@@ -367,7 +367,7 @@ class EventApply:
 def _fingerprint(ev: NormalizedEvent) -> tuple:
     return (ev.actor, ev.sol_amount, ev.token_amount, ev.virtual_sol_reserves, ev.virtual_token_reserves,
             ev.real_token_reserves, ev.real_sol_reserves, ev.creator, ev.token_program, ev.token_total_supply, ev.quote_scope_status, ev.quote_mint_raw, ev.quote_layout_hash,
-            ev.extra.get("tail_prefix_hash"), ev.extra.get("tail_verified"))
+            ev.extra.get("tail_prefix_hash"), ev.extra.get("tail_verified"), ev.extra.get("tail_values"))
 
 
 @dataclass(slots=True)

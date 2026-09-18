@@ -1,8 +1,8 @@
 {
   "campaign_id": "camp",
   "code_revision": "test",
-  "config_hash": "343a05a36310431ef775de39442489b9fadd0d4d91b2b34e4696c8ee336df0eb",
-  "created_utc": "2026-09-18T20:35:53.375236Z",
+  "config_hash": "b6ab71156dd1c10db273fd7569b0a72a5242f9c79c89634b52826ce14133ff76",
+  "created_utc": "2026-09-18T20:38:21.185752Z",
   "creates_actionable": 1,
   "creates_observed_union": 1,
   "dataset_hash": null,

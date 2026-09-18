@@ -316,8 +316,55 @@ def feature_contract_content(research: dict[str, Any]) -> dict[str, Any]:
             "offsets_ms": research["feature_snapshot_offsets_ms"]}
 
 
+def _validate_layout(fields: Any, label: str) -> None:
+    if not isinstance(fields, list):
+        raise ConfigError(f"{label}: expected field list")
+    names = set()
+    def kind(t: Any) -> None:
+        if isinstance(t, str) and t in {"pubkey", "bool", "string", "u8", "u16", "u64", "u128", "i64"}:
+            return
+        if isinstance(t, dict) and len(t) == 1:
+            if "struct" in t:
+                _validate_layout(t["struct"], label)
+                return
+            if "vec" in t:
+                kind(t["vec"])
+                return
+            if "array" in t and isinstance(t["array"], list) and len(t["array"]) == 2 and type(t["array"][1]) is int and t["array"][1] > 0:
+                kind(t["array"][0])
+                return
+        raise ConfigError(f"{label}: unsupported Borsh type {t!r}")
+    for f in fields:
+        if not isinstance(f, list) or len(f) != 2 or not isinstance(f[0], str) or f[0] in names:
+            raise ConfigError(f"{label}: invalid or duplicate field")
+        names.add(f[0])
+        kind(f[1])
+
+
 def _cross_checks(raw: dict[str, Any]) -> None:
     ex, st, po, co = raw["execution"], raw["strategy"], raw["portfolio"], raw["costs"]
+    events = raw["protocol"]["events"]
+    if not isinstance(events, dict) or set(events) != {"CreateEvent", "TradeEvent", "CompleteEvent", "CompletePumpAmmMigrationEvent"}:
+        raise ConfigError("protocol.events: exactly the four supported event definitions are required")
+    for name, event in events.items():
+        _check(event, S(prefix_fields="list[any]", tail_policy="str", tail_layouts="list[any]"), "protocol.events." + name)
+        _validate_layout(event["prefix_fields"], name)
+        for layout in event["tail_layouts"]:
+            if not isinstance(layout, dict) or set(layout) - {"layout_id", "tail_fields", "quote_mint_field", "verification_status", "note"} or not {"layout_id", "tail_fields", "quote_mint_field", "verification_status"} <= set(layout):
+                raise ConfigError(f"protocol.events.{name}: invalid tail layout keys")
+            _validate_layout(layout["tail_fields"], name)
+    _validate_layout(raw["protocol"]["global_account"]["layout_after_discriminator"], "Global")
+    _validate_layout(raw["protocol"]["fee_config"]["layout_after_discriminator"], "FeeConfig")
+    for layout in raw["protocol"]["create_event_tail_layouts"]:
+        _validate_layout(layout.get("tail_fields"), "CreateEvent tail")
+    if set(ex["message_templates"]) != {"buy", "sell"}:
+        raise ConfigError("execution.message_templates requires buy and sell")
+    for name, template in ex["message_templates"].items():
+        _check(template, S(discriminator="list[int0]", accounts="list[any]", args="list[any]"), "message_templates." + name)
+        if len(template["discriminator"]) != 8 or any(x > 255 for x in template["discriminator"]):
+            raise ConfigError("message discriminator must be eight bytes")
+    if not 0 <= Decimal(ex["research_stress"]["exit_reject_rate"]) <= 1 or ex["research_stress"]["additional_adverse_price_bps"] > 10000:
+        raise ConfigError("execution.research_stress rate/bps outside supported bounds")
     if len(ex["exit_retry_backoff_ms"]) != ex["max_exit_attempts"] - 1:
         raise ConfigError("execution.exit_retry_backoff_ms must contain max_exit_attempts-1 positive values")
     if Decimal(st["target_net_multiple"]) <= 1:
@@ -416,6 +463,10 @@ def load_research_config(path: Path) -> dict[str, Any]:
     split = [Decimal(x) for x in raw["chronological_split"]]
     if len(split) != 3 or sum(split) != 1:
         raise ConfigError("research.chronological_split must be three fractions summing to 1")
+    if not 0 < Decimal(raw["bootstrap_confidence"]) < 1 or not 0 <= Decimal(raw["conservative_exit_reject_rate"]) <= 1 or not 0 < Decimal(raw["baseline_preference_fraction"]) <= 1:
+        raise ConfigError("research confidence/reject/preference fraction outside supported bounds")
+    if any(b > 10000 for b in raw["additional_adverse_price_bps"]):
+        raise ConfigError("research adverse price bps must not exceed 10000")
     errors: list[str] = []
     _find_secrets(raw, "research", errors)
     if errors:

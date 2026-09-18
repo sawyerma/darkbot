@@ -4,6 +4,7 @@ doctor counting non-actionable CREATEs, in-sample/zero-delay research qualificat
 from __future__ import annotations
 
 import base64
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,7 @@ from darkbot.fees import FeeResolver
 from darkbot.market import b58encode, encode_fields
 from darkbot.replay import load_replay_input, run_replay
 from darkbot.storage import open_connection
-from tests.helpers import MINT_A, T0, Harness, base_config, create_payload, creator_sell_frame, open_position, create_frame_logs, logs_notification, CREATOR
+from tests.helpers import ROOT, MINT_A, T0, Harness, base_config, create_payload, creator_sell_frame, open_position, create_frame_logs, logs_notification, CREATOR
 
 
 class BatchSplit(unittest.TestCase):
@@ -62,16 +63,21 @@ class ReplayEnd(unittest.TestCase):
 
 class FeeLayout(unittest.TestCase):
     def _rpc(self, cfg, owner, discriminator: bytes | None = None):
-        ga = cfg.protocol["global_account"]
-        pk = lambda n: b58encode(n.encode().ljust(32, b"\0"))
-        from darkbot.fees import account_discriminator
-        disc = account_discriminator("Global") if discriminator is None else discriminator
-        data = disc + encode_fields([("initialized", True), ("authority", pk("a")), ("fee_recipient", pk("b")), ("initial_virtual_token_reserves", 1), ("initial_virtual_sol_reserves", 1), ("initial_real_token_reserves", 1),
-                                     ("token_total_supply", 1), ("fee_basis_points", 95), ("withdraw_authority", pk("c")), ("enable_migrate", True), ("pool_migration_fee", 1), ("creator_fee_basis_points", 30)], ga["layout_after_discriminator"])
-        return lambda m, p: {"context": {"slot": 1}, "value": {"owner": owner, "data": [base64.b64encode(data).decode(), "base64"]}}
+        fixture = json.loads((ROOT / "tests/fixtures/mainnet_fee_accounts.json").read_text())
+        result = fixture["rpc"]["result"]
+        global_account, fee_account = result["value"]
+        global_account["owner"] = owner
+        if discriminator is not None:
+            data = base64.b64decode(global_account["data"][0])
+            global_account["data"][0] = base64.b64encode(discriminator + data[8:]).decode()
+        def rpc(method, params):
+            account = global_account if params[0] == cfg.protocol["global_account"]["address"] else fee_account
+            return {"context": result["context"], "value": account}
+        return rpc
 
     def test_unverified_layout_is_never_valid(self):
         cfg = base_config()
+        cfg = cfg.with_overrides(protocol={"global_account": {**cfg.protocol["global_account"], "verification_status": "UNVERIFIED_TEST"}})
         self.assertFalse(cfg.protocol["global_account"]["verification_status"].startswith("VERIFIED"))
         s = FeeResolver(cfg, self._rpc(cfg, cfg.protocol["program_id"]), ReplayClock("e", T0, 0), "run", "t").resolve_protocol()
         self.assertEqual(s.validation_status, "LAYOUT_UNVERIFIED")

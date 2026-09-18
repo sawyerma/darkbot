@@ -301,7 +301,7 @@ class FeeSnapshot:
     evidence: CostEvidence
 
     def is_fresh(self, now_mono_ns: int) -> bool:
-        return self.validation_status == "VALID" and now_mono_ns - self.received_mono_ns <= self.max_age_ns
+        return self.validation_status == "VALID" and 0 <= now_mono_ns - self.received_mono_ns <= self.max_age_ns
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,7 +2,7 @@
   "config_version": "phase1_research_v1",
   "spec_version": "1.3.2",
   "dataset_freeze": {
-    "decoder_version": "PUMP_LOG_DECODER_V1",
+    "decoder_version": "PUMP_LOG_DECODER_IDL_ffe966c42f1a",
     "coverage_version": "CANONICAL_COVERAGE_V2"
   },
   "target_grid": [
