@@ -1,0 +1,2 @@
+position_id,mint,state,exit_reason,origin_trigger,net_pnl_lamports,entry_economic_cost_lamports,total_fees_lamports,locked_rent_lamports,open_mono_ns,close_mono_ns,research_status,quality_status,unresolved_reason,venue_state,canonical_provider_gap_flag
+run_p1,8N6gdCd5Z7njqvG9rxsNbe5mt5hBtVFDHVHJeNzEcWw9,OPEN,,,,99655810,1285810,2039280,1000001000000,,CENSORED_RUN_END,OPEN_AT_RUN_END,,BONDING_CURVE_ACTIVE,0

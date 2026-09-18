@@ -68,13 +68,32 @@ class _Reader:
         self.pos += n
         return chunk
 
-    def read(self, kind: str) -> Any:
+    def read(self, kind: Any) -> Any:
+        if isinstance(kind, dict):
+            if "struct" in kind:
+                return {n: self.read(t) for n, t in kind["struct"]}
+            if "array" in kind:
+                element, count = kind["array"]
+            elif "vec" in kind:
+                element, count = kind["vec"], struct.unpack("<I", self.take(4))[0]
+            else:
+                raise ValueError("unsupported Borsh container")
+            if count > self.remaining():
+                raise ValueError("Borsh vector length exceeds payload")
+            return [self.read(element) for _ in range(count)]
+        if kind == "u128":
+            return int.from_bytes(self.take(16), "little")
+        if kind == "u16":
+            return int.from_bytes(self.take(2), "little")
         if kind == "u64":
             return struct.unpack("<Q", self.take(8))[0]
         if kind == "i64":
             return struct.unpack("<q", self.take(8))[0]
         if kind == "bool":
-            return self.take(1) != b"\0"
+            value = self.take(1)[0]
+            if value not in (0, 1):
+                raise ValueError("invalid Borsh bool")
+            return bool(value)
         if kind == "pubkey":
             return b58encode(self.take(PUBKEY_BYTES))
         if kind == "string":
@@ -202,7 +221,7 @@ class PumpDecoder:
                 continue
             fields["tail_layout_id"] = layout["layout_id"]
             fields["tail_verified"] = str(layout["verification_status"]).startswith("VERIFIED")
-            fields["tail_values"] = {k: v for k, v in values.items() if isinstance(v, (int, str, bool))}
+            fields["tail_values"] = values
             if layout.get("quote_mint_field"):
                 fields["tail_quote_mint_raw"] = values.get(layout["quote_mint_field"])
             return
@@ -225,6 +244,7 @@ class PumpDecoder:
                 continue
             if reader.remaining() != 0:
                 continue
+            fields["tail_values"] = values
             fields["quote_layout_hash"] = layout["layout_id"]
             fields["tail_verified"] = str(layout["verification_status"]).startswith("VERIFIED")
             fields["token_program"] = values.get("token_program", layout.get("token_program"))
@@ -302,7 +322,7 @@ class Normalizer:
                 events.append(NormalizedEvent(EventType.CREATE, f["mint"], d.log_index, actor=f["user"], creator=f["creator"], virtual_sol_reserves=f["virtual_sol_reserves"], virtual_token_reserves=f["virtual_token_reserves"],
                                               real_token_reserves=f["real_token_reserves"], token_total_supply=f["token_total_supply"], token_program=f["token_program"], quote_mint_raw=f["quote_mint_raw"],
                                               quote_field_origin=f["quote_field_origin"], quote_layout_hash=f["quote_layout_hash"], normalized_quote_asset=f["normalized_quote_asset"], quote_scope_status=f["quote_scope_status"],
-                                              extra={"tail_bytes": d.tail_bytes, "tail_base64": d.tail_base64, "tail_prefix_hash": f.get("tail_prefix_hash"), "tail_len_unpinned": f.get("tail_len_unpinned"), "bonding_curve": f["bonding_curve"], "name": f["name"], "symbol": f["symbol"]}))
+                                              extra={"tail_bytes": d.tail_bytes, "tail_base64": d.tail_base64, "tail_prefix_hash": f.get("tail_prefix_hash"), "tail_len_unpinned": f.get("tail_len_unpinned"), "tail_values": f.get("tail_values"), "tail_verified": f.get("tail_verified"), "bonding_curve": f["bonding_curve"], "name": f["name"], "symbol": f["symbol"]}))
             elif d.kind == "complete":
                 events.append(NormalizedEvent(EventType.COMPLETE, d.fields["mint"], d.log_index, actor=d.fields["user"]))
             elif d.kind == "migrate":
@@ -371,6 +391,9 @@ class MarketReducer:
         self.history_per_mint = history_per_mint
         self.trade_log_per_mint = trade_log_per_mint or history_per_mint * 4
         self.event_points_max = event_points_max
+        self.signature_history_max = event_points_max
+        self.dedup_keys_per_mint = event_points_max
+        self.protected_mints: set[str] = set()
         self.max_tracked_mints = max_tracked_mints
         self.states: dict[str, MarketState] = {}
         self.gap_open_since: int | None = None
@@ -493,16 +516,16 @@ class MarketReducer:
                 continue
             st.seen_keys[cid] = (fingerprint, envelope.completeness == Completeness.COMPLETE)
             self.applied_signatures.setdefault(sig, set()).add(ev.mint)
-            if len(st.seen_keys) > self.event_points_max:
+            if len(st.seen_keys) > self.dedup_keys_per_mint:
                 st.seen_keys.pop(next(iter(st.seen_keys)))
                 st.quote_uncertain = True
                 st.quote_conflict_mono_ns = min(st.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
                 result.conflicts.append((ev.mint, cid, "DEDUP_HISTORY_TRUNCATED"))
-            if len(self.applied_signatures) > self.event_points_max:
-                removed_sig = next(iter(self.applied_signatures))
+            if len(self.applied_signatures) > self.signature_history_max:
+                removed_sig = next((k for k, mints in self.applied_signatures.items() if not (mints & self.protected_mints)), next(iter(self.applied_signatures)))
                 for affected in self.applied_signatures.pop(removed_sig):
                     affected_state = self.states.get(affected)
-                    if affected_state is not None:
+                    if affected_state is not None and affected in self.protected_mints:
                         affected_state.quote_uncertain = True
                         affected_state.quote_conflict_mono_ns = min(affected_state.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
                         if affected not in result.touched:
@@ -516,6 +539,18 @@ class MarketReducer:
             st.event_count += 1
             if ev.mint not in result.touched:
                 result.touched.append(ev.mint)
+            tail_values = ev.extra.get("tail_values") or {}
+            unsupported = next((name for name, active in (("MAYHEM", tail_values.get("is_mayhem_mode") or tail_values.get("mayhem_mode")),
+                                ("CASHBACK", tail_values.get("is_cashback_enabled") or tail_values.get("cashback_fee_basis_points")),
+                                ("HOLDER_REWARD", tail_values.get("is_holder_reward") or tail_values.get("holder_rewards_bps")),
+                                ("FEE_SHARING", tail_values.get("shareholders"))) if active), None)
+            if unsupported:
+                st.unsupported_fee_mode = unsupported
+                st.quote_uncertain = True
+                st.quote_conflict_mono_ns = min(st.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
+                result.conflicts.append((ev.mint, cid, "UNSUPPORTED_FEE_MODE_" + unsupported))
+            if ev.event_type == EventType.CREATE:
+                st.creator_fee_bps = int(tail_values.get("creator_fee_bps", 0))
             validation = ValidationStatus.VALID
             applied = False
             creator_sell = False

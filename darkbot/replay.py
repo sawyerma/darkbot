@@ -88,7 +88,10 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
     end = max(last_obs, ended) if ended is not None else last_obs
     # dataset freeze covers everything replay consumes: frames with timing/feeds, fee knowledge with timing, gaps, callback lateness, run window, decoder/coverage/config
     decoder_code_hash = sha256_text((Path(__file__).resolve().parent / "market.py").read_text(encoding="utf-8"))  # same version string with changed decoder code = new dataset version
-    dataset_hash = sha256_text(canonical_json({"run": run_id, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
+    canonical_rows = [dict(r) for r in conn.execute("SELECT * FROM market_events WHERE run_id=? ORDER BY event_id", (run_id,))]
+    quality_rows = [dict(r) for r in conn.execute("SELECT * FROM quality_events WHERE run_id=? ORDER BY quality_event_id", (run_id,))]
+    run_manifest = dict(run)
+    dataset_hash = sha256_text(canonical_json({"run": run_id, "run_manifest": run_manifest, "canonical_events": canonical_rows, "quality_events": quality_rows, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
                                                "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "decoder_code_hash": decoder_code_hash, "protocol_pinning_hash": cfg.protocol_hash,
                                                "coverage": "CANONICAL_COVERAGE_V2", "spec": "1.3.2"}))
     return ReplayInput(run_id, run["host_clock_epoch_id"], start, start_utc, observations, fees, transitions, lateness, dataset_hash, end)

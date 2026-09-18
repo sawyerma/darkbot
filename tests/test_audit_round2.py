@@ -130,7 +130,7 @@ class S13S14(unittest.TestCase):
             self.assertEqual(h.rows("select side from quote_snapshots where quote_snapshot_id=?", (a["fill_quote_snapshot_id"],))[0]["side"], a["side"])
             for col in ("network_fee_snapshot_id", "rent_fee_snapshot_id", "priority_fee_snapshot_id", "fee_snapshot_id"):
                 self.assertEqual(h.rows("select count(*) from fee_snapshots where fee_snapshot_id=?", (a[col],))[0][0], 1)
-            self.assertEqual(a["decoder_version"], "PUMP_LOG_DECODER_V1")
+            self.assertEqual(a["decoder_version"], h.cfg.protocol["decoder_version"])
             self.assertEqual(a["fee_reconciliation_status"], "APPLIED_AT_MODELED_FILL")
         self.assertEqual(h.fk_check(), [])
 

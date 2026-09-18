@@ -1,0 +1,357 @@
+{
+  "campaign_id": "camp",
+  "code_revision": "test",
+  "config_hash": "343a05a36310431ef775de39442489b9fadd0d4d91b2b34e4696c8ee336df0eb",
+  "created_utc": "2026-09-18T20:35:53.375236Z",
+  "creates_actionable": 1,
+  "creates_observed_union": 1,
+  "dataset_hash": null,
+  "economic": {
+    "attempts_with_unknown_costs": 0,
+    "avg_loss_lamports": null,
+    "avg_win_lamports": null,
+    "block_bootstrap_per_intent_pnl": {
+      "blocks": 0,
+      "ci_high": null,
+      "ci_low": null,
+      "mean": null,
+      "resamples": 2000,
+      "seed": 20260916,
+      "status": "INSUFFICIENT_BLOCKS"
+    },
+    "capital_utilization_fraction": 0.8,
+    "cash_reconciliation": {
+      "end_cash_per_ledger": 898304910,
+      "initial": 1000000000,
+      "ledger_cash_sum": -101695090,
+      "reconciled": true,
+      "run_end_balance": 898304910
+    },
+    "censored": 1,
+    "conservative_lower_bound_pnl_lamports_token_residual_zero": -99655810,
+    "cost_evidence_counts": {
+      "MEASURED": 1
+    },
+    "daily_pnl": {
+      "by_day": {},
+      "note": "net PnL per UTC day of position close (failed entries: decision day), derived from run start UTC plus monotonic offset; no extrapolation"
+    },
+    "entry_failed": 0,
+    "entry_fills": 1,
+    "entry_intents": 1,
+    "exit_failed_attempts": 0,
+    "exits": {
+      "CREATOR_SELL": 0,
+      "TARGET": 0,
+      "TIMEOUT": 0
+    },
+    "expectancy_per_fill_lamports": null,
+    "expectancy_per_intent_lamports": null,
+    "fee_share_of_entry_cost": null,
+    "fees_by_kind_lamports": {
+      "creator_fee_lamports": 295110,
+      "network_fee_total_lamports": 7000,
+      "protocol_fee_lamports": 983700,
+      "rent_locked_lamports": 2039280,
+      "rent_refunded_lamports": 0,
+      "sender_tip_lamports": 0
+    },
+    "fill_evidence_counts": {
+      "OBSERVED_STATE_PROXY": 1
+    },
+    "hold_duration_ns": {
+      "max": null,
+      "min": null,
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "p99_low_confidence": true
+    },
+    "locked_rent_lamports_end": 2039280,
+    "max_drawdown_lamports_on_close_time_equity": 0,
+    "median_pnl_lamports": null,
+    "open_at_end": 1,
+    "per_attempt_costs": [
+      {
+        "attempt_id": "run_p1_buy1",
+        "cost_evidence_status": "MEASURED",
+        "creator_fee_lamports": 295110,
+        "fee_reconciliation_status": "APPLIED_AT_MODELED_FILL",
+        "fee_snapshot_id": "run_fee_protocol",
+        "fees_charged_lamports": 101695090,
+        "fill_evidence_status": "OBSERVED_STATE_PROXY",
+        "network_fee_total_lamports": 7000,
+        "priority_fee_lamports": 2000,
+        "protocol_fee_lamports": 983700,
+        "rent_locked_lamports": 2039280,
+        "sender_tip_lamports": 0,
+        "side": "BUY",
+        "status": "FILLED"
+      }
+    ],
+    "positions_by_state": {
+      "OPEN": 1
+    },
+    "profit_factor": null,
+    "profit_factor_special_case": "NO_TRADES",
+    "quote_age_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "realized_net_pnl_lamports": 0,
+    "realized_net_pnl_sol": "0",
+    "resolved_intents": 0,
+    "retry_exhausted": 0,
+    "run_window_ns": 5000000,
+    "time_to_entry_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "unrealized_status": "UNKNOWN_EQUITY_INTERVAL",
+    "unresolved": 0,
+    "unresolved_by_reason": {},
+    "unresolved_exposure_entry_cost_lamports": 99655810,
+    "unresolved_fraction": 1.0,
+    "win_rate": null
+  },
+  "host_clock_epoch_id": "epoch_test",
+  "latency": {
+    "callback_lateness_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "class_legend": {
+      "MEASURED_LOCAL": "same clock epoch, local CPU path",
+      "MEASURED_RELATIVE": "feed vs feed, no absolute chain latency",
+      "SIMULATED": "declared model delay",
+      "UNKNOWN": "missing timestamp -> NULL"
+    },
+    "decision_to_enqueue_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "decode_to_actionable_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "feeds": {
+      "coverage_denominator": "UNION_OF_LOCALLY_OBSERVED_CREATES (no global mainnet completeness claim)",
+      "pairwise_common_creates": {},
+      "per_feed": {
+        "existing_rpc": {
+          "actionable_wins": 0,
+          "class": "MEASURED_RELATIVE",
+          "count": 0,
+          "decode_errors": 0,
+          "hint_wins": 0,
+          "matched_creates": 0,
+          "missing": 1,
+          "relative_arrival_ns": {
+            "max": null,
+            "min": null,
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "p99_low_confidence": true
+          },
+          "ties": 0
+        },
+        "helius_standard": {
+          "actionable_wins": 1,
+          "class": "MEASURED_RELATIVE",
+          "count": 1,
+          "decode_errors": 0,
+          "hint_wins": 1,
+          "matched_creates": 1,
+          "missing": 0,
+          "relative_arrival_ns": {
+            "max": 0,
+            "min": 0,
+            "n": 1,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "p99_low_confidence": true
+          },
+          "ties": 0
+        },
+        "pumpportal": {
+          "actionable_wins": 0,
+          "class": "MEASURED_RELATIVE",
+          "count": 0,
+          "decode_errors": 0,
+          "hint_wins": 0,
+          "matched_creates": 0,
+          "missing": 1,
+          "relative_arrival_ns": {
+            "max": null,
+            "min": null,
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "p99_low_confidence": true
+          },
+          "ties": 0
+        }
+      },
+      "tie_rule": "same mono ns = tie; operative feed-id tiebreak not counted as win"
+    },
+    "first_hint_to_actionable_ns": {
+      "max": null,
+      "min": null,
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "p99_low_confidence": true
+    },
+    "modeled_entry_delay_ns": {
+      "class": "SIMULATED",
+      "value": 0
+    },
+    "modeled_exit_delay_ns": {
+      "class": "SIMULATED",
+      "value": 0
+    },
+    "ready_to_decision_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "receive_to_decision_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "receive_to_decode_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "submit_to_ack_ns": {
+      "class": "FUTURE_LIVE_MEASURED_NOT_FILL",
+      "n": 0
+    },
+    "submit_to_observed_chain_execution_ns": {
+      "class": "FUTURE_LIVE_OBSERVATION_INCLUDES_RETURN_FEED_DELAY",
+      "n": 0
+    }
+  },
+  "mode": "PAPER",
+  "model_assumptions": {
+    "counterfactual_note": "Historischer Fremd-Orderflow reagiert nicht auf unseren hypothetischen Trade (Gegenfaktualitaetsannahme). Simulierte Inklusion ist eine Annahme, keine gemessene Landung. Fill-Evidenz ist OBSERVED_STATE_PROXY. Keine Zahl behauptet global frueheste Erkennung, sicheren Fill oder garantierten Profit.",
+    "exclusions": {
+      "decisions_skipped": {}
+    },
+    "fill_evidence": "OBSERVED_STATE_PROXY",
+    "latency_model": {
+      "entry_delay_ms": 0,
+      "exit_delay_ms": 0,
+      "label": "ASSUMED_OPTIMISTIC_BASELINE",
+      "measured_distribution_id": null,
+      "scenario_unit": "MILLISECONDS",
+      "stage_breakdown_required": true,
+      "stress_delay_ms": [
+        5,
+        25,
+        100,
+        250,
+        500
+      ],
+      "zero_delay_run_can_qualify_edge": false
+    },
+    "slippage_bps": 300,
+    "target_net_multiple": "1.5"
+  },
+  "qualification_reasons": [
+    "unresolved exposure exceeds configured maximum"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA",
+  "quality": {
+    "canonical_gap_events": 0,
+    "coverage_version": "CANONICAL_COVERAGE_V2",
+    "create_quote_scope_counts": {
+      "SOL_WSOL": 1
+    },
+    "feature_sets": {},
+    "fee_snapshot_status_counts": {
+      "VALID": 4
+    },
+    "fee_snapshots": [
+      {
+        "id": "run_fee_protocol",
+        "status": "VALID",
+        "type": "PROTOCOL_GLOBAL_ACCOUNT"
+      },
+      {
+        "id": "run_fee_network",
+        "status": "VALID",
+        "type": "NETWORK_FEE"
+      },
+      {
+        "id": "run_fee_rent",
+        "status": "VALID",
+        "type": "RENT_EXEMPTION"
+      },
+      {
+        "id": "run_fee_priority",
+        "status": "VALID",
+        "type": "PRIORITY_POLICY"
+      }
+    ],
+    "ineligible_by_reason": {},
+    "internal_errors": 0,
+    "migration_or_curve_complete_exposures": [],
+    "positions_with_canonical_gap": [],
+    "provider_disconnects": 0,
+    "quality_events": 2,
+    "quote_unknown_rejects": {},
+    "recorder_overflows": 0,
+    "run_quality_status": "OK",
+    "run_status": "COMPLETED",
+    "sol_only_rejects": {}
+  },
+  "query_version": "REPORT_QUERY_V1",
+  "run_id": "run",
+  "spec_hash": "spec"
+}

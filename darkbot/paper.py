@@ -116,7 +116,9 @@ class StateOwner:
         adapter.on_outcome = self.on_outcome
         self.decoder = PumpDecoder(cfg.protocol)
         self.normalizer = Normalizer(self.decoder)
-        self.reducer = MarketReducer(canonical_prefix or run_id, cfg.storage["state_history_per_mint"], cfg.storage["max_tracked_mints"], cfg.storage["trade_log_per_mint"], cfg.storage["fee_history_max"])
+        self.reducer = MarketReducer(canonical_prefix or run_id, cfg.storage["state_history_per_mint"], cfg.storage["max_tracked_mints"], cfg.storage["trade_log_per_mint"], cfg.storage["undecodable_points_max"])
+        self.reducer.signature_history_max = cfg.storage["signature_history_max"]
+        self.reducer.dedup_keys_per_mint = cfg.storage["dedup_keys_per_mint"]
         self.reducer.set_quote_constants(cfg.protocol["wsol_mint"], cfg.protocol["native_sol_curve_sentinel"])
         self.telemetry_max = cfg.storage["telemetry_samples_max"]
         self.fee_history: list[tuple[int, str, Any]] = []  # (received_mono_ns, kind, snapshot): fee rule valid at a model time = latest snapshot received <= t
@@ -207,9 +209,9 @@ class StateOwner:
         if entry is None:
             if not st.curve_known or st.last_state_event_id is None:
                 return None
-            return CurveState(st.last_state_event_id, st.last_state_event_id.split("|")[1], st.last_state_slot, st.last_state_sequence, st.last_state_receive_mono_ns or 0, st.virtual_sol_reserves, st.virtual_token_reserves, st.real_sol_reserves, st.real_token_reserves, st.venue_state)  # type: ignore[arg-type]
+            return CurveState(st.last_state_event_id, st.last_state_event_id.split("|")[1], st.last_state_slot, st.last_state_sequence, st.last_state_receive_mono_ns or 0, st.virtual_sol_reserves, st.virtual_token_reserves, st.real_sol_reserves, st.real_token_reserves, st.venue_state, st.creator_fee_bps, st.creator != self.cfg.protocol["native_sol_curve_sentinel"])  # type: ignore[arg-type]
         rec, seq, cid, slot, vsol, vtok, rsol, rtok = entry
-        return CurveState(cid, cid.split("|")[1], slot, seq, rec, vsol, vtok, rsol, rtok, VenueState.BONDING_CURVE_ACTIVE)
+        return CurveState(cid, cid.split("|")[1], slot, seq, rec, vsol, vtok, rsol, rtok, VenueState.BONDING_CURVE_ACTIVE, st.creator_fee_bps, st.creator != self.cfg.protocol["native_sol_curve_sentinel"])
 
     def _coverage_at(self, st: MarketState, start: int, end: int | None) -> CoverageState:
         if self.reducer.gap_intersects(start, end):
@@ -302,6 +304,7 @@ class StateOwner:
             self.counters.decode_errors += 1
             self.decode_issues[raw.feed_id] = self.decode_issues.get(raw.feed_id, 0) + 1
         try:
+            self.reducer.protected_mints = {self.positions[pid].mint for pid in self.active_ids}
             result = self.reducer.apply(env, raw)
             # P0: exposed positions first, then immediately actionable CREATEs
             for mint in result.touched:
@@ -375,6 +378,8 @@ class StateOwner:
         eligible = verdict.eligible
         if eligible and self.mint_allowlist is not None and mint not in self.mint_allowlist:
             eligible, reason = False, "OUT_OF_RESEARCH_SPLIT"
+        if eligible and st.unsupported_fee_mode:
+            eligible, reason = False, "UNSUPPORTED_FEE_MODE_" + st.unsupported_fee_mode
         if eligible and st.quote_uncertain:
             eligible, reason = False, "QUOTE_CONFLICT"
         if eligible and st.decode_gap_since is not None:

@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--config", type=Path, required=True, help="research config (config/research.json)")
     rs.add_argument("--runtime-config", type=Path, default=Path("config/phase1.json"))
     rs.add_argument("--out", type=Path, required=True)
+    rs.add_argument("--source-run-id", action="append", default=None, help="recording to evaluate; repeat for a dataset, required to select fresh forward recordings")
     rs.add_argument("--max-variants", type=int, default=None)
     return p
 
@@ -108,7 +109,7 @@ def cmd_research(args: argparse.Namespace) -> int:
 
     cfg = load_runtime_config(args.runtime_config)
     conn = open_connection(args.db)
-    report = run_research(conn, args.campaign, cfg, args.config, args.out, max_variants=args.max_variants)
+    report = run_research(conn, args.campaign, cfg, args.config, args.out, max_variants=args.max_variants, source_run_ids=args.source_run_id)
     conn.close()
     print(f"research {args.campaign}: variants={report['variants_registered']} selection={report['selection_for_limit_1']} -> {args.out}")
     return EXIT_OK

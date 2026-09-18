@@ -233,6 +233,8 @@ class MarketState:
     creator_sell_receive_mono_ns: int | None = None
     creator_sell_slot: int | None = None
     creator_sell_sequence: int | None = None
+    unsupported_fee_mode: str | None = None
+    creator_fee_bps: int = 0
     quote_uncertain: bool = False
     quote_conflict_mono_ns: int | None = None
     event_count: int = 0
@@ -268,6 +270,8 @@ class CurveState:
     real_sol_reserves: int | None
     real_token_reserves: int | None
     venue_state: VenueState
+    creator_fee_bps: int = 0
+    creator_fee_applicable: bool = True
 
 
 # --------------------------------------------------------------------------- fees / quotes

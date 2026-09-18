@@ -92,7 +92,7 @@ class FeeTerms:
     ids: dict[str, str]
 
 
-def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int) -> FeeTerms | InvalidQuote:
+def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int, state: CurveState | None = None) -> FeeTerms | InvalidQuote:
     """Assemble cost terms from snapshots valid at now_mono_ns; NULL or stale is UNKNOWN, never zero and never a fill basis."""
     if not basis.complete:
         missing = [n for n, s in (("protocol", basis.protocol), ("network", basis.network), ("rent", basis.rent), ("priority_policy", basis.priority_policy)) if s is None]
@@ -106,6 +106,19 @@ def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int) -> Fe
         if not snap.is_fresh(now_mono_ns):
             return InvalidQuote("UNQUALIFIED_COSTS", f"{name} fee snapshot stale")
     p = basis.protocol.normalized_fee_components
+    if p.get("fee_tiers") and state is not None:
+        if state.virtual_token_reserves <= 0:
+            return InvalidQuote("CURVE_UNAVAILABLE")
+        cap = state.virtual_sol_reserves * p["standard_supply_base_units"] // state.virtual_token_reserves
+        tier = p["fee_tiers"][0]
+        for candidate in p["fee_tiers"]:
+            if candidate["market_cap_lamports_threshold"] <= cap:
+                tier = candidate
+        p = {**p, "protocol_fee_bps": tier["fees"]["protocol_fee_bps"], "creator_fee_bps": tier["fees"]["creator_fee_bps"]}
+        if p.get("creator_fee_configurable") and state.creator_fee_bps:
+            p["creator_fee_bps"] = state.creator_fee_bps
+        if not state.creator_fee_applicable:
+            p["creator_fee_bps"] = 0
     n = basis.network.normalized_fee_components
     r = basis.rent.normalized_fee_components
     pp = basis.priority_policy.normalized_fee_components
@@ -158,10 +171,10 @@ class QuoteEngine:
             tokens, capped = rtok, True
         if tokens <= 0:
             return 0, 0, capped
-        curve_input = -(-(vsol * tokens) // (vtok - tokens))
+        curve_input = (vsol * tokens) // (vtok - tokens) + 1
         if curve_input > budget:  # protect against rounding edge; never exceed the nominal budget
             tokens -= 1
-            curve_input = -(-(vsol * tokens) // (vtok - tokens)) if tokens > 0 else 0
+            curve_input = (vsol * tokens) // (vtok - tokens) + 1 if tokens > 0 else 0
         return tokens, curve_input, capped
 
     @staticmethod
@@ -175,7 +188,7 @@ class QuoteEngine:
             return InvalidQuote("VENUE_INVALID", state.venue_state.value)
         if coverage == CoverageState.GAP:
             return InvalidQuote("COVERAGE_GAP")
-        terms = fee_terms(basis, self.policy, now_mono_ns)
+        terms = fee_terms(basis, self.policy, now_mono_ns, state)
         if isinstance(terms, InvalidQuote):
             return terms
         age = now_mono_ns - state.receive_mono_ns
@@ -213,7 +226,7 @@ class QuoteEngine:
             return InvalidQuote("COVERAGE_GAP")
         if tokens <= 0:
             return InvalidQuote("NO_TOKENS")
-        terms = fee_terms(basis, self.policy, now_mono_ns)
+        terms = fee_terms(basis, self.policy, now_mono_ns, state)
         if isinstance(terms, InvalidQuote):
             return terms
         age = now_mono_ns - state.receive_mono_ns
@@ -281,7 +294,7 @@ def evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: Curv
     ev = _evaluate_fill(engine, expected, fill_state, basis, modeled_fill_mono_ns, run_prefix, coverage, rent_refund)
     if ev.status == AttemptStatus.UNKNOWN:
         return ev
-    terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns)
+    terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns, fill_state)
     if isinstance(terms, InvalidQuote):
         return FillEvaluation(AttemptStatus.UNKNOWN, None, None, "COSTS_UNKNOWN_AT_MODELED_FILL", ev.proxy_age_ns)
     if ev.status == AttemptStatus.FILLED and expected.side == Side.SELL and engine.stress_rejects(expected.quote_snapshot_id):
@@ -343,8 +356,8 @@ def _evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: Cur
         vsol, vtok = fill_state.virtual_sol_reserves, fill_state.virtual_token_reserves
         if fill_state.real_token_reserves is not None and tokens > fill_state.real_token_reserves:
             return FillEvaluation(AttemptStatus.CURVE_UNAVAILABLE, None, network_and_tip, "INSUFFICIENT_REAL_TOKEN_RESERVES", proxy_age)
-        curve_input = -(-(vsol * tokens) // (vtok - tokens))
-        terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns)
+        curve_input = (vsol * tokens) // (vtok - tokens) + 1
+        terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns, fill_state)
         assert not isinstance(terms, InvalidQuote)
         proto, creator, other = ceil_bps(curve_input, terms.protocol_bps), ceil_bps(curve_input, terms.creator_bps), ceil_bps(curve_input, terms.other_bps)
         debit = curve_input + proto + creator + other

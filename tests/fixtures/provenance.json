@@ -1,0 +1,10 @@
+{
+  "source_idl": "https://raw.githubusercontent.com/pump-fun/pump-public-docs/main/idl/pump.json",
+  "sha256": "ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+  "fee_idl": "https://raw.githubusercontent.com/pump-fun/pump-public-docs/main/idl/pump_fees.json",
+  "fee_sha256": "d87b52305fd6b2ec487d4ba1e08a49990c23fa9b8b76092b2097df0164fa3859",
+  "captured_utc_date": "2026-09-18",
+  "fee_accounts_slot": 448189609,
+  "trade_slot": 448190022,
+  "scope": "Public read-only Mainnet RPC; no trading; recorded layouts do not qualify trading profitability"
+}

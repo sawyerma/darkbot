@@ -12,6 +12,8 @@ import math
 import struct
 import urllib.request
 from dataclasses import dataclass, replace
+from collections import deque
+import hashlib
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -71,6 +73,55 @@ def build_fee_probe_message(signature_count: int, compute_unit_limit: int, cu_pr
     return header + compact_u16(len(keys)) + b"".join(keys) + blockhash + compact_u16(2) + ix_limit + ix_price
 
 
+def build_trade_fee_message(cfg: Any, side: str, cu_price_micro: int, blockhash: bytes) -> bytes:
+    """Unsigned configured Pump instruction/ATA/ComputeBudget message for getFeeForMessage.
+    Dynamic addresses are deterministic placeholders: no signer secret and no broadcast.
+    The instruction/account shape is the pinned IDL and is included in provenance.
+    """
+    template = cfg.execution["message_templates"][side]
+    specs = {a["name"]: a for a in template["accounts"]}
+    def key(name: str) -> bytes:
+        if name == "user":
+            return DUMMY_PAYER
+        address = specs.get(name, {}).get("address")
+        if name == "global":
+            address = cfg.protocol["global_account"]["address"]
+        elif name == "fee_config":
+            address = cfg.protocol["fee_config"]["address"]
+        elif name == "token_program":
+            address = cfg.protocol["spl_token_program"]
+        return b58decode(address).rjust(32, b"\0") if address else hashlib.sha256(("PAPER_FEE_TEMPLATE:" + name).encode()).digest()
+    metas: dict[bytes, tuple[bool, bool]] = {DUMMY_PAYER: (True, True)}
+    instructions: list[tuple[bytes, list[bytes], bytes]] = []
+    def add(program: bytes, accounts: list[tuple[bytes, bool, bool]], data: bytes) -> None:
+        metas.setdefault(program, (False, False))
+        for k, signer, writable in accounts:
+            old = metas.get(k, (False, False))
+            metas[k] = (old[0] or signer, old[1] or writable)
+        instructions.append((program, [a[0] for a in accounts], data))
+    cb = b58decode(COMPUTE_BUDGET_PROGRAM)
+    add(cb, [], bytes([2]) + struct.pack("<I", cfg.execution["priority_policy"]["compute_unit_limit"]))
+    add(cb, [], bytes([3]) + struct.pack("<Q", cu_price_micro))
+    if side == "buy" and cfg.execution["token_account_policy"]["assume_new_token_account_per_position"]:
+        ata = b58decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+        add(ata, [(key("user"), True, True), (key("associated_user"), False, True), (key("user"), True, True),
+                  (key("mint"), False, False), (b58decode("11111111111111111111111111111111"), False, False),
+                  (key("token_program"), False, False)], bytes([1]))
+    # Fee computation depends on the configured message, not hypothetical swap amounts.
+    data = bytes(template["discriminator"]) + b"".join(bytes([0]) if a["type"] == "bool" else struct.pack("<Q", 1) for a in template["args"])
+    add(b58decode(cfg.protocol["program_id"]), [(key(a["name"]), a.get("signer", False), a.get("writable", False)) for a in template["accounts"]], data)
+    if side == "sell" and cfg.execution["token_account_policy"]["close_token_account_on_full_exit"]:
+        add(key("token_program"), [(key("associated_user"), False, True), (key("user"), True, True), (key("user"), True, False)], bytes([9]))
+    keys = sorted(metas, key=lambda k: (not metas[k][0], not metas[k][1]))
+    signers = sum(metas[k][0] for k in keys)
+    if signers != cfg.execution["signature_count"]:
+        raise ValueError("configured signature count differs from Pump message template")
+    readonly_signed = sum(s and not w for s, w in metas.values())
+    readonly_unsigned = sum(not s and not w for s, w in metas.values())
+    compiled = b"".join(bytes([keys.index(program)]) + compact_u16(len(accounts)) + bytes(keys.index(k) for k in accounts) + compact_u16(len(data)) + data for program, accounts, data in instructions)
+    return bytes([signers, readonly_signed, readonly_unsigned]) + compact_u16(len(keys)) + b"".join(keys) + blockhash + compact_u16(len(instructions)) + compiled
+
+
 def message_template_hash(signature_count: int, compute_unit_limit: int, message_format: str) -> str:
     import hashlib
 
@@ -94,6 +145,17 @@ class FeeResolver:
     def __init__(self, cfg: Any, rpc: RpcCall | None, clock: Any, run_id: str, provider_label: str) -> None:
         self.cfg = cfg
         self.rpc = rpc
+        self._rpc_times: deque[int] = deque()
+        if rpc is not None:
+            def budgeted_rpc(method: str, params: list[Any]) -> Any:
+                now = self.clock.monotonic_ns()
+                while self._rpc_times and self._rpc_times[0] <= now - 60_000_000_000:
+                    self._rpc_times.popleft()
+                if len(self._rpc_times) >= self.cfg.raw["rpc_http"]["max_requests_per_minute"]:
+                    raise RpcError("configured free RPC request budget exhausted")
+                self._rpc_times.append(now)
+                return rpc(method, params)
+            self.rpc = budgeted_rpc
         self.clock = clock
         self.run_id = run_id
         self.provider = provider_label
@@ -145,10 +207,48 @@ class FeeResolver:
                 status = "LAYOUT_UNVERIFIED"  # decoded candidates are reported for doctor/operator verification but never used economically
             else:
                 status = "VALID"
-            ok = status == "VALID"
-            return self._snap("protocol", "PROTOCOL_GLOBAL_ACCOUNT", "getAccountInfo", (addr,), slot, raw,
-                              {"protocol_fee_bps": fee_bps, "creator_fee_bps": creator_bps, "other_protocol_fee_bps": 0} if ok else {"protocol_fee_bps": None, "creator_fee_bps": None, "other_protocol_fee_bps": None},
-                              status, CostEvidence.MEASURED if ok else CostEvidence.UNKNOWN, "PUMP_BONDING_CURVE_SOL", self.cfg.protocol["fee_rounding"])
+            normalized = {"protocol_fee_bps": None, "creator_fee_bps": None, "other_protocol_fee_bps": None}
+            addresses = (addr,)
+            if status == "VALID":
+                if reader.remaining():
+                    status = "GLOBAL_LAYOUT_LENGTH_MISMATCH"
+                else:
+                    fc = self.cfg.protocol["fee_config"]
+                    result_fee = self.rpc("getAccountInfo", [fc["address"], {"encoding": "base64", "commitment": self.cfg.raw["rpc_http"]["commitment"]}])
+                    account = result_fee["value"]
+                    encoded = base64.b64decode(account["data"][0])
+                    addresses = (addr, fc["address"])
+                    raw["fee_config_slot"] = result_fee.get("context", {}).get("slot")
+                    raw["fee_config_owner"] = account["owner"]
+                    raw["fee_config_idl"] = fc["idl_version_or_hash"]
+                    if account["owner"] != fc["program_id"]:
+                        status = "INVALID_FEE_CONFIG_OWNER"
+                    elif encoded[:8] != account_discriminator("FeeConfig"):
+                        status = "INVALID_FEE_CONFIG_DISCRIMINATOR"
+                    elif not fc["verification_status"].startswith("VERIFIED"):
+                        status = "FEE_CONFIG_LAYOUT_UNVERIFIED"
+                    else:
+                        fr = _Reader(encoded[8:])
+                        ff = {n: fr.read(k) for n, k in fc["layout_after_discriminator"]}
+                        raw["fee_config"] = ff
+                        raw["fee_config_allocated_bytes"] = len(encoded)
+                        tail = fr.take(fr.remaining())
+                        tiers = ff["fee_tiers"]
+                        valid_tiers = bool(tiers) and all(0 <= int(v) <= ga["max_reasonable_bps"] for t in tiers for v in t["fees"].values())
+                        valid_tiers = valid_tiers and [t["market_cap_lamports_threshold"] for t in tiers] == sorted({t["market_cap_lamports_threshold"] for t in tiers})
+                        if any(tail) or not valid_tiers:
+                            status = "INVALID_FEE_CONFIG_LAYOUT_OR_TIERS"
+                        elif any(t["fees"]["lp_fee_bps"] for t in tiers):
+                            status = "UNSUPPORTED_CURVE_LP_FEE"
+                        else:
+                            normalized = {"protocol_fee_bps": tiers[0]["fees"]["protocol_fee_bps"], "creator_fee_bps": tiers[0]["fees"]["creator_fee_bps"],
+                                          "other_protocol_fee_bps": 0, "fee_tiers": tiers, "rule": fc["rule"],
+                                          "creator_fee_configurable": fields["creator_fee_configurable"],
+                                          "standard_supply_base_units": 1_000_000_000_000_000,
+                                          "rule_source": "@pump-fun/pump-sdk@2.0.0/src/fees.ts"}
+            return self._snap("protocol", "PROTOCOL_GLOBAL_ACCOUNT", "getAccountInfo:Global+FeeConfig", addresses, slot, raw,
+                              normalized, status, CostEvidence.KNOWN_RULE if status == "VALID" else CostEvidence.UNKNOWN,
+                              "PUMP_BONDING_CURVE_STANDARD_SOL", self.cfg.protocol["fee_rounding"])
         except Exception as exc:  # noqa: BLE001 - recorded as UNKNOWN snapshot, never as zero fee
             self.errors.append(f"protocol: {type(exc).__name__}")
             return self._snap("protocol", "PROTOCOL_GLOBAL_ACCOUNT", "getAccountInfo", (addr,), None, {"error": type(exc).__name__}, {"protocol_fee_bps": None, "creator_fee_bps": None, "other_protocol_fee_bps": None}, "RPC_ERROR", CostEvidence.UNKNOWN, "PUMP_BONDING_CURVE_SOL", self.cfg.protocol["fee_rounding"])
@@ -178,7 +278,7 @@ class FeeResolver:
         sigs, cu_limit = ex["signature_count"], ex["priority_policy"]["compute_unit_limit"]
         base = sigs * co["lamports_per_signature"]
         price = None if priority is None else priority.normalized_fee_components.get("compute_unit_price_micro_lamports")
-        template = message_template_hash(sigs, cu_limit, ex["message_format"])
+        template = hashlib.sha256(json.dumps({"templates": ex["message_templates"], "format": ex["message_format"], "signature_count": sigs, "cu_limit": cu_limit, "token_account_policy": ex["token_account_policy"]}, sort_keys=True).encode()).hexdigest()
         if co["base_fee_lamports"] is not None:
             base = int(co["base_fee_lamports"])  # CONFIGURED override of the rule value (documented in raw values)
         if price is None and co["priority_fee_lamports"] is not None:  # configured priority lamports as CONFIGURED fallback when no measurement exists
@@ -194,10 +294,17 @@ class FeeResolver:
         try:
             bh = self.rpc("getLatestBlockhash", [{"commitment": self.cfg.raw["rpc_http"]["commitment"]}])
             blockhash = b58decode(bh["value"]["blockhash"]).rjust(32, b"\0")
-            msg = build_fee_probe_message(sigs, cu_limit, int(price), blockhash)
-            fee = self.rpc("getFeeForMessage", [base64.b64encode(msg).decode(), {"commitment": self.cfg.raw["rpc_http"]["commitment"]}])
-            rpc_fee = fee.get("value") if isinstance(fee, dict) else None
-            raw.update({"rpc_fee_for_message_lamports": rpc_fee, "rpc_slot": fee.get("context", {}).get("slot") if isinstance(fee, dict) else None, "blockhash_slot": bh.get("context", {}).get("slot")})
+            results = {}
+            for side in ("buy", "sell"):
+                msg = build_trade_fee_message(self.cfg, side, int(price), blockhash)
+                fee = self.rpc("getFeeForMessage", [base64.b64encode(msg).decode(), {"commitment": self.cfg.raw["rpc_http"]["commitment"]}])
+                results[side] = {"fee_lamports": fee.get("value") if isinstance(fee, dict) else None,
+                                 "rpc_slot": fee.get("context", {}).get("slot") if isinstance(fee, dict) else None,
+                                 "message_base64": base64.b64encode(msg).decode(), "message_hash": hashlib.sha256(msg).hexdigest()}
+            raw["messages"] = results
+            buy_fee, sell_fee = results["buy"]["fee_lamports"], results["sell"]["fee_lamports"]
+            rpc_fee = buy_fee if buy_fee == sell_fee else None
+            raw.update({"rpc_fee_for_message_lamports": rpc_fee, "rpc_slot": results["sell"]["rpc_slot"], "blockhash_slot": bh.get("context", {}).get("slot")})
             if rpc_fee is None:
                 return self._snap("network", "NETWORK_FEE", "getFeeForMessage", (), raw["rpc_slot"], raw, {"base_fee_lamports": base, "priority_fee_lamports": None, "network_fee_total_lamports": None}, "RPC_RETURNED_NULL", CostEvidence.UNKNOWN, "PER_ATTEMPT_BUY_OR_SELL")
             status = "VALID" if int(rpc_fee) == base + prio else "VALID_FORMULA_MISMATCH_RPC"

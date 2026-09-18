@@ -94,6 +94,171 @@
       "additional_adverse_price_bps": 0,
       "exit_reject_rate": "0",
       "random_seed": 0
+    },
+    "message_templates": {
+      "buy": {
+        "discriminator": [
+          102,
+          6,
+          61,
+          18,
+          1,
+          218,
+          235,
+          234
+        ],
+        "accounts": [
+          {
+            "name": "global"
+          },
+          {
+            "name": "fee_recipient",
+            "writable": true
+          },
+          {
+            "name": "mint"
+          },
+          {
+            "name": "bonding_curve",
+            "writable": true
+          },
+          {
+            "name": "associated_bonding_curve",
+            "writable": true
+          },
+          {
+            "name": "associated_user",
+            "writable": true
+          },
+          {
+            "name": "user",
+            "writable": true,
+            "signer": true
+          },
+          {
+            "name": "system_program",
+            "address": "11111111111111111111111111111111"
+          },
+          {
+            "name": "token_program"
+          },
+          {
+            "name": "creator_vault",
+            "writable": true
+          },
+          {
+            "name": "event_authority"
+          },
+          {
+            "name": "program",
+            "address": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+          },
+          {
+            "name": "global_volume_accumulator"
+          },
+          {
+            "name": "user_volume_accumulator",
+            "writable": true
+          },
+          {
+            "name": "fee_config"
+          },
+          {
+            "name": "fee_program",
+            "address": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ"
+          }
+        ],
+        "args": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "max_sol_cost",
+            "type": "u64"
+          },
+          {
+            "name": "track_volume",
+            "type": "bool"
+          }
+        ]
+      },
+      "sell": {
+        "discriminator": [
+          51,
+          230,
+          133,
+          164,
+          1,
+          127,
+          131,
+          173
+        ],
+        "accounts": [
+          {
+            "name": "global"
+          },
+          {
+            "name": "fee_recipient",
+            "writable": true
+          },
+          {
+            "name": "mint"
+          },
+          {
+            "name": "bonding_curve",
+            "writable": true
+          },
+          {
+            "name": "associated_bonding_curve",
+            "writable": true
+          },
+          {
+            "name": "associated_user",
+            "writable": true
+          },
+          {
+            "name": "user",
+            "writable": true,
+            "signer": true
+          },
+          {
+            "name": "system_program",
+            "address": "11111111111111111111111111111111"
+          },
+          {
+            "name": "creator_vault",
+            "writable": true
+          },
+          {
+            "name": "token_program"
+          },
+          {
+            "name": "event_authority"
+          },
+          {
+            "name": "program",
+            "address": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+          },
+          {
+            "name": "fee_config"
+          },
+          {
+            "name": "fee_program",
+            "address": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ"
+          }
+        ],
+        "args": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "min_sol_output",
+            "type": "u64"
+          }
+        ]
+      }
     }
   },
   "costs": {
@@ -146,7 +311,10 @@
     "status_latency_window": 500,
     "writer_shutdown_timeout_ms": 30000,
     "writer_busy_timeout_ms": 100,
-    "writer_retry_backoff_ms": 50
+    "writer_retry_backoff_ms": 50,
+    "signature_history_max": 50000,
+    "dedup_keys_per_mint": 8192,
+    "undecodable_points_max": 4096
   },
   "connectivity": {
     "reconnect_initial_ms": 250,
@@ -238,8 +406,8 @@
   "protocol": {
     "program_id": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
     "idl_source": "https://github.com/pump-fun/pump-public-docs",
-    "idl_version_or_hash": "pump-public-docs@2026-09-17 (checked date per SPEC.reference_sources; hash not available offline)",
-    "decoder_version": "PUMP_LOG_DECODER_V1",
+    "idl_version_or_hash": "sha256:ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+    "decoder_version": "PUMP_LOG_DECODER_IDL_ffe966c42f1a",
     "supported_variants": [
       "create",
       "create_v2",
@@ -294,6 +462,123 @@
         ],
         "tail_policy": "KEEP_RAW",
         "tail_layouts": [
+          {
+            "layout_id": "TradeEvent_ffe966c42f1a",
+            "tail_fields": [
+              [
+                "fee_recipient",
+                "pubkey"
+              ],
+              [
+                "fee_basis_points",
+                "u64"
+              ],
+              [
+                "fee",
+                "u64"
+              ],
+              [
+                "creator",
+                "pubkey"
+              ],
+              [
+                "creator_fee_basis_points",
+                "u64"
+              ],
+              [
+                "creator_fee",
+                "u64"
+              ],
+              [
+                "track_volume",
+                "bool"
+              ],
+              [
+                "total_unclaimed_tokens",
+                "u64"
+              ],
+              [
+                "total_claimed_tokens",
+                "u64"
+              ],
+              [
+                "current_sol_volume",
+                "u64"
+              ],
+              [
+                "last_update_timestamp",
+                "i64"
+              ],
+              [
+                "ix_name",
+                "string"
+              ],
+              [
+                "mayhem_mode",
+                "bool"
+              ],
+              [
+                "cashback_fee_basis_points",
+                "u64"
+              ],
+              [
+                "cashback",
+                "u64"
+              ],
+              [
+                "buyback_fee_basis_points",
+                "u64"
+              ],
+              [
+                "buyback_fee",
+                "u64"
+              ],
+              [
+                "shareholders",
+                {
+                  "vec": {
+                    "struct": [
+                      [
+                        "address",
+                        "pubkey"
+                      ],
+                      [
+                        "share_bps",
+                        "u16"
+                      ]
+                    ]
+                  }
+                }
+              ],
+              [
+                "quote_mint",
+                "pubkey"
+              ],
+              [
+                "quote_amount",
+                "u64"
+              ],
+              [
+                "virtual_quote_reserves",
+                "u64"
+              ],
+              [
+                "real_quote_reserves",
+                "u64"
+              ],
+              [
+                "holder_rewards_bps",
+                "u64"
+              ],
+              [
+                "holder_rewards",
+                "u64"
+              ]
+            ],
+            "quote_mint_field": "quote_mint",
+            "verification_status": "VERIFIED_OFFICIAL_IDL_SHA256_ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+            "note": "Pinned official IDL; variable strings/vectors decoded exactly; extra trailing bytes rejected."
+          },
           {
             "layout_id": "TRADE_EVENT_TAIL_CANDIDATE_FEES_2025",
             "tail_fields": [
@@ -402,7 +687,20 @@
           ]
         ],
         "tail_policy": "KEEP_RAW",
-        "tail_layouts": []
+        "tail_layouts": [
+          {
+            "layout_id": "CompleteEvent_ffe966c42f1a",
+            "tail_fields": [
+              [
+                "quote_mint",
+                "pubkey"
+              ]
+            ],
+            "quote_mint_field": "quote_mint",
+            "verification_status": "VERIFIED_OFFICIAL_IDL_SHA256_ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+            "note": "Pinned official IDL; variable strings/vectors decoded exactly; extra trailing bytes rejected."
+          }
+        ]
       },
       "CompletePumpAmmMigrationEvent": {
         "prefix_fields": [
@@ -416,10 +714,84 @@
           ]
         ],
         "tail_policy": "KEEP_RAW",
-        "tail_layouts": []
+        "tail_layouts": [
+          {
+            "layout_id": "CompletePumpAmmMigrationEvent_ffe966c42f1a",
+            "tail_fields": [
+              [
+                "mint_amount",
+                "u64"
+              ],
+              [
+                "sol_amount",
+                "u64"
+              ],
+              [
+                "pool_migration_fee",
+                "u64"
+              ],
+              [
+                "bonding_curve",
+                "pubkey"
+              ],
+              [
+                "timestamp",
+                "i64"
+              ],
+              [
+                "pool",
+                "pubkey"
+              ],
+              [
+                "quote_mint",
+                "pubkey"
+              ]
+            ],
+            "quote_mint_field": "quote_mint",
+            "verification_status": "VERIFIED_OFFICIAL_IDL_SHA256_ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+            "note": "Pinned official IDL; variable strings/vectors decoded exactly; extra trailing bytes rejected."
+          }
+        ]
       }
     },
     "create_event_tail_layouts": [
+      {
+        "layout_id": "CreateEvent_ffe966c42f1a",
+        "tail_fields": [
+          [
+            "token_program",
+            "pubkey"
+          ],
+          [
+            "is_mayhem_mode",
+            "bool"
+          ],
+          [
+            "is_cashback_enabled",
+            "bool"
+          ],
+          [
+            "quote_mint",
+            "pubkey"
+          ],
+          [
+            "virtual_quote_reserves",
+            "u64"
+          ],
+          [
+            "creator_fee_bps",
+            "u64"
+          ],
+          [
+            "is_holder_reward",
+            "bool"
+          ]
+        ],
+        "quote_mint_field": "quote_mint",
+        "implied_quote_asset": null,
+        "verification_status": "VERIFIED_OFFICIAL_IDL_SHA256_ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+        "token_program": null
+      },
       {
         "layout_id": "CREATE_EVENT_V1_NO_TAIL",
         "tail_fields": [],
@@ -482,17 +854,231 @@
         [
           "creator_fee_basis_points",
           "u64"
+        ],
+        [
+          "fee_recipients",
+          {
+            "array": [
+              "pubkey",
+              7
+            ]
+          }
+        ],
+        [
+          "set_creator_authority",
+          "pubkey"
+        ],
+        [
+          "admin_set_creator_authority",
+          "pubkey"
+        ],
+        [
+          "create_v2_enabled",
+          "bool"
+        ],
+        [
+          "whitelist_pda",
+          "pubkey"
+        ],
+        [
+          "reserved_fee_recipient",
+          "pubkey"
+        ],
+        [
+          "mayhem_mode_enabled",
+          "bool"
+        ],
+        [
+          "reserved_fee_recipients",
+          {
+            "array": [
+              "pubkey",
+              7
+            ]
+          }
+        ],
+        [
+          "is_cashback_enabled",
+          "bool"
+        ],
+        [
+          "buyback_fee_recipients",
+          {
+            "array": [
+              "pubkey",
+              8
+            ]
+          }
+        ],
+        [
+          "buyback_basis_points",
+          "u64"
+        ],
+        [
+          "initial_virtual_quote_reserves",
+          "u64"
+        ],
+        [
+          "whitelisted_quote_mints",
+          {
+            "array": [
+              "pubkey",
+              1
+            ]
+          }
+        ],
+        [
+          "creator_fee_configurable",
+          "bool"
+        ],
+        [
+          "max_configurable_creator_fee_bps",
+          "u64"
+        ],
+        [
+          "holder_reward_claim_authority",
+          "pubkey"
+        ],
+        [
+          "is_holder_reward_enabled",
+          "bool"
         ]
       ],
-      "verification_status": "PINNED_FROM_IDL_UNVERIFIED_OFFLINE_DOCTOR_VALIDATES_OWNER_AND_LENGTH",
+      "verification_status": "VERIFIED_OFFICIAL_IDL_SHA256_ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
       "max_reasonable_bps": 1000,
       "discriminator_source": "ANCHOR_SHA256_account:Global_FIRST_8_BYTES"
     },
     "fee_rounding": "CEIL_BPS",
-    "curve_rounding_version": "PUMP_CURVE_V1_FLOOR_TOKENS_CEIL_SOL_INPUT",
+    "curve_rounding_version": "PUMP_SDK_2_0_0_BUY_FLOOR_PLUS_ONE_SELL_FLOOR",
     "spl_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
     "token_2022_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-    "unpinned_tail_policy": "RECORD_TAIL_LENGTH_AND_PREFIX_HASH"
+    "unpinned_tail_policy": "RECORD_TAIL_LENGTH_AND_PREFIX_HASH",
+    "fee_config": {
+      "address": "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+      "program_id": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+      "idl_version_or_hash": "sha256:d87b52305fd6b2ec487d4ba1e08a49990c23fa9b8b76092b2097df0164fa3859",
+      "layout_after_discriminator": [
+        [
+          "bump",
+          "u8"
+        ],
+        [
+          "admin",
+          "pubkey"
+        ],
+        [
+          "flat_fees",
+          {
+            "struct": [
+              [
+                "lp_fee_bps",
+                "u64"
+              ],
+              [
+                "protocol_fee_bps",
+                "u64"
+              ],
+              [
+                "creator_fee_bps",
+                "u64"
+              ]
+            ]
+          }
+        ],
+        [
+          "fee_tiers",
+          {
+            "vec": {
+              "struct": [
+                [
+                  "market_cap_lamports_threshold",
+                  "u128"
+                ],
+                [
+                  "fees",
+                  {
+                    "struct": [
+                      [
+                        "lp_fee_bps",
+                        "u64"
+                      ],
+                      [
+                        "protocol_fee_bps",
+                        "u64"
+                      ],
+                      [
+                        "creator_fee_bps",
+                        "u64"
+                      ]
+                    ]
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        [
+          "stable_fee_tiers",
+          {
+            "vec": {
+              "struct": [
+                [
+                  "market_cap_lamports_threshold",
+                  "u128"
+                ],
+                [
+                  "fees",
+                  {
+                    "struct": [
+                      [
+                        "lp_fee_bps",
+                        "u64"
+                      ],
+                      [
+                        "protocol_fee_bps",
+                        "u64"
+                      ],
+                      [
+                        "creator_fee_bps",
+                        "u64"
+                      ]
+                    ]
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        [
+          "exotic_flat_fees",
+          {
+            "struct": [
+              [
+                "lp_fee_bps",
+                "u64"
+              ],
+              [
+                "protocol_fee_bps",
+                "u64"
+              ],
+              [
+                "creator_fee_bps",
+                "u64"
+              ]
+            ]
+          }
+        ]
+      ],
+      "verification_status": "VERIFIED_OFFICIAL_IDL_SHA256_d87b52305fd6b2ec487d4ba1e08a49990c23fa9b8b76092b2097df0164fa3859",
+      "rule": "PUMP_SOL_MARKET_CAP_TIERS",
+      "unsupported_modes": [
+        "MAYHEM",
+        "CASHBACK",
+        "HOLDER_REWARD",
+        "CONFIGURABLE_CREATOR_FEE",
+        "FEE_SHARING"
+      ]
+    }
   },
   "research": {
     "target_grid": [

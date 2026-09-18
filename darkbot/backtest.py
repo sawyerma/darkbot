@@ -137,12 +137,15 @@ def evaluate_variant(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: R
     samples = [((replay_input.start_utc_ns + owner.first_create_receive[p.mint] - replay_input.start_mono_ns) // block_len, p.net_pnl_lamports) for p in resolved]
     boot = block_bootstrap(samples, research["bootstrap_resamples"], research["random_seed"], Decimal(research["bootstrap_confidence"]))
     exposed = [p for p in owner.positions.values() if p.net_pnl_lamports is None]
-    return {"variant_id": v.variant_id, "variant_config_hash": variant_snapshot_hash, "split": split, "target": v.target, "entry_delay_ms": v.entry_delay_ms, "exit_delay_ms": v.exit_delay_ms, "fee_multiplier": v.fee_multiplier, "adverse_bps": v.adverse_bps, "reject_rate": v.reject_rate,
+    critical_quality = bool(owner.disk_error or owner.recorder.overflowed or owner.counters.internal_errors or owner.counters.ineligible.get("UNQUALIFIED_COSTS") or any(p.canonical_provider_gap_flag for p in owner.positions.values()))
+    source_quality = conn.execute("SELECT quality_status FROM runs WHERE run_id=?", (replay_input.source_run_id,)).fetchone()
+    critical_quality = critical_quality or bool(source_quality and source_quality[0] not in ("OK", None))
+    return {"_samples": samples, "critical_quality": critical_quality, "variant_id": v.variant_id, "variant_config_hash": variant_snapshot_hash, "split": split, "target": v.target, "entry_delay_ms": v.entry_delay_ms, "exit_delay_ms": v.exit_delay_ms, "fee_multiplier": v.fee_multiplier, "adverse_bps": v.adverse_bps, "reject_rate": v.reject_rate,
             "portfolio_limit": "paired" if v.paired else v.portfolio_limit, "launches": len(mints), "intents": len(owner.positions), "resolved": len(resolved), "unresolved": len(exposed),
             "net_pnl_lamports": sum(p.net_pnl_lamports for p in resolved), "expectancy_per_intent": (sum(p.net_pnl_lamports for p in resolved) / len(resolved)) if resolved else None,
             "bootstrap": boot, "exits": {"CREATOR_SELL": sum(1 for p in resolved if p.exit_reason and p.exit_reason.value == "CREATOR_SELL"), "TARGET": sum(1 for p in resolved if p.exit_reason and p.exit_reason.value == "TARGET"), "TIMEOUT": sum(1 for p in resolved if p.exit_reason and p.exit_reason.value == "TIMEOUT")},
             "entry_failed": owner.counters.entry_failed, "exit_exhausted": owner.counters.exit_exhausted, "censored": owner.counters.censored, "unresolved_reasons": {p.unresolved_reason: 1 for p in exposed if p.unresolved_reason},
-            "status": variant_status(v, split, boot, exposed, research, cfg),
+            "status": "UNQUALIFIED_DATA_CRITICAL_QUALITY" if critical_quality else variant_status(v, split, boot, exposed, research, cfg),
             "run_id": run_id}
 
 
@@ -164,7 +167,7 @@ def variant_status(v: Variant, split: str, boot: dict[str, Any], exposed: list[A
     return "HOLDOUT_POSITIVE_PENDING_FORWARD" if split == "test" else "POSITIVE_UNDER_MODEL_PENDING_STRESS"
 
 
-def apply_stress_gate(outputs: list[dict[str, Any]], candidate_target: str | None = None, required_stress: int | None = None) -> None:
+def apply_stress_gate(outputs: list[dict[str, Any]], candidate_target: str | None = None, required_stress: int | None = None, required_scenarios: set[tuple] | None = None) -> None:
     """A forward/test candidate qualifies only if (a) a candidate target was FROZEN before the forward evaluation and matches, and (b) ALL declared stress
     siblings (fee multipliers, adverse bps, conservative reject rate; same target/delays/limit) exist, have enough data and are positive."""
     source = [dict(o) for o in outputs]  # gate decisions never depend on earlier output mutation
@@ -176,6 +179,16 @@ def apply_stress_gate(outputs: list[dict[str, Any]], candidate_target: str | Non
             continue
         if o.get("target") != candidate_target:
             o["status"] = "NOT_PREREGISTERED_CANDIDATE"
+            continue
+        if required_scenarios is not None:
+            siblings = [x for x in source if x.get("split") == o["split"] and x.get("target") == o["target"] and x.get("portfolio_limit") == o.get("portfolio_limit") and x.get("source_run_id") == o.get("source_run_id")]
+            scenarios = {(x["entry_delay_ms"], x["exit_delay_ms"], str(x["fee_multiplier"]), x["adverse_bps"], str(x["reject_rate"])): x for x in siblings}
+            if not required_scenarios <= scenarios.keys():
+                o["status"] = "INSUFFICIENT_DATA_NO_STRESS_VARIANTS"
+            elif any(scenarios[k].get("status") != "POSITIVE_UNDER_MODEL_PENDING_STRESS" for k in required_scenarios):
+                o["status"] = "UNQUALIFIED_DECLARED_STRESS_SCENARIO"
+            else:
+                o["status"] = "POSITIVE_UNDER_MODEL"
             continue
         siblings = [x for x in source if x.get("split") == o["split"] and x.get("target") == o["target"] and x.get("entry_delay_ms") == o["entry_delay_ms"] and x.get("exit_delay_ms") == o["exit_delay_ms"]
                     and x.get("portfolio_limit") == o["portfolio_limit"] and x.get("source_run_id") == o.get("source_run_id") ]
@@ -280,6 +293,34 @@ def run_research(conn: sqlite3.Connection, campaign: str, cfg: RuntimeConfig, re
             cutoff = min(rin.end_mono_ns, min(future) - utc_offsets[run_id] - 1) if future else rin.end_mono_ns
             for v in variants:
                 outputs.append({**evaluate_variant(conn, rin, cfg, v, mints, campaign, research, split_name, persist, stage, cutoff), "source_run_id": run_id})
+    per_run_outputs = outputs
+    aggregated = {}
+    for row in outputs:
+        if row.get("variant_id") == "ALL":
+            continue
+        key = (row["split"], row["variant_id"])
+        aggregated.setdefault(key, []).append(row)
+    outputs = [o for o in outputs if o.get("variant_id") == "ALL"]
+    variants_by_id = {v.variant_id: v for v in variants}
+    for (split, vid), rows in aggregated.items():
+        row = dict(rows[0])
+        samples = [sample for r in rows for sample in r["_samples"]]
+        boot = block_bootstrap(samples, research["bootstrap_resamples"], research["random_seed"], Decimal(research["bootstrap_confidence"]))
+        for k in ("launches", "intents", "resolved", "unresolved", "net_pnl_lamports", "entry_failed", "exit_exhausted", "censored"):
+            row[k] = sum(r[k] for r in rows)
+        row["source_run_id"] = "DATASET:" + dataset_hash
+        row["source_runs"] = [r["source_run_id"] for r in rows]
+        row["run_ids"] = [r["run_id"] for r in rows]
+        row["bootstrap"] = boot
+        row["critical_quality"] = any(r["critical_quality"] for r in rows)
+        row["expectancy_per_intent"] = row["net_pnl_lamports"] / row["resolved"] if row["resolved"] else None
+        row["status"] = ("UNQUALIFIED_DATA_CRITICAL_QUALITY" if row["critical_quality"] else
+                          "UNQUALIFIED_DATA_UNRESOLVED_EXPOSURE" if row["unresolved"] else
+                          variant_status(variants_by_id[vid], split, boot, [], research, cfg))
+        row.pop("_samples", None)
+        outputs.append(row)
+    for row in per_run_outputs:
+        row.pop("_samples", None)
     selection_limit_rows = [o for o in outputs if o.get("portfolio_limit") == selection_limit]
     pre_selection = select_candidate(selection_limit_rows, research["baseline_target"], Decimal(research["baseline_preference_fraction"]))
     if max_variants is not None:
@@ -291,7 +332,8 @@ def run_research(conn: sqlite3.Connection, campaign: str, cfg: RuntimeConfig, re
         frozen_target = pre_selection["selected_target"]
     # every declared stress scenario (fee multipliers x adverse bps x reject rates) except the baseline must be present and positive
     required_stress = len(research["network_fee_multipliers"]) * len(research["additional_adverse_price_bps"]) * 2 - 1
-    apply_stress_gate(outputs, frozen_target if stage == "forward" else None, required_stress)
+    required_scenarios = {(v.entry_delay_ms, v.exit_delay_ms, str(v.fee_multiplier), v.adverse_bps, str(v.reject_rate)) for v in register_variants(research, cfg) if v.entry_delay_ms or v.exit_delay_ms}
+    apply_stress_gate(outputs, frozen_target if stage == "forward" else None, required_stress, required_scenarios)
     if stage != "freeze" and persist:
         upsert_config_snapshot(conn, "EVALUATION_COMPLETED", evaluation_key, {"dataset": dataset_hash, "stage": stage}, "research", utc_iso(time.time_ns()))
     if persist:
@@ -300,7 +342,7 @@ def run_research(conn: sqlite3.Connection, campaign: str, cfg: RuntimeConfig, re
     limit10 = [o for o in outputs if o.get("portfolio_limit") == 10]
     report = {"campaign": campaign, "dataset_hash": dataset_hash, "source_runs": runs, "variants_registered": len(variants), "embargo_ns": embargo_ns(cfg, research), "research_config": research,
               "selection_for_limit_1": selection, "limit_10_note": "Limit 10 is a scenario, not a LIVE release; separate temporal validation required before switching", "limit_10_results": len(limit10),
-              "results": outputs, "forward_test_note": "After any adjustment the previous test split is development data; a new untouched forward PAPER period is required (R7).",
+              "results": outputs, "per_recording_results": per_run_outputs, "forward_test_note": "After any adjustment the previous test split is development data; a new untouched forward PAPER period is required (R7).",
               "qualification_rule": "POSITIVE_UNDER_MODEL only with lower bootstrap bound > 0 on untouched forward data, declared stress scenarios survived, no unresolved exposure; never LIVE_PROFIT_PROVEN"}
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "research_report.json").write_text(json.dumps(report, indent=2, sort_keys=True, default=str), encoding="utf-8")
