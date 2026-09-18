@@ -11,7 +11,7 @@ import json
 import math
 import struct
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -231,6 +231,21 @@ class FeeResolver:
 
     async def run_background(self, on_snapshots: Callable[[list[FeeSnapshot]], None], stop: asyncio.Event) -> None:
         """Refresh per configured intervals; snapshots are pushed to the caller (recorder + StateOwner) via callback."""
+        def publish(batch: list[FeeSnapshot]) -> None:
+            # A CostBasis is one causal knowledge point. Do not expose a new
+            # component through the cache while the remaining refresh calls
+            # are still in flight.
+            current = {"protocol": self.cache.protocol, "network": self.cache.network,
+                       "rent": self.cache.rent, "priority_policy": self.cache.priority_policy}
+            kinds = {"PROTOCOL_GLOBAL_ACCOUNT": "protocol", "NETWORK_FEE": "network",
+                     "RENT_EXEMPTION": "rent", "PRIORITY_POLICY": "priority_policy"}
+            published_at = self.clock.monotonic_ns()
+            batch = [replace(snap, received_mono_ns=max(snap.received_mono_ns, published_at)) for snap in batch]
+            for snap in batch:
+                current[kinds[snap.source_type]] = snap
+            self.cache = FeeCache(current["protocol"], current["network"], current["rent"], current["priority_policy"])
+            on_snapshots(batch)
+
         due = {k: 0.0 for k in self.interval_ms}
         loop = asyncio.get_running_loop()
         while not stop.is_set():
@@ -238,22 +253,18 @@ class FeeResolver:
             batch: list[FeeSnapshot] = []
             if now >= due["protocol"]:
                 batch.append(await asyncio.to_thread(self.resolve_protocol))
-                self.cache.protocol = batch[-1]
                 due["protocol"] = now + self.interval_ms["protocol"] / 1000
             if now >= due["priority_policy"]:
                 prio = await asyncio.to_thread(self.resolve_priority)
-                self.cache.priority_policy = prio
                 batch.append(prio)
                 net = await asyncio.to_thread(self.resolve_network, prio if prio.validation_status == "VALID" else None)
-                self.cache.network = net
                 batch.append(net)
                 due["priority_policy"] = due["network"] = now + self.interval_ms["network"] / 1000
             if now >= due["rent"]:
                 batch.append(await asyncio.to_thread(self.resolve_rent))
-                self.cache.rent = batch[-1]
                 due["rent"] = now + self.interval_ms["rent"] / 1000
             if batch:
-                on_snapshots(batch)
+                publish(batch)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=max(self.cfg.costs["snapshot_refresh_policy"]["min_poll_interval_ms"] / 1000, min(due.values()) - loop.time()))
             except asyncio.TimeoutError:

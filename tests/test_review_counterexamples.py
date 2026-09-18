@@ -109,7 +109,7 @@ class ResearchQualification(unittest.TestCase):
         self.assertEqual(variant_status(v0, "train", boot, [], research, cfg), "DIAGNOSTIC_ZERO_DELAY_CANNOT_QUALIFY")
         self.assertEqual(variant_status(v5, "train", boot, [], research, cfg), "CANDIDATE_IN_SAMPLE_NOT_QUALIFYING")
         self.assertEqual(variant_status(v5, "validation", boot, [], research, cfg), "CANDIDATE_IN_SAMPLE_NOT_QUALIFYING")
-        self.assertEqual(variant_status(v5, "test", boot, [], research, cfg), "POSITIVE_UNDER_MODEL_PENDING_STRESS")
+        self.assertEqual(variant_status(v5, "test", boot, [], research, cfg), "HOLDOUT_POSITIVE_PENDING_FORWARD")
         self.assertEqual(variant_status(v5, "test", {**boot, "blocks": 10}, [], research, cfg), "INSUFFICIENT_DATA")
         self.assertEqual(variant_status(v5, "test", {**boot, "ci_low": -1}, [], research, cfg), "NEGATIVE")
         base = {"split": "test", "target": "1.5", "entry_delay_ms": 5, "exit_delay_ms": 5, "portfolio_limit": 1}

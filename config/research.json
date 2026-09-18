@@ -102,5 +102,8 @@
     ],
     "mode": "ONE_SIDED_PLUS_JOINT"
   },
-  "split_unit": "BLOCK"
+  "split_unit": "BLOCK",
+  "forward_test": false,
+  "baseline_target": "1.5",
+  "baseline_preference_fraction": "0.90"
 }

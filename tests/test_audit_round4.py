@@ -56,7 +56,9 @@ class ResearchGates(unittest.TestCase):
     def test_baseline_preference_keeps_positive_flag(self):
         rows = [{"split": "validation", "target": "1.5", "entry_delay_ms": 5, "exit_delay_ms": 5, "fee_multiplier": "1.0", "adverse_bps": 0, "reject_rate": "0", "bootstrap": {"ci_low": 95}, "variant_id": "b"},
                 {"split": "validation", "target": "2.0", "entry_delay_ms": 5, "exit_delay_ms": 5, "fee_multiplier": "1.0", "adverse_bps": 0, "reject_rate": "0", "bootstrap": {"ci_low": 100}, "variant_id": "best"}]
-        sel = select_candidate(rows)
+        for row in rows:
+            row["status"] = "CANDIDATE_IN_SAMPLE_NOT_QUALIFYING"
+        sel = select_candidate(rows, "1.5", Decimal("0.90"))
         self.assertEqual(sel["selected_target"], "1.5")
         self.assertTrue(sel["positive"])  # a positive baseline within 10% is a freezable candidate
 

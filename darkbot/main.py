@@ -81,7 +81,7 @@ class Application:
         storage_info = self.open_storage()
         assert self.conn is not None
         self.writer = SqliteWriter(self.conn, self.recorder, self.cfg.storage["batch_max_records"], self.cfg.storage["flush_interval_ms"], self._disk_error, self.cfg.storage["writer_locked_retries"], self.cfg.storage["fk_merge_max_batches"],
-                                   quarantine_path=self.db_path.with_suffix(".quarantine.jsonl"))
+                                   quarantine_path=self.db_path.with_suffix(".quarantine.jsonl"), busy_timeout_ms=self.cfg.storage["writer_busy_timeout_ms"], retry_backoff_ms=self.cfg.storage["writer_retry_backoff_ms"])
         prior_mints = prior_campaign_mints(self.conn, self.campaign)
         self.writer.start()
         scheduler = LiveScheduler(loop, self.clock)
@@ -89,7 +89,7 @@ class Application:
         rpc_ep = resolve_rpc_http(self.cfg)
         rpc = http_rpc(rpc_ep.url, self.cfg.connectivity["rpc_http_timeout_ms"] / 1000) if rpc_ep.available else None
         self.resolver = FeeResolver(self.cfg, rpc, self.clock, self.run_id, "rpc_http" if rpc_ep.available else "NONE")
-        self.owner = StateOwner(self.cfg, self.run_id, self.clock, scheduler, self.recorder, adapter, self.resolver.cache.basis, "PAPER", economic_intents_allowed=self.economic,
+        self.owner = StateOwner(self.cfg, self.run_id, self.clock, scheduler, self.recorder, adapter, lambda: self.resolver.cache.basis(), "PAPER", economic_intents_allowed=self.economic,
                                 feature_sink=lambda job: loop.run_in_executor(self.executor, job), prior_submitted_mints=prior_mints if self.mode == "PAPER" else None)
         endpoints = resolve_feed_endpoints(self.cfg)
         feed_status: dict[str, str] = {}
@@ -129,7 +129,10 @@ class Application:
             self.owner._quality("FEED_STATS", "INFO", "FEED", canonical_gap=False, details=self._feed_report(fid), lost=None, feed_id=fid, end=self.clock.monotonic_ns(), recovery="RUN_END")
         self.owner.finalize(self.clock.monotonic_ns())
         self.executor.shutdown(wait=True)
-        self.writer.stop()
+        stopped = await asyncio.to_thread(self.writer.stop, self.cfg.storage["writer_shutdown_timeout_ms"] / 1000)
+        if not stopped:
+            # Never use or close the connection while its sole writer is alive.
+            await asyncio.to_thread(self.writer.wait_until_stopped)
         status = "INTERRUPTED" if "signal" in self.stop_reason else "COMPLETED"
         quality = "OK" if not (self.recorder.overflowed or self.writer.disk_error or self.owner.counters.internal_errors) else "DEGRADED"
         readiness = self.compute_readiness()

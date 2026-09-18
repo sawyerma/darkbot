@@ -234,12 +234,14 @@ class MarketState:
     creator_sell_slot: int | None = None
     creator_sell_sequence: int | None = None
     quote_uncertain: bool = False
+    quote_conflict_mono_ns: int | None = None
     event_count: int = 0
     seen_keys: dict[str, tuple[tuple, bool]] = field(default_factory=dict)  # canonical id -> (content fingerprint, seen COMPLETE)
     create_completeness: Completeness | None = None
     decode_gap_since: int | None = None  # a PARTIAL/unknown Pump event touched this mint: state unknowable until a new COMPLETE state
     decode_gap_intervals: list[tuple[int, int | None]] = field(default_factory=list)
     trade_log_truncated: bool = False
+    trade_log_truncated_from_mono_ns: int | None = None
     migration_evidence: dict[str, Any] = field(default_factory=dict)
     # bounded history of (receive_mono_ns, sequence, event_id, slot, vsol, vtok, rsol, rtok) for proxy selection at modeled fill time
     state_history: list[tuple[int, int, str, int | None, int, int, int | None, int | None]] = field(default_factory=list)

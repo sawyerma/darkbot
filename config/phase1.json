@@ -88,6 +88,12 @@
       "close_token_account_on_full_exit": true,
       "spl_token_account_size_bytes": 165,
       "token_2022_supported": false
+    },
+    "research_stress": {
+      "network_fee_multiplier": "1.0",
+      "additional_adverse_price_bps": 0,
+      "exit_reject_rate": "0",
+      "random_seed": 0
     }
   },
   "costs": {
@@ -137,7 +143,10 @@
     "telemetry_samples_max": 20000,
     "fee_history_max": 4096,
     "error_text_max_chars": 300,
-    "status_latency_window": 500
+    "status_latency_window": 500,
+    "writer_shutdown_timeout_ms": 30000,
+    "writer_busy_timeout_ms": 100,
+    "writer_retry_backoff_ms": 50
   },
   "connectivity": {
     "reconnect_initial_ms": 250,
@@ -424,7 +433,7 @@
     "wsol_mint": "So11111111111111111111111111111111111111112",
     "native_sol_curve_sentinel": "11111111111111111111111111111111",
     "global_account": {
-      "address": "4wTV1YmiEkRvAtNtd6Vc7SnT5vWWLK8oFMWuP4Mv9xvE",
+      "address": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
       "layout_after_discriminator": [
         [
           "initialized",

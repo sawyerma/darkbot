@@ -165,13 +165,13 @@ class P1CostsStressResearch(unittest.TestCase):
             self.assertFalse(rep0["selection_for_limit_1"]["would_freeze"])
             from darkbot.config import config_hash
             from darkbot.storage import upsert_config_snapshot
-            freeze_key = config_hash({"campaign": "camp", "dataset": rep0["dataset_hash"], "kind": "POLICY_FREEZE"})
-            upsert_config_snapshot(conn, "POLICY_FREEZE", freeze_key, {"campaign": "camp", "dataset": rep0["dataset_hash"], "selected_target": "1.5", "stage": "VALIDATION"}, "test", utc_iso(0))
+            freeze_key = config_hash({"campaign": "camp", "kind": "POLICY_FREEZE"})
+            upsert_config_snapshot(conn, "POLICY_FREEZE", freeze_key, {"campaign": "camp", "dataset": rep0["dataset_hash"], "selected_target": "1.1", "runtime_config_hash": h.cfg.config_hash, "research_policy_hash": config_hash({k: v for k, v in rc.items() if k not in ("test_split_unlocked", "forward_test", "policy_freeze_note")}), "stage": "VALIDATION"}, "test", utc_iso(0))
             rep = run_research(conn, "camp", h.cfg, p, Path(d) / "out", persist=True, max_variants=2)  # forward stage: distinct run ids, no collision
             test_rows = [r for r in rep["results"] if r.get("split") == "test" and r.get("variant_id") != "ALL"]
             self.assertTrue(test_rows)
-            self.assertEqual(rep["selection_for_limit_1"]["frozen_target"], "1.5")
-            self.assertTrue(conn.execute("SELECT COUNT(*) FROM runs WHERE mode='RESEARCH_REPLAY' AND run_id LIKE '%_forward_test_%'").fetchone()[0] > 0)
+            self.assertEqual(rep["selection_for_limit_1"]["frozen_target"], "1.1")
+            self.assertTrue(conn.execute("SELECT COUNT(*) FROM runs WHERE mode='RESEARCH_REPLAY' AND run_id LIKE '%_holdout_test_%'").fetchone()[0] > 0)
             self.assertFalse(any(r.get("status") == "POSITIVE_UNDER_MODEL" for r in rep["results"]))  # no stress siblings/insufficient data -> never positive
 
 

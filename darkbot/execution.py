@@ -99,6 +99,8 @@ def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int) -> Fe
         return InvalidQuote("UNQUALIFIED_COSTS", f"missing fee snapshots: {missing}")
     for name, snap in (("protocol", basis.protocol), ("network", basis.network), ("rent", basis.rent), ("priority_policy", basis.priority_policy)):
         assert snap is not None
+        if snap.evidence == CostEvidence.UNKNOWN:
+            return InvalidQuote("UNQUALIFIED_COSTS", f"{name} fee evidence unknown")
         if snap.validation_status != "VALID":
             return InvalidQuote("UNQUALIFIED_COSTS", f"{name} fee snapshot invalid ({snap.validation_status})")
         if not snap.is_fresh(now_mono_ns):
@@ -112,7 +114,7 @@ def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int) -> Fe
             if value is None and key.endswith("_lamports") or (value is None and key.endswith("_bps")):
                 return InvalidQuote("UNQUALIFIED_COSTS", f"{source}.{key} is NULL (unknown, not zero)")
     evidences = {basis.protocol.evidence, basis.network.evidence, basis.rent.evidence, basis.priority_policy.evidence}
-    evidence = "MEASURED" if evidences <= {CostEvidence.MEASURED, CostEvidence.KNOWN_RULE, CostEvidence.CONFIGURED} else "MODELED"
+    evidence = "MEASURED" if evidences <= {CostEvidence.MEASURED, CostEvidence.KNOWN_RULE} else "CONFIGURED" if CostEvidence.CONFIGURED in evidences else "MODELED"
     return FeeTerms(
         protocol_bps=int(p["protocol_fee_bps"]), creator_bps=int(p["creator_fee_bps"]), other_bps=int(p.get("other_protocol_fee_bps", 0)),
         base_fee_lamports=int(n["base_fee_lamports"]), priority_fee_lamports=int(n["priority_fee_lamports"]),
@@ -270,19 +272,28 @@ class FillEvaluation:
     fees_charged_lamports: int | None  # None = UNKNOWN (never zero)
     failure_reason: str | None
     proxy_age_ns: int | None
+    cost_evidence_status: str | None = None
 
 
 def evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: CurveState | None, basis: CostBasis, modeled_fill_mono_ns: int, run_prefix: str, coverage: CoverageState, rent_refund: int) -> FillEvaluation:
     """Compare the expected quote with the quote at the OBSERVED_STATE_PROXY of the modeled fill time.
     A landed-but-failed transaction pays its network fee (base+priority) and tip; no protocol fee, no rent."""
     ev = _evaluate_fill(engine, expected, fill_state, basis, modeled_fill_mono_ns, run_prefix, coverage, rent_refund)
+    if ev.status == AttemptStatus.UNKNOWN:
+        return ev
+    terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns)
+    if isinstance(terms, InvalidQuote):
+        return FillEvaluation(AttemptStatus.UNKNOWN, None, None, "COSTS_UNKNOWN_AT_MODELED_FILL", ev.proxy_age_ns)
     if ev.status == AttemptStatus.FILLED and expected.side == Side.SELL and engine.stress_rejects(expected.quote_snapshot_id):
-        ev = FillEvaluation(AttemptStatus.SLIPPAGE_REJECTED, None, expected.network_fee_total_lamports + expected.tip_lamports, "STRESS_SCENARIO_REJECT", ev.proxy_age_ns)
-    if ev.status == AttemptStatus.FILLED and ev.actual is not None and (engine.stress_network_fee_multiplier != 1 or engine.stress_adverse_price_bps):
-        return _apply_stress(engine, ev, expected)
-    if ev.fees_charged_lamports is not None and engine.stress_network_fee_multiplier != 1:
-        return FillEvaluation(ev.status, ev.actual, int(Decimal(ev.fees_charged_lamports) * engine.stress_network_fee_multiplier), ev.failure_reason, ev.proxy_age_ns)
-    return ev
+        ev = FillEvaluation(AttemptStatus.SLIPPAGE_REJECTED, None, 0, "STRESS_SCENARIO_REJECT", ev.proxy_age_ns)
+    if ev.status == AttemptStatus.FILLED:
+        if engine.stress_network_fee_multiplier != 1 or engine.stress_adverse_price_bps:
+            ev = _apply_stress(engine, ev, expected)
+        if ev.status == AttemptStatus.FILLED:
+            return ev
+    network = int(Decimal(terms.base_fee_lamports + terms.priority_fee_lamports) * engine.stress_network_fee_multiplier)
+    evidence = "MODELED_STRESS" if engine.stress_network_fee_multiplier != 1 or engine.stress_adverse_price_bps or engine.stress_exit_reject_rate else terms.evidence
+    return FillEvaluation(ev.status, None, network + engine.policy.sender_tip_lamports, ev.failure_reason, ev.proxy_age_ns, evidence)
 
 
 def _apply_stress(engine: QuoteEngine, ev: FillEvaluation, expected: QuoteSnapshot) -> FillEvaluation:
@@ -338,7 +349,10 @@ def _evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: Cur
         proto, creator, other = ceil_bps(curve_input, terms.protocol_bps), ceil_bps(curve_input, terms.creator_bps), ceil_bps(curve_input, terms.other_bps)
         debit = curve_input + proto + creator + other
         if expected.max_input_base_units is not None and debit > expected.max_input_base_units:
-            return FillEvaluation(AttemptStatus.SLIPPAGE_REJECTED, None, network_and_tip, f"max_sol_cost_exceeded debit={debit}", proxy_age)
+            # A rejected attempt is charged using the fee rule valid at the
+            # modeled fill, never the stale submit quote.
+            return FillEvaluation(AttemptStatus.SLIPPAGE_REJECTED, None, actual.network_fee_total_lamports + actual.tip_lamports,
+                                  f"max_sol_cost_exceeded debit={debit}", proxy_age)
         filled = QuoteSnapshot(**{**_asdict(actual), "quote_snapshot_id": actual.quote_snapshot_id, "curve_input_lamports": curve_input, "token_amount_base_units": tokens,
                                   "protocol_fee_lamports": proto, "creator_fee_lamports": creator, "other_protocol_fee_lamports": other, "protocol_fee_total_lamports": proto + creator + other,
                                   "swap_wallet_debit_lamports": debit, "max_input_base_units": expected.max_input_base_units, "min_output_base_units": expected.min_output_base_units,
@@ -349,7 +363,8 @@ def _evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: Cur
         return FillEvaluation(AttemptStatus.CURVE_UNAVAILABLE, None, network_and_tip, actual.reason, proxy_age)
     assert expected.min_output_base_units is not None and actual.swap_wallet_credit_lamports is not None
     if actual.swap_wallet_credit_lamports < expected.min_output_base_units:
-        return FillEvaluation(AttemptStatus.SLIPPAGE_REJECTED, None, network_and_tip, f"min_sol_output_not_met credit={actual.swap_wallet_credit_lamports} min={expected.min_output_base_units}", proxy_age)
+        return FillEvaluation(AttemptStatus.SLIPPAGE_REJECTED, None, actual.network_fee_total_lamports + actual.tip_lamports,
+                              f"min_sol_output_not_met credit={actual.swap_wallet_credit_lamports} min={expected.min_output_base_units}", proxy_age)
     return FillEvaluation(AttemptStatus.FILLED, actual, actual.network_fee_total_lamports + actual.tip_lamports + actual.protocol_fee_total_lamports, None, proxy_age)
 
 

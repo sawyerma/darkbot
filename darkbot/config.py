@@ -75,7 +75,7 @@ RUNTIME_SCHEMA: dict[str, Any] = {
                    occupied_slot_states="list[str]", unresolved_with_possible_exposure_occupies_slot="enum:True"),
     "latency_model": S(entry_delay_ms="int0", exit_delay_ms="int0", label="str", zero_delay_run_can_qualify_edge="enum:False", stage_breakdown_required="enum:True",
                        measured_distribution_id="null|str", stress_delay_ms="list[int0]", scenario_unit="enum:MILLISECONDS"),
-    "execution": S(max_exit_attempts="int+", exit_retry_backoff_ms="list[int+]", quote_max_age_ms="int+", slippage_bps="int0",
+    "execution": S(research_stress=S(network_fee_multiplier="dec+", additional_adverse_price_bps="int0", exit_reject_rate="dec", random_seed="int0"), max_exit_attempts="int+", exit_retry_backoff_ms="list[int+]", quote_max_age_ms="int+", slippage_bps="int0",
                    unknown_status_policy="enum:RECONCILE_BEFORE_RESUBMIT", retries_must_advance_time="enum:True", entry_max_attempts="enum:1",
                    exit_retries_after_exhaustion="str", fill_evidence_status="enum:OBSERVED_STATE_PROXY", supported_venue="enum:PUMP_BONDING_CURVE",
                    pumpswap_execution_enabled="enum:False", message_format="enum:LEGACY_OR_V0_COMPUTE_BUDGET", signature_count="int+",
@@ -91,7 +91,7 @@ RUNTIME_SCHEMA: dict[str, Any] = {
     "storage": S(engine="enum:sqlite", journal_mode="enum:WAL", writer_threads="enum:1", queue_capacity_records="int+", batch_max_records="int+", flush_interval_ms="int+",
                  report_interval_ms="int+", raw_retention_policy="str", on_queue_overflow="enum:MARK_GAP_AND_PAUSE_NEW_ENTRIES", on_disk_error="enum:MARK_RUN_INVALID_AND_PAUSE_NEW_ENTRIES",
                  state_history_per_mint="int+", inactive_mint_retention_ms="int+", max_tracked_mints="int+", priority_headroom_records="int+", writer_locked_retries="int+", fk_merge_max_batches="int+",
-                 trade_log_per_mint="int+", telemetry_samples_max="int+", fee_history_max="int+", error_text_max_chars="int+", status_latency_window="int+"),
+                 trade_log_per_mint="int+", telemetry_samples_max="int+", fee_history_max="int+", error_text_max_chars="int+", status_latency_window="int+", writer_shutdown_timeout_ms="int+", writer_busy_timeout_ms="int+", writer_retry_backoff_ms="int+"),
     "connectivity": S(reconnect_initial_ms="int+", reconnect_max_ms="int+", jitter_fraction="dec", subscription_ack_timeout_ms="int+", liveness_check_interval_ms="int+",
                       position_state_stale_ms="int+", pumpportal_required="bool", pumpportal_api_key_env="str", websocket_max_message_bytes="int+", websocket_ping_interval_ms="int+", rpc_http_timeout_ms="int+"),
     "feeds": "list[obj:feed]",
@@ -116,7 +116,7 @@ RESEARCH_SCHEMA = S(config_version="str", spec_version="enum:1.3.2", dataset_fre
                     joint_delay_scenarios="list[any]", network_fee_multipliers="list[dec+]", additional_adverse_price_bps="list[int0]", conservative_exit_reject_rate="dec",
                     portfolio_position_limits="list[int+]", selection_portfolio_position_limit="int+", chronological_split="list[dec+]", block_length_ms="int+",
                     bootstrap_confidence="dec+", bootstrap_resamples="int+", random_seed="int0", minimum_independent_blocks_for_qualification="int+", test_split_unlocked="bool", policy_freeze_note="str",
-                    independent_delay_scenarios="any", split_unit="enum:BLOCK")
+                    independent_delay_scenarios="any", split_unit="enum:BLOCK", forward_test="bool", baseline_target="dec+", baseline_preference_fraction="dec+")
 
 
 def _dec(value: Any, label: str, positive: bool) -> Decimal:
@@ -126,6 +126,8 @@ def _dec(value: Any, label: str, positive: bool) -> Decimal:
         parsed = Decimal(value)
     except InvalidOperation as exc:
         raise ConfigError(f"{label}: not a decimal string: {value!r}") from exc
+    if not parsed.is_finite():
+        raise ConfigError(f"{label}: decimal must be finite")
     if positive and parsed <= 0:
         raise ConfigError(f"{label}: must be > 0")
     return parsed
@@ -162,6 +164,10 @@ def _check(value: Any, spec: Any, label: str) -> None:
         return
     if spec.startswith("enum:"):
         allowed = spec[5:].split("|")
+        if set(allowed) <= {"True", "False"} and type(value) is not bool:
+            raise ConfigError(f"{label}: expected boolean")
+        if all(a.isdigit() for a in allowed) and type(value) is not int:
+            raise ConfigError(f"{label}: expected integer")
         text = str(value) if not isinstance(value, bool) else ("True" if value else "False")
         if isinstance(value, bool) and text not in allowed:
             raise ConfigError(f"{label}: must be {allowed[0]}")
@@ -294,7 +300,7 @@ class RuntimeConfig:
             "POLICY": (self.policy_hash, self.policy_content()),
             "COST_MODEL": (self.cost_model_hash, self.cost_model_content()),
             "FRESHNESS_POLICY": (self.freshness_policy_hash, self.costs["snapshot_refresh_policy"]),
-            "QUOTE_MODEL": (self.quote_model_hash, {"curve_rounding_version": self.protocol["curve_rounding_version"], "fee_rounding": self.protocol["fee_rounding"], "slippage_bps": self.execution["slippage_bps"], "quote_max_age_ms": self.execution["quote_max_age_ms"]}),
+            "QUOTE_MODEL": (self.quote_model_hash, {"curve_rounding_version": self.protocol["curve_rounding_version"], "fee_rounding": self.protocol["fee_rounding"], "slippage_bps": self.execution["slippage_bps"], "quote_max_age_ms": self.execution["quote_max_age_ms"], "research_stress": self.execution["research_stress"]}),
             "FEATURE_CONTRACT": (self.feature_contract_hash, feature_contract_content(self.research)),
             "COVERAGE_VERSION": (self.coverage_version_hash, {"version": "CANONICAL_COVERAGE_V2"}),
             "PROTOCOL": (self.protocol_hash, self.protocol),
@@ -341,6 +347,14 @@ def _cross_checks(raw: dict[str, Any]) -> None:
             raise ConfigError(f"costs.snapshot_refresh_policy.{kind}_max_age_ms must be >= refresh interval")
     if raw["connectivity"]["reconnect_max_ms"] < raw["connectivity"]["reconnect_initial_ms"]:
         raise ConfigError("connectivity.reconnect_max_ms must be >= reconnect_initial_ms")
+    if not 0 <= raw["execution"]["slippage_bps"] <= 10000:
+        raise ConfigError("execution.slippage_bps must be between 0 and 10000")
+    if not 0 < Decimal(raw["research"]["bootstrap_confidence"]) < 1:
+        raise ConfigError("research.bootstrap_confidence must be between 0 and 1")
+    if not 0 <= Decimal(raw["research"]["execution_stress"]["conservative_exit_reject_rate"]) <= 1:
+        raise ConfigError("research conservative_exit_reject_rate must be between 0 and 1")
+    if raw["storage"]["fee_history_max"] < 4:
+        raise ConfigError("storage.fee_history_max must retain at least the four current fee components")
     split = [Decimal(x) for x in raw["research"]["chronological_split"]]
     if len(split) != 3 or sum(split) != 1:
         raise ConfigError("research.chronological_split must be three fractions summing to 1")
@@ -381,7 +395,7 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
     cfg.policy_hash = config_hash(cfg.policy_content())
     cfg.cost_model_hash = config_hash(cfg.cost_model_content())
     cfg.freshness_policy_hash = config_hash(raw["costs"]["snapshot_refresh_policy"])
-    cfg.quote_model_hash = config_hash({"curve_rounding_version": raw["protocol"]["curve_rounding_version"], "fee_rounding": raw["protocol"]["fee_rounding"], "slippage_bps": raw["execution"]["slippage_bps"], "quote_max_age_ms": raw["execution"]["quote_max_age_ms"]})
+    cfg.quote_model_hash = config_hash({"curve_rounding_version": raw["protocol"]["curve_rounding_version"], "fee_rounding": raw["protocol"]["fee_rounding"], "slippage_bps": raw["execution"]["slippage_bps"], "quote_max_age_ms": raw["execution"]["quote_max_age_ms"], "research_stress": raw["execution"]["research_stress"]})
     cfg.feature_contract_hash = config_hash(feature_contract_content(raw["research"]))
     cfg.coverage_version_hash = config_hash({"version": "CANONICAL_COVERAGE_V2"})
     cfg.protocol_hash = config_hash(raw["protocol"])

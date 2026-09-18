@@ -19,7 +19,7 @@ from darkbot.domain import (
     NS_PER_MS, QuoteScopeStatus, OCCUPIED_SLOT_STATES, AttemptHandle, AttemptStatus, CostBasis, CoverageState, CurveState, DecisionAction, ExecutionOutcome, ExitReason, FillEvidence,
     Intent, InvalidQuote, MarketState, NormalizedEnvelope, PositionRecord, PositionState, QuoteSnapshot, RawEnvelope, Side, VenueState, Completeness,
 )
-from darkbot.execution import ExecutionPolicy, FillEvaluation, LiveBroadcastForbidden, QuoteEngine, assert_paper_boundary, book_entry_fill, book_exit_fill, book_failed_attempt, evaluate_fill, next_retry_submit_mono_ns
+from darkbot.execution import ExecutionPolicy, FillEvaluation, LiveBroadcastForbidden, QuoteEngine, assert_paper_boundary, book_entry_fill, book_exit_fill, book_failed_attempt, evaluate_fill, fee_terms, next_retry_submit_mono_ns
 from darkbot.market import ApplyResult, MarketReducer, Normalizer, PumpDecoder
 from darkbot.storage import ObservationRecord, RecordGroup, Recorder, RowRecord, UpdateRecord
 from darkbot.strategy import FEATURE_SET_V1, FEATURE_SET_V2, FeatureCalculator, FeatureEvent, FeatureInputs, entry_admission, pick_exit_trigger, target_reached
@@ -52,13 +52,16 @@ class PaperExecutionAdapter:
         def fire(actual_mono_ns: int, h: AttemptHandle = handle) -> None:
             assert self.on_outcome is not None
             self.pending.pop(h.attempt_id, None)
-            if self.lateness_provider is not None:
-                actual_mono_ns = max(actual_mono_ns, h.scheduled_fill_mono_ns + self.lateness_provider(h.attempt_id))
-                if hasattr(self.clock, "advance_to"):
-                    self.clock.advance_to(max(self.clock.monotonic_ns(), actual_mono_ns))
+            if self.lateness_provider is not None and hasattr(self.clock, "advance_to"):
+                self.clock.advance_to(max(self.clock.monotonic_ns(), actual_mono_ns))
             self.on_outcome(ExecutionOutcome(h.attempt_id, h.intent, h.submit_mono_ns, h.scheduled_fill_mono_ns, actual_mono_ns))
 
-        self.scheduler.schedule_at(scheduled, fire)
+        # Replay delivery occurs at the recorded callback time. The outcome
+        # retains scheduled_fill_mono_ns as model time.
+        callback_due = scheduled
+        if self.lateness_provider is not None:
+            callback_due += max(0, self.lateness_provider(handle.attempt_id))
+        self.scheduler.schedule_at(callback_due, fire)
         return handle
 
     def send_transaction(self, *_a: Any, **_k: Any) -> None:  # T22: forbidden path
@@ -172,8 +175,24 @@ class StateOwner:
         kinds = {"PROTOCOL_GLOBAL_ACCOUNT": "protocol", "NETWORK_FEE": "network", "RENT_EXEMPTION": "rent", "PRIORITY_POLICY": "priority_policy"}
         for snap in snapshots:
             self.fee_history.append((snap.received_mono_ns, kinds[snap.source_type], snap))
+            # Each pending attempt retains its effective modeled-fill basis,
+            # independently of global history compaction and callback delay.
+            for meta in self.pending_attempts.values():
+                if snap.received_mono_ns <= meta["handle"].scheduled_fill_mono_ns:
+                    old = meta.get("fill_basis", meta["basis"])
+                    values = {k: getattr(old, k) for k in ("protocol", "network", "rent", "priority_policy")}
+                    values[kinds[snap.source_type]] = snap
+                    meta["fill_basis"] = CostBasis(**values)
         if len(self.fee_history) > self.fee_history_max:
-            del self.fee_history[: self.fee_history_max // 2]
+            latest_by_kind: dict[str, int] = {}
+            for i, (_, kind, _) in enumerate(self.fee_history):
+                latest_by_kind[kind] = i
+            keep = set(latest_by_kind.values())
+            for i in range(len(self.fee_history) - 1, -1, -1):
+                if len(keep) >= self.fee_history_max:
+                    break
+                keep.add(i)
+            self.fee_history = [item for i, item in enumerate(self.fee_history) if i in keep]
 
     def basis_at(self, mono_ns: int) -> CostBasis:
         latest: dict[str, Any] = {}
@@ -479,6 +498,9 @@ class StateOwner:
             return
         if pos.state not in (PositionState.OPEN,):
             return
+        if st.quote_uncertain:
+            self._unresolved(pos, "QUOTE_CONFLICT_ON_OPEN_POSITION", now)
+            return
         if self.reducer.gap_open_since is not None or st.coverage_state == CoverageState.GAP or self.reducer.gap_intersects(pos.open_mono_ns or now, now):
             pos.canonical_provider_gap_flag = True
         if st.creator_sell_event_id is not None and self.cfg.strategy["creator_sell_exit_enabled"] and not any(r == ExitReason.CREATOR_SELL for r, _ in pos.latched_triggers):
@@ -583,14 +605,15 @@ class StateOwner:
         modeled_fill = outcome.scheduled_fill_mono_ns
         now = outcome.callback_actual_mono_ns
         self._tele("callback_lateness_ns", max(0, now - modeled_fill))
-        basis = self.basis_at(modeled_fill) if self.fee_history else meta["basis"]  # rule valid at the modeled fill, not at submit (S07)
+        basis = meta.get("fill_basis", meta["basis"])  # rule valid at the modeled fill, not at submit (S07)
         entry = self.reducer.proxy_state_at(st, modeled_fill)
         venue_invalid = st.venue_state != VenueState.BONDING_CURVE_ACTIVE and st.venue_change_mono_ns is not None and st.venue_change_mono_ns <= modeled_fill
         fill_state = self._curve(st, entry) if entry and not venue_invalid else (None if entry is None else CurveState(entry[2], entry[2].split("|")[1], entry[3], entry[1], entry[0], entry[4], entry[5], entry[6], entry[7], st.venue_state))
         coverage = self._coverage_at(st, entry[0] if entry else modeled_fill, modeled_fill)
         unknowable = self.reducer.unknowable_between(st, entry[0] if entry else outcome.submit_mono_ns, modeled_fill) if not venue_invalid else None
-        if st.quote_uncertain or st.quote_scope_status != QuoteScopeStatus.SOL_WSOL:
-            unknowable = "QUOTE_CONFLICT" if st.quote_uncertain else st.quote_scope_status.value
+        conflict_at_fill = st.quote_conflict_mono_ns is not None and st.quote_conflict_mono_ns <= modeled_fill
+        if conflict_at_fill or (st.quote_scope_status != QuoteScopeStatus.SOL_WSOL and st.quote_conflict_mono_ns is None):
+            unknowable = "QUOTE_CONFLICT" if conflict_at_fill else st.quote_scope_status.value
         if unknowable is not None:
             ev = FillEvaluation(AttemptStatus.UNKNOWN, None, None, unknowable, (modeled_fill - entry[0]) if entry else None)
         else:
@@ -616,7 +639,19 @@ class StateOwner:
                         "protocol_fee_lamports": q.protocol_fee_lamports, "creator_fee_lamports": q.creator_fee_lamports, "other_protocol_fee_lamports": q.other_protocol_fee_lamports, "entry_curve_input_lamports": q.curve_input_lamports,
                         "cost_evidence_status": q.cost_evidence_status})
         elif ev.status == AttemptStatus.UNKNOWN:
-            upd.update({"cost_evidence_status": "UNKNOWN"})
+            upd.update({"cost_evidence_status": "UNKNOWN", "network_fee_total_lamports": None, "base_fee_lamports": None,
+                        "priority_fee_lamports": None, "sender_tip_lamports": None, "protocol_fee_lamports": None,
+                        "creator_fee_lamports": None, "other_protocol_fee_lamports": None, "rent_locked_lamports": None,
+                        "rent_refunded_lamports": None, "irrecoverable_account_cost_lamports": None})
+        else:
+            terms = fee_terms(basis, self.policy, modeled_fill)
+            assert not isinstance(terms, InvalidQuote)
+            network = ev.fees_charged_lamports - self.policy.sender_tip_lamports
+            upd.update({"cost_evidence_status": ev.cost_evidence_status, "network_fee_total_lamports": network,
+                        "base_fee_lamports": terms.base_fee_lamports, "priority_fee_lamports": network - terms.base_fee_lamports,
+                        "sender_tip_lamports": self.policy.sender_tip_lamports, "protocol_fee_lamports": 0, "creator_fee_lamports": 0,
+                        "other_protocol_fee_lamports": 0, "rent_locked_lamports": 0, "rent_refunded_lamports": 0,
+                        "irrecoverable_account_cost_lamports": 0, "compute_unit_price_micro_lamports": terms.compute_unit_price_micro_lamports})
         self._record(UpdateRecord("execution_attempts", "attempt_id", outcome.attempt_id, upd))
         if intent.side == Side.BUY:
             self._entry_outcome(pos, st, outcome, ev, now, modeled_fill)
@@ -670,7 +705,7 @@ class StateOwner:
             pos.net_pnl_lamports = -fees
             pos.research_status = "ENTRY_FAILED"
             self.counters.entry_failed += 1
-            self._record(book_failed_attempt(self.run_id, pos.position_id, outcome.attempt_id, modeled_fill, self.clock.utc_ns(), Side.BUY, fees, ev.status, outcome.intent.quote.cost_evidence_status))
+            self._record(book_failed_attempt(self.run_id, pos.position_id, outcome.attempt_id, modeled_fill, self.clock.utc_ns(), Side.BUY, fees, ev.status, ev.cost_evidence_status or "UNKNOWN"))
             self._position_record(pos)
 
     def _exit_outcome(self, pos: PositionRecord, st: MarketState, outcome: ExecutionOutcome, ev: Any, now: int, modeled_fill: int) -> None:
@@ -717,7 +752,7 @@ class StateOwner:
         pos.total_fees_lamports += fees
         pos.network_fee_lamports += fees
         self.counters.exit_failed_attempts += 1
-        self._record(book_failed_attempt(self.run_id, pos.position_id, outcome.attempt_id, modeled_fill, self.clock.utc_ns(), Side.SELL, fees, ev.status, outcome.intent.quote.cost_evidence_status))
+        self._record(book_failed_attempt(self.run_id, pos.position_id, outcome.attempt_id, modeled_fill, self.clock.utc_ns(), Side.SELL, fees, ev.status, ev.cost_evidence_status or "UNKNOWN"))
         if ev.status == AttemptStatus.VENUE_INVALID:
             self._unresolved(pos, self._venue_reason(st.venue_state), now)
             return
@@ -770,7 +805,7 @@ class StateOwner:
         if st is None:
             return
         log = list(st.trade_log)
-        truncated = st.trade_log_truncated
+        truncated_from = st.trade_log_truncated_from_mono_ns
         gap_intervals = list(self.reducer.gap_intervals)
         decode_gaps = list(st.decode_gap_intervals)
         create = (st.initial_virtual_sol_reserves, st.initial_virtual_token_reserves, st.initial_real_token_reserves, st.initial_buy_tokens, st.token_total_supply)
@@ -802,6 +837,7 @@ class StateOwner:
         def job() -> None:
             for offset in self.feature_offsets_ns:
                 cutoff = t0 + offset
+                truncated = truncated_from is not None and truncated_from <= cutoff
                 events = tuple(FeatureEvent(t, r, a, s, vs, vt, rt) for t, r, a, s, vs, vt, rt, in_create, _ in log if r <= cutoff and not in_create)
                 intersects = any((ge is None or ge >= t0) and gs <= cutoff for gs, ge in gap_intervals) or any((ge is None or ge >= t0) and gs <= cutoff for gs, ge in decode_gaps)
                 coverage = CoverageState.GAP.value if intersects else CoverageState.OBSERVED.value  # historical: derived from the gap intervals up to the cutoff, never from later state

@@ -181,7 +181,7 @@ class PumpDecoder:
                 else:
                     self._decode_tail(name, fields, tail_bytes)
                 fields["tail_len"] = tail
-                fields["tail_prefix_hash"] = hashlib.sha256(tail_bytes[:16]).hexdigest()[:12] if tail else None
+                fields["tail_prefix_hash"] = tail_bytes[:16].hex() if tail else None  # raw prefix evidence; hashing belongs to the writer
                 out.append(DecodedEvent(kind, index, fields, tail, tail_b64))
             except ValueError:
                 out.append(DecodedEvent("undecodable", index, {}, 0, None))
@@ -212,6 +212,7 @@ class PumpDecoder:
         fields["quote_mint_raw"] = None
         fields["quote_field_origin"] = None
         fields["quote_layout_hash"] = None
+        fields["tail_verified"] = False
         fields["normalized_quote_asset"] = None
         fields["quote_scope_status"] = QuoteScopeStatus.QUOTE_UNKNOWN_LAYOUT_UNVERIFIED
         fields["token_program"] = None
@@ -225,6 +226,7 @@ class PumpDecoder:
             if reader.remaining() != 0:
                 continue
             fields["quote_layout_hash"] = layout["layout_id"]
+            fields["tail_verified"] = str(layout["verification_status"]).startswith("VERIFIED")
             fields["token_program"] = values.get("token_program", layout.get("token_program"))
             qfield = layout["quote_mint_field"]
             if qfield is None:
@@ -286,6 +288,9 @@ class Normalizer:
         completeness = Completeness.COMPLETE
         error = None
         for d in decoded:
+            if d.tail_bytes and d.kind != "create" and not bool(d.fields.get("tail_verified")):
+                completeness = Completeness.PARTIAL
+                error = "UNVERIFIED_EVENT_TAIL"
             if d.kind == "trade":
                 f = d.fields
                 events.append(NormalizedEvent(EventType.BUY if f["is_buy"] else EventType.SELL, f["mint"], d.log_index, actor=f["user"], sol_amount=f["sol_amount"], token_amount=f["token_amount"],
@@ -340,7 +345,9 @@ class EventApply:
 
 
 def _fingerprint(ev: NormalizedEvent) -> tuple:
-    return (ev.actor, ev.sol_amount, ev.token_amount, ev.virtual_sol_reserves, ev.virtual_token_reserves, ev.real_token_reserves, ev.creator)
+    return (ev.actor, ev.sol_amount, ev.token_amount, ev.virtual_sol_reserves, ev.virtual_token_reserves,
+            ev.real_token_reserves, ev.real_sol_reserves, ev.creator, ev.token_program, ev.token_total_supply, ev.quote_scope_status, ev.quote_mint_raw, ev.quote_layout_hash,
+            ev.extra.get("tail_prefix_hash"), ev.extra.get("tail_verified"))
 
 
 @dataclass(slots=True)
@@ -374,9 +381,10 @@ class MarketReducer:
         self.stale_events = 0
         self.duplicates = 0
         self.conflicts = 0
-        self.applied_signatures: dict[str, str] = {}  # signature -> mint (bounded by mint eviction) for reorg/failed-after-success detection
+        self.applied_signatures: dict[str, set[str]] = {}  # signature -> all touched mints (bounded) for reorg detection
         self.reorg_conflicts = 0
         self.undecodable_points: list[int] = []  # receive times of frames that could not be attributed to a mint: any fill window containing one is UNKNOWN
+        self.undecodable_lost_interval: tuple[int, int] | None = None
         self.decode_gaps_opened = 0
         self.first_hint_mono: dict[str, int] = {}
 
@@ -425,24 +433,21 @@ class MarketReducer:
                 self._apply_hint(ev, raw, result)
             return result
         if envelope.completeness == Completeness.UNDECODABLE:
-            self.undecodable_points.append(raw.receive_mono_ns)
-            if len(self.undecodable_points) > self.event_points_max:
-                del self.undecodable_points[: self.event_points_max // 2]
+            self._remember_undecodable(raw.receive_mono_ns)
             return result
         if envelope.completeness == Completeness.FAILED_TX and envelope.signature in self.applied_signatures:
-            mint = self.applied_signatures[envelope.signature]
-            st = self.states.get(mint)
-            if st is not None:  # processed-commitment reorg: a previously applied tx is now reported failed -> quote uncertain, no new entry
-                st.quote_uncertain = True
-                self.reorg_conflicts += 1
-                result.touched.append(mint)
-                result.conflicts.append((mint, envelope.signature, "FAILED_AFTER_APPLIED"))
+            for mint in set(self.applied_signatures[envelope.signature]):
+                st = self.states.get(mint)
+                if st is not None:  # processed-commitment reorg: invalidate every mint in the tx
+                    st.quote_uncertain = True
+                    st.quote_conflict_mono_ns = min(st.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
+                    self.reorg_conflicts += 1
+                    result.touched.append(mint)
+                    result.conflicts.append((mint, envelope.signature, "FAILED_AFTER_APPLIED"))
             return result
         if not envelope.signature or not envelope.events:
             if envelope.completeness == Completeness.PARTIAL:  # unknown Pump event with no decodable sibling: unattributable
-                self.undecodable_points.append(raw.receive_mono_ns)
-                if len(self.undecodable_points) > self.event_points_max:
-                    del self.undecodable_points[: self.event_points_max // 2]
+                self._remember_undecodable(raw.receive_mono_ns)
             return result
         sig = envelope.signature
         partial = envelope.completeness == Completeness.PARTIAL
@@ -458,7 +463,10 @@ class MarketReducer:
                 if seen_fp != fingerprint:
                     self.conflicts += 1
                     st.quote_uncertain = True
+                    st.quote_conflict_mono_ns = min(st.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
                     result.conflicts.append((ev.mint, cid, "CONTENT_MISMATCH"))
+                    if ev.mint not in result.touched:
+                        result.touched.append(ev.mint)
                     result.events.append(EventApply(ev, cid, ValidationStatus.CONFLICT, False, False, False))
                     continue
                 if seen_complete or envelope.completeness != Completeness.COMPLETE:
@@ -474,7 +482,7 @@ class MarketReducer:
                     if ev.mint not in result.touched:
                         result.touched.append(ev.mint)
                 applied_up = False
-                stale_up = st.last_state_slot is not None and envelope.slot is not None and envelope.slot < st.last_state_slot and ev.event_type != EventType.CREATE
+                stale_up = st.last_state_slot is not None and envelope.slot is not None and envelope.slot < st.last_state_slot
                 if ev.virtual_sol_reserves and ev.virtual_token_reserves and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and not stale_up:
                     # every state-bearing event of the now-complete tx is applied in instruction order: the LAST one is the atomic post-tx state
                     if st.decode_gap_since is not None:
@@ -484,7 +492,22 @@ class MarketReducer:
                 result.events.append(EventApply(ev, cid, ValidationStatus.VALID, True, applied_up, False, upgraded=True))
                 continue
             st.seen_keys[cid] = (fingerprint, envelope.completeness == Completeness.COMPLETE)
-            self.applied_signatures[sig] = ev.mint
+            self.applied_signatures.setdefault(sig, set()).add(ev.mint)
+            if len(st.seen_keys) > self.event_points_max:
+                st.seen_keys.pop(next(iter(st.seen_keys)))
+                st.quote_uncertain = True
+                st.quote_conflict_mono_ns = min(st.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
+                result.conflicts.append((ev.mint, cid, "DEDUP_HISTORY_TRUNCATED"))
+            if len(self.applied_signatures) > self.event_points_max:
+                removed_sig = next(iter(self.applied_signatures))
+                for affected in self.applied_signatures.pop(removed_sig):
+                    affected_state = self.states.get(affected)
+                    if affected_state is not None:
+                        affected_state.quote_uncertain = True
+                        affected_state.quote_conflict_mono_ns = min(affected_state.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
+                        if affected not in result.touched:
+                            result.touched.append(affected)
+                        result.conflicts.append((affected, removed_sig, "REORG_HISTORY_TRUNCATED"))
             if partial and st.decode_gap_since is None:  # an unknown Pump event in a tx touching this mint: the curve may have changed unknowably
                 st.decode_gap_since = raw.receive_mono_ns
                 st.decode_gap_intervals.append((raw.receive_mono_ns, None))
@@ -523,9 +546,16 @@ class MarketReducer:
                 else:
                     validation = ValidationStatus.CONFLICT
             elif ev.event_type in (EventType.BUY, EventType.SELL):
+                unverified_tail = bool(ev.extra.get("tail_bytes")) and not bool(ev.extra.get("tail_verified"))
                 foreign_quote = ev.quote_mint_raw is not None and ev.quote_mint_raw not in (self.wsol, self.native_sentinel)
-                if foreign_quote:  # explicit foreign quote in a trade tail: lock the mint, never write these amounts into SOL state
+                if unverified_tail:
                     st.quote_uncertain = True
+                    st.quote_conflict_mono_ns = min(st.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
+                    validation = ValidationStatus.CONFLICT
+                    result.conflicts.append((ev.mint, cid, "UNVERIFIED_TRADE_TAIL"))
+                elif foreign_quote:  # explicit foreign quote in a trade tail: lock the mint, never write these amounts into SOL state
+                    st.quote_uncertain = True
+                    st.quote_conflict_mono_ns = min(st.quote_conflict_mono_ns or raw.receive_mono_ns, raw.receive_mono_ns)
                     st.quote_scope_status = QuoteScopeStatus.UNSUPPORTED_QUOTE
                     result.conflicts.append((ev.mint, cid, "FOREIGN_QUOTE_IN_TRADE"))
                 if stale:
@@ -542,7 +572,7 @@ class MarketReducer:
                     applied = True
                     if ev.real_token_reserves == 0 and st.venue_state == VenueState.BONDING_CURVE_ACTIVE:
                         self._venue(st, VenueState.CURVE_COMPLETE, result, cid, raw)
-                if ev.event_type == EventType.SELL and st.creator is not None and ev.actor == st.creator:
+                if ev.event_type == EventType.SELL and not unverified_tail and st.creator is not None and ev.actor == st.creator:
                     creator_sell = True
                     if st.creator_sell_event_id is None:
                         st.creator_sell_event_id = cid
@@ -557,12 +587,21 @@ class MarketReducer:
                     st.trade_log.append((ev.event_type.value, raw.receive_mono_ns, ev.actor or "", ev.sol_amount or 0, ev.virtual_sol_reserves, ev.virtual_token_reserves, ev.real_token_reserves, in_create_tx, cid))
                 else:
                     st.trade_log_truncated = True
+                    if st.trade_log_truncated_from_mono_ns is None:
+                        st.trade_log_truncated_from_mono_ns = raw.receive_mono_ns
             elif ev.event_type == EventType.COMPLETE:
                 self._venue(st, VenueState.CURVE_COMPLETE, result, cid, raw)
             elif ev.event_type == EventType.MIGRATE:
                 self._venue(st, VenueState.MIGRATED_UNSUPPORTED, result, cid, raw)
             result.events.append(EventApply(ev, cid, validation, True, applied, creator_sell))
         return result
+
+    def _remember_undecodable(self, mono_ns: int) -> None:
+        self.undecodable_points.append(mono_ns)
+        if len(self.undecodable_points) > self.event_points_max:
+            removed = self.undecodable_points.pop(0)
+            start = self.undecodable_lost_interval[0] if self.undecodable_lost_interval else removed
+            self.undecodable_lost_interval = (start, removed)
 
     def _close_decode_gap(self, st: MarketState, mono_ns: int) -> None:
         start = st.decode_gap_since
@@ -577,6 +616,9 @@ class MarketReducer:
         for gs, ge in st.decode_gap_intervals:
             if gs <= end_mono_ns and (ge is None or ge > start_mono_ns):
                 return "DECODE_GAP"
+        lost = self.undecodable_lost_interval
+        if lost and start_mono_ns < lost[1] and end_mono_ns >= lost[0]:
+            return "UNDECODABLE_HISTORY_TRUNCATED"
         for t in self.undecodable_points:
             if start_mono_ns < t <= end_mono_ns:
                 return "UNDECODABLE_FRAME_IN_WINDOW"
@@ -652,8 +694,10 @@ class MarketReducer:
             ordered = sorted(((s.last_state_receive_mono_ns or 0, m) for m, s in self.states.items() if m not in protected))
             candidates = [m for _, m in ordered[: len(self.states) - self.max_tracked_mints]]
         for mint in candidates:
-            for sig in [k for k, m in self.applied_signatures.items() if m == mint]:
-                self.applied_signatures.pop(sig, None)
+            for sig, mints in list(self.applied_signatures.items()):
+                mints.discard(mint)
+                if not mints:
+                    self.applied_signatures.pop(sig, None)
             del self.states[mint]
             removed += 1
         return removed

@@ -11,6 +11,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from decimal import Decimal
+from datetime import datetime, timezone
 from typing import Any
 
 from darkbot.clock import ReplayClock, ReplayScheduler
@@ -55,7 +56,10 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
         import json
 
         norm = json.loads(r["normalized_fee_components"])
-        evidence = CostEvidence.UNKNOWN if r["validation_status"] != "VALID" else CostEvidence.MEASURED
+        try:
+            evidence = CostEvidence(r["evidence"] or "UNKNOWN")
+        except (KeyError, IndexError, ValueError):
+            evidence = CostEvidence.UNKNOWN
         fees.append(FeeSnapshot(r["fee_snapshot_id"], r["source_type"], r["source_provider"], r["source_method"], tuple(json.loads(r["source_account_addresses"])), r["source_slot"], r["observed_utc"], r["received_mono_ns"], r["commitment"],
                                 r["protocol_program_id"], r["idl_version_or_hash"], json.loads(r["raw_values"]), norm, r["rounding_rules"], r["applicability"], r["freshness_policy_hash"], r["validation_status"], r["config_hash"],
                                 max_age[r["source_type"]] * 1_000_000, evidence))
@@ -74,9 +78,11 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
         key = f"{a['position_id'].split('_p')[-1]}:{a['side']}:{a['attempt_number']}"
         lateness[key] = max(0, a["callback_actual_mono_ns"] - a["scheduled_fill_mono_ns"])
     hashes = [(r[0], r[1], r[2], r[3]) for r in conn.execute("SELECT raw_payload_hash, receive_mono_ns, arrival_sequence, feed_id FROM feed_observations WHERE run_id=? ORDER BY receive_mono_ns, arrival_sequence, feed_id", (run_id,))]
-    fee_ids = [(r[0], r[1], r[2], sha256_text(str(r[3]) + "|" + str(r[4]) + "|" + str(r[5])))
-               for r in conn.execute("SELECT fee_snapshot_id, snapshot_hash, received_mono_ns, normalized_fee_components, validation_status, raw_values FROM fee_snapshots WHERE run_id=? ORDER BY received_mono_ns, fee_snapshot_id", (run_id,))]
-    start = observations[0][0] if observations else 0
+    fee_ids = [(r[0], r[1], r[2], sha256_text(str(r[3]) + "|" + str(r[4]) + "|" + str(r[5]) + "|" + str(r[6])))
+               for r in conn.execute("SELECT fee_snapshot_id, snapshot_hash, received_mono_ns, normalized_fee_components, validation_status, raw_values, evidence FROM fee_snapshots WHERE run_id=? ORDER BY received_mono_ns, fee_snapshot_id", (run_id,))]
+    start = run["started_mono_ns"] if "started_mono_ns" in run.keys() and run["started_mono_ns"] is not None else (observations[0][0] if observations else 0)
+    delta = datetime.fromisoformat(run["started_utc"].replace("Z", "+00:00")) - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    start_utc = (delta.days * 86400 + delta.seconds) * 1_000_000_000 + delta.microseconds * 1000
     last_obs = observations[-1][0] if observations else 0
     ended = run["ended_mono_ns"] if "ended_mono_ns" in run.keys() else None
     end = max(last_obs, ended) if ended is not None else last_obs
@@ -85,7 +91,7 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
     dataset_hash = sha256_text(canonical_json({"run": run_id, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
                                                "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "decoder_code_hash": decoder_code_hash, "protocol_pinning_hash": cfg.protocol_hash,
                                                "coverage": "CANONICAL_COVERAGE_V2", "spec": "1.3.2"}))
-    return ReplayInput(run_id, run["host_clock_epoch_id"], start, 0, observations, fees, transitions, lateness, dataset_hash, end)
+    return ReplayInput(run_id, run["host_clock_epoch_id"], start, start_utc, observations, fees, transitions, lateness, dataset_hash, end)
 
 
 @dataclass

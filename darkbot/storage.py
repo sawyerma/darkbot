@@ -8,6 +8,7 @@ overflow flag. Row building, JSON serialisation and payload hashing happen in th
 from __future__ import annotations
 
 import collections
+import dataclasses
 import hashlib
 import json
 import sqlite3
@@ -16,6 +17,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
+from enum import Enum
 
 from darkbot.config import canonical_json
 from darkbot.domain import FeeSnapshot, LedgerRecord, PositionRecord, QuoteSnapshot, RawEnvelope, utc_iso
@@ -180,13 +182,16 @@ class SqliteWriter:
     """Dedicated thread: drains the recorder, builds rows, hashes payloads and commits in batches."""
 
     def __init__(self, conn: sqlite3.Connection, recorder: Recorder, batch_max: int, flush_interval_ms: int, on_disk_error: Callable[[str], None], locked_retries: int = 100, fk_merge_max_batches: int = 20,
-                 quarantine_path: Path | None = None) -> None:
+                 quarantine_path: Path | None = None, busy_timeout_ms: int = 100, retry_backoff_ms: int = 50) -> None:
         self.conn = conn
         self.recorder = recorder
         self.batch_max = batch_max
         self.locked_retries = locked_retries
         self.fk_merge_max_batches = fk_merge_max_batches
         self.quarantine_path = quarantine_path
+        self.busy_timeout_ms = busy_timeout_ms
+        self.retry_backoff_s = retry_backoff_ms / 1000
+        self._abort = threading.Event()
         self.fk_hold_rounds = 0
         self.fk_holds = 0
         self.quarantined_records = 0
@@ -206,16 +211,31 @@ class SqliteWriter:
     def start(self) -> None:
         self._thread.start()
 
-    def stop(self, timeout_s: float = 30.0) -> None:
+    def stop(self, timeout_s: float = 30.0) -> bool:
         self._stop.set()
         self._thread.join(timeout_s)
+        if self._thread.is_alive():
+            self._abort.set()
+            self.conn.interrupt()
+            self.disk_error = True
+            self.last_error = f"WRITER_SHUTDOWN_TIMEOUT after {timeout_s:.3f}s"
+            self.on_disk_error(self.last_error)
+            return False
+        return True
+
+    def wait_until_stopped(self) -> None:
+        self._thread.join()
 
     def _run(self) -> None:
+        self.conn.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
         held: list[Any] = []
         while not self._stop.is_set() or self.recorder.depth() or held:
             batch = held + self.recorder.drain(self.batch_max)
             held = []
             if batch:
+                if self._abort.is_set():
+                    self._quarantine(batch, "SHUTDOWN_DEADLINE_EXCEEDED")
+                    continue
                 if self._commit(batch):
                     self.fk_hold_rounds = 0
                 elif self.fk_split:
@@ -228,6 +248,8 @@ class SqliteWriter:
                         held = batch  # deferred FK target may still be in the queue: retry with more records
                         if not self._stop.is_set() and self.recorder.depth() == 0:
                             self.recorder.wait(self.flush_interval_s)
+                else:
+                    self._quarantine(batch, "WRITE_FAILED")
             else:
                 self.recorder.wait(self.flush_interval_s)
 
@@ -240,7 +262,7 @@ class SqliteWriter:
                 self.quarantine_path.parent.mkdir(parents=True, exist_ok=True)
                 with self.quarantine_path.open("a", encoding="utf-8") as fh:
                     for record in batch:
-                        fh.write(json.dumps({"reason": reason, "type": type(record).__name__, "record": repr(record)[:4000]}) + "\n")
+                        fh.write(json.dumps({"reason": reason, "type": type(record).__name__, "record": _jsonable(record)}, ensure_ascii=False) + "\n")
             except OSError as exc:
                 self.last_error += f"; quarantine write failed: {exc}"
         self.disk_error = True
@@ -249,8 +271,8 @@ class SqliteWriter:
     def flush_sync(self) -> None:
         """Drain everything now in the calling thread (tests/replay); unresolved FK batches are quarantined, never spun on."""
         batch = self.recorder.drain(10**9)
-        if batch and not self._commit(batch) and self.fk_split:
-            self._quarantine(batch, "FK_TARGET_NEVER_ARRIVED")
+        if batch and not self._commit(batch):
+            self._quarantine(batch, "FK_TARGET_NEVER_ARRIVED" if self.fk_split else "WRITE_FAILED")
 
     def _commit(self, batch: list[Any], retries: int = 0) -> bool:
         started = time.monotonic_ns()
@@ -276,8 +298,8 @@ class SqliteWriter:
                 pass
             self.failures += 1
             self.last_error = f"{type(exc).__name__}: {exc}"
-            if isinstance(exc, (sqlite3.OperationalError, sqlite3.DatabaseError)) and "locked" in str(exc).lower() and retries < self.locked_retries:
-                time.sleep(0.05)
+            if isinstance(exc, (sqlite3.OperationalError, sqlite3.DatabaseError)) and "locked" in str(exc).lower() and retries < self.locked_retries and not self._stop.is_set() and not self._abort.is_set():
+                self._stop.wait(self.retry_backoff_s)
                 return self._commit(batch, retries + 1)
             if isinstance(exc, sqlite3.IntegrityError) and "FOREIGN KEY" in str(exc):
                 self.fk_split = True
@@ -313,6 +335,25 @@ def _sql(v: Any) -> Any:
     return v
 
 
+def _jsonable(value: Any) -> Any:
+    """Lossless quarantine representation; diagnostics are bounded separately."""
+    if isinstance(value, Enum):
+        return value.value
+    if dataclasses.is_dataclass(value):
+        return {f.name: _jsonable(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if hasattr(value, "__slots__"):
+        return {name: _jsonable(getattr(value, name)) for name in value.__slots__ if hasattr(value, name)}
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, bytes):
+        return {"__bytes_hex__": value.hex()}
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def rows_for(record: Any) -> list[tuple[str, tuple]]:
     if isinstance(record, RecordGroup):
         return [row for r in record.records for row in rows_for(r)]
@@ -344,12 +385,12 @@ def rows_for(record: Any) -> list[tuple[str, tuple]]:
         if kind == "fee_snapshot":
             s: FeeSnapshot = obj[0]
             run_id = obj[1]
-            snap_hash = hashlib.sha256(canonical_json({"raw": s.raw_values, "norm": s.normalized_fee_components, "src": s.source_method, "slot": s.source_slot}).encode()).hexdigest()
+            snap_hash = hashlib.sha256(canonical_json({"raw": s.raw_values, "norm": s.normalized_fee_components, "src": s.source_method, "slot": s.source_slot, "evidence": s.evidence.value}).encode()).hexdigest()
             return [_insert("fee_snapshots", {"fee_snapshot_id": s.fee_snapshot_id, "run_id": run_id, "source_type": s.source_type, "source_provider": s.source_provider, "source_method": s.source_method,
                                               "source_account_addresses": list(s.source_account_addresses), "source_slot": s.source_slot, "observed_utc": s.observed_utc, "received_mono_ns": s.received_mono_ns,
                                               "commitment": s.commitment, "protocol_program_id": s.protocol_program_id, "idl_version_or_hash": s.idl_version_or_hash, "raw_values": s.raw_values,
                                               "normalized_fee_components": s.normalized_fee_components, "rounding_rules": s.rounding_rules, "applicability": s.applicability, "freshness_policy_hash": s.freshness_policy_hash,
-                                              "validation_status": s.validation_status, "config_hash": s.config_hash, "snapshot_hash": snap_hash})]
+                                              "validation_status": s.validation_status, "evidence": s.evidence.value, "config_hash": s.config_hash, "snapshot_hash": snap_hash})]
         if kind == "quote_snapshot":
             q: QuoteSnapshot = obj[0]
             run_id, position_id = obj[1], obj[2]
