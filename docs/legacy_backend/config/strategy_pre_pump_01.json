@@ -1,0 +1,34 @@
+{
+  "candidate_name": "PRE_PUMP_01_500MS_10USD_2X",
+  "observation_ms": 500,
+  "filters": [
+    {
+      "feature": "buy_count",
+      "min": 3,
+      "max": null
+    },
+    {
+      "feature": "unique_buyers",
+      "min": 3,
+      "max": null
+    },
+    {
+      "feature": "sell_count",
+      "min": 0,
+      "max": 0
+    },
+    {
+      "feature": "dev_initial_buy",
+      "min": "0",
+      "max": "0.20"
+    }
+  ],
+  "trade_amount_lamports": 98370000,
+  "target_net_multiple": "2.0",
+  "stop_net_multiple": "0",
+  "max_hold_ms": 300000,
+  "base_fee_lamports": 5000,
+  "priority_fee_lamports": 100000,
+  "max_slippage_bps": 300,
+  "entry_latency_ms": 800
+}
