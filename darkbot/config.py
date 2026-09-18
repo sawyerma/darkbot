@@ -450,7 +450,37 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
     return cfg
 
 
+def load_local_env(path: Path) -> None:
+    """Load KEY=VALUE pairs from a local .env without overwriting process env."""
+    if not path.exists():
+        return
+
+    for lineno, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            raise ConfigError(f"{path}:{lineno}: expected KEY=VALUE")
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise ConfigError(f"{path}:{lineno}: invalid environment variable name")
+
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+
+        os.environ.setdefault(key, value)
+
+
 def load_runtime_config(path: Path) -> RuntimeConfig:
+    config_path = path.resolve()
+    project_env = config_path.parent.parent / ".env"
+    load_local_env(project_env)
     raw = load_json_strict(path)
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: top-level must be an object")

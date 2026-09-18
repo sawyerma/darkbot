@@ -283,7 +283,16 @@ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor"
     reader = open_connection(db_path, read_only=True)
     creates_observed = reader.execute("SELECT COUNT(*) FROM market_events WHERE run_id=? AND event_type='CREATE'", (app.run_id,)).fetchone()[0]
     creates = reader.execute("SELECT COUNT(*) FROM market_events WHERE run_id=? AND event_type='CREATE' AND actionable_mono_ns IS NOT NULL", (app.run_id,)).fetchone()[0]
-    trades = reader.execute("SELECT COUNT(*) FROM market_events WHERE run_id=? AND event_type IN ('BUY','SELL') AND validation_status='VALID' AND virtual_sol_reserves IS NOT NULL", (app.run_id,)).fetchone()[0]
+    trades = reader.execute("""
+        SELECT COUNT(*)
+        FROM market_events AS m
+        JOIN feed_observations AS o
+          ON o.observation_id = m.source_observation_id
+        WHERE m.run_id=?
+          AND m.event_type IN ('BUY','SELL')
+          AND o.validation_status='VALID'
+          AND m.virtual_sol_reserves IS NOT NULL
+    """, (app.run_id,)).fetchone()[0]
     scope = {r[0]: r[1] for r in reader.execute("SELECT quote_scope_status, COUNT(*) FROM market_events WHERE run_id=? AND event_type='CREATE' GROUP BY quote_scope_status", (app.run_id,))}
     tails = [r[0] for r in reader.execute("SELECT DISTINCT quote_layout_hash FROM market_events WHERE run_id=? AND event_type='CREATE'", (app.run_id,))]
     live_sells = count_live_creator_sells(reader, app.run_id)
