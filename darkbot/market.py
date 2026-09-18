@@ -441,6 +441,8 @@ class MarketReducer:
         if not envelope.signature or not envelope.events:
             if envelope.completeness == Completeness.PARTIAL:  # unknown Pump event with no decodable sibling: unattributable
                 self.undecodable_points.append(raw.receive_mono_ns)
+                if len(self.undecodable_points) > self.event_points_max:
+                    del self.undecodable_points[: self.event_points_max // 2]
             return result
         sig = envelope.signature
         partial = envelope.completeness == Completeness.PARTIAL
@@ -471,10 +473,15 @@ class MarketReducer:
                     result.new_creates.append(ev.mint)
                     if ev.mint not in result.touched:
                         result.touched.append(ev.mint)
-                if st.decode_gap_since is not None and ev.virtual_sol_reserves and ev.virtual_token_reserves and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL:
-                    self._close_decode_gap(st, raw.receive_mono_ns)
+                applied_up = False
+                stale_up = st.last_state_slot is not None and envelope.slot is not None and envelope.slot < st.last_state_slot and ev.event_type != EventType.CREATE
+                if ev.virtual_sol_reserves and ev.virtual_token_reserves and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and not stale_up:
+                    # every state-bearing event of the now-complete tx is applied in instruction order: the LAST one is the atomic post-tx state
+                    if st.decode_gap_since is not None:
+                        self._close_decode_gap(st, raw.receive_mono_ns)
                     self._set_state(st, ev, cid, raw, envelope.slot)
-                result.events.append(EventApply(ev, cid, ValidationStatus.VALID, True, st.decode_gap_since is None, False, upgraded=True))
+                    applied_up = True
+                result.events.append(EventApply(ev, cid, ValidationStatus.VALID, True, applied_up, False, upgraded=True))
                 continue
             st.seen_keys[cid] = (fingerprint, envelope.completeness == Completeness.COMPLETE)
             self.applied_signatures[sig] = ev.mint

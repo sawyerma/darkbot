@@ -106,9 +106,9 @@ def variant_config(cfg: RuntimeConfig, v: Variant, launches: int) -> RuntimeConf
     return cfg.with_overrides(strategy={"target_net_multiple": v.target}, latency_model={"entry_delay_ms": v.entry_delay_ms, "exit_delay_ms": v.exit_delay_ms}, portfolio=portfolio)
 
 
-def evaluate_variant(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: RuntimeConfig, v: Variant, mints: set[str], campaign: str, research: dict[str, Any], split: str, persist: bool) -> dict[str, Any]:
+def evaluate_variant(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: RuntimeConfig, v: Variant, mints: set[str], campaign: str, research: dict[str, Any], split: str, persist: bool, stage: str = "freeze") -> dict[str, Any]:
     vcfg = variant_config(cfg, v, len(mints))
-    scope = f"{replay_input.source_run_id}_{replay_input.dataset_hash[:12]}"  # one recording + one frozen dataset: research runs never collide across recordings
+    scope = f"{replay_input.source_run_id}_{replay_input.dataset_hash[:12]}_{stage}"  # recording + frozen dataset + stage (freeze|forward): never collides
     run_id = f"research_{campaign}_{scope}_{split}_{v.variant_id}"
     variant_key = f"{scope}:{split}:{v.variant_id}"
     if persist:
@@ -140,8 +140,10 @@ def variant_status(v: Variant, split: str, boot: dict[str, Any], exposed: list[A
     with enough independent blocks and a lower bootstrap bound > 0. Everything in-sample is at most a CANDIDATE."""
     if boot["status"] != "OK" or boot["blocks"] < research["minimum_independent_blocks_for_qualification"]:
         return "INSUFFICIENT_DATA"
-    if exposed and sum((p.entry_economic_cost_lamports or 0) for p in exposed) > cfg.research["max_unresolved_exposure_for_positive_qualification_lamports"]:
-        return "UNQUALIFIED_DATA_UNRESOLVED_EXPOSURE"
+    max_exposure = cfg.research["max_unresolved_exposure_for_positive_qualification_lamports"]
+    if exposed and (any(p.entry_economic_cost_lamports is None or p.state.value in ("UNRESOLVED", "ENTRY_PENDING", "EXIT_PENDING") and p.entry_fill_attempt_id is None for p in exposed)
+                    or sum((p.entry_economic_cost_lamports or 0) for p in exposed) > max_exposure or (max_exposure == 0 and exposed)):
+        return "UNQUALIFIED_DATA_UNRESOLVED_EXPOSURE"  # unknown cost of an exposed position is never zero
     if boot["ci_low"] is None or boot["ci_low"] <= 0:
         return "NEGATIVE"
     if v.entry_delay_ms == 0 and v.exit_delay_ms == 0 and not cfg.latency_model["zero_delay_run_can_qualify_edge"]:
@@ -164,13 +166,17 @@ def apply_stress_gate(outputs: list[dict[str, Any]], candidate_target: str | Non
             o["status"] = "NOT_PREREGISTERED_CANDIDATE"
             continue
         siblings = [x for x in outputs if x.get("split") == o["split"] and x.get("target") == o["target"] and x.get("entry_delay_ms") == o["entry_delay_ms"] and x.get("exit_delay_ms") == o["exit_delay_ms"]
-                    and x.get("portfolio_limit") == o["portfolio_limit"] and x is not o]
-        stressed = [x for x in siblings if x.get("fee_multiplier") != "1.0" or x.get("adverse_bps") != 0 or str(x.get("reject_rate", "0")) != "0"]
+                    and x.get("portfolio_limit") == o["portfolio_limit"] and x.get("source_run_id") == o.get("source_run_id") and x is not o]
+        stressed: dict[tuple, dict[str, Any]] = {}
+        for x in siblings:  # one entry per UNIQUE declared stress scenario of the same recording; duplicates never count twice
+            key = (str(x.get("fee_multiplier")), int(x.get("adverse_bps", 0)), str(x.get("reject_rate", "0")))
+            if key != ("1.0", 0, "0") and key not in stressed:
+                stressed[key] = x
         if not stressed or (required_stress is not None and len(stressed) < required_stress):
             o["status"] = "INSUFFICIENT_DATA_NO_STRESS_VARIANTS"
-        elif any(str(x.get("status", "")).startswith("INSUFFICIENT") for x in stressed):
-            o["status"] = "INSUFFICIENT_DATA_IN_STRESS_VARIANTS"
-        elif all((x.get("bootstrap", {}).get("ci_low") or 0) > 0 and not x.get("unresolved") for x in stressed):
+        elif any(not str(x.get("status", "")).startswith(("NEGATIVE", "POSITIVE", "CANDIDATE")) for x in stressed.values()):
+            o["status"] = "INSUFFICIENT_DATA_IN_STRESS_VARIANTS"  # INSUFFICIENT_*, UNQUALIFIED_*, DIAGNOSTIC_* siblings block
+        elif all((x.get("bootstrap", {}).get("ci_low") or 0) > 0 and not x.get("unresolved") for x in stressed.values()):
             o["status"] = "POSITIVE_UNDER_MODEL"
         else:
             o["status"] = "NEGATIVE_UNDER_STRESS"
@@ -184,7 +190,7 @@ def select_candidate(rows: list[dict[str, Any]], baseline: str = "1.5") -> dict[
     best = max(cands, key=lambda r: r["bootstrap"]["ci_low"])
     base = next((r for r in cands if r["target"] == baseline and r["entry_delay_ms"] == best["entry_delay_ms"] and r["exit_delay_ms"] == best["exit_delay_ms"]), None)
     if base is not None and best["bootstrap"]["ci_low"] > 0 and base["bootstrap"]["ci_low"] >= Decimal("0.9") * Decimal(best["bootstrap"]["ci_low"]):
-        return {"selected_target": baseline, "reason": "baseline within 10% of best lower bound; simpler stable choice preferred", "best": best["variant_id"]}
+        return {"selected_target": baseline, "reason": "baseline within 10% of best lower bound; simpler stable choice preferred", "best": best["variant_id"], "positive": base["bootstrap"]["ci_low"] > 0}
     return {"selected_target": best["target"], "reason": "best validation lower bound", "best": best["variant_id"], "positive": best["bootstrap"]["ci_low"] > 0}
 
 
@@ -200,9 +206,17 @@ def run_research(conn: sqlite3.Connection, campaign: str, cfg: RuntimeConfig, re
     variants = register_variants(research, cfg)
     if max_variants:
         variants = variants[:max_variants]
+    inputs = {run_id: load_replay_input(conn, run_id, cfg) for run_id in runs}
+    dataset_hashes = [inputs[r].dataset_hash for r in runs]
+    dataset_hash = config_hash({"runs": runs, "hashes": dataset_hashes, "freeze": research["dataset_freeze"]})
+    freeze_key = config_hash({"campaign": campaign, "dataset": dataset_hash, "kind": "POLICY_FREEZE"})
+    frozen_row = conn.execute("SELECT canonical_json FROM config_snapshots WHERE config_hash=?", (freeze_key,)).fetchone()
+    frozen_target = json.loads(frozen_row[0])["selected_target"] if frozen_row else None
+    stage = "forward" if research["test_split_unlocked"] else "freeze"
+    if research["test_split_unlocked"] and frozen_target is None:
+        raise ValueError("test_split_unlocked=true but no POLICY_FREEZE exists for this campaign/dataset: run research with the test split locked first (R6/R7)")
     for run_id in runs:
-        rin = load_replay_input(conn, run_id, cfg)
-        dataset_hashes.append(rin.dataset_hash)
+        rin = inputs[run_id]
         creates = [(r["mint"], r["first_seen_mono_ns"]) for r in conn.execute("SELECT DISTINCT mint, MIN(first_seen_mono_ns) AS first_seen_mono_ns FROM market_events WHERE run_id=? AND event_type='CREATE' GROUP BY mint", (run_id,))]
         splits = chronological_split(creates, [Decimal(x) for x in research["chronological_split"]], embargo_ns(cfg, research), research["block_length_ms"] * NS_PER_MS)
         for split_name in ("train", "validation", "test"):
@@ -213,26 +227,19 @@ def run_research(conn: sqlite3.Connection, campaign: str, cfg: RuntimeConfig, re
             if not mints:
                 continue
             for v in variants:
-                outputs.append({**evaluate_variant(conn, rin, cfg, v, mints, campaign, research, split_name, persist), "source_run_id": run_id})
+                outputs.append({**evaluate_variant(conn, rin, cfg, v, mints, campaign, research, split_name, persist, stage), "source_run_id": run_id})
     selection_limit_rows = [o for o in outputs if o.get("portfolio_limit") == selection_limit]
     pre_selection = select_candidate(selection_limit_rows)
-    dataset_hash = config_hash({"runs": runs, "hashes": dataset_hashes, "freeze": research["dataset_freeze"]})
-    freeze_key = config_hash({"campaign": campaign, "dataset": dataset_hash, "kind": "POLICY_FREEZE"})
-    frozen = conn.execute("SELECT canonical_json FROM config_snapshots WHERE config_hash=?", (freeze_key,)).fetchone()
-    frozen_target = json.loads(frozen[0])["selected_target"] if frozen else None
-    if not research["test_split_unlocked"] and persist and pre_selection.get("positive") and frozen is None:
+    if stage == "freeze" and persist and pre_selection.get("positive") and frozen_row is None:
         # freeze the validation candidate BEFORE any forward evaluation; the record is immutable (INSERT OR IGNORE)
         upsert_config_snapshot(conn, "POLICY_FREEZE", freeze_key, {"campaign": campaign, "dataset": dataset_hash, "selected_target": pre_selection["selected_target"], "stage": "VALIDATION", "note": "frozen before test split unlock"}, "research_freeze", utc_iso(0))
         frozen_target = pre_selection["selected_target"]
+    # every declared stress scenario (fee multipliers x adverse bps x reject rates) except the baseline must be present and positive
     required_stress = len(research["network_fee_multipliers"]) * len(research["additional_adverse_price_bps"]) * 2 - 1
-    apply_stress_gate(outputs, frozen_target if research["test_split_unlocked"] else None, required_stress)
-    if research["test_split_unlocked"] and frozen_target is None:
-        for o in outputs:
-            if o.get("split") == "test":
-                o["status"] = "TEST_SPLIT_WITHOUT_FROZEN_CANDIDATE"
+    apply_stress_gate(outputs, frozen_target if stage == "forward" else None, required_stress)
     if persist:
         upsert_config_snapshot(conn, "DATASET", dataset_hash, {"runs": runs, "hashes": dataset_hashes, "freeze": research["dataset_freeze"]}, "research_freeze", utc_iso(0))
-    selection = pre_selection
+    selection = {**pre_selection, "frozen_target": frozen_target, "stage": stage, "would_freeze": bool(pre_selection.get("positive"))}
     limit10 = [o for o in outputs if o.get("portfolio_limit") == 10]
     report = {"campaign": campaign, "dataset_hash": dataset_hash, "source_runs": runs, "variants_registered": len(variants), "embargo_ns": embargo_ns(cfg, research), "research_config": research,
               "selection_for_limit_1": selection, "limit_10_note": "Limit 10 is a scenario, not a LIVE release; separate temporal validation required before switching", "limit_10_results": len(limit10),

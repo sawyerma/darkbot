@@ -131,7 +131,7 @@ class P1CostsStressResearch(unittest.TestCase):
         pos = open_position(h)
         st = h.owner.reducer.states[MINT_A]
         curve = h.owner._curve(st)
-        expected = h.owner.adapter.submitted[0].intent.quote
+        expected = h.owner.quote_by_attempt[attempts(h)[0]["attempt_id"]]
         strict = QuoteEngine(ExecutionPolicy.from_config(h.cfg), Decimal("2.0"), 400)  # +400 bps adverse > 300 bps max_sol_cost bound
         ev = evaluate_fill(strict, expected, curve, h.fees.basis(), curve.receive_mono_ns, "x", CoverageState.OBSERVED, 0)
         self.assertEqual(ev.status, AttemptStatus.SLIPPAGE_REJECTED)
@@ -156,11 +156,23 @@ class P1CostsStressResearch(unittest.TestCase):
             p = Path(d) / "research_unlocked.json"
             p.write_text(json.dumps(rc))
             conn = open_connection(Path(d) / "r.sqlite")
-            rep = run_research(conn, "camp", h.cfg, p, Path(d) / "out", persist=True, max_variants=2)
+            with self.assertRaises(ValueError):  # unlocking without a prior freeze is refused before any test run is persisted
+                run_research(conn, "camp", h.cfg, p, Path(d) / "out", persist=True, max_variants=2)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM runs WHERE mode='RESEARCH_REPLAY'").fetchone()[0], 0)
+            # locked stage first (no positive candidate on synthetic data -> nothing frozen), then a manual freeze -> forward stage runs and creates test runs
+            rep0 = run_research(conn, "camp", h.cfg, ROOT / "config" / "research.json", Path(d) / "out0", persist=True, max_variants=2)
+            self.assertEqual(rep0["selection_for_limit_1"]["stage"], "freeze")
+            self.assertFalse(rep0["selection_for_limit_1"]["would_freeze"])
+            from darkbot.config import config_hash
+            from darkbot.storage import upsert_config_snapshot
+            freeze_key = config_hash({"campaign": "camp", "dataset": rep0["dataset_hash"], "kind": "POLICY_FREEZE"})
+            upsert_config_snapshot(conn, "POLICY_FREEZE", freeze_key, {"campaign": "camp", "dataset": rep0["dataset_hash"], "selected_target": "1.5", "stage": "VALIDATION"}, "test", utc_iso(0))
+            rep = run_research(conn, "camp", h.cfg, p, Path(d) / "out", persist=True, max_variants=2)  # forward stage: distinct run ids, no collision
             test_rows = [r for r in rep["results"] if r.get("split") == "test" and r.get("variant_id") != "ALL"]
             self.assertTrue(test_rows)
-            self.assertTrue(all(r["status"] == "TEST_SPLIT_WITHOUT_FROZEN_CANDIDATE" for r in test_rows))
-            self.assertFalse(any(r.get("status") == "POSITIVE_UNDER_MODEL" for r in rep["results"]))
+            self.assertEqual(rep["selection_for_limit_1"]["frozen_target"], "1.5")
+            self.assertTrue(conn.execute("SELECT COUNT(*) FROM runs WHERE mode='RESEARCH_REPLAY' AND run_id LIKE '%_forward_test_%'").fetchone()[0] > 0)
+            self.assertFalse(any(r.get("status") == "POSITIVE_UNDER_MODEL" for r in rep["results"]))  # no stress siblings/insufficient data -> never positive
 
 
 class P1RestartWriter(unittest.TestCase):

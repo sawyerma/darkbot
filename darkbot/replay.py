@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 from decimal import Decimal
 from typing import Any
 
@@ -29,7 +30,7 @@ class ReplayInput:
     start_utc_ns: int
     observations: list[tuple[int, int, str, str, str, str]]  # (receive_mono_ns, arrival_sequence, feed_id, connection_id, receive_utc, payload)
     fee_snapshots: list[FeeSnapshot]
-    gap_intervals: list[tuple[int, int | None]]
+    health_transitions: list[tuple[int, str, bool]]  # recorded feed readiness changes, replayed through the same on_feed_health path as PAPER
     lateness: dict[str, int]  # attempt key (position suffix + side + number) -> callback lateness ns
     dataset_hash: str
     end_mono_ns: int  # recorded run end (runs.ended_mono_ns) or, if missing, the last observation
@@ -40,8 +41,13 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
     run = conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
     if run is None:
         raise ValueError(f"run {run_id} not found")
-    obs = conn.execute("SELECT receive_mono_ns, arrival_sequence, feed_id, connection_id, receive_utc, raw_payload FROM feed_observations WHERE run_id=? AND raw_payload IS NOT NULL ORDER BY receive_mono_ns, arrival_sequence, feed_id", (run_id,)).fetchall()
-    observations = [(r["receive_mono_ns"], r["arrival_sequence"], r["feed_id"], r["connection_id"], r["receive_utc"], r["raw_payload"]) for r in obs]
+    obs = conn.execute("SELECT receive_mono_ns, arrival_sequence, feed_id, connection_id, receive_utc, raw_payload, raw_payload_hash FROM feed_observations WHERE run_id=? AND raw_payload IS NOT NULL ORDER BY receive_mono_ns, arrival_sequence, feed_id", (run_id,)).fetchall()
+    observations = []
+    for r in obs:  # dataset integrity: stored payloads are re-hashed; a manipulated payload never replays under the old hash
+        actual = sha256_text(r["raw_payload"])
+        if actual != r["raw_payload_hash"]:
+            raise ValueError(f"DATASET_INTEGRITY_VIOLATION: feed_observations payload hash mismatch at receive_mono_ns={r['receive_mono_ns']} feed={r['feed_id']}")
+        observations.append((r["receive_mono_ns"], r["arrival_sequence"], r["feed_id"], r["connection_id"], r["receive_utc"], r["raw_payload"]))
     fees = []
     refresh = cfg.costs["snapshot_refresh_policy"]
     max_age = {"PROTOCOL_GLOBAL_ACCOUNT": refresh["protocol_max_age_ms"], "NETWORK_FEE": refresh["network_fee_max_age_ms"], "RENT_EXEMPTION": refresh["rent_max_age_ms"], "PRIORITY_POLICY": refresh["network_fee_max_age_ms"]}
@@ -53,7 +59,16 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
         fees.append(FeeSnapshot(r["fee_snapshot_id"], r["source_type"], r["source_provider"], r["source_method"], tuple(json.loads(r["source_account_addresses"])), r["source_slot"], r["observed_utc"], r["received_mono_ns"], r["commitment"],
                                 r["protocol_program_id"], r["idl_version_or_hash"], json.loads(r["raw_values"]), norm, r["rounding_rules"], r["applicability"], r["freshness_policy_hash"], r["validation_status"], r["config_hash"],
                                 max_age[r["source_type"]] * 1_000_000, evidence))
-    gaps = [(q["start_mono_ns"], q["end_mono_ns"]) for q in conn.execute("SELECT start_mono_ns, end_mono_ns FROM quality_events WHERE run_id=? AND kind IN ('CANONICAL_GAP','CANONICAL_GAP_RECOVERED_STATE_ONLY') ORDER BY start_mono_ns", (run_id,))]
+    transitions: list[tuple[int, str, bool]] = []
+    for q in conn.execute("SELECT kind, feed_id, start_mono_ns, end_mono_ns FROM quality_events WHERE run_id=? AND kind IN ('PROVIDER_DISCONNECT','CANONICAL_GAP','PROVIDER_RECONNECT','CANONICAL_GAP_RECOVERED_STATE_ONLY') ORDER BY quality_event_id", (run_id,)):
+        if q["feed_id"] is None:
+            continue
+        if q["kind"] in ("PROVIDER_DISCONNECT", "CANONICAL_GAP"):
+            transitions.append((q["start_mono_ns"], q["feed_id"], False))
+        else:
+            transitions.append((q["end_mono_ns"] if q["end_mono_ns"] is not None else q["start_mono_ns"], q["feed_id"], True))
+    transitions.sort(key=lambda t: t[0])
+    gaps = transitions
     lateness: dict[str, int] = {}
     for a in conn.execute("SELECT attempt_id, position_id, side, attempt_number, scheduled_fill_mono_ns, callback_actual_mono_ns FROM execution_attempts WHERE run_id=? AND callback_actual_mono_ns IS NOT NULL", (run_id,)):
         key = f"{a['position_id'].split('_p')[-1]}:{a['side']}:{a['attempt_number']}"
@@ -66,9 +81,11 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
     ended = run["ended_mono_ns"] if "ended_mono_ns" in run.keys() else None
     end = max(last_obs, ended) if ended is not None else last_obs
     # dataset freeze covers everything replay consumes: frames with timing/feeds, fee knowledge with timing, gaps, callback lateness, run window, decoder/coverage/config
-    dataset_hash = sha256_text(canonical_json({"run": run_id, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "gaps": gaps, "lateness": sorted(lateness.items()),
-                                               "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "protocol_pinning_hash": cfg.protocol_hash, "coverage": "CANONICAL_COVERAGE_V2", "spec": "1.3.2"}))
-    return ReplayInput(run_id, run["host_clock_epoch_id"], start, 0, observations, fees, gaps, lateness, dataset_hash, end)
+    decoder_code_hash = sha256_text((Path(__file__).resolve().parent / "market.py").read_text(encoding="utf-8"))  # same version string with changed decoder code = new dataset version
+    dataset_hash = sha256_text(canonical_json({"run": run_id, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
+                                               "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "decoder_code_hash": decoder_code_hash, "protocol_pinning_hash": cfg.protocol_hash,
+                                               "coverage": "CANONICAL_COVERAGE_V2", "spec": "1.3.2"}))
+    return ReplayInput(run_id, run["host_clock_epoch_id"], start, 0, observations, fees, transitions, lateness, dataset_hash, end)
 
 
 @dataclass
@@ -97,8 +114,8 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
     if persist:
         for kind, (h, content) in cfg.snapshot_kinds().items():
             upsert_config_snapshot(conn, kind, h, content, "replay", utc_iso(0))
-        conn.execute("INSERT OR IGNORE INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,host_clock_epoch_id,status,quality_status,start_balance_lamports,parent_run_id,dataset_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                     (new_run_id, campaign_id, mode, utc_iso(0), "replay", "", cfg.config_hash, clock.epoch_id, "RUNNING", "OK", cfg.portfolio["initial_paper_balance_lamports"], replay_input.source_run_id, replay_input.dataset_hash))
+        conn.execute("INSERT OR IGNORE INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,host_clock_epoch_id,status,quality_status,start_balance_lamports,parent_run_id,dataset_hash,started_mono_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     (new_run_id, campaign_id, mode, utc_iso(0), "replay", "", cfg.config_hash, clock.epoch_id, "RUNNING", "OK", cfg.portfolio["initial_paper_balance_lamports"], replay_input.source_run_id, replay_input.dataset_hash, replay_input.start_mono_ns))
         for s in replay_input.fee_snapshots:
             recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
     fee_cache = FeeCache()
@@ -123,16 +140,26 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
                        persist_observations=persist_observations, compute_features=compute_features, engine=engine, mint_allowlist=mint_filter)
     owner_ref.append(owner)
     owner.on_fee_snapshots([snap for snap in (fee_cache.protocol, fee_cache.network, fee_cache.rent, fee_cache.priority_policy) if snap is not None])
-    for f in cfg.feeds:
-        owner.on_feed_health(f.id, True, replay_input.start_mono_ns)
-    gaps = list(replay_input.gap_intervals)
-    gi = 0
+    transitions = list(replay_input.health_transitions)
+    ti = 0
+    if not transitions:  # legacy recordings without health events: all configured feeds ready from the start
+        for f in cfg.feeds:
+            owner.on_feed_health(f.id, True, replay_input.start_mono_ns)
     apply_fees_until(replay_input.start_mono_ns)
     stop_at = end_mono_ns if end_mono_ns is not None else replay_input.end_mono_ns
+
+    def apply_health_until(t: int, strict: bool = False) -> None:
+        nonlocal ti
+        while ti < len(transitions) and (transitions[ti][0] < t if strict else transitions[ti][0] <= t):
+            mono, fid, ready = transitions[ti]
+            clock.advance_to(max(clock.monotonic_ns(), mono))
+            owner.on_feed_health(fid, ready, mono, "replayed")
+            ti += 1
 
     def fire_until(t: int, strict: bool = False) -> None:
         due = scheduler.next_due_ns()
         while due is not None and (due < t if strict else due <= t):
+            apply_health_until(due)  # a health change at or before the timer is visible to the callback, exactly as in PAPER
             clock.advance_to(max(clock.monotonic_ns(), due))
             apply_fees_until(clock.monotonic_ns())
             scheduler.fire_due(due, clock.monotonic_ns())
@@ -141,12 +168,8 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
     for receive, seq, feed_id, conn_id, utc, payload in replay_input.observations:
         if receive > stop_at:
             break
-        while gi < len(gaps) and gaps[gi][0] <= receive:
-            owner.reducer.open_gap(gaps[gi][0])
-            if gaps[gi][1] is not None and gaps[gi][1] <= receive:
-                owner.reducer.close_gap(gaps[gi][1])
-            gi += 1
         fire_until(receive, strict=True)  # same model time: market/venue state first, then scheduled fills
+        apply_health_until(receive)
         clock.advance_to(max(clock.monotonic_ns(), receive))
         apply_fees_until(receive)
         owner.on_raw(RawEnvelope(feed_id, conn_id, receive, utc, seq, payload))
@@ -156,6 +179,7 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
     # drain_ns can only extend within the recording; a research embargo beyond it is a no-op (positions crossing the end are purged/censored).
     horizon = stop_at if drain_ns is None else min(stop_at + drain_ns, replay_input.end_mono_ns)
     fire_until(horizon)
+    apply_health_until(horizon)
     clock.advance_to(max(clock.monotonic_ns(), horizon))
     owner.finalize(clock.monotonic_ns())
     if writer is not None:
@@ -171,6 +195,6 @@ def digest(owner: StateOwner) -> dict[str, Any]:
         positions.append({"mint": p.mint, "state": p.state.value, "exit_reason": p.exit_reason.value if p.exit_reason else None, "origin_trigger": p.origin_trigger.value if p.origin_trigger else None,
                           "net_pnl": p.net_pnl_lamports, "tokens": p.token_balance_base_units, "entry_cost": p.entry_economic_cost_lamports, "fees": p.total_fees_lamports, "exit_attempts": p.exit_attempts,
                           "unresolved_reason": p.unresolved_reason, "research_status": p.research_status, "open_mono_ns": p.open_mono_ns, "close_mono_ns": p.close_mono_ns})
-    attempts = [{"id": h.attempt_id.split("_p")[-1], "side": h.intent.side.value, "n": h.intent.attempt_number, "submit": h.submit_mono_ns, "scheduled": h.scheduled_fill_mono_ns, "quote_state": h.intent.quote.quote_state_event_id.split("|", 1)[-1]} for h in owner.adapter.submitted]
+    attempts = [{"id": aid.split("_p")[-1], "side": side, "n": n, "submit": submit, "scheduled": scheduled, "quote_state": qs.split("|", 1)[-1]} for aid, side, n, submit, scheduled, qs in owner.adapter.submitted]
     return {"positions": positions, "attempts": attempts, "cash": owner.portfolio.cash_lamports, "reserved": owner.portfolio.reserved_lamports, "locked_rent": owner.portfolio.locked_rent_lamports,
             "ledger_cash_sum": owner.portfolio.ledger_cash_sum, "counters": {k: v for k, v in owner.counters.__dict__.items() if k != "quality_events"}}

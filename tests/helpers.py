@@ -121,8 +121,8 @@ class Harness:
             upsert_config_snapshot(self.conn, kind, h, content, "test", utc_iso(0))
         from darkbot.storage import prior_campaign_mints
         prior = prior_campaign_mints(self.conn, campaign) if mode == "PAPER" else set()
-        self.conn.execute("INSERT INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,host_clock_epoch_id,status,quality_status,start_balance_lamports) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                          (run_id, campaign, mode, utc_iso(0), "test", "spec", self.cfg.config_hash, "epoch_test", "RUNNING", "OK", self.cfg.portfolio["initial_paper_balance_lamports"]))
+        self.conn.execute("INSERT INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,host_clock_epoch_id,status,quality_status,start_balance_lamports,started_mono_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (run_id, campaign, mode, utc_iso(1_700_000_000_000_000_000), "test", "spec", self.cfg.config_hash, "epoch_test", "RUNNING", "OK", self.cfg.portfolio["initial_paper_balance_lamports"], T0))
         self.writer = SqliteWriter(self.conn, self.recorder, 500, 100, self._disk_error, self.cfg.storage["writer_locked_retries"], self.cfg.storage["fk_merge_max_batches"])
         self.fees = fees if fees is not None else fee_basis(self.cfg, T0, run_id=run_id)
         for s in (self.fees.protocol, self.fees.network, self.fees.rent, self.fees.priority_policy):

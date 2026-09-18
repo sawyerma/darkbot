@@ -476,7 +476,8 @@
         ]
       ],
       "verification_status": "PINNED_FROM_IDL_UNVERIFIED_OFFLINE_DOCTOR_VALIDATES_OWNER_AND_LENGTH",
-      "max_reasonable_bps": 1000
+      "max_reasonable_bps": 1000,
+      "discriminator_source": "ANCHOR_SHA256_account:Global_FIRST_8_BYTES"
     },
     "fee_rounding": "CEIL_BPS",
     "curve_rounding_version": "PUMP_CURVE_V1_FLOOR_TOKENS_CEIL_SOL_INPUT",

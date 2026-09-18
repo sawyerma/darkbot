@@ -43,6 +43,12 @@ def http_rpc(url: str, timeout_s: float) -> RpcCall:
     return call
 
 
+def account_discriminator(name: str) -> bytes:
+    import hashlib as _h
+
+    return _h.sha256(f"account:{name}".encode("ascii")).digest()[:8]
+
+
 def compact_u16(n: int) -> bytes:
     out = bytearray()
     while True:
@@ -122,6 +128,10 @@ class FeeResolver:
             data = base64.b64decode(value["data"][0])
             if owner != self.cfg.protocol["program_id"]:
                 return self._snap("protocol", "PROTOCOL_GLOBAL_ACCOUNT", "getAccountInfo", (addr,), slot, {"owner": owner, "data_len": len(data)}, {"protocol_fee_bps": None, "creator_fee_bps": None, "other_protocol_fee_bps": None}, "INVALID_OWNER", CostEvidence.UNKNOWN, "PUMP_BONDING_CURVE_SOL", self.cfg.protocol["fee_rounding"])
+            expected_disc = account_discriminator("Global")
+            if data[:8] != expected_disc:
+                return self._snap("protocol", "PROTOCOL_GLOBAL_ACCOUNT", "getAccountInfo", (addr,), slot, {"owner": owner, "data_len": len(data), "discriminator_hex": data[:8].hex(), "expected_discriminator_hex": expected_disc.hex()},
+                                  {"protocol_fee_bps": None, "creator_fee_bps": None, "other_protocol_fee_bps": None}, "INVALID_DISCRIMINATOR", CostEvidence.UNKNOWN, "PUMP_BONDING_CURVE_SOL", self.cfg.protocol["fee_rounding"])
             reader = _Reader(data[8:])
             fields = {name: reader.read(kind) for name, kind in (tuple(f) for f in ga["layout_after_discriminator"])}
             fee_bps, creator_bps = int(fields["fee_basis_points"]), int(fields["creator_fee_basis_points"])

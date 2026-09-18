@@ -171,7 +171,7 @@ class S05S06S09S10(unittest.TestCase):
             h1 = load_replay_input(conn, "runA", h.cfg).dataset_hash
             conn.execute("UPDATE fee_snapshots SET received_mono_ns=received_mono_ns+1 WHERE run_id='runA' AND fee_snapshot_id LIKE '%protocol%'")
             h2 = load_replay_input(conn, "runA", h.cfg).dataset_hash
-            conn.execute("INSERT INTO quality_events(quality_event_id,run_id,start_mono_ns,end_mono_ns,kind,severity,scope,details,canonical_gap,coverage_version,recovery_status,evidence_observation_ids) VALUES ('g','runA',1,2,'CANONICAL_GAP','CRITICAL','ALL_MINTS','{}',1,'V2','OPEN','[]')")
+            conn.execute("INSERT INTO quality_events(quality_event_id,run_id,feed_id,start_mono_ns,end_mono_ns,kind,severity,scope,details,canonical_gap,coverage_version,recovery_status,evidence_observation_ids) VALUES ('g','runA','helius_standard',1,2,'CANONICAL_GAP','CRITICAL','ALL_MINTS','{}',1,'V2','OPEN','[]')")
             h3 = load_replay_input(conn, "runA", h.cfg).dataset_hash
             conn.execute("UPDATE execution_attempts SET callback_actual_mono_ns=callback_actual_mono_ns+5 WHERE run_id='runA'")
             h4 = load_replay_input(conn, "runA", h.cfg).dataset_hash

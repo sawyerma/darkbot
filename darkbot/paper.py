@@ -37,7 +37,8 @@ class PaperExecutionAdapter:
         self.lateness_provider = lateness_provider  # replay: recorded callback lateness per attempt key
         self._seq = 0
         self.on_outcome: Callable[[ExecutionOutcome], None] | None = None
-        self.submitted: list[AttemptHandle] = []
+        self.pending: dict[str, AttemptHandle] = {}  # only attempts awaiting their callback (bounded by open exposure)
+        self.submitted: list[tuple[str, str, int, int, int, str]] = []  # compact audit log (attempt_id, side, n, submit, scheduled, quote_state_event_id)
 
     def submit(self, intent: Intent) -> AttemptHandle:
         assert_paper_boundary(self.mode, self.live_broadcast_enabled)
@@ -45,10 +46,12 @@ class PaperExecutionAdapter:
         submit = self.clock.monotonic_ns()
         scheduled = submit + intent.delay_ns
         handle = AttemptHandle(f"{intent.position_id}_{intent.side.value.lower()}{intent.attempt_number}", intent, submit, scheduled)
-        self.submitted.append(handle)
+        self.pending[handle.attempt_id] = handle
+        self.submitted.append((handle.attempt_id, intent.side.value, intent.attempt_number, submit, scheduled, intent.quote.quote_state_event_id))
 
         def fire(actual_mono_ns: int, h: AttemptHandle = handle) -> None:
             assert self.on_outcome is not None
+            self.pending.pop(h.attempt_id, None)
             if self.lateness_provider is not None:
                 actual_mono_ns = max(actual_mono_ns, h.scheduled_fill_mono_ns + self.lateness_provider(h.attempt_id))
                 if hasattr(self.clock, "advance_to"):
@@ -131,6 +134,7 @@ class StateOwner:
         self.feature_offsets_ns = tuple(o * NS_PER_MS for o in cfg.research["feature_snapshot_offsets_ms"])
         self.features = FeatureCalculator(cfg.research["feature_ratio_decimal_places"], cfg.research["feature_first_buyer_window"])
         self.positions: dict[str, PositionRecord] = {}
+        self.active_ids: set[str] = set()
         self.position_by_mint: dict[str, str] = {}
         self.submitted_mints: set[str] = set(prior_submitted_mints or ())  # ONE_SUBMITTED_ENTRY_PER_MINT_PER_CAMPAIGN survives restarts (loaded from the campaign DB)
         self.health_history: list[tuple[int, str, bool]] = []  # (mono_ns, feed_id, ready) for historical feature views (V1)
@@ -142,6 +146,7 @@ class StateOwner:
         self.feed_ready: dict[str, bool] = {}
         self.eligible_trade_feeds = {f.id for f in cfg.feeds if f.enabled and f.transport == "logsSubscribe" and {"CREATE", "BUY", "SELL"} <= set(f.provides)}
         self.pending_attempts: dict[str, dict[str, Any]] = {}
+        self.quote_by_attempt: dict[str, QuoteSnapshot] = {}  # expected quote per attempt (audit); pruned with terminal positions
         self.attempts_by_position: dict[str, list[str]] = {}
         self.obs_seq = 0
         self.dec_seq = 0
@@ -209,7 +214,15 @@ class StateOwner:
         self._record(("position", pos))
 
     def occupied_slots(self) -> int:
-        return sum(1 for p in self.positions.values() if p.state in OCCUPIED_SLOT_STATES)
+        """Counts only positions still able to occupy a slot; terminal positions leave the active index (no full-history scan)."""
+        n = 0
+        for pid in list(self.active_ids):
+            state = self.positions[pid].state
+            if state in OCCUPIED_SLOT_STATES:
+                n += 1
+            elif state in (PositionState.CLOSED, PositionState.ENTRY_FAILED, PositionState.INELIGIBLE):
+                self.active_ids.discard(pid)
+        return n
 
     def recording_ok(self) -> bool:
         return not (self.recorder.overflowed or self.disk_error or self.stop_new_entries)
@@ -302,7 +315,7 @@ class StateOwner:
                 actionable = ev.event_type.value == "CREATE" and ev.mint in result.new_creates and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and st.venue_state == VenueState.BONDING_CURVE_ACTIVE
                 sol_scope = st.quote_scope_status == QuoteScopeStatus.SOL_WSOL  # foreign/unknown quote amounts never land in SOL columns (S12)
                 new_me.append({"canonical_event_id": ea.canonical_event_id, "run_id": self.run_id, "signature": env.signature, "instruction_index": ev.instruction_index, "slot": env.slot, "mint": ev.mint, "event_type": ev.event_type.value,
-                               "actor": ev.actor, "creator": ev.creator, "token_program": ev.token_program, "virtual_sol_reserves": ev.virtual_sol_reserves if sol_scope else None, "virtual_token_reserves": ev.virtual_token_reserves if sol_scope else None,
+                               "actor": ev.actor, "creator": ev.creator or st.creator, "token_program": ev.token_program or st.token_program, "virtual_sol_reserves": ev.virtual_sol_reserves if sol_scope else None, "virtual_token_reserves": ev.virtual_token_reserves if sol_scope else None,
                                "real_sol_reserves": ev.real_sol_reserves if sol_scope else None, "real_token_reserves": ev.real_token_reserves if sol_scope else None, "first_seen_mono_ns": raw.receive_mono_ns, "actionable_mono_ns": decode_done if actionable else None,
                                "winner_feed_id": raw.feed_id, "source_observation_id": obs_id if k == 0 else f"{obs_id}-{k}", "commitment": self.commitment_by_feed.get(raw.feed_id),
                                "quality_status": ea.validation.value, "quote_mint_raw": ev.quote_mint_raw, "quote_field_origin": ev.quote_field_origin, "quote_layout_hash": ev.quote_layout_hash, "normalized_quote_asset": ev.normalized_quote_asset,
@@ -386,6 +399,7 @@ class StateOwner:
         pos = PositionRecord(position_id, self.run_id, mint, st.creator, self.cfg.policy_hash, PositionState.ENTRY_INTENT, decision_id, variant_id=self.variant_id, target_net_multiple=self.cfg.strategy["target_net_multiple"],
                              research_end_mono_ns=raw.receive_mono_ns + self.horizon_ns, venue_state=st.venue_state, canonical_provider_gap_flag=False, reserved_cash_lamports=required, exit_reserve_lamports=exit_reserve)
         self.positions[position_id] = pos
+        self.active_ids.add(position_id)
         self.position_by_mint[mint] = position_id
         self.submitted_mints.add(mint)
         self.counters.entry_intents += 1
@@ -414,6 +428,7 @@ class StateOwner:
         self._tele("receive_to_decision_ns", decision_done - raw.receive_mono_ns)
         self._tele("decision_to_enqueue_ns", enqueued - decision_done)
         self.pending_attempts[handle.attempt_id] = {"handle": handle, "basis": basis, "coverage": st.coverage_state}
+        self.quote_by_attempt[handle.attempt_id] = quote
         self.attempts_by_position.setdefault(position_id, []).append(handle.attempt_id)
         # telemetry (values only; serialisation in writer); FK-coupled rows travel as one group
         self._record(RecordGroup((("quote_snapshot", (quote, self.run_id, position_id)),
@@ -526,6 +541,7 @@ class StateOwner:
         pos.state = PositionState.EXIT_PENDING
         self._tele("decision_to_enqueue_ns", enqueued - decision_done)
         self.pending_attempts[handle.attempt_id] = {"handle": handle, "basis": basis, "coverage": st.coverage_state}
+        self.quote_by_attempt[handle.attempt_id] = quote
         self.attempts_by_position.setdefault(pos.position_id, []).append(handle.attempt_id)
         self._record(RecordGroup((("quote_snapshot", (quote, self.run_id, pos.position_id)),
                                   RowRecord("decisions", {"decision_id": decision_id, "run_id": self.run_id, "mint": pos.mint, "event_id": st.last_state_event_id, "policy_hash": self.cfg.policy_hash, "receive_mono_ns": st.last_state_receive_mono_ns,
@@ -792,7 +808,7 @@ class StateOwner:
                 v1_gap = v1_gap_at(cutoff)
                 for fs in ((FEATURE_SET_V2, FEATURE_SET_V1) if self.cfg.research["legacy_feature_export_enabled"] else (FEATURE_SET_V2,)):
                     inp = FeatureInputs(t0, cutoff, create[0], create[1], create[1], create[2], create[3], create[4], quote_amount, events, coverage, intersects, v1_gap)
-                    values, nulls = self.features.compute(inp, fs)
+                    values, nulls = self.features.compute(inp, fs, history_complete=not truncated)
                     rows.append(RowRecord("feature_snapshots", {"feature_snapshot_id": f"{self.run_id}_f_{mint}_{fs}_{offset}", "run_id": self.run_id, "mint": mint, "feature_set_id": fs, "feature_contract_hash": self.cfg.feature_contract_hash,
                                                                 "cutoff_mono_ns": cutoff, "computed_mono_ns": actual, "source_event_ids_json": [e[8] for e in log if e[1] <= cutoff and not e[7]], "features_json": values, "null_reasons_json": nulls,
                                                                 "coverage_version": "CANONICAL_COVERAGE_V2" if fs == FEATURE_SET_V2 else "PROVIDER_V1",

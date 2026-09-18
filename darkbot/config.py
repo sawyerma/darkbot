@@ -99,7 +99,7 @@ RUNTIME_SCHEMA: dict[str, Any] = {
     "protocol": S(program_id="str", idl_source="str", idl_version_or_hash="str", decoder_version="str", supported_variants="list[str]", events="any",
                   create_event_tail_layouts="list[any]", unpinned_create_tail_policy="enum:QUOTE_UNKNOWN_LAYOUT_UNVERIFIED", unpinned_tail_policy="str", wsol_mint="str", native_sol_curve_sentinel="str",
                   spl_token_program="str", token_2022_program="str",
-                  global_account=S(address="str", layout_after_discriminator="list[any]", verification_status="str", max_reasonable_bps="int+"),
+                  global_account=S(address="str", layout_after_discriminator="list[any]", verification_status="str", max_reasonable_bps="int+", discriminator_source="enum:ANCHOR_SHA256_account:Global_FIRST_8_BYTES"),
                   fee_rounding="enum:CEIL_BPS", curve_rounding_version="str"),
     "research": S(target_grid="list[dec+]", pilot_min_unique_creates="int+", chronological_split="list[dec+]", bootstrap_confidence="dec+", bootstrap_resamples="int+", random_seed="int0",
                   minimum_independent_blocks_for_qualification="int+", adaptive_targets_enabled="enum:False",

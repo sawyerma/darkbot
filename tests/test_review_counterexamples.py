@@ -61,11 +61,13 @@ class ReplayEnd(unittest.TestCase):
 
 
 class FeeLayout(unittest.TestCase):
-    def _rpc(self, cfg, owner):
+    def _rpc(self, cfg, owner, discriminator: bytes | None = None):
         ga = cfg.protocol["global_account"]
         pk = lambda n: b58encode(n.encode().ljust(32, b"\0"))
-        data = b"\0" * 8 + encode_fields([("initialized", True), ("authority", pk("a")), ("fee_recipient", pk("b")), ("initial_virtual_token_reserves", 1), ("initial_virtual_sol_reserves", 1), ("initial_real_token_reserves", 1),
-                                           ("token_total_supply", 1), ("fee_basis_points", 95), ("withdraw_authority", pk("c")), ("enable_migrate", True), ("pool_migration_fee", 1), ("creator_fee_basis_points", 30)], ga["layout_after_discriminator"])
+        from darkbot.fees import account_discriminator
+        disc = account_discriminator("Global") if discriminator is None else discriminator
+        data = disc + encode_fields([("initialized", True), ("authority", pk("a")), ("fee_recipient", pk("b")), ("initial_virtual_token_reserves", 1), ("initial_virtual_sol_reserves", 1), ("initial_real_token_reserves", 1),
+                                     ("token_total_supply", 1), ("fee_basis_points", 95), ("withdraw_authority", pk("c")), ("enable_migrate", True), ("pool_migration_fee", 1), ("creator_fee_basis_points", 30)], ga["layout_after_discriminator"])
         return lambda m, p: {"context": {"slot": 1}, "value": {"owner": owner, "data": [base64.b64encode(data).decode(), "base64"]}}
 
     def test_unverified_layout_is_never_valid(self):
@@ -82,6 +84,9 @@ class FeeLayout(unittest.TestCase):
         self.assertEqual(s2.normalized_fee_components["protocol_fee_bps"], 95)
         s3 = FeeResolver(verified, self._rpc(verified, "SomeOtherOwner"), ReplayClock("e", T0, 0), "run", "t").resolve_protocol()
         self.assertEqual(s3.validation_status, "INVALID_OWNER")
+        s4 = FeeResolver(verified, self._rpc(verified, verified.protocol["program_id"], discriminator=b"WRONGDIS"), ReplayClock("e", T0, 0), "run", "t").resolve_protocol()
+        self.assertEqual(s4.validation_status, "INVALID_DISCRIMINATOR")  # a VERIFIED_* pin never bypasses the Anchor discriminator check
+        self.assertIsNone(s4.normalized_fee_components["protocol_fee_bps"])
 
 
 class DoctorCounting(unittest.TestCase):

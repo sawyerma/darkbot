@@ -127,8 +127,11 @@ class Reporter:
             if d["action"] == "SKIP":
                 ineligible[d["reason"]] += 1
         run_span_ns = (max((o["receive_mono_ns"] for o in obs), default=0) - min((o["receive_mono_ns"] for o in obs), default=0)) if obs else 0
-        run_end = max((o["receive_mono_ns"] for o in obs), default=0)
-        run_start = min((o["receive_mono_ns"] for o in obs), default=0)
+        obs_end = max((o["receive_mono_ns"] for o in obs), default=0)
+        obs_start = min((o["receive_mono_ns"] for o in obs), default=0)
+        run_start = run["started_mono_ns"] if run.get("started_mono_ns") is not None else obs_start  # recorded run window, not the first/last frame
+        run_end = run["ended_mono_ns"] if run.get("ended_mono_ns") is not None else obs_end
+        window_ns = max(0, run_end - run_start)
         entry_submit = {a["position_id"]: a["submit_mono_ns"] for a in attempts if a["side"] == "BUY" and a["attempt_number"] == 1}
         busy_ns = 0
         for p in positions:  # one interval per position: from entry submit (capital reserved) to close/fail/run end; never double counted
@@ -156,7 +159,7 @@ class Reporter:
             "resolved_intents": len(resolved), "unresolved_fraction": (len(exposed) / len(positions)) if positions else None, "median_pnl_lamports": statistics.median(pnls) if pnls else None,
             "win_rate": (len(wins) / len(pnls)) if pnls else None, "avg_win_lamports": (sum(wins) / len(wins)) if wins else None, "avg_loss_lamports": (sum(losses) / len(losses)) if losses else None,
             "profit_factor": profit_factor, "profit_factor_special_case": None if gross_loss else ("NO_LOSS_SAMPLE" if pnls else "NO_TRADES"),
-            "max_drawdown_lamports_on_close_time_equity": dd, "capital_utilization_fraction": min(1.0, busy_ns / (run_span_ns * slots)) if run_span_ns else None,
+            "max_drawdown_lamports_on_close_time_equity": dd, "capital_utilization_fraction": min(1.0, busy_ns / (window_ns * slots)) if window_ns else None, "run_window_ns": window_ns,
             "fees_by_kind_lamports": fee_kinds, "fee_share_of_entry_cost": (sum(fee_kinds[k] for k in ("protocol_fee_lamports", "network_fee_total_lamports", "sender_tip_lamports")) / sum(p["entry_economic_cost_lamports"] for p in closed)) if closed and sum(p["entry_economic_cost_lamports"] for p in closed) else None,
             "cost_evidence_counts": dict(evidence), "fill_evidence_counts": dict(fill_evidence), "attempts_with_unknown_costs": exposed_fees_unknown_cost,
             "quote_age_ns": percentiles([a["proxy_age_ns"] for a in attempts if a["proxy_age_ns"] is not None]), "hold_duration_ns": percentiles(holds),
@@ -167,6 +170,7 @@ class Reporter:
             "block_bootstrap_per_intent_pnl": boot, "daily_pnl": self._daily(resolved, run, run_start, decision_time),
         }
 
+        run_span_ns = window_ns
         # ---------------- latency
         entry_decisions = [d for d in decisions if d["action"] == "ENTRY"]
         latency = {
@@ -207,14 +211,15 @@ class Reporter:
         """Net PnL per UTC day of the close (or failed-entry decision): day = run start UTC + (event mono - first observation mono)."""
         import datetime as _dt
 
-        try:
-            start = _dt.datetime.strptime(run["started_utc"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=_dt.timezone.utc)
+        try:  # full precision anchor (microseconds) of the recorded run start, paired with started_mono_ns
+            text = run["started_utc"].rstrip("Z")
+            start = _dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%S.%f" if "." in text else "%Y-%m-%dT%H:%M:%S").replace(tzinfo=_dt.timezone.utc)
         except ValueError:
             start = None
         out: dict[str, int] = defaultdict(int)
         for p in resolved:
             mono = p["close_mono_ns"] or decision_time.get(p["entry_decision_id"]) or run_start_mono
-            day = (start + _dt.timedelta(microseconds=(mono - run_start_mono) / 1000)).strftime("%Y-%m-%d") if start else "UNKNOWN"
+            day = (start + _dt.timedelta(microseconds=(mono - run_start_mono) // 1000)).strftime("%Y-%m-%d") if start else "UNKNOWN"
             out[day] += p["net_pnl_lamports"] or 0
         return {"note": "net PnL per UTC day of position close (failed entries: decision day), derived from run start UTC plus monotonic offset; no extrapolation", "by_day": dict(out)}
 

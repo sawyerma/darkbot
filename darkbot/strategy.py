@@ -127,7 +127,18 @@ class FeatureCalculator:
             return None
         return self.ratio(Decimal(vsol), Decimal(vtok))
 
-    def compute(self, inputs: FeatureInputs, feature_set: str) -> tuple[dict[str, Any], dict[str, str]]:
+    TRADE_DERIVED = ("buy_count", "sell_count", "buy_volume_sol", "sell_volume_sol", "net_buy_flow_sol", "unique_buyers", "unique_buyer_ratio", "largest_buy_sol", "buyer_volume_concentration",
+                     "first5_buyer_concentration", "first_sell_latency_ms", "price_change", "max_drawdown", "curve_progress_pct", "research_estimated_price_impact")
+
+    def compute(self, inputs: FeatureInputs, feature_set: str, history_complete: bool = True) -> tuple[dict[str, Any], dict[str, str]]:
+        values, nulls = self._compute(inputs, feature_set)
+        if not history_complete:  # a truncated trade history is not a valid basis: trade-derived features are unreachable (NULL), never a "complete" view
+            for name in self.TRADE_DERIVED:
+                values[name] = None
+                nulls[name] = "TRUNCATED_TRADE_LOG"
+        return values, nulls
+
+    def _compute(self, inputs: FeatureInputs, feature_set: str) -> tuple[dict[str, Any], dict[str, str]]:
         ev = [e for e in inputs.events if e.receive_mono_ns <= inputs.cutoff_mono_ns]
         buys = [e for e in ev if e.event_type == "BUY"]
         sells = [e for e in ev if e.event_type == "SELL"]

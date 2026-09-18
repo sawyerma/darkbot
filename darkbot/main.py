@@ -54,6 +54,7 @@ class Application:
         self.recorder = Recorder(cfg.storage["queue_capacity_records"], cfg.storage["priority_headroom_records"])
         self.conn = None
         self.readiness = Readiness.NOT_READY
+        self._loop: asyncio.AbstractEventLoop | None = None
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="features")
 
     # ------------------------------------------------------------------ setup
@@ -64,16 +65,19 @@ class Application:
         now_utc = self.clock.utc_iso()
         for kind, (h, content) in self.cfg.snapshot_kinds().items():
             upsert_config_snapshot(self.conn, kind, h, content, str(self.cfg.path), now_utc)
-        self.conn.execute("INSERT INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,protocol_snapshot_id,host_clock_epoch_id,status,quality_status,start_balance_lamports,readiness) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                          (self.run_id, self.campaign, self.mode, now_utc, code_revision(), spec_hash(), self.cfg.config_hash, self.cfg.protocol_hash, self.clock.epoch_id, "RUNNING", "OK", self.cfg.portfolio["initial_paper_balance_lamports"], self.readiness.value))
+        self.conn.execute("INSERT INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,protocol_snapshot_id,host_clock_epoch_id,status,quality_status,start_balance_lamports,readiness,started_mono_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (self.run_id, self.campaign, self.mode, now_utc, code_revision(), spec_hash(), self.cfg.config_hash, self.cfg.protocol_hash, self.clock.epoch_id, "RUNNING", "OK", self.cfg.portfolio["initial_paper_balance_lamports"], self.readiness.value, self.clock.monotonic_ns()))
         return {"migrations": applied, "interrupted_previous_runs": interrupted, "integrity": integrity_check(self.conn)}
 
     def _disk_error(self, message: str) -> None:
-        assert self.owner is not None
-        self.owner.on_disk_error(message)
+        """Called from the writer thread: never touch the StateOwner here; hand over to the event-loop thread (single-owner rule)."""
+        loop = self._loop
+        if loop is not None and self.owner is not None:
+            loop.call_soon_threadsafe(self.owner.on_disk_error, message)
 
     async def run(self) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
+        self._loop = loop
         storage_info = self.open_storage()
         assert self.conn is not None
         self.writer = SqliteWriter(self.conn, self.recorder, self.cfg.storage["batch_max_records"], self.cfg.storage["flush_interval_ms"], self._disk_error, self.cfg.storage["writer_locked_retries"], self.cfg.storage["fk_merge_max_batches"],
@@ -183,6 +187,11 @@ class Application:
 # --------------------------------------------------------------------------- doctor
 
 
+def count_live_creator_sells(conn: Any, run_id: str) -> int:
+    """D04 live evidence: SELL events whose actor is the creator recorded on the mint's CREATE (trade rows carry the creator too)."""
+    return conn.execute("SELECT COUNT(*) FROM market_events s JOIN market_events c ON c.run_id=s.run_id AND c.mint=s.mint AND c.event_type='CREATE' WHERE s.run_id=? AND s.event_type='SELL' AND s.actor=c.creator", (run_id,)).fetchone()[0]
+
+
 def doctor_fixture_checks(cfg: RuntimeConfig) -> dict[str, Any]:
     """D04 fixture part: creator-sell, completion and migration decoders on synthetic IDL-layout fixtures (separate from live counts)."""
     from darkbot.clock import ReplayClock, ReplayScheduler
@@ -274,7 +283,7 @@ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor"
     trades = reader.execute("SELECT COUNT(*) FROM market_events WHERE run_id=? AND event_type IN ('BUY','SELL')", (app.run_id,)).fetchone()[0]
     scope = {r[0]: r[1] for r in reader.execute("SELECT quote_scope_status, COUNT(*) FROM market_events WHERE run_id=? AND event_type='CREATE' GROUP BY quote_scope_status", (app.run_id,))}
     tails = [r[0] for r in reader.execute("SELECT DISTINCT quote_layout_hash FROM market_events WHERE run_id=? AND event_type='CREATE'", (app.run_id,))]
-    live_sells = reader.execute("SELECT COUNT(*) FROM market_events WHERE run_id=? AND event_type='SELL' AND actor=creator", (app.run_id,)).fetchone()[0]
+    live_sells = count_live_creator_sells(reader, app.run_id)
     live_completes = reader.execute("SELECT COUNT(*) FROM market_events WHERE run_id=? AND event_type IN ('COMPLETE','MIGRATE')", (app.run_id,)).fetchone()[0]
     obs_count, lat = reader.execute("SELECT COUNT(*), AVG(decode_done_mono_ns - receive_mono_ns) FROM feed_observations WHERE run_id=? AND decode_done_mono_ns IS NOT NULL", (app.run_id,)).fetchone()
     fee_rows = [dict(r) for r in reader.execute("SELECT source_type, validation_status, fee_snapshot_id FROM fee_snapshots WHERE run_id=? ORDER BY received_mono_ns", (app.run_id,))]
