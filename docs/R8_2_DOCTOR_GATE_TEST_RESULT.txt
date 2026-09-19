@@ -1,0 +1,32 @@
+............paper: no eligible feed was ready (NOT_READY) – see feed_setup; exit code 4
+......................................................................................................................
+----------------------------------------------------------------------
+Ran 130 tests in 4.248s
+
+OK
+{
+  "run_id": "run",
+  "status": "INTERRUPTED",
+  "readiness": "CAPTURE_READY",
+  "feeds_started": 1,
+  "artifacts": [
+    "exports/camp/run/report.json",
+    "exports/camp/run/positions.csv",
+    "exports/camp/run/latency_by_feed.csv",
+    "exports/camp/run/summary.md"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA"
+}
+{
+  "run_id": "run",
+  "status": "COMPLETED",
+  "readiness": "NOT_READY",
+  "feeds_started": 0,
+  "artifacts": [
+    "exports/camp/run/report.json",
+    "exports/camp/run/positions.csv",
+    "exports/camp/run/latency_by_feed.csv",
+    "exports/camp/run/summary.md"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA"
+}

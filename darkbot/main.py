@@ -378,10 +378,18 @@ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor"
     checks["D06"] = d06
     if checks["D01"]["status"] != "PASS" or not eligible_ready:
         readiness = Readiness.NOT_READY
-    elif d05 and checks["D03"]["status"] == "PASS":
+    elif all(checks.get(cid, {}).get("status") == "PASS" for cid in ("D01", "D02", "D03", "D04", "D05", "D06")):
         readiness = Readiness.ECONOMIC_PAPER_READY
     else:
         readiness = Readiness.CAPTURE_READY
+    # Persist the final integration gate, not only the earlier runtime cost/feed readiness.
+    summary["runtime_readiness"] = summary.get("readiness")
+    summary["readiness"] = readiness.value
+    conn = open_connection(db_path)
+    try:
+        conn.execute("UPDATE runs SET readiness=? WHERE run_id=?", (readiness.value, app.run_id))
+    finally:
+        conn.close()
     return {"readiness": readiness.value, "run_id": app.run_id, "checks": checks, "summary": {k: v for k, v in summary.items() if k not in ("storage",)}, "note": "Short probe proves integration only, not completeness, reliability, landing latency or expectancy."}
 
 

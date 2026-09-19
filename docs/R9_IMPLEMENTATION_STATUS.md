@@ -1,9 +1,11 @@
-# R9 – Token-2022 / V2 PAPER: Implementierungs- und Prüfstand
+# R8_2 (Arbeitsbezeichnung R9) – Token-2022 / V2 PAPER: Implementierungs- und Prüfstand
 
 Stand: 2026-09-19. Änderungen direkt im Originalrepository
 `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot`, Ausgangspunkt `afaab27 R8_1`.
-Nicht committed oder gepusht. Die normative SPEC wurde nicht geändert:
+Der Token-2022/V2-Block ist als `1ac8e8be7f61a9f74b93eadd551d1a050cc2d7d0` (`R8_2`) committed; der Push wurde vom Nutzer bestätigt. „R9“ in Dateinamen bezeichnet den damaligen Arbeitsblock, keine weitere Git-Revision. Die normative SPEC wurde nicht geändert:
 SHA256 `40fe4ab8130a732ca8a1023c2fb6e0165fc2832e91a6dac0e81d0ddd1e7036f5`.
+
+Nachtrag 2026-09-20: Das Doctor-Gate wurde korrigiert, 130 Tests bestehen und der neue reale Doctor hat D01–D06 gleichzeitig bestanden. Siehe [aktuellen Gate-/Edge-Status](R8_2_DOCTOR_GATE_STATUS.md). Die folgenden Laufberichte beschreiben den damaligen R9-Arbeitsstand.
 
 ## Abgeschlossener Codeblock
 
