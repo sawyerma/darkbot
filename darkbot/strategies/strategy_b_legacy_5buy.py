@@ -43,15 +43,26 @@ class Legacy5Buy5Unique:
             if self.observations.pop(mint, None) is not obs:
                 return
             self.decided.add(mint)
-            qualified = obs.buy_count >= self.config["min_buy_count"] and len(obs.buyers) >= self.config["min_unique_buyers"]
-            owner.record_observation(obs, qualified, actual)
-            reason = None if qualified else "OBSERVATION_FILTER_NOT_MET"
             st = owner.reducer.states.get(mint)
             if st is None:
+                owner.record_observation(obs, None, actual, status="DATA_INCOMPLETE")
                 return
-            if qualified and (owner.reducer.gap_intersects(obs.start, obs.end - 1)
-                              or any((end is None or end >= obs.start) and start < obs.end for start, end in st.decode_gap_intervals)):
+            coverage_gap = (
+                owner.reducer.gap_intersects(obs.start, obs.end - 1)
+                or any((end is None or end >= obs.start) and start < obs.end for start, end in st.decode_gap_intervals)
+            )
+            if coverage_gap:
+                # A missing interval can hide BUYs, so this observation must not
+                # be recorded as a genuine filter miss (or a genuine qualifier).
+                owner.record_observation(obs, None, actual, status="DATA_INCOMPLETE")
                 reason = "OBSERVATION_COVERAGE_GAP"
+            else:
+                qualified = (
+                    obs.buy_count >= self.config["min_buy_count"]
+                    and len(obs.buyers) >= self.config["min_unique_buyers"]
+                )
+                owner.record_observation(obs, qualified, actual)
+                reason = None if qualified else "OBSERVATION_FILTER_NOT_MET"
             owner._entry_decision(mint, raw, envelope, obs.end, policy_rejection=reason)
 
         owner.scheduler.schedule_at(obs.end, complete)
