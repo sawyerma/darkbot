@@ -173,13 +173,15 @@ class StateOwner:
         self.fx_snapshot = snapshot
         self._record(RowRecord("fx_snapshots", snapshot.row(self.run_id)))
 
-    def record_observation(self, observation, qualified, actual):
+    def record_observation(self, observation, qualified, actual, status=None):
+        if status is None:
+            status = "OBSERVING" if qualified is None else "DECIDED"
         self._record(RowRecord("strategy_observations", {
             "observation_id": f"{self.run_id}_obs_{observation.mint}", "run_id": self.run_id, "mint": observation.mint,
             "strategy_id": self.cfg.strategy_id, "strategy_config_hash": self.cfg.strategy_config_hash,
             "create_signature": observation.signature, "observation_start": observation.start, "observation_end": observation.end,
             "decision_actual_mono_ns": actual, "buy_count": observation.buy_count, "unique_buyers": len(observation.buyers),
-            "qualified": qualified, "status": "OBSERVING" if qualified is None else "DECIDED"}, upsert=True))
+            "qualified": qualified, "status": status}, upsert=True))
 
     # ------------------------------------------------------------------ helpers
     def _tele(self, key: str, value: int) -> None:
