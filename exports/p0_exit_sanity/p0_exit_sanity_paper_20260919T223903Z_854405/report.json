@@ -1,0 +1,465 @@
+{
+  "campaign_id": "p0_exit_sanity",
+  "code_revision": "darkbot-1.3.2-phase1",
+  "config_hash": "d477997581a78bbb78574e7a9f510f1f3008d81e51c94ebd09e36b32bb01b973",
+  "created_utc": "2026-09-19T22:42:13.570800Z",
+  "creates_actionable": 79,
+  "creates_observed_union": 96,
+  "dataset_hash": null,
+  "economic": {
+    "attempts_with_unknown_costs": 0,
+    "avg_loss_lamports": -3391236.0,
+    "avg_win_lamports": 61721029.0,
+    "block_bootstrap_per_intent_pnl": {
+      "blocks": 1,
+      "ci_high": null,
+      "ci_low": null,
+      "mean": 29164896.5,
+      "resamples": 2000,
+      "seed": 20260916,
+      "status": "INSUFFICIENT_BLOCKS"
+    },
+    "capital_utilization_fraction": 0.8007621172038456,
+    "cash_reconciliation": {
+      "end_cash_per_ledger": 957211128,
+      "initial": 1000000000,
+      "ledger_cash_sum": -42788872,
+      "reconciled": true,
+      "run_end_balance": 957211128
+    },
+    "censored": 1,
+    "conservative_lower_bound_pnl_lamports_token_residual_zero": -41275032,
+    "cost_evidence_counts": {
+      "MEASURED": 5
+    },
+    "daily_pnl": {
+      "by_day": {
+        "2026-09-19": 58329793
+      },
+      "note": "net PnL per UTC day of position close (failed entries: decision day), derived from run start UTC plus monotonic offset; no extrapolation"
+    },
+    "entry_failed": 0,
+    "entry_fills": 3,
+    "entry_intents": 3,
+    "exit_failed_attempts": 0,
+    "exits": {
+      "CREATOR_SELL": 1,
+      "TARGET": 1,
+      "TIMEOUT": 0
+    },
+    "expectancy_per_fill_lamports": 29164896.5,
+    "expectancy_per_intent_lamports": 29164896.5,
+    "fee_share_of_entry_cost": 0.026641485490286238,
+    "fees_by_kind_lamports": {
+      "creator_fee_lamports": 1667761,
+      "network_fee_total_lamports": 26000,
+      "protocol_fee_lamports": 5281241,
+      "rent_locked_lamports": 4541520,
+      "rent_refunded_lamports": 3027680,
+      "sender_tip_lamports": 0
+    },
+    "fill_evidence_counts": {
+      "OBSERVED_STATE_PROXY": 5
+    },
+    "hold_duration_ns": {
+      "max": 57311934583,
+      "min": 1713705833,
+      "n": 2,
+      "p50": 1713705833,
+      "p95": 57311934583,
+      "p99": 57311934583,
+      "p99_low_confidence": true
+    },
+    "locked_rent_lamports_end": 1513840,
+    "max_drawdown_lamports_on_close_time_equity": 3391236,
+    "median_pnl_lamports": 29164896.5,
+    "open_at_end": 1,
+    "per_attempt_costs": [
+      {
+        "attempt_id": "p0_exit_sanity_paper_20260919T223903Z_854405_p1_buy1",
+        "cost_evidence_status": "MEASURED",
+        "creator_fee_lamports": 295110,
+        "fee_reconciliation_status": "APPLIED_AT_MODELED_FILL",
+        "fee_snapshot_id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_protocol_1",
+        "fees_charged_lamports": 101118665,
+        "fill_evidence_status": "OBSERVED_STATE_PROXY",
+        "network_fee_total_lamports": 5200,
+        "priority_fee_lamports": 200,
+        "protocol_fee_lamports": 934515,
+        "rent_locked_lamports": 1513840,
+        "sender_tip_lamports": 0,
+        "side": "BUY",
+        "status": "FILLED"
+      },
+      {
+        "attempt_id": "p0_exit_sanity_paper_20260919T223903Z_854405_p1_sell1",
+        "cost_evidence_status": "MEASURED",
+        "creator_fee_lamports": 292311,
+        "fee_reconciliation_status": "APPLIED_AT_MODELED_FILL",
+        "fee_snapshot_id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_protocol_9",
+        "fees_charged_lamports": 1223161,
+        "fill_evidence_status": "OBSERVED_STATE_PROXY",
+        "network_fee_total_lamports": 5200,
+        "priority_fee_lamports": 200,
+        "protocol_fee_lamports": 925650,
+        "rent_locked_lamports": 0,
+        "sender_tip_lamports": 0,
+        "side": "SELL",
+        "status": "FILLED"
+      },
+      {
+        "attempt_id": "p0_exit_sanity_paper_20260919T223903Z_854405_p2_buy1",
+        "cost_evidence_status": "MEASURED",
+        "creator_fee_lamports": 295110,
+        "fee_reconciliation_status": "APPLIED_AT_MODELED_FILL",
+        "fee_snapshot_id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_protocol_9",
+        "fees_charged_lamports": 101118665,
+        "fill_evidence_status": "OBSERVED_STATE_PROXY",
+        "network_fee_total_lamports": 5200,
+        "priority_fee_lamports": 200,
+        "protocol_fee_lamports": 934515,
+        "rent_locked_lamports": 1513840,
+        "sender_tip_lamports": 0,
+        "side": "BUY",
+        "status": "FILLED"
+      },
+      {
+        "attempt_id": "p0_exit_sanity_paper_20260919T223903Z_854405_p2_sell1",
+        "cost_evidence_status": "MEASURED",
+        "creator_fee_lamports": 490120,
+        "fee_reconciliation_status": "APPLIED_AT_MODELED_FILL",
+        "fee_snapshot_id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_protocol_9",
+        "fees_charged_lamports": 2047366,
+        "fill_evidence_status": "OBSERVED_STATE_PROXY",
+        "network_fee_total_lamports": 5200,
+        "priority_fee_lamports": 200,
+        "protocol_fee_lamports": 1552046,
+        "rent_locked_lamports": 0,
+        "sender_tip_lamports": 0,
+        "side": "SELL",
+        "status": "FILLED"
+      },
+      {
+        "attempt_id": "p0_exit_sanity_paper_20260919T223903Z_854405_p3_buy1",
+        "cost_evidence_status": "MEASURED",
+        "creator_fee_lamports": 295110,
+        "fee_reconciliation_status": "APPLIED_AT_MODELED_FILL",
+        "fee_snapshot_id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_protocol_9",
+        "fees_charged_lamports": 101118665,
+        "fill_evidence_status": "OBSERVED_STATE_PROXY",
+        "network_fee_total_lamports": 5200,
+        "priority_fee_lamports": 200,
+        "protocol_fee_lamports": 934515,
+        "rent_locked_lamports": 1513840,
+        "sender_tip_lamports": 0,
+        "side": "BUY",
+        "status": "FILLED"
+      }
+    ],
+    "positions_by_state": {
+      "CLOSED": 2,
+      "OPEN": 1
+    },
+    "profit_factor": 18.200157405736434,
+    "profit_factor_special_case": null,
+    "quote_age_ns": {
+      "max": 924125,
+      "min": 291292,
+      "n": 5,
+      "p50": 391375,
+      "p95": 924125,
+      "p99": 924125,
+      "p99_low_confidence": true
+    },
+    "realized_net_pnl_lamports": 58329793,
+    "realized_net_pnl_sol": "0.058329793",
+    "resolved_intents": 2,
+    "retry_exhausted": 0,
+    "run_window_ns": 190124550750,
+    "time_to_entry_ns": {
+      "max": 924125,
+      "min": 291292,
+      "n": 3,
+      "p50": 831417,
+      "p95": 924125,
+      "p99": 924125,
+      "p99_low_confidence": true
+    },
+    "unrealized_status": "UNKNOWN_EQUITY_INTERVAL",
+    "unresolved": 0,
+    "unresolved_by_reason": {},
+    "unresolved_exposure_entry_cost_lamports": 99604825,
+    "unresolved_fraction": 0.3333333333333333,
+    "win_rate": 0.5
+  },
+  "host_clock_epoch_id": "epoch_b44cef91a7854405",
+  "latency": {
+    "callback_lateness_ns": {
+      "max": 238542,
+      "min": 113125,
+      "n": 5,
+      "p50": 173750,
+      "p95": 238542,
+      "p99": 238542,
+      "p99_low_confidence": true
+    },
+    "class_legend": {
+      "MEASURED_LOCAL": "same clock epoch, local CPU path",
+      "MEASURED_RELATIVE": "feed vs feed, no absolute chain latency",
+      "SIMULATED": "declared model delay",
+      "UNKNOWN": "missing timestamp -> NULL"
+    },
+    "decision_to_enqueue_ns": {
+      "max": 42583,
+      "min": 15208,
+      "n": 5,
+      "p50": 32583,
+      "p95": 42583,
+      "p99": 42583,
+      "p99_low_confidence": true
+    },
+    "decode_to_actionable_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 79,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "feeds": {
+      "coverage_denominator": "UNION_OF_LOCALLY_OBSERVED_CREATES (no global mainnet completeness claim)",
+      "pairwise_common_creates": {},
+      "per_feed": {
+        "existing_rpc": {
+          "actionable_wins": 79,
+          "class": "MEASURED_RELATIVE",
+          "count": 44911,
+          "decode_errors": 1189,
+          "hint_wins": 96,
+          "matched_creates": 96,
+          "missing": 0,
+          "relative_arrival_ns": {
+            "max": 0,
+            "min": 0,
+            "n": 96,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "p99_low_confidence": true
+          },
+          "ties": 0
+        },
+        "helius_standard": {
+          "actionable_wins": 0,
+          "class": "MEASURED_RELATIVE",
+          "count": 0,
+          "decode_errors": 0,
+          "hint_wins": 0,
+          "matched_creates": 0,
+          "missing": 96,
+          "relative_arrival_ns": {
+            "max": null,
+            "min": null,
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "p99_low_confidence": true
+          },
+          "ties": 0
+        },
+        "pumpportal": {
+          "actionable_wins": 0,
+          "class": "MEASURED_RELATIVE",
+          "count": 0,
+          "decode_errors": 0,
+          "hint_wins": 0,
+          "matched_creates": 0,
+          "missing": 96,
+          "relative_arrival_ns": {
+            "max": null,
+            "min": null,
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "p99_low_confidence": true
+          },
+          "ties": 0
+        }
+      },
+      "tie_rule": "same mono ns = tie; operative feed-id tiebreak not counted as win"
+    },
+    "first_hint_to_actionable_ns": {
+      "max": null,
+      "min": null,
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "p99_low_confidence": true
+    },
+    "modeled_entry_delay_ns": {
+      "class": "SIMULATED",
+      "value": 0
+    },
+    "modeled_exit_delay_ns": {
+      "class": "SIMULATED",
+      "value": 0
+    },
+    "ready_to_decision_ns": {
+      "max": 810708,
+      "min": 21625,
+      "n": 98,
+      "p50": 45459,
+      "p95": 160125,
+      "p99": 810708,
+      "p99_low_confidence": true
+    },
+    "receive_to_decision_ns": {
+      "max": 914333,
+      "min": 287292,
+      "n": 3,
+      "p50": 819042,
+      "p95": 914333,
+      "p99": 914333,
+      "p99_low_confidence": true
+    },
+    "receive_to_decode_ns": {
+      "max": 4498667,
+      "min": 4959,
+      "n": 44911,
+      "p50": 19000,
+      "p95": 290459,
+      "p99": 643333,
+      "p99_low_confidence": false
+    },
+    "submit_to_ack_ns": {
+      "class": "FUTURE_LIVE_MEASURED_NOT_FILL",
+      "n": 0
+    },
+    "submit_to_observed_chain_execution_ns": {
+      "class": "FUTURE_LIVE_OBSERVATION_INCLUDES_RETURN_FEED_DELAY",
+      "n": 0
+    }
+  },
+  "mode": "PAPER",
+  "model_assumptions": {
+    "counterfactual_note": "Historischer Fremd-Orderflow reagiert nicht auf unseren hypothetischen Trade (Gegenfaktualitaetsannahme). Simulierte Inklusion ist eine Annahme, keine gemessene Landung. Fill-Evidenz ist OBSERVED_STATE_PROXY. Keine Zahl behauptet global frueheste Erkennung, sicheren Fill oder garantierten Profit.",
+    "exclusions": {
+      "decisions_skipped": {
+        "SLOT_LIMIT": 62,
+        "UNQUALIFIED_COSTS": 9,
+        "UNSUPPORTED_FEE_MODE_HOLDER_REWARD": 1,
+        "UNSUPPORTED_FEE_MODE_MAYHEM": 4,
+        "UNSUPPORTED_QUOTE": 16,
+        "VENUE_CURVE_COMPLETE": 1
+      }
+    },
+    "fill_evidence": "OBSERVED_STATE_PROXY",
+    "latency_model": {
+      "entry_delay_ms": 0,
+      "exit_delay_ms": 0,
+      "label": "ASSUMED_OPTIMISTIC_BASELINE",
+      "measured_distribution_id": null,
+      "scenario_unit": "MILLISECONDS",
+      "stage_breakdown_required": true,
+      "stress_delay_ms": [
+        5,
+        25,
+        100,
+        250,
+        500
+      ],
+      "zero_delay_run_can_qualify_edge": false
+    },
+    "slippage_bps": 300,
+    "target_net_multiple": "1.5"
+  },
+  "qualification_reasons": [
+    "fee rules not fully verified or attempt costs unknown"
+  ],
+  "qualification_status": "UNQUALIFIED_COSTS",
+  "quality": {
+    "canonical_gap_events": 6,
+    "coverage_version": "CANONICAL_COVERAGE_V2",
+    "create_quote_scope_counts": {
+      "SOL_WSOL": 80,
+      "UNSUPPORTED_QUOTE": 16
+    },
+    "feature_sets": {
+      "FEATURE_CONTRACT_V1_LEGACY": 480,
+      "FEATURE_SET_V2_CANONICAL_COVERAGE": 480
+    },
+    "fee_snapshot_status_counts": {
+      "RPC_ERROR": 2,
+      "VALID": 20
+    },
+    "fee_snapshots": [
+      {
+        "id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_network_15",
+        "status": "VALID",
+        "type": "NETWORK_FEE"
+      },
+      {
+        "id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_protocol_16",
+        "status": "VALID",
+        "type": "PROTOCOL_GLOBAL_ACCOUNT"
+      },
+      {
+        "id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_priority_policy_17",
+        "status": "VALID",
+        "type": "PRIORITY_POLICY"
+      },
+      {
+        "id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_network_18",
+        "status": "VALID",
+        "type": "NETWORK_FEE"
+      },
+      {
+        "id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_priority_policy_19",
+        "status": "VALID",
+        "type": "PRIORITY_POLICY"
+      },
+      {
+        "id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_network_20",
+        "status": "RPC_ERROR",
+        "type": "NETWORK_FEE"
+      },
+      {
+        "id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_priority_policy_21",
+        "status": "VALID",
+        "type": "PRIORITY_POLICY"
+      },
+      {
+        "id": "p0_exit_sanity_paper_20260919T223903Z_854405_fee_network_22",
+        "status": "VALID",
+        "type": "NETWORK_FEE"
+      }
+    ],
+    "ineligible_by_reason": {
+      "SLOT_LIMIT": 62,
+      "UNQUALIFIED_COSTS": 9,
+      "UNSUPPORTED_FEE_MODE_HOLDER_REWARD": 1,
+      "UNSUPPORTED_FEE_MODE_MAYHEM": 4,
+      "UNSUPPORTED_QUOTE": 16,
+      "VENUE_CURVE_COMPLETE": 1
+    },
+    "internal_errors": 0,
+    "migration_or_curve_complete_exposures": [],
+    "positions_with_canonical_gap": [],
+    "provider_disconnects": 0,
+    "quality_events": 3530,
+    "quote_unknown_rejects": {},
+    "recorder_overflows": 0,
+    "run_quality_status": "OK",
+    "run_status": "COMPLETED",
+    "sol_only_rejects": {
+      "UNSUPPORTED_QUOTE": 16
+    }
+  },
+  "query_version": "REPORT_QUERY_V1",
+  "run_id": "p0_exit_sanity_paper_20260919T223903Z_854405",
+  "spec_hash": "40fe4ab8130a732ca8a1023c2fb6e0165fc2832e91a6dac0e81d0ddd1e7036f5"
+}

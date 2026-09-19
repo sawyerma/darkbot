@@ -1,0 +1,16 @@
+{
+  "source": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/data/edge_probe_01.sqlite",
+  "backup": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/data/evidence/edge_probe_01_20260919T222709Z.sqlite",
+  "backup_sha256": "e4fb90452c3e897ff89eec16c704a2219fe2040f3ec558a52ca029c9bf617675",
+  "created_utc": "20260919T222709Z",
+  "integrity_check": "ok",
+  "code_revision": "48c21d9f1219321fef5ccb3b77e24b38d469f4c3",
+  "runs": [
+    {
+      "run_id": "edge_probe_01_paper_20260919T220756Z_804f03",
+      "status": "INTERRUPTED",
+      "started_utc": "2026-09-19T22:07:56.198997Z",
+      "ended_utc": "2026-09-19T22:21:40.765898Z"
+    }
+  ]
+}

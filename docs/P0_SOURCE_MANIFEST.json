@@ -1,0 +1,15 @@
+{
+  "base_commit": "48c21d9f1219321fef5ccb3b77e24b38d469f4c3",
+  "state": "uncommitted P0 block; no commit or push performed",
+  "files": {
+    "darkbot/domain.py": "1764a71c918c5353b0c6e7c781c14c7696e9f9d3fda262c3dfea186ae941ac26",
+    "darkbot/market.py": "a837d1d7734e4d59bad11bc5ea436f73506054a6b3879e4905432243f52fe30c",
+    "darkbot/paper.py": "7ce65d6409f3fc7fb28082eb1e23f35251bb111d84057961ed49d322780e69d6",
+    "darkbot/replay.py": "19fbae7c1dde62338e703798d4e0c1e2a17083d19ed2386e83e2911a23974afb",
+    "tests/test_p0_exit_liveness.py": "fb5a4a620d7533631a6d080469983bcfcb5056c835e02a620c7f0269e8eb6edc",
+    "tests/test_t01_t15_feeds_engine.py": "00f0fab76423edc1553a7655843d61f3f18cae6a2a6d28e7e8ebd4177bfe4f4a",
+    "tests/fixtures/edge_probe_01_p2.json": "f08652d93f0f04138c6e004808ab3d097248efbe58500893cdf2eade5cf59cf6",
+    "docs/SPEC.json": "40fe4ab8130a732ca8a1023c2fb6e0165fc2832e91a6dac0e81d0ddd1e7036f5",
+    "config/phase1.json": "461b3fb1f458404fb3ad015b8bb8d2c7899dd25d2fadfb48971480de93fb74ca"
+  }
+}

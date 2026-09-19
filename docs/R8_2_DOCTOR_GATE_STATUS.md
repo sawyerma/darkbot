@@ -1,7 +1,7 @@
 # R8_2 – Doctor-Gate-Nachtrag (2026-09-20)
 
 Ausgangscommit: `1ac8e8be7f61a9f74b93eadd551d1a050cc2d7d0` (`R8_2`).
-Korrektur direkt im Originalrepository, noch nicht committed/gepusht. SPEC unverändert.
+Korrektur direkt im Originalrepository, inzwischen in `48c21d9f1219321fef5ccb3b77e24b38d469f4c3` (`R8_2b`) committed. SPEC unverändert.
 
 ## Korrektur und Regression
 

@@ -312,7 +312,9 @@ class Normalizer:
         completeness = Completeness.COMPLETE
         error = None
         for d in decoded:
-            if d.tail_bytes and d.kind != "create" and not bool(d.fields.get("tail_verified")):
+            # Already recognized administrative events are deliberately ignored by
+            # the decoder. Their payload length is not an unverified trade tail.
+            if d.tail_bytes and d.kind not in ("create", "ignored") and not bool(d.fields.get("tail_verified")):
                 completeness = Completeness.PARTIAL
                 error = "UNVERIFIED_EVENT_TAIL"
             if d.kind == "trade":
@@ -519,6 +521,8 @@ class MarketReducer:
                         self._close_decode_gap(st, raw.receive_mono_ns)
                     self._set_state(st, ev, cid, raw, envelope.slot)
                     applied_up = True
+                    if ev.mint not in result.touched:
+                        result.touched.append(ev.mint)
                 if ev.event_type == EventType.CREATE:
                     st.account_profile_id = ev.extra.get("account_profile_id")
                 result.events.append(EventApply(ev, cid, ValidationStatus.VALID, True, applied_up, False, upgraded=True, profile_upgraded=profile_upgrade))

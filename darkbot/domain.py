@@ -482,6 +482,8 @@ class PositionRecord:
     tip_lamports: int = 0
     open_intent_id: str | None = None
     retry_not_before_mono_ns: int | None = None
+    exit_quote_blocked_since_mono_ns: int | None = None
+    exit_quote_recoverable: bool = False
 
 
 def decimal_str(value: Decimal | None) -> str | None:

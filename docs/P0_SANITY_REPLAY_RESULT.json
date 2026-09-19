@@ -1,0 +1,206 @@
+{
+  "replay_reproducible": true,
+  "economic_position_parity": true,
+  "cash_parity": true,
+  "paper_positions": [
+    {
+      "mint": "2Vsa64CS6unDvnnZwUUwZ37hDDiDrfdTbSo6n6TZpump",
+      "state": "CLOSED",
+      "exit_reason": "CREATOR_SELL",
+      "origin_trigger": "CREATOR_SELL",
+      "net_pnl": -3391236,
+      "tokens": 0,
+      "entry_cost": 99604825,
+      "fees": 2457986,
+      "unresolved_reason": null,
+      "research_status": "CLOSED"
+    },
+    {
+      "mint": "DQtD28McdRBXduw8WCCfezXonnswy9bmpHYAJtD1pump",
+      "state": "CLOSED",
+      "exit_reason": "TARGET",
+      "origin_trigger": "TARGET",
+      "net_pnl": 61721029,
+      "tokens": 0,
+      "entry_cost": 99604825,
+      "fees": 3282191,
+      "unresolved_reason": null,
+      "research_status": "CLOSED"
+    },
+    {
+      "mint": "9Zki5soLwkRWgdbbj1VEPdtEYsETfGrm9uVuZ94Npump",
+      "state": "OPEN",
+      "exit_reason": null,
+      "origin_trigger": null,
+      "net_pnl": null,
+      "tokens": 3383434847520,
+      "entry_cost": 99604825,
+      "fees": 1234825,
+      "unresolved_reason": null,
+      "research_status": "CENSORED_RUN_END"
+    }
+  ],
+  "replay_positions": [
+    {
+      "mint": "2Vsa64CS6unDvnnZwUUwZ37hDDiDrfdTbSo6n6TZpump",
+      "state": "CLOSED",
+      "exit_reason": "CREATOR_SELL",
+      "origin_trigger": "CREATOR_SELL",
+      "net_pnl": -3391236,
+      "tokens": 0,
+      "entry_cost": 99604825,
+      "fees": 2457986,
+      "unresolved_reason": null,
+      "research_status": "CLOSED"
+    },
+    {
+      "mint": "DQtD28McdRBXduw8WCCfezXonnswy9bmpHYAJtD1pump",
+      "state": "CLOSED",
+      "exit_reason": "TARGET",
+      "origin_trigger": "TARGET",
+      "net_pnl": 61721029,
+      "tokens": 0,
+      "entry_cost": 99604825,
+      "fees": 3282191,
+      "unresolved_reason": null,
+      "research_status": "CLOSED"
+    },
+    {
+      "mint": "9Zki5soLwkRWgdbbj1VEPdtEYsETfGrm9uVuZ94Npump",
+      "state": "OPEN",
+      "exit_reason": null,
+      "origin_trigger": null,
+      "net_pnl": null,
+      "tokens": 3383434847520,
+      "entry_cost": 99604825,
+      "fees": 1234825,
+      "unresolved_reason": null,
+      "research_status": "CENSORED_RUN_END"
+    }
+  ],
+  "replay_digest": {
+    "positions": [
+      {
+        "mint": "2Vsa64CS6unDvnnZwUUwZ37hDDiDrfdTbSo6n6TZpump",
+        "state": "CLOSED",
+        "exit_reason": "CREATOR_SELL",
+        "origin_trigger": "CREATOR_SELL",
+        "net_pnl": -3391236,
+        "tokens": 0,
+        "entry_cost": 99604825,
+        "fees": 2457986,
+        "exit_attempts": 1,
+        "unresolved_reason": null,
+        "research_status": "CLOSED",
+        "open_mono_ns": 1658694916349208,
+        "close_mono_ns": 1658752228810250
+      },
+      {
+        "mint": "DQtD28McdRBXduw8WCCfezXonnswy9bmpHYAJtD1pump",
+        "state": "CLOSED",
+        "exit_reason": "TARGET",
+        "origin_trigger": "TARGET",
+        "net_pnl": 61721029,
+        "tokens": 0,
+        "entry_cost": 99604825,
+        "fees": 3282191,
+        "exit_attempts": 1,
+        "unresolved_reason": null,
+        "research_status": "CLOSED",
+        "open_mono_ns": 1658766384261083,
+        "close_mono_ns": 1658768098499666
+      },
+      {
+        "mint": "9Zki5soLwkRWgdbbj1VEPdtEYsETfGrm9uVuZ94Npump",
+        "state": "OPEN",
+        "exit_reason": null,
+        "origin_trigger": null,
+        "net_pnl": null,
+        "tokens": 3383434847520,
+        "entry_cost": 99604825,
+        "fees": 1234825,
+        "exit_attempts": 0,
+        "unresolved_reason": null,
+        "research_status": "CENSORED_RUN_END",
+        "open_mono_ns": 1658779005593833,
+        "close_mono_ns": null
+      }
+    ],
+    "attempts": [
+      {
+        "id": "1_buy1",
+        "side": "BUY",
+        "n": 1,
+        "submit": 1658694916349208,
+        "scheduled": 1658694916349208,
+        "quote_state": "4eEvX6u1MEhJS6eCLteU4uDKBpDXXvbC69sXTFcPpHTP6pFDnGkiSeNffMKABkjiXX1hDa3wTRjjpW1zjmvoZch6|118|2Vsa64CS6unDvnnZwUUwZ37hDDiDrfdTbSo6n6TZpump|BUY"
+      },
+      {
+        "id": "1_sell1",
+        "side": "SELL",
+        "n": 1,
+        "submit": 1658752228810250,
+        "scheduled": 1658752228810250,
+        "quote_state": "4oN4QuYku38wVq48DuAiTBAsGvU8CZiHv1GocydPyeVBLDtqqDgFqx4Cn3tYqxhmcQuNQCFBdQqfcGsHxmwZ482K|34|2Vsa64CS6unDvnnZwUUwZ37hDDiDrfdTbSo6n6TZpump|SELL"
+      },
+      {
+        "id": "2_buy1",
+        "side": "BUY",
+        "n": 1,
+        "submit": 1658766384261083,
+        "scheduled": 1658766384261083,
+        "quote_state": "3kkxB6NSySe7iYHJYAXv4wULRBQLEbSZQy7YRzfTP52rLatprHPYmDPQx9fvYuUibf1bYGGczi94eYpLrnHiJfpH|101|DQtD28McdRBXduw8WCCfezXonnswy9bmpHYAJtD1pump|BUY"
+      },
+      {
+        "id": "2_sell1",
+        "side": "SELL",
+        "n": 1,
+        "submit": 1658768098499666,
+        "scheduled": 1658768098499666,
+        "quote_state": "3t5mbjUc591Mqo5XRMSWEN5DkwUqBpFVwFX2YMLauc21ckjonXZ2BvEgp7Loc24xHTerNQgHfW4wGUfpSpqV5ur|43|DQtD28McdRBXduw8WCCfezXonnswy9bmpHYAJtD1pump|BUY"
+      },
+      {
+        "id": "3_buy1",
+        "side": "BUY",
+        "n": 1,
+        "submit": 1658779005593833,
+        "scheduled": 1658779005593833,
+        "quote_state": "5g1Q2K3iG8MEPZCcfeMhfZj7LQwHs6qmsdaSvLrssseDeQPiDuBFgDLTFsRLf7z1ia3p9eGyjRRa8sbFBxXenCf2|105|9Zki5soLwkRWgdbbj1VEPdtEYsETfGrm9uVuZ94Npump|BUY"
+      }
+    ],
+    "cash": 957195528,
+    "reserved": 15600,
+    "locked_rent": 1513840,
+    "ledger_cash_sum": -42788872,
+    "counters": {
+      "raw_messages": 43614,
+      "decode_errors": 1189,
+      "internal_errors": 0,
+      "creates": 96,
+      "creates_actionable": 3,
+      "hints": 0,
+      "duplicates": 0,
+      "entry_intents": 3,
+      "entry_fills": 3,
+      "entry_failed": 0,
+      "exits_creator": 1,
+      "exits_target": 1,
+      "exits_timeout": 0,
+      "exit_fills": 2,
+      "exit_failed_attempts": 0,
+      "exit_exhausted": 0,
+      "unresolved": 0,
+      "censored": 1,
+      "ineligible": {
+        "UNQUALIFIED_COSTS": 9,
+        "SLOT_LIMIT": 62,
+        "UNSUPPORTED_QUOTE": 16,
+        "UNSUPPORTED_FEE_MODE_MAYHEM": 4,
+        "UNSUPPORTED_FEE_MODE_HOLDER_REWARD": 1,
+        "VENUE_CURVE_COMPLETE": 1
+      }
+    }
+  },
+  "dataset_hash": "bcf1f57a3547f76c0b75a15b399d5dcd8232c82579fe5c2d0200386ebee6fa22",
+  "note": "Financial/state parity; processing timestamps are not claimed identical."
+}

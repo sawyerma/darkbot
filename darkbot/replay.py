@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from decimal import Decimal
 from datetime import datetime, timezone
+from itertools import groupby
 from typing import Any
 
 from darkbot.clock import ReplayClock, ReplayScheduler
@@ -132,14 +133,17 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
     next_fee = next(fee_iter, None)
     prefix = new_run_id if persist else replay_input.source_run_id
 
-    def apply_fees_until(t: int) -> None:
+    def apply_fees_until(t: int, notify: bool = True) -> list[FeeSnapshot]:
         nonlocal next_fee
+        snapshots = []
         while next_fee is not None and next_fee.received_mono_ns <= t:
             renamed = FeeSnapshot(**{**{k: getattr(next_fee, k) for k in next_fee.__slots__}, "fee_snapshot_id": f"{new_run_id}_{next_fee.fee_snapshot_id}"}) if persist else next_fee
             setattr(fee_cache, {"PROTOCOL_GLOBAL_ACCOUNT": "protocol", "NETWORK_FEE": "network", "RENT_EXEMPTION": "rent", "PRIORITY_POLICY": "priority_policy"}[next_fee.source_type], renamed)
-            if owner_ref:
-                owner_ref[0].on_fee_snapshots([renamed])
+            snapshots.append(renamed)
             next_fee = next(fee_iter, None)
+        if snapshots and owner_ref and notify:
+            owner_ref[0].on_fee_snapshots(snapshots)
+        return snapshots
 
     owner_ref: list[StateOwner] = []
     lateness = replay_input.lateness
@@ -166,24 +170,31 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
             ti += 1
 
     def fire_until(t: int, strict: bool = False) -> None:
-        due = scheduler.next_due_ns()
-        while due is not None and (due < t if strict else due <= t):
+        while True:
+            pending = [v for v in (scheduler.next_due_ns(), next_fee.received_mono_ns if next_fee else None) if v is not None]
+            if not pending:
+                return
+            due = min(pending)
+            if not (due < t if strict else due <= t):
+                return
             apply_health_until(due)  # a health change at or before the timer is visible to the callback, exactly as in PAPER
             clock.advance_to(max(clock.monotonic_ns(), due))
             apply_fees_until(clock.monotonic_ns())
             scheduler.fire_due(due, clock.monotonic_ns())
-            due = scheduler.next_due_ns()
 
-    for receive, seq, feed_id, conn_id, utc, payload in replay_input.observations:
+    for receive, observations in groupby(replay_input.observations, key=lambda row: row[0]):
         if receive > stop_at:
             break
         fire_until(receive, strict=True)  # same model time: market/venue state first, then scheduled fills
         apply_health_until(receive)
         clock.advance_to(max(clock.monotonic_ns(), receive))
-        apply_fees_until(receive)
-        owner.on_raw(RawEnvelope(feed_id, conn_id, receive, utc, seq, payload))
-        if seq % 5000 == 0:
-            owner.maybe_evict(receive)
+        snapshots = apply_fees_until(receive, notify=False)
+        for _, seq, feed_id, conn_id, utc, payload in observations:
+            owner.on_raw(RawEnvelope(feed_id, conn_id, receive, utc, seq, payload))
+            if seq % 5000 == 0:
+                owner.maybe_evict(receive)
+        if snapshots:
+            owner.on_fee_snapshots(snapshots)
     # Model time never runs past the recorded window: timers beyond it are not fired (no invented fills, exposures stay censored).
     # drain_ns can only extend within the recording; a research embargo beyond it is a no-op (positions crossing the end are purged/censored).
     horizon = stop_at if drain_ns is None else min(stop_at + drain_ns, replay_input.end_mono_ns)

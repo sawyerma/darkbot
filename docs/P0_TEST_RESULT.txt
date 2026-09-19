@@ -1,0 +1,36 @@
+Original repository: /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot
+Base commit: 48c21d9f1219321fef5ccb3b77e24b38d469f4c3 plus P0 working-tree changes
+Runner: Python unittest discovery; output cwd temporary, source from original repository.
+
+............paper: no eligible feed was ready (NOT_READY) – see feed_setup; exit code 4
+.................................................................................................................................
+----------------------------------------------------------------------
+Ran 141 tests in 4.298s
+
+OK
+{
+  "run_id": "run",
+  "status": "INTERRUPTED",
+  "readiness": "CAPTURE_READY",
+  "feeds_started": 1,
+  "artifacts": [
+    "exports/camp/run/report.json",
+    "exports/camp/run/positions.csv",
+    "exports/camp/run/latency_by_feed.csv",
+    "exports/camp/run/summary.md"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA"
+}
+{
+  "run_id": "run",
+  "status": "COMPLETED",
+  "readiness": "NOT_READY",
+  "feeds_started": 0,
+  "artifacts": [
+    "exports/camp/run/report.json",
+    "exports/camp/run/positions.csv",
+    "exports/camp/run/latency_by_feed.csv",
+    "exports/camp/run/summary.md"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA"
+}

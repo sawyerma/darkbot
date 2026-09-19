@@ -1,0 +1,229 @@
+{
+  "readiness": "ECONOMIC_PAPER_READY",
+  "run_id": "p0_exit_doctor_doctor_20260919T223658Z_204b77",
+  "checks": {
+    "D01": {
+      "status": "PASS",
+      "python": "3.14.3 (main, Feb  3 2026, 15:32:20) [Clang 17.0.0 (clang-1700.6.3.2)]",
+      "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "os": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+      "packages": {
+        "websockets": "15.0.1"
+      },
+      "config_hash": "ad54674c525a480188adbaf3d19a17b87651b12ff37709c47f26adc04c128bed",
+      "mode": "PAPER",
+      "live_broadcast_enabled": false,
+      "monthly_paid_services_allowed": false,
+      "disk_free_bytes": 109961117696,
+      "migrations": [
+        "0001_phase1_spec_1_3_2.sql",
+        "0002_run_end_mono.sql",
+        "0003_attempt_provenance.sql",
+        "0004_run_window.sql",
+        "0005_fee_evidence.sql",
+        "0006_token_account_profiles.sql"
+      ],
+      "integrity": {
+        "foreign_key_check": [],
+        "integrity_check": "ok",
+        "tables": [
+          "config_snapshots",
+          "decisions",
+          "execution_attempts",
+          "feature_snapshots",
+          "fee_snapshots",
+          "feed_observations",
+          "ledger",
+          "market_events",
+          "phase1_applied_migrations",
+          "phase1_schema_version",
+          "positions",
+          "quality_events",
+          "quote_snapshots",
+          "reports",
+          "research_variants",
+          "runs"
+        ],
+        "schema_version": 1,
+        "foreign_keys_pragma": 1
+      },
+      "write_readback": true
+    },
+    "D02": {
+      "status": "PASS",
+      "feeds": {
+        "helius_standard": "FAILED missing env ('HELIUS_API_KEY',)",
+        "existing_rpc": "READY",
+        "pumpportal": "DISABLED_OPTIONAL missing env ('PUMPPORTAL_API_KEY',)"
+      },
+      "missing_env": {
+        "helius_standard": [
+          "HELIUS_API_KEY"
+        ],
+        "pumpportal": [
+          "PUMPPORTAL_API_KEY"
+        ]
+      },
+      "rpc_http": "SET",
+      "paid_subscriptions": "NONE (only logsSubscribe / subscribeNewToken / subscribeMigration)"
+    },
+    "D03": {
+      "status": "PASS",
+      "create_samples_actionable_sol": 22,
+      "create_samples_observed_total": 24,
+      "trade_samples": 509,
+      "sol_scope_counts": {
+        "SOL_WSOL": 23,
+        "UNSUPPORTED_QUOTE": 1
+      },
+      "create_tail_layouts_seen": [
+        "CreateEvent_ffe966c42f1a"
+      ],
+      "decoder_version": "PUMP_LOG_DECODER_IDL_ffe966c42f1a_TOKEN_ACCOUNT_PROFILE_V1",
+      "idl": "sha256:ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+      "observations": 14201,
+      "avg_receive_to_decode_ns": 75765.77100204211,
+      "note": "unpinned CreateEvent tails stay QUOTE_UNKNOWN_LAYOUT_UNVERIFIED (observe-only) until pinned in config.protocol.create_event_tail_layouts"
+    },
+    "D04": {
+      "status": "PASS",
+      "fixture_checks": {
+        "create_decoded": true,
+        "creator_sell_detected": true,
+        "complete_detected": true,
+        "migration_detected": true,
+        "all_pass": true
+      },
+      "live_creator_sell_count": 7,
+      "live_completion_or_migration_count": 4,
+      "live_evidence": "OBSERVED",
+      "note": "fixture success is not proof of live coverage"
+    },
+    "D05": {
+      "status": "PASS",
+      "snapshots": {
+        "PROTOCOL_GLOBAL_ACCOUNT": {
+          "source_type": "PROTOCOL_GLOBAL_ACCOUNT",
+          "validation_status": "VALID",
+          "fee_snapshot_id": "p0_exit_doctor_doctor_20260919T223658Z_204b77_fee_protocol_1"
+        },
+        "PRIORITY_POLICY": {
+          "source_type": "PRIORITY_POLICY",
+          "validation_status": "VALID",
+          "fee_snapshot_id": "p0_exit_doctor_doctor_20260919T223658Z_204b77_fee_priority_policy_7"
+        },
+        "NETWORK_FEE": {
+          "source_type": "NETWORK_FEE",
+          "validation_status": "VALID",
+          "fee_snapshot_id": "p0_exit_doctor_doctor_20260919T223658Z_204b77_fee_network_8"
+        },
+        "RENT_EXEMPTION": {
+          "source_type": "RENT_EXEMPTION",
+          "validation_status": "VALID",
+          "fee_snapshot_id": "p0_exit_doctor_doctor_20260919T223658Z_204b77_fee_rent_4"
+        }
+      },
+      "cost_status": "VERIFIED",
+      "fee_errors": [],
+      "no_transfers": true,
+      "observed_economic_profile_samples": 13,
+      "fee_probe_scope": "getFeeForMessage verifies network fees, not transaction execution or landing",
+      "global_account_verification_status": "VERIFIED_OFFICIAL_IDL_SHA256_ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+      "decoded_global_account": {
+        "raw_values": "{\"admin_set_creator_authority\":\"UqN2p5bAzBqYdHXcgB6WLtuVrdvmy9JSAtgqZb3CMKw\",\"authority\":\"FFWtrEQ4B4PKQoVuHYzZq8FabGkVatYzDpEVHsK5rrhF\",\"buyback_basis_points\":5000,\"buyback_fee_recipients\":\"['5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD', '9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7', 'GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL', '3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR', '5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6', 'EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL', '5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD', 'A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW']\",\"candidate_creator_fee_bps\":5,\"candidate_protocol_fee_bps\":95,\"create_v2_enabled\":true,\"creator_fee_basis_points\":5,\"creator_fee_configurable\":true,\"data_len\":1087,\"enable_migrate\":true,\"fee_basis_points\":95,\"fee_config\":{\"admin\":\"FFWtrEQ4B4PKQoVuHYzZq8FabGkVatYzDpEVHsK5rrhF\",\"bump\":253,\"exotic_flat_fees\":{\"creator_fee_bps\":30,\"lp_fee_bps\":0,\"protocol_fee_bps\":95},\"fee_tiers\":[{\"fees\":{\"creator_fee_bps\":30,\"lp_fee_bps\":0,\"protocol_fee_bps\":95},\"market_cap_lamports_threshold\":0}],\"flat_fees\":{\"creator_fee_bps\":30,\"lp_fee_bps\":0,\"protocol_fee_bps\":95},\"stable_fee_tiers\":[{\"fees\":{\"creator_fee_bps\":30,\"lp_fee_bps\":0,\"protocol_fee_bps\":95},\"market_cap_lamports_threshold\":0}]},\"fee_config_allocated_bytes\":4097,\"fee_config_idl\":\"sha256:d87b52305fd6b2ec487d4ba1e08a49990c23fa9b8b76092b2097df0164fa3859\",\"fee_config_owner\":\"pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ\",\"fee_config_slot\":448544378,\"fee_recipient\":\"62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV\",\"fee_recipients\":\"['7VtfL8fvgNfhz17qKRMjzQEXgbdpnHHHQRh54R9jP2RJ', '7hTckgnGnLQR6sdH7YkqFTAA7VwTfYFaZ6EhEsU3saCX', '9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz', 'AVmoTthdrX6tKt4nDjco2D775W2YK3sDhxPcMmzUAmTY', 'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM', 'FWsW1xNtWscwNmKv6wVsU1iTzRN6wmmk3MjxRP5tT7hz', 'G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP']\",\"holder_reward_claim_authority\":\"HckQ93Xqjjo8mwt5pNPWvyCTZXQZ858rvzmm7ZRrZg9t\",\"initial_real_token_reserves\":793100000000000,\"initial_virtual_quote_reserves\":4292000000,\"initial_virtual_sol_reserves\":30000000000,\"initial_virtual_token_reserves\":1073000000000000,\"initialized\":true,\"is_cashback_enabled\":true,\"is_holder_reward_enabled\":true,\"layout_verification_status\":\"VERIFIED_OFFICIAL_IDL_SHA256_ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b\",\"max_configurable_creator_fee_bps\":300,\"mayhem_mode_enabled\":true,\"owner\":\"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P\",\"pool_migration_fee\":15000001,\"reserved_fee_recipient\":\"GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS\",\"reserved_fee_recipients\":\"['4budycTjhs9fD6xw62VBducVTNgMgJJ5BgtKq7mAZwn6', '8SBKzEQU4nLSzcwF4a74F2iaUDQyTfjGndn6qUWBnrpR', '4UQeTP1T39KZ9Sfxzo3WR5skgsaP6NZa87BAkuazLEKH', '8sNeir4QsLsJdYpc9RZacohhK1Y5FLU3nC5LXgYB4aa6', 'Fh9HmeLNUMVCvejxCtCL2DbYaRyBFVJ5xrWkLnMH6fdk', '463MEnMeGyJekNZFQSTUABBEbLnvMTALbT6ZmsxAbAdq', '6AUH3WEHucYZyC61hqpqYUWVto5qA5hjHuNQ32GNnNxA']\",\"set_creator_authority\":\"39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg\",\"token_total_supply\":1000000000000000,\"whitelist_pda\":\"BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s\",\"whitelisted_quote_mints\":\"['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v']\",\"withdraw_authority\":\"39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg\"}",
+        "validation_status": "VALID"
+      },
+      "note": "layout must be marked VERIFIED_* in config.protocol.global_account after checking decoded values against the official IDL; until then protocol fees stay LAYOUT_UNVERIFIED"
+    },
+    "D06": {
+      "status": "PASS",
+      "persisted_observations": 14201,
+      "replay_reproducible": true,
+      "replay_creates": 24,
+      "positions_booked_in_doctor": 0,
+      "report_qualification": "UNQUALIFIED_COSTS",
+      "writer": {
+        "committed_records": 15520,
+        "failures": 0,
+        "fk_holds": 0,
+        "quarantined_records": 0,
+        "disk_error": false
+      }
+    }
+  },
+  "summary": {
+    "run_id": "p0_exit_doctor_doctor_20260919T223658Z_204b77",
+    "status": "COMPLETED",
+    "stop_reason": "max_duration",
+    "quality": "OK",
+    "readiness": "ECONOMIC_PAPER_READY",
+    "feeds_started": 1,
+    "feeds": {
+      "existing_rpc": {
+        "messages": 13969,
+        "reconnects": 0,
+        "connections": 1,
+        "acks": 1,
+        "ack_failures": 0,
+        "transport_errors": 0,
+        "ready": true,
+        "last_error": null
+      }
+    },
+    "feed_setup": {
+      "helius_standard": "FAILED missing env ('HELIUS_API_KEY',)",
+      "existing_rpc": "STARTING",
+      "pumpportal": "DISABLED_OPTIONAL missing env ('PUMPPORTAL_API_KEY',)"
+    },
+    "owner": {
+      "raw": 13969,
+      "creates": 24,
+      "actionable": 0,
+      "intents": 0,
+      "fills": 0,
+      "entry_failed": 0,
+      "exit_fills": 0,
+      "unresolved": 0,
+      "open": 0,
+      "cash": 1000000000,
+      "reserved": 0,
+      "locked_rent": 0,
+      "realized_pnl": 0,
+      "gap_open": false,
+      "recorder_depth": 0,
+      "recorder_overflow": 0,
+      "feeds": {
+        "existing_rpc": true
+      },
+      "ineligible": {
+        "UNQUALIFIED_COSTS": 3,
+        "VENUE_CURVE_COMPLETE": 1,
+        "UNSUPPORTED_QUOTE": 1,
+        "CAPTURE_ONLY_MODE": 19
+      },
+      "internal_errors": 0,
+      "last_error": null
+    },
+    "cash_reconciliation": {
+      "initial": 1000000000,
+      "ledger_cash_sum": 0,
+      "cash_plus_reserved": 1000000000,
+      "reconciled": true,
+      "locked_rent": 0
+    },
+    "writer": {
+      "committed_records": 15520,
+      "failures": 0,
+      "fk_holds": 0,
+      "quarantined_records": 0,
+      "disk_error": false
+    },
+    "fee_errors": [],
+    "db": "data/p0_exit_doctor_20260920.sqlite",
+    "quarantined_records": 0,
+    "prior_campaign_mints": 0,
+    "economic_profile_samples_at_run_end": 13,
+    "runtime_readiness": "ECONOMIC_PAPER_READY"
+  },
+  "note": "Short probe proves integration only, not completeness, reliability, landing latency or expectancy."
+}

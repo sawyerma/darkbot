@@ -195,6 +195,13 @@ class StateOwner:
                     break
                 keep.add(i)
             self.fee_history = [item for i, item in enumerate(self.fee_history) if i in keep]
+        # Background cost recovery is itself a wakeup; a quiet mint must not
+        # need another trade to release an already latched liquidation intent.
+        now = self.clock.monotonic_ns()
+        for pid in sorted(self.active_ids):
+            pos = self.positions[pid]
+            if pos.latched_triggers:
+                self._maybe_exit(pos, self.reducer.state_for(pos.mint), now)
 
     def basis_at(self, mono_ns: int) -> CostBasis:
         latest: dict[str, Any] = {}
@@ -497,24 +504,29 @@ class StateOwner:
         pos = self.positions[self.position_by_mint[mint]]
         st = self.reducer.states[mint]
         now = self.clock.monotonic_ns()
+        if (pos.entry_fill_mono_ns is not None and pos.token_balance_base_units > 0
+                and st.creator_sell_event_id is not None and self.cfg.strategy["creator_sell_exit_enabled"]
+                and not any(r == ExitReason.CREATOR_SELL for r, _ in pos.latched_triggers)):
+            pos.latched_triggers.append((ExitReason.CREATOR_SELL, now))
+            if pos.origin_trigger is None:
+                pos.origin_trigger = pick_exit_trigger(pos.latched_triggers)[0]
+            self._position_record(pos)
         if st.venue_state != VenueState.BONDING_CURVE_ACTIVE and pos.venue_state != st.venue_state:
             pos.venue_state = st.venue_state
-            if pos.state in (PositionState.OPEN,):
+            if pos.state == PositionState.OPEN or pos.exit_quote_recoverable:
                 self._unresolved(pos, self._venue_reason(st.venue_state), now)
             elif pos.state in (PositionState.ENTRY_PENDING, PositionState.EXIT_PENDING):
                 pos.quality_status = "VENUE_INVALIDATED_WHILE_PENDING"
                 self._position_record(pos)
             return
-        if pos.state not in (PositionState.OPEN,):
+        if pos.state != PositionState.OPEN and not pos.exit_quote_recoverable:
             return
         if st.quote_uncertain:
             self._unresolved(pos, "QUOTE_CONFLICT_ON_OPEN_POSITION", now)
             return
         if self.reducer.gap_open_since is not None or st.coverage_state == CoverageState.GAP or self.reducer.gap_intersects(pos.open_mono_ns or now, now):
             pos.canonical_provider_gap_flag = True
-        if st.creator_sell_event_id is not None and self.cfg.strategy["creator_sell_exit_enabled"] and not any(r == ExitReason.CREATOR_SELL for r, _ in pos.latched_triggers):
-            pos.latched_triggers.append((ExitReason.CREATOR_SELL, now))
-        if not any(r == ExitReason.TARGET for r, _ in pos.latched_triggers):
+        if st.decode_gap_since is None and not any(r == ExitReason.TARGET for r, _ in pos.latched_triggers):
             curve = self._curve(st)
             if curve is not None:
                 nlv = self.engine.net_liquidation_value(curve, self.basis_getter(), now, st.coverage_state, pos.token_balance_base_units, pos.failed_attempt_cost_lamports)
@@ -523,7 +535,7 @@ class StateOwner:
         self._maybe_exit(pos, st, now)
 
     def _maybe_exit(self, pos: PositionRecord, st: MarketState, now: int) -> None:
-        if pos.state != PositionState.OPEN or pos.exit_intent_pending or pos.exhausted or not pos.latched_triggers:
+        if (pos.state != PositionState.OPEN and not pos.exit_quote_recoverable) or pos.exit_intent_pending or pos.exhausted or not pos.latched_triggers:
             return
         if pos.retry_not_before_mono_ns is not None and now < pos.retry_not_before_mono_ns:
             return  # retries must advance time: wait for the scheduled backoff timer
@@ -550,19 +562,28 @@ class StateOwner:
                                                  "data_ready_mono_ns": now, "decision_done_mono_ns": decision_done, "intent_enqueued_mono_ns": None, "action": action.value, "reason": f"EXIT_LATCHED_{quote.reason}", "position_id": pos.position_id,
                                                  "quote_state_event_id": st.last_state_event_id, "quote_age_ns": None, "quote_snapshot_id": None, "arrival_sequence": None}))
             pos.quality_status = f"EXIT_LATCHED_{quote.reason}"
+            self._position_record(pos)
             if quote.reason == "VENUE_INVALID":
                 self._unresolved(pos, self._venue_reason(st.venue_state), now)
             elif quote.reason in ("QUOTE_CONFLICT", "UNSUPPORTED_QUOTE"):
                 self._unresolved(pos, f"{quote.reason}_ON_OPEN_POSITION", now)
+            else:
+                self._watch_exit_quote(pos, now)
             return
         assert isinstance(quote, QuoteSnapshot)
         decision_done = self.clock.monotonic_ns()
         if self._quote_stale(quote, decision_done):
             pos.quality_status = "EXIT_LATCHED_QUOTE_STALE"
+            self._position_record(pos)
             self._record(RowRecord("decisions", {"decision_id": decision_id, "run_id": self.run_id, "mint": pos.mint, "event_id": st.last_state_event_id, "policy_hash": self.cfg.policy_hash, "receive_mono_ns": st.last_state_receive_mono_ns,
                                                  "data_ready_mono_ns": now, "decision_done_mono_ns": decision_done, "intent_enqueued_mono_ns": None, "action": DecisionAction.CANCEL_INTENT.value, "reason": "QUOTE_STALE", "position_id": pos.position_id,
                                                  "quote_state_event_id": quote.quote_state_event_id, "quote_age_ns": decision_done - quote.created_mono_ns, "quote_snapshot_id": None, "arrival_sequence": None}))
+            self._watch_exit_quote(pos, now)
             return
+        pos.exit_quote_blocked_since_mono_ns = None
+        pos.exit_quote_recoverable = False
+        pos.unresolved_reason = None
+        pos.quality_status = "OK"
         attempt_no = pos.exit_attempts + 1
         intent = Intent(f"{pos.position_id}_x{attempt_no}", pos.position_id, pos.mint, Side.SELL, attempt_no, decision_id, quote, {"protocol": quote.fee_snapshot_id}, self.exit_delay_ns, decision_done, origin_trigger=pos.origin_trigger)
         handle = self.adapter.submit(intent)
@@ -581,11 +602,33 @@ class StateOwner:
                                   RowRecord("execution_attempts", self._attempt_row(handle, decision_id, quote, basis, AttemptStatus.SUBMITTED)),
                                   ("position", pos))))
 
+    def _watch_exit_quote(self, pos: PositionRecord, now: int) -> None:
+        """One diagnostic deadline per blocked intent, without paid attempts or
+        polling. Later trusted state/cost inputs may recover this blockage only."""
+        if pos.exit_quote_blocked_since_mono_ns is not None:
+            return
+        pos.exit_quote_blocked_since_mono_ns = now
+        due = now + self.cfg.connectivity["position_state_stale_ms"] * NS_PER_MS
+        self.scheduler.schedule_at(due, lambda actual, pid=pos.position_id, start=now: self._on_exit_quote_deadline(pid, start, actual))
+
+    def _on_exit_quote_deadline(self, position_id: str, start: int, actual: int) -> None:
+        pos = self.positions.get(position_id)
+        if pos is None or pos.state != PositionState.OPEN or pos.exit_quote_blocked_since_mono_ns != start:
+            return
+        self._maybe_exit(pos, self.reducer.state_for(pos.mint), actual)
+        if pos.state == PositionState.OPEN and pos.exit_quote_blocked_since_mono_ns == start:
+            reason = pos.quality_status
+            self._unresolved(pos, "EXIT_QUOTE_UNAVAILABLE", actual)
+            pos.exit_quote_recoverable = True
+            pos.quality_status = reason
+            self._position_record(pos)
+
     @staticmethod
     def _venue_reason(venue: VenueState) -> str:
         return {VenueState.MIGRATION_SUSPECTED: "MIGRATION_SUSPECTED_UNVERIFIED", VenueState.MIGRATED_UNSUPPORTED: "MIGRATED_UNSUPPORTED", VenueState.CURVE_COMPLETE: "CURVE_COMPLETE_UNSUPPORTED"}.get(venue, "VENUE_UNKNOWN")
 
     def _unresolved(self, pos: PositionRecord, reason: str, now: int) -> None:
+        pos.exit_quote_recoverable = False
         if pos.state == PositionState.UNRESOLVED and pos.unresolved_reason == reason:
             return
         pos.state = PositionState.UNRESOLVED

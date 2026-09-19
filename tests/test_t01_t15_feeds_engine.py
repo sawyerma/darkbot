@@ -145,7 +145,8 @@ class T06T09Rules(unittest.TestCase):
         h.owner.on_feed_health("existing_rpc", False, T0 + 2_000_000, "closed")
         h.advance(T0 + 1_000_000 + 600_000_000_000 + 1)
         self.assertEqual(pos.research_status, "CENSORED")
-        self.assertEqual(pos.state, PositionState.OPEN)  # tracker alive, no forced profit close
+        self.assertEqual(pos.state, PositionState.UNRESOLVED)  # unavailable timeout quote is explicit; tracker/exposure remain alive
+        self.assertTrue(pos.exit_quote_recoverable)
         self.assertEqual(ledger_kinds(h), ["ENTRY_FILL"])
         self.assertIn(MINT_A, h.owner.reducer.states)
         h.owner.reducer.evict_inactive(T0 + 10**15, 0, set(h.owner.position_by_mint))
