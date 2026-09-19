@@ -48,8 +48,8 @@ class Legacy5Buy5Unique:
                 owner.record_observation(obs, None, actual, status="DATA_INCOMPLETE")
                 return
             coverage_gap = (
-                owner.reducer.gap_intersects(obs.start, obs.end - 1)
-                or any((end is None or end >= obs.start) and start < obs.end for start, end in st.decode_gap_intervals)
+                owner.reducer.gap_intersects(obs.start, obs.end)
+                or any((end is None or end >= obs.start) and start <= obs.end for start, end in st.decode_gap_intervals)
             )
             if coverage_gap:
                 # A missing interval can hide BUYs, so this observation must not
@@ -73,7 +73,7 @@ class Legacy5Buy5Unique:
         for applied in result.events:
             event = applied.event
             obs = self.observations.get(event.mint)
-            if (obs is not None and obs.start <= raw.receive_mono_ns < obs.end
+            if (obs is not None and obs.start <= raw.receive_mono_ns <= obs.end
                     and envelope.signature != obs.signature and applied.is_new and applied.validation.value == "VALID"
                     and event.event_type.value == "BUY" and event.actor and applied.applied_state):
                 obs.buy_count += 1
