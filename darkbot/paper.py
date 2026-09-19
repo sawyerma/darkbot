@@ -22,6 +22,7 @@ from darkbot.domain import (
 from darkbot.execution import ExecutionPolicy, FillEvaluation, LiveBroadcastForbidden, QuoteEngine, assert_paper_boundary, book_entry_fill, book_exit_fill, book_failed_attempt, evaluate_fill, fee_terms, next_retry_submit_mono_ns
 from darkbot.market import ApplyResult, MarketReducer, Normalizer, PumpDecoder
 from darkbot.storage import ObservationRecord, RecordGroup, Recorder, RowRecord, UpdateRecord
+from darkbot.strategies import make_strategy
 from darkbot.strategy import FEATURE_SET_V1, FEATURE_SET_V2, FeatureCalculator, FeatureEvent, FeatureInputs, entry_admission, pick_exit_trigger, target_reached
 
 
@@ -29,11 +30,12 @@ class PaperExecutionAdapter:
     """submit(Intent) -> AttemptHandle; the modeled fill is scheduled after the declared delay and the
     outcome is delivered back to the StateOwner with the ACTUAL callback time."""
 
-    def __init__(self, clock: Any, scheduler: Any, mode: str, live_broadcast_enabled: bool, entry_delay_ns: int, exit_delay_ns: int, lateness_provider: Callable[[str], int] | None = None) -> None:
+    def __init__(self, clock: Any, scheduler: Any, mode: str, live_broadcast_enabled: bool, entry_delay_ns: int, exit_delay_ns: int, lateness_provider: Callable[[str], int] | None = None, delay_provider: Callable[[Intent], int] | None = None) -> None:
         assert_paper_boundary(mode, live_broadcast_enabled)
         self.clock, self.scheduler = clock, scheduler
         self.mode, self.live_broadcast_enabled = mode, live_broadcast_enabled
         self.entry_delay_ns, self.exit_delay_ns = entry_delay_ns, exit_delay_ns
+        self.delay_provider = delay_provider
         self.lateness_provider = lateness_provider  # replay: recorded callback lateness per attempt key
         self._seq = 0
         self.on_outcome: Callable[[ExecutionOutcome], None] | None = None
@@ -44,7 +46,7 @@ class PaperExecutionAdapter:
         assert_paper_boundary(self.mode, self.live_broadcast_enabled)
         self._seq += 1
         submit = self.clock.monotonic_ns()
-        scheduled = submit + intent.delay_ns
+        scheduled = submit + (self.delay_provider(intent) if self.delay_provider else intent.delay_ns)
         handle = AttemptHandle(f"{intent.position_id}_{intent.side.value.lower()}{intent.attempt_number}", intent, submit, scheduled)
         self.pending[handle.attempt_id] = handle
         self.submitted.append((handle.attempt_id, intent.side.value, intent.attempt_number, submit, scheduled, intent.quote.quote_state_event_id))
@@ -128,6 +130,7 @@ class StateOwner:
         self.persist_observations = persist_observations
         self.mint_allowlist = mint_allowlist  # research splits: entries only for launches of the evaluated split
         self.compute_features = compute_features
+        self.strategy = make_strategy(cfg.strategy)
         self.policy = ExecutionPolicy.from_config(cfg)
         self.engine = engine or QuoteEngine(self.policy)
         self.portfolio = Portfolio(cfg.portfolio["initial_paper_balance_lamports"])
@@ -164,6 +167,19 @@ class StateOwner:
         self.commitment_by_feed = {f.id: f.commitment for f in cfg.feeds}
         self.first_create_receive: dict[str, int] = {}
         self.feature_jobs_scheduled: set[str] = set()
+        self.fx_snapshot = None
+
+    def on_fx_snapshot(self, snapshot):
+        self.fx_snapshot = snapshot
+        self._record(RowRecord("fx_snapshots", snapshot.row(self.run_id)))
+
+    def record_observation(self, observation, qualified, actual):
+        self._record(RowRecord("strategy_observations", {
+            "observation_id": f"{self.run_id}_obs_{observation.mint}", "run_id": self.run_id, "mint": observation.mint,
+            "strategy_id": self.cfg.strategy_id, "strategy_config_hash": self.cfg.strategy_config_hash,
+            "create_signature": observation.signature, "observation_start": observation.start, "observation_end": observation.end,
+            "decision_actual_mono_ns": actual, "buy_count": observation.buy_count, "unique_buyers": len(observation.buyers),
+            "qualified": qualified, "status": "OBSERVING" if qualified is None else "DECIDED"}, upsert=True))
 
     # ------------------------------------------------------------------ helpers
     def _tele(self, key: str, value: int) -> None:
@@ -311,17 +327,18 @@ class StateOwner:
             self.counters.decode_errors += 1
             self.decode_issues[raw.feed_id] = self.decode_issues.get(raw.feed_id, 0) + 1
         try:
-            self.reducer.protected_mints = {self.positions[pid].mint for pid in self.active_ids}
+            self.reducer.protected_mints = {self.positions[pid].mint for pid in self.active_ids} | set(getattr(self.strategy, "observations", {}))
             result = self.reducer.apply(env, raw)
             # P0: exposed positions first, then immediately actionable CREATEs
             for mint in result.touched:
                 if mint in self.position_by_mint:
                     self._position_tick(mint, raw.receive_mono_ns)
+            self.strategy.on_events(self, result, raw, env)
             for mint in result.new_creates:
                 if mint not in self.first_create_receive:
                     self.counters.creates += 1
                 self.first_create_receive.setdefault(mint, raw.receive_mono_ns)
-                self._entry_decision(mint, raw, env, decode_done)
+                self.strategy.on_create(self, mint, raw, env, decode_done)
         except Exception as exc:  # noqa: BLE001 - consumer invariant violation (T14)
             self.counters.internal_errors += 1
             self.last_error = f"STATE_OWNER_INTERNAL_ERROR: {type(exc).__name__}: {exc}"
@@ -370,20 +387,27 @@ class StateOwner:
                                                                                                           "position_reason": self._venue_reason(new) if mint in self.position_by_mint else None}, lost=None, feed_id=raw.feed_id, start=raw.receive_mono_ns, end=raw.receive_mono_ns, recovery="VENUE_LOCKED", evidence=[obs_id])
 
     # ------------------------------------------------------------------ entry
-    def _entry_decision(self, mint: str, raw: RawEnvelope, env: NormalizedEnvelope, decode_done: int) -> None:
+    def _entry_decision(self, mint: str, raw: RawEnvelope, env: NormalizedEnvelope, decode_done: int, policy_rejection: str | None = None) -> None:
         st = self.reducer.states[mint]
         data_ready = decode_done
         basis = self.basis_getter()
         now = self.clock.monotonic_ns()
         creator_sold = st.creator_sell_event_id is not None
         gap = st.coverage_state == CoverageState.GAP or self.reducer.gap_open_since is not None
-        verdict = entry_admission(st, gap_flag=gap, creator_sell_known=creator_sold, already_submitted=mint in self.submitted_mints or mint in self.position_by_mint, slots_free=self.occupied_slots() < self.max_open,
+        verdict = self.strategy.admission(st, gap_flag=gap, creator_sell_known=creator_sold, already_submitted=mint in self.submitted_mints or mint in self.position_by_mint, slots_free=self.occupied_slots() < self.max_open,
                                   capital_ok=True, costs_ok=basis.complete and all(s.is_fresh(now) for s in (basis.protocol, basis.network, basis.rent, basis.priority_policy)),  # type: ignore[union-attr]
                                   recording_ok=self.recording_ok(), quote_ok=True)
         quote: QuoteSnapshot | InvalidQuote | None = None
         exit_reserve = 0
         reason = verdict.reason
         eligible = verdict.eligible
+        budget = None
+        if policy_rejection is not None:
+            eligible, reason = False, policy_rejection
+        if eligible and self.cfg.strategy["sizing_mode"] == "USD_SWAP_BUDGET":
+            budget = self.fx_snapshot.budget(self.cfg.strategy["trade_size_usd"], now, self.cfg["fx"]["max_age_ms"]) if self.fx_snapshot else None
+            if not budget:
+                eligible, reason = False, "SOL_USD_EVIDENCE_MISSING_OR_STALE"
         if eligible and not self.economic_intents_allowed:
             eligible, reason = False, "CAPTURE_ONLY_MODE"
         if eligible and self.mint_allowlist is not None and mint not in self.mint_allowlist:
@@ -398,7 +422,12 @@ class StateOwner:
             eligible, reason = False, "UNSUPPORTED_TOKEN_PROGRAM"
         if eligible:
             curve = self._curve(st)
-            quote = self.engine.quote_buy(curve, basis, now, f"{self.run_id}_", st.coverage_state) if curve else InvalidQuote("CURVE_UNAVAILABLE")
+            if curve is None:
+                quote = InvalidQuote("CURVE_UNAVAILABLE")
+            elif budget is not None:
+                quote = self.engine.quote_buy_swap_budget(curve, basis, now, f"{self.run_id}_", st.coverage_state, budget)
+            else:
+                quote = self.engine.quote_buy(curve, basis, now, f"{self.run_id}_", st.coverage_state)
             if isinstance(quote, InvalidQuote):
                 eligible, reason = False, quote.reason
             else:
@@ -411,6 +440,10 @@ class StateOwner:
                         eligible, reason = False, "INSUFFICIENT_CAPITAL"
         self.dec_seq += 1
         decision_id = f"{self.run_id}_d{self.dec_seq}"
+        if eligible and budget is not None:
+            self._record(RowRecord("entry_sizing", {"decision_id": decision_id, "run_id": self.run_id, "mint": mint,
+                "trade_size_usd": self.cfg.strategy["trade_size_usd"], "fx_snapshot_id": f"{self.run_id}_{self.fx_snapshot.snapshot_id}",
+                "swap_budget_lamports": budget, "curve_input_lamports": quote.curve_input_lamports, "max_swap_debit_lamports": quote.max_input_base_units, "sizing_basis": self.cfg.strategy["sizing_mode"], "decision_mono_ns": now}))
         if not eligible:
             self.counters.ineligible[reason] = self.counters.ineligible.get(reason, 0) + 1
             decision_done = self.clock.monotonic_ns()
@@ -505,7 +538,7 @@ class StateOwner:
         st = self.reducer.states[mint]
         now = self.clock.monotonic_ns()
         if (pos.entry_fill_mono_ns is not None and pos.token_balance_base_units > 0
-                and st.creator_sell_event_id is not None and self.cfg.strategy["creator_sell_exit_enabled"]
+                and st.creator_sell_event_id is not None and self.strategy.creator_exit_enabled()
                 and not any(r == ExitReason.CREATOR_SELL for r, _ in pos.latched_triggers)):
             pos.latched_triggers.append((ExitReason.CREATOR_SELL, now))
             if pos.origin_trigger is None:
@@ -530,7 +563,7 @@ class StateOwner:
             curve = self._curve(st)
             if curve is not None:
                 nlv = self.engine.net_liquidation_value(curve, self.basis_getter(), now, st.coverage_state, pos.token_balance_base_units, pos.failed_attempt_cost_lamports)
-                if target_reached(nlv, pos.entry_economic_cost_lamports, Decimal(pos.target_net_multiple)):
+                if self.strategy.target_reached(nlv, pos.entry_economic_cost_lamports, Decimal(pos.target_net_multiple)):
                     pos.latched_triggers.append((ExitReason.TARGET, now))
         self._maybe_exit(pos, st, now)
 
@@ -914,6 +947,9 @@ class StateOwner:
     def finalize(self, stop_mono_ns: int) -> None:
         """End of run: no new entries; pending outcomes are not invented; exposures reported as unresolved/censored."""
         self.stop_new_entries = True
+        for observation in getattr(self.strategy, "observations", {}).values():
+            self.record_observation(observation, None, None)
+            self._record(UpdateRecord("strategy_observations", "observation_id", f"{self.run_id}_obs_{observation.mint}", {"status": "CENSORED_RUN_END"}))
         if self.decode_issues:
             self._quality("DECODE_GAP_SUMMARY", "WARNING", "RUN", canonical_gap=False, details={"partial_or_undecodable_frames_by_feed": dict(self.decode_issues), "note": "frames with unknown/undecodable Pump events; affected creates were not actionable"}, lost=sum(self.decode_issues.values()), recovery="RUN_END")
         for attempt_id, meta in list(self.pending_attempts.items()):
@@ -930,7 +966,7 @@ class StateOwner:
     def maybe_evict(self, now_mono_ns: int) -> int:
         """Bounded memory: drop inactive mint trackers (never active positions, never during their research horizon)."""
         active = {p.mint for p in self.positions.values() if p.state not in (PositionState.CLOSED, PositionState.ENTRY_FAILED, PositionState.INELIGIBLE)}
-        protected = active | {m for m, t in self.first_create_receive.items() if now_mono_ns - t <= self.horizon_ns}
+        protected = active | set(getattr(self.strategy, "observations", {})) | {m for m, t in self.first_create_receive.items() if now_mono_ns - t <= self.horizon_ns}
         removed = self.reducer.evict_inactive(now_mono_ns, self.cfg.storage["inactive_mint_retention_ms"] * NS_PER_MS, protected)
         for mint in list(self.position_by_mint):
             if mint not in self.reducer.states:  # closed/failed position whose tracker was evicted: record stays in self.positions (persisted), index only
@@ -939,6 +975,8 @@ class StateOwner:
             if m not in self.reducer.states:
                 self.first_create_receive.pop(m, None)
                 self.feature_jobs_scheduled.discard(m)
+                if hasattr(self.strategy, "decided"):
+                    self.strategy.decided.discard(m)
         return removed
 
     def status(self) -> dict[str, Any]:

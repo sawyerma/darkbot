@@ -1,0 +1,14 @@
+{
+  "config_version": "STRATEGY_AB_RESEARCH_V1",
+  "portfolio_position_limits": [1, 10],
+  "latency_scenarios": [
+    {"label": "LEGACY_REFERENCE_LATENCY", "entry_delay_ms": 400, "exit_delay_ms": 400},
+    {"label": "ASSUMED_250_250", "entry_delay_ms": 250, "exit_delay_ms": 250},
+    {"label": "ASSUMED_100_100", "entry_delay_ms": 100, "exit_delay_ms": 100},
+    {"label": "ASSUMED_25_25", "entry_delay_ms": 25, "exit_delay_ms": 25},
+    {"label": "ASSUMED_5_5", "entry_delay_ms": 5, "exit_delay_ms": 5},
+    {"label": "ASSUMED_OPTIMISTIC_BASELINE", "entry_delay_ms": 0, "exit_delay_ms": 0}
+  ],
+  "measured_distribution_required_scenario": "MEASURED_EXECUTION_DISTRIBUTION",
+  "missing_measurements_policy": "REPORT_UNAVAILABLE_NEVER_SUBSTITUTE_ASSUMPTION"
+}

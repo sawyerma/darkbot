@@ -64,13 +64,14 @@ RUNTIME_SCHEMA: dict[str, Any] = {
     "live_broadcast_enabled": "enum:False",
     "monthly_paid_services_allowed": "enum:False",
     "strategy": S(
-        observation_ms="int0", filters="list[any]", entry_trigger="enum:FIRST_ACTIONABLE_CREATE", target_net_multiple="dec+",
+        strategy_id="enum:FAST_CREATOR_HOLD_V1|LEGACY_5BUY_5UNIQUE_V1", observation_ms="int0", filters="list[any]", entry_trigger="enum:FIRST_ACTIONABLE_CREATE", target_net_multiple="dec+",
         target_is_proven_optimal="bool", ordinary_stop_enabled="enum:False", creator_sell_exit_enabled="bool", entry_amount_lamports="int+",
         sizing_mode="enum:FIXED_SOL", policy_frozen_per_position="enum:True", same_event_exit_priority="list[str]", strategy_timeout_ms="int+",
         timeout_policy="enum:FORCE_EXIT", timeout_clock_origin="enum:SUCCESSFUL_ENTRY_FILL",
         entry_amount_semantics="enum:CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT", entry_amount_is_usd_pegged="enum:False",
         entry_reentry_policy="enum:ONE_SUBMITTED_ENTRY_PER_MINT_PER_CAMPAIGN", quote_asset_policy="enum:SOL_ONLY",
     ),
+    "fx": S(enabled="bool", source_url="enum:https://api.coinbase.com/v2/prices/SOL-USD/spot", refresh_interval_ms="int+", max_age_ms="int+", request_timeout_ms="int+"),
     "portfolio": S(initial_paper_balance_lamports="int+", max_open_positions="int+", allow_borrowing="enum:False", reserve_exit_costs="enum:True",
                    occupied_slot_states="list[str]", unresolved_with_possible_exposure_occupies_slot="enum:True"),
     "latency_model": S(entry_delay_ms="int0", exit_delay_ms="int0", label="str", zero_delay_run_can_qualify_edge="enum:False", stage_breakdown_required="enum:True",
@@ -236,6 +237,7 @@ class RuntimeConfig:
     feature_contract_hash: str
     coverage_version_hash: str
     protocol_hash: str = ""
+    strategy_config_hash: str = ""
     feeds: tuple[FeedConfig, ...] = field(default_factory=tuple)
 
     def __getitem__(self, key: str) -> Any:
@@ -281,6 +283,10 @@ class RuntimeConfig:
     def doctor(self) -> dict[str, Any]:
         return self.raw["doctor"]
 
+    @property
+    def strategy_id(self) -> str:
+        return self.strategy["strategy_id"]
+
     def policy_content(self) -> dict[str, Any]:
         return {"strategy": self.strategy, "portfolio": self.portfolio, "execution": self.execution, "latency_model": self.latency_model}
 
@@ -298,6 +304,7 @@ class RuntimeConfig:
         """kind -> (hash, content) for every config_snapshots row that must exist before a run starts."""
         return {
             "RUNTIME_CONFIG": (self.config_hash, self.raw),
+            "STRATEGY": (self.strategy_config_hash, self.strategy),
             "POLICY": (self.policy_hash, self.policy_content()),
             "COST_MODEL": (self.cost_model_hash, self.cost_model_content()),
             "FRESHNESS_POLICY": (self.freshness_policy_hash, self.costs["snapshot_refresh_policy"]),
@@ -343,6 +350,8 @@ def _validate_layout(fields: Any, label: str) -> None:
 
 def _cross_checks(raw: dict[str, Any]) -> None:
     ex, st, po, co = raw["execution"], raw["strategy"], raw["portfolio"], raw["costs"]
+    if raw["fx"]["max_age_ms"] < raw["fx"]["refresh_interval_ms"]:
+        raise ConfigError("fx.max_age_ms must cover refresh_interval_ms")
     events = raw["protocol"]["events"]
     if not isinstance(events, dict) or set(events) != {"CreateEvent", "TradeEvent", "CompleteEvent", "CompletePumpAmmMigrationEvent"}:
         raise ConfigError("protocol.events: exactly the four supported event definitions are required")
@@ -383,7 +392,7 @@ def _cross_checks(raw: dict[str, Any]) -> None:
         raise ConfigError("strategy.target_net_multiple must be > 1")
     if st["same_event_exit_priority"] != ["CREATOR_SELL", "TARGET", "TIMEOUT"]:
         raise ConfigError("strategy.same_event_exit_priority must be CREATOR_SELL,TARGET,TIMEOUT")
-    if st["observation_ms"] != 0:
+    if st["strategy_id"] == "FAST_CREATOR_HOLD_V1" and st["observation_ms"] != 0:
         raise ConfigError("strategy.observation_ms must be 0 (no artificial observation wait)")
     if st["filters"]:
         raise ConfigError("strategy.filters must be empty in phase 1 (no predictive filters)")
@@ -443,7 +452,24 @@ def _cross_checks(raw: dict[str, Any]) -> None:
 
 
 def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
-    _check(raw, RUNTIME_SCHEMA, "config")
+    raw = json.loads(json.dumps(raw))
+    # Backward-compatible interpretation of pre-strategy captures: FX collection was disabled.
+    raw.setdefault("fx", {"enabled": False, "source_url": "https://api.coinbase.com/v2/prices/SOL-USD/spot",
+                          "refresh_interval_ms": 10000, "max_age_ms": 30000, "request_timeout_ms": 5000})
+    raw.get("strategy", {}).setdefault("strategy_id", "FAST_CREATOR_HOLD_V1")
+    schema = {**RUNTIME_SCHEMA}
+    if raw.get("strategy", {}).get("strategy_id") == "LEGACY_5BUY_5UNIQUE_V1":
+        schema["strategy"] = {**RUNTIME_SCHEMA["strategy"], "trade_size_usd": "dec+", "min_buy_count": "int+", "min_unique_buyers": "int+",
+                              "stop_net_multiple": "dec", "sizing_mode": "enum:USD_SWAP_BUDGET", "entry_amount_lamports": "enum:0",
+                              "entry_amount_semantics": "enum:SWAP_BUDGET_INCLUDING_PROTOCOL_FEES", "entry_amount_is_usd_pegged": "enum:True"}
+    _check(raw, schema, "config")
+    if raw["strategy"]["strategy_id"] == "LEGACY_5BUY_5UNIQUE_V1":
+        st = raw["strategy"]
+        required = {"observation_ms": 1000, "min_buy_count": 5, "min_unique_buyers": 5, "ordinary_stop_enabled": False,
+                    "creator_sell_exit_enabled": False, "strategy_timeout_ms": 60000}
+        if any(st.get(k) != v for k, v in required.items()) or any(Decimal(str(st.get(k, "-1"))) != Decimal(v) for k, v in
+                {"trade_size_usd": "10", "target_net_multiple": "1.05", "stop_net_multiple": "0"}.items()):
+            raise ConfigError("LEGACY_5BUY_5UNIQUE_V1 policy parameters are frozen")
     _cross_checks(raw)
     errors: list[str] = []
     _find_secrets(raw, "config", errors)
@@ -452,6 +478,7 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
     canonical = canonical_json(raw)
     feeds = tuple(FeedConfig(f["id"], f["enabled"], f["required"], f["transport"], f["commitment"], f["endpoint_template"], tuple(f["endpoint_env"]), f["provider"], tuple(f["provides"])) for f in raw["feeds"])
     cfg = RuntimeConfig(path=path, raw=raw, canonical=canonical, config_hash=sha256_text(canonical), policy_hash="", cost_model_hash="", freshness_policy_hash="", quote_model_hash="", feature_contract_hash="", coverage_version_hash="", feeds=feeds)
+    cfg.strategy_config_hash = config_hash(cfg.strategy)
     cfg.policy_hash = config_hash(cfg.policy_content())
     cfg.cost_model_hash = config_hash(cfg.cost_model_content())
     cfg.freshness_policy_hash = config_hash(raw["costs"]["snapshot_refresh_policy"])

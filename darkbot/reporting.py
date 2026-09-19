@@ -17,7 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from darkbot.config import canonical_json
+from darkbot.config import canonical_json, config_hash
 from darkbot.domain import LAMPORTS_PER_SOL, NS_PER_MS, QualificationStatus, utc_iso
 
 QUERY_VERSION = "REPORT_QUERY_V1"
@@ -83,6 +83,10 @@ class Reporter:
         fees = _rows(c, "SELECT fee_snapshot_id, source_type, validation_status, normalized_fee_components, observed_utc FROM fee_snapshots WHERE run_id=? ORDER BY received_mono_ns", (run_id,))
         creates = _rows(c, "SELECT canonical_event_id, mint, first_seen_mono_ns, actionable_mono_ns, winner_feed_id, quote_scope_status, canonical_coverage_state FROM market_events WHERE run_id=? AND event_type='CREATE' ORDER BY first_seen_mono_ns", (run_id,))
         obs = _rows(c, "SELECT feed_id, canonical_event_id, receive_mono_ns, decode_done_mono_ns, event_type, completeness, validation_status, mint FROM feed_observations WHERE run_id=? ORDER BY receive_mono_ns", (run_id,))
+        tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        filters = _rows(c, "SELECT * FROM strategy_observations WHERE run_id=? ORDER BY observation_start,mint", (run_id,)) if "strategy_observations" in tables else []
+        fx = _rows(c, "SELECT * FROM fx_snapshots WHERE run_id=? ORDER BY received_mono_ns", (run_id,)) if "fx_snapshots" in tables else []
+        sizing = _rows(c, "SELECT * FROM entry_sizing WHERE run_id=? ORDER BY decision_mono_ns,mint", (run_id,)) if "entry_sizing" in tables else []
         initial = run["start_balance_lamports"]
 
         # ---------------- economics
@@ -200,7 +204,21 @@ class Reporter:
             "fee_snapshot_status_counts": _count(fees, "validation_status"), "run_status": run["status"], "run_quality_status": run["quality_status"],
         }
         status, reasons = self._qualify(cfg, economic, qual, fees, attempts, positions, boot)
-        return {"query_version": QUERY_VERSION, "run_id": run_id, "campaign_id": run["campaign_id"], "mode": run["mode"], "config_hash": run["config_hash"], "code_revision": run["code_revision"], "spec_hash": run["spec_hash"],
+        if any(d["reason"] == "SOL_USD_EVIDENCE_MISSING_OR_STALE" for d in decisions):
+            status = QualificationStatus.UNQUALIFIED_DATA
+            reasons.append("SOL_USD_EVIDENCE_MISSING_OR_STALE")
+        latency["entry_execution_delay_ns"] = percentiles([a["scheduled_fill_mono_ns"] - a["submit_mono_ns"] for a in attempts if a["side"] == "BUY"])
+        latency["exit_execution_delay_ns"] = percentiles([a["scheduled_fill_mono_ns"] - a["submit_mono_ns"] for a in attempts if a["side"] == "SELL"])
+        economic["closed_trades"] = len(closed)
+        economic["exit_fills"] = sum(a["side"] == "SELL" and a["status"] == "FILLED" for a in attempts)
+        economic["unknown_attempts"] = sum(a["status"] == "UNKNOWN" for a in attempts)
+        economic["slippage_limit_bps"] = cfg["execution"]["slippage_bps"]
+        economic["slippage_rejected_attempts"] = sum(a["status"] == "SLIPPAGE_REJECTED" for a in attempts)
+        return {"strategy_id": run.get("strategy_id") or cfg["strategy"].get("strategy_id", "FAST_CREATOR_HOLD_V1"),
+                "strategy_config_hash": run.get("strategy_config_hash") or config_hash(cfg["strategy"]),
+                "strategy_observations": filters, "qualified_creates": sum(f["qualified"] == 1 for f in filters) if filters else sum(d["action"] == "ENTRY" for d in decisions),
+                "fx_evidence": fx, "entry_sizing": sizing,
+                "query_version": QUERY_VERSION, "run_id": run_id, "campaign_id": run["campaign_id"], "mode": run["mode"], "config_hash": run["config_hash"], "code_revision": run["code_revision"], "spec_hash": run["spec_hash"],
                 "dataset_hash": run["dataset_hash"], "host_clock_epoch_id": run["host_clock_epoch_id"], "created_utc": utc_iso(time.time_ns()), "creates_observed_union": len(creates), "creates_actionable": sum(1 for cr in creates if cr["actionable_mono_ns"]),
                 "economic": economic, "latency": latency, "quality": qual, "qualification_status": status.value, "qualification_reasons": reasons,
                 "model_assumptions": {"fill_evidence": "OBSERVED_STATE_PROXY", "latency_model": cfg["latency_model"], "slippage_bps": cfg["execution"]["slippage_bps"], "target_net_multiple": cfg["strategy"]["target_net_multiple"],
@@ -369,6 +387,7 @@ def write_outputs(report: dict[str, Any], conn: sqlite3.Connection, out_dir: Pat
 def summary_markdown(r: dict[str, Any]) -> str:
     e, l, q = r["economic"], r["latency"], r["quality"]
     lines = [f"# DarkBot Phase-1 PAPER Bericht – Run {r['run_id']}", "", f"Kampagne: {r['campaign_id']} | Modus: {r['mode']} | Config-Hash: {r['config_hash'][:16]} | Query: {r['query_version']}", "",
+             f"Strategie: {r.get('strategy_id', 'FAST_CREATOR_HOLD_V1')} | Strategy-Hash: {r.get('strategy_config_hash', 'UNKNOWN')}", "",
              f"**Qualifikationsstatus: {r['qualification_status']}** – {'; '.join(r['qualification_reasons'])}", "",
              "## Umfang", f"- Beobachtete CREATEs (lokale Union): {r['creates_observed_union']}, davon actionable: {r['creates_actionable']}", f"- Entry-Intents: {e['entry_intents']}, Fills: {e['entry_fills']}, Entry-Fehler: {e['entry_failed']}",
              f"- Exits: Creator-Sell {e['exits']['CREATOR_SELL']}, Target {e['exits']['TARGET']}, Timeout {e['exits']['TIMEOUT']}; Exit-Fehlversuche {e['exit_failed_attempts']}, Retry-Erschoepfungen {e['retry_exhausted']}",

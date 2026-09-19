@@ -93,6 +93,7 @@ class Application:
             upsert_config_snapshot(self.conn, kind, h, content, str(self.cfg.path), now_utc)
         self.conn.execute("INSERT INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,protocol_snapshot_id,host_clock_epoch_id,status,quality_status,start_balance_lamports,readiness,started_mono_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                           (self.run_id, self.campaign, self.mode, now_utc, code_revision(), spec_hash(), self.cfg.config_hash, self.cfg.protocol_hash, self.clock.epoch_id, "RUNNING", "OK", self.cfg.portfolio["initial_paper_balance_lamports"], self.readiness.value, self.clock.monotonic_ns()))
+        self.conn.execute("UPDATE runs SET strategy_id=?,strategy_config_hash=? WHERE run_id=?", (self.cfg.strategy_id, self.cfg.strategy_config_hash, self.run_id))
         return {"migrations": applied, "interrupted_previous_runs": interrupted, "integrity": integrity_check(self.conn)}
 
     def _disk_error(self, message: str) -> None:
@@ -131,6 +132,10 @@ class Application:
             feed_status[feed.id] = "STARTING"
         tasks = [loop.create_task(f.run(), name=f"feed-{fid}") for fid, f in self.feeds.items()]
         fee_task = loop.create_task(self.resolver.run_background(self._on_fee_snapshots, self.stop_event), name="fees")
+        fx_task = None
+        if self.cfg["fx"]["enabled"]:
+            from darkbot.fx import run_fx_background
+            fx_task = loop.create_task(run_fx_background(self.cfg["fx"], self.clock, self.owner.on_fx_snapshot, self.stop_event), name="sol-usd-evidence")
         status_task = loop.create_task(self._status_loop(), name="status")
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
@@ -148,7 +153,7 @@ class Application:
             f.stop()
         for t in tasks:
             t.cancel()
-        await asyncio.gather(*tasks, fee_task, return_exceptions=True)
+        await asyncio.gather(*tasks, fee_task, *([fx_task] if fx_task else []), return_exceptions=True)
         status_task.cancel()
         await asyncio.gather(status_task, return_exceptions=True)
         for fid in self.feeds:

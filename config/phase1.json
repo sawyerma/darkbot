@@ -26,7 +26,8 @@
     "entry_amount_semantics": "CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT",
     "entry_amount_is_usd_pegged": false,
     "entry_reentry_policy": "ONE_SUBMITTED_ENTRY_PER_MINT_PER_CAMPAIGN",
-    "quote_asset_policy": "SOL_ONLY"
+    "quote_asset_policy": "SOL_ONLY",
+    "strategy_id": "FAST_CREATOR_HOLD_V1"
   },
   "portfolio": {
     "initial_paper_balance_lamports": 1000000000,
@@ -2481,5 +2482,12 @@
     "broadcast_allowed": false,
     "economic_intents_allowed": false,
     "min_free_disk_bytes": 536870912
+  },
+  "fx": {
+    "enabled": false,
+    "source_url": "https://api.coinbase.com/v2/prices/SOL-USD/spot",
+    "refresh_interval_ms": 10000,
+    "max_age_ms": 30000,
+    "request_timeout_ms": 5000
   }
 }

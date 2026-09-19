@@ -259,6 +259,35 @@ class QuoteEngine:
             cost_evidence_status=terms.evidence, unspent_budget_lamports=budget - curve_input, capped_by_real_reserves=capped,
         )
 
+    def quote_buy_swap_budget(self, state: CurveState, basis: CostBasis, now_mono_ns: int, run_prefix: str,
+                              coverage: CoverageState, swap_budget_lamports: int) -> QuoteSnapshot | InvalidQuote:
+        """Invert the shared buy quote for a fee-inclusive swap budget (integer lamports).
+
+        Pump/creator fees consume the swap budget. Network fees, rent and the existing
+        slippage allowance remain additional. Bounded binary search uses quote_buy's
+        current fee tiers/rounding/real-reserve cap, without a second fee model.
+        """
+        if swap_budget_lamports <= 0:
+            return InvalidQuote("SWAP_BUDGET_TOO_SMALL")
+        probe = self.quote_buy(state, basis, now_mono_ns, run_prefix, coverage, budget=swap_budget_lamports)
+        if isinstance(probe, InvalidQuote) or probe.swap_wallet_debit_lamports <= swap_budget_lamports:
+            return probe
+        low, high = 1, swap_budget_lamports - 1
+        best = None
+        while low <= high:
+            middle = (low + high) // 2
+            quote = self.quote_buy(state, basis, now_mono_ns, run_prefix, coverage, budget=middle)
+            if isinstance(quote, InvalidQuote):
+                if quote.reason != "CURVE_UNAVAILABLE":
+                    return quote
+                low = middle + 1
+            elif quote.swap_wallet_debit_lamports <= swap_budget_lamports:
+                best = quote
+                low = middle + 1
+            else:
+                high = middle - 1
+        return best if best is not None else InvalidQuote("SWAP_BUDGET_TOO_SMALL")
+
     def quote_sell(self, state: CurveState, basis: CostBasis, now_mono_ns: int, run_prefix: str, coverage: CoverageState, tokens: int, rent_refund_lamports: int) -> QuoteSnapshot | InvalidQuote:
         if state.venue_state != VenueState.BONDING_CURVE_ACTIVE:
             return InvalidQuote("VENUE_INVALID", state.venue_state.value)

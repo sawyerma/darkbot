@@ -36,6 +36,15 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--out", type=Path, required=True)
     rs.add_argument("--source-run-id", action="append", default=None, help="recording to evaluate; repeat for a dataset, required to select fresh forward recordings")
     rs.add_argument("--max-variants", type=int, default=None)
+    ab = sub.add_parser("ab-replay", help="same-capture Strategy A/B replay into a NEW output database; source is read-only")
+    ab.add_argument("--source-db", type=Path, required=True)
+    ab.add_argument("--source-run-id", required=True)
+    ab.add_argument("--output-db", type=Path, required=True)
+    ab.add_argument("--out", type=Path, required=True)
+    ab.add_argument("--config-a", type=Path, default=Path("config/phase1.json"))
+    ab.add_argument("--config-b", type=Path, default=Path("config/strategy_b.json"))
+    ab.add_argument("--research-config", type=Path, default=Path("config/research_ab.json"))
+    ab.add_argument("--measured-latency", type=Path, default=None)
     return p
 
 
@@ -118,6 +127,12 @@ def cmd_research(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "ab-replay":
+            from darkbot.ab_replay import compare_capture
+            result = compare_capture(args.source_db, args.source_run_id, args.output_db, args.out,
+                                     load_runtime_config(args.config_a), load_runtime_config(args.config_b), args.research_config, args.measured_latency)
+            print(f"A/B replay: {len(result['results'])} runs -> {args.out / 'comparison.json'}")
+            return EXIT_OK
         if args.command == "doctor":
             return cmd_doctor(args)
         if args.command == "paper":

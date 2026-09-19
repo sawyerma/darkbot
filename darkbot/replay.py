@@ -20,6 +20,7 @@ from darkbot.config import RuntimeConfig, canonical_json, sha256_text
 from darkbot.domain import CostEvidence, FeeSnapshot, RawEnvelope, utc_iso
 from darkbot.execution import ExecutionPolicy, QuoteEngine
 from darkbot.fees import FeeCache
+from darkbot.fx import FxSnapshot
 from darkbot.paper import PaperExecutionAdapter, StateOwner
 from darkbot.storage import Recorder, SqliteWriter, upsert_config_snapshot
 
@@ -37,6 +38,7 @@ class ReplayInput:
     dataset_hash: str
     end_mono_ns: int  # recorded run end (runs.ended_mono_ns) or, if missing, the last observation
 
+    fx_snapshots: list[FxSnapshot] = field(default_factory=list)
 
 def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig) -> ReplayInput:
     conn.row_factory = sqlite3.Row
@@ -91,11 +93,19 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
     decoder_code_hash = sha256_text(canonical_json({name: (Path(__file__).resolve().parent / name).read_text(encoding="utf-8") for name in ("market.py", "token_accounts.py")}))  # same version string with changed decoder code = new dataset version
     canonical_rows = [dict(r) for r in conn.execute("SELECT * FROM market_events WHERE run_id=? ORDER BY canonical_event_id", (run_id,))]
     quality_rows = [dict(r) for r in conn.execute("SELECT * FROM quality_events WHERE run_id=? ORDER BY quality_event_id", (run_id,))]
+    fx_snapshots = []
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fx_snapshots'").fetchone():
+        for row in conn.execute("SELECT * FROM fx_snapshots WHERE run_id=? ORDER BY received_mono_ns,fx_snapshot_id", (run_id,)):
+            snapshot = FxSnapshot.from_payload(row["raw_json"], row["source"], row["observed_utc"], row["received_mono_ns"])
+            if (snapshot.raw_hash != row["raw_hash"] or snapshot.snapshot_id != row["evidence_id"] or snapshot.amount != row["amount"]
+                    or snapshot.validation_status != row["validation_status"] or snapshot.timestamp_basis != row["timestamp_basis"]):
+                raise ValueError("DATASET_INTEGRITY_VIOLATION: SOL/USD evidence mismatch")
+            fx_snapshots.append(snapshot)
     run_manifest = dict(run)
-    dataset_hash = sha256_text(canonical_json({"run": run_id, "run_manifest": run_manifest, "canonical_events": canonical_rows, "quality_events": quality_rows, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
+    dataset_hash = sha256_text(canonical_json({"run": run_id, "fx": [s.__dict__ for s in fx_snapshots], "run_manifest": run_manifest, "canonical_events": canonical_rows, "quality_events": quality_rows, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
                                                "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "decoder_code_hash": decoder_code_hash, "protocol_pinning_hash": cfg.protocol_hash,
                                                "coverage": "CANONICAL_COVERAGE_V2", "spec": "1.3.2"}))
-    return ReplayInput(run_id, run["host_clock_epoch_id"], start, start_utc, observations, fees, transitions, lateness, dataset_hash, end)
+    return ReplayInput(run_id, run["host_clock_epoch_id"], start, start_utc, observations, fees, transitions, lateness, dataset_hash, end, fx_snapshots)
 
 
 @dataclass
@@ -115,7 +125,7 @@ def _lateness_key(attempt_id: str) -> str:
 
 def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: RuntimeConfig, new_run_id: str, campaign_id: str, *, mode: str = "REPLAY", variant_id: str | None = None,
                persist: bool = True, persist_observations: bool = False, compute_features: bool = False, end_mono_ns: int | None = None, drain_ns: int | None = None,
-               stress_fee_multiplier: Decimal = Decimal(1), stress_adverse_bps: int = 0, mint_filter: set[str] | None = None, stress_reject_rate: Decimal = Decimal(0), stress_seed: int = 0) -> ReplayResult:
+               stress_fee_multiplier: Decimal = Decimal(1), stress_adverse_bps: int = 0, mint_filter: set[str] | None = None, stress_reject_rate: Decimal = Decimal(0), stress_seed: int = 0, replay_callback_lateness: bool = True, execution_delay_provider=None) -> ReplayResult:
     """Replay the frozen dataset through StateOwner; returns the owner (RAM truth) and persists rows when requested."""
     clock = ReplayClock(f"replay_{new_run_id}", replay_input.start_mono_ns, replay_input.start_utc_ns)
     scheduler = ReplayScheduler()
@@ -126,6 +136,7 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
             upsert_config_snapshot(conn, kind, h, content, "replay", utc_iso(0))
         conn.execute("INSERT OR IGNORE INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,host_clock_epoch_id,status,quality_status,start_balance_lamports,parent_run_id,dataset_hash,started_mono_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      (new_run_id, campaign_id, mode, utc_iso(0), "replay", "", cfg.config_hash, clock.epoch_id, "RUNNING", "OK", cfg.portfolio["initial_paper_balance_lamports"], replay_input.source_run_id, replay_input.dataset_hash, replay_input.start_mono_ns))
+        conn.execute("UPDATE runs SET strategy_id=?,strategy_config_hash=? WHERE run_id=?", (cfg.strategy_id, cfg.strategy_config_hash, new_run_id))
         for s in replay_input.fee_snapshots:
             recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
     fee_cache = FeeCache()
@@ -146,12 +157,22 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
         return snapshots
 
     owner_ref: list[StateOwner] = []
-    lateness = replay_input.lateness
-    adapter = PaperExecutionAdapter(clock, scheduler, "PAPER", False, cfg.latency_model["entry_delay_ms"] * 1_000_000, cfg.latency_model["exit_delay_ms"] * 1_000_000, lateness_provider=lambda aid: lateness.get(_lateness_key(aid), 0))
+    lateness = replay_input.lateness if replay_callback_lateness else {}
+    adapter = PaperExecutionAdapter(clock, scheduler, "PAPER", False, cfg.latency_model["entry_delay_ms"] * 1_000_000, cfg.latency_model["exit_delay_ms"] * 1_000_000, lateness_provider=lambda aid: lateness.get(_lateness_key(aid), 0), delay_provider=execution_delay_provider)
     engine = QuoteEngine(ExecutionPolicy.from_config(cfg), stress_fee_multiplier, stress_adverse_bps, stress_reject_rate, stress_seed)
     owner = StateOwner(cfg, new_run_id, clock, scheduler, recorder, adapter, fee_cache.basis, "PAPER", variant_id=variant_id, canonical_prefix=replay_input.source_run_id if not persist_observations else None,
                        persist_observations=persist_observations, compute_features=compute_features, engine=engine, mint_allowlist=mint_filter)
     owner_ref.append(owner)
+    fx_iter = iter(sorted(replay_input.fx_snapshots, key=lambda s: s.received_mono_ns))
+    next_fx = next(fx_iter, None)
+
+    def apply_fx_until(t):
+        nonlocal next_fx
+        while next_fx is not None and next_fx.received_mono_ns <= t:
+            owner.on_fx_snapshot(next_fx)
+            next_fx = next(fx_iter, None)
+
+    apply_fx_until(replay_input.start_mono_ns)
     owner.on_fee_snapshots([snap for snap in (fee_cache.protocol, fee_cache.network, fee_cache.rent, fee_cache.priority_policy) if snap is not None])
     transitions = list(replay_input.health_transitions)
     ti = 0
@@ -171,7 +192,7 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
 
     def fire_until(t: int, strict: bool = False) -> None:
         while True:
-            pending = [v for v in (scheduler.next_due_ns(), next_fee.received_mono_ns if next_fee else None) if v is not None]
+            pending = [v for v in (scheduler.next_due_ns(), next_fee.received_mono_ns if next_fee else None, next_fx.received_mono_ns if next_fx else None) if v is not None]
             if not pending:
                 return
             due = min(pending)
@@ -180,6 +201,7 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
             apply_health_until(due)  # a health change at or before the timer is visible to the callback, exactly as in PAPER
             clock.advance_to(max(clock.monotonic_ns(), due))
             apply_fees_until(clock.monotonic_ns())
+            apply_fx_until(clock.monotonic_ns())
             scheduler.fire_due(due, clock.monotonic_ns())
 
     for receive, observations in groupby(replay_input.observations, key=lambda row: row[0]):
@@ -189,12 +211,15 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
         apply_health_until(receive)
         clock.advance_to(max(clock.monotonic_ns(), receive))
         snapshots = apply_fees_until(receive, notify=False)
+        apply_fx_until(receive)
         for _, seq, feed_id, conn_id, utc, payload in observations:
             owner.on_raw(RawEnvelope(feed_id, conn_id, receive, utc, seq, payload))
             if seq % 5000 == 0:
                 owner.maybe_evict(receive)
         if snapshots:
             owner.on_fee_snapshots(snapshots)
+        if writer is not None and recorder.depth() >= cfg.storage["batch_max_records"]:
+            writer.flush_sync()  # replay driver, outside the StateOwner critical section
     # Model time never runs past the recorded window: timers beyond it are not fired (no invented fills, exposures stay censored).
     # drain_ns can only extend within the recording; a research embargo beyond it is a no-op (positions crossing the end are purged/censored).
     horizon = stop_at if drain_ns is None else min(stop_at + drain_ns, replay_input.end_mono_ns)
