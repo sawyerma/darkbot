@@ -88,9 +88,22 @@ class StrategyBTests(unittest.TestCase):
         h=make_b();h.feed('helius_standard',create_payload(),START);buys(h,[_pubkey(str(n)) for n in range(4)])
         h.feed('helius_standard',pump_frame(h,MINT_A,10000,'boundary',110,_pubkey('fifth')),END)
         h.advance(END)
-        h.feed('helius_standard',pump_frame(h,MINT_A,10000,'late',111,_pubkey('sixth')),END+NS_PER_MS)
-        self.assertEqual(h.owner.counters.entry_intents,0)
-        self.assertEqual(h.rows('select buy_count from strategy_observations')[0][0],4)
+        self.assertEqual(h.owner.counters.entry_intents,1)
+        row=h.rows('select buy_count,unique_buyers,qualified from strategy_observations')[0]
+        self.assertEqual(tuple(row),(5,5,1))
+        h.feed('helius_standard',pump_frame(h,MINT_A,10000,'late',111,_pubkey('sixth')),END+1)
+        row=h.rows('select buy_count,unique_buyers,qualified from strategy_observations')[0]
+        self.assertEqual(tuple(row),(5,5,1))
+
+    def test_B07_replay_keeps_inclusive_deadline(self):
+        h=make_b();h.feed('helius_standard',create_payload(),START);buys(h,[_pubkey(str(n)) for n in range(4)])
+        h.feed('helius_standard',pump_frame(h,MINT_A,10000,'boundary_replay',110,_pubkey('fifth')),END)
+        h.finish(END+NS_PER_MS)
+        ri=load_replay_input(h.conn,'run',h.cfg)
+        replay=run_replay(h.conn,ri,h.cfg,'replayed_boundary','camp',persist=True,persist_observations=True)
+        self.assertEqual(digest(h.owner),replay.digest)
+        rows=h.rows("select run_id,buy_count,unique_buyers,qualified from strategy_observations where mint=? order by run_id",(MINT_A,))
+        self.assertEqual([(r['buy_count'],r['unique_buyers'],r['qualified']) for r in rows],[(5,5,1),(5,5,1)])
 
     def test_B08_paper_replay_decision_and_fx_parity(self):
         h=make_b();qualified(h);h.finish(END+NS_PER_MS)
