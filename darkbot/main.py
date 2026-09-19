@@ -35,11 +35,37 @@ def spec_hash() -> str:
     return sha256_text(SPEC_PATH.read_text(encoding="utf-8")) if SPEC_PATH.exists() else "SPEC_MISSING"
 
 
+def economic_profile_samples(owner: Any, basis: Any, now: int, limit: int | None = None) -> int:
+    """Economic readiness requires an observed supported curve and side-scoped costs.
+
+    Captured unsupported/unknown profiles cannot certify economic PAPER readiness.
+    This diagnostic runs outside the BUY critical section and never submits orders.
+    """
+    from darkbot.domain import Completeness, InvalidQuote, QuoteScopeStatus, Side
+    from darkbot.execution import fee_terms
+    if not basis.complete or not all(s.is_fresh(now) for s in (basis.protocol, basis.network, basis.rent, basis.priority_policy)):
+        return 0
+    count = 0
+    for st in owner.reducer.states.values():
+        if (st.create_completeness != Completeness.COMPLETE or st.quote_scope_status != QuoteScopeStatus.SOL_WSOL
+                or st.unsupported_fee_mode or st.quote_uncertain or st.decode_gap_since is not None):
+            continue
+        if st.token_program not in (owner.cfg.protocol["spl_token_program"], owner.cfg.protocol["token_2022_program"]):
+            continue
+        curve = owner._curve(st)
+        if curve and all(not isinstance(fee_terms(basis, owner.policy, now, curve, side), InvalidQuote) for side in (Side.BUY, Side.SELL)):
+            count += 1
+            if limit is not None and count >= limit:
+                return count
+    return count
+
+
 class Application:
     """One PAPER (or DOCTOR) run: one process, one StateOwner, bounded queues, one SQLite writer thread."""
 
     def __init__(self, cfg: RuntimeConfig, db_path: Path, campaign: str, mode: str = "PAPER", max_duration_ms: int | None = None, economic: bool = True, status_stream: Any = None) -> None:
         self.cfg, self.db_path, self.campaign, self.mode = cfg, db_path, campaign, mode
+        self._economic_sample_count_at_stop: int | None = None
         self.max_duration_ms = max_duration_ms
         self.economic = economic
         self.status_stream = status_stream or sys.stderr
@@ -127,6 +153,7 @@ class Application:
         await asyncio.gather(status_task, return_exceptions=True)
         for fid in self.feeds:
             self.owner._quality("FEED_STATS", "INFO", "FEED", canonical_gap=False, details=self._feed_report(fid), lost=None, feed_id=fid, end=self.clock.monotonic_ns(), recovery="RUN_END")
+        readiness = self._capture_end_readiness()
         self.owner.finalize(self.clock.monotonic_ns())
         self.executor.shutdown(wait=True)
         stopped = await asyncio.to_thread(self.writer.stop, self.cfg.storage["writer_shutdown_timeout_ms"] / 1000)
@@ -135,18 +162,23 @@ class Application:
             await asyncio.to_thread(self.writer.wait_until_stopped)
         status = "INTERRUPTED" if "signal" in self.stop_reason else "COMPLETED"
         quality = "OK" if not (self.recorder.overflowed or self.writer.disk_error or self.owner.counters.internal_errors) else "DEGRADED"
-        readiness = self.compute_readiness()
         self.conn.execute("UPDATE runs SET status=?, ended_utc=?, ended_mono_ns=?, end_balance_lamports=?, quality_status=?, readiness=? WHERE run_id=?",
                           (status, self.clock.utc_iso(), self.clock.monotonic_ns(), self.owner.portfolio.cash_lamports + self.owner.portfolio.reserved_lamports, quality, readiness.value, self.run_id))
         summary = {"run_id": self.run_id, "status": status, "stop_reason": self.stop_reason, "quality": quality, "readiness": readiness.value, "feeds_started": len(self.feeds), "feeds": {fid: self._feed_report(fid) for fid in self.feeds},
                    "feed_setup": feed_status, "owner": self.owner.status(), "cash_reconciliation": self.owner.cash_reconciliation(), "writer": {"committed_records": self.writer.committed_records, "failures": self.writer.failures, "fk_holds": self.writer.fk_holds, "quarantined_records": self.writer.quarantined_records, "disk_error": self.writer.disk_error},
-                   "fee_errors": self.resolver.errors[-10:], "storage": storage_info, "db": str(self.db_path), "quarantined_records": self.writer.quarantined_records, "prior_campaign_mints": len(prior_mints)}
+                   "fee_errors": self.resolver.errors[-10:], "storage": storage_info, "db": str(self.db_path), "quarantined_records": self.writer.quarantined_records, "prior_campaign_mints": len(prior_mints), "economic_profile_samples_at_run_end": self._economic_sample_count_at_stop}
         self.conn.close()
         return summary
 
     def _feed_report(self, fid: str) -> dict[str, Any]:
         s = self.feeds[fid].stats
         return {"messages": s.messages, "reconnects": s.reconnects, "connections": s.connections, "acks": s.acks, "ack_failures": s.ack_failures, "transport_errors": s.transport_errors, "ready": s.ready, "last_error": redact(s.last_error or "") or None}
+
+    def _capture_end_readiness(self) -> Readiness:
+        # Feeds and execution callbacks have stopped; count once before finalize evicts trackers.
+        assert self.owner is not None and self.resolver is not None
+        self._economic_sample_count_at_stop = economic_profile_samples(self.owner, self.resolver.cache.basis(), self.clock.monotonic_ns())
+        return self.compute_readiness()
 
     def compute_readiness(self) -> Readiness:
         assert self.owner is not None and self.resolver is not None
@@ -155,7 +187,10 @@ class Application:
             return Readiness.NOT_READY
         basis = self.resolver.cache.basis()
         now = self.clock.monotonic_ns()
-        if basis.complete and all(s.is_fresh(now) for s in (basis.protocol, basis.network, basis.rent, basis.priority_policy)) and self.owner.portfolio.cash_lamports > self.cfg.strategy["entry_amount_lamports"]:  # type: ignore[union-attr]
+        samples = self._economic_sample_count_at_stop
+        if samples is None:
+            samples = economic_profile_samples(self.owner, basis, now, limit=1)
+        if samples and self.owner.portfolio.cash_lamports > self.cfg.strategy["entry_amount_lamports"]:
             return Readiness.ECONOMIC_PAPER_READY
         return Readiness.CAPTURE_READY
 
@@ -309,6 +344,8 @@ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor"
     for r in fee_rows:
         latest[r["source_type"]] = r
     d05 = {"PROTOCOL_GLOBAL_ACCOUNT", "NETWORK_FEE", "RENT_EXEMPTION", "PRIORITY_POLICY"} <= {k for k, v in latest.items() if v["validation_status"] == "VALID"}
+    supported_samples = summary.get("economic_profile_samples_at_run_end", 0)
+    d05 = d05 and supported_samples > 0
     decoded = reader2 = None
     try:
         reader2 = open_connection(db_path, read_only=True)
@@ -317,7 +354,8 @@ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor"
         reader2.close()
     except Exception:  # noqa: BLE001
         pass
-    checks["D05"] = {"status": "PASS" if d05 else "FAIL", "snapshots": latest, "cost_status": "VERIFIED" if d05 else "UNQUALIFIED_COSTS", "fee_errors": summary["fee_errors"], "no_transfers": True,
+    checks["D05"] = {"status": "PASS" if d05 else "FAIL", "snapshots": latest, "cost_status": "VERIFIED" if d05 else "UNQUALIFIED_COSTS", "fee_errors": summary["fee_errors"], "no_transfers": True, "observed_economic_profile_samples": supported_samples,
+                     "fee_probe_scope": "getFeeForMessage verifies network fees, not transaction execution or landing",
                      "global_account_verification_status": cfg.protocol["global_account"]["verification_status"], "decoded_global_account": decoded,
                      "note": "layout must be marked VERIFIED_* in config.protocol.global_account after checking decoded values against the official IDL; until then protocol fees stay LAYOUT_UNVERIFIED"}
     # D06: recorder/quality/report/offline replay of the same probe

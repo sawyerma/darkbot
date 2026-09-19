@@ -320,7 +320,7 @@ class T25T30Protocol(unittest.TestCase):
         a = attempts(h)
         self.assertEqual(a[1]["rent_refunded_lamports"], 2_039_280)
         self.assertEqual(sum(r["locked_rent_delta_lamports"] for r in h.rows("select * from ledger")), 0)
-        h2 = Harness(base_config(execution={"token_account_policy": {"assume_new_token_account_per_position": False, "close_token_account_on_full_exit": False, "spl_token_account_size_bytes": 165, "token_2022_supported": False}}))
+        h2 = Harness(base_config(execution={"token_account_policy": {**base_config().execution["token_account_policy"], "assume_new_token_account_per_position": False, "close_token_account_on_full_exit": False, "spl_token_account_size_bytes": 165, "token_2022_supported": False}}))
         open_position(h2)
         self.assertEqual(attempts(h2)[0]["rent_locked_lamports"], 0)
         self.assertEqual(h2.owner.portfolio.locked_rent_lamports, 0)

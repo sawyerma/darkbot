@@ -213,6 +213,7 @@ class MarketState:
     create_receive_mono_ns: int | None = None
     create_slot: int | None = None
     token_program: str | None = None
+    account_profile_id: str | None = None
     quote_scope_status: QuoteScopeStatus = QuoteScopeStatus.QUOTE_UNKNOWN
     venue_state: VenueState = VenueState.VENUE_UNKNOWN
     coverage_state: CoverageState = CoverageState.UNKNOWN_WARMUP
@@ -272,6 +273,8 @@ class CurveState:
     venue_state: VenueState
     creator_fee_bps: int = 0
     creator_fee_applicable: bool = True
+    token_program: str | None = None
+    account_profile_id: str | None = None
 
 
 # --------------------------------------------------------------------------- fees / quotes
@@ -354,6 +357,11 @@ class QuoteSnapshot:
     cost_evidence_status: str
     unspent_budget_lamports: int | None = None
     capped_by_real_reserves: bool = False
+    token_program: str | None = None
+    account_profile_id: str | None = None
+    account_size_bytes: int | None = None
+    message_template_hash: str | None = None
+    instruction_name: str | None = None
 
     @property
     def entry_cash_debit(self) -> int:

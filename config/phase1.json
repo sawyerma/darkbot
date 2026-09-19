@@ -87,7 +87,19 @@
       "assume_new_token_account_per_position": true,
       "close_token_account_on_full_exit": true,
       "spl_token_account_size_bytes": 165,
-      "token_2022_supported": false
+      "token_2022_supported": true,
+      "profiles": {
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+          "profile_id": "SPL_ACCOUNT_165_V1",
+          "account_size_bytes": 165,
+          "instruction_version": "v2"
+        },
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+          "profile_id": "PUMP_CREATE_V2_METADATA_IMMUTABLE_170_V1",
+          "account_size_bytes": 170,
+          "instruction_version": "v2"
+        }
+      }
     },
     "research_stress": {
       "network_fee_multiplier": "1.0",
@@ -98,37 +110,315 @@
     "message_templates": {
       "buy": {
         "discriminator": [
-          102,
-          6,
-          61,
-          18,
-          1,
-          218,
-          235,
-          234
+          184,
+          23,
+          238,
+          97,
+          103,
+          197,
+          211,
+          61
         ],
         "accounts": [
           {
-            "name": "global"
+            "name": "global",
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    103,
+                    108,
+                    111,
+                    98,
+                    97,
+                    108
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "base_mint"
+          },
+          {
+            "name": "quote_mint"
+          },
+          {
+            "name": "base_token_program"
+          },
+          {
+            "name": "quote_token_program"
+          },
+          {
+            "name": "associated_token_program",
+            "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
           },
           {
             "name": "fee_recipient",
             "writable": true
           },
           {
-            "name": "mint"
+            "name": "associated_quote_fee_recipient",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "fee_recipient"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
+          },
+          {
+            "name": "buyback_fee_recipient",
+            "writable": true
+          },
+          {
+            "name": "associated_quote_buyback_fee_recipient",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "buyback_fee_recipient"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
           },
           {
             "name": "bonding_curve",
-            "writable": true
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    98,
+                    111,
+                    110,
+                    100,
+                    105,
+                    110,
+                    103,
+                    45,
+                    99,
+                    117,
+                    114,
+                    118,
+                    101
+                  ]
+                },
+                {
+                  "kind": "account",
+                  "path": "base_mint"
+                }
+              ]
+            }
           },
           {
-            "name": "associated_bonding_curve",
-            "writable": true
+            "name": "associated_base_bonding_curve",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "bonding_curve"
+                },
+                {
+                  "kind": "account",
+                  "path": "base_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "base_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
           },
           {
-            "name": "associated_user",
-            "writable": true
+            "name": "associated_quote_bonding_curve",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "bonding_curve"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
           },
           {
             "name": "user",
@@ -136,36 +426,414 @@
             "signer": true
           },
           {
-            "name": "system_program",
-            "address": "11111111111111111111111111111111"
+            "name": "associated_base_user",
+            "writable": true
           },
           {
-            "name": "token_program"
+            "name": "associated_quote_user",
+            "docs": [
+              "canonical SPL associated-token PDA. Validated in handlers via",
+              "`validate_user_quote_token_account` for non-legacy mints; ignored for legacy (SOL) trades."
+            ],
+            "writable": true
           },
           {
             "name": "creator_vault",
-            "writable": true
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    99,
+                    114,
+                    101,
+                    97,
+                    116,
+                    111,
+                    114,
+                    45,
+                    118,
+                    97,
+                    117,
+                    108,
+                    116
+                  ]
+                },
+                {
+                  "kind": "account",
+                  "path": "bonding_curve.creator",
+                  "account": "BondingCurve"
+                }
+              ]
+            }
           },
           {
-            "name": "event_authority"
+            "name": "associated_creator_vault",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "creator_vault"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
           },
           {
-            "name": "program",
-            "address": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+            "name": "sharing_config",
+            "docs": [
+              "seeds; the account is intentionally not deserialized here because it may be uninitialized",
+              "for mints that have not created a fee sharing config. Handlers must check",
+              "`data_is_empty()` / owner before reading."
+            ],
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    115,
+                    104,
+                    97,
+                    114,
+                    105,
+                    110,
+                    103,
+                    45,
+                    99,
+                    111,
+                    110,
+                    102,
+                    105,
+                    103
+                  ]
+                },
+                {
+                  "kind": "account",
+                  "path": "base_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  12,
+                  53,
+                  255,
+                  169,
+                  5,
+                  90,
+                  142,
+                  86,
+                  141,
+                  168,
+                  247,
+                  188,
+                  7,
+                  86,
+                  21,
+                  39,
+                  76,
+                  241,
+                  201,
+                  44,
+                  164,
+                  31,
+                  64,
+                  0,
+                  156,
+                  81,
+                  106,
+                  164,
+                  20,
+                  194,
+                  124,
+                  112
+                ]
+              }
+            }
           },
           {
-            "name": "global_volume_accumulator"
+            "name": "global_volume_accumulator",
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    103,
+                    108,
+                    111,
+                    98,
+                    97,
+                    108,
+                    95,
+                    118,
+                    111,
+                    108,
+                    117,
+                    109,
+                    101,
+                    95,
+                    97,
+                    99,
+                    99,
+                    117,
+                    109,
+                    117,
+                    108,
+                    97,
+                    116,
+                    111,
+                    114
+                  ]
+                }
+              ]
+            }
           },
           {
             "name": "user_volume_accumulator",
-            "writable": true
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    117,
+                    115,
+                    101,
+                    114,
+                    95,
+                    118,
+                    111,
+                    108,
+                    117,
+                    109,
+                    101,
+                    95,
+                    97,
+                    99,
+                    99,
+                    117,
+                    109,
+                    117,
+                    108,
+                    97,
+                    116,
+                    111,
+                    114
+                  ]
+                },
+                {
+                  "kind": "account",
+                  "path": "user"
+                }
+              ]
+            }
           },
           {
-            "name": "fee_config"
+            "name": "associated_user_volume_accumulator",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "user_volume_accumulator"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
+          },
+          {
+            "name": "fee_config",
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    102,
+                    101,
+                    101,
+                    95,
+                    99,
+                    111,
+                    110,
+                    102,
+                    105,
+                    103
+                  ]
+                },
+                {
+                  "kind": "const",
+                  "value": [
+                    1,
+                    86,
+                    224,
+                    246,
+                    147,
+                    102,
+                    90,
+                    207,
+                    68,
+                    219,
+                    21,
+                    104,
+                    191,
+                    23,
+                    91,
+                    170,
+                    81,
+                    137,
+                    203,
+                    151,
+                    245,
+                    210,
+                    255,
+                    59,
+                    101,
+                    93,
+                    43,
+                    182,
+                    253,
+                    109,
+                    24,
+                    176
+                  ]
+                }
+              ],
+              "program": {
+                "kind": "account",
+                "path": "fee_program"
+              }
+            }
           },
           {
             "name": "fee_program",
             "address": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ"
+          },
+          {
+            "name": "system_program",
+            "address": "11111111111111111111111111111111"
+          },
+          {
+            "name": "event_authority",
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    95,
+                    95,
+                    101,
+                    118,
+                    101,
+                    110,
+                    116,
+                    95,
+                    97,
+                    117,
+                    116,
+                    104,
+                    111,
+                    114,
+                    105,
+                    116,
+                    121
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "program",
+            "address": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
           }
         ],
         "args": [
@@ -176,46 +844,320 @@
           {
             "name": "max_sol_cost",
             "type": "u64"
-          },
-          {
-            "name": "track_volume",
-            "type": "bool"
           }
         ]
       },
       "sell": {
         "discriminator": [
-          51,
-          230,
-          133,
-          164,
-          1,
-          127,
-          131,
-          173
+          93,
+          246,
+          130,
+          60,
+          231,
+          233,
+          64,
+          178
         ],
         "accounts": [
           {
-            "name": "global"
+            "name": "global",
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    103,
+                    108,
+                    111,
+                    98,
+                    97,
+                    108
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "base_mint"
+          },
+          {
+            "name": "quote_mint"
+          },
+          {
+            "name": "base_token_program"
+          },
+          {
+            "name": "quote_token_program"
+          },
+          {
+            "name": "associated_token_program",
+            "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
           },
           {
             "name": "fee_recipient",
             "writable": true
           },
           {
-            "name": "mint"
+            "name": "associated_quote_fee_recipient",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "fee_recipient"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
+          },
+          {
+            "name": "buyback_fee_recipient",
+            "writable": true
+          },
+          {
+            "name": "associated_quote_buyback_fee_recipient",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "buyback_fee_recipient"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
           },
           {
             "name": "bonding_curve",
-            "writable": true
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    98,
+                    111,
+                    110,
+                    100,
+                    105,
+                    110,
+                    103,
+                    45,
+                    99,
+                    117,
+                    114,
+                    118,
+                    101
+                  ]
+                },
+                {
+                  "kind": "account",
+                  "path": "base_mint"
+                }
+              ]
+            }
           },
           {
-            "name": "associated_bonding_curve",
-            "writable": true
+            "name": "associated_base_bonding_curve",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "bonding_curve"
+                },
+                {
+                  "kind": "account",
+                  "path": "base_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "base_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
           },
           {
-            "name": "associated_user",
-            "writable": true
+            "name": "associated_quote_bonding_curve",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "bonding_curve"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
           },
           {
             "name": "user",
@@ -223,29 +1165,377 @@
             "signer": true
           },
           {
-            "name": "system_program",
-            "address": "11111111111111111111111111111111"
-          },
-          {
-            "name": "creator_vault",
+            "name": "associated_base_user",
             "writable": true
           },
           {
-            "name": "token_program"
+            "name": "associated_quote_user",
+            "docs": [
+              "canonical SPL associated-token PDA. Validated in `sell_v2_ix` via",
+              "`validate_user_quote_token_account` for non-legacy mints; ignored for legacy (SOL) trades."
+            ],
+            "writable": true
           },
           {
-            "name": "event_authority"
+            "name": "creator_vault",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    99,
+                    114,
+                    101,
+                    97,
+                    116,
+                    111,
+                    114,
+                    45,
+                    118,
+                    97,
+                    117,
+                    108,
+                    116
+                  ]
+                },
+                {
+                  "kind": "account",
+                  "path": "bonding_curve.creator",
+                  "account": "BondingCurve"
+                }
+              ]
+            }
           },
           {
-            "name": "program",
-            "address": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+            "name": "associated_creator_vault",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "creator_vault"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
           },
           {
-            "name": "fee_config"
+            "name": "sharing_config",
+            "docs": [
+              "seeds; the account is intentionally not deserialized here because it may be uninitialized",
+              "for mints that have not created a fee sharing config. Handlers must check",
+              "`data_is_empty()` / owner before reading."
+            ],
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    115,
+                    104,
+                    97,
+                    114,
+                    105,
+                    110,
+                    103,
+                    45,
+                    99,
+                    111,
+                    110,
+                    102,
+                    105,
+                    103
+                  ]
+                },
+                {
+                  "kind": "account",
+                  "path": "base_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  12,
+                  53,
+                  255,
+                  169,
+                  5,
+                  90,
+                  142,
+                  86,
+                  141,
+                  168,
+                  247,
+                  188,
+                  7,
+                  86,
+                  21,
+                  39,
+                  76,
+                  241,
+                  201,
+                  44,
+                  164,
+                  31,
+                  64,
+                  0,
+                  156,
+                  81,
+                  106,
+                  164,
+                  20,
+                  194,
+                  124,
+                  112
+                ]
+              }
+            }
+          },
+          {
+            "name": "user_volume_accumulator",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    117,
+                    115,
+                    101,
+                    114,
+                    95,
+                    118,
+                    111,
+                    108,
+                    117,
+                    109,
+                    101,
+                    95,
+                    97,
+                    99,
+                    99,
+                    117,
+                    109,
+                    117,
+                    108,
+                    97,
+                    116,
+                    111,
+                    114
+                  ]
+                },
+                {
+                  "kind": "account",
+                  "path": "user"
+                }
+              ]
+            }
+          },
+          {
+            "name": "associated_user_volume_accumulator",
+            "writable": true,
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "account",
+                  "path": "user_volume_accumulator"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_token_program"
+                },
+                {
+                  "kind": "account",
+                  "path": "quote_mint"
+                }
+              ],
+              "program": {
+                "kind": "const",
+                "value": [
+                  140,
+                  151,
+                  37,
+                  143,
+                  78,
+                  36,
+                  137,
+                  241,
+                  187,
+                  61,
+                  16,
+                  41,
+                  20,
+                  142,
+                  13,
+                  131,
+                  11,
+                  90,
+                  19,
+                  153,
+                  218,
+                  255,
+                  16,
+                  132,
+                  4,
+                  142,
+                  123,
+                  216,
+                  219,
+                  233,
+                  248,
+                  89
+                ]
+              }
+            }
+          },
+          {
+            "name": "fee_config",
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    102,
+                    101,
+                    101,
+                    95,
+                    99,
+                    111,
+                    110,
+                    102,
+                    105,
+                    103
+                  ]
+                },
+                {
+                  "kind": "const",
+                  "value": [
+                    1,
+                    86,
+                    224,
+                    246,
+                    147,
+                    102,
+                    90,
+                    207,
+                    68,
+                    219,
+                    21,
+                    104,
+                    191,
+                    23,
+                    91,
+                    170,
+                    81,
+                    137,
+                    203,
+                    151,
+                    245,
+                    210,
+                    255,
+                    59,
+                    101,
+                    93,
+                    43,
+                    182,
+                    253,
+                    109,
+                    24,
+                    176
+                  ]
+                }
+              ],
+              "program": {
+                "kind": "account",
+                "path": "fee_program"
+              }
+            }
           },
           {
             "name": "fee_program",
             "address": "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ"
+          },
+          {
+            "name": "system_program",
+            "address": "11111111111111111111111111111111"
+          },
+          {
+            "name": "event_authority",
+            "pda": {
+              "seeds": [
+                {
+                  "kind": "const",
+                  "value": [
+                    95,
+                    95,
+                    101,
+                    118,
+                    101,
+                    110,
+                    116,
+                    95,
+                    97,
+                    117,
+                    116,
+                    104,
+                    111,
+                    114,
+                    105,
+                    116,
+                    121
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "program",
+            "address": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
           }
         ],
         "args": [
@@ -278,7 +1568,7 @@
     "snapshot_refresh_policy": {
       "protocol_refresh_interval_ms": 60000,
       "protocol_max_age_ms": 120000,
-      "network_fee_refresh_interval_ms": 10000,
+      "network_fee_refresh_interval_ms": 20000,
       "network_fee_max_age_ms": 30000,
       "rent_refresh_interval_ms": 3600000,
       "rent_max_age_ms": 7200000,
@@ -407,7 +1697,7 @@
     "program_id": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
     "idl_source": "https://github.com/pump-fun/pump-public-docs",
     "idl_version_or_hash": "sha256:ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
-    "decoder_version": "PUMP_LOG_DECODER_IDL_ffe966c42f1a",
+    "decoder_version": "PUMP_LOG_DECODER_IDL_ffe966c42f1a_TOKEN_ACCOUNT_PROFILE_V1",
     "supported_variants": [
       "create",
       "create_v2",
@@ -1078,6 +2368,33 @@
         "CONFIGURABLE_CREATOR_FEE",
         "FEE_SHARING"
       ]
+    },
+    "token_2022_create_profile": {
+      "profile_id": "PUMP_CREATE_V2_METADATA_IMMUTABLE_170_V1",
+      "account_size_bytes": 170,
+      "instruction": "CreateV2",
+      "required_token_instructions": [
+        "MetadataPointerInstruction::Initialize",
+        "InitializeMint2",
+        "GetAccountDataSize",
+        "InitializeImmutableOwner",
+        "InitializeAccount3",
+        "TokenMetadataInstruction: Initialize",
+        "MintTo",
+        "SetAuthority"
+      ],
+      "allowed_token_instructions": [
+        "MetadataPointerInstruction::Initialize",
+        "InitializeMint2",
+        "GetAccountDataSize",
+        "InitializeImmutableOwner",
+        "InitializeAccount3",
+        "TokenMetadataInstruction: Initialize",
+        "TokenMetadataInstruction: UpdateAuthority",
+        "MintTo",
+        "SetAuthority"
+      ],
+      "source": "pump-public-docs IDL sha256:ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b; mainnet_create_transactions.json; token-2022 ImmutableOwner account layout"
     }
   },
   "research": {

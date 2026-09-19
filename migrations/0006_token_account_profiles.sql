@@ -1,0 +1,10 @@
+ALTER TABLE execution_attempts ADD COLUMN token_program TEXT;
+ALTER TABLE execution_attempts ADD COLUMN account_profile_id TEXT;
+ALTER TABLE execution_attempts ADD COLUMN account_size_bytes INTEGER;
+ALTER TABLE execution_attempts ADD COLUMN instruction_name TEXT;
+ALTER TABLE quote_snapshots ADD COLUMN token_program TEXT;
+ALTER TABLE quote_snapshots ADD COLUMN account_profile_id TEXT;
+ALTER TABLE quote_snapshots ADD COLUMN account_size_bytes INTEGER;
+ALTER TABLE quote_snapshots ADD COLUMN instruction_name TEXT;
+ALTER TABLE quote_snapshots ADD COLUMN message_template_hash TEXT;
+ALTER TABLE market_events ADD COLUMN account_profile_id TEXT;

@@ -61,11 +61,17 @@ class ExecutionPolicy:
     target_net_multiple: Decimal
     irrecoverable_cost_lamports: int = 0
     irrecoverable_evidence: CostEvidence = CostEvidence.VALID_ZERO
+    spl_token_program: str = ""
+    token_2022_program: str = ""
+    token_2022_supported: bool = False
+    account_profiles: dict[str, Any] | None = None
 
     @classmethod
     def from_config(cls, cfg: Any) -> "ExecutionPolicy":
         ex, co, st = cfg.execution, cfg.costs, cfg.strategy
         return cls(
+            spl_token_program=cfg.protocol["spl_token_program"], token_2022_program=cfg.protocol["token_2022_program"],
+            token_2022_supported=ex["token_account_policy"]["token_2022_supported"], account_profiles=ex["token_account_policy"]["profiles"],
             slippage_bps=ex["slippage_bps"], quote_max_age_ns=ex["quote_max_age_ms"] * NS_PER_MS, proxy_state_max_age_ns=ex["quote_max_age_ms"] * NS_PER_MS,
             max_exit_attempts=ex["max_exit_attempts"], exit_retry_backoff_ns=tuple(b * NS_PER_MS for b in ex["exit_retry_backoff_ms"]), entry_max_attempts=ex["entry_max_attempts"],
             signature_count=ex["signature_count"], compute_unit_limit=ex["priority_policy"]["compute_unit_limit"], sender_tip_lamports=co["sender_tip_lamports"],
@@ -90,9 +96,14 @@ class FeeTerms:
     rent_lamports: int
     evidence: str
     ids: dict[str, str]
+    token_program: str
+    account_profile_id: str | None
+    account_size_bytes: int
+    message_template_hash: str | None
+    instruction_name: str | None
 
 
-def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int, state: CurveState | None = None) -> FeeTerms | InvalidQuote:
+def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int, state: CurveState | None = None, side: Side = Side.BUY) -> FeeTerms | InvalidQuote:
     """Assemble cost terms from snapshots valid at now_mono_ns; NULL or stale is UNKNOWN, never zero and never a fill basis."""
     if not basis.complete:
         missing = [n for n, s in (("protocol", basis.protocol), ("network", basis.network), ("rent", basis.rent), ("priority_policy", basis.priority_policy)) if s is None]
@@ -122,6 +133,31 @@ def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int, state
     n = basis.network.normalized_fee_components
     r = basis.rent.normalized_fee_components
     pp = basis.priority_policy.normalized_fee_components
+    program = (state.token_program if state else None) or policy.spl_token_program
+    if program not in (policy.spl_token_program, policy.token_2022_program) or (program == policy.token_2022_program and not policy.token_2022_supported):
+        return InvalidQuote("UNSUPPORTED_TOKEN_PROGRAM")
+    profile = (policy.account_profiles or {}).get(program, {})
+    if program == policy.token_2022_program and (state is None or state.account_profile_id != profile.get("profile_id")):
+        return InvalidQuote("TOKEN_ACCOUNT_PROFILE_UNVERIFIED")
+    if "execution_profiles" in n or "account_profiles" in r:
+        n = n.get("execution_profiles", {}).get(program, {}).get(side.value, {})
+        r = r.get("account_profiles", {}).get(program, {})
+        if (n.get("validation_status") != "VALID" or r.get("validation_status") != "VALID"
+                or n.get("profile_id") != profile.get("profile_id") or r.get("profile_id") != profile.get("profile_id")
+                or r.get("account_size_bytes") != profile.get("account_size_bytes")):
+            return InvalidQuote("UNQUALIFIED_COSTS", "missing or mismatched program/side/account profile")
+    elif program != policy.spl_token_program:
+        return InvalidQuote("UNQUALIFIED_COSTS", "legacy scalar cost evidence cannot price Token-2022")
+    if r.get("account_size_bytes") != profile.get("account_size_bytes"):
+        return InvalidQuote("UNQUALIFIED_COSTS", "rent account size disagrees with the selected profile")
+    for comp, keys in ((p, ("protocol_fee_bps", "creator_fee_bps")),
+                       (n, ("base_fee_lamports", "priority_fee_lamports")),
+                       (r, ("token_account_rent_lamports", "account_size_bytes")),
+                       (pp, ("compute_unit_price_micro_lamports",))):
+        if any(type(comp.get(key)) is not int or comp[key] < 0 for key in keys):
+            return InvalidQuote("UNQUALIFIED_COSTS", "missing/invalid selected cost component")
+    if n.get("network_fee_total_lamports", n["base_fee_lamports"] + n["priority_fee_lamports"]) != n["base_fee_lamports"] + n["priority_fee_lamports"]:
+        return InvalidQuote("UNQUALIFIED_COSTS", "inconsistent selected network fee")
     for comp, source in ((p, "protocol"), (n, "network"), (r, "rent"), (pp, "priority_policy")):
         for key, value in comp.items():
             if value is None and key.endswith("_lamports") or (value is None and key.endswith("_bps")):
@@ -129,6 +165,8 @@ def fee_terms(basis: CostBasis, policy: ExecutionPolicy, now_mono_ns: int, state
     evidences = {basis.protocol.evidence, basis.network.evidence, basis.rent.evidence, basis.priority_policy.evidence}
     evidence = "MEASURED" if evidences <= {CostEvidence.MEASURED, CostEvidence.KNOWN_RULE} else "CONFIGURED" if CostEvidence.CONFIGURED in evidences else "MODELED"
     return FeeTerms(
+        token_program=program, account_profile_id=profile.get("profile_id"), account_size_bytes=int(r["account_size_bytes"]),
+        message_template_hash=n.get("message_template_hash", basis.network.raw_values.get("message_template_hash")), instruction_name=n.get("instruction_name"),
         protocol_bps=int(p["protocol_fee_bps"]), creator_bps=int(p["creator_fee_bps"]), other_bps=int(p.get("other_protocol_fee_bps", 0)),
         base_fee_lamports=int(n["base_fee_lamports"]), priority_fee_lamports=int(n["priority_fee_lamports"]),
         compute_unit_price_micro_lamports=int(pp["compute_unit_price_micro_lamports"]), rent_lamports=int(r["token_account_rent_lamports"]), evidence=evidence,
@@ -208,6 +246,8 @@ class QuoteEngine:
         # buy_v2 max_sol_cost includes protocol/creator fees (instruction semantics); slippage bound applied to the fee-inclusive debit
         max_input = swap_debit * (BASIS_POINTS + self.policy.slippage_bps) // BASIS_POINTS
         return QuoteSnapshot(
+            token_program=terms.token_program, account_profile_id=terms.account_profile_id, account_size_bytes=terms.account_size_bytes,
+            message_template_hash=terms.message_template_hash, instruction_name=terms.instruction_name,
             quote_snapshot_id=self._next_id(run_prefix), side=Side.BUY, quote_state_event_id=state.event_id, fee_snapshot_id=terms.ids["protocol"], created_mono_ns=now_mono_ns,
             knowledge_cutoff_mono_ns=state.receive_mono_ns, curve_input_lamports=curve_input, gross_curve_output_lamports=None, token_amount_base_units=tokens,
             protocol_fee_lamports=proto, creator_fee_lamports=creator, other_protocol_fee_lamports=other, protocol_fee_total_lamports=total,
@@ -226,7 +266,7 @@ class QuoteEngine:
             return InvalidQuote("COVERAGE_GAP")
         if tokens <= 0:
             return InvalidQuote("NO_TOKENS")
-        terms = fee_terms(basis, self.policy, now_mono_ns, state)
+        terms = fee_terms(basis, self.policy, now_mono_ns, state, Side.SELL)
         if isinstance(terms, InvalidQuote):
             return terms
         age = now_mono_ns - state.receive_mono_ns
@@ -246,6 +286,8 @@ class QuoteEngine:
         min_output = credit * (BASIS_POINTS - self.policy.slippage_bps) // BASIS_POINTS
         refund = rent_refund_lamports if self.policy.close_token_account_on_full_exit else 0
         return QuoteSnapshot(
+            token_program=terms.token_program, account_profile_id=terms.account_profile_id, account_size_bytes=terms.account_size_bytes,
+            message_template_hash=terms.message_template_hash, instruction_name=terms.instruction_name,
             quote_snapshot_id=self._next_id(run_prefix), side=Side.SELL, quote_state_event_id=state.event_id, fee_snapshot_id=terms.ids["protocol"], created_mono_ns=now_mono_ns,
             knowledge_cutoff_mono_ns=state.receive_mono_ns, curve_input_lamports=None, gross_curve_output_lamports=gross, token_amount_base_units=tokens,
             protocol_fee_lamports=proto, creator_fee_lamports=creator, other_protocol_fee_lamports=other, protocol_fee_total_lamports=total,
@@ -265,8 +307,8 @@ class QuoteEngine:
             return None
         return q.swap_wallet_credit_lamports - q.network_fee_total_lamports - q.tip_lamports - booked_failed_costs
 
-    def exit_reserve_lamports(self, basis: CostBasis, now_mono_ns: int) -> int | None:
-        terms = fee_terms(basis, self.policy, now_mono_ns)
+    def exit_reserve_lamports(self, basis: CostBasis, now_mono_ns: int, state: CurveState | None = None) -> int | None:
+        terms = fee_terms(basis, self.policy, now_mono_ns, state, Side.SELL)
         if isinstance(terms, InvalidQuote):
             return None
         return self.policy.max_exit_attempts * (terms.base_fee_lamports + terms.priority_fee_lamports + self.policy.sender_tip_lamports)
@@ -294,7 +336,7 @@ def evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: Curv
     ev = _evaluate_fill(engine, expected, fill_state, basis, modeled_fill_mono_ns, run_prefix, coverage, rent_refund)
     if ev.status == AttemptStatus.UNKNOWN:
         return ev
-    terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns, fill_state)
+    terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns, fill_state, expected.side)
     if isinstance(terms, InvalidQuote):
         return FillEvaluation(AttemptStatus.UNKNOWN, None, None, "COSTS_UNKNOWN_AT_MODELED_FILL", ev.proxy_age_ns)
     if ev.status == AttemptStatus.FILLED and expected.side == Side.SELL and engine.stress_rejects(expected.quote_snapshot_id):
@@ -338,6 +380,8 @@ def _evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: Cur
     network_and_tip = expected.network_fee_total_lamports + expected.tip_lamports
     if fill_state is None:
         return FillEvaluation(AttemptStatus.UNKNOWN, None, None, "NO_PROXY_STATE_AT_MODELED_FILL", None)
+    if expected.token_program and ((fill_state.token_program or engine.policy.spl_token_program) != expected.token_program or (fill_state.token_program == engine.policy.token_2022_program and fill_state.account_profile_id != expected.account_profile_id)):
+        return FillEvaluation(AttemptStatus.UNKNOWN, None, None, "TOKEN_ACCOUNT_PROFILE_CHANGED", None)
     proxy_age = modeled_fill_mono_ns - fill_state.receive_mono_ns
     if fill_state.venue_state != VenueState.BONDING_CURVE_ACTIVE:
         return FillEvaluation(AttemptStatus.VENUE_INVALID, None, network_and_tip, f"VENUE_{fill_state.venue_state.value}", proxy_age)
@@ -345,7 +389,7 @@ def _evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: Cur
         return FillEvaluation(AttemptStatus.UNKNOWN, None, None, "COVERAGE_GAP_AT_MODELED_FILL", proxy_age)
     if proxy_age > engine.policy.proxy_state_max_age_ns:
         return FillEvaluation(AttemptStatus.UNKNOWN, None, None, "PROXY_STATE_STALE", proxy_age)
-    if isinstance(fee_terms(basis, engine.policy, modeled_fill_mono_ns), InvalidQuote):
+    if isinstance(fee_terms(basis, engine.policy, modeled_fill_mono_ns, fill_state, expected.side), InvalidQuote):
         return FillEvaluation(AttemptStatus.UNKNOWN, None, None, "COSTS_UNKNOWN_AT_MODELED_FILL", proxy_age)  # unknown fee rule: never a "safe" failed attempt with old fees
     if expected.side == Side.BUY:
         actual = engine.quote_buy(fill_state, basis, modeled_fill_mono_ns, run_prefix, coverage, budget=expected.curve_input_lamports)
@@ -357,7 +401,7 @@ def _evaluate_fill(engine: QuoteEngine, expected: QuoteSnapshot, fill_state: Cur
         if fill_state.real_token_reserves is not None and tokens > fill_state.real_token_reserves:
             return FillEvaluation(AttemptStatus.CURVE_UNAVAILABLE, None, network_and_tip, "INSUFFICIENT_REAL_TOKEN_RESERVES", proxy_age)
         curve_input = (vsol * tokens) // (vtok - tokens) + 1
-        terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns, fill_state)
+        terms = fee_terms(basis, engine.policy, modeled_fill_mono_ns, fill_state, expected.side)
         assert not isinstance(terms, InvalidQuote)
         proto, creator, other = ceil_bps(curve_input, terms.protocol_bps), ceil_bps(curve_input, terms.creator_bps), ceil_bps(curve_input, terms.other_bps)
         debit = curve_input + proto + creator + other

@@ -68,6 +68,7 @@ class S01S03(unittest.TestCase):
 class S08S12(unittest.TestCase):
     def test_S08_token_2022_rejected_when_unsupported(self):
         cfg = _v2cfg(base_config())
+        cfg = cfg.with_overrides(execution={"token_account_policy": {**cfg.execution["token_account_policy"], "token_2022_supported": False}})
         h = Harness(cfg)
         tail = encode_fields([("quote_mint", cfg.protocol["wsol_mint"]), ("token_program", cfg.protocol["token_2022_program"])], [["quote_mint", "pubkey"], ["token_program", "pubkey"]])
         h.feed("helius_standard", logs_notification("s", 1, create_frame_logs(MINT_A, CREATOR, tail=tail)), T0 + 1_000_000)

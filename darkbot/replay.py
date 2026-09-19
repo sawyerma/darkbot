@@ -87,7 +87,7 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
     ended = run["ended_mono_ns"] if "ended_mono_ns" in run.keys() else None
     end = max(last_obs, ended) if ended is not None else last_obs
     # dataset freeze covers everything replay consumes: frames with timing/feeds, fee knowledge with timing, gaps, callback lateness, run window, decoder/coverage/config
-    decoder_code_hash = sha256_text((Path(__file__).resolve().parent / "market.py").read_text(encoding="utf-8"))  # same version string with changed decoder code = new dataset version
+    decoder_code_hash = sha256_text(canonical_json({name: (Path(__file__).resolve().parent / name).read_text(encoding="utf-8") for name in ("market.py", "token_accounts.py")}))  # same version string with changed decoder code = new dataset version
     canonical_rows = [dict(r) for r in conn.execute("SELECT * FROM market_events WHERE run_id=? ORDER BY canonical_event_id", (run_id,))]
     quality_rows = [dict(r) for r in conn.execute("SELECT * FROM quality_events WHERE run_id=? ORDER BY quality_event_id", (run_id,))]
     run_manifest = dict(run)

@@ -20,6 +20,7 @@ from typing import Any, Callable
 from darkbot.domain import NS_PER_MS, CostBasis, CostEvidence, FeeSnapshot, utc_iso
 from darkbot.execution import priority_lamports
 from darkbot.market import _Reader, b58decode
+from darkbot.token_accounts import ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, account_profiles, find_pda
 
 COMPUTE_BUDGET_PROGRAM = "ComputeBudget111111111111111111111111111111"
 DUMMY_PAYER = bytes([1]) * 32  # fee probe only; getFeeForMessage does not validate signers, nothing is ever signed or sent
@@ -73,24 +74,52 @@ def build_fee_probe_message(signature_count: int, compute_unit_limit: int, cu_pr
     return header + compact_u16(len(keys)) + b"".join(keys) + blockhash + compact_u16(2) + ix_limit + ix_price
 
 
-def build_trade_fee_message(cfg: Any, side: str, cu_price_micro: int, blockhash: bytes) -> bytes:
+def build_trade_fee_message(cfg: Any, side: str, cu_price_micro: int, blockhash: bytes, token_program: str | None = None) -> bytes:
     """Unsigned configured Pump instruction/ATA/ComputeBudget message for getFeeForMessage.
     Dynamic addresses are deterministic placeholders: no signer secret and no broadcast.
     The instruction/account shape is the pinned IDL and is included in provenance.
     """
     template = cfg.execution["message_templates"][side]
+    token_program = token_program or cfg.protocol["spl_token_program"]
+    if token_program not in account_profiles(cfg):
+        raise ValueError("unsupported token program")
+    if len(blockhash) != 32:
+        raise ValueError("blockhash must be 32 bytes")
     specs = {a["name"]: a for a in template["accounts"]}
+    pump = b58decode(cfg.protocol["program_id"])
+    fee_program = b58decode(cfg.protocol["fee_config"]["program_id"])
+    ata_program = b58decode(ASSOCIATED_TOKEN_PROGRAM)
+    base_program = b58decode(token_program)
+    quote_program = b58decode(cfg.protocol["spl_token_program"])
+    def placeholder(name: str) -> bytes:
+        return hashlib.sha256(("PAPER_FEE_TEMPLATE:" + name).encode()).digest()
+    mint, creator = placeholder("mint"), placeholder("creator")
+    keys_by_name = {
+        "user": DUMMY_PAYER, "base_mint": mint, "quote_mint": b58decode(cfg.protocol["wsol_mint"]),
+        "base_token_program": base_program, "quote_token_program": quote_program,
+        "associated_token_program": ata_program, "system_program": b58decode(SYSTEM_PROGRAM),
+        "global": b58decode(cfg.protocol["global_account"]["address"]),
+        "fee_config": b58decode(cfg.protocol["fee_config"]["address"]), "fee_program": fee_program,
+        "program": pump, "event_authority": find_pda(pump, b"__event_authority"),
+        "bonding_curve": find_pda(pump, b"bonding-curve", mint),
+        "creator_vault": find_pda(pump, b"creator-vault", creator),
+        "sharing_config": find_pda(fee_program, b"sharing-config", mint),
+        "global_volume_accumulator": find_pda(pump, b"global_volume_accumulator"),
+        "user_volume_accumulator": find_pda(pump, b"user_volume_accumulator", DUMMY_PAYER),
+        "fee_recipient": placeholder("fee_recipient"), "buyback_fee_recipient": placeholder("buyback_fee_recipient"),
+    }
+    for account, owner in (("associated_base_user", "user"), ("associated_base_bonding_curve", "bonding_curve")):
+        keys_by_name[account] = find_pda(ata_program, keys_by_name[owner], base_program, mint)
+    for account, owner in (("associated_quote_user", "user"), ("associated_quote_bonding_curve", "bonding_curve"),
+                           ("associated_quote_fee_recipient", "fee_recipient"), ("associated_quote_buyback_fee_recipient", "buyback_fee_recipient"),
+                           ("associated_creator_vault", "creator_vault"), ("associated_user_volume_accumulator", "user_volume_accumulator")):
+        keys_by_name[account] = find_pda(ata_program, keys_by_name[owner], quote_program, keys_by_name["quote_mint"])
     def key(name: str) -> bytes:
-        if name == "user":
-            return DUMMY_PAYER
         address = specs.get(name, {}).get("address")
-        if name == "global":
-            address = cfg.protocol["global_account"]["address"]
-        elif name == "fee_config":
-            address = cfg.protocol["fee_config"]["address"]
-        elif name == "token_program":
-            address = cfg.protocol["spl_token_program"]
-        return b58decode(address).rjust(32, b"\0") if address else hashlib.sha256(("PAPER_FEE_TEMPLATE:" + name).encode()).digest()
+        value = keys_by_name[name]  # unknown account names fail closed, never invented
+        if address and value != b58decode(address):
+            raise ValueError("IDL account address mismatch: " + name)
+        return value
     metas: dict[bytes, tuple[bool, bool]] = {DUMMY_PAYER: (True, True)}
     instructions: list[tuple[bytes, list[bytes], bytes]] = []
     def add(program: bytes, accounts: list[tuple[bytes, bool, bool]], data: bytes) -> None:
@@ -104,14 +133,16 @@ def build_trade_fee_message(cfg: Any, side: str, cu_price_micro: int, blockhash:
     add(cb, [], bytes([3]) + struct.pack("<Q", cu_price_micro))
     if side == "buy" and cfg.execution["token_account_policy"]["assume_new_token_account_per_position"]:
         ata = b58decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
-        add(ata, [(key("user"), True, True), (key("associated_user"), False, True), (key("user"), True, True),
-                  (key("mint"), False, False), (b58decode("11111111111111111111111111111111"), False, False),
-                  (key("token_program"), False, False)], bytes([1]))
+        add(ata, [(key("user"), True, True), (key("associated_base_user"), False, True), (key("user"), True, True),
+                  (key("base_mint"), False, False), (b58decode("11111111111111111111111111111111"), False, False),
+                  (key("base_token_program"), False, False)], bytes([1]))
     # Fee computation depends on the configured message, not hypothetical swap amounts.
-    data = bytes(template["discriminator"]) + b"".join(bytes([0]) if a["type"] == "bool" else struct.pack("<Q", 1) for a in template["args"])
+    if any(a["type"] != "u64" for a in template["args"]):
+        raise ValueError("unsupported instruction argument type")
+    data = bytes(template["discriminator"]) + b"".join(struct.pack("<Q", 1) for a in template["args"])
     add(b58decode(cfg.protocol["program_id"]), [(key(a["name"]), a.get("signer", False), a.get("writable", False)) for a in template["accounts"]], data)
     if side == "sell" and cfg.execution["token_account_policy"]["close_token_account_on_full_exit"]:
-        add(key("token_program"), [(key("associated_user"), False, True), (key("user"), True, True), (key("user"), True, False)], bytes([9]))
+        add(key("base_token_program"), [(key("associated_base_user"), False, True), (key("user"), True, True), (key("user"), True, False)], bytes([9]))
     keys = sorted(metas, key=lambda k: (not metas[k][0], not metas[k][1]))
     signers = sum(metas[k][0] for k in keys)
     if signers != cfg.execution["signature_count"]:
@@ -294,39 +325,68 @@ class FeeResolver:
         try:
             bh = self.rpc("getLatestBlockhash", [{"commitment": self.cfg.raw["rpc_http"]["commitment"]}])
             blockhash = b58decode(bh["value"]["blockhash"]).rjust(32, b"\0")
-            results = {}
-            for side in ("buy", "sell"):
-                msg = build_trade_fee_message(self.cfg, side, int(price), blockhash)
-                fee = self.rpc("getFeeForMessage", [base64.b64encode(msg).decode(), {"commitment": self.cfg.raw["rpc_http"]["commitment"]}])
-                results[side] = {"fee_lamports": fee.get("value") if isinstance(fee, dict) else None,
-                                 "rpc_slot": fee.get("context", {}).get("slot") if isinstance(fee, dict) else None,
-                                 "message_base64": base64.b64encode(msg).decode(), "message_hash": hashlib.sha256(msg).hexdigest()}
-            raw["messages"] = results
-            buy_fee, sell_fee = results["buy"]["fee_lamports"], results["sell"]["fee_lamports"]
-            rpc_fee = buy_fee if buy_fee == sell_fee else None
-            raw.update({"rpc_fee_for_message_lamports": rpc_fee, "rpc_slot": results["sell"]["rpc_slot"], "blockhash_slot": bh.get("context", {}).get("slot")})
-            if rpc_fee is None:
-                return self._snap("network", "NETWORK_FEE", "getFeeForMessage", (), raw["rpc_slot"], raw, {"base_fee_lamports": base, "priority_fee_lamports": None, "network_fee_total_lamports": None}, "RPC_RETURNED_NULL", CostEvidence.UNKNOWN, "PER_ATTEMPT_BUY_OR_SELL")
-            status = "VALID" if int(rpc_fee) == base + prio else "VALID_FORMULA_MISMATCH_RPC"
-            total = int(rpc_fee)
-            return self._snap("network", "NETWORK_FEE", "getFeeForMessage", (), raw["rpc_slot"], raw, {"base_fee_lamports": base, "priority_fee_lamports": total - base, "network_fee_total_lamports": total}, status, CostEvidence.MEASURED, "PER_ATTEMPT_BUY_OR_SELL")
+            results: dict[str, Any] = {}
+            profiles: dict[str, Any] = {}
+            for program, profile in account_profiles(self.cfg).items():
+                results[program], profiles[program] = {}, {}
+                for side in ("buy", "sell"):
+                    msg = build_trade_fee_message(self.cfg, side, int(price), blockhash, program)
+                    # Stable shape hash excludes blockhash/priority price; these are recorded separately.
+                    shape = build_trade_fee_message(self.cfg, side, 0, bytes(32), program)
+                    shape_hash = hashlib.sha256(shape).hexdigest()
+                    fee = self.rpc("getFeeForMessage", [base64.b64encode(msg).decode(), {"commitment": self.cfg.raw["rpc_http"]["commitment"]}])
+                    total = fee.get("value") if isinstance(fee, dict) else None
+                    slot = fee.get("context", {}).get("slot") if isinstance(fee, dict) else None
+                    status = "VALID" if type(total) is int and total == base + prio else "FEE_MESSAGE_UNVERIFIED"
+                    results[program][side] = {"fee_lamports": total, "rpc_slot": slot, "message_base64": base64.b64encode(msg).decode(),
+                                             "message_hash": hashlib.sha256(msg).hexdigest(), "message_template_hash": shape_hash}
+                    profiles[program][side.upper()] = {"validation_status": status, "profile_id": profile["profile_id"],
+                        "instruction_name": side + "_v2", "message_template_hash": shape_hash,
+                        "base_fee_lamports": base if status == "VALID" else None,
+                        "priority_fee_lamports": prio if status == "VALID" else None,
+                        "network_fee_total_lamports": total if status == "VALID" else None}
+            raw["execution_profiles"] = results
+            legacy = self.cfg.protocol["spl_token_program"]
+            raw["messages"] = results[legacy]  # compatibility for older report consumers
+            raw["blockhash_slot"] = bh.get("context", {}).get("slot")
+            valid = all(v["validation_status"] == "VALID" for sides in profiles.values() for v in sides.values())
+            normalized = dict(profiles[legacy]["BUY"], execution_profiles=profiles)
+            return self._snap("network", "NETWORK_FEE", "getFeeForMessage", (), raw["blockhash_slot"], raw, normalized,
+                              "VALID" if valid else ("RPC_RETURNED_NULL" if any(v["fee_lamports"] is None for sides in results.values() for v in sides.values()) else "FEE_MESSAGE_UNVERIFIED"), CostEvidence.MEASURED if valid else CostEvidence.UNKNOWN,
+                              "PER_PROGRAM_PROFILE_AND_SIDE;FEE_PROBE_NOT_EXECUTION_VALIDATION")
         except Exception as exc:  # noqa: BLE001
             self.errors.append(f"network: {type(exc).__name__}")
             return self._snap("network", "NETWORK_FEE", "getFeeForMessage", (), None, raw | {"error": type(exc).__name__}, {"base_fee_lamports": base, "priority_fee_lamports": None, "network_fee_total_lamports": None}, "RPC_ERROR", CostEvidence.UNKNOWN, "PER_ATTEMPT_BUY_OR_SELL")
 
     def resolve_rent(self) -> FeeSnapshot:
-        size = self.cfg.execution["token_account_policy"]["spl_token_account_size_bytes"]
+        profiles: dict[str, Any] = {}
+        raw: dict[str, Any] = {}
         configured = self.cfg.costs["account_rent_lamports"]
-        if self.rpc is None:
-            if configured is not None:  # explicit operator value: CONFIGURED evidence, never a silent default
-                return self._snap("rent", "RENT_EXEMPTION", "CONFIG:costs.account_rent_lamports", (), None, {"account_size_bytes": size, "configured": configured}, {"token_account_rent_lamports": int(configured), "account_size_bytes": size}, "VALID", CostEvidence.CONFIGURED, "SPL_TOKEN_ACCOUNT_REFUNDABLE")
-            return self._snap("rent", "RENT_EXEMPTION", "getMinimumBalanceForRentExemption", (), None, {"account_size_bytes": size}, {"token_account_rent_lamports": None, "account_size_bytes": size}, "UNAVAILABLE_NO_RPC", CostEvidence.UNKNOWN, "SPL_TOKEN_ACCOUNT_REFUNDABLE")
-        try:
-            lamports = self.rpc("getMinimumBalanceForRentExemption", [size])
-            return self._snap("rent", "RENT_EXEMPTION", "getMinimumBalanceForRentExemption", (), None, {"account_size_bytes": size, "lamports": lamports}, {"token_account_rent_lamports": int(lamports), "account_size_bytes": size}, "VALID", CostEvidence.MEASURED, "SPL_TOKEN_ACCOUNT_REFUNDABLE")
-        except Exception as exc:  # noqa: BLE001
-            self.errors.append(f"rent: {type(exc).__name__}")
-            return self._snap("rent", "RENT_EXEMPTION", "getMinimumBalanceForRentExemption", (), None, {"account_size_bytes": size, "error": type(exc).__name__}, {"token_account_rent_lamports": None, "account_size_bytes": size}, "RPC_ERROR", CostEvidence.UNKNOWN, "SPL_TOKEN_ACCOUNT_REFUNDABLE")
+        for program, profile in account_profiles(self.cfg).items():
+            size = profile["account_size_bytes"]
+            status, lamports = "VALID", None
+            evidence = CostEvidence.MEASURED
+            try:
+                if self.rpc is not None:
+                    lamports = self.rpc("getMinimumBalanceForRentExemption", [size])
+                    if type(lamports) is not int or lamports < 0:
+                        raise ValueError("invalid rent response")
+                elif program == self.cfg.protocol["spl_token_program"] and configured is not None:
+                    lamports, evidence = int(configured), CostEvidence.CONFIGURED
+                else:
+                    status, evidence = "UNAVAILABLE_NO_RPC", CostEvidence.UNKNOWN
+            except Exception as exc:
+                self.errors.append(f"rent: {type(exc).__name__}")
+                status, evidence = "RPC_ERROR", CostEvidence.UNKNOWN
+            profiles[program] = {"profile_id": profile["profile_id"], "account_size_bytes": size,
+                                 "token_account_rent_lamports": lamports, "validation_status": status, "evidence": evidence.value}
+            raw[program] = dict(profiles[program])
+        legacy = profiles[self.cfg.protocol["spl_token_program"]]
+        valid = all(v["validation_status"] == "VALID" for v in profiles.values())
+        evidence = CostEvidence.MEASURED if self.rpc is not None else CostEvidence.CONFIGURED
+        return self._snap("rent", "RENT_EXEMPTION", "getMinimumBalanceForRentExemption" if self.rpc else "CONFIG:costs.account_rent_lamports",
+                          (), None, raw, dict(legacy, account_profiles=profiles), "VALID" if valid else "ACCOUNT_RENT_UNVERIFIED",
+                          evidence if valid else CostEvidence.UNKNOWN, "PER_PROGRAM_ACCOUNT_PROFILE_REFUNDABLE;NO_QUOTE_ATA_FOR_NATIVE_SOL")
 
     def resolve_all(self) -> list[FeeSnapshot]:
         protocol = self.resolve_protocol()

@@ -11,7 +11,7 @@ hashing, no prints.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -209,9 +209,9 @@ class StateOwner:
         if entry is None:
             if not st.curve_known or st.last_state_event_id is None:
                 return None
-            return CurveState(st.last_state_event_id, st.last_state_event_id.split("|")[1], st.last_state_slot, st.last_state_sequence, st.last_state_receive_mono_ns or 0, st.virtual_sol_reserves, st.virtual_token_reserves, st.real_sol_reserves, st.real_token_reserves, st.venue_state, st.creator_fee_bps, st.creator != self.cfg.protocol["native_sol_curve_sentinel"])  # type: ignore[arg-type]
+            return CurveState(st.last_state_event_id, st.last_state_event_id.split("|")[1], st.last_state_slot, st.last_state_sequence, st.last_state_receive_mono_ns or 0, st.virtual_sol_reserves, st.virtual_token_reserves, st.real_sol_reserves, st.real_token_reserves, st.venue_state, st.creator_fee_bps, st.creator != self.cfg.protocol["native_sol_curve_sentinel"], st.token_program, st.account_profile_id)  # type: ignore[arg-type]
         rec, seq, cid, slot, vsol, vtok, rsol, rtok = entry
-        return CurveState(cid, cid.split("|")[1], slot, seq, rec, vsol, vtok, rsol, rtok, VenueState.BONDING_CURVE_ACTIVE, st.creator_fee_bps, st.creator != self.cfg.protocol["native_sol_curve_sentinel"])
+        return CurveState(cid, cid.split("|")[1], slot, seq, rec, vsol, vtok, rsol, rtok, VenueState.BONDING_CURVE_ACTIVE, st.creator_fee_bps, st.creator != self.cfg.protocol["native_sol_curve_sentinel"], st.token_program, st.account_profile_id)
 
     def _coverage_at(self, st: MarketState, start: int, end: int | None) -> CoverageState:
         if self.reducer.gap_intersects(start, end):
@@ -311,7 +311,8 @@ class StateOwner:
                 if mint in self.position_by_mint:
                     self._position_tick(mint, raw.receive_mono_ns)
             for mint in result.new_creates:
-                self.counters.creates += 1
+                if mint not in self.first_create_receive:
+                    self.counters.creates += 1
                 self.first_create_receive.setdefault(mint, raw.receive_mono_ns)
                 self._entry_decision(mint, raw, env, decode_done)
         except Exception as exc:  # noqa: BLE001 - consumer invariant violation (T14)
@@ -337,7 +338,7 @@ class StateOwner:
                 actionable = ev.event_type.value == "CREATE" and ev.mint in result.new_creates and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and st.venue_state == VenueState.BONDING_CURVE_ACTIVE
                 sol_scope = st.quote_scope_status == QuoteScopeStatus.SOL_WSOL  # foreign/unknown quote amounts never land in SOL columns (S12)
                 new_me.append({"canonical_event_id": ea.canonical_event_id, "run_id": self.run_id, "signature": env.signature, "instruction_index": ev.instruction_index, "slot": env.slot, "mint": ev.mint, "event_type": ev.event_type.value,
-                               "actor": ev.actor, "creator": ev.creator or st.creator, "token_program": ev.token_program or st.token_program, "virtual_sol_reserves": ev.virtual_sol_reserves if sol_scope else None, "virtual_token_reserves": ev.virtual_token_reserves if sol_scope else None,
+                               "account_profile_id": st.account_profile_id, "actor": ev.actor, "creator": ev.creator or st.creator, "token_program": ev.token_program or st.token_program, "virtual_sol_reserves": ev.virtual_sol_reserves if sol_scope else None, "virtual_token_reserves": ev.virtual_token_reserves if sol_scope else None,
                                "real_sol_reserves": ev.real_sol_reserves if sol_scope else None, "real_token_reserves": ev.real_token_reserves if sol_scope else None, "first_seen_mono_ns": raw.receive_mono_ns, "actionable_mono_ns": decode_done if actionable else None,
                                "winner_feed_id": raw.feed_id, "source_observation_id": obs_id if k == 0 else f"{obs_id}-{k}", "commitment": self.commitment_by_feed.get(raw.feed_id),
                                "quality_status": ea.validation.value, "quote_mint_raw": ev.quote_mint_raw, "quote_field_origin": ev.quote_field_origin, "quote_layout_hash": ev.quote_layout_hash, "normalized_quote_asset": ev.normalized_quote_asset,
@@ -345,8 +346,8 @@ class StateOwner:
             if ea.upgraded and ea.canonical_event_id is not None:
                 st = self.reducer.states[ev.mint]  # type: ignore[index]
                 actionable = ev.event_type.value == "CREATE" and ev.mint in result.new_creates and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and st.venue_state == VenueState.BONDING_CURVE_ACTIVE
-                self._record(UpdateRecord("market_events", "canonical_event_id", ea.canonical_event_id, {"actionable_mono_ns": decode_done if actionable else None, "winner_feed_id": raw.feed_id, "source_observation_id": obs_id if k == 0 else f"{obs_id}-{k}",
-                                                                                                          "quality_status": "VALID_UPGRADED_FROM_PARTIAL", "quote_scope_status": st.quote_scope_status.value, "venue_state": st.venue_state.value, "canonical_coverage_state": st.coverage_state.value}))
+                self._record(UpdateRecord("market_events", "canonical_event_id", ea.canonical_event_id, {"account_profile_id": st.account_profile_id, "actionable_mono_ns": decode_done if actionable else None, "winner_feed_id": raw.feed_id, "source_observation_id": obs_id if k == 0 else f"{obs_id}-{k}",
+                                                                                                          "quality_status": "VALID_UPGRADED_ACCOUNT_PROFILE" if ea.profile_upgraded else "VALID_UPGRADED_FROM_PARTIAL", "quote_scope_status": st.quote_scope_status.value, "venue_state": st.venue_state.value, "canonical_coverage_state": st.coverage_state.value}))
             if ea.validation.value == "DUPLICATE":
                 self.counters.duplicates += 1
             if ev.event_type.value.startswith("HINT"):
@@ -371,11 +372,13 @@ class StateOwner:
         gap = st.coverage_state == CoverageState.GAP or self.reducer.gap_open_since is not None
         verdict = entry_admission(st, gap_flag=gap, creator_sell_known=creator_sold, already_submitted=mint in self.submitted_mints or mint in self.position_by_mint, slots_free=self.occupied_slots() < self.max_open,
                                   capital_ok=True, costs_ok=basis.complete and all(s.is_fresh(now) for s in (basis.protocol, basis.network, basis.rent, basis.priority_policy)),  # type: ignore[union-attr]
-                                  recording_ok=self.recording_ok() and self.economic_intents_allowed, quote_ok=True)
+                                  recording_ok=self.recording_ok(), quote_ok=True)
         quote: QuoteSnapshot | InvalidQuote | None = None
         exit_reserve = 0
         reason = verdict.reason
         eligible = verdict.eligible
+        if eligible and not self.economic_intents_allowed:
+            eligible, reason = False, "CAPTURE_ONLY_MODE"
         if eligible and self.mint_allowlist is not None and mint not in self.mint_allowlist:
             eligible, reason = False, "OUT_OF_RESEARCH_SPLIT"
         if eligible and st.unsupported_fee_mode:
@@ -384,7 +387,7 @@ class StateOwner:
             eligible, reason = False, "QUOTE_CONFLICT"
         if eligible and st.decode_gap_since is not None:
             eligible, reason = False, "DECODE_GAP"
-        if eligible and (st.token_program != self.spl_token_program) and not self.token_2022_supported:
+        if eligible and (st.token_program not in (self.spl_token_program, self.cfg.protocol["token_2022_program"]) or (st.token_program == self.cfg.protocol["token_2022_program"] and not self.token_2022_supported)):
             eligible, reason = False, "UNSUPPORTED_TOKEN_PROGRAM"
         if eligible:
             curve = self._curve(st)
@@ -392,7 +395,7 @@ class StateOwner:
             if isinstance(quote, InvalidQuote):
                 eligible, reason = False, quote.reason
             else:
-                reserve = self.engine.exit_reserve_lamports(basis, now)
+                reserve = self.engine.exit_reserve_lamports(basis, now, curve)
                 if reserve is None:
                     eligible, reason = False, "UNQUALIFIED_COSTS"
                 else:
@@ -479,7 +482,8 @@ class StateOwner:
                 "transaction_signature": None, "model_hash": self.cfg.policy_hash, "quote_state_event_id": quote.quote_state_event_id,
                 "amount_in_base_units": quote.swap_wallet_debit_lamports if intent.side == Side.BUY else quote.token_amount_base_units,
                 "amount_out_base_units": quote.token_amount_base_units if intent.side == Side.BUY else quote.swap_wallet_credit_lamports, "slippage_bps": quote.slippage_limit_bps, "failure_reason": None,
-                "fees_charged_lamports": None, "fee_snapshot_id": quote.fee_snapshot_id, "quote_snapshot_id": quote.quote_snapshot_id, "message_template_hash": (basis.network.raw_values.get("message_template_hash") if basis.network else None),
+                "fees_charged_lamports": None, "fee_snapshot_id": quote.fee_snapshot_id, "quote_snapshot_id": quote.quote_snapshot_id, "message_template_hash": quote.message_template_hash,
+                "token_program": quote.token_program, "account_profile_id": quote.account_profile_id, "account_size_bytes": quote.account_size_bytes, "instruction_name": quote.instruction_name,
                 "cost_model_hash": self.cfg.cost_model_hash, "signature_count": quote.signature_count, "compute_unit_limit": quote.compute_unit_limit, "compute_unit_price_micro_lamports": quote.compute_unit_price_micro_lamports,
                 "protocol_fee_lamports": quote.protocol_fee_lamports, "creator_fee_lamports": quote.creator_fee_lamports, "other_protocol_fee_lamports": quote.other_protocol_fee_lamports, "base_fee_lamports": quote.base_fee_lamports,
                 "priority_fee_lamports": quote.priority_fee_lamports, "network_fee_total_lamports": quote.network_fee_total_lamports, "sender_tip_lamports": quote.tip_lamports,
@@ -613,7 +617,9 @@ class StateOwner:
         basis = meta.get("fill_basis", meta["basis"])  # rule valid at the modeled fill, not at submit (S07)
         entry = self.reducer.proxy_state_at(st, modeled_fill)
         venue_invalid = st.venue_state != VenueState.BONDING_CURVE_ACTIVE and st.venue_change_mono_ns is not None and st.venue_change_mono_ns <= modeled_fill
-        fill_state = self._curve(st, entry) if entry and not venue_invalid else (None if entry is None else CurveState(entry[2], entry[2].split("|")[1], entry[3], entry[1], entry[0], entry[4], entry[5], entry[6], entry[7], st.venue_state))
+        fill_state = self._curve(st, entry) if entry else None
+        if venue_invalid and fill_state is not None:
+            fill_state = replace(fill_state, venue_state=st.venue_state)
         coverage = self._coverage_at(st, entry[0] if entry else modeled_fill, modeled_fill)
         unknowable = self.reducer.unknowable_between(st, entry[0] if entry else outcome.submit_mono_ns, modeled_fill) if not venue_invalid else None
         conflict_at_fill = st.quote_conflict_mono_ns is not None and st.quote_conflict_mono_ns <= modeled_fill
@@ -637,6 +643,7 @@ class StateOwner:
             fill_q = QuoteSnapshot(**{**{k: getattr(q, k) for k in q.__slots__}, "quote_snapshot_id": f"{outcome.attempt_id}_fill"})  # type: ignore[attr-defined]
             self._record(("quote_snapshot", (fill_q, self.run_id, pos.position_id)))
             upd["fill_quote_snapshot_id"] = fill_q.quote_snapshot_id
+            upd.update({k: getattr(q, k) for k in ("token_program", "account_profile_id", "account_size_bytes", "message_template_hash", "instruction_name")})
             upd.update({"network_fee_total_lamports": q.network_fee_total_lamports, "base_fee_lamports": q.base_fee_lamports, "priority_fee_lamports": q.priority_fee_lamports, "sender_tip_lamports": q.tip_lamports,
                         "compute_unit_price_micro_lamports": q.compute_unit_price_micro_lamports, "rent_locked_lamports": q.rent_delta_lamports if intent.side == Side.BUY else 0,
                         "rent_refunded_lamports": -q.rent_delta_lamports if intent.side == Side.SELL else 0, "irrecoverable_account_cost_lamports": q.irrecoverable_cost_lamports, "slippage_bps": q.slippage_limit_bps})
@@ -649,8 +656,9 @@ class StateOwner:
                         "creator_fee_lamports": None, "other_protocol_fee_lamports": None, "rent_locked_lamports": None,
                         "rent_refunded_lamports": None, "irrecoverable_account_cost_lamports": None})
         else:
-            terms = fee_terms(basis, self.policy, modeled_fill)
+            terms = fee_terms(basis, self.policy, modeled_fill, fill_state, intent.side)
             assert not isinstance(terms, InvalidQuote)
+            upd.update({k: getattr(terms, k) for k in ("token_program", "account_profile_id", "account_size_bytes", "message_template_hash", "instruction_name")})
             network = ev.fees_charged_lamports - self.policy.sender_tip_lamports
             upd.update({"cost_evidence_status": ev.cost_evidence_status, "network_fee_total_lamports": network,
                         "base_fee_lamports": terms.base_fee_lamports, "priority_fee_lamports": network - terms.base_fee_lamports,

@@ -400,7 +400,8 @@ def rows_for(record: Any) -> list[tuple[str, tuple]]:
                                                 "swap_wallet_debit_lamports": q.swap_wallet_debit_lamports, "swap_wallet_credit_lamports": q.swap_wallet_credit_lamports, "network_fee_total_lamports": q.network_fee_total_lamports,
                                                 "tip_lamports": q.tip_lamports, "rent_delta_lamports": q.rent_delta_lamports, "irrecoverable_cost_lamports": q.irrecoverable_cost_lamports, "slippage_limit_bps": q.slippage_limit_bps,
                                                 "min_output_base_units": q.min_output_base_units, "max_input_base_units": q.max_input_base_units, "quote_age_ns": q.quote_age_ns, "quote_model_hash": q.quote_model_hash,
-                                                "rounding_version": q.rounding_version, "quality_status": q.quality_status})]
+                                                "rounding_version": q.rounding_version, "quality_status": q.quality_status,
+                                                **{k: getattr(q, k) for k in ("token_program", "account_profile_id", "account_size_bytes", "message_template_hash", "instruction_name")}})]
         if kind == "position":
             p: PositionRecord = obj
             return [_insert("positions", position_row(p), upsert=True)]

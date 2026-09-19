@@ -81,7 +81,7 @@ RUNTIME_SCHEMA: dict[str, Any] = {
                    pumpswap_execution_enabled="enum:False", message_format="enum:LEGACY_OR_V0_COMPUTE_BUDGET", signature_count="int+",
                    priority_policy=S(compute_unit_limit="int+", price_source="enum:RECENT_PRIORITIZATION_FEES_PERCENTILE", percentile="dec+",
                                      min_compute_unit_price_micro_lamports="int0", max_compute_unit_price_micro_lamports="int+", lookback_slots="int+"),
-                   token_account_policy=S(assume_new_token_account_per_position="bool", close_token_account_on_full_exit="bool", spl_token_account_size_bytes="int+", token_2022_supported="enum:False")),
+                   token_account_policy=S(assume_new_token_account_per_position="bool", close_token_account_on_full_exit="bool", spl_token_account_size_bytes="int+", token_2022_supported="bool", profiles="any")),
     "costs": S(protocol_snapshot_id="null|str", base_fee_lamports="null|int0", priority_fee_lamports="null|int0", sender_tip_lamports="int0", account_rent_lamports="null|int0",
                irrecoverable_account_cost_lamports="null|int0", unverified_fee_snapshot_blocks_qualified_pnl="enum:True",
                resolution_mode="enum:AUTO_RESOLVE_AND_PERSIST_BEFORE_ECONOMIC_PAPER", null_means="str", sender_tip_provenance="enum:NOT_APPLICABLE|CONFIGURED",
@@ -98,7 +98,7 @@ RUNTIME_SCHEMA: dict[str, Any] = {
     "rpc_http": S(endpoint_template="str", endpoint_env="list[str]", fallback_endpoint_template="null|str", fallback_endpoint_env="list[str]", commitment="enum:processed|confirmed", max_requests_per_minute="int+"),
     "protocol": S(program_id="str", idl_source="str", idl_version_or_hash="str", decoder_version="str", supported_variants="list[str]", events="any",
                   create_event_tail_layouts="list[any]", unpinned_create_tail_policy="enum:QUOTE_UNKNOWN_LAYOUT_UNVERIFIED", unpinned_tail_policy="str", wsol_mint="str", native_sol_curve_sentinel="str",
-                  spl_token_program="str", token_2022_program="str",
+                  spl_token_program="str", token_2022_program="str", token_2022_create_profile="any",
                   fee_config=S(address="str", program_id="str", idl_version_or_hash="str", layout_after_discriminator="list[any]", verification_status="str", rule="enum:PUMP_SOL_MARKET_CAP_TIERS", unsupported_modes="list[str]"),
                   global_account=S(address="str", layout_after_discriminator="list[any]", verification_status="str", max_reasonable_bps="int+", discriminator_source="enum:ANCHOR_SHA256_account:Global_FIRST_8_BYTES"),
                   fee_rounding="enum:CEIL_BPS", curve_rounding_version="str"),
@@ -357,6 +357,18 @@ def _cross_checks(raw: dict[str, Any]) -> None:
     _validate_layout(raw["protocol"]["fee_config"]["layout_after_discriminator"], "FeeConfig")
     for layout in raw["protocol"]["create_event_tail_layouts"]:
         _validate_layout(layout.get("tail_fields"), "CreateEvent tail")
+    profiles = ex["token_account_policy"]["profiles"]
+    if set(profiles) != {raw["protocol"]["spl_token_program"], raw["protocol"]["token_2022_program"]}:
+        raise ConfigError("token account profiles require exactly SPL and Token-2022")
+    for profile in profiles.values():
+        _check(profile, S(profile_id="str", account_size_bytes="int+", instruction_version="enum:v2"), "token account profile")
+    profile = raw["protocol"]["token_2022_create_profile"]
+    _check(profile, S(profile_id="str", account_size_bytes="int+", instruction="enum:CreateV2", required_token_instructions="list[str]", allowed_token_instructions="list[str]", source="str"), "Token-2022 create profile")
+    if not set(profile["required_token_instructions"]) <= set(profile["allowed_token_instructions"]):
+        raise ConfigError("required Token-2022 instructions must be allowed")
+    account = profiles[raw["protocol"]["token_2022_program"]]
+    if (profile["profile_id"], profile["account_size_bytes"]) != (account["profile_id"], account["account_size_bytes"]):
+        raise ConfigError("creation evidence and cost account profiles differ")
     if set(ex["message_templates"]) != {"buy", "sell"}:
         raise ConfigError("execution.message_templates requires buy and sell")
     for name, template in ex["message_templates"].items():

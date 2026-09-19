@@ -7,6 +7,8 @@ DB rows or prints happen here.
 
 from __future__ import annotations
 
+from darkbot.token_accounts import create_account_profiles
+
 import base64
 import binascii
 import hashlib
@@ -145,6 +147,7 @@ class PumpDecoder:
         events = protocol["events"]
         self.layouts = {name: [tuple(f) for f in spec["prefix_fields"]] for name, spec in events.items()}
         self.event_tail_layouts = {name: list(spec.get("tail_layouts", [])) for name, spec in events.items()}
+        self.protocol = protocol
         self.spl_token_program = protocol["spl_token_program"]
         self.disc = {event_discriminator(name): name for name in events}
         self.ignored = {event_discriminator(name) for name in KNOWN_NON_STATE_EVENTS}
@@ -304,6 +307,7 @@ class Normalizer:
         if err is not None:
             return NormalizedEnvelope(signature, slot, False, (), Completeness.FAILED_TX, raw.feed_id, decode_done_mono_ns, self.decoder.version, None)
         decoded = self.decoder.decode_logs(logs)
+        profiles = create_account_profiles(logs, self.decoder.protocol) if any(d.kind == "create" and d.fields.get("token_program") == self.decoder.protocol["token_2022_program"] for d in decoded) else {}
         events: list[NormalizedEvent] = []
         completeness = Completeness.COMPLETE
         error = None
@@ -322,7 +326,7 @@ class Normalizer:
                 events.append(NormalizedEvent(EventType.CREATE, f["mint"], d.log_index, actor=f["user"], creator=f["creator"], virtual_sol_reserves=f["virtual_sol_reserves"], virtual_token_reserves=f["virtual_token_reserves"],
                                               real_token_reserves=f["real_token_reserves"], token_total_supply=f["token_total_supply"], token_program=f["token_program"], quote_mint_raw=f["quote_mint_raw"],
                                               quote_field_origin=f["quote_field_origin"], quote_layout_hash=f["quote_layout_hash"], normalized_quote_asset=f["normalized_quote_asset"], quote_scope_status=f["quote_scope_status"],
-                                              extra={"tail_bytes": d.tail_bytes, "tail_base64": d.tail_base64, "tail_prefix_hash": f.get("tail_prefix_hash"), "tail_len_unpinned": f.get("tail_len_unpinned"), "tail_values": f.get("tail_values"), "tail_verified": f.get("tail_verified"), "bonding_curve": f["bonding_curve"], "name": f["name"], "symbol": f["symbol"]}))
+                                              extra={"account_profile_id": profiles.get(d.log_index), "tail_bytes": d.tail_bytes, "tail_base64": d.tail_base64, "tail_prefix_hash": f.get("tail_prefix_hash"), "tail_len_unpinned": f.get("tail_len_unpinned"), "tail_values": f.get("tail_values"), "tail_verified": f.get("tail_verified"), "bonding_curve": f["bonding_curve"], "name": f["name"], "symbol": f["symbol"]}))
             elif d.kind == "complete":
                 events.append(NormalizedEvent(EventType.COMPLETE, d.fields["mint"], d.log_index, actor=d.fields["user"]))
             elif d.kind == "migrate":
@@ -362,6 +366,7 @@ class EventApply:
     applied_state: bool
     creator_sell: bool
     upgraded: bool = False  # PARTIAL copy upgraded to COMPLETE by this observation
+    profile_upgraded: bool = False
 
 
 def _fingerprint(ev: NormalizedEvent) -> tuple:
@@ -492,7 +497,9 @@ class MarketReducer:
                         result.touched.append(ev.mint)
                     result.events.append(EventApply(ev, cid, ValidationStatus.CONFLICT, False, False, False))
                     continue
-                if seen_complete or envelope.completeness != Completeness.COMPLETE:
+                profile_upgrade = (seen_complete and ev.event_type == EventType.CREATE and st.account_profile_id is None
+                                   and ev.extra.get("account_profile_id") is not None)
+                if (seen_complete and not profile_upgrade) or envelope.completeness != Completeness.COMPLETE:
                     self.duplicates += 1
                     result.events.append(EventApply(ev, cid, ValidationStatus.DUPLICATE, False, False, False))
                     continue
@@ -506,13 +513,15 @@ class MarketReducer:
                         result.touched.append(ev.mint)
                 applied_up = False
                 stale_up = st.last_state_slot is not None and envelope.slot is not None and envelope.slot < st.last_state_slot
-                if ev.virtual_sol_reserves and ev.virtual_token_reserves and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and not stale_up:
+                if not profile_upgrade and ev.virtual_sol_reserves and ev.virtual_token_reserves and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and not stale_up:
                     # every state-bearing event of the now-complete tx is applied in instruction order: the LAST one is the atomic post-tx state
                     if st.decode_gap_since is not None:
                         self._close_decode_gap(st, raw.receive_mono_ns)
                     self._set_state(st, ev, cid, raw, envelope.slot)
                     applied_up = True
-                result.events.append(EventApply(ev, cid, ValidationStatus.VALID, True, applied_up, False, upgraded=True))
+                if ev.event_type == EventType.CREATE:
+                    st.account_profile_id = ev.extra.get("account_profile_id")
+                result.events.append(EventApply(ev, cid, ValidationStatus.VALID, True, applied_up, False, upgraded=True, profile_upgraded=profile_upgrade))
                 continue
             st.seen_keys[cid] = (fingerprint, envelope.completeness == Completeness.COMPLETE)
             self.applied_signatures.setdefault(sig, set()).add(ev.mint)
@@ -563,6 +572,7 @@ class MarketReducer:
                     st.create_slot = slot
                     st.creator = ev.creator
                     st.token_program = ev.token_program
+                    st.account_profile_id = ev.extra.get("account_profile_id")
                     st.quote_scope_status = ev.quote_scope_status or QuoteScopeStatus.QUOTE_UNKNOWN
                     st.create_completeness = envelope.completeness
                     st.token_total_supply = ev.token_total_supply
