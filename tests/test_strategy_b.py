@@ -258,6 +258,21 @@ class StrategyBTests(unittest.TestCase):
         buys(h,[_pubkey(str(n)) for n in range(5)]);h.advance(END)
         self.assertEqual(h.owner.counters.entry_intents,0)
         self.assertIn('OBSERVATION_COVERAGE_GAP',h.owner.counters.ineligible)
+        row=h.rows('select * from strategy_observations')[0]
+        self.assertIsNone(row['qualified'])
+        self.assertEqual(row['status'],'DATA_INCOMPLETE')
+
+    def test_gap_with_filter_miss_is_data_incomplete_not_false_negative(self):
+        h=make_b();h.feed('helius_standard',create_payload(),START)
+        for feed in h.owner.eligible_trade_feeds:h.owner.on_feed_health(feed,False,START+NS_PER_MS)
+        for feed in h.owner.eligible_trade_feeds:h.owner.on_feed_health(feed,True,START+2*NS_PER_MS)
+        buys(h,[_pubkey(str(n)) for n in range(4)]);h.advance(END)
+        self.assertEqual(h.owner.counters.entry_intents,0)
+        self.assertIn('OBSERVATION_COVERAGE_GAP',h.owner.counters.ineligible)
+        row=h.rows('select * from strategy_observations')[0]
+        self.assertEqual((row['buy_count'],row['unique_buyers']),(4,4))
+        self.assertIsNone(row['qualified'])
+        self.assertEqual(row['status'],'DATA_INCOMPLETE')
 
     def test_partial_duplicate_upgrade_counts_once(self):
         h=make_b();h.feed('helius_standard',create_payload(),START)
