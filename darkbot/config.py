@@ -396,8 +396,12 @@ def _cross_checks(raw: dict[str, Any]) -> None:
         raise ConfigError("strategy.observation_ms must be 0 (no artificial observation wait)")
     if st["strategy_id"] == "FAST_CREATOR_HOLD_V1":
         if st["sizing_mode"] == "FIXED_SOL":
-            if st["entry_amount_lamports"] <= 0 or st["entry_amount_semantics"] != "CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT" or st["entry_amount_is_usd_pegged"]:
-                raise ConfigError("FAST_CREATOR_HOLD_V1 FIXED_SOL sizing contract invalid")
+            if st["entry_amount_lamports"] <= 0:
+                raise ConfigError("strategy.entry_amount_lamports must be > 0 for FIXED_SOL")
+            if st["entry_amount_semantics"] != "CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT":
+                raise ConfigError("strategy.entry_amount_semantics invalid for FIXED_SOL")
+            if st["entry_amount_is_usd_pegged"]:
+                raise ConfigError("strategy.entry_amount_is_usd_pegged must be false for FIXED_SOL")
         else:
             if Decimal(st["trade_size_usd"]) != Decimal("10") or st["entry_amount_lamports"] != 0:
                 raise ConfigError("FAST_CREATOR_HOLD_V1 USD profile requires 10 USD slot sizing")
