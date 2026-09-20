@@ -98,6 +98,56 @@ Gesamtstartkapital = max_open_positions × 10 USD
 
 Für einen neuen unabhängigen Test immer **neue DB und neue Campaign** verwenden.
 
+## 4.1 Strategie-freier Market-Capture
+
+Für Edge-Suche zuerst **keine Trading-Strategie fahren**. `capture` zeichnet nur Markt-/Feed-Daten auf; es erzeugt keine Entry-/Exit-Entscheidungen und keine simulierten Trades.
+
+Beispiel: 15 Minuten:
+
+```bash
+python3 -m darkbot capture \
+  --config config/strategy_a_creator_exit_usd_slots.json \
+  --db data/market_capture_15m_20260920.sqlite \
+  --campaign market_capture_15m_20260920 \
+  --max-duration-minutes 15
+```
+
+Aufgezeichnet werden u. a. CREATE/BUY/SELL, Reserven, Actor/Creator, Trade-Mengen, Complete/Migration, Feed-/Coverage-Daten sowie Fee-/FX-Evidenz.
+
+### Offline-Edge-Analyse
+
+```bash
+python3 -m darkbot edge-analysis \
+  --source data/market_capture_15m_20260920.sqlite \
+  --out exports/market_capture_15m_20260920_edge
+```
+
+Der Analyzer erzeugt insbesondere:
+
+- `edge_summary.json`
+- `baseline_reproduction.json`
+- `per_mint_summary.csv`
+- `per_mint_paths.csv`
+- `checkpoint_multiples.csv`
+- `target_hits.csv`
+- `combined_exit_rules.csv`
+
+Ausgewertet werden Peak/Tiefpunkt und Zeit, feste Zeitpunkte, erste Target-Hits, Creator-Rebuys/-Sells sowie viele Kombinationen aus Target, Dev-Sell, Hard-Exit und Mindesthaltezeit.
+
+**Wichtig:** Das Ergebnis ist In-Sample-Diagnostik. Eine daraus gewählte Regel wird erst auf einem neuen, unangetasteten Capture validiert.
+
+### Alten Backend-Test erneut nachweisen
+
+Die bereits versionierte ZIP kann direkt analysiert werden:
+
+```bash
+python3 -m darkbot edge-analysis \
+  --source exports/basetest_backend_v0.zip \
+  --out exports/backend_edge_analysis
+```
+
+`baseline_reproduction.json` rekonstruiert zuerst die im Quelldatensatz persistierte alte Performance. Die Edge-Suche bleibt davon getrennt.
+
 ## 5. Lauf vorzeitig kontrolliert stoppen
 
 ```text
