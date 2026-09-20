@@ -1,0 +1,34 @@
+{
+  "ambiguous_counts": [
+    {
+      "ambiguous": 0,
+      "rows": 18758
+    }
+  ],
+  "data_complete_counts": [
+    {
+      "data_complete": 1,
+      "rows": 18758
+    }
+  ],
+  "event_type_counts": [
+    {
+      "event_type": "BUY",
+      "rows": 9578
+    },
+    {
+      "event_type": "SELL",
+      "rows": 8845
+    },
+    {
+      "event_type": "CREATE",
+      "rows": 335
+    }
+  ],
+  "late_counts": [
+    {
+      "late": 0,
+      "rows": 18758
+    }
+  ]
+}

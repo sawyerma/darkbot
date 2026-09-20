@@ -1,0 +1,22 @@
+[
+  {
+    "active_strategy_version_id": null,
+    "code_commit": "unknown",
+    "contract_version": "2.9.14-MVP",
+    "data_complete": 1,
+    "ended_at_utc_ns": 1789257988024529000,
+    "feed_pricing_model_id": null,
+    "final_state": "STOPPED",
+    "id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "mode": "PAPER",
+    "operational_limits_model_id": "c34eaab82e3148d28e0d9075a08aa63c",
+    "persistent_session_sequence": 1,
+    "protocol_config_model_id": null,
+    "protocol_config_read_slot": null,
+    "protocol_config_read_utc_ns": null,
+    "protocol_config_rpc_url_without_secret": null,
+    "provider_schema_version_id": null,
+    "started_at_monotonic_ns": 1572485131998208,
+    "started_at_utc_ns": 1789257090377507000
+  }
+]

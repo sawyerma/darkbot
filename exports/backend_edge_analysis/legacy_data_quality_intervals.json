@@ -1,0 +1,20 @@
+[
+  {
+    "details_json": "{\"code\":\"CHAIN_DISCONNECTED\"}",
+    "end_offset_ns": 897625246125,
+    "id": 1,
+    "launch_id": null,
+    "reason": "RECONNECT",
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "start_offset_ns": 897617073917
+  },
+  {
+    "details_json": "{\"code\":\"PROCESS_RESTART\"}",
+    "end_offset_ns": 897625267708,
+    "id": 2,
+    "launch_id": null,
+    "reason": "PROCESS_RESTART",
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "start_offset_ns": 897620755458
+  }
+]

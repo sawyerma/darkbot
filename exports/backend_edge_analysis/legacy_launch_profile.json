@@ -1,0 +1,44 @@
+{
+  "accepted_counts": [
+    {
+      "accepted": 0,
+      "rows": 86
+    },
+    {
+      "accepted": 1,
+      "rows": 249
+    }
+  ],
+  "coverage_state_counts": [
+    {
+      "coverage_state": "GAP",
+      "rows": 225
+    },
+    {
+      "coverage_state": "OBSERVED",
+      "rows": 110
+    }
+  ],
+  "horizon_cohort_counts": [
+    {
+      "horizon_cohort": "FULL",
+      "rows": 335
+    }
+  ],
+  "quote_scope_counts": [
+    {
+      "quote_scope": "OBSERVE_ONLY",
+      "rows": 86
+    },
+    {
+      "quote_scope": "SOL_WSOL",
+      "rows": 249
+    }
+  ],
+  "status_counts": [
+    {
+      "rows": 335,
+      "status": "EVICTED"
+    }
+  ]
+}

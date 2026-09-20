@@ -1,0 +1,9 @@
+[
+  {
+    "applied_at_utc_ns": 1789257090378789000,
+    "contract_version": "2.9.14-MVP",
+    "migration_name": "0001_initial.sql",
+    "migration_sha256": "87430150b7ab0ee85f19471e79bfc0556bfc4b21e4fca256192541d11e9070e8",
+    "version": 1
+  }
+]

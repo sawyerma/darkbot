@@ -1,5 +1,57 @@
 {
-  "database_used": "/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/darkbot_edge_b3hh7ebl/paper_research_all_launches_10min_20260913.db",
+  "database_used": "/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/darkbot_edge_g9_i7yxh/paper_research_all_launches_10min_20260913.db",
+  "exported_text_artifacts": {
+    "backtest_runs": {
+      "file": "legacy_backtest_runs.json",
+      "rows": 0
+    },
+    "backtest_splits": {
+      "file": "legacy_backtest_splits.json",
+      "rows": 0
+    },
+    "data_quality_intervals": {
+      "file": "legacy_data_quality_intervals.json",
+      "rows": 2
+    },
+    "event_profile": {
+      "file": "legacy_event_profile.json"
+    },
+    "events": {
+      "file": "legacy_events.csv",
+      "rows": 18758
+    },
+    "feature_snapshots": {
+      "file": "legacy_feature_snapshots.csv",
+      "rows": 670
+    },
+    "launch_profile": {
+      "file": "legacy_launch_profile.json"
+    },
+    "launches": {
+      "file": "legacy_launches.csv",
+      "rows": 335
+    },
+    "model_versions": {
+      "file": "legacy_model_versions.json",
+      "rows": 2
+    },
+    "schema_version": {
+      "file": "legacy_schema_version.json",
+      "rows": 1
+    },
+    "sessions": {
+      "file": "legacy_sessions.json",
+      "rows": 1
+    },
+    "strategy_versions": {
+      "file": "legacy_strategy_versions.json",
+      "rows": 0
+    },
+    "system_events": {
+      "file": "legacy_system_events.json",
+      "rows": 94
+    }
+  },
   "likely_data_tables": [
     {
       "columns": [
@@ -654,14 +706,14 @@
   "zip_database_candidates": [
     {
       "error": "DatabaseError: file is not a database",
-      "path": "/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/darkbot_edge_b3hh7ebl/__MACOSX/._paper_research_all_launches_10min_20260913.db",
+      "path": "/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/darkbot_edge_g9_i7yxh/__MACOSX/._paper_research_all_launches_10min_20260913.db",
       "size_bytes": 220,
       "sqlite": false,
       "tables": {}
     },
     {
       "has_run_id": false,
-      "path": "/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/darkbot_edge_b3hh7ebl/paper_research_all_launches_10min_20260913.db",
+      "path": "/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/darkbot_edge_g9_i7yxh/paper_research_all_launches_10min_20260913.db",
       "phase1_complete": false,
       "phase1_tables_present": [],
       "score": 184,

@@ -1,0 +1,20 @@
+[
+  {
+    "content_json": "{\"bulk_batch_max_rows\":500,\"bulk_flush_interval_ms\":250,\"busy_timeout_ms\":5000,\"critical_ack_timeout_ms\":2000,\"deadline_jitter_warn_us\":20000,\"eventloop_lag_critical_us\":250000,\"eventloop_lag_warn_us\":50000,\"health_sample_interval_ms\":10000,\"memory_guard_rss_bytes\":2147483648,\"protocol_config_read_retries\":5,\"provider_message_age_warn_ms\":2000,\"queue_bulk_critical_rows\":20000,\"queue_bulk_hard_limit_rows\":200000,\"queue_bulk_warning_rows\":5000,\"reconnect_backoff_initial_ms\":500,\"reconnect_backoff_max_ms\":10000,\"rpc_timeout_ms\":3000,\"stream_stale_timeout_ms\":5000,\"tracker_limit\":2000,\"wal_autocheckpoint_pages\":10000,\"websocket_ping_interval_ms\":20000}",
+    "content_sha256": "0328873de1d3d58a30972b3bdb163e16849d09cc6f1de63d4f23899126da21b4",
+    "created_at_utc_ns": 1789257090380465000,
+    "effective_from_utc_ns": null,
+    "id": "c34eaab82e3148d28e0d9075a08aa63c",
+    "kind": "OPERATIONAL_LIMITS",
+    "source": "contract operational_limits_v1 initial values"
+  },
+  {
+    "content_json": "{\"feature_contract_sha256\":\"17e05155485d659191318575a932ec7f361760269e04193e6926c9263deba0a9\",\"feature_names\":[\"buy_count\",\"sell_count\",\"buy_volume_sol\",\"sell_volume_sol\",\"net_buy_flow_sol\",\"unique_buyers\",\"unique_buyer_ratio\",\"largest_buy_sol\",\"buyer_volume_concentration\",\"first5_buyer_concentration\",\"first_sell_latency_ms\",\"price_change\",\"max_drawdown\",\"dev_initial_buy\",\"curve_progress_pct\",\"research_estimated_price_impact\",\"provider_gap_flag\"],\"research_snapshot_ms\":[250,500,750,1000],\"runtime_snapshot_ms\":[500,1000]}",
+    "content_sha256": "2eede1e41208c1e413841093480fa6eb15b14be2322cce7b3f66f3ab38aea404",
+    "created_at_utc_ns": 1789257090380465000,
+    "effective_from_utc_ns": null,
+    "id": "c4856e3e42ed452ea1b359ceaadd2678",
+    "kind": "FEATURE_SET",
+    "source": "contract feature_contract_v1"
+  }
+]

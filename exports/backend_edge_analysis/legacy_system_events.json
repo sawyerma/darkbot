@@ -1,0 +1,754 @@
+[
+  {
+    "details_json": "{\"chain_commitment\":\"processed\",\"chain_ws_host\":\"wss://api.mainnet-beta.solana.com/\",\"code\":\"SESSION_CONFIG\",\"feature_set_model_id\":\"c4856e3e42ed452ea1b359ceaadd2678\",\"message\":\"session started\",\"mode\":\"PAPER\",\"operational_limits_model_id\":\"c34eaab82e3148d28e0d9075a08aa63c\",\"pumpportal\":false,\"research_horizon_ms\":600000,\"runtime_snapshot_ms\":[500,1000]}",
+    "event_type": "SESSION_CONFIG",
+    "id": 1,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257090381202000
+  },
+  {
+    "details_json": "{\"code\": \"STATE_CHANGE\", \"from\": \"STARTING_RECONCILIATION\", \"message\": \"startup complete\", \"reason\": \"startup complete\", \"to\": \"RUNNING\", \"trigger\": \"startup\"}",
+    "event_type": "STATE_CHANGE",
+    "id": 2,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257090381234000
+  },
+  {
+    "details_json": "{\"code\":\"CHAIN_CONNECTED\",\"message\":\"logsSubscribe active\"}",
+    "event_type": "CHAIN_CONNECTED",
+    "id": 3,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257090780121000
+  },
+  {
+    "details_json": "{\"active_trackers\":6,\"code\":\"HEALTH\",\"creates\":6,\"decoded_events\":277,\"decoder_known_ignored_events\":32,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":6,\"evictions\":0,\"failed_transactions\":300,\"heap\":7,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":6,\"launches_tradable\":6,\"launches_unsupported_quote\":0,\"message\":\"periodic sample\",\"notifications\":585,\"offset_ns\":10005246542,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":1,\"queue_critical_depth\":0,\"snapshots\":11,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":263,\"trades_tracked\":2,\"unknown_payload_observations\":36,\"writer_committed_rows\":75,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 4,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257100382801000
+  },
+  {
+    "details_json": "{\"active_trackers\":7,\"code\":\"HEALTH\",\"creates\":7,\"decoded_events\":554,\"decoder_known_ignored_events\":74,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":7,\"evictions\":0,\"failed_transactions\":403,\"heap\":7,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":7,\"launches_tradable\":6,\"launches_unsupported_quote\":1,\"message\":\"periodic sample\",\"notifications\":979,\"offset_ns\":20006335000,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":2,\"queue_critical_depth\":0,\"snapshots\":14,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":522,\"trades_tracked\":18,\"unknown_payload_observations\":75,\"writer_committed_rows\":153,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 5,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257110383854000
+  },
+  {
+    "details_json": "{\"active_trackers\":13,\"code\":\"HEALTH\",\"creates\":13,\"decoded_events\":838,\"decoder_known_ignored_events\":114,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":57,\"evictions\":0,\"failed_transactions\":839,\"heap\":13,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":13,\"launches_tradable\":12,\"launches_unsupported_quote\":1,\"message\":\"periodic sample\",\"notifications\":1761,\"offset_ns\":30007457000,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":26,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":759,\"trades_tracked\":53,\"unknown_payload_observations\":153,\"writer_committed_rows\":338,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 6,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257120384935000
+  },
+  {
+    "details_json": "{\"active_trackers\":18,\"code\":\"HEALTH\",\"creates\":18,\"decoded_events\":1130,\"decoder_known_ignored_events\":151,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":98,\"evictions\":0,\"failed_transactions\":1149,\"heap\":19,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":18,\"launches_tradable\":17,\"launches_unsupported_quote\":1,\"message\":\"periodic sample\",\"notifications\":2408,\"offset_ns\":40008586792,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":35,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":1021,\"trades_tracked\":73,\"unknown_payload_observations\":227,\"writer_committed_rows\":482,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 7,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257130386030000
+  },
+  {
+    "details_json": "{\"active_trackers\":22,\"code\":\"HEALTH\",\"creates\":22,\"decoded_events\":1510,\"decoder_known_ignored_events\":192,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":127,\"evictions\":0,\"failed_transactions\":2274,\"heap\":22,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":22,\"launches_tradable\":21,\"launches_unsupported_quote\":1,\"message\":\"periodic sample\",\"notifications\":3965,\"offset_ns\":50009439542,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":44,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":1312,\"trades_tracked\":154,\"unknown_payload_observations\":294,\"writer_committed_rows\":737,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 8,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257140386859000
+  },
+  {
+    "details_json": "{\"active_trackers\":24,\"code\":\"HEALTH\",\"creates\":24,\"decoded_events\":1896,\"decoder_known_ignored_events\":239,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":153,\"evictions\":0,\"failed_transactions\":3132,\"heap\":24,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":24,\"launches_tradable\":22,\"launches_unsupported_quote\":2,\"message\":\"periodic sample\",\"notifications\":5251,\"offset_ns\":60009715833,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":5,\"queue_critical_depth\":0,\"snapshots\":48,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":1638,\"trades_tracked\":210,\"unknown_payload_observations\":364,\"writer_committed_rows\":927,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 9,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257150387073000
+  },
+  {
+    "details_json": "{\"active_trackers\":26,\"code\":\"HEALTH\",\"creates\":26,\"decoded_events\":2274,\"decoder_known_ignored_events\":278,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":239,\"evictions\":0,\"failed_transactions\":3266,\"heap\":26,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":26,\"launches_tradable\":23,\"launches_unsupported_quote\":3,\"message\":\"periodic sample\",\"notifications\":5852,\"offset_ns\":70010986792,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":17,\"queue_critical_depth\":0,\"snapshots\":52,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":1918,\"trades_tracked\":304,\"unknown_payload_observations\":484,\"writer_committed_rows\":1235,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 10,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257160388340000
+  },
+  {
+    "details_json": "{\"active_trackers\":29,\"code\":\"HEALTH\",\"creates\":29,\"decoded_events\":2546,\"decoder_known_ignored_events\":320,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":261,\"evictions\":0,\"failed_transactions\":3308,\"heap\":29,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":29,\"launches_tradable\":26,\"launches_unsupported_quote\":3,\"message\":\"periodic sample\",\"notifications\":6195,\"offset_ns\":80012094667,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":4,\"queue_critical_depth\":0,\"snapshots\":58,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":2109,\"trades_tracked\":379,\"unknown_payload_observations\":541,\"writer_committed_rows\":1474,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 11,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257170389380000
+  },
+  {
+    "details_json": "{\"active_trackers\":33,\"code\":\"HEALTH\",\"creates\":33,\"decoded_events\":2782,\"decoder_known_ignored_events\":355,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":265,\"evictions\":0,\"failed_transactions\":3337,\"heap\":33,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":33,\"launches_tradable\":30,\"launches_unsupported_quote\":3,\"message\":\"periodic sample\",\"notifications\":6467,\"offset_ns\":90012574833,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":66,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":2244,\"trades_tracked\":472,\"unknown_payload_observations\":575,\"writer_committed_rows\":1722,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 12,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257180389824000
+  },
+  {
+    "details_json": "{\"active_trackers\":34,\"code\":\"HEALTH\",\"creates\":34,\"decoded_events\":3016,\"decoder_known_ignored_events\":398,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":267,\"evictions\":0,\"failed_transactions\":3371,\"heap\":34,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":34,\"launches_tradable\":31,\"launches_unsupported_quote\":3,\"message\":\"periodic sample\",\"notifications\":6749,\"offset_ns\":100013721708,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":5,\"queue_critical_depth\":0,\"snapshots\":68,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":2414,\"trades_tracked\":534,\"unknown_payload_observations\":619,\"writer_committed_rows\":1892,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 13,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257190390958000
+  },
+  {
+    "details_json": "{\"active_trackers\":37,\"code\":\"HEALTH\",\"creates\":37,\"decoded_events\":3328,\"decoder_known_ignored_events\":428,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":268,\"evictions\":0,\"failed_transactions\":3421,\"heap\":40,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":37,\"launches_tradable\":34,\"launches_unsupported_quote\":3,\"message\":\"periodic sample\",\"notifications\":7116,\"offset_ns\":110014874333,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":21,\"queue_critical_depth\":0,\"snapshots\":71,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":2580,\"trades_tracked\":674,\"unknown_payload_observations\":645,\"writer_committed_rows\":2197,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 14,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257200392089000
+  },
+  {
+    "details_json": "{\"active_trackers\":38,\"code\":\"HEALTH\",\"creates\":38,\"decoded_events\":3600,\"decoder_known_ignored_events\":483,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":269,\"evictions\":0,\"failed_transactions\":3445,\"heap\":38,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":38,\"launches_tradable\":34,\"launches_unsupported_quote\":4,\"message\":\"periodic sample\",\"notifications\":7422,\"offset_ns\":120015993208,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":76,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":2724,\"trades_tracked\":800,\"unknown_payload_observations\":691,\"writer_committed_rows\":2526,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 15,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257210393164000
+  },
+  {
+    "details_json": "{\"active_trackers\":41,\"code\":\"HEALTH\",\"creates\":41,\"decoded_events\":3833,\"decoder_known_ignored_events\":518,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":269,\"evictions\":0,\"failed_transactions\":3478,\"heap\":41,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":41,\"launches_tradable\":36,\"launches_unsupported_quote\":5,\"message\":\"periodic sample\",\"notifications\":7693,\"offset_ns\":130017054333,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":2,\"queue_critical_depth\":0,\"snapshots\":82,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":2866,\"trades_tracked\":885,\"unknown_payload_observations\":720,\"writer_committed_rows\":2743,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 16,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257220394195000
+  },
+  {
+    "details_json": "{\"active_trackers\":48,\"code\":\"HEALTH\",\"creates\":48,\"decoded_events\":4067,\"decoder_known_ignored_events\":542,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":269,\"evictions\":0,\"failed_transactions\":4202,\"heap\":48,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":48,\"launches_tradable\":43,\"launches_unsupported_quote\":5,\"message\":\"periodic sample\",\"notifications\":8666,\"offset_ns\":140017729083,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":16,\"queue_critical_depth\":0,\"snapshots\":96,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":2988,\"trades_tracked\":983,\"unknown_payload_observations\":740,\"writer_committed_rows\":2986,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 17,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257230394811000
+  },
+  {
+    "details_json": "{\"active_trackers\":57,\"code\":\"HEALTH\",\"creates\":57,\"decoded_events\":4355,\"decoder_known_ignored_events\":582,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":269,\"evictions\":0,\"failed_transactions\":4767,\"heap\":62,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":57,\"launches_tradable\":50,\"launches_unsupported_quote\":7,\"message\":\"periodic sample\",\"notifications\":9521,\"offset_ns\":150018452042,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":10,\"queue_critical_depth\":0,\"snapshots\":109,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":3156,\"trades_tracked\":1085,\"unknown_payload_observations\":773,\"writer_committed_rows\":3281,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 18,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257240395499000
+  },
+  {
+    "details_json": "{\"active_trackers\":65,\"code\":\"HEALTH\",\"creates\":65,\"decoded_events\":4638,\"decoder_known_ignored_events\":618,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":269,\"evictions\":0,\"failed_transactions\":5150,\"heap\":65,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":65,\"launches_tradable\":57,\"launches_unsupported_quote\":8,\"message\":\"periodic sample\",\"notifications\":10194,\"offset_ns\":160019577583,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":8,\"queue_critical_depth\":0,\"snapshots\":130,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":3329,\"trades_tracked\":1179,\"unknown_payload_observations\":803,\"writer_committed_rows\":3555,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 19,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257250396624000
+  },
+  {
+    "details_json": "{\"active_trackers\":69,\"code\":\"HEALTH\",\"creates\":69,\"decoded_events\":4937,\"decoder_known_ignored_events\":642,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":269,\"evictions\":0,\"failed_transactions\":5280,\"heap\":69,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":69,\"launches_tradable\":61,\"launches_unsupported_quote\":8,\"message\":\"periodic sample\",\"notifications\":10628,\"offset_ns\":170019977625,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":6,\"queue_critical_depth\":0,\"snapshots\":138,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":3521,\"trades_tracked\":1280,\"unknown_payload_observations\":824,\"writer_committed_rows\":3803,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 20,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257260396954000
+  },
+  {
+    "details_json": "{\"active_trackers\":72,\"code\":\"HEALTH\",\"creates\":72,\"decoded_events\":5190,\"decoder_known_ignored_events\":663,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":270,\"evictions\":0,\"failed_transactions\":6237,\"heap\":74,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":72,\"launches_tradable\":62,\"launches_unsupported_quote\":10,\"message\":\"periodic sample\",\"notifications\":11856,\"offset_ns\":180021098667,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":7,\"queue_critical_depth\":0,\"snapshots\":142,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":3656,\"trades_tracked\":1392,\"unknown_payload_observations\":842,\"writer_committed_rows\":4060,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 21,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257270398065000
+  },
+  {
+    "details_json": "{\"active_trackers\":78,\"code\":\"HEALTH\",\"creates\":78,\"decoded_events\":5460,\"decoder_known_ignored_events\":699,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":272,\"evictions\":0,\"failed_transactions\":7228,\"heap\":78,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":78,\"launches_tradable\":67,\"launches_unsupported_quote\":11,\"message\":\"periodic sample\",\"notifications\":13145,\"offset_ns\":190022193000,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":9,\"queue_critical_depth\":0,\"snapshots\":156,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":3755,\"trades_tracked\":1551,\"unknown_payload_observations\":871,\"writer_committed_rows\":4447,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 22,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257280399120000
+  },
+  {
+    "details_json": "{\"active_trackers\":79,\"code\":\"HEALTH\",\"creates\":79,\"decoded_events\":5717,\"decoder_known_ignored_events\":735,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":330,\"evictions\":0,\"failed_transactions\":7285,\"heap\":79,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":79,\"launches_tradable\":68,\"launches_unsupported_quote\":11,\"message\":\"periodic sample\",\"notifications\":13522,\"offset_ns\":200023298875,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":158,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":3859,\"trades_tracked\":1702,\"unknown_payload_observations\":958,\"writer_committed_rows\":4851,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 23,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257290400206000
+  },
+  {
+    "details_json": "{\"active_trackers\":83,\"code\":\"HEALTH\",\"creates\":83,\"decoded_events\":6064,\"decoder_known_ignored_events\":768,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":386,\"evictions\":0,\"failed_transactions\":7754,\"heap\":83,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":83,\"launches_tradable\":71,\"launches_unsupported_quote\":12,\"message\":\"periodic sample\",\"notifications\":14413,\"offset_ns\":210024391333,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":20,\"queue_critical_depth\":0,\"snapshots\":166,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":3963,\"trades_tracked\":1937,\"unknown_payload_observations\":1044,\"writer_committed_rows\":5413,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 24,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257300401253000
+  },
+  {
+    "details_json": "{\"active_trackers\":87,\"code\":\"HEALTH\",\"creates\":87,\"decoded_events\":6393,\"decoder_known_ignored_events\":801,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":437,\"evictions\":0,\"failed_transactions\":8518,\"heap\":87,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":87,\"launches_tradable\":74,\"launches_unsupported_quote\":13,\"message\":\"periodic sample\",\"notifications\":15572,\"offset_ns\":220025488208,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":12,\"queue_critical_depth\":0,\"snapshots\":174,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4058,\"trades_tracked\":2163,\"unknown_payload_observations\":1123,\"writer_committed_rows\":5976,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 25,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257310402309000
+  },
+  {
+    "details_json": "{\"active_trackers\":87,\"code\":\"HEALTH\",\"creates\":87,\"decoded_events\":6659,\"decoder_known_ignored_events\":827,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":465,\"evictions\":0,\"failed_transactions\":8984,\"heap\":87,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":87,\"launches_tradable\":74,\"launches_unsupported_quote\":13,\"message\":\"periodic sample\",\"notifications\":16345,\"offset_ns\":230026589625,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":174,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4136,\"trades_tracked\":2351,\"unknown_payload_observations\":1172,\"writer_committed_rows\":6415,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 26,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257320403383000
+  },
+  {
+    "details_json": "{\"active_trackers\":88,\"code\":\"HEALTH\",\"creates\":88,\"decoded_events\":6918,\"decoder_known_ignored_events\":860,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":494,\"evictions\":0,\"failed_transactions\":9442,\"heap\":88,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":88,\"launches_tradable\":75,\"launches_unsupported_quote\":13,\"message\":\"periodic sample\",\"notifications\":17104,\"offset_ns\":240027326292,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":176,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4226,\"trades_tracked\":2518,\"unknown_payload_observations\":1227,\"writer_committed_rows\":6811,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 27,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257330404104000
+  },
+  {
+    "details_json": "{\"active_trackers\":93,\"code\":\"HEALTH\",\"creates\":93,\"decoded_events\":7200,\"decoder_known_ignored_events\":892,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":542,\"evictions\":0,\"failed_transactions\":10255,\"heap\":96,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":93,\"launches_tradable\":79,\"launches_unsupported_quote\":14,\"message\":\"periodic sample\",\"notifications\":18260,\"offset_ns\":250028431917,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":1,\"queue_critical_depth\":0,\"snapshots\":183,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4330,\"trades_tracked\":2686,\"unknown_payload_observations\":1297,\"writer_committed_rows\":7243,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 28,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257340405154000
+  },
+  {
+    "details_json": "{\"active_trackers\":97,\"code\":\"HEALTH\",\"creates\":97,\"decoded_events\":7517,\"decoder_known_ignored_events\":926,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":567,\"evictions\":0,\"failed_transactions\":12261,\"heap\":97,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":97,\"launches_tradable\":81,\"launches_unsupported_quote\":16,\"message\":\"periodic sample\",\"notifications\":20630,\"offset_ns\":260028510167,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":13,\"queue_critical_depth\":0,\"snapshots\":194,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4406,\"trades_tracked\":2919,\"unknown_payload_observations\":1345,\"writer_committed_rows\":7775,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 29,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257350405191000
+  },
+  {
+    "details_json": "{\"active_trackers\":98,\"code\":\"HEALTH\",\"creates\":98,\"decoded_events\":7740,\"decoder_known_ignored_events\":967,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":586,\"evictions\":0,\"failed_transactions\":12574,\"heap\":98,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":98,\"launches_tradable\":82,\"launches_unsupported_quote\":16,\"message\":\"periodic sample\",\"notifications\":21201,\"offset_ns\":270029595292,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":1,\"queue_critical_depth\":0,\"snapshots\":196,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4494,\"trades_tracked\":3052,\"unknown_payload_observations\":1397,\"writer_committed_rows\":8113,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 30,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257360406258000
+  },
+  {
+    "details_json": "{\"active_trackers\":99,\"code\":\"HEALTH\",\"creates\":99,\"decoded_events\":7972,\"decoder_known_ignored_events\":993,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":627,\"evictions\":0,\"failed_transactions\":12635,\"heap\":99,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":99,\"launches_tradable\":83,\"launches_unsupported_quote\":16,\"message\":\"periodic sample\",\"notifications\":21550,\"offset_ns\":280029866250,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":1,\"queue_critical_depth\":0,\"snapshots\":198,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4604,\"trades_tracked\":3172,\"unknown_payload_observations\":1463,\"writer_committed_rows\":8426,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 31,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257370406485000
+  },
+  {
+    "details_json": "{\"active_trackers\":106,\"code\":\"HEALTH\",\"creates\":106,\"decoded_events\":8257,\"decoder_known_ignored_events\":1040,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":657,\"evictions\":0,\"failed_transactions\":12815,\"heap\":108,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":106,\"launches_tradable\":89,\"launches_unsupported_quote\":17,\"message\":\"periodic sample\",\"notifications\":22046,\"offset_ns\":290031009708,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":210,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4723,\"trades_tracked\":3324,\"unknown_payload_observations\":1530,\"writer_committed_rows\":8838,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 32,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257380407646000
+  },
+  {
+    "details_json": "{\"active_trackers\":111,\"code\":\"HEALTH\",\"creates\":111,\"decoded_events\":8750,\"decoder_known_ignored_events\":1085,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":686,\"evictions\":0,\"failed_transactions\":15212,\"heap\":111,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":111,\"launches_tradable\":94,\"launches_unsupported_quote\":17,\"message\":\"periodic sample\",\"notifications\":25208,\"offset_ns\":300032088417,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":16,\"queue_critical_depth\":0,\"snapshots\":222,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4840,\"trades_tracked\":3691,\"unknown_payload_observations\":1597,\"writer_committed_rows\":9655,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 33,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257390408642000
+  },
+  {
+    "details_json": "{\"active_trackers\":116,\"code\":\"HEALTH\",\"creates\":116,\"decoded_events\":9175,\"decoder_known_ignored_events\":1116,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":756,\"evictions\":0,\"failed_transactions\":17577,\"heap\":116,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":116,\"launches_tradable\":99,\"launches_unsupported_quote\":17,\"message\":\"periodic sample\",\"notifications\":28261,\"offset_ns\":310032191958,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":41,\"queue_critical_depth\":0,\"snapshots\":232,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4914,\"trades_tracked\":4032,\"unknown_payload_observations\":1691,\"writer_committed_rows\":10436,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 34,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257400408708000
+  },
+  {
+    "details_json": "{\"active_trackers\":118,\"code\":\"HEALTH\",\"creates\":118,\"decoded_events\":9526,\"decoder_known_ignored_events\":1143,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":798,\"evictions\":0,\"failed_transactions\":18369,\"heap\":118,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":118,\"launches_tradable\":100,\"launches_unsupported_quote\":18,\"message\":\"periodic sample\",\"notifications\":29458,\"offset_ns\":320032404958,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":18,\"queue_critical_depth\":0,\"snapshots\":236,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":4983,\"trades_tracked\":4310,\"unknown_payload_observations\":1753,\"writer_committed_rows\":11090,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 35,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257410408902000
+  },
+  {
+    "details_json": "{\"active_trackers\":122,\"code\":\"HEALTH\",\"creates\":122,\"decoded_events\":9914,\"decoder_known_ignored_events\":1178,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":822,\"evictions\":0,\"failed_transactions\":19389,\"heap\":122,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":122,\"launches_tradable\":102,\"launches_unsupported_quote\":20,\"message\":\"periodic sample\",\"notifications\":30913,\"offset_ns\":330032898500,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":2,\"queue_critical_depth\":0,\"snapshots\":244,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":5122,\"trades_tracked\":4551,\"unknown_payload_observations\":1806,\"writer_committed_rows\":11661,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 36,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257420409357000
+  },
+  {
+    "details_json": "{\"active_trackers\":126,\"code\":\"HEALTH\",\"creates\":126,\"decoded_events\":10218,\"decoder_known_ignored_events\":1223,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":876,\"evictions\":0,\"failed_transactions\":20140,\"heap\":128,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":126,\"launches_tradable\":106,\"launches_unsupported_quote\":20,\"message\":\"periodic sample\",\"notifications\":32037,\"offset_ns\":340033101167,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":2,\"queue_critical_depth\":0,\"snapshots\":250,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":5234,\"trades_tracked\":4735,\"unknown_payload_observations\":1898,\"writer_committed_rows\":12144,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 37,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257430409520000
+  },
+  {
+    "details_json": "{\"active_trackers\":126,\"code\":\"HEALTH\",\"creates\":126,\"decoded_events\":10514,\"decoder_known_ignored_events\":1271,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":909,\"evictions\":0,\"failed_transactions\":20437,\"heap\":126,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":126,\"launches_tradable\":106,\"launches_unsupported_quote\":20,\"message\":\"periodic sample\",\"notifications\":32684,\"offset_ns\":350034169708,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":6,\"queue_critical_depth\":0,\"snapshots\":252,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":5364,\"trades_tracked\":4901,\"unknown_payload_observations\":1973,\"writer_committed_rows\":12552,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 38,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257440410554000
+  },
+  {
+    "details_json": "{\"active_trackers\":129,\"code\":\"HEALTH\",\"creates\":129,\"decoded_events\":10769,\"decoder_known_ignored_events\":1324,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":910,\"evictions\":0,\"failed_transactions\":21070,\"heap\":129,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":129,\"launches_tradable\":108,\"launches_unsupported_quote\":21,\"message\":\"periodic sample\",\"notifications\":33587,\"offset_ns\":360035318417,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":11,\"queue_critical_depth\":0,\"snapshots\":258,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":5486,\"trades_tracked\":5028,\"unknown_payload_observations\":2016,\"writer_committed_rows\":12861,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 39,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257450411706000
+  },
+  {
+    "details_json": "{\"active_trackers\":132,\"code\":\"HEALTH\",\"creates\":132,\"decoded_events\":10997,\"decoder_known_ignored_events\":1376,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":935,\"evictions\":0,\"failed_transactions\":21602,\"heap\":132,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":132,\"launches_tradable\":111,\"launches_unsupported_quote\":21,\"message\":\"periodic sample\",\"notifications\":34392,\"offset_ns\":370036417250,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":13,\"queue_critical_depth\":0,\"snapshots\":264,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":5569,\"trades_tracked\":5167,\"unknown_payload_observations\":2082,\"writer_committed_rows\":13222,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 40,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257460412748000
+  },
+  {
+    "details_json": "{\"active_trackers\":137,\"code\":\"HEALTH\",\"creates\":137,\"decoded_events\":11239,\"decoder_known_ignored_events\":1410,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":960,\"evictions\":0,\"failed_transactions\":21694,\"heap\":137,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":137,\"launches_tradable\":114,\"launches_unsupported_quote\":23,\"message\":\"periodic sample\",\"notifications\":34754,\"offset_ns\":380037520250,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":13,\"queue_critical_depth\":0,\"snapshots\":274,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":5658,\"trades_tracked\":5310,\"unknown_payload_observations\":2134,\"writer_committed_rows\":13591,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 41,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257470413819000
+  },
+  {
+    "details_json": "{\"active_trackers\":140,\"code\":\"HEALTH\",\"creates\":140,\"decoded_events\":11452,\"decoder_known_ignored_events\":1443,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":985,\"evictions\":0,\"failed_transactions\":21717,\"heap\":140,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":140,\"launches_tradable\":114,\"launches_unsupported_quote\":26,\"message\":\"periodic sample\",\"notifications\":35019,\"offset_ns\":390037888542,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":12,\"queue_critical_depth\":0,\"snapshots\":280,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":5728,\"trades_tracked\":5447,\"unknown_payload_observations\":2189,\"writer_committed_rows\":13940,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 42,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257480414140000
+  },
+  {
+    "details_json": "{\"active_trackers\":141,\"code\":\"HEALTH\",\"creates\":141,\"decoded_events\":11702,\"decoder_known_ignored_events\":1483,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":995,\"evictions\":0,\"failed_transactions\":21758,\"heap\":141,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":141,\"launches_tradable\":115,\"launches_unsupported_quote\":26,\"message\":\"periodic sample\",\"notifications\":35324,\"offset_ns\":400038990750,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":282,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":5864,\"trades_tracked\":5559,\"unknown_payload_observations\":2234,\"writer_committed_rows\":14228,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 43,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257490415227000
+  },
+  {
+    "details_json": "{\"active_trackers\":147,\"code\":\"HEALTH\",\"creates\":147,\"decoded_events\":12067,\"decoder_known_ignored_events\":1540,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1029,\"evictions\":0,\"failed_transactions\":24142,\"heap\":147,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":147,\"launches_tradable\":120,\"launches_unsupported_quote\":27,\"message\":\"periodic sample\",\"notifications\":38146,\"offset_ns\":410039177708,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":294,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6033,\"trades_tracked\":5743,\"unknown_payload_observations\":2306,\"writer_committed_rows\":14705,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 44,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257500415379000
+  },
+  {
+    "details_json": "{\"active_trackers\":149,\"code\":\"HEALTH\",\"creates\":149,\"decoded_events\":12385,\"decoder_known_ignored_events\":1585,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1032,\"evictions\":0,\"failed_transactions\":26853,\"heap\":151,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":149,\"launches_tradable\":121,\"launches_unsupported_quote\":28,\"message\":\"periodic sample\",\"notifications\":41227,\"offset_ns\":420040304583,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":296,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6124,\"trades_tracked\":5966,\"unknown_payload_observations\":2342,\"writer_committed_rows\":15197,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 45,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257510416492000
+  },
+  {
+    "details_json": "{\"active_trackers\":153,\"code\":\"HEALTH\",\"creates\":153,\"decoded_events\":12672,\"decoder_known_ignored_events\":1627,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1063,\"evictions\":0,\"failed_transactions\":27212,\"heap\":153,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":153,\"launches_tradable\":122,\"launches_unsupported_quote\":31,\"message\":\"periodic sample\",\"notifications\":41911,\"offset_ns\":430042401542,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":26,\"queue_critical_depth\":0,\"snapshots\":306,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6201,\"trades_tracked\":6169,\"unknown_payload_observations\":2404,\"writer_committed_rows\":15664,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 46,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257520418527000
+  },
+  {
+    "details_json": "{\"active_trackers\":155,\"code\":\"HEALTH\",\"creates\":155,\"decoded_events\":12951,\"decoder_known_ignored_events\":1683,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1091,\"evictions\":0,\"failed_transactions\":27289,\"heap\":155,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":155,\"launches_tradable\":123,\"launches_unsupported_quote\":32,\"message\":\"periodic sample\",\"notifications\":42307,\"offset_ns\":440044149958,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":310,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6290,\"trades_tracked\":6355,\"unknown_payload_observations\":2479,\"writer_committed_rows\":16151,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 47,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257530420261000
+  },
+  {
+    "details_json": "{\"active_trackers\":159,\"code\":\"HEALTH\",\"creates\":159,\"decoded_events\":13323,\"decoder_known_ignored_events\":1733,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1098,\"evictions\":0,\"failed_transactions\":27499,\"heap\":159,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":159,\"launches_tradable\":126,\"launches_unsupported_quote\":33,\"message\":\"periodic sample\",\"notifications\":42907,\"offset_ns\":450044731375,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":41,\"queue_critical_depth\":0,\"snapshots\":318,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6421,\"trades_tracked\":6589,\"unknown_payload_observations\":2523,\"writer_committed_rows\":16649,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 48,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257540420938000
+  },
+  {
+    "details_json": "{\"active_trackers\":160,\"code\":\"HEALTH\",\"creates\":160,\"decoded_events\":13740,\"decoder_known_ignored_events\":1788,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1105,\"evictions\":0,\"failed_transactions\":27766,\"heap\":160,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":160,\"launches_tradable\":127,\"launches_unsupported_quote\":33,\"message\":\"periodic sample\",\"notifications\":43605,\"offset_ns\":460045536000,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":20,\"queue_critical_depth\":0,\"snapshots\":320,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6570,\"trades_tracked\":6855,\"unknown_payload_observations\":2573,\"writer_committed_rows\":17259,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 49,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257550421569000
+  },
+  {
+    "details_json": "{\"active_trackers\":166,\"code\":\"HEALTH\",\"creates\":166,\"decoded_events\":14133,\"decoder_known_ignored_events\":1819,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1115,\"evictions\":0,\"failed_transactions\":28050,\"heap\":166,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":166,\"launches_tradable\":131,\"launches_unsupported_quote\":35,\"message\":\"periodic sample\",\"notifications\":44291,\"offset_ns\":470047619042,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":332,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6666,\"trades_tracked\":7141,\"unknown_payload_observations\":2603,\"writer_committed_rows\":17917,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 50,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257560423633000
+  },
+  {
+    "details_json": "{\"active_trackers\":171,\"code\":\"HEALTH\",\"creates\":171,\"decoded_events\":14532,\"decoder_known_ignored_events\":1867,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1125,\"evictions\":0,\"failed_transactions\":28443,\"heap\":173,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":171,\"launches_tradable\":135,\"launches_unsupported_quote\":36,\"message\":\"periodic sample\",\"notifications\":45094,\"offset_ns\":480048174125,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":20,\"queue_critical_depth\":0,\"snapshots\":340,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6806,\"trades_tracked\":7390,\"unknown_payload_observations\":2650,\"writer_committed_rows\":18471,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 51,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257570424122000
+  },
+  {
+    "details_json": "{\"active_trackers\":174,\"code\":\"HEALTH\",\"creates\":174,\"decoded_events\":14785,\"decoder_known_ignored_events\":1911,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1126,\"evictions\":0,\"failed_transactions\":28670,\"heap\":174,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":174,\"launches_tradable\":138,\"launches_unsupported_quote\":36,\"message\":\"periodic sample\",\"notifications\":45579,\"offset_ns\":490050315792,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":5,\"queue_critical_depth\":0,\"snapshots\":348,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":6913,\"trades_tracked\":7530,\"unknown_payload_observations\":2689,\"writer_committed_rows\":18825,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 52,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257580426353000
+  },
+  {
+    "details_json": "{\"active_trackers\":174,\"code\":\"HEALTH\",\"creates\":174,\"decoded_events\":15029,\"decoder_known_ignored_events\":1959,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1127,\"evictions\":0,\"failed_transactions\":28722,\"heap\":174,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":174,\"launches_tradable\":138,\"launches_unsupported_quote\":36,\"message\":\"periodic sample\",\"notifications\":45881,\"offset_ns\":500051024833,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":14,\"queue_critical_depth\":0,\"snapshots\":348,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7019,\"trades_tracked\":7668,\"unknown_payload_observations\":2724,\"writer_committed_rows\":19129,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 53,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257590426919000
+  },
+  {
+    "details_json": "{\"active_trackers\":179,\"code\":\"HEALTH\",\"creates\":179,\"decoded_events\":15359,\"decoder_known_ignored_events\":2012,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1128,\"evictions\":0,\"failed_transactions\":28799,\"heap\":179,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":179,\"launches_tradable\":141,\"launches_unsupported_quote\":38,\"message\":\"periodic sample\",\"notifications\":46289,\"offset_ns\":510053263500,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":28,\"queue_critical_depth\":0,\"snapshots\":358,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7138,\"trades_tracked\":7869,\"unknown_payload_observations\":2764,\"writer_committed_rows\":19587,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 54,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257600429149000
+  },
+  {
+    "details_json": "{\"active_trackers\":181,\"code\":\"HEALTH\",\"creates\":181,\"decoded_events\":15728,\"decoder_known_ignored_events\":2059,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1128,\"evictions\":0,\"failed_transactions\":29159,\"heap\":183,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":181,\"launches_tradable\":143,\"launches_unsupported_quote\":38,\"message\":\"periodic sample\",\"notifications\":47027,\"offset_ns\":520054482875,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":11,\"queue_critical_depth\":0,\"snapshots\":360,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7237,\"trades_tracked\":8135,\"unknown_payload_observations\":2796,\"writer_committed_rows\":20178,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 55,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257610430301000
+  },
+  {
+    "details_json": "{\"active_trackers\":190,\"code\":\"HEALTH\",\"creates\":190,\"decoded_events\":16143,\"decoder_known_ignored_events\":2107,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1128,\"evictions\":0,\"failed_transactions\":30067,\"heap\":190,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":190,\"launches_tradable\":151,\"launches_unsupported_quote\":39,\"message\":\"periodic sample\",\"notifications\":48348,\"offset_ns\":530056611417,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":380,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7320,\"trades_tracked\":8449,\"unknown_payload_observations\":2829,\"writer_committed_rows\":20904,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 56,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257620432432000
+  },
+  {
+    "details_json": "{\"active_trackers\":194,\"code\":\"HEALTH\",\"creates\":194,\"decoded_events\":16529,\"decoder_known_ignored_events\":2158,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1134,\"evictions\":0,\"failed_transactions\":31209,\"heap\":194,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":194,\"launches_tradable\":152,\"launches_unsupported_quote\":42,\"message\":\"periodic sample\",\"notifications\":49890,\"offset_ns\":540058706458,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":35,\"queue_critical_depth\":0,\"snapshots\":388,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7423,\"trades_tracked\":8724,\"unknown_payload_observations\":2872,\"writer_committed_rows\":21487,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 57,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257630434472000
+  },
+  {
+    "details_json": "{\"active_trackers\":196,\"code\":\"HEALTH\",\"creates\":196,\"decoded_events\":16862,\"decoder_known_ignored_events\":2200,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1161,\"evictions\":0,\"failed_transactions\":31732,\"heap\":196,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":196,\"launches_tradable\":154,\"launches_unsupported_quote\":42,\"message\":\"periodic sample\",\"notifications\":50786,\"offset_ns\":550059248833,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":27,\"queue_critical_depth\":0,\"snapshots\":392,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7476,\"trades_tracked\":9000,\"unknown_payload_observations\":2926,\"writer_committed_rows\":22114,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 58,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257640434974000
+  },
+  {
+    "details_json": "{\"active_trackers\":203,\"code\":\"HEALTH\",\"creates\":203,\"decoded_events\":17258,\"decoder_known_ignored_events\":2240,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1273,\"evictions\":0,\"failed_transactions\":32361,\"heap\":204,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":203,\"launches_tradable\":158,\"launches_unsupported_quote\":45,\"message\":\"periodic sample\",\"notifications\":51936,\"offset_ns\":560059438000,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":10,\"queue_critical_depth\":0,\"snapshots\":405,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7538,\"trades_tracked\":9322,\"unknown_payload_observations\":3063,\"writer_committed_rows\":22951,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 59,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257650435127000
+  },
+  {
+    "details_json": "{\"active_trackers\":205,\"code\":\"HEALTH\",\"creates\":205,\"decoded_events\":17618,\"decoder_known_ignored_events\":2289,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1343,\"evictions\":0,\"failed_transactions\":32761,\"heap\":205,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":205,\"launches_tradable\":159,\"launches_unsupported_quote\":46,\"message\":\"periodic sample\",\"notifications\":52777,\"offset_ns\":570061504625,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":410,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7625,\"trades_tracked\":9591,\"unknown_payload_observations\":3161,\"writer_committed_rows\":23608,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 60,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257660437166000
+  },
+  {
+    "details_json": "{\"active_trackers\":207,\"code\":\"HEALTH\",\"creates\":207,\"decoded_events\":18055,\"decoder_known_ignored_events\":2353,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1457,\"evictions\":0,\"failed_transactions\":33500,\"heap\":209,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":207,\"launches_tradable\":161,\"launches_unsupported_quote\":46,\"message\":\"periodic sample\",\"notifications\":54086,\"offset_ns\":580061676125,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":25,\"queue_critical_depth\":0,\"snapshots\":412,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7715,\"trades_tracked\":9934,\"unknown_payload_observations\":3320,\"writer_committed_rows\":24419,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 61,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257670437294000
+  },
+  {
+    "details_json": "{\"active_trackers\":212,\"code\":\"HEALTH\",\"creates\":212,\"decoded_events\":18372,\"decoder_known_ignored_events\":2405,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1516,\"evictions\":0,\"failed_transactions\":33975,\"heap\":214,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":212,\"launches_tradable\":165,\"launches_unsupported_quote\":47,\"message\":\"periodic sample\",\"notifications\":54952,\"offset_ns\":590061822208,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":10,\"queue_critical_depth\":0,\"snapshots\":422,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7770,\"trades_tracked\":10186,\"unknown_payload_observations\":3413,\"writer_committed_rows\":25061,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 62,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257680437408000
+  },
+  {
+    "details_json": "{\"active_trackers\":218,\"code\":\"HEALTH\",\"creates\":218,\"decoded_events\":18707,\"decoder_known_ignored_events\":2436,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1560,\"evictions\":0,\"failed_transactions\":34135,\"heap\":222,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":218,\"launches_tradable\":169,\"launches_unsupported_quote\":49,\"message\":\"periodic sample\",\"notifications\":55502,\"offset_ns\":600062077125,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":19,\"queue_critical_depth\":0,\"snapshots\":432,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7827,\"trades_tracked\":10453,\"unknown_payload_observations\":3470,\"writer_committed_rows\":25677,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 63,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257690437636000
+  },
+  {
+    "details_json": "{\"active_trackers\":214,\"code\":\"HEALTH\",\"creates\":220,\"decoded_events\":18984,\"decoder_known_ignored_events\":2464,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1587,\"evictions\":6,\"failed_transactions\":34207,\"heap\":215,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":220,\"launches_tradable\":171,\"launches_unsupported_quote\":49,\"message\":\"periodic sample\",\"notifications\":55882,\"offset_ns\":610064147042,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":16,\"queue_critical_depth\":0,\"snapshots\":439,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7870,\"trades_tracked\":10683,\"unknown_payload_observations\":3511,\"writer_committed_rows\":26207,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 64,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257700439676000
+  },
+  {
+    "details_json": "{\"active_trackers\":215,\"code\":\"HEALTH\",\"creates\":222,\"decoded_events\":19311,\"decoder_known_ignored_events\":2510,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1590,\"evictions\":7,\"failed_transactions\":34465,\"heap\":215,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":222,\"launches_tradable\":172,\"launches_unsupported_quote\":50,\"message\":\"periodic sample\",\"notifications\":56486,\"offset_ns\":620065440125,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":4,\"queue_critical_depth\":0,\"snapshots\":444,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7931,\"trades_tracked\":10945,\"unknown_payload_observations\":3548,\"writer_committed_rows\":26794,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 65,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257710440964000
+  },
+  {
+    "details_json": "{\"active_trackers\":211,\"code\":\"HEALTH\",\"creates\":224,\"decoded_events\":19567,\"decoder_known_ignored_events\":2536,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1593,\"evictions\":13,\"failed_transactions\":34707,\"heap\":211,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":224,\"launches_tradable\":174,\"launches_unsupported_quote\":50,\"message\":\"periodic sample\",\"notifications\":57007,\"offset_ns\":630066549417,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":448,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":7977,\"trades_tracked\":11151,\"unknown_payload_observations\":3568,\"writer_committed_rows\":27250,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 66,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257720442046000
+  },
+  {
+    "details_json": "{\"active_trackers\":210,\"code\":\"HEALTH\",\"creates\":229,\"decoded_events\":19904,\"decoder_known_ignored_events\":2583,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1595,\"evictions\":19,\"failed_transactions\":34854,\"heap\":210,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":229,\"launches_tradable\":176,\"launches_unsupported_quote\":53,\"message\":\"periodic sample\",\"notifications\":57501,\"offset_ns\":640067618833,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":3,\"queue_critical_depth\":0,\"snapshots\":458,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8040,\"trades_tracked\":11415,\"unknown_payload_observations\":3599,\"writer_committed_rows\":27841,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 67,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257730443054000
+  },
+  {
+    "details_json": "{\"active_trackers\":209,\"code\":\"HEALTH\",\"creates\":231,\"decoded_events\":20202,\"decoder_known_ignored_events\":2612,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1595,\"evictions\":22,\"failed_transactions\":35387,\"heap\":211,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":231,\"launches_tradable\":177,\"launches_unsupported_quote\":54,\"message\":\"periodic sample\",\"notifications\":58340,\"offset_ns\":650068739667,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":460,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8106,\"trades_tracked\":11643,\"unknown_payload_observations\":3616,\"writer_committed_rows\":28331,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 68,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257740444168000
+  },
+  {
+    "details_json": "{\"active_trackers\":208,\"code\":\"HEALTH\",\"creates\":232,\"decoded_events\":20427,\"decoder_known_ignored_events\":2650,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1595,\"evictions\":24,\"failed_transactions\":35554,\"heap\":208,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":232,\"launches_tradable\":178,\"launches_unsupported_quote\":54,\"message\":\"periodic sample\",\"notifications\":58740,\"offset_ns\":660069863750,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":464,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8167,\"trades_tracked\":11805,\"unknown_payload_observations\":3642,\"writer_committed_rows\":28694,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 69,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257750445255000
+  },
+  {
+    "details_json": "{\"active_trackers\":209,\"code\":\"HEALTH\",\"creates\":235,\"decoded_events\":20669,\"decoder_known_ignored_events\":2672,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1621,\"evictions\":26,\"failed_transactions\":36115,\"heap\":209,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":235,\"launches_tradable\":180,\"launches_unsupported_quote\":55,\"message\":\"periodic sample\",\"notifications\":59578,\"offset_ns\":670070949167,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":10,\"queue_critical_depth\":0,\"snapshots\":470,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8217,\"trades_tracked\":11991,\"unknown_payload_observations\":3681,\"writer_committed_rows\":29117,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 70,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257760446280000
+  },
+  {
+    "details_json": "{\"active_trackers\":208,\"code\":\"HEALTH\",\"creates\":237,\"decoded_events\":20868,\"decoder_known_ignored_events\":2715,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1673,\"evictions\":29,\"failed_transactions\":36271,\"heap\":208,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":237,\"launches_tradable\":182,\"launches_unsupported_quote\":55,\"message\":\"periodic sample\",\"notifications\":60000,\"offset_ns\":680072032708,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":11,\"queue_critical_depth\":0,\"snapshots\":474,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8266,\"trades_tracked\":12137,\"unknown_payload_observations\":3762,\"writer_committed_rows\":29505,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 71,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257770447334000
+  },
+  {
+    "details_json": "{\"active_trackers\":208,\"code\":\"HEALTH\",\"creates\":241,\"decoded_events\":21141,\"decoder_known_ignored_events\":2742,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1682,\"evictions\":33,\"failed_transactions\":36565,\"heap\":208,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":241,\"launches_tradable\":185,\"launches_unsupported_quote\":56,\"message\":\"periodic sample\",\"notifications\":60585,\"offset_ns\":690072474750,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":2,\"queue_critical_depth\":0,\"snapshots\":482,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8342,\"trades_tracked\":12326,\"unknown_payload_observations\":3788,\"writer_committed_rows\":29946,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 72,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257780447733000
+  },
+  {
+    "details_json": "{\"active_trackers\":212,\"code\":\"HEALTH\",\"creates\":246,\"decoded_events\":21457,\"decoder_known_ignored_events\":2791,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1685,\"evictions\":34,\"failed_transactions\":38301,\"heap\":212,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":246,\"launches_tradable\":188,\"launches_unsupported_quote\":58,\"message\":\"periodic sample\",\"notifications\":62687,\"offset_ns\":700073545750,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":492,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8428,\"trades_tracked\":12547,\"unknown_payload_observations\":3815,\"writer_committed_rows\":30446,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 73,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257790448785000
+  },
+  {
+    "details_json": "{\"active_trackers\":210,\"code\":\"HEALTH\",\"creates\":247,\"decoded_events\":21752,\"decoder_known_ignored_events\":2838,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1686,\"evictions\":37,\"failed_transactions\":38925,\"heap\":210,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":247,\"launches_tradable\":189,\"launches_unsupported_quote\":58,\"message\":\"periodic sample\",\"notifications\":63643,\"offset_ns\":710074665625,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":19,\"queue_critical_depth\":0,\"snapshots\":494,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8482,\"trades_tracked\":12786,\"unknown_payload_observations\":3844,\"writer_committed_rows\":30946,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 74,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257800455011000
+  },
+  {
+    "details_json": "{\"active_trackers\":214,\"code\":\"HEALTH\",\"creates\":252,\"decoded_events\":22140,\"decoder_known_ignored_events\":2879,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1686,\"evictions\":38,\"failed_transactions\":40125,\"heap\":214,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":252,\"launches_tradable\":192,\"launches_unsupported_quote\":60,\"message\":\"periodic sample\",\"notifications\":65261,\"offset_ns\":720075779417,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":504,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8541,\"trades_tracked\":13105,\"unknown_payload_observations\":3867,\"writer_committed_rows\":31658,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 75,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257810465364000
+  },
+  {
+    "details_json": "{\"active_trackers\":218,\"code\":\"HEALTH\",\"creates\":259,\"decoded_events\":22549,\"decoder_known_ignored_events\":2918,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1686,\"evictions\":41,\"failed_transactions\":42035,\"heap\":218,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":259,\"launches_tradable\":195,\"launches_unsupported_quote\":64,\"message\":\"periodic sample\",\"notifications\":67606,\"offset_ns\":730076862083,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":17,\"queue_critical_depth\":0,\"snapshots\":518,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8596,\"trades_tracked\":13446,\"unknown_payload_observations\":3887,\"writer_committed_rows\":32388,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 76,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257820469672000
+  },
+  {
+    "details_json": "{\"active_trackers\":212,\"code\":\"HEALTH\",\"creates\":260,\"decoded_events\":22926,\"decoder_known_ignored_events\":2975,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1686,\"evictions\":48,\"failed_transactions\":43013,\"heap\":212,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":260,\"launches_tradable\":195,\"launches_unsupported_quote\":65,\"message\":\"periodic sample\",\"notifications\":68962,\"offset_ns\":740078000875,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":16,\"queue_critical_depth\":0,\"snapshots\":520,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8641,\"trades_tracked\":13776,\"unknown_payload_observations\":3914,\"writer_committed_rows\":33070,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 77,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257830473105000
+  },
+  {
+    "details_json": "{\"active_trackers\":208,\"code\":\"HEALTH\",\"creates\":265,\"decoded_events\":23367,\"decoder_known_ignored_events\":3028,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1686,\"evictions\":57,\"failed_transactions\":43398,\"heap\":208,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":265,\"launches_tradable\":199,\"launches_unsupported_quote\":66,\"message\":\"periodic sample\",\"notifications\":69780,\"offset_ns\":750079111167,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":530,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8702,\"trades_tracked\":14146,\"unknown_payload_observations\":3949,\"writer_committed_rows\":33876,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 78,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257840475411000
+  },
+  {
+    "details_json": "{\"active_trackers\":206,\"code\":\"HEALTH\",\"creates\":271,\"decoded_events\":23786,\"decoder_known_ignored_events\":3073,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1686,\"evictions\":65,\"failed_transactions\":44783,\"heap\":206,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":271,\"launches_tradable\":203,\"launches_unsupported_quote\":68,\"message\":\"periodic sample\",\"notifications\":71596,\"offset_ns\":760080214708,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":542,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8760,\"trades_tracked\":14495,\"unknown_payload_observations\":3967,\"writer_committed_rows\":34633,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 79,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257850477155000
+  },
+  {
+    "details_json": "{\"active_trackers\":208,\"code\":\"HEALTH\",\"creates\":277,\"decoded_events\":24201,\"decoder_known_ignored_events\":3124,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1691,\"evictions\":69,\"failed_transactions\":46196,\"heap\":208,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":277,\"launches_tradable\":206,\"launches_unsupported_quote\":71,\"message\":\"periodic sample\",\"notifications\":73450,\"offset_ns\":770081328583,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":554,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8810,\"trades_tracked\":14848,\"unknown_payload_observations\":3996,\"writer_committed_rows\":35407,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 80,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257860478637000
+  },
+  {
+    "details_json": "{\"active_trackers\":207,\"code\":\"HEALTH\",\"creates\":279,\"decoded_events\":24570,\"decoder_known_ignored_events\":3168,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1697,\"evictions\":72,\"failed_transactions\":46449,\"heap\":207,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":279,\"launches_tradable\":208,\"launches_unsupported_quote\":71,\"message\":\"periodic sample\",\"notifications\":74085,\"offset_ns\":780082418208,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":9,\"queue_critical_depth\":0,\"snapshots\":558,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8872,\"trades_tracked\":15151,\"unknown_payload_observations\":4023,\"writer_committed_rows\":36047,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 81,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257870479911000
+  },
+  {
+    "details_json": "{\"active_trackers\":205,\"code\":\"HEALTH\",\"creates\":283,\"decoded_events\":24886,\"decoder_known_ignored_events\":3206,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1709,\"evictions\":78,\"failed_transactions\":48387,\"heap\":205,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":283,\"launches_tradable\":210,\"launches_unsupported_quote\":73,\"message\":\"periodic sample\",\"notifications\":76389,\"offset_ns\":790082980625,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":16,\"queue_critical_depth\":0,\"snapshots\":566,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8915,\"trades_tracked\":15416,\"unknown_payload_observations\":4058,\"writer_committed_rows\":36637,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 82,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257880480584000
+  },
+  {
+    "details_json": "{\"active_trackers\":208,\"code\":\"HEALTH\",\"creates\":287,\"decoded_events\":25269,\"decoder_known_ignored_events\":3253,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1736,\"evictions\":79,\"failed_transactions\":49830,\"heap\":208,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":287,\"launches_tradable\":212,\"launches_unsupported_quote\":75,\"message\":\"periodic sample\",\"notifications\":78271,\"offset_ns\":800084089167,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":14,\"queue_critical_depth\":0,\"snapshots\":574,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":8976,\"trades_tracked\":15730,\"unknown_payload_observations\":4103,\"writer_committed_rows\":37336,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 83,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257890481794000
+  },
+  {
+    "details_json": "{\"active_trackers\":213,\"code\":\"HEALTH\",\"creates\":296,\"decoded_events\":25626,\"decoder_known_ignored_events\":3312,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1743,\"evictions\":83,\"failed_transactions\":50604,\"heap\":221,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":296,\"launches_tradable\":219,\"launches_unsupported_quote\":77,\"message\":\"periodic sample\",\"notifications\":79422,\"offset_ns\":810084192750,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":20,\"queue_critical_depth\":0,\"snapshots\":584,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9028,\"trades_tracked\":16021,\"unknown_payload_observations\":4140,\"writer_committed_rows\":37984,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 84,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257900481936000
+  },
+  {
+    "details_json": "{\"active_trackers\":217,\"code\":\"HEALTH\",\"creates\":304,\"decoded_events\":25935,\"decoder_known_ignored_events\":3363,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1763,\"evictions\":87,\"failed_transactions\":51040,\"heap\":221,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":304,\"launches_tradable\":226,\"launches_unsupported_quote\":78,\"message\":\"periodic sample\",\"notifications\":80193,\"offset_ns\":820085275792,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":604,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9065,\"trades_tracked\":16279,\"unknown_payload_observations\":4178,\"writer_committed_rows\":38608,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 85,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257910483073000
+  },
+  {
+    "details_json": "{\"active_trackers\":222,\"code\":\"HEALTH\",\"creates\":309,\"decoded_events\":26313,\"decoder_known_ignored_events\":3412,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1764,\"evictions\":87,\"failed_transactions\":53113,\"heap\":222,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":309,\"launches_tradable\":230,\"launches_unsupported_quote\":79,\"message\":\"periodic sample\",\"notifications\":82669,\"offset_ns\":830085437333,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":12,\"queue_critical_depth\":0,\"snapshots\":618,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9122,\"trades_tracked\":16590,\"unknown_payload_observations\":4205,\"writer_committed_rows\":39274,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 86,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257920483268000
+  },
+  {
+    "details_json": "{\"active_trackers\":226,\"code\":\"HEALTH\",\"creates\":314,\"decoded_events\":26691,\"decoder_known_ignored_events\":3458,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1765,\"evictions\":88,\"failed_transactions\":54221,\"heap\":226,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":314,\"launches_tradable\":235,\"launches_unsupported_quote\":79,\"message\":\"periodic sample\",\"notifications\":84161,\"offset_ns\":840085754833,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":7,\"queue_critical_depth\":0,\"snapshots\":628,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9169,\"trades_tracked\":16915,\"unknown_payload_observations\":4222,\"writer_committed_rows\":39966,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 87,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257930483622000
+  },
+  {
+    "details_json": "{\"active_trackers\":224,\"code\":\"HEALTH\",\"creates\":317,\"decoded_events\":27018,\"decoder_known_ignored_events\":3512,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1767,\"evictions\":93,\"failed_transactions\":54549,\"heap\":224,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":317,\"launches_tradable\":237,\"launches_unsupported_quote\":80,\"message\":\"periodic sample\",\"notifications\":84822,\"offset_ns\":850086850417,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":634,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9215,\"trades_tracked\":17191,\"unknown_payload_observations\":4241,\"writer_committed_rows\":40565,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 88,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257940484763000
+  },
+  {
+    "details_json": "{\"active_trackers\":225,\"code\":\"HEALTH\",\"creates\":322,\"decoded_events\":27334,\"decoder_known_ignored_events\":3560,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1768,\"evictions\":97,\"failed_transactions\":54644,\"heap\":225,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":322,\"launches_tradable\":242,\"launches_unsupported_quote\":80,\"message\":\"periodic sample\",\"notifications\":85231,\"offset_ns\":860087128958,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":0,\"queue_critical_depth\":0,\"snapshots\":644,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9267,\"trades_tracked\":17445,\"unknown_payload_observations\":4262,\"writer_committed_rows\":41123,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 89,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257950485097000
+  },
+  {
+    "details_json": "{\"active_trackers\":226,\"code\":\"HEALTH\",\"creates\":324,\"decoded_events\":27653,\"decoder_known_ignored_events\":3599,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1768,\"evictions\":98,\"failed_transactions\":54778,\"heap\":226,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":324,\"launches_tradable\":242,\"launches_unsupported_quote\":82,\"message\":\"periodic sample\",\"notifications\":85684,\"offset_ns\":870088193542,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":16,\"queue_critical_depth\":0,\"snapshots\":648,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9314,\"trades_tracked\":17713,\"unknown_payload_observations\":4278,\"writer_committed_rows\":41668,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 90,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257960486172000
+  },
+  {
+    "details_json": "{\"active_trackers\":230,\"code\":\"HEALTH\",\"creates\":330,\"decoded_events\":27937,\"decoder_known_ignored_events\":3643,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1793,\"evictions\":100,\"failed_transactions\":54824,\"heap\":235,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":330,\"launches_tradable\":246,\"launches_unsupported_quote\":84,\"message\":\"periodic sample\",\"notifications\":86039,\"offset_ns\":880088517667,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":36,\"queue_critical_depth\":0,\"snapshots\":655,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9360,\"trades_tracked\":17940,\"unknown_payload_observations\":4318,\"writer_committed_rows\":42172,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 91,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257970486530000
+  },
+  {
+    "details_json": "{\"active_trackers\":226,\"code\":\"HEALTH\",\"creates\":332,\"decoded_events\":28270,\"decoder_known_ignored_events\":3687,\"decoder_undecodable\":0,\"decoder_unknown_discriminators\":1824,\"evictions\":106,\"failed_transactions\":55293,\"heap\":226,\"launches_quote_unknown\":0,\"launches_rejected_limit\":0,\"launches_tracked\":332,\"launches_tradable\":248,\"launches_unsupported_quote\":84,\"message\":\"periodic sample\",\"notifications\":86871,\"offset_ns\":890088903667,\"open_intervals\":[],\"pumpportal_after_chain\":0,\"pumpportal_before_chain\":0,\"pumpportal_creates\":0,\"pumpportal_lag_ns_total\":0,\"queue_bulk_depth\":33,\"queue_critical_depth\":0,\"snapshots\":664,\"trades_duplicate\":0,\"trades_late\":0,\"trades_orphan\":9398,\"trades_tracked\":18231,\"unknown_payload_observations\":4361,\"writer_committed_rows\":42822,\"writer_dropped_envelopes\":0,\"writer_failures\":0}",
+    "event_type": "HEALTH",
+    "id": 92,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "INFO",
+    "utc_ns": 1789257980486944000
+  },
+  {
+    "details_json": "{\"code\":\"CHAIN_DISCONNECTED\",\"message\":\"reconnecting with backoff\"}",
+    "event_type": "CHAIN_DISCONNECTED",
+    "id": 93,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "WARN",
+    "utc_ns": 1789257988016978000
+  },
+  {
+    "details_json": "{\"code\": \"STATE_CHANGE\", \"from\": \"RUNNING\", \"message\": \"controlled shutdown\", \"reason\": \"controlled shutdown\", \"to\": \"STOPPED\", \"trigger\": \"signal\"}",
+    "event_type": "STATE_CHANGE",
+    "id": 94,
+    "session_id": "3bfcc14ed5a14034a6c1900b759b6609",
+    "severity": "CRITICAL",
+    "utc_ns": 1789257988023326000
+  }
+]
