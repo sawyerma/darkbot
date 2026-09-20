@@ -110,9 +110,10 @@ class StateOwner:
     def __init__(self, cfg: Any, run_id: str, clock: Any, scheduler: Any, recorder: Recorder, adapter: PaperExecutionAdapter, basis_getter: Callable[[], CostBasis], mode: str,
                  economic_intents_allowed: bool = True, feature_sink: Callable[[Callable[[], None]], None] | None = None, variant_id: str | None = None,
                  canonical_prefix: str | None = None, persist_observations: bool = True, compute_features: bool = True, engine: QuoteEngine | None = None, mint_allowlist: set[str] | None = None,
-                 prior_submitted_mints: set[str] | None = None) -> None:
+                 prior_submitted_mints: set[str] | None = None, capture_only: bool = false) -> None:
         self.cfg, self.run_id, self.clock, self.scheduler, self.recorder, self.adapter, self.basis_getter, self.mode = cfg, run_id, clock, scheduler, recorder, adapter, basis_getter, mode
         self.economic_intents_allowed = economic_intents_allowed
+        self.capture_only = capture_only
         self.feature_sink = feature_sink or (lambda job: job())
         self.variant_id = variant_id
         adapter.on_outcome = self.on_outcome
@@ -341,16 +342,27 @@ class StateOwner:
         try:
             self.reducer.protected_mints = {self.positions[pid].mint for pid in self.active_ids} | set(getattr(self.strategy, "observations", {}))
             result = self.reducer.apply(env, raw)
-            # P0: exposed positions first, then immediately actionable CREATEs
-            for mint in result.touched:
-                if mint in self.position_by_mint:
-                    self._position_tick(mint, raw.receive_mono_ns)
-            self.strategy.on_events(self, result, raw, env)
-            for mint in result.new_creates:
-                if mint not in self.first_create_receive:
-                    self.counters.creates += 1
-                self.first_create_receive.setdefault(mint, raw.receive_mono_ns)
-                self.strategy.on_create(self, mint, raw, env, decode_done)
+            if self.capture_only:
+                # Pure market capture: decode/reduce/persist only. No strategy callback,
+                # no admission, no intent and no simulated execution.
+                for mint in result.new_creates:
+                    if mint not in self.first_create_receive:
+                        self.counters.creates += 1
+                    self.first_create_receive.setdefault(mint, raw.receive_mono_ns)
+                    st = self.reducer.states[mint]
+                    if st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and st.venue_state == VenueState.BONDING_CURVE_ACTIVE:
+                        self.counters.creates_actionable += 1
+            else:
+                # P0: exposed positions first, then immediately actionable CREATEs
+                for mint in result.touched:
+                    if mint in self.position_by_mint:
+                        self._position_tick(mint, raw.receive_mono_ns)
+                self.strategy.on_events(self, result, raw, env)
+                for mint in result.new_creates:
+                    if mint not in self.first_create_receive:
+                        self.counters.creates += 1
+                    self.first_create_receive.setdefault(mint, raw.receive_mono_ns)
+                    self.strategy.on_create(self, mint, raw, env, decode_done)
         except Exception as exc:  # noqa: BLE001 - consumer invariant violation (T14)
             self.counters.internal_errors += 1
             self.last_error = f"STATE_OWNER_INTERNAL_ERROR: {type(exc).__name__}: {exc}"
@@ -374,7 +386,9 @@ class StateOwner:
                 actionable = ev.event_type.value == "CREATE" and ev.mint in result.new_creates and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and st.venue_state == VenueState.BONDING_CURVE_ACTIVE
                 sol_scope = st.quote_scope_status == QuoteScopeStatus.SOL_WSOL  # foreign/unknown quote amounts never land in SOL columns (S12)
                 new_me.append({"canonical_event_id": ea.canonical_event_id, "run_id": self.run_id, "signature": env.signature, "instruction_index": ev.instruction_index, "slot": env.slot, "mint": ev.mint, "event_type": ev.event_type.value,
-                               "account_profile_id": st.account_profile_id, "actor": ev.actor, "creator": ev.creator or st.creator, "token_program": ev.token_program or st.token_program, "virtual_sol_reserves": ev.virtual_sol_reserves if sol_scope else None, "virtual_token_reserves": ev.virtual_token_reserves if sol_scope else None,
+                               "account_profile_id": st.account_profile_id, "actor": ev.actor, "creator": ev.creator or st.creator, "token_program": ev.token_program or st.token_program,
+                               "sol_amount": ev.sol_amount if sol_scope else None, "token_amount": ev.token_amount, "token_total_supply": ev.token_total_supply or st.token_total_supply,
+                               "creator_fee_bps": st.creator_fee_bps, "virtual_sol_reserves": ev.virtual_sol_reserves if sol_scope else None, "virtual_token_reserves": ev.virtual_token_reserves if sol_scope else None,
                                "real_sol_reserves": ev.real_sol_reserves if sol_scope else None, "real_token_reserves": ev.real_token_reserves if sol_scope else None, "first_seen_mono_ns": raw.receive_mono_ns, "actionable_mono_ns": decode_done if actionable else None,
                                "winner_feed_id": raw.feed_id, "source_observation_id": obs_id if k == 0 else f"{obs_id}-{k}", "commitment": self.commitment_by_feed.get(raw.feed_id),
                                "quality_status": ea.validation.value, "quote_mint_raw": ev.quote_mint_raw, "quote_field_origin": ev.quote_field_origin, "quote_layout_hash": ev.quote_layout_hash, "normalized_quote_asset": ev.normalized_quote_asset,
