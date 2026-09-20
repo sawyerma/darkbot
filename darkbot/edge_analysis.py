@@ -177,6 +177,112 @@ def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.hex()
+    return value
+
+
+def _export_legacy_table_json(conn: sqlite3.Connection, table: str, path: Path) -> int:
+    rows = [dict(r) for r in conn.execute(f'SELECT * FROM "{table}"')]
+    for row in rows:
+        for key, value in list(row.items()):
+            row[key] = _json_safe(value)
+    path.write_text(json.dumps(rows, indent=2, sort_keys=True), encoding="utf-8")
+    return len(rows)
+
+
+def _export_legacy_table_csv(conn: sqlite3.Connection, table: str, path: Path) -> int:
+    cur = conn.execute(f'SELECT * FROM "{table}"')
+    cols = [d[0] for d in cur.description]
+    count = 0
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(cols)
+        for row in cur:
+            w.writerow([_json_safe(v) for v in row])
+            count += 1
+    return count
+
+
+def _legacy_capture_export(conn: sqlite3.Connection, out_dir: Path) -> dict[str, Any]:
+    """Export historical backend capture tables as text without assigning trading semantics."""
+    tables = _table_names(conn)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    exported: dict[str, Any] = {}
+
+    json_tables = (
+        "sessions",
+        "model_versions",
+        "schema_version",
+        "system_events",
+        "data_quality_intervals",
+        "strategy_versions",
+        "backtest_runs",
+        "backtest_splits",
+    )
+    for table in json_tables:
+        if table in tables:
+            count = _export_legacy_table_json(conn, table, out_dir / f"legacy_{table}.json")
+            exported[table] = {"rows": count, "file": f"legacy_{table}.json"}
+
+    for table in ("launches", "events", "feature_snapshots"):
+        if table in tables:
+            count = _export_legacy_table_csv(conn, table, out_dir / f"legacy_{table}.csv")
+            exported[table] = {"rows": count, "file": f"legacy_{table}.csv"}
+
+    # Small frequency/profile summaries make the full event export easier to audit from Git.
+    if "events" in tables:
+        profiles = {
+            "event_type_counts": [
+                {"event_type": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY COUNT(*) DESC, event_type")
+            ],
+            "data_complete_counts": [
+                {"data_complete": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT data_complete, COUNT(*) FROM events GROUP BY data_complete ORDER BY data_complete")
+            ],
+            "late_counts": [
+                {"late": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT late, COUNT(*) FROM events GROUP BY late ORDER BY late")
+            ],
+            "ambiguous_counts": [
+                {"ambiguous": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT ambiguous, COUNT(*) FROM events GROUP BY ambiguous ORDER BY ambiguous")
+            ],
+        }
+        (out_dir / "legacy_event_profile.json").write_text(json.dumps(profiles, indent=2, sort_keys=True), encoding="utf-8")
+        exported["event_profile"] = {"file": "legacy_event_profile.json"}
+
+    if "launches" in tables:
+        profiles = {
+            "accepted_counts": [
+                {"accepted": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT accepted, COUNT(*) FROM launches GROUP BY accepted ORDER BY accepted")
+            ],
+            "status_counts": [
+                {"status": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT status, COUNT(*) FROM launches GROUP BY status ORDER BY status")
+            ],
+            "quote_scope_counts": [
+                {"quote_scope": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT quote_scope, COUNT(*) FROM launches GROUP BY quote_scope ORDER BY quote_scope")
+            ],
+            "coverage_state_counts": [
+                {"coverage_state": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT coverage_state, COUNT(*) FROM launches GROUP BY coverage_state ORDER BY coverage_state")
+            ],
+            "horizon_cohort_counts": [
+                {"horizon_cohort": r[0], "rows": r[1]}
+                for r in conn.execute("SELECT horizon_cohort, COUNT(*) FROM launches GROUP BY horizon_cohort ORDER BY horizon_cohort")
+            ],
+        }
+        (out_dir / "legacy_launch_profile.json").write_text(json.dumps(profiles, indent=2, sort_keys=True), encoding="utf-8")
+        exported["launch_profile"] = {"file": "legacy_launch_profile.json"}
+
+    return exported
+
+
 def _legacy_schema_report(conn: sqlite3.Connection, inventory: list[dict[str, Any]], chosen_db: Path) -> dict[str, Any]:
     """Describe an unknown historical backend schema without inventing semantics."""
     tables: dict[str, Any] = {}
@@ -570,17 +676,20 @@ def run_edge_analysis(source: Path, out_dir: Path, *, run_id: str | None = None,
         if not phase1_complete:
             report = _legacy_schema_report(conn, inventory, db_path)
             out_dir.mkdir(parents=True, exist_ok=True)
+            exported = _legacy_capture_export(conn, out_dir)
+            report["exported_text_artifacts"] = exported
             (out_dir / "legacy_schema_inventory.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
             (out_dir / "edge_summary.json").write_text(json.dumps({
                 "source": str(source),
-                "analysis_status": "LEGACY_SCHEMA_REQUIRES_ADAPTER",
+                "analysis_status": "LEGACY_CAPTURE_EXPORTED_FOR_ADAPTER",
                 "database_used": str(db_path),
-                "next_artifact": "legacy_schema_inventory.json",
+                "next_artifacts": ["legacy_schema_inventory.json", "legacy_launches.csv", "legacy_events.csv", "legacy_model_versions.json"],
+                "exported": exported,
             }, indent=2, sort_keys=True), encoding="utf-8")
             return {
                 "run_id": "__LEGACY_SCHEMA__",
                 "launches_with_hypothetical_entry": 0,
-                "analysis_status": "LEGACY_SCHEMA_REQUIRES_ADAPTER",
+                "analysis_status": "LEGACY_CAPTURE_EXPORTED_FOR_ADAPTER",
                 "database_used": str(db_path),
             }
 
