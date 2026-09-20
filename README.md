@@ -4,6 +4,8 @@ Ein Prozess, ein `StateOwner`, RAM-Zustand, begrenzte Queues, ein SQLite-Writer-
 imaginäres Kapital, modellierte Fills mit Evidenz `OBSERVED_STATE_PROXY`. **LIVE-Senden ist technisch gesperrt** (`execution.LiveBroadcastForbidden`, T22).
 Verbindliche Spezifikation: `docs/SPEC.json` (Kopie von `DARKBOT_PHASE1_IMPLEMENTATION_SPEC_v1_3_2.json`).
 
+**Praxis-/Test-Kurzreferenz:** [docs/TEST_HANDBUCH.md](docs/TEST_HANDBUCH.md)
+
 ## Voraussetzungen
 - Python ≥ 3.12 (entwickelt/getestet mit CPython 3.12.3). Keine venv/Container. Installation nur über denselben Interpreter:
   `python3 -m pip install -r requirements.txt` (einzige Drittabhängigkeit: `websockets`; nur für `doctor`/`paper` nötig; Tests, Replay, Report, Research laufen ohne).
@@ -15,14 +17,65 @@ Verbindliche Spezifikation: `docs/SPEC.json` (Kopie von `DARKBOT_PHASE1_IMPLEMEN
 - Ausreichend Speicherplatz (`doctor` prüft ≥ 512 MB frei) und schreibbares `data/`.
 
 ## Befehle
+
+```bash
+# komplette Testsuite
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+# Doctor / Readiness für aktuelle Strategy A
+python3 -m darkbot doctor --config config/strategy_a_creator_exit_usd_slots.json
+
+# Aktuelle Strategy A: 10 USD pro Slot, Creator-Exit, kein fixes TP
+# --max-duration-minutes ist für PAPER verpflichtend.
+python3 -m darkbot paper \
+  --config config/strategy_a_creator_exit_usd_slots.json \
+  --db data/strategy_a_creator_exit_10slots_15m.sqlite \
+  --campaign strategy_a_creator_exit_10slots_15m \
+  --max-open-positions 10 \
+  --max-duration-minutes 15
+
+# Report
+python3 -m darkbot report \
+  --db data/strategy_a_creator_exit_10slots_15m.sqlite \
+  --campaign strategy_a_creator_exit_10slots_15m \
+  --out exports/strategy_a_creator_exit_10slots_15m
+
+# Research / Baseline
+python3 -m darkbot research \
+  --db data/phase1.sqlite \
+  --campaign phase1_001 \
+  --config config/research.json \
+  --runtime-config config/phase1.json \
+  --out exports/research_001
 ```
-python3 -m darkbot doctor   --config config/phase1.json                                   # D01–D06, Readiness, Secrets redigiert
-python3 -m darkbot paper    --config config/phase1.json --db data/phase1.sqlite --campaign phase1_001   # Live-PAPER, Ctrl-C = kontrolliertes Ende
-python3 -m darkbot report   --db data/phase1.sqlite --campaign phase1_001 --out exports/phase1_001
-python3 -m darkbot research --db data/phase1.sqlite --campaign phase1_001 --config config/research.json --out exports/research_001
-python3 -m unittest discover -s tests -t .                                                # T01–T52 (+ D01/D04/D06 offline)
-```
-Exitcodes: 0 ok, 2 Konfigurationsfehler, 3 Laufzeitfehler, 4 NOT_READY (`doctor`, oder `paper` ohne startbaren Feed). Nach jedem `paper`-Lauf (auch Ctrl-C) werden report.json/summary.md/positions.csv/latency_by_feed.csv automatisch unter `exports/<campaign>/<run_id>/` erzeugt und in `reports` persistiert.
+
+Exitcodes: 0 ok, 2 Konfigurationsfehler, 3 Laufzeitfehler, 4 NOT_READY. Jeder PAPER-Lauf benötigt `--max-duration-minutes > 0`; nach Ablauf stoppt der gesamte Run kontrolliert automatisch. `Ctrl+C` bleibt als kontrollierter manueller Stop möglich. Nach jedem PAPER-Lauf werden `report.json`, `summary.md`, `positions.csv` und `latency_by_feed.csv` automatisch unter `exports/<campaign>/<run_id>/` erzeugt.
+
+### Aktuelle Strategien
+
+**Strategy A – `config/strategy_a_creator_exit_usd_slots.json`**
+- CREATE -> sofort BUY
+- keine Observation-Verzögerung
+- 10 USD Gesamtbudget pro Slot
+- Startkapital = `max_open_positions × 10 USD`
+- kein fixes Take-Profit
+- Creator-Sell -> EXIT
+- Positions-Timeout 590 s
+- PAPER only
+
+**Strategy-A-Baseline – `config/phase1.json`**
+- stabile Regression-/Research-Baseline
+- FIXED_SOL-Sizing
+- 1.5x-Target weiterhin aktiv
+- nicht mit der aktuellen Creator-Exit-/USD-Slot-PAPER-Variante verwechseln
+
+**Strategy B – `config/strategy_b.json`**
+- 1 s Observation
+- mindestens 5 BUYs und 5 Unique Buyers
+- 10 USD Swap-Budget
+- 1.05x Netto-Target
+- 60 s Timeout
+- kein Creator-Sell-Exit
 
 ## Dateibaum (normativ, `simple_project_structure`)
 `darkbot/{__init__,__main__,main,cli,config,domain,clock,capture,market,strategy,execution,paper,fees,storage,replay,backtest,reporting}.py`,
@@ -32,7 +85,7 @@ Exitcodes: 0 ok, 2 Konfigurationsfehler, 3 Laufzeitfehler, 4 NOT_READY (`doctor`
 ## Betriebsverhalten
 - Hot Path pro Nachricht: normalize → atomares Envelope anwenden → Exposure-Ticks → Admission → Decision → atomare Reservierung → Adapter-Enqueue → Telemetrie `put_nowait`. Keine DB, kein Hashing, kein Print, kein `await` (T37).
 - Gebühren werden im Hintergrund beschafft (Global-Account, getFeeForMessage, Rent, Priority-Perzentil) und als unveränderliche Snapshots gespeichert. `NULL` heißt UNBEKANNT, nie 0. Ohne vollständige, frische Snapshots: keine wirtschaftlichen Entries (`UNQUALIFIED_COSTS`), Aufnahme/Latenzbenchmark läuft weiter. Auch Exits werden nie auf veralteter Kostenbasis gefüllt: der Exit-Intent bleibt geloggt/latched, bis ein frischer Snapshot vorliegt. Beim modellierten Fill gilt die Fee-Regel des zu diesem Zeitpunkt gültigen Snapshots (nicht die Submit-Basis). Ein Attempt, dessen modellierter Fill in eine Coverage-Lücke fällt, bleibt UNKNOWN (Kosten NULL, Position UNRESOLVED) und wird nie mit späteren Zuständen „reconciled“.
-- Statuszeile alle `storage.report_interval_ms`; Ctrl-C → keine neuen Entries, Feeds stoppen, Recorder flushen, Run `INTERRUPTED`, offene Positionen als Exposure/zensiert.
+- Statuszeile alle `storage.report_interval_ms`. PAPER verlangt `--max-duration-minutes`; nach Ablauf stoppt der gesamte Run kontrolliert automatisch. Ctrl-C bleibt als manueller kontrollierter Stop möglich.
 - Neustart: vorher laufende Runs werden `INTERRUPTED`, neue Clock-Epoch; Positionen werden nie automatisch geschlossen (T23).
 
 ## Bekannte Grenzen / Annahmen
