@@ -134,6 +134,8 @@ class StateOwner:
         self.policy = ExecutionPolicy.from_config(cfg)
         self.engine = engine or QuoteEngine(self.policy)
         self.portfolio = Portfolio(cfg.portfolio["initial_paper_balance_lamports"])
+        self.initial_capital_lamports = cfg.portfolio["initial_paper_balance_lamports"]
+        self.capital_initialized = cfg.portfolio["initial_paper_balance_mode"] == "FIXED_LAMPORTS"
         self.max_open = cfg.portfolio["max_open_positions"]
         self.timeout_ns = cfg.strategy["strategy_timeout_ms"] * NS_PER_MS
         self.horizon_ns = cfg.research["research_horizon_ms"] * NS_PER_MS
@@ -172,6 +174,14 @@ class StateOwner:
     def on_fx_snapshot(self, snapshot):
         self.fx_snapshot = snapshot
         self._record(RowRecord("fx_snapshots", snapshot.row(self.run_id)))
+        if not self.capital_initialized and self.cfg.portfolio["initial_paper_balance_mode"] == "USD_PER_SLOT":
+            total_usd = Decimal(self.cfg.portfolio["slot_capital_usd"]) * self.max_open
+            capital = snapshot.budget(str(total_usd), self.clock.monotonic_ns(), self.cfg["fx"]["max_age_ms"])
+            if capital:
+                self.portfolio.cash_lamports = capital
+                self.initial_capital_lamports = capital
+                self.capital_initialized = True
+                self._record(UpdateRecord("runs", "run_id", self.run_id, {"start_balance_lamports": capital}))
 
     def record_observation(self, observation, qualified, actual, status=None):
         if status is None:
@@ -426,20 +436,22 @@ class StateOwner:
             curve = self._curve(st)
             if curve is None:
                 quote = InvalidQuote("CURVE_UNAVAILABLE")
-            elif budget is not None:
-                quote = self.engine.quote_buy_swap_budget(curve, basis, now, f"{self.run_id}_", st.coverage_state, budget)
-            else:
-                quote = self.engine.quote_buy(curve, basis, now, f"{self.run_id}_", st.coverage_state)
-            if isinstance(quote, InvalidQuote):
-                eligible, reason = False, quote.reason
             else:
                 reserve = self.engine.exit_reserve_lamports(basis, now, curve)
                 if reserve is None:
-                    eligible, reason = False, "UNQUALIFIED_COSTS"
+                    quote = InvalidQuote("UNQUALIFIED_COSTS")
                 else:
                     exit_reserve = reserve
-                    if self.portfolio.cash_lamports < self._max_entry_debit(quote) + exit_reserve:
-                        eligible, reason = False, "INSUFFICIENT_CAPITAL"
+                    if budget is not None and self.cfg.strategy["entry_amount_semantics"] == "TOTAL_SLOT_BUDGET_INCLUDING_ALL_COSTS":
+                        quote = self.engine.quote_buy_total_slot_budget(curve, basis, now, f"{self.run_id}_", st.coverage_state, budget, exit_reserve)
+                    elif budget is not None:
+                        quote = self.engine.quote_buy_swap_budget(curve, basis, now, f"{self.run_id}_", st.coverage_state, budget)
+                    else:
+                        quote = self.engine.quote_buy(curve, basis, now, f"{self.run_id}_", st.coverage_state)
+            if isinstance(quote, InvalidQuote):
+                eligible, reason = False, quote.reason
+            elif self.portfolio.cash_lamports < self._max_entry_debit(quote) + exit_reserve:
+                eligible, reason = False, "INSUFFICIENT_CAPITAL"
         self.dec_seq += 1
         decision_id = f"{self.run_id}_d{self.dec_seq}"
         if eligible and budget is not None:
@@ -990,7 +1002,7 @@ class StateOwner:
                 "recorder_depth": self.recorder.depth(), "recorder_overflow": self.recorder.overflow_count, "feeds": dict(self.feed_ready), "ineligible": dict(c.ineligible), "internal_errors": c.internal_errors, "last_error": self.last_error}
 
     def cash_reconciliation(self) -> dict[str, int | bool]:
-        initial = self.cfg.portfolio["initial_paper_balance_lamports"]
+        initial = self.initial_capital_lamports
         expected = initial + self.portfolio.ledger_cash_sum
         actual = self.portfolio.cash_lamports + self.portfolio.reserved_lamports
         return {"initial": initial, "ledger_cash_sum": self.portfolio.ledger_cash_sum, "cash_plus_reserved": actual, "reconciled": expected == actual, "locked_rent": self.portfolio.locked_rent_lamports}
