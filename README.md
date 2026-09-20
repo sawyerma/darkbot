@@ -34,6 +34,18 @@ python3 -m darkbot paper \
   --max-open-positions 10 \
   --max-duration-minutes 15
 
+# Strategie-freier 15-Minuten-Market-Capture
+python3 -m darkbot capture \
+  --config config/strategy_a_creator_exit_usd_slots.json \
+  --db data/market_capture_15m.sqlite \
+  --campaign market_capture_15m \
+  --max-duration-minutes 15
+
+# Offline Edge-Analyse (keine Trades, reine Auswertung)
+python3 -m darkbot edge-analysis \
+  --source data/market_capture_15m.sqlite \
+  --out exports/market_capture_15m_edge
+
 # Report
 python3 -m darkbot report \
   --db data/strategy_a_creator_exit_10slots_15m.sqlite \
@@ -50,6 +62,10 @@ python3 -m darkbot research \
 ```
 
 Exitcodes: 0 ok, 2 Konfigurationsfehler, 3 Laufzeitfehler, 4 NOT_READY. Jeder PAPER-Lauf benötigt `--max-duration-minutes > 0`; nach Ablauf stoppt der gesamte Run kontrolliert automatisch. `Ctrl+C` bleibt als kontrollierter manueller Stop möglich. Nach jedem PAPER-Lauf werden `report.json`, `summary.md`, `positions.csv` und `latency_by_feed.csv` automatisch unter `exports/<campaign>/<run_id>/` erzeugt.
+
+### Strategie-freie Edge-Suche
+
+Für neue Exit-/Timing-Hypothesen zuerst `capture` verwenden. Dieser Modus zeichnet Marktpfade ohne Strategy-Callbacks, Entry-/Exit-Entscheidungen oder simulierte Trades auf. `edge-analysis` wertet diese Aufnahme anschließend offline aus (Peak/Tief, Zeitpunkte, Target-Hits, Creator-Verhalten und kombinierte Exit-Regeln). Eine auf demselben Datensatz gefundene Regel gilt nur als In-Sample-Kandidat und muss auf einem neuen Capture validiert werden.
 
 ### Aktuelle Strategien
 
