@@ -23,6 +23,8 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--config", type=Path, required=True)
     pp.add_argument("--db", type=Path, required=True)
     pp.add_argument("--campaign", required=True)
+    pp.add_argument("--max-open-positions", type=int, default=None,
+                    help="override portfolio.max_open_positions for this PAPER run")
     r = sub.add_parser("report", help="deterministic latency/PnL/quality reports")
     r.add_argument("--db", type=Path, required=True)
     r.add_argument("--campaign", required=True)
@@ -64,7 +66,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def cmd_paper(args: argparse.Namespace) -> int:
     from darkbot.main import run_paper
 
-    summary = run_paper(args.config, args.db, args.campaign)
+    summary = run_paper(args.config, args.db, args.campaign, max_open_positions=args.max_open_positions)
     # complete_delivery_contract: artifacts are produced automatically after every run, including interrupts
     try:
         from darkbot.reporting import Reporter, persist_report, write_outputs
