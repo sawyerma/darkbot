@@ -9,6 +9,7 @@
     "filters": [],
     "entry_trigger": "FIRST_ACTIONABLE_CREATE",
     "target_net_multiple": "1.05",
+    "target_exit_enabled": true,
     "target_is_proven_optimal": false,
     "ordinary_stop_enabled": false,
     "creator_sell_exit_enabled": false,
