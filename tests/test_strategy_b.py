@@ -15,6 +15,11 @@ START = T0 + NS_PER_MS
 END = START + 1000 * NS_PER_MS
 
 
+def a_creator_config(**overrides):
+    cfg = load_runtime_config(ROOT / 'config/strategy_a_creator_exit_usd_slots.json')
+    return cfg.with_overrides(**overrides) if overrides else cfg
+
+
 def bconfig(**overrides):
     cfg = load_runtime_config(ROOT / 'config/strategy_b.json')
     return cfg.with_overrides(**overrides) if overrides else cfg
@@ -174,13 +179,13 @@ class StrategyBTests(unittest.TestCase):
 
     def test_A_slot_capital_scales_exactly_with_slot_count(self):
         for slots, expected in [(1,100_000_000),(2,200_000_000),(10,1_000_000_000)]:
-            h=Harness(base_config(portfolio={'max_open_positions':slots}))
+            h=Harness(a_creator_config(portfolio={'max_open_positions':slots}))
             self.assertTrue(h.owner.capital_initialized)
             self.assertEqual(h.owner.initial_capital_lamports,expected)
             self.assertEqual(h.owner.portfolio.cash_lamports,expected)
 
     def test_A_one_trade_never_reserves_more_than_10_usd_slot_capital(self):
-        h=Harness()
+        h=Harness(a_creator_config())
         h.feed('helius_standard',create_payload(),START)
         p=h.position()
         self.assertEqual(p.state,PositionState.ENTRY_PENDING)
@@ -191,7 +196,7 @@ class StrategyBTests(unittest.TestCase):
         self.assertEqual(row['sizing_basis'],'USD_SWAP_BUDGET')
 
     def test_A_target_disabled_but_creator_sell_still_exits(self):
-        h=Harness();p=open_position(h)
+        h=Harness(a_creator_config());p=open_position(h)
         self.assertFalse(h.owner.strategy.target_reached(2500,1000,Decimal('1.5')))
         h.owner.engine.net_liquidation_value=lambda *args: p.entry_economic_cost_lamports*3
         h.owner._position_tick(MINT_A,START)
