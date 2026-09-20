@@ -195,7 +195,7 @@ class Application:
         samples = self._economic_sample_count_at_stop
         if samples is None:
             samples = economic_profile_samples(self.owner, basis, now, limit=1)
-        if samples and self.owner.portfolio.cash_lamports > self.cfg.strategy["entry_amount_lamports"]:
+        if samples and self.owner.capital_initialized:
             return Readiness.ECONOMIC_PAPER_READY
         return Readiness.CAPTURE_READY
 
