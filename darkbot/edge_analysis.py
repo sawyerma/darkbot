@@ -177,6 +177,38 @@ def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
+def _legacy_schema_report(conn: sqlite3.Connection, inventory: list[dict[str, Any]], chosen_db: Path) -> dict[str, Any]:
+    """Describe an unknown historical backend schema without inventing semantics."""
+    tables: dict[str, Any] = {}
+    likely_data_tables: list[dict[str, Any]] = []
+    pnl_tokens = ("pnl", "profit", "return", "multiple", "roi", "gain", "loss")
+    trade_tokens = ("trade", "position", "launch", "coin", "token", "mint", "result", "backtest", "paper", "event")
+    for table in sorted(_table_names(conn)):
+        cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")')]
+        count = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+        tables[table] = {"columns": cols, "rows": count}
+        lower_cols = [x.lower() for x in cols]
+        name_l = table.lower()
+        pnl_cols = [cols[i] for i, x in enumerate(lower_cols) if any(t in x for t in pnl_tokens)]
+        identity_cols = [cols[i] for i, x in enumerate(lower_cols) if any(t in x for t in ("mint", "token", "symbol", "coin", "position", "trade"))]
+        if pnl_cols or any(t in name_l for t in trade_tokens):
+            likely_data_tables.append({
+                "table": table,
+                "rows": count,
+                "pnl_like_columns": pnl_cols,
+                "identity_like_columns": identity_cols,
+                "columns": cols,
+            })
+    return {
+        "status": "LEGACY_SCHEMA_REQUIRES_ADAPTER",
+        "database_used": str(chosen_db),
+        "reason": "Selected SQLite database has no complete current Phase-1 runs/config/feed schema. No trading semantics are guessed.",
+        "tables": tables,
+        "likely_data_tables": likely_data_tables,
+        "zip_database_candidates": inventory,
+    }
+
+
 def _baseline_reproduction(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "positions" not in tables:
@@ -530,9 +562,28 @@ def _rule_sweep(summaries: list[dict[str, Any]], flat: list[PathPoint]) -> list[
 
 
 def run_edge_analysis(source: Path, out_dir: Path, *, run_id: str | None = None, campaign: str | None = None) -> dict[str, Any]:
-    db_path, temp = _materialize_source(source)
+    db_path, temp, inventory = _materialize_source(source)
     conn = open_connection(db_path, read_only=True)
     try:
+        tables = _table_names(conn)
+        phase1_complete = {"runs", "config_snapshots", "feed_observations", "market_events"} <= tables
+        if not phase1_complete:
+            report = _legacy_schema_report(conn, inventory, db_path)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "legacy_schema_inventory.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+            (out_dir / "edge_summary.json").write_text(json.dumps({
+                "source": str(source),
+                "analysis_status": "LEGACY_SCHEMA_REQUIRES_ADAPTER",
+                "database_used": str(db_path),
+                "next_artifact": "legacy_schema_inventory.json",
+            }, indent=2, sort_keys=True), encoding="utf-8")
+            return {
+                "run_id": "__LEGACY_SCHEMA__",
+                "launches_with_hypothetical_entry": 0,
+                "analysis_status": "LEGACY_SCHEMA_REQUIRES_ADAPTER",
+                "database_used": str(db_path),
+            }
+
         selected = run_id or _latest_run(conn, campaign)
         cfg = _runtime_config(conn, selected, db_path)
         baseline = _baseline_reproduction(conn, selected)
