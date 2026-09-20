@@ -1,12 +1,16 @@
 """Regression tests for strategy-free capture and offline edge-analysis plumbing."""
 from __future__ import annotations
 
+import json
+import sqlite3
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 from darkbot.cli import build_parser
-from darkbot.edge_analysis import PathPoint, _event_for_rule
+from darkbot.edge_analysis import PathPoint, _event_for_rule, _materialize_source, run_edge_analysis
 from darkbot.main import run_capture
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -61,6 +65,56 @@ class CaptureCliTests(unittest.TestCase):
         ])
         self.assertEqual(args.command, "edge-analysis")
         self.assertEqual(args.source, Path("exports/basetest_backend_v0.zip"))
+
+
+class LegacySourceTests(unittest.TestCase):
+    def test_zip_selection_prefers_relevant_schema_over_larger_empty_db(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            empty = root / "large.db"
+            conn = sqlite3.connect(empty)
+            conn.execute("CREATE TABLE junk(x BLOB)")
+            conn.execute("INSERT INTO junk VALUES (?)", (b"x" * 100000,))
+            conn.commit()
+            conn.close()
+
+            relevant = root / "backend.db"
+            conn = sqlite3.connect(relevant)
+            conn.execute("CREATE TABLE trades(mint TEXT, pnl REAL)")
+            conn.execute("INSERT INTO trades VALUES ('m', 1.0)")
+            conn.commit()
+            conn.close()
+
+            archive = root / "source.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.write(empty, empty.name)
+                zf.write(relevant, relevant.name)
+
+            selected, temp, inventory = _materialize_source(archive)
+            try:
+                self.assertEqual(selected.name, "backend.db")
+                self.assertEqual(len(inventory), 2)
+            finally:
+                if temp is not None:
+                    temp.cleanup()
+
+    def test_legacy_database_emits_schema_inventory_instead_of_crashing(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            db = root / "legacy.db"
+            conn = sqlite3.connect(db)
+            conn.execute("CREATE TABLE trades(mint TEXT, pnl REAL, multiple REAL)")
+            conn.execute("INSERT INTO trades VALUES ('m', 1.5, 1.2)")
+            conn.commit()
+            conn.close()
+
+            out = root / "out"
+            result = run_edge_analysis(db, out)
+            self.assertEqual(result["analysis_status"], "LEGACY_SCHEMA_REQUIRES_ADAPTER")
+            report = json.loads((out / "legacy_schema_inventory.json").read_text())
+            self.assertEqual(report["status"], "LEGACY_SCHEMA_REQUIRES_ADAPTER")
+            self.assertIn("trades", report["tables"])
+            self.assertTrue(report["likely_data_tables"])
 
 
 class EdgeRuleTests(unittest.TestCase):
