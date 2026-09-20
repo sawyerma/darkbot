@@ -172,6 +172,24 @@ class StrategyBTests(unittest.TestCase):
         h.feed('helius_standard',creator_sell_frame(h,MINT_A,'sell',102),START+NS_PER_MS);h.advance(START+NS_PER_MS)
         self.assertEqual(p.exit_reason,ExitReason.CREATOR_SELL)
 
+    def test_A_slot_capital_scales_exactly_with_slot_count(self):
+        for slots, expected in [(1,100_000_000),(2,200_000_000),(10,1_000_000_000)]:
+            h=Harness(base_config(portfolio={'max_open_positions':slots}))
+            self.assertTrue(h.owner.capital_initialized)
+            self.assertEqual(h.owner.initial_capital_lamports,expected)
+            self.assertEqual(h.owner.portfolio.cash_lamports,expected)
+
+    def test_A_one_trade_never_reserves_more_than_10_usd_slot_capital(self):
+        h=Harness()
+        h.feed('helius_standard',create_payload(),START)
+        p=h.position()
+        self.assertEqual(p.state,PositionState.ENTRY_PENDING)
+        self.assertLessEqual(p.reserved_cash_lamports,100_000_000)
+        row=h.rows('select trade_size_usd,swap_budget_lamports,sizing_basis from entry_sizing')[0]
+        self.assertEqual(row['trade_size_usd'],'10')
+        self.assertEqual(row['swap_budget_lamports'],100_000_000)
+        self.assertEqual(row['sizing_basis'],'USD_SWAP_BUDGET')
+
     def test_A_target_disabled_but_creator_sell_still_exits(self):
         h=Harness();p=open_position(h)
         self.assertFalse(h.owner.strategy.target_reached(2500,1000,Decimal('1.5')))
