@@ -342,6 +342,41 @@ class QuoteEngine:
             return None
         return self.policy.max_exit_attempts * (terms.base_fee_lamports + terms.priority_fee_lamports + self.policy.sender_tip_lamports)
 
+    def entry_fixed_cost_lamports(self, basis: CostBasis, now_mono_ns: int, state: CurveState) -> int | None:
+        """Entry costs outside the fee-inclusive swap debit: network/tip, token-account rent and irrecoverable account cost."""
+        terms = fee_terms(basis, self.policy, now_mono_ns, state, Side.BUY)
+        if isinstance(terms, InvalidQuote):
+            return None
+        rent = terms.rent_lamports if self.policy.new_token_account_per_position else 0
+        return terms.base_fee_lamports + terms.priority_fee_lamports + self.policy.sender_tip_lamports + rent + self.policy.irrecoverable_cost_lamports
+
+    def quote_buy_total_slot_budget(self, state: CurveState, basis: CostBasis, now_mono_ns: int, run_prefix: str,
+                                    coverage: CoverageState, total_budget_lamports: int, exit_reserve_lamports: int) -> QuoteSnapshot | InvalidQuote:
+        """Fit one BUY into a strict total slot-capital budget.
+
+        The cap includes the entry max-sol-cost/slippage bound, entry network/tip/rent/irrecoverable
+        costs and the reserved exit-attempt costs. This makes N slots require at most N times the
+        declared slot capital instead of silently needing an extra fee buffer.
+        """
+        fixed = self.entry_fixed_cost_lamports(basis, now_mono_ns, state)
+        if fixed is None:
+            return InvalidQuote("UNQUALIFIED_COSTS")
+        available_for_max_input = total_budget_lamports - fixed - exit_reserve_lamports
+        if available_for_max_input <= 0:
+            return InvalidQuote("SLOT_BUDGET_TOO_SMALL")
+        factor = BASIS_POINTS + self.policy.slippage_bps
+        # max y with floor(y*factor/BASIS_POINTS) <= available_for_max_input
+        swap_budget = ((available_for_max_input + 1) * BASIS_POINTS - 1) // factor
+        if swap_budget <= 0:
+            return InvalidQuote("SLOT_BUDGET_TOO_SMALL")
+        quote = self.quote_buy_swap_budget(state, basis, now_mono_ns, run_prefix, coverage, swap_budget)
+        if isinstance(quote, InvalidQuote):
+            return quote
+        required = (quote.max_input_base_units or quote.swap_wallet_debit_lamports or 0) + fixed + exit_reserve_lamports
+        if required > total_budget_lamports:
+            return InvalidQuote("SLOT_BUDGET_ROUNDING_OVERFLOW")
+        return quote
+
     def entry_required_cash(self, quote: QuoteSnapshot, exit_reserve: int) -> int:
         return quote.entry_cash_debit + exit_reserve
 
