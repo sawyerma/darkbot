@@ -172,6 +172,17 @@ class StrategyBTests(unittest.TestCase):
         h.feed('helius_standard',creator_sell_frame(h,MINT_A,'sell',102),START+NS_PER_MS);h.advance(START+NS_PER_MS)
         self.assertEqual(p.exit_reason,ExitReason.CREATOR_SELL)
 
+    def test_A_target_disabled_but_creator_sell_still_exits(self):
+        h=Harness();p=open_position(h)
+        self.assertFalse(h.owner.strategy.target_reached(2500,1000,Decimal('1.5')))
+        h.owner.engine.net_liquidation_value=lambda *args: p.entry_economic_cost_lamports*3
+        h.owner._position_tick(MINT_A,START)
+        self.assertEqual(p.state,PositionState.OPEN)
+        self.assertFalse(any(r == ExitReason.TARGET for r, _ in p.latched_triggers))
+        h.feed('helius_standard',creator_sell_frame(h,MINT_A,'creator_exit_after_disabled_target',103),START+NS_PER_MS)
+        h.advance(START+NS_PER_MS)
+        self.assertEqual(p.exit_reason,ExitReason.CREATOR_SELL)
+
     def test_B18_strategy_selection_hash_and_run_identity(self):
         a,b=Harness(),make_b()
         self.assertNotEqual(a.cfg.strategy_id,b.cfg.strategy_id)
