@@ -66,7 +66,7 @@ RUNTIME_SCHEMA: dict[str, Any] = {
     "strategy": S(
         strategy_id="enum:FAST_CREATOR_HOLD_V1|LEGACY_5BUY_5UNIQUE_V1", observation_ms="int0", filters="list[any]", entry_trigger="enum:FIRST_ACTIONABLE_CREATE", target_net_multiple="dec+",
         target_exit_enabled="bool", target_is_proven_optimal="bool", ordinary_stop_enabled="enum:False", creator_sell_exit_enabled="bool", entry_amount_lamports="int0",
-        sizing_mode="enum:FIXED_SOL|USD_SWAP_BUDGET", trade_size_usd="dec+", policy_frozen_per_position="enum:True", same_event_exit_priority="list[str]", strategy_timeout_ms="int+",
+        sizing_mode="enum:FIXED_SOL|USD_SWAP_BUDGET", policy_frozen_per_position="enum:True", same_event_exit_priority="list[str]", strategy_timeout_ms="int+",
         timeout_policy="enum:FORCE_EXIT", timeout_clock_origin="enum:SUCCESSFUL_ENTRY_FILL",
         entry_amount_semantics="enum:CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT|SWAP_BUDGET_INCLUDING_PROTOCOL_FEES|TOTAL_SLOT_BUDGET_INCLUDING_ALL_COSTS", entry_amount_is_usd_pegged="bool",
         entry_reentry_policy="enum:ONE_SUBMITTED_ENTRY_PER_MINT_PER_CAMPAIGN", quote_asset_policy="enum:SOL_ONLY",
@@ -395,10 +395,14 @@ def _cross_checks(raw: dict[str, Any]) -> None:
     if st["strategy_id"] == "FAST_CREATOR_HOLD_V1" and st["observation_ms"] != 0:
         raise ConfigError("strategy.observation_ms must be 0 (no artificial observation wait)")
     if st["strategy_id"] == "FAST_CREATOR_HOLD_V1":
-        if st["sizing_mode"] != "USD_SWAP_BUDGET" or Decimal(st["trade_size_usd"]) != Decimal("10") or st["entry_amount_lamports"] != 0:
-            raise ConfigError("FAST_CREATOR_HOLD_V1 requires 10 USD slot sizing")
-        if st["entry_amount_semantics"] != "TOTAL_SLOT_BUDGET_INCLUDING_ALL_COSTS" or not st["entry_amount_is_usd_pegged"]:
-            raise ConfigError("FAST_CREATOR_HOLD_V1 requires total USD slot-budget semantics")
+        if st["sizing_mode"] == "FIXED_SOL":
+            if st["entry_amount_lamports"] <= 0 or st["entry_amount_semantics"] != "CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT" or st["entry_amount_is_usd_pegged"]:
+                raise ConfigError("FAST_CREATOR_HOLD_V1 FIXED_SOL sizing contract invalid")
+        else:
+            if Decimal(st["trade_size_usd"]) != Decimal("10") or st["entry_amount_lamports"] != 0:
+                raise ConfigError("FAST_CREATOR_HOLD_V1 USD profile requires 10 USD slot sizing")
+            if st["entry_amount_semantics"] != "TOTAL_SLOT_BUDGET_INCLUDING_ALL_COSTS" or not st["entry_amount_is_usd_pegged"]:
+                raise ConfigError("FAST_CREATOR_HOLD_V1 USD profile requires total USD slot-budget semantics")
     if st["filters"]:
         raise ConfigError("strategy.filters must be empty in phase 1 (no predictive filters)")
     if po["occupied_slot_states"] != ["ENTRY_INTENT", "ENTRY_PENDING", "OPEN", "EXIT_PENDING", "UNRESOLVED"]:
@@ -470,9 +474,14 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
                           "refresh_interval_ms": 10000, "max_age_ms": 30000, "request_timeout_ms": 5000})
     raw.get("strategy", {}).setdefault("strategy_id", "FAST_CREATOR_HOLD_V1")
     raw.get("strategy", {}).setdefault("target_exit_enabled", True)
+    raw.setdefault("portfolio", {})
+    raw["portfolio"].setdefault("initial_paper_balance_mode", "FIXED_LAMPORTS")
+    raw["portfolio"].setdefault("slot_capital_usd", "10")
     schema = {**RUNTIME_SCHEMA}
+    if raw.get("strategy", {}).get("sizing_mode") == "USD_SWAP_BUDGET":
+        schema["strategy"] = {**RUNTIME_SCHEMA["strategy"], "trade_size_usd": "dec+"}
     if raw.get("strategy", {}).get("strategy_id") == "LEGACY_5BUY_5UNIQUE_V1":
-        schema["strategy"] = {**RUNTIME_SCHEMA["strategy"], "min_buy_count": "int+", "min_unique_buyers": "int+",
+        schema["strategy"] = {**schema["strategy"], "min_buy_count": "int+", "min_unique_buyers": "int+",
                               "stop_net_multiple": "dec", "sizing_mode": "enum:USD_SWAP_BUDGET", "entry_amount_lamports": "enum:0",
                               "entry_amount_semantics": "enum:SWAP_BUDGET_INCLUDING_PROTOCOL_FEES", "entry_amount_is_usd_pegged": "enum:True"}
     _check(raw, schema, "config")
