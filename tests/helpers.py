@@ -12,6 +12,7 @@ from darkbot.clock import ReplayClock, ReplayScheduler
 from darkbot.config import RuntimeConfig, build_runtime_config, load_json_strict
 from darkbot.domain import CostEvidence, CostBasis, FeeSnapshot, RawEnvelope, utc_iso
 from darkbot.fees import FeeCache
+from darkbot.fx import FxSnapshot
 from darkbot.market import encode_fields, event_discriminator
 from darkbot.paper import PaperExecutionAdapter, StateOwner
 from darkbot.storage import Recorder, SqliteWriter, apply_migrations, open_connection, upsert_config_snapshot
@@ -131,6 +132,9 @@ class Harness:
                 self.recorder.try_append(("fee_snapshot", (s, run_id)))
         self.adapter = PaperExecutionAdapter(self.clock, self.scheduler, mode, False, self.cfg.latency_model["entry_delay_ms"] * 1_000_000, self.cfg.latency_model["exit_delay_ms"] * 1_000_000)
         self.owner = StateOwner(self.cfg, run_id, self.clock, self.scheduler, self.recorder, self.adapter, lambda: self.fees.basis(), mode, economic_intents_allowed=economic, prior_submitted_mints=prior)
+        if self.cfg.portfolio["initial_paper_balance_mode"] == "USD_PER_SLOT":
+            self.owner.on_fx_snapshot(FxSnapshot.from_payload('{"data":{"base":"SOL","currency":"USD","amount":"100"}}',
+                                                              self.cfg["fx"]["source_url"], self.clock.utc_iso(), T0))
         # emulate the background fee resolver: snapshots are re-read every network_fee_refresh_interval (same ids, new receive time) unless auto_refresh is off
         self.auto_refresh = fees is None
         self.refresh_interval_ns = self.cfg.costs["snapshot_refresh_policy"]["network_fee_refresh_interval_ms"] * 1_000_000
