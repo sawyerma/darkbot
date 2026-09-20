@@ -36,6 +36,8 @@
   },
   "portfolio": {
     "initial_paper_balance_lamports": 1000000000,
+    "initial_paper_balance_mode": "FIXED_LAMPORTS",
+    "slot_capital_usd": "10",
     "max_open_positions": 1,
     "allow_borrowing": false,
     "reserve_exit_costs": true,
