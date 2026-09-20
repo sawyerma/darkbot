@@ -147,6 +147,20 @@ python3 -m darkbot report \
   --out exports/<ordner>
 ```
 
+## 7.1 Exports nach Git pushen
+
+`exports/` wird absichtlich mit Git versioniert. SQLite-/DB-Dateien bleiben über `.gitignore` ausgeschlossen.
+
+Nach einem PAPER-Lauf:
+
+```bash
+git add exports
+git commit -m "Add PAPER export <campaign>"
+git push
+```
+
+Danach können die Reports direkt aus dem Repository gelesen werden; ein separates Hochladen der Export-Dateien ist nicht nötig.
+
 ## 8. Strategy B
 
 Config:
