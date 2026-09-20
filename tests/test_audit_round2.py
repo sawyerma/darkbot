@@ -250,7 +250,7 @@ class S11S16S17(unittest.TestCase):
                 cwd = os.getcwd()
                 os.chdir(d)
                 try:
-                    code = cli.main(["paper", "--config", str(ROOT / "config" / "phase1.json"), "--db", str(Path(d) / "p.sqlite"), "--campaign", "camp"])
+                    code = cli.main(["paper", "--config", str(ROOT / "config" / "phase1.json"), "--db", str(Path(d) / "p.sqlite"), "--campaign", "camp", "--max-duration-minutes", "1"])
                 finally:
                     os.chdir(cwd)
             self.assertEqual(code, 0)
@@ -259,7 +259,7 @@ class S11S16S17(unittest.TestCase):
             conn = sqlite3.connect(str(Path(d) / "p.sqlite"))
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0], 1)
             with mock.patch("darkbot.main.run_paper", return_value={"run_id": "run", "status": "COMPLETED", "readiness": "NOT_READY", "feeds_started": 0}):
-                code = cli.main(["paper", "--config", str(ROOT / "config" / "phase1.json"), "--db", str(Path(d) / "p.sqlite"), "--campaign", "camp"])
+                code = cli.main(["paper", "--config", str(ROOT / "config" / "phase1.json"), "--db", str(Path(d) / "p.sqlite"), "--campaign", "camp", "--max-duration-minutes", "1"])
             self.assertEqual(code, cli.EXIT_NOT_READY)
 
 
