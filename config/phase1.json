@@ -13,8 +13,9 @@
     "target_is_proven_optimal": false,
     "ordinary_stop_enabled": false,
     "creator_sell_exit_enabled": true,
-    "entry_amount_lamports": 98370000,
-    "sizing_mode": "FIXED_SOL",
+    "entry_amount_lamports": 0,
+    "sizing_mode": "USD_SWAP_BUDGET",
+    "trade_size_usd": "10",
     "policy_frozen_per_position": true,
     "same_event_exit_priority": [
       "CREATOR_SELL",
@@ -24,14 +25,16 @@
     "strategy_timeout_ms": 590000,
     "timeout_policy": "FORCE_EXIT",
     "timeout_clock_origin": "SUCCESSFUL_ENTRY_FILL",
-    "entry_amount_semantics": "CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT",
-    "entry_amount_is_usd_pegged": false,
+    "entry_amount_semantics": "TOTAL_SLOT_BUDGET_INCLUDING_ALL_COSTS",
+    "entry_amount_is_usd_pegged": true,
     "entry_reentry_policy": "ONE_SUBMITTED_ENTRY_PER_MINT_PER_CAMPAIGN",
     "quote_asset_policy": "SOL_ONLY",
     "strategy_id": "FAST_CREATOR_HOLD_V1"
   },
   "portfolio": {
-    "initial_paper_balance_lamports": 2000000000,
+    "initial_paper_balance_lamports": 0,
+    "initial_paper_balance_mode": "USD_PER_SLOT",
+    "slot_capital_usd": "10",
     "max_open_positions": 1,
     "allow_borrowing": false,
     "reserve_exit_costs": true,
@@ -2485,7 +2488,7 @@
     "min_free_disk_bytes": 536870912
   },
   "fx": {
-    "enabled": false,
+    "enabled": true,
     "source_url": "https://api.coinbase.com/v2/prices/SOL-USD/spot",
     "refresh_interval_ms": 10000,
     "max_age_ms": 30000,
