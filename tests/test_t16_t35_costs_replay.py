@@ -151,6 +151,20 @@ class T19T21Replay(unittest.TestCase):
             self.assertEqual(sum(len(v) for v in splits.values()), 8)  # two launches purged by embargo at the boundaries
 
 
+    def test_T21b_research_registers_overridden_parent_config_snapshot(self):
+        """A PAPER CLI override changes the runtime hash; research must register that exact parent before FK use."""
+        with tempfile.TemporaryDirectory() as d:
+            h, db = self._scenario_db(Path(d))
+            conn = open_connection(Path(db))
+            overridden = h.cfg.with_overrides(portfolio={"max_open_positions": 10})
+            self.assertIsNone(conn.execute("SELECT 1 FROM config_snapshots WHERE config_hash=?", (overridden.config_hash,)).fetchone())
+            run_research(conn, "camp", overridden, ROOT / "config" / "research.json", Path(d) / "research_override",
+                         source_run_ids=["run"], persist=True, max_variants=1)
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM config_snapshots WHERE config_hash=?", (overridden.config_hash,)).fetchone())
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+            conn.close()
+
+
 class T22T24Boundary(unittest.TestCase):
     def test_T22_paper_broadcast_boundary(self):
         for fn in (send_transaction, paid_trade_api_call):

@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+from darkbot.ab_replay import _comparison_configs
 from darkbot.config import ConfigError, load_runtime_config
 from darkbot.domain import NS_PER_MS, AttemptStatus, EventType, ExitReason, PositionState
 from darkbot.replay import digest, load_replay_input, run_replay
@@ -359,6 +360,17 @@ class StrategyCTests(unittest.TestCase):
         h = make_c(); h.feed("helius_standard", create_payload(**dev_buy()), START); h.finish(START + 500 * NS_PER_MS)
         row = h.rows("select * from strategy_observations")[0]
         self.assertEqual(row["status"], "CENSORED_RUN_END"); self.assertIsNone(row["qualified"])
+
+
+    def test_C24_ab_replay_normalizes_legacy_latency_and_quote_age(self):
+        a = load_runtime_config(ROOT / "config/phase1.json")
+        c = load_runtime_config(ROOT / "config/strategy_c_pre_pump_01.json")
+        _a, normalized_c, note = _comparison_configs(a, c)
+        self.assertEqual(normalized_c.execution["quote_max_age_ms"], a.execution["quote_max_age_ms"])
+        self.assertEqual(note["quote_max_age_ms"]["config_b_original"], 600000)
+        self.assertEqual(note["quote_max_age_ms"]["value"], 250)
+        self.assertEqual(note["latency_model"], "RESEARCH_SCENARIO_OVERRIDES_PROFILE_DEFAULTS")
+        self.assertEqual(c.execution["quote_max_age_ms"], 600000)  # original profile is untouched
 
 
 if __name__ == "__main__":

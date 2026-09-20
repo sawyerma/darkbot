@@ -29,16 +29,36 @@ def load_measured_distribution(path):
     return data
 
 
+def _comparison_configs(config_a, config_b):
+    """Return configs for a policy-only replay comparison.
+
+    Latency is owned by the A/B research scenarios, so profile-local latency assumptions must not
+    block the comparison. Quote freshness is an execution assumption rather than strategy policy;
+    normalize B/C to A for the comparison instead of requiring a hand-edited copy.
+    """
+    if config_a.strategy_id != "FAST_CREATOR_HOLD_V1" or config_b.strategy_id not in ("LEGACY_5BUY_5UNIQUE_V1", "LEGACY_BACKEND_FILTER_V1"):
+        raise ConfigError("A/B requires Strategy A first, then a Strategy B or Strategy C config")
+    normalized_b = config_b.with_overrides(execution={"quote_max_age_ms": config_a.execution["quote_max_age_ms"]})
+    shared = set(config_a.raw) - {"strategy", "config_version", "fx", "latency_model"}
+    if any(config_a.raw[k] != normalized_b.raw[k] for k in shared) or config_a.raw["fx"]["max_age_ms"] != normalized_b.raw["fx"]["max_age_ms"]:
+        raise ConfigError("A/B configs must share engine, costs, feeds, portfolio and FX freshness settings after comparison normalization")
+    normalization = {
+        "latency_model": "RESEARCH_SCENARIO_OVERRIDES_PROFILE_DEFAULTS",
+        "quote_max_age_ms": {
+            "source": "CONFIG_A",
+            "value": config_a.execution["quote_max_age_ms"],
+            "config_b_original": config_b.execution["quote_max_age_ms"],
+        },
+    }
+    return config_a, normalized_b, normalization
+
+
 def compare_capture(source_db: Path, source_run_id: str, output_db: Path, out: Path, config_a, config_b,
                     research_path: Path, measured_path: Path | None = None):
     """Source opened read-only. Each variant gets its own persisted run, same frames/fees/FX/portfolio/delay assumptions."""
     if source_db.resolve() == output_db.resolve() or output_db.exists():
         raise ConfigError("A/B output database must be a new file, separate from the source capture")
-    if config_a.strategy_id != "FAST_CREATOR_HOLD_V1" or config_b.strategy_id not in ("LEGACY_5BUY_5UNIQUE_V1", "LEGACY_BACKEND_FILTER_V1"):
-        raise ConfigError("A/B requires Strategy A first, then a Strategy B or Strategy C config")
-    shared = set(config_a.raw) - {"strategy", "config_version", "fx"}
-    if any(config_a.raw[k] != config_b.raw[k] for k in shared) or config_a.raw["fx"]["max_age_ms"] != config_b.raw["fx"]["max_age_ms"]:
-        raise ConfigError("A/B configs must share engine, costs, feeds, portfolio, latency and FX freshness settings")
+    config_a, config_b, comparison_normalization = _comparison_configs(config_a, config_b)
     research = load_json_strict(research_path)
     if set(research) != {"config_version", "portfolio_position_limits", "latency_scenarios", "measured_distribution_required_scenario", "missing_measurements_policy"}:
         raise ConfigError("invalid A/B research config keys")
@@ -100,6 +120,7 @@ def compare_capture(source_db: Path, source_run_id: str, output_db: Path, out: P
         conn.close()
     summary={'dataset_hash':frozen.dataset_hash,'source_run_id':source_run_id,
              'comparison_scope':'Same frames, fee/FX evidence, decoder, engine and costs; strategy policy only varies within each portfolio/latency pair',
+             'comparison_normalization':comparison_normalization,
              'callback_lateness':'Scenario execution delays shared; source per-position callback lateness excluded because A/B position numbering differs',
              'measured_distribution':{'status':'AVAILABLE' if measured else 'UNAVAILABLE_NO_MEASUREMENTS_SUPPLIED','hash':measured_hash},
              'usd_evidence_status':'RECORDED' if frozen.fx_snapshots else 'MISSING_B_ENTRIES_FAIL_CLOSED',

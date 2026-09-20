@@ -235,6 +235,12 @@ def run_research(conn: sqlite3.Connection, campaign: str, cfg: RuntimeConfig, re
         variants = variants[:max_variants]
     inputs = {run_id: load_replay_input(conn, run_id, cfg) for run_id in runs}
     dataset_hashes = [inputs[r].dataset_hash for r in runs]
+    # The research parent config can legitimately differ from the config used to record the PAPER run
+    # (for example a CLI portfolio override). research_variants.parent_config_hash is a foreign key,
+    # therefore the exact parent RuntimeConfig must always be registered before variants are inserted.
+    if persist:
+        for kind, (snapshot_hash, content) in cfg.snapshot_kinds().items():
+            upsert_config_snapshot(conn, kind, snapshot_hash, content, str(cfg.path), utc_iso(0))
     dataset_hash = config_hash({"runs": runs, "hashes": dataset_hashes, "freeze": research["dataset_freeze"]})
     # Only explicit operational switches may differ after preregistration.
     research_policy = {k: v for k, v in research.items() if k not in ("test_split_unlocked", "forward_test", "policy_freeze_note")}
