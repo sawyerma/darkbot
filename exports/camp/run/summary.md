@@ -1,6 +1,8 @@
 # DarkBot Phase-1 PAPER Bericht – Run run
 
-Kampagne: camp | Modus: PAPER | Config-Hash: b6ab71156dd1c10d | Query: REPORT_QUERY_V1
+Kampagne: camp | Modus: PAPER | Config-Hash: bb2eb90eb979917b | Query: REPORT_QUERY_V1
+
+Strategie: FAST_CREATOR_HOLD_V1 | Strategy-Hash: 0a341b11a964ed2e04814bcf11a4c093a8d3e90814956347dcee0df2604d7cfa
 
 **Qualifikationsstatus: UNQUALIFIED_DATA** – unresolved exposure exceeds configured maximum
 

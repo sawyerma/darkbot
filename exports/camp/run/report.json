@@ -1,8 +1,8 @@
 {
   "campaign_id": "camp",
   "code_revision": "test",
-  "config_hash": "b6ab71156dd1c10db273fd7569b0a72a5242f9c79c89634b52826ce14133ff76",
-  "created_utc": "2026-09-18T20:38:21.185752Z",
+  "config_hash": "bb2eb90eb979917b508605ec2c2f313e2058ca1698fd021e2a0f56562346b9c6",
+  "created_utc": "2026-09-20T06:31:38.497434Z",
   "creates_actionable": 1,
   "creates_observed_union": 1,
   "dataset_hash": null,
@@ -28,6 +28,7 @@
       "run_end_balance": 898304910
     },
     "censored": 1,
+    "closed_trades": 0,
     "conservative_lower_bound_pnl_lamports_token_residual_zero": -99655810,
     "cost_evidence_counts": {
       "MEASURED": 1
@@ -40,6 +41,7 @@
     "entry_fills": 1,
     "entry_intents": 1,
     "exit_failed_attempts": 0,
+    "exit_fills": 0,
     "exits": {
       "CREATOR_SELL": 0,
       "TARGET": 0,
@@ -109,6 +111,8 @@
     "resolved_intents": 0,
     "retry_exhausted": 0,
     "run_window_ns": 5000000,
+    "slippage_limit_bps": 300,
+    "slippage_rejected_attempts": 0,
     "time_to_entry_ns": {
       "max": 0,
       "min": 0,
@@ -118,6 +122,7 @@
       "p99": 0,
       "p99_low_confidence": true
     },
+    "unknown_attempts": 0,
     "unrealized_status": "UNKNOWN_EQUITY_INTERVAL",
     "unresolved": 0,
     "unresolved_by_reason": {},
@@ -125,6 +130,8 @@
     "unresolved_fraction": 1.0,
     "win_rate": null
   },
+  "entry_sizing": [],
+  "fx_evidence": [],
   "host_clock_epoch_id": "epoch_test",
   "latency": {
     "callback_lateness_ns": {
@@ -158,6 +165,24 @@
       "p50": 0,
       "p95": 0,
       "p99": 0,
+      "p99_low_confidence": true
+    },
+    "entry_execution_delay_ns": {
+      "max": 0,
+      "min": 0,
+      "n": 1,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "p99_low_confidence": true
+    },
+    "exit_execution_delay_ns": {
+      "max": null,
+      "min": null,
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
       "p99_low_confidence": true
     },
     "feeds": {
@@ -307,6 +332,7 @@
     "unresolved exposure exceeds configured maximum"
   ],
   "qualification_status": "UNQUALIFIED_DATA",
+  "qualified_creates": 1,
   "quality": {
     "canonical_gap_events": 0,
     "coverage_version": "CANONICAL_COVERAGE_V2",
@@ -353,5 +379,8 @@
   },
   "query_version": "REPORT_QUERY_V1",
   "run_id": "run",
-  "spec_hash": "spec"
+  "spec_hash": "spec",
+  "strategy_config_hash": "0a341b11a964ed2e04814bcf11a4c093a8d3e90814956347dcee0df2604d7cfa",
+  "strategy_id": "FAST_CREATOR_HOLD_V1",
+  "strategy_observations": []
 }
