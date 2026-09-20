@@ -31,7 +31,7 @@
     "strategy_id": "FAST_CREATOR_HOLD_V1"
   },
   "portfolio": {
-    "initial_paper_balance_lamports": 1000000000,
+    "initial_paper_balance_lamports": 2000000000,
     "max_open_positions": 1,
     "allow_borrowing": false,
     "reserve_exit_costs": true,
