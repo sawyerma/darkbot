@@ -131,7 +131,7 @@ class StateOwner:
         self.persist_observations = persist_observations
         self.mint_allowlist = mint_allowlist  # research splits: entries only for launches of the evaluated split
         self.compute_features = compute_features
-        self.strategy = make_strategy(cfg.strategy)
+        self.strategy = None if capture_only else make_strategy(cfg.strategy)
         self.policy = ExecutionPolicy.from_config(cfg)
         self.engine = engine or QuoteEngine(self.policy)
         self.portfolio = Portfolio(cfg.portfolio["initial_paper_balance_lamports"])
@@ -346,11 +346,12 @@ class StateOwner:
                 # Pure market capture: decode/reduce/persist only. No strategy callback,
                 # no admission, no intent and no simulated execution.
                 for mint in result.new_creates:
-                    if mint not in self.first_create_receive:
+                    first = mint not in self.first_create_receive
+                    if first:
                         self.counters.creates += 1
-                    self.first_create_receive.setdefault(mint, raw.receive_mono_ns)
+                        self.first_create_receive[mint] = raw.receive_mono_ns
                     st = self.reducer.states[mint]
-                    if st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and st.venue_state == VenueState.BONDING_CURVE_ACTIVE:
+                    if first and st.quote_scope_status == QuoteScopeStatus.SOL_WSOL and st.venue_state == VenueState.BONDING_CURVE_ACTIVE:
                         self.counters.creates_actionable += 1
             else:
                 # P0: exposed positions first, then immediately actionable CREATEs
