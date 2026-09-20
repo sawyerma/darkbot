@@ -35,3 +35,7 @@ env/
 # IDE
 .idea/
 .vscode/
+
+# PAPER/report exports are intentionally versioned
+!exports/
+!exports/**
