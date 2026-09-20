@@ -55,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     ab.add_argument("--config-b", type=Path, default=Path("config/strategy_b.json"))
     ab.add_argument("--research-config", type=Path, default=Path("config/research_ab.json"))
     ab.add_argument("--measured-latency", type=Path, default=None)
+    ea = sub.add_parser("edge-analysis", help="offline market-path/exit-rule analysis from a CAPTURE/PAPER DB or ZIP")
+    ea.add_argument("--source", type=Path, required=True, help="SQLite database or ZIP containing one")
+    ea.add_argument("--out", type=Path, required=True)
+    sel = ea.add_mutually_exclusive_group()
+    sel.add_argument("--run-id", default=None)
+    sel.add_argument("--campaign", default=None)
     return p
 
 
@@ -157,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
             result = compare_capture(args.source_db, args.source_run_id, args.output_db, args.out,
                                      load_runtime_config(args.config_a), load_runtime_config(args.config_b), args.research_config, args.measured_latency)
             print(f"A/B replay: {len(result['results'])} runs -> {args.out / 'comparison.json'}")
+            return EXIT_OK
+        if args.command == "edge-analysis":
+            from darkbot.edge_analysis import run_edge_analysis
+            result = run_edge_analysis(args.source, args.out, run_id=args.run_id, campaign=args.campaign)
+            print(f"edge-analysis: run={result['run_id']} launches={result['launches_with_hypothetical_entry']} -> {args.out / 'edge_summary.json'}")
             return EXIT_OK
         if args.command == "doctor":
             return cmd_doctor(args)
