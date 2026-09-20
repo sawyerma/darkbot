@@ -1,0 +1,725 @@
+"""Live PAPER execution for LEAN_V1.
+
+Responsibility:
+- consume the same live feature snapshots and curve states as SHADOW,
+- evaluate the shared StrategyEngine,
+- reserve PAPER slots at decision time,
+- model entry/exit latency with PaperFillModel,
+- maintain virtual positions and realized accounting.
+
+Not responsible for:
+- RPC, signing, transaction broadcasting or wallet access,
+- feature calculation,
+- market-data decoding,
+- strategy/filter definition,
+- persistence schema management.
+
+PAPER is deterministic with respect to the observed live event stream and the
+configured latency/cost assumptions. No real transaction is ever sent.
+"""
+
+from __future__ import annotations
+
+import enum
+import json
+import statistics
+
+from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import Any, Callable
+
+from darkbot.clock import Clock, Scheduler
+from darkbot.config import StrategyConfig
+from darkbot.domain import DecisionAction, NANOSECONDS_PER_MILLISECOND
+from darkbot.execution import AttemptStatus, EntryAttempt, ExitSignal, ObservedCurveState, PaperFillModel
+from darkbot.market import TokenTracker
+from darkbot.strategy import StrategyEngine
+
+
+class PaperPhase(str, enum.Enum):
+    """Lifecycle of one reserved PAPER slot."""
+
+    ENTRY_PENDING = "ENTRY_PENDING"
+    OPEN = "OPEN"
+    EXIT_PENDING = "EXIT_PENDING"
+
+
+@dataclass(slots=True)
+class PaperTrade:
+    """Transient state for one candidate/virtual position."""
+
+    tracker: TokenTracker
+    decision_offset_ns: int
+    decision_state: ObservedCurveState
+    history: list[ObservedCurveState]
+    phase: PaperPhase = PaperPhase.ENTRY_PENDING
+    entry: EntryAttempt | None = None
+    tokens: int = 0
+    timeout_trigger_offset_ns: int | None = None
+    exit_reason: str | None = None
+    failed_exit_network_fee_lamports: int = 0
+
+
+@dataclass
+class PaperCounters:
+    """Session-local PAPER accounting counters."""
+
+    decisions: int = 0
+    rejected_filter: int = 0
+    data_incomplete: int = 0
+    candidates_passed: int = 0
+    skipped_slot_busy: int = 0
+    entries_attempted: int = 0
+    entries_filled: int = 0
+    entries_slippage_rejected: int = 0
+    entries_curve_unavailable: int = 0
+    positions_closed: int = 0
+    target_exits: int = 0
+    stop_exits: int = 0
+    timeout_exits: int = 0
+    creator_sell_exits: int = 0
+    exit_retries: int = 0
+    entries_creator_sold_before_fill: int = 0
+    unresolved_zero: int = 0
+    interrupted_positions: int = 0
+    pending_entries_cancelled: int = 0
+    curve_pnl_before_fees_lamports: int = 0
+    pump_fees_lamports: int = 0
+    network_fees_lamports: int = 0
+    account_rent_lamports: int = 0
+    net_pnl_lamports: int = 0
+
+
+@dataclass
+class PaperRuntime:
+    """Forward-test StrategyEngine + PaperFillModel on the current live market."""
+
+    strategy: StrategyConfig
+    fill: PaperFillModel
+    scheduler: Scheduler
+    clock: Clock
+    max_open_positions: int = 1
+    account_rent_lamports: int = 0
+    counters: PaperCounters = field(default_factory=PaperCounters)
+
+    def __post_init__(self) -> None:
+        if self.max_open_positions <= 0:
+            raise ValueError("max_open_positions must be > 0")
+        if self.account_rent_lamports < 0:
+            raise ValueError("account_rent_lamports must be >= 0")
+
+        self._engine = StrategyEngine(self.strategy)
+        self._active: dict[str, PaperTrade] = {}
+        self._decided: set[str] = set()
+        self._all_pnls: list[int] = []
+        self._closed_pnls: list[int] = []
+        self._equity_lamports = 0
+        self._equity_peak_lamports = 0
+        self._max_drawdown_lamports = 0
+        self._stopping = False
+
+    # ------------------------------------------------------------------ inputs
+
+    def on_snapshot(
+        self,
+        tracker: TokenTracker,
+        deadline_offset_ns: int,
+        features: dict[str, Any],
+    ) -> None:
+        """Evaluate exactly the configured observation snapshot once per launch."""
+
+        if self._stopping:
+            return
+
+        decision_offset = (
+            tracker.t0_offset_ns
+            + self.strategy.observation_ms * NANOSECONDS_PER_MILLISECOND
+        )
+        if deadline_offset_ns != decision_offset:
+            return
+        if tracker.launch_id in self._decided:
+            return
+        if not tracker.tradable:
+            return
+
+        self._decided.add(tracker.launch_id)
+        self.counters.decisions += 1
+
+        flags = tuple(sorted(tracker.flags))
+        decision = self._engine.evaluate(features, flags)
+
+        if decision.action == DecisionAction.DATA_INCOMPLETE:
+            self.counters.data_incomplete += 1
+            return
+        if decision.action != DecisionAction.PASS:
+            self.counters.rejected_filter += 1
+            return
+
+        self.counters.candidates_passed += 1
+
+        if len(self._active) >= self.max_open_positions:
+            self.counters.skipped_slot_busy += 1
+            self._emit(
+                "PAPER_SKIPPED_SLOT_BUSY",
+                launch_id=tracker.launch_id,
+                mint=tracker.mint,
+                decision_offset_ns=deadline_offset_ns,
+            )
+            return
+
+        decision_state = self._tracker_state(tracker)
+        if decision_state is None:
+            self.counters.entries_attempted += 1
+            self.counters.entries_curve_unavailable += 1
+            self._record_pnl(0, closed=False)
+            self._emit(
+                "PAPER_ENTRY_CURVE_UNAVAILABLE",
+                launch_id=tracker.launch_id,
+                mint=tracker.mint,
+                decision_offset_ns=deadline_offset_ns,
+            )
+            return
+
+        trade = PaperTrade(
+            tracker=tracker,
+            decision_offset_ns=deadline_offset_ns,
+            decision_state=decision_state,
+            history=[decision_state],
+        )
+        self._active[tracker.launch_id] = trade
+
+        fill_offset = self.fill.entry_fill_offset_ns(deadline_offset_ns)
+        self._schedule_offset(
+            fill_offset,
+            lambda _actual, launch_id=tracker.launch_id: self._entry_fill(
+                launch_id
+            ),
+        )
+
+        self._emit(
+            "PAPER_CANDIDATE",
+            launch_id=tracker.launch_id,
+            mint=tracker.mint,
+            decision_offset_ns=deadline_offset_ns,
+            modeled_entry_fill_offset_ns=fill_offset,
+        )
+
+    def on_curve_state(self, tracker: TokenTracker) -> None:
+        """Receive an O(1) update after a tracked BUY/SELL event."""
+
+        if self._stopping:
+            return
+
+        trade = self._active.get(tracker.launch_id)
+        if trade is None:
+            return
+
+        state = self._tracker_state(tracker)
+        if state is None:
+            return
+
+        trade.history.append(state)
+
+        if trade.phase != PaperPhase.OPEN:
+            return
+        if trade.entry is None:
+            return
+        if state.receive_offset_ns <= trade.entry.fill_offset_ns:
+            return
+        if (
+            trade.tracker.creator_sell_offset_ns is not None
+            and trade.tracker.creator_sell_offset_ns > trade.entry.fill_offset_ns
+            and trade.tracker.creator_sell_offset_ns <= state.receive_offset_ns
+        ):
+            self._schedule_exit(
+                trade,
+                trade.tracker.creator_sell_offset_ns,
+                "CREATOR_SELL",
+            )
+            return
+
+        if (
+            trade.timeout_trigger_offset_ns is not None
+            and state.receive_offset_ns > trade.timeout_trigger_offset_ns
+        ):
+            return
+
+        self._evaluate_exit_state(trade, state)
+
+    # ---------------------------------------------------------------- execution
+
+    def _entry_fill(self, launch_id: str) -> None:
+        trade = self._active.get(launch_id)
+        if trade is None or trade.phase != PaperPhase.ENTRY_PENDING:
+            return
+
+        self.counters.entries_attempted += 1
+        fill_offset = self.fill.entry_fill_offset_ns(trade.decision_offset_ns)
+
+        if (
+            trade.tracker.creator_sell_offset_ns is not None
+            and trade.tracker.creator_sell_offset_ns <= fill_offset
+        ):
+            self.counters.entries_creator_sold_before_fill += 1
+            self._active.pop(launch_id, None)
+            self._emit(
+                "PAPER_ENTRY_SKIPPED_CREATOR_SOLD",
+                launch_id=launch_id,
+                mint=trade.tracker.mint,
+                creator_sell_offset_ns=trade.tracker.creator_sell_offset_ns,
+                modeled_fill_offset_ns=fill_offset,
+            )
+            return
+
+        fill_state = self._state_at(trade.history, fill_offset)
+
+        if fill_state is None:
+            self.counters.entries_curve_unavailable += 1
+            self._active.pop(launch_id, None)
+            self._emit(
+                "PAPER_ENTRY_CURVE_UNAVAILABLE",
+                launch_id=launch_id,
+                mint=trade.tracker.mint,
+                modeled_fill_offset_ns=fill_offset,
+            )
+            return
+
+        attempt = self.fill.simulate_entry(
+            trade.decision_state,
+            fill_state,
+            trade.decision_offset_ns,
+            self.strategy.trade_amount_lamports,
+            self.strategy.max_slippage_bps,
+            account_rent_lamports=self.account_rent_lamports,
+        )
+
+        if not attempt.filled:
+            if attempt.status == AttemptStatus.SLIPPAGE_REJECTED:
+                self.counters.entries_slippage_rejected += 1
+            else:
+                self.counters.entries_curve_unavailable += 1
+
+            self.counters.network_fees_lamports += attempt.network_fee_lamports
+            pnl = -attempt.network_fee_lamports
+            self.counters.net_pnl_lamports += pnl
+            self._record_pnl(pnl, closed=False)
+            self._active.pop(launch_id, None)
+
+            self._emit(
+                "PAPER_ENTRY_REJECTED",
+                launch_id=launch_id,
+                mint=trade.tracker.mint,
+                status=attempt.status.value,
+                network_fee_lamports=attempt.network_fee_lamports,
+                net_pnl_lamports=pnl,
+            )
+            return
+
+        assert attempt.fill_quote is not None
+
+        trade.entry = attempt
+        trade.tokens = attempt.fill_quote.tokens_out
+        trade.phase = PaperPhase.OPEN
+        trade.timeout_trigger_offset_ns = (
+            attempt.fill_offset_ns
+            + self.strategy.max_hold_ms * NANOSECONDS_PER_MILLISECOND
+        )
+
+        self.counters.entries_filled += 1
+
+        self._schedule_offset(
+            trade.timeout_trigger_offset_ns,
+            lambda _actual, launch_id=launch_id: self._timeout_trigger(launch_id),
+        )
+
+        self._emit(
+            "PAPER_ENTRY_FILLED",
+            launch_id=launch_id,
+            mint=trade.tracker.mint,
+            tokens=trade.tokens,
+            entry_cost_lamports=attempt.entry_cost_lamports,
+            pump_fee_lamports=attempt.fill_quote.fees.total_lamports,
+            network_fee_lamports=attempt.network_fee_lamports,
+            fill_offset_ns=attempt.fill_offset_ns,
+        )
+
+        # A timer callback can run slightly late under event-loop load. Replay
+        # any already observed states after the modeled fill, but never beyond
+        # the timeout trigger. This preserves the same <= modeled-time rule as
+        # the deterministic backtest.
+        for state in trade.history:
+            if trade.phase != PaperPhase.OPEN:
+                break
+            if state.receive_offset_ns <= attempt.fill_offset_ns:
+                continue
+            if state.receive_offset_ns > trade.timeout_trigger_offset_ns:
+                break
+            self._evaluate_exit_state(trade, state)
+
+    def _evaluate_exit_state(
+        self,
+        trade: PaperTrade,
+        state: ObservedCurveState,
+    ) -> None:
+        assert trade.entry is not None
+
+        signal = self.fill.exit_signal(
+            state,
+            trade.tokens,
+            trade.entry.entry_cost_lamports,
+            self.strategy.target_net_multiple,
+            self.strategy.stop_net_multiple,
+        )
+        if signal == ExitSignal.HOLD:
+            return
+
+        self._schedule_exit(trade, state.receive_offset_ns, signal.value)
+
+    def _timeout_trigger(self, launch_id: str) -> None:
+        trade = self._active.get(launch_id)
+        if trade is None or trade.phase != PaperPhase.OPEN:
+            return
+        if trade.timeout_trigger_offset_ns is None:
+            return
+
+        trigger_state = self._state_at(
+            trade.history,
+            trade.timeout_trigger_offset_ns,
+        )
+        if trigger_state is None:
+            self._close_unresolved(trade, failed_exit_network_fee=0)
+            return
+
+        self._schedule_exit(
+            trade,
+            trade.timeout_trigger_offset_ns,
+            "TIMEOUT",
+        )
+
+    def _schedule_exit(
+        self,
+        trade: PaperTrade,
+        trigger_offset_ns: int,
+        reason: str,
+    ) -> None:
+        if trade.phase != PaperPhase.OPEN:
+            return
+
+        trade.phase = PaperPhase.EXIT_PENDING
+        trade.exit_reason = reason
+        fill_offset = self.fill.exit_fill_offset_ns(trigger_offset_ns)
+
+        self._schedule_offset(
+            fill_offset,
+            lambda _actual, launch_id=trade.tracker.launch_id,
+            trigger_offset_ns=trigger_offset_ns: self._exit_fill(
+                launch_id,
+                trigger_offset_ns,
+            ),
+        )
+
+        self._emit(
+            "PAPER_EXIT_TRIGGERED",
+            launch_id=trade.tracker.launch_id,
+            mint=trade.tracker.mint,
+            reason=reason,
+            trigger_offset_ns=trigger_offset_ns,
+            modeled_fill_offset_ns=fill_offset,
+        )
+
+    def _exit_fill(self, launch_id: str, trigger_offset_ns: int) -> None:
+        trade = self._active.get(launch_id)
+        if trade is None or trade.phase != PaperPhase.EXIT_PENDING:
+            return
+        if trade.entry is None:
+            return
+
+        trigger_state = self._state_at(trade.history, trigger_offset_ns)
+        fill_offset = self.fill.exit_fill_offset_ns(trigger_offset_ns)
+        fill_state = self._state_at(trade.history, fill_offset)
+
+        if trigger_state is None or fill_state is None:
+            self._close_unresolved(trade, failed_exit_network_fee=0)
+            return
+
+        attempt = self.fill.simulate_exit(
+            trigger_state,
+            fill_state,
+            trigger_offset_ns,
+            trade.tokens,
+            self.strategy.max_slippage_bps,
+        )
+
+        if not attempt.filled:
+            trade.failed_exit_network_fee_lamports += attempt.network_fee_lamports
+            self.counters.exit_retries += 1
+
+            retry_trigger_offset_ns = fill_offset
+            retry_fill_offset_ns = self.fill.exit_fill_offset_ns(
+                retry_trigger_offset_ns
+            )
+
+            self._emit(
+                "PAPER_EXIT_RETRY",
+                launch_id=launch_id,
+                mint=trade.tracker.mint,
+                reason=trade.exit_reason,
+                status=attempt.status.value,
+                failed_network_fee_lamports=attempt.network_fee_lamports,
+                retry_trigger_offset_ns=retry_trigger_offset_ns,
+                modeled_retry_fill_offset_ns=retry_fill_offset_ns,
+            )
+
+            self._schedule_offset(
+                retry_fill_offset_ns,
+                lambda _actual,
+                launch_id=launch_id,
+                trigger_offset_ns=retry_trigger_offset_ns: self._exit_fill(
+                    launch_id,
+                    trigger_offset_ns,
+                ),
+            )
+            return
+
+        assert trade.entry.fill_quote is not None
+        assert attempt.fill_quote is not None
+
+        buy_fees = trade.entry.fill_quote.fees.total_lamports
+        sell_fees = attempt.fill_quote.fees.total_lamports
+        network = (
+            trade.entry.network_fee_lamports
+            + trade.failed_exit_network_fee_lamports
+            + attempt.network_fee_lamports
+        )
+        curve_pnl = (
+            attempt.fill_quote.gross_sol_lamports
+            - trade.entry.fill_quote.net_sol_lamports
+        )
+        net_pnl = (
+            attempt.net_return_lamports
+            - trade.entry.entry_cost_lamports
+            - trade.failed_exit_network_fee_lamports
+        )
+
+        self.counters.positions_closed += 1
+        self.counters.curve_pnl_before_fees_lamports += curve_pnl
+        self.counters.pump_fees_lamports += buy_fees + sell_fees
+        self.counters.network_fees_lamports += network
+        self.counters.account_rent_lamports += trade.entry.account_rent_lamports
+        self.counters.net_pnl_lamports += net_pnl
+
+        if trade.exit_reason == ExitSignal.TARGET.value:
+            self.counters.target_exits += 1
+        elif trade.exit_reason == ExitSignal.STOP.value:
+            self.counters.stop_exits += 1
+        elif trade.exit_reason == "TIMEOUT":
+            self.counters.timeout_exits += 1
+        elif trade.exit_reason == "CREATOR_SELL":
+            self.counters.creator_sell_exits += 1
+
+        self._record_pnl(net_pnl, closed=True)
+        self._active.pop(launch_id, None)
+
+        self._emit(
+            "PAPER_POSITION_CLOSED",
+            launch_id=launch_id,
+            mint=trade.tracker.mint,
+            reason=trade.exit_reason,
+            exit_status=attempt.status.value,
+            curve_pnl_before_fees_lamports=curve_pnl,
+            pump_fees_lamports=buy_fees + sell_fees,
+            network_fees_lamports=network,
+            net_pnl_lamports=net_pnl,
+            cumulative_net_pnl_lamports=self.counters.net_pnl_lamports,
+        )
+
+    def _close_unresolved(
+        self,
+        trade: PaperTrade,
+        failed_exit_network_fee: int,
+    ) -> None:
+        assert trade.entry is not None
+        assert trade.entry.fill_quote is not None
+
+        buy_fees = trade.entry.fill_quote.fees.total_lamports
+        network = trade.entry.network_fee_lamports + failed_exit_network_fee
+        net_pnl = (
+            -trade.entry.entry_cost_lamports
+            - failed_exit_network_fee
+        )
+
+        self.counters.unresolved_zero += 1
+        self.counters.pump_fees_lamports += buy_fees
+        self.counters.network_fees_lamports += network
+        self.counters.account_rent_lamports += trade.entry.account_rent_lamports
+        self.counters.net_pnl_lamports += net_pnl
+
+        self._record_pnl(net_pnl, closed=False)
+        self._active.pop(trade.tracker.launch_id, None)
+
+        self._emit(
+            "PAPER_UNRESOLVED_ZERO",
+            launch_id=trade.tracker.launch_id,
+            mint=trade.tracker.mint,
+            reason=trade.exit_reason,
+            failed_exit_network_fee_lamports=failed_exit_network_fee,
+            net_pnl_lamports=net_pnl,
+            cumulative_net_pnl_lamports=self.counters.net_pnl_lamports,
+        )
+
+    # ------------------------------------------------------------------ state
+
+    @staticmethod
+    def _state_at(
+        history: list[ObservedCurveState],
+        offset_ns: int,
+    ) -> ObservedCurveState | None:
+        for state in reversed(history):
+            if state.receive_offset_ns <= offset_ns:
+                return state
+        return None
+
+    @staticmethod
+    def _tracker_state(
+        tracker: TokenTracker,
+    ) -> ObservedCurveState | None:
+        if None in (
+            tracker.last_vsol,
+            tracker.last_vtok,
+            tracker.last_real_tok,
+            tracker.token_total_supply,
+        ):
+            return None
+
+        return ObservedCurveState(
+            virtual_sol_reserves=int(tracker.last_vsol),
+            virtual_token_reserves=int(tracker.last_vtok),
+            real_token_reserves=int(tracker.last_real_tok),
+            fee_market_cap_supply=int(tracker.token_total_supply),
+            creator_fee_enabled=tracker.creator_fee_enabled,
+            receive_offset_ns=tracker.last_state_offset_ns,
+            signature=tracker.last_signature,
+            slot=tracker.last_slot,
+            receive_sequence=tracker.last_receive_sequence,
+        )
+
+    def _schedule_offset(
+        self,
+        offset_ns: int,
+        callback: Callable[[int], None],
+    ) -> None:
+        self.scheduler.schedule_at(
+            self.clock.started_at_monotonic_ns + offset_ns,
+            callback,
+        )
+
+    # ---------------------------------------------------------------- accounting
+
+    def _record_pnl(self, pnl_lamports: int, *, closed: bool) -> None:
+        self._all_pnls.append(pnl_lamports)
+        if closed:
+            self._closed_pnls.append(pnl_lamports)
+
+        self._equity_lamports += pnl_lamports
+        self._equity_peak_lamports = max(
+            self._equity_peak_lamports,
+            self._equity_lamports,
+        )
+        self._max_drawdown_lamports = max(
+            self._max_drawdown_lamports,
+            self._equity_peak_lamports - self._equity_lamports,
+        )
+
+    def summary(self) -> dict[str, Any]:
+        """Return current realized PAPER session metrics."""
+
+        gains = sum(value for value in self._all_pnls if value > 0)
+        losses = -sum(value for value in self._all_pnls if value < 0)
+
+        expectancy = (
+            None
+            if not self._closed_pnls
+            else str(
+                Decimal(self.counters.net_pnl_lamports)
+                / Decimal(len(self._closed_pnls))
+            )
+        )
+        win_rate = (
+            None
+            if not self._closed_pnls
+            else str(
+                Decimal(sum(value > 0 for value in self._closed_pnls))
+                / Decimal(len(self._closed_pnls))
+            )
+        )
+        profit_factor = (
+            None
+            if losses == 0
+            else str(Decimal(gains) / Decimal(losses))
+        )
+        median_trade = (
+            None
+            if not self._closed_pnls
+            else str(
+                Decimal(str(statistics.median(self._closed_pnls)))
+            )
+        )
+
+        result = dict(self.counters.__dict__)
+        result.update(
+            {
+                "active_slots": len(self._active),
+                "pending_entries": sum(
+                    trade.phase == PaperPhase.ENTRY_PENDING
+                    for trade in self._active.values()
+                ),
+                "open_positions": sum(
+                    trade.phase in (PaperPhase.OPEN, PaperPhase.EXIT_PENDING)
+                    for trade in self._active.values()
+                ),
+                "net_expectancy_lamports": expectancy,
+                "win_rate": win_rate,
+                "profit_factor": profit_factor,
+                "median_trade_lamports": median_trade,
+                "max_realized_drawdown_lamports": self._max_drawdown_lamports,
+            }
+        )
+        return result
+
+    def stop(self) -> None:
+        """Stop PAPER cleanly without inventing a market exit or artificial PnL.
+
+        Pending entries are cancelled because their modeled fill has not happened.
+        Filled positions are marked interrupted and excluded from realized PnL.
+        Scheduled callbacks become harmless because the active slot is removed.
+        """
+
+        self._stopping = True
+
+        for trade in list(self._active.values()):
+            if trade.phase == PaperPhase.ENTRY_PENDING:
+                self.counters.pending_entries_cancelled += 1
+                event = "PAPER_PENDING_ENTRY_CANCELLED"
+            else:
+                self.counters.interrupted_positions += 1
+                event = "PAPER_POSITION_INTERRUPTED"
+
+            self._active.pop(trade.tracker.launch_id, None)
+
+            self._emit(
+                event,
+                launch_id=trade.tracker.launch_id,
+                mint=trade.tracker.mint,
+                phase=trade.phase.value,
+            )
+
+    @staticmethod
+    def _emit(event: str, **details: Any) -> None:
+        print(
+            json.dumps(
+                {"event": event, **details},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
