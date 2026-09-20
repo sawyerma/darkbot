@@ -65,7 +65,7 @@ RUNTIME_SCHEMA: dict[str, Any] = {
     "monthly_paid_services_allowed": "enum:False",
     "strategy": S(
         strategy_id="enum:FAST_CREATOR_HOLD_V1|LEGACY_5BUY_5UNIQUE_V1", observation_ms="int0", filters="list[any]", entry_trigger="enum:FIRST_ACTIONABLE_CREATE", target_net_multiple="dec+",
-        target_is_proven_optimal="bool", ordinary_stop_enabled="enum:False", creator_sell_exit_enabled="bool", entry_amount_lamports="int+",
+        target_exit_enabled="bool", target_is_proven_optimal="bool", ordinary_stop_enabled="enum:False", creator_sell_exit_enabled="bool", entry_amount_lamports="int+",
         sizing_mode="enum:FIXED_SOL", policy_frozen_per_position="enum:True", same_event_exit_priority="list[str]", strategy_timeout_ms="int+",
         timeout_policy="enum:FORCE_EXIT", timeout_clock_origin="enum:SUCCESSFUL_ENTRY_FILL",
         entry_amount_semantics="enum:CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT", entry_amount_is_usd_pegged="enum:False",
@@ -457,6 +457,7 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
     raw.setdefault("fx", {"enabled": False, "source_url": "https://api.coinbase.com/v2/prices/SOL-USD/spot",
                           "refresh_interval_ms": 10000, "max_age_ms": 30000, "request_timeout_ms": 5000})
     raw.get("strategy", {}).setdefault("strategy_id", "FAST_CREATOR_HOLD_V1")
+    raw.get("strategy", {}).setdefault("target_exit_enabled", True)
     schema = {**RUNTIME_SCHEMA}
     if raw.get("strategy", {}).get("strategy_id") == "LEGACY_5BUY_5UNIQUE_V1":
         schema["strategy"] = {**RUNTIME_SCHEMA["strategy"], "trade_size_usd": "dec+", "min_buy_count": "int+", "min_unique_buyers": "int+",
