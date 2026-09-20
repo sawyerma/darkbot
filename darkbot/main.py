@@ -398,8 +398,12 @@ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor"
     return {"readiness": readiness.value, "run_id": app.run_id, "checks": checks, "summary": {k: v for k, v in summary.items() if k not in ("storage",)}, "note": "Short probe proves integration only, not completeness, reliability, landing latency or expectancy."}
 
 
-def run_paper(cfg_path: Path, db_path: Path, campaign: str) -> dict[str, Any]:
+def run_paper(cfg_path: Path, db_path: Path, campaign: str, max_open_positions: int | None = None) -> dict[str, Any]:
     cfg = load_runtime_config(cfg_path)
+    if max_open_positions is not None:
+        if max_open_positions <= 0:
+            raise ConfigError("--max-open-positions must be > 0")
+        cfg = cfg.with_overrides(portfolio={"max_open_positions": max_open_positions})
     app = Application(cfg, db_path, campaign, mode="PAPER")
     return asyncio.run(app.run())
 
