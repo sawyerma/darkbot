@@ -65,14 +65,14 @@ RUNTIME_SCHEMA: dict[str, Any] = {
     "monthly_paid_services_allowed": "enum:False",
     "strategy": S(
         strategy_id="enum:FAST_CREATOR_HOLD_V1|LEGACY_5BUY_5UNIQUE_V1", observation_ms="int0", filters="list[any]", entry_trigger="enum:FIRST_ACTIONABLE_CREATE", target_net_multiple="dec+",
-        target_exit_enabled="bool", target_is_proven_optimal="bool", ordinary_stop_enabled="enum:False", creator_sell_exit_enabled="bool", entry_amount_lamports="int+",
-        sizing_mode="enum:FIXED_SOL", policy_frozen_per_position="enum:True", same_event_exit_priority="list[str]", strategy_timeout_ms="int+",
+        target_exit_enabled="bool", target_is_proven_optimal="bool", ordinary_stop_enabled="enum:False", creator_sell_exit_enabled="bool", entry_amount_lamports="int0",
+        sizing_mode="enum:FIXED_SOL|USD_SWAP_BUDGET", trade_size_usd="dec+", policy_frozen_per_position="enum:True", same_event_exit_priority="list[str]", strategy_timeout_ms="int+",
         timeout_policy="enum:FORCE_EXIT", timeout_clock_origin="enum:SUCCESSFUL_ENTRY_FILL",
-        entry_amount_semantics="enum:CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT", entry_amount_is_usd_pegged="enum:False",
+        entry_amount_semantics="enum:CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT|SWAP_BUDGET_INCLUDING_PROTOCOL_FEES|TOTAL_SLOT_BUDGET_INCLUDING_ALL_COSTS", entry_amount_is_usd_pegged="bool",
         entry_reentry_policy="enum:ONE_SUBMITTED_ENTRY_PER_MINT_PER_CAMPAIGN", quote_asset_policy="enum:SOL_ONLY",
     ),
     "fx": S(enabled="bool", source_url="enum:https://api.coinbase.com/v2/prices/SOL-USD/spot", refresh_interval_ms="int+", max_age_ms="int+", request_timeout_ms="int+"),
-    "portfolio": S(initial_paper_balance_lamports="int+", max_open_positions="int+", allow_borrowing="enum:False", reserve_exit_costs="enum:True",
+    "portfolio": S(initial_paper_balance_lamports="int0", initial_paper_balance_mode="enum:FIXED_LAMPORTS|USD_PER_SLOT", slot_capital_usd="dec+", max_open_positions="int+", allow_borrowing="enum:False", reserve_exit_costs="enum:True",
                    occupied_slot_states="list[str]", unresolved_with_possible_exposure_occupies_slot="enum:True"),
     "latency_model": S(entry_delay_ms="int0", exit_delay_ms="int0", label="str", zero_delay_run_can_qualify_edge="enum:False", stage_breakdown_required="enum:True",
                        measured_distribution_id="null|str", stress_delay_ms="list[int0]", scenario_unit="enum:MILLISECONDS"),
@@ -394,12 +394,24 @@ def _cross_checks(raw: dict[str, Any]) -> None:
         raise ConfigError("strategy.same_event_exit_priority must be CREATOR_SELL,TARGET,TIMEOUT")
     if st["strategy_id"] == "FAST_CREATOR_HOLD_V1" and st["observation_ms"] != 0:
         raise ConfigError("strategy.observation_ms must be 0 (no artificial observation wait)")
+    if st["strategy_id"] == "FAST_CREATOR_HOLD_V1":
+        if st["sizing_mode"] != "USD_SWAP_BUDGET" or Decimal(st["trade_size_usd"]) != Decimal("10") or st["entry_amount_lamports"] != 0:
+            raise ConfigError("FAST_CREATOR_HOLD_V1 requires 10 USD slot sizing")
+        if st["entry_amount_semantics"] != "TOTAL_SLOT_BUDGET_INCLUDING_ALL_COSTS" or not st["entry_amount_is_usd_pegged"]:
+            raise ConfigError("FAST_CREATOR_HOLD_V1 requires total USD slot-budget semantics")
     if st["filters"]:
         raise ConfigError("strategy.filters must be empty in phase 1 (no predictive filters)")
     if po["occupied_slot_states"] != ["ENTRY_INTENT", "ENTRY_PENDING", "OPEN", "EXIT_PENDING", "UNRESOLVED"]:
         raise ConfigError("portfolio.occupied_slot_states deviates from spec")
-    if po["initial_paper_balance_lamports"] <= st["entry_amount_lamports"]:
-        raise ConfigError("portfolio.initial_paper_balance_lamports must exceed entry_amount_lamports plus fees/reserve")
+    if po["initial_paper_balance_mode"] == "USD_PER_SLOT":
+        if po["initial_paper_balance_lamports"] != 0:
+            raise ConfigError("USD_PER_SLOT requires initial_paper_balance_lamports=0 (derived from receipt-time FX)")
+        if st["sizing_mode"] != "USD_SWAP_BUDGET" or not raw["fx"]["enabled"]:
+            raise ConfigError("USD_PER_SLOT requires USD_SWAP_BUDGET sizing and fx.enabled=true")
+        if Decimal(po["slot_capital_usd"]) != Decimal(st["trade_size_usd"]):
+            raise ConfigError("portfolio.slot_capital_usd must equal strategy.trade_size_usd")
+    elif po["initial_paper_balance_lamports"] <= st["entry_amount_lamports"]:
+        raise ConfigError("FIXED_LAMPORTS initial balance must exceed entry_amount_lamports plus fees/reserve")
     if co["sender_tip_lamports"] != 0 and co["sender_tip_provenance"] != "CONFIGURED":
         raise ConfigError("costs.sender_tip_lamports != 0 requires sender_tip_provenance CONFIGURED")
     if co["sender_tip_lamports"] == 0 and co["sender_tip_provenance"] != "NOT_APPLICABLE":
@@ -460,7 +472,7 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
     raw.get("strategy", {}).setdefault("target_exit_enabled", True)
     schema = {**RUNTIME_SCHEMA}
     if raw.get("strategy", {}).get("strategy_id") == "LEGACY_5BUY_5UNIQUE_V1":
-        schema["strategy"] = {**RUNTIME_SCHEMA["strategy"], "trade_size_usd": "dec+", "min_buy_count": "int+", "min_unique_buyers": "int+",
+        schema["strategy"] = {**RUNTIME_SCHEMA["strategy"], "min_buy_count": "int+", "min_unique_buyers": "int+",
                               "stop_net_multiple": "dec", "sizing_mode": "enum:USD_SWAP_BUDGET", "entry_amount_lamports": "enum:0",
                               "entry_amount_semantics": "enum:SWAP_BUDGET_INCLUDING_PROTOCOL_FEES", "entry_amount_is_usd_pegged": "enum:True"}
     _check(raw, schema, "config")
