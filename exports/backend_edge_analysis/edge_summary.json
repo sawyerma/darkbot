@@ -1,0 +1,6 @@
+{
+  "analysis_status": "LEGACY_SCHEMA_REQUIRES_ADAPTER",
+  "database_used": "/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/darkbot_edge_b3hh7ebl/paper_research_all_launches_10min_20260913.db",
+  "next_artifact": "legacy_schema_inventory.json",
+  "source": "exports/basetest_backend_v0.zip"
+}
