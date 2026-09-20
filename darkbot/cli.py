@@ -27,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="override portfolio.max_open_positions for this PAPER run")
     pp.add_argument("--max-duration-minutes", type=int, required=True,
                     help="required total PAPER runtime in minutes; the run stops automatically when reached")
+    cap = sub.add_parser("capture", help="strategy-free live market capture; records CREATE/BUY/SELL/reserves/fees/FX only")
+    cap.add_argument("--config", type=Path, required=True)
+    cap.add_argument("--db", type=Path, required=True)
+    cap.add_argument("--campaign", required=True)
+    cap.add_argument("--max-duration-minutes", type=int, required=True,
+                     help="required total CAPTURE runtime in minutes")
     r = sub.add_parser("report", help="deterministic latency/PnL/quality reports")
     r.add_argument("--db", type=Path, required=True)
     r.add_argument("--campaign", required=True)
@@ -63,6 +69,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             print(f"{cid}: {c['status']}  " + redact(json.dumps({k: v for k, v in c.items() if k not in ('status', 'integrity', 'python', 'snapshots')}, default=str))[:400])
         print(f"READINESS: {result['readiness']}  run_id={result['run_id']}")
     return EXIT_OK if result["readiness"] != "NOT_READY" else EXIT_NOT_READY
+
+
+def cmd_capture(args: argparse.Namespace) -> int:
+    from darkbot.main import run_capture
+
+    summary = run_capture(args.config, args.db, args.campaign,
+                          max_duration_minutes=args.max_duration_minutes)
+    print(redact(json.dumps(summary, indent=2, default=str)))
+    if summary.get("feeds_started", 0) == 0 or summary.get("readiness") == "NOT_READY":
+        return EXIT_NOT_READY
+    if summary.get("status") not in ("COMPLETED", "INTERRUPTED"):
+        return EXIT_RUNTIME
+    return EXIT_OK
 
 
 def cmd_paper(args: argparse.Namespace) -> int:
@@ -143,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_doctor(args)
         if args.command == "paper":
             return cmd_paper(args)
+        if args.command == "capture":
+            return cmd_capture(args)
         if args.command == "report":
             return cmd_report(args)
         if args.command == "research":
