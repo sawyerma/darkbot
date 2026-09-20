@@ -34,8 +34,8 @@ def compare_capture(source_db: Path, source_run_id: str, output_db: Path, out: P
     """Source opened read-only. Each variant gets its own persisted run, same frames/fees/FX/portfolio/delay assumptions."""
     if source_db.resolve() == output_db.resolve() or output_db.exists():
         raise ConfigError("A/B output database must be a new file, separate from the source capture")
-    if config_a.strategy_id != "FAST_CREATOR_HOLD_V1" or config_b.strategy_id != "LEGACY_5BUY_5UNIQUE_V1":
-        raise ConfigError("A/B requires Strategy A then Strategy B configs")
+    if config_a.strategy_id != "FAST_CREATOR_HOLD_V1" or config_b.strategy_id not in ("LEGACY_5BUY_5UNIQUE_V1", "LEGACY_BACKEND_FILTER_V1"):
+        raise ConfigError("A/B requires Strategy A first, then a Strategy B or Strategy C config")
     shared = set(config_a.raw) - {"strategy", "config_version", "fx"}
     if any(config_a.raw[k] != config_b.raw[k] for k in shared) or config_a.raw["fx"]["max_age_ms"] != config_b.raw["fx"]["max_age_ms"]:
         raise ConfigError("A/B configs must share engine, costs, feeds, portfolio, latency and FX freshness settings")

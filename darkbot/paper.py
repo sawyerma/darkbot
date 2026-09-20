@@ -96,7 +96,9 @@ class Counters:
     entry_failed: int = 0
     exits_creator: int = 0
     exits_target: int = 0
+    exits_stop: int = 0
     exits_timeout: int = 0
+    entry_cancelled_creator_sold: int = 0
     exit_fills: int = 0
     exit_failed_attempts: int = 0
     exit_exhausted: int = 0
@@ -184,7 +186,7 @@ class StateOwner:
                 self.capital_initialized = True
                 self._record(UpdateRecord("runs", "run_id", self.run_id, {"start_balance_lamports": capital}))
 
-    def record_observation(self, observation, qualified, actual, status=None):
+    def record_observation(self, observation, qualified, actual, status=None, extra=None):
         if status is None:
             status = "OBSERVING" if qualified is None else "DECIDED"
         self._record(RowRecord("strategy_observations", {
@@ -192,7 +194,7 @@ class StateOwner:
             "strategy_id": self.cfg.strategy_id, "strategy_config_hash": self.cfg.strategy_config_hash,
             "create_signature": observation.signature, "observation_start": observation.start, "observation_end": observation.end,
             "decision_actual_mono_ns": actual, "buy_count": observation.buy_count, "unique_buyers": len(observation.buyers),
-            "qualified": qualified, "status": status}, upsert=True))
+            "qualified": qualified, "status": status, **(extra or {})}, upsert=True))
 
     # ------------------------------------------------------------------ helpers
     def _tele(self, key: str, value: int) -> None:
@@ -435,6 +437,8 @@ class StateOwner:
             budget = self.fx_snapshot.budget(self.cfg.strategy["trade_size_usd"], now, self.cfg["fx"]["max_age_ms"]) if self.fx_snapshot else None
             if not budget:
                 eligible, reason = False, "SOL_USD_EVIDENCE_MISSING_OR_STALE"
+        elif eligible and self.cfg.strategy["entry_amount_semantics"] == "SWAP_BUDGET_INCLUDING_PROTOCOL_FEES":
+            budget = self.cfg.strategy["entry_amount_lamports"]  # FIXED_SOL swap budget: pump/creator fees inside, network/rent on top
         if eligible and not self.economic_intents_allowed:
             eligible, reason = False, "CAPTURE_ONLY_MODE"
         if eligible and self.mint_allowlist is not None and mint not in self.mint_allowlist:
@@ -469,7 +473,7 @@ class StateOwner:
                 eligible, reason = False, "INSUFFICIENT_CAPITAL"
         self.dec_seq += 1
         decision_id = f"{self.run_id}_d{self.dec_seq}"
-        if eligible and budget is not None:
+        if eligible and budget is not None and self.cfg.strategy["sizing_mode"] == "USD_SWAP_BUDGET":
             self._record(RowRecord("entry_sizing", {"decision_id": decision_id, "run_id": self.run_id, "mint": mint,
                 "trade_size_usd": self.cfg.strategy["trade_size_usd"], "fx_snapshot_id": f"{self.run_id}_{self.fx_snapshot.snapshot_id}",
                 "swap_budget_lamports": budget, "curve_input_lamports": quote.curve_input_lamports, "max_swap_debit_lamports": quote.max_input_base_units, "sizing_basis": self.cfg.strategy["sizing_mode"], "decision_mono_ns": now}))
@@ -588,12 +592,14 @@ class StateOwner:
             return
         if self.reducer.gap_open_since is not None or st.coverage_state == CoverageState.GAP or self.reducer.gap_intersects(pos.open_mono_ns or now, now):
             pos.canonical_provider_gap_flag = True
-        if st.decode_gap_since is None and not any(r == ExitReason.TARGET for r, _ in pos.latched_triggers):
+        if st.decode_gap_since is None and not any(r in (ExitReason.TARGET, ExitReason.STOP) for r, _ in pos.latched_triggers):
             curve = self._curve(st)
             if curve is not None:
                 nlv = self.engine.net_liquidation_value(curve, self.basis_getter(), now, st.coverage_state, pos.token_balance_base_units, pos.failed_attempt_cost_lamports)
                 if self.strategy.target_reached(nlv, pos.entry_economic_cost_lamports, Decimal(pos.target_net_multiple)):
                     pos.latched_triggers.append((ExitReason.TARGET, now))
+                elif self.strategy.stop_reached(nlv, pos.entry_economic_cost_lamports):
+                    pos.latched_triggers.append((ExitReason.STOP, now))
         self._maybe_exit(pos, st, now)
 
     def _maybe_exit(self, pos: PositionRecord, st: MarketState, now: int) -> None:
@@ -719,6 +725,10 @@ class StateOwner:
         modeled_fill = outcome.scheduled_fill_mono_ns
         now = outcome.callback_actual_mono_ns
         self._tele("callback_lateness_ns", max(0, now - modeled_fill))
+        if (intent.side == Side.BUY and self.strategy.cancel_entry_if_creator_sold_before_fill()
+                and st.creator_sell_receive_mono_ns is not None and st.creator_sell_receive_mono_ns <= modeled_fill):
+            self._entry_cancelled_creator_sold(pos, st, outcome, now, modeled_fill)
+            return
         basis = meta.get("fill_basis", meta["basis"])  # rule valid at the modeled fill, not at submit (S07)
         entry = self.reducer.proxy_state_at(st, modeled_fill)
         venue_invalid = st.venue_state != VenueState.BONDING_CURVE_ACTIVE and st.venue_change_mono_ns is not None and st.venue_change_mono_ns <= modeled_fill
@@ -775,6 +785,31 @@ class StateOwner:
             self._entry_outcome(pos, st, outcome, ev, now, modeled_fill)
         else:
             self._exit_outcome(pos, st, outcome, ev, now, modeled_fill)
+
+    def _entry_cancelled_creator_sold(self, pos: PositionRecord, st: MarketState, outcome: ExecutionOutcome, now: int, modeled_fill: int) -> None:
+        """Legacy backend creator skip: the creator's first SELL was received up to the modeled entry fill, so the entry
+        never happens and nothing is charged (old PAPER_ENTRY_SKIPPED_CREATOR_SOLD). No re-entry for the mint."""
+        required = pos.reserved_cash_lamports
+        self.portfolio.reserved_lamports -= required
+        self.portfolio.cash_lamports += required
+        pos.reserved_cash_lamports = 0
+        pos.state = PositionState.ENTRY_FAILED
+        pos.close_mono_ns = now
+        pos.net_pnl_lamports = 0
+        pos.unresolved_reason = "CREATOR_SOLD_BEFORE_FILL"
+        pos.research_status = "ENTRY_CANCELLED"
+        self.counters.entry_cancelled_creator_sold += 1
+        self.counters.ineligible["CREATOR_SOLD_BEFORE_FILL"] = self.counters.ineligible.get("CREATOR_SOLD_BEFORE_FILL", 0) + 1
+        self.dec_seq += 1
+        self._record(RecordGroup((
+            UpdateRecord("execution_attempts", "attempt_id", outcome.attempt_id, {
+                "status": AttemptStatus.CANCELLED_CREATOR_SOLD.value, "callback_actual_mono_ns": now, "modeled_fill_mono_ns": modeled_fill, "failure_reason": "CREATOR_SOLD_BEFORE_FILL",
+                "fees_charged_lamports": 0, "fee_reconciliation_status": "NOT_CHARGED_CANCELLED", "fill_evidence_status": FillEvidence.NOT_APPLICABLE.value}),
+            RowRecord("decisions", {"decision_id": f"{self.run_id}_d{self.dec_seq}", "run_id": self.run_id, "mint": pos.mint, "event_id": st.creator_sell_event_id, "policy_hash": self.cfg.policy_hash,
+                                    "receive_mono_ns": st.creator_sell_receive_mono_ns, "data_ready_mono_ns": now, "decision_done_mono_ns": self.clock.monotonic_ns(), "intent_enqueued_mono_ns": None,
+                                    "action": DecisionAction.ENTRY_CANCEL.value, "reason": "CREATOR_SOLD_BEFORE_FILL", "position_id": pos.position_id, "quote_state_event_id": st.last_state_event_id,
+                                    "quote_age_ns": None, "quote_snapshot_id": None, "arrival_sequence": None}),
+            ("position", pos))))
 
     def _entry_outcome(self, pos: PositionRecord, st: MarketState, outcome: ExecutionOutcome, ev: Any, now: int, modeled_fill: int) -> None:
         required = pos.reserved_cash_lamports
@@ -853,6 +888,8 @@ class StateOwner:
                 self.counters.exits_creator += 1
             elif pos.exit_reason == ExitReason.TARGET:
                 self.counters.exits_target += 1
+            elif pos.exit_reason == ExitReason.STOP:
+                self.counters.exits_stop += 1
             elif pos.exit_reason == ExitReason.TIMEOUT:
                 self.counters.exits_timeout += 1
             self._record(RecordGroup((book_exit_fill(self.run_id, pos.position_id, outcome.attempt_id, modeled_fill, self.clock.utc_ns(), q), ("position", pos))))

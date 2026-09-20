@@ -19,7 +19,7 @@ FEATURE_NAMES: tuple[str, ...] = (
 )
 FEATURE_SET_V1 = "FEATURE_CONTRACT_V1_LEGACY"
 FEATURE_SET_V2 = "FEATURE_SET_V2_CANONICAL_COVERAGE"
-EXIT_PRIORITY = (ExitReason.CREATOR_SELL, ExitReason.TARGET, ExitReason.TIMEOUT)
+EXIT_PRIORITY = (ExitReason.CREATOR_SELL, ExitReason.TARGET, ExitReason.STOP, ExitReason.TIMEOUT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,8 +66,17 @@ def target_reached(net_liquidation_value: int | None, entry_economic_cost: int, 
     return multiple is not None and multiple >= target
 
 
+def stop_reached(net_liquidation_value: int | None, entry_economic_cost: int, stop: Decimal) -> bool:
+    """Legacy backend stop: net realizable value <= entry cost * stop multiple. With stop == 0 this still
+    fires once the position is worth nothing net of one exit network fee (value <= 0), exactly as the old
+    PaperFillModel.exit_signal did."""
+    if net_liquidation_value is None or entry_economic_cost <= 0:
+        return False
+    return Decimal(net_liquidation_value) <= Decimal(entry_economic_cost) * stop
+
+
 def pick_exit_trigger(candidates: list[tuple[ExitReason, int]]) -> tuple[ExitReason, int] | None:
-    """First causal trigger wins; exact same decision timestamp -> CREATOR_SELL > TARGET > TIMEOUT."""
+    """First causal trigger wins; exact same decision timestamp -> CREATOR_SELL > TARGET > STOP > TIMEOUT."""
     if not candidates:
         return None
     earliest = min(t for _, t in candidates)

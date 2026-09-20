@@ -64,7 +64,7 @@ RUNTIME_SCHEMA: dict[str, Any] = {
     "live_broadcast_enabled": "enum:False",
     "monthly_paid_services_allowed": "enum:False",
     "strategy": S(
-        strategy_id="enum:FAST_CREATOR_HOLD_V1|LEGACY_5BUY_5UNIQUE_V1", observation_ms="int0", filters="list[any]", entry_trigger="enum:FIRST_ACTIONABLE_CREATE", target_net_multiple="dec+",
+        strategy_id="enum:FAST_CREATOR_HOLD_V1|LEGACY_5BUY_5UNIQUE_V1|LEGACY_BACKEND_FILTER_V1", observation_ms="int0", filters="list[any]", entry_trigger="enum:FIRST_ACTIONABLE_CREATE", target_net_multiple="dec+",
         target_exit_enabled="bool", target_is_proven_optimal="bool", ordinary_stop_enabled="enum:False", creator_sell_exit_enabled="bool", entry_amount_lamports="int0",
         sizing_mode="enum:FIXED_SOL|USD_SWAP_BUDGET", policy_frozen_per_position="enum:True", same_event_exit_priority="list[str]", strategy_timeout_ms="int+",
         timeout_policy="enum:FORCE_EXIT", timeout_clock_origin="enum:SUCCESSFUL_ENTRY_FILL",
@@ -390,8 +390,12 @@ def _cross_checks(raw: dict[str, Any]) -> None:
         raise ConfigError("execution.exit_retry_backoff_ms must contain max_exit_attempts-1 positive values")
     if Decimal(st["target_net_multiple"]) <= 1:
         raise ConfigError("strategy.target_net_multiple must be > 1")
-    if st["same_event_exit_priority"] != ["CREATOR_SELL", "TARGET", "TIMEOUT"]:
-        raise ConfigError("strategy.same_event_exit_priority must be CREATOR_SELL,TARGET,TIMEOUT")
+    legacy_backend = st["strategy_id"] == "LEGACY_BACKEND_FILTER_V1"
+    expected_priority = ["CREATOR_SELL", "TARGET", "STOP", "TIMEOUT"] if legacy_backend else ["CREATOR_SELL", "TARGET", "TIMEOUT"]
+    if st["same_event_exit_priority"] != expected_priority:
+        raise ConfigError("strategy.same_event_exit_priority must be " + ",".join(expected_priority))
+    if legacy_backend:
+        _check_legacy_backend_strategy(st)
     if st["strategy_id"] == "FAST_CREATOR_HOLD_V1" and st["observation_ms"] != 0:
         raise ConfigError("strategy.observation_ms must be 0 (no artificial observation wait)")
     if st["strategy_id"] == "FAST_CREATOR_HOLD_V1":
@@ -407,7 +411,7 @@ def _cross_checks(raw: dict[str, Any]) -> None:
                 raise ConfigError("FAST_CREATOR_HOLD_V1 USD profile requires 10 USD slot sizing")
             if st["entry_amount_semantics"] != "TOTAL_SLOT_BUDGET_INCLUDING_ALL_COSTS" or not st["entry_amount_is_usd_pegged"]:
                 raise ConfigError("FAST_CREATOR_HOLD_V1 USD profile requires total USD slot-budget semantics")
-    if st["filters"]:
+    if st["filters"] and not legacy_backend:
         raise ConfigError("strategy.filters must be empty in phase 1 (no predictive filters)")
     if po["occupied_slot_states"] != ["ENTRY_INTENT", "ENTRY_PENDING", "OPEN", "EXIT_PENDING", "UNRESOLVED"]:
         raise ConfigError("portfolio.occupied_slot_states deviates from spec")
@@ -471,6 +475,34 @@ def _cross_checks(raw: dict[str, Any]) -> None:
                 raise ConfigError(f"protocol.create_event_tail_layouts[{layout.get('layout_id')}]: missing {key}")
 
 
+def _check_legacy_backend_strategy(st: dict[str, Any]) -> None:
+    """Strategy C = the old backend's policy. Free parameters are exactly the old StrategyConfig fields; what the old
+    PAPER runtime hard-wired (creator exit, target exit, swap-budget sizing) is not configurable here either."""
+    from darkbot.strategies.strategy_c_legacy_backend import parse_filters
+
+    max_filters = 8  # old contract strategy.max_filters
+    if len(st["filters"]) > max_filters:
+        raise ConfigError(f"strategy.filters has {len(st['filters'])} rules, maximum is {max_filters}")
+    try:
+        parse_filters(st["filters"])
+    except ValueError as exc:
+        raise ConfigError(f"strategy.{exc}") from exc
+    stop = Decimal(str(st["stop_net_multiple"]))
+    if not Decimal(0) <= stop < Decimal(1):
+        raise ConfigError("strategy.stop_net_multiple must be within [0, 1)")
+    if st["ordinary_stop_enabled"] != (stop > 0):
+        raise ConfigError("strategy.ordinary_stop_enabled must be true exactly when stop_net_multiple > 0 (stop 0 still exits at net value <= 0)")
+    if not st["creator_sell_exit_enabled"] or not st["target_exit_enabled"]:
+        raise ConfigError("LEGACY_BACKEND_FILTER_V1: creator-sell exit and target exit were hard-wired in the old backend and must stay enabled")
+    if st["entry_amount_semantics"] != "SWAP_BUDGET_INCLUDING_PROTOCOL_FEES":
+        raise ConfigError("LEGACY_BACKEND_FILTER_V1: trade amount is a swap budget including pump/creator fees (old trade_amount_lamports)")
+    if st["sizing_mode"] == "FIXED_SOL":
+        if st["entry_amount_lamports"] <= 0 or st["entry_amount_is_usd_pegged"]:
+            raise ConfigError("LEGACY_BACKEND_FILTER_V1 FIXED_SOL requires entry_amount_lamports > 0 and entry_amount_is_usd_pegged=false")
+    elif st["entry_amount_lamports"] != 0 or not st["entry_amount_is_usd_pegged"]:
+        raise ConfigError("LEGACY_BACKEND_FILTER_V1 USD_SWAP_BUDGET requires entry_amount_lamports=0 and entry_amount_is_usd_pegged=true")
+
+
 def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
     raw = json.loads(json.dumps(raw))
     # Backward-compatible interpretation of pre-strategy captures: FX collection was disabled.
@@ -488,6 +520,8 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
         schema["strategy"] = {**schema["strategy"], "min_buy_count": "int+", "min_unique_buyers": "int+",
                               "stop_net_multiple": "dec", "sizing_mode": "enum:USD_SWAP_BUDGET", "entry_amount_lamports": "enum:0",
                               "entry_amount_semantics": "enum:SWAP_BUDGET_INCLUDING_PROTOCOL_FEES", "entry_amount_is_usd_pegged": "enum:True"}
+    if raw.get("strategy", {}).get("strategy_id") == "LEGACY_BACKEND_FILTER_V1":
+        schema["strategy"] = {**schema["strategy"], "candidate_name": "str", "stop_net_multiple": "dec", "ordinary_stop_enabled": "bool"}
     _check(raw, schema, "config")
     if raw["strategy"]["strategy_id"] == "LEGACY_5BUY_5UNIQUE_V1":
         st = raw["strategy"]

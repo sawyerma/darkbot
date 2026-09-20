@@ -34,6 +34,14 @@ python3 -m darkbot paper \
   --max-open-positions 10 \
   --max-duration-minutes 15
 
+# Strategy C: altes Backend als Policy (hier Profil PRE_PUMP_01; alle sechs Profile: config/strategy_c_*.json)
+python3 -m darkbot paper \
+  --config config/strategy_c_pre_pump_01.json \
+  --db data/strategy_c_pre_pump_01_15m.sqlite \
+  --campaign strategy_c_pre_pump_01_15m \
+  --max-open-positions 1 \
+  --max-duration-minutes 15
+
 # Strategie-freier 15-Minuten-Market-Capture
 python3 -m darkbot capture \
   --config config/strategy_a_creator_exit_usd_slots.json \
@@ -92,6 +100,17 @@ Für neue Exit-/Timing-Hypothesen zuerst `capture` verwenden. Dieser Modus zeich
 - 1.05x Netto-Target
 - 60 s Timeout
 - kein Creator-Sell-Exit
+
+**Strategy C – `config/strategy_c_*.json` (`LEGACY_BACKEND_FILTER_V1`)**
+
+- komplette Policy des alten Backends (`old_system/backend`), siehe [docs/STRATEGY_C_SOURCE_OF_TRUTH.md](docs/STRATEGY_C_SOURCE_OF_TRUTH.md)
+- `observation_ms` frei (alte Profile: 0 / 500 / 1000 ms), Feature-Snapshot mit exaktem Cutoff
+- typisierte Filter `{feature, min, max}` über die 17 Legacy-Features; NULL = nicht bestanden
+- Creator-Sell bis zum modellierten Entry-Fill -> Entry entfällt kostenfrei
+- Exits: CREATOR_SELL > TARGET > STOP > TIMEOUT; Stop 0 löst bei Netto-Wert <= 0 trotzdem aus
+- Swap-Budget in Lamports inkl. Pump-/Creator-Fee; Netzwerk/Rent zusätzlich
+- Profile: `fast_creator_hold_2x`, `pre_pump_01`, `launch_sniper_0ms_15x`, `paper_explore_01`, `example`, `smoke_all`
+- Latenz 800/800 ms (Sniper 0/0) und `quote_max_age_ms = 600000` wie im alten Backend (letzter beobachteter Zustand, beliebig alt); für einen A/B/C-Vergleich unter identischer Engine beides in der Config auf die A/B-Werte setzen
 
 ## Dateibaum (normativ, `simple_project_structure`)
 `darkbot/{__init__,__main__,main,cli,config,domain,clock,capture,market,strategy,execution,paper,fees,storage,replay,backtest,reporting}.py`,

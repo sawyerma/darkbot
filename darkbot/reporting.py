@@ -125,7 +125,7 @@ class Reporter:
             peak = max(peak, equity)
             dd = max(dd, peak - equity)
         holds = [p["close_mono_ns"] - p["open_mono_ns"] for p in closed if p["open_mono_ns"] and p["close_mono_ns"]]
-        exits = {r: sum(1 for p in closed if p["exit_reason"] == r) for r in ("CREATOR_SELL", "TARGET", "TIMEOUT")}
+        exits = {r: sum(1 for p in closed if p["exit_reason"] == r) for r in ("CREATOR_SELL", "TARGET", "STOP", "TIMEOUT")}
         ineligible: dict[str, int] = defaultdict(int)
         for d in decisions:
             if d["action"] == "SKIP":
@@ -390,7 +390,7 @@ def summary_markdown(r: dict[str, Any]) -> str:
              f"Strategie: {r.get('strategy_id', 'FAST_CREATOR_HOLD_V1')} | Strategy-Hash: {r.get('strategy_config_hash', 'UNKNOWN')}", "",
              f"**Qualifikationsstatus: {r['qualification_status']}** – {'; '.join(r['qualification_reasons'])}", "",
              "## Umfang", f"- Beobachtete CREATEs (lokale Union): {r['creates_observed_union']}, davon actionable: {r['creates_actionable']}", f"- Entry-Intents: {e['entry_intents']}, Fills: {e['entry_fills']}, Entry-Fehler: {e['entry_failed']}",
-             f"- Exits: Creator-Sell {e['exits']['CREATOR_SELL']}, Target {e['exits']['TARGET']}, Timeout {e['exits']['TIMEOUT']}; Exit-Fehlversuche {e['exit_failed_attempts']}, Retry-Erschoepfungen {e['retry_exhausted']}",
+             f"- Exits: Creator-Sell {e['exits']['CREATOR_SELL']}, Target {e['exits']['TARGET']}, Stop {e['exits'].get('STOP', 0)}, Timeout {e['exits']['TIMEOUT']}; Exit-Fehlversuche {e['exit_failed_attempts']}, Retry-Erschoepfungen {e['retry_exhausted']}",
              f"- Offen am Ende: {e['open_at_end']}, UNRESOLVED: {e['unresolved']} {e['unresolved_by_reason']}, zensiert: {e['censored']}", f"- Ineligible nach Grund: {q['ineligible_by_reason']}", "",
              "## Wirtschaft (Modell, OBSERVED_STATE_PROXY)", f"- Realisiertes Netto-PnL: {e['realized_net_pnl_lamports']} Lamports ({e['realized_net_pnl_sol']} SOL)",
              f"- Unrealized: {e['unrealized_status']}; ungeklaerte Exposure (Entry-Kosten): {e['unresolved_exposure_entry_cost_lamports']} Lamports; konservative Untergrenze (Token-Restwert 0): {e['conservative_lower_bound_pnl_lamports_token_residual_zero']}",

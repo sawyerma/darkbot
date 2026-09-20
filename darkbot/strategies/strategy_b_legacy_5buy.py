@@ -88,3 +88,9 @@ class Legacy5Buy5Unique:
 
     def target_reached(self, value, entry_cost, target):
         return target_reached(value, entry_cost, target)
+
+    def stop_reached(self, value, entry_cost):
+        return False
+
+    def cancel_entry_if_creator_sold_before_fill(self):
+        return False
