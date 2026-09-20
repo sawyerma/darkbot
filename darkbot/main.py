@@ -63,11 +63,12 @@ def economic_profile_samples(owner: Any, basis: Any, now: int, limit: int | None
 class Application:
     """One PAPER (or DOCTOR) run: one process, one StateOwner, bounded queues, one SQLite writer thread."""
 
-    def __init__(self, cfg: RuntimeConfig, db_path: Path, campaign: str, mode: str = "PAPER", max_duration_ms: int | None = None, economic: bool = True, status_stream: Any = None) -> None:
+    def __init__(self, cfg: RuntimeConfig, db_path: Path, campaign: str, mode: str = "PAPER", max_duration_ms: int | None = None, economic: bool = True, capture_only: bool = False, status_stream: Any = None) -> None:
         self.cfg, self.db_path, self.campaign, self.mode = cfg, db_path, campaign, mode
         self._economic_sample_count_at_stop: int | None = None
         self.max_duration_ms = max_duration_ms
         self.economic = economic
+        self.capture_only = capture_only
         self.status_stream = status_stream or sys.stderr
         self.clock = LiveClock()
         self.run_id = f"{campaign}_{mode.lower()}_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}_{self.clock.epoch_id[-6:]}"
@@ -117,7 +118,8 @@ class Application:
         rpc = http_rpc(rpc_ep.url, self.cfg.connectivity["rpc_http_timeout_ms"] / 1000) if rpc_ep.available else None
         self.resolver = FeeResolver(self.cfg, rpc, self.clock, self.run_id, "rpc_http" if rpc_ep.available else "NONE")
         self.owner = StateOwner(self.cfg, self.run_id, self.clock, scheduler, self.recorder, adapter, lambda: self.resolver.cache.basis(), "PAPER", economic_intents_allowed=self.economic,
-                                feature_sink=lambda job: loop.run_in_executor(self.executor, job), prior_submitted_mints=prior_mints if self.mode == "PAPER" else None)
+                                feature_sink=lambda job: loop.run_in_executor(self.executor, job), prior_submitted_mints=prior_mints if self.mode == "PAPER" else None,
+                                capture_only=self.capture_only)
         endpoints = resolve_feed_endpoints(self.cfg)
         feed_status: dict[str, str] = {}
         for feed in self.cfg.feeds:
@@ -408,6 +410,16 @@ def run_paper(cfg_path: Path, db_path: Path, campaign: str, max_open_positions: 
     if max_duration_minutes is None or max_duration_minutes <= 0:
         raise ConfigError("--max-duration-minutes must be > 0")
     app = Application(cfg, db_path, campaign, mode="PAPER", max_duration_ms=max_duration_minutes * 60_000)
+    return asyncio.run(app.run())
+
+
+def run_capture(cfg_path: Path, db_path: Path, campaign: str, max_duration_minutes: int | None = None) -> dict[str, Any]:
+    """Record live Pump market data only: no strategy decisions, intents or simulated trades."""
+    cfg = load_runtime_config(cfg_path)
+    if max_duration_minutes is None or max_duration_minutes <= 0:
+        raise ConfigError("--max-duration-minutes must be > 0")
+    app = Application(cfg, db_path, campaign, mode="CAPTURE", max_duration_ms=max_duration_minutes * 60_000,
+                      economic=False, capture_only=True)
     return asyncio.run(app.run())
 
 
