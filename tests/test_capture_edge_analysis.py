@@ -110,11 +110,13 @@ class LegacySourceTests(unittest.TestCase):
 
             out = root / "out"
             result = run_edge_analysis(db, out)
-            self.assertEqual(result["analysis_status"], "LEGACY_SCHEMA_REQUIRES_ADAPTER")
+            self.assertEqual(result["analysis_status"], "LEGACY_CAPTURE_EXPORTED_FOR_ADAPTER")
             report = json.loads((out / "legacy_schema_inventory.json").read_text())
             self.assertEqual(report["status"], "LEGACY_SCHEMA_REQUIRES_ADAPTER")
             self.assertIn("trades", report["tables"])
             self.assertTrue(report["likely_data_tables"])
+            summary = json.loads((out / "edge_summary.json").read_text())
+            self.assertEqual(summary["analysis_status"], "LEGACY_CAPTURE_EXPORTED_FOR_ADAPTER")
 
 
 class EdgeRuleTests(unittest.TestCase):
