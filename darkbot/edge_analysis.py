@@ -60,11 +60,52 @@ class PathPoint:
     exit_invalid_reason: str | None = None
 
 
-def _materialize_source(source: Path) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
+def _schema_inventory_path(path: Path) -> dict[str, Any]:
+    """Inspect a SQLite candidate without assuming any DarkBot schema."""
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        return {"path": str(path), "size_bytes": path.stat().st_size, "sqlite": False, "error": f"{type(exc).__name__}: {exc}", "tables": {}}
+    try:
+        tables: dict[str, list[str]] = {}
+        for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"):
+            try:
+                tables[name] = [r[1] for r in conn.execute(f'PRAGMA table_info("{name}")')]
+            except sqlite3.Error:
+                tables[name] = []
+        names = set(tables)
+        phase1_required = {"runs", "config_snapshots", "feed_observations", "market_events"}
+        phase1_score = len(names & phase1_required)
+        researchish = sum(
+            1 for name in names
+            if any(token in name.lower() for token in ("trade", "position", "launch", "event", "market", "feed", "research", "result", "backtest", "paper"))
+        )
+        has_run_id = any("run_id" in cols for cols in tables.values())
+        score = phase1_score * 1000 + researchish * 20 + (50 if has_run_id else 0) + min(len(names), 100)
+        return {
+            "path": str(path),
+            "size_bytes": path.stat().st_size,
+            "sqlite": True,
+            "tables": tables,
+            "phase1_tables_present": sorted(names & phase1_required),
+            "phase1_complete": phase1_required <= names,
+            "has_run_id": has_run_id,
+            "score": score,
+        }
+    except sqlite3.Error as exc:
+        return {"path": str(path), "size_bytes": path.stat().st_size, "sqlite": False, "error": f"{type(exc).__name__}: {exc}", "tables": {}}
+    finally:
+        conn.close()
+
+
+def _materialize_source(source: Path) -> tuple[Path, tempfile.TemporaryDirectory[str] | None, list[dict[str, Any]]]:
     if source.suffix.lower() != ".zip":
         if not source.exists():
             raise ConfigError(f"edge-analysis source not found: {source}")
-        return source, None
+        inventory = [_schema_inventory_path(source)]
+        if not inventory[0].get("sqlite"):
+            raise ConfigError(f"edge-analysis source is not a readable SQLite database: {source}")
+        return source, None, inventory
     if not source.exists():
         raise ConfigError(f"edge-analysis source ZIP not found: {source}")
     tmp = tempfile.TemporaryDirectory(prefix="darkbot_edge_")
@@ -78,23 +119,46 @@ def _materialize_source(source: Path) -> tuple[Path, tempfile.TemporaryDirectory
     if not candidates:
         tmp.cleanup()
         raise ConfigError(f"edge-analysis ZIP contains no SQLite database: {source}")
-    # Prefer the largest DB: capture databases dwarf metadata/test DBs.
-    db = max(candidates, key=lambda p: p.stat().st_size)
-    return db, tmp
+    inventory = [_schema_inventory_path(p) for p in candidates]
+    readable = [x for x in inventory if x.get("sqlite")]
+    if not readable:
+        tmp.cleanup()
+        raise ConfigError(f"edge-analysis ZIP contains no readable SQLite database: {source}")
+    # Select by DarkBot/research schema relevance, not file size.
+    chosen = max(readable, key=lambda x: (x.get("score", 0), x.get("size_bytes", 0)))
+    return Path(chosen["path"]), tmp, inventory
+
+
+def _table_names(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
 def _latest_run(conn: sqlite3.Connection, campaign: str | None = None) -> str:
-    if campaign:
-        row = conn.execute(
-            "SELECT run_id FROM runs WHERE campaign_id=? ORDER BY started_utc DESC LIMIT 1", (campaign,)
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT run_id FROM runs WHERE mode IN ('CAPTURE','PAPER') ORDER BY started_utc DESC LIMIT 1"
-        ).fetchone()
-    if row is None:
-        raise ConfigError("edge-analysis: no CAPTURE/PAPER run found")
-    return row[0]
+    tables = _table_names(conn)
+    if "runs" in tables:
+        run_cols = _table_columns(conn, "runs")
+        if campaign and "campaign_id" in run_cols:
+            order = "started_utc" if "started_utc" in run_cols else "rowid"
+            row = conn.execute(
+                f"SELECT run_id FROM runs WHERE campaign_id=? ORDER BY {order} DESC LIMIT 1", (campaign,)
+            ).fetchone()
+        else:
+            order = "started_utc" if "started_utc" in run_cols else "rowid"
+            where = "WHERE mode IN ('CAPTURE','PAPER')" if "mode" in run_cols else ""
+            row = conn.execute(f"SELECT run_id FROM runs {where} ORDER BY {order} DESC LIMIT 1").fetchone()
+        if row is not None:
+            return row[0]
+
+    # Legacy DBs sometimes persist run_id on data tables but have no runs manifest.
+    for table in ("positions", "trades", "market_events", "feed_observations", "results"):
+        if table not in tables:
+            continue
+        cols = _table_columns(conn, table)
+        if "run_id" in cols:
+            row = conn.execute(f'SELECT run_id FROM "{table}" WHERE run_id IS NOT NULL ORDER BY rowid DESC LIMIT 1').fetchone()
+            if row is not None:
+                return row[0]
+    return "__LEGACY_SINGLE_RUN__"
 
 
 def _runtime_config(conn: sqlite3.Connection, run_id: str, source: Path) -> RuntimeConfig:
