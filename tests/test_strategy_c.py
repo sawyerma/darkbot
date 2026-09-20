@@ -373,5 +373,20 @@ class StrategyCTests(unittest.TestCase):
         self.assertEqual(c.execution["quote_max_age_ms"], 600000)  # original profile is untouched
 
 
+    def test_C25_replay_slot_limit_scales_fixed_capital(self):
+        c = load_runtime_config(ROOT / "config/strategy_c_pre_pump_01.json")
+        base = c.portfolio["initial_paper_balance_lamports"]
+        variant = c.with_overrides(portfolio=c.portfolio_limit_overrides(10))
+        self.assertEqual(variant.portfolio["max_open_positions"], 10)
+        self.assertEqual(variant.portfolio["initial_paper_balance_lamports"], base * 10)
+
+    def test_C26_usd_per_slot_keeps_fx_derived_capital(self):
+        a = load_runtime_config(ROOT / "config/strategy_a_creator_exit_usd_slots.json")
+        variant = a.with_overrides(portfolio=a.portfolio_limit_overrides(10))
+        self.assertEqual(variant.portfolio["max_open_positions"], 10)
+        self.assertEqual(variant.portfolio["initial_paper_balance_lamports"], 0)
+        self.assertEqual(variant.portfolio["initial_paper_balance_mode"], "USD_PER_SLOT")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -102,9 +102,8 @@ def register_variants(research: dict[str, Any], cfg: RuntimeConfig) -> list[Vari
 
 
 def variant_config(cfg: RuntimeConfig, v: Variant, launches: int, seed: int = 0) -> RuntimeConfig:
-    portfolio = {"max_open_positions": max(1, launches) if v.paired else v.portfolio_limit}
-    if v.paired:
-        portfolio["initial_paper_balance_lamports"] = cfg.portfolio["initial_paper_balance_lamports"] * max(1, launches)
+    limit = max(1, launches) if v.paired else v.portfolio_limit
+    portfolio = cfg.portfolio_limit_overrides(limit)
     return cfg.with_overrides(strategy={"target_net_multiple": v.target}, latency_model={"entry_delay_ms": v.entry_delay_ms, "exit_delay_ms": v.exit_delay_ms}, portfolio=portfolio, execution={"research_stress": {"network_fee_multiplier": v.fee_multiplier, "additional_adverse_price_bps": v.adverse_bps, "exit_reject_rate": v.reject_rate, "random_seed": seed}})
 
 

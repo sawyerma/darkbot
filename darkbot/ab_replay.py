@@ -101,7 +101,7 @@ def compare_capture(source_db: Path, source_run_id: str, output_db: Path, out: P
                                 delays[mint,side,attempt] = measured[key][index]*NS_PER_MS
                 provider = (lambda intent: delays[intent.mint,intent.side.value,intent.attempt_number]) if empirical else None
                 for tag,cfg in (("A",config_a),("B",config_b)):
-                    variant=cfg.with_overrides(portfolio={'max_open_positions':limit},latency_model={**scenario,'measured_distribution_id':measured_hash if empirical else None})
+                    variant=cfg.with_overrides(portfolio=cfg.portfolio_limit_overrides(limit),latency_model={**scenario,'measured_distribution_id':measured_hash if empirical else None})
                     run_id=f"ab_{tag}_L{limit}_S{scenario_index}_{frozen.dataset_hash[:12]}"
                     result=run_replay(conn,frozen,variant,run_id,'strategy_ab',persist=True,persist_observations=True,
                                       replay_callback_lateness=False,execution_delay_provider=provider)

@@ -300,6 +300,22 @@ class RuntimeConfig:
             raw[section].update(values)
         return build_runtime_config(self.path, raw)
 
+    def portfolio_limit_overrides(self, limit: int) -> dict[str, Any]:
+        """Research/replay portfolio override preserving capital per configured slot.
+
+        FIXED_LAMPORTS profiles scale the initial balance with the requested slot count so a
+        portfolio-limit scenario is not silently capital-limited. USD_PER_SLOT profiles keep
+        initial_paper_balance_lamports=0 because StateOwner derives total capital from FX × slots.
+        """
+        if type(limit) is not int or limit < 1:
+            raise ConfigError("portfolio limit must be a positive integer")
+        out: dict[str, Any] = {"max_open_positions": limit}
+        if self.portfolio["initial_paper_balance_mode"] == "FIXED_LAMPORTS":
+            base_limit = int(self.portfolio["max_open_positions"])
+            base_balance = int(self.portfolio["initial_paper_balance_lamports"])
+            out["initial_paper_balance_lamports"] = (base_balance * limit + base_limit - 1) // base_limit
+        return out
+
     def snapshot_kinds(self) -> dict[str, tuple[str, dict[str, Any]]]:
         """kind -> (hash, content) for every config_snapshots row that must exist before a run starts."""
         return {
