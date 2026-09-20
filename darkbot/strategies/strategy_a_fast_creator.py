@@ -21,4 +21,6 @@ class FastCreatorHold:
         return self.config["creator_sell_exit_enabled"]
 
     def target_reached(self, value, entry_cost, target):
+        if not self.config.get("target_exit_enabled", True):
+            return False
         return target_reached(value, entry_cost, target)
