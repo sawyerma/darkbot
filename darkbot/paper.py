@@ -110,7 +110,7 @@ class StateOwner:
     def __init__(self, cfg: Any, run_id: str, clock: Any, scheduler: Any, recorder: Recorder, adapter: PaperExecutionAdapter, basis_getter: Callable[[], CostBasis], mode: str,
                  economic_intents_allowed: bool = True, feature_sink: Callable[[Callable[[], None]], None] | None = None, variant_id: str | None = None,
                  canonical_prefix: str | None = None, persist_observations: bool = True, compute_features: bool = True, engine: QuoteEngine | None = None, mint_allowlist: set[str] | None = None,
-                 prior_submitted_mints: set[str] | None = None, capture_only: bool = false) -> None:
+                 prior_submitted_mints: set[str] | None = None, capture_only: bool = False) -> None:
         self.cfg, self.run_id, self.clock, self.scheduler, self.recorder, self.adapter, self.basis_getter, self.mode = cfg, run_id, clock, scheduler, recorder, adapter, basis_getter, mode
         self.economic_intents_allowed = economic_intents_allowed
         self.capture_only = capture_only
