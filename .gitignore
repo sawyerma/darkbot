@@ -1,13 +1,19 @@
+# Code, JSON configuration, fixtures and report exports are versioned by default.
+# From the repository root, use git add . to stage all non-ignored changes.
+# Do not blanket-unignore exports: the exclusions below also apply there.
+
 # macOS
 .DS_Store
+._*
 
-# Python
+# Python caches and test output
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
 
 # Virtual environments
@@ -15,7 +21,7 @@ htmlcov/
 venv/
 env/
 
-# Secrets / environment
+# Secrets / environment (keep the sanitized example)
 .env
 .env.*
 !.env.example
@@ -24,18 +30,27 @@ env/
 *.p12
 *.pfx
 
-# Runtime databases
+# Runtime databases and SQLite sidecars
 *.sqlite
 *.sqlite3
 *.db
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+*.db-wal
+*.db-shm
+*.db-journal
 
-# Logs
+# Runtime logs and failed writer batches (may contain raw recording data)
 *.log
+*.quarantine.jsonl
 
 # IDE
 .idea/
 .vscode/
 
-# PAPER/report exports are intentionally versioned
-!exports/
-!exports/**
+# No blanket exclusions for data/ or exports/:
+# evidence JSON, reports, CSV, Markdown and ZIP exports remain eligible for Git.
