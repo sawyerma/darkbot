@@ -10,7 +10,9 @@ Policy (old paper.py / execution.py semantics):
               exact cutoff (receive <= deadline) -> every typed filter {feature, min, max} must
               pass; NULL feature value = failed; coverage gap = DATA_INCOMPLETE (no entry).
   entry     : one decision per mint, slot busy = discarded for good; entry is dropped at no cost
-              when the creator sold up to the modeled entry fill (creator skip).
+              when the creator sold up to the modeled entry fill (default LEGACY_FREE_CANCEL).
+              Optional TX_LANDS keeps the submitted BUY in normal modeled-fill evaluation;
+              it does not guarantee a fill or bypass costs, coverage or slippage checks.
   exit      : CREATOR_SELL > TARGET > STOP on the same state, TIMEOUT from the successful fill.
               Creator exit is hard-wired (never configurable in the old backend).
               stop_net_multiple == 0 still fires when the net realizable value is <= 0.
@@ -279,7 +281,9 @@ class LegacyBackendFilter:
         return entry_admission(state, **checks)  # includes CREATOR_ALREADY_SOLD and SLOT_LIMIT (slot busy = discarded for good)
 
     def cancel_entry_if_creator_sold_before_fill(self):
-        return True  # old paper._entry_fill: creator_sell_offset <= fill_offset -> entry skipped, no cost
+        # TX_LANDS retains the normal fill checks; a successful BUY then enters
+        # the shared creator-sell exit path. Known sells still block admission.
+        return self.config.get("creator_sold_before_fill", "LEGACY_FREE_CANCEL") == "LEGACY_FREE_CANCEL"
 
     def creator_exit_enabled(self):
         return True  # hard-wired in the old PAPER runtime

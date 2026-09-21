@@ -538,6 +538,8 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
                               "entry_amount_semantics": "enum:SWAP_BUDGET_INCLUDING_PROTOCOL_FEES", "entry_amount_is_usd_pegged": "enum:True"}
     if raw.get("strategy", {}).get("strategy_id") == "LEGACY_BACKEND_FILTER_V1":
         schema["strategy"] = {**schema["strategy"], "candidate_name": "str", "stop_net_multiple": "dec", "ordinary_stop_enabled": "bool"}
+        if "creator_sold_before_fill" in raw["strategy"]:
+            schema["strategy"]["creator_sold_before_fill"] = "enum:LEGACY_FREE_CANCEL|TX_LANDS"
     _check(raw, schema, "config")
     if raw["strategy"]["strategy_id"] == "LEGACY_5BUY_5UNIQUE_V1":
         st = raw["strategy"]

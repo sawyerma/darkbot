@@ -39,6 +39,10 @@ class ReplayInput:
     end_mono_ns: int  # recorded run end (runs.ended_mono_ns) or, if missing, the last observation
 
     fx_snapshots: list[FxSnapshot] = field(default_factory=list)
+    # Fee evidence retains the configuration hash under which it was observed.
+    # A replay into a separate database must carry those referenced source rows
+    # with the dataset; the replay policy's cost model may legitimately differ.
+    source_config_snapshots: list[tuple[str, str, str, str, str, int | None, str | None]] = field(default_factory=list)
 
 def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig) -> ReplayInput:
     conn.row_factory = sqlite3.Row
@@ -105,7 +109,25 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
     dataset_hash = sha256_text(canonical_json({"run": run_id, "fx": [s.__dict__ for s in fx_snapshots], "run_manifest": run_manifest, "canonical_events": canonical_rows, "quality_events": quality_rows, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
                                                "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "decoder_code_hash": decoder_code_hash, "protocol_pinning_hash": cfg.protocol_hash,
                                                "coverage": "CANONICAL_COVERAGE_V2", "spec": "1.3.2"}))
-    return ReplayInput(run_id, run["host_clock_epoch_id"], start, start_utc, observations, fees, transitions, lateness, dataset_hash, end, fx_snapshots)
+    referenced_hashes = sorted({fee.config_hash for fee in fees if fee.config_hash})
+    source_config_snapshots = [
+        tuple(row)
+        for config_hash in referenced_hashes
+        for row in conn.execute(
+            "SELECT config_hash,kind,canonical_json,created_utc,source,valid_from_slot,verified_utc "
+            "FROM config_snapshots WHERE config_hash=?",
+            (config_hash,),
+        )
+    ]
+    found_hashes = {row[0] for row in source_config_snapshots}
+    missing_hashes = sorted(set(referenced_hashes) - found_hashes)
+    if missing_hashes:
+        raise ValueError("DATASET_INTEGRITY_VIOLATION: fee evidence references missing config snapshot(s): " + ",".join(missing_hashes))
+    return ReplayInput(
+        run_id, run["host_clock_epoch_id"], start, start_utc, observations,
+        fees, transitions, lateness, dataset_hash, end, fx_snapshots,
+        source_config_snapshots,
+    )
 
 
 @dataclass
@@ -130,10 +152,28 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
     clock = ReplayClock(f"replay_{new_run_id}", replay_input.start_mono_ns, replay_input.start_utc_ns)
     scheduler = ReplayScheduler()
     recorder = Recorder(cfg.storage["queue_capacity_records"], cfg.storage["priority_headroom_records"])
-    writer = SqliteWriter(conn, recorder, cfg.storage["batch_max_records"], cfg.storage["flush_interval_ms"], lambda m: None, cfg.storage["writer_locked_retries"], cfg.storage["fk_merge_max_batches"]) if persist else None
+    writer_errors: list[str] = []
+    owner_ref: list[StateOwner] = []
+
+    def on_writer_error(message: str) -> None:
+        if not writer_errors:
+            writer_errors.append(message)
+        if owner_ref:
+            owner_ref[0].on_disk_error(message)
+
+    writer = SqliteWriter(
+        conn, recorder, cfg.storage["batch_max_records"], cfg.storage["flush_interval_ms"],
+        on_writer_error, cfg.storage["writer_locked_retries"], cfg.storage["fk_merge_max_batches"],
+    ) if persist else None
     if persist:
         for kind, (h, content) in cfg.snapshot_kinds().items():
             upsert_config_snapshot(conn, kind, h, content, "replay", utc_iso(0))
+        conn.executemany(
+            "INSERT OR IGNORE INTO config_snapshots("
+            "config_hash,kind,canonical_json,created_utc,source,valid_from_slot,verified_utc"
+            ") VALUES (?,?,?,?,?,?,?)",
+            replay_input.source_config_snapshots,
+        )
         conn.execute("INSERT OR IGNORE INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,host_clock_epoch_id,status,quality_status,start_balance_lamports,parent_run_id,dataset_hash,started_mono_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      (new_run_id, campaign_id, mode, utc_iso(0), "replay", "", cfg.config_hash, clock.epoch_id, "RUNNING", "OK", cfg.portfolio["initial_paper_balance_lamports"], replay_input.source_run_id, replay_input.dataset_hash, replay_input.start_mono_ns))
         conn.execute("UPDATE runs SET strategy_id=?,strategy_config_hash=? WHERE run_id=?", (cfg.strategy_id, cfg.strategy_config_hash, new_run_id))
@@ -156,7 +196,6 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
             owner_ref[0].on_fee_snapshots(snapshots)
         return snapshots
 
-    owner_ref: list[StateOwner] = []
     lateness = replay_input.lateness if replay_callback_lateness else {}
     adapter = PaperExecutionAdapter(clock, scheduler, "PAPER", False, cfg.latency_model["entry_delay_ms"] * 1_000_000, cfg.latency_model["exit_delay_ms"] * 1_000_000, lateness_provider=lambda aid: lateness.get(_lateness_key(aid), 0), delay_provider=execution_delay_provider)
     engine = QuoteEngine(ExecutionPolicy.from_config(cfg), stress_fee_multiplier, stress_adverse_bps, stress_reject_rate, stress_seed)
@@ -229,7 +268,10 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
     owner.finalize(clock.monotonic_ns())
     if writer is not None:
         writer.flush_sync()
-        conn.execute("UPDATE runs SET status='COMPLETED', ended_utc=?, ended_mono_ns=?, end_balance_lamports=?, quality_status=? WHERE run_id=?", (utc_iso(0), clock.monotonic_ns(), owner.portfolio.cash_lamports + owner.portfolio.reserved_lamports, "OK" if not owner.counters.internal_errors else "INTERNAL_ERROR", new_run_id))
+        if writer_errors:
+            owner.on_disk_error(writer_errors[0])
+        quality_status = "STORAGE_ERROR" if writer_errors or writer.disk_error else ("OK" if not owner.counters.internal_errors else "INTERNAL_ERROR")
+        conn.execute("UPDATE runs SET status='COMPLETED', ended_utc=?, ended_mono_ns=?, end_balance_lamports=?, quality_status=? WHERE run_id=?", (utc_iso(0), clock.monotonic_ns(), owner.portfolio.cash_lamports + owner.portfolio.reserved_lamports, quality_status, new_run_id))
     return ReplayResult(new_run_id, owner, digest(owner))
 
 
