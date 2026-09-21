@@ -406,7 +406,7 @@ def run_paper(cfg_path: Path, db_path: Path, campaign: str, max_open_positions: 
     if max_open_positions is not None:
         if max_open_positions <= 0:
             raise ConfigError("--max-open-positions must be > 0")
-        cfg = cfg.with_overrides(portfolio={"max_open_positions": max_open_positions})
+        cfg = cfg.with_overrides(portfolio=cfg.portfolio_limit_overrides(max_open_positions))
     if max_duration_minutes is None or max_duration_minutes <= 0:
         raise ConfigError("--max-duration-minutes must be > 0")
     app = Application(cfg, db_path, campaign, mode="PAPER", max_duration_ms=max_duration_minutes * 60_000)

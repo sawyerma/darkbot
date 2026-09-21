@@ -20,7 +20,7 @@ from typing import Any
 from darkbot.config import canonical_json, config_hash
 from darkbot.domain import LAMPORTS_PER_SOL, NS_PER_MS, QualificationStatus, utc_iso
 
-QUERY_VERSION = "REPORT_QUERY_V1"
+QUERY_VERSION = "REPORT_QUERY_V2_CREATOR_CANCEL_PROVENANCE"
 COUNTERFACTUAL_NOTE = ("Historischer Fremd-Orderflow reagiert nicht auf unseren hypothetischen Trade (Gegenfaktualitaetsannahme). Simulierte Inklusion ist eine Annahme, keine gemessene Landung. "
                        "Fill-Evidenz ist OBSERVED_STATE_PROXY. Keine Zahl behauptet global frueheste Erkennung, sicheren Fill oder garantierten Profit.")
 
@@ -95,6 +95,7 @@ class Reporter:
             by_state[p["state"]] += 1
         closed = [p for p in positions if p["state"] == "CLOSED"]
         failed_entries = [p for p in positions if p["state"] == "ENTRY_FAILED"]
+        free_cancels = [a for a in attempts if a["side"] == "BUY" and a["status"] == "CANCELLED_CREATOR_SOLD"]
         exposed = [p for p in positions if p["state"] in ("OPEN", "EXIT_PENDING", "ENTRY_PENDING", "ENTRY_INTENT", "UNRESOLVED")]
         resolved = closed + failed_entries
         realized = sum(p["net_pnl_lamports"] for p in resolved if p["net_pnl_lamports"] is not None)
@@ -151,6 +152,8 @@ class Reporter:
         boot = block_bootstrap(blocks, int(cfg["research"]["bootstrap_resamples"]), int(cfg["research"]["random_seed"]), Decimal(cfg["research"]["bootstrap_confidence"]))
         economic = {
             "positions_by_state": dict(by_state), "entry_intents": len(positions), "entry_fills": sum(1 for a in attempts if a["side"] == "BUY" and a["status"] == "FILLED"), "entry_failed": len(failed_entries),
+            "entry_cancelled_free_of_cost": len(free_cancels),
+            "entry_cancellations_by_reason": {"CREATOR_SOLD_BEFORE_FILL": len(free_cancels)} if free_cancels else {},
             "exits": exits, "exit_failed_attempts": sum(1 for a in attempts if a["side"] == "SELL" and a["status"] not in ("FILLED", "SUBMITTED", "UNKNOWN")),
             "retry_exhausted": sum(1 for p in positions if p["unresolved_reason"] == "EXIT_RETRIES_EXHAUSTED"), "unresolved": by_state.get("UNRESOLVED", 0),
             "unresolved_by_reason": _count(positions, "unresolved_reason"), "censored": sum(1 for p in positions if (p["research_status"] or "").startswith("CENSORED")),
@@ -222,6 +225,7 @@ class Reporter:
                 "dataset_hash": run["dataset_hash"], "host_clock_epoch_id": run["host_clock_epoch_id"], "created_utc": utc_iso(time.time_ns()), "creates_observed_union": len(creates), "creates_actionable": sum(1 for cr in creates if cr["actionable_mono_ns"]),
                 "economic": economic, "latency": latency, "quality": qual, "qualification_status": status.value, "qualification_reasons": reasons,
                 "model_assumptions": {"fill_evidence": "OBSERVED_STATE_PROXY", "latency_model": cfg["latency_model"], "slippage_bps": cfg["execution"]["slippage_bps"], "target_net_multiple": cfg["strategy"]["target_net_multiple"],
+                                      "creator_sold_before_fill": cfg["strategy"].get("creator_sold_before_fill", "LEGACY_FREE_CANCEL") if cfg["strategy"].get("strategy_id") == "LEGACY_BACKEND_FILTER_V1" else "TX_LANDS",
                                       "counterfactual_note": COUNTERFACTUAL_NOTE, "exclusions": {"decisions_skipped": dict(ineligible)}}}
 
     @staticmethod
@@ -318,6 +322,8 @@ class Reporter:
     @staticmethod
     def _qualify(cfg: dict[str, Any], econ: dict[str, Any], qual: dict[str, Any], fees: list[dict[str, Any]], attempts: list[dict[str, Any]], positions: list[dict[str, Any]], boot: dict[str, Any]) -> tuple[QualificationStatus, list[str]]:
         reasons: list[str] = []
+        if cfg["strategy"].get("strategy_id") == "LEGACY_BACKEND_FILTER_V1" and cfg["strategy"].get("creator_sold_before_fill", "LEGACY_FREE_CANCEL") == "LEGACY_FREE_CANCEL":
+            return QualificationStatus.UNQUALIFIED_DATA, ["LEGACY_FREE_CANCEL_DIAGNOSTIC_ONLY: free cancellation after submit cannot qualify economic evidence"]
         valid_kinds = {f["source_type"] for f in fees if f["validation_status"] == "VALID"}
         stale_or_unknown = sum(v for k, v in econ["cost_evidence_counts"].items() if "UNKNOWN" in k or "STALE" in k)
         if not {"PROTOCOL_GLOBAL_ACCOUNT", "NETWORK_FEE", "RENT_EXEMPTION", "PRIORITY_POLICY"} <= valid_kinds or stale_or_unknown or qual["ineligible_by_reason"].get("UNQUALIFIED_COSTS") or any(a["fees_charged_lamports"] is None and a["status"] not in ("SUBMITTED",) for a in attempts):
@@ -390,6 +396,7 @@ def summary_markdown(r: dict[str, Any]) -> str:
              f"Strategie: {r.get('strategy_id', 'FAST_CREATOR_HOLD_V1')} | Strategy-Hash: {r.get('strategy_config_hash', 'UNKNOWN')}", "",
              f"**Qualifikationsstatus: {r['qualification_status']}** – {'; '.join(r['qualification_reasons'])}", "",
              "## Umfang", f"- Beobachtete CREATEs (lokale Union): {r['creates_observed_union']}, davon actionable: {r['creates_actionable']}", f"- Entry-Intents: {e['entry_intents']}, Fills: {e['entry_fills']}, Entry-Fehler: {e['entry_failed']}",
+             f"- Davon kostenlose Creator-Stornos: {e.get('entry_cancelled_free_of_cost', 0)}; Modus: {r['model_assumptions'].get('creator_sold_before_fill', 'UNKNOWN')}; Gruende: {e.get('entry_cancellations_by_reason', {})}",
              f"- Exits: Creator-Sell {e['exits']['CREATOR_SELL']}, Target {e['exits']['TARGET']}, Stop {e['exits'].get('STOP', 0)}, Timeout {e['exits']['TIMEOUT']}; Exit-Fehlversuche {e['exit_failed_attempts']}, Retry-Erschoepfungen {e['retry_exhausted']}",
              f"- Offen am Ende: {e['open_at_end']}, UNRESOLVED: {e['unresolved']} {e['unresolved_by_reason']}, zensiert: {e['censored']}", f"- Ineligible nach Grund: {q['ineligible_by_reason']}", "",
              "## Wirtschaft (Modell, OBSERVED_STATE_PROXY)", f"- Realisiertes Netto-PnL: {e['realized_net_pnl_lamports']} Lamports ({e['realized_net_pnl_sol']} SOL)",

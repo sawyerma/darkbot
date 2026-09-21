@@ -8,6 +8,7 @@ later events never change earlier decisions (T20).
 from __future__ import annotations
 
 import sqlite3
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from decimal import Decimal
@@ -19,10 +20,32 @@ from darkbot.clock import ReplayClock, ReplayScheduler
 from darkbot.config import RuntimeConfig, canonical_json, sha256_text
 from darkbot.domain import CostEvidence, FeeSnapshot, RawEnvelope, utc_iso
 from darkbot.execution import ExecutionPolicy, QuoteEngine
-from darkbot.fees import FeeCache
+from darkbot.fees import FEE_KINDS, FeeCache, select_cost_basis
 from darkbot.fx import FxSnapshot
 from darkbot.paper import PaperExecutionAdapter, StateOwner
 from darkbot.storage import Recorder, SqliteWriter, upsert_config_snapshot
+
+DATASET_SCHEMA_VERSION = "REPLAY_DATASET_V3_SOURCE_CONFIG_EVIDENCE"
+
+
+def _validate_source_configs(fees, rows):
+    """Validate consumed evidence before replay or any destination mutation."""
+    by_hash = {}
+    for row in rows:
+        h, kind, content = row[:3]
+        try:
+            normalized = canonical_json(json.loads(content))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("DATASET_INTEGRITY_VIOLATION: config snapshot invalid JSON") from exc
+        if kind != "COST_MODEL" or sha256_text(normalized) != h:
+            raise ValueError(f"DATASET_INTEGRITY_VIOLATION: config snapshot hash/kind mismatch: {h}")
+        if h in by_hash and by_hash[h] != normalized:
+            raise ValueError("DATASET_INTEGRITY_VIOLATION: conflicting source config snapshots")
+        by_hash[h] = normalized
+    missing = {fee.config_hash for fee in fees} - by_hash.keys()
+    if missing:
+        raise ValueError("DATASET_INTEGRITY_VIOLATION: fee evidence references missing config snapshot(s): " + ",".join(sorted(missing)))
+    return by_hash
 
 
 @dataclass
@@ -106,9 +129,6 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
                 raise ValueError("DATASET_INTEGRITY_VIOLATION: SOL/USD evidence mismatch")
             fx_snapshots.append(snapshot)
     run_manifest = dict(run)
-    dataset_hash = sha256_text(canonical_json({"run": run_id, "fx": [s.__dict__ for s in fx_snapshots], "run_manifest": run_manifest, "canonical_events": canonical_rows, "quality_events": quality_rows, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
-                                               "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "decoder_code_hash": decoder_code_hash, "protocol_pinning_hash": cfg.protocol_hash,
-                                               "coverage": "CANONICAL_COVERAGE_V2", "spec": "1.3.2"}))
     referenced_hashes = sorted({fee.config_hash for fee in fees if fee.config_hash})
     source_config_snapshots = [
         tuple(row)
@@ -119,10 +139,21 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
             (config_hash,),
         )
     ]
-    found_hashes = {row[0] for row in source_config_snapshots}
-    missing_hashes = sorted(set(referenced_hashes) - found_hashes)
-    if missing_hashes:
-        raise ValueError("DATASET_INTEGRITY_VIOLATION: fee evidence references missing config snapshot(s): " + ",".join(missing_hashes))
+    source_content = _validate_source_configs(fees, source_config_snapshots)
+    # Bind every consumed fee attribute, including selection identity and the
+    # TTL derived from this replay's freshness policy. A changed provider,
+    # commitment, account identity or expiry is a different dataset version.
+    fee_manifest = [
+        {key: (fee.evidence.value if key == "evidence" else getattr(fee, key)) for key in fee.__slots__}
+        for fee in sorted(fees, key=lambda fee: (fee.received_mono_ns, fee.fee_snapshot_id))
+    ]
+    dataset_hash = sha256_text(canonical_json({"dataset_schema_version": DATASET_SCHEMA_VERSION,
+        "source_cost_models": sorted(source_content.items()),
+        "fee_config_references": sorted((f.fee_snapshot_id, f.config_hash) for f in fees),
+        "fee_manifest": fee_manifest,
+        "run": run_id, "fx": [s.__dict__ for s in fx_snapshots], "run_manifest": run_manifest, "canonical_events": canonical_rows, "quality_events": quality_rows, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
+        "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "decoder_code_hash": decoder_code_hash, "protocol_pinning_hash": cfg.protocol_hash,
+        "coverage": "CANONICAL_COVERAGE_V2", "spec": "1.3.2"}))
     return ReplayInput(
         run_id, run["host_clock_epoch_id"], start, start_utc, observations,
         fees, transitions, lateness, dataset_hash, end, fx_snapshots,
@@ -149,6 +180,12 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
                persist: bool = True, persist_observations: bool = False, compute_features: bool = False, end_mono_ns: int | None = None, drain_ns: int | None = None,
                stress_fee_multiplier: Decimal = Decimal(1), stress_adverse_bps: int = 0, mint_filter: set[str] | None = None, stress_reject_rate: Decimal = Decimal(0), stress_seed: int = 0, replay_callback_lateness: bool = True, execution_delay_provider=None) -> ReplayResult:
     """Replay the frozen dataset through StateOwner; returns the owner (RAM truth) and persists rows when requested."""
+    source_content = _validate_source_configs(replay_input.fee_snapshots, replay_input.source_config_snapshots) if persist or replay_input.source_config_snapshots else {}
+    if persist:
+        for h, content in source_content.items():
+            existing = conn.execute("SELECT kind,canonical_json FROM config_snapshots WHERE config_hash=?", (h,)).fetchone()
+            if existing is not None and (existing[0] != "COST_MODEL" or existing[1] != content):
+                raise ValueError(f"DATASET_INTEGRITY_VIOLATION: destination config snapshot conflict: {h}")
     clock = ReplayClock(f"replay_{new_run_id}", replay_input.start_mono_ns, replay_input.start_utc_ns)
     scheduler = ReplayScheduler()
     recorder = Recorder(cfg.storage["queue_capacity_records"], cfg.storage["priority_headroom_records"])
@@ -189,9 +226,12 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
         snapshots = []
         while next_fee is not None and next_fee.received_mono_ns <= t:
             renamed = FeeSnapshot(**{**{k: getattr(next_fee, k) for k in next_fee.__slots__}, "fee_snapshot_id": f"{new_run_id}_{next_fee.fee_snapshot_id}"}) if persist else next_fee
-            setattr(fee_cache, {"PROTOCOL_GLOBAL_ACCOUNT": "protocol", "NETWORK_FEE": "network", "RENT_EXEMPTION": "rent", "PRIORITY_POLICY": "priority_policy"}[next_fee.source_type], renamed)
             snapshots.append(renamed)
             next_fee = next(fee_iter, None)
+        for _, grouped in groupby(snapshots, key=lambda s: s.received_mono_ns):
+            effective = select_cost_basis(fee_cache.basis(), list(grouped))
+            for kind in FEE_KINDS.values():
+                setattr(fee_cache, kind, getattr(effective, kind))
         if snapshots and owner_ref and notify:
             owner_ref[0].on_fee_snapshots(snapshots)
         return snapshots

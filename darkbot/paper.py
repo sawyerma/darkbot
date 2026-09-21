@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
+from itertools import groupby
 from typing import Any, Callable
 
 from darkbot.domain import (
@@ -20,6 +21,7 @@ from darkbot.domain import (
     Intent, InvalidQuote, MarketState, NormalizedEnvelope, PositionRecord, PositionState, QuoteSnapshot, RawEnvelope, Side, VenueState, Completeness,
 )
 from darkbot.execution import ExecutionPolicy, FillEvaluation, LiveBroadcastForbidden, QuoteEngine, assert_paper_boundary, book_entry_fill, book_exit_fill, book_failed_attempt, evaluate_fill, fee_terms, next_retry_submit_mono_ns
+from darkbot.fees import FEE_KINDS, select_cost_basis
 from darkbot.market import ApplyResult, MarketReducer, Normalizer, PumpDecoder
 from darkbot.storage import ObservationRecord, RecordGroup, Recorder, RowRecord, UpdateRecord
 from darkbot.strategies import make_strategy
@@ -127,6 +129,7 @@ class StateOwner:
         self.reducer.set_quote_constants(cfg.protocol["wsol_mint"], cfg.protocol["native_sol_curve_sentinel"])
         self.telemetry_max = cfg.storage["telemetry_samples_max"]
         self.fee_history: list[tuple[int, str, Any]] = []  # (received_mono_ns, kind, snapshot): fee rule valid at a model time = latest snapshot received <= t
+        self._effective_fee_basis = CostBasis(None, None, None, None)
         self.spl_token_program = cfg.protocol["spl_token_program"]
         self.token_2022_supported = cfg.execution["token_account_policy"]["token_2022_supported"]
         self.decode_issues: dict[str, int] = {}
@@ -204,18 +207,18 @@ class StateOwner:
             del lst[: self.telemetry_max // 2]
 
     def on_fee_snapshots(self, snapshots: list[Any]) -> None:
-        """Fee snapshots are knowledge with a receive time; the rule valid at a modeled fill is the latest snapshot received before it (S07)."""
-        kinds = {"PROTOCOL_GLOBAL_ACCOUNT": "protocol", "NETWORK_FEE": "network", "RENT_EXEMPTION": "rent", "PRIORITY_POLICY": "priority_policy"}
-        for snap in snapshots:
-            self.fee_history.append((snap.received_mono_ns, kinds[snap.source_type], snap))
+        """Select effective evidence at publication time without changing retained evidence's TTL."""
+        for published_at, grouped in groupby(sorted(snapshots, key=lambda s: s.received_mono_ns), key=lambda s: s.received_mono_ns):
+            batch = list(grouped)
+            self._effective_fee_basis = select_cost_basis(self._effective_fee_basis, batch)
+            for kind in FEE_KINDS.values():
+                self.fee_history.append((published_at, kind, getattr(self._effective_fee_basis, kind)))
             # Each pending attempt retains its effective modeled-fill basis,
             # independently of global history compaction and callback delay.
             for meta in self.pending_attempts.values():
-                if snap.received_mono_ns <= meta["handle"].scheduled_fill_mono_ns:
+                if published_at <= meta["handle"].scheduled_fill_mono_ns:
                     old = meta.get("fill_basis", meta["basis"])
-                    values = {k: getattr(old, k) for k in ("protocol", "network", "rent", "priority_policy")}
-                    values[kinds[snap.source_type]] = snap
-                    meta["fill_basis"] = CostBasis(**values)
+                    meta["fill_basis"] = select_cost_basis(old, batch)
         if len(self.fee_history) > self.fee_history_max:
             latest_by_kind: dict[str, int] = {}
             for i, (_, kind, _) in enumerate(self.fee_history):
@@ -239,7 +242,7 @@ class StateOwner:
         for received, kind, snap in self.fee_history:
             if received <= mono_ns:
                 latest[kind] = snap
-        if not latest:
+        if not latest and not self.fee_history:
             return self.basis_getter()
         return CostBasis(latest.get("protocol"), latest.get("network"), latest.get("rent"), latest.get("priority_policy"))
 

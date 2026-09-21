@@ -18,12 +18,14 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from decimal import Decimal
+from itertools import groupby
 from pathlib import Path
 from typing import Any, Iterable
 
 from darkbot.config import ConfigError, RuntimeConfig, build_runtime_config
 from darkbot.domain import CostBasis, CoverageState, CurveState, InvalidQuote, QuoteScopeStatus, RawEnvelope, Side, VenueState
 from darkbot.execution import ExecutionPolicy, QuoteEngine
+from darkbot.fees import select_cost_basis
 from darkbot.market import MarketReducer, Normalizer, PumpDecoder
 from darkbot.replay import load_replay_input
 from darkbot.storage import open_connection
@@ -347,18 +349,14 @@ def _baseline_reproduction(conn: sqlite3.Connection, run_id: str) -> dict[str, A
 
 
 def _basis_at(fees: list[Any], t: int) -> CostBasis:
-    latest: dict[str, Any] = {}
-    mapping = {
-        "PROTOCOL_GLOBAL_ACCOUNT": "protocol",
-        "NETWORK_FEE": "network",
-        "RENT_EXEMPTION": "rent",
-        "PRIORITY_POLICY": "priority_policy",
-    }
-    for snap in fees:
-        if snap.received_mono_ns > t:
+    basis = CostBasis(None, None, None, None)
+    # load_replay_input supplies snapshots ordered by receive time. Preserve
+    # atomic refresh batches and the same causal evidence policy as PAPER/replay.
+    for received, grouped in groupby(fees, key=lambda s: s.received_mono_ns):
+        if received > t:
             break
-        latest[mapping[snap.source_type]] = snap
-    return CostBasis(latest.get("protocol"), latest.get("network"), latest.get("rent"), latest.get("priority_policy"))
+        basis = select_cost_basis(basis, list(grouped))
+    return basis
 
 
 def _fx_at(fx: list[Any], t: int) -> Any | None:

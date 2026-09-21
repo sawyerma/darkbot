@@ -301,7 +301,7 @@ class RuntimeConfig:
         return build_runtime_config(self.path, raw)
 
     def portfolio_limit_overrides(self, limit: int) -> dict[str, Any]:
-        """Research/replay portfolio override preserving capital per configured slot.
+        """PAPER/research/replay portfolio override preserving capital per configured slot.
 
         FIXED_LAMPORTS profiles scale the initial balance with the requested slot count so a
         portfolio-limit scenario is not silently capital-limited. USD_PER_SLOT profiles keep

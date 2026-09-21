@@ -31,6 +31,61 @@ class RpcError(RuntimeError):
     pass
 
 
+def _acquisition_error(exc: Exception) -> dict[str, Any]:
+    # Parsing/layout failures also reach the resolver's broad exception boundary;
+    # only transport failures or our exact local request-budget failure can retain evidence.
+    transient = isinstance(exc, (OSError, TimeoutError, ConnectionError)) or (
+        isinstance(exc, RpcError) and str(exc) == "configured free RPC request budget exhausted")
+    return {"error": type(exc).__name__, "transient_acquisition_failure": transient}
+
+
+FEE_KINDS = {"PROTOCOL_GLOBAL_ACCOUNT": "protocol", "NETWORK_FEE": "network",
+             "RENT_EXEMPTION": "rent", "PRIORITY_POLICY": "priority_policy"}
+
+
+def select_cost_basis(previous: CostBasis, snapshots: list[FeeSnapshot]) -> CostBasis:
+    """Apply one publication batch; retained evidence keeps its original identity and TTL.
+
+    Raw failures remain observations. An authoritative invalidation replaces VALID evidence,
+    so a later transient failure cannot resurrect it. Network/priority form a coherent pair.
+    """
+    if not snapshots:
+        return previous
+    now = max(s.received_mono_ns for s in snapshots)
+    incoming = {FEE_KINDS[s.source_type]: s for s in snapshots}
+    values = {k: getattr(previous, k) for k in FEE_KINDS.values()}
+
+    def transient(s):
+        return s is not None and s.raw_values.get("transient_acquisition_failure") is True
+
+    def compatible(old, new):
+        return old is not None and new is not None and old.is_fresh(now) and all(
+            getattr(old, k) == getattr(new, k) for k in
+            ("source_type", "source_provider", "config_hash", "protocol_program_id", "idl_version_or_hash", "freshness_policy_hash", "commitment")) and (
+            old.source_account_addresses[:len(new.source_account_addresses)] == new.source_account_addresses)
+
+    for kind in ("protocol", "rent"):
+        new = incoming.get(kind)
+        if new is not None and not (transient(new) and compatible(values[kind], new)):
+            values[kind] = new
+    if "network" in incoming or "priority_policy" in incoming:
+        net = incoming.get("network", values["network"])
+        priority = incoming.get("priority_policy", values["priority_policy"])
+        priority_failure = transient(priority)
+        net_failure = transient(net) or (net is not None and net.validation_status == "PRIORITY_UNKNOWN" and priority_failure)
+        pair_failure = (net_failure or priority_failure) and (
+            net_failure or (net is not None and net.validation_status == "VALID")) and (
+            priority_failure or (priority is not None and priority.validation_status == "VALID"))
+        if not (pair_failure and compatible(values["network"], net) and compatible(values["priority_policy"], priority)):
+            values["network"], values["priority_policy"] = net, priority
+            # A stand-alone priority update cannot silently relabel a previous fee probe.
+            if net is not None and priority is not None:
+                probed_price = net.raw_values.get("compute_unit_price_micro_lamports")
+                if probed_price is not None and probed_price != priority.normalized_fee_components.get("compute_unit_price_micro_lamports"):
+                    values["network"] = None
+    return CostBasis(**values)
+
+
 def http_rpc(url: str, timeout_s: float) -> RpcCall:
     """Minimal JSON-RPC over urllib (standard library). Used only via asyncio.to_thread outside the hot path."""
 
@@ -213,8 +268,10 @@ class FeeResolver:
         addr = ga["address"]
         if self.rpc is None:
             return self._snap("protocol", "PROTOCOL_GLOBAL_ACCOUNT", "getAccountInfo", (addr,), None, {}, {"protocol_fee_bps": None, "creator_fee_bps": None, "other_protocol_fee_bps": None}, "UNAVAILABLE_NO_RPC", CostEvidence.UNKNOWN, "PUMP_BONDING_CURVE_SOL", self.cfg.protocol["fee_rounding"])
+        response_observed = False
         try:
             result = self.rpc("getAccountInfo", [addr, {"encoding": "base64", "commitment": self.cfg.raw["rpc_http"]["commitment"]}])
+            response_observed = True
             value = result["value"]
             slot = result.get("context", {}).get("slot")
             owner = value["owner"]
@@ -282,7 +339,10 @@ class FeeResolver:
                               "PUMP_BONDING_CURVE_STANDARD_SOL", self.cfg.protocol["fee_rounding"])
         except Exception as exc:  # noqa: BLE001 - recorded as UNKNOWN snapshot, never as zero fee
             self.errors.append(f"protocol: {type(exc).__name__}")
-            return self._snap("protocol", "PROTOCOL_GLOBAL_ACCOUNT", "getAccountInfo", (addr,), None, {"error": type(exc).__name__}, {"protocol_fee_bps": None, "creator_fee_bps": None, "other_protocol_fee_bps": None}, "RPC_ERROR", CostEvidence.UNKNOWN, "PUMP_BONDING_CURVE_SOL", self.cfg.protocol["fee_rounding"])
+            error = _acquisition_error(exc)
+            if response_observed:
+                error["transient_acquisition_failure"] = False  # partial observations may contain changed fee rules
+            return self._snap("protocol", "PROTOCOL_GLOBAL_ACCOUNT", "getAccountInfo", (addr,), None, error, {"protocol_fee_bps": None, "creator_fee_bps": None, "other_protocol_fee_bps": None}, "RPC_ERROR", CostEvidence.UNKNOWN, "PUMP_BONDING_CURVE_SOL", self.cfg.protocol["fee_rounding"])
 
     def resolve_priority(self) -> FeeSnapshot:
         pp = self.cfg.execution["priority_policy"]
@@ -302,7 +362,7 @@ class FeeResolver:
             return self._snap("priority_policy", "PRIORITY_POLICY", "getRecentPrioritizationFees", (), None, {"samples": fees, "derivation": derivation}, {"compute_unit_price_micro_lamports": price, "compute_unit_limit": pp["compute_unit_limit"]}, "VALID", CostEvidence.MEASURED, "COMPUTE_BUDGET_PRICE")
         except Exception as exc:  # noqa: BLE001
             self.errors.append(f"priority: {type(exc).__name__}")
-            return self._snap("priority_policy", "PRIORITY_POLICY", "getRecentPrioritizationFees", (), None, {"error": type(exc).__name__}, {"compute_unit_price_micro_lamports": None}, "RPC_ERROR", CostEvidence.UNKNOWN, "COMPUTE_BUDGET_PRICE")
+            return self._snap("priority_policy", "PRIORITY_POLICY", "getRecentPrioritizationFees", (), None, _acquisition_error(exc), {"compute_unit_price_micro_lamports": None}, "RPC_ERROR", CostEvidence.UNKNOWN, "COMPUTE_BUDGET_PRICE")
 
     def resolve_network(self, priority: FeeSnapshot | None) -> FeeSnapshot:
         ex, co = self.cfg.execution, self.cfg.costs
@@ -322,6 +382,7 @@ class FeeResolver:
         raw: dict[str, Any] = {"message_template_hash": template, "signature_count": sigs, "compute_unit_limit": cu_limit, "compute_unit_price_micro_lamports": int(price), "formula_priority_lamports": prio, "base_rule": co["base_fee_rule"]}
         if self.rpc is None:
             return self._snap("network", "NETWORK_FEE", "getFeeForMessage", (), None, raw, {"base_fee_lamports": base, "priority_fee_lamports": prio, "network_fee_total_lamports": base + prio}, "VALID_FORMULA_UNVALIDATED_NO_RPC", CostEvidence.MODELED, "PER_ATTEMPT_BUY_OR_SELL")
+        results: dict[str, Any] = {}
         try:
             bh = self.rpc("getLatestBlockhash", [{"commitment": self.cfg.raw["rpc_http"]["commitment"]}])
             blockhash = b58decode(bh["value"]["blockhash"]).rjust(32, b"\0")
@@ -356,12 +417,16 @@ class FeeResolver:
                               "PER_PROGRAM_PROFILE_AND_SIDE;FEE_PROBE_NOT_EXECUTION_VALIDATION")
         except Exception as exc:  # noqa: BLE001
             self.errors.append(f"network: {type(exc).__name__}")
-            return self._snap("network", "NETWORK_FEE", "getFeeForMessage", (), None, raw | {"error": type(exc).__name__}, {"base_fee_lamports": base, "priority_fee_lamports": None, "network_fee_total_lamports": None}, "RPC_ERROR", CostEvidence.UNKNOWN, "PER_ATTEMPT_BUY_OR_SELL")
+            error = _acquisition_error(exc)
+            if any(results.values()):
+                error["transient_acquisition_failure"] = False
+            return self._snap("network", "NETWORK_FEE", "getFeeForMessage", (), None, raw | error, {"base_fee_lamports": base, "priority_fee_lamports": None, "network_fee_total_lamports": None}, "RPC_ERROR", CostEvidence.UNKNOWN, "PER_ATTEMPT_BUY_OR_SELL")
 
     def resolve_rent(self) -> FeeSnapshot:
         profiles: dict[str, Any] = {}
         raw: dict[str, Any] = {}
         configured = self.cfg.costs["account_rent_lamports"]
+        failures = []
         for program, profile in account_profiles(self.cfg).items():
             size = profile["account_size_bytes"]
             status, lamports = "VALID", None
@@ -378,11 +443,14 @@ class FeeResolver:
             except Exception as exc:
                 self.errors.append(f"rent: {type(exc).__name__}")
                 status, evidence = "RPC_ERROR", CostEvidence.UNKNOWN
+                failures.append(_acquisition_error(exc))
             profiles[program] = {"profile_id": profile["profile_id"], "account_size_bytes": size,
                                  "token_account_rent_lamports": lamports, "validation_status": status, "evidence": evidence.value}
             raw[program] = dict(profiles[program])
         legacy = profiles[self.cfg.protocol["spl_token_program"]]
         valid = all(v["validation_status"] == "VALID" for v in profiles.values())
+        # A mixed refresh may reveal changed rent for a successful profile; do not hide it.
+        raw["transient_acquisition_failure"] = len(failures) == len(profiles) and all(f["transient_acquisition_failure"] for f in failures)
         evidence = CostEvidence.MEASURED if self.rpc is not None else CostEvidence.CONFIGURED
         return self._snap("rent", "RENT_EXEMPTION", "getMinimumBalanceForRentExemption" if self.rpc else "CONFIG:costs.account_rent_lamports",
                           (), None, raw, dict(legacy, account_profiles=profiles), "VALID" if valid else "ACCOUNT_RENT_UNVERIFIED",
@@ -393,7 +461,8 @@ class FeeResolver:
         priority = self.resolve_priority()
         network = self.resolve_network(priority if priority.validation_status == "VALID" else None)
         rent = self.resolve_rent()
-        self.cache = FeeCache(protocol, network, rent, priority)
+        effective = select_cost_basis(self.cache.basis(), [protocol, priority, network, rent])
+        self.cache = FeeCache(**{k: getattr(effective, k) for k in FEE_KINDS.values()})
         return [protocol, priority, network, rent]
 
     async def run_background(self, on_snapshots: Callable[[list[FeeSnapshot]], None], stop: asyncio.Event) -> None:
@@ -402,15 +471,10 @@ class FeeResolver:
             # A CostBasis is one causal knowledge point. Do not expose a new
             # component through the cache while the remaining refresh calls
             # are still in flight.
-            current = {"protocol": self.cache.protocol, "network": self.cache.network,
-                       "rent": self.cache.rent, "priority_policy": self.cache.priority_policy}
-            kinds = {"PROTOCOL_GLOBAL_ACCOUNT": "protocol", "NETWORK_FEE": "network",
-                     "RENT_EXEMPTION": "rent", "PRIORITY_POLICY": "priority_policy"}
             published_at = self.clock.monotonic_ns()
             batch = [replace(snap, received_mono_ns=max(snap.received_mono_ns, published_at)) for snap in batch]
-            for snap in batch:
-                current[kinds[snap.source_type]] = snap
-            self.cache = FeeCache(current["protocol"], current["network"], current["rent"], current["priority_policy"])
+            effective = select_cost_basis(self.cache.basis(), batch)
+            self.cache = FeeCache(**{k: getattr(effective, k) for k in FEE_KINDS.values()})
             on_snapshots(batch)
 
         due = {k: 0.0 for k in self.interval_ms}

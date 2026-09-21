@@ -45,7 +45,23 @@ entry_latency_ms          gilt für Entry UND Exit (main.py 110–116)
 ```
 
 CLI zusätzlich: `--max-open-positions` (Default **1**), `--account-rent-lamports` (Default **0**).
-Nicht konfigurierbar, sondern hart im Code: Creator-Sell-Exit, Creator-Skip vor Fill, eine Entscheidung pro Launch.
+Im alten Backend hart im Code: Creator-Sell-Exit, Creator-Skip vor Fill, eine Entscheidung pro Launch.
+Die aktuelle C-Portierung bietet fuer den Creator-Skip die unten beschriebene ausdrueckliche Option.
+
+### Aktuelle Option: Creator verkauft nach Submit, vor Fill
+
+`strategy.creator_sold_before_fill` erlaubt `LEGACY_FREE_CANCEL` (Default bei fehlendem Feld)
+oder `TX_LANDS`. Bestehende Profile und ihre Config-Hashes bleiben unveraendert.
+`LEGACY_FREE_CANCEL` reproduziert die historischen kostenlosen Stornos. Dieser Modus ist
+ausschliesslich diagnostisch und kann auch ohne beobachtete Stornos keinen wirtschaftlichen
+Nachweis, Kandidaten-Freeze oder `POSITIVE_UNDER_MODEL` liefern.
+
+`TX_LANDS` laesst den bereits eingereichten BUY durch die normale Fill-Pruefung laufen.
+Der Name garantiert keinen Fill: Reservefrische, Coverage, Kosten und Slippage gelten weiter;
+Reject oder UNKNOWN bleiben moeglich. Erst ein erfolgreicher BUY geht in den gelatchten
+Creator-Sell-Exit. Ein vor Submit bekannter Creator-Sell verhindert weiterhin den Entry.
+Reports weisen Modus und `entry_cancelled_free_of_cost` mit Grund separat aus;
+`decisions_skipped` bleibt fuer tatsaechliche Pre-Submit-SKIPs reserviert.
 
 ---
 

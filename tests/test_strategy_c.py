@@ -109,6 +109,65 @@ class LegacyFeatureParityTests(unittest.TestCase):
 
 
 class StrategyCTests(unittest.TestCase):
+    def test_creator_fill_policy_validation_and_default_compatibility(self):
+        default = cconfig()
+        self.assertNotIn("creator_sold_before_fill", default.strategy)
+        self.assertEqual(default.config_hash, cconfig().config_hash)
+        for mode in ("LEGACY_FREE_CANCEL", "TX_LANDS"):
+            h = make_c(strategy={"creator_sold_before_fill": mode})
+            self.addCleanup(h.conn.close)
+            self.assertEqual(h.owner.strategy.cancel_entry_if_creator_sold_before_fill(), mode == "LEGACY_FREE_CANCEL")
+        with self.assertRaises(ConfigError):
+            cconfig(strategy={"creator_sold_before_fill": "FORCE_FILL"})
+        with self.assertRaises(ConfigError):
+            base_config(strategy={"creator_sold_before_fill": "TX_LANDS"})
+
+    def test_tx_lands_executes_buy_and_creator_exit_with_costs(self):
+        h = make_c(strategy={"creator_sold_before_fill": "TX_LANDS"}, latency_model={"entry_delay_ms": 100, "exit_delay_ms": 0})
+        self.addCleanup(h.conn.close)
+        qualified(h)
+        h.feed("helius_standard", creator_sell_frame(h, MINT_A, "csell", 120, tok=10_000), end_of(h) + 50 * NS_PER_MS)
+        h.advance(end_of(h) + 100 * NS_PER_MS)
+        self.assertEqual(h.owner.counters.entry_cancelled_creator_sold, 0)
+        self.assertEqual(h.position().state, PositionState.CLOSED)
+        self.assertEqual(h.position().exit_reason, ExitReason.CREATOR_SELL)
+        attempts = h.rows("SELECT side,status,fees_charged_lamports FROM execution_attempts ORDER BY submit_mono_ns")
+        self.assertEqual([(r["side"], r["status"]) for r in attempts], [("BUY", "FILLED"), ("SELL", "FILLED")])
+        self.assertTrue(all(r["fees_charged_lamports"] > 0 for r in attempts))
+
+    def test_tx_lands_never_forces_fill_on_stale_reserves(self):
+        h = make_c(strategy={"creator_sold_before_fill": "TX_LANDS"}, latency_model={"entry_delay_ms": 800, "exit_delay_ms": 0}, execution={"quote_max_age_ms": 250})
+        self.addCleanup(h.conn.close)
+        qualified(h)
+        h.feed("helius_standard", creator_sell_frame(h, MINT_A, "csell", 120, tok=10_000), end_of(h) + 100 * NS_PER_MS)
+        h.advance(end_of(h) + 800 * NS_PER_MS)
+        self.assertEqual(h.owner.counters.entry_fills, 0)
+        self.assertEqual(h.owner.counters.entry_cancelled_creator_sold, 0)
+        self.assertEqual(h.rows("SELECT status FROM execution_attempts WHERE side='BUY'")[0][0], "UNKNOWN")
+
+    def test_free_cancel_report_and_research_cannot_qualify(self):
+        from darkbot.backtest import Variant, variant_status
+        from darkbot.reporting import summary_markdown
+        h = make_c(latency_model={"entry_delay_ms": 100, "exit_delay_ms": 0})
+        self.addCleanup(h.conn.close)
+        qualified(h)
+        h.feed("helius_standard", creator_sell_frame(h, MINT_A, "csell", 120, tok=10_000), end_of(h) + 50 * NS_PER_MS)
+        h.finish(end_of(h) + 100 * NS_PER_MS)
+        report = h.report()
+        self.assertEqual(report["economic"]["entry_cancelled_free_of_cost"], 1)
+        self.assertEqual(report["economic"]["entry_cancellations_by_reason"], {"CREATOR_SOLD_BEFORE_FILL": 1})
+        self.assertEqual(report["model_assumptions"]["creator_sold_before_fill"], "LEGACY_FREE_CANCEL")
+        self.assertIn("kostenlose Creator-Stornos: 1", summary_markdown(report))
+        self.assertEqual(report["qualification_status"], "UNQUALIFIED_DATA")
+        self.assertIn("LEGACY_FREE_CANCEL_DIAGNOSTIC_ONLY", report["qualification_reasons"][0])
+        v = Variant("positive", "1.5", 25, 25, "1.0", 0, 1, False)
+        boot = {"status": "OK", "blocks": 100, "ci_low": 100}
+        for split in ("train", "validation", "test", "forward"):
+            self.assertEqual(variant_status(v, split, boot, [], h.cfg.research, h.cfg), "DIAGNOSTIC_LEGACY_FREE_CANCEL_CANNOT_QUALIFY")
+        empty = make_c()
+        self.addCleanup(empty.conn.close)
+        self.assertEqual(empty.report()["qualification_status"], "UNQUALIFIED_DATA")
+
     def test_C01_non_sol_quote_never_decides(self):
         from darkbot.market import b58encode, encode_fields
         raw = json.loads(json.dumps(cconfig().raw))

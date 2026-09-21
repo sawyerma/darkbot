@@ -136,3 +136,22 @@ Aktueller Prüfstand: [R8_2 – Doctor-Gate bestanden, Edge-A/B offen](docs/R8_2
 - Replay/Research: Modellzeit endet am aufgezeichneten Run-Ende (`runs.ended_mono_ns`); offene Positionen werden zensiert, nie mit altem Kurs geschlossen. Research-Läufe sind pro Aufnahme+Dataset-Hash eindeutig; `POSITIVE_UNDER_MODEL` nur auf dem entsperrten Forward-Split, für den vorregistrierten Validierungskandidaten, mit bestandenen Stress-Varianten (Fee ×, adverse bps, Reject-Rate) und ohne ungeklärte Exposure.
 - Fee- und Curve-Rundung sind in der Runtime-Konfiguration versioniert; die BUY-Kosten berücksichtigen die offizielle Floor-plus-one-Regel. Legacy-Featureformeln bleiben davon getrennt.
 - Keine Zahl im Report behauptet globale Erstkenntnis, sicheren Fill oder Profit; positive Ergebnisse sind höchstens `POSITIVE_UNDER_MODEL`.
+# Audit-Ergaenzung: Replay-Evidenz und Strategy C
+
+- `strategy.creator_sold_before_fill = "TX_LANDS"` aktiviert fuer Strategy C die normale
+  Auswertung eines bereits eingereichten BUY trotz Creator-Sell vor modelliertem Fill.
+  Kein erzwungener Fill: Kosten, Coverage, Reservefrische und Slippage gelten weiterhin.
+  Ohne Feld bleibt `LEGACY_FREE_CANCEL` zur historischen Reproduktion erhalten. Dieser Modus
+  ist diagnostisch und kann keinen positiven wirtschaftlichen Nachweis liefern.
+- Reports zeigen kostenlose Creator-Stornos separat als `entry_cancelled_free_of_cost`,
+  ihren Grund und den Modus in `model_assumptions`; sie sind keine Pre-Submit-SKIPs.
+- Replay prueft referenzierte `COST_MODEL`-Snapshots gegen Inhalt und Hash, erkennt
+  Zielkonflikte und bindet Referenzen/Inhalt an `REPLAY_DATASET_V3_SOURCE_CONFIG_EVIDENCE`.
+  Neue Dataset-Hashes sind eine neue Datenversion; alte Freezes muessen neu erstellt werden.
+- Voruebergehende Transport-/Request-Budget-Fehler duerfen passende, noch frische Kosten-
+  Evidenz bis zu ihrer urspruenglichen TTL erhalten. Rohfehler bleiben gespeichert;
+  unbekannte/ungueltige Layouts oder gemischt fehlgeschlagene Profilabfragen werden nicht
+  verdeckt. Netzwerkgebuehr und Priority bleiben ein zusammengehoeriges Paar. Live,
+  Replay und Pending-Fills verwenden denselben Auswahlpfad zum jeweiligen Wissenszeitpunkt.
+- PAPER `--max-open-positions` verwendet wie Replay/Research Kapital pro konfiguriertem Slot;
+  USD-Slot-Profile werden weiterhin ueber FX initialisiert.

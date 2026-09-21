@@ -151,6 +151,8 @@ def evaluate_variant(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: R
 def variant_status(v: Variant, split: str, boot: dict[str, Any], exposed: list[Any], research: dict[str, Any], cfg: RuntimeConfig) -> str:
     """qualification_rule: POSITIVE_UNDER_MODEL is only possible on untouched forward/test data, with non-zero declared delays, without unresolved exposure,
     with enough independent blocks and a lower bootstrap bound > 0. Everything in-sample is at most a CANDIDATE."""
+    if cfg.strategy_id == "LEGACY_BACKEND_FILTER_V1" and cfg.strategy.get("creator_sold_before_fill", "LEGACY_FREE_CANCEL") == "LEGACY_FREE_CANCEL":
+        return "DIAGNOSTIC_LEGACY_FREE_CANCEL_CANNOT_QUALIFY"
     if boot["status"] != "OK" or boot["blocks"] < research["minimum_independent_blocks_for_qualification"]:
         return "INSUFFICIENT_DATA"
     max_exposure = cfg.research["max_unresolved_exposure_for_positive_qualification_lamports"]
