@@ -257,9 +257,18 @@ class FeeResolver:
         refresh = cfg.costs["snapshot_refresh_policy"]
         self.max_age = {"protocol": refresh["protocol_max_age_ms"] * NS_PER_MS, "network": refresh["network_fee_max_age_ms"] * NS_PER_MS, "rent": refresh["rent_max_age_ms"] * NS_PER_MS, "priority_policy": refresh["network_fee_max_age_ms"] * NS_PER_MS}
         self.interval_ms = {"protocol": refresh["protocol_refresh_interval_ms"], "network": refresh["network_fee_refresh_interval_ms"], "rent": refresh["rent_refresh_interval_ms"], "priority_policy": refresh["network_fee_refresh_interval_ms"]}
-        # Acquisition retry policy. It is intentionally independent from evidence freshness:
-        # retries improve liveness; they never extend TTL or turn UNKNOWN into zero.
-        self.retry_backoff_ms = (1000, 2000, 5000, 10000, 20000)
+        # Fee acquisition reuses the configured transient connectivity backoff used by live feeds.
+        # This keeps operative timing limits in config (S16); retry scheduling never changes evidence TTL.
+        initial = cfg.connectivity["reconnect_initial_ms"]
+        maximum = cfg.connectivity["reconnect_max_ms"]
+        retry = []
+        delay = initial
+        while True:
+            retry.append(delay)
+            if delay >= maximum:
+                break
+            delay = min(delay * 2, maximum)
+        self.retry_backoff_ms = tuple(retry)
         self.family_interval_ms = {
             "protocol": self.interval_ms["protocol"],
             "network_pair": self.interval_ms["network"],

@@ -79,13 +79,16 @@ class FeeRefreshTests(unittest.TestCase):
         h = Harness()
         self.addCleanup(h.conn.close)
         resolver = FeeResolver(h.cfg, None, h.clock, "probe", "FIXTURE")
+        self.assertEqual(resolver.retry_backoff_ms[0], h.cfg.connectivity["reconnect_initial_ms"])
+        self.assertEqual(resolver.retry_backoff_ms[-1], h.cfg.connectivity["reconnect_max_ms"])
+        self.assertTrue(all(a <= b for a, b in zip(resolver.retry_backoff_ms, resolver.retry_backoff_ms[1:])))
         old = h.fees.basis()
         failed = failure(old.protocol, T0 + NS_PER_MS)
-        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), 1000)
-        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), 2000)
-        self.assertEqual(resolver._next_refresh_delay_ms("rent", [failure(old.rent, T0 + NS_PER_MS)]), 1000)
+        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), resolver.retry_backoff_ms[0])
+        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), resolver.retry_backoff_ms[1])
+        self.assertEqual(resolver._next_refresh_delay_ms("rent", [failure(old.rent, T0 + NS_PER_MS)]), resolver.retry_backoff_ms[0])
         self.assertEqual(resolver._next_refresh_delay_ms("protocol", [old.protocol]), h.cfg.costs["snapshot_refresh_policy"]["protocol_refresh_interval_ms"])
-        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), 1000)
+        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), resolver.retry_backoff_ms[0])
         authoritative = failure(old.protocol, T0 + 2 * NS_PER_MS, transient=False, status="INVALID_OWNER")
         self.assertEqual(resolver._next_refresh_delay_ms("protocol", [authoritative]), h.cfg.costs["snapshot_refresh_policy"]["protocol_refresh_interval_ms"])
 
@@ -96,8 +99,8 @@ class FeeRefreshTests(unittest.TestCase):
         old = h.fees.basis()
         failed_priority = failure(old.priority_policy, T0 + NS_PER_MS)
         failed_network = failure(old.network, T0 + NS_PER_MS, status="PRIORITY_UNKNOWN")
-        self.assertEqual(resolver._next_refresh_delay_ms("network_pair", [failed_priority, failed_network]), 1000)
-        self.assertEqual(resolver._next_refresh_delay_ms("network_pair", [failed_priority, failed_network]), 2000)
+        self.assertEqual(resolver._next_refresh_delay_ms("network_pair", [failed_priority, failed_network]), resolver.retry_backoff_ms[0])
+        self.assertEqual(resolver._next_refresh_delay_ms("network_pair", [failed_priority, failed_network]), resolver.retry_backoff_ms[1])
         self.assertEqual(resolver._next_refresh_delay_ms("network_pair", [old.priority_policy, old.network]), h.cfg.costs["snapshot_refresh_policy"]["network_fee_refresh_interval_ms"])
 
     def test_rent_partial_transport_failure_retries_but_does_not_retain_combined_evidence(self):
@@ -114,7 +117,7 @@ class FeeRefreshTests(unittest.TestCase):
         self.assertEqual(snap.validation_status, "ACCOUNT_RENT_UNVERIFIED")
         self.assertFalse(snap.raw_values["transient_acquisition_failure"])
         self.assertTrue(snap.raw_values["retryable_acquisition_failure"])
-        self.assertEqual(resolver._next_refresh_delay_ms("rent", [snap]), 1000)
+        self.assertEqual(resolver._next_refresh_delay_ms("rent", [snap]), resolver.retry_backoff_ms[0])
 
     def test_run_background_retries_failed_rent_before_hourly_interval(self):
         h = Harness()

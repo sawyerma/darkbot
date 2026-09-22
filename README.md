@@ -155,7 +155,7 @@ Aktueller Prüfstand: [R8_2 – Doctor-Gate bestanden, Edge-A/B offen](docs/R8_2
 - Voruebergehende Transport-/Request-Budget-Fehler duerfen passende, noch frische Kosten-
   Evidenz bis zu ihrer urspruenglichen TTL erhalten. Der FeeResolver wiederholt retrybare
   Transport-/Request-Budget-Fehler mit getrenntem Backoff fuer Protocol, Rent und das gekoppelte
-  Priority/Network-Paar (1s, 2s, 5s, 10s, 20s; danach 20s), ohne TTL zu verlaengern. Erfolg
+  Priority/Network-Paar nach derselben konfigurierten Connectivity-Backoff-Policy wie die Live-Feeds (`connectivity.reconnect_initial_ms` bis `connectivity.reconnect_max_ms`, exponentiell), ohne TTL zu verlaengern. Erfolg
   setzt den jeweiligen Backoff zurueck; nicht-retrybare Layout-/Profilfehler bleiben auf normalem
   Refresh. Rohfehler bleiben gespeichert. Netzwerkgebuehr und Priority bleiben ein
   zusammengehoeriges Paar. Live, Replay und Pending-Fills verwenden denselben Auswahlpfad zum
