@@ -27,12 +27,20 @@ def build_parser() -> argparse.ArgumentParser:
                     help="override portfolio.max_open_positions for this PAPER run")
     pp.add_argument("--max-duration-minutes", type=int, required=True,
                     help="required total PAPER runtime in minutes; the run stops automatically when reached")
+    pp.add_argument("--require-economic-within-s", type=int, default=None,
+                    help="startup grace period in seconds for first economic readiness")
+    pp.add_argument("--max-economic-outage-s", type=int, default=None,
+                    help="maximum continuous loss of economic readiness after first readiness; default: same as --require-economic-within-s")
     cap = sub.add_parser("capture", help="strategy-free live market capture; records CREATE/BUY/SELL/reserves/fees/FX only")
     cap.add_argument("--config", type=Path, required=True)
     cap.add_argument("--db", type=Path, required=True)
     cap.add_argument("--campaign", required=True)
     cap.add_argument("--max-duration-minutes", type=int, required=True,
                      help="required total CAPTURE runtime in minutes")
+    cap.add_argument("--require-economic-within-s", type=int, default=None,
+                     help="startup grace period in seconds for first economic readiness")
+    cap.add_argument("--max-economic-outage-s", type=int, default=None,
+                     help="maximum continuous loss of economic readiness after first readiness; default: same as --require-economic-within-s")
     r = sub.add_parser("report", help="deterministic latency/PnL/quality reports")
     r.add_argument("--db", type=Path, required=True)
     r.add_argument("--campaign", required=True)
@@ -80,22 +88,33 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def cmd_capture(args: argparse.Namespace) -> int:
     from darkbot.main import run_capture
 
-    summary = run_capture(args.config, args.db, args.campaign,
-                          max_duration_minutes=args.max_duration_minutes)
+    summary = run_capture(
+        args.config, args.db, args.campaign,
+        max_duration_minutes=args.max_duration_minutes,
+        require_economic_within_s=args.require_economic_within_s,
+        max_economic_outage_s=args.max_economic_outage_s,
+    )
     print(redact(json.dumps(summary, indent=2, default=str)))
+    gate_failed = str(summary.get("stop_reason", "")).startswith("FEE_EVIDENCE_NOT_ECONOMIC")
+    if gate_failed:
+        print("capture: economic evidence/profile gate failed; recording is not accepted as a clean economic replay dataset (exit 4)", file=sys.stderr)
+        return EXIT_NOT_READY
     if summary.get("feeds_started", 0) == 0 or summary.get("readiness") == "NOT_READY":
         return EXIT_NOT_READY
     if summary.get("status") not in ("COMPLETED", "INTERRUPTED"):
         return EXIT_RUNTIME
     return EXIT_OK
 
-
 def cmd_paper(args: argparse.Namespace) -> int:
     from darkbot.main import run_paper
 
-    summary = run_paper(args.config, args.db, args.campaign,
-                        max_open_positions=args.max_open_positions,
-                        max_duration_minutes=args.max_duration_minutes)
+    summary = run_paper(
+        args.config, args.db, args.campaign,
+        max_open_positions=args.max_open_positions,
+        max_duration_minutes=args.max_duration_minutes,
+        require_economic_within_s=args.require_economic_within_s,
+        max_economic_outage_s=args.max_economic_outage_s,
+    )
     # complete_delivery_contract: artifacts are produced automatically after every run, including interrupts
     try:
         from darkbot.reporting import Reporter, persist_report, write_outputs
@@ -112,13 +131,16 @@ def cmd_paper(args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001
         summary["artifacts_error"] = f"{type(exc).__name__}: {exc}"
     print(redact(json.dumps(summary, indent=2, default=str)))
+    gate_failed = str(summary.get("stop_reason", "")).startswith("FEE_EVIDENCE_NOT_ECONOMIC")
+    if gate_failed:
+        print(f"paper: economic evidence/profile gate failed ({summary.get('stop_reason')}); exit code 4", file=sys.stderr)
+        return EXIT_NOT_READY
     if summary.get("feeds_started", 0) == 0 or summary["readiness"] == "NOT_READY":
         print("paper: no eligible feed was ready (NOT_READY) – see feed_setup; exit code 4", file=sys.stderr)
         return EXIT_NOT_READY
     if summary["status"] not in ("COMPLETED", "INTERRUPTED") or "artifacts_error" in summary:
         return EXIT_RUNTIME
     return EXIT_OK
-
 
 def cmd_report(args: argparse.Namespace) -> int:
     from darkbot.reporting import Reporter, persist_report, write_outputs

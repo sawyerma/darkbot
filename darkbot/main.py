@@ -19,7 +19,7 @@ from darkbot import __version__
 from darkbot.capture import FeedAdapter
 from darkbot.clock import LiveClock, LiveScheduler
 from darkbot.config import ConfigError, RuntimeConfig, load_runtime_config, redact, resolve_feed_endpoints, resolve_rpc_http, sha256_text
-from darkbot.domain import Readiness, utc_iso
+from darkbot.domain import CostEvidence, Readiness, utc_iso
 from darkbot.fees import FeeResolver, http_rpc
 from darkbot.paper import PaperExecutionAdapter, StateOwner
 from darkbot.storage import REQUIRED_TABLES, Recorder, SqliteWriter, apply_migrations, integrity_check, mark_interrupted_runs, open_connection, prior_campaign_mints, upsert_config_snapshot, write_readback_test
@@ -63,8 +63,16 @@ def economic_profile_samples(owner: Any, basis: Any, now: int, limit: int | None
 class Application:
     """One PAPER (or DOCTOR) run: one process, one StateOwner, bounded queues, one SQLite writer thread."""
 
-    def __init__(self, cfg: RuntimeConfig, db_path: Path, campaign: str, mode: str = "PAPER", max_duration_ms: int | None = None, economic: bool = True, capture_only: bool = False, status_stream: Any = None) -> None:
+    def __init__(self, cfg: RuntimeConfig, db_path: Path, campaign: str, mode: str = "PAPER", max_duration_ms: int | None = None, economic: bool = True, capture_only: bool = False, status_stream: Any = None,
+                 require_economic_within_ms: int | None = None, max_economic_outage_ms: int | None = None) -> None:
         self.cfg, self.db_path, self.campaign, self.mode = cfg, db_path, campaign, mode
+        # Fee-evidence gate: startup readiness and later-outage tolerance are separate controls.
+        # The trading/quote path itself is unchanged; this gate only decides whether a PAPER/CAPTURE run remains acceptable.
+        self.require_economic_within_ms = require_economic_within_ms
+        self.max_economic_outage_ms = max_economic_outage_ms
+        self._economic_gate_start_mono_ns: int | None = None
+        self._economic_lost_since_mono_ns: int | None = None
+        self._economic_seen_ready = False
         self._economic_sample_count_at_stop: int | None = None
         self.max_duration_ms = max_duration_ms
         self.economic = economic
@@ -120,6 +128,7 @@ class Application:
         self.owner = StateOwner(self.cfg, self.run_id, self.clock, scheduler, self.recorder, adapter, lambda: self.resolver.cache.basis(), "PAPER", economic_intents_allowed=self.economic,
                                 feature_sink=lambda job: loop.run_in_executor(self.executor, job), prior_submitted_mints=prior_mints if self.mode == "PAPER" else None,
                                 capture_only=self.capture_only)
+        self._economic_gate_start_mono_ns = self.clock.monotonic_ns()  # gate clock starts once resolver and StateOwner exist
         endpoints = resolve_feed_endpoints(self.cfg)
         feed_status: dict[str, str] = {}
         for feed in self.cfg.feeds:
@@ -201,6 +210,72 @@ class Application:
             return Readiness.ECONOMIC_PAPER_READY
         return Readiness.CAPTURE_READY
 
+    def economic_evidence_ready(self, now_mono_ns: int | None = None) -> bool:
+        """Current economic usability, outside the hot path: StateOwner + FeeResolver present, capital initialised, at least
+        one observed supported curve state, BUY and SELL fee_terms valid (economic_profile_samples). Creates no order."""
+        if self.owner is None or self.resolver is None or not self.owner.capital_initialized:
+            return False
+        now = self.clock.monotonic_ns() if now_mono_ns is None else now_mono_ns
+        return bool(economic_profile_samples(self.owner, self.resolver.cache.basis(), now, limit=1))
+
+    def fee_status(self) -> dict[str, str]:
+        """Per component: VALID, STALE, MISSING, UNKNOWN_EVIDENCE (fee_terms rejects these even with status VALID) or the raw status."""
+        if self.resolver is None:
+            return {}
+        basis = self.resolver.cache.basis()
+        now = self.clock.monotonic_ns()
+        out: dict[str, str] = {}
+        for kind in ("protocol", "priority_policy", "network", "rent"):
+            snap = getattr(basis, kind)
+            if snap is None:
+                out[kind] = "MISSING"
+            elif snap.evidence == CostEvidence.UNKNOWN:
+                out[kind] = "UNKNOWN_EVIDENCE"
+            elif snap.validation_status != "VALID":
+                out[kind] = snap.validation_status
+            else:
+                out[kind] = "VALID" if snap.is_fresh(now) else "STALE"
+        return out
+
+    def economic_gate_violation(self, now_mono_ns: int) -> str | None:
+        """Fail closed without touching trading logic.
+
+        Startup: readiness must appear within require_economic_within_ms when configured.
+        After readiness has been seen once: a continuous loss is tolerated for max_economic_outage_ms when configured.
+        A recovery resets the outage timer, so one failed refresh cannot accumulate across separate incidents.
+        """
+        if self._economic_gate_start_mono_ns is None:
+            return None
+
+        if self.economic_evidence_ready(now_mono_ns):
+            self._economic_seen_ready = True
+            self._economic_lost_since_mono_ns = None
+            return None
+
+        if not self._economic_seen_ready:
+            if self.require_economic_within_ms is None:
+                return None
+            lost_since = self._economic_gate_start_mono_ns
+            tolerance_ns = self.require_economic_within_ms * 1_000_000
+        else:
+            if self.max_economic_outage_ms is None:
+                return None
+            if self._economic_lost_since_mono_ns is None:
+                self._economic_lost_since_mono_ns = now_mono_ns
+            lost_since = self._economic_lost_since_mono_ns
+            tolerance_ns = self.max_economic_outage_ms * 1_000_000
+
+        if now_mono_ns - lost_since < tolerance_ns:
+            return None
+
+        fees = ",".join(f"{k}={v}" for k, v in self.fee_status().items())
+        capital = self.owner.capital_initialized if self.owner is not None else False
+        phase = "startup" if not self._economic_seen_ready else "outage"
+        return (
+            f"FEE_EVIDENCE_NOT_ECONOMIC: phase={phase},{fees},capital_initialized={capital},"
+            f"not_economic_for_s={(now_mono_ns - lost_since) / 1e9:.0f}"
+        )
+
     def _on_fee_snapshots(self, snapshots: list[Any]) -> None:
         for s in snapshots:
             self.recorder.try_append(("fee_snapshot", (s, self.run_id)))
@@ -218,16 +293,22 @@ class Application:
             await asyncio.sleep(interval)
             if self.owner is None:
                 continue
-            self.owner.maybe_evict(self.clock.monotonic_ns())
+            now = self.clock.monotonic_ns()
+            violation = self.economic_gate_violation(now)
+            if violation is not None:
+                print(f"[gate] {violation} - run stops", file=self.status_stream, flush=True)
+                self.request_stop(violation)
+                continue
+            self.owner.maybe_evict(now)
             s = self.owner.status()
             tele = self.owner.telemetry["receive_to_decision_ns"][-self.cfg.storage["status_latency_window"] :]
             p50 = sorted(tele)[len(tele) // 2] if tele else None
             p95 = sorted(tele)[max(0, int(len(tele) * 0.95) - 1)] if tele else None
             feeds = ",".join(f"{k}:{'UP' if v else 'DOWN'}" for k, v in s["feeds"].items())
             readiness = self.compute_readiness().value
-            print(f"[status {utc_iso(self.clock.utc_ns())}] {readiness} feeds={feeds} raw={s['raw']} creates={s['creates']} actionable={s['actionable']} intents={s['intents']} fills={s['fills']} open={s['open']} unresolved={s['unresolved']} "
+            fees_txt = ",".join(f"{k[:4]}:{v}" for k, v in self.fee_status().items())  # prot/prio/netw/rent
+            print(f"[status {utc_iso(self.clock.utc_ns())}] {readiness} fees={fees_txt} feeds={feeds} raw={s['raw']} creates={s['creates']} actionable={s['actionable']} intents={s['intents']} fills={s['fills']} open={s['open']} unresolved={s['unresolved']} "
                   f"pnl={s['realized_pnl']} cash={s['cash']} gap={s['gap_open']} q={s['recorder_depth']}/{s['recorder_overflow']} lat_p50/p95_ns={p50}/{p95} err={s['internal_errors']}", file=self.status_stream, flush=True)
-
 
 # --------------------------------------------------------------------------- doctor
 
@@ -401,7 +482,8 @@ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor"
 
 
 def run_paper(cfg_path: Path, db_path: Path, campaign: str, max_open_positions: int | None = None,
-              max_duration_minutes: int | None = None) -> dict[str, Any]:
+              max_duration_minutes: int | None = None, require_economic_within_s: int | None = None,
+              max_economic_outage_s: int | None = None) -> dict[str, Any]:
     cfg = load_runtime_config(cfg_path)
     if max_open_positions is not None:
         if max_open_positions <= 0:
@@ -409,19 +491,41 @@ def run_paper(cfg_path: Path, db_path: Path, campaign: str, max_open_positions: 
         cfg = cfg.with_overrides(portfolio=cfg.portfolio_limit_overrides(max_open_positions))
     if max_duration_minutes is None or max_duration_minutes <= 0:
         raise ConfigError("--max-duration-minutes must be > 0")
-    app = Application(cfg, db_path, campaign, mode="PAPER", max_duration_ms=max_duration_minutes * 60_000)
+    if require_economic_within_s is not None and require_economic_within_s <= 0:
+        raise ConfigError("--require-economic-within-s must be > 0")
+    if max_economic_outage_s is not None and max_economic_outage_s <= 0:
+        raise ConfigError("--max-economic-outage-s must be > 0")
+    # Backward-compatible safety: when only the startup gate is supplied, use the same value for later outages.
+    if max_economic_outage_s is None:
+        max_economic_outage_s = require_economic_within_s
+    app = Application(
+        cfg, db_path, campaign, mode="PAPER", max_duration_ms=max_duration_minutes * 60_000,
+        require_economic_within_ms=None if require_economic_within_s is None else require_economic_within_s * 1000,
+        max_economic_outage_ms=None if max_economic_outage_s is None else max_economic_outage_s * 1000,
+    )
     return asyncio.run(app.run())
 
 
-def run_capture(cfg_path: Path, db_path: Path, campaign: str, max_duration_minutes: int | None = None) -> dict[str, Any]:
+def run_capture(cfg_path: Path, db_path: Path, campaign: str, max_duration_minutes: int | None = None,
+                require_economic_within_s: int | None = None, max_economic_outage_s: int | None = None) -> dict[str, Any]:
     """Record live Pump market data only: no strategy decisions, intents or simulated trades."""
     cfg = load_runtime_config(cfg_path)
     if max_duration_minutes is None or max_duration_minutes <= 0:
         raise ConfigError("--max-duration-minutes must be > 0")
-    app = Application(cfg, db_path, campaign, mode="CAPTURE", max_duration_ms=max_duration_minutes * 60_000,
-                      economic=False, capture_only=True)
+    if require_economic_within_s is not None and require_economic_within_s <= 0:
+        raise ConfigError("--require-economic-within-s must be > 0")
+    if max_economic_outage_s is not None and max_economic_outage_s <= 0:
+        raise ConfigError("--max-economic-outage-s must be > 0")
+    # Backward-compatible safety: when only the startup gate is supplied, use the same value for later outages.
+    if max_economic_outage_s is None:
+        max_economic_outage_s = require_economic_within_s
+    app = Application(
+        cfg, db_path, campaign, mode="CAPTURE", max_duration_ms=max_duration_minutes * 60_000,
+        economic=False, capture_only=True,
+        require_economic_within_ms=None if require_economic_within_s is None else require_economic_within_s * 1000,
+        max_economic_outage_ms=None if max_economic_outage_s is None else max_economic_outage_s * 1000,
+    )
     return asyncio.run(app.run())
-
 
 def run_doctor_cli(cfg_path: Path, db_path: Path | None = None) -> dict[str, Any]:
     cfg = load_runtime_config(cfg_path)
