@@ -36,7 +36,13 @@ def _acquisition_error(exc: Exception) -> dict[str, Any]:
     # only transport failures or our exact local request-budget failure can retain evidence.
     transient = isinstance(exc, (OSError, TimeoutError, ConnectionError)) or (
         isinstance(exc, RpcError) and str(exc) == "configured free RPC request budget exhausted")
-    return {"error": type(exc).__name__, "transient_acquisition_failure": transient}
+    return {
+        "error": type(exc).__name__,
+        # Selection semantics: fully transient failures may retain compatible, still-fresh prior evidence.
+        "transient_acquisition_failure": transient,
+        # Scheduling semantics are separate: partial observations can invalidate evidence but still deserve a fast retry.
+        "retryable_acquisition_failure": transient,
+    }
 
 
 FEE_KINDS = {"PROTOCOL_GLOBAL_ACCOUNT": "protocol", "NETWORK_FEE": "network",
@@ -251,6 +257,15 @@ class FeeResolver:
         refresh = cfg.costs["snapshot_refresh_policy"]
         self.max_age = {"protocol": refresh["protocol_max_age_ms"] * NS_PER_MS, "network": refresh["network_fee_max_age_ms"] * NS_PER_MS, "rent": refresh["rent_max_age_ms"] * NS_PER_MS, "priority_policy": refresh["network_fee_max_age_ms"] * NS_PER_MS}
         self.interval_ms = {"protocol": refresh["protocol_refresh_interval_ms"], "network": refresh["network_fee_refresh_interval_ms"], "rent": refresh["rent_refresh_interval_ms"], "priority_policy": refresh["network_fee_refresh_interval_ms"]}
+        # Acquisition retry policy. It is intentionally independent from evidence freshness:
+        # retries improve liveness; they never extend TTL or turn UNKNOWN into zero.
+        self.retry_backoff_ms = (1000, 2000, 5000, 10000, 20000)
+        self.family_interval_ms = {
+            "protocol": self.interval_ms["protocol"],
+            "network_pair": self.interval_ms["network"],
+            "rent": self.interval_ms["rent"],
+        }
+        self._retry_index = {family: 0 for family in self.family_interval_ms}
 
     def _snap(self, kind: str, source_type: str, method: str, accounts: tuple[str, ...], slot: int | None, raw: dict[str, Any], normalized: dict[str, Any], status: str, evidence: CostEvidence, applicability: str, rounding: str = "INTEGER_LAMPORTS") -> FeeSnapshot:
         self._seq += 1
@@ -261,6 +276,37 @@ class FeeResolver:
             rounding_rules=rounding, applicability=applicability, freshness_policy_hash=self.cfg.freshness_policy_hash, validation_status=status, config_hash=self.cfg.cost_model_hash,
             max_age_ns=self.max_age[kind], evidence=evidence,
         )
+
+    @staticmethod
+    def _retryable_snapshot(snapshot: FeeSnapshot) -> bool:
+        raw = snapshot.raw_values
+        return bool(raw.get("retryable_acquisition_failure", raw.get("transient_acquisition_failure", False)))
+
+    @staticmethod
+    def _usable_snapshot(snapshot: FeeSnapshot) -> bool:
+        return snapshot.validation_status == "VALID" and snapshot.evidence != CostEvidence.UNKNOWN
+
+    def _next_refresh_delay_ms(self, family: str, snapshots: list[FeeSnapshot]) -> int:
+        """Return next delay for one causal acquisition family.
+
+        Retryable transport/request-budget failures use bounded backoff. Success resets the
+        family. Non-retryable validation failures stay on the normal cadence because extra RPC
+        traffic cannot repair a layout/profile/protocol mismatch.
+        """
+        if family not in self.family_interval_ms:
+            raise ValueError(f"unknown fee refresh family: {family}")
+        by_kind = {FEE_KINDS[s.source_type]: s for s in snapshots}
+        required = ("priority_policy", "network") if family == "network_pair" else (family,)
+        selected = [by_kind[k] for k in required if k in by_kind]
+        usable = len(selected) == len(required) and all(self._usable_snapshot(s) for s in selected)
+        retryable = any(self._retryable_snapshot(s) for s in selected)
+        if usable or not retryable:
+            self._retry_index[family] = 0
+            return self.family_interval_ms[family]
+        index = self._retry_index[family]
+        delay = self.retry_backoff_ms[min(index, len(self.retry_backoff_ms) - 1)]
+        self._retry_index[family] = min(index + 1, len(self.retry_backoff_ms) - 1)
+        return delay
 
     # -------------------------------------------------------------- individual resolvers (blocking RPC; run via to_thread)
     def resolve_protocol(self) -> FeeSnapshot:
@@ -431,6 +477,7 @@ class FeeResolver:
             size = profile["account_size_bytes"]
             status, lamports = "VALID", None
             evidence = CostEvidence.MEASURED
+            acquisition_error = None
             try:
                 if self.rpc is not None:
                     lamports = self.rpc("getMinimumBalanceForRentExemption", [size])
@@ -443,14 +490,19 @@ class FeeResolver:
             except Exception as exc:
                 self.errors.append(f"rent: {type(exc).__name__}")
                 status, evidence = "RPC_ERROR", CostEvidence.UNKNOWN
-                failures.append(_acquisition_error(exc))
+                acquisition_error = _acquisition_error(exc)
+                failures.append(acquisition_error)
             profiles[program] = {"profile_id": profile["profile_id"], "account_size_bytes": size,
                                  "token_account_rent_lamports": lamports, "validation_status": status, "evidence": evidence.value}
             raw[program] = dict(profiles[program])
+            if acquisition_error is not None:
+                raw[program]["acquisition_error"] = acquisition_error
         legacy = profiles[self.cfg.protocol["spl_token_program"]]
         valid = all(v["validation_status"] == "VALID" for v in profiles.values())
-        # A mixed refresh may reveal changed rent for a successful profile; do not hide it.
-        raw["transient_acquisition_failure"] = len(failures) == len(profiles) and all(f["transient_acquisition_failure"] for f in failures)
+        # Mixed profile results invalidate the combined rent snapshot, but a transport failure
+        # in any profile still schedules a fast retry.
+        raw["transient_acquisition_failure"] = bool(failures) and len(failures) == len(profiles) and all(f["transient_acquisition_failure"] for f in failures)
+        raw["retryable_acquisition_failure"] = any(f["retryable_acquisition_failure"] for f in failures)
         evidence = CostEvidence.MEASURED if self.rpc is not None else CostEvidence.CONFIGURED
         return self._snap("rent", "RENT_EXEMPTION", "getMinimumBalanceForRentExemption" if self.rpc else "CONFIG:costs.account_rent_lamports",
                           (), None, raw, dict(legacy, account_profiles=profiles), "VALID" if valid else "ACCOUNT_RENT_UNVERIFIED",
@@ -466,37 +518,45 @@ class FeeResolver:
         return [protocol, priority, network, rent]
 
     async def run_background(self, on_snapshots: Callable[[list[FeeSnapshot]], None], stop: asyncio.Event) -> None:
-        """Refresh per configured intervals; snapshots are pushed to the caller (recorder + StateOwner) via callback."""
+        """Refresh fee evidence outside the hot path with per-family transient retry backoff."""
         def publish(batch: list[FeeSnapshot]) -> None:
-            # A CostBasis is one causal knowledge point. Do not expose a new
-            # component through the cache while the remaining refresh calls
-            # are still in flight.
             published_at = self.clock.monotonic_ns()
             batch = [replace(snap, received_mono_ns=max(snap.received_mono_ns, published_at)) for snap in batch]
             effective = select_cost_basis(self.cache.basis(), batch)
             self.cache = FeeCache(**{k: getattr(effective, k) for k in FEE_KINDS.values()})
             on_snapshots(batch)
 
-        due = {k: 0.0 for k in self.interval_ms}
+        due = {family: 0.0 for family in self.family_interval_ms}
         loop = asyncio.get_running_loop()
         while not stop.is_set():
             now = loop.time()
             batch: list[FeeSnapshot] = []
+
             if now >= due["protocol"]:
-                batch.append(await asyncio.to_thread(self.resolve_protocol))
-                due["protocol"] = now + self.interval_ms["protocol"] / 1000
-            if now >= due["priority_policy"]:
-                prio = await asyncio.to_thread(self.resolve_priority)
-                batch.append(prio)
-                net = await asyncio.to_thread(self.resolve_network, prio if prio.validation_status == "VALID" else None)
-                batch.append(net)
-                due["priority_policy"] = due["network"] = now + self.interval_ms["network"] / 1000
+                protocol = await asyncio.to_thread(self.resolve_protocol)
+                batch.append(protocol)
+                due["protocol"] = loop.time() + self._next_refresh_delay_ms("protocol", [protocol]) / 1000
+
+            if now >= due["network_pair"]:
+                priority = await asyncio.to_thread(self.resolve_priority)
+                network = await asyncio.to_thread(self.resolve_network, priority if priority.validation_status == "VALID" else None)
+                pair = [priority, network]
+                batch.extend(pair)
+                due["network_pair"] = loop.time() + self._next_refresh_delay_ms("network_pair", pair) / 1000
+
             if now >= due["rent"]:
-                batch.append(await asyncio.to_thread(self.resolve_rent))
-                due["rent"] = now + self.interval_ms["rent"] / 1000
+                rent = await asyncio.to_thread(self.resolve_rent)
+                batch.append(rent)
+                due["rent"] = loop.time() + self._next_refresh_delay_ms("rent", [rent]) / 1000
+
             if batch:
                 publish(batch)
+
+            wait_s = max(
+                self.cfg.costs["snapshot_refresh_policy"]["min_poll_interval_ms"] / 1000,
+                min(due.values()) - loop.time(),
+            )
             try:
-                await asyncio.wait_for(stop.wait(), timeout=max(self.cfg.costs["snapshot_refresh_policy"]["min_poll_interval_ms"] / 1000, min(due.values()) - loop.time()))
+                await asyncio.wait_for(stop.wait(), timeout=wait_s)
             except asyncio.TimeoutError:
                 pass

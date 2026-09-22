@@ -75,6 +75,78 @@ class FeeRefreshTests(unittest.TestCase):
         resolver = FeeResolver(h.cfg, lambda *args: [{"prioritizationFee": "invalid"}], h.clock, "probe", "FIXTURE")
         self.assertFalse(resolver.resolve_priority().raw_values["transient_acquisition_failure"])
 
+    def test_retry_backoff_is_per_family_and_resets_on_success(self):
+        h = Harness()
+        self.addCleanup(h.conn.close)
+        resolver = FeeResolver(h.cfg, None, h.clock, "probe", "FIXTURE")
+        old = h.fees.basis()
+        failed = failure(old.protocol, T0 + NS_PER_MS)
+        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), 1000)
+        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), 2000)
+        self.assertEqual(resolver._next_refresh_delay_ms("rent", [failure(old.rent, T0 + NS_PER_MS)]), 1000)
+        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [old.protocol]), h.cfg.costs["snapshot_refresh_policy"]["protocol_refresh_interval_ms"])
+        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [failed]), 1000)
+        authoritative = failure(old.protocol, T0 + 2 * NS_PER_MS, transient=False, status="INVALID_OWNER")
+        self.assertEqual(resolver._next_refresh_delay_ms("protocol", [authoritative]), h.cfg.costs["snapshot_refresh_policy"]["protocol_refresh_interval_ms"])
+
+    def test_network_priority_retry_as_one_family(self):
+        h = Harness()
+        self.addCleanup(h.conn.close)
+        resolver = FeeResolver(h.cfg, None, h.clock, "probe", "FIXTURE")
+        old = h.fees.basis()
+        failed_priority = failure(old.priority_policy, T0 + NS_PER_MS)
+        failed_network = failure(old.network, T0 + NS_PER_MS, status="PRIORITY_UNKNOWN")
+        self.assertEqual(resolver._next_refresh_delay_ms("network_pair", [failed_priority, failed_network]), 1000)
+        self.assertEqual(resolver._next_refresh_delay_ms("network_pair", [failed_priority, failed_network]), 2000)
+        self.assertEqual(resolver._next_refresh_delay_ms("network_pair", [old.priority_policy, old.network]), h.cfg.costs["snapshot_refresh_policy"]["network_fee_refresh_interval_ms"])
+
+    def test_rent_partial_transport_failure_retries_but_does_not_retain_combined_evidence(self):
+        h = Harness()
+        self.addCleanup(h.conn.close)
+        calls = {"n": 0}
+        def rpc(_method, _params):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return 2_039_280
+            raise URLError("offline")
+        resolver = FeeResolver(h.cfg, rpc, h.clock, "probe", "FIXTURE")
+        snap = resolver.resolve_rent()
+        self.assertEqual(snap.validation_status, "ACCOUNT_RENT_UNVERIFIED")
+        self.assertFalse(snap.raw_values["transient_acquisition_failure"])
+        self.assertTrue(snap.raw_values["retryable_acquisition_failure"])
+        self.assertEqual(resolver._next_refresh_delay_ms("rent", [snap]), 1000)
+
+    def test_run_background_retries_failed_rent_before_hourly_interval(self):
+        h = Harness()
+        self.addCleanup(h.conn.close)
+        old = h.fees.basis()
+        resolver = FeeResolver(h.cfg, None, h.clock, "probe", "FIXTURE")
+        resolver.retry_backoff_ms = (1,)
+        rent_calls = {"n": 0}
+        received = []
+
+        def rent():
+            rent_calls["n"] += 1
+            if rent_calls["n"] == 1:
+                return failure(old.rent, T0, transient=True)
+            return replace(old.rent, fee_snapshot_id="rent_recovered")
+
+        async def run():
+            stop = asyncio.Event()
+            def callback(batch):
+                received.extend(batch)
+                if rent_calls["n"] >= 2 and any(s.source_type == "RENT_EXEMPTION" and s.validation_status == "VALID" for s in batch):
+                    stop.set()
+            with patch.object(resolver, "resolve_protocol", return_value=old.protocol), \
+                 patch.object(resolver, "resolve_priority", return_value=old.priority_policy), \
+                 patch.object(resolver, "resolve_network", return_value=old.network), \
+                 patch.object(resolver, "resolve_rent", side_effect=rent):
+                await asyncio.wait_for(resolver.run_background(callback, stop), timeout=1.0)
+
+        asyncio.run(run())
+        self.assertGreaterEqual(rent_calls["n"], 2)
+        self.assertTrue(any(s.source_type == "RENT_EXEMPTION" and s.validation_status == "VALID" for s in received))
+
     def test_live_publication_keeps_raw_failure_but_cache_retains_good_pair(self):
         h = Harness()
         self.addCleanup(h.conn.close)

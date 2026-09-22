@@ -25,27 +25,65 @@ from darkbot.fx import FxSnapshot
 from darkbot.paper import PaperExecutionAdapter, StateOwner
 from darkbot.storage import Recorder, SqliteWriter, upsert_config_snapshot
 
-DATASET_SCHEMA_VERSION = "REPLAY_DATASET_V3_SOURCE_CONFIG_EVIDENCE"
+DATASET_SCHEMA_VERSION = "REPLAY_DATASET_V4_SOURCE_FRESHNESS_POLICY"
+SOURCE_CONFIG_KINDS = {"COST_MODEL", "FRESHNESS_POLICY"}
 
 
-def _validate_source_configs(fees, rows):
-    """Validate consumed evidence before replay or any destination mutation."""
-    by_hash = {}
+def _fee_source_config_refs(fees) -> set[tuple[str, str]]:
+    refs: set[tuple[str, str]] = set()
+    for fee in fees:
+        if not fee.config_hash or not fee.freshness_policy_hash:
+            raise ValueError("DATASET_INTEGRITY_VIOLATION: fee evidence missing source config reference")
+        refs.add((fee.config_hash, "COST_MODEL"))
+        refs.add((fee.freshness_policy_hash, "FRESHNESS_POLICY"))
+    return refs
+
+
+def _validate_source_configs(required_refs: set[tuple[str, str]], rows):
+    """Validate all source configs referenced by fee evidence."""
+    by_hash: dict[str, tuple[str, str]] = {}
     for row in rows:
         h, kind, content = row[:3]
         try:
             normalized = canonical_json(json.loads(content))
         except (ValueError, TypeError) as exc:
             raise ValueError("DATASET_INTEGRITY_VIOLATION: config snapshot invalid JSON") from exc
-        if kind != "COST_MODEL" or sha256_text(normalized) != h:
+        if kind not in SOURCE_CONFIG_KINDS or sha256_text(normalized) != h:
             raise ValueError(f"DATASET_INTEGRITY_VIOLATION: config snapshot hash/kind mismatch: {h}")
-        if h in by_hash and by_hash[h] != normalized:
+        previous = by_hash.get(h)
+        if previous is not None and previous != (kind, normalized):
             raise ValueError("DATASET_INTEGRITY_VIOLATION: conflicting source config snapshots")
-        by_hash[h] = normalized
-    missing = {fee.config_hash for fee in fees} - by_hash.keys()
+        by_hash[h] = (kind, normalized)
+    missing = []
+    for h, expected_kind in sorted(required_refs):
+        stored = by_hash.get(h)
+        if stored is None:
+            missing.append(f"{expected_kind}:{h}")
+        elif stored[0] != expected_kind:
+            raise ValueError(f"DATASET_INTEGRITY_VIOLATION: source config kind mismatch: {h} expected={expected_kind} actual={stored[0]}")
     if missing:
-        raise ValueError("DATASET_INTEGRITY_VIOLATION: fee evidence references missing config snapshot(s): " + ",".join(sorted(missing)))
+        raise ValueError("DATASET_INTEGRITY_VIOLATION: fee evidence references missing config snapshot(s): " + ",".join(missing))
     return by_hash
+
+
+def _source_max_age_ns(source_type: str, freshness_policy_hash: str, source_configs: dict[str, tuple[str, str]]) -> int:
+    stored = source_configs.get(freshness_policy_hash)
+    if stored is None or stored[0] != "FRESHNESS_POLICY":
+        raise ValueError(f"DATASET_INTEGRITY_VIOLATION: missing source freshness policy: {freshness_policy_hash}")
+    try:
+        policy = json.loads(stored[1])
+        key = {
+            "PROTOCOL_GLOBAL_ACCOUNT": "protocol_max_age_ms",
+            "NETWORK_FEE": "network_fee_max_age_ms",
+            "RENT_EXEMPTION": "rent_max_age_ms",
+            "PRIORITY_POLICY": "network_fee_max_age_ms",
+        }[source_type]
+        value = policy[key]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("DATASET_INTEGRITY_VIOLATION: malformed source freshness policy") from exc
+    if type(value) is not int or value <= 0:
+        raise ValueError("DATASET_INTEGRITY_VIOLATION: invalid max_age in source freshness policy")
+    return value * 1_000_000
 
 
 @dataclass
@@ -62,9 +100,8 @@ class ReplayInput:
     end_mono_ns: int  # recorded run end (runs.ended_mono_ns) or, if missing, the last observation
 
     fx_snapshots: list[FxSnapshot] = field(default_factory=list)
-    # Fee evidence retains the configuration hash under which it was observed.
-    # A replay into a separate database must carry those referenced source rows
-    # with the dataset; the replay policy's cost model may legitimately differ.
+    # Fee evidence retains both the COST_MODEL and FRESHNESS_POLICY hashes under which it was observed.
+    # Cross-database replay carries both source rows; strategy/execution may differ, source TTL may not.
     source_config_snapshots: list[tuple[str, str, str, str, str, int | None, str | None]] = field(default_factory=list)
 
 def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig) -> ReplayInput:
@@ -79,12 +116,27 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
         if actual != r["raw_payload_hash"]:
             raise ValueError(f"DATASET_INTEGRITY_VIOLATION: feed_observations payload hash mismatch at receive_mono_ns={r['receive_mono_ns']} feed={r['feed_id']}")
         observations.append((r["receive_mono_ns"], r["arrival_sequence"], r["feed_id"], r["connection_id"], r["receive_utc"], r["raw_payload"]))
-    fees = []
-    refresh = cfg.costs["snapshot_refresh_policy"]
-    max_age = {"PROTOCOL_GLOBAL_ACCOUNT": refresh["protocol_max_age_ms"], "NETWORK_FEE": refresh["network_fee_max_age_ms"], "RENT_EXEMPTION": refresh["rent_max_age_ms"], "PRIORITY_POLICY": refresh["network_fee_max_age_ms"]}
-    for r in conn.execute("SELECT * FROM fee_snapshots WHERE run_id=? ORDER BY received_mono_ns", (run_id,)):
-        import json
+    fee_rows = list(conn.execute("SELECT * FROM fee_snapshots WHERE run_id=? ORDER BY received_mono_ns", (run_id,)))
+    required_source_refs: set[tuple[str, str]] = set()
+    for row in fee_rows:
+        if not row["config_hash"] or not row["freshness_policy_hash"]:
+            raise ValueError("DATASET_INTEGRITY_VIOLATION: fee evidence missing source config reference")
+        required_source_refs.add((row["config_hash"], "COST_MODEL"))
+        required_source_refs.add((row["freshness_policy_hash"], "FRESHNESS_POLICY"))
 
+    source_config_snapshots = [
+        tuple(row)
+        for config_hash in sorted({h for h, _kind in required_source_refs})
+        for row in conn.execute(
+            "SELECT config_hash,kind,canonical_json,created_utc,source,valid_from_slot,verified_utc "
+            "FROM config_snapshots WHERE config_hash=?",
+            (config_hash,),
+        )
+    ]
+    source_content = _validate_source_configs(required_source_refs, source_config_snapshots)
+
+    fees = []
+    for r in fee_rows:
         norm = json.loads(r["normalized_fee_components"])
         try:
             evidence = CostEvidence(r["evidence"] or "UNKNOWN")
@@ -92,7 +144,7 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
             evidence = CostEvidence.UNKNOWN
         fees.append(FeeSnapshot(r["fee_snapshot_id"], r["source_type"], r["source_provider"], r["source_method"], tuple(json.loads(r["source_account_addresses"])), r["source_slot"], r["observed_utc"], r["received_mono_ns"], r["commitment"],
                                 r["protocol_program_id"], r["idl_version_or_hash"], json.loads(r["raw_values"]), norm, r["rounding_rules"], r["applicability"], r["freshness_policy_hash"], r["validation_status"], r["config_hash"],
-                                max_age[r["source_type"]] * 1_000_000, evidence))
+                                _source_max_age_ns(r["source_type"], r["freshness_policy_hash"], source_content), evidence))
     transitions: list[tuple[int, str, bool]] = []
     for q in conn.execute("SELECT kind, feed_id, start_mono_ns, end_mono_ns FROM quality_events WHERE run_id=? AND kind IN ('PROVIDER_DISCONNECT','CANONICAL_GAP','PROVIDER_RECONNECT','CANONICAL_GAP_RECOVERED_STATE_ONLY') ORDER BY quality_event_id", (run_id,)):
         if q["feed_id"] is None:
@@ -129,27 +181,15 @@ def load_replay_input(conn: sqlite3.Connection, run_id: str, cfg: RuntimeConfig)
                 raise ValueError("DATASET_INTEGRITY_VIOLATION: SOL/USD evidence mismatch")
             fx_snapshots.append(snapshot)
     run_manifest = dict(run)
-    referenced_hashes = sorted({fee.config_hash for fee in fees if fee.config_hash})
-    source_config_snapshots = [
-        tuple(row)
-        for config_hash in referenced_hashes
-        for row in conn.execute(
-            "SELECT config_hash,kind,canonical_json,created_utc,source,valid_from_slot,verified_utc "
-            "FROM config_snapshots WHERE config_hash=?",
-            (config_hash,),
-        )
-    ]
-    source_content = _validate_source_configs(fees, source_config_snapshots)
-    # Bind every consumed fee attribute, including selection identity and the
-    # TTL derived from this replay's freshness policy. A changed provider,
-    # commitment, account identity or expiry is a different dataset version.
+    # Bind every consumed fee attribute, including selection identity and TTL derived
+    # from the source run's recorded freshness policy.
     fee_manifest = [
         {key: (fee.evidence.value if key == "evidence" else getattr(fee, key)) for key in fee.__slots__}
         for fee in sorted(fees, key=lambda fee: (fee.received_mono_ns, fee.fee_snapshot_id))
     ]
     dataset_hash = sha256_text(canonical_json({"dataset_schema_version": DATASET_SCHEMA_VERSION,
-        "source_cost_models": sorted(source_content.items()),
-        "fee_config_references": sorted((f.fee_snapshot_id, f.config_hash) for f in fees),
+        "source_evidence_configs": sorted((h, kind, content) for h, (kind, content) in source_content.items()),
+        "fee_config_references": sorted((f.fee_snapshot_id, f.config_hash, f.freshness_policy_hash) for f in fees),
         "fee_manifest": fee_manifest,
         "run": run_id, "fx": [s.__dict__ for s in fx_snapshots], "run_manifest": run_manifest, "canonical_events": canonical_rows, "quality_events": quality_rows, "epoch": run["host_clock_epoch_id"], "config_hash": run["config_hash"], "frames": hashes, "fees": fee_ids, "health": transitions, "lateness": sorted(lateness.items()),
         "start_mono_ns": start, "end_mono_ns": end, "ended_mono_ns": ended, "decoder": cfg.protocol["decoder_version"], "decoder_code_hash": decoder_code_hash, "protocol_pinning_hash": cfg.protocol_hash,
@@ -180,11 +220,15 @@ def run_replay(conn: sqlite3.Connection, replay_input: ReplayInput, cfg: Runtime
                persist: bool = True, persist_observations: bool = False, compute_features: bool = False, end_mono_ns: int | None = None, drain_ns: int | None = None,
                stress_fee_multiplier: Decimal = Decimal(1), stress_adverse_bps: int = 0, mint_filter: set[str] | None = None, stress_reject_rate: Decimal = Decimal(0), stress_seed: int = 0, replay_callback_lateness: bool = True, execution_delay_provider=None) -> ReplayResult:
     """Replay the frozen dataset through StateOwner; returns the owner (RAM truth) and persists rows when requested."""
-    source_content = _validate_source_configs(replay_input.fee_snapshots, replay_input.source_config_snapshots) if persist or replay_input.source_config_snapshots else {}
+    if persist or replay_input.source_config_snapshots:
+        required_refs = _fee_source_config_refs(replay_input.fee_snapshots)
+        source_content = _validate_source_configs(required_refs, replay_input.source_config_snapshots)
+    else:
+        source_content = {}
     if persist:
-        for h, content in source_content.items():
+        for h, (kind, content) in source_content.items():
             existing = conn.execute("SELECT kind,canonical_json FROM config_snapshots WHERE config_hash=?", (h,)).fetchone()
-            if existing is not None and (existing[0] != "COST_MODEL" or existing[1] != content):
+            if existing is not None and (existing[0] != kind or existing[1] != content):
                 raise ValueError(f"DATASET_INTEGRITY_VIOLATION: destination config snapshot conflict: {h}")
     clock = ReplayClock(f"replay_{new_run_id}", replay_input.start_mono_ns, replay_input.start_utc_ns)
     scheduler = ReplayScheduler()

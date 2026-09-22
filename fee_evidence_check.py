@@ -3,7 +3,7 @@
 Vier Stufen:
   1. Rohbestand der Fee-Snapshots je Komponente/Status, Fehlertexte
   2. Zeitleiste: fuer jede Sekunde, ob eine vollstaendige frische Basis fuer BUY und SELL existierte (select_cost_basis, is_fresh, fee_terms)
-  3. Abstaende der Abrufe vs. Maximalalter (max_age_ns rekonstruiert load_replay_input aus der snapshot_refresh_policy der --config)
+  3. Abstaende der Abrufe vs. Maximalalter (max_age_ns stammt aus der beim Source-Run gespeicherten FRESHNESS_POLICY)
   4. Echter RAM-Replay der angegebenen Strategie-Config durch run_replay (StateOwner -> Strategy -> QuoteEngine -> fee_terms):
      Verdikt ohne nachgebauten Entry-Pfad. Slots hoch, damit SLOT_LIMIT nicht mit UNQUALIFIED_COSTS vermischt wird.
      Exit-Codes: 0 PASS (Fills, 0x UNQUALIFIED_COSTS) | 2 keine Snapshots | 3 PARTIAL (Fills + UNQUALIFIED) | 4 FAIL | 5 OFFEN | 6 KEIN FILL
@@ -28,7 +28,7 @@ from darkbot.storage import open_connection
 ap = argparse.ArgumentParser()
 ap.add_argument("--db", type=Path, required=True)
 ap.add_argument("--run-id", default=None)
-ap.add_argument("--config", type=Path, required=True, help="exakt die Strategie-/Execution-Config, deren wirtschaftlicher Replay geprueft werden soll")
+ap.add_argument("--config", type=Path, required=True, help="Strategie-/Execution-Config fuer Stufe 4; Fee-Freshness in Stufe 2/3 stammt aus dem Source-Run")
 ap.add_argument("--slots", type=int, default=2000, help="Slots fuer den Diagnose-Replay (hoch, damit SLOT_LIMIT nicht als Fee-Problem erscheint)")
 ap.add_argument("--step-ms", type=int, default=1000, help="Raster der Fee-Zeitleiste")
 args = ap.parse_args()
@@ -108,7 +108,7 @@ while t <= t1:
 if gap_start is not None:
     gaps.append((gap_start, t1))
 total_s = max(1, int((t1 - t0) / step) + 1)
-print(f"\nZeitleiste ({args.step_ms}-ms-Raster, BUY+SELL fee_terms der Engine, max_age aus --config): vollstaendige frische Basis in {ok_s} von {total_s} Punkten ({100 * ok_s / total_s:.1f}%)")
+print(f"\nZeitleiste ({args.step_ms}-ms-Raster, BUY+SELL fee_terms der Engine, max_age aus Source-FRESHNESS_POLICY): vollstaendige frische Basis in {ok_s} von {total_s} Punkten ({100 * ok_s / total_s:.1f}%)")
 print(f"  erste vollstaendige Basis nach {((first_ok - t0) / 1e9) if first_ok else '-'} s")
 if reasons:
     print("  Gruende ohne Basis:")
@@ -121,7 +121,7 @@ if gaps:
 per_kind = defaultdict(list)
 for s in fees:
     per_kind[s.source_type].append(s)
-print("\nAbstaende zwischen Snapshots je Komponente (max_age laut Snapshot):")
+print("\nAbstaende zwischen Snapshots je Komponente (max_age laut Source-FRESHNESS_POLICY):")
 for kind, lst in per_kind.items():
     valid = [s for s in lst if s.validation_status == "VALID" and s.evidence.value != "UNKNOWN"]
     deltas = [(b.received_mono_ns - a.received_mono_ns) / 1e9 for a, b in zip(valid, valid[1:])]

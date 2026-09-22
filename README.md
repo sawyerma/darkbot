@@ -146,13 +146,19 @@ Aktueller Prüfstand: [R8_2 – Doctor-Gate bestanden, Edge-A/B offen](docs/R8_2
   ist diagnostisch und kann keinen positiven wirtschaftlichen Nachweis liefern.
 - Reports zeigen kostenlose Creator-Stornos separat als `entry_cancelled_free_of_cost`,
   ihren Grund und den Modus in `model_assumptions`; sie sind keine Pre-Submit-SKIPs.
-- Replay prueft referenzierte `COST_MODEL`-Snapshots gegen Inhalt und Hash, erkennt
-  Zielkonflikte und bindet Referenzen/Inhalt an `REPLAY_DATASET_V3_SOURCE_CONFIG_EVIDENCE`.
-  Neue Dataset-Hashes sind eine neue Datenversion; alte Freezes muessen neu erstellt werden.
+- Replay prueft alle von Fee-Snapshots referenzierten `COST_MODEL`- und `FRESHNESS_POLICY`-
+  Snapshots gegen Typ, Inhalt und Hash. `max_age_ns` wird ausschliesslich aus der beim Source-
+  Run referenzierten Freshness-Policy rekonstruiert, nicht aus der spaeter gewaehlten Replay-
+  Config. Fehlende/falsche Source-Policies sind `DATASET_INTEGRITY_VIOLATION`. Referenzen,
+  Inhalte und daraus abgeleitete TTL sind an `REPLAY_DATASET_V4_SOURCE_FRESHNESS_POLICY`
+  gebunden; neue Dataset-Hashes sind eine neue Datenversion.
 - Voruebergehende Transport-/Request-Budget-Fehler duerfen passende, noch frische Kosten-
-  Evidenz bis zu ihrer urspruenglichen TTL erhalten. Rohfehler bleiben gespeichert;
-  unbekannte/ungueltige Layouts oder gemischt fehlgeschlagene Profilabfragen werden nicht
-  verdeckt. Netzwerkgebuehr und Priority bleiben ein zusammengehoeriges Paar. Live,
-  Replay und Pending-Fills verwenden denselben Auswahlpfad zum jeweiligen Wissenszeitpunkt.
+  Evidenz bis zu ihrer urspruenglichen TTL erhalten. Der FeeResolver wiederholt retrybare
+  Transport-/Request-Budget-Fehler mit getrenntem Backoff fuer Protocol, Rent und das gekoppelte
+  Priority/Network-Paar (1s, 2s, 5s, 10s, 20s; danach 20s), ohne TTL zu verlaengern. Erfolg
+  setzt den jeweiligen Backoff zurueck; nicht-retrybare Layout-/Profilfehler bleiben auf normalem
+  Refresh. Rohfehler bleiben gespeichert. Netzwerkgebuehr und Priority bleiben ein
+  zusammengehoeriges Paar. Live, Replay und Pending-Fills verwenden denselben Auswahlpfad zum
+  jeweiligen Wissenszeitpunkt.
 - PAPER `--max-open-positions` verwendet wie Replay/Research Kapital pro konfiguriertem Slot;
   USD-Slot-Profile werden weiterhin ueber FX initialisiert.
