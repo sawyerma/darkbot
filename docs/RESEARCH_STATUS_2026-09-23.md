@@ -1321,3 +1321,101 @@ Do **not** claim a live-tradable edge until all of the following are true:
 - a frozen candidate survives a fresh forward low-latency dataset — **OPEN**.
 
 The current work has narrowed the unknowns substantially, but real transaction landing latency remains the critical missing measurement.
+
+
+---
+
+## 31. First Devnet T4 -> T5 execution-path measurement
+
+A controlled 10-transaction Solana Devnet test was executed from the camper Mac using:
+
+- network: Solana Devnet
+- HTTP RPC: `api.devnet.solana.com`
+- WebSocket: `api.devnet.solana.com`
+- local signer: temporary test keypair `BFaakhXHciEFJMZgBbrRa2KEXswH1ZaRKsqjk16XmTPM`
+- wallet balance before test: **1.0 Devnet SOL**
+- `skipPreflight = true`
+- `maxRetries = 0`
+- 10 signed transfers
+
+Raw result file created locally:
+
+`exports/devnet_t4_t5_latency_20260923T211907Z.json`
+
+### 31.1 Important validity limitation
+
+All 10 transactions reached validator processing but returned:
+
+`InsufficientFundsForRent: account_index = 1`
+
+Reason: the randomly generated receiver account did not yet exist and each test attempted to create/fund it with only 1–10 lamports, below the Devnet rent-exempt minimum for a new system account.
+
+Therefore this run is **not a successful-transfer execution sample**. It remains useful as a measurement of the public-Devnet send/receive/validator-processing path for transactions that were received and executed far enough to produce an on-chain instruction error.
+
+Do not treat these values as final successful BUY/transfer T4->T5 calibration.
+
+### 31.2 Local transaction preparation
+
+10 samples:
+
+| Stage | min ms | p50 ms | p95 ms | p99 ms | max ms | mean ms |
+|---|---:|---:|---:|---:|---:|---:|
+| Blockhash RPC | 107.068 | 123.082 | 147.030 | 147.030 | 159.518 | 128.050 |
+| TX build | 0.061 | 0.099 | 0.118 | 0.118 | 0.203 | 0.106 |
+| TX sign | 0.178 | 0.336 | 0.375 | 0.375 | 0.396 | 0.310 |
+| TX serialize | 0.011 | 0.019 | 0.023 | 0.023 | 0.097 | 0.026 |
+
+The build/sign/serialize CPU work is sub-millisecond and is not the dominant component.
+
+### 31.3 Public Devnet network/validator path
+
+10 samples:
+
+| Stage | min ms | p50 ms | p95 ms | p99 ms | max ms | mean ms |
+|---|---:|---:|---:|---:|---:|---:|
+| send -> RPC ACK | 115.711 | 122.421 | 137.230 | 137.230 | 380.872 | 150.318 |
+| send -> receivedSignature | 290.162 | 358.204 | 391.529 | 391.529 | 439.075 | 355.275 |
+| send -> processed (WS) | 343.866 | 414.624 | 445.364 | 445.364 | 468.624 | 404.640 |
+| send -> processed (HTTP polling) | 458.038 | 539.884 | 585.946 | 585.946 | 632.333 | 541.180 |
+
+Derived `receivedSignature -> processed (WS)` across these 10 samples:
+
+- min: about **0.061 ms**
+- p50: about **53.703 ms**
+- p95: about **104.930 ms**
+- max: about **106.061 ms**
+- mean: about **49.365 ms**
+
+### 31.4 Interpretation
+
+This first Devnet run establishes that the measurement instrumentation works end-to-end:
+
+- transaction build/sign/serialization are measured locally,
+- RPC send acknowledgement is separated from validator receipt,
+- `receivedSignature` is separated from `processed`,
+- HTTP polling is visibly slower than the WebSocket processed notification and must not be used as the primary timing source.
+
+However, because every transaction failed the rent condition, a second run with an already-created/rent-funded receiver is required before this path can be treated as a successful transaction baseline.
+
+Also, public Solana Devnet and the camper/mobile route are not equivalent to the intended future Mainnet low-latency submission path. These measurements validate method and order of magnitude only; they are not yet the final Strategy-C execution distribution.
+
+---
+
+## 32. Immediate next Devnet correction
+
+Before repeating the 10 timing samples:
+
+1. create one receiver account on Devnet with at least the RPC-reported rent-exempt minimum for zero data,
+2. verify that setup transaction succeeds,
+3. then send the 10 tiny timed transfers to that already-existing receiver,
+4. require `err = null` for every sample used in the successful T4->T5 distribution,
+5. retain the failed-rent run separately as a transport/processing diagnostic rather than silently replacing it.
+
+After the successful Devnet run, compare:
+
+- failed-vs-successful send -> ACK,
+- failed-vs-successful send -> receivedSignature,
+- failed-vs-successful send -> processed,
+- local build/sign/serialize distributions.
+
+Only after that should the next submission-path experiment move to a faster provider/low-latency host and eventually Mainnet-equivalent conditions.
