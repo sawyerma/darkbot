@@ -1001,3 +1001,323 @@ Use these terms consistently:
 - **strict current semantics**: current repository evidence rules without monkeypatch
 
 Never use "0 ms" alone. Always state **0 ms from what timestamp to what timestamp**.
+
+
+---
+
+## 23. Live-PAPER local latency measurement completed
+
+A 10-minute live-PAPER run was executed with the real host monotonic clock and Strategy C launch-sniper config.
+
+Run:
+
+`latency_chain_20260923_paper_20260923T203355Z_ae42f8`
+
+The run reported `qualification_status = UNQUALIFIED_DATA`. This does **not** invalidate the latency timing samples. In the current reporter, Strategy C with `creator_sold_before_fill = LEGACY_FREE_CANCEL` is explicitly diagnostic-only for economic qualification and returns `UNQUALIFIED_DATA` by design. The timestamps themselves remain real local wall/monotonic-clock measurements.
+
+### 23.1 T1 -> T2: Helius local receive -> decode
+
+443 Helius CREATE samples:
+
+- min: **0.086375 ms**
+- p50: **0.190792 ms**
+- p95: **0.638959 ms**
+- p99: **0.966000 ms**
+- max: **1.120750 ms**
+- mean: **0.257456 ms**
+
+This second live-PAPER measurement is consistent with the clean-v2 capture measurement and confirms that local decoding is not the dominant latency component.
+
+### 23.2 T1 -> T3: local receive -> decision
+
+205 real ENTRY decisions:
+
+- min: **0.386083 ms**
+- p50: **0.524209 ms**
+- p95: **1.360916 ms**
+- p99: **2.131750 ms**
+- max: **3.625750 ms**
+- mean: **0.711430 ms**
+
+### 23.3 data-ready -> decision
+
+205 ENTRY decisions:
+
+- min: **0.252209 ms**
+- p50: **0.338667 ms**
+- p95: **0.862834 ms**
+- p99: **1.395958 ms**
+- max: **2.621000 ms**
+- mean: **0.471185 ms**
+
+### 23.4 T3 -> T4: decision -> enqueue
+
+205 ENTRY decisions:
+
+- min: **0.005750 ms**
+- p50: **0.015708 ms**
+- p95: **0.038833 ms**
+- p99: **0.067750 ms**
+- max: **0.085500 ms**
+- mean: **0.020226 ms**
+
+### 23.5 T1 -> T4: local receive -> enqueue total
+
+205 ENTRY decisions:
+
+- min: **0.392500 ms**
+- p50: **0.539334 ms**
+- p95: **1.394291 ms**
+- p99: **2.202542 ms**
+- max: **3.668666 ms**
+- mean: **0.731656 ms**
+
+### 23.6 Consequence for the old fixed-delay replay interpretation
+
+The local software path is now measured and is very small. If an old replay scenario is labeled `LOCAL_RECEIVE_PLUS_3MS`, the residual time after the measured local path would be only approximately:
+
+- p50 residual: **3.000 - 0.539 = 2.461 ms**
+- p95 residual: **3.000 - 1.394 = 1.606 ms**
+- p99 residual: **3.000 - 2.203 = 0.797 ms**
+
+This is **not** evidence that a real transaction can land in the residual time. It demonstrates why real T4 -> T5 measurement is mandatory before interpreting the 3–6 ms replay cliff as physically tradable.
+
+---
+
+## 24. Persistent HTTP RPC timing from camper Mac
+
+Using a persistent HTTPS connection and repeated `getLatestBlockhash(commitment=processed)` calls against Helius:
+
+### Helius HTTP
+
+100 samples:
+
+- min: **105.583709 ms**
+- p50: **125.299625 ms**
+- p95: **146.862084 ms**
+- p99: **158.000166 ms**
+- max: **179.972458 ms**
+- mean: **127.509662 ms**
+
+Interpretation:
+
+- this is request -> response latency on the current camper/mobile route,
+- it is **not** transaction send -> landed latency,
+- it contains outbound + Helius/RPC handling + inbound network time,
+- it must not be inserted directly as `entry_delay_ms`.
+
+### Existing public RPC HTTP
+
+The same rapid 100-request test against the existing public RPC aborted with:
+
+`HTTP 429: Connection rate limits exceeded`
+
+Therefore no valid 100-sample HTTP latency distribution exists for the existing public RPC from this test. It remains unsuitable as the primary low-latency submission/reference path under this rate behavior.
+
+---
+
+## 25. Bodman Helius HTTP attempt
+
+A PowerShell persistent-`HttpClient` test was attempted on the Windows host physically connected to the DELTA Bodman fixed network.
+
+The request returned:
+
+`HTTP Unauthorized: Unauthorized`
+
+As a result:
+
+- **no Bodman Helius HTTP latency distribution was measured**,
+- the earlier Bodman **10 ms ICMP RTT** remains valid,
+- the failed HTTP attempt must not be converted into a latency value.
+
+Before retrying this test, the Helius API-key/endpoint authorization on that Windows session must be corrected/verified. Do not print or commit the API key.
+
+---
+
+## 26. Transaction-latency test environment prepared
+
+The Mac has no Solana CLI installed:
+
+`NO_SOLANA_CLI`
+
+A separate temporary Python virtual environment was therefore created for the transaction-latency experiment:
+
+`/tmp/darkbot-solana-latency`
+
+Installed successfully:
+
+- `solders==0.29.0`
+- `jsonalias==0.1.1`
+- `typing-extensions==4.16.0`
+
+A new temporary latency-test keypair was generated locally:
+
+- public key: `BFaakhXHciEFJMZgBbrRa2KEXswH1ZaRKsqjk16XmTPM`
+- private key file: `/tmp/darkbot_latency_keypair.json`
+
+The private key file is temporary/local and **must never be committed, pasted into documentation, SQLite, logs, or GitHub**.
+
+### 26.1 Existing funded DarkBot test wallet already exists
+
+A new funded wallet is not inherently required.
+
+An earlier DarkBot test/bot wallet was already created and funded on Solana Mainnet:
+
+- public key: `3rKiMw7mDTbxrnwsFhGjGgJ81o5YeysBrkvkXdRUQ9d5`
+- confirmed funding at the time: **0.005 SOL = 5,000,000 lamports**
+- the locally held private key was previously verified to derive exactly this public key
+
+Therefore the preferred next action is:
+
+1. **reuse the existing funded test wallet if its private key is still available locally and controlled by the user**;
+2. do **not** fund the newly generated `BFaakh...` wallet merely because it was generated;
+3. use the new throwaway wallet only if the old test-wallet key is no longer available or a deliberately isolated test wallet is desired.
+
+No private key or seed phrase is to be placed in this repository.
+
+---
+
+## 27. Updated measured latency chain
+
+The current best-known chain is now:
+
+```text
+T0  real Pump.fun CREATE executes / becomes observable on Solana
+ |
+ | A1 validator/leader -> Helius ingestion            UNKNOWN absolute
+ | A2 Helius processing/distribution                  UNKNOWN absolute
+ | A3 Helius -> host network
+ |    camper Helius ICMP avg RTT: 117.307 ms
+ |    Bodman Helius ICMP RTT:      10 ms
+ v
+T1  Helius frame reaches DarkBot
+ |
+ | receive -> decode
+ | live PAPER p50/p95/p99: 0.191 / 0.639 / 0.966 ms
+ v
+T2  decoded/data ready
+ |
+ | reducer + strategy + admission + quote
+ v
+T3  decision done
+ |    T1->T3 p50/p95/p99: 0.524 / 1.361 / 2.132 ms
+ |
+ | decision -> enqueue
+ |    p50/p95/p99: 0.0157 / 0.0388 / 0.0678 ms
+ v
+T4  local enqueue/submission point
+ |    T1->T4 total p50/p95/p99: 0.539 / 1.394 / 2.203 ms
+ |
+ | E transaction build/sign/send -> provider/leader -> execution
+ |    REAL T4->T5 STILL UNKNOWN
+ v
+T5  BUY actually executes/lands on Solana
+```
+
+The major unresolved engineering measurement is now **T4 -> T5**.
+
+---
+
+## 28. Replay calibration limitation discovered
+
+The current measured-latency loader in `darkbot/ab_replay.py` accepts only arrays of non-negative **integer milliseconds**:
+
+- `entry_delay_ms`
+- `exit_delay_ms`
+
+This is too coarse for the now-measured sub-millisecond / low-single-digit-millisecond path because values such as **0.539 ms**, **1.394 ms**, and **2.203 ms** would be quantized materially.
+
+Before measured real distributions are used for final latency calibration, the replay measured-distribution format should be upgraded to preserve at least **microsecond precision** (preferably integer nanoseconds to match the engine clock).
+
+This change should be made only after the exact semantic origin of the measured sample is frozen, so that no stage is double-counted.
+
+---
+
+## 29. Exact work still required from this frozen point
+
+### Immediate P0 — finish ENTRY_FAILED diagnosis
+
+Still open. Determine exact attempt statuses behind the sharp modeled entry-delay failure growth. Do not interpret the 3–6 ms replay cliff as pure physical latency until this is resolved.
+
+### Immediate P1 — T4 -> T5 real transaction measurement
+
+Use the existing funded DarkBot test wallet if its local private key is still available.
+
+For each controlled Mainnet test transaction, timestamp separately:
+
+1. transaction build start/end,
+2. signing start/end,
+3. `sendTransaction` start,
+4. RPC response / signature returned,
+5. first `getSignatureStatuses` state = processed,
+6. first Helius return-feed observation of the same signature.
+
+Required output distributions:
+
+- build time,
+- sign time,
+- send -> RPC ACK,
+- send -> processed,
+- send -> Helius return observation,
+- processed -> Helius return observation.
+
+These must be recorded as raw per-sample values, not only averages.
+
+### P2 — repeat HTTP RPC timing from Bodman with valid Helius authorization
+
+Goal: compare the same persistent `getLatestBlockhash` call between camper/mobile and Bodman fixed network.
+
+The existing Windows attempt produced Unauthorized and therefore has no usable latency result.
+
+### P3 — decompose 204 Strategy-C entries vs 512 CREATEs
+
+Still open and required before final all-launch economic interpretation.
+
+### P4 — profit concentration and chronological stability
+
+Still required:
+
+- top-1/top-3/top-5 contribution,
+- PnL excluding biggest winners,
+- chronological thirds,
+- rolling-window stability,
+- exit-reason contribution.
+
+### P5 — upgrade measured-latency format precision
+
+After T4->T5 semantics are measured/frozen:
+
+- replace integer-ms-only measured samples with microsecond or nanosecond precision,
+- keep stage origin explicit,
+- avoid adding provider/network stages twice,
+- use measured distributions rather than a single median.
+
+### P6 — build calibrated realistic replay distribution
+
+For a replay whose market observations already begin at recorded local Helius receive timestamps, the initial calibrated entry execution delay should represent the stages **after that recorded receive point**, primarily:
+
+`T1 -> T4 measured local software path + T4 -> T5 measured real execution path`
+
+Do not automatically add the Bodman one-way network estimate to this value; the capture's receive timestamp already defines the replay market-data origin.
+
+### P7 — fresh low-latency forward capture
+
+The clean-v2 capture was recorded over the camper/mobile path. Because the candidate edge is highly time-sensitive, a final forward test should be captured on a stable low-latency fixed/server path after the execution semantics are frozen.
+
+Then run the frozen strategy without target/timeout tuning on that new dataset.
+
+---
+
+## 30. Updated stop/go rule
+
+Do **not** claim a live-tradable edge until all of the following are true:
+
+- ENTRY_FAILED mechanism is understood,
+- real T1->T4 distribution is measured — **DONE**,
+- real T4->T5 distribution is measured — **OPEN**,
+- measured distribution is represented without millisecond quantization loss — **OPEN**,
+- 204/512 admission denominator is explained — **OPEN**,
+- profit concentration/stability is quantified — **OPEN**,
+- a frozen candidate survives a fresh forward low-latency dataset — **OPEN**.
+
+The current work has narrowed the unknowns substantially, but real transaction landing latency remains the critical missing measurement.
