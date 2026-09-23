@@ -1523,3 +1523,64 @@ Minimum live timestamps to persist:
 8. actual Pump.fun economic fill evidence.
 
 PAPER and LIVE must remain structurally separated so a PAPER run can never accidentally broadcast.
+
+
+---
+
+## 35. Fixed entry-latency sweep on clean 30-minute capture
+
+Dataset:
+
+`8dbc5bf633f4c589fa816ce637fd18c2dd85383932de6e36d4209b49938b3636`
+
+Test configuration was held fixed except for ENTRY latency:
+
+- Strategy C launch-sniper hypothesis
+- observation: **0 ms**
+- filters: **none**
+- target: **3.0x net**
+- timeout: **750 ms**
+- creator semantics: **TX_LANDS**
+- exit latency: **0 ms**
+- large slot count / no slot competition
+- legacy-compatible evidence semantics for unattributable undecodable points
+
+### 35.1 Results
+
+| Entry latency | fills | resolved | failed | unresolved | realized SOL | pessimistic SOL | EV/resolved SOL | PF |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 50 ms | 161 | 161 | 42 | 1 | -0.255848 | -0.358922 | -0.001589 | 0.402 |
+| 100 ms | 160 | 160 | 43 | 1 | -0.256552 | -0.359632 | -0.001603 | 0.406 |
+| 150 ms | 159 | 159 | 44 | 1 | -0.263277 | -0.366362 | -0.001656 | 0.392 |
+| 200 ms | 158 | 158 | 45 | 1 | -0.296391 | -0.399480 | -0.001876 | 0.318 |
+| 250 ms | 154 | 154 | 49 | 1 | -0.357262 | -0.460372 | -0.002320 | 0.168 |
+| 350 ms | 151 | 151 | 52 | 1 | -0.396871 | -0.499997 | -0.002628 | 0.081 |
+
+Exit composition:
+
+- 50 ms: 161 TIMEOUT, 0 TARGET
+- 100 ms: 159 TIMEOUT, 1 CREATOR_SELL, 0 TARGET
+- 150 ms: 158 TIMEOUT, 1 CREATOR_SELL, 0 TARGET
+- 200 ms: 157 TIMEOUT, 1 CREATOR_SELL, 0 TARGET
+- 250 ms: 153 TIMEOUT, 1 CREATOR_SELL, 0 TARGET
+- 350 ms: 150 TIMEOUT, 1 CREATOR_SELL, 0 TARGET
+
+### 35.2 Conclusion
+
+For this exact Strategy-C candidate and this 30-minute capture, the historical near-CREATE edge does **not** survive realistic tens-to-hundreds-of-milliseconds entry delay. It is already clearly negative at 50 ms and degrades further with latency.
+
+Combined with the earlier fine sweep:
+
+- 0 ms: strongly positive
+- 1–3 ms: still positive but rapidly collapsing
+- about 4 ms: approximately break-even/slightly negative
+- 5–10 ms: negative
+- 50–350 ms: decisively negative
+
+Therefore the profitable effect previously observed is an extremely short-horizon counterfactual tied to near-immediate local-receive execution. It must not be treated as a currently tradable live edge under the measured/estimated execution regime.
+
+This finding rejects the current **0 ms / no-filter / 3x / 750 ms launch-sniper candidate** for realistic execution latency. It does not by itself reject other Strategy-C observation windows, filters, targets, or later-entry hypotheses.
+
+### 35.3 Remaining diagnostic
+
+The number of ENTRY_FAILED positions rises from 42 at 50 ms to 52 at 350 ms. The exact failure-reason breakdown remains an open diagnostic and must be separated from the economic conclusion above. Even ignoring those failures, the resolved-trade PnL itself is already negative at every tested 50–350 ms latency.
