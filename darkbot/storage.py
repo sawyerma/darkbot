@@ -191,10 +191,11 @@ class SqliteWriter:
         self.quarantine_path = quarantine_path
         self.busy_timeout_ms = busy_timeout_ms
         self.retry_backoff_s = retry_backoff_ms / 1000
-        self._abort = threading.Event()
         self.fk_hold_rounds = 0
         self.fk_holds = 0
         self.quarantined_records = 0
+        self.quarantine_by_reason: dict[str, int] = {}
+        self._quarantine_root_error: str | None = None
         self.flush_interval_s = flush_interval_ms / 1000
         self.on_disk_error = on_disk_error
         self._stop = threading.Event()
@@ -207,24 +208,33 @@ class SqliteWriter:
         self.fk_split = False
         self._commit_ok = False
         self.batch_latency_ns: list[int] = []
+        self.slow_shutdown = False
+        self._stop_requested_ns: int | None = None
+        self.shutdown_drain_ns: int | None = None
 
     def start(self) -> None:
         self._thread.start()
 
+    def _mark_shutdown_complete(self) -> None:
+        if self._stop_requested_ns is not None and self.shutdown_drain_ns is None:
+            self.shutdown_drain_ns = time.monotonic_ns() - self._stop_requested_ns
+
     def stop(self, timeout_s: float = 30.0) -> bool:
+        """Request a graceful drain. timeout_s is a soft observability deadline, never a data-loss deadline."""
+        if self._stop_requested_ns is None:
+            self._stop_requested_ns = time.monotonic_ns()
         self._stop.set()
         self._thread.join(timeout_s)
         if self._thread.is_alive():
-            self._abort.set()
-            self.conn.interrupt()
-            self.disk_error = True
-            self.last_error = f"WRITER_SHUTDOWN_TIMEOUT after {timeout_s:.3f}s"
-            self.on_disk_error(self.last_error)
+            self.slow_shutdown = True
             return False
+        self._mark_shutdown_complete()
         return True
 
     def wait_until_stopped(self) -> None:
+        """Wait for a graceful drain after the soft shutdown deadline was exceeded."""
         self._thread.join()
+        self._mark_shutdown_complete()
 
     def _run(self) -> None:
         self.conn.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
@@ -233,9 +243,6 @@ class SqliteWriter:
             batch = held + self.recorder.drain(self.batch_max)
             held = []
             if batch:
-                if self._abort.is_set():
-                    self._quarantine(batch, "SHUTDOWN_DEADLINE_EXCEEDED")
-                    continue
                 if self._commit(batch):
                     self.fk_hold_rounds = 0
                 elif self.fk_split:
@@ -254,9 +261,15 @@ class SqliteWriter:
                 self.recorder.wait(self.flush_interval_s)
 
     def _quarantine(self, batch: list[Any], reason: str) -> None:
-        """Records that can never be committed are written to a quarantine file and the run is marked degraded; nothing is dropped silently."""
+        """Records that genuinely cannot be committed are quarantined once; diagnostics stay bounded."""
         self.quarantined_records += len(batch)
-        self.last_error = f"{reason}: {len(batch)} records quarantined ({self.last_error})"
+        self.quarantine_by_reason[reason] = self.quarantine_by_reason.get(reason, 0) + len(batch)
+        if self._quarantine_root_error is None and self.last_error:
+            self._quarantine_root_error = self.last_error
+        total = self.quarantine_by_reason[reason]
+        self.last_error = f"{reason}: {total} records quarantined"
+        if self._quarantine_root_error:
+            self.last_error += f" ({self._quarantine_root_error})"
         if self.quarantine_path is not None:
             try:
                 self.quarantine_path.parent.mkdir(parents=True, exist_ok=True)
@@ -298,8 +311,10 @@ class SqliteWriter:
                 pass
             self.failures += 1
             self.last_error = f"{type(exc).__name__}: {exc}"
-            if isinstance(exc, (sqlite3.OperationalError, sqlite3.DatabaseError)) and "locked" in str(exc).lower() and retries < self.locked_retries and not self._stop.is_set() and not self._abort.is_set():
-                self._stop.wait(self.retry_backoff_s)
+            if isinstance(exc, (sqlite3.OperationalError, sqlite3.DatabaseError)) and "locked" in str(exc).lower() and retries < self.locked_retries:
+                # Shutdown is a drain phase, not a cancellation phase. A transient lock must still
+                # get the configured bounded retries or valid queued records could be lost at run end.
+                time.sleep(self.retry_backoff_s)
                 return self._commit(batch, retries + 1)
             if isinstance(exc, sqlite3.IntegrityError) and "FOREIGN KEY" in str(exc):
                 self.fk_split = True

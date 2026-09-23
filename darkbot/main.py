@@ -174,14 +174,15 @@ class Application:
         self.executor.shutdown(wait=True)
         stopped = await asyncio.to_thread(self.writer.stop, self.cfg.storage["writer_shutdown_timeout_ms"] / 1000)
         if not stopped:
-            # Never use or close the connection while its sole writer is alive.
+            # The configured timeout is a soft deadline only. Data integrity wins over shutdown speed:
+            # keep draining until every accepted record is committed or a genuine writer error occurs.
             await asyncio.to_thread(self.writer.wait_until_stopped)
         status = "INTERRUPTED" if "signal" in self.stop_reason else "COMPLETED"
         quality = "OK" if not (self.recorder.overflowed or self.writer.disk_error or self.owner.counters.internal_errors) else "DEGRADED"
         self.conn.execute("UPDATE runs SET status=?, ended_utc=?, ended_mono_ns=?, end_balance_lamports=?, quality_status=?, readiness=? WHERE run_id=?",
                           (status, self.clock.utc_iso(), self.clock.monotonic_ns(), self.owner.portfolio.cash_lamports + self.owner.portfolio.reserved_lamports, quality, readiness.value, self.run_id))
         summary = {"run_id": self.run_id, "status": status, "stop_reason": self.stop_reason, "quality": quality, "readiness": readiness.value, "feeds_started": len(self.feeds), "feeds": {fid: self._feed_report(fid) for fid in self.feeds},
-                   "feed_setup": feed_status, "owner": self.owner.status(), "cash_reconciliation": self.owner.cash_reconciliation(), "writer": {"committed_records": self.writer.committed_records, "failures": self.writer.failures, "fk_holds": self.writer.fk_holds, "quarantined_records": self.writer.quarantined_records, "disk_error": self.writer.disk_error},
+                   "feed_setup": feed_status, "owner": self.owner.status(), "cash_reconciliation": self.owner.cash_reconciliation(), "writer": {"committed_records": self.writer.committed_records, "committed_batches": self.writer.committed_batches, "failures": self.writer.failures, "fk_holds": self.writer.fk_holds, "quarantined_records": self.writer.quarantined_records, "quarantine_by_reason": dict(self.writer.quarantine_by_reason), "disk_error": self.writer.disk_error, "slow_shutdown": self.writer.slow_shutdown, "shutdown_drain_ms": None if self.writer.shutdown_drain_ns is None else self.writer.shutdown_drain_ns / 1_000_000},
                    "fee_errors": self.resolver.errors[-10:], "storage": storage_info, "db": str(self.db_path), "quarantined_records": self.writer.quarantined_records, "prior_campaign_mints": len(prior_mints), "economic_profile_samples_at_run_end": self._economic_sample_count_at_stop}
         self.conn.close()
         return summary

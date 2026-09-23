@@ -7,7 +7,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import sqlite3
 import tempfile
+import threading
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -18,7 +20,7 @@ from darkbot.domain import PositionState
 from darkbot.main import count_live_creator_sells
 from darkbot.market import event_discriminator
 from darkbot.replay import digest, load_replay_input, run_replay
-from darkbot.storage import open_connection
+from darkbot.storage import Recorder, SqliteWriter, open_connection
 from tests.helpers import BUYER, CREATOR, MINT_A, MINT_B, T0, Harness, attempts, base_config, create_frame_logs, create_payload, creator_sell_frame, logs_notification, open_position, pump_frame
 
 
@@ -175,6 +177,72 @@ class Architecture(unittest.TestCase):
         app._disk_error("boom")
         app._loop.call_soon_threadsafe.assert_called_once_with(app.owner.on_disk_error, "boom")
         app.owner.on_disk_error.assert_not_called()  # never mutated from the writer thread
+
+    def test_writer_soft_shutdown_deadline_never_quarantines_valid_backlog(self):
+        conn = sqlite3.connect(":memory:", check_same_thread=False, isolation_level=None)
+        self.addCleanup(conn.close)
+        recorder = Recorder(10)
+        recorder.try_append(object())
+        errors = []
+        writer = SqliteWriter(conn, recorder, 10, 1, errors.append)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow_commit(batch):
+            entered.set()
+            release.wait(1)
+            writer.committed_records += len(batch)
+            writer.committed_batches += 1
+            return True
+
+        with mock.patch.object(writer, "_commit", side_effect=slow_commit):
+            writer.start()
+            self.assertTrue(entered.wait(1))
+            self.assertFalse(writer.stop(0.001))
+            self.assertTrue(writer.slow_shutdown)
+            self.assertFalse(writer.disk_error)
+            self.assertEqual(writer.quarantined_records, 0)
+            self.assertEqual(errors, [])
+            release.set()
+            writer.wait_until_stopped()
+
+        self.assertEqual(writer.committed_records, 1)
+        self.assertEqual(recorder.depth(), 0)
+        self.assertIsNotNone(writer.shutdown_drain_ns)
+
+    def test_writer_locked_retry_still_runs_during_shutdown_drain(self):
+        class LockedOnce:
+            def __init__(self):
+                self.begin_calls = 0
+
+            def execute(self, sql, _params=()):
+                if sql == "BEGIN":
+                    self.begin_calls += 1
+                    if self.begin_calls == 1:
+                        raise sqlite3.OperationalError("database is locked")
+                return self
+
+        conn = LockedOnce()
+        errors = []
+        writer = SqliteWriter(conn, Recorder(10), 10, 1, errors.append, locked_retries=1, retry_backoff_ms=0)
+        writer._stop.set()
+        self.assertTrue(writer._commit([]))
+        self.assertEqual(conn.begin_calls, 2)
+        self.assertFalse(writer.disk_error)
+        self.assertEqual(errors, [])
+
+    def test_quarantine_diagnostic_does_not_nest_per_batch(self):
+        conn = sqlite3.connect(":memory:", check_same_thread=False, isolation_level=None)
+        self.addCleanup(conn.close)
+        errors = []
+        writer = SqliteWriter(conn, Recorder(10), 10, 1, errors.append)
+        writer.last_error = "OperationalError: disk full"
+        writer._quarantine([object(), object()], "WRITE_FAILED")
+        writer._quarantine([object()], "WRITE_FAILED")
+        self.assertEqual(writer.quarantined_records, 3)
+        self.assertEqual(writer.quarantine_by_reason, {"WRITE_FAILED": 3})
+        self.assertEqual(writer.last_error.count("records quarantined"), 1)
+        self.assertIn("OperationalError: disk full", writer.last_error)
 
     def test_pending_handles_and_active_index_are_bounded(self):
         h = Harness()
