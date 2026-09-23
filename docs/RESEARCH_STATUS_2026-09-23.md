@@ -1419,3 +1419,107 @@ After the successful Devnet run, compare:
 - local build/sign/serialize distributions.
 
 Only after that should the next submission-path experiment move to a faster provider/low-latency host and eventually Mainnet-equivalent conditions.
+
+
+---
+
+## 33. Successful Devnet T4 -> T5 measurement
+
+The corrected Devnet experiment used one pre-funded/rent-valid receiver and then executed 10 timed transfers. All 10 completed with `err = null`.
+
+Sender:
+
+`BFaakhXHciEFJMZgBbrRa2KEXswH1ZaRKsqjk16XmTPM`
+
+Receiver:
+
+`5Pf6Vx2jvLc9u1FNnRL7v7ywmBt8F8z5xK7U57vynmiS`
+
+Receiver setup:
+
+- Devnet rent minimum: **650,240 lamports**
+- setup funding: **750,240 lamports**
+- setup send -> ACK: **149.263 ms**
+- setup send -> processed: **504.921 ms**
+- setup error: **None**
+
+Raw result file created locally:
+
+`exports/devnet_t4_t5_SUCCESS_20260923T212347Z.json`
+
+### 33.1 Successful-sample summary
+
+`TOTAL = 10`, `SUCCESS = 10`, `FAILED = 0`.
+
+| Stage | min ms | p50 ms | p95 ms | p99 ms | max ms | mean ms |
+|---|---:|---:|---:|---:|---:|---:|
+| Blockhash RPC | 129.054 | 136.932 | 151.628 | 151.628 | 157.586 | 140.140 |
+| TX build | 0.058 | 0.091 | 0.113 | 0.113 | 0.116 | 0.089 |
+| TX sign | 0.183 | 0.285 | 0.372 | 0.372 | 0.372 | 0.288 |
+| TX serialize | 0.013 | 0.019 | 0.022 | 0.022 | 0.022 | 0.019 |
+| T4 -> RPC ACK | 122.563 | 133.497 | 144.925 | 144.925 | 326.406 | 153.708 |
+| T4 -> receivedSignature | 267.899 | 386.643 | 472.366 | 472.366 | 487.684 | 389.462 |
+| T4 -> processed (WS) | 392.209 | 457.251 | 490.767 | 490.767 | 496.056 | 451.527 |
+| T4 -> processed (HTTP polling) | 523.683 | 600.502 | 644.989 | 644.989 | 3284.810 | 859.664 |
+| receivedSignature -> processed (WS) | 0.050 | 46.542 | 109.413 | 109.413 | 142.006 | 62.064 |
+
+### 33.2 Interpretation
+
+The successful run confirms the instrumentation and separates several distinct stages:
+
+- local TX build/sign/serialization are sub-millisecond,
+- public Devnet RPC ACK over the current camper/mobile path is roughly 133 ms at p50,
+- the first received-signature notification is much later than RPC ACK,
+- processed via WebSocket is roughly 457 ms at p50,
+- HTTP polling is both slower and contains a large outlier, so it is unsuitable as the primary processed-timestamp source.
+
+These are real successful Devnet transaction timings, but they are **not Mainnet/Pump.fun BUY latency** and must not be inserted directly into the Strategy-C replay as the final Mainnet execution distribution.
+
+---
+
+## 34. DarkBot already contains most of the measurement architecture, but not LIVE broadcast
+
+Repository inspection confirms that the current Phase-1 DarkBot already records/handles most of the local latency chain:
+
+- `receive_mono_ns`
+- `decode_done_mono_ns`
+- `decision_done_mono_ns`
+- `intent_enqueued_mono_ns`
+- `submit_mono_ns`
+- `scheduled_fill_mono_ns`
+- `callback_actual_mono_ns`
+
+The attempt record also already has fields reserved for future live telemetry:
+
+- `rpc_ack_mono_ns`
+- `chain_observed_mono_ns`
+
+The reporter already exposes placeholders:
+
+- `submit_to_ack_ns = FUTURE_LIVE_MEASURED_NOT_FILL`
+- `submit_to_observed_chain_execution_ns = FUTURE_LIVE_OBSERVATION_INCLUDES_RETURN_FEED_DELAY`
+
+However, the current execution adapter is deliberately PAPER-only:
+
+- `PaperExecutionAdapter.send_transaction()` raises `LiveBroadcastForbidden`,
+- `Mode.LIVE` is explicitly marked `never runnable in phase 1`,
+- PAPER schedules a modeled fill instead of building/signing/broadcasting a real Solana transaction.
+
+Therefore the external Devnet script is not duplicating an existing live executor. It is validating the missing physical execution segment in isolation before production code is changed.
+
+### 34.1 Required production integration later
+
+After the execution semantics are frozen, the proper DarkBot implementation path is to add a separate live-capable execution adapter rather than weakening the PAPER boundary. That adapter should populate the already-anticipated telemetry fields and maintain the same attempt/decision accounting contract.
+
+Minimum live timestamps to persist:
+
+1. TX build start/end,
+2. signing start/end,
+3. serialization end,
+4. send start,
+5. RPC ACK,
+6. first provider received-signature observation if available,
+7. first processed/chain-observed notification,
+8. actual Pump.fun economic fill evidence.
+
+PAPER and LIVE must remain structurally separated so a PAPER run can never accidentally broadcast.
