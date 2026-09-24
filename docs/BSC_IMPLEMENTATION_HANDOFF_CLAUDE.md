@@ -615,17 +615,17 @@ Current problem in `darkbot/paper.py`:
 - it constructs `MarketReducer` directly;
 - it assumes SOL/Pump semantics.
 
-Change the constructor additively:
+Change the constructor additively while preserving the existing `engine` injection:
 
 ```python
 class StateOwner:
     def __init__(
         self,
         ...,
-        decoder=None,
-        reducer=None,
-        quote_engine=None,
-        market_profile=None,
+        engine=None,          # EXISTING injection; do not replace it
+        decoder=None,         # additive
+        reducer=None,         # additive
+        market_profile=None,  # additive metadata
     ):
         ...
 ```
@@ -1142,8 +1142,8 @@ CREATE TABLE pending_launches (
     verification_status TEXT NOT NULL,
     canonical_asset_id TEXT,
     canonical_create_event_id TEXT,
-    create_included_mono_ns INTEGER,
-    pending_lead_ns INTEGER,
+    create_inclusion_observed_mono_ns INTEGER,
+    pending_lead_observed_ns INTEGER,
     PRIMARY KEY (run_id, venue_id, tx_hash)
 );
 ```
@@ -1274,6 +1274,217 @@ At minimum, the chain layer must retain enough evidence to answer:
 Block number and transaction indices **alone are insufficient** because a reorg can replace a block at the same height.
 
 Milliseconds remain useful for local-system/provider performance, while block hash + canonical-chain membership + tx/log indices establish actual chain ordering.
+
+---
+
+
+# 18.1 Mandatory ultra-low-latency performance contract
+
+The architectural objective is **as close to 0 ns of avoidable local delay as practical**. Zero is an optimization direction, not a physically achievable measured value.
+
+For the later BSC hot path, the hard local reaction deadline is:
+
+```
+3,000,000 ns = 3.000 ms
+```
+
+measured from:
+
+```
+T_PENDING_SEEN
+    =
+first byte-complete / parseable relevant pending notification
+received by DarkBot on the selected hot feed
+```
+
+to:
+
+```
+T_SOCKET_HANDOFF
+    =
+the fully built and signed BUY transaction has been handed to the
+already-open network transport / sender implementation for transmission
+```
+
+This is deliberately stricter than "decision -> enqueue". Queue handoff alone is not success.
+
+Required sub-stage timestamps:
+
+```
+pending_first_seen_mono_ns
+decode_done_mono_ns
+decision_done_mono_ns
+intent_enqueued_mono_ns
+queue_dequeued_mono_ns
+tx_build_start_mono_ns
+tx_build_done_mono_ns
+sign_start_mono_ns
+sign_done_mono_ns
+socket_handoff_mono_ns
+rpc_ack_mono_ns
+```
+
+Required derived local metrics:
+
+```
+pending_to_decode_ns
+pending_to_decision_ns
+decision_to_enqueue_ns
+enqueue_queue_wait_ns
+queue_dequeue_to_build_done_ns
+sign_ns
+build_and_sign_ns
+pending_to_socket_handoff_ns
+socket_handoff_to_ack_ns
+```
+
+## 18.1.1 Hard 3 ms entry deadline
+
+For future BSC LIVE entry execution:
+
+- if `pending_to_socket_handoff_ns <= 3_000_000`, the local deadline is met;
+- if the deadline is already exceeded **before network handoff**, do not send a new entry;
+- record the event as `LOCAL_ENTRY_DEADLINE_EXCEEDED`;
+- deadline violations remain in all statistics and denominators;
+- never delete or hide slow samples;
+- exits/risk-reduction actions must **not** be suppressed by this entry deadline.
+
+This rule guarantees that DarkBot does not knowingly originate a new BSC entry after its own 3 ms local budget has already expired. It does **not** guarantee 3 ms to on-chain inclusion.
+
+## 18.1.2 Hot path rules — apply through network handoff
+
+From `T_PENDING_SEEN` through `T_SOCKET_HANDOFF`, there must be no avoidable waiting work:
+
+Forbidden:
+
+- SQLite/database reads or writes;
+- filesystem access;
+- metadata/network lookups;
+- RPC quote verification;
+- REST calls;
+- DNS lookup on each trade;
+- opening a new HTTP/TCP/TLS/WebSocket connection per trade;
+- configuration parsing;
+- registry/profile lookup;
+- ABI loading/parsing from disk;
+- JSON reserialization for persistence/logging;
+- synchronous logging;
+- waiting for the writer;
+- process/task hops introduced only by the adapter architecture;
+- sleeps/backoff;
+- fetching nonce/gas/protocol constants on demand when they can be prepared ahead of time.
+
+Required:
+
+- chain/venue/profile resolution once at startup;
+- direct references to already-created adapter objects on the hot path;
+- pre-opened/warmed sender connections;
+- preloaded verified ABI/selectors/contracts;
+- locally cached, freshness-gated nonce/gas/protocol state;
+- precomputed transaction templates/static calldata parts where possible;
+- local deterministic quote/fee calculation only;
+- non-blocking telemetry/write queue;
+- minimal allocations/copies;
+- explicit failure/skip if required verified state is missing or stale.
+
+Correctness wins over speed: missing required state means **no entry**, not a blocking fetch inside the hot path.
+
+## 18.1.3 Phase-A performance preservation gate
+
+Replay parity alone is insufficient because replay virtual time does not expose additional CPU latency.
+
+Before the first Phase-A code change, run a real wall-clock processing benchmark on the same host/environment used for the post-change test.
+
+The benchmark must exercise the existing real processing path with representative recorded input and the normal writer/telemetry load. Measure at least:
+
+```
+receive -> decode
+receive -> decision
+decision -> enqueue
+receive -> enqueue
+queue wait
+```
+
+Record raw samples and:
+
+```
+min / p50 / p95 / p99 / max / mean
+sample count
+CPU/platform/Python version
+writer enabled state
+input dataset/hash
+exact benchmark command
+```
+
+After Phase A, rerun the identical benchmark on the same hardware/environment.
+
+Acceptance:
+
+- no reproducible latency regression attributable to the adapter layer;
+- no new queue/task/process/serialization boundary in the hot path merely because adapters were introduced;
+- `receive -> enqueue` p99 target remains **< 3.000 ms**;
+- any reproducible p50/p95/p99 degradation must be explained and corrected before Phase A is accepted.
+
+The historical Solana measurement (`receive -> enqueue` p50 about 0.539 ms, p99 about 2.203 ms) is context, not the Phase-A oracle; the fresh before/after benchmark is authoritative.
+
+## 18.1.4 Later BSC performance acceptance
+
+When BSC Flap and Four.meme are implemented, benchmark **both enabled simultaneously**, because production capture/recognition may run both recognizers.
+
+Report for each venue and combined load:
+
+```
+p50 / p95 / p99 / max
+deadline violation count
+deadline violation percentage
+```
+
+for:
+
+- pending -> recognized;
+- pending -> decoded;
+- pending -> decision;
+- decision -> enqueue;
+- queue wait;
+- build;
+- sign;
+- pending -> socket handoff;
+- socket handoff -> ACK.
+
+The primary local entry performance gate is `pending -> socket handoff <= 3 ms`.
+
+The optimization target remains **minimum possible latency toward 0 ms**, but no result may be described as "0 ms" unless the measured interval is actually zero at the timer's resolution.
+
+## 18.1.5 Feed/sender path selection is empirical
+
+Do not assume that:
+
+- a local BSC node is always the fastest feed;
+- a paid provider is always faster;
+- the geographically closest endpoint is best;
+- a builder always gives better placement;
+- ACK implies inclusion or correct ordering.
+
+Compare candidate paths using synchronized local first-seen/send timestamps and canonical-chain outcomes.
+
+Feed comparison must measure:
+
+- complete pending-data availability;
+- first-seen lead;
+- missing-transaction rate;
+- p50/p95/p99 jitter;
+- disconnect/gap behavior.
+
+Sender/builder comparison must measure:
+
+- socket handoff -> ACK;
+- canonical inclusion rate;
+- same-block CREATE -> BUY ordering;
+- transaction index distance behind CREATE;
+- revert/failure rate;
+- actual gas/tip/relay cost.
+
+Select the production path from measured results, not marketing claims.
 
 ---
 
@@ -1533,9 +1744,9 @@ Test:
 - unknown venue rejected
 - venue/chain mismatch rejected
 - config hash changes when market profile changes
-- Solana profile resolves Pump
-- Flap profile resolves BSC + Flap
-- Four profile resolves BSC + Four
+- Solana profile resolves executable Solana + Pump components
+- Flap profile resolves **metadata only** to `bsc-mainnet:flap` and runtime construction fails explicitly in Phase A
+- Four profile resolves **metadata only** to `bsc-mainnet:fourmeme` and runtime construction fails explicitly in Phase A
 
 ## 21.3 EVM tests
 
@@ -1815,6 +2026,9 @@ FILES ADDED:
 FILES MODIFIED:
 SEMANTIC CHANGES:
 SOLANA PARITY:
+PERFORMANCE BEFORE:
+PERFORMANCE AFTER:
+PERFORMANCE DELTA:
 TESTS RUN:
 TEST RESULT:
 OPEN QUESTIONS:
@@ -1843,22 +2057,25 @@ Specifically:
 2. record the actual full pre-change commit SHA and working-tree status;
 3. run and save the complete pre-change test-suite result;
 4. create/run/save the strict production Solana replay baseline per Section 0.5;
-5. add `chains/base.py`;
-6. add `chains/registry.py`;
-7. add `venues/base.py`;
-8. add `venues/registry.py`;
-9. add `runtime/profiles.py`;
-10. add `runtime/assembly.py`;
-11. add **minimal Solana chain and Pump.fun venue wrappers in Phase A**, reusing existing implementation;
-12. add backward-compatible effective `market_profile_id` resolution without mutating old canonical config JSON/hashes;
-13. preserve all existing replay-specific dependency injection and offline semantics;
-14. inject runtime components into normal Solana runtime paths without semantic change;
-15. register BSC/Flap and BSC/Four as metadata only; attempting to run them must fail explicitly;
-16. add registry/assembly/backward-compatibility tests;
-17. run the entire post-change test suite;
-18. rerun the exact pre-change strict Solana replay baseline;
-19. perform and save the exact parity comparison;
-20. stop and report.
+5. run and save the pre-change real wall-clock performance baseline from Section 18.1.3;
+6. add `chains/base.py`;
+7. add `chains/registry.py`;
+8. add `venues/base.py`;
+9. add `venues/registry.py`;
+10. add `runtime/profiles.py`;
+11. add `runtime/assembly.py`;
+12. add **minimal Solana chain and Pump.fun venue wrappers in Phase A**, reusing existing implementation;
+13. add backward-compatible effective `market_profile_id` resolution without mutating old canonical config JSON/hashes;
+14. preserve all existing replay-specific dependency injection and offline semantics;
+15. inject runtime components into normal Solana runtime paths without semantic change;
+16. register BSC/Flap and BSC/Four as metadata only; attempting to run them must fail explicitly;
+17. add registry/assembly/backward-compatibility tests;
+18. run the entire post-change test suite;
+19. rerun the exact pre-change strict Solana replay baseline;
+20. perform and save the exact parity comparison;
+21. rerun the identical wall-clock performance benchmark from Section 18.1.3;
+22. investigate/correct any reproducible adapter-induced regression;
+23. stop and report.
 
 Do **not** add BSC networking, EVM decoding, Flap/Four contract constants, or live broadcasting in this phase.
 
@@ -1876,6 +2093,9 @@ All must be true:
 - minimal Solana/Pump wrappers are present and reuse existing implementation;
 - Solana/Pump runtime still works;
 - strict before/after replay parity passes under the exact same command/runner and dataset;
+- the same pre/post wall-clock benchmark was run on the same hardware/environment;
+- no reproducible adapter-induced latency regression remains unexplained;
+- `receive -> enqueue` p99 target remains below 3.000 ms;
 - lamport-denominated results compare as exact integers, not rounded SOL;
 - decision/event/attempt/fill/fee/ledger semantics match under the predetermined run-id-independent mapping;
 - diagnostic legacy-compatible monkeypatch results were not promoted into production semantics;
