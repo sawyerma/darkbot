@@ -32,7 +32,7 @@ Do **not** change the semantics of:
 
 All existing tests must remain green.
 
-The clean Solana replay baseline from the research status must remain reproducible.
+The Solana parity baseline for this refactor is **not** a historical diagnostic result and is **not** hard-coded to an old commit. Before any Phase-A code change, freeze the current implementation revision and run a strict, unmodified production replay as described in Section 0.5. The historical commit `4af978e18f91dea5d921ed7ef284b15d55d6c987` remains useful documentary context only; it is not automatically the Phase-A starting revision.
 
 ## 0.2 No protocol guessing
 
@@ -90,6 +90,138 @@ elif venue == "fourmeme":
 ```
 
 inside generic BSC transport/fee/nonce code.
+
+## 0.5 Phase-A baseline and exact parity contract
+
+This section is mandatory and must be completed **before the first implementation edit**.
+
+### 0.5.1 Freeze the actual starting revision
+
+Record the current full commit SHA at execution time:
+
+```bash
+git rev-parse HEAD
+git status --short
+```
+
+The resulting full SHA is the Phase-A baseline revision. Do not substitute a historically documented commit merely because it appears in research notes.
+
+Also record the current working-tree status. Unrelated local captures/exports must not be modified, deleted, staged, or committed as part of Phase A.
+
+### 0.5.2 Run the complete pre-change test suite
+
+Run the repository's complete existing test suite **before any source edit** and persist the exact command and complete result.
+
+Minimum requirement:
+
+```bash
+pytest
+```
+
+If the repository normally requires a more specific invocation, use that actual invocation and record it verbatim.
+
+Store:
+
+- full baseline commit SHA;
+- Python version/environment;
+- exact test command;
+- pass/fail/skip counts;
+- complete stdout/stderr or durable test-result artifact.
+
+A failing pre-change suite is not silently accepted. Stop and report it.
+
+### 0.5.3 Create a strict Solana replay baseline before the refactor
+
+Run one **strict, unmodified production Solana/Pump.fun replay** on the current implementation.
+
+The baseline manifest must record:
+
+- full baseline commit SHA;
+- source database path;
+- source run id;
+- dataset hash;
+- complete runtime config content and config hash;
+- complete research/replay parameters;
+- exact replay command or exact one-off runner command used;
+- SHA-256 of any one-off runner used;
+- output database/artifacts;
+- exact integer economic results in **lamports**;
+- semantic decision/event/attempt/fill/fee/ledger digests described below.
+
+Use the existing clean source dataset when available:
+
+```
+data/market_capture_30m_clean_v2.sqlite
+source run:
+market_capture_30m_clean_v2_capture_20260923T112208Z_994750
+
+documented dataset hash:
+8dbc5bf633f4c589fa816ce637fd18c2dd85383932de6e36d4209b49938b3636
+```
+
+The runner/config used for the Phase-A parity baseline must use the **current strict production semantics**. It must not use the historical RAM-only legacy-evidence compatibility monkeypatches documented in `RESEARCH_STATUS_2026-09-23.md`.
+
+If there is no existing single CLI command for the required strict replay, a read-only one-off runner may be created **outside the production source tree** (for example under `/tmp`). It must:
+
+- import the current production replay implementation normally;
+- not monkeypatch decoder/reducer/evidence semantics;
+- not modify source data;
+- record its exact file hash and command;
+- be used identically before and after the refactor.
+
+### 0.5.4 Required parity comparison
+
+After Phase A, rerun the **same** baseline procedure and compare before/after.
+
+The comparison must include at minimum:
+
+- normalized/canonical event semantic identities;
+- decision sequence and decision action/reason;
+- entry and exit attempt sequence;
+- attempt statuses;
+- fills and fill quantities;
+- fee evidence actually selected;
+- fee amounts;
+- ledger records;
+- position terminal states;
+- exit reasons;
+- realized PnL in exact lamports;
+- pessimistic PnL in exact lamports;
+- unresolved exposure/cost in exact lamports.
+
+Do **not** use rounded SOL values as an equality criterion.
+
+Generated run-specific IDs are allowed to differ. Compare them through a predetermined semantic mapping, not by raw generated id string. Use stable semantic keys such as:
+
+```
+event:
+(tx/signature, instruction-or-log index, asset/mint, event type)
+
+decision:
+(asset/mint, source create tx/signature, action, reason)
+
+attempt:
+(asset/mint, side, attempt number)
+
+fee evidence:
+(kind, source/provider/method, canonical normalized content)
+
+position:
+(asset/mint, entry decision semantic key)
+```
+
+If a generated ID contains a run-id/canonical-prefix component, strip/map only that documented run-specific component; do not ignore substantive differences.
+
+### 0.5.5 Diagnostic legacy-compatible runs are separate
+
+The positive diagnostic figures in the research document, including the legacy-compatible 3.0x/750 ms experiments, are **not** the mandatory production parity oracle.
+
+Those diagnostic runs may be repeated as an additional research check, but:
+
+- they stay clearly labeled diagnostic;
+- RAM-only/monkeypatch evidence semantics stay outside production code;
+- their output must not force a production-semantic change;
+- failure to reproduce a diagnostic monkeypatch result is not permission to alter strict production behavior.
 
 ---
 
@@ -451,6 +583,28 @@ def assemble_runtime(*, cfg, clock, run_id, callbacks) -> RuntimeComponents:
 
 Adapt names to actual repository conventions, but preserve the separation.
 
+### 5.1 Assembly scope: do not flatten replay-specific injection
+
+The generic assembly example is for normal runtime component selection. It does **not** replace specialized replay construction.
+
+The existing replay path already injects replay-specific behavior into `StateOwner` and must keep doing so. In particular, preserve the current semantics of:
+
+- `StateOwner(..., engine=...)`;
+- replay-created quote engine with stress parameters;
+- `canonical_prefix`;
+- recorded/source fee snapshots and source-policy binding;
+- `persist_observations`;
+- `compute_features`;
+- `mint_allowlist` / replay filters;
+- callback-lateness handling;
+- `execution_delay_provider`;
+- virtual replay clock/offline scheduling;
+- source dataset integrity checks.
+
+Do not force replay through a generic live/capture assembly path if doing so changes any of these semantics. Shared factories may be used only where they preserve the exact existing replay contract.
+
+Replay remains fully offline and must never require a live feed, live RPC, provider connection, signing key, or broadcaster.
+
 ---
 
 # 6. Refactor `StateOwner` by dependency injection
@@ -476,19 +630,62 @@ class StateOwner:
         ...
 ```
 
-During migration:
+During migration, preserve the **existing** replay injection seam. The current code already accepts `engine=...`; do not replace or shadow it with a second competing parameter.
+
+A compatible shape is conceptually:
 
 ```python
-self.decoder = decoder if decoder is not None else PumpDecoder(cfg.protocol)
-self.reducer = reducer if reducer is not None else MarketReducer(...)
-self.engine = quote_engine if quote_engine is not None else QuoteEngine(...)
+class StateOwner:
+    def __init__(
+        self,
+        ...,
+        engine=None,          # EXISTING replay injection — preserve semantics
+        decoder=None,         # additive
+        reducer=None,         # additive
+        market_profile=None,  # additive metadata
+        canonical_prefix=None,
+        persist_observations=True,
+        compute_features=True,
+        mint_allowlist=None,
+        ...
+    ):
+        self.decoder = decoder if decoder is not None else PumpDecoder(cfg.protocol)
+        self.reducer = reducer if reducer is not None else MarketReducer(...)
+        self.engine = engine if engine is not None else QuoteEngine(...)
 ```
 
-This temporary fallback is allowed only to preserve old tests while adapter injection is introduced.
+The exact signature must follow the real repository, not this abbreviated example. The key rule is that existing arguments and behavior remain intact.
 
-After parity is proven, runtime code must always inject components.
+Temporary Pump/Solana fallback construction is allowed to preserve legacy callers during Phase A.
 
 Do not change Strategy C semantics in this step.
+
+### 6.1 Legacy config and hash compatibility
+
+Phase A must not retroactively alter existing Solana config hashes.
+
+For legacy configs with no explicit `market_profile_id`:
+
+```
+effective market profile = solana-mainnet:pumpfun
+```
+
+but the default must be interpreted **outside the canonical raw JSON used for the legacy config hash**.
+
+Do **not** implement this by mutating the legacy raw config with:
+
+```python
+raw.setdefault("market_profile_id", "solana-mainnet:pumpfun")
+```
+
+before `canonical_json(raw)`, because that would change historical config hashes.
+
+Requirements:
+
+- old config file + old code semantics => same existing config hash after Phase A;
+- explicit new profile metadata may participate in hashes for newly authored multichain configs;
+- absent profile remains backward-compatible Solana/Pump;
+- existing replay/source config foreign-key/evidence bindings must remain valid.
 
 ---
 
@@ -1014,9 +1211,11 @@ Do not hard-code target/timeout in the strategy class. Those remain config/resea
 
 ---
 
-# 18. Unified timing fields
+# 18. Unified timing and ordering semantics
 
-Required for BSC:
+For BSC, distinguish **local observation time** from **on-chain ordering**.
+
+Required local monotonic timestamps:
 
 ```
 pending_first_seen_mono_ns
@@ -1025,32 +1224,56 @@ decision_done_mono_ns
 intent_enqueued_mono_ns
 submit_mono_ns
 rpc_ack_mono_ns
-create_included_mono_ns
-buy_included_mono_ns
+create_inclusion_observed_mono_ns
+buy_inclusion_observed_mono_ns
 receipt_seen_mono_ns
 ```
 
-Derived:
+Do **not** name a local arrival timestamp `create_execution_time` or imply that it is the exact EVM execution instant.
+
+Derived local-observation latencies:
 
 ```
 pending_to_decode_ns
 pending_to_decision_ns
 pending_to_enqueue_ns
 pending_to_submit_ns
-pending_lead_to_create_ns
-pending_to_buy_ns
-create_to_buy_ns
+pending_to_create_inclusion_observed_ns
+pending_to_buy_inclusion_observed_ns
+create_observed_to_buy_observed_ns
 ```
 
-Also persist block ordering:
+These values include provider/network observation delay and are not exact on-chain execution intervals.
+
+Persist canonical ordering evidence separately:
 
 ```
+create_block_number
+create_block_hash
 create_tx_index
+create_log_index
+
+buy_block_number
+buy_block_hash
 buy_tx_index
-buy_minus_create_tx_index
+buy_log_index
 ```
 
-Milliseconds alone are insufficient for same-block execution analysis.
+For same-block analysis, ordering is valid only when both transactions belong to the same block hash that is currently on the accepted canonical chain.
+
+For different blocks, compare canonical ancestry/block order, not arrival timestamps.
+
+At minimum, the chain layer must retain enough evidence to answer:
+
+- was CREATE on the accepted canonical chain?
+- was BUY on the accepted canonical chain?
+- were they in the same canonical block hash?
+- if yes, was `buy_tx_index > create_tx_index`?
+- if a reorg removed either block, was the prior conclusion rolled back?
+
+Block number and transaction indices **alone are insufficient** because a reorg can replace a block at the same height.
+
+Milliseconds remain useful for local-system/provider performance, while block hash + canonical-chain membership + tx/log indices establish actual chain ordering.
 
 ---
 
@@ -1068,37 +1291,114 @@ The capture mode must allow:
 }
 ```
 
-Only one BSC network ingest.
+Only one BSC network ingest is required for pending traffic, and both recognizers must consume the same original local receive timestamp.
 
-Both recognizers consume the same original `receive_mono_ns`.
+However, the dataset must contain **two independent evidence paths**:
 
-Required report per venue:
+### 19.1 Pending-path evidence
+
+Purpose: measure what DarkBot could know before canonical inclusion.
+
+Persist the complete raw pending transaction evidence needed to reproduce decoding, including at minimum:
+
+- provider id;
+- full tx hash;
+- sender;
+- destination;
+- nonce;
+- value;
+- calldata/input;
+- gas fields;
+- first-seen local monotonic timestamp;
+- replacement relationship;
+- raw provider payload or a lossless canonical raw representation plus integrity hash.
+
+Do not store only the decoded launch object.
+
+### 19.2 Independent canonical launch census
+
+Purpose: establish the denominator of all launches that actually occurred, including launches never seen in the public pending feed.
+
+Independently scan canonical BSC blocks/logs/receipts for Flap and Four.meme launch events.
+
+The canonical census must not depend on a launch having first existed in `pending_launches`.
+
+This makes the coverage definition:
 
 ```
-launches_total
-pending_seen
+pending_coverage =
+canonical launches seen in pending before inclusion
+/
+all canonical launches in the capture window
+```
+
+A pending-only denominator is invalid.
+
+Persist enough raw canonical data to reproduce the census:
+
+- block number;
+- block hash;
+- parent hash;
+- transaction hash;
+- transaction index;
+- transaction input/value where required;
+- raw logs/topics/data;
+- log index;
+- receipt status;
+- gas used/effective gas price;
+- local observation timestamps;
+- integrity hashes/raw payloads as appropriate.
+
+### 19.3 Reorg contract
+
+Canonicality is mutable until the configured confirmation/finality policy is satisfied.
+
+The capture layer must:
+
+1. track block hash and parent hash;
+2. detect canonical-head replacement/reorg;
+3. mark events/receipts from orphaned blocks non-canonical;
+4. roll back/reconcile derived launch/trade state;
+5. accept the replacement canonical block/events;
+6. retain both the original raw evidence and the canonicality transition for audit.
+
+Do not delete orphaned raw evidence. Mark it.
+
+### 19.4 Required reports
+
+Per venue:
+
+```
+canonical_launches_total
+pending_seen_before_inclusion
 pending_coverage_pct
 predicted_asset_id_available_pct
-pending_lead_ms_min
-pending_lead_ms_p50
-pending_lead_ms_p95
-pending_lead_ms_p99
-pending_lead_ms_max
+pending_lead_observed_ms_min
+pending_lead_observed_ms_p50
+pending_lead_observed_ms_p95
+pending_lead_observed_ms_p99
+pending_lead_observed_ms_max
 reverted_creates
 replaced_creates
-dropped_creates
-first_external_buy_delay
-trades_0_100ms
-trades_0_250ms
-trades_0_500ms
-trades_0_750ms
-trades_0_1000ms
+dropped_pending_creates
+orphaned_create_observations
+first_external_buy_observed_delay
+same_block_first_buy_count
+trades_0_100ms_observed
+trades_0_250ms_observed
+trades_0_500ms_observed
+trades_0_750ms_observed
+trades_0_1000ms_observed
 creator_sell_count
 decode_unknown_count
 unsupported_mode_count
+raw_evidence_integrity_failures
+canonical_census_gaps
 ```
 
-No economic conclusion before quote/fee verification.
+Any millisecond `*_observed` metric is a local/provider observation metric, not an exact EVM execution interval.
+
+No economic conclusion before quote/fee verification and canonical-census quality checks pass.
 
 ---
 
@@ -1183,17 +1483,37 @@ chronological_third_3
 
 # 21. Test plan
 
-## 21.1 Regression gate
+## 21.1 Regression and exact Solana parity gate
 
-Before any BSC feature merge:
+Phase A has a strict before/after gate.
 
-```
-pytest
-```
+Before source changes:
 
-must remain fully green.
+1. freeze the actual full `git rev-parse HEAD`;
+2. run and store the complete existing test-suite result;
+3. run and store the strict production Solana replay baseline defined in Section 0.5.
 
-Also run the existing Solana clean replay and compare frozen metrics.
+After Phase A:
+
+1. run the same complete test command;
+2. run the exact same replay command/runner against the same source dataset;
+3. compare using the semantic mapping defined in Section 0.5;
+4. require exact integer equality for lamport-denominated economics.
+
+Required equalities include:
+
+- event semantics;
+- decisions/actions/reasons;
+- attempts/statuses;
+- fills;
+- selected fee evidence and fee values;
+- ledger economics;
+- position outcomes;
+- exact realized PnL lamports;
+- exact pessimistic PnL lamports;
+- unresolved exposure/cost lamports.
+
+Diagnostic legacy-compatible monkeypatch runs are separate optional checks and are not the production oracle.
 
 ## 21.2 New core tests
 
@@ -1274,37 +1594,56 @@ Explicitly test unknown mode refusal.
 
 # 22. Implementation phases for Claude
 
-## Phase A — architecture only
+## Phase A — architecture + minimal Solana/Pump wrapper parity
+
+Phase A includes the **minimum Solana/Pump wrappers required to make the adapter seam real**. This resolves the earlier phase-boundary ambiguity.
 
 Implement:
 
-- chain interfaces
-- venue interfaces
-- profile registry
-- runtime assembly
-- dependency injection seam
+- freeze pre-change baseline per Section 0.5;
+- chain interfaces;
+- venue interfaces;
+- profile registry;
+- runtime assembly;
+- dependency-injection seam;
+- minimal Solana chain wrapper around existing implementation;
+- minimal Pump.fun venue wrapper around existing implementation;
+- legacy config compatibility without changing existing config hashes;
+- explicit non-runnable BSC profile metadata.
 
-Do **not** implement BSC networking yet.
+Rules:
+
+- reuse existing Solana/Pump classes/functions;
+- do not move/rewrite Pump decoder, reducer, quote or fee logic unless strictly necessary for wrapping;
+- preserve existing `StateOwner(engine=...)` replay injection and all replay-specific parameters;
+- do not implement BSC networking;
+- do not implement Flap/Four contracts;
+- do not add live broadcasting.
 
 Acceptance:
 
-- full existing suite passes
-- exact Solana behavior unchanged
+- full existing suite passes;
+- exact strict Solana replay parity passes per Sections 0.5 and 21.1;
+- legacy configs without `market_profile_id` still resolve to Solana/Pump;
+- those legacy config hashes remain unchanged;
+- `bsc-mainnet:flap` and `bsc-mainnet:fourmeme` exist as metadata only and fail explicitly if execution/runtime construction is requested.
 
-Commit separately.
+Commit Phase A separately, then **STOP** and report.
 
-## Phase B — Solana wrapper parity
+## Phase B — optional adapter cleanup after Phase-A approval
 
-Create Solana/Pump adapters around existing code.
+Phase B is **not** where Solana wrappers are first introduced.
 
-Do not rewrite Pump code.
+Only after Phase A is independently reviewed and accepted may Phase B:
 
-Acceptance:
+- remove temporary fallback wiring that is proven unnecessary;
+- improve adapter type boundaries;
+- reduce imports/coupling;
+- add non-semantic cleanup.
 
-- full suite passes
-- clean replay exact parity
+It must still preserve exact Solana parity.
 
-Commit separately.
+Do not start Phase B automatically.
 
 ## Phase C — EVM/BSC capture primitives
 
@@ -1500,21 +1839,28 @@ Do not jump ahead.
 
 Specifically:
 
-1. inspect current repository
-2. add `chains/base.py`
-3. add `chains/registry.py`
-4. add `venues/base.py`
-5. add `venues/registry.py`
-6. add `runtime/profiles.py`
-7. add `runtime/assembly.py`
-8. add minimal config support for `market_profile_id`
-9. inject runtime components without changing existing Solana behavior
-10. add registry/assembly tests
-11. run entire test suite
-12. run frozen Solana replay parity check
-13. stop and report
+1. inspect the current repository and the parent design/source-of-truth documents;
+2. record the actual full pre-change commit SHA and working-tree status;
+3. run and save the complete pre-change test-suite result;
+4. create/run/save the strict production Solana replay baseline per Section 0.5;
+5. add `chains/base.py`;
+6. add `chains/registry.py`;
+7. add `venues/base.py`;
+8. add `venues/registry.py`;
+9. add `runtime/profiles.py`;
+10. add `runtime/assembly.py`;
+11. add **minimal Solana chain and Pump.fun venue wrappers in Phase A**, reusing existing implementation;
+12. add backward-compatible effective `market_profile_id` resolution without mutating old canonical config JSON/hashes;
+13. preserve all existing replay-specific dependency injection and offline semantics;
+14. inject runtime components into normal Solana runtime paths without semantic change;
+15. register BSC/Flap and BSC/Four as metadata only; attempting to run them must fail explicitly;
+16. add registry/assembly/backward-compatibility tests;
+17. run the entire post-change test suite;
+18. rerun the exact pre-change strict Solana replay baseline;
+19. perform and save the exact parity comparison;
+20. stop and report.
 
-Do **not** add BSC networking in this phase.
+Do **not** add BSC networking, EVM decoding, Flap/Four contract constants, or live broadcasting in this phase.
 
 ---
 
@@ -1522,16 +1868,28 @@ Do **not** add BSC networking in this phase.
 
 All must be true:
 
-- existing test suite green;
-- no existing test deleted or weakened;
+- actual pre-change full commit SHA was recorded;
+- complete pre-change test result was recorded;
+- strict pre-change Solana replay baseline manifest exists;
+- complete post-change test suite is green;
+- no existing test was deleted, weakened, skipped, or rewritten merely to accept new behavior;
+- minimal Solana/Pump wrappers are present and reuse existing implementation;
 - Solana/Pump runtime still works;
-- Solana clean replay metrics unchanged;
+- strict before/after replay parity passes under the exact same command/runner and dataset;
+- lamport-denominated results compare as exact integers, not rounded SOL;
+- decision/event/attempt/fill/fee/ledger semantics match under the predetermined run-id-independent mapping;
+- diagnostic legacy-compatible monkeypatch results were not promoted into production semantics;
+- existing replay `engine` injection, `canonical_prefix`, recorded fee evidence, stress parameters, virtual clock and other replay-specific inputs remain intact;
+- replay remains offline;
+- legacy config without `market_profile_id` resolves effectively to `solana-mainnet:pumpfun`;
+- legacy config hashes remain unchanged;
 - `solana-mainnet:pumpfun` resolves correctly;
 - `bsc-mainnet:flap` exists as registry metadata only;
 - `bsc-mainnet:fourmeme` exists as registry metadata only;
 - selecting an unimplemented BSC runtime fails explicitly with a clear `NotImplementedError` or readiness error;
-- no Flap/Four contract constant invented;
-- no live broadcasting added;
-- no historical DB migration required yet.
+- no Flap/Four contract constant was invented;
+- no BSC networking was added;
+- no live broadcasting was added;
+- no historical DB migration is required in Phase A.
 
-Only after Phase A passes should Phase B start.
+After Phase A passes, **STOP**. Do not begin Phase B until the Phase-A implementation and parity artifacts have been independently reviewed and approved.
