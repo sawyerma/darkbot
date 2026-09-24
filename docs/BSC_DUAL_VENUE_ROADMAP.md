@@ -1057,8 +1057,8 @@ Fields:
 - launch_params_json
 - canonical_asset_id nullable
 - canonical_create_event_id nullable
-- create_included_mono_ns nullable
-- pending_lead_ns nullable
+- create_inclusion_observed_mono_ns nullable
+- pending_lead_observed_ns nullable
 
 ## 15.4 Market events
 
@@ -1580,22 +1580,51 @@ Design DarkBot around a provider-neutral builder interface because BSC supports 
 
 ---
 
-# 23. Performance targets
+# 23. Performance contract — optimize toward 0 ms, hard local entry deadline 3 ms
 
-The BSC implementation should preserve the existing local-performance standard.
+The performance objective is to remove every avoidable local delay. **0 ms is the optimization direction.**
 
-Initial targets:
+For future BSC LIVE entries, the hard local deadline is:
+
+```
+T_PENDING_SEEN -> T_SOCKET_HANDOFF <= 3,000,000 ns
+```
+
+where `T_SOCKET_HANDOFF` means the fully built and signed transaction has been handed to an already-open sender/network transport. It does not mean ACK or on-chain inclusion.
+
+If the 3 ms deadline has already expired before handoff, the new entry is not sent and is recorded as `LOCAL_ENTRY_DEADLINE_EXCEEDED`. Late entries remain in statistics. The rule does not suppress exits/risk-reduction actions.
+
+Internal performance targets should be materially below the hard deadline:
 
 ```
 pending receive -> venue recognized      p50 < 0.10 ms
 recognized -> fully decoded              p50 < 0.50 ms
-pending receive -> decision              p50 < 1.0 ms
+pending receive -> decision              p50 < 1.00 ms
 decision -> enqueue                      p50 < 0.10 ms
+pending receive -> socket handoff        p99 < 3.00 ms
 ```
 
-These are engineering targets, not assumed chain execution latency.
+Measure p50/p95/p99/max and raw samples for:
 
-Storage must remain off the hot path through the existing writer architecture.
+- receive -> recognize;
+- receive -> decode;
+- receive -> decision;
+- decision -> enqueue;
+- queue wait;
+- transaction build;
+- signing;
+- receive -> socket handoff;
+- socket handoff -> ACK.
+
+The full hot path through socket handoff must contain no waiting DB/filesystem/metadata/RPC quote fetch, no per-trade connection establishment, and no adapter-induced process/task/serialization hop. Profiles/adapters are resolved at startup; contracts/selectors/templates/connections and freshness-gated nonce/gas/protocol state are prepared outside the hot path. Missing/stale required state blocks the trade rather than causing a synchronous fetch.
+
+Phase A must also run the same real wall-clock receive->decode->decision->enqueue benchmark before and after the adapter refactor on the same hardware. Replay parity alone is not a performance test.
+
+Both Flap and Four.meme must later be benchmarked simultaneously under combined ingest load.
+
+These are local engineering deadlines, not promises of 3 ms to canonical BSC execution. Feed/provider, sender, builder placement, ACK, inclusion and canonical ordering are measured separately.
+
+Storage remains off the hot path through the existing writer architecture.
 
 ---
 
