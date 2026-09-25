@@ -8,19 +8,42 @@ Current implementation anchor: `main@004f440c39c147087a7385bf16a4dc6660058936`
 
 ## Roadmap continuity and current status — 2026-09-25
 
-This file is the **authoritative BSC dual-venue milestone sequence**. The implementation handoff defines the corresponding Phase A-F gates. The older `docs/MULTICHAIN_ROADMAP.md` remains the parent architecture, but its earlier BSC milestone numbering is superseded where it differs from this dual-venue roadmap.
+This file is the **single authoritative active BSC milestone sequence and status roadmap**.
+
+Document responsibilities are fixed:
+
+- **this file** = what is DONE / NEXT / PENDING and in what order work is allowed to happen;
+- **`docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md`** = exact technical contract and acceptance rules for the active phase;
+- **`docs/MULTICHAIN_ROADMAP.md`** = historical parent architecture only; it MUST NOT override current phase scope or numbering;
+- **`docs/phase_a/PHASE_A_REPORT.md`** = immutable historical evidence only.
+
+Current repository/documentation HEAD for the Phase-C handoff is:
+
+```
+main@a65ba4aa0129c02328ccdb8d9426741ab3fdfc9d
+```
+
+The Phase-A production-code seam underneath it was integrated at:
+
+```
+main@004f440c39c147087a7385bf16a4dc6660058936
+```
+
+No other roadmap is allowed to change the active ordering below.
 
 Crosswalk:
 
-| Phase | Milestones in this roadmap | Current status |
-| --- | --- | --- |
-| Phase A | M0-M3 | code seam integrated at `004f440`; see notes below |
-| Phase B | optional non-semantic adapter cleanup | intentionally skipped unless review requires it |
-| Phase C | M4 + M5 + M6 | NEXT |
-| Phase D | M7 | pending |
-| Phase E | M8 | pending |
-| Phase F | M9 | pending |
-| post-Phase F | M10-M17 | blocked until the combined BSC capture is analyzed |
+| Phase | Milestones | Status | Exact scope |
+| --- | --- | --- | --- |
+| Phase A | M0-M3 | **IMPLEMENTED** | multichain seam, Solana/Pump wrappers, profiles/runtime assembly, backward compatibility; strict new real-capture Solana parity still OPEN |
+| Phase-A evidence cleanup | validation tools only | **REQUIRED BEFORE PHASE-C CODE** | fix/supplement parity PASS/exit-code enforcement and benchmark of actual assembly wiring; no Solana semantic change |
+| Phase B | optional cleanup | **SKIPPED** | do not start unless an independent concrete need is approved |
+| Phase C | M4 + M5 + M6 | **NEXT** | EVM core + BSC chain + shared dispatcher + minimal read-only capture storage; no real venues/economics/trading |
+| Phase D | M7 | **PENDING** | Flap read-only decoder only |
+| Phase E | M8 | **PENDING** | Four.meme read-only decoder only |
+| Phase F | M9 | **PENDING** | one combined real 30-minute BSC capture for both venues |
+| post-Phase-F economics gate | unnumbered prerequisite before M10 | **BLOCKED** | verified quote/fee/tax economics + eth_call/helper parity using evidence from the real capture |
+| post-Phase-F | M10-M17 | **BLOCKED** | Strategy C multichain, replay, PAPER, send/inclusion, venue execution, ordered backrun, forward capture, GUI |
 
 Phase-A/M0-M3 detail at the current anchor:
 
@@ -31,6 +54,32 @@ Phase-A/M0-M3 detail at the current anchor:
 - `docs/phase_a/PHASE_A_REPORT.md` remains historical evidence and must not be rewritten as a later-phase status document.
 
 The next implementation block is therefore **Phase C / M4-M6**, not a new architecture rewrite and not Phase B.
+
+Before touching Phase-C production code, repair/supplement the two known Phase-A validation-tool gaps documented in `BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md`:
+
+- `compare_parity.py`: advertised config-hash invariants must participate in PASS and FAIL must return non-zero;
+- `bench_hotpath.py`: future benchmark must exercise the real current assembly/injection wiring rather than only the retained fallback path.
+
+Historical Phase-A artifacts remain unchanged.
+
+### Non-negotiable Phase-C semantics
+
+Phase C must implement all of the following before it can be accepted:
+
+- same-sender+nonce different hashes are competing candidates; observation order alone is never definitive replacement;
+- canonical path is independent from pending visibility;
+- each BSC HTTP/WSS connection verifies `eth_chainId == 56` on connect/reconnect;
+- hash-only pending enrichment is bounded/asynchronous and preserves original first-seen time;
+- reconnect/restart performs deterministic missing-block canonical backfill before canonical coverage is marked recovered;
+- pending gaps are retained because missed mempool history is not fabricated;
+- block hash + parent hash + bounded ancestry drive reorg logic; orphan evidence is preserved with canonicality transition audit;
+- chain transaction identity is separate from per-provider observation identity;
+- arbitrary EVM uint256-capable values are stored losslessly, never float;
+- `REPLACED`/`DROPPED` require an explicit evidence-based finalization rule, not observation order or timeout alone;
+- a mandatory integrated `Fake WSS/RPC -> BSC chain -> dispatcher -> Recorder/SqliteWriter -> DB readback` test covers disconnect, backfill, reorg and shutdown;
+- Phase C measures parse/dispatch/enrichment/queue latency only and does not claim the later 3 ms socket-handoff LIVE contract is proven.
+
+The detailed contract is in `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md`; these bullets are not optional.
 
 At Phase F, the synchronized experiment uses two independent databases:
 
@@ -1334,70 +1383,152 @@ Gate:
 
 ## M4 — EVM core
 
-Implement:
+Implement generic, venue-free EVM capture primitives:
 
-- JSON-RPC
-- WS
-- pending tx model
-- block model
-- receipt model
-- nonce/replacement/reorg logic
+- JSON-RPC + WebSocket parsing/health/error handling;
+- immutable pending/block/transaction/log/receipt evidence;
+- exact hex/integer handling with lossless uint256-capable storage representation;
+- provider pending capability: full object / hash only / unavailable;
+- bounded asynchronous hash-only enrichment with dedup/concurrency/overflow accounting;
+- sender+nonce **candidate competition**, not observation-order replacement;
+- block ancestry and reorg primitives.
 
 Unit-test with synthetic fixtures.
 
+No BSC venue logic. No quotes. No trading.
+
 ## M5 — BSC chain
 
-Implement:
+Implement one read-only BSC specialization:
 
-- chain id 56
-- BNB units
-- BSC feed config
-- provider health
-- local `bsc-geth` support
-- canonical block/receipt collection
+- chain id 56 / `eth_chainId == 0x38`;
+- BNB / 18 decimals;
+- BSC provider config and health;
+- chain-id verification on connect/reconnect;
+- pending ingress;
+- independent canonical head/block/transaction/log/receipt collection;
+- last-completely-processed canonical high-water mark;
+- reconnect/restart missing-block backfill with hash/parent-hash continuity checks;
+- pending-gap tracking separate from canonical-gap recovery;
+- bounded ancestry + reorg processing with orphan evidence retained;
+- auditable canonicality transitions;
+- BSC timing telemetry.
 
 No venue logic.
 
-## M6 — shared BSC multi-venue dispatcher
+## M6 — shared BSC multi-venue dispatcher + minimum capture persistence
 
-One pending feed, one block feed, venue recognizer registry.
+Implement one shared BSC dispatcher and the minimum read-only persistence needed to test/use it:
 
-Gate:
-
-- same pending tx timestamp passed unchanged to every venue recognizer
-- no duplicate raw storage
-
-## M7 — Flap adapter
-
-Implement pending/create/trade/migration decoding first.
-
-Then quote/fee model.
-
-Gate:
-
-- ABI vectors
-- on-chain `eth_call` parity
-- historical tx parity
-
-## M8 — Four.meme adapter
-
-Implement pending/create/trade/liquidity decoding.
-
-Then mode-aware quote/fee model.
+- one pending ingest;
+- one canonical ingest;
+- one original timestamp origin;
+- recognizer protocol for synthetic Phase-C recognizers;
+- chain transaction evidence stored once per `(run_id, chain_id, tx_hash)`;
+- provider observations stored independently per provider/tx;
+- no duplicate raw chain evidence per future venue;
+- exact big-int round-trip;
+- bounded Recorder/Writer integration;
+- mandatory integrated Fake-WSS/RPC -> chain -> dispatcher -> SQLite test including disconnect, canonical backfill, short reorg and clean shutdown.
 
 Gate:
 
-- V2 normal
-- tax token
-- X Mode
-- AntiSniperFeeMode
-- helper parity
+- original pending timestamp passed unchanged to every recognizer;
+- no raw chain transaction duplication across recognizers/providers;
+- provider timing evidence retained separately;
+- canonical path works when pending feed missed a transaction;
+- replacement/drop finalization is evidence-based and tested;
+- all Phase-C tests + full Solana regressions pass;
+- no signing or broadcast path exists.
 
-## M9 — combined 30-minute capture
+After M6: **STOP and review.**
 
-Capture both venues simultaneously.
+## M7 — Flap read-only decoder
 
-Decision point: compare launch count, pending coverage, lead time, token-address availability, taxes/modes, market activity.
+Only after Phase C acceptance and verified Flap contracts/ABI/fixtures are frozen.
+
+Implement read-only:
+
+- pending CREATE recognition;
+- canonical CREATE/BUY/SELL/migration decoding supported by verified evidence;
+- version/mode validation;
+- unknown versions/modes rejected.
+
+Explicitly NOT M7:
+
+- quote engine;
+- protocol fee/tax economics;
+- `eth_call` quote parity;
+- execution plan;
+- signing/broadcast.
+
+Gate:
+
+- verified ABI/fixture vectors;
+- historical/captured transaction decoding parity;
+- unknown versions fail closed;
+- full regression suite green.
+
+After M7: **STOP and review.**
+
+## M8 — Four.meme read-only decoder
+
+Only after M7 review and verified Four.meme contracts/ABI/fixtures are frozen.
+
+Implement read-only:
+
+- pending CREATE recognition;
+- canonical CREATE/BUY/SELL/liquidity decoding supported by verified evidence;
+- explicit verified mode/version identification;
+- unknown mode/version refusal.
+
+Explicitly NOT M8:
+
+- quote engine;
+- protocol fee/tax economics;
+- Helper quote parity;
+- execution plan;
+- signing/broadcast.
+
+Gate:
+
+- verified ABI/fixture vectors;
+- normal/tax/X/AntiSniper modes are decoded only where evidence proves them;
+- unknown modes fail closed;
+- historical/captured transaction decoding parity;
+- full regression suite green.
+
+After M8: **STOP and review.**
+
+## M9 — combined 30-minute real BSC capture
+
+Run Flap and Four.meme simultaneously on the single shared BSC chain ingest.
+
+Required:
+
+- one original pending timestamp origin;
+- independent canonical launch census;
+- canonical reconnect/backfill and reorg handling active;
+- per-provider pending coverage/gaps retained;
+- raw evidence integrity;
+- separate venue reports;
+- no signing/broadcast.
+
+Decision point: compare launch count, pending coverage, lead time, deterministic asset-id availability, decoded modes/taxes where observable, and market activity.
+
+After M9: **STOP and analyze the real dataset before economics implementation.**
+
+## Mandatory post-M9 economics gate — before M10
+
+Only after the combined real capture identifies the actual deployed protocol versions/modes:
+
+- implement/freeze Flap quote + fee/tax economics and verify local results against authoritative/on-chain `eth_call` evidence where available;
+- implement/freeze Four.meme mode-aware quote + fee/tax economics and verify against authoritative Helper/on-chain evidence where available;
+- model unknown economic modes as UNKNOWN/UNSUPPORTED, never zero/default;
+- prove actual BSC gas/revert/replacement cost accounting;
+- freeze the economic model before Strategy C multichain research.
+
+M10 must not start until this gate passes.
 
 ## M10 — Strategy C multichain
 

@@ -14,11 +14,19 @@ This document is intentionally prescriptive. Do not redesign the architecture un
 
 ## Current implementation anchor and continuation point — 2026-09-25
 
-The authoritative current implementation anchor is:
+The authoritative **Phase-A production-code implementation anchor** is:
 
 ```
 main@004f440c39c147087a7385bf16a4dc6660058936
 ```
+
+The current repository/documentation HEAD from which Phase C starts is:
+
+```
+main@a65ba4aa0129c02328ccdb8d9426741ab3fdfc9d
+```
+
+Commit `a65ba4a` is documentation continuity on top of the Phase-A code anchor; it does not add Phase-C production code.
 
 That commit already integrates **Phase A** of this handoff:
 
@@ -33,6 +41,55 @@ That commit already integrates **Phase A** of this handoff:
 Do **not** reimplement or replace that seam. New BSC work must extend it.
 
 The historical Phase-A evidence under `docs/phase_a/` is an immutable evidence record and should not be rewritten to describe later phases.
+
+### Authoritative source-of-truth order and exact current state
+
+There must be no interpretation about which document controls which decision:
+
+1. **`docs/BSC_DUAL_VENUE_ROADMAP.md`** controls the active BSC phase/milestone order and the current DONE/NEXT/PENDING status.
+2. **This file, `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md`,** controls the technical implementation contract and acceptance rules for the active phase.
+3. **`docs/MULTICHAIN_ROADMAP.md`** is parent architecture and historical design rationale only. Its older milestone numbering and older phase scope MUST NOT be used to schedule current BSC work where it differs from the two documents above.
+4. **`docs/phase_a/PHASE_A_REPORT.md`** is immutable historical evidence. It is not the current task scheduler and must not be rewritten to make later work look already completed.
+
+Exact state at the start of Phase C:
+
+| Area | Status | Meaning |
+| --- | --- | --- |
+| Phase A / M0-M3 code seam | **IMPLEMENTED** | chain/venue registries, Solana/Pump wrappers, profile/runtime assembly, config-hash compatibility, StateOwner DI and fail-fast BSC metadata are in production code |
+| Existing regression suite | **287/287 PASS in the recorded Phase-A result** | historical result only; rerun before Phase-C edits |
+| Synthetic Phase-A replay parity | **PASS in historical Phase-A evidence** | useful regression evidence, not the missing strict real-capture oracle |
+| Strict real-capture Solana parity | **OPEN** | must be re-established on a new separate Solana capture; never fabricate it |
+| Phase-A validation tooling | **REVIEW FIX REQUIRED BEFORE PHASE-C CODE** | two concrete tooling defects below must be corrected without changing Solana semantics |
+| Phase B cleanup | **SKIPPED** | do not start it unless a separate concrete review requires it |
+| Phase C / M4-M6 | **NEXT** | generic EVM core + BSC chain + shared BSC dispatcher + minimum read-only capture storage |
+| Phase D / M7 | **PENDING** | Flap read-only decoder only |
+| Phase E / M8 | **PENDING** | Four.meme read-only decoder only |
+| Phase F / M9 | **PENDING** | combined real 30-minute BSC capture |
+| Quote/fee/tax economics | **POST-PHASE-F** | only after the real BSC capture establishes actual protocol versions/modes/evidence |
+| Strategy C multichain / BSC replay / PAPER / LIVE | **POST-PHASE-F** | not part of Phase C/D/E/F decoder/capture work |
+
+### Mandatory validation-tool review before Phase-C production edits
+
+Two known defects are already confirmed in the current repository:
+
+1. `docs/phase_a/tools/compare_parity.py`
+   - reports effective/file config-hash equality but does not fully enforce those advertised invariants in its final PASS decision;
+   - does not return a non-zero process exit code on parity failure.
+
+2. `docs/phase_a/tools/bench_hotpath.py`
+   - constructs `StateOwner` and feed adapters through the retained fallback/direct path;
+   - therefore does not fully exercise the current `Application.run -> assemble_runtime -> injected components` wiring even though its historical description says it is constructed like `Application.run`.
+
+Before Phase-C production code is edited:
+
+- correct or supplement these validation tools;
+- add deterministic tests for the parity-tool PASS/FAIL/exit-code behavior;
+- make the current-runtime benchmark exercise the actual Phase-A assembly seam while preserving equivalent workload/metrics;
+- rerun the complete existing test suite;
+- do **not** rewrite historical Phase-A reports or benchmark JSON;
+- do **not** change Solana/Pump/Strategy-C semantics to make a validation tool pass.
+
+These are evidence/tooling fixes, not Phase B and not permission for a Solana refactor.
 
 ### Formal Solana parity status
 
@@ -754,6 +811,138 @@ Requirements:
 
 ---
 
+# 6.2 Phase-C mandatory EVM/BSC semantics — no alternative interpretation
+
+The following rules are mandatory for Phase C and override any older/example wording elsewhere in the repository:
+
+## 6.2.1 Same sender + nonce means competing candidates, not immediate replacement
+
+For EVM/BSC, different hashes observed for the same `(chain_id, sender, nonce)` are **competing nonce candidates**.
+
+Observation order alone MUST NOT create a definitive `old -> replaced_by -> new` conclusion.
+
+The first observed hash may still be the one that becomes canonical.
+
+A definitive replacement/drop conclusion requires the documented canonical/finality resolution rule. All hashes and all provider observations are retained.
+
+Tests must include:
+
+- A observed, then B observed, A lands;
+- A observed, then B observed, B lands;
+- neither lands before run end;
+- a previously included candidate is removed by reorg and the replacement branch changes the resolved outcome.
+
+## 6.2.2 Canonical reconnect requires deterministic backfill
+
+WebSocket reconnect does not restore missed canonical history.
+
+The BSC chain layer must retain a last-completely-processed canonical high-water mark with block-hash evidence. After reconnect or restart it must:
+
+1. verify the provider chain identity;
+2. obtain current canonical head;
+3. fetch all missing blocks from the local high-water mark through current head;
+4. fetch required transactions/logs/receipts;
+5. verify hash/parent-hash continuity;
+6. process recovered data through the same normal canonical/reorg path;
+7. mark canonical coverage recovered only after successful catch-up.
+
+Backfill must be idempotent. Late/old heads must not silently roll accepted canonical state backwards.
+
+Pending/mempool history lost during disconnect is different: it normally cannot be reconstructed. Persist a pending-coverage gap; never fabricate recovered pending evidence.
+
+## 6.2.3 Every BSC endpoint must prove chain id 56
+
+Each configured BSC HTTP and WebSocket connection must call/verify `eth_chainId` at initial connection and after a new underlying connection/reconnect.
+
+Required result:
+
+```
+0x38 == 56
+```
+
+A mismatching endpoint is unhealthy and contributes no pending or canonical evidence.
+
+## 6.2.4 Hash-only pending enrichment is bounded and asynchronous
+
+A hash-only pending notification must never trigger a synchronous `eth_getTransactionByHash` inside the receive callback.
+
+Use a bounded asynchronous enrichment mechanism with:
+
+- bounded queue;
+- bounded in-flight RPC count;
+- tx-hash deduplication;
+- bounded retained pending/enrichment state;
+- explicit overflow/overload/failure quality states;
+- no silent evidence loss.
+
+Persist `first_seen_mono_ns` separately from enrichment request/completion timestamps. Enrichment time never replaces first-seen time.
+
+## 6.2.5 Chain transaction identity and provider observation are separate
+
+Do not duplicate one blockchain transaction because multiple providers observed it.
+
+Persist conceptually:
+
+- chain transaction identity: `(run_id, chain_id, tx_hash)`;
+- provider observation identity: `(run_id, provider_id, tx_hash)`.
+
+Provider observations retain capability, first/last seen, raw evidence/integrity reference and enrichment timing. Chain transaction evidence retains exact transaction content and canonical associations.
+
+## 6.2.6 Canonicality changes are auditable
+
+Block hash, not block number alone, identifies a branch member.
+
+A reorg must preserve orphaned raw evidence and preserve an audit trail/equivalent immutable evidence of canonicality transitions. Transaction/log/receipt canonical associations remain reversible until the configured finality rule resolves them.
+
+If a retained common ancestor cannot be determined, canonical certainty becomes an explicit quality gap; do not invent state.
+
+## 6.2.7 DROPPED/REPLACED require an explicit finalization rule
+
+Do not use timeout alone as a definitive `DROPPED` rule.
+
+At run end, unresolved mempool observations remain `PENDING_ONLY` or `UNKNOWN` unless explicit evidence supports a stronger state.
+
+`REPLACED` is not final merely because another same-nonce hash was observed.
+
+The exact finalization rule must be documented and deterministically tested.
+
+## 6.2.8 Integrated Phase-C capture-path test is mandatory
+
+Phase C is not accepted on isolated unit tests alone.
+
+At least one deterministic integrated test must cover:
+
+```
+Fake WSS/RPC
+-> BSC provider/chain layer
+-> EVM pending + hash-only enrichment
+-> independent canonical processing
+-> disconnect/reconnect + missing-block backfill
+-> short reorg
+-> shared dispatcher with synthetic recognizers
+-> Recorder
+-> SqliteWriter
+-> SQLite readback
+-> orderly shutdown
+```
+
+It must verify bounded queues, exact chain-id handshake, no duplicated chain transaction evidence, independent provider observations, canonical/orphan transitions and persistence readback.
+
+Do not use Pump components as fake BSC components. Do not create real Flap/Four recognizers for this test.
+
+## 6.2.9 Phase-C performance scope
+
+Phase C measures only the read-only capture/dispatch foundation:
+
+- pending receive -> generic parse complete;
+- pending receive -> full tx available (hash-only providers, reported separately);
+- pending receive -> dispatcher complete;
+- dispatcher -> recorder enqueue;
+- writer queue wait separately;
+- enrichment/writer queue depth and overflow.
+
+The later hard `T_PENDING_SEEN -> T_SOCKET_HANDOFF <= 3 ms` LIVE contract cannot be proven in Phase C because build/sign/send do not exist yet. Phase C must not claim that it has proven that final 3 ms contract.
+
 # 7. Generic domain additions
 
 Add fields **without deleting existing Solana fields**.
@@ -940,7 +1129,9 @@ class FlapDecoder:
 
 Never use Four.meme ABI here.
 
-## 9.4 `quote.py`
+## 9.4 `quote.py` — POST-PHASE-F ECONOMICS ONLY
+
+This subsection defines a future target interface. **Do not implement it in Phase D/M7.** Flap Phase D is read-only decoding only. Quote/fee/economic implementation starts only after Phase F/M9 real capture and the post-capture economics gate.
 
 ```python
 class FlapQuoteEngine:
@@ -1000,7 +1191,9 @@ Must distinguish supported modes explicitly.
 
 Never coerce unknown mode to "normal".
 
-## 10.4 `quote.py`
+## 10.4 `quote.py` — POST-PHASE-F ECONOMICS ONLY
+
+This subsection defines a future target interface. **Do not implement it in Phase E/M8.** Four.meme Phase E is read-only decoding only. Quote/fee/economic implementation starts only after Phase F/M9 real capture and the post-capture economics gate.
 
 ```python
 class FourMemeQuoteEngine:
@@ -1118,18 +1311,29 @@ UNKNOWN
 
 # 14. BSC pending lifecycle
 
-Required pending states:
+Required pending/current-resolution concepts include:
 
 ```
 PENDING
-REPLACED
-DROPPED
+PENDING_ONLY
 INCLUDED_SUCCESS
 INCLUDED_REVERTED
+REPLACED
+DROPPED
 UNKNOWN
 ```
 
-For launch transactions add venue lifecycle:
+The states are not assigned from observation order alone.
+
+For the same `(chain_id, sender, nonce)`, every distinct hash remains a competing candidate until canonical/finality evidence resolves the competition. A later-observed hash does not automatically replace an earlier-observed hash.
+
+`INCLUDED_SUCCESS` / `INCLUDED_REVERTED` are provisional while their block can still be orphaned under the configured finality policy.
+
+`REPLACED` and `DROPPED` require the explicit evidence-based finalization rule defined and tested by the BSC chain implementation. Timeout alone is insufficient.
+
+At run end, unresolved pending evidence is `PENDING_ONLY` or `UNKNOWN`, not silently `DROPPED`.
+
+For future launch transactions, venue lifecycle may later include:
 
 ```
 PENDING_CREATE
@@ -1140,6 +1344,8 @@ CREATE_REPLACED
 COMPLETED
 MIGRATED
 ```
+
+Those venue states are not implemented in Phase C because no real Flap/Four recognizer exists yet.
 
 Do not equate `pending seen` with `launch exists`.
 
@@ -1163,36 +1369,50 @@ native_decimals
 
 Legacy runs remain valid.
 
-## 15.2 New `pending_transactions`
+## 15.2 EVM/BSC chain transaction + provider observation storage
 
-Minimum schema:
+The earlier one-table example keyed by `(run_id, provider_id, tx_hash)` is superseded because it duplicates blockchain transaction identity across providers.
 
-```sql
-CREATE TABLE pending_transactions (
-    run_id TEXT NOT NULL,
-    chain_id TEXT NOT NULL,
-    provider_id TEXT NOT NULL,
-    tx_hash TEXT NOT NULL,
-    from_address TEXT NOT NULL,
-    to_address TEXT,
-    nonce INTEGER NOT NULL,
-    value_native TEXT NOT NULL,
-    calldata_selector TEXT,
-    first_seen_mono_ns INTEGER NOT NULL,
-    last_seen_mono_ns INTEGER NOT NULL,
-    replacement_tx_hash TEXT,
-    final_status TEXT,
-    included_block_number INTEGER,
-    included_block_hash TEXT,
-    included_tx_index INTEGER,
-    receipt_status INTEGER,
-    PRIMARY KEY (run_id, provider_id, tx_hash)
-);
+The Phase-C schema must separate two concepts.
+
+### Chain transaction evidence
+
+One logical transaction per:
+
+```
+(run_id, chain_id, tx_hash)
 ```
 
-Use TEXT for values that may exceed signed SQLite integer range.
+Store exact/lossless transaction content, sender, recipient, nonce, value, calldata/gas fields and current canonical association/status.
 
-## 15.3 New `pending_launches`
+### Provider pending observation
+
+One observation relationship per conceptually:
+
+```
+(run_id, provider_id, tx_hash)
+```
+
+Store:
+
+- provider capability;
+- first_seen_mono_ns;
+- last_seen_mono_ns;
+- raw payload or lossless integrity reference;
+- enrichment_requested_mono_ns where applicable;
+- full_tx_available_mono_ns where applicable;
+- enrichment status/error;
+- pending-gap/quality linkage where applicable.
+
+The exact table names and foreign keys should follow DarkBot conventions, but these two identities MUST remain separate.
+
+Use TEXT or another verified exact representation for values that may exceed signed SQLite INTEGER range. Never float.
+
+Also persist blocks, canonicality transitions, canonical transaction associations, logs and receipts so that reorg changes can be reconstructed without deleting old evidence.
+
+## 15.3 New `pending_launches` — FUTURE VENUE STORAGE
+
+`pending_launches` is a venue-derived table for Phase D/E/F after real recognizers exist. It is **not required for Phase C synthetic dispatcher operation**. If introduced later, it references the chain transaction evidence instead of duplicating raw transaction content.
 
 ```sql
 CREATE TABLE pending_launches (
@@ -1813,58 +2033,72 @@ Test:
 - Flap profile resolves **metadata only** to `bsc-mainnet:flap` and runtime construction fails explicitly in Phase A
 - Four profile resolves **metadata only** to `bsc-mainnet:fourmeme` and runtime construction fails explicitly in Phase A
 
-## 21.3 EVM tests
+## 21.3 Phase-C EVM/BSC tests
 
-Create:
+Create focused tests following repository naming conventions, covering at minimum:
 
-```
-tests/test_evm_pending.py
-tests/test_evm_receipts.py
-tests/test_evm_nonce.py
-tests/test_evm_reorg.py
-tests/test_bsc_gas.py
-tests/test_bsc_dispatcher.py
-```
+- full-object pending decode;
+- hash-only pending decode;
+- malformed/error JSON-RPC;
+- exact hex/integer parsing and uint256 round-trip;
+- duplicate pending frames;
+- same tx observed by multiple providers without duplicating chain transaction identity;
+- bounded asynchronous hash enrichment, dedup, concurrency and overflow;
+- first-seen timestamp preserved separately from full-data-available timestamp;
+- correct `eth_chainId == 56` verification and rejection of mismatch;
+- same-sender+nonce candidate competition where A lands;
+- same-sender+nonce candidate competition where B lands;
+- unresolved candidates at run end;
+- success/revert receipts;
+- duplicate log/receipt idempotency;
+- normal canonical extension;
+- disconnect/reconnect with missing-block backfill;
+- backfill idempotency;
+- pending gap retained despite canonical recovery;
+- one-block and multi-block reorg;
+- orphan/canonical transition audit;
+- missing retained common ancestor -> explicit quality uncertainty;
+- transaction canonical reassociation after reorg;
+- shared dispatcher zero/one/multiple synthetic recognizer matches;
+- original timestamp preservation;
+- queue overflow visible as quality failure;
+- integrated `Fake WSS/RPC -> BSC chain -> dispatcher -> Recorder/Writer -> DB readback` scenario required by §6.2.8.
 
-Must cover:
+The integrated test is mandatory, not optional.
 
-- pending decode
-- replacement by same sender+nonce
-- dropped tx
-- success receipt
-- revert receipt
-- gas charged on revert
-- duplicate provider frames
-- same tx seen by two providers
-- block/log ordering
-- reorg rollback semantics
+## 21.4 Flap tests — Phase D only
 
-## 21.4 Flap tests
+Phase D is **read-only decoder work only**. Use verified captured/authoritative fixture data.
 
-```
-tests/test_flap_pending.py
-tests/test_flap_decoder.py
-tests/test_flap_quote.py
-tests/test_flap_fees.py
-tests/test_flap_execution_plan.py
-```
+Required scope:
 
-Use verified captured fixture data.
+- pending CREATE recognition;
+- canonical CREATE/BUY/SELL/migration recognition as supported by verified evidence;
+- ABI/version fixture vectors;
+- unknown versions/modes rejected;
+- no quote engine;
+- no fee/tax economic model;
+- no execution plan;
+- no signing/broadcast.
 
-No made-up fixture constants.
+Quote/fee/eth_call economic parity tests are post-Phase-F.
 
-## 21.5 Four.meme tests
+## 21.5 Four.meme tests — Phase E only
 
-```
-tests/test_fourmeme_pending.py
-tests/test_fourmeme_decoder.py
-tests/test_fourmeme_quote.py
-tests/test_fourmeme_fees.py
-tests/test_fourmeme_modes.py
-tests/test_fourmeme_execution_plan.py
-```
+Phase E is **read-only decoder work only**. Use verified captured/authoritative fixture data.
 
-Explicitly test unknown mode refusal.
+Required scope:
+
+- pending CREATE recognition;
+- canonical CREATE/BUY/SELL/liquidity recognition as supported by verified evidence;
+- explicit verified mode/version decoding;
+- unknown mode refusal;
+- no quote engine;
+- no fee/tax economic model;
+- no execution plan;
+- no signing/broadcast.
+
+Helper/quote/fee economic parity tests are post-Phase-F.
 
 ---
 
@@ -1923,49 +2157,82 @@ Do not start Phase B automatically.
 
 ## Phase C — EVM/BSC capture primitives — NEXT
 
-Implement generic EVM envelopes + BSC feed abstractions + dispatcher.
+Phase C is exactly **M4 + M5 + M6**.
 
-Phase C also adds the minimal generic/BSC storage required by read-only capture. Preserve existing Solana tables/columns and historical DB readability; do not rename legacy Solana fields merely to make BSC fit.
+Before Phase-C production edits, complete the validation-tool review described near the top of this file.
+
+Implement:
+
+- generic EVM evidence/parsing/RPC/WS primitives;
+- provider pending capability model;
+- bounded asynchronous hash-only enrichment;
+- BSC chain identity verification (`eth_chainId == 56`);
+- independent canonical block/transaction/log/receipt path;
+- canonical reconnect/restart backfill;
+- sender+nonce competing-candidate model;
+- bounded ancestry + deterministic reorg handling;
+- auditable canonical/orphan transitions;
+- shared BSC dispatcher with synthetic recognizer protocol;
+- minimum generic/BSC capture storage with chain-transaction/provider-observation separation;
+- Phase-C performance telemetry;
+- mandatory integrated Fake-WSS/RPC-to-SQLite test.
+
+Do not implement real Flap/Four recognizers.
 
 No protocol economics.
 
-Acceptance:
+No signing/broadcast.
 
-- synthetic pending/receipt/replacement tests pass
-- no live broadcasting exists
+Acceptance requires all §6.2 rules and §21.3 tests, the integrated test, the complete regression suite and compileall.
 
-Commit separately.
+After Phase C: **STOP**.
 
 ## Phase D — Flap read-only decoder — PENDING
 
-Only after verified ABI/contracts are supplied/frozen.
+Start only after Phase C has been independently reviewed/accepted and verified Flap ABI/contracts/fixtures are supplied/frozen.
 
-Acceptance:
+Implement **read-only decoding only**:
 
-- pending CREATE recognized
-- canonical CREATE/BUY/SELL recognized
-- fixture tests pass
-- unknown versions rejected
+- pending CREATE recognition;
+- canonical CREATE/BUY/SELL/migration decoding supported by verified evidence;
+- version/mode refusal for unknown evidence.
 
-Commit separately.
+Do **not** implement quote math, protocol economics, fee/tax models, execution plan, signing or broadcast.
+
+After Phase D: **STOP**.
 
 ## Phase E — Four.meme read-only decoder — PENDING
 
-Same.
+Start only after Phase D review and verified Four.meme ABI/contracts/fixtures are supplied/frozen.
 
-Commit separately.
+Implement **read-only decoding only**:
 
-## Phase F — combined 30-minute capture — PENDING
+- pending CREATE recognition;
+- canonical CREATE/BUY/SELL/liquidity decoding supported by verified evidence;
+- explicit verified mode/version handling;
+- unknown-mode refusal.
 
-Add CLI/config support for both BSC venues in capture-only mode.
+Do **not** implement quote math, protocol economics, fee/tax models, execution plan, signing or broadcast.
+
+After Phase E: **STOP**.
+
+## Phase F — combined 30-minute BSC capture — PENDING
+
+Add the final capture-only CLI/config path that runs Flap + Four.meme recognizers on one shared BSC ingest/timestamp origin and an independent canonical census.
 
 Acceptance:
 
-- one feed timestamp origin
-- both venue reports
-- no broadcast path
+- one pending/canonical chain ingest;
+- same original receive timestamp distributed to both recognizers;
+- independent canonical denominator;
+- reconnect/backfill and reorg accounting active;
+- both venue reports;
+- raw evidence integrity checks;
+- no signing/broadcast.
 
-Only after this capture decide quote/execution priorities.
+After the real Phase-F capture, analyze actual versions/modes/evidence.
+
+Only **after Phase F** may quote math, protocol fee/tax economics and `eth_call`/helper parity be implemented and frozen. Only after that economics gate may Strategy C multichain/replay/PAPER work start.
 
 ---
 

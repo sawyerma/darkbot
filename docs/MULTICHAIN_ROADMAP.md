@@ -4,22 +4,32 @@ Baseline: `main@84b5d95c345261829a53a3cf76e497f7859ae45e`
 
 ## Status / relationship to the BSC dual-venue roadmap — 2026-09-25
 
-This document remains the **parent architecture** and historical design rationale.
+This document remains the **parent architecture and historical design rationale only**.
 
-For the active BSC implementation sequence, use:
+**A coding agent MUST NOT use the historical milestone sections in this file to determine the current BSC task scope, ordering, acceptance gates, or what is already implemented.**
 
-1. `docs/BSC_DUAL_VENUE_ROADMAP.md` — authoritative BSC milestone numbering and dual-venue architecture;
-2. `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md` — authoritative Phase A-F implementation gates.
+For active BSC work there are exactly two authoritative documents:
 
-Current implementation anchor:
+1. `docs/BSC_DUAL_VENUE_ROADMAP.md` — the single active DONE/NEXT/PENDING milestone sequence;
+2. `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md` — the exact technical implementation/acceptance contract for the active phase.
+
+If any later section of this historical file conflicts with either authoritative BSC document, **ignore the conflicting historical wording**. Do not reconcile it by interpretation.
+
+Current repository/documentation HEAD for the Phase-C handoff:
+
+```
+main@a65ba4aa0129c02328ccdb8d9426741ab3fdfc9d
+```
+
+Phase-A production-code seam anchor underneath it:
 
 ```
 main@004f440c39c147087a7385bf16a4dc6660058936
 ```
 
-At that commit the Phase-A multichain seam, Solana/Pump wrappers, market profiles, runtime assembly and fail-closed BSC metadata are integrated.
+At `004f440` the Phase-A multichain seam, Solana/Pump wrappers, market profiles, runtime assembly and fail-closed BSC metadata are integrated. The strict new real-capture Solana parity proof remains OPEN; the active documents define how that evidence is handled.
 
-Do **not** use this file's older BSC M4-M9 numbering as the active implementation scheduler where it conflicts with the later dual-venue roadmap. The later crosswalk is:
+Do **not** use this file's older BSC M4-M9 numbering or older quote/fee placement as the active implementation scheduler. The authoritative crosswalk is:
 
 ```
 Phase A -> M0-M3
