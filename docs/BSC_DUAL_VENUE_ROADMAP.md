@@ -4,7 +4,7 @@ Status: active implementation roadmap; Phase A seam integrated, Phase C is next
 Parent architecture: `docs/MULTICHAIN_ROADMAP.md`  
 Implementation handoff / phase gates: `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md`  
 Original design baseline before BSC work: `main@9a0b5cb32f46bce78f2fb18e4f0f5672bac07f7d`  
-Current implementation anchor: `main@004f440c39c147087a7385bf16a4dc6660058936`
+Phase-A production-code anchor: `main@004f440c39c147087a7385bf16a4dc6660058936`
 
 ## Roadmap continuity and current status — 2026-09-25
 
@@ -17,13 +17,11 @@ Document responsibilities are fixed:
 - **`docs/MULTICHAIN_ROADMAP.md`** = historical parent architecture only; it MUST NOT override current phase scope or numbering;
 - **`docs/phase_a/PHASE_A_REPORT.md`** = immutable historical evidence only.
 
-Current repository/documentation HEAD for the Phase-C handoff is:
+Historical documentation-continuity commits include `a65ba4a` and `3562890a`. They are not a dynamically maintained current HEAD.
 
-```
-main@a65ba4aa0129c02328ccdb8d9426741ab3fdfc9d
-```
+**The exact starting HEAD for a coding run comes only from that run's external task and must match `git rev-parse HEAD`.**
 
-The Phase-A production-code seam underneath it was integrated at:
+The Phase-A production-code seam was integrated at:
 
 ```
 main@004f440c39c147087a7385bf16a4dc6660058936
@@ -55,12 +53,14 @@ Phase-A/M0-M3 detail at the current anchor:
 
 The next implementation block is therefore **Phase C / M4-M6**, not a new architecture rewrite and not Phase B.
 
-Before touching Phase-C production code, repair/supplement the two known Phase-A validation-tool gaps documented in `BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md`:
+Before **any edit**, including validation-tool work, run/save the untouched complete test suite and compileall as required by `BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md`.
 
-- `compare_parity.py`: advertised config-hash invariants must participate in PASS and FAIL must return non-zero;
-- `bench_hotpath.py`: future benchmark must exercise the real current assembly/injection wiring rather than only the retained fallback path.
+Then repair/supplement the two known Phase-A validation-tool gaps **without modifying frozen Phase-A evidence**:
 
-Historical Phase-A artifacts remain unchanged.
+- historical source `docs/phase_a/tools/compare_parity.py` remains unchanged; maintained correction goes to `tools/validation/compare_parity.py`;
+- historical source `docs/phase_a/tools/bench_hotpath.py` remains unchanged; maintained correction goes to `tools/validation/bench_hotpath.py`.
+
+All `docs/phase_a/**` files, including scripts/manifests/checksums/results, remain byte-for-byte frozen. New validation outputs go outside that tree.
 
 ### Non-negotiable Phase-C semantics
 

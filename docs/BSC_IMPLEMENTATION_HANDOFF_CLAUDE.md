@@ -20,13 +20,16 @@ The authoritative **Phase-A production-code implementation anchor** is:
 main@004f440c39c147087a7385bf16a4dc6660058936
 ```
 
-The current repository/documentation HEAD from which Phase C starts is:
+Historical documentation-continuity anchors after the Phase-A code seam include:
 
 ```
 main@a65ba4aa0129c02328ccdb8d9426741ab3fdfc9d
+main@3562890a037652079ba94cf4c100811b7f497d44
 ```
 
-Commit `a65ba4a` is documentation continuity on top of the Phase-A code anchor; it does not add Phase-C production code.
+These are historical documentation commits, not a dynamically maintained "current HEAD".
+
+**The exact starting HEAD for any coding run is supplied by that run's external task.** Claude must compare that task-provided SHA with `git rev-parse HEAD` and STOP on mismatch. Do not infer a current HEAD from a SHA written in this document.
 
 That commit already integrates **Phase A** of this handoff:
 
@@ -40,7 +43,7 @@ That commit already integrates **Phase A** of this handoff:
 
 Do **not** reimplement or replace that seam. New BSC work must extend it.
 
-The historical Phase-A evidence under `docs/phase_a/` is an immutable evidence record and should not be rewritten to describe later phases.
+The entire historical Phase-A evidence tree under `docs/phase_a/` is **byte-for-byte frozen evidence**, including reports, scripts, manifests, checksums and benchmark artifacts. It must not be edited, replaced, reformatted or regenerated in place for later phases.
 
 ### Authoritative source-of-truth order and exact current state
 
@@ -68,28 +71,47 @@ Exact state at the start of Phase C:
 | Quote/fee/tax economics | **POST-PHASE-F** | only after the real BSC capture establishes actual protocol versions/modes/evidence |
 | Strategy C multichain / BSC replay / PAPER / LIVE | **POST-PHASE-F** | not part of Phase C/D/E/F decoder/capture work |
 
-### Mandatory validation-tool review before Phase-C production edits
+### Mandatory Phase-C preflight and validation-tool correction
 
-Two known defects are already confirmed in the current repository:
+The order is mandatory and removes all ambiguity:
 
-1. `docs/phase_a/tools/compare_parity.py`
-   - reports effective/file config-hash equality but does not fully enforce those advertised invariants in its final PASS decision;
-   - does not return a non-zero process exit code on parity failure.
+1. **Before ANY edit at all** — including validation-tool work — record `git status --short`, `git rev-parse HEAD`, Python version, run the complete existing test suite, and run `python3 -m compileall darkbot tests`.
+2. Save new preflight/test/benchmark outputs outside `docs/phase_a/`.
+3. Only if the untouched baseline is green, create maintained corrected validation tools outside the frozen evidence tree.
+4. Run tests for those maintained tools.
+5. Only then begin Phase-C production-code work.
 
-2. `docs/phase_a/tools/bench_hotpath.py`
-   - constructs `StateOwner` and feed adapters through the retained fallback/direct path;
-   - therefore does not fully exercise the current `Application.run -> assemble_runtime -> injected components` wiring even though its historical description says it is constructed like `Application.run`.
+The two known historical tool defects are in frozen files:
 
-Before Phase-C production code is edited:
+- `docs/phase_a/tools/compare_parity.py`
+  - it reports effective/file config-hash equality but does not fully enforce those advertised invariants in its final PASS decision;
+  - it does not return a non-zero process exit code on parity failure.
 
-- correct or supplement these validation tools;
-- add deterministic tests for the parity-tool PASS/FAIL/exit-code behavior;
-- make the current-runtime benchmark exercise the actual Phase-A assembly seam while preserving equivalent workload/metrics;
-- rerun the complete existing test suite;
-- do **not** rewrite historical Phase-A reports or benchmark JSON;
-- do **not** change Solana/Pump/Strategy-C semantics to make a validation tool pass.
+- `docs/phase_a/tools/bench_hotpath.py`
+  - it constructs `StateOwner` and feed adapters through the retained fallback/direct path;
+  - therefore it does not fully exercise the current `Application.run -> assemble_runtime -> injected components` wiring even though its historical description says it is constructed like `Application.run`.
 
-These are evidence/tooling fixes, not Phase B and not permission for a Solana refactor.
+**Do not modify either frozen file.**
+
+Create the maintained corrected versions at exactly:
+
+```
+tools/validation/compare_parity.py
+tools/validation/bench_hotpath.py
+```
+
+If `tools/` or `tools/validation/` does not yet exist, create it.
+
+Requirements:
+
+- the maintained parity tool must enforce every invariant it reports as required, including intended source/dataset/runner/config-hash equality, and must exit non-zero on FAIL;
+- add deterministic tests for PASS, each required mismatch class, and FAIL exit status;
+- the maintained hot-path benchmark must exercise the actual current Phase-A runtime assembly/injection seam while preserving equivalent workload and metric meaning;
+- new validation outputs belong under `exports/phase_c_validation/` (or temporary test directories for automated tests), never under `docs/phase_a/`;
+- `git diff -- docs/phase_a` must remain empty throughout the task;
+- do not change Solana/Pump/Strategy-C semantics to make a validation tool pass.
+
+These are Phase-C preflight/evidence-tool fixes, not Phase B and not a Solana refactor.
 
 ### Formal Solana parity status
 
@@ -154,7 +176,7 @@ Do **not** change the semantics of:
 
 All existing tests must remain green.
 
-The Solana parity baseline for this refactor is **not** a historical diagnostic result and is **not** hard-coded to an old commit. Before any Phase-A code change, freeze the current implementation revision and run a strict, unmodified production replay as described in Section 0.5. The historical commit `4af978e18f91dea5d921ed7ef284b15d55d6c987` remains useful documentary context only; it is not automatically the Phase-A starting revision.
+Historical Phase-A methodology required freezing the then-current implementation revision before Phase-A code changes and running the strict production replay described in Section 0.5. That instruction is **historical and must not restart Phase A now**. The historical commit `4af978e18f91dea5d921ed7ef284b15d55d6c987` remains documentary context only. The still-missing strict real-capture Solana parity evidence remains OPEN and must be re-established later exactly as specified by the active roadmap.
 
 ## 0.2 No protocol guessing
 
@@ -2104,41 +2126,30 @@ Helper/quote/fee economic parity tests are post-Phase-F.
 
 # 22. Implementation phases for Claude
 
-## Phase A — architecture + minimal Solana/Pump wrapper parity — IMPLEMENTED
+## Phase A — architecture + minimal Solana/Pump wrapper parity — IMPLEMENTED / HISTORICAL
 
-Phase A includes the **minimum Solana/Pump wrappers required to make the adapter seam real**. This resolves the earlier phase-boundary ambiguity.
+Phase A is complete production-code history. **Do not execute this section as a task.**
 
-Implement:
+Implemented contents:
 
-- freeze pre-change baseline per Section 0.5;
 - chain interfaces;
 - venue interfaces;
 - profile registry;
 - runtime assembly;
 - dependency-injection seam;
-- minimal Solana chain wrapper around existing implementation;
-- minimal Pump.fun venue wrapper around existing implementation;
+- minimal Solana chain wrapper around the existing implementation;
+- minimal Pump.fun venue wrapper around the existing implementation;
 - legacy config compatibility without changing existing config hashes;
 - explicit non-runnable BSC profile metadata.
 
-Rules:
+Preserved constraints:
 
-- reuse existing Solana/Pump classes/functions;
-- do not move/rewrite Pump decoder, reducer, quote or fee logic unless strictly necessary for wrapping;
-- preserve existing `StateOwner(engine=...)` replay injection and all replay-specific parameters;
-- do not implement BSC networking;
-- do not implement Flap/Four contracts;
-- do not add live broadcasting.
+- existing Solana/Pump classes/functions remain the semantic source;
+- existing `StateOwner(engine=...)` replay injection and replay-specific parameters remain preserved;
+- no Phase-A BSC networking or real Flap/Four implementation was introduced;
+- BSC/Flap and BSC/Four profiles remain fail-closed metadata until later phases.
 
-Acceptance:
-
-- full existing suite passes;
-- exact strict Solana replay parity passes per Sections 0.5 and 21.1;
-- legacy configs without `market_profile_id` still resolve to Solana/Pump;
-- those legacy config hashes remain unchanged;
-- `bsc-mainnet:flap` and `bsc-mainnet:fourmeme` exist as metadata only and fail explicitly if execution/runtime construction is requested.
-
-Commit Phase A separately, then **STOP** and report.
+Historical Phase-A evidence is retained under `docs/phase_a/` and is frozen. The missing strict new real-capture Solana parity proof remains OPEN; do not restart Phase A to fabricate it.
 
 ## Phase B — optional adapter cleanup after Phase-A approval — OPTIONAL / SKIPPED FOR NOW
 
@@ -2159,7 +2170,7 @@ Do not start Phase B automatically.
 
 Phase C is exactly **M4 + M5 + M6**.
 
-Before Phase-C production edits, complete the validation-tool review described near the top of this file.
+Before any Phase-C edit, follow the mandatory preflight order near the top of this file: untouched baseline tests/compileall first, then maintained validation tools outside `docs/phase_a/`, then Phase-C production code.
 
 Implement:
 
@@ -2379,71 +2390,71 @@ For replay parity include exact metrics.
 
 ---
 
-# 27. First task to execute now
+# 27. Current task to execute now — Phase C / M4-M6
 
-Implement **Phase A only**.
+Execute **Phase C only**, plus the mandatory Phase-C preflight/validation-tool correction defined above.
 
-Do not jump ahead.
+Required order:
 
-Specifically:
+1. verify the exact starting SHA supplied by the external task; STOP on mismatch;
+2. record untouched working-tree status and Python version;
+3. **before ANY edit**, run and save the complete existing test suite and `python3 -m compileall darkbot tests`;
+4. confirm `git diff -- docs/phase_a` is empty;
+5. create maintained corrected tools at `tools/validation/compare_parity.py` and `tools/validation/bench_hotpath.py`; never modify `docs/phase_a/**`;
+6. add/run deterministic validation-tool tests;
+7. implement M4 generic EVM core exactly as specified;
+8. implement M5 BSC chain exactly as specified;
+9. implement M6 shared BSC dispatcher + minimum read-only capture persistence exactly as specified;
+10. run targeted Phase-C tests;
+11. run the mandatory integrated Fake-WSS/RPC -> BSC -> dispatcher -> Recorder/SqliteWriter -> DB readback test;
+12. run the complete post-change test suite and compileall;
+13. run the maintained current-runtime benchmark where applicable;
+14. verify `git diff -- docs/phase_a` is still empty;
+15. report exact results and STOP.
 
-1. inspect the current repository and the parent design/source-of-truth documents;
-2. record the actual full pre-change commit SHA and working-tree status;
-3. run and save the complete pre-change test-suite result;
-4. create/run/save the strict production Solana replay baseline per Section 0.5;
-5. run and save the pre-change real wall-clock performance baseline from Section 18.1.3;
-6. add `chains/base.py`;
-7. add `chains/registry.py`;
-8. add `venues/base.py`;
-9. add `venues/registry.py`;
-10. add `runtime/profiles.py`;
-11. add `runtime/assembly.py`;
-12. add **minimal Solana chain and Pump.fun venue wrappers in Phase A**, reusing existing implementation;
-13. add backward-compatible effective `market_profile_id` resolution without mutating old canonical config JSON/hashes;
-14. preserve all existing replay-specific dependency injection and offline semantics;
-15. inject runtime components into normal Solana runtime paths without semantic change;
-16. register BSC/Flap and BSC/Four as metadata only; attempting to run them must fail explicitly;
-17. add registry/assembly/backward-compatibility tests;
-18. run the entire post-change test suite;
-19. rerun the exact pre-change strict Solana replay baseline;
-20. perform and save the exact parity comparison;
-21. rerun the identical wall-clock performance benchmark from Section 18.1.3;
-22. investigate/correct any reproducible adapter-induced regression;
-23. stop and report.
+Do not execute Phase A again.
 
-Do **not** add BSC networking, EVM decoding, Flap/Four contract constants, or live broadcasting in this phase.
+Do not execute Phase B.
+
+Do not begin Phase D.
+
+Do not implement real Flap or Four.meme recognizers, quote/fee/tax economics, Strategy C multichain, BSC PAPER/LIVE, signing or broadcasting.
+
+Do not commit or push unless the external task explicitly overrides that rule.
 
 ---
 
-# 28. Phase A acceptance criteria
+# 28. Phase C acceptance criteria
 
 All must be true:
 
-- actual pre-change full commit SHA was recorded;
-- complete pre-change test result was recorded;
-- strict pre-change Solana replay baseline manifest exists;
+- task-provided starting SHA was verified exactly;
+- untouched pre-edit full test-suite result was recorded before any edit;
+- untouched pre-edit compileall result was recorded before any edit;
+- `docs/phase_a/**` remained byte-for-byte unchanged and `git diff -- docs/phase_a` is empty;
+- maintained corrected validation tools exist under `tools/validation/`, not under frozen evidence;
+- maintained parity tool enforces required source/dataset/runner/config-hash invariants and exits non-zero on FAIL;
+- maintained hot-path benchmark exercises the real current runtime assembly/injection seam;
+- new validation outputs are outside `docs/phase_a/`;
+- M4 generic EVM core is implemented without venue-specific logic;
+- M5 BSC chain verifies `eth_chainId == 56`, supports independent pending/canonical paths, bounded enrichment, reconnect/backfill and reorg handling;
+- same-sender+nonce hashes remain competing candidates until evidence-based resolution;
+- pending gaps are never fabricated as recovered;
+- M6 uses one shared BSC dispatcher and preserves original receive timestamps;
+- chain transaction identity and provider-observation identity remain separate;
+- EVM uint256-capable values round-trip losslessly;
+- canonical/orphan transitions remain auditable;
+- `REPLACED`/`DROPPED` follow the explicit tested finalization rule;
+- mandatory integrated Phase-C capture-path test passes;
 - complete post-change test suite is green;
-- no existing test was deleted, weakened, skipped, or rewritten merely to accept new behavior;
-- minimal Solana/Pump wrappers are present and reuse existing implementation;
-- Solana/Pump runtime still works;
-- strict before/after replay parity passes under the exact same command/runner and dataset;
-- the same pre/post wall-clock benchmark was run on the same hardware/environment;
-- no reproducible adapter-induced latency regression remains unexplained;
-- `receive -> enqueue` p99 target remains below 3.000 ms;
-- lamport-denominated results compare as exact integers, not rounded SOL;
-- decision/event/attempt/fill/fee/ledger semantics match under the predetermined run-id-independent mapping;
-- diagnostic legacy-compatible monkeypatch results were not promoted into production semantics;
-- existing replay `engine` injection, `canonical_prefix`, recorded fee evidence, stress parameters, virtual clock and other replay-specific inputs remain intact;
-- replay remains offline;
-- legacy config without `market_profile_id` resolves effectively to `solana-mainnet:pumpfun`;
+- post-change compileall is green;
+- existing Solana/Pump/Strategy A/B/C semantics remain unchanged;
 - legacy config hashes remain unchanged;
-- `solana-mainnet:pumpfun` resolves correctly;
-- `bsc-mainnet:flap` exists as registry metadata only;
-- `bsc-mainnet:fourmeme` exists as registry metadata only;
-- selecting an unimplemented BSC runtime fails explicitly with a clear `NotImplementedError` or readiness error;
-- no Flap/Four contract constant was invented;
-- no BSC networking was added;
-- no live broadcasting was added;
-- no historical DB migration is required in Phase A.
+- BSC Flap/Four market profiles remain RESEARCH/non-runnable;
+- no real Flap/Four implementation exists;
+- no BSC quote/fee/tax economic model exists;
+- no signer/private-key/broadcast path exists;
+- full LIVE `T_PENDING_SEEN -> T_SOCKET_HANDOFF <= 3 ms` is **not** claimed as proven in Phase C;
+- strict new real-capture Solana parity remains explicitly OPEN unless it was genuinely run later on the required new Solana capture.
 
-After Phase A passes, **STOP**. Do not begin Phase B until the Phase-A implementation and parity artifacts have been independently reviewed and approved.
+After Phase C passes: **STOP and report. Do not begin Phase D.**

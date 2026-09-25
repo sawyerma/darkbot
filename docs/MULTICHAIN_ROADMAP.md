@@ -15,13 +15,11 @@ For active BSC work there are exactly two authoritative documents:
 
 If any later section of this historical file conflicts with either authoritative BSC document, **ignore the conflicting historical wording**. Do not reconcile it by interpretation.
 
-Current repository/documentation HEAD for the Phase-C handoff:
+Historical documentation-continuity commits include `a65ba4a` and `3562890a`. They are not a dynamically maintained current HEAD.
 
-```
-main@a65ba4aa0129c02328ccdb8d9426741ab3fdfc9d
-```
+The exact starting HEAD for any coding run is supplied by that run's external task and must match `git rev-parse HEAD`.
 
-Phase-A production-code seam anchor underneath it:
+Phase-A production-code seam anchor:
 
 ```
 main@004f440c39c147087a7385bf16a4dc6660058936
