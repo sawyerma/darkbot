@@ -287,6 +287,23 @@ class RuntimeConfig:
     def strategy_id(self) -> str:
         return self.strategy["strategy_id"]
 
+    @property
+    def market_profile_id(self) -> str:
+        """Effective market profile: explicit ``market_profile_id`` or, for legacy configs, ``solana-mainnet:pumpfun``.
+
+        The default is applied here and never written into ``raw``/``canonical``, so legacy config hashes are unchanged.
+        """
+        profile = self.raw.get("market_profile_id")
+        if profile is None:
+            from darkbot.runtime.profiles import DEFAULT_MARKET_PROFILE_ID  # local import: keeps config import-free of runtime modules
+
+            return DEFAULT_MARKET_PROFILE_ID
+        return profile
+
+    @property
+    def has_explicit_market_profile(self) -> bool:
+        return "market_profile_id" in self.raw
+
     def policy_content(self) -> dict[str, Any]:
         return {"strategy": self.strategy, "portfolio": self.portfolio, "execution": self.execution, "latency_model": self.latency_model}
 
@@ -540,7 +557,17 @@ def build_runtime_config(path: Path, raw: dict[str, Any]) -> RuntimeConfig:
         schema["strategy"] = {**schema["strategy"], "candidate_name": "str", "stop_net_multiple": "dec", "ordinary_stop_enabled": "bool"}
         if "creator_sold_before_fill" in raw["strategy"]:
             schema["strategy"]["creator_sold_before_fill"] = "enum:LEGACY_FREE_CANCEL|TX_LANDS"
+    if "market_profile_id" in raw:
+        # Multichain seam (BSC handoff §6.1): an EXPLICIT profile is validated and stays inside the hashed raw config.
+        # A legacy config without the key is never mutated here: its effective profile is resolved by
+        # RuntimeConfig.market_profile_id, outside canonical_json(raw), so historical config hashes are unchanged.
+        schema["market_profile_id"] = "str"
     _check(raw, schema, "config")
+    if "market_profile_id" in raw:
+        from darkbot.runtime.profiles import MARKET_PROFILES  # local import: profiles are pure metadata, config stays free of runtime modules at import time
+
+        if raw["market_profile_id"] not in MARKET_PROFILES:
+            raise ConfigError(f"config.market_profile_id: unknown market profile {raw['market_profile_id']!r}; known: {sorted(MARKET_PROFILES)}")
     if raw["strategy"]["strategy_id"] == "LEGACY_5BUY_5UNIQUE_V1":
         st = raw["strategy"]
         required = {"observation_ms": 1000, "min_buy_count": 5, "min_unique_buyers": 5, "ordinary_stop_enabled": False,

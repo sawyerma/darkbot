@@ -114,19 +114,34 @@ class StateOwner:
     def __init__(self, cfg: Any, run_id: str, clock: Any, scheduler: Any, recorder: Recorder, adapter: PaperExecutionAdapter, basis_getter: Callable[[], CostBasis], mode: str,
                  economic_intents_allowed: bool = True, feature_sink: Callable[[Callable[[], None]], None] | None = None, variant_id: str | None = None,
                  canonical_prefix: str | None = None, persist_observations: bool = True, compute_features: bool = True, engine: QuoteEngine | None = None, mint_allowlist: set[str] | None = None,
-                 prior_submitted_mints: set[str] | None = None, capture_only: bool = False) -> None:
+                 prior_submitted_mints: set[str] | None = None, capture_only: bool = False,
+                 decoder: Any | None = None, reducer: Any | None = None, market_profile: Any | None = None) -> None:
+        # Multichain DI seam (BSC handoff §6): `engine` is the EXISTING replay/quote-engine injection and stays authoritative.
+        # `decoder`, `reducer` and `market_profile` are additive; when absent the legacy Solana/Pump construction below runs
+        # unchanged. Selection happens once here, never per message: the hot path uses these direct references only.
         self.cfg, self.run_id, self.clock, self.scheduler, self.recorder, self.adapter, self.basis_getter, self.mode = cfg, run_id, clock, scheduler, recorder, adapter, basis_getter, mode
         self.economic_intents_allowed = economic_intents_allowed
         self.capture_only = capture_only
         self.feature_sink = feature_sink or (lambda job: job())
         self.variant_id = variant_id
         adapter.on_outcome = self.on_outcome
-        self.decoder = PumpDecoder(cfg.protocol)
+        self.market_profile = market_profile  # metadata only (MarketProfile or None); not consulted on the hot path
+        if decoder is None or reducer is None:
+            from darkbot.runtime.profiles import DEFAULT_MARKET_PROFILE_ID  # local import: metadata only
+
+            profile_id = getattr(cfg, "market_profile_id", DEFAULT_MARKET_PROFILE_ID)
+            if profile_id != DEFAULT_MARKET_PROFILE_ID:
+                # Legacy fallback construction is Solana/Pump-specific; any other profile must be assembled explicitly (Phase A: BSC is metadata only).
+                raise NotImplementedError(f"StateOwner fallback construction is Solana/Pump only; market profile {profile_id!r} requires injected decoder/reducer (not runnable in Phase A)")
+        self.decoder = decoder if decoder is not None else PumpDecoder(cfg.protocol)
         self.normalizer = Normalizer(self.decoder)
-        self.reducer = MarketReducer(canonical_prefix or run_id, cfg.storage["state_history_per_mint"], cfg.storage["max_tracked_mints"], cfg.storage["trade_log_per_mint"], cfg.storage["undecodable_points_max"])
-        self.reducer.signature_history_max = cfg.storage["signature_history_max"]
-        self.reducer.dedup_keys_per_mint = cfg.storage["dedup_keys_per_mint"]
-        self.reducer.set_quote_constants(cfg.protocol["wsol_mint"], cfg.protocol["native_sol_curve_sentinel"])
+        if reducer is not None:
+            self.reducer = reducer
+        else:
+            self.reducer = MarketReducer(canonical_prefix or run_id, cfg.storage["state_history_per_mint"], cfg.storage["max_tracked_mints"], cfg.storage["trade_log_per_mint"], cfg.storage["undecodable_points_max"])
+            self.reducer.signature_history_max = cfg.storage["signature_history_max"]
+            self.reducer.dedup_keys_per_mint = cfg.storage["dedup_keys_per_mint"]
+            self.reducer.set_quote_constants(cfg.protocol["wsol_mint"], cfg.protocol["native_sol_curve_sentinel"])
         self.telemetry_max = cfg.storage["telemetry_samples_max"]
         self.fee_history: list[tuple[int, str, Any]] = []  # (received_mono_ns, kind, snapshot): fee rule valid at a model time = latest snapshot received <= t
         self._effective_fee_basis = CostBasis(None, None, None, None)

@@ -1,0 +1,305 @@
+test_S03_partial_copy_never_poisons_complete_copy (test_audit_round2.S01S03.test_S03_partial_copy_never_poisons_complete_copy) ... ok
+test_S15_conflicting_content_and_reorg_block_entries (test_audit_round2.S01S03.test_S15_conflicting_content_and_reorg_block_entries) ... ok
+test_S02_stale_fee_basis_never_fills_an_exit (test_audit_round2.S02StaleQuotes.test_S02_stale_fee_basis_never_fills_an_exit)
+No refreshed fee snapshot -> the timeout exit stays latched (no fictitious FILLED); the first fresh snapshot lets it execute. ... ok
+test_S05_multiple_recordings_never_collide (test_audit_round2.S05S06S09S10.test_S05_multiple_recordings_never_collide) ... ok
+test_S06_dataset_hash_covers_fees_gaps_lateness_and_run_end (test_audit_round2.S05S06S09S10.test_S06_dataset_hash_covers_fees_gaps_lateness_and_run_end) ... ok
+test_S09_config_values_take_effect (test_audit_round2.S05S06S09S10.test_S09_config_values_take_effect) ... ok
+test_S10_block_split_keeps_blocks_whole_and_purges_embargo (test_audit_round2.S05S06S09S10.test_S10_block_split_keeps_blocks_whole_and_purges_embargo) ... ok
+test_S08_token_2022_rejected_when_unsupported (test_audit_round2.S08S12.test_S08_token_2022_rejected_when_unsupported) ... ok
+test_S12_foreign_quote_reserves_never_enter_sol_state_or_columns (test_audit_round2.S08S12.test_S12_foreign_quote_reserves_never_enter_sol_state_or_columns) ... ok
+test_trade_tail_layout_is_evidence_only (test_audit_round2.S08S12.test_trade_tail_layout_is_evidence_only) ... ok
+test_S11_features_for_skipped_creates_and_historical_coverage (test_audit_round2.S11S16S17.test_S11_features_for_skipped_creates_and_historical_coverage) ... ok
+test_S16_operative_limits_come_from_config (test_audit_round2.S11S16S17.test_S16_operative_limits_come_from_config) ... ok
+test_S17_paper_produces_artifacts_and_honest_exit_code (test_audit_round2.S11S16S17.test_S17_paper_produces_artifacts_and_honest_exit_code) ... {
+  "run_id": "run",
+  "status": "INTERRUPTED",
+  "readiness": "CAPTURE_READY",
+  "feeds_started": 1,
+  "artifacts": [
+    "exports/camp/run/report.json",
+    "exports/camp/run/positions.csv",
+    "exports/camp/run/latency_by_feed.csv",
+    "exports/camp/run/summary.md"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA"
+}
+{
+  "run_id": "run",
+  "status": "COMPLETED",
+  "readiness": "NOT_READY",
+  "feeds_started": 0,
+  "artifacts": [
+    "exports/camp/run/report.json",
+    "exports/camp/run/positions.csv",
+    "exports/camp/run/latency_by_feed.csv",
+    "exports/camp/run/summary.md"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA"
+}
+paper: no eligible feed was ready (NOT_READY) – see feed_setup; exit code 4
+ok
+test_S13_failed_entries_count_in_expectancy_bootstrap_and_utilization (test_audit_round2.S13S14.test_S13_failed_entries_count_in_expectancy_bootstrap_and_utilization) ... ok
+test_S14_provenance_columns (test_audit_round2.S13S14.test_S14_provenance_columns) ... ok
+test_P1_2_conflict_before_modeled_fill_makes_pending_buy_unknown (test_audit_round3.P1ConflictsGaps.test_P1_2_conflict_before_modeled_fill_makes_pending_buy_unknown) ... ok
+test_P1_3_unknown_pump_event_opens_decode_gap (test_audit_round3.P1ConflictsGaps.test_P1_3_unknown_pump_event_opens_decode_gap) ... ok
+test_P1_4_foreign_quote_trade_tail_never_overwrites_sol_state (test_audit_round3.P1ConflictsGaps.test_P1_4_foreign_quote_trade_tail_never_overwrites_sol_state) ... ok
+test_P1_5_test_split_without_frozen_candidate_never_qualifies (test_audit_round3.P1CostsStressResearch.test_P1_5_test_split_without_frozen_candidate_never_qualifies) ... ok
+test_P1_6_unknown_fee_basis_at_fill_is_unknown_not_failed (test_audit_round3.P1CostsStressResearch.test_P1_6_unknown_fee_basis_at_fill_is_unknown_not_failed) ... ok
+test_P1_7_stressed_debit_beyond_max_input_is_rejected (test_audit_round3.P1CostsStressResearch.test_P1_7_stressed_debit_beyond_max_input_is_rejected) ... ok
+test_P1_1_reserves_older_than_quote_max_age_never_fill (test_audit_round3.P1Freshness.test_P1_1_reserves_older_than_quote_max_age_never_fill) ... ok
+test_P1_8_same_mint_never_bought_twice_across_restarts (test_audit_round3.P1RestartWriter.test_P1_8_same_mint_never_bought_twice_across_restarts) ... ok
+test_P1_9_writer_gives_up_on_permanent_fk_miss_with_quarantine (test_audit_round3.P1RestartWriter.test_P1_9_writer_gives_up_on_permanent_fk_miss_with_quarantine) ... ok
+test_S03_db_row_reflects_upgrade (test_audit_round3.Residuals.test_S03_db_row_reflects_upgrade) ... ok
+test_S06_hash_changes_with_fee_contents_and_protocol_pinning (test_audit_round3.Residuals.test_S06_hash_changes_with_fee_contents_and_protocol_pinning) ... ok
+test_S07_S14_attempt_costs_match_fill_quote_and_position (test_audit_round3.Residuals.test_S07_S14_attempt_costs_match_fill_quote_and_position) ... ok
+test_S11_v1_history_and_truncation_flag (test_audit_round3.Residuals.test_S11_v1_history_and_truncation_flag) ... ok
+test_S13_utilization_bounded_and_daily_by_close_day (test_audit_round3.Residuals.test_S13_utilization_bounded_and_daily_by_close_day) ... ok
+test_S16_closed_positions_do_not_block_eviction (test_audit_round3.Residuals.test_S16_closed_positions_do_not_block_eviction) ... ok
+test_pending_handles_and_active_index_are_bounded (test_audit_round4.Architecture.test_pending_handles_and_active_index_are_bounded) ... ok
+test_quarantine_diagnostic_does_not_nest_per_batch (test_audit_round4.Architecture.test_quarantine_diagnostic_does_not_nest_per_batch) ... ok
+test_writer_error_is_marshalled_to_the_owner_thread (test_audit_round4.Architecture.test_writer_error_is_marshalled_to_the_owner_thread) ... ok
+test_writer_locked_retry_still_runs_during_shutdown_drain (test_audit_round4.Architecture.test_writer_locked_retry_still_runs_during_shutdown_drain) ... ok
+test_writer_soft_shutdown_deadline_never_quarantines_valid_backlog (test_audit_round4.Architecture.test_writer_soft_shutdown_deadline_never_quarantines_valid_backlog) ... ok
+test_partial_create_buy_then_complete_fills_on_post_tx_state (test_audit_round4.AtomicUpgrade.test_partial_create_buy_then_complete_fills_on_post_tx_state) ... ok
+test_D04_counts_persisted_creator_sells (test_audit_round4.DoctorAndDataset.test_D04_counts_persisted_creator_sells) ... ok
+test_dataset_integrity_rejects_manipulated_payloads (test_audit_round4.DoctorAndDataset.test_dataset_integrity_rejects_manipulated_payloads) ... ok
+test_truncated_history_nulls_trade_features (test_audit_round4.FeaturesAndReports.test_truncated_history_nulls_trade_features) ... ok
+test_utilization_uses_recorded_run_window_and_day_by_close (test_audit_round4.FeaturesAndReports.test_utilization_uses_recorded_run_window_and_day_by_close) ... ok
+test_fill_before_later_disconnect_is_filled_in_both (test_audit_round4.ReplayParity.test_fill_before_later_disconnect_is_filled_in_both) ... ok
+test_fill_inside_gap_is_unknown_in_both (test_audit_round4.ReplayParity.test_fill_inside_gap_is_unknown_in_both) ... ok
+test_baseline_preference_keeps_positive_flag (test_audit_round4.ResearchGates.test_baseline_preference_keeps_positive_flag) ... ok
+test_duplicate_stress_scenarios_across_recordings_do_not_count (test_audit_round4.ResearchGates.test_duplicate_stress_scenarios_across_recordings_do_not_count) ... ok
+test_unknown_exposure_cost_never_treated_as_zero (test_audit_round4.ResearchGates.test_unknown_exposure_cost_never_treated_as_zero) ... ok
+test_unqualified_sibling_blocks_positive (test_audit_round4.ResearchGates.test_unqualified_sibling_blocks_positive) ... ok
+test_future_truncation_does_not_change_zero_ms_features (test_audit_round5.IntegratedR5Regressions.test_future_truncation_does_not_change_zero_ms_features) ... ok
+test_insufficient_validation_cannot_freeze (test_audit_round5.IntegratedR5Regressions.test_insufficient_validation_cannot_freeze) ... ok
+test_later_conflict_does_not_rewrite_earlier_modeled_fill (test_audit_round5.IntegratedR5Regressions.test_later_conflict_does_not_rewrite_earlier_modeled_fill) ... ok
+test_lost_unknown_history_remains_unknown_for_delayed_callback (test_audit_round5.IntegratedR5Regressions.test_lost_unknown_history_remains_unknown_for_delayed_callback) ... ok
+test_rejected_fill_records_current_network_fee (test_audit_round5.IntegratedR5Regressions.test_rejected_fill_records_current_network_fee) ... ok
+test_research_stress_has_distinct_model_provenance (test_audit_round5.IntegratedR5Regressions.test_research_stress_has_distinct_model_provenance) ... ok
+test_stale_complete_create_upgrade_preserves_newer_state (test_audit_round5.IntegratedR5Regressions.test_stale_complete_create_upgrade_preserves_newer_state) ... ok
+test_stress_gate_is_order_independent (test_audit_round5.IntegratedR5Regressions.test_stress_gate_is_order_independent) ... ok
+test_unknown_trade_tail_never_changes_curve_or_sells (test_audit_round5.IntegratedR5Regressions.test_unknown_trade_tail_never_changes_curve_or_sells) ... ok
+test_capture_passes_strategy_free_mode_to_application (test_capture_edge_analysis.CaptureCliTests.test_capture_passes_strategy_free_mode_to_application) ... ok
+test_capture_requires_duration (test_capture_edge_analysis.CaptureCliTests.test_capture_requires_duration) ... usage: python -m darkbot capture [-h] --config CONFIG --db DB --campaign
+                                 CAMPAIGN --max-duration-minutes
+                                 MAX_DURATION_MINUTES
+                                 [--require-economic-within-s REQUIRE_ECONOMIC_WITHIN_S]
+                                 [--max-economic-outage-s MAX_ECONOMIC_OUTAGE_S]
+python -m darkbot capture: error: the following arguments are required: --max-duration-minutes
+ok
+test_edge_analysis_cli_accepts_db_or_zip_source (test_capture_edge_analysis.CaptureCliTests.test_edge_analysis_cli_accepts_db_or_zip_source) ... ok
+test_min_hold_loser_rule_waits_until_hold (test_capture_edge_analysis.EdgeRuleTests.test_min_hold_loser_rule_waits_until_hold) ... ok
+test_target_or_dev_uses_first_trigger (test_capture_edge_analysis.EdgeRuleTests.test_target_or_dev_uses_first_trigger) ... ok
+test_legacy_database_emits_schema_inventory_instead_of_crashing (test_capture_edge_analysis.LegacySourceTests.test_legacy_database_emits_schema_inventory_instead_of_crashing) ... ok
+test_zip_selection_prefers_relevant_schema_over_larger_empty_db (test_capture_edge_analysis.LegacySourceTests.test_zip_selection_prefers_relevant_schema_over_larger_empty_db) ... ok
+test_fixture_and_replay_failures_block_economic_readiness (test_doctor_gate.DoctorGate.test_fixture_and_replay_failures_block_economic_readiness) ... ok
+test_fee_status_reports_all_components (test_fee_evidence_gate.FeeEvidenceGateTests.test_fee_status_reports_all_components) ... ok
+test_fee_status_reports_unknown_evidence (test_fee_evidence_gate.FeeEvidenceGateTests.test_fee_status_reports_unknown_evidence) ... ok
+test_gate_disabled_preserves_old_behavior (test_fee_evidence_gate.FeeEvidenceGateTests.test_gate_disabled_preserves_old_behavior) ... ok
+test_gate_does_not_fire_before_deadline (test_fee_evidence_gate.FeeEvidenceGateTests.test_gate_does_not_fire_before_deadline) ... ok
+test_gate_does_not_fire_when_economic_ready (test_fee_evidence_gate.FeeEvidenceGateTests.test_gate_does_not_fire_when_economic_ready) ... ok
+test_gate_fires_at_deadline_when_not_economic (test_fee_evidence_gate.FeeEvidenceGateTests.test_gate_fires_at_deadline_when_not_economic) ... ok
+test_later_outage_uses_separate_tolerance_and_resets_after_recovery (test_fee_evidence_gate.FeeEvidenceGateTests.test_later_outage_uses_separate_tolerance_and_resets_after_recovery)
+Startup and later-outage tolerances are independent; separate incidents never accumulate. ... ok
+test_run_helpers_forward_separate_gate_values_and_reject_nonpositive (test_fee_evidence_gate.FeeEvidenceGateTests.test_run_helpers_forward_separate_gate_values_and_reject_nonpositive) ... ok
+test_authoritative_invalidations_never_resurrect_prior_good_data (test_fee_refresh_evidence.FeeRefreshTests.test_authoritative_invalidations_never_resurrect_prior_good_data) ... ok
+test_edge_analysis_uses_same_atomic_causal_evidence_selection (test_fee_refresh_evidence.FeeRefreshTests.test_edge_analysis_uses_same_atomic_causal_evidence_selection) ... ok
+test_expiry_and_authoritative_failure_block_pending_fill (test_fee_refresh_evidence.FeeRefreshTests.test_expiry_and_authoritative_failure_block_pending_fill) ... ok
+test_failure_after_modeled_fill_cannot_change_late_callback (test_fee_refresh_evidence.FeeRefreshTests.test_failure_after_modeled_fill_cannot_change_late_callback) ... ok
+test_live_publication_keeps_raw_failure_but_cache_retains_good_pair (test_fee_refresh_evidence.FeeRefreshTests.test_live_publication_keeps_raw_failure_but_cache_retains_good_pair) ... ok
+test_network_priority_retry_as_one_family (test_fee_refresh_evidence.FeeRefreshTests.test_network_priority_retry_as_one_family) ... ok
+test_priority_change_with_failed_network_retains_old_coherent_pair (test_fee_refresh_evidence.FeeRefreshTests.test_priority_change_with_failed_network_retains_old_coherent_pair) ... ok
+test_raw_failure_persists_and_live_replay_share_fill_outcome (test_fee_refresh_evidence.FeeRefreshTests.test_raw_failure_persists_and_live_replay_share_fill_outcome) ... ok
+test_rent_partial_transport_failure_retries_but_does_not_retain_combined_evidence (test_fee_refresh_evidence.FeeRefreshTests.test_rent_partial_transport_failure_retries_but_does_not_retain_combined_evidence) ... ok
+test_resolver_classifies_transport_separately_from_invalid_data (test_fee_refresh_evidence.FeeRefreshTests.test_resolver_classifies_transport_separately_from_invalid_data) ... ok
+test_retry_backoff_is_per_family_and_resets_on_success (test_fee_refresh_evidence.FeeRefreshTests.test_retry_backoff_is_per_family_and_resets_on_success) ... ok
+test_run_background_retries_failed_rent_before_hourly_interval (test_fee_refresh_evidence.FeeRefreshTests.test_run_background_retries_failed_rent_before_hourly_interval) ... ok
+test_transient_retains_original_identity_and_expires_without_renewal (test_fee_refresh_evidence.FeeRefreshTests.test_transient_retains_original_identity_and_expires_without_renewal) ... ok
+test_A_immediate_creator_sell (test_p0_exit_liveness.ExitLiveness.test_A_immediate_creator_sell) ... ok
+test_B_C_F_fee_recovery_without_trade_and_no_duplicate (test_p0_exit_liveness.ExitLiveness.test_B_C_F_fee_recovery_without_trade_and_no_duplicate) ... ok
+test_D_true_gap_deadline_is_honest_and_later_state_recovers (test_p0_exit_liveness.ExitLiveness.test_D_true_gap_deadline_is_honest_and_later_state_recovers) ... ok
+test_E_creator_priority_same_tick_and_pending_audit (test_p0_exit_liveness.ExitLiveness.test_E_creator_priority_same_tick_and_pending_audit) ... ok
+test_G_recorded_mainnet_frames_and_fees_replay (test_p0_exit_liveness.ExitLiveness.test_G_recorded_mainnet_frames_and_fees_replay) ... ok
+test_complete_copy_recovers_gap_without_new_trade (test_p0_exit_liveness.ExitLiveness.test_complete_copy_recovers_gap_without_new_trade) ... ok
+test_fee_recovery_after_diagnostic_deadline_requires_fresh_state (test_p0_exit_liveness.ExitLiveness.test_fee_recovery_after_diagnostic_deadline_requires_fresh_state) ... ok
+test_fee_recovery_never_uses_stale_curve (test_p0_exit_liveness.ExitLiveness.test_fee_recovery_never_uses_stale_curve) ... ok
+test_replay_fee_receipt_without_market_or_timer_at_receipt (test_p0_exit_liveness.ExitLiveness.test_replay_fee_receipt_without_market_or_timer_at_receipt) ... ok
+test_unknown_sibling_never_uses_pre_gap_curve_for_target (test_p0_exit_liveness.ExitLiveness.test_unknown_sibling_never_uses_pre_gap_curve_for_target) ... ok
+test_unknown_submission_never_recovers_from_fees (test_p0_exit_liveness.ExitLiveness.test_unknown_submission_never_recovers_from_fees) ... ok
+test_cli_requires_max_duration_minutes (test_paper_duration.PaperDurationTests.test_cli_requires_max_duration_minutes) ... usage: python -m darkbot paper [-h] --config CONFIG --db DB --campaign
+                               CAMPAIGN
+                               [--max-open-positions MAX_OPEN_POSITIONS]
+                               --max-duration-minutes MAX_DURATION_MINUTES
+                               [--require-economic-within-s REQUIRE_ECONOMIC_WITHIN_S]
+                               [--max-economic-outage-s MAX_ECONOMIC_OUTAGE_S]
+python -m darkbot paper: error: the following arguments are required: --max-duration-minutes
+ok
+test_cli_slot_override_preserves_fixed_and_usd_capital_per_slot (test_paper_duration.PaperDurationTests.test_cli_slot_override_preserves_fixed_and_usd_capital_per_slot) ... ok
+test_run_paper_converts_minutes_to_milliseconds (test_paper_duration.PaperDurationTests.test_run_paper_converts_minutes_to_milliseconds) ... ok
+test_run_paper_rejects_nonpositive_duration (test_paper_duration.PaperDurationTests.test_run_paper_rejects_nonpositive_duration) ... ok
+test_dataset_binds_fee_config_reference_and_source_content (test_replay_evidence_fk.ReplayEvidenceTests.test_dataset_binds_fee_config_reference_and_source_content) ... ok
+test_dataset_binds_fee_selection_identity_and_source_ttl (test_replay_evidence_fk.ReplayEvidenceTests.test_dataset_binds_fee_selection_identity_and_source_ttl) ... ok
+test_destination_conflict_fails_without_creating_run (test_replay_evidence_fk.ReplayEvidenceTests.test_destination_conflict_fails_without_creating_run) ... ok
+test_different_replay_cost_config_keeps_source_evidence_fk (test_replay_evidence_fk.ReplayEvidenceTests.test_different_replay_cost_config_keeps_source_evidence_fk) ... ok
+test_missing_corrupt_and_wrong_kind_source_fail_before_replay (test_replay_evidence_fk.ReplayEvidenceTests.test_missing_corrupt_and_wrong_kind_source_fail_before_replay) ... ok
+test_writer_failure_stops_entries_and_marks_storage_error (test_replay_evidence_fk.ReplayEvidenceTests.test_writer_failure_stops_entries_and_marks_storage_error) ... ok
+test_batch_boundary_never_loses_fk_coupled_rows (test_review_counterexamples.BatchSplit.test_batch_boundary_never_loses_fk_coupled_rows) ... ok
+test_non_actionable_creates_do_not_count_as_valid_samples (test_review_counterexamples.DoctorCounting.test_non_actionable_creates_do_not_count_as_valid_samples) ... ok
+test_unverified_layout_is_never_valid (test_review_counterexamples.FeeLayout.test_unverified_layout_is_never_valid) ... ok
+test_replay_never_invents_exits_after_recording_end (test_review_counterexamples.ReplayEnd.test_replay_never_invents_exits_after_recording_end) ... ok
+test_in_sample_and_zero_delay_cannot_qualify (test_review_counterexamples.ResearchQualification.test_in_sample_and_zero_delay_cannot_qualify) ... ok
+test_A_one_trade_never_reserves_more_than_10_usd_slot_capital (test_strategy_b.StrategyBTests.test_A_one_trade_never_reserves_more_than_10_usd_slot_capital) ... ok
+test_A_slot_capital_scales_exactly_with_slot_count (test_strategy_b.StrategyBTests.test_A_slot_capital_scales_exactly_with_slot_count) ... ok
+test_A_target_disabled_but_creator_sell_still_exits (test_strategy_b.StrategyBTests.test_A_target_disabled_but_creator_sell_still_exits) ... ok
+test_B01_four_four_skip (test_strategy_b.StrategyBTests.test_B01_four_four_skip) ... ok
+test_B02_five_four_skip (test_strategy_b.StrategyBTests.test_B02_five_four_skip) ... ok
+test_B03_five_five_entry (test_strategy_b.StrategyBTests.test_B03_five_five_entry) ... ok
+test_B04_ten_one_skip (test_strategy_b.StrategyBTests.test_B04_ten_one_skip) ... ok
+test_B05_all_create_transaction_buys_excluded (test_strategy_b.StrategyBTests.test_B05_all_create_transaction_buys_excluded) ... ok
+test_B06_cross_feed_dedup (test_strategy_b.StrategyBTests.test_B06_cross_feed_dedup) ... ok
+test_B07_deadline_and_late_buys_do_not_change_decision (test_strategy_b.StrategyBTests.test_B07_deadline_and_late_buys_do_not_change_decision) ... ok
+test_B07_replay_keeps_inclusive_deadline (test_strategy_b.StrategyBTests.test_B07_replay_keeps_inclusive_deadline) ... ok
+test_B08_paper_replay_decision_and_fx_parity (test_strategy_b.StrategyBTests.test_B08_paper_replay_decision_and_fx_parity) ... ok
+test_B09_below_net_target_holds (test_strategy_b.StrategyBTests.test_B09_below_net_target_holds) ... ok
+test_B10_net_target_exits (test_strategy_b.StrategyBTests.test_B10_net_target_exits) ... ok
+test_B11_no_stop_even_zero_negative (test_strategy_b.StrategyBTests.test_B11_no_stop_even_zero_negative) ... ok
+test_B12_creator_sell_no_exit_or_entry_rejection (test_strategy_b.StrategyBTests.test_B12_creator_sell_no_exit_or_entry_rejection) ... ok
+test_B13_timeout_from_successful_fill (test_strategy_b.StrategyBTests.test_B13_timeout_from_successful_fill) ... ok
+test_B14_simultaneous_observations (test_strategy_b.StrategyBTests.test_B14_simultaneous_observations) ... ok
+test_B15_open_position_does_not_block_observation (test_strategy_b.StrategyBTests.test_B15_open_position_does_not_block_observation) ... ok
+test_B16_parallel_positions_shared_portfolio (test_strategy_b.StrategyBTests.test_B16_parallel_positions_shared_portfolio) ... ok
+test_B17_a_regression_immediate_entry_creator_exit (test_strategy_b.StrategyBTests.test_B17_a_regression_immediate_entry_creator_exit) ... ok
+test_B18_strategy_selection_hash_and_run_identity (test_strategy_b.StrategyBTests.test_B18_strategy_selection_hash_and_run_identity) ... ok
+test_fx_tampering_rejected (test_strategy_b.StrategyBTests.test_fx_tampering_rejected) ... ok
+test_fx_validation_and_floor (test_strategy_b.StrategyBTests.test_fx_validation_and_floor) ... ok
+test_gap_during_window_is_not_repaired_by_later_buys (test_strategy_b.StrategyBTests.test_gap_during_window_is_not_repaired_by_later_buys) ... ok
+test_gap_with_filter_miss_is_data_incomplete_not_false_negative (test_strategy_b.StrategyBTests.test_gap_with_filter_miss_is_data_incomplete_not_false_negative) ... ok
+test_late_timer_does_not_extend_window (test_strategy_b.StrategyBTests.test_late_timer_does_not_extend_window) ... ok
+test_measured_distribution_is_explicit_and_reproducible (test_strategy_b.StrategyBTests.test_measured_distribution_is_explicit_and_reproducible) ... ok
+test_missing_stale_future_invalid_fx_fail_closed (test_strategy_b.StrategyBTests.test_missing_stale_future_invalid_fx_fail_closed) ... ok
+test_observation_censored_at_recording_end (test_strategy_b.StrategyBTests.test_observation_censored_at_recording_end) ... ok
+test_partial_duplicate_upgrade_counts_once (test_strategy_b.StrategyBTests.test_partial_duplicate_upgrade_counts_once) ... ok
+test_policy_version_is_frozen (test_strategy_b.StrategyBTests.test_policy_version_is_frozen) ... ok
+test_same_capture_ab_matrix_and_read_only_source (test_strategy_b.StrategyBTests.test_same_capture_ab_matrix_and_read_only_source) ... ok
+test_shared_safety_stale_quote_and_migration (test_strategy_b.StrategyBTests.test_shared_safety_stale_quote_and_migration) ... ok
+test_stale_failed_and_missing_actor_never_count (test_strategy_b.StrategyBTests.test_stale_failed_and_missing_actor_never_count) ... ok
+test_swap_budget_inverse_uses_modern_fee_rounding (test_strategy_b.StrategyBTests.test_swap_budget_inverse_uses_modern_fee_rounding) ... ok
+test_C00_feature_parity_with_old_backend_code (test_strategy_c.LegacyFeatureParityTests.test_C00_feature_parity_with_old_backend_code) ... ok
+test_filter_engine_null_bounds_and_first_failed (test_strategy_c.LegacyFeatureParityTests.test_filter_engine_null_bounds_and_first_failed) ... ok
+test_C01_non_sol_quote_never_decides (test_strategy_c.StrategyCTests.test_C01_non_sol_quote_never_decides) ... ok
+test_C02_create_transaction_trades_only_feed_dev_buy_and_t0_price (test_strategy_c.StrategyCTests.test_C02_create_transaction_trades_only_feed_dev_buy_and_t0_price) ... ok
+test_C03_exact_cutoff_inclusive_then_frozen (test_strategy_c.StrategyCTests.test_C03_exact_cutoff_inclusive_then_frozen) ... ok
+test_C04_null_feature_fails_filter (test_strategy_c.StrategyCTests.test_C04_null_feature_fails_filter) ... ok
+test_C05_filter_miss_records_every_evaluation (test_strategy_c.StrategyCTests.test_C05_filter_miss_records_every_evaluation) ... ok
+test_C06_gap_in_window_is_data_incomplete (test_strategy_c.StrategyCTests.test_C06_gap_in_window_is_data_incomplete) ... ok
+test_C07_empty_filters_pass_every_tradable_launch (test_strategy_c.StrategyCTests.test_C07_empty_filters_pass_every_tradable_launch) ... ok
+test_C07b_state_freshness_is_the_shared_engine_rule_not_strategy_c (test_strategy_c.StrategyCTests.test_C07b_state_freshness_is_the_shared_engine_rule_not_strategy_c)
+Old backend: last observed state, any age. Shared engine: reserves older than execution.quote_max_age_ms are ... ok
+test_C08_busy_slot_discards_candidate_for_good (test_strategy_c.StrategyCTests.test_C08_busy_slot_discards_candidate_for_good) ... ok
+test_C09_creator_sell_during_observation_no_entry_no_cost (test_strategy_c.StrategyCTests.test_C09_creator_sell_during_observation_no_entry_no_cost) ... ok
+test_C10_creator_sell_before_modeled_fill_cancels_entry_free (test_strategy_c.StrategyCTests.test_C10_creator_sell_before_modeled_fill_cancels_entry_free) ... ok
+test_C10b_other_policies_never_cancel_on_creator_sell (test_strategy_c.StrategyCTests.test_C10b_other_policies_never_cancel_on_creator_sell) ... ok
+test_C12_fixed_swap_budget_contains_pump_fees_network_and_rent_on_top (test_strategy_c.StrategyCTests.test_C12_fixed_swap_budget_contains_pump_fees_network_and_rent_on_top) ... ok
+test_C13_creator_sell_after_fill_beats_target_on_same_state (test_strategy_c.StrategyCTests.test_C13_creator_sell_after_fill_beats_target_on_same_state) ... ok
+test_C14_net_target_boundary (test_strategy_c.StrategyCTests.test_C14_net_target_boundary) ... ok
+test_C15_stop_multiple_exits (test_strategy_c.StrategyCTests.test_C15_stop_multiple_exits) ... ok
+test_C16_stop_zero_holds_until_net_value_is_gone (test_strategy_c.StrategyCTests.test_C16_stop_zero_holds_until_net_value_is_gone) ... ok
+test_C17_timeout_from_successful_fill (test_strategy_c.StrategyCTests.test_C17_timeout_from_successful_fill) ... ok
+test_C18_same_timestamp_priority (test_strategy_c.StrategyCTests.test_C18_same_timestamp_priority) ... ok
+test_C19_all_six_legacy_profiles_load_with_own_hash_and_exact_parameters (test_strategy_c.StrategyCTests.test_C19_all_six_legacy_profiles_load_with_own_hash_and_exact_parameters) ... ok
+test_C19b_hard_wired_legacy_rules_are_not_configurable (test_strategy_c.StrategyCTests.test_C19b_hard_wired_legacy_rules_are_not_configurable) ... ok
+test_C20_zero_observation_decides_directly_from_create (test_strategy_c.StrategyCTests.test_C20_zero_observation_decides_directly_from_create) ... ok
+test_C21_paper_and_replay_take_identical_decisions (test_strategy_c.StrategyCTests.test_C21_paper_and_replay_take_identical_decisions) ... ok
+test_C22_run_identity_separate_from_a_and_b (test_strategy_c.StrategyCTests.test_C22_run_identity_separate_from_a_and_b) ... ok
+test_C23_observation_censored_at_recording_end (test_strategy_c.StrategyCTests.test_C23_observation_censored_at_recording_end) ... ok
+test_C24_ab_replay_normalizes_legacy_latency_and_quote_age (test_strategy_c.StrategyCTests.test_C24_ab_replay_normalizes_legacy_latency_and_quote_age) ... ok
+test_C25_replay_slot_limit_scales_fixed_capital (test_strategy_c.StrategyCTests.test_C25_replay_slot_limit_scales_fixed_capital) ... ok
+test_C26_usd_per_slot_keeps_fx_derived_capital (test_strategy_c.StrategyCTests.test_C26_usd_per_slot_keeps_fx_derived_capital) ... ok
+test_creator_fill_policy_validation_and_default_compatibility (test_strategy_c.StrategyCTests.test_creator_fill_policy_validation_and_default_compatibility) ... ok
+test_free_cancel_report_and_research_cannot_qualify (test_strategy_c.StrategyCTests.test_free_cancel_report_and_research_cannot_qualify) ... ok
+test_tx_lands_executes_buy_and_creator_exit_with_costs (test_strategy_c.StrategyCTests.test_tx_lands_executes_buy_and_creator_exit_with_costs) ... ok
+test_tx_lands_never_forces_fill_on_stale_reserves (test_strategy_c.StrategyCTests.test_tx_lands_never_forces_fill_on_stale_reserves) ... ok
+test_T01_same_create_three_sources_one_intent (test_t01_t15_feeds_engine.T01T02FeedRace.test_T01_same_create_three_sources_one_intent) ... ok
+test_T02_early_incomplete_hint_does_not_enter (test_t01_t15_feeds_engine.T01T02FeedRace.test_T02_early_incomplete_hint_does_not_enter) ... ok
+test_T03_create_multiple_buys_creator_sell_one_tx (test_t01_t15_feeds_engine.T03T05Atomicity.test_T03_create_multiple_buys_creator_sell_one_tx) ... ok
+test_T04_late_entry_callback_with_creator_sell_in_between (test_t01_t15_feeds_engine.T03T05Atomicity.test_T04_late_entry_callback_with_creator_sell_in_between) ... ok
+test_T05_creator_sell_after_submit_before_fill_no_free_cancel (test_t01_t15_feeds_engine.T03T05Atomicity.test_T05_creator_sell_after_submit_before_fill_no_free_cancel) ... ok
+test_T06_bounded_retries_time_advances (test_t01_t15_feeds_engine.T06T09Rules.test_T06_bounded_retries_time_advances) ... ok
+test_T07_stop_disabled_curve_unknown (test_t01_t15_feeds_engine.T06T09Rules.test_T07_stop_disabled_curve_unknown) ... ok
+test_T08_entry_exit_latency_separate (test_t01_t15_feeds_engine.T06T09Rules.test_T08_entry_exit_latency_separate) ... ok
+test_T09_research_horizon_with_open_position (test_t01_t15_feeds_engine.T06T09Rules.test_T09_research_horizon_with_open_position) ... ok
+test_T10_failed_entry_sell_retries_abort (test_t01_t15_feeds_engine.T10T12Ledger.test_T10_failed_entry_sell_retries_abort) ... ok
+test_T11_rent_lock_and_refund (test_t01_t15_feeds_engine.T10T12Ledger.test_T11_rent_lock_and_refund) ... ok
+test_T12_writer_queue_full_and_disk_error (test_t01_t15_feeds_engine.T10T12Ledger.test_T12_writer_queue_full_and_disk_error) ... ok
+test_T13_ack_rejected_and_disconnect (test_t01_t15_feeds_engine.T13T15Feeds.test_T13_ack_rejected_and_disconnect) ... ok
+test_T14_decoder_programming_error_is_diagnostic (test_t01_t15_feeds_engine.T13T15Feeds.test_T14_decoder_programming_error_is_diagnostic) ... ok
+test_T15_out_of_order_duplicates_conflict (test_t01_t15_feeds_engine.T13T15Feeds.test_T15_out_of_order_duplicates_conflict) ... ok
+test_T16_stale_fees_diagnostic_only (test_t16_t35_costs_replay.T16T18Costs.test_T16_stale_fees_diagnostic_only) ... ok
+test_T17_hand_computed_fixture (test_t16_t35_costs_replay.T16T18Costs.test_T17_hand_computed_fixture) ... ok
+test_T18_missing_feed_and_tie (test_t16_t35_costs_replay.T16T18Costs.test_T18_missing_feed_and_tie) ... ok
+test_T19_replay_twice_identical (test_t16_t35_costs_replay.T19T21Replay.test_T19_replay_twice_identical) ... ok
+test_T20_future_events_do_not_change_earlier_decisions (test_t16_t35_costs_replay.T19T21Replay.test_T20_future_events_do_not_change_earlier_decisions) ... ok
+test_T21_paired_and_portfolio_separate (test_t16_t35_costs_replay.T19T21Replay.test_T21_paired_and_portfolio_separate) ... ok
+test_T21b_research_registers_overridden_parent_config_snapshot (test_t16_t35_costs_replay.T19T21Replay.test_T21b_research_registers_overridden_parent_config_snapshot)
+A PAPER CLI override changes the runtime hash; research must register that exact parent before FK use. ... ok
+test_T22_paper_broadcast_boundary (test_t16_t35_costs_replay.T22T24Boundary.test_T22_paper_broadcast_boundary) ... ok
+test_T23_process_restart_new_epoch (test_t16_t35_costs_replay.T22T24Boundary.test_T23_process_restart_new_epoch) ... ok
+test_T24_gap_during_position_censoring_visible (test_t16_t35_costs_replay.T22T24Boundary.test_T24_gap_during_position_censoring_visible) ... ok
+test_T25_protocol_variants (test_t16_t35_costs_replay.T25T30Protocol.test_T25_protocol_variants) ... ok
+test_T26_fee_snapshot_missing_or_null (test_t16_t35_costs_replay.T25T30Protocol.test_T26_fee_snapshot_missing_or_null) ... ok
+test_T27_fees_change_between_buy_and_sell (test_t16_t35_costs_replay.T25T30Protocol.test_T27_fees_change_between_buy_and_sell) ... ok
+test_T28_no_double_counting (test_t16_t35_costs_replay.T25T30Protocol.test_T28_no_double_counting) ... ok
+test_T29_token_account_rent (test_t16_t35_costs_replay.T25T30Protocol.test_T29_token_account_rent) ... ok
+test_T30_precomputed_vs_reconciled (test_t16_t35_costs_replay.T25T30Protocol.test_T30_precomputed_vs_reconciled)
+Attempt costs are precomputed at submit and applied with the fee rule valid at the modeled fill; an attempt whose modeled fill lies in a ... ok
+test_T31_timeout_vs_research_end (test_t16_t35_costs_replay.T31T35Contracts.test_T31_timeout_vs_research_end) ... ok
+test_T32_timeout_without_fresh_quote (test_t16_t35_costs_replay.T31T35Contracts.test_T32_timeout_without_fresh_quote) ... ok
+test_T33_sizing_contract_worked_example (test_t16_t35_costs_replay.T31T35Contracts.test_T33_sizing_contract_worked_example) ... ok
+test_T34_simultaneous_creates_one_slot (test_t16_t35_costs_replay.T31T35Contracts.test_T34_simultaneous_creates_one_slot) ... ok
+test_T35_schema_and_foreign_keys (test_t16_t35_costs_replay.T31T35Contracts.test_T35_schema_and_foreign_keys) ... ok
+test_D01_D04_D06_offline_parts (test_t36_t52_semantics.DChecksOffline.test_D01_D04_D06_offline_parts) ... ok
+test_capital_reservation_includes_slippage_bound (test_t36_t52_semantics.ReviewRegressions.test_capital_reservation_includes_slippage_bound) ... ok
+test_eviction_keeps_active_and_horizon (test_t36_t52_semantics.ReviewRegressions.test_eviction_keeps_active_and_horizon) ... ok
+test_overflow_quality_event_survives_overflow (test_t36_t52_semantics.ReviewRegressions.test_overflow_quality_event_survives_overflow) ... ok
+test_quote_max_age_cancels_before_submit (test_t36_t52_semantics.ReviewRegressions.test_quote_max_age_cancels_before_submit)
+execution.quote_max_age_ms: a quote older than the limit at submit is cancelled without fee (replay with late processing). ... ok
+test_venue_transition_recorded (test_t36_t52_semantics.ReviewRegressions.test_venue_transition_recorded) ... ok
+test_T36_late_callback_creator_sell_not_backdated (test_t36_t52_semantics.T36T40Engine.test_T36_late_callback_creator_sell_not_backdated) ... ok
+test_T37_hot_path_no_db_print_hash_under_load (test_t36_t52_semantics.T36T40Engine.test_T37_hot_path_no_db_print_hash_under_load) ... ok
+test_T38_portfolio_replay_1_vs_10 (test_t36_t52_semantics.T36T40Engine.test_T38_portfolio_replay_1_vs_10) ... ok
+test_T39_config_rejection (test_t36_t52_semantics.T36T40Engine.test_T39_config_rejection) ... ok
+test_T40_optimisation_invariance (test_t36_t52_semantics.T36T40Engine.test_T40_optimisation_invariance) ... ok
+test_T41_quote_scopes (test_t36_t52_semantics.T41T46Semantics.test_T41_quote_scopes) ... ok
+test_T42_creator_timing_matrix (test_t36_t52_semantics.T41T46Semantics.test_T42_creator_timing_matrix) ... ok
+test_T43_exit_priority_and_tie (test_t36_t52_semantics.T41T46Semantics.test_T43_exit_priority_and_tie) ... ok
+test_T44_one_reject_then_fill (test_t36_t52_semantics.T41T46Semantics.test_T44_one_reject_then_fill) ... ok
+test_T45_paper_replay_matrix (test_t36_t52_semantics.T41T46Semantics.test_T45_paper_replay_matrix) ... ok
+test_T46_curve_complete_with_pending_fill (test_t36_t52_semantics.T41T46Semantics.test_T46_curve_complete_with_pending_fill) ... ok
+test_T47_pumpportal_optional_and_policy (test_t36_t52_semantics.T47T52Coverage.test_T47_pumpportal_optional_and_policy) ... ok
+test_T48_provider_failover_and_hard_gate (test_t36_t52_semantics.T47T52Coverage.test_T48_provider_failover_and_hard_gate) ... ok
+test_T49_recovery_state_only (test_t36_t52_semantics.T47T52Coverage.test_T49_recovery_state_only) ... ok
+test_T50_legacy_features (test_t36_t52_semantics.T47T52Coverage.test_T50_legacy_features) ... ok
+test_T51_fill_evidence_proxy_and_audit (test_t36_t52_semantics.T47T52Coverage.test_T51_fill_evidence_proxy_and_audit) ... ok
+test_T52_pumpportal_migration_hint (test_t36_t52_semantics.T47T52Coverage.test_T52_pumpportal_migration_hint) ... ok
+test_account_size_and_metadata_evidence_is_program_scoped (test_token2022_block.Token2022Block.test_account_size_and_metadata_evidence_is_program_scoped) ... ok
+test_capture_only_and_unsupported_observations_cannot_certify_ready (test_token2022_block.Token2022Block.test_capture_only_and_unsupported_observations_cannot_certify_ready) ... ok
+test_complete_duplicate_can_supply_missing_profile_without_rewinding_state (test_token2022_block.Token2022Block.test_complete_duplicate_can_supply_missing_profile_without_rewinding_state) ... ok
+test_fill_refresh_and_replay_preserve_scope (test_token2022_block.Token2022Block.test_fill_refresh_and_replay_preserve_scope) ... ok
+test_pda_derivation_against_captured_mainnet_addresses (test_token2022_block.Token2022Block.test_pda_derivation_against_captured_mainnet_addresses) ... ok
+test_pending_fill_uses_selected_profile_never_another_program (test_token2022_block.Token2022Block.test_pending_fill_uses_selected_profile_never_another_program) ... ok
+test_pending_token2022_completion_keeps_profile_and_failure_fee (test_token2022_block.Token2022Block.test_pending_token2022_completion_keeps_profile_and_failure_fee) ... ok
+test_recorded_create_buy_exit_refund_and_sql_provenance (test_token2022_block.Token2022Block.test_recorded_create_buy_exit_refund_and_sql_provenance) ... ok
+test_rent_refresh_refunds_the_original_deposit (test_token2022_block.Token2022Block.test_rent_refresh_refunds_the_original_deposit) ... ok
+test_rpc_refresh_budget_for_all_profiles (test_token2022_block.Token2022Block.test_rpc_refresh_budget_for_all_profiles) ... ok
+test_serialized_v2_metas_match_pinned_official_idl (test_token2022_block.Token2022Block.test_serialized_v2_metas_match_pinned_official_idl) ... ok
+test_side_scoped_costs_and_missing_sell_reserve (test_token2022_block.Token2022Block.test_side_scoped_costs_and_missing_sell_reserve) ... ok
+test_status_short_circuits_and_shutdown_keeps_observed_evidence (test_token2022_block.Token2022Block.test_status_short_circuits_and_shutdown_keeps_observed_evidence) ... ok
+test_unverified_program_and_scalar_costs_do_not_enable_token2022 (test_token2022_block.Token2022Block.test_unverified_program_and_scalar_costs_do_not_enable_token2022) ... ok
+
+----------------------------------------------------------------------
+Ran 253 tests in 11.741s
+
+OK
+exit=0 wall=12.087227563s

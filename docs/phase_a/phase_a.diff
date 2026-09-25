@@ -1,0 +1,1389 @@
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/chains/__init__.py /home/claude/darkbot-main/darkbot/chains/__init__.py
+--- orig/darkbot-main/darkbot/chains/__init__.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/chains/__init__.py	2026-09-24 19:57:21.827006794 +0000
+@@ -0,0 +1 @@
++"""Chain adapters (BSC handoff §2.2/§4.1): network mechanics only, no venue/protocol economics."""
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/chains/base.py /home/claude/darkbot-main/darkbot/chains/base.py
+--- orig/darkbot-main/darkbot/chains/base.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/chains/base.py	2026-09-24 19:57:21.830713536 +0000
+@@ -0,0 +1,38 @@
++"""Chain adapter contract (BSC handoff §4.1). No venue logic here."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any, Protocol, Sequence
++
++
++@dataclass(frozen=True, slots=True)
++class ChainIdentity:
++    chain_id: str
++    family: str
++    native_symbol: str
++    native_decimals: int
++
++
++class ChainAdapter(Protocol):
++    identity: ChainIdentity
++
++    def build_feed_adapters(
++        self,
++        *,
++        cfg: Any,
++        clock: Any,
++        on_raw: Any,
++        on_health: Any,
++        on_error: Any,
++    ) -> Sequence[Any]:
++        ...
++
++    def build_fee_resolver(self, *, cfg: Any, clock: Any, run_id: str) -> Any:
++        ...
++
++    def block_ref_from_raw(self, raw: Any) -> str | int | None:
++        ...
++
++    def tx_id_from_raw(self, raw: Any) -> str | None:
++        ...
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/chains/registry.py /home/claude/darkbot-main/darkbot/chains/registry.py
+--- orig/darkbot-main/darkbot/chains/registry.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/chains/registry.py	2026-09-24 19:58:12.663263276 +0000
+@@ -0,0 +1,57 @@
++"""Chain registry (BSC handoff §3/§5): resolve a chain id to ONE executable chain adapter, once at runtime start.
++
++``solana-mainnet`` is the only executable chain in Phase A. ``bsc-mainnet`` is registered as identity metadata only;
++requesting its executable adapter fails explicitly (``ChainNotImplemented`` is a ``NotImplementedError``). No EVM/BSC
++networking, gas, nonce or builder code exists yet.
++"""
++
++from __future__ import annotations
++
++from typing import Any, Callable
++
++from darkbot.chains.base import ChainIdentity
++
++
++class UnknownChain(ValueError):
++    """The chain id is not registered at all."""
++
++
++class ChainNotImplemented(NotImplementedError):
++    """The chain exists as metadata but has no executable adapter in this phase."""
++
++
++def _solana_factory() -> Any:
++    from darkbot.chains.solana.chain import SolanaChainAdapter  # lazy: keeps registry import free of feed/fee modules
++
++    return SolanaChainAdapter()
++
++
++# chain_id -> identity metadata (documented in the handoff: BSC mainnet = EVM family, BNB native, 18 decimals)
++CHAIN_IDENTITIES: dict[str, ChainIdentity] = {
++    "solana-mainnet": ChainIdentity(chain_id="solana-mainnet", family="solana", native_symbol="SOL", native_decimals=9),
++    "bsc-mainnet": ChainIdentity(chain_id="bsc-mainnet", family="evm", native_symbol="BNB", native_decimals=18),
++}
++
++# chain_id -> factory of an executable adapter; chains without a factory are metadata only
++CHAIN_FACTORIES: dict[str, Callable[[], Any]] = {
++    "solana-mainnet": _solana_factory,
++}
++
++
++def chain_identity(chain_id: str) -> ChainIdentity:
++    try:
++        return CHAIN_IDENTITIES[chain_id]
++    except KeyError as exc:
++        raise UnknownChain(f"unknown chain {chain_id!r}; known: {sorted(CHAIN_IDENTITIES)}") from exc
++
++
++def load_chain(chain_id: str) -> Any:
++    """Executable adapter for ``chain_id``; explicit failure for unknown or not-yet-implemented chains."""
++    identity = chain_identity(chain_id)
++    factory = CHAIN_FACTORIES.get(chain_id)
++    if factory is None:
++        raise ChainNotImplemented(f"chain {identity.chain_id!r} ({identity.family}) is registered as metadata only; no executable adapter in Phase A")
++    adapter = factory()
++    if adapter.identity != identity:
++        raise UnknownChain(f"chain adapter identity mismatch for {chain_id!r}: {adapter.identity} != {identity}")
++    return adapter
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/chains/solana/__init__.py /home/claude/darkbot-main/darkbot/chains/solana/__init__.py
+--- orig/darkbot-main/darkbot/chains/solana/__init__.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/chains/solana/__init__.py	2026-09-24 19:57:21.829280509 +0000
+@@ -0,0 +1 @@
++"""Solana chain adapter: thin delegation to the existing Solana feed/fee implementation."""
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/chains/solana/chain.py /home/claude/darkbot-main/darkbot/chains/solana/chain.py
+--- orig/darkbot-main/darkbot/chains/solana/chain.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/chains/solana/chain.py	2026-09-24 19:57:40.353960671 +0000
+@@ -0,0 +1,85 @@
++"""Solana chain adapter (BSC handoff §2.2 "Existing behavior wrapped, not rewritten").
++
++Every method delegates to the existing production implementation (``capture.FeedAdapter``, ``fees.FeeResolver``,
++``config.resolve_feed_endpoints``/``resolve_rpc_http``). The feed/fee wiring below is the exact wiring that
++``main.Application.run`` used before Phase A; it is only relocated behind the chain seam. Nothing here runs on the
++per-message hot path: adapters are built once at runtime start and the StateOwner keeps direct bound-method references.
++"""
++
++from __future__ import annotations
++
++import json
++from typing import Any
++
++from darkbot.capture import FeedAdapter
++from darkbot.chains.base import ChainIdentity
++from darkbot.config import resolve_feed_endpoints, resolve_rpc_http
++from darkbot.domain import RawEnvelope
++from darkbot.fees import FeeResolver, http_rpc
++
++SOLANA_MAINNET = ChainIdentity(chain_id="solana-mainnet", family="solana", native_symbol="SOL", native_decimals=9)
++
++
++class SolanaChainAdapter:
++    identity: ChainIdentity = SOLANA_MAINNET
++
++    # ------------------------------------------------------------------ feeds (was: Application.run feed loop)
++    def feed_setup_status(self, cfg: Any) -> dict[str, str]:
++        """Per configured feed the same status strings Application reported before Phase A (DISABLED / DISABLED_OPTIONAL / FAILED / STARTING)."""
++        endpoints = resolve_feed_endpoints(cfg)
++        status: dict[str, str] = {}
++        for feed in cfg.feeds:
++            ep = endpoints[feed.id]
++            if not feed.enabled:
++                status[feed.id] = "DISABLED"
++            elif not ep.available:
++                status[feed.id] = f"DISABLED_OPTIONAL missing env {ep.missing_env}" if not feed.required else f"FAILED missing env {ep.missing_env}"
++            else:
++                status[feed.id] = "STARTING"
++        return status
++
++    def build_feed_adapters(self, *, cfg: Any, clock: Any, on_raw: Any, on_health: Any, on_error: Any) -> tuple[FeedAdapter, ...]:
++        """One production FeedAdapter per enabled feed with an available endpoint, in config order; callbacks are passed through unchanged."""
++        endpoints = resolve_feed_endpoints(cfg)
++        adapters: list[FeedAdapter] = []
++        for feed in cfg.feeds:
++            ep = endpoints[feed.id]
++            if not feed.enabled or not ep.available:
++                continue
++            adapters.append(FeedAdapter(feed, ep.url, cfg.connectivity, cfg.protocol["program_id"], clock, on_raw, on_health, on_error))
++        return tuple(adapters)
++
++    # ------------------------------------------------------------------ fees (was: Application.run resolver wiring)
++    def build_fee_resolver(self, *, cfg: Any, clock: Any, run_id: str) -> FeeResolver:
++        rpc_ep = resolve_rpc_http(cfg)
++        rpc = http_rpc(rpc_ep.url, cfg.connectivity["rpc_http_timeout_ms"] / 1000) if rpc_ep.available else None
++        return FeeResolver(cfg, rpc, clock, run_id, "rpc_http" if rpc_ep.available else "NONE")
++
++    # ------------------------------------------------------------------ generic identity mapping (handoff §7.1: tx_id = signature, block_ref = slot)
++    @staticmethod
++    def _notification_value(raw: Any) -> tuple[dict[str, Any], dict[str, Any]] | None:
++        payload = raw.payload if isinstance(raw, RawEnvelope) else raw
++        try:
++            message = json.loads(payload) if isinstance(payload, str) else payload
++        except (TypeError, ValueError):
++            return None
++        if not isinstance(message, dict):
++            return None
++        result = (message.get("params") or {}).get("result") if isinstance(message.get("params"), dict) else None
++        if not isinstance(result, dict):
++            return None
++        return (result.get("context") or {}), (result.get("value") or {})
++
++    def tx_id_from_raw(self, raw: Any) -> str | None:
++        parsed = self._notification_value(raw)
++        if parsed is None:
++            return None
++        signature = parsed[1].get("signature") if isinstance(parsed[1], dict) else None
++        return signature if isinstance(signature, str) else None
++
++    def block_ref_from_raw(self, raw: Any) -> str | int | None:
++        parsed = self._notification_value(raw)
++        if parsed is None:
++            return None
++        slot = parsed[0].get("slot") if isinstance(parsed[0], dict) else None
++        return slot if isinstance(slot, int) and not isinstance(slot, bool) else None
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/config.py /home/claude/darkbot-main/darkbot/config.py
+--- orig/darkbot-main/darkbot/config.py	2026-09-24 09:34:22.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/config.py	2026-09-24 19:58:48.537180203 +0000
+@@ -287,6 +287,23 @@
+     def strategy_id(self) -> str:
+         return self.strategy["strategy_id"]
+ 
++    @property
++    def market_profile_id(self) -> str:
++        """Effective market profile: explicit ``market_profile_id`` or, for legacy configs, ``solana-mainnet:pumpfun``.
++
++        The default is applied here and never written into ``raw``/``canonical``, so legacy config hashes are unchanged.
++        """
++        profile = self.raw.get("market_profile_id")
++        if profile is None:
++            from darkbot.runtime.profiles import DEFAULT_MARKET_PROFILE_ID  # local import: keeps config import-free of runtime modules
++
++            return DEFAULT_MARKET_PROFILE_ID
++        return profile
++
++    @property
++    def has_explicit_market_profile(self) -> bool:
++        return "market_profile_id" in self.raw
++
+     def policy_content(self) -> dict[str, Any]:
+         return {"strategy": self.strategy, "portfolio": self.portfolio, "execution": self.execution, "latency_model": self.latency_model}
+ 
+@@ -540,7 +557,17 @@
+         schema["strategy"] = {**schema["strategy"], "candidate_name": "str", "stop_net_multiple": "dec", "ordinary_stop_enabled": "bool"}
+         if "creator_sold_before_fill" in raw["strategy"]:
+             schema["strategy"]["creator_sold_before_fill"] = "enum:LEGACY_FREE_CANCEL|TX_LANDS"
++    if "market_profile_id" in raw:
++        # Multichain seam (BSC handoff §6.1): an EXPLICIT profile is validated and stays inside the hashed raw config.
++        # A legacy config without the key is never mutated here: its effective profile is resolved by
++        # RuntimeConfig.market_profile_id, outside canonical_json(raw), so historical config hashes are unchanged.
++        schema["market_profile_id"] = "str"
+     _check(raw, schema, "config")
++    if "market_profile_id" in raw:
++        from darkbot.runtime.profiles import MARKET_PROFILES  # local import: profiles are pure metadata, config stays free of runtime modules at import time
++
++        if raw["market_profile_id"] not in MARKET_PROFILES:
++            raise ConfigError(f"config.market_profile_id: unknown market profile {raw['market_profile_id']!r}; known: {sorted(MARKET_PROFILES)}")
+     if raw["strategy"]["strategy_id"] == "LEGACY_5BUY_5UNIQUE_V1":
+         st = raw["strategy"]
+         required = {"observation_ms": 1000, "min_buy_count": 5, "min_unique_buyers": 5, "ordinary_stop_enabled": False,
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/main.py /home/claude/darkbot-main/darkbot/main.py
+--- orig/darkbot-main/darkbot/main.py	2026-09-24 09:34:22.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/main.py	2026-09-24 20:42:34.839558331 +0000
+@@ -22,6 +22,7 @@
+ from darkbot.domain import CostEvidence, Readiness, utc_iso
+ from darkbot.fees import FeeResolver, http_rpc
+ from darkbot.paper import PaperExecutionAdapter, StateOwner
++from darkbot.runtime.assembly import RuntimeCallbacks, assemble_runtime, build_feeds, preflight_market_profile
+ from darkbot.storage import REQUIRED_TABLES, Recorder, SqliteWriter, apply_migrations, integrity_check, mark_interrupted_runs, open_connection, prior_campaign_mints, upsert_config_snapshot, write_readback_test
+ 
+ SPEC_PATH = Path(__file__).resolve().parent.parent / "docs" / "SPEC.json"
+@@ -65,6 +66,9 @@
+ 
+     def __init__(self, cfg: RuntimeConfig, db_path: Path, campaign: str, mode: str = "PAPER", max_duration_ms: int | None = None, economic: bool = True, capture_only: bool = False, status_stream: Any = None,
+                  require_economic_within_ms: int | None = None, max_economic_outage_ms: int | None = None) -> None:
++        # Fail fast (BSC handoff §28): a metadata-only / unknown / incompatible market profile is rejected here, before any
++        # run or storage side effect exists (no DB file, no migration, no runs row, no writer thread).
++        self.preflight = preflight_market_profile(cfg)
+         self.cfg, self.db_path, self.campaign, self.mode = cfg, db_path, campaign, mode
+         # Fee-evidence gate: startup readiness and later-outage tolerance are separate controls.
+         # The trading/quote path itself is unchanged; this gate only decides whether a PAPER/CAPTURE run remains acceptable.
+@@ -85,6 +89,7 @@
+         self.feeds: dict[str, FeedAdapter] = {}
+         self.owner: StateOwner | None = None
+         self.resolver: FeeResolver | None = None
++        self.components: Any = None  # RuntimeComponents once assembled (chain/venue/profile selected once at start)
+         self.writer: SqliteWriter | None = None
+         self.recorder = Recorder(cfg.storage["queue_capacity_records"], cfg.storage["priority_headroom_records"])
+         self.conn = None
+@@ -114,6 +119,12 @@
+     async def run(self) -> dict[str, Any]:
+         loop = asyncio.get_running_loop()
+         self._loop = loop
++        # Multichain seam (BSC handoff §5): chain/venue/profile are resolved ONCE here, BEFORE storage is opened, so a
++        # non-runnable profile or a component construction failure leaves no RUNNING run behind. The Solana chain adapter
++        # builds the same FeeResolver/FeedAdapter objects with the same arguments as before; the Pump.fun venue adapter
++        # builds the same PumpDecoder/MarketReducer/QuoteEngine. Feeds are built after the StateOwner exists so they hold
++        # its bound methods directly.
++        self.components = assemble_runtime(cfg=self.cfg, clock=self.clock, run_id=self.run_id, callbacks=None)
+         storage_info = self.open_storage()
+         assert self.conn is not None
+         self.writer = SqliteWriter(self.conn, self.recorder, self.cfg.storage["batch_max_records"], self.cfg.storage["flush_interval_ms"], self._disk_error, self.cfg.storage["writer_locked_retries"], self.cfg.storage["fk_merge_max_batches"],
+@@ -122,25 +133,15 @@
+         self.writer.start()
+         scheduler = LiveScheduler(loop, self.clock)
+         adapter = PaperExecutionAdapter(self.clock, scheduler, "PAPER", bool(self.cfg["live_broadcast_enabled"]), self.cfg.latency_model["entry_delay_ms"] * 1_000_000, self.cfg.latency_model["exit_delay_ms"] * 1_000_000)
+-        rpc_ep = resolve_rpc_http(self.cfg)
+-        rpc = http_rpc(rpc_ep.url, self.cfg.connectivity["rpc_http_timeout_ms"] / 1000) if rpc_ep.available else None
+-        self.resolver = FeeResolver(self.cfg, rpc, self.clock, self.run_id, "rpc_http" if rpc_ep.available else "NONE")
++        self.resolver = self.components.fee_resolver
+         self.owner = StateOwner(self.cfg, self.run_id, self.clock, scheduler, self.recorder, adapter, lambda: self.resolver.cache.basis(), "PAPER", economic_intents_allowed=self.economic,
+                                 feature_sink=lambda job: loop.run_in_executor(self.executor, job), prior_submitted_mints=prior_mints if self.mode == "PAPER" else None,
+-                                capture_only=self.capture_only)
++                                capture_only=self.capture_only, engine=self.components.quote_engine, decoder=self.components.decoder, reducer=self.components.reducer,
++                                market_profile=self.components.market_profile)
+         self._economic_gate_start_mono_ns = self.clock.monotonic_ns()  # gate clock starts once resolver and StateOwner exist
+-        endpoints = resolve_feed_endpoints(self.cfg)
+-        feed_status: dict[str, str] = {}
+-        for feed in self.cfg.feeds:
+-            ep = endpoints[feed.id]
+-            if not feed.enabled:
+-                feed_status[feed.id] = "DISABLED"
+-                continue
+-            if not ep.available:
+-                feed_status[feed.id] = f"DISABLED_OPTIONAL missing env {ep.missing_env}" if not feed.required else f"FAILED missing env {ep.missing_env}"
+-                continue
+-            self.feeds[feed.id] = FeedAdapter(feed, ep.url, self.cfg.connectivity, self.cfg.protocol["program_id"], self.clock, self.owner.on_raw, self.owner.on_feed_health, self.owner.on_transport_error)
+-            feed_status[feed.id] = "STARTING"
++        feed_status: dict[str, str] = self.components.chain.feed_setup_status(self.cfg)
++        for feed_adapter in build_feeds(self.components, cfg=self.cfg, clock=self.clock, callbacks=RuntimeCallbacks(on_raw=self.owner.on_raw, on_health=self.owner.on_feed_health, on_error=self.owner.on_transport_error)):
++            self.feeds[feed_adapter.feed.id] = feed_adapter
+         tasks = [loop.create_task(f.run(), name=f"feed-{fid}") for fid, f in self.feeds.items()]
+         fee_task = loop.create_task(self.resolver.run_background(self._on_fee_snapshots, self.stop_event), name="fees")
+         fx_task = None
+@@ -183,7 +184,8 @@
+                           (status, self.clock.utc_iso(), self.clock.monotonic_ns(), self.owner.portfolio.cash_lamports + self.owner.portfolio.reserved_lamports, quality, readiness.value, self.run_id))
+         summary = {"run_id": self.run_id, "status": status, "stop_reason": self.stop_reason, "quality": quality, "readiness": readiness.value, "feeds_started": len(self.feeds), "feeds": {fid: self._feed_report(fid) for fid in self.feeds},
+                    "feed_setup": feed_status, "owner": self.owner.status(), "cash_reconciliation": self.owner.cash_reconciliation(), "writer": {"committed_records": self.writer.committed_records, "committed_batches": self.writer.committed_batches, "failures": self.writer.failures, "fk_holds": self.writer.fk_holds, "quarantined_records": self.writer.quarantined_records, "quarantine_by_reason": dict(self.writer.quarantine_by_reason), "disk_error": self.writer.disk_error, "slow_shutdown": self.writer.slow_shutdown, "shutdown_drain_ms": None if self.writer.shutdown_drain_ns is None else self.writer.shutdown_drain_ns / 1_000_000},
+-                   "fee_errors": self.resolver.errors[-10:], "storage": storage_info, "db": str(self.db_path), "quarantined_records": self.writer.quarantined_records, "prior_campaign_mints": len(prior_mints), "economic_profile_samples_at_run_end": self._economic_sample_count_at_stop}
++                   "fee_errors": self.resolver.errors[-10:], "storage": storage_info, "db": str(self.db_path), "quarantined_records": self.writer.quarantined_records, "prior_campaign_mints": len(prior_mints), "economic_profile_samples_at_run_end": self._economic_sample_count_at_stop,
++                   "market_profile": {"profile_id": self.components.market_profile.profile_id, "chain_id": self.components.chain.identity.chain_id, "venue_id": self.components.venue.identity.venue_id, "display_name": self.components.market_profile.display_name, "explicit_in_config": self.cfg.has_explicit_market_profile}}
+         self.conn.close()
+         return summary
+ 
+@@ -362,6 +364,7 @@
+ 
+ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor") -> dict[str, Any]:
+     d = cfg.doctor
++    preflight_market_profile(cfg)  # fail fast before the doctor database is touched (metadata-only BSC profiles are not runnable)
+     checks: dict[str, dict[str, Any]] = {}
+     # D01
+     conn = open_connection(db_path)
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/paper.py /home/claude/darkbot-main/darkbot/paper.py
+--- orig/darkbot-main/darkbot/paper.py	2026-09-24 09:34:22.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/paper.py	2026-09-24 19:59:07.012714508 +0000
+@@ -114,19 +114,34 @@
+     def __init__(self, cfg: Any, run_id: str, clock: Any, scheduler: Any, recorder: Recorder, adapter: PaperExecutionAdapter, basis_getter: Callable[[], CostBasis], mode: str,
+                  economic_intents_allowed: bool = True, feature_sink: Callable[[Callable[[], None]], None] | None = None, variant_id: str | None = None,
+                  canonical_prefix: str | None = None, persist_observations: bool = True, compute_features: bool = True, engine: QuoteEngine | None = None, mint_allowlist: set[str] | None = None,
+-                 prior_submitted_mints: set[str] | None = None, capture_only: bool = False) -> None:
++                 prior_submitted_mints: set[str] | None = None, capture_only: bool = False,
++                 decoder: Any | None = None, reducer: Any | None = None, market_profile: Any | None = None) -> None:
++        # Multichain DI seam (BSC handoff §6): `engine` is the EXISTING replay/quote-engine injection and stays authoritative.
++        # `decoder`, `reducer` and `market_profile` are additive; when absent the legacy Solana/Pump construction below runs
++        # unchanged. Selection happens once here, never per message: the hot path uses these direct references only.
+         self.cfg, self.run_id, self.clock, self.scheduler, self.recorder, self.adapter, self.basis_getter, self.mode = cfg, run_id, clock, scheduler, recorder, adapter, basis_getter, mode
+         self.economic_intents_allowed = economic_intents_allowed
+         self.capture_only = capture_only
+         self.feature_sink = feature_sink or (lambda job: job())
+         self.variant_id = variant_id
+         adapter.on_outcome = self.on_outcome
+-        self.decoder = PumpDecoder(cfg.protocol)
++        self.market_profile = market_profile  # metadata only (MarketProfile or None); not consulted on the hot path
++        if decoder is None or reducer is None:
++            from darkbot.runtime.profiles import DEFAULT_MARKET_PROFILE_ID  # local import: metadata only
++
++            profile_id = getattr(cfg, "market_profile_id", DEFAULT_MARKET_PROFILE_ID)
++            if profile_id != DEFAULT_MARKET_PROFILE_ID:
++                # Legacy fallback construction is Solana/Pump-specific; any other profile must be assembled explicitly (Phase A: BSC is metadata only).
++                raise NotImplementedError(f"StateOwner fallback construction is Solana/Pump only; market profile {profile_id!r} requires injected decoder/reducer (not runnable in Phase A)")
++        self.decoder = decoder if decoder is not None else PumpDecoder(cfg.protocol)
+         self.normalizer = Normalizer(self.decoder)
+-        self.reducer = MarketReducer(canonical_prefix or run_id, cfg.storage["state_history_per_mint"], cfg.storage["max_tracked_mints"], cfg.storage["trade_log_per_mint"], cfg.storage["undecodable_points_max"])
+-        self.reducer.signature_history_max = cfg.storage["signature_history_max"]
+-        self.reducer.dedup_keys_per_mint = cfg.storage["dedup_keys_per_mint"]
+-        self.reducer.set_quote_constants(cfg.protocol["wsol_mint"], cfg.protocol["native_sol_curve_sentinel"])
++        if reducer is not None:
++            self.reducer = reducer
++        else:
++            self.reducer = MarketReducer(canonical_prefix or run_id, cfg.storage["state_history_per_mint"], cfg.storage["max_tracked_mints"], cfg.storage["trade_log_per_mint"], cfg.storage["undecodable_points_max"])
++            self.reducer.signature_history_max = cfg.storage["signature_history_max"]
++            self.reducer.dedup_keys_per_mint = cfg.storage["dedup_keys_per_mint"]
++            self.reducer.set_quote_constants(cfg.protocol["wsol_mint"], cfg.protocol["native_sol_curve_sentinel"])
+         self.telemetry_max = cfg.storage["telemetry_samples_max"]
+         self.fee_history: list[tuple[int, str, Any]] = []  # (received_mono_ns, kind, snapshot): fee rule valid at a model time = latest snapshot received <= t
+         self._effective_fee_basis = CostBasis(None, None, None, None)
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/runtime/__init__.py /home/claude/darkbot-main/darkbot/runtime/__init__.py
+--- orig/darkbot-main/darkbot/runtime/__init__.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/runtime/__init__.py	2026-09-24 19:57:21.828463469 +0000
+@@ -0,0 +1 @@
++"""Runtime profile registry and assembly (BSC handoff §4.3/§5)."""
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/runtime/assembly.py /home/claude/darkbot-main/darkbot/runtime/assembly.py
+--- orig/darkbot-main/darkbot/runtime/assembly.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/runtime/assembly.py	2026-09-24 20:42:34.839318203 +0000
+@@ -0,0 +1,102 @@
++"""Runtime assembly (BSC handoff §5): profile -> chain + venue -> components, resolved ONCE at runtime start.
++
++Scope (handoff §5.1): this is the normal PAPER/CAPTURE/DOCTOR component selection. It does NOT replace the
++specialised replay construction in ``darkbot.replay`` (``StateOwner(engine=...)``, canonical_prefix, recorded fee
++snapshots, stress parameters, virtual clock, mint filters, lateness, delay provider). Replay stays offline and untouched.
++
++Hot-path rule: nothing in this module is called per message. ``assemble_runtime`` returns already-built objects; the
++StateOwner and the feed adapters keep direct references to them.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any, Callable
++
++from darkbot.chains.registry import load_chain
++from darkbot.runtime.profiles import DEFAULT_MARKET_PROFILE_ID, MarketProfile, load_market_profile
++from darkbot.venues.registry import load_venue
++
++
++class MarketProfileNotRunnable(NotImplementedError):
++    """The profile exists as metadata but cannot be executed in this phase (status != READY)."""
++
++
++@dataclass(frozen=True, slots=True)
++class RuntimeCallbacks:
++    on_raw: Callable[..., Any]
++    on_health: Callable[..., Any]
++    on_error: Callable[..., Any]
++
++
++@dataclass(frozen=True, slots=True)
++class RuntimeComponents:
++    market_profile: MarketProfile
++    chain: Any
++    venue: Any
++    decoder: Any
++    reducer: Any
++    quote_engine: Any
++    fee_resolver: Any
++    feeds: tuple[Any, ...]
++
++
++def effective_market_profile_id(cfg: Any) -> str:
++    """Legacy configs carry no ``market_profile_id``; the default is applied here, outside the hashed raw config (handoff §6.1)."""
++    return getattr(cfg, "market_profile_id", None) or DEFAULT_MARKET_PROFILE_ID
++
++
++def resolve_market_profile(cfg: Any) -> MarketProfile:
++    return load_market_profile(effective_market_profile_id(cfg))
++
++
++def require_runnable(profile: MarketProfile) -> MarketProfile:
++    if not profile.runnable:
++        raise MarketProfileNotRunnable(f"market profile {profile.profile_id!r} ({profile.display_name}) has status {profile.status}: metadata only, not runnable in Phase A")
++    return profile
++
++
++@dataclass(frozen=True, slots=True)
++class RuntimePreflight:
++    market_profile: MarketProfile
++    chain: Any
++    venue: Any
++
++
++def preflight_market_profile(cfg: Any) -> RuntimePreflight:
++    """Fail-fast gate to run BEFORE any run/storage side effect (DB open, migrations, runs INSERT, writer start).
++
++    Order: resolve profile -> require runnable -> load chain -> load venue -> venue/chain compatibility.
++    Builds no decoder/reducer/engine/resolver/feed and touches no file, socket or database.
++    """
++    profile = require_runnable(resolve_market_profile(cfg))
++    chain = load_chain(profile.chain_id)
++    venue = load_venue(profile.venue_id)
++    if venue.identity.chain_id != chain.identity.chain_id:
++        raise ValueError(f"venue/chain mismatch: {venue.identity.venue_id} requires {venue.identity.chain_id}, got {chain.identity.chain_id}")
++    return RuntimePreflight(market_profile=profile, chain=chain, venue=venue)
++
++
++def assemble_runtime(*, cfg: Any, clock: Any, run_id: str, callbacks: RuntimeCallbacks | None, canonical_prefix: str | None = None) -> RuntimeComponents:
++    """Build the executable components for the effective market profile of ``cfg``.
++
++    ``callbacks=None`` builds everything except the feed adapters (``feeds=()``); use ``build_feeds`` after the
++    StateOwner exists so the feeds receive its bound methods directly (no lambda/task hop on the receive path).
++    Unknown chain/venue, venue/chain mismatch and metadata-only (BSC) profiles fail explicitly (same gate as
++    ``preflight_market_profile``; callers with storage side effects must run the preflight first).
++    """
++    pre = preflight_market_profile(cfg)
++    profile, chain, venue = pre.market_profile, pre.chain, pre.venue
++    decoder = venue.build_decoder(cfg=cfg)
++    reducer = venue.build_reducer(cfg=cfg, run_id=canonical_prefix or run_id)
++    quote_engine = venue.build_quote_engine(cfg=cfg)
++    fee_resolver = chain.build_fee_resolver(cfg=cfg, clock=clock, run_id=run_id)
++    feeds: tuple[Any, ...] = ()
++    if callbacks is not None:
++        feeds = tuple(chain.build_feed_adapters(cfg=cfg, clock=clock, on_raw=callbacks.on_raw, on_health=callbacks.on_health, on_error=callbacks.on_error))
++    return RuntimeComponents(market_profile=profile, chain=chain, venue=venue, decoder=decoder, reducer=reducer, quote_engine=quote_engine, fee_resolver=fee_resolver, feeds=feeds)
++
++
++def build_feeds(components: RuntimeComponents, *, cfg: Any, clock: Any, callbacks: RuntimeCallbacks) -> tuple[Any, ...]:
++    """Second stage of assembly: feed adapters bound directly to the consumer callbacks."""
++    return tuple(components.chain.build_feed_adapters(cfg=cfg, clock=clock, on_raw=callbacks.on_raw, on_health=callbacks.on_health, on_error=callbacks.on_error))
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/runtime/profiles.py /home/claude/darkbot-main/darkbot/runtime/profiles.py
+--- orig/darkbot-main/darkbot/runtime/profiles.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/runtime/profiles.py	2026-09-24 19:57:10.909958921 +0000
+@@ -0,0 +1,70 @@
++"""Market profile registry (BSC handoff §4.3): stable backend IDs for chain + venue combinations.
++
++Pure metadata: no runtime imports, no networking, no protocol constants. The stable ``profile_id`` is
++authoritative; ``display_name`` is presentation only. Profiles with status ``RESEARCH`` exist as metadata
++only in Phase A and are never runnable (see ``darkbot.runtime.assembly``).
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++
++DEFAULT_MARKET_PROFILE_ID = "solana-mainnet:pumpfun"  # effective profile of every legacy config without market_profile_id (resolved OUTSIDE the raw config, never written into it)
++
++PROFILE_STATUS_READY = "READY"
++PROFILE_STATUS_RESEARCH = "RESEARCH"
++
++
++class UnknownMarketProfile(ValueError):
++    """The requested profile id is not registered."""
++
++
++@dataclass(frozen=True, slots=True)
++class MarketProfile:
++    profile_id: str
++    chain_id: str
++    venue_id: str
++    display_name: str
++    status: str
++
++    @property
++    def runnable(self) -> bool:
++        return self.status == PROFILE_STATUS_READY
++
++
++MARKET_PROFILES: dict[str, MarketProfile] = {
++    "solana-mainnet:pumpfun": MarketProfile(
++        profile_id="solana-mainnet:pumpfun",
++        chain_id="solana-mainnet",
++        venue_id="pumpfun",
++        display_name="Solana / Pump.fun",
++        status=PROFILE_STATUS_READY,
++    ),
++    "bsc-mainnet:flap": MarketProfile(
++        profile_id="bsc-mainnet:flap",
++        chain_id="bsc-mainnet",
++        venue_id="flap",
++        display_name="BSC / Flap.sh",
++        status=PROFILE_STATUS_RESEARCH,
++    ),
++    "bsc-mainnet:fourmeme": MarketProfile(
++        profile_id="bsc-mainnet:fourmeme",
++        chain_id="bsc-mainnet",
++        venue_id="fourmeme",
++        display_name="BSC / Four.meme",
++        status=PROFILE_STATUS_RESEARCH,
++    ),
++}
++
++
++def load_market_profile(profile_id: str) -> MarketProfile:
++    """Metadata lookup only; never constructs runtime components."""
++    try:
++        return MARKET_PROFILES[profile_id]
++    except KeyError as exc:
++        raise UnknownMarketProfile(f"unknown market profile {profile_id!r}; known: {sorted(MARKET_PROFILES)}") from exc
++
++
++def market_profile_catalog() -> list[dict[str, str]]:
++    """GUI/control-plane view (roadmap §3.1): stable id + status, no trading logic."""
++    return [{"id": p.profile_id, "chain_id": p.chain_id, "venue_id": p.venue_id, "display_name": p.display_name, "status": p.status} for p in MARKET_PROFILES.values()]
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/venues/__init__.py /home/claude/darkbot-main/darkbot/venues/__init__.py
+--- orig/darkbot-main/darkbot/venues/__init__.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/venues/__init__.py	2026-09-24 19:57:21.827791502 +0000
+@@ -0,0 +1 @@
++"""Venue adapters (BSC handoff §2.3/§4.2): launchpad/protocol mechanics only, no RPC transport."""
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/venues/base.py /home/claude/darkbot-main/darkbot/venues/base.py
+--- orig/darkbot-main/darkbot/venues/base.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/venues/base.py	2026-09-24 19:57:21.831398242 +0000
+@@ -0,0 +1,32 @@
++"""Venue adapter contract (BSC handoff §4.2). Protocol semantics only, never transport."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any, Protocol
++
++
++@dataclass(frozen=True, slots=True)
++class VenueIdentity:
++    venue_id: str
++    chain_id: str
++    display_name: str
++
++
++class VenueAdapter(Protocol):
++    identity: VenueIdentity
++
++    def build_decoder(self, *, cfg: Any) -> Any:
++        ...
++
++    def build_reducer(self, *, cfg: Any, run_id: str) -> Any:
++        ...
++
++    def build_quote_engine(self, *, cfg: Any) -> Any:
++        ...
++
++    def is_actionable_launch(self, state: Any) -> bool:
++        ...
++
++    def creator_of(self, state: Any) -> str | None:
++        ...
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/venues/pumpfun/__init__.py /home/claude/darkbot-main/darkbot/venues/pumpfun/__init__.py
+--- orig/darkbot-main/darkbot/venues/pumpfun/__init__.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/venues/pumpfun/__init__.py	2026-09-24 19:57:21.830039328 +0000
+@@ -0,0 +1 @@
++"""Pump.fun venue adapter: thin delegation to the existing PumpDecoder/MarketReducer/QuoteEngine."""
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/venues/pumpfun/venue.py /home/claude/darkbot-main/darkbot/venues/pumpfun/venue.py
+--- orig/darkbot-main/darkbot/venues/pumpfun/venue.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/venues/pumpfun/venue.py	2026-09-24 19:57:52.665961403 +0000
+@@ -0,0 +1,52 @@
++"""Pump.fun venue adapter (BSC handoff §2.3 "Wrap existing decoder/reducer/quote behavior").
++
++Thin delegation only: the decoder, reducer and quote engine are the unchanged production classes, constructed with
++exactly the arguments ``paper.StateOwner.__init__`` used before Phase A. No Pump logic is copied or re-implemented here.
++"""
++
++from __future__ import annotations
++
++from typing import Any
++
++from darkbot.domain import MarketState, NormalizedEvent, QuoteScopeStatus, VenueState
++from darkbot.execution import ExecutionPolicy, QuoteEngine
++from darkbot.market import MarketReducer, PumpDecoder
++from darkbot.venues.base import VenueIdentity
++
++PUMPFUN = VenueIdentity(venue_id="pumpfun", chain_id="solana-mainnet", display_name="Pump.fun")
++
++
++class PumpFunVenueAdapter:
++    identity: VenueIdentity = PUMPFUN
++
++    def build_decoder(self, *, cfg: Any) -> PumpDecoder:
++        return PumpDecoder(cfg.protocol)
++
++    def build_reducer(self, *, cfg: Any, run_id: str) -> MarketReducer:
++        """``run_id`` is the canonical-id prefix (StateOwner passes ``canonical_prefix or run_id``, unchanged)."""
++        reducer = MarketReducer(run_id, cfg.storage["state_history_per_mint"], cfg.storage["max_tracked_mints"], cfg.storage["trade_log_per_mint"], cfg.storage["undecodable_points_max"])
++        reducer.signature_history_max = cfg.storage["signature_history_max"]
++        reducer.dedup_keys_per_mint = cfg.storage["dedup_keys_per_mint"]
++        reducer.set_quote_constants(cfg.protocol["wsol_mint"], cfg.protocol["native_sol_curve_sentinel"])
++        return reducer
++
++    def build_quote_engine(self, *, cfg: Any) -> QuoteEngine:
++        return QuoteEngine(ExecutionPolicy.from_config(cfg))
++
++    def is_actionable_launch(self, state: Any) -> bool:
++        """Same predicate the StateOwner applies to a new CREATE (SOL/WSOL quote scope on an active bonding curve)."""
++        return state.quote_scope_status == QuoteScopeStatus.SOL_WSOL and state.venue_state == VenueState.BONDING_CURVE_ACTIVE
++
++    def creator_of(self, state: Any) -> str | None:
++        return state.creator
++
++    # ------------------------------------------------------------------ generic identity mapping (handoff §7.1)
++    @staticmethod
++    def asset_id_of(value: MarketState | NormalizedEvent | Any) -> str | None:
++        """asset_id = mint (compatibility mapping; database columns are not renamed in Phase A)."""
++        return getattr(value, "mint", None)
++
++    @staticmethod
++    def native_amount_base_units_of(event: NormalizedEvent | Any) -> int | None:
++        """native_amount_base_units = sol_amount (lamports)."""
++        return getattr(event, "sol_amount", None)
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/darkbot/venues/registry.py /home/claude/darkbot-main/darkbot/venues/registry.py
+--- orig/darkbot-main/darkbot/venues/registry.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/darkbot/venues/registry.py	2026-09-24 19:58:12.664074002 +0000
+@@ -0,0 +1,55 @@
++"""Venue registry (BSC handoff §3/§5): resolve a venue id to ONE executable venue adapter, once at runtime start.
++
++``pumpfun`` is the only executable venue in Phase A. ``flap`` and ``fourmeme`` are identity metadata only: no
++contracts, ABIs, selectors, decoders, quotes or fee rules exist (handoff §0.2 "no protocol guessing").
++"""
++
++from __future__ import annotations
++
++from typing import Any, Callable
++
++from darkbot.venues.base import VenueIdentity
++
++
++class UnknownVenue(ValueError):
++    """The venue id is not registered at all."""
++
++
++class VenueNotImplemented(NotImplementedError):
++    """The venue exists as metadata but has no executable adapter in this phase."""
++
++
++def _pumpfun_factory() -> Any:
++    from darkbot.venues.pumpfun.venue import PumpFunVenueAdapter  # lazy: keeps registry import free of decoder/engine modules
++
++    return PumpFunVenueAdapter()
++
++
++VENUE_IDENTITIES: dict[str, VenueIdentity] = {
++    "pumpfun": VenueIdentity(venue_id="pumpfun", chain_id="solana-mainnet", display_name="Pump.fun"),
++    "flap": VenueIdentity(venue_id="flap", chain_id="bsc-mainnet", display_name="Flap.sh"),
++    "fourmeme": VenueIdentity(venue_id="fourmeme", chain_id="bsc-mainnet", display_name="Four.meme"),
++}
++
++VENUE_FACTORIES: dict[str, Callable[[], Any]] = {
++    "pumpfun": _pumpfun_factory,
++}
++
++
++def venue_identity(venue_id: str) -> VenueIdentity:
++    try:
++        return VENUE_IDENTITIES[venue_id]
++    except KeyError as exc:
++        raise UnknownVenue(f"unknown venue {venue_id!r}; known: {sorted(VENUE_IDENTITIES)}") from exc
++
++
++def load_venue(venue_id: str) -> Any:
++    """Executable adapter for ``venue_id``; explicit failure for unknown or not-yet-implemented venues."""
++    identity = venue_identity(venue_id)
++    factory = VENUE_FACTORIES.get(venue_id)
++    if factory is None:
++        raise VenueNotImplemented(f"venue {identity.venue_id!r} on {identity.chain_id!r} is registered as metadata only; no executable adapter in Phase A")
++    adapter = factory()
++    if adapter.identity != identity:
++        raise UnknownVenue(f"venue adapter identity mismatch for {venue_id!r}: {adapter.identity} != {identity}")
++    return adapter
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/tests/fixtures/config_hashes_baseline_05971e4.json /home/claude/darkbot-main/tests/fixtures/config_hashes_baseline_05971e4.json
+--- orig/darkbot-main/tests/fixtures/config_hashes_baseline_05971e4.json	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/tests/fixtures/config_hashes_baseline_05971e4.json	2026-09-24 20:00:20.188528773 +0000
+@@ -0,0 +1,110 @@
++{
++ "phase1.json": {
++  "COST_MODEL": "a79d4a5e51ea52884dc3eef5777fe50e7f7491d0df348dda97061d3cc549f36d",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "29602663a4c9ede51fc8cdb053993079f171394f521b80105f6fd92a6fdc12e5",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "136149eb1b0d06336593224dbae35efc41c36d6cbbedec09bec6d649e8de955e",
++  "RUNTIME_CONFIG": "bb2eb90eb979917b508605ec2c2f313e2058ca1698fd021e2a0f56562346b9c6",
++  "STRATEGY": "0a341b11a964ed2e04814bcf11a4c093a8d3e90814956347dcee0df2604d7cfa",
++  "canonical_sha256_len": 26336
++ },
++ "strategy_a_creator_exit_usd_slots.json": {
++  "COST_MODEL": "a79d4a5e51ea52884dc3eef5777fe50e7f7491d0df348dda97061d3cc549f36d",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "59dfcda60243f2f916b35143316c1e7583f9ce73793adbbb0cdeb8ca0734ada9",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "136149eb1b0d06336593224dbae35efc41c36d6cbbedec09bec6d649e8de955e",
++  "RUNTIME_CONFIG": "599238fdeefe6a60367a0a076dd525805239007bd0ec70917bde2c8d37f71d6f",
++  "STRATEGY": "9e57cd79bd7028286aafb2fe5f243849da0d7ea2d8b449c5bd4c886725cf05fd",
++  "canonical_sha256_len": 26362
++ },
++ "strategy_b.json": {
++  "COST_MODEL": "a79d4a5e51ea52884dc3eef5777fe50e7f7491d0df348dda97061d3cc549f36d",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "f9a0792ca953e40a49d1286296a262e32c1a16d894eb5177b2280075c246dd05",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "136149eb1b0d06336593224dbae35efc41c36d6cbbedec09bec6d649e8de955e",
++  "RUNTIME_CONFIG": "3fc257866f3617807d8fcd658152d3471b0f0e8aa9dd8ca023fc11500a5e6232",
++  "STRATEGY": "ced7aa7559ee87ac18071f4bfb6e12958f070c161aecb9558512c06c60781a43",
++  "canonical_sha256_len": 26417
++ },
++ "strategy_c_example.json": {
++  "COST_MODEL": "429a5baf0d6a9dc9da9cf47cf187a957f8d9d80edf07e9bfbd7fee7b39f5accc",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "5952781de976d228d20eb8f6e2bbf9153512f73536294d3f3408fa9acff10a61",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "9f80d49fd964f124bd57618f88ab82c793d44663a89518327a81cfd039e7684e",
++  "RUNTIME_CONFIG": "7d2fed3bc8c2f5b800d0528600ddb966511a94febe4a4cde2a75773ec9abbb70",
++  "STRATEGY": "ec11f610f2f78aff72fc0813010ee14d428e508e9d0bd3e8e21eb5fbe88dc062",
++  "canonical_sha256_len": 26620
++ },
++ "strategy_c_fast_creator_hold_2x.json": {
++  "COST_MODEL": "429a5baf0d6a9dc9da9cf47cf187a957f8d9d80edf07e9bfbd7fee7b39f5accc",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "43d26666dadeb9de38f9995f62e350b7f02863b66a93965e89f8267037ba8779",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "9f80d49fd964f124bd57618f88ab82c793d44663a89518327a81cfd039e7684e",
++  "RUNTIME_CONFIG": "72caa5132225a114f0366d724a6848cbd0c89e2608d847b345edc2a52463b08b",
++  "STRATEGY": "2bbc0d92766ea3771c0c5d73f543bde22bbd4ca1b26137c50122d23bfa69f82a",
++  "canonical_sha256_len": 26417
++ },
++ "strategy_c_launch_sniper_0ms_15x.json": {
++  "COST_MODEL": "429a5baf0d6a9dc9da9cf47cf187a957f8d9d80edf07e9bfbd7fee7b39f5accc",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "0d58184f1b614e4e3e26026ac1e6508ec7ead1cfe1c0c112d25719b970c76a55",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "9f80d49fd964f124bd57618f88ab82c793d44663a89518327a81cfd039e7684e",
++  "RUNTIME_CONFIG": "3782e39d82d1b0a52fd34961a7afd21d1cdc7837b74b094cb7847e4eb20593d7",
++  "STRATEGY": "fc689d981cf29d9ec1ab9f969a63468e343d7ced8b73389ccfdbe3fce74b4832",
++  "canonical_sha256_len": 26420
++ },
++ "strategy_c_paper_explore_01.json": {
++  "COST_MODEL": "429a5baf0d6a9dc9da9cf47cf187a957f8d9d80edf07e9bfbd7fee7b39f5accc",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "418ce26f775ed871579839249fdb4ddb36d2c37a9bac3922ef169157a5a61b0e",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "9f80d49fd964f124bd57618f88ab82c793d44663a89518327a81cfd039e7684e",
++  "RUNTIME_CONFIG": "3fef9796572e3f479b78313689c5044f3d6c0ff3bfa2d8b380b54d3808e957f6",
++  "STRATEGY": "2de715225a65938d2b6a5e05502a7d4b061ea155f8bee414928e629627b04f40",
++  "canonical_sha256_len": 26626
++ },
++ "strategy_c_pre_pump_01.json": {
++  "COST_MODEL": "429a5baf0d6a9dc9da9cf47cf187a957f8d9d80edf07e9bfbd7fee7b39f5accc",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "6d429059e997e505168233dd9b7f0ab0e1a93fd715c70534bc9fa26594d54387",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "9f80d49fd964f124bd57618f88ab82c793d44663a89518327a81cfd039e7684e",
++  "RUNTIME_CONFIG": "3ba2e3aaf1685b6b1a2284a682472372ae2f62092df640c0c42a899a78a95a54",
++  "STRATEGY": "488c25d05750d61ad551ee2295866189e2bcd5c9ec31ed03cf14d45afd0b24d2",
++  "canonical_sha256_len": 26614
++ },
++ "strategy_c_smoke_all.json": {
++  "COST_MODEL": "429a5baf0d6a9dc9da9cf47cf187a957f8d9d80edf07e9bfbd7fee7b39f5accc",
++  "COVERAGE_VERSION": "09476c2b6c6eaba39bc8ee4a2f730c951edd0ca2e5a9babf85cd0f2dc92fee44",
++  "FEATURE_CONTRACT": "5c9ad684be02cf80d7bb0cb194e9f11ebb1745fea113505155f92f2c747df11d",
++  "FRESHNESS_POLICY": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
++  "POLICY": "f5fc12ad00f4731d138f4a48c8c33053b2922655b3458e6e06f33dd76ef41771",
++  "PROTOCOL": "6e59f790ebb2645ecec784995aa08b7bb3a35ab82cce4fae407cadd59edb8651",
++  "QUOTE_MODEL": "9f80d49fd964f124bd57618f88ab82c793d44663a89518327a81cfd039e7684e",
++  "RUNTIME_CONFIG": "7d154ec235244f4027ccbe17e56da08ae68eb99a9bbed15976e414218a3ba1c5",
++  "STRATEGY": "ce4a252e2193036b39cd18dc338b403a7f2f50919df38cb55d2b0764ff90b34e",
++  "canonical_sha256_len": 26426
++ }
++}
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/tests/test_bsc_profile_fail_fast.py /home/claude/darkbot-main/tests/test_bsc_profile_fail_fast.py
+--- orig/darkbot-main/tests/test_bsc_profile_fail_fast.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/tests/test_bsc_profile_fail_fast.py	2026-09-24 20:42:58.123148737 +0000
+@@ -0,0 +1,109 @@
++"""Phase A review fix (P0): a metadata-only BSC market profile must be rejected BEFORE any run/storage side effect.
++
++Integration level: the real entry points run_capture / run_paper / run_doctor_cli / Application(...) with a config that
++selects bsc-mainnet:flap or bsc-mainnet:fourmeme raise MarketProfileNotRunnable and leave no database file, no runs row,
++no RUNNING artefact and no sqlite-writer thread behind.
++"""
++
++from __future__ import annotations
++
++import inspect
++import json
++import sqlite3
++import tempfile
++import threading
++import unittest
++from pathlib import Path
++
++from darkbot.config import load_json_strict
++from darkbot.main import Application, run_capture, run_doctor_cli, run_paper
++from darkbot.runtime.assembly import MarketProfileNotRunnable
++from tests.helpers import ROOT, base_config
++
++
++def _writer_threads() -> list[str]:
++    return [t.name for t in threading.enumerate() if t.name == "sqlite-writer" and t.is_alive()]
++
++
++class BscProfileFailFastTests(unittest.TestCase):
++    def setUp(self):
++        self.tmp = Path(tempfile.mkdtemp())
++        self.configs = {}
++        raw = load_json_strict(ROOT / "config" / "phase1.json")
++        for pid in ("bsc-mainnet:flap", "bsc-mainnet:fourmeme"):
++            path = self.tmp / f"{pid.replace(':', '_')}.json"
++            path.write_text(json.dumps({**raw, "market_profile_id": pid}))
++            self.configs[pid] = path
++        self.writers_before = _writer_threads()
++
++    def _assert_no_side_effects(self, db: Path):
++        self.assertFalse(db.exists(), f"database file was created: {db}")
++        self.assertFalse(db.with_suffix(".sqlite-wal").exists())
++        self.assertFalse(db.with_suffix(".quarantine.jsonl").exists())
++        self.assertEqual(_writer_threads(), self.writers_before, "a sqlite-writer thread was started")
++
++    def test_run_capture_rejects_bsc_profiles_before_storage(self):
++        for pid, cfg_path in self.configs.items():
++            db = self.tmp / f"capture_{pid.split(':')[1]}.sqlite"
++            with self.subTest(profile=pid):
++                with self.assertRaises(MarketProfileNotRunnable) as ctx:
++                    run_capture(cfg_path, db, "bsc_test_capture", max_duration_minutes=1)
++                self.assertIn(pid, str(ctx.exception))
++                self._assert_no_side_effects(db)
++
++    def test_run_paper_rejects_bsc_profiles_before_storage(self):
++        for pid, cfg_path in self.configs.items():
++            db = self.tmp / f"paper_{pid.split(':')[1]}.sqlite"
++            with self.subTest(profile=pid):
++                with self.assertRaises(MarketProfileNotRunnable):
++                    run_paper(cfg_path, db, "bsc_test_paper", max_open_positions=1, max_duration_minutes=1)
++                self._assert_no_side_effects(db)
++
++    def test_run_doctor_rejects_bsc_profiles_before_touching_doctor_db(self):
++        for pid, cfg_path in self.configs.items():
++            db = self.tmp / f"doctor_{pid.split(':')[1]}.sqlite"
++            with self.subTest(profile=pid):
++                with self.assertRaises(MarketProfileNotRunnable):
++                    run_doctor_cli(cfg_path, db)
++                self._assert_no_side_effects(db)
++
++    def test_application_construction_itself_fails_fast(self):
++        from darkbot.config import load_runtime_config
++        for pid, cfg_path in self.configs.items():
++            db = self.tmp / f"app_{pid.split(':')[1]}.sqlite"
++            with self.subTest(profile=pid):
++                with self.assertRaises(NotImplementedError):
++                    Application(load_runtime_config(cfg_path), db, "bsc_test_app", mode="CAPTURE", max_duration_ms=1000, economic=False, capture_only=True)
++                self._assert_no_side_effects(db)
++
++    def test_existing_database_gets_no_new_run_row(self):
++        # a pre-existing campaign database must not receive a RUNNING row for a rejected profile
++        db = self.tmp / "existing.sqlite"
++        conn = sqlite3.connect(db)
++        from darkbot.storage import apply_migrations
++        apply_migrations(conn)
++        conn.commit()
++        before = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
++        conn.close()
++        with self.assertRaises(MarketProfileNotRunnable):
++            run_capture(self.configs["bsc-mainnet:flap"], db, "bsc_test_existing", max_duration_minutes=1)
++        conn = sqlite3.connect(db)
++        self.assertEqual(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0], before)
++        self.assertEqual(conn.execute("SELECT COUNT(*) FROM runs WHERE status='RUNNING'").fetchone()[0], 0)
++        conn.close()
++        self.assertEqual(_writer_threads(), self.writers_before)
++
++    def test_solana_profile_still_constructs_application(self):
++        app = Application(base_config(), self.tmp / "solana.sqlite", "c")  # positive control: legacy path unchanged, no side effect at construction
++        self.assertEqual(app.preflight.market_profile.profile_id, "solana-mainnet:pumpfun")
++        self.assertFalse((self.tmp / "solana.sqlite").exists())
++
++    def test_assembly_precedes_storage_in_application_run(self):
++        src = inspect.getsource(Application.run)
++        self.assertLess(src.index("assemble_runtime("), src.index("self.open_storage()"))
++        src_init = inspect.getsource(Application.__init__)
++        self.assertLess(src_init.index("preflight_market_profile("), src_init.index("self.cfg, self.db_path"))
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/tests/test_chain_registry.py /home/claude/darkbot-main/tests/test_chain_registry.py
+--- orig/darkbot-main/tests/test_chain_registry.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/tests/test_chain_registry.py	2026-09-24 20:00:20.190345611 +0000
+@@ -0,0 +1,54 @@
++"""Phase A (BSC handoff §21.2): chain registry — Solana executable, BSC metadata only, unknown rejected."""
++
++from __future__ import annotations
++
++import unittest
++
++from darkbot.capture import FeedAdapter
++from darkbot.chains.base import ChainIdentity
++from darkbot.chains.registry import CHAIN_IDENTITIES, ChainNotImplemented, UnknownChain, chain_identity, load_chain
++from darkbot.chains.solana.chain import SolanaChainAdapter
++from darkbot.clock import LiveClock
++from darkbot.fees import FeeResolver
++from tests.helpers import base_config
++
++
++class ChainRegistryTests(unittest.TestCase):
++    def test_unknown_chain_rejected(self):
++        with self.assertRaises(UnknownChain):
++            load_chain("ethereum-mainnet")
++        with self.assertRaises(ValueError):
++            chain_identity("BSC1")
++
++    def test_bsc_is_metadata_only_and_fails_explicitly(self):
++        ident = chain_identity("bsc-mainnet")
++        self.assertEqual(ident, ChainIdentity("bsc-mainnet", "evm", "BNB", 18))
++        with self.assertRaises(ChainNotImplemented):
++            load_chain("bsc-mainnet")
++        with self.assertRaises(NotImplementedError):
++            load_chain("bsc-mainnet")
++
++    def test_solana_resolves_executable_adapter(self):
++        chain = load_chain("solana-mainnet")
++        self.assertIsInstance(chain, SolanaChainAdapter)
++        self.assertEqual(chain.identity, ChainIdentity("solana-mainnet", "solana", "SOL", 9))
++        self.assertEqual(chain.identity, CHAIN_IDENTITIES["solana-mainnet"])
++
++    def test_solana_wraps_existing_fee_resolver_and_feeds(self):
++        cfg = base_config()
++        chain = load_chain("solana-mainnet")
++        resolver = chain.build_fee_resolver(cfg=cfg, clock=LiveClock(), run_id="run")
++        self.assertIsInstance(resolver, FeeResolver)  # existing implementation, not a copy
++        self.assertEqual(resolver.run_id, "run")
++        status = chain.feed_setup_status(cfg)
++        self.assertEqual(set(status), {f.id for f in cfg.feeds})
++        calls = []
++        feeds = chain.build_feed_adapters(cfg=cfg, clock=LiveClock(), on_raw=calls.append, on_health=lambda *a: None, on_error=lambda *a: None)
++        self.assertTrue(all(isinstance(f, FeedAdapter) for f in feeds))
++        self.assertEqual([f.feed.id for f in feeds], [fid for fid, st in status.items() if st == "STARTING"])
++        for f in feeds:
++            self.assertIs(f.on_raw, calls.append)  # consumer callback passed through directly: no adapter-introduced hop
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/tests/test_market_profiles.py /home/claude/darkbot-main/tests/test_market_profiles.py
+--- orig/darkbot-main/tests/test_market_profiles.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/tests/test_market_profiles.py	2026-09-24 20:01:19.687780322 +0000
+@@ -0,0 +1,86 @@
++"""Phase A (BSC handoff §21.2): market profile registry + legacy config-hash compatibility."""
++
++from __future__ import annotations
++
++import json
++import unittest
++from pathlib import Path
++
++from darkbot.config import ConfigError, build_runtime_config, load_json_strict, load_runtime_config
++from darkbot.runtime.profiles import DEFAULT_MARKET_PROFILE_ID, MARKET_PROFILES, UnknownMarketProfile, load_market_profile, market_profile_catalog
++from tests.helpers import ROOT, base_config
++
++GOLDEN = ROOT / "tests" / "fixtures" / "config_hashes_baseline_05971e4.json"  # hashes frozen BEFORE the Phase-A change at baseline 05971e4
++
++
++class MarketProfileRegistryTests(unittest.TestCase):
++    def test_three_profiles_registered_with_stable_ids(self):
++        self.assertEqual(set(MARKET_PROFILES), {"solana-mainnet:pumpfun", "bsc-mainnet:flap", "bsc-mainnet:fourmeme"})
++        for pid, p in MARKET_PROFILES.items():
++            self.assertEqual(p.profile_id, pid)
++            self.assertEqual(pid, f"{p.chain_id}:{p.venue_id}")
++
++    def test_solana_ready_bsc_research_metadata_only(self):
++        self.assertEqual(load_market_profile("solana-mainnet:pumpfun").status, "READY")
++        self.assertTrue(load_market_profile("solana-mainnet:pumpfun").runnable)
++        for pid, name in (("bsc-mainnet:flap", "BSC / Flap.sh"), ("bsc-mainnet:fourmeme", "BSC / Four.meme")):
++            p = load_market_profile(pid)
++            self.assertEqual((p.status, p.display_name, p.chain_id), ("RESEARCH", name, "bsc-mainnet"))
++            self.assertFalse(p.runnable)
++
++    def test_unknown_profile_rejected(self):
++        with self.assertRaises(UnknownMarketProfile):
++            load_market_profile("bsc-mainnet:unknown")
++        with self.assertRaises(ValueError):
++            load_market_profile("BSC1")
++
++    def test_catalog_exposes_stable_ids_and_status(self):
++        cat = {c["id"]: c for c in market_profile_catalog()}
++        self.assertEqual(cat["bsc-mainnet:flap"]["status"], "RESEARCH")
++        self.assertEqual(cat["solana-mainnet:pumpfun"]["display_name"], "Solana / Pump.fun")
++
++
++class LegacyConfigCompatibilityTests(unittest.TestCase):
++    def test_legacy_config_without_profile_resolves_to_solana_pumpfun_without_mutating_raw(self):
++        cfg = base_config()
++        self.assertNotIn("market_profile_id", cfg.raw)
++        self.assertNotIn("market_profile_id", cfg.canonical)
++        self.assertFalse(cfg.has_explicit_market_profile)
++        self.assertEqual(cfg.market_profile_id, DEFAULT_MARKET_PROFILE_ID)
++        self.assertEqual(cfg.market_profile_id, "solana-mainnet:pumpfun")
++        self.assertNotIn("market_profile_id", cfg.snapshot_kinds()["RUNTIME_CONFIG"][1])
++
++    def test_all_shipped_configs_keep_their_pre_phase_a_hashes(self):
++        golden = json.loads(GOLDEN.read_text())
++        self.assertEqual(len(golden), 9)  # all 9 runtime configs shipped at baseline 05971e4 (research*.json are not runtime configs)
++        for name, hashes in golden.items():
++            cfg = load_runtime_config(ROOT / "config" / name)
++            with self.subTest(config=name):
++                self.assertEqual(cfg.market_profile_id, "solana-mainnet:pumpfun")
++                for kind, (h, _content) in cfg.snapshot_kinds().items():
++                    self.assertEqual(h, hashes[kind], f"{name}: {kind} hash changed")
++                self.assertEqual(len(cfg.canonical), hashes["canonical_sha256_len"])
++
++    def test_explicit_profile_participates_in_config_hash(self):
++        raw = load_json_strict(ROOT / "config" / "phase1.json")
++        legacy = build_runtime_config(ROOT / "config" / "phase1.json", raw)
++        explicit = build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": "solana-mainnet:pumpfun"})
++        self.assertTrue(explicit.has_explicit_market_profile)
++        self.assertEqual(explicit.market_profile_id, legacy.market_profile_id)
++        self.assertNotEqual(explicit.config_hash, legacy.config_hash)  # explicit metadata is part of the newly authored config's hash binding
++        self.assertEqual(explicit.policy_hash, legacy.policy_hash)  # policy/cost bindings untouched
++        self.assertEqual(explicit.cost_model_hash, legacy.cost_model_hash)
++        flap = build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": "bsc-mainnet:flap"})
++        self.assertEqual(flap.market_profile_id, "bsc-mainnet:flap")
++        self.assertNotEqual(flap.config_hash, explicit.config_hash)  # config hash changes when the market profile changes
++
++    def test_unknown_explicit_profile_is_a_config_error(self):
++        raw = load_json_strict(ROOT / "config" / "phase1.json")
++        with self.assertRaises(ConfigError):
++            build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": "bsc-mainnet:unknown"})
++        with self.assertRaises(ConfigError):
++            build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": ""})
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/tests/test_multichain_domain.py /home/claude/darkbot-main/tests/test_multichain_domain.py
+--- orig/darkbot-main/tests/test_multichain_domain.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/tests/test_multichain_domain.py	2026-09-24 20:01:13.040822046 +0000
+@@ -0,0 +1,58 @@
++"""Phase A (BSC handoff §7.1/§21.2): generic identity/amount mapping for Solana without renaming any legacy field or column.
++
++asset_id = mint, tx_id = signature, block_ref = slot, native_amount_base_units = sol_amount, native = SOL / 9 decimals.
++Domain dataclasses and database columns are unchanged (additive generic columns are deferred to a later milestone).
++"""
++
++from __future__ import annotations
++
++import json
++import unittest
++
++from darkbot.chains.registry import chain_identity, load_chain
++from darkbot.domain import LAMPORTS_PER_SOL, NormalizedEvent, NormalizedEnvelope, RawEnvelope
++from darkbot.venues.registry import load_venue
++from tests.helpers import BUYER, MINT_A, T0, Harness, create_payload, pump_frame
++
++
++class MultichainDomainTests(unittest.TestCase):
++    def test_native_unit_metadata(self):
++        sol = chain_identity("solana-mainnet")
++        self.assertEqual((sol.native_symbol, sol.native_decimals, 10 ** sol.native_decimals), ("SOL", 9, LAMPORTS_PER_SOL))
++        bnb = chain_identity("bsc-mainnet")
++        self.assertEqual((bnb.family, bnb.native_symbol, bnb.native_decimals), ("evm", "BNB", 18))
++
++    def test_solana_tx_id_and_block_ref_from_raw(self):
++        chain = load_chain("solana-mainnet")
++        payload = create_payload(MINT_A, sig="sigXYZ", slot=4242)
++        raw = RawEnvelope("helius_standard", "c1", T0, "1970-01-01T00:00:00Z", 1, payload)
++        self.assertEqual(chain.tx_id_from_raw(raw), "sigXYZ")
++        self.assertEqual(chain.block_ref_from_raw(raw), 4242)
++        self.assertIsNone(chain.tx_id_from_raw(RawEnvelope("f", "c", T0, "", 1, "{not json")))
++        self.assertIsNone(chain.block_ref_from_raw(RawEnvelope("f", "c", T0, "", 1, json.dumps({"id": 1, "result": 7}))))
++
++    def test_pumpfun_asset_id_and_native_amount_mapping_against_decoded_events(self):
++        h = Harness()
++        self.addCleanup(h.conn.close)
++        venue = load_venue("pumpfun")
++        chain = load_chain("solana-mainnet")
++        h.feed("helius_standard", create_payload(MINT_A, sig="sigC", slot=100), T0 + 1_000_000)
++        h.advance(T0 + 1_000_000)
++        payload = pump_frame(h, MINT_A, 123_456_789, "sigB", 101, user=BUYER)
++        raw = RawEnvelope("helius_standard", "c1", T0 + 2_000_000, "1970-01-01T00:00:00Z", 2, payload)
++        env = h.owner.normalizer.normalize(raw, "logsSubscribe", T0 + 2_000_000)
++        self.assertIsInstance(env, NormalizedEnvelope)
++        buy = next(e for e in env.events if e.event_type.value == "BUY")
++        self.assertIsInstance(buy, NormalizedEvent)
++        self.assertEqual(venue.asset_id_of(buy), MINT_A)
++        self.assertEqual(venue.asset_id_of(h.owner.reducer.states[MINT_A]), MINT_A)
++        self.assertEqual(venue.native_amount_base_units_of(buy), 123_456_789)
++        self.assertEqual(chain.tx_id_from_raw(raw), env.signature)
++        self.assertEqual(chain.block_ref_from_raw(raw), env.slot)
++        # legacy fields untouched
++        self.assertEqual(buy.mint, MINT_A)
++        self.assertEqual(buy.sol_amount, 123_456_789)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/tests/test_runtime_assembly.py /home/claude/darkbot-main/tests/test_runtime_assembly.py
+--- orig/darkbot-main/tests/test_runtime_assembly.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/tests/test_runtime_assembly.py	2026-09-24 20:01:13.040051766 +0000
+@@ -0,0 +1,146 @@
++"""Phase A (BSC handoff §21.2/§5): runtime assembly — Solana profile executable, BSC profiles fail explicitly,
++DI seam preserves legacy StateOwner behaviour and the existing replay `engine` injection."""
++
++from __future__ import annotations
++
++import unittest
++
++from darkbot.clock import LiveClock, ReplayClock, ReplayScheduler
++from darkbot.config import build_runtime_config, load_json_strict
++from darkbot.execution import QuoteEngine
++from darkbot.market import MarketReducer, PumpDecoder
++from darkbot.paper import PaperExecutionAdapter, StateOwner
++from darkbot.replay import digest, load_replay_input, run_replay
++from darkbot.runtime.assembly import MarketProfileNotRunnable, RuntimeCallbacks, RuntimeComponents, assemble_runtime, build_feeds, effective_market_profile_id, resolve_market_profile
++from darkbot.storage import Recorder
++from tests.helpers import BUYER, MINT_A, ROOT, T0, Harness, base_config, create_payload, creator_sell_frame, fee_basis, pump_frame
++
++
++def _profile_cfg(profile_id):
++    raw = load_json_strict(ROOT / "config" / "phase1.json")
++    return build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": profile_id})
++
++
++class RuntimeAssemblyTests(unittest.TestCase):
++    def test_legacy_config_assembles_solana_pump_components(self):
++        cfg = base_config()
++        self.assertEqual(effective_market_profile_id(cfg), "solana-mainnet:pumpfun")
++        self.assertEqual(resolve_market_profile(cfg).display_name, "Solana / Pump.fun")
++        comps = assemble_runtime(cfg=cfg, clock=LiveClock(), run_id="run", callbacks=None)
++        self.assertIsInstance(comps, RuntimeComponents)
++        self.assertEqual((comps.chain.identity.chain_id, comps.venue.identity.venue_id), ("solana-mainnet", "pumpfun"))
++        self.assertIsInstance(comps.decoder, PumpDecoder)
++        self.assertIsInstance(comps.reducer, MarketReducer)
++        self.assertIsInstance(comps.quote_engine, QuoteEngine)
++        self.assertEqual(comps.reducer.run_id, "run")
++        self.assertEqual(comps.feeds, ())
++        calls = []
++        feeds = build_feeds(comps, cfg=cfg, clock=LiveClock(), callbacks=RuntimeCallbacks(on_raw=calls.append, on_health=lambda *a: None, on_error=lambda *a: None))
++        self.assertEqual([f.feed.id for f in feeds], [fid for fid, st in comps.chain.feed_setup_status(cfg).items() if st == "STARTING"])
++        self.assertEqual(assemble_runtime(cfg=cfg, clock=LiveClock(), run_id="run", callbacks=None, canonical_prefix="src").reducer.run_id, "src")
++
++    def test_explicit_solana_profile_assembles(self):
++        comps = assemble_runtime(cfg=_profile_cfg("solana-mainnet:pumpfun"), clock=LiveClock(), run_id="run", callbacks=None)
++        self.assertEqual(comps.market_profile.profile_id, "solana-mainnet:pumpfun")
++
++    def test_bsc_profiles_resolve_metadata_but_fail_runtime_construction(self):
++        for pid, name in (("bsc-mainnet:flap", "BSC / Flap.sh"), ("bsc-mainnet:fourmeme", "BSC / Four.meme")):
++            cfg = _profile_cfg(pid)
++            profile = resolve_market_profile(cfg)  # metadata only
++            self.assertEqual((profile.profile_id, profile.display_name, profile.status), (pid, name, "RESEARCH"))
++            with self.assertRaises(MarketProfileNotRunnable):
++                assemble_runtime(cfg=cfg, clock=LiveClock(), run_id="run", callbacks=None)
++            with self.assertRaises(NotImplementedError):
++                assemble_runtime(cfg=cfg, clock=LiveClock(), run_id="run", callbacks=None)
++            # legacy fallback construction is Solana/Pump only: a StateOwner for a BSC profile must not silently decode Pump
++            recorder = Recorder(cfg.storage["queue_capacity_records"], cfg.storage["priority_headroom_records"])
++            clock, sched = ReplayClock("e", T0, 0), ReplayScheduler()
++            adapter = PaperExecutionAdapter(clock, sched, "PAPER", False, 0, 0)
++            with self.assertRaises(NotImplementedError):
++                StateOwner(cfg, "run", clock, sched, recorder, adapter, lambda: fee_basis(cfg, T0).basis(), "PAPER")
++
++    def test_venue_chain_mismatch_rejected(self):
++        from darkbot.runtime import assembly
++        from darkbot.venues.base import VenueIdentity
++
++        class WrongChainVenue:
++            identity = VenueIdentity("pumpfun", "bsc-mainnet", "x")
++
++        original = assembly.load_venue
++        assembly.load_venue = lambda vid: WrongChainVenue()
++        try:
++            with self.assertRaises(ValueError) as ctx:
++                assembly.assemble_runtime(cfg=base_config(), clock=LiveClock(), run_id="run", callbacks=None)
++            self.assertIn("venue/chain mismatch", str(ctx.exception))
++        finally:
++            assembly.load_venue = original
++
++    def test_injected_components_are_used_directly_and_fallback_is_identical(self):
++        cfg = base_config()
++        comps = assemble_runtime(cfg=cfg, clock=LiveClock(), run_id="run", callbacks=None)
++        h = Harness()  # legacy construction (no injection)
++        self.addCleanup(h.conn.close)
++        recorder = Recorder(cfg.storage["queue_capacity_records"], cfg.storage["priority_headroom_records"])
++        clock, sched = ReplayClock("epoch_test", T0, 1_700_000_000_000_000_000), ReplayScheduler()
++        adapter = PaperExecutionAdapter(clock, sched, "PAPER", False, 0, 0)
++        fees = fee_basis(cfg, T0)
++        owner = StateOwner(cfg, "run", clock, sched, recorder, adapter, fees.basis, "PAPER", engine=comps.quote_engine, decoder=comps.decoder, reducer=comps.reducer, market_profile=comps.market_profile)
++        self.assertIs(owner.decoder, comps.decoder)
++        self.assertIs(owner.reducer, comps.reducer)
++        self.assertIs(owner.engine, comps.quote_engine)
++        self.assertIs(owner.normalizer.decoder, comps.decoder)
++        self.assertEqual(owner.market_profile.profile_id, "solana-mainnet:pumpfun")
++        self.assertIsNone(h.owner.market_profile)
++        self.assertEqual(type(owner.decoder), type(h.owner.decoder))
++        self.assertEqual(type(owner.reducer), type(h.owner.reducer))
++        self.assertEqual(owner.decoder.layout_hash, h.owner.decoder.layout_hash)
++        self.assertEqual(owner.engine.policy, h.owner.engine.policy)
++
++    def test_injected_and_legacy_state_owner_produce_identical_replay_digest(self):
++        # same recording through (a) legacy fallback construction and (b) assembled Pump.fun components -> identical RAM digest
++        h = Harness()
++        self.addCleanup(h.conn.close)
++        h.feed("helius_standard", create_payload(MINT_A), T0 + 1_000_000)
++        h.advance(T0 + 1_000_000)
++        h.feed("helius_standard", pump_frame(h, MINT_A, 500_000_000, "sig2", 101, user=BUYER), T0 + 400_000_000)
++        h.feed("helius_standard", creator_sell_frame(h, MINT_A, "sig3", 102), T0 + 900_000_000)
++        h.finish(T0 + 2_000_000_000)
++        data = load_replay_input(h.conn, h.run_id, h.cfg)
++        legacy = run_replay(h.conn, data, h.cfg, "rep_legacy", "camp", persist=False)
++        self.assertGreaterEqual(len(legacy.digest["positions"]), 1)
++        cfg = h.cfg
++        comps = assemble_runtime(cfg=cfg, clock=LiveClock(), run_id="rep_inj", callbacks=None, canonical_prefix=h.run_id)
++        clock = ReplayClock("replay_rep_inj", data.start_mono_ns, data.start_utc_ns)
++        sched = ReplayScheduler()
++        recorder = Recorder(cfg.storage["queue_capacity_records"], cfg.storage["priority_headroom_records"])
++        adapter = PaperExecutionAdapter(clock, sched, "PAPER", False, 0, 0, lateness_provider=lambda aid: 0)
++        fees = fee_basis(cfg, T0)
++        owner = StateOwner(cfg, "rep_inj", clock, sched, recorder, adapter, fees.basis, "PAPER", canonical_prefix=h.run_id, persist_observations=False, compute_features=False, engine=comps.quote_engine, decoder=comps.decoder, reducer=comps.reducer, market_profile=comps.market_profile)
++        owner.on_fee_snapshots([s for s in (fees.protocol, fees.network, fees.rent, fees.priority_policy) if s is not None])
++        for f in cfg.feeds:
++            owner.on_feed_health(f.id, True, data.start_mono_ns)
++        from darkbot.domain import RawEnvelope
++        for receive, seq, feed_id, conn_id, utc, payload in data.observations:
++            while (due := sched.next_due_ns()) is not None and due < receive:
++                clock.advance_to(max(clock.monotonic_ns(), due))
++                sched.fire_due(due, clock.monotonic_ns())
++            clock.advance_to(max(clock.monotonic_ns(), receive))
++            owner.on_raw(RawEnvelope(feed_id, conn_id, receive, utc, seq, payload))
++        while (due := sched.next_due_ns()) is not None and due <= data.end_mono_ns:
++            clock.advance_to(max(clock.monotonic_ns(), due))
++            sched.fire_due(due, clock.monotonic_ns())
++        clock.advance_to(max(clock.monotonic_ns(), data.end_mono_ns))
++        owner.finalize(clock.monotonic_ns())
++        self.assertEqual(digest(owner), legacy.digest)
++
++    def test_replay_keeps_its_own_engine_injection_and_stays_offline(self):
++        import inspect
++        from darkbot import replay
++        src = inspect.getsource(replay.run_replay)
++        self.assertIn("engine=engine", src)  # existing replay injection preserved
++        self.assertNotIn("assemble_runtime", src)  # replay is not forced through the generic live assembly path
++        self.assertNotIn("http_rpc", src)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' orig/darkbot-main/tests/test_venue_registry.py /home/claude/darkbot-main/tests/test_venue_registry.py
+--- orig/darkbot-main/tests/test_venue_registry.py	1970-01-01 00:00:00.000000000 +0000
++++ /home/claude/darkbot-main/tests/test_venue_registry.py	2026-09-24 20:00:20.191203971 +0000
+@@ -0,0 +1,69 @@
++"""Phase A (BSC handoff §21.2): venue registry — Pump.fun executable, Flap/Four.meme metadata only, unknown rejected."""
++
++from __future__ import annotations
++
++import unittest
++
++from darkbot.execution import QuoteEngine
++from darkbot.market import MarketReducer, PumpDecoder
++from darkbot.venues.base import VenueIdentity
++from darkbot.venues.pumpfun.venue import PumpFunVenueAdapter
++from darkbot.venues.registry import UnknownVenue, VenueNotImplemented, load_venue, venue_identity
++from tests.helpers import CREATOR, MINT_A, Harness, create_payload, T0
++
++
++class VenueRegistryTests(unittest.TestCase):
++    def test_unknown_venue_rejected(self):
++        with self.assertRaises(UnknownVenue):
++            load_venue("raydium")
++        with self.assertRaises(ValueError):
++            venue_identity("BSC2")
++
++    def test_flap_and_fourmeme_are_metadata_only(self):
++        self.assertEqual(venue_identity("flap"), VenueIdentity("flap", "bsc-mainnet", "Flap.sh"))
++        self.assertEqual(venue_identity("fourmeme"), VenueIdentity("fourmeme", "bsc-mainnet", "Four.meme"))
++        for vid in ("flap", "fourmeme"):
++            with self.assertRaises(VenueNotImplemented):
++                load_venue(vid)
++            with self.assertRaises(NotImplementedError):
++                load_venue(vid)
++
++    def test_no_flap_or_fourmeme_package_exists_in_phase_a(self):
++        import importlib
++        for mod in ("darkbot.venues.flap", "darkbot.venues.fourmeme", "darkbot.chains.evm", "darkbot.chains.bsc"):
++            with self.assertRaises(ModuleNotFoundError):
++                importlib.import_module(mod)
++
++    def test_pumpfun_wraps_existing_components(self):
++        h = Harness()
++        self.addCleanup(h.conn.close)
++        venue = load_venue("pumpfun")
++        self.assertIsInstance(venue, PumpFunVenueAdapter)
++        self.assertEqual(venue.identity, VenueIdentity("pumpfun", "solana-mainnet", "Pump.fun"))
++        decoder = venue.build_decoder(cfg=h.cfg)
++        reducer = venue.build_reducer(cfg=h.cfg, run_id="prefix")
++        engine = venue.build_quote_engine(cfg=h.cfg)
++        self.assertIsInstance(decoder, PumpDecoder)
++        self.assertIsInstance(reducer, MarketReducer)
++        self.assertIsInstance(engine, QuoteEngine)
++        # exactly the StateOwner legacy construction
++        own = h.owner.reducer
++        self.assertEqual(reducer.run_id, "prefix")
++        self.assertEqual((reducer.history_per_mint, reducer.max_tracked_mints, reducer.trade_log_per_mint, reducer.event_points_max), (own.history_per_mint, own.max_tracked_mints, own.trade_log_per_mint, own.event_points_max))
++        self.assertEqual((reducer.signature_history_max, reducer.dedup_keys_per_mint, reducer.wsol, reducer.native_sentinel), (own.signature_history_max, own.dedup_keys_per_mint, own.wsol, own.native_sentinel))
++        self.assertEqual(decoder.layout_hash, h.owner.decoder.layout_hash)
++        self.assertEqual(engine.policy, h.owner.engine.policy)
++
++    def test_actionable_launch_and_creator_match_state_owner_predicate(self):
++        h = Harness()
++        self.addCleanup(h.conn.close)
++        venue = load_venue("pumpfun")
++        h.feed("helius_standard", create_payload(MINT_A), T0 + 1_000_000)
++        st = h.owner.reducer.states[MINT_A]
++        self.assertTrue(venue.is_actionable_launch(st))
++        self.assertEqual(venue.creator_of(st), CREATOR)
++        self.assertEqual(h.owner.counters.creates_actionable, 1)
++
++
++if __name__ == "__main__":
++    unittest.main()

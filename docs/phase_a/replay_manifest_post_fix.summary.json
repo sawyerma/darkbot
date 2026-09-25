@@ -1,0 +1,107 @@
+{
+ "baseline_commit": "05971e4ed35a8a98349e298d2de4e61f8584fc5b",
+ "command": "strict_replay.py /home/claude/darkbot-main /tmp/phase_a/synthetic_capture_seed20260924.sqlite phase_a_synth_capture_capture_synthetic_seed20260924 /home/claude/darkbot-main/config/strategy_c_launch_sniper_0ms_15x.json 10 /tmp/phase_a/replay_post_fix.sqlite /tmp/phase_a/replay_manifest_post_fix.json post_fix",
+ "config_hash_file": "3782e39d82d1b0a52fd34961a7afd21d1cdc7837b74b094cb7847e4eb20593d7",
+ "config_path": "/home/claude/darkbot-main/config/strategy_c_launch_sniper_0ms_15x.json",
+ "cost_model_hash": "429a5baf0d6a9dc9da9cf47cf187a957f8d9d80edf07e9bfbd7fee7b39f5accc",
+ "dataset_hash": "c62ca4ceeebc093fd6c7988fb2caf494f0397c5c8ef879b2f7565b8d859f95d7",
+ "effective_config_canonical_sha256": "0e38da4bb48b5dbce87e3acf571a81d01473c1386970b7a44520bbfeb8ebcc28",
+ "effective_config_hash": "0e38da4bb48b5dbce87e3acf571a81d01473c1386970b7a44520bbfeb8ebcc28",
+ "exact_lamports": {
+  "cash_reconciliation": {
+   "end_cash_per_ledger": 10463892785,
+   "initial": 10000000000,
+   "ledger_cash_sum": 463892785,
+   "reconciled": true,
+   "run_end_balance": 10463892785
+  },
+  "counts": {
+   "attempts": 112,
+   "censored": 10,
+   "decisions": 356,
+   "entry_failed": 0,
+   "entry_fills": 56,
+   "entry_intents": 56,
+   "events": 11010,
+   "exits": {
+    "CREATOR_SELL": 19,
+    "STOP": 0,
+    "TARGET": 27,
+    "TIMEOUT": 0
+   },
+   "fills": 102,
+   "ledger": 102,
+   "positions_by_state": {
+    "CLOSED": 46,
+    "UNRESOLVED": 10
+   },
+   "unresolved": 10,
+   "unresolved_by_reason": {
+    "ATTEMPT_STATUS_UNKNOWN": 10
+   }
+  },
+  "fees_by_kind_lamports": {
+   "creator_fee_lamports": 34532187,
+   "network_fee_total_lamports": 741100,
+   "protocol_fee_lamports": 115107196,
+   "rent_locked_lamports": 114199680,
+   "rent_refunded_lamports": 93806880,
+   "sender_tip_lamports": 0
+  },
+  "locked_rent_lamports_end": 20392800,
+  "pessimistic_pnl_lamports_token_residual_zero": 484285585,
+  "qualification_status": "UNQUALIFIED_DATA",
+  "ram_cash_lamports": 10463674985,
+  "ram_ledger_cash_sum": 463892785,
+  "ram_locked_rent_lamports": 20392800,
+  "ram_reserved_lamports": 217800,
+  "realized_net_pnl_lamports": 1468058175,
+  "sum_position_net_pnl_lamports": 1468058175,
+  "unresolved_exposure_entry_cost_lamports": 983772590
+ },
+ "freshness_policy_hash": "4f7c983e416e56478c8a3e574623bbfcd2be3400b111f1e3001fcb239cf72325",
+ "label": "post_fix",
+ "output_db": "/tmp/phase_a/replay_post_fix.sqlite",
+ "platform": "Linux-6.18.44-fc-v42-x86_64-with-glibc2.39",
+ "policy_hash": "aa2f1849b66fa94e78a0603762b2a24b26a6fb7913756a741e57c737f92c1094",
+ "portfolio_limit_override": 10,
+ "python": "3.12.3",
+ "replay_parameters": {
+  "compute_features": false,
+  "drain_ns": null,
+  "end_mono_ns": null,
+  "execution_delay_provider": null,
+  "mint_filter": null,
+  "mode": "REPLAY",
+  "persist": true,
+  "persist_observations": true,
+  "replay_callback_lateness": true,
+  "stress_adverse_bps": 0,
+  "stress_fee_multiplier": "1",
+  "stress_reject_rate": "0",
+  "stress_seed": 0
+ },
+ "replay_run_id": "phase_a_post_fix_replay_c62ca4ceeebc",
+ "replay_wall_s": 29.95111349999999,
+ "runner_path": "/tmp/phase_a/strict_replay.py",
+ "runner_sha256": "75a965d91d611babf5e454bac093f4b301c36a9824ac1532c8f4ebe62adca3ab",
+ "semantic_section_sizes": {
+  "attempts": 112,
+  "decisions": 356,
+  "events": 11010,
+  "fee_evidence": 352,
+  "fills": 102,
+  "ledger": 102,
+  "positions": 56,
+  "quality_events": 9,
+  "quote_snapshots": 214,
+  "ram_digest": 7,
+  "selected_fee_evidence": 31
+ },
+ "semantic_sha256": "d9725dcfc33088ce88c3a03fdda12082c729a1cba69f7c51072820e5d517e18c",
+ "source_db": "/tmp/phase_a/synthetic_capture_seed20260924.sqlite",
+ "source_db_sha256": "d17136ae1c02b345d15e5e3393a223e804c615680217e1f8417e0e7d6993e2f9",
+ "source_quality": "OK",
+ "source_run_id": "phase_a_synth_capture_capture_synthetic_seed20260924",
+ "strategy_config_hash": "fc689d981cf29d9ec1ab9f969a63468e343d7ced8b73389ccfdbe3fce74b4832"
+}

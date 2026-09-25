@@ -22,6 +22,7 @@ from darkbot.config import ConfigError, RuntimeConfig, load_runtime_config, reda
 from darkbot.domain import CostEvidence, Readiness, utc_iso
 from darkbot.fees import FeeResolver, http_rpc
 from darkbot.paper import PaperExecutionAdapter, StateOwner
+from darkbot.runtime.assembly import RuntimeCallbacks, assemble_runtime, build_feeds, preflight_market_profile
 from darkbot.storage import REQUIRED_TABLES, Recorder, SqliteWriter, apply_migrations, integrity_check, mark_interrupted_runs, open_connection, prior_campaign_mints, upsert_config_snapshot, write_readback_test
 
 SPEC_PATH = Path(__file__).resolve().parent.parent / "docs" / "SPEC.json"
@@ -65,6 +66,9 @@ class Application:
 
     def __init__(self, cfg: RuntimeConfig, db_path: Path, campaign: str, mode: str = "PAPER", max_duration_ms: int | None = None, economic: bool = True, capture_only: bool = False, status_stream: Any = None,
                  require_economic_within_ms: int | None = None, max_economic_outage_ms: int | None = None) -> None:
+        # Fail fast (BSC handoff §28): a metadata-only / unknown / incompatible market profile is rejected here, before any
+        # run or storage side effect exists (no DB file, no migration, no runs row, no writer thread).
+        self.preflight = preflight_market_profile(cfg)
         self.cfg, self.db_path, self.campaign, self.mode = cfg, db_path, campaign, mode
         # Fee-evidence gate: startup readiness and later-outage tolerance are separate controls.
         # The trading/quote path itself is unchanged; this gate only decides whether a PAPER/CAPTURE run remains acceptable.
@@ -85,6 +89,7 @@ class Application:
         self.feeds: dict[str, FeedAdapter] = {}
         self.owner: StateOwner | None = None
         self.resolver: FeeResolver | None = None
+        self.components: Any = None  # RuntimeComponents once assembled (chain/venue/profile selected once at start)
         self.writer: SqliteWriter | None = None
         self.recorder = Recorder(cfg.storage["queue_capacity_records"], cfg.storage["priority_headroom_records"])
         self.conn = None
@@ -114,6 +119,12 @@ class Application:
     async def run(self) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
         self._loop = loop
+        # Multichain seam (BSC handoff §5): chain/venue/profile are resolved ONCE here, BEFORE storage is opened, so a
+        # non-runnable profile or a component construction failure leaves no RUNNING run behind. The Solana chain adapter
+        # builds the same FeeResolver/FeedAdapter objects with the same arguments as before; the Pump.fun venue adapter
+        # builds the same PumpDecoder/MarketReducer/QuoteEngine. Feeds are built after the StateOwner exists so they hold
+        # its bound methods directly.
+        self.components = assemble_runtime(cfg=self.cfg, clock=self.clock, run_id=self.run_id, callbacks=None)
         storage_info = self.open_storage()
         assert self.conn is not None
         self.writer = SqliteWriter(self.conn, self.recorder, self.cfg.storage["batch_max_records"], self.cfg.storage["flush_interval_ms"], self._disk_error, self.cfg.storage["writer_locked_retries"], self.cfg.storage["fk_merge_max_batches"],
@@ -122,25 +133,15 @@ class Application:
         self.writer.start()
         scheduler = LiveScheduler(loop, self.clock)
         adapter = PaperExecutionAdapter(self.clock, scheduler, "PAPER", bool(self.cfg["live_broadcast_enabled"]), self.cfg.latency_model["entry_delay_ms"] * 1_000_000, self.cfg.latency_model["exit_delay_ms"] * 1_000_000)
-        rpc_ep = resolve_rpc_http(self.cfg)
-        rpc = http_rpc(rpc_ep.url, self.cfg.connectivity["rpc_http_timeout_ms"] / 1000) if rpc_ep.available else None
-        self.resolver = FeeResolver(self.cfg, rpc, self.clock, self.run_id, "rpc_http" if rpc_ep.available else "NONE")
+        self.resolver = self.components.fee_resolver
         self.owner = StateOwner(self.cfg, self.run_id, self.clock, scheduler, self.recorder, adapter, lambda: self.resolver.cache.basis(), "PAPER", economic_intents_allowed=self.economic,
                                 feature_sink=lambda job: loop.run_in_executor(self.executor, job), prior_submitted_mints=prior_mints if self.mode == "PAPER" else None,
-                                capture_only=self.capture_only)
+                                capture_only=self.capture_only, engine=self.components.quote_engine, decoder=self.components.decoder, reducer=self.components.reducer,
+                                market_profile=self.components.market_profile)
         self._economic_gate_start_mono_ns = self.clock.monotonic_ns()  # gate clock starts once resolver and StateOwner exist
-        endpoints = resolve_feed_endpoints(self.cfg)
-        feed_status: dict[str, str] = {}
-        for feed in self.cfg.feeds:
-            ep = endpoints[feed.id]
-            if not feed.enabled:
-                feed_status[feed.id] = "DISABLED"
-                continue
-            if not ep.available:
-                feed_status[feed.id] = f"DISABLED_OPTIONAL missing env {ep.missing_env}" if not feed.required else f"FAILED missing env {ep.missing_env}"
-                continue
-            self.feeds[feed.id] = FeedAdapter(feed, ep.url, self.cfg.connectivity, self.cfg.protocol["program_id"], self.clock, self.owner.on_raw, self.owner.on_feed_health, self.owner.on_transport_error)
-            feed_status[feed.id] = "STARTING"
+        feed_status: dict[str, str] = self.components.chain.feed_setup_status(self.cfg)
+        for feed_adapter in build_feeds(self.components, cfg=self.cfg, clock=self.clock, callbacks=RuntimeCallbacks(on_raw=self.owner.on_raw, on_health=self.owner.on_feed_health, on_error=self.owner.on_transport_error)):
+            self.feeds[feed_adapter.feed.id] = feed_adapter
         tasks = [loop.create_task(f.run(), name=f"feed-{fid}") for fid, f in self.feeds.items()]
         fee_task = loop.create_task(self.resolver.run_background(self._on_fee_snapshots, self.stop_event), name="fees")
         fx_task = None
@@ -183,7 +184,8 @@ class Application:
                           (status, self.clock.utc_iso(), self.clock.monotonic_ns(), self.owner.portfolio.cash_lamports + self.owner.portfolio.reserved_lamports, quality, readiness.value, self.run_id))
         summary = {"run_id": self.run_id, "status": status, "stop_reason": self.stop_reason, "quality": quality, "readiness": readiness.value, "feeds_started": len(self.feeds), "feeds": {fid: self._feed_report(fid) for fid in self.feeds},
                    "feed_setup": feed_status, "owner": self.owner.status(), "cash_reconciliation": self.owner.cash_reconciliation(), "writer": {"committed_records": self.writer.committed_records, "committed_batches": self.writer.committed_batches, "failures": self.writer.failures, "fk_holds": self.writer.fk_holds, "quarantined_records": self.writer.quarantined_records, "quarantine_by_reason": dict(self.writer.quarantine_by_reason), "disk_error": self.writer.disk_error, "slow_shutdown": self.writer.slow_shutdown, "shutdown_drain_ms": None if self.writer.shutdown_drain_ns is None else self.writer.shutdown_drain_ns / 1_000_000},
-                   "fee_errors": self.resolver.errors[-10:], "storage": storage_info, "db": str(self.db_path), "quarantined_records": self.writer.quarantined_records, "prior_campaign_mints": len(prior_mints), "economic_profile_samples_at_run_end": self._economic_sample_count_at_stop}
+                   "fee_errors": self.resolver.errors[-10:], "storage": storage_info, "db": str(self.db_path), "quarantined_records": self.writer.quarantined_records, "prior_campaign_mints": len(prior_mints), "economic_profile_samples_at_run_end": self._economic_sample_count_at_stop,
+                   "market_profile": {"profile_id": self.components.market_profile.profile_id, "chain_id": self.components.chain.identity.chain_id, "venue_id": self.components.venue.identity.venue_id, "display_name": self.components.market_profile.display_name, "explicit_in_config": self.cfg.has_explicit_market_profile}}
         self.conn.close()
         return summary
 
@@ -362,6 +364,7 @@ def doctor_fixture_checks(cfg: RuntimeConfig) -> dict[str, Any]:
 
 async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor") -> dict[str, Any]:
     d = cfg.doctor
+    preflight_market_profile(cfg)  # fail fast before the doctor database is touched (metadata-only BSC profiles are not runnable)
     checks: dict[str, dict[str, Any]] = {}
     # D01
     conn = open_connection(db_path)

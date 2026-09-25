@@ -1,0 +1,8 @@
+BASELINE_COMMIT=05971e4ed35a8a98349e298d2de4e61f8584fc5b
+BASELINE_COMMIT_SOURCE=GitHub archive comment of darkbot-main__7_.zip (workspace has no .git)
+WORKSPACE_STATUS=fresh unzip, no local modifications (git status not available)
+PYTHON=Python 3.12.3
+PLATFORM=Linux 6.18.44-fc-v40 x86_64
+CPU=Intel(R) Xeon(R) Processor @ 2.10GHz
+CPU_COUNT=1
+SOURCE_MANIFEST_SHA256_PRE=0594c977b4433f986b16c2a21da824c3e7a97017c7ed3c341c0e1ba58c8f4a3c

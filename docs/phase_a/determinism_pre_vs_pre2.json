@@ -1,0 +1,209 @@
+{
+ "a": "pre",
+ "b": "pre2",
+ "same_source_db_sha256": true,
+ "same_dataset_hash": true,
+ "same_runner_sha256": true,
+ "same_effective_config_hash": true,
+ "same_file_config_hash": true,
+ "semantic_sha256_equal": true,
+ "sections": {
+  "exact:realized_net_pnl_lamports": {
+   "a": 1468058175,
+   "b": 1468058175,
+   "equal": true
+  },
+  "exact:pessimistic_pnl_lamports_token_residual_zero": {
+   "a": 484285585,
+   "b": 484285585,
+   "equal": true
+  },
+  "exact:unresolved_exposure_entry_cost_lamports": {
+   "a": 983772590,
+   "b": 983772590,
+   "equal": true
+  },
+  "exact:locked_rent_lamports_end": {
+   "a": 20392800,
+   "b": 20392800,
+   "equal": true
+  },
+  "exact:fees_by_kind_lamports": {
+   "a": {
+    "creator_fee_lamports": 34532187,
+    "network_fee_total_lamports": 741100,
+    "protocol_fee_lamports": 115107196,
+    "rent_locked_lamports": 114199680,
+    "rent_refunded_lamports": 93806880,
+    "sender_tip_lamports": 0
+   },
+   "b": {
+    "creator_fee_lamports": 34532187,
+    "network_fee_total_lamports": 741100,
+    "protocol_fee_lamports": 115107196,
+    "rent_locked_lamports": 114199680,
+    "rent_refunded_lamports": 93806880,
+    "sender_tip_lamports": 0
+   },
+   "equal": true
+  },
+  "exact:cash_reconciliation": {
+   "a": {
+    "end_cash_per_ledger": 10463892785,
+    "initial": 10000000000,
+    "ledger_cash_sum": 463892785,
+    "reconciled": true,
+    "run_end_balance": 10463892785
+   },
+   "b": {
+    "end_cash_per_ledger": 10463892785,
+    "initial": 10000000000,
+    "ledger_cash_sum": 463892785,
+    "reconciled": true,
+    "run_end_balance": 10463892785
+   },
+   "equal": true
+  },
+  "exact:ram_cash_lamports": {
+   "a": 10463674985,
+   "b": 10463674985,
+   "equal": true
+  },
+  "exact:ram_reserved_lamports": {
+   "a": 217800,
+   "b": 217800,
+   "equal": true
+  },
+  "exact:ram_locked_rent_lamports": {
+   "a": 20392800,
+   "b": 20392800,
+   "equal": true
+  },
+  "exact:ram_ledger_cash_sum": {
+   "a": 463892785,
+   "b": 463892785,
+   "equal": true
+  },
+  "exact:sum_position_net_pnl_lamports": {
+   "a": 1468058175,
+   "b": 1468058175,
+   "equal": true
+  },
+  "exact:counts": {
+   "a": {
+    "attempts": 112,
+    "censored": 10,
+    "decisions": 356,
+    "entry_failed": 0,
+    "entry_fills": 56,
+    "entry_intents": 56,
+    "events": 11010,
+    "exits": {
+     "CREATOR_SELL": 19,
+     "STOP": 0,
+     "TARGET": 27,
+     "TIMEOUT": 0
+    },
+    "fills": 102,
+    "ledger": 102,
+    "positions_by_state": {
+     "CLOSED": 46,
+     "UNRESOLVED": 10
+    },
+    "unresolved": 10,
+    "unresolved_by_reason": {
+     "ATTEMPT_STATUS_UNKNOWN": 10
+    }
+   },
+   "b": {
+    "attempts": 112,
+    "censored": 10,
+    "decisions": 356,
+    "entry_failed": 0,
+    "entry_fills": 56,
+    "entry_intents": 56,
+    "events": 11010,
+    "exits": {
+     "CREATOR_SELL": 19,
+     "STOP": 0,
+     "TARGET": 27,
+     "TIMEOUT": 0
+    },
+    "fills": 102,
+    "ledger": 102,
+    "positions_by_state": {
+     "CLOSED": 46,
+     "UNRESOLVED": 10
+    },
+    "unresolved": 10,
+    "unresolved_by_reason": {
+     "ATTEMPT_STATUS_UNKNOWN": 10
+    }
+   },
+   "equal": true
+  },
+  "exact:qualification_status": {
+   "a": "UNQUALIFIED_DATA",
+   "b": "UNQUALIFIED_DATA",
+   "equal": true
+  },
+  "semantic:events": {
+   "equal": true,
+   "size_a": 11010,
+   "size_b": 11010
+  },
+  "semantic:decisions": {
+   "equal": true,
+   "size_a": 356,
+   "size_b": 356
+  },
+  "semantic:attempts": {
+   "equal": true,
+   "size_a": 112,
+   "size_b": 112
+  },
+  "semantic:fills": {
+   "equal": true,
+   "size_a": 102,
+   "size_b": 102
+  },
+  "semantic:selected_fee_evidence": {
+   "equal": true,
+   "size_a": 31,
+   "size_b": 31
+  },
+  "semantic:fee_evidence": {
+   "equal": true,
+   "size_a": 352,
+   "size_b": 352
+  },
+  "semantic:ledger": {
+   "equal": true,
+   "size_a": 102,
+   "size_b": 102
+  },
+  "semantic:positions": {
+   "equal": true,
+   "size_a": 56,
+   "size_b": 56
+  },
+  "semantic:quote_snapshots": {
+   "equal": true,
+   "size_a": 214,
+   "size_b": 214
+  },
+  "semantic:quality_events": {
+   "equal": true,
+   "size_a": 9,
+   "size_b": 9
+  },
+  "semantic:ram_digest": {
+   "equal": true,
+   "size_a": 7,
+   "size_b": 7
+  }
+ },
+ "exact_lamports_equal": true,
+ "diffs": [],
+ "PARITY": "PASS"
+}
