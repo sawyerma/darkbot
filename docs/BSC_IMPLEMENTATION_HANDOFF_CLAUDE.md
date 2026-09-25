@@ -12,6 +12,71 @@
 
 This document is intentionally prescriptive. Do not redesign the architecture unless a concrete contradiction in the repository requires it. If a contradiction is found, stop and report it with exact file/line references before changing semantics.
 
+## Current implementation anchor and continuation point — 2026-09-25
+
+The authoritative current implementation anchor is:
+
+```
+main@004f440c39c147087a7385bf16a4dc6660058936
+```
+
+That commit already integrates **Phase A** of this handoff:
+
+- chain/venue adapter contracts and registries;
+- runtime market-profile registry and assembly;
+- legacy-config compatibility without changing historical Solana config hashes;
+- additive `StateOwner` decoder/reducer/market-profile dependency injection while preserving the existing `engine=` replay injection;
+- thin Solana/Pump.fun wrappers around the existing implementation;
+- explicit `bsc-mainnet:flap` and `bsc-mainnet:fourmeme` metadata profiles that fail closed for normal runtime execution;
+- fail-fast profile preflight before storage side effects.
+
+Do **not** reimplement or replace that seam. New BSC work must extend it.
+
+The historical Phase-A evidence under `docs/phase_a/` is an immutable evidence record and should not be rewritten to describe later phases.
+
+### Formal Solana parity status
+
+Phase-A code integration is complete, but the old real `clean-v2` source database used for the intended strict production replay parity check is no longer available locally. Therefore:
+
+- do not invent or backfill the missing parity result;
+- do not use the positive legacy-compatible diagnostic replay as the production parity oracle;
+- after the BSC capture path is ready, record a new, separate Solana 30-minute capture in `data/market_capture_solana_30m.sqlite`;
+- replay that exact same new Solana database once with baseline `05971e4ed35a8a98349e298d2de4e61f8584fc5b` and once with the current/refactored code;
+- require semantic and exact-lamport equality.
+
+This parity task is **Solana-only** and must never use the BSC database.
+
+### Phase / milestone crosswalk from the current commit
+
+Use the later dual-venue milestone numbering in `docs/BSC_DUAL_VENUE_ROADMAP.md` as authoritative for BSC implementation order:
+
+| Handoff phase | Dual-venue milestones | Status at `004f440` |
+| --- | --- | --- |
+| Phase A | M0-M3 architecture/seam work | IMPLEMENTED; strict real-DB Solana parity must be re-established on a new Solana capture |
+| Phase B | optional adapter cleanup only | SKIP unless an independent review identifies a concrete need |
+| Phase C | M4 EVM core + M5 BSC chain + M6 shared BSC dispatcher | NEXT |
+| Phase D | M7 Flap read-only decoder | PENDING |
+| Phase E | M8 Four.meme read-only decoder | PENDING |
+| Phase F | M9 combined 30-minute BSC capture | PENDING |
+
+The older milestone numbering in `docs/MULTICHAIN_ROADMAP.md` is architectural history. Where numbering differs, the later dual-venue roadmap and this handoff govern the implementation sequence.
+
+### Capture database separation
+
+When Phase F is accepted, run the two 30-minute captures in parallel but keep them completely separate:
+
+```
+BSC / Flap + Four.meme
+-> data/market_capture_bsc_30m.sqlite
+
+Solana / Pump.fun
+-> data/market_capture_solana_30m.sqlite
+```
+
+The BSC database is for BSC pending/canonical coverage and later BSC research.  
+The Solana database is for the strict `05971e4` vs current Solana parity replay.  
+Never merge, cross-use, or compare rows across these databases as if they belonged to the same chain.
+
 ---
 
 # 0. Non-negotiable rules
@@ -1805,7 +1870,7 @@ Explicitly test unknown mode refusal.
 
 # 22. Implementation phases for Claude
 
-## Phase A — architecture + minimal Solana/Pump wrapper parity
+## Phase A — architecture + minimal Solana/Pump wrapper parity — IMPLEMENTED
 
 Phase A includes the **minimum Solana/Pump wrappers required to make the adapter seam real**. This resolves the earlier phase-boundary ambiguity.
 
@@ -1841,7 +1906,7 @@ Acceptance:
 
 Commit Phase A separately, then **STOP** and report.
 
-## Phase B — optional adapter cleanup after Phase-A approval
+## Phase B — optional adapter cleanup after Phase-A approval — OPTIONAL / SKIPPED FOR NOW
 
 Phase B is **not** where Solana wrappers are first introduced.
 
@@ -1856,9 +1921,11 @@ It must still preserve exact Solana parity.
 
 Do not start Phase B automatically.
 
-## Phase C — EVM/BSC capture primitives
+## Phase C — EVM/BSC capture primitives — NEXT
 
 Implement generic EVM envelopes + BSC feed abstractions + dispatcher.
+
+Phase C also adds the minimal generic/BSC storage required by read-only capture. Preserve existing Solana tables/columns and historical DB readability; do not rename legacy Solana fields merely to make BSC fit.
 
 No protocol economics.
 
@@ -1869,7 +1936,7 @@ Acceptance:
 
 Commit separately.
 
-## Phase D — Flap read-only decoder
+## Phase D — Flap read-only decoder — PENDING
 
 Only after verified ABI/contracts are supplied/frozen.
 
@@ -1882,13 +1949,13 @@ Acceptance:
 
 Commit separately.
 
-## Phase E — Four.meme read-only decoder
+## Phase E — Four.meme read-only decoder — PENDING
 
 Same.
 
 Commit separately.
 
-## Phase F — combined 30-minute capture
+## Phase F — combined 30-minute capture — PENDING
 
 Add CLI/config support for both BSC venues in capture-only mode.
 

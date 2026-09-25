@@ -1,8 +1,50 @@
 # DarkBot BSC Dual-Venue Roadmap — Flap.sh + Four.meme
 
-Status: design / implementation plan  
+Status: active implementation roadmap; Phase A seam integrated, Phase C is next  
 Parent architecture: `docs/MULTICHAIN_ROADMAP.md`  
-Baseline before BSC work: `main@9a0b5cb32f46bce78f2fb18e4f0f5672bac07f7d`
+Implementation handoff / phase gates: `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md`  
+Original design baseline before BSC work: `main@9a0b5cb32f46bce78f2fb18e4f0f5672bac07f7d`  
+Current implementation anchor: `main@004f440c39c147087a7385bf16a4dc6660058936`
+
+## Roadmap continuity and current status — 2026-09-25
+
+This file is the **authoritative BSC dual-venue milestone sequence**. The implementation handoff defines the corresponding Phase A-F gates. The older `docs/MULTICHAIN_ROADMAP.md` remains the parent architecture, but its earlier BSC milestone numbering is superseded where it differs from this dual-venue roadmap.
+
+Crosswalk:
+
+| Phase | Milestones in this roadmap | Current status |
+| --- | --- | --- |
+| Phase A | M0-M3 | code seam integrated at `004f440`; see notes below |
+| Phase B | optional non-semantic adapter cleanup | intentionally skipped unless review requires it |
+| Phase C | M4 + M5 + M6 | NEXT |
+| Phase D | M7 | pending |
+| Phase E | M8 | pending |
+| Phase F | M9 | pending |
+| post-Phase F | M10-M17 | blocked until the combined BSC capture is analyzed |
+
+Phase-A/M0-M3 detail at the current anchor:
+
+- M1 adapter interfaces: DONE.
+- M2 Solana/Pump wrappers: DONE.
+- M3 generic config/profile/runtime seam and generic identity mapping: DONE for the Phase-A seam; generic/BSC storage additions required by capture remain to be completed with Phase C.
+- M0 code baseline/evidence freeze exists, but the old real `clean-v2` database is no longer available. The strict real-data Solana parity gate must therefore be re-established later with a new, separate Solana 30-minute capture. Do not fabricate the missing old result.
+- `docs/phase_a/PHASE_A_REPORT.md` remains historical evidence and must not be rewritten as a later-phase status document.
+
+The next implementation block is therefore **Phase C / M4-M6**, not a new architecture rewrite and not Phase B.
+
+At Phase F, the synchronized experiment uses two independent databases:
+
+```
+data/market_capture_bsc_30m.sqlite
+    BSC only
+    Flap.sh + Four.meme in one shared BSC capture
+
+data/market_capture_solana_30m.sqlite
+    Solana only
+    Pump.fun
+```
+
+They may run during the same 30-minute wall-clock interval, but data from one chain must never be written to or replayed as the other chain.
 
 ## 0. Goal
 

@@ -2,6 +2,36 @@
 
 Baseline: `main@84b5d95c345261829a53a3cf76e497f7859ae45e`
 
+## Status / relationship to the BSC dual-venue roadmap — 2026-09-25
+
+This document remains the **parent architecture** and historical design rationale.
+
+For the active BSC implementation sequence, use:
+
+1. `docs/BSC_DUAL_VENUE_ROADMAP.md` — authoritative BSC milestone numbering and dual-venue architecture;
+2. `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md` — authoritative Phase A-F implementation gates.
+
+Current implementation anchor:
+
+```
+main@004f440c39c147087a7385bf16a4dc6660058936
+```
+
+At that commit the Phase-A multichain seam, Solana/Pump wrappers, market profiles, runtime assembly and fail-closed BSC metadata are integrated.
+
+Do **not** use this file's older BSC M4-M9 numbering as the active implementation scheduler where it conflicts with the later dual-venue roadmap. The later crosswalk is:
+
+```
+Phase A -> M0-M3
+Phase B -> optional cleanup only
+Phase C -> M4 EVM core + M5 BSC chain + M6 shared BSC dispatcher
+Phase D -> M7 Flap read-only
+Phase E -> M8 Four.meme read-only
+Phase F -> M9 combined BSC capture
+```
+
+Historical sections below are retained instead of being rewritten so that the design evolution remains auditable.
+
 Goal: evolve DarkBot from a Solana/Pump.fun-specific runtime into a multichain launch-trading research/execution framework where one configuration selects a chain + venue combination, e.g.
 
 - Solana + Pump.fun
