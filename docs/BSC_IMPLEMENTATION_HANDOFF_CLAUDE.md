@@ -10,6 +10,16 @@
 - `docs/RESEARCH_STATUS_2026-09-23.md`
 - `docs/STRATEGY_C_SOURCE_OF_TRUTH.md`
 
+Phase-specific future contracts:
+
+- `docs/BSC_PHASE_B_OPTIONAL_CLEANUP_DRAFT.md` — optional draft only; not approved;
+- `docs/BSC_PHASE_D_FLAP_READ_ONLY_CONTRACT.md` — Phase D/M7;
+- `docs/BSC_PHASE_E_FOURMEME_READ_ONLY_CONTRACT.md` — Phase E/M8;
+- `docs/BSC_PHASE_F_DUAL_CAPTURE_CONTRACT.md` — Phase F/M9;
+- `docs/BSC_ECONOMICS_GATE_CONTRACT.md` — mandatory post-M9 economics gate.
+
+The active roadmap decides when a future contract becomes executable. A future contract file does not itself authorize starting that phase.
+
 This document is intentionally prescriptive. Do not redesign the architecture unless a concrete contradiction in the repository requires it. If a contradiction is found, stop and report it with exact file/line references before changing semantics.
 
 ## Current implementation anchor and continuation point — 2026-09-25
@@ -2153,6 +2163,10 @@ Historical Phase-A evidence is retained under `docs/phase_a/` and is frozen. The
 
 ## Phase B — optional adapter cleanup after Phase-A approval — OPTIONAL / SKIPPED FOR NOW
 
+Detailed status/possible scope is kept in `docs/BSC_PHASE_B_OPTIONAL_CLEANUP_DRAFT.md`.
+
+That file is explicitly DRAFT / NOT APPROVED and may be reviewed/changed before any use.
+
 Phase B is **not** where Solana wrappers are first introduced.
 
 Only after Phase A is independently reviewed and accepted may Phase B:
@@ -2200,6 +2214,8 @@ After Phase C: **STOP**.
 
 ## Phase D — Flap read-only decoder — PENDING
 
+Full contract: `docs/BSC_PHASE_D_FLAP_READ_ONLY_CONTRACT.md`.
+
 Start only after Phase C has been independently reviewed/accepted and verified Flap ABI/contracts/fixtures are supplied/frozen.
 
 Implement **read-only decoding only**:
@@ -2213,6 +2229,8 @@ Do **not** implement quote math, protocol economics, fee/tax models, execution p
 After Phase D: **STOP**.
 
 ## Phase E — Four.meme read-only decoder — PENDING
+
+Full contract: `docs/BSC_PHASE_E_FOURMEME_READ_ONLY_CONTRACT.md`.
 
 Start only after Phase D review and verified Four.meme ABI/contracts/fixtures are supplied/frozen.
 
@@ -2228,6 +2246,10 @@ Do **not** implement quote math, protocol economics, fee/tax models, execution p
 After Phase E: **STOP**.
 
 ## Phase F — combined 30-minute BSC capture — PENDING
+
+Full contract: `docs/BSC_PHASE_F_DUAL_CAPTURE_CONTRACT.md`.
+
+Mandatory post-capture economics contract: `docs/BSC_ECONOMICS_GATE_CONTRACT.md`.
 
 Add the final capture-only CLI/config path that runs Flap + Four.meme recognizers on one shared BSC ingest/timestamp origin and an independent canonical census.
 

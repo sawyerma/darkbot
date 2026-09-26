@@ -43,6 +43,23 @@ Crosswalk:
 | post-Phase-F economics gate | unnumbered prerequisite before M10 | **BLOCKED** | verified quote/fee/tax economics + eth_call/helper parity using evidence from the real capture |
 | post-Phase-F | M10-M17 | **BLOCKED** | Strategy C multichain, replay, PAPER, send/inclusion, venue execution, ordered backrun, forward capture, GUI |
 
+### Phase-specific implementation contracts
+
+The roadmap controls activation/order. The files below control detailed implementation only after their phase is activated.
+
+| Work block | Contract file | Contract status |
+| --- | --- | --- |
+| Phase B optional cleanup | `docs/BSC_PHASE_B_OPTIONAL_CLEANUP_DRAFT.md` | **DRAFT / NOT APPROVED / editable before any use** |
+| Phase C / M4-M6 | `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md` | active technical contract until Phase C is accepted |
+| Phase D / M7 | `docs/BSC_PHASE_D_FLAP_READ_ONLY_CONTRACT.md` | fully specified future contract; blocked by Phase-C acceptance + evidence freeze |
+| Phase E / M8 | `docs/BSC_PHASE_E_FOURMEME_READ_ONLY_CONTRACT.md` | fully specified future contract; blocked by Phase-D acceptance + evidence freeze |
+| Phase F / M9 | `docs/BSC_PHASE_F_DUAL_CAPTURE_CONTRACT.md` | fully specified future contract; blocked by Phase-D/E acceptance |
+| Post-M9 Economics Gate | `docs/BSC_ECONOMICS_GATE_CONTRACT.md` | fully specified future contract; concrete economics populated only from accepted Phase-F evidence |
+
+A future contract being present does **not** activate that phase.
+
+Do not skip the predecessor acceptance/evidence gates.
+
 Phase-A/M0-M3 detail at the current anchor:
 
 - M1 adapter interfaces: DONE.
