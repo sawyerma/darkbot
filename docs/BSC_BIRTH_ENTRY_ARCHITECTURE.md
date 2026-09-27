@@ -33,7 +33,9 @@ The product objective is not "submit quickly" and not "see pending early".
 
 The objective is:
 
-> obtain the earliest technically possible successful BUY once a new Flap/Four.meme coin becomes executable.
+> obtain the earliest technically possible successful external BUY once a new Flap/Four.meme coin becomes executable.
+
+If the launch transaction itself contains a creator/presale/initial BUY, that launch-internal acquisition is not an externally overtakeable BUY. The target is then the first technically possible external successful BUY after the launch-internal state transition.
 
 Authoritative definitions:
 
@@ -200,10 +202,14 @@ inclusion_path
 Primary economic success:
 
 ```
-successful BUY
-+ earliest technically valid execution position
-+ no successful competing BUY between launch and ours
+SUCCESSFUL_BUY = intended token actually acquired by intended recipient
+               + positive received token amount
+               + attributable debit/cost evidence
+               + verified earliest technically valid external execution position
+               + no successful competing external BUY between launch and ours
 ```
+
+Receipt success alone is insufficient. Launch-internal creator/presale/initial purchases are recorded separately and do not count as externally overtakeable competitors.
 
 ## 6. Production architecture after Gate-0 PASS
 
@@ -287,6 +293,6 @@ BSC proceeds beyond Gate 0 only when at least one venue demonstrates:
 - enough pre-execution information to build a valid earliest BUY;
 - local build/sign/send path within the required engineering budget;
 - a credible inclusion mechanism;
-- controlled Mainnet evidence of the earliest technically possible successful BUY placement with acceptable repeatability.
+- controlled Mainnet evidence of the earliest technically possible successful external BUY placement with repeatability measured against the numeric Gate-0 acceptance contract frozen before value-bearing trials.
 
 Otherwise the venue is ADAPT or STOP.
