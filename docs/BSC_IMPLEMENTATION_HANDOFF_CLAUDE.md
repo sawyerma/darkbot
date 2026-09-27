@@ -1,3 +1,28 @@
+# 2026-09-27 NATIVE SINGLE-RUNTIME OVERRIDE — READ FIRST
+
+**This section is normative for all post-Phase-C BSC work and overrides conflicting later-phase architecture text in this historical handoff.**
+
+Authoritative runtime contract: `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`.
+Authoritative phase order: `docs/BSC_DUAL_VENUE_ROADMAP.md`.
+
+Non-negotiable changes:
+
+- BSC runtime semantics from venue decode through strategy/economics/build/sign are implemented once in Rust.
+- 30-minute capture, replay, PAPER and LIVE must use the same Rust core; no separate Python/test/live trading implementation.
+- The primary Phase-F dataset is the exact versioned binary FastLaneEvent stream delivered by local bsc-geth to the Rust core.
+- LIVE latency source is the native local bsc-geth txpool/new-tx event, not remote WSS/JSON.
+- Native Runtime Gate must pass before Phase D.
+- Phase D Flap and Phase E Four.meme normative decoders are Rust modules.
+- Phase F must prove binary capture -> same Rust replay identity.
+- Economics executable decision math is Rust single-source.
+- Strategy C BSC runtime is Rust single-source.
+- Latency objective is to exploit/preserve approximately -10 ms pre-canonical lead where available; T0->T8 engineering target <0.5 ms, >=1 ms warning, >3 ms hard economic failure.
+- Python Phase C remains valuable as evidence/reference/offline analysis but is not the final BSC LIVE engine.
+
+Any post-Phase-C section below that says Python decoder/runtime, WSS capture as primary LIVE-equivalent source, or separate replay/PAPER/LIVE logic is superseded.
+
+---
+
 # DarkBot BSC Dual-Venue — Implementation Handoff for Claude
 
 **Purpose:** implementation contract for the next coding agent.  
