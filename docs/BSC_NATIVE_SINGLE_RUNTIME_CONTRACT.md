@@ -1,151 +1,139 @@
 # DarkBot BSC — Maximum-Performance Native Single-Runtime Contract
 
-Status: **NORMATIVE**
+Status: **NORMATIVE AFTER GATE-0 PASS**
 Updated: 2026-09-27
-Parent cleanup: `docs/BSC_PHASE_C_PYTHON_RETIREMENT.md`
+
+Higher-priority feasibility documents:
+1. `docs/GATE0_TESTPLAN_SHORT.md`
+2. `docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md`
+3. `docs/BSC_DUAL_VENUE_ROADMAP.md`
+
+This production contract becomes active only after at least one BSC venue passes Gate 0.
 
 ## 1. Objective
 
-Build BSC as a clean native runtime with no Python in the latency-critical or runtime-semantic path.
+Build one native BSC runtime that preserves the Gate-0-proven first-BUY capability while adding correctness, replayability, strategy and operational safety.
 
-The same Rust runtime must be used for:
+The product objective remains:
 
-```
-CAPTURE
-REPLAY
-PAPER/SHADOW
-LIVE
-```
+> earliest technically possible successful BUY after a supported launch becomes executable.
 
-There is no alternate test engine, no Python trading engine and no "fast live" implementation.
+Fast local processing is necessary but is not itself proof of purchase.
 
-Only external sources/sinks, credentials and clock adapters may differ.
+## 2. Ownership
 
-Zero latency cannot be physically guaranteed because network, CPU, kernel and peer scheduling are external realities. Instead this contract removes avoidable software latency and defines hard release gates. A build that misses those gates does not ship.
+### Go / pinned bsc-geth
 
-## 2. Final ownership
-
-### Go / bsc-geth
-
-Go owns only what should remain inside the chain client:
+Own only chain-client duties:
 
 - BSC devp2p/network protocol;
 - canonical chain import;
 - txpool validation/admission;
 - peer management;
-- minimal timestamped Fast-Lane hooks;
-- minimal signed-transaction injection/broadcast hook.
+- minimal timestamped ingress hooks;
+- minimal local signed-transaction injection/broadcast hook.
 
-Do not put strategy, venue logic, economics or research code into geth.
+No venue strategy/economics/research logic in geth.
 
-### Rust / DarkBot runtime
+### Rust / DarkBot
 
-Rust owns all BSC runtime semantics:
+Own all runtime semantics:
 
 - native event model;
 - pending identity;
-- sender/nonce replacement competition;
+- sender/nonce competition/replacement;
 - canonical/reorg/orphan state;
-- Flap recognition/decoding;
-- Four.meme recognition/decoding;
-- runtime feature/state extraction;
-- Strategy C;
+- Flap/Four factual decode;
+- market/runtime state;
 - economics/local quote math;
+- Strategy C;
 - admission/risk;
 - transaction construction;
 - secp256k1 signing;
-- execution intent;
+- inclusion adapter selection;
 - latency telemetry;
 - binary capture journal;
 - replay;
 - PAPER/shadow;
-- LIVE runner;
-- native output/result records.
+- LIVE.
 
 ### Python
 
-Python is offline/control analysis only:
+Offline analysis/control only:
 
+- EV/statistical analysis;
 - parameter sweeps;
-- statistical EV analysis;
-- plots;
-- reports;
-- SQLite/Parquet generation;
-- notebooks;
-- human-facing research utilities.
+- plots/reports;
+- SQLite/Parquet derivation;
+- notebooks.
 
-Python output may configure Rust, but Python may not make a BSC runtime trade decision.
+Python never determines a BSC runtime trade.
 
-## 3. Ingress: capture as early as technically useful
+## 3. Ingress
 
-Use two native BSC event classes.
+Use native event classes such as:
 
 ### EARLY_TX_SEEN
 
-Timestamp and export the transaction as early as safely practical after peer-message transaction decoding.
+Timestamp a complete relevant signed transaction as early as safely practical after peer-message decode.
 
 Purpose:
 
-- preserve maximum market lead;
-- perform destination/selector filtering immediately;
-- predecode venue fields;
-- precompute any deterministic state/transaction material possible before txpool acceptance.
+- preserve actionable pending evidence;
+- cheap destination/selector filtering;
+- precompute deterministic launch/BUY material before txpool acceptance where valid.
 
 ### TXPOOL_ACCEPTED
 
-Emit when the local node has accepted/validated the transaction into the relevant txpool path.
+Timestamp local txpool acceptance of the source transaction.
 
 Purpose:
 
-- authoritative local acceptance;
-- final gate for any policy that requires validated pending evidence.
+- local validation evidence;
+- diagnostics for pending lifecycle.
 
-Both event classes enter the same versioned binary wire format and are captured/replayed.
+Neither event proves that the token is already buyable.
 
-This allows early speculative computation without silently treating unvalidated network spam as authoritative state.
+Pending visibility is incomplete by nature; record launches not seen pending.
 
-## 4. Egress
+## 4. Production egress/inclusion
 
-Rust outputs a fully signed canonical transaction representation through a second shared-memory SPSC ring.
+The production runtime supports more than one inclusion adapter behind one exact signed transaction/bundle intent.
 
-The geth hook:
+Candidate adapters may include:
 
-1. consumes signed bytes;
-2. performs required local chain-client validation/admission;
-3. injects into txpool;
-4. triggers normal/optimized peer propagation;
-5. emits acceptance and first-outbound timing evidence.
+- local bsc-geth/P2P;
+- Gate-0-proven ordered builder/backrun path;
+- another currently verified builder path.
 
-No JSON-RPC/HTTP/WSS is used for LIVE submission.
+A local geth acceptance or builder ACK is **not** a successful BUY.
+
+The production-selected inclusion adapter must have passed/repassed actual ordering/inclusion validation.
 
 ## 5. Shared-memory Fast Lane
 
-Primary inter-process transport:
+Default local IPC:
 
 ```
-Go producer -> mmap SPSC ring -> Rust consumer
-Rust producer -> mmap SPSC ring -> Go consumer
+geth -> mmap SPSC -> Rust
+Rust -> mmap SPSC -> local geth adapter
 ```
 
 Requirements:
 
 - one producer / one consumer per ring;
-- cache-line aligned producer/consumer indices;
-- fixed-capacity descriptors;
-- preallocated payload slab for variable transaction bytes;
+- fixed-capacity/preallocated structures;
 - sequence numbers;
-- no locks on common path;
-- no allocation on the ring common path after initialization;
-- explicit full/overflow state;
+- no common-path locks;
 - no silent overwrite;
-- busy-poll option on dedicated cores;
-- Unix socket only as debug/control fallback, never primary LIVE path.
+- explicit overflow evidence;
+- no JSON wire format.
 
-Do not use JSON as the wire format.
+Builder adapters may use their required external transport; this does not change Rust decision/build semantics.
 
 ## 6. Same Rust core in all modes
 
-The following Rust functions/modules exist once:
+These semantics exist once:
 
 ```
 decode_event
@@ -160,275 +148,206 @@ build_transaction
 sign_transaction
 ```
 
-Replay/PAPER/LIVE call the same implementations.
+Replay/PAPER/LIVE reuse them.
+
+Mode-specific differences are limited to external source/sink, credentials and test/live key material.
 
 Forbidden:
 
 - replay-only decoder;
-- paper-only quote;
-- live-only strategy;
+- PAPER-only quote;
+- LIVE-only strategy;
 - alternate fast signer;
-- Python decision oracle in production;
-- mode-specific state transition behavior.
+- Python decision oracle.
 
-PAPER runs through build + sign. Only broadcast is replaced by a non-broadcast sink.
+## 7. Native capture/replay
 
-## 7. Capture format
+Production evidence is an immutable versioned binary journal.
 
-Primary BSC research evidence is an immutable versioned binary journal.
+Required:
 
-The event is fanned out at the exact same boundary used by the Rust core:
+- append-only;
+- sequence preserving;
+- checksummed/hash-manifested;
+- exact native timestamps;
+- raw signed tx bytes or lossless fields;
+- canonical/reorg events;
+- explicit gaps/overflow.
+
+SQLite/Parquet are derived offline only.
+
+## 8. Production state
+
+Rust owns:
+
+- tx identity/first-seen;
+- sender+nonce candidates;
+- replacement resolution;
+- included/reverted;
+- canonical/orphan/uncertain;
+- bounded reorg ancestry;
+- restart/recovery state needed for operational parity;
+- explicit provenance/gaps.
+
+Relevant retired Python Phase-C counterexamples become Rust tests, not runtime dependencies.
+
+## 9. Hot-path rules
+
+Production common path:
 
 ```
 native event
-   +--> Rust core
-   +--> bounded Rust/native recorder queue
-```
-
-The primary recorder implementation is native/Rust, not Python.
-
-Required properties:
-
-- append-only;
-- sequence-preserving;
-- checksummed;
-- hash-addressed manifest;
-- wire-format version;
-- exact timestamps;
-- raw tx bytes/lossless fields;
-- canonical/reorg events;
-- explicit gap/overflow markers.
-
-SQLite/Parquet are generated later and are never the canonical replay source.
-
-## 8. Canonical/reorg runtime is Rust
-
-Do not keep canonical/reorg/replacement semantics in Python.
-
-Rust must own:
-
-- block/head identity needed by runtime;
-- included/reverted outcome;
-- canonical/orphan/uncertain state;
-- sender+nonce candidate sets;
-- replacement resolution;
-- restart/recovery state required by LIVE/PAPER/replay equivalence.
-
-Phase-C Python semantics are ported as fixtures and adversarial tests.
-
-## 9. Hot-thread rules
-
-The trading thread is deliberately simple:
-
-```
-busy-poll event
--> cheap address/selector reject
--> fixed decode
--> state
--> decision/quote
+-> cheap venue reject
+-> verified fixed decode
+-> state/decision/quote
 -> build/sign
--> submit ring
+-> selected inclusion adapter
 ```
 
-Common path rules:
+Forbidden on the latency-critical decision path:
 
-- no filesystem;
-- no DB;
-- no DNS;
-- no RPC;
-- no HTTP;
-- no WSS;
-- no JSON;
-- no logging formatting;
-- no blocking locks;
-- no unbounded collections;
-- no async task scheduling on the hot thread;
-- no dynamic ABI reflection;
-- no metadata lookup;
-- no heap allocation after warmup where technically avoidable;
-- no lazy initialization;
-- no page faults expected after warmup/prefault;
-- no synchronous external quote/helper call.
+- filesystem/DB;
+- DNS;
+- blocking RPC/HTTP/WSS lookup;
+- metadata lookup;
+- dynamic ABI download/reflection;
+- JSON persistence;
+- synchronous logging;
+- blocking locks;
+- lazy initialization;
+- avoidable heap allocation/page faults;
+- synchronous external quote/helper call.
 
-Use fixed verified ABI offsets and integer arithmetic.
+Required state is prepared before the event. Missing/stale required state => fail closed.
 
-## 10. Build/profile optimization
+## 10. Build/sign preparation
 
-Release builds must benchmark at least:
+Benchmark and retain only beneficial settings:
 
-- Rust `opt-level=3`;
+- release `opt-level=3`;
 - LTO;
-- codegen-units=1 for latency build;
+- codegen-units=1 where beneficial;
 - `panic=abort`;
-- target CPU tuned for production hardware where deployment policy allows;
-- PGO after representative native capture exists.
+- target CPU tuning where deployment permits;
+- PGO only after representative production capture exists.
 
-Do not accept compiler flags on belief alone; retain only settings that improve measured tails.
+Signer context is warm before trading.
 
-The signer context is pre-created and warm.
+## 11. Target host
 
-## 11. Host isolation
+Final production latency qualification uses dedicated Linux hardware.
 
-Production latency tests and LIVE use dedicated Linux hardware.
+Evaluate:
 
-Evaluate and freeze:
-
-- isolated physical hot core;
+- isolated hot physical core;
 - no competing SMT sibling;
-- fixed CPU affinity;
-- Go fast-lane producer on a separate dedicated core;
-- Rust hot thread on its own core;
-- writer/analysis on other cores;
-- NIC IRQ/RSS/RPS/XPS away from the Rust hot core;
-- performance CPU governor;
-- disabled swap;
-- memory prefault/`mlockall` where justified;
-- NUMA-local memory/NIC placement;
-- real-time scheduling after validation;
-- no noisy colocated workloads.
+- fixed affinity;
+- geth fast-lane work on separate core(s);
+- recorder/analysis off hot core;
+- NIC IRQ/RSS/RPS/XPS placement;
+- performance governor;
+- no swap;
+- prefault/mlock where justified;
+- NUMA/NIC locality.
 
-A shared VPS/macOS result cannot establish the final latency gate.
+A shared VPS/macOS benchmark cannot establish the production latency gate.
 
 ## 12. Timing model
 
-Capture at least:
+Use names that do not confuse local engineering time with actual economic execution:
 
 ```
-T-1 peer message decoded / EARLY_TX_SEEN
-T0  local txpool accepted
-T1  Fast Lane publish
-T2  Rust receive
-T3  venue decode complete
-T4  strategy + quote complete
-T5  transaction built
-T6  signing complete
-T7  submit ring publish
-T8  local geth accepts our signed tx
-T9  first outbound peer handoff/write
-TC  canonical reference observation
+L0 = EARLY_TX_SEEN
+L1 = Fast Lane publish
+L2 = Rust receive
+L3 = venue decode complete
+L4 = decision + local quote complete
+L5 = transaction/bundle built
+L6 = signed
+L7 = inclusion-adapter handoff
+L8 = local geth acceptance, if local path
+L9 = first outbound peer handoff, if measurable
+
+C0 = source launch canonical inclusion/order evidence
+B0 = our BUY canonical inclusion/order evidence
 ```
 
-Report:
+Report local durations:
 
 ```
-early_lead         = T-1 - TC
-validated_lead     = T0  - TC
-internal_from_early= T8  - T-1
-internal_validated = T8  - T0
-submit_lead        = T8  - TC
-peer_lead          = T9  - TC
+local_ready = L6 - L0
+local_send  = L7 - L0
 ```
 
-## 13. Targets
-
-External market objective:
+Record canonical ordering:
 
 ```
-early_lead <= -10 ms
+launch_tx_index
+buy_tx_index
+successful_competing_buys_between
+same_block
+receipt_status
 ```
 
-where the BSC peer topology actually provides it.
+Do **not** calculate an authoritative sub-ms `T_buy-T0` from ordinary block timestamps.
 
-Internal engineering target:
+## 13. Engineering targets
 
-```
-EARLY_TX_SEEN -> local acceptance of our signed tx  < 0.5 ms
-stretch                                         < 0.25 ms
->= 1.0 ms                                       investigate/fail gate
-> 3.0 ms reproducible runtime path              release blocker
-```
-
-For individual components use design budgets, not guarantees:
-
-- Go hook -> Rust visibility: tens of microseconds target;
-- Rust decode/state/strategy/quote: low hundreds of microseconds or less;
-- build/sign: low hundreds of microseconds or less;
-- Rust -> geth acceptance: tens/low hundreds of microseconds target.
-
-Every stage reports p50/p95/p99/p99.9/p99.99/max plus exact counts above 0.5/1/3 ms.
-
-No percentile may hide a bad maximum.
-
-## 14. Maximum-speed escalation without architecture inflation
-
-The default implementation remains deliberately small:
+Local production target:
 
 ```
-one local bsc-geth
-+ one inbound SPSC ring
-+ one Rust runtime
-+ one outbound SPSC ring
-+ one native binary recorder
+EARLY_TX_SEEN -> inclusion-adapter handoff < 0.5 ms preferred
+< 1.0 ms                               required target band
+1-3 ms                                 investigate/adapt
+> 3 ms reproducible                    release blocker
 ```
 
-Do not add a component merely because it could be faster in theory.
+These are local engineering targets.
 
-The following escalation levels are retained so the -10 ms objective is not forgotten, but each is gated by measurements from the simpler level.
+Economic success remains the actual execution placement proven by Gate 0 and revalidated in LIVE.
 
-Instrument from C1 onward:
+Historical `-10 ms` pre-lead is not a production PASS gate. Negative actionable lead may still be measured as diagnostic evidence when the timing reference is valid.
 
-- source peer identity;
-- full-TX vs hash-only announcement path;
-- first-seen spread among peers for the same tx;
-- peer decode -> EARLY_TX_SEEN;
-- local geth acceptance -> first outbound peer handoff.
+## 14. Inclusion-path invariant
 
-These measurements are part of the normal event evidence and do not create another runtime.
+Do not hide inclusion behind a late optional optimization phase.
 
-## 15. Optional maximum-speed escalation
+The production runtime must expose the Gate-0-proven inclusion mechanism from the beginning.
 
-The core is designed so ingress can be replaced without changing strategy semantics.
+If an ordered builder/backrun path won Gate 0, it is a production requirement, not a Phase-K experiment.
 
-### Level 1 — native geth Fast Lane
+Local geth/P2P may remain as:
+- baseline;
+- fallback only if its semantics are explicitly safe;
+- diagnostic comparison.
 
-Default.
+## 15. Optional escalation after PASS
 
-Use earliest practical geth peer/txpool hooks + shared memory.
+Only for measured remaining bottlenecks:
 
-### Level 2 — dedicated Rust devp2p observer
+### Level 1 — peer-path optimization
+Rank peers by relevant full-transaction first-seen performance, not ping.
 
-Only if measurement proves geth ingress itself consumes material lead.
+### Level 2 — inclusion/builder optimization
+Optimize or replace the inclusion provider only from measured execution-placement evidence.
 
-A Rust BSC devp2p observer may receive the same peer transaction stream earlier and feed the exact same Rust event/core API.
+### Level 3 — geographic sensors
+Only if geography dominates ingress. Sensors contain no strategy/economics.
 
-It must not create a second strategy/runtime.
-
-### Level 3 — peer/topology race
-
-If Phase-F evidence shows the local peer topology, not local compute, is the dominant loss:
-
-- rank peers by actual relevant first-seen performance, never ping alone;
-- compare a small number of geographically separate native sensors;
-- keep source/timestamp provenance;
-- if multi-source ingress becomes production, define one deterministic earliest-valid-event arbitration module and use that exact module in capture/replay/PAPER/LIVE;
-- optionally propagate the exact same signed raw transaction through multiple controlled broadcast nodes after proving deterministic transaction identity.
-
-No regional sensor may contain its own strategy/economics implementation.
-
-### Level 4 — direct Rust devp2p observer
-
-Only if geth ingress processing itself is a measured bottleneck.
-
-A dedicated Rust BSC devp2p observer may receive the relevant peer transaction stream earlier and feed the exact same Rust event/core API.
-
-It must not create a second strategy/runtime.
+### Level 4 — direct Rust devp2p
+Only if geth ingress itself consumes material lead.
 
 ### Level 5 — kernel/NIC specialization
-
-Only if kernel receive jitter is proven to be the remaining economic bottleneck:
-
-- dedicated NIC queue;
+Only if local kernel/NIC tails dominate:
+- dedicated NIC queues;
 - busy polling;
-- AF_XDP/XDP or equivalent measured approach;
+- IRQ isolation;
+- AF_XDP/XDP if measured beneficial;
 - hardware timestamping where useful.
 
-Do not add DPDK/AF_XDP complexity without evidence. The architecture permits it without changing the Rust core.
+No escalation is kept without measured benefit.
 
-At every escalation level the simplest measured solution wins. Remove or leave disabled any layer that does not improve the relevant lead/tail metric.
-
-## 16. Rust workspace
-
-Target:
+## 16. Rust workspace target
 
 ```
 native/
@@ -444,49 +363,35 @@ native/
       strategy/
       tx/
       signer/
+      inclusion/
     darkbot-capture/
     darkbot-runner/
-      replay
-      paper
-      live
+      replay/
+      paper/
+      live/
 ```
 
-Keep packages responsibility-based and small. Do not create a framework for hypothetical chains.
+Do not create a generic framework for hypothetical chains.
 
 ## 17. Solana relationship
 
-Existing Solana/Pump.fun remains frozen and working while BSC native work is proven.
+Existing Solana/Pump.fun remains working while BSC production is proven.
 
-Do not rewrite Solana merely to make the BSC migration look uniform.
+A later Solana convergence may reuse the Rust core only after strict parity/forward validation.
 
-However, the Rust core is designed chain-neutral enough that a later controlled Solana convergence can reuse:
-
-- strategy interfaces;
-- execution intent;
-- portfolio/risk concepts;
-- capture/replay mode model;
-- latency telemetry.
-
-After BSC is stable, Solana may be migrated phase-by-phase into the same Rust runtime with strict replay/PAPER parity. Only after that parity passes may old Python trading runtime be removed.
-
-The final desired product can therefore become:
-
-```
-one Rust runtime
-  + Solana native adapter
-  + BSC native adapter
-  + Pump.fun / Flap / Four.meme venue modules
-Python offline analysis only
-```
-
-without risking the currently proven Solana system during BSC development.
+Do not rewrite Solana merely for architecture symmetry.
 
 ## 18. Acceptance principle
 
-Architecture is accepted only by measurement.
+Production architecture is accepted only by measurement and correctness evidence.
 
-No claim such as "Rust is fast" is evidence.
+No statement such as:
+- "Rust is fast";
+- "geth accepted it";
+- "builder acknowledged it";
+- "same block";
+- "we had -10 ms canonical lead"
 
-Each phase must produce raw latency samples, target-host metadata, correctness tests and capture/replay parity.
+is sufficient proof of the first BUY.
 
-If the -10 ms market lead does not exist in real BSC evidence, report it. Software cannot manufacture network lead that the market does not expose.
+The decisive economic evidence is successful on-chain placement relative to the launch and competing BUYs.
