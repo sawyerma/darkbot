@@ -60,11 +60,11 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | A | **DONE / KEEP** | Existing Solana/Pump.fun + Phase-A multichain seam |
 | C-PY | **RETIRED** | Old Python BSC/EVM prototype retained only as engineering evidence |
 | G0.1 | **NEXT** | Freeze current Flap/Four Mainnet contracts, versions, launch/BUY semantics |
-| G0.2 | **BLOCKED** | Prove pre-`T0` token/address + BUY-input derivability per venue |
-| G0.3 | **BLOCKED** | Minimal Rust launch→decode→quote→build→sign→serialize/queue→T_send benchmark |
-| G0.4 | **BLOCKED** | Measure real pending coverage / unseen-private launch rate |
-| G0.5 | **BLOCKED** | Race inclusion paths: local P2P vs verified ordered builder/bundle paths |
-| G0.6 | **BLOCKED** | Prove ordered launch→BUY validity plus concurrent-launch/nonce correctness |
+| G0.2 | **BLOCKED** | Build BUY-field pre-computability matrix and freeze one exact PRIMARY_GATE0_SCOPE |
+| G0.3 | **BLOCKED** | Prove minimal exact launch→BUY semantic validity for PRIMARY_GATE0_SCOPE before performance tuning |
+| G0.4 | **BLOCKED** | Start bounded pending/actionable coverage in parallel as soon as launch evidence is frozen |
+| G0.5 | **BLOCKED** | Benchmark/optimize complete local path through T_send after semantic BUY validity is proven |
+| G0.6 | **BLOCKED** | Race full ingress×inclusion combinations plus concurrent-launch/nonce correctness |
 | G0.7 | **BLOCKED** | Controlled minimal-value Mainnet validation |
 | G0.8 | **BLOCKED** | Prove actual token acquisition, ordering, competing external BUYs, costs and entry price |
 | G0.9 | **BLOCKED** | Classify external builder dependency: NONE / BENEFICIAL / REQUIRED / UNKNOWN |
@@ -90,6 +90,8 @@ Every phase STOPs for independent review.
 ## 4. Gate 0 is not C0
 
 Gate 0 deliberately does **not** require the complete production architecture.
+
+Gate-0 ordering rule: prove the smallest exact BUY semantics first, collect ingress coverage in parallel, and only then invest in fine local latency optimization.
 
 It needs only enough code to answer:
 
@@ -149,9 +151,11 @@ The winning path is selected from real execution placement, not ACK latency.
 
 Before full Phase D, Gate 0 is allowed to implement a **minimal factual Flap probe** sufficient for:
 - launch recognition;
+- BUY-field preparation matrix;
 - token-address derivation proof;
 - exact first-BUY construction;
-- ordered execution validation.
+- semantic launch→BUY validity;
+- ingress coverage measurement for the selected scope.
 
 This is not the full production decoder.
 
