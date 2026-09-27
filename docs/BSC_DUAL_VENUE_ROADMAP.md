@@ -39,7 +39,8 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | G0.6 | **BLOCKED** | Prove ordered launch→BUY validity for each supported venue/mode |
 | G0.7 | **BLOCKED** | Controlled minimal-value Mainnet validation |
 | G0.8 | **BLOCKED** | Verify actual tx ordering, competing BUYs, receipt and entry price |
-| G0.9 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
+| G0.9 | **BLOCKED** | PASS / ADAPT / STOP decision per venue + external-infrastructure dependency classification |
+| G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | C0 | **BLOCKED BY G0 PASS** | Production Rust wire/event/journal/replay foundation |
 | C1 | **BLOCKED** | Production bsc-geth Fast Lane + SPSC ingress |
 | C2 | **BLOCKED** | Production pending/canonical/reorg/nonce/replacement state |
@@ -51,6 +52,7 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | H | **BLOCKED** | Strategy C Rust + deterministic replay/EV |
 | I | **BLOCKED** | PAPER/shadow on same production runtime |
 | J | **BLOCKED** | Production LIVE enablement using Gate-0-proven inclusion adapters |
+| KB | **BLOCKED / OPTIONAL AFTER PASS** | Own BSC builder track if external builder access is materially beneficial or required |
 | K | **BLOCKED** | Only measured performance escalation |
 | S0-S3 | **FUTURE** | Optional later native Solana convergence |
 
@@ -291,7 +293,34 @@ Validate:
 
 STOP.
 
-## 18. K — measured escalation only
+## 18. KB — own-builder independence track
+
+This phase is activated only if Gate 0 shows that an external builder materially improves or is required for the target inclusion quality.
+
+External builders are not a permanent architectural dependency by default.
+
+Evaluate whether DarkBot can operate its own BSC builder using current official builder interfaces/reference implementations.
+
+The acceptance criteria are infrastructure-level:
+
+- validator/proposer integration is technically available;
+- sufficient proposer coverage can be reached;
+- valid competitive block bids can be produced reliably;
+- operating cost is known;
+- maintenance complexity is known;
+- third-party dependency is reduced without degrading the measured inclusion result.
+
+Possible outcomes:
+
+- **OWN_BUILDER_PASS** — own builder can replace the external provider for the required quality;
+- **OWN_BUILDER_PARTIAL** — hybrid operation is justified;
+- **OWN_BUILDER_FAIL** — retain the external builder only where its measured benefit justifies the dependency/cost.
+
+Building or operating a validator is not required by this phase.
+
+STOP.
+
+## 19. K — measured escalation only
 
 Escalate only when production measurements identify the bottleneck.
 
@@ -305,7 +334,7 @@ Possible order:
 
 Do not prebuild all levels.
 
-## 19. Architecture invariants
+## 20. Architecture invariants
 
 Production remains:
 
@@ -328,7 +357,7 @@ Forbidden:
 - treating local geth acceptance or builder ACK as a BUY;
 - claiming exact sub-ms on-chain execution from ordinary block timestamps.
 
-## 20. Decision rule
+## 21. Decision rule
 
 If Gate 0 returns STOP for both Four.meme and Flap, the BSC Birth-Sniping production roadmap stops.
 
