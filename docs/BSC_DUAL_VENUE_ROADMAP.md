@@ -51,7 +51,7 @@ During migration, existing Solana Python runtime remains frozen and operational.
 | A | **DONE / KEEP** | Existing Solana/Pump.fun + Phase-A multichain seam |
 | B | **SKIPPED** | Optional cleanup; no need |
 | C-PY | **RETIRED / DO NOT MERGE** | Pass-6 Python BSC/EVM prototype kept only as external evidence |
-| C0 | **NEXT** | Clean Rust workspace + wire/event model + native binary capture/replay skeleton |
+| C0 | **BLOCKED BY GATE 0** | Clean Rust workspace + wire/event model + native binary capture/replay skeleton |
 | C1 | **BLOCKED** | Minimal bsc-geth early/accepted ingress hooks + shared-memory SPSC Fast Lane |
 | C2 | **BLOCKED** | Rust canonical/reorg/nonce/replacement state + native capture/replay parity |
 | C3 | **BLOCKED** | Native signed-tx return path + geth admission/broadcast + T-1..T9 latency gate |
@@ -66,6 +66,75 @@ During migration, existing Solana Python runtime remains frozen and operational.
 | S0-S3 | **FUTURE** | Optional controlled Solana convergence into the proven Rust core |
 
 Every phase STOPs for independent review.
+
+
+## Gate 0 — Birth-to-BUY latency definition
+
+This gate is mandatory before further low-latency work on either chain.
+
+Test objects:
+- Solana / Pump.fun
+- BSC / Four.meme
+- BSC / Flap
+
+Use one identical timing model:
+
+```
+T_pre = earliest usable indication that the coin is about to become tradable
+T0    = first instant the coin is actually tradable/buyable
+T_buy = instant our BUY has actually executed successfully
+```
+
+Lead metric:
+
+```
+pre_lead = T_pre - T0
+```
+
+Target: as negative as possible. About -10 ms is a desired lead, not an assumed fact.
+
+Primary decision metric:
+
+```
+buy_delay = T_buy - T0
+```
+
+Target:
+
+```
+buy_delay << 1 ms
+```
+
+Gate classification:
+- <1 ms: PASS
+- 1-3 ms: continue only if a concrete measured bottleneck is removable
+- >3 ms: current path FAIL; change infrastructure and retest
+- ~10 ms or more: STOP that venue/chain for Birth Sniping
+
+Also record:
+- was this the first technically possible buy: YES/NO
+- number of successful BUYs ahead of us
+- distance from first-tradable point to our BUY
+- achieved entry price versus first executable price
+- revert/drop/failure outcome
+
+Do not use as the primary metric:
+- block time
+- finality time
+- local decode time alone
+- signing time alone
+- submit acknowledgement alone
+- EARLY_TX_SEEN versus canonical block time
+
+Venue selection:
+- do not preselect Four.meme or Flap
+- choose the venue with the lowest measured `T_buy - T0`
+- if latency is similar, prefer fewer successful competing BUYs ahead
+
+Project order:
+- Gate 0 comes before further BSC buildout
+- Gate 0 comes before any Solana low-latency rebuild
+- only PASS branches proceed
 
 ## 4. Phase C0 — clean native foundation
 
