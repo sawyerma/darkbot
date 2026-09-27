@@ -79,33 +79,45 @@ Do not derive an authoritative millisecond pre-lead from ordinary canonical bloc
 
 ## 4. What Gate 0 must prove on BSC
 
-For Four.meme and Flap separately:
+Investigate Four.meme and Flap, then drive one exactly defined venue/version/mode through the complete first end-to-end proof before expanding scope.
 
-1. current Mainnet contracts/versions/selectors are frozen from verified evidence;
-2. the launch transaction can be recognized before or at first executability;
-3. determine whether the future token address and all mandatory BUY inputs can be derived before `T0`;
-4. exact initial BUY calldata/value/gas/fee requirements can be prepared without a synchronous hot-path RPC;
-5. build + sign stays comfortably below the 1 ms local engineering budget;
-6. measure how often the launch is actually visible pending before execution;
-7. compare real inclusion paths, including ordinary local-node/P2P and current ordered-builder/bundle paths;
-8. perform controlled minimal-value Mainnet validation only after dry qualification;
-9. verify actual on-chain ordering and successful receipt;
-10. classify PASS / ADAPT / STOP.
+1. current Mainnet contracts/versions/selectors and supported launch modes are frozen from verified evidence;
+2. the launch transaction can be recognized before or at first external executability;
+3. every mandatory BUY field has an explicit preparation record: source, earliest availability, precomputable portion, signature binding and invalidation conditions;
+4. a minimal exact `launch -> BUY` path is semantically valid for the selected venue/version/mode before performance optimization begins;
+5. pending/actionable coverage is measured as soon as launch detection is frozen and continues in parallel with G0.2/G0.3;
+6. the complete controllable local path through `T_send` stays below the frozen latency target;
+7. candidate ingress sources and candidate inclusion paths are tested as a matrix, not as isolated components;
+8. controlled minimal-value Mainnet validation proves actual intended-token acquisition;
+9. actual external BUY ordering, competing BUYs, realized costs and failure outcomes are verified;
+10. PASS / ADAPT / STOP applies only to the exact proven scope; untested venue/version/modes remain unproven.
 
-## 5. BSC inclusion paths are part of Gate 0
+## 5. BSC ingress × inclusion paths are part of Gate 0
 
-Do not postpone builder/bundle testing to a late LIVE phase.
+Do not postpone either early-ingress comparison or builder/bundle testing to a late LIVE phase.
 
-BSC uses proposer-builder separation and builders accept searcher transactions/bundles. Current official/reference evidence must be rechecked at execution time.
+Gate 0 compares complete paths:
 
-Minimum candidate comparison:
+```
+ingress source -> actionable launch facts -> local BUY path -> inclusion adapter -> actual acquisition/order result
+```
+
+Minimum ingress candidates where currently available and relevant:
+
+- own local bsc-geth / P2P full-transaction visibility;
+- 48Club Auction Feed as a separate candidate evidence source where its current filtered simulation output contains the required launch facts;
+- another independently verified early source only if it can provide losslessly attributable facts required by the exact BUY.
+
+Minimum inclusion candidates:
 
 - own local bsc-geth / P2P submission;
 - 48Club/Puissant ordered or backrun-target bundle path where currently supported;
 - BlockRazor ordered/bundle path where currently supported;
 - another current BSC builder only if independently verified.
 
-48Club currently documents that when a bundle is submitted with `backrunTarget`, the target transaction is automatically prepended ahead of the submitted bundle transactions. This is directly relevant to testing:
+Do not assume an ingress source is useful merely because it is early. It must expose enough verified facts for the selected BUY scope, and its real coverage must be measured.
+
+48Club currently documents that Auction Feed publishes backrun targets with simulated logs and, for the state variant, state changes; its current filtered topic list explicitly includes a Four.meme Create topic. It also documents that when a bundle is submitted with `backrunTarget`, the target transaction is automatically prepended ahead of the submitted bundle transactions. Gate 0 must test whether those feed fields are early enough, complete enough and available often enough for the selected scope. This is directly relevant to testing:
 
 ```
 [target launch]
@@ -186,48 +198,94 @@ Before any value-bearing G0.7 attempt, freeze a numeric acceptance contract cove
 
 Every attempt selected by the frozen sampling rule stays in the statistics. No post-hoc removal of unfavorable outcomes.
 
-### G0.2 Pre-computability proof
-For each venue prove whether token address + all BUY inputs are available before `T0`.
+### G0.2 Pre-computability matrix + primary scope selection
+For each candidate venue/version/mode, create a mandatory BUY-field preparation table before writing performance code.
 
-### G0.3 Local hotpath proof
-Benchmark the complete controllable BUY path through transport handoff:
+Minimum columns:
+
+| BUY field/state | Verified source | Earliest availability | Signature-bound? | Precomputable before signal? | Hot-path residual | Invalidation/rebuild condition |
+| --- | --- | --- | --- | --- | --- | --- |
+| token address | evidence required | measured/proven | yes/no | yes/no/partial | exact remaining work | exact invalidator |
+| recipient | local config | startup | yes | yes | none unless changed | wallet/config change |
+| buy amount/value | local policy + venue semantics | startup or launch-dependent | yes | yes/no/partial | exact remaining work | policy/state change |
+| minimum output / slippage bound | verified local quote inputs | venue-dependent | yes | yes/no/partial | exact remaining work | reserve/state/input change |
+| nonce | own account state | continuously maintained | yes | prepared lane/state | patch/finalize | competing/replacement tx |
+| gas/fee fields | frozen policy + current required head/fee state | continuously maintained | yes | partial/full if valid | patch/finalize | head/policy invalidation |
+| destination/selector/calldata constants | G0.1 evidence | startup | yes | yes | dynamic fields only | contract/version/mode change |
+| launch activation/state dependency | verified venue semantics | venue-dependent | indirectly/yes | prove | exact residual | mode/state mismatch |
+
+Add every other field that affects the signing payload or BUY validity.
+
+Rules:
+
+- prepare every static byte/state component before the actionable signal;
+- pre-sign only when **all** signature-bound fields are already final and the signed payload remains valid for the intended launch;
+- otherwise prebuild static serialization/template state and leave only the proven dynamic patch/finalization work in the hot path;
+- unknown provenance or invalidation semantics => unsupported.
+
+After comparing both venues, freeze one `PRIMARY_GATE0_SCOPE = venue + deployment/version + launch mode + BUY selector/mode` for the first complete proof. PASS later applies only to this exact scope.
+
+### G0.3 Minimal correctness-first launch→BUY proof
+As soon as G0.2 supplies enough verified fields for a minimal transaction builder, prove the smallest exact BUY path before fine performance work:
+
+```
+selected launch mode/state
+-> exact required BUY inputs
+-> exact transaction
+-> launch -> BUY sequential validity
+-> expected acquisition semantics
+```
+
+This proof must include launch-internal creator/presale actions, activation conditions, fee/tax semantics needed for validity, recipient and minimum-output rules.
+
+Do not spend time on low-level latency tuning for a BUY path that has not passed this semantic validity proof.
+
+### G0.4 Pending/actionable coverage — starts in parallel
+Start bounded coverage collection as soon as G0.1 freezes recognizable launch evidence. Run it in parallel with G0.2 and G0.3 rather than waiting for their completion.
+
+For each candidate ingress source record:
+
+- launches observed;
+- launches actionable with all fields required by the selected scope;
+- first actionable local timestamp;
+- missing/filtered fields;
+- source gaps/reconnects;
+- launches first learned only after the useful window;
+- launches never visible through that ingress but later observed canonically.
+
+The purpose is early falsification: if the selected scope is rarely actionable through an ingress source, discover that before optimization.
+
+### G0.5 Local hotpath proof
+Only after the G0.3 minimal BUY path is semantically valid, benchmark and optimize the complete controllable path through transport handoff:
 
 ```
 T_pre
 -> minimal venue decode
--> derive required BUY inputs / local quote
--> transaction-template patch/build
+-> patch/finalize only the G0.2 hot-path residual
+-> local quote only where G0.2 proved it cannot be removed
+-> transaction finalize
 -> sign
 -> final serialization / adapter queue
 -> T_send
 ```
 
-Record `T_ready` and `T_send` separately so post-sign serialization/queue delay is visible.
+Record every stage separately, including `T_ready` and `T_send`, so no post-sign work disappears from the budget.
 
 Target: `T_pre -> T_send < 1 ms` on target-like hardware.
 
-This is an engineering metric only; it does not prove a real first BUY.
-
-### G0.4 Pending coverage
-Measure what percentage of real launches is seen with complete actionable data before canonical execution.
-
-Record private/unseen launches explicitly. Do not assume one local node sees every launch.
-
-### G0.5 Inclusion-path race
-Compare candidate submission/builder paths under the same test conditions.
-
-Measure acknowledgement as diagnostic data only.
-
-### G0.6 Sequential and concurrency validity
-Before value-bearing validation, prove that:
+### G0.6 Ingress × inclusion race + concurrency validity
+Compare complete combinations, not only multiple senders behind one ingress:
 
 ```
-launch -> BUY
+candidate ingress A/B/...
+x
+candidate inclusion path X/Y/...
+-> actual successful acquisition/order result
 ```
 
-is a valid ordered execution for the exact venue/version/mode.
+The ranking metric is real successful external BUY placement and repeatability under the frozen acceptance contract, not source timestamp or adapter ACK alone.
 
-Mandatory stress cases must also prove that multiple simultaneously actionable launches do not create sender/nonce collisions, accidental replacement, head-of-line blocking beyond the frozen latency target, token/recipient cross-wiring, overwritten BUY inputs, duplicate economic submission, or shared-state races.
+Also prove that multiple simultaneously actionable launches do not create sender/nonce collisions, accidental replacement, head-of-line blocking beyond the frozen latency target, token/recipient cross-wiring, overwritten BUY inputs, duplicate economic submission, or shared-state races.
 
 ### G0.7 Controlled Mainnet validation
 Only after dry qualification and after the G0.1 acceptance contract is frozen, use minimal user-authorized test value.
@@ -286,11 +344,15 @@ Gate 0 does not require the full own builder to be built. It records whether the
 ### G0.11 Decision
 
 ```
-PASS:
+PASS for the exact `PRIMARY_GATE0_SCOPE` only:
+- G0.3 proved the exact launch->BUY semantics before performance tuning;
 - the complete controllable path reaches `T_send` inside the frozen latency requirement;
 - real validation proves actual token acquisition, not merely submission/receipt;
 - earliest technically possible external BUY placement satisfies every frozen G0.1 acceptance threshold;
+- ingress coverage and ingress × inclusion evidence are sufficient for the frozen scope;
 - concurrency/nonce stress satisfies its frozen requirement.
+
+No PASS automatically transfers to another venue, deployment version, launch mode or BUY selector/mode.
 
 ADAPT:
 - one or more frozen thresholds miss and the miss is attributable to a measured, realistically removable bottleneck.
