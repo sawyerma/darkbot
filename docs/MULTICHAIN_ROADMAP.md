@@ -1,3 +1,21 @@
+# HISTORICAL MULTICHAIN ROADMAP — BSC SECTIONS SUPERSEDED
+
+Status: **HISTORICAL DESIGN RATIONALE / NOT CURRENT BSC SCHEDULER**
+Updated: 2026-09-27
+
+For BSC, any phase order, 3 ms socket-handoff rule, 30-minute-first experiment, pending-lead target, Four.meme-first assumption, backrun-later sequence or LIVE timing in this document is superseded by:
+
+1. `docs/GATE0_TESTPLAN_SHORT.md`
+2. `docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md`
+3. `docs/BSC_DUAL_VENUE_ROADMAP.md`
+4. `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
+
+The current product question is the earliest technically possible **successful BUY**, not merely signal→enqueue/socket/geth acceptance.
+
+This file is retained only as historical multichain architecture rationale.
+
+---
+
 # DarkBot Multichain Roadmap
 
 Baseline: `main@84b5d95c345261829a53a3cf76e497f7859ae45e`
