@@ -1,78 +1,91 @@
-# DarkBot — Phase E / M8 Four.meme Rust Decoder Contract
+# DarkBot — Phase E / M8 Four.meme Production Rust Decoder Contract
 
-Status: **BLOCKED UNTIL PHASE D IS ACCEPTED**
+Status: **BLOCKED UNTIL BSC GATE-0 PASS + PHASE D/C0-C3 ACCEPTED AS APPLICABLE**
 Milestone: **M8**
 End rule: **STOP after independent Phase-E review**
 
-Normative parent: `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`.
+Normative parents:
+- `docs/GATE0_TESTPLAN_SHORT.md`
+- `docs/BSC_DUAL_VENUE_ROADMAP.md`
+- `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
 
-## 1. Purpose
+## 1. Scope
 
-Phase E adds Four.meme factual recognition/decoding to the same Rust runtime already used by the native BSC Fast Lane and Flap.
+Phase E creates the full production Four.meme decoder in the same Rust runtime.
 
-There is no second Four.meme decoder for tests, capture or Python.
+Gate 0 may contain a smaller Four.meme feasibility probe before Phase E. It must answer:
+- launch recognition;
+- whether token address + mandatory BUY inputs are knowable before `T0`;
+- exact first-BUY construction;
+- ordered launch→BUY feasibility.
+
+The probe is not a second production decoder.
 
 ## 2. Preconditions
 
-- Phase C/reference baseline accepted;
-- Native Runtime Gate accepted;
-- Phase D accepted;
-- Four.meme Mainnet evidence frozen;
-- full regression green;
-- no unresolved native latency blocker.
+Do not start full Phase E until:
+
+- Four.meme has PASS from Gate 0 if Four is being promoted;
+- C0-C3 production foundation is accepted;
+- Phase D/shared venue infrastructure is accepted where required by the roadmap;
+- current Four.meme Mainnet evidence is refrozen;
+- full regression is green;
+- no unresolved native local-latency blocker remains.
 
 ## 3. Evidence freeze
 
-Freeze for every supported current Mainnet version/mode:
+For every supported current version/mode freeze:
 
-- TokenManager/TokenManager2 addresses and implementation identities;
-- Helper identity only as validation evidence, never hot-path dependency;
-- ABI hash/source;
-- useful bytecode/code hashes;
-- CREATE/BUY/SELL selectors;
+- TokenManager/TokenManager2 address and implementation identity;
+- Helper identity only as validation evidence, not hot-path dependency;
+- ABI source/hash;
+- useful code hashes;
+- launch/create selector;
+- BUY/SELL selectors;
 - TokenCreate/TokenPurchase/TokenSale topics;
-- LiquidityAdded/graduation evidence;
-- version-detection rule;
-- TaxToken/X/AntiSniper mode evidence;
+- liquidity/graduation evidence;
+- version/mode detection;
+- TaxToken/X/AntiSniper factual mode evidence;
 - canonical fixtures;
 - pending launch fixtures;
-- deterministic token-id derivation proof or UNKNOWN;
-- provenance and retrieval date.
+- deterministic token-address derivation proof or explicit UNKNOWN;
+- provenance/retrieval date.
 
-Only observed/verified modes are supported. Unknown => UNSUPPORTED.
+Critical rule:
 
-## 4. Runtime ownership
+> Never assume the token address is knowable from a pending create transaction merely because the canonical `TokenCreate` event later contains it.
 
-Normative code lives in:
+Gate 0 must have proven this for the promoted mode, or the production runtime must treat pre-execution address availability as UNKNOWN.
+
+## 4. Implementation ownership
+
+Normative implementation:
 
 ```
 native/crates/darkbot-core/src/venues/fourmeme.rs
 ```
 
-Common BSC mechanics stay in shared Rust state/event code.
-
-Flap and Four.meme may share generic fixed EVM primitives, but neither venue may contain conditional logic for the other.
+No second Python or fast-LIVE decoder.
 
 ## 5. Recognition/decode
 
-Recognition order:
+Order:
 
 1. destination;
 2. selector/topic;
 3. fixed version/mode lookup;
 4. verified decode.
 
-No RPC, HTTP, DB, filesystem, JSON, metadata API or dynamic ABI lookup.
+No RPC, HTTP, DB, filesystem, JSON metadata API or dynamic ABI lookup in the hot path.
 
-Malformed/oversized inputs fail closed and cannot enter Strategy later as valid venue evidence.
+Malformed/oversized inputs fail closed.
 
-## 6. Pending and canonical semantics
+## 6. Pending/canonical semantics
 
-Pending decode preserves exact native first-seen/sequence/source identity.
+Pending evidence preserves exact first-seen/sequence/source identity.
 
 Canonical decode supports only verified:
-
-- CREATE;
+- launch;
 - BUY;
 - SELL;
 - liquidity/graduation;
@@ -80,61 +93,60 @@ Canonical decode supports only verified:
 
 Receipt failure/revert never maps to success.
 
-Reorg/orphan/uncertain semantics remain those of the shared Rust state model.
-
-## 7. Mode/version rules
-
-Mode and version are explicit.
+## 7. Mode/version
 
 No silent "normal" default.
 
-TaxToken/X/AntiSniper labels are factual only in Phase E. Their economic formulas/rates are deferred to the Economics Gate.
+TaxToken/X/AntiSniper labels are factual unless their economics are separately verified.
 
-## 8. Single-runtime parity
+Gate-0 first-BUY economics for a supported mode must remain valid; complete economics belongs to Phase G.
 
-Every test fixture enters the same Rust decoder API used by LIVE.
+## 8. Mode identity
 
-The exact Four.meme decoder is reused by:
-
-- Phase-F capture processing;
-- M11 replay;
-- M12 PAPER/shadow;
+Same Four.meme Rust decoder is used in:
+- capture;
+- replay;
+- PAPER;
 - LIVE.
-
-No separate Python or "fast live" implementation is permitted.
 
 ## 9. Performance
 
-Measure recognizer and full decode separately and with Flap simultaneously enabled.
+Measure recognizer/full decode separately and with Flap enabled.
 
 Report p50/p95/p99/p99.9/p99.99/max.
 
-Destination/selector rejection for unrelated BSC traffic must remain extremely cheap and bounded.
-
-Any reproducible >1 ms decoder path is a defect/review item because the total native engineering target is <0.5 ms and hard economic failure is >3 ms.
+A reproducible >1 ms decoder path is a defect/review item. This is local runtime latency, not a purchase claim.
 
 ## 10. Out of scope
 
-No economics, Strategy C, tx execution, broadcast, approval logic, second feed, second state engine or Python trading implementation.
+No Strategy C, second feed/state engine or duplicate execution implementation.
 
-## 11. Required tests
+## 11. Tests
 
+At minimum:
 - every supported manager/version;
 - selector positives/negatives;
 - unknown version/mode;
 - malformed/truncated/oversized calldata;
 - pending launch fixtures;
-- canonical CREATE/BUY/SELL/liquidity fixtures;
+- canonical launch/BUY/SELL/liquidity fixtures;
 - revert;
 - duplicate/idempotency;
 - orphan/uncertain;
-- explicit mode fixtures;
-- FastLaneEvent binary round-trip;
-- same captured event -> same Rust decode in replay;
-- Flap+Four shared-input test without duplicate raw evidence.
+- explicit modes;
+- FastLane roundtrip;
+- same event→same replay decode;
+- Flap+Four shared-input behavior;
+- token-address pre-execution assumption tests: proven derivation or explicit UNKNOWN.
 
 ## 12. Acceptance
 
-Accept only when evidence, correctness, single-runtime parity and latency tests pass.
+Accept only when:
+- current evidence supports every claimed fact;
+- Gate-0 promoted Four.meme assumptions remain true;
+- Rust decoder is sole production source;
+- unknowns fail closed;
+- capture/replay/PAPER/LIVE use the same decoder;
+- regression + latency tests pass.
 
-Then **STOP**. Do not begin Phase F automatically.
+Then STOP.
