@@ -1,53 +1,51 @@
-# DarkBot — Phase F / M9 Native Dual-Venue 30-Minute Capture Contract
+# DarkBot — Phase F / M9 Native Dual-Venue Capture Contract
 
-Status: **BLOCKED UNTIL PHASE D + E ARE ACCEPTED**
+Status: **BLOCKED UNTIL PROMOTED VENUE DECODERS ARE ACCEPTED**
 Milestone: **M9**
-Primary deliverable: **immutable native binary event journal + manifest**
-End rule: **STOP after Phase-F review; Economics Gate next**
+End rule: **STOP after Phase-F review**
 
-Normative parent: `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`.
+Normative parents:
+- `docs/GATE0_TESTPLAN_SHORT.md`
+- `docs/BSC_DUAL_VENUE_ROADMAP.md`
+- `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
 
 ## 1. Purpose
 
-Phase F captures the exact native BSC event stream used by the Rust runtime for Flap and Four.meme.
+Phase F is a production-quality native market-evidence capture.
 
-This is not a Python/WSS approximation of what LIVE would have seen.
+It does **not** decide first-BUY feasibility; Gate 0 already did that.
 
-The stored 30-minute dataset must be directly replayable into the exact same Rust event API later used for Strategy, PAPER and LIVE.
+Phase F quantifies:
+- pending coverage;
+- source/peer timing;
+- venue versions/modes;
+- canonical outcomes;
+- data-quality gaps;
+- production ingest/decode latency;
+- capture→replay identity.
 
-## 2. Mandatory topology
+## 2. Topology
 
 ```
 BSC P2P
-   |
-local bsc-geth
-   |
-native new-tx/canonical hooks
-   |
-FastLaneEvent / CanonicalEvent
-   |
-   +------------------> SAME Rust core -> Flap + Four factual decode
-   |
-   +--> bounded recorder ring -> immutable binary journal
+ -> pinned local bsc-geth
+ -> native event hooks
+ -> same Rust core
+      -> promoted Flap/Four decoder(s)
+      -> bounded native recorder
 ```
 
-Both consumers receive the same versioned event object/sequence/timestamp.
+No Python transformation before the primary binary journal.
 
-No Python transformation is allowed before the primary journal.
+Secondary WSS/RPC evidence may be recorded under separate source ids but is not the latency source of truth.
 
-WSS/RPC providers may run only as secondary comparison/recovery evidence and must have separate source ids. They are not the latency source of truth.
+## 3. Duration
 
-## 3. Capture duration
-
-Primary clean target:
-
-**30 continuous wall-clock minutes of valid native capture.**
+Primary target: 30 continuous minutes of clean native capture.
 
 A failed/overflowed run is retained as diagnostic evidence and repeated.
 
-No silent loss.
-
-## 4. Primary artifacts
+## 4. Artifacts
 
 Required:
 
@@ -56,190 +54,138 @@ market_capture_bsc_native_30m.bin
 market_capture_bsc_native_30m.manifest.json
 ```
 
-Optional derived artifacts:
+Optional derived SQLite/Parquet never replace the binary journal.
 
-```
-market_capture_bsc_30m.sqlite
-market_capture_bsc_30m.parquet
-```
-
-The binary journal is immutable source evidence. Derived DBs never replace it as replay input.
-
-Manifest includes at minimum:
-
-- journal SHA-256;
-- wire-format version/hash;
-- Rust core commit/hash;
-- bsc-geth commit/patch identity;
+Manifest includes:
+- journal hash;
+- wire/core/geth versions;
 - chain id;
-- start/end UTC and monotonic clock metadata;
-- sequence range/count;
-- config hashes;
-- Flap/Four evidence/version hashes;
+- start/end and clock metadata;
+- sequence/count;
+- config/evidence hashes;
 - queue/overflow counts;
-- reconnect/recovery intervals;
 - canonical/reorg quality;
-- recorder completeness;
-- target-host identity relevant to latency.
+- host metadata relevant to latency.
 
-## 5. Exact event requirements
+## 5. Event evidence
 
-Record enough information for deterministic future Rust replay without RPC reconstruction of the pending input:
+Record enough for replay without reconstructing pending input from RPC:
 
 - sequence id;
 - native first-seen timestamp;
-- source;
+- source/peer/message type where available;
 - raw signed tx bytes or lossless equivalent;
 - hash/from/nonce/to/value/gas/calldata;
-- native geth event timestamp;
-- canonical/head/block/receipt/log evidence needed by shared state;
-- quality/reorg transitions.
+- txpool/canonical/head evidence;
+- receipt/log evidence;
+- reorg/quality transitions.
 
-Never replace original first-seen with enrichment/persistence time.
+Never overwrite original first-seen with enrichment time.
 
-## 6. Two venues, one runtime
+## 6. One runtime
 
-Flap and Four.meme decoders are the Phase-D/E Rust modules.
+Promoted venue decoders inspect the same native event object.
 
-Do not run:
-
-- Python Flap decoder for capture;
-- Python Four decoder for capture;
+No:
+- Python venue capture decoder;
 - separate venue feeds;
 - separate clocks;
 - separate BSC state engines.
 
-One event may be inspected by both recognizers; raw chain evidence is stored once.
+## 7. Pending-coverage and pre-lead diagnostics
 
-## 7. -10 ms lead objective
+For each canonical launch report:
 
-For every canonical launch/trade where comparison is valid record:
+- seen as complete pending tx before inclusion: YES/NO;
+- earliest source peer/path;
+- full-TX vs hash-announcement path;
+- first-seen spread across peers;
+- token/address actionable before execution: YES/NO/UNKNOWN;
+- venue/mode/version;
+- reverted/replaced/orphaned state.
 
-```
-raw_native_lead = T_NATIVE_PENDING - T_CANONICAL_REFERENCE
-```
-
-Primary objective:
-
-```
-raw_native_lead <= -10 ms
-```
-
-Also record where available:
+A canonical-observation lead may be reported as a **diagnostic** if timestamp semantics are clear:
 
 ```
-T0 native geth event
-T1 ring publish
-T2 Rust receive
-T3 decode
-TC canonical reference
+diagnostic_pending_vs_canonical_observation =
+    T_NATIVE_PENDING - T_CANONICAL_OBSERVATION
 ```
 
-Later execution phases add T4-T9.
+It is **not**:
+- the authoritative `T_pre-T0`;
+- proof the coin was buyable at the canonical observation timestamp;
+- a Gate-0 PASS condition.
 
-Report per venue and combined:
+There is no Phase-F requirement that this value be `<= -10 ms`.
 
-- source peer id for earliest observation where available;
-- full-TX vs hash-announcement/request path;
-- same-tx first-seen spread across observed peers;
-- geth peer-decode -> native event delay where instrumented;
-- min;
-- p1/p5 where useful for worst lead;
-- p50;
-- p95;
-- p99;
-- max;
-- count with lead <= -10 ms;
-- count between -10 and -3 ms;
-- count worse than -3 ms;
-- missing/invalid timing evidence.
+## 8. Native local latency
 
-Do not redefine the reference if the result is disappointing.
-
-Phase F must also determine whether a missed -10 ms target is primarily:
-
-- network/peer-topology limited;
-- geth ingress limited;
-- Rust/local-processing limited;
-- canonical-reference/timestamp-quality limited.
-
-Do not add multi-region/devp2p/AF_XDP machinery inside Phase F. Phase F measures the deficit; Phase K applies the smallest justified escalation.
-
-## 8. Native runtime latency during capture
-
-Even though Phase F is read-only with respect to strategy/execution, measure the actual native ingest/decode prefix:
-
-- T0->T1;
-- T1->T2;
-- T2->Flap/Four recognition;
+Measure:
+- peer decode→native event;
+- native event→ring publish;
+- ring→Rust receive;
+- recognition;
 - matched full decode;
-- recorder fanout cost.
+- recorder fanout.
 
-Report p50/p95/p99/p99.9/p99.99/max and exact counts >=0.5 ms, >=1 ms and >3 ms.
+Report p50/p95/p99/p99.9/p99.99/max plus counts >=0.5/1/3 ms.
 
-Any reproducible >3 ms code path is a blocker.
+Reproducible >3 ms local code paths block production until explained/corrected.
 
-## 9. Replay proof before Phase-F acceptance
+## 9. Replay proof
 
-Before accepting the dataset:
+Before acceptance:
 
-1. close/hash the binary journal;
-2. replay it through the same Rust event API;
-3. reproduce the same factual venue decode/state sequence;
+1. close/hash journal;
+2. replay through same Rust API;
+3. reproduce factual venue/state sequence;
 4. prove sequence/event counts;
 5. prove no Python normalization is required;
-6. compare derived summaries against the live capture summary.
-
-This is a mandatory capture->replay identity test.
+6. compare derived summaries.
 
 ## 10. Canonical census
 
-Pending visibility never defines launch count.
-
-Build independent canonical census for each venue from the same shared canonical event stream.
-
-Report:
-
+Report per venue:
 - canonical launches;
 - pending-covered launches;
-- never seen pending;
-- pending after inclusion;
-- gap affected;
+- never-seen-pending;
+- pending first observed after inclusion;
 - unsupported version/mode;
 - reverted;
-- orphaned/reorg affected.
+- orphan/reorg affected;
+- actionable pre-execution address/input availability.
+
+This measures how representative Gate-0 pending assumptions are over a larger sample.
 
 ## 11. Quality gate
 
-Not clean if any unresolved:
-
+Not clean with unresolved:
 - wrong chain;
-- journal corruption/hash mismatch;
-- sequence discontinuity not explicitly represented;
-- silent queue loss;
+- journal corruption;
+- silent sequence loss;
+- queue loss;
 - timestamp/source ambiguity;
-- native/canonical state uncertainty contaminating claimed clean interval;
-- decoder ambiguity for evidence claimed supported;
-- binary replay mismatch.
+- canonical uncertainty contaminating a claimed clean interval;
+- decoder ambiguity;
+- replay mismatch.
 
-Capture recorder failure invalidates research evidence but must never be allowed to stall a future LIVE trading hotpath.
+Recorder failure invalidates research evidence but must not stall future LIVE hotpath.
 
 ## 12. Out of scope
 
-No Strategy C optimization, no EV ranking, no economics assumptions, no real broadcast.
+No Strategy C optimization, EV ranking or first-time real execution proof.
 
-Phase F does not yet need a production trade decision, but it must already use the same Rust event/decode/state modules that later phases extend.
+Phase F may compare already Gate-0-validated inclusion metadata offline, but it does not need to send trades.
 
 ## 13. Acceptance
 
-Phase F is complete only when:
+Complete only when:
+- one clean 30-minute binary journal exists;
+- promoted decoder(s) are factual and current;
+- pending coverage is quantified honestly;
+- pre-execution actionability is quantified;
+- native ingest/decode tails are measured;
+- capture→replay identity passes;
+- quality manifest passes.
 
-- one clean 30-minute native binary journal exists;
-- Flap/Four factual decode is accepted;
-- native lead is measured honestly against canonical reference;
-- the -10 ms objective is quantified;
-- capture->Rust replay identity passes;
-- quality/integrity manifest passes;
-- no second trading/capture semantic implementation exists.
-
-Then **STOP**. Economics Gate is next.
+Then STOP. Full Economics Gate is next.
