@@ -91,13 +91,23 @@ but the actual token is:
 
 Therefore no pre-T0 token-address claim is allowed yet.
 
-### Required resolution order
+### Runtime result and required resolution order
 
-1. Read the actual token runtime bytecode at `0xabe1...7777` at latest/current state.
-2. If it is an EIP-1167 clone, extract and compare its embedded implementation to the published Tax Token V3 implementation.
-3. If the embedded implementation differs, recompute CREATE2 with that implementation and document the version-specific mapping.
-4. If it matches yet prediction still fails, obtain historical Portal proxy/implementation state and a CREATE2-capable trace or equivalent evidence at the launch block to identify effective deployer/salt transformation/init code.
-5. Only after address derivation is explained, reconstruct the post-launch initial state and `minOutputAmount` semantics.
+Runtime inspection is complete:
+
+- actual token `0xabe1...7777` is an EIP-1167 clone;
+- embedded implementation exactly matches `0x024f18294970B5c76c0691b87f138A0317156422`;
+- the implementation-address hypothesis is eliminated;
+- the official Flap example repository's OpenZeppelin `Clones.sol` uses the same standard 55-byte EIP-1167 creation sequence as the published salt recipe.
+
+Next:
+
+1. Try `debug_traceTransaction` / equivalent trace for launch tx `0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c`, capturing CREATE2 creator/deployer, salt and creation input.
+2. If public tracing is unavailable, use an archive/trace-capable BSC endpoint.
+3. Freeze the Portal EIP-1967 implementation slot specifically at block `124415357`.
+4. Analyze the historical implementation/deployment path to determine whether it transforms salt or delegates CREATE2 to another factory/helper.
+5. Recompute the address from the **observed** CREATE2 preimage and require exact match to `0xabe1...7777`.
+6. Only then reconstruct the post-launch initial state and `minOutputAmount` semantics.
 
 Public historical RPC `missing trie node` means current public endpoints are insufficient for the needed historical-state proof; it does not imply the state is unknowable in production.
 
