@@ -1,5 +1,15 @@
 # DarkBot — Post-Phase-F BSC Economics Gate Contract
 
+> **2026-09-27 NORMATIVE SINGLE-RUNTIME UPDATE**
+>
+> This gate now follows `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`.
+> Executable BSC quote/economics semantics used for any future decision MUST be implemented once in the Rust `darkbot-core` and reused unchanged by Replay, PAPER and LIVE.
+> Python may validate, analyze, sweep and report Rust outputs but MUST NOT become an alternative BSC decision/quote engine.
+> `eth_call`, Helper calls, HTTP/RPC and APIs are validation/evidence tools only and are forbidden in the latency-critical decision path.
+> Internal quote math must operate on already-resident state.
+> The complete native runtime engineering target is <0.5 ms T0->T8; >=1 ms is warning/investigation and >3 ms is an economic hard failure.
+> Any older wording below that suggests separate runtime implementations is superseded by this update.
+
 Status: **FUTURE CONTRACT / BLOCKED UNTIL PHASE F CLEAN CAPTURE IS ACCEPTED**  
 Position: **after M9, before M10 Strategy C Multichain**  
 Purpose: freeze exact executable economics before any BSC EV research
