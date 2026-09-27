@@ -61,12 +61,12 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | C-PY | **RETIRED** | Old Python BSC/EVM prototype retained only as engineering evidence |
 | G0.1 | **NEXT** | Freeze current Flap/Four Mainnet contracts, versions, launch/BUY semantics |
 | G0.2 | **BLOCKED** | Prove pre-`T0` token/address + BUY-input derivability per venue |
-| G0.3 | **BLOCKED** | Minimal Rust launch→decode→quote→build→sign benchmark |
+| G0.3 | **BLOCKED** | Minimal Rust launch→decode→quote→build→sign→serialize/queue→T_send benchmark |
 | G0.4 | **BLOCKED** | Measure real pending coverage / unseen-private launch rate |
 | G0.5 | **BLOCKED** | Race inclusion paths: local P2P vs verified ordered builder/bundle paths |
-| G0.6 | **BLOCKED** | Prove ordered launch→BUY validity for each supported venue/mode |
+| G0.6 | **BLOCKED** | Prove ordered launch→BUY validity plus concurrent-launch/nonce correctness |
 | G0.7 | **BLOCKED** | Controlled minimal-value Mainnet validation |
-| G0.8 | **BLOCKED** | Verify actual tx ordering, competing BUYs, receipt and entry price |
+| G0.8 | **BLOCKED** | Prove actual token acquisition, ordering, competing external BUYs, costs and entry price |
 | G0.9 | **BLOCKED** | Classify external builder dependency: NONE / BENEFICIAL / REQUIRED / UNKNOWN |
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
@@ -79,7 +79,7 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | F | **BLOCKED** | Native dual-venue capture and pending-coverage/market evidence |
 | G | **BLOCKED** | Full production economics/quote verification |
 | H | **BLOCKED** | Strategy C Rust + deterministic replay/EV |
-| I | **BLOCKED** | PAPER/shadow on same production runtime |
+| I | **BLOCKED** | PAPER/shadow plus full production hot-path requalification before LIVE |
 | J | **BLOCKED** | Production LIVE enablement using Gate-0-proven inclusion adapters |
 | KB | **BLOCKED / OPTIONAL AFTER PASS** | Own BSC builder track if external builder access is materially beneficial or required |
 | K | **BLOCKED** | Only measured performance escalation |
@@ -299,11 +299,29 @@ Positive expectancy after complete costs is a separate question from Gate-0 feas
 
 STOP.
 
-## 16. I — PAPER/shadow
+## 16. I — PAPER/shadow + final production hot-path requalification
 
 Run the same production path through build/sign, suppressing only final external submission.
 
-PAPER does not re-prove first-BUY feasibility; Gate 0 already did.
+PAPER does not re-prove Gate-0 economic feasibility, but the now-complete production path MUST be requalified for latency after D/E/G/H have added the full decoder, state, economics and strategy layers.
+
+Mandatory pre-J production re-gate:
+
+```
+production event
+-> full production venue decoder
+-> production state
+-> production economics / quote
+-> production strategy / admission
+-> production transaction build
+-> production signer
+-> production serialization / adapter queue
+-> T_send
+```
+
+The complete production path must still satisfy the frozen local latency requirement using the same timing boundary as G0.3. A fast Gate-0 prototype or earlier C3 result cannot waive this requalification.
+
+Also rerun the required concurrent-launch/nonce stress cases against the final production runtime.
 
 STOP.
 
@@ -314,11 +332,12 @@ J is production enablement, not the first time inclusion is tested.
 Use only inclusion adapters already validated in Gate 0 and revalidated for current service/API behavior.
 
 Validate:
-- successful inclusion;
-- ordering;
-- realized gas/tips/slippage;
+- actual intended-token acquisition by the intended recipient;
+- ordering against external competing BUYs;
+- realized gas/tips/slippage and total debit/cost;
 - replacement/reconciliation;
-- replay/decision parity.
+- replay/decision parity;
+- continued compliance with the final production hot-path latency gate.
 
 STOP.
 
