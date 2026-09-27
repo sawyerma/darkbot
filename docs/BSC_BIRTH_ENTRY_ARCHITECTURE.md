@@ -6,6 +6,27 @@ Updated: 2026-09-27
 Normative feasibility gate:
 - `docs/GATE0_TESTPLAN_SHORT.md`
 
+## 0. Direct-chain invariant
+
+DarkBot's BUY execution is **contract-native and direct on-chain**.
+
+```
+chain/pending evidence
+-> local verified venue decode
+-> local BUY construction
+-> local signing
+-> inclusion adapter
+-> BSC contract execution
+```
+
+The Four.meme/Flap website, browser, UI, frontend trading workflow and frontend API are not part of this path and must never become runtime BUY dependencies.
+
+Frontend state does not determine whether a token is buyable. Readiness is determined only from verified contract semantics and the chain/pending facts needed to construct a valid transaction, plus DarkBot's own admission/risk decision.
+
+A local node or builder is only an inclusion mechanism. The economic action remains the signed transaction executing directly against the verified venue contract.
+
+Where an ordered launch->BUY bundle is supported and proven, DarkBot may prepare and submit that bundle before `T0`; the BUY still executes only in the valid position after activation. Where some mandatory BUY input becomes known only at/after activation, DarkBot reacts at the earliest chain-visible point. There is never a reason to wait for website listing, page refresh or an enabled frontend BUY button.
+
 ## 1. Product objective
 
 The product objective is not "submit quickly" and not "see pending early".
