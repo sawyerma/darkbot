@@ -16,6 +16,21 @@ Test objects:
 
 Gate 0 is a minimal feasibility harness, not the production bot.
 
+### Hard execution rule — direct on-chain only
+
+Gate 0 must test the path DarkBot will actually use: **construct, sign and submit the BUY directly for on-chain contract execution**.
+
+Forbidden as BUY dependencies:
+- Four.meme/Flap website or browser UI;
+- frontend trading workflow;
+- frontend API response as a readiness gate;
+- page refresh/listing state;
+- manual click/action.
+
+Allowed inclusion transports are the measured chain paths in this document: local bsc-geth/P2P and verified builder/bundle adapters. They transport the signed transaction/bundle; they do not replace the venue contract or become a frontend dependency.
+
+If the exact BUY can be derived before `T0`, prebuild/pre-sign/pre-submit as far as the proven ordered inclusion mechanism safely permits. If it cannot, derive the missing input from the earliest valid chain evidence and submit immediately. **Never wait for frontend publication when the chain already provides the required facts.**
+
 ## 2. Authoritative timing definitions
 
 ```
