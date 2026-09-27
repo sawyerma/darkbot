@@ -117,7 +117,17 @@ Measure:
 peer decode -> Fast Lane publish -> Rust visible
 ```
 
+In addition, instrument the ingress so later -10 ms work is evidence-driven without changing runtime semantics:
+
+- distinguish full-transaction receipt from hash-only announcement/request/response paths;
+- record the source peer id for first-seen evidence;
+- record per-peer first-seen deltas, duplicates, invalids and disconnects;
+- retain peer-message type and timing in the binary evidence stream;
+- do not yet add peer ranking, multi-region fan-in or a second ingress implementation.
+
 Acceptance is measurement-based on dedicated Linux target hardware.
+
+Simplicity rule: C1 remains one local bsc-geth, one Fast Lane and one Rust consumer. Instrumentation is allowed; topology expansion is not.
 
 STOP.
 
@@ -230,6 +240,18 @@ Report the truth if the network does not provide it.
 
 The exact journal is replayed through the same Rust core before Phase-F acceptance.
 
+Phase F also reports where lead is gained/lost:
+
+- earliest peer by relevant launch transaction;
+- full-tx vs hash-announcement arrival path;
+- peer-to-peer first-seen spread for the same transaction;
+- geth peer-decode -> EARLY_TX_SEEN cost;
+- EARLY_TX_SEEN -> Rust-visible cost.
+
+If the single-node topology already reaches the -10 ms objective with sufficient stability, no topology expansion is added.
+
+If it does not, the deficit becomes measured input to Phase K. Do not solve it inside Phase F by inventing a second capture/live architecture.
+
 STOP.
 
 ## 11. Phase G — economics
@@ -309,22 +331,85 @@ LIVE release fails on unresolved deterministic/reproducible >3 ms native runtime
 
 STOP.
 
-## 15. Phase K — only if more speed is measurably available
+## 15. Phase K — measured -10 ms escalation ladder only
 
-Do not prematurely add complexity.
+Phase K exists only if Phase F/J measurements show the -10 ms objective or the internal latency budget is being lost outside the Rust core.
 
-If profiling shows geth ingress materially consumes lead:
+Do not enable all items by default. Apply one level, measure, keep it only if it provides a reproducible economic latency benefit.
 
-- add a dedicated Rust devp2p observer feeding the exact same Rust event API.
+### K1 — peer-path optimization
 
-If kernel/NIC jitter then dominates:
+Use the C1/F evidence to improve the existing single-node topology:
+
+- prefer peers that actually deliver relevant full transactions earliest, not merely peers with low ping;
+- distinguish full-TX delivery from hash-announcement/request paths;
+- maintain bounded per-peer first-seen/duplicate/invalid/disconnect statistics;
+- evaluate static/trusted peer topology only where operationally valid;
+- measure geth receive/decode/validation delay before changing anything.
+
+No strategy/runtime fork.
+
+### K2 — geographically separate native sensors
+
+Only if peer geography is proven to dominate first-seen timing.
+
+Run the same pinned native sensor/wire protocol in a small number of regions and compare identical transaction hashes.
+
+Requirements:
+
+- same event format and timestamp semantics;
+- no venue/strategy logic duplicated in regional sensors;
+- source id and clock-quality metadata always recorded;
+- a single explicit earliest-valid-event arbitration rule used identically in capture/replay/PAPER/LIVE if this topology becomes production;
+- do not create separate regional strategy engines unless a later dedicated design proves this necessary and preserves deterministic trade identity.
+
+The purpose is to discover whether network topology can recover additional milliseconds toward -10 ms.
+
+### K3 — direct Rust devp2p ingress
+
+Only if measurement proves bsc-geth ingress itself consumes material lead.
+
+A dedicated Rust BSC devp2p observer may feed the exact same Rust event/core API earlier.
+
+The existing Rust strategy/state/economics/build/sign path remains unchanged.
+
+### K4 — propagation optimization
+
+If ingress and Rust processing are already fast but outbound propagation dominates:
+
+- measure local geth acceptance -> first peer handoff;
+- evaluate peer selection/topology;
+- where safe and deterministic, fan the exact same signed raw transaction to multiple controlled local/remote BSC broadcast nodes;
+- never generate different strategy decisions or different transaction payloads per broadcast node.
+
+### K5 — kernel/NIC specialization
+
+Only if kernel/NIC jitter is proven to be the remaining bottleneck:
 
 - dedicated NIC queue;
-- busy-poll/socket tuning;
-- AF_XDP/XDP where measured beneficial;
-- hardware timestamps if useful.
+- IRQ/RSS/RPS/XPS isolation;
+- busy polling / SO_BUSY_POLL where measured;
+- AF_XDP/XDP only where it improves tails;
+- hardware timestamping where useful;
+- NUMA/NIC locality.
 
-No strategy fork is permitted at any level.
+Do not add DPDK/AF_XDP complexity without measured need.
+
+### K simplicity gate
+
+At every level:
+
+- one Rust core semantics;
+- one binary event contract;
+- one decision implementation;
+- one build/sign implementation;
+- bounded state;
+- no generic event bus;
+- no microservices framework;
+- no second database/runtime architecture;
+- no optimization kept without benchmark evidence.
+
+The simplest level that meets the economic target wins.
 
 ## 16. Solana convergence S0-S3
 
@@ -346,7 +431,24 @@ Only after full parity and forward validation, retire the old Python Solana trad
 
 Python then remains offline analysis only for both chains.
 
-## 17. Repository cleanliness rule
+## 17. Simplicity invariant
+
+"Maximum performance" does not mean maximum architecture.
+
+Default production shape remains:
+
+```
+one pinned bsc-geth
++ two SPSC rings
++ one Rust runtime
++ one native recorder
+```
+
+Additional nodes/regions/devp2p/kernel specialization are optional adapters behind the same event contract and are activated only by measured deficit.
+
+Do not prebuild K2-K5 while C0-C3/D/E/F are still sufficient.
+
+## 18. Repository cleanliness rule
 
 The production repository must never contain both the retired Python BSC runtime and the native Rust BSC runtime.
 
