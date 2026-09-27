@@ -1,18 +1,26 @@
-# DarkBot — Post-Phase-F BSC Economics Gate Contract
+# DarkBot — BSC Production Economics Gate Contract
 
-> **2026-09-27 NORMATIVE SINGLE-RUNTIME UPDATE**
->
-> This gate now follows `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`.
-> Executable BSC quote/economics semantics used for any future decision MUST be implemented once in the Rust `darkbot-core` and reused unchanged by Replay, PAPER and LIVE.
-> Python may validate, analyze, sweep and report Rust outputs but MUST NOT become an alternative BSC decision/quote engine.
-> `eth_call`, Helper calls, HTTP/RPC and APIs are validation/evidence tools only and are forbidden in the latency-critical decision path.
-> Internal quote math must operate on already-resident state.
-> The complete native runtime engineering target is <0.5 ms T0->T8; >=1 ms is warning/investigation and >3 ms is an economic hard failure.
-> Any older wording below that suggests separate runtime implementations is superseded by this update.
+Status: **BLOCKED UNTIL GATE-0 PASS + PHASE-F ACCEPTANCE**
+Updated: 2026-09-27
 
-Status: **FUTURE CONTRACT / BLOCKED UNTIL PHASE F CLEAN CAPTURE IS ACCEPTED**  
-Position: **after M9, before M10 Strategy C Multichain**  
-Purpose: freeze exact executable economics before any BSC EV research
+Normative parents:
+- `docs/GATE0_TESTPLAN_SHORT.md`
+- `docs/BSC_DUAL_VENUE_ROADMAP.md`
+- `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
+
+## Gate-0 relationship
+
+Gate 0 MUST already contain the **minimal exact economics needed to construct a valid first BUY** for the tested venue/mode: required value/input, mandatory fees/tax behavior that affects validity, gas requirements and slippage bounds.
+
+This Economics Gate does not postpone first-BUY feasibility. It expands that minimal proof into the complete production economic model after Phase F.
+
+Executable production economics live once in Rust and are reused by Replay/PAPER/LIVE.
+
+Python may validate/analyze outputs but is not a BSC decision/quote engine.
+
+No synchronous `eth_call`, Helper, HTTP/RPC or external quote request is allowed in the production decision hot path. External calls are evidence/differential-test tools only.
+
+Local quote/economics latency is an engineering metric. It is not proof of an actual BUY.
 
 ---
 
