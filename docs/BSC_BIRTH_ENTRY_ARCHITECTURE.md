@@ -82,9 +82,9 @@ Before the production runtime is built, Gate 0 must contain only enough native c
 
 ### 3.1 Current venue evidence
 
-Freeze current Mainnet facts for Flap and Four.meme, then select one exact `PRIMARY_GATE0_SCOPE = venue + deployment/version + launch mode + BUY selector/mode` for the first complete proof:
+Freeze current Mainnet facts for Flap, Four.Meme Classic and Four.Meme OpenFour, then select one exact `PRIMARY_GATE0_SCOPE = venue family + deployment/version + launch mode + BUY selector/mode + quote mode` for the first complete proof:
 
-- deployed contract/manager address;
+- deployed contract/manager/core/registry address as applicable;
 - implementation/version;
 - launch selector;
 - BUY selector;
@@ -92,6 +92,8 @@ Freeze current Mainnet facts for Flap and Four.meme, then select one exact `PRIM
 - exact data needed to construct the first valid BUY;
 - token-address derivation proof if deterministic;
 - current provenance/date.
+
+Four Classic and OpenFour are distinct protocol families; do not reuse one family’s decoder, address-derivation or BUY assumptions for the other without proof.
 
 Unknown => unsupported. Never guess.
 
