@@ -3,6 +3,12 @@
 Status: **NORMATIVE — DO NOT MERGE THE PASS-6 PYTHON BSC RUNTIME**
 Updated: 2026-09-27
 
+## 0. Scheduling note
+
+This file controls only retirement/cleanup of the old Python BSC prototype. It does **not** schedule current BSC implementation work.
+
+Current work starts with `docs/GATE0_TESTPLAN_SHORT.md`; full native C0+ production work begins only after Gate-0 PASS.
+
 ## 1. Decision
 
 The Pass-6 Python Phase-C ZIP is retained only as external engineering evidence.
