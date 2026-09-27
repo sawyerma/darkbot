@@ -60,7 +60,7 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | A | **DONE / KEEP** | Existing Solana/Pump.fun + Phase-A multichain seam |
 | C-PY | **RETIRED** | Old Python BSC/EVM prototype retained only as engineering evidence |
 | G0.1 | **IN PROGRESS** | Freeze Flap + Four Classic + OpenFour Mainnet contracts, versions, launch/BUY semantics and live evidence |
-| G0.2 | **BLOCKED** | Build BUY-field pre-computability matrix and freeze one exact PRIMARY_GATE0_SCOPE |
+| G0.2 | **IN PROGRESS** | BUY-field pre-computability matrix created; finish Flap v5.24.0 proof and freeze one exact PRIMARY_GATE0_SCOPE |
 | G0.3 | **BLOCKED** | Prove minimal exact launch→BUY semantic validity for PRIMARY_GATE0_SCOPE before performance tuning |
 | G0.4 | **BLOCKED** | Start bounded pending/actionable coverage in parallel as soon as launch evidence is frozen |
 | G0.5 | **BLOCKED** | Benchmark/optimize complete local path through T_send after semantic BUY validity is proven |
