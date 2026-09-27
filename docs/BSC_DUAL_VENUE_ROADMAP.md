@@ -67,8 +67,9 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | G0.6 | **BLOCKED** | Prove ordered launch→BUY validity for each supported venue/mode |
 | G0.7 | **BLOCKED** | Controlled minimal-value Mainnet validation |
 | G0.8 | **BLOCKED** | Verify actual tx ordering, competing BUYs, receipt and entry price |
-| G0.9 | **BLOCKED** | PASS / ADAPT / STOP decision per venue + external-infrastructure dependency classification |
+| G0.9 | **BLOCKED** | Classify external builder dependency: NONE / BENEFICIAL / REQUIRED / UNKNOWN |
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
+| G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
 | C0 | **BLOCKED BY G0 PASS** | Production Rust wire/event/journal/replay foundation |
 | C1 | **BLOCKED** | Production bsc-geth Fast Lane + SPSC ingress |
 | C2 | **BLOCKED** | Production pending/canonical/reorg/nonce/replacement state |
