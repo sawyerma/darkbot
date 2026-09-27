@@ -12,6 +12,16 @@ Detailed source of truth:
 
 Older versions of this file are historical only and remain available through Git history.
 
+## 0. Global execution invariant
+
+For birth-sniping, DarkBot trades **directly on-chain**. Venue websites/frontends are never in the BUY path.
+
+```
+chain/pending signal -> local decision/build/sign -> inclusion adapter -> venue contract
+```
+
+No browser, page refresh, frontend trading API or manual action may gate execution. If required BUY inputs are available before first tradability, precompute/pre-submit through a proven ordered path as far as safely possible; otherwise react to the earliest valid chain evidence. Never wait for frontend publication.
+
 ## 1. Product shape
 
 ```
