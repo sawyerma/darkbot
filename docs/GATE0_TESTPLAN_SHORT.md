@@ -182,6 +182,10 @@ Do not add Strategy C, research DB architecture, full reorg engine, full capture
 ### G0.1 Evidence freeze
 Freeze current Flap/Four contracts, versions, selectors, launch and BUY semantics.
 
+Before any value-bearing G0.7 attempt, freeze a numeric acceptance contract covering at minimum: trial count / minimum evaluable sample, denominator rules, minimum successful-acquisition rate, maximum revert/drop/failure rate, maximum late-BUY rate, maximum missed-actionable-launch rate, pending-coverage accounting, maximum authorized spend, concurrency/nonce stress requirement, and exact PASS / ADAPT / STOP thresholds.
+
+Every attempt selected by the frozen sampling rule stays in the statistics. No post-hoc removal of unfavorable outcomes.
+
 ### G0.2 Pre-computability proof
 For each venue prove whether token address + all BUY inputs are available before `T0`.
 
@@ -214,7 +218,7 @@ Compare candidate submission/builder paths under the same test conditions.
 
 Measure acknowledgement as diagnostic data only.
 
-### G0.6 Sequential validity
+### G0.6 Sequential and concurrency validity
 Before value-bearing validation, prove that:
 
 ```
@@ -223,21 +227,34 @@ launch -> BUY
 
 is a valid ordered execution for the exact venue/version/mode.
 
+Mandatory stress cases must also prove that multiple simultaneously actionable launches do not create sender/nonce collisions, accidental replacement, head-of-line blocking beyond the frozen latency target, token/recipient cross-wiring, overwritten BUY inputs, duplicate economic submission, or shared-state races.
+
 ### G0.7 Controlled Mainnet validation
-Only after dry qualification, use minimal user-authorized test value.
+Only after dry qualification and after the G0.1 acceptance contract is frozen, use minimal user-authorized test value.
 
 No unattended strategy trading is needed for Gate 0.
 
-### G0.8 Economic ordering proof
-For each successful validation record:
+Record every selected trial outcome, including successful BUY, revert, dropped/not-included submission, late BUY, missed actionable launch, launch not visible with sufficient pending data, and unsupported venue mode.
 
-- launch tx hash/index;
-- our BUY tx hash/index;
-- same block YES/NO;
-- successful competing BUYs between launch and ours;
-- entry price versus earliest observable successful BUY price;
-- revert/drop/failure;
-- inclusion path used.
+### G0.8 Successful-acquisition and ordering proof
+For every controlled validation attempt record the full outcome.
+
+A trial counts as `SUCCESSFUL_BUY` only when all required acquisition evidence is present:
+
+- expected token address equals acquired token address;
+- expected recipient equals actual recipient;
+- acquired token amount is positive;
+- token transfer/balance evidence is attributable to our BUY;
+- actual debit plus measurable fees/costs are recorded;
+- venue BUY execution is attributable to our submitted transaction/bundle;
+- launch/BUY ordering is verified;
+- successful competing external BUYs between launch and ours are counted;
+- entry price versus earliest observable successful external BUY price is recorded;
+- inclusion path is recorded.
+
+A successful transaction receipt without acquisition evidence is not a successful BUY.
+
+Launch-internal creator/presale/initial purchases are recorded separately as `LAUNCH_INTERNAL_BUY`; they are not externally overtakeable competitors. Aggregate acceptance uses the frozen G0.1 denominator and thresholds.
 
 ### G0.9 Builder-dependency classification
 
@@ -270,14 +287,16 @@ Gate 0 does not require the full own builder to be built. It records whether the
 
 ```
 PASS:
-- exact BUY can be prepared fast enough;
-- real validation reaches the first technically possible execution position with competitive repeatability.
+- the complete controllable path reaches `T_send` inside the frozen latency requirement;
+- real validation proves actual token acquisition, not merely submission/receipt;
+- earliest technically possible external BUY placement satisfies every frozen G0.1 acceptance threshold;
+- concurrency/nonce stress satisfies its frozen requirement.
 
 ADAPT:
-- failure is attributable to one measured, realistically removable bottleneck.
+- one or more frozen thresholds miss and the miss is attributable to a measured, realistically removable bottleneck.
 
 STOP:
-- the venue/chain cannot repeatedly reach an economically early enough first-BUY position after credible ingress/inclusion paths are tested.
+- after credible ingress/inclusion paths are tested, the venue cannot satisfy the frozen successful-acquisition / first-external-BUY acceptance contract.
 ```
 
 ## 9. Local latency classification
