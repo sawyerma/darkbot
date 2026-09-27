@@ -28,7 +28,7 @@ earliest verified chain/pending evidence
 -> direct BSC execution against the verified venue contract
 ```
 
-For Four.meme this means direct interaction with the verified current TokenManager/TokenManager2 trade surface; for Flap it means direct interaction with the verified current Flap/BNB Portal contract surface. Exact addresses, versions, selectors and modes must be frozen from current evidence before use.
+For Four.Meme this means direct interaction with the verified current protocol family selected by Gate 0: either Classic TokenManager2 or OpenFour Core. These are separate protocol families and MUST NOT share assumed launch/BUY semantics. For Flap it means direct interaction with the verified current Flap/BNB Portal contract surface. Exact addresses, versions, selectors and modes must be frozen from current evidence before use.
 
 A builder/bundle provider or local bsc-geth is an **inclusion transport**, not a trading frontend. It may carry the already-constructed signed transaction/bundle to block execution, but it never supplies strategy, quote, BUY logic or readiness.
 
@@ -59,7 +59,7 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | --- | --- | --- |
 | A | **DONE / KEEP** | Existing Solana/Pump.fun + Phase-A multichain seam |
 | C-PY | **RETIRED** | Old Python BSC/EVM prototype retained only as engineering evidence |
-| G0.1 | **NEXT** | Freeze current Flap/Four Mainnet contracts, versions, launch/BUY semantics |
+| G0.1 | **IN PROGRESS** | Freeze Flap + Four Classic + OpenFour Mainnet contracts, versions, launch/BUY semantics and live evidence |
 | G0.2 | **BLOCKED** | Build BUY-field pre-computability matrix and freeze one exact PRIMARY_GATE0_SCOPE |
 | G0.3 | **BLOCKED** | Prove minimal exact launch→BUY semantic validity for PRIMARY_GATE0_SCOPE before performance tuning |
 | G0.4 | **BLOCKED** | Start bounded pending/actionable coverage in parallel as soon as launch evidence is frozen |
@@ -159,9 +159,9 @@ Before full Phase D, Gate 0 is allowed to implement a **minimal factual Flap pro
 
 This is not the full production decoder.
 
-### Four.meme
+### Four.Meme Classic / OpenFour
 
-Before full Phase E, Gate 0 is allowed to implement a **minimal factual Four probe** sufficient for the same feasibility questions.
+Gate 0 treats Four Classic TokenManager2 and OpenFour Core as separate current protocol families. Before full Phase E, minimal factual probes may be implemented for each family sufficient for the same feasibility questions, but assumptions/decoders must not be shared without evidence.
 
 Do not assume pre-execution token-address derivation. Prove it or record that it is unavailable.
 
