@@ -133,6 +133,10 @@ Current evidence snapshot:
 
 A builder is never selected on marketing claims. Actual first-BUY ordering decides.
 
+External builder access is not assumed to be permanent. If Gate 0 classifies external builder access as BENEFICIAL or REQUIRED, the roadmap activates an own-builder option.
+
+That option is accepted only if validator/proposer reach, practical coverage, operating cost and measured inclusion quality are competitive enough. The ability to run builder software alone is not sufficient.
+
 ## 4. Gate-0 latency evidence
 
 Record local timestamps such as:
