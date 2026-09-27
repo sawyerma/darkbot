@@ -212,6 +212,33 @@ For each successful validation record:
 
 ### G0.9 Decision
 
+Also classify external builder dependency:
+
+```
+BUILDER_DEPENDENCY = NONE | BENEFICIAL | REQUIRED | UNKNOWN
+```
+
+- NONE: third-party builder access adds no material benefit.
+- BENEFICIAL: it improves the result but is not strictly necessary.
+- REQUIRED: the target result is not reproducible without builder access.
+- UNKNOWN: evidence is insufficient.
+
+If BENEFICIAL or REQUIRED, G0.10 evaluates an own-builder alternative before any permanent paid-provider assumption.
+
+### G0.10 Own-builder feasibility
+
+Evaluate only the infrastructure question:
+
+- can the current official BSC builder interface be implemented/operated by us;
+- what validator/proposer integration is required;
+- what practical proposer coverage is available;
+- what operating/maintenance cost results;
+- whether an own builder could match the measured inclusion quality of the external path.
+
+Gate 0 does not require the full own builder to be built. It records whether the later KB phase is justified.
+
+### G0.9 Decision
+
 ```
 PASS:
 - exact BUY can be prepared fast enough;
