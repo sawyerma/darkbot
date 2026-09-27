@@ -1,7 +1,7 @@
 # Gate 0 — G0.1 BSC Evidence Freeze
 
-Status: **PARTIAL PASS — DOCUMENT + ON-CHAIN EVIDENCE PRESENT; FINAL SCOPE FREEZE STILL OPEN**
-Date: 2026-09-27
+Status: **G0.1 IN PROGRESS — STRONG ON-CHAIN EVIDENCE PRESENT; OPENFOUR LAUNCH FIXTURE + FINAL MODE FREEZE STILL OPEN**
+Date: 2026-09-28
 
 This file records the current G0.1 evidence. It is not Gate-0 PASS and does not authorize value-bearing tests.
 
@@ -19,27 +19,80 @@ G0.2 must compare candidate modes and freeze exactly one:
 
 PASS never transfers automatically to an untested family/mode.
 
-## 2. Local evidence already collected on 2026-09-27
+## 2. Local read-only evidence collected on 2026-09-27/28
 
-The Mac preparation/evidence run reported:
+The Mac evidence run reported:
 
 - BSC chain id `0x38 = 56`;
 - reference block `124414293`, hash `0x58c1892369c7544d6ed4d2ee38f54f0295114816de0fe2668cd610cb45811def`;
 - later reference block `124414743`, hash `0x827501e0a628f4427ec213709e1e858110283eeb71dbcdece9b07b2a39096c51`;
-- Flap Portal `0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0`;
-- Flap proxy implementation observed as `0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20`;
-- Four Classic TokenManager2 `0x5c952063c7fc8610FFDB798152D69F0B9550762b`;
-- Four Classic proxy implementation observed as `0xf32ee25a7a94f5858692b90815493bda9f992eee`;
-- bytecode was cross-read through two public BSC RPCs and matched;
-- a real Four Classic `createToken(bytes,bytes)` transaction was captured:
+- no key was read, no transaction was signed and no transaction was sent by DarkBot during G0.1;
+- RPC wall-clock reads around 0.5–0.9 s are evidence-fetch times only and are **not** DarkBot latency measurements;
+- no `T_signal`, `T_ready`, `T_queue`, `T_send` or `T_buy` latency has yet been measured.
+
+### Four Classic live evidence
+
+- TokenManager2 `0x5c952063c7fc8610FFDB798152D69F0B9550762b`;
+- proxy implementation observed as `0xf32ee25a7a94f5858692b90815493bda9f992eee`;
+- bytecode cross-read through two public BSC RPCs matched;
+- real `createToken(bytes,bytes)` launch:
   - tx `0x8cc24c0cb9f40ee92240959fbafece1a2fc22f2e367b42366050a33cba827e5b`
   - block `124415333`
+  - block hash `0xbcf5ab6e8e741e11acb17495d58a05af93f2ce75d6acf1e4ffbd3fa253a94abd`
   - transaction index `43`
   - receipt status `1`
-  - selector `0x519ebb10`;
-- local Four evidence artifacts exist under the user's `gate0-evidence/2026-09-27-g01` workspace.
+  - selector `0x519ebb10`
+  - decoded token `0xa89a24209a3ae8ba1ffb3f0567b69ef4765bffff`
+  - decoded creator `0x1985ec0215a94db223f5ae98b436074c4be1219b`
+  - decoded requestId `103111172`
+  - decoded symbol `YING`;
+- Helper3 `0xF251F83e40a78868FcfA3FA4599Dad6494E46034` latest-state probe returned version `2` and the exact TokenManager2 address;
+- historical Helper3 read failure with `missing trie node` is classified as public-RPC archive limitation, not protocol evidence.
 
-The previously reported SHA-256 digests of deployed runtime bytecode are retained only as supplemental byte fingerprints. They are **not** labeled EVM codehashes.
+### OpenFour live evidence
+
+- Registry `0x912CEf0C3aE9Ab6eB3Ec87cab69371cFb317Ab94`;
+- current `openFourCore()` -> `0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3`;
+- current `openFourTool()` -> `0x97da82f56fef1a0b974587a48135fa9da2a4e905`;
+- current `feeRouter()` -> `0x7383b244b416db16aa9dd0ab7c296aa60255b9a2`;
+- current `wrappedNative()` -> WBNB `0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c`;
+- EIP-1967 implementation slots observed:
+  - Registry -> `0x9d6f9e62a2ffe33ce81bd1f291bdea74e3a9dc6b`
+  - Core -> `0x42a7378dcbc7dcd644b5c9b196c5451f847cbedc`
+  - Tools -> `0x7eca56ed477345ad17cf327f3b54fa5226434b98`;
+- official OpenFour source commit pinned at `0527d529d59c6a3fbc9927ce391ecc97c66e1b01`;
+- official ABI confirms `createToken(bytes,bytes)`, `buy(...)`, `buyByBudget(...)`, `estimateBuy(...)` and `estimateBuyByBudget(...)`.
+
+OpenFour still lacks a canonical real create/BUY fixture in the current G0.1 evidence set.
+
+### Flap live evidence
+
+- Portal `0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0`;
+- proxy implementation observed as `0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20`;
+- live `version()` returned **`v5.24.0`**;
+- the public deployment page still showed `v5.23.1` at the time of the run; the live contract therefore overrides that stale documentation value for Gate-0 evidence;
+- real `newTokenV7` launch:
+  - selector `0x8cb5772c`
+  - block `124415357`
+  - transaction index `0`
+  - decoded token `0xabe1fe16cf6bc48c9524713054efe6e954b17777`
+  - name `Koyuki`
+  - symbol `こゆき`;
+- first observed external BUY for that token:
+  - block `124415358`
+  - transaction index `16`
+  - tx `0x73716f5fffab9493483d8eae7c1b170bc4d33feaa8346bb07d5c6a0d91d2595b`
+  - receipt status `1`;
+- second external BUY:
+  - block `124415359`
+  - transaction index `17`
+  - tx `0x6f723464dbb64ba0d5e6f468b3a411161e7861baa6214dc7d38938b5a46514b6`
+  - receipt status `1`;
+- later BUY `0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b` also succeeded and emitted both `TokenBought` and a target-token `Transfer` to the buyer.
+
+This historical Flap fixture proves factual launch/BUY decoding and ordering for one real v5.24.0-era `newTokenV7` launch. It is not DarkBot's BUY and proves no local latency.
+
+The previously reported SHA-256 digests of deployed runtime bytecode may be retained only as supplemental byte fingerprints. They are **not** labeled EVM codehashes.
 
 ## 3. Keccak / ABI hashing rule
 
@@ -58,31 +111,35 @@ Known Classic Four signatures already cross-checked against BSC `web3_sha3` incl
 - `buyTokenAMAP(address,uint256,uint256)` -> `0x87f27655`
 - `buyTokenAMAP(address,address,uint256,uint256)` -> `0x7f79f6df`
 
-## 4. Flap — current documented surface
+## 4. Flap — current documented + live surface
 
-Official Flap sources inspected on 2026-09-27:
+Official Flap sources inspected on 2026-09-27/28:
 
-- BNB Portal documentation: v5.23.1
 - Portal: `0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0`
+- live on-chain `version()`: **`v5.24.0`**
+- public deployment documentation observed one version behind at `v5.23.1`
 - official repository `flap-sh/FlapVaultExample`, main observed at `5949cc7eb99bcb5ac5f679cc710ae456e627f12a`
 - `src/flap/IPortal.sol` blob `f4d50e1580339125c40a7d032b6f8fca3da19663`
 
 Current interface exposes multiple launch families, including `newTokenV6` and `newTokenV7`.
 
+The real canonical fixture establishes that `newTokenV7` is an active launch path and that external successful BUYs follow such a launch.
+
 Important semantics:
 
 - launch params contain CREATE2 `salt` semantics;
-- `quoteAmt` is the initial quote amount spent during creation, therefore `quoteAmt > 0` is `LAUNCH_INTERNAL_BUY`;
+- `quoteAmt` is an initial quote amount spent during creation, therefore `quoteAmt > 0` is `LAUNCH_INTERNAL_BUY`;
 - external trading includes `swapExactInput`;
 - extension-aware modes include `swapExactInputV3`;
 - acquisition event surface includes `TokenBought`.
 
-G0.2 must choose an exact Flap launch/trade mode and prove:
+Remaining before Flap can be frozen as a G0.2 candidate scope:
 
-- exact token-address derivation from pending launch calldata for that mode;
-- exact initial state/quote data available before external tradability;
-- exact external BUY call;
-- whether extension/tax/quote modes change the first-BUY transaction.
+- pin the exact v5.24.0 ABI/interface semantics for the selected `newTokenV7` mode;
+- derive and cross-check the exact selected external BUY selector/mode from the real fixture;
+- prove the exact token-address derivation from pending `newTokenV7` calldata for that mode;
+- decode whether the fixture contains launch-internal `quoteAmt` and other mode-changing fields;
+- identify any extension/tax/quote-mode conditions that invalidate the simple BUY path.
 
 ## 5. Four.Meme Classic — current documented surface
 
@@ -94,7 +151,7 @@ Published BSC addresses:
 - TokenManager2 V2: `0x5c952063c7fc8610FFDB798152D69F0B9550762b`
 - TokenManagerHelper3: `0xF251F83e40a78868FcfA3FA4599Dad6494E46034`
 
-New Classic launches use TokenManager2/V2.
+New Classic launches use TokenManager2/V2. The real captured launch fixture and Helper3 latest-state probe both support this routing for the sampled token.
 
 Creation:
 
@@ -136,6 +193,19 @@ Current Core/Tools addresses are intentionally resolved dynamically via:
 - `OpenFourRegistry.openFourCore()`
 - `OpenFourRegistry.openFourTool()`
 
+Live resolution in the read-only run returned:
+
+- Core `0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3`
+- Tools `0x97da82f56fef1a0b974587a48135fa9da2a4e905`
+- FeeRouter `0x7383b244b416db16aa9dd0ab7c296aa60255b9a2`
+- WBNB `0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c`
+
+Observed proxy implementations:
+
+- Registry `0x9d6f9e62a2ffe33ce81bd1f291bdea74e3a9dc6b`
+- Core `0x42a7378dcbc7dcd644b5c9b196c5451f847cbedc`
+- Tools `0x7eca56ed477345ad17cf327f3b54fa5226434b98`
+
 Current Core surface includes:
 
 - `createToken(bytes,bytes)`
@@ -148,41 +218,53 @@ Documentation notes that the API token-address placeholder may be empty before c
 
 OpenFour presets/modules/quote modes are explicit scope dimensions. No Classic Four decoder or BUY assumptions may be reused without proof.
 
-## 7. Remaining G0.1 live-read requirements
+## 7. Remaining G0.1 requirements
 
-Before `G0.1_COMPLETE`, perform read-only live checks for all candidates that remain under consideration:
+The following are still required before `G0.1_COMPLETE`:
 
-- latest chain/reference block and hash;
-- non-empty deployed runtime code;
-- proxy/implementation resolution where applicable;
-- vetted Keccak-256 runtime code fingerprint;
-- exact ABI/interface source commit/blob;
-- current Flap `version()`;
-- current OpenFour Registry `openFourCore()` and `openFourTool()`;
-- Core/Tools runtime code fingerprints;
-- exact candidate launch and BUY selectors/topics;
-- at least one real canonical launch fixture per candidate family/mode that remains eligible.
+1. **OpenFour canonical fixture**
+   - find and preserve at least one real current create transaction for the resolved Core;
+   - decode `TokenCreated`;
+   - preserve a real external BUY fixture for the same token when available;
+   - pin the preset/module/quote mode represented by that fixture.
 
-Any mismatch reopens G0.1.
+2. **Flap v5.24.0 exact mode freeze**
+   - pin exact ABI/interface evidence for the real `newTokenV7` fixture;
+   - freeze the external BUY method/selector used by the selected fixture;
+   - decode launch-internal purchase fields and mode-changing fields;
+   - prove or reject pre-execution token-address derivation for that exact mode.
+
+3. **Vetted Keccak fingerprints**
+   - generate runtime-code Keccak-256 fingerprints and any remaining selectors/topics with a vetted implementation;
+   - retain independent cross-check evidence.
+
+4. **Candidate-scope inventory**
+   - record which Flap, Four Classic and OpenFour modes remain eligible for G0.2;
+   - unsupported/unknown modes fail closed.
+
+A separate Four Classic external BUY fixture is useful evidence but is **not required to close G0.1** if the selected BUY surface, ABI/selectors and launch semantics are frozen. Semantic `launch -> BUY` validity is tested in G0.3.
+
+No DarkBot BUY transaction is required for G0.1.
 
 ## 8. G0.1 completion rule
 
 Current state:
 
-- Flap document + partial on-chain evidence: **PARTIAL**
-- Four Classic document + real launch fixture + partial on-chain evidence: **STRONG PARTIAL**
-- OpenFour document evidence: **PARTIAL; live registry/core/tool freeze still required**
-- exact `PRIMARY_GATE0_SCOPE`: **NOT YET SELECTED**
+- Flap live deployment + real `newTokenV7` launch + real external BUY ordering fixture: **STRONG PARTIAL**
+- Four Classic live deployment + real launch fixture + Helper3 routing evidence: **STRONG PARTIAL**
+- OpenFour live Registry/Core/Tools/proxy freeze + pinned ABI: **STRONG PARTIAL; canonical launch fixture still missing**
+- exact `PRIMARY_GATE0_SCOPE`: **NOT YET SELECTED** — selection belongs to G0.2 after G0.1 candidate evidence is complete
 
 Therefore:
 
 `G0.1_COMPLETE = false`
 
-Next allowed work:
+Next work:
 
-1. finish read-only OpenFour live freeze;
-2. finish Flap exact selector/mode freeze and obtain real launch fixture;
-3. use vetted Keccak/ABI hashing only;
-4. then close G0.1 and begin G0.2 preparation-matrix comparison.
+1. obtain/decode canonical OpenFour launch fixture;
+2. finish exact Flap v5.24.0 `newTokenV7` + external BUY selector/mode freeze;
+3. generate remaining Keccak fingerprints with a vetted primitive;
+4. close G0.1;
+5. begin G0.2 preparation-matrix comparison and select `PRIMARY_GATE0_SCOPE`.
 
-No BUY transaction is required for G0.1.
+No value-bearing DarkBot transaction is needed before G0.7.
