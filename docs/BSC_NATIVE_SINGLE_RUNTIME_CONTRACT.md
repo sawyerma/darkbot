@@ -349,7 +349,33 @@ Every stage reports p50/p95/p99/p99.9/p99.99/max plus exact counts above 0.5/1/3
 
 No percentile may hide a bad maximum.
 
-## 14. Optional maximum-speed escalation
+## 14. Maximum-speed escalation without architecture inflation
+
+The default implementation remains deliberately small:
+
+```
+one local bsc-geth
++ one inbound SPSC ring
++ one Rust runtime
++ one outbound SPSC ring
++ one native binary recorder
+```
+
+Do not add a component merely because it could be faster in theory.
+
+The following escalation levels are retained so the -10 ms objective is not forgotten, but each is gated by measurements from the simpler level.
+
+Instrument from C1 onward:
+
+- source peer identity;
+- full-TX vs hash-only announcement path;
+- first-seen spread among peers for the same tx;
+- peer decode -> EARLY_TX_SEEN;
+- local geth acceptance -> first outbound peer handoff.
+
+These measurements are part of the normal event evidence and do not create another runtime.
+
+## 15. Optional maximum-speed escalation
 
 The core is designed so ingress can be replaced without changing strategy semantics.
 
@@ -367,7 +393,27 @@ A Rust BSC devp2p observer may receive the same peer transaction stream earlier 
 
 It must not create a second strategy/runtime.
 
-### Level 3 — kernel/NIC specialization
+### Level 3 — peer/topology race
+
+If Phase-F evidence shows the local peer topology, not local compute, is the dominant loss:
+
+- rank peers by actual relevant first-seen performance, never ping alone;
+- compare a small number of geographically separate native sensors;
+- keep source/timestamp provenance;
+- if multi-source ingress becomes production, define one deterministic earliest-valid-event arbitration module and use that exact module in capture/replay/PAPER/LIVE;
+- optionally propagate the exact same signed raw transaction through multiple controlled broadcast nodes after proving deterministic transaction identity.
+
+No regional sensor may contain its own strategy/economics implementation.
+
+### Level 4 — direct Rust devp2p observer
+
+Only if geth ingress processing itself is a measured bottleneck.
+
+A dedicated Rust BSC devp2p observer may receive the relevant peer transaction stream earlier and feed the exact same Rust event/core API.
+
+It must not create a second strategy/runtime.
+
+### Level 5 — kernel/NIC specialization
 
 Only if kernel receive jitter is proven to be the remaining economic bottleneck:
 
@@ -378,7 +424,9 @@ Only if kernel receive jitter is proven to be the remaining economic bottleneck:
 
 Do not add DPDK/AF_XDP complexity without evidence. The architecture permits it without changing the Rust core.
 
-## 15. Rust workspace
+At every escalation level the simplest measured solution wins. Remove or leave disabled any layer that does not improve the relevant lead/tail metric.
+
+## 16. Rust workspace
 
 Target:
 
@@ -405,7 +453,7 @@ native/
 
 Keep packages responsibility-based and small. Do not create a framework for hypothetical chains.
 
-## 16. Solana relationship
+## 17. Solana relationship
 
 Existing Solana/Pump.fun remains frozen and working while BSC native work is proven.
 
@@ -433,7 +481,7 @@ Python offline analysis only
 
 without risking the currently proven Solana system during BSC development.
 
-## 17. Acceptance principle
+## 18. Acceptance principle
 
 Architecture is accepted only by measurement.
 
