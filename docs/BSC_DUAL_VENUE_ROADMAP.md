@@ -305,11 +305,7 @@ STOP.
 
 ## 16. I — PAPER/shadow + final production hot-path requalification
 
-Run the same production path through build/sign, suppressing only final external submission.
-
-PAPER does not re-prove Gate-0 economic feasibility, but the now-complete production path MUST be requalified for latency after D/E/G/H have added the full decoder, state, economics and strategy layers.
-
-Mandatory pre-J production re-gate:
+Run the same production semantics through build/sign in PAPER/shadow, but distinguish two boundaries:
 
 ```
 production event
@@ -319,11 +315,22 @@ production event
 -> production strategy / admission
 -> production transaction build
 -> production signer
--> production serialization / adapter queue
--> T_send
+-> production serialization
+-> PAPER test-sink handoff = T_shadow_sink
 ```
 
-The complete production path must still satisfy the frozen local latency requirement using the same timing boundary as G0.3. A fast Gate-0 prototype or earlier C3 result cannot waive this requalification.
+`T_shadow_sink` is useful for isolating local production-code cost but is **not** the real transport boundary and must never be reported as `T_send`.
+
+Before broad LIVE is enabled, run a controlled transport revalidation using the actual Gate-0-proven production adapter:
+
+```
+production event
+-> same full production path
+-> actual adapter queue/IPC
+-> actual defined transport handoff = T_send
+```
+
+The final production program must still satisfy the frozen local latency requirement using the same adapter-specific timing boundary defined in Gate 0 **G0.5**. A fast Gate-0 prototype, C3 result or PAPER test sink cannot waive the real transport revalidation.
 
 Also rerun the required concurrent-launch/nonce stress cases against the final production runtime.
 
@@ -331,7 +338,7 @@ STOP.
 
 ## 17. J — production LIVE
 
-J is production enablement, not the first time inclusion is tested.
+J is production enablement, not the first time inclusion is tested. Its first controlled step revalidates the actual production transport boundary before broader LIVE is permitted.
 
 Use only inclusion adapters already validated in Gate 0 and revalidated for current service/API behavior.
 
