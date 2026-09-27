@@ -225,7 +225,7 @@ For each successful validation record:
 - revert/drop/failure;
 - inclusion path used.
 
-### G0.9 Decision
+### G0.9 Builder-dependency classification
 
 Also classify external builder dependency:
 
@@ -252,7 +252,7 @@ Evaluate only the infrastructure question:
 
 Gate 0 does not require the full own builder to be built. It records whether the later KB phase is justified.
 
-### G0.9 Decision
+### G0.11 Decision
 
 ```
 PASS:
