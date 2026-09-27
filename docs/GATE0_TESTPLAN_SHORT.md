@@ -7,7 +7,11 @@ Updated: 2026-09-27
 
 Before any further low-latency production build, answer one question:
 
-> When a new coin becomes buyable for the first time, can DarkBot obtain the earliest technically possible successful BUY?
+> When a new coin becomes externally buyable for the first time, can DarkBot obtain the earliest technically possible successful external BUY?
+
+If the launch transaction itself contains a creator/presale/initial BUY, that launch-internal acquisition is not an externally overtakeable BUY. DarkBot's target is then the first technically possible external successful BUY after the launch-internal state transition.
+
+A BUY counts as successful only when the intended token is actually acquired by the intended recipient with a positive received amount and attributable economic debit/cost. Build, sign, send, adapter ACK or receipt status alone are insufficient.
 
 Test objects:
 - Solana / Pump.fun
@@ -123,8 +127,10 @@ No builder is assumed fastest. Gate 0 measures the result.
 
 Freeze current BNB Portal/version and launch/buy semantics.
 
-Current public documentation snapshot lists BNB Portal v5.8.6:
+Current public documentation snapshot (reverified 2026-09-27) lists BNB Chain Portal v5.23.1 at `0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0`:
 https://docs.flap.sh/flap/developers/deployed-contract-addresses
+
+G0.1 MUST reverify and freeze the current deployment/version/address/ABI/selectors immediately before implementation.
 
 Prove from current ABI/on-chain evidence whether token address derivation is deterministic before `T0`, then build the exact first BUY path.
 
@@ -180,13 +186,21 @@ Freeze current Flap/Four contracts, versions, selectors, launch and BUY semantic
 For each venue prove whether token address + all BUY inputs are available before `T0`.
 
 ### G0.3 Local hotpath proof
-Benchmark:
+Benchmark the complete controllable BUY path through transport handoff:
 
 ```
-T_pre -> venue decode -> BUY build -> sign -> T_ready
+T_pre
+-> minimal venue decode
+-> derive required BUY inputs / local quote
+-> transaction-template patch/build
+-> sign
+-> final serialization / adapter queue
+-> T_send
 ```
 
-Target: comfortably below 1 ms on target-like hardware.
+Record `T_ready` and `T_send` separately so post-sign serialization/queue delay is visible.
+
+Target: `T_pre -> T_send < 1 ms` on target-like hardware.
 
 This is an engineering metric only; it does not prove a real first BUY.
 
