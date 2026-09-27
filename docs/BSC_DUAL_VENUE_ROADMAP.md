@@ -4,6 +4,7 @@ Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-09-27
 
 Normative architecture:
+- `docs/GATE0_TESTPLAN_SHORT.md` — kurzer vollständiger Ausführungsplan für Gate 0
 - `docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md` — final MUST/OPTIONAL/FORBIDDEN birth-entry architecture
 - `docs/BSC_PHASE_C_PYTHON_RETIREMENT.md`
 - `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
