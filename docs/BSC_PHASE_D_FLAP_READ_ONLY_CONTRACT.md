@@ -1,6 +1,6 @@
 # DarkBot — Phase D / M7 Flap.sh Rust Decoder Contract
 
-Status: **BLOCKED UNTIL PHASE C + NATIVE RUNTIME GATE ARE ACCEPTED**
+Status: **BLOCKED UNTIL NATIVE PHASES C0-C3 ARE ACCEPTED**
 Milestone: **M7**
 End rule: **STOP after independent Phase-D review**
 
