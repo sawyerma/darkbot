@@ -35,43 +35,73 @@ Current Mac regression/performance evidence supplied during Gate-0 preparation:
 
 These numbers are from the existing Solana/PAPER path on macOS. They do not include BSC transaction construction, signing or real transport handoff and therefore do not satisfy G0.5.
 
-## 2. Candidate A — Flap Portal v5.24.0 / newTokenV7
+## 2. Candidate A — Flap Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3
 
 Evidence:
 
 - live Portal: `0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0`;
 - live `version()` returned `v5.24.0`;
-- real canonical `newTokenV7` launch fixture exists;
+- real canonical `newTokenV6` launch fixture exists;
+- selector `0x8cb5772c` decodes as `newTokenV6`;
+- `tokenVersion = 6 = TOKEN_TAXED_V3`;
+- quote token = WBNB `0xba2ae424d960c26247dd6c32edc70b295c744c43`;
+- `quoteAmt = 80574062404`;
+- `buyTaxRate = 100`, `sellTaxRate = 100`;
+- tax distribution sums to 10000 bps;
 - real successful external BUY fixtures exist after that launch;
 - canonical BUY fixture uses `swapExactInput` selector `0xef7ec2e7`;
-- target-token transfer evidence exists for a successful BUY.
+- target-token transfer evidence exists for a successful BUY;
+- current published Tax Token V3 CREATE2 recipe does **not** reproduce the actual fixture token address.
 
 | BUY field/state | Verified source | Earliest availability | Signature-bound? | Precomputable before actionable signal? | Hot-path residual | Invalidation/rebuild condition |
 | --- | --- | --- | --- | --- | --- | --- |
 | Portal destination | live G0.1 freeze | startup | yes | yes | none | proxy/implementation/version change |
 | BUY selector | canonical BUY fixture + ABI | startup | yes | yes | none | ABI/mode change |
 | recipient | local wallet config | startup | yes | yes | none | wallet/config change |
-| input token / quote mode | selected launch mode + launch calldata | pending launch if encoded there | yes | **partial / must prove** | mode branch or none | quote/mode mismatch |
-| input amount / BNB value | local policy, constrained by venue semantics | startup plus launch semantics | yes | **partial** | patch/finalize amount | policy or mode/state invalidation |
-| token address | CREATE2/salt semantics + selected implementation/deployer | potentially pending launch | yes | **UNKNOWN — must prove against v5.24.0 fixture** | derive/patch if proven | implementation/salt/deployer mismatch |
-| launch-internal purchase state | `newTokenV7` params including `quoteAmt` and selected mode | potentially pending launch | affects validity/quote | **UNKNOWN/PARTIAL** | local state derivation | launch payload/mode change |
-| initial curve state | selected v5.24.0 launch semantics | potentially derivable from launch payload | affects min output | **UNKNOWN/PARTIAL** | local curve calculation if needed | any state-changing launch-internal action |
-| min output / slippage floor | local policy + exact first-external-BUY state | after required state is derivable | yes | **UNKNOWN/PARTIAL — do not assume no** | compute/patch only if unavoidable | state/input/policy change |
+| quote token / quote mode | decoded V6 launch | pending launch | yes | yes for this fixture mode | none/mode validation | launch mode mismatch |
+| input amount/value | local policy + ERC-20 quote semantics | startup plus policy | yes | partial | patch/finalize amount | policy/state change |
+| token address | V6 salt + actual deployment semantics | potentially pending | yes | **UNKNOWN/PARTIAL — published formula mismatches fixture** | unresolved | implementation/deployer/salt-transform/version mismatch |
+| launch-internal purchase | decoded `quoteAmt` | pending launch | affects state | yes as input fact | state calculation | payload/mode change |
+| tax configuration | decoded V6 params | pending launch | affects economics | yes as input fact | local calculation | payload/mode change |
+| initial curve state | v5.24.0 V6 deployment + quoteAmt + extension/curve semantics | potentially pending | affects output | **UNKNOWN/PARTIAL** | reconstruct locally if proven | deployment/extension/state mismatch |
+| min output / slippage floor | policy + exact first-external-BUY state | after initial state derivable | yes | **UNKNOWN/PARTIAL** | compute/patch if unavoidable | state/input/policy change |
 | nonce | local sender state | continuously maintained | yes | partial/prepared | finalize lane nonce | competing/replacement tx |
 | gas/fee fields | local policy + current head/fee state | continuously maintained | yes | partial | patch/finalize | head/policy invalidation |
-| extension/proof data | selected launch/trade mode | mode dependent | yes | unknown until mode freeze | possibly none or exact bytes | extension/mode change |
+| extension data | decoded launch extension ID/data | pending launch | may affect validity/state | partial | local mode handling | extension semantics/version change |
 
-### Flap G0.2 questions that must be answered next
+### Flap CREATE2 blocker
 
-1. Decode the real `newTokenV7` fixture fully against the live v5.24.0 ABI.
-2. Identify `salt`, `quoteAmt`, quote mode, tax/extension configuration and every field affecting first external BUY validity.
-3. Reproduce the fixture token address from the pending launch inputs with the exact CREATE2/deployer semantics.
-4. Reconstruct the post-launch/pre-external-BUY curve state locally.
-5. Reproduce the first external BUY's executable output/cost semantics locally without synchronous RPC.
-6. Determine whether `minOutputAmount` can be prepared before `T0` or needs a final local patch.
-7. Freeze one exact Flap mode only after these proofs.
+Current official `flap-skills` salt-finding reference uses:
 
-Current Flap assessment: **strongest first candidate, but not yet PRIMARY_GATE0_SCOPE**.
+`CREATE2(Portal, salt, EIP1167(TaxTokenV3 implementation))`
+
+with Tax Token V3 implementation `0x024f18294970B5c76c0691b87f138A0317156422`.
+
+For the historical fixture salt:
+
+`0x0c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c`
+
+the published recipe predicts:
+
+`0xaf5b39fd975d2f1ea9d89ecd8d09676155cb818a`
+
+but the actual token is:
+
+`0xabe1fe16cf6bc48c9524713054efe6e954b17777`
+
+Therefore no pre-T0 token-address claim is allowed yet.
+
+### Required resolution order
+
+1. Read the actual token runtime bytecode at `0xabe1...7777` at latest/current state.
+2. If it is an EIP-1167 clone, extract and compare its embedded implementation to the published Tax Token V3 implementation.
+3. If the embedded implementation differs, recompute CREATE2 with that implementation and document the version-specific mapping.
+4. If it matches yet prediction still fails, obtain historical Portal proxy/implementation state and a CREATE2-capable trace or equivalent evidence at the launch block to identify effective deployer/salt transformation/init code.
+5. Only after address derivation is explained, reconstruct the post-launch initial state and `minOutputAmount` semantics.
+
+Public historical RPC `missing trie node` means current public endpoints are insufficient for the needed historical-state proof; it does not imply the state is unknowable in production.
+
+Current Flap assessment: **strongest first candidate, but G0.3 remains blocked until the V6 deployment/address and initial-state semantics are resolved**.
 
 ## 3. Candidate B — Four.Meme Classic / TokenManager2 V2
 
@@ -126,7 +156,7 @@ Current OpenFour assessment: **not eligible for PRIMARY_GATE0_SCOPE until a cano
 
 Current evidence ranks the candidates for **order of proof only**, not as a performance winner:
 
-1. Flap v5.24.0 / real `newTokenV7` family — first to finish precomputability proof;
+1. Flap v5.24.0 / real `newTokenV6 / TOKEN_TAXED_V3` family — first to finish precomputability proof;
 2. Four Classic / TokenManager2 V2 — second;
 3. OpenFour — deferred until canonical launch evidence exists.
 
@@ -136,7 +166,7 @@ This is not yet a frozen `PRIMARY_GATE0_SCOPE`.
 
 All of the following must be true:
 
-- exact live v5.24.0 `newTokenV7` mode and ABI semantics pinned;
+- exact live v5.24.0 `newTokenV6 / TOKEN_TAXED_V3` mode and ABI semantics pinned;
 - real fixture fully decoded;
 - token address derivation proven from pre-execution/pending data, or earliest unavoidable later derivation point explicitly proven;
 - launch-internal purchase and initial curve state reproduced locally;
@@ -146,7 +176,7 @@ All of the following must be true:
 
 If these pass, freeze:
 
-`PRIMARY_GATE0_SCOPE = Flap / BSC / Portal v5.24.0 / exact newTokenV7 mode / exact swapExactInput mode / exact quote mode`
+`PRIMARY_GATE0_SCOPE = Flap / BSC / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3 / exact swapExactInput mode / exact quote mode`
 
 and proceed to G0.3 minimal correctness-first Launch -> BUY harness.
 
