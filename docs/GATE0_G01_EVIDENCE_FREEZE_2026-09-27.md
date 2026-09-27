@@ -123,15 +123,22 @@ produced:
 
 Therefore token-address precomputability for this exact v5.24.0 historical V6 mode is **UNKNOWN/PARTIAL**. The published formula is not accepted as sufficient evidence for this fixture.
 
-Possible explanations to test, not assumptions:
+The next read-only runtime test resolved one candidate:
 
-1. the actual deployed clone references a different implementation;
-2. the historical Portal implementation used different deployment semantics;
-3. the effective CREATE2 deployer differs from the documented assumption for this path;
-4. the salt is transformed internally before CREATE2;
-5. another version-specific deployment detail is missing from the public reference.
+- actual token runtime is an EIP-1167 clone;
+- embedded implementation is exactly `0x024f18294970B5c76c0691b87f138A0317156422`;
+- therefore a different token implementation is **not** the cause.
 
-First diagnostic: read the actual token runtime bytecode at `0xabe1...7777` and, if it is an EIP-1167 clone, extract the embedded implementation. If that does not resolve the mismatch, obtain historical Portal proxy/implementation state and/or transaction trace at the launch block from an archive/trace-capable BSC source.
+The current official Flap reference and the OpenZeppelin `Clones.sol` vendored by the official Flap example repository also use the same standard 55-byte EIP-1167 creation-code sequence. This makes a simple published-vs-OpenZeppelin init-code-format discrepancy unlikely, although the historical production Portal's actual CREATE2 preimage must still be proven.
+
+Remaining hypotheses, in order of diagnostic value:
+
+1. effective CREATE2 deployer differs from the documented Portal address;
+2. salt is transformed/derived internally before CREATE2;
+3. historical Portal implementation/deployment path used different CREATE2 semantics or another helper/factory;
+4. another version-specific CREATE2 preimage detail is absent from the public reference.
+
+Next evidence target: obtain a trace of launch tx `0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c` that exposes the CREATE2 frame/opcode, effective creator/deployer, salt and init code. If public trace is unavailable, use an archive/trace-capable BSC source and freeze the Portal EIP-1967 implementation slot at block `124415357` before analyzing the historical implementation bytecode/source.
 
 The previously reported SHA-256 digests of deployed runtime bytecode may be retained only as supplemental byte fingerprints. They are **not** labeled EVM codehashes.
 
@@ -273,7 +280,7 @@ The following are still required before `G0.1_COMPLETE`:
 2. **Flap v5.24.0 exact mode freeze**
    - pin exact ABI/interface evidence for the real `newTokenV6 / TOKEN_TAXED_V3` fixture;
    - freeze the external BUY method/selector used by the selected fixture;
-   - resolve the documented CREATE2 prediction mismatch against the actual token;
+   - resolve the documented CREATE2 prediction mismatch; runtime clone and embedded Tax Token V3 implementation are already confirmed, so focus on effective deployer/salt/historical deployment path;
    - reconstruct launch-internal purchase effects and initial tradable state;
    - prove or reject pre-execution token-address and `minOutputAmount` derivation for that exact mode.
 
