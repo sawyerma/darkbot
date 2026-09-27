@@ -10,6 +10,25 @@ Higher-priority feasibility documents:
 
 This production contract becomes active only after at least one BSC venue passes Gate 0.
 
+## 0. Production invariant — no trading frontend
+
+Production BUY execution is direct on-chain only:
+
+```
+native event
+-> Rust venue/economics/admission
+-> local transaction/bundle construction
+-> local signing
+-> Gate-0-proven inclusion adapter
+-> venue contract execution
+```
+
+Four.meme/Flap websites, browser automation, frontend trading APIs and UI state are forbidden production BUY dependencies.
+
+No component may wait for "listed on website", page refresh, frontend button enablement or frontend API publication when the verified chain/pending data required for a valid BUY is already available.
+
+Local bsc-geth/P2P and external/own builders are transport/inclusion adapters only. They receive DarkBot's already-determined transaction/bundle intent; they are not quote, strategy, venue or readiness authorities.
+
 ## 1. Objective
 
 Build one native BSC runtime that preserves the Gate-0-proven first-BUY capability while adding correctness, replayability, strategy and operational safety.
