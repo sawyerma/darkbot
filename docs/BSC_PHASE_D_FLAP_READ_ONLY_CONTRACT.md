@@ -1,183 +1,174 @@
-# DarkBot — Phase D / M7 Flap.sh Rust Decoder Contract
+# DarkBot — Phase D / M7 Flap Production Rust Decoder Contract
 
-Status: **BLOCKED UNTIL NATIVE PHASES C0-C3 ARE ACCEPTED**
+Status: **BLOCKED UNTIL BSC GATE-0 PASS + C0-C3 ACCEPTED**
 Milestone: **M7**
 End rule: **STOP after independent Phase-D review**
 
-Normative parent: `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`.
+Normative parents:
+- `docs/GATE0_TESTPLAN_SHORT.md`
+- `docs/BSC_DUAL_VENUE_ROADMAP.md`
+- `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
 
-## 1. Purpose
+## 1. Scope
 
-Phase D adds factual Flap recognition/decoding directly to the single normative Rust runtime.
+Phase D creates the **full production Flap decoder** in the single Rust runtime.
 
-It does not create a Python trading decoder and does not create a special LIVE decoder.
+Gate 0 is explicitly allowed to contain a smaller Flap feasibility probe before Phase D. That probe exists only to prove:
+- launch recognition;
+- pre-`T0` token/address derivation where possible;
+- exact first-BUY construction;
+- ordered execution feasibility.
 
-The exact same Flap Rust module must later run in native capture, deterministic replay, PAPER/shadow and LIVE.
+It must not become a second production decoder.
 
 ## 2. Preconditions
 
-Do not start until:
+Do not start full Phase D until:
 
-1. Phase C candidate is accepted/merged or explicitly frozen as reference baseline;
-2. Native Runtime Gate is accepted;
-3. exact FastLaneEvent capture/replay identity is proven;
-4. T0-T8 native benchmark has no unresolved reproducible >3 ms runtime path;
-5. Flap Mainnet evidence is frozen;
+1. Flap has PASS from Gate 0;
+2. C0-C3 production foundation is accepted;
+3. current Flap Mainnet evidence is refrozen;
+4. FastLane capture/replay identity is proven;
+5. no unresolved reproducible >3 ms local production path remains;
 6. full repository regression is green.
 
 ## 3. Evidence freeze
 
-Before coding constants, freeze evidence for every supported Flap deployment/version:
+For every supported current Flap deployment/version freeze:
 
 - BSC chain id;
 - contract/deployment address;
 - implementation/version relationship;
-- ABI source + hash;
-- bytecode/code hash where useful;
-- verified launch/BUY/SELL selectors;
+- ABI source/hash;
+- code hash where useful;
+- launch/BUY/SELL selectors;
 - relevant event topics;
 - canonical fixture tx/block/log identities;
 - pending launch samples;
 - deterministic token-address derivation proof or explicit UNKNOWN;
-- mode/config fields actually present on-chain;
+- mode/config fields;
 - provenance/retrieval date.
 
-Unknown/conflicting evidence => UNSUPPORTED. Never guess.
+Unknown/conflicting => UNSUPPORTED.
 
-## 4. Normative implementation location
+Gate-0 facts must be reconfirmed if contracts changed.
 
-Flap runtime semantics belong in Rust, inside the single `darkbot-core` venue module.
+## 4. Implementation ownership
 
-Target shape:
+Normative implementation:
 
 ```
 native/crates/darkbot-core/src/venues/flap.rs
 ```
 
-Split files only when measured/verified complexity requires it.
+One production implementation only.
 
-Python may contain fixture generation, analysis and reference tooling only. Python output is not allowed to determine a LIVE trade.
+Python may analyze fixtures/results but never determine a LIVE trade.
 
-## 5. Hot-path recognizer
+## 5. Hot-path recognition
 
-Use the cheapest verified checks first:
+Order:
 
-1. destination address;
+1. destination;
 2. 4-byte selector;
-3. small fixed version lookup;
-4. full decode only after match.
+3. fixed version lookup;
+4. full verified decode.
 
-Forbidden in recognizer/decoder:
-
+Forbidden:
 - HTTP/RPC/DNS;
 - DB/filesystem;
 - dynamic ABI downloads;
 - JSON reserialization;
-- general reflection;
-- strategy/economics;
-- logging allocation on common path.
+- reflection;
+- logging allocation.
 
-Large or malformed calldata must fail closed without creating a false match.
+Malformed/oversized input fails closed.
 
-## 6. Pending decoding
-
-Decode only verified fields available in FastLaneEvent/raw signed transaction evidence.
+## 6. Pending semantics
 
 Preserve:
 
-- exact native first_seen timestamp;
-- sequence id/source;
+- first-seen timestamp;
+- sequence/source;
 - tx hash;
 - sender/nonce;
 - destination/version;
 - selector;
 - public launch parameters;
 - native value;
-- explicit mode/config fields;
-- predicted token id only if derivation is proven.
+- explicit mode/config;
+- predicted token id only when derivation is proven.
 
-Pending evidence is never canonical existence.
+Pending evidence is not canonical existence.
 
-## 7. Canonical decoding
+## 7. Canonical semantics
 
-Decode verified canonical evidence for:
-
-- CREATE/launch;
+Decode only verified:
+- launch;
 - BUY;
 - SELL;
-- migration/graduation where proven;
+- migration/graduation;
 - factual mode/config transitions.
 
-Revert must not become a successful action.
-Reorg/orphan/uncertain transitions must remain auditable.
+Receipt revert is never success.
+Reorg/orphan/uncertain state remains auditable.
 
-## 8. Capture/replay/live identity
-
-Fixtures must be expressible as FastLaneEvent/canonical-event bytes.
-
-A positive fixture is tested by feeding it to the same Rust function used in LIVE.
-
-Forbidden:
-
-```
-fixture -> Python decoder -> expected runtime event
-LIVE    -> different Rust decoder
-```
+## 8. Identity across modes
 
 Required:
 
 ```
-fixture bytes -> Rust decoder
+fixture bytes -> same Rust decoder
+capture bytes -> same Rust decoder
+replay bytes  -> same Rust decoder
 LIVE bytes    -> same Rust decoder
 ```
 
-## 9. Performance gate
+No Python/alternate LIVE decoder.
 
-Measure Flap recognize and decode separately on target-like hardware.
+## 9. Performance
+
+Measure recognizer and full decode separately on target-like hardware.
 
 Report p50/p95/p99/p99.9/p99.99/max.
 
-The implementation must not materially consume the 0.5 ms T0-T8 engineering budget. Any deterministic >1 ms Flap decode path must be treated as a defect unless evidence proves an unavoidable protocol-size case, which then requires a fail-closed latency policy.
+A deterministic >1 ms venue decode path is a defect/review item. This is a local decoder metric, not proof of actual BUY execution.
 
 ## 10. Out of scope
 
-No:
-
-- quote/economics;
+Phase D does not add:
 - Strategy C;
-- tx execution;
-- PAPER/LIVE broadcast;
-- Four.meme changes except shared interface fixes proven necessary;
-- second network ingest;
-- second state machine.
+- second ingress;
+- second state machine;
+- alternative execution semantics.
+
+Full economics remains Phase G, but any economics already required for a valid Gate-0 first BUY is treated as validated feasibility evidence and must not be contradicted.
 
 ## 11. Tests
 
 At minimum:
-
-- each supported address/version;
+- every supported address/version;
 - selector positives/negatives;
-- malformed/truncated/oversize calldata;
+- malformed/truncated/oversized calldata;
 - unknown version;
 - pending launch fixture;
-- canonical CREATE/BUY/SELL;
+- canonical launch/BUY/SELL;
 - revert;
 - duplicate/idempotency;
-- orphan/uncertain propagation;
+- orphan/uncertain;
 - exact timestamp preservation;
-- FastLaneEvent binary round-trip;
-- capture -> replay -> identical decode result;
-- no allocation/latency regression on common recognizer path where measurable.
+- FastLane binary roundtrip;
+- capture→replay identical decode;
+- no common-path allocation/latency regression where measurable.
 
 ## 12. Acceptance
 
-Phase D is accepted only if:
-
+Accept only if:
 - all claimed protocol facts are evidence-backed;
-- Rust decoder is the only normative Flap runtime decoder;
-- capture/replay share the exact same decoder;
+- Gate-0 Flap facts remain valid;
+- Rust decoder is sole production source of truth;
 - unknowns fail closed;
-- full tests are green;
-- latency gate passes.
+- capture/replay/LIVE share the decoder;
+- regression + latency gates pass.
 
-Then **STOP**. Do not start Phase E automatically.
+Then STOP.
