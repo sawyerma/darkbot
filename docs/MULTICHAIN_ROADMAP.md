@@ -68,10 +68,10 @@ Current order:
 Gate 0:
   Flap + Four evidence
   -> pre-T0 actionability
-  -> minimal native build/sign
+  -> minimal native build/sign/serialize/queue through T_send
   -> pending coverage
   -> inclusion race including ordered builder paths
-  -> controlled real first-BUY ordering validation
+  -> controlled real intended-token acquisition + first-external-BUY ordering validation
   -> PASS / ADAPT / STOP
 
 After PASS:
@@ -83,7 +83,7 @@ After PASS:
   F production capture
   G complete economics
   H Strategy C / EV
-  I PAPER/shadow
+  I PAPER/shadow + final full-production hot-path requalification
   J production LIVE
   K measured escalation
 ```
@@ -108,7 +108,7 @@ Do not manufacture an intra-block millisecond value from ordinary BSC block time
 
 For BSC the primary externally verifiable first-BUY evidence is transaction ordering:
 - launch/activation transaction;
-- our successful BUY at the earliest valid following position;
+- our successful external BUY at the earliest valid following position, with intended-token acquisition evidence;
 - number of successful competing BUYs between them.
 
 ## 6. No assumed BSC advantage
