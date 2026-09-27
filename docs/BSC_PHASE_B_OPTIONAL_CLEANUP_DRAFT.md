@@ -1,3 +1,14 @@
+# ARCHIVED OPTIONAL BSC CLEANUP DRAFT — DO NOT EXECUTE
+
+Status: **ARCHIVED / NOT PART OF CURRENT BSC PLAN**
+Updated: 2026-09-27
+
+Current BSC work is governed by `docs/GATE0_TESTPLAN_SHORT.md` and `docs/BSC_DUAL_VENUE_ROADMAP.md`.
+
+Any phase/order/performance instruction below is historical draft material only. Do not use it to schedule or implement current BSC work.
+
+---
+
 # DarkBot — Phase B Optional Cleanup Contract (DRAFT)
 
 Status: **DRAFT / OPTIONAL / NOT APPROVED / NOT ACTIVE**  
