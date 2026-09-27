@@ -139,6 +139,10 @@ Later execution phases add T4-T9.
 
 Report per venue and combined:
 
+- source peer id for earliest observation where available;
+- full-TX vs hash-announcement/request path;
+- same-tx first-seen spread across observed peers;
+- geth peer-decode -> native event delay where instrumented;
 - min;
 - p1/p5 where useful for worst lead;
 - p50;
@@ -151,6 +155,15 @@ Report per venue and combined:
 - missing/invalid timing evidence.
 
 Do not redefine the reference if the result is disappointing.
+
+Phase F must also determine whether a missed -10 ms target is primarily:
+
+- network/peer-topology limited;
+- geth ingress limited;
+- Rust/local-processing limited;
+- canonical-reference/timestamp-quality limited.
+
+Do not add multi-region/devp2p/AF_XDP machinery inside Phase F. Phase F measures the deficit; Phase K applies the smallest justified escalation.
 
 ## 8. Native runtime latency during capture
 
