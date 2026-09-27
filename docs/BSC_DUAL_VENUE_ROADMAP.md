@@ -12,6 +12,34 @@ Normative documents, highest priority first:
 
 If an older document conflicts with Gate 0, Gate 0 wins.
 
+## 0. NON-NEGOTIABLE EXECUTION INVARIANT — DIRECT ON-CHAIN ONLY
+
+DarkBot **NEVER** uses the Four.meme or Flap website, browser UI, frontend trading flow, frontend API, page refresh, or manual interaction as part of BUY execution.
+
+The BUY path is always:
+
+```
+earliest verified chain/pending evidence
+-> venue decode / derive required BUY inputs
+-> local quote/input calculation
+-> construct exact contract transaction or ordered bundle
+-> local secp256k1 signing
+-> measured inclusion adapter
+-> direct BSC execution against the verified venue contract
+```
+
+For Four.meme this means direct interaction with the verified current TokenManager/TokenManager2 trade surface; for Flap it means direct interaction with the verified current Flap/BNB Portal contract surface. Exact addresses, versions, selectors and modes must be frozen from current evidence before use.
+
+A builder/bundle provider or local bsc-geth is an **inclusion transport**, not a trading frontend. It may carry the already-constructed signed transaction/bundle to block execution, but it never supplies strategy, quote, BUY logic or readiness.
+
+Website/frontend state is **never** a readiness signal. DarkBot does not wait for a page to list, refresh, enable a button or expose a frontend API response.
+
+The only external facts relevant to earliest valid execution are the verified on-chain/pending facts required by the current contract semantics. Internal strategy/admission/risk rules may still decline a BUY.
+
+If token address and all mandatory BUY inputs are derivable before `T0`, DarkBot precomputes as much as possible before `T0` and may hand an ordered launch->BUY bundle to a proven inclusion path before the launch executes. If any mandatory input is not derivable before `T0`, DarkBot reacts at the earliest chain-visible point at which it becomes derivable. In both cases the execution remains direct on-chain.
+
+Frontend/UI/API latency is therefore outside the BUY latency budget and outside the production dependency graph.
+
 ## 1. Core objective
 
 The BSC product succeeds only if it can obtain the earliest technically possible successful BUY after a new launch becomes executable.
