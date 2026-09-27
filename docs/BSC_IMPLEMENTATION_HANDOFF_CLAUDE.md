@@ -1,72 +1,46 @@
-# 2026-09-27 CLEAN NATIVE BSC OVERRIDE — READ FIRST
+# DarkBot BSC — Archived Historical Implementation Handoff
 
-**This section is normative for all new BSC work and overrides conflicting BSC instructions later in this historical handoff.**
+Status: **ARCHIVED / DO NOT EXECUTE AS CURRENT PLAN**
+Updated: 2026-09-27
 
-Authoritative documents:
+This file preserves historical implementation reasoning only.
 
-- `docs/BSC_DUAL_VENUE_ROADMAP.md`
-- `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
-- `docs/BSC_PHASE_C_PYTHON_RETIREMENT.md`
+It is **not** a current scheduler, phase order, performance contract or authorization to implement BSC work.
 
-## Non-negotiable current state
+Current authoritative order:
 
-- The Pass-6 Python Phase-C BSC/EVM implementation is **RETIRED / DO NOT MERGE**.
-- Current GitHub `main` intentionally remains the clean Phase-A/Solana baseline.
-- Do not add `darkbot/chains/evm/**`, `darkbot/chains/bsc/**` or `migrations/0010_evm_bsc_capture.sql` from the Pass-6 ZIP.
-- Relevant Phase-C correctness counterexamples must be re-expressed as Rust tests, not kept as Python runtime dependencies.
-- New BSC work starts at **C0**, then C1, C2, C3.
-- Phase D may start only after C0-C3 are accepted.
+1. `docs/GATE0_TESTPLAN_SHORT.md`
+2. `docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md`
+3. `docs/BSC_DUAL_VENUE_ROADMAP.md`
+4. `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
+5. active phase-specific contract
 
-## Runtime ownership
-
-- Go/bsc-geth: minimal native P2P/txpool/canonical hooks and signed-tx injection only.
-- Rust: all BSC runtime semantics — event model, pending/replacement, canonical/reorg, Flap/Four decode, state, economics, Strategy C, build/sign, capture journal, replay, PAPER/shadow and LIVE.
-- Python: offline analysis/reporting only for BSC.
-
-There is no Python BSC trading engine and no separate test/live implementation.
-
-## Performance contract
-
-Primary market objective:
+Current BSC rule:
 
 ```
-T_EARLY_TX_SEEN - T_CANONICAL_REFERENCE <= -10 ms
+Gate 0 first:
+current venue evidence
+-> pre-T0 actionability proof
+-> minimal native build/sign proof
+-> pending-coverage proof
+-> real inclusion-path race including ordered builder paths
+-> controlled Mainnet first-BUY ordering proof
+-> PASS / ADAPT / STOP
+
+Only after PASS:
+C0 -> C1 -> C2 -> C3 -> full venue decoders -> F -> G -> H -> I -> J -> K
 ```
 
-where the real BSC network exposes that lead.
+Historical claims below such as:
+- starting new BSC work at C0 before Gate 0;
+- using `-10 ms vs canonical` as the product success gate;
+- treating local geth acceptance as the main latency proof;
+- postponing builder/backrun testing until late LIVE phases;
+- delaying all venue BUY semantics until after C3;
 
-Native internal release target:
+are **superseded and must not be followed**.
 
-```
-T_EARLY_TX_SEEN -> T_LOCAL_OWN_TX_ACCEPTED < 0.5 ms
-stretch                                < 0.25 ms
->= 1 ms                                investigate/fail gate
-reproducible > 3 ms                    release blocker
-```
-
-No software can guarantee zero latency or guarantee that the external market offers -10 ms. Therefore the contract is: remove avoidable software latency, measure every stage, and do not release when the hard runtime gates fail.
-
-## Phase order
-
-```
-A       keep existing Solana/Phase-A seam
-C-PY    retired, do not merge
-C0      Rust wire/journal/replay skeleton
-C1      earliest native bsc-geth ingress + SPSC
-C2      Rust BSC/EVM state/reorg/replacement
-C3      native Rust sign/submit + full T-1..T9 latency gate
-D       Flap Rust decoder
-E       Four.meme Rust decoder
-F       native 30-min capture
-G       Rust economics
-H       Rust Strategy C + replay/EV
-I       Rust PAPER/shadow
-J       Rust LIVE
-K       optional further measured latency escalation
-S0-S3   future controlled Solana convergence
-```
-
-Any later section in this file describing Python Phase-C as the production BSC foundation is historical and superseded.
+The historical text remains below only for audit/history.
 
 ---
 
