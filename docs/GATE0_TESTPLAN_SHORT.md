@@ -15,8 +15,11 @@ A BUY counts as successful only when the intended token is actually acquired by 
 
 Test objects:
 - Solana / Pump.fun
-- BSC / Four.meme
 - BSC / Flap
+- BSC / Four.Meme Classic (TokenManager2)
+- BSC / Four.Meme OpenFour
+
+Four.Meme Classic and OpenFour are distinct current protocol families and MUST NOT share an assumed launch/BUY decoder or scope.
 
 Gate 0 is a minimal feasibility harness, not the production bot.
 
@@ -38,11 +41,13 @@ If the exact BUY can be derived before `T0`, prebuild/pre-sign/pre-submit as far
 ## 2. Authoritative timing definitions
 
 ```
-T_pre   = earliest usable evidence before the coin becomes buyable
-T0      = first execution point at which the coin is actually buyable
-T_ready = our exact BUY transaction/bundle is fully built and signed
-T_send  = our exact BUY transaction/bundle is handed to the tested inclusion path
-T_buy   = our BUY actually executes successfully
+T_signal = local monotonic timestamp at receipt of the actionable signal used by this attempt
+T_pre    = T_signal only when independent evidence proves that signal occurred before external tradability
+T0       = first execution point at which an independent external BUY can validly execute
+T_ready  = our exact BUY transaction/bundle is fully built and signed
+T_queue  = signed payload committed to the selected local adapter/IPC queue, where applicable
+T_send   = signed payload handed to the actual tested transport boundary defined for that adapter
+T_buy    = our BUY actually executes successfully and acquisition evidence confirms the intended token was received
 ```
 
 Desired product target:
@@ -64,6 +69,8 @@ successful competing BUYs between launch and ours = 0
 ```
 
 If a trusted builder/validator trace later exposes intra-block execution timestamps, record the direct `T_buy-T0` value as additional evidence.
+
+Every latency report MUST state the exact adapter-specific `T_send` boundary. An internal Rust queue alone is not `T_send`. Examples: for a local-geth path, report both Rust->IPC queue commit and the measured geth/network handoff; for a builder path, report queue/enqueue separately from the write/handoff to the live builder transport. Hidden movement of the timing boundary is forbidden.
 
 ## 3. Pre-lead
 
@@ -146,16 +153,27 @@ G0.1 MUST reverify and freeze the current deployment/version/address/ABI/selecto
 
 Prove from current ABI/on-chain evidence whether token address derivation is deterministic before `T0`, then build the exact first BUY path.
 
-### Four.meme
+### Four.Meme Classic
 
 Freeze current TokenManager2 create/trade surface.
 
-Current public integration documentation states that new classic launches use `TokenManager2.createToken` and emit `TokenCreate` containing the token address:
+Current public Classic integration documentation states that new Classic launches use `TokenManager2.createToken` and emit `TokenCreate` containing the token address:
 https://github.com/four-meme-community/fourmeme-docs/blob/main/docs/create-guide.md
 
-Do **not** assume that the future token address is derivable from the pending create transaction. Gate 0 must prove this from current contract behavior or mark it unavailable.
+Do **not** assume that the future token address is derivable from the pending create transaction. Gate 0 must prove this from current contract behavior/calldata or mark it unavailable.
 
-If the address cannot be known before execution, quantify the earliest valid alternative and its effect on first-BUY placement.
+### Four.Meme OpenFour
+
+OpenFour is a separate modular protocol family and is not TokenManager2 Classic.
+
+Current BSC Registry documented by the OpenFour integration guide:
+`0x912CEf0C3aE9Ab6eB3Ec87cab69371cFb317Ab94`
+
+Resolve and freeze `openFourCore()` and `openFourTool()` from that Registry at the G0.1 reference block. Current Core trade surface includes `buy(...)` and `buyByBudget(...)`; creation uses `createToken(bytes,bytes)`. A nonzero documented `presaleQuote` is a launch-internal creator acquisition.
+
+Do **not** assume pre-execution token-address derivation for OpenFour. Prove it from the selected preset/create payload/deployer semantics or mark it unavailable.
+
+If a candidate address cannot be known before execution, quantify the earliest valid alternative and its effect on first-external-BUY placement.
 
 ## 7. Minimal Gate-0 harness
 
@@ -197,6 +215,8 @@ Freeze current Flap/Four contracts, versions, selectors, launch and BUY semantic
 Before any value-bearing G0.7 attempt, freeze a numeric acceptance contract covering at minimum: trial count / minimum evaluable sample, denominator rules, minimum successful-acquisition rate, maximum revert/drop/failure rate, maximum late-BUY rate, maximum missed-actionable-launch rate, pending-coverage accounting, maximum authorized spend, concurrency/nonce stress requirement, and exact PASS / ADAPT / STOP thresholds.
 
 Every attempt selected by the frozen sampling rule stays in the statistics. No post-hoc removal of unfavorable outcomes.
+
+G0.1 crypto/evidence rule: do not use hand-written Keccak/ABI hashing code as an authority. Function selectors, event topics and runtime-code Keccak fingerprints must be produced by a vetted implementation and cross-checked against an independent reference where practical. A separate SHA-256 bytecode fingerprint may be retained as supplemental evidence but is not labeled an EVM codehash.
 
 ### G0.2 Pre-computability matrix + primary scope selection
 For each candidate venue/version/mode, create a mandatory BUY-field preparation table before writing performance code.
@@ -273,26 +293,31 @@ Record every stage separately, including `T_ready` and `T_send`, so no post-sign
 
 Target: `T_pre -> T_send < 1 ms` on target-like hardware.
 
-### G0.6 Ingress × inclusion race + concurrency validity
-Compare complete combinations, not only multiple senders behind one ingress:
+### G0.6 Ingress × inclusion dry qualification + concurrency validity
+Before any value-bearing G0.7 trial, qualify the candidate matrix without claiming a real-race winner:
 
 ```
 candidate ingress A/B/...
 x
 candidate inclusion path X/Y/...
--> actual successful acquisition/order result
+-> field completeness
+-> transport readiness
+-> deterministic bundle/transaction construction
+-> simulation/fork/sequential validity where applicable
 ```
 
-The ranking metric is real successful external BUY placement and repeatability under the frozen acceptance contract, not source timestamp or adapter ACK alone.
+G0.6 may compare diagnostic timing and adapter behavior, but it MUST NOT claim that a path wins real successful BUY placement before G0.7 executes controlled Mainnet trials and G0.8 evaluates their acquisition/order results.
 
 Also prove that multiple simultaneously actionable launches do not create sender/nonce collisions, accidental replacement, head-of-line blocking beyond the frozen latency target, token/recipient cross-wiring, overwritten BUY inputs, duplicate economic submission, or shared-state races.
+
+The same qualified ingress × inclusion combinations that survive G0.6 become the frozen candidate matrix for G0.7.
 
 ### G0.7 Controlled Mainnet validation
 Only after dry qualification and after the G0.1 acceptance contract is frozen, use minimal user-authorized test value.
 
 No unattended strategy trading is needed for Gate 0.
 
-Record every selected trial outcome, including successful BUY, revert, dropped/not-included submission, late BUY, missed actionable launch, launch not visible with sufficient pending data, and unsupported venue mode.
+Execute the frozen G0.6 candidate matrix under the G0.1 authorized budget/attempt limits. Record every selected trial outcome, including successful BUY, revert, dropped/not-included submission, late BUY, missed actionable launch, launch not visible with sufficient pending data, and unsupported venue mode.
 
 ### G0.8 Successful-acquisition and ordering proof
 For every controlled validation attempt record the full outcome.
