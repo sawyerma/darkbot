@@ -1,25 +1,72 @@
-# 2026-09-27 NATIVE SINGLE-RUNTIME OVERRIDE — READ FIRST
+# 2026-09-27 CLEAN NATIVE BSC OVERRIDE — READ FIRST
 
-**This section is normative for all post-Phase-C BSC work and overrides conflicting later-phase architecture text in this historical handoff.**
+**This section is normative for all new BSC work and overrides conflicting BSC instructions later in this historical handoff.**
 
-Authoritative runtime contract: `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`.
-Authoritative phase order: `docs/BSC_DUAL_VENUE_ROADMAP.md`.
+Authoritative documents:
 
-Non-negotiable changes:
+- `docs/BSC_DUAL_VENUE_ROADMAP.md`
+- `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
+- `docs/BSC_PHASE_C_PYTHON_RETIREMENT.md`
 
-- BSC runtime semantics from venue decode through strategy/economics/build/sign are implemented once in Rust.
-- 30-minute capture, replay, PAPER and LIVE must use the same Rust core; no separate Python/test/live trading implementation.
-- The primary Phase-F dataset is the exact versioned binary FastLaneEvent stream delivered by local bsc-geth to the Rust core.
-- LIVE latency source is the native local bsc-geth txpool/new-tx event, not remote WSS/JSON.
-- Native Runtime Gate must pass before Phase D.
-- Phase D Flap and Phase E Four.meme normative decoders are Rust modules.
-- Phase F must prove binary capture -> same Rust replay identity.
-- Economics executable decision math is Rust single-source.
-- Strategy C BSC runtime is Rust single-source.
-- Latency objective is to exploit/preserve approximately -10 ms pre-canonical lead where available; T0->T8 engineering target <0.5 ms, >=1 ms warning, >3 ms hard economic failure.
-- Python Phase C remains valuable as evidence/reference/offline analysis but is not the final BSC LIVE engine.
+## Non-negotiable current state
 
-Any post-Phase-C section below that says Python decoder/runtime, WSS capture as primary LIVE-equivalent source, or separate replay/PAPER/LIVE logic is superseded.
+- The Pass-6 Python Phase-C BSC/EVM implementation is **RETIRED / DO NOT MERGE**.
+- Current GitHub `main` intentionally remains the clean Phase-A/Solana baseline.
+- Do not add `darkbot/chains/evm/**`, `darkbot/chains/bsc/**` or `migrations/0010_evm_bsc_capture.sql` from the Pass-6 ZIP.
+- Relevant Phase-C correctness counterexamples must be re-expressed as Rust tests, not kept as Python runtime dependencies.
+- New BSC work starts at **C0**, then C1, C2, C3.
+- Phase D may start only after C0-C3 are accepted.
+
+## Runtime ownership
+
+- Go/bsc-geth: minimal native P2P/txpool/canonical hooks and signed-tx injection only.
+- Rust: all BSC runtime semantics — event model, pending/replacement, canonical/reorg, Flap/Four decode, state, economics, Strategy C, build/sign, capture journal, replay, PAPER/shadow and LIVE.
+- Python: offline analysis/reporting only for BSC.
+
+There is no Python BSC trading engine and no separate test/live implementation.
+
+## Performance contract
+
+Primary market objective:
+
+```
+T_EARLY_TX_SEEN - T_CANONICAL_REFERENCE <= -10 ms
+```
+
+where the real BSC network exposes that lead.
+
+Native internal release target:
+
+```
+T_EARLY_TX_SEEN -> T_LOCAL_OWN_TX_ACCEPTED < 0.5 ms
+stretch                                < 0.25 ms
+>= 1 ms                                investigate/fail gate
+reproducible > 3 ms                    release blocker
+```
+
+No software can guarantee zero latency or guarantee that the external market offers -10 ms. Therefore the contract is: remove avoidable software latency, measure every stage, and do not release when the hard runtime gates fail.
+
+## Phase order
+
+```
+A       keep existing Solana/Phase-A seam
+C-PY    retired, do not merge
+C0      Rust wire/journal/replay skeleton
+C1      earliest native bsc-geth ingress + SPSC
+C2      Rust BSC/EVM state/reorg/replacement
+C3      native Rust sign/submit + full T-1..T9 latency gate
+D       Flap Rust decoder
+E       Four.meme Rust decoder
+F       native 30-min capture
+G       Rust economics
+H       Rust Strategy C + replay/EV
+I       Rust PAPER/shadow
+J       Rust LIVE
+K       optional further measured latency escalation
+S0-S3   future controlled Solana convergence
+```
+
+Any later section in this file describing Python Phase-C as the production BSC foundation is historical and superseded.
 
 ---
 
