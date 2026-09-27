@@ -82,7 +82,7 @@ Before the production runtime is built, Gate 0 must contain only enough native c
 
 ### 3.1 Current venue evidence
 
-Freeze current Mainnet facts for Flap and Four.meme:
+Freeze current Mainnet facts for Flap and Four.meme, then select one exact `PRIMARY_GATE0_SCOPE = venue + deployment/version + launch mode + BUY selector/mode` for the first complete proof:
 
 - deployed contract/manager address;
 - implementation/version;
@@ -97,6 +97,8 @@ Unknown => unsupported. Never guess.
 
 ### 3.2 Earliest actionable ingress
 
+Ingress is not assumed to be a single source. Compare complete candidate sources early enough to falsify weak coverage.
+
 Primary candidate:
 
 ```
@@ -107,19 +109,34 @@ BSC peer transaction
 
 A pinned local `bsc-geth` with an early full-transaction hook is preferred for controlled measurement.
 
-Also measure whether relevant launches are absent from local pending visibility.
+Also measure whether relevant launches are absent from local pending visibility. Where independently verified, compare alternate early ingress such as the current 48Club Auction Feed if it exposes enough attributable simulated logs/state for the selected scope. Early arrival alone is not enough; actionable field completeness and real coverage decide.
 
-### 3.3 Minimal native hot path
+### 3.3 Preparation matrix and minimal native path
+
+Before performance tuning, create the Gate-0 BUY-field preparation matrix for the selected scope. For every signature-bound or BUY-validity field record source, earliest availability, precomputable portion, hot-path residual and invalidation condition. Static bytes/state are prepared before the actionable signal; pre-signing is allowed only when all signature-bound fields are final and remain valid.
+
+Then prove the smallest exact semantic path first:
+
+```
+selected launch mode/state
+-> exact BUY inputs
+-> exact transaction
+-> valid launch -> BUY semantics
+-> expected acquisition
+```
+
+Only after this correctness proof optimize the local path:
 
 ```
 T_pre
 -> cheap destination/selector match
 -> minimal verified venue decode
--> token/address derivation if proven
--> initial quote/input calculation
--> transaction template patch
+-> patch/finalize only proven dynamic BUY fields
+-> local quote only if unavoidable
+-> transaction finalize
 -> secp256k1 sign
--> inclusion adapter
+-> serialization/adapter queue
+-> inclusion-adapter handoff
 ```
 
 No DB, filesystem, DNS, metadata request, synchronous `eth_call`, HTTP quote or lazy initialization in this path.
@@ -139,14 +156,11 @@ Before the event arrives keep ready:
 
 Missing required verified state => do not send; never block on a remote fetch.
 
-### 3.5 Inclusion is part of the feasibility gate
+### 3.5 Ingress × inclusion is part of the feasibility gate
 
 BSC PBS/builders are part of the real execution market and must not be postponed until late production LIVE.
 
-Gate 0 compares at least:
-
-- local geth/P2P path;
-- current verified ordered-builder/backrun path(s).
+Gate 0 compares complete `ingress source × inclusion path` combinations. At minimum compare local geth/P2P ingress and any independently verified alternate early ingress that exposes sufficient BUY facts, against local geth/P2P submission and current verified ordered-builder/backrun path(s). Actual successful acquisition/order result ranks the combination.
 
 Current evidence snapshot:
 - BNB Chain PBS: https://docs.bnbchain.org/bnb-smart-chain/validator/mev/overview/
@@ -288,11 +302,11 @@ Do not claim any of the following without measurement:
 
 ## 10. Definition of success
 
-BSC proceeds beyond Gate 0 only when at least one venue demonstrates:
+BSC proceeds beyond Gate 0 only when one exact `PRIMARY_GATE0_SCOPE` demonstrates:
 
 - enough pre-execution information to build a valid earliest BUY;
 - local build/sign/send path within the required engineering budget;
 - a credible inclusion mechanism;
 - controlled Mainnet evidence of the earliest technically possible successful external BUY placement with repeatability measured against the numeric Gate-0 acceptance contract frozen before value-bearing trials.
 
-Otherwise the venue is ADAPT or STOP.
+PASS applies only to that exact venue/deployment/version/launch mode/BUY mode. Untested scopes remain unproven. Otherwise the scope is ADAPT or STOP.
