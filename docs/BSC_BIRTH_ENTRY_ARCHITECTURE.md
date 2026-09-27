@@ -223,6 +223,39 @@ Do not redefine TC to improve the number.
 
 ---
 
+
+## 3A. Birth-to-BUY metric is authoritative
+
+The authoritative economic timing model is:
+
+```
+T_pre = earliest usable indication before tradability
+T0    = first instant the coin is actually tradable/buyable
+T_buy = instant our BUY actually executes successfully
+```
+
+Desired preparation lead:
+
+```
+T_pre - T0 ~= -10 ms or better
+```
+
+This is a target only and must be measured.
+
+The primary product metric is:
+
+```
+T_buy - T0
+```
+
+Target:
+
+```
+T_buy - T0 << 1 ms
+```
+
+All prior canonical/block-reference lead metrics are secondary diagnostics only and must not replace this Birth-to-BUY metric.
+
 ## 4. Things that are NOT mandatory initially
 
 These are explicitly not prerequisites for C0-C3/D/E/F:
