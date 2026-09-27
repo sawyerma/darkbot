@@ -298,6 +298,8 @@ local_ready = L6 - L0
 local_send  = L7 - L0
 ```
 
+`local_send` is the authoritative local BUY-path latency boundary. Any post-sign serialization, queueing or adapter preparation performed before L7 is part of the measured latency and may not be excluded.
+
 Record canonical ordering:
 
 ```
@@ -413,4 +415,6 @@ No statement such as:
 
 is sufficient proof of the first BUY.
 
-The decisive economic evidence is successful on-chain placement relative to the launch and competing BUYs.
+The decisive economic evidence is actual acquisition of the intended token by the intended recipient, with positive received amount and attributable debit/cost, at the earliest technically valid external BUY position relative to the launch and competing external BUYs. Receipt success alone is insufficient.
+
+Before production LIVE, the final D/E/G/H-complete runtime must requalify the full `event -> decoder/state/economics/strategy -> build/sign -> serialization/adapter handoff` path against the same local latency boundary used by Gate 0, including concurrent-launch/nonce stress.
