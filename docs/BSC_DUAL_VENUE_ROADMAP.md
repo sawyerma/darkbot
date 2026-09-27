@@ -1,221 +1,361 @@
-# DarkBot BSC Dual-Venue Roadmap — Native Single Runtime
+# DarkBot Solana + BSC Roadmap — Clean Native BSC, Maximum-Performance Runtime
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-09-27
-Repository: `sawyerma/darkbot`
 
-This file controls phase order/status. Detailed runtime invariants are in `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`.
+Normative architecture:
+- `docs/BSC_PHASE_C_PYTHON_RETIREMENT.md`
+- `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
 
-## 1. Non-negotiable architecture decision
+## 1. Core decision
 
-BSC testing and BSC LIVE must use the same Rust runtime implementation.
+Do not merge the Pass-6 Python Phase-C BSC/EVM runtime.
 
-There is one normative BSC Rust core for:
+Start native BSC work from the clean current `main`, which already contains the useful Phase-A multichain seam and the working Solana/Pump.fun system.
+
+BSC runtime semantics are Rust-only.
+
+Go/bsc-geth provides only native chain hooks.
+
+Python is offline analysis/control only for BSC.
+
+## 2. Final target
 
 ```
-venue decode -> state -> strategy -> economics/quote -> admission -> tx build -> sign
+                         DARKBOT
+                            |
+              +-------------+-------------+
+              |                           |
+          Solana adapter               BSC adapter
+              |                           |
+          Pump.fun                  Flap / Four.meme
+              \                           /
+               +--------- Rust Core ------+
+                          |
+             strategy/economics/risk
+               build/sign/replay
+                PAPER/LIVE/capture
+                          |
+                    native execution
+
+Python: offline analysis/reporting only
 ```
 
-Capture, Replay, PAPER and LIVE are not separate trading implementations. Only external input/output adapters may differ.
-
-Python remains research/reporting/reference infrastructure, not a second BSC trading engine.
-
-The latency goal is to exploit native BSC pending visibility and pursue an effective pre-canonical advantage around **-10 ms**. Internal native processing is engineered with target <0.5 ms, warning >=1 ms and hard economic failure >3 ms.
-
-## 2. Authoritative contracts
-
-| Scope | Contract |
-| --- | --- |
-| Native runtime / capture-replay-live identity / latency | `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md` |
-| Current/historical Phase-C technical evidence | `docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md` |
-| Flap | `docs/BSC_PHASE_D_FLAP_READ_ONLY_CONTRACT.md` |
-| Four.meme | `docs/BSC_PHASE_E_FOURMEME_READ_ONLY_CONTRACT.md` |
-| Combined native 30-minute capture | `docs/BSC_PHASE_F_DUAL_CAPTURE_CONTRACT.md` |
-| Economics | `docs/BSC_ECONOMICS_GATE_CONTRACT.md` |
-
-If an older document conflicts with the Native Single-Runtime Contract for post-Phase-C BSC runtime architecture, the Native Single-Runtime Contract wins.
-
-`docs/phase_a/**` remains frozen historical evidence.
+During migration, existing Solana Python runtime remains frozen and operational. It is not mixed into the new BSC runtime.
 
 ## 3. Phase sequence
 
-| Phase | Status | Scope |
+| Phase | Status | Deliverable |
 | --- | --- | --- |
-| A / M0-M3 | **IMPLEMENTED** | multichain seam, Solana/Pump wrappers, runtime/profile compatibility |
-| B | **SKIPPED** | optional cleanup only |
-| C / M4-M6 | **EXTERNAL HARDENED CANDIDATE; MERGE/ACCEPTANCE REQUIRED** | Python EVM/BSC evidence/canonical reference; retain as reference, not final BSC LIVE runtime |
-| Native Runtime Gate / NR0 | **NEXT AFTER C ACCEPTANCE/MERGE** | bsc-geth native hook + binary wire + SPSC/shared-memory + Rust echo/build/sign/submit + exact binary capture/replay + T0-T9 benchmark |
-| D / M7 | **BLOCKED** | Flap recognition/decoding implemented directly in the same Rust core; read-only semantics only |
-| E / M8 | **BLOCKED** | Four.meme recognition/decoding in the same Rust core |
-| F / M9 | **BLOCKED** | 30-minute combined BSC native capture using exact FastLaneEvent stream consumed by the Rust core |
-| Economics Gate | **BLOCKED** | exact Rust economics/quote modules validated against chain/helper evidence; no remote quote in hot path |
-| M10 | **BLOCKED** | Strategy C in Rust single core; no Python duplicate |
-| M11 | **BLOCKED** | deterministic replay of Phase-F binary journal through the same Rust core |
-| M12 | **BLOCKED** | PAPER/shadow through the same core including build/sign; only broadcast sink differs |
-| M13-M15 | **BLOCKED** | native submit/inclusion, venue execution, ordered/backrun work where evidence supports it |
-| M16 | **BLOCKED** | forward validation on the same Rust runtime and native input path |
-| M17 | **BLOCKED** | GUI/control plane only; no trading semantics in GUI |
+| A | **DONE / KEEP** | Existing Solana/Pump.fun + Phase-A multichain seam |
+| B | **SKIPPED** | Optional cleanup; no need |
+| C-PY | **RETIRED / DO NOT MERGE** | Pass-6 Python BSC/EVM prototype kept only as external evidence |
+| C0 | **NEXT** | Clean Rust workspace + wire/event model + native binary capture/replay skeleton |
+| C1 | **BLOCKED** | Minimal bsc-geth early/accepted ingress hooks + shared-memory SPSC Fast Lane |
+| C2 | **BLOCKED** | Rust canonical/reorg/nonce/replacement state + native capture/replay parity |
+| C3 | **BLOCKED** | Native signed-tx return path + geth admission/broadcast + T-1..T9 latency gate |
+| D | **BLOCKED** | Flap factual decoder in same Rust core |
+| E | **BLOCKED** | Four.meme factual decoder in same Rust core |
+| F | **BLOCKED** | Real 30-minute native dual-venue capture, exact same runtime event stream |
+| G | **BLOCKED** | Rust economics/quote gate from real evidence |
+| H | **BLOCKED** | Strategy C Rust single-source + deterministic replay/EV |
+| I | **BLOCKED** | Rust PAPER/shadow, same decode/state/strategy/quote/build/sign |
+| J | **BLOCKED** | LIVE native execution, inclusion and peer-propagation validation |
+| K | **BLOCKED** | Latency escalation only where measured: direct Rust devp2p / AF_XDP etc. |
+| S0-S3 | **FUTURE** | Optional controlled Solana convergence into the proven Rust core |
 
-No phase may create a second BSC decision implementation.
+Every phase STOPs for independent review.
 
-## 4. Native Runtime Gate — mandatory before D
+## 4. Phase C0 — clean native foundation
 
-The first post-C engineering work is not Flap/Four.
+Create no Python BSC runtime.
 
-Build a minimal venue-neutral latency proof:
+Implement:
 
-```
-bsc-geth NewTxsEvent
- -> FastLaneEvent
- -> SPSC/shared memory
- -> Rust runner
- -> deterministic dummy build/sign
- -> binary submit ring
- -> local bsc-geth txpool
-```
+- Rust workspace;
+- versioned binary `FastLaneEvent` and canonical-event schemas;
+- fixed-width/lossless EVM integer/address/hash primitives;
+- immutable binary journal;
+- journal manifest/hash;
+- Rust replay reader feeding exactly the same `Engine::process_event` API as LIVE will use;
+- monotonic sequence/order model;
+- bounded queues and explicit overflow events;
+- native latency sample format.
 
-In parallel:
+Port Phase-C adversarial semantic fixtures into Rust unit/property tests where applicable.
 
-```
-FastLaneEvent -> immutable binary capture journal
-binary journal -> same Rust Engine::process_event
-```
+Acceptance:
 
-Gate requirements:
+- binary event -> journal -> replay is byte/semantic deterministic;
+- no SQLite required for replay;
+- no JSON on native runtime path;
+- no Python dependency in the Rust runner.
 
-- no WSS/JSON/HTTP/RPC in T0-T8;
-- same binary event schema in LIVE and replay;
-- bounded queues/state;
-- target T0-T8 <0.5 ms on dedicated target hardware;
-- all >=1 ms samples analyzed;
-- any reproducible >3 ms runtime path is a blocker;
-- T9/P2P handoff measured where possible;
-- output includes p50/p95/p99/p99.9/p99.99/max and exact outlier counts.
+STOP.
 
-Only after this gate passes may D start.
+## 5. Phase C1 — earliest native BSC ingress
 
-## 5. Phase D — Flap
+Patch a pinned bsc-geth version minimally.
 
-Protocol discovery/evidence freeze may use Python/tools, but the normative decoder is Rust.
+Add:
 
-Implement in `darkbot-core`:
+- `EARLY_TX_SEEN` hook as early as practical after peer transaction-message decode;
+- `TXPOOL_ACCEPTED` hook after local txpool acceptance;
+- canonical/head hook required by Rust state;
+- shared-memory SPSC producer;
+- exact local timestamps and sequence correlation.
 
-- fixed address/version table from verified evidence;
-- cheap destination + 4-byte selector recognition;
-- pending launch decode;
-- canonical CREATE/BUY/SELL/migration factual decode;
-- explicit unknown/unsupported version handling;
-- deterministic fixtures.
+Rust consumer:
 
-No economics, strategy or execution in D.
+- dedicated busy-poll thread;
+- address/selector prefilter;
+- no venue semantics yet.
 
-The same Flap decoder is used by native capture, replay, PAPER and LIVE. No Python Flap trading decoder is allowed.
-
-## 6. Phase E — Four.meme
-
-Same rule as D.
-
-Implement the normative Four.meme decoder in the same Rust core with verified version/mode evidence.
-
-No economics, Strategy C or execution yet.
-
-## 7. Phase F — exact native 30-minute capture
-
-The primary BSC research capture is no longer a Python/WSS approximation.
-
-Required source:
+Measure:
 
 ```
-local bsc-geth native tx event
- -> versioned FastLaneEvent
- -> same Rust core
- -> binary journal fan-out
+peer decode -> Fast Lane publish -> Rust visible
 ```
 
-Both venues run in one Rust core and one clock domain.
+Acceptance is measurement-based on dedicated Linux target hardware.
 
-Primary evidence artifact:
+STOP.
+
+## 6. Phase C2 — Rust EVM/BSC state
+
+Port only the semantics actually required by correct BSC runtime:
+
+- tx identity;
+- first-seen;
+- sender+nonce candidate competition;
+- replacement state;
+- included/reverted;
+- canonical/orphan/uncertain;
+- bounded ancestry/reorg;
+- restart snapshot/recovery required by runtime;
+- exact provenance/gap semantics.
+
+Do not port the old Python class/file architecture.
+
+Use the Pass-6 counterexamples as Rust tests.
+
+Capture/replay must produce identical state transitions.
+
+STOP.
+
+## 7. Phase C3 — native submit and complete latency proof
+
+Add second SPSC shared-memory ring:
 
 ```
-immutable binary event journal + manifest
+Rust signed tx -> geth
 ```
 
-Derived SQLite/Parquet may be generated asynchronously for analysis.
+Implement:
 
-The binary journal must be directly replayable through the same Rust event API with no Python transformation.
+- Rust tx representation/builder skeleton;
+- warm secp256k1 signer;
+- deterministic dummy/fixture transaction build+sign;
+- geth native admission;
+- timestamp of acceptance;
+- timestamp of first outbound peer handoff where technically measurable.
 
-Phase F measures at least:
+No venue trade logic yet.
 
-- T_NATIVE_PENDING;
-- T_CANONICAL_REFERENCE;
-- native lead distribution;
-- effective decode latency;
-- Flap/Four coverage;
-- version/mode distribution;
-- quality gaps/reorgs;
-- exact sequence provenance.
-
-Primary latency objective:
+Mandatory timing:
 
 ```
-T_NATIVE_PENDING - T_CANONICAL_REFERENCE <= -10 ms
+T-1 EARLY_TX_SEEN
+T0  TXPOOL_ACCEPTED source tx
+T1  ring publish
+T2  Rust receive
+T5  built
+T6  signed
+T7  submit
+T8  local geth accepted ours
+T9  outbound peer handoff
 ```
 
-Report actual values even if the objective is missed.
+Gate:
 
-## 8. Economics Gate
+- engineering target T-1 -> T8 <0.5 ms;
+- stretch <0.25 ms;
+- every >=1 ms sample investigated;
+- reproducible >3 ms runtime path blocks D;
+- report full tails, never p99-only.
 
-Economics is validated after real venue evidence exists.
+STOP.
 
-Normative executable quote/economic math lives in Rust and is reused unchanged by Replay/PAPER/LIVE.
+## 8. Phase D — Flap Rust decoder
 
-Python may analyze or cross-check results, but may not implement an alternative decision quote engine.
+Use `docs/BSC_PHASE_D_FLAP_READ_ONLY_CONTRACT.md`.
 
-No synchronous `eth_call`/HTTP/helper request in the decision hot path.
+Important:
 
-## 9. Strategy C, Replay, PAPER, LIVE
+- one Rust implementation;
+- exact FastLaneEvent input;
+- same decoder later in F/H/I/J;
+- no Python runtime decoder.
 
-Strategy C is implemented once in Rust.
+STOP.
 
-### Replay
+## 9. Phase E — Four.meme Rust decoder
 
-Phase-F binary events -> same Rust core.
+Use `docs/BSC_PHASE_E_FOURMEME_READ_ONLY_CONTRACT.md`.
 
-### PAPER
+Same single-runtime rule.
 
-Native/live or captured event -> same Rust core -> same tx build/sign -> non-broadcast sink.
+STOP.
 
-### LIVE
+## 10. Phase F — 30-minute native capture
 
-Native event -> same Rust core -> same tx build/sign -> local bsc-geth submit sink.
+Use `docs/BSC_PHASE_F_DUAL_CAPTURE_CONTRACT.md`.
 
-If Replay/PAPER/LIVE would produce different decisions for the same event/state/config snapshot, that is a correctness bug.
+Primary dataset is the exact binary native event journal consumed by the Rust core.
 
-## 10. What remains from Python Phase C
+Measure real market lead:
 
-Keep it.
+```
+early_lead     = T-1 - TC
+validated_lead = T0  - TC
+```
 
-It provides:
+Primary objective:
 
-- adversarial EVM/reorg/restart evidence;
-- canonical/reference behavior;
-- provenance/storage model;
-- fixtures/oracles;
-- research DB/report tooling.
+```
+early_lead <= -10 ms
+```
 
-Do not keep optimizing Python as the final BSC LIVE path.
+Report the truth if the network does not provide it.
 
-## 11. STOP rules
+The exact journal is replayed through the same Rust core before Phase-F acceptance.
 
-Every phase ends with independent review.
+STOP.
 
-Do not automatically proceed from:
+## 11. Phase G — economics
 
-- Native Gate -> D;
-- D -> E;
-- E -> F;
-- F -> Economics;
-- Economics -> Strategy;
-- PAPER -> LIVE.
+Executable quote/cost semantics live once in Rust.
 
-Latency regressions are correctness/release failures for this project.
+Validate against real captured state, receipts and authoritative contract/helper calls offline.
+
+LIVE decision path has:
+
+- local state;
+- local integer quote math;
+- no eth_call;
+- no RPC;
+- no HTTP.
+
+STOP.
+
+## 12. Phase H — Strategy C + EV replay
+
+Implement Strategy C once in Rust.
+
+Run the Phase-F binary journal directly through:
+
+```
+same state
+same venue decoder
+same economics
+same strategy
+same builder
+same signer
+```
+
+Research sweeps change config/parameters, not implementation.
+
+Python may consume Rust result files for statistics only.
+
+Positive expectancy must be shown after complete costs before PAPER progression.
+
+STOP.
+
+## 13. Phase I — PAPER/shadow
+
+Run native live event source or exact journal through the same Rust core.
+
+PAPER executes through signed transaction creation.
+
+Only final broadcast sink is suppressed.
+
+Compare shadow decisions against deterministic replay.
+
+Latency is measured end-to-end exactly as LIVE except external broadcast.
+
+STOP.
+
+## 14. Phase J — LIVE
+
+Enable native submit sink.
+
+No Python component may be on:
+
+```
+event -> decision -> quote -> build -> sign -> submit
+```
+
+Validate:
+
+- local acceptance;
+- peer handoff;
+- inclusion;
+- replacement behavior;
+- realized fees/slippage;
+- decision/replay parity;
+- actual submit lead relative to canonical reference.
+
+LIVE release fails on unresolved deterministic/reproducible >3 ms native runtime paths.
+
+STOP.
+
+## 15. Phase K — only if more speed is measurably available
+
+Do not prematurely add complexity.
+
+If profiling shows geth ingress materially consumes lead:
+
+- add a dedicated Rust devp2p observer feeding the exact same Rust event API.
+
+If kernel/NIC jitter then dominates:
+
+- dedicated NIC queue;
+- busy-poll/socket tuning;
+- AF_XDP/XDP where measured beneficial;
+- hardware timestamps if useful.
+
+No strategy fork is permitted at any level.
+
+## 16. Solana convergence S0-S3
+
+This is future work after BSC Rust runtime is proven.
+
+Goal: final one-runtime product without risking existing Solana.
+
+### S0
+Native Solana event adapter feeding the same Rust event/core interfaces.
+
+### S1
+Pump.fun decode + Strategy parity against frozen existing captures/results.
+
+### S2
+Replay/PAPER parity, then native send path.
+
+### S3
+Only after full parity and forward validation, retire the old Python Solana trading runtime.
+
+Python then remains offline analysis only for both chains.
+
+## 17. Repository cleanliness rule
+
+The production repository must never contain both the retired Python BSC runtime and the native Rust BSC runtime.
+
+No old Phase-C fallback.
+
+No compatibility bridge.
+
+No old EVM SQLite schema as mandatory runtime state.
+
+No second decision engine.
+
+The clean source of truth is the Rust runtime plus pinned native chain adapters.
