@@ -60,7 +60,7 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | A | **DONE / KEEP** | Existing Solana/Pump.fun + Phase-A multichain seam |
 | C-PY | **RETIRED** | Old Python BSC/EVM prototype retained only as engineering evidence |
 | G0.1 | **IN PROGRESS** | Freeze Flap + Four Classic + OpenFour Mainnet contracts, versions, launch/BUY semantics and live evidence |
-| G0.2 | **IN PROGRESS** | Flap v5.24.0 V6/TOKEN_TAXED_V3 decoded; resolve CREATE2/initial-state precomputability before PRIMARY_GATE0_SCOPE freeze |
+| G0.2 | **IN PROGRESS** | Flap V6 CREATE2 address proof PASS; finish DOGE initial state, BNB->DOGE economics and earliest-router vs direct-Portal BUY-path freeze |
 | G0.3 | **BLOCKED BY G0.2** | Build minimal launch→BUY harness only after exact address/state precomputability boundary for PRIMARY_GATE0_SCOPE is proven |
 | G0.4 | **BLOCKED** | Start bounded pending/actionable coverage in parallel as soon as launch evidence is frozen |
 | G0.5 | **BLOCKED** | Benchmark/optimize complete local path through T_send after semantic BUY validity is proven |
