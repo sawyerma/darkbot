@@ -86,18 +86,18 @@ OpenFour still lacks a canonical real create/BUY fixture in the current G0.1 evi
   - `buyTaxRate = 100` bps
   - `sellTaxRate = 100` bps
   - `mktBps + deflationBps + dividendBps + lpBps = 10000`
-  - `dividendToken = WBNB`
+  - `dividendToken = DOGE`
   - `commissionReceiver = address(0)`;
 - full ordering rescan covered four blocks / 211 receipts;
 - earliest observed external BUY:
   - block `124415358`
   - transaction index `15`
-  - tx abbreviated in the local correction evidence as `0x189585be…926800`
+  - tx `0x189585bec2fbfac6d2ff03455e1137b6c938bd17f495895e4e076b808d926800`
   - execution path: on-chain router;
 - the previously selected reference BUY was actually the **fifth external purchase**;
 - later successful BUY fixtures remain useful for semantic/transfer evidence, but their previous "first"/"second" ordering labels are withdrawn.
 
-This historical Flap fixture proves factual launch/BUY decoding and ordering for one real v5.24.0-era `newTokenV6 / TOKEN_TAXED_V3` launch. It is not DarkBot's BUY and proves no local latency.
+This historical Flap fixture proves factual launch/BUY decoding and ordering for one real v5.24.0-era `newTokenV6 / TOKEN_TAXED_V3` launch. The earliest observed external BUY is the router transaction above; the previously used direct Portal reference is the fifth external BUY. It is not DarkBot's BUY and proves no local latency.
 
 ### Flap CREATE2 precomputability proof
 
@@ -263,8 +263,8 @@ The following are still required before `G0.1_COMPLETE`:
    - pin exact ABI/interface evidence for the real `newTokenV6 / TOKEN_TAXED_V3` fixture;
    - freeze the external BUY method/selector used by the selected fixture;
    - retain the exact CREATE2 address proof from pending V6 calldata and frozen deployment inputs;
-   - reconstruct launch-internal DOGE purchase effects, BNB->DOGE conversion semantics and initial tradable state;
-   - token-address derivation is proven; prove or reject pre-execution `minOutputAmount`/BUY-output derivation for the exact selected on-chain BUY path.
+   - archive-bind the reconstructed DOGE launch state/curve constants, native-BNB->DOGE conversion state and intervening invalidations;
+   - token-address derivation is proven; conditional curve outputs reproduce exactly, but prove the same output from pending/pre-resident inputs only and bind exact fee/tax rounding, extension and router/direct path semantics.
 
 3. **Vetted Keccak fingerprints**
    - generate runtime-code Keccak-256 fingerprints and any remaining selectors/topics with a vetted implementation;
@@ -282,7 +282,7 @@ No DarkBot BUY transaction is required for G0.1.
 
 Current state:
 
-- Flap live deployment + fully decoded real `newTokenV6 / TOKEN_TAXED_V3` launch + exact CREATE2 address derivation + corrected external BUY ordering: **STRONG PARTIAL; initial-state/quote/BUY-path economics unresolved**
+- Flap live deployment + fully decoded real `newTokenV6 / TOKEN_TAXED_V3` launch + exact CREATE2 + corrected first-BUY ordering + exact conditional curve reproduction: **STRONG PARTIAL; historical state provenance/router semantics/fee rounding/minOutput remain unresolved**
 - Four Classic live deployment + real launch fixture + Helper3 routing evidence: **STRONG PARTIAL**
 - OpenFour live Registry/Core/Tools/proxy freeze + pinned ABI: **STRONG PARTIAL; canonical launch fixture still missing**
 - exact `PRIMARY_GATE0_SCOPE`: **NOT YET SELECTED** — selection belongs to G0.2 after G0.1 candidate evidence is complete
@@ -294,7 +294,7 @@ Therefore:
 Next work:
 
 1. obtain/decode canonical OpenFour launch fixture;
-2. finish Flap v5.24.0 V6 DOGE initial state, BNB->DOGE conversion, fee/output and router-vs-direct BUY-path freeze;
+2. run the transaction-index-correct archive execution-witness replay defined in `docs/GATE0_G02_FLAP_ECONOMICS_BUYPATH_2026-09-28.md`;
 3. generate remaining Keccak fingerprints with a vetted primitive;
 4. close G0.1;
 5. begin G0.2 preparation-matrix comparison and select `PRIMARY_GATE0_SCOPE`.
