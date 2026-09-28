@@ -63,8 +63,8 @@ Evidence:
 | token address | V6 salt + Portal + verified TaxTokenV3 implementation + EIP-1167 CREATE2 | pending launch | yes | **PROVEN YES** | local CREATE2 only | deployment/implementation/version change |
 | launch-internal purchase | decoded `quoteAmt` | pending launch | affects state | yes as input fact | state calculation | payload/mode change |
 | tax configuration | decoded V6 params | pending launch | affects economics | yes as input fact | local calculation | payload/mode change |
-| initial curve state | v5.24.0 V6 deployment + quoteAmt + extension/curve semantics | potentially pending | affects output | **UNKNOWN/PARTIAL** | reconstruct locally if proven | deployment/extension/state mismatch |
-| min output / slippage floor | policy + exact first-external-BUY state | after initial state derivable | yes | **UNKNOWN/PARTIAL** | compute/patch if unavoidable | state/input/policy change |
+| initial curve state | conditional reconstruction matches historical launch/BUY outputs; r/h/k provenance not yet pending-bound | potentially pre-resident + pending | affects output | **UNKNOWN/PARTIAL** | derive creator-buy state | curve/config/extension/intervening-state mismatch |
+| min output / slippage floor | policy + exact locally simulated conversion/curve/fee/tax state | UNKNOWN until witness | yes | **UNKNOWN** | local quote/patch after proof | conversion/curve/fee/tax/order/policy change |
 | nonce | local sender state | continuously maintained | yes | partial/prepared | finalize lane nonce | competing/replacement tx |
 | gas/fee fields | local policy + current head/fee state | continuously maintained | yes | partial | patch/finalize | head/policy invalidation |
 | extension data | decoded launch extension ID/data | pending launch | may affect validity/state | partial | local mode handling | extension semantics/version change |
@@ -111,7 +111,27 @@ Required next proof:
 5. determine a valid `minOutputAmount` without synchronous RPC in the hot path;
 6. compare local results against historical receipts/transfers.
 
-Current Flap assessment: **strongest first candidate; address derivation is proven, but G0.3 remains blocked until DOGE initial-state/economics and exact router-vs-direct BUY semantics are resolved**.
+Current Flap assessment: **G0.2_FLAP_PARTIAL**. CREATE2 is proven and the observed curve model reproduces creator + six external BUY outputs exactly, but G0.3 remains blocked until an archive-backed transaction-index witness binds pending/pre-resident state provenance, router internals, conversion state, extension semantics and exact fee/tax rounding.
+
+### Latest economics/BUY-path evidence
+
+Detailed evidence is frozen in:
+
+`docs/GATE0_G02_FLAP_ECONOMICS_BUYPATH_2026-09-28.md`
+
+Current verified facts:
+
+- earliest external BUY = `0x189585bec2fbfac6d2ff03455e1137b6c938bd17f495895e4e076b808d926800`, router path, block `124415358`, tx index `15`;
+- direct `Portal.swapExactInput` reference `0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b` is the fifth external BUY;
+- earliest router path observed flow is BNB -> WBNB -> DOGE -> Portal -> token;
+- direct Portal path uses a distinct native-to-DOGE conversion route;
+- conditional curve calculation reproduces creator + six external outputs with exact integer equality;
+- the conditional model still relies on observed/historical constants and deductions whose complete pre-signal provenance is not yet proven;
+- naive `floor(input/100)` for both protocol fee and tax is false for multiple samples; tax is sometimes one DOGE base unit higher;
+- current quote configuration exposes unresolved mode `7`, while the saved interface only defines 0..6;
+- `minOutputAmount = UNKNOWN`.
+
+Exactly one next test is allowed before G0.3: archive-backed transaction-index execution witness from launch `124415357:0` through first BUY `124415358:15`.
 
 ## 3. Candidate B — Four.Meme Classic / TokenManager2 V2
 
