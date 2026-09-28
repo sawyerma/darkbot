@@ -242,7 +242,11 @@ Damit ist die Rechenstrecke erheblich stärker abgesichert als die frühere rein
 
 Aber:
 
-**G0.2 ist dadurch noch nicht automatisch PASS**, weil die 65 Zwischen-Transaktionen zwischen Launch und First BUY noch vollständig auf BUY-relevante State-Änderungen geprüft werden müssen.
+**Update 2026-09-28:** Die 65 Zwischen-Transaktionen sind jetzt anhand vollständiger committed State-Diffs geprüft. Der historische First-BUY-Zustand wurde aus dem Parent-Block `124415356`, dem Launch-Diff und den 65 geordneten TX-Diffs fortgeschrieben und mit dem unabhängigen First-BUY-Prestate verglichen. Eine gesondert belegte Balance-Anpassung am Blockübergang ist ausdrücklich ausgewiesen (Abschnitt 10).
+
+Alle **22 Accounts / 67 gelesenen Storage-Slots** stimmen überein; **111 Zwischenzustands-Prüfungen** bestehen. Mit dem fortgeschriebenen Zustand liefert die BUY-Rechnung erneut `expected = actual = 6243568333969093909994622`, `difference = 0`.
+
+Das ist ein unabhängiger **State-Diff-Replay mit exakter BUY-Arithmetik**. Es ist kein vollständig unabhängiger EVM-Replay aller externen Callees. G0.2 bleibt wegen der in Abschnitt 10 benannten Semantik-/Pending-Nachweise **PARTIAL**.
 
 ---
 
@@ -299,7 +303,19 @@ Beispiele:
 
 Keine Rundungsregel darf aus diesen Werten nur „gefittet“ werden.
 
-Die exakte historische Semantik muss aus Contract-/State-Evidence kommen.
+**Jetzt für den beobachteten Modus aus historischem Runtime-Bytecode belegt:**
+
+```text
+combinedFee = floor(q * (protocolBps + taxBps) / 10000)
+protocolFee = floor(q * protocolBps / 10000)
+tax         = combinedFee - protocolFee
+```
+
+Bei jeweils 100 bps: `tax = floor(q/50) - floor(q/100)`. Das ergibt genau dann `floor(q/100)+1`, wenn `q mod 100 >= 50`. Die Regel wurde anhand tatsächlich ausgeführter Bytecode-Operationen mit Programmzählern und Operanden geprüft, nicht an beobachtete Gebühren gefittet. First-BUY und Direct-BUY bestätigen die Rechnung.
+
+Der Portal-Caller ist beim First BUY der Router; dessen Fee-Exemption-Mapping-Slot 177 ist 0. Die Decimals-, Buytax-, Pair- und Tax-Processor-Getter wurden zusätzlich aus historischem Code/Storage ohne übernommene Returnwerte nachgerechnet. Die Aussage gilt für diese Fixture und ersetzt keine vollständige Klassifikation anderer Caller, Extension-/Transfer-Effekte oder Modi.
+
+Technische Belege: `fee_rounding_proof.json`, `independent_view_reads.json` und `first_buy_trade_arithmetic_audit.json` im Archive-Witness-Ordner aus Abschnitt 5.2.
 
 ---
 
@@ -409,50 +425,98 @@ Der beobachtete Blockabstand von ungefähr 450 ms zwischen Launch-Block und ansc
 
 ---
 
-## 10. Aktueller einzige G0.2-Restblock
+## 10. Geprüfte Zwischen-Transaktionen und verbleibende G0.2-UNKNOWNs
 
-Zwischen:
+### 10.1 Vollständiger State-Diff-Nachweis — abgeschlossen
+
+Geprüfter Abschnitt:
 
 ```text
-Launch   124415357:0
-First BUY 124415358:15
+Launch:    124415357:0
+Zwischen:  124415357:1–50 und 124415358:0–14 (65 TXs)
+First BUY: 124415358:15
 ```
 
-liegen **65 zu prüfende Zwischen-Transaktionen**.
+Testaufbau: Mac / Darwin arm64, Python 3.14.3 und Node v24.1.0 / ethers 6.15.0. Read-only QuickNode-Archive-Abfragen und Offline-Verifier. Kein Live-BUY, keine Signatur, keine G0.3-Arbeit.
 
-Diese müssen einmal vollständig klassifiziert werden:
+Erfasst wurden **207 Raw-RPC-Antworten**: Chain-ID, kanonische Blockheader/Rechecks, Launch plus 65 `prestateTracer(diffMode=true)`-Antworten, historischer Parent-Code/-Balance/-Nonce/-Storage für die First-BUY-Abhängigkeiten sowie ein zusätzlicher Balance-Beleg am Blockübergang. Historische Zustandsabfragen sind per Blockhash gebunden. Alle Raw-Antworten besitzen SHA256-Nachweise; Zugangsdaten sind nicht enthalten.
 
-| Feld | Inhalt |
+Jede der 65 TXs besitzt im bestehenden technischen Beleg `intervening_transactions.json` Hash, Block/Index, betroffene Accounts, konkrete Storage-Slots bzw. Accountfelder, Vorher-/Nachherwerte, Relevanzentscheidung und Einfluss auf die Quote. Es gibt **keine unklassifizierte Zwischen-TX**. Die Relevanzentscheidung bezieht sich ausdrücklich auf den tatsächlich ausgeführten historischen First-BUY-Pfad.
+
+| Prüfumfang | Ergebnis |
 |---|---|
-| TX Hash / Index | eindeutige Identität |
-| betroffener Contract | falls relevant |
-| betroffener State | konkret |
-| BUY-relevant? | ja / nein |
-| State-Änderung | konkret |
-| beeinflusst First-BUY-Rechnung? | ja / nein |
-| Konsequenz | Recompute / keine |
+| 65 Zwischen-TXs | vollständig geprüft |
+| Änderungen an gelesenen First-BUY-Storage-Slots / relevantem Runtime-Code | **0** |
+| Portal-Storage-Änderungen | 2, beide für einen anderen Token |
+| WBNB-Änderungen | 14 andere Storage-Slots und 8 Native-Balance-Änderungen; einzeln dokumentiert |
+| Zieltoken-/Curve-/Preis-State | keine beeinflussende Zwischen-Mutation |
+| WBNB/DOGE-Poolreserven für diese Quote | keine Zwischen-Mutation |
+| Gelesene Extension-/Fee-/Exemption-/Proxy-/Router-Abhängigkeiten | keine beeinflussende Zwischen-Mutation |
+| Abgleich nach Fortschreibung | **22 Accounts / 67 Storage-Slots stimmen überein** |
+| Laufende Vorzustandsvergleiche | **111 bestanden** |
+| Erneute First-BUY-Rechnung | **Differenz 0** |
 
-Zu prüfen sind insbesondere:
+Die beiden Portal-TXs `124415357:12` (`0xe82b9496286c436cc6a1b46889071b5b4c6bff93f8055a3530823fd680b39980`) und `124415357:17` (`0x0b85b5a3fc78f03a9d181e1fb8b1c7010b872b9a91943c2b51e8fe7102393933`) verändern Reserve/Supply des anderen Tokens `0x76668c2ebe22185b82b73cb4e77707845ba67777`. Dessen Mapping-Slot wurde gegen die bestehenden Receipt-Logs und `keccak256(token,152)+1` geprüft. Sie verändern nicht die Kurve unseres Ziel-Tokens.
 
-- Portal-/Curve-State;
-- r/h/k;
-- Quote-/Converter-State;
-- WBNB/DOGE-Pool;
-- Extension-State;
-- Fee-/Tax-State;
-- Fee-Exemption;
-- relevante Proxy-/Implementation-Änderungen;
-- Router-relevanter State.
+**Explizite Blockgrenze:** Das Konto `0xfffffffffffffffffffffffffffffffffffffffe` hat nach dem letzten betroffenen Launch-Block-TX-Diff die Balance `0x5d9c5f336ddc3`; der per Blockhash abgefragte kanonische Block-Endzustand beträgt 0. Diese außerhalb der erfassten TX-Diffs liegende Balance-Anpassung wird separat eingespielt und dokumentiert. Ihre Protokollimplementierung wurde nicht unabhängig replayt. Sie ist kein Curve-/Pool-/Quote-Input; sie wurde nicht stillschweigend ignoriert oder als TX-Mutation ausgegeben.
 
-Danach muss die First-BUY-Rechnung **noch einmal** aus dem tatsächlich wirksamen State laufen.
-
-Ziel bleibt:
+Die Fortschreibung verwendet **keinen beobachteten Token-Output als Eingabe**. Das beobachtete First-BUY-Prestate liefert die unabhängige Vergleichsbasis und den Scope der gelesenen Werte; die verwendeten Zustandswerte werden aus Parent-State und geordneten Änderungen rekonstruiert.
 
 ```text
-expected = 6243568333969093909994622
-actual   = 6243568333969093909994622
-diff     = 0
+replayed_state_arithmetic_expected_output = 6243568333969093909994622
+actual                                   = 6243568333969093909994622
+replayed_state_arithmetic_difference      = 0
 ```
+
+Raw- und technische Belege im bestehenden Ordner:
+
+```text
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/gate0-evidence/
+2026-09-28-g02-archive-witness-quicknode-153754/
+  intervening_raw/                    # requests, unveränderte responses, SHA256
+  intervening_transactions.json      # alle 65 Klassifikationen, Vor-/Nachwerte
+  replayed_first_buy_prestate.json    # aus Parent + Diffs fortgeschrieben
+  first_buy_calculation.json          # Rechnung mit diesem Zustand
+  witness_summary.json
+  verifier.stdout.txt
+```
+
+Ausgeführt:
+
+```bash
+python3 gate0-evidence/collect_flap_intervening.py
+python3 gate0-evidence/verify_flap_intervening.py
+# Exit 0: 65 TXs klassifiziert, Zustand stimmt überein
+
+python3 gate0-evidence/verify_flap_g02_economics.py
+# Exit 2: G0.2_FLAP_PARTIAL; kein künstlicher PASS
+```
+
+Es wurde keine neue Latenz gemessen. Die Zahlen in Abschnitt 8 bleiben unverändert; `T_signal → T_send` und `T_buy` bleiben N/A.
+
+### 10.2 Verbleibende UNKNOWNs — weiterhin PARTIAL
+
+Die frühere Formulierung „einziger Restblock = 65 TXs“ war gegenüber den bereits dokumentierten Verifier-Requirements unvollständig. Der jetzt abgeschlossene TX-Nachweis beseitigt diese anderen Anforderungen nicht:
+
+1. **Pending-Initialisierung / Oracle / Extension:** Der benötigte Preis ist in den Launch-Calldata vorhanden und stimmt mit dem gespeicherten Preis überein. Vollständige unabhängige Herleitung des signierten Digests, Rollen-/Frischeprüfung und Launcher-/Extension-Effekte fehlen noch. Die erfolgreiche historische Ausführung allein belegt nicht alle Vorbedingungen für die lokale Vorausberechnung.
+2. **Externe Callee-/Transfer-Effekte:** Die Arithmetik und die genannten View-Getter sind unabhängig berechnet. Der begrenzte Trade-Bytecode-Auditor übernimmt für externe Effekte weiterhin aufgezeichnete erfolgreiche Antworten. Er ist kein unabhängiger Ausführungsnachweis sämtlicher Nebenwirkungen. Der First-BUY-Audit verwendet jetzt den belegten Blocktimestamp und erreicht den Return; ein künstlicher Timestamp wird nicht eingesetzt.
+3. **Vollständige Hotpath-Klassifikation:** Aktualisierung, Invalidierung und rechtzeitige Verfügbarkeit aller Quote-/Converter-/Registry-/Extension-/Exemption-Werte sind noch nicht geschlossen. Für den direkten BNB-Portal-Referenzpfad fehlt zusätzlich die unabhängig gerechnete V3-Konvertierung; sie darf nicht mit der bewiesenen Router-V2-Konvertierung gleichgesetzt werden.
+
+Aktuelle Requirements:
+
+| Requirement | Wert |
+|---|---|
+| router_command_semantics | true für die historische Fixture |
+| independent_conversion_prestate | true für den First-BUY-V2-Pfad |
+| fee_rounding_source | true für den belegten Modus |
+| alle 65 Zwischen-TXs geprüft | true |
+| pending_initial_state | false |
+| full_first_buy_reproduction als vollständiger semantischer Ausführungsnachweis | false |
+| hotpath_dependencies_fully_classified | false |
+
+`full_independent_first_buy_difference` bleibt im strengen Gesamt-Witness `null`; die exakt bestandene Rechenprüfung ist separat als `replayed_state_arithmetic_difference = 0` ausgewiesen. Damit wird der historische Rechenerfolg nicht als vollständige G0.2-Freigabe ausgegeben.
+
+**Gate-Entscheidung: G0.2 = PARTIAL, G0.3 = BLOCKED.** Nächster fachlicher Nachweis ist die konkrete Launcher-/Oracle-/Extension-Semantik und ihre pending-seitige Abhängigkeitsklassifikation, nicht eine erneute Prüfung derselben 65 TXs.
 
 ---
 
