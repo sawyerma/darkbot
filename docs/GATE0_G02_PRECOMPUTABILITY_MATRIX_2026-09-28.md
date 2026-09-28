@@ -44,14 +44,14 @@ Evidence:
 - real canonical `newTokenV6` launch fixture exists;
 - selector `0x8cb5772c` decodes as `newTokenV6`;
 - `tokenVersion = 6 = TOKEN_TAXED_V3`;
-- quote token = WBNB `0xba2ae424d960c26247dd6c32edc70b295c744c43`;
+- quote token = DOGE / Dogecoin, 8 decimals;
 - `quoteAmt = 80574062404`;
 - `buyTaxRate = 100`, `sellTaxRate = 100`;
 - tax distribution sums to 10000 bps;
 - real successful external BUY fixtures exist after that launch;
-- canonical BUY fixture uses `swapExactInput` selector `0xef7ec2e7`;
+- direct Portal BUY evidence uses `swapExactInput` selector `0xef7ec2e7`;
 - target-token transfer evidence exists for a successful BUY;
-- current published Tax Token V3 CREATE2 recipe does **not** reproduce the actual fixture token address.
+- corrected EIP-1014 calculation reproduces the fixture token address exactly; the earlier mismatch was caused by incorrectly padding the 20-byte Portal address to 32 bytes.
 
 | BUY field/state | Verified source | Earliest availability | Signature-bound? | Precomputable before actionable signal? | Hot-path residual | Invalidation/rebuild condition |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -60,7 +60,7 @@ Evidence:
 | recipient | local wallet config | startup | yes | yes | none | wallet/config change |
 | quote token / quote mode | decoded V6 launch | pending launch | yes | yes for this fixture mode | none/mode validation | launch mode mismatch |
 | input amount/value | local policy + ERC-20 quote semantics | startup plus policy | yes | partial | patch/finalize amount | policy/state change |
-| token address | V6 salt + actual deployment semantics | potentially pending | yes | **UNKNOWN/PARTIAL — published formula mismatches fixture** | unresolved | implementation/deployer/salt-transform/version mismatch |
+| token address | V6 salt + Portal + verified TaxTokenV3 implementation + EIP-1167 CREATE2 | pending launch | yes | **PROVEN YES** | local CREATE2 only | deployment/implementation/version change |
 | launch-internal purchase | decoded `quoteAmt` | pending launch | affects state | yes as input fact | state calculation | payload/mode change |
 | tax configuration | decoded V6 params | pending launch | affects economics | yes as input fact | local calculation | payload/mode change |
 | initial curve state | v5.24.0 V6 deployment + quoteAmt + extension/curve semantics | potentially pending | affects output | **UNKNOWN/PARTIAL** | reconstruct locally if proven | deployment/extension/state mismatch |
@@ -69,49 +69,49 @@ Evidence:
 | gas/fee fields | local policy + current head/fee state | continuously maintained | yes | partial | patch/finalize | head/policy invalidation |
 | extension data | decoded launch extension ID/data | pending launch | may affect validity/state | partial | local mode handling | extension semantics/version change |
 
-### Flap CREATE2 blocker
+### Flap CREATE2 proof — PASS for this exact scope
 
-Current official `flap-skills` salt-finding reference uses:
+The previous mismatch was a verifier bug, not a protocol ambiguity. The CREATE2 deployer address must be encoded as exactly 20 bytes under EIP-1014; the earlier local calculation incorrectly padded it to 32 bytes.
 
-`CREATE2(Portal, salt, EIP1167(TaxTokenV3 implementation))`
+Correct inputs reproduce the token exactly:
 
-with Tax Token V3 implementation `0x024f18294970B5c76c0691b87f138A0317156422`.
+`pending V6 salt + Portal + TaxTokenV3 implementation + EIP-1167 init code -> 0xabe1fe16cf6bc48c9524713054efe6e954b17777`
 
-For the historical fixture salt:
+Seven EIP-1014 reference vectors and an independent RPC-hash cross-check passed.
 
-`0x0c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c`
+Therefore token-address derivation is no longer a G0.2 blocker.
 
-the published recipe predicts:
+### Corrected BUY ordering and path question
 
-`0xaf5b39fd975d2f1ea9d89ecd8d09676155cb818a`
+A four-block / 211-receipt rescan found the earliest observed external BUY at block `124415358`, transaction index `15`, via an on-chain router. The previously used reference BUY was the fifth external purchase.
 
-but the actual token is:
+This creates a mandatory G0.2 comparison:
 
-`0xabe1fe16cf6bc48c9524713054efe6e954b17777`
+1. decode the earliest router transaction completely;
+2. identify router destination, selector, calldata and downstream Portal calls;
+3. compare it with direct `Portal.swapExactInput`;
+4. prove whether both paths are executable from the same pending-launch facts;
+5. determine whether either path requires additional state/quote data;
+6. freeze the exact on-chain BUY path used by `PRIMARY_GATE0_SCOPE`.
 
-Therefore no pre-T0 token-address claim is allowed yet.
+Router use here is still direct on-chain execution; it is not a frontend/API dependency.
 
-### Runtime result and required resolution order
+### Remaining Flap G0.2 blocker: initial state and economics
 
-Runtime inspection is complete:
+The fixture's quote asset is DOGE with 8 decimals, not WBNB.
 
-- actual token `0xabe1...7777` is an EIP-1167 clone;
-- embedded implementation exactly matches `0x024f18294970B5c76c0691b87f138A0317156422`;
-- the implementation-address hypothesis is eliminated;
-- the official Flap example repository's OpenZeppelin `Clones.sol` uses the same standard 55-byte EIP-1167 creation sequence as the published salt recipe.
+For a BUY funded with native BNB, exact local semantics must include the BNB -> DOGE conversion before/inside the selected Flap trading path. The official Flap example confirms that `Portal.swapExactInput` can take native BNB as `inputToken = address(0)` while buying a token whose reserve quote asset is an ERC-20, but Gate 0 must reproduce the exact conversion and first-BUY economics for this fixture.
 
-Next:
+Required next proof:
 
-1. Try `debug_traceTransaction` / equivalent trace for launch tx `0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c`, capturing CREATE2 creator/deployer, salt and creation input.
-2. If public tracing is unavailable, use an archive/trace-capable BSC endpoint.
-3. Freeze the Portal EIP-1967 implementation slot specifically at block `124415357`.
-4. Analyze the historical implementation/deployment path to determine whether it transforms salt or delegates CREATE2 to another factory/helper.
-5. Recompute the address from the **observed** CREATE2 preimage and require exact match to `0xabe1...7777`.
-6. Only then reconstruct the post-launch initial state and `minOutputAmount` semantics.
+1. derive the post-launch DOGE reserve/circulating state from V6 launch parameters and `quoteAmt`;
+2. freeze the curve parameters and native-to-quote conversion mode applicable to this token;
+3. decode the earliest router BUY and the direct Portal reference BUY;
+4. reproduce protocol fees, conversion fees, taxes and exact output locally;
+5. determine a valid `minOutputAmount` without synchronous RPC in the hot path;
+6. compare local results against historical receipts/transfers.
 
-Public historical RPC `missing trie node` means current public endpoints are insufficient for the needed historical-state proof; it does not imply the state is unknowable in production.
-
-Current Flap assessment: **strongest first candidate, but G0.3 remains blocked until the V6 deployment/address and initial-state semantics are resolved**.
+Current Flap assessment: **strongest first candidate; address derivation is proven, but G0.3 remains blocked until DOGE initial-state/economics and exact router-vs-direct BUY semantics are resolved**.
 
 ## 3. Candidate B — Four.Meme Classic / TokenManager2 V2
 
@@ -178,15 +178,15 @@ All of the following must be true:
 
 - exact live v5.24.0 `newTokenV6 / TOKEN_TAXED_V3` mode and ABI semantics pinned;
 - real fixture fully decoded;
-- token address derivation proven from pre-execution/pending data, or earliest unavoidable later derivation point explicitly proven;
-- launch-internal purchase and initial curve state reproduced locally;
-- exact external `swapExactInput` BUY semantics reproduced locally;
+- token address derivation proven from pre-execution/pending data — **already satisfied for the frozen V6 fixture**;
+- launch-internal DOGE purchase, BNB->DOGE conversion and initial curve state reproduced locally;
+- exact earliest-router and direct-Portal BUY semantics compared; selected on-chain BUY path reproduced locally;
 - every signature-bound BUY field classified as startup-precomputed, pre-signal-derived, signal-time-patched or unavoidable later input;
 - no synchronous RPC/HTTP/helper call required in the local BUY hot path.
 
 If these pass, freeze:
 
-`PRIMARY_GATE0_SCOPE = Flap / BSC / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3 / exact swapExactInput mode / exact quote mode`
+`PRIMARY_GATE0_SCOPE = Flap / BSC / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3 / exact selected on-chain BUY path / DOGE quote mode`
 
 and proceed to G0.3 minimal correctness-first Launch -> BUY harness.
 
