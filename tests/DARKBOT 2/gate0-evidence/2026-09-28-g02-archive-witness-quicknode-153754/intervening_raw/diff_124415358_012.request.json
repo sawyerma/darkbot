@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "debug_traceTransaction",
+  "params": [
+    "0xa11e305e94efbac58b5183e4355bf819bbee2fea1c2ea62ac8e6cf3b3c1a781f",
+    {
+      "tracer": "prestateTracer",
+      "tracerConfig": {
+        "diffMode": true
+      },
+      "timeout": "30s"
+    }
+  ]
+}

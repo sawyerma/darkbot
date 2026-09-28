@@ -121,7 +121,8 @@
     "independent_prestate": false,
     "limitation": "Pre-reserves use target Swap output; arithmetic consistency only",
     "router_native_fee": 150000000000000,
-    "pool_fee_wei_under_9975_model": 74625000000000
+    "pool_fee_wei_under_9975_model": 74625000000000,
+    "legacy_evidence_scope": "Original receipt-only calculation retained; new independent prestate proof is in archive witness independent_conversion.json"
   },
   "costs": {
     "router": {
@@ -165,5 +166,15 @@
     0
   ],
   "current_quote_config_mode_7_semantics": "UNRESOLVED; saved interface defines 0..6",
-  "direct_internal_conversion": "DOGE inflow from ce6160... observed; complete V3 state/ticks/fee-mode not reproduced"
+  "direct_internal_conversion": "DOGE inflow from ce6160... observed; complete V3 state/ticks/fee-mode not reproduced",
+  "archive_update": {
+    "tx_prestate_arithmetic_expected_output": "6243568333969093909994622",
+    "tx_prestate_arithmetic_difference": "0",
+    "full_independent_first_buy_difference": "0",
+    "remaining_unknowns": [],
+    "status": "G0.2_FLAP_PASS",
+    "semantic_replay_file": "2026-09-28-g02-archive-witness-quicknode-153754/semantic_replay_proof.json",
+    "independent_calculation_file": "2026-09-28-g02-archive-witness-quicknode-153754/first_buy_calculation.json"
+  },
+  "legacy_section_status": "Earlier conditional/receipt-only evidence retained; authoritative current status is archive_update and gate_result.json"
 }

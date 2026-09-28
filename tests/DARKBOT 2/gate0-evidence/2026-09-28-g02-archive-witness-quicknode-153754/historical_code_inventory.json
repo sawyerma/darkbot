@@ -1,0 +1,464 @@
+{
+  "launch": {
+    "0x0000000000000000000000000000000000000001": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 0
+    },
+    "0x024f18294970b5c76c0691b87f138a0317156422": {
+      "code_bytes": 19331,
+      "code_keccak": "0xb530a7e0ff0d6ab435a5ec71f2b04092937735e23a0fb3a0746724ce9b875b4a",
+      "code_sha256": "34000dd228055664fda2debd21b5fe5288b750ca3ce8fb4e6933e5c529586ef5",
+      "storage_slots": 0
+    },
+    "0x11055852a513d15655a3f03e4ed66c6e7827e3c7": {
+      "code_bytes": 24262,
+      "code_keccak": "0x927085e861210117fb0eff27a12eea60a00d4ea179a1de51ace8144d1295328c",
+      "code_sha256": "38321e7d0beb687440c2dd267c7b1c93aa405e32bca2bf8e23898fb864c3fd42",
+      "storage_slots": 0
+    },
+    "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20": {
+      "code_bytes": 20475,
+      "code_keccak": "0xb191694f7248773f714234aeb150149a2b9af5d1ab483a53d31c19ec3132b230",
+      "code_sha256": "2ac893fca8dfa730d66cb4f0fc3e2c769f2ffdb4565e55903d9fa12e7cd7149f",
+      "storage_slots": 0
+    },
+    "0x34e98907d262de5c8241350d602beb889ba8b129": {
+      "code_bytes": 17205,
+      "code_keccak": "0xf8a15747db7bbbaa6cf5d886fdf7eb0a8a641c8212b5dec879f06b4f5d1cf884",
+      "code_sha256": "e7e2caf919da101dd12a877db4dc1ba0e0334cb8f021e1eb65e8bf4cc3bf5bd9",
+      "storage_slots": 0
+    },
+    "0x39c4d7530eda6d7d678f1d1029b6f36070b51954": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 5
+    },
+    "0x3a632ecc01a45b8002d76c15e172e71c79412003": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 7
+    },
+    "0x3e6e9300dba3c604b383ef732471322b52d8bd35": {
+      "code_bytes": 19855,
+      "code_keccak": "0x4dcb12a880ff13079d25f856d5287e662a82dd1763a39fc1ede3949a2869ca10",
+      "code_sha256": "c18cdcaf4bb286fc41c3ed8c3f7a09434aae48e09ed2f7766d2fa14aca13a8de",
+      "storage_slots": 0
+    },
+    "0x3fb6c01dd3cf085fe02a8678ae2ea2f26f0ff705": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 17
+    },
+    "0x4db4fcfebbf3f0cbd20efff444b133b96abda2d6": {
+      "code_bytes": 5111,
+      "code_keccak": "0xa13a38651497f9561425a51b6486aa9cb639723c0d8f32e01c8694add247d096",
+      "code_sha256": "1c41203da4415575de6548afa1d82842716d13ea9dfd5d03615f87d2edd82716",
+      "storage_slots": 4
+    },
+    "0x4eb3e98d9b79755fe2b8aacb8528b63746e9867a": {
+      "code_bytes": 3347,
+      "code_keccak": "0x309a521de5d6279f5a69dafcaec81ac2f3c40dd02ae44b9d72cbb07b7f616035",
+      "code_sha256": "4e55e063b4b0233baf44d3c89a5261e24692e2dc3423036a9d6778fafc96ec90",
+      "storage_slots": 0
+    },
+    "0x5471478eb0b37fff15e831efc044a967da83a825": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 26
+    },
+    "0x71e947a4bcbf4f80948bcb2afb0422b3cdcfdd0b": {
+      "code_bytes": 3014,
+      "code_keccak": "0x03a2c68bfaa80726f2163f84dc841a95212ca54fdad5547ad0951bd6954f5dc8",
+      "code_sha256": "16f5ce450900e94e4f54c07b1d35c8c9654b724e567923c2ea1eb756461863f8",
+      "storage_slots": 0
+    },
+    "0x78d9828e5d58d63e40bb4ac5b754189bcfb93cdc": {
+      "code_bytes": 10417,
+      "code_keccak": "0x138fdfc74b1a3c40d84fb851bf0d316a3969845da8a38790450f9560111c0f88",
+      "code_sha256": "07cc9c9b4744d14eaac68cc24efff19b59e35a1508cd8a36e6217292e8fad850",
+      "storage_slots": 0
+    },
+    "0x7d800be463b920771b1c232072b0ab11623270cc": {
+      "code_bytes": 23951,
+      "code_keccak": "0x5046f6288042c7b0d1fb855676d97538e6c5e0eb46d7b57b43d5a39b7d44c796",
+      "code_sha256": "d7372831bdf76a357f9031bc368265118437e7ffffa3fadb6f7d59a88f6bdfec",
+      "storage_slots": 0
+    },
+    "0x88056bfe17e460e4b3240080dbce849b97b984dd": {
+      "code_bytes": 17023,
+      "code_keccak": "0x14b37d5e8f26cbcf893adcf8f97b38a95fcfb768ac924dfb5c892795a7b61f74",
+      "code_sha256": "efa98843587345aca114061215448371b8829a5dfa9887c5e0cd3ded8eddd62c",
+      "storage_slots": 0
+    },
+    "0x9818eb714a8c0955c5915c368b2766d950275d24": {
+      "code_bytes": 21538,
+      "code_keccak": "0x56691bdd16e4acaa50d07728fe2c2319705093a9ab064b34177b0ade24c94bf7",
+      "code_sha256": "448d5061bc9b5a2b966a008cca4a406cdb6587098fb1f4824082b478ed24a2e2",
+      "storage_slots": 0
+    },
+    "0x9d6716dea8614448bd342f5c5c84a8def9079dc4": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 0
+    },
+    "0xa39a573d33181f014b326c50575589ed8efcee98": {
+      "code_bytes": 4096,
+      "code_keccak": "0xc78dce1c177d0e9bdf1d2c55dc4df3d58dd8677e4e07c9953d60ed939b1b9cc9",
+      "code_sha256": "37c42a51754219fbfb03be1821ca84f5127281989362e3ab614f31c7e2b52ee6",
+      "storage_slots": 0
+    },
+    "0xa3c8edc3dae4aa4c43954b2c9f3d46195567fcf5": {
+      "code_bytes": 1130,
+      "code_keccak": "0x92eae87549a7f8a7e19128739071276af5ecf574b1e02cc8121c47c916f3b40e",
+      "code_sha256": "3d035beda99215984056f9dc90ccef912ed353c0fe3cbedfc6e274e4d1da449a",
+      "storage_slots": 1
+    },
+    "0xabe1fe16cf6bc48c9524713054efe6e954b17777": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 48
+    },
+    "0xba2ae424d960c26247dd6c32edc70b295c744c43": {
+      "code_bytes": 1596,
+      "code_keccak": "0x83286e6603e5438137daf601561c2013e66fa84a967364f53ab02dacee83dfe8",
+      "code_sha256": "f79db50aa7ba73637c85e0392ca9d19b43a2e7db638293de717955293d4eb5cc",
+      "storage_slots": 9
+    },
+    "0xba5fe23f8a3a24bed3236f05f2fcf35fd0bf0b5c": {
+      "code_bytes": 5066,
+      "code_keccak": "0xd2d7cf7504e1cb572af28476d45907fc30bee1297917bed153e6fbba125821a3",
+      "code_sha256": "7f92760e3dee25dadcf64405a080deef0f62b3d7bd263a1f9fa22176e59d195c",
+      "storage_slots": 0
+    },
+    "0xca143ce32fe78f1f7019d7d551a6402fc5350c73": {
+      "code_bytes": 19084,
+      "code_keccak": "0x9e8d17faaee69b053be6ac65b2b2c317741d770cb5fbdd9512536d17e9e076ca",
+      "code_sha256": "74aa65f879c1865d63680e869d990a43a151431b52836929dd0d166e4f056f7f",
+      "storage_slots": 4
+    },
+    "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0": {
+      "code_bytes": 2882,
+      "code_keccak": "0x0a3fe6f701ee3cb432f45912e054896327ce5902337eae4d62d01406005a91c3",
+      "code_sha256": "1fc365bfda5c9694d38901227927872e610f84d9de9b4e360fea40578fb4bcc1",
+      "storage_slots": 20
+    },
+    "0xe987459f78785305bd25e4f41ab13c29c0b50310": {
+      "code_bytes": 18129,
+      "code_keccak": "0x53e993ea6f8bade787232d5797bc00f03fb056661095b72ad84f557152422dc0",
+      "code_sha256": "637ab9e0563fabfca6771be47d20d47bb82c292ddb9f39eb94c3d6d56090ce6d",
+      "storage_slots": 0
+    },
+    "0xffb69d59f62454f3b8322bc1a9fce6e171a5264f": {
+      "code_bytes": 2840,
+      "code_keccak": "0x0bf9e19e3338c64927d945e74e5f4c64bf47bf8cc524972feaa65ba40b2aa78b",
+      "code_sha256": "84ec746a132c56c65c4cb9c625ade3b721720ab2cddad3604440cbc1f2636f94",
+      "storage_slots": 5
+    },
+    "0xfffffffffffffffffffffffffffffffffffffffe": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 0
+    }
+  },
+  "first_buy": {
+    "0x024f18294970b5c76c0691b87f138a0317156422": {
+      "code_bytes": 19331,
+      "code_keccak": "0xb530a7e0ff0d6ab435a5ec71f2b04092937735e23a0fb3a0746724ce9b875b4a",
+      "code_sha256": "34000dd228055664fda2debd21b5fe5288b750ca3ce8fb4e6933e5c529586ef5",
+      "storage_slots": 0
+    },
+    "0x11055852a513d15655a3f03e4ed66c6e7827e3c7": {
+      "code_bytes": 24262,
+      "code_keccak": "0x927085e861210117fb0eff27a12eea60a00d4ea179a1de51ace8144d1295328c",
+      "code_sha256": "38321e7d0beb687440c2dd267c7b1c93aa405e32bca2bf8e23898fb864c3fd42",
+      "storage_slots": 0
+    },
+    "0x1e4a7882aa4390fce8e9c0f88327305aa6ed9a72": {
+      "code_bytes": 171,
+      "code_keccak": "0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000",
+      "code_sha256": "5b8bff324e02136edb0775bd77aa0fe773c1e23092305fe63f50a9e92f5b8faf",
+      "storage_slots": 1
+    },
+    "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20": {
+      "code_bytes": 20475,
+      "code_keccak": "0xb191694f7248773f714234aeb150149a2b9af5d1ab483a53d31c19ec3132b230",
+      "code_sha256": "2ac893fca8dfa730d66cb4f0fc3e2c769f2ffdb4565e55903d9fa12e7cd7149f",
+      "storage_slots": 0
+    },
+    "0x34e98907d262de5c8241350d602beb889ba8b129": {
+      "code_bytes": 17205,
+      "code_keccak": "0xf8a15747db7bbbaa6cf5d886fdf7eb0a8a641c8212b5dec879f06b4f5d1cf884",
+      "code_sha256": "e7e2caf919da101dd12a877db4dc1ba0e0334cb8f021e1eb65e8bf4cc3bf5bd9",
+      "storage_slots": 0
+    },
+    "0x3a632ecc01a45b8002d76c15e172e71c79412003": {
+      "code_bytes": 359,
+      "code_keccak": "0x65ad04e670b9f5251cad98e60413c0fba11497aab948070a2f4f5a4564b628a6",
+      "code_sha256": "00b0ba48e9f7e3ae11d7ebce90eecee3e7cd7b6126a6c986694d46b59aa9483f",
+      "storage_slots": 5
+    },
+    "0x3e5c63644e683549055b9be8653de26e0b4cd36e": {
+      "code_bytes": 23800,
+      "code_keccak": "0x21842597390c4c6e3c1239e434a682b054bd9548eee5e9b1d6a4482731023c0f",
+      "code_sha256": "382183ad763afbcc7f7728a6dbd6fd51b46843b0e1ebdc33a0def6e7939f4aa2",
+      "storage_slots": 0
+    },
+    "0x3fb6c01dd3cf085fe02a8678ae2ea2f26f0ff705": {
+      "code_bytes": 45,
+      "code_keccak": "0xcf2597e147622af5246f31bfb1f4f2cd381cc326db3418f24268331f807dcdca",
+      "code_sha256": "07f3b6e6d43d2c58ecd64bddaf95b97f624e31895f6882d6a9e655e62b0aadda",
+      "storage_slots": 10
+    },
+    "0x43dd5eebeebead726fbc84e2511567d9827ae1bb": {
+      "code_bytes": 20863,
+      "code_keccak": "0xf929fb888d12d85d4770db4725753b77e567f40e4979e1f9b3f291b477446ba7",
+      "code_sha256": "89430097209c2522fe9d3a2555910921e9d3ab3ecef1bbed2c6fa401091a17c3",
+      "storage_slots": 2
+    },
+    "0x4db4fcfebbf3f0cbd20efff444b133b96abda2d6": {
+      "code_bytes": 5111,
+      "code_keccak": "0xa13a38651497f9561425a51b6486aa9cb639723c0d8f32e01c8694add247d096",
+      "code_sha256": "1c41203da4415575de6548afa1d82842716d13ea9dfd5d03615f87d2edd82716",
+      "storage_slots": 1
+    },
+    "0x5471478eb0b37fff15e831efc044a967da83a825": {
+      "code_bytes": 45,
+      "code_keccak": "0x9e4e097cdf52b213db28e187f77850297425d588fe62b26909459e7ed59649b9",
+      "code_sha256": "e4c84611bf0760f47cfbb4ab6a9e61c9131e3d773fdd3b8ad37bcaf5bb75bf5e",
+      "storage_slots": 9
+    },
+    "0x78d9828e5d58d63e40bb4ac5b754189bcfb93cdc": {
+      "code_bytes": 10417,
+      "code_keccak": "0x138fdfc74b1a3c40d84fb851bf0d316a3969845da8a38790450f9560111c0f88",
+      "code_sha256": "07cc9c9b4744d14eaac68cc24efff19b59e35a1508cd8a36e6217292e8fad850",
+      "storage_slots": 0
+    },
+    "0xa39a573d33181f014b326c50575589ed8efcee98": {
+      "code_bytes": 4096,
+      "code_keccak": "0xc78dce1c177d0e9bdf1d2c55dc4df3d58dd8677e4e07c9953d60ed939b1b9cc9",
+      "code_sha256": "37c42a51754219fbfb03be1821ca84f5127281989362e3ab614f31c7e2b52ee6",
+      "storage_slots": 0
+    },
+    "0xa3c8edc3dae4aa4c43954b2c9f3d46195567fcf5": {
+      "code_bytes": 1130,
+      "code_keccak": "0x92eae87549a7f8a7e19128739071276af5ecf574b1e02cc8121c47c916f3b40e",
+      "code_sha256": "3d035beda99215984056f9dc90ccef912ed353c0fe3cbedfc6e274e4d1da449a",
+      "storage_slots": 1
+    },
+    "0xabe1fe16cf6bc48c9524713054efe6e954b17777": {
+      "code_bytes": 45,
+      "code_keccak": "0x9a16180e23f97dd8df627d48402f11d69169798b0470c1d975bf3d846a38e365",
+      "code_sha256": "44682660b605e0547325b011a2d7cb089fc2f6591b6d3e9b6f3be119d1e85e6b",
+      "storage_slots": 9
+    },
+    "0xac109c8025f272414fd9e2faa805a583708a017f": {
+      "code_bytes": 14981,
+      "code_keccak": "0x60e4bcb14447615ab7c14fda2c2d70ca4191570e8841c75618e627c8f72662f8",
+      "code_sha256": "ab89a0244c7e5a86aa8e1673b4c5b825db93bc406c7934e923ebb0a7c4548ac7",
+      "storage_slots": 6
+    },
+    "0xba2ae424d960c26247dd6c32edc70b295c744c43": {
+      "code_bytes": 1596,
+      "code_keccak": "0x83286e6603e5438137daf601561c2013e66fa84a967364f53ab02dacee83dfe8",
+      "code_sha256": "f79db50aa7ba73637c85e0392ca9d19b43a2e7db638293de717955293d4eb5cc",
+      "storage_slots": 10
+    },
+    "0xba5fe23f8a3a24bed3236f05f2fcf35fd0bf0b5c": {
+      "code_bytes": 5066,
+      "code_keccak": "0xd2d7cf7504e1cb572af28476d45907fc30bee1297917bed153e6fbba125821a3",
+      "code_sha256": "7f92760e3dee25dadcf64405a080deef0f62b3d7bd263a1f9fa22176e59d195c",
+      "storage_slots": 0
+    },
+    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c": {
+      "code_bytes": 3124,
+      "code_keccak": "0xb7d84205eaaf83ce7b3940c6beaad6d22790255e34a9a2b486aa8cdfff118fe6",
+      "code_sha256": "e96eee25c3a063ffcfbe4ae2aa2c44e5c99ddf236adb7828676f6fd7f8605742",
+      "storage_slots": 2
+    },
+    "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0": {
+      "code_bytes": 2882,
+      "code_keccak": "0x0a3fe6f701ee3cb432f45912e054896327ce5902337eae4d62d01406005a91c3",
+      "code_sha256": "1fc365bfda5c9694d38901227927872e610f84d9de9b4e360fea40578fb4bcc1",
+      "storage_slots": 11
+    },
+    "0xe6b55031e42587e540c629807a059ff7d1a849b6": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 0
+    },
+    "0xfffffffffffffffffffffffffffffffffffffffe": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 0
+    }
+  },
+  "direct_buy": {
+    "0x024f18294970b5c76c0691b87f138a0317156422": {
+      "code_bytes": 19331,
+      "code_keccak": "0xb530a7e0ff0d6ab435a5ec71f2b04092937735e23a0fb3a0746724ce9b875b4a",
+      "code_sha256": "34000dd228055664fda2debd21b5fe5288b750ca3ce8fb4e6933e5c529586ef5",
+      "storage_slots": 0
+    },
+    "0x11055852a513d15655a3f03e4ed66c6e7827e3c7": {
+      "code_bytes": 24262,
+      "code_keccak": "0x927085e861210117fb0eff27a12eea60a00d4ea179a1de51ace8144d1295328c",
+      "code_sha256": "38321e7d0beb687440c2dd267c7b1c93aa405e32bca2bf8e23898fb864c3fd42",
+      "storage_slots": 0
+    },
+    "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": {
+      "code_bytes": 24316,
+      "code_keccak": "0x25cbde77f2ef6d474c31f738e67ab99e604471170d8a0ab4f544cbaba969d078",
+      "code_sha256": "e0fd1ddff7b3de30545afe89d4088bfd9aa92088f5212459e84de526c07eccf7",
+      "storage_slots": 1
+    },
+    "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20": {
+      "code_bytes": 20475,
+      "code_keccak": "0xb191694f7248773f714234aeb150149a2b9af5d1ab483a53d31c19ec3132b230",
+      "code_sha256": "2ac893fca8dfa730d66cb4f0fc3e2c769f2ffdb4565e55903d9fa12e7cd7149f",
+      "storage_slots": 0
+    },
+    "0x34e98907d262de5c8241350d602beb889ba8b129": {
+      "code_bytes": 17205,
+      "code_keccak": "0xf8a15747db7bbbaa6cf5d886fdf7eb0a8a641c8212b5dec879f06b4f5d1cf884",
+      "code_sha256": "e7e2caf919da101dd12a877db4dc1ba0e0334cb8f021e1eb65e8bf4cc3bf5bd9",
+      "storage_slots": 0
+    },
+    "0x3a632ecc01a45b8002d76c15e172e71c79412003": {
+      "code_bytes": 359,
+      "code_keccak": "0x65ad04e670b9f5251cad98e60413c0fba11497aab948070a2f4f5a4564b628a6",
+      "code_sha256": "00b0ba48e9f7e3ae11d7ebce90eecee3e7cd7b6126a6c986694d46b59aa9483f",
+      "storage_slots": 5
+    },
+    "0x3fb6c01dd3cf085fe02a8678ae2ea2f26f0ff705": {
+      "code_bytes": 45,
+      "code_keccak": "0xcf2597e147622af5246f31bfb1f4f2cd381cc326db3418f24268331f807dcdca",
+      "code_sha256": "07f3b6e6d43d2c58ecd64bddaf95b97f624e31895f6882d6a9e655e62b0aadda",
+      "storage_slots": 7
+    },
+    "0x4db4fcfebbf3f0cbd20efff444b133b96abda2d6": {
+      "code_bytes": 5111,
+      "code_keccak": "0xa13a38651497f9561425a51b6486aa9cb639723c0d8f32e01c8694add247d096",
+      "code_sha256": "1c41203da4415575de6548afa1d82842716d13ea9dfd5d03615f87d2edd82716",
+      "storage_slots": 1
+    },
+    "0x5471478eb0b37fff15e831efc044a967da83a825": {
+      "code_bytes": 45,
+      "code_keccak": "0x9e4e097cdf52b213db28e187f77850297425d588fe62b26909459e7ed59649b9",
+      "code_sha256": "e4c84611bf0760f47cfbb4ab6a9e61c9131e3d773fdd3b8ad37bcaf5bb75bf5e",
+      "storage_slots": 9
+    },
+    "0x78d9828e5d58d63e40bb4ac5b754189bcfb93cdc": {
+      "code_bytes": 10417,
+      "code_keccak": "0x138fdfc74b1a3c40d84fb851bf0d316a3969845da8a38790450f9560111c0f88",
+      "code_sha256": "07cc9c9b4744d14eaac68cc24efff19b59e35a1508cd8a36e6217292e8fad850",
+      "storage_slots": 0
+    },
+    "0x87de52c286cfb226317b7fe1f69e52680c98ef0b": {
+      "code_bytes": 3235,
+      "code_keccak": "0x883de16d4e3b2fa9429ebf5abd41876e38bd195413651b542c858f8951795c3e",
+      "code_sha256": "d7fcac191324c21b480cdcfc08ba948e5931a31e5086e280de19fb7d7df92b29",
+      "storage_slots": 0
+    },
+    "0x9818eb714a8c0955c5915c368b2766d950275d24": {
+      "code_bytes": 21538,
+      "code_keccak": "0x56691bdd16e4acaa50d07728fe2c2319705093a9ab064b34177b0ade24c94bf7",
+      "code_sha256": "448d5061bc9b5a2b966a008cca4a406cdb6587098fb1f4824082b478ed24a2e2",
+      "storage_slots": 0
+    },
+    "0xa39a573d33181f014b326c50575589ed8efcee98": {
+      "code_bytes": 4096,
+      "code_keccak": "0xc78dce1c177d0e9bdf1d2c55dc4df3d58dd8677e4e07c9953d60ed939b1b9cc9",
+      "code_sha256": "37c42a51754219fbfb03be1821ca84f5127281989362e3ab614f31c7e2b52ee6",
+      "storage_slots": 0
+    },
+    "0xa3c8edc3dae4aa4c43954b2c9f3d46195567fcf5": {
+      "code_bytes": 1130,
+      "code_keccak": "0x92eae87549a7f8a7e19128739071276af5ecf574b1e02cc8121c47c916f3b40e",
+      "code_sha256": "3d035beda99215984056f9dc90ccef912ed353c0fe3cbedfc6e274e4d1da449a",
+      "storage_slots": 1
+    },
+    "0xabe1fe16cf6bc48c9524713054efe6e954b17777": {
+      "code_bytes": 45,
+      "code_keccak": "0x9a16180e23f97dd8df627d48402f11d69169798b0470c1d975bf3d846a38e365",
+      "code_sha256": "44682660b605e0547325b011a2d7cb089fc2f6591b6d3e9b6f3be119d1e85e6b",
+      "storage_slots": 7
+    },
+    "0xb6864c017e9d9d89012d4f90ee382bf1461e4c90": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 0
+    },
+    "0xba2ae424d960c26247dd6c32edc70b295c744c43": {
+      "code_bytes": 1596,
+      "code_keccak": "0x83286e6603e5438137daf601561c2013e66fa84a967364f53ab02dacee83dfe8",
+      "code_sha256": "f79db50aa7ba73637c85e0392ca9d19b43a2e7db638293de717955293d4eb5cc",
+      "storage_slots": 8
+    },
+    "0xba5fe23f8a3a24bed3236f05f2fcf35fd0bf0b5c": {
+      "code_bytes": 5066,
+      "code_keccak": "0xd2d7cf7504e1cb572af28476d45907fc30bee1297917bed153e6fbba125821a3",
+      "code_sha256": "7f92760e3dee25dadcf64405a080deef0f62b3d7bd263a1f9fa22176e59d195c",
+      "storage_slots": 0
+    },
+    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c": {
+      "code_bytes": 3124,
+      "code_keccak": "0xb7d84205eaaf83ce7b3940c6beaad6d22790255e34a9a2b486aa8cdfff118fe6",
+      "code_sha256": "e96eee25c3a063ffcfbe4ae2aa2c44e5c99ddf236adb7828676f6fd7f8605742",
+      "storage_slots": 4
+    },
+    "0xbc9e1a3695bc22e624d82a042281bcf33500c8b7": {
+      "code_bytes": 5833,
+      "code_keccak": "0x4e1c278c0b4f05cb6e98c38a3f049e38af544b09a1775a57443a9b8c160d3749",
+      "code_sha256": "7a147c2708a2128057e27aa8e67cf128eb243583e07a87498785a28fbdc9be76",
+      "storage_slots": 1
+    },
+    "0xc09f951241ff5037855f37601119b4b29b0417f2": {
+      "code_bytes": 17545,
+      "code_keccak": "0xb00ae859e25c699a2094810ed5bba93ae8f6e409b24d17595dac0d51aebcf85c",
+      "code_sha256": "94dc3f6aec3cda383ca4a8a30d16ca3d5ab35c97e34e9605a89d473db262fda3",
+      "storage_slots": 0
+    },
+    "0xce6160bb594fc055c943f59de92cee30b8c6b32c": {
+      "code_bytes": 22962,
+      "code_keccak": "0xe47a6efe7e11ab755de95a81355fe3f0301d0189eb8b378babf19d903b823c86",
+      "code_sha256": "6e46ab9fa46a160fe439b0bb16c33a2c071cef9290533e9d927b57337a051736",
+      "storage_slots": 7
+    },
+    "0xdaecee3c08e953bd5f89a5cc90ac560413d709e3": {
+      "code_bytes": 5228,
+      "code_keccak": "0xeaf9053a5ab6c55c47ebe861e67b06aae60728d2f24f3ce0861c4da6b5488916",
+      "code_sha256": "8690c6e3244b515bee20ce3523d2fb598df91e23f29cd89e996c6d169114320c",
+      "storage_slots": 0
+    },
+    "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0": {
+      "code_bytes": 2882,
+      "code_keccak": "0x0a3fe6f701ee3cb432f45912e054896327ce5902337eae4d62d01406005a91c3",
+      "code_sha256": "1fc365bfda5c9694d38901227927872e610f84d9de9b4e360fea40578fb4bcc1",
+      "storage_slots": 13
+    },
+    "0xe4f8dffbff23f7a0157316d22f449e368cc5a5ab": {
+      "code_bytes": 49,
+      "code_keccak": "0x2afc499c2d60f9f5ae0466605740d01e8c59d859ad99e2b6c9857a062c8c3ec0",
+      "code_sha256": "01be1d7cde35f2c0f8b79e4969d005d97d57854e180a08e3261175149a4a09ef",
+      "storage_slots": 0
+    },
+    "0xfffffffffffffffffffffffffffffffffffffffe": {
+      "code_bytes": 0,
+      "code_keccak": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "code_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_slots": 0
+    }
+  }
+}

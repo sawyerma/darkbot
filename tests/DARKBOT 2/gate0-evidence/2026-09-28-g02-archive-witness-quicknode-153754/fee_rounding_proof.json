@@ -1,0 +1,86 @@
+{
+  "scope": "Historical trade mode with 100bps protocol and 100bps tax; no generalization to all modes",
+  "implementation": "0x11055852a513d15655a3f03e4ed66c6e7827e3c7",
+  "code_keccak": "0x927085e861210117fb0eff27a12eea60a00d4ea179a1de51ace8144d1295328c",
+  "formula": {
+    "combined": "floor(q * (protocolBps + taxBps) / 10000)",
+    "protocol": "floor(q * protocolBps / 10000)",
+    "tax": "combined - protocol"
+  },
+  "explanation": "With both rates at 100bps: tax=floor(q/50)-floor(q/100). It equals floor(q/100)+1 exactly when q modulo 100 is at least 50.",
+  "executed_arithmetic_pcs": {
+    "add": "0x59bd",
+    "multiply": "0x59e3",
+    "divide": "0x5a2c",
+    "subtract": "0x59d0"
+  },
+  "actual_executed_operations": [
+    {
+      "pc": 22973,
+      "op": 1,
+      "a": "100",
+      "b": "100",
+      "result": "200"
+    },
+    {
+      "pc": 23016,
+      "op": 4,
+      "a": "4810264106800",
+      "b": "24051320534",
+      "result": "200"
+    },
+    {
+      "pc": 23084,
+      "op": 4,
+      "a": "4810264106800",
+      "b": "10000",
+      "result": "481026410"
+    },
+    {
+      "pc": 23084,
+      "op": 4,
+      "a": "2405132053400",
+      "b": "10000",
+      "result": "240513205"
+    },
+    {
+      "pc": 22992,
+      "op": 3,
+      "a": "481026410",
+      "b": "240513205",
+      "result": "240513205"
+    }
+  ],
+  "crosschecks": [
+    {
+      "role": "launch",
+      "quote_input": "80574062404",
+      "protocol_fee": "805740624",
+      "combined_fee": "1611481248",
+      "tax": "805740624",
+      "tax_minus_simple_floor": "0",
+      "quote_input_authority": "historical call input; validates rounding only, not independent conversion"
+    },
+    {
+      "role": "first_buy",
+      "quote_input": "24051320534",
+      "protocol_fee": "240513205",
+      "combined_fee": "481026410",
+      "tax": "240513205",
+      "tax_minus_simple_floor": "0",
+      "quote_input_authority": "independent prestate V2 calculation"
+    },
+    {
+      "role": "direct_buy",
+      "quote_input": "120878323272",
+      "protocol_fee": "1208783232",
+      "combined_fee": "2417566465",
+      "tax": "1208783233",
+      "tax_minus_simple_floor": "1",
+      "quote_input_authority": "historical call input; validates rounding only, not independent conversion"
+    }
+  ],
+  "rule_fitted_to_outputs": false,
+  "full_callee_side_effects_proven": true,
+  "semantic_replay": "semantic_replay_proof.json"
+}

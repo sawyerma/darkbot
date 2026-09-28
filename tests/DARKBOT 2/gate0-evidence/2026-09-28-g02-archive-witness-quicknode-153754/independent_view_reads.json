@@ -1,0 +1,911 @@
+[
+  {
+    "trade_child_index": 1,
+    "address": "0xba2ae424d960c26247dd6c32edc70b295c744c43",
+    "implementation": "0xba5fe23f8a3a24bed3236f05f2fcf35fd0bf0b5c",
+    "selector": "0x313ce567",
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000008",
+    "reads": [
+      {
+        "pc": 1618,
+        "slot": "0x0000000000000000000000000000000000000000000000000000000000000006",
+        "value": "0x0000000000000000000001f68a4b64162906eff0ff6ae34e2bb1cd42fef62d08"
+      }
+    ],
+    "writes": [],
+    "arithmetic": [
+      {
+        "pc": 576,
+        "op": 3,
+        "a": "128",
+        "b": "128",
+        "result": "0"
+      },
+      {
+        "pc": 579,
+        "op": 1,
+        "a": "32",
+        "b": "0",
+        "result": "32"
+      }
+    ],
+    "external": [],
+    "branches": [
+      {
+        "pc": 11,
+        "to": 16,
+        "taken": true
+      },
+      {
+        "pc": 25,
+        "to": 278,
+        "taken": false
+      },
+      {
+        "pc": 42,
+        "to": 162,
+        "taken": true
+      },
+      {
+        "pc": 173,
+        "to": 233,
+        "taken": false
+      },
+      {
+        "pc": 184,
+        "to": 552,
+        "taken": true
+      }
+    ],
+    "constants": [
+      {
+        "pc": 0,
+        "bytes": 1,
+        "value": "128"
+      },
+      {
+        "pc": 2,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 8,
+        "bytes": 2,
+        "value": "16"
+      },
+      {
+        "pc": 18,
+        "bytes": 1,
+        "value": "4"
+      },
+      {
+        "pc": 22,
+        "bytes": 2,
+        "value": "278"
+      },
+      {
+        "pc": 26,
+        "bytes": 1,
+        "value": "0"
+      },
+      {
+        "pc": 29,
+        "bytes": 1,
+        "value": "224"
+      },
+      {
+        "pc": 33,
+        "bytes": 4,
+        "value": "1901074598"
+      },
+      {
+        "pc": 39,
+        "bytes": 2,
+        "value": "162"
+      },
+      {
+        "pc": 164,
+        "bytes": 4,
+        "value": "826074471"
+      },
+      {
+        "pc": 170,
+        "bytes": 2,
+        "value": "233"
+      },
+      {
+        "pc": 175,
+        "bytes": 4,
+        "value": "826074471"
+      },
+      {
+        "pc": 181,
+        "bytes": 2,
+        "value": "552"
+      },
+      {
+        "pc": 553,
+        "bytes": 2,
+        "value": "560"
+      },
+      {
+        "pc": 556,
+        "bytes": 2,
+        "value": "1615"
+      },
+      {
+        "pc": 1616,
+        "bytes": 1,
+        "value": "6"
+      },
+      {
+        "pc": 1619,
+        "bytes": 1,
+        "value": "255"
+      },
+      {
+        "pc": 561,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 565,
+        "bytes": 1,
+        "value": "255"
+      },
+      {
+        "pc": 577,
+        "bytes": 1,
+        "value": "32"
+      }
+    ],
+    "steps": 65,
+    "limitations": [
+      "No gas accounting",
+      "External calls use recorded results; side effects are not replayed",
+      "Does not prove pending-state provenance or intervening transactions"
+    ]
+  },
+  {
+    "trade_child_index": 2,
+    "address": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+    "implementation": "0x024f18294970b5c76c0691b87f138a0317156422",
+    "selector": "0x691f224f",
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000064",
+    "reads": [
+      {
+        "pc": 1444,
+        "slot": "0x0000000000000000000000000000000000000000000000000000000000000106",
+        "value": "0x00000000000000000000bbf81e00000054b40b1f852bda000000010064006400"
+      }
+    ],
+    "writes": [],
+    "arithmetic": [
+      {
+        "pc": 1449,
+        "op": 4,
+        "a": "70327630058086285729137725407023872845260941086974976",
+        "b": "256",
+        "result": "274717304914399553629444239871187003301800551120996"
+      },
+      {
+        "pc": 990,
+        "op": 1,
+        "a": "32",
+        "b": "128",
+        "result": "160"
+      },
+      {
+        "pc": 776,
+        "op": 3,
+        "a": "160",
+        "b": "128",
+        "result": "32"
+      }
+    ],
+    "external": [],
+    "branches": [
+      {
+        "pc": 11,
+        "to": 16,
+        "taken": true
+      },
+      {
+        "pc": 25,
+        "to": 745,
+        "taken": false
+      },
+      {
+        "pc": 42,
+        "to": 401,
+        "taken": true
+      },
+      {
+        "pc": 412,
+        "to": 586,
+        "taken": false
+      },
+      {
+        "pc": 423,
+        "to": 510,
+        "taken": false
+      },
+      {
+        "pc": 434,
+        "to": 472,
+        "taken": false
+      },
+      {
+        "pc": 445,
+        "to": 1432,
+        "taken": false
+      },
+      {
+        "pc": 456,
+        "to": 1440,
+        "taken": true
+      }
+    ],
+    "constants": [
+      {
+        "pc": 0,
+        "bytes": 1,
+        "value": "128"
+      },
+      {
+        "pc": 2,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 8,
+        "bytes": 2,
+        "value": "16"
+      },
+      {
+        "pc": 18,
+        "bytes": 1,
+        "value": "4"
+      },
+      {
+        "pc": 22,
+        "bytes": 2,
+        "value": "745"
+      },
+      {
+        "pc": 26,
+        "bytes": 1,
+        "value": "0"
+      },
+      {
+        "pc": 29,
+        "bytes": 1,
+        "value": "224"
+      },
+      {
+        "pc": 33,
+        "bytes": 4,
+        "value": "1901074598"
+      },
+      {
+        "pc": 39,
+        "bytes": 2,
+        "value": "401"
+      },
+      {
+        "pc": 403,
+        "bytes": 4,
+        "value": "826074471"
+      },
+      {
+        "pc": 409,
+        "bytes": 2,
+        "value": "586"
+      },
+      {
+        "pc": 414,
+        "bytes": 4,
+        "value": "1629807847"
+      },
+      {
+        "pc": 420,
+        "bytes": 2,
+        "value": "510"
+      },
+      {
+        "pc": 425,
+        "bytes": 4,
+        "value": "1734367111"
+      },
+      {
+        "pc": 431,
+        "bytes": 2,
+        "value": "472"
+      },
+      {
+        "pc": 436,
+        "bytes": 4,
+        "value": "1734367111"
+      },
+      {
+        "pc": 442,
+        "bytes": 2,
+        "value": "1432"
+      },
+      {
+        "pc": 447,
+        "bytes": 4,
+        "value": "1763648079"
+      },
+      {
+        "pc": 453,
+        "bytes": 2,
+        "value": "1440"
+      },
+      {
+        "pc": 1441,
+        "bytes": 2,
+        "value": "262"
+      },
+      {
+        "pc": 1445,
+        "bytes": 2,
+        "value": "256"
+      },
+      {
+        "pc": 1450,
+        "bytes": 2,
+        "value": "65535"
+      },
+      {
+        "pc": 1454,
+        "bytes": 2,
+        "value": "976"
+      },
+      {
+        "pc": 977,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 980,
+        "bytes": 2,
+        "value": "65535"
+      },
+      {
+        "pc": 988,
+        "bytes": 1,
+        "value": "32"
+      },
+      {
+        "pc": 991,
+        "bytes": 2,
+        "value": "770"
+      },
+      {
+        "pc": 771,
+        "bytes": 1,
+        "value": "64"
+      }
+    ],
+    "steps": 81,
+    "limitations": [
+      "No gas accounting",
+      "External calls use recorded results; side effects are not replayed",
+      "Does not prove pending-state provenance or intervening transactions"
+    ]
+  },
+  {
+    "trade_child_index": 3,
+    "address": "0x4db4fcfebbf3f0cbd20efff444b133b96abda2d6",
+    "implementation": "0x4db4fcfebbf3f0cbd20efff444b133b96abda2d6",
+    "selector": "0xe6a43905",
+    "output": "0x0000000000000000000000003a632ecc01a45b8002d76c15e172e71c79412003",
+    "reads": [
+      {
+        "pc": 453,
+        "slot": "0xa6fe033c394be2f42d9701b47f5f30cdf08fad848322a77f943a4a63ff2ffef0",
+        "value": "0x0000000000000000000000003a632ecc01a45b8002d76c15e172e71c79412003"
+      }
+    ],
+    "writes": [],
+    "arithmetic": [
+      {
+        "pc": 3056,
+        "op": 3,
+        "a": "68",
+        "b": "4",
+        "result": "64"
+      },
+      {
+        "pc": 3083,
+        "op": 1,
+        "a": "4",
+        "b": "32",
+        "result": "36"
+      },
+      {
+        "pc": 260,
+        "op": 1,
+        "a": "32",
+        "b": "128",
+        "result": "160"
+      },
+      {
+        "pc": 267,
+        "op": 3,
+        "a": "160",
+        "b": "128",
+        "result": "32"
+      }
+    ],
+    "external": [],
+    "branches": [
+      {
+        "pc": 11,
+        "to": 15,
+        "taken": true
+      },
+      {
+        "pc": 24,
+        "to": 185,
+        "taken": false
+      },
+      {
+        "pc": 40,
+        "to": 114,
+        "taken": false
+      },
+      {
+        "pc": 51,
+        "to": 88,
+        "taken": false
+      },
+      {
+        "pc": 62,
+        "to": 398,
+        "taken": false
+      },
+      {
+        "pc": 73,
+        "to": 417,
+        "taken": true
+      },
+      {
+        "pc": 3062,
+        "to": 3066,
+        "taken": true
+      },
+      {
+        "pc": 3011,
+        "to": 1118,
+        "taken": true
+      },
+      {
+        "pc": 3011,
+        "to": 1118,
+        "taken": true
+      }
+    ],
+    "constants": [
+      {
+        "pc": 0,
+        "bytes": 1,
+        "value": "128"
+      },
+      {
+        "pc": 2,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 8,
+        "bytes": 2,
+        "value": "15"
+      },
+      {
+        "pc": 17,
+        "bytes": 1,
+        "value": "4"
+      },
+      {
+        "pc": 21,
+        "bytes": 2,
+        "value": "185"
+      },
+      {
+        "pc": 27,
+        "bytes": 1,
+        "value": "224"
+      },
+      {
+        "pc": 31,
+        "bytes": 4,
+        "value": "1911801238"
+      },
+      {
+        "pc": 37,
+        "bytes": 2,
+        "value": "114"
+      },
+      {
+        "pc": 42,
+        "bytes": 4,
+        "value": "3385217942"
+      },
+      {
+        "pc": 48,
+        "bytes": 2,
+        "value": "88"
+      },
+      {
+        "pc": 53,
+        "bytes": 4,
+        "value": "3385217942"
+      },
+      {
+        "pc": 59,
+        "bytes": 2,
+        "value": "398"
+      },
+      {
+        "pc": 64,
+        "bytes": 4,
+        "value": "3869522181"
+      },
+      {
+        "pc": 70,
+        "bytes": 2,
+        "value": "417"
+      },
+      {
+        "pc": 418,
+        "bytes": 2,
+        "value": "228"
+      },
+      {
+        "pc": 421,
+        "bytes": 2,
+        "value": "431"
+      },
+      {
+        "pc": 425,
+        "bytes": 1,
+        "value": "4"
+      },
+      {
+        "pc": 427,
+        "bytes": 2,
+        "value": "3049"
+      },
+      {
+        "pc": 3052,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 3059,
+        "bytes": 2,
+        "value": "3066"
+      },
+      {
+        "pc": 3069,
+        "bytes": 2,
+        "value": "3077"
+      },
+      {
+        "pc": 3073,
+        "bytes": 2,
+        "value": "2982"
+      },
+      {
+        "pc": 2983,
+        "bytes": 20,
+        "value": "1461501637330902918203684832716283019655932542975"
+      },
+      {
+        "pc": 3008,
+        "bytes": 2,
+        "value": "1118"
+      },
+      {
+        "pc": 3080,
+        "bytes": 1,
+        "value": "32"
+      },
+      {
+        "pc": 3085,
+        "bytes": 2,
+        "value": "3093"
+      },
+      {
+        "pc": 3089,
+        "bytes": 2,
+        "value": "2982"
+      },
+      {
+        "pc": 2983,
+        "bytes": 20,
+        "value": "1461501637330902918203684832716283019655932542975"
+      },
+      {
+        "pc": 3008,
+        "bytes": 2,
+        "value": "1118"
+      },
+      {
+        "pc": 433,
+        "bytes": 1,
+        "value": "32"
+      },
+      {
+        "pc": 441,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 454,
+        "bytes": 20,
+        "value": "1461501637330902918203684832716283019655932542975"
+      },
+      {
+        "pc": 229,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 232,
+        "bytes": 20,
+        "value": "1461501637330902918203684832716283019655932542975"
+      },
+      {
+        "pc": 258,
+        "bytes": 1,
+        "value": "32"
+      },
+      {
+        "pc": 262,
+        "bytes": 1,
+        "value": "64"
+      }
+    ],
+    "steps": 152,
+    "limitations": [
+      "No gas accounting",
+      "External calls use recorded results; side effects are not replayed",
+      "Does not prove pending-state provenance or intervening transactions"
+    ]
+  },
+  {
+    "trade_child_index": 8,
+    "address": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+    "implementation": "0x024f18294970b5c76c0691b87f138a0317156422",
+    "selector": "0xf3635019",
+    "output": "0x0000000000000000000000005471478eb0b37fff15e831efc044a967da83a825",
+    "reads": [
+      {
+        "pc": 2040,
+        "slot": "0x0000000000000000000000000000000000000000000000000000000000000103",
+        "value": "0x0000000000000000000000005471478eb0b37fff15e831efc044a967da83a825"
+      }
+    ],
+    "writes": [],
+    "arithmetic": [
+      {
+        "pc": 936,
+        "op": 1,
+        "a": "32",
+        "b": "128",
+        "result": "160"
+      },
+      {
+        "pc": 776,
+        "op": 3,
+        "a": "160",
+        "b": "128",
+        "result": "32"
+      }
+    ],
+    "external": [],
+    "branches": [
+      {
+        "pc": 11,
+        "to": 16,
+        "taken": true
+      },
+      {
+        "pc": 25,
+        "to": 745,
+        "taken": false
+      },
+      {
+        "pc": 42,
+        "to": 401,
+        "taken": false
+      },
+      {
+        "pc": 53,
+        "to": 227,
+        "taken": false
+      },
+      {
+        "pc": 64,
+        "to": 151,
+        "taken": false
+      },
+      {
+        "pc": 75,
+        "to": 113,
+        "taken": false
+      },
+      {
+        "pc": 86,
+        "to": 1985,
+        "taken": false
+      },
+      {
+        "pc": 97,
+        "to": 2017,
+        "taken": false
+      },
+      {
+        "pc": 108,
+        "to": 2036,
+        "taken": true
+      }
+    ],
+    "constants": [
+      {
+        "pc": 0,
+        "bytes": 1,
+        "value": "128"
+      },
+      {
+        "pc": 2,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 8,
+        "bytes": 2,
+        "value": "16"
+      },
+      {
+        "pc": 18,
+        "bytes": 1,
+        "value": "4"
+      },
+      {
+        "pc": 22,
+        "bytes": 2,
+        "value": "745"
+      },
+      {
+        "pc": 26,
+        "bytes": 1,
+        "value": "0"
+      },
+      {
+        "pc": 29,
+        "bytes": 1,
+        "value": "224"
+      },
+      {
+        "pc": 33,
+        "bytes": 4,
+        "value": "1901074598"
+      },
+      {
+        "pc": 39,
+        "bytes": 2,
+        "value": "401"
+      },
+      {
+        "pc": 44,
+        "bytes": 4,
+        "value": "2835717307"
+      },
+      {
+        "pc": 50,
+        "bytes": 2,
+        "value": "227"
+      },
+      {
+        "pc": 55,
+        "bytes": 4,
+        "value": "3573918927"
+      },
+      {
+        "pc": 61,
+        "bytes": 2,
+        "value": "151"
+      },
+      {
+        "pc": 66,
+        "bytes": 4,
+        "value": "3735927828"
+      },
+      {
+        "pc": 72,
+        "bytes": 2,
+        "value": "113"
+      },
+      {
+        "pc": 77,
+        "bytes": 4,
+        "value": "3735927828"
+      },
+      {
+        "pc": 83,
+        "bytes": 2,
+        "value": "1985"
+      },
+      {
+        "pc": 88,
+        "bytes": 4,
+        "value": "4076725131"
+      },
+      {
+        "pc": 94,
+        "bytes": 2,
+        "value": "2017"
+      },
+      {
+        "pc": 99,
+        "bytes": 4,
+        "value": "4083372057"
+      },
+      {
+        "pc": 105,
+        "bytes": 2,
+        "value": "2036"
+      },
+      {
+        "pc": 2037,
+        "bytes": 2,
+        "value": "259"
+      },
+      {
+        "pc": 2041,
+        "bytes": 2,
+        "value": "904"
+      },
+      {
+        "pc": 2045,
+        "bytes": 20,
+        "value": "1461501637330902918203684832716283019655932542975"
+      },
+      {
+        "pc": 905,
+        "bytes": 1,
+        "value": "64"
+      },
+      {
+        "pc": 908,
+        "bytes": 20,
+        "value": "1461501637330902918203684832716283019655932542975"
+      },
+      {
+        "pc": 934,
+        "bytes": 1,
+        "value": "32"
+      },
+      {
+        "pc": 937,
+        "bytes": 2,
+        "value": "770"
+      },
+      {
+        "pc": 771,
+        "bytes": 1,
+        "value": "64"
+      }
+    ],
+    "steps": 84,
+    "limitations": [
+      "No gas accounting",
+      "External calls use recorded results; side effects are not replayed",
+      "Does not prove pending-state provenance or intervening transactions"
+    ]
+  }
+]

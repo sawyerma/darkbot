@@ -1,0 +1,51 @@
+{
+  "status": "G0.2_FLAP_PASS",
+  "archive_rpc_qualified": true,
+  "router_portal_selector_proven": true,
+  "pending_initial_state_proven": true,
+  "independent_conversion_prestate_proven": true,
+  "fee_rounding_source_proven": true,
+  "extension_effects_proven": true,
+  "fee_exemption_proven": true,
+  "full_first_buy_expected_output": "6243568333969093909994622",
+  "actual_first_buy_output": "6243568333969093909994622",
+  "full_independent_first_buy_difference": "0",
+  "tx_prestate_arithmetic_expected_output": "6243568333969093909994622",
+  "tx_prestate_arithmetic_difference": "0",
+  "intervening_transactions_reviewed": 65,
+  "intervening_quote_relevant_count": 0,
+  "replayed_state_arithmetic_expected_output": "6243568333969093909994622",
+  "replayed_state_arithmetic_difference": "0",
+  "block_boundary_balance_adjustment": [
+    {
+      "account": "0xfffffffffffffffffffffffffffffffffffffffe",
+      "field": "balance",
+      "after_last_traced_tx": "0x5d9c5f336ddc3",
+      "canonical_block_end": "0x0",
+      "authority": "launch_block_end_fee_account_balance.response.json",
+      "cause": "Difference outside captured per-TX diffs; protocol accounting explanation not independently replayed",
+      "quote_input_effect": "None: native balance of this account is not a curve/pool/config input"
+    }
+  ],
+  "launch_creator_arithmetic_matches_first_buy_prestate": true,
+  "requirements": {
+    "router_command_semantics": true,
+    "pending_initial_state": true,
+    "independent_conversion_prestate": true,
+    "fee_rounding_source": true,
+    "full_first_buy_reproduction": true,
+    "hotpath_dependencies_fully_classified": true
+  },
+  "remaining_unknowns": [],
+  "evidence_scope": "Pinned historical V6/TAXED_V3/DOGE/extension mode 0 plus historical first Router-V2 and direct Portal-V3 paths. Full offline message replay, not live execution or BSC consensus validation.",
+  "semantic_replay": "semantic_replay_proof.json",
+  "dependency_classification": "hotpath_dependency_matrix.json",
+  "scope_limits": [
+    "Finite historical read sets do not prove arbitrary input/mode/tick coverage",
+    "Freshness, ingress visibility, future execution timestamp/order and live success are not established by this offline evidence",
+    "First BUY uses historical Router V2; direct fixture separately verifies native Portal V3. New direct-at-launch wallet/amount is G0.3 work."
+  ],
+  "live_cache_coverage_proven": false,
+  "latency_proven": false,
+  "no_g03_authorized": true
+}

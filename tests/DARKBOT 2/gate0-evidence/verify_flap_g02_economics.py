@@ -128,14 +128,61 @@ def main():
  requirements=dict(create2=True,vetted_selector=True,router_command_semantics=False,
     pending_initial_state=False,independent_conversion_prestate=False,fee_rounding_source=False,
     full_first_buy_reproduction=False,hotpath_dependencies_fully_classified=False)
- status='G0.2_FLAP_READY_FOR_G0.3' if all(requirements.values()) else 'G0.2_FLAP_PARTIAL'
+ status='G0.2_FLAP_PASS' if all(requirements.values()) else 'G0.2_FLAP_PARTIAL'
  summary=dict(status=status,tests=[dict(test=t,status=s,reason=r) for t,s,r in tests],requirements=requirements,
               minOutputAmount='UNKNOWN',conditional_first_buy_difference=0,
               full_independent_first_buy_difference=None,
               next_test='Archive-backed transaction-index-correct execution witness: replay launch 124415357:0 through first BUY 124415358:15 with call tree, read prestate/code and intervening state changes; verify exact Portal selector, quote mode and fee rounding.')
+ # The archive audit has its own six-raw-file boundary. The earlier checks above
+ # remain legacy consistency checks, not additional inputs to the new BUY math.
+ archive=ROOT/'2026-09-28-g02-archive-witness-quicknode-153754'
+ if archive.is_dir():
+  result=subprocess.run(['node',str(ROOT/'verify_flap_archive_witness.cjs')],capture_output=True,text=True)
+  (archive/'archive_verifier.stdout.txt').write_text(result.stdout)
+  if result.returncode not in (0,2):
+   raise RuntimeError('Archive verifier failed: '+result.stderr)
+  witness=read(archive/'witness_summary.json')
+  for name,value in witness['requirements'].items():
+   assert name in requirements and isinstance(value,bool)
+   requirements[name]=value
+  assert (result.returncode==0)==all(witness['requirements'].values())
+  summary.update(status='G0.2_FLAP_PASS' if all(requirements.values()) else 'G0.2_FLAP_PARTIAL',
+                 requirements=requirements,archive_witness=str(archive.relative_to(ROOT)),
+                 tx_prestate_arithmetic_expected_output=witness['tx_prestate_arithmetic_expected_output'],
+                 tx_prestate_arithmetic_difference=witness['tx_prestate_arithmetic_difference'],
+                 full_independent_first_buy_difference=witness['full_independent_first_buy_difference'],
+                 remaining_unknowns=witness['remaining_unknowns'],
+                 next_test='STOP before G0.3. Review the pinned historical-mode PASS and dependency guards; no live sending, cache coverage or latency claim.' if all(requirements.values()) else 'Resolve the exact remaining_unknowns reported by the archive verifier.')
+  for field in ['intervening_transactions_reviewed','intervening_quote_relevant_count','replayed_state_arithmetic_expected_output','replayed_state_arithmetic_difference']:
+   summary[field]=witness.get(field)
+  semantic=read(archive/'semantic_replay_proof.json')
+  updates={1:('PASS' if requirements['router_command_semantics'] else 'FAIL','All 71 historical router/Portal/callee frames independently reproduced'),
+           2:('PASS' if semantic['roles']['direct_buy']['all_frames_match'] else 'FAIL','Direct Portal/V3: 50 frames, 21 logs, actual recipient balance independently reproduced'),
+           4:('PASS' if requirements['pending_initial_state'] else 'FAIL','Launch from calldata + pre-launch state: initialization, EIP-712 digest, signer role, deadline, 106 storage checks; cache availability is a runtime guard'),
+           5:('PASS' if requirements['independent_conversion_prestate'] else 'FAIL','Router V2 and separate direct Portal V3 conversion executed from independent historical prestate'),
+           6:('PASS' if requirements['fee_rounding_source'] else 'FAIL','Executed runtime establishes fee/tax rounding; complete historical token/extension/callee effects and logs agree'),
+           7:('PASS' if requirements['full_first_buy_reproduction'] else 'FAIL','Full first-BUY calltree, logs and recipient balance independently reproduced: difference=0'),
+           8:('PASS' if requirements['hotpath_dependencies_fully_classified'] else 'FAIL','minOutput derived locally from coherent state and required slippage policy; stale/unavailable state => SKIP; no inclusion guarantee'),
+           9:('PASS' if requirements['hotpath_dependencies_fully_classified'] else 'FAIL','17 field groups, exact witnessed read closure, four source categories, invalidation and fail-closed rules'),
+           10:('PASS','STOP before G0.3; no transaction signing/submission or latency assertion')}
+  summary['minOutputAmount']='Locally derivable for qualified state/amount/mode and explicit slippage policy; not a guaranteed future acquisition'
+  summary['scope_limits']=witness['scope_limits']
+  for test in summary['tests']:
+   if test['test'] in updates:test['status'],test['reason']=updates[test['test']]
+  economics=read(P/'economics_reproduction.json')
+  economics['archive_update']={k:witness[k] for k in ['tx_prestate_arithmetic_expected_output','tx_prestate_arithmetic_difference','full_independent_first_buy_difference','remaining_unknowns']}
+  economics['legacy_section_status']='Earlier conditional/receipt-only evidence retained; authoritative current status is archive_update and gate_result.json'
+  economics['archive_update']['status']=witness['status']
+  economics['archive_update']['semantic_replay_file']=str((archive/'semantic_replay_proof.json').relative_to(ROOT))
+  economics['archive_update']['independent_calculation_file']=str((archive/'first_buy_calculation.json').relative_to(ROOT))
+  economics['router_v2']['legacy_evidence_scope']='Original receipt-only calculation retained; new independent prestate proof is in archive witness independent_conversion.json'
+  write('economics_reproduction.json',economics)
  write('gate_result.json',summary)
  files=[p for p in P.rglob('*') if p.is_file() and p.name!='evidence_sha256.json' and not p.name.endswith('.stdout.json')]
  files += [ROOT/'decode_flap_economics.cjs', ROOT/'verify_flap_g02_economics.py', ROOT/'abi-tools/package-lock.json']
+ if archive.is_dir():
+  files += [ROOT/n for n in ['verify_flap_archive_witness.cjs','audit_flap_trade_bytecode.cjs','verify_flap_semantic_replay.cjs','replay_flap_evm.cjs','classify_flap_hotpath.cjs','evm-audit-tools/package-lock.json']]
+  files += [p for p in archive.iterdir() if p.is_file() and p.suffix=='.json']
  files += [OLD/n for n in ['flap_fixture_rpc/001.response.json','flap_buy_order_receipts_rpc/001.response.json','flap_first_external_buy_rpc/001.response.json','flap_token_runtime_evidence.json','flap_v6_fixture_decoded.json']]
  write('evidence_sha256.json',{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)})
  print(json.dumps(summary,indent=2))

@@ -1,0 +1,50 @@
+{
+  "status": "FULL_HISTORICAL_MESSAGE_SEMANTICS_EXACT",
+  "state_authority": "Parent block 124415356 + launch diff + 65 ordered TX diffs; explicit canonical block-boundary balance adjustment",
+  "inputs": {
+    "native_value": "30000000000000000",
+    "wrap_amount": "29850000000000000",
+    "pool_reserve_doge": "523620527542026",
+    "pool_reserve_wbnb": "648208958251729359290",
+    "pool_multiplier": "9975",
+    "quote_input": "24051320534",
+    "cached_quote_price": "96028517023029920",
+    "cached_quote_price_slot": "0x31cba80a49047575083297ca7759d08e24b53dd28362f4fbbd014c26e92a1fea",
+    "base_r_literal": "3837000000000000000000",
+    "h_literal": "107036751000000000000000000",
+    "r": "39956880715754427756773",
+    "k": "44233735407663336217722200164523",
+    "total_supply": "1000000000000000000000000000",
+    "portal_reserve_before": "78962581156",
+    "portal_circulating_before": "21453245135239692933310825",
+    "protocol_fee_bps": "100",
+    "tax_bps": "100"
+  },
+  "steps": {
+    "protocol_fee": "240513205",
+    "combined_fee": "481026410",
+    "tax": "240513205",
+    "net_quote": "23570294124",
+    "portal_reserve_after": "102532875280",
+    "denominator": "40982209468554427756773",
+    "numerator": "44233735407663336217722200164523000000000000000000",
+    "ceil_quotient": "1079339937530791213156694553",
+    "circulating_after": "27696813469208786843305447",
+    "expected_output": "6243568333969093909994622",
+    "actual_output": "6243568333969093909994622",
+    "tx_prestate_arithmetic_difference": "0"
+  },
+  "observed_output_used_as_input": false,
+  "observed_fee_used_as_input": false,
+  "latest_state_used": false,
+  "bytecode_arithmetic_audit": "first_buy_trade_arithmetic_audit.json",
+  "limitations": [
+    "BSC block/consensus validation and transaction gas settlement",
+    "Proof of actual live ingress/cache coverage",
+    "Unseen modes, addresses, tax rules or code versions",
+    "Transaction construction/signing/sending and latency"
+  ],
+  "semantic_replay": "semantic_replay_proof.json",
+  "full_independent_first_buy_difference": "0",
+  "expected_recipient_acquisition": "6243568333969093909994622"
+}

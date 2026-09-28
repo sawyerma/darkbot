@@ -1,0 +1,7 @@
+{
+  "provider": "QuickNode",
+  "endpoint": "REDACTED",
+  "archive_rpc_qualified": true,
+  "qualification_transaction": "0x189585bec2fbfac6d2ff03455e1137b6c938bd17f495895e4e076b808d926800",
+  "collected_utc": "2026-09-28T15:37:58.994253+00:00"
+}

@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "eth_getBalance",
+  "params": [
+    "0xfffffffffffffffffffffffffffffffffffffffe",
+    {
+      "blockHash": "0xac1c321e3d196cce7d8f783dd5c8e1ec6225c751cdb34813a252384d103cd231",
+      "requireCanonical": true
+    }
+  ]
+}

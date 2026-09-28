@@ -1,0 +1,51 @@
+{
+  "scope": "Transaction prestate; absent keys remain UNKNOWN, never defaulted to zero",
+  "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+  "token": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+  "token_state": {
+    "base_slot": "0x9bdeb951a4830fe4ef5e1a4ab125b32a4b4aebecef205ad3a8887a8667285d52",
+    "header": "255",
+    "status": "1",
+    "curve_type": "0",
+    "threshold_type": "1",
+    "id": "3293409",
+    "token_version": "6",
+    "quote_type": "1",
+    "migrator_type": "1",
+    "using_extension": "1",
+    "reserve": "78962581156",
+    "circulating": "21453245135239692933310825",
+    "quote_token": "0xba2ae424d960c26247dd6c32edc70b295c744c43",
+    "extension_id": "0x3526f6a0e790306d64c896eeda5ec66052ea17889e20632ff0cf512923153dad"
+  },
+  "curve": {
+    "r": "39956880715754427756773",
+    "h": "107036751000000000000000000",
+    "k": "44233735407663336217722200164523",
+    "quote_price": "96028517023029920",
+    "source": "Executed historical bytecode constants plus first-BUY storage mapping slot 187; price also present in launch calldata"
+  },
+  "portal_fee_exemption": {
+    "trader_used_by_portal": "0x43dd5eebeebead726fbc84e2511567d9827ae1bb",
+    "mapping_slot": 177,
+    "key": "0xc92fe1d364edee5515a4eb764784e51b24327983c85d50d181173244fcb17247",
+    "value": "0",
+    "read_pc": "0x2d09",
+    "eoa_exemption_lookup_needed_on_this_path": false
+  },
+  "quote_conversion": {
+    "first_buy": "Router V2 WBNB/DOGE before Portal call; Portal receives DOGE directly",
+    "direct_buy": "Portal delegated converter/V3 path independently executed: all 50 frames, 21 logs and recipient balance match",
+    "global_quote_configuration": "Executed read closure qualified for exact pinned historical modes; see dependency inventory"
+  },
+  "extension": {
+    "id": "0x3526f6a0e790306d64c896eeda5ec66052ea17889e20632ff0cf512923153dad",
+    "launch_delegate": "0x4eb3e98d9b79755fe2b8aacb8528b63746e9867a",
+    "full_registry_and_effects_proven": true
+  },
+  "proxy": {
+    "portal_implementation": "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20",
+    "trade_implementation": "0x11055852a513d15655a3f03e4ed66c6e7827e3c7",
+    "token_implementation": "024f18294970b5c76c0691b87f138a0317156422"
+  }
+}

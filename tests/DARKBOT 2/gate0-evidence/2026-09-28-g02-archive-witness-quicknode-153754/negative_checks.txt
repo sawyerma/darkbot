@@ -1,0 +1,3 @@
+PASS: modified raw evidence rejected before calculation
+PASS: changed protocol-fee bytecode rejected by generated-call comparison
+No raw file was modified.

@@ -1,0 +1,79 @@
+{
+  "status": "HISTORICAL_MODE_SEMANTICS_PROVEN",
+  "scope": "newTokenV6 / TOKEN_TAXED_V3 / witnessed DOGE quote + extension mode 0 / exact pinned code; conditional on complete coherent pre-resident state and valid execution-time deadline",
+  "source": "Pending-equivalent launch calldata + PRE-launch code/storage + chain context. No launch output/log used as execution input.",
+  "independently_executed_launch_frames": 116,
+  "all_48_launch_logs_match": true,
+  "launch_changed_storage_checks": 106,
+  "launch_created_code_checks": 5,
+  "launch_nonce_checks": 9,
+  "launch_to_intervening_state_bridge_checks": 38,
+  "initial_token_state": {
+    "token": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+    "price": "96028517023029920",
+    "reserve": "78962581156",
+    "supply": "21453245135239692933310825"
+  },
+  "oracle": {
+    "source": "Executed extension runtime + launch calldata + signer-role storage",
+    "extension": "0x4eb3e98d9b79755fe2b8aacb8528b63746e9867a",
+    "type_hash": "0xc85e0427238d385ff46b4077637989e3a22d8e279751552b25cc8d9b969c00ff",
+    "domain_constants": [
+      "0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f",
+      "0xef4e9c445ee362f23612056be1d6944b397a92d325cd36f4904f2ff14eb1ccee",
+      "0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6"
+    ],
+    "struct_fields": [
+      "typeHash",
+      "quoteToken",
+      "salt",
+      "tokenVersion",
+      "word0/mode",
+      "price",
+      "deadline"
+    ],
+    "struct_preimage": "0xc85e0427238d385ff46b4077637989e3a22d8e279751552b25cc8d9b969c00ff000000000000000000000000ba2ae424d960c26247dd6c32edc70b295c744c430c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000155296d6d771aa0000000000000000000000000000000000000000000000000000000006ab99db9",
+    "domain_preimage": "0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400fef4e9c445ee362f23612056be1d6944b397a92d325cd36f4904f2ff14eb1cceec89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc60000000000000000000000000000000000000000000000000000000000000038000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "digest": "0xb4f18475286f0e7516e4594813c152209dd86bf1ea1b8ecedd54445ccdb414db",
+    "recovered_signer": "0x53f3a6115f6a2cc0ca8d388d7c169ecc9f5058ac",
+    "required_role": "0x8ee04765c820c611e269de1cf54fca3a04499091ecf575d156e410e9dfb17af5",
+    "role_slot": "0xccd502d3a4b0ea811b3bae1c79644c2b5f85298f4d330f13c274eff5e206e9a8",
+    "deadline": "1790549433",
+    "admissibility": "execution block.timestamp <= signed deadline; future inclusion timestamp is not known at pending ingress",
+    "at_deadline_accepted": true,
+    "deadline_plus_one_rejected": true,
+    "negative_controls": [
+      {
+        "case": "timestamp=deadline+1",
+        "exception": "revert",
+        "return_data": "0xa29a0f00000000000000000000000000000000000000000000000000000000006ab99db9",
+        "rejected": true
+      },
+      {
+        "case": "oracle signer role revoked in pre-resident state",
+        "exception": "revert",
+        "return_data": "0x4019b09300000000000000000000000053f3a6115f6a2cc0ca8d388d7c169ecc9f5058ac",
+        "rejected": true
+      },
+      {
+        "case": "required cached storage missing",
+        "exception": "UNWITNESSED_STORAGE",
+        "rejected": true
+      }
+    ]
+  },
+  "excluded_transaction_settlement": [
+    {
+      "address": "0x9d6716dea8614448bd342f5c5c84a8def9079dc4",
+      "field": "balance",
+      "reason": "TX gas debit/fee settlement excluded from message execution"
+    },
+    {
+      "address": "0xfffffffffffffffffffffffffffffffffffffffe",
+      "field": "balance",
+      "reason": "TX gas debit/fee settlement excluded from message execution"
+    }
+  ],
+  "pending_availability": "Dependency provenance/precomputability established; actual live cache/ingress coverage is not measured by historical replay.",
+  "fail_closed": "Missing/stale state, unsupported code/mode, insufficient expiry margin or unresolved ordering: SKIP. No synchronous state fetch."
+}

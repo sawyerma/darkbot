@@ -1,0 +1,17 @@
+{
+  "authority": "first_buy_prestate.json / pair storage slot 8 + top-level transaction calldata",
+  "pair": "0xac109c8025f272414fd9e2faa805a583708a017f",
+  "reserve0_doge": "523620527542026",
+  "reserve1_wbnb": "648208958251729359290",
+  "last_update_timestamp": "1790549253",
+  "native_input": "30000000000000000",
+  "router_fee_bps": "50",
+  "router_fee_wei": "150000000000000",
+  "wrap_amount_wei": "29850000000000000",
+  "pool_multiplier": "9975",
+  "formula": "floor(wrap*multiplier*reserve0/(reserve1*10000+wrap*multiplier))",
+  "expected_doge": "24051320534",
+  "portal_input_comparison": "24051320534",
+  "difference": "0",
+  "uses_swap_output_to_infer_reserves": false
+}

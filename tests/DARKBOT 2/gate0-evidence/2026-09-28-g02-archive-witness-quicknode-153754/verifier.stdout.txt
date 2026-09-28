@@ -1,0 +1,82 @@
+{
+  "status": "G0.2_FLAP_PASS",
+  "tests": [
+    {
+      "test": 1,
+      "status": "PASS",
+      "reason": "All 71 historical router/Portal/callee frames independently reproduced"
+    },
+    {
+      "test": 2,
+      "status": "PASS",
+      "reason": "Direct Portal/V3: 50 frames, 21 logs, actual recipient balance independently reproduced"
+    },
+    {
+      "test": 3,
+      "status": "PASS",
+      "reason": "Comparison records verified differences and explicit unknowns; no unsupported winner"
+    },
+    {
+      "test": 4,
+      "status": "PASS",
+      "reason": "Launch from calldata + pre-launch state: initialization, EIP-712 digest, signer role, deadline, 106 storage checks; cache availability is a runtime guard"
+    },
+    {
+      "test": 5,
+      "status": "PASS",
+      "reason": "Router V2 and separate direct Portal V3 conversion executed from independent historical prestate"
+    },
+    {
+      "test": 6,
+      "status": "PASS",
+      "reason": "Executed runtime establishes fee/tax rounding; complete historical token/extension/callee effects and logs agree"
+    },
+    {
+      "test": 7,
+      "status": "PASS",
+      "reason": "Full first-BUY calltree, logs and recipient balance independently reproduced: difference=0"
+    },
+    {
+      "test": 8,
+      "status": "PASS",
+      "reason": "minOutput derived locally from coherent state and required slippage policy; stale/unavailable state => SKIP; no inclusion guarantee"
+    },
+    {
+      "test": 9,
+      "status": "PASS",
+      "reason": "17 field groups, exact witnessed read closure, four source categories, invalidation and fail-closed rules"
+    },
+    {
+      "test": 10,
+      "status": "PASS",
+      "reason": "STOP before G0.3; no transaction signing/submission or latency assertion"
+    }
+  ],
+  "requirements": {
+    "create2": true,
+    "vetted_selector": true,
+    "router_command_semantics": true,
+    "pending_initial_state": true,
+    "independent_conversion_prestate": true,
+    "fee_rounding_source": true,
+    "full_first_buy_reproduction": true,
+    "hotpath_dependencies_fully_classified": true
+  },
+  "minOutputAmount": "Locally derivable for qualified state/amount/mode and explicit slippage policy; not a guaranteed future acquisition",
+  "conditional_first_buy_difference": 0,
+  "full_independent_first_buy_difference": "0",
+  "next_test": "STOP before G0.3. Review the pinned historical-mode PASS and dependency guards; no live sending, cache coverage or latency claim.",
+  "archive_witness": "2026-09-28-g02-archive-witness-quicknode-153754",
+  "tx_prestate_arithmetic_expected_output": "6243568333969093909994622",
+  "tx_prestate_arithmetic_difference": "0",
+  "remaining_unknowns": [],
+  "intervening_transactions_reviewed": 65,
+  "intervening_quote_relevant_count": 0,
+  "replayed_state_arithmetic_expected_output": "6243568333969093909994622",
+  "replayed_state_arithmetic_difference": "0",
+  "scope_limits": [
+    "Finite historical read sets do not prove arbitrary input/mode/tick coverage",
+    "Freshness, ingress visibility, future execution timestamp/order and live success are not established by this offline evidence",
+    "First BUY uses historical Router V2; direct fixture separately verifies native Portal V3. New direct-at-launch wallet/amount is G0.3 work."
+  ]
+}

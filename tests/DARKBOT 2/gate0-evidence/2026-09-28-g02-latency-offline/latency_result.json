@@ -1,0 +1,173 @@
+{
+  "timestamp_utc": "2026-09-28T15:58:26.818Z",
+  "historical": {
+    "launch": {
+      "transaction": "0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c",
+      "block": 124415357,
+      "index": 0,
+      "block_hash": "0xac1c321e3d196cce7d8f783dd5c8e1ec6225c751cdb34813a252384d103cd231",
+      "block_milliTimestamp": 1790549254300,
+      "utc": "2026-09-27T22:47:34.300Z"
+    },
+    "first_buy": {
+      "transaction": "0x189585bec2fbfac6d2ff03455e1137b6c938bd17f495895e4e076b808d926800",
+      "block": 124415358,
+      "index": 15,
+      "block_hash": "0x2311408be0e5bd308833b31303a1de6be3a2975d290da3cd99a3daf03bd2c462",
+      "block_milliTimestamp": 1790549254750,
+      "utc": "2026-09-27T22:47:34.750Z"
+    },
+    "block_timestamp_gap_ms": 450,
+    "measurement": "Difference between included blocks milliTimestamp values, NOT signal-to-execution latency",
+    "pending_seen_to_send_ms": null,
+    "pending_seen_to_execution_ms": null,
+    "individual_tx_execution_wallclock_ms": null
+  },
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4 Max",
+    "node": "v24.1.0",
+    "ethers": "6.15.0",
+    "load_before": [
+      2.72900390625,
+      2.95654296875,
+      3.10888671875
+    ],
+    "load_after": [
+      2.72900390625,
+      2.95654296875,
+      3.10888671875
+    ]
+  },
+  "benchmark": {
+    "scope": "Warm single-process, single historical fixture, preloaded exact historical state. 3 runs x 2000 samples; 200 warmup calls per run/category.",
+    "includes": {
+      "arithmetic_only": "V2 output + fee arithmetic + r/h/k derivation + curve output",
+      "launch_decode_create2_quote": "ABI decode launch calldata + CREATE2 address + extension price decode + same arithmetic"
+    },
+    "excludes": [
+      "network receive",
+      "mempool detection",
+      "state refresh/invalidation",
+      "strategy filters",
+      "transaction build",
+      "signing",
+      "nonce management",
+      "socket handoff",
+      "RPC acknowledgement",
+      "inclusion",
+      "on-chain execution"
+    ],
+    "correctness_expected_output": "6243568333969093909994622",
+    "clock": "process.hrtime.bigint monotonic; timing overhead included, not subtracted",
+    "runs": [
+      {
+        "round": 1,
+        "name": "arithmetic_only",
+        "samples": 2000,
+        "min_ns": 583,
+        "p50_ns": 666,
+        "p95_ns": 916,
+        "p99_ns": 2000,
+        "max_ns": 322958,
+        "mean_ns": 893.85
+      },
+      {
+        "round": 1,
+        "name": "launch_decode_create2_quote",
+        "samples": 2000,
+        "min_ns": 222417,
+        "p50_ns": 251083,
+        "p95_ns": 334458,
+        "p99_ns": 388625,
+        "max_ns": 535458,
+        "mean_ns": 258702.407
+      },
+      {
+        "round": 2,
+        "name": "arithmetic_only",
+        "samples": 2000,
+        "min_ns": 583,
+        "p50_ns": 708,
+        "p95_ns": 917,
+        "p99_ns": 3417,
+        "max_ns": 98709,
+        "mean_ns": 869.078
+      },
+      {
+        "round": 2,
+        "name": "launch_decode_create2_quote",
+        "samples": 2000,
+        "min_ns": 217250,
+        "p50_ns": 251250,
+        "p95_ns": 343750,
+        "p99_ns": 408208,
+        "max_ns": 946208,
+        "mean_ns": 260532.4695
+      },
+      {
+        "round": 3,
+        "name": "arithmetic_only",
+        "samples": 2000,
+        "min_ns": 583,
+        "p50_ns": 708,
+        "p95_ns": 875,
+        "p99_ns": 1000,
+        "max_ns": 19458,
+        "mean_ns": 707.5415
+      },
+      {
+        "round": 3,
+        "name": "launch_decode_create2_quote",
+        "samples": 2000,
+        "min_ns": 217666,
+        "p50_ns": 252708,
+        "p95_ns": 312833,
+        "p99_ns": 423375,
+        "max_ns": 2228834,
+        "mean_ns": 260947.2555
+      }
+    ],
+    "aggregate": {
+      "clock_pair_overhead": {
+        "samples": 5000,
+        "min_ns": 0,
+        "p50_ns": 41,
+        "p95_ns": 84,
+        "p99_ns": 167,
+        "max_ns": 3958,
+        "mean_ns": 33.1302
+      },
+      "arithmetic_only": {
+        "samples": 6000,
+        "min_ns": 583,
+        "p50_ns": 667,
+        "p95_ns": 875,
+        "p99_ns": 3042,
+        "max_ns": 322958,
+        "mean_ns": 823.4898333333333
+      },
+      "launch_decode_create2_quote": {
+        "samples": 6000,
+        "min_ns": 217250,
+        "p50_ns": 251708,
+        "p95_ns": 332375,
+        "p99_ns": 405000,
+        "max_ns": 2228834,
+        "mean_ns": 260060.71066666668
+      }
+    },
+    "sink": "0",
+    "not_a_g03_harness": true,
+    "not_a_latency_gate_pass": true
+  },
+  "sources": {
+    "2026-09-27-g01/flap_buy_order_blocks_rpc/001.response.json": "92401c7d7156b4c7c1bc68d24ac3f84272682fb3f8cbc883795257cf27a9a74d",
+    "2026-09-27-g01/flap_fixture_rpc/001.response.json": "b575cf53ff28923aff71070f9c9af5b1dfc9baa0166fa3f85c77ef6e6308306d",
+    "2026-09-27-g01/flap_first_external_buy_rpc/001.response.json": "15086dd6b0cc4fd32a5c5dc37224b1a9fb180a2c1f602733e3f8f29fc56242e6",
+    "2026-09-28-g02-archive-witness-quicknode-153754/first_buy_calculation.json": "ee689d2423b502d2e0b177251a907648329101a60ebb8901c15918d78a20012d",
+    "2026-09-28-g02-archive-witness-quicknode-153754/launch_calltrace.json": "8be5ce85638389ef27fff85e9e9617452e34e71420253f60c3cd68cc9390b8a6",
+    "2026-09-28-g02-archive-witness-quicknode-153754/first_buy_prestate.json": "c08f17307775b67ecbd6cea517f748c6326b1320e35496fe4292c471c9e5df7c"
+  }
+}

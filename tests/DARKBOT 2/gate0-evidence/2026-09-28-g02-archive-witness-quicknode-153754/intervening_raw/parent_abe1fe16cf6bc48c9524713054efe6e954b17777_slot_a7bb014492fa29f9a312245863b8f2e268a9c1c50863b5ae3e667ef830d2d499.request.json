@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "eth_getStorageAt",
+  "params": [
+    "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+    "0xa7bb014492fa29f9a312245863b8f2e268a9c1c50863b5ae3e667ef830d2d499",
+    {
+      "blockHash": "0x854055a293db2a4c69d4827e00654bc3be75d0484b1f4258a8056380672d1104",
+      "requireCanonical": true
+    }
+  ]
+}
