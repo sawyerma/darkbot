@@ -1,0 +1,56 @@
+{
+  "generated_utc": "2026-09-27T23:08:48.256090+00:00",
+  "chain_id": 56,
+  "rpc": "https://bsc-dataseed.bnbchain.org",
+  "classic_fixture": {
+    "creator": "0x1985ec0215a94db223f5ae98b436074c4be1219b",
+    "token": "0xa89a24209a3ae8ba1ffb3f0567b69ef4765bffff",
+    "requestId": 103111172,
+    "name": "币安广场负责人",
+    "symbol": "YING",
+    "totalSupply": 1000000000000000000000000000,
+    "launchTime": 0,
+    "launchFee": 0,
+    "logIndex": 301,
+    "txHash": "0x8cc24c0cb9f40ee92240959fbafece1a2fc22f2e367b42366050a33cba827e5b",
+    "blockNumber": 124415333
+  },
+  "classic_helper": {
+    "contract": "0xf251f83e40a78868fcfa3fa4599dad6494e46034",
+    "selector": "0x1f69565f",
+    "call": "getTokenInfo(address)",
+    "token": "0xa89a24209a3ae8ba1ffb3f0567b69ef4765bffff",
+    "result_words": 12,
+    "word0_version": 2,
+    "word1_manager": "0x5c952063c7fc8610ffdb798152d69f0b9550762b",
+    "raw_result": "0x00000000000000000000000000000000000000000000000000000000000000020000000000000000000000005c952063c7fc8610ffdb798152d69f0b9550762b0000000000000000000000001d80392d12caaaf9e333bb0bb7f021eacf297fe6000000000000000000000000000000000000000000000000000000251f4aa4d600000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000295be96e64066972000000000000000000000000000000000000000000000000295be96e640669720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001b1ae4d6e2ef5000000000000000000000000000000000000000000000000000000000000000000000",
+    "historical_block_error": "eth_getCode/eth_call at fixture block returned missing trie node on public RPC; latest call succeeded"
+  },
+  "openfour": {
+    "repo": "four-meme-community/openfour-docs",
+    "commit": "0527d529d59c6a3fbc9927ce391ecc97c66e1b01",
+    "registry": "0x912cef0c3ae9ab6eb3ec87cab69371cfb317ab94",
+    "registry_core": "0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3",
+    "registry_tools": "0x97da82f56fef1a0b974587a48135fa9da2a4e905",
+    "fee_router": "0x7383b244b416db16aa9dd0ab7c296aa60255b9a2",
+    "wrapped_native": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "registry_implementation": "0x9d6f9e62a2ffe33ce81bd1f291bdea74e3a9dc6b",
+    "core_implementation": "0x42a7378dcbc7dcd644b5c9b196c5451f847cbedc",
+    "tools_implementation": "0x7eca56ed477345ad17cf327f3b54fa5226434b98"
+  },
+  "status": "G0.1_PARTIAL_EVIDENCE; NO_GATE_PASS",
+  "not_done": [
+    "Flap canonical launch fixture and v5.24.0 ABI/mode freeze",
+    "Four external BUY receipt/semantic proof",
+    "OpenFour canonical launch/BUY fixture",
+    "latency harness and Linux qualification",
+    "controlled value-bearing mainnet test"
+  ],
+  "flap": {
+    "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "version_onchain": "v5.24.0",
+    "implementation": "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20",
+    "docs_version_observed": "v5.23.1",
+    "version_mismatch": true
+  }
+}

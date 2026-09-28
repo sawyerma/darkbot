@@ -1,0 +1,132 @@
+{
+  "status": "ADDRESS_REPRODUCED_FOR_FIXTURE_G02_STILL_IN_PROGRESS",
+  "eip1014_vectors_passed": 7,
+  "init_code_bytes": 55,
+  "preimage_bytes": 85,
+  "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+  "salt": "0x0c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c",
+  "embedded_implementation": "0x024f18294970b5c76c0691b87f138a0317156422",
+  "init_code_hash": "0x2f7f413fcc6c3812c665c15bd4a012e663f567d626112a81d401066fd5a771b4",
+  "predicted": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+  "actual": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+  "match": true,
+  "independent_rpc_hash_match": true,
+  "invalid_old_preimage_bytes": 97,
+  "error_cause": "Deployer incorrectly padded from 20 to 32 bytes",
+  "quote": {
+    "address": "0xba2ae424d960c26247dd6c32edc70b295c744c43",
+    "name": "Dogecoin",
+    "symbol": "DOGE",
+    "decimals": 8,
+    "identity_state": "latest"
+  },
+  "launch_quote_raw": 80574062404,
+  "launch_value_wei": 0,
+  "complete_blocks_checked": 4,
+  "receipts_checked": 211,
+  "ordered_buys": [
+    {
+      "tx": "0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c",
+      "block": 124415357,
+      "tx_index": 0,
+      "log_index": 46,
+      "buyer": "0x9d6716dea8614448bd342f5c5c84a8def9079dc4",
+      "amount": 21453245135239692933310825,
+      "quote_amount_event_field_eth": 80574062404,
+      "fee_event": 805740624,
+      "creator_buy": true
+    },
+    {
+      "tx": "0x189585bec2fbfac6d2ff03455e1137b6c938bd17f495895e4e076b808d926800",
+      "block": 124415358,
+      "tx_index": 15,
+      "log_index": 53,
+      "buyer": "0x43dd5eebeebead726fbc84e2511567d9827ae1bb",
+      "amount": 6243568333969093909994622,
+      "quote_amount_event_field_eth": 24051320534,
+      "fee_event": 240513205,
+      "creator_buy": false
+    },
+    {
+      "tx": "0x73716f5fffab9493483d8eae7c1b170bc4d33feaa8346bb07d5c6a0d91d2595b",
+      "block": 124415358,
+      "tx_index": 16,
+      "log_index": 79,
+      "buyer": "0x9ac2168fd668e3c0ffc8359fe4aa89e430fa9c99",
+      "amount": 4144051253779744418964799,
+      "quote_amount_event_field_eth": 16117839140,
+      "fee_event": 161178391,
+      "creator_buy": false
+    },
+    {
+      "tx": "0x0b94910a60af0178e909112011fe145be59d2302c1123ec488daaa6cbf66a5fe",
+      "block": 124415359,
+      "tx_index": 1,
+      "log_index": 22,
+      "buyer": "0x1de460f363af910f51726def188f9004276bf4bc",
+      "amount": 27854385038085308409123649,
+      "quote_amount_event_field_eth": 111646524369,
+      "fee_event": 1116465243,
+      "creator_buy": false
+    },
+    {
+      "tx": "0x6f723464dbb64ba0d5e6f468b3a411161e7861baa6214dc7d38938b5a46514b6",
+      "block": 124415359,
+      "tx_index": 17,
+      "log_index": 66,
+      "buyer": "0xe931f1fa2e2eca0470cf5887a8f9e168e46538f2",
+      "amount": 2539869948463638758830078,
+      "quote_amount_event_field_eth": 10476515617,
+      "fee_event": 104765156,
+      "creator_buy": false
+    },
+    {
+      "tx": "0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b",
+      "block": 124415360,
+      "tx_index": 17,
+      "log_index": 64,
+      "buyer": "0xb6864c017e9d9d89012d4f90ee382bf1461e4c90",
+      "amount": 28438305464314215025968609,
+      "quote_amount_event_field_eth": 120878323272,
+      "fee_event": 1208783232,
+      "creator_buy": false
+    },
+    {
+      "tx": "0x39784336cfb80506fcd60abcb253fc273d884a16d005f2c215874c4a16ebc659",
+      "block": 124415360,
+      "tx_index": 23,
+      "log_index": 143,
+      "buyer": "0x9b4ec20c680b93d34fb56d84f56088f33e2080b8",
+      "amount": 15174475315454912584461328,
+      "quote_amount_event_field_eth": 67309479679,
+      "fee_event": 673094796,
+      "creator_buy": false
+    }
+  ],
+  "first_external_buy": {
+    "tx": "0x189585bec2fbfac6d2ff03455e1137b6c938bd17f495895e4e076b808d926800",
+    "block": 124415358,
+    "tx_index": 15,
+    "log_index": 53,
+    "buyer": "0x43dd5eebeebead726fbc84e2511567d9827ae1bb",
+    "amount": 6243568333969093909994622,
+    "quote_amount_event_field_eth": 24051320534,
+    "fee_event": 240513205,
+    "creator_buy": false
+  },
+  "first_external_envelope": {
+    "hash": "0x189585bec2fbfac6d2ff03455e1137b6c938bd17f495895e4e076b808d926800",
+    "from": "0xe6b55031e42587e540c629807a059ff7d1a849b6",
+    "to": "0x43dd5eebeebead726fbc84e2511567d9827ae1bb",
+    "value": "0x6a94d74f430000",
+    "selector": "0x24856bc3",
+    "direct_to_portal": false,
+    "value_wei": 30000000000000000,
+    "internal_call_semantics": "NOT_VERIFIED_FROM_TOP_LEVEL_CALLDATA"
+  },
+  "remaining": [
+    "Derive launch curve/config/extension state from pre-signal cache and calldata",
+    "Reproduce first external router BUY with its actual internal inputs and fees/rounding; distinguish later direct Portal BUYs",
+    "Prove config invalidation and pending visibility; no BSC latency or inclusion proof yet"
+  ]
+}

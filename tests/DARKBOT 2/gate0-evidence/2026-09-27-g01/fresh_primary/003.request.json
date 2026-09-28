@@ -1,0 +1,20 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "eth_getCode",
+    "params": [
+      "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20",
+      "0x76a6b17"
+    ]
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "eth_getCode",
+    "params": [
+      "0xf32ee25a7a94f5858692b90815493bda9f992eee",
+      "0x76a6b17"
+    ]
+  }
+]

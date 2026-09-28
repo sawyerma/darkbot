@@ -1,0 +1,14 @@
+{
+  "rpc_method": "eth_getCode",
+  "address": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+  "tag": "latest",
+  "response_code_bytes": 45,
+  "runtime_code": "0x363d3d373d3d3d363d73024f18294970b5c76c0691b87f138a03171564225af43d82803e903d91602b57fd5bf3",
+  "runtime_sha256": "44682660b605e0547325b011a2d7cb089fc2f6591b6d3e9b6f3be119d1e85e6b",
+  "is_eip1167_runtime": true,
+  "embedded_implementation": "0x024f18294970b5c76c0691b87f138a0317156422",
+  "historical_tag_error": {
+    "code": -32000,
+    "message": "missing trie node"
+  }
+}

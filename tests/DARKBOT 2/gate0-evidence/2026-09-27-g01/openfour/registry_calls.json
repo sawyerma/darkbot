@@ -1,0 +1,22 @@
+[
+  {
+    "method": "eth_call",
+    "params": [
+      {
+        "to": "0x912cef0c3ae9ab6eb3ec87cab69371cfb317ab94",
+        "data": "0x7ba9413c"
+      },
+      "latest"
+    ]
+  },
+  {
+    "method": "eth_call",
+    "params": [
+      {
+        "to": "0x912cef0c3ae9ab6eb3ec87cab69371cfb317ab94",
+        "data": "0xe75dfb3c"
+      },
+      "latest"
+    ]
+  }
+]

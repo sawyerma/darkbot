@@ -1,0 +1,8 @@
+[
+  {
+    "method": "web3_sha3",
+    "params": [
+      "0xffe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de00c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c6503c030e7b94b9e67e0acf9c39cef218e663fef69b9cb594d23471f78c2688a"
+    ]
+  }
+]

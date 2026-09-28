@@ -1,0 +1,27 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "web3_sha3",
+    "params": [
+      "0x6f70656e466f7572436f72652829"
+    ]
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "web3_sha3",
+    "params": [
+      "0x6f70656e466f7572546f6f6c2829"
+    ]
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "eth_getCode",
+    "params": [
+      "0x912cef0c3ae9ab6eb3ec87cab69371cfb317ab94",
+      "latest"
+    ]
+  }
+]

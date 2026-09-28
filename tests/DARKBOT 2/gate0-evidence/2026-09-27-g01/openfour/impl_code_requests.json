@@ -1,0 +1,23 @@
+[
+  {
+    "method": "eth_getCode",
+    "params": [
+      "0x9d6f9e62a2ffe33ce81bd1f291bdea74e3a9dc6b",
+      "latest"
+    ]
+  },
+  {
+    "method": "eth_getCode",
+    "params": [
+      "0x42a7378dcbc7dcd644b5c9b196c5451f847cbedc",
+      "latest"
+    ]
+  },
+  {
+    "method": "eth_getCode",
+    "params": [
+      "0x7eca56ed477345ad17cf327f3b54fa5226434b98",
+      "latest"
+    ]
+  }
+]

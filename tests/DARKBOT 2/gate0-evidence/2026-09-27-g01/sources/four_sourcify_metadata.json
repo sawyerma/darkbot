@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<pre>Cannot GET /repository/contracts/full_match/56/0xf32ee25a7a94f5858692b90815493bda9f992eee/metadata.json</pre>
+</body>
+</html>

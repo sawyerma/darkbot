@@ -1,0 +1,10 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "web3_sha3",
+    "params": [
+      "0xffe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de00c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c2f7f413fcc6c3812c665c15bd4a012e663f567d626112a81d401066fd5a771b4"
+    ]
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "method": "eth_getStorageAt",
+    "params": [
+      "0x912cef0c3ae9ab6eb3ec87cab69371cfb317ab94",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+    ]
+  },
+  {
+    "method": "eth_getStorageAt",
+    "params": [
+      "0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+    ]
+  },
+  {
+    "method": "eth_getStorageAt",
+    "params": [
+      "0x97da82f56fef1a0b974587a48135fa9da2a4e905",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+    ]
+  }
+]

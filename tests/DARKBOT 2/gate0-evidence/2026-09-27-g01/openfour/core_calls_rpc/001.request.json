@@ -1,0 +1,26 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "eth_call",
+    "params": [
+      {
+        "to": "0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3",
+        "data": "0xf29ebf61"
+      },
+      "latest"
+    ]
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "eth_call",
+    "params": [
+      {
+        "to": "0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3",
+        "data": "0xeb6d3a11"
+      },
+      "latest"
+    ]
+  }
+]

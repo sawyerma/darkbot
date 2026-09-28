@@ -1,0 +1,11 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "eth_getCode",
+    "params": [
+      "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+      "latest"
+    ]
+  }
+]

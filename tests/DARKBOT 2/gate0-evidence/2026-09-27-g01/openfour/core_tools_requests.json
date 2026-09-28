@@ -1,0 +1,35 @@
+[
+  {
+    "method": "eth_getBlockByNumber",
+    "params": [
+      "latest",
+      false
+    ]
+  },
+  {
+    "method": "eth_getCode",
+    "params": [
+      "0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3",
+      "latest"
+    ]
+  },
+  {
+    "method": "eth_getCode",
+    "params": [
+      "0x97da82f56fef1a0b974587a48135fa9da2a4e905",
+      "latest"
+    ]
+  },
+  {
+    "method": "web3_sha3",
+    "params": [
+      "0x666565526f757465722829"
+    ]
+  },
+  {
+    "method": "web3_sha3",
+    "params": [
+      "0x777261707065644e61746976652829"
+    ]
+  }
+]

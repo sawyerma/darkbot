@@ -1,0 +1,30 @@
+[
+  {
+    "method": "eth_getBlockByNumber",
+    "params": [
+      "0x76a6d7d",
+      false
+    ]
+  },
+  {
+    "method": "eth_getBlockByNumber",
+    "params": [
+      "0x76a6d7e",
+      false
+    ]
+  },
+  {
+    "method": "eth_getBlockByNumber",
+    "params": [
+      "0x76a6d7f",
+      false
+    ]
+  },
+  {
+    "method": "eth_getBlockByNumber",
+    "params": [
+      "0x76a6d80",
+      false
+    ]
+  }
+]

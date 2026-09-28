@@ -1,0 +1,30 @@
+[
+  {
+    "method": "eth_chainId",
+    "params": []
+  },
+  {
+    "method": "eth_getBlockByNumber",
+    "params": [
+      "finalized",
+      false
+    ]
+  },
+  {
+    "method": "eth_getCode",
+    "params": [
+      "0xf251f83e40a78868fcfa3fa4599dad6494e46034",
+      "finalized"
+    ]
+  },
+  {
+    "method": "eth_call",
+    "params": [
+      {
+        "to": "0xf251f83e40a78868fcfa3fa4599dad6494e46034",
+        "data": "0x1f69565f000000000000000000000000a89a24209a3ae8ba1ffb3f0567b69ef4765bffff"
+      },
+      "finalized"
+    ]
+  }
+]

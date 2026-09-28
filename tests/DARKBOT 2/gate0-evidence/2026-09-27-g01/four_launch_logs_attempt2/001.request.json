@@ -1,0 +1,17 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "eth_getLogs",
+    "params": [
+      {
+        "address": "0x5c952063c7fc8610ffdb798152d69f0b9550762b",
+        "fromBlock": "0x76a6786",
+        "toBlock": "0x76a6b86",
+        "topics": [
+          "0x396d5e902b675b032348d3d2e9517ee8f0c4a926603fbc075d3d282ff00cad20"
+        ]
+      }
+    ]
+  }
+]

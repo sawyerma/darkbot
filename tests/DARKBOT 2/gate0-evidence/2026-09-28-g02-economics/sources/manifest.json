@@ -1,0 +1,36 @@
+[
+  {
+    "file": "router_bscscan.html",
+    "url": "https://bscscan.com/address/0x43dd5eebeebead726fbc84e2511567d9827ae1bb#code",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "file": "portal_impl_bscscan.html",
+    "url": "https://bscscan.com/address/0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20#code",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "file": "router_sourcify.json",
+    "url": "https://sourcify.dev/server/v2/contract/56/0x43dd5eebeebead726fbc84e2511567d9827ae1bb?fields=all",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "file": "portal_sourcify.json",
+    "url": "https://sourcify.dev/server/v2/contract/56/0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20?fields=all",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "file": "portal_source.sol",
+    "url": "https://raw.githubusercontent.com/incjanta/Portal/bed46ef0/src/Portal.sol",
+    "status": 200,
+    "bytes": 39373,
+    "sha256": "47fc071b837db013bbb916df93071ea87af9e085077cef8bb8ed45691c3e813d"
+  },
+  {
+    "file": "official_IPortal.sol",
+    "url": "https://raw.githubusercontent.com/flap-sh/FlapVaultExample/5949cc7eb99bcb5ac5f679cc710ae456e627f12a/src/flap/IPortal.sol",
+    "status": 200,
+    "bytes": 85369,
+    "sha256": "6de1991040667e4bf6e31db1d96d50b81a1e072378fed91beaca131f8683dcd9"
+  }
+]

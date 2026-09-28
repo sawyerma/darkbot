@@ -1,0 +1,8 @@
+{
+  "endpoint": "https://bsc-dataseed.bnbchain.org",
+  "started_utc": "2026-09-27T23:13:19.870477+00:00",
+  "http_status": 200,
+  "elapsed_ns": 805849667,
+  "response_sha256": "927896463d6eb91da18fe0c24e4d7f3f2390924084a1289bb81d79145ac276e3",
+  "timing_use": "RPC diagnostic only; not BUY latency"
+}

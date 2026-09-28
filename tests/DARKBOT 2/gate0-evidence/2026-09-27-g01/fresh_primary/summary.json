@@ -1,0 +1,30 @@
+{
+  "block_number": 124414743,
+  "block_hash": "0x827501e0a628f4427ec213709e1e858110283eeb71dbcdece9b07b2a39096c51",
+  "contracts": {
+    "flap": {
+      "address": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+      "code_bytes": 2882,
+      "code_sha256": "1fc365bfda5c9694d38901227927872e610f84d9de9b4e360fea40578fb4bcc1",
+      "implementation_slot": "0x00000000000000000000000027a0f9da7f5bead616fe0bf02bf0c793bece4e20",
+      "implementation_address": "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20",
+      "beacon_slot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "implementation_code_bytes": 20475,
+      "implementation_code_sha256": "2ac893fca8dfa730d66cb4f0fc3e2c769f2ffdb4565e55903d9fa12e7cd7149f"
+    },
+    "four": {
+      "address": "0x5c952063c7fc8610ffdb798152d69f0b9550762b",
+      "code_bytes": 170,
+      "code_sha256": "14a7814cc2ab527e7f52901a21b0d4be3c6934aa9d4dddc42143bc314b9b3d72",
+      "implementation_slot": "0x000000000000000000000000f32ee25a7a94f5858692b90815493bda9f992eee",
+      "implementation_address": "0xf32ee25a7a94f5858692b90815493bda9f992eee",
+      "beacon_slot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "implementation_code_bytes": 24203,
+      "implementation_code_sha256": "25d8adffb76ebb355e46d7c62b9cbfa34b803e1d162c4b8317d5758439b99194"
+    }
+  },
+  "errors": [],
+  "block_hash_rechecked": true,
+  "status": "READ_EVIDENCE_CAPTURED",
+  "scope": "Bytecode/standard-slot snapshot only; source/ABI/launch semantics NOT verified"
+}

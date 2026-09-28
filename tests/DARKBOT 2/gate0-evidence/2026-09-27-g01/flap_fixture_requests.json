@@ -1,0 +1,38 @@
+[
+  {
+    "method": "eth_getTransactionByHash",
+    "params": [
+      "0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c"
+    ]
+  },
+  {
+    "method": "eth_getTransactionReceipt",
+    "params": [
+      "0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c"
+    ]
+  },
+  {
+    "method": "eth_getTransactionByHash",
+    "params": [
+      "0x9af918c908e461092d0018ecbcdfa08816228352b0e2a8d6984041ab1c49ed9a"
+    ]
+  },
+  {
+    "method": "eth_getTransactionReceipt",
+    "params": [
+      "0x9af918c908e461092d0018ecbcdfa08816228352b0e2a8d6984041ab1c49ed9a"
+    ]
+  },
+  {
+    "method": "eth_getTransactionByHash",
+    "params": [
+      "0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b"
+    ]
+  },
+  {
+    "method": "eth_getTransactionReceipt",
+    "params": [
+      "0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b"
+    ]
+  }
+]

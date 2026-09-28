@@ -1,0 +1,38 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "debug_traceTransaction",
+    "params": [
+      "0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c",
+      {
+        "tracer": "callTracer",
+        "timeout": "10s"
+      }
+    ]
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "debug_traceTransaction",
+    "params": [
+      "0x189585bec2fbfac6d2ff03455e1137b6c938bd17f495895e4e076b808d926800",
+      {
+        "tracer": "callTracer",
+        "timeout": "10s"
+      }
+    ]
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "debug_traceTransaction",
+    "params": [
+      "0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b",
+      {
+        "tracer": "callTracer",
+        "timeout": "10s"
+      }
+    ]
+  }
+]

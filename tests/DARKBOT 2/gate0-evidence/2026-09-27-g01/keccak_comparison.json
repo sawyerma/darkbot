@@ -1,0 +1,170 @@
+[
+  {
+    "label": "createToken(bytes,bytes)",
+    "bytes": 24,
+    "submitted_hash": "0x519ebb10d341a3459bd788883c630b2e3e84d8b3e8ee6a84cb174f16adc74203",
+    "reference_hash": "0x519ebb10d341a3459bd788883c630b2e3e84d8b3e8ee6a84cb174f16adc74203",
+    "match": true
+  },
+  {
+    "label": "buyTokenAMAP(address,uint256,uint256)",
+    "bytes": 37,
+    "submitted_hash": "0x87f27655b5ad7e5cf2d1746673f1abc53c5ed0d93e7e4c930c0fcb95ab573eb1",
+    "reference_hash": "0x87f27655b5ad7e5cf2d1746673f1abc53c5ed0d93e7e4c930c0fcb95ab573eb1",
+    "match": true
+  },
+  {
+    "label": "buyTokenAMAP(address,address,uint256,uint256)",
+    "bytes": 45,
+    "submitted_hash": "0x7f79f6dfb0906c07e9ab7fc4c0c4be65af7cf71bbdd7cccab10e737a2367775f",
+    "reference_hash": "0x7f79f6dfb0906c07e9ab7fc4c0c4be65af7cf71bbdd7cccab10e737a2367775f",
+    "match": true
+  },
+  {
+    "label": "buyToken(address,uint256,uint256)",
+    "bytes": 33,
+    "submitted_hash": "0xe671499be20312df72e417477296255457d7f4de16a88383df5446449000f004",
+    "reference_hash": "0xe671499be20312df72e417477296255457d7f4de16a88383df5446449000f004",
+    "match": true
+  },
+  {
+    "label": "buyToken(address,address,uint256,uint256)",
+    "bytes": 41,
+    "submitted_hash": "0x7d17ff3d1636d8a7f87c636c344efabb2eacef44eef070afb5a434a340631292",
+    "reference_hash": "0x7d17ff3d1636d8a7f87c636c344efabb2eacef44eef070afb5a434a340631292",
+    "match": true
+  },
+  {
+    "label": "swapExactInput((address,address,uint256,uint256,bytes))",
+    "bytes": 55,
+    "submitted_hash": "0xef7ec2e7dfa44c2ae90c357beffe82b14393fa524bc2bc0ff2d89f34bc3b71b4",
+    "reference_hash": "0xef7ec2e7dfa44c2ae90c357beffe82b14393fa524bc2bc0ff2d89f34bc3b71b4",
+    "match": true
+  },
+  {
+    "label": "swapExactInputV3((address,address,uint256,uint256,bytes,bytes))",
+    "bytes": 63,
+    "submitted_hash": "0x4f7edf58b37629df5cc2b923316517667d7a6a13086bafaed548b55dd61eb3e4",
+    "reference_hash": "0x4f7edf58b37629df5cc2b923316517667d7a6a13086bafaed548b55dd61eb3e4",
+    "match": true
+  },
+  {
+    "label": "buyOnCreation(address,address,uint256)",
+    "bytes": 38,
+    "submitted_hash": "0xfcb5c9e3373da485e4ac985662a83a7b46587047445d5321af7377f6860c67d1",
+    "reference_hash": "0xfcb5c9e3373da485e4ac985662a83a7b46587047445d5321af7377f6860c67d1",
+    "match": true
+  },
+  {
+    "label": "buy(address,address,uint256)",
+    "bytes": 28,
+    "submitted_hash": "0x153e66e60de05b99ac9183e034dc3f050df3ed7fdaa98b95163729e13722f664",
+    "reference_hash": "0x153e66e60de05b99ac9183e034dc3f050df3ed7fdaa98b95163729e13722f664",
+    "match": true
+  },
+  {
+    "label": "TokenCreate(address,address,uint256,string,string,uint256,uint256,uint256)",
+    "bytes": 74,
+    "submitted_hash": "0x396d5e902b675b032348d3d2e9517ee8f0c4a926603fbc075d3d282ff00cad20",
+    "reference_hash": "0x396d5e902b675b032348d3d2e9517ee8f0c4a926603fbc075d3d282ff00cad20",
+    "match": true
+  },
+  {
+    "label": "TokenPurchase(address,address,uint256,uint256,uint256,uint256,uint256,uint256)",
+    "bytes": 78,
+    "submitted_hash": "0x7db52723a3b2cdd6164364b3b766e65e540d7be48ffa89582956d8eaebe62942",
+    "reference_hash": "0x7db52723a3b2cdd6164364b3b766e65e540d7be48ffa89582956d8eaebe62942",
+    "match": true
+  },
+  {
+    "label": "TokenCreated(uint256,address,uint256,address,string,string,string)",
+    "bytes": 66,
+    "submitted_hash": "0x504e7f360b2e5fe33cbaaae4c593bc55305328341bf79009e43e0e3b7f699603",
+    "reference_hash": "0x504e7f360b2e5fe33cbaaae4c593bc55305328341bf79009e43e0e3b7f699603",
+    "match": true
+  },
+  {
+    "label": "TokenBought(uint256,address,address,uint256,uint256,uint256,uint256)",
+    "bytes": 68,
+    "submitted_hash": "0xa800a2038683844fac66747f771bfdfae862eb28b16bcfa387afa9fbacce8ff7",
+    "reference_hash": "0xa800a2038683844fac66747f771bfdfae862eb28b16bcfa387afa9fbacce8ff7",
+    "match": true
+  },
+  {
+    "label": "newTokenV6((string,string,string,uint8,bytes32,uint8,address,uint256,address,bytes,bytes32,bytes,uint8,uint8,uint16,uint16,uint64,uint64,uint16,uint16,uint16,uint16,uint256,address,address,uint8))",
+    "bytes": 196,
+    "submitted_hash": "0x8cb5772cfecf1ccfe4f6e0da0aa0d89c975e2fa972a10783361319f682ec0c27",
+    "reference_hash": "0x8cb5772cfecf1ccfe4f6e0da0aa0d89c975e2fa972a10783361319f682ec0c27",
+    "match": true
+  },
+  {
+    "label": "newTokenV7((string,string,string,uint8,bytes32,uint8,address,uint256,bytes,bytes32,bytes,uint8,uint16,uint16,uint64,uint64,address,uint8,(uint8,uint16,address,address,uint256)[4]))",
+    "bytes": 180,
+    "submitted_hash": "0x87ef5b300982bc30e98b9846c3a5eca545dd5f0bd79d7327d85c95201fb6c043",
+    "reference_hash": "0x87ef5b300982bc30e98b9846c3a5eca545dd5f0bd79d7327d85c95201fb6c043",
+    "match": true
+  },
+  {
+    "label": "padding_A_0",
+    "bytes": 0,
+    "submitted_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+    "reference_hash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+    "match": true
+  },
+  {
+    "label": "padding_A_1",
+    "bytes": 1,
+    "submitted_hash": "0x03783fac2efed8fbc9ad443e592ee30e61d65f471140c10ca155e937b435b760",
+    "reference_hash": "0x03783fac2efed8fbc9ad443e592ee30e61d65f471140c10ca155e937b435b760",
+    "match": true
+  },
+  {
+    "label": "padding_A_134",
+    "bytes": 134,
+    "submitted_hash": "0x5d416b4cae4c589cf605bfc83e5aceea9f733d54f3c7cdde54a97dc1273c984b",
+    "reference_hash": "0x5d416b4cae4c589cf605bfc83e5aceea9f733d54f3c7cdde54a97dc1273c984b",
+    "match": true
+  },
+  {
+    "label": "padding_A_135",
+    "bytes": 135,
+    "submitted_hash": "0xf2a8318c46ed21aa1fbfb854e1a76ddd10f7f2aaec18d2e266a1ec6a31a9a411",
+    "reference_hash": "0x5d661f2d3aaf313834b69b2948a73a0ed39cb03726e7c29374a411d8d5d4e71a",
+    "match": false
+  },
+  {
+    "label": "padding_A_136",
+    "bytes": 136,
+    "submitted_hash": "0xcfbaa33d0639debd26f425287642acd461b3064b2bae139ea5919adba46f40f1",
+    "reference_hash": "0xcfbaa33d0639debd26f425287642acd461b3064b2bae139ea5919adba46f40f1",
+    "match": true
+  },
+  {
+    "label": "padding_A_137",
+    "bytes": 137,
+    "submitted_hash": "0xa54656ce134f33ffbc09002c6535ef7ca554c046ed838e2a24a4d1ce9478bc5c",
+    "reference_hash": "0xa54656ce134f33ffbc09002c6535ef7ca554c046ed838e2a24a4d1ce9478bc5c",
+    "match": true
+  },
+  {
+    "label": "padding_A_270",
+    "bytes": 270,
+    "submitted_hash": "0x03326c3197c0a9f673c39cea7d344250926cb36bbd75d0d2ca24e77aa72e4c23",
+    "reference_hash": "0x03326c3197c0a9f673c39cea7d344250926cb36bbd75d0d2ca24e77aa72e4c23",
+    "match": true
+  },
+  {
+    "label": "padding_A_271",
+    "bytes": 271,
+    "submitted_hash": "0xafb878d98ca3725c34cf79864af640451b9d04e83d79290b5aef6f806bd27876",
+    "reference_hash": "0xffe39b1166549d709c585d19a7eef0490fac0d3484b9cca540e71718b4e9bfe4",
+    "match": false
+  },
+  {
+    "label": "padding_A_272",
+    "bytes": 272,
+    "submitted_hash": "0x34c197ae40dff92e650de923ef3271e8704253ac873c6c7ae5650457939d3351",
+    "reference_hash": "0x34c197ae40dff92e650de923ef3271e8704253ac873c6c7ae5650457939d3351",
+    "match": true
+  }
+]

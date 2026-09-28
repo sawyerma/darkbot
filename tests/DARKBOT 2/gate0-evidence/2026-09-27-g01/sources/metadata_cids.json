@@ -1,0 +1,12 @@
+{
+  "four": {
+    "cid": "Qma3R9cHvaq1y9Dk8hKv7cz3MqrCvumUt931juHGjz4Xh3",
+    "sha256": "ade209640d94bb9c1d5a0cf2bb0ea5385bf76ede16d53cab199b00cabd95e452",
+    "cbor_metadata_hex": "a2646970667358221220ade209640d94bb9c1d5a0cf2bb0ea5385bf76ede16d53cab199b00cabd95e45264736f6c6343000814"
+  },
+  "flap": {
+    "cid": "QmcxevqADiEtknTG8p3f2yaSm35UaSUU41dem5FzF8gnNH",
+    "sha256": "d93cc62f3ef043274935e0d83bdd5847678117856fe521e30cdd63e3ba57e1ae",
+    "cbor_metadata_hex": "a2646970667358221220d93cc62f3ef043274935e0d83bdd5847678117856fe521e30cdd63e3ba57e1ae64736f6c634300081a"
+  }
+}

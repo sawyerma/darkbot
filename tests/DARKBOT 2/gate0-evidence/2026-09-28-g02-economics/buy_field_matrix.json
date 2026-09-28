@@ -1,0 +1,146 @@
+[
+  {
+    "field": "destination",
+    "source": "Portal launch.to + captured runtime; router code present, implementation semantics unverified",
+    "earliest": "startup",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE",
+    "signal_time_residual": "mode validation",
+    "invalidation": "deployment/proxy/code change"
+  },
+  {
+    "field": "selector",
+    "source": "official IPortal + ethers + web3_sha3: 0xef7ec2e7",
+    "earliest": "startup",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE",
+    "signal_time_residual": "none",
+    "invalidation": "ABI/mode change"
+  },
+  {
+    "field": "token address",
+    "source": "V6 salt + Portal + observed EIP1167 implementation, ethers CREATE2",
+    "earliest": "pending launch",
+    "signature_bound": true,
+    "classification": "SIGNAL_TIME_LOCAL_CALC",
+    "signal_time_residual": "CREATE2 and patch",
+    "invalidation": "salt/implementation/deployer change"
+  },
+  {
+    "field": "input token",
+    "source": "direct fixture address(0); router downstream DOGE observed",
+    "earliest": "startup policy + pending quote mode",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE",
+    "signal_time_residual": "validate chosen mode",
+    "invalidation": "quote mode or routing change"
+  },
+  {
+    "field": "input amount",
+    "source": "local budget; direct BUY decoded 150000000000000000",
+    "earliest": "startup policy",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE",
+    "signal_time_residual": "budget/amount patch",
+    "invalidation": "policy/funds/conversion change"
+  },
+  {
+    "field": "recipient",
+    "source": "direct: tx.from; router: final Transfer to tx.from; command semantics unverified",
+    "earliest": "startup wallet policy",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE",
+    "signal_time_residual": "sender/recipient consistency",
+    "invalidation": "sender/router command/config change"
+  },
+  {
+    "field": "minOutputAmount",
+    "source": "slippage policy + verified state/route math, currently missing",
+    "earliest": "UNKNOWN",
+    "signature_bound": true,
+    "classification": "UNKNOWN",
+    "signal_time_residual": "local quote then patch only after proof",
+    "invalidation": "curve/pool/ticks/fees/tax/ordering/input/policy change"
+  },
+  {
+    "field": "permitData",
+    "source": "direct fixture empty 0x; ERC20 allowance separate from permit",
+    "earliest": "startup if mode frozen",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE",
+    "signal_time_residual": "none for native input",
+    "invalidation": "ERC20 mode/allowance/permit nonce/deadline change"
+  },
+  {
+    "field": "nonce",
+    "source": "maintained own-account nonce lane; not inspected in this no-wallet audit",
+    "earliest": "continuous pre-signal",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE conditional",
+    "signal_time_residual": "reserve/finalize lane",
+    "invalidation": "competing tx/replacement/reorg"
+  },
+  {
+    "field": "gas/fee",
+    "source": "local policy + gas/head state; historical gas is not a future gas-limit guarantee",
+    "earliest": "continuous pre-signal",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE conditional",
+    "signal_time_residual": "finalize policy values",
+    "invalidation": "head/policy/route/state change"
+  },
+  {
+    "field": "DOGE conversion state",
+    "source": "router V2 reserves; direct V3 price/liquidity/ticks + actual converter mode",
+    "earliest": "pre-signal cache possible, completeness unproven",
+    "signature_bound": false,
+    "classification": "UNKNOWN",
+    "signal_time_residual": "pool simulation if fully cached",
+    "invalidation": "any pool swap/liquidity/fee/converter mode change"
+  },
+  {
+    "field": "curve state",
+    "source": "r/h/k observed in launch event; conditional post-launch reserve reproduced",
+    "earliest": "post-execution evidence now; pre-signal derivation unproven",
+    "signature_bound": false,
+    "classification": "UNKNOWN",
+    "signal_time_residual": "derive creator-buy state after source proof",
+    "invalidation": "curve/config/creator buy/intervening trades/reorg"
+  },
+  {
+    "field": "tax state",
+    "source": "V6 rates and allocation available in calldata; actual rounding/exemption code not bound",
+    "earliest": "pending + pre-signal registry/code cache",
+    "signature_bound": false,
+    "classification": "UNKNOWN",
+    "signal_time_residual": "exact integer deductions after proof",
+    "invalidation": "rate/exemption/config/extension/version change"
+  },
+  {
+    "field": "router-specific fields",
+    "source": "execute(bytes,bytes[]) envelope; command bytes 0b090816 and raw operands",
+    "earliest": "calldata now; future build semantics unproven",
+    "signature_bound": true,
+    "classification": "UNKNOWN",
+    "signal_time_residual": "patch amount/token/path/recipient after decoder proven",
+    "invalidation": "dispatcher/code/pool/path/slippage changes"
+  },
+  {
+    "field": "extension state",
+    "source": "V6 extensionID/data + beneficiary/dividend; implementation lookup unproven",
+    "earliest": "pending plus cached registry",
+    "signature_bound": false,
+    "classification": "UNKNOWN",
+    "signal_time_residual": "mode validation and hook-state effects",
+    "invalidation": "registry/hook/state/code changes"
+  },
+  {
+    "field": "chainId/type/access list",
+    "source": "BSC chainId56 verified; exact tx type is a future scope decision",
+    "earliest": "startup",
+    "signature_bound": true,
+    "classification": "PRECOMPUTABLE conditional",
+    "signal_time_residual": "serialize frozen type",
+    "invalidation": "chain/transaction-type/policy change"
+  }
+]

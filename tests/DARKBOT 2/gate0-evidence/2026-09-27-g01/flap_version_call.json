@@ -1,0 +1,12 @@
+[
+  {
+    "method": "eth_call",
+    "params": [
+      {
+        "to": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+        "data": "0x54fd4d50"
+      },
+      "latest"
+    ]
+  }
+]

@@ -1,0 +1,9 @@
+[
+  {
+    "method": "eth_getBlockByNumber",
+    "params": [
+      "latest",
+      false
+    ]
+  }
+]

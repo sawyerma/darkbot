@@ -1,0 +1,26 @@
+[
+  {
+    "method": "eth_getBlockReceipts",
+    "params": [
+      "0x76a6d7d"
+    ]
+  },
+  {
+    "method": "eth_getBlockReceipts",
+    "params": [
+      "0x76a6d7e"
+    ]
+  },
+  {
+    "method": "eth_getBlockReceipts",
+    "params": [
+      "0x76a6d7f"
+    ]
+  },
+  {
+    "method": "eth_getBlockReceipts",
+    "params": [
+      "0x76a6d80"
+    ]
+  }
+]

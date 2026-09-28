@@ -1,0 +1,8 @@
+{
+  "endpoint": "https://bsc-dataseed.defibit.io",
+  "started_utc": "2026-09-27T22:43:48.758625+00:00",
+  "http_status": 200,
+  "elapsed_ns": 667500667,
+  "response_sha256": "c42814f4505c3ba6ae769d3737624a3a6e13d5643c979fb26a06bbed66ece464",
+  "timing_use": "RPC diagnostic only; not BUY latency"
+}

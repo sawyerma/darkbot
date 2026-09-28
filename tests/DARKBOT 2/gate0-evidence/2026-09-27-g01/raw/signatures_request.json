@@ -1,0 +1,72 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "web3_sha3",
+    "params": [
+      "0x546f6b656e43726561746528616464726573732c616464726573732c75696e743235362c737472696e672c737472696e672c75696e743235362c75696e743235362c75696e7432353629"
+    ],
+    "signature": "TokenCreate(address,address,uint256,string,string,uint256,uint256,uint256)",
+    "kind": "event"
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "web3_sha3",
+    "params": [
+      "0x546f6b656e507572636861736528616464726573732c616464726573732c75696e743235362c75696e743235362c75696e743235362c75696e743235362c75696e743235362c75696e7432353629"
+    ],
+    "signature": "TokenPurchase(address,address,uint256,uint256,uint256,uint256,uint256,uint256)",
+    "kind": "event"
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "web3_sha3",
+    "params": [
+      "0x627579546f6b656e414d41502875696e743235362c616464726573732c616464726573732c75696e743235362c75696e7432353629"
+    ],
+    "signature": "buyTokenAMAP(uint256,address,address,uint256,uint256)",
+    "kind": "function"
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "web3_sha3",
+    "params": [
+      "0x627579546f6b656e414d415028616464726573732c616464726573732c75696e743235362c75696e7432353629"
+    ],
+    "signature": "buyTokenAMAP(address,address,uint256,uint256)",
+    "kind": "function"
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 5,
+    "method": "web3_sha3",
+    "params": [
+      "0x627579546f6b656e414d415028616464726573732c75696e743235362c75696e7432353629"
+    ],
+    "signature": "buyTokenAMAP(address,uint256,uint256)",
+    "kind": "function"
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 6,
+    "method": "web3_sha3",
+    "params": [
+      "0x627579546f6b656e414d41502875696e743235362c616464726573732c75696e743235362c75696e7432353629"
+    ],
+    "signature": "buyTokenAMAP(uint256,address,uint256,uint256)",
+    "kind": "function"
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "method": "web3_sha3",
+    "params": [
+      "0x637265617465546f6b656e2862797465732c627974657329"
+    ],
+    "signature": "createToken(bytes,bytes)",
+    "kind": "function"
+  }
+]

@@ -1,0 +1,40 @@
+{
+  "txHash": "0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c",
+  "selector": "0x8cb5772c",
+  "to": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+  "function": "newTokenV6",
+  "params": {
+    "name": "Koyuki",
+    "symbol": "こゆき",
+    "meta": "https://ipfs.io/ipfs/bafkreiaudspkidhgbgzrewa4jmqcwb2qkobepouf243pglztl6sabnwthi",
+    "dexThresh": 1,
+    "salt": "0x0c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c",
+    "migratorType": 1,
+    "quoteToken": "0xba2ae424d960c26247dd6c32edc70b295c744c43",
+    "quoteAmt": 80574062404,
+    "beneficiary": "0x9d6716dea8614448bd342f5c5c84a8def9079dc4",
+    "permitData": "0x",
+    "extensionID": "0x3526f6a0e790306d64c896eeda5ec66052ea17889e20632ff0cf512923153dad",
+    "extensionData": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000155296d6d771aa0000000000000000000000000000000000000000000000000000000006ab99db900000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000041b66652d37f6011737e03b6b1b0bbf3f37bccfdb0673a84e0556675a5d702e0af1821a8f1008ee48f4300733d18a5e20aab1d24009dfe16ac70b5d0862a6468d11b00000000000000000000000000000000000000000000000000000000000000",
+    "dexId": 0,
+    "lpFeeProfile": 0,
+    "buyTaxRate": 100,
+    "sellTaxRate": 100,
+    "taxDuration": 3153600000,
+    "antiFarmerDuration": 31536000,
+    "mktBps": 0,
+    "deflationBps": 0,
+    "dividendBps": 10000,
+    "lpBps": 0,
+    "minimumShareBalance": 10000000000000000000000,
+    "dividendToken": "0xba2ae424d960c26247dd6c32edc70b295c744c43",
+    "commissionReceiver": "0x0000000000000000000000000000000000000000",
+    "tokenVersion": 6
+  },
+  "checks": {
+    "outer_tuple_offset": 32,
+    "token_version_is_taxed_v3": true,
+    "tax_sum_bps": 10000,
+    "quote_value_matches_tx": "ERC20 quote: tx value is 0 and quoteAmt is encoded token amount"
+  }
+}

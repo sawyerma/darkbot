@@ -1,0 +1,12 @@
+{
+  "scope": "historical Flap fixture, newTokenV6 TOKEN_TAXED_V3",
+  "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+  "salt": "0x0c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c",
+  "published_tax_token_v3_impl": "0x024f18294970b5c76c0691b87f138a0317156422",
+  "published_eip1167_init_code_hash": "0x2f7f413fcc6c3812c665c15bd4a012e663f567d626112a81d401066fd5a771b4",
+  "predicted_address": "0xaf5b39fd975d2f1ea9d89ecd8d09676155cb818a",
+  "actual_receipt_token": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+  "match": false,
+  "status": "SUPERSEDED_INVALID_CREATE2_PREIMAGE",
+  "interpretation": "Invalid 97-byte preimage padded deployer to 32 bytes. Correct 85-byte preimage exactly matches actual token. See flap_g02_verified_correction.json. Original attempted values retained for audit."
+}

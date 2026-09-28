@@ -1,0 +1,113 @@
+{
+  "sha": "0527d529d59c6a3fbc9927ce391ecc97c66e1b01",
+  "node_id": "C_kwDOS0Att9oAKDA1MjdkNTI5ZDU5YzZhM2ZiYzk5MjdjZTM5MWVjYzk3YzY2ZTFiMDE",
+  "commit": {
+    "author": {
+      "name": "four-meme-community",
+      "email": "lol@four.meme",
+      "date": "2026-09-08T16:26:09Z"
+    },
+    "committer": {
+      "name": "four-meme-community",
+      "email": "lol@four.meme",
+      "date": "2026-09-08T16:26:09Z"
+    },
+    "message": "docs: more examples of buy / sell interfaces",
+    "tree": {
+      "sha": "151f0cc014e5d11d92ccfab7849e0b64118ad1f1",
+      "url": "https://api.github.com/repos/four-meme-community/openfour-docs/git/trees/151f0cc014e5d11d92ccfab7849e0b64118ad1f1"
+    },
+    "url": "https://api.github.com/repos/four-meme-community/openfour-docs/git/commits/0527d529d59c6a3fbc9927ce391ecc97c66e1b01",
+    "comment_count": 0,
+    "verification": {
+      "verified": false,
+      "reason": "unsigned",
+      "signature": null,
+      "payload": null,
+      "verified_at": null
+    }
+  },
+  "url": "https://api.github.com/repos/four-meme-community/openfour-docs/commits/0527d529d59c6a3fbc9927ce391ecc97c66e1b01",
+  "html_url": "https://github.com/four-meme-community/openfour-docs/commit/0527d529d59c6a3fbc9927ce391ecc97c66e1b01",
+  "comments_url": "https://api.github.com/repos/four-meme-community/openfour-docs/commits/0527d529d59c6a3fbc9927ce391ecc97c66e1b01/comments",
+  "author": {
+    "login": "four-meme-community",
+    "id": 239776964,
+    "node_id": "U_kgDODkq0xA",
+    "avatar_url": "https://avatars.githubusercontent.com/u/239776964?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/four-meme-community",
+    "html_url": "https://github.com/four-meme-community",
+    "followers_url": "https://api.github.com/users/four-meme-community/followers",
+    "following_url": "https://api.github.com/users/four-meme-community/following{/other_user}",
+    "gists_url": "https://api.github.com/users/four-meme-community/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/four-meme-community/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/four-meme-community/subscriptions",
+    "organizations_url": "https://api.github.com/users/four-meme-community/orgs",
+    "repos_url": "https://api.github.com/users/four-meme-community/repos",
+    "events_url": "https://api.github.com/users/four-meme-community/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/four-meme-community/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "four-meme-community",
+    "id": 239776964,
+    "node_id": "U_kgDODkq0xA",
+    "avatar_url": "https://avatars.githubusercontent.com/u/239776964?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/four-meme-community",
+    "html_url": "https://github.com/four-meme-community",
+    "followers_url": "https://api.github.com/users/four-meme-community/followers",
+    "following_url": "https://api.github.com/users/four-meme-community/following{/other_user}",
+    "gists_url": "https://api.github.com/users/four-meme-community/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/four-meme-community/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/four-meme-community/subscriptions",
+    "organizations_url": "https://api.github.com/users/four-meme-community/orgs",
+    "repos_url": "https://api.github.com/users/four-meme-community/repos",
+    "events_url": "https://api.github.com/users/four-meme-community/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/four-meme-community/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "8c110e913e1c8a43a38d9b56d6c02c6c4e4bec23",
+      "url": "https://api.github.com/repos/four-meme-community/openfour-docs/commits/8c110e913e1c8a43a38d9b56d6c02c6c4e4bec23",
+      "html_url": "https://github.com/four-meme-community/openfour-docs/commit/8c110e913e1c8a43a38d9b56d6c02c6c4e4bec23"
+    }
+  ],
+  "stats": {
+    "total": 234,
+    "additions": 184,
+    "deletions": 50
+  },
+  "files": [
+    {
+      "sha": "d7553ea3f141dec781d59eeb7dcd3e13cc673129",
+      "filename": "docs/integration-guide.md",
+      "status": "modified",
+      "additions": 92,
+      "deletions": 25,
+      "changes": 117,
+      "blob_url": "https://github.com/four-meme-community/openfour-docs/blob/0527d529d59c6a3fbc9927ce391ecc97c66e1b01/docs%2Fintegration-guide.md",
+      "raw_url": "https://github.com/four-meme-community/openfour-docs/raw/0527d529d59c6a3fbc9927ce391ecc97c66e1b01/docs%2Fintegration-guide.md",
+      "contents_url": "https://api.github.com/repos/four-meme-community/openfour-docs/contents/docs%2Fintegration-guide.md?ref=0527d529d59c6a3fbc9927ce391ecc97c66e1b01",
+      "patch": "@@ -544,52 +544,67 @@ function buyByBudget(address token, uint256 maxQuotePayAmount, uint256 minAmount\n function sell(address token, uint256 amount, uint256 minQuoteRecvAmount, uint256 options, bytes calldata proof) external;\n ```\n \n-### 7.1 Buy\n+The internal market supports four explicit settlement paths:\n \n-Native quote path:\n+1. Buy with the token's ERC20 `quoteAsset`.\n+2. Buy with BNB, converting through Core when necessary.\n+3. Sell and receive the token's ERC20 `quoteAsset`.\n+4. Sell and receive BNB, converting through Core when necessary.\n \n-```typescript\n-const est = await tools.estimateBuy.staticCall(token, user, amount, 0, \"0x\");\n-const maxPay = est.userPays * 101n / 100n;\n-\n-await core.buy(token, amount, maxPay, 0, \"0x\", { value: maxPay });\n-```\n-\n-ERC20 quote path:\n+### 7.1 Buy with the Quote Asset\n \n ```typescript\n+const est = await tools.estimateBuy.staticCall(token, user, amount, 0n, \"0x\");\n+if (est.tokenAmount === 0n) throw new Error(\"buy not executable\");\n+\n+const maxPay = est.userPays * 101n / 100n;\n await quote.approve(coreAddress, maxPay);\n-await core.buy(token, amount, maxPay, 0, \"0x\");\n+await core.buy(token, amount, maxPay, 0n, \"0x\");\n ```\n \n-When `quoteAsset == wrappedNative`, users may also approve WBNB first and call without passing `msg.value`.\n+Here `quote` is the ERC20 at `cfg.quoteAsset`. When `quoteAsset == wrappedNative`, this path pays with WBNB rather than BNB. The estimate, approval, and `maxPay` are all denominated in quote-asset wei.\n \n-### 7.2 Buy by Budget\n+### 7.2 Buy with a Quote-Asset Budget\n \n ```typescript\n-const est = await tools.estimateBuyByBudget.staticCall(token, user, budget, 0, \"0x\");\n-await core.buyByBudget(token, budget, est.tokenAmount, 0, \"0x\", { value: budget });\n+const est = await tools.estimateBuyByBudget.staticCall(token, user, quoteBudget, 0n, \"0x\");\n+if (est.tokenAmount === 0n) throw new Error(\"budget not executable\");\n+\n+const minTokenOut = est.tokenAmount * 99n / 100n;\n+await quote.approve(coreAddress, quoteBudget);\n+await core.buyByBudget(token, quoteBudget, minTokenOut, 0n, \"0x\");\n ```\n \n-For ERC20 quote, approve `budget` first and use `msg.value = 0`.\n+`quoteBudget` is denominated in `cfg.quoteAsset` wei. Do not send `msg.value` on this path.\n \n-### 7.3 Sell\n+### 7.3 Sell and Receive the Quote Asset\n \n ```typescript\n await tokenContract.approve(coreAddress, amount);\n \n-const est = await tools.estimateSell.staticCall(token, user, amount, 0, \"0x\");\n+const RECEIVE_WRAPPED_NATIVE = 1n << 0n;\n+const wrappedNative = await core.wrappedNative();\n+const cfg = await core.tokens(token);\n+const sellToQuoteOptions =\n+  cfg.quoteAsset.toLowerCase() === wrappedNative.toLowerCase()\n+    ? RECEIVE_WRAPPED_NATIVE\n+    : 0n;\n+\n+const est = await tools.estimateSell.staticCall(\n+  token,\n+  user,\n+  amount,\n+  sellToQuoteOptions,\n+  \"0x\",\n+);\n+if (est.tokenAmount === 0n) throw new Error(\"sell not executable\");\n+\n const minReceive = est.userReceives * 99n / 100n;\n \n-await core.sell(token, amount, minReceive, 0, \"0x\");\n+await core.sell(token, amount, minReceive, sellToQuoteOptions, \"0x\");\n ```\n \n-If `quoteAsset == wrappedNative`:\n-\n-- `options = 0`: receive native by default.\n-- `options & 1 == 1`: receive wrapped native ERC20.\n-\n-Sell does not charge anti-sniper.\n+For a WBNB quote, bit0 prevents Core from unwrapping the quote into BNB. For any other quote asset, `options = 0`. `est.userReceives` and `minReceive` are denominated in quote-asset wei. Sell does not charge anti-sniper.\n \n ### 7.4 Pre-Trade Checks\n \n@@ -756,6 +771,58 @@ await core.buyByBudget(\n \n The configured ZapRouter must have a usable native-to-quote route. Re-estimate shortly before submission and handle `CoreErrBadConfig`, `CoreErrBudgetNotExecutable`, `CoreErrSlippage`, and `CoreErrNativeRefundFailed`.\n \n+### 7.7 Selling a Meme Token for BNB Through Core's Built-in Zap\n+\n+When the token is still in the OpenFour `Trading` phase, Core can settle a sell directly in BNB:\n+\n+```text\n+user meme token\n+  -> Vault\n+  -> quote proceeds after fees\n+  -> Core.zapRouter().swapTokenToNative(quoteAsset -> BNB), when quoteAsset is not WBNB\n+  -> BNB to user\n+```\n+\n+The user approves the meme token to `OpenFourCore`, not to `ZapRouter`. When the quote asset is WBNB, Core unwraps it directly and no multi-asset zap route is needed.\n+\n+```typescript\n+const ZAP_NATIVE = 1n << 1n;\n+const zapRouter = await core.zapRouter();\n+const wrappedNative = await core.wrappedNative();\n+const cfg = await core.tokens(tokenAddress);\n+const quoteIsWrappedNative =\n+  cfg.quoteAsset.toLowerCase() === wrappedNative.toLowerCase();\n+\n+if (!quoteIsWrappedNative && zapRouter === ZeroAddress) {\n+  throw new Error(\"Core ZapRouter is not configured\");\n+}\n+\n+// WBNB quote: options=0 unwraps WBNB directly into BNB.\n+// Other quotes: bit1 converts quote proceeds into BNB through ZapRouter.\n+const sellToNativeOptions = quoteIsWrappedNative ? 0n : ZAP_NATIVE;\n+const est = await tools.estimateSell.staticCall(\n+  tokenAddress,\n+  userAddress,\n+  tokenAmount,\n+  sellToNativeOptions,\n+  \"0x\",\n+);\n+if (est.tokenAmount === 0n) throw new Error(\"sell not executable\");\n+\n+const minNativeReceive = est.userReceives * 99n / 100n;\n+\n+await tokenContract.approve(coreAddress, tokenAmount);\n+await core.sell(\n+  tokenAddress,\n+  tokenAmount,\n+  minNativeReceive, // BNB wei\n+  sellToNativeOptions,\n+  \"0x\",\n+);\n+```\n+\n+For a non-WBNB quote, the configured ZapRouter must have a usable quote-to-native route. Re-estimate shortly before submission because `est.userReceives` includes the current zap quote. To receive WBNB instead, set bit0 as well; `minNativeReceive` remains denominated in WBNB wei.\n+\n ## 8. Migration and External Market Routing\n \n After each buy, Core calls `MigrateModule.evaluate()`. If it returns `canMigrate = true`, Core automatically migrates. Anyone can also call:"
+    },
+    {
+      "sha": "8195c465c41f2a528af388610e554a130447072d",
+      "filename": "docs/zh-Hant/integration-guide.md",
+      "status": "modified",
+      "additions": 92,
+      "deletions": 25,
+      "changes": 117,
+      "blob_url": "https://github.com/four-meme-community/openfour-docs/blob/0527d529d59c6a3fbc9927ce391ecc97c66e1b01/docs%2Fzh-Hant%2Fintegration-guide.md",
+      "raw_url": "https://github.com/four-meme-community/openfour-docs/raw/0527d529d59c6a3fbc9927ce391ecc97c66e1b01/docs%2Fzh-Hant%2Fintegration-guide.md",
+      "contents_url": "https://api.github.com/repos/four-meme-community/openfour-docs/contents/docs%2Fzh-Hant%2Fintegration-guide.md?ref=0527d529d59c6a3fbc9927ce391ecc97c66e1b01",
+      "patch": "@@ -544,52 +544,67 @@ function buyByBudget(address token, uint256 maxQuotePayAmount, uint256 minAmount\n function sell(address token, uint256 amount, uint256 minQuoteRecvAmount, uint256 options, bytes calldata proof) external;\n ```\n \n-### 7.1 買入\n+內盤支援以下四種明確的結算路徑：\n \n-Native quote 路徑：\n+1. 使用 Token 的 ERC20 `quoteAsset` 買入。\n+2. 使用 BNB 買入，必要時由 Core 執行轉換。\n+3. 賣出並接收 Token 的 ERC20 `quoteAsset`。\n+4. 賣出並接收 BNB，必要時由 Core 執行轉換。\n \n-```typescript\n-const est = await tools.estimateBuy.staticCall(token, user, amount, 0, \"0x\");\n-const maxPay = est.userPays * 101n / 100n;\n-\n-await core.buy(token, amount, maxPay, 0, \"0x\", { value: maxPay });\n-```\n-\n-ERC20 quote 路徑：\n+### 7.1 使用 Quote Asset 買入\n \n ```typescript\n+const est = await tools.estimateBuy.staticCall(token, user, amount, 0n, \"0x\");\n+if (est.tokenAmount === 0n) throw new Error(\"buy not executable\");\n+\n+const maxPay = est.userPays * 101n / 100n;\n await quote.approve(coreAddress, maxPay);\n-await core.buy(token, amount, maxPay, 0, \"0x\");\n+await core.buy(token, amount, maxPay, 0n, \"0x\");\n ```\n \n-當 `quoteAsset == wrappedNative` 時，也可以先 approve WBNB，再不傳 `msg.value`。\n+此處 `quote` 是位於 `cfg.quoteAsset` 的 ERC20。當 `quoteAsset == wrappedNative` 時，此路徑使用 WBNB 而非 BNB 支付。預估值、approve 金額和 `maxPay` 均以 quote-asset wei 計價。\n \n-### 7.2 按預算買入\n+### 7.2 使用 Quote-Asset 預算買入\n \n ```typescript\n-const est = await tools.estimateBuyByBudget.staticCall(token, user, budget, 0, \"0x\");\n-await core.buyByBudget(token, budget, est.tokenAmount, 0, \"0x\", { value: budget });\n+const est = await tools.estimateBuyByBudget.staticCall(token, user, quoteBudget, 0n, \"0x\");\n+if (est.tokenAmount === 0n) throw new Error(\"budget not executable\");\n+\n+const minTokenOut = est.tokenAmount * 99n / 100n;\n+await quote.approve(coreAddress, quoteBudget);\n+await core.buyByBudget(token, quoteBudget, minTokenOut, 0n, \"0x\");\n ```\n \n-ERC20 quote 時先 approve `budget`，再用 `msg.value = 0`。\n+`quoteBudget` 以 `cfg.quoteAsset` wei 計價。此路徑不要傳送 `msg.value`。\n \n-### 7.3 賣出\n+### 7.3 賣出並接收 Quote Asset\n \n ```typescript\n await tokenContract.approve(coreAddress, amount);\n \n-const est = await tools.estimateSell.staticCall(token, user, amount, 0, \"0x\");\n+const RECEIVE_WRAPPED_NATIVE = 1n << 0n;\n+const wrappedNative = await core.wrappedNative();\n+const cfg = await core.tokens(token);\n+const sellToQuoteOptions =\n+  cfg.quoteAsset.toLowerCase() === wrappedNative.toLowerCase()\n+    ? RECEIVE_WRAPPED_NATIVE\n+    : 0n;\n+\n+const est = await tools.estimateSell.staticCall(\n+  token,\n+  user,\n+  amount,\n+  sellToQuoteOptions,\n+  \"0x\",\n+);\n+if (est.tokenAmount === 0n) throw new Error(\"sell not executable\");\n+\n const minReceive = est.userReceives * 99n / 100n;\n \n-await core.sell(token, amount, minReceive, 0, \"0x\");\n+await core.sell(token, amount, minReceive, sellToQuoteOptions, \"0x\");\n ```\n \n-如果 `quoteAsset == wrappedNative`：\n-\n-- `options = 0`：預設收到 native。\n-- `options & 1 == 1`：收到 wrapped native ERC20。\n-\n-賣出不收 anti-sniper。\n+當 quote 是 WBNB 時，bit0 可防止 Core 將 quote 解包為 BNB。其它 quote asset 使用 `options = 0`。`est.userReceives` 和 `minReceive` 均以 quote-asset wei 計價。賣出不收 anti-sniper。\n \n ### 7.4 交易前檢查\n \n@@ -756,6 +771,58 @@ await core.buyByBudget(\n \n 已配置 ZapRouter 必須存在可用的 native-to-quote 路由。提交前應重新預估，並處理 `CoreErrBadConfig`、`CoreErrBudgetNotExecutable`、`CoreErrSlippage` 和 `CoreErrNativeRefundFailed`。\n \n+### 7.7 透過 Core 內建 Zap 賣出 Meme Token 並接收 BNB\n+\n+Token 仍處於 OpenFour `Trading` phase 時，Core 可以直接將 sell 以 BNB 結算：\n+\n+```text\n+使用者 meme token\n+  -> Vault\n+  -> 扣除費用後的 quote 收益\n+  -> Core.zapRouter().swapTokenToNative(quoteAsset -> BNB)，quoteAsset 不是 WBNB 時\n+  -> BNB 發送給使用者\n+```\n+\n+使用者將 meme token approve 給 `OpenFourCore`，而不是 `ZapRouter`。Quote asset 是 WBNB 時，Core 會直接解包，不需要多資產 zap 路由。\n+\n+```typescript\n+const ZAP_NATIVE = 1n << 1n;\n+const zapRouter = await core.zapRouter();\n+const wrappedNative = await core.wrappedNative();\n+const cfg = await core.tokens(tokenAddress);\n+const quoteIsWrappedNative =\n+  cfg.quoteAsset.toLowerCase() === wrappedNative.toLowerCase();\n+\n+if (!quoteIsWrappedNative && zapRouter === ZeroAddress) {\n+  throw new Error(\"Core ZapRouter is not configured\");\n+}\n+\n+// WBNB quote：options=0 直接將 WBNB 解包成 BNB。\n+// 其它 quote：bit1 透過 ZapRouter 將 quote 收益轉換為 BNB。\n+const sellToNativeOptions = quoteIsWrappedNative ? 0n : ZAP_NATIVE;\n+const est = await tools.estimateSell.staticCall(\n+  tokenAddress,\n+  userAddress,\n+  tokenAmount,\n+  sellToNativeOptions,\n+  \"0x\",\n+);\n+if (est.tokenAmount === 0n) throw new Error(\"sell not executable\");\n+\n+const minNativeReceive = est.userReceives * 99n / 100n;\n+\n+await tokenContract.approve(coreAddress, tokenAmount);\n+await core.sell(\n+  tokenAddress,\n+  tokenAmount,\n+  minNativeReceive, // BNB wei\n+  sellToNativeOptions,\n+  \"0x\",\n+);\n+```\n+\n+Quote 不是 WBNB 時，已配置的 ZapRouter 必須存在可用的 quote-to-native 路由。由於 `est.userReceives` 包含當前 zap 報價，提交前應重新預估。若要接收 WBNB，需同時設定 bit0；`minNativeReceive` 仍以 WBNB wei 計價。\n+\n ## 8. 遷移與外盤路由\n \n 每次 buy 後，Core 會呼叫 `MigrateModule.evaluate()`。如果返回 `canMigrate = true`，Core 會自動遷移。任何人也可以呼叫："
+    }
+  ]
+}

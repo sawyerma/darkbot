@@ -1,0 +1,8 @@
+{
+  "endpoint": "https://bsc-dataseed1.binance.org",
+  "started_utc": "2026-09-28T08:01:01.956519+00:00",
+  "http_status": 200,
+  "elapsed_ns": 687005917,
+  "response_sha256": "c140910aff77f6e02dc50b23b490085f527a788eefd77f7415a174355d72e6b2",
+  "timing_use": "RPC diagnostic only; not BUY latency"
+}

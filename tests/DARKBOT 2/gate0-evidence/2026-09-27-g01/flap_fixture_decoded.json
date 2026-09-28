@@ -1,0 +1,37 @@
+{
+  "launch": {
+    "ts": 1790549254,
+    "creator": "0x9d6716dea8614448bd342f5c5c84a8def9079dc4",
+    "nonce": 3293409,
+    "token": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+    "name": "Koyuki",
+    "symbol": "こゆき",
+    "meta": "https://ipfs.io/ipfs/bafkreiaudspkidhgbgzrewa4jmqcwb2qkobepouf243pglztl6sabnwthi",
+    "txHash": "0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c",
+    "blockNumber": 124415357,
+    "transactionIndex": 0,
+    "logIndex": 15
+  },
+  "buy": {
+    "ts": 1790549255,
+    "token": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+    "buyer": "0xb6864c017e9d9d89012d4f90ee382bf1461e4c90",
+    "amount": 28438305464314215025968609,
+    "eth": 120878323272,
+    "fee": 1208783232,
+    "postPrice": 42820885549661,
+    "txHash": "0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b",
+    "blockNumber": 124415360,
+    "transactionIndex": 17,
+    "logIndex": 64,
+    "receiptStatus": 1
+  },
+  "token_transfers_in_buy_receipt": [
+    {
+      "from": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+      "to": "0xb6864c017e9d9d89012d4f90ee382bf1461e4c90",
+      "amount": 28438305464314215025968609,
+      "logIndex": 53
+    }
+  ]
+}

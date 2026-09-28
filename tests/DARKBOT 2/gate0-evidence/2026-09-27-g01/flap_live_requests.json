@@ -1,0 +1,30 @@
+[
+  {
+    "method": "web3_sha3",
+    "params": [
+      "0x76657273696f6e2829"
+    ]
+  },
+  {
+    "method": "eth_getCode",
+    "params": [
+      "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+      "latest"
+    ]
+  },
+  {
+    "method": "eth_getStorageAt",
+    "params": [
+      "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+      "latest"
+    ]
+  },
+  {
+    "method": "eth_getCode",
+    "params": [
+      "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20",
+      "latest"
+    ]
+  }
+]

@@ -1,0 +1,69 @@
+{
+  "status": "G0.2_FLAP_PARTIAL",
+  "tests": [
+    {
+      "test": 1,
+      "status": "FAIL",
+      "reason": "Full router command semantics/internal Portal call not traced; envelope and transfer chain verified"
+    },
+    {
+      "test": 2,
+      "status": "FAIL",
+      "reason": "Direct ABI, selector, output and visible flows PASS; complete fee/tax/conversion semantics incomplete"
+    },
+    {
+      "test": 3,
+      "status": "PASS",
+      "reason": "Comparison records verified differences and explicit unknowns; no unsupported winner"
+    },
+    {
+      "test": 4,
+      "status": "FAIL",
+      "reason": "Historical state numerically reconstructed; pending-only r/h/k/config/extension provenance missing"
+    },
+    {
+      "test": 5,
+      "status": "FAIL",
+      "reason": "Router V2 arithmetic consistent; prestate not independent; direct conversion unresolved"
+    },
+    {
+      "test": 6,
+      "status": "FAIL",
+      "reason": "Visible charges reconciled; fee rounding/exemption semantics not completely proven"
+    },
+    {
+      "test": 7,
+      "status": "FAIL",
+      "reason": "Seven conditional outputs match exactly; full independent pending-only first-BUY reproduction missing"
+    },
+    {
+      "test": 8,
+      "status": "PASS",
+      "reason": "minOutputAmount classified UNKNOWN with exact missing dependencies"
+    },
+    {
+      "test": 9,
+      "status": "PASS",
+      "reason": "Field matrix records sources, signature binding, residuals and invalidation"
+    },
+    {
+      "test": 10,
+      "status": "PASS",
+      "reason": "G0.2_FLAP_PARTIAL; no G0.3 authorization"
+    }
+  ],
+  "requirements": {
+    "create2": true,
+    "vetted_selector": true,
+    "router_command_semantics": false,
+    "pending_initial_state": false,
+    "independent_conversion_prestate": false,
+    "fee_rounding_source": false,
+    "full_first_buy_reproduction": false,
+    "hotpath_dependencies_fully_classified": false
+  },
+  "minOutputAmount": "UNKNOWN",
+  "conditional_first_buy_difference": 0,
+  "full_independent_first_buy_difference": null,
+  "next_test": "Archive-backed transaction-index-correct execution witness: replay launch 124415357:0 through first BUY 124415358:15 with call tree, read prestate/code and intervening state changes; verify exact Portal selector, quote mode and fee rounding."
+}

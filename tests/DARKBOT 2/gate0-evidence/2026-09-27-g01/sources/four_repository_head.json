@@ -1,0 +1,112 @@
+{
+  "sha": "5f7f589b042e4e3b41c2c214d0fe3a81b36725a9",
+  "node_id": "C_kwDOT36ePdoAKDVmN2Y1ODliMDQyZTRlM2I0MWMyYzIxNGQwZmUzYTgxYjM2NzI1YTk",
+  "commit": {
+    "author": {
+      "name": "four-meme-community",
+      "email": "lol@four.meme",
+      "date": "2026-08-18T04:11:04Z"
+    },
+    "committer": {
+      "name": "four-meme-community",
+      "email": "lol@four.meme",
+      "date": "2026-08-18T04:11:04Z"
+    },
+    "message": "Add charity icon assets",
+    "tree": {
+      "sha": "7d899efa115e4764ea2fdab8fccc8b417f0fb943",
+      "url": "https://api.github.com/repos/four-meme-community/fourmeme-docs/git/trees/7d899efa115e4764ea2fdab8fccc8b417f0fb943"
+    },
+    "url": "https://api.github.com/repos/four-meme-community/fourmeme-docs/git/commits/5f7f589b042e4e3b41c2c214d0fe3a81b36725a9",
+    "comment_count": 0,
+    "verification": {
+      "verified": false,
+      "reason": "unsigned",
+      "signature": null,
+      "payload": null,
+      "verified_at": null
+    }
+  },
+  "url": "https://api.github.com/repos/four-meme-community/fourmeme-docs/commits/5f7f589b042e4e3b41c2c214d0fe3a81b36725a9",
+  "html_url": "https://github.com/four-meme-community/fourmeme-docs/commit/5f7f589b042e4e3b41c2c214d0fe3a81b36725a9",
+  "comments_url": "https://api.github.com/repos/four-meme-community/fourmeme-docs/commits/5f7f589b042e4e3b41c2c214d0fe3a81b36725a9/comments",
+  "author": {
+    "login": "four-meme-community",
+    "id": 239776964,
+    "node_id": "U_kgDODkq0xA",
+    "avatar_url": "https://avatars.githubusercontent.com/u/239776964?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/four-meme-community",
+    "html_url": "https://github.com/four-meme-community",
+    "followers_url": "https://api.github.com/users/four-meme-community/followers",
+    "following_url": "https://api.github.com/users/four-meme-community/following{/other_user}",
+    "gists_url": "https://api.github.com/users/four-meme-community/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/four-meme-community/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/four-meme-community/subscriptions",
+    "organizations_url": "https://api.github.com/users/four-meme-community/orgs",
+    "repos_url": "https://api.github.com/users/four-meme-community/repos",
+    "events_url": "https://api.github.com/users/four-meme-community/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/four-meme-community/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "four-meme-community",
+    "id": 239776964,
+    "node_id": "U_kgDODkq0xA",
+    "avatar_url": "https://avatars.githubusercontent.com/u/239776964?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/four-meme-community",
+    "html_url": "https://github.com/four-meme-community",
+    "followers_url": "https://api.github.com/users/four-meme-community/followers",
+    "following_url": "https://api.github.com/users/four-meme-community/following{/other_user}",
+    "gists_url": "https://api.github.com/users/four-meme-community/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/four-meme-community/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/four-meme-community/subscriptions",
+    "organizations_url": "https://api.github.com/users/four-meme-community/orgs",
+    "repos_url": "https://api.github.com/users/four-meme-community/repos",
+    "events_url": "https://api.github.com/users/four-meme-community/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/four-meme-community/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "6748033c63e3f68b9ef6fba709783181c9a95792",
+      "url": "https://api.github.com/repos/four-meme-community/fourmeme-docs/commits/6748033c63e3f68b9ef6fba709783181c9a95792",
+      "html_url": "https://github.com/four-meme-community/fourmeme-docs/commit/6748033c63e3f68b9ef6fba709783181c9a95792"
+    }
+  ],
+  "stats": {
+    "total": 9,
+    "additions": 9,
+    "deletions": 0
+  },
+  "files": [
+    {
+      "sha": "051edb61c40ff591fe0514162a0044d03a58b0f2",
+      "filename": "assets/charity-action.png",
+      "status": "added",
+      "additions": 0,
+      "deletions": 0,
+      "changes": 0,
+      "blob_url": "https://github.com/four-meme-community/fourmeme-docs/blob/5f7f589b042e4e3b41c2c214d0fe3a81b36725a9/assets%2Fcharity-action.png",
+      "raw_url": "https://github.com/four-meme-community/fourmeme-docs/raw/5f7f589b042e4e3b41c2c214d0fe3a81b36725a9/assets%2Fcharity-action.png",
+      "contents_url": "https://api.github.com/repos/four-meme-community/fourmeme-docs/contents/assets%2Fcharity-action.png?ref=5f7f589b042e4e3b41c2c214d0fe3a81b36725a9"
+    },
+    {
+      "sha": "0b3c2772709d6560ffd9fca9b1a37f446b2779b8",
+      "filename": "assets/charity-badge.svg",
+      "status": "added",
+      "additions": 9,
+      "deletions": 0,
+      "changes": 9,
+      "blob_url": "https://github.com/four-meme-community/fourmeme-docs/blob/5f7f589b042e4e3b41c2c214d0fe3a81b36725a9/assets%2Fcharity-badge.svg",
+      "raw_url": "https://github.com/four-meme-community/fourmeme-docs/raw/5f7f589b042e4e3b41c2c214d0fe3a81b36725a9/assets%2Fcharity-badge.svg",
+      "contents_url": "https://api.github.com/repos/four-meme-community/fourmeme-docs/contents/assets%2Fcharity-badge.svg?ref=5f7f589b042e4e3b41c2c214d0fe3a81b36725a9",
+      "patch": "@@ -0,0 +1,9 @@\n+<svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n+<path d=\"M12.0362 2.47372C10.8256 1.2695 8.97148 1.07198 7.55699 1.92577L4.92554 4.76748C4.81085 4.88854 4.65794 4.95226 4.49865 4.95226C4.35847 4.95226 4.2183 4.90128 4.10361 4.79934C3.86786 4.58271 3.85512 4.2259 4.06538 3.98378L4.07175 3.97741L6.12977 1.74736C4.82997 1.12932 3.24345 1.3141 2.12206 2.3208C0.624742 3.67157 0.490939 5.98445 1.83534 7.49451L6.79241 12.4579C6.91347 12.579 7.10461 12.579 7.22567 12.4579L12.1827 7.49451C13.4698 6.04816 13.4061 3.84361 12.0362 2.47372Z\" fill=\"url(#paint0_linear_7985_76555)\"/>\n+<defs>\n+<linearGradient id=\"paint0_linear_7985_76555\" x1=\"7.0073\" y1=\"1.3916\" x2=\"7.0073\" y2=\"12.5487\" gradientUnits=\"userSpaceOnUse\">\n+<stop stop-color=\"#FF988F\"/>\n+<stop offset=\"1\" stop-color=\"#FF362B\"/>\n+</linearGradient>\n+</defs>\n+</svg>"
+    }
+  ]
+}
