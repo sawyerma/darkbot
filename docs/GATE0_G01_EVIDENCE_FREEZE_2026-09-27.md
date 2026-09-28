@@ -80,7 +80,7 @@ OpenFour still lacks a canonical real create/BUY fixture in the current G0.1 evi
   - name `Koyuki`
   - symbol `こゆき`
   - `tokenVersion = 6 = TOKEN_TAXED_V3`
-  - `quoteToken = WBNB 0xba2ae424d960c26247dd6c32edc70b295c744c43`
+  - `quoteToken = DOGE (Dogecoin), 8 decimals; previous WBNB label was wrong`
   - `quoteAmt = 80574062404`
   - transaction native value `0` (ERC-20 quote)
   - `buyTaxRate = 100` bps
@@ -88,57 +88,39 @@ OpenFour still lacks a canonical real create/BUY fixture in the current G0.1 evi
   - `mktBps + deflationBps + dividendBps + lpBps = 10000`
   - `dividendToken = WBNB`
   - `commissionReceiver = address(0)`;
-- first observed external BUY for that token:
+- full ordering rescan covered four blocks / 211 receipts;
+- earliest observed external BUY:
   - block `124415358`
-  - transaction index `16`
-  - tx `0x73716f5fffab9493483d8eae7c1b170bc4d33feaa8346bb07d5c6a0d91d2595b`
-  - receipt status `1`;
-- second external BUY:
-  - block `124415359`
-  - transaction index `17`
-  - tx `0x6f723464dbb64ba0d5e6f468b3a411161e7861baa6214dc7d38938b5a46514b6`
-  - receipt status `1`;
-- later BUY `0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b` also succeeded and emitted both `TokenBought` and a target-token `Transfer` to the buyer.
+  - transaction index `15`
+  - tx abbreviated in the local correction evidence as `0x189585be…926800`
+  - execution path: on-chain router;
+- the previously selected reference BUY was actually the **fifth external purchase**;
+- later successful BUY fixtures remain useful for semantic/transfer evidence, but their previous "first"/"second" ordering labels are withdrawn.
 
 This historical Flap fixture proves factual launch/BUY decoding and ordering for one real v5.24.0-era `newTokenV6 / TOKEN_TAXED_V3` launch. It is not DarkBot's BUY and proves no local latency.
 
-### Flap CREATE2 precomputability mismatch
+### Flap CREATE2 precomputability proof
 
-The current official `flap-sh/flap-skills` salt-finding reference was pinned at repository commit `dbcdda580317ae0f01b8883093a536c6725086ce`, file blob `7050e1ebb9f6c40ecf239770246e1a854b5e6304`.
+The earlier CREATE2 mismatch was caused by a bug in the local verifier: the Portal/deployer address was incorrectly left-padded to 32 bytes.
 
-That reference specifies:
+EIP-1014 uses a **20-byte address** in the CREATE2 preimage:
 
-- deployer = Portal `0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0`;
-- Tax Token V3 implementation = `0x024f18294970B5c76c0691b87f138A0317156422`;
-- standard EIP-1167 minimal-proxy creation bytecode;
-- CREATE2 address prediction from `Portal + salt + init-code hash`.
+`0xff ++ address(20 bytes) ++ salt(32 bytes) ++ keccak256(init_code)`
 
-Applying that published formula to the decoded historical launch salt
-`0x0c5ae0f6ffd0a19acfb501ad8eb95542ce1ee50305987db5b6d388537a128e2c`
-produced:
+With the correct 20-byte Portal address, decoded V6 salt, verified EIP-1167 clone init code and embedded Tax Token V3 implementation, the predicted address exactly equals:
 
-- predicted: `0xaf5b39fd975d2f1ea9d89ecd8d09676155cb818a`
-- actual receipt token: `0xabe1fe16cf6bc48c9524713054efe6e954b17777`
-- match: **false**
+`0xabe1fe16cf6bc48c9524713054efe6e954b17777`
 
-Therefore token-address precomputability for this exact v5.24.0 historical V6 mode is **UNKNOWN/PARTIAL**. The published formula is not accepted as sufficient evidence for this fixture.
+Cross-checks reported by the local verifier:
 
-The next read-only runtime test resolved one candidate:
+- seven EIP-1014 reference vectors: PASS;
+- independent RPC hash cross-check: PASS;
+- actual token runtime is EIP-1167;
+- embedded implementation exactly equals `0x024f18294970B5c76c0691b87f138A0317156422`.
 
-- actual token runtime is an EIP-1167 clone;
-- embedded implementation is exactly `0x024f18294970B5c76c0691b87f138A0317156422`;
-- therefore a different token implementation is **not** the cause.
+Therefore, for this exact v5.24.0 V6/TOKEN_TAXED_V3 deployment mode, **token-address derivation from the pending launch signal is PROVEN**.
 
-The current official Flap reference and the OpenZeppelin `Clones.sol` vendored by the official Flap example repository also use the same standard 55-byte EIP-1167 creation-code sequence. This makes a simple published-vs-OpenZeppelin init-code-format discrepancy unlikely, although the historical production Portal's actual CREATE2 preimage must still be proven.
-
-Remaining hypotheses, in order of diagnostic value:
-
-1. effective CREATE2 deployer differs from the documented Portal address;
-2. salt is transformed/derived internally before CREATE2;
-3. historical Portal implementation/deployment path used different CREATE2 semantics or another helper/factory;
-4. another version-specific CREATE2 preimage detail is absent from the public reference.
-
-Next evidence target: obtain a trace of launch tx `0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c` that exposes the CREATE2 frame/opcode, effective creator/deployer, salt and init code. If public trace is unavailable, use an archive/trace-capable BSC source and freeze the Portal EIP-1967 implementation slot at block `124415357` before analyzing the historical implementation bytecode/source.
+This removes CREATE2/address derivation as the current Flap blocker.
 
 The previously reported SHA-256 digests of deployed runtime bytecode may be retained only as supplemental byte fingerprints. They are **not** labeled EVM codehashes.
 
@@ -184,10 +166,10 @@ Important semantics:
 Remaining before Flap can be frozen as a G0.2 candidate scope:
 
 - pin the exact v5.24.0 ABI/interface semantics for the selected `newTokenV6 / TOKEN_TAXED_V3` mode;
-- freeze the exact external BUY selector/mode from the real fixture;
-- resolve the CREATE2/clone mismatch before claiming pre-execution token-address derivation;
-- reconstruct the exact launch-internal `quoteAmt` effect and post-launch initial curve state;
-- identify extension/tax/quote-mode conditions that change the first external BUY;
+- freeze the exact external BUY path only after comparing the earliest observed on-chain router BUY with direct Portal `swapExactInput`;
+- retain the proven pre-execution CREATE2 token-address derivation and fail closed on deployment/implementation/version mismatch;
+- reconstruct the exact launch-internal `quoteAmt` effect in DOGE base units and post-launch initial curve state;
+- identify extension/tax/quote-mode conditions and native-BNB -> DOGE conversion semantics that change the first external BUY;
 - prove whether `minOutputAmount` can be derived locally from pending launch data without historical/synchronous RPC.
 
 ## 5. Four.Meme Classic — current documented surface
@@ -280,9 +262,9 @@ The following are still required before `G0.1_COMPLETE`:
 2. **Flap v5.24.0 exact mode freeze**
    - pin exact ABI/interface evidence for the real `newTokenV6 / TOKEN_TAXED_V3` fixture;
    - freeze the external BUY method/selector used by the selected fixture;
-   - resolve the documented CREATE2 prediction mismatch; runtime clone and embedded Tax Token V3 implementation are already confirmed, so focus on effective deployer/salt/historical deployment path;
-   - reconstruct launch-internal purchase effects and initial tradable state;
-   - prove or reject pre-execution token-address and `minOutputAmount` derivation for that exact mode.
+   - retain the exact CREATE2 address proof from pending V6 calldata and frozen deployment inputs;
+   - reconstruct launch-internal DOGE purchase effects, BNB->DOGE conversion semantics and initial tradable state;
+   - token-address derivation is proven; prove or reject pre-execution `minOutputAmount`/BUY-output derivation for the exact selected on-chain BUY path.
 
 3. **Vetted Keccak fingerprints**
    - generate runtime-code Keccak-256 fingerprints and any remaining selectors/topics with a vetted implementation;
@@ -300,7 +282,7 @@ No DarkBot BUY transaction is required for G0.1.
 
 Current state:
 
-- Flap live deployment + fully decoded real `newTokenV6 / TOKEN_TAXED_V3` launch + real external BUY ordering fixture: **STRONG PARTIAL; CREATE2/pre-state mismatch unresolved**
+- Flap live deployment + fully decoded real `newTokenV6 / TOKEN_TAXED_V3` launch + exact CREATE2 address derivation + corrected external BUY ordering: **STRONG PARTIAL; initial-state/quote/BUY-path economics unresolved**
 - Four Classic live deployment + real launch fixture + Helper3 routing evidence: **STRONG PARTIAL**
 - OpenFour live Registry/Core/Tools/proxy freeze + pinned ABI: **STRONG PARTIAL; canonical launch fixture still missing**
 - exact `PRIMARY_GATE0_SCOPE`: **NOT YET SELECTED** — selection belongs to G0.2 after G0.1 candidate evidence is complete
@@ -312,7 +294,7 @@ Therefore:
 Next work:
 
 1. obtain/decode canonical OpenFour launch fixture;
-2. resolve Flap v5.24.0 V6 CREATE2/clone mismatch, initial state and external BUY mode freeze;
+2. finish Flap v5.24.0 V6 DOGE initial state, BNB->DOGE conversion, fee/output and router-vs-direct BUY-path freeze;
 3. generate remaining Keccak fingerprints with a vetted primitive;
 4. close G0.1;
 5. begin G0.2 preparation-matrix comparison and select `PRIMARY_GATE0_SCOPE`.
