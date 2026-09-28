@@ -422,3 +422,13 @@ Gate 0 comes before:
 - optional kernel/NIC/multi-region optimization.
 
 Only a venue/chain that passes Gate 0 proceeds.
+
+## Mandatory measurement/evidence ledger
+
+Gate 0 uses `docs/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md` as the canonical chronological measurement log.
+
+Before any dependent Gate-0 stage is declared PASS or started, every new empirical result that influences the decision MUST be frozen there (or linked there to immutable/raw evidence) with scope, sample count, includes/excludes, evidence path, interpretation and explicit non-claims.
+
+No latency or correctness result may exist only in chat output, an agent summary or an unreferenced local terminal session. Historical results are appended or explicitly superseded; they are never silently overwritten.
+
+This rule does not change the stage order. It makes each stage auditable and prevents later phases from reusing measurements outside their proven scope.
