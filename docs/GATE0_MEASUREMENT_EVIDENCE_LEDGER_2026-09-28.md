@@ -94,7 +94,7 @@ Wichtig:
 |---|---|---|
 | G0.1 | Verträge, Versionen, Selektoren und Acceptance-Basis einfrieren | weitgehend vorhanden / Evidence eingefroren |
 | **G0.2** | Precomputability, exakte Flap-Economics und historischer First-BUY-Witness | **PASS für den eingefrorenen historischen Modus** |
-| G0.3 | Minimaler korrekter Direct-Portal Launch→BUY-Harness | **G0.2-Voraussetzung erfüllt; STOP vor Implementierung / Review** |
+| **G0.3** | Minimaler korrekter Direct-Portal Launch→BUY-Harness | **IN PROGRESS — historische TX-Konstruktion PASS; unmittelbarer Launch→Direct-BUY auf echtem Post-Launch-State revertiert; Aktivierungs-State noch offen** |
 | G0.4 | Pending/actionable Coverage und frühestes brauchbares Signal | parallel möglich, kein Gate-PASS |
 | G0.5 | vollständige lokale BUY-Hotpath-Latenz bis echtem `T_send` | blockiert |
 | G0.6 | Ingress × Inclusion Dry-Qualifikation + Concurrency | blockiert |
@@ -725,3 +725,299 @@ Welche Gate-Entscheidung ändert sich dadurch?
 ```
 
 Damit bleibt die Phasenlogik später vollständig nachvollziehbar.
+
+<!-- G03_PROGRESS_START -->
+## 12. G0.3 Zwischenprotokoll — Direct Portal Launch→BUY
+
+Status: **IN PROGRESS / KEIN G0.3-PASS**
+
+Scope:
+
+\`\`\`text
+Flap Portal: 0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0
+Launch: newTokenV6 / TOKEN_TAXED_V3
+Token: 0xabe1fe16cf6bc48c9524713054efe6e954b17777
+Direct BUY selector: 0xef7ec2e7
+swapExactInput((address,address,uint256,uint256,bytes))
+\`\`\`
+
+### 12.1 Rust-Harness: historische Direct-BUY-Konstruktion
+
+**STEP 1 — PASS**
+
+\`\`\`text
+selector       = 0xef7ec2e7
+calldata_bytes = 228
+\`\`\`
+
+Die ABI-kodierte Direct-Portal-BUY-Calldata wurde lokal in Rust gebaut und bytegenau gegen den historischen Direct-BUY verglichen.
+
+**STEP 2 — PASS**
+
+\`\`\`text
+portal            = 0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0
+value_wei         = 150000000000000000
+historical_output = 28438305464314215025968609
+\`\`\`
+
+**STEP 3 — PASS**
+
+\`\`\`text
+launch_token         = 0xabe1fe16cf6bc48c9524713054efe6e954b17777
+recipient            = 0xb6864c017e9d9d89012d4f90ee382bf1461e4c90
+expected_acquisition = 28438305464314215025968609
+min_output           = 6000000000000000000000000
+semantic_difference  = 0
+\`\`\`
+
+Damit sind historischer Token, Recipient, Acquisition und das verwendete historische \`minOutput\` an die bereits unabhängig replayte G0.2-Acquisition gebunden.
+
+**STEP 4 — PASS**
+
+Der vollständige historische Legacy-TX-Envelope wurde einschließlich EIP-155-Signaturbindung rekonstruiert:
+
+\`\`\`text
+chainId      = 56
+type         = 0
+nonce        = 0x32e
+gas          = 0x16e360
+gasPrice     = 0x127a3980
+value        = 0x214e8348c4f0000
+v            = 0x93
+y_parity     = 0
+
+recovered_sender =
+0xb6864c017e9d9d89012d4f90ee382bf1461e4c90
+
+reconstructed_tx_hash =
+0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b
+\`\`\`
+
+Recovered Sender und TX-Hash stimmen exakt mit der historischen Transaktion überein.
+
+### 12.2 Archive-State für den Sequential-Test
+
+Ein historischer \`eth_call\` über den öffentlichen Binance-RPC scheiterte mit:
+
+\`\`\`text
+missing trie node
+\`\`\`
+
+Das ist eine Archive-/Pruning-Grenze und kein BUY-Ergebnis.
+
+Für den G0.3-Sequenztest wurde deshalb der bereits qualifizierte Archive-Zugang verwendet.
+
+Erster Direct-BUY-Abhängigkeits-Snapshot:
+
+\`\`\`text
+gate0/evidence/g03_direct_parent_state.json
+12 Accounts
+64 Storage-Slots
+SHA256 80e391d70cb33f2d658ab7ccd5686fde0f79cdab6aeb840c030213af07b655c6
+\`\`\`
+
+Vollständiger Parent-State für alle Accounts aus dem historischen Direct-BUY-Prestate:
+
+\`\`\`text
+gate0/evidence/g03_direct_parent_state_full.json
+26 Accounts
+64 Storage-Slots
+SHA256 3a090b8398c581ee0b3a06c1a1a7cfe288dcdd231a106b6a60ab22511ff532b7
+\`\`\`
+
+Merge mit dem vorhandenen Launch-Parent-State:
+
+\`\`\`text
+launch_accounts   = 28
+direct_accounts   = 26
+overlap_accounts  = 17
+added_accounts    = 9
+added_slots       = 22
+merged_accounts   = 37
+conflicts         = 0
+\`\`\`
+
+### 12.3 Launch-Replay auf kombiniertem Parent-State
+
+\`\`\`text
+launch_exception = null
+launch_frames    = 116
+launch_match     = true
+\`\`\`
+
+Der historische Launch bleibt auf dem erweiterten Parent-State vollständig reproduzierbar.
+
+### 12.4 Echter Sequential-Test: Parent → Launch → unmittelbarer Direct-BUY
+
+Ausgeführt wurde:
+
+\`\`\`text
+Parent-State Block 124415356
+→ historischer Launch Block 124415357
+→ lokal berechneter Post-Launch-State
+→ Direct Portal BUY
+\`\`\`
+
+Ergebnis auf dem tatsächlichen unmittelbar berechneten Post-Launch-State:
+
+\`\`\`text
+direct_exception             = revert
+direct_frames                = 15
+direct_missing_accounts      = []
+direct_missing_storage_count = 0
+direct_return_value          = 0x
+\`\`\`
+
+Damit ist ein Direct-BUY **unmittelbar nach dem Launch aktuell nicht als gültig bewiesen**.
+
+Der Revert wurde bis in den Native→DOGE-Converter-/Pool-Pfad lokalisiert:
+
+\`\`\`text
+Portal 0xe2ce...
+→ Portal implementation 0x27a0...
+→ trade implementation 0x1105...
+→ converter 0xc09f...
+→ 0x9818...
+→ 0x13f4...
+→ pool 0xce6160...
+→ 0xbc9e1a...
+→ selector 0x214a6fe2
+→ revert
+\`\`\`
+
+### 12.5 Timestamp-/Gate-Untersuchung
+
+Launch-Timestamp:
+
+\`\`\`text
+1790549254
+\`\`\`
+
+Beim unmittelbaren Zustand:
+
+\`\`\`text
+0x214a6fe2(...6ab99d06) → revert
+\`\`\`
+
+Beim später historisch erfolgreichen Direct-BUY:
+
+\`\`\`text
+0x214a6fe2(...6ab99d07) → success
+\`\`\`
+
+Ein reines Verändern des Ausführungs-Timestamps beseitigt den Revert jedoch nicht:
+
+| Delta zum Launch-Timestamp | Ergebnis |
+|---:|---|
+| +0 s | revert |
+| +1 s | revert |
+| +2 s | revert |
+| +3 s | revert |
+
+Daher ist **Zeit allein nicht die Freischaltbedingung**.
+
+### 12.6 Read-Set und kausale State-Tests
+
+Historischer Direct-BUY:
+
+\`\`\`text
+64 unique Storage-Reads
+30 im Post-Launch-State bereits identisch
+9 später verändert
+25 im ursprünglichen Launch-Replay nicht vorhanden
+\`\`\`
+
+Bis zum unmittelbaren Revert:
+
+\`\`\`text
+20 unique Reads
+8 Werte unterscheiden sich vom später erfolgreichen Direct-BUY
+\`\`\`
+
+Drei echte Prestate-Unterschiede wurden einzeln als Gegenfaktentest gepatcht:
+
+| Patch | Ergebnis |
+|---|---|
+| Portal/Curve-State | weiterhin Revert, 15 Frames |
+| \`0xce6160...\` Slot 0 | weiterhin Revert, 15 Frames |
+| \`0xbc9e1a...\` Slot 2 | Ausführung läuft von 15 auf 32 Frames weiter |
+
+Damit ist \`0xbc9e1a... slot 2\` als **kausaler Gate-State** isoliert.
+
+Wichtig: Der spätere Wert dieses Slots ist **nicht** als unmittelbar nach Launch vorhanden bewiesen. Der Patch ist ausschließlich ein Gegenfaktentest zur Ursachenanalyse.
+
+Der danach fehlende Read:
+
+\`\`\`text
+address = 0x3a632ecc01a45b8002d76c15e172e71c79412003
+slot    = 0x5
+\`\`\`
+
+wurde unabhängig am Parent-Block über Archive-RPC abgefragt:
+
+\`\`\`text
+value = 0x0
+\`\`\`
+
+### 12.7 Fortgesetzter Gegenfaktentest mit beweisbar zulässigem Null-State
+
+Für nachweislich im Launch neu erzeugte Contracts wurden nur solche historischen Direct-BUY-Read-Slots auf Null gesetzt, die im Launch nicht beschrieben worden waren. Für neu erzeugten EVM-Storage ist dieser Ausgangswert exakt Null.
+
+\`\`\`text
+zero_filled_created_slots = 6
+\`\`\`
+
+Zusammen mit dem isolierten **späteren** Wert von \`0xbc9e1a... slot 2\` ergab der Gegenfaktentest:
+
+\`\`\`text
+exception             = null
+frames                = 50
+missing_accounts      = []
+missing_storage_count = 0
+return_value          = 0x000000000000000000000000000000000000000000195e890851ef24d3319fd4
+return_value_decimal  = 30669575743216741084405716
+\`\`\`
+
+Damit ist gezeigt:
+
+1. Der zuvor isolierte \`0xbc9e1a... slot 2\` ist tatsächlich entscheidend dafür, dass der Converter-Pfad den frühen Revert überwindet.
+2. Sobald dieser Gate-State auf den späteren Wert gesetzt wird und ausschließlich beweisbar-null initialisierte Slots ergänzt werden, läuft der Direct-BUY über alle **50 Frames** ohne Exception.
+3. Das ist **kein Beweis**, dass der spätere Gate-State unmittelbar nach Launch real vorhanden war.
+4. Der reale unmittelbare Post-Launch-State revertiert weiterhin nach 15 Frames.
+
+### 12.8 Aktueller G0.3-Stand
+
+Bewiesen:
+
+\`\`\`text
+historische Direct-BUY-Calldata                   PASS
+historischer Value/Recipient/Acquisition          PASS
+historischer Legacy-TX-Envelope + Signaturbindung PASS
+historischer Direct-BUY-TX-Hash                   PASS
+Launch-Replay auf erweitertem Parent-State        PASS
+Revert-Pfad unmittelbar nach Launch               lokalisiert
+kausaler Gate-State                               isoliert
+\`\`\`
+
+Noch offen:
+
+\`\`\`text
+welche reale Zustandsänderung setzt 0xbc9e... slot 2?
+welche Transaktion / Aktion verursacht sie?
+wann relativ zum Launch wird dieser Zustand gültig?
+ist ein Direct-BUY schon vor dem ersten beobachteten externen BUY möglich?
+welcher exakte früheste gültige Direct-BUY-State ist T0?
+G0.3 Gesamt-PASS = NEIN
+\`\`\`
+
+Keine neuen Latenzbehauptungen:
+
+\`\`\`text
+BSC T_signal → T_send          N/A
+BSC T_signal → erfolgreicher BUY
+                               N/A
+T_buy - T0                     N/A
+\`\`\`
+
+**Nächster zwingender Schritt:** die reale Mutation von \`0xbc9e1a... slot 2\` zwischen Launch und späterem erfolgreichen Direct-BUY aus den bereits archivierten geordneten Transaktionen/State-Diffs identifizieren. Erst danach darf der früheste gültige Direct-BUY-Zeitpunkt bewertet und G0.3 weiter abgeschlossen werden.
+<!-- G03_PROGRESS_END -->
