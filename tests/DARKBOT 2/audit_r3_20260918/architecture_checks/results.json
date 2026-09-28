@@ -1,0 +1,70 @@
+{
+  "reorg_before_fill": {
+    "quote_uncertain": true,
+    "status": "FILLED",
+    "position": "OPEN",
+    "gap_flag": false,
+    "proxy_signature": "sigC"
+  },
+  "decode_gap_before_fill": {
+    "decode_errors": 1,
+    "status": "FILLED",
+    "coverage": "OBSERVED",
+    "position_gap": false,
+    "quality": [
+      {
+        "kind": "DECODE_GAP_SUMMARY",
+        "canonical_gap": 0
+      }
+    ]
+  },
+  "features": [
+    {
+      "version": "FEATURE_SET_V2_CANONICAL_COVERAGE",
+      "cutoff_offset": 0,
+      "buy_count": 0,
+      "provider_gap": false,
+      "quality": "OK"
+    },
+    {
+      "version": "FEATURE_CONTRACT_V1_LEGACY",
+      "cutoff_offset": 0,
+      "buy_count": 0,
+      "provider_gap": true,
+      "quality": "OK"
+    },
+    {
+      "version": "FEATURE_SET_V2_CANONICAL_COVERAGE",
+      "cutoff_offset": 1000000000,
+      "buy_count": 2,
+      "provider_gap": false,
+      "quality": "OK"
+    },
+    {
+      "version": "FEATURE_CONTRACT_V1_LEGACY",
+      "cutoff_offset": 1000000000,
+      "buy_count": 2,
+      "provider_gap": true,
+      "quality": "OK"
+    }
+  ],
+  "closed_trackers": {
+    "states": 3,
+    "configured_max": 1,
+    "removed": 0,
+    "position_states": [
+      "CLOSED",
+      "CLOSED",
+      "CLOSED"
+    ],
+    "slots": 0,
+    "adapter_submitted_retained": 6
+  },
+  "writer_orphan_fk_shutdown": {
+    "thread_alive": true,
+    "failures": 11301,
+    "disk_error": false,
+    "error_callbacks": [],
+    "queue_depth": 0
+  }
+}

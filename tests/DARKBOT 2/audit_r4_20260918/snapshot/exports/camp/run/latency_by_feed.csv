@@ -1,0 +1,4 @@
+feed_id,count,matched_creates,hint_wins,actionable_wins,ties,missing,decode_errors,rel_n,rel_min_ns,rel_p50_ns,rel_p95_ns,rel_p99_ns,rel_max_ns,class
+helius_standard,1,1,1,1,0,0,0,1,0,0,0,0,0,MEASURED_RELATIVE
+existing_rpc,0,0,0,0,0,1,0,0,,,,,,MEASURED_RELATIVE
+pumpportal,0,0,0,0,0,1,0,0,,,,,,MEASURED_RELATIVE

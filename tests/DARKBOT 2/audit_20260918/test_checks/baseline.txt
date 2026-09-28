@@ -1,0 +1,69 @@
+test_batch_boundary_never_loses_fk_coupled_rows (test_review_counterexamples.BatchSplit.test_batch_boundary_never_loses_fk_coupled_rows) ... ok
+test_non_actionable_creates_do_not_count_as_valid_samples (test_review_counterexamples.DoctorCounting.test_non_actionable_creates_do_not_count_as_valid_samples) ... ok
+test_unverified_layout_is_never_valid (test_review_counterexamples.FeeLayout.test_unverified_layout_is_never_valid) ... ok
+test_replay_never_invents_exits_after_recording_end (test_review_counterexamples.ReplayEnd.test_replay_never_invents_exits_after_recording_end) ... ok
+test_in_sample_and_zero_delay_cannot_qualify (test_review_counterexamples.ResearchQualification.test_in_sample_and_zero_delay_cannot_qualify) ... ok
+test_T01_same_create_three_sources_one_intent (test_t01_t15_feeds_engine.T01T02FeedRace.test_T01_same_create_three_sources_one_intent) ... ok
+test_T02_early_incomplete_hint_does_not_enter (test_t01_t15_feeds_engine.T01T02FeedRace.test_T02_early_incomplete_hint_does_not_enter) ... ok
+test_T03_create_multiple_buys_creator_sell_one_tx (test_t01_t15_feeds_engine.T03T05Atomicity.test_T03_create_multiple_buys_creator_sell_one_tx) ... ok
+test_T04_late_entry_callback_with_creator_sell_in_between (test_t01_t15_feeds_engine.T03T05Atomicity.test_T04_late_entry_callback_with_creator_sell_in_between) ... ok
+test_T05_creator_sell_after_submit_before_fill_no_free_cancel (test_t01_t15_feeds_engine.T03T05Atomicity.test_T05_creator_sell_after_submit_before_fill_no_free_cancel) ... ok
+test_T06_bounded_retries_time_advances (test_t01_t15_feeds_engine.T06T09Rules.test_T06_bounded_retries_time_advances) ... ok
+test_T07_stop_disabled_curve_unknown (test_t01_t15_feeds_engine.T06T09Rules.test_T07_stop_disabled_curve_unknown) ... ok
+test_T08_entry_exit_latency_separate (test_t01_t15_feeds_engine.T06T09Rules.test_T08_entry_exit_latency_separate) ... ok
+test_T09_research_horizon_with_open_position (test_t01_t15_feeds_engine.T06T09Rules.test_T09_research_horizon_with_open_position) ... ok
+test_T10_failed_entry_sell_retries_abort (test_t01_t15_feeds_engine.T10T12Ledger.test_T10_failed_entry_sell_retries_abort) ... ok
+test_T11_rent_lock_and_refund (test_t01_t15_feeds_engine.T10T12Ledger.test_T11_rent_lock_and_refund) ... ok
+test_T12_writer_queue_full_and_disk_error (test_t01_t15_feeds_engine.T10T12Ledger.test_T12_writer_queue_full_and_disk_error) ... ok
+test_T13_ack_rejected_and_disconnect (test_t01_t15_feeds_engine.T13T15Feeds.test_T13_ack_rejected_and_disconnect) ... ok
+test_T14_decoder_programming_error_is_diagnostic (test_t01_t15_feeds_engine.T13T15Feeds.test_T14_decoder_programming_error_is_diagnostic) ... ok
+test_T15_out_of_order_duplicates_conflict (test_t01_t15_feeds_engine.T13T15Feeds.test_T15_out_of_order_duplicates_conflict) ... ok
+test_T16_stale_fees_diagnostic_only (test_t16_t35_costs_replay.T16T18Costs.test_T16_stale_fees_diagnostic_only) ... ok
+test_T17_hand_computed_fixture (test_t16_t35_costs_replay.T16T18Costs.test_T17_hand_computed_fixture) ... ok
+test_T18_missing_feed_and_tie (test_t16_t35_costs_replay.T16T18Costs.test_T18_missing_feed_and_tie) ... ok
+test_T19_replay_twice_identical (test_t16_t35_costs_replay.T19T21Replay.test_T19_replay_twice_identical) ... ok
+test_T20_future_events_do_not_change_earlier_decisions (test_t16_t35_costs_replay.T19T21Replay.test_T20_future_events_do_not_change_earlier_decisions) ... ok
+test_T21_paired_and_portfolio_separate (test_t16_t35_costs_replay.T19T21Replay.test_T21_paired_and_portfolio_separate) ... ok
+test_T22_paper_broadcast_boundary (test_t16_t35_costs_replay.T22T24Boundary.test_T22_paper_broadcast_boundary) ... ok
+test_T23_process_restart_new_epoch (test_t16_t35_costs_replay.T22T24Boundary.test_T23_process_restart_new_epoch) ... ok
+test_T24_gap_during_position_censoring_visible (test_t16_t35_costs_replay.T22T24Boundary.test_T24_gap_during_position_censoring_visible) ... ok
+test_T25_protocol_variants (test_t16_t35_costs_replay.T25T30Protocol.test_T25_protocol_variants) ... ok
+test_T26_fee_snapshot_missing_or_null (test_t16_t35_costs_replay.T25T30Protocol.test_T26_fee_snapshot_missing_or_null) ... ok
+test_T27_fees_change_between_buy_and_sell (test_t16_t35_costs_replay.T25T30Protocol.test_T27_fees_change_between_buy_and_sell) ... ok
+test_T28_no_double_counting (test_t16_t35_costs_replay.T25T30Protocol.test_T28_no_double_counting) ... ok
+test_T29_token_account_rent (test_t16_t35_costs_replay.T25T30Protocol.test_T29_token_account_rent) ... ok
+test_T30_precomputed_vs_reconciled (test_t16_t35_costs_replay.T25T30Protocol.test_T30_precomputed_vs_reconciled) ... ok
+test_T31_timeout_vs_research_end (test_t16_t35_costs_replay.T31T35Contracts.test_T31_timeout_vs_research_end) ... ok
+test_T32_timeout_without_fresh_quote (test_t16_t35_costs_replay.T31T35Contracts.test_T32_timeout_without_fresh_quote) ... ok
+test_T33_sizing_contract_worked_example (test_t16_t35_costs_replay.T31T35Contracts.test_T33_sizing_contract_worked_example) ... ok
+test_T34_simultaneous_creates_one_slot (test_t16_t35_costs_replay.T31T35Contracts.test_T34_simultaneous_creates_one_slot) ... ok
+test_T35_schema_and_foreign_keys (test_t16_t35_costs_replay.T31T35Contracts.test_T35_schema_and_foreign_keys) ... ok
+test_D01_D04_D06_offline_parts (test_t36_t52_semantics.DChecksOffline.test_D01_D04_D06_offline_parts) ... ok
+test_capital_reservation_includes_slippage_bound (test_t36_t52_semantics.ReviewRegressions.test_capital_reservation_includes_slippage_bound) ... ok
+test_eviction_keeps_active_and_horizon (test_t36_t52_semantics.ReviewRegressions.test_eviction_keeps_active_and_horizon) ... ok
+test_overflow_quality_event_survives_overflow (test_t36_t52_semantics.ReviewRegressions.test_overflow_quality_event_survives_overflow) ... ok
+test_quote_max_age_cancels_before_submit (test_t36_t52_semantics.ReviewRegressions.test_quote_max_age_cancels_before_submit)
+execution.quote_max_age_ms: a quote older than the limit at submit is cancelled without fee (replay with late processing). ... ok
+test_venue_transition_recorded (test_t36_t52_semantics.ReviewRegressions.test_venue_transition_recorded) ... ok
+test_T36_late_callback_creator_sell_not_backdated (test_t36_t52_semantics.T36T40Engine.test_T36_late_callback_creator_sell_not_backdated) ... ok
+test_T37_hot_path_no_db_print_hash_under_load (test_t36_t52_semantics.T36T40Engine.test_T37_hot_path_no_db_print_hash_under_load) ... ok
+test_T38_portfolio_replay_1_vs_10 (test_t36_t52_semantics.T36T40Engine.test_T38_portfolio_replay_1_vs_10) ... ok
+test_T39_config_rejection (test_t36_t52_semantics.T36T40Engine.test_T39_config_rejection) ... ok
+test_T40_optimisation_invariance (test_t36_t52_semantics.T36T40Engine.test_T40_optimisation_invariance) ... ok
+test_T41_quote_scopes (test_t36_t52_semantics.T41T46Semantics.test_T41_quote_scopes) ... ok
+test_T42_creator_timing_matrix (test_t36_t52_semantics.T41T46Semantics.test_T42_creator_timing_matrix) ... ok
+test_T43_exit_priority_and_tie (test_t36_t52_semantics.T41T46Semantics.test_T43_exit_priority_and_tie) ... ok
+test_T44_one_reject_then_fill (test_t36_t52_semantics.T41T46Semantics.test_T44_one_reject_then_fill) ... ok
+test_T45_paper_replay_matrix (test_t36_t52_semantics.T41T46Semantics.test_T45_paper_replay_matrix) ... ok
+test_T46_curve_complete_with_pending_fill (test_t36_t52_semantics.T41T46Semantics.test_T46_curve_complete_with_pending_fill) ... ok
+test_T47_pumpportal_optional_and_policy (test_t36_t52_semantics.T47T52Coverage.test_T47_pumpportal_optional_and_policy) ... ok
+test_T48_provider_failover_and_hard_gate (test_t36_t52_semantics.T47T52Coverage.test_T48_provider_failover_and_hard_gate) ... ok
+test_T49_recovery_state_only (test_t36_t52_semantics.T47T52Coverage.test_T49_recovery_state_only) ... ok
+test_T50_legacy_features (test_t36_t52_semantics.T47T52Coverage.test_T50_legacy_features) ... ok
+test_T51_fill_evidence_proxy_and_audit (test_t36_t52_semantics.T47T52Coverage.test_T51_fill_evidence_proxy_and_audit) ... ok
+test_T52_pumpportal_migration_hint (test_t36_t52_semantics.T47T52Coverage.test_T52_pumpportal_migration_hint) ... ok
+
+----------------------------------------------------------------------
+Ran 63 tests in 0.637s
+
+OK

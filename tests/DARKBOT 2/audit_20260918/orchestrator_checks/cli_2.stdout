@@ -1,0 +1,80 @@
+{
+  "run_id": "audit_no_feeds_paper_20260918T101602Z_f14825",
+  "status": "COMPLETED",
+  "stop_reason": "no feed could be started (missing endpoint env or all feeds disabled)",
+  "quality": "OK",
+  "readiness": "NOT_READY",
+  "feeds": {},
+  "feed_setup": {
+    "helius_standard": "FAILED missing env ('HELIUS_API_KEY',)",
+    "existing_rpc": "DISABLED_OPTIONAL missing env ('EXISTING_RPC_WSS_URL',)",
+    "pumpportal": "DISABLED_OPTIONAL missing env ('PUMPPORTAL_API_KEY',)"
+  },
+  "owner": {
+    "raw": 0,
+    "creates": 0,
+    "actionable": 0,
+    "intents": 0,
+    "fills": 0,
+    "entry_failed": 0,
+    "exit_fills": 0,
+    "unresolved": 0,
+    "open": 0,
+    "cash": 1000000000,
+    "reserved": 0,
+    "locked_rent": 0,
+    "realized_pnl": 0,
+    "gap_open": false,
+    "recorder_depth": 0,
+    "recorder_overflow": 0,
+    "feeds": {},
+    "ineligible": {},
+    "internal_errors": 0,
+    "last_error": null
+  },
+  "cash_reconciliation": {
+    "initial": 1000000000,
+    "ledger_cash_sum": 0,
+    "cash_plus_reserved": 1000000000,
+    "reconciled": true,
+    "locked_rent": 0
+  },
+  "writer": {
+    "committed_records": 0,
+    "failures": 0,
+    "disk_error": false
+  },
+  "fee_errors": [],
+  "storage": {
+    "migrations": [
+      "0001_phase1_spec_1_3_2.sql",
+      "0002_run_end_mono.sql"
+    ],
+    "interrupted_previous_runs": 0,
+    "integrity": {
+      "foreign_key_check": [],
+      "integrity_check": "ok",
+      "tables": [
+        "config_snapshots",
+        "decisions",
+        "execution_attempts",
+        "feature_snapshots",
+        "fee_snapshots",
+        "feed_observations",
+        "ledger",
+        "market_events",
+        "phase1_applied_migrations",
+        "phase1_schema_version",
+        "positions",
+        "quality_events",
+        "quote_snapshots",
+        "reports",
+        "research_variants",
+        "runs"
+      ],
+      "schema_version": 1,
+      "foreign_keys_pragma": 1
+    }
+  },
+  "db": "../orchestrator_checks/paper_no_feeds.sqlite"
+}

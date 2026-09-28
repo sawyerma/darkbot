@@ -1,0 +1,172 @@
+{
+  "readiness": "NOT_READY",
+  "run_id": "doctor_doctor_20260918T122010Z_8a4757",
+  "checks": {
+    "D01": {
+      "status": "FAIL",
+      "python": "3.14.3 (main, Feb  3 2026, 15:32:20) [Clang 17.0.0 (clang-1700.6.3.2)]",
+      "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "os": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+      "packages": {
+        "websockets": "MISSING (ModuleNotFoundError)"
+      },
+      "config_hash": "3fedc8378e70ed60fa7b6a487cc8b2689b9a15ba7fc1eda5a451de3de9b108e2",
+      "mode": "PAPER",
+      "live_broadcast_enabled": false,
+      "monthly_paid_services_allowed": false,
+      "disk_free_bytes": 112450502656,
+      "migrations": [
+        "0001_phase1_spec_1_3_2.sql",
+        "0002_run_end_mono.sql",
+        "0003_attempt_provenance.sql"
+      ],
+      "integrity": {
+        "foreign_key_check": [],
+        "integrity_check": "ok",
+        "tables": [
+          "config_snapshots",
+          "decisions",
+          "execution_attempts",
+          "feature_snapshots",
+          "fee_snapshots",
+          "feed_observations",
+          "ledger",
+          "market_events",
+          "phase1_applied_migrations",
+          "phase1_schema_version",
+          "positions",
+          "quality_events",
+          "quote_snapshots",
+          "reports",
+          "research_variants",
+          "runs"
+        ],
+        "schema_version": 1,
+        "foreign_keys_pragma": 1
+      },
+      "write_readback": true
+    },
+    "D02": {
+      "status": "FAIL",
+      "feeds": {
+        "helius_standard": "FAILED missing env ('HELIUS_API_KEY',)",
+        "existing_rpc": "DISABLED_OPTIONAL missing env ('EXISTING_RPC_WSS_URL',)",
+        "pumpportal": "DISABLED_OPTIONAL missing env ('PUMPPORTAL_API_KEY',)"
+      },
+      "missing_env": {
+        "helius_standard": [
+          "HELIUS_API_KEY"
+        ],
+        "existing_rpc": [
+          "EXISTING_RPC_WSS_URL"
+        ],
+        "pumpportal": [
+          "PUMPPORTAL_API_KEY"
+        ]
+      },
+      "rpc_http": "MISSING ('EXISTING_RPC_HTTP_URL', 'HELIUS_API_KEY')",
+      "paid_subscriptions": "NONE (only logsSubscribe / subscribeNewToken / subscribeMigration)"
+    },
+    "D03": {
+      "status": "FAIL",
+      "create_samples_actionable_sol": 0,
+      "create_samples_observed_total": 0,
+      "trade_samples": 0,
+      "sol_scope_counts": {},
+      "create_tail_layouts_seen": [],
+      "decoder_version": "PUMP_LOG_DECODER_V1",
+      "idl": "pump-public-docs@2026-09-17 (checked date per SPEC.reference_sources; hash not available offline)",
+      "observations": 0,
+      "avg_receive_to_decode_ns": null,
+      "note": "unpinned CreateEvent tails stay QUOTE_UNKNOWN_LAYOUT_UNVERIFIED (observe-only) until pinned in config.protocol.create_event_tail_layouts"
+    },
+    "D04": {
+      "status": "PASS",
+      "fixture_checks": {
+        "create_decoded": true,
+        "creator_sell_detected": true,
+        "complete_detected": true,
+        "migration_detected": true,
+        "all_pass": true
+      },
+      "live_creator_sell_count": 0,
+      "live_completion_or_migration_count": 0,
+      "live_evidence": "NOT_OBSERVED",
+      "note": "fixture success is not proof of live coverage"
+    },
+    "D05": {
+      "status": "FAIL",
+      "snapshots": {},
+      "cost_status": "UNQUALIFIED_COSTS",
+      "fee_errors": [],
+      "no_transfers": true,
+      "global_account_verification_status": "PINNED_FROM_IDL_UNVERIFIED_OFFLINE_DOCTOR_VALIDATES_OWNER_AND_LENGTH",
+      "decoded_global_account": null,
+      "note": "layout must be marked VERIFIED_* in config.protocol.global_account after checking decoded values against the official IDL; until then protocol fees stay LAYOUT_UNVERIFIED"
+    },
+    "D06": {
+      "status": "FAIL",
+      "persisted_observations": 0,
+      "replay_reproducible": true,
+      "replay_creates": 0,
+      "positions_booked_in_doctor": 0,
+      "report_qualification": "UNQUALIFIED_COSTS",
+      "writer": {
+        "committed_records": 0,
+        "failures": 0,
+        "disk_error": false
+      }
+    }
+  },
+  "summary": {
+    "run_id": "doctor_doctor_20260918T122010Z_8a4757",
+    "status": "COMPLETED",
+    "stop_reason": "no feed could be started (missing endpoint env or all feeds disabled)",
+    "quality": "OK",
+    "readiness": "NOT_READY",
+    "feeds_started": 0,
+    "feeds": {},
+    "feed_setup": {
+      "helius_standard": "FAILED missing env ('HELIUS_API_KEY',)",
+      "existing_rpc": "DISABLED_OPTIONAL missing env ('EXISTING_RPC_WSS_URL',)",
+      "pumpportal": "DISABLED_OPTIONAL missing env ('PUMPPORTAL_API_KEY',)"
+    },
+    "owner": {
+      "raw": 0,
+      "creates": 0,
+      "actionable": 0,
+      "intents": 0,
+      "fills": 0,
+      "entry_failed": 0,
+      "exit_fills": 0,
+      "unresolved": 0,
+      "open": 0,
+      "cash": 1000000000,
+      "reserved": 0,
+      "locked_rent": 0,
+      "realized_pnl": 0,
+      "gap_open": false,
+      "recorder_depth": 0,
+      "recorder_overflow": 0,
+      "feeds": {},
+      "ineligible": {},
+      "internal_errors": 0,
+      "last_error": null
+    },
+    "cash_reconciliation": {
+      "initial": 1000000000,
+      "ledger_cash_sum": 0,
+      "cash_plus_reserved": 1000000000,
+      "reconciled": true,
+      "locked_rent": 0
+    },
+    "writer": {
+      "committed_records": 0,
+      "failures": 0,
+      "disk_error": false
+    },
+    "fee_errors": [],
+    "db": "/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/orchestrator_checks/doctor.sqlite"
+  },
+  "note": "Short probe proves integration only, not completeness, reliability, landing latency or expectancy."
+}

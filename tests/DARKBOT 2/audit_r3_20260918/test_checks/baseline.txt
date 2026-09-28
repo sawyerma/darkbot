@@ -1,0 +1,433 @@
+{
+  "run_id": "run",
+  "status": "INTERRUPTED",
+  "readiness": "CAPTURE_READY",
+  "feeds_started": 1,
+  "artifacts": [
+    "exports/camp/run/report.json",
+    "exports/camp/run/positions.csv",
+    "exports/camp/run/latency_by_feed.csv",
+    "exports/camp/run/summary.md"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA"
+}
+{
+  "run_id": "run",
+  "status": "COMPLETED",
+  "readiness": "NOT_READY",
+  "feeds_started": 0,
+  "artifacts": [
+    "exports/camp/run/report.json",
+    "exports/camp/run/positions.csv",
+    "exports/camp/run/latency_by_feed.csv",
+    "exports/camp/run/summary.md"
+  ],
+  "qualification_status": "UNQUALIFIED_DATA"
+}
+test_S03_partial_copy_never_poisons_complete_copy (tests.test_audit_round2.S01S03.test_S03_partial_copy_never_poisons_complete_copy) ... ok
+test_S15_conflicting_content_and_reorg_block_entries (tests.test_audit_round2.S01S03.test_S15_conflicting_content_and_reorg_block_entries) ... ok
+test_S02_stale_fee_basis_never_fills_an_exit (tests.test_audit_round2.S02StaleQuotes.test_S02_stale_fee_basis_never_fills_an_exit)
+No refreshed fee snapshot -> the timeout exit stays latched (no fictitious FILLED); the first fresh snapshot lets it execute. ... /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101e47b50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef8220>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef86d0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef8f40>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_S05_multiple_recordings_never_collide (tests.test_audit_round2.S05S06S09S10.test_S05_multiple_recordings_never_collide) ... ok
+test_S06_dataset_hash_covers_fees_gaps_lateness_and_run_end (tests.test_audit_round2.S05S06S09S10.test_S06_dataset_hash_covers_fees_gaps_lateness_and_run_end) ... ok
+test_S09_config_values_take_effect (tests.test_audit_round2.S05S06S09S10.test_S09_config_values_take_effect) ... ok
+test_S10_block_split_keeps_blocks_whole_and_purges_embargo (tests.test_audit_round2.S05S06S09S10.test_S10_block_split_keeps_blocks_whole_and_purges_embargo) ... ok
+test_S08_token_2022_rejected_when_unsupported (tests.test_audit_round2.S08S12.test_S08_token_2022_rejected_when_unsupported) ... ok
+test_S12_foreign_quote_reserves_never_enter_sol_state_or_columns (tests.test_audit_round2.S08S12.test_S12_foreign_quote_reserves_never_enter_sol_state_or_columns) ... ok
+test_trade_tail_layout_is_evidence_only (tests.test_audit_round2.S08S12.test_trade_tail_layout_is_evidence_only) ... ok
+test_S11_features_for_skipped_creates_and_historical_coverage (tests.test_audit_round2.S11S16S17.test_S11_features_for_skipped_creates_and_historical_coverage) ... ok
+test_S16_operative_limits_come_from_config (tests.test_audit_round2.S11S16S17.test_S16_operative_limits_come_from_config) ... ok
+test_S17_paper_produces_artifacts_and_honest_exit_code (tests.test_audit_round2.S11S16S17.test_S17_paper_produces_artifacts_and_honest_exit_code) ... paper: no eligible feed was ready (NOT_READY) – see feed_setup; exit code 4
+ok
+test_S13_failed_entries_count_in_expectancy_bootstrap_and_utilization (tests.test_audit_round2.S13S14.test_S13_failed_entries_count_in_expectancy_bootstrap_and_utilization) ... ok
+test_S14_provenance_columns (tests.test_audit_round2.S13S14.test_S14_provenance_columns) ... ok
+test_batch_boundary_never_loses_fk_coupled_rows (tests.test_review_counterexamples.BatchSplit.test_batch_boundary_never_loses_fk_coupled_rows) ... ok
+test_non_actionable_creates_do_not_count_as_valid_samples (tests.test_review_counterexamples.DoctorCounting.test_non_actionable_creates_do_not_count_as_valid_samples) ... ok
+test_unverified_layout_is_never_valid (tests.test_review_counterexamples.FeeLayout.test_unverified_layout_is_never_valid) ... ok
+test_replay_never_invents_exits_after_recording_end (tests.test_review_counterexamples.ReplayEnd.test_replay_never_invents_exits_after_recording_end) ... ok
+test_in_sample_and_zero_delay_cannot_qualify (tests.test_review_counterexamples.ResearchQualification.test_in_sample_and_zero_delay_cannot_qualify) ... ok
+test_T01_same_create_three_sources_one_intent (tests.test_t01_t15_feeds_engine.T01T02FeedRace.test_T01_same_create_three_sources_one_intent) ... ok
+test_T02_early_incomplete_hint_does_not_enter (tests.test_t01_t15_feeds_engine.T01T02FeedRace.test_T02_early_incomplete_hint_does_not_enter) ... ok
+test_T03_create_multiple_buys_creator_sell_one_tx (tests.test_t01_t15_feeds_engine.T03T05Atomicity.test_T03_create_multiple_buys_creator_sell_one_tx) ... ok
+test_T04_late_entry_callback_with_creator_sell_in_between (tests.test_t01_t15_feeds_engine.T03T05Atomicity.test_T04_late_entry_callback_with_creator_sell_in_between) ... ok
+test_T05_creator_sell_after_submit_before_fill_no_free_cancel (tests.test_t01_t15_feeds_engine.T03T05Atomicity.test_T05_creator_sell_after_submit_before_fill_no_free_cancel) ... ok
+test_T06_bounded_retries_time_advances (tests.test_t01_t15_feeds_engine.T06T09Rules.test_T06_bounded_retries_time_advances) ... ok
+test_T07_stop_disabled_curve_unknown (tests.test_t01_t15_feeds_engine.T06T09Rules.test_T07_stop_disabled_curve_unknown) ... ok
+test_T08_entry_exit_latency_separate (tests.test_t01_t15_feeds_engine.T06T09Rules.test_T08_entry_exit_latency_separate) ... ok
+test_T09_research_horizon_with_open_position (tests.test_t01_t15_feeds_engine.T06T09Rules.test_T09_research_horizon_with_open_position) ... /Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef8b80>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efb3d0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efbf10>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334c220>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334c6d0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334cc70>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334d210>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334d6c0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334dc60>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334e110>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334ea70>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f4040>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f5210>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f56c0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f5b70>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f6020>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f64d0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f6980>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f6e30>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f72e0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f76a0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f7970>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f7f10>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104078400>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1040788b0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104078d60>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104079210>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1040796c0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104079b70>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10407a020>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/storage.py:143: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10407a4d0>
+  def try_append(self, record: Any, priority: bool = False) -> str:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_T10_failed_entry_sell_retries_abort (tests.test_t01_t15_feeds_engine.T10T12Ledger.test_T10_failed_entry_sell_retries_abort) ... ok
+test_T11_rent_lock_and_refund (tests.test_t01_t15_feeds_engine.T10T12Ledger.test_T11_rent_lock_and_refund) ... ok
+test_T12_writer_queue_full_and_disk_error (tests.test_t01_t15_feeds_engine.T10T12Ledger.test_T12_writer_queue_full_and_disk_error) ... ok
+test_T13_ack_rejected_and_disconnect (tests.test_t01_t15_feeds_engine.T13T15Feeds.test_T13_ack_rejected_and_disconnect) ... ok
+test_T14_decoder_programming_error_is_diagnostic (tests.test_t01_t15_feeds_engine.T13T15Feeds.test_T14_decoder_programming_error_is_diagnostic) ... ok
+test_T15_out_of_order_duplicates_conflict (tests.test_t01_t15_feeds_engine.T13T15Feeds.test_T15_out_of_order_duplicates_conflict) ... ok
+test_T16_stale_fees_diagnostic_only (tests.test_t16_t35_costs_replay.T16T18Costs.test_T16_stale_fees_diagnostic_only) ... ok
+test_T17_hand_computed_fixture (tests.test_t16_t35_costs_replay.T16T18Costs.test_T17_hand_computed_fixture) ... ok
+test_T18_missing_feed_and_tie (tests.test_t16_t35_costs_replay.T16T18Costs.test_T18_missing_feed_and_tie) ... ok
+test_T19_replay_twice_identical (tests.test_t16_t35_costs_replay.T19T21Replay.test_T19_replay_twice_identical) ... /Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f7e20>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f7970>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f72e0>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f6e30>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f6890>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f6d40>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f5f30>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f56c0>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f5210>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f5030>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/darkbot/replay.py:102: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f4c70>
+  recorder.try_append(("fee_snapshot", (FeeSnapshot(**{**{k: getattr(s, k) for k in s.__slots__}, "fee_snapshot_id": f"{new_run_id}_{s.fee_snapshot_id}"}), new_run_id)))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_T20_future_events_do_not_change_earlier_decisions (tests.test_t16_t35_costs_replay.T19T21Replay.test_T20_future_events_do_not_change_earlier_decisions) ... ok
+test_T21_paired_and_portfolio_separate (tests.test_t16_t35_costs_replay.T19T21Replay.test_T21_paired_and_portfolio_separate) ... /Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/snapshot/tests/helpers.py:151: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef95d0>
+  return _FS(**{**{k: getattr(x, k) for k in x.__slots__}, "received_mono_ns": now, "fee_snapshot_id": f"{base_id}_r{self.refresh_n}"})
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:3: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef8f40>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_T22_paper_broadcast_boundary (tests.test_t16_t35_costs_replay.T22T24Boundary.test_T22_paper_broadcast_boundary) ... ok
+test_T23_process_restart_new_epoch (tests.test_t16_t35_costs_replay.T22T24Boundary.test_T23_process_restart_new_epoch) ... ok
+test_T24_gap_during_position_censoring_visible (tests.test_t16_t35_costs_replay.T22T24Boundary.test_T24_gap_during_position_censoring_visible) ... ok
+test_T25_protocol_variants (tests.test_t16_t35_costs_replay.T25T30Protocol.test_T25_protocol_variants) ... ok
+test_T26_fee_snapshot_missing_or_null (tests.test_t16_t35_costs_replay.T25T30Protocol.test_T26_fee_snapshot_missing_or_null) ... ok
+test_T27_fees_change_between_buy_and_sell (tests.test_t16_t35_costs_replay.T25T30Protocol.test_T27_fees_change_between_buy_and_sell) ... ok
+test_T28_no_double_counting (tests.test_t16_t35_costs_replay.T25T30Protocol.test_T28_no_double_counting) ... ok
+test_T29_token_account_rent (tests.test_t16_t35_costs_replay.T25T30Protocol.test_T29_token_account_rent) ... ok
+test_T30_precomputed_vs_reconciled (tests.test_t16_t35_costs_replay.T25T30Protocol.test_T30_precomputed_vs_reconciled)
+Attempt costs are precomputed at submit and applied with the fee rule valid at the modeled fill; an attempt whose modeled fill lies in a ... ok
+test_T31_timeout_vs_research_end (tests.test_t16_t35_costs_replay.T31T35Contracts.test_T31_timeout_vs_research_end) ... ok
+test_T32_timeout_without_fresh_quote (tests.test_t16_t35_costs_replay.T31T35Contracts.test_T32_timeout_without_fresh_quote) ... ok
+test_T33_sizing_contract_worked_example (tests.test_t16_t35_costs_replay.T31T35Contracts.test_T33_sizing_contract_worked_example) ... ok
+test_T34_simultaneous_creates_one_slot (tests.test_t16_t35_costs_replay.T31T35Contracts.test_T34_simultaneous_creates_one_slot) ... ok
+test_T35_schema_and_foreign_keys (tests.test_t16_t35_costs_replay.T31T35Contracts.test_T35_schema_and_foreign_keys) ... ok
+test_D01_D04_D06_offline_parts (tests.test_t36_t52_semantics.DChecksOffline.test_D01_D04_D06_offline_parts) ... ok
+test_capital_reservation_includes_slippage_bound (tests.test_t36_t52_semantics.ReviewRegressions.test_capital_reservation_includes_slippage_bound) ... ok
+test_eviction_keeps_active_and_horizon (tests.test_t36_t52_semantics.ReviewRegressions.test_eviction_keeps_active_and_horizon) ... ok
+test_overflow_quality_event_survives_overflow (tests.test_t36_t52_semantics.ReviewRegressions.test_overflow_quality_event_survives_overflow) ... ok
+test_quote_max_age_cancels_before_submit (tests.test_t36_t52_semantics.ReviewRegressions.test_quote_max_age_cancels_before_submit)
+execution.quote_max_age_ms: a quote older than the limit at submit is cancelled without fee (replay with late processing). ... ok
+test_venue_transition_recorded (tests.test_t36_t52_semantics.ReviewRegressions.test_venue_transition_recorded) ... ok
+test_T36_late_callback_creator_sell_not_backdated (tests.test_t36_t52_semantics.T36T40Engine.test_T36_late_callback_creator_sell_not_backdated) ... ok
+test_T37_hot_path_no_db_print_hash_under_load (tests.test_t36_t52_semantics.T36T40Engine.test_T37_hot_path_no_db_print_hash_under_load) ... ok
+test_T38_portfolio_replay_1_vs_10 (tests.test_t36_t52_semantics.T36T40Engine.test_T38_portfolio_replay_1_vs_10) ... ok
+test_T39_config_rejection (tests.test_t36_t52_semantics.T36T40Engine.test_T39_config_rejection) ... ok
+test_T40_optimisation_invariance (tests.test_t36_t52_semantics.T36T40Engine.test_T40_optimisation_invariance) ... ok
+test_T41_quote_scopes (tests.test_t36_t52_semantics.T41T46Semantics.test_T41_quote_scopes) ... ok
+test_T42_creator_timing_matrix (tests.test_t36_t52_semantics.T41T46Semantics.test_T42_creator_timing_matrix) ... ok
+test_T43_exit_priority_and_tie (tests.test_t36_t52_semantics.T41T46Semantics.test_T43_exit_priority_and_tie) ... ok
+test_T44_one_reject_then_fill (tests.test_t36_t52_semantics.T41T46Semantics.test_T44_one_reject_then_fill) ... ok
+test_T45_paper_replay_matrix (tests.test_t36_t52_semantics.T41T46Semantics.test_T45_paper_replay_matrix) ... /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f6c50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f71f0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f74c0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f7970>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1035f7e20>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334ec50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334dd50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334d7b0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334d3f0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334cc70>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334c6d0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334c5e0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10334c130>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101e47b50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef9300>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efb880>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efbb50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efb3d0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efb1f0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efaa70>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef9d50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efa890>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101efa4d0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101ef8310>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104079d50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104078d60>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x1040788b0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104078400>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104078130>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10407b2e0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10407b790>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x10407bd30>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e50040>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e506d0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e509a0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e50d60>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e51210>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e516c0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e51b70>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e52020>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e524d0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e52980>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e52e30>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e532e0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e53790>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104e53c40>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f50130>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f505e0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f50a90>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f50d60>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f513f0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f516c0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f51d50>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f52020>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f526b0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f52980>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f53010>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f532e0>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/encoder.py:263: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x104f53970>
+  return _iterencode(o, 0)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_T46_curve_complete_with_pending_fill (tests.test_t36_t52_semantics.T41T46Semantics.test_T46_curve_complete_with_pending_fill) ... ok
+test_T47_pumpportal_optional_and_policy (tests.test_t36_t52_semantics.T47T52Coverage.test_T47_pumpportal_optional_and_policy) ... ok
+test_T48_provider_failover_and_hard_gate (tests.test_t36_t52_semantics.T47T52Coverage.test_T48_provider_failover_and_hard_gate) ... ok
+test_T49_recovery_state_only (tests.test_t36_t52_semantics.T47T52Coverage.test_T49_recovery_state_only) ... ok
+test_T50_legacy_features (tests.test_t36_t52_semantics.T47T52Coverage.test_T50_legacy_features) ... ok
+test_T51_fill_evidence_proxy_and_audit (tests.test_t36_t52_semantics.T47T52Coverage.test_T51_fill_evidence_proxy_and_audit) ... ok
+test_T52_pumpportal_migration_hint (tests.test_t36_t52_semantics.T47T52Coverage.test_T52_pumpportal_migration_hint) ... ok
+
+----------------------------------------------------------------------
+Ran 78 tests in 1.271s
+
+OK

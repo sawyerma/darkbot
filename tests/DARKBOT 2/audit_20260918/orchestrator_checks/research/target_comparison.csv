@@ -1,0 +1,2 @@
+split,variant_id,target,entry_delay_ms,exit_delay_ms,fee_multiplier,adverse_bps,portfolio_limit,launches,intents,resolved,unresolved,net_pnl_lamports,expectancy_per_intent,ci_low,ci_high,blocks,status
+test,ALL,,,,,,,0,,,,,,,,,LOCKED_UNTIL_POLICY_FREEZE

@@ -1,0 +1,54 @@
+{
+  "failed_intents_bootstrap_collapsed": {
+    "original_positions": [
+      {
+        "state": "ENTRY_FAILED",
+        "open_mono_ns": null,
+        "net_pnl_lamports": -7000
+      },
+      {
+        "state": "ENTRY_FAILED",
+        "open_mono_ns": null,
+        "net_pnl_lamports": -7000
+      }
+    ],
+    "actual_research_blocks": 1,
+    "resolved": 2,
+    "expected_decision_blocks": 2
+  },
+  "campaign_chronology_leak": {
+    "split_times": {
+      "early": {
+        "train": [
+          1000000000000,
+          5000000000000,
+          9000000000000,
+          13000000000000
+        ],
+        "validation": [
+          17000000000000
+        ],
+        "test": [
+          21000000000000
+        ]
+      },
+      "late": {
+        "train": [
+          101000000000000,
+          105000000000000,
+          109000000000000,
+          113000000000000
+        ],
+        "validation": [
+          117000000000000
+        ],
+        "test": [
+          121000000000000
+        ]
+      }
+    },
+    "earliest_late_train": 101000000000000,
+    "latest_early_test": 21000000000000,
+    "test_precedes_training": true
+  }
+}

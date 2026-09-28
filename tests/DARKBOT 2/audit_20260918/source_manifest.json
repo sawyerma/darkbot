@@ -1,0 +1,337 @@
+[
+  {
+    "path": "README.md",
+    "bytes": 4495,
+    "sha256": "0e1a3cd86979fbd90bc34635e181d91ec90ef53270d683c049d2afb2191d90f3"
+  },
+  {
+    "path": "config/phase1.json",
+    "bytes": 11309,
+    "sha256": "beecf7cdfe521d51a24084d499ee27099cc1c880b8aae0b6dadbf2c5eec0ca9e"
+  },
+  {
+    "path": "config/research.json",
+    "bytes": 1071,
+    "sha256": "9c8f8833906f2cb6e087c5a9aee4b3ef910c0b2d2e9eaf5e86ecca3ad4b618d5"
+  },
+  {
+    "path": "darkbot/__init__.py",
+    "bytes": 150,
+    "sha256": "fc5871df7ef8baf0143a3ffa727b7db94819153cfb3ad3af3895ea889cd7977f"
+  },
+  {
+    "path": "darkbot/__main__.py",
+    "bytes": 157,
+    "sha256": "cace683fee6a43f1d79ae934ffbc5c3ed75d4301e39744af50ff5784c5425242"
+  },
+  {
+    "path": "darkbot/backtest.py",
+    "bytes": 13734,
+    "sha256": "2deaf77cf0fc275f89bbe33acb2246661f8f18c2992568c58b36d99cc51bfad5"
+  },
+  {
+    "path": "darkbot/capture.py",
+    "bytes": 9310,
+    "sha256": "d237e248499c67d8b640abc316d0494bd5e54cd15be1ab43a3503b988c90cc79"
+  },
+  {
+    "path": "darkbot/cli.py",
+    "bytes": 5249,
+    "sha256": "c239266a18f578cf4ee7758627ad95553be04ae92374cc29b63d5707f2e85571"
+  },
+  {
+    "path": "darkbot/clock.py",
+    "bytes": 4134,
+    "sha256": "fd832152907ddb6cff893c96f939211ac2ddd577978773b9e0ca5af6f20229e1"
+  },
+  {
+    "path": "darkbot/config.py",
+    "bytes": 25408,
+    "sha256": "ab1063b1057787cf923da0c29e1529526129c98cab115db5d63cdbb2209a6981"
+  },
+  {
+    "path": "darkbot/domain.py",
+    "bytes": 14655,
+    "sha256": "9de8caaf8f8a89f69802a16038d28b622720fd2b4deb8cde7f478ce3c95fe88f"
+  },
+  {
+    "path": "darkbot/execution.py",
+    "bytes": 24750,
+    "sha256": "158d728fe91bf122c1a093e3807ef61bf18989818d9d11b360de71e59937fc55"
+  },
+  {
+    "path": "darkbot/fees.py",
+    "bytes": 16947,
+    "sha256": "22b49590246092d9fd59a4bd7bba511f6816892731199313ca936e952537c0d5"
+  },
+  {
+    "path": "darkbot/main.py",
+    "bytes": 23184,
+    "sha256": "8ede59b1b12c0f81cdf8cdae603ac6692657384fa100735e5d3a9896264a3691"
+  },
+  {
+    "path": "darkbot/market.py",
+    "bytes": 27186,
+    "sha256": "1cbe691e13fd268e55813a7f37b0cadc56b2bf01cf2ae2ae972bf8136ac6cd22"
+  },
+  {
+    "path": "darkbot/paper.py",
+    "bytes": 58080,
+    "sha256": "73ce112f05597eb436445c51b993edd772695a2c823d96011df576587522d6e1"
+  },
+  {
+    "path": "darkbot/replay.py",
+    "bytes": 12251,
+    "sha256": "6e068584b9c5bfcd2c734a6aacf400643850ae7c423a5a72969e701ffd891fb9"
+  },
+  {
+    "path": "darkbot/reporting.py",
+    "bytes": 31385,
+    "sha256": "bb076f5d9db729dce8ae0a2962d0a2eba026e581652f983056e33b49d030d7cf"
+  },
+  {
+    "path": "darkbot/storage.py",
+    "bytes": 19069,
+    "sha256": "ac8596655ae896216ea7f88fe515df096ab2b73b1e49881f67fa4ac776d36f82"
+  },
+  {
+    "path": "darkbot/strategy.py",
+    "bytes": 10775,
+    "sha256": "b93a226d10e88aa28ebadad5a34fe8c73133b6900583065e0605afb98cbac5e9"
+  },
+  {
+    "path": "data/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "docs/SPEC.json",
+    "bytes": 151953,
+    "sha256": "40fe4ab8130a732ca8a1023c2fb6e0165fc2832e91a6dac0e81d0ddd1e7036f5"
+  },
+  {
+    "path": "docs/legacy_backend/config/protocol_fee_mainnet_2026-09-12.json",
+    "bytes": 265,
+    "sha256": "481ee69c6e45caeba7b466e107226a06848eb8927bb0b0c388e726e9b997140f"
+  },
+  {
+    "path": "docs/legacy_backend/config/strategy_example.json",
+    "bytes": 572,
+    "sha256": "040067d59273876e7bb3a69197cfd9ae3e1e2a9ba4da477398e9a0c39a3ad74c"
+  },
+  {
+    "path": "docs/legacy_backend/config/strategy_fast_creator_hold_2x.json",
+    "bytes": 329,
+    "sha256": "ece1e6ce26eb962323b4f7f885e22f8e25e69ed648f471b550be699af6af3d1f"
+  },
+  {
+    "path": "docs/legacy_backend/config/strategy_launch_sniper_15x.json",
+    "bytes": 336,
+    "sha256": "1e9240190f0d3ba94872c7a6e88f456c961355f5e6537fb15dd64e2c59dce781"
+  },
+  {
+    "path": "docs/legacy_backend/config/strategy_paper_explore_01.json",
+    "bytes": 674,
+    "sha256": "5b8944e394382a71d94ea1bf71317aa00d9806d88d9a7f50fcafe9dc123012a7"
+  },
+  {
+    "path": "docs/legacy_backend/config/strategy_pre_pump_01.json",
+    "bytes": 657,
+    "sha256": "5c91e623e7b0555b753fcea92860edd6ee4ce88d0187a8162762ea55a6838fdf"
+  },
+  {
+    "path": "docs/legacy_backend/config/strategy_smoke_all.json",
+    "bytes": 339,
+    "sha256": "0894c6d5793bbe74a6b063a0e3d19bbd70c4aedf94e7d79451dbfc1995b8745c"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/__init__.py",
+    "bytes": 117,
+    "sha256": "3e6ca460ba0836073e56b4140ea0643254b8a5c2c2c43d5de059931824457aa6"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/backtest.py",
+    "bytes": 26841,
+    "sha256": "626854b449342e011f471497b4aa9f1c88f02bda9701ff25ea4f38ea6d005ec1"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/capture.py",
+    "bytes": 24516,
+    "sha256": "9dcefc4cc71baeff87ba610e55e02eaeb5b4d62598032b19dbc2d56f84be1f80"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/cli.py",
+    "bytes": 81778,
+    "sha256": "0b9fa644c141663f09811015e18feb7a6c77e3ac8fccdd97caef9e0741af4e69"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/clock.py",
+    "bytes": 4015,
+    "sha256": "df7ae4a946dbf090376d41286e2fdecb57179d719ac7714e6ffeb80daab5855e"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/config.py",
+    "bytes": 14792,
+    "sha256": "caf29eb979d6eab0781bcea7a7b66177b5c9d9ab1aa9a3f1058a65898baa14bf"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/domain.py",
+    "bytes": 11863,
+    "sha256": "1d45b2ffdcf40a2437d055a9f8b6f449e73c6287edc93c57df068269d8d500d3"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/execution.py",
+    "bytes": 18842,
+    "sha256": "f434b6dcdef165ddb29768d5ded278aa71741eb5136471a380fd2aa569a1f700"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/main.py",
+    "bytes": 17382,
+    "sha256": "02c372bfc0dee6e53deb1732dbc687cbf7bb4a689b4f8f7e8d0f8140fd08ff76"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/market.py",
+    "bytes": 46194,
+    "sha256": "9607b45ea5af52232a6cf9b5116c0534e5a8c010ace731e371bcb36fe1843390"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/paper.py",
+    "bytes": 30091,
+    "sha256": "bf332ea16a2a1cce9c6854c12cf008bc0a9f76bb19f88e7e8b017c944a802b4e"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/replay.py",
+    "bytes": 18446,
+    "sha256": "11676119417d7f52170d49b01509396c119643cd4ab46a06612cb6e40e03a591"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/storage.py",
+    "bytes": 16751,
+    "sha256": "002383c6f5e97187c90cd61dd37c1a485e5fd3514d6475e4e10d10325fee5f77"
+  },
+  {
+    "path": "docs/legacy_backend/darkbot/strategy.py",
+    "bytes": 7374,
+    "sha256": "3ab6a5caf5ecb19051d47a595eb524688673b20d107c98787dcdc19212176dc0"
+  },
+  {
+    "path": "docs/legacy_backend/migrations/0001_initial.sql",
+    "bytes": 24063,
+    "sha256": "87430150b7ab0ee85f19471e79bfc0556bfc4b21e4fca256192541d11e9070e8"
+  },
+  {
+    "path": "docs/legacy_backend/tests/__init__.py",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "docs/legacy_backend/tests/fixtures/features/README.md",
+    "bytes": 2329,
+    "sha256": "3091310d4422d448aa84eb58280bea514e1e20e31b75cc3a2ffecec4c0acf56d"
+  },
+  {
+    "path": "docs/legacy_backend/tests/fixtures/pumpportal/README.md",
+    "bytes": 2508,
+    "sha256": "cbfcbd8d49355d0f5c70da62553a0d4629b8dff1b9660d1bd01bb5aa7aca17c2"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_backtest.py",
+    "bytes": 6442,
+    "sha256": "daef6929900489be1adbda0f72d4e00093d8ccc0a2a9eee08d2b1177c4615671"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_capture.py",
+    "bytes": 18221,
+    "sha256": "d2375438dfa526b05cc385ca554873bbe2de764e3ca4b226791e828cf16f94f8"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_domain.py",
+    "bytes": 5800,
+    "sha256": "94fadabc29e7436e965d13bbcdbc9415b5d059fe7b2e8cb5e968b5babb81c8a0"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_execution.py",
+    "bytes": 7716,
+    "sha256": "0e2c81a24d5deeb39a50adc0e77fdc396417160810b0acaba395b16486fbc74d"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_market.py",
+    "bytes": 21073,
+    "sha256": "68a20ca65e12b7072990ba01877a034892b924f3bb3cc5c9fed0d4dc3fb5b8b5"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_paper.py",
+    "bytes": 2870,
+    "sha256": "20ed0da4c53d21be009f023fa95b134629c33893b65fe13bfceaed7f04eff7c2"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_phase0.py",
+    "bytes": 36957,
+    "sha256": "99c4dcdf0fc0ab9a13f19ead4239a014141bb830d62cde8245759c9004cc5fd1"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_replay.py",
+    "bytes": 2942,
+    "sha256": "87c41c7b70344fb95743da8f4b01edff1950c5aa6114ff1533fe639e08c72c34"
+  },
+  {
+    "path": "docs/legacy_backend/tests/test_storage.py",
+    "bytes": 9372,
+    "sha256": "632a0999bfc21593c724da43a6b66139c5a933d7c98e27c5d0aabbb4c4bea1fe"
+  },
+  {
+    "path": "exports/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "migrations/0001_phase1_spec_1_3_2.sql",
+    "bytes": 14076,
+    "sha256": "26d795be69ec98a25fc802366a8b597b10352d87e7f4ab2f1118b40f451f2c38"
+  },
+  {
+    "path": "migrations/0002_run_end_mono.sql",
+    "bytes": 270,
+    "sha256": "f239aeea56d95d453f43bcd7bedf9105dfe28ac4206be5ff0dd461c5ceb17dcc"
+  },
+  {
+    "path": "migrations/legacy/0001_initial.sql",
+    "bytes": 24063,
+    "sha256": "87430150b7ab0ee85f19471e79bfc0556bfc4b21e4fca256192541d11e9070e8"
+  },
+  {
+    "path": "requirements.txt",
+    "bytes": 503,
+    "sha256": "ab2126b76d82f979bedf35be049243eae1ef1f30a2aa3c116f600eeab3e14ac3"
+  },
+  {
+    "path": "tests/__init__.py",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/helpers.py",
+    "bytes": 14558,
+    "sha256": "f63d4ab0572d2d9c406e2d712b1a60d60912957fa228e17d124f606cfdfa5ec7"
+  },
+  {
+    "path": "tests/test_review_counterexamples.py",
+    "bytes": 8412,
+    "sha256": "eb2f2eebbd18f49ff3d77b7f31821fc12267d259af1552efda1cad10bafa5e91"
+  },
+  {
+    "path": "tests/test_t01_t15_feeds_engine.py",
+    "bytes": 18053,
+    "sha256": "cb5bfc7133b4287b11294747d988f6354495bfafac600d1aa10ffdf0f8699a38"
+  },
+  {
+    "path": "tests/test_t16_t35_costs_replay.py",
+    "bytes": 28084,
+    "sha256": "507adff33b5a871d7ef376ef1bdc4efe8f569c315b7978110baa9741afbe58c0"
+  },
+  {
+    "path": "tests/test_t36_t52_semantics.py",
+    "bytes": 38156,
+    "sha256": "09a63a2d715c45c15d30f68de943297f6642da08dfc1b62c97778be13798e4a5"
+  }
+]

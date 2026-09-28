@@ -1,0 +1,113 @@
+{
+  "campaign": "audit_no_feeds",
+  "dataset_hash": "347f9d3a58445ca30620a0ac56bb0647bcb909529f50d4764b6eb26b65face91",
+  "embargo_ns": 591200000000,
+  "forward_test_note": "After any adjustment the previous test split is development data; a new untouched forward PAPER period is required (R7).",
+  "limit_10_note": "Limit 10 is a scenario, not a LIVE release; separate temporal validation required before switching",
+  "limit_10_results": 0,
+  "qualification_rule": "POSITIVE_UNDER_MODEL only with lower bootstrap bound > 0 on untouched forward data, declared stress scenarios survived, no unresolved exposure; never LIVE_PROFIT_PROVEN",
+  "research_config": {
+    "additional_adverse_price_bps": [
+      0,
+      100,
+      300
+    ],
+    "block_length_ms": 3600000,
+    "bootstrap_confidence": "0.95",
+    "bootstrap_resamples": 2000,
+    "chronological_split": [
+      "0.60",
+      "0.20",
+      "0.20"
+    ],
+    "config_version": "phase1_research_v1",
+    "conservative_exit_reject_rate": "0.10",
+    "dataset_freeze": {
+      "coverage_version": "CANONICAL_COVERAGE_V2",
+      "decoder_version": "PUMP_LOG_DECODER_V1"
+    },
+    "entry_delay_ms": [
+      0,
+      5,
+      25,
+      100,
+      250,
+      500
+    ],
+    "exit_delay_ms": [
+      0,
+      5,
+      25,
+      100,
+      250,
+      500
+    ],
+    "joint_delay_scenarios": [
+      [
+        0,
+        0
+      ],
+      [
+        5,
+        5
+      ],
+      [
+        25,
+        25
+      ],
+      [
+        100,
+        100
+      ],
+      [
+        250,
+        250
+      ],
+      [
+        500,
+        500
+      ]
+    ],
+    "minimum_independent_blocks_for_qualification": 30,
+    "network_fee_multipliers": [
+      "1.0",
+      "2.0"
+    ],
+    "policy_freeze_note": "Test split stays locked until a candidate is frozen on training/validation; set test_split_unlocked=true exactly once afterwards.",
+    "portfolio_position_limits": [
+      1,
+      10
+    ],
+    "random_seed": 20260916,
+    "selection_portfolio_position_limit": 1,
+    "spec_version": "1.3.2",
+    "target_grid": [
+      "1.1",
+      "1.25",
+      "1.5",
+      "1.75",
+      "2.0",
+      "2.5",
+      "3.0"
+    ],
+    "test_split_unlocked": false
+  },
+  "results": [
+    {
+      "launches": 0,
+      "run_id": "audit_no_feeds_paper_20260918T101602Z_f14825",
+      "split": "test",
+      "status": "LOCKED_UNTIL_POLICY_FREEZE",
+      "variant_id": "ALL"
+    }
+  ],
+  "selection_for_limit_1": {
+    "candidates": [],
+    "reason": "INSUFFICIENT_DATA: no validation variant with a bootstrap interval; baseline kept",
+    "selected_target": "1.5"
+  },
+  "source_runs": [
+    "audit_no_feeds_paper_20260918T101602Z_f14825"
+  ],
+  "variants_registered": 1
+}

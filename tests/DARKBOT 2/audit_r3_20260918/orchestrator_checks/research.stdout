@@ -1,0 +1,1 @@
+research audit_r3_no_feeds: variants=1 selection={'selected_target': '1.5', 'reason': 'INSUFFICIENT_DATA: no validation variant with a bootstrap interval; baseline kept', 'candidates': []} -> /Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/audit_r3_20260918/orchestrator_checks/research

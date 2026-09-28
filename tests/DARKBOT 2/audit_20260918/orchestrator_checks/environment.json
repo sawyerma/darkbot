@@ -1,0 +1,12 @@
+{
+  "python": "3.14.3 (main, Feb  3 2026, 15:32:20) [Clang 17.0.0 (clang-1700.6.3.2)]",
+  "executable": "/opt/homebrew/opt/python@3.14/bin/python3.14",
+  "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+  "env_present": {
+    "HELIUS_API_KEY": false,
+    "EXISTING_RPC_WSS_URL": false,
+    "EXISTING_RPC_HTTP_URL": false,
+    "PUMPPORTAL_API_KEY": false
+  },
+  "websockets": "MISSING"
+}

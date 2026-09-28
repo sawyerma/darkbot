@@ -1,0 +1,55 @@
+{
+  "old_reserves": {
+    "state": "CLOSED",
+    "side": "SELL",
+    "status": "FILLED",
+    "proxy_age_ns": 590000000000,
+    "limit_ms": 250
+  },
+  "invalid_fee_pending": {
+    "status": "CURVE_UNAVAILABLE",
+    "failure_reason": "UNQUALIFIED_COSTS",
+    "fees_charged_lamports": 7000,
+    "cost_evidence_status": "MEASURED",
+    "fee_reconciliation_status": "APPLIED_AT_MODELED_FILL",
+    "position": "ENTRY_FAILED"
+  },
+  "conflict_pending": {
+    "uncertain": true,
+    "state": "OPEN",
+    "attempt": "FILLED"
+  },
+  "foreign_trade": {
+    "uncertain": true,
+    "vsol": 99000000000,
+    "attempts": [
+      {
+        "side": "BUY",
+        "status": "FILLED"
+      },
+      {
+        "side": "SELL",
+        "status": "FILLED"
+      }
+    ],
+    "stored": {
+      "virtual_sol_reserves": 99000000000,
+      "quote_mint_raw": "7dLrFakvLTfZy2c5Ymfqd7KDYndBgrgENUiQ3daRMhhH",
+      "quote_scope_status": null
+    }
+  },
+  "fee_provenance": {
+    "attempt_network_id": "new_network",
+    "attempt_network_fee": 7000,
+    "fill_quote_network_fee": 11000,
+    "position_network_fee": 11000
+  },
+  "partial_persisted": {
+    "positions": 1,
+    "create": {
+      "actionable_mono_ns": null,
+      "winner_feed_id": "existing_rpc",
+      "first_seen_mono_ns": 1000001000000
+    }
+  }
+}

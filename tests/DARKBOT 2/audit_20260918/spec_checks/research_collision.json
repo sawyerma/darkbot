@@ -1,0 +1,16 @@
+{
+  "source1_output_run": "research_camp_train_same",
+  "source2_output_run": "research_camp_train_same",
+  "db_runs": [
+    {
+      "run_id": "research_camp_train_same",
+      "parent_run_id": "source1"
+    }
+  ],
+  "positions": [
+    {
+      "run_id": "research_camp_train_same",
+      "mint": "8N6gdCdg9tuGcGAsEkqrLogh7RyHwuLR4woiKZ1cwtn3"
+    }
+  ]
+}

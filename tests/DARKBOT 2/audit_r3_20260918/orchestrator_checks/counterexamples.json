@@ -1,0 +1,40 @@
+{
+  "wrong_global_discriminator": {
+    "expected": "invalid/unknown",
+    "actual_status": "VALID",
+    "evidence": "MEASURED",
+    "bug_reproduced": true
+  },
+  "unknown_quote_trade_sol_columns": {
+    "expected": "NULL SOL reserves until quote scope verified",
+    "actual": {
+      "virtual_sol_reserves": null,
+      "quote_scope_status": null
+    },
+    "bug_reproduced": false
+  },
+  "doctor_creator_sell_count": {
+    "expected": 1,
+    "actual": 0,
+    "runtime_creator_sell_detected": true,
+    "bug_reproduced": true
+  },
+  "campaign_reentry_after_restart": {
+    "expected": "no second submitted BUY for same campaign/mint",
+    "actual_positions": [
+      {
+        "campaign_id": "camp",
+        "run_id": "first",
+        "mint": "8N6gdCd5Z7njqvG9rxsNbe5mt5hBtVFDHVHJeNzEcWw9",
+        "state": "OPEN"
+      },
+      {
+        "campaign_id": "camp",
+        "run_id": "second",
+        "mint": "8N6gdCd5Z7njqvG9rxsNbe5mt5hBtVFDHVHJeNzEcWw9",
+        "state": "OPEN"
+      }
+    ],
+    "bug_reproduced": true
+  }
+}

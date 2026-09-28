@@ -1,0 +1,55 @@
+{
+  "gate_duplicate_stress_across_recordings": {
+    "base_status": "POSITIVE_UNDER_MODEL",
+    "unique_stress_scenarios": 1,
+    "required_stress_scenarios": 11
+  },
+  "gate_unknown_entry_exposure": {
+    "pre_status": "POSITIVE_UNDER_MODEL_PENDING_STRESS",
+    "post_status": "POSITIVE_UNDER_MODEL",
+    "unresolved": 1
+  },
+  "gate_unqualified_stress": {
+    "base_status": "POSITIVE_UNDER_MODEL",
+    "stress_status": "UNQUALIFIED_COSTS"
+  },
+  "dataset_raw_content_change": {
+    "hash_equal": true,
+    "loaded_raw_changed": true,
+    "new_payload_contains_altered_sig": true
+  },
+  "stress_policy_hash_same": {
+    "config": true,
+    "cost_model": true,
+    "quote_model": true
+  },
+  "utilization_wrong_denominator": {
+    "reported": 1.0,
+    "expected_using_recorded_end": 0.00010001000100010001,
+    "busy_ns": 1000000,
+    "recorded_span_ns": 9999000000
+  },
+  "daily_utc_anchor_shift": {
+    "reported": {
+      "note": "net PnL per UTC day of position close (failed entries: decision day), derived from run start UTC plus monotonic offset; no extrapolation",
+      "by_day": {
+        "2026-09-18": 123
+      }
+    },
+    "expected_day": "2026-09-19"
+  },
+  "baseline_preference_drops_positive_flag": {
+    "selection": {
+      "selected_target": "1.5",
+      "reason": "baseline within 10% of best lower bound; simpler stable choice preferred",
+      "best": "best"
+    },
+    "would_freeze": false
+  },
+  "persisted_freeze_unlock_workflow": {
+    "first_run_succeeded": true,
+    "freeze_exists": true,
+    "unlock_result": "ValueError: research run research_camp_run_b8821fd1b8fb_train_t1.1_e0_x0_f1.0_a0_r0_paired already exists: re-running the same variant on the same recording is not allowed (delete or use a new campaign)",
+    "test_runs_persisted": 0
+  }
+}

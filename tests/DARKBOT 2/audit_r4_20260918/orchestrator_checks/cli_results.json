@@ -1,0 +1,47 @@
+{
+  "python": "3.14.3 (main, Feb  3 2026, 15:32:20) [Clang 17.0.0 (clang-1700.6.3.2)]",
+  "env_present": {
+    "HELIUS_API_KEY": false,
+    "EXISTING_RPC_WSS_URL": false,
+    "EXISTING_RPC_HTTP_URL": false,
+    "PUMPPORTAL_API_KEY": false
+  },
+  "commands": [
+    {
+      "name": "doctor",
+      "exit": 4,
+      "readiness": "NOT_READY",
+      "checks": {
+        "D01": "FAIL",
+        "D02": "FAIL",
+        "D03": "FAIL",
+        "D04": "PASS",
+        "D05": "FAIL",
+        "D06": "FAIL"
+      },
+      "artifacts": null,
+      "error": null
+    },
+    {
+      "name": "paper",
+      "exit": 4,
+      "readiness": "NOT_READY",
+      "checks": {},
+      "artifacts": [
+        "exports/audit_r4_no_feeds/audit_r4_no_feeds_paper_20260918T142630Z_644213/report.json",
+        "exports/audit_r4_no_feeds/audit_r4_no_feeds_paper_20260918T142630Z_644213/positions.csv",
+        "exports/audit_r4_no_feeds/audit_r4_no_feeds_paper_20260918T142630Z_644213/latency_by_feed.csv",
+        "exports/audit_r4_no_feeds/audit_r4_no_feeds_paper_20260918T142630Z_644213/summary.md"
+      ],
+      "error": null
+    },
+    {
+      "name": "report",
+      "exit": 0
+    },
+    {
+      "name": "research",
+      "exit": 0
+    }
+  ]
+}

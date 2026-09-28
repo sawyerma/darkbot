@@ -1,0 +1,39 @@
+{
+  "partial_atomic_upgrade": {
+    "expected_vsol": 35000000000,
+    "actual_vsol": 30000000000,
+    "expected_vtok": 973000000000000,
+    "actual_vtok": 1073000000000000,
+    "status": "FILLED",
+    "quote_state_event_id": "run|atomic|2|8N6gdCd5Z7njqvG9rxsNbe5mt5hBtVFDHVHJeNzEcWw9|CREATE",
+    "proxy_event_id": "run|atomic|2|8N6gdCd5Z7njqvG9rxsNbe5mt5hBtVFDHVHJeNzEcWw9|CREATE",
+    "stored_events": [
+      {
+        "event_type": "CREATE",
+        "virtual_sol_reserves": 30000000000,
+        "quality_status": "VALID_UPGRADED_FROM_PARTIAL"
+      },
+      {
+        "event_type": "BUY",
+        "virtual_sol_reserves": 35000000000,
+        "quality_status": "VALID_UPGRADED_FROM_PARTIAL"
+      }
+    ]
+  },
+  "future_gap_changes_earlier_replay_fill": {
+    "paper_state": "OPEN",
+    "paper_fill_status": "FILLED",
+    "paper_fill_time": 1000021000000,
+    "gap_start": 1000030000000,
+    "replay_state": "UNRESOLVED",
+    "replay_quality": "UNKNOWN_COVERAGE_GAP_AT_MODELED_FILL"
+  },
+  "wrong_global_discriminator": {
+    "status": "VALID",
+    "evidence": "MEASURED"
+  },
+  "doctor_creator_sell_count": {
+    "runtime_detected": true,
+    "doctor_count": 0
+  }
+}

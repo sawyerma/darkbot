@@ -1,0 +1,68 @@
+{
+  "stale_reserve_timeout": {
+    "status": "FILLED",
+    "side": "SELL",
+    "proxy_age_ns": 590000000000,
+    "cost_evidence_status": "MEASURED",
+    "configured_max_ns": 250000000
+  },
+  "gate_no_candidate_and_insufficient_stress": [
+    {
+      "status": "POSITIVE_UNDER_MODEL",
+      "blocks": 30
+    },
+    {
+      "status": "INSUFFICIENT_DATA",
+      "blocks": 2
+    }
+  ],
+  "gate_duplicate_stress_across_recordings": "POSITIVE_UNDER_MODEL",
+  "gate_unknown_entry_exposure": "POSITIVE_UNDER_MODEL_PENDING_STRESS",
+  "dataset_fee_content_change": {
+    "hash_equal": true,
+    "loaded_bps": 1000
+  },
+  "dataset_decoder_layout_change_same_version": {
+    "runtime_hash_changed": true,
+    "dataset_hash_equal": true
+  },
+  "legacy_future_gap": [
+    {
+      "set": "FEATURE_SET_V2_CANONICAL_COVERAGE",
+      "cutoff_offset_ms": 1,
+      "gap": false,
+      "quality": "OK"
+    },
+    {
+      "set": "FEATURE_CONTRACT_V1_LEGACY",
+      "cutoff_offset_ms": 1,
+      "gap": true,
+      "quality": "OK"
+    }
+  ],
+  "feature_key_order": [
+    "buy_count",
+    "buy_volume_sol",
+    "buyer_volume_concentration",
+    "curve_progress_pct"
+  ],
+  "utilization_over_one": 5.0,
+  "fee_attempt_columns_inconsistent": {
+    "status": "FILLED",
+    "attempt_network_fee": 7000,
+    "fill_quote_network_fee": 20000,
+    "referenced_fee_snapshot": "run_fee_network_new"
+  },
+  "stress_exceeds_slippage_limit": {
+    "status": "FILLED",
+    "max_input": 102638274,
+    "filled_debit": 109613691,
+    "slippage_bps": 300,
+    "adverse_bps": 1000
+  },
+  "stress_policy_hash_same": {
+    "config": true,
+    "cost_model": true,
+    "quote_model": true
+  }
+}

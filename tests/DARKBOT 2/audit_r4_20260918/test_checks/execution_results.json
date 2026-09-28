@@ -1,0 +1,60 @@
+{
+  "unknown_tail": {
+    "completeness": "COMPLETE",
+    "tail": {
+      "tail_bytes": 19,
+      "tail_prefix_hash": "4b6efefcf5d6",
+      "tail_verified": false,
+      "tail_values": null
+    },
+    "state": "CLOSED",
+    "vsol": 60000000000,
+    "attempts": [
+      {
+        "side": "BUY",
+        "status": "FILLED"
+      },
+      {
+        "side": "SELL",
+        "status": "FILLED"
+      }
+    ]
+  },
+  "duplicate_changed_quote": {
+    "validation": "DUPLICATE",
+    "quote_uncertain": false,
+    "quote_scope": "SOL_WSOL",
+    "position": "OPEN"
+  },
+  "open_conflict": {
+    "quote_uncertain": true,
+    "touched": [],
+    "position": "OPEN",
+    "unresolved": null
+  },
+  "multi_mint_reorg": {
+    "8N6gdCd5Z7njqvG9rxsNbe5mt5hBtVFDHVHJeNzEcWw9": {
+      "quote_uncertain": false,
+      "position": "OPEN"
+    },
+    "8N6gdCdg9tuGcGAsEkqrLogh7RyHwuLR4woiKZ1cwtn3": {
+      "quote_uncertain": true,
+      "position": null
+    }
+  },
+  "rejected_fill_current_fee": {
+    "status": "SLIPPAGE_REJECTED",
+    "failure_reason": "max_sol_cost_exceeded debit=277408667",
+    "network_fee_snapshot_id": "new_network",
+    "network_fee_total_lamports": 7000,
+    "fees_charged_lamports": 7000,
+    "expected_current_fee": 11000
+  },
+  "future_conflict_backpropagates": {
+    "status": "UNKNOWN",
+    "failure_reason": "QUOTE_CONFLICT",
+    "modeled_fill_mono_ns": 1000011000000,
+    "callback_actual_mono_ns": 1000030000000,
+    "conflict_observed_mono_ns": 1000020000000
+  }
+}

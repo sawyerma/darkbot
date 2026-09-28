@@ -1,0 +1,5 @@
+# DarkBot Phase-1 (SPEC 1.3.2) – exact pins. Standard library covers asyncio/sqlite3/json/decimal/argparse/unittest/urllib.
+# Only third-party dependency: WebSocket client for the live feeds (paper/doctor). websockets has no transitive dependencies.
+# NOTE: the pin could not be resolved/installed in the offline build sandbox (no network); verify with
+#   python3 -m pip install -r requirements.txt   (same interpreter as `python3 -m darkbot`, no venv, no --break-system-packages)
+websockets==15.0.1

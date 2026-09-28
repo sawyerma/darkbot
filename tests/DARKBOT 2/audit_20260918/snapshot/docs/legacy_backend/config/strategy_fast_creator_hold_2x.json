@@ -1,0 +1,13 @@
+{
+  "candidate_name": "FAST_CREATOR_HOLD_2X",
+  "observation_ms": 500,
+  "filters": [],
+  "trade_amount_lamports": 98370000,
+  "target_net_multiple": "2.0",
+  "stop_net_multiple": "0",
+  "max_hold_ms": 590000,
+  "base_fee_lamports": 5000,
+  "priority_fee_lamports": 100000,
+  "max_slippage_bps": 300,
+  "entry_latency_ms": 800
+}

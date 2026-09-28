@@ -1,0 +1,2780 @@
+{
+  "document_type": "AI_IMPLEMENTATION_SPECIFICATION",
+  "spec_version": "1.3.2",
+  "created_utc_date": "2026-09-16",
+  "language": "de-DE",
+  "status": "SPEC_FROZEN_NOT_IMPLEMENTED",
+  "instruction_to_implementing_ai": {
+    "mission": "Optimiere das bestehende DarkBot-Backend für einen einfachen, stabilen Start ohne monatliche Infrastrukturkosten. Erfasse neue Pump.fun-Launches möglichst früh, führe realistische PAPER-Trades auf dem laufenden Mainnet-Datenstrom aus und liefere automatisch reproduzierbare Latenz- und Netto-Erwartungswert-Auswertungen.",
+    "authorization_boundary": "Dieses Dokument spezifiziert die spätere Umsetzung. Es autorisiert keine echten Käufe, Verkäufe, kostenpflichtigen Abonnements oder kostenpflichtigen Daten-Abos. Implementierung und PAPER sind der nächste Arbeitsschritt; LIVE-Senden bleibt technisch deaktiviert, bis der Nutzer es gesondert autorisiert.",
+    "priorities": [
+      "Korrekte, kausale Daten und Ausführung vor scheinbar gutem PAPER-PnL",
+      "Niedrigste praktisch erreichbare Empfang-bis-Entscheidung-Latenz bei einfacher Architektur",
+      "Keine monatlichen Lizenz- oder Infrastrukturkosten; vorhandenen Rechner und kostenlose Kontingente verwenden",
+      "Stabilität, reproduzierbare Messungen und ehrliche Datenlücken",
+      "Strategie anhand neuer Daten prüfen, keine Profitgarantie"
+    ],
+    "working_rules": [
+      "Bestehenden Code zuerst lesen und gezielt ändern; keine vollständige Neuentwicklung.",
+      "Alle Strategie-, Risiko-, Kosten-, Modell- und Betriebsparameter in versionierten JSON-Konfigurationen; keine versteckten operativen Konstanten.",
+      "Keine Produktionsschlüssel in Quellcode, Konfigurationsexporten, Datenbank oder Logs.",
+      "Nicht vorhandene Messdaten, Gebühren, Reserven oder Vertragsdateien nicht erfinden. Fehlende Pflichtdaten führen zu markierter Nicht-Handelbarkeit.",
+      "PAPER und später LIVE teilen Entscheidungs-, Positions-, Quote- und Exit-Logik; ausschließlich Ausführung und deren Rückmeldungen unterscheiden sich.",
+      "Ein fehlgeschlagener Test wird korrigiert, nicht durch Entfernen der Prüfung umgangen.",
+      "Zuerst Pflichtfehler und Messbarkeit beheben, dann Geschwindigkeit messen und anhand eines Profils optimieren.",
+      "Verbindlichen einfachen Dateibaum und minimal_environment_contract umsetzen; keine virtuelle Umgebung und keine überholten parallelen Runtime-Pfade.",
+      "Technischen Verbindungstest direkt als wiederverwendbaren doctor-/Recorder-Pfad bauen, nicht als isoliertes Experiment."
+    ],
+    "non_goals": [
+      "Eigener Solana-Validator/RPC-Knoten",
+      "Shred-Receiver, Yellowstone, kostenpflichtige Preconfirmations",
+      "Redis, Kafka, Microservices, neues Web-Dashboard",
+      "Kompletter Rust-Rewrite ohne Profilingnachweis",
+      "ML oder adaptive Gewinnschwellen in Phase 1",
+      "Garantie der ersten Chartkerze, einer bestimmten Transaktionsposition oder eines Exits vor dem Dev-Verkauf"
+    ]
+  },
+  "evidence_and_provenance": {
+    "primary_code": "backend.zip",
+    "historical_only": [
+      "lean_v1_frozen(1).zip",
+      "v2_9_10(2).zip"
+    ],
+    "documents": [
+      "markdown(20260916-203038).md eingefügt",
+      "DARKBOT_KEY_FINDING_ANFANGSKERZE_2026-09-13(2).md",
+      "DARKBOT_RESEARCH_LOG_2026-09-13(2).md",
+      "MEME_DarkBot_Handoff_2026-09-13_v3(1).md"
+    ],
+    "limits": [
+      "Keine auswertbare historische Handelsdatenbank im Backend-Upload; data/logs enthalten keine passende Rohdatengrundlage.",
+      "Historische Berichte sind Hypothesen, kein unabhängig nachgerechneter Edge-Nachweis.",
+      "Der aktuelle Backend-Upload enthält keinen vollständig zuordenbaren externen ACTIVE_CONTRACT samt vollständiger Projektumgebung. Vor Umsetzung auflösen; ältere Contracts nicht stillschweigend übernehmen.",
+      "Historische Latenzkonfiguration beeinflusst teilweise sowohl Entry als auch Exit. Alte PnL-Unterschiede deshalb nicht als isolierten Feed-Latenzeffekt interpretieren."
+    ],
+    "input_files": [
+      {
+        "filename": "DARKBOT_KEY_FINDING_ANFANGSKERZE_2026-09-13(2).md",
+        "bytes": 2042,
+        "sha256": "c08139eb479e82293ac5cec4d5084d5e7f856c7ac98c8563a60b22cda8e5f39f"
+      },
+      {
+        "filename": "DARKBOT_RESEARCH_LOG_2026-09-13(2).md",
+        "bytes": 4548,
+        "sha256": "2dad5865eee0a5bcc9444a6588284a09b34bbb402feec913e35b39c409b4ab6c"
+      },
+      {
+        "filename": "MEME_DarkBot_Handoff_2026-09-13_v3(1).md",
+        "bytes": 14574,
+        "sha256": "af1bde7ea84b811567dd57025ae56814b16bd813b7c65f64d08c58084df14e73"
+      },
+      {
+        "filename": "backend.zip",
+        "bytes": 469202,
+        "sha256": "b263aca8e3ae955ee7b7148337806daf716cc593dc1a6431c1c56c3cb0389b9b"
+      },
+      {
+        "filename": "lean_v1_frozen(1).zip",
+        "bytes": 307042,
+        "sha256": "1e0b39e47e87e4b1f46d7a3ea5e5f8913809c90a3b2692837fba3083b73b4fd0"
+      },
+      {
+        "filename": "markdown(20260916-203038).md eingefügt",
+        "bytes": 10603,
+        "sha256": "dcd16a9aef4fe01fcdf2aa299e792b9730e2bd4bbde9012a0442371f45b3ba8f"
+      },
+      {
+        "filename": "v2_9_10(2).zip",
+        "bytes": 229667,
+        "sha256": "1c8fdfafae6e1b38d85a8272802a2343bfc817640034540eaa8f25f0ced78f05"
+      }
+    ]
+  },
+  "core_design": {
+    "runtime": "Vorhandenes Python-Backend gemäß simple_project_structure: ein Prozess mit asyncio, ein StateOwner, RAM-Zustand und begrenzte Queues; ein SQLite-Writer-Thread. Standardbibliothek bevorzugen. Solders nur bei tatsächlich erforderlichem lokalem Decoder-/Builderbedarf, kein vorsorglicher LIVE-Stack.",
+    "feeds": [
+      {
+        "id": "helius_standard",
+        "transport": "standard logsSubscribe",
+        "commitment": "processed",
+        "purpose": "CREATE sowie Trades/Reserven/Creator-Sells",
+        "endpoint_template": "wss://beta.helius-rpc.com/?api-key=${HELIUS_API_KEY}",
+        "requirements": "Gatekeeper/Standard-WSS-Verfügbarkeit und Free-Kontingent beim Setup anhand aktueller Dokumentation prüfen. Keine Premium-Subscription als Ersatz aktivieren."
+      },
+      {
+        "id": "existing_rpc",
+        "transport": "standard logsSubscribe",
+        "commitment": "processed",
+        "purpose": "Unabhängiger paralleler CREATE- und Trade-Feed",
+        "endpoint_template": "${EXISTING_RPC_WSS_URL}",
+        "requirements": "Anbieter, Region und Backend-Unabhängigkeit dokumentieren. Zwei URLs desselben Upstreams nicht als unabhängige Redundanz verkaufen."
+      },
+      {
+        "id": "pumpportal",
+        "transport": "WebSocket subscribeNewToken + subscribeMigration",
+        "purpose": "Optionale kostenlose CREATE-Hinweise und Migrationsmeldungen",
+        "endpoint_template": "wss://pumpportal.fun/api/data?api-key=${PUMPPORTAL_API_KEY}",
+        "requirements": "Optionaler API-Key aus PUMPPORTAL_API_KEY. Genau eine Verbindung, nur subscribeNewToken und subscribeMigration. Kostenpflichtige Trade-/Account-Subscriptions sind verboten. doctor prüft kostenfreien Zugang, sonst Adapter deaktivieren und RPC-Feeds weiterverwenden."
+      }
+    ],
+    "winner_definition": "First actionable CREATE wins: Die erste vollständig validierte, für die gemeinsame Strategie verwertbare Nachricht darf den Entry auslösen. Frühester Hinweis und früheste vollständige Handelsbereitschaft sind getrennte Metriken.",
+    "hot_path": [
+      "WebSocket-Message empfangen und monotone Empfangszeit erfassen",
+      "Minimal dekodieren und Protokoll/Transaktionsstatus prüfen",
+      "SOL-only-Scope, Venue-Gültigkeit und kanonische Coverage per RAM/Decoder prüfen",
+      "Beobachtung dem kanonischen Ereignis zuordnen; genau einen Positions-Intent reservieren",
+      "Vollständigen atomaren Transaktionsinhalt in korrekter Reihenfolge berücksichtigen",
+      "Benötigte Accounts/Reserven/Creator feststellen; günstige RAM-Prüfungen für Kapital, Positionszahl und Datenqualität",
+      "Gemeinsame Strategie entscheidet; PAPER-Ausführung einplanen bzw. später LIVE-Adapter aufrufen",
+      "Unveränderliche minimale Telemetrie in begrenzte Queue übergeben"
+    ],
+    "outside_hot_path": [
+      "SQLite-Schreibzugriffe und Row-Aufbereitung",
+      "JSON-Serialisierung für Archiv/Reports und Hashing großer Payloads",
+      "Metadaten und REST-getTransaction-Fallbacks",
+      "17 Features bei leerem Filterset",
+      "Terminalausgabe pro Tick/Trade",
+      "Statistik, Berichtserstellung, Backtests und Konfigurationshashing"
+    ],
+    "background_preparation": [
+      "Protokollkonfiguration und Gebühren mit Herkunft und Gültigkeit laden",
+      "Feed-Verbindungen warm halten, Subscription-ACKs prüfen",
+      "Bei späterem Transaktionsbau Blockhash, statische Accounts und notwendige Protokollzustände im Hintergrund aktuell halten",
+      "Bei fehlenden oder veralteten Pflichtdaten Entry auslassen und Grund zählen; niemals im Entscheidungsweg lange nachladen"
+    ],
+    "dedup_and_order": {
+      "canonical_event_key": [
+        "signature",
+        "instruction_or_log_index",
+        "mint",
+        "event_type"
+      ],
+      "create_key": "Eindeutige CREATE-Instruktion; Mint ist zusätzlicher Positionsschutz, allein aber keine ausreichende Ereignisidentität.",
+      "provider_observation": "Jede Feed-Beobachtung inklusive Duplikat wird für Feed-Vergleich aufbewahrt, ohne zweimal zu handeln.",
+      "missing_identity": "Provider-Hinweise ohne ausreichend gesicherte Identität als UNMATCHED/HINT speichern. Keine künstliche sichere Zuordnung zu einem Transaktionsereignis.",
+      "atomicity": "CREATE plus mehrere Trades in einer Transaktion bilden eine atomare Ausführung. PAPER darf nicht zwischen deren Instruktionen kaufen. Nach dem CREATE nur den ersten Buy zu berücksichtigen ist unzulässig.",
+      "out_of_order": "Slot, Signatur und Instruktionsindex aufbewahren. Netzwerkempfang ist keine globale Ledger-Reihenfolge. Ältere Zustände dürfen neuere nicht überschreiben. Bei unauflösbaren Konflikten Quote als unsicher markieren und keinen neuen Entry erzeugen.",
+      "reorgs": "processed ist vorläufig. Orphan-/Rollback-Fälle und später fehlerhafte Transaktionen kennzeichnen; keinen endgültigen Fill allein aus processed oder RPC-ACK behaupten.",
+      "exactly_once_intent": "Ein Actor/Sequencer verwaltet Positionen. Wiederholte CREATEs dürfen nach Fehlern Zustandsklärung ermöglichen, aber keinen unkontrollierten zweiten Kauf.",
+      "partial_transaction": "Eine CREATE-Nachricht, die die für den Entry notwendige atomare Transaktionswirkung nicht zuverlässig abbildet, ist nur HINT/PARTIAL. Früh eintreffende, aber unvollständige Reserven dürfen keinen günstigeren Zwischenzustand als handelbar ausgeben."
+    }
+  },
+  "configuration_template": {
+    "template_status": "PROPOSED_DEFAULTS_REQUIRES_PREFLIGHT_VALIDATION",
+    "mode": "PAPER",
+    "live_broadcast_enabled": false,
+    "monthly_paid_services_allowed": false,
+    "strategy": {
+      "observation_ms": 0,
+      "filters": [],
+      "entry_trigger": "FIRST_ACTIONABLE_CREATE",
+      "target_net_multiple": "1.5",
+      "target_is_proven_optimal": false,
+      "ordinary_stop_enabled": false,
+      "creator_sell_exit_enabled": true,
+      "entry_amount_lamports": 98370000,
+      "sizing_mode": "FIXED_SOL",
+      "policy_frozen_per_position": true,
+      "same_event_exit_priority": [
+        "CREATOR_SELL",
+        "TARGET",
+        "TIMEOUT"
+      ],
+      "strategy_timeout_ms": 590000,
+      "timeout_policy": "FORCE_EXIT",
+      "timeout_clock_origin": "SUCCESSFUL_ENTRY_FILL",
+      "entry_amount_semantics": "CURVE_INPUT_EXCLUDING_ALL_FEES_AND_RENT",
+      "entry_amount_is_usd_pegged": false,
+      "entry_reentry_policy": "ONE_SUBMITTED_ENTRY_PER_MINT_PER_CAMPAIGN",
+      "quote_asset_policy": "SOL_ONLY"
+    },
+    "portfolio": {
+      "initial_paper_balance_lamports": 1000000000,
+      "max_open_positions": 1,
+      "allow_borrowing": false,
+      "reserve_exit_costs": true,
+      "occupied_slot_states": [
+        "ENTRY_INTENT",
+        "ENTRY_PENDING",
+        "OPEN",
+        "EXIT_PENDING",
+        "UNRESOLVED"
+      ],
+      "unresolved_with_possible_exposure_occupies_slot": true
+    },
+    "latency_model": {
+      "entry_delay_ms": 0,
+      "exit_delay_ms": 0,
+      "label": "ASSUMED_OPTIMISTIC_BASELINE",
+      "zero_delay_run_can_qualify_edge": false,
+      "stage_breakdown_required": true,
+      "measured_distribution_id": null,
+      "stress_delay_ms": [
+        5,
+        25,
+        100,
+        250,
+        500
+      ],
+      "scenario_unit": "MILLISECONDS",
+      "explanation": "Null Millisekunden ist nur Diagnose. Entry und Exit unabhängig variieren; Modellverzögerungen nicht doppelt auf bereits gemessene lokale Verzögerungen addieren."
+    },
+    "execution": {
+      "max_exit_attempts": 3,
+      "exit_retry_backoff_ms": [
+        50,
+        150
+      ],
+      "quote_max_age_ms": 250,
+      "slippage_bps": 300,
+      "unknown_status_policy": "RECONCILE_BEFORE_RESUBMIT",
+      "retries_must_advance_time": true,
+      "entry_max_attempts": 1,
+      "exit_retries_after_exhaustion": "NO_AUTOMATIC_NEW_SUBMISSION; CONTINUE_RECONCILIATION_AND_MARK_UNRESOLVED",
+      "fill_evidence_status": "OBSERVED_STATE_PROXY",
+      "supported_venue": "PUMP_BONDING_CURVE",
+      "pumpswap_execution_enabled": false
+    },
+    "costs": {
+      "protocol_snapshot_id": null,
+      "base_fee_lamports": null,
+      "priority_fee_lamports": null,
+      "sender_tip_lamports": 0,
+      "account_rent_lamports": null,
+      "irrecoverable_account_cost_lamports": null,
+      "unverified_fee_snapshot_blocks_qualified_pnl": true,
+      "resolution_mode": "AUTO_RESOLVE_AND_PERSIST_BEFORE_ECONOMIC_PAPER",
+      "null_means": "UNRESOLVED_NOT_ZERO; beim Aufbau automatisch auflösen, nicht dauerhaft als Default verwenden",
+      "snapshot_refresh_policy": {
+        "protocol_refresh_interval_ms": 60000,
+        "protocol_max_age_ms": 120000,
+        "network_fee_refresh_interval_ms": 10000,
+        "network_fee_max_age_ms": 30000,
+        "rent_refresh_interval_ms": 3600000,
+        "rent_max_age_ms": 7200000,
+        "status": "INITIAL_OPERATIONAL_DEFAULTS_NOT_PROTOCOL_GUARANTEES",
+        "rule": "Accountänderungen sofort invalidieren; kostenlose RPC-Budgets berücksichtigen. Kein Polling pro Tick."
+      }
+    },
+    "storage": {
+      "engine": "sqlite",
+      "journal_mode": "WAL",
+      "writer_threads": 1,
+      "queue_capacity_records": 50000,
+      "batch_max_records": 500,
+      "flush_interval_ms": 100,
+      "report_interval_ms": 5000,
+      "raw_retention_policy": "KEEP_UNTIL_REPORT_AND_REPLAY_VERIFIED",
+      "on_queue_overflow": "MARK_GAP_AND_PAUSE_NEW_ENTRIES",
+      "on_disk_error": "MARK_RUN_INVALID_AND_PAUSE_NEW_ENTRIES"
+    },
+    "connectivity": {
+      "reconnect_initial_ms": 250,
+      "reconnect_max_ms": 10000,
+      "jitter_fraction": "0.2",
+      "subscription_ack_timeout_ms": 10000,
+      "liveness_check_interval_ms": 5000,
+      "position_state_stale_ms": 2000,
+      "pumpportal_required": false,
+      "pumpportal_api_key_env": "PUMPPORTAL_API_KEY"
+    },
+    "research": {
+      "target_grid": [
+        "1.1",
+        "1.25",
+        "1.5",
+        "1.75",
+        "2.0",
+        "2.5",
+        "3.0"
+      ],
+      "pilot_min_unique_creates": 1000,
+      "chronological_split": [
+        "0.60",
+        "0.20",
+        "0.20"
+      ],
+      "bootstrap_confidence": "0.95",
+      "bootstrap_resamples": 2000,
+      "random_seed": 20260916,
+      "minimum_independent_blocks_for_qualification": 30,
+      "adaptive_targets_enabled": false,
+      "execution_stress": {
+        "network_fee_multipliers": [
+          "1.0",
+          "2.0"
+        ],
+        "additional_adverse_price_bps": [
+          0,
+          100,
+          300
+        ],
+        "failure_scenario": "Historisch beobachtete Fehler plus gesondertes konservatives Szenario; dessen Häufigkeit vor Test registrieren, nicht nach Ergebnis wählen.",
+        "interpretation": "Adverse-Preis-Sensitivität ist eine Modellannahme und keine erneute Addition schon im Quote enthaltener Gebühren oder Curve-Impact."
+      },
+      "research_horizon_ms": 600000,
+      "research_horizon_policy": "CENSOR",
+      "research_horizon_clock_origin": "FIRST_VALID_CREATE_RECEIPT",
+      "portfolio_position_limits_to_compare": [
+        1,
+        10
+      ],
+      "selection_portfolio_position_limit": 1,
+      "feature_snapshot_offsets_ms": [
+        0,
+        250,
+        500,
+        750,
+        1000
+      ],
+      "active_feature_set": "FEATURE_SET_V2_CANONICAL_COVERAGE",
+      "legacy_feature_export_enabled": true,
+      "max_unresolved_exposure_for_positive_qualification_lamports": 0
+    },
+    "default_provenance": "Observation 0 ms, Nettoziel 1.5x, Kurvenbudget 98370000 Lamports, Strategie-Timeout 590000 ms und Slippage-Grenze 300 bps sind Startparameter, keine bewiesenen Optima. Research-Horizont 600000 ms ist ausschließlich ein Beobachtungsfenster. Neue Größen-, Timeout- und Portfolioregeln sind ab Version 1.2.0 normativ; historische Ergebnisse nicht ohne Neuberechnung vergleichen. Gebühren werden automatisch aufgelöst. Sämtliche Parameter und Änderungen vor Run-Start versionieren.",
+    "required_preflight": [
+      "Aufgelöster Projekt-/Contract-Stand und unterstützte Pump-Protokollversion",
+      "Aktuelle Protokoll-/Gebühren-/Account-Snapshots mit Provenienz",
+      "Tatsächliche kostenfreie Feed-Kontingente und gesetzte Endpoint-Umgebungsvariablen",
+      "Ausreichender Speicherplatz und schreibbare Datenbank",
+      "Live-Senden deaktiviert; keine privaten Trading-Schlüssel im PAPER-Prozess",
+      "Konfigurationsvalidierung einschließlich positiver Retry-Fortschritte, Kostenreserve und bindender Policy-Hashes"
+    ],
+    "missing_cost_behavior": "Feed-Benchmark und technische Diagnose dürfen laufen; wirtschaftlicher PAPER-Bericht wird UNQUALIFIED_COSTS und kann keinen positiven Edge bestätigen.",
+    "doctor": {
+      "max_duration_ms": 120000,
+      "minimum_valid_create_samples": 3,
+      "minimum_valid_trade_samples": 3,
+      "broadcast_allowed": false,
+      "economic_intents_allowed": false
+    }
+  },
+  "shared_strategy_and_execution_contract": {
+    "position_states": [
+      "DETECTED",
+      "INELIGIBLE",
+      "ENTRY_INTENT",
+      "ENTRY_PENDING",
+      "OPEN",
+      "EXIT_PENDING",
+      "CLOSED",
+      "ENTRY_FAILED",
+      "UNRESOLVED"
+    ],
+    "transition_rules": [
+      "Kein Kapital und keine Token aus dem Nichts: verfügbare Mittel, reservierte Mittel, Tokenbestand und Rent-Lock führen.",
+      "ENTRY_PENDING darf nach angenommener Einreichung nicht kostenfrei verschwinden, nur weil der Creator verkauft. Status feststellen bzw. modellierte Ausführung/Fehler inklusive Kosten buchen.",
+      "Creator-Verkauf vor noch nicht eingereichtem Entry kann Entry verhindern; ab angenommener Einreichung gelten Ausführungs- und Reconciliation-Regeln.",
+      "Creator-Verkauf nach modelliertem Fill, aber vor verspätetem Callback muss im gemeinsamen Sequencer verarbeitet werden und den Exit auslösen.",
+      "Nicht verfügbare Reserven sind UNKNOWN, niemals Kurs null oder automatisch ein regulärer Stop.",
+      "Nach maximalen Retries wird Restbestand UNRESOLVED; nicht als kostenlos geschlossen behandeln.",
+      "PAPER, Replay und Backtest verwenden dieselbe Exit-Priorität und dieselben Fehler-/Retry-Übergänge.",
+      "Migration/Curve-complete invalidiert Proxy-Quotes auch für zeitgleich geplante Ausführung. Creator-Sell- und Exit-Trigger historisch latched führen; kein zweiter Exit während EXIT_PENDING."
+    ],
+    "creator_sell_definition": "Dekodierter Sell auf dem relevanten Pump-Handelspfad durch die gespeicherte Creator-Adresse. Kein heuristisches Gleichsetzen von erstem Käufer und Creator. Transfers oder andere Wallets sind ohne Zusatzdaten kein Creator-Sell.",
+    "creator_sell_limitation": "Ein über Logs beobachteter Creator-Sell ist bereits ausgeführt bzw. processed. Seine Reservenänderung geht in die verfügbare Quote ein. Diese Architektur garantiert keinen Verkauf vor ihm.",
+    "target_definition": {
+      "entry_economic_cost": "Gemäß sizing_contract.equations.entry_economic_cost: tatsächlicher Kurveninput plus alle Entry-Protokoll-/Netzwerk-/Tip-/unwiederbringlichen Account-Kosten; rückerstattbare Rent separat.",
+      "net_liquidation_value": "Aktuell ausführbarer modellierter Brutto-Kurven-Verkaufserlös minus Sell-Protokollgesamtsumme, erwartete erfolgreiche Exit-Netzwerkgebühr/Tip, neue unwiederbringliche Exit-Kosten sowie bereits gebuchte zusätzliche Fehlversuchskosten. Keine Rückerstattung gebundener Rent als Profit zählen.",
+      "net_multiple": "net_liquidation_value / entry_economic_cost; bei Nenner <= 0 ist das Ergebnis ungültig.",
+      "target_trigger": "net_multiple >= target_net_multiple. Trigger ist kein garantierter späterer Fill-Kurs.",
+      "rent": "Rückerstattbare Rent ist gebundenes Vermögen, kein endgültiger Verlust. Sie reduziert verfügbares Cash. Rückzahlung nur buchen, wenn modelliert/tatsächlich geschlossen und zurückerstattet; Modellannahme offen ausweisen."
+    },
+    "paper_realism": [
+      "Live-Mainnet-Ereignisse in tatsächlicher Ankunftsreihenfolge aufnehmen; PAPER heißt imaginäres Kapital, nicht erfundene günstige Preise.",
+      "Entscheidung nutzt ausschließlich zum Entscheidungszeitpunkt verfügbare Informationen.",
+      "Empfangszeit, geplante Ausführungszeit, tatsächliche Callback-Zeit und modellierter Fill-Zeitpunkt getrennt speichern. Ein verspäteter Callback darf keinen rückdatierten LIVE-Handel suggerieren.",
+      "Deterministischer Simulator verarbeitet virtuelle Aktionen und eingegangene Marktereignisse nach dokumentierter Zeit- und Tie-Break-Regel; spätere Nachrichten nicht rückwirkend als früher bekannt behandeln.",
+      "Fill-Modell nutzt am modellierten Ausführungszeitpunkt verfügbare gültige Reserven und dokumentierte Reserve-Altersgrenze. Ohne ausreichend frische Daten: UNKNOWN/CENSORED statt günstiger Füllung.",
+      "Eigene Quote berücksichtigt Größe, Curve, Protokollgebühren und Slippage. Historischer Fremd-Orderflow reagiert nicht auf unseren hypothetischen Trade: verbleibende Gegenfaktualitätsannahme explizit in jedem Report nennen.",
+      "Simulierte Inklusion ist eine Annahme, keine gemessene Blockchain-Landung. RPC-Sendeantwort ist auch bei LIVE kein Fill.",
+      "Kein zukünftiges Kerzenhoch für Entries oder Exits verwenden. MFE/MAE nur beschreibende Nachanalyse.",
+      "Null-Latenz, unbekannte Gebühren, veraltete Reserven oder unaufgelöste Positionen können keinen qualifizierten Gewinnnachweis liefern."
+    ],
+    "live_future_requirements": [
+      "Separater LIVE-Adapter hinter deaktivierter Broadcast-Grenze; Aktivierung später ausdrücklich bestätigen lassen.",
+      "Transaktionssignatur und tatsächlicher Status bestimmen Fill; ACK reicht nicht.",
+      "Bei Sendestatus UNKNOWN zunächst Reconciliation. Retransmission derselben signierten Bytes von Neubau/Neusignatur unterscheiden, um Doppelkäufe zu verhindern.",
+      "Aktuelle Blockhash-Gültigkeit, Priority Fee, eventuell Tip und Tokenprogramm/Accounttyp validieren.",
+      "Kein wiederholtes Senden auf Basis eines PAPER-Erfolgs. Offline-Signierbenchmark nutzt ausschließlich Wegwerf-Schlüssel und sendet nichts."
+    ],
+    "simulation_tie_break": "Gleicher logischer Zeitstempel: atomare Marktnachrichten gemäß arrival_sequence anwenden, modellierte Fills/Statusübergänge, dann Exit-Priorität CREATOR_SELL > TARGET > TIMEOUT. Ein nach Fill verfügbarer Creator-Sell setzt einen persistenten Exit-Intent. LIVE-PAPER Entscheidungen werden zusätzlich durch tatsächliche Verarbeitungszeit begrenzt, siehe ultra_low_latency_contract.late_callback_policy.",
+    "exit_reason_semantics": {
+      "first_trigger": "Erster kausal verfügbarer Trigger reserviert den Exit-Intent und bleibt origin_trigger.",
+      "same_timestamp": "Nur bei identischem Entscheidungszeitpunkt CREATOR_SELL vor TARGET vor TIMEOUT. Späterer Creator-Sell überschreibt keinen früheren Target-Trigger rückwirkend.",
+      "pending": "Weiteren Trigger als Audit-Signal erfassen; kein zusätzlicher paralleler Verkauf. Nach Reject bleibt Liquidationsabsicht erhalten und folgt gemeinsamer Retry-Policy.",
+      "pre_entry": "Bekannter Creator-Sell bereits vor Entry-Decision verhindert Entry mit CREATOR_ALREADY_SOLD. Zwischen Decision und Einreichung Entry noch abbrechbar, danach Reconciliation/Fill-/Fee-Regeln."
+    }
+  },
+  "mandatory_code_corrections": [
+    {
+      "id": "F01",
+      "inspect_modules": "main.py; backtest.py",
+      "observed_issue": "Entry-Latenz wird auch als Exit-Latenz verwendet.",
+      "required_change": "Entry/Exit und Modellstufen separat konfigurieren und persistieren."
+    },
+    {
+      "id": "F02",
+      "inspect_modules": "market.py",
+      "observed_issue": "CREATE-Verarbeitung verwendet ersten Buy und überspringt weitere gleichmintige Trades derselben Transaktion.",
+      "required_change": "Vollständigen Transaktionszustand einschließlich weiterer Buys/Sells vor Entry berücksichtigen."
+    },
+    {
+      "id": "F03",
+      "inspect_modules": "paper.py",
+      "observed_issue": "Nach verspätetem Entry-Callback kann zwischenzeitlicher Creator-Sell unberücksichtigt bleiben.",
+      "required_change": "Ein gemeinsamer kausaler Sequencer für Entry, Creator-Sell, Target und Timeout."
+    },
+    {
+      "id": "F04",
+      "inspect_modules": "paper.py",
+      "observed_issue": "Creator-Sell vor Fill kann einen bereits angenommenen Entry kostenfrei entfernen.",
+      "required_change": "Submission-Status modellieren; keine magische Stornierung nach Einreichung."
+    },
+    {
+      "id": "F05",
+      "inspect_modules": "paper.py; backtest.py",
+      "observed_issue": "Retry-Verhalten weicht ab; PAPER kann ohne Backoff endlos wiederholen.",
+      "required_change": "Einheitliche begrenzte Retries, strikt fortschreitende virtuelle Zeit, Restposition UNRESOLVED."
+    },
+    {
+      "id": "F06",
+      "inspect_modules": "execution.py",
+      "observed_issue": "Stop-Multiple null kann bei nicht verfügbarem Kurvenwert trotzdem Stop auslösen.",
+      "required_change": "Stop explizit deaktivieren; UNKNOWN-Quote von Wert null unterscheiden."
+    },
+    {
+      "id": "F07",
+      "inspect_modules": "main.py; market.py",
+      "observed_issue": "Hashing/JSON/Featurearbeit und synchrone Ausgaben können vor Entscheidung liegen.",
+      "required_change": "Nur notwendige Dekodierung und RAM-Prüfungen im Hot Path; Aufbereitung im Hintergrund."
+    },
+    {
+      "id": "F08",
+      "inspect_modules": "market.py; paper.py",
+      "observed_issue": "Research-Horizont kann Tracker trotz offener Position entfernen.",
+      "required_change": "Aktive Positionen unabhängig von Research-Retention weiterverfolgen; fehlende Deckung markieren."
+    },
+    {
+      "id": "F09",
+      "inspect_modules": "config; execution.py",
+      "observed_issue": "Gebühren-Snapshot ohne verifizierte Herkunft/Zeit; Tips und Rent nicht vollständig abgebildet.",
+      "required_change": "Aktuelle versionierte Fee-/Account-Daten; Cash-Ledger mit sauberer Rent-Behandlung."
+    },
+    {
+      "id": "F10",
+      "inspect_modules": "main.py; storage.py",
+      "observed_issue": "Policy-/Protocol-Bindung und Kosten offener/unterbrochener Positionen unvollständig.",
+      "required_change": "Vollständige Konfigurationshashes und Ledger; Realized, Unrealized, Censored getrennt."
+    },
+    {
+      "id": "F11",
+      "inspect_modules": "storage.py; capture.py",
+      "observed_issue": "Speicherfehler/Queue-Verlust und fehlende Subscription-Bestätigung gefährden Datenintegrität.",
+      "required_change": "ACK prüfen, Datenlücken erfassen, neue Entries pausieren; offene Positionen weiter behandeln."
+    },
+    {
+      "id": "F12",
+      "inspect_modules": "replay.py; backtest.py",
+      "observed_issue": "Auslassungen, rekonstruierte Reserven und Horizontende können Ergebnisse verzerren.",
+      "required_change": "Reale Reserven explizit persistieren; Ausschlüsse und Zensierung nicht als Nullverlust verstecken."
+    },
+    {
+      "id": "F13",
+      "inspect_modules": "capture.py; main.py",
+      "observed_issue": "Transport-Reconnect darf Decoder-/Consumer-Programmierfehler nicht kaschieren.",
+      "required_change": "Transportfehler, Providerfehler, Decodefehler und interne Invarianten getrennt behandeln."
+    },
+    {
+      "id": "F14",
+      "inspect_modules": "clock.py; paper.py",
+      "observed_issue": "Tatsächliche Callback-Zeit und historische Modellzeit können vermischt werden.",
+      "required_change": "Alle Zeitpunkte separat messen und verspätete Verarbeitung kausal ausführen."
+    }
+  ],
+  "database_specification": {
+    "migration_policy": "Bestehende SQLite-DB sichern und additive, versionierte Migration erstellen. Keine alten Tabellen löschen oder historische Daten still neu interpretieren. Neue DB für neue Kampagne anlegen; Altdaten separat importierbar mit Herkunft.",
+    "types": "UTC als ISO-8601, lokale Zeiten als monotone INTEGER-Nanosekunden, Geld/Token als INTEGER-Basiseinheiten. Multiples als Dezimalstrings. Keine float-Rundung bei Gebühren/Geld. SQLite-Integergrenzen für Tokenmengen prüfen; bei Bedarf Dezimaltext mit validierter Integer-Arithmetik.",
+    "tables": {
+      "runs": {
+        "pk": "run_id",
+        "fields": [
+          "campaign_id",
+          "mode",
+          "started_utc",
+          "ended_utc",
+          "code_revision",
+          "spec_hash",
+          "config_hash",
+          "protocol_snapshot_id",
+          "host_clock_epoch_id",
+          "status",
+          "quality_status",
+          "start_balance_lamports",
+          "end_balance_lamports"
+        ]
+      },
+      "config_snapshots": {
+        "pk": "config_hash",
+        "fields": [
+          "kind",
+          "canonical_json",
+          "created_utc",
+          "source",
+          "valid_from_slot",
+          "verified_utc"
+        ],
+        "rule": "Strategie, Ausführungsmodell, Protokoll/Gebühren und Operational Limits eindeutig binden; keine Änderung in-place."
+      },
+      "feed_observations": {
+        "pk": "observation_id",
+        "fields": [
+          "run_id",
+          "feed_id",
+          "connection_id",
+          "receive_mono_ns",
+          "receive_utc",
+          "decode_done_mono_ns",
+          "slot",
+          "signature",
+          "instruction_index",
+          "mint",
+          "event_type",
+          "canonical_event_id",
+          "completeness",
+          "validation_status",
+          "raw_payload",
+          "raw_payload_hash",
+          "arrival_sequence"
+        ],
+        "indexes": [
+          "run_id,canonical_event_id,feed_id,receive_mono_ns",
+          "run_id,receive_mono_ns"
+        ],
+        "rule": "Hash erst im Writer; unzuordenbare Provider-Hinweise behalten."
+      },
+      "market_events": {
+        "pk": "canonical_event_id",
+        "fields": [
+          "run_id",
+          "signature",
+          "instruction_index",
+          "slot",
+          "mint",
+          "event_type",
+          "actor",
+          "creator",
+          "token_program",
+          "virtual_sol_reserves",
+          "virtual_token_reserves",
+          "real_sol_reserves",
+          "real_token_reserves",
+          "first_seen_mono_ns",
+          "actionable_mono_ns",
+          "winner_feed_id",
+          "source_observation_id",
+          "commitment",
+          "quality_status",
+          "quote_mint_raw",
+          "quote_field_origin",
+          "quote_layout_hash",
+          "normalized_quote_asset",
+          "quote_scope_status",
+          "venue_state",
+          "canonical_coverage_state"
+        ],
+        "rule": "Nicht vorhandene Reserven NULL, nicht 0. Quelle jedes abgeleiteten Zustands referenzieren."
+      },
+      "decisions": {
+        "pk": "decision_id",
+        "fields": [
+          "run_id",
+          "mint",
+          "event_id",
+          "policy_hash",
+          "receive_mono_ns",
+          "data_ready_mono_ns",
+          "decision_done_mono_ns",
+          "intent_enqueued_mono_ns",
+          "action",
+          "reason",
+          "position_id",
+          "quote_state_event_id",
+          "quote_age_ns",
+          "quote_snapshot_id",
+          "arrival_sequence"
+        ]
+      },
+      "positions": {
+        "pk": "position_id",
+        "fields": [
+          "run_id",
+          "variant_id",
+          "mint",
+          "creator",
+          "policy_hash",
+          "state",
+          "entry_decision_id",
+          "entry_fill_attempt_id",
+          "token_balance_base_units",
+          "target_net_multiple",
+          "open_mono_ns",
+          "close_mono_ns",
+          "exit_reason",
+          "net_pnl_lamports",
+          "quality_status",
+          "research_status",
+          "timeout_due_mono_ns",
+          "research_end_mono_ns",
+          "unresolved_reason",
+          "venue_state",
+          "canonical_provider_gap_flag"
+        ]
+      },
+      "execution_attempts": {
+        "pk": "attempt_id",
+        "fields": [
+          "run_id",
+          "position_id",
+          "side",
+          "attempt_number",
+          "adapter",
+          "status",
+          "submit_mono_ns",
+          "scheduled_fill_mono_ns",
+          "callback_actual_mono_ns",
+          "modeled_fill_mono_ns",
+          "rpc_ack_mono_ns",
+          "chain_observed_mono_ns",
+          "transaction_signature",
+          "model_hash",
+          "quote_state_event_id",
+          "amount_in_base_units",
+          "amount_out_base_units",
+          "slippage_bps",
+          "failure_reason",
+          "fees_charged_lamports",
+          "fee_snapshot_id",
+          "quote_snapshot_id",
+          "message_template_hash",
+          "cost_model_hash",
+          "signature_count",
+          "compute_unit_limit",
+          "compute_unit_price_micro_lamports",
+          "protocol_fee_lamports",
+          "creator_fee_lamports",
+          "other_protocol_fee_lamports",
+          "base_fee_lamports",
+          "priority_fee_lamports",
+          "network_fee_total_lamports",
+          "sender_tip_lamports",
+          "rent_locked_lamports",
+          "rent_refunded_lamports",
+          "irrecoverable_account_cost_lamports",
+          "cost_evidence_status",
+          "fee_reconciliation_status",
+          "entry_curve_input_lamports",
+          "attempt_decision_id",
+          "fill_evidence_status",
+          "proxy_event_id",
+          "proxy_signature",
+          "proxy_slot",
+          "proxy_receive_sequence",
+          "proxy_receive_mono_ns",
+          "proxy_age_ns",
+          "next_observed_event_id_after_modeled_fill",
+          "fill_commitment"
+        ],
+        "rule": "Simulierte Felder und gemessene Felder nie gegeneinander umbenennen. LIVE-Felder in PAPER NULL."
+      },
+      "ledger": {
+        "pk": "ledger_entry_id",
+        "fields": [
+          "run_id",
+          "position_id",
+          "attempt_id",
+          "mono_ns",
+          "utc",
+          "kind",
+          "cash_delta_lamports",
+          "locked_rent_delta_lamports",
+          "token_delta_base_units",
+          "economic_cost_lamports",
+          "provenance"
+        ],
+        "rule": "Eindeutiger Buchungsschlüssel pro wirtschaftlichem Vorgang verhindert doppelte Kosten; alle Fehlversuche auch ohne spätere geschlossene Position erfassen."
+      },
+      "quality_events": {
+        "pk": "quality_event_id",
+        "fields": [
+          "run_id",
+          "feed_id",
+          "start_mono_ns",
+          "end_mono_ns",
+          "kind",
+          "severity",
+          "scope",
+          "lost_records_count",
+          "details",
+          "canonical_gap",
+          "coverage_version",
+          "recovery_status",
+          "evidence_observation_ids"
+        ],
+        "rule": "Unbekannte Verlustzahl NULL; Quellenausfall und vollständige Beobachtungslücke unterscheiden."
+      },
+      "research_variants": {
+        "pk": "variant_id",
+        "fields": [
+          "campaign_id",
+          "parent_config_hash",
+          "variant_config_hash",
+          "dataset_id",
+          "split",
+          "registered_utc",
+          "seed",
+          "selection_status"
+        ]
+      },
+      "reports": {
+        "pk": "report_id",
+        "fields": [
+          "run_id",
+          "campaign_id",
+          "created_utc",
+          "query_version",
+          "dataset_hash",
+          "config_hash",
+          "report_json",
+          "qualification_status"
+        ]
+      },
+      "fee_snapshots": {
+        "pk": "fee_snapshot_id",
+        "fields": [
+          "run_id",
+          "source_type",
+          "source_provider",
+          "source_method",
+          "source_account_addresses",
+          "source_slot",
+          "observed_utc",
+          "received_mono_ns",
+          "commitment",
+          "protocol_program_id",
+          "idl_version_or_hash",
+          "raw_values",
+          "normalized_fee_components",
+          "rounding_rules",
+          "applicability",
+          "freshness_policy_hash",
+          "validation_status",
+          "config_hash",
+          "snapshot_hash"
+        ],
+        "rule": "Unveränderlicher Snapshot mit Herkunft; referenzierte Rows in derselben Writer-Transaktion oder vorher persistieren. Snapshot-Erzeugung/Aufbereitung nicht als DB-Arbeit im Hot Path."
+      },
+      "quote_snapshots": {
+        "pk": "quote_snapshot_id",
+        "fields": [
+          "run_id",
+          "position_id",
+          "quote_state_event_id",
+          "fee_snapshot_id",
+          "side",
+          "created_mono_ns",
+          "knowledge_cutoff_mono_ns",
+          "curve_input_lamports",
+          "gross_curve_output_lamports",
+          "token_amount_base_units",
+          "protocol_fee_total_lamports",
+          "swap_wallet_debit_lamports",
+          "swap_wallet_credit_lamports",
+          "network_fee_total_lamports",
+          "tip_lamports",
+          "rent_delta_lamports",
+          "irrecoverable_cost_lamports",
+          "slippage_limit_bps",
+          "min_output_base_units",
+          "max_input_base_units",
+          "quote_age_ns",
+          "quote_model_hash",
+          "rounding_version",
+          "quality_status"
+        ],
+        "rule": "Unveränderlicher Snapshot mit Herkunft; referenzierte Rows in derselben Writer-Transaktion oder vorher persistieren. Snapshot-Erzeugung/Aufbereitung nicht als DB-Arbeit im Hot Path."
+      },
+      "feature_snapshots": {
+        "pk": "feature_snapshot_id",
+        "fields": [
+          "run_id",
+          "mint",
+          "feature_set_id",
+          "feature_contract_hash",
+          "cutoff_mono_ns",
+          "computed_mono_ns",
+          "source_event_ids_json",
+          "features_json",
+          "null_reasons_json",
+          "coverage_version",
+          "quality_status"
+        ],
+        "rule": "Eindeutig pro run_id,mint,feature_set_id,cutoff_mono_ns. Feature-JSON-Schlüssel in Vertragsreihenfolge; int/Decimal-String/bool/null, keine Geld-floats. Nur Hintergrund-Writer."
+      }
+    },
+    "integrity": [
+      "Foreign Keys aktivieren; interne IDs vor Queue-Übergabe erzeugen; abhängige Datensätze transaktional schreiben.",
+      "Rohdatenaufbewahrung ermöglicht erneutes Dekodieren. Keine Redaktion von für Trades nötigen öffentlichen Accounts; API-Keys/URLs mit Keys vor Persistenz entfernen.",
+      "Writer-Ausfall darf Event Loop nicht blockieren. Überlauf zählt als Datenlücke und macht betroffenen Bewertungszeitraum unqualifiziert.",
+      "Bei Neustart Run schließen/unterbrochen markieren und neuen Clock-Epoch beginnen. Monotone Zeitstempel verschiedener Prozesse nicht direkt subtrahieren.",
+      "LIVE ist noch deaktiviert; künftig vor Freigabe sicherstellen, dass Crash-Recovery Einreichungen on-chain reconciliert. Asynchrones Logging allein garantiert keine dauerhafte Exactly-once-Ausführung."
+    ],
+    "identity_scope": "Ereignisidentität innerhalb eines Runs eindeutig; canonical_event_id aus run_id und kanonischem Chain-Key ableiten oder UNIQUE(run_id,signature,instruction_index,mint,event_type) verwenden. Wiederholte Aufnahmen derselben Chain-Ereignisse in anderen Runs bleiben getrennt. Varianten referenzieren denselben eingefrorenen Dataset-Stand.",
+    "foreign_keys": [
+      {
+        "table": "feed_observations",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "market_events",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "decisions",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "positions",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "execution_attempts",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "ledger",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "quality_events",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "reports",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "fee_snapshots",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "quote_snapshots",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "runs",
+        "column": "config_hash",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "runs",
+        "column": "protocol_snapshot_id",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "feed_observations",
+        "column": "canonical_event_id",
+        "references_table": "market_events",
+        "references_column": "canonical_event_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "market_events",
+        "column": "source_observation_id",
+        "references_table": "feed_observations",
+        "references_column": "observation_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "decisions",
+        "column": "event_id",
+        "references_table": "market_events",
+        "references_column": "canonical_event_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "decisions",
+        "column": "policy_hash",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "decisions",
+        "column": "position_id",
+        "references_table": "positions",
+        "references_column": "position_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "decisions",
+        "column": "quote_state_event_id",
+        "references_table": "market_events",
+        "references_column": "canonical_event_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "decisions",
+        "column": "quote_snapshot_id",
+        "references_table": "quote_snapshots",
+        "references_column": "quote_snapshot_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "positions",
+        "column": "variant_id",
+        "references_table": "research_variants",
+        "references_column": "variant_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "positions",
+        "column": "policy_hash",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "positions",
+        "column": "entry_decision_id",
+        "references_table": "decisions",
+        "references_column": "decision_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "positions",
+        "column": "entry_fill_attempt_id",
+        "references_table": "execution_attempts",
+        "references_column": "attempt_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "execution_attempts",
+        "column": "position_id",
+        "references_table": "positions",
+        "references_column": "position_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "execution_attempts",
+        "column": "attempt_decision_id",
+        "references_table": "decisions",
+        "references_column": "decision_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "execution_attempts",
+        "column": "quote_state_event_id",
+        "references_table": "market_events",
+        "references_column": "canonical_event_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "execution_attempts",
+        "column": "fee_snapshot_id",
+        "references_table": "fee_snapshots",
+        "references_column": "fee_snapshot_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "execution_attempts",
+        "column": "quote_snapshot_id",
+        "references_table": "quote_snapshots",
+        "references_column": "quote_snapshot_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "ledger",
+        "column": "position_id",
+        "references_table": "positions",
+        "references_column": "position_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "ledger",
+        "column": "attempt_id",
+        "references_table": "execution_attempts",
+        "references_column": "attempt_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "fee_snapshots",
+        "column": "config_hash",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "quote_snapshots",
+        "column": "position_id",
+        "references_table": "positions",
+        "references_column": "position_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "quote_snapshots",
+        "column": "quote_state_event_id",
+        "references_table": "market_events",
+        "references_column": "canonical_event_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "quote_snapshots",
+        "column": "fee_snapshot_id",
+        "references_table": "fee_snapshots",
+        "references_column": "fee_snapshot_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "research_variants",
+        "column": "parent_config_hash",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "research_variants",
+        "column": "variant_config_hash",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "reports",
+        "column": "config_hash",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "feature_snapshots",
+        "column": "run_id",
+        "references_table": "runs",
+        "references_column": "run_id",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "feature_snapshots",
+        "column": "feature_contract_hash",
+        "references_table": "config_snapshots",
+        "references_column": "config_hash",
+        "nullable": false,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "execution_attempts",
+        "column": "proxy_event_id",
+        "references_table": "market_events",
+        "references_column": "canonical_event_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      },
+      {
+        "table": "execution_attempts",
+        "column": "next_observed_event_id_after_modeled_fill",
+        "references_table": "market_events",
+        "references_column": "canonical_event_id",
+        "nullable": true,
+        "delete_policy": "RESTRICT"
+      }
+    ],
+    "relational_rules": [
+      "Zirkuläre Beziehungen observation/event sowie position/decision/attempt durch DEFERRABLE INITIALLY DEFERRED Foreign Keys und gemeinsame Writer-Transaktionen auflösen; keine vorübergehend dauerhaft verwaisten IDs.",
+      "Alle internen IDs sind run-eindeutige RAM-IDs, keine synchronen DB-autoincrement-Anforderungen im Hot Path.",
+      "fee_snapshot_id und quote_snapshot_id dürfen nur bei tatsächlich fehlender Kostengrundlage/Quote NULL sein; betroffener Versuch ist wirtschaftlich unqualifiziert. Fehlende Quote legitimiert keinen simulierten Fill.",
+      "policy_hash, model_hash, cost_model_hash, quote_model_hash und freshness_policy_hash referenzieren registrierte config_snapshots.config_hash; IDs vor Run bereitstellen.",
+      "campaign_id und dataset_id sind externe versionierte Kampagnen-/Dataset-Bezeichner; ihre Metadaten in config_snapshots speichern. variant_id NULL bedeutet unveränderten Basislauf.",
+      "source_account_addresses, raw_values, normalized_fee_components und details sind kanonisches JSON TEXT; Bool-Werte 0/1; Geld gemäß types. Quelldaten niemals als binäre Python-Pickles speichern.",
+      "unique(run_id,position_id,side,attempt_number) für attempts; deduplizierter ledger_entry_id als idempotenter Buchungsschlüssel; FOREIGN KEY PRAGMA aktiv.",
+      "Bestehende Migrationen nicht verändern. Neue Migration plus Integritätsprüfung und Schema-Version. NULL-Zulässigkeit aller weiteren Felder anhand ihres Lifecycle dokumentieren; MONEY UNKNOWN darf nicht zu 0 werden.",
+      "FeatureSet- und Coverage-Versionen als config_snapshots registrieren; feature_set_id ist deren stabiler Name. proxy_receive_sequence entspricht source observation arrival_sequence. Migrationsdetails in quality_events.details mit referenzierten vorhandenen Beobachtungen speichern."
+    ]
+  },
+  "latency_analysis": {
+    "clock": "time.monotonic_ns für lokale Differenzen; time.time_ns/UTC nur für Anzeige und grobe Zuordnung. Empfang ist Rückgabe des WebSocket-Reads, keine NIC-Ankunft und kein Erzeugungszeitpunkt auf der Chain.",
+    "metrics": [
+      {
+        "name": "feed_relative_arrival_ns",
+        "formula": "first_receive(feed, matched_create) - min(first_receive(all_observed_feeds, matched_create))",
+        "class": "MEASURED_RELATIVE",
+        "missing": "NULL"
+      },
+      {
+        "name": "first_hint_to_actionable_ns",
+        "formula": "actionable_mono_ns - earliest_valid_hint_mono_ns",
+        "class": "MEASURED_LOCAL"
+      },
+      {
+        "name": "receive_to_decode_ns",
+        "formula": "decode_done_mono_ns - receive_mono_ns",
+        "class": "MEASURED_LOCAL"
+      },
+      {
+        "name": "receive_to_decision_ns",
+        "formula": "decision_done_mono_ns - winning_observation_receive_mono_ns",
+        "class": "MEASURED_LOCAL"
+      },
+      {
+        "name": "ready_to_decision_ns",
+        "formula": "decision_done_mono_ns - data_ready_mono_ns",
+        "class": "MEASURED_LOCAL"
+      },
+      {
+        "name": "decision_to_enqueue_ns",
+        "formula": "intent_enqueued_mono_ns - decision_done_mono_ns",
+        "class": "MEASURED_LOCAL"
+      },
+      {
+        "name": "callback_lateness_ns",
+        "formula": "max(0, callback_actual_mono_ns - scheduled_fill_mono_ns)",
+        "class": "MEASURED_LOCAL"
+      },
+      {
+        "name": "modeled_entry_delay_ns",
+        "formula": "modeled_fill_mono_ns - entry_decision_done_mono_ns",
+        "class": "SIMULATED"
+      },
+      {
+        "name": "submit_to_ack_ns",
+        "formula": "rpc_ack_mono_ns - submit_mono_ns",
+        "class": "FUTURE_LIVE_MEASURED_NOT_FILL"
+      },
+      {
+        "name": "submit_to_observed_chain_execution_ns",
+        "formula": "chain_observed_mono_ns - submit_mono_ns",
+        "class": "FUTURE_LIVE_OBSERVATION_INCLUDES_RETURN_FEED_DELAY"
+      }
+    ],
+    "feed_report": [
+      "Je Feed Count, gematchte CREATEs, Hint- und Actionable-Gewinnrate, Missing-/Decodefehlerquote, Reconnects und Empfangsdifferenzen ausgeben.",
+      "Union aller beobachteten CREATEs als lokalen Coverage-Nenner benennen: keine Behauptung globaler Mainnet-Vollständigkeit.",
+      "Zusätzlich paarweise Vergleiche ausschließlich gemeinsamer CREATEs, damit unterschiedliche Abdeckung nicht als Geschwindigkeit erscheint.",
+      "Gleiche monotone Zeit = Gleichstand; operative Feed-ID-Tie-Regel festhalten, statistisch nicht als exklusiven Sieg zählen.",
+      "Alle Feed-Beobachtungen für ein Ereignis einsammeln, obwohl bereits der erste Entry ausgelöst wurde.",
+      "p50/p95/p99 über nearest-rank ceil(p*n), Min, Max und n; p99 bei n<100 als geringe Aussagekraft markieren.",
+      "Ausreißer nicht abschneiden; Version mit Qualitätsfilter zusätzlich, Ausschlusszahlen offenlegen."
+    ],
+    "measurement_limits": [
+      "Slot/Blocktime hat keine ausreichend genaue lokale Sendezeit für eine behauptete absolute Millisekundenlatenz.",
+      "PAPER kann Feed-Ankunft und CPU-Pfad messen, aber keine echte Sende-/Inklusionslatenz beweisen.",
+      "Mehrere Feeds können alle nach einem gleichen Upstream eintreffen. Ein relativer Sieg sagt nichts über die global früheste Kenntnis."
+    ],
+    "local_performance_goal": "Minimiere gemessene receive_to_decision und receive_to_adapter_enqueue unter dokumentierter Last. Es gibt keine zugesicherte 2-ms-Grenze und keinen künstlichen Latenzpuffer. Vor/nach-Vergleich muss unveränderte Entscheidungen/Buchungen und verbesserte bzw. erklärte Verteilungen zeigen.",
+    "profiling": "Zuerst Netzwerk-Wartezeit, Decode, Queue-Lag, Event-Loop-Lag und DB-Writer-Backpressure trennen. Nur belegte Engpässe optimieren. Kein Logging pro Nachricht im Hot Path."
+  },
+  "economic_analysis": {
+    "accounting": {
+      "closed_position_net_pnl": "Summe Verkaufserlöse minus Kaufaufwand minus sämtliche nicht schon in Quotes enthaltenen Netz-/Priority-/Tip-/Fehlversuchsgebühren minus unwiederbringliche Account-Kosten.",
+      "campaign_pnl": "Realisiertes Netto-PnL einschließlich gescheiterter Entry-Versuche plus separat ausgewiesenes konservatives Unrealized-PnL; offene/unbewertbare Positionen nicht als Nullverlust verschweigen.",
+      "cash_reconciliation": "Initiales Cash plus alle Cash-Ledger-Deltas = aktuelles Cash. Gebundene Rent und Tokenbestände separat abstimmen; erst real zurückgebuchte Rent erhöht Cash.",
+      "failed_attempt_fees": "Nur im Modell tatsächlich ausgeführte/gebührenpflichtige Fehler belasten. Abgelehnt-vor-Submit, dropped und on-chain-failed unterscheiden; Unbekannt nicht still als kostenlos behandeln.",
+      "expectancy_per_attempt": "Summe Netto-Ergebnisse vollständig aufgelöster Entry-Intents inklusive gebührenpflichtiger Fehlversuche / Zahl dieser Entry-Intents. Quote ungelöster Fälle und konservative Szenariogrenze daneben.",
+      "expectancy_per_fill": "Zusätzliche beschreibende Kennzahl für erfolgreich gefüllte Entries; nicht als alleinigen Kampagnen-Erwartungswert verwenden."
+    },
+    "required_report_fields": [
+      "run_id/config_hash/code_revision/dataset_hash",
+      "Anzahl CREATEs, actionable, ineligible nach Grund, Entry-Intents, Fills, Entry-Fehler",
+      "Anzahl Creator-/Target-/Timeout-Exits, Retry-Erschöpfungen, offene und zensierte Positionen",
+      "Netto-PnL SOL/Lamports, Gebühren nach Art, gebundenes Kapital, Realized/Unrealized",
+      "Netto-Erwartungswert je Intent und Fill, Median-PnL, Gewinnrate, mittlerer Gewinn/Verlust",
+      "Profit Factor mit definierten Sonderfällen, Drawdown auf zeitlich konsistenter Equity, Kapitalauslastung",
+      "Gebührenanteil, Slippage, Quote-Alter, Time-to-Entry/Exit, Haltedauer",
+      "Feed- und interne Latenzen mit Stichprobengröße",
+      "Konfidenzintervall und unabhängige Zeitblöcke; Modellannahmen, Ausschlüsse und Lücken",
+      "Status INSUFFICIENT_DATA / UNQUALIFIED_DATA / UNQUALIFIED_COSTS / NEGATIVE / POSITIVE_UNDER_MODEL",
+      "SOL-only-Rejects getrennt von QUOTE_UNKNOWN",
+      "Migrations-/Curve-complete-Exposures und konservative Restwert-Untergrenze",
+      "Fill-Evidenz OBSERVED_STATE_PROXY vs tatsächlich beobachtete Chain-Ausführung",
+      "FeatureSet-/Coverage-Versionen, kanonische Lücken vs Einzelprovider-Ausfälle"
+    ],
+    "special_cases": [
+      "Profit Factor ohne Verluste ist nicht belastbar unendlich: NULL plus NO_LOSS_SAMPLE.",
+      "Keine Gewinner/kein Trade: keine künstlichen Null-Erwartungswerte als Ergebnisnachweis.",
+      "Migrations-, Horizont- und Feed-Enden als zensiert ausweisen. Unhandelbare Restbestände in konservativer Verlustbetrachtung berücksichtigen.",
+      "Quote unbekannt: Equity unbekannt/Intervall, nicht unverändert günstigen letzten Preis fortschreiben.",
+      "1.5x meint Netto-Multiple der definierten Kostenbasis, nicht bloß Chartpreis +50%."
+    ],
+    "automatic_outputs": {
+      "during_run": "Alle konfigurierten 5 Sekunden kompakte Statuszeile oder Snapshot: Feedzustand, CREATEs, Entries, Positionen, Realized-PnL, Datenqualität, p50/p95 lokale Latenz. Statistik außerhalb Hot Path.",
+      "after_run": [
+        "report.json mit festen maschinenlesbaren Feldern",
+        "summary.md mit verständlicher deutscher Zusammenfassung",
+        "positions.csv und latency_by_feed.csv",
+        "target_comparison.csv bei Research-Auswertung"
+      ],
+      "on_interrupt": "Flush versuchen, Run INTERRUPTED markieren, offene Positionen und fehlende Beobachtungszeit offen ausweisen. Kein behaupteter Exit beim Prozessende."
+    }
+  },
+  "target_selection_and_validation": {
+    "question": "Hat die Strategie nach Gebühren und realistischen Ausführungsannahmen positiven Erwartungswert, und welche vorab festgelegte Netto-Zielschwelle ist robust?",
+    "stages": [
+      {
+        "id": "R1",
+        "name": "Technischer Pilot",
+        "rule": "Mindestens 1000 eindeutige beobachtete CREATEs als initiales Sammelziel. Das ist keine ausreichende Profit-Stichprobe. Zuerst Decoder, Matching, Datenqualität, Kostenmodell und Latenzen prüfen."
+      },
+      {
+        "id": "R2",
+        "name": "Unveränderlicher Datensatz",
+        "rule": "Raw-Events, Canonical-Events, Run-/Policy-/Fee-Snapshots und Hashes einfrieren. Korrigierte Decoder erzeugen neue Dataset-Version."
+      },
+      {
+        "id": "R3",
+        "name": "Vorregistrierte Varianten",
+        "rule": "Die target_grid und unabhängigen Entry-/Exit-Latenzszenarien vor Auswertung festschreiben. Creator-Exit und übrige Parameter identisch halten."
+      },
+      {
+        "id": "R4",
+        "name": "Zeitliche Aufteilung",
+        "rule": "Chronologisch 60% Training, 20% Validation, 20% Test. Ganze abhängige Zeitblöcke zusammenhalten; kein zufälliger Trade-Split. Embargo/Purging nach timeout_and_observation_contract.split_embargo. Grenzübergreifende ungeklärte Positionen nicht als abgeschlossen behandeln."
+      },
+      {
+        "id": "R5",
+        "name": "Zwei getrennte Vergleiche",
+        "rule": "A: Gepaarte Launch-Analyse auf gleichen zulässigen Ereignissen zur Wirkung der Zielschwelle. B: Echter Portfolio-Replay mit gleichem Startkapital und Positionslimits, dessen unterschiedliche Haltedauern andere Entries zulassen. Nur B beschreibt das umsetzbare Portfolio."
+      },
+      {
+        "id": "R6",
+        "name": "Auswahl und Freeze",
+        "rule": "Training zur Kandidatensuche, Validation zur Wahl einer einfachen robusten Schwelle. Bei engem Abstand zu 1.5x keine Scheingenauigkeit: einfachere stabile Wahl bevorzugen. Danach alle Parameter einfrieren und Test genau einmal bewerten."
+      },
+      {
+        "id": "R7",
+        "name": "Neuer Forward-PAPER-Lauf",
+        "rule": "Gewählten Kandidaten auf erst danach eintreffenden Daten prüfen. Nach einer Anpassung ist bisheriger Test Entwicklungsdaten; neue unberührte Testperiode erforderlich."
+      }
+    ],
+    "uncertainty": "Zeitblock-Bootstrap mit Session-/Tagesblöcken, Abhängigkeit und Blockwahl begründen, Seed und 2000 Resamples speichern. Mindestens 30 unabhängige Blöcke ist nur eine vorsichtige Startregel, keine statistische Garantie. Zu wenige oder stark abhängige Daten = INSUFFICIENT_DATA.",
+    "qualification_rule": [
+      "Keine kritischen ungeklärten Daten-/Kostenlücken; alle versuchten Entries und offene Restbestände berücksichtigt.",
+      "Positiver Netto-Erwartungswert auf unberührtem Forward-Datensatz und unter realistisch deklariertem Ausführungsmodell.",
+      "Untere Grenze des vorregistrierten 95%-Block-Bootstrap-Intervalls > 0; mehrere getestete Varianten und Auswahlprozess offenlegen.",
+      "Positive Resultate müssen vorab deklarierte plausible Gebühren-/Latenz-/Slippage-Stressfälle überstehen; alleiniger 0-ms-Gewinn reicht nicht.",
+      "Wesentliche ungelöste Positionen oder nicht modellierbare Fill-Ungewissheit verhindern positive Qualifikation.",
+      "Status bleibt POSITIVE_UNDER_MODEL, niemals LIVE_PROFIT_PROVEN.",
+      "Keine unaufgelöste exponierte Migration und keine nicht rekonstruierte entscheidungsrelevante kanonische Lücke; betroffene Trades nicht aus der Kampagne entfernen."
+    ],
+    "stress_design": "Entry und Exit getrennt und gemeinsam verzögern. Null, 5, 25, 100, 250, 500 ms sind Sensitivitätsraster, keine Behauptung realer Landing-Zeiten. Gemessene lokale Verzögerungen verwenden; unbekannte Netz-/Inklusionsverzögerung als Annahme kennzeichnen. Kosten-/Slippage-Stress vor Lauf in Research-Config spezifizieren.",
+    "forbidden": [
+      "Beste Schwelle nach Betrachtung desselben Testsets immer wieder nachstellen und dasselbe Set als Beweis nutzen",
+      "Nur Gewinner, geschlossene Trades oder durchgehend beobachtbare Launches ohne Ausschlussbericht auswerten",
+      "Zukünftiges Hoch, späteren Creator-Sell oder erst später bekannte Wallet-Merkmale als Entry-Feature verwenden",
+      "Gleiche historische PnL-Tabelle ohne identischen Input als kausalen Millisekundennachweis behandeln"
+    ],
+    "adaptive_future": {
+      "enabled": false,
+      "activation_gate": "Erst nach stabilem festen Ziel und gesonderter Spezifikation/Forward-Validierung.",
+      "simple_candidate": "Wenige feste Zielwerte anhand ausschließlich vorher abgeschlossener, ausreichend großer Zeitfenster wählen; Minimum-Stichprobe, seltene Updates und Fallback auf feste Schwelle.",
+      "rules": [
+        "Keine offenen Trades oder Zukunftsdaten zur Auswahl verwenden.",
+        "Neue Policy gilt nur für neue Positionen; Ziel bestehender Positionen nicht rückwirkend ändern.",
+        "Jede Anpassung mit Datencutoff, Auswahlregel, Policy-Hash und Begründung speichern.",
+        "Adaptive Regel selbst gegen feste 1.5x-Baseline zeitlich out-of-sample testen, nicht nur ihre Gewinnerfenster."
+      ]
+    }
+  },
+  "reliability_and_resource_limits": {
+    "feed_failure": "Ein ausgefallener Feed führt zu Reconnect mit Backoff/Jitter. Andere gültige Quellen weiter nutzen; fehlende Positionsabdeckung gesondert markieren. Bei fehlenden frischen Pflichtzuständen keine neuen Entries.",
+    "position_safety": "Bei Daten-/DB-Problemen neue Entries pausieren; bestehende Positionsbehandlung fortsetzen, soweit gültige Daten vorhanden. Keine falsche Ausführung aus stale Quotes. Unauflösbare Situation markiert UNRESOLVED.",
+    "free_tier_budget": "RPC-Credits, Subscription- und Requestlimits pro Anbieter vor Start erfassen, im Hintergrund budgetieren und 429/Disconnect messen. Keine Rate-Limit-Umgehung durch Schlüsselrotation.",
+    "host": "Vorhandenen Mac verwenden, Schlafmodus während Aufnahme verhindern, stabile Netzwerkverbindung, CPU/RAM/Disk/Event-Loop-Lag aufzeichnen. RAM allein macht keinen schnellen Mainnet-Knoten; Phase 1 braucht keinen eigenen Knoten.",
+    "bounded_memory": "Queue, Dedup-Retention, Raw-Buffer und inaktive Mint-Tracker begrenzen; aktive Positionen aus normaler Research-Eviction ausnehmen. Retentionparameter versionieren.",
+    "quiet_output": "Keine synchronen Prints/Flushes für einzelne Ticks. Nur periodische Statusberichte und gezielte Fehler."
+  },
+  "acceptance_tests": [
+    {
+      "id": "T01",
+      "scenario": "Gleicher CREATE über drei Quellen",
+      "expected": "Ein Entry-Intent, drei Beobachtungen, korrekte relative Feed-Latenzen."
+    },
+    {
+      "id": "T02",
+      "scenario": "Früher unvollständiger PumpPortal-Hinweis",
+      "expected": "Hint-Gewinn erfassen, erst vollständige handlungsfähige Quelle löst Entry aus."
+    },
+    {
+      "id": "T03",
+      "scenario": "CREATE + mehrere Buys + Creator-Sell in einer Transaktion",
+      "expected": "Kein Fill zwischen Instruktionen; finalen atomaren Zustand berücksichtigen."
+    },
+    {
+      "id": "T04",
+      "scenario": "Verspäteter Entry-Callback mit zwischenzeitlichem Creator-Sell",
+      "expected": "Sell wird kausal verarbeitet; keine unbemerkt offene Position."
+    },
+    {
+      "id": "T05",
+      "scenario": "Creator-Sell nach angenommener Einreichung vor Fill",
+      "expected": "Keine kostenlose Stornierung; Status/Kosten korrekt."
+    },
+    {
+      "id": "T06",
+      "scenario": "Null-Latenz und wiederholte Exit-Fehler",
+      "expected": "Begrenzte Retries, Zeitfortschritt, kein Endlosloop."
+    },
+    {
+      "id": "T07",
+      "scenario": "Stop deaktiviert und Curve unbekannt",
+      "expected": "Kein gewöhnlicher Stop, kein erfundener Nullkurs."
+    },
+    {
+      "id": "T08",
+      "scenario": "Entry- und Exit-Latenz separat geändert",
+      "expected": "Nur konfigurierte Seite verändert Timing; gemeinsame Engine in PAPER/Replay."
+    },
+    {
+      "id": "T09",
+      "scenario": "Research-Horizont endet bei offener Position",
+      "expected": "Tracker bleibt aktiv oder Position klar zensiert; kein erzwungener Gewinnabschluss."
+    },
+    {
+      "id": "T10",
+      "scenario": "Entry scheitert / Sell retries / Prozessabbruch",
+      "expected": "Alle gebührenpflichtigen Versuche im Ledger, keine doppelte Buchung, Restposition sichtbar."
+    },
+    {
+      "id": "T11",
+      "scenario": "Rent lock und spätere Erstattung",
+      "expected": "Cash, gebundenes Vermögen und PnL stimmen getrennt überein."
+    },
+    {
+      "id": "T12",
+      "scenario": "Writer-Queue voll / Diskfehler",
+      "expected": "Event Loop blockiert nicht, neue Entries pausieren, Qualitätslücke und ungültiger Bewertungsbereich."
+    },
+    {
+      "id": "T13",
+      "scenario": "Subscription-ACK abgelehnt / Feed disconnect",
+      "expected": "Kein falscher READY-Status; begrenzter Reconnect und verbleibende Quelle funktioniert."
+    },
+    {
+      "id": "T14",
+      "scenario": "Decoder-/Consumer-Programmierfehler",
+      "expected": "Nicht als bloßer Transport-Reconnect verschluckt; diagnostischer Fehlerstatus."
+    },
+    {
+      "id": "T15",
+      "scenario": "Out-of-order / Duplikate / widersprüchlicher processed-Zustand",
+      "expected": "Kein doppelter Intent, kein unbemerktes Zurückrollen frischer Reserven."
+    },
+    {
+      "id": "T16",
+      "scenario": "Ungültige/alte Gebühren oder Reserven",
+      "expected": "Diagnose möglich, aber keine qualifizierte wirtschaftliche Aussage."
+    },
+    {
+      "id": "T17",
+      "scenario": "Bekannter kleiner Fixture-Datensatz mit handgerechneten Gebühren",
+      "expected": "Netto-Multiple, PnL, Failed-Intent-Erwartungswert und Cash-Reconciliation exakt korrekt."
+    },
+    {
+      "id": "T18",
+      "scenario": "Fehlender Feed und Zeitgleichstand",
+      "expected": "Missing NULL, korrekte Coverage-Nenner, Tie kein exklusiver Sieg."
+    },
+    {
+      "id": "T19",
+      "scenario": "Replay zweimal mit identischen Inputs/Seed",
+      "expected": "Gleiche Entscheidungen, Ledger und wirtschaftliche Reports; erzeugte Report-Zeit aus Vergleich ausnehmen."
+    },
+    {
+      "id": "T20",
+      "scenario": "Zukünftige Events werden nachträglich ergänzt",
+      "expected": "Bereits frühere Entscheidungen bleiben unverändert; kein Look-ahead."
+    },
+    {
+      "id": "T21",
+      "scenario": "Alle Zielvarianten auf gleichen Launches und Portfolio",
+      "expected": "Gepaarte Analyse von kapitalbegrenztem Portfolio getrennt ausweisen."
+    },
+    {
+      "id": "T22",
+      "scenario": "PAPER-Broadcast-Grenze",
+      "expected": "Jeder sendTransaction-/kostenpflichtige Trade-API-Aufruf im PAPER-Test schlägt als verbotener Pfad fehl."
+    },
+    {
+      "id": "T23",
+      "scenario": "Prozessneustart",
+      "expected": "Neue Clock-Epoch; keine Subtraktion inkompatibler monotonic-Zeiten; vorher offene Positionen nicht als geschlossen."
+    },
+    {
+      "id": "T24",
+      "scenario": "Unterbrechung/fehlender Marktabschnitt",
+      "expected": "Censoring, Verlustgrenzen und Ausschlüsse sichtbar; kein positives Urteil durch Weglassen."
+    },
+    {
+      "id": "T25",
+      "scenario": "Unterstützte Pump-Protokollvarianten",
+      "expected": "Fixtures aus versioniertem offiziellem IDL einschließlich relevanter create/create_v2- und Tokenprogramm-Unterschiede; unbekannte Variante bleibt non-actionable."
+    },
+    {
+      "id": "T26",
+      "scenario": "Fee-Snapshot fehlt/veraltet; RPC gibt NULL",
+      "expected": "UNQUALIFIED_COSTS, keine implizite Nullgebühr; Feedmessung bleibt möglich."
+    },
+    {
+      "id": "T27",
+      "scenario": "Gebühren ändern sich zwischen BUY und SELL",
+      "expected": "Unterschiedliche korrekte Snapshots pro Versuch; Replay behält historische Kenntnis."
+    },
+    {
+      "id": "T28",
+      "scenario": "Quote enthält Fee/Impact; Netzwerkgesamtsumme enthält Priority",
+      "expected": "PnL zieht jede Kostenkomponente genau einmal ab; Slippage-Toleranz wird nicht als Gebühr gebucht."
+    },
+    {
+      "id": "T29",
+      "scenario": "Token-Account existiert / muss erstellt werden / wird geschlossen",
+      "expected": "Passende Größe/Rent, kein doppelter Rent-Abzug, Erstattung nur mit belegtem Vorgang."
+    },
+    {
+      "id": "T30",
+      "scenario": "Vorberechnete Gebühr weicht von späterer Abrechnung ab",
+      "expected": "Differenz offen gespeichert, nachvollziehbare Korrekturversion, ursprüngliche Entscheidung bleibt unverändert."
+    },
+    {
+      "id": "T31",
+      "scenario": "Strategie-Timeout bei 590 s nach Entry; Research-Ende 600 s nach CREATE",
+      "expected": "Nur Strategie-Timeout erzeugt Exit-Intent; Research-Ende bucht nichts und entfernt keine exponierte Position."
+    },
+    {
+      "id": "T32",
+      "scenario": "Timeout ohne frische Quote / Exit scheitert",
+      "expected": "Kein fiktiver Fill; latched Exit, begrenzte Versuche, Restbestand UNRESOLVED."
+    },
+    {
+      "id": "T33",
+      "scenario": "Kurvenbudget mit Protokollfee, Netzfee, Rent und Exit-Reserve",
+      "expected": "Handgerechnetes sizing_contract-Beispiel stimmt; Quote-Parametrisierung hängt von Instruktionssemantik ab; kein still kleinerer Entry."
+    },
+    {
+      "id": "T34",
+      "scenario": "Mehrere zeitgleiche CREATEs bei einem freien Slot",
+      "expected": "Genau ein atomar reservierter Entry; andere als SLOT_LIMIT verworfen, später nicht nachgeholt."
+    },
+    {
+      "id": "T35",
+      "scenario": "Relationale Snapshot-/Attempt-Verknüpfungen",
+      "expected": "Migration erfolgreich, foreign_key_check leer, keine verwaisten Fee-/Quote-IDs, zyklische Inserts transaktional korrekt."
+    },
+    {
+      "id": "T36",
+      "scenario": "Verspäteter Callback und Creator-Sell",
+      "expected": "Exit-Entscheidungszeit nicht vor tatsächlicher Verarbeitung; latched Sell bleibt erhalten."
+    },
+    {
+      "id": "T37",
+      "scenario": "Hot-Path-Abhängigkeiten unter Recorder-Last",
+      "expected": "Keine synchronen DB-/RPC-/Print-/Hash-Aufrufe im kritischen Abschnitt; Queueüberlauf sichtbar; Latenzprofil mit Last dokumentiert."
+    },
+    {
+      "id": "T38",
+      "scenario": "Portfolio-Replay mit 1 und 10 Slots",
+      "expected": "Getrennte Ergebnisse mit demselben Kapital; Reservationsgrenzen halten, kein linear hochgerechneter Tagesgewinn."
+    },
+    {
+      "id": "T39",
+      "scenario": "Unbekannte Config-Schlüssel, alte max_hold_ms und widersprüchliche Betragssemantik",
+      "expected": "Konfiguration abgelehnt mit präziser Fehlermeldung; keine stillen Defaults."
+    },
+    {
+      "id": "T40",
+      "scenario": "Unveränderter Entscheidungs-Input bei Performance-Optimierung",
+      "expected": "Entscheidungen, Buchungen und Fehlerzustände identisch; Laufzeitmessungen separat."
+    },
+    {
+      "id": "T41",
+      "scenario": "SOL-Quote, WSOL-Instruction, Native-Sentinel, USDC und unbekanntes Layout",
+      "expected": "Nur feldabhängig validiertes SOL_WSOL handelbar. Fremde Quote UNSUPPORTED_QUOTE; unbekannt QUOTE_UNKNOWN. Kein Zugriff fremder Beträge auf SOL-Formeln."
+    },
+    {
+      "id": "T42",
+      "scenario": "Creator bereits vor Entry-Decision sowie vor/nach angenommener Einreichung",
+      "expected": "Vor Decision kein Entry; vor Submit nur tatsächlich noch unsubmitted abbrechen; nach Submit keine magische Stornierung. Kosten nach Status."
+    },
+    {
+      "id": "T43",
+      "scenario": "Target vor Creator, Creator vor Target und exakter Timestamp-Gleichstand",
+      "expected": "Erster kausaler Trigger bleibt erhalten; Gleichstand CREATOR_SELL; genau ein Exit-Intent und kein nachträglich umgeschriebener Grund."
+    },
+    {
+      "id": "T44",
+      "scenario": "Ein gebührenpflichtiger Exit-Reject, dann erfolgreicher Retry",
+      "expected": "Genau zwei Versuche mit Backoff; vollständige kumulative Gebühren, Token einmal verkauft, Cash/Netto-PnL handgerechnet korrekt."
+    },
+    {
+      "id": "T45",
+      "scenario": "PAPER↔Replay↔Backtest Creator-/Target-/Retry-Matrix",
+      "expected": "Mit identischen Events, Zeit-/Callback-Schedule, Fee-Snapshots, Seed und Modellpolicy identische Intents, Zustände, Origin-Trigger, Versuche, Fill-Proxies und Ledger. Varianten: vor Decision, zwischen Decision/Fill, nach Fill, beide Triggerreihenfolgen, Gleichstand, ein Reject dann Fill, wiederholte Rejects und Exhaustion."
+    },
+    {
+      "id": "T46",
+      "scenario": "Migration/Curve-complete bei offener Position und zeitgleich geplantem Fill",
+      "expected": "Alte Quote sofort ungültig; keine Pump-Füllung nach Venue-Wechsel. Pending-Status klären, Restbestand UNRESOLVED und positiver Kampagnenstatus gesperrt."
+    },
+    {
+      "id": "T47",
+      "scenario": "PumpPortal-Key fehlt/Access nicht kostenfrei/Subscriptions prüfen",
+      "expected": "Adapter optional deaktiviert; RPC-basierter Start möglich. Nur NewToken/Migration auf einer Verbindung, keine Key-Leaks oder kostenpflichtige Subscribe-Aufrufe."
+    },
+    {
+      "id": "T48",
+      "scenario": "Ein Provider fällt aus, anderer deckt alle erforderlichen Events",
+      "expected": "Kein kanonischer Gap allein durch Disconnect. NewToken-only-Feed genügt nicht als Ersatz für Trades. Ausfall aller geeigneten Quellen setzt Hard-Gate."
+    },
+    {
+      "id": "T49",
+      "scenario": "Nach Gap kommen neue Reserven, verlorener Creator-Sell nicht rekonstruierbar",
+      "expected": "Aktueller State kann RECOVERED_STATE_ONLY sein, historische Gap bleibt. Kein falsches OBSERVED oder qualifizierter Edge durch einfachen Reconnect."
+    },
+    {
+      "id": "T50",
+      "scenario": "17 Legacy-Features und neue Coverage-Sicht im Hintergrund",
+      "expected": "Exakte Namen/Reihenfolge/16 unveränderte Formeln; V1-Orakel bleibt unverändert, V2-Gap explizit versioniert. Kein Feature-Snapshot vor BUY, keine Zukunftsevents im Cutoff."
+    },
+    {
+      "id": "T51",
+      "scenario": "PAPER-FILLED sowie späteres next-event-Audit",
+      "expected": "Fill-Evidenz zwingend OBSERVED_STATE_PROXY; nachfolgendes Event verändert keine vorherige Quote/Entscheidung. LIVE-ACK ist kein CHAIN_EXECUTION_OBSERVED."
+    },
+    {
+      "id": "T52",
+      "scenario": "PumpPortal-Migrationshinweis ohne vollständigen Chain-Nachweis",
+      "expected": "Venue zuerst gesperrt als MIGRATION_SUSPECTED, asynchrone Prüfung; keine falsche definitive Migration und keine weitere alte Curve-Füllung."
+    }
+  ],
+  "implementation_sequence": [
+    {
+      "step": 1,
+      "name": "Projektstand sichern und Contract auflösen",
+      "deliverables": [
+        "Repository-/Abhängigkeitsinventar",
+        "Zuordnung aktueller Contract/Protokollversion",
+        "Baseline-Tests und dokumentierte Upload-Lücken",
+        "Versionierte Runtime-Config-Validierung und Datenbankmigration mit Fee-/Quote-Tabellen als Grundlage der folgenden Tests",
+        "Einfacher Projektbaum, requirements.txt und Installations-/Config-Prüfung nach minimal_environment_contract"
+      ],
+      "gate": "Alle required_test_ids dieses Schritts müssen bestehen. Keine Vermischung alter und neuer Konfigurationen; bestehende Dateien erhalten.",
+      "required_test_ids": [
+        "T35",
+        "T39"
+      ]
+    },
+    {
+      "step": 2,
+      "name": "Gemeinsame korrekte PAPER-Engine und Ledger",
+      "deliverables": [
+        "F01–F06, F08–F10, F12, F14 korrigiert",
+        "Getrennte Entry-/Exit-Modelle",
+        "Atomare Eventverarbeitung, Kostenrechnung und Zustandsautomat",
+        "Verpflichtende automatische Gebührenbeschaffung und Fee-Snapshot-Pipeline gemäß mandatory_fee_pipeline",
+        "SOL-only, Venue-/Migration-Guards und Creator/Target/Retry-Parität"
+      ],
+      "gate": "Alle required_test_ids müssen bestehen, ausdrücklich T26–T30 für Gebühren, Rent, Snapshotwechsel und Doppelzählung. Danach technische Aufnahme zulässig; wirtschaftlicher Lauf erfordert zusätzlich Runtime-Readiness.",
+      "required_test_ids": [
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09",
+        "T10",
+        "T11",
+        "T16",
+        "T17",
+        "T20",
+        "T24",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T30",
+        "T31",
+        "T32",
+        "T33",
+        "T36",
+        "T41",
+        "T42",
+        "T43",
+        "T44",
+        "T45",
+        "T46",
+        "T51",
+        "T52"
+      ]
+    },
+    {
+      "step": 3,
+      "name": "Feed-Race und Hot Path",
+      "deliverables": [
+        "Drei zulässige Adapter",
+        "Normalisierung, Beobachtungen, Dedup, Handlungsfähigkeit",
+        "Empfang/Decode/Decision-Timestamps und Hintergrundaufbereitung",
+        "Optionales kostenloses PumpPortal mit API-Key und Migration; kanonische Coverage",
+        "Wiederverwendbare doctor-Probe mit realen kostenlosen Quellen und Fee-Snapshots; D02–D05"
+      ],
+      "gate": "Alle required_test_ids dieses Schritts müssen bestehen. T01–T02, T13–T15, T18, T25 bestehen; kein kostenpflichtiger Feed.",
+      "required_test_ids": [
+        "T01",
+        "T02",
+        "T13",
+        "T14",
+        "T15",
+        "T18",
+        "T25",
+        "T34",
+        "T37",
+        "T41",
+        "T47",
+        "T48",
+        "T49",
+        "T52"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "Neue DB und automatische Reports",
+      "deliverables": [
+        "Additive Migration und neue Kampagnen-DB",
+        "Single Writer, Qualitätsmarkierung",
+        "report.json/summary.md/CSV automatisch",
+        "Legacy-Features mit expliziten Versionen sowie Proxy-Evidenz in DB und Report",
+        "doctor-Probe vollständig mit SQLite/Report/Replay integriert; D01 und D06"
+      ],
+      "gate": "Alle required_test_ids dieses Schritts müssen bestehen. T10–T12, T17–T19, T23 bestehen; Raw-Replay reproduzierbar.",
+      "required_test_ids": [
+        "T10",
+        "T11",
+        "T12",
+        "T17",
+        "T18",
+        "T19",
+        "T21",
+        "T23",
+        "T35",
+        "T38",
+        "T40",
+        "T45",
+        "T46",
+        "T48",
+        "T49",
+        "T50",
+        "T51"
+      ]
+    },
+    {
+      "step": 5,
+      "name": "Lokaler Smoke-Test und echter Live-PAPER-Pilot",
+      "deliverables": [
+        "T22 Broadcast-Sperre",
+        "Aufnahme von mindestens 1000 beobachteten CREATEs oder klar dokumentiertem vorzeitigem Ende",
+        "Kosten-, Coverage- und Latenzbericht"
+      ],
+      "gate": "Alle T01–T52 bestanden, ECONOMIC_PAPER_READY für wirtschaftlichen Pilot. CAPTURE_READY allein erlaubt nur technischen Feed-Benchmark, keinen qualifizierten PnL. Keine echten Transaktionen. D01–D06 mit konkreter Evidenz berichten; INCONCLUSIVE ist kein PASS. Seltene nicht beobachtete Live-Ereignisse getrennt von bestandenen Decoder-Fixtures offenlegen. Wirtschaftliche Readiness bleibt Voraussetzung.",
+      "required_test_ids": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09",
+        "T10",
+        "T11",
+        "T12",
+        "T13",
+        "T14",
+        "T15",
+        "T16",
+        "T17",
+        "T18",
+        "T19",
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T30",
+        "T31",
+        "T32",
+        "T33",
+        "T34",
+        "T35",
+        "T36",
+        "T37",
+        "T38",
+        "T39",
+        "T40",
+        "T41",
+        "T42",
+        "T43",
+        "T44",
+        "T45",
+        "T46",
+        "T47",
+        "T48",
+        "T49",
+        "T50",
+        "T51",
+        "T52"
+      ],
+      "required_integration_checks": [
+        "D01",
+        "D02",
+        "D03",
+        "D04",
+        "D05",
+        "D06"
+      ]
+    },
+    {
+      "step": 6,
+      "name": "Zielschwellen-Research und Forward-Test",
+      "deliverables": [
+        "Vorregistrierte Varianten",
+        "Zeitliche Splits/Embargo",
+        "Paarvergleich plus Portfolio-Replay",
+        "Unberührter Forward-PAPER-Bericht"
+      ],
+      "gate": "Alle required_test_ids dieses Schritts müssen bestehen. Positiven Erwartungswert nur nach qualification_rule melden; sonst ehrliches negatives oder unzureichendes Resultat.",
+      "required_test_ids": [
+        "T19",
+        "T20",
+        "T21",
+        "T24",
+        "T27",
+        "T38",
+        "T45",
+        "T46",
+        "T49",
+        "T50",
+        "T51"
+      ]
+    }
+  ],
+  "required_cli_contract": {
+    "note": "Folgende Befehle sind zu implementierende Schnittstellen, keine Behauptung, dass sie im Upload bereits existieren. Bestehende CLI darf kompatibel erweitert werden.",
+    "commands": [
+      {
+        "command": "python -m darkbot doctor --config config/phase1.json",
+        "effect": "Konfiguration, kostenlose Feed-Bereitschaft, Gebührenherkunft, Datenbank und PAPER-Sperre prüfen; Geheimnisse redigieren."
+      },
+      {
+        "command": "python -m darkbot paper --config config/phase1.json --db data/phase1.sqlite --campaign phase1_001",
+        "effect": "Live-PAPER mit Auto-Recording und periodischem Status; Ctrl-C kontrolliert beenden."
+      },
+      {
+        "command": "python -m darkbot report --db data/phase1.sqlite --campaign phase1_001 --out exports/phase1_001",
+        "effect": "Deterministische Latenz-/PnL-/Qualitätsberichte erzeugen."
+      },
+      {
+        "command": "python -m darkbot research --db data/phase1.sqlite --campaign phase1_001 --config config/research.json --out exports/research_001",
+        "effect": "Vorregistrierte Ziel- und Latenzvarianten auf eingefrorenem Dataset auswerten; Testsplit sperren bis Policy-Freeze."
+      }
+    ],
+    "operator_handoff": "Installation, Umgebungsvariablen ohne echte Schlüsselwerte, doctor, PAPER-Start, Ende und Report erläutern. Dem Nutzer beim gemeinsamen Start jeweils einen ausführbaren Schritt geben. Keine Gewinnbehauptung aus einem bloßen Smoke-Test."
+  },
+  "definition_of_done": [
+    "Bestehendes Backend gezielt erweitert, keine unnötige Zusatzinfrastruktur.",
+    "Alle aktivierten Feed-Beobachtungen werden korrekt verglichen; erster vollständiger CREATE entscheidet einmal. PumpPortal ist optional; mindestens eine geeignete RPC-Quelle muss vollständige Pflichtdaten liefern.",
+    "Reale Live-Daten und imaginäres Kapital; PAPER kann technisch keine Transaktion senden.",
+    "Korrekte gemeinsame Zustands-/Kosten-/Retry-Logik und alle relevanten semantischen Tests bestanden.",
+    "Neue SQLite-Kampagne enthält reproduzierbare Rohdaten, Entscheidungen, Versuche, Ledger und Qualität.",
+    "Latenzbericht trennt lokal gemessen, relativ gemessen, simuliert und unbekannt.",
+    "Automatischer Bericht zeigt tatsächliche Modell-Ergebnisse einschließlich Fehler, Fees, offenen Positionen und Unsicherheit.",
+    "1.5x ist Baseline, Vergleichslogik ist implementiert, adaptive Regel bleibt deaktiviert.",
+    "Keine positive Edge-Aussage ohne ausreichende unverbrauchte Daten und erfüllte Qualitätskriterien.",
+    "Abschluss nennt Änderungen, bestandene Prüfungen, gemessene Werte und verbleibende Annahmen konkret.",
+    "Gebühren-Pipeline läuft automatisch, aktuelle Quellen/Snapshots sind in der DB, Kosten je Versuch nachvollziehbar, keine Doppelzählung und kein positiver Edge bei UNQUALIFIED_COSTS.",
+    "Sizing-, Timeout- und Portfoliovertrag in Config, Engine, Replay und Reports identisch umgesetzt.",
+    "Schema-/Foreign-Key-Prüfungen und alle 52 Abnahmetests bestanden; Laufzeitnachweise nicht mit Spezifikationsprüfung verwechseln.",
+    "Keine Zahl im Report behauptet global früheste Erkennung, sicheren Fill oder garantierten Profit.",
+    "SOL-only, Migration-Sperre, Coverage-V2, historische Feature-Sicht und OBSERVED_STATE_PROXY samt T41–T52 implementiert; kein stiller Bruch alter Forschungssemantik.",
+    "Verbindlicher einfacher Dateibaum, ein aktueller Runtime-Pfad, keine virtuelle Umgebung und keine versteckten operativen Parameter.",
+    "doctor, paper, report und research sind integriert; D01–D06 sowie Installationsprüfung dokumentiert und alle T01–T52 bestanden."
+  ],
+  "reference_sources": [
+    {
+      "url": "https://www.helius.dev/docs/gatekeeper/overview",
+      "purpose": "Gatekeeper/Standard-WebSockets; Tarif und Verfügbarkeit vor Setup erneut prüfen"
+    },
+    {
+      "url": "https://www.helius.dev/pricing",
+      "purpose": "Free-Kontingent, keine dauerhaft garantierten Limits"
+    },
+    {
+      "url": "https://pumpportal.fun/data-api/real-time/",
+      "purpose": "Kostenlose NewToken-Subscription von kostenpflichtigen Trade-Daten trennen"
+    },
+    {
+      "url": "https://solana.com/docs/rpc/websocket/logssubscribe",
+      "purpose": "logsSubscribe und explizites processed commitment"
+    },
+    {
+      "url": "https://solana.com/docs/rpc/http/sendtransaction",
+      "purpose": "Send-ACK ist keine bestätigte Ausführung"
+    },
+    {
+      "url": "https://solana.com/developers/cookbook/transactions/retry",
+      "purpose": "Retransmission, Retry und Doppel-Ausführungsrisiko"
+    },
+    {
+      "url": "https://github.com/pump-fun/pump-public-docs",
+      "purpose": "Aktuelle versionierte IDLs, Instruktionen und Protokoll-Accounts"
+    },
+    {
+      "url": "https://solana.com/docs/core/fees",
+      "purpose": "Transaktionsgebühr und versionsabhängige Priority-Berechnung"
+    },
+    {
+      "url": "https://solana.com/docs/rpc/http/getfeeformessage",
+      "purpose": "Gebühr für konkret serialisierte Nachricht"
+    },
+    {
+      "url": "https://solana.com/docs/rpc/http/getminimumbalanceforrentexemption",
+      "purpose": "Größenabhängiger Rent-Bedarf"
+    },
+    {
+      "url": "https://solana.com/docs/rpc/http/getrecentprioritizationfees",
+      "purpose": "Hintergrunddaten für Priority-Policy"
+    },
+    {
+      "url": "https://solana.com/docs/rpc/json-structures",
+      "purpose": "Transaktionsmetadaten für spätere LIVE-Nachabrechnung"
+    },
+    {
+      "url": "https://github.com/pump-fun/pump-public-docs/blob/main/docs/instructions/BUY.md",
+      "purpose": "Quote-Asset, Native-SOL-Sentinel, WSOL-Instruktionsaccount und Gebühreninklusion",
+      "checked_utc_date": "2026-09-17"
+    },
+    {
+      "url": "https://github.com/pump-fun/pump-public-docs/blob/main/docs/instructions/SELL.md",
+      "purpose": "SOL-/Non-SOL-Verkauf und Netto-Minimum",
+      "checked_utc_date": "2026-09-17"
+    }
+  ],
+  "revision_note": "Vom Nutzer beauftragte dokumentarische Ergänzung nach Freeze: verbindlicher schlanker Python-Dateibaum, eindeutige Modulzuständigkeiten, kein Legacy-Runtime-/venv-Betrieb, integrierte doctor-Probe und vollständige Delivery-Kriterien. Bestehende 52 semantische Tests unverändert; sechs operative Integrationsprüfungen ergänzt. Keine Änderung der Handelsstrategie.",
+  "mandatory_fee_pipeline": {
+    "priority": "MUST_IMPLEMENT_BEFORE_ECONOMIC_PAPER_QUALIFICATION",
+    "requirement": "Beim Bau Gebührenbeschaffung, Fee-Snapshots, Quote-Kostenrechnung und automatische Kostenberichte vollständig implementieren. Kosten nicht als spätere manuelle Ergänzung offenlassen. Reale aktuelle Gebührenregeln verwenden; PAPER-Ausführungsannahmen ausdrücklich von tatsächlich bezahlten LIVE-Gebühren trennen.",
+    "startup_and_refresh": [
+      "Beim Start Protokoll-/Fee-Accounts anhand einer festgehaltenen offiziellen Pump-IDL-Version lesen, Besitzer/Programm/Accountlayout validieren und benötigte Gebührensätze sowie gegebenenfalls zustandsabhängige Gebührenstufen dekodieren. Keine unverifizierten alten 95/30-bps-Werte übernehmen.",
+      "Gebührensatz für den tatsächlichen Handelspfad, Token-/Quote-Typ und aktuellen Zustand berechnen. Nicht unterstützte Gebührenlogik macht den Token nicht handelbar; Migration auf einen anderen Handelsplatz darf keine stillschweigende Gebührenübernahme auslösen.",
+      "Fee-Accounts nach Möglichkeit im Hintergrund abonnieren; zusätzlich begrenzte Refresh-Abfragen nach versionierter Policy und Free-RPC-Budget. Jede Änderung als neuen unveränderlichen Snapshot speichern.",
+      "Für konkret konfigurierte BUY-/SELL-Nachrichten Netzwerkgebühr per getFeeForMessage im Hintergrund validieren. Message-Version, Signaturzahl, Compute-Budget, Blockhash-Kontext und RPC-Slot festhalten. NULL ist unbekannt, nicht kostenlos.",
+      "Priority-Policy mit CU-Limit und CU-Preis explizit festlegen. Für legacy/v0 ComputeBudget: Priority-Lamports = ceil(CU-Limit * CU-Preis-in-MicroLamports / 1000000). Keine Gleichsetzung des CU-Limits mit tatsächlich verbrauchten CUs; andere Message-Formate separat unterstützen oder ablehnen.",
+      "getRecentPrioritizationFees kann Hintergrunddaten für eine begrenzte Priority-Policy liefern, garantiert aber keine Landung. Gewählten Preis und dessen Herleitung speichern; Fehlversuche und Landing bleiben im PAPER Modellannahmen.",
+      "Rent-Bedarf per getMinimumBalanceForRentExemption für die tatsächlich erforderliche Accountgröße bestimmen; Token-Programm/Extensions und bereits vorhandene Accounts berücksichtigen. Accountschließung und Rückzahlung nur bei entsprechendem modelliertem/tatsächlichem Vorgang buchen.",
+      "Sender-/Bundle-Tip nur für den tatsächlich gewählten Sendepfad ansetzen. Null ist zulässig, wenn kein Tip-Transfer vorgesehen ist, mit expliziter Herkunft NOT_APPLICABLE. Gebühren externer Dienste separat erfassen; keine kostenpflichtigen Dienste automatisch aktivieren."
+    ],
+    "hot_path_rule": "Keine Gebühren-RPC-Abfragen vor BUY/SELL im zeitkritischen Pfad. Dort nur gültigen gecachten Snapshot und lokal vorbereitete Gebührenberechnung verwenden. Exakte nachträgliche RPC-Prüfung asynchron; Differenz führt zu markierter Korrekturversion, niemals stiller rückwirkender Veränderung einer Entscheidung.",
+    "paper_cost_semantics": "PAPER kennt aktuelle Gebührenregeln und die konfigurierte Transaktions-/Sendepolicy. Es bezahlt keine Gebühren und kennt keine tatsächliche künftige Inklusion. Jede Kostenkomponente trägt KNOWN_RULE, CONFIGURED, MODELED, MEASURED oder UNKNOWN. Ergebnis bleibt ein Netto-Erwartungswert unter dokumentiertem Ausführungsmodell.",
+    "live_reconciliation_future": "Bei später autorisiertem LIVE bestätigte Transaktionsmetadaten, meta.fee sowie SOL-/Token-Balanceänderungen und dekodierte Transfers auswerten. meta.fee umfasst die Transaktionsgebühr; Priority nicht nochmals auf die Gesamtsumme addieren. Protokollgebühren, Tips, Rent und eventuelle separate Tip-Transaktionen getrennt zuordnen. Ungeklärte Differenzen markieren.",
+    "no_double_counting": [
+      "Im tatsächlichen/modellierten Kaufaufwand und Netto-Verkaufserlös bereits enthaltene Protokollgebühren nicht erneut vom PnL abziehen; Aufschlüsselung dient Transparenz, nicht zusätzlicher Buchung.",
+      "Curve Impact und tatsächlich modellierte Slippage wirken im Ausführungspreis bzw. in Token-/SOL-Mengen. Nicht zusätzlich denselben Impact als Pauschalgebühr abziehen.",
+      "Slippage-Toleranz ist eine Ausführungsgrenze, kein garantiert gezahlter Prozentsatz. Abweichung nur über das deklarierte Fill-Modell ansetzen.",
+      "Netzwerk-Gesamtgebühr nicht zusätzlich zu deren Base-/Priority-Komponenten summieren.",
+      "Rückerstattbare Rent als gebundenes Kapital führen, nicht pauschal als verloren. Fehlversuchskosten gemäß Status buchen; nicht ausgeführte Transfers verursachen keine fiktiven Tips oder Protokollgebühren."
+    ],
+    "database_contract": {
+      "storage": "fee_snapshots speichert vollständige Gebühren-Snapshots. quote_snapshots speichert konkrete Quote-Ergebnisse. execution_attempts referenziert beide; ledger enthält einmalige Buchungen. Alle Tabellen in derselben SQLite-DB.",
+      "fee_snapshot_fields": [
+        "fee_snapshot_id",
+        "source_type",
+        "source_provider",
+        "source_method",
+        "source_account_addresses",
+        "source_slot",
+        "observed_utc",
+        "received_mono_ns",
+        "commitment",
+        "protocol_program_id",
+        "idl_version_or_hash",
+        "raw_values",
+        "normalized_fee_components",
+        "rounding_rules",
+        "applicability",
+        "freshness_policy_hash",
+        "validation_status"
+      ],
+      "attempt_cost_fields": [
+        "fee_snapshot_id",
+        "quote_snapshot_id",
+        "message_template_hash",
+        "cost_model_hash",
+        "signature_count",
+        "compute_unit_limit",
+        "compute_unit_price_micro_lamports",
+        "protocol_fee_lamports",
+        "creator_fee_lamports",
+        "other_protocol_fee_lamports",
+        "base_fee_lamports",
+        "priority_fee_lamports",
+        "network_fee_total_lamports",
+        "sender_tip_lamports",
+        "rent_locked_lamports",
+        "rent_refunded_lamports",
+        "irrecoverable_account_cost_lamports",
+        "cost_evidence_status",
+        "fee_reconciliation_status"
+      ],
+      "component_rule": "Creator/sonstige Protokollkomponenten sind eine Aufteilung der Protokollgesamtsumme, nicht zusätzliche Kosten. Aktiver Phase-1-Handel ist SOL_ONLY. Fremdwährungsdaten nur als gekennzeichnete Rohbeobachtungen speichern, nicht wirtschaftlich mittels SOL-Formeln auswerten.",
+      "immutability": "Entry und Exit dürfen verschiedene Fee-Snapshots referenzieren. Gebührenänderungen während einer Position berücksichtigen, ohne die eingefrorene Strategie rückwirkend zu ändern. Jeder Retry erhält eigene Kostendaten."
+    },
+    "gating": {
+      "technical_recording": "Fehlende Gebühren verhindern den Feed-/Latenzbenchmark nicht.",
+      "economic_paper": "Ohne vollständige aktuelle verifizierte Regeln und dokumentierte Ausführungspolicy Status UNQUALIFIED_COSTS. Keine Aussage über positiven Netto-Edge.",
+      "unknown_not_zero": "NULL niemals mittels default/or/coalesce als 0 buchen. Explizite Null benötigt VALID_ZERO oder NOT_APPLICABLE mit Begründung.",
+      "staleness": "Refresh-Intervalle und Maximalalter nach Datenart in JSON konfigurieren. Überschrittene Frischegrenze, unbekannte Fee-Version oder Accountänderung kennzeichnen und neue wirtschaftlich bewertete Entries pausieren; Positionsbehandlung bleibt aktiv.",
+      "replay": "Ausschließlich zum damaligen Entscheidungszeitpunkt verfügbare Snapshots für kausale Entscheidungen. Später bekannt gewordene Kosten nur als getrennte Nachabrechnung/Korrektur kennzeichnen; historische Trades nicht mit heutigen Gebühren nachträglich optimieren."
+    },
+    "report_additions": [
+      "Kosten je BUY, SELL und Fehlversuch, nach Komponente und Evidenzstatus",
+      "Gesamtkosten je geschlossenem Trade und pro Entry-Versuch",
+      "Quote-/Preiswirkung getrennt von separat belasteten Gebühren",
+      "Anteil verifizierter, modellierter, fehlender und veralteter Kostensätze",
+      "Abweichungen zwischen vorberechneten und später abgeglichenen Kosten",
+      "Fee-Snapshot-IDs sowie effektive Netto-Schwelle jedes Trades",
+      "UNQUALIFIED_COSTS deutlich sichtbar, wenn die Kostengrundlage nicht ausreicht"
+    ]
+  },
+  "sizing_contract": {
+    "nominal_curve_budget_lamports": 98370000,
+    "meaning": "Maximaler SOL-Input in die Bonding Curve pro Entry, OHNE Pump-/Creator-/sonstige Protokollgebühren, Netzwerkgebühren, Sender-Tips und Rent. Kein Gesamtbudget und keine feste USD-Summe.",
+    "quote_algorithm": [
+      "Unterstützte Protokollversion und aktuellen Zustand verwenden, um größtmöglichen Token-Output zu berechnen, dessen Kurveninput das nominelle Kurvenbudget nicht überschreitet. Protokoll-Rundungsregeln exakt in Integer-Arithmetik übernehmen.",
+      "Protokoll-/Creator-/sonstige Fees separat berechnen und zum tatsächlich genutzten Kurveninput addieren. Creator-Fee ist Teil der Protokollgesamtsumme, nicht zusätzlich zu dieser zu addieren.",
+      "Für die jeweilige Instruktion SOL-Budget, Tokenmenge und Slippage-Grenze gemäß ihrer tatsächlichen Semantik setzen. Ein exact-input-including-fees-Parameter darf nicht direkt den Wert des fee-excluding Kurvenbudgets erhalten.",
+      "Verwendeten Kurveninput, nicht ausgegebenen Rest und vollständigen Wallet-Abfluss protokollieren. Nicht unterstützte Quote-/Rundungslogik blockiert den Entry."
+    ],
+    "equations": {
+      "protocol_fee_total": "protocol_component + creator_component + other_protocol_components; Komponenten disjunkt",
+      "swap_wallet_debit": "actual_curve_input + protocol_fee_total",
+      "entry_cash_debit": "swap_wallet_debit + entry_network_fee_total + entry_tip + newly_locked_refundable_rent + irrecoverable_account_cost",
+      "entry_economic_cost": "swap_wallet_debit + entry_network_fee_total + entry_tip + irrecoverable_account_cost",
+      "entry_required_available_cash": "max_entry_cash_debit_with_slippage_bound + reserved_remaining_exit_attempt_costs",
+      "sell_cash_credit": "gross_curve_output - sell_protocol_fee_total - sell_network_fee_total - sell_tip + actual_rent_refund - new_irrecoverable_account_cost"
+    },
+    "capital_admission": "Kurvenbudget nicht still verkleinern. Bei zu wenig frei verfügbarem Cash für maximale Entry-Abbuchung einschließlich Slippage/Rent und Exit-Kostenreserve Entry mit INSUFFICIENT_CAPITAL überspringen. Entry-Reserve bei Intent atomar setzen, bei endgültigem Scheitern nicht benötigten Teil freigeben.",
+    "exit_reserve": "Für maximal drei konfigurierte Exit-Versuche deren maximale Netzwerk-/Tip-Kosten nach aktueller Policy reservieren; Protokoll-Sell-Fees aus Verkaufserlös berücksichtigen. Reserve ist gesperrtes Cash, noch kein Aufwand. Bei Fee-Änderung aktualisieren und Reserve-Defizit melden.",
+    "worked_example_not_current_fee_claim": {
+      "curve_input_lamports": 98370000,
+      "hypothetical_protocol_fee_lamports": 1000000,
+      "hypothetical_entry_network_fee_lamports": 105000,
+      "hypothetical_tip_lamports": 0,
+      "hypothetical_refundable_rent_lamports": 2000000,
+      "hypothetical_irrecoverable_cost_lamports": 0,
+      "entry_economic_cost_lamports": 99475000,
+      "entry_cash_debit_lamports": 101475000,
+      "note": "Nur Rechentest mit erfundenen Gebühren, nicht als Runtime-Default verwenden. Exit-Reserve kommt zur benötigten Kapitalverfügbarkeit hinzu."
+    }
+  },
+  "timeout_and_observation_contract": {
+    "strategy_timeout": {
+      "duration_config": "configuration_template.strategy.strategy_timeout_ms",
+      "origin": "Erfolgreicher Entry-Fill: PAPER modellierter Fill, später LIVE bestätigte Ausführungszuordnung nach Adaptervertrag. Nicht CREATE-Empfang und nicht Submit.",
+      "action": "Nach 590000 ms einmal Exit-Intent TIMEOUT erzeugen, sofern Position noch offen und kein Exit anhängig. Exit hat dieselben Quote-, Verzögerungs-, Slippage-, Gebühren- und Retry-Regeln wie andere Exits.",
+      "no_fill_guarantee": "FORCE_EXIT bedeutet Verkaufsversuch, keine erzwungene erfolgreiche Füllung. Ohne gültige Quote Intent latched halten; nach Quote-Verfügbarkeit ausführen, sofern Daten gültig. Bei fehlender Deckung unbewertbar/UNRESOLVED, kein erfundener Abschluss."
+    },
+    "research_horizon": {
+      "duration_config": "configuration_template.research.research_horizon_ms",
+      "origin": "Erster gültiger CREATE-Empfang im jeweiligen Run.",
+      "action": "Nach 600000 ms Research-Beobachtungsfenster für diesen Launch schließen. Falls Ergebnis nicht beobachtbar abgeschlossen: Research-Ergebnis CENSORED, ohne Handelsaktion oder Kontobuchung.",
+      "active_positions": "Aktive oder möglicherweise exponierte Positionen weiter verfolgen, auch nach Research-Horizont. Späteren echten/modellierten Abschluss im Portfolio-Ledger erfassen; Research-Fenster bleibt als solches begrenzt."
+    },
+    "censor_is_not_position_state": "CENSORED ist ein Ergebnis-/Datenqualitätsstatus, kein erfolgreicher Exit und kein Nullverlust.",
+    "end_of_run": "Nach Stop-Signal keine neuen Entries. Pending-Aufnahme kontrolliert flushen. Nicht beobachtete spätere Ausführungen niemals erfinden. Offene Positionen als unresolved exposure und Forschungsresultate rechtszensiert ausweisen.",
+    "split_embargo": "Mindestens strategy_timeout_ms plus maximal vorregistrierte Entry-/Exit-Modellverzögerungen und Retry-Backoffs. Tatsächlich länger offene/ungeklärte Exposures an Splitgrenzen vollständig purgen; ein Timeout garantiert keine maximale Lebensdauer."
+  },
+  "portfolio_evaluation_contract": {
+    "baseline": "max_open_positions=1, Startkapital 1000000000 Lamports. Der Pilot beschreibt ausschließlich diese Konfiguration.",
+    "comparison": "Research-Portfolio-Replay für Limits 1 und 10 mit identischem Datenstrom, gleichem Startkapital, Kurvenbudget und Kostenmodell getrennt ausgeben. Zehn ist ein Szenario, keine LIVE-Freigabe. Kapitalgrenzen bleiben bindend; zehn Slots bedeuten nicht zehn finanzierbare Positionen.",
+    "selection": "Die Zielschwellen-Auswahl gilt zunächst für Limit 1. Vor Änderung auf 10 dieselbe Zielwahl für 10 separat zeitlich validieren; Ergebnisse nicht übertragen.",
+    "arrival_admission": "Bei konkurrierenden CREATEs zuerst receive_mono_ns, dann arrival_sequence, dann stabiler feed_id-Tiebreak. Kapital/Slot im selben seriellen RAM-Schritt reservieren, ohne await.",
+    "no_backlog_entries": "Kein späterer Kauf eines wegen fehlenden Kapitals/Slots übersprungenen Launches. Duplicate-Feed-Nachricht darf diese Entscheidung nicht wieder öffnen.",
+    "daily_pnl": "Netto-Cashflow und Portfolio-Ergebnis pro tatsächlich beobachtetem UTC-Tag berichten. Keine Multiplikation des besten Trades mit hypothetischen 100 Trades/Tag. Beobachtungsdauer, freie Slots, Kapitalengpässe und Datenlücken daneben."
+  },
+  "ultra_low_latency_contract": {
+    "objective": "FAST AS POSSIBLE: technisch minimale reale Empfang-bis-Entscheidung-/Sendelatenz. Keine künstliche Observation oder Wartezeit auf weitere Feeds. Optimierung anhand reproduzierbarer Profile, nicht eines akzeptierten Zeitbudgets beenden.",
+    "priority_order": [
+      "P0: vollständige vorhandene Nachricht erfassen und timestampen",
+      "P0: Exits/Statusklärung exponierter Positionen und unmittelbar handlungsfähige CREATEs verarbeiten",
+      "P1: Feedverbindungen, Frische und Gebühren-/Blockhash-Caches pflegen",
+      "P2: Aufzeichnung serialisieren/schreiben und Reports berechnen"
+    ],
+    "critical_section": "Normalize -> apply complete atomic envelope -> dedup/admission -> decision -> reserve intent -> adapter enqueue ist ein synchroner, kurzer RAM-Abschnitt ohne await, Locks mit Wartezeit oder Thread-Wechsel. Netzwerk-Read und späteres Send-I/O sind asynchron. Ein einzelner Zustands-Owner verhindert Positionsrennen.",
+    "required_decode": "Transport-JSON und benötigte Protokoll-Binärdaten müssen dekodiert werden. Verboten ist unnötige erneute JSON-Serialisierung/Hashing vor Entscheidung, nicht die notwendige Dekodierung.",
+    "atomic_envelope": "Vollständigkeit bezieht sich auf eine bereits empfangene komplette Transaktionsbenachrichtigung einschließlich relevanter Logs/Events. Nicht auf confirmed/finalized oder die übrigen Feeds warten. Ist Atomarität/benötigter Zustand nicht aus dieser Quelle prüfbar, bleibt sie Hinweisquelle.",
+    "minimal_safety_checks": [
+      "Protokoll unterstützt, Nachricht erfolgreich/parsebar und relevante atomare Daten vollständig",
+      "Kein doppelter Entry; Kapital und Positionsslot verfügbar",
+      "Gültige benötigte Quote-/Fee-Daten und kein kritischer Aufzeichnungsausfall",
+      "SOL_WSOL validiert, Venue BONDING_CURVE_ACTIVE und kanonische Coverage ausreichend"
+    ],
+    "no_predictive_filters": "Diese technischen Gültigkeitsprüfungen sind keine zusätzlichen Momentum-/Metadaten-/Wallet-Strategiefilter. filters bleibt leer.",
+    "paper_adapter": "PAPER übernimmt denselben Intent an derselben Adaptergrenze und protokolliert reale decision/enqueue-Zeit. Keine künstliche Verzögerung vor der Entscheidung; nur deklarierte simulierte Ausführungsverzögerung nach Adapterübergabe.",
+    "future_live_adapter": "Nach Freigabe gleiche Intent-Schnittstelle -> lokal bauen/signieren -> warmer Sendekanal. build_start/build_done/sign_done/send_start zusätzlich messen. Keine Behauptung einer bereits implementierten LIVE-Ausführung.",
+    "telemetry": "Empfangszeit vor Parse, arrival_sequence und IDs im RAM; append/put_nowait in begrenzte Queue. Keine DB-Rows bauen, keine Payloads hashen, keine Prints. Vollständige Raw-Nachricht als unveränderliche Referenz behalten; Writer übernimmt Serialisierung. Queueüberlauf setzt sofort RAM-Qualitätsflag.",
+    "writer_isolation": "Ein dedizierter Writer-Thread bearbeitet SQLite und Serialisierung; asyncio.create_task allein ist keine CPU-/I/O-Isolation. GIL-/Queue-Einfluss messen. Nur bei belegtem Engpass zweiten Prozess erwägen, kein pauschaler Architekturwechsel.",
+    "replay_vs_live": "In deterministischem Replay gibt es logische Modellzeit. Im laufenden PAPER gelten zusätzlich echte Callback-/Event-Loop-Verzögerungen. Keine Reaktion des Bots zeitlich vor deren tatsächliche Verarbeitung zurückdatieren.",
+    "late_callback_policy": "Modellierter Fill darf vor seinem spät verarbeiteten Callback liegen und wird entsprechend als Modellereignis geführt. Ein daraufhin erst jetzt erkannter Exit wird frühestens zum tatsächlichen Verarbeitungszeitpunkt entschieden/enqueued. Dazwischen empfangene Creator-Sells bleiben latched und werden beim Öffnen/Statusabgleich berücksichtigt.",
+    "benchmark": "Identischer eingefrorener Input vor/nach Optimierung; p50/p95/p99/max mit n für Decode, Decision, Enqueue, Callback-Lag, Event-Loop-Lag. Feed- und lokale Anteile getrennt. Kein optimistischer Zeitstempel anstelle tatsächlicher Messung."
+  },
+  "module_interfaces": {
+    "rule": "Schnittstellen in den in simple_project_structure benannten Modulen als direkte Funktionen/kleine dataclasses implementieren. Protocol nur bei tatsächlich nötiger Typisierung, keine Datei/Abstraktionsschicht pro Konzept.",
+    "FeedAdapter": "async receive -> RawEnvelope(feed_id,connection_id,receive_mono_ns,receive_utc,arrival_sequence,payload); ACK/readiness separat",
+    "Normalizer": "normalize(RawEnvelope) -> NormalizedEnvelope(signature,slot,success,events_in_instruction_order,completeness,provenance); unbekannte Felder nicht erfinden",
+    "StateOwner": "apply_envelope -> MarketState + Decision; einziger mutierender Owner für dedup, portfolio, positions, latched exits und reservations",
+    "QuoteEngine": "quote(side,amount_semantics,state,fee_snapshot,execution_policy) -> QuoteSnapshot | InvalidQuote(reason); rein lokal/deterministisch",
+    "ExecutionAdapter": "submit(Intent) -> AttemptHandle; spätere ExecutionOutcome-Nachrichten zum StateOwner. Nur PAPER-Adapter in Phase 1. LIVE-Aufruf an der Mode-/Broadcast-Grenze ablehnen; keinen echten LIVE-Sender vorbauen.",
+    "Recorder": "try_append(immutable_record) -> ACCEPTED | OVERFLOW; darf niemals await/block im Hot Path erfordern",
+    "Reporter": "read committed SQLite snapshot -> versionierter Report; keine Mutation von Entscheidungen/Ledger",
+    "RunReadiness": [
+      "CAPTURE_READY: gültiger Feed und Recorder",
+      "ECONOMIC_PAPER_READY: zusätzlich unterstütztes Protokoll, komplette verifizierte Gebührenregeln und kapitalfähige Policy",
+      "LIVE_READY: in Phase 1 nicht erreichbar"
+    ],
+    "config_validation": "Unbekannte Schlüssel ablehnen; Typen/Einheiten, enums, positive Beträge, Fristen, Backoffanzahl, Gebührenprovenienz und LIVE-Sperre prüfen. Fehlende Nutzer-Geheimnisse per konkretem env-Namen melden; bei fehlender historischer Contract-Datei aktuellen Vertrag explizit aus dieser Spec erzeugen und Herkunft dokumentieren, statt alte Defaults zu erraten."
+  },
+  "specification_validation": {
+    "status": "STATIC_CHECKED_NOT_IMPLEMENTATION_TESTED",
+    "checks": [
+      "JSON parsebar und keine doppelten Schlüssel",
+      "Alle 52 Test-IDs eindeutig und in verpflichtenden Gates referenziert",
+      "Alle expliziten Foreign Keys referenzieren definierte Tabellen/Spalten",
+      "Timeout und Research-Horizont getrennte Configfelder",
+      "Kurvenbudget und Kostenbeispiel arithmetisch konsistent",
+      "PAPER-Sperre und adaptive_targets_enabled=false erhalten",
+      "17 Feature-Namen und eingebetteter v1-Vertrag entsprechen Originaldatei",
+      "Alle neuen Tests verpflichtenden Gates zugeordnet; optionale PumpPortal-Quelle ohne Pflicht-Funding",
+      "SOL-Normalisierung und Migration als Vorbedingungen der Quote definiert",
+      "Dateibaum und Modulzuordnung vollständig und eindeutig",
+      "52 semantische Abnahmetests unverändert; D01–D06 in Pflicht-Integration referenziert",
+      "Strategie/Portfolio/Execution-Parameter gegenüber 1.3.1 unverändert"
+    ],
+    "limitations": "Statische Konsistenzprüfung der Anleitung, kein Beweis fehlerfreier Software, erreichter Latenz oder Profitabilität. Implementierer muss die beschriebenen Tests und Mainnet-PAPER-Messungen ausführen."
+  },
+  "quote_asset_contract": {
+    "policy": "SOL_ONLY",
+    "normalized_quote_asset": "SOL_WSOL",
+    "wsol_mint": "So11111111111111111111111111111111111111112",
+    "native_sol_curve_sentinel": "11111111111111111111111111111111",
+    "field_sensitive_normalization": [
+      "Im versioniert validierten Pump-BondingCurve.quote_mint kann Pubkey::default() native SOL bezeichnen; für buy_v2/sell_v2 ist der quote_mint-Account dann WSOL. Raw-Feld, Schema/IDL-Hash und normalisierte Bedeutung getrennt speichern.",
+      "WSOL/native-SOL-Repräsentationen nur an Feldern akzeptieren, für die der gepinnte Decoder die Zuordnung bestätigt. Ein beliebiges default-Pubkey-Feld ist kein SOL-Nachweis.",
+      "Bei älteren Instruktions-/Accountlayouts darf SOL nur durch einen geprüften, versionierten Legacy-Decoder implizit feststehen. Fehlende Quote bei unbekanntem Layout ist QUOTE_UNKNOWN_LAYOUT_UNVERIFIED, niemals automatisch SOL.",
+      "Explizite fremde Quote-Mint: UNSUPPORTED_QUOTE. Unbekannte/widersprüchliche Quote: QUOTE_UNKNOWN. Beide OBSERVE_ONLY, keine SOL-Quote, kein PAPER-/LIVE-Entry.",
+      "Kein mint-Name, Symbol, Dezimalstellenwert oder Provider-Preisfeld ersetzt die Protokollvalidierung. USDC-Mengen niemals als Lamports interpretieren."
+    ],
+    "guard_order": "Quote-Scope vor QuoteEngine, Kapitalreservierung und Entry prüfen. Nur billige RAM-/Decoder-Prüfung; kein zusätzlicher REST-Call im Hot Path.",
+    "storage": "market_events: quote_mint_raw, quote_field_origin, quote_layout_hash, normalized_quote_asset, quote_scope_status. Nicht-SOL-Events bleiben Rohbeobachtungen; SOL-Reservefelder für sie NULL, nicht mit fremder Währung füllen.",
+    "instruction_semantics": "Für unterstützte SOL-V2-Instruktionen enthält max_sol_cost die einschlägigen Protokoll-/Creator-Fees und min_sol_output ist nach diesen Fees. Je gepinnter Instruktion prüfen; sizing_contract weiter anwenden, keine doppelte Gebührenaddition."
+  },
+  "migration_contract": {
+    "scope": "Migration/Curve-Abschluss erkennen; PumpSwap-Handel und dessen Fill-Modell bleiben in Phase 1 deaktiviert.",
+    "signals": [
+      "Validierte Pump-Programmereignisse/Instruktionen der vorhandenen RPC-Feeds anhand gepinnter IDL auf completion und migration dekodieren.",
+      "PumpPortal subscribeMigration ist zusätzlicher optionaler Hinweis. Fehlt dieser Feed, bleibt Pflicht zur Erkennung über Pump-Daten bestehen.",
+      "Bei Curve-complete, bestätigtem Wechsel des Handelsplatzes oder glaubhaft zugeordnetem Migrationshinweis alte Bonding-Curve-Quote sofort sperren. Unverifizierter Providerhinweis erzeugt MIGRATION_SUSPECTED, keine erfundene bestätigte Migration; asynchron prüfen.",
+      "Bei fehlender Migrations-/Completion-Abdeckung oder unklarer Curve-Gültigkeit neue Entries pausieren bzw. tokenbezogen sperren; keine stale Quote weiterverwenden. Neue Trade-Reservemeldung allein hebt die Venue-Sperre nicht auf."
+    ],
+    "venue_states": [
+      "BONDING_CURVE_ACTIVE",
+      "CURVE_COMPLETE",
+      "MIGRATION_SUSPECTED",
+      "MIGRATED_UNSUPPORTED",
+      "VENUE_UNKNOWN"
+    ],
+    "on_transition": "MarketState/Quote-Gültigkeit vor jeglichem neuen Fill aus demselben atomaren Envelope aktualisieren. Nur BONDING_CURVE_ACTIVE erlaubt neue Curve-Ausführungen.",
+    "existing_position": "Bei exponierter Position state=UNRESOLVED, reason=MIGRATED_UNSUPPORTED bzw. CURVE_COMPLETE_UNSUPPORTED/VENUE_UNKNOWN. Tokenbestand, Cash, Rent, Slotbelegung und bisherige Kosten erhalten. Kein fiktiver Pump-Sell, keine Freigabe des Kapitals als Verkaufserlös.",
+    "pending_submission": "Bereits eingereichten Entry/Exit nicht rückwirkend stornieren. Status/Timing klären; für hypothetischen Fill nach Venue-Invalidierung kein Pump-Proxy-Fill. Bei Mehrdeutigkeit UNKNOWN. Echte spätere Ausführung nur durch Nachweis des Adapters verbuchen.",
+    "same_timestamp": "Bei gleichem Modellzeitpunkt zuerst atomaren Markt-/Venuezustand anwenden, dann geplante Fills; unaufgelöste Reihenfolge als Modellunsicherheit markieren.",
+    "valuation": "Resttokens nicht als realisierten Totalverlust oder Nullgewinn buchen. Unbewertet ausweisen, separat konservative Untergrenze mit Token-Restwert 0 berechnen; Rent gemäß Eigentum/Rückholbarkeit gesondert.",
+    "qualification": "Jede ungelöste exponierte Migration verhindert POSITIVE_UNDER_MODEL für die vollständige Kampagne, bis Exit/Bestand belastbar aufgelöst oder ein separat validiertes PumpSwap-Modell implementiert ist. Häufigkeit und Kostenanteil trotzdem berichten. Keine Frequenzschwelle als Erlaubnis zum Weglassen.",
+    "recording": "migration source observation/event ID, receive time, slot/signature soweit vorhanden, evidence status, previous/new venue state, quote invalidation time und position reason speichern. UNKNOWN-Provenienz nicht erfinden."
+  },
+  "provider_coverage_contract": {
+    "version": "CANONICAL_COVERAGE_V2",
+    "states": [
+      "OBSERVED",
+      "UNKNOWN_WARMUP",
+      "GAP",
+      "RECOVERED_STATE_ONLY"
+    ],
+    "runtime_flag": "canonical_provider_gap_flag",
+    "definition": "true, wenn erforderliche kanonische Ereignis-/Zustandsabdeckung im relevanten Mint-/Positionsintervall nicht nachweisbar ist. false nur bei unterstützter, kontinuierlicher und widerspruchsfreier Abdeckung durch mindestens eine geeignete Quelle oder nachgewiesenem vollständigem Backfill.",
+    "single_source_disconnect": "Ein Quellen-Ausfall ist provider health, nicht automatisch kanonischer Gap. Kontinuierlicher vollständiger Zweitfeed kann die kanonische Abdeckung tragen. PumpPortal NewToken/Migration ersetzt keinen Trade-/Creator-Sell-Feed.",
+    "scope": "Abdeckung je Mint/Position und Zeitintervall. Globale Ausfälle aller geeigneten Quellen invalidieren alle betroffenen Intervalle. Niemals bloß Anzahl aktiver WebSockets als Deckungsnachweis nutzen.",
+    "startup": "Subscription-ACK plus vollständig dekodiertes CREATE-Envelope kann den lokalen Beobachtungsbeginn für einen neuen Launch bilden. Das ist keine globale Vollständigkeitsgarantie; fehlende Vorhistorie oder relevante Mehrdeutigkeit bleibt UNKNOWN.",
+    "recovery": "Aktuelle Reserven können aktuellen Zustand wiederherstellen, aber nicht vergangene Creator-Sells oder Trade-Features. Reconnect/Heartbeat oder ein einzelner neuer Trade setzt eine historische Lücke nicht zurück. Vollständigen Backfill nur mit dokumentierter Identitäts-/Ordnungs-/Abdeckungsprüfung anerkennen.",
+    "hard_gate": "canonical_provider_gap_flag=true blockiert neue Entries, auch bei filters=[]. Offene Positionen weiter überwachen und gültige Statusklärung/Exit-Intents bearbeiten; keine fehlenden Beobachtungen oder Fills erfinden. Lücken im Haltedauerintervall sperren positiven Kampagnennachweis bis belastbarer Auflösung.",
+    "audit": "quality_events speichern einzelnen Provider-Ausfall getrennt von kanonischer Lücke, Scope, Intervall, recovery status und belegenden Beobachtungen. Keine Umdeutung historischer v1-Flags."
+  },
+  "legacy_feature_contract": {
+    "source_filename": "DARKBOT_MVP_IMPLEMENTATION_CONTRACT_v2.9.10_2026-09-11.json",
+    "source_sha256": "6ba784eb921bf6439a810f2ed2a34a73a230a08a76182dcfc0144c21e994db4a",
+    "feature_names_in_order": [
+      "buy_count",
+      "sell_count",
+      "buy_volume_sol",
+      "sell_volume_sol",
+      "net_buy_flow_sol",
+      "unique_buyers",
+      "unique_buyer_ratio",
+      "largest_buy_sol",
+      "buyer_volume_concentration",
+      "first5_buyer_concentration",
+      "first_sell_latency_ms",
+      "price_change",
+      "max_drawdown",
+      "dev_initial_buy",
+      "curve_progress_pct",
+      "research_estimated_price_impact",
+      "provider_gap_flag"
+    ],
+    "feature_contract_v1_verbatim": {
+      "version": 1,
+      "scope": "SOL/WSOL-Pump-Launches",
+      "definition_tuple": [
+        "formula",
+        "unit",
+        "source",
+        "availability",
+        "missing/zero behavior"
+      ],
+      "sources": {
+        "E": "deduplizierte normalisierte Events bis t",
+        "C": "validiertes Create-Event",
+        "R": "reserve_source_v1: validierte virtuelle Reserven plus versionierte ProtocolConfig und abgeleitete/reconciled reale Reserven",
+        "Q": "Datenqualität"
+      },
+      "event_source_rule": "E enthält nur deduplizierte BUY- und SELL-Events mit receive_offset <= t. Das Create-Event und der darin enthaltene Initial-Buy sind nie Teil von E (nicht in buy_count, buy_volume_sol, unique_buyers); der Initial-Buy ist ausschließlich über C (dev_initial_buy) sichtbar.",
+      "observed_semantics": "E-Features sind beobachtete Werte über die Trade-Coverage des Launches, keine Vollständigkeitsaussage; siehe market_data_source_v1.subscription_coverage.",
+      "precision": "Integer-Basiseinheiten und Decimal; Rundung nur Anzeige.",
+      "stored_representation": "features_json speichert Werte exakt wie feature_cases.expected: int, Dezimalstring, bool oder null; nie Float. LIVE und REPLAY schreiben dieselbe Repräsentation, damit paper_replay_parity per Stringgleichheit prüfbar ist.",
+      "strategy_dependent_impact": "strategy_estimated_price_impact wird nicht im Snapshot gespeichert, sondern zur Entscheidungszeit aus den Snapshot-Reserven für die exakten Lamports der StrategyVersion berechnet und in decisions.filter_evaluations_json protokolliert. research_estimated_price_impact im Snapshot gilt immer für den RESEARCH_ENTRY-Betrag.",
+      "definitions": {
+        "buy_count": [
+          "count(E BUY)",
+          "events",
+          "E",
+          "t",
+          "0"
+        ],
+        "sell_count": [
+          "count(E SELL)",
+          "events",
+          "E",
+          "t",
+          "0"
+        ],
+        "buy_volume_sol": [
+          "sum(SOL BUY)",
+          "SOL",
+          "E",
+          "t",
+          "0"
+        ],
+        "sell_volume_sol": [
+          "sum(SOL SELL)",
+          "SOL",
+          "E",
+          "t",
+          "0"
+        ],
+        "net_buy_flow_sol": [
+          "buy_volume_sol - sell_volume_sol",
+          "SOL",
+          "E",
+          "t",
+          "0"
+        ],
+        "unique_buyers": [
+          "count(distinct BUY actor)",
+          "addresses",
+          "E",
+          "t",
+          "0"
+        ],
+        "unique_buyer_ratio": [
+          "unique_buyers / buy_count",
+          "fraction",
+          "E",
+          "t",
+          "null if buy_count=0"
+        ],
+        "largest_buy_sol": [
+          "max(SOL BUY)",
+          "SOL",
+          "E",
+          "t",
+          "null without BUY"
+        ],
+        "buyer_volume_concentration": [
+          "sum((buyer BUY SOL / total BUY SOL)^2)",
+          "HHI",
+          "E",
+          "t",
+          "null if total=0"
+        ],
+        "first5_buyer_concentration": [
+          "sum of all observed BUY SOL of the first 5 distinct buyer addresses (ordered by first BUY) / total BUY SOL",
+          "fraction",
+          "E",
+          "t",
+          "null if total=0"
+        ],
+        "first_sell_latency_ms": [
+          "(first SELL receive monotonic - t0 monotonic)/1e6",
+          "ms",
+          "E",
+          "first SELL",
+          "null without SELL"
+        ],
+        "price_change": [
+          "price(t) / price(t0) - 1; price(t0) = marginal quote price from the validated Create payload reserves (state immediately after the initial buy); price(t) = reserves of the last deduplicated event with offset <= t, or price(t0) if no such event (value 0)",
+          "fraction",
+          "R",
+          "t",
+          "null if price missing/nonpositive"
+        ],
+        "max_drawdown": [
+          "max(1 - price/running_peak) over the event price path starting at price(t0) through t (event states only, no interpolation); 0 without event",
+          "fraction",
+          "R",
+          "t",
+          "null without positive price"
+        ],
+        "dev_initial_buy": [
+          "C.initialBuy token amount / validated supply",
+          "fraction",
+          "C",
+          "Create",
+          "null if missing/supply=0"
+        ],
+        "curve_progress_pct": [
+          "100*(1-current real token reserves/initial real token reserves)",
+          "percent",
+          "R",
+          "t",
+          "null if initial missing/0"
+        ],
+        "research_estimated_price_impact": [
+          "virtual-curve simulated average entry price for research_entry_policy quote_amount / pretrade marginal price - 1 excluding fees",
+          "fraction",
+          "R",
+          "t",
+          "null without valid virtual reserves"
+        ],
+        "provider_gap_flag": [
+          "true if coverage_state != OBSERVED at t or any data_quality_interval intersects [t0, t]",
+          "bool",
+          "Q",
+          "t",
+          "true when unknown"
+        ]
+      },
+      "implementation_gate": "Fixtures müssen jede der 17 Formeln bei 500/1000ms beweisen (Orakel); Replay-Fixtures zusätzlich bei 250/750ms.",
+      "expansion_rule": "Weitere Features nur als neue FeatureSetVersion aus denselben Rohdaten; kein Sammel-Neustart erforderlich.",
+      "boolean_feature": "provider_gap_flag",
+      "phase0_oracle_rule": "Alle 17 Features werden in Phase 0 von einem unabhängigen Referenz-Orakel in cli.py nachgerechnet: E-Features aus den normalisierten Fixture-Events, R/C-Features aus den mit Provenienz gelieferten curve_inputs (Create-Reserven, PROTOCOL_CONFIG-Werte, Research-Betrag) nach phase0_fixture_contract.precision_rule, Q-Features aus coverage_state_at_deadline/data_quality_interval_intersects des Falls. Null-Eingaben ergeben null mit Pflicht-Begründung; ein Wert, der vom Orakel abweicht, scheitert am Gate. features.py (Phase 4a) darf dieses Orakel nie importieren; test_features vergleicht beide Implementierungen."
+    },
+    "legacy_oracle_precision_rule": "Geld und Reserven als Integer-Basiseinheiten oder Dezimalstrings; binäre Gleitkommazahlen werden abgelehnt. Quotienten auf ratio_decimal_places mit ROUND_HALF_EVEN. HHI (buyer_volume_concentration): Anteil je Käufer zuerst runden, quadrieren, summieren, Summe erneut runden. first5_buyer_concentration: Summe der Beträge der ersten first_buyer_window verschiedenen Käufer geteilt durch Buy-Gesamtvolumen, dann runden. Volumen in SOL = Lamports / lamports_per_sol exakt (Decimal). Kurvenformeln (R/C): price(vsol, vtok) = round(vsol / vtok); Preis(t0) aus create_virtual_*; Preis(t) aus dem letzten Event mit offset <= t, ohne Event = Preis(t0). price_change = round(price_t / price_t0 - 1); max_drawdown = max über den Event-Preispfad ab price_t0 von round(1 - price / running_peak), 0 ohne Event; dev_initial_buy = round(initial_buy_token_base_units / token_total_supply); curve_progress_pct = round(100 * (1 - real_t / initial_real_token_reserves)) mit real_t = vtok_t - (initial_virtual_token_reserves - initial_real_token_reserves); research_estimated_price_impact: q = research_quote_amount_lamports, tokens_out = vtok - (vsol * vtok) // (vsol + q) (Integer-Division wie das Programm), avg = round(q / tokens_out), impact = round(avg / price_t - 1); provider_gap_flag = coverage_state_at_deadline != OBSERVED or data_quality_interval_intersects. Alle round() = quantize auf ratio_decimal_places, ROUND_HALF_EVEN.",
+    "preservation": "Originaler Feature-Contract-v1 und dessen Fixtures bleiben unverändert. Enthaltene historische Namen und Bedeutungen werden nicht still als aktuelle Handelsregeln behandelt. Insbesondere v1-Gap, Create-/Initial-Buy-Abgrenzung und historische Research-Quote bleiben für Legacy-Export erhalten.",
+    "new_version": {
+      "id": "FEATURE_SET_V2_CANONICAL_COVERAGE",
+      "base": "Feature-Contract-v1",
+      "same_names": true,
+      "explicit_delta": {
+        "provider_gap_flag": "Verwendet CANONICAL_COVERAGE_V2 des betrachteten Fensters statt Einzelprovider-Verbindungszustand."
+      },
+      "other_definitions": "Die übrigen 16 Formeln und Original-Null-/Typregeln unverändert. Jede weitere Definitionskorrektur benötigt neue Version; keine Anpassung an moderne Ausführungskosten in Legacy-Research-Impact."
+    },
+    "feature_vs_execution": "Legacy-Ausgangspreise oder im Feature-E-Set ausgeschlossene Create-Trades dürfen die korrekte atomare Ausführungszustandsverarbeitung niemals steuern. Trading verarbeitet alle relevanten Trades; Research bildet ausdrücklich versionierte Sichten daraus.",
+    "compute_schedule": "Bei filters=[] nur nach Entry-Entscheidung im Hintergrund berechnen. Für 0/250/500/750/1000-ms-Snapshots den jeweiligen ursprünglichen Knowledge-Cutoff und das unveränderliche bis dahin bekannte Eventset verwenden; Rechenzeit nach BUY darf keinen Look-ahead erzeugen.",
+    "missing_inputs": "Featurewert NULL mit null_reason, wenn historische Voraussetzungen nicht belegt sind. Verpasster Snapshot wegen Backpressure wird als fehlend gespeichert, nicht später mit Zukunftsdaten rekonstruiert.",
+    "comparability": "Berichte vergleichen nur dieselbe FeatureSetVersion und gleiche Capture-/Coverage-/Quote-Provenienz. Namen allein beweisen keine Vergleichbarkeit. Neuer Creator-Sell-Status bleibt Runtime-Signal, kein heimliches 18. Core-Feature.",
+    "storage": "feature_snapshots speichert beide Versionen ausdrücklich getrennt. V1 bleibt optionale Legacy-Sicht, V2 ist aktuelle Research-Sicht. Kein vollständiger 17er-Snapshot vor BUY."
+  },
+  "fill_evidence_contract": {
+    "field": "fill_evidence_status",
+    "values": [
+      "OBSERVED_STATE_PROXY",
+      "CHAIN_EXECUTION_OBSERVED",
+      "UNKNOWN",
+      "NOT_APPLICABLE"
+    ],
+    "paper_rule": "Jeder modellierte PAPER-/Replay-/Backtest-Fill trägt OBSERVED_STATE_PROXY, unabhängig vom execution status FILLED. UNKNOWN bei unzureichendem Zustand; dann kein behaupteter erfolgreicher Fill.",
+    "live_rule": "CHAIN_EXECUTION_OBSERVED erst nach zuordenbarer tatsächlicher Chain-Ausführung mit Signatur, Slot und Commitment. RPC-ACK reicht nicht; FINALIZED/CONFIRMED als getrennte Commitment-Angabe, nicht als frei erfundene Evidenz.",
+    "proxy_fields": [
+      "proxy_event_id",
+      "proxy_signature",
+      "proxy_slot",
+      "proxy_receive_sequence",
+      "proxy_receive_mono_ns",
+      "proxy_age_ns",
+      "next_observed_event_id_after_modeled_fill",
+      "fill_commitment"
+    ],
+    "future_annotation": "next_observed_event_id_after_modeled_fill ist ausschließlich nachträgliches Audit-Feld und darf nie Quote/Entscheidung beeinflussen. Kein nächstes Event am Aufnahmeende: NULL plus CENSORED.",
+    "report_rule": "PAPER-Filled immer zusammen mit OBSERVED_STATE_PROXY und Modellversion ausweisen, niemals REAL_FILL/LIVE_PROFIT_PROVEN."
+  },
+  "explicit_policy_deviations_from_legacy": [
+    {
+      "topic": "Timeout",
+      "current": "590000 ms ab Entry-Fill lösen FORCE_EXIT-Versuch aus",
+      "legacy": "Im Handoff offene Policy-Frage; diese Spec trifft eine ausdrückliche neue Startentscheidung. Research-Horizont löst keinen Verkauf aus."
+    },
+    {
+      "topic": "Sizing",
+      "current": "98370000 Lamports reines Kurvenbudget, alle einschlägigen Gebühren/Rent zusätzlich",
+      "legacy": "Kein dynamisches TEST-USD-Sizing. Historische ~10-USD-Ergebnisse nicht mit festen SOL-Budgets gleichsetzen."
+    },
+    {
+      "topic": "Gap/Feature",
+      "current": "Neues kanonisches Runtime-Gap und FEATURE_SET_V2_CANONICAL_COVERAGE",
+      "legacy": "V1-Definition unverändert archiviert; kein stilles Umbenennen."
+    },
+    {
+      "topic": "Migration",
+      "current": "UNRESOLVED plus separat konservative Null-Restwert-Untergrenze",
+      "legacy": "Historisches UNRESOLVED_ZERO ist keine echte Füllung/Abbuchung; Legacy-Resultate als andere Bewertungsregel kennzeichnen."
+    },
+    {
+      "topic": "Observation",
+      "current": "observation_ms=0; sofortiger Entry beim ersten actionable CREATE",
+      "legacy": "500 ms getestete Strategie bzw. ältere 500–3000-ms-Observation. Bewusste Low-Latency-Änderung."
+    },
+    {
+      "topic": "Target",
+      "current": "target_net_multiple=1.5 als Phase-1-Baseline",
+      "legacy": "FAST_CREATOR_HOLD_2X verwendete 2.0. 1.5 ist neuer Research-Default, nicht rückwirkend vergleichbar."
+    },
+    {
+      "topic": "Creator sell before fill",
+      "current": "Vor Submit Entry abbrechbar; nach Submit Status/Füllung/Kosten kausal weiterführen und Creator-Exit latched setzen.",
+      "legacy": "Frühere Research-Prototypen konnten Creator-Sell vor Fill als Entry-Verwerfung behandeln. Neue Regel ist bewusst realistischere Execution-Semantik."
+    }
+  ],
+  "updated_utc_date": "2026-09-17",
+  "freeze_record": {
+    "version": "1.3.2",
+    "date_utc": "2026-09-17",
+    "scope": "Implementierungsspezifikation, Phase-1-Baseline, einfacher Dateibaum und integrierte Betriebsprüfung",
+    "meaning": "Konzept abgeschlossen; nächster Arbeitsschritt ist die Implementierung mit den vorhandenen verpflichtenden Gates. Keine weiteren optionalen Konzept-Erweiterungen vor Umsetzung.",
+    "implementation_status": "NOT_IMPLEMENTED_UNDER_THIS_SPEC",
+    "validation_scope": "Statische Dokumentprüfung; keine Behauptung bestandener Implementierungstests, gemessener Low-Latency-Ausführung oder nachgewiesenen positiven Erwartungswerts.",
+    "change_control": "Technische Korrekturen bei nachgewiesenen Widersprüchen oder Änderungen externer Protokolle explizit versionieren; keine stille Änderung von Strategie-/Kosten-/Ausführungssemantik. LIVE bleibt deaktiviert."
+  },
+  "simple_project_structure": {
+    "status": "NORMATIVE_IMPLEMENTATION_LAYOUT",
+    "root": "DarkBot/",
+    "root_files": [
+      "README.md",
+      "requirements.txt"
+    ],
+    "directories": {
+      "config/": [
+        "phase1.json",
+        "research.json"
+      ],
+      "darkbot/": [
+        "__init__.py",
+        "__main__.py",
+        "main.py",
+        "cli.py",
+        "config.py",
+        "domain.py",
+        "clock.py",
+        "capture.py",
+        "market.py",
+        "strategy.py",
+        "execution.py",
+        "paper.py",
+        "fees.py",
+        "storage.py",
+        "replay.py",
+        "backtest.py",
+        "reporting.py"
+      ],
+      "migrations/": [],
+      "tests/": [],
+      "data/": [],
+      "exports/": [],
+      "docs/": [
+        "SPEC.json"
+      ]
+    },
+    "tree_lines": [
+      "DarkBot/",
+      "  README.md",
+      "  requirements.txt",
+      "  config/",
+      "    phase1.json",
+      "    research.json",
+      "  darkbot/",
+      "    __init__.py",
+      "    __main__.py",
+      "    main.py",
+      "    cli.py",
+      "    config.py",
+      "    domain.py",
+      "    clock.py",
+      "    capture.py",
+      "    market.py",
+      "    strategy.py",
+      "    execution.py",
+      "    paper.py",
+      "    fees.py",
+      "    storage.py",
+      "    replay.py",
+      "    backtest.py",
+      "    reporting.py",
+      "  migrations/",
+      "  tests/",
+      "  data/",
+      "  exports/",
+      "  docs/",
+      "    SPEC.json"
+    ],
+    "module_responsibilities": {
+      "__init__.py": {
+        "role": "Paketkennung/Version, keine Start- oder Netzwerk-Nebeneffekte.",
+        "owns": []
+      },
+      "__main__.py": {
+        "role": "Kleiner Einstieg für python -m darkbot; ruft cli.main auf.",
+        "owns": [
+          "package_entrypoint"
+        ]
+      },
+      "main.py": {
+        "role": "Verbindet Konfiguration, Recorder, Gebühren-Cache, Feed-Adapter und StateOwner. Start/Stop, Readiness und gemeinsamer async Lifecycle; keine zweite Handelslogik.",
+        "owns": [
+          "application_lifecycle",
+          "doctor_probe_orchestration"
+        ]
+      },
+      "cli.py": {
+        "role": "argparse für doctor, paper, report und research; validiert Argumente, ruft zuständige Funktionen auf und setzt Exitcode.",
+        "owns": [
+          "cli_parser"
+        ]
+      },
+      "config.py": {
+        "role": "JSON laden und strikt validieren; Einheiten/Enums, Policies, Secrets aus Umgebung, Snapshot-Registrierung vor Start.",
+        "owns": [
+          "runtime_config",
+          "research_config",
+          "secret_resolution"
+        ]
+      },
+      "domain.py": {
+        "role": "Gemeinsame schlanke dataclasses/Enums für Envelope, MarketState, Intent, Outcome, LedgerRecord und PositionState. Keine I/O- oder Strategiearbeit.",
+        "owns": [
+          "shared_types"
+        ]
+      },
+      "clock.py": {
+        "role": "Monotone Echtzeit und deterministische Replay-Uhr, Timer/Scheduler, aufgezeichnete Callback-Verzögerungen.",
+        "owns": [
+          "real_clock",
+          "replay_clock",
+          "scheduler"
+        ]
+      },
+      "capture.py": {
+        "role": "Helius/RPC/optionales PumpPortal: Connections, Subscriptions/ACK, Empfangstimestamps und arrival_sequence, Reconnect und Quellengesundheit. Keine Entscheidungen.",
+        "owns": [
+          "FeedAdapter",
+          "RawEnvelope_capture"
+        ]
+      },
+      "market.py": {
+        "role": "Versionierter Minimaldecoder, atomare Envelopes, kanonische Ereignisidentität/Dedup, Market-/Venue-State, SOL-Scope und Coverage. Mutation nur durch StateOwner-Aufruf.",
+        "owns": [
+          "Normalizer",
+          "market_state_reducer",
+          "canonical_coverage",
+          "venue_guard"
+        ]
+      },
+      "strategy.py": {
+        "role": "Gemeinsame reine Entry-/Exit-Regeln und versionierte Research-Feature-Berechnung. Feature-Funktionen werden nur außerhalb des Hot Paths aufgerufen.",
+        "owns": [
+          "entry_exit_policy",
+          "feature_calculation"
+        ]
+      },
+      "execution.py": {
+        "role": "Lokale QuoteEngine, Gebührenanwendung/Rundung, Versuchszustände, Slippage, Retry-Regeln und Ledger-Buchungsregeln. Eine gemeinsame Implementierung für PAPER/Replay/Backtest.",
+        "owns": [
+          "QuoteEngine",
+          "execution_rules",
+          "cost_accounting",
+          "retry_policy"
+        ]
+      },
+      "paper.py": {
+        "role": "StateOwner mit Portfolio/Positionen/Reservations/Latches und PAPER-Adapter. Wendet MarketReducer an, ruft reine Strategy/Execution-Funktionen auf und verarbeitet Outcomes seriell. Keine duplizierten Quote-/Fee-Formeln.",
+        "owns": [
+          "StateOwner",
+          "PaperExecutionAdapter",
+          "position_portfolio_state"
+        ]
+      },
+      "fees.py": {
+        "role": "Im Hintergrund aktuelle Gebühren-/Protokoll-/Accountdaten beschaffen, prüfen und unveränderliche Snapshots/Cache bereitstellen. Keine RPC-Arbeit im StateOwner-Abschnitt.",
+        "owns": [
+          "fee_snapshot_acquisition",
+          "fee_cache"
+        ]
+      },
+      "storage.py": {
+        "role": "SQLite-Migrationen, begrenzte Recorder-Queue, ein Writer-Thread, transaktionale Rows/Hashes, konsistente Lesesnapshots.",
+        "owns": [
+          "Recorder",
+          "sqlite_writer",
+          "schema_migrations"
+        ]
+      },
+      "replay.py": {
+        "role": "Aufgezeichnete Inputs und Zeit-/Callback-Schedule deterministisch durch dieselbe Engine abspielen. Keine eigene Creator-/Target-/Retry-Logik.",
+        "owns": [
+          "recorded_input_replay"
+        ]
+      },
+      "backtest.py": {
+        "role": "research orchestrieren: Dataset-Freeze, registrierte Varianten, zeitliche Splits, Replay pro Portfolio/Szenario, statistische Auswertung. Entscheidungen kommen aus derselben Engine.",
+        "owns": [
+          "research_orchestration",
+          "variant_evaluation"
+        ]
+      },
+      "reporting.py": {
+        "role": "Außerhalb Hot Path Latenzen, Kosten, Ledger/PnL, Qualität und Unsicherheit aggregieren; report.json, summary.md und CSV schreiben.",
+        "owns": [
+          "Reporter",
+          "latency_report",
+          "economic_report"
+        ]
+      }
+    },
+    "single_owner_rule": "StateOwner in paper.py ist der einzige Laufzeit-Owner für Positions-/Portfolio-/Marktzustandsmutationen. Er ruft market.py als Reducer auf. Capture, Fee-Worker und Timer liefern Nachrichten; der SQLite-Writer verändert keinen Handelszustand.",
+    "module_dependency_rules": [
+      "domain.py bleibt frei von Imports anderer DarkBot-Laufzeitmodule.",
+      "main.py orchestriert; Fachmodule importieren main.py und cli.py nicht.",
+      "market.py und strategy.py importieren paper.py nicht. paper.py verbindet MarketReducer, Strategy, Execution, Clock und Recorder über kleine Schnittstellen.",
+      "execution.py führt keine Feed-, SQLite- oder RPC-Abfragen aus. fees.py beschafft Daten; execution.py nutzt sie lokal.",
+      "replay.py nutzt denselben StateOwner und PAPER-Adapter mit ReplayClock. backtest.py orchestriert Replay, kopiert keine Handelsentscheidungen.",
+      "Research-Features in strategy.py sind eigenständige reine Funktionen. Ein Hintergrundauftrag bekommt eingefrorene Inputs/Cutoffs; er blockiert nicht den Empfang/StateOwner.",
+      "Dataclasses und wenige direkte Funktionen genügen. Keine Service-Layer, Plugin-Registry, DI-Frameworks oder leeren Basisklassen nur für spätere Erweiterungen."
+    ],
+    "existing_code_policy": "Vorhandene korrekte Module/Funktionen übernehmen und gezielt umbauen. Neue Namen nicht zusätzlich als Wrapper um unveränderte alte Pfade legen. Am Ende existiert genau ein aktueller Handels-/Kostenpfad.",
+    "legacy_policy": "Kein startbarer Legacy-Bot, keine Runtime-Auswahl alt/neu. Historische Feature-Definitionen und Test-Fixtures bleiben ausdrücklich versionierte Forschungsreferenzen. V1-Export ist eine Sicht derselben Daten, kein zweiter Ausführungspfad. Ursprüngliche Uploads/Belege nicht löschen.",
+    "directory_purposes": {
+      "migrations/": "Versionierte additive SQL-Migrationen; vorhandene Historie erhalten, keine neue Datenbankarchitektur.",
+      "tests/": "Ausführbare Tests T01–T52 samt notwendigen deterministischen Fixtures; keine Platzhalter-Erfolgstests.",
+      "data/": "Aufgezeichnete SQLite-Kampagnen inklusive Rohdaten/Provenienz; keine API-Keys.",
+      "exports/": "Generierte Reports/CSV je Kampagne, keine Runtime-Abhängigkeit.",
+      "docs/": "Genau diese konsolidierte Spezifikation als SPEC.json; keine parallelen widersprüchlichen Implementierungspläne."
+    },
+    "no_extra_modules_by_default": [
+      "feeds.py",
+      "state.py",
+      "quote.py",
+      "features.py",
+      "live.py",
+      "pumpswap.py"
+    ],
+    "explanation": "Die Konzepte FeedAdapter, StateOwner und QuoteEngine sind Funktionen/kleine Klassen in den genannten Dateien. Ein Konzept bedeutet keine neue Datei. Zusätzliche Module nur bei einem konkreten belegten Wartungsproblem, keine vorsorglichen Zukunftsschichten."
+  },
+  "minimal_environment_contract": {
+    "virtual_environments": false,
+    "containers": false,
+    "additional_services": false,
+    "python": "Vorhandenen geeigneten Python-3-Interpreter verwenden. doctor protokolliert ausführbaren Pfad, genaue Python-Version, Betriebssystem und installierte Paketversionen. Unterstützte Python-Version anhand des tatsächlichen Codes/Abhängigkeiten bei Umsetzung festlegen und in README dokumentieren, nicht ungeprüft behaupten.",
+    "dependencies": "Eine requirements.txt mit exakt festgehaltenen Versionen aller benötigten Drittanbieterpakete einschließlich ihrer aufgelösten Abhängigkeiten. Standardbibliothek zuerst: asyncio, sqlite3, json, decimal, argparse, unittest. Vorhandene notwendige WebSocket-/HTTP-Bibliotheken konsolidieren; kein neues Framework.",
+    "installation": "Installation immer über denselben Interpreter mit python -m pip; keine automatische pip-Installation/Updates beim Botstart. Keine venv/virtualenv/Poetry-/Conda-Umgebung anlegen. Vorhandene geteilte Umgebung vor Änderungen auf Versionskonflikte prüfen.",
+    "protected_environment": "Systemschutz nicht mit --break-system-packages, sudo oder Entfernen von Sperrdateien umgehen. Falls die vorhandene Installation keine verträgliche Installation erlaubt, konkrete Fehlermeldung und benötigte Pakete nennen; bis dahin unabhängige Code-/Fixture-Arbeit fortsetzen.",
+    "secrets": "Nur benötigte Umgebungsvariablen, keine Secrets in phase1.json, requirements.txt, DB oder Reports. Keine neue Secret-Verwaltungssoftware.",
+    "no_hidden_parameters": "Alle operativen Strategie-/Risiko-/Latenz-/Queue-/Retry-/Frische-/Researchwerte stehen in JSON. Protokollregeln, Decoder-Layouts, Discriminators und Einheitenkonstanten sind versionierte technische Definitionen; Gebühren werden verifiziert beschafft. Keine pauschale Behauptung, jede technische Konstante müsse konfigurierbar sein.",
+    "phase1_scope": "Vollständiger PAPER-Bot, Aufnahme und Auswertung. Kein echter LIVE-Sender, PumpSwap-Executor oder adaptives Target. Broadcast-Grenze für PAPER bleibt testbar gesperrt, ohne einen zukünftigen Live-Stack vorzubauen."
+  },
+  "integrated_preflight_test": {
+    "implementation": "doctor verwendet dieselben Adapter, Decoder, Fee-Resolver und Recorder wie paper. Keine separate Probe-App und kein Wegwerf-Prototyp.",
+    "command": "python -m darkbot doctor --config config/phase1.json",
+    "probe_defaults": {
+      "max_duration_ms": 120000,
+      "minimum_valid_create_samples": 3,
+      "minimum_valid_trade_samples": 3,
+      "broadcast_allowed": false,
+      "economic_intents_allowed": false
+    },
+    "config_rule": "Diese Startwerte als doctor-Abschnitt in phase1.json übernehmen. Sie sind versionierte Testparameter und keine versteckten Konstanten.",
+    "checks": [
+      {
+        "id": "D01",
+        "check": "Python/Paketversionen, Konfigurationsschema, FREE/PAPER-Grenze, Speicherplatz, SQLite-Schreibbarkeit und Migration prüfen.",
+        "evidence": "Versionen, Validierungsstatus und tatsächlicher Schreib-/Readback-Test."
+      },
+      {
+        "id": "D02",
+        "check": "Kostenlose Feed-Verbindungen/ACKs testen; PumpPortal optional mit Key. Keine kostenpflichtige Subscription oder automatische Einzahlung.",
+        "evidence": "Je Feed READY/FAILED/DISABLED_OPTIONAL, redigierter Fehler und Kontingent-Konfiguration."
+      },
+      {
+        "id": "D03",
+        "check": "Reale CREATE-/Trade-Envelopes aufnehmen, SOL-Scope und benötigte Reserven/Accounts dekodieren.",
+        "evidence": "Raw-zu-Event-Provenienz, Vollständigkeit, Decoder-/IDL-Version, sample counts und receive/decode-Timestamps."
+      },
+      {
+        "id": "D04",
+        "check": "Creator-Sell- und Completion-/Migrationsdecoder anhand verifizierter Fixtures prüfen; im Probezeitraum eintreffende reale Fälle zusätzlich zählen.",
+        "evidence": "Fixture-Prüfung getrennt von live_event_count. Kein Ereignis in zwei Minuten ist NOT_OBSERVED, kein Beweis funktionierender Live-Abdeckung."
+      },
+      {
+        "id": "D05",
+        "check": "Aktuelle Gebühren-/Protokoll-/Rent-Snapshots beschaffen und Validierung/Herkunft/Frische prüfen.",
+        "evidence": "Snapshot-IDs und Kostenstatus; keine echten Handels- oder Tip-Transfers."
+      },
+      {
+        "id": "D06",
+        "check": "Recorder, Datenqualität, Report und Offline-Replay derselben Probeaufnahme prüfen.",
+        "evidence": "Persistierte Beobachtungen, Konsistenzprüfung und reproduzierbare Decode-/State-Ergebnisse; keine PAPER-Positionsbuchungen im doctor-Modus."
+      }
+    ],
+    "result": "Strukturierter doctor-Bericht mit PASS/FAIL/INCONCLUSIVE je Prüfung. CAPTURE_READY, ECONOMIC_PAPER_READY oder NOT_READY nach vorhandenen Readiness-Regeln. Fehlende aktuelle Evidenz nicht mit Fixture-Erfolg gleichsetzen.",
+    "sample_limit": "Kurze Probe belegt grundlegende Integration, keine globale Datenvollständigkeit, dauerhafte Zuverlässigkeit, reale Landing-Latenz oder positiven Erwartungswert. Seltene Ereignisse im späteren PAPER-Lauf weiter validieren.",
+    "failure_policy": "Einen optionalen Feed deaktivieren und geeignete RPC-Quellen weiterverwenden. Fehlen alle geeigneten Quellen oder wirtschaftliche Pflichtdaten, nur entsprechend erlaubte Diagnose fortsetzen. Konkretes fehlendes env-/Datenfeld melden, keine Werte erfinden.",
+    "reuse": "Die Probeaufnahme bleibt in SQLite mit capture-only Kennzeichnung ohne wirtschaftliche Trades. Der anschließende PAPER-Lauf erhält eigene run_id und eigenen Clock-Epoch.",
+    "test_scope": "D01–D06 sind verpflichtende Integrations-/Betriebsprüfungen zusätzlich zu den vorhandenen 52 semantischen Abnahmetests; keine Aussage, dass sie schon ausgeführt wurden."
+  },
+  "complete_delivery_contract": {
+    "must_work_together": [
+      "doctor",
+      "paper",
+      "report",
+      "research"
+    ],
+    "first_paper_delivery": "Mainnet-Daten aufnehmen, kostenkorrekte PAPER-Entries/Exits/Fehlversuche über gemeinsame Engine abwickeln, alles kausal in SQLite persistieren und automatisch auswerten. Keine spätere Nachrüstung der grundlegenden Mess-/Research-Daten.",
+    "reports": [
+      "report.json",
+      "summary.md",
+      "positions.csv",
+      "latency_by_feed.csv",
+      "target_comparison.csv für Research"
+    ],
+    "measurements": [
+      "Feed-Ankunft und Coverage",
+      "receive_to_decode",
+      "decode_to_actionable",
+      "actionable_to_decision",
+      "decision_to_adapter_enqueue",
+      "Callback-/Event-Loop-Lag",
+      "Netto-PnL, Gebühren, Fehler, Migrationen, offene Positionen und Modellunsicherheit"
+    ],
+    "measurement_rule": "Nur Zeitdifferenzen innerhalb desselben Clock-Epochs und wohldefinierter Stufen. Wenn Decode bereits Handlungsfähigkeit erzeugt, kann decode_to_actionable 0 ns sein; fehlender Zeitstempel ist UNKNOWN, kein erfundener Messwert.",
+    "tests": "Alle T01–T52 implementieren und bestehen lassen. Dazu verpflichtende D01–D06-Integration sowie Projekt-/Installationsprüfung. Unabhängige Regressionstests und handgerechnete Kostenfixtures nutzen, keine Tests, die nur ihre Implementierung spiegeln.",
+    "initial_live_paper": "Mindestens ungefähr 1000 beobachtete CREATEs als technischer Pilot gemäß bestehendem Research-Plan; ausreichende Profit-Stichprobe separat nach Qualifikationsregeln beurteilen.",
+    "research_ready": "Auf gleichem eingefrorenem Datensatz Zielschwellen, getrennte Entry-/Exit-Latenzen, Kosten-/Slippage-Szenarien und Portfolio-Limits 1/10 prüfen. Temporal Split und Forward-Test bleiben verbindlich.",
+    "unknown_until_measured": [
+      "Welcher verfügbare Feed auf dem Nutzerrechner zuerst actionable ist",
+      "Erreichbare reale lokale Latenz unter Aufnahme-/Reportlast",
+      "Praktische Abdeckung und Decodefähigkeit aktueller Mainnet-Varianten",
+      "Netto-Erwartungswert unter überprüften Kosten und ausgewiesenen Fill-Annahmen"
+    ],
+    "completion_evidence": "README mit Start/Test/Report-Befehlen, Versionsmanifest, Migration, Testprotokoll, doctor-Bericht und tatsächliche PAPER-/Research-Outputs soweit erforderliche Zugänge/Daten vorhanden. Fehlende Zugangsdaten sind ein benannter externer Blocker, keine Erlaubnis, Ergebnisse zu erfinden."
+  }
+}

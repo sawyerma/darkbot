@@ -1,0 +1,79 @@
+[
+  {
+    "args": [
+      "-m",
+      "darkbot",
+      "--help"
+    ],
+    "exit_code": 0,
+    "stdout_bytes": 766,
+    "stderr": ""
+  },
+  {
+    "args": [
+      "-m",
+      "darkbot",
+      "doctor",
+      "--config",
+      "config/phase1.json",
+      "--db",
+      "../orchestrator_checks/doctor.sqlite",
+      "--json"
+    ],
+    "exit_code": 4,
+    "stdout_bytes": 5474,
+    "stderr": ""
+  },
+  {
+    "args": [
+      "-m",
+      "darkbot",
+      "paper",
+      "--config",
+      "config/phase1.json",
+      "--db",
+      "../orchestrator_checks/paper_no_feeds.sqlite",
+      "--campaign",
+      "audit_no_feeds"
+    ],
+    "exit_code": 0,
+    "stdout_bytes": 1985,
+    "stderr": ""
+  },
+  {
+    "args": [
+      "-m",
+      "darkbot",
+      "report",
+      "--db",
+      "../orchestrator_checks/paper_no_feeds.sqlite",
+      "--campaign",
+      "audit_no_feeds",
+      "--out",
+      "../orchestrator_checks/report"
+    ],
+    "exit_code": 0,
+    "stdout_bytes": 251,
+    "stderr": ""
+  },
+  {
+    "args": [
+      "-m",
+      "darkbot",
+      "research",
+      "--db",
+      "../orchestrator_checks/paper_no_feeds.sqlite",
+      "--campaign",
+      "audit_no_feeds",
+      "--config",
+      "config/research.json",
+      "--max-variants",
+      "1",
+      "--out",
+      "../orchestrator_checks/research"
+    ],
+    "exit_code": 0,
+    "stdout_bytes": 221,
+    "stderr": ""
+  }
+]

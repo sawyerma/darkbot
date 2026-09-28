@@ -1,0 +1,17 @@
+usage: python -m darkbot [-h] {doctor,paper,report,research} ...
+
+DarkBot Phase-1 PAPER backend (spec 1.3.2). LIVE broadcast is technically
+disabled.
+
+positional arguments:
+  {doctor,paper,report,research}
+    doctor              config, free feed readiness, fee provenance, database
+                        and PAPER boundary checks (D01-D06); secrets redacted
+    paper               live PAPER with auto-recording and periodic status;
+                        Ctrl-C stops controlled
+    report              deterministic latency/PnL/quality reports
+    research            pre-registered target/latency variants on the frozen
+                        dataset; test split locked until policy freeze
+
+options:
+  -h, --help            show this help message and exit
