@@ -1188,3 +1188,23 @@ Providerfehler: sieben `-32007`-Antworten mit **15 requests/s limit reached** un
 Evidence lokal: `gate0/evidence/g04_quicknode_coverage_v2/capture.json`, `sha256.json`, `analysis.json`; Collector/Analyzer: `gate0/tools/probe_g04_coverage_v2.cjs`, `gate0/tools/analyze_g04_coverage_v2.cjs`.
 
 **Nächster Messschritt:** keine Upgrade-Annahme. Collector so umbauen, dass der kanonische Nenner ohne per-Log-TX-Fetch-Bursts entsteht, Requests deutlich unter 15/s bleiben und Source-Gaps/Reconnects explizit erfasst werden. Danach längeren bounded Run durchführen. `T_send`, `T_buy`, `T0` und vollständige BUY-Latenz bleiben N/A; kein value-bearing Send.
+
+
+### G0.4 QuickNode v3 connection-limit diagnosis — 2026-09-29
+
+Die geplante v3-Coverage-Probe wurde **nicht als Messlauf gewertet**. Beim Start kam zwar eine WebSocket-Verbindung zustande (`OPEN`), aber bereits die erste `eth_subscribe`-Anfrage erhielt:
+
+```text
+code: -32003
+message: request limit reached
+```
+
+Der Server schloss anschließend die Verbindung sauber mit WebSocket-Close-Code `1001` (`upstream went away`). Ein isolierter 30-s-`newHeads`-Verbindungstest reproduzierte denselben Zustand. Damit ist belegt, dass zu diesem Zeitpunkt **der QuickNode-Endpunkt selbst wegen Request-/Planlimit keine Subscription annahm**; die v3-Reconnect-Zahlen sind deshalb kein Ingress-/Coverage-Messwert.
+
+Folge:
+- v3 liefert **keine Coverage-Evidence** und keinen neuen Nenner;
+- die vorherige v2-Stichprobe bleibt die letzte verwertbare QuickNode-Evidence;
+- kein `T0`, `T_send`, `T_buy` oder BUY-Latenzwert wird daraus abgeleitet;
+- weitere automatische Reconnects gegen denselben limitierten Endpoint sind bis Quota-Reset/Planänderung/anderem Endpoint zu vermeiden.
+
+Security-Hinweis: Zugangsdaten werden nicht im Protokoll dokumentiert.
