@@ -96,7 +96,7 @@ Wichtig:
 | **G0.2** | Precomputability, exakte Flap-Economics und historischer First-BUY-Witness | **PASS für den eingefrorenen historischen Modus** |
 | **G0.3** | Minimaler korrekter Direct-Portal Launch→BUY-Harness | **PASS für den eingefrorenen Offline-Scope — unmittelbarer Launch→Direct-BUY gültig; siehe Abschluss 2026-09-29** |
 | G0.4 | Pending/actionable Coverage und frühestes brauchbares Signal | **PARTIAL — QuickNode-Quellenprobe; noch kein Coverage-PASS** |
-| G0.5 | vollständige lokale BUY-Hotpath-Latenz bis echtem `T_send` | blockiert |
+| G0.5 | vollständige lokale BUY-Hotpath-Latenz bis echtem `T_send` | **LOCAL PREQUALIFICATION START — finaler Transport-PASS noch offen** |
 | G0.6 | Ingress × Inclusion Dry-Qualifikation + Concurrency | blockiert |
 | G0.7 | kontrollierter Minimalwert-Mainnet-BUY | blockiert |
 | G0.8 | tatsächliche Acquisition + Ordering | blockiert |
@@ -1208,3 +1208,23 @@ Folge:
 - weitere automatische Reconnects gegen denselben limitierten Endpoint sind bis Quota-Reset/Planänderung/anderem Endpoint zu vermeiden.
 
 Security-Hinweis: Zugangsdaten werden nicht im Protokoll dokumentiert.
+
+
+### Gate-0 Fortsetzungsentscheidung — 2026-09-29
+
+Ziel bleibt unverändert: **zuerst falsifizieren oder bestätigen, ob der kontrollierbare lokale BUY-Pfad unter 1 ms bleiben kann; erst danach kostenpflichtige Infrastruktur oder Hardware beschaffen.**
+
+Der Phasenplan wird dabei nicht geändert:
+
+- G0.3 ist semantisch PASS und erfüllt damit die Voraussetzung für G0.5.
+- G0.4 läuft weiterhin parallel/opportunistisch und bleibt PARTIAL; ein fehlender eigener Node oder ein vorübergehend limitierter QuickNode-Endpunkt darf die lokale G0.5-Vorqualifikation nicht unnötig stoppen.
+- G0.5 wird jetzt in zwei klar getrennten Evidenzstufen fortgesetzt:
+  1. **LOCAL PREQUALIFICATION:** kompletter lokal kontrollierbarer Pfad `T_pre → Decode → Residual/Quote → TX finalize → Sign → Serialize → lokale Adapter-/Socket-Übergabe`. Dieser Lauf darf das <1-ms-Ziel früh falsifizieren oder stützen.
+  2. **TRANSPORT QUALIFICATION:** später derselbe Rust-Pfad bis zur tatsächlich ausgewählten realen Transportgrenze. Erst diese Stufe kann einen finalen G0.5-`T_send`-PASS liefern.
+- Ein lokaler Mock-/Socket-Handoff wird **nicht** als echter BSC-P2P-/Builder-`T_send` ausgegeben.
+- Node-Hardware, zusätzlicher Speicher, QuickNode-Upgrade sowie 48Club-/BlockRazor-Verträge werden **nicht vorab beschafft**, nur um Gate 0 fortsetzen zu können. Beschaffung wird erst nach positiver lokaler Latenz-Vorqualifikation und konkretem Bedarf aus G0.4–G0.6 entschieden.
+- G0.6/G0.7/G0.8 bleiben in ihrer ursprünglichen Reihenfolge. Vor G0.7 kein value-bearing Send ohne ausdrückliche Nutzerfreigabe.
+
+**Entscheidungslogik:** Wenn bereits die lokale G0.5-Vorqualifikation das Ziel `T_pre → lokale Übergabe < 1 ms` auf target-like Hardware nicht robust halten kann, wird zuerst lokal optimiert bzw. die Edge-Annahme neu bewertet. Wenn sie das Ziel hält, wird anschließend genau die Infrastruktur beschafft/eingerichtet, die für den realen G0.4/G0.5/G0.6-Nachweis benötigt wird.
+
+Keine Änderung an den Non-Claims: `T_signal→T_send`, `T_buy−T0` und Gate-0-Gesamt-PASS bleiben bis zu den vorgesehenen realen Messungen unbelegt.
