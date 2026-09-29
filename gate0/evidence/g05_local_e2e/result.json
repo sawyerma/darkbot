@@ -1,0 +1,126 @@
+{
+  "architecture": "aarch64",
+  "correctness": {
+    "expected_min_output": "30362879985784573673561658",
+    "expected_output": "30669575743216741084405716",
+    "expected_token": "0xabe1fE16cf6Bc48c9524713054efe6e954b17777",
+    "g03_fixture_match": true
+  },
+  "measured_samples": 50000,
+  "non_claims": [
+    "UnixStream write-return is only a local adapter boundary",
+    "This is NOT a real bsc-geth P2P T_send",
+    "This is NOT a builder T_send",
+    "This is NOT T_buy",
+    "This does not close final G0.5"
+  ],
+  "os": "macos",
+  "scope": "Pinned G0.3 Flap fixture; single measured local E2E path through JSON-RPC IPC handoff",
+  "stages": {
+    "T_pre_to_T_ready_local": {
+      "max_ns": 517042,
+      "max_us": 517.042,
+      "mean_ns": 31953,
+      "p50_ns": 31500,
+      "p50_us": 31.5,
+      "p95_ns": 35708,
+      "p95_us": 35.708,
+      "p99_ns": 36541,
+      "p99_us": 36.541
+    },
+    "T_pre_to_json_rpc_ipc_handoff": {
+      "max_ns": 537042,
+      "max_us": 537.042,
+      "mean_ns": 33512,
+      "p50_ns": 32875,
+      "p50_us": 32.875,
+      "p95_ns": 37625,
+      "p95_us": 37.625,
+      "p99_ns": 38875,
+      "p99_us": 38.875
+    },
+    "decode_and_create2": {
+      "max_ns": 27666,
+      "max_us": 27.666,
+      "mean_ns": 581,
+      "p50_ns": 583,
+      "p50_us": 0.583,
+      "p95_ns": 667,
+      "p95_us": 0.667,
+      "p99_ns": 709,
+      "p99_us": 0.709
+    },
+    "hex_and_json_rpc_framing": {
+      "max_ns": 9917,
+      "max_us": 9.917,
+      "mean_ns": 866,
+      "p50_ns": 833,
+      "p50_us": 0.833,
+      "p95_ns": 1125,
+      "p95_us": 1.125,
+      "p99_ns": 1167,
+      "p99_us": 1.167
+    },
+    "quote_and_min_output": {
+      "max_ns": 18084,
+      "max_us": 18.084,
+      "mean_ns": 414,
+      "p50_ns": 417,
+      "p50_us": 0.417,
+      "p95_ns": 459,
+      "p95_us": 0.459,
+      "p99_ns": 459,
+      "p99_us": 0.459
+    },
+    "secp256k1_sign": {
+      "max_ns": 506375,
+      "max_us": 506.375,
+      "mean_ns": 29955,
+      "p50_ns": 29583,
+      "p50_us": 29.583,
+      "p95_ns": 33459,
+      "p95_us": 33.459,
+      "p99_ns": 34250,
+      "p99_us": 34.25
+    },
+    "signed_tx_serialize": {
+      "max_ns": 36208,
+      "max_us": 36.208,
+      "mean_ns": 233,
+      "p50_ns": 209,
+      "p50_us": 0.209,
+      "p95_ns": 292,
+      "p95_us": 0.292,
+      "p99_ns": 334,
+      "p99_us": 0.334
+    },
+    "tx_finalize_and_sighash": {
+      "max_ns": 32458,
+      "max_us": 32.458,
+      "mean_ns": 767,
+      "p50_ns": 750,
+      "p50_us": 0.75,
+      "p95_ns": 834,
+      "p95_us": 0.834,
+      "p99_ns": 875,
+      "p99_us": 0.875
+    },
+    "unix_stream_handoff": {
+      "max_ns": 29208,
+      "max_us": 29.208,
+      "mean_ns": 692,
+      "p50_ns": 542,
+      "p50_us": 0.542,
+      "p95_ns": 1209,
+      "p95_us": 1.209,
+      "p99_ns": 1834,
+      "p99_us": 1.834
+    }
+  },
+  "status": "G0.5_LOCAL_E2E_PREQUALIFICATION",
+  "target": {
+    "final_real_T_send_target_ns": 1000000,
+    "local_prequalification_ns": 1000000
+  },
+  "warmup_samples": 5000
+}
