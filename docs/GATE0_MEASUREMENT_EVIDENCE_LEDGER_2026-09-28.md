@@ -1,5 +1,7 @@
 # DarkBot Gate 0 — Masterprotokoll BSC Birth-to-BUY
 
+> **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
+
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
 Stand: **2026-09-28**  
 Primärer Scope: **BSC / Flap / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3**
@@ -33,25 +35,28 @@ frühestes verwertbares Chain/Pending-Signal
 → Token tatsächlich erhalten
 ```
 
-Die zentrale lokale Performance-KPI ab G0.5 ist:
+Die **primäre Projekt-KPI** ist:
 
 ```text
-T_signal → T_send
+T0 → T_buy
 ```
 
-mit Ziel:
+also: ab dem frühesten Zeitpunkt, zu dem ein unabhängiger externer BUY technisch gültig ist, bis zur **erfolgreichen on-chain Ausführung und tatsächlichen Token-Akquisition**.
+
+`T_signal → T_send` ist nur eine **diagnostische Teil-KPI** des kontrollierbaren Bot-/Transportpfads. Das lokale Ziel bleibt:
 
 ```text
-< 1,0 ms
+T_signal → T_send < 1,0 ms
 bevorzugt < 0,5 ms
 ```
 
-Dabei bedeutet `T_send` ausdrücklich **echter Transport-Handoff** und nicht nur eine interne Queue.
+Ein `T_send`-PASS beweist ausdrücklich **nicht**, dass der Coin bereits gekauft wurde. Für „wirklich gekauft“ zählen zusätzlich Transport/Ankunft, Ordering/Validator-Selektion und erfolgreiche on-chain Ausführung bis `T_buy`.
 
-Der wirtschaftlich entscheidende spätere Nachweis ist:
+Der wirtschaftlich entscheidende Nachweis ist:
 
 ```text
-BUY erfolgreich ausgeführt
+T0 → T_buy gemessen
++ BUY erfolgreich ausgeführt
 + erwarteter Token tatsächlich erhalten
 + Position/Ordering gegenüber konkurrierenden BUYs bekannt
 ```
@@ -81,7 +86,7 @@ T_buy    = BUY erfolgreich ausgeführt und Acquisition-Evidence beweist,
 
 Wichtig:
 
-- BSC-Blockzeiten sind **keine BUY-Latenz**.
+- BSC-Blockzeiten sind **kein Bestandteil der lokalen `T_signal → T_send`-Latenz**. Für die tatsächliche Wall-Clock-Zeit bis `T_buy` ist die Inclusion/Block-Ausführung dagegen selbstverständlich relevant.
 - Ein Receipt liefert keine vertrauenswürdige Sub-ms-EVM-Ausführungszeit für eine einzelne TX.
 - Solana/PAPER-Latenzen dürfen niemals als BSC-BUY-Latenz bezeichnet werden.
 - Nicht gemessene Werte bleiben **N/A** und werden niemals zu 0 umgedeutet.
