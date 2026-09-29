@@ -1304,3 +1304,32 @@ Evidence:
 **Einordnung:** Die lokale <1-ms-Hypothese ist nach insgesamt 500.000 zusätzlichen Messdurchläufen robust gestützt. Dies bleibt weiterhin **LOCAL PREQUALIFICATION**, nicht finaler G0.5-Transport-PASS. Der gemessene UnixDatagram-Handoff ist kein realer bsc-geth-P2P- oder Builder-`T_send`.
 
 **Nächster G0.5-Schritt:** die tatsächlich für einen lokalen geth-Pfad relevante Adapterarbeit separat vorqualifizieren: signed raw transaction → Hex/JSON-RPC `eth_sendRawTransaction` framing → vorverbundener Unix-Stream/IPC-Handoff. Danach erst reale geth-/P2P-Transportqualifikation auf verfügbarer Infrastruktur.
+
+
+### G0.5 Local IPC Prequalification — 2026-09-29
+
+Evidence-Commit: `8515823` (`Add G0.5 local IPC prequalification`).
+
+Scope: exakter historischer G0.3 Direct-BUY-Envelope, lokaler vorverbundener UnixStream, kein echter geth-Prozess. Gemessen wurden 10.000 Warmups + **100.000 Samples** für:
+
+```text
+signed raw TX
+→ Hex-Encoding
+→ JSON-RPC eth_sendRawTransaction framing
+→ UnixStream write_all
+```
+
+Ergebnis:
+
+| Stufe | p50 | p95 | p99 | max |
+|---|---:|---:|---:|---:|
+| Raw-TX Hex-Encoding | 1,208 µs | 2,125 µs | 2,667 µs | 18,625 µs |
+| JSON-RPC-Framing | 0,041 µs | 0,042 µs | 0,042 µs | 0,208 µs |
+| UnixStream write_all | 0,583 µs | 1,042 µs | 1,333 µs | 15,750 µs |
+| **signed raw TX → local IPC handoff** | **1,875 µs** | **2,917 µs** | **3,584 µs** | **19,208 µs** |
+
+Raw-TX: 343 Bytes; JSON-RPC-Frame: 761 Bytes. SHA256 der Evidence: `fd162da5bf677aa9857c27971d2d52287e512c50cf056933681601f8cfa61ad9`.
+
+**Einordnung:** Auch die realistischere lokale JSON-RPC/IPC-Adapterarbeit liegt mit deutlichem Abstand unter 1 ms. Dies bleibt Vorqualifikation: kein echter geth-Prozess, keine P2P-Propagation, kein finaler `T_send`, kein `T_buy`, kein value-bearing Broadcast.
+
+**Nächster Schritt:** vollständigen lokalen Pfad in **einer** Messung erfassen: Launch Decode/CREATE2 → Quote/minOutput → TX finalize/sighash → warm sign → signed serialization → Hex/JSON-RPC → vorverbundener UnixStream-Handoff. Keine Addition separater Benchmarks.
