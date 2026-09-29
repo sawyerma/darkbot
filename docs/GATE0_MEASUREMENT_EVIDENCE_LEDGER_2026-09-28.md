@@ -1333,3 +1333,40 @@ Raw-TX: 343 Bytes; JSON-RPC-Frame: 761 Bytes. SHA256 der Evidence: `fd162da5bf67
 **Einordnung:** Auch die realistischere lokale JSON-RPC/IPC-Adapterarbeit liegt mit deutlichem Abstand unter 1 ms. Dies bleibt Vorqualifikation: kein echter geth-Prozess, keine P2P-Propagation, kein finaler `T_send`, kein `T_buy`, kein value-bearing Broadcast.
 
 **Nächster Schritt:** vollständigen lokalen Pfad in **einer** Messung erfassen: Launch Decode/CREATE2 → Quote/minOutput → TX finalize/sighash → warm sign → signed serialization → Hex/JSON-RPC → vorverbundener UnixStream-Handoff. Keine Addition separater Benchmarks.
+
+
+### G0.5 Local E2E Prequalification — 2026-09-29
+
+Evidence-Commit: `4239a0f` (`Add G0.5 local E2E hotpath benchmark`).
+
+Scope: eingefrorener G0.3-Flap-Fixture; **eine zusammenhängende Messung** des kompletten lokal kontrollierbaren Pfads:
+
+```text
+Launch Decode + CREATE2
+→ Quote + minOutput
+→ TX finalize + sighash
+→ warmer secp256k1-Signer
+→ signed TX serialization
+→ Hex + JSON-RPC eth_sendRawTransaction framing
+→ vorverbundener UnixStream write_all
+```
+
+5.000 Warmups + **50.000 Messsamples**. Correctness-Bindung an den G0.3-Fixture blieb aktiv: Token, erwarteter Output und minOutput stimmen.
+
+| Messpunkt | p50 | p95 | p99 | max |
+|---|---:|---:|---:|---:|
+| `T_pre → T_ready local` | 31,500 µs | 35,708 µs | 36,541 µs | 517,042 µs |
+| **`T_pre → JSON-RPC IPC handoff`** | **32,875 µs** | **37,625 µs** | **38,875 µs** | **537,042 µs** |
+
+Teilwerte p99: Decode/CREATE2 0,709 µs; Quote/minOutput 0,459 µs; TX finalize+sighash 0,875 µs; secp256k1 Sign 34,250 µs; signed serialization 0,334 µs; Hex+JSON-RPC 1,167 µs; UnixStream-Handoff 1,834 µs.
+
+Evidence:
+- `gate0/src/bin/g05_e2e_local.rs`
+- `gate0/evidence/g05_local_e2e/result.json`
+- SHA256: `91e051b6bdb19e31b28be7f9bff40c425f666b690a693d5684293d738df68cc3`
+
+**Einordnung:** Die zentrale lokale <1-ms-Hypothese bleibt in einem einzigen End-to-End-Messpfad mit großem Abstand bestehen; selbst das beobachtete Maximum lag bei 537,042 µs. Damit ist weitere lokale Mikromessung für die Vorentscheidung nicht mehr der Engpass.
+
+**Non-Claim:** UnixStream-`write_all` bleibt eine lokale Adaptergrenze und ist weder echter bsc-geth-P2P-`T_send` noch Builder-`T_send`, `T_buy` oder finaler G0.5-PASS.
+
+**Fortsetzung nach Plan:** keine weitere Beschaffung nur für Vorqualifikation. Nächster Schritt ist reale, nicht-value-bearing Transportqualifikation mit einem tatsächlich verfügbaren BSC-Transportkandidaten; erst danach kann der finale `T_send`-Teil von G0.5 geschlossen werden.
