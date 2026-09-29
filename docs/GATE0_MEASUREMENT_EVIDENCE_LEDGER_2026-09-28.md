@@ -1370,3 +1370,25 @@ Evidence:
 **Non-Claim:** UnixStream-`write_all` bleibt eine lokale Adaptergrenze und ist weder echter bsc-geth-P2P-`T_send` noch Builder-`T_send`, `T_buy` oder finaler G0.5-PASS.
 
 **Fortsetzung nach Plan:** keine weitere Beschaffung nur für Vorqualifikation. Nächster Schritt ist reale, nicht-value-bearing Transportqualifikation mit einem tatsächlich verfügbaren BSC-Transportkandidaten; erst danach kann der finale `T_send`-Teil von G0.5 geschlossen werden.
+
+
+### G0.5 Real Remote Transport Prequalification — 2026-09-29
+
+Transportkandidat: offizieller öffentlicher BSC-Mainnet-RPC `bsc-dataseed.bnbchain.org:443`, vorverbundene TLS/TCP-HTTP/1.1-Verbindung. Chain-ID 56 wurde vor der Messung verifiziert.
+
+Safety: gesendet wurde ausschließlich ein absichtlich **nicht parsebarer 343-Byte-Payload** (erste Bytefolge kein gültiger RLP-Transaction-Envelope). Der Endpoint antwortete deterministisch mit `unmarshal transaction failed`. Es wurde **keine gültige oder value-bearing Transaktion** ausgesendet.
+
+Messung: 10 Warmups + **100 Samples**.
+
+| Messpunkt | p50 | p95 | p99 | max |
+|---|---:|---:|---:|---:|
+| TLS/TCP `write_all + flush` Handoff | **176,750 µs** | **363,291 µs** | **472,084 µs** | **525,958 µs** |
+| Request → JSON-RPC Response | 110,780 ms | 131,117 ms | 157,384 ms | 183,345 ms |
+
+SHA256 der lokalen Evidence: `98c359c47a869588f84b55f08786f8d33de3a0101a4e1343eeb60d2ad358d935`.
+
+**Einordnung:** Die tatsächliche warme TLS/TCP-Socket-Übergabe an einen realen externen BSC-RPC-Endpunkt liegt in dieser Stichprobe selbst bei p99 und Maximum unter 1 ms. Die Antwort-RTT liegt dagegen im Bereich 110–183 ms und ist **nicht** Teil der lokalen BUY-Latenz bzw. von `T_send`.
+
+**Non-Claims:** Diese Messung umfasst noch **nicht** den lokalen BUY-Build im selben Zeitintervall; separate lokale und Remote-Benchmarks werden nicht addiert. Die Rückkehr von `write_all + flush` bedeutet Übergabe an den getesteten TLS/TCP-Transportpfad, nicht bestätigte Remote-Verarbeitung, Mempool-Aufnahme, P2P-Propagation, Inclusion oder `T_buy`. Der öffentliche RPC ist außerdem noch kein qualifizierter Produktions-Inclusion-Pfad.
+
+**Nächster Schritt:** vollständiger einteiliger Remote-E2E-Benchmark `T_pre → Decode/Quote/Build/Sign/Serialize → Hex/JSON-RPC → vorverbundener realer TLS/TCP write+flush` mit absichtlich nicht broadcastbarer Payload-Variante. Erst dieser Lauf kann die <1-ms-Hypothese für einen realen Remote-Transport in einer einzigen Messung stützen oder falsifizieren.
