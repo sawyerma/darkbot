@@ -1,0 +1,11 @@
+{
+  "method": "debug_traceTransaction",
+  "started_utc": "2026-09-28T13:11:57.104558+00:00",
+  "http_status": 200,
+  "response_sha256": "acd8ba29afb81b622f5baa611961f5d61db5c154fcb0ac55162581c77f6059a0",
+  "rpc_error": {
+    "code": -32002,
+    "message": "the resource debug_traceTransaction is not available."
+  },
+  "diagnostic_elapsed_ns": 449356834
+}

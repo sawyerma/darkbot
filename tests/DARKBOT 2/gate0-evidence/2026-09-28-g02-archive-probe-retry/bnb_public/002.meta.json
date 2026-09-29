@@ -1,0 +1,11 @@
+{
+  "method": "eth_getCode",
+  "started_utc": "2026-09-28T13:11:56.668908+00:00",
+  "http_status": 200,
+  "response_sha256": "055a465f4e593f019bfeeaa7b9dd414161ada719aae135629354685b842786e5",
+  "rpc_error": {
+    "code": -32000,
+    "message": "not supported"
+  },
+  "diagnostic_elapsed_ns": 435381625
+}

@@ -1,0 +1,78 @@
+[
+  {
+    "endpoint": "https://bsc-dataseed.nariox.org",
+    "calls": [
+      {
+        "method": "eth_chainId",
+        "started_utc": "2026-09-28T13:11:55.994465+00:00",
+        "http_status": 200,
+        "response_sha256": "ce50ba55ecf1a9410c6f5503d09da66974203165305ff8f5a2b520f49a705c07",
+        "rpc_error": null,
+        "result_present": true,
+        "chain_id": 56,
+        "diagnostic_elapsed_ns": 673738667
+      },
+      {
+        "method": "eth_getCode",
+        "started_utc": "2026-09-28T13:11:56.669431+00:00",
+        "http_status": 200,
+        "response_sha256": "fac51ed531541ee7e3b73810f8faad7c684f98fc0ded756cf068ae9ee86485b1",
+        "rpc_error": {
+          "code": -32000,
+          "message": "missing trie node"
+        },
+        "diagnostic_elapsed_ns": 438747958
+      },
+      {
+        "method": "debug_traceTransaction",
+        "started_utc": "2026-09-28T13:11:57.108395+00:00",
+        "http_status": 200,
+        "response_sha256": "90d8c8671918d6b1fddf8f764a3ac327aed59dfc3c5cd313aa1b0c0f032953c7",
+        "rpc_error": {
+          "code": -32000,
+          "message": "missing trie node"
+        },
+        "diagnostic_elapsed_ns": 450946459
+      }
+    ],
+    "usable": false
+  },
+  {
+    "endpoint": "https://bsc-dataseed-public.bnbchain.org",
+    "calls": [
+      {
+        "method": "eth_chainId",
+        "started_utc": "2026-09-28T13:11:55.994175+00:00",
+        "http_status": 200,
+        "response_sha256": "ce50ba55ecf1a9410c6f5503d09da66974203165305ff8f5a2b520f49a705c07",
+        "rpc_error": null,
+        "result_present": true,
+        "chain_id": 56,
+        "diagnostic_elapsed_ns": 673436584
+      },
+      {
+        "method": "eth_getCode",
+        "started_utc": "2026-09-28T13:11:56.668908+00:00",
+        "http_status": 200,
+        "response_sha256": "055a465f4e593f019bfeeaa7b9dd414161ada719aae135629354685b842786e5",
+        "rpc_error": {
+          "code": -32000,
+          "message": "not supported"
+        },
+        "diagnostic_elapsed_ns": 435381625
+      },
+      {
+        "method": "debug_traceTransaction",
+        "started_utc": "2026-09-28T13:11:57.104558+00:00",
+        "http_status": 200,
+        "response_sha256": "acd8ba29afb81b622f5baa611961f5d61db5c154fcb0ac55162581c77f6059a0",
+        "rpc_error": {
+          "code": -32002,
+          "message": "the resource debug_traceTransaction is not available."
+        },
+        "diagnostic_elapsed_ns": 449356834
+      }
+    ],
+    "usable": false
+  }
+]

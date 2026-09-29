@@ -1,0 +1,140 @@
+{
+  "scope": "workspace evidence, local repo dotenv/RPC config and docs, selective shell startup RPC assignments, process provider/RPC vars, config members of local ZIPs; no shell history/keychain/wallet files",
+  "files_scanned": 685,
+  "settings": [
+    {
+      "file": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/.env",
+      "line": 9,
+      "setting": "EXISTING_RPC_WSS_URL",
+      "configured": true,
+      "endpoints": [
+        {
+          "host": "api.mainnet-beta.solana.com",
+          "provider": null,
+          "path_segments": 0,
+          "has_query": false,
+          "has_userinfo": false,
+          "authenticated_shape": false
+        }
+      ],
+      "provider_named_credential": false
+    },
+    {
+      "file": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/.env",
+      "line": 10,
+      "setting": "EXISTING_RPC_HTTP_URL",
+      "configured": true,
+      "endpoints": [
+        {
+          "host": "api.mainnet-beta.solana.com",
+          "provider": null,
+          "path_segments": 0,
+          "has_query": false,
+          "has_userinfo": false,
+          "authenticated_shape": false
+        }
+      ],
+      "provider_named_credential": false
+    },
+    {
+      "file": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/.env.example",
+      "line": 9,
+      "setting": "EXISTING_RPC_WSS_URL",
+      "configured": true,
+      "endpoints": [
+        {
+          "host": "api.mainnet-beta.solana.com",
+          "provider": null,
+          "path_segments": 0,
+          "has_query": false,
+          "has_userinfo": false,
+          "authenticated_shape": false
+        }
+      ],
+      "provider_named_credential": false
+    },
+    {
+      "file": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/.env.example",
+      "line": 10,
+      "setting": "EXISTING_RPC_HTTP_URL",
+      "configured": true,
+      "endpoints": [
+        {
+          "host": "api.mainnet-beta.solana.com",
+          "provider": null,
+          "path_segments": 0,
+          "has_query": false,
+          "has_userinfo": false,
+          "authenticated_shape": false
+        }
+      ],
+      "provider_named_credential": false
+    }
+  ],
+  "provider_url_hits": [
+    {
+      "file": "/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/gate0-evidence/2026-09-28-g02-archive-witness/drpc_first_buy_single/result.json",
+      "line": 2,
+      "endpoint": {
+        "host": "bsc.drpc.org",
+        "provider": "dRPC",
+        "path_segments": 0,
+        "has_query": false,
+        "has_userinfo": false,
+        "authenticated_shape": false
+      }
+    },
+    {
+      "file": "/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/gate0-evidence/2026-09-27-g01/four_launch_logs_attempt2/001.meta.json",
+      "line": 2,
+      "endpoint": {
+        "host": "bsc.nodereal.io",
+        "provider": "NodeReal",
+        "path_segments": 0,
+        "has_query": false,
+        "has_userinfo": false,
+        "authenticated_shape": false
+      }
+    },
+    {
+      "file": "/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/gate0-evidence/2026-09-28-g02-economics/trace_binance_retry/001.response.json",
+      "line": 1,
+      "endpoint": {
+        "host": "docs.nodereal.io",
+        "provider": "NodeReal",
+        "path_segments": 3,
+        "has_query": false,
+        "has_userinfo": false,
+        "authenticated_shape": false
+      }
+    },
+    {
+      "file": "/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/gate0-evidence/2026-09-28-g02-economics/trace_binance_retry/001.response.json",
+      "line": 1,
+      "endpoint": {
+        "host": "docs.nodereal.io",
+        "provider": "NodeReal",
+        "path_segments": 3,
+        "has_query": false,
+        "has_userinfo": false,
+        "authenticated_shape": false
+      }
+    },
+    {
+      "file": "/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/gate0-evidence/2026-09-28-g02-economics/trace_binance_retry/001.response.json",
+      "line": 1,
+      "endpoint": {
+        "host": "docs.nodereal.io",
+        "provider": "NodeReal",
+        "path_segments": 3,
+        "has_query": false,
+        "has_userinfo": false,
+        "authenticated_shape": false
+      }
+    }
+  ],
+  "zip_env_members": [],
+  "skipped": [],
+  "credential_candidates": 0,
+  "authenticated_shape_candidates": 0
+}

@@ -1,0 +1,12 @@
+{
+  "endpoint": "https://bsc-dataseed-public.bnbchain.org",
+  "calls": [
+    {
+      "method": "eth_chainId",
+      "started_utc": "2026-09-28T13:11:10.938169+00:00",
+      "error": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+      "diagnostic_elapsed_ns": 18442208
+    }
+  ],
+  "usable": false
+}

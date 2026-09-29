@@ -1,0 +1,12 @@
+{
+  "endpoint": "https://bsc-dataseed.nariox.org",
+  "calls": [
+    {
+      "method": "eth_chainId",
+      "started_utc": "2026-09-28T13:11:10.937949+00:00",
+      "error": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+      "diagnostic_elapsed_ns": 18638834
+    }
+  ],
+  "usable": false
+}

@@ -1,0 +1,11 @@
+{
+  "method": "debug_traceTransaction",
+  "started_utc": "2026-09-28T13:11:57.108395+00:00",
+  "http_status": 200,
+  "response_sha256": "90d8c8671918d6b1fddf8f764a3ac327aed59dfc3c5cd313aa1b0c0f032953c7",
+  "rpc_error": {
+    "code": -32000,
+    "message": "missing trie node"
+  },
+  "diagnostic_elapsed_ns": 450946459
+}

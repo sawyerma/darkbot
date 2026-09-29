@@ -1,0 +1,10 @@
+{
+  "method": "eth_chainId",
+  "started_utc": "2026-09-28T13:11:55.994465+00:00",
+  "http_status": 200,
+  "response_sha256": "ce50ba55ecf1a9410c6f5503d09da66974203165305ff8f5a2b520f49a705c07",
+  "rpc_error": null,
+  "result_present": true,
+  "chain_id": 56,
+  "diagnostic_elapsed_ns": 673738667
+}

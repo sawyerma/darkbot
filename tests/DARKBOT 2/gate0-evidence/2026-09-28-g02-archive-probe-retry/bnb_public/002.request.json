@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "eth_getCode",
+  "params": [
+    "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "0x76a6d7c"
+  ]
+}
