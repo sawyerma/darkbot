@@ -1275,3 +1275,32 @@ Evidence:
 **Non-Claims / Gate-Grenze:** Der UnixDatagram-`send()`-Return ist nur eine lokale Adaptergrenze. Er ist **kein** realer bsc-geth-P2P-`T_send`, **kein** Builder-`T_send`, **kein** `T_buy` und schließt G0.5 final noch nicht. Die Messung bestätigt jedoch, dass die lokale Rust-Verarbeitung die 1-ms-Hypothese nicht falsifiziert; kostenpflichtige Infrastruktur muss deshalb nicht vor dieser lokalen Entscheidung beschafft werden.
 
 **Fortsetzung:** G0.4 bleibt parallel PARTIAL. Als nächstes G0.5 lokal robustifizieren (unabhängige Wiederholung/Verteilungsstabilität und Adaptergrenze), danach reale Transportqualifikation nur mit tatsächlich verfügbarem Kandidatenpfad. G0.6/G0.7 bleiben unverändert nach Plan; kein value-bearing Send ohne ausdrückliche Freigabe.
+
+
+### G0.5 Local Stability — 500.000 Durchläufe
+
+Evidence-Commit: `b903892` (`Add G0.5 local hotpath stability evidence`).
+
+Aufbau: derselbe eingefrorene G0.3-Fixture und derselbe Rust-Release-Hotpath wie bei der ersten G0.5-Local-Prequalification. **10 unabhängige Läufe × 50.000 Messsamples = 500.000 gemessene Durchläufe**, jeweils zusätzlich 5.000 Warmups.
+
+`T_pre → local handoff` über alle 10 Läufe:
+
+| Kennwert | Ergebnis |
+|---|---:|
+| bester Run p99 | **35,333 µs** |
+| schlechtester Run p99 | **37,125 µs** |
+| bester beobachteter Run-Max | **58,583 µs** |
+| schlechtester beobachteter Run-Max | **550,875 µs** |
+| Runs mit p99 < 1 ms | **10/10** |
+| beobachtete Maxima < 1 ms | **10/10** |
+
+Einzelne höhere Scheduling-/OS-Ausreißer sind sichtbar (z. B. 550,875 µs im ersten Lauf und 287,084 µs im neunten Lauf), bleiben in dieser Stichprobe aber ebenfalls unter 1 ms. Der p99-Bereich ist über alle Läufe eng und stabil.
+
+Evidence:
+- `gate0/evidence/g05_local_stability/run_01.json` bis `run_10.json`
+- `gate0/evidence/g05_local_stability/summary.json`
+- SHA256 Summary: `1d1ea23a246d989a1cb6116379eea3a7be5eb8cbc834fa4bee7316f8f92c8388`
+
+**Einordnung:** Die lokale <1-ms-Hypothese ist nach insgesamt 500.000 zusätzlichen Messdurchläufen robust gestützt. Dies bleibt weiterhin **LOCAL PREQUALIFICATION**, nicht finaler G0.5-Transport-PASS. Der gemessene UnixDatagram-Handoff ist kein realer bsc-geth-P2P- oder Builder-`T_send`.
+
+**Nächster G0.5-Schritt:** die tatsächlich für einen lokalen geth-Pfad relevante Adapterarbeit separat vorqualifizieren: signed raw transaction → Hex/JSON-RPC `eth_sendRawTransaction` framing → vorverbundener Unix-Stream/IPC-Handoff. Danach erst reale geth-/P2P-Transportqualifikation auf verfügbarer Infrastruktur.
