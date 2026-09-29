@@ -1490,3 +1490,104 @@ Die 1.000-Sample-Stabilitätsmessung ändert den primären Gate-0-Maßstab nicht
 
 **Evidence-Status:** Die oben genannten Run-Dateien und `summary.json` stammen aus dem lokal ausgeführten Terminal-Lauf. Dieser Protokolleintrag dokumentiert die vom Lauf ausgegebenen Werte und den SHA256 der Summary; er behauptet nicht, dass die lokalen Raw-Evidence-Dateien mit diesem Commit bereits in Git versioniert wurden.
 
+
+
+---
+
+## 2026-09-30 — Testnet-Funktionsnachweis vor G0.6/G0.7, ohne Gate-Vorziehung
+
+**Phase:** unterstützende Vorqualifikation innerhalb Gate 0; **kein** Ersatz für G0.6/G0.7/G0.8 und **keine** Änderung der festgelegten Phasenreihenfolge.
+
+**Zweck:** Nachweis, dass der bereits rekonstruierte direkte Flap-Portal-BUY auf BSC Testnet als echte signierte Transaktion erfolgreich ausgeführt werden kann und die beabsichtigten Token tatsächlich im vorgesehenen Wallet ankommen. Dieser Test diente ausschließlich als Funktions-/Acquisition-Nachweis. Der hierfür kurzfristig angelegte separate Test-Harness `gate0/src/bin/g07_testnet_buy.rs` wurde anschließend wieder entfernt, damit keine parallele BSC-BUY-Architektur neben dem bestehenden Gate-0-Hotpath verbleibt.
+
+### Eingefrorener Testnet-Scope
+
+```text
+chain_id                = 97
+wallet                  = 0x9c8a0Db41914beEE52Dd49790c4F087E252743DE
+portal                  = 0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9
+token                   = 0xe39b945a917a3a7E17E006896FEc1f5e4B3D7777
+buy value               = 0.0001 tBNB
+selector                = 0xef7ec2e7
+```
+
+### Erfolgreicher realer Testnet-BUY 1
+
+```text
+tx hash                  = 0x910a26b707b170567954641f5039419294e28c2994849a7897525b7d8fdbcf8b
+receipt_status           = 1
+block_number             = 133949536
+transaction_index        = 19
+gas_used                 = 188047
+token_balance_before     = 0
+token_balance_after      = 17307906101479678993718
+token_acquired           = 17307906101479678993718
+native_balance_after     = 99881195300000000
+REAL_TESTNET_BUY_PASS     = true
+```
+
+**Acquisition-Evidence:** Receipt-Erfolg allein wurde nicht als BUY-Erfolg gewertet. Der Token-Balance-Zuwachs war positiv und entsprach exakt dem unmittelbar zuvor simulierten Output.
+
+### Erfolgreicher realer Testnet-BUY 2
+
+```text
+tx hash                  = 0x8a27e1149141b1438d94245741a640fecddafba931e52de34316d5664a8ffc8f
+receipt_status           = 1
+block_number             = 133950690
+transaction_index        = 18
+gas_used                 = 170947
+token_balance_before     = 17307906101479678993718
+token_balance_after      = 34615271003919266692310
+token_acquired           = 17307364902439587698592
+native_balance_after     = 99764100600000000
+REAL_TESTNET_BUY_PASS     = true
+```
+
+Der zweite Lauf wurde lokal zusätzlich mit Diagnose-Timestamps instrumentiert:
+
+```text
+local_build_sign_us          = 411.375
+send_to_rpc_ack_ms           = 625.197
+send_to_receipt_seen_ms      = 2425.614
+send_to_acquisition_seen_ms  = 3060.663
+```
+
+### Gemessene aktuelle Client→RPC-Baseline während des Testnet-Laufs
+
+20 `curl`-Proben gegen den BSC-Testnet-RPC:
+
+```text
+DNS   median =   3.674 ms   min =   2.818 ms   max =  93.629 ms
+TCP   median =  80.427 ms   min =  74.645 ms   max = 257.548 ms
+TLS   median = 439.558 ms   min = 432.176 ms   max = 606.289 ms
+TTFB  median = 619.458 ms   min = 603.697 ms   max = 781.294 ms
+TOTAL median = 621.356 ms   min = 603.837 ms   max = 781.496 ms
+```
+
+**Einordnung:** Diese kumulativen `curl`-Zeiten enthalten DNS/TCP/TLS und sind **nicht** die definierte DarkBot-Hotpath-Latenz. Der bestehende Gate-0-Vertrag verlangt vorgewärmte Verbindungen und pre-resident State; deshalb werden diese Werte nicht als `T_pre -> T_send` verwendet und nicht nachträglich von Inclusion-/Acquisition-Zeiten abgezogen.
+
+### PASS / ADAPT / STOP
+
+```text
+Testnet direct BUY functionality     PASS
+Testnet acquisition proof           PASS
+Gate G0.5 final real transport      UNCHANGED / still open
+Gate G0.6                            BLOCKED
+Gate G0.7 Mainnet                    BLOCKED
+Gate G0.8 acquisition + ordering     BLOCKED
+T0 -> T_buy                          N/A
+```
+
+### Architekturentscheidung / Bereinigung
+
+Der separate Testnet-Harness war nur ein temporärer Funktionsprüfer und gehört **nicht** zur normativen BSC-Runtime. Er wurde in Commit `2caddeb7face2428a2fc102c8e8d523bf2baab87` wieder entfernt. Für weitere Latenz- und Inclusion-Arbeit ist ausschließlich der bereits festgelegte Gate-0-/Produktionspfad maßgeblich:
+
+```text
+pre-resident state
+-> earliest actionable ingress
+-> verified local decode/quote/build/sign
+-> warmed inclusion adapter
+-> actual acquisition/order evidence
+```
+
+**Explizite Non-Claims:** Kein Mainnet-BUY; keine Birth-Latenz; kein numerischer `T0 -> T_buy`; keine Aussage über Builder-/Validator-Selektion; keine Aussage, dass der kalte `curl`-RPC-Pfad die Produktionsarchitektur repräsentiert.
