@@ -1392,3 +1392,27 @@ SHA256 der lokalen Evidence: `98c359c47a869588f84b55f08786f8d33de3a0101a4e1343ee
 **Non-Claims:** Diese Messung umfasst noch **nicht** den lokalen BUY-Build im selben Zeitintervall; separate lokale und Remote-Benchmarks werden nicht addiert. Die Rückkehr von `write_all + flush` bedeutet Übergabe an den getesteten TLS/TCP-Transportpfad, nicht bestätigte Remote-Verarbeitung, Mempool-Aufnahme, P2P-Propagation, Inclusion oder `T_buy`. Der öffentliche RPC ist außerdem noch kein qualifizierter Produktions-Inclusion-Pfad.
 
 **Nächster Schritt:** vollständiger einteiliger Remote-E2E-Benchmark `T_pre → Decode/Quote/Build/Sign/Serialize → Hex/JSON-RPC → vorverbundener realer TLS/TCP write+flush` mit absichtlich nicht broadcastbarer Payload-Variante. Erst dieser Lauf kann die <1-ms-Hypothese für einen realen Remote-Transport in einer einzigen Messung stützen oder falsifizieren.
+
+
+### G0.5 Remote E2E Prequalification — 2026-09-29
+
+Evidence-Commit: `f75d02d` (`Add G0.5 remote E2E prequalification`).
+
+Scope: eingefrorener G0.3-Flap-Fixture; einteilige Messung von `T_pre` bis zur realen warmen TLS/TCP-`write_all + flush`-Übergabe an `bsc-dataseed.bnbchain.org:443`. Chain-ID 56 wurde verifiziert. Der lokal korrekt gebaute/signierte BUY wurde **vor jedem Netzwerk-Write absichtlich in ungültiges RLP verfälscht**, daher keine gültige/value-bearing Transaktion ausgesendet.
+
+10 Warmups + **100 Messsamples**.
+
+| Messpunkt | p50 | p95 | p99 | max |
+|---|---:|---:|---:|---:|
+| `T_pre → T_ready local` | 199,333 µs | 297,583 µs | 396,958 µs | 405,583 µs |
+| Remote TLS/TCP write+flush | 176,500 µs | 312,000 µs | 425,167 µs | 1.458,166 µs |
+| **`T_pre → remote TLS/TCP handoff`** | **393,750 µs** | **569,167 µs** | **681,250 µs** | **1.852,791 µs** |
+| `T_pre → JSON-RPC response` | 115,334 ms | 153,175 ms | 171,312 ms | 182,712 ms |
+
+SHA256: `9e071cca013af7cd976efded5f608c87eb7f0843809428b18d6387eefed3318e`.
+
+**Einordnung:** p50/p95/p99 des vollständigen gemessenen Remote-E2E-Pfads liegen unter 1 ms, der beobachtete Maximalwert jedoch nicht. Deshalb ist dies **kein finaler G0.5-PASS**. Die Tail-Latenz muss über weitere unabhängige Remote-Läufe quantifiziert werden. Zudem war der lokale Teil in diesem Remote-Aufbau deutlich langsamer als im isolierten Local-E2E-Lauf; das ist als Testaufbau-/Scheduling-Effekt zu behandeln, nicht als Änderung der Flap-Arithmetik.
+
+**Non-Claims:** Socket-`write_all + flush` misst den warmen Client→TLS/TCP-Handoff, nicht bestätigte Remote-Mempool-Aufnahme, P2P-Propagation, Inclusion oder `T_buy`. Die JSON-RPC-Antwortzeit ist nicht `T_send`.
+
+**Nächster Schritt:** Remote-E2E-Stabilitätslauf mit expliziter Zählung der Samples über 1 ms, damit die Tail-Häufigkeit statt nur ein einzelnes Maximum bewertet werden kann.
