@@ -1158,3 +1158,33 @@ Offizielle Quellen, geprüft 2026-09-29:
 - [QuickNode eth_subscribe](https://www.quicknode.com/docs/bnb-smart-chain/eth_subscribe)
 
 **Fortsetzung:** G0.3 nicht neu anfangen. Zuerst Node-Host/Storage und Kandidatenzugänge konkret bereitstellen; dann G0.4 mit kanonischem Denominator und Rust-G0.5 bis zur qualifizierten Transportgrenze durchführen. Keine Gewinnerannahme. Aktuell bleiben `T_signal→T_send`, `T_buy−T0` und Gate-0-Gesamt-PASS unbelegt.
+
+
+### G0.4 QuickNode Coverage v2 — rate-limit run 2026-09-29
+
+Aufbau: lokale QuickNode-WebSocket-Probe mit vollständigen Pending-TX-Objekten, Portal-Logs und Head-Subscription. Für Portal-Log-TXs wurden zusätzlich `eth_getTransactionByHash`-Abfragen ausgelöst. Geplante Laufzeit 600 s; tatsächlicher Abbruch durch Provider nach **197,727906875 s**.
+
+Ergebnis:
+
+| Messwert | Ergebnis |
+|---|---:|
+| vollständige Pending-TXs | 42.886 |
+| eindeutige Pending-Hashes | 32.917 |
+| Hash-only Pending | 0 |
+| Pending mit fehlenden Basisfeldern | 0 |
+| Portal-Pending-TXs | 46 |
+| Portal-Logs | 2.136 |
+| Heads | 429 |
+| kanonische Portal-TX-Fetches | 480 |
+| kanonische `newTokenV6`-Launches im ausgewerteten Census-Fenster | 4 |
+| davon zuvor im Pending gesehen | **4/4** |
+| beobachtete V6-Pending-Coverage dieser Stichprobe | **100 %** |
+| Launches im eingefrorenen DOGE-/Extension-Scope | **0** |
+
+Status bleibt **G0.4_PARTIAL_NO_FROZEN_SCOPE_DENOMINATOR**. Die 4/4-Beobachtung ist eine positive QuickNode-Stichprobe für allgemeine V6-Sichtbarkeit, aber **kein Coverage-PASS für den eingefrorenen G0.3-Scope**, weil kein Launch dieses Scopes im Nenner lag.
+
+Providerfehler: sieben `-32007`-Antworten mit **15 requests/s limit reached** und anschließend eine `-32003 request limit reached`-Antwort; danach schloss der Server die Verbindung. Damit ist die aktuelle Probe zusätzlich durch die eigene Log→`eth_getTransactionByHash`-Request-Burst-Strategie belastet. Diese Probe wird nicht als 600-s-Coverage-Lauf gewertet.
+
+Evidence lokal: `gate0/evidence/g04_quicknode_coverage_v2/capture.json`, `sha256.json`, `analysis.json`; Collector/Analyzer: `gate0/tools/probe_g04_coverage_v2.cjs`, `gate0/tools/analyze_g04_coverage_v2.cjs`.
+
+**Nächster Messschritt:** keine Upgrade-Annahme. Collector so umbauen, dass der kanonische Nenner ohne per-Log-TX-Fetch-Bursts entsteht, Requests deutlich unter 15/s bleiben und Source-Gaps/Reconnects explizit erfasst werden. Danach längeren bounded Run durchführen. `T_send`, `T_buy`, `T0` und vollständige BUY-Latenz bleiben N/A; kein value-bearing Send.
