@@ -1421,3 +1421,72 @@ SHA256: `9e071cca013af7cd976efded5f608c87eb7f0843809428b18d6387eefed3318e`.
 **Non-Claims:** Socket-`write_all + flush` misst den warmen Client→TLS/TCP-Handoff, nicht bestätigte Remote-Mempool-Aufnahme, P2P-Propagation, Inclusion oder `T_buy`. Die JSON-RPC-Antwortzeit ist nicht `T_send`.
 
 **Nächster Schritt:** Remote-E2E-Stabilitätslauf mit expliziter Zählung der Samples über 1 ms, damit die Tail-Häufigkeit statt nur ein einzelnes Maximum bewertet werden kann.
+
+### G0.5 Remote E2E Stability — 10 × 100 Samples — 2026-09-29
+
+Aufbau: derselbe eingefrorene G0.3-Flap-Fixture und derselbe Remote-E2E-Pfad wie bei der vorherigen G0.5-Remote-E2E-Prequalification. Gemessen wurde weiterhin ausschließlich:
+
+```text
+T_pre
+→ Decode / CREATE2
+→ Quote / minOutput
+→ TX finalize / sighash
+→ secp256k1 Sign
+→ signed TX serialization
+→ Hex / JSON-RPC
+→ warme Remote-TLS/TCP write_all + flush Übergabe
+```
+
+Der lokal korrekt gebaute/signierte BUY wurde vor dem Netzwerk-Write weiterhin absichtlich in einen ungültigen Wire-Payload überführt. Es wurde **keine gültige und keine value-bearing BUY-Transaktion** gesendet.
+
+Messumfang: **10 unabhängige Läufe × 100 Samples = 1.000 gemessene Remote-E2E-Durchläufe**.
+
+Für `T_pre → remote TLS/TCP handoff`:
+
+| Run | p50 | p95 | p99 | max | > 1 ms |
+|---|---:|---:|---:|---:|---:|
+| 01 | 460,541 µs | 544,250 µs | 675,333 µs | 684,333 µs | 0/100 |
+| 02 | 399,666 µs | 551,208 µs | 858,541 µs | 950,583 µs | 0/100 |
+| 03 | 398,250 µs | 547,666 µs | 592,083 µs | 720,167 µs | 0/100 |
+| 04 | 388,584 µs | 524,125 µs | 820,250 µs | 1.128,833 µs | 1/100 |
+| 05 | 451,167 µs | 541,208 µs | 791,083 µs | 1.405,667 µs | 1/100 |
+| 06 | 426,750 µs | 610,834 µs | 816,875 µs | 1.466,167 µs | 1/100 |
+| 07 | 415,750 µs | 753,042 µs | 887,125 µs | 1.018,084 µs | 1/100 |
+| 08 | 399,500 µs | 570,667 µs | 1.042,916 µs | 1.411,000 µs | 3/100 |
+| 09 | 435,417 µs | 584,250 µs | 948,166 µs | 994,334 µs | 0/100 |
+| 10 | 407,750 µs | 538,291 µs | 587,875 µs | 598,333 µs | 0/100 |
+
+Gesamt:
+
+```text
+Runs                         = 10
+Samples                      = 1.000
+Samples > 1 ms               = 7
+Anteil > 1 ms                = 0,007 = 0,7 %
+bester Run-p99               = 587,875 µs
+schlechtester Run-p99        = 1.042,916 µs
+schlechtester beobachteter Max = 1.466,167 µs
+```
+
+Lokal ausgegebener SHA256 der erzeugten Summary-Datei:
+
+```text
+2ecdc06f9018fc69b44365ece3b21df905387cba4e35bf8f268e9c51deaccd3b
+gate0/evidence/g05_remote_e2e_stability/summary.json
+```
+
+**Einordnung:** Die vorherige Aussage wird präzisiert. Der warme Remote-E2E-Handoff liegt im typischen Bereich klar unter 1 ms, ist aber **nicht tail-stabil vollständig unter 1 ms**: 7 von 1.000 Samples lagen über 1 ms; in einem Run lag bereits p99 mit 1.042,916 µs über 1 ms. Damit ist ein harter Anspruch „jeder Remote-Handoff < 1 ms“ durch diese Stichprobe widerlegt. Die Messung stützt weiterhin, dass der eigene lokale Build-/Sign-/Serialize-/Transport-Handoff im Regelfall sub-ms bleiben kann.
+
+**Non-Claims / unveränderte Gate-Grenze:** Dieser Lauf misst nur den warmen Client→TLS/TCP-Handoff. Er beweist **keine** bestätigte Remote-Node-Annahme, **keine** Mempool-Aufnahme, **keine** P2P-Propagation, **keine** Builder-/Validator-Selektion, **keine** Inclusion, **keine** erfolgreiche on-chain BUY-Ausführung und **kein** `T_buy`. Deshalb bleiben:
+
+```text
+T0 → T_buy                         N/A
+Node-/Mempool-Acceptance           N/A
+Ordering/Inclusion                 N/A
+erfolgreiche reale Token-Akquisition N/A
+```
+
+Die 1.000-Sample-Stabilitätsmessung ändert den primären Gate-0-Maßstab nicht: `T_send`/Socket-Handoff ist nur ein Zwischenwert. Der nächste wirtschaftlich relevante Fortschritt muss reale Acceptance/Ordering/Inclusion und anschließend die tatsächliche Acquisition bis `T_buy` erfassen.
+
+**Evidence-Status:** Die oben genannten Run-Dateien und `summary.json` stammen aus dem lokal ausgeführten Terminal-Lauf. Dieser Protokolleintrag dokumentiert die vom Lauf ausgegebenen Werte und den SHA256 der Summary; er behauptet nicht, dass die lokalen Raw-Evidence-Dateien mit diesem Commit bereits in Git versioniert wurden.
+
