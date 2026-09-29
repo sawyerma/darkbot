@@ -15,7 +15,7 @@ async function run(role,options={}){
  const trace=read(path.join(P,role+'_calltrace.json')).result;
  const inputState=options.state||read(path.join(P,role+'_prestate.json')).result;
  const blocks=read(path.join(__dirname,'2026-09-27-g01/flap_buy_order_blocks_rpc/001.response.json')).map(r=>r.result);
- const number={launch:124415357,first_buy:124415358,direct_buy:124415360}[role],header=blocks.find(b=>Number(BigInt(b.number))===number);assert(header);
+ const number=options.blockNumber??{launch:124415357,first_buy:124415358,direct_buy:124415360}[role],header=blocks.find(b=>Number(BigInt(b.number))===number);assert(header);
  const common=createCustomCommon({chainId:56},Mainnet,{hardfork:Hardfork.Cancun});
  const state=new SimpleStateManager({common});
  for(const [address,x] of Object.entries(inputState)){
@@ -26,6 +26,8 @@ async function run(role,options={}){
  const unknownAccounts=new Set(),unknownStorage=[],created=new Set(),writes=[],reads=[],messages=[],active=[],ops=new Set(),oracleSteps=[];
  const rawGetAccount=state.getAccount.bind(state),rawGetStorage=state.getStorage.bind(state),rawPutStorage=state.putStorage.bind(state),rawGetCode=state.getCode.bind(state);
  const isPrecompile=s=>BigInt(s)>0n&&BigInt(s)<=10n;
+ const codeReads=[];
+ state.getCode=async a=>{const address=a.toString();codeReads.push(address);if(!inputState[address]&&!created.has(address)&&!isPrecompile(address))throw Error('UNWITNESSED_CODE '+address);return rawGetCode(a);};
  state.getAccount=async a=>{const s=a.toString();if(!inputState[s]&&!created.has(s)&&!isPrecompile(s))unknownAccounts.add(s);return rawGetAccount(a);};
  state.getStorage=async(a,k)=>{
   const address=a.toString(),key=X(k),map=state.topStorageStack();
@@ -67,7 +69,7 @@ async function run(role,options={}){
   exception:exception||result?.execResult.exceptionError?.error||null,return_value:result?X(result.execResult.returnValue):null,
   missing_accounts:missingAccounts,missing_storage:unknownStorage,created:[...created],opcodes:[...ops].sort(),
   frame_count:messages.length,observed_frame_count:observed.length,all_frames_match:messages.length===observed.length&&comparisons.every(c=>c.match),
-  comparisons,reads,writes,logs,final_state:final,oracle_steps:oracleSteps,
+  comparisons,reads,writes,logs,final_state:final,oracle_steps:oracleSteps,code_reads:codeReads,
   limitations:['Message semantics only; no transaction pool, fee settlement, BSC consensus, signing, sending, or latency claim','Historical block timestamp is an execution-context input; pending-time admissibility needs a separate freshness proof']};
  if(!options.noSave)save(role+'_evm_replay.json',output);
  if(!options.quiet)console.log(JSON.stringify({role,exception:output.exception,frames:messages.length,expected_frames:observed.length,all_frames_match:output.all_frames_match,missing_accounts:missingAccounts,missing_storage:unknownStorage.slice(0,3),mismatches:comparisons.filter(x=>!x.match).slice(0,2).map(x=>({index:x.index,type:x.computed.type,to:x.computed.to,error:x.computed.error}))},null,2));

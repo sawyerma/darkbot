@@ -1,0 +1,106 @@
+{
+  "status": "G0.3_PASS_PINNED_OFFLINE_SCOPE",
+  "scope": "Frozen newTokenV6/TAXED_V3/DOGE mode, historical direct caller and 0.15 BNB; exact single-segment parent V3 state",
+  "actual_parent_block_hash": "0x854055a293db2a4c69d4827e00654bc3be75d0484b1f4258a8056380672d1104",
+  "no_later_state_patch": true,
+  "launch_frames": 116,
+  "buy_frames": 51,
+  "receipt_like_logs": 21,
+  "expected_token": "0xabe1fe16cf6bc48c9524713054efe6e954b17777",
+  "recipient": "0xb6864c017e9d9d89012d4f90ee382bf1461e4c90",
+  "balance_before": "0",
+  "balance_after": "30669575743216741084405716",
+  "acquired": "30669575743216741084405716",
+  "expected_output_from_rust": "30669575743216741084405716",
+  "difference": "0",
+  "native_debit_excluding_gas": "150000000000000000",
+  "creator_acquisition_separate": true,
+  "activation": "After successful launch state transition; before-launch negative test reverts. No external reward update is required beforehand.",
+  "historical_signature_and_nonce_compatible": true,
+  "tx_hash": "0x8aff738f6fff1302e057609661acf39eb2ebbf8ac13f1bd69dbc0835bb570f6b",
+  "historical_minimum": "6000000000000000000000000",
+  "test_policy_minimum": "30362879985784573673561658",
+  "test_slippage_bps": 100,
+  "production_slippage_policy_authorized": false,
+  "slot2_transitions": [
+    {
+      "tx": "0x73716f5fffab9493483d8eae7c1b170bc4d33feaa8346bb07d5c6a0d91d2595b",
+      "block": 124415358,
+      "index": 16,
+      "old": "0x0000000000000000000000006ab99d0500000000000000000461a19d27ae98ae",
+      "new": "0x0000000000000000000000006ab99d0600000000000000000461a19d27ae98ae",
+      "old_timestamp": "1790549253",
+      "new_timestamp": "1790549254",
+      "semantics": "External direct BUY invokes V3 pool reward accumulation; not a token activation prerequisite"
+    },
+    {
+      "tx": "0x6f723464dbb64ba0d5e6f468b3a411161e7861baa6214dc7d38938b5a46514b6",
+      "block": 124415359,
+      "index": 17,
+      "old": "0x0000000000000000000000006ab99d0600000000000000000461a19d27ae98ae",
+      "new": "0x0000000000000000000000006ab99d0700000000000000000461a19d27ae98ae",
+      "old_timestamp": "1790549254",
+      "new_timestamp": "1790549255",
+      "semantics": "External direct BUY invokes V3 pool reward accumulation; not a token activation prerequisite"
+    }
+  ],
+  "tests": [
+    {
+      "name": "local_test_slippage_100bps",
+      "min_output": "30362879985784573673561658",
+      "expected_success": true,
+      "exception": null,
+      "return_value": "0x000000000000000000000000000000000000000000195e890851ef24d3319fd4",
+      "frames": 51
+    },
+    {
+      "name": "exact_output_bound",
+      "min_output": "30669575743216741084405716",
+      "expected_success": true,
+      "exception": null,
+      "return_value": "0x000000000000000000000000000000000000000000195e890851ef24d3319fd4",
+      "frames": 51
+    },
+    {
+      "name": "one_unit_above_output",
+      "min_output": "30669575743216741084405717",
+      "expected_success": false,
+      "exception": "revert",
+      "return_value": "0x76baadda000000000000000000000000000000000000000000195e890851ef24d3319fd4000000000000000000000000000000000000000000195e890851ef24d3319fd5",
+      "frames": 27
+    },
+    {
+      "name": "missing_contract_is_evidence_error_not_trade_revert",
+      "exception": "UNWITNESSED_CODE 0x556b9306565093c855aea9ae92a594704c2cd59e"
+    },
+    {
+      "name": "before_launch_rejected",
+      "exception": "revert",
+      "return_value": "0x6e8698f20000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "quote": {
+    "calldata": "0xef7ec2e700000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000abe1fe16cf6bc48c9524713054efe6e954b177770000000000000000000000000000000000000000000000000214e8348c4f0000000000000000000000000000000000000000000000191d9705ad465a377b5e3a00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000",
+    "creator_reserve": "78962581156",
+    "creator_supply": "21453245135239692933310825",
+    "expected_output": "30669575743216741084405716",
+    "min_output": "30362879985784573673561658",
+    "no_production_policy": true,
+    "portal": "0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0",
+    "protocol_fee": "1208801652",
+    "quote_input": "120880165276",
+    "scope": "Pinned G0.3 single-segment fixture; correctness only",
+    "sqrt_next": "88147837689378056938624643760236",
+    "tax": "1208801653",
+    "test_slippage_bps": 100,
+    "token": "0xabe1fE16cf6Bc48c9524713054efe6e954b17777",
+    "value": "150000000000000000"
+  },
+  "scope_limits": [
+    "Offline message execution, not live acquisition or ordering",
+    "Historical signed transaction uses historical minimum; Rust policy calldata is separately simulated and not signed with the historical wallet",
+    "No generalized tick-crossing/native quote implementation or live cache/ingress coverage",
+    "No T_send or T_buy latency measured",
+    "Gas settlement excluded from message debit; envelope funding checked against gas-limit times gas price"
+  ]
+}

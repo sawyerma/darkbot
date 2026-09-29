@@ -1,0 +1,11 @@
+[package]
+name = "darkbot-gate0"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy-primitives = "1"
+alloy-sol-types = { version = "1", features = ["more-tuple-impls"] }
+hex = "0.4"
+serde_json = "1"
+k256 = { version = "0.13", features = ["ecdsa"] }

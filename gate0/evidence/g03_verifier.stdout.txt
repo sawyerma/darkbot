@@ -1,0 +1,64 @@
+{
+  "status": "G0.3_PASS_PINNED_OFFLINE_SCOPE",
+  "launch_frames": 116,
+  "buy_frames": 51,
+  "acquired": "30669575743216741084405716",
+  "difference": "0",
+  "tests": [
+    {
+      "name": "local_test_slippage_100bps",
+      "min_output": "30362879985784573673561658",
+      "expected_success": true,
+      "exception": null,
+      "return_value": "0x000000000000000000000000000000000000000000195e890851ef24d3319fd4",
+      "frames": 51
+    },
+    {
+      "name": "exact_output_bound",
+      "min_output": "30669575743216741084405716",
+      "expected_success": true,
+      "exception": null,
+      "return_value": "0x000000000000000000000000000000000000000000195e890851ef24d3319fd4",
+      "frames": 51
+    },
+    {
+      "name": "one_unit_above_output",
+      "min_output": "30669575743216741084405717",
+      "expected_success": false,
+      "exception": "revert",
+      "return_value": "0x76baadda000000000000000000000000000000000000000000195e890851ef24d3319fd4000000000000000000000000000000000000000000195e890851ef24d3319fd5",
+      "frames": 27
+    },
+    {
+      "name": "missing_contract_is_evidence_error_not_trade_revert",
+      "exception": "UNWITNESSED_CODE 0x556b9306565093c855aea9ae92a594704c2cd59e"
+    },
+    {
+      "name": "before_launch_rejected",
+      "exception": "revert",
+      "return_value": "0x6e8698f20000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "slot2_transitions": [
+    {
+      "tx": "0x73716f5fffab9493483d8eae7c1b170bc4d33feaa8346bb07d5c6a0d91d2595b",
+      "block": 124415358,
+      "index": 16,
+      "old": "0x0000000000000000000000006ab99d0500000000000000000461a19d27ae98ae",
+      "new": "0x0000000000000000000000006ab99d0600000000000000000461a19d27ae98ae",
+      "old_timestamp": "1790549253",
+      "new_timestamp": "1790549254",
+      "semantics": "External direct BUY invokes V3 pool reward accumulation; not a token activation prerequisite"
+    },
+    {
+      "tx": "0x6f723464dbb64ba0d5e6f468b3a411161e7861baa6214dc7d38938b5a46514b6",
+      "block": 124415359,
+      "index": 17,
+      "old": "0x0000000000000000000000006ab99d0600000000000000000461a19d27ae98ae",
+      "new": "0x0000000000000000000000006ab99d0700000000000000000461a19d27ae98ae",
+      "old_timestamp": "1790549254",
+      "new_timestamp": "1790549255",
+      "semantics": "External direct BUY invokes V3 pool reward accumulation; not a token activation prerequisite"
+    }
+  ]
+}
