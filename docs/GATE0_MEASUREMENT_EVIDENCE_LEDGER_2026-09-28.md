@@ -96,7 +96,7 @@ Wichtig:
 | **G0.2** | Precomputability, exakte Flap-Economics und historischer First-BUY-Witness | **PASS für den eingefrorenen historischen Modus** |
 | **G0.3** | Minimaler korrekter Direct-Portal Launch→BUY-Harness | **PASS für den eingefrorenen Offline-Scope — unmittelbarer Launch→Direct-BUY gültig; siehe Abschluss 2026-09-29** |
 | G0.4 | Pending/actionable Coverage und frühestes brauchbares Signal | **PARTIAL — QuickNode-Quellenprobe; noch kein Coverage-PASS** |
-| G0.5 | vollständige lokale BUY-Hotpath-Latenz bis echtem `T_send` | **LOCAL PREQUALIFICATION START — finaler Transport-PASS noch offen** |
+| G0.5 | vollständige lokale BUY-Hotpath-Latenz bis echtem `T_send` | **LOCAL PREQUALIFICATION PASS — finaler realer Transport-PASS noch offen** |
 | G0.6 | Ingress × Inclusion Dry-Qualifikation + Concurrency | blockiert |
 | G0.7 | kontrollierter Minimalwert-Mainnet-BUY | blockiert |
 | G0.8 | tatsächliche Acquisition + Ordering | blockiert |
@@ -1228,3 +1228,50 @@ Der Phasenplan wird dabei nicht geändert:
 **Entscheidungslogik:** Wenn bereits die lokale G0.5-Vorqualifikation das Ziel `T_pre → lokale Übergabe < 1 ms` auf target-like Hardware nicht robust halten kann, wird zuerst lokal optimiert bzw. die Edge-Annahme neu bewertet. Wenn sie das Ziel hält, wird anschließend genau die Infrastruktur beschafft/eingerichtet, die für den realen G0.4/G0.5/G0.6-Nachweis benötigt wird.
 
 Keine Änderung an den Non-Claims: `T_signal→T_send`, `T_buy−T0` und Gate-0-Gesamt-PASS bleiben bis zu den vorgesehenen realen Messungen unbelegt.
+
+
+### G0.5 Local Prequalification — 2026-09-29
+
+Commit der Messimplementierung und Evidence: `3d032f6` (`Add G0.5 local hotpath prequalification benchmark`).
+
+Scope: eingefrorener G0.3-Flap-Fixture, Rust Release-Build auf macOS/aarch64. Gemessen wurde der lokal kontrollierbare Pfad:
+
+```text
+T_pre
+→ Launch Decode + CREATE2
+→ lokale Quote + minOutput
+→ TX finalize + sighash
+→ warmer secp256k1-Signer
+→ signed legacy TX serialization
+→ UnixDatagram send-return als lokale Adaptergrenze
+```
+
+Correctness-Bindung vor der Messung:
+- G0.3-Fixture-Match = true
+- Token = `0xabe1fE16cf6Bc48c9524713054efe6e954b17777`
+- Expected output = `30669575743216741084405716`
+- Expected minOutput = `30362879985784573673561658`
+
+Messumfang: **5.000 Warmup + 50.000 Messsamples**.
+
+| Stufe | p50 | p95 | p99 | max |
+|---|---:|---:|---:|---:|
+| Decode + CREATE2 | 0,542 µs | 0,625 µs | 0,667 µs | 7,291 µs |
+| Quote + minOutput | 0,417 µs | 0,458 µs | 0,459 µs | 7,000 µs |
+| TX finalize + sighash | 0,750 µs | 0,833 µs | 0,875 µs | 10,334 µs |
+| secp256k1 Sign | 29,583 µs | 31,208 µs | 33,625 µs | 54,292 µs |
+| Signed-TX serialize | 0,209 µs | 0,291 µs | 0,333 µs | 13,792 µs |
+| UnixDatagram lokale Übergabe | 0,458 µs | 1,000 µs | 1,209 µs | 7,833 µs |
+| **T_pre → T_ready local** | **31,541 µs** | **33,375 µs** | **35,916 µs** | **67,167 µs** |
+| **T_pre → lokale Übergabe** | **32,000 µs** | **33,875 µs** | **36,750 µs** | **69,417 µs** |
+
+Damit ist die **lokale 1-ms-Vorqualifikation klar PASS**: selbst der gemessene Maximalwert des 50k-Laufs liegt mit 69,417 µs weit unter 1.000 µs. Der dominante lokale Anteil ist der secp256k1-Signer.
+
+Evidence:
+- `gate0/src/bin/g05_local.rs`
+- `gate0/evidence/g05_local_prequalification/result.json`
+- SHA256 `8de2bba322cdbb85ae4dca788b6897dde3976180cf30190fd9a05d3dbdd42e9b`
+
+**Non-Claims / Gate-Grenze:** Der UnixDatagram-`send()`-Return ist nur eine lokale Adaptergrenze. Er ist **kein** realer bsc-geth-P2P-`T_send`, **kein** Builder-`T_send`, **kein** `T_buy` und schließt G0.5 final noch nicht. Die Messung bestätigt jedoch, dass die lokale Rust-Verarbeitung die 1-ms-Hypothese nicht falsifiziert; kostenpflichtige Infrastruktur muss deshalb nicht vor dieser lokalen Entscheidung beschafft werden.
+
+**Fortsetzung:** G0.4 bleibt parallel PARTIAL. Als nächstes G0.5 lokal robustifizieren (unabhängige Wiederholung/Verteilungsstabilität und Adaptergrenze), danach reale Transportqualifikation nur mit tatsächlich verfügbarem Kandidatenpfad. G0.6/G0.7 bleiben unverändert nach Plan; kein value-bearing Send ohne ausdrückliche Freigabe.
