@@ -1,0 +1,115 @@
+{
+  "architecture": "aarch64",
+  "correctness": {
+    "expected_min_output": "30362879985784573673561658",
+    "expected_output": "30669575743216741084405716",
+    "expected_token": "0xabe1fE16cf6Bc48c9524713054efe6e954b17777",
+    "g03_fixture_match": true
+  },
+  "measured_samples": 50000,
+  "non_claims": [
+    "UnixDatagram send-return is only a local adapter boundary",
+    "This is NOT a real bsc-geth P2P T_send",
+    "This is NOT a builder T_send",
+    "This is NOT T_buy",
+    "This does not close final G0.5"
+  ],
+  "os": "macos",
+  "scope": "Pinned G0.3 Flap fixture; release build; local controllable path only",
+  "stages": {
+    "T_pre_to_T_ready_local": {
+      "max_ns": 544792,
+      "max_us": 544.792,
+      "mean_ns": 31671,
+      "p50_ns": 31500,
+      "p50_us": 31.5,
+      "p95_ns": 32292,
+      "p95_us": 32.292,
+      "p99_ns": 36041,
+      "p99_us": 36.041
+    },
+    "T_pre_to_local_handoff": {
+      "max_ns": 550875,
+      "max_us": 550.875,
+      "mean_ns": 32268,
+      "p50_ns": 31958,
+      "p50_us": 31.958,
+      "p95_ns": 33416,
+      "p95_us": 33.416,
+      "p99_ns": 37125,
+      "p99_us": 37.125
+    },
+    "decode_and_create2": {
+      "max_ns": 12792,
+      "max_us": 12.792,
+      "mean_ns": 572,
+      "p50_ns": 583,
+      "p50_us": 0.583,
+      "p95_ns": 625,
+      "p95_us": 0.625,
+      "p99_ns": 708,
+      "p99_us": 0.708
+    },
+    "quote_and_min_output": {
+      "max_ns": 27042,
+      "max_us": 27.042,
+      "mean_ns": 404,
+      "p50_ns": 416,
+      "p50_us": 0.416,
+      "p95_ns": 417,
+      "p95_us": 0.417,
+      "p99_ns": 459,
+      "p99_us": 0.459
+    },
+    "secp256k1_sign": {
+      "max_ns": 262375,
+      "max_us": 262.375,
+      "mean_ns": 29687,
+      "p50_ns": 29542,
+      "p50_us": 29.542,
+      "p95_ns": 30250,
+      "p95_us": 30.25,
+      "p99_ns": 33792,
+      "p99_us": 33.792
+    },
+    "signed_tx_serialize": {
+      "max_ns": 347000,
+      "max_us": 347.0,
+      "mean_ns": 238,
+      "p50_ns": 209,
+      "p50_us": 0.209,
+      "p95_ns": 292,
+      "p95_us": 0.292,
+      "p99_ns": 333,
+      "p99_us": 0.333
+    },
+    "tx_finalize_and_sighash": {
+      "max_ns": 15833,
+      "max_us": 15.833,
+      "mean_ns": 768,
+      "p50_ns": 750,
+      "p50_us": 0.75,
+      "p95_ns": 833,
+      "p95_us": 0.833,
+      "p99_ns": 875,
+      "p99_us": 0.875
+    },
+    "unix_datagram_handoff": {
+      "max_ns": 37917,
+      "max_us": 37.917,
+      "mean_ns": 597,
+      "p50_ns": 459,
+      "p50_us": 0.459,
+      "p95_ns": 1084,
+      "p95_us": 1.084,
+      "p99_ns": 1292,
+      "p99_us": 1.292
+    }
+  },
+  "status": "G0.5_LOCAL_PREQUALIFICATION",
+  "target": {
+    "final_real_T_send_target_ns": 1000000,
+    "local_prequalification_ns": 1000000
+  },
+  "warmup_samples": 5000
+}

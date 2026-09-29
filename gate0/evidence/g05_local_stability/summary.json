@@ -1,0 +1,113 @@
+{
+  "status": "G0.5_LOCAL_STABILITY",
+  "runs": 10,
+  "samples_per_run": 50000,
+  "total_measured_samples": 500000,
+  "runs_detail": [
+    {
+      "run": "run_01.json",
+      "ready_p99_us": 36.041,
+      "ready_max_us": 544.792,
+      "handoff_p50_us": 31.958,
+      "handoff_p95_us": 33.416,
+      "handoff_p99_us": 37.125,
+      "handoff_max_us": 550.875
+    },
+    {
+      "run": "run_02.json",
+      "ready_p99_us": 35.958,
+      "ready_max_us": 62.792,
+      "handoff_p50_us": 31.917,
+      "handoff_p95_us": 33.125,
+      "handoff_p99_us": 36.833,
+      "handoff_max_us": 64.375
+    },
+    {
+      "run": "run_03.json",
+      "ready_p99_us": 35.709,
+      "ready_max_us": 56.958,
+      "handoff_p50_us": 31.917,
+      "handoff_p95_us": 32.958,
+      "handoff_p99_us": 36.541,
+      "handoff_max_us": 58.583
+    },
+    {
+      "run": "run_04.json",
+      "ready_p99_us": 35.875,
+      "ready_max_us": 73.708,
+      "handoff_p50_us": 31.917,
+      "handoff_p95_us": 32.834,
+      "handoff_p99_us": 36.583,
+      "handoff_max_us": 80.166
+    },
+    {
+      "run": "run_05.json",
+      "ready_p99_us": 34.459,
+      "ready_max_us": 59.0,
+      "handoff_p50_us": 31.917,
+      "handoff_p95_us": 32.667,
+      "handoff_p99_us": 35.333,
+      "handoff_max_us": 62.375
+    },
+    {
+      "run": "run_06.json",
+      "ready_p99_us": 35.125,
+      "ready_max_us": 62.958,
+      "handoff_p50_us": 31.958,
+      "handoff_p95_us": 32.792,
+      "handoff_p99_us": 35.917,
+      "handoff_max_us": 64.75
+    },
+    {
+      "run": "run_07.json",
+      "ready_p99_us": 34.584,
+      "ready_max_us": 112.167,
+      "handoff_p50_us": 31.958,
+      "handoff_p95_us": 32.709,
+      "handoff_p99_us": 35.5,
+      "handoff_max_us": 118.792
+    },
+    {
+      "run": "run_08.json",
+      "ready_p99_us": 35.875,
+      "ready_max_us": 70.625,
+      "handoff_p50_us": 31.917,
+      "handoff_p95_us": 32.917,
+      "handoff_p99_us": 36.625,
+      "handoff_max_us": 72.458
+    },
+    {
+      "run": "run_09.json",
+      "ready_p99_us": 35.916,
+      "ready_max_us": 269.375,
+      "handoff_p50_us": 31.917,
+      "handoff_p95_us": 33.0,
+      "handoff_p99_us": 36.625,
+      "handoff_max_us": 287.084
+    },
+    {
+      "run": "run_10.json",
+      "ready_p99_us": 34.75,
+      "ready_max_us": 59.417,
+      "handoff_p50_us": 31.958,
+      "handoff_p95_us": 32.833,
+      "handoff_p99_us": 35.708,
+      "handoff_max_us": 60.875
+    }
+  ],
+  "T_pre_to_local_handoff_across_runs": {
+    "best_p99_us": 35.333,
+    "worst_p99_us": 37.125,
+    "best_max_us": 58.583,
+    "worst_max_us": 550.875,
+    "all_run_p99_below_1ms": true,
+    "all_observed_max_below_1ms": true
+  },
+  "non_claims": [
+    "Local UnixDatagram boundary only",
+    "Not real bsc-geth P2P T_send",
+    "Not builder T_send",
+    "Not T_buy",
+    "Does not close final G0.5"
+  ]
+}
