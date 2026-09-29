@@ -95,7 +95,7 @@ Wichtig:
 | G0.1 | Verträge, Versionen, Selektoren und Acceptance-Basis einfrieren | weitgehend vorhanden / Evidence eingefroren |
 | **G0.2** | Precomputability, exakte Flap-Economics und historischer First-BUY-Witness | **PASS für den eingefrorenen historischen Modus** |
 | **G0.3** | Minimaler korrekter Direct-Portal Launch→BUY-Harness | **PASS für den eingefrorenen Offline-Scope — unmittelbarer Launch→Direct-BUY gültig; siehe Abschluss 2026-09-29** |
-| G0.4 | Pending/actionable Coverage und frühestes brauchbares Signal | parallel möglich, kein Gate-PASS |
+| G0.4 | Pending/actionable Coverage und frühestes brauchbares Signal | **PARTIAL — QuickNode-Quellenprobe; noch kein Coverage-PASS** |
 | G0.5 | vollständige lokale BUY-Hotpath-Latenz bis echtem `T_send` | blockiert |
 | G0.6 | Ingress × Inclusion Dry-Qualifikation + Concurrency | blockiert |
 | G0.7 | kontrollierter Minimalwert-Mainnet-BUY | blockiert |
@@ -1107,3 +1107,54 @@ Die 100-bps-Regel ist **nur eine Testpolicy**, keine Freigabe einer Produktions-
 Eingefrorene Belege: `gate0/evidence/g03_result.json`, `g03_rust_inputs.json`, `g03_rust_output.json`, `g03_sequential_execution.json`, `g03_parent_closure.json`, `g03_activation_raw/`, `g03_verifier.stdout.txt`, `g03_verifier.stderr.txt`, `g03_sha256.json`. Fünf explizite Grenz-/Negativfälle plus Rust-Arithmetiktests; der historische Signatur-/Hash-Test wird vom Gesamtverifier mit ausgeführt. Alle 3 G0.2-Referenzausführungen behalten mit strikter Code-Verfügbarkeitsprüfung ihre Übereinstimmung.
 
 **Folgegates:** G0.4/G0.5 dürfen jetzt weiter vorbereitet werden. Die lokale Bestandsprüfung findet weder geth/BSC-Binary noch einen BSC/geth-Docker-Container; die laufenden Container gehören zu OpenProject. Im Repository-`.env` wurden keine BSC/geth/48Club/BlockRazor-Konfigurationsvariablen gefunden (keine Werte ausgegeben). Ein externer Node-/Feed-Zugang wurde angefragt. Die vorhandene QuickNode-Archive-Verbindung ist kein Nachweis eines eigenen P2P-Knotens oder einer qualifizierten Inclusion-Verbindung. `T_signal → T_send` bleibt N/A. Kein value-bearing Send und kein Gate-0-Gesamt-PASS.
+
+
+### G0.4 Quellenprobe und Fortsetzungspunkt — 2026-09-29
+
+Stand Git vor diesem Update: `ffd77c0`; G0.3-Abschluss: `7a6e532`. Der Nutzer bestätigt: kein eigener bsc-geth und kein eingerichteter 48Club-/BlockRazor-Zugang. Vorhanden ist nur der externe QuickNode-Archive-Zugang. Credentials werden nicht dokumentiert.
+
+**Durchgeführte Quellenprobe:** ein WebSocket-Lauf auf dem Mac, Node v24.1.0, parallele read-only Subscriptions `newPendingTransactions(true)`, Portal-Logs und `newHeads`. Vorab begrenzt auf 60 Sekunden, 4.000 Nachrichten oder 8 MiB. Ende nach **18,752543375 Sekunden durch die 4.000-Nachrichten-Grenze**. Keine nachträgliche Auswahl günstiger Ergebnisse. Der JS-Observer prüft Quellenfähigkeit; er ist nicht der Rust-BUY-Hotpath.
+
+| Messwert | Ergebnis |
+|---|---:|
+| vollständige Pending-TX-Objekte | 3.855 |
+| Hash-only Pending-Nachrichten | 0 |
+| fehlende geprüfte Basisfelder | 0 |
+| Pending-TXs direkt an Portal | 3 |
+| davon `newTokenV6` | 1 |
+| Portal-Lognachrichten | 102 |
+| Head-Nachrichten | 40 |
+| RPC-/Verbindungsfehler | 0 |
+| qualifizierte Launches unseres eingefrorenen Scopes | **0** |
+
+Der V6-Launch `0xb8d5c29c6c647d393b1e883eca2e093ffac380c4345ca7dd9c281d124e58c898` hat TokenVersion 6, Tax 100/100 bps, aber Quote-Token `0x21caef8a43163eea865baee23b9c2e327696a3bf`, QuoteAmt 0 und Extension-ID 0. Er gehört **nicht** zum bewiesenen DOGE-/Extension-Modus. Selector-Gleichheit wird nicht als unterstützter Scope ausgegeben.
+
+Zehn empfangene Portal-Logs gehören zu dieser TX. Zwischen lokalem Pending-Empfang und erster zugehöriger Logzustellung liegen **129.102.833 ns**. Das ist ausschließlich eine Zustellungsdifferenz zweier Subscriptions auf derselben lokalen Uhr, **keine BUY-Latenz, kein T0 und kein autoritativer Pre-Lead**. Aus normalen Block-/Logdaten wird kein Ausführungszeitpunkt im Millisekundenbereich erfunden.
+
+Evidence: `gate0/evidence/g04_quicknode_probe/capture.json`, `sha256.json`, `analysis.json`. Offline-Prüfung: `node gate0/tools/verify_g04_probe.cjs` → Exit 0. Gate-Status bleibt **G0.4_PARTIAL_SOURCE_CAPABILITY_ONLY**; kanonischer Launch-Denominator/Coverage-Rate bleiben null. Ein positiver Verifier-Exit bedeutet hier lediglich konsistente Quellen-Evidence.
+
+#### Konkrete Infrastruktur-Anforderungen und Setup-Reihenfolge
+
+Lokal geprüft: Mac arm64, **16 CPU-Kerne, 128 GiB RAM, nur 116 GiB freier Speicher**. Kein geth-Binary und kein geth-Docker-Container. Deshalb keinen Mainnet-Snapshot auf diesem Laufwerk starten.
+
+1. **Node-Host bereitstellen:** Linux-Host mit mindestens 16 Kernen / 64 GB RAM gemäß offizieller Full-Node-Baseline; für diesen Versuchsaufbau ist **4 TB dediziertes NVMe** mit Reserve für einen pruned Full-Node ein sinnvoller Planungsvorschlag, keine gemessene Performance-Garantie. Rust und geth auf demselben Host, damit IPC/P2P-Handoff messbar ist. Keine kostenpflichtige Ressource wurde bestellt.
+2. **Version und Snapshot exakt einfrieren:** produktionsgeeignetes BSC-Release samt Commit/Checksumme und passendem Mainnet-config/genesis wählen. Nicht blind `releases/latest` installieren: der am 2026-09-29 geprüfte Link zeigte `v1.8.0-alpha`, ausdrücklich eine Preview. Das offizielle Snapshot-Verzeichnis listete Mainnet 20260805 mit etwa **1,7 TB pruned**, etwa **6,6 TB full**, jeweils BSC >=1.7.2. Auswahl und tatsächliche aktuelle Größe vor Download erneut prüfen.
+3. **Snapshot laden/verifizieren:** passendes offizielles `fetch-snapshot.sh` prüfen und pinnen; pruned Modus mit Prüfsummen verwenden, in ein neues dediziertes Datadir extrahieren. Keine bestehende Chain-Datenbank überschreiben. Das dokumentierte Beispiel lautet `bash fetch-snapshot.sh -d -e -c -p --auto-delete -D /data/snapshot -E /data/bsc mainnet-geth-pbss-20260805`; es ist hier **nicht ausgeführt**. Der Auto-delete-Modus entfernt entpackte Download-Archive. Kein Archive-Node nötig: historische Evidence bleibt bei QuickNode.
+4. **Node starten und qualifizieren:** versionseigenes Mainnet-config verwenden, IPC lokal halten, HTTP/WS nur Loopback; kein öffentliches Admin-/Debug-RPC. Synchronisation, Chain-ID 56, Head-Fortschritt und Peers prüfen. Erst nach Sync vollständige Pending-Bodies plus kanonische Launch-Erfassung prüfen. Der genaue Startbefehl wird gegen `geth --help` der ausgewählten Binary validiert; es gibt noch keinen installierten Host oder scheinbar getesteten Startbefehl.
+5. **G0.4 messen:** eigener geth, QuickNode und zugängliche zusätzliche Feeds auf derselben lokalen Uhr vergleichen. Vollständige Launch-Daten, unsupported Modi, Source-Gaps, Reconnects und kanonisch nacherfasste/verpasste Launches in den Nenner aufnehmen. Die aktuelle Mini-Probe ersetzt diese Messung nicht.
+6. **48Club separat qualifizieren:** Auction Feed benötigt laut Dokumentation 48 SP, State-Variante 480 SP und Timestamp-Signatur des berechtigten Accounts. Logs/State-Diffs werden gefiltert; die Topic-Liste enthält Four.meme Create, aber keinen ausdrücklich gelisteten Flap-Create-Topic. Flap-Verwendbarkeit deshalb offen prüfen, nicht voraussetzen. `backrunTarget`-Semantik und Feldvollständigkeit separat testen. Kein Zugang gekauft oder eingerichtet.
+7. **BlockRazor separat qualifizieren:** Account/Auth und Berechtigung für den konkreten BSC-Stream erforderlich. Public-Mempool-Stream, Private-Orderflow und Builder-Submission sind unterschiedliche Produkte/Pfade. Region, vollständige Launch-Felder und jeweilige Bundle-Semantik prüfen; keine Gleichsetzung und kein angenommener Geschwindigkeitsvorteil. Kein Zugang gekauft oder eingerichtet.
+8. **G0.5/G0.6 erst mit tatsächlich verfügbarem Transport:** Rust Decode/Quote/Patch/Nonce/Sign/Serialize plus echte Transportgrenze messen; Queue separat. Beim geth-Pfad reicht Rust→IPC nicht als P2P-T_send-Nachweis. Sender/Nonce/Cache bleiben vorgehalten. Der bestehende G0.3-Fixture-Harness ist noch kein vollständiger Live-Hotpath. Live-Wallet, Testbetrag und Produktions-Slippage sind nicht freigegeben; G0.7 stoppt vor jedem value-bearing Send.
+
+Offizielle Quellen, geprüft 2026-09-29:
+
+- [BNB Node-Baseline](https://docs.bnbchain.org/bnb-smart-chain/developers/node_operators/node_best_practices/)
+- [Snapshot-Größen und Verwendung](https://github.com/bnb-chain/bsc-snapshots/blob/main/README.md)
+- [BSC Preview v1.8.0-alpha](https://github.com/bnb-chain/bsc/releases/tag/v1.8.0-alpha)
+- [48Club Auction Feed](https://docs.48.club/puissant-builder/auction-transaction-feed)
+- [48Club Send Bundle](https://docs.48.club/puissant-builder/send-bundle)
+- [BlockRazor Public Mempool](https://docs.blockrazor.io/streams/public-mempool)
+- [BlockRazor Private Mempool](https://docs.blockrazor.io/streams/private-mempool)
+- [QuickNode eth_subscribe](https://www.quicknode.com/docs/bnb-smart-chain/eth_subscribe)
+
+**Fortsetzung:** G0.3 nicht neu anfangen. Zuerst Node-Host/Storage und Kandidatenzugänge konkret bereitstellen; dann G0.4 mit kanonischem Denominator und Rust-G0.5 bis zur qualifizierten Transportgrenze durchführen. Keine Gewinnerannahme. Aktuell bleiben `T_signal→T_send`, `T_buy−T0` und Gate-0-Gesamt-PASS unbelegt.

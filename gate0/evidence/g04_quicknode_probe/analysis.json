@@ -1,0 +1,41 @@
+{
+  "status": "G0.4_PARTIAL_SOURCE_CAPABILITY_ONLY",
+  "packet_count": 4000,
+  "duration_ns": "18752543375",
+  "stop_reason": "4000-message bound",
+  "stats": {
+    "pending_full": 3855,
+    "pending_hash_only": 0,
+    "pending_missing_fields": 0,
+    "portal_pending": 3,
+    "selected_v6_pending": 1,
+    "canonical_portal_logs": 102,
+    "heads": 40
+  },
+  "launches": [
+    {
+      "tx_hash": "0xb8d5c29c6c647d393b1e883eca2e093ffac380c4345ca7dd9c281d124e58c898",
+      "token_version": "6",
+      "quote_token": "0x21caef8a43163eea865baee23b9c2e327696a3bf",
+      "quote_amount": "0",
+      "extension_id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "buy_tax": "100",
+      "sell_tax": "100",
+      "frozen_scope_match": false,
+      "matching_portal_logs": 10,
+      "pending_to_first_log_delivery_ns": "129102833",
+      "timing_scope": "Same observer monotonic clock; subscription delivery gap only. Not T0, pre-lead, T_send, or T_buy."
+    }
+  ],
+  "qualified_frozen_scope_launches": 0,
+  "canonical_launch_denominator": null,
+  "coverage_rate": null,
+  "T_send": null,
+  "T_buy": null,
+  "limits": [
+    "One bounded capture; no independent canonical launch census",
+    "No own-geth/48Club/BlockRazor comparison",
+    "V6 selector alone is insufficient scope qualification",
+    "No full state/actionable or purchase-latency evidence"
+  ]
+}
