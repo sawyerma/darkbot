@@ -1,0 +1,50 @@
+{
+  "chain_id_verified": 56,
+  "endpoint_host": "bsc-dataseed.bnbchain.org",
+  "first_rejection": "{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32000,\"message\":\"unmarshal transaction failed\"}}",
+  "measured_samples": 100,
+  "non_claims": [
+    "Invalid payload only; no valid transaction broadcast",
+    "No value-bearing BUY sent",
+    "Remote RPC socket handoff is not local bsc-geth P2P propagation",
+    "Response RTT is not T_send and is not T_buy",
+    "This alone does not close final G0.5"
+  ],
+  "stages": {
+    "TLS_TCP_write_flush_handoff": {
+      "max_ms": 0.525958,
+      "max_ns": 525958,
+      "max_us": 525.958,
+      "mean_ns": 191052,
+      "p50_ms": 0.17675,
+      "p50_ns": 176750,
+      "p50_us": 176.75,
+      "p95_ms": 0.363291,
+      "p95_ns": 363291,
+      "p95_us": 363.291,
+      "p99_ms": 0.472084,
+      "p99_ns": 472084,
+      "p99_us": 472.084
+    },
+    "request_to_JSON_RPC_response": {
+      "max_ms": 183.345167,
+      "max_ns": 183345167,
+      "max_us": 183345.167,
+      "mean_ns": 113336577,
+      "p50_ms": 110.780083,
+      "p50_ns": 110780083,
+      "p50_us": 110780.083,
+      "p95_ms": 131.117375,
+      "p95_ns": 131117375,
+      "p95_us": 131117.375,
+      "p99_ms": 157.383792,
+      "p99_ns": 157383792,
+      "p99_us": 157383.792
+    }
+  },
+  "status": "G0.5_REAL_REMOTE_TRANSPORT_PREQUALIFICATION",
+  "transport": "preconnected TLS/TCP HTTP/1.1",
+  "warmup_samples": 10,
+  "wire_payload": "deliberately invalid/non-broadcastable transaction-shaped payload",
+  "wire_raw_tx_bytes": 343
+}
