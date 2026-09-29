@@ -1,0 +1,64 @@
+{
+  "architecture": "aarch64",
+  "json_rpc_frame_bytes": 761,
+  "measured_samples": 100000,
+  "non_claims": [
+    "No real geth process is connected",
+    "UnixStream write-return is not bsc-geth P2P propagation",
+    "Not final T_send",
+    "Not T_buy",
+    "No value-bearing transaction was broadcast"
+  ],
+  "os": "macos",
+  "raw_tx_bytes": 343,
+  "receiver_total_bytes": 83710000,
+  "scope": "Exact historical G0.3 signed Direct-BUY envelope; local preconnected UnixStream only",
+  "stages": {
+    "json_rpc_framing": {
+      "max_ns": 208,
+      "max_us": 0.208,
+      "mean_ns": 30,
+      "p50_ns": 41,
+      "p50_us": 0.041,
+      "p95_ns": 42,
+      "p95_us": 0.042,
+      "p99_ns": 42,
+      "p99_us": 0.042
+    },
+    "raw_tx_hex_encoding": {
+      "max_ns": 18625,
+      "max_us": 18.625,
+      "mean_ns": 1292,
+      "p50_ns": 1208,
+      "p50_us": 1.208,
+      "p95_ns": 2125,
+      "p95_us": 2.125,
+      "p99_ns": 2667,
+      "p99_us": 2.667
+    },
+    "signed_raw_tx_to_local_ipc_handoff": {
+      "max_ns": 19208,
+      "max_us": 19.208,
+      "mean_ns": 1945,
+      "p50_ns": 1875,
+      "p50_us": 1.875,
+      "p95_ns": 2917,
+      "p95_us": 2.917,
+      "p99_ns": 3584,
+      "p99_us": 3.584
+    },
+    "unix_stream_write_all": {
+      "max_ns": 15750,
+      "max_us": 15.75,
+      "mean_ns": 621,
+      "p50_ns": 583,
+      "p50_us": 0.583,
+      "p95_ns": 1042,
+      "p95_us": 1.042,
+      "p99_ns": 1333,
+      "p99_us": 1.333
+    }
+  },
+  "status": "G0.5_LOCAL_IPC_PREQUALIFICATION",
+  "warmup_samples": 10000
+}
