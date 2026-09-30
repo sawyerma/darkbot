@@ -102,7 +102,7 @@ class T36T40Engine(unittest.TestCase):
             self.assertNotEqual(r1.digest["positions"], r10.digest["positions"])
 
     def test_T39_config_rejection(self):
-        raw = load_json_strict(ROOT / "config" / "phase1.json")
+        raw = load_json_strict(ROOT / "config" / "solana_pump" / "phase1.json")
 
         def check(mutate, needle):
             r = json.loads(json.dumps(raw))
