@@ -1,0 +1,55 @@
+{
+  "status": "G0.6_CONCURRENCY_DRY_QUALIFICATION",
+  "source": "terminal output supplied by user",
+  "result": "PASS",
+  "candidate_inclusion_projection": [
+    "BlockRazor eth_sendBundle",
+    "48Club eth_sendBundle noMerge=true"
+  ],
+  "g03_fixture": {
+    "base_token": "0xabe1fE16cf6Bc48c9524713054efe6e954b17777",
+    "input": "150000000000000000",
+    "min_output": "30362879985784573673561658",
+    "portal": "0xe2cE6ab80874Fa9Fa2aAE65D277Dd6B8e65C9De0"
+  },
+  "workers": 8,
+  "intents": 1000,
+  "wall_time_ms": 13.186,
+  "invariants": {
+    "accidental_replacement_count": 0,
+    "adapter_projection_mismatch_count": 0,
+    "contiguous_nonce_lane": true,
+    "cross_wiring_count": 0,
+    "duplicate_economic_submission_count": 0,
+    "duplicate_nonce_count": 0,
+    "duplicate_token_count": 0,
+    "duplicate_tx_hash_count": 0,
+    "overwritten_buy_input_count": 0,
+    "unique_nonce_count": 1000,
+    "unique_token_count": 1000,
+    "unique_tx_hash_count": 1000
+  },
+  "local_concurrent_intent_build_sign": {
+    "p50_us": 80.5,
+    "p95_us": 102.584,
+    "p99_us": 273.792,
+    "max_us": 3137.834,
+    "over_1ms_count": 5,
+    "over_1ms_fraction": 0.005,
+    "p99_target_under_1ms": true
+  },
+  "scope": "Concurrency/nonce/cross-wiring/adapter-projection dry qualification using the frozen G0.3 Flap BUY shape; synthetic distinct launch identities; no network write",
+  "safety": {
+    "network_access": false,
+    "transaction_submission": false,
+    "value_bearing_buy": false,
+    "signing_key": "fixed non-funded test key"
+  },
+  "non_claims": [
+    "No ingress coverage PASS",
+    "No builder inclusion or ordering proof",
+    "No Mainnet BUY",
+    "No T_buy measurement",
+    "Synthetic launch identities are used only to stress concurrency isolation"
+  ]
+}
