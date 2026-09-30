@@ -1,1 +1,2 @@
-"""Pump.fun venue adapter: thin delegation to the existing PumpDecoder/MarketReducer/QuoteEngine."""
+"""Compatibility facade for the Pump.fun venue adapter."""
+from darkbot.solana_pump.venue.venue import PumpFunVenueAdapter
