@@ -17,8 +17,8 @@ from tests.helpers import BUYER, MINT_A, ROOT, T0, Harness, base_config, create_
 
 
 def _profile_cfg(profile_id):
-    raw = load_json_strict(ROOT / "config" / "phase1.json")
-    return build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": profile_id})
+    raw = load_json_strict(ROOT / "config" / "solana_pump" / "phase1.json")
+    return build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", {**raw, "market_profile_id": profile_id})
 
 
 class RuntimeAssemblyTests(unittest.TestCase):
