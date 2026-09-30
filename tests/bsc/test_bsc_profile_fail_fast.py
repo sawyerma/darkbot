@@ -16,9 +16,9 @@ import unittest
 from pathlib import Path
 
 from darkbot.solana_pump.config import load_json_strict
-from darkbot.main import Application, run_capture, run_doctor_cli, run_paper
+from darkbot.solana_pump.main import Application, run_capture, run_doctor_cli, run_paper
 from darkbot.runtime.assembly import MarketProfileNotRunnable
-from tests.helpers import ROOT, base_config
+from tests.solana_pump.helpers import ROOT, base_config
 
 
 def _writer_threads() -> list[str]:

@@ -10,7 +10,7 @@ from darkbot.chains.registry import CHAIN_IDENTITIES, ChainNotImplemented, Unkno
 from darkbot.solana.chain import SolanaChainAdapter
 from darkbot.clock import LiveClock
 from darkbot.solana_pump.fees import FeeResolver
-from tests.helpers import base_config
+from tests.solana_pump.helpers import base_config
 
 
 class ChainRegistryTests(unittest.TestCase):

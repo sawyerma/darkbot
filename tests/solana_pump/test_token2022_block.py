@@ -14,13 +14,13 @@ from darkbot.clock import ReplayClock
 from darkbot.solana_pump.domain import AttemptStatus, InvalidQuote, Side
 from darkbot.solana_pump.execution import evaluate_fill, fee_terms
 from darkbot.solana_pump.fees import FeeResolver, build_trade_fee_message
-from darkbot.main import economic_profile_samples
+from darkbot.solana_pump.main import economic_profile_samples
 from darkbot.solana_pump.market import b58decode, b58encode
 from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
 from darkbot.solana_pump.token_accounts import ASSOCIATED_TOKEN_PROGRAM, create_account_profiles, find_pda
-from tests.helpers import ROOT, T0, Harness, base_config, fee_basis, dump_frame, complete_frame_logs, logs_notification
+from tests.solana_pump.helpers import ROOT, T0, Harness, base_config, fee_basis, dump_frame, complete_frame_logs, logs_notification
 
-FIXTURES = ROOT / 'tests/fixtures'
+FIXTURES = ROOT / 'tests/solana_pump/fixtures'
 
 
 def recorded_create(index=1):
@@ -262,7 +262,7 @@ class Token2022Block(unittest.TestCase):
 
     def test_status_short_circuits_and_shutdown_keeps_observed_evidence(self):
         from types import SimpleNamespace
-        from darkbot.main import Application
+        from darkbot.solana_pump.main import Application
         from darkbot.solana_pump.domain import Readiness
         h,_=self.harness(economic=False)
         st=self.feed_create(h)

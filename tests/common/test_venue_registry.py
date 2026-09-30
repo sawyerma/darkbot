@@ -9,7 +9,7 @@ from darkbot.solana_pump.market import MarketReducer, PumpDecoder
 from darkbot.venues.base import VenueIdentity
 from darkbot.solana_pump.venue.venue import PumpFunVenueAdapter
 from darkbot.venues.registry import UnknownVenue, VenueNotImplemented, load_venue, venue_identity
-from tests.helpers import CREATOR, MINT_A, Harness, create_payload, T0
+from tests.solana_pump.helpers import CREATOR, MINT_A, Harness, create_payload, T0
 
 
 class VenueRegistryTests(unittest.TestCase):

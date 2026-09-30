@@ -22,7 +22,7 @@ from darkbot.solana_pump.domain import AttemptStatus, CoverageState, ExitReason,
 from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
 from darkbot.solana_pump.storage import open_connection
 from darkbot.solana_pump.strategy import FEATURE_NAMES, FEATURE_SET_V1, FEATURE_SET_V2, FeatureCalculator, FeatureEvent, FeatureInputs
-from tests.helpers import BUYER, BUYER2, CREATOR, MINT_A, MINT_B, ROOT, R_TOK0, SUPPLY, T0, V_SOL0, V_TOK0, Harness, attempts, base_config, complete_frame_logs, create_payload, creator_sell_frame, dump_frame, ledger_kinds, logs_notification, migrate_frame_logs, open_position, pump_frame, pumpportal_create, pumpportal_migrate
+from tests.solana_pump.helpers import BUYER, BUYER2, CREATOR, MINT_A, MINT_B, ROOT, R_TOK0, SUPPLY, T0, V_SOL0, V_TOK0, Harness, attempts, base_config, complete_frame_logs, create_payload, creator_sell_frame, dump_frame, ledger_kinds, logs_notification, migrate_frame_logs, open_position, pump_frame, pumpportal_create, pumpportal_migrate
 
 
 def target_pump_sol(h: Harness, mint: str, pos) -> int:
@@ -151,7 +151,7 @@ class T41T46Semantics(unittest.TestCase):
         raw["protocol"]["create_event_tail_layouts"].append({"layout_id": "V3_UNVERIFIED", "tail_fields": [["quote_mint", "pubkey"], ["flag", "bool"]], "quote_mint_field": "quote_mint", "implied_quote_asset": None, "verification_status": "UNVERIFIED", "token_program": "x"})
         cfg2 = build_runtime_config(cfg.path, raw)
         from darkbot.solana_pump.market import b58encode, encode_fields
-        from tests.helpers import create_frame_logs
+        from tests.solana_pump.helpers import create_frame_logs
         cases = [("a", b"", QuoteScopeStatus.SOL_WSOL, True), ("b", encode_fields([("quote_mint", cfg.protocol["wsol_mint"])], [["quote_mint", "pubkey"]]), QuoteScopeStatus.SOL_WSOL, True),
                  ("c", encode_fields([("quote_mint", cfg.protocol["native_sol_curve_sentinel"])], [["quote_mint", "pubkey"]]), QuoteScopeStatus.SOL_WSOL, True),
                  ("d", encode_fields([("quote_mint", b58encode(b"USDC".ljust(32, b"\0")))], [["quote_mint", "pubkey"]]), QuoteScopeStatus.UNSUPPORTED_QUOTE, False),
@@ -221,7 +221,7 @@ class T41T46Semantics(unittest.TestCase):
         st = h.owner.reducer.states[MINT_A]
         sol = target_pump_sol(h, MINT_A, pos) + 5_000_000_000
         tok = sol * st.virtual_token_reserves // (st.virtual_sol_reserves + sol)
-        from tests.helpers import trade_log_line, PROGRAM
+        from tests.solana_pump.helpers import trade_log_line, PROGRAM
         v1 = (st.virtual_sol_reserves + sol, st.virtual_token_reserves - tok, st.real_token_reserves - tok)
         tok2 = 1_000_000_000_000
         sol2 = tok2 * v1[0] // (v1[1] + tok2)
@@ -255,7 +255,7 @@ class T41T46Semantics(unittest.TestCase):
 
     def test_T45_paper_replay_matrix(self):
         scenarios = {
-            "creator_before_decision": lambda h: [h.feed("helius_standard", logs_notification("s", 1, __import__("tests.helpers", fromlist=["create_frame_logs"]).create_frame_logs(MINT_A, CREATOR, creator_sell=dict(sol=10, tok=10, vsol=V_SOL0 - 10, vtok=V_TOK0 + 10, rtok=R_TOK0 + 10))), T0 + 1_000_000)],
+            "creator_before_decision": lambda h: [h.feed("helius_standard", logs_notification("s", 1, __import__("tests.solana_pump.helpers", fromlist=["create_frame_logs"]).create_frame_logs(MINT_A, CREATOR, creator_sell=dict(sol=10, tok=10, vsol=V_SOL0 - 10, vtok=V_TOK0 + 10, rtok=R_TOK0 + 10))), T0 + 1_000_000)],
             "creator_between_decision_fill": lambda h: [h.feed("helius_standard", create_payload(), T0 + 1_000_000), h.feed("helius_standard", creator_sell_frame(h, MINT_A, "cs", 101), T0 + 10_000_000)],
             "creator_after_fill": lambda h: [open_position(h, fill_at=T0 + 21_000_000), h.feed("helius_standard", creator_sell_frame(h, MINT_A, "cs", 101), T0 + 30_000_000)],
             "target_then_creator": lambda h: [open_position(h, fill_at=T0 + 21_000_000), h.feed("helius_standard", pump_frame(h, MINT_A, target_pump_sol(h, MINT_A, h.position()), "p", 101), T0 + 30_000_000), h.feed("helius_standard", creator_sell_frame(h, MINT_A, "cs", 102), T0 + 31_000_000)],
@@ -520,13 +520,13 @@ class ReviewRegressions(unittest.TestCase):
 
 class DChecksOffline(unittest.TestCase):
     def test_D01_D04_D06_offline_parts(self):
-        from darkbot.main import doctor_fixture_checks
+        from darkbot.solana_pump.main import doctor_fixture_checks
         cfg = base_config()
         fx = doctor_fixture_checks(cfg)
         self.assertTrue(fx["all_pass"])
         with tempfile.TemporaryDirectory() as d:
             import asyncio as _a
-            from darkbot.main import run_doctor
+            from darkbot.solana_pump.main import run_doctor
             res = _a.run(run_doctor(cfg.with_overrides(doctor={"max_duration_ms": 500}), Path(d) / "doctor.sqlite"))
             self.assertIn(res["readiness"], ("NOT_READY", "CAPTURE_READY", "ECONOMIC_PAPER_READY"))
             self.assertEqual(res["checks"]["D04"]["status"], "PASS")

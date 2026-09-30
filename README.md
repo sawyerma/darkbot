@@ -66,12 +66,10 @@ migrations/
 └── project_0/
 
 tests/
-├── common/
+├── common/                 cross-project registry/runtime seam tests
 ├── bsc/
-├── solana_pump/
-├── project_0/
-├── helpers.py              shared test helper while still cross-suite
-└── fixtures/               shared fixtures while still cross-suite
+├── solana_pump/            includes Pump.fun helpers + fixtures
+└── project_0/
 
 tools/
 ├── bsc/

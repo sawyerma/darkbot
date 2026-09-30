@@ -9,9 +9,9 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from darkbot.cli import build_parser
+from darkbot.solana_pump.cli import build_parser
 from darkbot.solana_pump.edge_analysis import PathPoint, _event_for_rule, _materialize_source, run_edge_analysis
-from darkbot.main import run_capture
+from darkbot.solana_pump.main import run_capture
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -22,7 +22,7 @@ class CaptureCliTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args([
                 "capture",
-                "--config", str(ROOT / "config" / "solana_pump" / "solana_pump" / "strategy_a_creator_exit_usd_slots.json"),
+                "--config", str(ROOT / "config" / "solana_pump" / "strategy_a_creator_exit_usd_slots.json"),
                 "--db", "data/solana_pump/capture.sqlite",
                 "--campaign", "capture_test",
             ])
@@ -43,9 +43,9 @@ class CaptureCliTests(unittest.TestCase):
             async def run(self):
                 return {"status": "COMPLETED"}
 
-        with patch("darkbot.main.Application", FakeApplication):
+        with patch("darkbot.solana_pump.main.Application", FakeApplication):
             result = run_capture(
-                ROOT / "config" / "solana_pump" / "solana_pump" / "strategy_a_creator_exit_usd_slots.json",
+                ROOT / "config" / "solana_pump" / "strategy_a_creator_exit_usd_slots.json",
                 Path("data/solana_pump/capture.sqlite"),
                 "capture_test",
                 max_duration_minutes=15,

@@ -13,7 +13,7 @@ from darkbot.solana_pump.paper import PaperExecutionAdapter, StateOwner
 from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
 from darkbot.runtime.assembly import MarketProfileNotRunnable, RuntimeCallbacks, RuntimeComponents, assemble_runtime, build_feeds, effective_market_profile_id, resolve_market_profile
 from darkbot.solana_pump.storage import Recorder
-from tests.helpers import BUYER, MINT_A, ROOT, T0, Harness, base_config, create_payload, creator_sell_frame, fee_basis, pump_frame
+from tests.solana_pump.helpers import BUYER, MINT_A, ROOT, T0, Harness, base_config, create_payload, creator_sell_frame, fee_basis, pump_frame
 
 
 def _profile_cfg(profile_id):

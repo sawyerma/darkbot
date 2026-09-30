@@ -12,7 +12,7 @@ import unittest
 from darkbot.chains.registry import chain_identity, load_chain
 from darkbot.solana_pump.domain import LAMPORTS_PER_SOL, NormalizedEvent, NormalizedEnvelope, RawEnvelope
 from darkbot.venues.registry import load_venue
-from tests.helpers import BUYER, MINT_A, T0, Harness, create_payload, pump_frame
+from tests.solana_pump.helpers import BUYER, MINT_A, T0, Harness, create_payload, pump_frame
 
 
 class MultichainDomainTests(unittest.TestCase):

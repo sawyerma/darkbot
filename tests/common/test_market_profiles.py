@@ -8,9 +8,9 @@ from pathlib import Path
 
 from darkbot.solana_pump.config import ConfigError, build_runtime_config, load_json_strict, load_runtime_config
 from darkbot.runtime.profiles import DEFAULT_MARKET_PROFILE_ID, MARKET_PROFILES, UnknownMarketProfile, load_market_profile, market_profile_catalog
-from tests.helpers import ROOT, base_config
+from tests.solana_pump.helpers import ROOT, base_config
 
-GOLDEN = ROOT / "tests" / "fixtures" / "config_hashes_baseline_05971e4.json"  # hashes frozen BEFORE the Phase-A change at baseline 05971e4
+GOLDEN = ROOT / "tests" / "solana_pump" / "fixtures" / "config_hashes_baseline_05971e4.json"  # hashes frozen BEFORE the Phase-A change at baseline 05971e4
 
 
 class MarketProfileRegistryTests(unittest.TestCase):

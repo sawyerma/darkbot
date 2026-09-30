@@ -7,7 +7,7 @@ import unittest
 from dataclasses import replace
 
 from darkbot.solana_pump.domain import ExitReason, PositionState
-from tests.helpers import Harness, MINT_A, T0, attempts, base_config, creator_sell_frame, open_position
+from tests.solana_pump.helpers import Harness, MINT_A, T0, attempts, base_config, creator_sell_frame, open_position
 
 
 def partial_copy(payload: str) -> str:
@@ -152,7 +152,7 @@ class ExitLiveness(unittest.TestCase):
         from darkbot.solana_pump.domain import Completeness, CostEvidence, FeeSnapshot, RawEnvelope
         from darkbot.solana_pump.market import Normalizer, PumpDecoder
         from darkbot.solana_pump.replay import ReplayInput, run_replay
-        from tests.helpers import ROOT
+        from tests.solana_pump.helpers import ROOT
         fixture = json.loads((ROOT / 'tests/fixtures/edge_probe_01_p2.json').read_text())
         cfg = build_runtime_config(ROOT / 'config/phase1.json', json.loads(fixture['config_snapshot']['canonical_json']))
         normalizer = Normalizer(PumpDecoder(cfg.protocol))

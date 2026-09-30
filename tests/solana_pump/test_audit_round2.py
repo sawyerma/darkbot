@@ -18,7 +18,7 @@ from darkbot.solana_pump.market import b58encode, encode_fields, event_discrimin
 from darkbot.solana_pump.replay import load_replay_input, run_replay
 from darkbot.solana_pump.storage import open_connection
 from darkbot.solana_pump.domain import ExitReason, PositionState
-from tests.helpers import BUYER, CREATOR, MINT_A, MINT_B, PROGRAM, ROOT, T0, Harness, attempts, base_config, create_frame_logs, create_payload, creator_sell_frame, dump_frame, logs_notification, open_position, pump_frame, trade_frame_logs, trade_log_line
+from tests.solana_pump.helpers import BUYER, CREATOR, MINT_A, MINT_B, PROGRAM, ROOT, T0, Harness, attempts, base_config, create_frame_logs, create_payload, creator_sell_frame, dump_frame, logs_notification, open_position, pump_frame, trade_frame_logs, trade_log_line
 
 
 def _v2cfg(cfg, token_program="TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"):
@@ -245,7 +245,7 @@ class S11S16S17(unittest.TestCase):
             open_position(h)
             h.finish(T0 + 5_000_000)
             summary = {"run_id": "run", "status": "INTERRUPTED", "readiness": "CAPTURE_READY", "feeds_started": 1}
-            with mock.patch("darkbot.main.run_paper", return_value=summary), mock.patch("darkbot.cli.Path", Path):
+            with mock.patch("darkbot.solana_pump.main.run_paper", return_value=summary), mock.patch("darkbot.solana_pump.cli.Path", Path):
                 import os
                 cwd = os.getcwd()
                 os.chdir(d)
@@ -258,7 +258,7 @@ class S11S16S17(unittest.TestCase):
             self.assertTrue((out / "report.json").exists() and (out / "summary.md").exists() and (out / "positions.csv").exists() and (out / "latency_by_feed.csv").exists())
             conn = sqlite3.connect(str(Path(d) / "p.sqlite"))
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0], 1)
-            with mock.patch("darkbot.main.run_paper", return_value={"run_id": "run", "status": "COMPLETED", "readiness": "NOT_READY", "feeds_started": 0}):
+            with mock.patch("darkbot.solana_pump.main.run_paper", return_value={"run_id": "run", "status": "COMPLETED", "readiness": "NOT_READY", "feeds_started": 0}):
                 code = cli.main(["paper", "--config", str(ROOT / "config" / "phase1.json"), "--db", str(Path(d) / "p.sqlite"), "--campaign", "camp", "--max-duration-minutes", "1"])
             self.assertEqual(code, cli.EXIT_NOT_READY)
 

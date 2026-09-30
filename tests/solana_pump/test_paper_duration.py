@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from darkbot.cli import build_parser
+from darkbot.solana_pump.cli import build_parser
 from darkbot.solana_pump.config import ConfigError, load_runtime_config
-from darkbot.main import run_paper
+from darkbot.solana_pump.main import run_paper
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -25,7 +25,7 @@ class PaperDurationTests(unittest.TestCase):
                     async def run(self):
                         return {"status": "COMPLETED"}
                 args = build_parser().parse_args(["paper", "--config", str(path), "--db", "unused.sqlite", "--campaign", "test", "--max-open-positions", "10", "--max-duration-minutes", "1"])
-                with patch("darkbot.main.Application", FakeApplication):
+                with patch("darkbot.solana_pump.main.Application", FakeApplication):
                     run_paper(args.config, args.db, args.campaign, args.max_open_positions, args.max_duration_minutes)
                 after = captured["cfg"]
                 self.assertEqual(after.portfolio["max_open_positions"], 10)
@@ -60,7 +60,7 @@ class PaperDurationTests(unittest.TestCase):
             async def run(self):
                 return {"status": "COMPLETED"}
 
-        with patch("darkbot.main.Application", FakeApplication):
+        with patch("darkbot.solana_pump.main.Application", FakeApplication):
             result = run_paper(ROOT / "config" / "solana_pump" / "phase1.json", Path("data/solana_pump/test.sqlite"), "test",
                                max_duration_minutes=7)
         self.assertEqual(result["status"], "COMPLETED")

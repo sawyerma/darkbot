@@ -5,9 +5,9 @@ import unittest
 from types import SimpleNamespace
 
 from darkbot.solana_pump.domain import CostBasis, CostEvidence
-from darkbot.main import Application, run_capture, run_paper
+from darkbot.solana_pump.main import Application, run_capture, run_paper
 from darkbot.solana_pump.config import ConfigError
-from tests.helpers import ROOT
+from tests.solana_pump.helpers import ROOT
 
 S = 1_000_000_000
 
@@ -85,7 +85,7 @@ class FeeEvidenceGateTests(unittest.TestCase):
         self.assertIn("not_economic_for_s=31", violation)
 
     def test_run_helpers_forward_separate_gate_values_and_reject_nonpositive(self):
-        import darkbot.main as main_module
+        import darkbot.solana_pump.main as main_module
         captured = {}
 
         class FakeApplication:

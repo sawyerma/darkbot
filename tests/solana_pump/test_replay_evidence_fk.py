@@ -7,7 +7,7 @@ from darkbot.solana_pump.config import canonical_json, config_hash
 from darkbot.solana_pump.domain import NS_PER_MS
 from darkbot.solana_pump.replay import load_replay_input, run_replay
 from darkbot.solana_pump.storage import apply_migrations
-from tests.helpers import Harness, base_config, create_payload, MINT_A, MINT_B, T0
+from tests.solana_pump.helpers import Harness, base_config, create_payload, MINT_A, MINT_B, T0
 
 
 class ReplayEvidenceTests(unittest.TestCase):

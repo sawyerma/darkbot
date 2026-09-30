@@ -8,7 +8,7 @@ from unittest.mock import patch
 from darkbot.solana_pump.domain import CostBasis, CostEvidence, NS_PER_MS
 from darkbot.solana_pump.fees import FEE_KINDS, FeeCache, FeeResolver, select_cost_basis
 from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
-from tests.helpers import Harness, base_config, create_payload, fee_basis, T0
+from tests.solana_pump.helpers import Harness, base_config, create_payload, fee_basis, T0
 
 
 def failure(snap, at, *, transient=True, status="RPC_ERROR"):

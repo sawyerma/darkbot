@@ -14,8 +14,8 @@ from darkbot.solana_pump.strategies.strategy_c_legacy_backend import (
     DATA_INCOMPLETE, PASS, REJECT_FILTER, LegacyTracker, evaluate_filters, parse_filters,
 )
 from darkbot.solana_pump.strategy import EXIT_PRIORITY, FEATURE_NAMES, pick_exit_trigger, stop_reached
-from tests.helpers import *
-from tests.helpers import _pubkey
+from tests.solana_pump.helpers import *
+from tests.solana_pump.helpers import _pubkey
 
 START = T0 + NS_PER_MS
 PROFILES = ("fast_creator_hold_2x", "pre_pump_01", "launch_sniper_0ms_15x", "paper_explore_01", "example", "smoke_all")

@@ -8,7 +8,7 @@ from decimal import Decimal
 from darkbot.solana_pump.backtest import Variant, apply_stress_gate, select_candidate, variant_config
 from darkbot.solana_pump.domain import ExecutionOutcome, PositionState, RawEnvelope, utc_iso
 from darkbot.solana_pump.market import event_discriminator
-from tests.helpers import (BUYER, CREATOR, MINT_A, T0, Harness, attempts, base_config,
+from tests.solana_pump.helpers import (BUYER, CREATOR, MINT_A, T0, Harness, attempts, base_config,
                            create_frame_logs, create_payload, logs_notification, open_position,
                            pump_frame, trade_frame_logs)
 

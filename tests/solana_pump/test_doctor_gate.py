@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from darkbot.main import run_doctor
-from tests.helpers import Harness, T0, base_config, create_payload
+from darkbot.solana_pump.main import run_doctor
+from tests.solana_pump.helpers import Harness, T0, base_config, create_payload
 
 
 class DoctorGate(unittest.TestCase):
@@ -28,8 +28,8 @@ class DoctorGate(unittest.TestCase):
                     # Deliberately unequal replay results for D06; all other prerequisite evidence stays equal.
                     replays = [types.SimpleNamespace(digest={'result': 1}, owner=h.owner),
                                types.SimpleNamespace(digest={'result': 2 if failed == 'D06' else 1}, owner=h.owner)]
-                    with patch('darkbot.main.Application', return_value=app), \
-                         patch('darkbot.main.doctor_fixture_checks', return_value={'all_pass': failed != 'D04'}), \
+                    with patch('darkbot.solana_pump.main.Application', return_value=app), \
+                         patch('darkbot.solana_pump.main.doctor_fixture_checks', return_value={'all_pass': failed != 'D04'}), \
                          patch('darkbot.solana_pump.replay.run_replay', side_effect=replays), \
                          patch.dict('sys.modules', {'websockets': types.SimpleNamespace(__version__='offline-gate-test')}):
                         result = asyncio.run(run_doctor(cfg, db))

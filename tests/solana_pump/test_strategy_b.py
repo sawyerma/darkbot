@@ -8,8 +8,8 @@ from darkbot.solana_pump.config import ConfigError, build_runtime_config, load_r
 from darkbot.solana_pump.domain import ExitReason, PositionState, RawEnvelope, NS_PER_MS
 from darkbot.solana_pump.fx import FxSnapshot
 from darkbot.solana_pump.replay import load_replay_input, run_replay, digest
-from tests.helpers import *
-from tests.helpers import _pubkey
+from tests.solana_pump.helpers import *
+from tests.solana_pump.helpers import _pubkey
 
 START = T0 + NS_PER_MS
 END = START + 1000 * NS_PER_MS

@@ -17,11 +17,11 @@ from unittest import mock
 
 from darkbot.solana_pump.backtest import Variant, apply_stress_gate, select_candidate, variant_status
 from darkbot.solana_pump.domain import PositionState
-from darkbot.main import count_live_creator_sells
+from darkbot.solana_pump.main import count_live_creator_sells
 from darkbot.solana_pump.market import event_discriminator
 from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
 from darkbot.solana_pump.storage import Recorder, SqliteWriter, open_connection
-from tests.helpers import BUYER, CREATOR, MINT_A, MINT_B, T0, Harness, attempts, base_config, create_frame_logs, create_payload, creator_sell_frame, logs_notification, open_position, pump_frame
+from tests.solana_pump.helpers import BUYER, CREATOR, MINT_A, MINT_B, T0, Harness, attempts, base_config, create_frame_logs, create_payload, creator_sell_frame, logs_notification, open_position, pump_frame
 
 
 class ResearchGates(unittest.TestCase):
@@ -169,7 +169,7 @@ class FeaturesAndReports(unittest.TestCase):
 
 class Architecture(unittest.TestCase):
     def test_writer_error_is_marshalled_to_the_owner_thread(self):
-        from darkbot.main import Application
+        from darkbot.solana_pump.main import Application
         app = Application(base_config(), Path(tempfile.mkdtemp()) / "x.sqlite", "c")
         calls = []
         app._loop = mock.Mock()
