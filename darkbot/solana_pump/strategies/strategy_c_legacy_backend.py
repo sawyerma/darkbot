@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
-from darkbot.domain import LAMPORTS_PER_SOL, NS_PER_MS, Completeness, QuoteScopeStatus, VenueState
-from darkbot.strategy import FEATURE_NAMES, entry_admission, stop_reached, target_reached
+from darkbot.solana_pump.domain import LAMPORTS_PER_SOL, NS_PER_MS, Completeness, QuoteScopeStatus, VenueState
+from darkbot.solana_pump.strategy import FEATURE_NAMES, entry_admission, stop_reached, target_reached
 
 BOOLEAN_FEATURE = "provider_gap_flag"
 # Old PAPER never passed research_quote_lamports into MarketDataService (main.py), so this feature was
