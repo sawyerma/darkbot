@@ -1,0 +1,59 @@
+{
+  "status": "G0.5_BLOCKRAZOR_RPC_BUNDLE_TRANSPORT_PREQUALIFICATION",
+  "source": "terminal output supplied by user from gate0/src/bin/g05_remote_e2e.rs --blockrazor-rpc-bundle",
+  "architecture": "aarch64",
+  "os": "macos",
+  "endpoint_host": "bsc.blockrazor.xyz",
+  "transport_candidate": "blockrazor_bsc_rpc_eth_sendBundle",
+  "transport": "preconnected TLS/TCP HTTP/1.1",
+  "chain_id_verified": 56,
+  "warmup_samples": 10,
+  "measured_samples": 100,
+  "scope": "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through live BlockRazor BSC RPC eth_sendBundle TLS/TCP handoff; wire transaction deliberately corrupted before send",
+  "correctness": {
+    "g03_fixture_match": true,
+    "expected_token": "0xabe1fE16cf6Bc48c9524713054efe6e954b17777",
+    "expected_output": "30669575743216741084405716",
+    "expected_min_output": "30362879985784573673561658"
+  },
+  "stages": {
+    "T_pre_to_T_ready_local": {
+      "p50_us": 192.833,
+      "p95_us": 301.291,
+      "p99_us": 475.917,
+      "max_us": 984.75,
+      "over_1ms_count": 0
+    },
+    "remote_TLS_TCP_write_flush_handoff": {
+      "p50_us": 147.458,
+      "p95_us": 383.167,
+      "p99_us": 486.291,
+      "max_us": 625.5,
+      "over_1ms_count": 0
+    },
+    "T_pre_to_remote_TLS_TCP_handoff": {
+      "p50_us": 367.791,
+      "p95_us": 646.584,
+      "p99_us": 879.834,
+      "max_us": 1620.25,
+      "over_1ms_count": 1,
+      "over_1ms_fraction": 0.01
+    },
+    "T_pre_to_JSON_RPC_response": {
+      "p50_us": 96355.459,
+      "p95_us": 100936.042,
+      "p99_us": 102177.75,
+      "max_us": 102598.417
+    }
+  },
+  "json_rpc_error_histogram": {
+    "-32000: transaction type not supported": 100
+  },
+  "wire_safety": "valid local signed BUY is corrupted to invalid RLP before network write",
+  "interpretation": "Initial BlockRazor run is promising but not a final G0.5 PASS because 1/100 measured T_pre-to-T_send samples exceeded 1 ms. Stability qualification is required.",
+  "non_claims": [
+    "No valid transaction was broadcast",
+    "No value-bearing BUY was sent",
+    "No proof of builder inclusion, ordering, acquisition or T_buy"
+  ]
+}
