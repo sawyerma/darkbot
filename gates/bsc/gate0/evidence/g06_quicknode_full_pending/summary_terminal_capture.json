@@ -1,0 +1,50 @@
+{
+  "status": "G0.6_INGRESS_DRY_QUALIFICATION_PASS",
+  "source": "QuickNode BSC eth_subscribe newPendingTransactions flag=true",
+  "duration_ns": "10396589250",
+  "planned_max_ms": 300000,
+  "stop_reason": "exact_flap_actionable_sample_observed",
+  "subscription_established": true,
+  "stats": {
+    "full_pending": 1572,
+    "hash_only": 0,
+    "missing_required_fields": 0,
+    "portal_pending": 7,
+    "portal_new_token_v6": 1
+  },
+  "field_contract": {
+    "required": ["hash","from","to","input","value","nonce","gas"],
+    "full_pending_capability": true
+  },
+  "exact_flap_scope": {
+    "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "selector": "0x8cb5772c",
+    "observed_pending_launches": 1,
+    "actionable_sample_observed": true
+  },
+  "observed_flap_pending_sample": {
+    "local_received_ns": "10396364584",
+    "hash": "0x4a15b72ec7b251c0145e3591078d46a71df227d0d9891673ef35757e74329fec",
+    "from": "0xba781e8592216bc28f8279b1ff09d9a24ee48705",
+    "to": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "nonce": "0x1697",
+    "value": "0x0",
+    "gas": "0x7737c4",
+    "input_length_hex_chars": 2378,
+    "selector": "0x8cb5772c",
+    "is_new_token_v6": true
+  },
+  "errors": [],
+  "safety": {
+    "read_only": true,
+    "transaction_submission": false,
+    "value_bearing_buy": false
+  },
+  "non_claims": [
+    "No canonical coverage denominator",
+    "No T0 measurement",
+    "No T_send or T_buy measurement",
+    "No builder inclusion or ordering proof"
+  ],
+  "summary_sha256": "c7b774fd691c438265f72eab59aaf153cd439b5cf67f0be552d504297cc0c2b9"
+}
