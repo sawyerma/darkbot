@@ -41,8 +41,8 @@ Authoritative documents:
 
 Code/evidence:
 
-- [../gate0/](../gate0/)
-- [../gate0/evidence/](../gate0/evidence/)
+- [../gates/bsc/gate0/](../gates/bsc/gate0/)
+- [../gates/bsc/gate0/evidence/](../gates/bsc/gate0/evidence/)
 
 ## 2. Solana / Pump.fun
 
