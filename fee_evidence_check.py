@@ -9,7 +9,7 @@ Vier Stufen:
      Exit-Codes: 0 PASS (Fills, 0x UNQUALIFIED_COSTS) | 2 keine Snapshots | 3 PARTIAL (Fills + UNQUALIFIED) | 4 FAIL | 5 OFFEN | 6 KEIN FILL
 
 Aufruf (im DarkBot-Ordner):
-  python3 fee_evidence_check.py --db data/market_capture_30m_20260920.sqlite --run-id <run> --config config/strategy_c_pre_pump_01.json
+  python3 fee_evidence_check.py --db data/solana_pump/market_capture_30m_20260920.sqlite --run-id <run> --config config/solana_pump/strategy_c_pre_pump_01.json
 """
 import argparse
 import json
