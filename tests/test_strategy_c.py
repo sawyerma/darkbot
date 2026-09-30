@@ -22,7 +22,7 @@ PROFILES = ("fast_creator_hold_2x", "pre_pump_01", "launch_sniper_0ms_15x", "pap
 
 
 def cconfig(profile="paper_explore_01", **overrides):
-    cfg = load_runtime_config(ROOT / f"config/strategy_c_{profile}.json")
+    cfg = load_runtime_config(ROOT / f"config/solana_pump/strategy_c_{profile}.json")
     overrides.setdefault("latency_model", {"entry_delay_ms": 0, "exit_delay_ms": 0})
     return cfg.with_overrides(**overrides)
 
@@ -174,7 +174,7 @@ class StrategyCTests(unittest.TestCase):
         raw["protocol"]["create_event_tail_layouts"].append({"layout_id": "V2", "tail_fields": [["quote_mint", "pubkey"]], "quote_mint_field": "quote_mint", "implied_quote_asset": None,
                                                              "verification_status": "VERIFIED_TEST_FIXTURE", "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"})
         from darkbot.config import build_runtime_config
-        h = Harness(build_runtime_config(ROOT / "config/strategy_c_paper_explore_01.json", raw))
+        h = Harness(build_runtime_config(ROOT / "config/solana_pump/strategy_c_paper_explore_01.json", raw))
         tail = encode_fields([("quote_mint", b58encode(b"USDC".ljust(32, b"\0")))], [["quote_mint", "pubkey"]])
         h.feed("helius_standard", create_payload(tail=tail), START)
         self.assertNotIn(MINT_A, h.owner.strategy.observations)
@@ -361,7 +361,7 @@ class StrategyCTests(unittest.TestCase):
                      "paper_explore_01": "strategy_paper_explore_01", "example": "strategy_example", "smoke_all": "strategy_smoke_all"}
         hashes = set()
         for profile in PROFILES:
-            cfg = load_runtime_config(ROOT / f"config/strategy_c_{profile}.json")
+            cfg = load_runtime_config(ROOT / f"config/solana_pump/strategy_c_{profile}.json")
             old = json.loads((ROOT / "old_system/backend/config" / f"{old_names[profile]}.json").read_text())
             st = cfg.strategy
             self.assertEqual(cfg.strategy_id, "LEGACY_BACKEND_FILTER_V1")
@@ -410,7 +410,7 @@ class StrategyCTests(unittest.TestCase):
         self.assertFalse(h.fk_check()); self.assertFalse(h.disk_errors)
 
     def test_C22_run_identity_separate_from_a_and_b(self):
-        a, b, c = Harness(), Harness(load_runtime_config(ROOT / "config/strategy_b.json")), make_c()
+        a, b, c = Harness(), Harness(load_runtime_config(ROOT / "config/solana_pump/strategy_b.json")), make_c()
         self.assertEqual(len({x.cfg.strategy_id for x in (a, b, c)}), 3)
         self.assertEqual(len({x.cfg.strategy_config_hash for x in (a, b, c)}), 3)
         self.assertEqual(tuple(c.rows("select strategy_id, strategy_config_hash from runs")[0]), (c.cfg.strategy_id, c.cfg.strategy_config_hash))
@@ -422,8 +422,8 @@ class StrategyCTests(unittest.TestCase):
 
 
     def test_C24_ab_replay_normalizes_legacy_latency_and_quote_age(self):
-        a = load_runtime_config(ROOT / "config/phase1.json")
-        c = load_runtime_config(ROOT / "config/strategy_c_pre_pump_01.json")
+        a = load_runtime_config(ROOT / "config/solana_pump/phase1.json")
+        c = load_runtime_config(ROOT / "config/solana_pump/strategy_c_pre_pump_01.json")
         _a, normalized_c, note = _comparison_configs(a, c)
         self.assertEqual(normalized_c.execution["quote_max_age_ms"], a.execution["quote_max_age_ms"])
         self.assertEqual(note["quote_max_age_ms"]["config_b_original"], 600000)
@@ -433,14 +433,14 @@ class StrategyCTests(unittest.TestCase):
 
 
     def test_C25_replay_slot_limit_scales_fixed_capital(self):
-        c = load_runtime_config(ROOT / "config/strategy_c_pre_pump_01.json")
+        c = load_runtime_config(ROOT / "config/solana_pump/strategy_c_pre_pump_01.json")
         base = c.portfolio["initial_paper_balance_lamports"]
         variant = c.with_overrides(portfolio=c.portfolio_limit_overrides(10))
         self.assertEqual(variant.portfolio["max_open_positions"], 10)
         self.assertEqual(variant.portfolio["initial_paper_balance_lamports"], base * 10)
 
     def test_C26_usd_per_slot_keeps_fx_derived_capital(self):
-        a = load_runtime_config(ROOT / "config/strategy_a_creator_exit_usd_slots.json")
+        a = load_runtime_config(ROOT / "config/solana_pump/strategy_a_creator_exit_usd_slots.json")
         variant = a.with_overrides(portfolio=a.portfolio_limit_overrides(10))
         self.assertEqual(variant.portfolio["max_open_positions"], 10)
         self.assertEqual(variant.portfolio["initial_paper_balance_lamports"], 0)
