@@ -168,13 +168,40 @@ fn rlp_list(items: Vec<Vec<u8>>) -> Vec<u8> {
 }
 
 
-const HOST: &str = "bsc-dataseed.bnbchain.org";
-const PORT: u16 = 443;
+const PUBLIC_RPC_HOST: &str = "bsc-dataseed.bnbchain.org";
+const FORTY_EIGHT_CLUB_HOST: &str = "puissant-builder.48.club";
+const HTTPS_PORT: u16 = 443;
 
-fn http_request(body: &str) -> Vec<u8> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransportKind {
+    PublicRpc,
+    FortyEightClubBundle,
+}
+
+impl TransportKind {
+    fn host(self) -> &'static str {
+        match self {
+            Self::PublicRpc => PUBLIC_RPC_HOST,
+            Self::FortyEightClubBundle => FORTY_EIGHT_CLUB_HOST,
+        }
+    }
+
+    fn port(self) -> u16 {
+        HTTPS_PORT
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::PublicRpc => "public_bsc_rpc_eth_sendRawTransaction",
+            Self::FortyEightClubBundle => "48club_puissant_builder_eth_sendBundle",
+        }
+    }
+}
+
+fn http_request(host: &str, body: &str) -> Vec<u8> {
     format!(
         "POST / HTTP/1.1\r\n\
-         Host: {HOST}\r\n\
+         Host: {host}\r\n\
          Content-Type: application/json\r\n\
          Accept: application/json\r\n\
          Accept-Encoding: identity\r\n\
@@ -271,6 +298,7 @@ fn run_once(
     stream: &mut StreamOwned<ClientConnection, TcpStream>,
     nonce: u64,
     correctness_check: bool,
+    transport: TransportKind,
 ) -> Sample {
     let t0 = Instant::now();
 
@@ -443,12 +471,18 @@ fn run_once(
 
     let raw_hex = hex::encode(&wire);
 
-    let send_body = format!(
-        r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
-        raw_hex
-    );
+    let send_body = match transport {
+        TransportKind::PublicRpc => format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
+            raw_hex
+        ),
+        TransportKind::FortyEightClubBundle => format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendBundle","params":[{{"txs":["0x{}"],"noMerge":true}}]}}"#,
+            raw_hex
+        ),
+    };
 
-    let request = http_request(&send_body);
+    let request = http_request(transport.host(), &send_body);
 
     let t6 = Instant::now();
 
@@ -473,7 +507,7 @@ fn run_once(
 
     assert!(
         !body.contains("\"result\":\"0x"),
-        "SAFETY FAILURE: endpoint returned transaction hash"
+        "SAFETY FAILURE: endpoint returned transaction/bundle hash"
     );
 
     let lower = body.to_lowercase();
@@ -527,9 +561,15 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     assert!(
-        args.len() == 3,
-        "g05_local <g03_rust_inputs.json> <g03_rust_output.json>"
+        args.len() == 3 || args.len() == 4,
+        "g05_remote_e2e <g03_rust_inputs.json> <g03_rust_output.json> [--48club-builder]"
     );
+
+    let transport = match args.get(3).map(String::as_str) {
+        None => TransportKind::PublicRpc,
+        Some("--48club-builder") => TransportKind::FortyEightClubBundle,
+        Some(other) => panic!("unsupported transport mode: {other}"),
+    };
 
     let fi: Value =
         serde_json::from_str(&fs::read_to_string(&args[1]).unwrap()).unwrap();
@@ -586,7 +626,7 @@ fn main() {
     };
 
     // DNS/TCP/TLS connection setup is deliberately outside T_pre.
-    let addr = (HOST, PORT)
+    let addr = (transport.host(), transport.port())
         .to_socket_addrs()
         .unwrap()
         .next()
@@ -612,33 +652,41 @@ fn main() {
         .with_no_client_auth();
 
     let server_name =
-        ServerName::try_from(HOST.to_string()).unwrap();
+        ServerName::try_from(transport.host().to_string()).unwrap();
 
     let conn =
         ClientConnection::new(Arc::new(config), server_name).unwrap();
 
     let mut stream = StreamOwned::new(conn, tcp);
 
-    // Verify endpoint = BSC mainnet before benchmark.
-    let chain_body =
-        r#"{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}"#;
+    // Public RPC supports eth_chainId directly. The 48Club builder path is
+    // qualified by the real eth_sendBundle request itself; the payload is
+    // deliberately invalid RLP, so it cannot become a valid/value-bearing tx.
+    let chain_id_verified = if transport == TransportKind::PublicRpc {
+        let chain_body =
+            r#"{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}"#;
 
-    let chain_req = http_request(chain_body);
+        let chain_req = http_request(transport.host(), chain_body);
 
-    stream.write_all(&chain_req).unwrap();
-    stream.flush().unwrap();
+        stream.write_all(&chain_req).unwrap();
+        stream.flush().unwrap();
 
-    let chain_resp = read_http(&mut stream);
-    let chain_text =
-        String::from_utf8_lossy(body_of(&chain_resp));
+        let chain_resp = read_http(&mut stream);
+        let chain_text =
+            String::from_utf8_lossy(body_of(&chain_resp));
 
-    assert!(
-        chain_text.contains("\"0x38\""),
-        "endpoint did not report BSC chainId 56: {chain_text}"
-    );
+        assert!(
+            chain_text.contains("\"0x38\""),
+            "endpoint did not report BSC chainId 56: {chain_text}"
+        );
 
-    // Correctness check against G0.3 frozen output.
-    run_once(&ctx, &mut stream, 0x032e, true);
+        Some(56u64)
+    } else {
+        None
+    };
+
+    // Correctness check against G0.3 frozen output and live transport request.
+    run_once(&ctx, &mut stream, 0x032e, true, transport);
 
     const WARMUP: usize = 10;
     const SAMPLES: usize = 100;
@@ -649,6 +697,7 @@ fn main() {
             &mut stream,
             0x032e + (i as u64 & 0x3ff),
             false,
+            transport,
         ));
     }
 
@@ -669,6 +718,7 @@ fn main() {
             &mut stream,
             0x032e + (i as u64 & 0x3ff),
             false,
+            transport,
         );
 
         decode.push(s.decode);
@@ -682,15 +732,29 @@ fn main() {
         total.push(s.total);
         roundtrip.push(s.roundtrip);
 
-        // Outside measured interval.
-        thread::sleep(Duration::from_millis(50));
+        // Outside measured interval. 48Club currently documents an unsigned
+        // guest limit of 50 conditional transactions / 9 s; stay below it.
+        let pause_ms = if transport == TransportKind::FortyEightClubBundle {
+            200
+        } else {
+            50
+        };
+        thread::sleep(Duration::from_millis(pause_ms));
     }
 
     let total_stats = stats(total);
 
     let result = json!({
-        "status": "G0.5_REMOTE_E2E_PREQUALIFICATION",
-        "scope": "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through real remote warm TLS/TCP handoff; wire transaction deliberately corrupted before send",
+        "status": if transport == TransportKind::FortyEightClubBundle {
+            "G0.5_48CLUB_BUILDER_TRANSPORT_PREQUALIFICATION"
+        } else {
+            "G0.5_REMOTE_E2E_PREQUALIFICATION"
+        },
+        "scope": if transport == TransportKind::FortyEightClubBundle {
+            "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through live 48Club Puissant Builder eth_sendBundle TLS/TCP handoff; wire transaction deliberately corrupted before send"
+        } else {
+            "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through real remote warm TLS/TCP handoff; wire transaction deliberately corrupted before send"
+        },
         "architecture": std::env::consts::ARCH,
         "os": std::env::consts::OS,
         "warmup_samples": WARMUP,
@@ -717,14 +781,15 @@ fn main() {
             "remote_e2e_prequalification_ns": 1_000_000,
             "final_real_T_send_target_ns": 1_000_000
         },
-        "endpoint_host": HOST,
-        "chain_id_verified": 56,
+        "endpoint_host": transport.host(),
+        "transport_candidate": transport.label(),
+        "chain_id_verified": chain_id_verified,
         "transport": "preconnected TLS/TCP HTTP/1.1",
         "wire_safety": "valid local signed BUY is corrupted to invalid RLP before network write",
         "non_claims": [
             "No valid transaction was broadcast",
             "No value-bearing BUY was sent",
-            "Remote RPC socket handoff is not confirmed mempool acceptance or P2P propagation",
+            "Transport socket handoff is not confirmed builder acceptance, mempool acceptance, propagation or inclusion",
             "JSON-RPC response latency is not T_send and is not T_buy",
             "This alone does not prove inclusion advantage"
         ]
