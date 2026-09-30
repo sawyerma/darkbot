@@ -732,8 +732,8 @@ fn main() {
         total.push(s.total);
         roundtrip.push(s.roundtrip);
 
-        // Outside measured interval. 48Club currently documents an unsigned
-        // guest limit of 50 conditional transactions / 9 s; stay below it.
+        // Outside measured interval. Keep the builder probe deliberately
+        // paced so transport qualification does not become a burst test.
         let pause_ms = if transport == TransportKind::FortyEightClubBundle {
             200
         } else {
