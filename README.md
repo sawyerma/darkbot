@@ -107,10 +107,10 @@ The current repository still explicitly distinguishes PAPER from LIVE:
 
 ## Solana/Pump.fun current code
 
-- **Solana chain adapter:** [darkbot/chains/solana/](darkbot/chains/solana/)
-- **Pump.fun venue adapter:** [darkbot/venues/pumpfun/](darkbot/venues/pumpfun/)
-- **Runtime assembly:** [darkbot/runtime/](darkbot/runtime/)
-- **Strategies:** [darkbot/strategies/](darkbot/strategies/)
+- **Solana/Pump application:** [darkbot/solana_pump/](darkbot/solana_pump/)
+- **Shared app/control plane:** [darkbot/app/](darkbot/app/)
+- **Shared runtime assembly:** [darkbot/runtime/](darkbot/runtime/)
+- **Pump.fun strategies:** [darkbot/solana_pump/strategies/](darkbot/solana_pump/strategies/)
 - **Main Python package:** [darkbot/](darkbot/)
 - **Configs:** [config/solana_pump/](config/solana_pump/)
 - **Tests:** [tests/](tests/)
@@ -255,7 +255,13 @@ At the moment this ledger intentionally contains **N/A**, not invented values, b
 
 ~~~text
 darkbot/
-  existing Solana/Pump.fun Python reference runtime
+  main.py + cli.py       shared stable entry facades
+  app/                   shared application/control-plane registry
+  solana_pump/           existing Solana/Pump.fun implementation
+  bsc/                   BSC application boundary
+  project_0/             Project 0 application boundary
+  solana/                shared native Solana boundary
+  common/                truly project-independent infrastructure only
 
 gates/bsc/gate0/
   current BSC Gate-0 Rust harnesses, tools and evidence
