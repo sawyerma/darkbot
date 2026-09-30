@@ -1,7 +1,7 @@
 # R6/R7 – Implementierungsstand und ausstehende Prüfung
 
 Arbeitsverzeichnis: `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot`.
-Verbindliche Quelle: `docs/SPEC.json`, identisch mit der externen Roadmap
+Verbindliche Quelle: `docs/solana_pump/SPEC.json`, identisch mit der externen Roadmap
 `DARKBOT_PHASE1_IMPLEMENTATION_SPEC_v1_3_2.json` (SHA256
 `40fe4ab8130a732ca8a1023c2fb6e0165fc2832e91a6dac0e81d0ddd1e7036f5`).
 
