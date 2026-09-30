@@ -212,7 +212,7 @@ Project 0 adds:
 
 ## Project 0 phase plan
 
-- **Current draft phase plan:** [docs/SOLANA_PROJECT0_ROADMAP_DRAFT.md](docs/SOLANA_PROJECT0_ROADMAP_DRAFT.md)
+- **Current draft phase plan:** [docs_project_0/PHASENPLAN.md](docs_project_0/PHASENPLAN.md)
 
 Current phase order:
 
@@ -241,11 +241,11 @@ P9 production LIVE
 K  measured escalation only
 ~~~
 
-The roadmap is explicitly **DRAFT / REVIEW PENDING** until the current Astra/Fable protocol and workspace review is resolved.
+The authoritative Project 0 architecture and phase plan is frozen in **docs_project_0/PHASENPLAN.md**.
 
 ## Project 0 measurements / evidence
 
-- **Project 0 measurement ledger:** [docs/SOLANA_PROJECT0_MEASUREMENT_LEDGER.md](docs/SOLANA_PROJECT0_MEASUREMENT_LEDGER.md)
+- **Project 0 measurement ledger:** [docs_project_0/MEASUREMENT_LEDGER.md](docs_project_0/MEASUREMENT_LEDGER.md)
 
 At the moment this ledger intentionally contains **N/A**, not invented values, because Project 0 production implementation/measurement has not started.
 
@@ -261,7 +261,10 @@ gate0/
   current BSC Gate-0 Rust harnesses, tools and evidence
 
 docs/
-  project roadmaps, contracts, status and measurement ledgers
+  shared/BSC/Pump.fun roadmaps, contracts, status and measurement ledgers
+
+docs_project_0/
+  authoritative Project 0 phase plan and measurement ledger
 
 config/
   existing Pump.fun/PAPER/research configuration
