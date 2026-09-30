@@ -63,3 +63,5 @@ node_modules/
 
 # Obsolete pre-restructure Gate0 root
 /gate0/
+
+/tests/DARKBOT 2/r5_work/
