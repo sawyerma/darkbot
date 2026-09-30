@@ -1,11 +1,30 @@
-# DarkBot — Project 0 — Finaler Produktions-Phasenplan
+# DarkBot — Project 0 — Produktions-Phasenplan v4.4
 
-**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.2  
+**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.4
+**Promoted:** 2026-09-30 nach Fable-Review (Checkliste 12A beantwortet in `FABLE_REVIEW_v4.4.md`); ersetzt v4.2.  
 **Stand:** 2026-09-30  
 **Geltungsbereich:** DarkBot / Project 0 Liquidator  
-**Source of Truth:** Diese Datei definiert Architektur, Reihenfolge, Gates und verbindliche Entwicklungsregeln.
+**Source of Truth:** Diese Datei. Ältere Fassungen (v4.2, v4.3) sind nicht autoritativ.
 
-**Freeze-Korrekturen:** `solana-dex-superagg` ist als Remote-Aggregator-Client klassifiziert; `marginfi-v2` Apache-2.0 und `solana-dex-superagg` MIT sind lizenzseitig bestätigt; Receivership Maintenance=SPOT und Equity=EMA sowie die tatsächlichen `liquidate_end.rs`-Grenzen sind als Protocol-Semantik aufgenommen; H0 modelliert konfigurierbare Konkurrenz-Mindestprofitschwellen. **v4.2 trennt die Ingress-Rollen explizit: Race-LIVE ausschließlich über einen qualifizierten binären/native Mainnet-Source; Long-Tail-/Premium-LIVE darf kostenoptimiert über `WsRpcControlSource` plus periodische Snapshots/Reconciliation laufen. Shred/Deshred ist keine S1-Pflicht, sondern nur K-Eskalation bei gemessenem `LOSS_REASON = INGRESS`. Maßgeblich ist Quellenlatenz/Position im Datenpfad, nicht JSON-Parsingkosten.**
+**v4.4 gegenüber v4.2:** korrigiert die Reihenfolge der v4.3-Speed-Hebel, damit der kostenlose Long-Tail-/Premium-Pfad zuerst bis LIVE kommt und Race-Komplexität ihn nicht blockiert.
+
+- **FIRST EURO PATH wird Hauptpfad:** `S1-LT → S3-CORE → P2 → P3 → P4A → P5 → T → P6-LT → P8-LT`;
+- **S3-CORE bleibt schlank:** Builder, Signer, `RpcSubmitter`, Jito-Core, Reconciliation;
+- **Jito gRPC / Race-Prewarm / Race-Benchmark:** nur nach `S1-RACE PASS`;
+- **Direct TPU QUIC:** kein S3-Bau; nur K-Kandidat nach `S1-RACE PASS` und nach SWQoS-/Stake-Qualifikation;
+- **Prepared Candidate / TX Prebuild:** bleibt in P2/P5;
+- **SubscribeDeshred / Raw Shred:** bleibt K-only;
+- keine zweite Codebasis, keine spätere Race-Neuentwicklung.
+
+**BELEGT — Solana SWQoS:** Solana dokumentiert stake-weighted QoS für TPU-Traffic. Ein standalone Direct-TPU-Sender besitzt diesen Vorteil nicht automatisch; ein vertrauenswürdiger/gestakter oder virtuell gestakter Pfad muss separat qualifiziert werden.
+
+**Konsequenz:** Direct TPU QUIC bleibt technisch interessant, ist ohne qualifizierte SWQoS-/Stake-Beziehung aber **nicht Race-Primary** und wird nicht vorab gebaut.
+
+**BELEGT — Yellowstone:** `SubscribeDeshred` liefert pre-execution Transactions aus eingehenden Shreds, ist aktuell aber nur auf Triton-Extension-Servern verfügbar; der Open-Source-`yellowstone-grpc-geyser`-Server liefert dafür `UNIMPLEMENTED`.
+
+**BELEGT — Agave:** `tpu-client-next` existiert und kann QUIC-Verbindungen zu kommenden Leadern vorhalten. Das beweist technische Verfügbarkeit, nicht wirtschaftliche Priorität für einen unstaked/ungepaarten Bot.
+
+**PRÜFEN durch Fable:** aktuelle SWQoS-/TPU-Regeln, Jito-gRPC-Zugang/TxV1, exakte Long-Tail-LIVE-Gates, sichere Prebuild-Grenzen und ob irgendeine Race-Erweiterung noch weiter nach K gehört.
 
 ---
 
@@ -111,7 +130,7 @@ Trigger
 → Reconciliation
 ```
 
-**Es wird nicht zuerst ein billiger Long-Tail-Bot und später ein schneller Race-Bot gebaut.**
+**Es wird keine zweite Entwicklung gebaut.** Architektur und Interfaces berücksichtigen Race von Anfang an; **LIVE-Freigabe darf aber bewusst Long-Tail/Premium zuerst erfolgen**, während Race auf `S1-RACE PASS` und seine eigenen wirtschaftlichen Gates wartet.
 
 ---
 
@@ -158,6 +177,78 @@ Dies gilt insbesondere für:
 
 **Eine kostenlose Infrastruktur darf die Architektur nicht verschlechtern.**
 Adapter und Interfaces werden so gebaut, dass bessere Infrastruktur später ohne Rewrite genutzt werden kann.
+
+## 0.5 Speed-Regel v4.3
+
+Race wird nicht nur auf Ingress optimiert. Die kontrollierbare End-to-End-Kette lautet:
+
+```text
+source proximity
+→ decode/state
+→ candidate narrowing
+→ exact health/economics
+→ prepared execution patch
+→ sign
+→ leader/block-engine handoff
+```
+
+Optimiert wird nur dort, wo die Messung realen Lead/Landing-/Profitgewinn zeigt.
+
+Priorität:
+
+1. keine unnötige Arbeit nach Trigger;
+2. keine Remote-Lookups im Race-Pfad;
+3. Connection/Leader/Block-Engine-Verbindungen vorwärmen;
+4. statische TX-/Account-/Route-Teile vorbauen;
+5. Submission-Pfade gegeneinander messen;
+6. teure pre-execution/shred/validatornahe Eskalation erst nach belegtem Bottleneck.
+
+---
+
+## 0.6 FIRST EURO PATH — höchste Umsetzungspriorität
+
+Der erste wirtschaftliche Produktionspfad ist **Long-Tail/Premium**, nicht Race.
+
+```text
+P0 minimal required reuse/protocol decisions
++ P1A current mainnet freeze
++ C0 long-tail market evidence
+
+S0
+→ S1-LT PASS
+→ S2
+→ S3-CORE PASS
+→ P2
+→ P3
+→ P4A
+→ P5
+→ T
+→ P6-LT shadow
+→ S4 parity before value-bearing LIVE
+→ P8-LT controlled LIVE
+→ first realized net profit
+```
+
+Parallel, aber **nicht blockierend für P2/Long-Tail-Bau**:
+
+- H0 vertiefen;
+- P1B vorbereiten und bei Deployment promoten;
+- S1-RACE Binary-Source suchen/qualifizieren;
+- Race-spezifische Submission-Forschung;
+- P7/P4B Competition-/Provider-Optimierung.
+
+Regel:
+
+```text
+kein kostenloser Mainnet-Geyser
+≠ Projekt blockiert
+
+sondern:
+Long-Tail/Premium weiterbauen und LIVE qualifizieren
+Race bleibt deaktiviert
+```
+
+0.1.12-spezifisches Tagging/T-Pfad darf erst LIVE, wenn der entsprechende Program-Stand tatsächlich on-chain deployed und über P1B→P1A promoted ist.
 
 ---
 
@@ -538,7 +629,7 @@ Relevante Eigenschaften:
 
 - größere Transaktionen bis 4096 Bytes;
 - keine LUTs in v1;
-- max. 64 Accounts nach aktueller v1-Spezifikation;
+- max. 64 Accounts (Runtime-Limit, gilt für legacy/v0/v1; v1 macht es zum Formatlimit);
 - Resource-/Fee-Konfiguration in `TransactionConfig`;
 - Priority Fee als Gesamtbetrag in Lamports;
 - ComputeBudget-Instructions konfigurieren v1 nicht;
@@ -705,9 +796,18 @@ Gemeinsam genutzt wird nur, was wirklich chain-/protokollunabhängig ist.
 
 Ab S0 verbindlich:
 
+Optional für spätere K-PreExecution-Sensoren:
+
+```text
+T_pre
+    speculative/pre-execution Signal empfangen; niemals allein authoritative State
+```
+
+Verbindlicher authoritative/Production-Pfad:
+
 ```text
 T_rx
-    Rohupdate im Ingress empfangen
+    authoritative bzw. für die Execution-Klasse qualifiziertes Rohupdate im Ingress empfangen
 
 T_state
     relevanter Canonical-/Project0-State aktualisiert
@@ -736,6 +836,8 @@ state_to_detect  = T_detect - T_state
 detect_to_ready  = T_ready - T_detect
 ready_to_sign    = T_sign - T_ready
 sign_to_handoff  = T_handoff - T_sign
+
+optional_precompute_lead = T_rx - T_pre   # nur wenn T_pre vorhanden; diagnostisch, nicht State-Wahrheit
 ```
 
 Landing Evidence:
@@ -1766,9 +1868,9 @@ PASS nur wenn:
 
 ## Ziel
 
-Finaler nativer Build-/Sign-/Submit-/Reconcile-Pfad.
+Den **kleinsten finalen Production-Execution-Core** bauen, der Long-Tail/Premium bis LIVE tragen kann und später Race-Adapter ohne Rewrite aufnehmen kann.
 
-## Bau
+## S3.1 CORE — Build / Sign
 
 - legacy/v0 Builder;
 - v1 Builder;
@@ -1776,84 +1878,138 @@ Finaler nativer Build-/Sign-/Submit-/Reconcile-Pfad.
 - v1 TransactionConfig;
 - Ed25519 Signing;
 - Serialization;
-- RPC Adapter;
-- Jito Adapter;
-- Bundle Adapter;
 - Submission Result Taxonomy;
 - Landing Reconciliation.
 
-## v1
+## S3.2 CORE — Submission
+
+### `RpcSubmitter`
+
+Pflicht für Baseline, Long-Tail/Premium, Recovery/Fallback und Vergleich.
+
+### `JitoSubmitter`
+
+Gemeinsames Interface für Jito Single-TX/Bundle-Semantik.
+
+Für den **First-Euro-Pfad** reicht zunächst der aktuell verfügbare, korrekt qualifizierte Jito-Pfad; JSON-RPC ist hier zulässig, weil Long-Tail/Premium nicht auf den Race-Latenzpfad angewiesen ist.
+
+Pflicht:
+- atomare Bundle-Semantik soweit benötigt;
+- definierte Failed-Cost-/Revert-Semantik;
+- Tip-/Fee-Erfassung;
+- v0/v1/TxV1-Kompatibilität;
+- Landing/Reconciliation.
+
+## S3.3 CORE Gate
+
+`S3-CORE PASS` wenn mindestens ein vollständiger Long-Tail/Premium-Pfad reproduzierbar korrekt ist:
+
+```text
+build
+→ sign
+→ RpcSubmitter oder JitoSubmitter
+→ observe
+→ reconcile
+```
+
+`S3-CORE PASS` ist die Voraussetzung für P2 im First-Euro-Pfad.
+
+## S3.R — RACE EXTENSIONS — nur nach `S1-RACE PASS`
+
+Diese Tickets blockieren P2/P3/P4A/P5/T/P8-LT nicht.
+
+### `JitoGrpcSubmitter`
+
+Erst bauen/messen, wenn ein qualifizierter Race-Ingress existiert.
+
+Qualifikation:
+- Access/Auth;
+- Regionen;
+- Single TX / Bundle;
+- TxV1;
+- >1232 Byte;
+- Tip-/Revert-Semantik;
+- Landing/Execution Position;
+- `T_sign→T_handoff`;
+- Kosten.
+
+### Race Prewarm Manager
+
+Erst nach `S1-RACE PASS`:
+- Jito gRPC connections;
+- block-engine region state;
+- Race submission buffers/queues;
+- keine Handshakes/DNS nach Trigger.
+
+### Race Submission Benchmark
+
+Vergleicht zunächst:
+
+```text
+Jito gRPC
+vs.
+RPC baseline
+```
+
+Direct TPU gehört **nicht** zu S3.R; es bleibt K.
+
+## S3.4 v1
 
 Unterstützen:
-
 - bis 4096 Byte;
 - max. 64 Accounts entsprechend aktuellem Format/Runtime-Capability;
-- keine LUTs;
+- keine LUTs in v1;
 - explizites CU-Limit;
 - explizites Loaded-Account-Data-Limit;
 - Priority Fee in totalen Lamports;
 - ComputeBudget-Instructions nicht als v1-Konfiguration;
 - Reader Version 1;
-- base64-/Submission-Kompatibilität für große TX.
+- Adapter-Kompatibilität.
 
-## v0/v1 Auswahl
+## S3.5 v0/v1 Auswahl
 
-Kein permanentes Default-Dogma.
-
-Pro Execution-Klasse messen:
+Kein Dogma; pro Execution-Klasse messen:
 
 ```text
-v0:
+version
 bytes
 accounts
-LUT
+LUT/resource config
 CU
-landing
-latency
-failure
-cost
-
-v1:
-bytes
-accounts
-resource config
-CU
+submission path
 landing
 latency
 failure
 cost
 ```
-
-Dann auswählen.
-
-## Jito Capability Gate
-
-Vor LIVE-Nutzung eines konkreten v1-/Bundle-Pfads:
-
-- sendTransaction akzeptiert;
-- Bundle akzeptiert;
-- >1232 Byte überlebt vollständigen Pfad;
-- keine Truncation;
-- config bleibt korrekt;
-- Failure-Verhalten bekannt;
-- Fallback deterministisch.
 
 ## Gate S3
 
-Mindestens ein vollständiger Pfad:
-
 ```text
-build
-→ sign
-→ submit
-→ observe
-→ reconcile
+S3-CORE PASS:
+    Long-Tail/Premium final build/sign/submit/reconcile works
+
+S3-RACE EXTENSIONS PASS:
+    requires S1-RACE PASS
+    Jito gRPC/prewarm/race benchmark qualified
 ```
 
-reproduzierbar korrekt.
+`S3-RACE EXTENSIONS PASS` ist **keine Voraussetzung** für P2 oder Long-Tail-LIVE.
+
+Tickets CORE:
+`S3-01 v0 builder` ·
+`S3-02 v1 builder` ·
+`S3-03 signer/serialization` ·
+`S3-04 RpcSubmitter` ·
+`S3-05 JitoSubmitter core` ·
+`S3-06 landing reconciliation`
+
+Tickets RACE — `requires: S1-RACE PASS`:
+`S3-R01 JitoGrpcSubmitter` ·
+`S3-R02 race prewarm manager` ·
+`S3-R03 submission race benchmark`
 
 ---
-
 # PHASE S4 — CORE PARITY + PERFORMANCE BASELINE
 
 ## Ziel
@@ -1901,21 +2057,51 @@ Keine ungeklärte semantische Abweichung.
 
 ---
 
-# MERGE GATE — PROJECT-0 BUILD FREIGABE
+# PROJECT-0 IMPLEMENTATION UNLOCKS
 
-P2 startet, wenn mindestens:
+Es gibt **keinen einzelnen großen Merge Gate**, der Long-Tail auf Race-Evidence warten lässt.
 
-- P0 Reuse-/Lizenzentscheidung ausreichend;
-- P1A aktueller LIVE-Stand eingefroren;
-- P1B Upgrade-Pfad vorbereitet;
-- C0 Marktklassen verstanden;
-- H0 reale Execution-/Competition-Daten ausreichend;
-- S0–S4 stabil genug als gemeinsames Fundament.
+## P2 BUILD UNLOCK — First-Euro-Pfad
 
-Es gibt **kein Long-Tail-only Gate** und **kein Race-only Gate**.
+P2 darf beginnen, sobald mindestens:
+- P0: relevante Reuse-/Protocol-Entscheidungen für P2/P3 geklärt;
+- P1A: aktueller LIVE-Stand ausreichend eingefroren;
+- C0: Long-Tail/Premium-Marktklasse ausreichend verstanden;
+- S0 PASS;
+- S1-LT PASS;
+- S2 State-Basis funktionsfähig;
+- S3-CORE PASS.
+
+Parallel weiterlaufend und **nicht P2-blockierend**:
+- P1B bis zum tatsächlichen Deployment;
+- H0;
+- S1-RACE;
+- S3-RACE Extensions;
+- vertiefte Competition-/Provider-Forschung.
+
+## P8-LT LIVE GATE
+
+Vor value-bearing Long-Tail/Premium-LIVE zusätzlich Pflicht:
+- tatsächlicher deployed Program-Stand qualifiziert; bei 0.1.12: P1B→P1A Promotion abgeschlossen;
+- S4 Core-Parity PASS;
+- P3 exact Health PASS;
+- P4A deterministic Economics PASS;
+- P5 execution plan PASS;
+- T PASS soweit Tagging verwendet wird;
+- P6-LT Shadow ausreichend;
+- Reconciliation/Safety/Halts PASS.
+
+## RACE LIVE GATE
+
+Zusätzlich zum gemeinsamen Core:
+- S1-RACE PASS;
+- S3-RACE Extensions PASS oder anderer gemessener Race-Submission-Pfad;
+- Race-spezifisches P6 Shadow/Loss Evidence;
+- wirtschaftlicher Vorteil gegenüber Kosten belegt.
+
+Race wird später auf demselben Core freigeschaltet; kein zweiter Health-/Economics-/Planner-/TX-Core.
 
 ---
-
 # PHASE P2 — FINAL PROJECT-0 STATE ENGINE
 
 ## Ziel
@@ -1985,17 +2171,51 @@ Reagiert auf:
 - Asset-/Debt-Preis;
 - Fee-/Route-Änderung.
 
-## TX Template Cache
+## Prepared Candidate / TX Template Cache
 
-Für relevante Near-Threshold-/Near-`t_profitable`-Kandidaten:
+Für relevante Near-Threshold-/Near-`t_profitable`-Kandidaten wird **vor** dem Trigger so viel wie semantisch sicher vorbereitet.
 
-- Accounts;
+Precomputable/resident:
+
+- betroffene Account-Liste;
+- Bank-/Oracle-/Integration-Dependencies;
 - Refresh-Skelett;
-- Route-Skelett;
-- Integration Accounts;
-- Instruction-Skelett.
+- Receivership-Instruction-Skelett;
+- AccountMeta-Reihenfolge;
+- Route-Klasse / `NO_SWAP`-Kandidat;
+- v0/v1 Execution-Klasse;
+- LUT-/Address-Plan für v0;
+- v1 Resource-Config-Skelett;
+- Compute-/Fee-Profil;
+- statische Serialization-Buffers;
+- Submission-Klasse;
+- invalidation keys/version.
 
-Bei Trigger nur dynamische Teile patchen.
+Nicht blind cachen:
+
+- stale Health;
+- stale Oracle-Werte;
+- stale Quote/Route;
+- blockhash/lifetime;
+- dynamischer seize/repay amount;
+- dynamischer Tip/Fee;
+- Signatur.
+
+Race-Ziel:
+
+```text
+trigger
+→ candidate lookup O(log n)/O(1)-nah
+→ exact current health/economics
+→ nur dynamische Felder patchen
+→ finalize
+→ sign
+→ submit
+```
+
+Jeder Cache-Eintrag besitzt harte Invalidation auf relevante Account-/Program-/Oracle-/Route-/Version-Änderungen.
+
+**PRÜFEN:** Welche Instruction-/Message-Bytes bei v0/v1 tatsächlich sicher vorserialisiert werden können, ohne Signatur-/Lifetime-/Account-Ordering-Semantik zu verletzen.
 
 ## Gate P2
 
@@ -2419,6 +2639,36 @@ Der einzige derzeit referenzseitig belegte router-freie Pfad ist:
 NO_SWAP
 → Repay aus Inventar
 ```
+
+## Prepared Execution Plan
+
+P5 konsumiert den P2 Prepared-Candidate-Cache und hält für Near-Threshold-Kandidaten einen **unsigned prepared execution plan** bereit.
+
+Zielzustand vor Trigger:
+
+```text
+static accounts known
++ protocol instruction skeleton known
++ route class known
++ tx version class known
++ resource profile known
++ submission class known
+```
+
+Beim Trigger verbleiben nur:
+
+```text
+exact current health/economics
+→ dynamic seize/repay/route values
+→ blockhash/lifetime + fee/tip
+→ final serialization
+→ sign
+→ handoff
+```
+
+Keine Vorab-Signatur, solange irgendein signature-bound Feld noch dynamisch oder invalidierbar ist.
+
+Remote-Routing darf nicht als synchroner Pflicht-Call in diesen Race-Pfad zurückkehren. Wenn eine Route nicht ausreichend frisch/prepared verfügbar ist, greift die definierte alternative Execution-Klasse (`NO_SWAP`, vorbereitete erlaubte Route oder SKIP).
 
 ## Bundle
 
@@ -2847,17 +3097,65 @@ Wenn `LOSS_REASON = INGRESS`:
 
 prüfen, in dieser Reihenfolge:
 
-- besserer kostenloser Mainnet-Binary-Feed;
-- vorhandener Geyser-Zugang;
-- Paid Geyser;
-- eigener Geyser / validatornaher Aufbau;
-- eigener Node;
-- Region;
-- **erst danach Shred/Deshred/native Shred Delivery**, wenn Geyser nachweislich nicht reicht.
+1. Filter/Region/Provider des bestehenden Mainnet-Geyser optimieren;
+2. besserer kostenloser/bereits verfügbarer Mainnet-Binary-Feed;
+3. Paid Geyser nur bei positivem incremental net value;
+4. eigener Geyser / validatornaher Aufbau;
+5. eigener Node / Region;
+6. **erst danach pre-execution / Shred / Deshred**, wenn Geyser nachweislich nicht reicht.
 
-Shred/Deshred ist **keine S1-Pflicht** und kein prophylaktischer Build. Es wird nur aktiviert, wenn reale Race-Verluste dem Ingress zugerechnet werden und der erwartete zusätzliche Netto-Profit die vollständigen Shred-/Validator-/Netzwerkkosten rechtfertigt.
+### K-INGRESS-PRE — `SubscribeDeshred` Sensor
+
+**BELEGT:** Yellowstone beschreibt `SubscribeDeshred` als separaten Stream für pre-execution Transactions. Der Server rekonstruiert Entries aus eingehenden Shreds und streamt decodierte Transactions, bevor Replay sie ausgeführt hat.
+
+**BELEGT / Einschränkung:** Die aktuelle Yellowstone-README sagt zugleich:
+
+```text
+SubscribeDeshred is only available on Triton extension servers.
+Open-source yellowstone-grpc-geyser currently returns UNIMPLEMENTED.
+```
+
+Daher ist `SubscribeDeshred` **kein Bestandteil von S1**, keine kostenlose Annahme und keine Voraussetzung für Race-LIVE.
+
+Wenn wirtschaftlich verfügbar, ist seine Rolle ausschließlich:
+
+```text
+T_pre speculative pre-execution transaction
+→ Project0/Oracle relevance filter
+→ affected banks/accounts lookup
+→ speculative/prepared health/economics work
+→ prepared TX/route/serialization warming
+
+authoritative Geyser/state evidence
+→ validate/recompute dynamic truth
+→ sign/send
+```
+
+Der Deshred-Stream darf **niemals allein**:
+
+- canonical State setzen;
+- Health final bestätigen;
+- eine Liquidation blind absenden;
+- Fork/Execution-Erfolg behaupten.
+
+Messgröße:
+
+```text
+precompute_lead = T_rx_authoritative - T_pre
+```
+
+und entscheidend:
+
+```text
+incremental race wins / realized net profit
+- access/provider/shred cost
+```
 
 Nur bei messbarem Netto-Mehrwert.
+
+### K-INGRESS-RAW
+
+Raw Shred Delivery / eigener validatornaher Deshred-Pfad bleibt noch eine Stufe später. Erst wenn Geyser **und** ein verfügbarer pre-execution Sensor nachweislich Ingress-Limit sind, wird eigener Shred-/Validator-Stack erwogen.
 
 ## CPU
 
@@ -2898,12 +3196,54 @@ Aktuell ist in den geprüften Referenzen **kein lokaler Router belegt**. Ein sol
 
 Wenn `LOSS_REASON = SUBMISSION/TIP`:
 
-- Jito Region;
-- Tip Policy;
-- Submission Redundancy;
-- Bundle Policy;
-- RPC vs. Jito.
+1. Jito gRPC / Region / Tip / Bundle Policy optimieren;
+2. Jito vs. RPC unter gleichen Bedingungen messen;
+3. erst danach Direct TPU QUIC prüfen.
 
+### K-SUB-TPU — `DirectTpuQuicSubmitter`
+
+**BELEGT:** Agave `tpu-client-next` kann QUIC-Verbindungen zu kommenden Leader-TPUs cachen/vorwärmen.
+
+**BELEGT — SWQoS:** TPU-Kapazität kann stake-gewichtet priorisiert werden. Ein standalone Sender ohne gestakten/virtuell gestakten vertrauenswürdigen Pfad hat diesen Vorteil nicht automatisch.
+
+Vor Implementierung zwingend dokumentieren:
+- verwendete Identity/QUIC-Identity;
+- eigener gestakter Validatorpfad ja/nein;
+- vertrauenswürdige SWQoS-/virtual-stake-Beziehung ja/nein;
+- reale unstaked/staked TPU-Kapazität;
+- Landing unter Last gegenüber Jito/Staked-RPC.
+
+Hard Rule:
+
+```text
+kein qualifizierter SWQoS-/Stake-Pfad
+→ Direct TPU darf experimentell gemessen werden
+→ aber NICHT Race-Primary werden
+→ kein großer Leader/Prewarm/Worker-Bau ohne Messbeleg
+```
+
+Erst bei belastbarem Vorteil bauen/optimieren:
+- LeaderUpdater;
+- TPU address service;
+- QUIC worker pool;
+- leader lookahead;
+- connection prewarm;
+- fanout/retry policy.
+
+Entscheidend:
+
+```text
+incremental realized net profit
+vs.
+Jito gRPC / staked provider path / full operating cost
+```
+
+### Weitere K-Submission-Hebel
+
+- Submission Redundancy derselben signierten TX nur bei sicherer Semantik;
+- Block-Engine-/Region-Nähe;
+- dedizierter Host erst nach Messung;
+- Kernel/NIC-Spezialisierung erst als späteste Stufe.
 ## Transaction Version
 
 v0/v1 dauerhaft anhand realer Daten vergleichen.
@@ -2973,11 +3313,14 @@ S2-05 blockhash/LUT/token metadata
 
 S3-01 v0 builder
 S3-02 v1 builder
-S3-03 signer
-S3-04 RPC submission
-S3-05 Jito submission
-S3-06 bundle
-S3-07 landing reconciliation
+S3-03 signer/serialization
+S3-04 RpcSubmitter
+S3-05 JitoSubmitter core
+S3-06 landing reconciliation
+
+S3-R01 JitoGrpcSubmitter                  requires S1-RACE PASS
+S3-R02 race prewarm manager              requires S1-RACE PASS
+S3-R03 submission race benchmark         requires S1-RACE PASS
 
 S4-01 parity corpus
 S4-02 decode/state parity
@@ -2993,7 +3336,8 @@ P2-02 reverse indices
 P2-03 threshold index
 P2-04 premium scheduler
 P2-05 tag scheduler
-P2-06 tx template cache
+P2-06 prepared candidate / tx template cache
+P2-07 cache invalidation + prebuild benchmark
 
 P3-01 crate integration / exact fallback
 P3-02 premium health
@@ -3014,7 +3358,8 @@ P5-03 NO_SWAP
 P5-04 local/precomputed route
 P5-05 free route
 P5-06 receivership builder
-P5-07 staging fixtures
+P5-07 prepared execution plan
+P5-08 staging fixtures
 
 T-01 tag transaction
 T-02 tag state tracking
@@ -3049,6 +3394,13 @@ P9-01 production metrics
 P9-02 provider review
 P9-03 inventory review
 P9-04 protocol-upgrade watch
+
+K-01 ingress loss attribution
+K-02 SubscribeDeshred economic/access qualification
+K-03 raw-shred/validator escalation only if justified
+K-04 Jito/region optimization
+K-05 DirectTPU SWQoS/stake qualification
+K-06 DirectTPU build only if qualification passes
 ```
 
 ---
@@ -3158,7 +3510,8 @@ gates/project_0/
 
 ```text
 ARCHITECTURE:
-    FREEZE — AUTHORITATIVE v4.2
+    REVIEW CANDIDATE v4.4
+    v4.2 REMAINS AUTHORITATIVE UNTIL PROMOTION
 
 ONE PRODUCTION CORE:
     REQUIRED
@@ -3184,7 +3537,8 @@ WS/RPC ROLE:
 
 SHRED / DESHRED:
     NOT S1
-    K-ONLY AFTER MEASURED INGRESS BOTTLENECK
+    SubscribeDeshred = OPTIONAL K PRE-EXECUTION SENSOR ONLY
+    RAW SHRED = LATER K-ONLY AFTER MEASURED INGRESS BOTTLENECK
 
 PYTHON LIVE HOTPATH:
     FORBIDDEN
@@ -3218,6 +3572,14 @@ SOLANA TX V1:
     ACTIVE
     MUST BE SUPPORTED
 
+FIRST EURO SUBMISSION:
+    RPC + JITO CORE
+
+RACE SUBMISSION:
+    JITO gRPC ONLY AFTER S1-RACE PASS
+    DIRECT TPU = K-ONLY + SWQoS/STAKE QUALIFICATION
+    UNSTAKED/UNPAIRED DIRECT TPU = NOT RACE-PRIMARY
+
 PAID PROVIDER:
     NONE REQUIRED BY ARCHITECTURE
     ONLY AFTER MEASURED POSITIVE INCREMENTAL NET VALUE
@@ -3232,31 +3594,96 @@ LIVE:
 
 ---
 
+# 12A. Fable Review Checklist für v4.4
+
+Fable soll diese Review-Fassung **nicht nur sprachlich**, sondern technisch gegen aktuelle Primärquellen prüfen.
+
+## A — Ingress
+
+- Ist v4.2-S1 weiterhin korrekt: Race=BinaryGeyser, Long-Tail/Premium=WSS+Snapshot/Reconcile?
+- Ist `SubscribeDeshred` korrekt als Triton-spezifischer optionaler K-Sensor eingeordnet?
+- Ist `SubscribeDeshred` tatsächlich pre-execution und nicht authoritative/canonical?
+- Gibt es aktuell bessere/kostenlose Mainnet-Binary-Quellen, die S1-RACE ohne Paid-Abo ermöglichen?
+
+## B — Submission
+
+- Ist es korrekt, Direct TPU vollständig nach K zu verschieben?
+- SWQoS: welche Kapazität ist für unstaked/unpaired Direct-TPU-Verbindungen aktuell real verfügbar?
+- Welche trusted-validator/virtual-stake-Konstellation wäre nötig, damit Direct TPU überhaupt Race-Primary werden kann?
+- Jito gRPC: aktueller Access, Auth, Regionen, TxV1, Bundle-/Single-TX-Semantik, Kosten/Tips?
+- Reicht für First-Euro-Live `RpcSubmitter` + Jito-Core ohne gRPC-Race-Ausbau?
+- Ist parallele/redundante Submission derselben TX sicher und wirtschaftlich sinnvoll?
+
+## C — Prebuild
+
+- Welche Teile des Project-0 Receivership-TX lassen sich wirklich vor dem Trigger kompilieren/serialisieren?
+- Welche Felder müssen wegen v0/v1, Lifetime, Fees, route quote, account ordering oder Signatur zwingend spät gepatcht werden?
+- Welche Invalidation-Events fehlen im Prepared-Candidate-Cache?
+
+## D — Economics / Scope
+
+- Entsteht irgendwo eine versteckte Paid-Provider-Pflicht?
+- Ist irgendeine Speed-Optimierung nur theoretisch und sollte nach K verschoben werden?
+- Bleibt ein einziger Production-Core erhalten?
+- Bleiben Race und Long-Tail gleichzeitig funktional, ohne Zweitentwicklung?
+
+Erst nach dieser Prüfung darf v4.4 die autoritative v4.2 ersetzen.
+
+---
+
 # 13. Verbindlicher Start
 
-Ab jetzt parallel:
+## Hauptpfad — First Euro
+
+Parallel vorbereiten:
 
 ```text
-P0  → eva01/mary vollständig analysieren, Reuse-/Lizenzmatrix und Remote-API-Kosten-Audit erstellen
-P1A → aktuellen Mainnet-Stand on-chain einfrieren
-P1B → 0.1.12 vollständig vorbereiten
-C0  → Race + Long-Tail Markt quantifizieren
-H0  → reale historische Liquidationen analysieren
-
-S0  → finalen Rust-Workspace aufbauen
+P0  → nur die für Current Mainnet / Health / Reuse unmittelbar nötigen Entscheidungen zuerst
+P1A → aktuellen Mainnet-Stand einfrieren
+P1B → 0.1.12 vorbereiten; bei Deployment sofort Promotion/Requalification
+C0  → Long-Tail/Premium-Markt quantifizieren
+S0  → finalen Rust-Workspace
 ```
 
-Danach:
+Dann höchste Priorität:
 
 ```text
-S1 → S2 → S3 → S4
+S1-LT PASS
+→ S2
+→ S3-CORE PASS
+→ P2
+→ P3
+→ P4A
+→ P5
+→ T
+→ P6-LT
+→ S4 PASS vor value-bearing LIVE
+→ P8-LT
+→ erster realisierter Netto-Profit
 ```
 
-und nach Merge Gate:
+## Parallel / danach — Race
 
 ```text
-P2 → P3 → P4A → P5 → T → P6 → P7 → P4B → P8 → P9 → K
+S1-RACE qualification
+→ S3-R01 Jito gRPC
+→ S3-R02 prewarm
+→ S3-R03 race benchmark
+→ P6-RACE evidence
+→ Race LIVE gate
 ```
+
+Nur bei gemessenem Bottleneck/Mehrwert:
+
+```text
+K SubscribeDeshred
+K Raw Shred
+K Direct TPU + SWQoS/stake path
+K own validator/node/region/kernel/NIC
+```
+
+H0, P7 und P4B laufen als Evidence/Optimization weiter, dürfen aber den First-Euro-Build nicht künstlich verzögern, solange die für sichere Controlled-LIVE-Freigabe notwendigen Gates erfüllt sind.
 
 **Keine zweite Entwicklung. Kein späterer Race-Rewrite. Kein späterer Rust-Rewrite.  
-Von Anfang an ein schneller, schlanker, kostenoptimierter finaler Production-Core.**
+Ein finaler Core; Long-Tail/Premium wird zuerst wirtschaftlich aktiviert, Race wird danach auf demselben Core freigeschaltet.  
+Diese v4.4 ist nach Fable-Review promoted und eingefroren.**
