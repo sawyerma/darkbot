@@ -170,12 +170,14 @@ fn rlp_list(items: Vec<Vec<u8>>) -> Vec<u8> {
 
 const PUBLIC_RPC_HOST: &str = "bsc-dataseed.bnbchain.org";
 const FORTY_EIGHT_CLUB_HOST: &str = "puissant-builder.48.club";
+const BLOCKRAZOR_RPC_HOST: &str = "bsc.blockrazor.xyz";
 const HTTPS_PORT: u16 = 443;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TransportKind {
     PublicRpc,
     FortyEightClubBundle,
+    BlockRazorRpcBundle,
 }
 
 impl TransportKind {
@@ -183,6 +185,7 @@ impl TransportKind {
         match self {
             Self::PublicRpc => PUBLIC_RPC_HOST,
             Self::FortyEightClubBundle => FORTY_EIGHT_CLUB_HOST,
+            Self::BlockRazorRpcBundle => BLOCKRAZOR_RPC_HOST,
         }
     }
 
@@ -194,6 +197,7 @@ impl TransportKind {
         match self {
             Self::PublicRpc => "public_bsc_rpc_eth_sendRawTransaction",
             Self::FortyEightClubBundle => "48club_puissant_builder_eth_sendBundle",
+            Self::BlockRazorRpcBundle => "blockrazor_bsc_rpc_eth_sendBundle",
         }
     }
 }
@@ -482,6 +486,10 @@ fn run_once(
             r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendBundle","params":[{{"txs":["0x{}"],"noMerge":true}}]}}"#,
             raw_hex
         ),
+        TransportKind::BlockRazorRpcBundle => format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendBundle","params":[{{"txs":["0x{}"]}}]}}"#,
+            raw_hex
+        ),
     };
 
     let request = http_request(transport.host(), &send_body);
@@ -595,12 +603,13 @@ fn main() {
 
     assert!(
         args.len() == 3 || args.len() == 4,
-        "g05_remote_e2e <g03_rust_inputs.json> <g03_rust_output.json> [--48club-builder]"
+        "g05_remote_e2e <g03_rust_inputs.json> <g03_rust_output.json> [--48club-builder|--blockrazor-rpc-bundle]"
     );
 
     let transport = match args.get(3).map(String::as_str) {
         None => TransportKind::PublicRpc,
         Some("--48club-builder") => TransportKind::FortyEightClubBundle,
+        Some("--blockrazor-rpc-bundle") => TransportKind::BlockRazorRpcBundle,
         Some(other) => panic!("unsupported transport mode: {other}"),
     };
 
@@ -695,7 +704,10 @@ fn main() {
     // Public RPC supports eth_chainId directly. The 48Club builder path is
     // qualified by the real eth_sendBundle request itself; the payload is
     // deliberately invalid RLP, so it cannot become a valid/value-bearing tx.
-    let chain_id_verified = if transport == TransportKind::PublicRpc {
+    let chain_id_verified = if matches!(
+        transport,
+        TransportKind::PublicRpc | TransportKind::BlockRazorRpcBundle
+    ) {
         let chain_body =
             r#"{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}"#;
 
