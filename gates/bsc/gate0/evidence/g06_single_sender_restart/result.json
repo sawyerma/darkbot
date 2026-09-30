@@ -1,0 +1,27 @@
+{
+  "status": "PASS_FAIL_CLOSED_RESTART_OFFLINE",
+  "gate_status": "G0.6_PARTIAL",
+  "tests_passed": 26,
+  "tests_failed": 0,
+  "command": "cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --lib --bins -- --nocapture",
+  "implementation": "Single-sender FencedLane wrapping existing IntentLane; exclusive create_new fence, file sync and directory sync before admission; no removal or automatic rearm",
+  "tested": [
+    "Reserved/Prepared/Sending/Confirmed drop and reopen quarantined",
+    "second owner denied",
+    "empty/corrupt existing fence quarantined",
+    "filesystem error cannot arm",
+    "dedup and unknown-send HALT retained",
+    "existing guarded builder with memory stream cannot restart with same nonce"
+  ],
+  "limits": [
+    "No automatic canonical reconciliation/resume",
+    "State-loss simulated through drop/reopen, not OS power-failure certification",
+    "Same stable registry must be used across restarts; do not delete fence or choose another registry to bypass quarantine",
+    "Current diagnostic CLI still intentionally creates isolated invalid-wire probes; future G0.7 must arm through FencedLane",
+    "No live wallet/current-state/0.001 BNB validation yet"
+  ],
+  "hotpath_filesystem_io": false,
+  "multi_sender_implemented": false,
+  "new_real_latency_measurement": false,
+  "test_output_sha256": "2e17c4b86fd344170df3f2f1ef3402617b6c0b7829ac5f41f940a6989c6d4d1f"
+}

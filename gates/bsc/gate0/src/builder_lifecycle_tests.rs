@@ -215,3 +215,51 @@ fn wrong_sender_lane_is_rejected_before_any_transport_write() {
     assert!(result.is_err());
     assert!(sink.written.is_empty());
 }
+
+#[test]
+fn persistent_fence_covers_existing_builder_write_and_restart() {
+    use darkbot_gate0::restart_fence::{FencedLane, OpenError};
+    let ctx = context();
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-builder-fence-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut armed = FencedLane::arm(
+        &root,
+        56,
+        sender(&ctx),
+        814,
+        1,
+        alloy_primitives::B256::repeat_byte(1),
+    )
+    .unwrap();
+    let mut sink = MemoryTransport::new(
+        r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"transaction type not supported"}}"#,
+    );
+    run_once(
+        &ctx,
+        &mut sink,
+        814,
+        true,
+        TransportKind::BlockRazorRpcBundle,
+        armed.for_transport(),
+    );
+    assert!(!sink.written.is_empty());
+    drop(armed);
+    assert!(matches!(
+        FencedLane::arm(
+            &root,
+            56,
+            sender(&ctx),
+            814,
+            1,
+            alloy_primitives::B256::repeat_byte(1)
+        ),
+        Err(OpenError::Quarantined(_))
+    ));
+    std::fs::remove_dir_all(root).unwrap();
+}

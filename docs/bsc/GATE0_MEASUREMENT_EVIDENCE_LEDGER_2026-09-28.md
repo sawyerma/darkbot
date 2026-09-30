@@ -1857,7 +1857,7 @@ Belege: `gates/bsc/gate0/evidence/g06_intent_lane/result.json` und `test_output.
 
 ## 2026-10-01 — Builder-Grenze, Head-of-line, Recovery und Empfängerbindung
 
-**G0.6 bleibt PARTIAL. Die konservative Single-Sender-Spur erfüllt das <1-ms-HoL-Ziel bei ungeklärter Vorgänger-Nonce nicht.** Das ist eine nachgewiesene Grenze dieses Modells, kein weiterer fehlender QuickNode-Capture.
+**G0.6 bleibt PARTIAL. Der injizierte HoL-Test beweist Kopplung, keine reale Verletzung des <1-ms-Ziels.** Single-Sender bleibt; aus diesem Test folgt keine notwendige Architekturänderung.
 
 ### Bestehende Builder-Anbindung, lokal geprüft
 
@@ -1876,7 +1876,7 @@ Nonce N wird `Sending`, acht nachfolgende Intents sind vollständig vorbereitet.
 
 Dies sind zwei gezielte lokale Fehlerszenarien, **keine Netzwerk-/BUY-Latenzen und keine Perzentilschätzung**. Ohne HALT oder separate Resolution gibt es in der Spur keinen zeitlichen Freigabemechanismus; die Blockierung ist strukturell unbeschränkt. Ein schneller `NotReady`-Rückgabewert verkürzt die Wartezeit des BUY nicht. HALT beendet nur den Versuch und macht aus dem blockierten Kauf keinen erfolgreichen Entry.
 
-**Architekturentscheidung vor G0.7:** Eine einzelne confirmation-gated Sender-Spur kann spätere Birth-BUYs verlieren, sobald N unklar bleibt. Mehrere isolierte Sender-Spuren sind ein zu prüfender Ausweg, noch kein bewiesener Gewinn: jede Spur behält ihre Nonce-Abhängigkeiten; zusätzlich braucht es portfolio-weite Intent-Deduplication, Funding und Recovery. Pipelining auf demselben Sender hebt die on-chain Nonce-Abhängigkeit nicht auf. Hier wurde weder automatisch auf Multi-Sender umgebaut noch ein Latenzversprechen abgeleitet.
+**Einordnung korrigiert:** Die 25 ms wurden künstlich injiziert. Reale HoL-Latenz ist NOT MEASURED, reale sub-1-ms-Verletzung NOT PROVEN. Der Test verlangt keinen Multi-Sender-Umbau. Single-Sender bleibt gemäß Projektentscheidung. Das ist ebenso wenig ein neuer Latenz-PASS; Build/Sign, Transport und tatsächliche Acquisition bleiben getrennte Nachweise.
 
 ### Restart: reproduzierter Blocker und minimaler Vertrag
 
@@ -1895,4 +1895,17 @@ Minimaler Recovery-Vertrag, **Design, noch nicht implementiert**:
 256 finale signierte Envelopes über acht parallele Sender-Spuren geprüft: Ticket → Chain/Nonce/Token → Portal-Ziel und dekodierte BUY-Calldata → kryptographisch rekonstruierter Absender. Die direkte Portal-ABI enthält kein separates Recipient-Feld; die Zuordnung Empfänger = direkter Caller gilt unter der bereits eingefrorenen G0.3-Semantik. Dies ist kein neuer Beweis für beliebige zukünftige Implementierungen oder Live-State.
 
 Befehl: `cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --lib --bins -- --nocapture`.
-**21 Tests bestanden, 0 fehlgeschlagen.** Raw-Ausgabe und strukturierte Ergebnisse: `gates/bsc/gate0/evidence/g06_submission_hol_recovery/`. Die Matrix verweist darauf. Kein Mainnet-BUY, kein Netzwerk-Capture, kein neuer G0.5-Microbenchmark. Offen bleiben die HoL-Architekturentscheidung, implementierte persistente Recovery/kanonische Reconciliation sowie die bereits benannte Live-Sender/-Betrag/-State-Qualifikation.
+**21 Tests bestanden, 0 fehlgeschlagen.** Raw-Ausgabe und strukturierte Ergebnisse: `gates/bsc/gate0/evidence/g06_submission_hol_recovery/`. Die Matrix verweist darauf. Kein Mainnet-BUY, kein Netzwerk-Capture, kein neuer G0.5-Microbenchmark. Offen bleiben die kanonische Reconciliation sowie die bereits benannte Live-Sender/-Betrag/-State-Qualifikation. Die nachstehende Startsperre ergänzt jetzt die fail-closed Recovery; kein Multi-Sender-Umbau wird verlangt.
+
+
+## 2026-10-01 — Korrigierte HoL-Einordnung und persistente Single-Sender-Startsperre
+
+Verbindliche Einordnung: **HoL coupling PROVEN; 25-ms scenario ARTIFICIALLY INJECTED; real HoL latency NOT MEASURED; real sub-1-ms violation NOT PROVEN; architecture change required NO aus diesem Test.** Single-Sender bleibt. Die ursprünglichen Rohwerte bleiben erhalten; ihre zu weit gehende FAIL-Interpretation wurde korrigiert. Matrix `reviewed_head` ist auf den tatsächlich geprüften Ausgangscommit aktualisiert; `new_measurement_performed=true` bezeichnet ausdrücklich die lokale injizierte Messung, keine Netzwerk-/BUY-Messung.
+
+`restart_fence::FencedLane` umschließt jetzt die bestehende IntentLane. Vor der ersten Admission wird im stabilen Registry-Verzeichnis eine eindeutige Chain-/Sender-Fence mit `create_new` angelegt, geschrieben und per Datei-/Directory-Sync dauerhaft gemacht. Existiert die Fence bereits — auch leer oder beschädigt — liefert Arm ausschließlich `Quarantined`, keine Lane. Schreib-/Sync-Fehler geben keine Lane zurück und entfernen keine eventuell entstandene Fence. Während Reserve/Prepare/BeginSend/Confirm erfolgt kein Dateizugriff. Die Fence bleibt nach Drop und auch nach Confirm bestehen.
+
+**Recovery-Scope:** fail-closed Wiederanlauf ist implementiert; automatische Wiederaufnahme ist es nicht. Alle unbekannten Session-Zustände bleiben quarantänisiert. Registry-Pfad über Starts stabil halten; Fence weder löschen noch durch einen neuen Pfad umgehen. Ein kanonischer Reconciler und kontrollierte Wiederfreigabe fehlen weiterhin. Die vorhandenen isolierten Invalid-Wire-Diagnoseprobes sind keine G0.7-Starts; ein künftiger werttragender Lauf muss zwingend über FencedLane armiert werden. Kein Multi-Lane-Code angelegt.
+
+**26 Tests bestanden, 0 fehlgeschlagen**, mit demselben Offline-Cargo-Befehl. Neu geprüft: Wiederanlauf aus allen vier Zuständen, zweiter Owner, leere/kaputte Fence, Filesystem-Fehler, bestehende Dedup-/HALT-Regeln und die bestehende Builder-Grenze mit lokalem Memory-Stream unter persistenter Fence. Die Tests simulieren Zustandsverlust per Drop/Reopen; keine Behauptung einer Hardware-Power-Loss-Zertifizierung.
+
+Evidence: `gates/bsc/gate0/evidence/g06_single_sender_restart/`. G0.6 bleibt PARTIAL; die Startsperre ist kein Live-Scope-PASS. Nächste fachliche Qualifikation bleibt der bestehende Direct-Portal-Pfad für den vorgeschlagenen 0,001-BNB-Betrag und tatsächlichen Sender/State sowie die kontrollierte kanonische Reconciliation. Kein Mainnet-BUY, kein neues Latenzversprechen; der Mainnet-Vertrag bleibt nicht autorisiert.

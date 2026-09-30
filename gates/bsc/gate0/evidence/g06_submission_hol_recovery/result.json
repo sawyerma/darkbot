@@ -20,7 +20,7 @@
     "legacy_cli": "isolated invalid-wire probes reset dry lane per diagnostic sample; not production lifecycle"
   },
   "head_of_line": {
-    "status": "FAIL_SUB_1MS_FOR_UNRESOLVED_HEAD_SCENARIO",
+    "status": "COUPLING_PROVEN_REAL_LATENCY_NOT_MEASURED",
     "samples": [
       {
         "actionable_to_first_blocked_ns": [
@@ -75,7 +75,15 @@
         "outcome": "SIMULATED_RESOLUTION"
       }
     ],
-    "interpretation": "25ms artificial unknown-head hold; local elapsed time includes scheduler delay. Not network/inclusion/BUY latency. Current lane has no automatic bounded release; unknown head blocks indefinitely without external intervention."
+    "interpretation": "Artificial 25ms hold demonstrates coupling only. It does not prove a real sub-1ms violation or require architecture change. Raw scenario samples retained.",
+    "classification": {
+      "coupling": "PROVEN",
+      "scenario_25ms": "ARTIFICIALLY_INJECTED",
+      "real_hol_latency": "NOT_MEASURED",
+      "sub_1ms_violation": "NOT_PROVEN",
+      "architecture_change_required": false,
+      "decision": "Keep single sender; injected duration does not establish real performance or require multi-sender"
+    }
   },
   "recovery": {
     "status": "BLOCKER_REPRODUCED",

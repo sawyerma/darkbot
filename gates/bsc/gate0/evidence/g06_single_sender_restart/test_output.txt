@@ -1,0 +1,123 @@
+   Compiling darkbot-gate0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/gates/bsc/gate0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.55s
+     Running unittests src/lib.rs (gates/bsc/gate0/target/debug/deps/darkbot_gate0-6a65734d4150708e)
+
+running 13 tests
+G06_RECOVERY {"blind_reuse_possible":true,"previous_state":"Reserved","restart_nonce_source":"deliberately_stale","status":"BLOCKER_REPRODUCED"}
+G06_RECOVERY {"blind_reuse_possible":true,"previous_state":"Prepared","restart_nonce_source":"deliberately_stale","status":"BLOCKER_REPRODUCED"}
+G06_RECOVERY {"blind_reuse_possible":true,"previous_state":"Sending","restart_nonce_source":"deliberately_stale","status":"BLOCKER_REPRODUCED"}
+G06_RECOVERY {"blind_reuse_possible":true,"previous_state":"Confirmed","restart_nonce_source":"deliberately_stale","status":"BLOCKER_REPRODUCED"}
+test intent_lane::tests::conflicting_preparation_and_confirmation_rejected ... ok
+test intent_lane::tests::capacity_and_nonce_exhaustion_fail_closed ... ok
+test intent_lane::tests::duplicate_before_and_after_confirmation_never_consumes_nonce ... ok
+test intent_lane::tests::reversed_build_completion_cannot_bypass_unready_or_unconfirmed_head ... ok
+test intent_lane::tests::tickets_cannot_cross_sender_or_chain_lanes ... ok
+test intent_lane::tests::unknown_write_outcome_halts_without_retry_replacement_or_nonce_reuse ... ok
+test intent_lane::lifecycle_measurements::diagnostic_restart_loses_all_four_in_memory_states ... ok
+test intent_lane::tests::eight_workers_repeated_signals_produce_exactly_1000_permits ... ok
+test restart_fence::tests::filesystem_failure_cannot_return_armed_lane ... ok
+G06_HOL {"actionable_to_first_blocked_ns":[834,250,167,166,1333,208,250,166],"actionable_to_outcome_ns":[30058334,30053333,30051083,30049000,30046833,30042875,30040458,30038166],"blocked_followers":8,"injected_hold_ns":25000000,"network_measurement":false,"outcome":"HALT"}
+test restart_fence::tests::armed_lane_retains_dedup_and_unknown_send_halt ... ok
+G06_FENCE Reserved: restart QUARANTINED, no nonce or intent reused
+G06_HOL {"actionable_to_first_blocked_ns":[208,125,83,125,541,83,125,125],"actionable_to_outcome_ns":[27499125,27497167,27495458,27493875,27492291,27490125,27488583,27487000],"blocked_followers":8,"injected_hold_ns":25000000,"network_measurement":false,"outcome":"SIMULATED_RESOLUTION"}
+test intent_lane::lifecycle_measurements::targeted_head_of_line_unknown_head_blocks_all_prepared_followers ... ok
+G06_FENCE Prepared: restart QUARANTINED, no nonce or intent reused
+test restart_fence::tests::corrupt_or_empty_fence_never_rearms ... ok
+G06_FENCE Sending: restart QUARANTINED, no nonce or intent reused
+G06_FENCE Confirmed: restart QUARANTINED, no nonce or intent reused
+test restart_fence::tests::every_restart_state_and_second_owner_is_quarantined ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running unittests src/main.rs (gates/bsc/gate0/target/debug/deps/darkbot_gate0-e0912251b444e2a9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g03.rs (gates/bsc/gate0/target/debug/deps/g03-f85be6ce1aa74ca7)
+
+running 3 tests
+
+thread 'tests::reject_unbounded_slippage' (189495) panicked at src/bin/g03.rs:47:5:
+invalid test slippage policy
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test tests::minimum_keeps_exact_integer_bound ... ok
+test tests::widened_product_does_not_wrap ... ok
+test tests::reject_unbounded_slippage - should panic ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_e2e_local.rs (gates/bsc/gate0/target/debug/deps/g05_e2e_local-bb0a28f37997f2af)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_ipc.rs (gates/bsc/gate0/target/debug/deps/g05_ipc-c917b15584f9d233)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_local.rs (gates/bsc/gate0/target/debug/deps/g05_local-5e6ab2d683ddcd1a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_remote_e2e.rs (gates/bsc/gate0/target/debug/deps/g05_remote_e2e-1bb41cd0cd597856)
+
+running 5 tests
+
+thread 'lifecycle_tests::wrong_sender_lane_is_rejected_before_any_transport_write' (189524) panicked at src/bin/g05_remote_e2e.rs:391:5:
+assertion `left == right` failed: lane/signer mismatch
+  left: (56, 0x7777777777777777777777777777777777777777)
+ right: (56, 0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test lifecycle_tests::mismatched_request_permit_never_reaches_writer ... ok
+test lifecycle_tests::wrong_sender_lane_is_rejected_before_any_transport_write ... ok
+test lifecycle_tests::consumed_permit_cannot_retry_partial_write_or_flush_failure ... ok
+
+thread 'lifecycle_tests::both_existing_builder_paths_consume_permit_without_confirming_http_or_ack' (189520) panicked at src/bin/g05_remote_e2e.rs:600:5:
+invalid transaction unexpectedly not rejected: {"jsonrpc":"2.0","id":2,"result":"0x1234"}
+
+thread 'lifecycle_tests::both_existing_builder_paths_consume_permit_without_confirming_http_or_ack' (189520) panicked at src/bin/g05_remote_e2e.rs:600:5:
+invalid transaction unexpectedly not rejected: {"jsonrpc":"2.0","id":2,"result":"0x1234"}
+test lifecycle_tests::both_existing_builder_paths_consume_permit_without_confirming_http_or_ack ... ok
+test lifecycle_tests::persistent_fence_covers_existing_builder_write_and_restart ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src/bin/g05_remote_e2e_stability.rs (gates/bsc/gate0/target/debug/deps/g05_remote_e2e_stability-d3c769e4cf44b465)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_remote_transport.rs (gates/bsc/gate0/target/debug/deps/g05_remote_transport-3cb7fcd16c7dc9e1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g06_concurrency.rs (gates/bsc/gate0/target/debug/deps/g06_concurrency-23bef000a2bf1df5)
+
+running 5 tests
+LIMITATION_REPRODUCED: unique nonces complete out of order; no dispatch or nonce-gap guarantee
+test qualification_tests::diagnostic_atomic_nonce_allocation_does_not_order_completion ... ok
+LIMITATION_REPRODUCED: same economic intent, two distinct hashes; hash uniqueness is not deduplication
+test qualification_tests::diagnostic_duplicate_intent_has_distinct_hash_when_nonce_changes ... ok
+test qualification_tests::dry_lane_orders_existing_signed_buy_envelopes ... ok
+G06_RECIPIENT 256 final envelopes; 8 distinct sender lanes; ticket/token/recovered sender binding PASS; pinned implicit-recipient semantics only
+test qualification_tests::parallel_final_envelopes_bind_ticket_token_and_implicit_recipient ... ok
+1024 envelopes validated; short signature scalars=10
+test qualification_tests::signed_envelopes_are_canonical_and_recover_the_correct_sender ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.36s
+
+     Running unittests src/bin/g06_flap_pending_decode.rs (gates/bsc/gate0/target/debug/deps/g06_flap_pending_decode-b3eb15322091a0e8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
