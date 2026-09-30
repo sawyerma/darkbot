@@ -51,7 +51,7 @@ No production code was changed for the legacy-compatibility replay experiments d
 
 Database:
 
-`data/market_capture_30m_clean_v2.sqlite`
+`data/solana_pump/market_capture_30m_clean_v2.sqlite`
 
 Run:
 
@@ -171,7 +171,7 @@ Therefore:
 
 Current config:
 
-`config/strategy_c_launch_sniper_0ms_15x.json`
+`config/solana_pump/strategy_c_launch_sniper_0ms_15x.json`
 
 Core policy:
 
@@ -1340,7 +1340,7 @@ A controlled 10-transaction Solana Devnet test was executed from the camper Mac 
 
 Raw result file created locally:
 
-`exports/devnet_t4_t5_latency_20260923T211907Z.json`
+`exports/solana_pump/devnet_t4_t5_latency_20260923T211907Z.json`
 
 ### 31.1 Important validity limitation
 
@@ -1445,7 +1445,7 @@ Receiver setup:
 
 Raw result file created locally:
 
-`exports/devnet_t4_t5_SUCCESS_20260923T212347Z.json`
+`exports/solana_pump/devnet_t4_t5_SUCCESS_20260923T212347Z.json`
 
 ### 33.1 Successful-sample summary
 
