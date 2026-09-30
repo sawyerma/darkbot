@@ -7,7 +7,7 @@ DB rows or prints happen here.
 
 from __future__ import annotations
 
-from darkbot.token_accounts import create_account_profiles
+from darkbot.solana_pump.token_accounts import create_account_profiles
 
 import base64
 import binascii
@@ -17,7 +17,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Any
 
-from darkbot.domain import (
+from darkbot.solana_pump.domain import (
     Completeness, CoverageState, EventType, MarketState, NormalizedEnvelope, NormalizedEvent, QuoteScopeStatus, RawEnvelope, ValidationStatus, VenueState,
 )
 
