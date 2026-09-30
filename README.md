@@ -66,11 +66,11 @@ According to the current measurement ledger:
 
 - **Human-readable master measurement ledger:** [docs/bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md](docs/bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md)
 - **G0.1 evidence freeze:** [docs/bsc/GATE0_G01_EVIDENCE_FREEZE_2026-09-27.md](docs/bsc/GATE0_G01_EVIDENCE_FREEZE_2026-09-27.md)
-- **Raw/current Gate-0 evidence:** [gate0/evidence/](gate0/evidence/)
-- **Rust Gate-0 harnesses:** [gate0/src/](gate0/src/)
-- **Gate-0 verification tools:** [gate0/tools/](gate0/tools/)
+- **Raw/current Gate-0 evidence:** [gates/bsc/gate0/evidence/](gates/bsc/gate0/evidence/)
+- **Rust Gate-0 harnesses:** [gates/bsc/gate0/src/](gates/bsc/gate0/src/)
+- **Gate-0 verification tools:** [gates/bsc/gate0/tools/](gates/bsc/gate0/tools/)
 
-The files under gate0/ are current Gate-0 engineering/evidence code. They are **not automatically the final BSC production runtime**.
+The files under gates/bsc/gate0/ are current Gate-0 engineering/evidence code. They are **not automatically the final BSC production runtime**.
 
 ---
 
@@ -257,7 +257,7 @@ At the moment this ledger intentionally contains **N/A**, not invented values, b
 darkbot/
   existing Solana/Pump.fun Python reference runtime
 
-gate0/
+gates/bsc/gate0/
   current BSC Gate-0 Rust harnesses, tools and evidence
 
 docs/
