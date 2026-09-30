@@ -1,0 +1,22 @@
+{
+  "status": "G0.5_48CLUB_BUILDER_STABILITY",
+  "runs": 10,
+  "total_samples": 1000,
+  "total_over_1ms": 22,
+  "fraction_over_1ms": 0.022,
+  "best_p99_us": 658.125,
+  "worst_p99_us": 1950.542,
+  "worst_max_us": 2808.041,
+  "runs_with_p99_under_1ms": 5,
+  "runs_with_max_under_1ms": 3,
+  "json_rpc_error_histogram": {
+    "-32000: transaction type not supported": 1000
+  },
+  "summary_sha256": "cc7a522bee287a765ba38148efc07a2ade5ddf6422ee5138e3fc97588e6e6944",
+  "interpretation": "48Club transport semantics confirmed, but the warm T_pre-to-T_send path is not tail-stable below 1 ms on this client/route. Candidate remains ADAPT, not final G0.5 PASS.",
+  "non_claims": [
+    "Invalid wire transaction only",
+    "No valid or value-bearing BUY sent",
+    "No proof of builder inclusion, ordering, acquisition or T_buy"
+  ]
+}
