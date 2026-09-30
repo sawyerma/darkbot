@@ -1,155 +1,117 @@
-# DarkBot — Current Multichain Roadmap
+# DarkBot — Current Project Map
 
-Status: **CURRENT HIGH-LEVEL OVERVIEW**
-Updated: 2026-09-27
+Status: **CURRENT HIGH-LEVEL OVERVIEW**  
+Updated: 2026-09-30
 
-Detailed source of truth:
-- Solana current production/research documents remain authoritative for the existing Pump.fun runtime.
-- BSC scheduling: `docs/BSC_DUAL_VENUE_ROADMAP.md`
-- BSC first feasibility gate: `docs/GATE0_TESTPLAN_SHORT.md`
-- BSC birth-entry objective: `docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md`
-- BSC production runtime after PASS: `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
+DarkBot currently contains three distinct engineering lines. They share selected principles and later selected Rust infrastructure, but they are **not the same strategy or protocol**.
 
-Older versions of this file are historical only and remain available through Git history.
-
-## 0. Global execution invariant
-
-For birth-sniping, DarkBot trades **directly on-chain**. Venue websites/frontends are never in the BUY path.
-
-```
-chain/pending signal -> local decision/build/sign -> inclusion adapter -> venue contract
-```
-
-No browser, page refresh, frontend trading API or manual action may gate execution. If required BUY inputs are available before first tradability, precompute/pre-submit through a proven ordered path as far as safely possible; otherwise react to the earliest valid chain evidence. Never wait for frontend publication.
-
-## 1. Product shape
-
-```
+~~~text
 DarkBot
-  |
-  +-- Solana / Pump.fun
-  |     existing runtime remains operational
-  |
-  +-- BSC
-        Gate 0 first
-        -> promote only a proven venue/path
-        -> native Rust production runtime after PASS
-```
+├── BSC / Birth Entry
+│   └── earliest technically possible on-chain BUY after launch
+├── Solana / Pump.fun
+│   └── existing launch-sniper / strategy / capture / replay reference system
+└── Solana / Project 0 Liquidator
+    └── liquidation detection, exact health, receivership execution and competition
+~~~
 
-Do not force both chains into one runtime before the new native path is independently proven.
+The root [README](../README.md) is the navigation entry point.
 
-## 2. Common economic objective
+## 1. BSC / Birth Entry
 
-For a birth-sniping venue the relevant product question is:
+Goal:
 
-> How early can a real successful BUY execute after the asset first becomes buyable?
+~~~text
+earliest actionable pending/chain signal
+→ local decode/quote/build/sign
+→ qualified inclusion path
+→ successful on-chain BUY
+→ acquisition/ordering evidence
+~~~
 
-Local CPU/decoder/sign/submit latency is supporting engineering evidence only.
+Current work is Gate 0. The decisive product result is the actual BUY/acquisition position, not a local benchmark alone.
 
-## 3. Solana
+Authoritative documents:
 
-Current Solana/Pump.fun remains the working baseline.
+- [BSC_DUAL_VENUE_ROADMAP.md](BSC_DUAL_VENUE_ROADMAP.md)
+- [GATE0_TESTPLAN_SHORT.md](GATE0_TESTPLAN_SHORT.md)
+- [BSC_BIRTH_ENTRY_ARCHITECTURE.md](BSC_BIRTH_ENTRY_ARCHITECTURE.md)
+- [BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md](BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md)
+- [GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md](GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md)
 
-A native Solana rewrite is not started merely for symmetry.
+Code/evidence:
 
-Before any later migration:
-- run the same Gate-0 first-BUY feasibility logic;
-- prove the new native path materially improves the actual entry objective;
-- preserve strategy/economic/replay semantics;
-- migrate only after parity and forward validation.
+- [../gate0/](../gate0/)
+- [../gate0/evidence/](../gate0/evidence/)
 
-## 4. BSC
+## 2. Solana / Pump.fun
 
-BSC does not start with the full production architecture.
+Goal:
 
-Current order:
+- preserve and validate the existing Pump.fun semantics;
+- capture/replay real market data;
+- evaluate strategies and economics without pretending PAPER fills are LIVE fills;
+- retain the current Python implementation as the reference system while native Solana work is introduced.
 
-```
-Gate 0:
-  Flap + Four evidence
-  -> pre-T0 actionability
-  -> minimal native build/sign/serialize/queue through T_send
-  -> pending coverage
-  -> inclusion race including ordered builder paths
-  -> controlled real intended-token acquisition + first-external-BUY ordering validation
-  -> PASS / ADAPT / STOP
+Current authoritative status documents:
 
-After PASS:
-  C0 production foundation
-  C1 native ingress
-  C2 state/reorg/replacement
-  C3 local execution engineering gate
-  D/E full promoted venue decoders
-  F production capture
-  G complete economics
-  H Strategy C / EV
-  I PAPER/shadow + final full-production hot-path requalification
-  J production LIVE
-  K measured escalation
-```
+- [RESEARCH_STATUS_2026-09-23.md](RESEARCH_STATUS_2026-09-23.md)
+- [MASTER_TODO_2026-09-20.md](MASTER_TODO_2026-09-20.md)
+- [R9_IMPLEMENTATION_STATUS.md](R9_IMPLEMENTATION_STATUS.md)
+- [phase_a/PHASE_A_REPORT.md](phase_a/PHASE_A_REPORT.md)
 
-## 5. BSC timing rule
+Current code:
 
-Definitions:
+- [../darkbot/chains/solana/](../darkbot/chains/solana/)
+- [../darkbot/venues/pumpfun/](../darkbot/venues/pumpfun/)
+- [../darkbot/runtime/](../darkbot/runtime/)
+- [../darkbot/strategies/](../darkbot/strategies/)
 
-```
-T_pre = earliest actionable evidence before tradability
-T0    = first execution point where the coin is buyable
-T_buy = our successful BUY
-```
+Important: legacy files named P0_* refer to the old **Pump.fun Phase-0/Doctor work**, not to the Project 0 protocol.
 
-Desired product target:
+## 3. Solana / Project 0 Liquidator
 
-```
-T_buy - T0 < 1 ms
-```
+Goal:
 
-Do not manufacture an intra-block millisecond value from ordinary BSC block timestamps.
+~~~text
+native Solana ingress/state
+→ exact Project 0 protocol/risk state
+→ exact liquidation eligibility
+→ economics
+→ receivership execution planning
+→ Jito/RPC submission
+→ landing/winner/PnL reconciliation
+~~~
 
-For BSC the primary externally verifiable first-BUY evidence is transaction ordering:
-- launch/activation transaction;
-- our successful external BUY at the earliest valid following position, with intended-token acquisition evidence;
-- number of successful competing BUYs between them.
+Current phase plan:
 
-## 6. No assumed BSC advantage
+- [SOLANA_PROJECT0_ROADMAP_DRAFT.md](SOLANA_PROJECT0_ROADMAP_DRAFT.md)
 
-BSC pending visibility is a hypothesis to measure, not a guarantee.
+Measurement ledger:
 
-Do not assume:
-- every launch is public pending;
-- fixed -10 ms pre-lead;
-- token address is derivable before launch for every venue;
-- a local node is the fastest inclusion path;
-- a builder ACK equals execution;
-- same block proves <1 ms.
+- [SOLANA_PROJECT0_MEASUREMENT_LEDGER.md](SOLANA_PROJECT0_MEASUREMENT_LEDGER.md)
 
-## 7. Runtime ownership after BSC PASS
+Status:
 
-Production BSC:
-- Go/bsc-geth: chain-client/native hooks only;
-- Rust: runtime semantics, venue decode, state, economics, strategy, build/sign, inclusion, capture/replay/PAPER/LIVE;
-- Python: offline analysis/reporting only.
+- roadmap under technical review;
+- no Project 0 production implementation in the repository yet;
+- no Project 0 measurement may be claimed before evidence is written to the ledger.
 
-No Python BSC trading engine.
+## 4. Shared architecture rule
 
-## 8. Shared strategy relationship
+Do not force BSC and Solana into one fake chain abstraction.
 
-Strategy C is not the Gate-0 feasibility test.
+Share only components that are genuinely generic and proven useful, for example:
 
-First prove that a venue/path can obtain the required early BUY.
+- timing/telemetry;
+- lifecycle/shutdown;
+- bounded channels;
+- journal/replay concepts;
+- measurement discipline;
+- fail-closed handling.
 
-Only afterward evaluate whether Strategy C has positive expectancy after:
-- exact entry;
-- complete protocol costs;
-- gas/tips;
-- failures/reverts;
-- slippage;
-- exit execution.
+Chain and protocol semantics remain separate.
 
-Latency feasibility and economic edge are separate gates.
+## 5. Source-of-truth rule
 
-## 9. Stop rule
-
-If no tested venue/path can achieve sufficiently early real execution after credible ingress/inclusion testing, stop that birth-sniping branch instead of expanding architecture.
-
-If one venue passes and another fails, promote only the passing venue first.
+For each project use its own phase plan and evidence ledger. Historical documents remain useful evidence, but they do not override a newer project-specific source of truth.
