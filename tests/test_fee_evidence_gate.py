@@ -101,18 +101,18 @@ class FeeEvidenceGateTests(unittest.TestCase):
         main_module.Application = FakeApplication
         try:
             run_paper(
-                ROOT / "config/strategy_c_pre_pump_01.json", ROOT / "data/x.sqlite", "test",
+                ROOT / "config/solana_pump/strategy_c_pre_pump_01.json", ROOT / "data/solana_pump/x.sqlite", "test",
                 max_duration_minutes=1, require_economic_within_s=120, max_economic_outage_s=30,
             )
             # If omitted, outage tolerance intentionally falls back to the startup value.
             run_capture(
-                ROOT / "config/strategy_c_pre_pump_01.json", ROOT / "data/x.sqlite", "test",
+                ROOT / "config/solana_pump/strategy_c_pre_pump_01.json", ROOT / "data/solana_pump/x.sqlite", "test",
                 max_duration_minutes=1, require_economic_within_s=90,
             )
             with self.assertRaises(ConfigError):
-                run_capture(ROOT / "config/phase1.json", ROOT / "data/x.sqlite", "test", max_duration_minutes=1, require_economic_within_s=0)
+                run_capture(ROOT / "config/solana_pump/phase1.json", ROOT / "data/solana_pump/x.sqlite", "test", max_duration_minutes=1, require_economic_within_s=0)
             with self.assertRaises(ConfigError):
-                run_capture(ROOT / "config/phase1.json", ROOT / "data/x.sqlite", "test", max_duration_minutes=1, max_economic_outage_s=0)
+                run_capture(ROOT / "config/solana_pump/phase1.json", ROOT / "data/solana_pump/x.sqlite", "test", max_duration_minutes=1, max_economic_outage_s=0)
         finally:
             main_module.Application = original
         self.assertEqual(captured, {"PAPER": (120_000, 30_000), "CAPTURE": (90_000, 90_000)})
