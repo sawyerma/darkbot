@@ -22,7 +22,7 @@ class CaptureCliTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args([
                 "capture",
-                "--config", str(ROOT / "config" / "solana_pump" / "strategy_a_creator_exit_usd_slots.json"),
+                "--config", str(ROOT / "config" / "solana_pump" / "solana_pump" / "strategy_a_creator_exit_usd_slots.json"),
                 "--db", "data/solana_pump/capture.sqlite",
                 "--campaign", "capture_test",
             ])
@@ -45,7 +45,7 @@ class CaptureCliTests(unittest.TestCase):
 
         with patch("darkbot.main.Application", FakeApplication):
             result = run_capture(
-                ROOT / "config" / "solana_pump" / "strategy_a_creator_exit_usd_slots.json",
+                ROOT / "config" / "solana_pump" / "solana_pump" / "strategy_a_creator_exit_usd_slots.json",
                 Path("data/solana_pump/capture.sqlite"),
                 "capture_test",
                 max_duration_minutes=15,
@@ -60,11 +60,11 @@ class CaptureCliTests(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args([
             "edge-analysis",
-            "--source", "exports/solana_pump/basetest_backend_v0.zip",
-            "--out", "exports/solana_pump/backend_edge_analysis",
+            "--source", "old_system/exports/basetest_backend_v0.zip",
+            "--out", "old_system/exports/backend_edge_analysis",
         ])
         self.assertEqual(args.command, "edge-analysis")
-        self.assertEqual(args.source, Path("exports/solana_pump/basetest_backend_v0.zip"))
+        self.assertEqual(args.source, Path("old_system/exports/basetest_backend_v0.zip"))
 
 
 class LegacySourceTests(unittest.TestCase):
