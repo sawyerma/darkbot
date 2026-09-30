@@ -21,7 +21,7 @@ class ChainNotImplemented(NotImplementedError):
 
 
 def _solana_factory() -> Any:
-    from darkbot.chains.solana.chain import SolanaChainAdapter  # lazy: keeps registry import free of feed/fee modules
+    from darkbot.solana_pump.chain.chain import SolanaChainAdapter  # lazy: keeps registry import free of feed/fee modules
 
     return SolanaChainAdapter()
 
