@@ -4,9 +4,9 @@ Status: **BLOCKED UNTIL GATE-0 PASS + PHASE-F ACCEPTANCE**
 Updated: 2026-09-27
 
 Normative parents:
-- `docs/GATE0_TESTPLAN_SHORT.md`
-- `docs/BSC_DUAL_VENUE_ROADMAP.md`
-- `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
+- `docs/bsc/GATE0_TESTPLAN_SHORT.md`
+- `docs/bsc/BSC_DUAL_VENUE_ROADMAP.md`
+- `docs/bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
 
 ## Gate-0 relationship
 
