@@ -56,16 +56,16 @@ According to the current measurement ledger:
 
 ## BSC phase plans / architecture
 
-- **Active phase roadmap:** [docs/BSC_DUAL_VENUE_ROADMAP.md](docs/BSC_DUAL_VENUE_ROADMAP.md)
-- **Gate-0 test plan:** [docs/GATE0_TESTPLAN_SHORT.md](docs/GATE0_TESTPLAN_SHORT.md)
-- **Birth-entry architecture:** [docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md](docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md)
-- **Production Rust runtime after Gate-0 PASS:** [docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md](docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md)
-- **Economics gate contract:** [docs/BSC_ECONOMICS_GATE_CONTRACT.md](docs/BSC_ECONOMICS_GATE_CONTRACT.md)
+- **Active phase roadmap:** [docs/bsc/BSC_DUAL_VENUE_ROADMAP.md](docs/bsc/BSC_DUAL_VENUE_ROADMAP.md)
+- **Gate-0 test plan:** [docs/bsc/GATE0_TESTPLAN_SHORT.md](docs/bsc/GATE0_TESTPLAN_SHORT.md)
+- **Birth-entry architecture:** [docs/bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md](docs/bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md)
+- **Production Rust runtime after Gate-0 PASS:** [docs/bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md](docs/bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md)
+- **Economics gate contract:** [docs/bsc/BSC_ECONOMICS_GATE_CONTRACT.md](docs/bsc/BSC_ECONOMICS_GATE_CONTRACT.md)
 
 ## BSC measurements / evidence
 
-- **Human-readable master measurement ledger:** [docs/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md](docs/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md)
-- **G0.1 evidence freeze:** [docs/GATE0_G01_EVIDENCE_FREEZE_2026-09-27.md](docs/GATE0_G01_EVIDENCE_FREEZE_2026-09-27.md)
+- **Human-readable master measurement ledger:** [docs/bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md](docs/bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md)
+- **G0.1 evidence freeze:** [docs/bsc/GATE0_G01_EVIDENCE_FREEZE_2026-09-27.md](docs/bsc/GATE0_G01_EVIDENCE_FREEZE_2026-09-27.md)
 - **Raw/current Gate-0 evidence:** [gate0/evidence/](gate0/evidence/)
 - **Rust Gate-0 harnesses:** [gate0/src/](gate0/src/)
 - **Gate-0 verification tools:** [gate0/tools/](gate0/tools/)
@@ -117,16 +117,16 @@ The current repository still explicitly distinguishes PAPER from LIVE:
 
 ## Solana/Pump.fun phase/status documents
 
-- **Current research + latency status:** [docs/RESEARCH_STATUS_2026-09-23.md](docs/RESEARCH_STATUS_2026-09-23.md)
-- **Current historical master TODO:** [docs/MASTER_TODO_2026-09-20.md](docs/MASTER_TODO_2026-09-20.md)
-- **Token-2022 / R9 implementation status:** [docs/R9_IMPLEMENTATION_STATUS.md](docs/R9_IMPLEMENTATION_STATUS.md)
-- **Phase-A refactor / parity report:** [docs/phase_a/PHASE_A_REPORT.md](docs/phase_a/PHASE_A_REPORT.md)
-- **Strategy C source of truth:** [docs/STRATEGY_C_SOURCE_OF_TRUTH.md](docs/STRATEGY_C_SOURCE_OF_TRUTH.md)
+- **Current research + latency status:** [docs/solana_pump/RESEARCH_STATUS_2026-09-23.md](docs/solana_pump/RESEARCH_STATUS_2026-09-23.md)
+- **Current historical master TODO:** [docs/solana_pump/MASTER_TODO_2026-09-20.md](docs/solana_pump/MASTER_TODO_2026-09-20.md)
+- **Token-2022 / R9 implementation status:** [docs/solana_pump/R9_IMPLEMENTATION_STATUS.md](docs/solana_pump/R9_IMPLEMENTATION_STATUS.md)
+- **Phase-A refactor / parity report:** [docs/bsc/phase_a/PHASE_A_REPORT.md](docs/bsc/phase_a/PHASE_A_REPORT.md)
+- **Strategy C source of truth:** [docs/solana_pump/STRATEGY_C_SOURCE_OF_TRUTH.md](docs/solana_pump/STRATEGY_C_SOURCE_OF_TRUTH.md)
 
 ## Solana/Pump.fun measurements / evidence
 
-- **Research/latency evidence summary:** [docs/RESEARCH_STATUS_2026-09-23.md](docs/RESEARCH_STATUS_2026-09-23.md)
-- **Phase-A raw benchmark/parity material:** [docs/phase_a/](docs/phase_a/)
+- **Research/latency evidence summary:** [docs/solana_pump/RESEARCH_STATUS_2026-09-23.md](docs/solana_pump/RESEARCH_STATUS_2026-09-23.md)
+- **Phase-A raw benchmark/parity material:** [docs/bsc/phase_a/](docs/bsc/phase_a/)
 - **Current stored evidence:** [data/evidence/](data/evidence/)
 - **Generated run reports:** [exports/](exports/)
 
@@ -135,9 +135,9 @@ The current repository still explicitly distinguishes PAPER from LIVE:
 Files such as:
 
 ~~~text
-docs/P0_IMPLEMENTATION_STATUS.md
-docs/P0_DOCTOR_RESULT.json
-docs/P0_SANITY_RESULT.json
+docs/solana_pump/P0_IMPLEMENTATION_STATUS.md
+docs/solana_pump/P0_DOCTOR_RESULT.json
+docs/solana_pump/P0_SANITY_RESULT.json
 docs/P0_...
 ~~~
 
@@ -212,7 +212,7 @@ Project 0 adds:
 
 ## Project 0 phase plan
 
-- **Current draft phase plan:** [docs_project_0/PHASENPLAN.md](docs_project_0/PHASENPLAN.md)
+- **Current draft phase plan:** [docs/project_0/PHASENPLAN.md](docs/project_0/PHASENPLAN.md)
 
 Current phase order:
 
@@ -241,11 +241,11 @@ P9 production LIVE
 K  measured escalation only
 ~~~
 
-The authoritative Project 0 architecture and phase plan is frozen in **docs_project_0/PHASENPLAN.md**.
+The authoritative Project 0 architecture and phase plan is frozen in **docs/project_0/PHASENPLAN.md**.
 
 ## Project 0 measurements / evidence
 
-- **Project 0 measurement ledger:** [docs_project_0/MEASUREMENT_LEDGER.md](docs_project_0/MEASUREMENT_LEDGER.md)
+- **Project 0 measurement ledger:** [docs/project_0/MEASUREMENT_LEDGER.md](docs/project_0/MEASUREMENT_LEDGER.md)
 
 At the moment this ledger intentionally contains **N/A**, not invented values, because Project 0 production implementation/measurement has not started.
 
@@ -261,10 +261,11 @@ gate0/
   current BSC Gate-0 Rust harnesses, tools and evidence
 
 docs/
-  shared/BSC/Pump.fun roadmaps, contracts, status and measurement ledgers
-
-docs_project_0/
-  authoritative Project 0 phase plan and measurement ledger
+  README.md
+  MULTICHAIN_ROADMAP.md
+  bsc/
+  solana_pump/
+  project_0/
 
 config/
   existing Pump.fun/PAPER/research configuration
