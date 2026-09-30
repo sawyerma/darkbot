@@ -4,11 +4,11 @@ Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-09-27
 
 Normative documents, highest priority first:
-1. `docs/GATE0_TESTPLAN_SHORT.md` — feasibility gate; decides whether BSC/Solana low-latency work proceeds
-2. `docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md` — BSC birth-entry objective and evidence rules
-3. `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md` — production runtime contract after Gate-0 PASS
+1. `docs/bsc/GATE0_TESTPLAN_SHORT.md` — feasibility gate; decides whether BSC/Solana low-latency work proceeds
+2. `docs/bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md` — BSC birth-entry objective and evidence rules
+3. `docs/bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md` — production runtime contract after Gate-0 PASS
 4. phase-specific BSC contracts
-5. `docs/BSC_PHASE_C_PYTHON_RETIREMENT.md` — retired Python BSC prototype policy
+5. `docs/bsc/BSC_PHASE_C_PYTHON_RETIREMENT.md` — retired Python BSC prototype policy
 
 If an older document conflicts with Gate 0, Gate 0 wins.
 
