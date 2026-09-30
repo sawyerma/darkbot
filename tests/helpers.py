@@ -34,10 +34,10 @@ T0 = 1_000_000_000_000  # mono ns epoch start
 
 
 def base_config(**overrides: dict[str, Any]) -> RuntimeConfig:
-    raw = load_json_strict(ROOT / "config" / "phase1.json")
+    raw = load_json_strict(ROOT / "config" / "solana_pump" / "phase1.json")
     for section, values in overrides.items():
         raw[section].update(values)
-    return build_runtime_config(ROOT / "config" / "phase1.json", raw)
+    return build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", raw)
 
 
 def create_frame_logs(mint: str, creator: str, vsol: int = V_SOL0, vtok: int = V_TOK0, rtok: int = R_TOK0, tail: bytes = b"", initial_buy: tuple[int, int] | None = None, extra_trades: list[dict[str, Any]] | None = None, creator_sell: dict[str, Any] | None = None) -> list[str]:
