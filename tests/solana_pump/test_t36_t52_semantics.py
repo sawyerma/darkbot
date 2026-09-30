@@ -15,13 +15,13 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
 from unittest import mock
 
-from darkbot.capture import ALLOWED_PUMPPORTAL_METHODS, FeedAdapter, FakeWebSocket, fake_connect_factory, pumpportal_frame
+from darkbot.solana_pump.capture import ALLOWED_PUMPPORTAL_METHODS, FeedAdapter, FakeWebSocket, fake_connect_factory, pumpportal_frame
 from darkbot.clock import LiveClock
-from darkbot.config import ConfigError, build_runtime_config, load_json_strict, redact, resolve_feed_endpoints
-from darkbot.domain import AttemptStatus, CoverageState, ExitReason, FillEvidence, PositionState, QuoteScopeStatus, VenueState, utc_iso
-from darkbot.replay import digest, load_replay_input, run_replay
-from darkbot.storage import open_connection
-from darkbot.strategy import FEATURE_NAMES, FEATURE_SET_V1, FEATURE_SET_V2, FeatureCalculator, FeatureEvent, FeatureInputs
+from darkbot.solana_pump.config import ConfigError, build_runtime_config, load_json_strict, redact, resolve_feed_endpoints
+from darkbot.solana_pump.domain import AttemptStatus, CoverageState, ExitReason, FillEvidence, PositionState, QuoteScopeStatus, VenueState, utc_iso
+from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
+from darkbot.solana_pump.storage import open_connection
+from darkbot.solana_pump.strategy import FEATURE_NAMES, FEATURE_SET_V1, FEATURE_SET_V2, FeatureCalculator, FeatureEvent, FeatureInputs
 from tests.helpers import BUYER, BUYER2, CREATOR, MINT_A, MINT_B, ROOT, R_TOK0, SUPPLY, T0, V_SOL0, V_TOK0, Harness, attempts, base_config, complete_frame_logs, create_payload, creator_sell_frame, dump_frame, ledger_kinds, logs_notification, migrate_frame_logs, open_position, pump_frame, pumpportal_create, pumpportal_migrate
 
 
@@ -42,7 +42,7 @@ class T36T40Engine(unittest.TestCase):
     def test_T36_late_callback_creator_sell_not_backdated(self):
         h = Harness(base_config(latency_model={"entry_delay_ms": 5}))
         h.feed("helius_standard", create_payload(), T0 + 1_000_000)
-        from darkbot.domain import RawEnvelope
+        from darkbot.solana_pump.domain import RawEnvelope
         h.clock.advance_to(T0 + 20_000_000)
         h.owner.on_raw(RawEnvelope("helius_standard", "c", T0 + 20_000_000, "", 2, creator_sell_frame(h, MINT_A, "cs", 101)))  # arrives before the late fill callback is processed
         h.advance(T0 + 30_000_000, late_ns=10_000_000)  # callback actual >= T0+16ms (fill modeled at T0+6ms)
@@ -56,7 +56,7 @@ class T36T40Engine(unittest.TestCase):
 
     def test_T37_hot_path_no_db_print_hash_under_load(self):
         h = Harness(base_config(storage={"queue_capacity_records": 200}))
-        frames = [create_payload(__import__("darkbot.market", fromlist=["b58encode"]).b58encode(f"mint{i}".encode().ljust(32, b"\0")), sig=f"s{i}", slot=100 + i) for i in range(300)]
+        frames = [create_payload(__import__("darkbot.solana_pump.market", fromlist=["b58encode"]).b58encode(f"mint{i}".encode().ljust(32, b"\0")), sig=f"s{i}", slot=100 + i) for i in range(300)]
         forbidden = []
         h.conn.set_trace_callback(lambda stmt: forbidden.append("sqlite"))
 
@@ -72,7 +72,7 @@ class T36T40Engine(unittest.TestCase):
         started = time.monotonic_ns()
         with mock.patch.object(builtins, "print", spy_print), mock.patch.object(hashlib, "sha256", spy_sha):
             for i, f in enumerate(frames):
-                h.owner.on_raw(__import__("darkbot.domain", fromlist=["RawEnvelope"]).RawEnvelope("helius_standard", "c", T0 + 1_000_000 + i * 1000, "", i + 1, f))
+                h.owner.on_raw(__import__("darkbot.solana_pump.domain", fromlist=["RawEnvelope"]).RawEnvelope("helius_standard", "c", T0 + 1_000_000 + i * 1000, "", i + 1, f))
         elapsed = time.monotonic_ns() - started
         h.conn.set_trace_callback(None)
         self.assertEqual(forbidden, [])
@@ -87,7 +87,7 @@ class T36T40Engine(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             h = Harness(base_config(portfolio={"max_open_positions": 10, "initial_paper_balance_lamports": 250_000_000}), db_path=str(Path(d) / "p.sqlite"))
             for i in range(3):
-                m = __import__("darkbot.market", fromlist=["b58encode"]).b58encode(f"m{i}".encode().ljust(32, b"\0"))
+                m = __import__("darkbot.solana_pump.market", fromlist=["b58encode"]).b58encode(f"m{i}".encode().ljust(32, b"\0"))
                 h.feed("helius_standard", create_payload(m, sig=f"s{i}", slot=100 + i), T0 + (i + 1) * 1_000_000)
             self.assertEqual(len(h.owner.positions), 2)  # capital allows two entries only: slots are not fundable positions
             self.assertEqual(h.owner.counters.ineligible.get("INSUFFICIENT_CAPITAL"), 1)
@@ -150,7 +150,7 @@ class T41T46Semantics(unittest.TestCase):
         raw["protocol"]["create_event_tail_layouts"].append({"layout_id": "V2", "tail_fields": [["quote_mint", "pubkey"]], "quote_mint_field": "quote_mint", "implied_quote_asset": None, "verification_status": "VERIFIED_TEST_FIXTURE", "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"})
         raw["protocol"]["create_event_tail_layouts"].append({"layout_id": "V3_UNVERIFIED", "tail_fields": [["quote_mint", "pubkey"], ["flag", "bool"]], "quote_mint_field": "quote_mint", "implied_quote_asset": None, "verification_status": "UNVERIFIED", "token_program": "x"})
         cfg2 = build_runtime_config(cfg.path, raw)
-        from darkbot.market import b58encode, encode_fields
+        from darkbot.solana_pump.market import b58encode, encode_fields
         from tests.helpers import create_frame_logs
         cases = [("a", b"", QuoteScopeStatus.SOL_WSOL, True), ("b", encode_fields([("quote_mint", cfg.protocol["wsol_mint"])], [["quote_mint", "pubkey"]]), QuoteScopeStatus.SOL_WSOL, True),
                  ("c", encode_fields([("quote_mint", cfg.protocol["native_sol_curve_sentinel"])], [["quote_mint", "pubkey"]]), QuoteScopeStatus.SOL_WSOL, True),
@@ -351,7 +351,7 @@ class T47T52Coverage(unittest.TestCase):
         rows = [r["reason"] for r in h.rows("select reason from decisions order by decision_id")]
         self.assertIn("SLOT_LIMIT", rows[-1:])  # slot occupied by first position; hard gate tested next
         h.owner.on_feed_health("helius_standard", False, T0 + 6_000_000, "closed")
-        m = __import__("darkbot.market", fromlist=["b58encode"]).b58encode(b"m3".ljust(32, b"\0"))
+        m = __import__("darkbot.solana_pump.market", fromlist=["b58encode"]).b58encode(b"m3".ljust(32, b"\0"))
         h.feed("helius_standard", create_payload(m, sig="s3", slot=300), T0 + 7_000_000)
         self.assertEqual(h.rows("select reason from decisions order by decision_id")[-1]["reason"], "CANONICAL_PROVIDER_GAP")
         self.assertEqual(h.rows("select count(*) from quality_events where kind='CANONICAL_GAP'")[0][0], 2)

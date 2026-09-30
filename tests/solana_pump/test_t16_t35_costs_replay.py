@@ -10,17 +10,17 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-from darkbot.backtest import chronological_split, run_research
-from darkbot.capture import pumpportal_frame
-from darkbot.config import ConfigError, load_json_strict
-from darkbot.domain import AttemptStatus, CostEvidence, CoverageState, CurveState, ExitReason, FeeSnapshot, PositionState, QuoteScopeStatus, QuoteSnapshot, Side, VenueState, utc_iso
-from darkbot.execution import LiveBroadcastForbidden, QuoteEngine, assert_paper_boundary, ceil_bps, paid_trade_api_call, send_transaction
-from darkbot.fees import FeeResolver, build_fee_probe_message, compact_u16
-from darkbot.market import PumpDecoder, b58encode, encode_fields, event_discriminator
-from darkbot.paper import PaperExecutionAdapter
-from darkbot.replay import digest, load_replay_input, run_replay
-from darkbot.reporting import comparable
-from darkbot.storage import REQUIRED_TABLES, apply_migrations, integrity_check, mark_interrupted_runs, open_connection
+from darkbot.solana_pump.backtest import chronological_split, run_research
+from darkbot.solana_pump.capture import pumpportal_frame
+from darkbot.solana_pump.config import ConfigError, load_json_strict
+from darkbot.solana_pump.domain import AttemptStatus, CostEvidence, CoverageState, CurveState, ExitReason, FeeSnapshot, PositionState, QuoteScopeStatus, QuoteSnapshot, Side, VenueState, utc_iso
+from darkbot.solana_pump.execution import LiveBroadcastForbidden, QuoteEngine, assert_paper_boundary, ceil_bps, paid_trade_api_call, send_transaction
+from darkbot.solana_pump.fees import FeeResolver, build_fee_probe_message, compact_u16
+from darkbot.solana_pump.market import PumpDecoder, b58encode, encode_fields, event_discriminator
+from darkbot.solana_pump.paper import PaperExecutionAdapter
+from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
+from darkbot.solana_pump.reporting import comparable
+from darkbot.solana_pump.storage import REQUIRED_TABLES, apply_migrations, integrity_check, mark_interrupted_runs, open_connection
 from tests.helpers import BUYER, CREATOR, MINT_A, MINT_B, ROOT, R_TOK0, SUPPLY, T0, V_SOL0, V_TOK0, Harness, attempts, base_config, create_frame_logs, create_payload, creator_sell_frame, dump_frame, fee_basis, ledger_kinds, logs_notification, open_position, pump_frame
 
 
@@ -119,7 +119,7 @@ class T19T21Replay(unittest.TestCase):
             r2 = run_replay(conn, rin, h.cfg, "rep2", "camp", persist=True)
             self.assertEqual(r1.digest, r2.digest)
             self.assertEqual(r1.digest["positions"], digest(h.owner)["positions"])
-            from darkbot.reporting import Reporter
+            from darkbot.solana_pump.reporting import Reporter
             a, b = Reporter(conn).build("rep1"), Reporter(conn).build("rep2")
             for key in ("economic", "quality", "qualification_status"):
                 self.assertEqual(json.dumps(a[key], sort_keys=True, default=str).replace("rep1", "X"), json.dumps(b[key], sort_keys=True, default=str).replace("rep2", "X"))
@@ -220,7 +220,7 @@ class T22T24Boundary(unittest.TestCase):
 def _cfg_with(top: dict):
     raw = load_json_strict(ROOT / "config" / "solana_pump" / "phase1.json")
     raw.update(top)
-    from darkbot.config import build_runtime_config
+    from darkbot.solana_pump.config import build_runtime_config
     return build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", raw)
 
 
@@ -242,7 +242,7 @@ class T25T30Protocol(unittest.TestCase):
         cfg = base_config()
         raw = json.loads(json.dumps(cfg.raw))
         raw["protocol"]["create_event_tail_layouts"].append({"layout_id": "CREATE_EVENT_V2_QUOTE_MINT", "tail_fields": [["quote_mint", "pubkey"]], "quote_mint_field": "quote_mint", "implied_quote_asset": None, "verification_status": "VERIFIED_TEST_FIXTURE", "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"})
-        from darkbot.config import build_runtime_config
+        from darkbot.solana_pump.config import build_runtime_config
         cfg2 = build_runtime_config(cfg.path, raw)
         for mint_name, quote, expect in (("q1", cfg.protocol["wsol_mint"], QuoteScopeStatus.SOL_WSOL), ("q2", cfg.protocol["native_sol_curve_sentinel"], QuoteScopeStatus.SOL_WSOL), ("q3", b58encode(b"usdc".ljust(32, b"\0")), QuoteScopeStatus.UNSUPPORTED_QUOTE)):
             h2 = Harness(cfg2)

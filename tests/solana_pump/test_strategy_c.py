@@ -6,14 +6,14 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
-from darkbot.ab_replay import _comparison_configs
-from darkbot.config import ConfigError, load_runtime_config
-from darkbot.domain import NS_PER_MS, AttemptStatus, EventType, ExitReason, PositionState
-from darkbot.replay import digest, load_replay_input, run_replay
-from darkbot.strategies.strategy_c_legacy_backend import (
+from darkbot.solana_pump.ab_replay import _comparison_configs
+from darkbot.solana_pump.config import ConfigError, load_runtime_config
+from darkbot.solana_pump.domain import NS_PER_MS, AttemptStatus, EventType, ExitReason, PositionState
+from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
+from darkbot.solana_pump.strategies.strategy_c_legacy_backend import (
     DATA_INCOMPLETE, PASS, REJECT_FILTER, LegacyTracker, evaluate_filters, parse_filters,
 )
-from darkbot.strategy import EXIT_PRIORITY, FEATURE_NAMES, pick_exit_trigger, stop_reached
+from darkbot.solana_pump.strategy import EXIT_PRIORITY, FEATURE_NAMES, pick_exit_trigger, stop_reached
 from tests.helpers import *
 from tests.helpers import _pubkey
 
@@ -71,9 +71,9 @@ class LegacyFeatureParityTests(unittest.TestCase):
             del sys.modules[k]
         sys.path.insert(0, legacy_root)
         try:
-            from darkbot.domain import EventType as OldType, NormalizedEvent
-            from darkbot.market import TokenTracker
-            from darkbot.strategy import FeatureCalculator
+            from darkbot.solana_pump.domain import EventType as OldType, NormalizedEvent
+            from darkbot.solana_pump.market import TokenTracker
+            from darkbot.solana_pump.strategy import FeatureCalculator
             contract = {"phase0_fixture_contract": {"first_buyer_window": 5, "ratio_decimal_places": 12},
                         "feature_contract_v1": {"definitions": list(FEATURE_NAMES), "boolean_feature": "provider_gap_flag"}}
             calc = FeatureCalculator(contract, None)
@@ -146,8 +146,8 @@ class StrategyCTests(unittest.TestCase):
         self.assertEqual(h.rows("SELECT status FROM execution_attempts WHERE side='BUY'")[0][0], "UNKNOWN")
 
     def test_free_cancel_report_and_research_cannot_qualify(self):
-        from darkbot.backtest import Variant, variant_status
-        from darkbot.reporting import summary_markdown
+        from darkbot.solana_pump.backtest import Variant, variant_status
+        from darkbot.solana_pump.reporting import summary_markdown
         h = make_c(latency_model={"entry_delay_ms": 100, "exit_delay_ms": 0})
         self.addCleanup(h.conn.close)
         qualified(h)
@@ -169,11 +169,11 @@ class StrategyCTests(unittest.TestCase):
         self.assertEqual(empty.report()["qualification_status"], "UNQUALIFIED_DATA")
 
     def test_C01_non_sol_quote_never_decides(self):
-        from darkbot.market import b58encode, encode_fields
+        from darkbot.solana_pump.market import b58encode, encode_fields
         raw = json.loads(json.dumps(cconfig().raw))
         raw["protocol"]["create_event_tail_layouts"].append({"layout_id": "V2", "tail_fields": [["quote_mint", "pubkey"]], "quote_mint_field": "quote_mint", "implied_quote_asset": None,
                                                              "verification_status": "VERIFIED_TEST_FIXTURE", "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"})
-        from darkbot.config import build_runtime_config
+        from darkbot.solana_pump.config import build_runtime_config
         h = Harness(build_runtime_config(ROOT / "config/solana_pump/strategy_c_paper_explore_01.json", raw))
         tail = encode_fields([("quote_mint", b58encode(b"USDC".ljust(32, b"\0")))], [["quote_mint", "pubkey"]])
         h.feed("helius_standard", create_payload(tail=tail), START)

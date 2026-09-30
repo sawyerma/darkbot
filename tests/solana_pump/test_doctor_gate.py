@@ -30,7 +30,7 @@ class DoctorGate(unittest.TestCase):
                                types.SimpleNamespace(digest={'result': 2 if failed == 'D06' else 1}, owner=h.owner)]
                     with patch('darkbot.main.Application', return_value=app), \
                          patch('darkbot.main.doctor_fixture_checks', return_value={'all_pass': failed != 'D04'}), \
-                         patch('darkbot.replay.run_replay', side_effect=replays), \
+                         patch('darkbot.solana_pump.replay.run_replay', side_effect=replays), \
                          patch.dict('sys.modules', {'websockets': types.SimpleNamespace(__version__='offline-gate-test')}):
                         result = asyncio.run(run_doctor(cfg, db))
                     for check, values in result['checks'].items():

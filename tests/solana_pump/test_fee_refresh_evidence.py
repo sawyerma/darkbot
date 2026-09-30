@@ -5,9 +5,9 @@ import unittest
 from urllib.error import URLError
 from unittest.mock import patch
 
-from darkbot.domain import CostBasis, CostEvidence, NS_PER_MS
-from darkbot.fees import FEE_KINDS, FeeCache, FeeResolver, select_cost_basis
-from darkbot.replay import digest, load_replay_input, run_replay
+from darkbot.solana_pump.domain import CostBasis, CostEvidence, NS_PER_MS
+from darkbot.solana_pump.fees import FEE_KINDS, FeeCache, FeeResolver, select_cost_basis
+from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
 from tests.helpers import Harness, base_config, create_payload, fee_basis, T0
 
 
@@ -23,7 +23,7 @@ def as_cache(basis):
 
 class FeeRefreshTests(unittest.TestCase):
     def test_edge_analysis_uses_same_atomic_causal_evidence_selection(self):
-        from darkbot.edge_analysis import _basis_at
+        from darkbot.solana_pump.edge_analysis import _basis_at
         old = fee_basis(base_config(), T0).basis()
         failed = failure(old.protocol, T0 + 50 * NS_PER_MS)
         invalid = failure(old.protocol, T0 + 100 * NS_PER_MS, transient=False, status="INVALID_OWNER")

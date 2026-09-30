@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from darkbot.clock import ReplayClock, ReplayScheduler
-from darkbot.config import RuntimeConfig, build_runtime_config, load_json_strict
-from darkbot.domain import CostEvidence, CostBasis, FeeSnapshot, RawEnvelope, utc_iso
-from darkbot.fees import FeeCache
-from darkbot.fx import FxSnapshot
-from darkbot.market import encode_fields, event_discriminator
-from darkbot.paper import PaperExecutionAdapter, StateOwner
-from darkbot.storage import Recorder, SqliteWriter, apply_migrations, open_connection, upsert_config_snapshot
+from darkbot.solana_pump.config import RuntimeConfig, build_runtime_config, load_json_strict
+from darkbot.solana_pump.domain import CostEvidence, CostBasis, FeeSnapshot, RawEnvelope, utc_iso
+from darkbot.solana_pump.fees import FeeCache
+from darkbot.solana_pump.fx import FxSnapshot
+from darkbot.solana_pump.market import encode_fields, event_discriminator
+from darkbot.solana_pump.paper import PaperExecutionAdapter, StateOwner
+from darkbot.solana_pump.storage import Recorder, SqliteWriter, apply_migrations, open_connection, upsert_config_snapshot
 
 ROOT = Path(__file__).resolve().parent.parent
 PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
@@ -23,7 +23,7 @@ PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
 def _pubkey(s: str) -> str:
     """Deterministic valid 32-byte pubkey from a short test name."""
-    from darkbot.market import b58encode
+    from darkbot.solana_pump.market import b58encode
     return b58encode(s.encode("ascii")[:32].ljust(32, b"\0"))
 
 
@@ -120,7 +120,7 @@ class Harness:
         apply_migrations(self.conn)
         for kind, (h, content) in self.cfg.snapshot_kinds().items():
             upsert_config_snapshot(self.conn, kind, h, content, "test", utc_iso(0))
-        from darkbot.storage import prior_campaign_mints
+        from darkbot.solana_pump.storage import prior_campaign_mints
         prior = prior_campaign_mints(self.conn, campaign) if mode == "PAPER" else set()
         self.conn.execute("INSERT INTO runs(run_id,campaign_id,mode,started_utc,code_revision,spec_hash,config_hash,host_clock_epoch_id,status,quality_status,start_balance_lamports,started_mono_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                           (run_id, campaign, mode, utc_iso(1_700_000_000_000_000_000), "test", "spec", self.cfg.config_hash, "epoch_test", "RUNNING", "OK", self.cfg.portfolio["initial_paper_balance_lamports"], T0))
@@ -151,7 +151,7 @@ class Harness:
 
     def refresh_fees(self, now: int) -> None:
         """Background resolver emulation: same fee rule re-read at `now` -> new immutable snapshot (new id, persisted), exactly like Application._on_fee_snapshots."""
-        from darkbot.domain import FeeSnapshot as _FS
+        from darkbot.solana_pump.domain import FeeSnapshot as _FS
         self.refresh_n = getattr(self, "refresh_n", 0) + 1
         def clone(x):
             base_id = x.fee_snapshot_id.split("_r")[0]
@@ -217,7 +217,7 @@ class Harness:
         self.conn.execute("UPDATE runs SET status='COMPLETED', ended_utc=?, ended_mono_ns=?, end_balance_lamports=? WHERE run_id=?", (utc_iso(0), mono, self.owner.portfolio.cash_lamports + self.owner.portfolio.reserved_lamports, self.run_id))
 
     def report(self) -> dict[str, Any]:
-        from darkbot.reporting import Reporter
+        from darkbot.solana_pump.reporting import Reporter
         self.flush()
         return Reporter(self.conn).build(self.run_id)
 

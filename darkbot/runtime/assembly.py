@@ -1,7 +1,7 @@
 """Runtime assembly (BSC handoff §5): profile -> chain + venue -> components, resolved ONCE at runtime start.
 
 Scope (handoff §5.1): this is the normal PAPER/CAPTURE/DOCTOR component selection. It does NOT replace the
-specialised replay construction in ``darkbot.replay`` (``StateOwner(engine=...)``, canonical_prefix, recorded fee
+specialised replay construction in ``darkbot.solana_pump.replay`` (``StateOwner(engine=...)``, canonical_prefix, recorded fee
 snapshots, stress parameters, virtual clock, mint filters, lateness, delay provider). Replay stays offline and untouched.
 
 Hot-path rule: nothing in this module is called per message. ``assemble_runtime`` returns already-built objects; the

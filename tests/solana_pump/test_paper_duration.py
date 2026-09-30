@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from darkbot.cli import build_parser
-from darkbot.config import ConfigError, load_runtime_config
+from darkbot.solana_pump.config import ConfigError, load_runtime_config
 from darkbot.main import run_paper
 
 ROOT = Path(__file__).resolve().parents[2]

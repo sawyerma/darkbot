@@ -4,10 +4,10 @@ import unittest
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
-from darkbot.config import ConfigError, build_runtime_config, load_runtime_config
-from darkbot.domain import ExitReason, PositionState, RawEnvelope, NS_PER_MS
-from darkbot.fx import FxSnapshot
-from darkbot.replay import load_replay_input, run_replay, digest
+from darkbot.solana_pump.config import ConfigError, build_runtime_config, load_runtime_config
+from darkbot.solana_pump.domain import ExitReason, PositionState, RawEnvelope, NS_PER_MS
+from darkbot.solana_pump.fx import FxSnapshot
+from darkbot.solana_pump.replay import load_replay_input, run_replay, digest
 from tests.helpers import *
 from tests.helpers import _pubkey
 
@@ -256,7 +256,7 @@ class StrategyBTests(unittest.TestCase):
     def test_same_capture_ab_matrix_and_read_only_source(self):
         import tempfile
         import hashlib
-        from darkbot.ab_replay import compare_capture
+        from darkbot.solana_pump.ab_replay import compare_capture
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);source=root/'source.sqlite'
             h=Harness(bconfig(),db_path=str(source));h.owner.on_fx_snapshot(FxSnapshot.from_payload('{"data":{"amount":"100","base":"SOL","currency":"USD"}}','fixture',h.clock.utc_iso(),T0))
@@ -277,7 +277,7 @@ class StrategyBTests(unittest.TestCase):
 
     def test_measured_distribution_is_explicit_and_reproducible(self):
         import tempfile
-        from darkbot.ab_replay import compare_capture
+        from darkbot.solana_pump.ab_replay import compare_capture
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);source=root/'source.sqlite'
             h=Harness(bconfig(),db_path=str(source));h.owner.on_fx_snapshot(FxSnapshot.from_payload('{"data":{"amount":"100","base":"SOL","currency":"USD"}}','fixture',h.clock.utc_iso(),T0));qualified(h);h.finish(END+100*NS_PER_MS);h.conn.close()
@@ -338,12 +338,12 @@ class StrategyBTests(unittest.TestCase):
         h.feed('helius_standard',json.dumps(failed),START+NS_PER_MS)
         h.feed('helius_standard',pump_frame(h,MINT_A,10000,'stale',99,BUYER),START+2*NS_PER_MS)
         self.assertEqual(h.owner.strategy.observations[MINT_A].buy_count,0)
-        from darkbot.market import EventApply
-        from darkbot.domain import ValidationStatus, EventType
+        from darkbot.solana_pump.market import EventApply
+        from darkbot.solana_pump.domain import ValidationStatus, EventType
         from types import SimpleNamespace
         event=SimpleNamespace(mint=MINT_A,event_type=EventType.BUY,actor=None)
         applied=SimpleNamespace(event=event,is_new=True,validation=ValidationStatus.VALID,applied_state=True)
-        h.owner.strategy.on_events(h.owner,SimpleNamespace(events=[applied]),SimpleNamespace(receive_mono_ns=START+3*NS_PER_MS),SimpleNamespace(signature='new',completeness=__import__('darkbot.domain',fromlist=['Completeness']).Completeness.COMPLETE))
+        h.owner.strategy.on_events(h.owner,SimpleNamespace(events=[applied]),SimpleNamespace(receive_mono_ns=START+3*NS_PER_MS),SimpleNamespace(signature='new',completeness=__import__('darkbot.solana_pump.domain',fromlist=['Completeness']).Completeness.COMPLETE))
         self.assertEqual(h.owner.strategy.observations[MINT_A].buy_count,0)
 
     def test_swap_budget_inverse_uses_modern_fee_rounding(self):

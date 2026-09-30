@@ -11,13 +11,13 @@ from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
-from darkbot.backtest import chronological_split, delay_scenarios, register_variants, run_research
-from darkbot.config import build_runtime_config
-from darkbot.execution import ExecutionPolicy, QuoteEngine
-from darkbot.market import b58encode, encode_fields, event_discriminator
-from darkbot.replay import load_replay_input, run_replay
-from darkbot.storage import open_connection
-from darkbot.domain import ExitReason, PositionState
+from darkbot.solana_pump.backtest import chronological_split, delay_scenarios, register_variants, run_research
+from darkbot.solana_pump.config import build_runtime_config
+from darkbot.solana_pump.execution import ExecutionPolicy, QuoteEngine
+from darkbot.solana_pump.market import b58encode, encode_fields, event_discriminator
+from darkbot.solana_pump.replay import load_replay_input, run_replay
+from darkbot.solana_pump.storage import open_connection
+from darkbot.solana_pump.domain import ExitReason, PositionState
 from tests.helpers import BUYER, CREATOR, MINT_A, MINT_B, PROGRAM, ROOT, T0, Harness, attempts, base_config, create_frame_logs, create_payload, creator_sell_frame, dump_frame, logs_notification, open_position, pump_frame, trade_frame_logs, trade_log_line
 
 
@@ -186,7 +186,7 @@ class S05S06S09S10(unittest.TestCase):
         self.assertEqual(a["irrecoverable_account_cost_lamports"], 1234)
         self.assertEqual(a["fees_charged_lamports"], a["amount_in_base_units"] + a["network_fee_total_lamports"] + a["rent_locked_lamports"] + 1234)
         self.assertEqual(pos.entry_economic_cost_lamports, a["amount_in_base_units"] + a["network_fee_total_lamports"] + 1234)
-        from darkbot.config import ConfigError
+        from darkbot.solana_pump.config import ConfigError
         with self.assertRaises(ConfigError):
             base_config(costs={"irrecoverable_account_cost_lamports": None, "irrecoverable_account_cost_provenance": "UNKNOWN"})
         research = json.loads((ROOT / "config" / "research.json").read_text())

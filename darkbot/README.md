@@ -6,17 +6,16 @@ The runtime is organized by application. Protocol/business logic must stay insid
 
 ~~~text
 darkbot/
-├── main.py              shared stable application facade
-├── cli.py               shared stable CLI facade
+├── __main__.py          package entry point / dispatcher
 ├── app/                 shared control-plane/application registry
-├── common/              truly project-independent infrastructure only
-├── solana/              shared native Solana infrastructure boundary
-├── bsc/                 BSC Birth Entry application
-├── solana_pump/         Solana/Pump.fun application implementation
-├── project_0/           Project 0 liquidation application
+├── common/              genuinely project-independent infrastructure only
 ├── runtime/             shared runtime assembly/profile selection
 ├── chains/              shared chain contracts/registry
-└── venues/              shared venue contracts/registry
+├── venues/              shared venue contracts/registry
+├── solana/              shared native Solana primitives
+├── bsc/                 BSC Birth Entry application
+├── solana_pump/         Solana/Pump.fun application implementation
+└── project_0/           Project 0 liquidation application
 ~~~
 
 ## Ownership rules
@@ -30,8 +29,6 @@ darkbot/
 - Shared registries may select applications/components but may not implement strategy/protocol behavior.
 - Do not duplicate a Solana stack separately in Pump.fun and Project 0.
 
-## Compatibility facades
+## Canonical imports
 
-Several historical top-level modules remain as thin import facades so existing callers/tests do not break during the structural migration. New implementation work must target the project-owned packages, not those facades.
-
-The facades contain no independent business logic and can be retired after all external imports have migrated.
+Project implementation code is imported from its owning package. Historical top-level Pump.fun compatibility modules have been retired; new and existing callers must use `darkbot.solana_pump.*`. Shared chain/venue/runtime contracts remain under their shared packages.

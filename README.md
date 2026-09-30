@@ -20,17 +20,16 @@ Cross-project overview: [docs/MULTICHAIN_ROADMAP.md](docs/MULTICHAIN_ROADMAP.md)
 
 ~~~text
 darkbot/
-├── main.py                 shared stable application facade
-├── cli.py                  shared stable CLI facade
+├── __main__.py             shared package entry point
 ├── app/                    shared control-plane / app registry
-├── common/                 only truly project-independent runtime pieces
-├── solana/                 shared native Solana boundary
-├── bsc/                    BSC application code
-├── solana_pump/            Pump.fun application implementation
-├── project_0/              Project 0 application code
-├── runtime/                shared runtime/profile assembly
+├── common/                 only genuinely project-independent code
+├── runtime/                shared profile/runtime assembly
 ├── chains/                 shared chain contracts/registry
-└── venues/                 shared venue contracts/registry
+├── venues/                 shared venue contracts/registry
+├── solana/                 shared native Solana primitives
+├── bsc/                    BSC / Birth Entry application
+├── solana_pump/            Solana / Pump.fun application
+└── project_0/              Solana / Project 0 application
 
 docs/
 ├── README.md
@@ -79,10 +78,6 @@ tools/
 ├── solana_pump/
 └── project_0/
 
-old_system/
-├── backend/
-├── exports/
-└── tests/
 ~~~
 
 Runtime ownership rules: [darkbot/README.md](darkbot/README.md)

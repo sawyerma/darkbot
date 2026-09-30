@@ -6,7 +6,7 @@ import json
 import unittest
 from pathlib import Path
 
-from darkbot.config import ConfigError, build_runtime_config, load_json_strict, load_runtime_config
+from darkbot.solana_pump.config import ConfigError, build_runtime_config, load_json_strict, load_runtime_config
 from darkbot.runtime.profiles import DEFAULT_MARKET_PROFILE_ID, MARKET_PROFILES, UnknownMarketProfile, load_market_profile, market_profile_catalog
 from tests.helpers import ROOT, base_config
 

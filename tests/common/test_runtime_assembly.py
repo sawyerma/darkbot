@@ -6,13 +6,13 @@ from __future__ import annotations
 import unittest
 
 from darkbot.clock import LiveClock, ReplayClock, ReplayScheduler
-from darkbot.config import build_runtime_config, load_json_strict
-from darkbot.execution import QuoteEngine
-from darkbot.market import MarketReducer, PumpDecoder
-from darkbot.paper import PaperExecutionAdapter, StateOwner
-from darkbot.replay import digest, load_replay_input, run_replay
+from darkbot.solana_pump.config import build_runtime_config, load_json_strict
+from darkbot.solana_pump.execution import QuoteEngine
+from darkbot.solana_pump.market import MarketReducer, PumpDecoder
+from darkbot.solana_pump.paper import PaperExecutionAdapter, StateOwner
+from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
 from darkbot.runtime.assembly import MarketProfileNotRunnable, RuntimeCallbacks, RuntimeComponents, assemble_runtime, build_feeds, effective_market_profile_id, resolve_market_profile
-from darkbot.storage import Recorder
+from darkbot.solana_pump.storage import Recorder
 from tests.helpers import BUYER, MINT_A, ROOT, T0, Harness, base_config, create_payload, creator_sell_frame, fee_basis, pump_frame
 
 
@@ -119,7 +119,7 @@ class RuntimeAssemblyTests(unittest.TestCase):
         owner.on_fee_snapshots([s for s in (fees.protocol, fees.network, fees.rent, fees.priority_policy) if s is not None])
         for f in cfg.feeds:
             owner.on_feed_health(f.id, True, data.start_mono_ns)
-        from darkbot.domain import RawEnvelope
+        from darkbot.solana_pump.domain import RawEnvelope
         for receive, seq, feed_id, conn_id, utc, payload in data.observations:
             while (due := sched.next_due_ns()) is not None and due < receive:
                 clock.advance_to(max(clock.monotonic_ns(), due))

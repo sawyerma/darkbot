@@ -17,7 +17,9 @@ Historical backend/reference material:
 - [legacy_backend/](legacy_backend/)
 
 Current implementation remains under:
-- `../../darkbot/chains/solana/`
-- `../../darkbot/venues/pumpfun/`
-- `../../darkbot/runtime/`
-- `../../darkbot/strategies/`
+- `../../darkbot/solana_pump/` — Pump.fun application, strategy, replay/PAPER, economics, venue and project-specific Solana wiring
+- `../../darkbot/runtime/` — shared runtime/profile assembly
+- `../../darkbot/chains/` and `../../darkbot/venues/` — shared contracts/registries
+- `../../darkbot/solana/` — shared native Solana primitives as they are extracted for reuse by Project 0
+
+Historical backend/reference material is retained once under `legacy_backend/`; duplicate copies previously stored under `old_system/` were removed.

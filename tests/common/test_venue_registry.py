@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import unittest
 
-from darkbot.execution import QuoteEngine
-from darkbot.market import MarketReducer, PumpDecoder
+from darkbot.solana_pump.execution import QuoteEngine
+from darkbot.solana_pump.market import MarketReducer, PumpDecoder
 from darkbot.venues.base import VenueIdentity
-from darkbot.venues.pumpfun.venue import PumpFunVenueAdapter
+from darkbot.solana_pump.venue.venue import PumpFunVenueAdapter
 from darkbot.venues.registry import UnknownVenue, VenueNotImplemented, load_venue, venue_identity
 from tests.helpers import CREATOR, MINT_A, Harness, create_payload, T0
 

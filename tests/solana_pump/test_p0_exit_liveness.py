@@ -6,7 +6,7 @@ import json
 import unittest
 from dataclasses import replace
 
-from darkbot.domain import ExitReason, PositionState
+from darkbot.solana_pump.domain import ExitReason, PositionState
 from tests.helpers import Harness, MINT_A, T0, attempts, base_config, creator_sell_frame, open_position
 
 
@@ -124,7 +124,7 @@ class ExitLiveness(unittest.TestCase):
         self.assertEqual(pos2.exit_attempts, 1)
 
     def test_replay_fee_receipt_without_market_or_timer_at_receipt(self):
-        from darkbot.replay import load_replay_input, run_replay
+        from darkbot.solana_pump.replay import load_replay_input, run_replay
         h = Harness()
         self.addCleanup(h.conn.close)
         open_position(h)
@@ -148,10 +148,10 @@ class ExitLiveness(unittest.TestCase):
 
     def test_G_recorded_mainnet_frames_and_fees_replay(self):
         import hashlib
-        from darkbot.config import build_runtime_config
-        from darkbot.domain import Completeness, CostEvidence, FeeSnapshot, RawEnvelope
-        from darkbot.market import Normalizer, PumpDecoder
-        from darkbot.replay import ReplayInput, run_replay
+        from darkbot.solana_pump.config import build_runtime_config
+        from darkbot.solana_pump.domain import Completeness, CostEvidence, FeeSnapshot, RawEnvelope
+        from darkbot.solana_pump.market import Normalizer, PumpDecoder
+        from darkbot.solana_pump.replay import ReplayInput, run_replay
         from tests.helpers import ROOT
         fixture = json.loads((ROOT / 'tests/fixtures/edge_probe_01_p2.json').read_text())
         cfg = build_runtime_config(ROOT / 'config/phase1.json', json.loads(fixture['config_snapshot']['canonical_json']))

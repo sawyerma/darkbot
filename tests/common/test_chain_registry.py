@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import unittest
 
-from darkbot.capture import FeedAdapter
+from darkbot.solana_pump.capture import FeedAdapter
 from darkbot.chains.base import ChainIdentity
 from darkbot.chains.registry import CHAIN_IDENTITIES, ChainNotImplemented, UnknownChain, chain_identity, load_chain
-from darkbot.chains.solana.chain import SolanaChainAdapter
+from darkbot.solana.chain import SolanaChainAdapter
 from darkbot.clock import LiveClock
-from darkbot.fees import FeeResolver
+from darkbot.solana_pump.fees import FeeResolver
 from tests.helpers import base_config
 
 

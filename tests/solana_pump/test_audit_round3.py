@@ -13,13 +13,13 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-from darkbot.backtest import run_research
-from darkbot.config import build_runtime_config
-from darkbot.domain import AttemptStatus, CoverageState, ExitReason, LedgerRecord, PositionState, QuoteScopeStatus, Side, utc_iso
-from darkbot.execution import ExecutionPolicy, QuoteEngine, evaluate_fill
-from darkbot.market import b58encode, encode_fields, event_discriminator
-from darkbot.replay import load_replay_input
-from darkbot.storage import Recorder, SqliteWriter, open_connection, prior_campaign_mints
+from darkbot.solana_pump.backtest import run_research
+from darkbot.solana_pump.config import build_runtime_config
+from darkbot.solana_pump.domain import AttemptStatus, CoverageState, ExitReason, LedgerRecord, PositionState, QuoteScopeStatus, Side, utc_iso
+from darkbot.solana_pump.execution import ExecutionPolicy, QuoteEngine, evaluate_fill
+from darkbot.solana_pump.market import b58encode, encode_fields, event_discriminator
+from darkbot.solana_pump.replay import load_replay_input
+from darkbot.solana_pump.storage import Recorder, SqliteWriter, open_connection, prior_campaign_mints
 from tests.helpers import BUYER, CREATOR, MINT_A, MINT_B, PROGRAM, ROOT, T0, Harness, attempts, base_config, create_frame_logs, create_payload, creator_sell_frame, fee_basis, ledger_kinds, logs_notification, open_position, pump_frame, trade_log_line
 
 
@@ -163,8 +163,8 @@ class P1CostsStressResearch(unittest.TestCase):
             rep0 = run_research(conn, "camp", h.cfg, ROOT / "config" / "research.json", Path(d) / "out0", persist=True, max_variants=2)
             self.assertEqual(rep0["selection_for_limit_1"]["stage"], "freeze")
             self.assertFalse(rep0["selection_for_limit_1"]["would_freeze"])
-            from darkbot.config import config_hash
-            from darkbot.storage import upsert_config_snapshot
+            from darkbot.solana_pump.config import config_hash
+            from darkbot.solana_pump.storage import upsert_config_snapshot
             freeze_key = config_hash({"campaign": "camp", "kind": "POLICY_FREEZE"})
             upsert_config_snapshot(conn, "POLICY_FREEZE", freeze_key, {"campaign": "camp", "dataset": rep0["dataset_hash"], "selected_target": "1.1", "runtime_config_hash": h.cfg.config_hash, "research_policy_hash": config_hash({k: v for k, v in rc.items() if k not in ("test_split_unlocked", "forward_test", "policy_freeze_note")}), "stage": "VALIDATION"}, "test", utc_iso(0))
             rep = run_research(conn, "camp", h.cfg, p, Path(d) / "out", persist=True, max_variants=2)  # forward stage: distinct run ids, no collision

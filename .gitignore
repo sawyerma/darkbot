@@ -54,3 +54,6 @@ env/
 
 # No blanket exclusions for data/ or exports/:
 # evidence JSON, reports, CSV, Markdown and ZIP exports remain eligible for Git.
+
+# JavaScript dependency trees are reproducible from package-lock files
+node_modules/

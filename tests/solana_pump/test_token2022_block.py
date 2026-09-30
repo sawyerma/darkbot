@@ -11,13 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from darkbot.clock import ReplayClock
-from darkbot.domain import AttemptStatus, InvalidQuote, Side
-from darkbot.execution import evaluate_fill, fee_terms
-from darkbot.fees import FeeResolver, build_trade_fee_message
+from darkbot.solana_pump.domain import AttemptStatus, InvalidQuote, Side
+from darkbot.solana_pump.execution import evaluate_fill, fee_terms
+from darkbot.solana_pump.fees import FeeResolver, build_trade_fee_message
 from darkbot.main import economic_profile_samples
-from darkbot.market import b58decode, b58encode
-from darkbot.replay import digest, load_replay_input, run_replay
-from darkbot.token_accounts import ASSOCIATED_TOKEN_PROGRAM, create_account_profiles, find_pda
+from darkbot.solana_pump.market import b58decode, b58encode
+from darkbot.solana_pump.replay import digest, load_replay_input, run_replay
+from darkbot.solana_pump.token_accounts import ASSOCIATED_TOKEN_PROGRAM, create_account_profiles, find_pda
 from tests.helpers import ROOT, T0, Harness, base_config, fee_basis, dump_frame, complete_frame_logs, logs_notification
 
 FIXTURES = ROOT / 'tests/fixtures'
@@ -87,7 +87,7 @@ class Token2022Block(unittest.TestCase):
         h, calls = self.harness()
         before = len(calls)
         # No new fee-message/PDA/RPC work may enter the StateOwner path.
-        with patch('darkbot.fees.build_trade_fee_message', side_effect=AssertionError('hot path message')), patch('darkbot.token_accounts.find_pda', side_effect=AssertionError('hot path PDA')):
+        with patch('darkbot.solana_pump.fees.build_trade_fee_message', side_effect=AssertionError('hot path message')), patch('darkbot.solana_pump.token_accounts.find_pda', side_effect=AssertionError('hot path PDA')):
             st = self.feed_create(h)
         self.assertEqual(len(calls), before)
         pos = h.position()
@@ -263,13 +263,13 @@ class Token2022Block(unittest.TestCase):
     def test_status_short_circuits_and_shutdown_keeps_observed_evidence(self):
         from types import SimpleNamespace
         from darkbot.main import Application
-        from darkbot.domain import Readiness
+        from darkbot.solana_pump.domain import Readiness
         h,_=self.harness(economic=False)
         st=self.feed_create(h)
         # Real max-size population; deterministic work-count assertion, not a wall-clock threshold.
         for i in range(h.cfg.storage['max_tracked_mints']-1):
             h.owner.reducer.states['replica'+str(i)]=st
-        with patch('darkbot.execution.fee_terms',wraps=fee_terms) as terms:
+        with patch('darkbot.solana_pump.execution.fee_terms',wraps=fee_terms) as terms:
             self.assertEqual(economic_profile_samples(h.owner,h.fees.basis(),h.clock.monotonic_ns(),limit=1),1)
             self.assertEqual(terms.call_count,2)
         h.owner.reducer.states={st.mint:st}

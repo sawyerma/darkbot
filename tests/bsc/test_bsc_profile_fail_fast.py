@@ -15,7 +15,7 @@ import threading
 import unittest
 from pathlib import Path
 
-from darkbot.config import load_json_strict
+from darkbot.solana_pump.config import load_json_strict
 from darkbot.main import Application, run_capture, run_doctor_cli, run_paper
 from darkbot.runtime.assembly import MarketProfileNotRunnable
 from tests.helpers import ROOT, base_config
@@ -68,7 +68,7 @@ class BscProfileFailFastTests(unittest.TestCase):
                 self._assert_no_side_effects(db)
 
     def test_application_construction_itself_fails_fast(self):
-        from darkbot.config import load_runtime_config
+        from darkbot.solana_pump.config import load_runtime_config
         for pid, cfg_path in self.configs.items():
             db = self.tmp / f"app_{pid.split(':')[1]}.sqlite"
             with self.subTest(profile=pid):
@@ -80,7 +80,7 @@ class BscProfileFailFastTests(unittest.TestCase):
         # a pre-existing campaign database must not receive a RUNNING row for a rejected profile
         db = self.tmp / "existing.sqlite"
         conn = sqlite3.connect(db)
-        from darkbot.storage import apply_migrations
+        from darkbot.solana_pump.storage import apply_migrations
         apply_migrations(conn)
         conn.commit()
         before = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]

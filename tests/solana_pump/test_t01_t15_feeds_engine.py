@@ -6,11 +6,11 @@ import asyncio
 import unittest
 from unittest import mock
 
-from darkbot.capture import FeedAdapter, FakeWebSocket, fake_connect_factory
+from darkbot.solana_pump.capture import FeedAdapter, FakeWebSocket, fake_connect_factory
 from darkbot.clock import LiveClock
-from darkbot.config import ConfigError, FeedConfig
-from darkbot.domain import AttemptStatus, ExitReason, PositionState, ValidationStatus
-from darkbot.reporting import Reporter
+from darkbot.solana_pump.config import ConfigError, FeedConfig
+from darkbot.solana_pump.domain import AttemptStatus, ExitReason, PositionState, ValidationStatus
+from darkbot.solana_pump.reporting import Reporter
 from tests.helpers import *  # noqa: F401,F403
 from tests.helpers import BUYER, CREATOR, MINT_A, MINT_B, T0, Harness, attempts, base_config, create_payload, creator_sell_frame, dump_frame, ledger_kinds, logs_notification, open_position, pump_frame, pumpportal_create, trade_frame_logs
 
@@ -64,7 +64,7 @@ class T03T05Atomicity(unittest.TestCase):
         h = Harness()
         h.feed("helius_standard", create_payload(), T0 + 1_000_000)  # fill scheduled at T0+1ms (delay 0), not yet fired
         h.clock.advance_to(T0 + 2_000_000)
-        h.owner.on_raw(__import__("darkbot.domain", fromlist=["RawEnvelope"]).RawEnvelope("helius_standard", "c", T0 + 2_000_000, "", 2, creator_sell_frame(h, MINT_A, "cs", 101)))
+        h.owner.on_raw(__import__("darkbot.solana_pump.domain", fromlist=["RawEnvelope"]).RawEnvelope("helius_standard", "c", T0 + 2_000_000, "", 2, creator_sell_frame(h, MINT_A, "cs", 101)))
         pos = h.position()
         self.assertEqual(pos.state, PositionState.ENTRY_PENDING)
         h.advance(T0 + 5_000_000, late_ns=3_000_000)  # callback fires late (actual >= T0+4ms)
@@ -126,7 +126,7 @@ class T06T09Rules(unittest.TestCase):
         self.assertEqual(pos.state, PositionState.OPEN)
         self.assertEqual([x for x in attempts(h) if x["side"] == "SELL"], [])
         self.assertTrue(h.owner.reducer.gap_open_since is not None)
-        self.assertIsNone(h.owner.engine.net_liquidation_value(h.owner._curve(h.owner.reducer.states[MINT_A]), h.fees.basis(), T0 + 100_000_000, __import__("darkbot.domain", fromlist=["CoverageState"]).CoverageState.GAP, pos.token_balance_base_units, 0))
+        self.assertIsNone(h.owner.engine.net_liquidation_value(h.owner._curve(h.owner.reducer.states[MINT_A]), h.fees.basis(), T0 + 100_000_000, __import__("darkbot.solana_pump.domain", fromlist=["CoverageState"]).CoverageState.GAP, pos.token_balance_base_units, 0))
 
     def test_T08_entry_exit_latency_separate(self):
         h = Harness(base_config(latency_model={"entry_delay_ms": 10, "exit_delay_ms": 30}))
