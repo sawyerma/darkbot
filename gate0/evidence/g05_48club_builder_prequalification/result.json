@@ -1,0 +1,98 @@
+{
+  "status": "G0.5_48CLUB_BUILDER_TRANSPORT_PREQUALIFICATION",
+  "source": "terminal output supplied by user from gate0/src/bin/g05_remote_e2e.rs --48club-builder",
+  "architecture": "aarch64",
+  "os": "macos",
+  "endpoint_host": "puissant-builder.48.club",
+  "transport_candidate": "48club_puissant_builder_eth_sendBundle",
+  "transport": "preconnected TLS/TCP HTTP/1.1",
+  "chain_id_verified": null,
+  "warmup_samples": 10,
+  "measured_samples": 100,
+  "scope": "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through live 48Club Puissant Builder eth_sendBundle TLS/TCP handoff; wire transaction deliberately corrupted before send",
+  "correctness": {
+    "g03_fixture_match": true,
+    "expected_token": "0xabe1fE16cf6Bc48c9524713054efe6e954b17777",
+    "expected_output": "30669575743216741084405716",
+    "expected_min_output": "30362879985784573673561658"
+  },
+  "stages": {
+    "T_pre_to_T_ready_local": {
+      "p50_us": 173.834,
+      "p95_us": 305.584,
+      "p99_us": 549.584,
+      "max_us": 804.333,
+      "mean_ns": 198770
+    },
+    "remote_TLS_TCP_write_flush_handoff": {
+      "p50_us": 128.375,
+      "p95_us": 228.417,
+      "p99_us": 294.042,
+      "max_us": 295.041,
+      "mean_ns": 139295
+    },
+    "T_pre_to_remote_TLS_TCP_handoff": {
+      "p50_us": 328.0,
+      "p95_us": 522.209,
+      "p99_us": 632.667,
+      "max_us": 998.125,
+      "mean_ns": 351816
+    },
+    "T_pre_to_JSON_RPC_response": {
+      "p50_us": 85257.333,
+      "p95_us": 99379.375,
+      "p99_us": 107449.166,
+      "max_us": 109187.666,
+      "mean_ns": 87419947
+    },
+    "decode_and_create2": {
+      "p50_us": 17.5,
+      "p95_us": 34.208,
+      "p99_us": 56.042,
+      "max_us": 100.75
+    },
+    "quote_and_min_output": {
+      "p50_us": 6.625,
+      "p95_us": 10.708,
+      "p99_us": 11.791,
+      "max_us": 22.25
+    },
+    "tx_finalize_and_sighash": {
+      "p50_us": 10.083,
+      "p95_us": 23.709,
+      "p99_us": 50.708,
+      "max_us": 82.125
+    },
+    "secp256k1_sign": {
+      "p50_us": 131.75,
+      "p95_us": 238.291,
+      "p99_us": 519.084,
+      "max_us": 756.167
+    },
+    "signed_tx_serialize": {
+      "p50_us": 3.125,
+      "p95_us": 6.916,
+      "p99_us": 12.125,
+      "max_us": 24.333
+    },
+    "safety_invalidate_hex_json_http_framing": {
+      "p50_us": 11.292,
+      "p95_us": 20.667,
+      "p99_us": 60.167,
+      "max_us": 116.083
+    }
+  },
+  "target": {
+    "remote_e2e_prequalification_ns": 1000000,
+    "final_real_T_send_target_ns": 1000000
+  },
+  "wire_safety": "valid local signed BUY is corrupted to invalid RLP before network write",
+  "non_claims": [
+    "No valid transaction was broadcast",
+    "No value-bearing BUY was sent",
+    "Transport socket handoff is not confirmed builder acceptance, mempool acceptance, propagation or inclusion",
+    "JSON-RPC response latency is not T_send and is not T_buy",
+    "This alone does not prove inclusion advantage",
+    "The runner version used for this capture did not persist the JSON-RPC error code/message, so method-level builder acceptance is not yet frozen by this evidence"
+  ]
+}
