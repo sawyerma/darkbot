@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from darkbot.domain import (
+from darkbot.solana_pump.domain import (
     BASIS_POINTS, NS_PER_MS, AttemptStatus, CostBasis, CostEvidence, CoverageState, CurveState, InvalidQuote, LedgerRecord, QuoteSnapshot, Side, VenueState, utc_iso,
 )
 
