@@ -142,7 +142,7 @@ class T19T21Replay(unittest.TestCase):
             h, db = self._scenario_db(Path(d))
             conn = open_connection(Path(db))
             out = Path(d) / "research"
-            rep = run_research(conn, "camp", h.cfg, ROOT / "config" / "research.json", out, source_run_ids=["run"], persist=False, max_variants=3)
+            rep = run_research(conn, "camp", h.cfg, ROOT / "config" / "solana_pump" / "research.json", out, source_run_ids=["run"], persist=False, max_variants=3)
             kinds = {r.get("portfolio_limit") for r in rep["results"] if r.get("variant_id") != "ALL"}
             self.assertEqual(kinds, {"paired", 1, 10})
             self.assertTrue(any(r["split"] == "test" and r["status"] == "LOCKED_UNTIL_POLICY_FREEZE" for r in rep["results"]))
@@ -158,7 +158,7 @@ class T19T21Replay(unittest.TestCase):
             conn = open_connection(Path(db))
             overridden = h.cfg.with_overrides(portfolio={"max_open_positions": 10})
             self.assertIsNone(conn.execute("SELECT 1 FROM config_snapshots WHERE config_hash=?", (overridden.config_hash,)).fetchone())
-            run_research(conn, "camp", overridden, ROOT / "config" / "research.json", Path(d) / "research_override",
+            run_research(conn, "camp", overridden, ROOT / "config" / "solana_pump" / "research.json", Path(d) / "research_override",
                          source_run_ids=["run"], persist=True, max_variants=1)
             self.assertIsNotNone(conn.execute("SELECT 1 FROM config_snapshots WHERE config_hash=?", (overridden.config_hash,)).fetchone())
             self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
@@ -218,10 +218,10 @@ class T22T24Boundary(unittest.TestCase):
 
 
 def _cfg_with(top: dict):
-    raw = load_json_strict(ROOT / "config" / "phase1.json")
+    raw = load_json_strict(ROOT / "config" / "solana_pump" / "phase1.json")
     raw.update(top)
     from darkbot.config import build_runtime_config
-    return build_runtime_config(ROOT / "config" / "phase1.json", raw)
+    return build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", raw)
 
 
 class T25T30Protocol(unittest.TestCase):
