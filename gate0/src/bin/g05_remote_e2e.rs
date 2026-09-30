@@ -573,6 +573,7 @@ fn stats(mut v: Vec<u64>) -> Value {
     };
 
     let sum: u128 = v.iter().map(|x| *x as u128).sum();
+    let over_1ms = v.iter().filter(|x| **x > 1_000_000).count();
 
     json!({
         "p50_ns": at(50,100),
@@ -583,7 +584,9 @@ fn stats(mut v: Vec<u64>) -> Value {
         "p50_us": at(50,100) as f64 / 1000.0,
         "p95_us": at(95,100) as f64 / 1000.0,
         "p99_us": at(99,100) as f64 / 1000.0,
-        "max_us": *v.last().unwrap() as f64 / 1000.0
+        "max_us": *v.last().unwrap() as f64 / 1000.0,
+        "over_1ms_count": over_1ms,
+        "over_1ms_fraction": over_1ms as f64 / v.len() as f64
     })
 }
 
