@@ -1692,3 +1692,52 @@ Given the current Gate-0 objective is to reach an actual successful BUY/order me
 This does not convert either remote path into a final G0.5 PASS and does not remove the local-geth/P2P candidate from the overall architecture. It records that the candidate is presently unavailable for measurement on the current machine.
 
 **Next phase action:** begin G0.6 dry qualification for the available builder candidates and concurrency/nonce validity. No value-bearing transaction is permitted in G0.6.
+
+
+---
+
+## 2026-09-30 — G0.6 Concurrency / Nonce Dry Qualification
+
+Harness: `gates/bsc/gate0/src/bin/g06_concurrency.rs`
+
+Messumfang: **1.000 parallele Intent-Builds mit 8 Worker-Threads**, eingefrorene G0.3-Flap-BUY-Form, synthetisch getrennte Launch-Identitäten, **kein Netzwerk-Write und kein value-bearing BUY**.
+
+Ergebnis:
+
+~~~text
+result                              PASS
+unique nonces                       1000/1000
+duplicate nonces                    0
+accidental replacements             0
+unique tokens                       1000/1000
+cross-wiring                        0
+overwritten BUY inputs              0
+unique signed tx hashes             1000/1000
+duplicate economic submissions      0
+adapter projection mismatches       0
+contiguous nonce lane               true
+~~~
+
+Lokale Concurrent-Build/Sign-Latenz:
+
+~~~text
+p50      80,500 µs
+p95     102,584 µs
+p99     273,792 µs
+max    3.137,834 µs
+>1 ms     5/1000 = 0,5 %
+~~~
+
+Die eingefrorene G0.6-Concurrency-Anforderung ist damit für diesen Dry-Harness **PASS**: keine Nonce-Kollisionen, keine accidental replacements, kein Cross-Wiring, keine überschriebenen BUY-Inputs und keine doppelten Economic Submissions. Der p99 bleibt deutlich unter 1 ms; einzelne Scheduler-/OS-Tails oberhalb 1 ms werden separat dokumentiert und sind kein `T_send`.
+
+Candidate inclusion projection im Harness:
+- BlockRazor `eth_sendBundle`
+- 48Club `eth_sendBundle` mit `noMerge=true`
+
+Evidence:
+- `gates/bsc/gate0/evidence/g06_concurrency_dry_qualification/summary_terminal_capture.json`
+- Evidence-Commit: `da31f00fca417a51f23a9f4612ec063fe4c6e83a`
+
+**G0.6 Gesamtstatus:** **PARTIAL / concurrency PASS**. Noch offen ist die reale Ingress-Seite der Matrix. Der lokale bsc-geth/P2P-Kandidat ist auf der aktuellen Maschine nicht verfügbar; QuickNode-Coverage bleibt G0.4 PARTIAL wegen fehlendem frozen-scope denominator bzw. Providerlimit. Transport-Readiness der beiden Remote-Builder ist durch G0.5 vorqualifiziert, aber nicht Inclusion-/Ordering-bewiesen.
+
+**Non-Claims:** kein Mainnet-BUY, kein Builder-Inclusion-/Ordering-Nachweis, kein `T_buy`, kein Ingress-Coverage-PASS.
