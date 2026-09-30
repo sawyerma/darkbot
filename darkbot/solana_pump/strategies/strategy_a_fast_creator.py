@@ -1,5 +1,5 @@
 """Existing first actionable CREATE policy, extracted without changing its behavior."""
-from darkbot.strategy import entry_admission, target_reached
+from darkbot.solana_pump.strategy import entry_admission, target_reached
 
 
 class FastCreatorHold:
