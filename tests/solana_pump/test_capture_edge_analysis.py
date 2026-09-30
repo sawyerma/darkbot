@@ -13,7 +13,7 @@ from darkbot.cli import build_parser
 from darkbot.edge_analysis import PathPoint, _event_for_rule, _materialize_source, run_edge_analysis
 from darkbot.main import run_capture
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class CaptureCliTests(unittest.TestCase):
