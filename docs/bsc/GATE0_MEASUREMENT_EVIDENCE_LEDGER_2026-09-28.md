@@ -815,7 +815,7 @@ Für den G0.3-Sequenztest wurde deshalb der bereits qualifizierte Archive-Zugang
 Erster Direct-BUY-Abhängigkeits-Snapshot:
 
 \`\`\`text
-gate0/evidence/g03_direct_parent_state.json
+gates/bsc/gate0/evidence/g03_direct_parent_state.json
 12 Accounts
 64 Storage-Slots
 SHA256 80e391d70cb33f2d658ab7ccd5686fde0f79cdab6aeb840c030213af07b655c6
@@ -824,7 +824,7 @@ SHA256 80e391d70cb33f2d658ab7ccd5686fde0f79cdab6aeb840c030213af07b655c6
 Vollständiger Parent-State für alle Accounts aus dem historischen Direct-BUY-Prestate:
 
 \`\`\`text
-gate0/evidence/g03_direct_parent_state_full.json
+gates/bsc/gate0/evidence/g03_direct_parent_state_full.json
 26 Accounts
 64 Storage-Slots
 SHA256 3a090b8398c581ee0b3a06c1a1a7cfe288dcdd231a106b6a60ab22511ff532b7
@@ -1060,7 +1060,7 @@ logs   = 21
 
 Der zusätzliche 51. Frame ist die nun wirklich ausgeführte MasterChef-Abfrage. Der BUY selbst aktualisiert den Reward-Timestamp von 1790549253 auf 1790549254. Damit ist die bislang behauptete Wartebedingung widerlegt. Empfänger-Balance-/Kostenprüfung, Rust-Quote und Minimum-Output-Gegenproben folgen vor dem G0.3-Gesamtentscheid.
 
-Evidence im echten Repo: `gate0/evidence/g03_activation_raw/` (Requests, Raw-Antworten, Hashes), `g03_parent_closure.json`, `g03_sequential_execution.json`. Befehle: `python3 gate0/tools/collect_g03_activation.py`, `node gate0/tools/probe_sequence.cjs`. Ein Sequential-Sample, zwei historische Mutations-Traces, gezielte Closure-Reads. Kein Signing/Send, keine Live-Acquisition, keine neue Latenzzahl. Noch kein G0.3-Gesamt-PASS.
+Evidence im echten Repo: `gates/bsc/gate0/evidence/g03_activation_raw/` (Requests, Raw-Antworten, Hashes), `g03_parent_closure.json`, `g03_sequential_execution.json`. Befehle: `python3 gates/bsc/gate0/tools/collect_g03_activation.py`, `node gates/bsc/gate0/tools/probe_sequence.cjs`. Ein Sequential-Sample, zwei historische Mutations-Traces, gezielte Closure-Reads. Kein Signing/Send, keine Live-Acquisition, keine neue Latenzzahl. Noch kein G0.3-Gesamt-PASS.
 <!-- G03_ACTIVATION_RESOLUTION_END -->
 
 
@@ -1069,8 +1069,8 @@ Evidence im echten Repo: `gate0/evidence/g03_activation_raw/` (Requests, Raw-Ant
 Gesamtbefehl im echten Repo:
 
 ```bash
-cargo test --manifest-path gate0/Cargo.toml --locked --offline
-node gate0/tools/verify_g03.cjs
+cargo test --manifest-path gates/bsc/gate0/Cargo.toml --locked --offline
+node gates/bsc/gate0/tools/verify_g03.cjs
 ```
 
 Rust: **3 Tests bestanden**, 0 fehlgeschlagen. Gesamtverifier: **Exit 0 / G0.3_PASS_PINNED_OFFLINE_SCOPE**. Das vorhandene `src/main.rs` bleibt erhalten und verifiziert weiterhin den historischen Legacy-Envelope, Chain-ID 56, Sender-Recovery und TX-Hash. `src/bin/g03.rs` ergänzt den minimalen Korrektheitslauf: dekodiertes V6-Launch-Tupel, CREATE2, Creator-Kurve, Native→DOGE-V3-Single-Segment-Quote, Fee-/Tax-Rundung und exakte Direct-Portal-Calldata. Keine neue Produktionsarchitektur.
@@ -1109,7 +1109,7 @@ Die 100-bps-Regel ist **nur eine Testpolicy**, keine Freigabe einer Produktions-
 
 **Aktivierung:** Der ausgewählte Direct-Portal-BUY kann im geprüften Zustand unmittelbar nach dem erfolgreichen Launch ausgeführt werden. Der BUY aktualisiert `lastRewardTimestamp` selbst. Kein vorgeschalteter fremder BUY, kein Frontend und keine zusätzliche Reward-Freischaltung nötig. Der Creator-BUY bleibt launch-intern und ist kein überholbarer externer Konkurrent. Dies beweist ausführbare Reihenfolge in der Simulation, keine erreichte reale Inclusion-Position und keinen numerischen `T_buy−T0`-Wert.
 
-Eingefrorene Belege: `gate0/evidence/g03_result.json`, `g03_rust_inputs.json`, `g03_rust_output.json`, `g03_sequential_execution.json`, `g03_parent_closure.json`, `g03_activation_raw/`, `g03_verifier.stdout.txt`, `g03_verifier.stderr.txt`, `g03_sha256.json`. Fünf explizite Grenz-/Negativfälle plus Rust-Arithmetiktests; der historische Signatur-/Hash-Test wird vom Gesamtverifier mit ausgeführt. Alle 3 G0.2-Referenzausführungen behalten mit strikter Code-Verfügbarkeitsprüfung ihre Übereinstimmung.
+Eingefrorene Belege: `gates/bsc/gate0/evidence/g03_result.json`, `g03_rust_inputs.json`, `g03_rust_output.json`, `g03_sequential_execution.json`, `g03_parent_closure.json`, `g03_activation_raw/`, `g03_verifier.stdout.txt`, `g03_verifier.stderr.txt`, `g03_sha256.json`. Fünf explizite Grenz-/Negativfälle plus Rust-Arithmetiktests; der historische Signatur-/Hash-Test wird vom Gesamtverifier mit ausgeführt. Alle 3 G0.2-Referenzausführungen behalten mit strikter Code-Verfügbarkeitsprüfung ihre Übereinstimmung.
 
 **Folgegates:** G0.4/G0.5 dürfen jetzt weiter vorbereitet werden. Die lokale Bestandsprüfung findet weder geth/BSC-Binary noch einen BSC/geth-Docker-Container; die laufenden Container gehören zu OpenProject. Im Repository-`.env` wurden keine BSC/geth/48Club/BlockRazor-Konfigurationsvariablen gefunden (keine Werte ausgegeben). Ein externer Node-/Feed-Zugang wurde angefragt. Die vorhandene QuickNode-Archive-Verbindung ist kein Nachweis eines eigenen P2P-Knotens oder einer qualifizierten Inclusion-Verbindung. `T_signal → T_send` bleibt N/A. Kein value-bearing Send und kein Gate-0-Gesamt-PASS.
 
@@ -1136,7 +1136,7 @@ Der V6-Launch `0xb8d5c29c6c647d393b1e883eca2e093ffac380c4345ca7dd9c281d124e58c89
 
 Zehn empfangene Portal-Logs gehören zu dieser TX. Zwischen lokalem Pending-Empfang und erster zugehöriger Logzustellung liegen **129.102.833 ns**. Das ist ausschließlich eine Zustellungsdifferenz zweier Subscriptions auf derselben lokalen Uhr, **keine BUY-Latenz, kein T0 und kein autoritativer Pre-Lead**. Aus normalen Block-/Logdaten wird kein Ausführungszeitpunkt im Millisekundenbereich erfunden.
 
-Evidence: `gate0/evidence/g04_quicknode_probe/capture.json`, `sha256.json`, `analysis.json`. Offline-Prüfung: `node gate0/tools/verify_g04_probe.cjs` → Exit 0. Gate-Status bleibt **G0.4_PARTIAL_SOURCE_CAPABILITY_ONLY**; kanonischer Launch-Denominator/Coverage-Rate bleiben null. Ein positiver Verifier-Exit bedeutet hier lediglich konsistente Quellen-Evidence.
+Evidence: `gates/bsc/gate0/evidence/g04_quicknode_probe/capture.json`, `sha256.json`, `analysis.json`. Offline-Prüfung: `node gates/bsc/gate0/tools/verify_g04_probe.cjs` → Exit 0. Gate-Status bleibt **G0.4_PARTIAL_SOURCE_CAPABILITY_ONLY**; kanonischer Launch-Denominator/Coverage-Rate bleiben null. Ein positiver Verifier-Exit bedeutet hier lediglich konsistente Quellen-Evidence.
 
 #### Konkrete Infrastruktur-Anforderungen und Setup-Reihenfolge
 
@@ -1190,7 +1190,7 @@ Status bleibt **G0.4_PARTIAL_NO_FROZEN_SCOPE_DENOMINATOR**. Die 4/4-Beobachtung 
 
 Providerfehler: sieben `-32007`-Antworten mit **15 requests/s limit reached** und anschließend eine `-32003 request limit reached`-Antwort; danach schloss der Server die Verbindung. Damit ist die aktuelle Probe zusätzlich durch die eigene Log→`eth_getTransactionByHash`-Request-Burst-Strategie belastet. Diese Probe wird nicht als 600-s-Coverage-Lauf gewertet.
 
-Evidence: `gate0/evidence/g04_quicknode_coverage_v2/capture.json`, `sha256.json`, `analysis.json`; Collector/Analyzer: `gate0/tools/probe_g04_coverage_v2.cjs`, `gate0/tools/analyze_g04_coverage_v2.cjs`. Raw-Evidence und zugehörige Tools sind ab Evidence-Commit `cdd5950867c633906ce4aa5354f3f9a2cf85a2aa` versioniert.
+Evidence: `gates/bsc/gate0/evidence/g04_quicknode_coverage_v2/capture.json`, `sha256.json`, `analysis.json`; Collector/Analyzer: `gates/bsc/gate0/tools/probe_g04_coverage_v2.cjs`, `gates/bsc/gate0/tools/analyze_g04_coverage_v2.cjs`. Raw-Evidence und zugehörige Tools sind ab Evidence-Commit `cdd5950867c633906ce4aa5354f3f9a2cf85a2aa` versioniert.
 
 **Nächster Messschritt:** keine Upgrade-Annahme. Collector so umbauen, dass der kanonische Nenner ohne per-Log-TX-Fetch-Bursts entsteht, Requests deutlich unter 15/s bleiben und Source-Gaps/Reconnects explizit erfasst werden. Danach längeren bounded Run durchführen. `T_send`, `T_buy`, `T0` und vollständige BUY-Latenz bleiben N/A; kein value-bearing Send.
 
@@ -1273,8 +1273,8 @@ Messumfang: **5.000 Warmup + 50.000 Messsamples**.
 Damit ist die **lokale 1-ms-Vorqualifikation klar PASS**: selbst der gemessene Maximalwert des 50k-Laufs liegt mit 69,417 µs weit unter 1.000 µs. Der dominante lokale Anteil ist der secp256k1-Signer.
 
 Evidence:
-- `gate0/src/bin/g05_local.rs`
-- `gate0/evidence/g05_local_prequalification/result.json`
+- `gates/bsc/gate0/src/bin/g05_local.rs`
+- `gates/bsc/gate0/evidence/g05_local_prequalification/result.json`
 - SHA256 `8de2bba322cdbb85ae4dca788b6897dde3976180cf30190fd9a05d3dbdd42e9b`
 
 **Non-Claims / Gate-Grenze:** Der UnixDatagram-`send()`-Return ist nur eine lokale Adaptergrenze. Er ist **kein** realer bsc-geth-P2P-`T_send`, **kein** Builder-`T_send`, **kein** `T_buy` und schließt G0.5 final noch nicht. Die Messung bestätigt jedoch, dass die lokale Rust-Verarbeitung die 1-ms-Hypothese nicht falsifiziert; kostenpflichtige Infrastruktur muss deshalb nicht vor dieser lokalen Entscheidung beschafft werden.
@@ -1302,8 +1302,8 @@ Aufbau: derselbe eingefrorene G0.3-Fixture und derselbe Rust-Release-Hotpath wie
 Einzelne höhere Scheduling-/OS-Ausreißer sind sichtbar (z. B. 550,875 µs im ersten Lauf und 287,084 µs im neunten Lauf), bleiben in dieser Stichprobe aber ebenfalls unter 1 ms. Der p99-Bereich ist über alle Läufe eng und stabil.
 
 Evidence:
-- `gate0/evidence/g05_local_stability/run_01.json` bis `run_10.json`
-- `gate0/evidence/g05_local_stability/summary.json`
+- `gates/bsc/gate0/evidence/g05_local_stability/run_01.json` bis `run_10.json`
+- `gates/bsc/gate0/evidence/g05_local_stability/summary.json`
 - SHA256 Summary: `1d1ea23a246d989a1cb6116379eea3a7be5eb8cbc834fa4bee7316f8f92c8388`
 
 **Einordnung:** Die lokale <1-ms-Hypothese ist nach insgesamt 500.000 zusätzlichen Messdurchläufen robust gestützt. Dies bleibt weiterhin **LOCAL PREQUALIFICATION**, nicht finaler G0.5-Transport-PASS. Der gemessene UnixDatagram-Handoff ist kein realer bsc-geth-P2P- oder Builder-`T_send`.
@@ -1366,8 +1366,8 @@ Launch Decode + CREATE2
 Teilwerte p99: Decode/CREATE2 0,709 µs; Quote/minOutput 0,459 µs; TX finalize+sighash 0,875 µs; secp256k1 Sign 34,250 µs; signed serialization 0,334 µs; Hex+JSON-RPC 1,167 µs; UnixStream-Handoff 1,834 µs.
 
 Evidence:
-- `gate0/src/bin/g05_e2e_local.rs`
-- `gate0/evidence/g05_local_e2e/result.json`
+- `gates/bsc/gate0/src/bin/g05_e2e_local.rs`
+- `gates/bsc/gate0/evidence/g05_local_e2e/result.json`
 - SHA256: `91e051b6bdb19e31b28be7f9bff40c425f666b690a693d5684293d738df68cc3`
 
 **Einordnung:** Die zentrale lokale <1-ms-Hypothese bleibt in einem einzigen End-to-End-Messpfad mit großem Abstand bestehen; selbst das beobachtete Maximum lag bei 537,042 µs. Damit ist weitere lokale Mikromessung für die Vorentscheidung nicht mehr der Engpass.
@@ -1472,7 +1472,7 @@ Lokal ausgegebener SHA256 der erzeugten Summary-Datei:
 
 ```text
 2ecdc06f9018fc69b44365ece3b21df905387cba4e35bf8f268e9c51deaccd3b
-gate0/evidence/g05_remote_e2e_stability/summary.json
+gates/bsc/gate0/evidence/g05_remote_e2e_stability/summary.json
 ```
 
 **Einordnung:** Die vorherige Aussage wird präzisiert. Der warme Remote-E2E-Handoff liegt im typischen Bereich klar unter 1 ms, ist aber **nicht tail-stabil vollständig unter 1 ms**: 7 von 1.000 Samples lagen über 1 ms; in einem Run lag bereits p99 mit 1.042,916 µs über 1 ms. Damit ist ein harter Anspruch „jeder Remote-Handoff < 1 ms“ durch diese Stichprobe widerlegt. Die Messung stützt weiterhin, dass der eigene lokale Build-/Sign-/Serialize-/Transport-Handoff im Regelfall sub-ms bleiben kann.
@@ -1498,7 +1498,7 @@ Die 1.000-Sample-Stabilitätsmessung ändert den primären Gate-0-Maßstab nicht
 
 **Phase:** unterstützende Vorqualifikation innerhalb Gate 0; **kein** Ersatz für G0.6/G0.7/G0.8 und **keine** Änderung der festgelegten Phasenreihenfolge.
 
-**Zweck:** Nachweis, dass der bereits rekonstruierte direkte Flap-Portal-BUY auf BSC Testnet als echte signierte Transaktion erfolgreich ausgeführt werden kann und die beabsichtigten Token tatsächlich im vorgesehenen Wallet ankommen. Dieser Test diente ausschließlich als Funktions-/Acquisition-Nachweis. Der hierfür kurzfristig angelegte separate Test-Harness `gate0/src/bin/g07_testnet_buy.rs` wurde anschließend wieder entfernt, damit keine parallele BSC-BUY-Architektur neben dem bestehenden Gate-0-Hotpath verbleibt.
+**Zweck:** Nachweis, dass der bereits rekonstruierte direkte Flap-Portal-BUY auf BSC Testnet als echte signierte Transaktion erfolgreich ausgeführt werden kann und die beabsichtigten Token tatsächlich im vorgesehenen Wallet ankommen. Dieser Test diente ausschließlich als Funktions-/Acquisition-Nachweis. Der hierfür kurzfristig angelegte separate Test-Harness `gates/bsc/gate0/src/bin/g07_testnet_buy.rs` wurde anschließend wieder entfernt, damit keine parallele BSC-BUY-Architektur neben dem bestehenden Gate-0-Hotpath verbleibt.
 
 ### Eingefrorener Testnet-Scope
 
@@ -1618,8 +1618,8 @@ Die konsistente `-32000`-Antwort bestätigt, dass der Live-Endpunkt die `eth_sen
 **Bewertung:** 48Club bleibt als Inclusion-Kandidat technisch verwendbar, erfüllt auf der aktuell gemessenen Client-/Netzwerkroute aber das harte Tail-Ziel `T_pre -> T_send < 1 ms` nicht robust. Status für diesen Kandidaten: **ADAPT**, kein finaler G0.5-PASS.
 
 Evidence:
-- lokal erzeugte Runs unter `gate0/evidence/g05_48club_builder_stability/`
-- versionierte Terminal-Summary: `gate0/evidence/g05_48club_builder_stability/summary_terminal_capture.json`
+- lokal erzeugte Runs unter `gates/bsc/gate0/evidence/g05_48club_builder_stability/`
+- versionierte Terminal-Summary: `gates/bsc/gate0/evidence/g05_48club_builder_stability/summary_terminal_capture.json`
 - lokal ausgegebener SHA256 der vollständigen `summary.json`: `cc7a522bee287a765ba38148efc07a2ade5ddf6422ee5138e3fc97588e6e6944`
 - Terminal-Summary-Commit: `60fb52341ddde3c6a630ab1f2a1dda8f8801fb82`
 
