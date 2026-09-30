@@ -16,12 +16,12 @@ END = START + 1000 * NS_PER_MS
 
 
 def a_creator_config(**overrides):
-    cfg = load_runtime_config(ROOT / 'config/strategy_a_creator_exit_usd_slots.json')
+    cfg = load_runtime_config(ROOT / 'config/solana_pump/strategy_a_creator_exit_usd_slots.json')
     return cfg.with_overrides(**overrides) if overrides else cfg
 
 
 def bconfig(**overrides):
-    cfg = load_runtime_config(ROOT / 'config/strategy_b.json')
+    cfg = load_runtime_config(ROOT / 'config/solana_pump/strategy_b.json')
     return cfg.with_overrides(**overrides) if overrides else cfg
 
 
@@ -262,7 +262,7 @@ class StrategyBTests(unittest.TestCase):
             h=Harness(bconfig(),db_path=str(source));h.owner.on_fx_snapshot(FxSnapshot.from_payload('{"data":{"amount":"100","base":"SOL","currency":"USD"}}','fixture',h.clock.utc_iso(),T0))
             qualified(h);h.finish(END+NS_PER_MS);h.conn.close()
             before=hashlib.sha256(source.read_bytes()).hexdigest()
-            summary=compare_capture(source,'run',root/'out.sqlite',root/'reports',base_config(),bconfig(),ROOT/'config/research_ab.json')
+            summary=compare_capture(source,'run',root/'out.sqlite',root/'reports',base_config(),bconfig(),ROOT/'config/solana_pump/research_ab.json')
             self.assertEqual(len(summary['results']),24)
             self.assertEqual({r['portfolio_limit'] for r in summary['results']},{1,10})
             self.assertEqual(len({r['dataset_hash'] for r in summary['results']}),1)
@@ -282,7 +282,7 @@ class StrategyBTests(unittest.TestCase):
             root=Path(directory);source=root/'source.sqlite'
             h=Harness(bconfig(),db_path=str(source));h.owner.on_fx_snapshot(FxSnapshot.from_payload('{"data":{"amount":"100","base":"SOL","currency":"USD"}}','fixture',h.clock.utc_iso(),T0));qualified(h);h.finish(END+100*NS_PER_MS);h.conn.close()
             measured=root/'measured.json';measured.write_text(json.dumps({'source':'offline test fixture; not real measurement','observed_utc':'2026-09-20T00:00:00Z','entry_delay_ms':[25],'exit_delay_ms':[5]}))
-            research=root/'research.json';raw=json.loads((ROOT/'config/research_ab.json').read_text());raw['portfolio_position_limits']=[1];raw['latency_scenarios']=raw['latency_scenarios'][-1:];research.write_text(json.dumps(raw))
+            research=root/'research.json';raw=json.loads((ROOT/'config/solana_pump/research_ab.json').read_text());raw['portfolio_position_limits']=[1];raw['latency_scenarios']=raw['latency_scenarios'][-1:];research.write_text(json.dumps(raw))
             summary=compare_capture(source,'run',root/'out.sqlite',root/'reports',base_config(),bconfig(),research,measured)
             self.assertEqual(len(summary['results']),4)
             selected=[r for r in summary['results'] if r['latency_scenario']=='MEASURED_EXECUTION_DISTRIBUTION' and r['strategy_id']==bconfig().strategy_id][0]
