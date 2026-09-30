@@ -180,7 +180,7 @@ If a candidate address cannot be known before execution, quantify the earliest v
 Gate 0 may use a small native Rust harness:
 
 ```
-gate0/
+gates/bsc/gate0/
   Cargo.toml
   src/
     main.rs
