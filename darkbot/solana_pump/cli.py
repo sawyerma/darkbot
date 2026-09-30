@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from darkbot.config import ConfigError, load_runtime_config, redact
+from darkbot.solana_pump.config import ConfigError, load_runtime_config, redact
 
 EXIT_OK, EXIT_CONFIG, EXIT_RUNTIME, EXIT_NOT_READY = 0, 2, 3, 4
 
@@ -117,8 +117,8 @@ def cmd_paper(args: argparse.Namespace) -> int:
     )
     # complete_delivery_contract: artifacts are produced automatically after every run, including interrupts
     try:
-        from darkbot.reporting import Reporter, persist_report, write_outputs
-        from darkbot.storage import open_connection
+        from darkbot.solana_pump.reporting import Reporter, persist_report, write_outputs
+        from darkbot.solana_pump.storage import open_connection
 
         conn = open_connection(args.db)
         report = Reporter(conn).build(summary["run_id"])
@@ -143,8 +143,8 @@ def cmd_paper(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 def cmd_report(args: argparse.Namespace) -> int:
-    from darkbot.reporting import Reporter, persist_report, write_outputs
-    from darkbot.storage import open_connection
+    from darkbot.solana_pump.reporting import Reporter, persist_report, write_outputs
+    from darkbot.solana_pump.storage import open_connection
 
     if not args.db.exists():
         print(f"database {args.db} does not exist", file=sys.stderr)
@@ -166,8 +166,8 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 def cmd_research(args: argparse.Namespace) -> int:
-    from darkbot.backtest import run_research
-    from darkbot.storage import open_connection
+    from darkbot.solana_pump.backtest import run_research
+    from darkbot.solana_pump.storage import open_connection
 
     cfg = load_runtime_config(args.runtime_config)
     conn = open_connection(args.db)
@@ -181,13 +181,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "ab-replay":
-            from darkbot.ab_replay import compare_capture
+            from darkbot.solana_pump.ab_replay import compare_capture
             result = compare_capture(args.source_db, args.source_run_id, args.output_db, args.out,
                                      load_runtime_config(args.config_a), load_runtime_config(args.config_b), args.research_config, args.measured_latency)
             print(f"A/B replay: {len(result['results'])} runs -> {args.out / 'comparison.json'}")
             return EXIT_OK
         if args.command == "edge-analysis":
-            from darkbot.edge_analysis import run_edge_analysis
+            from darkbot.solana_pump.edge_analysis import run_edge_analysis
             result = run_edge_analysis(args.source, args.out, run_id=args.run_id, campaign=args.campaign)
             print(f"edge-analysis: run={result['run_id']} launches={result['launches_with_hypothetical_entry']} -> {args.out / 'edge_summary.json'}")
             return EXIT_OK
