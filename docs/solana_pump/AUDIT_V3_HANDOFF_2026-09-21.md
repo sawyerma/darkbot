@@ -57,6 +57,6 @@ Arbeitsdateien: `/tmp/darkbot-v3-confirmed.patch`, `/tmp/darkbot-v3-coder`. Dies
 
 Grundpatch und beide Review-Korrekturen wurden im Originalrepository auf main angewendet. Der Analyse-Agent hat beide korrigierten Findings nochmals statisch geprüft und sieht daraus keine verbleibenden Blocker. Der ergänzte Hash bindet nun sämtliche konsumierten FeeSnapshot-Felder einschließlich TTL. Der Stale-Test setzt ausdrücklich 250 ms.
 
-Die endgültige AST-Prüfung aller 12 geänderten/neuen Python-Dateien und git diff --check waren erfolgreich. 20 neue Testmethoden sind vorbereitet, keine ausgeführt. Bestehende JSON-Profile und docs/SPEC.json unverändert. Kein Commit/Push. Sechs SQLite-Begleitdateien sind lediglich im Index zur Entfernung vorgemerkt und lokal weiterhin vorhanden.
+Die endgültige AST-Prüfung aller 12 geänderten/neuen Python-Dateien und git diff --check waren erfolgreich. 20 neue Testmethoden sind vorbereitet, keine ausgeführt. Bestehende JSON-Profile und docs/solana_pump/SPEC.json unverändert. Kein Commit/Push. Sechs SQLite-Begleitdateien sind lediglich im Index zur Entfernung vorgemerkt und lokal weiterhin vorhanden.
 
 Offen: funktionale Regressionstests und Gesamtsuite nach Testfreigabe; echte Mainnet-/PAPER-Validierung, Performance-Messung und positiver Erwartungswert sind nicht nachgewiesen. Die statische Prüfung ist kein Versprechen fehlerfreien Betriebs.
