@@ -1842,3 +1842,14 @@ Zwei erfolgreiche **Diagnosetests belegen Grenzen**, nicht bestandene Sicherheit
 - Kontrollierte Thread-Reihenfolge ohne Sleep ergibt Completion `[8, 7]` trotz atomarer eindeutiger Nonces. Allocation beweist weder geordneten Versand noch Verhalten bei einer Nonce-Lücke.
 
 Raw-Testausgaben und maschinenlesbares Ergebnis liegen unter `gates/bsc/gate0/evidence/g06_offline_regression/`. Historische Transportmessungen bleiben historische Evidence der damaligen Binärdateien; der Fix ist kein neuer Latenznachweis. **G0.6 bleibt PARTIAL**: Submission-Idempotenz/Nonce-Lifecycle, Head-of-line und Live-Sender/-Betrag/-State noch offen. Kein Mainnet-BUY, kein RPC-Capture, kein T_buy-Messwert.
+
+
+## 2026-09-30 — Begrenzte Offline-Intent-/Nonce-Spur
+
+Der vorhandene G0.6-Harness verwendet jetzt `src/intent_lane.rs` für die Admission und Nonce-Vergabe. Die BUY-/Signierimplementierung bleibt erhalten. Eine Sitzung bindet Chain und Sender, merkt jeden Token als wirtschaftliche Kaufabsicht und behält diese Sperre auch nach Bestätigung. Doppelte Signale verbrauchen keine weitere Nonce. Ein Prepared-Hash ist unveränderlich; ein Send-Permit wird vor dem gedachten I/O verbraucht. Unbekannter Sendeausgang, Revert/Timeout oder ungültige Bestätigung führen über Halt zu keinem weiteren Permit und keiner automatischen Nonce-Wiederverwendung. Tickets fremder Sender/Chains werden abgelehnt.
+
+**Verifikation:** `cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --lib --bins -- --nocapture` — **14 Tests bestanden, 0 fehlgeschlagen**. Sieben Lane-Tests einschließlich 8 Worker × 1.000 wiederholte Signale → genau 1.000 Intents/Permits; ein zusätzlicher Integrationstest prüft die tatsächlichen bestehenden G0.6-Signaturen/Calldata bei umgekehrter Build-Reihenfolge. Die bisherigen Signatur- und G0.3-Tests bleiben grün. Dies ist kein neuer Microbenchmark.
+
+Belege: `gates/bsc/gate0/evidence/g06_intent_lane/result.json` und `test_output.txt`. Das Harness-Ergebnis heißt nun ausdrücklich `PASS_SYNTHETIC_DRY_ONLY`; irreführende Submission-/Replacement-Zähler sind durch Dry-Permits und `actual_submission_lifecycle=NOT_TESTED` ersetzt.
+
+**Grenzen / nächste notwendige Arbeit:** Die Spur ist nur in-memory und nur in den Dry-Harness integriert. Sie wartet konservativ auf die Bestätigung der Vorgänger-Nonce; im Test wird diese simuliert. Das ist keine Lösung für das Head-of-line-Latenzziel. ACKs dürfen später nicht als kanonische Bestätigung gelten. Live-Transport-Anbindung, Wiederanlauf/Reconciliation, Kopfblockierung sowie Live-Sender/-Betrag/-State bleiben unqualifiziert. **G0.6 bleibt PARTIAL**, beide Builder bleiben Kandidaten. Keine value-bearing TX und kein neuer BUY-Latenzwert. Der vorgeschlagene Mainnet-Vertrag bleibt nicht autorisiert.

@@ -1,0 +1,89 @@
+   Compiling darkbot-gate0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/gates/bsc/gate0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.56s
+     Running unittests src/lib.rs (gates/bsc/gate0/target/debug/deps/darkbot_gate0-6a65734d4150708e)
+
+running 7 tests
+test intent_lane::tests::capacity_and_nonce_exhaustion_fail_closed ... ok
+test intent_lane::tests::conflicting_preparation_and_confirmation_rejected ... ok
+test intent_lane::tests::unknown_write_outcome_halts_without_retry_replacement_or_nonce_reuse ... ok
+test intent_lane::tests::reversed_build_completion_cannot_bypass_unready_or_unconfirmed_head ... ok
+test intent_lane::tests::duplicate_before_and_after_confirmation_never_consumes_nonce ... ok
+test intent_lane::tests::tickets_cannot_cross_sender_or_chain_lanes ... ok
+test intent_lane::tests::eight_workers_repeated_signals_produce_exactly_1000_permits ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/main.rs (gates/bsc/gate0/target/debug/deps/darkbot_gate0-e0912251b444e2a9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g03.rs (gates/bsc/gate0/target/debug/deps/g03-f85be6ce1aa74ca7)
+
+running 3 tests
+
+thread 'tests::reject_unbounded_slippage' (91533) panicked at src/bin/g03.rs:47:5:
+invalid test slippage policy
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test tests::minimum_keeps_exact_integer_bound ... ok
+test tests::widened_product_does_not_wrap ... ok
+test tests::reject_unbounded_slippage - should panic ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_e2e_local.rs (gates/bsc/gate0/target/debug/deps/g05_e2e_local-bb0a28f37997f2af)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_ipc.rs (gates/bsc/gate0/target/debug/deps/g05_ipc-c917b15584f9d233)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_local.rs (gates/bsc/gate0/target/debug/deps/g05_local-5e6ab2d683ddcd1a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_remote_e2e.rs (gates/bsc/gate0/target/debug/deps/g05_remote_e2e-1bb41cd0cd597856)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_remote_e2e_stability.rs (gates/bsc/gate0/target/debug/deps/g05_remote_e2e_stability-d3c769e4cf44b465)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_remote_transport.rs (gates/bsc/gate0/target/debug/deps/g05_remote_transport-3cb7fcd16c7dc9e1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g06_concurrency.rs (gates/bsc/gate0/target/debug/deps/g06_concurrency-23bef000a2bf1df5)
+
+running 4 tests
+LIMITATION_REPRODUCED: unique nonces complete out of order; no dispatch or nonce-gap guarantee
+test qualification_tests::diagnostic_atomic_nonce_allocation_does_not_order_completion ... ok
+LIMITATION_REPRODUCED: same economic intent, two distinct hashes; hash uniqueness is not deduplication
+test qualification_tests::diagnostic_duplicate_intent_has_distinct_hash_when_nonce_changes ... ok
+test qualification_tests::dry_lane_orders_existing_signed_buy_envelopes ... ok
+1024 envelopes validated; short signature scalars=10
+test qualification_tests::signed_envelopes_are_canonical_and_recover_the_correct_sender ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.33s
+
+     Running unittests src/bin/g06_flap_pending_decode.rs (gates/bsc/gate0/target/debug/deps/g06_flap_pending_decode-b3eb15322091a0e8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

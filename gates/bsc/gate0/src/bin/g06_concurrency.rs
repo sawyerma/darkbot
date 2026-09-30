@@ -1,3 +1,4 @@
+use darkbot_gate0::intent_lane::IntentLane;
 use alloy_primitives::{keccak256, Address, Bytes, U256};
 use alloy_sol_types::{sol, SolCall};
 use k256::ecdsa::SigningKey;
@@ -8,7 +9,7 @@ use std::{
     fs,
     str::FromStr,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Barrier, Mutex,
     },
     thread,
@@ -209,7 +210,10 @@ fn main() {
     let signer = SigningKey::from_bytes((&[0x22u8; 32]).into()).unwrap();
 
     let next_index = AtomicUsize::new(0);
-    let next_nonce = AtomicU64::new(0);
+    let public_key = signer.verifying_key().to_encoded_point(false);
+    let sender_hash = keccak256(&public_key.as_bytes()[1..]);
+    let sender = Address::from_slice(&sender_hash.as_slice()[12..]);
+    let lane = Mutex::new(IntentLane::new(56, sender, BASE_NONCE, intents));
     let results: Mutex<Vec<ResultRow>> = Mutex::new(Vec::with_capacity(intents));
     let start_barrier = Barrier::new(workers);
     const BASE_NONCE: u64 = 0x700000;
@@ -220,7 +224,7 @@ fn main() {
         for _ in 0..workers {
             let signer = signer.clone();
             let next_index = &next_index;
-            let next_nonce = &next_nonce;
+            let lane = &lane;
             let results = &results;
             let barrier = &start_barrier;
 
@@ -235,12 +239,14 @@ fn main() {
                     let launch_id = idx as u64;
                     let t0 = Instant::now();
 
-                    let nonce = BASE_NONCE + next_nonce.fetch_add(1, Ordering::SeqCst);
                     let token = derive_token(base_token, launch_id);
+                    let ticket = lane.lock().unwrap().reserve(token).unwrap();
+                    let nonce = ticket.nonce();
                     let calldata = make_calldata(token, input, minimum);
                     let calldata_hash = keccak256(&calldata);
                     let signed = sign_legacy(nonce, portal, input, &calldata, &signer);
                     let tx_hash = keccak256(&signed);
+                    lane.lock().unwrap().prepare(ticket, tx_hash).unwrap();
                     let raw_hex = hex::encode(&signed);
 
                     // G0.6 adapter projection only: same signed transaction must be
@@ -305,6 +311,16 @@ fn main() {
         }
     }
 
+    // Dry permits only. Confirmation below is simulated, never a receipt claim.
+    let mut lane = lane.into_inner().unwrap();
+    for expected_nonce in BASE_NONCE..BASE_NONCE + intents as u64 {
+        let (ticket, hash) = lane.begin_send().unwrap();
+        assert_eq!(ticket.nonce(), expected_nonce);
+        assert!(rows.iter().any(|r| r.nonce == ticket.nonce() && r.tx_hash == hash.0));
+        lane.confirm(ticket, hash).unwrap();
+    }
+    assert!(lane.begin_send().is_err());
+
     let duplicate_nonce_count = intents - nonces.len();
     let duplicate_token_count = intents - tokens.len();
     let duplicate_tx_hash_count = intents - tx_hashes.len();
@@ -332,7 +348,7 @@ fn main() {
 
     let latency_target_met = p99 < 1_000_000;
     let result = if invariants_pass && latency_target_met {
-        "PASS"
+        "PASS_SYNTHETIC_DRY_ONLY"
     } else {
         "ADAPT"
     };
@@ -363,8 +379,9 @@ fn main() {
                 "cross_wiring_count": cross_wiring,
                 "overwritten_buy_input_count": overwritten_inputs,
                 "adapter_projection_mismatch_count": adapter_projection_mismatch,
-                "accidental_replacement_count": duplicate_nonce_count,
-                "duplicate_economic_submission_count": duplicate_tx_hash_count
+                "dry_ordered_permit_count": intents,
+                "actual_submission_lifecycle": "NOT_TESTED",
+                "confirmation": "SIMULATED_OFFLINE_ONLY"
             },
             "local_concurrent_intent_build_sign": {
                 "p50_us": p50 as f64 / 1000.0,
@@ -403,7 +420,7 @@ mod qualification_tests {
     use super::*;
     use alloy_rlp::Header;
     use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
-    use std::sync::mpsc;
+    use std::sync::{mpsc, atomic::AtomicU64};
 
     fn fields(raw: &[u8]) -> Vec<&[u8]> {
         let mut envelope = raw;
@@ -457,6 +474,41 @@ mod qualification_tests {
         }
         assert!(shortened_scalars > 0, "regression vectors must exercise short signature scalars");
         println!("1024 envelopes validated; short signature scalars={shortened_scalars}");
+    }
+
+    #[test]
+    fn dry_lane_orders_existing_signed_buy_envelopes() {
+        use darkbot_gate0::intent_lane::Error;
+        let (portal, calldata) = fixture();
+        let signer=SigningKey::from_bytes((&[0x22;32]).into()).unwrap();
+        let pk=signer.verifying_key().to_encoded_point(false);
+        let digest=keccak256(&pk.as_bytes()[1..]);
+        let sender=Address::from_slice(&digest.as_slice()[12..]);
+        let mut lane=IntentLane::new(56,sender,7,2);
+        let token_a=Address::repeat_byte(1); let token_b=Address::repeat_byte(2);
+        let a=lane.reserve(token_a).unwrap(); let b=lane.reserve(token_b).unwrap();
+        assert_eq!(lane.reserve(token_a),Err(Error::Duplicate));
+        let mut envelopes=std::collections::BTreeMap::new();
+        for (ticket,token) in [(b,token_b),(a,token_a)] {
+            let input=make_calldata(token,U256::from(1000),U256::from(1));
+            let raw=sign_legacy(ticket.nonce(),portal,U256::from(1000),&input,&signer);
+            lane.prepare(ticket,keccak256(&raw)).unwrap();
+            envelopes.insert(ticket.nonce(),(token,raw));
+        }
+        for expected_nonce in [7,8] {
+            let (ticket,hash)=lane.begin_send().unwrap();
+            assert_eq!(ticket.nonce(),expected_nonce);
+            let (token,raw)=&envelopes[&expected_nonce];
+            assert_eq!(keccak256(raw),hash);
+            let f=fields(raw);
+            assert_eq!(U256::from_be_slice(f[0]).to::<u64>(),expected_nonce);
+            let decoded=swapExactInputCall::abi_decode_validate(f[5]).unwrap();
+            assert_eq!(decoded.params.outputToken,*token);
+            assert_eq!(lane.begin_send(),Err(Error::NotReady));
+            lane.confirm(ticket,hash).unwrap();
+        }
+        assert_eq!(lane.begin_send(),Err(Error::NotReady));
+        let _=calldata;
     }
 
     #[test]

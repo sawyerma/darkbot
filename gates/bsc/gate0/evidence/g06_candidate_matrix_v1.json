@@ -24,7 +24,7 @@
     "full_submission_lifecycle": "NOT_PROVEN"
   },
   "blockers": {
-    "concurrency_lifecycle": "Atomic nonce allocation and unique synthetic work items do not prove duplicate-signal/retry idempotency, dropped-nonce recovery, ordered dispatch or recipient isolation. No network submission occurs; duplicate_economic_submission_count is just duplicate_tx_hash_count.",
+    "concurrency_lifecycle": "Offline lane now deduplicates tokens per fixed chain/sender, orders single-use permits and halts on uncertainty; integrated only in synthetic g06 harness. Live adapter binding, canonical reconciliation and restart recovery remain unproven.",
     "head_of_line": "Timer starts after work acquisition; ingress backlog and nonce-gap blocking are absent. Local build p99=273792 ns, max=3137834 ns, 5/1000 >1ms do not establish the plan's head-of-line requirement.",
     "live_scope_validity": "G0.3 PASS is historical caller + 0.15 BNB + pinned single-segment state. Live sender, small amount, cache freshness/invalidation and new launch must be validated on the existing Rust path before value-bearing use. No general tick-crossing proof."
   },
@@ -115,5 +115,7 @@
     "Terminal summaries are evidence records, not independently rerun raw samples"
   ],
   "followup_evidence": "gates/bsc/gate0/evidence/g06_offline_regression/result.json",
-  "followup_status": "Signature RLP defect fixed; deduplication and completion-order limitations reproduced offline; G0.6 remains PARTIAL"
+  "followup_status": "Signature RLP defect fixed; deduplication and completion-order limitations reproduced offline; G0.6 remains PARTIAL",
+  "intent_lane_evidence": "gates/bsc/gate0/evidence/g06_intent_lane/result.json",
+  "intent_lane_status": "PASS_OFFLINE_BOUNDED_SESSION_ONLY; live transport/reconciliation, restart and latency not qualified"
 }

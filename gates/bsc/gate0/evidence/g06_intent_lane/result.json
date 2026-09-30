@@ -1,0 +1,29 @@
+{
+  "status": "PASS_OFFLINE_INTENT_LANE_ONLY",
+  "gate_status": "G0.6_PARTIAL",
+  "command": "cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --lib --bins -- --nocapture",
+  "tests_passed": 14,
+  "tests_failed": 0,
+  "workers": 8,
+  "signals": 8000,
+  "unique_intents": 1000,
+  "dry_permits": 1000,
+  "checks": [
+    "duplicate signals before/after confirmation rejected without extra nonce",
+    "reverse preparation cannot bypass unready/unconfirmed head",
+    "unknown write outcome halts all subsequent permits",
+    "conflicting preparation rejected; wrong confirmation hash halts",
+    "cross-chain and cross-sender ticket use rejected",
+    "capacity and nonce overflow rejected",
+    "existing g06 signed BUY envelope hash, nonce and token checked before simulated confirmation"
+  ],
+  "implementation_scope": "In-memory bounded session; existing g06_concurrency harness integrated; no network IO or live sender integration",
+  "nonclaims": [
+    "No crash/restart recovery",
+    "No canonical live receipt reconciliation",
+    "No head-of-line latency PASS: conservative lane waits for confirmation",
+    "No proof of live sender/amount/current-state quote",
+    "No Mainnet BUY or new T_send/T_buy measurement"
+  ],
+  "test_output_sha256": "110abbe86545d7c3141cc18b9823f6fc0cad9a4a8af4b25f43eba3519c839d1f"
+}
