@@ -20,7 +20,7 @@ class VenueNotImplemented(NotImplementedError):
 
 
 def _pumpfun_factory() -> Any:
-    from darkbot.venues.pumpfun.venue import PumpFunVenueAdapter  # lazy: keeps registry import free of decoder/engine modules
+    from darkbot.solana_pump.venue.venue import PumpFunVenueAdapter  # lazy: keeps registry import free of decoder/engine modules
 
     return PumpFunVenueAdapter()
 
