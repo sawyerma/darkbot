@@ -22,7 +22,7 @@ from enum import Enum
 from darkbot.config import canonical_json
 from darkbot.domain import FeeSnapshot, LedgerRecord, PositionRecord, QuoteSnapshot, RawEnvelope, utc_iso
 
-MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
+MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations" / "solana_pump"
 SCHEMA_VERSION = 1
 SPEC_VERSION = "1.3.2"
 
