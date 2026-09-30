@@ -1,11 +1,11 @@
 # DarkBot — Project 0 — Finaler Produktions-Phasenplan
 
-**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4  
+**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.1  
 **Stand:** 2026-09-30  
 **Geltungsbereich:** DarkBot / Project 0 Liquidator  
 **Source of Truth:** Diese Datei definiert Architektur, Reihenfolge, Gates und verbindliche Entwicklungsregeln.
 
-**Freeze-Korrekturen:** `solana-dex-superagg` ist als Remote-Aggregator-Client klassifiziert; `marginfi-v2` Apache-2.0 und `solana-dex-superagg` MIT sind lizenzseitig bestätigt; Receivership Maintenance=SPOT und Equity=EMA sowie die tatsächlichen `liquidate_end.rs`-Grenzen sind als Protocol-Semantik aufgenommen; H0 modelliert konfigurierbare Konkurrenz-Mindestprofitschwellen.
+**Freeze-Korrekturen:** `solana-dex-superagg` ist als Remote-Aggregator-Client klassifiziert; `marginfi-v2` Apache-2.0 und `solana-dex-superagg` MIT sind lizenzseitig bestätigt; Receivership Maintenance=SPOT und Equity=EMA sowie die tatsächlichen `liquidate_end.rs`-Grenzen sind als Protocol-Semantik aufgenommen; H0 modelliert konfigurierbare Konkurrenz-Mindestprofitschwellen. **v4.1 übernimmt zusätzlich den BSC-Fast-Lane-Grundsatz: kein JSON/WSS im latency-kritischen Production-Hotpath; Production-Ingress ist binär/native, WSS/RPC bleibt Control-/Bootstrap-/Recovery-/Evidence-Pfad.**
 
 ---
 
@@ -171,8 +171,9 @@ Nicht „Rust um jeden Preis“, sondern:
 
 Rust ist verbindlich für:
 
-- Solana Ingress;
-- WebSocket-/Geyser-Decode;
+- Solana Native/Binary Ingress;
+- Protobuf-/Geyser-/Shred-/Deshred-Decode;
+- native Fast-Lane Event Mapping;
 - Canonical/Fork State;
 - RAM State;
 - Reconnect/Reconciliation;
@@ -376,18 +377,43 @@ GUESS
 
 ## 1.7 Hotpath-Verbote
 
-Im LIVE-Entscheidungspfad:
+Im latency-kritischen Production-/Race-Pfad:
 
 - keine Datenbank;
 - kein Python;
+- **kein JSON-Wire-Format;**
+- **kein JSON-RPC-WebSocket als normative Race-Quelle;**
+- kein `serde_json`/Base64/JSON-Normalisierungsschritt vor der Entscheidung;
 - kein synchroner RPC-Lookup als Voraussetzung;
 - kein HTTP-Routing-Call als zwingende Voraussetzung, wenn lokal/precomputed möglich;
 - kein globaler Account-Full-Scan;
 - kein unbekannter Wert mit Fallback auf 0;
 - keine vereinfachte Health-Formel;
-- kein unnötiges JSON im internen Hotpath;
 - keine unbounded Queue;
 - keine unnötige Lock-/Allocation-Kaskade.
+
+Der Production-Fast-Lane-Pfad ist:
+
+```text
+binary/native network event
+→ minimaler Rust decode
+→ fixed/native Rust event
+→ bounded channel / SPSC
+→ RAM state
+→ detection / health / economics
+→ build / sign / submit
+```
+
+WSS/RPC/JSON bleiben erlaubt für:
+
+- P0/P1/C0/H0;
+- Bootstrap/Snapshot;
+- Recovery/Reconciliation;
+- Control Plane;
+- Evidence/Shadow-Vergleich;
+- Fallback-Diagnostik.
+
+Sie sind **nicht** die Latency Source of Truth für Race.
 
 ---
 
@@ -398,7 +424,7 @@ Nicht ideologisch festlegen:
 - v0 vs. v1;
 - RPC vs. Jito;
 - single TX vs. bundle;
-- WS vs. Geyser;
+- welcher **qualifizierte binäre/native Production-Ingress** genutzt wird (z. B. Geyser/Protobuf oder Shred/Deshred, sofern technisch verfügbar);
 - Provider A vs. Provider B;
 - NO_SWAP vs. Swap;
 - Tip-Höhe;
@@ -515,44 +541,52 @@ Deshalb dürfen ältere `eva01`-Versionspins nicht blind übernommen werden.
 ```text
                          SOLANA
                            │
-               ┌───────────┴───────────┐
-               │                       │
-          WsRpcSource              GeyserSource
-        kostenlos/vorhanden      kostenlos/vorhanden
-          wenn geeignet          oder später bezahlt
-               │                       │
-               └───────────┬───────────┘
-                           │
-                    IngressSource
+               ┌───────────┴────────────┐
+               │                        │
+      PRIMARY PRODUCTION           CONTROL / EVIDENCE
+          FAST LANE                    PLANE
+               │                        │
+   BinaryGeyserSource            WsRpcControlSource
+   Protobuf / native             JSON-RPC / WSS
+          oder                         │
+ BinaryShred/DeshredSource             │
+   wenn qualifiziert                   │
+               │                        │
+               └──────────┬─────────────┘
+                          │
+                   IngressSource
                        RUST
-                           │
+                          │
+          fixed/native internal events
+          NO JSON in Race hotpath
+                          │
                  Canonical/Fork State
-                       RAM / RUST
-                           │
+                     RAM / RUST
+                          │
                   Project-0 State
-                           │
+                          │
                    Reverse Indices
-                           │
-      ┌────────────────────┼────────────────────┐
-      │                    │                    │
-Oracle/State Trigger  Premium Boundary     Tag Boundary
-      │                    │                    │
-   RACE             TIME-DEPENDENT          LONG-TAIL
-      │                    │                    │
-      └────────────────────┴────────────────────┘
-                           │
+                          │
+      ┌───────────────────┼────────────────────┐
+      │                   │                    │
+Oracle/State Trigger Premium Boundary     Tag Boundary
+      │                   │                    │
+   RACE            TIME-DEPENDENT          LONG-TAIL
+      │                   │                    │
+      └───────────────────┴────────────────────┘
+                          │
                      Exact Health
-                           │
+                          │
                   Opportunity Detection
-                           │
+                          │
              Deterministic Profit Engine
-                           │
+                          │
            Probabilistic Optimizer nach P7
-                           │
+                          │
                  Receivership Planner
                     │             │
                  NO_SWAP         SWAP
-                    └──────┬──────┘
+                    └──────┬───────┘
                            │
                        TX Builder
                        v0 / v1
@@ -562,7 +596,7 @@ Oracle/State Trigger  Premium Boundary     Tag Boundary
                   SubmissionRouter
                     │             │
                    RPC           Jito
-                    └──────┬──────┘
+                    └──────┬───────┘
                            │
                          Landing
                            │
@@ -571,6 +605,9 @@ Oracle/State Trigger  Premium Boundary     Tag Boundary
                   REALIZED NET PROFIT
 ```
 
+**BSC-Paritätsprinzip:** Wie beim BSC-Pfad `native event → fixed Rust decode → state/decision → build/sign` darf Project 0 vor der Trade-Entscheidung keinen JSON-Konvertierungsweg erzwingen.
+
+**Kostenregel bleibt unverändert:** Die Architektur verlangt einen binären/native Production-Ingress, aber **keinen kostenpflichtigen Provider**. S1 qualifiziert zuerst kostenlose/bereits verfügbare binäre Quellen. Ein Paid Feed ist nur nach gemessenem positivem Netto-Mehrwert zulässig. Fehlt vorerst eine kostenlose qualifizierte Binary-Quelle, wird Race nicht auf einen JSON-Hotpath „degradiert“; WSS bleibt Control/Evidence, bis ein geeigneter Binary-Pfad verfügbar ist.
 Nebenpfad:
 
 ```text
@@ -606,6 +643,11 @@ native/
 
     darkbot-solana/
       ingress
+        binary
+        geyser
+        shred_deshred
+        wsrpc_control
+        fastlane
       canonical_state
       fork_root
       blockhash
@@ -1371,11 +1413,32 @@ PASS nur wenn:
 
 ---
 
-# PHASE S1 — FINAL SOLANA INGRESS
+# PHASE S1 — FINAL SOLANA NATIVE/BINARY INGRESS
 
 ## Ziel
 
-Austauschbarer, schneller Rust-Ingress ohne Provider-Abhängigkeit in der Businesslogik.
+Einen provider-austauschbaren **binären/native Rust-Ingress** bauen, der dem BSC-Fast-Lane-Prinzip entspricht und keinen JSON-/WSS-Decode in den latency-kritischen Race-Pfad zwingt.
+
+## Production Invariant
+
+```text
+kein:
+JSON-RPC WSS
+→ JSON parse
+→ Base64/JSON normalization
+→ strategy
+
+sondern:
+binary/native source
+→ protobuf/raw decode
+→ fixed Rust event
+→ bounded channel/SPSC
+→ canonical state
+→ Project0 state
+→ detection
+```
+
+**Kein JSON wire format im Production Race Hotpath.**
 
 ## Interface
 
@@ -1383,112 +1446,244 @@ Austauschbarer, schneller Rust-Ingress ohne Provider-Abhängigkeit in der Busine
 trait IngressSource
 ```
 
-Einheitliches Event-Modell für:
+Ein einheitliches **native Rust Event-Modell** für:
 
 - Accounts;
 - Transactions;
 - Slots;
 - Roots;
-- write_version;
+- write_version / gleichwertige Provenance;
 - receive timestamp;
-- provider health;
+- source health;
 - gap events;
-- reconnect events.
+- reconnect/recovery events.
 
-## Adapter
+Businesslogik kennt weder Provider noch Transport.
 
-### `WsRpcSource`
+## S1.1 PRIMARY — `BinaryGeyserSource`
 
-Für:
+Yellowstone-/Geyser-kompatibler binärer Production-Adapter.
 
-- kostenlose/vorhandene RPC-/WS-Endpunkte;
-- Development;
-- Production, solange Coverage/Korrektheit ausreicht.
+Transport:
 
-Unterstützt:
+```text
+gRPC / Protobuf
+→ generated Rust structs
+→ minimal mapping
+→ native DarkBot event
+```
 
-- `programSubscribe`;
-- `accountSubscribe`;
-- slot/root tracking;
-- Snapshot/Reconcile.
+Unterstützt soweit von der qualifizierten Source geliefert:
 
-### `GeyserSource`
-
-Yellowstone-kompatibel.
-
-Gebaut als finaler Adapter, unabhängig davon, ob sofort ein kostenpflichtiger Feed verwendet wird.
-
-Unterstützt:
-
-- accounts;
+- account updates;
 - transactions;
 - slots;
 - roots;
 - write version;
 - reconnect;
 - gap detection;
-- replay/fromSlot sofern Provider;
-- replay info sofern Provider.
+- replay/fromSlot;
+- replay information;
+- aktuelle v0/v1-Felder einschließlich `Message.config`.
 
-## Yellowstone-v1-Regel
+**Kein Zwischenformat JSON.**
 
-Bei aktuellem Proto:
+## S1.2 OPTIONAL PRIMARY — `BinaryShredDeshredSource`
 
-```text
-Message.config vorhanden
-→ v1
+Nur wenn in P0/S1 technisch und wirtschaftlich qualifiziert.
 
-sonst Message.versioned = true
-→ v0
-
-sonst
-→ legacy
-```
-
-`versioned = true` reicht nicht zur Unterscheidung v0/v1.
-
-## Reconnect
-
-Nicht blind Eva/alte Yellowstone-Version übernehmen.
-
-Aktuelle Client-/Plugin-Semantik wird gepinnt und getestet.
-
-## PriceSource
-
-Falls P0 ergibt, dass externe Preisupdates separat bezogen/postiert werden müssen:
+Ziel:
 
 ```text
-trait PriceSource
+earliest usable binary transaction/state evidence
+→ raw shred/deshred/native feed
+→ minimal Rust decode
+→ native event
 ```
 
-separat vom `IngressSource`.
+Diese Quelle wird nicht vorausgesetzt und nicht allein wegen theoretischer Latenz gebaut.
 
-## Messung
+PASS nur wenn:
 
-- messages/s;
+- aktuelle Mainnet-Kompatibilität belegt;
+- Daten für Project-0-Entscheidungen vollständig genug;
+- Fork/slot/root-Provenance rekonstruierbar;
+- Recovery/Gaps beherrscht;
+- tatsächlicher Vorteil messbar.
+
+## S1.3 SECONDARY — `WsRpcControlSource`
+
+JSON-RPC/WebSocket ist **kein Production Race Fast Lane**.
+
+Erlaubte Rollen:
+
+- Bootstrap;
+- Snapshot;
+- C0/P1/H0;
+- Recovery;
+- Reconciliation;
+- Shadow-/Evidence-Vergleich;
+- Health/diagnostic control plane;
+- kostenlose Baseline.
+
+Er darf nie stillschweigend zur normativen Race-Quelle werden.
+
+## S1.4 Interne Fast Lane
+
+Nach dem Netzwerk-Decode:
+
+```text
+source adapter
+→ fixed/native event
+→ bounded/preallocated queue
+→ state owner
+```
+
+Regeln analog BSC:
+
+- bounded;
+- sequence/provenance;
+- kein common-path lock wenn vermeidbar;
+- kein stiller overwrite;
+- overflow/gap explizit;
+- keine JSON-Serialisierung zwischen Modulen;
+- keine DB/File-I/O;
+- kein synchroner External Lookup.
+
+SPSC wird dort bevorzugt, wo Ownership tatsächlich 1 Producer / 1 Consumer erlaubt; andernfalls eine gemessene bounded Rust-Struktur mit gleicher Evidenzdisziplin.
+
+## S1.5 Kosten-/Provider-Regel
+
+S1 trennt **Technik** von **Providerpreis**.
+
+Open-Source-Komponenten wie Yellowstone-/Protobuf-Rust-Code erzeugen keine notwendige monatliche Gebühr.
+
+Providerregel:
+
+```text
+kostenlose / bereits verfügbare Binary-Quelle
+→ zuerst qualifizieren
+
+Paid Binary Feed
+→ nicht erforderlich
+→ nur wenn später:
+   incremental_net_profit > full_cost + dependency_risk
+```
+
+**Kein Paid-Abo wird benötigt, um S1 zu implementieren.**
+
+Wenn zunächst keine kostenlose qualifizierte Binary-Mainnet-Quelle verfügbar ist:
+
+- Binary Adapter trotzdem final bauen/testen;
+- WSS/RPC für Census/Bootstrap/Evidence verwenden;
+- Race LIVE nicht auf JSON als „temporären Production-Hotpath“ umdefinieren;
+- Provider-/Node-Eskalation erst nach Messung und Kostenentscheidung.
+
+## S1.6 BSC-Designparität
+
+Project 0 übernimmt ausdrücklich den bereits eingefrorenen BSC-Grundsatz:
+
+```text
+BSC:
+native peer/geth event
+→ binary fast lane
+→ Rust
+
+Project 0:
+binary Solana event
+→ protobuf/raw fast lane
+→ Rust
+```
+
+Kein generischer Chain-Abstraktionslayer wird dafür erzwungen; nur Timing/Channels/Lifecycle können gemeinsam sein.
+
+## S1.7 v1
+
+Bei aktuellem Yellowstone-/Proto-Stand muss v1 verlustfrei erhalten bleiben.
+
+Mindestens prüfen:
+
+- `Message.config`;
+- version;
+- transaction bytes;
+- account list;
+- resource config;
+- priority fee fields;
+- keine v1→v0-Degradation.
+
+`versioned = true` allein reicht nicht zur sicheren v0/v1-Unterscheidung.
+
+## S1.8 Recovery
+
+Binary Source mit Replay:
+
+```text
+trusted slot
+→ replay
+→ canonical reconcile
+```
+
+Binary Source ohne Replay oder Control-WSS:
+
+```text
+HALT
+→ Snapshot
+→ buffered deltas soweit belastbar
+→ reconcile
+→ state valid
+→ Trading freigeben
+```
+
+Unreconciled State ist nie tradable.
+
+## S1.9 Messung
+
+Pro Source/Adapter:
+
+- bytes/s;
+- events/s;
+- source→`T_rx`;
 - decode latency;
-- `T_rx`;
+- mapping latency;
+- queue wait;
+- p50/p95/p99/max;
+- allocations;
 - coverage;
 - gap count;
 - reconnect duration;
 - replay recovery;
-- v1 config fidelity;
-- rate/subscription limits;
-- Kosten.
+- v1 fidelity;
+- CPU;
+- Memory;
+- monatliche/Usage-Kosten.
+
+WSS-Vergleich darf als Kontrollmessung laufen, ist aber nicht die Race Latency Source of Truth.
 
 ## Gate S1
 
 PASS nur wenn:
 
-- Provider nicht in Businesslogik steckt;
-- WS und/oder Geyser denselben State speisen;
-- v0/v1 korrekt erkannt;
+- mindestens ein binärer/native Adapter vollständig implementiert und reproduzierbar getestet ist;
+- Businesslogik provider-unabhängig bleibt;
+- intern kein JSON im Race-Hotpath existiert;
+- v0/v1 verlustfrei erhalten;
 - Gap Detection vorhanden;
-- Reconnect/Reconcile reproduzierbar;
-- State vollständig speisbar.
+- Reconnect/Recovery deterministisch;
+- State vollständig und provenance-korrekt speisbar;
+- Kosten des tatsächlich betriebenen Sources dokumentiert sind;
+- kein Paid-Provider allein aus Bequemlichkeit erforderlich ist.
+
+Tickets:
+`S1-01 IngressSource/native event model` ·
+`S1-02 BinaryGeyserSource` ·
+`S1-03 BinaryShredDeshredSource qualification` ·
+`S1-04 WsRpcControlSource` ·
+`S1-05 binary fast lane/queues` ·
+`S1-06 v1 fidelity` ·
+`S1-07 reconnect/gap/reconcile` ·
+`S1-08 cost/source qualification`
 
 ---
-
 # PHASE S2 — FINAL CANONICAL SOLANA STATE
 
 ## Ziel
@@ -2755,11 +2950,14 @@ S0-03 telemetry
 S0-04 bounded channels/lifecycle
 S0-05 journal/replay
 
-S1-01 IngressSource
-S1-02 WsRpcSource
-S1-03 GeyserSource
-S1-04 v1 decode/config
-S1-05 reconnect/gap/reconcile
+S1-01 IngressSource/native event model
+S1-02 BinaryGeyserSource
+S1-03 BinaryShredDeshredSource qualification
+S1-04 WsRpcControlSource
+S1-05 binary fast lane/queues
+S1-06 v1 fidelity
+S1-07 reconnect/gap/reconcile
+S1-08 cost/source qualification
 
 S2-01 canonical state
 S2-02 fork/root
@@ -2857,6 +3055,8 @@ Nicht vorgesehen:
 - zweiter Race-Core;
 - zweiter Long-Tail-Core;
 - Python im LIVE-Hotpath;
+- JSON/WSS als normativer Production-Race-Hotpath;
+- interne JSON-Serialisierung zwischen latency-kritischen Rust-Stufen;
 - Nachbau vorhandener funktionierender Komponenten ohne Grund;
 - Nachbau der Risk Engine bei nutzbarem offiziellen Crate;
 - vereinfachte Health-Formel;
@@ -2952,7 +3152,7 @@ gates/project_0/
 
 ```text
 ARCHITECTURE:
-    FREEZE — AUTHORITATIVE v4
+    FREEZE — AUTHORITATIVE v4.1
 
 ONE PRODUCTION CORE:
     REQUIRED
@@ -2965,6 +3165,15 @@ LONG-TAIL:
 
 RUST HOTPATH:
     REQUIRED
+
+PRODUCTION RACE INGRESS:
+    BINARY / NATIVE REQUIRED
+
+JSON / WSS RACE HOTPATH:
+    FORBIDDEN
+
+WS/RPC ROLE:
+    CONTROL / BOOTSTRAP / RECOVERY / EVIDENCE
 
 PYTHON LIVE HOTPATH:
     FORBIDDEN
