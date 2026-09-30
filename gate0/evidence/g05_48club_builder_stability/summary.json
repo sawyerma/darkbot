@@ -1,0 +1,123 @@
+{
+  "best_p99_us": 658.125,
+  "fraction_over_1ms": 0.022,
+  "json_rpc_error_histogram": {
+    "-32000: transaction type not supported": 1000
+  },
+  "non_claims": [
+    "Invalid wire transaction only",
+    "No valid or value-bearing BUY sent",
+    "Measures T_pre through warm 48Club TLS/TCP handoff",
+    "Does not prove builder inclusion, ordering, acquisition or T_buy"
+  ],
+  "run_summaries": [
+    {
+      "max_us": 2739.875,
+      "over_1ms_count": 3,
+      "p50_us": 379.292,
+      "p95_us": 894.917,
+      "p99_us": 1649.458,
+      "run": 1,
+      "samples": 100,
+      "sha256": "0bb5d01be9c786ec50214399ae2bbb5a2782c0774ccc207357139b34afbc772f"
+    },
+    {
+      "max_us": 872.917,
+      "over_1ms_count": 0,
+      "p50_us": 383.334,
+      "p95_us": 534.667,
+      "p99_us": 658.125,
+      "run": 2,
+      "samples": 100,
+      "sha256": "abd3dcde8790afad35f5cd1f901a5059234929a419f9fcd32e03362029d07454"
+    },
+    {
+      "max_us": 989.375,
+      "over_1ms_count": 0,
+      "p50_us": 420.792,
+      "p95_us": 864.459,
+      "p99_us": 972.875,
+      "run": 3,
+      "samples": 100,
+      "sha256": "9d52432037f793926fb97602a1623e4217aa805eb7b816046bef68a082782162"
+    },
+    {
+      "max_us": 1047.959,
+      "over_1ms_count": 1,
+      "p50_us": 412.084,
+      "p95_us": 654.209,
+      "p99_us": 746.083,
+      "run": 4,
+      "samples": 100,
+      "sha256": "8db06d8ec96e8ce065019c2bbcaded38b92a29c5ba201cb622bfc5e46785a30a"
+    },
+    {
+      "max_us": 1667.083,
+      "over_1ms_count": 2,
+      "p50_us": 399.209,
+      "p95_us": 598.667,
+      "p99_us": 1067.0,
+      "run": 5,
+      "samples": 100,
+      "sha256": "2b692629f916e63536d748a8b3434fcfd1b583d994a9bdff8303a2629946a2b3"
+    },
+    {
+      "max_us": 787.541,
+      "over_1ms_count": 0,
+      "p50_us": 394.833,
+      "p95_us": 573.042,
+      "p99_us": 737.333,
+      "run": 6,
+      "samples": 100,
+      "sha256": "44cbfc7843a556d3f04737a2c27a428e5066922d2487ec65be7c838a5d4d29b2"
+    },
+    {
+      "max_us": 2140.458,
+      "over_1ms_count": 3,
+      "p50_us": 431.917,
+      "p95_us": 881.458,
+      "p99_us": 1435.584,
+      "run": 7,
+      "samples": 100,
+      "sha256": "ae8ad792bb23ab3bbf05c95a5825318c432a2c0a9a7e7c7da8b1fc5895d97fad"
+    },
+    {
+      "max_us": 1081.583,
+      "over_1ms_count": 1,
+      "p50_us": 431.292,
+      "p95_us": 728.208,
+      "p99_us": 970.625,
+      "run": 8,
+      "samples": 100,
+      "sha256": "437895cb1bf605d500992758bbd768539203aede9b226e33624879b78dc09aaa"
+    },
+    {
+      "max_us": 2433.0,
+      "over_1ms_count": 9,
+      "p50_us": 411.167,
+      "p95_us": 1547.083,
+      "p99_us": 1950.542,
+      "run": 9,
+      "samples": 100,
+      "sha256": "9b790184623226b7e25ca8d9a58daef0bc116fd42a9e5091bfb87b7df5336896"
+    },
+    {
+      "max_us": 2808.041,
+      "over_1ms_count": 3,
+      "p50_us": 445.875,
+      "p95_us": 943.416,
+      "p99_us": 1010.0,
+      "run": 10,
+      "samples": 100,
+      "sha256": "3a0433b88c2762c270ff9575dbb37bd72f94b1aa18be1f1f42301e549dd69ded"
+    }
+  ],
+  "runs": 10,
+  "runs_with_max_under_1ms": 3,
+  "runs_with_p99_under_1ms": 5,
+  "status": "G0.5_48CLUB_BUILDER_STABILITY",
+  "total_over_1ms": 22,
+  "total_samples": 1000,
+  "worst_max_us": 2808.041,
+  "worst_p99_us": 1950.542
+}

@@ -1,0 +1,165 @@
+{
+  "architecture": "aarch64",
+  "chain_id_verified": null,
+  "correctness": {
+    "expected_min_output": "30362879985784573673561658",
+    "expected_output": "30669575743216741084405716",
+    "expected_token": "0xabe1fE16cf6Bc48c9524713054efe6e954b17777",
+    "g03_fixture_match": true
+  },
+  "endpoint_host": "puissant-builder.48.club",
+  "json_rpc_error_histogram": {
+    "-32000: transaction type not supported": 100
+  },
+  "measured_samples": 100,
+  "non_claims": [
+    "No valid transaction was broadcast",
+    "No value-bearing BUY was sent",
+    "Transport socket handoff is not confirmed builder acceptance, mempool acceptance, propagation or inclusion",
+    "JSON-RPC response latency is not T_send and is not T_buy",
+    "This alone does not prove inclusion advantage"
+  ],
+  "os": "macos",
+  "scope": "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through live 48Club Puissant Builder eth_sendBundle TLS/TCP handoff; wire transaction deliberately corrupted before send",
+  "stages": {
+    "T_pre_to_JSON_RPC_response": {
+      "max_ns": 110406708,
+      "max_us": 110406.708,
+      "mean_ns": 92886942,
+      "over_1ms_count": 100,
+      "over_1ms_fraction": 1.0,
+      "p50_ns": 90999167,
+      "p50_us": 90999.167,
+      "p95_ns": 104399083,
+      "p95_us": 104399.083,
+      "p99_ns": 110353667,
+      "p99_us": 110353.667
+    },
+    "T_pre_to_T_ready_local": {
+      "max_ns": 2644625,
+      "max_us": 2644.625,
+      "mean_ns": 246722,
+      "over_1ms_count": 2,
+      "over_1ms_fraction": 0.02,
+      "p50_ns": 168916,
+      "p50_us": 168.916,
+      "p95_ns": 444167,
+      "p95_us": 444.167,
+      "p99_ns": 1324583,
+      "p99_us": 1324.583
+    },
+    "T_pre_to_remote_TLS_TCP_handoff": {
+      "max_ns": 2739875,
+      "max_us": 2739.875,
+      "mean_ns": 459237,
+      "over_1ms_count": 3,
+      "over_1ms_fraction": 0.03,
+      "p50_ns": 379292,
+      "p50_us": 379.292,
+      "p95_ns": 894917,
+      "p95_us": 894.917,
+      "p99_ns": 1649458,
+      "p99_us": 1649.458
+    },
+    "decode_and_create2": {
+      "max_ns": 133709,
+      "max_us": 133.709,
+      "mean_ns": 21595,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 17125,
+      "p50_us": 17.125,
+      "p95_ns": 47000,
+      "p95_us": 47.0,
+      "p99_ns": 129291,
+      "p99_us": 129.291
+    },
+    "quote_and_min_output": {
+      "max_ns": 67583,
+      "max_us": 67.583,
+      "mean_ns": 8352,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 8167,
+      "p50_us": 8.167,
+      "p95_ns": 10583,
+      "p95_us": 10.583,
+      "p99_ns": 11667,
+      "p99_us": 11.667
+    },
+    "remote_TLS_TCP_write_flush_handoff": {
+      "max_ns": 1014833,
+      "max_us": 1014.833,
+      "mean_ns": 198429,
+      "over_1ms_count": 1,
+      "over_1ms_fraction": 0.01,
+      "p50_ns": 181958,
+      "p50_us": 181.958,
+      "p95_ns": 370625,
+      "p95_us": 370.625,
+      "p99_ns": 783250,
+      "p99_us": 783.25
+    },
+    "safety_invalidate_hex_json_http_framing": {
+      "max_ns": 62917,
+      "max_us": 62.917,
+      "mean_ns": 14085,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 13291,
+      "p50_us": 13.291,
+      "p95_ns": 21625,
+      "p95_us": 21.625,
+      "p99_ns": 27125,
+      "p99_us": 27.125
+    },
+    "secp256k1_sign": {
+      "max_ns": 2617000,
+      "max_us": 2617.0,
+      "mean_ns": 200309,
+      "over_1ms_count": 2,
+      "over_1ms_fraction": 0.02,
+      "p50_ns": 128667,
+      "p50_us": 128.667,
+      "p95_ns": 394375,
+      "p95_us": 394.375,
+      "p99_ns": 1279208,
+      "p99_us": 1279.208
+    },
+    "signed_tx_serialize": {
+      "max_ns": 100042,
+      "max_us": 100.042,
+      "mean_ns": 6092,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 3375,
+      "p50_us": 3.375,
+      "p95_ns": 9791,
+      "p95_us": 9.791,
+      "p99_ns": 79750,
+      "p99_us": 79.75
+    },
+    "tx_finalize_and_sighash": {
+      "max_ns": 24042,
+      "max_us": 24.042,
+      "mean_ns": 10372,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 10333,
+      "p50_us": 10.333,
+      "p95_ns": 14666,
+      "p95_us": 14.666,
+      "p99_ns": 15459,
+      "p99_us": 15.459
+    }
+  },
+  "status": "G0.5_48CLUB_BUILDER_TRANSPORT_PREQUALIFICATION",
+  "target": {
+    "final_real_T_send_target_ns": 1000000,
+    "remote_e2e_prequalification_ns": 1000000
+  },
+  "transport": "preconnected TLS/TCP HTTP/1.1",
+  "transport_candidate": "48club_puissant_builder_eth_sendBundle",
+  "warmup_samples": 10,
+  "wire_safety": "valid local signed BUY is corrupted to invalid RLP before network write"
+}

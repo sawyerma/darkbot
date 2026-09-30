@@ -1,0 +1,165 @@
+{
+  "architecture": "aarch64",
+  "chain_id_verified": 56,
+  "correctness": {
+    "expected_min_output": "30362879985784573673561658",
+    "expected_output": "30669575743216741084405716",
+    "expected_token": "0xabe1fE16cf6Bc48c9524713054efe6e954b17777",
+    "g03_fixture_match": true
+  },
+  "endpoint_host": "bsc.blockrazor.xyz",
+  "json_rpc_error_histogram": {
+    "-32000: transaction type not supported": 100
+  },
+  "measured_samples": 100,
+  "non_claims": [
+    "No valid transaction was broadcast",
+    "No value-bearing BUY was sent",
+    "Transport socket handoff is not confirmed builder acceptance, mempool acceptance, propagation or inclusion",
+    "JSON-RPC response latency is not T_send and is not T_buy",
+    "This alone does not prove inclusion advantage"
+  ],
+  "os": "macos",
+  "scope": "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through live BlockRazor BSC RPC eth_sendBundle TLS/TCP handoff; wire transaction deliberately corrupted before send",
+  "stages": {
+    "T_pre_to_JSON_RPC_response": {
+      "max_ns": 102950333,
+      "max_us": 102950.333,
+      "mean_ns": 94718725,
+      "over_1ms_count": 100,
+      "over_1ms_fraction": 1.0,
+      "p50_ns": 94305250,
+      "p50_us": 94305.25,
+      "p95_ns": 99426208,
+      "p95_us": 99426.208,
+      "p99_ns": 101933209,
+      "p99_us": 101933.209
+    },
+    "T_pre_to_T_ready_local": {
+      "max_ns": 516583,
+      "max_us": 516.583,
+      "mean_ns": 224877,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 230375,
+      "p50_us": 230.375,
+      "p95_ns": 329958,
+      "p95_us": 329.958,
+      "p99_ns": 393584,
+      "p99_us": 393.584
+    },
+    "T_pre_to_remote_TLS_TCP_handoff": {
+      "max_ns": 800000,
+      "max_us": 800.0,
+      "mean_ns": 434075,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 401292,
+      "p50_us": 401.292,
+      "p95_ns": 730709,
+      "p95_us": 730.709,
+      "p99_ns": 771125,
+      "p99_us": 771.125
+    },
+    "decode_and_create2": {
+      "max_ns": 108042,
+      "max_us": 108.042,
+      "mean_ns": 17831,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 16666,
+      "p50_us": 16.666,
+      "p95_ns": 27167,
+      "p95_us": 27.167,
+      "p99_ns": 54583,
+      "p99_us": 54.583
+    },
+    "quote_and_min_output": {
+      "max_ns": 138042,
+      "max_us": 138.042,
+      "mean_ns": 10087,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 8708,
+      "p50_us": 8.708,
+      "p95_ns": 11208,
+      "p95_us": 11.208,
+      "p99_ns": 53792,
+      "p99_us": 53.792
+    },
+    "remote_TLS_TCP_write_flush_handoff": {
+      "max_ns": 632583,
+      "max_us": 632.583,
+      "mean_ns": 192938,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 171333,
+      "p50_us": 171.333,
+      "p95_ns": 404375,
+      "p95_us": 404.375,
+      "p99_ns": 591084,
+      "p99_us": 591.084
+    },
+    "safety_invalidate_hex_json_http_framing": {
+      "max_ns": 218500,
+      "max_us": 218.5,
+      "mean_ns": 16258,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 14292,
+      "p50_us": 14.292,
+      "p95_ns": 19625,
+      "p95_us": 19.625,
+      "p99_ns": 36708,
+      "p99_us": 36.708
+    },
+    "secp256k1_sign": {
+      "max_ns": 296750,
+      "max_us": 296.75,
+      "mean_ns": 176520,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 182792,
+      "p50_us": 182.792,
+      "p95_ns": 255084,
+      "p95_us": 255.084,
+      "p99_ns": 294958,
+      "p99_us": 294.958
+    },
+    "signed_tx_serialize": {
+      "max_ns": 50500,
+      "max_us": 50.5,
+      "mean_ns": 5087,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 3792,
+      "p50_us": 3.792,
+      "p95_ns": 9208,
+      "p95_us": 9.208,
+      "p99_ns": 43791,
+      "p99_us": 43.791
+    },
+    "tx_finalize_and_sighash": {
+      "max_ns": 322666,
+      "max_us": 322.666,
+      "mean_ns": 15352,
+      "over_1ms_count": 0,
+      "over_1ms_fraction": 0.0,
+      "p50_ns": 10500,
+      "p50_us": 10.5,
+      "p95_ns": 17958,
+      "p95_us": 17.958,
+      "p99_ns": 84500,
+      "p99_us": 84.5
+    }
+  },
+  "status": "G0.5_BLOCKRAZOR_RPC_BUNDLE_TRANSPORT_PREQUALIFICATION",
+  "target": {
+    "final_real_T_send_target_ns": 1000000,
+    "remote_e2e_prequalification_ns": 1000000
+  },
+  "transport": "preconnected TLS/TCP HTTP/1.1",
+  "transport_candidate": "blockrazor_bsc_rpc_eth_sendBundle",
+  "warmup_samples": 10,
+  "wire_safety": "valid local signed BUY is corrupted to invalid RLP before network write"
+}
