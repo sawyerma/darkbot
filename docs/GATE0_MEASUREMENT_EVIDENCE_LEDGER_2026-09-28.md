@@ -1190,7 +1190,7 @@ Status bleibt **G0.4_PARTIAL_NO_FROZEN_SCOPE_DENOMINATOR**. Die 4/4-Beobachtung 
 
 Providerfehler: sieben `-32007`-Antworten mit **15 requests/s limit reached** und anschließend eine `-32003 request limit reached`-Antwort; danach schloss der Server die Verbindung. Damit ist die aktuelle Probe zusätzlich durch die eigene Log→`eth_getTransactionByHash`-Request-Burst-Strategie belastet. Diese Probe wird nicht als 600-s-Coverage-Lauf gewertet.
 
-Evidence lokal: `gate0/evidence/g04_quicknode_coverage_v2/capture.json`, `sha256.json`, `analysis.json`; Collector/Analyzer: `gate0/tools/probe_g04_coverage_v2.cjs`, `gate0/tools/analyze_g04_coverage_v2.cjs`.
+Evidence: `gate0/evidence/g04_quicknode_coverage_v2/capture.json`, `sha256.json`, `analysis.json`; Collector/Analyzer: `gate0/tools/probe_g04_coverage_v2.cjs`, `gate0/tools/analyze_g04_coverage_v2.cjs`. Raw-Evidence und zugehörige Tools sind ab Evidence-Commit `cdd5950867c633906ce4aa5354f3f9a2cf85a2aa` versioniert.
 
 **Nächster Messschritt:** keine Upgrade-Annahme. Collector so umbauen, dass der kanonische Nenner ohne per-Log-TX-Fetch-Bursts entsteht, Requests deutlich unter 15/s bleiben und Source-Gaps/Reconnects explizit erfasst werden. Danach längeren bounded Run durchführen. `T_send`, `T_buy`, `T0` und vollständige BUY-Latenz bleiben N/A; kein value-bearing Send.
 
@@ -1488,7 +1488,7 @@ erfolgreiche reale Token-Akquisition N/A
 
 Die 1.000-Sample-Stabilitätsmessung ändert den primären Gate-0-Maßstab nicht: `T_send`/Socket-Handoff ist nur ein Zwischenwert. Der nächste wirtschaftlich relevante Fortschritt muss reale Acceptance/Ordering/Inclusion und anschließend die tatsächliche Acquisition bis `T_buy` erfassen.
 
-**Evidence-Status:** Die oben genannten Run-Dateien und `summary.json` stammen aus dem lokal ausgeführten Terminal-Lauf. Dieser Protokolleintrag dokumentiert die vom Lauf ausgegebenen Werte und den SHA256 der Summary; er behauptet nicht, dass die lokalen Raw-Evidence-Dateien mit diesem Commit bereits in Git versioniert wurden.
+**Evidence-Status:** Die oben genannten Run-Dateien, `summary.json` und der zugehörige Stability-Runner sind ab Evidence-Commit `cdd5950867c633906ce4aa5354f3f9a2cf85a2aa` versioniert. Der versionierte SHA256 von `summary.json` bleibt `2ecdc06f9018fc69b44365ece3b21df905387cba4e35bf8f268e9c51deaccd3b`.
 
 
 
