@@ -35,20 +35,20 @@ from darkbot.strategies.strategy_c_legacy_backend import FILTERABLE_FEATURES, ev
 
 _ap = argparse.ArgumentParser(description="A vs Strategy C - RAM-Auswertung einer eingefrorenen Capture (keine DB-Schreibzugriffe)")
 _ap.add_argument("--mode", choices=("search", "control", "a", "all"), default="search")
-_ap.add_argument("--db", type=Path, default=Path("data/market_capture_30m_20260920.sqlite"))
+_ap.add_argument("--db", type=Path, default=Path("data/solana_pump/market_capture_30m_20260920.sqlite"))
 _ap.add_argument("--run-id", default="market_capture_30m_20260920_capture_20260920T130659Z_18460a")
-_ap.add_argument("--out", type=Path, default=None, help="Standard: exports/ac_c_30m_<mode>_L<latenz>")
+_ap.add_argument("--out", type=Path, default=None, help="Standard: exports/solana_pump/ac_c_30m_<mode>_L<latenz>")
 _ap.add_argument("--latency-ms", type=int, default=100, help="Latenz fuer C2-Suche und A_NORMALIZED (Kontrollen bleiben bei ihrer nativen 800/800)")
 _ap.add_argument("--windows", default="0,250,500,750,1000")
 ARGS = _ap.parse_args()
 SOURCE_DB, SOURCE_RUN, LATENCY_MS, MODE = ARGS.db, ARGS.run_id, ARGS.latency_ms, ARGS.mode
 WINDOWS = [int(w) for w in ARGS.windows.split(",")]
-OUT_DIR = ARGS.out or Path(f"exports/ac_c_30m_{MODE}_L{LATENCY_MS}")
+OUT_DIR = ARGS.out or Path(f"exports/solana_pump/ac_c_30m_{MODE}_L{LATENCY_MS}")
 QUOTE_MAX_AGE_MS = 600000
 SLOTS = 2000
 RAM_QUEUE = {"queue_capacity_records": 5_000_000}  # persist=False: nichts leert den Recorder; Ueberlauf wuerde still neue Entries sperren
-C_BASE_PATH = Path("config/strategy_c_pre_pump_01.json")           # 0.09837 SOL Swap-Budget, 2x, Stop 0, 300 s
-A_PATH = Path("config/strategy_a_creator_exit_usd_slots.json")       # aktuelle A: $10/Slot, Target aus, Creator-Exit, 590 s
+C_BASE_PATH = Path("config/solana_pump/strategy_c_pre_pump_01.json")           # 0.09837 SOL Swap-Budget, 2x, Stop 0, 300 s
+A_PATH = Path("config/solana_pump/strategy_a_creator_exit_usd_slots.json")       # aktuelle A: $10/Slot, Target aus, Creator-Exit, 590 s
 PRE_PUMP_01 = [{"feature": "buy_count", "min": "3", "max": None}, {"feature": "unique_buyers", "min": "3", "max": None},
                {"feature": "sell_count", "min": "0", "max": "0"}, {"feature": "dev_initial_buy", "min": "0", "max": "0.20"}]
 COUNT_GRID = {"buy_count": (1, 2, 3, 4, 5, 6, 8), "unique_buyers": (1, 2, 3, 4, 5, 6), "sell_count": (0, 1, 2)}
