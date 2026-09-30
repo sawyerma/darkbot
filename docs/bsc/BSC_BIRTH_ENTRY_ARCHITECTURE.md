@@ -4,7 +4,7 @@ Status: **AUTHORITATIVE / NO ARCHITECTURE DRIFT**
 Updated: 2026-09-27
 
 Normative feasibility gate:
-- `docs/GATE0_TESTPLAN_SHORT.md`
+- `docs/bsc/GATE0_TESTPLAN_SHORT.md`
 
 ## 0. Direct-chain invariant
 
