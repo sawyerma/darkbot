@@ -1626,3 +1626,37 @@ Evidence:
 **Nächster G0.5-Schritt:** keinen 48Club-PASS erzwingen. Einen zweiten realen Inclusion-Kandidaten messen. BlockRazor dokumentiert auf BSC sowohl Bundle-Submission über `eth_sendBundle` als auch einen öffentlichen BSC-RPC unter `https://bsc.blockrazor.xyz`. Der nächste Messlauf soll denselben vollständigen G0.5-Hotpath und dieselbe Safety-Korruption verwenden, damit die Transportpfade direkt vergleichbar bleiben.
 
 **Non-Claims:** Kein Builder-Inclusion-Nachweis, kein Ordering-Nachweis, kein `T_buy`, kein Mainnet-BUY.
+
+
+---
+
+## 2026-09-30 — G0.5 BlockRazor Bundle Stability
+
+Transportkandidat: BlockRazor BSC RPC über `eth_sendBundle` und vorgewärmte TLS/TCP-HTTP/1.1-Verbindung.
+
+Safety: Der vollständige G0.3-BUY wurde lokal gebaut und signiert, vor dem Netzwerk-Write jedoch absichtlich in ungültiges RLP verfälscht. Es wurde kein gültiger und kein value-bearing BUY gesendet.
+
+Messumfang: **10 unabhängige Läufe × 100 Samples = 1.000 Samples**.
+
+`T_pre -> remote TLS/TCP handoff`:
+
+- bester Run-p99: **738,208 µs**
+- schlechtester Run-p99: **1.534,583 µs**
+- schlechtester beobachteter Maximalwert: **2.752,167 µs**
+- Samples > 1 ms: **19/1.000 = 1,9 %**
+- Runs mit p99 < 1 ms: **8/10**
+- Runs mit Max < 1 ms: **2/10**
+- Builder-Antworten: **1.000/1.000 `-32000: transaction type not supported`**
+
+**Vergleich zu 48Club:** BlockRazor ist auf der aktuell gemessenen Client-/Netzwerkroute etwas stabiler als 48Club (1,9 % statt 2,2 % der Samples > 1 ms; schlechterster Run-p99 1.534,583 µs statt 1.950,542 µs). Dennoch erfüllt auch BlockRazor das harte Tail-Ziel `T_pre -> T_send < 1 ms` nicht robust.
+
+**Bewertung:** BlockRazor bleibt der derzeit bessere gemessene Remote-Builder-Kandidat, Status aber ebenfalls **ADAPT**, kein finaler G0.5-PASS.
+
+Evidence:
+- lokal erzeugte Runs unter `gates/bsc/gate0/evidence/g05_blockrazor_rpc_bundle_stability/`
+- versionierte Terminal-Summary: `gates/bsc/gate0/evidence/g05_blockrazor_rpc_bundle_stability/summary_terminal_capture.json`
+- lokal ausgegebener SHA256 der vollständigen `summary.json`: `2b5f820a94bce0be0abfd4d590d8eb33716ecd637e922f7782a14ade7a6e1b07`
+
+**Nächster G0.5-Schritt:** keine weiteren identischen Remote-Builder-Stability-Schleifen. Der Plan sieht als alternativen Inclusion-Pfad ausdrücklich lokalen `bsc-geth/P2P` vor. Dieser Pfad ist jetzt der nächste Kandidat für die finale Transportqualifikation. G0.6 bleibt bis zu dieser Qualifikation noch nicht offiziell eröffnet.
+
+**Non-Claims:** Kein Builder-Inclusion-Nachweis, kein Ordering-Nachweis, kein `T_buy`, kein Mainnet-BUY.
