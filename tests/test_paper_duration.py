@@ -16,7 +16,7 @@ class PaperDurationTests(unittest.TestCase):
     def test_cli_slot_override_preserves_fixed_and_usd_capital_per_slot(self):
         for profile in ("strategy_c_fast_creator_hold_2x.json", "strategy_a_creator_exit_usd_slots.json"):
             with self.subTest(profile=profile):
-                path = ROOT / "config" / profile
+                path = ROOT / "config" / "solana_pump" / profile
                 before = load_runtime_config(path)
                 captured = {}
                 class FakeApplication:
@@ -39,15 +39,15 @@ class PaperDurationTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args([
                 "paper",
-                "--config", str(ROOT / "config" / "phase1.json"),
-                "--db", "data/test.sqlite",
+                "--config", str(ROOT / "config" / "solana_pump" / "phase1.json"),
+                "--db", "data/solana_pump/test.sqlite",
                 "--campaign", "test",
             ])
 
     def test_run_paper_rejects_nonpositive_duration(self):
         for value in (None, 0, -1):
             with self.assertRaisesRegex(ConfigError, "--max-duration-minutes must be > 0"):
-                run_paper(ROOT / "config" / "phase1.json", Path("data/test.sqlite"), "test",
+                run_paper(ROOT / "config" / "solana_pump" / "phase1.json", Path("data/solana_pump/test.sqlite"), "test",
                           max_duration_minutes=value)
 
     def test_run_paper_converts_minutes_to_milliseconds(self):
@@ -61,7 +61,7 @@ class PaperDurationTests(unittest.TestCase):
                 return {"status": "COMPLETED"}
 
         with patch("darkbot.main.Application", FakeApplication):
-            result = run_paper(ROOT / "config" / "phase1.json", Path("data/test.sqlite"), "test",
+            result = run_paper(ROOT / "config" / "solana_pump" / "phase1.json", Path("data/solana_pump/test.sqlite"), "test",
                                max_duration_minutes=7)
         self.assertEqual(result["status"], "COMPLETED")
         self.assertEqual(captured["max_duration_ms"], 7 * 60_000)
