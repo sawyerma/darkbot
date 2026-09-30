@@ -1,9 +1,9 @@
-# DarkBot — Project 0 — Finaler Produktions-Phasenplan
+# DarkBot — Project 0 — PHASENPLAN v4 — AUTHORITATIVE
 
 Status: **ARCHITECTURE FREEZE — AUTHORITATIVE**
 Stand: **2026-09-30**
 
-Diese Datei ist die verbindliche technische Roadmap für den DarkBot Project-0-Liquidator.
+Diese Datei ist die verbindliche technische Roadmap für den DarkBot Project-0-Liquidator. Sie vereint Produktionsarchitektur, Referenzstudie, Census, Historical Evidence und Upgrade-Requalifikation. Frühere Project-0-Roadmaps werden dadurch ersetzt.
 
 Es gilt genau eine Produktionsimplementierung. Jede Phase erweitert denselben finalen Codepfad. Es gibt keinen Prototypen, der später neu geschrieben wird.
 
@@ -244,15 +244,26 @@ S2  Final Canonical Solana State
  ↓
 S3  Final Solana Execution Core
  ↓
-S4  Solana Core Parity
+S4  Solana Core Qualification
 ~~~
 
-## Track B — Project-0-Protokoll und Evidence, parallel
+## Track B — Project-0-Referenz, Protocol Freeze und Evidence, parallel
 
 ~~~text
+P0   Project-0 Reference Study
 P1A  Current-Mainnet Source Freeze + Account Census
-P1B  Upcoming-Release Freeze
+P1B  Upcoming 0.1.12 Release Freeze
+C0A  Pre-Upgrade Long-Tail Census + Economic Simulation
 H0   Historical Liquidation Intelligence
+~~~
+
+## Gate A — vor dem eigentlichen Liquidator-Core
+
+~~~text
+P0 COMPLETE
++ P1A CLEAR
++ C0A ECONOMICALLY PLAUSIBLE
+→ P2 darf starten
 ~~~
 
 ## Danach Zusammenführung
@@ -266,7 +277,14 @@ P4A  Deterministic Profit Engine
  ↓
 P5   Final Receivership Execution Planner
  ↓
+T    Tagger + Premium Scheduler
+ ↓
 P6   Full Production Shadow Path
+ ↓
+0.1.12 DEPLOYMENT
+→ HALT + REQUALIFICATION
+→ P1B → P1A
+→ C0B Post-Upgrade Census
  ↓
 P7   Competition + Provider Economics
  ↓
@@ -276,8 +294,10 @@ P8   Controlled LIVE
  ↓
 P9   Production LIVE
  ↓
-K    Continuous Production Optimization
+K    Continuous Optimization — only measured bottlenecks
 ~~~
+
+Strategischer Default bis reale Competition-Daten etwas anderes zeigen: **Long-Tail first, Race later.**
 
 ---
 
@@ -659,48 +679,80 @@ Finaler Rust-Solana-Execution-Core.
 
 ---
 
-# PHASE S4 — SOLANA CORE PARITY
+# PHASE S4 — SOLANA CORE QUALIFICATION
 
 ## Ziel
 
-Beweisen, dass der neue Rust-Solana-Core semantisch korrekt arbeitet.
+Beweisen, dass der neue Rust-Solana-Core die für Project 0 benötigten Solana-Fähigkeiten semantisch korrekt und reproduzierbar bereitstellt.
 
-Pump.fun dient hier ausschließlich als bereits vorhandene Referenz.
+S4 ist ausdrücklich **keine vollständige Pump.fun-Portierung**. Pump.fun dient nur dort als Referenz, wo dieselbe Solana-Grundfunktion belastbar verglichen werden kann.
 
 ## Bau
 
-Keine zweite Pump.fun-Engine.
+Keine zweite Pump.fun-Engine und kein unnötiger Protocol-Rewrite.
 
-Die bestehenden Referenzdaten werden durch denselben neuen Rust-Core verarbeitet.
+Qualifiziert werden insbesondere:
 
-Vergleich:
-
-~~~text
-bestehende Python-Referenz
-vs.
-neuer Rust-Production-Core
-~~~
-
-## Messung / Vergleich
-
-- Decode;
-- State Transitions;
-- Bonding-Curve-Werte;
-- Quotes;
-- Fees;
-- entscheidungsrelevante Werte;
-- Timing Stages.
+- Account-/Program-Decode-Grundlagen;
+- Slot/Fork/Root-Reconciliation;
+- Subscription-/Ingress-Semantik;
+- Transaction-/Message-Building;
+- v0/v1-/LUT-Fähigkeiten;
+- Signing und Submission;
+- Landing-/Status-Reconciliation;
+- Timing-Stages und Telemetrie.
 
 ## Gate S4
 
 PASS nur wenn:
 
+- alle für Project 0 benötigten gemeinsamen Solana-Primitiven qualifiziert sind;
 - keine ungeklärte semantische Abweichung existiert;
-- Differenzen entweder exakt erklärt oder behoben sind.
+- Differenzen exakt erklärt oder behoben sind;
+- kein vollständiger Pump.fun-Rewrite als Voraussetzung offen ist.
 
 ## Ergebnis
 
-Verifizierter Solana-Core als Fundament für Project 0.
+Qualifizierter gemeinsamer Solana-Core als Fundament für Project 0.
+---
+
+# PHASE P0 — PROJECT-0 REFERENCE STUDY
+
+P0 läuft parallel zu S0–S4 und blockiert den Native-Core nicht.
+
+## Ziel
+
+Die Project-0-Protokollsemantik vor der Implementierung vollständig genug verstehen, dass P1/P2 nicht auf Vermutungen aufbauen.
+
+P0 ist eine Referenzstudie, **kein zweiter Liquidator**.
+
+## Bau / Evidence
+
+Systematisch erfassen und mit Source/IDL/realen Mainnet-Transaktionen gegentesten:
+
+- Program-/Account-Modell;
+- Bank-/MarginfiAccount-Strukturen;
+- Oracle-/Integrationstypen;
+- Health-/Risk-Semantik;
+- Liquidation Eligibility;
+- StartLiquidation / EndLiquidation;
+- Repay / Withdraw / Refresh;
+- Fees und Flat-SOL-Fee;
+- Tagging/Premium-Grundsemantik;
+- costly positions;
+- Receivership Constraints;
+- reale Liquidations-TX-Strukturen;
+- zulässige Routing-/Swap-Programme.
+
+Reference-Code oder Python darf offline verwendet werden, aber nicht als späterer LIVE-Core.
+
+## Gate P0
+
+PASS wenn offene Semantik als UNKNOWN markiert statt geraten wird und ein belastbares Mapping von Source/IDL zu den späteren State-/Health-Komponenten existiert.
+
+## Ergebnis
+
+Project-0 Reference Manifest.
 
 ---
 
@@ -740,7 +792,10 @@ Mindestens pinnen:
 - swap/integration allowlist;
 - Flat-SOL-Liquidation-Fee;
 - Premium-Aktivierungssemantik;
-- Bank-Resize-/Version-Semantik.
+- Bank-Resize-/Version-Semantik;
+- Tagging-/Premium-Zustände und deren Health-Relevanz;
+- externe Refresh-Accounts und deren Abhängigkeiten;
+- Cross-Venue-/Integration-Coverage der aktuell adressierbaren realen Positionen und Liquidationen.
 
 Bei ProgramData-/Source-Änderung:
 
@@ -818,13 +873,13 @@ Current-Mainnet Protocol Manifest + Account Census.
 
 ---
 
-# PHASE P1B — UPCOMING RELEASE FREEZE
+# PHASE P1B — UPCOMING 0.1.12 RELEASE FREEZE
 
 P1B läuft parallel zu P1A.
 
 ## Ziel
 
-Kommende Project-0-Versionen vorbereiten, ohne sie vor Deployment als LIVE-Wahrheit zu behandeln.
+Die kommende 0.1.12-Version vorbereiten, ohne sie vor tatsächlichem Deployment als LIVE-Wahrheit zu behandeln.
 
 ## Bau
 
@@ -839,6 +894,16 @@ Für kommende Versionen separat pinnen:
 - Receivership-Änderungen;
 - Resize-Anforderungen;
 - neue Tests.
+
+Für 0.1.12 sind insbesondere explizit zu verifizieren und zu pinnen, nicht zu erraten:
+
+- Bank-Layout und mögliche Resize-/Migrationseffekte;
+- Premium-Einfluss auf Health;
+- Oracle-Typen 27/28 und deren genaue Semantik;
+- externe Refresh-Accounts;
+- costly-position-Limits;
+- Tagging-/Premium-Eskalation;
+- Receivership-Health-Constraints.
 
 ## Promotion
 
@@ -872,9 +937,42 @@ Vorbereiteter Upgrade-Manifest.
 
 ---
 
+# TRACK C0A — PRE-UPGRADE LONG-TAIL CENSUS + ECONOMIC SIMULATION
+
+C0A läuft parallel zu S0–S4, P0/P1 und H0.
+
+## Ziel
+
+Vor dem 0.1.12-Upgrade messen, ob ein wirtschaftlich relevanter Long-Tail-Bereich existiert, der sauber adressierbar ist, ohne sofort in maximal kompetitive Race-Infrastruktur zu investieren.
+
+## Bau
+
+Der Census ist wiederholbar und versioniert, kein einmaliger Snapshot. Mindestens erfassen:
+
+- unterstützbare Accounts/Banks/Integrationen;
+- Liability-/Collateral-Verteilung;
+- Liquidationsnähe und Health-Bänder;
+- Premium-/Tagging-Relevanz;
+- Route-/Receivership-Komplexität;
+- Kapitalbedarf;
+- deterministische Fee-/Slippage-Komponenten;
+- historische Opportunity-Frequenz;
+- Cross-Venue-Coverage;
+- Anteil klar unsupported/unknown.
+
+## Gate C0A
+
+PASS bedeutet keinen Profitbeweis. PASS bedeutet belastbare Coverage-Daten, einen technisch adressierbaren Long-Tail-Bereich und eine ökonomisch plausible Opportunity-Menge, die P2–P6 rechtfertigt.
+
+## Ergebnis
+
+Pre-Upgrade Long-Tail Census + Economic Plausibility Evidence.
+
+---
+
 # TRACK H0 — HISTORICAL LIQUIDATION INTELLIGENCE
 
-H0 läuft parallel zu S1–S4 und P1.
+H0 läuft parallel zu S0–S4 sowie P0/P1/C0A.
 
 ## Ziel
 
@@ -943,6 +1041,21 @@ PASS wenn genug belastbare Daten vorliegen, um:
 ## Ergebnis
 
 Historischer Evidence-Datensatz.
+
+---
+
+# GATE A — PROJECT-0 BUILD AUTHORIZATION
+
+P2 beginnt erst, wenn:
+
+~~~text
+P0 COMPLETE
++ P1A CLEAR
++ C0A ECONOMICALLY PLAUSIBLE
+= GATE A PASS
+~~~
+
+P1B und H0 dürfen parallel weiterlaufen.
 
 ---
 
@@ -1308,6 +1421,8 @@ Kostenlose Route Source darf genutzt werden, wenn:
 - Programme allowlisted sind;
 - keine synchrone Portalabhängigkeit zwingend im Hotpath entsteht, sofern lokal vermeidbar.
 
+**Jupiter ist in `FREE_PUBLIC_ALLOWED` nur ein austauschbarer `RouteProvider`, nicht die Architektur selbst.** Ein Jupiter-Adapter darf Route-/Instruction-Daten liefern, aber der Project-0-Core validiert Programme, Accounts, Slippage, Economics und Receivership-Regeln selbst.
+
 ### 3. PAID_ALLOWED
 
 Nur wenn später P7 zeigt:
@@ -1414,6 +1529,29 @@ Finaler Receivership Execution Planner.
 
 ---
 
+# PHASE T — TAGGER + PREMIUM SCHEDULER
+
+## Ziel
+
+Die zeit- und zustandsabhängige Tagging-/Premium-Semantik explizit machen, ohne Polling aller Accounts.
+
+## Bau
+
+- Tag-/Premium-State source-gepinnt abbilden;
+- nur relevante Accounts/Banks schedulen;
+- `t_profitable` aus P4A deterministisch ableiten;
+- Threshold-/Reverse-Index statt Full Scan;
+- Premium-Transitions und Expiry/Boundary-Ereignisse als Trigger behandeln;
+- bei 0.1.12 Deployment erneut qualifizieren.
+
+`t_profitable` ist der früheste Zeitpunkt, an dem die **deterministische** Net-Profit-Bedingung für einen ansonsten gültigen Kandidaten erfüllt ist. Es ist keine p(win)- oder Optimal-Stopping-Schätzung.
+
+## Gate T
+
+PASS wenn keine globale Scan-Schleife nötig ist und nur relevante Accounts zeitgetrieben reevaluiert werden.
+
+---
+
 # PHASE P6 — FULL PRODUCTION SHADOW PATH
 
 ## Ziel
@@ -1495,6 +1633,29 @@ PASS wenn der finale Production-Code reale Liquidationsrennen vollständig:
 ## Ergebnis
 
 Vollständig gemessener finaler Shadow-Pfad.
+
+---
+
+# POST-0.1.12 REQUALIFICATION BARRIER
+
+Sobald 0.1.12 tatsächlich deployed ist:
+
+~~~text
+EXECUTION HALT
+→ ProgramData / deployed Source bestätigen
+→ Bank Layout + Resize prüfen
+→ P1B gegen Mainnet verifizieren
+→ P1B wird neuer P1A
+→ Tag/Premium-/Health-Semantik erneut qualifizieren
+→ C0B durchführen
+→ erst danach weitere LIVE-Freigabe
+~~~
+
+# TRACK C0B — POST-UPGRADE CENSUS
+
+C0B wiederholt die für die Economics relevanten C0A-Messungen nach dem tatsächlichen Upgrade und vergleicht mindestens Account-/Bank-Coverage, Integrationen/Oracles, Cross-Venue-Coverage, Tagging/Premium, costly positions, Opportunity-Frequenz/-Wert und Route-/Receivership-Komplexität.
+
+C0 ist damit **kein einmaliger Snapshot**, sondern eine versionierte Coverage-/Economics-Messung je qualifiziertem Protocol-Stand.
 
 ---
 
@@ -1857,33 +2018,48 @@ nur wenn zusätzlicher nachhaltiger Netto-Profit > vollständige Kosten
 ~~~text
 TRACK A
 S0 → S1 → S2 → S3 → S4
-                    │
-TRACK B             │
-P1A + P1B + H0 ─────┘
-                    ↓
-                   P2
-                    ↓
-                   P3
-                    ↓
-                  P4A
-                    ↓
-                   P5
-                    ↓
-                   P6
-                    ↓
-                   P7
-                    ↓
-                  P4B
-                    ↓
-                   P8
-                    ↓
-                   P9
-                    ↓
-                    K
+│
+├──────────── parallel ────────────┐
+│                                 │
+P0 + P1A + P1B + C0A + H0         │
+│                                 │
+└──────────────┬──────────────────┘
+               ↓
+          GATE A PASS
+               ↓
+              P2
+               ↓
+              P3
+               ↓
+             P4A
+               ↓
+              P5
+               ↓
+               T
+               ↓
+              P6
+               ↓
+         0.1.12 deployed
+               ↓
+       HALT + REQUALIFY
+       P1B → P1A + C0B
+               ↓
+              P7
+               ↓
+             P4B
+               ↓
+              P8
+               ↓
+              P9
+               ↓
+               K
 ~~~
 
-P1A, P1B und H0 laufen parallel, soweit sie S0–S4 nicht blockieren.
+P0, P1A, P1B, C0A und H0 laufen früh parallel, soweit sie S0–S4 nicht blockieren.
 
+S4 qualifiziert nur den benötigten gemeinsamen Solana-Core. **Long-Tail first, Race later** gilt als strategischer Default, bis reale Competition-Evidence etwas anderes zeigt.
+
+K ist kein Rewrite-Block. Optimiert wird ausschließlich dort, wo Messungen einen relevanten technischen Bottleneck oder wirtschaftlichen Hebel zeigen.
 ---
 
 # 5. Verbindliche Non-Goals
@@ -1902,7 +2078,13 @@ Nicht vorgesehen:
 - v1 als Default ohne End-to-End-Capability-Gate;
 - beliebige DEX-Programme innerhalb Receivership;
 - Instruction nach EndLiquidation;
-- StartLiquidation und EndLiquidation in verschiedenen Transaktionen.
+- StartLiquidation und EndLiquidation in verschiedenen Transaktionen;
+- eine pauschal festgeschriebene Beobachtungsdauer wie „6 Monate“ ohne Evidence;
+- ein pauschal festgeschriebenes Startkapital wie „~100 EUR“ ohne Opportunity-/Risk-Evidence;
+- v0 oder v1 als ideologischer Default statt Capability-/Messentscheidung;
+- C0 als einmaliger Snapshot;
+- NO_SWAP künstlich an eine spätere Stufe koppeln statt ihn ab P5 als normalen Execution-Kandidaten zu behandeln;
+- CPU-/Provider-/Node-Komplexität ohne gemessenen Bottleneck oder positiven Netto-Nutzen.
 
 ---
 
@@ -1913,7 +2095,7 @@ Für Project 0 gilt:
 1. diese Datei definiert die Phasen und Architektur;
 2. P1A definiert den jeweils LIVE-fähigen deployed Protocol-Stand;
 3. das Measurement Ledger dokumentiert Messungen und Gates;
-4. alter Project-0-Roadmap-Text außerhalb von docs_project_0 ist nicht authoritative.
+4. alter Project-0-Roadmap-Text außerhalb von `docs/project_0/` ist nicht authoritative.
 
 Messungen gehören in:
 
@@ -1927,13 +2109,18 @@ Stand 2026-09-30:
 
 ~~~text
 Project-0 Production Code:       NOT STARTED
-Architecture:                    FROZEN BY THIS PLAN
+Architecture:                    FROZEN BY PHASENPLAN v4
+P0 Reference Study:              TO BUILD
 Current Mainnet Manifest:        TO BUILD IN P1A
-Account Census:                  TO BUILD IN P1A
+Upcoming 0.1.12 Manifest:        TO BUILD IN P1B
+Pre-Upgrade Long-Tail Census:    TO BUILD IN C0A
 Historical H0 Dataset:           TO BUILD
+Gate A:                          NOT PASSED
+Tagger/Premium Scheduler:        NOT STARTED
+Post-Upgrade C0B:                BLOCKED UNTIL DEPLOYMENT
 Permanent Paid Provider:         NONE APPROVED
 Probabilistic Ranking:           NOT ALLOWED BEFORE P7
 LIVE:                            NOT ENABLED
 ~~~
 
-Die Umsetzung beginnt mit S0 sowie parallel P1A/P1B/H0 entsprechend der oben definierten Reihenfolge.
+Die Umsetzung beginnt mit S0 sowie parallel P0/P1A/P1B/C0A/H0 entsprechend der oben definierten Reihenfolge.

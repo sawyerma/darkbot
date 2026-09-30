@@ -1,89 +1,48 @@
 # DarkBot
 
-DarkBot contains three separate trading/automation projects with a shared control plane and selected shared infrastructure.
+DarkBot contains three separate trading/automation projects with shared control-plane infrastructure and selected shared Solana primitives.
 
-The repository is deliberately organized by project. **Protocol, strategy, evidence, gates, configuration, tests and outputs must stay inside the owning project area.**
+**Ownership rule:** protocol logic, project-specific configuration, evidence, gates, tests, tools and outputs stay inside the owning project area. Shared code is limited to genuinely reusable infrastructure.
 
 ## Projects
 
-| Project | Purpose | Primary navigation |
-|---|---|---|
-| **BSC / Birth Entry** | Earliest technically possible direct on-chain BUY after supported BSC launch | [BSC docs](docs/bsc/README.md) |
-| **Solana / Pump.fun** | Existing Pump.fun capture/replay/PAPER/strategy system and reference implementation | [Pump.fun docs](docs/solana_pump/README.md) |
-| **Solana / Project 0** | Native liquidation searcher: exact state/health → economics → receivership → inclusion | [Project 0 docs](docs/project_0/README.md) |
+| Project | Purpose | Documentation | Code |
+|---|---|---|---|
+| **BSC / Birth Entry** | Earliest technically possible direct on-chain BUY after supported BSC launch | [docs/bsc/README.md](docs/bsc/README.md) | [darkbot/bsc/](darkbot/bsc/) |
+| **Solana / Pump.fun** | Existing Pump.fun capture/replay/PAPER/strategy system and reference implementation | [docs/solana_pump/README.md](docs/solana_pump/README.md) | [darkbot/solana_pump/](darkbot/solana_pump/) |
+| **Solana / Project 0** | Native liquidation searcher: exact state/health → economics → receivership → inclusion → realized PnL | [docs/project_0/README.md](docs/project_0/README.md) | [darkbot/project_0/](darkbot/project_0/) |
 
 Cross-project overview: [docs/MULTICHAIN_ROADMAP.md](docs/MULTICHAIN_ROADMAP.md)
 
----
-
-# Repository structure
+## Repository structure
 
 ~~~text
 darkbot/
-├── __main__.py             shared package entry point
-├── app/                    shared control-plane / app registry
-├── common/                 only genuinely project-independent code
-├── runtime/                shared profile/runtime assembly
+├── app/                    shared control-plane/application registry
+├── common/                 genuinely project-independent infrastructure
+├── runtime/                shared runtime/profile assembly
 ├── chains/                 shared chain contracts/registry
 ├── venues/                 shared venue contracts/registry
 ├── solana/                 shared native Solana primitives
-├── bsc/                    BSC / Birth Entry application
-├── solana_pump/            Solana / Pump.fun application
-└── project_0/              Solana / Project 0 application
-
-docs/
-├── README.md
-├── MULTICHAIN_ROADMAP.md
-├── bsc/
-├── solana_pump/
-└── project_0/
-
-gates/
-├── README.md
-├── bsc/
-│   └── gate0/
-├── solana_pump/
-└── project_0/
+├── bsc/                    BSC / Birth Entry
+├── solana_pump/            Solana / Pump.fun
+└── project_0/              Solana / Project 0
 
 config/
-├── bsc/
-├── solana_pump/
-└── project_0/
-
 data/
-├── bsc/
-├── solana_pump/
-└── project_0/
-
+docs/
 exports/
-├── bsc/
-├── solana_pump/
-└── project_0/
-
+gates/
 migrations/
-├── bsc/
-├── solana_pump/
-└── project_0/
-
 tests/
-├── common/                 cross-project registry/runtime seam tests
-├── bsc/
-├── solana_pump/            includes Pump.fun helpers + fixtures
-└── project_0/
-
 tools/
-├── bsc/
-├── solana_pump/
-└── project_0/
-
+└── each split into bsc / solana_pump / project_0 where project-owned
 ~~~
 
-Runtime ownership rules: [darkbot/README.md](darkbot/README.md)
-
-Documentation root: [docs/README.md](docs/README.md)  
-Gates root: [gates/README.md](gates/README.md)  
-Tests root: [tests/README.md](tests/README.md)  
-Tools root: [tools/README.md](tools/README.md)
+Runtime ownership contract: [darkbot/README.md](darkbot/README.md)  
+Documentation index: [docs/README.md](docs/README.md)  
+Tests index: [tests/README.md](tests/README.md)  
+Tools index: [tools/README.md](tools/README.md)
 
 ---
 
@@ -100,41 +59,25 @@ earliest usable pending/chain evidence
 → prove token acquisition and ordering
 ~~~
 
-No website/browser/frontend BUY dependency.
+No frontend/browser BUY dependency.
 
-## Phase plan / architecture
+## Authoritative documents
 
-- **Active BSC phase roadmap:** [docs/bsc/BSC_DUAL_VENUE_ROADMAP.md](docs/bsc/BSC_DUAL_VENUE_ROADMAP.md)
-- **Gate-0 test plan:** [docs/bsc/GATE0_TESTPLAN_SHORT.md](docs/bsc/GATE0_TESTPLAN_SHORT.md)
-- **Birth-entry architecture:** [docs/bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md](docs/bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md)
-- **Final native runtime contract after Gate-0 PASS:** [docs/bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md](docs/bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md)
-- **Economics gate:** [docs/bsc/BSC_ECONOMICS_GATE_CONTRACT.md](docs/bsc/BSC_ECONOMICS_GATE_CONTRACT.md)
+- [BSC project index](docs/bsc/README.md)
+- [Active dual-venue roadmap](docs/bsc/BSC_DUAL_VENUE_ROADMAP.md)
+- [Gate-0 test plan](docs/bsc/GATE0_TESTPLAN_SHORT.md)
+- [Birth-entry architecture](docs/bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md)
+- [Native single-runtime contract](docs/bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md)
+- [Economics gate contract](docs/bsc/BSC_ECONOMICS_GATE_CONTRACT.md)
+- [Measurement/evidence ledger](docs/bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md)
 
-## Measurements / evidence
+## Code / evidence
 
-- **Master measurement ledger:** [docs/bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md](docs/bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md)
-- **Gate-0 evidence:** [gates/bsc/gate0/evidence/](gates/bsc/gate0/evidence/)
-- **Additional BSC docs/evidence:** [docs/bsc/](docs/bsc/)
-
-## Gate code
-
-- **Gate-0 Rust workspace:** [gates/bsc/gate0/](gates/bsc/gate0/)
-- **Gate-0 Rust source:** [gates/bsc/gate0/src/](gates/bsc/gate0/src/)
-- **Gate-0 tools:** [gates/bsc/gate0/tools/](gates/bsc/gate0/tools/)
-
-## Application code
-
-- **BSC application boundary:** [darkbot/bsc/](darkbot/bsc/)
-- **Shared application registry:** [darkbot/app/](darkbot/app/)
-
-## Project assets
-
-- [config/bsc/](config/bsc/)
-- [data/bsc/](data/bsc/)
-- [exports/bsc/](exports/bsc/)
-- [migrations/bsc/](migrations/bsc/)
-- [tests/bsc/](tests/bsc/)
-- [tools/bsc/](tools/bsc/)
+- [Application boundary](darkbot/bsc/)
+- [Gate-0 Rust workspace](gates/bsc/gate0/)
+- [Gate-0 evidence](gates/bsc/gate0/evidence/)
+- [Tests](tests/bsc/)
+- [Tools](tools/bsc/)
 
 ---
 
@@ -142,57 +85,32 @@ No website/browser/frontend BUY dependency.
 
 ## Goal
 
-Existing Pump.fun reference system for:
+Existing reference system for real market capture, deterministic replay, PAPER execution modeling, exact Pump.fun semantics, Strategy A/B/C, fee/rent evidence and research/reporting.
 
-- real market capture;
-- deterministic replay;
-- PAPER execution modeling;
-- exact Pump.fun market/quote semantics;
-- Strategy A/B/C;
-- fee/rent/economic evidence;
-- research and reporting.
+## Authoritative navigation
 
-The current Python implementation remains the reference system while native shared Solana infrastructure is developed.
+- [Pump.fun project index](docs/solana_pump/README.md)
+- [Research + latency status](docs/solana_pump/RESEARCH_STATUS_2026-09-23.md)
+- [Master TODO](docs/solana_pump/MASTER_TODO_2026-09-20.md)
+- [R9 / Token-2022 implementation status](docs/solana_pump/R9_IMPLEMENTATION_STATUS.md)
+- [Strategy C source of truth](docs/solana_pump/STRATEGY_C_SOURCE_OF_TRUTH.md)
+- [SPEC.json](docs/solana_pump/SPEC.json)
+- [Test handbook](docs/solana_pump/TEST_HANDBUCH.md)
 
-## Current phase / status
+## Code / evidence
 
-- **Research + latency status:** [docs/solana_pump/RESEARCH_STATUS_2026-09-23.md](docs/solana_pump/RESEARCH_STATUS_2026-09-23.md)
-- **Current master TODO / phase work:** [docs/solana_pump/MASTER_TODO_2026-09-20.md](docs/solana_pump/MASTER_TODO_2026-09-20.md)
-- **R9 / Token-2022 implementation status:** [docs/solana_pump/R9_IMPLEMENTATION_STATUS.md](docs/solana_pump/R9_IMPLEMENTATION_STATUS.md)
-- **Strategy C source of truth:** [docs/solana_pump/STRATEGY_C_SOURCE_OF_TRUTH.md](docs/solana_pump/STRATEGY_C_SOURCE_OF_TRUTH.md)
-- **Pump.fun documentation index:** [docs/solana_pump/README.md](docs/solana_pump/README.md)
+- [Pump.fun implementation](darkbot/solana_pump/)
+- [Strategies](darkbot/solana_pump/strategies/)
+- [Pump.fun venue adapter](darkbot/solana_pump/venue/)
+- [Shared Solana adapter](darkbot/solana/)
+- [Data](data/solana_pump/)
+- [Exports](exports/solana_pump/)
+- [Tests + fixtures](tests/solana_pump/)
+- [Tools](tools/solana_pump/)
 
-## Measurements / evidence
+Historical backend/reference material is retained under [docs/solana_pump/legacy_backend/](docs/solana_pump/legacy_backend/) and historical output archives under [exports/solana_pump/legacy/](exports/solana_pump/legacy/).
 
-- **Current research/latency evidence summary:** [docs/solana_pump/RESEARCH_STATUS_2026-09-23.md](docs/solana_pump/RESEARCH_STATUS_2026-09-23.md)
-- **Stored evidence:** [data/solana_pump/](data/solana_pump/)
-- **Generated reports/exports:** [exports/solana_pump/](exports/solana_pump/)
-
-## Gates
-
-- **Pump.fun gates area:** [gates/solana_pump/](gates/solana_pump/)
-
-No separate new production gate implementation is assumed merely because this folder exists; current authoritative status remains in the documents above.
-
-## Application code
-
-- **Pump.fun implementation:** [darkbot/solana_pump/](darkbot/solana_pump/)
-- **Strategies:** [darkbot/solana_pump/strategies/](darkbot/solana_pump/strategies/)
-- **Current Pump.fun chain adapter:** [darkbot/solana_pump/chain/](darkbot/solana_pump/chain/)
-- **Pump.fun venue adapter:** [darkbot/solana_pump/venue/](darkbot/solana_pump/venue/)
-
-Historical top-level modules such as `darkbot/market.py`, `darkbot/execution.py`, `darkbot/paper.py` etc. are compatibility facades. New Pump.fun implementation work belongs under `darkbot/solana_pump/`.
-
-## Project assets
-
-- [config/solana_pump/](config/solana_pump/)
-- [data/solana_pump/](data/solana_pump/)
-- [exports/solana_pump/](exports/solana_pump/)
-- [migrations/solana_pump/](migrations/solana_pump/)
-- [tests/solana_pump/](tests/solana_pump/)
-- [tools/solana_pump/](tools/solana_pump/)
-
-Important naming rule: files named `P0_*` under Pump.fun documentation/tests refer to historical **Pump.fun Phase-0**, not the Project 0 liquidation protocol.
+Files named `P0_*` inside Pump.fun history refer to historical **Pump.fun Phase-0**, not Project 0.
 
 ---
 
@@ -213,96 +131,50 @@ native Solana ingress/state
 
 Primary objective: **maximize sustainable realized net profit**.
 
-## Authoritative phase plan
+## Authoritative documents
 
-- **Frozen production phase plan:** [docs/project_0/PHASENPLAN.md](docs/project_0/PHASENPLAN.md)
-- **Project 0 documentation index:** [docs/project_0/README.md](docs/project_0/README.md)
+- [Project 0 project index](docs/project_0/README.md)
+- [PHASENPLAN v4 — authoritative](docs/project_0/PHASENPLAN.md)
+- [Measurement ledger](docs/project_0/MEASUREMENT_LEDGER.md)
 
-Core phase sequence:
+## Phase sequence
 
 ~~~text
 S0 → S1 → S2 → S3 → S4
-                 │
-P1A + P1B + H0 ──┘
-                 ↓
-P2 → P3 → P4A → P5 → P6 → P7 → P4B → P8 → P9 → K
+│
+├─ parallel: P0 + P1A + P1B + C0A + H0
+│
+└→ Gate A
+   → P2 → P3 → P4A → P5 → T → P6
+   → 0.1.12 deployment: HALT + requalification + C0B
+   → P7 → P4B → P8 → P9 → K
 ~~~
 
-## Measurements / evidence
+Strategic default: **Long-Tail first, Race later**, until real competition evidence supports escalation.
 
-- **Measurement ledger:** [docs/project_0/MEASUREMENT_LEDGER.md](docs/project_0/MEASUREMENT_LEDGER.md)
+## Code / evidence
 
-Unmeasured values remain N/A; no invented Project-0 latency, p(win), capture-rate or PnL values.
+- [Project 0 application boundary](darkbot/project_0/)
+- [Shared native Solana boundary](darkbot/solana/)
+- [Project 0 gates](gates/project_0/)
+- [Tests](tests/project_0/)
+- [Tools](tools/project_0/)
+- [Config](config/project_0/)
+- [Data](data/project_0/)
+- [Exports](exports/project_0/)
 
-## Gates
-
-- **Project 0 gates area:** [gates/project_0/](gates/project_0/)
-
-Actual phase gates are defined in the authoritative [PHASENPLAN](docs/project_0/PHASENPLAN.md).
-
-## Application code
-
-- **Project 0 application boundary:** [darkbot/project_0/](darkbot/project_0/)
-- **Shared native Solana boundary:** [darkbot/solana/](darkbot/solana/)
-- **Shared application/control plane:** [darkbot/app/](darkbot/app/)
-
-Project 0 production code is added directly into the final project/shared-Solana architecture; no temporary Python LIVE hotpath and no duplicate Solana stack.
-
-## Project assets
-
-- [config/project_0/](config/project_0/)
-- [data/project_0/](data/project_0/)
-- [exports/project_0/](exports/project_0/)
-- [migrations/project_0/](migrations/project_0/)
-- [tests/project_0/](tests/project_0/)
-- [tools/project_0/](tools/project_0/)
+No temporary Python LIVE hotpath and no duplicate Solana stack.
 
 ---
 
-# 4. Shared control plane and code ownership
+# 4. Shared ownership rules
 
-The target application model is:
+- BSC business/protocol logic → `darkbot/bsc/`
+- Pump.fun business/protocol logic → `darkbot/solana_pump/`
+- Project 0 business/protocol logic → `darkbot/project_0/`
+- Solana primitives genuinely shared by Pump.fun and Project 0 → `darkbot/solana/`
+- truly project-independent infrastructure → `darkbot/common/`
+- shared registries/orchestration may select components but must not contain project business logic
+- one production implementation per concern; no shadow duplicate cores
 
-~~~text
-                    shared frontend / control plane
-                               │
-                         darkbot.app
-                               │
-                    shared main / CLI facade
-                               │
-          ┌────────────────────┼────────────────────┐
-          │                    │                    │
-         BSC             Solana / Pump.fun      Project 0
-          │                    │                    │
-     darkbot/bsc/       darkbot/solana_pump/   darkbot/project_0/
-                                                    │
-                                          darkbot/solana/
-                                     shared native Solana pieces
-~~~
-
-Rules:
-
-- frontend/control-plane code does not contain protocol trading logic;
-- BSC logic stays in `darkbot/bsc/`;
-- Pump.fun logic stays in `darkbot/solana_pump/`;
-- Project 0 logic stays in `darkbot/project_0/`;
-- only Solana infrastructure genuinely shared by Pump.fun and Project 0 belongs in `darkbot/solana/`;
-- only truly project-independent infrastructure belongs in `darkbot/common/`;
-- one production business-logic implementation per project.
-
-Detailed ownership contract: [darkbot/README.md](darkbot/README.md)
-
----
-
-# 5. Old system / legacy material
-
-Historical backend/source and exports are isolated under:
-
-- [old_system/](old_system/)
-- [old_system/backend/](old_system/backend/)
-- [old_system/exports/](old_system/exports/)
-- [old_system/tests/](old_system/tests/)
-
-Older audit files, snapshots and historical evidence are intentionally retained for now.
-
-They may be deleted later **only after checking that they are not referenced by current tests, evidence chains, source manifests or authoritative documentation**. Repository cleanup is a separate task from the structural split.
+See [darkbot/README.md](darkbot/README.md) for the runtime ownership contract.

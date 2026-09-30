@@ -3,115 +3,106 @@
 Status: **CURRENT HIGH-LEVEL OVERVIEW**  
 Updated: 2026-09-30
 
-DarkBot currently contains three distinct engineering lines. They share selected principles and later selected Rust infrastructure, but they are **not the same strategy or protocol**.
+DarkBot contains three separate engineering lines. They share selected infrastructure, but not protocol semantics or strategy logic.
 
 ~~~text
 DarkBot
 ├── BSC / Birth Entry
 │   └── earliest technically possible on-chain BUY after launch
 ├── Solana / Pump.fun
-│   └── existing launch-sniper / strategy / capture / replay reference system
-└── Solana / Project 0 Liquidator
-    └── liquidation detection, exact health, receivership execution and competition
+│   └── capture / replay / PAPER / strategy reference system
+└── Solana / Project 0
+    └── exact liquidation state / health / economics / receivership / competition
 ~~~
 
-The root [README](../README.md) is the navigation entry point.
+Root navigation: [../README.md](../README.md)
 
 ## 1. BSC / Birth Entry
 
 Goal:
 
 ~~~text
-earliest actionable pending/chain signal
-→ local decode/quote/build/sign
-→ qualified inclusion path
-→ successful on-chain BUY
+pending/chain evidence
+→ local decode/build/sign
+→ qualified submission
+→ successful BUY
 → acquisition/ordering evidence
 ~~~
 
-Current work is Gate 0. The decisive product result is the actual BUY/acquisition position, not a local benchmark alone.
+Key links:
 
-Authoritative documents:
-
-- [BSC_DUAL_VENUE_ROADMAP.md](bsc/BSC_DUAL_VENUE_ROADMAP.md)
-- [GATE0_TESTPLAN_SHORT.md](bsc/GATE0_TESTPLAN_SHORT.md)
-- [BSC_BIRTH_ENTRY_ARCHITECTURE.md](bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md)
-- [BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md](bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md)
-- [GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md](bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md)
-
-Code/evidence:
-
-- [../gates/bsc/gate0/](../gates/bsc/gate0/)
-- [../gates/bsc/gate0/evidence/](../gates/bsc/gate0/evidence/)
+- [BSC project index](bsc/README.md)
+- [Active roadmap](bsc/BSC_DUAL_VENUE_ROADMAP.md)
+- [Gate-0 plan](bsc/GATE0_TESTPLAN_SHORT.md)
+- [Measurement ledger](bsc/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md)
+- [Gate-0 Rust workspace](../gates/bsc/gate0/)
+- [Gate-0 evidence](../gates/bsc/gate0/evidence/)
 
 ## 2. Solana / Pump.fun
 
-Goal:
+Purpose:
 
-- preserve and validate the existing Pump.fun semantics;
+- preserve exact Pump.fun semantics;
 - capture/replay real market data;
-- evaluate strategies and economics without pretending PAPER fills are LIVE fills;
-- retain the current Python implementation as the reference system while native Solana work is introduced.
+- evaluate strategies and economics;
+- keep the current implementation as the semantic reference while shared Solana primitives are extracted.
 
-Current authoritative status documents:
+Key links:
 
-- [RESEARCH_STATUS_2026-09-23.md](solana_pump/RESEARCH_STATUS_2026-09-23.md)
-- [MASTER_TODO_2026-09-20.md](solana_pump/MASTER_TODO_2026-09-20.md)
-- [R9_IMPLEMENTATION_STATUS.md](solana_pump/R9_IMPLEMENTATION_STATUS.md)
-- [phase_a/PHASE_A_REPORT.md](bsc/phase_a/PHASE_A_REPORT.md)
+- [Pump.fun project index](solana_pump/README.md)
+- [Research status](solana_pump/RESEARCH_STATUS_2026-09-23.md)
+- [Master TODO](solana_pump/MASTER_TODO_2026-09-20.md)
+- [Strategy C source of truth](solana_pump/STRATEGY_C_SOURCE_OF_TRUTH.md)
+- [Pump.fun code](../darkbot/solana_pump/)
+- [Shared Solana code](../darkbot/solana/)
+- [Tests + fixtures](../tests/solana_pump/)
 
-Current code:
-
-- [../darkbot/chains/solana/](../darkbot/chains/solana/)
-- [../darkbot/venues/pumpfun/](../darkbot/venues/pumpfun/)
-- [../darkbot/runtime/](../darkbot/runtime/)
-- [../darkbot/strategies/](../darkbot/strategies/)
-
-Important: legacy files named P0_* refer to the old **Pump.fun Phase-0/Doctor work**, not to the Project 0 protocol.
-
-## 3. Solana / Project 0 Liquidator
+## 3. Solana / Project 0
 
 Goal:
 
 ~~~text
-native Solana ingress/state
-→ exact Project 0 protocol/risk state
-→ exact liquidation eligibility
-→ economics
-→ receivership execution planning
-→ Jito/RPC submission
+native Solana state
+→ exact Project-0 state + health
+→ deterministic economics
+→ receivership planning
+→ submission
 → landing/winner/PnL reconciliation
 ~~~
 
-Current phase plan:
+Key links:
 
-- [../docs_project_0/PHASENPLAN.md](project_0/PHASENPLAN.md)
+- [Project 0 project index](project_0/README.md)
+- [PHASENPLAN v4](project_0/PHASENPLAN.md)
+- [Measurement ledger](project_0/MEASUREMENT_LEDGER.md)
+- [Project 0 code](../darkbot/project_0/)
+- [Shared Solana code](../darkbot/solana/)
 
-Measurement ledger:
+Authoritative high-level order:
 
-- [../docs_project_0/MEASUREMENT_LEDGER.md](project_0/MEASUREMENT_LEDGER.md)
-
-Status:
-
-- architecture/phase plan frozen in dedicated Project 0 docs folder;
-- no Project 0 production implementation in the repository yet;
-- no Project 0 measurement may be claimed before evidence is written to the ledger.
+~~~text
+S0 → S1 → S2 → S3 → S4
+parallel P0 + P1A + P1B + C0A + H0
+→ Gate A
+→ P2 → P3 → P4A → P5 → T → P6
+→ 0.1.12 HALT/requalification + C0B
+→ P7 → P4B → P8 → P9 → K
+~~~
 
 ## 4. Shared architecture rule
 
-Do not force BSC and Solana into one fake chain abstraction.
-
-Share only components that are genuinely generic and proven useful, for example:
+Share only what is truly generic:
 
 - timing/telemetry;
 - lifecycle/shutdown;
 - bounded channels;
-- journal/replay concepts;
+- chain/venue contracts;
+- shared native Solana primitives;
 - measurement discipline;
-- fail-closed handling.
+- fail-closed infrastructure.
 
-Chain and protocol semantics remain separate.
+Protocol semantics remain project-owned.
 
 ## 5. Source-of-truth rule
 
-For each project use its own phase plan and evidence ledger. Historical documents remain useful evidence, but they do not override a newer project-specific source of truth.
+Each project owns its own authoritative roadmap/spec/evidence. Historical documents are evidence only and do not override newer project-specific source-of-truth documents.

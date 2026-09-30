@@ -1,25 +1,37 @@
 # Solana / Pump.fun
 
-Documentation root for the existing Solana/Pump.fun system.
+Documentation root for the existing Solana/Pump.fun reference system.
 
-## Current navigation
+## Purpose
 
-- [RESEARCH_STATUS_2026-09-23.md](RESEARCH_STATUS_2026-09-23.md)
-- [MASTER_TODO_2026-09-20.md](MASTER_TODO_2026-09-20.md)
-- [R9_IMPLEMENTATION_STATUS.md](R9_IMPLEMENTATION_STATUS.md)
-- [STRATEGY_C_SOURCE_OF_TRUTH.md](STRATEGY_C_SOURCE_OF_TRUTH.md)
-- [SPEC.json](SPEC.json)
-- [TEST_HANDBUCH.md](TEST_HANDBUCH.md)
+The Pump.fun project owns the current capture/replay/PAPER/strategy implementation and remains the semantic reference while shared native Solana infrastructure is introduced.
 
-Historical files named `P0_*` in this folder are **Pump.fun Phase-0** material. They are not Project 0 liquidation-protocol documentation.
+## Current authoritative navigation
 
-Historical backend/reference material:
-- [legacy_backend/](legacy_backend/)
+- [RESEARCH_STATUS_2026-09-23.md](RESEARCH_STATUS_2026-09-23.md) — current research and latency evidence.
+- [MASTER_TODO_2026-09-20.md](MASTER_TODO_2026-09-20.md) — active work/TODO.
+- [R9_IMPLEMENTATION_STATUS.md](R9_IMPLEMENTATION_STATUS.md) — R9 / Token-2022 status.
+- [STRATEGY_C_SOURCE_OF_TRUTH.md](STRATEGY_C_SOURCE_OF_TRUTH.md) — Strategy C semantics.
+- [SPEC.json](SPEC.json) — authoritative machine-readable specification.
+- [TEST_HANDBUCH.md](TEST_HANDBUCH.md) — test handbook.
 
-Current implementation remains under:
-- `../../darkbot/solana_pump/` — Pump.fun application, strategy, replay/PAPER, economics, venue and project-specific Solana wiring
-- `../../darkbot/runtime/` — shared runtime/profile assembly
-- `../../darkbot/chains/` and `../../darkbot/venues/` — shared contracts/registries
-- `../../darkbot/solana/` — shared native Solana primitives as they are extracted for reuse by Project 0
+## Code and project assets
 
-Historical backend/reference material is retained once under `legacy_backend/`; duplicate copies previously stored under `old_system/` were removed.
+- [Pump.fun implementation](../../darkbot/solana_pump/)
+- [Strategies](../../darkbot/solana_pump/strategies/)
+- [Venue adapter](../../darkbot/solana_pump/venue/)
+- [Shared Solana primitives](../../darkbot/solana/)
+- [Config](../../config/solana_pump/)
+- [Data](../../data/solana_pump/)
+- [Exports](../../exports/solana_pump/)
+- [Migrations](../../migrations/solana_pump/)
+- [Tests + fixtures](../../tests/solana_pump/)
+- [Tools](../../tools/solana_pump/)
+
+## Historical material
+
+- [legacy_backend/](legacy_backend/) — retained historical backend/reference source.
+- [../../exports/solana_pump/legacy/](../../exports/solana_pump/legacy/) — historical output archives.
+- [../../tests/solana_pump/legacy_audits/](../../tests/solana_pump/legacy_audits/) — historical audit snapshots.
+
+Historical files named `P0_*` mean **Pump.fun Phase-0**, not the Project 0 liquidation protocol.
