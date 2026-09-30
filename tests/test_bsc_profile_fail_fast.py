@@ -29,7 +29,7 @@ class BscProfileFailFastTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.configs = {}
-        raw = load_json_strict(ROOT / "config" / "phase1.json")
+        raw = load_json_strict(ROOT / "config" / "solana_pump" / "phase1.json")
         for pid in ("bsc-mainnet:flap", "bsc-mainnet:fourmeme"):
             path = self.tmp / f"{pid.replace(':', '_')}.json"
             path.write_text(json.dumps({**raw, "market_profile_id": pid}))
