@@ -171,13 +171,17 @@ Solana state update
 
 The product goal is **not** an arbitrary “1 ms BUY” target.
 
-The important end results are:
+The **primary objective is maximum sustainable realized net profit**. The important end results are:
 
 ~~~text
 REALIZED NET PNL
 CAPTURE RATE
 WINNER POSITION
+CAPITAL EFFICIENCY
+PROVIDER / INFRASTRUCTURE COST
 ~~~
+
+Paid portals/APIs are not assumed production dependencies. A recurring paid provider is retained only if measured incremental profit exceeds subscription, usage and dependency cost.
 
 ## Planned native architecture
 
@@ -227,10 +231,11 @@ H0  historical Project 0 evidence
 then:
 P2 state + reverse indices
 P3 exact health + eligibility
-P4 economics
+P4A deterministic economics/ranking
 P5 refresh/routing/receivership planner
 P6 full hotpath + shadow race
-P7 economics/competition qualification
+P7 economics/competition/provider qualification
+P4B probabilistic ranking/tip/stopping policy
 P8 controlled LIVE
 P9 production LIVE
 K  measured escalation only
