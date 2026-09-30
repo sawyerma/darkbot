@@ -1,7 +1,7 @@
 """Small policy interface; StateOwner retains all shared execution and safety state."""
 from typing import Protocol, Any
 from decimal import Decimal
-from darkbot.strategy import EntryVerdict
+from darkbot.solana_pump.strategy import EntryVerdict
 
 
 class StrategyPolicy(Protocol):
