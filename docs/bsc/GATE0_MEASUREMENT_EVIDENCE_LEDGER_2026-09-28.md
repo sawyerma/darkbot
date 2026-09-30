@@ -1741,3 +1741,45 @@ Evidence:
 **G0.6 Gesamtstatus:** **PARTIAL / concurrency PASS**. Noch offen ist die reale Ingress-Seite der Matrix. Der lokale bsc-geth/P2P-Kandidat ist auf der aktuellen Maschine nicht verfügbar; QuickNode-Coverage bleibt G0.4 PARTIAL wegen fehlendem frozen-scope denominator bzw. Providerlimit. Transport-Readiness der beiden Remote-Builder ist durch G0.5 vorqualifiziert, aber nicht Inclusion-/Ordering-bewiesen.
 
 **Non-Claims:** kein Mainnet-BUY, kein Builder-Inclusion-/Ordering-Nachweis, kein `T_buy`, kein Ingress-Coverage-PASS.
+
+
+---
+
+## 2026-09-30 — G0.6 Flap actionable pending field completeness
+
+QuickNode delivered a real pending Flap `newTokenV6` transaction and the Rust verifier decoded the complete calldata successfully.
+
+Observed capture:
+
+~~~text
+full pending txs                 482
+hash-only pending txs              0
+missing required fields            0
+Flap tx hash
+0xefe37cc398f69e29775e4282da099dac4174761a8e4cbbf472f2be7f04ee2fe0
+pending sample SHA256
+f887e6c2df0f252f9321159ceec11c9f7aa21b874298ba5baa23057bf29837de
+~~~
+
+Decoder result:
+
+~~~text
+ABI roundtrip                     PASS
+tokenVersion                         6
+buyTax                             100
+sellTax                            100
+quoteToken                         native / zero address
+extensionId                        zero
+exact frozen DOGE/extension scope  false
+result                             PASS_DECODE_ONLY_SCOPE_MISMATCH
+~~~
+
+Interpretation: this is positive evidence that the selected QuickNode pending feed can expose a complete, directly decodable Flap `newTokenV6` transaction before canonical inclusion. It is **not** yet the frozen Gate-0 ingress PASS because the observed launch used a different V6 launch mode than the pinned DOGE/extension scope.
+
+Evidence:
+- `gates/bsc/gate0/evidence/g06_flap_actionable_pending/summary_terminal_capture.json`
+- evidence commit: `ade0d92d294028f9ad2e41b95de8e44d6c1721ee`
+
+**G0.6 ingress status:** field completeness for an observed V6 Flap launch is PASS; exact frozen-scope qualification remains open until a pending launch matching tokenVersion 6 + DOGE quote token + frozen extension ID is captured and decoded.
+
+Non-claims remain unchanged: no canonical coverage denominator, no inclusion/order proof, no `T0`, `T_send` or `T_buy`, no value-bearing transaction.
