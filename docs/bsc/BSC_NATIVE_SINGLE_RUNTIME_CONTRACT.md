@@ -4,9 +4,9 @@ Status: **NORMATIVE AFTER GATE-0 PASS**
 Updated: 2026-09-27
 
 Higher-priority feasibility documents:
-1. `docs/GATE0_TESTPLAN_SHORT.md`
-2. `docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md`
-3. `docs/BSC_DUAL_VENUE_ROADMAP.md`
+1. `docs/bsc/GATE0_TESTPLAN_SHORT.md`
+2. `docs/bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md`
+3. `docs/bsc/BSC_DUAL_VENUE_ROADMAP.md`
 
 This production contract becomes active only after at least one BSC venue passes Gate 0.
 
