@@ -85,15 +85,15 @@ native Solana ingress/state
 
 Current phase plan:
 
-- [SOLANA_PROJECT0_ROADMAP_DRAFT.md](SOLANA_PROJECT0_ROADMAP_DRAFT.md)
+- [../docs_project_0/PHASENPLAN.md](../docs_project_0/PHASENPLAN.md)
 
 Measurement ledger:
 
-- [SOLANA_PROJECT0_MEASUREMENT_LEDGER.md](SOLANA_PROJECT0_MEASUREMENT_LEDGER.md)
+- [../docs_project_0/MEASUREMENT_LEDGER.md](../docs_project_0/MEASUREMENT_LEDGER.md)
 
 Status:
 
-- roadmap under technical review;
+- architecture/phase plan frozen in dedicated Project 0 docs folder;
 - no Project 0 production implementation in the repository yet;
 - no Project 0 measurement may be claimed before evidence is written to the ledger.
 
