@@ -47,7 +47,11 @@ function decodeScopeFields(input) {
   if (args.length < 64) return null;
 
   const tupleOffsetBytes = Number(BigInt('0x' + args.slice(0, 64)));
-  const tupleStartHex = 64 + tupleOffsetBytes * 2;
+
+  // ABI offsets are measured from the start of the arguments block.
+  // newTokenV6 has one dynamic tuple argument, so the first word is the
+  // tuple offset (normally 0x20) and the tuple starts at args[offset].
+  const tupleStartHex = tupleOffsetBytes * 2;
 
   const quoteWord = word(args, tupleStartHex, 6);
   const extensionWord = word(args, tupleStartHex, 10);
