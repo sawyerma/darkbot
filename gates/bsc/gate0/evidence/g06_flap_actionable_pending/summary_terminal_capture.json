@@ -1,0 +1,45 @@
+{
+  "status": "G0.6_FLAP_PENDING_FIELD_COMPLETENESS",
+  "source": "terminal output supplied by user from g06_capture_flap_actionable_pending.cjs and g06_flap_pending_decode",
+  "capture": {
+    "status": "G0.6_FLAP_ACTIONABLE_PENDING_SAMPLE_CAPTURED",
+    "duration_ns": "3516878167",
+    "stop_reason": "exact_flap_pending_launch_observed",
+    "subscription_established": true,
+    "stats": {
+      "full_pending": 482,
+      "hash_only": 0,
+      "missing_required_fields": 0
+    },
+    "pending_sample_sha256": "f887e6c2df0f252f9321159ceec11c9f7aa21b874298ba5baa23057bf29837de",
+    "tx_hash": "0xefe37cc398f69e29775e4282da099dac4174761a8e4cbbf472f2be7f04ee2fe"
+  },
+  "decode": {
+    "abi_roundtrip": true,
+    "result": "PASS_DECODE_ONLY_SCOPE_MISMATCH",
+    "token_version": 6,
+    "quote_token": "0x0000000000000000000000000000000000000000",
+    "extension_id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "quote_amount": "500000000000000000",
+    "buy_tax": 100,
+    "sell_tax": 100,
+    "frozen_scope_check": {
+      "token_version_6": true,
+      "quote_token_doge": false,
+      "extension_id_match": false,
+      "exact_scope_match": false
+    }
+  },
+  "interpretation": "QuickNode exposed a complete actionable pending Flap newTokenV6 transaction and the Rust ABI decoder round-tripped it exactly. This proves pending field completeness for this observed V6 launch mode, but the sample is not the frozen DOGE/extension Gate-0 scope.",
+  "safety": {
+    "read_only": true,
+    "transaction_submission": false,
+    "value_bearing_buy": false
+  },
+  "non_claims": [
+    "No frozen-scope ingress PASS",
+    "No canonical coverage denominator",
+    "No builder inclusion or ordering proof",
+    "No T0, T_send or T_buy measurement"
+  ]
+}
