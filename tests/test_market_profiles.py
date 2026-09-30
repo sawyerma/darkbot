@@ -54,7 +54,7 @@ class LegacyConfigCompatibilityTests(unittest.TestCase):
         golden = json.loads(GOLDEN.read_text())
         self.assertEqual(len(golden), 9)  # all 9 runtime configs shipped at baseline 05971e4 (research*.json are not runtime configs)
         for name, hashes in golden.items():
-            cfg = load_runtime_config(ROOT / "config" / name)
+            cfg = load_runtime_config(ROOT / "config" / "solana_pump" / name)
             with self.subTest(config=name):
                 self.assertEqual(cfg.market_profile_id, "solana-mainnet:pumpfun")
                 for kind, (h, _content) in cfg.snapshot_kinds().items():
@@ -62,24 +62,24 @@ class LegacyConfigCompatibilityTests(unittest.TestCase):
                 self.assertEqual(len(cfg.canonical), hashes["canonical_sha256_len"])
 
     def test_explicit_profile_participates_in_config_hash(self):
-        raw = load_json_strict(ROOT / "config" / "phase1.json")
-        legacy = build_runtime_config(ROOT / "config" / "phase1.json", raw)
-        explicit = build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": "solana-mainnet:pumpfun"})
+        raw = load_json_strict(ROOT / "config" / "solana_pump" / "phase1.json")
+        legacy = build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", raw)
+        explicit = build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", {**raw, "market_profile_id": "solana-mainnet:pumpfun"})
         self.assertTrue(explicit.has_explicit_market_profile)
         self.assertEqual(explicit.market_profile_id, legacy.market_profile_id)
         self.assertNotEqual(explicit.config_hash, legacy.config_hash)  # explicit metadata is part of the newly authored config's hash binding
         self.assertEqual(explicit.policy_hash, legacy.policy_hash)  # policy/cost bindings untouched
         self.assertEqual(explicit.cost_model_hash, legacy.cost_model_hash)
-        flap = build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": "bsc-mainnet:flap"})
+        flap = build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", {**raw, "market_profile_id": "bsc-mainnet:flap"})
         self.assertEqual(flap.market_profile_id, "bsc-mainnet:flap")
         self.assertNotEqual(flap.config_hash, explicit.config_hash)  # config hash changes when the market profile changes
 
     def test_unknown_explicit_profile_is_a_config_error(self):
-        raw = load_json_strict(ROOT / "config" / "phase1.json")
+        raw = load_json_strict(ROOT / "config" / "solana_pump" / "phase1.json")
         with self.assertRaises(ConfigError):
-            build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": "bsc-mainnet:unknown"})
+            build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", {**raw, "market_profile_id": "bsc-mainnet:unknown"})
         with self.assertRaises(ConfigError):
-            build_runtime_config(ROOT / "config" / "phase1.json", {**raw, "market_profile_id": ""})
+            build_runtime_config(ROOT / "config" / "solana_pump" / "phase1.json", {**raw, "market_profile_id": ""})
 
 
 if __name__ == "__main__":
