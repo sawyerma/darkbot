@@ -275,6 +275,8 @@ struct Sample {
     ready: u64,
     total: u64,
     roundtrip: u64,
+    response_error_code: Option<i64>,
+    response_error_message: Option<String>,
 }
 
 struct Ctx {
@@ -518,6 +520,32 @@ fn run_once(
         "provider rate limit encountered: {body}"
     );
 
+    let parsed: Value =
+        serde_json::from_str(&body).expect("invalid JSON-RPC response body");
+
+    let response_error_code =
+        parsed.get("error")
+            .and_then(|e| e.get("code"))
+            .and_then(Value::as_i64);
+
+    let response_error_message =
+        parsed.get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+
+    if transport == TransportKind::FortyEightClubBundle {
+        assert_ne!(
+            response_error_code,
+            Some(-32601),
+            "48Club endpoint reports eth_sendBundle method not found: {body}"
+        );
+        assert!(
+            response_error_code.is_some(),
+            "48Club invalid-wire probe returned neither error nor bundle hash: {body}"
+        );
+    }
+
     black_box(&body);
 
     Sample {
@@ -531,6 +559,8 @@ fn run_once(
         ready: (t5 - t0).as_nanos() as u64,
         total: (t7 - t0).as_nanos() as u64,
         roundtrip: (t8 - t0).as_nanos() as u64,
+        response_error_code,
+        response_error_message,
     }
 }
 
@@ -711,6 +741,8 @@ fn main() {
     let mut ready = Vec::with_capacity(SAMPLES);
     let mut total = Vec::with_capacity(SAMPLES);
     let mut roundtrip = Vec::with_capacity(SAMPLES);
+    let mut response_errors: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
 
     for i in 0..SAMPLES {
         let s = run_once(
@@ -731,6 +763,13 @@ fn main() {
         ready.push(s.ready);
         total.push(s.total);
         roundtrip.push(s.roundtrip);
+
+        if let Some(code) = s.response_error_code {
+            let message = s.response_error_message.as_deref().unwrap_or("");
+            *response_errors
+                .entry(format!("{code}: {message}"))
+                .or_insert(0) += 1;
+        }
 
         // Outside measured interval. Keep the builder probe deliberately
         // paced so transport qualification does not become a burst test.
@@ -786,6 +825,7 @@ fn main() {
         "chain_id_verified": chain_id_verified,
         "transport": "preconnected TLS/TCP HTTP/1.1",
         "wire_safety": "valid local signed BUY is corrupted to invalid RLP before network write",
+        "json_rpc_error_histogram": response_errors,
         "non_claims": [
             "No valid transaction was broadcast",
             "No value-bearing BUY was sent",
