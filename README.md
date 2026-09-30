@@ -134,23 +134,34 @@ Primary objective: **maximize sustainable realized net profit**.
 ## Authoritative documents
 
 - [Project 0 project index](docs/project_0/README.md)
-- [PHASENPLAN v4 — authoritative](docs/project_0/PHASENPLAN.md)
+- [PHASENPLAN v4 — FROZEN / authoritative](docs/project_0/PHASENPLAN.md)
 - [Measurement ledger](docs/project_0/MEASUREMENT_LEDGER.md)
 
-## Phase sequence
+## Frozen phase model
 
 ~~~text
+TRACK A — Native Core
 S0 → S1 → S2 → S3 → S4
-│
-├─ parallel: P0 + P1A + P1B + C0A + H0
-│
-└→ Gate A
-   → P2 → P3 → P4A → P5 → T → P6
-   → 0.1.12 deployment: HALT + requalification + C0B
-   → P7 → P4B → P8 → P9 → K
+
+TRACK B — Project-0 Evidence / Qualification
+P0 + P1A + P1B + C0 + H0
+
+→ MERGE GATE
+→ P2 → P3 → P4A → P5 → T → P6 → P7 → P4B → P8 → P9 → K
 ~~~
 
-Strategic default: **Long-Tail first, Race later**, until real competition evidence supports escalation.
+Race and Long-Tail are **not separate development stages**. Both are designed into the same final production core from the start and feed the same health/economics/execution pipeline.
+
+The frozen plan also pins the corrected receivership semantics from `liquidate_end.rs`: Maintenance uses SPOT, Equity uses EMA, and seizure/repaid/extracted limits are evaluated with the actual pre/post formulas and separate protocol caps rather than a naive equity-difference shortcut.
+
+## Current immediate work
+
+The next immediate Project-0 work is:
+
+- **P0** — reference/reuse/license study;
+- **C0** — market/account census covering Race + Long-Tail.
+
+The frozen full plan also schedules P1A, P1B, H0 and S0 in parallel where practical.
 
 ## Code / evidence
 

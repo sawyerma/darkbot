@@ -73,7 +73,7 @@ native Solana state
 Key links:
 
 - [Project 0 project index](project_0/README.md)
-- [PHASENPLAN v4](project_0/PHASENPLAN.md)
+- [PHASENPLAN v4 — FROZEN](project_0/PHASENPLAN.md)
 - [Measurement ledger](project_0/MEASUREMENT_LEDGER.md)
 - [Project 0 code](../darkbot/project_0/)
 - [Shared Solana code](../darkbot/solana/)
@@ -82,12 +82,14 @@ Authoritative high-level order:
 
 ~~~text
 S0 → S1 → S2 → S3 → S4
-parallel P0 + P1A + P1B + C0A + H0
-→ Gate A
-→ P2 → P3 → P4A → P5 → T → P6
-→ 0.1.12 HALT/requalification + C0B
-→ P7 → P4B → P8 → P9 → K
+parallel with P0 + P1A + P1B + C0 + H0
+→ MERGE GATE
+→ P2 → P3 → P4A → P5 → T → P6 → P7 → P4B → P8 → P9 → K
 ~~~
+
+Race and Long-Tail are simultaneous capabilities of the same final production core, not separate products or development stages.
+
+Immediate Project-0 work: **P0 + C0**.
 
 ## 4. Shared architecture rule
 

@@ -1,303 +1,1315 @@
-# DarkBot — Project 0 — PHASENPLAN v4 — AUTHORITATIVE
+# DarkBot — Project 0 — Finaler Produktions-Phasenplan
 
-Status: **ARCHITECTURE FREEZE — AUTHORITATIVE**
-Stand: **2026-09-30**
+**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4  
+**Stand:** 2026-09-30  
+**Geltungsbereich:** DarkBot / Project 0 Liquidator  
+**Source of Truth:** Diese Datei definiert Architektur, Reihenfolge, Gates und verbindliche Entwicklungsregeln.
 
-Diese Datei ist die verbindliche technische Roadmap für den DarkBot Project-0-Liquidator. Sie vereint Produktionsarchitektur, Referenzstudie, Census, Historical Evidence und Upgrade-Requalifikation. Frühere Project-0-Roadmaps werden dadurch ersetzt.
-
-Es gilt genau eine Produktionsimplementierung. Jede Phase erweitert denselben finalen Codepfad. Es gibt keinen Prototypen, der später neu geschrieben wird.
+**Freeze-Korrekturen:** `solana-dex-superagg` ist als Remote-Aggregator-Client klassifiziert; `marginfi-v2` Apache-2.0 und `solana-dex-superagg` MIT sind lizenzseitig bestätigt; Receivership Maintenance=SPOT und Equity=EMA sowie die tatsächlichen `liquidate_end.rs`-Grenzen sind als Protocol-Semantik aufgenommen; H0 modelliert konfigurierbare Konkurrenz-Mindestprofitschwellen.
 
 ---
 
-# 0. Primäres Produktziel
+# 0. Leitbild
 
-## 0.1 Zielfunktion
+## 0.1 Primäres Produktziel
 
 **Maximiere nachhaltigen realisierten Netto-Profit.**
 
 Nicht optimiert wird auf:
+
 - minimale lokale Latenz um jeden Preis;
 - maximale Anzahl Liquidationen;
 - maximale Anzahl Provider;
 - maximale technische Komplexität;
 - maximale Anzahl Abos;
-- möglichst viele Features ohne wirtschaftlichen Nutzen.
+- maximale Anzahl selbst geschriebener Komponenten.
 
 Ökonomische Zielfunktion:
 
-~~~text
+```text
 REALIZED NET PROFIT
 =
-realisierter Liquidationserlös
-- Repay-Kosten
+realisierter Liquidationserlös zum tatsächlich ausführbaren Preis
+- Repay
 - Project-0-Protokollgebühren
-- Project-0-Flat-SOL-Fee
+- Project-0 Flat-SOL-Liquidationsgebühr
 - Swap-/DEX-Gebühren
 - realer Price Impact / Slippage
 - Priority Fees
 - Jito Tips
 - Token-/Rent-Kosten
-- Kosten fehlgeschlagener Versuche
+- pfadabhängige Kosten fehlgeschlagener Versuche
 - Infrastrukturkosten
-- API-/SaaS-/Portal-Kosten
-- vermeidbare Betriebskosten
-~~~
+- Provider-/API-/SaaS-Kosten
+- Kapitalkosten
+```
 
-Latenz, Capture Rate, Routing, Inclusion und Infrastruktur sind Mittel zur Profitmaximierung, nicht das Endziel.
+**Latenz, Capture Rate, Routing, Inclusion und technische Geschwindigkeit sind Mittel zur Profitmaximierung, nicht das Endziel.**
 
-## 0.2 Kostenregel
+---
 
-~~~text
-kostenlos + technisch sinnvoll
-→ direkt verwenden
+## 0.2 Eine Production-Implementierung
+
+Es gibt **genau einen finalen Production-Codepfad**.
+
+```text
+kein:
+Prototype → Rewrite → Production
+
+sondern:
+S0 baut final
+→ jede folgende Phase erweitert denselben Code
+→ Replay, Shadow und LIVE benutzen dieselben Komponenten
+```
+
+Es gibt ausdrücklich keinen separaten:
+
+- Race-Bot;
+- Long-Tail-Bot;
+- Shadow-Core;
+- Health-Core;
+- Execution-Core;
+- Economics-Core;
+- zweiten Solana-Core.
+
+---
+
+## 0.3 Race und Long-Tail sind gleichzeitig Bestandteil desselben Systems
+
+**Race und Long-Tail sind keine Entwicklungsstufen und keine getrennten Produkte.**
+
+Beide werden von Anfang an in derselben finalen Architektur berücksichtigt.
+
+Drei Opportunity-Trigger speisen dieselbe Detection-/Health-/Execution-Pipeline:
+
+```text
+(a) Oracle-/State-Update
+    → sofortige Schwellenverletzung
+    → Race Opportunity
+
+(b) zeitabhängige Premium-/Debt-Grenze
+    → Premium Scheduler
+    → zeitgetriebene Opportunity
+
+(c) liquidation_tagged_at
+    → t_profitable Scheduler
+    → Long-Tail Opportunity
+```
+
+Danach immer derselbe Pfad:
+
+```text
+Trigger
+→ Exact Health
+→ Deterministic Economics
+→ Opportunity Ranking
+→ Receivership Planner
+→ TX Build
+→ Sign
+→ Submit
+→ Landing
+→ Reconciliation
+```
+
+**Es wird nicht zuerst ein billiger Long-Tail-Bot und später ein schneller Race-Bot gebaut.**
+
+---
+
+## 0.4 Kostenoptimierung ohne technische Verkrüppelung
+
+Der Code wird von Anfang an:
+
+- schnell;
+- schlank;
+- provider-austauschbar;
+- Rust-hotpath-fähig;
+- fork-/state-korrekt;
+- Race-fähig;
+- Long-Tail-fähig;
+- v0-/v1-fähig;
+- Jito-/RPC-fähig;
+- NO_SWAP-/Swap-fähig
+
+gebaut.
+
+Die **laufende Infrastruktur** wird dagegen kostenoptimiert betrieben.
+
+Regel:
+
+```text
+kostenlos / bereits vorhanden + technisch ausreichend
+→ verwenden
 
 laufende Zusatzkosten
-→ nur verwenden, wenn der zusätzliche nachhaltige Netto-Profit
-  die vollständigen Kosten und das Abhängigkeitsrisiko übersteigt
-~~~
+→ nur wenn gemessener zusätzlicher Netto-Profit
+   > vollständige Zusatzkosten + Abhängigkeitsrisiko
+```
 
-Kein kostenpflichtiger Provider wird allein aus Bequemlichkeit permanente Produktionsabhängigkeit.
+Dies gilt insbesondere für:
 
-Jeder kostenpflichtige Provider braucht:
-- klaren Zweck;
-- monatliche Kosten;
-- Usage-Kosten;
-- gemessenen technischen Nutzen;
-- gemessenen zusätzlichen Profit;
-- Ersatz-/Fallback-Pfad, soweit technisch möglich;
-- Entfernungskriterium.
+- Paid RPC;
+- Geyser-Abos;
+- QuickNode-Zusatzprodukte;
+- dedizierte Server;
+- eigene Solana-Nodes;
+- zusätzliche Regionen;
+- DoubleZero;
+- kostenpflichtige Routing-/Submission-Dienste.
+
+**Eine kostenlose Infrastruktur darf die Architektur nicht verschlechtern.**
+Adapter und Interfaces werden so gebaut, dass bessere Infrastruktur später ohne Rewrite genutzt werden kann.
 
 ---
 
 # 1. Harte Architekturregeln
 
-## 1.1 Final-Implementation Rule
+## 1.1 Rust dort, wo Rust nötig ist
 
-~~~text
-zeitkritisch
-→ direkt Rust
+Nicht „Rust um jeden Preis“, sondern:
 
-nicht zeitkritisch
-→ Python erlaubt
-~~~
+**Alles, was LIVE-Korrektheit, State, Race-Latenz, deterministische Ausführung oder TX-Erzeugung beeinflusst, wird in Rust gebaut.**
 
-Es gibt ausdrücklich nicht:
-
-~~~text
-Prototype
-→ Rewrite
-→ Production
-~~~
-
-Sondern:
-
-~~~text
-Phase 1 baut finalen Produktionscode
-→ Phase 2 erweitert denselben Code
-→ Phase 3 erweitert denselben Code
-→ ...
-~~~
-
-## 1.2 Rust-Hotpath
-
-Diese Komponenten werden von Anfang an in Rust implementiert:
+Rust ist verbindlich für:
 
 - Solana Ingress;
-- Yellowstone/Geyser Decode;
-- Canonical State;
+- WebSocket-/Geyser-Decode;
+- Canonical/Fork State;
 - RAM State;
-- Fork/Root/Reconciliation;
-- Project-0 Decoder;
+- Reconnect/Reconciliation;
+- Project-0 Account Decoder;
 - Reverse Indices;
+- Threshold Index;
 - Premium Scheduler;
-- Health Engine;
-- Liquidation Detection;
+- Tag Scheduler / `t_profitable`;
+- Health-Anbindung;
+- LIVE Liquidation Detection;
+- Race Detection;
+- Long-Tail Detection;
 - deterministische Economics;
 - LIVE Opportunity Ranking;
-- LIVE Routing-/Execution-Planung;
+- Receivership Planning;
+- Routing-Entscheidung im LIVE-Pfad;
 - Transaction Builder;
 - v0/v1 Builder;
 - Signing;
-- Jito Submission;
-- RPC Submission;
-- Landing/Reconciliation;
+- RPC-/Jito-Submission;
+- Landing Observation;
+- Reconciliation;
 - Hotpath Telemetrie.
 
 Python ist erlaubt für:
 
-- historische H0-Analysen;
+- Source-/Referenzanalyse;
+- P0-Reuse-Analyse;
 - Account Census;
+- historische H0-Extraktion;
 - große Offline-Auswertungen;
 - Statistik;
 - Reports;
 - Plots;
-- Shadow-Auswertung;
-- p(win)-Modelltraining;
-- Diagnose-/Audit-Werkzeuge.
+- Research;
+- Modelltraining;
+- Audit-/Diagnose-Werkzeuge.
 
-## 1.3 Hotpath-Verbote
+**Kein Python im LIVE-Hotpath.**
+
+---
+
+## 1.2 REUSE BEFORE REIMPLEMENTATION
+
+Für jede Project-0-Komponente wird **vor Eigenentwicklung** geprüft:
+
+1. existiert die Lösung bereits in `0dotxyz/eva01`?
+2. existiert die Lösung im offiziellen `marginfi-v2`-Crate?
+3. existiert eine geeignete Bibliothek, die `eva01` bereits nutzt?
+4. ist die Lösung technisch korrekt für unseren aktuellen Protocol-/Solana-Stand?
+5. ist die Nutzung lizenzrechtlich erlaubt?
+6. erfüllt sie unsere Performance- und Architekturvorgaben?
+
+Danach genau eine der drei Entscheidungen:
+
+```text
+DIRECT_DEPENDENCY
+→ vorhandenes Crate direkt pinnen und verwenden
+
+REUSE_ADAPT
+→ geeignete vorhandene Implementierung übernehmen/anpassen
+
+REIMPLEMENT
+→ nur wenn Dependency/Reuse technisch, lizenzrechtlich
+   oder bezüglich Korrektheit/Performance nicht geeignet ist
+```
+
+**„Wir können es selbst neu schreiben“ ist kein ausreichender Grund für REIMPLEMENT.**
+
+---
+
+## 1.3 `0dotxyz/eva01` ist Referenzimplementierung
+
+`eva01` wird systematisch analysiert, nicht nur als README-Beispiel.
+
+Aktuell sichtbare Rust-Komponenten umfassen u. a.:
+
+```text
+src/cache.rs
+src/cache_loader.rs
+src/geyser.rs
+src/liquidator.rs
+src/execution/
+src/marginfi_ixs.rs
+src/kamino_ixs.rs
+src/drift_ixs.rs
+src/juplend_ixs.rs
+src/clock_manager.rs
+src/rebalancer.rs
+src/config.rs
+src/wrappers/
+src/utils/
+```
+
+Die aktuelle `eva01`-Dependency-Struktur enthält u. a.:
+
+- `marginfi`;
+- `marginfi-type-crate`;
+- `yellowstone-grpc-client`;
+- `yellowstone-grpc-proto`;
+- `solana-dex-superagg`;
+- `pyth-solana-receiver-sdk`;
+- `pythnet-sdk`;
+- `rayon`;
+- `crossbeam`;
+- `tokio`.
+
+**Wichtig:** Die Architektur und geeignete Implementierungen werden übernommen, aber alte Versionspins werden nicht blind kopiert. `eva01` nutzt derzeit einen älteren Solana-/Yellowstone-Stand als der aktuelle Solana-v1-Stack.
+
+---
+
+## 1.4 Lizenzregel
+
+Code wird nur übernommen, wenn die Lizenzlage dies zulässt.
+
+Für jede Reuse-Komponente dokumentiert P0:
+
+```text
+upstream
+commit/tag/rev
+license
+allowed use
+copied code? yes/no
+dependency? yes/no
+modifications
+update strategy
+```
+
+`eva01` selbst besitzt aktuell keine ausgewiesene Root-Lizenz.
+
+Daher:
+
+- Source lesen und Architektur verstehen: erlaubt;
+- APIs/Verhalten nachbauen: erlaubt;
+- separat lizenzierte Dependencies nutzen: entsprechend deren Lizenz;
+- `eva01`-Code kopieren: erst nach eindeutiger Lizenz-/Freigabeklärung.
+
+Lizenzstatus der beiden zentralen Upstreams:
+
+- `0dotxyz/marginfi-v2`: **Apache-2.0** — direkte Crate-Nutzung und Modifikation sind unter Einhaltung der Apache-2.0-Bedingungen erlaubt.
+- `0dotxyz/solana-dex-superagg`: **MIT** — die Library ist lizenzrechtlich nutzbar; ihre Remote-API-Abhängigkeiten und Kosten werden separat in P0 qualifiziert.
+
+---
+
+## 1.5 Protocol-Code vor Risk-Nachbau
+
+Für `marginfi-v2` ist die Lizenzfrage geklärt: **Apache-2.0**.
+
+Damit ist `USE_CRATE` der bevorzugte und lizenzrechtlich zulässige Weg. Offen zu qualifizieren sind nur technische Kompatibilität, deployed Tag/API, Performance und exakte LIVE-Semantik.
+
+**Die offizielle `marginfi`-Programmlogik / das offizielle Crate wird als Health-/Risk-Referenz und nach Möglichkeit direkt als Dependency genutzt.**
+
+Bevorzugte Reihenfolge:
+
+```text
+offizielles Crate direkt verwenden
+↓ falls nicht möglich
+offizielles Crate als Parity-Referenz
+↓ nur falls zwingend
+eigene exakte Reimplementierung
+```
+
+Keine vereinfachte Health-Formel.
+
+---
+
+## 1.6 Fail Closed
+
+Unbekannt bedeutet niemals „0“ und niemals „wird schon stimmen“.
+
+Bei unbekanntem:
+
+- Program-Stand;
+- Layout;
+- Account-Größe;
+- Oracle-Typ;
+- Integrationstyp;
+- Health-Semantik;
+- Premium-Semantik;
+- Fee-Modell;
+- Route;
+- Allowlist;
+- Transaction-Version;
+- State-Gap;
+- Fork-State;
+- Reconciliation;
+
+gilt:
+
+```text
+HALT / SKIP
+```
+
+nicht:
+
+```text
+GUESS
+```
+
+---
+
+## 1.7 Hotpath-Verbote
 
 Im LIVE-Entscheidungspfad:
 
 - keine Datenbank;
-- kein synchroner RPC-Lookup;
-- kein HTTP-Routing-Call als zwingende Voraussetzung, wenn lokal lösbar;
 - kein Python;
-- kein vollständiger Account-Scan;
-- kein unbekannter State mit Fallback auf 0;
-- keine vereinfachte Project-0-Health-Formel.
+- kein synchroner RPC-Lookup als Voraussetzung;
+- kein HTTP-Routing-Call als zwingende Voraussetzung, wenn lokal/precomputed möglich;
+- kein globaler Account-Full-Scan;
+- kein unbekannter Wert mit Fallback auf 0;
+- keine vereinfachte Health-Formel;
+- kein unnötiges JSON im internen Hotpath;
+- keine unbounded Queue;
+- keine unnötige Lock-/Allocation-Kaskade.
 
-## 1.4 Fail Closed
+---
 
-Unbekannt bedeutet nicht 0 und nicht "wird schon stimmen".
+## 1.8 Messen vor Entscheiden
 
-Bei unbekanntem:
-- Program-Stand;
-- Layout;
-- Oracle-Typ;
-- Integrationstyp;
-- Health-Semantik;
-- Fee-Modell;
+Nicht ideologisch festlegen:
+
+- v0 vs. v1;
+- RPC vs. Jito;
+- single TX vs. bundle;
+- WS vs. Geyser;
+- Provider A vs. Provider B;
+- NO_SWAP vs. Swap;
+- Tip-Höhe;
 - Route;
-- State-Gap;
+- eigener Node vs. Provider.
 
-gilt:
+Entscheidung erfolgt aus:
 
-~~~text
-HALT / SKIP
-~~~
+```text
+Korrektheit
++ Landing
++ Latenz
++ Failure Rate
++ realisierbarer Profit
++ vollständige Kosten
+```
+
+---
+
+# 2. Source-of-Truth-Hierarchie
+
+Für LIVE gilt in dieser Reihenfolge:
+
+1. **deployed On-Chain ProgramData / tatsächlicher Mainnet-Stand**
+2. **zum Deployment gehörender Source-/Release-/IDL-Stand**
+3. offizielles `marginfi-v2`-Crate / Type-Crate
+4. Project-0 Release Notes / Security Notes
+5. qualifizierte Referenzimplementationen (`eva01`, `mary`)
+6. Solana-/Yellowstone-/Jito-Primärquellen
+7. diese Roadmap
+8. Annahmen nur als **PRÜFEN**
+
+GitHub-Release ≠ Mainnet-Deployment.
+
+---
+
+# 3. Aktueller belegter Ausgangszustand
+
+## 3.1 Eigenes Repo
+
+Stand 2026-09-30:
+
+```text
+bestehender Solana-Bot:
+    Python
+    PAPER-orientiert
+    bestehende Capture-/Replay-Infrastruktur
+
+Project-0 Production Rust:
+    noch nicht aufgebaut
+
+native/:
+    wird durch S0 eingeführt
+
+BSC:
+    getrennte Linie
+
+Pump.fun:
+    getrennte Protokolllinie
+```
+
+Die existierenden Python-Komponenten werden **nicht** als LIVE-Project-0-Core weiterentwickelt.
+
+Sie dienen nur dort als Referenz, Capture, Replay oder Offline-Analyse, wo sinnvoll.
+
+---
+
+## 3.2 Project 0 aktuell / kommende Version
+
+`mrgn-0.1.12-rc1` wurde am 2026-09-29 als Pre-Release veröffentlicht.
+
+Bis Mainnet-Deployment gilt 0.1.12 **nicht** als LIVE-Wahrheit.
+
+Wichtige für uns relevante 0.1.12-Themen:
+
+- Liquidation Tagging;
+- `liquidation_tagged_at`;
+- steigende Receivership-Premium;
+- `PREMIUM_ACTIVE`;
+- variable Borrow Premium in Health;
+- neue Receivership-Health-Regel;
+- Bank Resize 1.856 → 3.904 Bytes ohne Anchor-Discriminator;
+- `ScopeKamino`;
+- `ScopeJuplend`;
+- `MAX_COSTLY_POSITIONS = 4`;
+- neue Premium-/Balance-Felder.
+
+Mainnet-ETA laut Release: **2026-10-12, exakte Zeit noch offen.**
+
+---
+
+## 3.3 Solana Transaction v1
+
+Transaction v1 ist auf Mainnet aktiv.
+
+Relevante Eigenschaften:
+
+- größere Transaktionen bis 4096 Bytes;
+- keine LUTs in v1;
+- max. 64 Accounts nach aktueller v1-Spezifikation;
+- Resource-/Fee-Konfiguration in `TransactionConfig`;
+- Priority Fee als Gesamtbetrag in Lamports;
+- ComputeBudget-Instructions konfigurieren v1 nicht;
+- Reader müssen Version 1 unterstützen;
+- Rust-Clientseite benötigt aktuelle Solana-4.x-Unterstützung;
+- Yellowstone muss `Message.config` korrekt erhalten.
+
+Deshalb dürfen ältere `eva01`-Versionspins nicht blind übernommen werden.
+
+---
+
+# 4. Finale Zielarchitektur
+
+```text
+                         SOLANA
+                           │
+               ┌───────────┴───────────┐
+               │                       │
+          WsRpcSource              GeyserSource
+        kostenlos/vorhanden      kostenlos/vorhanden
+          wenn geeignet          oder später bezahlt
+               │                       │
+               └───────────┬───────────┘
+                           │
+                    IngressSource
+                       RUST
+                           │
+                 Canonical/Fork State
+                       RAM / RUST
+                           │
+                  Project-0 State
+                           │
+                   Reverse Indices
+                           │
+      ┌────────────────────┼────────────────────┐
+      │                    │                    │
+Oracle/State Trigger  Premium Boundary     Tag Boundary
+      │                    │                    │
+   RACE             TIME-DEPENDENT          LONG-TAIL
+      │                    │                    │
+      └────────────────────┴────────────────────┘
+                           │
+                     Exact Health
+                           │
+                  Opportunity Detection
+                           │
+             Deterministic Profit Engine
+                           │
+           Probabilistic Optimizer nach P7
+                           │
+                 Receivership Planner
+                    │             │
+                 NO_SWAP         SWAP
+                    └──────┬──────┘
+                           │
+                       TX Builder
+                       v0 / v1
+                           │
+                         Signer
+                           │
+                  SubmissionRouter
+                    │             │
+                   RPC           Jito
+                    └──────┬──────┘
+                           │
+                         Landing
+                           │
+                     Reconciliation
+                           │
+                  REALIZED NET PROFIT
+```
+
+Nebenpfad:
+
+```text
+unhealthy + noch nicht wirtschaftlich liquidierbar
+→ Tagger
+→ liquidation_tagged_at
+→ Tag Scheduler
+→ t_profitable
+→ dieselbe Detection-/Execution-Pipeline
+```
+
+---
+
+# 5. Finaler Workspace
+
+S0 baut:
+
+```text
+native/
+  Cargo.toml
+
+  crates/
+    darkbot-common/
+      timing
+      telemetry
+      histograms
+      channels
+      lifecycle
+      config
+      journal
+      replay
+      errors
+
+    darkbot-solana/
+      ingress
+      canonical_state
+      fork_root
+      blockhash
+      lut
+      tx
+      signer
+      rpc_submission
+      jito_submission
+      reconciliation
+
+    darkbot-project0/
+      protocol
+      decoder
+      indices
+      scheduler
+      health
+      economics
+      planner
+      tagger
+      runner
+
+    darkbot-pumpfun/
+      eigene Protokolllinie
+
+    darkbot-bsc/
+      eigene Protokolllinie
+
+    darkbot-capture/
+      capture/replay bridge
+
+    darkbot-runner/
+      replay
+      shadow
+      live
+```
+
+**Keine generische Multi-Chain-Abstraktion erzwingen.**
+
+Gemeinsam genutzt wird nur, was wirklich chain-/protokollunabhängig ist.
+
+---
+
+# 6. Timing Contract
+
+Ab S0 verbindlich:
+
+```text
+T_rx
+    Rohupdate im Ingress empfangen
+
+T_state
+    relevanter Canonical-/Project0-State aktualisiert
+
+T_detect
+    Opportunity als gültig + wirtschaftlich erkannt
+
+T_ready
+    finaler TX-Plan gebaut
+
+T_sign
+    Signatur fertig
+
+T_handoff
+    an Submission-Adapter übergeben
+
+T_observed_landed
+    Landing von uns beobachtet
+```
+
+Ableitungen:
+
+```text
+ingress_to_state = T_state - T_rx
+state_to_detect  = T_detect - T_state
+detect_to_ready  = T_ready - T_detect
+ready_to_sign    = T_sign - T_ready
+sign_to_handoff  = T_handoff - T_sign
+```
+
+Landing Evidence:
+
+- signature;
+- submission path;
+- bundle id falls vorhanden;
+- landed slot;
+- tx index im Slot, wenn belastbar bestimmbar;
+- confirmation status;
+- failure reason;
+- actual fee;
+- actual tip.
+
+**Kein erfundener exakter On-Chain-Millisekundenzeitpunkt.**
+
+---
+
+# 7. Gesamtphasenplan
+
+Parallelstart:
+
+```text
+TRACK A — NATIVE CORE                 TRACK B — PROJECT-0 EVIDENCE
+
+S0 Native Foundation                  P0  eva01/mary/reuse/licenses
+S1 Solana Ingress                     P1A Current Mainnet Freeze
+S2 Canonical State                    P1B Upcoming 0.1.12 Freeze
+S3 Execution Core                     C0  Market / Account Census
+S4 Core Parity                        H0  Historical Liquidations
+          │                                      │
+          └──────────────────┬───────────────────┘
+                             ↓
+                         MERGE GATE
+                             ↓
+            P2 → P3 → P4A → P5 → T
+                             ↓
+                            P6
+                             ↓
+                            P7
+                             ↓
+                           P4B
+                             ↓
+                            P8
+                             ↓
+                            P9
+                             ↓
+                             K
+```
+
+Race und Long-Tail bleiben in **allen** Project-0-Phasen gleichzeitig Bestandteil des Systems.
+
+---
+
+# PHASE P0 — REFERENZ-, REUSE- UND LIZENZSTUDIE
+
+## Ziel
+
+Vor jeder vermeidbaren Eigenentwicklung wissen:
+
+- was `eva01` bereits löst;
+- was `mary` bereits löst;
+- was direkt aus `marginfi-v2` nutzbar ist;
+- welche Dependencies übernommen werden können;
+- was nur adaptiert werden muss;
+- was wirklich neu entwickelt werden muss.
+
+## P0.1 `eva01` vollständiger Read-through
+
+Mindestens analysieren:
+
+```text
+cache.rs / cache/
+cache_loader.rs
+geyser.rs
+liquidator.rs
+execution/
+marginfi_ixs.rs
+kamino_ixs.rs
+drift_ixs.rs
+juplend_ixs.rs
+clock_manager.rs
+config.rs
+wrappers/
+utils/
+main.rs
+```
+
+Fragen pro Bereich:
+
+- Was macht Eva?
+- Welche Source-of-Truth nutzt Eva?
+- Welche State-Struktur?
+- Welche Parallelisierung?
+- Welche Cache-Strategie?
+- Welche RPC-/Geyser-Annahmen?
+- Welche Liquidationssequenz?
+- Welche Refresh-Instruktionen?
+- Welche Route?
+- Welche Submission?
+- Welche Fehlerbehandlung?
+- Welche Recovery?
+- Welche Teile sind für 0.1.12 noch gültig?
+- Welche Teile sind für Solana v1 veraltet?
+
+## P0.2 Dependency-Reuse-Matrix
+
+Für jede relevante Dependency:
+
+```text
+Component
+Upstream
+Version/Commit/Tag
+License
+Purpose
+Reuse decision
+Required upgrade
+Performance concern
+LIVE critical?
+```
+
+Mindestens:
+
+- `marginfi`;
+- `marginfi-type-crate`;
+- `solana-dex-superagg`;
+- Pyth SDKs;
+- Yellowstone;
+- Solana Rust crates;
+- integration-specific crates.
+
+## P0.2A Remote-Routing-/API-Kosten-Audit
+
+`solana-dex-superagg` ist **kein lokaler Router**. Die Library ist ein Rust-Client, der Remote-Aggregatoren wie Jupiter, Titan und DFlow anspricht und deren Ergebnisse vergleicht.
+
+Vor einer Nutzung als Dependency muss P0 für **jeden** konfigurierbaren Aggregator dokumentieren:
+
+```text
+Aggregator
+Endpoint
+API key required?
+kostenlos ohne Key?
+kostenloser Tier mit Key?
+Rate Limit
+monatliche Kosten
+Usage-Kosten
+WebSocket/HTTP
+Latenz
+SLA/Abhängigkeit
+Receivership-Allowlist kompatibel?
+Hotpath-tauglich?
+Entfernungskriterium
+```
+
+Aus der aktuellen `solana-dex-superagg`-README ist belegt:
+
+- Jupiter: Remote Swap API; API-Key optional, für Production empfohlen.
+- Titan: Remote WebSocket/API; Titan API-Key erforderlich.
+- DFlow: Remote Quote API; API-Key optional, ohne Key rate-limited.
+
+Aus `eva01/bin/env.template` ist zusätzlich belegt:
+
+- `JUP_SWAP_API_URL=https://lite-api.jup.ag/swap/v1`;
+- `JUP_SWAP_API_KEY` ist konfigurierbar.
+
+**Kosten-/Free-Tier-Status wird nicht aus diesen Angaben abgeleitet.** Er wird unmittelbar vor Dependency-Freigabe anhand der jeweils aktuellen Anbieterbedingungen geprüft.
+
+Klassifikation:
+
+```text
+solana-dex-superagg
+→ REMOTE_AGGREGATOR_CLIENT
+→ niemals LOCAL_PRECOMPUTED_ALLOWED
+→ je nach aktuellem Tarif/Key:
+   FREE_PUBLIC_ALLOWED oder PAID_ALLOWED
+```
+
+Wirklich lokales Routing gilt erst dann als vorhanden, wenn Quotes/Route aus lokal gehaltenem Pool-/Venue-State ohne zwingenden Remote-Routing-Call erzeugt werden.
+
+## P0.3 Reuse Decision
+
+Für jede Komponente exakt eine Entscheidung:
+
+```text
+DIRECT_DEPENDENCY
+REUSE_ADAPT
+REIMPLEMENT
+DROP
+```
+
+Jede `REIMPLEMENT`-Entscheidung braucht Begründung.
+
+## P0.4 Oracle-Modell
+
+Klären:
+
+- welche Preise Eva bezieht;
+- welche Preisupdates Eva selbst einbindet/postet;
+- Pyth Receiver / Pythnet Nutzung;
+- Scope;
+- Integration-spezifische Oracles;
+- Freshness-/Confidence-Regeln;
+- Race-Relevanz des Oracle-Pfads.
+
+## P0.5 Staging
+
+Klären:
+
+- `network-staging`;
+- Program IDs;
+- verwendbare Testkonten;
+- welche P5/P8-Tests dort real ausführbar sind.
+
+## Gate P0
+
+PASS nur wenn:
+
+- Reuse-Matrix vollständig;
+- Lizenzstatus je Reuse-Komponente dokumentiert;
+- Remote-Routing-/API-Key-/Free-Tier-/Kosten-Audit abgeschlossen;
+- Health-Strategie entschieden;
+- Oracle-Modell verstanden;
+- Staging-Pfad bekannt;
+- kein offensichtliches Rad neu erfunden wird.
+
+## Artefakte
+
+```text
+docs/project_0/evidence/P0_REFERENCE_STUDY.md
+docs/project_0/evidence/P0_REUSE_MATRIX.md
+docs/project_0/evidence/P0_LICENSE_MATRIX.md
+```
+
+---
+
+# PHASE P1A — CURRENT MAINNET FREEZE
+
+## Ziel
+
+Exakt feststellen, was **jetzt tatsächlich deployed** ist.
+
+## Einzufrieren
+
+- Program ID;
+- ProgramData;
+- Upgrade Authority / Upgrade Identity;
+- deployed Program Hash;
+- deployed Source-/Release-Zuordnung;
+- IDL + Hash;
+- Discriminators;
+- Account Layouts;
+- Payload-Größen;
+- Rohlängen inkl. Anchor-Discriminator;
+- Bank;
+- MarginfiAccount;
+- MarginfiGroup;
+- FeeState;
+- OracleSetup;
+- Asset Tags;
+- Integrationen;
+- costly-position-Regeln;
+- receivership instructions;
+- refresh allowlist;
+- swap/integration allowlist;
+- Flat-SOL-Liquidationsgebühr;
+- Health-Regeln;
+- Premium-Aktivierung.
+
+## Upgrade Watch
+
+```text
+ProgramData ändert sich
+→ EXECUTION HALT
+→ neue Version bestimmen
+→ Layout/IDL/Source neu qualifizieren
+→ Parity
+→ LIVE erst danach wieder freigeben
+```
+
+## Gate P1A
+
+PASS nur wenn der LIVE-Stand eindeutig identifiziert und source-pinned ist.
+
+## Artefakt
+
+```text
+docs/project_0/manifests/CURRENT_MAINNET.md
+```
+
+---
+
+# PHASE P1B — UPCOMING 0.1.12 FREEZE
+
+## Status
+
+`mrgn-0.1.12-rc1` ist Pre-Release.
+
+Nicht LIVE, bevor On-Chain-Deployment bestätigt ist.
+
+## Relevante Änderungen
+
+### Liquidation Tagging
+
+`marginfi_account_tag_liq_record`:
+
+- permissionless;
+- keine Program-Instruktions-Signer-Anforderung;
+- äußere Solana-TX benötigt weiterhin Fee Payer/Signatur;
+- setzt `liquidation_tagged_at`;
+- bereits getaggt + unhealthy → `AccountAlreadyTagged`;
+- healthy ohne Tag → `HealthyAccount`.
+
+Premium:
+
+```text
+0 ... 1 h:
+max(FeeState.liquidation_max_fee, 5 %)
+
+danach:
+linear steigend
+
+bei 7 Tagen:
+bis 100 %
+```
+
+Kein Premium-Wachstum:
+
+- bei Bad Debt;
+- wenn `EMODE_BOOSTED`.
+
+Nach ausreichend großer Liquidation kann Timer zurückgesetzt werden.
+
+### Variable Borrow Premium
+
+Health muss projizierte Premium-Schuld berücksichtigen.
+
+`PREMIUM_ACTIVE` ist pro Bank relevant.
+
+### Bank Resize
+
+```text
+alt: 1.856 Bytes
+neu: 3.904 Bytes
+jeweils ohne Anchor-Discriminator
+```
+
+Nicht-resized Bank nach Upgrade:
+
+```text
+TX berührt Bank
+→ FAIL
+```
+
+### Receivership Health
+
+Neue zwei Bedingungen:
+
+1. Maintenance Health darf höchstens um den ungewichteten Wert `seized - repaid` fallen.
+2. War der Account vor der Liquidation auf ungewichteter Equity-Basis solvent, darf er danach nicht in Bad Debt geraten.
+
+### Weitere relevante Änderungen
+
+- `ScopeKamino = 27`;
+- `ScopeJuplend = 28`;
+- `MAX_COSTLY_POSITIONS = 4`;
+- `Balance.premium_rate_snapshot`;
+- `Balance.premium_outstanding`;
+- `MarginfiAccount.liquidation_tagged_at`;
+- neue Premium-Felder in Bank/Group/FeeState.
+
+## Promotion
+
+Nach tatsächlichem Mainnet-Deployment:
+
+```text
+HALT
+→ ProgramData prüfen
+→ Program Hash prüfen
+→ Bank Resize prüfen
+→ IDL/Layout prüfen
+→ Parity
+→ P1B wird neuer P1A
+```
+
+## Gate P1B
+
+PASS bedeutet:
+
+```text
+upgrade-ready
+```
 
 nicht:
 
-~~~text
-GUESS
-~~~
+```text
+already-live
+```
 
-## 1.5 Eine Implementierung
+## Artefakt
 
-Kein zweiter:
-- Trading-Core;
-- Health-Core;
-- Execution-Core;
-- Economics-Core;
-- Shadow-Core.
-
-Tests, Replay, Shadow und LIVE verwenden dieselben Produktionskomponenten.
+```text
+docs/project_0/manifests/UPCOMING_0_1_12.md
+```
 
 ---
 
-# 2. Finale Zielarchitektur
+# PHASE C0 — MARKET- UND ACCOUNT-CENSUS
 
-~~~text
-                         SOLANA
-                            │
-                    Rust IngressSource
-                            │
-                 Canonical / Fork State
-                            │
-                     Project-0 RAM State
-                            │
-                      Reverse Indices
-                            │
-                    Premium Scheduler
-                            │
-                       Health Engine
-                            │
-                  Opportunity Detection
-                            │
-                    P4 Profit Engine
-                            │
-                      RouteProvider
-                            │
-               Receivership Execution Plan
-                            │
-                        TX Builder
-                            │
-                          Signer
-                            │
-                    SubmissionRouter
-                     │             │
-                    Jito          RPC
-                     │             │
-                     └──────┬──────┘
-                            │
-                         Landing
-                            │
-                     Reconciliation
-                            │
-                            ▼
-                  REALIZED NET PROFIT
-~~~
+## Ziel
+
+Vor LIVE und vor unnötigem Aufwand quantitativ kennen:
+
+- wie groß der adressierbare Markt ist;
+- welche Account-Klassen existieren;
+- wie viel davon Race-Potential besitzt;
+- wie viel davon Long-Tail-Potential besitzt;
+- welche Integrationen fail-closed bleiben müssen.
+
+## Erfassung
+
+Für alle relevanten Project-0-Accounts:
+
+```text
+healthy
+
+unhealthy + sofort wirtschaftlich
+    → Race / sofortige Liquidation
+
+unhealthy + aktuell nicht wirtschaftlich
+    → Tag-Kandidat / Long-Tail
+
+zeitabhängig durch Borrow Premium
+    → zukünftiger Health-Trigger
+
+unsupported / fail-closed
+```
+
+Zusätzlich:
+
+- Account-Wert;
+- Liability-Wert;
+- Banks;
+- Oracle-Typen;
+- Integrationen;
+- costly positions;
+- PREMIUM_ACTIVE;
+- e-mode;
+- Bad Debt;
+- supported vs. unsupported.
+
+## Long-Tail-Modell
+
+Für jeden Tag-Kandidaten offline:
+
+```text
+premium(t)
+premium_cap(t)
+realizable_value(t)
+deterministic_net_profit(t)
+t_profitable
+```
+
+## Race-Modell
+
+Offline erfassen:
+
+- Abstand zur Liquidationsschwelle;
+- betroffene Oracle/Banks;
+- erwartete TX-Komplexität;
+- relevante Integrationen;
+- mögliche v0/v1-Klassen.
+
+## Gate C0
+
+Kein willkürliches „Long-Tail muss allein reichen“.
+
+GO für Project-0-spezifischen Ausbau, wenn belastbare Daten zeigen, dass mindestens eine oder mehrere Opportunity-Klassen wirtschaftlich relevant sind:
+
+```text
+Race
+oder
+Long-Tail
+oder
+Premium-driven
+```
+
+## Artefakt
+
+```text
+docs/project_0/evidence/C0_MARKET_CENSUS.md
+```
 
 ---
 
-# 3. Phasenübersicht
+# TRACK H0 — HISTORICAL LIQUIDATION INTELLIGENCE
 
-## Track A — Finaler Native-Solana-Core
+## Ziel
 
-~~~text
-S0  Final Native Foundation
- ↓
-S1  Final Solana Ingress
- ↓
-S2  Final Canonical Solana State
- ↓
-S3  Final Solana Execution Core
- ↓
-S4  Solana Core Qualification
-~~~
+Reale historische Liquidationen und Konkurrenz verstehen.
 
-## Track B — Project-0-Referenz, Protocol Freeze und Evidence, parallel
+## Reader
 
-~~~text
-P0   Project-0 Reference Study
-P1A  Current-Mainnet Source Freeze + Account Census
-P1B  Upcoming 0.1.12 Release Freeze
-C0A  Pre-Upgrade Long-Tail Census + Economic Simulation
-H0   Historical Liquidation Intelligence
-~~~
+Alle historischen Reader müssen aktuelle Transaction-Versionen unterstützen.
 
-## Gate A — vor dem eigentlichen Liquidator-Core
+Mindestens:
 
-~~~text
-P0 COMPLETE
-+ P1A CLEAR
-+ C0A ECONOMICALLY PLAUSIBLE
-→ P2 darf starten
-~~~
+```text
+maxSupportedTransactionVersion = 1
+```
 
-## Danach Zusammenführung
+oder äquivalente aktuelle Client-Unterstützung.
 
-~~~text
-P2   Final Project-0 State Engine
- ↓
-P3   Final Project-0 Health Engine
- ↓
-P4A  Deterministic Profit Engine
- ↓
-P5   Final Receivership Execution Planner
- ↓
-T    Tagger + Premium Scheduler
- ↓
-P6   Full Production Shadow Path
- ↓
-0.1.12 DEPLOYMENT
-→ HALT + REQUALIFICATION
-→ P1B → P1A
-→ C0B Post-Upgrade Census
- ↓
-P7   Competition + Provider Economics
- ↓
-P4B  Probabilistic Profit Optimizer
- ↓
-P8   Controlled LIVE
- ↓
-P9   Production LIVE
- ↓
-K    Continuous Optimization — only measured bottlenecks
-~~~
+## Pro Liquidation erfassen
 
-Strategischer Default bis reale Competition-Daten etwas anderes zeigen: **Long-Tail first, Race later.**
+Soweit belegbar:
+
+- signature;
+- slot;
+- tx index;
+- receiver/winner;
+- liquidatee;
+- seized asset;
+- repaid asset;
+- seized;
+- repaid;
+- premium;
+- tag age, sobald 0.1.12 live ist;
+- protocol fees;
+- flat SOL fee;
+- priority fee;
+- Jito tip;
+- transaction version;
+- serialized bytes;
+- account count;
+- compute;
+- LUT;
+- integration positions;
+- costly positions;
+- oracle types;
+- refresh instructions;
+- swap program;
+- route;
+- single TX / bundle;
+- wiederkehrende Winner;
+- erkennbare Eva-/Standard-Bot-Muster.
+
+## Nach 0.1.12 zusätzlich
+
+Für Tags:
+
+```text
+tagged_at
+wann liquidiert
+bei welcher Premium
+wer gewann
+Tag gelöscht?
+Timer reset?
+```
+
+## Konkurrenz-Mindestprofit
+
+`eva01` besitzt eine explizite Konfigurationsvariable:
+
+```text
+MIN_PROFIT
+```
+
+Der aktuelle Template-Wert ist `1` USD; `liquidator.rs` verwirft Opportunities, wenn:
+
+```text
+liquidator_profit <= min_profit
+```
+
+Damit ist belegt, dass mindestens die Eva-Referenz eine konfigurierbare Mindestprofit-Schwelle verwendet.
+
+H0 nutzt Tag-Zeitpunkt, Premium-Kurve, Asset-/Debt-Werte, beobachteten Take-Zeitpunkt und rekonstruierte Execution-Kosten, um für wiederkehrende Konkurrenten **implizite Mindestprofit-Bänder** zu schätzen:
+
+```text
+observed_take_time
++ premium(t)
++ reconstructable fees/route
+→ implied competitor min-profit range
+```
+
+Das ist eine **Inference**, kein exaktes Auslesen fremder Configs: unbekannte Tips, Inventar, Route, Providerkosten und interne Policies erzeugen Unsicherheit. Ergebnisse werden daher als Band/Verteilung mit Unsicherheitskennzeichnung geführt, nicht als behaupteter exakter Wert.
+
+Zielvergleich:
+
+```text
+unsere t_profitable / Mindestprofitschwelle
+vs.
+geschätzte Konkurrenzschwelle
+```
+
+## Zeitraum
+
+Start:
+
+```text
+30 Tage
+```
+
+Bei kleiner Stichprobe:
+
+```text
+90 Tage
+```
+
+## Gate H0
+
+Genug Daten, um:
+
+- typische TX-Klassen;
+- Competition;
+- Winner-Konzentration;
+- Tip-Verhalten;
+- Long-Tail-Wartekurven;
+- implizite Konkurrenz-Mindestprofit-Bänder;
+- Execution-Klassen
+
+zu quantifizieren.
+
+## Artefakt
+
+```text
+docs/project_0/evidence/H0_LIQUIDATIONS.md
+```
 
 ---
 
@@ -305,90 +1317,57 @@ Strategischer Default bis reale Competition-Daten etwas anderes zeigen: **Long-T
 
 ## Ziel
 
-Eine einzige finale Rust-Produktionsbasis schaffen, auf der die Solana-Produktionspfade aufgebaut werden.
-
-Keine temporäre Runtime.
+Finales Rust-Fundament für Solana/Project 0 schaffen.
 
 ## Bau
 
-Finaler Rust-Workspace mit klarer Trennung:
+`darkbot-common`:
 
-~~~text
-common production infrastructure
-solana infrastructure
-pumpfun protocol
-project0 protocol
-bsc protocol
-~~~
-
-Gemeinsame Produktionskomponenten:
-
-- Timing;
-- Telemetrie;
+- monotonic timing;
+- Histogramme p50/p95/p99/max/count;
 - bounded channels;
 - Lifecycle;
 - Shutdown;
-- Error Taxonomy;
 - Config;
+- Error Taxonomy;
 - Journal;
-- Capture-Primitives;
 - Replay-Primitives;
-- Metrics;
+- Capture-Primitives;
+- deterministische IDs;
 - feste Ownership-Regeln.
 
-Bestehender Gate-0-Code wird nur übernommen, wenn er wirklich Produktionscode ist oder ohne Rewrite Produktionscode werden kann.
+## Performance-Regeln
 
-Kein blindes Kopieren von Messharnesses in die Production Runtime.
+Von Anfang an:
 
-## Timing Contract
+- keine DB im Hotpath;
+- keine unnötigen Allocations;
+- kein unnötiges Cloning;
+- keine unbounded Queues;
+- keine globalen Locks, wenn vermeidbar;
+- keine String-/JSON-Konvertierung im inneren Decision-Loop;
+- Messung jeder Queue-Grenze.
 
-Verbindliche Zeitpunkte:
+## Bestehenden Code übernehmen
 
-~~~text
-T_rx
-T_state
-T_detect
-T_ready
-T_sign
-T_handoff
-T_observed_landed
-~~~
+Gate-0-/BSC-/Solana-Code nur dann übernehmen, wenn:
 
-Landing Evidence umfasst zusätzlich:
+- er wirklich allgemeiner Production-Code ist;
+- kein Rewrite nötig ist;
+- Semantik eindeutig ist.
 
-~~~text
-signature
-landed_slot
-tx_index_in_slot wo belastbar bestimmbar
-confirmation status
-submission path
-bundle id falls vorhanden
-~~~
-
-## Messung
-
-- Queue-Latenz;
-- Timing-Overhead;
-- Telemetry-Overhead;
-- Allocation-Verhalten;
-- Shutdown-Verhalten;
-- deterministische Replay-Komponenten.
+Benchmark-Harness bleibt Harness.
 
 ## Gate S0
 
 PASS nur wenn:
 
-- finaler Workspace steht;
-- keine zweite Runtime entsteht;
-- Timing API feststeht;
-- Telemetrie API feststeht;
-- bounded channels feststehen;
-- Rust-Hotpath ohne Python möglich ist;
-- spätere Solana-/Project-0-Phasen ohne strukturellen Rewrite darauf aufbauen können.
-
-## Ergebnis
-
-Finales Rust-Fundament.
+- Workspace steht;
+- Timing API fest;
+- Telemetry API fest;
+- Channels/Lifecycle fest;
+- Rust-Hotpath ohne Python möglich;
+- spätere Komponenten ohne strukturellen Rewrite integrierbar.
 
 ---
 
@@ -396,101 +1375,117 @@ Finales Rust-Fundament.
 
 ## Ziel
 
-Den finalen Solana-Datenpfad in Rust implementieren.
+Austauschbarer, schneller Rust-Ingress ohne Provider-Abhängigkeit in der Businesslogik.
 
-## Bau
+## Interface
 
-Finales Interface:
+```text
+trait IngressSource
+```
 
-~~~text
-IngressSource
-~~~
+Einheitliches Event-Modell für:
 
-Produktionsadapter müssen austauschbar sein, ohne State, Health, Economics oder Execution zu verändern.
+- Accounts;
+- Transactions;
+- Slots;
+- Roots;
+- write_version;
+- receive timestamp;
+- provider health;
+- gap events;
+- reconnect events.
 
-Unterstützte Architektur:
+## Adapter
 
-~~~text
-IngressSource
-├── Yellowstone/Geyser Provider
-├── eigener Geyser / eigener Solana Node
-└── weiterer qualifizierter Feed
-~~~
+### `WsRpcSource`
 
-### S1 Reference Adapter
+Für:
 
-Für S1 wird genau ein vollständig qualifizierter Reference-Adapter implementiert:
+- kostenlose/vorhandene RPC-/WS-Endpunkte;
+- Development;
+- Production, solange Coverage/Korrektheit ausreicht.
 
-~~~text
-QuickNode Yellowstone/gRPC
-~~~
+Unterstützt:
 
-Grund:
-- dokumentiertes Replay/fromSlot;
-- konkrete v1-Message.config-Unterstützung;
-- klar messbare Subscription-/Provider-Eigenschaften.
+- `programSubscribe`;
+- `accountSubscribe`;
+- slot/root tracking;
+- Snapshot/Reconcile.
 
-QuickNode ist **Reference-/Qualification-Adapter**, keine verpflichtende permanente Production-Abhängigkeit.
+### `GeyserSource`
 
-Wenn eine bereits verfügbare kostenlose Quelle dieselben Anforderungen erfüllt, kann sie direkt zusätzlich verwendet werden.
+Yellowstone-kompatibel.
 
-## Implementierung
+Gebaut als finaler Adapter, unabhängig davon, ob sofort ein kostenpflichtiger Feed verwendet wird.
 
-Rust:
+Unterstützt:
 
-- Account Updates;
-- Transaction Updates;
-- Slot Updates;
-- Root Updates;
-- Write Version;
-- Receive Timestamp;
-- Stream Health;
-- Reconnect;
-- Gap Detection;
-- Replay/fromSlot;
-- ReplayInfo;
-- v0/v1 Decode;
-- strukturelle Erkennung von v1 Message.config;
-- Subscription-Sharding-fähiges Layout;
-- Provider Capability Reporting.
+- accounts;
+- transactions;
+- slots;
+- roots;
+- write version;
+- reconnect;
+- gap detection;
+- replay/fromSlot sofern Provider;
+- replay info sofern Provider.
 
-Historische und Streaming-Reader müssen v1 korrekt behandeln.
+## Yellowstone-v1-Regel
+
+Bei aktuellem Proto:
+
+```text
+Message.config vorhanden
+→ v1
+
+sonst Message.versioned = true
+→ v0
+
+sonst
+→ legacy
+```
+
+`versioned = true` reicht nicht zur Unterscheidung v0/v1.
+
+## Reconnect
+
+Nicht blind Eva/alte Yellowstone-Version übernehmen.
+
+Aktuelle Client-/Plugin-Semantik wird gepinnt und getestet.
+
+## PriceSource
+
+Falls P0 ergibt, dass externe Preisupdates separat bezogen/postiert werden müssen:
+
+```text
+trait PriceSource
+```
+
+separat vom `IngressSource`.
 
 ## Messung
 
-Pro Ingress-Pfad:
-
-~~~text
-messages_per_second
-decode_latency
-T_rx
-coverage
-gap_count
-reconnect_duration
-replay_recovery
-v1_message_config_fidelity
-subscription_limits
-monthly_cost
-usage_cost
-operational_cost
-~~~
+- messages/s;
+- decode latency;
+- `T_rx`;
+- coverage;
+- gap count;
+- reconnect duration;
+- replay recovery;
+- v1 config fidelity;
+- rate/subscription limits;
+- Kosten.
 
 ## Gate S1
 
 PASS nur wenn:
 
-- finaler Rust-Ingress stabil läuft;
-- Provider nicht in Businesslogik eingebaut ist;
-- v0/v1 korrekt unterschieden werden;
-- Message.config bei v1 erhalten bleibt;
-- Gap Detection funktioniert;
-- Reconnect reproduzierbar ist;
-- Replay-Recovery reproduzierbar ist;
-- State vollständig aus dem Interface gespeist werden kann.
-
-## Ergebnis
-
-Finaler austauschbarer Rust-Solana-Ingress.
+- Provider nicht in Businesslogik steckt;
+- WS und/oder Geyser denselben State speisen;
+- v0/v1 korrekt erkannt;
+- Gap Detection vorhanden;
+- Reconnect/Reconcile reproduzierbar;
+- State vollständig speisbar.
 
 ---
 
@@ -498,82 +1493,74 @@ Finaler austauschbarer Rust-Solana-Ingress.
 
 ## Ziel
 
-Den für Project 0 benötigten Solana-Zustand korrekt und vollständig im RAM halten.
+Korrekter fork-aware Solana-State im RAM.
 
-## Bau
+## State
 
-State umfasst mindestens:
+Mindestens:
 
-- Accounts;
-- Slot;
-- Write Version;
-- Parent Slot;
-- Root;
-- Fork State;
-- Confirmation/Root Provenance;
-- Blockhash Cache;
-- Token Metadata;
-- Mint Metadata;
-- Transaction Metadata;
-- LUT Metadata;
-- Account-Version-Provenance.
+- account data;
+- slot;
+- write_version;
+- parent slot;
+- root;
+- fork/provenance;
+- confirmation;
+- blockhash cache;
+- LUT cache;
+- mint metadata;
+- token metadata;
+- transaction metadata.
 
 ## Bootstrap
 
-Verbindlicher Ablauf:
+Verbindlich:
 
-~~~text
+```text
 Stream starten
 → Updates puffern
-→ Snapshot mit Context Slot S holen
+→ Snapshot mit Context Slot S
 → Snapshot installieren
 → gepufferte canonical Updates > S anwenden
-→ State bestätigen
+→ reconcile
+→ state valid
 → Trading freigeben
-~~~
+```
 
 ## Reconnect
 
-~~~text
-letzter vertrauenswürdiger Slot
-→ Replay sofern verfügbar
+Geyser mit Replay:
+
+```text
+trusted slot
+→ replay
+→ fork-aware reconcile
+```
+
+WS ohne Replay:
+
+```text
+HALT
+→ Snapshot
+→ buffered deltas
 → reconcile
 → state valid
-~~~
+```
 
-Wenn Replay nicht sicher möglich ist:
+## Fork-Regel
 
-~~~text
-HALT
-→ neuer Snapshot
-→ reconcile
-→ explizite Recovery
-~~~
+`write_version` ordnet Writes.
 
-## Messung
-
-- Snapshot-Dauer;
-- Buffer-Größe;
-- Reconcile-Dauer;
-- Gap-Recovery;
-- Fork-Wechsel;
-- Root-Lag;
-- RAM-Verbrauch;
-- State-Update-Latenz.
+`write_version` bestimmt **nicht allein** den canonical Fork.
 
 ## Gate S2
 
 PASS nur wenn:
 
-- kein Snapshot/Delta Race besteht;
-- Fork/Root korrekt verarbeitet werden;
-- Reconnect reproduzierbar ist;
-- keine unbekannte State-Lücke weitergehandelt wird;
-- unreconciled State niemals tradable ist.
-
-## Ergebnis
-
-Finaler canonical/fork-aware Solana RAM State.
+- kein Snapshot/Delta-Race;
+- Fork/Root korrekt;
+- Recovery deterministisch;
+- unreconciled State niemals tradable.
 
 ---
 
@@ -581,481 +1568,153 @@ Finaler canonical/fork-aware Solana RAM State.
 
 ## Ziel
 
-Die finale native Solana-Ausführung implementieren.
+Finaler nativer Build-/Sign-/Submit-/Reconcile-Pfad.
 
 ## Bau
 
-Rust:
-
-- Transaction Builder;
-- Legacy/v0 Builder;
+- legacy/v0 Builder;
 - v1 Builder;
-- LUT Handling;
-- transaction-version-aware Resource Config;
-- Compute Limits;
-- Loaded Account Data Limits;
-- Priority Fee;
+- LUT für v0;
+- v1 TransactionConfig;
+- Ed25519 Signing;
 - Serialization;
-- Signing;
-- Jito Adapter;
 - RPC Adapter;
-- Landing Reconciliation;
-- Submission Result Taxonomy.
+- Jito Adapter;
+- Bundle Adapter;
+- Submission Result Taxonomy;
+- Landing Reconciliation.
 
-## Transaction-v1-Regeln
+## v1
 
-S3 muss die aktuell deployed Solana-v1-Semantik korrekt implementieren.
+Unterstützen:
 
-Zu qualifizieren:
+- bis 4096 Byte;
+- max. 64 Accounts entsprechend aktuellem Format/Runtime-Capability;
+- keine LUTs;
+- explizites CU-Limit;
+- explizites Loaded-Account-Data-Limit;
+- Priority Fee in totalen Lamports;
+- ComputeBudget-Instructions nicht als v1-Konfiguration;
+- Reader Version 1;
+- base64-/Submission-Kompatibilität für große TX.
 
-- bis zu 4096 Byte v1;
-- aktuelle Runtime-Account-Lock-Grenze als Cluster-Capability, nicht als permanente Konstante;
-- keine LUTs in v1;
-- v1 Compute Unit Limit explizit setzen;
-- v1 Loaded Accounts Data Size Limit explizit setzen;
-- v1 Priority Fee als totalen Lamport-Betrag behandeln;
-- klassische ComputeBudget-Instructions nicht als v1-Resource-Konfiguration verwenden;
-- >1232 Byte nur über einen dafür funktionierenden Submission-Pfad;
-- historische Reader mit maxSupportedTransactionVersion=1 oder äquivalenter Unterstützung.
+## v0/v1 Auswahl
 
-v0 und v1 werden nicht ideologisch vorentschieden.
+Kein permanentes Default-Dogma.
 
-## Jito / v1 Capability Gate
+Pro Execution-Klasse messen:
 
-Für den exakten Produktionspfad real nachweisen:
+```text
+v0:
+bytes
+accounts
+LUT
+CU
+landing
+latency
+failure
+cost
 
-1. RPC akzeptiert und landet v1;
-2. Jito sendTransaction akzeptiert und landet v1;
-3. Jito Bundle akzeptiert v1;
-4. >1232-Byte-v1 überlebt den vollständigen Jito/BAM/Bundle-Pfad;
-5. Message.config bleibt semantisch korrekt;
-6. keine versteckte v1→v0-Degradation;
-7. keine Truncation;
-8. Failure/Fallback-Verhalten ist deterministisch.
+v1:
+bytes
+accounts
+resource config
+CU
+landing
+latency
+failure
+cost
+```
 
-Validator-Version allein gilt nicht als ausreichender Nachweis.
+Dann auswählen.
 
-## Messung
+## Jito Capability Gate
 
-Pro Execution-Klasse:
+Vor LIVE-Nutzung eines konkreten v1-/Bundle-Pfads:
 
-~~~text
-transaction_version
-serialized_bytes
-account_count
-compute_limit
-compute_used
-loaded_account_data_limit
-priority_fee_model
-LUT_usage
-build_latency
-sign_latency
-submission_path
-landed
-rejected
-expired
-failure_reason
-~~~
+- sendTransaction akzeptiert;
+- Bundle akzeptiert;
+- >1232 Byte überlebt vollständigen Pfad;
+- keine Truncation;
+- config bleibt korrekt;
+- Failure-Verhalten bekannt;
+- Fallback deterministisch.
 
 ## Gate S3
 
-PASS wenn mindestens ein vollständiger finaler Production-Pfad:
+Mindestens ein vollständiger Pfad:
 
-~~~text
+```text
 build
 → sign
 → submit
 → observe
 → reconcile
-~~~
+```
 
-korrekt und reproduzierbar funktioniert.
-
-v1 darf erst Default werden, wenn sein kompletter Zielpfad qualifiziert ist.
-
-## Ergebnis
-
-Finaler Rust-Solana-Execution-Core.
+reproduzierbar korrekt.
 
 ---
 
-# PHASE S4 — SOLANA CORE QUALIFICATION
+# PHASE S4 — CORE PARITY + PERFORMANCE BASELINE
 
 ## Ziel
 
-Beweisen, dass der neue Rust-Solana-Core die für Project 0 benötigten Solana-Fähigkeiten semantisch korrekt und reproduzierbar bereitstellt.
+Semantische Korrektheit des neuen Rust-Cores beweisen.
 
-S4 ist ausdrücklich **keine vollständige Pump.fun-Portierung**. Pump.fun dient nur dort als Referenz, wo dieselbe Solana-Grundfunktion belastbar verglichen werden kann.
+## Referenzen
 
-## Bau
+- vorhandene Captures;
+- bekannte Solana-TXs;
+- Eva-Verhalten, wo geeignet;
+- offizielle Crates;
+- Staging.
 
-Keine zweite Pump.fun-Engine und kein unnötiger Protocol-Rewrite.
+## Vergleich
 
-Qualifiziert werden insbesondere:
+- Decode;
+- State Transitions;
+- Account Layout;
+- TX Build;
+- Serialization;
+- Signatures;
+- relevante Fees;
+- Timing.
 
-- Account-/Program-Decode-Grundlagen;
-- Slot/Fork/Root-Reconciliation;
-- Subscription-/Ingress-Semantik;
-- Transaction-/Message-Building;
-- v0/v1-/LUT-Fähigkeiten;
-- Signing und Submission;
-- Landing-/Status-Reconciliation;
-- Timing-Stages und Telemetrie.
+Pump.fun-spezifische Curve-/Quote-Parity nur, wenn für die Pump.fun-Linie benötigt.
+
+## Performance-Baseline
+
+Für jede Kernstufe:
+
+```text
+p50
+p95
+p99
+max
+count
+allocations
+queue_wait
+```
 
 ## Gate S4
 
-PASS nur wenn:
-
-- alle für Project 0 benötigten gemeinsamen Solana-Primitiven qualifiziert sind;
-- keine ungeklärte semantische Abweichung existiert;
-- Differenzen exakt erklärt oder behoben sind;
-- kein vollständiger Pump.fun-Rewrite als Voraussetzung offen ist.
-
-## Ergebnis
-
-Qualifizierter gemeinsamer Solana-Core als Fundament für Project 0.
----
-
-# PHASE P0 — PROJECT-0 REFERENCE STUDY
-
-P0 läuft parallel zu S0–S4 und blockiert den Native-Core nicht.
-
-## Ziel
-
-Die Project-0-Protokollsemantik vor der Implementierung vollständig genug verstehen, dass P1/P2 nicht auf Vermutungen aufbauen.
-
-P0 ist eine Referenzstudie, **kein zweiter Liquidator**.
-
-## Bau / Evidence
-
-Systematisch erfassen und mit Source/IDL/realen Mainnet-Transaktionen gegentesten:
-
-- Program-/Account-Modell;
-- Bank-/MarginfiAccount-Strukturen;
-- Oracle-/Integrationstypen;
-- Health-/Risk-Semantik;
-- Liquidation Eligibility;
-- StartLiquidation / EndLiquidation;
-- Repay / Withdraw / Refresh;
-- Fees und Flat-SOL-Fee;
-- Tagging/Premium-Grundsemantik;
-- costly positions;
-- Receivership Constraints;
-- reale Liquidations-TX-Strukturen;
-- zulässige Routing-/Swap-Programme.
-
-Reference-Code oder Python darf offline verwendet werden, aber nicht als späterer LIVE-Core.
-
-## Gate P0
-
-PASS wenn offene Semantik als UNKNOWN markiert statt geraten wird und ein belastbares Mapping von Source/IDL zu den späteren State-/Health-Komponenten existiert.
-
-## Ergebnis
-
-Project-0 Reference Manifest.
+Keine ungeklärte semantische Abweichung.
 
 ---
 
-# PHASE P1A — CURRENT MAINNET SOURCE FREEZE + ACCOUNT CENSUS
+# MERGE GATE — PROJECT-0 BUILD FREIGABE
 
-P1A läuft parallel zu S1–S4.
+P2 startet, wenn mindestens:
 
-## Ziel
+- P0 Reuse-/Lizenzentscheidung ausreichend;
+- P1A aktueller LIVE-Stand eingefroren;
+- P1B Upgrade-Pfad vorbereitet;
+- C0 Marktklassen verstanden;
+- H0 reale Execution-/Competition-Daten ausreichend;
+- S0–S4 stabil genug als gemeinsames Fundament.
 
-Exakt einfrieren, was auf Project-0-Mainnet tatsächlich deployed ist.
-
-Nicht GitHub-Ankündigungen, sondern der reale deployed Stand ist LIVE-Source-of-Truth.
-
-## Bau / Freeze
-
-Mindestens pinnen:
-
-- Program ID;
-- ProgramData / Upgrade Identity;
-- deployed Release/Source;
-- IDL;
-- IDL Hash;
-- Account Discriminators;
-- Account Layouts;
-- Account Sizes;
-- Bank Layout;
-- MarginfiAccount Layout;
-- FeeState;
-- Group;
-- OracleSetup;
-- Asset Tags;
-- Integration Types;
-- costly-position-Regeln;
-- liquidation instructions;
-- receivership rules;
-- refresh allowlist;
-- swap/integration allowlist;
-- Flat-SOL-Liquidation-Fee;
-- Premium-Aktivierungssemantik;
-- Bank-Resize-/Version-Semantik;
-- Tagging-/Premium-Zustände und deren Health-Relevanz;
-- externe Refresh-Accounts und deren Abhängigkeiten;
-- Cross-Venue-/Integration-Coverage der aktuell adressierbaren realen Positionen und Liquidationen.
-
-Bei ProgramData-/Source-Änderung:
-
-~~~text
-PROGRAM_UPGRADE
-→ EXECUTION HALT
-→ neue Version identifizieren
-→ neu qualifizieren
-~~~
-
-## Account Census
-
-Offline/Python ist hier ausdrücklich erlaubt.
-
-Ein vollständiger Mainnet-Census erfasst mindestens:
-
-~~~text
-total Project0 accounts
-active accounts
-total banks
-active banks
-
-OracleSetup distribution
-asset-tag distribution
-liability-bank distribution
-
-PREMIUM_ACTIVE banks
-accounts with PREMIUM_ACTIVE liabilities
-
-accounts with:
-- normal positions
-- Kamino
-- Drift
-- Solend
-- JupLend
-- Staked collateral
-- mixed integrations
-
-costly-position-count distribution
-
-fully supported accounts
-unsupported/fail-closed accounts
-unsupported by integration
-unsupported by oracle/layout
-~~~
-
-Zusätzlich wirtschaftliche Abdeckung, soweit belastbar bestimmbar:
-
-~~~text
-supported active accounts / all active accounts
-supported liability value / total liability value
-~~~
-
-## Messung
-
-- Anzahl Accounts/Banks;
-- Layout-Verteilung;
-- Oracle-Verteilung;
-- Integration-Verteilung;
-- Premium-Aktivierung;
-- adressierbarer Marktanteil;
-- unbekannte/unsupported Klassen.
-
-## Gate P1A
-
-PASS nur wenn:
-
-- aktuelle Mainnet-Version eindeutig identifiziert ist;
-- alle für LIVE benötigten Protocol-Semantiken source-pinned sind;
-- Account Census vollständig genug ist, um adressierbare und fail-closed Marktbereiche zu kennen.
-
-## Ergebnis
-
-Current-Mainnet Protocol Manifest + Account Census.
-
----
-
-# PHASE P1B — UPCOMING 0.1.12 RELEASE FREEZE
-
-P1B läuft parallel zu P1A.
-
-## Ziel
-
-Die kommende 0.1.12-Version vorbereiten, ohne sie vor tatsächlichem Deployment als LIVE-Wahrheit zu behandeln.
-
-## Bau
-
-Für kommende Versionen separat pinnen:
-
-- Source Commit/Tag;
-- IDL;
-- Layout-Änderungen;
-- neue Oracle Types;
-- neue Integrationen;
-- Fee-/Premium-Änderungen;
-- Receivership-Änderungen;
-- Resize-Anforderungen;
-- neue Tests.
-
-Für 0.1.12 sind insbesondere explizit zu verifizieren und zu pinnen, nicht zu erraten:
-
-- Bank-Layout und mögliche Resize-/Migrationseffekte;
-- Premium-Einfluss auf Health;
-- Oracle-Typen 27/28 und deren genaue Semantik;
-- externe Refresh-Accounts;
-- costly-position-Limits;
-- Tagging-/Premium-Eskalation;
-- Receivership-Health-Constraints.
-
-## Promotion
-
-~~~text
-neue Version wirklich deployed
-→ HALT
-→ ProgramData bestätigen
-→ Layout/Resize prüfen
-→ Source/IDL bestätigen
-→ Parity Suite
-→ neue Version wird P1A
-~~~
-
-## Gate P1B
-
-PASS bedeutet nur:
-
-~~~text
-upgrade-ready
-~~~
-
-nicht:
-
-~~~text
-LIVE-active
-~~~
-
-## Ergebnis
-
-Vorbereiteter Upgrade-Manifest.
-
----
-
-# TRACK C0A — PRE-UPGRADE LONG-TAIL CENSUS + ECONOMIC SIMULATION
-
-C0A läuft parallel zu S0–S4, P0/P1 und H0.
-
-## Ziel
-
-Vor dem 0.1.12-Upgrade messen, ob ein wirtschaftlich relevanter Long-Tail-Bereich existiert, der sauber adressierbar ist, ohne sofort in maximal kompetitive Race-Infrastruktur zu investieren.
-
-## Bau
-
-Der Census ist wiederholbar und versioniert, kein einmaliger Snapshot. Mindestens erfassen:
-
-- unterstützbare Accounts/Banks/Integrationen;
-- Liability-/Collateral-Verteilung;
-- Liquidationsnähe und Health-Bänder;
-- Premium-/Tagging-Relevanz;
-- Route-/Receivership-Komplexität;
-- Kapitalbedarf;
-- deterministische Fee-/Slippage-Komponenten;
-- historische Opportunity-Frequenz;
-- Cross-Venue-Coverage;
-- Anteil klar unsupported/unknown.
-
-## Gate C0A
-
-PASS bedeutet keinen Profitbeweis. PASS bedeutet belastbare Coverage-Daten, einen technisch adressierbaren Long-Tail-Bereich und eine ökonomisch plausible Opportunity-Menge, die P2–P6 rechtfertigt.
-
-## Ergebnis
-
-Pre-Upgrade Long-Tail Census + Economic Plausibility Evidence.
-
----
-
-# TRACK H0 — HISTORICAL LIQUIDATION INTELLIGENCE
-
-H0 läuft parallel zu S0–S4 sowie P0/P1/C0A.
-
-## Ziel
-
-Historische reale Liquidationen und Konkurrenz verstehen, ohne einen zweiten Liquidator zu bauen.
-
-## Bau
-
-Offline-Extractor/Analyzer darf Python sein.
-
-Alle historischen Solana-Reader müssen die auf Mainnet vorhandenen Transaction-Versionen korrekt verarbeiten.
-
-## Pro Liquidation erfassen
-
-Soweit belegbar:
-
-- Signature;
-- Slot;
-- TX Index;
-- Receiver/Winner;
-- Liquidatee;
-- Asset-/Debt-Paar;
-- Seized;
-- Repaid;
-- aktuelle/zulässige Premium;
-- Tag Age;
-- Project-0-Protokollgebühren;
-- Flat SOL Fee;
-- Priority Fee;
-- Jito Tip;
-- Transaction Version;
-- Serialized Bytes;
-- Account Count;
-- Compute Units;
-- LUT Usage;
-- Integration Positions;
-- costly positions;
-- Oracle Types;
-- Refresh Instructions;
-- Swap Program;
-- Route;
-- single TX / Bundle;
-- Winner Concentration;
-- wiederkehrende Receiver.
-
-## Zweck
-
-H0 liefert Evidenz für:
-
-- reale TX-Komplexität;
-- P5-Planbarkeit;
-- Konkurrenzstruktur;
-- Tip-Verhalten;
-- Tagging-Verhalten;
-- Account-Komposition;
-- spätere p(win)-Modelle.
-
-H0 erfindet keine Wahrscheinlichkeiten.
-
-## Gate H0
-
-PASS wenn genug belastbare Daten vorliegen, um:
-- reale Execution-Klassen abzuleiten;
-- typische Gewinnerpfade zu erkennen;
-- Konkurrenzdaten für P7 vorzubereiten.
-
-## Ergebnis
-
-Historischer Evidence-Datensatz.
-
----
-
-# GATE A — PROJECT-0 BUILD AUTHORIZATION
-
-P2 beginnt erst, wenn:
-
-~~~text
-P0 COMPLETE
-+ P1A CLEAR
-+ C0A ECONOMICALLY PLAUSIBLE
-= GATE A PASS
-~~~
-
-P1B und H0 dürfen parallel weiterlaufen.
+Es gibt **kein Long-Tail-only Gate** und **kein Race-only Gate**.
 
 ---
 
@@ -1063,98 +1722,92 @@ P1B und H0 dürfen parallel weiterlaufen.
 
 ## Ziel
 
-Project-0-State vollständig, inkrementell und effizient im Rust-RAM halten.
+Alle Project-0-relevanten Daten vollständig und inkrementell im Rust-RAM.
 
-## Bau
+## State
 
-State:
-
-- Marginfi Accounts;
-- Banks;
-- Groups;
+- MarginfiAccount;
+- Bank;
+- Group;
 - FeeState;
 - Oracles;
 - Integration State;
 - Liquidation Records;
 - Token State;
-- Project-0 relevante Version-/Config-Metadaten.
+- Version Metadata.
 
-Reverse Indices mindestens:
+## Reverse Indices
 
-~~~text
+Mindestens:
+
+```text
 Oracle → Banks
 Bank → Accounts
 Account → Banks
 Integration → Banks
-~~~
+```
 
-Dadurch:
+## Threshold Index
 
-~~~text
-Oracle Update
-→ betroffene Banks
-→ betroffene Accounts
-~~~
+Pro relevanter Bank/Preisdimension:
 
-Kein globaler Account-Scan im Hotpath.
+- Kandidaten nach Liquidationsschwelle indexieren;
+- Oracle Update → betroffene Kandidaten;
+- exakte Health nur dort, wo nötig.
+
+Kein globaler Full Scan.
 
 ## Premium Scheduler
 
-Zeitgetriebene Rechecks werden nur für Accounts angelegt, deren Health durch Premium-Akkumulation tatsächlich zeitabhängig werden kann.
+Nur Accounts, deren Health durch laufende Premium-Akkumulation zeitabhängig wird.
 
-Scheduler-Bedingung:
+```text
+PREMIUM_ACTIVE liability
+→ next health boundary
+```
 
-~~~text
-aktive Liability
-+
-zugehörige Bank hat PREMIUM_ACTIVE
-+
-Premium kann Health verändern
-→ next_health_boundary berechnen
-~~~
+Bank-Flag-Transitions aktualisieren Membership.
 
-Nicht premium-aktive Liabilities erzeugen keinen sinnlosen Timer.
+## Tag Scheduler
 
-Bank-Flag-Änderungen müssen Scheduler-Membership aktualisieren:
+Für getaggte Accounts:
 
-~~~text
-PREMIUM_ACTIVE OFF → ON
-→ betroffene Borrower aufnehmen/rechnen
+```text
+liquidation_tagged_at
++ Premium-Kurve
++ Economics
+→ t_profitable
+```
 
-PREMIUM_ACTIVE ON → OFF
-→ betroffene Borrower entfernen/rechnen
-~~~
+Reagiert auf:
 
-Der Scheduler verwendet Protocol-/Chain-Time-Semantik.
+- Tag gelöscht;
+- Timer reset;
+- Health-Änderung;
+- Asset-/Debt-Preis;
+- Fee-/Route-Änderung.
 
-Kein periodischer Full Scan.
+## TX Template Cache
 
-## Messung
+Für relevante Near-Threshold-/Near-`t_profitable`-Kandidaten:
 
-- RAM-Verbrauch;
-- Updates/s;
-- Accounts pro Oracle Update;
-- Banks pro Oracle Update;
-- Health-Recheck-Queue;
-- Scheduler-Größe;
-- boundary accuracy;
-- Update-Latenz;
-- Flag-Transition-Verhalten.
+- Accounts;
+- Refresh-Skelett;
+- Route-Skelett;
+- Integration Accounts;
+- Instruction-Skelett.
+
+Bei Trigger nur dynamische Teile patchen.
 
 ## Gate P2
 
 PASS nur wenn:
 
-- alle relevanten Accounts warm gehalten werden;
-- Updates inkrementell sind;
-- Reverse Indices korrekt sind;
-- Premium Scheduler nur relevante Accounts enthält;
-- Flag-Änderungen korrekt propagieren;
-- kein Full Scan im Hotpath stattfindet.
-
-## Ergebnis
-
-Finaler Project-0-State-Core.
+- kein Full Scan;
+- alle drei Trigger denselben State speisen;
+- Indices korrekt;
+- Scheduler korrekt;
+- keine stale/unreconciled Opportunity handelbar.
 
 ---
 
@@ -1162,70 +1815,138 @@ Finaler Project-0-State-Core.
 
 ## Ziel
 
-Project-0-Health exakt wie das gepinnte offizielle Programm berechnen.
+Health exakt wie deployed Project 0.
 
-Keine vereinfachte Formel.
+## Bevorzugter Weg
 
-## Bau
+```text
+USE_CRATE
+```
 
-Exakt pinnen und implementieren:
+`marginfi-v2` ist Apache-2.0 lizenziert. Die Lizenz ist daher **kein offenes Gate mehr**.
 
-- RequirementType::Initial;
-- RequirementType::Maintenance;
-- RequirementType::Equity;
-- OraclePriceType::RealTime;
-- OraclePriceType::TimeWeighted;
-- HealthPriceMode::Live;
-- HealthPriceMode::Cached;
+`USE_CRATE` ist der Default, sofern der deployed Tag technisch eingebunden werden kann:
+
+- deployed Tag pinnen;
+- Client-/No-entrypoint-Features qualifizieren;
+- State aus unserem RAM zuführen;
+- keine eigene Risk-Formel bauen.
+
+## Belegte Spot-/EMA-Semantik der Receivership
+
+Der offizielle `LiquidationCache` dokumentiert:
+
+```text
+asset_value_maint      → Maintenance + Confidence Adjustments → SPOT
+liability_value_maint  → Maintenance + Confidence Adjustments → SPOT
+
+asset_value_equity     → unweighted Equity + Confidence Adjustments → EMA
+liability_value_equity → unweighted Equity + Confidence Adjustments → EMA
+```
+
+**Wichtig:** Aus dem Kommentar im `LiquidationCache` wird **keine** vereinfachte Formel
+`liability_value_equity - asset_value_equity` als Seize-Grenze abgeleitet.
+
+Die tatsächliche 0.1.12-Receivership-Regel wird aus
+`programs/marginfi/src/instructions/marginfi_account/liquidate_end.rs`
+des deployed/qualifizierten Tags gepinnt.
+
+Für `mrgn-0.1.12-rc1` ist im Source belegt:
+
+```text
+pre_health
+=
+pre_asset_value_maint
+- pre_liability_value_maint
+
+seized
+=
+pre_asset_value_equity
+- post_asset_value_equity
+
+repaid
+=
+pre_liability_value_equity
+- post_liability_value_equity
+
+extracted
+=
+max(0, seized - repaid)
+```
+
+Bei einer normalen Receivership-Liquidation gelten zusätzlich getrennte Protocol-Grenzen:
+
+```text
+1. Premium-Cap:
+   seized <= repaid * (1 + allowed_premium)
+
+2. Health-Loss-Cap:
+   pre_health - post_health <= extracted
+
+3. Solvency-Preservation:
+   wenn pre_asset_value_equity >= pre_liability_value_equity,
+   dann muss auch gelten:
+   post_asset_value_equity >= post_liability_value_equity
+```
+
+Damit ist **BELEGT**:
+
+- Maintenance-Snapshots verwenden SPOT;
+- Equity-Snapshots verwenden EMA;
+- `seized` und `repaid` werden aus den jeweiligen Pre/Post-Equity-Werten bestimmt;
+- der erlaubte Premium wird separat auf `seized / repaid` begrenzt;
+- ein durch die Liquidation verursachter Health-Verlust darf den extrahierten Wert `max(0, seized-repaid)` nicht übersteigen;
+- ein zuvor solventer Account darf durch die Receivership nicht in Bad Debt gedrückt werden.
+
+Diese Regeln werden weder durch eine globale „Spot/TWAP“-Faustregel noch durch eine vereinfachte Equity-Differenz ersetzt.
+
+## Fallback
+
+Nur falls direkte Nutzung nicht möglich:
+
+```text
+REIMPLEMENT
+```
+
+Dann exakte Matrix:
+
+- Initial;
+- Maintenance;
+- Equity;
+- RealTime;
+- TimeWeighted;
+- Live;
+- Cached;
 - PriceBias;
-- Oracle Confidence;
-- Oracle Freshness;
+- Confidence;
+- Freshness;
 - EMode;
-- Bad Debt;
 - Premium Projection;
-- Integration Multipliers;
-- costly-position semantics;
-- Pre-Liquidation;
-- Post-Liquidation;
-- Receivership Health Checks;
-- Fixed-Point-/Rundungsregeln.
+- Bad Debt;
+- Integrationsmultiplikatoren;
+- costly positions;
+- pre-/post-Receivership;
+- Fixed-Point/Rundung.
 
-RequirementType, PriceType, PriceBias und HealthPriceMode werden nicht zu einer vereinfachten globalen "Spot/TWAP-Regel" zusammengezogen.
+Parity gegen offizielles Crate.
 
-## Messung / Parity
+## 0.1.12
 
-Für reale und synthetische Accounts:
+Zusätzlich exakt:
 
-~~~text
-Rust Project0 Health
-==
-gepinnte Protocol-Semantik
-~~~
-
-Verglichen werden:
-
-- healthy/liquidatable;
-- maintenance health;
-- equity;
-- liability projection;
-- premium;
-- bad debt;
-- EMode;
-- Integrationsfälle.
+- projizierte Borrow Premium;
+- `PREMIUM_ACTIVE`;
+- neue Receivership-Health-Regel;
+- `EMODE_BOOSTED`;
+- Bad-Debt-Grenze.
 
 ## Gate P3
 
-Jede ungeklärte Klassifikationsabweichung:
+Jede ungeklärte Healthy/Liquidatable-Abweichung:
 
-~~~text
+```text
 STOP
-~~~
-
-PASS nur bei vollständig erklärter/behobener Parity.
-
-## Ergebnis
-
-Finale Rust-Health-Engine.
+```
 
 ---
 
@@ -1233,132 +1954,144 @@ Finale Rust-Health-Engine.
 
 ## Ziel
 
-Liquidierbare Accounts nach echtem deterministischem Profit bewerten und ranken.
+Jede Opportunity nach real ausführbarem Netto-Profit bewerten.
 
-Vor P7 werden keine erfundenen Gewinnwahrscheinlichkeiten verwendet.
-
-## Bau
-
-P4A darf nicht erfinden:
-
-~~~text
-p(win)
-p(land)
-competitor response
-optimal waiting time
-~~~
-
-## Realisierbarer Wert statt Oracle-Wert
-
-Protocol-Oracle-/Equity-Werte entscheiden über:
-- Eligibility;
-- Premium-Cap;
-- Protocol Health.
-
-Unser Profit wird dagegen aus realisierbaren Werten berechnet.
-
-Verbindlich:
-
-~~~text
-gross_seized_value_realizable
-=
-Wert, der über den ausgewählten real ausführbaren Pfad
-zum aktuellen ausführbaren Marktpreis realisiert werden kann
-~~~
+## Realisierbarer Wert
 
 Nicht:
 
-~~~text
-gross_seized_value = Protocol Oracle Value
-~~~
+```text
+Protocol Oracle Value = unser Profit
+```
 
-Bei NO_SWAP muss separat definiert werden, wie gehaltenes Inventar für die Profitentscheidung bewertet wird.
+Sondern:
 
-## Deterministische Profitformel
+```text
+gross_seized_value_realizable
+=
+Wert des Assets über den tatsächlich ausführbaren Pfad
+zum aktuell realisierbaren Preis
+```
 
-~~~text
+Protocol-Oracle dient u. a. für:
+
+- Eligibility;
+- Health;
+- Premium-Cap.
+
+## Protocol-Seizure-/Premium-Cap: SPOT vs. EMA
+
+Für Receivership wird die Protocol-Grenze exakt aus dem gepinnten `liquidate_end.rs` übernommen.
+
+```text
+Maintenance-Snapshots:
+    SPOT
+
+Equity-Snapshots:
+    EMA
+
+seized:
+    pre_asset_value_equity - post_asset_value_equity
+
+repaid:
+    pre_liability_value_equity - post_liability_value_equity
+
+extracted:
+    max(0, seized - repaid)
+```
+
+Für `mrgn-0.1.12-rc1` muss der Planner/Economics-Pfad **alle** relevanten Grenzen gemeinsam erfüllen:
+
+```text
+seized <= repaid * (1 + allowed_premium)
+
+pre_health - post_health <= extracted
+
+wenn pre_equity solvent:
+    post_equity muss solvent bleiben
+```
+
+Es gibt daher **keine einzelne naive Equity-Differenz-Formel**, die allein den zulässigen Seizure bestimmt.
+
+Der **realisierbare Marktwert** bleibt davon getrennt: Protocol-Werte und Protocol-Checks bestimmen, was erlaubt ist; ausführbare Marktpreise bestimmen, was es uns wirtschaftlich wert ist.
+
+## Deterministische Formel
+
+```text
 deterministic_net_profit
 =
 realizable_seized_value
 - repay_cost
-- Project0 protocol fees
-- Project0 flat SOL fee
-- executable swap/DEX fees
-- real execution price impact
-- priority fee
-- Jito tip
-- token/rent costs
-- path-dependent failed-attempt cost
-~~~
+- protocol_fees
+- flat_SOL_fee
+- executable_swap_fees
+- price_impact
+- priority_fee
+- jito_tip
+- rent/token_cost
+- path_dependent_failed_attempt_cost
+```
 
 Zusätzlich:
 
-~~~text
-required_capital
-profit_per_capital
-capital_usage
-~~~
-
-## Failed-Attempt-Kosten
-
-Keine globale Konstante.
-
-Outcome-Matrix mindestens:
-
-~~~text
-RPC not landed
-RPC landed success
-RPC landed fail/revert
-
-Jito single-TX not landed
-Jito single-TX landed success
-Jito single-TX landed fail/revert
-
-Jito bundle not landed
-Jito bundle landed success
-Jito bundle failed/reverted
-~~~
-
-Unbekannte Kosten:
-
-~~~text
-UNKNOWN
-~~~
-
-niemals 0.
-
-## V1 Handlungsregel vor P7
-
-~~~text
-deterministic_net_profit > 0
-+ execution valid
-+ state valid
-+ safety valid
-→ handeln
-~~~
-
-Nicht künstlich auf höhere Tagging-Premium warten.
-
-Optimal Stopping kommt erst mit echten Konkurrenzdaten in P4B.
-
-## Messung
-
-- deterministic profit;
-- realizable value;
-- oracle-vs-realizable spread;
 - required capital;
 - profit/capital;
-- Fee-Komponenten;
-- path-dependent failed cost;
-- Ranking-Stabilität.
+- capital usage.
+
+## Long-Tail-Zeitdimension
+
+```text
+premium(t)
+premium_cap(t)
+deterministic_net_profit(t)
+
+t_profitable
+=
+frühester Zeitpunkt,
+an dem net_profit > konfigurierter Mindestprofit
+und alle Safety-/Execution-Regeln erfüllt sind
+```
+
+`t_profitable` wird laufend neu bewertet, wenn Markt-/State-/Fee-Daten sich ändern.
+
+## Race
+
+Race Opportunity:
+
+```text
+State/Oracle Update
+→ Threshold Candidate
+→ Exact Health
+→ Economics
+→ sofortige Entscheidung
+```
+
+## Failed-Attempt-Matrix
+
+Pfadabhängig:
+
+```text
+RPC:
+not landed
+landed success
+landed fail
+
+Jito single:
+not landed
+landed success
+landed fail
+
+Jito bundle:
+not landed
+landed success
+bundle failed
+```
+
+Unbekannt = `UNKNOWN`, niemals 0.
 
 ## Gate P4A
 
-PASS wenn jede unterstützte Opportunity deterministisch, reproduzierbar und ohne erfundene Wahrscheinlichkeiten bewertet und sortiert werden kann.
-
-## Ergebnis
-
-Finale deterministische LIVE-Profit-Engine.
+Jede unterstützte Opportunity deterministisch und reproduzierbar bewertet.
 
 ---
 
@@ -1366,296 +2099,295 @@ Finale deterministische LIVE-Profit-Engine.
 
 ## Ziel
 
-Aus einer profitablen Opportunity einen exakt protocol-gültigen ausführbaren Plan erzeugen.
+Aus einer wirtschaftlichen Opportunity einen exakt protocol-gültigen TX-Plan erzeugen.
 
-## Äußere Constraint: Protocol Allowlist
+## Allowlist
 
-Der RouteProvider steht **unter** der source-gepinnten Project-0-Allowlist.
-
-Kein RouteProvider darf Instruktionen ausgeben, deren Top-Level-Programme innerhalb der Receivership nicht erlaubt sind.
-
-Verbindlich aus P1A:
+P1A ist authoritative für:
 
 - Refresh Allowlist;
 - Integration Allowlist;
-- Swap-Program Allowlist;
-- StartLiquidation-Regeln;
-- EndLiquidation-Regeln;
-- Flat-Fee-Semantik.
+- Swap Allowlist;
+- Start-/End-Regeln.
 
-## Routing-Reihenfolge
+Kein RouteProvider darf nicht erlaubte Programme einschleusen.
 
-### 0. NO_SWAP
+## Sequenz
 
-Bevorzugter Kandidat, wenn wirtschaftlich sinnvoll:
+Schematisch:
 
-~~~text
-Repay aus eigenem Inventar
-→ seized Asset behalten oder später außerhalb der Receivership verwerten
-~~~
-
-Vorteil:
-- kein Router im kritischen Receivership-Pfad;
-- weniger Accounts;
-- weniger CU;
-- weniger Failure Surface.
-
-### 1. LOCAL_PRECOMPUTED_ALLOWED
-
-Route/Instruktionen lokal vorberechnen.
-
-Aber:
-
-~~~text
-lokal berechnet
-!=
-beliebiges Venue-Programm
-~~~
-
-Die tatsächlich ausgeführten Top-Level-Programme müssen in der gepinnten Project-0-Allowlist liegen.
-
-### 2. FREE_PUBLIC_ALLOWED
-
-Kostenlose Route Source darf genutzt werden, wenn:
-- Output vollständig überprüft wird;
-- Programme allowlisted sind;
-- keine synchrone Portalabhängigkeit zwingend im Hotpath entsteht, sofern lokal vermeidbar.
-
-**Jupiter ist in `FREE_PUBLIC_ALLOWED` nur ein austauschbarer `RouteProvider`, nicht die Architektur selbst.** Ein Jupiter-Adapter darf Route-/Instruction-Daten liefern, aber der Project-0-Core validiert Programme, Accounts, Slippage, Economics und Receivership-Regeln selbst.
-
-### 3. PAID_ALLOWED
-
-Nur wenn später P7 zeigt:
-
-~~~text
-zusätzlicher nachhaltiger Profit
->
-vollständige Paid-Kosten
-~~~
-
-## Receivership-Sequenz
-
-Finale Receivership-TX:
-
-~~~text
-[erlaubte Pre-Start-/Refresh-Instruktionen]
+```text
+[erlaubte Pre-Start Refreshes]
+[Preisupdates falls erforderlich]
 → StartLiquidation
-→ erlaubte Withdraw-/Integration-/Swap-/Repay-Instruktionen
+→ Withdraw / Integration Withdraw
+→ Swap oder Repay aus Inventar
+→ Repay
 → EndLiquidation
-~~~
+```
 
-## Absolute End-Regel
+Die exakte Reihenfolge wird aus dem deployed Source gepinnt.
 
-**EndLiquidation ist die letzte Instruction der gesamten Transaktion. Ohne Ausnahme.**
+## End-Regel
 
-Danach darf nichts folgen:
+Wenn deployed Source die bekannte Introspection-Regel bestätigt:
 
-- kein ATA Close;
-- kein Transfer;
-- kein Cleanup;
-- keine ComputeBudget-Instruction;
-- keine andere Program-Instruction.
+**EndLiquidation muss letzte Instruction der Receivership-TX sein.**
 
-Aufräumen:
-- vorher, falls erlaubt;
-- oder in einer Folge-TX.
+Danach kein:
 
-## Bundle-Regel
+- Cleanup;
+- Transfer;
+- ATA Close;
+- ComputeBudget;
+- sonstiger Program Call.
 
-Ein Bundle darf, soweit Protocol- und Submission-Semantik es erlauben:
+## Routing
 
-~~~text
-optionale prerequisite TXs
-+
-eine finale Receivership TX
-~~~
+Alle Pfade von Anfang an architektonisch vorhanden:
 
-Es ist verboten:
+### `NO_SWAP`
 
-~~~text
-TX1 StartLiquidation
-TX2 Swap
-TX3 EndLiquidation
-~~~
+```text
+Repay aus eigenem Inventar
+→ seized Asset behalten
+→ spätere Verwertung außerhalb Receivership
+```
 
-StartLiquidation und EndLiquidation bleiben in derselben finalen Receivership-TX.
+Nur aktiv, wenn Inventar + Economics passen.
 
-## Bau
+### `LOCAL_PRECOMPUTED_ALLOWED`
 
-Planner erzeugt mindestens:
+Nur für **wirklich lokale** Route-/Quote-Erzeugung:
 
-- NO_SWAP Plan;
-- allowlisted local/precomputed plan;
-- allowlisted free route plan;
-- optional paid route plan;
-- erforderliche Refreshes;
-- korrekte Accounts;
-- korrekte Instruction-Reihenfolge;
-- v0/v1-kompatiblen TX-Plan;
-- optionalen prerequisite bundle plan.
+```text
+lokal gehaltener Pool-/Venue-State
+→ lokale Quote
+→ lokale Route/Instructions
+→ kein zwingender Remote-Routing-Call
+```
 
-## Messung
+Aktuell ist in den geprüften Referenzen **kein solcher lokaler Router belegt**.
 
-Pro Execution-Klasse:
+`solana-dex-superagg` gehört ausdrücklich **nicht** in diese Klasse.
 
-- Route-Latenz;
-- Route-Korrektheit;
-- TX Bytes;
-- Account Count;
-- Compute Units;
-- Loaded Account Data;
-- Build-Latenz;
-- Quote Quality;
-- Price Impact;
-- v0/v1 Machbarkeit;
-- LUT Usage;
-- single-TX/bundle feasibility;
-- Allowlist Compliance;
-- path-dependent Fee/Tip-Verhalten.
+### `FREE_PUBLIC_ALLOWED`
+
+Remote Route Source ist hier erlaubt, wenn:
+
+- aktuell keine laufenden Kosten entstehen;
+- Rate Limits für unseren Pfad reichen;
+- Output vollständig validiert wird;
+- Programme allowlisted sind;
+- Abhängigkeit und Latenz gemessen werden.
+
+### `PAID_ALLOWED`
+
+Remote Route Source / API / Key mit laufenden oder nutzungsabhängigen Kosten.
+
+Nur wenn gemessener zusätzlicher Netto-Profit die vollständigen Kosten rechtfertigt.
+
+## `solana-dex-superagg`
+
+Klassifikation:
+
+```text
+REMOTE_AGGREGATOR_CLIENT
+```
+
+Die MIT-lizenzierte Rust-Library spricht Remote-Aggregatoren an und vergleicht deren Quotes:
+
+- Jupiter;
+- Titan;
+- DFlow.
+
+Sie ist **kein lokaler Router**.
+
+Die konkrete Nutzung wird nach dem zugrunde liegenden Aggregator klassifiziert:
+
+```text
+aktuell kostenlos + Rate Limits ausreichend
+→ FREE_PUBLIC_ALLOWED
+
+laufende/Usage-Kosten
+→ PAID_ALLOWED
+```
+
+P0 muss API-Key-Pflicht, aktuelle Free Tiers, Rate Limits, Kosten und Hotpath-Latenz **vor** Dependency-Freigabe prüfen.
+
+Der einzige derzeit referenzseitig belegte router-freie Pfad ist:
+
+```text
+NO_SWAP
+→ Repay aus Inventar
+```
+
+## Bundle
+
+Prerequisite-TXs dürfen separat im Bundle liegen, wenn semantisch erlaubt.
+
+`StartLiquidation` und `EndLiquidation` werden nicht über mehrere TXs gesplittet.
 
 ## Gate P5
 
-PASS nur wenn:
+Jede unterstützte Klasse:
 
-- jede unterstützte Receivership-Klasse einen protocol-gültigen Plan erzeugt;
-- EndLiquidation absolut letzte TX-Instruction ist;
-- keine Route die gepinnte Allowlist verletzt;
-- NO_SWAP als eigener Execution-Pfad unterstützt wird;
-- Start/End niemals über mehrere TXs gesplittet werden.
-
-## Ergebnis
-
-Finaler Receivership Execution Planner.
+- protocol-valid;
+- allowlist-valid;
+- simulierbar;
+- v0/v1-planbar;
+- Economics bekannt.
 
 ---
 
-# PHASE T — TAGGER + PREMIUM SCHEDULER
+# PHASE T — TAGGER
 
 ## Ziel
 
-Die zeit- und zustandsabhängige Tagging-/Premium-Semantik explizit machen, ohne Polling aller Accounts.
+Unhealthy, noch nicht wirtschaftliche Accounts früh markieren und denselben Account später automatisch bei `t_profitable` verarbeiten.
 
-## Bau
+## Logik
 
-- Tag-/Premium-State source-gepinnt abbilden;
-- nur relevante Accounts/Banks schedulen;
-- `t_profitable` aus P4A deterministisch ableiten;
-- Threshold-/Reverse-Index statt Full Scan;
-- Premium-Transitions und Expiry/Boundary-Ereignisse als Trigger behandeln;
-- bei 0.1.12 Deployment erneut qualifizieren.
+```text
+unhealthy
++ receivership-supported
++ aktuell nicht ausreichend profitabel
++ Tagging wirtschaftlich sinnvoll
+→ marginfi_account_tag_liq_record
+```
 
-`t_profitable` ist der früheste Zeitpunkt, an dem die **deterministische** Net-Profit-Bedingung für einen ansonsten gültigen Kandidaten erfüllt ist. Es ist keine p(win)- oder Optimal-Stopping-Schätzung.
+## Signaturpräzisierung
+
+Die Project-0-Instruktion benötigt laut 0.1.12 keinen Protokoll-Signer.
+
+Die Solana-Transaktion benötigt selbstverständlich einen Fee Payer / gültige Signatur.
+
+## State Tracking
+
+Speichern:
+
+- Account;
+- tag tx;
+- tag slot;
+- observed `liquidation_tagged_at`;
+- `t_profitable`;
+- Tag-Clear;
+- Timer-Reset;
+- Grund.
+
+## Economics
+
+Tagging-Kosten gehören in das Opportunity-Modell.
+
+Kein kostenloser Fantasy-Wert.
 
 ## Gate T
 
-PASS wenn keine globale Scan-Schleife nötig ist und nur relevante Accounts zeitgetrieben reevaluiert werden.
+- Tag korrekt gesetzt;
+- Chain-State bestätigt;
+- Scheduler aktualisiert;
+- Fehlerfälle deterministisch;
+- kein Doppelspam.
 
 ---
 
-# PHASE P6 — FULL PRODUCTION SHADOW PATH
+# PHASE P6 — FULL PRODUCTION SHADOW
 
 ## Ziel
 
-Den finalen Produktionscode komplett gegen reale Mainnet-Ereignisse laufen lassen, bevor unqualifiziert Kapital riskiert wird.
+Der **finale** Production-Code läuft vollständig gegen Mainnet, nur Submission mit Kapitalrisiko bleibt deaktiviert/abgesichert.
 
-Kein separater Shadow-Core.
+Kein Shadow-Sondercode.
 
 ## Pfad
 
-~~~text
+```text
 T_rx
-→ Canonical State Update
-→ Reverse Index / Premium Boundary
+→ Canonical State
+→ Project0 State
+→ Trigger
 → Exact Health
 → Candidate
-→ P4A Deterministic Economics
-→ Route Selection
-→ Receivership Plan
+→ P4A
+→ Route
+→ Plan
 → Build
 → Sign
 → Submission Decision
 → Landing Observation
 → Winner Comparison
-~~~
+```
+
+Race und Long-Tail beide aktiv im Shadow.
 
 ## Messung
 
-Für jede Hotpath-Stufe:
+Pro Stufe:
 
-~~~text
-p50
-p95
-p99
-max
-sample_count
-~~~
+- p50;
+- p95;
+- p99;
+- max;
+- count.
 
-Zusätzlich:
+Pro Opportunity:
 
-- Transaction Version;
-- Serialized Bytes;
-- Account Count;
+- type: RACE / TAG / PREMIUM_TIME;
+- detect time;
+- ready time;
+- tx version;
+- bytes;
+- accounts;
 - CU;
-- Route;
-- Submission Path;
-- Tip;
+- route;
+- path;
+- tip;
+- winner;
 - landed/rejected/expired;
-- Winner;
-- Failure Reason;
-- actual fees;
-- actual tips.
+- estimated/actual fees;
+- failure reason.
 
-Loss Taxonomy:
+## Long-Tail-spezifisch
 
-~~~text
+```text
+unser t_profitable
+vs.
+Zeitpunkt, an dem Konkurrenz liquidierte
+vs.
+Premium der Konkurrenz
+```
+
+## Race-spezifisch
+
+```text
+Oracle/State event
+→ unser detect/ready
+→ Winner Slot/Index
+→ Verlustgrund
+```
+
+## Loss Taxonomy
+
+```text
 INGRESS
 STATE
 HEALTH
 ECONOMICS
 ROUTING
 BUILD
+SIGN
 SUBMISSION
 TIP
 STATE_RACE
+THRESHOLD_TOO_HIGH
 ECONOMIC_SKIP
+UNSUPPORTED
 UNKNOWN
-~~~
+```
 
 ## Gate P6
 
-PASS wenn der finale Production-Code reale Liquidationsrennen vollständig:
-- erkennt;
-- bewertet;
-- plant;
-- timing-seitig misst;
-- mit realen Gewinnern vergleicht.
-
-## Ergebnis
-
-Vollständig gemessener finaler Shadow-Pfad.
-
----
-
-# POST-0.1.12 REQUALIFICATION BARRIER
-
-Sobald 0.1.12 tatsächlich deployed ist:
-
-~~~text
-EXECUTION HALT
-→ ProgramData / deployed Source bestätigen
-→ Bank Layout + Resize prüfen
-→ P1B gegen Mainnet verifizieren
-→ P1B wird neuer P1A
-→ Tag/Premium-/Health-Semantik erneut qualifizieren
-→ C0B durchführen
-→ erst danach weitere LIVE-Freigabe
-~~~
-
-# TRACK C0B — POST-UPGRADE CENSUS
-
-C0B wiederholt die für die Economics relevanten C0A-Messungen nach dem tatsächlichen Upgrade und vergleicht mindestens Account-/Bank-Coverage, Integrationen/Oracles, Cross-Venue-Coverage, Tagging/Premium, costly positions, Opportunity-Frequenz/-Wert und Route-/Receivership-Komplexität.
-
-C0 ist damit **kein einmaliger Snapshot**, sondern eine versionierte Coverage-/Economics-Messung je qualifiziertem Protocol-Stand.
+Finaler Code erkennt, bewertet, plant und misst beide Opportunity-Klassen vollständig.
 
 ---
 
@@ -1663,89 +2395,70 @@ C0 ist damit **kein einmaliger Snapshot**, sondern eine versionierte Coverage-/E
 
 ## Ziel
 
-Mit realen historischen und Shadow-Daten feststellen, welche Entscheidungen tatsächlich den Netto-Profit maximieren.
+Aus echten Daten bestimmen, was zusätzlichen Profit erzeugt.
 
-## Für jede reale Opportunity
+## Pro Opportunity
 
-Beantworten:
-
-- hätten wir sie gesehen?
+- gesehen?
 - wann?
-- war sie deterministisch profitabel?
-- wann war unsere Execution bereit?
+- welcher Trigger?
+- profitabel?
+- wann?
+- `t_profitable`?
+- wann ready?
 - wer gewann?
-- welche Premium war verfügbar?
-- wie alt war das Tag?
-- welcher Tip wurde beobachtet/geschätzt?
-- welcher Submission-Pfad?
-- welche TX-Version?
-- welche Route?
-- warum verloren wir?
-- welchen Profit hätte jeder qualifizierte Pfad erzeugt?
+- Premium?
+- Tag Age?
+- Tip?
+- Route?
+- Submission Path?
+- TX Version?
+- warum verloren?
+- welcher alternative Pfad wäre besser gewesen?
 
 ## Provider Economics
 
-Für jede kostenpflichtige Option:
+Für jede optionale bezahlte Komponente:
 
-~~~text
+```text
 incremental_net_value
 =
-zusätzlicher Profit durch zusätzlich gewonnene Opportunities
+zusätzlicher realisierter/realistisch attribuierbarer Profit
 - Subscription
 - Usage
-- zusätzliche Infrastruktur
-- zusätzliche Betriebs-/Abhängigkeitskosten
-~~~
+- Hardware
+- Traffic
+- Storage
+- Operations
+- Abhängigkeitskosten
+```
 
-Regel:
-
-~~~text
-incremental_net_value > 0 und wirtschaftlich relevant
-→ Provider darf bleiben
-
-sonst
-→ entfernen / nicht einführen
-~~~
+Nur bei positivem, relevantem Wert einsetzen.
 
 ## p(win)
 
-Erst hier darf aus echten Daten geschätzt werden:
+Erst jetzt aus echten Daten:
 
-~~~text
+```text
 p(win |
-  opportunity,
+  opportunity_class,
   premium,
   tag_age,
   tip,
   route,
   submission_path,
-  competition)
-~~~
+  tx_version,
+  competition,
+  timing)
+```
 
-Modelle werden versioniert und gegen Holdout/Forward-Daten geprüft.
-
-## Messung
-
-- Capture Rate;
-- Win Rate;
-- Winner Concentration;
-- Tag-Age-Verteilung;
-- Tip-Verteilung;
-- Provider-Mehrwert;
-- Competition-by-opportunity-class;
-- realized/estimated opportunity value;
-- Out-of-sample performance.
+Versioniert und Holdout-/Forward-validiert.
 
 ## Gate P7
 
-PASS wenn:
-- genügend empirische Konkurrenzdaten vorhanden sind;
-- Provider wirtschaftlich bewertet sind;
-- ein belastbares p(win)-Modell möglich ist oder bewusst darauf verzichtet wird.
-
-## Ergebnis
-
-Empirische Competition-/Provider-Evidence.
+- Competition ausreichend gemessen;
+- Provider wirtschaftlich bewertet;
+- p(win) belastbar oder bewusst nicht verwendet.
 
 ---
 
@@ -1755,61 +2468,38 @@ Empirische Competition-/Provider-Evidence.
 
 Deterministischen Profit mit empirischer Gewinnwahrscheinlichkeit verbinden.
 
-Diese Phase startet erst nach P7.
-
 ## Formel
 
-~~~text
+```text
 expected_net_profit
 =
-p(win | opportunity, premium, tag_age, tip, route, path)
-× deterministic_profit_if_won
+p(win) * deterministic_profit_if_won
 - expected_failed_attempt_cost
 - marginal_provider_cost
 - marginal_infrastructure_cost
-~~~
+```
 
-## Optimierung
+## Erst jetzt optimieren
 
-Erst jetzt:
-
-- Tip Size;
+- Tip;
 - Submission Path;
+- v0/v1 Policy;
+- Route;
 - Kapitalallokation;
-- Opportunity Priority;
-- act now vs wait;
-- Tagging Premium;
-- Optimal Stopping;
-- parallele Opportunity-Auswahl.
+- Opportunity-Priorität;
+- parallele Opportunities;
+- act now vs. wait;
+- Tag-Premium-Optimal-Stopping.
 
-Beispiel:
+## Race + Long-Tail
 
-~~~text
-jetzt bei +2 % Premium handeln
-vs.
-auf +5 % warten
-aber steigendes Risiko, dass Konkurrenz vorher gewinnt
-~~~
+Beide Klassen werden zusammen nach Expected Net Profit gerankt.
 
-## Messung
-
-- Expected vs realized profit;
-- Calibration von p(win);
-- Tip-Effizienz;
-- Waiting-Policy;
-- Opportunity Ranking;
-- Kapitalauslastung;
-- Out-of-sample Ergebnis.
+Kein separater Optimizer.
 
 ## Gate P4B
 
-PASS nur bei Shadow-/Forward-validierter Policy.
-
-Keine probabilistische Policy geht allein aufgrund In-Sample-Daten LIVE.
-
-## Ergebnis
-
-Finaler empirischer Profit Optimizer.
+Nur Forward-/Shadow-validierte Policy darf LIVE.
 
 ---
 
@@ -1817,73 +2507,72 @@ Finaler empirischer Profit Optimizer.
 
 ## Ziel
 
-Erste echte Production-Ausführung mit begrenztem Kapital und vollständiger Reconciliation.
+Echter finaler Code mit begrenztem Risiko.
 
-## Bau
+## Kein P8-Sonderbot
 
-Finaler Production-Code. Kein spezieller P8-Bot.
+Es läuft derselbe Production-Core.
 
-Limits:
+## Konfigurierbare Limits
 
-- dedizierte Wallet;
-- kleines Kapital;
-- Max Opportunity Exposure;
-- Max Daily Loss;
-- Max Failed Attempts;
-- Max Tip;
-- Max Slippage;
-- Max Outstanding Risk.
+Keine Architekturkonstante wie „100 EUR“.
 
-Hard Halts:
+Runtime Config:
 
-~~~text
-feed gap
-state gap
-program upgrade
-unknown layout
-unknown oracle
-unknown integration
-unknown economics
-reconciliation failure
-~~~
+- max capital;
+- max opportunity exposure;
+- max daily loss;
+- max failed attempts;
+- max tip;
+- max slippage;
+- max outstanding inventory;
+- max concurrent positions;
+- allowlisted assets;
+- allowlisted execution classes.
+
+## Hard Halts
+
+- feed gap;
+- state gap;
+- fork/reconcile failure;
+- program upgrade;
+- unknown layout;
+- unknown oracle;
+- unknown integration;
+- unknown fee/economics;
+- route violation;
+- reconciliation failure.
 
 ## Reconciliation
 
 Jeder Versuch:
 
-~~~text
+```text
 planned
+→ signed
 → submitted
 → landed / not landed
+→ instruction result
 → token deltas
 → fees
 → tips
-→ capital change
+→ inventory delta
+→ capital delta
 → realized PnL
-~~~
+```
 
-## Messung
+## Race und Long-Tail
 
-- Real Landing Rate;
-- Real Win Rate;
-- Real Fees;
-- Real Tips;
-- Real Failed Costs;
-- Real Slippage;
-- Realized Net PnL;
-- Reconciliation Accuracy.
+Beide dürfen Controlled LIVE sein, sobald ihre jeweilige Execution-Klasse alle Gates erfüllt.
+
+Kein künstliches sechsmonatiges Warten.
 
 ## Gate P8
 
-PASS nur wenn:
-- technische Reconciliation vollständig ist;
-- alle realen Kosten erklärbar sind;
-- keine unbekannte Exposure verbleibt;
-- Safety Limits funktionieren.
-
-## Ergebnis
-
-Kontrolliert validierter LIVE-Pfad.
+- Reconciliation vollständig;
+- Kosten erklärbar;
+- Safety funktioniert;
+- keine unbekannte Exposure.
 
 ---
 
@@ -1891,236 +2580,463 @@ Kontrolliert validierter LIVE-Pfad.
 
 ## Ziel
 
-Maximalen nachhaltigen realisierten Netto-Profit erzielen.
+Dauerhaft maximalen nachhaltigen realisierten Netto-Profit erzielen.
 
 ## Hauptmetriken
 
-~~~text
+```text
 realized_net_pnl
 profit_per_day
 profit_per_opportunity
 profit_per_capital
-capture_rate
-win_rate
+
+race_opportunities
+race_capture_rate
+race_win_rate
+
+tagged_accounts
+long_tail_opportunities
+long_tail_capture_rate
+t_profitable_error
+
 failed_attempt_cost
 priority_fees
 jito_tips
 swap_cost
-slippage
+price_impact
 provider_cost
 infrastructure_cost
 capital_utilization
-~~~
+inventory_risk
+```
 
 ## Provider Review
 
-Regelmäßig je kostenpflichtigem Dienst:
+Regelmäßig:
 
-~~~text
-incremental_profit_attributable_to_provider
+```text
+incremental_profit_attributable
 vs.
-full_provider_cost
-~~~
+full_cost
+```
 
-Wenn nicht positiv:
+Negativ:
 
-~~~text
-entfernen
-~~~
+```text
+entfernen / downgraden
+```
 
-## Gate P9
+## LIVE bleibt nur aktiv solange
 
-Production bleibt nur aktiv, solange:
-- Protocol-Version qualifiziert ist;
-- State gesund ist;
-- Economics vollständig sind;
+- Protocol-Version qualifiziert;
+- State gesund;
+- Health parity gültig;
+- Economics vollständig;
 - Reconciliation stimmt;
 - Safety Gates funktionieren.
 
-## Ergebnis
-
-Dauerhafte Production.
-
 ---
 
-# PHASE K — CONTINUOUS PRODUCTION OPTIMIZATION
+# PHASE K — MEASURED CONTINUOUS OPTIMIZATION
 
-K bedeutet nicht, dass vorher Wegwerfcode gebaut wurde.
+K bedeutet **kein Rewrite**.
 
-K optimiert denselben finalen Production-Code.
+K optimiert denselben finalen Code.
+
+## Ingress
+
+Wenn `LOSS_REASON = INGRESS`:
+
+prüfen:
+
+- besserer kostenloser Feed;
+- vorhandener Geyser-Zugang;
+- Paid Geyser;
+- eigener Geyser;
+- eigener Node;
+- Region.
+
+Nur bei messbarem Netto-Mehrwert.
 
 ## CPU
 
-Von S0 an:
+Wenn `LOSS_REASON = CPU/BUILD`:
 
-~~~text
-Rust
-keine DB im Hotpath
-keine Python-Grenze
-bounded queues
-wenig unnötige Allocations
-kein unnötiges Locking
-~~~
-
-Wenn danach ein CPU-Bottleneck messbar ist:
-
-~~~text
+```text
 Profiling
 → Data Layout
 → Allocation Tuning
 → Cache Locality
+→ Lock Reduction
 → CPU Affinity
 → Sharding / Parallelism
-~~~
-
-Kein Rewrite.
-
-## Ingress
-
-Wenn eine bessere kostenlose oder bereits vorhandene Lösung verfügbar ist:
-
-~~~text
-direkt qualifizieren und verwenden
-~~~
-
-Wenn eigener Geyser/Node zusätzliche Kosten erzeugt:
-
-~~~text
-zusätzlicher Netto-Profit
-vs.
-Hardware + Traffic + Storage + Betrieb + Redundanz
-~~~
+```
 
 ## Routing
 
-Lokales/precomputed Routing ist von P5 an Teil der finalen Architektur.
+Wenn `LOSS_REASON = ROUTING`:
 
-Keine hart verdrahtete Paid-API, die später ersetzt werden muss.
+1. zuerst router-freien Pfad prüfen:
+   - Inventar / `NO_SWAP`;
+
+2. Remote-Routing optimieren:
+   - Route Cache;
+   - Quote Cache nur soweit semantisch sicher;
+   - `solana-dex-superagg` oder direkte Jupiter/Titan/DFlow-Anbindung nur als **Remote-API-Pfad**;
+   - Provider-/API-Kosten gegen zusätzlichen Profit messen;
+
+3. wirklich lokales Routing nur bei nachgewiesenem Bedarf:
+   - lokale Pool-/Venue-Daten;
+   - lokale Quote;
+   - lokale Route/Instructions;
+   - nur für Project-0-allowlisted Programme.
+
+Aktuell ist in den geprüften Referenzen **kein lokaler Router belegt**. Ein solcher wird nicht prophylaktisch neu gebaut; erst ein gemessener Routing-Verlustgrund rechtfertigt die zusätzliche Komplexität.
 
 ## Submission
 
-Kostenlose Jito-/Region-/Submission-Möglichkeiten, die technisch sinnvoll sind:
+Wenn `LOSS_REASON = SUBMISSION/TIP`:
 
-~~~text
-direkt qualifizieren und verwenden
-~~~
+- Jito Region;
+- Tip Policy;
+- Submission Redundancy;
+- Bundle Policy;
+- RPC vs. Jito.
 
-Zusätzliche kostenpflichtige Infrastruktur:
+## Transaction Version
 
-~~~text
-nur wenn zusätzlicher nachhaltiger Netto-Profit > vollständige Kosten
-~~~
+v0/v1 dauerhaft anhand realer Daten vergleichen.
+
+Keine ideologische Bindung.
 
 ---
 
-# 4. Verbindliche Reihenfolge
+# 8. Verbindliche Ticket-Reihenfolge
 
-~~~text
-TRACK A
-S0 → S1 → S2 → S3 → S4
-│
-├──────────── parallel ────────────┐
-│                                 │
-P0 + P1A + P1B + C0A + H0         │
-│                                 │
-└──────────────┬──────────────────┘
-               ↓
-          GATE A PASS
-               ↓
-              P2
-               ↓
-              P3
-               ↓
-             P4A
-               ↓
-              P5
-               ↓
-               T
-               ↓
-              P6
-               ↓
-         0.1.12 deployed
-               ↓
-       HALT + REQUALIFY
-       P1B → P1A + C0B
-               ↓
-              P7
-               ↓
-             P4B
-               ↓
-              P8
-               ↓
-              P9
-               ↓
-               K
-~~~
+## Sofort parallel
 
-P0, P1A, P1B, C0A und H0 laufen früh parallel, soweit sie S0–S4 nicht blockieren.
+```text
+P0-01 eva01 full read-through
+P0-02 mary read-through
+P0-03 dependency/reuse matrix
+P0-04 license matrix
+P0-05 remote routing/API key/free-tier/cost audit
+P0-06 oracle model
+P0-07 staging model
 
-S4 qualifiziert nur den benötigten gemeinsamen Solana-Core. **Long-Tail first, Race later** gilt als strategischer Default, bis reale Competition-Evidence etwas anderes zeigt.
+P1A-01 current ProgramData
+P1A-02 current source/IDL manifest
+P1A-03 current allowlists
+P1A-04 upgrade watcher
 
-K ist kein Rewrite-Block. Optimiert wird ausschließlich dort, wo Messungen einen relevanten technischen Bottleneck oder wirtschaftlichen Hebel zeigen.
+P1B-01 0.1.12 manifest
+P1B-02 dual-size bank decoder tests
+P1B-03 promotion procedure
+
+C0-01 account census
+C0-02 health classification
+C0-03 race opportunity map
+C0-04 long-tail/t_profitable simulation
+
+H0-01 historical extractor
+H0-02 winner matcher
+H0-03 execution classifier
+H0-04 tag timeline after 0.1.12
+H0-05 competitor min-profit inference
+H0-06 report
+```
+
+## Native Core
+
+```text
+S0-01 workspace
+S0-02 timing
+S0-03 telemetry
+S0-04 bounded channels/lifecycle
+S0-05 journal/replay
+
+S1-01 IngressSource
+S1-02 WsRpcSource
+S1-03 GeyserSource
+S1-04 v1 decode/config
+S1-05 reconnect/gap/reconcile
+
+S2-01 canonical state
+S2-02 fork/root
+S2-03 snapshot bootstrap
+S2-04 recovery
+S2-05 blockhash/LUT/token metadata
+
+S3-01 v0 builder
+S3-02 v1 builder
+S3-03 signer
+S3-04 RPC submission
+S3-05 Jito submission
+S3-06 bundle
+S3-07 landing reconciliation
+
+S4-01 parity corpus
+S4-02 decode/state parity
+S4-03 tx parity
+S4-04 performance baseline
+```
+
+## Project 0
+
+```text
+P2-01 Project0 RAM model
+P2-02 reverse indices
+P2-03 threshold index
+P2-04 premium scheduler
+P2-05 tag scheduler
+P2-06 tx template cache
+
+P3-01 crate integration / exact fallback
+P3-02 premium health
+P3-03 receivership rule
+P3-04 integration parity
+P3-05 parity corpus
+
+P4A-01 realizable value
+P4A-02 fee model
+P4A-03 failed-attempt matrix
+P4A-04 t_profitable
+P4A-05 capital model
+P4A-06 ranking
+
+P5-01 allowlist enforcement
+P5-02 refresh planner
+P5-03 NO_SWAP
+P5-04 local/precomputed route
+P5-05 free route
+P5-06 receivership builder
+P5-07 staging fixtures
+
+T-01 tag transaction
+T-02 tag state tracking
+T-03 tag economics
+
+P6-01 E2E telemetry
+P6-02 race shadow
+P6-03 long-tail shadow
+P6-04 winner comparison
+P6-05 loss classifier
+
+P7-01 competition replay
+P7-02 provider economics
+P7-03 v0/v1 analysis
+P7-04 race curve
+P7-05 long-tail competition curve
+P7-06 p(win)
+
+P4B-01 expected profit
+P4B-02 tip/path policy
+P4B-03 waiting policy
+P4B-04 capital allocation
+P4B-05 forward validation
+
+P8-01 safety gates
+P8-02 wallet/capital limits
+P8-03 staging live
+P8-04 controlled mainnet
+P8-05 reconciliation
+
+P9-01 production metrics
+P9-02 provider review
+P9-03 inventory review
+P9-04 protocol-upgrade watch
+```
+
 ---
 
-# 5. Verbindliche Non-Goals
+# 9. Non-Goals
 
 Nicht vorgesehen:
 
-- Wegwerf-Prototypen;
-- Python LIVE-Hotpath;
-- Portal-zentrierte Architektur;
-- bezahlte Provider ohne Profitnachweis;
-- zweiter Health-Core;
-- zweiter Execution-Core;
-- vereinfachte Project-0-Risk-Formel;
-- Full-Account-Scan pro Oracle Update;
-- blindes Warten auf Tagging-Premium vor P4B;
-- v1 als Default ohne End-to-End-Capability-Gate;
-- beliebige DEX-Programme innerhalb Receivership;
-- Instruction nach EndLiquidation;
-- StartLiquidation und EndLiquidation in verschiedenen Transaktionen;
-- eine pauschal festgeschriebene Beobachtungsdauer wie „6 Monate“ ohne Evidence;
-- ein pauschal festgeschriebenes Startkapital wie „~100 EUR“ ohne Opportunity-/Risk-Evidence;
-- v0 oder v1 als ideologischer Default statt Capability-/Messentscheidung;
-- C0 als einmaliger Snapshot;
-- NO_SWAP künstlich an eine spätere Stufe koppeln statt ihn ab P5 als normalen Execution-Kandidaten zu behandeln;
-- CPU-/Provider-/Node-Komplexität ohne gemessenen Bottleneck oder positiven Netto-Nutzen.
+- Wegwerf-Prototyp;
+- zweiter Race-Core;
+- zweiter Long-Tail-Core;
+- Python im LIVE-Hotpath;
+- Nachbau vorhandener funktionierender Komponenten ohne Grund;
+- Nachbau der Risk Engine bei nutzbarem offiziellen Crate;
+- vereinfachte Health-Formel;
+- Full Scan pro Oracle Update;
+- DB im Hotpath;
+- Provider-zentrierte Businesslogik;
+- Paid Provider ohne Profitnachweis;
+- eigener Node aus Prestige-/Latenzgründen ohne Messung;
+- feste „6 Monate warten“-Regel;
+- feste Kapitalzahl als Architektur;
+- v0 oder v1 als Dogma;
+- nicht-allowlisted Programme im Receivership;
+- unbekannte State-/Fee-Werte als 0;
+- Codeübernahme ohne Lizenzprüfung.
 
 ---
 
-# 6. Source-of-Truth-Regel
+# 10. Measurement Ledger
 
-Für Project 0 gilt:
+Alle Gates und empirischen Entscheidungen werden separat dokumentiert:
 
-1. diese Datei definiert die Phasen und Architektur;
-2. P1A definiert den jeweils LIVE-fähigen deployed Protocol-Stand;
-3. das Measurement Ledger dokumentiert Messungen und Gates;
-4. alter Project-0-Roadmap-Text außerhalb von `docs/project_0/` ist nicht authoritative.
+```text
+docs/project_0/MEASUREMENT_LEDGER.md
+```
 
-Messungen gehören in:
+Pflicht pro Eintrag:
 
-[MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md)
+```text
+date
+commit
+phase/ticket
+environment
+provider
+config hash
+dataset/run id
+measurement
+sample count
+p50/p95/p99/max
+result
+gate decision
+evidence links
+```
+
+Architecture Claims gehören nicht als „gemessen“ ins Ledger.
 
 ---
 
-# 7. Aktueller Startstatus
+# 11. Empfohlene Project-0-Dokumentstruktur
 
-Stand 2026-09-30:
+```text
+docs/project_0/
+  README.md
+  PHASENPLAN.md
+  MEASUREMENT_LEDGER.md
 
-~~~text
-Project-0 Production Code:       NOT STARTED
-Architecture:                    FROZEN BY PHASENPLAN v4
-P0 Reference Study:              TO BUILD
-Current Mainnet Manifest:        TO BUILD IN P1A
-Upcoming 0.1.12 Manifest:        TO BUILD IN P1B
-Pre-Upgrade Long-Tail Census:    TO BUILD IN C0A
-Historical H0 Dataset:           TO BUILD
-Gate A:                          NOT PASSED
-Tagger/Premium Scheduler:        NOT STARTED
-Post-Upgrade C0B:                BLOCKED UNTIL DEPLOYMENT
-Permanent Paid Provider:         NONE APPROVED
-Probabilistic Ranking:           NOT ALLOWED BEFORE P7
-LIVE:                            NOT ENABLED
-~~~
+  manifests/
+    CURRENT_MAINNET.md
+    UPCOMING_0_1_12.md
 
-Die Umsetzung beginnt mit S0 sowie parallel P0/P1A/P1B/C0A/H0 entsprechend der oben definierten Reihenfolge.
+  evidence/
+    P0_REFERENCE_STUDY.md
+    P0_REUSE_MATRIX.md
+    P0_LICENSE_MATRIX.md
+    C0_MARKET_CENSUS.md
+    H0_LIQUIDATIONS.md
+
+gates/project_0/
+  P0.md
+  P1A.md
+  P1B.md
+  C0.md
+  H0.md
+  S0.md
+  S1.md
+  S2.md
+  S3.md
+  S4.md
+  P2.md
+  P3.md
+  P4A.md
+  P5.md
+  T.md
+  P6.md
+  P7.md
+  P4B.md
+  P8.md
+  P9.md
+```
+
+---
+
+# 12. Startstatus 2026-09-30
+
+```text
+ARCHITECTURE:
+    FREEZE — AUTHORITATIVE v4
+
+ONE PRODUCTION CORE:
+    REQUIRED
+
+RACE:
+    INCLUDED FROM INITIAL DESIGN
+
+LONG-TAIL:
+    INCLUDED FROM INITIAL DESIGN
+
+RUST HOTPATH:
+    REQUIRED
+
+PYTHON LIVE HOTPATH:
+    FORBIDDEN
+
+EVA01 REUSE:
+    MANDATORY TO EVALUATE BEFORE REIMPLEMENTATION
+
+EVA01 CODE COPYING:
+    BLOCKED UNTIL LICENSE/FREIGABE IS CLEAR
+
+MARGINFI CRATE REUSE:
+    LICENSE CLEARED: APACHE-2.0
+    USE_CRATE IS DEFAULT
+    TECHNICAL TAG/API/PARITY QUALIFICATION REMAINS
+
+SOLANA-DEX-SUPERAGG:
+    LICENSE: MIT
+    CLASS: REMOTE_AGGREGATOR_CLIENT
+    NOT LOCAL ROUTING
+    API-KEY/FREE-TIER/COST AUDIT REQUIRED IN P0
+
+CURRENT MAINNET:
+    VERIFY IN P1A
+
+0.1.12:
+    PRE-RELEASE
+    UPGRADE MANIFEST TO BUILD
+    MAINNET ETA 2026-10-12, EXACT TIME PENDING
+
+SOLANA TX V1:
+    ACTIVE
+    MUST BE SUPPORTED
+
+PAID PROVIDER:
+    NONE REQUIRED BY ARCHITECTURE
+    ONLY AFTER MEASURED POSITIVE INCREMENTAL NET VALUE
+
+OWN NODE:
+    NOT REQUIRED
+    ONLY AFTER MEASURED ECONOMIC CASE
+
+LIVE:
+    NOT ENABLED
+```
+
+---
+
+# 13. Verbindlicher Start
+
+Ab jetzt parallel:
+
+```text
+P0  → eva01/mary vollständig analysieren, Reuse-/Lizenzmatrix und Remote-API-Kosten-Audit erstellen
+P1A → aktuellen Mainnet-Stand on-chain einfrieren
+P1B → 0.1.12 vollständig vorbereiten
+C0  → Race + Long-Tail Markt quantifizieren
+H0  → reale historische Liquidationen analysieren
+
+S0  → finalen Rust-Workspace aufbauen
+```
+
+Danach:
+
+```text
+S1 → S2 → S3 → S4
+```
+
+und nach Merge Gate:
+
+```text
+P2 → P3 → P4A → P5 → T → P6 → P7 → P4B → P8 → P9 → K
+```
+
+**Keine zweite Entwicklung. Kein späterer Race-Rewrite. Kein späterer Rust-Rewrite.  
+Von Anfang an ein schneller, schlanker, kostenoptimierter finaler Production-Core.**
