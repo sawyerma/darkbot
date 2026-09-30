@@ -1,0 +1,29 @@
+{
+  "status": "G0.5_BLOCKRAZOR_RPC_BUNDLE_STABILITY",
+  "source": "terminal output supplied by user from gates/bsc/gate0/tools/run_g05_blockrazor_stability.py",
+  "runs": 10,
+  "total_samples": 1000,
+  "total_over_1ms": 19,
+  "fraction_over_1ms": 0.019,
+  "best_p99_us": 738.208,
+  "worst_p99_us": 1534.583,
+  "worst_max_us": 2752.167,
+  "runs_with_p99_under_1ms": 8,
+  "runs_with_max_under_1ms": 2,
+  "json_rpc_error_histogram": {
+    "-32000: transaction type not supported": 1000
+  },
+  "summary_sha256": "2b5f820a94bce0be0abfd4d590d8eb33716ecd637e922f7782a14ade7a6e1b07",
+  "comparison": {
+    "48club_fraction_over_1ms": 0.022,
+    "blockrazor_fraction_over_1ms": 0.019,
+    "48club_worst_p99_us": 1950.542,
+    "blockrazor_worst_p99_us": 1534.583
+  },
+  "interpretation": "BlockRazor is the better of the two measured remote builder transports, but it still does not satisfy a strict tail-stable T_pre-to-T_send below 1 ms requirement on this client/network route.",
+  "non_claims": [
+    "Invalid wire transaction only",
+    "No valid or value-bearing BUY sent",
+    "No proof of builder inclusion, ordering, acquisition or T_buy"
+  ]
+}
