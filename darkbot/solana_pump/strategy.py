@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
-from darkbot.domain import LAMPORTS_PER_SOL, NS_PER_MS, CoverageState, ExitReason, MarketState, QuoteScopeStatus, VenueState
+from darkbot.solana_pump.domain import LAMPORTS_PER_SOL, NS_PER_MS, CoverageState, ExitReason, MarketState, QuoteScopeStatus, VenueState
 
 FEATURE_NAMES: tuple[str, ...] = (
     "buy_count", "sell_count", "buy_volume_sol", "sell_volume_sol", "net_buy_flow_sol", "unique_buyers", "unique_buyer_ratio",
