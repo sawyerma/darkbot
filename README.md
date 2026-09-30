@@ -112,7 +112,7 @@ The current repository still explicitly distinguishes PAPER from LIVE:
 - **Runtime assembly:** [darkbot/runtime/](darkbot/runtime/)
 - **Strategies:** [darkbot/strategies/](darkbot/strategies/)
 - **Main Python package:** [darkbot/](darkbot/)
-- **Configs:** [config/](config/)
+- **Configs:** [config/solana_pump/](config/solana_pump/)
 - **Tests:** [tests/](tests/)
 
 ## Solana/Pump.fun phase/status documents
@@ -127,8 +127,8 @@ The current repository still explicitly distinguishes PAPER from LIVE:
 
 - **Research/latency evidence summary:** [docs/solana_pump/RESEARCH_STATUS_2026-09-23.md](docs/solana_pump/RESEARCH_STATUS_2026-09-23.md)
 - **Phase-A raw benchmark/parity material:** [docs/bsc/phase_a/](docs/bsc/phase_a/)
-- **Current stored evidence:** [data/evidence/](data/evidence/)
-- **Generated run reports:** [exports/](exports/)
+- **Current stored evidence:** [data/solana_pump/evidence/](data/solana_pump/evidence/)
+- **Generated run reports:** [exports/solana_pump/](exports/solana_pump/)
 
 ### Naming warning: P0 is not Project 0
 
