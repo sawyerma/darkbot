@@ -1591,3 +1591,38 @@ pre-resident state
 ```
 
 **Explizite Non-Claims:** Kein Mainnet-BUY; keine Birth-Latenz; kein numerischer `T0 -> T_buy`; keine Aussage über Builder-/Validator-Selektion; keine Aussage, dass der kalte `curl`-RPC-Pfad die Produktionsarchitektur repräsentiert.
+
+
+---
+
+## 2026-09-30 — G0.5 48Club Builder Stability
+
+Transportkandidat: 48Club Puissant Builder über `eth_sendBundle` und vorgewärmte TLS/TCP-HTTP/1.1-Verbindung.
+
+Safety: Der vollständige G0.3-BUY wurde lokal gebaut und signiert, vor dem Netzwerk-Write jedoch absichtlich in ungültiges RLP verfälscht. Es wurde kein gültiger und kein value-bearing BUY gesendet.
+
+Messumfang: **10 unabhängige Läufe × 100 Samples = 1.000 Samples**.
+
+`T_pre -> remote TLS/TCP handoff`:
+
+- bester Run-p99: **658,125 µs**
+- schlechtester Run-p99: **1.950,542 µs**
+- schlechtester beobachteter Maximalwert: **2.808,041 µs**
+- Samples > 1 ms: **22/1.000 = 2,2 %**
+- Runs mit p99 < 1 ms: **5/10**
+- Runs mit Max < 1 ms: **3/10**
+- Builder-Antworten: **1.000/1.000 `-32000: transaction type not supported`**
+
+Die konsistente `-32000`-Antwort bestätigt, dass der Live-Endpunkt die `eth_sendBundle`-Methode verarbeitet und den absichtlich ungültigen Transaktionstyp inhaltlich ablehnt; es liegt kein `-32601 Method not found` vor.
+
+**Bewertung:** 48Club bleibt als Inclusion-Kandidat technisch verwendbar, erfüllt auf der aktuell gemessenen Client-/Netzwerkroute aber das harte Tail-Ziel `T_pre -> T_send < 1 ms` nicht robust. Status für diesen Kandidaten: **ADAPT**, kein finaler G0.5-PASS.
+
+Evidence:
+- lokal erzeugte Runs unter `gate0/evidence/g05_48club_builder_stability/`
+- versionierte Terminal-Summary: `gate0/evidence/g05_48club_builder_stability/summary_terminal_capture.json`
+- lokal ausgegebener SHA256 der vollständigen `summary.json`: `cc7a522bee287a765ba38148efc07a2ade5ddf6422ee5138e3fc97588e6e6944`
+- Terminal-Summary-Commit: `60fb52341ddde3c6a630ab1f2a1dda8f8801fb82`
+
+**Nächster G0.5-Schritt:** keinen 48Club-PASS erzwingen. Einen zweiten realen Inclusion-Kandidaten messen. BlockRazor dokumentiert auf BSC sowohl Bundle-Submission über `eth_sendBundle` als auch einen öffentlichen BSC-RPC unter `https://bsc.blockrazor.xyz`. Der nächste Messlauf soll denselben vollständigen G0.5-Hotpath und dieselbe Safety-Korruption verwenden, damit die Transportpfade direkt vergleichbar bleiben.
+
+**Non-Claims:** Kein Builder-Inclusion-Nachweis, kein Ordering-Nachweis, kein `T_buy`, kein Mainnet-BUY.
