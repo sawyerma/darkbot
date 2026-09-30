@@ -50,7 +50,7 @@ Run:
 
 DB:
 
-`data/edge_probe_01.sqlite`
+`data/solana_pump/edge_probe_01.sqlite`
 
 Betroffene Position:
 
@@ -246,7 +246,7 @@ Die aktuelle DB darf nicht versehentlich überschrieben werden, bevor P0.1 repro
 
 Zu sichern/dokumentieren:
 
-- `data/edge_probe_01.sqlite`
+- `data/solana_pump/edge_probe_01.sqlite`
 - Run-ID
 - Position `p1`
 - Position `p2`
