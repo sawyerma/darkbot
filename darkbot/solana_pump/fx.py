@@ -6,7 +6,7 @@ import urllib.request
 from dataclasses import dataclass, asdict
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from darkbot.config import canonical_json, sha256_text
+from darkbot.solana_pump.config import canonical_json, sha256_text
 
 
 @dataclass(frozen=True)
