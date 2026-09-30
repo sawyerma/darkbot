@@ -3,7 +3,7 @@
 > **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
 
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
-Stand: **2026-09-28**  
+Stand: **2026-09-30**
 Primärer Scope: **BSC / Flap / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3**
 
 > Diese Datei ist die eine zentrale menschlich lesbare Quelle für den aktuellen Gate-0-Stand.
@@ -1728,7 +1728,7 @@ max    3.137,834 µs
 >1 ms     5/1000 = 0,5 %
 ~~~
 
-Die eingefrorene G0.6-Concurrency-Anforderung ist damit für diesen Dry-Harness **PASS**: keine Nonce-Kollisionen, keine accidental replacements, kein Cross-Wiring, keine überschriebenen BUY-Inputs und keine doppelten Economic Submissions. Der p99 bleibt deutlich unter 1 ms; einzelne Scheduler-/OS-Tails oberhalb 1 ms werden separat dokumentiert und sind kein `T_send`.
+Der synthetische Allocation-/Build-/Projection-Test meldet **PASS**. Dies ist kein vollständiger G0.6-Concurrency-PASS: `duplicate_economic_submission_count` zählt lediglich doppelte erzeugte TX-Hashes; reale Zustellung, Retry-Idempotenz, Nonce-Lücken und Recipient-Isolation wurden hier nicht getestet. Der p99 bleibt deutlich unter 1 ms; einzelne Scheduler-/OS-Tails oberhalb 1 ms werden separat dokumentiert und sind kein `T_send`.
 
 Candidate inclusion projection im Harness:
 - BlockRazor `eth_sendBundle`
@@ -1738,7 +1738,7 @@ Evidence:
 - `gates/bsc/gate0/evidence/g06_concurrency_dry_qualification/summary_terminal_capture.json`
 - Evidence-Commit: `da31f00fca417a51f23a9f4612ec063fe4c6e83a`
 
-**G0.6 Gesamtstatus:** **PARTIAL / concurrency PASS**. Noch offen ist die reale Ingress-Seite der Matrix. Der lokale bsc-geth/P2P-Kandidat ist auf der aktuellen Maschine nicht verfügbar; QuickNode-Coverage bleibt G0.4 PARTIAL wegen fehlendem frozen-scope denominator bzw. Providerlimit. Transport-Readiness der beiden Remote-Builder ist durch G0.5 vorqualifiziert, aber nicht Inclusion-/Ordering-bewiesen.
+**G0.6 Gesamtstatus:** **PARTIAL / synthetic allocation PASS**. Die maßgeblichen verbleibenden Anforderungen stehen in der Vertragsprüfung vom 2026-09-30 unten; fehlende DOGE-Beobachtung ist kein Field-Completeness-Blocker. Der lokale bsc-geth/P2P-Kandidat ist auf der aktuellen Maschine nicht verfügbar; QuickNode-Coverage bleibt G0.4 PARTIAL wegen fehlendem frozen-scope denominator bzw. Providerlimit. Transport-Readiness der beiden Remote-Builder ist durch G0.5 vorqualifiziert, aber nicht Inclusion-/Ordering-bewiesen.
 
 **Non-Claims:** kein Mainnet-BUY, kein Builder-Inclusion-/Ordering-Nachweis, kein `T_buy`, kein Ingress-Coverage-PASS.
 
@@ -1774,12 +1774,50 @@ exact frozen DOGE/extension scope  false
 result                             PASS_DECODE_ONLY_SCOPE_MISMATCH
 ~~~
 
-Interpretation: this is positive evidence that the selected QuickNode pending feed can expose a complete, directly decodable Flap `newTokenV6` transaction before canonical inclusion. It is **not** yet the frozen Gate-0 ingress PASS because the observed launch used a different V6 launch mode than the pinned DOGE/extension scope.
+Interpretation: this is positive evidence that the selected QuickNode pending feed can expose a complete, directly decodable Flap `newTokenV6` transaction before canonical inclusion. This proves availability of the decoded V6 fields; the different mode values do not invalidate field completeness. It does not establish frequency or coverage of the pinned DOGE/extension scope.
 
 Evidence:
 - `gates/bsc/gate0/evidence/g06_flap_actionable_pending/summary_terminal_capture.json`
 - evidence commit: `ade0d92d294028f9ad2e41b95de8e44d6c1721ee`
 
-**G0.6 ingress status:** field completeness for an observed V6 Flap launch is PASS; exact frozen-scope qualification remains open until a pending launch matching tokenVersion 6 + DOGE quote token + frozen extension ID is captured and decoded.
+**G0.6 ingress status:** field completeness for the observed V6 fields is PASS. An additional exact-DOGE pending sample is not required for field completeness. Exact-scope frequency/coverage remains UNKNOWN under G0.4; it requires a canonical denominator, not an endless matching-sample wait.
 
 Non-claims remain unchanged: no canonical coverage denominator, no inclusion/order proof, no `T0`, `T_send` or `T_buy`, no value-bearing transaction.
+
+
+## 2026-09-30 — G0.6 Vertragsprüfung und vorgeschlagener Mainnet-Pilot
+
+Diese Einordnung ersetzt frühere Aussagen, die einen weiteren Live-DOGE-Treffer für Field Completeness oder synthetische Hash-Eindeutigkeit für echte Submission-Idempotenz hielten. Keine neue Capture-Schleife, kein Microbenchmark, kein Node-Setup und kein Mainnet-Senden wurden durchgeführt.
+
+Versionierte Matrix: `gates/bsc/gate0/evidence/g06_candidate_matrix_v1.json`. Sie bindet die verwendeten Evidence-Dateien per SHA256; die transportbezogenen Zahlen stammen aus vorhandenen Terminal-Summaries, nicht aus einem neuen Lauf.
+
+| Kombination | V6-Felder | Konstruktion / Simulation | Nonce / Concurrency | Transport | G0.5 |
+|---|---|---|---|---|---|
+| QuickNode full pending × BlockRazor eth_sendBundle | PASS beobachtete vollständige Calldata | PASS historischer G0.3-Scope | 1000 Intents / 8 Worker: Allocation PASS; Lifecycle offen | Warm-TLS + Methode + Invalid-TX-Antwort bewiesen | ADAPT: 19/1000 >1 ms; schlechtester Run p99 1,534583 ms |
+| QuickNode full pending × 48Club eth_sendBundle/noMerge | PASS beobachtete vollständige Calldata | PASS historischer G0.3-Scope | identischer synthetischer Test | Warm-TLS + Methode + Invalid-TX-Antwort bewiesen | ADAPT: 22/1000 >1 ms; schlechtester Run p99 1,950542 ms |
+
+Beide bleiben Kandidaten, ohne G0.7-Sendefreigabe. Gültige Bundle-Annahme und tatsächliche Inclusion sind durch absichtlich ungültige Wire-TXs nicht bewiesen. Local bsc-geth/P2P: **UNAVAILABLE_ON_CURRENT_MACHINE / OPTIONAL CANDIDATE**, kein Gate-Fehler.
+
+**G0.6 bleibt PARTIAL aus folgenden konkreten Gründen:**
+
+1. `g06_concurrency.rs` erzeugt nur unterschiedliche synthetische Launch-IDs und vergibt atomar Nonces. `duplicate_economic_submission_count = duplicate_tx_hash_count` beweist keine Idempotenz bei erneutem Signal/Retry. Recipient-Isolation, Nonce-Gap-/Drop-Verhalten und geordnete Zustellung fehlen. Nächster Nachweis: gezielte Offline-Fehlerfälle im bestehenden Pfad, keine weitere Timing-Schleife.
+2. Der Timer beginnt nach Entnahme eines Work-Items. Ingress-Wartezeit und Nonce-bedingtes Head-of-line-Blocking sind nicht erfasst. Build-p99 0,273792 ms und Maximum 3,137834 ms erfüllen deshalb nicht automatisch die separate Head-of-line-Anforderung des Testplans. Fünf von 1000 Samples liegen über 1 ms.
+3. `g03_result.json` begrenzt PASS auf historischen Caller, 0,15 BNB und historischen Single-Segment-State. Der neue Sender, ein kleiner Live-Betrag und frischer State samt Invalidation sind noch nicht freigegeben. Der bestehende Rust-Pfad muss dafür gezielt validiert werden; historische Mindestoutputs dürfen nicht übernommen werden.
+
+Field Completeness ist davon getrennt: DOGE ist ein Feldwert derselben vollständigen V6-Calldata. Der korrigierte Lauf mit 18.148 Full-Pending-Objekten, einem V6-Launch und keinem DOGE-Treffer beweist weder fehlende Felder noch einen Venue-FAIL. G0.4-Coverage bleibt mangels kanonischem Nenner UNKNOWN/PARTIAL.
+
+### G0.1 Testvertrag v1 — Vorschlag, noch NICHT autorisiert
+
+Maschinenlesbar: `gates/bsc/gate0/evidence/g01_mainnet_acceptance_proposal_v1.json`.
+
+- Scope: eingefrorener Flap V6 / TAXED_V3 / DOGE / Extension, direkter nativer Portal-BUY. Runtime- und State-Bindung bleiben Pflicht.
+- Maximal **4 Versuche**, zwei je Builder, abwechselnd auf verschiedenen geeigneten Launches; höchstens ein wirtschaftlicher Intent pro Launch. Keine automatischen Wiederholungen oder parallelen Käufe.
+- Maximal **0,001 BNB BUY-Wert je Versuch**, zusätzlich höchstens **0,0005 BNB Gas + Builder-Kosten je Versuch**. Absolutes Gesamtlimit **0,006 BNB**, ohne Verrechnung etwaiger Verkaufserlöse. Der kleine Betrag benötigt einen eigenen Replay-Nachweis im vorhandenen Pfad.
+- Vorgeschlagene Slippage-Grenze 100 bps mit unabhängig berechnetem, positivem minOutput. Kein historischer Zahlenwert als Live-Quote.
+- 30-Minuten-Beobachtungsfenster nach separater Freigabe. Alle ausgewählten Versuche bleiben im Nenner, auch Skip, Deadline-Miss, Revert, Drop oder UNKNOWN. Alle kanonischen scope-konformen Launches bilden separat den Coverage-Nenner; kein Launch bzw. fehlende Daten bedeutet UNKNOWN.
+- Pilot-PASS je Kandidat: 2/2 belegte Token-Akquisitionen, im Launch-Block nach Launch, **null erfolgreiche externe BUYs dazwischen**, null Reverts/Drops/late/UNKNOWN; vollständige kanonische Coverage und null verpasste geeignete Pending-Launches. Creator-/Launch-internen BUY separat zählen. Vier Versuche beweisen keine Produktionszuverlässigkeit.
+- SUCCESSFUL_BUY verlangt korrekten Token und Empfänger, positive zuordenbare Balance-Änderung, tatsächlichen Debit und Kosten, unsere TX, kanonische Position, konkurrierende externe BUYs und Preisvergleich. Receipt-Erfolg allein genügt nicht.
+- ADAPT bei unzureichender Stichprobe oder verfehlten Timing-/Ordering-/Coverage-Kriterien. STOP bei Sicherheits-/Budget-/State-Verletzung, Providerlücke im scharfgeschalteten Zustand, Nonce-Konflikt, erstem Revert oder ungeklärter gesendeter TX. Kein automatischer Ersatz-/Cancel-/Sell-Trade.
+- Vor Sendefreigabe: echte G0.6-Lücken schließen, Sender/Empfänger, frischen State, kleinen Betrag sowie Bundle-Gültigkeit/Expiry und Deadline-Policy trocken validieren und binden. Anschließend Stephans ausdrückliche Freigabe für Vertragsversion und Gesamtbetrag einholen. Aktuell **approved=false**.
+
+**Kein echter BUY in dieser Prüfung. Keine neue T_buy-Zahl.** Ohne vertrauenswürdigen Intra-Block-Zeitstempel liefern spätere G0.7/G0.8-Versuche Acquisition + Ordering; Blockabstände werden nicht als BUY-Latenz ausgegeben.

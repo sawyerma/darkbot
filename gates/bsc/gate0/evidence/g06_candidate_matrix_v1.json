@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "review_date": "2026-09-30",
+  "reviewed_head": "b3cbd2819763315b9796479ea9f2d535250aad9c",
+  "status": "G0.6_PARTIAL",
+  "field_completeness": "PASS_OBSERVED_V6_FIELDS",
+  "exact_DOGE_sample_required_for_field_completeness": false,
+  "exact_scope_frequency_coverage": "UNKNOWN_NO_CANONICAL_DENOMINATOR",
+  "optional_candidates": [
+    {
+      "name": "local bsc-geth/P2P",
+      "status": "UNAVAILABLE_ON_CURRENT_MACHINE",
+      "classification": "OPTIONAL_CANDIDATE",
+      "gate_failure": false
+    }
+  ],
+  "concurrency": {
+    "intents": 1000,
+    "workers": 8,
+    "status": "PASS_SYNTHETIC_ALLOCATION_AND_PROJECTION_ONLY",
+    "local_build_p99_ns": 273792,
+    "local_build_max_ns": 3137834,
+    "over_1ms": 5,
+    "full_submission_lifecycle": "NOT_PROVEN"
+  },
+  "blockers": {
+    "concurrency_lifecycle": "Atomic nonce allocation and unique synthetic work items do not prove duplicate-signal/retry idempotency, dropped-nonce recovery, ordered dispatch or recipient isolation. No network submission occurs; duplicate_economic_submission_count is just duplicate_tx_hash_count.",
+    "head_of_line": "Timer starts after work acquisition; ingress backlog and nonce-gap blocking are absent. Local build p99=273792 ns, max=3137834 ns, 5/1000 >1ms do not establish the plan's head-of-line requirement.",
+    "live_scope_validity": "G0.3 PASS is historical caller + 0.15 BNB + pinned single-segment state. Live sender, small amount, cache freshness/invalidation and new launch must be validated on the existing Rust path before value-bearing use. No general tick-crossing proof."
+  },
+  "evidence": [
+    {
+      "path": "gates/bsc/gate0/evidence/g03_result.json",
+      "file_sha256": "c355ec61fe0ff2ed43771cc370c8174bc37f3e16147e0e535e9888b86717b8b5"
+    },
+    {
+      "path": "gates/bsc/gate0/evidence/g06_concurrency_dry_qualification/summary_terminal_capture.json",
+      "file_sha256": "ba00660dab6acc0fb62089f4f7fe066f5181dcb460c2cdaa4a2e4278086c5a3c"
+    },
+    {
+      "path": "gates/bsc/gate0/evidence/g06_quicknode_full_pending/summary_terminal_capture.json",
+      "file_sha256": "18f11c8a7eb076e11c180f0d9ec23bbac643df5104d92a353fe9f9ad6a3cf24b"
+    },
+    {
+      "path": "gates/bsc/gate0/evidence/g06_flap_actionable_pending/summary_terminal_capture.json",
+      "file_sha256": "73c9ff8e8b4a9b6575a8a3f20fb1eca63e3249379481b8ed4871713c2f5448b3"
+    },
+    {
+      "path": "gates/bsc/gate0/evidence/g06_flap_exact_scope_pending/summary_terminal_capture.json",
+      "file_sha256": "473c009601c8142d7da1e43b48beacba711cbcc5b9d7c75326183dcd6afac6af"
+    },
+    {
+      "path": "gates/bsc/gate0/evidence/g05_blockrazor_rpc_bundle_stability/summary_terminal_capture.json",
+      "file_sha256": "c4d361531da11054ea845c00e9cf85545a6f9d4e7e9b861ba595660d66703e3a"
+    },
+    {
+      "path": "gates/bsc/gate0/evidence/g05_48club_builder_stability/summary_terminal_capture.json",
+      "file_sha256": "40053635bdcff6789cc30d7b87138d807828aad91d8b1fb8920b0f83d6372a60"
+    }
+  ],
+  "candidates": [
+    {
+      "ingress": "QuickNode full pending",
+      "inclusion": "BlockRazor",
+      "method": "eth_sendBundle",
+      "noMerge": null,
+      "status": "RETAINED_CANDIDATE_NOT_G07_RELEASED",
+      "field_completeness": "PASS_OBSERVED_V6_FIELDS",
+      "deterministic_BUY_construction": "PASS_PINNED_HISTORICAL_SCOPE_ONLY",
+      "nonce_concurrency": "PASS_SYNTHETIC_ALLOCATION_ONLY",
+      "transport_readiness": "PASS_WARM_TLS_METHOD_AND_INVALID_TX_REJECTION_ONLY",
+      "valid_bundle_acceptance": "NOT_PROVEN",
+      "G05": "ADAPT",
+      "timing": {
+        "samples": 1000,
+        "over_1ms": 19,
+        "worst_run_p99_us": 1534.583,
+        "max_us": 2752.167
+      },
+      "simulation": "G0.3 pinned direct-Portal offline execution; not 1000 synthetic tokens or future live state",
+      "safety": "No valid/value-bearing submission; no acquisition or ordering claim"
+    },
+    {
+      "ingress": "QuickNode full pending",
+      "inclusion": "48Club",
+      "method": "eth_sendBundle",
+      "noMerge": true,
+      "status": "RETAINED_CANDIDATE_NOT_G07_RELEASED",
+      "field_completeness": "PASS_OBSERVED_V6_FIELDS",
+      "deterministic_BUY_construction": "PASS_PINNED_HISTORICAL_SCOPE_ONLY",
+      "nonce_concurrency": "PASS_SYNTHETIC_ALLOCATION_ONLY",
+      "transport_readiness": "PASS_WARM_TLS_METHOD_AND_INVALID_TX_REJECTION_ONLY",
+      "valid_bundle_acceptance": "NOT_PROVEN",
+      "G05": "ADAPT",
+      "timing": {
+        "samples": 1000,
+        "over_1ms": 22,
+        "worst_run_p99_us": 1950.542,
+        "max_us": 2808.041
+      },
+      "simulation": "G0.3 pinned direct-Portal offline execution; not 1000 synthetic tokens or future live state",
+      "safety": "No valid/value-bearing submission; no acquisition or ordering claim"
+    }
+  ],
+  "safety": {
+    "value_bearing_send_authorized": false,
+    "new_measurement_performed": false,
+    "new_buy_implementation": false
+  },
+  "nonclaims": [
+    "No successful Mainnet BUY",
+    "No inclusion/order proof",
+    "No T_buy latency",
+    "No end-to-end live pending-to-valid-builder-acceptance proof",
+    "Terminal summaries are evidence records, not independently rerun raw samples"
+  ]
+}

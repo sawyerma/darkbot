@@ -310,6 +310,10 @@ G0.6 may compare diagnostic timing and adapter behavior, but it MUST NOT claim t
 
 Also prove that multiple simultaneously actionable launches do not create sender/nonce collisions, accidental replacement, head-of-line blocking beyond the frozen latency target, token/recipient cross-wiring, overwritten BUY inputs, duplicate economic submission, or shared-state races.
 
+Field completeness is distinct from exact-mode live frequency/coverage: lossless V6 calldata and decoded mode fields do not require an additional randomly observed DOGE-valued sample. Exact-scope coverage still requires its canonical denominator in G0.4. Local bsc-geth/P2P is an optional candidate when unavailable on the current machine.
+
+A synthetic allocation/projection PASS alone does not prove submission idempotency, recipient isolation or nonce-gap/head-of-line behavior. Invalid-wire transport qualification does not prove valid bundle acceptance. Preserve these limitations in the versioned candidate matrix; do not promote diagnostic p99 or unique TX hashes to a full concurrency PASS.
+
 The same qualified ingress × inclusion combinations that survive G0.6 become the frozen candidate matrix for G0.7.
 
 ### G0.7 Controlled Mainnet validation

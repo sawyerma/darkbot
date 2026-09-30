@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "status": "PROPOSED_NOT_AUTHORIZED_NOT_EXECUTABLE",
+  "scope": {
+    "chain_id": 56,
+    "venue": "Flap",
+    "launch": "newTokenV6",
+    "tokenVersion": 6,
+    "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "quoteToken": "0xba2ae424d960c26247dd6c32edc70b295c744c43",
+    "extensionId": "0x3526f6a0e790306d64c896eeda5ec66052ea17889e20632ff0cf512923153dad",
+    "buy": "Direct Portal swapExactInput/native input/empty permit",
+    "runtime_binding": "Require proved implementation/code and relevant fresh state; version label alone insufficient"
+  },
+  "candidates": [
+    "QuickNode full pending x BlockRazor eth_sendBundle",
+    "QuickNode full pending x 48Club eth_sendBundle/noMerge=true"
+  ],
+  "attempts": {
+    "maximum": 4,
+    "per_candidate": 2,
+    "selection": "Alternate candidates on successive eligible launches; one candidate per launch; no parallel economic BUY or automatic retry",
+    "measurement_window_minutes": 30,
+    "minimum_evaluable_per_candidate": 2,
+    "unresolved_or_failed_selected_trials_remain_in_denominator": true
+  },
+  "budget_wei": {
+    "max_buy_per_attempt": "1000000000000000",
+    "max_gas_and_builder_combined_per_attempt": "500000000000000",
+    "max_total_including_all_fees": "6000000000000000"
+  },
+  "budget_rules": [
+    "Reserve full gasLimit*gasPrice plus all builder/tip costs before signing; reject excess",
+    "Total cap includes all attempts and fees, with no credit for resale proceeds",
+    "No automatic replacement, cancellation, sell or top-up; stop on unresolved nonce",
+    "Small amount is a proposal, NOT covered by existing 0.15 BNB fixture; independent replay required"
+  ],
+  "slippage": {
+    "proposed_max_bps": 100,
+    "requirement": "State-derived conservative nonzero minOutput, sender/amount/scope replay; never reuse historical minimum"
+  },
+  "success": "Correct positive token balance delta at approved recipient, attributable to our submitted BUY; verified receipt/call/log evidence, debit and all costs; canonical launch/BUY order and competing external buys counted; entry price compared with earliest successful external BUY",
+  "ordering": {
+    "pass": "Same canonical block as launch, strictly after launch, zero successful external BUYs of that token between launch and ours",
+    "launch_internal_buys": "Record separately, exclude from external competition",
+    "late": "Acquired but outside ordering criterion",
+    "unknown": "Never counted as success"
+  },
+  "denominators": {
+    "attempt": "Every selected launch, including local skip/deadline miss, revert, drop, not included or unknown",
+    "coverage": "All canonical launches matching frozen supported scope in predefined 30-minute window, including unseen pending; gap means UNKNOWN",
+    "unsupported_modes": "Record separately, do not discard selected failed trials as unsupported after the fact",
+    "missed_actionable": "Canonical eligible launches without timely complete pending data / all canonical eligible launches; zero denominator is UNKNOWN"
+  },
+  "thresholds": {
+    "PASS": "Both candidates independently: 2/2 successful acquisitions, 2/2 ordering pass, 0 reverts/drops/unknown/late; zero missed-actionable fraction with complete canonical accounting; all G0.6 blockers closed",
+    "ADAPT": "Any unmet performance/ordering/coverage threshold or insufficient evaluable sample; not evidence venue impossible",
+    "STOP": "Any budget/scope/recipient violation, duplicate economic intent, unreserved/replaced nonce, missing/stale required state, unaccounted cost, provider gap during armed state, or first revert/unresolved sent transaction"
+  },
+  "timing": {
+    "target_signal_to_send_ns": 1000000,
+    "preferred_ns": 500000,
+    "no_intrablock_timestamp": "T_buy latency UNKNOWN; report acquisition and order, never substitute block interval",
+    "sample_limit": "Four pilot trials cannot establish production reliability or latency percentiles"
+  },
+  "release_conditions": [
+    "Close G0.6 actual blockers",
+    "Validate existing Rust path for approved live wallet, 0.001 BNB and eligible current state without broadcasting",
+    "Freeze signer/recipient addresses and fee/deadline/expiry policy after dry validation; no secret in evidence",
+    "Verify valid bundle format and expiry behavior without a value-bearing broadcast",
+    "Explicit user approval of version/hash and 0.006 BNB maximum total"
+  ],
+  "authorization": {
+    "approved": false,
+    "signer_address": null,
+    "recipient_address": null
+  }
+}
