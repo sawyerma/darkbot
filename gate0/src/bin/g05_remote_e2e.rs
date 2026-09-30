@@ -222,6 +222,47 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
+fn decode_chunked_body(raw: &[u8]) -> Option<Vec<u8>> {
+    let mut pos = 0usize;
+    let mut out = Vec::new();
+
+    loop {
+        let line_end_rel = raw[pos..]
+            .windows(2)
+            .position(|w| w == b"\r\n")?;
+        let line_end = pos + line_end_rel;
+        let size_line = std::str::from_utf8(&raw[pos..line_end]).ok()?;
+        let size_hex = size_line.split(';').next()?.trim();
+        let size = usize::from_str_radix(size_hex, 16).ok()?;
+        let data_start = line_end + 2;
+
+        if size == 0 {
+            if raw.len() < data_start + 2 {
+                return None;
+            }
+            if &raw[data_start..data_start + 2] == b"\r\n" {
+                return Some(out);
+            }
+            let trailer_end = raw[data_start..]
+                .windows(4)
+                .position(|w| w == b"\r\n\r\n")?;
+            let _ = trailer_end;
+            return Some(out);
+        }
+
+        let data_end = data_start.checked_add(size)?;
+        if raw.len() < data_end + 2 {
+            return None;
+        }
+        if &raw[data_end..data_end + 2] != b"\r\n" {
+            return None;
+        }
+
+        out.extend_from_slice(&raw[data_start..data_end]);
+        pos = data_end + 2;
+    }
+}
+
 fn read_http(
     stream: &mut StreamOwned<ClientConnection, TcpStream>,
 ) -> Vec<u8> {
@@ -240,10 +281,17 @@ fn read_http(
 
         let header = String::from_utf8_lossy(&buf[..h]).to_lowercase();
 
-        assert!(
-            !header.contains("transfer-encoding: chunked"),
-            "chunked response unsupported"
-        );
+        if header.contains("transfer-encoding: chunked") {
+            let raw_body = &buf[h + 4..];
+            let Some(decoded) = decode_chunked_body(raw_body) else {
+                continue;
+            };
+
+            let mut response = Vec::with_capacity(h + 4 + decoded.len());
+            response.extend_from_slice(&buf[..h + 4]);
+            response.extend_from_slice(&decoded);
+            return response;
+        }
 
         let content_length = header
             .lines()
@@ -251,7 +299,7 @@ fn read_http(
                 line.strip_prefix("content-length:")
                     .map(|x| x.trim().parse::<usize>().unwrap())
             })
-            .expect("response has no Content-Length");
+            .expect("response has neither Content-Length nor chunked encoding");
 
         let full = h + 4 + content_length;
 
@@ -542,15 +590,18 @@ fn run_once(
             .and_then(Value::as_str)
             .map(str::to_owned);
 
-    if transport == TransportKind::FortyEightClubBundle {
+    if matches!(
+        transport,
+        TransportKind::FortyEightClubBundle | TransportKind::BlockRazorRpcBundle
+    ) {
         assert_ne!(
             response_error_code,
             Some(-32601),
-            "48Club endpoint reports eth_sendBundle method not found: {body}"
+            "bundle endpoint reports eth_sendBundle method not found: {body}"
         );
         assert!(
             response_error_code.is_some(),
-            "48Club invalid-wire probe returned neither error nor bundle hash: {body}"
+            "invalid-wire bundle probe returned neither error nor bundle hash: {body}"
         );
     }
 
@@ -788,7 +839,10 @@ fn main() {
 
         // Outside measured interval. Keep the builder probe deliberately
         // paced so transport qualification does not become a burst test.
-        let pause_ms = if transport == TransportKind::FortyEightClubBundle {
+        let pause_ms = if matches!(
+            transport,
+            TransportKind::FortyEightClubBundle | TransportKind::BlockRazorRpcBundle
+        ) {
             200
         } else {
             50
@@ -799,15 +853,15 @@ fn main() {
     let total_stats = stats(total);
 
     let result = json!({
-        "status": if transport == TransportKind::FortyEightClubBundle {
-            "G0.5_48CLUB_BUILDER_TRANSPORT_PREQUALIFICATION"
-        } else {
-            "G0.5_REMOTE_E2E_PREQUALIFICATION"
+        "status": match transport {
+            TransportKind::PublicRpc => "G0.5_REMOTE_E2E_PREQUALIFICATION",
+            TransportKind::FortyEightClubBundle => "G0.5_48CLUB_BUILDER_TRANSPORT_PREQUALIFICATION",
+            TransportKind::BlockRazorRpcBundle => "G0.5_BLOCKRAZOR_RPC_BUNDLE_TRANSPORT_PREQUALIFICATION",
         },
-        "scope": if transport == TransportKind::FortyEightClubBundle {
-            "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through live 48Club Puissant Builder eth_sendBundle TLS/TCP handoff; wire transaction deliberately corrupted before send"
-        } else {
-            "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through real remote warm TLS/TCP handoff; wire transaction deliberately corrupted before send"
+        "scope": match transport {
+            TransportKind::PublicRpc => "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through real remote warm TLS/TCP handoff; wire transaction deliberately corrupted before send",
+            TransportKind::FortyEightClubBundle => "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through live 48Club Puissant Builder eth_sendBundle TLS/TCP handoff; wire transaction deliberately corrupted before send",
+            TransportKind::BlockRazorRpcBundle => "Pinned G0.3 Flap fixture; single measured E2E path from T_pre through live BlockRazor BSC RPC eth_sendBundle TLS/TCP handoff; wire transaction deliberately corrupted before send",
         },
         "architecture": std::env::consts::ARCH,
         "os": std::env::consts::OS,
