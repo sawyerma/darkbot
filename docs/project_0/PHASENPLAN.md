@@ -1,11 +1,11 @@
 # DarkBot — Project 0 — Finaler Produktions-Phasenplan
 
-**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.1  
+**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.2  
 **Stand:** 2026-09-30  
 **Geltungsbereich:** DarkBot / Project 0 Liquidator  
 **Source of Truth:** Diese Datei definiert Architektur, Reihenfolge, Gates und verbindliche Entwicklungsregeln.
 
-**Freeze-Korrekturen:** `solana-dex-superagg` ist als Remote-Aggregator-Client klassifiziert; `marginfi-v2` Apache-2.0 und `solana-dex-superagg` MIT sind lizenzseitig bestätigt; Receivership Maintenance=SPOT und Equity=EMA sowie die tatsächlichen `liquidate_end.rs`-Grenzen sind als Protocol-Semantik aufgenommen; H0 modelliert konfigurierbare Konkurrenz-Mindestprofitschwellen. **v4.1 übernimmt zusätzlich den BSC-Fast-Lane-Grundsatz: kein JSON/WSS im latency-kritischen Production-Hotpath; Production-Ingress ist binär/native, WSS/RPC bleibt Control-/Bootstrap-/Recovery-/Evidence-Pfad.**
+**Freeze-Korrekturen:** `solana-dex-superagg` ist als Remote-Aggregator-Client klassifiziert; `marginfi-v2` Apache-2.0 und `solana-dex-superagg` MIT sind lizenzseitig bestätigt; Receivership Maintenance=SPOT und Equity=EMA sowie die tatsächlichen `liquidate_end.rs`-Grenzen sind als Protocol-Semantik aufgenommen; H0 modelliert konfigurierbare Konkurrenz-Mindestprofitschwellen. **v4.2 trennt die Ingress-Rollen explizit: Race-LIVE ausschließlich über einen qualifizierten binären/native Mainnet-Source; Long-Tail-/Premium-LIVE darf kostenoptimiert über `WsRpcControlSource` plus periodische Snapshots/Reconciliation laufen. Shred/Deshred ist keine S1-Pflicht, sondern nur K-Eskalation bei gemessenem `LOSS_REASON = INGRESS`. Maßgeblich ist Quellenlatenz/Position im Datenpfad, nicht JSON-Parsingkosten.**
 
 ---
 
@@ -172,7 +172,7 @@ Nicht „Rust um jeden Preis“, sondern:
 Rust ist verbindlich für:
 
 - Solana Native/Binary Ingress;
-- Protobuf-/Geyser-/Shred-/Deshred-Decode;
+- Protobuf-/Geyser-Decode;
 - native Fast-Lane Event Mapping;
 - Canonical/Fork State;
 - RAM State;
@@ -377,13 +377,13 @@ GUESS
 
 ## 1.7 Hotpath-Verbote
 
-Im latency-kritischen Production-/Race-Pfad:
+Im latency-kritischen **Race-Production-Pfad**:
 
 - keine Datenbank;
 - kein Python;
-- **kein JSON-Wire-Format;**
 - **kein JSON-RPC-WebSocket als normative Race-Quelle;**
-- kein `serde_json`/Base64/JSON-Normalisierungsschritt vor der Entscheidung;
+- kein JSON-/Base64-Normalisierungspfad als notwendige Race-Vorstufe;
+- bevorzugt binäre/native Quelle direkt aus validatornaher Datenbereitstellung;
 - kein synchroner RPC-Lookup als Voraussetzung;
 - kein HTTP-Routing-Call als zwingende Voraussetzung, wenn lokal/precomputed möglich;
 - kein globaler Account-Full-Scan;
@@ -411,9 +411,23 @@ WSS/RPC/JSON bleiben erlaubt für:
 - Recovery/Reconciliation;
 - Control Plane;
 - Evidence/Shadow-Vergleich;
-- Fallback-Diagnostik.
+- Fallback-Diagnostik;
+- **Long-Tail-LIVE und Premium-Trigger-LIVE**, sofern periodische Snapshots/Reconciliation den benötigten State vollständig und fail-closed aktuell halten.
 
-Sie sind **nicht** die Latency Source of Truth für Race.
+Die Trennung ist verbindlich:
+
+```text
+Race-Trigger (a):
+    ausschließlich qualifizierter Binary/Mainnet-Source
+
+Premium-/Long-Tail-Trigger (b/c):
+    WsRpcControlSource + periodischer Snapshot/Reconcile ist Production-zulässig
+    solange State-Freshness, Coverage und Economics die jeweilige Execution-Klasse freigeben
+```
+
+**Begründung:** Der Hauptvorteil von Geyser gegenüber Standard-WSS ist die Quellenlatenz und die Position im Datenpfad (validatornah statt hinter normalem RPC/WebSocket-Serving), nicht primär die CPU-Zeit des JSON-Parsens. JSON-Parsing ist im Vergleich typischerweise nur ein kleiner lokaler Anteil.
+
+WSS ist **nicht** die Latency Source of Truth für Race.
 
 ---
 
@@ -424,7 +438,7 @@ Nicht ideologisch festlegen:
 - v0 vs. v1;
 - RPC vs. Jito;
 - single TX vs. bundle;
-- welcher **qualifizierte binäre/native Production-Ingress** genutzt wird (z. B. Geyser/Protobuf oder Shred/Deshred, sofern technisch verfügbar);
+- welcher **qualifizierte binäre/native Race-Ingress** genutzt wird (initial Geyser/Protobuf; weitere native Quellen erst nach Messung);
 - Provider A vs. Provider B;
 - NO_SWAP vs. Swap;
 - Tip-Höhe;
@@ -548,9 +562,7 @@ Deshalb dürfen ältere `eva01`-Versionspins nicht blind übernommen werden.
                │                        │
    BinaryGeyserSource            WsRpcControlSource
    Protobuf / native             JSON-RPC / WSS
-          oder                         │
- BinaryShred/DeshredSource             │
-   wenn qualifiziert                   │
+      RACE-LIVE               LONG-TAIL/PREMIUM-LIVE
                │                        │
                └──────────┬─────────────┘
                           │
@@ -607,7 +619,7 @@ Oracle/State Trigger Premium Boundary     Tag Boundary
 
 **BSC-Paritätsprinzip:** Wie beim BSC-Pfad `native event → fixed Rust decode → state/decision → build/sign` darf Project 0 vor der Trade-Entscheidung keinen JSON-Konvertierungsweg erzwingen.
 
-**Kostenregel bleibt unverändert:** Die Architektur verlangt einen binären/native Production-Ingress, aber **keinen kostenpflichtigen Provider**. S1 qualifiziert zuerst kostenlose/bereits verfügbare binäre Quellen. Ein Paid Feed ist nur nach gemessenem positivem Netto-Mehrwert zulässig. Fehlt vorerst eine kostenlose qualifizierte Binary-Quelle, wird Race nicht auf einen JSON-Hotpath „degradiert“; WSS bleibt Control/Evidence, bis ein geeigneter Binary-Pfad verfügbar ist.
+**Kostenregel bleibt unverändert:** Race verlangt einen qualifizierten binären/native Mainnet-Ingress, aber **keinen kostenpflichtigen Provider als Startvoraussetzung**. Fehlt eine kostenlose geeignete Binary-Quelle, bleibt Race-LIVE gesperrt. Long-Tail-/Premium-LIVE darf trotzdem über `WsRpcControlSource` plus periodischem Snapshot/Reconcile laufen und damit bereits realen Gewinn erzeugen. Ein Paid Binary Feed wird erst aktiviert, wenn sein zusätzlicher nachhaltiger Netto-Profit die vollständigen Kosten und das Abhängigkeitsrisiko übersteigt.
 Nebenpfad:
 
 ```text
@@ -645,7 +657,6 @@ native/
       ingress
         binary
         geyser
-        shred_deshred
         wsrpc_control
         fastlane
       canonical_state
@@ -1413,40 +1424,29 @@ PASS nur wenn:
 
 ---
 
-# PHASE S1 — FINAL SOLANA NATIVE/BINARY INGRESS
+# PHASE S1 — FINAL SOLANA INGRESS
 
 ## Ziel
 
-Einen provider-austauschbaren **binären/native Rust-Ingress** bauen, der dem BSC-Fast-Lane-Prinzip entspricht und keinen JSON-/WSS-Decode in den latency-kritischen Race-Pfad zwingt.
-
-## Production Invariant
+Eine provider-austauschbare Rust-Ingress-Schicht bauen, die zwei klar getrennte Production-Rollen unterstützt:
 
 ```text
-kein:
-JSON-RPC WSS
-→ JSON parse
-→ Base64/JSON normalization
-→ strategy
+RACE-LIVE
+→ BinaryGeyserSource
+→ validatornahe binäre/Protobuf-Daten
 
-sondern:
-binary/native source
-→ protobuf/raw decode
-→ fixed Rust event
-→ bounded channel/SPSC
-→ canonical state
-→ Project0 state
-→ detection
+LONG-TAIL / PREMIUM-LIVE
+→ WsRpcControlSource
+→ JSON-RPC/WebSocket + periodischer Snapshot/Reconcile
 ```
 
-**Kein JSON wire format im Production Race Hotpath.**
+Beide speisen **denselben** Canonical-/Project-0-State und denselben Health/Economics/Execution-Core. Es gibt keinen zweiten Bot.
 
-## Interface
+## S1.1 `IngressSource` / native Event-Modell
 
-```text
-trait IngressSource
-```
+Businesslogik kennt weder Provider noch Transport.
 
-Ein einheitliches **native Rust Event-Modell** für:
+Ein einheitliches Rust Event-Modell enthält mindestens:
 
 - Accounts;
 - Transactions;
@@ -1458,22 +1458,22 @@ Ein einheitliches **native Rust Event-Modell** für:
 - gap events;
 - reconnect/recovery events.
 
-Businesslogik kennt weder Provider noch Transport.
+Nach dem Source-Adapter arbeiten die latency-kritischen Rust-Komponenten nur mit nativen/fixen Events.
 
-## S1.1 PRIMARY — `BinaryGeyserSource`
+## S1.2 RACE PRIMARY — `BinaryGeyserSource`
 
-Yellowstone-/Geyser-kompatibler binärer Production-Adapter.
-
-Transport:
+Yellowstone-/Geyser-kompatibler binärer Race-Production-Adapter.
 
 ```text
-gRPC / Protobuf
+validatornahe Source
+→ gRPC / Protobuf
 → generated Rust structs
 → minimal mapping
 → native DarkBot event
+→ Canonical State
 ```
 
-Unterstützt soweit von der qualifizierten Source geliefert:
+Mindestens:
 
 - account updates;
 - transactions;
@@ -1482,61 +1482,87 @@ Unterstützt soweit von der qualifizierten Source geliefert:
 - write version;
 - reconnect;
 - gap detection;
-- replay/fromSlot;
-- replay information;
+- replay/fromSlot soweit Source;
+- replay information soweit Source;
 - aktuelle v0/v1-Felder einschließlich `Message.config`.
 
-**Kein Zwischenformat JSON.**
+### Race Source Gate
 
-## S1.2 OPTIONAL PRIMARY — `BinaryShredDeshredSource`
+Race-LIVE ist nur erlaubt, wenn ein **Mainnet**-Binary-Source qualifiziert ist:
 
-Nur wenn in P0/S1 technisch und wirtschaftlich qualifiziert.
+- vollständige benötigte Daten;
+- korrekte Provenance/Fork-/Slot-Semantik;
+- v0/v1 fidelity;
+- Recovery/Gaps beherrscht;
+- reale Latenz gemessen;
+- Kosten dokumentiert.
 
-Ziel:
+Fehlt ein kostenloser qualifizierter Mainnet-Binary-Source:
 
 ```text
-earliest usable binary transaction/state evidence
-→ raw shred/deshred/native feed
-→ minimal Rust decode
-→ native event
+Race-LIVE = BLOCKED
+Long-Tail/Premium-LIVE = DARF WEITERLAUFEN
 ```
 
-Diese Quelle wird nicht vorausgesetzt und nicht allein wegen theoretischer Latenz gebaut.
+Ein Paid Geyser wird **nicht** allein deshalb gekauft. Er kommt erst nach positivem wirtschaftlichem Nachweis.
 
-PASS nur wenn:
+## S1.3 LONG-TAIL/PREMIUM PRODUCTION — `WsRpcControlSource`
 
-- aktuelle Mainnet-Kompatibilität belegt;
-- Daten für Project-0-Entscheidungen vollständig genug;
-- Fork/slot/root-Provenance rekonstruierbar;
-- Recovery/Gaps beherrscht;
-- tatsächlicher Vorteil messbar.
+`WsRpcControlSource` ist für folgende Rollen Production-zulässig:
 
-## S1.3 SECONDARY — `WsRpcControlSource`
-
-JSON-RPC/WebSocket ist **kein Production Race Fast Lane**.
-
-Erlaubte Rollen:
-
+- Long-Tail-Trigger über `liquidation_tagged_at` / `t_profitable`;
+- Premium-/zeitgetriebene Trigger;
+- Account-/Bank-/Oracle-State für diese Klassen;
+- periodische Snapshots;
+- Reconnect/Recovery/Reconciliation;
 - Bootstrap;
-- Snapshot;
 - C0/P1/H0;
-- Recovery;
-- Reconciliation;
-- Shadow-/Evidence-Vergleich;
-- Health/diagnostic control plane;
-- kostenlose Baseline.
+- Shadow-/Evidence-Vergleich.
 
-Er darf nie stillschweigend zur normativen Race-Quelle werden.
-
-## S1.4 Interne Fast Lane
-
-Nach dem Netzwerk-Decode:
+Production-Vertrag:
 
 ```text
-source adapter
-→ fixed/native event
+WSS incremental updates
++ periodischer Snapshot
++ gap detection
++ reconcile
++ fail closed bei unbekannter/staler Coverage
+→ Long-Tail/Premium State gültig
+```
+
+Diese Freigabe ist bewusst wirtschaftlich: Die relevante Zeitskala für Tag-/Premium-Opportunities ist typischerweise wesentlich größer als der Race-Pfad. Daher darf eine kostenlose WSS/RPC-Quelle diese Execution-Klassen tragen, solange State-Freshness und Coverage gemessen ausreichen.
+
+**WSS darf niemals stillschweigend Race-LIVE speisen.**
+
+## S1.4 Warum Geyser für Race
+
+Der Architekturgrund ist **Quellenlatenz**, nicht die Behauptung, JSON-Parsing allein sei langsam.
+
+```text
+Standard WSS:
+validator / RPC-internal state
+→ RPC serving layer
+→ JSON-RPC/WebSocket framing
+→ client
+
+Geyser:
+validatornahe account/tx/slot events
+→ gRPC/Protobuf
+→ client
+```
+
+Der relevante Vorteil ist, dass Geyser näher an der Quelle sitzt und weniger Serving-/Polling-/RPC-Pfad vor dem Client hat. Lokale JSON-Parsingkosten werden gemessen, aber nicht als Hauptbegründung verwendet.
+
+## S1.5 Interne Fast Lane
+
+Für Race nach dem Netzwerk-Decode:
+
+```text
+BinaryGeyserSource
+→ fixed/native Rust event
 → bounded/preallocated queue
 → state owner
+→ threshold/health/economics
 ```
 
 Regeln analog BSC:
@@ -1546,56 +1572,31 @@ Regeln analog BSC:
 - kein common-path lock wenn vermeidbar;
 - kein stiller overwrite;
 - overflow/gap explizit;
-- keine JSON-Serialisierung zwischen Modulen;
 - keine DB/File-I/O;
-- kein synchroner External Lookup.
+- kein synchroner External Lookup;
+- keine unnötige interne JSON-Serialisierung.
 
 SPSC wird dort bevorzugt, wo Ownership tatsächlich 1 Producer / 1 Consumer erlaubt; andernfalls eine gemessene bounded Rust-Struktur mit gleicher Evidenzdisziplin.
 
-## S1.5 Kosten-/Provider-Regel
+## S1.6 Kosten-/Provider-Regel
 
-S1 trennt **Technik** von **Providerpreis**.
+Open-Source-Code für Yellowstone/gRPC/Protobuf erzeugt keine notwendige monatliche Gebühr.
 
-Open-Source-Komponenten wie Yellowstone-/Protobuf-Rust-Code erzeugen keine notwendige monatliche Gebühr.
-
-Providerregel:
+Providerentscheidung:
 
 ```text
-kostenlose / bereits verfügbare Binary-Quelle
+kostenloser/bereits verfügbarer Mainnet Binary-Source
 → zuerst qualifizieren
 
+kein kostenloser geeigneter Binary-Source
+→ Race-LIVE bleibt gesperrt
+→ Long-Tail/Premium-LIVE nutzt WSS/RPC
+
 Paid Binary Feed
-→ nicht erforderlich
-→ nur wenn später:
-   incremental_net_profit > full_cost + dependency_risk
+→ erst wenn incremental_net_profit > full_cost + dependency_risk
 ```
 
-**Kein Paid-Abo wird benötigt, um S1 zu implementieren.**
-
-Wenn zunächst keine kostenlose qualifizierte Binary-Mainnet-Quelle verfügbar ist:
-
-- Binary Adapter trotzdem final bauen/testen;
-- WSS/RPC für Census/Bootstrap/Evidence verwenden;
-- Race LIVE nicht auf JSON als „temporären Production-Hotpath“ umdefinieren;
-- Provider-/Node-Eskalation erst nach Messung und Kostenentscheidung.
-
-## S1.6 BSC-Designparität
-
-Project 0 übernimmt ausdrücklich den bereits eingefrorenen BSC-Grundsatz:
-
-```text
-BSC:
-native peer/geth event
-→ binary fast lane
-→ Rust
-
-Project 0:
-binary Solana event
-→ protobuf/raw fast lane
-→ Rust
-```
-
-Kein generischer Chain-Abstraktionslayer wird dafür erzwungen; nur Timing/Channels/Lifecycle können gemeinsam sein.
+Damit kann der kostenlose Long-Tail-/Premium-Betrieb den wirtschaftlichen Nachweis bzw. das Kapital für eine spätere Race-Infrastruktur liefern, ohne eine zweite Codebasis zu erzeugen.
 
 ## S1.7 v1
 
@@ -1623,65 +1624,67 @@ trusted slot
 → canonical reconcile
 ```
 
-Binary Source ohne Replay oder Control-WSS:
+WSS/RPC Production-State für Long-Tail/Premium:
 
 ```text
-HALT
+gap / reconnect / uncertainty
+→ Execution-Klasse HALT
 → Snapshot
-→ buffered deltas soweit belastbar
 → reconcile
 → state valid
-→ Trading freigeben
+→ Long-Tail/Premium wieder freigeben
 ```
 
 Unreconciled State ist nie tradable.
 
 ## S1.9 Messung
 
-Pro Source/Adapter:
+Für `BinaryGeyserSource`:
 
-- bytes/s;
-- events/s;
 - source→`T_rx`;
-- decode latency;
-- mapping latency;
-- queue wait;
+- decode/mapping latency;
 - p50/p95/p99/max;
-- allocations;
-- coverage;
-- gap count;
-- reconnect duration;
-- replay recovery;
+- events/s;
+- bytes/s;
+- gaps/reconnect;
 - v1 fidelity;
-- CPU;
-- Memory;
-- monatliche/Usage-Kosten.
+- CPU/Memory;
+- Kosten.
 
-WSS-Vergleich darf als Kontrollmessung laufen, ist aber nicht die Race Latency Source of Truth.
+Für `WsRpcControlSource`:
+
+- update age / state freshness;
+- subscription coverage;
+- bytes/credits/requests;
+- gap/reconnect;
+- snapshot duration;
+- reconcile duration;
+- Long-Tail/Premium missed-opportunity rate;
+- Kosten.
 
 ## Gate S1
 
-PASS nur wenn:
+S1 hat zwei getrennte Freigaben:
 
-- mindestens ein binärer/native Adapter vollständig implementiert und reproduzierbar getestet ist;
-- Businesslogik provider-unabhängig bleibt;
-- intern kein JSON im Race-Hotpath existiert;
-- v0/v1 verlustfrei erhalten;
-- Gap Detection vorhanden;
-- Reconnect/Recovery deterministisch;
-- State vollständig und provenance-korrekt speisbar;
-- Kosten des tatsächlich betriebenen Sources dokumentiert sind;
-- kein Paid-Provider allein aus Bequemlichkeit erforderlich ist.
+```text
+S1-LT PASS:
+    WsRpcControlSource + Snapshot/Reconcile ist für Long-Tail/Premium korrekt
+
+S1-RACE PASS:
+    qualifizierter Mainnet BinaryGeyserSource vorhanden
+```
+
+`S1-LT PASS` darf vor `S1-RACE PASS` erreicht werden. Das ändert **nicht** die Codearchitektur, sondern nur welche Execution-Klasse LIVE freigegeben ist.
 
 Tickets:
 `S1-01 IngressSource/native event model` ·
 `S1-02 BinaryGeyserSource` ·
-`S1-03 BinaryShredDeshredSource qualification` ·
-`S1-04 WsRpcControlSource` ·
+`S1-03 WsRpcControlSource` ·
+`S1-04 Long-Tail/Premium snapshot+reconcile` ·
 `S1-05 binary fast lane/queues` ·
 `S1-06 v1 fidelity` ·
 `S1-07 reconnect/gap/reconcile` ·
-`S1-08 cost/source qualification`
+`S1-08 Mainnet binary source + cost qualification`
 
 ---
 # PHASE S2 — FINAL CANONICAL SOLANA STATE
@@ -2842,14 +2845,17 @@ K optimiert denselben finalen Code.
 
 Wenn `LOSS_REASON = INGRESS`:
 
-prüfen:
+prüfen, in dieser Reihenfolge:
 
-- besserer kostenloser Feed;
+- besserer kostenloser Mainnet-Binary-Feed;
 - vorhandener Geyser-Zugang;
 - Paid Geyser;
-- eigener Geyser;
+- eigener Geyser / validatornaher Aufbau;
 - eigener Node;
-- Region.
+- Region;
+- **erst danach Shred/Deshred/native Shred Delivery**, wenn Geyser nachweislich nicht reicht.
+
+Shred/Deshred ist **keine S1-Pflicht** und kein prophylaktischer Build. Es wird nur aktiviert, wenn reale Race-Verluste dem Ingress zugerechnet werden und der erwartete zusätzliche Netto-Profit die vollständigen Shred-/Validator-/Netzwerkkosten rechtfertigt.
 
 Nur bei messbarem Netto-Mehrwert.
 
@@ -2952,12 +2958,12 @@ S0-05 journal/replay
 
 S1-01 IngressSource/native event model
 S1-02 BinaryGeyserSource
-S1-03 BinaryShredDeshredSource qualification
-S1-04 WsRpcControlSource
+S1-03 WsRpcControlSource
+S1-04 Long-Tail/Premium snapshot+reconcile
 S1-05 binary fast lane/queues
 S1-06 v1 fidelity
 S1-07 reconnect/gap/reconcile
-S1-08 cost/source qualification
+S1-08 Mainnet binary source + cost qualification
 
 S2-01 canonical state
 S2-02 fork/root
@@ -3055,7 +3061,7 @@ Nicht vorgesehen:
 - zweiter Race-Core;
 - zweiter Long-Tail-Core;
 - Python im LIVE-Hotpath;
-- JSON/WSS als normativer Production-Race-Hotpath;
+- JSON/WSS als normativer Production-Race-Hotpath; Long-Tail/Premium-LIVE über qualifiziertes WSS/RPC bleibt ausdrücklich erlaubt;
 - interne JSON-Serialisierung zwischen latency-kritischen Rust-Stufen;
 - Nachbau vorhandener funktionierender Komponenten ohne Grund;
 - Nachbau der Risk Engine bei nutzbarem offiziellen Crate;
@@ -3152,7 +3158,7 @@ gates/project_0/
 
 ```text
 ARCHITECTURE:
-    FREEZE — AUTHORITATIVE v4.1
+    FREEZE — AUTHORITATIVE v4.2
 
 ONE PRODUCTION CORE:
     REQUIRED
@@ -3167,13 +3173,18 @@ RUST HOTPATH:
     REQUIRED
 
 PRODUCTION RACE INGRESS:
-    BINARY / NATIVE REQUIRED
+    QUALIFIED MAINNET BINARY / GEYSER REQUIRED
 
 JSON / WSS RACE HOTPATH:
     FORBIDDEN
 
 WS/RPC ROLE:
     CONTROL / BOOTSTRAP / RECOVERY / EVIDENCE
+    + LONG-TAIL / PREMIUM LIVE ALLOWED WITH SNAPSHOT+RECONCILE
+
+SHRED / DESHRED:
+    NOT S1
+    K-ONLY AFTER MEASURED INGRESS BOTTLENECK
 
 PYTHON LIVE HOTPATH:
     FORBIDDEN
