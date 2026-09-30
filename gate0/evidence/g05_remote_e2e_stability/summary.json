@@ -1,0 +1,107 @@
+{
+  "status": "G0.5_REMOTE_E2E_STABILITY",
+  "runs": [
+    {
+      "run": "run_01.json",
+      "p50_us": 460.541,
+      "p95_us": 544.25,
+      "p99_us": 675.333,
+      "max_us": 684.333,
+      "over_1ms_count": 0,
+      "samples": 100
+    },
+    {
+      "run": "run_02.json",
+      "p50_us": 399.666,
+      "p95_us": 551.208,
+      "p99_us": 858.541,
+      "max_us": 950.583,
+      "over_1ms_count": 0,
+      "samples": 100
+    },
+    {
+      "run": "run_03.json",
+      "p50_us": 398.25,
+      "p95_us": 547.666,
+      "p99_us": 592.083,
+      "max_us": 720.167,
+      "over_1ms_count": 0,
+      "samples": 100
+    },
+    {
+      "run": "run_04.json",
+      "p50_us": 388.584,
+      "p95_us": 524.125,
+      "p99_us": 820.25,
+      "max_us": 1128.833,
+      "over_1ms_count": 1,
+      "samples": 100
+    },
+    {
+      "run": "run_05.json",
+      "p50_us": 451.167,
+      "p95_us": 541.208,
+      "p99_us": 791.083,
+      "max_us": 1405.667,
+      "over_1ms_count": 1,
+      "samples": 100
+    },
+    {
+      "run": "run_06.json",
+      "p50_us": 426.75,
+      "p95_us": 610.834,
+      "p99_us": 816.875,
+      "max_us": 1466.167,
+      "over_1ms_count": 1,
+      "samples": 100
+    },
+    {
+      "run": "run_07.json",
+      "p50_us": 415.75,
+      "p95_us": 753.042,
+      "p99_us": 887.125,
+      "max_us": 1018.084,
+      "over_1ms_count": 1,
+      "samples": 100
+    },
+    {
+      "run": "run_08.json",
+      "p50_us": 399.5,
+      "p95_us": 570.667,
+      "p99_us": 1042.916,
+      "max_us": 1411.0,
+      "over_1ms_count": 3,
+      "samples": 100
+    },
+    {
+      "run": "run_09.json",
+      "p50_us": 435.417,
+      "p95_us": 584.25,
+      "p99_us": 948.166,
+      "max_us": 994.334,
+      "over_1ms_count": 0,
+      "samples": 100
+    },
+    {
+      "run": "run_10.json",
+      "p50_us": 407.75,
+      "p95_us": 538.291,
+      "p99_us": 587.875,
+      "max_us": 598.333,
+      "over_1ms_count": 0,
+      "samples": 100
+    }
+  ],
+  "total_samples": 1000,
+  "total_over_1ms": 7,
+  "fraction_over_1ms": 0.007,
+  "best_p99_us": 587.875,
+  "worst_p99_us": 1042.916,
+  "worst_max_us": 1466.167,
+  "non_claims": [
+    "Invalid wire transaction only",
+    "No value-bearing BUY sent",
+    "Measures T_pre to warm remote TLS/TCP handoff",
+    "Does not prove mempool acceptance, propagation, inclusion or T_buy"
+  ]
+}

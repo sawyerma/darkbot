@@ -1,0 +1,142 @@
+{
+  "status": "G0.4_PARTIAL_NO_FROZEN_SCOPE_DENOMINATOR",
+  "capture_duration_ns": "197678567667",
+  "census_start_ms": 30000,
+  "census_end_ms": 570000,
+  "stats": {
+    "pending_full": 42886,
+    "pending_hash_only": 0,
+    "pending_missing_fields": 0,
+    "portal_pending": 46,
+    "portal_logs": 2136,
+    "heads": 429,
+    "canonical_portal_tx_fetches": 480
+  },
+  "canonical_v6_launch_denominator": 4,
+  "canonical_v6_seen_pending": 4,
+  "canonical_v6_pending_coverage": 1,
+  "frozen_scope_launch_denominator": 0,
+  "frozen_scope_seen_pending": 0,
+  "frozen_scope_pending_coverage": null,
+  "launches": [
+    {
+      "tx_hash": "0xe67c5b6f8c18731d3362fb844c3356d8a400a7be48e6c70c3edd8d50b7138be9",
+      "block_number": "0x7700277",
+      "block_hash": "0xec116fcae6400c408bdbacf7077508e832277a1322bb8a8759974b1cc5401f32",
+      "token_version": "6",
+      "quote_token": "0x0000000000000000000000000000000000000000",
+      "quote_amount": "10000000000000000",
+      "extension_id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "buy_tax": "0",
+      "sell_tax": "100",
+      "frozen_scope_match": false,
+      "seen_in_pending": true,
+      "full_pending_object_seen": true,
+      "pending_received_ns": "34503094250",
+      "first_canonical_log_received_ns": "34667407917",
+      "pending_to_log_delivery_ns": "164313667"
+    },
+    {
+      "tx_hash": "0xa6ab8e8276d04fe4aafa2f3566af9c49cf517d4a9ab8574988195c4688e7c349",
+      "block_number": "0x770030b",
+      "block_hash": "0x607d3a89ab15a1efbe769eacca12484a7fea94450b52e6f53d4d235b8f0c512f",
+      "token_version": "6",
+      "quote_token": "0x02fca66c1d1afb4e2a7884261eb00f63598a7436",
+      "quote_amount": "495135336657800178",
+      "extension_id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "buy_tax": "0",
+      "sell_tax": "100",
+      "frozen_scope_match": false,
+      "seen_in_pending": true,
+      "full_pending_object_seen": true,
+      "pending_received_ns": "101548877417",
+      "first_canonical_log_received_ns": "101640756833",
+      "pending_to_log_delivery_ns": "91879416"
+    },
+    {
+      "tx_hash": "0x20a9e1880607271f7efcf20056fdfd10cbe7ee920b579c14b69adeace2226ab8",
+      "block_number": "0x7700318",
+      "block_hash": "0x0d56a3b721c8cca6c1326092e7efeaa955ec777bf8761cc9f0c08cb6f1c45372",
+      "token_version": "6",
+      "quote_token": "0x0000000000000000000000000000000000000000",
+      "quote_amount": "20000000000000000",
+      "extension_id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "buy_tax": "0",
+      "sell_tax": "100",
+      "frozen_scope_match": false,
+      "seen_in_pending": true,
+      "full_pending_object_seen": true,
+      "pending_received_ns": "107443676292",
+      "first_canonical_log_received_ns": "107525332417",
+      "pending_to_log_delivery_ns": "81656125"
+    },
+    {
+      "tx_hash": "0x37172d6bcb5130aed04abd7e394cdbc3a5b8063cb7f24c9c775524390dd2d377",
+      "block_number": "0x7700362",
+      "block_hash": "0x3b8a51bebad6d60f2007c26434305241a9f3a0b35dbd6890bc0a2084a87b5a6f",
+      "token_version": "6",
+      "quote_token": "0x0000000000000000000000000000000000000000",
+      "quote_amount": "0",
+      "extension_id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "buy_tax": "200",
+      "sell_tax": "200",
+      "frozen_scope_match": false,
+      "seen_in_pending": true,
+      "full_pending_object_seen": true,
+      "pending_received_ns": "140791849167",
+      "first_canonical_log_received_ns": "141002650833",
+      "pending_to_log_delivery_ns": "210801666"
+    }
+  ],
+  "errors": [
+    {
+      "id": 1365,
+      "code": -32007,
+      "message": "15/second request limit reached - reduce calls per second or upgrade your account at https://dashboard.quicknode.com/billing/plan"
+    },
+    {
+      "id": 1377,
+      "code": -32007,
+      "message": "15/second request limit reached - reduce calls per second or upgrade your account at https://dashboard.quicknode.com/billing/plan"
+    },
+    {
+      "id": 1378,
+      "code": -32007,
+      "message": "15/second request limit reached - reduce calls per second or upgrade your account at https://dashboard.quicknode.com/billing/plan"
+    },
+    {
+      "id": 1379,
+      "code": -32007,
+      "message": "15/second request limit reached - reduce calls per second or upgrade your account at https://dashboard.quicknode.com/billing/plan"
+    },
+    {
+      "id": 1408,
+      "code": -32007,
+      "message": "15/second request limit reached - reduce calls per second or upgrade your account at https://dashboard.quicknode.com/billing/plan"
+    },
+    {
+      "id": 1409,
+      "code": -32007,
+      "message": "15/second request limit reached - reduce calls per second or upgrade your account at https://dashboard.quicknode.com/billing/plan"
+    },
+    {
+      "id": 1410,
+      "code": -32007,
+      "message": "15/second request limit reached - reduce calls per second or upgrade your account at https://dashboard.quicknode.com/billing/plan"
+    },
+    {
+      "id": null,
+      "code": -32003,
+      "message": "request limit reached - upgrade your account at https://dashboard.quicknode.com/billing/plan"
+    }
+  ],
+  "T_send": null,
+  "T_buy": null,
+  "T0": null,
+  "limitations": [
+    "QuickNode only; no own-geth/48Club/BlockRazor comparison",
+    "Canonical denominator is successful Portal-emitting newTokenV6 transactions observed during the bounded census window",
+    "Subscription delivery gaps are not BUY latency or T0",
+    "No value-bearing transaction sent"
+  ]
+}
