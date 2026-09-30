@@ -14,6 +14,9 @@ pub struct Ticket {
     token: Address,
 }
 impl Ticket {
+    pub fn binding(self) -> (u64, Address, Address) {
+        (self.chain_id, self.sender, self.token)
+    }
     pub fn nonce(self) -> u64 {
         self.nonce
     }
@@ -266,5 +269,83 @@ mod tests {
         }
         assert_eq!(l.begin_send(), Err(Error::NotReady));
         assert_eq!(hashes.len(), 1000);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_measurements {
+    use super::*;
+    use std::time::{Duration, Instant};
+    fn token(n: u8) -> Address {
+        Address::repeat_byte(n)
+    }
+    fn hash(n: u8) -> B256 {
+        B256::repeat_byte(n)
+    }
+    #[test]
+    fn targeted_head_of_line_unknown_head_blocks_all_prepared_followers() {
+        for resolve in [false, true] {
+            let mut lane = IntentLane::new(56, token(200), 7, 9);
+            let head = lane.reserve(token(1)).unwrap();
+            lane.prepare(head, hash(1)).unwrap();
+            lane.begin_send().unwrap();
+            let mut first_blocked = Vec::new();
+            let mut actionable = Vec::new();
+            for n in 2..10 {
+                let t = lane.reserve(token(n)).unwrap();
+                lane.prepare(t, hash(n)).unwrap();
+                let start = Instant::now();
+                actionable.push(start);
+                assert_eq!(lane.begin_send(), Err(Error::NotReady));
+                first_blocked.push(start.elapsed().as_nanos() as u64);
+            }
+            // Deliberately unresolved for 25ms. This is injected local waiting,
+            // not an observed builder/chain delay or a BUY-latency benchmark.
+            std::thread::sleep(Duration::from_millis(25));
+            assert_eq!(lane.begin_send(), Err(Error::NotReady));
+            if resolve {
+                lane.confirm(head, hash(1)).unwrap();
+                assert_eq!(lane.begin_send().unwrap().0.nonce(), 8);
+            } else {
+                lane.halt();
+                assert_eq!(lane.begin_send(), Err(Error::Halted));
+            }
+            let durations: Vec<u64> = actionable
+                .iter()
+                .map(|t| t.elapsed().as_nanos() as u64)
+                .collect();
+            assert!(durations.iter().all(|n| *n > 1_000_000));
+            println!(
+                "G06_HOL {}",
+                serde_json::json!({"outcome":if resolve{"SIMULATED_RESOLUTION"}else{"HALT"},"blocked_followers":8,"actionable_to_first_blocked_ns":first_blocked,"actionable_to_outcome_ns":durations,"injected_hold_ns":25_000_000,"network_measurement":false})
+            );
+        }
+    }
+    #[test]
+    fn diagnostic_restart_loses_all_four_in_memory_states() {
+        for phase in ["Reserved", "Prepared", "Sending", "Confirmed"] {
+            let mut old = IntentLane::new(56, token(200), 7, 1);
+            let ticket = old.reserve(token(1)).unwrap();
+            if phase != "Reserved" {
+                old.prepare(ticket, hash(1)).unwrap();
+            }
+            if phase == "Sending" || phase == "Confirmed" {
+                old.begin_send().unwrap();
+            }
+            if phase == "Confirmed" {
+                old.confirm(ticket, hash(1)).unwrap();
+            }
+            drop(old);
+            // Explicitly demonstrate the UNSAFE restart assumption: stale nonce 7.
+            let mut restarted = IntentLane::new(56, token(200), 7, 1);
+            let again = restarted.reserve(token(1)).unwrap();
+            assert_eq!(again, ticket);
+            restarted.prepare(again, hash(1)).unwrap();
+            assert!(restarted.begin_send().is_ok());
+            println!(
+                "G06_RECOVERY {}",
+                serde_json::json!({"previous_state":phase,"blind_reuse_possible":true,"status":"BLOCKER_REPRODUCED","restart_nonce_source":"deliberately_stale"})
+            );
+        }
     }
 }

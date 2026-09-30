@@ -24,9 +24,10 @@
     "full_submission_lifecycle": "NOT_PROVEN"
   },
   "blockers": {
-    "concurrency_lifecycle": "Offline lane now deduplicates tokens per fixed chain/sender, orders single-use permits and halts on uncertainty; integrated only in synthetic g06 harness. Live adapter binding, canonical reconciliation and restart recovery remain unproven.",
-    "head_of_line": "Timer starts after work acquisition; ingress backlog and nonce-gap blocking are absent. Local build p99=273792 ns, max=3137834 ns, 5/1000 >1ms do not establish the plan's head-of-line requirement.",
-    "live_scope_validity": "G0.3 PASS is historical caller + 0.15 BNB + pinned single-segment state. Live sender, small amount, cache freshness/invalidation and new launch must be validated on the existing Rust path before value-bearing use. No general tick-crossing proof."
+    "concurrency_lifecycle": "Both existing builder projections now use a consumed-before-write permit tested with local stream doubles. ACK never confirms; partial/flush errors halt. Durable restart and actual canonical reconciler remain absent.",
+    "head_of_line": "Targeted unresolved-head test blocks all 8 prepared followers for about 30ms under injected 25ms hold. Single-sender confirmation-gated lane cannot bound HoL below 1ms; no automatic deadline/release exists.",
+    "live_scope_validity": "G0.3 PASS is historical caller + 0.15 BNB + pinned single-segment state. Live sender, small amount, cache freshness/invalidation and new launch must be validated on the existing Rust path before value-bearing use. No general tick-crossing proof.",
+    "restart_recovery": "All four in-memory states lose their guard after reconstruction using a deliberately stale nonce. Durable recovery contract documented, not implemented."
   },
   "evidence": [
     {
@@ -117,5 +118,6 @@
   "followup_evidence": "gates/bsc/gate0/evidence/g06_offline_regression/result.json",
   "followup_status": "Signature RLP defect fixed; deduplication and completion-order limitations reproduced offline; G0.6 remains PARTIAL",
   "intent_lane_evidence": "gates/bsc/gate0/evidence/g06_intent_lane/result.json",
-  "intent_lane_status": "PASS_OFFLINE_BOUNDED_SESSION_ONLY; live transport/reconciliation, restart and latency not qualified"
+  "intent_lane_status": "PASS_OFFLINE_ADMISSION_AND_LOCAL_BUILDER_BOUNDARY_ONLY",
+  "submission_hol_recovery_evidence": "gates/bsc/gate0/evidence/g06_submission_hol_recovery/result.json"
 }

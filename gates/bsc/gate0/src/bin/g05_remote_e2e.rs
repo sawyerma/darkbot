@@ -1,3 +1,4 @@
+use darkbot_gate0::intent_lane::{IntentLane, Ticket};
 use alloy_primitives::{keccak256, Address, Bytes, U256, U512};
 use alloy_sol_types::{sol, SolCall, SolValue};
 use k256::ecdsa::SigningKey;
@@ -263,8 +264,8 @@ fn decode_chunked_body(raw: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-fn read_http(
-    stream: &mut StreamOwned<ClientConnection, TcpStream>,
+fn read_http<W: Read>(
+    stream: &mut W,
 ) -> Vec<u8> {
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 8192];
@@ -347,13 +348,47 @@ struct Ctx {
     expected_calldata: Vec<u8>,
 }
 
-fn run_once(
+fn sender(ctx: &Ctx) -> Address {
+    let pk = ctx.signer.verifying_key().to_encoded_point(false);
+    let hash = keccak256(&pk.as_bytes()[1..]);
+    Address::from_slice(&hash.as_slice()[12..])
+}
+
+fn guarded_transport_write<W: Write>(
+    lane: &mut IntentLane, ticket: Ticket, hash: alloy_primitives::B256,
+    request: &[u8], writer: &mut W,
+) -> std::io::Result<()> {
+    let permit = lane.begin_send().map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+    if permit != (ticket, hash) {
+        lane.halt();
+        return Err(std::io::Error::other("permit/request mismatch"));
+    }
+    // The permit is already consumed before the FIRST write, including partial writes.
+    if let Err(e) = writer.write_all(request).and_then(|_| writer.flush()) {
+        lane.halt();
+        return Err(e);
+    }
+    // No confirm here. HTTP/JSON-RPC responses cannot establish canonical execution.
+    Ok(())
+}
+
+fn run_probe<W: Read + Write>(
+    ctx: &Ctx, stream: &mut W, nonce: u64, correctness_check: bool, transport: TransportKind,
+) -> Sample {
+    // Each legacy measurement is an isolated INVALID-WIRE probe, never a live lane.
+    let mut lane = IntentLane::new(56, sender(ctx), nonce, 1);
+    run_once(ctx, stream, nonce, correctness_check, transport, &mut lane)
+}
+
+fn run_once<W: Read + Write>(
     ctx: &Ctx,
-    stream: &mut StreamOwned<ClientConnection, TcpStream>,
+    stream: &mut W,
     nonce: u64,
     correctness_check: bool,
     transport: TransportKind,
+    lane: &mut IntentLane,
 ) -> Sample {
+    assert_eq!(lane.identity(), (56, sender(ctx)), "lane/signer mismatch");
     let t0 = Instant::now();
 
     // 1. Minimal launch decode + scope qualification + CREATE2 token address.
@@ -387,6 +422,8 @@ fn run_once(
 
     let digest = keccak256(&create2);
     let token = Address::from_slice(&digest.as_slice()[12..]);
+    let ticket = lane.reserve(token).expect("intent admission rejected");
+    assert_eq!(ticket.nonce(), nonce, "nonce must match admitted ticket");
 
     let t1 = Instant::now();
 
@@ -541,12 +578,14 @@ fn run_once(
     };
 
     let request = http_request(transport.host(), &send_body);
+    let signed_hash = keccak256(&signed);
+    lane.prepare(ticket, signed_hash).expect("intent preparation rejected");
 
     let t6 = Instant::now();
 
     // 7. REAL remote warm TLS/TCP handoff.
-    stream.write_all(&request).unwrap();
-    stream.flush().unwrap();
+    guarded_transport_write(lane, ticket, signed_hash, &request, stream)
+        .expect("guarded transport write failed");
 
     let t7 = Instant::now();
 
@@ -782,13 +821,13 @@ fn main() {
     };
 
     // Correctness check against G0.3 frozen output and live transport request.
-    run_once(&ctx, &mut stream, 0x032e, true, transport);
+    run_probe(&ctx, &mut stream, 0x032e, true, transport);
 
     const WARMUP: usize = 10;
     const SAMPLES: usize = 100;
 
     for i in 0..WARMUP {
-        black_box(run_once(
+        black_box(run_probe(
             &ctx,
             &mut stream,
             0x032e + (i as u64 & 0x3ff),
@@ -811,7 +850,7 @@ fn main() {
         std::collections::BTreeMap::new();
 
     for i in 0..SAMPLES {
-        let s = run_once(
+        let s = run_probe(
             &ctx,
             &mut stream,
             0x032e + (i as u64 & 0x3ff),
@@ -906,3 +945,7 @@ fn main() {
 
     println!("{}", serde_json::to_string_pretty(&result).unwrap());
 }
+
+#[cfg(test)]
+#[path = "../builder_lifecycle_tests.rs"]
+mod lifecycle_tests;

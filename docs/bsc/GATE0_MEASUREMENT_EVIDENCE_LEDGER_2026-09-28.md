@@ -3,7 +3,7 @@
 > **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
 
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
-Stand: **2026-09-30**
+Stand: **2026-10-01**
 Primärer Scope: **BSC / Flap / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3**
 
 > Diese Datei ist die eine zentrale menschlich lesbare Quelle für den aktuellen Gate-0-Stand.
@@ -1853,3 +1853,46 @@ Der vorhandene G0.6-Harness verwendet jetzt `src/intent_lane.rs` für die Admiss
 Belege: `gates/bsc/gate0/evidence/g06_intent_lane/result.json` und `test_output.txt`. Das Harness-Ergebnis heißt nun ausdrücklich `PASS_SYNTHETIC_DRY_ONLY`; irreführende Submission-/Replacement-Zähler sind durch Dry-Permits und `actual_submission_lifecycle=NOT_TESTED` ersetzt.
 
 **Grenzen / nächste notwendige Arbeit:** Die Spur ist nur in-memory und nur in den Dry-Harness integriert. Sie wartet konservativ auf die Bestätigung der Vorgänger-Nonce; im Test wird diese simuliert. Das ist keine Lösung für das Head-of-line-Latenzziel. ACKs dürfen später nicht als kanonische Bestätigung gelten. Live-Transport-Anbindung, Wiederanlauf/Reconciliation, Kopfblockierung sowie Live-Sender/-Betrag/-State bleiben unqualifiziert. **G0.6 bleibt PARTIAL**, beide Builder bleiben Kandidaten. Keine value-bearing TX und kein neuer BUY-Latenzwert. Der vorgeschlagene Mainnet-Vertrag bleibt nicht autorisiert.
+
+
+## 2026-10-01 — Builder-Grenze, Head-of-line, Recovery und Empfängerbindung
+
+**G0.6 bleibt PARTIAL. Die konservative Single-Sender-Spur erfüllt das <1-ms-HoL-Ziel bei ungeklärter Vorgänger-Nonce nicht.** Das ist eine nachgewiesene Grenze dieses Modells, kein weiterer fehlender QuickNode-Capture.
+
+### Bestehende Builder-Anbindung, lokal geprüft
+
+`g05_remote_e2e::run_once` verwendet jetzt die bestehende IntentLane unmittelbar vor `write_all/flush`: erst `begin_send()` konsumieren, Ticket/Hash vergleichen, dann erster Write. Fehler nach Teil-Write oder Flush führen zu HALT; kein erneuter Write. Der bestehende Aufbau von Flap-BUY, Signatur, BlockRazor-/48Club-Request bleibt erhalten. Der Stream ist für Tests abstrahiert; im Test werden nur Speicher-Streams verwendet. Die absichtliche Wire-Korruption des bisherigen Diagnosepfads bleibt aktiv.
+
+Vier Adaptertests decken beide Builder-Formate (`noMerge=true` für 48Club), HTTP 200 mit RPC-Fehler bzw. positiver ACK-Antwort, Teil-Write/Flush-Fehler, falschen Hash und falschen Sender ab. ACK/HTTP-Erfolg ruft niemals `confirm()` auf. Positive ACKs auf das bewusst ungültige Payload lösen erwartungsgemäß den abgefangenen Safety-Panic des bisherigen Probes aus; der Nachfolger bleibt gesperrt. **Ein kanonischer Reconciler ist noch nicht implementiert.** Der alte CLI-Diagnosemodus verwendet je ungültiger Probe eine frische Dry-Lane; das ist kein Live-/Restart-Modell und wurde hier nicht ausgeführt.
+
+### Gemessene HoL-Szenarien
+
+Nonce N wird `Sending`, acht nachfolgende Intents sind vollständig vorbereitet. Gemessen wird ab deren jeweiligem `T_actionable`, nicht ab TX-Build. Der Test hält N absichtlich für 25 ms ungeklärt. Die tatsächlich beobachtete Wartezeit inklusive Scheduler beträgt:
+
+| Ende des Szenarios | Blockierte Nachfolger | T_actionable → erste blockierte Freigabe | T_actionable → HALT / simulierte Resolution |
+|---|---:|---:|---:|
+| HALT | 8 | 125–1167 ns | 30.029750–30.048667 ms |
+| SIMULATED_RESOLUTION | 8 | 83–4417 ns | 30.029000–30.043708 ms |
+
+Dies sind zwei gezielte lokale Fehlerszenarien, **keine Netzwerk-/BUY-Latenzen und keine Perzentilschätzung**. Ohne HALT oder separate Resolution gibt es in der Spur keinen zeitlichen Freigabemechanismus; die Blockierung ist strukturell unbeschränkt. Ein schneller `NotReady`-Rückgabewert verkürzt die Wartezeit des BUY nicht. HALT beendet nur den Versuch und macht aus dem blockierten Kauf keinen erfolgreichen Entry.
+
+**Architekturentscheidung vor G0.7:** Eine einzelne confirmation-gated Sender-Spur kann spätere Birth-BUYs verlieren, sobald N unklar bleibt. Mehrere isolierte Sender-Spuren sind ein zu prüfender Ausweg, noch kein bewiesener Gewinn: jede Spur behält ihre Nonce-Abhängigkeiten; zusätzlich braucht es portfolio-weite Intent-Deduplication, Funding und Recovery. Pipelining auf demselben Sender hebt die on-chain Nonce-Abhängigkeit nicht auf. Hier wurde weder automatisch auf Multi-Sender umgebaut noch ein Latenzversprechen abgeleitet.
+
+### Restart: reproduzierter Blocker und minimaler Vertrag
+
+Für **Reserved, Prepared, Sending und Confirmed** wird der Prozesszustand verworfen und die Lane mit bewusst veralteter Start-Nonce rekonstruiert. In allen vier Fällen kann derselbe Token erneut reserviert und ein Permit erzeugt werden. Die positiven Diagnosetests beweisen diese Lücke, keinen Recovery-PASS.
+
+Minimaler Recovery-Vertrag, **Design, noch nicht implementiert**:
+
+1. Vor Scharfschaltung exklusiven Chain-/Sender-Owner, persistente Session-Epoch, kanonischen Checkpoint und begrenzten Nonce-Bereich dauerhaft festhalten. Kein synchroner DB-/Filesystem-Write im späteren Hotpath. Ist die Detailpersistenz beim Crash unvollständig, wird konservativ der gesamte geleaste Bereich quarantänisiert.
+2. Start grundsätzlich DISARMED/QUARANTINED. Persistenz muss Chain, Sender, Epoch, Nonce-Bereich, wirtschaftliche Intent-ID, Token, Empfänger, bekannte TX-Hashes sowie Bestätigungsblock binden. Keine Freigabe aus einer ungeprüft übernommenen `first_nonce`.
+3. Reserved/Prepared nach Crash nicht blind als ungesendet behandeln; Sending niemals automatisch erneut senden; Confirmed nur nach kanonischer Revalidierung und wiederhergestellter Deduplication übernehmen.
+4. Separater Reconciler prüft kanonische Nonce-/TX-/Receipt-/Block-Evidence und Reorgs. ACK, Pending-Nonce, fehlendes Receipt oder abgelaufenes Builder-Fenster allein beweisen nicht, dass eine signierte TX später nicht mehr ausgeführt werden kann.
+5. Unklare Nonces nicht automatisch freigeben, ersetzen oder canceln. Ohne kanonischen Verbrauch oder ausdrücklich geprüften Recovery-Nachweis bleibt die Spur gesperrt. Vor Implementierungsfreigabe Crash-Punkte rund um Persistenz/Write, Reorg, veraltete Epoch und konkurrierenden Prozess testen.
+
+### Empfängerbindung und Gesamtergebnis
+
+256 finale signierte Envelopes über acht parallele Sender-Spuren geprüft: Ticket → Chain/Nonce/Token → Portal-Ziel und dekodierte BUY-Calldata → kryptographisch rekonstruierter Absender. Die direkte Portal-ABI enthält kein separates Recipient-Feld; die Zuordnung Empfänger = direkter Caller gilt unter der bereits eingefrorenen G0.3-Semantik. Dies ist kein neuer Beweis für beliebige zukünftige Implementierungen oder Live-State.
+
+Befehl: `cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --lib --bins -- --nocapture`.
+**21 Tests bestanden, 0 fehlgeschlagen.** Raw-Ausgabe und strukturierte Ergebnisse: `gates/bsc/gate0/evidence/g06_submission_hol_recovery/`. Die Matrix verweist darauf. Kein Mainnet-BUY, kein Netzwerk-Capture, kein neuer G0.5-Microbenchmark. Offen bleiben die HoL-Architekturentscheidung, implementierte persistente Recovery/kanonische Reconciliation sowie die bereits benannte Live-Sender/-Betrag/-State-Qualifikation.

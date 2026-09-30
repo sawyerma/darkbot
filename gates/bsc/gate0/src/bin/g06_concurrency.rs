@@ -512,6 +512,52 @@ mod qualification_tests {
     }
 
     #[test]
+    fn parallel_final_envelopes_bind_ticket_token_and_implicit_recipient() {
+        let (portal, _) = fixture();
+        let count = thread::scope(|scope| {
+            let mut jobs = Vec::new();
+            for worker in 0..8u8 {
+                jobs.push(scope.spawn(move || {
+                    let signer = SigningKey::from_bytes((&[0x40+worker;32]).into()).unwrap();
+                    let pk=signer.verifying_key().to_encoded_point(false);
+                    let address_hash=keccak256(&pk.as_bytes()[1..]);
+                    let recipient=Address::from_slice(&address_hash.as_slice()[12..]);
+                    let mut lane=IntentLane::new(56,recipient,7,32);
+                    for id in 0..32u64 {
+                        let token=derive_token(portal,u64::from(worker)*32+id);
+                        let ticket=lane.reserve(token).unwrap();
+                        let calldata=make_calldata(token,U256::from(1000),U256::from(1));
+                        let raw=sign_legacy(ticket.nonce(),portal,U256::from(1000),&calldata,&signer);
+                        lane.prepare(ticket,keccak256(&raw)).unwrap();
+                        let (permitted,hash)=lane.begin_send().unwrap();
+                        assert_eq!(permitted,ticket);assert_eq!(keccak256(&raw),hash);
+                        let f=fields(&raw);
+                        assert_eq!(U256::from_be_slice(f[0]).to::<u64>(),ticket.nonce());
+                        assert_eq!(f[3],portal.as_slice());
+                        let swap=swapExactInputCall::abi_decode_validate(f[5]).unwrap().params;
+                        let signature=Signature::from_scalars(U256::from_be_slice(f[7]).to_be_bytes::<32>(),U256::from_be_slice(f[8]).to_be_bytes::<32>()).unwrap();
+                        let parity=(U256::from_be_slice(f[6]).to::<u64>()-147) as u8;
+                        let mut unsigned:Vec<Vec<u8>>=f[..6].iter().map(|x|rlp_bytes(x)).collect();
+                        unsigned.extend([rlp_u64(56),rlp_bytes(&[]),rlp_bytes(&[])]);
+                        let recovered=VerifyingKey::recover_from_prehash(keccak256(rlp_list(unsigned)).as_slice(),&signature,RecoveryId::from_byte(parity).unwrap()).unwrap();
+                        let pk=recovered.to_encoded_point(false);let h=keccak256(&pk.as_bytes()[1..]);
+                        let recovered_sender=Address::from_slice(&h.as_slice()[12..]);
+                        // This direct Portal ABI has no recipient argument. The pinned
+                        // G0.3 execution binds acquisition to the direct caller.
+                        assert_eq!(ticket.binding(),(56,recovered_sender,swap.outputToken));
+                        assert_eq!(recovered_sender,recipient);assert_eq!(swap.outputToken,token);
+                        lane.confirm(ticket,hash).unwrap();
+                    }
+                    32usize
+                }));
+            }
+            jobs.into_iter().map(|j|j.join().unwrap()).sum::<usize>()
+        });
+        assert_eq!(count,256);
+        println!("G06_RECIPIENT 256 final envelopes; 8 distinct sender lanes; ticket/token/recovered sender binding PASS; pinned implicit-recipient semantics only");
+    }
+
+    #[test]
     fn diagnostic_duplicate_intent_has_distinct_hash_when_nonce_changes() {
         let (portal, calldata) = fixture();
         let signer = SigningKey::from_bytes((&[0x22; 32]).into()).unwrap();

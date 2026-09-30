@@ -1,0 +1,158 @@
+{
+  "status": "G0.6_PARTIAL",
+  "review_date": "2026-10-01",
+  "command": "cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --lib --bins -- --nocapture",
+  "tests_passed": 21,
+  "tests_failed": 0,
+  "builder_integration": {
+    "status": "PASS_LOCAL_STREAM_DOUBLES_ONLY",
+    "path": "g05_remote_e2e::run_once -> guarded_transport_write -> Write::write_all/flush",
+    "candidates": [
+      "BlockRazor eth_sendBundle",
+      "48Club eth_sendBundle/noMerge=true"
+    ],
+    "permit_consumed_before_first_write": true,
+    "ack_or_http_confirms": false,
+    "partial_write_or_flush_failure": "HALT_NO_RETRY",
+    "wrong_sender_or_hash": "REJECT_BEFORE_WRITE",
+    "wire": "existing deliberately invalid transaction preserved",
+    "canonical_reconciler": "NOT_IMPLEMENTED; adapter never calls confirm; only separate reconciliation may do so",
+    "legacy_cli": "isolated invalid-wire probes reset dry lane per diagnostic sample; not production lifecycle"
+  },
+  "head_of_line": {
+    "status": "FAIL_SUB_1MS_FOR_UNRESOLVED_HEAD_SCENARIO",
+    "samples": [
+      {
+        "actionable_to_first_blocked_ns": [
+          1167,
+          209,
+          208,
+          166,
+          1125,
+          208,
+          166,
+          125
+        ],
+        "actionable_to_outcome_ns": [
+          30048667,
+          30044334,
+          30041916,
+          30039708,
+          30037542,
+          30034166,
+          30031958,
+          30029750
+        ],
+        "blocked_followers": 8,
+        "injected_hold_ns": 25000000,
+        "network_measurement": false,
+        "outcome": "HALT"
+      },
+      {
+        "actionable_to_first_blocked_ns": [
+          166,
+          4417,
+          125,
+          83,
+          541,
+          83,
+          83,
+          125
+        ],
+        "actionable_to_outcome_ns": [
+          30043708,
+          30042167,
+          30036459,
+          30035083,
+          30033750,
+          30031833,
+          30030458,
+          30029000
+        ],
+        "blocked_followers": 8,
+        "injected_hold_ns": 25000000,
+        "network_measurement": false,
+        "outcome": "SIMULATED_RESOLUTION"
+      }
+    ],
+    "interpretation": "25ms artificial unknown-head hold; local elapsed time includes scheduler delay. Not network/inclusion/BUY latency. Current lane has no automatic bounded release; unknown head blocks indefinitely without external intervention."
+  },
+  "recovery": {
+    "status": "BLOCKER_REPRODUCED",
+    "samples": [
+      {
+        "blind_reuse_possible": true,
+        "previous_state": "Reserved",
+        "restart_nonce_source": "deliberately_stale",
+        "status": "BLOCKER_REPRODUCED"
+      },
+      {
+        "blind_reuse_possible": true,
+        "previous_state": "Prepared",
+        "restart_nonce_source": "deliberately_stale",
+        "status": "BLOCKER_REPRODUCED"
+      },
+      {
+        "blind_reuse_possible": true,
+        "previous_state": "Sending",
+        "restart_nonce_source": "deliberately_stale",
+        "status": "BLOCKER_REPRODUCED"
+      },
+      {
+        "blind_reuse_possible": true,
+        "previous_state": "Confirmed",
+        "restart_nonce_source": "deliberately_stale",
+        "status": "BLOCKER_REPRODUCED"
+      }
+    ],
+    "contract": {
+      "status": "DESIGN_ONLY_NOT_IMPLEMENTED",
+      "startup": "Exclusive sender/chain owner with durable session epoch and canonical checkpoint; arm only after independent reconciliation, never from a manually reused first_nonce.",
+      "durability_before_hotpath": "Before arming, durably fence a bounded nonce range/session. A crash quarantines the whole outstanding range if per-intent durability is incomplete. No synchronous filesystem/DB wait is introduced in the hotpath by this design.",
+      "record_fields": [
+        "chain_id",
+        "sender",
+        "epoch",
+        "canonical_checkpoint_hash",
+        "leased_nonce_range",
+        "economic_intent_key(chain,token,policy)",
+        "recipient",
+        "token",
+        "signed_tx_hash where known",
+        "bundle target window where known",
+        "last durable state",
+        "canonical receipt/block hash where confirmed"
+      ],
+      "restart_default": "DISARMED/QUARANTINED. Reserved and Prepared are not assumed unsent when last in-memory transition was lost. Sending is never automatically resent. Confirmed requires canonical revalidation and persistent intent dedup.",
+      "canonical_reconciliation": "Verify chain, sender nonce, tx hash, receipt and canonical block; acquire/cost evidence separately. Handle reorg by quarantine. ACK, pending nonce, missing receipt or expired builder window alone do not prove an unmined signed transaction cannot later execute.",
+      "release": "No automatic reuse or cancellation of ambiguous nonce. Require canonical nonce consumption or explicit reviewed recovery proof. Missing/incomplete history keeps entire relevant lane quarantined.",
+      "multi_lane_constraint": "Independent sender lanes require shared economic-intent admission across senders; per-sender dedup alone permits duplicate portfolio BUYs. No multi-lane deployment is authorized or implemented by this record.",
+      "restart_tests_required": [
+        "crash before/after durable arm",
+        "crash at every reserve/prepare/begin-write/partial-write transition",
+        "lost asynchronous event",
+        "conflicting receipt",
+        "reorg",
+        "second process/stale epoch",
+        "duplicate intent across lanes"
+      ]
+    }
+  },
+  "recipient_binding": {
+    "status": "PASS_PINNED_DIRECT_CALL_ENVELOPE_ONLY",
+    "envelopes": 256,
+    "parallel_sender_lanes": 8,
+    "binding": "ticket chain/sender/token -> recovered signer + nonce + Portal destination + decoded swap outputToken",
+    "semantics": "Direct Portal ABI has no recipient field. Recipient equals direct caller only under pinned G0.3 semantics; this does not requalify future runtime/state."
+  },
+  "nonclaims": [
+    "No live transport invocation",
+    "No QuickNode capture",
+    "No new G0.5 benchmark",
+    "No Mainnet BUY",
+    "No new T_buy measurement",
+    "No recovery implementation",
+    "No G0.6 PASS"
+  ],
+  "test_log_sha256": "ebb7dd2b024602555d0ed6c64ad0ecb2f505aa2652140575d6f49f471ca8980e"
+}
