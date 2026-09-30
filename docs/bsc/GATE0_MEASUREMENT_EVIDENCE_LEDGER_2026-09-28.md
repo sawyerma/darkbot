@@ -1660,3 +1660,35 @@ Evidence:
 **Nächster G0.5-Schritt:** keine weiteren identischen Remote-Builder-Stability-Schleifen. Der Plan sieht als alternativen Inclusion-Pfad ausdrücklich lokalen `bsc-geth/P2P` vor. Dieser Pfad ist jetzt der nächste Kandidat für die finale Transportqualifikation. G0.6 bleibt bis zu dieser Qualifikation noch nicht offiziell eröffnet.
 
 **Non-Claims:** Kein Builder-Inclusion-Nachweis, kein Ordering-Nachweis, kein `T_buy`, kein Mainnet-BUY.
+
+
+---
+
+## 2026-09-30 — G0.5 Local bsc-geth Preflight
+
+Current development machine preflight:
+
+~~~text
+command -v geth       -> no result
+command -v bsc        -> no result
+command -v bsc-geth   -> no result
+find $HOME ... geth.ipc -> no result
+~~~
+
+**Result:** no local geth-compatible BSC node or IPC socket is currently available on this machine. Therefore the local `bsc-geth/P2P` inclusion candidate cannot be measured here without first provisioning and synchronizing a node.
+
+This is an availability result, not a latency failure:
+
+~~~text
+local bsc-geth/P2P candidate = UNAVAILABLE_ON_CURRENT_MACHINE
+T_pre -> local-geth T_send   = N/A
+~~~
+
+Given the current Gate-0 objective is to reach an actual successful BUY/order measurement rather than spend time provisioning infrastructure before it is shown necessary, the available remote builder paths remain the practical G0.6 dry-qualification candidates:
+
+- BlockRazor: preferred current remote candidate; 19/1000 samples >1 ms in G0.5 stability.
+- 48Club: secondary current remote candidate; 22/1000 samples >1 ms in G0.5 stability.
+
+This does not convert either remote path into a final G0.5 PASS and does not remove the local-geth/P2P candidate from the overall architecture. It records that the candidate is presently unavailable for measurement on the current machine.
+
+**Next phase action:** begin G0.6 dry qualification for the available builder candidates and concurrency/nonce validity. No value-bearing transaction is permitted in G0.6.
