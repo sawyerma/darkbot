@@ -16,16 +16,16 @@ from pathlib import Path
 from typing import Any
 
 from darkbot import __version__
-from darkbot.capture import FeedAdapter
+from darkbot.solana_pump.capture import FeedAdapter
 from darkbot.clock import LiveClock, LiveScheduler
-from darkbot.config import ConfigError, RuntimeConfig, load_runtime_config, redact, resolve_feed_endpoints, resolve_rpc_http, sha256_text
-from darkbot.domain import CostEvidence, Readiness, utc_iso
-from darkbot.fees import FeeResolver, http_rpc
-from darkbot.paper import PaperExecutionAdapter, StateOwner
+from darkbot.solana_pump.config import ConfigError, RuntimeConfig, load_runtime_config, redact, resolve_feed_endpoints, resolve_rpc_http, sha256_text
+from darkbot.solana_pump.domain import CostEvidence, Readiness, utc_iso
+from darkbot.solana_pump.fees import FeeResolver, http_rpc
+from darkbot.solana_pump.paper import PaperExecutionAdapter, StateOwner
 from darkbot.runtime.assembly import RuntimeCallbacks, assemble_runtime, build_feeds, preflight_market_profile
-from darkbot.storage import REQUIRED_TABLES, Recorder, SqliteWriter, apply_migrations, integrity_check, mark_interrupted_runs, open_connection, prior_campaign_mints, upsert_config_snapshot, write_readback_test
+from darkbot.solana_pump.storage import REQUIRED_TABLES, Recorder, SqliteWriter, apply_migrations, integrity_check, mark_interrupted_runs, open_connection, prior_campaign_mints, upsert_config_snapshot, write_readback_test
 
-SPEC_PATH = Path(__file__).resolve().parent.parent / "docs" / "SPEC.json"
+SPEC_PATH = Path(__file__).resolve().parent.parent.parent / "docs" / "solana_pump" / "SPEC.json"
 
 
 def code_revision() -> str:
@@ -42,8 +42,8 @@ def economic_profile_samples(owner: Any, basis: Any, now: int, limit: int | None
     Captured unsupported/unknown profiles cannot certify economic PAPER readiness.
     This diagnostic runs outside the BUY critical section and never submits orders.
     """
-    from darkbot.domain import Completeness, InvalidQuote, QuoteScopeStatus, Side
-    from darkbot.execution import fee_terms
+    from darkbot.solana_pump.domain import Completeness, InvalidQuote, QuoteScopeStatus, Side
+    from darkbot.solana_pump.execution import fee_terms
     if not basis.complete or not all(s.is_fresh(now) for s in (basis.protocol, basis.network, basis.rent, basis.priority_policy)):
         return 0
     count = 0
@@ -146,7 +146,7 @@ class Application:
         fee_task = loop.create_task(self.resolver.run_background(self._on_fee_snapshots, self.stop_event), name="fees")
         fx_task = None
         if self.cfg["fx"]["enabled"]:
-            from darkbot.fx import run_fx_background
+            from darkbot.solana_pump.fx import run_fx_background
             fx_task = loop.create_task(run_fx_background(self.cfg["fx"], self.clock, self.owner.on_fx_snapshot, self.stop_event), name="sol-usd-evidence")
         status_task = loop.create_task(self._status_loop(), name="status")
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -324,12 +324,12 @@ def count_live_creator_sells(conn: Any, run_id: str) -> int:
 def doctor_fixture_checks(cfg: RuntimeConfig) -> dict[str, Any]:
     """D04 fixture part: creator-sell, completion and migration decoders on synthetic IDL-layout fixtures (separate from live counts)."""
     from darkbot.clock import ReplayClock, ReplayScheduler
-    from darkbot.domain import EventType, VenueState
-    from darkbot.market import MarketReducer, Normalizer, PumpDecoder, b58encode
-    from darkbot.domain import RawEnvelope
+    from darkbot.solana_pump.domain import EventType, VenueState
+    from darkbot.solana_pump.market import MarketReducer, Normalizer, PumpDecoder, b58encode
+    from darkbot.solana_pump.domain import RawEnvelope
     import base64, json as _json  # noqa: E401
 
-    from darkbot.market import encode_fields, event_discriminator
+    from darkbot.solana_pump.market import encode_fields, event_discriminator
 
     def pk(n: str) -> str:
         return b58encode(n.encode()[:32].ljust(32, b"\0"))
@@ -453,8 +453,8 @@ async def run_doctor(cfg: RuntimeConfig, db_path: Path, campaign: str = "doctor"
     # D06: recorder/quality/report/offline replay of the same probe
     d06: dict[str, Any] = {"status": "FAIL"}
     try:
-        from darkbot.replay import load_replay_input, run_replay, digest
-        from darkbot.reporting import Reporter
+        from darkbot.solana_pump.replay import load_replay_input, run_replay, digest
+        from darkbot.solana_pump.reporting import Reporter
 
         conn = open_connection(db_path)
         report = Reporter(conn).build(app.run_id)
