@@ -349,7 +349,7 @@ class RuntimeConfig:
 
 
 def feature_contract_content(research: dict[str, Any]) -> dict[str, Any]:
-    from darkbot.strategy import FEATURE_NAMES  # local import keeps config free of strategy at import time
+    from darkbot.solana_pump.strategy import FEATURE_NAMES  # local import keeps config free of strategy at import time
 
     return {"feature_set_v1": "FEATURE_CONTRACT_V1_LEGACY", "feature_set_v2": research["active_feature_set"], "names": list(FEATURE_NAMES),
             "ratio_decimal_places": research["feature_ratio_decimal_places"], "first_buyer_window": research["feature_first_buyer_window"],
@@ -511,7 +511,7 @@ def _cross_checks(raw: dict[str, Any]) -> None:
 def _check_legacy_backend_strategy(st: dict[str, Any]) -> None:
     """Strategy C = the old backend's policy. Free parameters are exactly the old StrategyConfig fields; what the old
     PAPER runtime hard-wired (creator exit, target exit, swap-budget sizing) is not configurable here either."""
-    from darkbot.strategies.strategy_c_legacy_backend import parse_filters
+    from darkbot.solana_pump.strategies.strategy_c_legacy_backend import parse_filters
 
     max_filters = 8  # old contract strategy.max_filters
     if len(st["filters"]) > max_filters:
