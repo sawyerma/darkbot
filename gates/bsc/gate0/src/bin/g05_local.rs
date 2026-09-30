@@ -336,8 +336,8 @@ fn run_once(
         rlp_u256(ctx.input),
         rlp_bytes(&calldata),
         rlp_u64(v),
-        rlp_bytes(&sig_bytes[..32]),
-        rlp_bytes(&sig_bytes[32..]),
+        rlp_u256(U256::from_be_slice(&sig_bytes[..32])),
+        rlp_u256(U256::from_be_slice(&sig_bytes[32..])),
     ]);
 
     let t5 = Instant::now();

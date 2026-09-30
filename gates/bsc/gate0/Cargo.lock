@@ -726,6 +726,7 @@ name = "darkbot-gate0"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-sol-types",
  "hex",
  "k256",

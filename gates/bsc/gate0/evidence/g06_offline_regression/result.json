@@ -1,0 +1,42 @@
+{
+  "status": "G0.6_PARTIAL",
+  "command_before": "cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --bin g06_concurrency -- --nocapture",
+  "command_after": "cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --bins -- --nocapture",
+  "before": {
+    "tests_passed": 2,
+    "tests_failed": 1,
+    "regression": "noncanonical signature scalar s, test key byte 34, nonce 206"
+  },
+  "after": {
+    "tests_passed": 6,
+    "tests_failed": 0,
+    "signed_envelopes_verified": 1024,
+    "short_signature_scalars": 10,
+    "test_signers": 2,
+    "independent_RLP_decoder": "alloy-rlp 0.3.16",
+    "sender_recovery": true,
+    "low_s": true
+  },
+  "fix": "Encode ECDSA r/s as minimal RLP integers in all five existing harness serializers; no new BUY implementation",
+  "limitations_reproduced": [
+    "Same economic intent with different nonces produces distinct hashes, so hash uniqueness does not establish idempotency",
+    "Atomic nonce allocation does not order completion; test forces [8,7] completion without sleeps"
+  ],
+  "remaining": [
+    "Submission lifecycle deduplication and nonce-gap policy not implemented/proven",
+    "Head-of-line latency not proven",
+    "New live sender/amount/current-state validity not proven"
+  ],
+  "scope": "Canonical-envelope regression exercises g06 signer; other four serializer corrections compile in cargo test --bins but have no direct envelope tests",
+  "safety": {
+    "network_submission": false,
+    "funded_wallet": false,
+    "mainnet_buy": false,
+    "new_latency_measurement": false
+  },
+  "reference": "https://ethereum.org/developers/docs/data-structures-and-encoding/rlp/",
+  "logs": {
+    "before.txt": "9b31cd3c08afe301f9c5e00e2e5829280103a766a65464e356cfeaea7bac7680",
+    "after.txt": "09ab302d3aa7c83c1c4a6e4847f3e9ad411b5d3574bbbd1090886c0eef2d5aa0"
+  }
+}

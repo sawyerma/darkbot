@@ -113,5 +113,7 @@
     "No T_buy latency",
     "No end-to-end live pending-to-valid-builder-acceptance proof",
     "Terminal summaries are evidence records, not independently rerun raw samples"
-  ]
+  ],
+  "followup_evidence": "gates/bsc/gate0/evidence/g06_offline_regression/result.json",
+  "followup_status": "Signature RLP defect fixed; deduplication and completion-order limitations reproduced offline; G0.6 remains PARTIAL"
 }

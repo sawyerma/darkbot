@@ -1821,3 +1821,24 @@ Maschinenlesbar: `gates/bsc/gate0/evidence/g01_mainnet_acceptance_proposal_v1.js
 - Vor Sendefreigabe: echte G0.6-Lücken schließen, Sender/Empfänger, frischen State, kleinen Betrag sowie Bundle-Gültigkeit/Expiry und Deadline-Policy trocken validieren und binden. Anschließend Stephans ausdrückliche Freigabe für Vertragsversion und Gesamtbetrag einholen. Aktuell **approved=false**.
 
 **Kein echter BUY in dieser Prüfung. Keine neue T_buy-Zahl.** Ohne vertrauenswürdigen Intra-Block-Zeitstempel liefern spätere G0.7/G0.8-Versuche Acquisition + Ordering; Blockabstände werden nicht als BUY-Latenz ausgegeben.
+
+
+## 2026-09-30 — Offline-Signaturregression und Concurrency-Gegenbeispiele
+
+Die gezielte Offline-Prüfung fand einen echten Envelope-Fehler: fünf bestehende G0.5/G0.6-Serializer kodierten ECDSA `r`/`s` als feste 32-Byte-Strings. Führende Nullbytes sind bei RLP-Integern unzulässig ([Ethereum RLP-Spezifikation](https://ethereum.org/developers/docs/data-structures-and-encoding/rlp/)). Korrektur: bestehendes `rlp_u256` auf den jeweiligen Signatur-Integer anwenden. Kein neuer BUY-Pfad, keine Änderung an Quote oder Solana.
+
+Reproduzierbare Befehle, jeweils vom Repo-Root:
+
+```sh
+cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --bin g06_concurrency -- --nocapture
+cargo test --offline --manifest-path gates/bsc/gate0/Cargo.toml --bins -- --nocapture
+```
+
+Vor der Korrektur: 2 Tests bestanden, Signaturtest fehlgeschlagen bei Test-Key-Byte 34, Nonce 206, Feld `s` mit führendem Nullbyte. Danach: insgesamt 6 Tests bestanden, 0 fehlgeschlagen. Der G0.6-Test dekodiert 1.024 echte Offline-Signaturen unabhängig mit alloy-rlp, prüft Integer-Kanonizität, Low-s, Ziel/Calldata und rekonstruiert den korrekten Absender für zwei nicht finanzierte Testschlüssel; zehn Signaturwerte benötigen weniger als 32 Bytes. Die vier anderen korrigierten Serializer sind mitkompiliert, haben aber noch keinen eigenen Envelope-Integrationstest.
+
+Zwei erfolgreiche **Diagnosetests belegen Grenzen**, nicht bestandene Sicherheitsanforderungen:
+
+- Identische BUY-Calldata mit Nonces 7 und 8 ergibt unterschiedliche Hashes: Hash-Eindeutigkeit verhindert keinen doppelten wirtschaftlichen BUY.
+- Kontrollierte Thread-Reihenfolge ohne Sleep ergibt Completion `[8, 7]` trotz atomarer eindeutiger Nonces. Allocation beweist weder geordneten Versand noch Verhalten bei einer Nonce-Lücke.
+
+Raw-Testausgaben und maschinenlesbares Ergebnis liegen unter `gates/bsc/gate0/evidence/g06_offline_regression/`. Historische Transportmessungen bleiben historische Evidence der damaligen Binärdateien; der Fix ist kein neuer Latenznachweis. **G0.6 bleibt PARTIAL**: Submission-Idempotenz/Nonce-Lifecycle, Head-of-line und Live-Sender/-Betrag/-State noch offen. Kein Mainnet-BUY, kein RPC-Capture, kein T_buy-Messwert.

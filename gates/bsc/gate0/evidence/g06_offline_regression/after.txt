@@ -1,0 +1,75 @@
+   Compiling darkbot-gate0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/gates/bsc/gate0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running unittests src/main.rs (gates/bsc/gate0/target/debug/deps/darkbot_gate0-7494021c8d007808)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g03.rs (gates/bsc/gate0/target/debug/deps/g03-db86b9e93ebde0bd)
+
+running 3 tests
+
+thread 'tests::reject_unbounded_slippage' (64151) panicked at src/bin/g03.rs:47:5:
+invalid test slippage policy
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test tests::minimum_keeps_exact_integer_bound ... ok
+test tests::widened_product_does_not_wrap ... ok
+test tests::reject_unbounded_slippage - should panic ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_e2e_local.rs (gates/bsc/gate0/target/debug/deps/g05_e2e_local-2e766135f49c0634)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_ipc.rs (gates/bsc/gate0/target/debug/deps/g05_ipc-5013fe1211f11e82)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_local.rs (gates/bsc/gate0/target/debug/deps/g05_local-f2d7cedc05bcbeba)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_remote_e2e.rs (gates/bsc/gate0/target/debug/deps/g05_remote_e2e-4c5dc76d79ec6386)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_remote_e2e_stability.rs (gates/bsc/gate0/target/debug/deps/g05_remote_e2e_stability-d0d9f350e8999cae)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g05_remote_transport.rs (gates/bsc/gate0/target/debug/deps/g05_remote_transport-c42702d875756045)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g06_concurrency.rs (gates/bsc/gate0/target/debug/deps/g06_concurrency-e05e0821b04b8e1a)
+
+running 3 tests
+LIMITATION_REPRODUCED: unique nonces complete out of order; no dispatch or nonce-gap guarantee
+test qualification_tests::diagnostic_atomic_nonce_allocation_does_not_order_completion ... ok
+LIMITATION_REPRODUCED: same economic intent, two distinct hashes; hash uniqueness is not deduplication
+test qualification_tests::diagnostic_duplicate_intent_has_distinct_hash_when_nonce_changes ... ok
+1024 envelopes validated; short signature scalars=10
+test qualification_tests::signed_envelopes_are_canonical_and_recover_the_correct_sender ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.47s
+
+     Running unittests src/bin/g06_flap_pending_decode.rs (gates/bsc/gate0/target/debug/deps/g06_flap_pending_decode-f7147fd8d27a1486)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

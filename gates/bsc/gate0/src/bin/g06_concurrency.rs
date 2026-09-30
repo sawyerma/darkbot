@@ -143,8 +143,8 @@ fn sign_legacy(
         rlp_u256(input),
         rlp_bytes(calldata),
         rlp_u64(v),
-        rlp_bytes(&sig_bytes[..32]),
-        rlp_bytes(&sig_bytes[32..]),
+        rlp_u256(U256::from_be_slice(&sig_bytes[..32])),
+        rlp_u256(U256::from_be_slice(&sig_bytes[32..])),
     ])
 }
 
@@ -395,4 +395,102 @@ fn main() {
         }))
         .unwrap()
     );
+}
+
+
+#[cfg(test)]
+mod qualification_tests {
+    use super::*;
+    use alloy_rlp::Header;
+    use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+    use std::sync::mpsc;
+
+    fn fields(raw: &[u8]) -> Vec<&[u8]> {
+        let mut envelope = raw;
+        let mut body = Header::decode_bytes(&mut envelope, true).unwrap();
+        assert!(envelope.is_empty());
+        let mut fields = Vec::new();
+        while !body.is_empty() {
+            fields.push(Header::decode_bytes(&mut body, false).unwrap());
+        }
+        assert_eq!(fields.len(), 9);
+        fields
+    }
+
+    fn fixture() -> (Address, Vec<u8>) {
+        let portal = Address::from_str("0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0").unwrap();
+        let token = Address::from_str("0xabe1fe16cf6bc48c9524713054efe6e954b17777").unwrap();
+        (portal, make_calldata(token, U256::from(1000), U256::from(1)))
+    }
+
+    #[test]
+    fn signed_envelopes_are_canonical_and_recover_the_correct_sender() {
+        let (portal, calldata) = fixture();
+        let mut shortened_scalars = 0;
+        // Offline signatures only, no transport; these are disposable test keys.
+        for key_byte in [0x22, 0x33] {
+            let signer = SigningKey::from_bytes((&[key_byte; 32]).into()).unwrap();
+            for nonce in 0..512 {
+                let raw = sign_legacy(nonce, portal, U256::from(1000), &calldata, &signer);
+                let f = fields(&raw);
+                for i in [0, 1, 2, 4, 6, 7, 8] {
+                    assert_ne!(f[i].first(), Some(&0), "noncanonical integer: key={key_byte} nonce={nonce} field={i}");
+                }
+                assert_eq!(f[3], portal.as_slice());
+                assert_eq!(f[5], calldata);
+                let parity = U256::from_be_slice(f[6]).to::<u64>() - 147;
+                assert!(parity <= 1);
+                let signature = Signature::from_scalars(
+                    U256::from_be_slice(f[7]).to_be_bytes::<32>(),
+                    U256::from_be_slice(f[8]).to_be_bytes::<32>(),
+                ).unwrap();
+                assert!(signature.normalize_s().is_none(), "high-s signature");
+                let mut unsigned: Vec<Vec<u8>> = f[..6].iter().map(|x| rlp_bytes(x)).collect();
+                unsigned.extend([rlp_u64(56), rlp_bytes(&[]), rlp_bytes(&[])]);
+                let digest = keccak256(rlp_list(unsigned));
+                let recovered = VerifyingKey::recover_from_prehash(
+                    digest.as_slice(), &signature, RecoveryId::from_byte(parity as u8).unwrap()
+                ).unwrap();
+                assert_eq!(&recovered, signer.verifying_key());
+                shortened_scalars += usize::from(f[7].len() < 32) + usize::from(f[8].len() < 32);
+            }
+        }
+        assert!(shortened_scalars > 0, "regression vectors must exercise short signature scalars");
+        println!("1024 envelopes validated; short signature scalars={shortened_scalars}");
+    }
+
+    #[test]
+    fn diagnostic_duplicate_intent_has_distinct_hash_when_nonce_changes() {
+        let (portal, calldata) = fixture();
+        let signer = SigningKey::from_bytes((&[0x22; 32]).into()).unwrap();
+        let a = sign_legacy(7, portal, U256::from(1000), &calldata, &signer);
+        let b = sign_legacy(8, portal, U256::from(1000), &calldata, &signer);
+        assert_ne!(keccak256(&a), keccak256(&b));
+        assert_eq!(fields(&a)[5], fields(&b)[5]);
+        println!("LIMITATION_REPRODUCED: same economic intent, two distinct hashes; hash uniqueness is not deduplication");
+    }
+
+    #[test]
+    fn diagnostic_atomic_nonce_allocation_does_not_order_completion() {
+        let next = AtomicU64::new(7);
+        let (allocated_tx, allocated_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let completed = Mutex::new(Vec::new());
+        thread::scope(|scope| {
+            let completed = &completed;
+            let next = &next;
+            scope.spawn(move || {
+                let first = next.fetch_add(1, Ordering::SeqCst);
+                allocated_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                completed.lock().unwrap().push(first);
+            });
+            allocated_rx.recv().unwrap();
+            let second = next.fetch_add(1, Ordering::SeqCst);
+            completed.lock().unwrap().push(second);
+            release_tx.send(()).unwrap();
+        });
+        assert_eq!(*completed.lock().unwrap(), vec![8, 7]);
+        println!("LIMITATION_REPRODUCED: unique nonces complete out of order; no dispatch or nonce-gap guarantee");
+    }
 }
