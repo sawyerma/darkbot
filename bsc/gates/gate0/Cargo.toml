@@ -27,6 +27,7 @@ reth-eth-wire = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" 
 reth-eth-wire-types = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-ethereum-forks = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-network-peers = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth-network-api = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-metrics = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-primitives-traits = { git = "https://github.com/bnb-chain/reth-core.git", branch = "v0.3.1-v2", default-features = false }
 bytes = "1"
