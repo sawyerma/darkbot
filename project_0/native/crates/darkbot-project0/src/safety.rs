@@ -148,21 +148,26 @@ impl Safety {
     /// Reconciled-Ergebnis eines Versuchs. `realized_pnl` ist der **echte** Netto-Wert aus
     /// Token-Deltas, Fees, Tips — nicht der geplante.
     /// `exposure_released`: freigegebenes Kapital; `inventory_delta`: gehaltenes Collateral (NO_SWAP) ±.
-    pub fn record_outcome(&mut self, now_unix_s: u64, landed_success: bool, realized_pnl: i128, exposure_released: u64, inventory_delta: i128) {
+    /// [FIX-24] `realized_pnl: None` = UNKNOWN → Buchhaltung schließt, aber HALT(UnknownEconomics):
+    /// ein unbekannter Ausgang darf das Tagesbudget nicht besser aussehen lassen.
+    pub fn record_outcome(&mut self, now_unix_s: u64, landed_success: bool, realized_pnl: Option<i128>, exposure_released: u64, inventory_delta: i128) {
         self.roll_day(now_unix_s);
         self.outstanding = self.outstanding.saturating_sub(1);
         self.open_positions = self.open_positions.saturating_sub(1);
         self.capital_in_use = self.capital_in_use.saturating_sub(exposure_released);
         self.inventory_outstanding = (self.inventory_outstanding as i128 + inventory_delta).max(0) as u64;
-        self.day.realized_pnl += realized_pnl;
+        match realized_pnl {
+            Some(p) => self.day.realized_pnl += p,
+            None => self.halt(HaltReason::UnknownEconomics),
+        }
         if !landed_success {
             self.day.failed_attempts += 1;
         }
         if -self.day.realized_pnl >= self.limits.max_daily_loss as i128 {
-            self.halt(HaltReason::UnknownEconomics); // Limit-Halt; Grundtext im Ledger: DAILY_LOSS
+            self.halt(HaltReason::LimitBreached); // [FIX-12]
         }
         if self.day.failed_attempts >= self.limits.max_failed_attempts_per_day {
-            self.halt(HaltReason::UnknownEconomics);
+            self.halt(HaltReason::LimitBreached); // [FIX-12]
         }
     }
 
@@ -206,12 +211,12 @@ mod tests {
         assert_eq!(s.check(0, 50, 1, 1, &[solana_sdk::pubkey::Pubkey::new_unique()], "longtail"), Err(Deny::AssetNotAllowed));
         assert_eq!(s.check(0, 50, 1, 1, &[], "longtail"), Ok(()));
         assert_eq!(s.check(0, 50, 1, 1, &[], "longtail"), Err(Deny::Outstanding));
-        s.record_outcome(0, false, -30, 50, 0);
+        s.record_outcome(0, false, Some(-30), 50, 0);
         assert_eq!(s.check(0, 50, 1, 1, &[], "longtail"), Ok(()));
         s.release_without_outcome(50);
         assert_eq!(s.capital_in_use(), 0);
         s.check(0, 50, 1, 1, &[], "longtail").unwrap();
-        s.record_outcome(0, false, -30, 50, 0); // Tagesverlust 60 ≥ 50 → HALT
+        s.record_outcome(0, false, Some(-30), 50, 0); // Tagesverlust 60 ≥ 50 → HALT
         assert!(matches!(s.check(0, 50, 1, 1, &[], "longtail"), Err(Deny::Halted(_))));
     }
 
@@ -230,7 +235,7 @@ mod tests {
         assert_eq!(s.check(0, 1, 1, 1, &[], "longtail"), Err(Deny::LiveDisabled));
         let mut s = Safety::new(lim(), allow(), true);
         s.check(0, 1, 1, 1, &[], "longtail").unwrap();
-        s.record_outcome(0, false, -10, 1, 0);
+        s.record_outcome(0, false, Some(-10), 1, 0);
         assert_eq!(s.day().failed_attempts, 1);
         s.check(86_400, 1, 1, 1, &[], "longtail").unwrap();
         assert_eq!(s.day().failed_attempts, 0, "neuer Tag");

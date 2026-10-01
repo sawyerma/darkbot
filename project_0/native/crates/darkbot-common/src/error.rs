@@ -14,6 +14,8 @@ pub enum HaltReason {
     UnknownIntegration,
     UnknownEconomics,
     UnknownVersion,
+    /// [FIX-12] Safety-Limit verletzt (Daily Loss / Failed Attempts) — kein Protokollfehler.
+    LimitBreached,
     Shutdown,
 }
 
@@ -29,6 +31,7 @@ impl HaltReason {
             HaltReason::UnknownIntegration => "UNKNOWN_INTEGRATION",
             HaltReason::UnknownEconomics => "UNKNOWN_ECONOMICS",
             HaltReason::UnknownVersion => "UNKNOWN_VERSION",
+            HaltReason::LimitBreached => "LIMIT_BREACHED",
             HaltReason::Shutdown => "SHUTDOWN",
         }
     }

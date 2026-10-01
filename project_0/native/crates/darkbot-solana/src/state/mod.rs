@@ -313,7 +313,9 @@ impl StateCore {
             match self.accounts.get(&r.pubkey) {
                 None => rep.missing_local.push(r.pubkey),
                 Some(local) => {
-                    if local.slot > snapshot_slot {
+                    // [FIX-28] accountbezogen gegen den Context-Slot **dieses** Remote-Accounts,
+                    // nicht gegen den globalen Lower-Bound (Batches haben verschiedene Slots).
+                    if local.slot > r.slot {
                         continue;
                     }
                     if local.data != r.data || local.lamports != r.lamports || local.owner != r.owner {
@@ -432,6 +434,20 @@ mod tests {
         let rep = st.reconcile(8, &[upd(pk, 8, None, 1)]);
         assert!(rep.is_clean());
         assert!(st.confirm_ready().is_tradable());
+    }
+
+    #[test]
+    fn reconcile_mixed_slot_batches_detects_stale_local() {
+        // [FIX-28] Regression: lower bound 100, lokal Slot 105, remote (zweiter Batch) Slot 110 mit anderen Daten.
+        let mut st = StateCore::new(10);
+        let pk = Pubkey::new_unique();
+        st.install_snapshot(100, vec![upd(pk, 105, None, 1)]);
+        let rep = st.reconcile(100, &[upd(pk, 110, None, 2)]);
+        assert_eq!(rep.mismatch, vec![pk], "lokal 105 < remote 110 muss verglichen werden");
+        let mut st = StateCore::new(10);
+        st.install_snapshot(100, vec![upd(pk, 120, None, 1)]);
+        let rep = st.reconcile(100, &[upd(pk, 110, None, 2)]);
+        assert!(rep.is_clean(), "lokal 120 > remote 110 → lokal neuer, kein Mismatch");
     }
 
     #[test]

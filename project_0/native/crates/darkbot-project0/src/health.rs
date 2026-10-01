@@ -12,7 +12,7 @@
 //! Post-Health (Maintenance, Cached) ≥ Pre-Health; Equity-Assets < 5 USD → Closeout erlaubt.
 //!
 //! remaining_accounts: aktive Banks **absteigend** nach Pubkey, je Bank `bank` + Oracle-/Integrations-
-//! Accounts gemäß `protocol::remaining_layout` (get_remaining_accounts_per_bank).
+//! Accounts gemäß `crate_impl::bank_observation_keys` (= p0-cli::bank_observation_keys).
 //!
 //! Status: Feature `crate_health` — UNTESTED / VERIFY (Compile gegen Tag; Pyth-PDA-Ableitung).
 
@@ -85,12 +85,40 @@ pub trait AccountSource {
 #[cfg(feature = "crate_health")]
 pub mod crate_impl {
     use super::*;
-    use crate::protocol::{self, RemainingLayout};
     use marginfi::state::marginfi_account::get_health_components;
     use marginfi_type_crate::types::{Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, RequirementType};
     use solana_sdk::account::Account;
     use solana_sdk::account_info::IntoAccountInfo;
     use solana_sdk::clock::Clock;
+
+    /// [FIX-27] 1:1-Semantik von `p0-cli::bank_observation_keys`. Unbekannte Variante → fail closed.
+    pub fn bank_observation_keys(bank: &Bank) -> Result<Vec<Pubkey>, HealthError> {
+        use marginfi_type_crate::types::OracleSetup as O;
+        let keys = &bank.config.oracle_keys;
+        let mut out = match bank.config.oracle_setup {
+            O::None | O::Fixed => vec![],
+            O::FixedKamino | O::FixedDrift | O::FixedJuplend => vec![keys[1]],
+            O::StakedWithPythPush => {
+                let onramp = if keys[3] != Pubkey::default() {
+                    keys[3]
+                } else if bank.integration_acc_1 != Pubkey::default() {
+                    marginfi_type_crate::pdas::derive_staked_onramp_from_vote(bank.integration_acc_1)
+                } else {
+                    Pubkey::default()
+                };
+                vec![keys[0], keys[1], keys[2], onramp]
+            }
+            O::PythLegacy | O::SwitchboardV2 | O::PythPushOracle | O::SwitchboardPull | O::Scope | O::PTFixed => vec![keys[0]],
+            O::KaminoPythPush | O::KaminoSwitchboardPull | O::DriftPythPull | O::DriftSwitchboardPull
+            | O::SolendPythPull | O::SolendSwitchboardPull | O::JuplendPythPull | O::JuplendSwitchboardPull => vec![keys[0], keys[1]],
+            O::PythMSOL | O::PythLST | O::PTPyth => vec![keys[0], keys[1]],
+            O::KaminoMSOL | O::JuplendMSOL | O::KaminoLST | O::JuplendLST => vec![keys[0], keys[1], keys[2]],
+            #[allow(unreachable_patterns)]
+            other => return Err(HealthError::Unsupported(format!("OracleSetup {:?} (0.1.12-Typ? → P1B)", other))),
+        };
+        out.retain(|pk| *pk != Pubkey::default());
+        Ok(out)
+    }
 
     pub struct CrateHealth<'s, S: AccountSource> {
         pub state: &'s S,
@@ -109,39 +137,18 @@ pub mod crate_impl {
             self.state.account(k).ok_or(HealthError::MissingAccount(*k))
         }
 
-        /// VERIFY: Pyth-Push-PDA (oracle_keys[0] = feed_id) und Extra-Account-Indizes.
+        /// [FIX-27] Observation-Accounts **exakt wie `p0-cli/src/utils.rs::bank_observation_keys`**
+        /// (mrgn-0.1.11-rc1): Banks absteigend nach Pubkey; je Bank `bank` + Keys aus
+        /// `bank.config.oracle_keys` gemäß `OracleSetup`-Enum — keine eigene PDA-Ableitung, keine u8-Magie.
         pub fn observation(&self, acc: &MarginfiAccount) -> Result<Vec<Pubkey>, HealthError> {
             let mut banks: Vec<Pubkey> = acc.lending_account.balances.iter().filter(|b| b.is_active()).map(|b| b.bank_pk).collect();
             banks.sort_by(|a, b| b.cmp(a));
-            let mut out = Vec::with_capacity(banks.len() * 3);
+            let mut out = Vec::with_capacity(banks.len() * 4);
             for bk in banks {
                 let (_, _, data) = self.raw(&bk)?;
                 let bank: &Bank = load(data)?;
-                let setup = bank.config.oracle_setup as u8;
-                let tag = bank.config.asset_tag;
-                let layout = protocol::remaining_layout(setup, tag)
-                    .ok_or_else(|| HealthError::Unsupported(format!("oracle_setup {} asset_tag {}", setup, tag)))?;
-                let keys = &bank.config.oracle_keys;
-                let oracle = match setup {
-                    3 | 5 | 6 | 9 | 11 | 15 | 19 | 20 | 21 | 22 | 23 | 24 | 25 => protocol::pyth_push_price_pda(&keys[0].to_bytes()),
-                    _ => keys[0],
-                };
                 out.push(bk);
-                match layout {
-                    RemainingLayout::Fixed => {}
-                    RemainingLayout::BankOracle => out.push(oracle),
-                    RemainingLayout::BankIntegration => out.push(bank.integration_acc_1),
-                    RemainingLayout::BankOracleIntegration => { out.push(oracle); out.push(bank.integration_acc_1); }
-                    RemainingLayout::BankOracleExtra => { out.push(oracle); out.push(keys[1]); }
-                    RemainingLayout::BankOracleIntegrationExtra => { out.push(oracle); out.push(bank.integration_acc_1); out.push(keys[1]); }
-                    RemainingLayout::Staked => {
-                        out.push(oracle);
-                        out.push(keys[1]);
-                        out.push(keys[2]);
-                        let onramp = if keys[3] != Pubkey::default() { keys[3] } else { marginfi_type_crate::pdas::derive_staked_onramp_from_vote(bank.integration_acc_1) };
-                        out.push(onramp);
-                    }
-                }
+                out.extend(bank_observation_keys(bank)?);
             }
             Ok(out)
         }
@@ -198,4 +205,27 @@ pub mod crate_impl {
             Ok(0)
         }
     }
+}
+
+/// [FIX-26] Externe Abhängigkeiten aller Banks im State (Oracle-PDAs/-Keys, Integrations-Accounts,
+/// Mints, Extra-Keys) — damit Ingress/Snapshot sie **vor** der ersten Health-Berechnung halten.
+/// Kein RPC hier; nur Ableitung aus dem RAM-State.
+#[cfg(feature = "crate_health")]
+pub fn dependency_keys<S: AccountSource>(state: &S, program: &Pubkey, banks: &[Pubkey]) -> Vec<Pubkey> {
+    use crate::protocol;
+    use marginfi_type_crate::types::Bank;
+    let mut out: Vec<Pubkey> = Vec::new();
+    for bk in banks {
+        let Some((owner, _, data)) = state.account(bk) else { continue };
+        if &owner != program || protocol::classify(data) != protocol::AccountType::Bank { continue; }
+        let need = 8 + std::mem::size_of::<Bank>();
+        if data.len() < need { continue; }
+        let Ok(bank) = bytemuck::try_from_bytes::<Bank>(&data[8..need]) else { continue };
+        out.push(bank.mint);
+        // [FIX-27] dieselbe Quelle wie die Health-Observation (p0-cli-Semantik).
+        if let Ok(keys) = crate_impl::bank_observation_keys(bank) { out.extend(keys); }
+    }
+    out.sort_unstable_by_key(|k| k.to_bytes());
+    out.dedup();
+    out
 }

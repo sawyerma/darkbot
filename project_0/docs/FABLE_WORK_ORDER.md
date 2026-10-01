@@ -57,4 +57,4 @@ Nicht bei Kleinigkeiten rückfragen. Bei einem echten Blocker in `MEASUREMENT_LE
 
 ## Umgebung (muss auf dem Mac vorhanden sein)
 
-Rust stable ≥ 1.85, `protoc`, Python 3.12 mit `solders`/`solana-py`, `HELIUS_API_KEY` (Free) in der Shell, Git-Lesezugriff auf `0dotxyz/marginfi-v2` und `0dotxyz/eva01`, Repo-Checkout mit `project_0/docs/`, `project_0/native/` und `project_0/docs/MEASUREMENT_LEDGER.md`.
+Rust stable ≥ 1.85, `protoc`, Python 3.12 mit `solders`/`solana-py`, `HELIUS_API_KEY` (Free) in der Shell, Git-Lesezugriff auf `0dotxyz/marginfi-v2` und `0dotxyz/eva01`, Repo-Checkout mit `project_0/docs/` und leerem `MEASUREMENT_LEDGER.md`.

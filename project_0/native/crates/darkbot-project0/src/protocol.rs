@@ -128,43 +128,8 @@ pub fn bank_layout(raw_len: usize) -> Option<&'static str> {
     }
 }
 
-/// Remaining-Accounts pro Bank (get_remaining_accounts_per_bank, BELEGT). Banks in
-/// **absteigender** Pubkey-Reihenfolge, je Bank: bank, dann Oracle-/Integrations-Accounts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RemainingLayout {
-    /// bank
-    Fixed,
-    /// bank, oracle
-    BankOracle,
-    /// bank, oracle, integration (Kamino reserve / Drift spot market / JupLend lending state / Solend)
-    BankOracleIntegration,
-    /// bank, integration (Fixed + Integration, kein Oracle)
-    BankIntegration,
-    /// bank, pyth, marinade state  |  bank, pyth, spl stake pool  |  bank, pyth, exponent vault
-    BankOracleExtra,
-    /// bank, pyth, integration, marinade/stakepool
-    BankOracleIntegrationExtra,
-    /// bank, oracle, lst mint, lst pool, onramp (ASSET_TAG_STAKED)
-    Staked,
-}
-
-/// Aus OracleSetup (u8) und asset_tag (u8). Unbekannt → None → fail closed (UNKNOWN_ORACLE).
-pub fn remaining_layout(oracle_setup: u8, asset_tag: u8) -> Option<RemainingLayout> {
-    use RemainingLayout::*;
-    Some(match oracle_setup {
-        8 => Fixed,                       // Fixed
-        13 | 14 | 17 | 26 => BankIntegration, // FixedKamino, FixedDrift, FixedJuplend, PTFixed(exponent vault)
-        19 | 22 | 25 => BankOracleExtra,  // PythMSOL, PythLST, PTPyth
-        20 | 21 | 23 | 24 => BankOracleIntegrationExtra, // KaminoMSOL, JuplendMSOL, KaminoLST, JuplendLST
-        0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 9 | 10 | 11 | 12 | 15 | 16 | 18 => match asset_tag {
-            0 | 1 => BankOracle,                 // DEFAULT, SOL
-            3 | 4 | 5 | 6 => BankOracleIntegration, // KAMINO, DRIFT, SOLEND, JUPLEND
-            2 => Staked,
-            _ => return None,
-        },
-        _ => return None, // 27/28 (ScopeKamino/ScopeJuplend) erst 0.1.12 → P1B
-    })
-}
+/// [FIX-27] Observation-Layout kommt ausschließlich aus `health::crate_impl::bank_observation_keys`
+/// (OracleSetup-Enum des Type-Crates) — keine numerische Rekonstruktion mehr.
 
 #[cfg(test)]
 mod tests {
@@ -177,10 +142,6 @@ mod tests {
         assert_eq!(classify(&d), AccountType::Bank);
         assert_eq!(bank_layout(d.len()), Some("0.1.11"));
         assert_eq!(bank_layout(100), None);
-        assert_eq!(remaining_layout(3, 0), Some(RemainingLayout::BankOracle));
-        assert_eq!(remaining_layout(6, 3), Some(RemainingLayout::BankOracleIntegration));
-        assert_eq!(remaining_layout(5, 2), Some(RemainingLayout::Staked));
-        assert_eq!(remaining_layout(27, 0), None, "0.1.12-Typen erst nach P1B");
         assert_eq!(receivership_allowed_programs().len(), 8);
     }
 

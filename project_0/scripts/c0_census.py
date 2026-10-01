@@ -12,8 +12,8 @@ fehlende Messungen stehen als "N/A".
 
 Aufruf:
   export HELIUS_API_KEY=...
-  python3 scripts/project_0/c0_census.py --out data/project_0/c0/
-  python3 scripts/project_0/c0_census.py --selftest      # offline
+  python3 project_0/scripts/c0_census.py --out project_0/data/c0/
+  python3 project_0/scripts/c0_census.py --selftest      # offline
 
 Program-ID und Group-ID sind Defaults aus Sekundärwissen und werden erst
 durch P1A-01 (on-chain ProgramData) verbindlich. Bis dahin druckt das Script
@@ -186,7 +186,7 @@ def main():
     ap.add_argument("--rpc", help="RPC URL; Default aus HELIUS_API_KEY (Free-Plan)")
     ap.add_argument("--program", default=DEFAULT_PROGRAM_ID)
     ap.add_argument("--group", default=DEFAULT_GROUP_ID)
-    ap.add_argument("--out", default="data/project_0/c0")
+    ap.add_argument("--out", default="project_0/data/c0")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 

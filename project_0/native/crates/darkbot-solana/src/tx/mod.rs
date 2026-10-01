@@ -11,8 +11,8 @@
 //!
 //! Status: UNTESTED / VERIFY (solana-sdk API-Namen).
 
-use solana_sdk::address_lookup_table::AddressLookupTableAccount;
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
+use solana_message::AddressLookupTableAccount; // [FIX-13]
+use solana_compute_budget_interface::ComputeBudgetInstruction; // [FIX-13]
 use solana_sdk::hash::Hash;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::message::{v0, VersionedMessage};
@@ -296,8 +296,8 @@ pub fn sign(built: &mut BuiltTx, signers: &[&Keypair]) -> Result<(), BuildError>
 pub fn load_keypair_json(path: &str) -> Result<Keypair, BuildError> {
     let raw = std::fs::read_to_string(path).map_err(|e| BuildError::Sign(format!("read {}: {}", path, e)))?;
     let bytes: Vec<u8> = serde_json::from_str(&raw).map_err(|e| BuildError::Sign(format!("parse {}: {}", path, e)))?;
-    // VERIFY: `Keypair::from_bytes` (solana-sdk ≤ 2.x) vs `Keypair::try_from(&bytes[..])` (3.x).
-    Keypair::from_bytes(&bytes).map_err(|e| BuildError::Sign(e.to_string()))
+    // [FIX-13] SDK 3.x: `Keypair::try_from(&[u8])` (from_bytes entfernt).
+    Keypair::try_from(&bytes[..]).map_err(|e| BuildError::Sign(e.to_string()))
 }
 
 pub fn payer_of(kp: &Keypair) -> Pubkey {

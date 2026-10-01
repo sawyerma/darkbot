@@ -2,7 +2,8 @@
 //!
 //! Eigenschaften:
 //! - T_rx wird **beim Frame-Empfang** gesetzt, vor jedem JSON-Parse.
-//! - Kein Replay: nach Reconnect wird `Reconnected` + `Gap` emittiert; S2 muss
+//! - Kein Replay: Session-Fehler → OOB-Halt + `Gap`; `Reconnected` (= StreamReady) wird **erst**
+//!   emittiert, wenn alle Subscription-ACKs der neuen Session eingegangen sind ([FIX-36]); S2 muss
 //!   per Snapshot reconciliieren, bevor RunState wieder Ready wird.
 //! - Overflow im Sink ist kein stiller Drop: Adapter emittiert `Gap` mit
 //!   Slot-Provenienz und der Empfänger hält fail-closed an.
@@ -12,7 +13,7 @@
 //! Credit-Verbrauch der programSubscribe → Ledger S1-05).
 
 use super::{
-    AccountUpdate, IngressError, IngressEvent, IngressHalt, IngressSource, SlotStatus, SlotUpdate, SourceKind,
+    AccountUpdate, IngressError, IngressEvent, IngressHalt, IngressSource, SlotStatus, SlotUpdate, SlotWatch, SourceKind,
     Subscription,
 };
 use base64::Engine;
@@ -221,24 +222,24 @@ impl IngressSource for WsRpcControlSource {
         SourceKind::WsRpcControl
     }
 
-    fn run(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt) -> Result<(), IngressError> {
+    fn run(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt, slots: SlotWatch) -> Result<(), IngressError> {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|e| IngressError::Config(format!("tokio: {}", e)))?;
-        rt.block_on(self.run_async(sink, shutdown, halt))
+        rt.block_on(self.run_async(sink, shutdown, halt, slots))
     }
 }
 
 impl WsRpcControlSource {
-    async fn run_async(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt) -> Result<(), IngressError> {
+    async fn run_async(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt, slots: SlotWatch) -> Result<(), IngressError> {
         let mut attempt: u32 = 0;
         let mut backoff = self.cfg.reconnect_initial;
         let mut last_slot: Option<u64> = None;
 
         while !shutdown.is_requested() {
             attempt += 1;
-            match self.session(&sink, &shutdown, &halt, &mut last_slot).await {
+            match self.session(&sink, &shutdown, &halt, &slots, &mut last_slot, attempt).await {
                 Ok(()) => return Ok(()), // Shutdown
                 Err(e) => {
                     let t = self.clock.now_ns();
@@ -251,11 +252,8 @@ impl WsRpcControlSource {
                         to_slot: None,
                         t_rx_ns: t,
                     });
-                    let _ = sink.try_push(IngressEvent::Reconnected {
-                        source: SourceKind::WsRpcControl,
-                        attempt,
-                        t_rx_ns: t,
-                    });
+                    // [FIX-36] KEIN `Reconnected` hier — der Stream ist unten. StreamReady kommt aus der
+                    // nächsten Session, sobald alle ACKs da sind.
                     eprintln!("[ws_rpc] session ended: {} — reconnect in {:?}", e, backoff);
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(self.cfg.reconnect_max);
@@ -270,7 +268,9 @@ impl WsRpcControlSource {
         sink: &Producer<IngressEvent>,
         shutdown: &Shutdown,
         halt: &IngressHalt,
+        slots: &SlotWatch,
         last_slot: &mut Option<u64>,
+        attempt: u32,
     ) -> Result<(), IngressError> {
         let (ws, _) = tokio_tungstenite::connect_async(&self.cfg.ws_url)
             .await
@@ -289,6 +289,7 @@ impl WsRpcControlSource {
                 .map_err(|e| IngressError::Connect(e.to_string()))?;
         }
         let mut sub_ids: HashMap<u64, (SubKind, Option<Pubkey>)> = HashMap::new();
+        let mut stream_ready = false; // [FIX-36]
         let mut frames: u64 = 0;
         let mut last_frame_ns: Option<u64> = None;
         let mut last_health_ns: u64 = self.clock.now_ns();
@@ -344,6 +345,17 @@ impl WsRpcControlSource {
                         sub_ids.insert(sub, entry);
                     }
                 }
+                // [FIX-36] StreamReady-Barriere: alle Subscriptions bestätigt → genau ein `Reconnected`.
+                if !stream_ready && pending.is_empty() {
+                    stream_ready = true;
+                    if let Err(ChannelError::Disconnected(_)) = sink.try_push(IngressEvent::Reconnected {
+                        source: SourceKind::WsRpcControl,
+                        attempt,
+                        t_rx_ns: self.clock.now_ns(),
+                    }) {
+                        return Ok(());
+                    }
+                }
                 continue;
             }
             if let Some(err) = v.get("error") {
@@ -354,9 +366,11 @@ impl WsRpcControlSource {
             for ev in events {
                 if let IngressEvent::Slot(s) = &ev {
                     *last_slot = Some(s.slot);
+                    slots.observe(s.slot); // [FIX-40]
                 }
                 if let IngressEvent::Account(a) = &ev {
                     *last_slot = Some(last_slot.map_or(a.slot, |l| l.max(a.slot)));
+                    slots.observe(a.slot); // [FIX-40]
                 }
                 match sink.try_push(ev) {
                     Ok(()) => {}

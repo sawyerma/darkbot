@@ -19,6 +19,14 @@ darkbot-common = { path = "../darkbot-common" }
 solana-sdk = "=3.0.0"         # BELEGT: marginfi-v2 Workspace-Pin; protocol/v0 path
 solana-client = "=3.1.12"     # BELEGT: marginfi-v2 Workspace-Pin
 solana-transaction-status = "3"  # VERIFY: UiTransactionEncoding, EncodedConfirmedTransactionWithStatusMeta
+# [FIX-13] SDK-3.x: entfernte solana_sdk-Module über Component-Crates. Versionen VERIFY (an den
+# marginfi-Graph angleichen: `cargo tree -i solana-message` etc.).
+# [FIX-39] enger an den SDK-3.0-Graph gepinnt; `bincode`-Feature für die System-Instruction-Builder (transfer).
+solana-message = "=3.0.0"
+solana-commitment-config = "=3.0.0"
+solana-compute-budget-interface = "=3.0.0"
+solana-system-interface = { version = "=2.0.0", features = ["bincode"] }
+solana-keypair = "=3.0.0"
 solana-account-decoder = "3"  # VERIFY: UiAccountEncoding
 
 # Transaction-v1 capability adapter. These modular crates coexist with the

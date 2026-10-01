@@ -9,6 +9,21 @@ pub mod ws_rpc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+/// [FIX-40] Zuletzt beobachteter Chain-Slot, vom Ingress lockfrei aktualisiert, exakt bei T_sign gelesen
+/// (Winner-Vergleich). Kein RPC, kein Umweg über den Decision-Loop.
+#[derive(Clone, Debug, Default)]
+pub struct SlotWatch {
+    slot: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl SlotWatch {
+    pub fn new() -> Self { Self::default() }
+    #[inline]
+    pub fn observe(&self, slot: u64) { self.slot.fetch_max(slot, Ordering::Relaxed); }
+    #[inline]
+    pub fn get(&self) -> u64 { self.slot.load(Ordering::Relaxed) }
+}
+
 /// Out-of-Band-Signal: Sink-Overflow oder Fatal, das **nicht** über den (vollen) Channel
 /// transportiert werden kann. Der Consumer prüft es vor jeder Entscheidung → HALT(FeedGap).
 #[derive(Clone, Debug, Default)]
@@ -162,7 +177,7 @@ pub struct Subscription {
 /// Contract für alle Ingress-Adapter. `run` blockiert bis Shutdown oder Fatal.
 pub trait IngressSource {
     fn kind(&self) -> SourceKind;
-    fn run(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt) -> Result<(), IngressError>;
+    fn run(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt, slots: SlotWatch) -> Result<(), IngressError>;
 }
 
 // ---------------------------------------------------------------------------

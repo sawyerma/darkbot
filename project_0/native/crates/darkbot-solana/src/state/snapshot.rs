@@ -14,7 +14,7 @@ use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
 use solana_client::rpc_request::RpcRequest;
 use solana_client::rpc_response::{OptionalContext, RpcKeyedAccount};
 use solana_account_decoder::UiAccount;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig; // [FIX-13]
 use solana_sdk::pubkey::Pubkey;
 
 #[derive(Debug)]
@@ -30,6 +30,9 @@ impl std::error::Error for SnapshotError {}
 pub struct Snapshot {
     pub slot: u64,
     pub accounts: Vec<AccountUpdate>,
+    /// [FIX-37] Angefragte Keys ohne Account (mit Context-Slot des Batches). Für required
+    /// Dependencies macht das die Recovery fail-closed.
+    pub missing: Vec<(Pubkey, u64)>,
 }
 
 /// Alle Accounts eines Programms. `withContext` liefert den Slot; ohne Slot
@@ -73,13 +76,14 @@ pub fn program_accounts(rpc: &RpcClient, program: &Pubkey, clock: &Clock) -> Res
             t_rx_ns: t,
         });
     }
-    Ok(Snapshot { slot, accounts })
+    Ok(Snapshot { slot, accounts, missing: Vec::new() })
 }
 
 /// Einzelne Accounts (Oracles, FeeState, LUTs) in Batches ≤ 100. Jeder Account trägt
 /// den Context-Slot seines Batches; `Snapshot.slot` ist die untere Schranke (min).
 pub fn multiple_accounts(rpc: &RpcClient, keys: &[Pubkey], clock: &Clock) -> Result<Snapshot, SnapshotError> {
     let mut accounts = Vec::with_capacity(keys.len());
+    let mut missing: Vec<(Pubkey, u64)> = Vec::new();
     let mut slot_min = u64::MAX;
     for chunk in keys.chunks(100) {
         let resp = rpc
@@ -88,7 +92,8 @@ pub fn multiple_accounts(rpc: &RpcClient, keys: &[Pubkey], clock: &Clock) -> Res
         slot_min = slot_min.min(resp.context.slot);
         let t = clock.now_ns();
         for (k, acc) in chunk.iter().zip(resp.value.into_iter()) {
-            if let Some(acc) = acc {
+            let Some(acc) = acc else { missing.push((*k, resp.context.slot)); continue; };
+            {
                 accounts.push(AccountUpdate {
                     pubkey: *k,
                     owner: acc.owner,
@@ -102,5 +107,5 @@ pub fn multiple_accounts(rpc: &RpcClient, keys: &[Pubkey], clock: &Clock) -> Res
             }
         }
     }
-    Ok(Snapshot { slot: if slot_min == u64::MAX { 0 } else { slot_min }, accounts })
+    Ok(Snapshot { slot: if slot_min == u64::MAX { 0 } else { slot_min }, accounts, missing })
 }

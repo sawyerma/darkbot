@@ -15,7 +15,7 @@ pub mod run {
     use marginfi_type_crate::types::Bank;
     use serde_json::Value;
     use solana_client::rpc_client::RpcClient;
-    use solana_sdk::address_lookup_table::AddressLookupTableAccount;
+    use solana_message::AddressLookupTableAccount /* [FIX-13] */;
     use solana_sdk::hash::Hash;
     use solana_sdk::instruction::{AccountMeta, Instruction};
     use solana_sdk::pubkey::Pubkey;
@@ -210,7 +210,7 @@ pub mod run {
             swaps: inp.route.instructions.clone(),
             repays: vec![repay],
         });
-        let allow = route_allowlisted(&inp.route.instructions);
+        let allow = route_allowlisted(&ixs); // [FIX-11] komplette finale Ix-Liste, nicht nur die Route
         let resources = Resources {
             compute_unit_limit: 1_400_000,
             priority_micro_lamports_per_cu: 0,

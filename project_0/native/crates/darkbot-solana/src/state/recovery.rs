@@ -11,8 +11,8 @@
 //! **Barrier:** zwischen Snapshot-Install, Reconcile-Snapshot und Freigabe wird der äußere
 //! Ingress-Channel über `drain` in den State gezogen; Deltas, die während des RPC-Fetches
 //! eintrafen, sind damit vor `confirm_ready` eingeflossen.
-//! **Dedupe:** `Gap` hält nur an (Stream ist unten, Recovery wäre sofort wieder lückenhaft);
-//! `Reconnected` startet genau eine Recovery, wenn der Stream wieder puffert.
+//! **Dedupe/Barriere:** `Gap` hält nur an (Stream ist unten); `Reconnected` ist StreamReady
+//! ([FIX-36]: erst nach allen Subscription-ACKs emittiert) und startet genau eine Recovery.
 //! Der Snapshot-Fetch ist injiziert (`SnapshotFn`), damit der Loop offline testbar ist
 //! und der Runner RPC/Provider außerhalb der Businesslogik hält.
 //! Begrenzte Versuche: nach `max_attempts` bleibt der State HALTED und der Runner
@@ -26,6 +26,8 @@ use darkbot_common::lifecycle::RunState;
 pub struct SnapshotData {
     pub slot: u64,
     pub accounts: Vec<AccountUpdate>,
+    /// [FIX-37] Required Dependencies, die der Snapshot nicht liefern konnte → Recovery nicht sauber.
+    pub missing_required: Vec<(solana_sdk::pubkey::Pubkey, u64)>,
 }
 
 pub type SnapshotFn<'a> = dyn FnMut() -> Result<SnapshotData, String> + 'a;
@@ -70,6 +72,12 @@ impl RecoveryDriver {
                 Ok(s) => s,
                 Err(_) => continue,
             };
+            if !a.missing_required.is_empty() {
+                // [FIX-37] fehlende required Accounts: kein READY, nächster Versuch.
+                st.halt(HaltReason::ReconcileFailure);
+                self.reconcile_failures += 1;
+                continue;
+            }
             st.install_snapshot(a.slot, a.accounts);
             drain(st); // Deltas, die während Fetch A ankamen
             let b = match fetch() {
@@ -80,6 +88,12 @@ impl RecoveryDriver {
                 }
             };
             drain(st); // Deltas, die während Fetch B ankamen (vor dem Vergleich)
+            if !b.missing_required.is_empty() {
+                // [FIX-41] Snapshot B ohne required Dependency → kein Vergleich möglich → nicht sauber.
+                st.halt(HaltReason::ReconcileFailure);
+                self.reconcile_failures += 1;
+                continue;
+            }
             let rep = st.reconcile(b.slot, &b.accounts);
             if rep.is_clean() {
                 if st.confirm_ready().is_tradable() {
@@ -119,7 +133,7 @@ mod tests {
         let mut calls = 0;
         let mut fetch = move || {
             calls += 1;
-            Ok(SnapshotData { slot: 100 + calls, accounts: vec![upd(pk, 100 + calls, 7)] })
+            Ok(SnapshotData { slot: 100 + calls, accounts: vec![upd(pk, 100 + calls, 7)], missing_required: vec![] })
         };
         let mut drained = 0;
         let mut drain = |_st: &mut StateCore| { drained += 1; };
@@ -139,6 +153,36 @@ mod tests {
     }
 
     #[test]
+    fn missing_required_dependency_blocks_ready() {
+        // [FIX-37]
+        let pk = Pubkey::new_unique();
+        let mut st = StateCore::new(10);
+        let mut drv = RecoveryDriver::new(1);
+        let mut fetch = move || Ok(SnapshotData { slot: 10, accounts: vec![upd(pk, 10, 1)], missing_required: vec![(Pubkey::new_unique(), 10)] });
+        let mut drain = |_st: &mut StateCore| {};
+        assert_eq!(drv.recover(&mut st, &mut fetch, &mut drain), RecoveryOutcome::Exhausted { attempts: 1 });
+        assert!(!st.run_state().is_tradable());
+    }
+
+    #[test]
+    fn snapshot_b_missing_required_blocks_ready() {
+        // [FIX-41] A vollständig, B fehlt ein required Key → nie READY.
+        let pk = Pubkey::new_unique();
+        let mut st = StateCore::new(10);
+        let mut drv = RecoveryDriver::new(2);
+        let mut n = 0u8;
+        let mut fetch = move || {
+            n += 1;
+            let missing = if n % 2 == 0 { vec![(Pubkey::new_unique(), 10)] } else { vec![] };
+            Ok(SnapshotData { slot: 10, accounts: vec![upd(pk, 10, 1)], missing_required: missing })
+        };
+        let mut drain = |_st: &mut StateCore| {};
+        assert_eq!(drv.recover(&mut st, &mut fetch, &mut drain), RecoveryOutcome::Exhausted { attempts: 2 });
+        assert!(!st.run_state().is_tradable());
+        assert_eq!(drv.reconcile_failures, 2);
+    }
+
+    #[test]
     fn dirty_reconcile_stays_halted() {
         let pk = Pubkey::new_unique();
         let mut st = StateCore::new(100);
@@ -146,7 +190,7 @@ mod tests {
         let mut n = 0u8;
         let mut fetch = move || {
             n += 1;
-            Ok(SnapshotData { slot: 50, accounts: vec![upd(pk, 50, n)] }) // jedes Mal andere Daten → nie sauber
+            Ok(SnapshotData { slot: 50, accounts: vec![upd(pk, 50, n)], missing_required: vec![] }) // jedes Mal andere Daten → nie sauber
         };
         let mut drain = |_st: &mut StateCore| {};
         assert_eq!(drv.recover(&mut st, &mut fetch, &mut drain), RecoveryOutcome::Exhausted { attempts: 2 });

@@ -581,7 +581,7 @@ bestehender Solana-Bot:
 Project-0 Production Rust:
     noch nicht aufgebaut
 
-project_0/native/:
+native/:
     wird durch S0 eingeführt
 
 BSC:
@@ -724,77 +724,12 @@ unhealthy + noch nicht wirtschaftlich liquidierbar
 
 ---
 
-
----
-
-# 4A. Repository- und Frontend-Struktur — verbindlich ab 2026-10-01
-
-Die Root-Struktur ist bewusst flach und projektorientiert:
-
-```text
-darkbot/
-├── bsc/
-├── project_0/
-├── solana/
-├── frontend/
-└── README.md
-```
-
-Für Project 0 sind ab diesem Stand insbesondere diese Pfade autoritativ:
-
-```text
-project_0/
-├── native/          Rust Production Workspace
-├── src/             project-spezifische Python-/Control-Boundary
-├── gates/
-├── tests/
-├── docs/
-├── config/
-├── scripts/
-├── tools/
-├── data/
-└── exports/
-```
-
-Das Frontend ist **kein separater Project-0-Core** und keine zweite Implementierung von Protocol/Health/Economics. Es gibt genau ein gemeinsames DarkBot-Frontend:
-
-```text
-frontend/
-└── src/
-    ├── app/
-    ├── core/
-    │   ├── api/
-    │   ├── realtime/
-    │   └── types/
-    ├── features/
-    │   ├── overview/
-    │   ├── bsc/
-    │   ├── project0/
-    │   └── solana/
-    └── shared/
-```
-
-Technische Basis ist das bereits lauffähige React/Vite/Tailwind-Setup aus `ws_ai_front`. Die alte fachliche Ordnerstruktur wird nicht übernommen. Wiederverwendet werden nur geeignete Toolchain-/UI-/WebSocket-Muster.
-
-Frontend-Vertrag:
-
-```text
-Backend/Rust = Source of Truth
-REST         = Snapshots
-WebSocket    = sequenzierte Events/Deltas
-Frontend     = Anzeige + Control Plane
-```
-
-Kein Protocol-Decoding, keine Health-Berechnung, keine Economics, kein Signing und keine Execution im Browser. Ein WebSocket-Sequenz-Gap erzwingt einen REST-Resync statt lokaler Schätzung.
-
-Das Frontend darf den FIRST-EURO-Pfad nicht blockieren. Backend-Phasen und LIVE-Gates bleiben unabhängig davon autoritativ.
-
 # 5. Finaler Workspace
 
 S0 baut:
 
 ```text
-project_0/native/
+native/
   Cargo.toml
 
   crates/
@@ -3546,7 +3481,7 @@ project_0/docs/
     C0_MARKET_CENSUS.md
     H0_LIQUIDATIONS.md
 
-project_0/gates/
+gates/project_0/
   P0.md
   P1A.md
   P1B.md

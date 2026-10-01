@@ -60,8 +60,15 @@ impl FundingClass {
 #[derive(Clone, Debug)]
 pub struct FundingContext {
     pub liability_mint: Pubkey,
+    /// Token-Basis (Routing/Repay-Betrag).
     pub liability_needed: u64,
     pub liability_inventory: u64,
+    /// [FIX-16] Werte in USD-Micro — Economics/Safety rechnen nur hiermit.
+    pub liability_needed_value: u64,
+    pub liability_inventory_value: u64,
+    /// [FIX-17] Funding-Quelle für JIT (Base-Inventar, z. B. USDC): Bank + verfügbarer Wert.
+    pub funding_bank: Option<Pubkey>,
+    pub funding_available_value: u64,
     /// ZERO_PREFUND ist nur machbar, wenn Fixture/Simulation die Klasse für diese
     /// Opportunity-/Route-Klasse qualifiziert hat.
     pub zero_prefund_qualified: bool,
@@ -80,7 +87,9 @@ pub fn is_feasible(c: FundingClass, ctx: &FundingContext) -> bool {
         FundingClass::NoSwapInventory => ctx.liability_inventory >= ctx.liability_needed,
         FundingClass::FlashFunded => false,
         FundingClass::JitShortfall => {
-            ctx.route_available && ctx.liability_inventory < ctx.liability_needed
+            ctx.funding_bank.is_some()
+                && ctx.liability_inventory < ctx.liability_needed
+                && ctx.funding_available_value >= ctx.liability_needed_value.saturating_sub(ctx.liability_inventory_value)
         }
         FundingClass::PreheldInventory => ctx.liability_inventory >= ctx.liability_needed,
     }
@@ -95,13 +104,19 @@ pub fn feasible_classes(ctx: &FundingContext) -> Vec<FundingClass> {
         .collect()
 }
 
-/// Working Capital der Klasse in Liability-Einheiten; Fees/Tips/Rent separat in P4A.
+/// [FIX-16] Gebundenes Liability-Kapital in **USD-Micro** (Working Capital; SOL für Fees/Tip ist ein
+/// separates Safety-Limit). ZERO_PREFUND: 0, weil das Collateral den Repay finanziert.
 pub fn capital_required(c: FundingClass, ctx: &FundingContext) -> u64 {
     match c {
         FundingClass::ZeroPrefundSameTx | FundingClass::FlashFunded => 0,
-        FundingClass::NoSwapInventory | FundingClass::PreheldInventory => ctx.liability_needed,
-        FundingClass::JitShortfall => ctx.liability_needed.saturating_sub(ctx.liability_inventory),
+        FundingClass::NoSwapInventory | FundingClass::PreheldInventory => ctx.liability_needed_value,
+        FundingClass::JitShortfall => ctx.liability_needed_value.saturating_sub(ctx.liability_inventory_value),
     }
+}
+
+/// [FIX-17] Token-Fehlbetrag für die JIT-Buy-Route (Token-Basis der Liability).
+pub fn shortfall_token_amount(ctx: &FundingContext) -> u64 {
+    ctx.liability_needed.saturating_sub(ctx.liability_inventory)
 }
 
 #[cfg(test)]
@@ -113,6 +128,10 @@ mod tests {
             liability_mint: Pubkey::new_unique(),
             liability_needed: need,
             liability_inventory: inv,
+            liability_needed_value: need,
+            liability_inventory_value: inv,
+            funding_bank: if route { Some(Pubkey::new_unique()) } else { None },
+            funding_available_value: 1_000_000,
             zero_prefund_qualified: zp,
             route_available: route,
         }

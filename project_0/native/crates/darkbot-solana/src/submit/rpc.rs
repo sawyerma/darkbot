@@ -2,10 +2,11 @@
 //!
 //! Status: UNTESTED / VERIFY (solana-client Signaturen; getTransaction-Meta-Felder).
 
-use super::{LandingEvidence, LandingOutcome, SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError};
+use super::{LandingEvidence, LandingOutcome, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError};
+use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{RpcSendTransactionConfig, RpcTransactionConfig};
-use solana_sdk::commitment_config::{CommitmentConfig, CommitmentLevel};
+use solana_commitment_config::{CommitmentConfig, CommitmentLevel}; // [FIX-13]
 use solana_sdk::signature::Signature;
 use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status::UiTransactionEncoding;
@@ -45,11 +46,39 @@ impl SubmissionAdapter for RpcSubmitter {
             min_context_slot: None,
         };
         let len = super::serialize_tx(tx).map(|b| b.len()).map_err(|e| SubmitError::Serialize(e.to_string()))?;
-        let sig = self
-            .rpc
-            .send_transaction_with_config(tx, cfg)
-            .map_err(|e| SubmitError::Rejected(e.to_string()))?;
-        Ok(SubmitAck { path: SubmissionPath::Rpc, signature: sig, submission_id: None, t_handoff_ns, serialized_len: len })
+        // [FIX-31] Eindeutige RPC-Ablehnung → Rejected (Kapital frei). Unklar nach dem Senden (Timeout,
+        // Verbindungsabbruch, HTTP) → Transport (Ambiguous → Reconciliation). VERIFY Variantennamen 3.1.12.
+        let sig = self.rpc.send_transaction_with_config(tx, cfg).map_err(|e| {
+            use solana_client::client_error::ClientErrorKind as K;
+            match e.kind() {
+                K::RpcError(_) | K::SerdeJson(_) | K::SigningError(_) | K::TransactionError(_) => SubmitError::Rejected(e.to_string()),
+                _ => SubmitError::Transport(e.to_string()),
+            }
+        })?;
+        Ok(SubmitAck { path: SubmissionPath::Rpc, signature: sig, signatures: vec![sig], submission_id: None, t_handoff_ns, serialized_len: len })
+    }
+
+    /// [FIX-38] RPC akzeptiert v1 (Solana Foundation, base64 >1232 B) — VERIFY per Capability-Gate S3-02.
+    fn supports_tx_version(&self, _v: crate::tx::BuildVersion) -> bool { true }
+
+    /// [FIX-6] Simulation derselben signierten TX; kein Rebuild zwischen Simulation und Send.
+    fn simulate(&self, tx: &VersionedTransaction) -> SimResult {
+        let cfg = RpcSimulateTransactionConfig {
+            sig_verify: true,
+            replace_recent_blockhash: false,
+            commitment: Some(CommitmentConfig::confirmed()),
+            encoding: Some(UiTransactionEncoding::Base64),
+            accounts: None,
+            min_context_slot: None,
+            inner_instructions: false,
+        };
+        match self.rpc.simulate_transaction_with_config(tx, cfg) {
+            Ok(r) => match r.value.err {
+                None => SimResult::Ok { units_consumed: r.value.units_consumed },
+                Some(e) => SimResult::Failed(format!("{:?} logs={:?}", e, r.value.logs)),
+            },
+            Err(e) => SimResult::Unavailable(e.to_string()),
+        }
     }
 }
 

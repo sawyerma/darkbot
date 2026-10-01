@@ -7,7 +7,11 @@ use serde::Serialize;
 pub enum Decision {
     Skip,
     ShadowReady,
+    /// [M1] Shadow: gebaut und signiert, Simulation fehlgeschlagen.
+    ShadowSimFailed,
     Submitted,
+    /// [FIX-23] Handoff mit Transportfehler: Annahme unbekannt, Reconciliation entscheidet.
+    AmbiguousSubmission,
     DeniedBySafety,
     Unavailable,
 }
@@ -42,6 +46,15 @@ pub struct OpportunityRecord {
     pub path: Option<String>,
     pub funding: Option<String>,
     pub signature: Option<String>,
+    /// [M2] Slot zur Zeit von T_sign (für Winner-Vergleich).
+    pub sign_slot: Option<u64>,
+    /// [FIX-6] CU aus der Simulation derselben TX.
+    pub simulated_cu: Option<u64>,
+    /// [FIX-5] Reserviertes Kapital der Submission (für Reconciliation).
+    pub exposure: Option<u64>,
+    /// [FIX-18] Alle Signaturen des Handoffs + Bundle-ID (vollständige Reconciliation).
+    pub all_signatures: Vec<String>,
+    pub bundle_id: Option<String>,
     pub intervals_ns: Vec<(String, Option<u64>)>,
     pub reason: Option<String>,
     pub loss: Option<LossReason>,

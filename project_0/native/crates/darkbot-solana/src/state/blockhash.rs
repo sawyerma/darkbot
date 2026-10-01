@@ -4,7 +4,7 @@
 //! Status: UNTESTED / VERIFY (get_latest_blockhash_with_commitment Signatur).
 
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig; // [FIX-13]
 use solana_sdk::hash::Hash;
 use std::sync::{Arc, RwLock};
 

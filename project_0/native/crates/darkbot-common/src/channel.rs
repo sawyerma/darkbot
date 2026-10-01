@@ -36,6 +36,8 @@ pub struct ChannelStats {
     pub received: u64,
 }
 
+/// [FIX-34] Clone, damit ein Ingress-Adapter neu gestartet werden kann (Subscription-Rebuild).
+#[derive(Clone)]
 pub struct Producer<T> {
     tx: SyncSender<T>,
     counters: Arc<Counters>,

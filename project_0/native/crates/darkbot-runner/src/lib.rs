@@ -11,6 +11,10 @@
 //!
 //! Status: UNTESTED / VERIFY.
 
+pub mod builder;
 pub mod fixture;
+pub mod pending;
+pub mod shadow_ledger;
+pub mod winner;
 pub mod pipeline;
 pub mod record;

@@ -67,12 +67,12 @@ realized PnL
 
 | Phase | Measurement | Status | Evidence |
 |---|---|---|---|
-| S0 | timing/telemetry + provider abstraction contract | CODE WRITTEN, cargo test NOT RUN by author (no toolchain in author env) — see §9 | native/crates/darkbot-common |
+| S0 | timing/telemetry + provider abstraction contract | CODE WRITTEN, cargo test NOT RUN by author (no toolchain in author env) — see §9 | project_0/native/crates/darkbot-common |
 | S1-LT | WsRpcControlSource, event model, v1 detection | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/ingress |
 | S2 | state reconciliation/fork/gap recovery | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/state |
 | S3-CORE | v0 builder, v1 stub, signer, RPC+Jito adapter, reconciliation | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/{tx,submit} |
 | S4 | Python↔Rust Pump.fun parity + native baseline | N/A | not started |
-| C0 | account census (types/sizes) | TOOLING WRITTEN, selftest PASS offline, mainnet run NOT done (no egress) — see §9 | scripts/project_0/c0_census.py |
+| C0 | account census (types/sizes) | TOOLING WRITTEN, selftest PASS offline, mainnet run NOT done (no egress) — see §9 | project_0/scripts/c0_census.py |
 | H0 | historical Project 0 liquidation/composition/competition | N/A | not started |
 | P2 | reverse/threshold index, premium+tag scheduler | CODE WRITTEN, UNTESTED (offline-Tests enthalten) — see §9 | darkbot-project0/src/{index,schedule}.rs |
 | P3 | health via marginfi crate | STUB (Contract + NoHealth); Crate-Anbindung offen — see §9 | darkbot-project0/src/health.rs |
@@ -207,16 +207,16 @@ probabilistic ranking approved:   NO
 - C0-01 Mainnet-Lauf: nicht möglich (403). Tooling geschrieben und offline getestet.
 
 **S0 (S0-01..05) — CODE WRITTEN:**
-- `native/Cargo.toml` (workspace, resolver 2), `native/crates/darkbot-common` (edition 2021, **null externe Dependencies**).
+- `native/Cargo.toml` (workspace, resolver 2), `project_0/native/crates/darkbot-common` (edition 2021, **null externe Dependencies**).
 - Module: `timing` (Clock monoton, Stage T_rx..T_observed_landed, Timeline mit Intervallen; fehlender Punkt → None, nie 0; kein Overwrite), `histogram` (log-linear 8 Sub-Buckets, p50/p95/p99 konservativ als obere Bucket-Grenze, max/min/count exakt, leer → N/A), `channel` (bounded über sync_channel, Overflow explizit gezählt, Element zurückgegeben), `lifecycle` (Shutdown, RunState fail-closed: Halted behält ersten Grund, Ready nur über Reconciling), `journal` (Record mit seq/t_rx/source/kind/payload; SeqGap → Fehler; MemJournal + Replay), `config` (Pflichtwerte → Fehler, explizite Defaults), `error` (HaltReason-Taxonomie).
-- Unit-Tests in jedem Modul (14 Tests). **Nicht ausgeführt** — Gate S0 bleibt offen bis `cd native && cargo test -p darkbot-common` auf dem Mac PASS meldet. Ergebnis hier eintragen (Toolchain-Version, Test-Count, PASS/FAIL).
+- Unit-Tests in jedem Modul (14 Tests). **Nicht ausgeführt** — Gate S0 bleibt offen bis `cd project_0/native && cargo test -p darkbot-common` auf dem Mac PASS meldet. Ergebnis hier eintragen (Toolchain-Version, Test-Count, PASS/FAIL).
 - Bewusst nicht gebaut: lock-freier SPSC-Ring (erst nach Messung), Datei-Journal (S1).
 
 **C0 — TOOLING WRITTEN:**
-- `scripts/project_0/c0_census.py`: ein `getProgramAccounts` (confirmed, withContext), JSONL-Dump mit SHA-256, Typ-Census über Anchor-Discriminators, Größenverteilung pro Typ, unbekannte Discriminators gezählt. Health-Klassifikation steht explizit als N/A bis P1A-Layout.
+- `project_0/scripts/c0_census.py`: ein `getProgramAccounts` (confirmed, withContext), JSONL-Dump mit SHA-256, Typ-Census über Anchor-Discriminators, Größenverteilung pro Typ, unbekannte Discriminators gezählt. Health-Klassifikation steht explizit als N/A bis P1A-Layout.
 - `--selftest` offline: PASS.
 - Discriminators (sha256("account:<Name>")[:8]): MarginfiAccount 43b2826d7e721c2a · Bank 8e31a6f2324261bc · MarginfiGroup b617adf097ceb643 · FeeState 3fe01055c124ebdc · LiquidationRecord 5f74178459d2f5a2. PRÜFEN gegen IDL des deployed Tags (P1A-01). Ein unbekannter Discriminator mit hoher Anzahl im Mainnet-Lauf bedeutet: Typname im Script falsch, nicht Chain-Anomalie.
-- Mainnet-Lauf: `HELIUS_API_KEY=... python3 scripts/project_0/c0_census.py --out data/project_0/c0/` → Report + Rohdaten-Pfad + SHA hier eintragen. Credits: ein gPA-Call; Rohdatenmenge (bytes_total) hier dokumentieren.
+- Mainnet-Lauf: `HELIUS_API_KEY=... python3 project_0/scripts/c0_census.py --out project_0/data/c0/` → Report + Rohdaten-Pfad + SHA hier eintragen. Credits: ein gPA-Call; Rohdatenmenge (bytes_total) hier dokumentieren.
 
 **Gate-Entscheidungen:** keine. S0 PASS offen (cargo test). C0-GO/STOP offen (Mainnet-Lauf + Health-Klassifikation).
 
@@ -235,7 +235,7 @@ Kein `cargo`, kein Netzwerk. Nichts kompiliert. Offline ausgeführt: nur `c0_cen
 **Bewusst NICHT gebaut:** eigene Health-Formel (Regel 3), lock-freier SPSC-Ring (erst nach Messung), GeyserSource (S1-RACE), Race-S3-Tickets, Direct TPU, Deshred, Instruction-Bau für Receivership/Tagger (braucht Crate/IDLs aus P0/P1A), TX-Template-Cache (P2-06; Invalidation-Liste in schedule.rs dokumentiert).
 
 **VERIFY-Schwerpunkte für den Mac (in dieser Reihenfolge):**
-1. `cd native && cargo build` — Dependency-Versionen in beiden Cargo.toml sind geraten (solana-* 3.x, tokio-tungstenite 0.24, reqwest 0.12, bincode 1). Erwartete Reibung: `Keypair::from_bytes` vs `try_from`, `RpcProgramAccountsConfig.sort_results`, `get_program_accounts_with_config` ohne Context-Slot (siehe Kommentar in snapshot.rs), `compute_units_consumed` OptionSerializer, `Message::Text(.into())` bei tungstenite.
+1. `cd project_0/native && cargo build` — Dependency-Versionen in beiden Cargo.toml sind geraten (solana-* 3.x, tokio-tungstenite 0.24, reqwest 0.12, bincode 1). Erwartete Reibung: `Keypair::from_bytes` vs `try_from`, `RpcProgramAccountsConfig.sort_results`, `get_program_accounts_with_config` ohne Context-Slot (siehe Kommentar in snapshot.rs), `compute_units_consumed` OptionSerializer, `Message::Text(.into())` bei tungstenite.
 2. `cargo test --workspace` — 40+ Unit-Tests, alle offline.
 3. `c0_census.py` Mainnet-Lauf → Report ins Ledger.
 4. P0-01/P0-02 (GitHub) → Crate-Tag bestätigen → Feature `crate_health` anbinden (P3-01).
@@ -302,5 +302,79 @@ Kein `cargo`, kein Netzwerk. Nichts kompiliert. Offline ausgeführt: nur `c0_cen
 - `fixture.rs` (Feature `crate_health`): ZERO_PREFUND-Harness — vollständige Jupiter-Route (`tokenLedger`, setup, other, swap, cleanup) plus `addressLookupTableAddresses`; v0 lädt **echte LUT-Accounts**, v1 nutzt keine LUTs. Allowlist-Check und vollständige Receivership-Ix-Liste aus Crate-Buildern; Messung bytes/locked/ix-count. Simulation + Staging-Lauf bleibt Mac-Aufgabe (`simulateTransaction`, sigVerify=false).
 - **v1 korrigiert:** Solana-3.x (marginfi) und modulare Solana-4.x-v1-Crates können im selben Cargo-Workspace koexistieren; kein zweiter Business-/Execution-Core und kein marginfi-Upgrade ist architektonisch nötig. `darkbot-solana` hat einen isolierten v1-Capability-Adapter nach `solana-foundation/transaction-v1-examples` (`solana-message 4.4.1`, `solana-transaction 4.1.6` Referenz). `measure_v1()` kompiliert die v1-Message/TransactionConfig und misst 4096/64/64-Gates; der finale signierte v1-Wire-/Submission-Adapter bleibt **UNTESTED/VERIFY** bis zur Compiler-Runde.
 - Candidate-Auswahl in der Pipeline: alle vom Planner gelieferten Funding-/Route-Klassen werden einzeln auf Protocol-Validität, P4A-Economics, LIVE-Safety und TX-Baubarkeit geprüft; höchster deterministischer Netto-Profit gewinnt, bei Gleichstand höhere Kapital-Effizienz. Shadow wird nicht von `live_enabled=false` blockiert.
-- Offline-Evidence dieses Imports: `python3 -m py_compile scripts/project_0/c0_census.py` PASS; `python3 scripts/project_0/c0_census.py --selftest` PASS. Rust weiterhin nicht kompiliert (kein `cargo` in dieser Umgebung).
+- Offline-Evidence dieses Imports: `python3 -m py_compile project_0/scripts/c0_census.py` PASS; `python3 project_0/scripts/c0_census.py --selftest` PASS. Rust weiterhin nicht kompiliert (kein `cargo` in dieser Umgebung).
 - Zählung: ~6.400 Zeilen Rust im importierten Stand; Rust-Tests im Source, **nichts als Rust PASS deklariert**, bis Mac-Compilerlauf grün ist.
+
+### 2026-10-01 — Sitzung 6 (Fable-Audit von 87a9dd6 + Korrekturen, Zip) — CHECKPOINT
+
+Audit-Ergebnis: 5 Blocker, 4 High, 3 Medium (Details im Chat-Protokoll / Commit-Message). Korrigiert, markiert als `[FIX-n]` im Code (`grep -rn "\[FIX-" native`):
+- FIX-1 `runner/main.rs`: Pipeline in `p0-longtail` eingehängt (Shadow): Keypair, Blockhash-Thread, Safety aus Env, Allowlist aus Source, RpcSubmitter (nur Simulation), Records als JSON. Builder = `NoPlans` (fail closed), bis P4A-03-Sizing existiert.
+- FIX-2 `runner/builder.rs` neu: `P0ReceivershipBuilder` mit `SizingProvider`/`RouteProvider`-Traits; ein Plan je machbarer FundingClass; JIT als Prerequisite-TX; Init-Record inline nur wenn PDA fehlt.
+- FIX-3 `pipeline.rs`: `ReceivershipPlan.prerequisite_txs`; Kandidaten mit Prerequisites nur über Bundle-Pfad.
+- FIX-4 `submit/mod.rs`: `build_tip_tx` (legacy, System-Transfer) + `SubmissionAdapter::submit_bundle`; `jito.rs` implementiert es; `pipeline.rs` baut `[prereqs…, receivership, tip]`.
+- FIX-5 `runner/pending.rs` neu + `main.rs`: offene Submissions → `reconcile` → `Safety::record_outcome` (Landed/Failed/Timeout 90 s); `pnl_complete=false`, bis Token-Deltas (P8-05) gebucht werden.
+- FIX-6 `submit/mod.rs` `SimResult` + `SubmissionAdapter::simulate`; `rpc.rs` `simulate_transaction_with_config` auf derselben signierten TX; `pipeline.rs` Gate vor Submit, `simulated_cu` im Record.
+- FIX-7 `pipeline.rs`: Submit-Ablehnung → `release_without_outcome` statt Fehlversuch.
+- FIX-11 `fixture.rs`: Allowlist-Check auf finaler Ix-Liste. FIX-12 `HaltReason::LimitBreached`.
+Offen (unverändert): P4A-03 Sizing (numerisch), P3-02 Schwellen, Trigger (b)/(c) im Runner, v1 Sign/Wire, Token-Delta-PnL. Nichts kompiliert.
+
+### 2026-10-01 — Sitzung 7 (Astra-Review des FIX-Zips: 7 Blocker + High) — CHECKPOINT
+Korrigiert, markiert `[FIX-13]`…`[FIX-26]`:
+13 SDK-3.x: `solana_message::AddressLookupTableAccount`, `solana_commitment_config`, `solana_compute_budget_interface`, `solana_system_interface::instruction::transfer`, `Keypair::try_from`; Component-Crates in Cargo (Versionen VERIFY am marginfi-Graph).
+14 `SubmissionAdapter::supports_bundle()` (Jito true); Pipeline nutzt Capability, nicht `path()`.
+15 `simulate_bundle` (Jito `simulateBundle`, VERIFY Format); Bundle-Kandidaten werden als Bundle simuliert, Einzel-TX einzeln; Unavailable → fail closed.
+16 Kapital/Exposure in USD-Micro (`liability_needed_value`, `liability_inventory_value`); Token-Mengen nur fürs Routing; `profit_per_capital_bps` jetzt einheitenkonsistent.
+17 JIT: `funding_bank`/`funding_available_value`; Buy-Route = Funding-Bank → Liability über `shortfall_token_amount`.
+18 `SubmitAck.signatures` + Bundle-ID; `PendingSubmission` reconciled alle Signaturen, Gebühren summiert; Sentinel = Receivership-TX.
+19 `builder.bank()` prüft Owner/Discriminator/Länge (kein Panic).
+20 ZERO_PREFUND als v0- und v1-Kandidat (v1 bleibt bis Sign/Wire `V1Unavailable`, geht aber nicht verloren).
+21 `Freshness::is_stale` vor Planung.
+22 Globale Top-Level-Allowlist in der Pipeline, unabhängig von den Kategorien.
+23 `SubmitError::Transport` nach Handoff → `AmbiguousSubmission`, kein Release, Reconciliation über lokale Signaturen.
+24 `record_outcome(realized_pnl: Option<i128>)`: None = UNKNOWN → HALT(UnknownEconomics); NOT_LANDED = Some(0) gemessen; gelandet ohne Token-Deltas = None (P8-05 offen).
+25 Allowlist semantisch getrennt (swap: JUP/Titan; integration/refresh: Kamino/Drift/JupLend; refresh + Programm für init_liquidation_record).
+26 `health::dependency_keys` + main: Vor-Snapshot → Oracle-/Integrations-/Mint-Keys → accountSubscribe + gemeinsamer Snapshot/Reconcile.
+Offen: P4A-03, P3-02, v1 Sign/Wire, ZERO_PREFUND Staging, P8-05 Token-Delta-PnL. Nichts kompiliert.
+
+### 2026-10-01 — Sitzung 8 (Astra-Review v2: 8 Punkte) — CHECKPOINT
+Korrigiert `[FIX-27]`…`[FIX-34]`:
+27 Observation-/Dependency-Keys **exakt wie `p0-cli::bank_observation_keys`** (am Source im Zip verifiziert): `OracleSetup`-Enum, `keys[0..]` direkt, keine Pyth-PDA-Ableitung, keine u8-Magie; `protocol::remaining_layout` entfernt. Astra hatte recht, meine Ableitung aus eva01 war falsch.
+28 `reconcile()`: Vergleich gegen `r.slot` des jeweiligen Remote-Accounts statt globalem Lower-Bound; Regressionstest mit gemischten Batch-Slots.
+29 `RouteProvider::{quote_exact_in, quote_exact_out}`; JIT nutzt ExactOut mit Liability-Fehlbetrag als Output; `Route.amount_in/out` vom Router.
+30 P0-Allowlist nur auf Receivership-TX; Prerequisite-TXs eigene Allowlist (Swap, System, Token, Token-2022, ATA, ComputeBudget).
+31 RPC-Sendefehler klassifiziert: RpcError/Serde/Signing/TransactionError → Rejected; Rest → Transport (Ambiguous).
+32 `JitoAdapter::new(block_engine, bundle_sim_rpc: Option, timeout)`; `simulateBundle` nur gegen `P0_BUNDLE_SIM_RPC_URL`, sonst Bundle fail closed.
+33 Pending: Pfad aus Record (JITO_BUNDLE/JITO_SINGLE/RPC); `getInflightBundleStatuses` beendet `Failed` sofort; on-chain bleibt authoritative.
+34 Dynamische Dependency-Subscription: Bank-Update mit neuen externen Keys → HALT(StateGap) → Ingress-Session neu mit erweiterter Subscription → Recovery → READY. `Producer` Clone.
+Offen (unverändert): P3-02, P4A-03, v1 Sign/Wire, Staging, P8-05. Nichts kompiliert.
+
+### 2026-10-01 — Sitzung 9 (letzter Pre-Build-Patch) — CHECKPOINT
+`[FIX-35]`…`[FIX-39]`:
+35 Dependency-Prüfung **nach** `drv.on_event` (neue Bank-Konfiguration); kein 500-ms-Sleep mehr — Bootstrap und Resubscribe laufen über die StreamReady-Barriere.
+36 `ws_rpc`: `Reconnected` = StreamReady, nur nach allen Subscription-ACKs (`pending.is_empty()`), genau einmal pro Session; im Fehlerpfad nur OOB-Halt + Gap.
+37 `Snapshot.missing` (Key + Batch-Slot) aus `getMultipleAccounts`; `SnapshotData.missing_required` → Recovery nicht sauber, kein READY; Test.
+38 `SubmissionAdapter::supports_tx_version`: Default v1=false (Jito-Bundle/BAM unbelegt), RPC true; Pipeline verwirft v1-Kandidaten auf nicht-fähigen Pfaden.
+39 Component-Crates auf `=3.0.0` / `solana-system-interface =2.0.0` mit Feature `bincode` gepinnt.
+Vorgemerkt (P4A-03): Candidate = FundingClass × TxVersion × SubmissionPath (Tips/Failed-Cost/Latenz pfadabhängig).
+Offen: P3-02, P4A-03, v1 Sign/Wire, Staging, P8-05, v1-Bundle-Capability. Nächster Schritt: die vier Logs.
+
+### 2026-10-01 — Sitzung 10 (P6-LT Messstrukturen M1–M3) — CHECKPOINT
+- `project_0/docs/PHASE_P6LT_SHADOW.md`: Phase definiert (Gates G1–G5, Messfelder, PASS/ADAPT/STOP).
+- [M1] `pipeline.rs`: Shadow baut, signiert und **simuliert** identisch zu LIVE; Reservierung nur in LIVE (`reserved`-Flag, `release_if`); neue Decision `ShadowSimFailed`; `sign_slot` im Record.
+- [M2] `runner/winner.rs`: `find_winner` (getSignaturesForAddress → getTransaction json v1 → END_LIQUIDATION-Discriminator, receiver = 4. Account), `classify` (INGRESS/STATE_RACE/BUILD/THRESHOLD_TOO_HIGH/ECONOMIC_SKIP), `is_shadow_win`; Test. `main.rs`: Watchlist, Prüfung nach ≥ 60 s, Aufgabe nach 15 min, Race-Zeile im Record-Log.
+- [M3] `runner/shadow_ledger.rs`: Tagesaggregat (Updates, Health, liquidierbar, fail-closed, Pläne, Sim PASS/FAIL, Shadow-Wins, Losses je Grund, Summe erwarteter Netto der Wins, Latenz-Histogramme p50/p95/p99), `pnl_complete=false`; Tageswechsel schreibt `daily_summary.jsonl`; Test.
+- Dependencies runner: solana-commitment-config, solana-transaction-status, bs58.
+Offen unverändert: Build/Tests, C0, P4A-03 Sizing, Route, v1 Sign/Wire, Staging, P8-05.
+
+### 2026-10-01 — Sitzung 11 (Astra-Review v5: 10 Punkte) + Rebase auf `project_0/`-Struktur — CHECKPOINT
+`[FIX-40]`…`[FIX-47]`:
+40 `SlotWatch` (AtomicU64, lockfrei) im Ingress-Contract; ws_rpc aktualisiert bei Slot-/Account-Updates; Pipeline liest `sign_slot` exakt nach dem Signieren. Trigger-Slot ist nur Update-Provenienz.
+41 Recovery: `b.missing_required` → HALT(ReconcileFailure), kein READY; Regressionstest `snapshot_b_missing_required_blocks_ready`.
+42 Timing: `T_detect` beim ersten actionablen Kandidaten **vor** dem TX-Build; `T_ready` nach Build; `T_rx→T_detect` enthält keinen Build mehr.
+43 Verlustgrund strukturell: `ThresholdTooHigh` nur, wenn ein Kandidat positiv aber ≤ MIN_PROFIT war; sonst `EconomicSkip`; kein String-Parsing.
+44 Winner-Matcher deterministisch: nur erfolgreiche TXs (Signature-err und meta.err), früheste Landing ≥ since_slot, Pagination bis unter since_slot, Deckel 10 Seiten → `Err` (fail closed).
+45 `RaceOutcome {ReadyBeforeWinner | SameSlotUnknown | Loss}`: Win nur bei `ShadowReady` ∧ `sign_slot < winner_slot`; gleicher Slot zählt separat; `ShadowSimFailed`/`Skip` nie Win.
+46 Ledger: `plans_built` zählt ShadowReady + ShadowSimFailed; `same_slot_unknown`; letzter (Teil-)Tag beim Shutdown geschrieben + flush.
+47 `classify`-Kollision in main.rs per Alias `classify_account` behoben.
+Repo-Struktur: `project_0/{native,docs,scripts,data}`; Default-Pfade `project_0/data/shadow/*.jsonl`; Phase-Dokument unter `project_0/docs/PHASE_P6LT_SHADOW.md`.
+Offen: Build/Tests (vier Logs), C0, P4A-03 Sizing, RouteProvider, v1 Sign/Wire, Staging, P8-05.
