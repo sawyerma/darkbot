@@ -2267,3 +2267,73 @@ Status for this exact run:
 - zero successful competitors between: PASS;
 - current public/ordinary P2P ingress as technical maximum: NOT QUALIFIED;
 - exact `T_buy - T0`: NOT MEASURABLE from standard BSC block data.
+
+
+## 2026-10-01 — G0.6 Ingress × Inclusion Prequalification — current bottleneck and research brief
+
+### Problem statement
+
+The current controlled Flap Testnet path proves that the Rust BUY hotpath is **not** the dominant bottleneck.
+
+Latest successful run:
+- actual BUY/acquisition: PASS;
+- T_signal -> T_ready = 0.378500 ms;
+- T_signal -> T_send = 0.617667 ms;
+- launch handoff -> first P2P hash = 182.209833 ms;
+- P2P hash -> full actionable launch transaction = 87.510417 ms;
+- launch handoff -> actionable full launch transaction = 269.720250 ms;
+- launch block 134315024 index 5;
+- BUY block 134315025 index 1;
+- successful external BUYs between launch and DarkBot = 0.
+
+Conclusion: further shaving tens or hundreds of microseconds from Rust does not solve the product problem while ingress is roughly 270 ms late. Current ordinary BSC P2P/hash-fetch ingress is therefore **not qualified as the technical maximum**.
+
+### Research question
+
+Find the technically fastest practical BSC path for:
+
+`earliest actionable launch evidence -> DarkBot BUY -> ordered inclusion -> actual first external BUY`
+
+The target remains `T_buy - T0 < 1 ms`. If post-T0 internet reaction cannot physically satisfy this target, prioritize architectures that move work before T0:
+
+`T_pre < T0 -> BUY already prepared -> ordered/backrun builder -> [launch][DarkBot BUY]`.
+
+### Mandatory candidate classes
+
+Research and compare, with current documentation/code/evidence:
+1. direct custom BSC devp2p / network-only Reth relays with many strategically placed peers;
+2. own full bsc-geth / Reth nodes with early pre-txpool hooks;
+3. multi-region sensors and FIRST ACTIONABLE WINS;
+4. BlockRazor Public Mempool gRPC / Private Mempool / Fast Submit / Builder;
+5. 48Club Auction Feed + `backrunTarget` / Puissant ordered bundle;
+6. bloXroute BDN `newTxs` / local Gateway / gRPC / `blxr_tx`;
+7. current BSC PBS Builder -> Sentry -> Validator path;
+8. own builder based on BNB Chain's open-source `bsc-builder`;
+9. direct validator/sentry-near deployment where protocol/economic access allows it;
+10. kernel/NIC specialization only after network topology/ingress is proven no longer dominant.
+
+### Known external evidence to verify
+
+- BSC PBS architecture explicitly supports searchers sending bundles to builders, which bid to the in-turn validator through Sentry.
+- BSC ordinary tx propagation sends full transactions only to a subset of peers and hash-announces to others; therefore hash-fetch latency is structurally expected on ordinary peers.
+- BSC EVN directly connects validator/sentry peers but disables transaction broadcast between EVN peers, so EVN membership is not automatically an early public-mempool feed.
+- 48Club Auction Feed can prepend a `backrunTarget` ahead of the submitted bundle and currently filters a Four.meme Create topic.
+- BlockRazor publishes a BSC Public Mempool gRPC product and Fast Submit path; provider benchmarks claim material lead over regular nodes and ~20-50 ms submission-path reductions depending on geography.
+- bloXroute exposes BSC BDN transaction streams and Gateway APIs; its own docs recommend WSS/Gateway for latency-sensitive submission.
+- Merkle/Blink publicly described a network-only Reth relay architecture with many replicas/brokers and geographic distribution for BSC mempool latency; this architecture is directly relevant to a no-subscription alternative.
+
+### Required output of the next research/design step
+
+Do not merely suggest providers. Produce:
+- a ranked-by-physics architecture ladder from cheapest/free to absolute technical maximum;
+- exact timing boundary for each candidate;
+- which parts can run before T0;
+- whether full signed launch calldata is available without synchronous RPC;
+- whether exact ordered `[launch][BUY]` inclusion can be expressed;
+- expected unavoidable network hops and geographic dependencies;
+- current cost/access requirements;
+- open-source code/repositories worth reusing;
+- the smallest benchmark harness needed to compare all candidates under the same controlled launch;
+- explicit STOP criteria for ordinary P2P if it cannot approach the required lead.
+
+No provider is declared fastest from marketing claims alone. Gate 0 must measure complete ingress x inclusion paths under comparable conditions.
