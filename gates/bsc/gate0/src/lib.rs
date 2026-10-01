@@ -1,3 +1,4 @@
-//! Bounded, in-memory dry-qualification admission state. No network or signing.
+//! Bounded Gate-0 qualification helpers.
 pub mod intent_lane;
+pub mod p2p_ingress;
 pub mod restart_fence;
