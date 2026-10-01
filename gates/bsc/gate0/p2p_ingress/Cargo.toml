@@ -7,19 +7,24 @@ publish = false
 [dependencies]
 alloy-consensus = "2.0.4"
 alloy-eips = "2.0.4"
+alloy-genesis = "2.0.4"
 alloy-primitives = "1.5.6"
+alloy-rlp = "0.3.16"
+bytes = "1"
 futures = "0.3"
 tokio = { version = "1.51.1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tokio-stream = "0.1"
 
-reth_bsc = { git = "https://github.com/bnb-chain/reth-bsc.git", rev = "98ef6c5b2d8b191f9b10bf1406dce341475c30ce" }
 reth-chainspec = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-discv4 = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
+reth-eth-wire = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-eth-wire-types = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth-ethereum-forks = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-ethereum-primitives = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-metrics = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-network = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
-reth-network-api = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth-network-peers = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth-primitives-traits = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-provider = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
 reth-tasks = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 secp256k1 = { version = "0.30", features = ["global-context", "std", "recovery", "rand"] }
