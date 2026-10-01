@@ -1,7 +1,7 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
-Status: **NOT STARTED / EMPTY BASELINE**  
-Updated: 2026-09-30
+Status: **S0, S1-LT, S2, S3-CORE, P2, P4A, P5-Regeln CODE WRITTEN (UNTESTED / VERIFY) / P3 STUB / C0 TOOLING WRITTEN / P0+P1A BLOCKED (no egress)**  
+Updated: 2026-10-01
 
 This is the single human-readable measurement ledger for the new Solana / Project 0 Liquidator.
 
@@ -67,16 +67,17 @@ realized PnL
 
 | Phase | Measurement | Status | Evidence |
 |---|---|---|---|
-| S0 | timing/telemetry + provider abstraction contract | N/A | not started |
-| S1 | ingress throughput/decode/gaps/reconnect/v1 fidelity/provider cost | N/A | not started |
-| S2 | state reconciliation/fork/gap recovery | N/A | not started |
-| S3 | build/sign/serialize/v0-v1/Jito-RPC capability | N/A | not started |
+| S0 | timing/telemetry + provider abstraction contract | CODE WRITTEN, cargo test NOT RUN by author (no toolchain in author env) — see §9 | native/crates/darkbot-common |
+| S1-LT | WsRpcControlSource, event model, v1 detection | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/ingress |
+| S2 | state reconciliation/fork/gap recovery | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/state |
+| S3-CORE | v0 builder, v1 stub, signer, RPC+Jito adapter, reconciliation | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/{tx,submit} |
 | S4 | Python↔Rust Pump.fun parity + native baseline | N/A | not started |
+| C0 | account census (types/sizes) | TOOLING WRITTEN, selftest PASS offline, mainnet run NOT done (no egress) — see §9 | scripts/project_0/c0_census.py |
 | H0 | historical Project 0 liquidation/composition/competition | N/A | not started |
-| P2 | affected accounts/update + timed-recheck load | N/A | not started |
-| P3 | exact health/eligibility parity | N/A | not started |
-| P4A | deterministic economics/ranking | N/A | not started |
-| P5 | route/build/size/CU/bundle + path-dependent failure cost | N/A | not started |
+| P2 | reverse/threshold index, premium+tag scheduler | CODE WRITTEN, UNTESTED (offline-Tests enthalten) — see §9 | darkbot-project0/src/{index,schedule}.rs |
+| P3 | health via marginfi crate | STUB (Contract + NoHealth); Crate-Anbindung offen — see §9 | darkbot-project0/src/health.rs |
+| P4A | deterministic economics/ranking, premium curve | CODE WRITTEN, UNTESTED (offline-Tests enthalten) — see §9 | darkbot-project0/src/economics.rs |
+| P5 | receivership sequence/allowlist/bundle rules | RULES WRITTEN, UNTESTED; Instruction-Bau offen — see §9 | darkbot-project0/src/planner.rs |
 | P6 | full hotpath + shadow race | N/A | not started |
 | P7 | capture/economics/competition/provider-value evidence | N/A | not started |
 | P4B | empirical p(win)/tip/stopping ranking | N/A | blocked on P7 |
@@ -187,9 +188,119 @@ When created, use one canonical location and link it here. Do not scatter Projec
 ## 8. Current status
 
 ~~~text
-Project 0 production code:        NOT STARTED
+Project 0 production code:        S0 written (darkbot-common), not compiled by author
 Project 0 measurements:           N/A
 Project 0 LIVE:                   NOT ENABLED
 permanent paid provider approved: NONE
 probabilistic ranking approved:   NO
 ~~~
+
+## 9. Session log
+
+### 2026-10-01 — Sitzung 1 (Fable, Chat-Container ohne Egress)
+
+**Umgebung:** kein `cargo`/`rustc`/`protoc`; Egress-Proxy blockt github.com und mainnet.helius-rpc.com (HTTP 403). Alle Netzwerk-Tickets sind in dieser Umgebung nicht ausführbar.
+
+**BLOCKER (echt, dokumentiert nach Work-Order-Regel):**
+- P0-01, P0-02, P0-04: Source-/Lizenz-Lesen von `0dotxyz/eva01`, `mrgnlabs/mary`, `solana-dex-superagg` nicht möglich (403). Betroffene Quelle: GitHub. Minimale Option: Tickets in Claude Code auf dem Mac ausführen; kein Workaround über Sekundärquellen zulässig.
+- P1A-01: on-chain ProgramData nicht abrufbar (403). Program-ID `MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA` und Group `4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8` sind **Sekundärwissen, PRÜFEN**.
+- C0-01 Mainnet-Lauf: nicht möglich (403). Tooling geschrieben und offline getestet.
+
+**S0 (S0-01..05) — CODE WRITTEN:**
+- `native/Cargo.toml` (workspace, resolver 2), `native/crates/darkbot-common` (edition 2021, **null externe Dependencies**).
+- Module: `timing` (Clock monoton, Stage T_rx..T_observed_landed, Timeline mit Intervallen; fehlender Punkt → None, nie 0; kein Overwrite), `histogram` (log-linear 8 Sub-Buckets, p50/p95/p99 konservativ als obere Bucket-Grenze, max/min/count exakt, leer → N/A), `channel` (bounded über sync_channel, Overflow explizit gezählt, Element zurückgegeben), `lifecycle` (Shutdown, RunState fail-closed: Halted behält ersten Grund, Ready nur über Reconciling), `journal` (Record mit seq/t_rx/source/kind/payload; SeqGap → Fehler; MemJournal + Replay), `config` (Pflichtwerte → Fehler, explizite Defaults), `error` (HaltReason-Taxonomie).
+- Unit-Tests in jedem Modul (14 Tests). **Nicht ausgeführt** — Gate S0 bleibt offen bis `cd native && cargo test -p darkbot-common` auf dem Mac PASS meldet. Ergebnis hier eintragen (Toolchain-Version, Test-Count, PASS/FAIL).
+- Bewusst nicht gebaut: lock-freier SPSC-Ring (erst nach Messung), Datei-Journal (S1).
+
+**C0 — TOOLING WRITTEN:**
+- `scripts/project_0/c0_census.py`: ein `getProgramAccounts` (confirmed, withContext), JSONL-Dump mit SHA-256, Typ-Census über Anchor-Discriminators, Größenverteilung pro Typ, unbekannte Discriminators gezählt. Health-Klassifikation steht explizit als N/A bis P1A-Layout.
+- `--selftest` offline: PASS.
+- Discriminators (sha256("account:<Name>")[:8]): MarginfiAccount 43b2826d7e721c2a · Bank 8e31a6f2324261bc · MarginfiGroup b617adf097ceb643 · FeeState 3fe01055c124ebdc · LiquidationRecord 5f74178459d2f5a2. PRÜFEN gegen IDL des deployed Tags (P1A-01). Ein unbekannter Discriminator mit hoher Anzahl im Mainnet-Lauf bedeutet: Typname im Script falsch, nicht Chain-Anomalie.
+- Mainnet-Lauf: `HELIUS_API_KEY=... python3 scripts/project_0/c0_census.py --out data/project_0/c0/` → Report + Rohdaten-Pfad + SHA hier eintragen. Credits: ein gPA-Call; Rohdatenmenge (bytes_total) hier dokumentieren.
+
+**Gate-Entscheidungen:** keine. S0 PASS offen (cargo test). C0-GO/STOP offen (Mainnet-Lauf + Health-Klassifikation).
+
+**Nächstes Ticket in einer Umgebung mit Egress:** P0-01, dann P1A-01 (Program-ID verifizieren), dann C0-01 Mainnet-Lauf, dann S0 `cargo test`.
+
+### 2026-10-01 — Sitzung 2 (Fable, Chat-Container ohne Egress) — CHECKPOINT
+
+Auftrag: FIRST EURO PATH ohne Stopp bei fehlenden Testmöglichkeiten; alles **UNTESTED / VERIFY**.
+Kein `cargo`, kein Netzwerk. Nichts kompiliert. Offline ausgeführt: nur `c0_census.py --selftest` (Sitzung 1).
+
+**Geschrieben (Rust, ~3.760 LOC inkl. Tests):**
+- `darkbot-common` (S0, Sitzung 1) — unverändert.
+- `darkbot-solana` (S1-LT, S2, S3-CORE): `ingress/{mod,ws_rpc}.rs` (IngressSource-Contract, Event-Modell, programSubscribe/accountSubscribe/slot/root, T_rx vor Parse, Reconnect → Gap+Reconnected, Sink-Overflow → Gap, v1-Erkennung config→versioned→legacy für JSON und Bytes), `state/{mod,snapshot,blockhash}.rs` (Bootstrap-Puffer, Snapshot-Install mit "Updates > S", Ordnungsregeln slot/write_version mit Zählern, Root-Policy, Reconcile-Report → HALT bei Mismatch, explizite Freigabe; RPC-Snapshot; Blockhash-Cache ohne RPC im Hotpath), `tx/mod.rs` (v0-Builder mit ComputeBudget, 64-Lock-Limit vor Compile, Größenlimit, v1-Stub hinter Feature `txv1` mit dokumentierter API, Signer, Keypair-Loader), `submit/{mod,rpc,jito}.rs` (SubmissionAdapter, Ledger-§4-Outcome-Taxonomie, RPC-Submit + Reconciliation mit maxSupportedTransactionVersion=1, Jito sendTransaction/sendBundle(≤5)/getTipAccounts/getBundleStatuses).
+- `darkbot-project0` (P1A-Konstanten, P2, P3-Stub, P4A, P5-Regeln): `protocol.rs` (Discriminators, Dual-Size-Bank 1856/3904 → sonst UNKNOWN_LAYOUT), `index.rs` (ReverseIndex 4 Richtungen; ThresholdIndex pro Bank/Seite mit BTreeMap-Range-Lookup + margin), `schedule.rs` (TimeScheduler Min-Heap mit Invalidation; premium_boundary), `economics.rs` (Premium-Kurve 0.1.12: Basis max(FeeState,5 %), 1 h Grace, linear bis 100 % nach 7 d, blockiert bei Bad Debt/EMODE; Umkehrfunktion time_for_premium; FailedCostMatrix mit Option → Unknown nie 0; evaluate/actionable/rank), `health.rs` (HealthEngine-Contract, NoHealth fail-closed, Crate-Anbindung als Feature `crate_health` offen), `planner.rs` (validate_receivership: End letzte Ix ohne Ausnahme, Allowlist vor/zwischen Start–End, NO_SWAP verbietet Swap, Paid nur nach P7; validate_bundle: kein Start/End-Split, ≤5).
+
+**Bewusst NICHT gebaut:** eigene Health-Formel (Regel 3), lock-freier SPSC-Ring (erst nach Messung), GeyserSource (S1-RACE), Race-S3-Tickets, Direct TPU, Deshred, Instruction-Bau für Receivership/Tagger (braucht Crate/IDLs aus P0/P1A), TX-Template-Cache (P2-06; Invalidation-Liste in schedule.rs dokumentiert).
+
+**VERIFY-Schwerpunkte für den Mac (in dieser Reihenfolge):**
+1. `cd native && cargo build` — Dependency-Versionen in beiden Cargo.toml sind geraten (solana-* 3.x, tokio-tungstenite 0.24, reqwest 0.12, bincode 1). Erwartete Reibung: `Keypair::from_bytes` vs `try_from`, `RpcProgramAccountsConfig.sort_results`, `get_program_accounts_with_config` ohne Context-Slot (siehe Kommentar in snapshot.rs), `compute_units_consumed` OptionSerializer, `Message::Text(.into())` bei tungstenite.
+2. `cargo test --workspace` — 40+ Unit-Tests, alle offline.
+3. `c0_census.py` Mainnet-Lauf → Report ins Ledger.
+4. P0-01/P0-02 (GitHub) → Crate-Tag bestätigen → Feature `crate_health` anbinden (P3-01).
+
+**Gate-Entscheidungen:** keine. Alle Gates offen bis Build/Test/Mainnet-Lauf.
+
+### 2026-10-01 — Sitzung 3 (Fable, Chat-Container ohne Egress) — CHECKPOINT nach Astra-Review
+
+**Korrigiert (materiell, aus Astras Review):**
+1. `schedule.rs`: `Trigger` jetzt `Hash` (Compile-Fehler).
+2. `economics.rs`: Rampe = 7 d − 1 h → 100 % genau 7 d nach Tagging; VERIFY Bezugspunkt in `liquidate_start.rs`.
+3. `state/mod.rs`: `confirm_ready()` nur nach sauberem `reconcile()` nach dem letzten `install_snapshot()` (Flag `reconciled_clean`); Tests angepasst.
+4. `state/snapshot.rs`: Context-Slot aus **derselben** gPA-Antwort (`send(GetProgramAccounts)` + `OptionalContext`), kein separates `getSlot`.
+5. `install_snapshot`: per-Account-Slots bleiben erhalten; `snapshot_slot` = untere Schranke; gepufferte Deltas per Account-Vergleich. `multiple_accounts` liefert min-Slot statt max.
+7. `ws_rpc.rs`: fehlender `context.slot` → Protocol-Fehler; unlesbarer Frame → Session-Ende (Gap/Reconnect), kein `continue`.
+12. `jito.rs`: `getTipAccounts` auf `/api/v1/getTipAccounts`; `bundle_status` normalisiert zu `BundleStatus {NotFound|Pending|Landed|Failed}`.
+15. `index.rs`: `set_bank_oracles`/`set_bank_integration` entfernen alte Zuordnungen (Invalidation), Test ergänzt.
+24. `c0_census.py` Selftest: Bank-Rohlänge 1864 (8 + 1856), konsistent mit `protocol.rs`.
+
+**Neu gebaut (quellenunabhängig):**
+- S1-01: `IngressEvent::Transaction` (+ `TransactionObserved`, Version in Pflichtreihenfolge) und `IngressEvent::Health` (`SourceHealth`, alle 5 s). `transactionSubscribe` als Provider-Erweiterung markiert (VERIFY).
+- S1-07/S2-04: `state/recovery.rs` — `RecoveryDriver`: Gap → HALT → Snapshot A → install → Snapshot B → reconcile → confirm_ready; begrenzte Versuche, bleibt HALTED bei Mismatch; injizierter Snapshot-Fetch, offline getestet (2 Tests).
+- S3-01: `BuildVersion::Legacy` + `build_legacy`; Resource-Ixs gemeinsam.
+- P2-06/07: `prepared.rs` — `PreparedCache` mit `InvalidationKey` (account_slot, oracle_slots, tagged_at, premium_flags, lut_version, fee_state_version); Hit/Miss/Invalidation-Zähler.
+- P4A: `t_profitable()`-Solver: net(p) > min ⇔ p > Bedarf, gedeckelt durch `premium_cap_bps` (Receivership-Regel), Umkehr über `time_for_premium`; Tests.
+- P8-LT: `safety.rs` — Limits (exposure, daily loss, failed attempts, tip, slippage, outstanding), Tagesrollover, HALT ohne Auto-Reset, `record_outcome` mit realisiertem PnL; Tests.
+- Runner: `darkbot-runner` — `pipeline.rs` (Health → Plan → Economics → Planner-Validierung → Build → Sign → Send-Boundary [Shadow] | Safety → Submit [Live]; jede Stufe setzt Timing-Punkt; Fehler = Record mit LossReason), `record.rs` (OpportunityRecord, Decision, LossReason inkl. THRESHOLD_TOO_HIGH), `main.rs` (`p0-longtail`: Env-only-Config, Ingress-Thread → bounded channel → State + RecoveryDriver; Live-Modus verweigert Start, bis P8-LT im Ledger PASS ist).
+
+**Weiterhin offen — nur mit Quellen/Compiler lösbar (Begründung, keine Ausrede):**
+- S2-02 Fork-Graph: `SlotUpdate.parent` wird gehalten, aber kein Branch-State/Rollback. Stufe 1 läuft auf `confirmed`; Processed-Verarbeitung ist Race (S1-RACE). Als PARTIAL geführt.
+- S3-02 v1-Builder: API `v1::Message::try_compile_with_config` nur mit solana-sdk ≥ 4.2 verifizierbar.
+- P2-01 RAM-Modell der P0-Typen, P3-01..05 Health, P5-02/05/06/07 Instruction-Bau, T (Tag-Ix): brauchen `marginfi`-Crate/IDL (GitHub gesperrt).
+- C0-02..04, S4, P6-LT-Lauf: brauchen RPC bzw. Build.
+
+**Zählung:** ~4.790 Zeilen Rust, 60+ Unit-Tests im Source, **nichts kompiliert**.
+
+### 2026-10-01 — Sitzung 4 (Quellen marginfi-v2-main + eva01-main als Zip gelesen) — CHECKPOINT
+
+**Jetzt BELEGT aus Source (vorher PRÜFEN):** Program-ID Mainnet `MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA` (id-crate), Receivership-Allowlist (8 Programme), Refresh-Allowlist, Exclusive-Ix-Liste, Ix-Discriminators, Seeds (`liq_record`, `liquidity_vault_auth`, `feestate`), Seize-Grenze `seized ≤ repaid×(1+max(fee,5 %))` in Equity-Werten, Post-Health-Regel, Closeout < 5 USD, Flat-SOL-Fee in `end`, Health-API `HealthPriceMode::Client(Clock)`, Remaining-Accounts-Layout, Oracle-Modell (Pyth Push PDAs on-chain). **Kein System-Programm in der Receivership-TX → Jito-Tip in separater Bundle-TX** (P5-Konsequenz, neu).
+
+**Neu gebaut:** `protocol.rs` (komplett aus Source), `receivership.rs` (P5-06: init_liquidation_record, start, withdraw, repay, end mit exakter Account-Reihenfolge; `build_receivership`), `health.rs` `crate_impl` (P3-01: Observation-Accounts in Programm-Reihenfolge, `get_health_components` Maintenance+Equity über Client-Clock, HealthView mit Closeout/BadDebt), `economics::max_seizable_for_repay`, `state/fork.rs` (S2-02 Fork-Tracker, Orphan-Erkennung, `StateCore::invalidate_slots` → HALT), `IngressHalt` (Out-of-Band), Recovery-Barrier (`drain`) + Dedupe (Gap hält, Reconnected recovert), `begin_reconcile` aus Ready, Lock-Zählung auf finaler Ix-Liste, Safety mit Gesamtkapital/Inventar/Concurrency/Asset-/Klassen-Allowlist + `Pipeline::reconcile_outcome`, Runner: `AccountSource` über StateCore, Trigger (a) auf MarginfiAccount-Updates → Health-Record (JSONL) im Shadow, Feature `crate_health` durchgereicht.
+
+**Astras 10 Punkte:** 1–9 umgesetzt; 10 teilweise (Trigger a → Health-Record verdrahtet; Threshold-Index/Scheduler/Pipeline-Evaluate-Vollverdrahtung folgt mit P3-02 Schwellen und P4A-03 Sizing).
+
+**Weiterhin offen (jetzt mit Quelle, aber ohne Compiler):** P3-02 Preisschwellen (`thresholds()` fail-closed), P4A-03 max liquidatable amount, P5-02 Refresh-Planner (Kamino/Drift/JupLend-Ixs aus deren IDLs in `marginfi-v2/idls`), P5-05 allowlisted Swap-Ix, T (Tagging erst 0.1.12), v1, S4, P6-LT-Lauf, C0-02 (Health-Klassifikation kann jetzt über Crate laufen — braucht Build + RPC).
+
+**Zählung:** ~5.550 Zeilen Rust, 63 Unit-Tests im Source, nichts kompiliert. Ticketnummern angeglichen: NO_SWAP = P5-03, Receivership-Builder = P5-06.
+
+### 2026-10-01 — Sitzung 5 (Merge eva01 / marginfi-v2 / DarkBot) — CHECKPOINT
+
+- `receivership.rs`: manueller Builder **entfernt**; Instructions über `marginfi::accounts::*.to_account_metas(Some(true))` + `marginfi::instruction::*.data()` (BELEGT an `p0-cli/src/processor/account.rs`); Init-Record inline vor Start; EndLiquidation mit `fee_payer: None`, `global_fee_wallet` aus FeeState.
+- `execution.rs` neu: No-Route-Quarantäne, exponentielles Target-Backoff mit Drop, Simulate-Gate (nur `Ok` sendet; RPC-Fehler ist kein Freifahrtschein), Bundle-Status → Chain-Confirmation-Regel, sequenzieller Fallback nur bei einer TX. Verhalten aus eva01 adaptiert, kein Code kopiert. 3 Tests.
+- Workspace-Pins aus marginfi-v2 übernommen: `solana-sdk =3.0.0`, `solana-client =3.1.12`, `anchor-lang 1.0.2` (Feature `crate_health`).
+- `P0_REUSE_MATRIX.md`: Merge-Tabelle mit DIRECT_DEPENDENCY / REUSE_ADAPT / KEEP_DARKBOT / DROP für alle Komponenten.
+- Neuer Edge-Kandidat dokumentiert: In-Receivership-Swap (kapitalfrei, vom Protokoll erlaubt) + Tx v1 bei >1232 Bytes — eva01 fährt stattdessen JIT-Buy aus USDC-Reserve. VERIFY: Bytes per Staging-Simulation.
+- Offen (Quellen vorhanden, Compiler fehlt): P5-02 Refresh-Ixs (Kamino/Drift/JupLend aus Mocks-IDLs), P5-04/05 JIT-Buy-Fallback + superagg-Economics-Gate, Bundle-Bau mit Tip-TX, P4A-03 Sizing, P3-02 Schwellen, Runner-Vollverdrahtung.
+- Zählung: ~5.640 Zeilen Rust, 66 Tests im Source, nichts kompiliert.
+
+### 2026-10-01 — Sitzung 5b (Astra-Zusatz: Funding Ladder, Drift-Muster, ZERO_PREFUND-Fixture)
+
+- `funding.rs`: `FundingClass` {ZERO_PREFUND_SAME_TX, NO_SWAP_INVENTORY, FLASH_FUNDED, JIT_SHORTFALL, PREHELD_INVENTORY}. **Keine feste Ausführungspräferenz:** `feasible_classes()` emittiert alle technisch/protokollarisch machbaren Klassen; P4A + TX-Feasibility + Safety wählen die beste ausführbare Variante. FLASH_FUNDED bleibt für P0 ungültig (Allowlist). `capital_required()`/`tx_count()` bleiben Teil von Economics/Telemetry.
+- `execution.rs` erweitert (keep-rs-Muster, adaptiert): `Freshness` (Opportunity-Age, Execution-Deadline), `select_route()` über parallele Quotes nach **realisierbarem** Netto, `priority_fee_percentile()`. Safety: `release_without_outcome()` für deterministische Kapitalfreigabe vor Submission.
+- Pipeline: Deadline-Check vor Send-Boundary; Funding-Klasse im Record.
+- `fixture.rs` (Feature `crate_health`): ZERO_PREFUND-Harness — vollständige Jupiter-Route (`tokenLedger`, setup, other, swap, cleanup) plus `addressLookupTableAddresses`; v0 lädt **echte LUT-Accounts**, v1 nutzt keine LUTs. Allowlist-Check und vollständige Receivership-Ix-Liste aus Crate-Buildern; Messung bytes/locked/ix-count. Simulation + Staging-Lauf bleibt Mac-Aufgabe (`simulateTransaction`, sigVerify=false).
+- **v1 korrigiert:** Solana-3.x (marginfi) und modulare Solana-4.x-v1-Crates können im selben Cargo-Workspace koexistieren; kein zweiter Business-/Execution-Core und kein marginfi-Upgrade ist architektonisch nötig. `darkbot-solana` hat einen isolierten v1-Capability-Adapter nach `solana-foundation/transaction-v1-examples` (`solana-message 4.4.1`, `solana-transaction 4.1.6` Referenz). `measure_v1()` kompiliert die v1-Message/TransactionConfig und misst 4096/64/64-Gates; der finale signierte v1-Wire-/Submission-Adapter bleibt **UNTESTED/VERIFY** bis zur Compiler-Runde.
+- Candidate-Auswahl in der Pipeline: alle vom Planner gelieferten Funding-/Route-Klassen werden einzeln auf Protocol-Validität, P4A-Economics, LIVE-Safety und TX-Baubarkeit geprüft; höchster deterministischer Netto-Profit gewinnt, bei Gleichstand höhere Kapital-Effizienz. Shadow wird nicht von `live_enabled=false` blockiert.
+- Offline-Evidence dieses Imports: `python3 -m py_compile scripts/project_0/c0_census.py` PASS; `python3 scripts/project_0/c0_census.py --selftest` PASS. Rust weiterhin nicht kompiliert (kein `cargo` in dieser Umgebung).
+- Zählung: ~6.400 Zeilen Rust im importierten Stand; Rust-Tests im Source, **nichts als Rust PASS deklariert**, bis Mac-Compilerlauf grün ist.

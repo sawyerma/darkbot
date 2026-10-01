@@ -1,0 +1,12 @@
+[package]
+name = "darkbot-common"
+version = "0.1.0"
+edition = "2021"
+description = "DarkBot native common: timing contract, histograms, bounded channels, lifecycle, journal/replay contracts, config, fail-closed errors"
+license = "UNLICENSED"
+
+# Bewusst ohne externe Dependencies (S0-Regel: keine unnötigen Dependencies).
+
+[dependencies]
+
+[dev-dependencies]

@@ -1,0 +1,41 @@
+[package]
+name = "darkbot-solana"
+version = "0.1.0"
+edition = "2021"
+description = "DarkBot native Solana core: ingress (S1), canonical state (S2), execution core (S3)"
+license = "UNLICENSED"
+
+# UNTESTED / VERIFY bis zum Mac-Compilerlauf.
+# Project-0/marginfi bleibt auf dem belegten SDK-3.x-Graph. Transaction-v1 wird über
+# modulare 4.x-Crates isoliert zugeschaltet; beide Graphen dürfen im selben Workspace leben.
+
+[features]
+default = []
+txv1 = ["dep:solana-pubkey-v1", "dep:solana-hash-v1", "dep:solana-instruction-v1", "dep:solana-message-v1"]
+
+[dependencies]
+darkbot-common = { path = "../darkbot-common" }
+
+solana-sdk = "=3.0.0"         # BELEGT: marginfi-v2 Workspace-Pin; protocol/v0 path
+solana-client = "=3.1.12"     # BELEGT: marginfi-v2 Workspace-Pin
+solana-transaction-status = "3"  # VERIFY: UiTransactionEncoding, EncodedConfirmedTransactionWithStatusMeta
+solana-account-decoder = "3"  # VERIFY: UiAccountEncoding
+
+# Transaction-v1 capability adapter. These modular crates coexist with the
+# marginfi-pinned solana-sdk 3.x graph; only the serializer/message adapter uses them.
+solana-pubkey-v1 = { package = "solana-pubkey", version = "4.2.1", optional = true }
+solana-hash-v1 = { package = "solana-hash", version = "4.3.0", optional = true }
+solana-instruction-v1 = { package = "solana-instruction", version = "3.4.1", optional = true }
+solana-message-v1 = { package = "solana-message", version = "4.4.1", optional = true }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }  # VERIFY Version
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+bs58 = "0.5"
+bincode = "1"   # VERIFY: Wire-Format-Serialisierung der VersionedTransaction
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+[dev-dependencies]

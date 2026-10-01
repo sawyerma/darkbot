@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/darkbot-common",
+    "crates/darkbot-solana",
+    "crates/darkbot-project0",
+    "crates/darkbot-runner",
+]
+
+# Weitere Crates werden erst aufgenommen, wenn ihr Ticket freigegeben ist:
+# crates/darkbot-capture   (S1/S4)

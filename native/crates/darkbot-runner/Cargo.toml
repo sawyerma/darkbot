@@ -1,0 +1,27 @@
+[package]
+name = "darkbot-runner"
+version = "0.1.0"
+edition = "2021"
+description = "DarkBot Project 0 runner: Long-Tail pipeline (shadow = send boundary, live = behind safety)"
+license = "UNLICENSED"
+
+[features]
+default = []
+crate_health = ["darkbot-project0/crate_health", "marginfi-type-crate"]
+txv1 = ["darkbot-solana/txv1"]
+
+[dependencies]
+darkbot-common = { path = "../darkbot-common" }
+darkbot-solana = { path = "../darkbot-solana" }
+darkbot-project0 = { path = "../darkbot-project0" }
+solana-sdk = "=3.0.0"
+solana-client = "=3.1.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+bytemuck = "1"
+marginfi-type-crate = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["mainnet-beta"], optional = true }
+
+[[bin]]
+name = "p0-longtail"
+path = "src/main.rs"
