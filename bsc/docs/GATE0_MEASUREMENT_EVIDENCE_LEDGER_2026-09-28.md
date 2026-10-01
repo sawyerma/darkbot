@@ -2203,3 +2203,67 @@ unter 1 ms. Was wir noch nicht numerisch kennen, ist die echte
 nicht in Build/Sign, sondern in früheren Ingress und geordnete
 Builder-/Validator-Inclusion.**
 
+
+
+## 2026-10-01 — G0.7 Real Testnet BUY Prequalification — independent HTTPS launch + P2P ingress + prewarmed HTTPS BUY
+
+Controlled BSC Testnet Flap birth->BUY completed successfully after decoupling the value-bearing path from PublicNode WSS.
+
+Scope:
+- chain id: 97;
+- launch tx: `0x39b8f3853b595a23a2937870ce699d8b437ba806dcdd4d8644b381eda7fc3535`;
+- BUY tx: `0xb334938a4c36324ea87e8484eb4c2076a1d2f290d1699b35c797390eeae31a9f`;
+- token: `0xf9ffE5b7368D65FE184e5DA26dd284E0Da887777`;
+- launch transport: independent prewarmed HTTPS to `bsc-testnet-dataseed.bnbchain.org:443`;
+- race ingress: raw BSC ETH P2P channel before txpool;
+- BUY transport: separate prewarmed HTTPS `write_all+flush`;
+- WSS control: disabled for this BUY proof;
+- signal source: `BSC_P2P_HASH_FETCH`.
+
+Functional / economic result:
+- launch receipt status = 1;
+- BUY receipt status = 1;
+- acquired token balance = 17669034223232267628301;
+- native debit = 499300700000000 wei;
+- launch block = 134315024, tx index = 5;
+- BUY block = 134315025, tx index = 1;
+- same block = false;
+- successful external BUYs between launch and DarkBot = 0.
+
+Therefore the BUY was real and economically successful. DarkBot was the first observed successful external BUY after the launch in canonical ordering for this controlled trial, but it did **not** achieve same-block adjacency.
+
+Measured ingress:
+- launch handoff -> first P2P hash = **182,209,833 ns = 182.209833 ms**;
+- P2P hash -> complete transaction = **87,510,417 ns = 87.510417 ms**;
+- launch handoff -> actionable full transaction = **269,720,250 ns = 269.720250 ms**.
+
+Measured local BUY path:
+- T_signal -> decode = 139,500 ns;
+- decode -> build = 10,083 ns;
+- build -> sign = 218,542 ns;
+- sign -> ready = 10,375 ns;
+- ready -> queue = 10,458 ns;
+- queue -> send = 228,709 ns;
+- **T_signal -> T_ready = 378,500 ns = 0.378500 ms**;
+- **T_signal -> T_send = 617,667 ns = 0.617667 ms**.
+
+Observation:
+- T_signal -> receipts seen = 6,416,029,875 ns = 6.416029875 s.
+- This is observation latency, **not** BUY execution latency.
+- `T_buy - T0` remains `UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA`; ordinary BSC block/receipt data does not expose a trustworthy sub-ms execution timestamp for each transaction.
+
+Interpretation:
+1. The local BUY hotpath remains below the 1-ms target.
+2. The dominant bottleneck is still ingress. Roughly 269.7 ms elapsed from launch handoff until the complete actionable launch transaction reached DarkBot.
+3. Of that ingress delay, ~182.2 ms occurred before the first matching P2P hash and another ~87.5 ms in hash -> full transaction retrieval.
+4. Because actionable ingress arrived this late, the BUY landed in the next block rather than directly behind the launch in the same block.
+5. Zero successful competing BUYs happened in between, so this run still achieved first observed successful external BUY ordering, but it does not qualify the current P2P ingress as the technical maximum.
+6. Further local Rust build/sign optimization has low leverage relative to the ~270-ms ingress deficit. The next Gate-0 work belongs in G0.6/G0.9-style ingress x inclusion qualification: earlier transaction feeds, ordered/backrun builder paths, and ultimately validator/sentry-near or own-builder infrastructure if required.
+
+Status for this exact run:
+- actual BUY/acquisition: PASS;
+- local T_signal -> T_send <1 ms: PASS;
+- same-block adjacency: FAIL for this run;
+- zero successful competitors between: PASS;
+- current public/ordinary P2P ingress as technical maximum: NOT QUALIFIED;
+- exact `T_buy - T0`: NOT MEASURABLE from standard BSC block data.
