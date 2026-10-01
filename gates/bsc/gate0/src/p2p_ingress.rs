@@ -8,7 +8,7 @@
 //! Reth BSC-P2P example/fork behavior.
 
 use alloy_consensus::Transaction as _;
-use alloy_primitives::{Address, BlockHash, Bytes, TxKind, B256, U256};
+use alloy_primitives::{Address, BlockHash, Bytes, TxKind, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
 use futures::SinkExt;
@@ -24,7 +24,7 @@ use reth_eth_wire::{
 };
 use reth_eth_wire_types::{DisconnectReason, EthVersion};
 use reth_ethereum_forks::ForkFilter;
-use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager, PeersInfo};
+use reth_network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager, PeersInfo};
 use reth_primitives_traits::SealedHeader;
 use reth_storage_api::noop::NoopProvider;
 use reth_tasks::Runtime;
@@ -325,7 +325,7 @@ pub fn spawn_testnet_flap_sensor(
                 );
 
                 let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
-                let net_cfg = NetworkConfig::builder(rng_secret_key(), Runtime::test())
+                let net_cfg = NetworkConfig::<_, EthNetworkPrimitives>::builder(rng_secret_key(), Runtime::test())
                     .boot_nodes(boot_nodes.clone())
                     .set_head(head)
                     .with_pow()
