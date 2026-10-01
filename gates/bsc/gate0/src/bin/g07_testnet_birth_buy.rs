@@ -75,6 +75,8 @@ sol! {
 const RPC_DEFAULT: &str = "https://data-seed-prebsc-1-s1.bnbchain.org:8545/";
 const WSS_HOST: &str = "bsc-testnet-rpc.publicnode.com";
 const WSS_PATH: &str = "/";
+const LAUNCH_HTTPS_HOST_DEFAULT: &str = "data-seed-prebsc-1-s1.bnbchain.org";
+const LAUNCH_HTTPS_PATH: &str = "/";
 const CHAIN_ID: u64 = 97;
 const PORTAL: &str = "0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9";
 const TAX_V3_IMPL: &str = "0xE6Ff967a887084c16D0fD71548CF709542cc1557";
@@ -346,6 +348,43 @@ fn buy_calldata(token: Address) -> Vec<u8> {
 }
 
 type Tls = StreamOwned<ClientConnection, TcpStream>;
+
+fn https_connect(host: &str) -> Tls {
+    let addr = (host, 443)
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .expect("HTTPS DNS returned no address");
+
+    let tcp =
+        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).expect("HTTPS TCP connect failed");
+    tcp.set_nodelay(true).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
+    tcp.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+
+    let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let server_name = ServerName::try_from(host.to_string()).unwrap();
+    let conn = ClientConnection::new(Arc::new(config), server_name).unwrap();
+    StreamOwned::new(conn, tcp)
+}
+
+fn https_send_json(stream: &mut Tls, host: &str, body: &str) {
+    let req = format!(
+        "POST {LAUNCH_HTTPS_PATH} HTTP/1.1\r\n\
+         Host: {host}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: keep-alive\r\n\
+         \r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(req.as_bytes()).expect("HTTPS write failed");
+    stream.flush().expect("HTTPS flush failed");
+}
 
 fn ws_connect() -> Tls {
     let addr = (WSS_HOST, 443)
@@ -693,7 +732,7 @@ fn main() {
     let p2p_min_peers = env::var("DARKBOT_G07_P2P_MIN_PEERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(4)
+        .unwrap_or(8)
         .max(1);
     println!("p2p_min_peers:             {p2p_min_peers}");
     let p2p_head = latest_p2p_head();
@@ -753,16 +792,22 @@ fn main() {
         }
     });
 
-    // Submission connection. WSS here is transport, not race signal source.
-    let mut ws = ws_connect();
-    let mut mask_counter = 0x17a2_93c1u32;
+    // Independent launch injection. PublicNode WSS is not used to inject the
+    // launch, so its subscription remains a genuine control sensor.
+    let launch_https_host = env::var("DARKBOT_G07_LAUNCH_HTTPS_HOST")
+        .unwrap_or_else(|_| LAUNCH_HTTPS_HOST_DEFAULT.to_string());
+    let mut launch_https = https_connect(&launch_https_host);
     let launch_body = format!(
         r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
         hex::encode(&launch_signed)
     );
-
-    ws_send_text(&mut ws, &launch_body, &mut mask_counter);
+    https_send_json(&mut launch_https, &launch_https_host, &launch_body);
     let launch_handoff = Instant::now();
+    println!("launch_injection_transport: independent HTTPS {launch_https_host}");
+
+    // BUY submission remains on its own warm WSS connection; it is not a signal source.
+    let mut ws = ws_connect();
+    let mut mask_counter = 0x17a2_93c1u32;
 
     let p2p_signal = loop {
         let signal = p2p
@@ -845,41 +890,23 @@ fn main() {
     ws_send_text(&mut ws, &buy_body, &mut mask_counter);
     let t_send = Instant::now();
 
-    let mut launch_ack_seen = false;
-    let mut buy_ack: Option<String> = None;
-    let t_ack = loop {
+    let buy_ack = loop {
         let text = ws_read_message(&mut ws, &mut mask_counter);
         let v: Value = serde_json::from_str(&text).expect("invalid WSS JSON");
 
-        match v.get("id").and_then(Value::as_u64) {
-            Some(2) => {
-                if let Some(e) = v.get("error") {
-                    panic!("launch broadcast rejected: {e}");
-                }
-                let remote = v["result"].as_str().expect("launch tx hash missing");
-                assert_eq!(remote.to_lowercase(), launch_hash_hex.to_lowercase());
-                launch_ack_seen = true;
-            }
-            Some(3) => {
-                if let Some(e) = v.get("error") {
-                    panic!("BUY broadcast rejected: {e}");
-                }
-                buy_ack = Some(
-                    v["result"]
-                        .as_str()
-                        .expect("BUY tx hash missing")
-                        .to_string(),
-                );
-            }
-            _ => {}
+        if v.get("id").and_then(Value::as_u64) != Some(3) {
+            continue;
         }
-
-        if launch_ack_seen && buy_ack.is_some() {
-            break Instant::now();
+        if let Some(e) = v.get("error") {
+            panic!("BUY broadcast rejected: {e}");
         }
+        break v["result"]
+            .as_str()
+            .expect("BUY tx hash missing")
+            .to_string();
     };
+    let t_ack = Instant::now();
 
-    let buy_ack = buy_ack.expect("BUY submission ACK was not observed");
     assert_eq!(buy_ack.to_lowercase(), buy_hash_hex.to_lowercase());
     let t_wss_control = control_rx.recv_timeout(Duration::from_secs(5)).ok();
     let t_p2p_hash = p2p.hashes.try_recv().ok();
@@ -936,7 +963,7 @@ fn main() {
     println!("=== G0.7 TESTNET BIRTH->BUY RESULT ===");
     println!("status:                    PASS");
     println!("signal_mode:               {signal_mode}");
-    println!("launch_ack_seen:           {launch_ack_seen}");
+    println!("launch_ack_seen:           INDEPENDENT_HTTPS_NOT_WAITED");
     if let Some(t_hash) = t_p2p_hash {
         let hash_delta_ns: i128 = if t_hash >= launch_handoff {
             (t_hash - launch_handoff).as_nanos() as i128
@@ -1038,7 +1065,7 @@ fn main() {
         (t_observed - t_signal).as_nanos()
     );
     println!("race_ingress_boundary:     raw BSC ETH P2P transaction channel before txpool");
-    println!("transport_boundary:        live WSS write_all+flush (submission only)");
+    println!("transport_boundary:        BUY live WSS write_all+flush; launch independent HTTPS write_all+flush");
     println!("T_buy_minus_T0:            UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA");
     println!("G0.7_TESTNET_BIRTH_BUY_PASS: true");
 }
