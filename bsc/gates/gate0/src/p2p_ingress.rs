@@ -32,10 +32,12 @@ use reth_network::{
     NetworkConfig,
     NetworkManager,
     PeerRequest,
+    NetworkEvent,
+    NetworkEventListenerProvider,
     Peers,
-    PeersConfig,
     PeersInfo,
 };
+use reth_network_api::events::PeerEvent;
 use reth_primitives_traits::SealedHeader;
 use reth_storage_api::noop::NoopProvider;
 use reth_tasks::Runtime;
@@ -346,19 +348,10 @@ pub fn spawn_testnet_flap_sensor(
                 let boot_nodes = bsc_testnet_bootnodes();
                 let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
 
-                // Chapel/Testnet is much more deterministic when the known nodes are
-                // dialled directly instead of relying on discovery to populate the
-                // peer set. Keep discv4 enabled only as an additional source.
-                let peer_config = PeersConfig::default()
-                    .with_basic_nodes(boot_nodes.iter().cloned().collect())
-                    .with_max_outbound(16)
-                    .with_refill_slots_interval(Duration::from_millis(250));
-
                 let net_cfg = NetworkConfig::<_, EthNetworkPrimitives>::builder(
                     rng_secret_key(),
                     Runtime::test(),
                 )
-                .peer_config(peer_config)
                 .boot_nodes(boot_nodes.clone())
                 .set_head(head)
                 .with_pow()
@@ -384,9 +377,41 @@ pub fn spawn_testnet_flap_sensor(
                     .expect("failed to create standalone BSC P2P network");
                 network.set_transactions(network_tx);
                 let handle = network.handle().clone();
+                let mut peer_events = handle.event_listener();
+                let diag_handle = handle.clone();
+
+                tokio::spawn(async move {
+                    while let Some(evt) = peer_events.next().await {
+                        match evt {
+                            NetworkEvent::ActivePeerSession { info, .. } => {
+                                eprintln!(
+                                    "P2P_SESSION_OPEN peers={} peer={} remote={} client={} eth={} kind={:?} chain={}",
+                                    diag_handle.num_connected_peers(),
+                                    info.peer_id,
+                                    info.remote_addr,
+                                    info.client_version,
+                                    info.version,
+                                    info.peer_kind,
+                                    info.status.chain,
+                                );
+                            }
+                            NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
+                                eprintln!(
+                                    "P2P_SESSION_CLOSE peers={} peer={} reason={:?}",
+                                    diag_handle.num_connected_peers(),
+                                    peer_id,
+                                    reason,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+
                 tokio::spawn(network);
 
                 let mut ready_sent = false;
+                let mut last_diag_peers = usize::MAX;
                 let mut readiness_tick = tokio::time::interval(Duration::from_millis(100));
                 readiness_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -394,6 +419,10 @@ pub fn spawn_testnet_flap_sensor(
                     tokio::select! {
                         _ = readiness_tick.tick() => {
                             let peers = handle.num_connected_peers();
+                            if peers != last_diag_peers {
+                                eprintln!("P2P_PEER_COUNT peers={peers} required={min_peers}");
+                                last_diag_peers = peers;
+                            }
                             if !ready_sent && peers >= min_peers {
                                 let _ = ready_tx.send(P2pReady { peers });
                                 ready_sent = true;
