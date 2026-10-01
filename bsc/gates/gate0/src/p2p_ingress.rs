@@ -7,7 +7,7 @@
 //! Full Transactions messages are actionable immediately. Hash-only announcements are
 //! timestamped separately, then the exact transaction is requested from the announcing peer.
 
-use alloy_consensus::{transaction::TxHashRef as _, Transaction as _};
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{Address, BlockHash, Bytes, TxKind, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
@@ -33,6 +33,7 @@ use reth_network::{
     NetworkManager,
     PeerRequest,
     Peers,
+    PeersConfig,
     PeersInfo,
 };
 use reth_primitives_traits::SealedHeader;
@@ -345,10 +346,19 @@ pub fn spawn_testnet_flap_sensor(
                 let boot_nodes = bsc_testnet_bootnodes();
                 let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
 
+                // Chapel/Testnet is much more deterministic when the known nodes are
+                // dialled directly instead of relying on discovery to populate the
+                // peer set. Keep discv4 enabled only as an additional source.
+                let peer_config = PeersConfig::default()
+                    .with_basic_nodes(boot_nodes.iter().cloned().collect())
+                    .with_max_outbound(16)
+                    .with_refill_slots_interval(Duration::from_millis(250));
+
                 let net_cfg = NetworkConfig::<_, EthNetworkPrimitives>::builder(
                     rng_secret_key(),
                     Runtime::test(),
                 )
+                .peer_config(peer_config)
                 .boot_nodes(boot_nodes.clone())
                 .set_head(head)
                 .with_pow()
