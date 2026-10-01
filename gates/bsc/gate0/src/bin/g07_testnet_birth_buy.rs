@@ -1,11 +1,13 @@
 //! Controlled BSC Testnet birth->BUY latency/inclusion test.
 //! Creates a fresh Flap TAXED_V3 token with quoteAmt=0, observes that exact launch
-//! on a live pending WebSocket subscription, then builds/signs/sends the BUY.
+//! through direct BSC P2P transaction gossip, then builds/signs/sends the BUY.
+//! Public WSS remains parallel control/evidence and submission transport only.
 //! Testnet only. No Mainnet addresses or value are used.
 
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_sol_types::{sol, SolCall};
 use k256::ecdsa::SigningKey;
+use darkbot_gate0::p2p_ingress::spawn_testnet_flap_sensor;
 use rustls::{
     pki_types::ServerName,
     ClientConfig,
@@ -20,7 +22,7 @@ use std::{
     net::{TcpStream, ToSocketAddrs},
     process::Command,
     str::FromStr,
-    sync::Arc,
+    sync::{mpsc, Arc},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -670,20 +672,59 @@ fn main() {
         "testnet_min_output:       {TESTNET_MIN_OUTPUT} (TESTNET LATENCY ONLY)"
     );
 
-    let mut ws = ws_connect();
-    let mut mask_counter = 0x17a2_93c1u32;
+    // Race ingress: direct BSC devp2p/eth transaction propagation via standalone Reth.
+    // No full-node sync, DB, WSS or synchronous RPC lookup is involved here.
+    let p2p = spawn_testnet_flap_sensor(portal, newTokenV6Call::SELECTOR, 1);
+    let p2p_ready = p2p
+        .ready
+        .recv_timeout(Duration::from_secs(30))
+        .expect("BSC P2P sensor did not reach minimum peer count");
+    println!("p2p_ready_peers:           {}", p2p_ready.peers);
 
+    // Parallel WSS control sensor. It never gates BUY construction.
+    let mut control_ws = ws_connect();
+    let mut control_mask = 0x4b1d_2e37u32;
     ws_send_text(
-        &mut ws,
+        &mut control_ws,
         r#"{"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newPendingTransactions",true]}"#,
-        &mut mask_counter,
+        &mut control_mask,
     );
-    let sub = wait_rpc_id(&mut ws, 1, &mut mask_counter);
+    let sub = wait_rpc_id(&mut control_ws, 1, &mut control_mask);
     println!(
-        "pending_subscription:     {}",
+        "control_subscription:      {}",
         sub.as_str().unwrap_or("<non-string>")
     );
 
+    let control_hash = launch_hash_hex.clone();
+    let (control_tx, control_rx) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        loop {
+            let text = ws_read_message(&mut control_ws, &mut control_mask);
+            let frame_arrival = Instant::now();
+            let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
+            let Some(result) = v.pointer("/params/result") else { continue };
+
+            let matched = if let Some(h) = result.as_str() {
+                h.eq_ignore_ascii_case(&control_hash)
+            } else if let Some(obj) = result.as_object() {
+                obj.get("hash")
+                    .and_then(Value::as_str)
+                    .map(|h| h.eq_ignore_ascii_case(&control_hash))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if matched {
+                let _ = control_tx.send(frame_arrival);
+                break;
+            }
+        }
+    });
+
+    // Submission connection. WSS here is transport, not race signal source.
+    let mut ws = ws_connect();
+    let mut mask_counter = 0x17a2_93c1u32;
     let launch_body = format!(
         r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
         hex::encode(&launch_signed)
@@ -692,53 +733,20 @@ fn main() {
     ws_send_text(&mut ws, &launch_body, &mut mask_counter);
     let launch_handoff = Instant::now();
 
-    let mut launch_ack_seen = false;
-    let (t_signal, signal_mode, signal_launch_data) = loop {
-        let text = ws_read_message(&mut ws, &mut mask_counter);
-        let frame_arrival = Instant::now();
-        let v: Value = serde_json::from_str(&text).expect("invalid WSS JSON");
-
-        if v.get("id").and_then(Value::as_u64) == Some(2) {
-            if let Some(e) = v.get("error") {
-                panic!("launch broadcast rejected: {e}");
-            }
-
-            let remote = v["result"].as_str().expect("launch tx hash missing");
-            assert_eq!(remote.to_lowercase(), launch_hash_hex.to_lowercase());
-            launch_ack_seen = true;
-            continue;
-        }
-
-        let Some(result) = v.pointer("/params/result") else {
-            continue;
-        };
-
-        if let Some(h) = result.as_str() {
-            if h.eq_ignore_ascii_case(&launch_hash_hex) {
-                break (
-                    frame_arrival,
-                    "HASH_MATCH_CONTROLLED",
-                    launch_data.clone(),
-                );
-            }
-            continue;
-        }
-
-        if let Some(obj) = result.as_object() {
-            let h = obj.get("hash").and_then(Value::as_str).unwrap_or("");
-            if !h.eq_ignore_ascii_case(&launch_hash_hex) {
-                continue;
-            }
-
-            let input = obj
-                .get("input")
-                .and_then(Value::as_str)
-                .expect("full pending launch missing input");
-            let raw =
-                hex::decode(input.trim_start_matches("0x")).expect("pending input invalid hex");
-            break (frame_arrival, "FULL_PENDING_OBJECT", raw);
+    let p2p_signal = loop {
+        let signal = p2p
+            .signals
+            .recv_timeout(Duration::from_secs(15))
+            .expect("timed out waiting for direct BSC P2P launch signal");
+        if signal.hash == launch_hash {
+            break signal;
         }
     };
+
+    let t_signal = p2p_signal.observed;
+    let signal_mode = "BSC_P2P_FULL_TX";
+    let signal_launch_data = p2p_signal.input;
+    println!("p2p_signal_peers:          {}", p2p_signal.peers);
 
     let decoded = newTokenV6Call::abi_decode_validate(&signal_launch_data)
         .expect("pending launch decode failed");
@@ -797,9 +805,20 @@ fn main() {
     ws_send_text(&mut ws, &buy_body, &mut mask_counter);
     let t_send = Instant::now();
 
+    let mut launch_ack_seen = false;
     let buy_ack = loop {
         let text = ws_read_message(&mut ws, &mut mask_counter);
         let v: Value = serde_json::from_str(&text).expect("invalid WSS JSON");
+
+        if v.get("id").and_then(Value::as_u64) == Some(2) {
+            if let Some(e) = v.get("error") {
+                panic!("launch broadcast rejected: {e}");
+            }
+            let remote = v["result"].as_str().expect("launch tx hash missing");
+            assert_eq!(remote.to_lowercase(), launch_hash_hex.to_lowercase());
+            launch_ack_seen = true;
+            continue;
+        }
 
         if v.get("id").and_then(Value::as_u64) != Some(3) {
             continue;
@@ -816,7 +835,9 @@ fn main() {
     };
     let t_ack = Instant::now();
 
+    assert!(launch_ack_seen, "launch submission ACK was not observed");
     assert_eq!(buy_ack.to_lowercase(), buy_hash_hex.to_lowercase());
+    let t_wss_control = control_rx.recv_timeout(Duration::from_secs(5)).ok();
 
     let launch_receipt = receipt(&launch_hash_hex);
     let buy_receipt = receipt(&buy_hash_hex);
@@ -870,10 +891,17 @@ fn main() {
     println!("=== G0.7 TESTNET BIRTH->BUY RESULT ===");
     println!("status:                    PASS");
     println!("signal_mode:               {signal_mode}");
-    println!(
-        "launch_ack_seen_before_signal: {}",
-        launch_ack_seen
-    );
+    println!("launch_ack_seen:           {launch_ack_seen}");
+    if let Some(t_wss) = t_wss_control {
+        let delta_ns: i128 = if t_wss >= t_signal {
+            (t_wss - t_signal).as_nanos() as i128
+        } else {
+            -((t_signal - t_wss).as_nanos() as i128)
+        };
+        println!("WSS_minus_P2P_signal_ns:   {delta_ns}");
+    } else {
+        println!("WSS_minus_P2P_signal_ns:   UNKNOWN");
+    }
     println!("launch_tx:                 {launch_hash_hex}");
     println!("buy_tx:                    {buy_hash_hex}");
     println!("token:                     {derived}");
@@ -937,7 +965,8 @@ fn main() {
         "T_signal_to_receipts_seen_ns: {}",
         (t_observed - t_signal).as_nanos()
     );
-    println!("transport_boundary:        live WSS write_all+flush");
+    println!("race_ingress_boundary:     standalone BSC P2P full-tx pool admission");
+    println!("transport_boundary:        live WSS write_all+flush (submission only)");
     println!("T_buy_minus_T0:            UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA");
     println!("G0.7_TESTNET_BIRTH_BUY_PASS: true");
 }
