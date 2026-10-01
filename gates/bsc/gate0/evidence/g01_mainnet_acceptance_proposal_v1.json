@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "PROPOSED_NOT_AUTHORIZED_NOT_EXECUTABLE",
+  "status": "BUDGET_AUTHORIZED_RUNTIME_BINDING_PENDING",
   "scope": {
     "chain_id": 56,
     "venue": "Flap",
@@ -71,8 +71,11 @@
     "Explicit user approval of version/hash and 0.006 BNB maximum total"
   ],
   "authorization": {
-    "approved": false,
+    "approved": true,
     "signer_address": null,
-    "recipient_address": null
+    "recipient_address": null,
+    "approved_date": "2026-10-01",
+    "approval_scope": "G0.7 pilot budget only; max 4 attempts, max 0.001 BNB buy each, max 0.0005 BNB gas+builder each, absolute max 0.006 BNB including all costs",
+    "execution_ready": false
   }
 }
