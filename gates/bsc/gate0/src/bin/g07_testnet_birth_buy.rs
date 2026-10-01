@@ -674,7 +674,13 @@ fn main() {
 
     // Race ingress: direct BSC devp2p/eth transaction propagation via standalone Reth.
     // No full-node sync, DB, WSS or synchronous RPC lookup is involved here.
-    let p2p = spawn_testnet_flap_sensor(portal, newTokenV6Call::SELECTOR, 1);
+    let p2p_min_peers = env::var("DARKBOT_G07_P2P_MIN_PEERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(4)
+        .max(1);
+    println!("p2p_min_peers:             {p2p_min_peers}");
+    let p2p = spawn_testnet_flap_sensor(portal, newTokenV6Call::SELECTOR, p2p_min_peers);
     let p2p_ready = p2p
         .ready
         .recv_timeout(Duration::from_secs(30))
@@ -806,36 +812,40 @@ fn main() {
     let t_send = Instant::now();
 
     let mut launch_ack_seen = false;
-    let buy_ack = loop {
+    let mut buy_ack: Option<String> = None;
+    let t_ack = loop {
         let text = ws_read_message(&mut ws, &mut mask_counter);
         let v: Value = serde_json::from_str(&text).expect("invalid WSS JSON");
 
-        if v.get("id").and_then(Value::as_u64) == Some(2) {
-            if let Some(e) = v.get("error") {
-                panic!("launch broadcast rejected: {e}");
+        match v.get("id").and_then(Value::as_u64) {
+            Some(2) => {
+                if let Some(e) = v.get("error") {
+                    panic!("launch broadcast rejected: {e}");
+                }
+                let remote = v["result"].as_str().expect("launch tx hash missing");
+                assert_eq!(remote.to_lowercase(), launch_hash_hex.to_lowercase());
+                launch_ack_seen = true;
             }
-            let remote = v["result"].as_str().expect("launch tx hash missing");
-            assert_eq!(remote.to_lowercase(), launch_hash_hex.to_lowercase());
-            launch_ack_seen = true;
-            continue;
+            Some(3) => {
+                if let Some(e) = v.get("error") {
+                    panic!("BUY broadcast rejected: {e}");
+                }
+                buy_ack = Some(
+                    v["result"]
+                        .as_str()
+                        .expect("BUY tx hash missing")
+                        .to_string(),
+                );
+            }
+            _ => {}
         }
 
-        if v.get("id").and_then(Value::as_u64) != Some(3) {
-            continue;
+        if launch_ack_seen && buy_ack.is_some() {
+            break Instant::now();
         }
-
-        if let Some(e) = v.get("error") {
-            panic!("BUY broadcast rejected: {e}");
-        }
-
-        break v["result"]
-            .as_str()
-            .expect("BUY tx hash missing")
-            .to_string();
     };
-    let t_ack = Instant::now();
 
-    assert!(launch_ack_seen, "launch submission ACK was not observed");
+    let buy_ack = buy_ack.expect("BUY submission ACK was not observed");
     assert_eq!(buy_ack.to_lowercase(), buy_hash_hex.to_lowercase());
     let t_wss_control = control_rx.recv_timeout(Duration::from_secs(5)).ok();
 
@@ -957,9 +967,13 @@ fn main() {
         "T_signal_to_ack_ns:        {}",
         (t_ack - t_signal).as_nanos()
     );
+    let launch_handoff_to_signal_ns: i128 = if t_signal >= launch_handoff {
+        (t_signal - launch_handoff).as_nanos() as i128
+    } else {
+        -((launch_handoff - t_signal).as_nanos() as i128)
+    };
     println!(
-        "launch_handoff_to_signal_ns: {}",
-        (t_signal - launch_handoff).as_nanos()
+        "launch_handoff_to_signal_ns: {launch_handoff_to_signal_ns}"
     );
     println!(
         "T_signal_to_receipts_seen_ns: {}",
