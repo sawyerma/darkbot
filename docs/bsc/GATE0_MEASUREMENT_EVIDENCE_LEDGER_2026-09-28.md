@@ -1909,3 +1909,51 @@ Verbindliche Einordnung: **HoL coupling PROVEN; 25-ms scenario ARTIFICIALLY INJE
 **26 Tests bestanden, 0 fehlgeschlagen**, mit demselben Offline-Cargo-Befehl. Neu geprüft: Wiederanlauf aus allen vier Zuständen, zweiter Owner, leere/kaputte Fence, Filesystem-Fehler, bestehende Dedup-/HALT-Regeln und die bestehende Builder-Grenze mit lokalem Memory-Stream unter persistenter Fence. Die Tests simulieren Zustandsverlust per Drop/Reopen; keine Behauptung einer Hardware-Power-Loss-Zertifizierung.
 
 Evidence: `gates/bsc/gate0/evidence/g06_single_sender_restart/`. G0.6 bleibt PARTIAL; die Startsperre ist kein Live-Scope-PASS. Nächste fachliche Qualifikation bleibt der bestehende Direct-Portal-Pfad für den vorgeschlagenen 0,001-BNB-Betrag und tatsächlichen Sender/State sowie die kontrollierte kanonische Reconciliation. Kein Mainnet-BUY, kein neues Latenzversprechen; der Mainnet-Vertrag bleibt nicht autorisiert.
+
+
+## 2026-10-01 — G0.7 controlled Testnet: standalone BSC P2P ingress vs public WSS control
+
+Controlled Flap Testnet launch+BUY completed successfully with the new standalone BSC P2P sensor. This run is a **measurement of the current adapter only**, not a Gate-0 PASS for P2P ingress.
+
+Scope:
+- chain id 97;
+- Flap Testnet Portal `0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9`;
+- launch tx `0xe17635e85e1ab47e8bdf980928190ba3dfae7084cd3275345b41bc8bd74b7346`;
+- BUY tx `0x469ec76cab25a0c2eb4a729dd6a12e7967bf0ae1794068ef76503256647129b8`;
+- token `0xFAD8ce8C891130D7838f8F987688E2D953f07777`;
+- P2P readiness threshold 1 peer; 2 peers connected when the launch signal was emitted;
+- public WSS retained only as control/evidence and submission transport.
+
+Correctness / acquisition:
+- launch receipt status = 1;
+- BUY receipt status = 1;
+- acquired token balance = 17669034223232267628301;
+- launch block = 134253906, tx index = 3;
+- BUY block = 134253906, tx index = 4;
+- same block = true;
+- successful external BUYs between launch and ours = 0.
+
+Local reaction path from the P2P adapter's actionable signal:
+- T_signal -> decode = 91,417 ns;
+- decode -> build = 8,792 ns;
+- build -> sign = 109,958 ns;
+- sign -> ready = 7,042 ns;
+- ready -> queue = 5,833 ns;
+- queue -> send = 210,083 ns;
+- **T_signal -> T_ready = 217,209 ns**;
+- **T_signal -> T_send = 433,125 ns**;
+- T_signal -> submission ACK = 96,268,542 ns.
+
+Ingress/control timing:
+- launch handoff -> current P2P signal = **230,536,750 ns**;
+- WSS_minus_P2P_signal = **-130,313,708 ns**, i.e. the control WSS observed this same launch about 130.314 ms before the current P2P signal;
+- derived launch handoff -> WSS control signal for this run is about **100.223 ms**.
+
+Interpretation:
+- The Rust reaction path remains comfortably below the local 1-ms target.
+- The current P2P adapter is **not qualified** as a race ingress: its present `T_signal` is taken only after a complete transaction has entered the in-memory Reth transaction pool. Hash-only gossip can therefore incur a `GetPooledTransactions` round trip and pool/import work before the timestamp.
+- This run had only two connected P2P peers at signal time, so it does not prove that direct BSC P2P is intrinsically slower than public WSS. It proves that **this pool-admission measurement boundary/topology is too late**.
+- Next qualification must separate (a) first matching hash announcement, (b) first full `Transactions` message received directly from the ETH/RLPx network channel before pool validation/import, and (c) pool/fetch fallback. Only a complete full transaction is actionable for the real launch decoder.
+- `T_buy-T0` remains unavailable from standard BSC block data; same-block adjacent ordering with zero successful competitors is hard ordering evidence only.
+
+No Mainnet value was used. No claim of sub-ms on-chain execution is made.
