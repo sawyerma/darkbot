@@ -14,10 +14,9 @@ use reth_network::{
         constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
         NetworkTransactionEvent,
     },
-    NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager, PeerRequest,
-    PeersInfo,
+    EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider,
+    NetworkManager, PeerRequest, PeersInfo,
 };
-use reth_network_api::events::PeerEvent;
 use reth_provider::noop::NoopProvider;
 use reth_tasks::Runtime;
 use secp256k1::{rand, SecretKey};
@@ -176,7 +175,6 @@ pub fn spawn_testnet_launch_ingress(
                                     announced_ready = true;
                                 }
                             }
-                            NetworkEvent::Peer(PeerEvent::SessionClosed { .. }) => {}
                             _ => {}
                         }
                     }
