@@ -44,6 +44,14 @@ The selected ingress must deliver the complete signed launch transaction (or
 losslessly equivalent fields) without a synchronous RPC lookup in the hot
 path. JSON/WSS may remain in parallel for evidence/recovery only.
 
+Implementation state 2026-10-01: the controlled Flap Testnet G0.7 harness now
+uses a standalone BSC devp2p/eth network component (BNB reth/reth-bsc) with an
+in-memory transaction pool as the race ingress. It does not start a full-node
+database/state sync. Public WSS is kept on a separate connection only as a
+same-launch control sensor and, until the inclusion adapter is replaced, as
+the submission transport. The empirical P2P-vs-WSS timing remains unproven
+until a new controlled run is recorded in the measurement/evidence ledger.
+
 ### Hard execution rule — direct on-chain only
 
 Gate 0 must test the path DarkBot will actually use: **construct, sign and submit the BUY directly for on-chain contract execution**.
