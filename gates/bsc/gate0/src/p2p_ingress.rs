@@ -13,11 +13,11 @@ use alloy_consensus::Transaction as _;
 use alloy_primitives::{Address, Bytes, TxKind, B256};
 use reth_bsc::{
     chainspec::{bsc_testnet, BscChainSpec},
-    node::network::{handshake::BscHandshake, BscNetworkPrimitives},
+    node::network::handshake::BscHandshake,
 };
 use reth_chainspec::EthChainSpec;
 use reth_discv4::Discv4ConfigBuilder;
-use reth_network::{NetworkConfig, NetworkManager, PeersInfo};
+use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager, PeersInfo};
 use reth_provider::noop::NoopProvider;
 use reth_tasks::Runtime;
 use reth_transaction_pool::{
@@ -29,7 +29,6 @@ use reth_transaction_pool::{
     TransactionListenerKind,
     TransactionPool,
 };
-use secp256k1::{rand, SecretKey};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::{mpsc, Arc},
@@ -74,8 +73,13 @@ pub fn spawn_testnet_flap_sensor(
                 .expect("failed to build BSC P2P runtime");
 
             rt.block_on(async move {
-                let chain_spec = Arc::new(BscChainSpec::from(bsc_testnet()));
-                let boot_nodes = chain_spec.bootnodes().unwrap_or_default();
+                // Reth's standalone BSC P2P example uses a normal Ethereum wire
+                // network plus the BSC handshake. Keep the raw ChainSpec in the
+                // NoopProvider and use the BscChainSpec wrapper only for BSC
+                // bootnodes/head selection.
+                let raw_chain_spec = Arc::new(bsc_testnet());
+                let bsc_chain_spec = BscChainSpec::from((*raw_chain_spec).clone());
+                let boot_nodes = bsc_chain_spec.bootnodes().unwrap_or_default();
                 assert!(!boot_nodes.is_empty(), "reth-bsc returned no BSC Testnet bootnodes");
 
                 let pool: Pool<
@@ -89,17 +93,15 @@ pub fn spawn_testnet_flap_sensor(
                     Default::default(),
                 );
 
-                let secret_key = SecretKey::new(&mut rand::thread_rng());
                 let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
 
-                let net_cfg =
-                    NetworkConfig::<_, BscNetworkPrimitives>::builder(secret_key, Runtime::test())
-                        .boot_nodes(boot_nodes.clone())
-                        .set_head(chain_spec.head())
-                        .with_pow()
-                        .listener_addr(local_addr)
-                        .eth_rlpx_handshake(Arc::new(BscHandshake::default()))
-                        .build(NoopProvider::eth(chain_spec));
+                let net_cfg = NetworkConfig::builder(rng_secret_key(), Runtime::test())
+                    .boot_nodes(boot_nodes.clone())
+                    .set_head(bsc_chain_spec.head())
+                    .with_pow()
+                    .listener_addr(local_addr)
+                    .eth_rlpx_handshake(Arc::new(BscHandshake::default()))
+                    .build(NoopProvider::eth(raw_chain_spec));
 
                 let net_cfg = net_cfg.set_discovery_v4(
                     Discv4ConfigBuilder::default()
@@ -148,7 +150,7 @@ pub fn spawn_testnet_flap_sensor(
                             }
 
                             let input = pool_tx.input();
-                            if input.len() < 4 || input[..4] != launch_selector {
+                            if input.as_ref().get(..4) != Some(launch_selector.as_slice()) {
                                 continue;
                             }
 
