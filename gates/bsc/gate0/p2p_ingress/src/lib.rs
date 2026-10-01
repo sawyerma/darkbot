@@ -1,5 +1,5 @@
 use alloy_consensus::Transaction;
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{Address, B256};
 use reth_bsc::{
     chainspec::bsc_testnet,
@@ -8,6 +8,7 @@ use reth_bsc::{
 use reth_chainspec::Head;
 use reth_discv4::Discv4ConfigBuilder;
 use reth_eth_wire_types::{GetPooledTransactions, PooledTransactions};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_metrics::common::mpsc::memory_bounded_channel;
 use reth_network::{
     transactions::{
@@ -15,7 +16,7 @@ use reth_network::{
         NetworkTransactionEvent,
     },
     EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider,
-    NetworkManager, PeerRequest, PeersInfo,
+    NetworkManager, PeerRequest, Peers, PeersInfo,
 };
 use reth_provider::noop::NoopProvider;
 use reth_tasks::Runtime;
@@ -26,7 +27,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use tokio_stream::StreamExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,9 +54,39 @@ pub struct IngressReady {
     pub connected_peers: usize,
 }
 
+#[derive(Debug)]
+pub struct DirectSendResult {
+    /// Timestamp immediately after all NetworkHandle::send_transactions calls were enqueued.
+    /// This is an adapter/manager handoff boundary, not proof of socket flush or inclusion.
+    pub enqueued_at: Instant,
+    pub peers: usize,
+    pub tx_hash: B256,
+}
+
+struct SubmitRequest {
+    raw_tx: Vec<u8>,
+    reply: std_mpsc::Sender<Result<DirectSendResult, String>>,
+}
+
 pub struct IngressHandle {
     pub launches: std_mpsc::Receiver<LaunchSignal>,
     pub ready: std_mpsc::Receiver<IngressReady>,
+    submit: tokio_mpsc::UnboundedSender<SubmitRequest>,
+}
+
+impl IngressHandle {
+    pub fn send_raw_transaction(&self, raw_tx: Vec<u8>) -> Result<DirectSendResult, String> {
+        let (reply_tx, reply_rx) = std_mpsc::channel();
+        self.submit
+            .send(SubmitRequest {
+                raw_tx,
+                reply: reply_tx,
+            })
+            .map_err(|_| "P2P ingress submit channel closed".to_string())?;
+        reply_rx
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|e| format!("P2P submit acknowledgement timeout: {e}"))?
+    }
 }
 
 fn maybe_emit<T>(
@@ -105,6 +136,7 @@ pub fn spawn_testnet_launch_ingress(
 ) -> IngressHandle {
     let (launch_tx, launch_rx) = std_mpsc::channel();
     let (ready_tx, ready_rx) = std_mpsc::channel();
+    let (submit_tx, mut submit_rx) = tokio_mpsc::unbounded_channel::<SubmitRequest>();
 
     thread::Builder::new()
         .name("darkbot-bsc-p2p".into())
@@ -180,8 +212,55 @@ pub fn spawn_testnet_launch_ingress(
                     }
                 });
 
-                while let Some(event) = transactions_rx.recv().await {
-                    match event {
+                loop {
+                    tokio::select! {
+                        Some(req) = submit_rx.recv() => {
+                            let mut raw = req.raw_tx.as_slice();
+                            let parsed = match TransactionSigned::decode_2718(&mut raw) {
+                                Ok(tx) if raw.is_empty() => tx,
+                                Ok(_) => {
+                                    let _ = req.reply.send(Err(
+                                        "signed transaction has trailing bytes".to_string()
+                                    ));
+                                    continue;
+                                }
+                                Err(e) => {
+                                    let _ = req.reply.send(Err(format!(
+                                        "signed transaction decode failed: {e}"
+                                    )));
+                                    continue;
+                                }
+                            };
+
+                            let tx_hash = parsed.trie_hash();
+                            let peers = match handle.get_all_peers().await {
+                                Ok(peers) if !peers.is_empty() => peers,
+                                Ok(_) => {
+                                    let _ = req.reply.send(Err(
+                                        "no connected BSC peers for direct send".to_string()
+                                    ));
+                                    continue;
+                                }
+                                Err(e) => {
+                                    let _ = req.reply.send(Err(format!(
+                                        "get_all_peers failed: {e}"
+                                    )));
+                                    continue;
+                                }
+                            };
+
+                            let shared = Arc::new(parsed);
+                            for peer in &peers {
+                                handle.send_transactions(peer.remote_id, vec![shared.clone()]);
+                            }
+                            let enqueued_at = Instant::now();
+                            let _ = req.reply.send(Ok(DirectSendResult {
+                                enqueued_at,
+                                peers: peers.len(),
+                                tx_hash,
+                            }));
+                        }
+                        Some(event) = transactions_rx.recv() => match event {
                         NetworkTransactionEvent::IncomingTransactions { msg, .. } => {
                             let observed_at = Instant::now();
                             for tx in msg {
@@ -248,6 +327,8 @@ pub fn spawn_testnet_launch_ingress(
                         NetworkTransactionEvent::GetTransactionsHandle(response) => {
                             let _ = response.send(None);
                         }
+                    },
+                    else => break,
                     }
                 }
             });
@@ -257,6 +338,7 @@ pub fn spawn_testnet_launch_ingress(
     IngressHandle {
         launches: launch_rx,
         ready: ready_rx,
+        submit: submit_tx,
     }
 }
 
