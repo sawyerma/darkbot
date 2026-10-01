@@ -352,14 +352,34 @@ fn buy_calldata(token: Address) -> Vec<u8> {
 type Tls = StreamOwned<ClientConnection, TcpStream>;
 
 fn https_connect(host: &str, port: u16) -> Tls {
-    let addr = (host, port)
+    let addrs: Vec<_> = (host, port)
         .to_socket_addrs()
-        .unwrap()
-        .next()
-        .expect("HTTPS DNS returned no address");
+        .expect("HTTPS DNS resolution failed")
+        .collect();
+    assert!(!addrs.is_empty(), "HTTPS DNS returned no address");
 
-    let tcp =
-        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).expect("HTTPS TCP connect failed");
+    let mut last_error = None;
+    let mut connected = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, Duration::from_secs(3)) {
+            Ok(tcp) => {
+                eprintln!("HTTPS_TCP_CONNECTED host={host} port={port} remote={addr}");
+                connected = Some(tcp);
+                break;
+            }
+            Err(err) => {
+                eprintln!("HTTPS_TCP_CONNECT_FAIL host={host} port={port} remote={addr} error={err}");
+                last_error = Some(err);
+            }
+        }
+    }
+
+    let tcp = connected.unwrap_or_else(|| {
+        panic!(
+            "HTTPS TCP connect failed for every resolved address: {:?}",
+            last_error
+        )
+    });
     tcp.set_nodelay(true).unwrap();
     tcp.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
     tcp.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
