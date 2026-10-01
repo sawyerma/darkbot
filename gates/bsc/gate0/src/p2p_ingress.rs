@@ -1,13 +1,13 @@
 //! Minimal BSC Testnet P2P ingress for Gate 0.
 //!
-//! Standalone Reth network + in-memory txpool only. No full node, no database,
-//! no state sync, no JSON/WSS race ingress.
+//! Standalone Reth network only. No full node, no database, no state sync,
+//! no transaction pool and no JSON/WSS race ingress.
 //!
-//! BSC requires an extra UpgradeStatus exchange after the normal ETH handshake;
-//! the small compatibility layer below is adapted from the official BNB Chain
-//! Reth BSC-P2P example/fork behavior.
+//! The race boundary is the raw ETH transaction channel emitted by NetworkManager.
+//! Full Transactions messages are actionable immediately. Hash-only announcements are
+//! timestamped separately, then the exact transaction is requested from the announcing peer.
 
-use alloy_consensus::Transaction as _;
+use alloy_consensus::{transaction::TxHashRef as _, Transaction as _};
 use alloy_primitives::{Address, BlockHash, Bytes, TxKind, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
@@ -20,18 +20,23 @@ use reth_discv4::{Discv4ConfigBuilder, NodeRecord};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::{EthRlpxHandshake, EthereumEthHandshake, UnauthEth},
-    UnifiedStatus,
+    GetPooledTransactions, UnifiedStatus,
 };
 use reth_eth_wire_types::{DisconnectReason, EthVersion};
 use reth_ethereum_forks::ForkFilter;
-use reth_network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager, PeersInfo};
+use reth_metrics::common::mpsc::memory_bounded_channel;
+use reth_network::{
+    config::rng_secret_key,
+    transactions::NetworkTransactionEvent,
+    EthNetworkPrimitives,
+    NetworkConfig,
+    NetworkManager,
+    PeerRequest,
+    PeersInfo,
+};
 use reth_primitives_traits::SealedHeader;
 use reth_storage_api::noop::NoopProvider;
 use reth_tasks::Runtime;
-use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, test_utils::OkValidator, CoinbaseTipOrdering,
-    EthPooledTransaction, Pool, TransactionListenerKind, TransactionPool,
-};
 use std::{
     future::Future,
     net::{Ipv4Addr, SocketAddr},
@@ -41,10 +46,11 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tokio::time::timeout;
+use tokio::{sync::oneshot, time::timeout};
 use tokio_stream::StreamExt;
 
 const UPGRADE_STATUS_MESSAGE_ID: u8 = 0x0b;
+const TX_EVENT_CHANNEL_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct UpgradeStatus {
@@ -142,9 +148,8 @@ impl EthRlpxHandshake for BscHandshake {
                         }
                     };
 
-                    UpgradeStatus::decode(&mut their_msg.as_ref()).map_err(|e| {
-                        EthStreamError::InvalidMessage(e.into())
-                    })?;
+                    UpgradeStatus::decode(&mut their_msg.as_ref())
+                        .map_err(|e| EthStreamError::InvalidMessage(e.into()))?;
                 }
 
                 Ok(negotiated)
@@ -272,12 +277,29 @@ fn bsc_testnet_bootnodes() -> Vec<NodeRecord> {
     NODES.iter().map(|s| s.parse().unwrap()).collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum P2pSignalSource {
+    FullBroadcast,
+    HashFetch,
+}
+
+impl P2pSignalSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FullBroadcast => "BSC_P2P_FULL_BROADCAST",
+            Self::HashFetch => "BSC_P2P_HASH_FETCH",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct P2pSignal {
     pub observed: Instant,
+    pub hash_observed: Option<Instant>,
     pub hash: B256,
     pub input: Bytes,
     pub peers: usize,
+    pub source: P2pSignalSource,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -288,16 +310,24 @@ pub struct P2pReady {
 pub struct P2pSensor {
     pub ready: mpsc::Receiver<P2pReady>,
     pub signals: mpsc::Receiver<P2pSignal>,
+    pub hashes: mpsc::Receiver<Instant>,
+}
+
+fn tx_matches(tx: &impl alloy_consensus::Transaction, portal: Address, selector: [u8; 4]) -> bool {
+    tx.kind() == TxKind::Call(portal) &&
+        tx.input().as_ref().get(..4) == Some(selector.as_slice())
 }
 
 pub fn spawn_testnet_flap_sensor(
     portal: Address,
     launch_selector: [u8; 4],
+    expected_hash: B256,
     min_peers: usize,
     head: Head,
 ) -> P2pSensor {
     let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-    let (signal_tx, signal_rx) = mpsc::sync_channel(1024);
+    let (signal_tx, signal_rx) = mpsc::sync_channel(16);
+    let (hash_tx, hash_rx) = mpsc::sync_channel(16);
 
     thread::Builder::new()
         .name("darkbot-bsc-p2p".into())
@@ -312,26 +342,18 @@ pub fn spawn_testnet_flap_sensor(
             rt.block_on(async move {
                 let chain_spec = bsc_testnet_chain_spec();
                 let boot_nodes = bsc_testnet_bootnodes();
-
-                let pool: Pool<
-                    OkValidator<EthPooledTransaction>,
-                    CoinbaseTipOrdering<EthPooledTransaction>,
-                    InMemoryBlobStore,
-                > = Pool::new(
-                    OkValidator::default(),
-                    CoinbaseTipOrdering::default(),
-                    InMemoryBlobStore::default(),
-                    Default::default(),
-                );
-
                 let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
-                let net_cfg = NetworkConfig::<_, EthNetworkPrimitives>::builder(rng_secret_key(), Runtime::test())
-                    .boot_nodes(boot_nodes.clone())
-                    .set_head(head)
-                    .with_pow()
-                    .listener_addr(local_addr)
-                    .eth_rlpx_handshake(Arc::new(BscHandshake))
-                    .build(NoopProvider::eth(chain_spec));
+
+                let net_cfg = NetworkConfig::<_, EthNetworkPrimitives>::builder(
+                    rng_secret_key(),
+                    Runtime::test(),
+                )
+                .boot_nodes(boot_nodes.clone())
+                .set_head(head)
+                .with_pow()
+                .listener_addr(local_addr)
+                .eth_rlpx_handshake(Arc::new(BscHandshake))
+                .build(NoopProvider::eth(chain_spec));
 
                 let net_cfg = net_cfg.set_discovery_v4(
                     Discv4ConfigBuilder::default()
@@ -340,18 +362,19 @@ pub fn spawn_testnet_flap_sensor(
                         .build(),
                 );
 
-                let transactions_manager_config = net_cfg.transactions_manager_config.clone();
-                let (handle, network, txpool, _) = NetworkManager::builder(net_cfg)
+                let (network_tx, mut network_rx) =
+                    memory_bounded_channel::<NetworkTransactionEvent<EthNetworkPrimitives>>(
+                        TX_EVENT_CHANNEL_BYTES,
+                        "darkbot_gate0_raw_tx",
+                    );
+
+                let mut network = NetworkManager::<EthNetworkPrimitives>::new(net_cfg)
                     .await
-                    .expect("failed to create standalone BSC P2P network")
-                    .transactions(pool.clone(), transactions_manager_config)
-                    .split_with_handle();
-
+                    .expect("failed to create standalone BSC P2P network");
+                network.set_transactions(network_tx);
+                let handle = network.handle().clone();
                 tokio::spawn(network);
-                tokio::spawn(txpool);
 
-                let mut txs =
-                    pool.new_transactions_listener_for(TransactionListenerKind::All);
                 let mut ready_sent = false;
                 let mut readiness_tick = tokio::time::interval(Duration::from_millis(100));
                 readiness_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -365,29 +388,87 @@ pub fn spawn_testnet_flap_sensor(
                                 ready_sent = true;
                             }
                         }
-                        event = txs.recv() => {
+                        event = network_rx.recv() => {
                             let Some(event) = event else {
-                                panic!("BSC P2P transaction listener closed");
+                                panic!("BSC raw network transaction channel closed");
                             };
 
-                            let observed = Instant::now();
-                            let pool_tx = &event.transaction.transaction;
-                            if pool_tx.kind() != TxKind::Call(portal) {
-                                continue;
-                            }
+                            match event {
+                                NetworkTransactionEvent::IncomingTransactions { msg, .. } => {
+                                    let observed = Instant::now();
+                                    for tx in msg.0 {
+                                        if *tx.tx_hash() != expected_hash {
+                                            continue;
+                                        }
+                                        if !tx_matches(&tx, portal, launch_selector) {
+                                            continue;
+                                        }
+                                        let _ = signal_tx.try_send(P2pSignal {
+                                            observed,
+                                            hash_observed: None,
+                                            hash: expected_hash,
+                                            input: tx.input().clone(),
+                                            peers: handle.num_connected_peers(),
+                                            source: P2pSignalSource::FullBroadcast,
+                                        });
+                                    }
+                                }
+                                NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
+                                    if !msg.hashes().contains(&expected_hash) {
+                                        continue;
+                                    }
 
-                            let input = pool_tx.input();
-                            if input.as_ref().get(..4) != Some(launch_selector.as_slice()) {
-                                continue;
-                            }
+                                    let hash_observed = Instant::now();
+                                    let _ = hash_tx.try_send(hash_observed);
 
-                            let signal = P2pSignal {
-                                observed,
-                                hash: *event.transaction.hash(),
-                                input: input.clone(),
-                                peers: handle.num_connected_peers(),
-                            };
-                            let _ = signal_tx.try_send(signal);
+                                    let handle_fetch = handle.clone();
+                                    let signal_tx_fetch = signal_tx.clone();
+                                    tokio::spawn(async move {
+                                        let (response_tx, response_rx) = oneshot::channel();
+                                        handle_fetch.send_request(
+                                            peer_id,
+                                            PeerRequest::GetPooledTransactions {
+                                                request: GetPooledTransactions(vec![expected_hash]),
+                                                response: response_tx,
+                                            },
+                                        );
+
+                                        let Ok(Ok(response)) = timeout(
+                                            Duration::from_secs(2),
+                                            response_rx,
+                                        ).await else {
+                                            return;
+                                        };
+                                        let Ok(response) = response else {
+                                            return;
+                                        };
+
+                                        let observed = Instant::now();
+                                        for tx in response.0 {
+                                            if *tx.tx_hash() != expected_hash {
+                                                continue;
+                                            }
+                                            if !tx_matches(&tx, portal, launch_selector) {
+                                                continue;
+                                            }
+                                            let _ = signal_tx_fetch.try_send(P2pSignal {
+                                                observed,
+                                                hash_observed: Some(hash_observed),
+                                                hash: expected_hash,
+                                                input: tx.input().clone(),
+                                                peers: handle_fetch.num_connected_peers(),
+                                                source: P2pSignalSource::HashFetch,
+                                            });
+                                        }
+                                    });
+                                }
+                                NetworkTransactionEvent::GetPooledTransactions { response, .. } => {
+                                    let _ = response.send(Ok(Default::default()));
+                                }
+                                NetworkTransactionEvent::GetTransactionsHandle(response) => {
+                                    let _ = response.send(None);
+                                }
+                            }
                         }
                     }
                 }
@@ -395,5 +476,9 @@ pub fn spawn_testnet_flap_sensor(
         })
         .expect("failed to spawn BSC P2P sensor thread");
 
-    P2pSensor { ready: ready_rx, signals: signal_rx }
+    P2pSensor {
+        ready: ready_rx,
+        signals: signal_rx,
+        hashes: hash_rx,
+    }
 }
