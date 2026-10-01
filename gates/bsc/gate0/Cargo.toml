@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 alloy-primitives = "1"
+alloy-consensus = "1"
 alloy-sol-types = { version = "1", features = ["more-tuple-impls"] }
 hex = "0.4"
 serde_json = "1"
@@ -12,6 +13,19 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 
 rustls = "0.23"
 webpki-roots = "1"
+
+# Gate-0 BSC P2P sensor: pinned to the BNB Chain Reth family used by
+# reth-bsc at the frozen upstream snapshot. This is a standalone networking
+# component only; it does not launch/sync a full node.
+reth-bsc = { git = "https://github.com/bnb-chain/reth-bsc.git", rev = "98ef6c5b2d8b191f9b10bf1406dce341475c30ce", package = "reth_bsc", default-features = false }
+reth-network = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth-provider = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
+reth-tasks = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth-discv4 = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
+reth-chainspec = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth-transaction-pool = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
+secp256k1 = { version = "0.30", features = ["global-context", "std", "recovery", "rand"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "net", "sync", "time"] }
 
 [dev-dependencies]
 alloy-rlp = "=0.3.16"
