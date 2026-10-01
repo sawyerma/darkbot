@@ -32,6 +32,7 @@ use reth_network::{
     NetworkConfig,
     NetworkManager,
     PeerRequest,
+    Peers,
     PeersInfo,
 };
 use reth_primitives_traits::SealedHeader;
@@ -421,43 +422,66 @@ pub fn spawn_testnet_flap_sensor(
                                     let hash_observed = Instant::now();
                                     let _ = hash_tx.try_send(hash_observed);
 
+                                    // Request immediately from the announcing peer and, in
+                                    // parallel, fan out to every currently connected peer. The
+                                    // first valid full transaction wins; later duplicates are
+                                    // harmless evidence.
                                     let handle_fetch = handle.clone();
                                     let signal_tx_fetch = signal_tx.clone();
                                     tokio::spawn(async move {
-                                        let (response_tx, response_rx) = oneshot::channel();
-                                        handle_fetch.send_request(
-                                            peer_id,
-                                            PeerRequest::GetPooledTransactions {
-                                                request: GetPooledTransactions(vec![expected_hash]),
-                                                response: response_tx,
-                                            },
-                                        );
+                                        let peers = handle_fetch
+                                            .get_all_peers()
+                                            .await
+                                            .unwrap_or_default();
 
-                                        let Ok(Ok(response)) = timeout(
-                                            Duration::from_secs(2),
-                                            response_rx,
-                                        ).await else {
-                                            return;
-                                        };
-                                        let Ok(response) = response else {
-                                            return;
-                                        };
+                                        let mut peer_ids = Vec::with_capacity(peers.len() + 1);
+                                        peer_ids.push(peer_id);
+                                        for info in peers {
+                                            if info.remote_id != peer_id {
+                                                peer_ids.push(info.remote_id);
+                                            }
+                                        }
 
-                                        let observed = Instant::now();
-                                        for tx in response.0 {
-                                            if *tx.tx_hash() != expected_hash {
-                                                continue;
-                                            }
-                                            if !tx_matches(&tx, portal, launch_selector) {
-                                                continue;
-                                            }
-                                            let _ = signal_tx_fetch.try_send(P2pSignal {
-                                                observed,
-                                                hash_observed: Some(hash_observed),
-                                                hash: expected_hash,
-                                                input: tx.input().clone(),
-                                                peers: handle_fetch.num_connected_peers(),
-                                                source: P2pSignalSource::HashFetch,
+                                        for candidate in peer_ids {
+                                            let handle_one = handle_fetch.clone();
+                                            let signal_one = signal_tx_fetch.clone();
+                                            tokio::spawn(async move {
+                                                let (response_tx, response_rx) = oneshot::channel();
+                                                handle_one.send_request(
+                                                    candidate,
+                                                    PeerRequest::GetPooledTransactions {
+                                                        request: GetPooledTransactions(vec![expected_hash]),
+                                                        response: response_tx,
+                                                    },
+                                                );
+
+                                                let Ok(Ok(response)) = timeout(
+                                                    Duration::from_millis(500),
+                                                    response_rx,
+                                                ).await else {
+                                                    return;
+                                                };
+                                                let Ok(response) = response else {
+                                                    return;
+                                                };
+
+                                                let observed = Instant::now();
+                                                for tx in response.0 {
+                                                    if *tx.tx_hash() != expected_hash {
+                                                        continue;
+                                                    }
+                                                    if !tx_matches(&tx, portal, launch_selector) {
+                                                        continue;
+                                                    }
+                                                    let _ = signal_one.try_send(P2pSignal {
+                                                        observed,
+                                                        hash_observed: Some(hash_observed),
+                                                        hash: expected_hash,
+                                                        input: tx.input().clone(),
+                                                        peers: handle_one.num_connected_peers(),
+                                                        source: P2pSignalSource::HashFetch,
+                                                    });
+                                                }
                                             });
                                         }
                                     });
