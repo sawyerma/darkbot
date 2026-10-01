@@ -1,6 +1,6 @@
 use alloy_consensus::Transaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 use reth_bsc::{
     chainspec::bsc_testnet,
     node::network::{bootnodes::bsc_testnet_nodes, handshake::BscHandshake},
@@ -52,6 +52,15 @@ pub struct LaunchSignal {
 #[derive(Debug, Clone, Copy)]
 pub struct IngressReady {
     pub connected_peers: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BootstrapHead {
+    pub number: u64,
+    pub hash: B256,
+    pub difficulty: U256,
+    pub total_difficulty: U256,
+    pub timestamp: u64,
 }
 
 #[derive(Debug)]
@@ -131,8 +140,7 @@ fn maybe_emit<T>(
 pub fn spawn_testnet_launch_ingress(
     portal: Address,
     selector: [u8; 4],
-    head_number: u64,
-    head_timestamp: u64,
+    bootstrap: BootstrapHead,
 ) -> IngressHandle {
     let (launch_tx, launch_rx) = std_mpsc::channel();
     let (ready_tx, ready_rx) = std_mpsc::channel();
@@ -157,9 +165,11 @@ pub fn spawn_testnet_launch_ingress(
                 let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), listen_port);
 
                 let head = Head {
-                    number: head_number,
-                    timestamp: head_timestamp,
-                    ..Default::default()
+                    number: bootstrap.number,
+                    hash: bootstrap.hash,
+                    difficulty: bootstrap.difficulty,
+                    total_difficulty: bootstrap.total_difficulty,
+                    timestamp: bootstrap.timestamp,
                 };
 
                 let chain_spec = Arc::new(bsc_testnet());
