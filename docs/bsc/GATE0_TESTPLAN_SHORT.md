@@ -1,7 +1,7 @@
 # Gate 0 — BSC/Solana Birth-to-BUY Feasibility Gate
 
 Status: **AUTHORITATIVE / FIRST HARD GATE**
-Updated: 2026-09-27
+Updated: 2026-10-01
 
 ## 1. Product question
 
@@ -22,6 +22,27 @@ Test objects:
 Four.Meme Classic and OpenFour are distinct current protocol families and MUST NOT share an assumed launch/BUY decoder or scope.
 
 Gate 0 is a minimal feasibility harness, not the production bot.
+
+### BSC latency-source rule — public JSON/WSS is control-only
+
+For BSC birth-entry latency qualification, generic public JSON-RPC/WebSocket
+`newPendingTransactions` feeds are **not a valid race ingress**. They may be
+used only as a correctness/control source.
+
+The controlled 2026-10-01 Testnet run proved the Rust reaction path itself is
+fast (`T_signal -> T_send = 338,000 ns`) but the public WSS signal arrived
+`110,659,792 ns` after the launch network handoff. Therefore that sensor is
+removed from the Gate-0 performance path.
+
+The next BSC race qualification MUST use one of:
+
+1. direct BSC P2P / local bsc-geth early full-transaction ingress; or
+2. a measured low-latency binary/streaming relay such as a BSC public-mempool
+   gRPC feed, with the exact provider/region/version frozen in evidence.
+
+The selected ingress must deliver the complete signed launch transaction (or
+losslessly equivalent fields) without a synchronous RPC lookup in the hot
+path. JSON/WSS may remain in parallel for evidence/recovery only.
 
 ### Hard execution rule — direct on-chain only
 
