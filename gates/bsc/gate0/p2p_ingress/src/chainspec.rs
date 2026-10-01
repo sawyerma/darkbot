@@ -12,6 +12,7 @@ use reth_primitives_traits::SealedHeader;
 use std::{str::FromStr, sync::Arc};
 
 hardfork!(
+    #[derive(Default)]
     BscHardfork {
         Frontier,
         Ramanujan,
@@ -38,6 +39,7 @@ hardfork!(
         Pascal,
         Lorentz,
         Maxwell,
+        #[default]
         Fermi,
         Osaka,
         Mendel,
