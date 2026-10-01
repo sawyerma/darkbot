@@ -73,11 +73,12 @@ sol! {
     function balanceOf(address owner) external view returns(uint256);
 }
 
-const RPC_DEFAULT: &str = "https://data-seed-prebsc-1-s1.bnbchain.org:8545/";
+const RPC_DEFAULT: &str = "https://bsc-testnet-dataseed.bnbchain.org/";
 const WSS_HOST: &str = "bsc-testnet-rpc.publicnode.com";
 const WSS_PATH: &str = "/";
-const LAUNCH_HTTPS_HOST_DEFAULT: &str = "data-seed-prebsc-1-s1.bnbchain.org";
-const LAUNCH_HTTPS_PORT_DEFAULT: u16 = 8545;
+const TESTNET_HTTPS_PRIMARY: &str = "bsc-testnet-dataseed.bnbchain.org";
+const TESTNET_HTTPS_FALLBACK: &str = "bsc-testnet.bnbchain.org";
+const TESTNET_HTTPS_PORT_DEFAULT: u16 = 443;
 const LAUNCH_HTTPS_PATH: &str = "/";
 const CHAIN_ID: u64 = 97;
 const PORTAL: &str = "0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9";
@@ -351,46 +352,88 @@ fn buy_calldata(token: Address) -> Vec<u8> {
 
 type Tls = StreamOwned<ClientConnection, TcpStream>;
 
-fn https_connect(host: &str, port: u16) -> Tls {
+fn try_https_connect(host: &str, port: u16) -> Result<Tls, String> {
     let addrs: Vec<_> = (host, port)
         .to_socket_addrs()
-        .expect("HTTPS DNS resolution failed")
+        .map_err(|e| format!("HTTPS DNS resolution failed for {host}:{port}: {e}"))?
         .collect();
-    assert!(!addrs.is_empty(), "HTTPS DNS returned no address");
+    if addrs.is_empty() {
+        return Err(format!("HTTPS DNS returned no address for {host}:{port}"));
+    }
 
-    let mut last_error = None;
-    let mut connected = None;
+    let mut failures = Vec::new();
     for addr in addrs {
         match TcpStream::connect_timeout(&addr, Duration::from_secs(3)) {
-            Ok(tcp) => {
-                eprintln!("HTTPS_TCP_CONNECTED host={host} port={port} remote={addr}");
-                connected = Some(tcp);
-                break;
+            Ok(mut tcp) => {
+                tcp.set_nodelay(true).map_err(|e| e.to_string())?;
+                tcp.set_read_timeout(Some(Duration::from_secs(15)))
+                    .map_err(|e| e.to_string())?;
+                tcp.set_write_timeout(Some(Duration::from_secs(5)))
+                    .map_err(|e| e.to_string())?;
+
+                let roots =
+                    RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+                let config = ClientConfig::builder()
+                    .with_root_certificates(roots)
+                    .with_no_client_auth();
+                let server_name = ServerName::try_from(host.to_string())
+                    .map_err(|e| format!("invalid TLS server name {host}: {e}"))?;
+                let mut conn = ClientConnection::new(Arc::new(config), server_name)
+                    .map_err(|e| format!("TLS client init failed for {host}: {e}"))?;
+
+                match conn.complete_io(&mut tcp) {
+                    Ok(_) => {
+                        eprintln!(
+                            "HTTPS_CONNECTED host={host} port={port} remote={addr}"
+                        );
+                        return Ok(StreamOwned::new(conn, tcp));
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "HTTPS_TLS_FAIL host={host} port={port} remote={addr} error={err}"
+                        );
+                        failures.push(format!("{addr}: TLS {err}"));
+                    }
+                }
             }
             Err(err) => {
-                eprintln!("HTTPS_TCP_CONNECT_FAIL host={host} port={port} remote={addr} error={err}");
-                last_error = Some(err);
+                eprintln!(
+                    "HTTPS_TCP_CONNECT_FAIL host={host} port={port} remote={addr} error={err}"
+                );
+                failures.push(format!("{addr}: TCP {err}"));
             }
         }
     }
 
-    let tcp = connected.unwrap_or_else(|| {
-        panic!(
-            "HTTPS TCP connect failed for every resolved address: {:?}",
-            last_error
-        )
-    });
-    tcp.set_nodelay(true).unwrap();
-    tcp.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
-    tcp.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+    Err(format!(
+        "all resolved addresses failed for {host}:{port}: {}",
+        failures.join(" | ")
+    ))
+}
 
-    let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    let server_name = ServerName::try_from(host.to_string()).unwrap();
-    let conn = ClientConnection::new(Arc::new(config), server_name).unwrap();
-    StreamOwned::new(conn, tcp)
+fn connect_testnet_https(host_env: &str, port_env: &str) -> (String, u16, Tls) {
+    if let Ok(host) = env::var(host_env) {
+        let port = env::var(port_env)
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(TESTNET_HTTPS_PORT_DEFAULT);
+        let stream = try_https_connect(&host, port)
+            .unwrap_or_else(|e| panic!("explicit HTTPS endpoint failed: {e}"));
+        return (host, port, stream);
+    }
+
+    let mut failures = Vec::new();
+    for host in [TESTNET_HTTPS_PRIMARY, TESTNET_HTTPS_FALLBACK] {
+        match try_https_connect(host, TESTNET_HTTPS_PORT_DEFAULT) {
+            Ok(stream) => return (host.to_string(), TESTNET_HTTPS_PORT_DEFAULT, stream),
+            Err(err) => failures.push(err),
+        }
+    }
+
+    panic!(
+        "all official BSC Testnet HTTPS endpoints failed: {}",
+        failures.join(" || ")
+    );
 }
 
 fn https_send_json(stream: &mut Tls, host: &str, body: &str) {
@@ -780,21 +823,17 @@ fn main() {
 
     // Independent launch injection. PublicNode WSS is not used to inject the
     // launch, so its subscription remains a genuine control sensor.
-    let launch_https_host = env::var("DARKBOT_G07_LAUNCH_HTTPS_HOST")
-        .unwrap_or_else(|_| LAUNCH_HTTPS_HOST_DEFAULT.to_string());
-    let launch_https_port = env::var("DARKBOT_G07_LAUNCH_HTTPS_PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(LAUNCH_HTTPS_PORT_DEFAULT);
-    let mut launch_https = https_connect(&launch_https_host, launch_https_port);
+    let (launch_https_host, launch_https_port, mut launch_https) =
+        connect_testnet_https(
+            "DARKBOT_G07_LAUNCH_HTTPS_HOST",
+            "DARKBOT_G07_LAUNCH_HTTPS_PORT",
+        );
 
-    let buy_https_host = env::var("DARKBOT_G07_BUY_HTTPS_HOST")
-        .unwrap_or_else(|_| launch_https_host.clone());
-    let buy_https_port = env::var("DARKBOT_G07_BUY_HTTPS_PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(launch_https_port);
-    let mut buy_https = https_connect(&buy_https_host, buy_https_port);
+    let (buy_https_host, buy_https_port, mut buy_https) =
+        connect_testnet_https(
+            "DARKBOT_G07_BUY_HTTPS_HOST",
+            "DARKBOT_G07_BUY_HTTPS_PORT",
+        );
     println!("buy_submission_transport:  prewarmed HTTPS {buy_https_host}:{buy_https_port}");
 
     let launch_body = format!(
