@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+darkbot-bsc-p2p-ingress = { path = "p2p_ingress" }
 alloy-primitives = "1"
 alloy-sol-types = { version = "1", features = ["more-tuple-impls"] }
 hex = "0.4"

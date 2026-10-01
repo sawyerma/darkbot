@@ -1,0 +1,22 @@
+name: Gate0 BSC P2P ingress check
+
+on:
+  pull_request:
+    paths:
+      - "gates/bsc/gate0/p2p_ingress/**"
+      - "gates/bsc/gate0/Cargo.toml"
+      - "gates/bsc/gate0/src/bin/g07_testnet_birth_buy.rs"
+      - ".github/workflows/gate0-p2p-ingress.yml"
+  workflow_dispatch:
+
+jobs:
+  cargo-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check P2P ingress library
+        run: cargo check --manifest-path gates/bsc/gate0/p2p_ingress/Cargo.toml
+      - name: Check G0.7 P2P birth-to-BUY harness
+        run: cargo check --manifest-path gates/bsc/gate0/Cargo.toml --bin g07_testnet_birth_buy
