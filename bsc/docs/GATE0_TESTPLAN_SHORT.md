@@ -465,3 +465,34 @@ Before any dependent Gate-0 stage is declared PASS or started, every new empiric
 No latency or correctness result may exist only in chat output, an agent summary or an unreferenced local terminal session. Historical results are appended or explicitly superseded; they are never silently overwritten.
 
 This rule does not change the stage order. It makes each stage auditable and prevents later phases from reusing measurements outside their proven scope.
+
+
+## G0.7 status freeze — 2026-10-01
+
+Current measured state:
+- Direct on-chain Flap Testnet launch -> BUY is functionally proven.
+- Successful BUY acquisition is proven repeatedly.
+- Same-block immediate ordering has been proven, including runs with zero successful BUYs between launch and DarkBot.
+- Local actionable-signal -> BUY transport handoff is already below 1 ms:
+  - 433,125 ns in one controlled run;
+  - 535,250 ns in the raw-P2P/hash-fetch run.
+- Therefore decode/CREATE2/build/sign/queue is not the present Gate-0 bottleneck.
+
+Ingress is NOT qualified:
+- Earlier public-WSS-controlled run: WSS launch observation was ~110.66 ms after launch handoff.
+- First standalone P2P adapter stamped only after txpool admission and was slower than WSS.
+- Moving the boundary before txpool separated the delay:
+  - launch handoff -> first matching P2P hash: 133,377,959 ns;
+  - P2P hash -> full transaction fetch: 101,263,875 ns;
+  - actionable full P2P transaction: 234,641,834 ns.
+- This proves the dominant delay is network acquisition/topology, not the local BUY reaction path.
+
+Current P2P qualification blocker:
+- The Chapel sensor does not reliably reach a 4-peer readiness threshold within 30 s.
+- The four addresses embedded in reth-bsc are bootnodes; treating them as guaranteed transaction-feed/static peers was incorrect and has been reverted.
+- Gate0 now logs peer-session establishment/closure, remote address, client version, negotiated ETH version, peer kind and live peer count before changing the architecture again.
+- Current BNB Chain client development has moved its primary wire protocol to eth/70 while retaining eth/68 compatibility; the pinned bnb-chain/reth v0.1.2 defaults to eth/69/68/67/66 capability advertisement. This is a compatibility/topology item to measure explicitly, not assume away.
+- BSC transaction propagation itself intentionally sends full non-blob transactions only to approximately sqrt(peer_count) peers and sends hash announcements to the remaining peers; transactions above the broadcast-size threshold are hash-announced and fetched. Therefore receiving BSC_P2P_HASH_FETCH is expected behavior for ordinary peers, and peer placement/selection materially affects earliest actionable full-TX time.
+
+Stop condition:
+Do not optimize the Rust BUY hotpath further unless a new measurement shows a regression. The next work item is ingress qualification: identify stable transaction-carrying peers / protocol compatibility, then compare direct full broadcast, hash-fetch, independent WSS control and any verified low-latency relay on the same controlled launch.
