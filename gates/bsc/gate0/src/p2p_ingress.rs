@@ -26,7 +26,7 @@ use reth_eth_wire_types::{DisconnectReason, EthVersion};
 use reth_ethereum_forks::ForkFilter;
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager, PeersInfo};
 use reth_primitives_traits::SealedHeader;
-use reth_provider::noop::NoopProvider;
+use reth_storage_api::noop::NoopProvider;
 use reth_tasks::Runtime;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, test_utils::OkValidator, CoinbaseTipOrdering,
