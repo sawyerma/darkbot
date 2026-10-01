@@ -19,7 +19,7 @@ webpki-roots = "1"
 # the BNB Chain Reth fork; do not pull the reth-bsc root node crate because
 # that drags execution/engine components unrelated to this sensor.
 reth-network = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
-reth-provider = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
+reth-storage-api = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-tasks = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-discv4 = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
 reth-chainspec = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
@@ -28,7 +28,7 @@ reth-eth-wire = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" 
 reth-eth-wire-types = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-ethereum-forks = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-network-peers = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
-reth-primitives-traits = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth-primitives-traits = { git = "https://github.com/bnb-chain/reth-core.git", branch = "v0.3.1-v2", default-features = false }
 bytes = "1"
 futures = "0.3"
 tokio = { version = "1.44", features = ["rt-multi-thread", "net", "sync", "time"] }
