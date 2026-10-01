@@ -1,26 +1,18 @@
 //! Controlled BSC Testnet birth->BUY latency/inclusion test.
-//! Creates a fresh Flap TAXED_V3 token with quoteAmt=0, observes that exact launch
-//! on a live pending WebSocket subscription, then builds/signs/sends the BUY.
+//! Creates a fresh Flap TAXED_V3 token with quoteAmt=0, observes the complete signed
+//! launch transaction directly from BSC devp2p, then builds/signs and broadcasts the BUY
+//! directly to connected BSC peers. Public RPC is bootstrap/control/evidence only.
 //! Testnet only. No Mainnet addresses or value are used.
 
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_sol_types::{sol, SolCall};
+use darkbot_bsc_p2p_ingress::{spawn_testnet_launch_ingress, BootstrapHead};
 use k256::ecdsa::SigningKey;
-use rustls::{
-    pki_types::ServerName,
-    ClientConfig,
-    ClientConnection,
-    RootCertStore,
-    StreamOwned,
-};
 use serde_json::{json, Value};
 use std::{
     env,
-    io::{Read, Write},
-    net::{TcpStream, ToSocketAddrs},
     process::Command,
     str::FromStr,
-    sync::Arc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -70,8 +62,6 @@ sol! {
 }
 
 const RPC_DEFAULT: &str = "https://data-seed-prebsc-1-s1.bnbchain.org:8545/";
-const WSS_HOST: &str = "bsc-testnet-rpc.publicnode.com";
-const WSS_PATH: &str = "/";
 const CHAIN_ID: u64 = 97;
 const PORTAL: &str = "0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9";
 const TAX_V3_IMPL: &str = "0xE6Ff967a887084c16D0fD71548CF709542cc1557";
@@ -327,164 +317,6 @@ fn buy_calldata(token: Address) -> Vec<u8> {
     .abi_encode()
 }
 
-type Tls = StreamOwned<ClientConnection, TcpStream>;
-
-fn ws_connect() -> Tls {
-    let addr = (WSS_HOST, 443)
-        .to_socket_addrs()
-        .unwrap()
-        .next()
-        .expect("WSS DNS returned no address");
-
-    let tcp =
-        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).expect("WSS TCP connect failed");
-    tcp.set_nodelay(true).unwrap();
-    tcp.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
-    tcp.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
-
-    let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    let server_name = ServerName::try_from(WSS_HOST.to_string()).unwrap();
-    let conn = ClientConnection::new(Arc::new(config), server_name).unwrap();
-    let mut stream = StreamOwned::new(conn, tcp);
-
-    let req = format!(
-        "GET {WSS_PATH} HTTP/1.1\r\n\
-         Host: {WSS_HOST}\r\n\
-         Upgrade: websocket\r\n\
-         Connection: Upgrade\r\n\
-         Sec-WebSocket-Key: ZGFya2JvdC1nMDctdGVzdA==\r\n\
-         Sec-WebSocket-Version: 13\r\n\
-         \r\n"
-    );
-    stream.write_all(req.as_bytes()).unwrap();
-    stream.flush().unwrap();
-
-    let mut header = Vec::new();
-    let mut b = [0u8; 1];
-    while !header.ends_with(b"\r\n\r\n") {
-        stream
-            .read_exact(&mut b)
-            .expect("WSS upgrade response failed");
-        header.push(b[0]);
-        assert!(header.len() < 16_384, "WSS upgrade header too large");
-    }
-
-    let text = String::from_utf8_lossy(&header);
-    assert!(
-        text.starts_with("HTTP/1.1 101") || text.starts_with("HTTP/1.0 101"),
-        "WSS upgrade failed: {text}"
-    );
-
-    stream
-}
-
-fn ws_send_frame(stream: &mut Tls, opcode: u8, payload: &[u8], mask_counter: &mut u32) {
-    let mut frame = Vec::with_capacity(payload.len() + 14);
-    frame.push(0x80 | opcode);
-
-    let n = payload.len();
-    if n <= 125 {
-        frame.push(0x80 | n as u8);
-    } else if n <= u16::MAX as usize {
-        frame.push(0x80 | 126);
-        frame.extend_from_slice(&(n as u16).to_be_bytes());
-    } else {
-        frame.push(0x80 | 127);
-        frame.extend_from_slice(&(n as u64).to_be_bytes());
-    }
-
-    *mask_counter = mask_counter.wrapping_add(0x9e37_79b9);
-    let mask = mask_counter.to_be_bytes();
-    frame.extend_from_slice(&mask);
-
-    for (i, b) in payload.iter().enumerate() {
-        frame.push(*b ^ mask[i & 3]);
-    }
-
-    stream.write_all(&frame).expect("WSS write failed");
-    stream.flush().expect("WSS flush failed");
-}
-
-fn ws_send_text(stream: &mut Tls, text: &str, mask_counter: &mut u32) {
-    ws_send_frame(stream, 0x1, text.as_bytes(), mask_counter);
-}
-
-fn ws_read_message(stream: &mut Tls, mask_counter: &mut u32) -> String {
-    let mut collected = Vec::new();
-    let mut started = false;
-
-    loop {
-        let mut h = [0u8; 2];
-        stream.read_exact(&mut h).expect("WSS frame header failed");
-        let fin = h[0] & 0x80 != 0;
-        let opcode = h[0] & 0x0f;
-        let masked = h[1] & 0x80 != 0;
-        let mut len = (h[1] & 0x7f) as u64;
-
-        if len == 126 {
-            let mut x = [0u8; 2];
-            stream.read_exact(&mut x).unwrap();
-            len = u16::from_be_bytes(x) as u64;
-        } else if len == 127 {
-            let mut x = [0u8; 8];
-            stream.read_exact(&mut x).unwrap();
-            len = u64::from_be_bytes(x);
-        }
-
-        assert!(len <= 16 * 1024 * 1024, "WSS frame unexpectedly large");
-
-        let mut mask = [0u8; 4];
-        if masked {
-            stream.read_exact(&mut mask).unwrap();
-        }
-
-        let mut payload = vec![0u8; len as usize];
-        stream.read_exact(&mut payload).unwrap();
-
-        if masked {
-            for (i, b) in payload.iter_mut().enumerate() {
-                *b ^= mask[i & 3];
-            }
-        }
-
-        match opcode {
-            0x8 => panic!("WSS server closed connection"),
-            0x9 => {
-                ws_send_frame(stream, 0xA, &payload, mask_counter);
-                continue;
-            }
-            0xA => continue,
-            0x1 => {
-                collected.extend_from_slice(&payload);
-                started = true;
-            }
-            0x0 if started => collected.extend_from_slice(&payload),
-            _ => continue,
-        }
-
-        if fin && started {
-            return String::from_utf8(collected).expect("non-UTF8 WSS JSON frame");
-        }
-    }
-}
-
-fn wait_rpc_id(stream: &mut Tls, id: u64, mask_counter: &mut u32) -> Value {
-    loop {
-        let text = ws_read_message(stream, mask_counter);
-        let v: Value = serde_json::from_str(&text).expect("invalid WSS JSON");
-
-        if v.get("id").and_then(Value::as_u64) == Some(id) {
-            if let Some(e) = v.get("error") {
-                panic!("WSS RPC error id={id}: {e}");
-            }
-            return v["result"].clone();
-        }
-    }
-}
-
 fn receipt(tx_hash: &str) -> Value {
     for _ in 0..100 {
         let r = rpc("eth_getTransactionReceipt", json!([tx_hash]));
@@ -596,6 +428,33 @@ fn main() {
     let chain_id = hex_u64(&rpc("eth_chainId", json!([])));
     assert_eq!(chain_id, CHAIN_ID, "wrong chain");
 
+    // Bootstrap/control only: freeze a current BSC head before the measured race begins.
+    // No RPC/WSS lookup is performed by the P2P ingress after this point.
+    let latest = rpc("eth_getBlockByNumber", json!(["latest", false]));
+    let p2p_head = BootstrapHead {
+        number: hex_u64(&latest["number"]),
+        hash: B256::from_str(
+            latest["hash"].as_str().expect("latest block hash missing")
+        ).expect("invalid latest block hash"),
+        difficulty: hex_u256(&latest["difficulty"]),
+        total_difficulty: latest
+            .get("totalDifficulty")
+            .filter(|v| !v.is_null())
+            .map(hex_u256)
+            .unwrap_or_else(|| hex_u256(&latest["difficulty"])),
+        timestamp: hex_u64(&latest["timestamp"]),
+    };
+
+    let ingress = spawn_testnet_launch_ingress(
+        portal,
+        newTokenV6Call::SELECTOR,
+        p2p_head,
+    );
+    let p2p_ready = ingress
+        .ready
+        .recv_timeout(Duration::from_secs(30))
+        .expect("no compatible BSC Testnet P2P peer connected within 30s");
+
     let balance_before = hex_u256(&rpc("eth_getBalance", json!([WALLET, "latest"])));
     let nonce = hex_u64(&rpc(
         "eth_getTransactionCount",
@@ -670,76 +529,44 @@ fn main() {
         "testnet_min_output:       {TESTNET_MIN_OUTPUT} (TESTNET LATENCY ONLY)"
     );
 
-    let mut ws = ws_connect();
-    let mut mask_counter = 0x17a2_93c1u32;
+    println!("p2p_connected_peers:       {}", p2p_ready.connected_peers);
+    println!("race_ingress:              DIRECT_BSC_P2P");
 
-    ws_send_text(
-        &mut ws,
-        r#"{"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newPendingTransactions",true]}"#,
-        &mut mask_counter,
+    // The controlled launch itself may use HTTPS JSON-RPC as a generator. It is not
+    // a race sensor. The P2P task is already live and timestamps the full signed tx
+    // independently, even if the RPC call has not returned yet.
+    let launch_submit_start = Instant::now();
+    let launch_remote = rpc(
+        "eth_sendRawTransaction",
+        json!([format!("0x{}", hex::encode(&launch_signed))]),
     );
-    let sub = wait_rpc_id(&mut ws, 1, &mut mask_counter);
-    println!(
-        "pending_subscription:     {}",
-        sub.as_str().unwrap_or("<non-string>")
+    let launch_rpc_ack = Instant::now();
+    let launch_remote_hash = launch_remote
+        .as_str()
+        .expect("launch tx hash missing");
+    assert_eq!(
+        launch_remote_hash.to_lowercase(),
+        launch_hash_hex.to_lowercase(),
+        "launch RPC returned unexpected hash"
     );
 
-    let launch_body = format!(
-        r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
-        hex::encode(&launch_signed)
-    );
-
-    ws_send_text(&mut ws, &launch_body, &mut mask_counter);
-    let launch_handoff = Instant::now();
-
-    let mut launch_ack_seen = false;
-    let (t_signal, signal_mode, signal_launch_data) = loop {
-        let text = ws_read_message(&mut ws, &mut mask_counter);
-        let frame_arrival = Instant::now();
-        let v: Value = serde_json::from_str(&text).expect("invalid WSS JSON");
-
-        if v.get("id").and_then(Value::as_u64) == Some(2) {
-            if let Some(e) = v.get("error") {
-                panic!("launch broadcast rejected: {e}");
-            }
-
-            let remote = v["result"].as_str().expect("launch tx hash missing");
-            assert_eq!(remote.to_lowercase(), launch_hash_hex.to_lowercase());
-            launch_ack_seen = true;
-            continue;
+    let mut unrelated_launches = 0u64;
+    let signal = loop {
+        let candidate = ingress
+            .launches
+            .recv_timeout(Duration::from_secs(15))
+            .expect("P2P ingress did not observe controlled launch within 15s");
+        if candidate.tx_hash == launch_hash {
+            break candidate;
         }
-
-        let Some(result) = v.pointer("/params/result") else {
-            continue;
-        };
-
-        if let Some(h) = result.as_str() {
-            if h.eq_ignore_ascii_case(&launch_hash_hex) {
-                break (
-                    frame_arrival,
-                    "HASH_MATCH_CONTROLLED",
-                    launch_data.clone(),
-                );
-            }
-            continue;
-        }
-
-        if let Some(obj) = result.as_object() {
-            let h = obj.get("hash").and_then(Value::as_str).unwrap_or("");
-            if !h.eq_ignore_ascii_case(&launch_hash_hex) {
-                continue;
-            }
-
-            let input = obj
-                .get("input")
-                .and_then(Value::as_str)
-                .expect("full pending launch missing input");
-            let raw =
-                hex::decode(input.trim_start_matches("0x")).expect("pending input invalid hex");
-            break (frame_arrival, "FULL_PENDING_OBJECT", raw);
-        }
+        unrelated_launches += 1;
     };
 
+    let t_signal = signal.observed_at;
+    let signal_mode = format!("P2P_{:?}", signal.source);
+    let signal_fetch_ns = signal.fetch_ns;
+    let signal_launch_data = signal.input;
+    let launch_ack_seen_before_signal = launch_rpc_ack <= t_signal;
     let decoded = newTokenV6Call::abi_decode_validate(&signal_launch_data)
         .expect("pending launch decode failed");
     assert_eq!(decoded.params.tokenVersion, 6);
@@ -788,35 +615,16 @@ fn main() {
     let buy_hash_hex = format!("0x{}", hex::encode(buy_hash));
     let t_ready = Instant::now();
 
-    let buy_body = format!(
-        r#"{{"jsonrpc":"2.0","id":3,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
-        hex::encode(&buy_signed)
-    );
-
     let t_queue = Instant::now();
-    ws_send_text(&mut ws, &buy_body, &mut mask_counter);
-    let t_send = Instant::now();
-
-    let buy_ack = loop {
-        let text = ws_read_message(&mut ws, &mut mask_counter);
-        let v: Value = serde_json::from_str(&text).expect("invalid WSS JSON");
-
-        if v.get("id").and_then(Value::as_u64) != Some(3) {
-            continue;
-        }
-
-        if let Some(e) = v.get("error") {
-            panic!("BUY broadcast rejected: {e}");
-        }
-
-        break v["result"]
-            .as_str()
-            .expect("BUY tx hash missing")
-            .to_string();
-    };
-    let t_ack = Instant::now();
-
-    assert_eq!(buy_ack.to_lowercase(), buy_hash_hex.to_lowercase());
+    let direct_send = ingress
+        .send_raw_transaction(buy_signed.clone())
+        .expect("direct BSC P2P BUY broadcast failed");
+    let t_send = direct_send.enqueued_at;
+    assert_eq!(
+        direct_send.tx_hash, buy_hash,
+        "P2P sender decoded a different BUY transaction"
+    );
+    let buy_p2p_peers = direct_send.peers;
 
     let launch_receipt = receipt(&launch_hash_hex);
     let buy_receipt = receipt(&buy_hash_hex);
@@ -872,8 +680,11 @@ fn main() {
     println!("signal_mode:               {signal_mode}");
     println!(
         "launch_ack_seen_before_signal: {}",
-        launch_ack_seen
+        launch_ack_seen_before_signal
     );
+    println!("p2p_hash_fetch_ns:         {:?}", signal_fetch_ns);
+    println!("unrelated_launches_seen:   {unrelated_launches}");
+    println!("buy_p2p_peer_count:        {buy_p2p_peers}");
     println!("launch_tx:                 {launch_hash_hex}");
     println!("buy_tx:                    {buy_hash_hex}");
     println!("token:                     {derived}");
@@ -926,18 +737,14 @@ fn main() {
         (t_send - t_signal).as_nanos()
     );
     println!(
-        "T_signal_to_ack_ns:        {}",
-        (t_ack - t_signal).as_nanos()
-    );
-    println!(
-        "launch_handoff_to_signal_ns: {}",
-        (t_signal - launch_handoff).as_nanos()
+        "launch_rpc_submit_to_signal_ns: {}",
+        (t_signal - launch_submit_start).as_nanos()
     );
     println!(
         "T_signal_to_receipts_seen_ns: {}",
         (t_observed - t_signal).as_nanos()
     );
-    println!("transport_boundary:        live WSS write_all+flush");
+    println!("transport_boundary:        reth NetworkHandle::send_transactions enqueue");
     println!("T_buy_minus_T0:            UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA");
     println!("G0.7_TESTNET_BIRTH_BUY_PASS: true");
 }
