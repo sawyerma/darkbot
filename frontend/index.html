@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Crypto GUI</title>
+    
+    <!-- Idle-Prefetch für Lightweight Charts (kein Initial-Load Blocking!) -->
+    <link rel="prefetch" href="/lightweight-charts.standalone.development.js" as="script">
+    <link rel="prefetch" href="/lightweight-charts.standalone.production.js" as="script">
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Chart wird nun via chartLazyLoader.ts on-demand geladen -->
+    <!-- Vite/React laden -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
