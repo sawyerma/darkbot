@@ -78,10 +78,10 @@ const TAX_V3_IMPL: &str = "0xE6Ff967a887084c16D0fD71548CF709542cc1557";
 const WALLET: &str = "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE";
 
 const BUY_VALUE_WEI: u64 = 100_000_000_000_000; // 0.0001 tBNB
-const BUY_GAS_LIMIT: u64 = 300_000;
+const BUY_GAS_LIMIT: u64 = 3_000_000; // fresh TAXED_V3 first BUY can be much heavier than a warm existing-token BUY
 const MAX_GAS_PRICE_WEI: u64 = 1_000_000_000; // 1 gwei
 const MAX_LAUNCH_GAS: u64 = 15_000_000;
-const TESTNET_MIN_OUTPUT: u64 = 1; // testnet latency/inclusion only
+const TESTNET_MIN_OUTPUT: u64 = 0; // testnet latency/inclusion only; acquisition >0 is verified after execution
 
 fn rpc(method: &str, params: Value) -> Value {
     let rpc = env::var("BSC_TESTNET_RPC_HTTPS").unwrap_or_else(|_| RPC_DEFAULT.to_string());
@@ -824,8 +824,21 @@ fn main() {
 
     let launch_status = hex_u64(&launch_receipt["status"]);
     let buy_status = hex_u64(&buy_receipt["status"]);
+    let launch_gas_used = hex_u64(&launch_receipt["gasUsed"]);
+    let buy_gas_used = hex_u64(&buy_receipt["gasUsed"]);
+
+    println!("launch_receipt_status:    {launch_status}");
+    println!("launch_gas_used:          {launch_gas_used}");
+    println!("buy_tx:                   {buy_hash_hex}");
+    println!("buy_receipt_status:       {buy_status}");
+    println!("buy_gas_used:             {buy_gas_used}");
+    println!("buy_gas_limit:            {BUY_GAS_LIMIT}");
+
     assert_eq!(launch_status, 1, "launch reverted");
-    assert_eq!(buy_status, 1, "BUY reverted");
+    assert_eq!(
+        buy_status, 1,
+        "BUY reverted; compare buy_gas_used with buy_gas_limit above"
+    );
 
     let launch_block = hex_u64(&launch_receipt["blockNumber"]);
     let launch_index = hex_u64(&launch_receipt["transactionIndex"]);
