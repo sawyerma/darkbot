@@ -1,11 +1,12 @@
 // Pinned from bnb-chain/reth-bsc @ 98ef6c5b2d8b191f9b10bf1406dce341475c30ce.
 // Gate-0 needs only fork-id compatibility + bootnodes; no state DB/full sync.
 use alloy_genesis::Genesis;
-use alloy_primitives::{BlockHash, U256};
+use alloy_primitives::BlockHash;
 use reth_chainspec::{
-    hardfork, make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks,
-    ChainSpec, EthereumHardfork, ForkCondition, Hardfork, NamedChain,
+    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainSpec, ForkCondition,
+    NamedChain,
 };
+use reth_ethereum_forks::{hardfork, ChainHardforks, EthereumHardfork, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::SealedHeader;
 use std::{str::FromStr, sync::Arc};
