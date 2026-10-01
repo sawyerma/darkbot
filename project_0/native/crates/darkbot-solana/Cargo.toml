@@ -31,10 +31,13 @@ solana-account-decoder = "3"  # VERIFY: UiAccountEncoding
 
 # Transaction-v1 capability adapter. These modular crates coexist with the
 # marginfi-pinned solana-sdk 3.x graph; only the serializer/message adapter uses them.
+# [FIX-48] solana-instruction MUST stay at =3.4.0: marginfi-type-crate pins exactly 3.4.0,
+# while solana-message 4.4.1 accepts >=3.4.0,<3.5.0. Pin message exactly as well so a
+# future Cargo resolution cannot drift to a newer message release with a different graph.
 solana-pubkey-v1 = { package = "solana-pubkey", version = "4.2.1", optional = true }
 solana-hash-v1 = { package = "solana-hash", version = "4.3.0", optional = true }
-solana-instruction-v1 = { package = "solana-instruction", version = "3.4.1", optional = true }
-solana-message-v1 = { package = "solana-message", version = "4.4.1", optional = true }
+solana-instruction-v1 = { package = "solana-instruction", version = "=3.4.0", optional = true }
+solana-message-v1 = { package = "solana-message", version = "=4.4.1", optional = true }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }  # VERIFY Version
