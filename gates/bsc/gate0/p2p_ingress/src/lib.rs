@@ -1,10 +1,12 @@
 use alloy_consensus::Transaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{Address, B256, U256};
-use reth_bsc::{
-    chainspec::bsc_testnet,
-    node::network::{bootnodes::bsc_testnet_nodes, handshake::BscHandshake},
-};
+mod chainspec;
+mod handshake;
+mod upgrade_status;
+
+use chainspec::{boot_nodes, chain_spec};
+use handshake::BscHandshake;
 use reth_chainspec::Head;
 use reth_discv4::Discv4ConfigBuilder;
 use reth_eth_wire_types::{GetPooledTransactions, PooledTransactions};
@@ -157,7 +159,7 @@ pub fn spawn_testnet_launch_ingress(
                 .expect("build P2P runtime");
             rt.block_on(async move {
                 let secret_key = SecretKey::new(&mut rand::thread_rng());
-                let boot_nodes = bsc_testnet_nodes();
+                let bootstrap_nodes = boot_nodes();
                 let listen_port = std::env::var("DARKBOT_BSC_P2P_PORT")
                     .ok()
                     .and_then(|v| v.parse::<u16>().ok())
@@ -172,9 +174,9 @@ pub fn spawn_testnet_launch_ingress(
                     timestamp: bootstrap.timestamp,
                 };
 
-                let chain_spec = Arc::new(bsc_testnet());
+                let chain_spec = chain_spec();
                 let cfg = NetworkConfig::builder(secret_key, Runtime::test())
-                    .boot_nodes(boot_nodes.clone())
+                    .boot_nodes(bootstrap_nodes.clone())
                     .set_head(head)
                     .with_pow()
                     .listener_addr(local_addr)
@@ -182,7 +184,7 @@ pub fn spawn_testnet_launch_ingress(
                     .build(NoopProvider::eth(chain_spec))
                     .set_discovery_v4(
                         Discv4ConfigBuilder::default()
-                            .add_boot_nodes(boot_nodes)
+                            .add_boot_nodes(bootstrap_nodes)
                             .lookup_interval(Duration::from_millis(250))
                             .build(),
                     );
