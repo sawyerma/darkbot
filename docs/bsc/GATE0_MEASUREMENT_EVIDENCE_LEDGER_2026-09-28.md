@@ -1957,3 +1957,44 @@ Interpretation:
 - `T_buy-T0` remains unavailable from standard BSC block data; same-block adjacent ordering with zero successful competitors is hard ordering evidence only.
 
 No Mainnet value was used. No claim of sub-ms on-chain execution is made.
+
+
+## 2026-10-01 — G0.7 raw P2P channel run: hash arrival separated from full transaction
+
+A second controlled Flap Testnet launch+BUY used the raw ETH P2P transaction channel before the Reth txpool. It separated the first matching hash announcement from receipt of the complete launch transaction.
+
+Scope / correctness:
+- launch tx `0x54d4876b3e7e2e3d1dfab84aaaee116efcc00e63664f49130569f64c2adbbb6c`;
+- BUY tx `0xd3f07a6c9435463b0a725dcf6d0c3cee9309a76c5361d0c32074927927de8dc8`;
+- token `0x417cC79C0927a40352238d4516F2fe0546917777`;
+- P2P threshold 1 peer; 4 peers connected at actionable signal;
+- signal source = `BSC_P2P_HASH_FETCH`;
+- launch receipt status = 1, BUY receipt status = 1;
+- same block 134255601, launch index 0, BUY index 1;
+- zero successful external BUYs between launch and ours;
+- acquired token balance = 17669034223232267628301.
+
+Measured P2P ingress:
+- launch handoff -> first matching P2P hash = **133,377,959 ns**;
+- hash -> complete transaction fetched from the announcing peer = **101,263,875 ns**;
+- launch handoff -> actionable full P2P transaction = **234,641,834 ns**;
+- WSS_minus_P2P_hash = **-18,843,417 ns**: the public WSS control saw the launch about 18.843 ms before this P2P hash;
+- WSS_minus_P2P_full = **-120,107,292 ns**: WSS saw the launch about 120.107 ms before the actionable full P2P transaction.
+
+Local BUY reaction from full actionable P2P transaction:
+- T_signal -> decode = 203,875 ns;
+- decode -> build = 24,166 ns;
+- build -> sign = 121,084 ns;
+- sign -> ready = 7,750 ns;
+- ready -> queue = 6,041 ns;
+- queue -> send = 172,334 ns;
+- **T_signal -> T_ready = 356,875 ns**;
+- **T_signal -> T_send = 535,250 ns**.
+
+Interpretation:
+- Removing txpool admission did not remove the dominant delay. The split proves two distinct costs in this run: P2P topology/propagation to the first observed hash, then an additional peer round trip to fetch the complete transaction.
+- The local reaction path remains below 1 ms.
+- This comparison is **not yet a fair P2P-vs-WSS provider comparison**, because the controlled launch was injected through the same PublicNode WSS provider that hosted the control subscription. That topology gives the WSS control sensor a direct injection-point advantage. The next controlled run must inject the launch through an independent BNB Testnet transport while PublicNode remains only the control sensor.
+- The next adapter should also prewarm a larger peer set and fan out the one-shot `GetPooledTransactions` request across connected peers after the first matching hash, while still accepting a direct full `Transactions` broadcast immediately if one arrives first.
+
+No Mainnet value was used. No claim about `T_buy-T0` is made.
