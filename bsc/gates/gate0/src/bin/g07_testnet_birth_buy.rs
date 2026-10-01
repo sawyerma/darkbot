@@ -1,7 +1,8 @@
 //! Controlled BSC Testnet birth->BUY latency/inclusion test.
 //! Creates a fresh Flap TAXED_V3 token with quoteAmt=0, observes that exact launch
 //! through direct BSC P2P transaction gossip, then builds/signs/sends the BUY.
-//! Public WSS remains parallel control/evidence and submission transport only.
+//! Public WSS is not required for this controlled BUY proof; the race path uses
+//! direct BSC P2P ingress plus pre-warmed HTTPS submission.
 //! Testnet only. No Mainnet addresses or value are used.
 
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
@@ -23,8 +24,7 @@ use std::{
     net::{TcpStream, ToSocketAddrs},
     process::Command,
     str::FromStr,
-    sync::{mpsc, Arc},
-    thread,
+    sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -752,46 +752,10 @@ fn main() {
         .expect("BSC P2P sensor did not reach minimum peer count");
     println!("p2p_ready_peers:           {}", p2p_ready.peers);
 
-    // Parallel WSS control sensor. It never gates BUY construction.
-    let mut control_ws = ws_connect();
-    let mut control_mask = 0x4b1d_2e37u32;
-    ws_send_text(
-        &mut control_ws,
-        r#"{"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newPendingTransactions",true]}"#,
-        &mut control_mask,
-    );
-    let sub = wait_rpc_id(&mut control_ws, 1, &mut control_mask);
-    println!(
-        "control_subscription:      {}",
-        sub.as_str().unwrap_or("<non-string>")
-    );
-
-    let control_hash = launch_hash_hex.clone();
-    let (control_tx, control_rx) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        loop {
-            let text = ws_read_message(&mut control_ws, &mut control_mask);
-            let frame_arrival = Instant::now();
-            let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
-            let Some(result) = v.pointer("/params/result") else { continue };
-
-            let matched = if let Some(h) = result.as_str() {
-                h.eq_ignore_ascii_case(&control_hash)
-            } else if let Some(obj) = result.as_object() {
-                obj.get("hash")
-                    .and_then(Value::as_str)
-                    .map(|h| h.eq_ignore_ascii_case(&control_hash))
-                    .unwrap_or(false)
-            } else {
-                false
-            };
-
-            if matched {
-                let _ = control_tx.send(frame_arrival);
-                break;
-            }
-        }
-    });
+    // Public WSS is deliberately not a dependency of the actual BUY proof.
+    // Previous control runs already established the WSS baseline; an outage must
+    // never prevent the controlled P2P -> BUY path from executing.
+    println!("control_wss:                DISABLED_FOR_BUY_PROOF");
 
     // Independent launch injection. PublicNode WSS is not used to inject the
     // launch, so its subscription remains a genuine control sensor.
@@ -802,6 +766,16 @@ fn main() {
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(LAUNCH_HTTPS_PORT_DEFAULT);
     let mut launch_https = https_connect(&launch_https_host, launch_https_port);
+
+    let buy_https_host = env::var("DARKBOT_G07_BUY_HTTPS_HOST")
+        .unwrap_or_else(|_| launch_https_host.clone());
+    let buy_https_port = env::var("DARKBOT_G07_BUY_HTTPS_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(launch_https_port);
+    let mut buy_https = https_connect(&buy_https_host, buy_https_port);
+    println!("buy_submission_transport:  prewarmed HTTPS {buy_https_host}:{buy_https_port}");
+
     let launch_body = format!(
         r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
         hex::encode(&launch_signed)
@@ -809,10 +783,6 @@ fn main() {
     https_send_json(&mut launch_https, &launch_https_host, &launch_body);
     let launch_handoff = Instant::now();
     println!("launch_injection_transport: independent HTTPS {launch_https_host}:{launch_https_port}");
-
-    // BUY submission remains on its own warm WSS connection; it is not a signal source.
-    let mut ws = ws_connect();
-    let mut mask_counter = 0x17a2_93c1u32;
 
     let p2p_signal = loop {
         let signal = p2p
@@ -892,28 +862,11 @@ fn main() {
     );
 
     let t_queue = Instant::now();
-    ws_send_text(&mut ws, &buy_body, &mut mask_counter);
+    https_send_json(&mut buy_https, &buy_https_host, &buy_body);
     let t_send = Instant::now();
 
-    let buy_ack = loop {
-        let text = ws_read_message(&mut ws, &mut mask_counter);
-        let v: Value = serde_json::from_str(&text).expect("invalid WSS JSON");
-
-        if v.get("id").and_then(Value::as_u64) != Some(3) {
-            continue;
-        }
-        if let Some(e) = v.get("error") {
-            panic!("BUY broadcast rejected: {e}");
-        }
-        break v["result"]
-            .as_str()
-            .expect("BUY tx hash missing")
-            .to_string();
-    };
-    let t_ack = Instant::now();
-
-    assert_eq!(buy_ack.to_lowercase(), buy_hash_hex.to_lowercase());
-    let t_wss_control = control_rx.recv_timeout(Duration::from_secs(5)).ok();
+    // Do not wait for an RPC ACK in the latency path. Receipt + token acquisition
+    // below are the authority that the BUY really executed.
     let t_p2p_hash = p2p.hashes.try_recv().ok();
 
     let launch_receipt = receipt(&launch_hash_hex);
@@ -980,28 +933,8 @@ fn main() {
         println!("launch_handoff_to_P2P_hash_ns: UNKNOWN_OR_FULL_ONLY");
     }
 
-    if let Some(t_wss) = t_wss_control {
-        let delta_ns: i128 = if t_wss >= t_signal {
-            (t_wss - t_signal).as_nanos() as i128
-        } else {
-            -((t_signal - t_wss).as_nanos() as i128)
-        };
-        println!("WSS_minus_P2P_full_ns:     {delta_ns}");
-
-        if let Some(t_hash) = t_p2p_hash {
-            let hash_vs_wss: i128 = if t_wss >= t_hash {
-                (t_wss - t_hash).as_nanos() as i128
-            } else {
-                -((t_hash - t_wss).as_nanos() as i128)
-            };
-            println!("WSS_minus_P2P_hash_ns:     {hash_vs_wss}");
-        } else {
-            println!("WSS_minus_P2P_hash_ns:     UNKNOWN");
-        }
-    } else {
-        println!("WSS_minus_P2P_full_ns:     UNKNOWN");
-        println!("WSS_minus_P2P_hash_ns:     UNKNOWN");
-    }
+    println!("WSS_minus_P2P_full_ns:     NOT_MEASURED_THIS_RUN");
+    println!("WSS_minus_P2P_hash_ns:     NOT_MEASURED_THIS_RUN");
     println!("launch_tx:                 {launch_hash_hex}");
     println!("buy_tx:                    {buy_hash_hex}");
     println!("token:                     {derived}");
@@ -1053,10 +986,7 @@ fn main() {
         "T_signal_to_send_ns:       {}",
         (t_send - t_signal).as_nanos()
     );
-    println!(
-        "T_signal_to_ack_ns:        {}",
-        (t_ack - t_signal).as_nanos()
-    );
+    println!("T_signal_to_ack_ns:        NOT_WAITED_FOR_BUY_PROOF");
     let launch_handoff_to_signal_ns: i128 = if t_signal >= launch_handoff {
         (t_signal - launch_handoff).as_nanos() as i128
     } else {
@@ -1070,7 +1000,7 @@ fn main() {
         (t_observed - t_signal).as_nanos()
     );
     println!("race_ingress_boundary:     raw BSC ETH P2P transaction channel before txpool");
-    println!("transport_boundary:        BUY live WSS write_all+flush; launch independent HTTPS write_all+flush");
+    println!("transport_boundary:        prewarmed HTTPS write_all+flush for BUY; launch independent HTTPS write_all+flush");
     println!("T_buy_minus_T0:            UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA");
     println!("G0.7_TESTNET_BIRTH_BUY_PASS: true");
 }
