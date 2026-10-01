@@ -25,6 +25,7 @@ use std::{
     process::Command,
     str::FromStr,
     sync::Arc,
+    thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
