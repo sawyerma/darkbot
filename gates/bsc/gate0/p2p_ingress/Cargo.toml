@@ -12,7 +12,8 @@ futures = "0.3"
 tokio = { version = "1.51.1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tokio-stream = "0.1"
 
-reth_bsc = { git = "https://github.com/bnb-chain/reth-bsc.git", rev = "98ef6c5b2d8b191f9b10bf1406dce341475c30ce" }\nreth-chainspec = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
+reth_bsc = { git = "https://github.com/bnb-chain/reth-bsc.git", rev = "98ef6c5b2d8b191f9b10bf1406dce341475c30ce" }
+reth-chainspec = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-discv4 = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2", features = ["test-utils"] }
 reth-eth-wire-types = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
 reth-metrics = { git = "https://github.com/bnb-chain/reth.git", tag = "v0.1.2" }
