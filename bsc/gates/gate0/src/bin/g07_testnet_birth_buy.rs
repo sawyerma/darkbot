@@ -76,6 +76,7 @@ const RPC_DEFAULT: &str = "https://data-seed-prebsc-1-s1.bnbchain.org:8545/";
 const WSS_HOST: &str = "bsc-testnet-rpc.publicnode.com";
 const WSS_PATH: &str = "/";
 const LAUNCH_HTTPS_HOST_DEFAULT: &str = "data-seed-prebsc-1-s1.bnbchain.org";
+const LAUNCH_HTTPS_PORT_DEFAULT: u16 = 8545;
 const LAUNCH_HTTPS_PATH: &str = "/";
 const CHAIN_ID: u64 = 97;
 const PORTAL: &str = "0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9";
@@ -349,8 +350,8 @@ fn buy_calldata(token: Address) -> Vec<u8> {
 
 type Tls = StreamOwned<ClientConnection, TcpStream>;
 
-fn https_connect(host: &str) -> Tls {
-    let addr = (host, 443)
+fn https_connect(host: &str, port: u16) -> Tls {
+    let addr = (host, port)
         .to_socket_addrs()
         .unwrap()
         .next()
@@ -796,14 +797,18 @@ fn main() {
     // launch, so its subscription remains a genuine control sensor.
     let launch_https_host = env::var("DARKBOT_G07_LAUNCH_HTTPS_HOST")
         .unwrap_or_else(|_| LAUNCH_HTTPS_HOST_DEFAULT.to_string());
-    let mut launch_https = https_connect(&launch_https_host);
+    let launch_https_port = env::var("DARKBOT_G07_LAUNCH_HTTPS_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(LAUNCH_HTTPS_PORT_DEFAULT);
+    let mut launch_https = https_connect(&launch_https_host, launch_https_port);
     let launch_body = format!(
         r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
         hex::encode(&launch_signed)
     );
     https_send_json(&mut launch_https, &launch_https_host, &launch_body);
     let launch_handoff = Instant::now();
-    println!("launch_injection_transport: independent HTTPS {launch_https_host}");
+    println!("launch_injection_transport: independent HTTPS {launch_https_host}:{launch_https_port}");
 
     // BUY submission remains on its own warm WSS connection; it is not a signal source.
     let mut ws = ws_connect();
