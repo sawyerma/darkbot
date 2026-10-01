@@ -702,6 +702,7 @@ fn main() {
     let p2p = spawn_testnet_flap_sensor(
         portal,
         newTokenV6Call::SELECTOR,
+        launch_hash,
         p2p_min_peers,
         p2p_head,
     );
@@ -774,9 +775,18 @@ fn main() {
     };
 
     let t_signal = p2p_signal.observed;
-    let signal_mode = "BSC_P2P_FULL_TX";
+    let signal_mode = p2p_signal.source.as_str();
     let signal_launch_data = p2p_signal.input;
     println!("p2p_signal_peers:          {}", p2p_signal.peers);
+    println!("p2p_signal_source:         {signal_mode}");
+    if let Some(t_hash) = p2p_signal.hash_observed {
+        println!(
+            "P2P_hash_to_full_ns:       {}",
+            (t_signal - t_hash).as_nanos()
+        );
+    } else {
+        println!("P2P_hash_to_full_ns:       DIRECT_FULL_BROADCAST");
+    }
 
     let decoded = newTokenV6Call::abi_decode_validate(&signal_launch_data)
         .expect("pending launch decode failed");
@@ -872,6 +882,7 @@ fn main() {
     let buy_ack = buy_ack.expect("BUY submission ACK was not observed");
     assert_eq!(buy_ack.to_lowercase(), buy_hash_hex.to_lowercase());
     let t_wss_control = control_rx.recv_timeout(Duration::from_secs(5)).ok();
+    let t_p2p_hash = p2p.hashes.try_recv().ok();
 
     let launch_receipt = receipt(&launch_hash_hex);
     let buy_receipt = receipt(&buy_hash_hex);
@@ -926,15 +937,38 @@ fn main() {
     println!("status:                    PASS");
     println!("signal_mode:               {signal_mode}");
     println!("launch_ack_seen:           {launch_ack_seen}");
+    if let Some(t_hash) = t_p2p_hash {
+        let hash_delta_ns: i128 = if t_hash >= launch_handoff {
+            (t_hash - launch_handoff).as_nanos() as i128
+        } else {
+            -((launch_handoff - t_hash).as_nanos() as i128)
+        };
+        println!("launch_handoff_to_P2P_hash_ns: {hash_delta_ns}");
+    } else {
+        println!("launch_handoff_to_P2P_hash_ns: UNKNOWN_OR_FULL_ONLY");
+    }
+
     if let Some(t_wss) = t_wss_control {
         let delta_ns: i128 = if t_wss >= t_signal {
             (t_wss - t_signal).as_nanos() as i128
         } else {
             -((t_signal - t_wss).as_nanos() as i128)
         };
-        println!("WSS_minus_P2P_signal_ns:   {delta_ns}");
+        println!("WSS_minus_P2P_full_ns:     {delta_ns}");
+
+        if let Some(t_hash) = t_p2p_hash {
+            let hash_vs_wss: i128 = if t_wss >= t_hash {
+                (t_wss - t_hash).as_nanos() as i128
+            } else {
+                -((t_hash - t_wss).as_nanos() as i128)
+            };
+            println!("WSS_minus_P2P_hash_ns:     {hash_vs_wss}");
+        } else {
+            println!("WSS_minus_P2P_hash_ns:     UNKNOWN");
+        }
     } else {
-        println!("WSS_minus_P2P_signal_ns:   UNKNOWN");
+        println!("WSS_minus_P2P_full_ns:     UNKNOWN");
+        println!("WSS_minus_P2P_hash_ns:     UNKNOWN");
     }
     println!("launch_tx:                 {launch_hash_hex}");
     println!("buy_tx:                    {buy_hash_hex}");
@@ -1003,7 +1037,7 @@ fn main() {
         "T_signal_to_receipts_seen_ns: {}",
         (t_observed - t_signal).as_nanos()
     );
-    println!("race_ingress_boundary:     standalone BSC P2P full-tx pool admission");
+    println!("race_ingress_boundary:     raw BSC ETH P2P transaction channel before txpool");
     println!("transport_boundary:        live WSS write_all+flush (submission only)");
     println!("T_buy_minus_T0:            UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA");
     println!("G0.7_TESTNET_BIRTH_BUY_PASS: true");
