@@ -8,6 +8,7 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_sol_types::{sol, SolCall};
 use k256::ecdsa::SigningKey;
 use darkbot_gate0::p2p_ingress::spawn_testnet_flap_sensor;
+use reth_chainspec::Head;
 use rustls::{
     pki_types::ServerName,
     ClientConfig,
@@ -128,6 +129,21 @@ fn hex_u256(v: &Value) -> U256 {
         16,
     )
     .unwrap()
+}
+
+fn latest_p2p_head() -> Head {
+    let b = rpc("eth_getBlockByNumber", json!(["latest", false]));
+    Head {
+        number: hex_u64(&b["number"]),
+        hash: B256::from_str(b["hash"].as_str().expect("latest block hash missing")).unwrap(),
+        difficulty: hex_u256(&b["difficulty"]),
+        total_difficulty: b
+            .get("totalDifficulty")
+            .filter(|v| !v.is_null())
+            .map(hex_u256)
+            .unwrap_or(U256::ZERO),
+        timestamp: hex_u64(&b["timestamp"]),
+    }
 }
 
 fn signer_address(key: &SigningKey) -> Address {
@@ -680,7 +696,15 @@ fn main() {
         .unwrap_or(4)
         .max(1);
     println!("p2p_min_peers:             {p2p_min_peers}");
-    let p2p = spawn_testnet_flap_sensor(portal, newTokenV6Call::SELECTOR, p2p_min_peers);
+    let p2p_head = latest_p2p_head();
+    println!("p2p_head_number:           {}", p2p_head.number);
+    println!("p2p_head_timestamp:        {}", p2p_head.timestamp);
+    let p2p = spawn_testnet_flap_sensor(
+        portal,
+        newTokenV6Call::SELECTOR,
+        p2p_min_peers,
+        p2p_head,
+    );
     let p2p_ready = p2p
         .ready
         .recv_timeout(Duration::from_secs(30))
