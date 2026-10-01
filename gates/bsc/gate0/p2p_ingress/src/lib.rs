@@ -7,7 +7,7 @@ use reth_bsc::{
 };
 use reth_chainspec::Head;
 use reth_discv4::Discv4ConfigBuilder;
-use reth_eth_wire_types::{EthNetworkPrimitives, GetPooledTransactions, PooledTransactions};
+use reth_eth_wire_types::{GetPooledTransactions, PooledTransactions};
 use reth_metrics::common::mpsc::memory_bounded_channel;
 use reth_network::{
     transactions::{
