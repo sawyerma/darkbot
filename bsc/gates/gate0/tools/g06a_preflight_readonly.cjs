@@ -15,6 +15,13 @@ const TAX_ON_BC_SELECTOR = '0x1d31e153';       // enableTaxOnBondingCurve()
 const VERSION_SELECTOR = '0x54fd4d50';         // version()
 const EIP1967_IMPLEMENTATION_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
 
+const MAX_LAUNCH_GAS_LIMIT = 6_603_270n;
+const MAX_BUY_GAS_LIMIT = 3_000_000n;
+const MAX_SIGNED_GAS_PRICE_WEI = 1_000_000_000n;
+const MAX_BUY_VALUE_WEI = 1_000_000_000_000_000n;
+const MAX_LAUNCH_VALUE_WEI = 0n;
+const MAX_ATTEMPT_RESERVE_WEI = 10_603_270_000_000_000n;
+
 function req(name) {
   const v = process.env[name];
   if (!v) throw new Error(name + ' is required');
@@ -155,6 +162,26 @@ async function main() {
     buyerBalance = BigInt(await rpc(url, 'eth_getBalance', [buyer, 'latest']));
   }
 
+  const launcherRequiredWorstCase =
+    MAX_LAUNCH_VALUE_WEI + MAX_LAUNCH_GAS_LIMIT * MAX_SIGNED_GAS_PRICE_WEI;
+  const buyerRequiredWorstCase =
+    MAX_BUY_VALUE_WEI + MAX_BUY_GAS_LIMIT * MAX_SIGNED_GAS_PRICE_WEI;
+
+  const walletQualification = {
+    addresses_bound: Boolean(launcher && buyer),
+    distinct: launcher && buyer ? launcher !== buyer : null,
+    launcher_required_worst_case_wei: launcherRequiredWorstCase.toString(),
+    buyer_required_worst_case_wei: buyerRequiredWorstCase.toString(),
+    combined_attempt_reserve_wei: MAX_ATTEMPT_RESERVE_WEI.toString(),
+    launcher_sufficient: launcherBalance === null ? null : launcherBalance >= launcherRequiredWorstCase,
+    buyer_sufficient: buyerBalance === null ? null : buyerBalance >= buyerRequiredWorstCase,
+    funding_pass:
+      launcherBalance === null || buyerBalance === null
+        ? null
+        : launcherBalance >= launcherRequiredWorstCase &&
+          buyerBalance >= buyerRequiredWorstCase
+  };
+
   const result = {
     schema: 'darkbot.g06a.preflight-readonly.v2',
     chain_id: chain.toString(),
@@ -190,6 +217,7 @@ async function main() {
     buyer_address: buyer,
     buyer_pending_nonce: buyerNonce === null ? null : buyerNonce.toString(),
     buyer_balance_wei: buyerBalance === null ? null : buyerBalance.toString(),
+    wallet_qualification: walletQualification,
     network_actions: 'READ_ONLY_RPC_ONLY',
     signed_tx_submitted: false,
     bundle_submitted: false,
