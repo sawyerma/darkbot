@@ -468,9 +468,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let rec = pipe.evaluate(acct, "account_update", t_rx, now, slot, st.run_state().is_tradable());
             if let Ok(j) = serde_json::to_string(&rec) { let _ = writeln!(records, "{}", j); }
             // [M3] Ledger + [M2] Watchlist (nur Shadow-relevante Entscheidungen).
-            let sim_ok = match rec.decision { Decision::ShadowReady => Some(true), Decision::ShadowSimFailed => Some(false), _ => None };
+            let sim_ok = match rec.decision {
+                Decision::ShadowReady | Decision::ShadowTechnicalReady => Some(true),
+                Decision::ShadowSimFailed | Decision::ShadowTechnicalSimFailed => Some(false),
+                _ => None,
+            };
             ledger.on_record(&rec, sim_ok);
-            // [FIX-43] strukturierter Verlustgrund aus dem Record; [FIX-45] nur ShadowReady kann ein Win werden.
+            // [FIX-43][FIX-71] Nur wirtschaftlich bekannter ShadowReady darf als virtueller Win/PnL zählen.
+            // Technische Probes liefern ausschließlich Build/Sign/Simulation-Evidence.
             if matches!(rec.decision, Decision::ShadowReady | Decision::ShadowSimFailed | Decision::Skip) {
                 let shadow_ready = matches!(rec.decision, Decision::ShadowReady);
                 let our_loss = if shadow_ready { None } else { Some(rec.loss.unwrap_or(darkbot_runner::record::LossReason::Build)) };
