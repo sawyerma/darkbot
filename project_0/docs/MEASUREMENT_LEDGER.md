@@ -974,3 +974,37 @@ Decision:
 - It does **not yet** classify the 61 downstream Pipeline outcomes because OpportunityRecord decision lines do not carry the snapshot `slot`; downstream outcome distribution must be counted separately.
 
 Known sampled outcomes from the same run showed `bad_debt=true`, `equity_assets_bits=0` and therefore no receivership execution candidate. [FIX-85] separates these bankruptcy/no-collateral cases from Routing on the next build.
+
+
+### 2026-10-02 — Bootstrap probe downstream outcomes — BLOCKED BEFORE BUILD
+
+Observed distribution across all 61 processed Mainnet bootstrap probes from snapshot slot `452753636`:
+
+```text
+records: 61
+
+DECISIONS
+61 Skip
+
+LOSSES
+61 Routing
+
+REASONS
+54 no feasible execution candidates
+7 oracle adapter: ReserveStale (Kamino reserve refresh required)
+```
+
+Interpretation:
+- Exact Health reached all 61 candidates and marked 61/61 liquidatable.
+- **0/61 reached Build, Sign, or Simulation.**
+- 54/61 produced no protocol-executable receivership candidate.
+- 7/61 were blocked during exact sizing/oracle access because the Kamino reserve data was stale and a `refresh_reserve` prerequisite is required.
+- Sampled 54/61 no-plan cases showed `bad_debt=true` and `equity_assets_bits=0`, i.e. no-collateral bankruptcy cases rather than DEX routing failures.
+- The pinned marginfi bankruptcy path is not permissionless for the production group, so those no-collateral bad-debt accounts are not valid receivership opportunities for this Shadow signer.
+
+[FIX-85]/[FIX-86] improve classification:
+- `Bankruptcy` for bad debt with zero equity assets,
+- `IntegrationRefresh` for `ReserveStale`,
+- bootstrap probes carry `bootstrap_snapshot_probe` trigger provenance.
+
+Current P6-LT blocker: integration refresh completeness and obtaining at least one current liquidatable account with executable collateral/liability sizing. No Build/Sign/Sim evidence exists yet.
