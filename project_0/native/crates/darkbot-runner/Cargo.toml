@@ -16,9 +16,9 @@ darkbot-solana = { path = "../darkbot-solana" }
 darkbot-project0 = { path = "../darkbot-project0" }
 solana-sdk = "=3.0.0"
 solana-client = "=3.1.12"
-solana-message = "=3.0.0"       # [FIX-13][FIX-39]
-solana-commitment-config = "=3.0.0"
-solana-transaction-status = "3"
+solana-message = "=3.0.1"       # [FIX-13][FIX-39][FIX-49]
+solana-commitment-config = "=3.1.1"
+solana-transaction-status = "=3.1.12"
 bs58 = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
