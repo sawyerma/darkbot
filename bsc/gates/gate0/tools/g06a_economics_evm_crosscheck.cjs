@@ -255,6 +255,22 @@ async function main() {
   // launch call at the exact frozen parent state. This is eth_call only: no transaction
   // is signed, submitted, or persisted. If this succeeds but EthereumJS below reverts,
   // the divergence belongs to the local EVM backend rather than the launch parameters.
+  let rpcLaunchGasEstimate;
+  try {
+    rpcLaunchGasEstimate = BigInt(await rpc(rpcUrl, 'eth_estimateGas', [{
+      from: LAUNCHER,
+      to: PORTAL,
+      value: '0x0',
+      data: launchData
+    }, parentTag]));
+  } catch (e) {
+    throw new Error(
+      'MAINNET_ESTIMATE_GAS_LAUNCH_REVERT: exact launch parameters are rejected before gas estimation at ' +
+      `block ${preflight.latest_block_number}; ${e.message}`
+    );
+  }
+
+  const rpcLaunchGasLimit = rpcLaunchGasEstimate * 12n / 10n;
   let rpcLaunchReturn;
   try {
     rpcLaunchReturn = await rpc(rpcUrl, 'eth_call', [{
@@ -262,12 +278,12 @@ async function main() {
       to: PORTAL,
       value: '0x0',
       data: launchData,
-      gas: '0x4c4b40'
+      gas: '0x' + rpcLaunchGasLimit.toString(16)
     }, parentTag]);
   } catch (e) {
     throw new Error(
-      'MAINNET_ETH_CALL_LAUNCH_REVERT: exact launch parameters are rejected by the real BSC node at ' +
-      `block ${preflight.latest_block_number}; ${e.message}`
+      'MAINNET_ETH_CALL_LAUNCH_REVERT_AFTER_ESTIMATE: estimateGas succeeded but eth_call reverted at ' +
+      `block ${preflight.latest_block_number}; estimate=${rpcLaunchGasEstimate}; limit=${rpcLaunchGasLimit}; ${e.message}`
     );
   }
   const rpcLaunchDecoded = rpcLaunchReturn === '0x'
@@ -373,6 +389,9 @@ async function main() {
       block_hash: parent.hash,
       rpc_state_reads_only: true,
     },
+    mainnet_estimate_gas_launch_success: true,
+    mainnet_launch_gas_estimate: rpcLaunchGasEstimate,
+    mainnet_launch_gas_limit_120pct: rpcLaunchGasLimit,
     mainnet_eth_call_launch_success: true,
     mainnet_eth_call_launch_return: rpcLaunchReturn,
     mainnet_eth_call_predicted_token_match: rpcLaunchDecoded === null
