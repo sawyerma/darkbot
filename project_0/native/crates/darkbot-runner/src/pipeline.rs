@@ -130,6 +130,16 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some("not liquidatable".into());
             return rec.with_timeline(&tl);
         }
+
+        // [FIX-88] Exact receivership eligibility beyond health: pinned marginfi circuit-breaker
+        // state + CB price gate. This is part of the shared pipeline, so Shadow/LIVE/replay do not
+        // diverge at the protocol boundary.
+        if let Err(e) = self.health.receivership_eligibility(&account, now_unix_s as i64, slot) {
+            rec.loss = Some(LossReason::CircuitBreaker);
+            rec.reason = Some(e.to_string());
+            return rec.with_timeline(&tl);
+        }
+
         tl.mark(Stage::State, self.clock.now_ns());
 
         // P5 + P4A: Builder liefert alle technisch machbaren Funding-/Route-Klassen.
