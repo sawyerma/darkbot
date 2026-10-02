@@ -45,7 +45,7 @@ pub struct ReceivershipPlan {
 pub trait ReceivershipBuilder {
     /// Liefert **alle** technisch machbaren Funding-/Route-Candidates. Keine harte
     /// Funding-Präferenz im Builder; P4A + TX-Feasibility entscheiden danach.
-    fn plans(&self, account: &Pubkey, now_unix_s: u64) -> Result<Vec<ReceivershipPlan>, String>;
+    fn plans(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String>;
 }
 
 pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> {
@@ -140,7 +140,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some("opportunity stale before planning".into());
             return rec.with_timeline(&tl);
         }
-        let plans = match self.builder.plans(&account, now_unix_s) {
+        let plans = match self.builder.plans(&account, now_unix_s, slot) {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => {
                 rec.loss = Some(LossReason::Routing);
