@@ -956,3 +956,21 @@ Evidence:
 
 Status: **QUEUED, not yet counted as fully processed.**
 Completion evidence requires confirming the resulting per-account records in `project_0/data/shadow/opportunities.jsonl`.
+
+
+### 2026-10-02 — [FIX-84] Bootstrap probe Health outcomes — PASS (61/61)
+
+Observed from `project_0/data/shadow/opportunities.jsonl` for snapshot slot `452753636`:
+
+```text
+probe health records at slot 452753636: 61
+liquidatable=true at slot 452753636: 61
+```
+
+Decision:
+- **61/61 queued bootstrap candidates were processed through Exact Health.**
+- **61/61 were currently liquidatable according to the reconciled Mainnet state and current health engine.**
+- This closes the bootstrap-probe Health-processing evidence.
+- It does **not yet** classify the 61 downstream Pipeline outcomes because OpportunityRecord decision lines do not carry the snapshot `slot`; downstream outcome distribution must be counted separately.
+
+Known sampled outcomes from the same run showed `bad_debt=true`, `equity_assets_bits=0` and therefore no receivership execution candidate. [FIX-85] separates these bankruptcy/no-collateral cases from Routing on the next build.
