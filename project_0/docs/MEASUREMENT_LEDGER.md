@@ -630,3 +630,13 @@ Resolution:
 Commits: `5ec5df6`, `2a9f536`, `ffa69d0`, `7ad9a87`.
 
 Next gate: compile/tests for [FIX-71], then run a real Mainnet Shadow session and capture the first `ShadowTechnicalReady` or simulation failure with its exact reason.
+
+
+### 2026-10-02 — [FIX-71] build/test gate — PASS
+
+User-reported current-head verification after [FIX-71]:
+- `cargo build --manifest-path project_0/native/Cargo.toml --features "crate_health txv1"` → PASS.
+- `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features "crate_health txv1"` → PASS.
+- Final visible line was a zero-test target (`0 passed; 0 failed`), not the workspace aggregate.
+
+Gate decision: technical-shadow path compiles/tests. Next step is the first real Mainnet Shadow run.
