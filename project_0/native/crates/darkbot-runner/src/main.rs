@@ -403,6 +403,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
 
     let mut counts = [0u64; 6];
+    let mut last_reported_update_total = 0u64; // [FIX-81]
     loop {
         if shutdown.is_requested() {
             break;
@@ -627,7 +628,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         // Detection/Pipeline (P2→P5) wird hier eingehängt, sobald HealthEngine (P3) verfügbar ist.
         // Bis dahin: nur State + Zähler, damit S1-LT/S2 messbar sind (Ledger).
-        if counts.iter().sum::<u64>() % 1000 == 0 {
+        let update_total = counts.iter().sum::<u64>();
+        if update_total > 0 && update_total % 1000 == 0 && update_total != last_reported_update_total {
+            last_reported_update_total = update_total;
             eprintln!("updates: accounts={} banks={} groups={} fee={} liqrec={} unknown={} channel={:?}",
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
         }
