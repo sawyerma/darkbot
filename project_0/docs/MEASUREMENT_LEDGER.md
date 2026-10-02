@@ -1,7 +1,7 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
-Status: **S0, S1-LT, S2, S3-CORE, P2, P4A, P5-Regeln CODE WRITTEN (UNTESTED / VERIFY) / P3 STUB / C0 TOOLING WRITTEN / P0+P1A BLOCKED (no egress)**  
-Updated: 2026-10-01
+Status: **MAC BUILD/TEST BASELINE PASS (`crate_health` + `txv1`); Sizing/RouteProvider/v1 Sign-Wire/Staging/LIVE still open**  
+Updated: 2026-10-02
 
 This is the single human-readable measurement ledger for the new Solana / Project 0 Liquidator.
 
@@ -67,17 +67,17 @@ realized PnL
 
 | Phase | Measurement | Status | Evidence |
 |---|---|---|---|
-| S0 | timing/telemetry + provider abstraction contract | CODE WRITTEN, cargo test NOT RUN by author (no toolchain in author env) — see §9 | project_0/native/crates/darkbot-common |
-| S1-LT | WsRpcControlSource, event model, v1 detection | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/ingress |
-| S2 | state reconciliation/fork/gap recovery | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/state |
-| S3-CORE | v0 builder, v1 stub, signer, RPC+Jito adapter, reconciliation | CODE WRITTEN, UNTESTED — see §9 | darkbot-solana/src/{tx,submit} |
+| S0 | timing/telemetry + provider abstraction contract | WORKSPACE TEST PASS on Mac under `crate_health` and `crate_health txv1` — see 2026-10-02 session | project_0/native/crates/darkbot-common |
+| S1-LT | WsRpcControlSource, event model, v1 detection | COMPILES + UNIT TESTS PASS in workspace feature runs; live provider behavior not yet qualified | darkbot-solana/src/ingress |
+| S2 | state reconciliation/fork/gap recovery | UNIT TESTS PASS in workspace feature runs; Mainnet recovery evidence still N/A | darkbot-solana/src/state |
+| S3-CORE | v0 builder, v1 capability measurement, signer, RPC+Jito adapter, reconciliation | BUILD/UNIT TEST baseline PASS; v1 Sign/Wire/Submission remains unavailable | darkbot-solana/src/{tx,submit} |
 | S4 | Python↔Rust Pump.fun parity + native baseline | N/A | not started |
 | C0 | account census (types/sizes) | TOOLING WRITTEN, selftest PASS offline, mainnet run NOT done (no egress) — see §9 | project_0/scripts/c0_census.py |
 | H0 | historical Project 0 liquidation/composition/competition | N/A | not started |
-| P2 | reverse/threshold index, premium+tag scheduler | CODE WRITTEN, UNTESTED (offline-Tests enthalten) — see §9 | darkbot-project0/src/{index,schedule}.rs |
-| P3 | health via marginfi crate | STUB (Contract + NoHealth); Crate-Anbindung offen — see §9 | darkbot-project0/src/health.rs |
-| P4A | deterministic economics/ranking, premium curve | CODE WRITTEN, UNTESTED (offline-Tests enthalten) — see §9 | darkbot-project0/src/economics.rs |
-| P5 | receivership sequence/allowlist/bundle rules | RULES WRITTEN, UNTESTED; Instruction-Bau offen — see §9 | darkbot-project0/src/planner.rs |
+| P2 | reverse/threshold index, premium+tag scheduler | UNIT TEST baseline PASS in workspace feature runs; P3-02 thresholds still open | darkbot-project0/src/{index,schedule}.rs |
+| P3 | health via marginfi crate | `crate_health` compiles/tests PASS against pinned marginfi tag; exact thresholds P3-02 still open | darkbot-project0/src/health.rs |
+| P4A | deterministic economics/ranking, premium curve | UNIT TEST baseline PASS; concrete SizingProvider / failed-cost evidence still open | darkbot-project0/src/economics.rs |
+| P5 | receivership sequence/allowlist/bundle rules | Crate-based instruction builders + planner compile/tests PASS; concrete runtime Sizing/Route wiring still open | darkbot-project0/src/{planner,receivership}.rs |
 | P6 | full hotpath + shadow race | N/A | not started |
 | P7 | capture/economics/competition/provider-value evidence | N/A | not started |
 | P4B | empirical p(win)/tip/stopping ranking | N/A | blocked on P7 |
@@ -188,8 +188,8 @@ When created, use one canonical location and link it here. Do not scatter Projec
 ## 8. Current status
 
 ~~~text
-Project 0 production code:        S0 written (darkbot-common), not compiled by author
-Project 0 measurements:           N/A
+Project 0 production code:        Mac build/test baseline PASS through `crate_health + txv1`
+Project 0 measurements:           Build/test evidence only; latency/capture/PnL remain N/A
 Project 0 LIVE:                   NOT ENABLED
 permanent paid provider approved: NONE
 probabilistic ranking approved:   NO
@@ -378,3 +378,27 @@ Offen unverändert: Build/Tests, C0, P4A-03 Sizing, Route, v1 Sign/Wire, Staging
 47 `classify`-Kollision in main.rs per Alias `classify_account` behoben.
 Repo-Struktur: `project_0/{native,docs,scripts,data}`; Default-Pfade `project_0/data/shadow/*.jsonl`; Phase-Dokument unter `project_0/docs/PHASE_P6LT_SHADOW.md`.
 Offen: Build/Tests (vier Logs), C0, P4A-03 Sizing, RouteProvider, v1 Sign/Wire, Staging, P8-05.
+
+
+### 2026-10-02 — Mac compiler/test gate — PASS
+
+**Environment:** user MacBook Pro, local repo root `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot`. Exact `rustc`/`cargo` versions were not captured in the chat and are therefore **N/A**, not inferred.
+
+**Source baseline:** final reported green run after `[FIX-58]`, commit `870aecdf4d63b33ace2e38e50f37c25748d9cfaf`.
+
+**Commands/results reported by the user:**
+- `cargo build --manifest-path project_0/native/Cargo.toml --features crate_health` → **PASS**, warning-free after `[FIX-54]`.
+- `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features crate_health` → **PASS** after test corrections `[FIX-55..57]`.
+- `cargo build --manifest-path project_0/native/Cargo.toml --features "crate_health txv1"` → **PASS** after `[FIX-58]`.
+- `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features "crate_health txv1"` → **PASS**.
+- Per-test-target counts for the final two successful workspace runs were not fully pasted; do not infer them from earlier failed runs.
+
+**Compiler/test fixes closed in this gate:** `[FIX-48]` dependency alignment, `[FIX-49]` Solana component versions, `[FIX-50..53]` Project_0 compile blockers / trait-object support, `[FIX-54]` warning cleanup, `[FIX-55]` planner test construction, `[FIX-56]` histogram `u64::MAX` overflow/bucket bound, `[FIX-57]` stable reconciliation test owner with owner-mismatch regression, `[FIX-58]` canonical v1 message-size API.
+
+**What this PASS proves:** the workspace compiles and its current unit-test suite passes in both required feature combinations on the user's Mac.
+
+**What this PASS does NOT prove:** Mainnet/Staging correctness, route availability, exact Sizing, P3-02 thresholds, v1 signing/wire/submission, landing behavior, token-delta reconciliation, realized PnL, capture rate, or LIVE profitability.
+
+**Gate decision:** compiler/test baseline **PASS**. Next functional closure remains:
+`Exact Health → Sizing → RouteProvider → Funding → P0ReceivershipBuilder → Economics → Build → Sign → Simulate`.
+`NoPlans` must not be removed until that real path is wired and fail-closed.
