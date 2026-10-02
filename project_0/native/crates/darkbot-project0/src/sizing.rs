@@ -162,6 +162,42 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         self.fee_snapshot_and_rate().map(|(snapshot, _)| snapshot)
     }
 
+    /// Equity/TWAP USD-micro value of a native token amount for one Marginfi bank.
+    /// Used for SOL-denominated execution costs and inventory valuation so every economics
+    /// input uses the same pinned Marginfi price semantics. [FIX-66]
+    pub fn native_amount_value_usd_micro(
+        &self,
+        bank_key: &Pubkey,
+        native_amount: u64,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<u64, String> {
+        if native_amount == 0 {
+            return Ok(0);
+        }
+        let bank = self.bank(bank_key)?;
+        let clock = Clock {
+            slot,
+            epoch_start_timestamp: 0,
+            epoch: 0,
+            leader_schedule_epoch: 0,
+            unix_timestamp: now_unix_s,
+        };
+        let price = self.prices(&bank, &clock)?.equity;
+        let value = calc_value(
+            I80F48::from_num(native_amount),
+            price,
+            bank.get_balance_decimals(),
+            None,
+        )
+        .map_err(|e| format!("native amount value: {e}"))?;
+        usd_micro(value)
+    }
+
+    pub fn bank_mint(&self, bank_key: &Pubkey) -> Result<Pubkey, String> {
+        Ok(self.bank(bank_key)?.mint)
+    }
+
     fn prices(&self, bank: &Bank, clock: &Clock) -> Result<Prices, String> {
         let keys = bank_observation_keys(bank).map_err(|e| e.to_string())?;
         let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(keys.len());
