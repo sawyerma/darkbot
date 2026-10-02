@@ -32,6 +32,8 @@ const { createCustomCommon, Mainnet, Hardfork } = require(path.join(LEGACY_TOOLS
 const { RPCStateManager, RPCBlockChain } = require(path.join(LEGACY_TOOLS, '@ethereumjs/statemanager'));
 const {
   Account,
+  KECCAK256_RLP,
+  createAccount,
   createAddressFromString,
   hexToBytes,
   bytesToHex,
@@ -85,6 +87,35 @@ function blockHeaderFromRpc(b) {
     gasLimit: BigInt(b.gasLimit),
     baseFeePerGas: BigInt(b.baseFeePerGas || '0x0'),
     getBlobGasPrice: () => 0n,
+  };
+}
+
+// BSC's public dataseed endpoint does not provide the eth_getProof response
+// shape required by EthereumJS RPCStateManager 10.1.3. The state manager only
+// needs the account envelope here; code and storage are already fetched through
+// eth_getCode and eth_getStorageAt respectively. Override this single provider
+// hook with ordinary read-only RPC methods at the exact same frozen block tag.
+function installBasicAccountLoader(state, rpcUrl, blockTag) {
+  state.getAccountFromProvider = async function(address) {
+    const a = address.toString();
+    const [balanceHex, nonceHex, codeHex] = await Promise.all([
+      rpc(rpcUrl, 'eth_getBalance', [a, blockTag]),
+      rpc(rpcUrl, 'eth_getTransactionCount', [a, blockTag]),
+      rpc(rpcUrl, 'eth_getCode', [a, blockTag]),
+    ]);
+
+    if (balanceHex == null || nonceHex == null || codeHex == null) {
+      throw new Error(`incomplete basic account RPC data for ${a}`);
+    }
+
+    return createAccount({
+      balance: BigInt(balanceHex),
+      nonce: BigInt(nonceHex),
+      codeHash: hexToBytes(ethers.keccak256(codeHex)),
+      // RPCStateManager reads actual storage slots independently via
+      // eth_getStorageAt, so no account proof/storage root is required here.
+      storageRoot: KECCAK256_RLP,
+    });
   };
 }
 
@@ -226,6 +257,7 @@ async function main() {
     { hardfork: Hardfork.Osaka }
   );
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: parentNum });
+  installBasicAccountLoader(state, rpcUrl, parentTag);
   const blockchain = new RPCBlockChain(rpcUrl);
 
   const launcherAddr = createAddressFromString(LAUNCHER);
@@ -338,6 +370,7 @@ async function main() {
     limitations: [
       'EthereumJS local message execution against frozen BSC Mainnet state; not BSC consensus/block validation',
       'Dummy caller balances exist only in the local StateManager overlay',
+      'Account envelopes are reconstructed from eth_getBalance + eth_getTransactionCount + eth_getCode because the public BSC dataseed is incompatible with EthereumJS eth_getProof account loading; contract storage still comes block-exactly from eth_getStorageAt',
       'This probe proves economics/contract semantics only; wallet nonces, builder floors and signed bundle validity belong to later DRY checks'
     ]
   }), null, 2));
