@@ -121,7 +121,7 @@ pub mod crate_impl {
         Ok(out)
     }
 
-    pub struct CrateHealth<'s, S: AccountSource> {
+    pub struct CrateHealth<'s, S: AccountSource + ?Sized> { // [FIX-53] supports &dyn AccountSource
         pub state: &'s S,
         pub group: Pubkey,
     }
@@ -133,7 +133,7 @@ pub mod crate_impl {
         bytemuck::try_from_bytes::<T>(slice).map_err(|e| HealthError::Crate(format!("pod cast: {:?}", e)))
     }
 
-    impl<'s, S: AccountSource> CrateHealth<'s, S> {
+    impl<'s, S: AccountSource + ?Sized> CrateHealth<'s, S> {
         fn raw(&self, k: &Pubkey) -> Result<(Pubkey, u64, &'s [u8]), HealthError> {
             self.state.account(k).ok_or(HealthError::MissingAccount(*k))
         }
@@ -167,7 +167,7 @@ pub mod crate_impl {
         }
     }
 
-    impl<'s, S: AccountSource> HealthEngine for CrateHealth<'s, S> {
+    impl<'s, S: AccountSource + ?Sized> HealthEngine for CrateHealth<'s, S> {
         fn health(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<HealthView, HealthError> {
             let (_, _, adata) = self.raw(account)?;
             let acc: &MarginfiAccount = load(adata)?;
@@ -212,7 +212,7 @@ pub mod crate_impl {
 /// Mints, Extra-Keys) — damit Ingress/Snapshot sie **vor** der ersten Health-Berechnung halten.
 /// Kein RPC hier; nur Ableitung aus dem RAM-State.
 #[cfg(feature = "crate_health")]
-pub fn dependency_keys<S: AccountSource>(state: &S, program: &Pubkey, banks: &[Pubkey]) -> Vec<Pubkey> {
+pub fn dependency_keys<S: AccountSource + ?Sized>(state: &S, program: &Pubkey, banks: &[Pubkey]) -> Vec<Pubkey> {
     use crate::protocol;
     use marginfi_type_crate::types::Bank;
     let mut out: Vec<Pubkey> = Vec::new();
