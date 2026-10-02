@@ -26,6 +26,7 @@ pub enum LossReason {
     State,
     Health,
     Bankruptcy,
+    IntegrationRefresh,
     Economics,
     Routing,
     Build,
