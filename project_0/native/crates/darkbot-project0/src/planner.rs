@@ -31,6 +31,7 @@ pub struct Allowlist {
     pub refresh_programs: HashSet<Pubkey>,
     pub integration_programs: HashSet<Pubkey>,
     pub swap_programs: HashSet<Pubkey>,
+    pub other_programs: HashSet<Pubkey>,
     pub oracle_programs: HashSet<Pubkey>,
 }
 
@@ -99,6 +100,7 @@ pub fn validate_receivership(steps: &[Step], allow: &Allowlist, route: RouteKind
             Step::StartLiquidation => return Err(PlanError::OrderViolation(i, "duplicate start")),
             Step::Refresh(p) if allow.refresh_programs.contains(p) => {}
             Step::PriceUpdate(p) if allow.oracle_programs.contains(p) => {}
+            Step::Other(p) if allow.other_programs.contains(p) => {}
             Step::Other(_) | Step::Refresh(_) | Step::PriceUpdate(_) => return Err(PlanError::ProgramNotAllowlisted(i)),
             Step::EndLiquidation => unreachable!(),
         }
@@ -142,6 +144,7 @@ mod tests {
         a.refresh_programs.insert(kamino);
         a.integration_programs.insert(kamino);
         a.swap_programs.insert(jup);
+        a.other_programs.insert(other);
         (a, kamino, jup, other)
     }
 

@@ -21,6 +21,7 @@ pub mod p0 {
     use solana_message::AddressLookupTableAccount /* [FIX-13] */;
     use solana_sdk::instruction::Instruction;
     use solana_sdk::pubkey::Pubkey;
+    use std::str::FromStr;
 
     /// Protocol-Sizing für ein Asset×Liability-Paar. Markt-Realisierbarkeit gehört nicht hierher.
     #[derive(Clone, Debug)]
@@ -52,20 +53,17 @@ pub mod p0 {
         pub instructions: Vec<Instruction>,
         pub lookup_tables: Vec<AddressLookupTableAccount>,
         pub swap_program: Pubkey,
-        pub fees_and_impact_usd_micro: u64,
-        /// Tatsächlich über einen ausführbaren Marktpfad realisierbarer Wert, USD-Micro.
-        pub realizable_value_usd_micro: u64,
-        /// Vom Router bestimmt: Input in Funding-Token-Basis (ExactOut) / Output (ExactIn).
+        /// Vom Router bestimmte native Tokenmengen. Marktwert wird erst im Builder aus dem
+        /// executable Output relativ zum protocol-exakten Liability-Wert normalisiert. [FIX-64]
         pub amount_in: u64,
         pub amount_out: u64,
     }
 
     pub trait RouteProvider {
         /// ExactIn: ZERO_PREFUND (seized asset → liability) mit `withdraw_amount` als Input.
-        fn quote_exact_in(&self, from_bank: &Pubkey, to_bank: &Pubkey, amount_in: u64) -> Result<Option<Route>, String>;
-        /// [FIX-29] ExactOut: JIT (Funding-Asset → Liability) mit dem Liability-Fehlbetrag als **Output**;
-        /// der Router bestimmt den Funding-Input (andere Decimals!).
-        fn quote_exact_out(&self, from_bank: &Pubkey, to_bank: &Pubkey, amount_out: u64) -> Result<Option<Route>, String>;
+        fn quote_exact_in(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount_in: u64) -> Result<Option<Route>, String>;
+        /// ExactOut bleibt Provider-Capability. Ein Provider ohne belegten ExactOut-Pfad liefert None.
+        fn quote_exact_out(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount_out: u64) -> Result<Option<Route>, String>;
     }
 
     pub struct P0ReceivershipBuilder<'a, S: AccountSource, Z: SizingProvider, R: RouteProvider> {
@@ -79,7 +77,7 @@ pub mod p0 {
         /// Inventar je Liability-Bank (Token-Basis), aus P8-Reconciliation gepflegt.
         pub inventory: &'a dyn Fn(&Pubkey) -> u64,
         /// ATA des Liquidators je Mint.
-        pub ata: &'a dyn Fn(&Pubkey) -> Pubkey,
+        pub ata: &'a dyn Fn(&Pubkey) -> Option<Pubkey>,
         /// Economics cost after explicit conversion, never raw lamports. [FIX-61]
         pub priority_fee_usd_micro: u64,
         pub jito_tip_usd_micro: u64,
@@ -105,11 +103,19 @@ pub mod p0 {
         fn receivership(&self, account: &Pubkey, obs: &[Pubkey], sz: &Sizing, swaps: Vec<Instruction>, repay_from_inventory: bool) -> Result<(Vec<Instruction>, Vec<Step>), String> {
             let (asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
             let (liab_vault, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
+            let asset_ata = (self.ata)(&asset_mint).ok_or_else(|| format!("missing/unsupported asset ATA for {}", asset_mint))?;
+            let liab_ata = (self.ata)(&liab_mint).ok_or_else(|| format!("missing/unsupported liability ATA for {}", liab_mint))?;
             let withdraw = builders::withdraw(&self.program, &self.group, account, &self.liquidator, &sz.asset_bank,
-                &(self.ata)(&asset_mint), &asset_vault, &asset_tp, sz.withdraw_amount, None, obs);
+                &asset_ata, &asset_vault, &asset_tp, sz.withdraw_amount, None, obs);
             let repay = builders::repay(&self.program, &self.group, account, &self.liquidator, &sz.liab_bank,
-                &(self.ata)(&liab_mint), &liab_vault, &liab_tp, sz.repay_amount, None);
-            let swap_programs: Vec<Pubkey> = swaps.iter().map(|i| i.program_id).collect();
+                &liab_ata, &liab_vault, &liab_tp, sz.repay_amount, None);
+            let route_steps: Vec<Step> = swaps.iter().map(|i| {
+                if i.program_id == Pubkey::from_str(darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID).expect("static") {
+                    Step::Swap(i.program_id)
+                } else {
+                    Step::Other(i.program_id)
+                }
+            }).collect();
             let init_record = self.state.account(&darkbot_project0::protocol::liquidation_record_pda(&self.program, account)).is_none();
             let ixs = builders::build_receivership(ReceivershipParams {
                 program: &self.program, group: &self.group, marginfi_account: account, liquidator: &self.liquidator,
@@ -117,19 +123,28 @@ pub mod p0 {
                 pre_refreshes: vec![], withdraws: vec![withdraw], swaps, repays: vec![repay],
             });
             let mut steps = vec![Step::StartLiquidation, Step::Withdraw];
-            steps.extend(swap_programs.into_iter().map(Step::Swap));
+            steps.extend(route_steps);
             steps.push(if repay_from_inventory { Step::RepayFromInventory } else { Step::Repay });
             steps.push(Step::EndLiquidation);
             Ok((ixs, steps))
         }
 
-        fn input(&self, sz: &Sizing, funding: FundingClass, realizable_value_usd_micro: u64, swap_cost_usd_micro: u64, capital_usd_micro: u64) -> CandidateInput {
+        fn realizable_value(&self, sz: &Sizing, liability_out: u64) -> Result<u64, String> {
+            if sz.repay_amount == 0 { return Err("repay_amount=0".into()); }
+            let v = (liability_out as u128)
+                .checked_mul(sz.repay_value as u128)
+                .ok_or("realizable value overflow")?
+                / sz.repay_amount as u128;
+            u64::try_from(v).map_err(|_| "realizable value > u64".into())
+        }
+
+        fn input(&self, sz: &Sizing, funding: FundingClass, realizable_value_usd_micro: u64, capital_usd_micro: u64) -> CandidateInput {
             CandidateInput {
                 gross_seized_realizable_usd_micro: realizable_value_usd_micro,
                 repay_usd_micro: sz.repay_value,
                 protocol_fees_usd_micro: sz.protocol_fees,
                 flat_sol_fee_usd_micro: sz.flat_sol_fee,
-                swap_fees_and_impact_usd_micro: swap_cost_usd_micro,
+                swap_fees_and_impact_usd_micro: 0,
                 priority_fee_usd_micro: self.priority_fee_usd_micro,
                 jito_tip_usd_micro: self.jito_tip_usd_micro,
                 rent_and_token_usd_micro: sz.rent_and_token,
@@ -155,7 +170,7 @@ pub mod p0 {
                 let (_, asset_mint, _) = self.bank(&sz.asset_bank)?;
                 let inv = (self.inventory)(&sz.liab_bank);
                 // [FIX-60] Ohne executable Marktquote kein Realizable-Value; Oracle-Wert wird nicht eingesetzt.
-                let market = self.routes.quote_exact_in(&sz.asset_bank, &sz.liab_bank, sz.withdraw_amount)?;
+                let market = self.routes.quote_exact_in(&asset_mint, &liab_mint, sz.withdraw_amount)?;
                 let ctx = FundingContext {
                     liability_mint: liab_mint,
                     liability_needed: sz.repay_amount,
@@ -173,12 +188,13 @@ pub mod p0 {
                     let Some(mark) = market.clone() else { continue };
                     let plan = match class {
                         FundingClass::ZeroPrefundSameTx => {
+                            if mark.amount_out < sz.repay_amount { continue; }
                             let (ixs, steps) = self.receivership(account, &obs, &sz, mark.instructions.clone(), false)?;
                             out.push(ReceivershipPlan {
                                 steps: steps.clone(),
                                 instructions: ixs.clone(),
                                 route: RouteKind::FreePublicAllowed,
-                                input: self.input(&sz, class, mark.realizable_value_usd_micro, mark.fees_and_impact_usd_micro, capital),
+                                input: self.input(&sz, class, self.realizable_value(&sz, mark.amount_out)?, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
                                 tip: self.jito_tip_lamports,
@@ -192,7 +208,7 @@ pub mod p0 {
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::FreePublicAllowed,
-                                input: self.input(&sz, class, mark.realizable_value_usd_micro, mark.fees_and_impact_usd_micro, capital),
+                                input: self.input(&sz, class, self.realizable_value(&sz, mark.amount_out)?, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
                                 tip: self.jito_tip_lamports,
@@ -209,7 +225,7 @@ pub mod p0 {
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
-                                input: self.input(&sz, class, mark.realizable_value_usd_micro, mark.fees_and_impact_usd_micro, capital),
+                                input: self.input(&sz, class, self.realizable_value(&sz, mark.amount_out)?, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
                                 tip: self.jito_tip_lamports,
@@ -222,14 +238,15 @@ pub mod p0 {
                         }
                         FundingClass::JitShortfall => {
                             let Some(fb) = sz.funding_bank else { continue };
+                            let (_, funding_mint, _) = self.bank(&fb)?;
                             let shortfall = funding::shortfall_token_amount(&ctx);
-                            let Some(buy) = self.routes.quote_exact_out(&fb, &sz.liab_bank, shortfall)? else { continue };
+                            let Some(buy) = self.routes.quote_exact_out(&funding_mint, &liab_mint, shortfall)? else { continue };
                             let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
                             ReceivershipPlan {
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
-                                input: self.input(&sz, class, mark.realizable_value_usd_micro, mark.fees_and_impact_usd_micro.saturating_add(buy.fees_and_impact_usd_micro), capital),
+                                input: self.input(&sz, class, self.realizable_value(&sz, mark.amount_out)?, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
                                 tip: self.jito_tip_lamports,
