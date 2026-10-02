@@ -447,7 +447,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 priority_fee_usd_micro,
                 jito_tip_usd_micro: 0,
                 jito_tip_lamports: 0,
-                zero_prefund_qualified: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false).unwrap_or(false),
+                zero_prefund_qualified: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false).unwrap_or(false)
+                    || (mode == "shadow" && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false).unwrap_or(false)),
                 path: Path::Rpc,
             };
             let _ = &view;
