@@ -6,6 +6,33 @@
 **Geltungsbereich:** DarkBot / Project 0 Liquidator  
 **Source of Truth:** Diese Datei. Ältere Fassungen (v4.2, v4.3) sind nicht autoritativ.
 
+## Aktueller Umsetzungsstand — 2026-10-02
+
+Dieser Block ändert **nicht** die eingefrorene Architektur v4.4; er dokumentiert nur den realen Implementierungs-/Evidence-Stand.
+
+```text
+G1  Compiler / Workspace-Tests                    PASS
+G2  C0 Mainnet Census / Zielgruppe                GO für Shadow
+G3  Exact Health + Protocol Sizing                 IMPLEMENTIERT + build/test grün
+G4  Jupiter V2 RouteProvider + P0 Builder          IMPLEMENTIERT + build/test grün
+G5  Mainnet Bootstrap / Recovery / READY           NÄCHSTER GATE — noch nicht real belegt
+
+P6-LT technische Shadow-Kette                      IMPLEMENTIERT, Mainnet-Evidence offen
+P8-LT Landing / Token-Deltas / realized PnL        OFFEN
+LIVE                                                HART GESPERRT
+Produktionsprofitabilität                           NICHT BEWIESEN
+```
+
+Mainnet-C0 für Group `4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8`: `165123` Accounts, davon `82680` mit Liability, `61` beim letzten Pulse liquidierbar, `5114` historisch bereits liquidiert.
+
+Runtime-Hardening bis `[FIX-80]`: Unknown-Economics Technical Shadow, ZERO_PREFUND Shadow-Probe getrennt von LIVE-Qualifikation, kompakter C0, Group-/Liability-Filter für Bootstrap/Recovery/WSS, Helius-Free-RPC/WSS Launcher.
+
+**Unmittelbar nächster Schritt:** realer G5-Mainnet-Lauf:
+`StreamReady → filtered Snapshot → Reconcile → READY → Health → Sizing → Route → Build → Sign → Simulate`.
+
+Details/Evidence: `project_0/docs/MEASUREMENT_LEDGER.md`.
+
+
 **v4.4 gegenüber v4.2:** korrigiert die Reihenfolge der v4.3-Speed-Hebel, damit der kostenlose Long-Tail-/Premium-Pfad zuerst bis LIVE kommt und Race-Komplexität ihn nicht blockiert.
 
 - **FIRST EURO PATH wird Hauptpfad:** `S1-LT → S3-CORE → P2 → P3 → P4A → P5 → T → P6-LT → P8-LT`;
