@@ -7,8 +7,12 @@ use serde::Serialize;
 pub enum Decision {
     Skip,
     ShadowReady,
-    /// [M1] Shadow: gebaut und signiert, Simulation fehlgeschlagen.
+    /// Technical shadow qualification: build/sign/sim succeeded, but economics are still Unknown.
+    ShadowTechnicalReady,
+    /// [M1] Shadow: economically known candidate built+signed, simulation failed.
     ShadowSimFailed,
+    /// Technical shadow qualification candidate built+signed, simulation failed.
+    ShadowTechnicalSimFailed,
     Submitted,
     /// [FIX-23] Handoff mit Transportfehler: Annahme unbekannt, Reconciliation entscheidet.
     AmbiguousSubmission,
@@ -38,6 +42,8 @@ pub struct OpportunityRecord {
     pub trigger: String,
     pub decision: Decision,
     pub net_profit: Option<i128>,
+    /// False means technical qualification only; unknown economics were never coerced to zero.
+    pub economics_known: bool,
     pub premium_bps: Option<u64>,
     pub t_profitable_unix_s: Option<u64>,
     pub tx_version: Option<String>,
