@@ -12,9 +12,17 @@ need() {
   fi
 }
 
-need P0_WS_URL
-need P0_RPC_URL
-need P0_GROUP_ID
+if [[ -z "${P0_RPC_URL:-}" || -z "${P0_WS_URL:-}" ]]; then
+  if [[ -z "${HELIUS_API_KEY:-}" ]]; then
+    echo "missing endpoints: set P0_RPC_URL+P0_WS_URL or HELIUS_API_KEY" >&2
+    exit 2
+  fi
+  export P0_RPC_URL="${P0_RPC_URL:-https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}}"
+  export P0_WS_URL="${P0_WS_URL:-wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}}"
+fi
+
+export P0_GROUP_ID="${P0_GROUP_ID:-4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8}"
+
 need P0_KEYPAIR_PATH
 need P0_MAX_SLIPPAGE_BPS
 
@@ -37,6 +45,8 @@ mkdir -p "$(dirname "$P0_RECORD_PATH")" "$(dirname "$P0_SUMMARY_PATH")"
 echo "Project_0 Mainnet Shadow"
 echo "  program=$P0_PROGRAM_ID"
 echo "  group=$P0_GROUP_ID"
+echo "  rpc_host=$(printf '%s' "$P0_RPC_URL" | sed 's/?.*$//')"
+echo "  ws_host=$(printf '%s' "$P0_WS_URL" | sed 's/?.*$//')"
 echo "  mode=$P0_MODE"
 echo "  zero_prefund_qualified=$P0_ZERO_PREFUND_QUALIFIED"
 echo "  zero_prefund_shadow_probe=$P0_ZERO_PREFUND_SHADOW_PROBE"
