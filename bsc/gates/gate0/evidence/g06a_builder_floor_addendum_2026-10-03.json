@@ -1,0 +1,36 @@
+{
+  "schema": "darkbot.g06a.builder-floor-evidence-addendum.v1",
+  "observed_date": "2026-10-03",
+  "scope": "G0.6a DRY-3 builder floor/ranking resolution for controlled Flap self-launch",
+  "status": "DRY3_POLICY_READY",
+  "blockrazor": {
+    "verified": true,
+    "explicit_minimum_bundle_gas_price_wei": "50000000",
+    "rule": "Average gas price of a BSC bundle must be >= 0.05 gwei; mempool transactions are excluded from the average calculation.",
+    "source": "https://www.blockrazor.io/support/"
+  },
+  "fortyeightclub": {
+    "verified": true,
+    "explicit_minimum_documented": false,
+    "explicit_minimum_bundle_gas_price_wei": null,
+    "ranking_rule": "Official 48Club validator documentation defines bidReward = sumTxGasFee * 0.9 + directTransferBNB and states a preference for direct transfer over gas-fee burn. Current public builder documentation does not state an explicit minimum bundle gas-price floor.",
+    "official_sources": [
+      "https://web3.48.club/docs/validators",
+      "https://web3.48.club/docs/mev-builder/48-soulpoint-benefits",
+      "https://web3.48.club/builder"
+    ],
+    "probe_observation": "A deliberately non-economic probe at 0.05, 0.10, 0.50 and 1.00 gwei reached transaction nonce validation in every case. No earlier gas-price/floor rejection was observed. This does not prove valid bundle acceptance or inclusion.",
+    "policy": "Do not label 1 gwei as a 48Club minimum."
+  },
+  "strictest_explicit_verified_floor_wei": "50000000",
+  "strictest_explicit_verified_floor_source": "BlockRazor",
+  "stage1_signed_gas_price_policy_wei": "1000000000",
+  "stage1_policy_note": "1 gwei is DarkBot's conservative Stage-1 bid policy within the frozen budget, not a claimed provider minimum.",
+  "dry3_ready": true,
+  "non_claims": [
+    "This evidence does not prove valid bundle acceptance.",
+    "This evidence does not prove inclusion.",
+    "This evidence does not establish a hidden undocumented 48Club floor.",
+    "Real G0.7 ordering/acquisition evidence is still required."
+  ]
+}
