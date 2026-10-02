@@ -832,3 +832,34 @@ Do not mark G5 PASS until the real runtime output shows READY and valid Health e
 #### Rough engineering position
 
 Implementation completeness is now roughly **70–75%** of the intended technical product, but production qualification is materially lower because G5/P6/P8 evidence is still missing. This is an engineering estimate, not a measured KPI.
+
+
+### 2026-10-02 — G5 Mainnet bootstrap evidence — PASS
+
+Observed from the real Mainnet Shadow runner:
+
+```text
+dependencies: banks=204 required=384 optional_atas=328
+bootstrap: waiting for StreamReady (all subscription ACKs)
+recovery: Ready, run_state=Ready
+```
+
+What this proves:
+- Helius WSS connection succeeded.
+- All configured subscriptions reached the StreamReady ACK barrier.
+- The filtered target-group/liability snapshot completed.
+- Required dependency reconciliation completed.
+- StateCore transitioned to `Ready` on real Mainnet state.
+
+At the first observed READY window there were no filtered MarginfiAccount/Bank updates yet. Channel counters still advanced because Slot/Root/Health events were flowing, so the stream was alive.
+
+**G5 bootstrap/recovery decision:** PASS for `StreamReady → Snapshot → Reconcile → READY`.
+
+Still required before P6-LT Shadow qualification:
+- receive a real target MarginfiAccount update after READY,
+- compute exact Health from reconciled state,
+- reach exact sizing and executable route,
+- build/sign/simulate a real opportunity,
+- capture `ShadowTechnicalReady` or `ShadowTechnicalSimFailed` with the exact reason.
+
+[FIX-81] removes misleading repeated `updates: accounts=0 ...` log spam when the program-account update counter remains zero; reporting now occurs once per real 1000 account updates.
