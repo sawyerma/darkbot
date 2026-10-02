@@ -890,3 +890,22 @@ reconnect
 ```
 
 [FIX-82] redacts provider URLs/API keys from blockhash transport errors and emits a single `recovered` message when the blockhash poller becomes healthy again. Runtime fail-closed behavior is unchanged.
+
+
+### 2026-10-02 — Real provider interruption recovery — PASS
+
+Observed sequence on Mainnet:
+
+```text
+recovery: Ready, run_state=Ready
+blockhash refresh: error sending request ...
+[ws_rpc] session ended: ingress connect: idle timeout — reconnect in 500ms
+recovery: Ready, run_state=Ready
+```
+
+Decision: **PASS** for real provider interruption recovery.
+
+This proves the production Shadow runtime can:
+`READY → detect feed loss → halt trusted state → reconnect → re-subscribe → filtered snapshot → reconcile → READY`.
+
+This closes the open reconnect/recovery evidence item from the prior checkpoint. It does not yet prove a complete liquidation opportunity through Build/Sign/Simulate.
