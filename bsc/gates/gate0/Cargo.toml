@@ -11,6 +11,7 @@ alloy-rlp = "=0.3.13"
 hex = "0.4"
 serde_json = "1"
 k256 = { version = "0.13", features = ["ecdsa"] }
+sha2 = "0.10"
 
 rustls = "0.23"
 webpki-roots = "1"
