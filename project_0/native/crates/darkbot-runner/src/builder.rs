@@ -45,6 +45,9 @@ pub mod p0 {
 
     pub trait SizingProvider {
         fn sizes(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<Sizing>, String>;
+        fn no_size_reason(&self, _account: &Pubkey) -> Result<String, String> {
+            Ok("NO_VALID_PROTOCOL_PAIR".into())
+        }
     }
 
     /// Concrete bridge from protocol-exact sizing into runner economics. It adds only facts that
@@ -56,6 +59,17 @@ pub mod p0 {
         pub sol_bank: Pubkey,
         pub inventory: &'a dyn Fn(&Pubkey) -> u64,
         pub slippage_bps: u64,
+    }
+
+    impl<'a, S: AccountSource + ?Sized> ProtocolSizingProvider<'a, S> {
+        pub fn no_size_reason(&self, account: &Pubkey) -> Result<String, String> {
+            darkbot_project0::sizing::ProtocolSizer {
+                state: self.state,
+                program: self.program,
+                group: self.group,
+                headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
+            }.no_size_reason(account)
+        }
     }
 
     impl<'a, S: AccountSource + ?Sized> SizingProvider for ProtocolSizingProvider<'a, S> {
@@ -104,6 +118,10 @@ pub mod p0 {
                 });
             }
             Ok(out)
+        }
+
+        fn no_size_reason(&self, account: &Pubkey) -> Result<String, String> {
+            ProtocolSizingProvider::no_size_reason(self, account)
         }
     }
 
@@ -163,8 +181,8 @@ pub mod p0 {
         fn receivership(&self, account: &Pubkey, obs: &[Pubkey], sz: &Sizing, swaps: Vec<Instruction>, repay_from_inventory: bool) -> Result<(Vec<Instruction>, Vec<Step>), String> {
             let (asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
             let (liab_vault, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
-            let asset_ata = (self.ata)(&asset_mint).ok_or_else(|| format!("missing/unsupported asset ATA for {}", asset_mint))?;
-            let liab_ata = (self.ata)(&liab_mint).ok_or_else(|| format!("missing/unsupported liability ATA for {}", liab_mint))?;
+            let asset_ata = (self.ata)(&asset_mint).ok_or_else(|| format!("ATA:MISSING_ASSET:{}", asset_mint))?;
+            let liab_ata = (self.ata)(&liab_mint).ok_or_else(|| format!("ATA:MISSING_LIABILITY:{}", liab_mint))?;
             let withdraw = builders::withdraw(&self.program, &self.group, account, &self.liquidator, &sz.asset_bank,
                 &asset_ata, &asset_vault, &asset_tp, sz.withdraw_amount, None, obs);
             let repay = builders::repay(&self.program, &self.group, account, &self.liquidator, &sz.liab_bank,
@@ -219,7 +237,7 @@ pub mod p0 {
         fn plans(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
             let sizings = self.sizing.sizes(account, now_unix_s, slot)?;
             if sizings.is_empty() {
-                return Ok(vec![]);
+                return Err(format!("SIZING:{}", self.sizing.no_size_reason(account)?));
             }
             let health = CrateHealth { state: self.state, group: self.group };
             let obs = health.observation_accounts(account).map_err(|e| e.to_string())?;
@@ -245,10 +263,10 @@ pub mod p0 {
 
                 for class in funding::feasible_classes(&ctx) {
                     let capital = funding::capital_required(class, &ctx);
-                    let Some(mark) = market.clone() else { continue };
+                    let Some(mark) = market.clone() else { return Err("ROUTING:NO_ROUTE".into()) };
                     let plan = match class {
                         FundingClass::ZeroPrefundSameTx => {
-                            if mark.amount_out < sz.repay_amount { continue; }
+                            if mark.amount_out < sz.repay_amount { return Err("ROUTING:INSUFFICIENT_ROUTE_OUTPUT".into()); }
                             let (ixs, steps) = self.receivership(account, &obs, &sz, mark.instructions.clone(), false)?;
                             out.push(ReceivershipPlan {
                                 steps: steps.clone(),
