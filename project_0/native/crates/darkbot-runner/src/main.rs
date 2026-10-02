@@ -300,6 +300,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let dep_for_fetch = dep_shared.clone();
     let opt_for_fetch = opt_shared.clone();
     let mut fetch = move || -> Result<SnapshotData, String> {
+        let t0 = std::time::Instant::now();
+        eprintln!("snapshot: start");
         // [FIX-78] Recovery snapshot = target-group liability accounts + target-group banks +
         // explicit required/optional dependencies. Lending-only accounts are excluded.
         #[cfg(feature = "crate_health")]
@@ -325,6 +327,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if b.slot != 0 { slot = slot.min(b.slot); }
         if d.slot != 0 { slot = slot.min(d.slot); }
         if o.slot != 0 { slot = slot.min(o.slot); }
+        eprintln!(
+            "snapshot: done slot={} liability_accounts={} banks={} required={} optional={} missing_required={} total={} elapsed_ms={}",
+            slot,
+            a.accounts.len(),
+            b.accounts.len(),
+            d.accounts.len(),
+            o.accounts.len(),
+            d.missing.len(),
+            accounts.len(),
+            t0.elapsed().as_millis()
+        );
         Ok(SnapshotData { slot, accounts, missing_required: d.missing })
     };
     // Barrier: während der RPC-Fetches gepufferte Events in den State ziehen.
