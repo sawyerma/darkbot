@@ -41,7 +41,7 @@ use darkbot_solana::state::StateCore;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 #[cfg(feature = "crate_health")]
-use marginfi_type_crate::types::Bank;
+use marginfi_type_crate::types::{Bank, MarginfiAccount};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -135,6 +135,20 @@ fn find_bank_by_mint<S: AccountSource + ?Sized>(
     banks.iter().copied().find(|bk| bank_from_state(state, program, bk).map(|b| b.mint == *mint).unwrap_or(false))
 }
 
+#[cfg(feature = "crate_health")]
+fn marginfi_account_in_group(data: &[u8], group: &Pubkey) -> bool {
+    if classify_account(data) != AccountType::MarginfiAccount {
+        return false;
+    }
+    let need = 8 + std::mem::size_of::<MarginfiAccount>();
+    if data.len() < need {
+        return false;
+    }
+    bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
+        .map(|a| a.group == *group)
+        .unwrap_or(false)
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("p0-longtail: {}", e);
@@ -171,7 +185,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pre = snapshot::program_accounts(&dep_rpc, &program, &clock)?;
     let mut pre_state = StateCore::new(1);
     pre_state.install_snapshot(pre.slot, pre.accounts);
-    let bank_keys: Vec<Pubkey> = pre_state.iter_owned_by(&program).filter(|(_, r)| classify_account(&r.data) == AccountType::Bank).map(|(k, _)| *k).collect();
+    let bank_keys: Vec<Pubkey> = pre_state
+        .iter_owned_by(&program)
+        .filter_map(|(k, r)| {
+            if classify_account(&r.data) != AccountType::Bank { return None; }
+            #[cfg(feature = "crate_health")]
+            {
+                let view = StateView(&pre_state);
+                return bank_from_state(&view, &program, k)
+                    .filter(|b| b.group == group)
+                    .map(|_| *k);
+            }
+            #[cfg(not(feature = "crate_health"))]
+            { Some(*k) }
+        })
+        .collect();
     #[cfg(feature = "crate_health")]
     let mut required_dependency_keys = darkbot_project0::health::dependency_keys(&StateView(&pre_state), &program, &bank_keys);
     #[cfg(not(feature = "crate_health"))]
@@ -335,7 +363,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let Some(ev) = consumer.pop_timeout(Duration::from_millis(250)) else { continue };
         // Trigger (a) Long-Tail: jedes MarginfiAccount-Update → Detection im Shadow-Modus.
         let detect = match &ev {
-            IngressEvent::Account(a) if classify_account(&a.data) == AccountType::MarginfiAccount && st.run_state().is_tradable() => Some((a.pubkey, a.t_rx_ns, a.slot)),
+            IngressEvent::Account(a)
+                if st.run_state().is_tradable()
+                    && marginfi_account_in_group(&a.data, &group) =>
+            {
+                Some((a.pubkey, a.t_rx_ns, a.slot))
+            },
             _ => None,
         };
         // [FIX-35] Bank-Pubkey merken; die Dependency-Prüfung läuft NACH dem Anwenden des Updates.
