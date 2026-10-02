@@ -4,7 +4,7 @@
 //! does not claim oracle value is realizable market value. P4A-01 must value the resulting seized
 //! amount through an executable route.
 
-use crate::health::{crate_impl::bank_observation_keys, AccountSource, CrateHealth, HealthEngine};
+use crate::health::{crate_impl::{bank_observation_keys, CrateHealth}, AccountSource, HealthEngine, HealthError};
 use crate::protocol;
 use fixed::types::I80F48;
 use marginfi::state::{
@@ -276,7 +276,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         let account = load::<MarginfiAccount>(data)?;
         let health = CrateHealth { state: self.state, group: self.group }
             .health(account_key, now_unix_s, slot)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e: HealthError| e.to_string())?;
         if !health.liquidatable || health.maintenance_health >= 0 {
             return Ok(Vec::new());
         }
