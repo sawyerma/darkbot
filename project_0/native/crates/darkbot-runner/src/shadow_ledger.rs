@@ -19,6 +19,8 @@ pub struct DaySummary {
     pub sim_pass: u64,
     pub sim_fail: u64,
     pub shadow_ready: u64,
+    pub shadow_technical_ready: u64,
+    pub shadow_technical_sim_failed: u64,
     pub shadow_wins: u64,
     /// [FIX-45] gleicher Slot wie der Gewinner: kein Win, kein Verlust.
     pub same_slot_unknown: u64,
@@ -78,7 +80,9 @@ impl ShadowLedger {
     pub fn on_record(&mut self, rec: &OpportunityRecord, sim_ok: Option<bool>) {
         match rec.decision {
             Decision::ShadowReady => { self.day.shadow_ready += 1; self.day.plans_built += 1; }
-            Decision::ShadowSimFailed => { self.day.plans_built += 1; } // [FIX-46] gebaut+signiert, nur Sim fehlgeschlagen
+            Decision::ShadowTechnicalReady => { self.day.shadow_technical_ready += 1; self.day.plans_built += 1; }
+            Decision::ShadowSimFailed => { self.day.plans_built += 1; }
+            Decision::ShadowTechnicalSimFailed => { self.day.shadow_technical_sim_failed += 1; self.day.plans_built += 1; }
             Decision::Skip | Decision::Unavailable => { self.day.plans_rejected += 1; }
             _ => {}
         }
