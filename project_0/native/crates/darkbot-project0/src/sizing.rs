@@ -12,7 +12,9 @@ use marginfi::state::{
     marginfi_account::{calc_amount, calc_value},
     price::{OraclePriceFeedAdapter, PriceAdapter},
 };
-use marginfi_type_crate::constants::{ASSET_TAG_DEFAULT, ASSET_TAG_SOL};
+use marginfi_type_crate::constants::{
+    ASSET_TAG_DEFAULT, ASSET_TAG_SOL, ASSET_TAG_KAMINO, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND,
+};
 use marginfi_type_crate::types::{
     reconcile_emode_configs, BalanceSide, Bank, BankOperationalState, EmodeConfig, FeeState,
     MarginfiAccount, OraclePriceType, PriceBias, RequirementType,
@@ -196,6 +198,64 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
     pub fn bank_mint(&self, bank_key: &Pubkey) -> Result<Pubkey, String> {
         Ok(self.bank(bank_key)?.mint)
+    }
+
+    /// [FIX-89] Deterministic explanation when protocol sizing produced zero candidates.
+    /// This is diagnostics only; it does not relax any fail-closed sizing rule.
+    pub fn no_size_reason(&self, account_key: &Pubkey) -> Result<String, String> {
+        let (_, _, data) = self.raw(account_key)?;
+        if protocol::classify(data) != protocol::AccountType::MarginfiAccount {
+            return Ok("NOT_MARGINFI_ACCOUNT".into());
+        }
+        let account = load::<MarginfiAccount>(data)?;
+        let mut assets = 0usize;
+        let mut liabs = 0usize;
+        let mut supported_assets = 0usize;
+        let mut supported_liabs = 0usize;
+        let mut integration_assets = 0usize;
+        let mut integration_liabs = 0usize;
+
+        for balance in account.lending_account.balances.iter().filter(|b| b.is_active()) {
+            let Some(side) = balance.get_side() else { continue };
+            let bank = self.bank(&balance.bank_pk)?;
+            let integration = matches!(
+                bank.config.asset_tag,
+                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_JUPLEND
+            );
+            let supported = supported_generic_bank(&bank);
+            match side {
+                BalanceSide::Assets => {
+                    assets += 1;
+                    if supported { supported_assets += 1; }
+                    if integration { integration_assets += 1; }
+                }
+                BalanceSide::Liabilities => {
+                    liabs += 1;
+                    if supported { supported_liabs += 1; }
+                    if integration { integration_liabs += 1; }
+                }
+            }
+        }
+
+        if assets == 0 {
+            return Ok("NO_ASSET".into());
+        }
+        if liabs == 0 {
+            return Ok("NO_LIABILITY".into());
+        }
+        if supported_assets == 0 && integration_assets > 0 {
+            return Ok("UNSUPPORTED_INTEGRATION_ASSET".into());
+        }
+        if supported_liabs == 0 && integration_liabs > 0 {
+            return Ok("UNSUPPORTED_INTEGRATION_LIABILITY".into());
+        }
+        if supported_assets == 0 {
+            return Ok("NO_SUPPORTED_ASSET_BANK".into());
+        }
+        if supported_liabs == 0 {
+            return Ok("NO_SUPPORTED_LIABILITY_BANK".into());
+        }
+        Ok("NO_VALID_PROTOCOL_PAIR".into())
     }
 
     fn prices(&self, bank: &Bank, clock: &Clock) -> Result<Prices, String> {
