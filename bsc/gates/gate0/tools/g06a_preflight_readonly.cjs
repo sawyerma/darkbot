@@ -146,7 +146,8 @@ async function main() {
 
   const launcher = normalizeAddress(process.env.DARKBOT_G06A_LAUNCHER_ADDRESS || '', 'DARKBOT_G06A_LAUNCHER_ADDRESS');
   const buyer = normalizeAddress(process.env.DARKBOT_G06A_BUYER_ADDRESS || '', 'DARKBOT_G06A_BUYER_ADDRESS');
-  if (launcher && buyer && launcher === buyer) throw new Error('launcher and buyer addresses must be distinct');
+  // Read-only preflight may intentionally inspect the same wallet in both roles.
+  // Distinctness is reported below and remains mandatory for final G0.6a DRY qualification.
 
   let launcherNonce = null;
   let buyerNonce = null;
