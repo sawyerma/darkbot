@@ -41,7 +41,7 @@ const ethers = require(path.join(ABI_TOOLS, 'ethers'));
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
 const TAX_V3_IMPL = '0x024f18294970b5c76c0691b87f138a0317156422';
-const PREFLIGHT_PATH = path.join(__dirname, '../evidence/g06a_preflight_readonly.json');
+const DEFAULT_PREFLIGHT_PATH = path.join(__dirname, '../evidence/g06a_preflight_readonly.json');
 
 const BUY_VALUE = 1_000_000_000_000_000n; // 0.001 BNB
 const LAUNCH_VALUE = 0n;
@@ -171,7 +171,8 @@ function revertHex(res) {
 
 async function main() {
   const rpcUrl = req('BSC_MAINNET_RPC_HTTPS');
-  const preflight = JSON.parse(fs.readFileSync(PREFLIGHT_PATH));
+  const preflightPath = process.argv[2] ? path.resolve(process.argv[2]) : DEFAULT_PREFLIGHT_PATH;
+  const preflight = JSON.parse(fs.readFileSync(preflightPath));
 
   if (preflight.schema !== 'darkbot.g06a.preflight-readonly.v2') throw new Error('wrong preflight schema');
   if (preflight.chain_id !== '56') throw new Error('preflight is not BSC Mainnet');
@@ -197,8 +198,21 @@ async function main() {
     throw new Error('preflight block hash mismatch');
   }
 
-  const portalCode = await rpc(rpcUrl, 'eth_getCode', [PORTAL, parentTag]);
-  const taxCode = await rpc(rpcUrl, 'eth_getCode', [TAX_V3_IMPL, parentTag]);
+  let portalCode;
+  let taxCode;
+  try {
+    portalCode = await rpc(rpcUrl, 'eth_getCode', [PORTAL, parentTag]);
+    taxCode = await rpc(rpcUrl, 'eth_getCode', [TAX_V3_IMPL, parentTag]);
+  } catch (e) {
+    if (String(e).includes('missing trie node')) {
+      throw new Error(
+        `RPC has pruned state for preflight block ${preflight.latest_block_number}. ` +
+        'Generate a fresh read-only preflight to a temporary file and run this crosscheck immediately against that file. ' +
+        `Original error: ${e.message}`
+      );
+    }
+    throw e;
+  }
   if (ethers.getBytes(portalCode).length !== preflight.portal_code_bytes) throw new Error('Portal code length mismatch');
   if (ethers.getBytes(taxCode).length !== preflight.tax_v3_impl_code_bytes) throw new Error('TAX_V3 code length mismatch');
 
@@ -292,6 +306,7 @@ async function main() {
 
   console.log(JSON.stringify(clean({
     schema: 'darkbot.g06a.economics-evm-crosscheck.v1',
+    preflight_path: preflightPath,
     status: 'EVM_SEQUENCE_PASS',
     state_source: {
       block_number: parentNum,
