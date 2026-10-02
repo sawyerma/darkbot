@@ -27,7 +27,7 @@ const SLIPPAGE_BPS = 100n;
 
 function req(name) {
   const v = process.env[name];
-  if (!v) throw new Error(\`\${name} is required\`);
+  if (!v) throw new Error(`${name} is required`);
   return v;
 }
 function dec(name) { return BigInt(req(name)); }
@@ -40,9 +40,9 @@ async function rpc(url, method, params = []) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
-  if (!res.ok) throw new Error(\`RPC HTTP \${res.status} for \${method}\`);
+  if (!res.ok) throw new Error(`RPC HTTP ${res.status} for ${method}`);
   const body = await res.json();
-  if (body.error) throw new Error(\`RPC \${method}: \${JSON.stringify(body.error)}\`);
+  if (body.error) throw new Error(`RPC ${method}: ${JSON.stringify(body.error)}`);
   return body.result;
 }
 function blockHeaderFromRpc(b) {
@@ -162,7 +162,7 @@ async function main() {
   const buyHash = ethers.keccak256(rawBuy);
 
   const chain = BigInt(await rpc(rpcUrl, 'eth_chainId'));
-  if (chain !== CHAIN_ID) throw new Error(\`wrong chain: \${chain}\`);
+  if (chain !== CHAIN_ID) throw new Error(`wrong chain: ${chain}`);
   const parent = await rpc(rpcUrl, 'eth_getBlockByNumber', ['latest', false]);
   const parentNumber = BigInt(parent.number);
 
@@ -191,7 +191,7 @@ async function main() {
     block,
   });
   const launchError = launchRes.execResult.exceptionError?.error || null;
-  if (launchError) throw new Error(\`local launch simulation reverted: \${launchError}\`);
+  if (launchError) throw new Error(`local launch simulation reverted: ${launchError}`);
 
   const buyRes = await evm.runCall({
     caller: buyerAddr,
@@ -204,7 +204,7 @@ async function main() {
     block,
   });
   const buyError = buyRes.execResult.exceptionError?.error || null;
-  if (buyError) throw new Error(\`local BUY simulation reverted: \${buyError}\`);
+  if (buyError) throw new Error(`local BUY simulation reverted: ${buyError}`);
 
   const retHex = bytesToHex(buyRes.execResult.returnValue);
   const returned = BigInt(retHex === '0x' ? '0x0' : retHex);
@@ -221,11 +221,11 @@ async function main() {
     isStatic: true,
   });
   const balanceError = balanceRes.execResult.exceptionError?.error || null;
-  if (balanceError) throw new Error(\`local balanceOf simulation failed: \${balanceError}\`);
+  if (balanceError) throw new Error(`local balanceOf simulation failed: ${balanceError}`);
   const balHex = bytesToHex(balanceRes.execResult.returnValue);
   const balance = BigInt(balHex === '0x' ? '0x0' : balHex);
   if (returned !== balance) {
-    throw new Error(\`BUY return \${returned} != buyer token balance \${balance}\`);
+    throw new Error(`BUY return ${returned} != buyer token balance ${balance}`);
   }
 
   const launchTxModel = createLegacyTx({
@@ -242,10 +242,10 @@ async function main() {
   const launchGasUpper = launchIntrinsic + launchRes.execResult.executionGasUsed;
   const buyGasUpper = buyIntrinsic + buyRes.execResult.executionGasUsed;
   if (launchGasUpper > launchGasLimit) {
-    throw new Error(\`launch gas upper bound \${launchGasUpper} > signed limit \${launchGasLimit}\`);
+    throw new Error(`launch gas upper bound ${launchGasUpper} > signed limit ${launchGasLimit}`);
   }
   if (buyGasUpper > buyGasLimit) {
-    throw new Error(\`buy gas upper bound \${buyGasUpper} > signed limit \${buyGasLimit}\`);
+    throw new Error(`buy gas upper bound ${buyGasUpper} > signed limit ${buyGasLimit}`);
   }
 
   const launcherPending = BigInt(await rpc(
