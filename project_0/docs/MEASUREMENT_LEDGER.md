@@ -721,3 +721,13 @@ Follow-up hardening:
 
 Next gate: compile/tests for [FIX-77..79], then G5 Mainnet Bootstrap:
 `StreamReady → filtered Snapshot → Reconcile → READY → sample exact Health → first ShadowTechnicalReady/ShadowTechnicalSimFailed`.
+
+
+### 2026-10-02 — [FIX-77..79] filtered bootstrap/WSS build-test gate — PASS
+
+User-reported current-head verification:
+- `cargo build --manifest-path project_0/native/Cargo.toml --features "crate_health txv1"` → PASS.
+- `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features "crate_health txv1"` → PASS.
+- Final visible line was a zero-test target (`0 passed; 0 failed`), not the aggregate workspace count.
+
+Gate decision: filtered target-group/liability bootstrap, recovery and WSS subscription path compile/tests. Proceed to G5 real Mainnet bootstrap evidence.
