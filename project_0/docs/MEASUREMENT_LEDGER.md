@@ -930,3 +930,29 @@ Commits:
 - `ab727b1` one-shot probe queue
 
 Status: IMPLEMENTED, not yet compiler/Mainnet-qualified. Next evidence is build/test PASS followed by `bootstrap_probe: queued=N` and resulting Shadow records.
+
+
+### 2026-10-02 — [FIX-84] Mainnet bootstrap probe — QUEUED / OUTCOMES OPEN
+
+Observed on Mainnet Shadow after successful StreamReady and two-snapshot reconciliation:
+
+```text
+dependencies: banks=204 required=384 optional_atas=328
+[ws_rpc] session attempt=1 connected; subscriptions=716
+[ws_rpc] session attempt=1 subscription ACKs=716/716
+[ws_rpc] session attempt=1 StreamReady
+snapshot: done slot=452753636 liability_accounts=82685 banks=204 required=384 optional=0 missing_required=0 total=83273 elapsed_ms=7328
+snapshot: done slot=452753663 liability_accounts=82685 banks=204 required=384 optional=0 missing_required=0 total=83273 elapsed_ms=6099
+recovery: Ready, run_state=Ready
+bootstrap_probe: queued=61 candidates from was_liquidatable
+```
+
+Evidence:
+- all 716 subscriptions ACKed;
+- StreamReady barrier passed;
+- snapshot A/B completed with 0 missing required dependencies;
+- reconciled state returned READY;
+- the one-shot bootstrap probe selected and queued 61 `was_liquidatable` candidates from the reconciled snapshot.
+
+Status: **QUEUED, not yet counted as fully processed.**
+Completion evidence requires confirming the resulting per-account records in `project_0/data/shadow/opportunities.jsonl`.
