@@ -83,14 +83,14 @@
   },
   "budget_wei_proposal": {
     "max_buy_value_per_attempt": "1000000000000000",
-    "max_launch_call_value_per_attempt": "2000000000000000",
-    "max_launch_gas_limit": "5000000",
+    "max_launch_call_value_per_attempt": "0",
+    "max_launch_gas_limit": "6603270",
     "max_buy_gas_limit": "3000000",
     "max_gas_price_wei": "1000000000",
-    "max_gas_cost_per_attempt": "8000000000000000",
-    "max_total_per_attempt": "11000000000000000",
+    "max_gas_cost_per_attempt": "9603270000000000",
+    "max_total_per_attempt": "10603270000000000",
     "absolute_max_total_all_four_attempts": "50000000000000000",
-    "note": "0.05 BNB is a conservative PROPOSAL ceiling, not an authorization. Before approval, reverify actual Flap launch value/fee and builder floor; lower the cap if possible. Never increase these ceilings at runtime."
+    "note": "Still PROPOSED_NOT_AUTHORIZED. Launch quoteAmt/value is fixed to 0 for this scope. The launch gas cap is the measured 2026-10-02 Mainnet eth_estimateGas 5,502,725 with a 120% reserve = 6,603,270. With buy gas cap 3,000,000 and max gas price 1 gwei, worst-case gas reserve is 0.00960327 BNB and total per-attempt reserve including the 0.001 BNB BUY is 0.01060327 BNB. Absolute four-attempt ceiling remains 0.05 BNB. Never increase these ceilings at runtime."
   },
   "pre_arm_checks": [
     "Reverify current Flap Mainnet Portal/version/runtime code and selected native launch semantics",
