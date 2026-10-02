@@ -388,17 +388,35 @@ fn main() {
         "DRY harness must not run after source guard is armed"
     );
 
+    let allow_same_wallet_test =
+        env::var("DARKBOT_G06A_ALLOW_SAME_WALLET_TEST").ok().as_deref() == Some("YES");
+
     let launcher_key = key_from_env("DARKBOT_G06A_LAUNCHER_PRIVATE_KEY");
     let buyer_key = key_from_env("DARKBOT_G06A_BUYER_PRIVATE_KEY");
     let launcher = signer_address(&launcher_key);
     let buyer = signer_address(&buyer_key);
-    assert_ne!(launcher, buyer, "DRY-1 fail: launcher and buyer are identical");
+    let wallets_distinct = launcher != buyer;
+    if !wallets_distinct {
+        assert!(
+            allow_same_wallet_test,
+            "DRY-1 fail: launcher and buyer are identical; set DARKBOT_G06A_ALLOW_SAME_WALLET_TEST=YES only for the non-qualifying local test mode"
+        );
+    }
 
     let portal = Address::from_str(PORTAL).unwrap();
     let impl_addr = Address::from_str(&req_env("DARKBOT_G06A_TAX_V3_IMPL"))
         .expect("DARKBOT_G06A_TAX_V3_IMPL invalid");
     let launcher_nonce = env_u64("DARKBOT_G06A_LAUNCHER_NONCE");
     let buyer_nonce = env_u64("DARKBOT_G06A_BUYER_NONCE");
+    if wallets_distinct {
+        // Independent wallets may have unrelated pending nonces.
+    } else {
+        assert_eq!(
+            buyer_nonce,
+            launcher_nonce + 1,
+            "same-wallet test requires BUY nonce = launch nonce + 1"
+        );
+    }
     let gas_price = env_u64("DARKBOT_G06A_GAS_PRICE_WEI");
     let launch_gas_limit = env_u64("DARKBOT_G06A_LAUNCH_GAS_LIMIT");
     let buy_gas_limit = env_u64("DARKBOT_G06A_BUY_GAS_LIMIT");
@@ -442,7 +460,14 @@ fn main() {
     let recovered_buyer = recover_sender(&buy);
     assert_eq!(recovered_launcher, launcher, "DRY-1 launch signer recovery mismatch");
     assert_eq!(recovered_buyer, buyer, "DRY-1 buyer signer recovery mismatch");
-    assert_ne!(recovered_launcher, recovered_buyer, "DRY-1 recovered wallets identical");
+    if wallets_distinct {
+        assert_ne!(recovered_launcher, recovered_buyer, "DRY-1 recovered wallets identical");
+    } else {
+        assert_eq!(
+            recovered_launcher, recovered_buyer,
+            "same-wallet test recovery mismatch"
+        );
+    }
 
     let send_head = env_u64("DARKBOT_G06A_SEND_HEAD");
     let max_block = env_u64("DARKBOT_G06A_MAX_BLOCK");
@@ -557,15 +582,27 @@ fn main() {
             Some(launcher_nonce),
             "DRY-4 launcher nonce mismatch"
         );
-        assert_eq!(
-            evidence["buyer_pending_nonce"].as_u64(),
-            Some(buyer_nonce),
-            "DRY-4 buyer nonce mismatch"
-        );
-        dry4_nonce = true;
+        if wallets_distinct {
+            assert_eq!(
+                evidence["buyer_pending_nonce"].as_u64(),
+                Some(buyer_nonce),
+                "DRY-4 buyer nonce mismatch"
+            );
+            dry4_nonce = true;
+        } else {
+            // With one sender, both read-only pending-nonce queries return the same current nonce.
+            // The BUY is intentionally signed at N+1 and therefore cannot satisfy the two-wallet
+            // DRY-4 contract. This mode is diagnostic only.
+            assert_eq!(
+                evidence["buyer_pending_nonce"].as_u64(),
+                Some(launcher_nonce),
+                "same-wallet pending nonce mismatch"
+            );
+            dry4_nonce = false;
+        }
     }
 
-    let dry1 = true;
+    let dry1 = wallets_distinct;
     // Structural egress proof: this binary contains no TcpStream, UDP, HTTP client,
     // process spawn or file write of valid transaction/bundle bytes.
     let dry4_zero_egress = true;
@@ -584,7 +621,8 @@ fn main() {
         "wallets": {
             "launcher": launcher.to_string(),
             "buyer": buyer.to_string(),
-            "distinct": launcher != buyer
+            "distinct": wallets_distinct,
+            "same_wallet_test_mode": allow_same_wallet_test && !wallets_distinct
         },
         "transactions": {
             "chain_id": CHAIN_ID,
@@ -621,6 +659,11 @@ fn main() {
             "DRY_4_expiry_nonces_zero_egress": dry4,
             "zero_egress_structural": dry4_zero_egress,
             "all": all
+        },
+        "qualification_note": if wallets_distinct {
+            "eligible for DRY-1/DRY-4 qualification if all other predicates pass"
+        } else {
+            "SAME_WALLET_TEST_ONLY: construction/recovery diagnostics only; DRY-1 and DRY-4 intentionally cannot pass"
         },
         "network_write_capability": "NONE_IN_THIS_BINARY",
         "live_submission": "IMPOSSIBLE_FROM_G06A_DRY_BINARY"
