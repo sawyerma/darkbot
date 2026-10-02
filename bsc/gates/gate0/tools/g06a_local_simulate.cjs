@@ -85,7 +85,7 @@ function launchCalldata(launcher, salt) {
     buyTax: 100,
     sellTax: 100,
     taxDuration: 31536000,
-    antiFarmerDuration: 3600,
+    antiFarmerDuration: 86400,
     mktBps: 10000,
     deflationBps: 0,
     dividendBps: 0,
