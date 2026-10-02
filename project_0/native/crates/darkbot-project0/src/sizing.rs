@@ -63,6 +63,7 @@ pub struct ProtocolSizer<'a, S: AccountSource + ?Sized> {
 
 #[derive(Clone, Copy)]
 struct Prices {
+    /// RequirementType::Equity uses TimeWeighted (TWAP/EMA) in pinned marginfi source. [FIX-62]
     equity: I80F48,
     maint_asset: I80F48,
     maint_liab: I80F48,
@@ -73,7 +74,6 @@ struct Position {
     bank_pk: Pubkey,
     bank: Bank,
     amount: I80F48,
-    side: BalanceSide,
     equity_value: I80F48,
     maintenance_unweighted_value: I80F48,
 }
@@ -185,7 +185,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
             .map_err(|e| format!("oracle adapter: {e}"))?;
         let equity = feed
-            .get_price_of_type(OraclePriceType::RealTime, None, bank.config.oracle_max_confidence)
+            .get_price_of_type(OraclePriceType::TimeWeighted, None, bank.config.oracle_max_confidence)
             .map_err(|e| format!("equity price: {e}"))?;
         let maint_asset = feed
             .get_price_of_type(
@@ -224,23 +224,25 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 continue;
             }
             let prices = self.prices(&bank, clock)?;
-            let amount = match side {
-                BalanceSide::Assets => bank
-                    .get_asset_amount(balance.asset_shares.into())
-                    .map_err(|e| format!("asset amount: {e}"))?,
-                BalanceSide::Liabilities => bank
-                    .get_liability_amount(balance.liability_shares.into())
-                    .map_err(|e| format!("liability amount: {e}"))?,
+            let (amount, maint_price, is_asset) = match side {
+                BalanceSide::Assets => (
+                    bank.get_asset_amount(balance.asset_shares.into())
+                        .map_err(|e| format!("asset amount: {e}"))?,
+                    prices.maint_asset,
+                    true,
+                ),
+                BalanceSide::Liabilities => (
+                    bank.get_liability_amount(balance.liability_shares.into())
+                        .map_err(|e| format!("liability amount: {e}"))?,
+                    prices.maint_liab,
+                    false,
+                ),
             };
             if amount <= I80F48::ZERO {
                 continue;
             }
             let equity_value = calc_value(amount, prices.equity, bank.get_balance_decimals(), None)
                 .map_err(|e| format!("equity value: {e}"))?;
-            let maint_price = match side {
-                BalanceSide::Assets => prices.maint_asset,
-                BalanceSide::Liabilities => prices.maint_liab,
-            };
             let maintenance_unweighted_value =
                 calc_value(amount, maint_price, bank.get_balance_decimals(), None)
                     .map_err(|e| format!("maintenance value: {e}"))?;
@@ -248,16 +250,14 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 bank_pk: balance.bank_pk,
                 bank,
                 amount,
-                side,
                 equity_value,
                 maintenance_unweighted_value,
             };
-            match side {
-                BalanceSide::Assets => assets.push(p),
-                BalanceSide::Liabilities => {
-                    liability_emodes.push(bank.emode.emode_config);
-                    liabs.push(p);
-                }
+            if is_asset {
+                assets.push(p);
+            } else {
+                liability_emodes.push(bank.emode.emode_config);
+                liabs.push(p);
             }
         }
         Ok((assets, liabs, liability_emodes))
@@ -307,8 +307,6 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
         for asset in &assets {
             for liab in &liabs {
-                debug_assert_eq!(asset.side, BalanceSide::Assets);
-                debug_assert_eq!(liab.side, BalanceSide::Liabilities);
                 if asset.equity_value <= I80F48::ZERO || liab.equity_value <= I80F48::ZERO {
                     continue;
                 }
