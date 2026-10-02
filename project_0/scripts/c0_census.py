@@ -11,13 +11,14 @@ Nur Standardbibliothek. Kein Paid-Provider. Kein Wert wird als 0 erfunden:
 fehlende Messungen stehen als "N/A".
 
 Aufruf:
-  export HELIUS_API_KEY=...
+  export P0_RPC_URL=https://...
   python3 project_0/scripts/c0_census.py --out project_0/data/c0/
+  # alternativ: HELIUS_API_KEY=... oder --rpc https://...
   python3 project_0/scripts/c0_census.py --selftest      # offline
 
-Program-ID und Group-ID sind Defaults aus Sekundärwissen und werden erst
-durch P1A-01 (on-chain ProgramData) verbindlich. Bis dahin druckt das Script
-eine PRÜFEN-Warnung und schreibt beide IDs in den Report.
+Die Mainnet-Program-ID ist aus dem gepinnten marginfi-v2-Source verifiziert.
+Die Default-Group-ID bleibt bis zur separaten Mainnet-/P1A-Verifikation als
+PRÜFEN markiert.
 """
 import argparse
 import base64
@@ -31,8 +32,8 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
-DEFAULT_PROGRAM_ID = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"  # PRÜFEN via P1A-01
-DEFAULT_GROUP_ID = "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8"  # PRÜFEN via P1A-01
+DEFAULT_PROGRAM_ID = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"  # source-verified: marginfi-v2 mainnet id
+DEFAULT_GROUP_ID = "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8"  # PRÜFEN via P1A/Mainnet evidence
 
 # Anchor: sha256("account:<Name>")[:8]. Namen aus marginfi-v2 (PRÜFEN gegen IDL des deployed Tags).
 ACCOUNT_TYPES = [
@@ -113,7 +114,7 @@ def census(accounts, context_slot, program_id, group_id, rpc_host, source_note):
         "source": source_note,
         "rpc_host": rpc_host,
         "program_id": program_id,
-        "program_id_status": "PRÜFEN: on-chain via P1A-01, Default aus Sekundärwissen",
+        "program_id_status": "SOURCE_VERIFIED: pinned marginfi-v2 mainnet program id",
         "group_id": group_id,
         "group_id_status": "PRÜFEN: via P1A-01",
         "context_slot": context_slot,
@@ -183,7 +184,7 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rpc", help="RPC URL; Default aus HELIUS_API_KEY (Free-Plan)")
+    ap.add_argument("--rpc", help="RPC URL; Default: P0_RPC_URL, danach HELIUS_API_KEY")
     ap.add_argument("--program", default=DEFAULT_PROGRAM_ID)
     ap.add_argument("--group", default=DEFAULT_GROUP_ID)
     ap.add_argument("--out", default="project_0/data/c0")
@@ -194,20 +195,35 @@ def main():
         selftest()
         return 0
 
-    url = args.rpc
+    url = args.rpc or os.environ.get("P0_RPC_URL", "").strip()
     if not url:
         key = os.environ.get("HELIUS_API_KEY", "").strip()
-        if not key:
-            print("FEHLER: --rpc oder HELIUS_API_KEY erforderlich (Helius Free reicht).", file=sys.stderr)
+        placeholder = key.upper() in {"DEIN_KEY", "YOUR_KEY", "API_KEY", "HELIUS_API_KEY", "..."}
+        if not key or placeholder:
+            print(
+                "FEHLER: gueltige --rpc/P0_RPC_URL oder echte HELIUS_API_KEY erforderlich; "
+                "Platzhalter wie DEIN_KEY sind nicht gueltig.",
+                file=sys.stderr,
+            )
             return 2
         url = f"https://mainnet.helius-rpc.com/?api-key={key}"
     rpc_host = url.split("?")[0]
 
-    if args.program == DEFAULT_PROGRAM_ID:
-        print("PRÜFEN: Program-ID ist Default aus Sekundärwissen; on-chain via P1A-01 verifizieren.", file=sys.stderr)
-
     t0 = time.monotonic()
-    slot, accounts = fetch_program_accounts(url, args.program)
+    try:
+        slot, accounts = fetch_program_accounts(url, args.program)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            print(
+                f"FEHLER: RPC HTTP 401 Unauthorized ({rpc_host}). API-Key/Endpoint pruefen.",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"FEHLER: RPC HTTP {e.code} ({rpc_host}): {e.reason}", file=sys.stderr)
+        return 2
+    except Exception as e:
+        print(f"FEHLER: Census-RPC fehlgeschlagen ({rpc_host}): {e}", file=sys.stderr)
+        return 2
     dt = time.monotonic() - t0
     report = census(accounts, slot, args.program, args.group, rpc_host, "getProgramAccounts confirmed")
     report["gpa_duration_s"] = round(dt, 3)
