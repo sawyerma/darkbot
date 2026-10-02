@@ -251,6 +251,34 @@ async function main() {
   const launchData = launchCalldata(LAUNCHER, saltChoice.salt);
   const buyData = buyCalldata(saltChoice.token);
 
+  // Differential authority check: ask the real BSC node to execute exactly the same
+  // launch call at the exact frozen parent state. This is eth_call only: no transaction
+  // is signed, submitted, or persisted. If this succeeds but EthereumJS below reverts,
+  // the divergence belongs to the local EVM backend rather than the launch parameters.
+  let rpcLaunchReturn;
+  try {
+    rpcLaunchReturn = await rpc(rpcUrl, 'eth_call', [{
+      from: LAUNCHER,
+      to: PORTAL,
+      value: '0x0',
+      data: launchData,
+      gas: '0x4c4b40'
+    }, parentTag]);
+  } catch (e) {
+    throw new Error(
+      'MAINNET_ETH_CALL_LAUNCH_REVERT: exact launch parameters are rejected by the real BSC node at ' +
+      `block ${preflight.latest_block_number}; ${e.message}`
+    );
+  }
+  const rpcLaunchDecoded = rpcLaunchReturn === '0x'
+    ? null
+    : ethers.AbiCoder.defaultAbiCoder().decode(['address'], rpcLaunchReturn)[0];
+  if (rpcLaunchDecoded && rpcLaunchDecoded.toLowerCase() !== saltChoice.token.toLowerCase()) {
+    throw new Error(
+      `MAINNET_ETH_CALL_TOKEN_MISMATCH: returned ${rpcLaunchDecoded}, predicted ${saltChoice.token}`
+    );
+  }
+
   const common = createCustomCommon(
     { chainId: Number(CHAIN_ID) },
     Mainnet,
@@ -345,6 +373,11 @@ async function main() {
       block_hash: parent.hash,
       rpc_state_reads_only: true,
     },
+    mainnet_eth_call_launch_success: true,
+    mainnet_eth_call_launch_return: rpcLaunchReturn,
+    mainnet_eth_call_predicted_token_match: rpcLaunchDecoded === null
+      ? null
+      : rpcLaunchDecoded.toLowerCase() === saltChoice.token.toLowerCase(),
     portal: PORTAL,
     tax_v3_impl: TAX_V3_IMPL,
     launcher: LAUNCHER,
