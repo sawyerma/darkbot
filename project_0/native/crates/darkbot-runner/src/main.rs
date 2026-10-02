@@ -628,10 +628,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             let _ = &view;
             if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }
-            let line = match engine.health(&acct, now as i64, slot) {
-                Ok(h) => { ledger.on_health(h.liquidatable, false); format!("{{\"account\":\"{}\",\"trigger\":\"account_update\",\"t_rx_ns\":{},\"slot\":{},\"liquidatable\":{},\"maint_health_bits\":{},\"equity_assets_bits\":{},\"bad_debt\":{}}}", acct, t_rx, slot, h.liquidatable, h.maintenance_health, h.equity_assets, h.is_bad_debt) },
-                Err(HealthError::Unavailable) => { ledger.on_health(false, false); format!("{{\"account\":\"{}\",\"trigger\":\"account_update\",\"t_rx_ns\":{},\"slot\":{},\"decision\":\"Unavailable\"}}", acct, t_rx, slot) },
-                Err(e) => { ledger.on_health(false, matches!(e, HealthError::Unsupported(_))); format!("{{\"account\":\"{}\",\"trigger\":\"account_update\",\"t_rx_ns\":{},\"slot\":{},\"error\":\"{}\"}}", acct, t_rx, slot, e) },
+            let health_result = engine.health(&acct, now as i64, slot);
+            let line = match &health_result {
+                Ok(h) => { ledger.on_health(h.liquidatable, false); format!("{\"account\":\"{}\",\"trigger\":\"{}\",\"t_rx_ns\":{},\"slot\":{},\"liquidatable\":{},\"maint_health_bits\":{},\"equity_assets_bits\":{},\"bad_debt\":{}}}", acct, trigger, t_rx, slot, h.liquidatable, h.maintenance_health, h.equity_assets, h.is_bad_debt) },
+                Err(HealthError::Unavailable) => { ledger.on_health(false, false); format!("{\"account\":\"{}\",\"trigger\":\"{}\",\"t_rx_ns\":{},\"slot\":{},\"decision\":\"Unavailable\"}", acct, trigger, t_rx, slot) },
+                Err(e) => { ledger.on_health(false, matches!(e, HealthError::Unsupported(_))); format!("{\"account\":\"{}\",\"trigger\":\"{}\",\"t_rx_ns\":{},\"slot\":{},\"error\":\"{}\"}", acct, trigger, t_rx, slot, e) },
             };
             let _ = writeln!(records, "{}", line);
             // [FIX-1] Pipeline (Shadow): Health → Pläne → Economics → Build → Sign → Send-Boundary.
@@ -642,11 +643,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 freshness, tip_account: None, global_allowed: global_allowed.clone(), prereq_allowed: prereq_allowed.clone(), slot_watch: &slot_watch,
             };
             let mut rec = pipe.evaluate(acct, trigger, t_rx, now, slot, st.run_state().is_tradable());
-            if let Ok(h) = health_result {
+            if let Ok(h) = &health_result {
                 if h.is_bad_debt && h.equity_assets <= 0 && matches!(rec.loss, Some(darkbot_runner::record::LossReason::Routing)) {
                     rec.loss = Some(darkbot_runner::record::LossReason::Bankruptcy);
                     rec.reason = Some("bad debt with zero equity assets: bankruptcy/no-collateral case, not a receivership routing failure".into());
                 }
+            }
+            if rec.reason.as_deref().map(|s| s.contains("ReserveStale")).unwrap_or(false) {
+                rec.loss = Some(darkbot_runner::record::LossReason::IntegrationRefresh);
+                rec.reason = Some("integration reserve stale: required reserve refresh prerequisite missing before exact sizing".into());
             }
             if let Ok(j) = serde_json::to_string(&rec) { let _ = writeln!(records, "{}", j); }
             // [M3] Ledger + [M2] Watchlist (nur Shadow-relevante Entscheidungen).
