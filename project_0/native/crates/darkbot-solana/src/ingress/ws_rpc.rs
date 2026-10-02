@@ -281,6 +281,7 @@ impl WsRpcControlSource {
         last_slot: &mut Option<u64>,
         attempt: u32,
     ) -> Result<(), IngressError> {
+        eprintln!("[ws_rpc] session attempt={} connecting", attempt);
         let (ws, _) = tokio_tungstenite::connect_async(&self.cfg.ws_url)
             .await
             .map_err(|e| IngressError::Connect(e.to_string()))?;
@@ -288,6 +289,18 @@ impl WsRpcControlSource {
 
         // Subscribe-Requests senden; Bestätigungen (id → subscription) einsammeln.
         let requests = build_subscribe_requests(&self.cfg.subscription, self.cfg.commitment);
+        let request_total = requests.len();
+        eprintln!(
+            "[ws_rpc] session attempt={} connected; subscriptions={} (programs={} filtered_programs={} accounts={} slots={} roots={} tx={})",
+            attempt,
+            request_total,
+            self.cfg.subscription.programs.len(),
+            self.cfg.subscription.program_filters.len(),
+            self.cfg.subscription.accounts.len(),
+            self.cfg.subscription.slots as u8,
+            self.cfg.subscription.roots as u8,
+            self.cfg.subscription.transactions_mentioning.len()
+        );
         let mut pending: HashMap<u64, (SubKind, Option<Pubkey>)> = HashMap::new();
         let mut acc_iter = self.cfg.subscription.accounts.iter();
         for (id, kind, req) in &requests {
@@ -354,9 +367,14 @@ impl WsRpcControlSource {
                         sub_ids.insert(sub, entry);
                     }
                 }
+                let acked = request_total.saturating_sub(pending.len());
+                if acked == request_total || acked == 1 || acked % 100 == 0 {
+                    eprintln!("[ws_rpc] session attempt={} subscription ACKs={}/{}", attempt, acked, request_total);
+                }
                 // [FIX-36] StreamReady-Barriere: alle Subscriptions bestätigt → genau ein `Reconnected`.
                 if !stream_ready && pending.is_empty() {
                     stream_ready = true;
+                    eprintln!("[ws_rpc] session attempt={} StreamReady", attempt);
                     if let Err(ChannelError::Disconnected(_)) = sink.try_push(IngressEvent::Reconnected {
                         source: SourceKind::WsRpcControl,
                         attempt,
