@@ -1,6 +1,6 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
-Status: **CURRENT HEAD builds with `crate_health + txv1`; prior full unit-test baseline PASS; post-wiring full tests still to rerun; LIVE remains disabled**  
+Status: **POST-WIRING BUILD/TEST GATE PASS through `[FIX-70]`; first real Shadow/Simulation qualification next; LIVE remains disabled**  
 Updated: 2026-10-02
 
 This is the single human-readable measurement ledger for the new Solana / Project 0 Liquidator.
@@ -188,8 +188,8 @@ When created, use one canonical location and link it here. Do not scatter Projec
 ## 8. Current status
 
 ~~~text
-Project 0 production code:        CURRENT HEAD build PASS with `crate_health + txv1`; prior full unit-test baseline PASS
-Project 0 measurements:           Compiler/test evidence only; post-wiring tests + shadow/mainnet evidence remain open
+Project 0 production code:        POST-WIRING build/tests PASS through `[FIX-70]`
+Project 0 measurements:           Compiler/test evidence only; real Shadow/Mainnet simulation evidence remains open
 Project 0 LIVE:                   NOT ENABLED
 permanent paid provider approved: NONE
 probabilistic ranking approved:   NO
@@ -557,7 +557,7 @@ Protocol Sizing                         IMPLEMENTED + COMPILES
 Jupiter V2 RouteProvider                IMPLEMENTED + COMPILES
 P0ReceivershipBuilder runtime wiring    IMPLEMENTED + COMPILES
 NoPlans in crate_health runtime         REMOVED
-Post-wiring workspace tests             OPEN
+Post-wiring workspace tests             DONE
 Failed-cost evidence                    OPEN
 Shadow simulation on real opportunities OPEN
 ZERO_PREFUND qualification              OPEN
@@ -594,3 +594,21 @@ cargo test \
 ```
 
 If all three are green, update this ledger again and then proceed to the first real Shadow simulation/qualification gate rather than adding more unmeasured architecture.
+
+### 2026-10-02 — Post-wiring compiler/test gate — PASS
+
+**Source line:** `[FIX-59..70]` functional wiring is now compiler/test qualified on the user Mac.
+
+User-reported requested sequence:
+- `cargo build --manifest-path project_0/native/Cargo.toml --features "crate_health txv1"` → **PASS**.
+- `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features "crate_health txv1"` → **PASS**.
+- `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features crate_health` → **PASS**.
+
+The visible final terminal line was a zero-test target (`0 passed; 0 failed`), which is normal and does not represent the total workspace test count. No exact aggregate count is recorded because it was not pasted.
+
+**Gate decision:** dependency/compiler/unit-test work requested by the earlier Fable phase is now **CLOSED for the current wired code**, not merely for the old baseline.
+
+**Next gate:** actual Shadow/Mainnet functional qualification:
+`real account update → exact health → exact sizing → executable route → receivership build → sign → simulate → record evidence`.
+
+**Important blocker before Shadow can be called qualified:** `FailedCostMatrix` remains unknown by design. Shadow must not convert unknown failed-attempt cost to zero merely to reach simulation. The qualification path must preserve unknown economics while still allowing technical build/sign/simulate evidence, or first populate those cells from real evidence.
