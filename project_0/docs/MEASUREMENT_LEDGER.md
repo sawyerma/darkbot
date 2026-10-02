@@ -731,3 +731,104 @@ User-reported current-head verification:
 - Final visible line was a zero-test target (`0 passed; 0 failed`), not the aggregate workspace count.
 
 Gate decision: filtered target-group/liability bootstrap, recovery and WSS subscription path compile/tests. Proceed to G5 real Mainnet bootstrap evidence.
+
+
+### 2026-10-02 — Current Project_0 handoff / progress checkpoint
+
+This checkpoint is the current source for continuation work after C0/G2 and before G5 Mainnet runtime qualification.
+
+#### Evidence already closed
+
+- Compiler/dependency closure through the current wired Project_0 path: PASS on the user Mac.
+- Exact Marginfi Health for trigger (a): implemented against pinned Marginfi source.
+- Exact protocol receivership sizing: implemented.
+- Protocol sizing vs realizable route value: separated.
+- Jupiter V2 raw-instruction RouteProvider: implemented.
+- P0ReceivershipBuilder wired into the crate_health runtime; `NoPlans` is no longer used in that runtime.
+- Technical Shadow path with unknown failed-attempt economics: implemented without converting Unknown to zero.
+- C0-01 full-program Mainnet census: PASS.
+- C0-02 configured-group census: PASS for Shadow activation.
+- Filtered target-group/liability bootstrap, recovery and WSS path: build/test PASS.
+
+#### Mainnet C0 evidence
+
+Configured group: `4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8`
+
+```text
+group MarginfiAccounts             165123
+has_liability                       82680
+lending_only                        82443
+single_borrower                     67556
+has_ever_been_liquidated             5114
+was_liquidatable_last_pulse            61
+was_underwater_last_pulse              60
+active_30d                           9954
+active_60d                           9964
+```
+
+Decision: **G2 GO for Shadow qualification.**
+This proves a real Mainnet liquidation population exists. It does **not** prove sustainable profit.
+
+#### Recent implementation sequence
+
+```text
+[FIX-71] Unknown-economics technical Shadow probe path
+[FIX-72] Shadow launcher + ZERO_PREFUND shadow-probe separation
+[FIX-73] Census RPC/auth hardening
+[FIX-74] Compact 8-byte discriminator census
+[FIX-75] Configured-group IndexerFlags census
+[FIX-76] Runtime trigger/bank scope restricted to P0_GROUP_ID
+[FIX-77] Filtered Program-account snapshot primitive
+[FIX-78] Bootstrap/recovery = liability accounts + group banks + explicit dependencies
+[FIX-79] WSS programSubscribe uses the same liability/group filters
+[FIX-80] Mainnet Shadow launcher derives normal Helius RPC/WSS endpoints from HELIUS_API_KEY
+```
+
+#### Current G-gate state
+
+```text
+G1 compiler/tests                         PASS
+G2 C0 Mainnet market evidence             GO for Shadow
+G3 exact sizing                           IMPLEMENTED + build/test qualified
+G4 executable Jupiter route provider      IMPLEMENTED + build/test qualified
+G5 real Mainnet bootstrap/reconcile       NEXT / NOT YET EVIDENCED
+```
+
+#### Exact current next gate
+
+Run G5 on Mainnet using the production Shadow code:
+
+```text
+StreamReady
+→ filtered target-group/liability Snapshot
+→ required dependencies present
+→ Recovery/Reconcile
+→ READY
+→ real MarginfiAccount updates
+→ exact Health records
+→ exact Sizing
+→ executable Route
+→ P0ReceivershipBuilder
+→ Build
+→ Sign
+→ Simulate
+→ ShadowTechnicalReady or ShadowTechnicalSimFailed
+```
+
+Do not mark G5 PASS until the real runtime output shows READY and valid Health evidence. Do not mark P6-LT qualified until a real opportunity reaches build/sign/simulation and the record is captured.
+
+#### Still open after G5
+
+- FailedCostMatrix: real failed-attempt cost evidence.
+- ZERO_PREFUND: technical Shadow probe is allowed; LIVE qualification is still false.
+- v1 final sign/wire/submission support.
+- ExactOut/JIT qualification.
+- Integration-bank refresh/withdraw completeness.
+- P3-02 thresholds and triggers (b)/(c).
+- P8 landing/token-delta reconciliation and realized PnL.
+- Controlled LIVE remains intentionally disabled.
+- Sustainable production profitability remains unproven.
+
+#### Rough engineering position
+
+Implementation completeness is now roughly **70–75%** of the intended technical product, but production qualification is materially lower because G5/P6/P8 evidence is still missing. This is an engineering estimate, not a measured KPI.
