@@ -47,6 +47,66 @@ pub mod p0 {
         fn sizes(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<Sizing>, String>;
     }
 
+    /// Concrete bridge from protocol-exact sizing into runner economics. It adds only facts that
+    /// exist in reconciled RAM state; unsupported funding/rent paths remain disabled. [FIX-67]
+    pub struct ProtocolSizingProvider<'a, S: AccountSource + ?Sized> {
+        pub state: &'a S,
+        pub program: Pubkey,
+        pub group: Pubkey,
+        pub sol_bank: Pubkey,
+        pub inventory: &'a dyn Fn(&Pubkey) -> u64,
+        pub slippage_bps: u64,
+    }
+
+    impl<'a, S: AccountSource + ?Sized> SizingProvider for ProtocolSizingProvider<'a, S> {
+        fn sizes(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<Sizing>, String> {
+            let sizer = darkbot_project0::sizing::ProtocolSizer {
+                state: self.state,
+                program: self.program,
+                group: self.group,
+                headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
+            };
+            let raw = sizer.sizes(account, now_unix_s as i64, slot)?;
+            let mut out = Vec::with_capacity(raw.len());
+            for sz in raw {
+                let inv_native = (self.inventory)(&sz.liab_bank).min(sz.repay_amount);
+                let inv_value = sizer.native_amount_value_usd_micro(
+                    &sz.liab_bank,
+                    inv_native,
+                    now_unix_s as i64,
+                    slot,
+                )?;
+                let flat_sol_fee = sizer.native_amount_value_usd_micro(
+                    &self.sol_bank,
+                    sz.flat_sol_fee_lamports,
+                    now_unix_s as i64,
+                    slot,
+                )?;
+                out.push(Sizing {
+                    asset_bank: sz.asset_bank,
+                    liab_bank: sz.liab_bank,
+                    withdraw_amount: sz.withdraw_amount,
+                    repay_amount: sz.repay_amount,
+                    seized_equity_value: sz.seized_equity_value_micro,
+                    repay_value: sz.repay_equity_value_micro,
+                    liability_needed_value: sz.repay_equity_value_micro,
+                    liability_inventory_value: inv_value,
+                    // ExactOut/JIT is intentionally disabled until a documented provider path exists.
+                    funding_bank: None,
+                    funding_available_value: 0,
+                    // EndLiquidation premium is already represented by seized-vs-repaid value.
+                    protocol_fees: 0,
+                    flat_sol_fee,
+                    // ATAs must pre-exist; this provider never assumes account-creation rent is zero.
+                    rent_and_token: 0,
+                    premium_bps: sz.premium_bps,
+                    slippage_bps: self.slippage_bps,
+                });
+            }
+            Ok(out)
+        }
+    }
+
     /// Allowlisted Swap-Instructions (Jupiter/Titan) für collateral→liability.
     #[derive(Clone, Debug, Default)]
     pub struct Route {
