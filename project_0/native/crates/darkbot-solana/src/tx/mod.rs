@@ -245,7 +245,7 @@ pub fn measure_v1(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<V
         .with_priority_fee(plan.resources.priority_total_lamports());
     let msg = v1::Message::try_compile_with_config(&payer, &ixs, hash, cfg)
         .map_err(|e| BuildError::Compile(e.to_string()))?;
-    let message_bytes = msg.serialize().len();
+    let message_bytes = msg.size(); // [FIX-58] canonical v1 serialized message size; no wincode feature needed
     let signatures = msg.header.num_required_signatures as usize;
     // SIMD-0385: v1 has no short-vec signature-count prefix; count comes from header.
     let serialized_tx_bytes = message_bytes.saturating_add(signatures.saturating_mul(64));
@@ -379,5 +379,30 @@ mod tests {
             };
             assert!(matches!(build(&plan, Hash::default(), &TxLimits::default()), Err(BuildError::V1Unavailable)));
         }
+    }
+
+    #[cfg(feature = "txv1")]
+    #[test]
+    fn v1_measure_uses_canonical_message_size() {
+        let payer = Pubkey::new_unique();
+        let plan = TxPlan {
+            version: BuildVersion::V1,
+            payer,
+            instructions: vec![Instruction::new_with_bytes(
+                Pubkey::new_unique(),
+                &[1, 2, 3],
+                vec![AccountMeta::new(Pubkey::new_unique(), false)],
+            )],
+            lookup_tables: vec![],
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 5_000,
+                loaded_accounts_data_size: Some(32 * 1024),
+            },
+        };
+        let m = measure_v1(&plan, Hash::default(), &TxLimits::default()).expect("v1 measure");
+        assert!(m.message_bytes > 0);
+        assert_eq!(m.serialized_tx_bytes, m.message_bytes + m.signatures * 64);
+        assert_eq!(m.instructions, 1);
     }
 }
