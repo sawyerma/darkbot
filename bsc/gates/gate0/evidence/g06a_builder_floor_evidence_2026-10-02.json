@@ -1,0 +1,25 @@
+{
+  "schema": "darkbot.g06a.builder-floor-evidence.v1",
+  "observed_date": "2026-10-02",
+  "status": "PARTIAL_BLOCKED_48CLUB_FLOOR_UNRESOLVED",
+  "blockrazor": {
+    "verified": true,
+    "documented_rule": "Average gas price of a BSC bundle must be >= 0.05 gwei; mempool transactions are excluded from the average calculation.",
+    "floor_wei": "50000000",
+    "source": "https://www.blockrazor.io/support/",
+    "note": "Current support page crawled 2026-10-02."
+  },
+  "fortyeightclub": {
+    "verified": false,
+    "current_floor_wei": null,
+    "sources": [
+      "https://web3.48.club/builder",
+      "https://web3.48.club/docs/mev-builder/48-soulpoint-benefits",
+      "https://web3.48.club/docs/mev-builder/bundle-status"
+    ],
+    "observed": "Current public documentation confirms eth_sendBundle, bundle size/rate limits, bundle status and priority behavior, but no current explicit minimum bundle gas-price floor was located.",
+    "rule": "Do not arm DRY-3 from a stale 1-gwei assumption. Obtain a current explicit rule from 48Club endpoint/support or a reproducible dry prequalification before final signing."
+  },
+  "strictest_verified_floor_wei": null,
+  "dry3_ready": false
+}
