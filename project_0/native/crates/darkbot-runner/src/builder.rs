@@ -139,58 +139,108 @@ pub mod p0 {
 
     impl<'a, S: AccountSource, Z: SizingProvider, R: RouteProvider> ReceivershipBuilder for P0ReceivershipBuilder<'a, S, Z, R> {
         fn plans(&self, account: &Pubkey, now_unix_s: u64) -> Result<Vec<ReceivershipPlan>, String> {
-            let Some(sz) = self.sizing.size(account, now_unix_s)? else { return Ok(vec![]) };
+            let sizings = self.sizing.sizes(account, now_unix_s)?;
+            if sizings.is_empty() {
+                return Ok(vec![]);
+            }
             let health = CrateHealth { state: self.state, group: self.group };
             let obs = health.observation_accounts(account).map_err(|e| e.to_string())?;
-            let (_, liab_mint, _) = self.bank(&sz.liab_bank)?;
-            let (_, asset_mint, _) = self.bank(&sz.asset_bank)?;
-            let inv = (self.inventory)(&sz.liab_bank);
-            let route = self.routes.quote_exact_in(&sz.asset_bank, &sz.liab_bank, sz.withdraw_amount)?;
-            let ctx = FundingContext {
-                liability_mint: liab_mint,
-                liability_needed: sz.repay_amount,
-                liability_inventory: inv,
-                liability_needed_value: sz.liability_needed_value,
-                liability_inventory_value: sz.liability_inventory_value,
-                funding_bank: sz.funding_bank,
-                funding_available_value: sz.funding_available_value,
-                zero_prefund_qualified: self.zero_prefund_qualified,
-                route_available: route.is_some(),
-            };
             let mut out = Vec::new();
-            for class in funding::feasible_classes(&ctx) {
-                let capital = funding::capital_required(class, &ctx);
-                let plan = match class {
-                    FundingClass::ZeroPrefundSameTx => {
-                        // [FIX-20] dieselbe Route als v0- UND v1-Kandidat; passt v0 nicht in 1232 B, bleibt v1 erhalten.
-                        let r = route.clone().ok_or("route")?;
-                        let (ixs, steps) = self.receivership(account, &obs, &sz, r.instructions.clone(), false)?;
-                        out.push(ReceivershipPlan { steps: steps.clone(), instructions: ixs.clone(), route: RouteKind::FreePublicAllowed, input: self.input(&sz, class, r.fees_and_impact, capital),
-                            premium_bps: sz.premium_bps, exposure: capital, tip: self.jito_tip, slippage_bps: sz.slippage_bps, assets: vec![asset_mint, liab_mint],
-                            tx_version: BuildVersion::V1, lookup_tables: vec![], prerequisite_txs: vec![] });
-                        ReceivershipPlan { steps, instructions: ixs, route: RouteKind::FreePublicAllowed, input: self.input(&sz, class, r.fees_and_impact, capital),
-                            premium_bps: sz.premium_bps, exposure: capital, tip: self.jito_tip, slippage_bps: sz.slippage_bps, assets: vec![asset_mint, liab_mint],
-                            tx_version: BuildVersion::V0, lookup_tables: r.lookup_tables, prerequisite_txs: vec![] }
-                    }
-                    FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
-                        let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
-                        ReceivershipPlan { steps, instructions: ixs, route: RouteKind::NoSwap, input: self.input(&sz, class, 0, capital),
-                            premium_bps: sz.premium_bps, exposure: capital, tip: self.jito_tip, slippage_bps: 0, assets: vec![asset_mint, liab_mint],
-                            tx_version: BuildVersion::V0, lookup_tables: vec![], prerequisite_txs: vec![] }
-                    }
-                    FundingClass::JitShortfall => {
-                        // [FIX-17] Buy-TX: Funding-Bank (Base-Inventar) → Liability, nur der Token-Fehlbetrag.
-                        let Some(fb) = sz.funding_bank else { continue };
-                        let shortfall = funding::shortfall_token_amount(&ctx);
-                        let Some(buy) = self.routes.quote_exact_out(&fb, &sz.liab_bank, shortfall)? else { continue }; // [FIX-29] ExactOut
-                        let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
-                        ReceivershipPlan { steps, instructions: ixs, route: RouteKind::NoSwap, input: self.input(&sz, class, buy.fees_and_impact, capital),
-                            premium_bps: sz.premium_bps, exposure: capital, tip: self.jito_tip, slippage_bps: sz.slippage_bps, assets: vec![asset_mint, liab_mint],
-                            tx_version: BuildVersion::V0, lookup_tables: buy.lookup_tables, prerequisite_txs: vec![buy.instructions] }
-                    }
-                    FundingClass::FlashFunded => continue,
+
+            for sz in sizings {
+                let (_, liab_mint, _) = self.bank(&sz.liab_bank)?;
+                let (_, asset_mint, _) = self.bank(&sz.asset_bank)?;
+                let inv = (self.inventory)(&sz.liab_bank);
+                // [FIX-60] Ohne executable Marktquote kein Realizable-Value; Oracle-Wert wird nicht eingesetzt.
+                let market = self.routes.quote_exact_in(&sz.asset_bank, &sz.liab_bank, sz.withdraw_amount)?;
+                let ctx = FundingContext {
+                    liability_mint: liab_mint,
+                    liability_needed: sz.repay_amount,
+                    liability_inventory: inv,
+                    liability_needed_value: sz.liability_needed_value,
+                    liability_inventory_value: sz.liability_inventory_value,
+                    funding_bank: sz.funding_bank,
+                    funding_available_value: sz.funding_available_value,
+                    zero_prefund_qualified: self.zero_prefund_qualified,
+                    route_available: market.is_some(),
                 };
-                out.push(plan);
+
+                for class in funding::feasible_classes(&ctx) {
+                    let capital = funding::capital_required(class, &ctx);
+                    let Some(mark) = market.clone() else { continue };
+                    let plan = match class {
+                        FundingClass::ZeroPrefundSameTx => {
+                            let (ixs, steps) = self.receivership(account, &obs, &sz, mark.instructions.clone(), false)?;
+                            out.push(ReceivershipPlan {
+                                steps: steps.clone(),
+                                instructions: ixs.clone(),
+                                route: RouteKind::FreePublicAllowed,
+                                input: self.input(&sz, class, mark.realizable_value, mark.fees_and_impact, capital),
+                                premium_bps: sz.premium_bps,
+                                exposure: capital,
+                                tip: self.jito_tip,
+                                slippage_bps: sz.slippage_bps,
+                                assets: vec![asset_mint, liab_mint],
+                                tx_version: BuildVersion::V1,
+                                lookup_tables: vec![],
+                                prerequisite_txs: vec![],
+                            });
+                            ReceivershipPlan {
+                                steps,
+                                instructions: ixs,
+                                route: RouteKind::FreePublicAllowed,
+                                input: self.input(&sz, class, mark.realizable_value, mark.fees_and_impact, capital),
+                                premium_bps: sz.premium_bps,
+                                exposure: capital,
+                                tip: self.jito_tip,
+                                slippage_bps: sz.slippage_bps,
+                                assets: vec![asset_mint, liab_mint],
+                                tx_version: BuildVersion::V0,
+                                lookup_tables: mark.lookup_tables,
+                                prerequisite_txs: vec![],
+                            }
+                        }
+                        FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
+                            let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
+                            ReceivershipPlan {
+                                steps,
+                                instructions: ixs,
+                                route: RouteKind::NoSwap,
+                                input: self.input(&sz, class, mark.realizable_value, mark.fees_and_impact, capital),
+                                premium_bps: sz.premium_bps,
+                                exposure: capital,
+                                tip: self.jito_tip,
+                                slippage_bps: 0,
+                                assets: vec![asset_mint, liab_mint],
+                                tx_version: BuildVersion::V0,
+                                lookup_tables: vec![],
+                                prerequisite_txs: vec![],
+                            }
+                        }
+                        FundingClass::JitShortfall => {
+                            let Some(fb) = sz.funding_bank else { continue };
+                            let shortfall = funding::shortfall_token_amount(&ctx);
+                            let Some(buy) = self.routes.quote_exact_out(&fb, &sz.liab_bank, shortfall)? else { continue };
+                            let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
+                            ReceivershipPlan {
+                                steps,
+                                instructions: ixs,
+                                route: RouteKind::NoSwap,
+                                input: self.input(&sz, class, mark.realizable_value, mark.fees_and_impact.saturating_add(buy.fees_and_impact), capital),
+                                premium_bps: sz.premium_bps,
+                                exposure: capital,
+                                tip: self.jito_tip,
+                                slippage_bps: sz.slippage_bps,
+                                assets: vec![asset_mint, liab_mint],
+                                tx_version: BuildVersion::V0,
+                                lookup_tables: buy.lookup_tables,
+                                prerequisite_txs: vec![buy.instructions],
+                            }
+                        }
+                        FundingClass::FlashFunded => continue,
+                    };
+                    out.push(plan);
+                }
             }
             Ok(out)
         }
