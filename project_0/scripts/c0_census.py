@@ -43,7 +43,10 @@ ACCOUNT_TYPES = [
     "FeeState",
     "LiquidationRecord",
     "StakedSettings",
-    "RebalanceOrder",
+    "BankMetadata",
+    "Order",
+    "ExecuteOrderRecord",
+    "SameAssetEmodeRegistry",
 ]
 
 
@@ -101,6 +104,63 @@ def fetch_program_accounts(url: str, program_id: str):
     return slot, result["value"]
 
 
+MARGINFI_ACCOUNT_RAW_LEN = 8 + 2304
+# MarginfiAccount.indexer_flags starts at payload offset 2248; add 8-byte Anchor discriminator.
+INDEXER_FLAGS_RAW_OFFSET = 8 + 2248
+INDEXER_FLAGS_LEN = 24
+
+
+def fetch_group_indexer_flags(url: str, program_id: str, group_id: str):
+    """Compact C0-02 indicator scan for exactly one MarginfiGroup."""
+    params = [
+        program_id,
+        {
+            "encoding": "base64",
+            "commitment": "confirmed",
+            "withContext": True,
+            "filters": [
+                {"dataSize": MARGINFI_ACCOUNT_RAW_LEN},
+                {"memcmp": {"offset": 8, "bytes": group_id}},
+            ],
+            "dataSlice": {"offset": INDEXER_FLAGS_RAW_OFFSET, "length": INDEXER_FLAGS_LEN},
+        },
+    ]
+    result = rpc_call(url, "getProgramAccounts", params)
+    return result["context"]["slot"], result["value"]
+
+
+def group_indexer_census(accounts):
+    counts = Counter()
+    for acc in accounts:
+        raw = base64.b64decode(acc["account"]["data"][0])
+        if len(raw) < 16:
+            counts["malformed_indexer_slice"] += 1
+            continue
+        # IndexerFlags byte layout from pinned mrgn-0.1.11-rc1 user_account.rs.
+        if raw[0] == 1:
+            counts["lending_only"] += 1
+        else:
+            counts["has_liability"] += 1
+        if raw[1] == 1:
+            counts["empty"] += 1
+        if raw[2] == 1:
+            counts["single_borrower"] += 1
+        if raw[3] == 1:
+            counts["has_ever_been_liquidated"] += 1
+        if raw[11] == 1:
+            counts["was_liquidatable_last_pulse"] += 1
+        if raw[12] == 1:
+            counts["was_underwater_last_pulse"] += 1
+        if raw[13] == 1:
+            counts["active_30d"] += 1
+        if raw[14] == 1:
+            counts["active_60d"] += 1
+        if raw[15] == 1:
+            counts["trivial_balance"] += 1
+    counts["accounts_total"] = len(accounts)
+    return dict(counts)
+
+
 def census(accounts, context_slot, program_id, group_id, rpc_host, source_note):
     by_type = Counter()
     sizes_by_type = defaultdict(Counter)
@@ -142,6 +202,25 @@ def census(accounts, context_slot, program_id, group_id, rpc_host, source_note):
         "health_classification": "N/A — C0-02 Teil 2 benötigt P1A-Layout",
         "long_tail_candidates": "N/A — nach Health-Klassifikation",
     }
+
+
+def write_group_outputs(out_dir, accounts, slot):
+    path = os.path.join(out_dir, f"group_accounts_slot{slot}.jsonl")
+    h = hashlib.sha256()
+    with open(path, "w") as f:
+        for acc in accounts:
+            line = json.dumps(
+                {
+                    "pubkey": acc["pubkey"],
+                    "indexer_flags_b64": acc["account"]["data"][0],
+                    "space": acc["account"].get("space"),
+                    "slot": slot,
+                },
+                separators=(",", ":"),
+            )
+            f.write(line + "\n")
+            h.update(line.encode())
+    return path, h.hexdigest()
 
 
 def write_outputs(out_dir, accounts, report):
@@ -245,9 +324,34 @@ def main():
     dt = time.monotonic() - t0
     report = census(accounts, slot, args.program, args.group, rpc_host, "getProgramAccounts confirmed")
     report["gpa_duration_s"] = round(dt, 3)
+
+    print(f"C0 group scan: {args.group}", file=sys.stderr, flush=True)
+    tg0 = time.monotonic()
+    group_slot, group_accounts = fetch_group_indexer_flags(url, args.program, args.group)
+    report["group_context_slot"] = group_slot
+    report["group_indexer"] = group_indexer_census(group_accounts)
+    report["group_scan_duration_s"] = round(time.monotonic() - tg0, 3)
+
     jl, rp = write_outputs(args.out, accounts, report)
-    print(json.dumps({k: report[k] for k in ("context_slot", "accounts_total", "bytes_total", "by_type", "unknown_discriminators", "gpa_duration_s")}, indent=2))
-    print(f"raw:    {jl}\nreport: {rp}")
+    gjl, gsha = write_group_outputs(args.out, group_accounts, group_slot)
+    report["group_raw_evidence_path"] = gjl
+    report["group_raw_evidence_sha256"] = gsha
+    # Re-write report after adding group evidence path/hash.
+    with open(rp, "w") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    print(json.dumps({
+        "context_slot": report["context_slot"],
+        "accounts_total": report["accounts_total"],
+        "bytes_total": report["bytes_total"],
+        "by_type": report["by_type"],
+        "unknown_discriminators": report["unknown_discriminators"],
+        "gpa_duration_s": report["gpa_duration_s"],
+        "group_context_slot": report["group_context_slot"],
+        "group_indexer": report["group_indexer"],
+        "group_scan_duration_s": report["group_scan_duration_s"],
+    }, indent=2))
+    print(f"raw:       {jl}\ngroup_raw: {gjl}\nreport:    {rp}")
     return 0
 
 
