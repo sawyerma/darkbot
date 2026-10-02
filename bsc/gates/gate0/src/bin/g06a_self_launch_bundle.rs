@@ -494,7 +494,7 @@ fn main() {
         .and_then(|x| x.checked_add(worst_case_gas))
         .expect("attempt budget overflow");
     assert!(
-        reserved <= 11_000_000_000_000_000u128,
+        reserved <= 10_603_270_000_000_000u128,
         "DRY-3 precheck: attempt reserve exceeds v2 proposal ceiling"
     );
 
@@ -547,7 +547,7 @@ fn main() {
             + buy_value as u128
             + (launch_gas_used as u128 + buy_gas_used as u128) * gas_price as u128;
         assert!(
-            simulated_cost <= 11_000_000_000_000_000u128,
+            simulated_cost <= 10_603_270_000_000_000u128,
             "DRY-3 simulated attempt cost exceeds v2 proposal ceiling"
         );
         dry3 = true;
@@ -612,7 +612,7 @@ fn main() {
         },
         "budget": {
             "worst_case_reserved_wei": reserved.to_string(),
-            "v2_proposal_per_attempt_ceiling_wei": "11000000000000000"
+            "v2_proposal_per_attempt_ceiling_wei": "10603270000000000"
         },
         "dry_pass": {
             "DRY_1_bytes_and_signers": dry1,
