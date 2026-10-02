@@ -60,6 +60,10 @@ def rpc_call(url: str, method: str, params, timeout: float = 120.0, retries: int
     last_err = None
     for attempt in range(1, retries + 1):
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        if attempt == 1:
+            print(f"RPC {method}: request sent; waiting for response...", file=sys.stderr, flush=True)
+        else:
+            print(f"RPC {method}: retry {attempt}/{retries}...", file=sys.stderr, flush=True)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 payload = json.loads(resp.read().decode())
@@ -83,7 +87,14 @@ def rpc_call(url: str, method: str, params, timeout: float = 120.0, retries: int
 def fetch_program_accounts(url: str, program_id: str):
     params = [
         program_id,
-        {"encoding": "base64", "commitment": "confirmed", "withContext": True},
+        {
+            "encoding": "base64",
+            "commitment": "confirmed",
+            "withContext": True,
+            # C0 only needs the Anchor discriminator. Current Solana RPC responses also expose
+            # full account size in account.space, avoiding transfer of every full account payload.
+            "dataSlice": {"offset": 0, "length": 8},
+        },
     ]
     result = rpc_call(url, "getProgramAccounts", params)
     slot = result["context"]["slot"]
@@ -98,16 +109,21 @@ def census(accounts, context_slot, program_id, group_id, rpc_host, source_note):
     for acc in accounts:
         data_b64 = acc["account"]["data"][0]
         raw = base64.b64decode(data_b64)
-        total_bytes += len(raw)
+        space = acc["account"].get("space")
+        if space is None:
+            # Compatibility fallback for RPCs that omit space. With the production compact
+            # dataSlice this would make size evidence unavailable rather than inventing it.
+            space = len(raw)
+        total_bytes += int(space)
         disc = raw[:8]
         name = DISCRIMINATORS.get(disc)
         if name is None:
             unknown_disc[disc.hex()] += 1
             by_type["UNKNOWN_DISCRIMINATOR"] += 1
-            sizes_by_type["UNKNOWN_DISCRIMINATOR"][len(raw)] += 1
+            sizes_by_type["UNKNOWN_DISCRIMINATOR"][int(space)] += 1
         else:
             by_type[name] += 1
-            sizes_by_type[name][len(raw)] += 1
+            sizes_by_type[name][int(space)] += 1
     return {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "ticket": "C0-01",
@@ -139,7 +155,8 @@ def write_outputs(out_dir, accounts, report):
                     "pubkey": acc["pubkey"],
                     "lamports": acc["account"]["lamports"],
                     "owner": acc["account"]["owner"],
-                    "data_b64": acc["account"]["data"][0],
+                    "discriminator_b64": acc["account"]["data"][0],
+                    "space": acc["account"].get("space"),
                     "slot": report["context_slot"],
                 },
                 separators=(",", ":"),
@@ -163,8 +180,8 @@ def selftest():
     known = anchor_discriminator("Bank") + b"\x00" * 1856  # Rohlänge = 8 + 1856 (Payload ohne Discriminator)
     unknown = b"\xff" * 8 + b"\x00" * 100
     fixture = [
-        {"pubkey": "A", "account": {"lamports": 1, "owner": "P", "data": [base64.b64encode(known).decode(), "base64"]}},
-        {"pubkey": "B", "account": {"lamports": 2, "owner": "P", "data": [base64.b64encode(unknown).decode(), "base64"]}},
+        {"pubkey": "A", "account": {"lamports": 1, "owner": "P", "space": len(known), "data": [base64.b64encode(known[:8]).decode(), "base64"]}},
+        {"pubkey": "B", "account": {"lamports": 2, "owner": "P", "space": len(unknown), "data": [base64.b64encode(unknown[:8]).decode(), "base64"]}},
     ]
     rep = census(fixture, 123, DEFAULT_PROGRAM_ID, DEFAULT_GROUP_ID, "selftest", "fixture")
     assert rep["accounts_total"] == 2
@@ -209,6 +226,7 @@ def main():
         url = f"https://mainnet.helius-rpc.com/?api-key={key}"
     rpc_host = url.split("?")[0]
 
+    print("C0 compact scan: requesting only 8-byte discriminators + account.space", file=sys.stderr, flush=True)
     t0 = time.monotonic()
     try:
         slot, accounts = fetch_program_accounts(url, args.program)
