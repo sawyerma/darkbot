@@ -471,7 +471,8 @@ fn main() {
         "params":[{
             "txs":[launch_hex.clone(), buy_hex.clone()],
             "maxBlockNumber": max_block,
-            "noMerge": true
+            "noMerge": true,
+            "positionFirst": true
         }]
     });
 
@@ -605,7 +606,9 @@ fn main() {
             "blockrazor_payload_sha256": br_digest,
             "fortyeightclub_payload_sha256": c48_digest,
             "send_head": send_head,
-            "max_block": max_block
+            "max_block": max_block,
+            "fortyeightclub_noMerge": true,
+            "fortyeightclub_positionFirst": true
         },
         "budget": {
             "worst_case_reserved_wei": reserved.to_string(),
