@@ -1008,3 +1008,27 @@ Interpretation:
 - bootstrap probes carry `bootstrap_snapshot_probe` trigger provenance.
 
 Current P6-LT blocker: integration refresh completeness and obtaining at least one current liquidatable account with executable collateral/liability sizing. No Build/Sign/Sim evidence exists yet.
+
+
+### 2026-10-03 — Fable audit remediation R0 / R1-A5 checkpoint
+
+R0 compiler baseline after [FIX-87]:
+
+```text
+cargo build --manifest-path project_0/native/Cargo.toml --features "crate_health txv1"
+cargo test  --manifest-path project_0/native/Cargo.toml --workspace --features "crate_health txv1"
+...
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+Decision: **R0 PASS**.
+
+A5 circuit-breaker remediation is now implemented but not yet compiler/Mainnet-qualified:
+
+- [FIX-88a] off-chain receivership CB gate using explicit Client Clock;
+- all breaker/oracle math remains in pinned marginfi `BankImpl` / `OraclePriceFeedAdapter`;
+- [FIX-88b] dedicated `LossReason::CircuitBreaker`;
+- [FIX-88c] shared `HealthEngine::receivership_eligibility` contract;
+- [FIX-88d] shared Pipeline invokes eligibility after liquidatable Health and before Builder/Sizing.
+
+Status: **IMPLEMENTED / VERIFY**. Next gate is build/test green before structured planning-rejection diagnostics are introduced.
