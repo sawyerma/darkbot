@@ -454,6 +454,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut counts = [0u64; 6];
     let mut last_reported_update_total = 0u64; // [FIX-81]
+    let mut bootstrap_probe_done = false; // [FIX-84]
     loop {
         if shutdown.is_requested() {
             break;
@@ -492,6 +493,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("recovery: {:?}, run_state={:?}", o, st.run_state());
             if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
                 halt.clear();
+                #[cfg(feature = "crate_health")]
+                if mode == "shadow" && !bootstrap_probe_done {
+                    bootstrap_probe_done = true;
+                    let mut probes = Vec::new();
+                    for (pk, r) in st.iter_owned_by(&program) {
+                        if bootstrap_probe_candidate(&r.data, &group) {
+                            probes.push(darkbot_solana::ingress::AccountUpdate {
+                                pubkey: *pk,
+                                owner: r.owner,
+                                lamports: r.lamports,
+                                data: r.data.clone(),
+                                slot: r.slot,
+                                write_version: r.write_version,
+                                source: SourceKind::Snapshot,
+                                t_rx_ns: clock.now_ns(),
+                            });
+                        }
+                    }
+                    probes.sort_unstable_by_key(|a| a.pubkey.to_bytes());
+                    let mut queued = 0usize;
+                    for a in probes {
+                        if producer.try_push(IngressEvent::Account(a)).is_ok() {
+                            queued += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    eprintln!("bootstrap_probe: queued={} candidates from was_liquidatable", queued);
+                }
             }
         }
         // [FIX-34][FIX-35] Nach dem Anwenden: zeigt die NEUE Bank-Konfiguration auf nicht abonnierte Accounts?
