@@ -149,6 +149,24 @@ fn marginfi_account_in_group(data: &[u8], group: &Pubkey) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(feature = "crate_health")]
+fn bank_filters(group: &Pubkey) -> Vec<serde_json::Value> {
+    vec![
+        serde_json::json!({"dataSize": 8 + std::mem::size_of::<Bank>()}),
+        serde_json::json!({"memcmp": {"offset": 41, "bytes": group.to_string()}}),
+    ]
+}
+
+#[cfg(feature = "crate_health")]
+fn liability_account_filters(group: &Pubkey) -> Vec<serde_json::Value> {
+    vec![
+        serde_json::json!({"dataSize": 8 + std::mem::size_of::<MarginfiAccount>()}),
+        serde_json::json!({"memcmp": {"offset": 8, "bytes": group.to_string()}}),
+        // IndexerFlags.is_lending_only == 0; one zero byte is base58 "1".
+        serde_json::json!({"memcmp": {"offset": 8 + 2248, "bytes": "1"}}),
+    ]
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("p0-longtail: {}", e);
@@ -179,9 +197,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let slot_watch = SlotWatch::new(); // [FIX-40]
     let (producer, consumer) = bounded::<IngressEvent>("ingress", buffer_cap);
 
-    // [FIX-26] Externe Abhängigkeiten (Oracles, Integrationen, Mints) aus den Banks ableiten — vor dem
-    // Stream-Start, damit accountSubscribe + Snapshot sie von Anfang an halten. Ein zusätzlicher gPA.
+    // [FIX-78] Bootstrap only the configured group's Banks first. Full-program GPA was ~387 MB
+    // in C0 and is unnecessary for dependency discovery.
     let dep_rpc = RpcClient::new(config::require("P0_RPC_URL")?);
+    #[cfg(feature = "crate_health")]
+    let pre = snapshot::program_accounts_filtered(&dep_rpc, &program, bank_filters(&group), &clock)?;
+    #[cfg(not(feature = "crate_health"))]
     let pre = snapshot::program_accounts(&dep_rpc, &program, &clock)?;
     let mut pre_state = StateCore::new(1);
     pre_state.install_snapshot(pre.slot, pre.accounts);
@@ -201,7 +222,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
     #[cfg(feature = "crate_health")]
-    let mut required_dependency_keys = darkbot_project0::health::dependency_keys(&StateView(&pre_state), &program, &bank_keys);
+    let mut required_dependency_keys = {
+        let mut v = darkbot_project0::health::dependency_keys(&StateView(&pre_state), &program, &bank_keys);
+        v.push(group);
+        v.push(protocol::fee_state_pda(&program));
+        v.sort_unstable_by_key(|k| k.to_bytes());
+        v.dedup();
+        v
+    };
     #[cfg(not(feature = "crate_health"))]
     let mut required_dependency_keys: Vec<Pubkey> = Vec::new();
 
@@ -262,17 +290,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let dep_for_fetch = dep_shared.clone();
     let opt_for_fetch = opt_shared.clone();
     let mut fetch = move || -> Result<SnapshotData, String> {
-        // [FIX-26] Snapshot = P0-Programm + externe Abhängigkeiten, gemeinsam reconciled.
-        let s = snapshot::program_accounts(&rpc, &program, &clock).map_err(|e| e.to_string())?;
+        // [FIX-78] Recovery snapshot = target-group liability accounts + target-group banks +
+        // explicit required/optional dependencies. Lending-only accounts are excluded.
+        #[cfg(feature = "crate_health")]
+        let a = snapshot::program_accounts_filtered(&rpc, &program, liability_account_filters(&group), &clock)
+            .map_err(|e| e.to_string())?;
+        #[cfg(feature = "crate_health")]
+        let b = snapshot::program_accounts_filtered(&rpc, &program, bank_filters(&group), &clock)
+            .map_err(|e| e.to_string())?;
+        #[cfg(not(feature = "crate_health"))]
+        let a = snapshot::program_accounts(&rpc, &program, &clock).map_err(|e| e.to_string())?;
+        #[cfg(not(feature = "crate_health"))]
+        let b = darkbot_solana::state::snapshot::Snapshot { slot: a.slot, accounts: Vec::new(), missing: Vec::new() };
         let required = dep_for_fetch.lock().map_err(|_| "dep lock".to_string())?.clone();
         let optional = opt_for_fetch.lock().map_err(|_| "opt dep lock".to_string())?.clone();
         let d = snapshot::multiple_accounts(&rpc, &required, &clock).map_err(|e| e.to_string())?;
         let o = snapshot::multiple_accounts(&rpc, &optional, &clock).map_err(|e| e.to_string())?;
-        let mut accounts = s.accounts;
+        let mut accounts = a.accounts;
+        accounts.extend(b.accounts);
         accounts.extend(d.accounts);
         accounts.extend(o.accounts);
         // Required dependencies stay fail-closed; missing optional ATAs only disable that candidate.
-        let mut slot = s.slot;
+        let mut slot = a.slot;
+        if b.slot != 0 { slot = slot.min(b.slot); }
         if d.slot != 0 { slot = slot.min(d.slot); }
         if o.slot != 0 { slot = slot.min(o.slot); }
         Ok(SnapshotData { slot, accounts, missing_required: d.missing })
