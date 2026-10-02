@@ -86,8 +86,16 @@ pub trait AccountSource {
 pub mod crate_impl {
     use super::*;
     use crate::protocol; // [FIX-50] used by closeout threshold below
-    use marginfi::state::marginfi_account::get_health_components;
-    use marginfi_type_crate::types::{Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, RequirementType};
+    use marginfi::state::{
+        bank::BankImpl,
+        marginfi_account::get_health_components,
+        price::OraclePriceFeedAdapter,
+    };
+    use marginfi_type_crate::constants::CIRCUIT_BREAKER_ENABLED;
+    use marginfi_type_crate::types::{
+        Bank, BankOperationalState, HealthPriceMode, MarginfiAccount, MarginfiGroup,
+        OraclePriceType, RequirementType,
+    };
     use solana_sdk::account::Account;
     use solana_sdk::account_info::IntoAccountInfo;
     use solana_sdk::clock::Clock;
@@ -164,6 +172,94 @@ pub mod crate_impl {
             let (assets, liabs) = get_health_components(acc, group, &ais, req, &mut None, HealthPriceMode::Client(clock.clone()))
                 .map_err(|e| HealthError::Crate(e.to_string()))?;
             Ok((assets.to_bits(), liabs.to_bits()))
+        }
+
+        /// [FIX-88] Off-chain parity for the receivership circuit-breaker gate.
+        ///
+        /// The on-chain helpers use Clock::get(), which is not usable as an authoritative
+        /// off-chain clock. The control flow below is intentionally identical to pinned
+        /// marginfi `run_cb_price_gate` / `any_balance_bank_is_cb_halted`, while all
+        /// actual breaker/oracle math remains in the official BankImpl / Oracle adapter.
+        pub fn receivership_cb_gate(
+            &self,
+            account: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<(), HealthError> {
+            let (_, _, adata) = self.raw(account)?;
+            let acc: &MarginfiAccount = load(adata)?;
+            let clock = Clock {
+                slot,
+                epoch_start_timestamp: 0,
+                epoch: 0,
+                leader_schedule_epoch: 0,
+                unix_timestamp: now_unix_s,
+            };
+
+            for balance in acc.lending_account.balances.iter().filter(|b| b.is_active()) {
+                let (_, _, bdata) = self.raw(&balance.bank_pk)?;
+                let bank: &Bank = load(bdata)?;
+
+                if bank.is_cb_halted(now_unix_s)
+                    || bank.config.operational_state == BankOperationalState::CircuitBroken
+                {
+                    return Err(HealthError::Unsupported(format!(
+                        "CB_HALTED bank={}",
+                        balance.bank_pk
+                    )));
+                }
+
+                if !bank.get_flag(CIRCUIT_BREAKER_ENABLED) {
+                    continue;
+                }
+
+                let keys = bank_observation_keys(bank)?;
+                let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(keys.len());
+                for key in keys {
+                    let (owner, lamports, data) = self.raw(&key)?;
+                    owned.push((
+                        key,
+                        Account {
+                            lamports,
+                            data: data.to_vec(),
+                            owner,
+                            executable: false,
+                            rent_epoch: 0,
+                        },
+                    ));
+                }
+                let ais: Vec<_> = owned
+                    .iter_mut()
+                    .map(|(key, account)| (&*key, account).into_account_info())
+                    .collect();
+
+                let (_, cache_price) =
+                    OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+                        bank,
+                        &ais,
+                        &clock,
+                        OraclePriceType::RealTime,
+                    )
+                    .map_err(|e| {
+                        HealthError::Crate(format!(
+                            "CB_ORACLE bank={} error={}",
+                            balance.bank_pk, e
+                        ))
+                    })?;
+                let observation = cache_price.cb_observation().map_err(|e| {
+                    HealthError::Crate(format!(
+                        "CB_OBSERVATION bank={} error={}",
+                        balance.bank_pk, e
+                    ))
+                })?;
+                bank.cb_price_gate(observation).map_err(|e| {
+                    HealthError::Unsupported(format!(
+                        "CB_PRICE_GATE bank={} error={}",
+                        balance.bank_pk, e
+                    ))
+                })?;
+            }
+            Ok(())
         }
     }
 
