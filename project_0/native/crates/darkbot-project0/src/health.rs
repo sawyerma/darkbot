@@ -61,6 +61,13 @@ impl std::error::Error for HealthError {}
 
 pub trait HealthEngine {
     fn health(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<HealthView, HealthError>;
+    /// Protocol eligibility that must hold before receivership planning.
+    ///
+    /// Default keeps test/fake engines source-compatible. Production CrateHealth overrides this
+    /// with the pinned marginfi circuit-breaker gate. [FIX-88]
+    fn receivership_eligibility(&self, _account: &Pubkey, _now_unix_s: i64, _slot: u64) -> Result<(), HealthError> {
+        Ok(())
+    }
     /// Observation-Accounts in Programm-Reihenfolge (remaining_accounts für Start/End/Withdraw).
     fn observation_accounts(&self, account: &Pubkey) -> Result<Vec<Pubkey>, HealthError>;
     fn thresholds(&self, account: &Pubkey) -> Result<AccountThresholds, HealthError>;
@@ -284,6 +291,10 @@ pub mod crate_impl {
                 closeout_allowed: ea < five_usd_bits,
                 liquidatable: ma < ml && ml > 0,
             })
+        }
+
+        fn receivership_eligibility(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<(), HealthError> {
+            self.receivership_cb_gate(account, now_unix_s, slot)
         }
 
         fn observation_accounts(&self, account: &Pubkey) -> Result<Vec<Pubkey>, HealthError> {
