@@ -86,6 +86,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             trigger: trigger.to_string(),
             decision: Decision::Skip,
             net_profit: None,
+            economics_known: false,
             premium_bps: None,
             t_profitable_unix_s: None,
             tx_version: None,
@@ -161,7 +162,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             return rec.with_timeline(&tl);
         };
 
-        let mut best: Option<(ReceivershipPlan, darkbot_solana::tx::BuiltTx, Evaluation)> = None;
+        let mut best_actionable: Option<(ReceivershipPlan, darkbot_solana::tx::BuiltTx, Evaluation)> = None;
+        let mut best_probe: Option<(ReceivershipPlan, darkbot_solana::tx::BuiltTx, Evaluation)> = None;
         let mut threshold_hits: u32 = 0;
         let mut rejected = Vec::new();
         for plan in plans {
@@ -206,16 +208,21 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     }
                 },
             };
-            if !economics::actionable(eval, self.min_profit, true, state_valid, safety_valid) {
-                // [FIX-43] strukturierter Grund: positiv aber unter MIN_PROFIT = Schwelle; sonst unprofitabel/unbekannt.
+            let actionable = economics::actionable(eval, self.min_profit, true, state_valid, safety_valid);
+            let technical_probe = self.mode == Mode::Shadow
+                && matches!(eval, Evaluation::Unknown)
+                && state_valid
+                && safety_valid;
+            if !actionable && !technical_probe {
                 if let Evaluation::Known { net, .. } = eval {
                     if net > 0 && net <= self.min_profit { threshold_hits += 1; }
                 }
                 rejected.push(format!("{}: economics {:?}", plan.input.funding.as_str(), eval));
                 continue;
             }
-            // [FIX-42] T_detect = erster tatsächlich actionabler Kandidat, VOR dem TX-Build.
-            tl.mark(Stage::Detect, self.clock.now_ns());
+            if tl.get(Stage::Detect).is_none() {
+                tl.mark(Stage::Detect, self.clock.now_ns());
+            }
 
             // [FIX-3] Prerequisite-TXs nur über Bundle-Pfad; sonst ist der Kandidat nicht ausführbar.
             if !self.submitter.supports_tx_version(plan.tx_version) { // [FIX-38]
@@ -241,15 +248,25 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 }
             };
 
-            let replace = best.as_ref().map_or(true, |(_, _, current)| {
-                economics::compare_evaluations(eval, *current).is_gt()
-            });
-            if replace {
-                best = Some((plan, built, eval));
+            if actionable {
+                let replace = best_actionable.as_ref().map_or(true, |(_, _, current)| {
+                    economics::compare_evaluations(eval, *current).is_gt()
+                });
+                if replace {
+                    best_actionable = Some((plan, built, eval));
+                }
+            } else {
+                let candidate_key = (built.serialized_len, built.locked_accounts, plan.input.funding.as_str());
+                let replace = best_probe.as_ref().map_or(true, |(cur_plan, cur_built, _)| {
+                    candidate_key < (cur_built.serialized_len, cur_built.locked_accounts, cur_plan.input.funding.as_str())
+                });
+                if replace {
+                    best_probe = Some((plan, built, eval));
+                }
             }
         }
 
-        let Some((plan, mut built, eval)) = best else {
+        let Some((plan, mut built, eval)) = best_actionable.or(best_probe) else {
             // [FIX-43] ThresholdTooHigh nur, wenn mindestens ein Kandidat positiv, aber unter MIN_PROFIT lag.
             rec.loss = Some(if threshold_hits > 0 { LossReason::ThresholdTooHigh } else { LossReason::EconomicSkip });
             rec.reason = Some(if rejected.is_empty() {
@@ -262,8 +279,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
 
         rec.premium_bps = Some(plan.premium_bps);
         rec.funding = Some(plan.input.funding.as_str().to_string());
+        rec.economics_known = matches!(eval, Evaluation::Known { .. });
         if let Evaluation::Known { net, .. } = eval {
             rec.net_profit = Some(net);
+        } else if self.mode == Mode::Shadow {
+            rec.reason = Some("technical shadow probe: failed-attempt economics unknown".into());
         }
 
         rec.serialized_bytes = Some(built.serialized_len);
@@ -332,13 +352,21 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 release_if(self.safety, reserved, plan.exposure);
                 rec.loss = Some(LossReason::Build);
                 rec.reason = Some(format!("simulation not ok: {:?}", other));
-                rec.decision = if self.mode == Mode::Shadow { Decision::ShadowSimFailed } else { rec.decision };
+                rec.decision = if self.mode == Mode::Shadow {
+                    if rec.economics_known { Decision::ShadowSimFailed } else { Decision::ShadowTechnicalSimFailed }
+                } else {
+                    rec.decision
+                };
                 return rec.with_timeline(&tl);
             }
         }
         // [M1] Send-Boundary: Shadow endet hier — gebaut, signiert, simuliert, nicht gesendet.
         if self.mode == Mode::Shadow {
-            rec.decision = Decision::ShadowReady;
+            rec.decision = if rec.economics_known {
+                Decision::ShadowReady
+            } else {
+                Decision::ShadowTechnicalReady
+            };
             return rec.with_timeline(&tl);
         }
         let t_handoff = self.clock.now_ns();
