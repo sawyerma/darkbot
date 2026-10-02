@@ -640,3 +640,16 @@ User-reported current-head verification after [FIX-71]:
 - Final visible line was a zero-test target (`0 passed; 0 failed`), not the workspace aggregate.
 
 Gate decision: technical-shadow path compiles/tests. Next step is the first real Mainnet Shadow run.
+
+
+### 2026-10-02 — [FIX-72] Mainnet Shadow launcher / ZERO_PREFUND probe separation
+
+- Added `P0_ZERO_PREFUND_SHADOW_PROBE`: it may enable ZERO_PREFUND only while `P0_MODE=shadow`.
+- `P0_ZERO_PREFUND_QUALIFIED` remains false by default and is not implied by a technical probe.
+- Added executable launcher: `project_0/scripts/run_shadow_mainnet.sh`.
+- Launcher stores no secrets; RPC/WSS, group and keypair path must come from environment.
+- Mainnet Marginfi program defaults to the source-verified program ID.
+- Slippage is required explicitly; no guessed trading value is inserted.
+- Next roadmap gate before the 72 h P6-LT run remains G2/C0 Mainnet census, followed by G5 bootstrap/reconcile and first technical Shadow simulation.
+
+Commits: `d0f07e5`, `b2d39ba`.
