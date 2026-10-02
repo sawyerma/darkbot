@@ -152,19 +152,21 @@ impl FailedCostMatrix {
     }
 }
 
-/// Eingaben pro Kandidat, alle in derselben Einheit (z. B. USD-Micro).
+/// Eingaben pro Kandidat. **Jedes Geldfeld ist explizit USD-Micro.**
+/// Lamports/native token units dürfen hier niemals direkt eingetragen werden; die Umrechnung
+/// muss vorher über einen expliziten, ausführbaren Preis-/Kostenprovider erfolgt sein. [FIX-61]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CandidateInput {
     /// Realisierbarer Wert des beschlagnahmten Collaterals über den gewählten Pfad.
-    pub gross_seized_realizable: u64,
-    pub repay: u64,
-    pub protocol_fees: u64,
-    pub flat_sol_fee: u64,
-    pub swap_fees_and_impact: u64,
-    pub priority_fee: u64,
-    pub jito_tip: u64,
-    pub rent_and_token: u64,
-    pub required_capital: u64,
+    pub gross_seized_realizable_usd_micro: u64,
+    pub repay_usd_micro: u64,
+    pub protocol_fees_usd_micro: u64,
+    pub flat_sol_fee_usd_micro: u64,
+    pub swap_fees_and_impact_usd_micro: u64,
+    pub priority_fee_usd_micro: u64,
+    pub jito_tip_usd_micro: u64,
+    pub rent_and_token_usd_micro: u64,
+    pub required_capital_usd_micro: u64,
     pub path: Path,
     pub funding: crate::funding::FundingClass,
 }
@@ -179,16 +181,16 @@ pub enum Evaluation {
 
 pub fn evaluate(c: &CandidateInput, failed: &FailedCostMatrix) -> Evaluation {
     let Some(failed_cost) = failed.conservative(c.path) else { return Evaluation::Unknown };
-    let costs: u128 = c.repay as u128
-        + c.protocol_fees as u128
-        + c.flat_sol_fee as u128
-        + c.swap_fees_and_impact as u128
-        + c.priority_fee as u128
-        + c.jito_tip as u128
-        + c.rent_and_token as u128
+    let costs: u128 = c.repay_usd_micro as u128
+        + c.protocol_fees_usd_micro as u128
+        + c.flat_sol_fee_usd_micro as u128
+        + c.swap_fees_and_impact_usd_micro as u128
+        + c.priority_fee_usd_micro as u128
+        + c.jito_tip_usd_micro as u128
+        + c.rent_and_token_usd_micro as u128
         + failed_cost as u128;
-    let net = c.gross_seized_realizable as i128 - costs as i128;
-    let ppc = if c.required_capital == 0 { i128::MAX } else { net * BPS as i128 / c.required_capital as i128 };
+    let net = c.gross_seized_realizable_usd_micro as i128 - costs as i128;
+    let ppc = if c.required_capital_usd_micro == 0 { i128::MAX } else { net * BPS as i128 / c.required_capital_usd_micro as i128 };
     Evaluation::Known { net, profit_per_capital_bps: ppc }
 }
 
@@ -306,15 +308,15 @@ mod tests {
     #[test]
     fn unknown_cost_is_not_zero() {
         let c = CandidateInput {
-            gross_seized_realizable: 1_000,
-            repay: 900,
-            protocol_fees: 0,
-            flat_sol_fee: 0,
-            swap_fees_and_impact: 0,
-            priority_fee: 0,
-            jito_tip: 0,
-            rent_and_token: 0,
-            required_capital: 900,
+            gross_seized_realizable_usd_micro: 1_000,
+            repay_usd_micro: 900,
+            protocol_fees_usd_micro: 0,
+            flat_sol_fee_usd_micro: 0,
+            swap_fees_and_impact_usd_micro: 0,
+            priority_fee_usd_micro: 0,
+            jito_tip_usd_micro: 0,
+            rent_and_token_usd_micro: 0,
+            required_capital_usd_micro: 900,
             path: Path::JitoBundle,
             funding: crate::funding::FundingClass::NoSwapInventory,
         };
@@ -335,23 +337,23 @@ mod tests {
     #[test]
     fn funding_class_is_not_a_hardcoded_preference() {
         let base = CandidateInput {
-            gross_seized_realizable: 1_100,
-            repay: 1_000,
-            protocol_fees: 0,
-            flat_sol_fee: 0,
-            swap_fees_and_impact: 0,
-            priority_fee: 0,
-            jito_tip: 0,
-            rent_and_token: 0,
-            required_capital: 0,
+            gross_seized_realizable_usd_micro: 1_100,
+            repay_usd_micro: 1_000,
+            protocol_fees_usd_micro: 0,
+            flat_sol_fee_usd_micro: 0,
+            swap_fees_and_impact_usd_micro: 0,
+            priority_fee_usd_micro: 0,
+            jito_tip_usd_micro: 0,
+            rent_and_token_usd_micro: 0,
+            required_capital_usd_micro: 0,
             path: Path::Rpc,
             funding: crate::funding::FundingClass::ZeroPrefundSameTx,
         };
-        let zero = CandidateInput { swap_fees_and_impact: 60, ..base }; // net 40
+        let zero = CandidateInput { swap_fees_and_impact_usd_micro: 60, ..base }; // net 40
         let no_swap = CandidateInput {
             funding: crate::funding::FundingClass::NoSwapInventory,
-            required_capital: 1_000,
-            swap_fees_and_impact: 0,
+            required_capital_usd_micro: 1_000,
+            swap_fees_and_impact_usd_micro: 0,
             ..base
         }; // net 100
         let failed = FailedCostMatrix { rpc_not_landed: Some(0), rpc_landed_revert: Some(0), ..Default::default() };
@@ -363,11 +365,11 @@ mod tests {
     #[test]
     fn equal_net_prefers_capital_efficiency() {
         let zero = CandidateInput {
-            gross_seized_realizable: 1_100, repay: 1_000, protocol_fees: 0, flat_sol_fee: 0,
-            swap_fees_and_impact: 0, priority_fee: 0, jito_tip: 0, rent_and_token: 0,
-            required_capital: 0, path: Path::Rpc, funding: crate::funding::FundingClass::ZeroPrefundSameTx,
+            gross_seized_realizable_usd_micro: 1_100, repay_usd_micro: 1_000, protocol_fees_usd_micro: 0, flat_sol_fee_usd_micro: 0,
+            swap_fees_and_impact_usd_micro: 0, priority_fee_usd_micro: 0, jito_tip_usd_micro: 0, rent_and_token_usd_micro: 0,
+            required_capital_usd_micro: 0, path: Path::Rpc, funding: crate::funding::FundingClass::ZeroPrefundSameTx,
         };
-        let preheld = CandidateInput { required_capital: 1_000, funding: crate::funding::FundingClass::PreheldInventory, ..zero };
+        let preheld = CandidateInput { required_capital_usd_micro: 1_000, funding: crate::funding::FundingClass::PreheldInventory, ..zero };
         let failed = FailedCostMatrix { rpc_not_landed: Some(0), rpc_landed_revert: Some(0), ..Default::default() };
         let (chosen, _) = choose_best_candidate(&[preheld, zero], &failed, 0).unwrap();
         assert_eq!(chosen.funding, crate::funding::FundingClass::ZeroPrefundSameTx);
