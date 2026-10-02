@@ -18,6 +18,10 @@ use darkbot_project0::planner::Allowlist;
 use darkbot_project0::protocol;
 use darkbot_project0::safety::{Allow, Limits, Safety};
 use darkbot_runner::pipeline::{Mode, Pipeline, ReceivershipBuilder, ReceivershipPlan};
+#[cfg(feature = "crate_health")]
+use darkbot_runner::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
+#[cfg(feature = "crate_health")]
+use darkbot_runner::route::JupiterV2RouteProvider;
 use darkbot_runner::pending::{try_reconcile, PendingSubmission};
 use darkbot_runner::record::Decision;
 use darkbot_runner::shadow_ledger::ShadowLedger;
@@ -34,6 +38,8 @@ use darkbot_solana::state::snapshot;
 use darkbot_solana::state::StateCore;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
+#[cfg(feature = "crate_health")]
+use marginfi_type_crate::types::Bank;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -45,12 +51,86 @@ impl<'a> AccountSource for StateView<'a> {
     }
 }
 
-/// [FIX-1] Ohne P4A-03-Sizing gibt es keine Pläne — fail closed, kein geschätzter Betrag.
+#[cfg(not(feature = "crate_health"))]
 struct NoPlans;
+#[cfg(not(feature = "crate_health"))]
 impl ReceivershipBuilder for NoPlans {
     fn plans(&self, _: &solana_sdk::pubkey::Pubkey, _: u64, _: u64) -> Result<Vec<ReceivershipPlan>, String> {
-        Err("unavailable: P4A-03 sizing provider not configured".into())
+        Err("unavailable: crate_health disabled".into())
     }
+}
+
+#[cfg(feature = "crate_health")]
+fn bank_from_state<S: AccountSource + ?Sized>(state: &S, program: &Pubkey, bank_key: &Pubkey) -> Option<Bank> {
+    let (owner, _, data) = state.account(bank_key)?;
+    if owner != *program || classify_account(data) != AccountType::Bank {
+        return None;
+    }
+    let need = 8 + std::mem::size_of::<Bank>();
+    if data.len() < need {
+        return None;
+    }
+    bytemuck::try_from_bytes::<Bank>(&data[8..need]).ok().copied()
+}
+
+#[cfg(feature = "crate_health")]
+fn associated_token_address(owner: &Pubkey, mint: &Pubkey, token_program: &Pubkey) -> Pubkey {
+    let ata_program = Pubkey::from_str(protocol::ASSOCIATED_TOKEN_PROGRAM_ID).expect("static ATA program");
+    Pubkey::find_program_address(
+        &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
+        &ata_program,
+    ).0
+}
+
+#[cfg(feature = "crate_health")]
+fn ata_candidates_for_bank<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    bank_key: &Pubkey,
+    liquidator: &Pubkey,
+) -> Vec<Pubkey> {
+    let Some(bank) = bank_from_state(state, program, bank_key) else { return Vec::new() };
+    [protocol::TOKEN_PROGRAM_ID, protocol::TOKEN_2022_PROGRAM_ID]
+        .iter()
+        .filter_map(|s| Pubkey::from_str(s).ok())
+        .map(|tp| associated_token_address(liquidator, &bank.mint, &tp))
+        .collect()
+}
+
+#[cfg(feature = "crate_health")]
+fn validated_liquidator_ata<S: AccountSource + ?Sized>(
+    state: &S,
+    mint: &Pubkey,
+    liquidator: &Pubkey,
+) -> Option<(Pubkey, u64)> {
+    for token_program in [protocol::TOKEN_PROGRAM_ID, protocol::TOKEN_2022_PROGRAM_ID]
+        .iter()
+        .filter_map(|s| Pubkey::from_str(s).ok())
+    {
+        let ata = associated_token_address(liquidator, mint, &token_program);
+        let (owner, _, data) = state.account(&ata)?;
+        if owner != token_program || data.len() < 72 {
+            continue;
+        }
+        let account_mint = Pubkey::new_from_array(data[0..32].try_into().ok()?);
+        let account_owner = Pubkey::new_from_array(data[32..64].try_into().ok()?);
+        if account_mint != *mint || account_owner != *liquidator {
+            continue;
+        }
+        let amount = u64::from_le_bytes(data[64..72].try_into().ok()?);
+        return Some((ata, amount));
+    }
+    None
+}
+
+#[cfg(feature = "crate_health")]
+fn find_bank_by_mint<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    banks: &[Pubkey],
+    mint: &Pubkey,
+) -> Option<Pubkey> {
+    banks.iter().copied().find(|bk| bank_from_state(state, program, bk).map(|b| b.mint == *mint).unwrap_or(false))
 }
 
 fn main() {
@@ -75,6 +155,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let buffer_cap: usize = config::parsed_or("P0_INGRESS_BUFFER", 65_536)?;
 
     let group = Pubkey::from_str(&config::require("P0_GROUP_ID")?)?;
+    let payer = tx::load_keypair_json(&config::require("P0_KEYPAIR_PATH")?)?;
+    let liquidator = tx::payer_of(&payer);
     let clock = Clock::new();
     let shutdown = Shutdown::new();
     let halt = IngressHalt::new();
@@ -89,13 +171,39 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     pre_state.install_snapshot(pre.slot, pre.accounts);
     let bank_keys: Vec<Pubkey> = pre_state.iter_owned_by(&program).filter(|(_, r)| classify_account(&r.data) == AccountType::Bank).map(|(k, _)| *k).collect();
     #[cfg(feature = "crate_health")]
-    let mut dependency_keys = darkbot_project0::health::dependency_keys(&StateView(&pre_state), &program, &bank_keys);
+    let mut required_dependency_keys = darkbot_project0::health::dependency_keys(&StateView(&pre_state), &program, &bank_keys);
     #[cfg(not(feature = "crate_health"))]
-    let mut dependency_keys: Vec<Pubkey> = Vec::new();
-    eprintln!("dependencies: banks={} external_accounts={}", bank_keys.len(), dependency_keys.len());
+    let mut required_dependency_keys: Vec<Pubkey> = Vec::new();
+
+    #[cfg(feature = "crate_health")]
+    let mut optional_dependency_keys: Vec<Pubkey> = bank_keys.iter()
+        .flat_map(|bk| ata_candidates_for_bank(&StateView(&pre_state), &program, bk, &liquidator))
+        .collect();
+    #[cfg(not(feature = "crate_health"))]
+    let mut optional_dependency_keys: Vec<Pubkey> = Vec::new();
+    optional_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
+    optional_dependency_keys.dedup();
+
+    #[cfg(feature = "crate_health")]
+    let native_sol_mint = Pubkey::from_str(protocol::NATIVE_SOL_MINT)?;
+    #[cfg(feature = "crate_health")]
+    let sol_bank = find_bank_by_mint(&StateView(&pre_state), &program, &bank_keys, &native_sol_mint)
+        .ok_or("no Marginfi WSOL bank found; cannot value SOL-denominated liquidation costs")?;
+
+    let mut subscription_keys = required_dependency_keys.clone();
+    subscription_keys.extend(optional_dependency_keys.iter().copied());
+    subscription_keys.sort_unstable_by_key(|k| k.to_bytes());
+    subscription_keys.dedup();
+
+    eprintln!(
+        "dependencies: banks={} required={} optional_atas={}",
+        bank_keys.len(),
+        required_dependency_keys.len(),
+        optional_dependency_keys.len()
+    );
     drop(pre_state);
     // Ingress-Thread (WSS). Provider nur als URL.
-    let sub = Subscription { programs: vec![program], accounts: dependency_keys.clone(), slots: true, roots: true, transactions_mentioning: vec![] };
+    let sub = Subscription { programs: vec![program], accounts: subscription_keys.clone(), slots: true, roots: true, transactions_mentioning: vec![] };
     // [FIX-34] Ingress als neu startbare Session: bei Änderung der Dependency-Menge wird die alte
     // Session beendet, eine neue mit erweiterter Subscription gestartet, dann HALT → Recovery → READY.
     let slot_watch_for_spawn = slot_watch.clone();
@@ -109,7 +217,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })?;
         Ok(session)
     };
-    let mut subscribed: std::collections::HashSet<Pubkey> = dependency_keys.iter().copied().collect();
+    let mut subscribed: std::collections::HashSet<Pubkey> = subscription_keys.iter().copied().collect();
+    let mut required_set: std::collections::HashSet<Pubkey> = required_dependency_keys.iter().copied().collect();
+    let mut optional_set: std::collections::HashSet<Pubkey> = optional_dependency_keys.iter().copied().collect();
     let mut ingress_session = spawn_ingress(sub.clone(), producer.clone(), halt.clone())?;
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).
@@ -117,17 +227,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let rpc_recon = RpcClient::new(rpc_url); // [FIX-5] eigener Client für Reconciliation (fetch-Closure besitzt `rpc`)
     let mut st = StateCore::new(buffer_cap);
     let mut drv = RecoveryDriver::new(3);
-    let dep_shared = std::sync::Arc::new(std::sync::Mutex::new(dependency_keys.clone()));
+    let dep_shared = std::sync::Arc::new(std::sync::Mutex::new(required_dependency_keys.clone()));
+    let opt_shared = std::sync::Arc::new(std::sync::Mutex::new(optional_dependency_keys.clone()));
     let dep_for_fetch = dep_shared.clone();
+    let opt_for_fetch = opt_shared.clone();
     let mut fetch = move || -> Result<SnapshotData, String> {
         // [FIX-26] Snapshot = P0-Programm + externe Abhängigkeiten, gemeinsam reconciled.
         let s = snapshot::program_accounts(&rpc, &program, &clock).map_err(|e| e.to_string())?;
-        let keys = dep_for_fetch.lock().map_err(|_| "dep lock".to_string())?.clone();
-        let d = snapshot::multiple_accounts(&rpc, &keys, &clock).map_err(|e| e.to_string())?;
+        let required = dep_for_fetch.lock().map_err(|_| "dep lock".to_string())?.clone();
+        let optional = opt_for_fetch.lock().map_err(|_| "opt dep lock".to_string())?.clone();
+        let d = snapshot::multiple_accounts(&rpc, &required, &clock).map_err(|e| e.to_string())?;
+        let o = snapshot::multiple_accounts(&rpc, &optional, &clock).map_err(|e| e.to_string())?;
         let mut accounts = s.accounts;
         accounts.extend(d.accounts);
-        // [FIX-37] alle Dependency-Keys sind required (Oracles/Integrationen/Mints): fehlend → nicht sauber.
-        Ok(SnapshotData { slot: s.slot.min(if d.slot == 0 { s.slot } else { d.slot }), accounts, missing_required: d.missing })
+        accounts.extend(o.accounts);
+        // Required dependencies stay fail-closed; missing optional ATAs only disable that candidate.
+        let mut slot = s.slot;
+        if d.slot != 0 { slot = slot.min(d.slot); }
+        if o.slot != 0 { slot = slot.min(o.slot); }
+        Ok(SnapshotData { slot, accounts, missing_required: d.missing })
     };
     // Barrier: während der RPC-Fetches gepufferte Events in den State ziehen.
     let mut drain = |s: &mut StateCore| {
@@ -140,7 +258,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("bootstrap: waiting for StreamReady (all subscription ACKs)");
     // [FIX-1] Pipeline-Bausteine: Keypair (nur signieren, Shadow sendet nicht), Blockhash-Cache,
     // Safety aus Env (Limits sind Konfiguration), Allowlist aus Source, Submitter nur für Simulation.
-    let payer = tx::load_keypair_json(&config::require("P0_KEYPAIR_PATH")?)?;
     let blockhash = BlockhashCache::new();
     let bh_rpc = RpcClient::new(config::require("P0_RPC_URL")?);
     let bh_cache = blockhash.clone();
@@ -172,12 +289,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         allowlist.refresh_programs.insert(p); // Pre-Start-Refreshes nur dieser Programme (liquidate_start.rs)
     }
     allowlist.refresh_programs.insert(program); // init_liquidation_record vor Start
+    allowlist.other_programs.insert(Pubkey::from_str(protocol::ASSOCIATED_TOKEN_PROGRAM_ID)?);
     let global_allowed = protocol::receivership_allowed_programs();
     // [FIX-30] Prerequisite-TXs (JIT-Buy): Swap-Programme + System/Token/Token-2022/ATA/ComputeBudget.
     let prereq_allowed: Vec<Pubkey> = [protocol::JUP_SWAP_PROGRAM_ID, protocol::TITAN_SWAP_PROGRAM_ID, protocol::ASSOCIATED_TOKEN_PROGRAM_ID, protocol::COMPUTE_BUDGET_PROGRAM_ID,
         darkbot_project0::receivership::SYSTEM_PROGRAM, "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"].iter().map(|s| Pubkey::from_str(s)).collect::<Result<_, _>>()?;
     let submitter = RpcSubmitter::new(config::require("P0_RPC_URL")?, true);
     let failed_costs = FailedCostMatrix::default(); // alle None → Unknown → nicht handelbar, bis gemessen
+    #[cfg(feature = "crate_health")]
+    let routes = JupiterV2RouteProvider::new(
+        liquidator,
+        std::env::var("P0_JUPITER_API_KEY").ok().filter(|s| !s.trim().is_empty()),
+        config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0)?,
+        config::parsed_or("P0_JUPITER_MAX_ACCOUNTS", 64u8)?,
+        true,
+        false,
+    ).map_err(|e| format!("route provider: {e}"))?;
+    #[cfg(not(feature = "crate_health"))]
     let builder = NoPlans;
     let resources = Resources { compute_unit_limit: config::parsed_or("P0_CU_LIMIT", 1_400_000)?, priority_micro_lamports_per_cu: config::parsed_or("P0_PRIORITY_MICRO", 0)?, loaded_accounts_data_size: Some(config::parsed_or("P0_LOADED_DATA", 64 * 1024 * 1024)?) };
     let freshness = Freshness { max_opportunity_age_ns: config::parsed_or("P0_MAX_AGE_NS", 2_000_000_000)?, execution_deadline_ns: config::parsed_or("P0_DEADLINE_NS", 2_000_000_000)? };
@@ -233,20 +361,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // [FIX-34][FIX-35] Nach dem Anwenden: zeigt die NEUE Bank-Konfiguration auf nicht abonnierte Accounts?
         #[cfg(feature = "crate_health")]
         if let Some(bk) = updated_bank {
-            let new_keys: Vec<Pubkey> = {
-                let view = StateView(&st);
-                darkbot_project0::health::dependency_keys(&view, &program, &[bk]).into_iter().filter(|k| !subscribed.contains(k)).collect()
-            };
-            if !new_keys.is_empty() {
-                eprintln!("dependency set changed: +{} accounts → HALT, resubscribe; Recovery folgt auf StreamReady", new_keys.len());
+            let view = StateView(&st);
+            let required_now = darkbot_project0::health::dependency_keys(&view, &program, &[bk]);
+            let optional_now = ata_candidates_for_bank(&view, &program, &bk, &liquidator);
+            let new_required: Vec<Pubkey> = required_now.into_iter().filter(|k| !required_set.contains(k)).collect();
+            let new_optional: Vec<Pubkey> = optional_now.into_iter().filter(|k| !subscribed.contains(k)).collect();
+            if !new_required.is_empty() || !new_optional.is_empty() {
+                eprintln!(
+                    "dependency set changed: +{} required +{} optional → HALT, resubscribe; Recovery follows StreamReady",
+                    new_required.len(),
+                    new_optional.len()
+                );
                 st.halt(darkbot_common::error::HaltReason::StateGap);
                 ingress_session.request();
-                subscribed.extend(new_keys.iter().copied());
-                dependency_keys = subscribed.iter().copied().collect();
-                if let Ok(mut g) = dep_shared.lock() { *g = dependency_keys.clone(); }
-                let sub2 = Subscription { programs: vec![program], accounts: dependency_keys.clone(), slots: true, roots: true, transactions_mentioning: vec![] };
+                required_set.extend(new_required.iter().copied());
+                optional_set.extend(new_optional.iter().copied());
+                required_dependency_keys = required_set.iter().copied().collect();
+                optional_dependency_keys = optional_set.iter().copied().collect();
+                required_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
+                optional_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
+                subscribed = required_set.union(&optional_set).copied().collect();
+                if let Ok(mut g) = dep_shared.lock() { *g = required_dependency_keys.clone(); }
+                if let Ok(mut g) = opt_shared.lock() { *g = optional_dependency_keys.clone(); }
+                let mut all_keys: Vec<Pubkey> = subscribed.iter().copied().collect();
+                all_keys.sort_unstable_by_key(|k| k.to_bytes());
+                let sub2 = Subscription { programs: vec![program], accounts: all_keys, slots: true, roots: true, transactions_mentioning: vec![] };
                 ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
-                // kein sleep, keine direkte Recovery: das `Reconnected` der neuen Session (alle ACKs) startet sie.
             }
         }
         if let Some((acct, t_rx, slot)) = detect {
@@ -257,6 +397,57 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let engine = darkbot_project0::health::crate_impl::CrateHealth { state: &view, group };
             #[cfg(not(feature = "crate_health"))]
             let engine = darkbot_project0::health::NoHealth;
+            #[cfg(feature = "crate_health")]
+            let inventory = |bank_key: &Pubkey| -> u64 {
+                let Some(bank) = bank_from_state(&view, &program, bank_key) else { return 0 };
+                validated_liquidator_ata(&view, &bank.mint, &liquidator).map(|(_, amount)| amount).unwrap_or(0)
+            };
+            #[cfg(feature = "crate_health")]
+            let ata = |mint: &Pubkey| -> Option<Pubkey> {
+                validated_liquidator_ata(&view, mint, &liquidator).map(|(pk, _)| pk)
+            };
+            #[cfg(feature = "crate_health")]
+            let sizing = ProtocolSizingProvider {
+                state: &view,
+                program,
+                group,
+                sol_bank,
+                inventory: &inventory,
+                slippage_bps: config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0).unwrap_or(0),
+            };
+            #[cfg(feature = "crate_health")]
+            let sizer_for_cost = darkbot_project0::sizing::ProtocolSizer {
+                state: &view,
+                program,
+                group,
+                headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
+            };
+            #[cfg(feature = "crate_health")]
+            let priority_fee_lamports = resources.priority_total_lamports();
+            #[cfg(feature = "crate_health")]
+            let priority_fee_usd_micro = sizer_for_cost
+                .native_amount_value_usd_micro(&sol_bank, priority_fee_lamports, now as i64, slot)
+                .unwrap_or(u64::MAX);
+            #[cfg(feature = "crate_health")]
+            let builder = P0ReceivershipBuilder {
+                state: &view,
+                program,
+                group,
+                liquidator,
+                global_fee_wallet: match sizer_for_cost.fee_snapshot() {
+                    Ok(f) => f.global_fee_wallet,
+                    Err(_) => Pubkey::default(),
+                },
+                sizing: &sizing,
+                routes: &routes,
+                inventory: &inventory,
+                ata: &ata,
+                priority_fee_usd_micro,
+                jito_tip_usd_micro: 0,
+                jito_tip_lamports: 0,
+                zero_prefund_qualified: true,
+                path: Path::Rpc,
+            };
             let _ = &view;
             if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }
             let line = match engine.health(&acct, now as i64, slot) {
