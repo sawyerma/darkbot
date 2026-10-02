@@ -8,8 +8,8 @@
     "execution_ready": false,
     "approval_required_for": "Any value-bearing Mainnet bundle submission",
     "note": "v1 remains historical; only this v2 contract may authorize the controlled self-launch test after explicit user approval",
-    "launcher_address": null,
-    "buyer_address": null,
+    "launcher_address": "0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd",
+    "buyer_address": "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE",
     "approved_contract_sha256": null,
     "execution_authority": "Only this v2 file may authorize the self-launch Mainnet send path; v1 is forbidden as runtime authority"
   },
@@ -27,8 +27,8 @@
     "historical_g03_authority": "Historical DOGE/0.15-BNB G0.3 fixture is NOT authority for this native-quote self-launch; native mode requires its own dry semantic validation"
   },
   "wallet_separation": {
-    "launcher": "wallet_A",
-    "buyer": "wallet_B",
+    "launcher": "0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd",
+    "buyer": "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE",
     "must_be_distinct_addresses": true,
     "reason": "Launch/BUY ordering must be proven by bundle semantics, not by same-sender nonce ordering",
     "secret_storage": "No private key or secret is written to evidence"
