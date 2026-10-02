@@ -108,7 +108,7 @@ fn validated_liquidator_ata<S: AccountSource + ?Sized>(
         .filter_map(|s| Pubkey::from_str(s).ok())
     {
         let ata = associated_token_address(liquidator, mint, &token_program);
-        let (owner, _, data) = state.account(&ata)?;
+        let Some((owner, _, data)) = state.account(&ata) else { continue };
         if owner != token_program || data.len() < 72 {
             continue;
         }
@@ -445,7 +445,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 priority_fee_usd_micro,
                 jito_tip_usd_micro: 0,
                 jito_tip_lamports: 0,
-                zero_prefund_qualified: true,
+                zero_prefund_qualified: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false).unwrap_or(false),
                 path: Path::Rpc,
             };
             let _ = &view;
