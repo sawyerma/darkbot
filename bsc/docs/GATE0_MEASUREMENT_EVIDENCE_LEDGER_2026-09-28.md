@@ -2728,3 +2728,72 @@ Required result:
 5. only then bind launcher A / buyer B and close DRY-1..DRY-4.
 
 This preserves the already frozen G0.6a -> G0.7 stage order.
+
+
+## 2026-10-02 — G0.6a native-BNB economics crosscheck PASS
+
+Successful read-only/current-state crosscheck was captured at BSC Mainnet block `125373566`.
+
+Frozen evidence:
+`bsc/gates/gate0/evidence/g06a_economics_evm_crosscheck_2026-10-02.json`
+
+Current Portal binding from the same run:
+
+```text
+version                         v5.24.0
+proxy                           0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0
+implementation                  0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20
+implementation_code_sha256      2ac893fca8dfa730d66cb4f0fc3e2c769f2ffdb4565e55903d9fa12e7cd7149f
+curve_id                        20
+protocol_buy_fee_bps            100
+buy_tax_bps                     100
+tax_on_bonding_curve_enabled    true
+```
+
+Independent result:
+
+```text
+Rust expectedOutput             176664965031639901123273
+EVM simulated received amount   176664965031639901123273
+difference                      0
+buyer balance after             176664965031639901123273
+status                          EVM_SEQUENCE_PASS
+```
+
+The EVM execution did not use the Rust expected output as execution input; its BUY minimum was deliberately `1`. Therefore the exact match is an independent semantics/economics crosscheck rather than a circular assertion.
+
+Mainnet launch semantics also passed read-only node execution:
+
+```text
+eth_estimateGas                 PASS
+launch gas estimate             5502725
+120% launch gas reserve         6603270
+eth_call                        PASS
+predicted token match           true
+local launch execution gas      5223342
+local BUY execution gas         359291
+```
+
+Safety:
+
+```text
+signed transactions created     false
+signed transactions submitted   false
+bundle submitted                false
+network action                  READ_ONLY_RPC_STATE_AND_HEADER_ONLY
+```
+
+### Gate interpretation
+
+- Native-BNB Curve-20 arithmetic/economics crosscheck: **PASS**.
+- Exact received amount agrees between independent Rust calculation and sequential local EVM execution: **PASS**.
+- Full DRY-2 remains pending until the exact wallet-bound signed launch_A / buy_B bytes are built and verified against this same semantics path.
+- DRY-3 is currently blocked by the existing v2 proposal gas cap: `max_launch_gas_limit=5000000` is below the measured Mainnet requirement. The proposal must not be armed unchanged.
+- Mainnet execution remains **UNAUTHORIZED / UNARMED**.
+
+Next stage remains the frozen plan:
+1. bind distinct launcher_A and buyer_B;
+2. capture both pending nonces and balances read-only;
+3. build exact signed bytes locally and recover/verify all envelope fields;
+4. update the proposed launch gas/budget ceiling using measured evidence;
+5. close DRY-1, full DRY-2, DRY-3 and DRY-4 before any authorization.
