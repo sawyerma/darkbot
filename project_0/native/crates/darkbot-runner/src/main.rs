@@ -629,10 +629,42 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let _ = &view;
             if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }
             let health_result = engine.health(&acct, now as i64, slot);
+            // [FIX-87] Health evidence as structured JSON. Do not hand-build JSON with format!:
+            // braces/escaping are error-prone and error strings may contain quotes.
             let line = match &health_result {
-                Ok(h) => { ledger.on_health(h.liquidatable, false); format!("{\"account\":\"{}\",\"trigger\":\"{}\",\"t_rx_ns\":{},\"slot\":{},\"liquidatable\":{},\"maint_health_bits\":{},\"equity_assets_bits\":{},\"bad_debt\":{}}}", acct, trigger, t_rx, slot, h.liquidatable, h.maintenance_health, h.equity_assets, h.is_bad_debt) },
-                Err(HealthError::Unavailable) => { ledger.on_health(false, false); format!("{\"account\":\"{}\",\"trigger\":\"{}\",\"t_rx_ns\":{},\"slot\":{},\"decision\":\"Unavailable\"}", acct, trigger, t_rx, slot) },
-                Err(e) => { ledger.on_health(false, matches!(e, HealthError::Unsupported(_))); format!("{\"account\":\"{}\",\"trigger\":\"{}\",\"t_rx_ns\":{},\"slot\":{},\"error\":\"{}\"}", acct, trigger, t_rx, slot, e) },
+                Ok(h) => {
+                    ledger.on_health(h.liquidatable, false);
+                    serde_json::json!({
+                        "account": acct.to_string(),
+                        "trigger": trigger,
+                        "t_rx_ns": t_rx,
+                        "slot": slot,
+                        "liquidatable": h.liquidatable,
+                        "maint_health_bits": h.maintenance_health,
+                        "equity_assets_bits": h.equity_assets,
+                        "bad_debt": h.is_bad_debt,
+                    }).to_string()
+                }
+                Err(HealthError::Unavailable) => {
+                    ledger.on_health(false, false);
+                    serde_json::json!({
+                        "account": acct.to_string(),
+                        "trigger": trigger,
+                        "t_rx_ns": t_rx,
+                        "slot": slot,
+                        "decision": "Unavailable",
+                    }).to_string()
+                }
+                Err(e) => {
+                    ledger.on_health(false, matches!(e, HealthError::Unsupported(_)));
+                    serde_json::json!({
+                        "account": acct.to_string(),
+                        "trigger": trigger,
+                        "t_rx_ns": t_rx,
+                        "slot": slot,
+                        "error": e.to_string(),
+                    }).to_string()
+                }
             };
             let _ = writeln!(records, "{}", line);
             // [FIX-1] Pipeline (Shadow): Health → Pläne → Economics → Build → Sign → Send-Boundary.
