@@ -1,5 +1,7 @@
 # Gate-0 Fable execution checklist
 
+> **ABSOLUTE TOP PRIORITY / STOP RULE — FABLE TARGET:** Do not perform any unrelated Gate-0 work until a **real successful on-chain BUY with actual token acquisition** has a **measured/proven `T0 → T_buy < 1 ms`**. Only work directly required to execute, instrument, prove, or reduce that real BUY path below 1 ms is permitted. `T_signal → T_send`, transport handoff, builder ACK, receipt or ordering alone are not the target and do not unlock further work.
+
 Status: ACTIVE
 Date: 2026-10-02
 
