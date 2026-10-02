@@ -1,0 +1,49 @@
+{
+  "schema": "darkbot.g06a.wallet-preflight-readonly.v1",
+  "observed_date": "2026-10-03",
+  "source": "user-terminal-output",
+  "chain_id": "56",
+  "latest_block_number": "125381185",
+  "latest_block_hash": "0x817f4cd0e44d096713dbefbaf40259c63ef8be44cc06bd4005ed7a1c3dfda914",
+  "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+  "portal_version": "v5.24.0",
+  "portal_implementation": "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20",
+  "tax_v3_impl": "0x024f18294970b5c76c0691b87f138a0317156422",
+  "gas_price_wei": "50000000",
+  "native_quote_configuration": {
+    "enabled": "1",
+    "default_curve_id": "20",
+    "alternative_curve_id": "20",
+    "native_to_quote_swap_type": "0",
+    "dex_id": "0"
+  },
+  "protocol_fee_bps": {
+    "buy": "100",
+    "sell": "100"
+  },
+  "tax_on_bonding_curve_enabled": true,
+  "launcher": {
+    "address": "0x3e7b487ae5e1c49ab1cf6222bdb5cf016e86aacd",
+    "pending_nonce": "0",
+    "balance_wei": "0",
+    "required_worst_case_wei": "6603270000000000",
+    "sufficient": false
+  },
+  "buyer": {
+    "address": "0x9c8a0db41914beee52dd49790c4f087e252743de",
+    "pending_nonce": "0",
+    "balance_wei": "0",
+    "required_worst_case_wei": "4000000000000000",
+    "sufficient": false
+  },
+  "wallet_qualification": {
+    "addresses_bound": true,
+    "distinct": true,
+    "combined_attempt_reserve_wei": "10603270000000000",
+    "funding_pass": false
+  },
+  "network_actions": "READ_ONLY_RPC_ONLY",
+  "signed_tx_submitted": false,
+  "bundle_submitted": false,
+  "classification": "WALLETS_BOUND_AND_DISTINCT__FUNDING_BLOCKED"
+}
