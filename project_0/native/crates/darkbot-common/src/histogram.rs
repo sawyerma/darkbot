@@ -8,7 +8,7 @@
 
 const SUB_BITS: u32 = 3;
 const SUB: usize = 1 << SUB_BITS; // 8
-const BUCKETS: usize = 64 * SUB; // 512, deckt u64 vollständig ab
+const BUCKETS: usize = SUB + (u64::BITS as usize - SUB_BITS as usize) * SUB; // [FIX-56] 496; exakt alle erreichbaren u64-Buckets
 
 #[derive(Clone, Debug)]
 pub struct Histogram {
@@ -57,7 +57,7 @@ impl Histogram {
         let msb = k + SUB_BITS - 1;
         let width = 1u64 << (msb - SUB_BITS);
         let lower = (1u64 << msb) + sub * width;
-        lower + width - 1
+        lower + (width - 1) // [FIX-56] vermeidet Overflow des Zwischenschritts bei u64::MAX
     }
 
     #[inline]
@@ -187,6 +187,8 @@ mod tests {
                 assert!(Histogram::upper(i - 1) < v, "prev bucket upper must be < value");
             }
         }
+        assert_eq!(Histogram::index(u64::MAX), BUCKETS - 1);
+        assert_eq!(Histogram::upper(BUCKETS - 1), u64::MAX);
     }
 
     #[test]
