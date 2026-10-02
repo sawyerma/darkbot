@@ -17,7 +17,9 @@ use darkbot_project0::execution::Freshness;
 use darkbot_project0::planner::Allowlist;
 use darkbot_project0::protocol;
 use darkbot_project0::safety::{Allow, Limits, Safety};
-use darkbot_runner::pipeline::{Mode, Pipeline, ReceivershipBuilder, ReceivershipPlan};
+use darkbot_runner::pipeline::{Mode, Pipeline};
+#[cfg(not(feature = "crate_health"))]
+use darkbot_runner::pipeline::{ReceivershipBuilder, ReceivershipPlan};
 #[cfg(feature = "crate_health")]
 use darkbot_runner::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
 #[cfg(feature = "crate_health")]
