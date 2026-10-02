@@ -2451,3 +2451,142 @@ v2 execution_ready = false
 ```
 
 Therefore this implementation cannot perform a value-bearing Mainnet submission.
+
+
+## 2026-10-02 — Verbindlicher Zielpfad nach Sniper-/Builder-Vergleich
+
+Die aktuelle externe Vergleichsanalyse bestätigt die bisherige Gate-0-Richtung: Der lokale Rust-Hotpath ist mit den bereits gemessenen ~0,43–0,62 ms nicht der dominante Engpass. Entscheidend für die erste extern erreichbare Position sind frühe Sicht auf den Launch, der Netzweg zum Builder, die Builder-Abdeckung und das Ordering/Gebot.
+
+### Verbindlicher Architekturpfad
+
+**A. Öffentliche Launch-TX**
+
+```text
+mehrere Ingress-Quellen parallel
+  - eigener Mainnet-Reth/BSC-P2P-Sensor
+  - BlockRazor Public Mempool / weitere geprüfte Full-TX-Feeds
+        ↓
+FIRST FULL ACTIONABLE WINS
+        ↓
+Launch vollständig lokal dekodieren
+Token / BUY-Felder lokal bestimmen
+        ↓
+bestehender Rust BUY-Core
+        ↓
+ordered bundle:
+[raw signed Launch TX]
+[raw signed DarkBot BUY]
+        ↓
+parallel:
+48Club/Puissant
+BlockRazor
+        ↓
+Builder
+        ↓
+Validator
+```
+
+Für fremde öffentliche Launches bleibt die Ingress-Latenz zwingend relevant: DarkBot kann die Launch-TX nur mitbundeln, wenn die vollständige signierte Launch-TX früh genug vorliegt. Die bisherigen ~182 ms bis zum P2P-Hash plus ~87 ms Hash->Full aus dem Testnet-Versuch sind für Produktion nicht akzeptabel und werden nicht durch den Bundle-Pfad magisch entfernt.
+
+**B. Privater Launch-/Orderflow**
+
+```text
+Builder-/Auction-/Private-Mempool-Feed
+        ↓
+Target-Hash + ausreichende simulierte Fakten
+        ↓
+DarkBot BUY lokal vorbereiten
+        ↓
+backrunTarget / ordered inclusion
+        ↓
+Builder materialisiert:
+[private target Launch]
+[DarkBot BUY]
+```
+
+Für privaten Flow ist normales Public-P2P prinzipiell unvollständig. Deshalb werden 48Club Auction Feed / `backrunTarget` und ein geeigneter Private-Mempool-Feed als eigene Ingress-Klasse behandelt, nicht als Optimierung des öffentlichen Sensors.
+
+### Builder-Abdeckung und Konkurrenz
+
+Die externe Vergleichsanalyse findet keinen öffentlich dokumentierten Retail-Sniper, der auf BSC nachweislich einen strukturell besseren Pfad als direkten ordered Builder-Fan-out besitzt. Die relevante Konkurrenz sind vielmehr:
+
+- Builder selbst und builder-nahe Searcher;
+- Creator-/Dev-Bundles;
+- Searcher mit privatem Orderflow;
+- kapitalstärkere Searcher bei gleichem Signal und gleichem Builder.
+
+Retail-/Telegram-Produkte ohne dokumentierten BSC-Bundle-Pfad werden nicht als technische Referenz für Gate 0 verwendet.
+
+48Club und BlockRazor werden als primäre Inclusion-Kandidaten weitergeführt. Deren historisch sehr hohe gemeinsame Builder-Abdeckung wird als externe Evidenz behandelt, aber nicht als konstante aktuelle Garantie. Abdeckung und Block-Builder-Zuordnung werden in den eigenen Mainnet-Versuchen mitprotokolliert.
+
+### 48Club-spezifische Pflichtpunkte
+
+Vor Live-Freigabe müssen zusätzlich geprüft werden:
+
+1. `positionFirst` und `noMerge` Semantik im aktuellen 48Club-Pfad;
+2. aktuelle Gas-/Priority-/Tip-Regeln statt historischer Annahmen;
+3. Auction Feed + `backrunTarget` für privaten Flow;
+4. ob der ausgewählte Flap/Four.Meme-Scope im Feed vollständig genug ist, um den BUY ohne synchronen RPC-Roundtrip zu bauen.
+
+Spät eintreffende Bundles dürfen nicht still ans Blockende rutschen, wenn das Ziel N+1 lautet.
+
+### Mess- und Acceptance-Regel
+
+Das primäre Produktziel bleibt unverändert:
+
+```text
+T_buy - T0 < 1 ms
+```
+
+Die operative Vor-T0-Zielarchitektur lautet:
+
+```text
+T_pre < T0
+BUY vollständig vorbereitet/signiert < T0
+ordered bundle beim Builder < T0
+T0 = erste externe technische Kaufbarkeit
+T_buy = erfolgreiche tatsächliche BUY-Ausführung
+```
+
+Chain-Ordering wird separat bewiesen:
+
+```text
+Launch = Position N
+DarkBot BUY = Position N+1
+successful external BUYs between = 0
+positive intended-token acquisition
+```
+
+**N+1 beweist optimale Reihenfolge, aber nicht automatisch `T_buy-T0 < 1 ms`.**
+Ohne vertrauenswürdigen hochauflösenden Builder-/Validator-Execution-Trace bleibt die numerische reale Sub-ms-Zeit `UNKNOWN`. Ein lokaler Full-Node-Replay darf später eine Execution-Dauer in µs als Schätzung liefern, wird aber nicht als echte Validator-Uhr ausgegeben.
+
+### Reihenfolge ab jetzt
+
+1. G0.6a Zwei-Wallet-Eigenlaunch Dry-PASS vollständig schließen.
+2. V2-Budget und aktuelle Builder-Regeln endgültig einfrieren.
+3. Nach expliziter Freigabe 1–4 kontrollierte Minimalwert-Mainnet-`[Launch][BUY]`-Versuche.
+4. Danach fremden Mainnet-Ingress messen und optimieren:
+   - viele Mainnet-Peers;
+   - Full-TX first-seen;
+   - Peer-Ranking;
+   - eigener Sensor nahe Builder-Region;
+   - zusätzliche Full-TX-/Private-Flow-Feeds nur anhand echter Messung.
+5. Gleichzeitig reale Launch-/N+1-Statistik erfassen:
+   - Public vs. privat sichtbar;
+   - Dev-/Creator-Bundles;
+   - N+1-Gewinner;
+   - Builder;
+   - Gas/Tip;
+   - realisierte PnL/EV.
+6. Erst danach zusätzliche kostenpflichtige Infrastruktur, Multi-Region oder eigener Builder, wenn die Messung den Engpass dort zeigt.
+
+### Nicht priorisieren
+
+Bis Ingress und Inclusion nachweislich nicht mehr dominieren:
+
+- keine weitere Optimierung des Rust-Hotpaths um einzelne 10–100 µs;
+- kein Kernel-Bypass/DPDK/AF_XDP nur aus Prinzip;
+- kein eigener Builder ohne Messnachweis;
+- kein Multi-Region-Rollout ohne regionale First-Seen-/Builder-Handoff-Daten.
+
+Der bestehende Rust-Core wird beibehalten. Optimiert werden jetzt primär Sicht, Builder-Handoff, ordered inclusion und Zugang zu privatem Orderflow.
