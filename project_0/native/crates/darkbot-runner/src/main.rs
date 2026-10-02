@@ -25,7 +25,6 @@ use darkbot_runner::winner::{find_winner, race_outcome, RaceOutcome};
 use darkbot_solana::ingress::SlotWatch;
 use darkbot_solana::state::blockhash::BlockhashCache;
 use darkbot_solana::submit::rpc::RpcSubmitter;
-use darkbot_solana::submit::SubmissionAdapter;
 use darkbot_solana::tx::{self, Resources, TxLimits};
 use darkbot_project0::protocol::{classify as classify_account, AccountType}; // [FIX-47] Alias
 use darkbot_solana::ingress::ws_rpc::{WsRpcConfig, WsRpcControlSource};
