@@ -2407,3 +2407,47 @@ All four criteria are mandatory:
 Provider API/method/expiry prequalification before authorization may therefore use only deliberately non-executable fixtures. Exact valid Mainnet transaction/bundle bytes are not sent to remote simulation endpoints before authorization.
 
 The provisional 0.05 BNB total ceiling remains only a proposal. It must be recalculated from verified launch costs, simulated gas and the strictest current builder floor before approval and should be reduced if the evidence permits.
+
+
+## 2026-10-02 — G0.6a two-wallet self-launch bundle dry harness implemented
+
+Implemented components:
+
+- `bsc/gates/gate0/src/acceptance_guard.rs`
+  - v2-only fail-closed authorization reader;
+  - exact v2 path check;
+  - SHA-256 check;
+  - `approved` + `execution_ready`;
+  - frozen launcher/buyer address match;
+  - distinct-wallet requirement;
+  - attempt counter and total-budget check;
+  - explicit `FROZEN_APPROVED_V2_SHA256 = "UNARMED"` source lock. No environment variable or CLI flag can arm Mainnet execution.
+
+- `bsc/gates/gate0/src/bin/g06a_self_launch_bundle.rs`
+  - ChainID 56 transaction construction;
+  - distinct launcher-A / buyer-B keys;
+  - deterministic Flap CREATE2 token prediction from a separately supplied, reverified TAX_V3 implementation;
+  - native-quote `newTokenV6` launch calldata;
+  - nonzero BUY `minOutput` from the local expected-output input;
+  - final signed legacy-RLP reconstruction and independent signature recovery from the resulting RLP bytes;
+  - byte-identical ordered `[raw_launch_A, raw_buy_B]` projection into both BlockRazor and 48Club builder envelopes;
+  - tight `send_head..=send_head+2` expiry check;
+  - worst-case gas/value reservation check;
+  - no networking imports or network-write path; valid Mainnet transaction/bundle bytes remain in RAM and are not printed.
+
+The binary is deliberately two-phase:
+
+1. without a local simulation evidence file it performs DRY-1 construction/recovery and DRY-4 structural zero-egress checks, prints only hashes/metadata, then exits nonzero because DRY-2/3 are not yet independently proven;
+2. `--verify-evidence <local_simulation.json>` additionally requires exact transaction-hash/token/output/gas/floor/nonce evidence from an independent local simulation source before DRY-2/3/4 can all pass.
+
+This avoids claiming an "independent" simulation by simply re-running the same Rust formula.
+
+Current live state remains:
+
+```text
+FROZEN_APPROVED_V2_SHA256 = UNARMED
+v2 approved = false
+v2 execution_ready = false
+```
+
+Therefore this implementation cannot perform a value-bearing Mainnet submission.
