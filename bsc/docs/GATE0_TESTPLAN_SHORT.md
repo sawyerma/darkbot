@@ -1,5 +1,12 @@
 # Gate 0 — BSC/Solana Birth-to-BUY Feasibility Gate
 
+> **ABSOLUTE TOP PRIORITY / STOP RULE — REAL BUY ONLY:**  
+> For the current BSC Gate-0 work, the only acceptance target is a **real successful on-chain BUY with token acquisition** and a **measured/proven `T0 → T_buy < 1 ms`**.  
+> **Until that is achieved, no other tests, optimizations, features, venues, strategies or follow-up work are allowed.**  
+> The only permitted work is code, instrumentation, transport/inclusion integration or evidence work **strictly required to execute, measure, prove, or reduce the real `T0 → T_buy` BUY path below 1 ms**.  
+> `T_signal → T_send`, build/sign latency, transport handoff, builder ACK, receipt status or ordering alone **do not satisfy this gate**.  
+> If a real successful BUY cannot be proven below 1 ms, Gate 0 remains **BLOCKED/FAIL** and all unrelated work stays stopped.
+
 Status: **AUTHORITATIVE / FIRST HARD GATE**
 Updated: 2026-10-01
 
