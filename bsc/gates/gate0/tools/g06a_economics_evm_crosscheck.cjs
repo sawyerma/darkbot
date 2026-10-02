@@ -321,14 +321,17 @@ async function main() {
     to: portalAddr,
     value: LAUNCH_VALUE,
     data: hexToBytes(launchData),
-    gasLimit: LAUNCH_GAS_LIMIT,
+    gasLimit: rpcLaunchGasLimit,
     gasPrice: GAS_PRICE,
     block,
   });
 
   const launchError = launchRes.execResult.exceptionError?.error || null;
   if (launchError) {
-    throw new Error(`local launch simulation reverted: ${launchError}; returndata=${revertHex(launchRes)}`);
+    throw new Error(
+      `local launch simulation reverted: ${launchError}; returndata=${revertHex(launchRes)}; ` +
+      `mainnet_estimate=${rpcLaunchGasEstimate}; local_gas_limit=${rpcLaunchGasLimit}`
+    );
   }
 
   const launchReturn = bytesToHex(launchRes.execResult.returnValue);
