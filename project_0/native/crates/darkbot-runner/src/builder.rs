@@ -43,7 +43,7 @@ pub mod p0 {
     }
 
     pub trait SizingProvider {
-        fn sizes(&self, account: &Pubkey, now_unix_s: u64) -> Result<Vec<Sizing>, String>;
+        fn sizes(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<Sizing>, String>;
     }
 
     /// Allowlisted Swap-Instructions (Jupiter/Titan) für collateral→liability.
@@ -52,9 +52,9 @@ pub mod p0 {
         pub instructions: Vec<Instruction>,
         pub lookup_tables: Vec<AddressLookupTableAccount>,
         pub swap_program: Pubkey,
-        pub fees_and_impact: u64,
-        /// [FIX-60] Tatsächlich über einen ausführbaren Marktpfad realisierbarer Wert, USD-Micro.
-        pub realizable_value: u64,
+        pub fees_and_impact_usd_micro: u64,
+        /// Tatsächlich über einen ausführbaren Marktpfad realisierbarer Wert, USD-Micro.
+        pub realizable_value_usd_micro: u64,
         /// Vom Router bestimmt: Input in Funding-Token-Basis (ExactOut) / Output (ExactIn).
         pub amount_in: u64,
         pub amount_out: u64,
@@ -80,8 +80,11 @@ pub mod p0 {
         pub inventory: &'a dyn Fn(&Pubkey) -> u64,
         /// ATA des Liquidators je Mint.
         pub ata: &'a dyn Fn(&Pubkey) -> Pubkey,
-        pub priority_fee: u64,
-        pub jito_tip: u64,
+        /// Economics cost after explicit conversion, never raw lamports. [FIX-61]
+        pub priority_fee_usd_micro: u64,
+        pub jito_tip_usd_micro: u64,
+        /// Execution amount for Jito tip transaction.
+        pub jito_tip_lamports: u64,
         pub zero_prefund_qualified: bool,
         pub path: Path,
     }
@@ -120,17 +123,17 @@ pub mod p0 {
             Ok((ixs, steps))
         }
 
-        fn input(&self, sz: &Sizing, funding: FundingClass, realizable_value: u64, swap_cost: u64, capital: u64) -> CandidateInput {
+        fn input(&self, sz: &Sizing, funding: FundingClass, realizable_value_usd_micro: u64, swap_cost_usd_micro: u64, capital_usd_micro: u64) -> CandidateInput {
             CandidateInput {
-                gross_seized_realizable: realizable_value,
-                repay: sz.repay_value,
-                protocol_fees: sz.protocol_fees,
-                flat_sol_fee: sz.flat_sol_fee,
-                swap_fees_and_impact: swap_cost,
-                priority_fee: self.priority_fee,
-                jito_tip: self.jito_tip,
-                rent_and_token: sz.rent_and_token,
-                required_capital: capital,
+                gross_seized_realizable_usd_micro: realizable_value_usd_micro,
+                repay_usd_micro: sz.repay_value,
+                protocol_fees_usd_micro: sz.protocol_fees,
+                flat_sol_fee_usd_micro: sz.flat_sol_fee,
+                swap_fees_and_impact_usd_micro: swap_cost_usd_micro,
+                priority_fee_usd_micro: self.priority_fee_usd_micro,
+                jito_tip_usd_micro: self.jito_tip_usd_micro,
+                rent_and_token_usd_micro: sz.rent_and_token,
+                required_capital_usd_micro: capital_usd_micro,
                 path: self.path,
                 funding,
             }
@@ -138,8 +141,8 @@ pub mod p0 {
     }
 
     impl<'a, S: AccountSource, Z: SizingProvider, R: RouteProvider> ReceivershipBuilder for P0ReceivershipBuilder<'a, S, Z, R> {
-        fn plans(&self, account: &Pubkey, now_unix_s: u64) -> Result<Vec<ReceivershipPlan>, String> {
-            let sizings = self.sizing.sizes(account, now_unix_s)?;
+        fn plans(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
+            let sizings = self.sizing.sizes(account, now_unix_s, slot)?;
             if sizings.is_empty() {
                 return Ok(vec![]);
             }
@@ -175,10 +178,10 @@ pub mod p0 {
                                 steps: steps.clone(),
                                 instructions: ixs.clone(),
                                 route: RouteKind::FreePublicAllowed,
-                                input: self.input(&sz, class, mark.realizable_value, mark.fees_and_impact, capital),
+                                input: self.input(&sz, class, mark.realizable_value_usd_micro, mark.fees_and_impact_usd_micro, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
-                                tip: self.jito_tip,
+                                tip: self.jito_tip_lamports,
                                 slippage_bps: sz.slippage_bps,
                                 assets: vec![asset_mint, liab_mint],
                                 tx_version: BuildVersion::V1,
@@ -189,10 +192,10 @@ pub mod p0 {
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::FreePublicAllowed,
-                                input: self.input(&sz, class, mark.realizable_value, mark.fees_and_impact, capital),
+                                input: self.input(&sz, class, mark.realizable_value_usd_micro, mark.fees_and_impact_usd_micro, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
-                                tip: self.jito_tip,
+                                tip: self.jito_tip_lamports,
                                 slippage_bps: sz.slippage_bps,
                                 assets: vec![asset_mint, liab_mint],
                                 tx_version: BuildVersion::V0,
@@ -206,10 +209,10 @@ pub mod p0 {
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
-                                input: self.input(&sz, class, mark.realizable_value, mark.fees_and_impact, capital),
+                                input: self.input(&sz, class, mark.realizable_value_usd_micro, mark.fees_and_impact_usd_micro, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
-                                tip: self.jito_tip,
+                                tip: self.jito_tip_lamports,
                                 slippage_bps: 0,
                                 assets: vec![asset_mint, liab_mint],
                                 tx_version: BuildVersion::V0,
@@ -226,10 +229,10 @@ pub mod p0 {
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
-                                input: self.input(&sz, class, mark.realizable_value, mark.fees_and_impact.saturating_add(buy.fees_and_impact), capital),
+                                input: self.input(&sz, class, mark.realizable_value_usd_micro, mark.fees_and_impact_usd_micro.saturating_add(buy.fees_and_impact_usd_micro), capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
-                                tip: self.jito_tip,
+                                tip: self.jito_tip_lamports,
                                 slippage_bps: sz.slippage_bps,
                                 assets: vec![asset_mint, liab_mint],
                                 tx_version: BuildVersion::V0,
