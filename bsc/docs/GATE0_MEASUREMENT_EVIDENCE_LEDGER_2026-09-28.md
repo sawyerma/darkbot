@@ -2337,3 +2337,73 @@ Do not merely suggest providers. Produce:
 - explicit STOP criteria for ordinary P2P if it cannot approach the required lead.
 
 No provider is declared fastest from marketing claims alone. Gate 0 must measure complete ingress x inclusion paths under comparable conditions.
+
+
+## 2026-10-02 — G0.1 v2 self-launch authorization contract and Dry-PASS guard
+
+A conflict in the previous acceptance evidence was resolved explicitly:
+
+- `g01_mainnet_acceptance_proposal_v1.json` historically contains `authorization.approved=true`, dated 2026-10-01, while also containing `execution_ready=false`.
+- The human-readable ledger had described the state as not approved for execution.
+- Interpretation is now frozen: v1 represented a historical budget-only approval proposal/state and is **not execution authority**.
+- v1 is retained for audit history but marked `SUPERSEDED_NOT_EXECUTION_AUTHORITY` and points to v2.
+- All future controlled Mainnet self-launch execution authority must come exclusively from `g01_mainnet_acceptance_proposal_v2.json`.
+
+Current v2 state remains:
+
+```text
+approved = false
+execution_ready = false
+```
+
+No value-bearing Mainnet bundle may be sent while either remains false.
+
+### Runtime send guard requirements
+
+The G0.6a harness must implement a fail-closed guard before any network write of valid Mainnet transaction or bundle bytes. It must verify at minimum:
+
+1. exact v2 contract file path;
+2. SHA-256 of exact v2 bytes equals the frozen/armed hash;
+3. schema version 2;
+4. `approved=true`;
+5. `execution_ready=true`;
+6. recovered launcher address equals the authorized launcher address;
+7. recovered buyer address equals the authorized buyer address;
+8. launcher and buyer are distinct;
+9. approved contract hash field equals the frozen hash;
+10. consumed budget + worst-case reserved attempt cost stays within the approved absolute budget;
+11. attempt count stays within the approved maximum;
+12. every required Dry-PASS predicate is true.
+
+v1, environment variables and CLI flags are explicitly forbidden as standalone execution authority.
+
+### Dry-PASS definition before authorization
+
+All four criteria are mandatory:
+
+**DRY-1 — bytes and signers**
+- both builder payload constructors contain byte-identical raw launch and BUY transactions;
+- order is `[raw_signed_launch_A, raw_signed_buy_B]`;
+- independent decoding/signature recovery yields distinct wallet A and wallet B;
+- ChainID, nonces, Portal, value, gas and calldata all match the frozen scope.
+
+**DRY-2 — independent local simulation**
+- local/offline sequential execution of launch A followed by BUY B succeeds;
+- predicted token address matches;
+- exact received token amount matches the local economics calculation;
+- signed `minOutput > 0` and is <= independently simulated received amount;
+- historical DOGE fixture values are not reused as authority for the native self-launch mode.
+
+**DRY-3 — gas floor and budget**
+- current acceptance/ranking floor for every armed builder is independently verified before signing;
+- identical signed bytes satisfy the strictest verified builder requirement;
+- independently simulated launch+BUY gas multiplied by the signed gas price, plus launch value, BUY value and permitted builder costs, fits the per-attempt and absolute approved budget.
+
+**DRY-4 — expiry, nonces and zero egress**
+- expiry/max-block fields stay inside the approved tight window;
+- launcher and buyer pending nonces match the signed transactions;
+- before authorization, zero bytes of the valid signed launch, valid signed BUY or valid bundle payload may leave the machine.
+
+Provider API/method/expiry prequalification before authorization may therefore use only deliberately non-executable fixtures. Exact valid Mainnet transaction/bundle bytes are not sent to remote simulation endpoints before authorization.
+
+The provisional 0.05 BNB total ceiling remains only a proposal. It must be recalculated from verified launch costs, simulated gas and the strictest current builder floor before approval and should be reduced if the evidence permits.
