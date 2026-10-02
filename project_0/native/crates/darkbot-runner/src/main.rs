@@ -261,7 +261,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     drop(pre_state);
     // Ingress-Thread (WSS). Provider nur als URL.
-    let sub = Subscription { programs: vec![program], accounts: subscription_keys.clone(), slots: true, roots: true, transactions_mentioning: vec![] };
+    let sub = Subscription {
+        programs: vec![],
+        program_filters: vec![
+            (program, liability_account_filters(&group)),
+            (program, bank_filters(&group)),
+        ],
+        accounts: subscription_keys.clone(),
+        slots: true,
+        roots: true,
+        transactions_mentioning: vec![],
+    };
     // [FIX-34] Ingress als neu startbare Session: bei Änderung der Dependency-Menge wird die alte
     // Session beendet, eine neue mit erweiterter Subscription gestartet, dann HALT → Recovery → READY.
     let slot_watch_for_spawn = slot_watch.clone();
@@ -460,7 +470,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Ok(mut g) = opt_shared.lock() { *g = optional_dependency_keys.clone(); }
                 let mut all_keys: Vec<Pubkey> = subscribed.iter().copied().collect();
                 all_keys.sort_unstable_by_key(|k| k.to_bytes());
-                let sub2 = Subscription { programs: vec![program], accounts: all_keys, slots: true, roots: true, transactions_mentioning: vec![] };
+                let sub2 = Subscription {
+                    programs: vec![],
+                    program_filters: vec![
+                        (program, liability_account_filters(&group)),
+                        (program, bank_filters(&group)),
+                    ],
+                    accounts: all_keys,
+                    slots: true,
+                    roots: true,
+                    transactions_mentioning: vec![],
+                };
                 ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
             }
         }
