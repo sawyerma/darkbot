@@ -436,8 +436,8 @@ fn connect_testnet_https(host_env: &str, port_env: &str) -> (String, u16, Tls) {
     );
 }
 
-fn https_send_json(stream: &mut Tls, host: &str, body: &str) {
-    let req = format!(
+fn https_request(host: &str, body: &str) -> Vec<u8> {
+    format!(
         "POST {LAUNCH_HTTPS_PATH} HTTP/1.1\r\n\
          Host: {host}\r\n\
          Content-Type: application/json\r\n\
@@ -446,9 +446,16 @@ fn https_send_json(stream: &mut Tls, host: &str, body: &str) {
          \r\n{}",
         body.len(),
         body
-    );
-    stream.write_all(req.as_bytes()).expect("HTTPS write failed");
+    ).into_bytes()
+}
+
+fn https_send_prepared(stream: &mut Tls, request: &[u8]) {
+    stream.write_all(request).expect("HTTPS write failed");
     stream.flush().expect("HTTPS flush failed");
+}
+
+fn https_send_json(stream: &mut Tls, host: &str, body: &str) {
+    https_send_prepared(stream, &https_request(host, body));
 }
 
 fn ws_connect() -> Tls {
@@ -769,6 +776,23 @@ fn main() {
     let launch_hash = keccak256(&launch_signed);
     let launch_hash_hex = format!("0x{}", hex::encode(launch_hash));
 
+    // Controlled self-launch: all signature-bound BUY fields are known now.
+    // Complete BUY encoding/signing before launch publication or P2P arming.
+    let buy_prebuild_start = Instant::now();
+    let buy_nonce = nonce.checked_add(1).expect("BUY nonce overflow");
+    let buy_data = buy_calldata(predicted);
+    let buy_signed = sign_legacy(
+        &signer, buy_nonce, gas_price, BUY_GAS_LIMIT, portal,
+        U256::from(BUY_VALUE_WEI), &buy_data,
+    );
+    let buy_hash = keccak256(&buy_signed);
+    let buy_hash_hex = format!("0x{}", hex::encode(buy_hash));
+    let buy_body = format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
+        hex::encode(&buy_signed)
+    );
+    let buy_prebuild_and_sign_ns = buy_prebuild_start.elapsed().as_nanos();
+
     println!("G0.7 TESTNET BIRTH->BUY CONTROLLED TEST");
     println!("chain_id:                 {chain_id}");
     println!("wallet:                   {sender}");
@@ -836,13 +860,19 @@ fn main() {
         );
     println!("buy_submission_transport:  prewarmed HTTPS {buy_https_host}:{buy_https_port}");
 
+    // Host selection is complete; serialize the full HTTP request before launch.
+    let buy_request = https_request(&buy_https_host, &buy_body);
+    let t_ready = Instant::now();
+    println!("buy_prepared_before_launch: true");
+    println!("BUY_prebuild_and_sign_ns:  {buy_prebuild_and_sign_ns}");
+    println!("buy_local_tx_hash:         {buy_hash_hex}");
+
     let launch_body = format!(
         r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
         hex::encode(&launch_signed)
     );
     https_send_json(&mut launch_https, &launch_https_host, &launch_body);
     let launch_handoff = Instant::now();
-    println!("launch_injection_transport: independent HTTPS {launch_https_host}:{launch_https_port}");
 
     let p2p_signal = loop {
         let signal = p2p
@@ -855,6 +885,12 @@ fn main() {
     };
 
     let t_signal = p2p_signal.observed;
+    let t_queue = Instant::now();
+    https_send_prepared(&mut buy_https, &buy_request);
+    let t_send = Instant::now();
+
+    // Everything below is post-handoff evidence; not part of the send path.
+    println!("launch_injection_transport: independent HTTPS {launch_https_host}:{launch_https_port}");
     let signal_mode = p2p_signal.source.as_str();
     let signal_launch_data = p2p_signal.input;
     println!("p2p_signal_peers:          {}", p2p_signal.peers);
@@ -876,54 +912,8 @@ fn main() {
 
     let derived = predicted_token(decoded.params.salt);
     assert_eq!(derived, predicted);
-    let t_decode = Instant::now();
+    let t_postsend_verified = Instant::now();
 
-    let buy_data = buy_calldata(derived);
-    let unsigned = rlp_list(vec![
-        rlp_u64(nonce + 1),
-        rlp_u64(gas_price),
-        rlp_u64(BUY_GAS_LIMIT),
-        rlp_bytes(portal.as_slice()),
-        rlp_u256(U256::from(BUY_VALUE_WEI)),
-        rlp_bytes(&buy_data),
-        rlp_u64(CHAIN_ID),
-        rlp_bytes(&[]),
-        rlp_bytes(&[]),
-    ]);
-    let sighash = keccak256(&unsigned);
-    let t_build = Instant::now();
-
-    let (sig, recovery_id) = signer
-        .sign_prehash_recoverable(sighash.as_slice())
-        .expect("BUY signing failed");
-    let t_sign = Instant::now();
-
-    let sig_bytes = sig.to_bytes();
-    let v = 35u64 + 2 * CHAIN_ID + recovery_id.to_byte() as u64;
-    let buy_signed = rlp_list(vec![
-        rlp_u64(nonce + 1),
-        rlp_u64(gas_price),
-        rlp_u64(BUY_GAS_LIMIT),
-        rlp_bytes(portal.as_slice()),
-        rlp_u256(U256::from(BUY_VALUE_WEI)),
-        rlp_bytes(&buy_data),
-        rlp_u64(v),
-        rlp_u256(U256::from_be_slice(&sig_bytes[..32])),
-        rlp_u256(U256::from_be_slice(&sig_bytes[32..])),
-    ]);
-
-    let buy_hash = keccak256(&buy_signed);
-    let buy_hash_hex = format!("0x{}", hex::encode(buy_hash));
-    let t_ready = Instant::now();
-
-    let buy_body = format!(
-        r#"{{"jsonrpc":"2.0","id":3,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
-        hex::encode(&buy_signed)
-    );
-
-    let t_queue = Instant::now();
-    https_send_json(&mut buy_https, &buy_https_host, &buy_body);
-    let t_send = Instant::now();
 
     // Do not wait for an RPC ACK in the latency path. Receipt + token acquisition
     // below are the authority that the BUY really executed.
@@ -967,7 +957,9 @@ fn main() {
     );
 
     let native_after = hex_u256(&rpc("eth_getBalance", json!([WALLET, "latest"])));
+    assert!(balance_before >= native_after, "balance change cannot establish expected debit");
     let native_debit = balance_before - native_after;
+    assert!(native_debit >= U256::from(BUY_VALUE_WEI), "BUY economic debit not established");
 
     let competitors = successful_competing_buys_between(
         launch_block,
@@ -979,7 +971,7 @@ fn main() {
 
     println!();
     println!("=== G0.7 TESTNET BIRTH->BUY RESULT ===");
-    println!("status:                    PASS");
+    println!("status:                    ACQUISITION_PASS_TIMING_UNPROVEN");
     println!("signal_mode:               {signal_mode}");
     println!("launch_ack_seen:           INDEPENDENT_HTTPS_NOT_WAITED");
     if let Some(t_hash) = t_p2p_hash {
@@ -1014,22 +1006,8 @@ fn main() {
         }
     );
     println!();
-    println!(
-        "T_signal_to_decode_ns:     {}",
-        (t_decode - t_signal).as_nanos()
-    );
-    println!(
-        "T_decode_to_build_ns:      {}",
-        (t_build - t_decode).as_nanos()
-    );
-    println!(
-        "T_build_to_sign_ns:        {}",
-        (t_sign - t_build).as_nanos()
-    );
-    println!(
-        "T_sign_to_ready_ns:        {}",
-        (t_ready - t_sign).as_nanos()
-    );
+    println!("postsend_launch_verification_ns: {}", (t_postsend_verified - t_send).as_nanos());
+    println!("BUY_prebuild_and_sign_ns:  {buy_prebuild_and_sign_ns}");
     println!(
         "T_ready_to_queue_ns:       {}",
         (t_queue - t_ready).as_nanos()
@@ -1039,8 +1017,8 @@ fn main() {
         (t_send - t_queue).as_nanos()
     );
     println!(
-        "T_signal_to_ready_ns:      {}",
-        (t_ready - t_signal).as_nanos()
+        "BUY_ready_before_signal_ns: {}",
+        (t_signal - t_ready).as_nanos()
     );
     println!(
         "T_signal_to_send_ns:       {}",
