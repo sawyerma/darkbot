@@ -2797,3 +2797,34 @@ Next stage remains the frozen plan:
 3. build exact signed bytes locally and recover/verify all envelope fields;
 4. update the proposed launch gas/budget ceiling using measured evidence;
 5. close DRY-1, full DRY-2, DRY-3 and DRY-4 before any authorization.
+
+
+## 2026-10-02 — G0.6a current-target builder handoff diagnostics
+
+Two current native-BNB Flap V6 invalid-wire transport diagnostics were run against warm real builder TLS/TCP boundaries. These are diagnostic only because the benchmark still performs quote + BUY build/sign after T_signal, which violates the frozen G0.2/G0.5 preparation rule for the controlled self-launch where those fields are precomputable before T0.
+
+48Club Puissant diagnostic:
+- T_signal -> T_ready p50: 255.541 us
+- T_signal -> T_send p50: 518.833 us
+- T_signal -> T_send p95: 963.041 us
+- T_signal -> T_send p99: 1642.791 us
+- >1 ms: 5/100
+- remote TLS write+flush p50: 224.541 us
+
+BlockRazor standard bundle diagnostic:
+- T_signal -> T_ready p50: 274.125 us
+- T_signal -> T_send p50: 543.625 us
+- T_signal -> T_send p95: 1084.375 us
+- T_signal -> T_send p99: 2216.959 us
+- >1 ms: 8/100
+- remote TLS write+flush p50: 232.750 us
+
+Interpretation:
+- Both paths demonstrate sub-ms median current-target remote handoff.
+- 48Club is slightly better in these runs, but no real inclusion winner is claimed.
+- JSON-RPC response time is not T_send and not T_buy.
+- These runs MUST NOT be promoted to final G0.5 self-launch latency evidence because quote/build/sign remained inside the measured interval even though the controlled self-launch knows the exact token/BUY before T0.
+- The next valid self-launch benchmark MUST obey G0.2/G0.5 exactly: precompute/prebuild/pre-sign every signature-bound field that is final before T0; keep only proven dynamic residual work after T_signal; keep builder connections warm; measure T_ready, T_queue and actual builder transport T_send separately.
+- 48Club qualification path MUST carry noMerge=true and positionFirst=true.
+- BlockRazor and 48Club remain candidate inclusion adapters; actual controlled Mainnet acquisition/order result decides the winner.
+- T0 -> T_buy remains NOT MEASURED. Do not derive it from block timestamps or these handoff diagnostics.
