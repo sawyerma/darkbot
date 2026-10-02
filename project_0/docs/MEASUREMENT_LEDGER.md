@@ -1,6 +1,6 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
-Status: **MAC BUILD/TEST BASELINE PASS (`crate_health` + `txv1`); Sizing/RouteProvider/v1 Sign-Wire/Staging/LIVE still open**  
+Status: **CURRENT HEAD builds with `crate_health + txv1`; prior full unit-test baseline PASS; post-wiring full tests still to rerun; LIVE remains disabled**  
 Updated: 2026-10-02
 
 This is the single human-readable measurement ledger for the new Solana / Project 0 Liquidator.
@@ -76,8 +76,8 @@ realized PnL
 | H0 | historical Project 0 liquidation/composition/competition | N/A | not started |
 | P2 | reverse/threshold index, premium+tag scheduler | UNIT TEST baseline PASS in workspace feature runs; P3-02 thresholds still open | darkbot-project0/src/{index,schedule}.rs |
 | P3 | health via marginfi crate | `crate_health` compiles/tests PASS against pinned marginfi tag; exact thresholds P3-02 still open | darkbot-project0/src/health.rs |
-| P4A | deterministic economics/ranking, premium curve | UNIT TEST baseline PASS; concrete SizingProvider / failed-cost evidence still open | darkbot-project0/src/economics.rs |
-| P5 | receivership sequence/allowlist/bundle rules | Crate-based instruction builders + planner compile/tests PASS; concrete runtime Sizing/Route wiring still open | darkbot-project0/src/{planner,receivership}.rs |
+| P4A | deterministic economics/ranking, premium curve | Prior unit-test baseline PASS; concrete ProtocolSizingProvider now wired; failed-cost evidence still open/fail-closed | darkbot-project0/src/{economics,sizing}.rs |
+| P5 | receivership sequence/allowlist/bundle rules | Crate-based builders/planner prior tests PASS; runtime ProtocolSizer + Jupiter V2 RouteProvider + P0ReceivershipBuilder are now wired and CURRENT HEAD compiles | darkbot-project0/src/{planner,receivership}.rs + darkbot-runner |
 | P6 | full hotpath + shadow race | N/A | not started |
 | P7 | capture/economics/competition/provider-value evidence | N/A | not started |
 | P4B | empirical p(win)/tip/stopping ranking | N/A | blocked on P7 |
@@ -188,8 +188,8 @@ When created, use one canonical location and link it here. Do not scatter Projec
 ## 8. Current status
 
 ~~~text
-Project 0 production code:        Mac build/test baseline PASS through `crate_health + txv1`
-Project 0 measurements:           Build/test evidence only; latency/capture/PnL remain N/A
+Project 0 production code:        CURRENT HEAD build PASS with `crate_health + txv1`; prior full unit-test baseline PASS
+Project 0 measurements:           Compiler/test evidence only; post-wiring tests + shadow/mainnet evidence remain open
 Project 0 LIVE:                   NOT ENABLED
 permanent paid provider approved: NONE
 probabilistic ranking approved:   NO
@@ -402,3 +402,195 @@ Offen: Build/Tests (vier Logs), C0, P4A-03 Sizing, RouteProvider, v1 Sign/Wire, 
 **Gate decision:** compiler/test baseline **PASS**. Next functional closure remains:
 `Exact Health → Sizing → RouteProvider → Funding → P0ReceivershipBuilder → Economics → Build → Sign → Simulate`.
 `NoPlans` must not be removed until that real path is wired and fail-closed.
+
+
+### 2026-10-02 — Sitzung 12 (Compiler closure → exact sizing → Jupiter V2 → real runner wiring) — HANDOFF CHECKPOINT
+
+**Purpose of this checkpoint:** this section is the handoff source for the next chat/session. Do not infer completion beyond the explicit PASS statements below.
+
+**Current repository state at documentation time:** `7a55366182c07f1f99951427d5a98d7d8937a76b` on `main` after `[FIX-70]`. Parallel BSC commits were preserved and never reverted.
+
+#### A. What is conclusively complete
+
+1. **Original Fable compiler/unit-test closure is complete for the pre-wiring baseline.**
+   - `cargo build --manifest-path project_0/native/Cargo.toml --features crate_health` → PASS.
+   - `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features crate_health` → PASS.
+   - `cargo build --manifest-path project_0/native/Cargo.toml --features "crate_health txv1"` → PASS.
+   - `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features "crate_health txv1"` → PASS.
+   - This closed the initial compile blockers through `[FIX-58]`.
+   - Therefore the old Fable requirement **"compile/test the written Rust instead of leaving it UNTESTED"** was satisfied for that baseline.
+
+2. **Current post-wiring HEAD compiles with both important features enabled.**
+   User-reported command:
+   `cargo build --manifest-path project_0/native/Cargo.toml --features "crate_health txv1"`
+   → **PASS** on 2026-10-02 after `[FIX-59..69]`; only one unused-import warning remained.
+   `[FIX-70]` removed that feature-gated warning after the reported build.
+   A fresh build after `[FIX-70]` is still required to record the CURRENT HEAD as warning-free.
+
+3. **Compiler/test fixes already closed:** `[FIX-48..58]`.
+   Important verified corrections include Solana dependency alignment, trait-object AccountSource support, reconciliation-test ownership semantics, histogram `u64::MAX` overflow handling, and v1 message-size API.
+
+#### B. Functional work added after the original green baseline
+
+**[FIX-59] Exact protocol receivership sizing**
+- New `darkbot-project0/src/sizing.rs`.
+- Uses the pinned Marginfi crate/source instead of an independent health formula.
+- Enumerates protocol-valid Asset×Liability pairs rather than hardcoding one "largest" pair.
+- Uses Marginfi Maintenance vs Equity price semantics and e-mode reconciliation.
+- Uses on-chain `FeeState.liquidation_max_fee`.
+- Keeps protocol sizing distinct from executable market realizability.
+
+**[FIX-60..64] Correct economics/route boundaries**
+- Protocol oracle/equity value is not treated as executable market value.
+- Economics monetary fields made explicitly USD-micro.
+- Raw lamports were separated from USD-micro economics fields.
+- Trigger slot is carried into sizing.
+- RouteProvider changed to mint-based routing.
+- Executable realizable value derives from route output relative to protocol liability value.
+- Jupiter output already incorporates AMM fees/price impact, so those are not double-subtracted.
+- ZERO_PREFUND requires route output ≥ actual repay amount.
+
+**[FIX-65] Jupiter Swap API V2 RouteProvider**
+- Concrete `JupiterV2RouteProvider` uses `/swap/v2/build`.
+- DarkBot retains transaction ownership: blockhash, CU limits, signing, simulation and submission stay in our core.
+- Parses raw setup/swap/cleanup/other instructions and ALT address contents.
+- Only Marginfi-allowed top-level Jupiter/ATA route instructions are accepted; incompatible routes fail closed.
+- ExactOut/JIT remains disabled until a documented/qualified provider path exists.
+- Optional API key; implementation does not require a paid subscription.
+
+**[FIX-66..69] Runtime bridge and actual runner wiring**
+- Token / Token-2022 IDs and native SOL mint added.
+- Protocol-consistent USD valuation method added for native token amounts using pinned Marginfi equity pricing.
+- `ProtocolSizingProvider` bridges exact protocol amounts into runtime economics.
+- Liquidator ATA balances are read from reconciled RAM state.
+- Token and Token-2022 ATA derivations are supported.
+- ATA subscriptions are optional; missing ATAs disable candidates rather than blocking recovery.
+- Required oracle/mint dependencies remain fail-closed.
+- WSOL Marginfi bank is resolved to value SOL-denominated costs.
+- Real `P0ReceivershipBuilder` is wired in `p0-longtail` when `crate_health` is enabled.
+- `NoPlans` remains only as the compile-time fallback when `crate_health` is disabled.
+- ZERO_PREFUND is **not** assumed qualified: default false; requires `P0_ZERO_PREFUND_QUALIFIED=true`.
+- JIT remains fail-closed because ExactOut is not yet qualified.
+- `FailedCostMatrix::default()` remains Unknown, deliberately preventing fake-zero economics.
+
+**[FIX-70]**
+- Removed the feature-gated unused `ReceivershipBuilder`/`ReceivershipPlan` warning from the real `crate_health` build path.
+
+#### C. Current functional path
+
+With `crate_health` the intended Shadow path is now:
+
+```text
+WSS update
+→ reconciled StateCore
+→ exact Marginfi Health
+→ ProtocolSizer
+→ ATA inventory from RAM state
+→ Jupiter V2 executable route
+→ P0ReceivershipBuilder
+→ deterministic Economics
+→ TX Build
+→ Sign
+→ Simulate
+→ Shadow Send-Boundary
+```
+
+This is materially beyond the earlier Fable state where `NoPlans` blocked planning.
+
+#### D. What is NOT complete yet
+
+Do **not** call Project_0 finished. The following are still open:
+
+1. **Post-wiring full test rerun.**
+   After `[FIX-59..70]`, run both:
+   - `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features "crate_health txv1"`
+   - `cargo test --manifest-path project_0/native/Cargo.toml --workspace --features crate_health`
+   The previous green unit-test baseline predates the new sizing/router/runtime wiring.
+
+2. **Fresh warning-free build after [FIX-70].**
+   Re-run:
+   - `cargo build --manifest-path project_0/native/Cargo.toml --features "crate_health txv1"`
+
+3. **Failed-attempt cost matrix.**
+   Current cells are unknown by design. Economics therefore stays non-actionable until real path/outcome costs are measured or otherwise qualified. Unknown must not become zero.
+
+4. **Actual Shadow/Mainnet qualification.**
+   Current compile success does not prove:
+   - Jupiter route availability for live Marginfi opportunities,
+   - full receivership simulation success,
+   - ZERO_PREFUND feasibility,
+   - capture/winner performance,
+   - landing behavior,
+   - realized token deltas/PnL.
+
+5. **v1 execution remains partial.**
+   v1 capability/message measurement compiles, but final v1 sign/wire/submission support is still not closed.
+
+6. **P3-02 threshold scheduler remains open.**
+   `HealthEngine::thresholds()` is still fail-closed/Unsupported; trigger (b)/(c) work remains separate from trigger (a).
+
+7. **ExactOut/JIT is not qualified.**
+   Jupiter V2 provider currently returns `None` for ExactOut, therefore JIT_SHORTFALL is intentionally disabled.
+
+8. **Integration-bank refresh/withdraw completeness.**
+   Generic banks are handled; unsupported integration-bank paths remain skipped/fail-closed until their refresh/withdraw instruction planning is fully wired and qualified.
+
+9. **P8 token-delta reconciliation / realized PnL remains open.**
+   Landing alone is not sufficient economic evidence.
+
+10. **LIVE remains deliberately disabled.**
+    `P0_MODE=live` still refuses startup until P8-LT qualification is recorded.
+
+#### E. Assessment against Fable's earlier requested work
+
+**Compiler/build/unit-test problem from Fable:** substantially **closed** for the original baseline and current code **builds** after the major wiring changes.
+
+**Fable's broader production objective:** **not closed yet**. Compilation was only one gate. The remaining work is now predominantly functional qualification/evidence rather than basic Rust dependency repair.
+
+Current readiness summary:
+
+```text
+Dependency/compiler repair             DONE
+Pre-wiring workspace unit tests         DONE
+Exact Marginfi Health                   DONE for trigger-a path
+Protocol Sizing                         IMPLEMENTED + COMPILES
+Jupiter V2 RouteProvider                IMPLEMENTED + COMPILES
+P0ReceivershipBuilder runtime wiring    IMPLEMENTED + COMPILES
+NoPlans in crate_health runtime         REMOVED
+Post-wiring workspace tests             OPEN
+Failed-cost evidence                    OPEN
+Shadow simulation on real opportunities OPEN
+ZERO_PREFUND qualification              OPEN
+v1 sign/wire/submission                 OPEN
+P3-02 thresholds / triggers b,c         OPEN
+ExactOut/JIT                            OPEN
+P8 realized PnL/reconciliation          OPEN
+Controlled LIVE                         BLOCKED intentionally
+Production profitability                UNPROVEN
+```
+
+#### F. Exact next commands
+
+From repository root:
+
+```bash
+cd "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot"
+
+git pull --ff-only
+
+cargo build \
+  --manifest-path project_0/native/Cargo.toml \
+  --features "crate_health txv1"
+
+cargo test \
+  --manifest-path project_0/native/Cargo.toml \
+  --workspace \
+  --features "crate_health txv1"
+
+cargo test \
+  --manifest-path project_0/native/Cargo.toml \
+  --workspace \
+  --features crate_health
+```
+
+If all three are green, update this ledger again and then proceed to the first real Shadow simulation/qualification gate rather than adding more unmeasured architecture.
