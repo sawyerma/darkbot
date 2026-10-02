@@ -8,9 +8,7 @@
 
 use crate::ingress::{AccountUpdate, SourceKind};
 use darkbot_common::timing::Clock;
-use solana_account_decoder::UiAccountEncoding;
 use solana_client::rpc_client::RpcClient;
-use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
 use solana_client::rpc_request::RpcRequest;
 use solana_client::rpc_response::{OptionalContext, RpcKeyedAccount};
 use solana_account_decoder::UiAccount;
@@ -35,22 +33,20 @@ pub struct Snapshot {
     pub missing: Vec<(Pubkey, u64)>,
 }
 
-/// Alle Accounts eines Programms. `withContext` liefert den Slot; ohne Slot
-/// ist ein Snapshot wertlos (kein Bezug für "Updates > S").
-pub fn program_accounts(rpc: &RpcClient, program: &Pubkey, clock: &Clock) -> Result<Snapshot, SnapshotError> {
-    let cfg = RpcProgramAccountsConfig {
-        filters: None,
-        account_config: RpcAccountInfoConfig {
-            encoding: Some(UiAccountEncoding::Base64),
-            data_slice: None,
-            commitment: Some(CommitmentConfig::confirmed()),
-            min_context_slot: None,
-        },
-        with_context: Some(true),
-        sort_results: None, // VERIFY: Feld existiert ab solana-client 1.18/2.x
-    };
-    // Context-Slot aus **derselben** Antwort (withContext=true). `get_program_accounts_with_config`
-    // verwirft den Context, daher roher Request. VERIFY: OptionalContext/RpcKeyedAccount-Pfade in solana-client 3.x.
+fn decode_program_accounts(
+    rpc: &RpcClient,
+    program: &Pubkey,
+    filters: Option<Vec<serde_json::Value>>,
+    clock: &Clock,
+) -> Result<Snapshot, SnapshotError> {
+    let mut cfg = serde_json::json!({
+        "encoding": "base64",
+        "commitment": "confirmed",
+        "withContext": true
+    });
+    if let Some(filters) = filters {
+        cfg["filters"] = serde_json::Value::Array(filters);
+    }
     let params = serde_json::json!([program.to_string(), cfg]);
     let resp: OptionalContext<Vec<RpcKeyedAccount>> = rpc
         .send(RpcRequest::GetProgramAccounts, params)
@@ -77,6 +73,21 @@ pub fn program_accounts(rpc: &RpcClient, program: &Pubkey, clock: &Clock) -> Res
         });
     }
     Ok(Snapshot { slot, accounts, missing: Vec::new() })
+}
+
+/// Alle Accounts eines Programms. Nur noch für explizite Census-/Debug-Zwecke.
+pub fn program_accounts(rpc: &RpcClient, program: &Pubkey, clock: &Clock) -> Result<Snapshot, SnapshotError> {
+    decode_program_accounts(rpc, program, None, clock)
+}
+
+/// Gefilterte Program-Accounts mit Context-Slot. [FIX-77]
+pub fn program_accounts_filtered(
+    rpc: &RpcClient,
+    program: &Pubkey,
+    filters: Vec<serde_json::Value>,
+    clock: &Clock,
+) -> Result<Snapshot, SnapshotError> {
+    decode_program_accounts(rpc, program, Some(filters), clock)
 }
 
 /// Einzelne Accounts (Oracles, FeeState, LUTs) in Batches ≤ 100. Jeder Account trägt
