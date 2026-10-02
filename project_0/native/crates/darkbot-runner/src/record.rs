@@ -25,6 +25,7 @@ pub enum LossReason {
     Ingress,
     State,
     Health,
+    CircuitBreaker,
     Bankruptcy,
     IntegrationRefresh,
     Economics,
