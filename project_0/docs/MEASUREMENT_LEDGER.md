@@ -909,3 +909,24 @@ This proves the production Shadow runtime can:
 `READY → detect feed loss → halt trusted state → reconnect → re-subscribe → filtered snapshot → reconcile → READY`.
 
 This closes the open reconnect/recovery evidence item from the prior checkpoint. It does not yet prove a complete liquidation opportunity through Build/Sign/Simulate.
+
+
+### 2026-10-02 — [FIX-84] Immediate bootstrap Shadow probe — IMPLEMENTED / VERIFY
+
+Purpose: avoid waiting indefinitely for a new account update after G5 READY when the reconciled snapshot already contains accounts whose on-chain `IndexerFlags.was_liquidatable == 1`.
+
+Implementation:
+- after the first successful `RecoveryOutcome::Ready` in Shadow mode only,
+- scan the already reconciled target-group MarginfiAccounts in RAM,
+- select only accounts with `was_liquidatable == 1`,
+- queue those account states back through the existing account-trigger path,
+- therefore reuse the same exact Health → Sizing → Route → P0ReceivershipBuilder → Build → Sign → Simulate pipeline,
+- run the bootstrap probe once per process; later recovery events do not requeue it.
+
+No LIVE behavior is enabled or changed.
+
+Commits:
+- `1ef720f` selector
+- `ab727b1` one-shot probe queue
+
+Status: IMPLEMENTED, not yet compiler/Mainnet-qualified. Next evidence is build/test PASS followed by `bootstrap_probe: queued=N` and resulting Shadow records.
