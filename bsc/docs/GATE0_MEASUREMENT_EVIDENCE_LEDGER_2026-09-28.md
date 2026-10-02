@@ -1,5 +1,9 @@
 # DarkBot Gate 0 — Masterprotokoll BSC Birth-to-BUY
 
+> **ABSOLUTE TOP PRIORITY / STOP RULE:** Der nächste und einzige relevante Gate-0-Nachweis ist ein **wirklich erfolgreich ausgeführter on-chain BUY mit tatsächlicher Token-Akquisition** und **gemessenem/belegtem `T0 → T_buy < 1 ms`**.  
+> **Bis dieser Nachweis PASS ist, wird nichts anderes getestet, optimiert oder gebaut.** Erlaubt sind ausschließlich Code-, Mess-, Transport-/Inclusion- und Evidence-Arbeiten, die direkt notwendig sind, um diesen realen BUY auszuführen, `T0 → T_buy` zu messen/belegen oder unter 1 ms zu bringen.  
+> `T_signal → T_send`, reine Build-/Sign-Latenz, Transport-Handoff, Builder-ACK, Receipt oder Ordering allein zählen **nicht** als Erfolg. Ohne belegten realen BUY <1 ms bleibt Gate 0 **BLOCKED/FAIL**.
+
 > **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
 
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
