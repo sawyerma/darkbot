@@ -122,7 +122,7 @@ mod tests {
     use solana_sdk::pubkey::Pubkey;
 
     fn upd(pk: Pubkey, slot: u64, data: u8) -> AccountUpdate {
-        AccountUpdate { pubkey: pk, owner: Pubkey::new_unique(), lamports: 1, data: vec![data], slot, write_version: None, source: SourceKind::Snapshot, t_rx_ns: 0 }
+        AccountUpdate { pubkey: pk, owner: Pubkey::new_from_array([0xA5; 32]), lamports: 1, data: vec![data], slot, write_version: None, source: SourceKind::Snapshot, t_rx_ns: 0 } // [FIX-57] stable owner across A/B
     }
 
     #[test]

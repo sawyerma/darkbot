@@ -363,7 +363,7 @@ mod tests {
     fn upd(pk: Pubkey, slot: u64, wv: Option<u64>, data: u8) -> AccountUpdate {
         AccountUpdate {
             pubkey: pk,
-            owner: Pubkey::new_unique(),
+            owner: Pubkey::new_from_array([0xA5; 32]), // [FIX-57] stable owner across snapshots
             lamports: 1,
             data: vec![data],
             slot,
@@ -458,6 +458,18 @@ mod tests {
         let rep = st.reconcile(8, &[upd(pk, 8, None, 2)]);
         assert_eq!(rep.mismatch, vec![pk]);
         assert!(!st.confirm_ready().is_tradable());
+        assert_eq!(st.run_state(), RunState::Halted(HaltReason::ReconcileFailure));
+    }
+
+    #[test]
+    fn reconcile_owner_mismatch_halts() {
+        let mut st = StateCore::new(10);
+        let pk = Pubkey::new_unique();
+        st.install_snapshot(8, vec![upd(pk, 8, None, 1)]);
+        let mut remote = upd(pk, 8, None, 1);
+        remote.owner = Pubkey::new_from_array([0x5A; 32]);
+        let rep = st.reconcile(8, &[remote]);
+        assert_eq!(rep.mismatch, vec![pk], "owner is part of canonical account state");
         assert_eq!(st.run_state(), RunState::Halted(HaltReason::ReconcileFailure));
     }
 
