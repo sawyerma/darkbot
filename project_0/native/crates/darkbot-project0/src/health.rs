@@ -85,6 +85,7 @@ pub trait AccountSource {
 #[cfg(feature = "crate_health")]
 pub mod crate_impl {
     use super::*;
+    use crate::protocol; // [FIX-50] used by closeout threshold below
     use marginfi::state::marginfi_account::get_health_components;
     use marginfi_type_crate::types::{Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, RequirementType};
     use solana_sdk::account::Account;

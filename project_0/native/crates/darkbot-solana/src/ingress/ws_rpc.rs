@@ -66,7 +66,7 @@ impl WsRpcControlSource {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SubKind {
+pub(crate) enum SubKind { // [FIX-52] matches parse_notification visibility
     Program,
     Account,
     Slot,

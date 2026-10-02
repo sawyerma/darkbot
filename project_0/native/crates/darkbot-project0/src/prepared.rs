@@ -63,21 +63,24 @@ impl PreparedCache {
 
     /// Liefert den Eintrag nur, wenn der Schlüssel exakt übereinstimmt.
     pub fn get(&mut self, account: &Pubkey, current: &InvalidationKey) -> Option<&PreparedCandidate> {
-        match self.entries.get(account) {
-            Some(e) if &e.key == current => {
-                self.hits += 1;
-                Some(e)
-            }
-            Some(_) => {
-                self.invalidations += 1;
-                self.entries.remove(account);
-                self.misses += 1;
-                None
-            }
+        // [FIX-51] Validität zuerst ohne Referenz-Rückgabe bestimmen. Dadurch endet der
+        // immutable Borrow vor einem möglichen remove(), und wir geraten nicht in E0502.
+        let is_valid = match self.entries.get(account) {
+            Some(e) => &e.key == current,
             None => {
                 self.misses += 1;
-                None
+                return None;
             }
+        };
+
+        if is_valid {
+            self.hits += 1;
+            self.entries.get(account)
+        } else {
+            self.invalidations += 1;
+            self.entries.remove(account);
+            self.misses += 1;
+            None
         }
     }
 
