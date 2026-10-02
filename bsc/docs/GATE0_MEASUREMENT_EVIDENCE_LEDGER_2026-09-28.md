@@ -3,7 +3,7 @@
 > **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
 
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
-Stand: **2026-10-01**
+Stand: **2026-10-03**
 Primärer Scope: **BSC / Flap / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3**
 
 > Diese Datei ist die eine zentrale menschlich lesbare Quelle für den aktuellen Gate-0-Stand.
@@ -101,10 +101,10 @@ Wichtig:
 | **G0.2** | Precomputability, exakte Flap-Economics und historischer First-BUY-Witness | **PASS für den eingefrorenen historischen Modus** |
 | **G0.3** | Minimaler korrekter Direct-Portal Launch→BUY-Harness | **PASS für den eingefrorenen Offline-Scope — unmittelbarer Launch→Direct-BUY gültig; siehe Abschluss 2026-09-29** |
 | G0.4 | Pending/actionable Coverage und frühestes brauchbares Signal | **PARTIAL — QuickNode-Quellenprobe; noch kein Coverage-PASS** |
-| G0.5 | vollständige lokale BUY-Hotpath-Latenz bis echtem `T_send` | **LOCAL PREQUALIFICATION PASS — finaler realer Transport-PASS noch offen** |
-| G0.6 | Ingress × Inclusion Dry-Qualifikation + Concurrency | blockiert |
-| G0.7 | kontrollierter Minimalwert-Mainnet-BUY | blockiert |
-| G0.8 | tatsächliche Acquisition + Ordering | blockiert |
+| **G0.5** | vollständige vorbereitete Self-Launch-Hotpath-Latenz bis echtem `T_send` | **PASS — 48Club p99 0.584 ms, BlockRazor p99 0.527 ms, jeweils 0/100 >1 ms** |
+| **G0.6** | Ingress × Inclusion Dry-Qualifikation + Concurrency | **PARTIAL / SELF-LAUNCH DRY-3 POLICY READY; finale wallet-gebundene DRY-1..4 noch offen** |
+| **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT — wartet auf 2 getrennte Wallets, Funding und explizite v2-Autorisierung/Arming** |
+| G0.8 | tatsächliche Acquisition + Ordering | **offen — folgt unmittelbar auf G0.7** |
 | G0.9+ | Builder-/Feasibility-Folgeschritte | blockiert |
 
 **Es wird kein Gate übersprungen.**
@@ -415,18 +415,32 @@ gate0-evidence/2026-09-28-g02-latency-offline/latency_result.json
 
 ---
 
-## 9. Was ausdrücklich noch NICHT gemessen wurde
+## 9. Aktueller authoritative Timing-Stand
 
-Aktuell authoritative:
+Für den vorbereiteten kontrollierten Flap-Self-Launch ist `T_signal → T_send` inzwischen gemessen und G0.5-bestanden:
 
 ```text
-BSC T_signal → T_send          N/A
-BSC T_signal → erfolgreicher BUY
-                               N/A
-exaktes T_buy - T0 in ms       N/A
+48Club:
+  p50 = 0.2415 ms
+  p95 = 0.3371 ms
+  p99 = 0.5843 ms
+  max = 0.6026 ms
+  >1 ms = 0/100
+
+BlockRazor:
+  p50 = 0.2285 ms
+  p95 = 0.3763 ms
+  p99 = 0.5266 ms
+  max = 0.5570 ms
+  >1 ms = 0/100
+
+BSC T_signal → erfolgreicher BUY   N/A
+exaktes T_buy - T0 in ms           N/A
 ```
 
-Der beobachtete Blockabstand von ungefähr 450 ms zwischen Launch-Block und anschließendem BUY-Block ist **keine BUY-Latenz** und darf nicht als solche verwendet werden.
+Diese `T_signal → T_send`-Messungen sind **Hotpath-/Transport-Evidence**, keine Kauf- oder Inclusion-Evidence. `T0 → T_buy` bleibt der entscheidende offene Punkt und darf aus gewöhnlichen Blocktimestamps nicht als Sub-ms-Zahl abgeleitet werden.
+
+Der beobachtete Blockabstand historischer Launch-/BUY-Blöcke ist **keine BUY-Latenz** und darf nicht als solche verwendet werden.
 
 ---
 
