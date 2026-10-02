@@ -12,6 +12,8 @@ const TAX_V3_IMPL_EXPECTED = '0x024f18294970b5c76c0691b87f138a0317156422';
 const GET_QUOTE_CONFIG_SELECTOR = '0x26ef20d5'; // getQuoteTokenConfiguration(address)
 const GET_FEE_RATE_SELECTOR = '0x84e5eed0';    // getFeeRate()
 const TAX_ON_BC_SELECTOR = '0x1d31e153';       // enableTaxOnBondingCurve()
+const VERSION_SELECTOR = '0x54fd4d50';         // version()
+const EIP1967_IMPLEMENTATION_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
 
 function req(name) {
   const v = process.env[name];
@@ -41,6 +43,19 @@ function sha256HexBytes(hex) {
   const raw = hex.startsWith('0x') ? hex.slice(2) : hex;
   if (raw.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(raw)) throw new Error('invalid hex byte string');
   return crypto.createHash('sha256').update(Buffer.from(raw, 'hex')).digest('hex');
+}
+
+function decodeAbiString(hex, label) {
+  if (typeof hex !== 'string' || !hex.startsWith('0x')) throw new Error(label + ': invalid hex result');
+  const raw = hex.slice(2);
+  if (raw.length < 128) throw new Error(label + ': short ABI string result');
+  const offset = Number(BigInt('0x' + raw.slice(0, 64)));
+  const lenPos = offset * 2;
+  if (raw.length < lenPos + 64) throw new Error(label + ': bad ABI string offset');
+  const len = Number(BigInt('0x' + raw.slice(lenPos, lenPos + 64)));
+  const dataPos = lenPos + 64;
+  if (raw.length < dataPos + len * 2) throw new Error(label + ': truncated ABI string');
+  return Buffer.from(raw.slice(dataPos, dataPos + len * 2), 'hex').toString('utf8');
 }
 
 function decodeWords(hex, count, label) {
@@ -89,6 +104,20 @@ async function main() {
 
   const gasPrice = BigInt(await rpc(url, 'eth_gasPrice'));
 
+  const versionRaw = await ethCall(url, portal, VERSION_SELECTOR);
+  const portalVersion = decodeAbiString(versionRaw, 'version()');
+
+  const implSlotRaw = await rpc(url, 'eth_getStorageAt', [portal, EIP1967_IMPLEMENTATION_SLOT, 'latest']);
+  if (!/^0x[0-9a-f]{64}$/i.test(implSlotRaw)) throw new Error('invalid EIP-1967 implementation slot');
+  const portalImplementation = normalizeAddress('0x' + implSlotRaw.slice(-40), 'portal implementation');
+  if (!portalImplementation || portalImplementation === '0x0000000000000000000000000000000000000000') {
+    throw new Error('portal implementation slot is zero');
+  }
+  const portalImplementationCode = await rpc(url, 'eth_getCode', [portalImplementation, 'latest']);
+  if (!portalImplementationCode || portalImplementationCode === '0x') {
+    throw new Error('portal implementation has no code');
+  }
+
   // Bind the exact current native-BNB launch economics from the Portal itself.
   const quoteConfigRaw = await ethCall(
     url,
@@ -134,6 +163,10 @@ async function main() {
     portal,
     portal_code_bytes: (portalCode.length - 2) / 2,
     portal_code_sha256: sha256HexBytes(portalCode),
+    portal_version: portalVersion,
+    portal_implementation: portalImplementation,
+    portal_implementation_code_bytes: (portalImplementationCode.length - 2) / 2,
+    portal_implementation_code_sha256: sha256HexBytes(portalImplementationCode),
     tax_v3_impl: impl,
     tax_v3_impl_source: 'frozen BSC-mainnet deployment evidence; runtime code existence rechecked here',
     tax_v3_impl_code_bytes: (implCode.length - 2) / 2,
