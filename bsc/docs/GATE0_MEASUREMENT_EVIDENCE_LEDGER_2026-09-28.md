@@ -2828,3 +2828,30 @@ Interpretation:
 - 48Club qualification path MUST carry noMerge=true and positionFirst=true.
 - BlockRazor and 48Club remain candidate inclusion adapters; actual controlled Mainnet acquisition/order result decides the winner.
 - T0 -> T_buy remains NOT MEASURED. Do not derive it from block timestamps or these handoff diagnostics.
+
+
+## 2026-10-02 — G0.5 prepared/presigned self-launch transport PASS
+
+The controlled Flap self-launch path was remeasured under the frozen G0.2/G0.5 preparation rule: expensive work is complete before T0; after T_signal the benchmark only selects the prepared request and performs the warm TLS write+flush to the tested remote transport.
+
+48Club:
+- T_signal -> T_ready select-only p50: 0.542 us
+- T_signal -> T_send p50: 241.500 us
+- T_signal -> T_send p95: 337.125 us
+- T_signal -> T_send p99: 584.291 us
+- max: 602.625 us
+- >1 ms: 0/100
+
+BlockRazor standard endpoint:
+- T_signal -> T_ready select-only p50: 0.500 us
+- T_signal -> T_send p50: 228.458 us
+- T_signal -> T_send p95: 376.250 us
+- T_signal -> T_send p99: 526.584 us
+- max: 557.000 us
+- >1 ms: 0/100
+
+Classification:
+- G0.5 prepared/presigned self-launch local+transport target <1 ms: PASS for both tested standard endpoints.
+- These measurements are transport/hotpath evidence only. They are not T_buy, inclusion acceptance, or ordering evidence.
+- Real controlled Mainnet G0.7/G0.8 remains required for actual token acquisition and Launch=N / BUY=N+1 proof.
+- No numeric sub-ms T0->T_buy claim is permitted without trusted builder/validator execution timing evidence.
