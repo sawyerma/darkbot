@@ -48,7 +48,7 @@ impl<'a> AccountSource for StateView<'a> {
 /// [FIX-1] Ohne P4A-03-Sizing gibt es keine Pläne — fail closed, kein geschätzter Betrag.
 struct NoPlans;
 impl ReceivershipBuilder for NoPlans {
-    fn plans(&self, _: &solana_sdk::pubkey::Pubkey, _: u64) -> Result<Vec<ReceivershipPlan>, String> {
+    fn plans(&self, _: &solana_sdk::pubkey::Pubkey, _: u64, _: u64) -> Result<Vec<ReceivershipPlan>, String> {
         Err("unavailable: P4A-03 sizing provider not configured".into())
     }
 }
