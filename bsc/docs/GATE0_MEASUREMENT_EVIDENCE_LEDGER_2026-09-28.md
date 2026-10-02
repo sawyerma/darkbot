@@ -2590,3 +2590,56 @@ Bis Ingress und Inclusion nachweislich nicht mehr dominieren:
 - kein Multi-Region-Rollout ohne regionale First-Seen-/Builder-Handoff-Daten.
 
 Der bestehende Rust-Core wird beibehalten. Optimiert werden jetzt primär Sicht, Builder-Handoff, ordered inclusion und Zugang zu privatem Orderflow.
+
+
+## 2026-10-02 — G0.6a Mainnet read-only preflight
+
+Read-only BSC Mainnet preflight executed successfully from the G0.6a tooling.
+
+Observed evidence:
+
+```text
+schema                  darkbot.g06a.preflight-readonly.v2
+chain_id                56
+latest_block_number     125347789
+latest_block_hash       0xa91d8fe1250dd24c37f6af4e451b2a1c6b7d9825c0b29f9109dea32b3ba2eedc
+
+portal                  0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0
+portal_code_bytes       2882
+portal_code_sha256      1fc365bfda5c9694d38901227927872e610f84d9de9b4e360fea40578fb4bcc1
+
+tax_v3_impl             0x024f18294970b5c76c0691b87f138a0317156422
+tax_v3_impl_code_bytes  19331
+tax_v3_impl_code_sha256 34000dd228055664fda2debd21b5fe5288b750ca3ce8fb4e6933e5c529586ef5
+
+gas_price_wei           50000000
+```
+
+Safety observations:
+
+```text
+network_actions         READ_ONLY_RPC_ONLY
+signed_tx_submitted     false
+bundle_submitted        false
+```
+
+Wallet binding was intentionally not part of this run:
+
+```text
+launcher_address        null
+buyer_address           null
+launcher_pending_nonce  null
+buyer_pending_nonce     null
+```
+
+Interpretation:
+
+- current BSC Mainnet chain binding is correct;
+- current frozen Flap Portal address has runtime code;
+- current frozen TAX_V3 implementation address has runtime code;
+- G0.6a can proceed to wallet-bound Dry construction;
+- this preflight does not prove launch semantics, BUY semantics, gas sufficiency, builder acceptance or N+1 inclusion;
+- no value-bearing action occurred.
+
+Next required G0.6a evidence is the wallet-bound Dry run:
+distinct launcher A / buyer B, current pending nonces, salt, native launch parameters, positive minOutput, local sequential launch->BUY simulation, gas/budget proof, and builder-envelope identity.
