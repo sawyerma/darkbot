@@ -469,7 +469,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if st.run_state().is_tradable()
                     && marginfi_account_in_group(&a.data, &group) =>
             {
-                Some((a.pubkey, a.t_rx_ns, a.slot))
+                let trigger = if a.source == SourceKind::Snapshot { "bootstrap_snapshot_probe" } else { "account_update" };
+                Some((a.pubkey, a.t_rx_ns, a.slot, trigger))
             },
             _ => None,
         };
@@ -565,7 +566,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
             }
         }
-        if let Some((acct, t_rx, slot)) = detect {
+        if let Some((acct, t_rx, slot, trigger)) = detect {
             // Health über das Crate (Feature crate_health), sonst fail-closed NoHealth → Unavailable-Record.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             let view = StateView(&st);
@@ -640,7 +641,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 limits: TxLimits::default(), resources, min_profit, blockhash_max_age_ns: 30_000_000_000, p7_passed: false,
                 freshness, tip_account: None, global_allowed: global_allowed.clone(), prereq_allowed: prereq_allowed.clone(), slot_watch: &slot_watch,
             };
-            let rec = pipe.evaluate(acct, "account_update", t_rx, now, slot, st.run_state().is_tradable());
+            let mut rec = pipe.evaluate(acct, trigger, t_rx, now, slot, st.run_state().is_tradable());
+            if let Ok(h) = health_result {
+                if h.is_bad_debt && h.equity_assets <= 0 && matches!(rec.loss, Some(darkbot_runner::record::LossReason::Routing)) {
+                    rec.loss = Some(darkbot_runner::record::LossReason::Bankruptcy);
+                    rec.reason = Some("bad debt with zero equity assets: bankruptcy/no-collateral case, not a receivership routing failure".into());
+                }
+            }
             if let Ok(j) = serde_json::to_string(&rec) { let _ = writeln!(records, "{}", j); }
             // [M3] Ledger + [M2] Watchlist (nur Shadow-relevante Entscheidungen).
             let sim_ok = match rec.decision {
