@@ -1,0 +1,126 @@
+{
+  "schema_version": 2,
+  "status": "PROPOSED_NOT_AUTHORIZED",
+  "supersedes_for_self_launch_test": "g01_mainnet_acceptance_proposal_v1.json",
+  "purpose": "Controlled Mainnet self-launch ordered-bundle qualification with two independent wallets and parallel builder fan-out",
+  "authorization": {
+    "approved": false,
+    "execution_ready": false,
+    "approval_required_for": "Any value-bearing Mainnet bundle submission",
+    "note": "v1 remains historical; only this v2 contract may authorize the controlled self-launch test after explicit user approval"
+  },
+  "scope": {
+    "chain_id": 56,
+    "venue": "Flap",
+    "launch": "newTokenV6",
+    "tokenVersion": 6,
+    "portal_expected_from_current_evidence": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "portal_rule": "Reverify current Mainnet deployment/version/runtime code immediately before arming; mismatch is STOP",
+    "launch_mode": "controlled native-quote self-launch matching the intended harness, not the historical DOGE fixture",
+    "quoteToken": "0x0000000000000000000000000000000000000000",
+    "quoteAmt": "0",
+    "buy": "Direct Portal swapExactInput with native input and nonzero locally-derived minOutput",
+    "historical_g03_authority": "Historical DOGE/0.15-BNB G0.3 fixture is NOT authority for this native-quote self-launch; native mode requires its own dry semantic validation"
+  },
+  "wallet_separation": {
+    "launcher": "wallet_A",
+    "buyer": "wallet_B",
+    "must_be_distinct_addresses": true,
+    "reason": "Launch/BUY ordering must be proven by bundle semantics, not by same-sender nonce ordering",
+    "secret_storage": "No private key or secret is written to evidence"
+  },
+  "attempts": {
+    "maximum": 4,
+    "economic_attempt_definition": "One self-launch plus one intended BUY. Parallel submission of byte-identical [launch_A,buy_B] bundle copies to multiple builders counts as ONE economic attempt.",
+    "builder_fanout": [
+      "48Club/Puissant",
+      "BlockRazor"
+    ],
+    "parallel": true,
+    "no_public_launch_broadcast": true,
+    "no_automatic_retry": true,
+    "no_parallel_fallback_buy_bundle_in_stage_1": true,
+    "selected_attempts_remain_in_denominator": true
+  },
+  "bundle_bytes": {
+    "tx_order": [
+      "raw_signed_launch_A",
+      "raw_signed_buy_B"
+    ],
+    "identical_raw_transactions_across_builders": true,
+    "reverting_transactions_allowed": false,
+    "max_block_window": "At most send_head+2 unless a stricter provider-specific bound is available; never use a long default such as +100",
+    "expiry_mismatch": "STOP if equivalent tight expiry cannot be expressed for every armed builder"
+  },
+  "economics_validation": {
+    "min_output": {
+      "must_be_positive": true,
+      "source": "Exact controlled post-launch state from the chosen native launch parameters",
+      "independent_cross_check": "Simulate the exact [launch_A,buy_B] bundle using an independent execution path and, where available, builder bundle simulation before signing/arming",
+      "slippage_max_bps": 100,
+      "historical_min_output_reuse_forbidden": true
+    },
+    "gas_floor": {
+      "policy": "Before signing, determine the current acceptance floor/ranking rules for every armed builder. Use the strictest requirement for the identical transaction bytes.",
+      "blockrazor_current_documented_reference": "0.05 gwei average bundle gas price as of 2026-10-02 public support documentation",
+      "fortyeightclub": "Do not hardcode the stale 1-gwei assumption. Query/validate current builder acceptance rules in dry mode immediately before arming; if not independently established, STOP.",
+      "max_signed_gas_price_wei": "1000000000"
+    },
+    "bid_policy": {
+      "stage_1": "Bid through the signed transaction gas-price policy only; no separate automatic builder transfer/tip",
+      "max_direct_builder_tip_wei": "0",
+      "policy_change_requires_new_contract_version": true
+    }
+  },
+  "budget_wei_proposal": {
+    "max_buy_value_per_attempt": "1000000000000000",
+    "max_launch_call_value_per_attempt": "2000000000000000",
+    "max_launch_gas_limit": "5000000",
+    "max_buy_gas_limit": "3000000",
+    "max_gas_price_wei": "1000000000",
+    "max_gas_cost_per_attempt": "8000000000000000",
+    "max_total_per_attempt": "11000000000000000",
+    "absolute_max_total_all_four_attempts": "50000000000000000",
+    "note": "0.05 BNB is a conservative PROPOSAL ceiling, not an authorization. Before approval, reverify actual Flap launch value/fee and builder floor; lower the cap if possible. Never increase these ceilings at runtime."
+  },
+  "pre_arm_checks": [
+    "Reverify current Flap Mainnet Portal/version/runtime code and selected native launch semantics",
+    "Validate exact native-mode launch->BUY transition independently; historical DOGE G0.3 fixture is insufficient",
+    "Resolve and freeze distinct launcher_A and buyer_B addresses and both pending nonces",
+    "Verify both wallets have sufficient balance under the proposed reserved worst-case budget without writing secrets to evidence",
+    "Compute positive minOutput locally from the exact self-launch parameters and cross-check with independent simulation",
+    "Validate exact signed raw launch and BUY transactions decode/recover to the intended sender, nonce, chain, portal, value, gas and calldata",
+    "Dry-submit/simulate exact bundle shape to both builders without value-bearing execution and verify method/expiry semantics",
+    "Determine current builder gas-floor/ranking requirements; signed bytes must satisfy the strictest armed builder",
+    "Verify neither transaction is broadcast to the public mempool during dry qualification",
+    "Explicit user approval of this v2 scope and numeric absolute budget ceiling"
+  ],
+  "success": {
+    "acquisition": "BUY receipt success plus positive intended-token balance delta at buyer_B with attributable economic debit/cost",
+    "ordering": "Launch and BUY are in the same canonical block; BUY transaction index equals launch transaction index + 1; zero successful external BUYs between",
+    "builder_evidence": "Record builder submission hash/status where exposed and identify block builder/validator where reliably attributable",
+    "timing": "N+1 is ordering evidence only. T_buy-T0 remains UNKNOWN unless a trusted intra-block execution trace exists."
+  },
+  "retention_observability": {
+    "record_send_head": true,
+    "record_inclusion_block": true,
+    "record_builder": true,
+    "record_validator": true,
+    "record_bundle_status": true,
+    "on_expiry_without_inclusion": [
+      "Verify launcher_A nonce unchanged",
+      "Verify buyer_B nonce unchanged",
+      "Verify neither transaction appeared canonically or in the public mempool where observable"
+    ],
+    "interpretation": "Inclusion one or two blocks after submission is evidence relevant to bundle carry/re-simulation, but provider retention semantics must not be assumed solely from one successful inclusion."
+  },
+  "thresholds": {
+    "PASS": "Controlled self-launch attempt acquires the token and produces same-block adjacent [launch_A@N,buy_B@N+1] ordering with zero successful external BUYs between, no public leakage, no budget/scope violation and complete evidence",
+    "ADAPT": "Bundle valid but not adjacent/same-block, builder rejected/outbid/expired, dry simulation divergence, or incomplete attribution without a safety violation",
+    "STOP": "Any scope/version mismatch, non-distinct wallets, zero/unverified minOutput, fee/floor uncertainty at arming, budget violation, nonce conflict, unexpected public broadcast, first revert, unresolved sent transaction, unexpected duplicate economic execution, or inability to prove expiration/non-execution safely"
+  },
+  "coverage": {
+    "foreign_launch_coverage_requirement": "NOT_APPLICABLE_TO_SELF_LAUNCH_STAGE_1",
+    "note": "Coverage returns in the subsequent foreign-launch ingress qualification stage"
+  }
+}
