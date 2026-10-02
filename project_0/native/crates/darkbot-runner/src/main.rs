@@ -318,6 +318,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let optional = opt_for_fetch.lock().map_err(|_| "opt dep lock".to_string())?.clone();
         let d = snapshot::multiple_accounts(&rpc, &required, &clock).map_err(|e| e.to_string())?;
         let o = snapshot::multiple_accounts(&rpc, &optional, &clock).map_err(|e| e.to_string())?;
+        let liability_count = a.accounts.len();
+        let bank_count = b.accounts.len();
+        let required_count = d.accounts.len();
+        let optional_count = o.accounts.len();
+        let missing_required_count = d.missing.len();
         let mut accounts = a.accounts;
         accounts.extend(b.accounts);
         accounts.extend(d.accounts);
@@ -330,11 +335,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!(
             "snapshot: done slot={} liability_accounts={} banks={} required={} optional={} missing_required={} total={} elapsed_ms={}",
             slot,
-            a.accounts.len(),
-            b.accounts.len(),
-            d.accounts.len(),
-            o.accounts.len(),
-            d.missing.len(),
+            liability_count,
+            bank_count,
+            required_count,
+            optional_count,
+            missing_required_count,
             accounts.len(),
             t0.elapsed().as_millis()
         );
