@@ -34,7 +34,7 @@ use darkbot_solana::submit::rpc::RpcSubmitter;
 use darkbot_solana::tx::{self, Resources, TxLimits};
 use darkbot_project0::protocol::{classify as classify_account, AccountType}; // [FIX-47] Alias
 use darkbot_solana::ingress::ws_rpc::{WsRpcConfig, WsRpcControlSource};
-use darkbot_solana::ingress::{IngressEvent, IngressHalt, IngressSource, Subscription};
+use darkbot_solana::ingress::{IngressEvent, IngressHalt, IngressSource, SourceKind, Subscription};
 use darkbot_solana::state::recovery::{RecoveryDriver, SnapshotData};
 use darkbot_solana::state::snapshot;
 use darkbot_solana::state::StateCore;
@@ -146,6 +146,20 @@ fn marginfi_account_in_group(data: &[u8], group: &Pubkey) -> bool {
     }
     bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
         .map(|a| a.group == *group)
+        .unwrap_or(false)
+}
+
+#[cfg(feature = "crate_health")]
+fn bootstrap_probe_candidate(data: &[u8], group: &Pubkey) -> bool {
+    if classify_account(data) != AccountType::MarginfiAccount {
+        return false;
+    }
+    let need = 8 + std::mem::size_of::<MarginfiAccount>();
+    if data.len() < need {
+        return false;
+    }
+    bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
+        .map(|a| a.group == *group && a.indexer_flags.was_liquidatable == 1)
         .unwrap_or(false)
 }
 
