@@ -22,29 +22,28 @@ pub mod p0 {
     use solana_sdk::instruction::Instruction;
     use solana_sdk::pubkey::Pubkey;
 
-    /// P4A-03-Ergebnis für eine Opportunity (alle Werte in USD-Micro bzw. Token-Basis-Einheiten).
+    /// Protocol-Sizing für ein Asset×Liability-Paar. Markt-Realisierbarkeit gehört nicht hierher.
     #[derive(Clone, Debug)]
     pub struct Sizing {
         pub asset_bank: Pubkey,
         pub liab_bank: Pubkey,
-        pub withdraw_amount: u64,        // Token-Basis des Asset
-        pub repay_amount: u64,           // Token-Basis der Liability
+        pub withdraw_amount: u64,
+        pub repay_amount: u64,
+        pub seized_equity_value: u64,    // USD-Micro, Protocol/EMA only
+        pub repay_value: u64,            // USD-Micro
         pub liability_needed_value: u64, // USD-Micro
-        pub liability_inventory_value: u64, // [FIX-16] USD-Micro
-        /// [FIX-17] JIT-Funding-Quelle (Base-Inventar-Bank, z. B. USDC) und verfügbarer Wert.
+        pub liability_inventory_value: u64,
         pub funding_bank: Option<Pubkey>,
         pub funding_available_value: u64,
-        pub gross_seized_realizable: u64,
-        pub repay_value: u64,
-        pub protocol_fees: u64,
-        pub flat_sol_fee: u64,
-        pub rent_and_token: u64,
+        pub protocol_fees: u64,          // USD-Micro
+        pub flat_sol_fee: u64,           // USD-Micro after explicit SOL conversion
+        pub rent_and_token: u64,         // USD-Micro
         pub premium_bps: u64,
         pub slippage_bps: u64,
     }
 
     pub trait SizingProvider {
-        fn size(&self, account: &Pubkey, now_unix_s: u64) -> Result<Option<Sizing>, String>;
+        fn sizes(&self, account: &Pubkey, now_unix_s: u64) -> Result<Vec<Sizing>, String>;
     }
 
     /// Allowlisted Swap-Instructions (Jupiter/Titan) für collateral→liability.
@@ -54,7 +53,9 @@ pub mod p0 {
         pub lookup_tables: Vec<AddressLookupTableAccount>,
         pub swap_program: Pubkey,
         pub fees_and_impact: u64,
-        /// [FIX-29] Vom Router bestimmt: Input in Funding-Token-Basis (ExactOut) / Output (ExactIn).
+        /// [FIX-60] Tatsächlich über einen ausführbaren Marktpfad realisierbarer Wert, USD-Micro.
+        pub realizable_value: u64,
+        /// Vom Router bestimmt: Input in Funding-Token-Basis (ExactOut) / Output (ExactIn).
         pub amount_in: u64,
         pub amount_out: u64,
     }
@@ -119,9 +120,9 @@ pub mod p0 {
             Ok((ixs, steps))
         }
 
-        fn input(&self, sz: &Sizing, funding: FundingClass, swap_cost: u64, capital: u64) -> CandidateInput {
+        fn input(&self, sz: &Sizing, funding: FundingClass, realizable_value: u64, swap_cost: u64, capital: u64) -> CandidateInput {
             CandidateInput {
-                gross_seized_realizable: sz.gross_seized_realizable,
+                gross_seized_realizable: realizable_value,
                 repay: sz.repay_value,
                 protocol_fees: sz.protocol_fees,
                 flat_sol_fee: sz.flat_sol_fee,
