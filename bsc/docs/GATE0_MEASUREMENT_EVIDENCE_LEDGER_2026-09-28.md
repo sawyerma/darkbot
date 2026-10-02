@@ -2643,3 +2643,88 @@ Interpretation:
 
 Next required G0.6a evidence is the wallet-bound Dry run:
 distinct launcher A / buyer B, current pending nonces, salt, native launch parameters, positive minOutput, local sequential launch->BUY simulation, gas/budget proof, and builder-envelope identity.
+
+
+## 2026-10-02 — G0.6a live native-BNB economics preflight v2
+
+The expanded read-only Mainnet preflight was executed successfully after commit `d4041f1b49c5a704e12621ae34c8f6ba2633edaf`.
+
+Frozen raw evidence:
+`bsc/gates/gate0/evidence/g06a_preflight_readonly.json`
+
+Observed Mainnet binding:
+
+```text
+schema                         darkbot.g06a.preflight-readonly.v2
+chain_id                       56
+latest_block_number            125351041
+latest_block_hash              0xcd2188894c5f839538aab6c36f48f56a25b08bdc65f3e01b158e01b5cc3039e2
+
+portal                         0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0
+portal_code_bytes              2882
+portal_code_sha256             1fc365bfda5c9694d38901227927872e610f84d9de9b4e360fea40578fb4bcc1
+
+tax_v3_impl                    0x024f18294970b5c76c0691b87f138a0317156422
+tax_v3_impl_code_bytes         19331
+tax_v3_impl_code_sha256        34000dd228055664fda2debd21b5fe5288b750ca3ce8fb4e6933e5c529586ef5
+
+gas_price_wei                  50000000
+```
+
+Live Portal economics read directly from Mainnet:
+
+```text
+native_quote_enabled           1
+default_curve_id               20
+alternative_curve_id           20
+native_to_quote_swap_type      0
+dex_id                         0
+
+protocol_buy_fee_bps           100
+protocol_sell_fee_bps          100
+tax_on_bonding_curve_enabled   true
+```
+
+Safety:
+
+```text
+network_actions                READ_ONLY_RPC_ONLY
+signed_tx_submitted            false
+bundle_submitted               false
+launcher_address               null
+buyer_address                  null
+```
+
+Interpretation:
+- native BNB launch configuration is enabled on the current Mainnet Portal;
+- both reported native curve selectors resolve to curve ID 20 for this observation;
+- current protocol buy/sell fees are 100 bps / 100 bps;
+- bonding-curve taxation is enabled;
+- Portal and TAX_V3 runtime byte fingerprints match the previously frozen deployment evidence;
+- no wallet was bound and no value-bearing action occurred;
+- these values are empirical Mainnet configuration evidence, not yet a proof of the independent native-BNB Curve-20 quote implementation.
+
+### Frozen next step
+
+Do not move directly to a value-bearing Mainnet trial.
+
+Next, implement and independently verify the native-BNB quote/economics path for exactly:
+
+```text
+quote token              native BNB
+curve                    20
+native->quote swap type  0
+dex id                   0
+protocol buy fee         100 bps
+bonding-curve tax        enabled
+token version            TAXED_V3 / newTokenV6
+```
+
+Required result:
+1. derive the exact Curve-20 arithmetic from verified runtime semantics/state, not by fitting observed outputs;
+2. implement the production Rust quote/minOutput calculation;
+3. cross-check it against the independent local sequential Launch-A -> BUY-B simulation;
+4. freeze exact positive expectedOutput/minOutput and gas evidence;
+5. only then bind launcher A / buyer B and close DRY-1..DRY-4.
+
+This preserves the already frozen G0.6a -> G0.7 stage order.
