@@ -612,3 +612,21 @@ The visible final terminal line was a zero-test target (`0 passed; 0 failed`), w
 `real account update → exact health → exact sizing → executable route → receivership build → sign → simulate → record evidence`.
 
 **Important blocker before Shadow can be called qualified:** `FailedCostMatrix` remains unknown by design. Shadow must not convert unknown failed-attempt cost to zero merely to reach simulation. The qualification path must preserve unknown economics while still allowing technical build/sign/simulate evidence, or first populate those cells from real evidence.
+
+
+### 2026-10-02 — [FIX-71] Technical Shadow Probe path
+
+Problem: `FailedCostMatrix` is intentionally Unknown until real failed-attempt costs are measured. The previous pipeline therefore rejected every Unknown-economics candidate before TX build/sign/simulation, blocking the first real Shadow qualification.
+
+Resolution:
+- LIVE behavior is unchanged: only `Evaluation::Known` with `net > min_profit` can ever become actionable.
+- Shadow may now admit `Evaluation::Unknown` only as a **technical probe**.
+- Unknown economics are never coerced to zero and `net_profit` stays N/A.
+- Separate record decisions: `ShadowTechnicalReady` and `ShadowTechnicalSimFailed`.
+- Technical probes count toward build/sign/simulation evidence only.
+- They are excluded from virtual winner/PnL accounting; only economically known `ShadowReady` may count as a virtual win.
+- When no economically actionable candidate exists, technical probes are selected deterministically by lower serialized bytes, then fewer locked accounts; this is not an economic ranking.
+
+Commits: `5ec5df6`, `2a9f536`, `ffa69d0`, `7ad9a87`.
+
+Next gate: compile/tests for [FIX-71], then run a real Mainnet Shadow session and capture the first `ShadowTechnicalReady` or simulation failure with its exact reason.
