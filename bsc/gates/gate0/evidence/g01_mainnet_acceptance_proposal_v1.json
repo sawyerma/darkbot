@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "BUDGET_AUTHORIZED_RUNTIME_BINDING_PENDING",
+  "status": "SUPERSEDED_NOT_EXECUTION_AUTHORITY",
   "scope": {
     "chain_id": 56,
     "venue": "Flap",
@@ -76,6 +76,16 @@
     "recipient_address": null,
     "approved_date": "2026-10-01",
     "approval_scope": "G0.7 pilot budget only; max 4 attempts, max 0.001 BNB buy each, max 0.0005 BNB gas+builder each, absolute max 0.006 BNB including all costs",
-    "execution_ready": false
+    "execution_ready": false,
+    "historical_budget_approval_only": true,
+    "execution_authority": false,
+    "superseded": true,
+    "superseded_by": "g01_mainnet_acceptance_proposal_v2.json"
+  },
+  "supersession": {
+    "effective": true,
+    "superseded_by": "g01_mainnet_acceptance_proposal_v2.json",
+    "scope": "All future Gate-0 Mainnet value-bearing execution authorization, including controlled self-launch ordered-bundle qualification",
+    "note": "Historical authorization.approved=true is retained as evidence of the 2026-10-01 budget-only approval. It is NOT execution authority and MUST NOT be consumed by any runtime send guard."
   }
 }
