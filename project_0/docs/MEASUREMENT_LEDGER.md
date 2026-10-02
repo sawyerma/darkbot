@@ -653,3 +653,33 @@ Gate decision: technical-shadow path compiles/tests. Next step is the first real
 - Next roadmap gate before the 72 h P6-LT run remains G2/C0 Mainnet census, followed by G5 bootstrap/reconcile and first technical Shadow simulation.
 
 Commits: `d0f07e5`, `b2d39ba`.
+
+
+### 2026-10-02 — C0-01 Mainnet census — PASS
+
+Observed on Mainnet via Helius free RPC:
+
+- context_slot: `452723812`
+- accounts_total: `172742`
+- bytes_total (full account-space sum): `387399978`
+- MarginfiAccount: `165597`
+- LiquidationRecord: `6330`
+- Bank: `437`
+- MarginfiGroup: `162`
+- FeeState: `1`
+- StakedSettings: `1`
+- unknown-discriminator rows: `214`
+- compact getProgramAccounts duration: `61.843 s`
+- raw evidence: `project_0/data/c0/accounts_slot452723812.jsonl`
+- report: `project_0/data/c0/c0_census_slot452723812.json`
+
+Unknown-discriminator review against pinned `mrgn-0.1.11-rc1`:
+- `31cf1f2243e1a9ba` ×204 = `BankMetadata` (source-confirmed)
+- `86addfb94d561c33` ×1 = `Order` (source-confirmed)
+- `184662bf3a907b9e` ×9 = still unidentified auxiliary account type; not classified as MarginfiAccount/Bank and therefore ignored by the liquidation core
+
+**C0-01 decision:** PASS. The program/account census is real Mainnet evidence, not fixture data.
+
+**G2 is not yet final GO:** the first scan aggregates all 162 Marginfi groups. `[FIX-75]` adds a second compact scan for the configured group using `MarginfiAccount.group` plus on-chain `IndexerFlags` (`has_liability`, `was_liquidatable`, `was_underwater`, activity flags). That group-specific result is the remaining C0/G2 evidence.
+
+**[FIX-76] runner scope:** Project_0 now filters Bank dependencies and MarginfiAccount triggers to the configured `P0_GROUP_ID`; foreign groups no longer enter the liquidation pipeline.
