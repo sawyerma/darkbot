@@ -1,0 +1,36 @@
+{
+  "schema": "darkbot.g06a.preflight-readonly.v2",
+  "chain_id": "56",
+  "latest_block_number": "125351041",
+  "latest_block_hash": "0xcd2188894c5f839538aab6c36f48f56a25b08bdc65f3e01b158e01b5cc3039e2",
+  "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+  "portal_code_bytes": 2882,
+  "portal_code_sha256": "1fc365bfda5c9694d38901227927872e610f84d9de9b4e360fea40578fb4bcc1",
+  "tax_v3_impl": "0x024f18294970b5c76c0691b87f138a0317156422",
+  "tax_v3_impl_source": "frozen BSC-mainnet deployment evidence; runtime code existence rechecked here",
+  "tax_v3_impl_code_bytes": 19331,
+  "tax_v3_impl_code_sha256": "34000dd228055664fda2debd21b5fe5288b750ca3ce8fb4e6933e5c529586ef5",
+  "gas_price_wei": "50000000",
+  "native_quote_configuration": {
+    "enabled": "1",
+    "default_curve_id": "20",
+    "alternative_curve_id": "20",
+    "native_to_quote_swap_type": "0",
+    "dex_id": "0"
+  },
+  "protocol_fee_bps": {
+    "buy": "100",
+    "sell": "100"
+  },
+  "tax_on_bonding_curve_enabled": true,
+  "launcher_address": null,
+  "launcher_pending_nonce": null,
+  "launcher_balance_wei": null,
+  "buyer_address": null,
+  "buyer_pending_nonce": null,
+  "buyer_balance_wei": null,
+  "network_actions": "READ_ONLY_RPC_ONLY",
+  "signed_tx_submitted": false,
+  "bundle_submitted": false,
+  "dependencies": "Node.js standard library only"
+}
