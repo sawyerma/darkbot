@@ -342,9 +342,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let bh_rpc = RpcClient::new(config::require("P0_RPC_URL")?);
     let bh_cache = blockhash.clone();
     let bh_clock = clock;
-    std::thread::Builder::new().name("blockhash".into()).spawn(move || loop {
-        if let Err(e) = bh_cache.refresh(&bh_rpc, bh_clock.now_ns()) { eprintln!("blockhash refresh: {}", e); }
-        std::thread::sleep(Duration::from_secs(10));
+    std::thread::Builder::new().name("blockhash".into()).spawn(move || {
+        let mut degraded = false;
+        loop {
+            match bh_cache.refresh(&bh_rpc, bh_clock.now_ns()) {
+                Ok(_) => {
+                    if degraded {
+                        eprintln!("blockhash refresh: recovered");
+                        degraded = false;
+                    }
+                }
+                Err(e) => {
+                    if !degraded {
+                        // [FIX-82] Never print provider URLs/API keys embedded in transport errors.
+                        let safe = e.split(" for url ").next().unwrap_or("rpc transport error");
+                        eprintln!("blockhash refresh: {}", safe);
+                        degraded = true;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_secs(10));
+        }
     })?;
     let limits = Limits {
         max_total_capital: config::parsed_or("P0_MAX_TOTAL_CAPITAL", 0)?,
