@@ -14,6 +14,8 @@
 pub mod builder;
 pub mod fixture;
 pub mod pending;
+#[cfg(feature = "crate_health")]
+pub mod route;
 pub mod shadow_ledger;
 pub mod winner;
 pub mod pipeline;

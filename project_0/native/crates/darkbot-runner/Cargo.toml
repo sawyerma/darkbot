@@ -23,6 +23,7 @@ bs58 = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] } # [FIX-65] Jupiter Swap V2 /build
 bytemuck = "1"
 marginfi-type-crate = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["mainnet-beta"], optional = true }
 
