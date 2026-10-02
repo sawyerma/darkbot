@@ -54,7 +54,12 @@
     "identical_raw_transactions_across_builders": true,
     "reverting_transactions_allowed": false,
     "max_block_window": "At most send_head+2 unless a stricter provider-specific bound is available; never use a long default such as +100",
-    "expiry_mismatch": "STOP if equivalent tight expiry cannot be expressed for every armed builder"
+    "expiry_mismatch": "STOP if equivalent tight expiry cannot be expressed for every armed builder",
+    "fortyeightclub": {
+      "noMerge": true,
+      "positionFirst": true,
+      "rationale": "N+1 qualification must not accept late-arriving bundle placement at the block tail."
+    }
   },
   "economics_validation": {
     "min_output": {
@@ -67,7 +72,7 @@
     "gas_floor": {
       "policy": "Before signing, determine the current acceptance floor/ranking rules for every armed builder. Use the strictest requirement for the identical transaction bytes.",
       "blockrazor_current_documented_reference": "0.05 gwei average bundle gas price as of 2026-10-02 public support documentation",
-      "fortyeightclub": "Do not hardcode the stale 1-gwei assumption. Query/validate current builder acceptance rules in dry mode immediately before arming; if not independently established, STOP.",
+      "fortyeightclub": "Do not reuse a stale universal 1-gwei assumption. Verify the current Puissant endpoint/validator acceptance and priority rule immediately before arming. Auction Feed/backrunTarget requirements are a separate scope from the controlled self-launch bundle.",
       "max_signed_gas_price_wei": "1000000000"
     },
     "bid_policy": {
@@ -97,7 +102,8 @@
     "Validate builder method/format/expiry semantics only with deliberately non-executable fixtures; exact valid Mainnet bytes remain local until authorization",
     "Determine current builder gas-floor/ranking requirements; signed bytes must satisfy the strictest armed builder",
     "Verify neither transaction is broadcast to the public mempool during dry qualification",
-    "Explicit user approval of this v2 scope and numeric absolute budget ceiling"
+    "Explicit user approval of this v2 scope and numeric absolute budget ceiling",
+    "Validate 48Club noMerge=true and positionFirst=true semantics using deliberately non-executable fixtures before arming."
   ],
   "success": {
     "acquisition": "BUY receipt success plus positive intended-token balance delta at buyer_B with attributable economic debit/cost",
