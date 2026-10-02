@@ -863,3 +863,30 @@ Still required before P6-LT Shadow qualification:
 - capture `ShadowTechnicalReady` or `ShadowTechnicalSimFailed` with the exact reason.
 
 [FIX-81] removes misleading repeated `updates: accounts=0 ...` log spam when the program-account update counter remains zero; reporting now occurs once per real 1000 account updates.
+
+
+### 2026-10-02 — Real provider interruption observed during Shadow — RECOVERY EVIDENCE OPEN
+
+Observed after the first successful Mainnet READY:
+
+```text
+blockhash refresh: error sending request for url (...)
+[ws_rpc] session ended: ingress connect: idle timeout — reconnect in 500ms
+```
+
+Interpretation:
+- HTTP RPC and WSS degraded in the same runtime window.
+- The WSS idle watchdog correctly declared the stream unhealthy after the configured idle timeout.
+- The reconnect path was entered automatically.
+- Because no second `recovery: Ready, run_state=Ready` had yet been observed at documentation time, reconnect/recovery is **not** marked PASS yet.
+
+Required evidence to close this item:
+```text
+reconnect
+→ all subscription ACKs
+→ filtered Snapshot
+→ Reconcile
+→ recovery: Ready, run_state=Ready
+```
+
+[FIX-82] redacts provider URLs/API keys from blockhash transport errors and emits a single `recovered` message when the blockhash poller becomes healthy again. Runtime fail-closed behavior is unchanged.
