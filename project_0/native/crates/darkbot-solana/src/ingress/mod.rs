@@ -164,8 +164,10 @@ impl std::error::Error for IngressError {}
 /// Was ein Adapter abonniert. Provider-neutral.
 #[derive(Clone, Debug, Default)]
 pub struct Subscription {
-    /// Alle Accounts dieser Programme (programSubscribe / Geyser owner-filter).
+    /// Ungefilterte Program-Subscriptions.
     pub programs: Vec<Pubkey>,
+    /// Gefilterte programSubscribe-Subscriptions (Solana RPC filters). [FIX-79]
+    pub program_filters: Vec<(Pubkey, Vec<serde_json::Value>)>,
     /// Einzelne Accounts (Oracles, FeeState, LUTs …).
     pub accounts: Vec<Pubkey>,
     pub slots: bool,
