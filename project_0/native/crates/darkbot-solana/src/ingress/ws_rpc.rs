@@ -88,6 +88,15 @@ fn build_subscribe_requests(sub: &Subscription, commitment: &str) -> Vec<(u64, S
         ));
         id += 1;
     }
+    for (p, filters) in &sub.program_filters {
+        out.push((
+            id,
+            SubKind::Program,
+            json!({"jsonrpc":"2.0","id":id,"method":"programSubscribe",
+                   "params":[p.to_string(), {"encoding":"base64","commitment":commitment,"filters":filters}]}),
+        ));
+        id += 1;
+    }
     for a in &sub.accounts {
         out.push((
             id,
@@ -400,7 +409,14 @@ mod tests {
     fn subscribe_requests_cover_all_kinds() {
         let p = Pubkey::new_unique();
         let a = Pubkey::new_unique();
-        let sub = Subscription { programs: vec![p], accounts: vec![a], slots: true, roots: true, transactions_mentioning: vec![] };
+        let sub = Subscription {
+            programs: vec![p],
+            program_filters: vec![],
+            accounts: vec![a],
+            slots: true,
+            roots: true,
+            transactions_mentioning: vec![],
+        };
         let reqs = build_subscribe_requests(&sub, "confirmed");
         assert_eq!(reqs.len(), 4);
         assert_eq!(reqs[0].2["method"], "programSubscribe");
