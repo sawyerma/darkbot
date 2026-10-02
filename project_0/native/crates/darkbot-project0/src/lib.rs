@@ -23,4 +23,6 @@ pub mod prepared;
 pub mod protocol;
 pub mod receivership;
 pub mod safety;
+#[cfg(feature = "crate_health")]
+pub mod sizing; // [FIX-59] exact protocol sizing; market realizability remains in RouteProvider/P4A
 pub mod schedule;

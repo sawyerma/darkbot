@@ -12,7 +12,7 @@ license = "UNLICENSED"
 
 [features]
 default = []
-crate_health = ["marginfi", "marginfi-type-crate", "anchor-lang"]
+crate_health = ["marginfi", "marginfi-type-crate", "anchor-lang", "dep:fixed"]
 
 [dependencies]
 darkbot-common = { path = "../darkbot-common" }
@@ -20,6 +20,7 @@ darkbot-solana = { path = "../darkbot-solana" }
 # BELEGT: marginfi-v2 Workspace pinnt solana-sdk =3.0.0, solana-client =3.1.12, anchor-lang 1.0.2
 solana-sdk = "=3.0.0"
 bytemuck = "1"
+fixed = { version = "=1.28.0", optional = true } # [FIX-59] exact protocol sizing math; matches marginfi lock
 anchor-lang = { version = "1.0.2", optional = true }
 
 # VERIFY: Tag = deployed Mainnet-Version aus P1A-01 (erwartet mrgn-0.1.11-rc1, nach Upgrade 0.1.12).
