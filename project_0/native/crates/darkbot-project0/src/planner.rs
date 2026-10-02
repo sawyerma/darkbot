@@ -186,6 +186,6 @@ mod tests {
         let split_a = vec![Step::StartLiquidation, Step::Withdraw];
         let split_b = vec![Step::Repay, Step::EndLiquidation];
         assert!(validate_bundle(&[split_a, split_b]).is_err());
-        assert!(validate_bundle(&[pre.clone(); 6]).is_err());
+        assert!(validate_bundle(&vec![pre.clone(); 6]).is_err()); // [FIX-55] Vec<T>: Clone, not Copy
     }
 }
