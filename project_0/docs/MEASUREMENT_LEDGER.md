@@ -683,3 +683,41 @@ Unknown-discriminator review against pinned `mrgn-0.1.11-rc1`:
 **G2 is not yet final GO:** the first scan aggregates all 162 Marginfi groups. `[FIX-75]` adds a second compact scan for the configured group using `MarginfiAccount.group` plus on-chain `IndexerFlags` (`has_liability`, `was_liquidatable`, `was_underwater`, activity flags). That group-specific result is the remaining C0/G2 evidence.
 
 **[FIX-76] runner scope:** Project_0 now filters Bank dependencies and MarginfiAccount triggers to the configured `P0_GROUP_ID`; foreign groups no longer enter the liquidation pipeline.
+
+
+### 2026-10-02 — C0-02 target-group census / G2 Shadow GO
+
+Second Mainnet census, target group `4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8`:
+
+- overall context_slot: `452727107`
+- group_context_slot: `452727389`
+- group MarginfiAccounts: `165123`
+- has_liability: `82680`
+- lending_only: `82443`
+- single_borrower: `67556`
+- empty: `4662`
+- has_ever_been_liquidated: `5114`
+- was_liquidatable_last_pulse: `61`
+- was_underwater_last_pulse: `60`
+- active_30d: `9954`
+- active_60d: `9964`
+- trivial_balance: `9`
+- group scan duration: `48.198 s`
+
+Evidence:
+- `project_0/data/c0/group_accounts_slot452727389.jsonl`
+- `project_0/data/c0/c0_census_slot452727107.json`
+
+**G2 decision for Shadow qualification: GO.**
+The target group has a large liability population and directly observed recent liquidatable/underwater accounts, therefore there is enough real Mainnet activity to justify the Shadow qualification run.
+
+**Not a profitability claim:** C0 does not prove that realizable liquidation edge exceeds all execution/failure costs. That remains for Shadow simulation, winner matching, failed-cost measurement and realized-PnL evidence.
+
+Follow-up hardening:
+- `[FIX-77]` adds filtered Program-account snapshots.
+- `[FIX-78]` changes bootstrap/recovery from full-program (~387 MB account-space census) to target-group Banks + target-group liability accounts + explicit required/optional dependencies. MarginfiGroup and FeeState are explicitly required so filtering does not silently drop them.
+- `[FIX-79]` applies the same target-group liability/Bank filters to WSS `programSubscribe`.
+- Lending-only accounts are excluded from the liquidator runtime state because they cannot be liquidated while they have no liabilities.
+
+Next gate: compile/tests for [FIX-77..79], then G5 Mainnet Bootstrap:
+`StreamReady → filtered Snapshot → Reconcile → READY → sample exact Health → first ShadowTechnicalReady/ShadowTechnicalSimFailed`.
