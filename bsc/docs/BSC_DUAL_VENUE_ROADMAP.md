@@ -1,7 +1,24 @@
 # DarkBot Solana + BSC Roadmap — Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-09-27
+Updated: 2026-10-02
+
+## TOP PRIORITY — LATENCY MEASUREMENT
+
+The immediate Gate-0 priority is to reach the real end-to-end latency measurement as quickly as technically valid.
+
+Critical unknowns:
+
+```text
+BUY latency        NOT MEASURED
+T0 -> T_buy        NOT MEASURED
+T_signal -> T_send NOT MEASURED for the target Mainnet path
+```
+
+These measurements are the decisive unresolved Gate-0 evidence. All other work is supporting work and should be limited to what is strictly necessary to make the measurement valid, safe, reproducible, and interpretable.
+
+Do not delay the latency experiment for duplicate simulations, cosmetic hardening, additional refactoring, or re-testing facts that are already established. Once the minimum blockers for a valid controlled measurement are closed, proceed directly to the measurement.
+
 
 Normative documents, highest priority first:
 1. `docs/bsc/GATE0_TESTPLAN_SHORT.md` — feasibility gate; decides whether BSC/Solana low-latency work proceeds
