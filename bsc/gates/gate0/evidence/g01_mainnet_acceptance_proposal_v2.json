@@ -7,7 +7,11 @@
     "approved": false,
     "execution_ready": false,
     "approval_required_for": "Any value-bearing Mainnet bundle submission",
-    "note": "v1 remains historical; only this v2 contract may authorize the controlled self-launch test after explicit user approval"
+    "note": "v1 remains historical; only this v2 contract may authorize the controlled self-launch test after explicit user approval",
+    "launcher_address": null,
+    "buyer_address": null,
+    "approved_contract_sha256": null,
+    "execution_authority": "Only this v2 file may authorize the self-launch Mainnet send path; v1 is forbidden as runtime authority"
   },
   "scope": {
     "chain_id": 56,
@@ -56,7 +60,7 @@
     "min_output": {
       "must_be_positive": true,
       "source": "Exact controlled post-launch state from the chosen native launch parameters",
-      "independent_cross_check": "Simulate the exact [launch_A,buy_B] bundle using an independent execution path and, where available, builder bundle simulation before signing/arming",
+      "independent_cross_check": "Local/offline independent sequential execution of exact launch_A then buy_B. Before authorization, exact valid Mainnet bytes MUST NOT be sent to external builder simulation endpoints.",
       "slippage_max_bps": 100,
       "historical_min_output_reuse_forbidden": true
     },
@@ -90,7 +94,7 @@
     "Verify both wallets have sufficient balance under the proposed reserved worst-case budget without writing secrets to evidence",
     "Compute positive minOutput locally from the exact self-launch parameters and cross-check with independent simulation",
     "Validate exact signed raw launch and BUY transactions decode/recover to the intended sender, nonce, chain, portal, value, gas and calldata",
-    "Dry-submit/simulate exact bundle shape to both builders without value-bearing execution and verify method/expiry semantics",
+    "Validate builder method/format/expiry semantics only with deliberately non-executable fixtures; exact valid Mainnet bytes remain local until authorization",
     "Determine current builder gas-floor/ranking requirements; signed bytes must satisfy the strictest armed builder",
     "Verify neither transaction is broadcast to the public mempool during dry qualification",
     "Explicit user approval of this v2 scope and numeric absolute budget ceiling"
@@ -122,5 +126,51 @@
   "coverage": {
     "foreign_launch_coverage_requirement": "NOT_APPLICABLE_TO_SELF_LAUNCH_STAGE_1",
     "note": "Coverage returns in the subsequent foreign-launch ingress qualification stage"
+  },
+  "send_guard": {
+    "fail_closed": true,
+    "required_checks": [
+      "Runtime file path is exactly g01_mainnet_acceptance_proposal_v2.json",
+      "SHA-256 of exact v2 bytes equals the hash compiled/frozen into the armed harness",
+      "schema_version == 2",
+      "authorization.approved == true",
+      "authorization.execution_ready == true",
+      "authorization.launcher_address equals recovered launcher_A address",
+      "authorization.buyer_address equals recovered buyer_B address",
+      "launcher_A != buyer_B",
+      "authorization.approved_contract_sha256 equals the frozen hash",
+      "spent_budget_wei + reserved_worst_case_attempt_wei <= absolute approved total budget",
+      "attempt number does not exceed approved maximum",
+      "all Dry-PASS evidence predicates are true"
+    ],
+    "forbidden_authorities": [
+      "g01_mainnet_acceptance_proposal_v1.json",
+      "environment variable alone",
+      "command-line flag alone"
+    ]
+  },
+  "dry_pass": {
+    "status": "REQUIRED_BEFORE_AUTHORIZATION",
+    "valid_mainnet_bytes_may_leave_machine": false,
+    "criteria": [
+      {
+        "id": "DRY-1-BYTES-AND-SIGNERS",
+        "pass": "Both builder payload constructors contain the exact same raw_signed_launch_A bytes followed by the exact same raw_signed_buy_B bytes; independent transaction decoding and signature recovery yield distinct frozen wallet A and wallet B addresses, correct ChainID 56, nonces, Portal, value, gas and calldata."
+      },
+      {
+        "id": "DRY-2-INDEPENDENT-LOCAL-SIMULATION",
+        "pass": "A local/offline independent sequential execution of launch_A followed by buy_B succeeds, produces the same token address and exact received token amount as the local economics calculation, and signed minOutput is >0 and <= independently simulated received amount. Historical DOGE fixture values are not reused as authority."
+      },
+      {
+        "id": "DRY-3-GAS-FLOOR-AND-BUDGET",
+        "pass": "Current acceptance/ranking gas-floor semantics for every armed builder are independently verified before signing; identical signed bytes satisfy the strictest verified requirement. Independent simulated gas for launch and BUY, multiplied by the signed gas price and combined with launch value, BUY value and any allowed builder cost, fits both the per-attempt reserve and absolute approved budget."
+      },
+      {
+        "id": "DRY-4-EXPIRY-NONCES-NO-EGRESS",
+        "pass": "Bundle expiry/maxBlock fields are within the approved tight window, launcher and buyer pending nonces match the signed transactions, and an egress guard proves zero bytes of the valid signed launch, valid signed BUY, or valid bundle payload were written to any socket/process/stdout/file intended for network transmission before authorization."
+      }
+    ],
+    "provider_prequalification": "Builder method/format/expiry behavior before authorization may only use deliberately non-executable fixtures. Exact valid Mainnet transaction/bundle bytes must not be sent to a remote simulation endpoint before authorization.",
+    "all_four_required": true
   }
 }
