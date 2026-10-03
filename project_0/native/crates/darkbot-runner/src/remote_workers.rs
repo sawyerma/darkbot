@@ -115,8 +115,9 @@ impl RemoteWorkers {
         })?;
 
         let reconcile_shutdown = shutdown.clone();
+        let reconcile_rpc_url = rpc_url.clone();
         std::thread::Builder::new().name("reconcile-rpc".into()).spawn(move || {
-            let rpc = RpcClient::new(rpc_url);
+            let rpc = RpcClient::new(reconcile_rpc_url);
             let clock = Clock::new();
             while !reconcile_shutdown.is_requested() {
                 let Some(work) = reconcile_job_rx.pop_timeout(Duration::from_millis(250)) else {
