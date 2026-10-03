@@ -1107,3 +1107,39 @@ Decision:
 - The previous Exhausted event is classified as **transient / exact root cause unobserved**, because it occurred before FIX-90 exposed fetch errors.
 - FIX-90 diagnostics are confirmed operational.
 - No evidence currently supports changing retry count or recovery semantics.
+
+
+### 2026-10-03 — R1 Mainnet typed rejection census — PASS
+
+Mainnet Shadow bootstrap probe after R1 diagnostics:
+
+```text
+HEALTH RECORDS: 61
+LIQUIDATABLE: 61
+DECISION RECORDS: 61
+
+LOSSES
+55 Sizing
+6 IntegrationRefresh
+
+REASONS
+53 SIZING:NO_ASSET
+6 JuplendLendingStale
+2 SIZING:NO_VALID_PROTOCOL_PAIR
+
+DECISIONS
+61 Skip
+```
+
+Interpretation:
+- 53/61 are no-collateral cases at sizing input (`NO_ASSET`); sampled/previous evidence shows these are bad-debt bankruptcy states, not normal receivership opportunities.
+- 6/61 are blocked by stale JupLend integration state; this independently confirms the missing integration-refresh path beyond the earlier Kamino evidence.
+- 2/61 have both sides present on supported generic banks but still produce no protocol-valid Asset×Liability pair. These are the highest-value candidates for the next generic-path diagnosis because they reach deeper than the 53 no-asset and 6 integration-stale cases.
+- 0/61 reached route/build/sign/simulation, so A1 is not yet exercised by this sample.
+
+[FIX-91] changes bankruptcy classification to depend on protocol state (`bad_debt && equity_assets<=0`) rather than the prior planner loss category, so no-collateral cases are not mislabeled as Sizing merely because diagnostics improved.
+
+Status:
+- R1 diagnostics: **Mainnet PASS**.
+- FIX-91: **IMPLEMENTED / VERIFY**.
+- Next diagnostic target: explain the 2 `NO_VALID_PROTOCOL_PAIR` cases at pair-level before touching route/funding.
