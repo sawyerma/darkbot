@@ -1032,3 +1032,28 @@ A5 circuit-breaker remediation is now implemented but not yet compiler/Mainnet-q
 - [FIX-88d] shared Pipeline invokes eligibility after liquidatable Health and before Builder/Sizing.
 
 Status: **IMPLEMENTED / VERIFY**. Next gate is build/test green before structured planning-rejection diagnostics are introduced.
+
+
+### 2026-10-03 — R1 implementation complete — VERIFY
+
+R1-A5 build/test was reported green after [FIX-88].
+
+[FIX-89] adds structured planning rejection evidence without relaxing fail-closed behavior:
+
+- `SIZING:NO_ASSET`
+- `SIZING:NO_LIABILITY`
+- `SIZING:UNSUPPORTED_INTEGRATION_ASSET`
+- `SIZING:UNSUPPORTED_INTEGRATION_LIABILITY`
+- `SIZING:NO_SUPPORTED_ASSET_BANK`
+- `SIZING:NO_SUPPORTED_LIABILITY_BANK`
+- `SIZING:NO_VALID_PROTOCOL_PAIR`
+- `ROUTING:NO_ROUTE`
+- `ROUTING:INSUFFICIENT_ROUTE_OUTPUT`
+- `ATA:MISSING_ASSET:<mint>`
+- `ATA:MISSING_LIABILITY:<mint>`
+
+Typed loss categories now include `CircuitBreaker`, `Sizing`, `UnsupportedIntegration`, `IntegrationRefresh`, `MissingAta`, `Funding`, and `Routing`.
+
+Important: A1 (NoSwap/Preheld incorrectly coupled to a market quote) is **not fixed by FIX-89**. A `ROUTING:NO_ROUTE` result remains evidence of that known blocker until R3.
+
+Status: **IMPLEMENTED / VERIFY**. Next gate: workspace build/test green, then Mainnet Shadow rerun to obtain the real 61-probe rejection distribution.
