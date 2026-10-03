@@ -633,29 +633,29 @@ Any narrowly controlled value-bearing qualification experiment is a separate exp
 
 Maintain this table in the master plan as the human-readable acceptance source. A machine-readable companion may reference these IDs; do not create divergent status reports. Each implemented row gains source commit/hash, scope/sample count, exact test name, raw result, what is excluded and future requalification. Never fill PASS by hand without linked results.
 
-| ID / retained evidence | Owner / required regression or measurement | Current consequence |
-|---|---|---|
-| W1 — EIP-155, historical 343-byte TX, short r/s, 1,024 signatures | Unit 1: byte/hash/chain/sender/low-S/output/buffer tests | Checked Revision 2 PASS; normalized import pending |
-| W2 — malformed RLP and 27,624 actual differential inputs | Unit 1: real Rust differential and bounded decoder error cases | PASS for delivered cases; no exhaustive-fuzz claim |
-| P1 — V6 TAXED_V3, real CREATE2, seven vectors, corrected mismatch | Unit 2: deployment/salt/init-code/address golden and wrong-mode rejection | Evidence exists; production port/test pending |
-| P2 — 65 TX witness, Router→Portal and direct call, independent output | Units 2/3: independent semantic fixtures tied to actual prestate/caller | Historical scoped PASS; generic live semantics not qualified |
-| Q1 — 497 dependency rows, coherent snapshot/invalidators | Units 2/3 + C2: explicit profile inputs; stale/reorg/mode/code/caller negatives | Witness classification exists; production live cache coverage pending |
-| Q2 — immediate DOGE BUY, minOutput exact/+1, pre-launch revert | Unit 3: sequential EVM golden and negative tests, no observed-output input | Scoped golden exists; other conversion segments disabled |
-| Q3 — native-BNB Curve-20 and exact fee rounding | Unit 3 + G: independent Rust/EVM, tax toggle/exemption/slippage/overflow | Scoped golden exists; operational policy validated separately |
-| N1 — 8,000 signals/1,000 intents, cross-chain and ordering failures | Unit 4: bounded dedup/nonces/recipient isolation/UNKNOWN regressions | Historical PASS; new production data structures pending |
-| N2 — 256 final-envelope bindings, short signatures | Units 1/2/4: intended chain/signer/nonce/Portal/token/recipient final binding | Eight test senders are not a multi-sender requirement |
-| N3 — injected HoL, startup quarantine in all four states | Unit 4 + C2: coupling telemetry, startup failures, controlled recovery proof | Coupling/fence demonstrated; real HoL and automatic resume not proven |
-| S1 — permit-before-write, ACK≠confirm, partial-write HALT | Units 4/5: once-economic/per-adapter permits and fault matrix | Historical single-sink PASS; fan-out lifecycle requires new tests |
-| S2 — ordered self-launch/public/private inclusion, gas/budget/floor evidence | Unit 5 + Unit 4/C2 + C3/J: exact options/payload bytes, cost/expiry/placement; §8 after-handoff validity and delayed-execution regressions | API acceptance/diagnostic is not real N+1 qualification; request expiry is not transaction revocation |
-| T1 — 0.433125/0.535250-ms real same-block BUYs | C3 + inclusion track: retain scope/order/acquisition; new exact-runtime measurement | Historical constructive evidence; producer elapsed time UNKNOWN |
-| T2 — prepared remote diagnostics and tails >1 ms | Unit 5 + C3: separate prepared/full path and per-adapter tails/all outcomes | No universal “every send <1 ms” claim |
-| T3 — 0.103417/0.045125-ms real following-block BUYs | Unit 5 + C3/J: preserve counterexample, optimize arrival/order | Fast local send does not guarantee first-block acquisition |
-| T4 — clock/actual-send/producer witness | C0 schema + C1/C3 + J: bracket original successful execution, conservative bound; frozen per-cell campaign and verdict evaluator regressions | Actual T0→T_buy <1 ms NOT PROVEN; no campaign or universal-bound claim without its distinct proof |
-| R1 — no-peer/disconnect/hash/fetch/rate-limit failures | C1/F + runner adapters: source health, actionable binding, full denominator | No feed/P2P coverage winner presumed |
-| R2 — pending/canonical/replacement/reorg counterexamples | C2: every applicable retirement-contract counterexample with exact test | No parallel chain-state engine in Unit 4 |
-| C1 — first 15 s, complete receipt/internal-event acquisition evidence | C0 recorder + F/I/J: bounded raw capture, explicit window/completeness | Minimal schema alone is not implemented COMPLETE capture |
-| C2 — journal/borrow/sequence/checksum/replay | C0 recorder + C1/F/I: lifetime, corruption/gap/restart and identity tests | No hotpath writer wait; derivatives are offline |
-| X1 — old Solana/PAPER latency and Research Strategy C scans | H: separate observation semantics, BSC fee/EV validation | Preserve Solana; no BSC-EV/timing inference |
+| ID / retained evidence | Owner / required regression or measurement | Current consequence | Source index |
+|---|---|---|---|
+| W1 — EIP-155, historical 343-byte TX, short r/s, 1,024 signatures | Unit 1: byte/hash/chain/sender/low-S/output/buffer tests | Checked Revision 2 PASS; normalized import pending | SN01 |
+| W2 — malformed RLP and 27,624 actual differential inputs | Unit 1: real Rust differential and bounded decoder error cases | PASS for delivered cases; no exhaustive-fuzz claim | SN01 |
+| P1 — V6 TAXED_V3, real CREATE2, seven vectors, corrected mismatch | Unit 2: deployment/salt/init-code/address golden and wrong-mode rejection | Evidence exists; production port/test pending | SN02, SN19 |
+| P2 — 65 TX witness, Router→Portal and direct call, independent output | Units 2/3: independent semantic fixtures tied to actual prestate/caller | Historical scoped PASS; generic live semantics not qualified | SN03, SN04, SN19 |
+| Q1 — 497 dependency rows, coherent snapshot/invalidators | Units 2/3 + C2: explicit profile inputs; stale/reorg/mode/code/caller negatives | Witness classification exists; production live cache coverage pending | SN04, SN07 |
+| Q2 — immediate DOGE BUY, minOutput exact/+1, pre-launch revert | Unit 3: sequential EVM golden and negative tests, no observed-output input | Scoped golden exists; other conversion segments disabled | SN03, SN05 |
+| Q3 — native-BNB Curve-20 and exact fee rounding | Unit 3 + G: independent Rust/EVM, tax toggle/exemption/slippage/overflow | Scoped golden exists; operational policy validated separately | SN05, SN18 |
+| N1 — 8,000 signals/1,000 intents, cross-chain and ordering failures | Unit 4: bounded dedup/nonces/recipient isolation/UNKNOWN regressions | Historical PASS; new production data structures pending | SN06 |
+| N2 — 256 final-envelope bindings, short signatures | Units 1/2/4: intended chain/signer/nonce/Portal/token/recipient final binding | Eight test senders are not a multi-sender requirement | SN01, SN02, SN06 |
+| N3 — injected HoL, startup quarantine in all four states | Unit 4 + C2: coupling telemetry, startup failures, controlled recovery proof | Coupling/fence demonstrated; real HoL and automatic resume not proven | SN06, SN08 |
+| S1 — permit-before-write, ACK≠confirm, partial-write HALT | Units 4/5: once-economic/per-adapter permits and fault matrix | Historical single-sink PASS; fan-out lifecycle requires new tests | SN08, SN10 |
+| S2 — ordered self-launch/public/private inclusion, gas/budget/floor evidence | Unit 5 + Unit 4/C2 + C3/J: exact options/payload bytes, cost/expiry/placement; §8 after-handoff validity and delayed-execution regressions | API acceptance/diagnostic is not real N+1 qualification; request expiry is not transaction revocation | SN12 |
+| T1 — 0.433125/0.535250-ms real same-block BUYs | C3 + inclusion track: retain scope/order/acquisition; new exact-runtime measurement | Historical constructive evidence; producer elapsed time UNKNOWN | SN13 |
+| T2 — prepared remote diagnostics and tails >1 ms | Unit 5 + C3: separate prepared/full path and per-adapter tails/all outcomes | No universal “every send <1 ms” claim | SN09, SN10, SN11 |
+| T3 — 0.103417/0.045125-ms real following-block BUYs | Unit 5 + C3/J: preserve counterexample, optimize arrival/order | Fast local send does not guarantee first-block acquisition | SN13 |
+| T4 — clock/actual-send/producer witness | C0 schema + C1/C3 + J: bracket original successful execution, conservative bound; frozen per-cell campaign and verdict evaluator regressions | Actual T0→T_buy <1 ms NOT PROVEN; no campaign or universal-bound claim without its distinct proof | SN11, SN13, SN14, SN15 |
+| R1 — no-peer/disconnect/hash/fetch/rate-limit failures | C1/F + runner adapters: source health, actionable binding, full denominator | No feed/P2P coverage winner presumed | SN07, SN17 |
+| R2 — pending/canonical/replacement/reorg counterexamples | C2: every applicable retirement-contract counterexample with exact test | No parallel chain-state engine in Unit 4 | SN16, SN19 |
+| C1 — first 15 s, complete receipt/internal-event acquisition evidence | C0 recorder + F/I/J: bounded raw capture, explicit window/completeness | Minimal schema alone is not implemented COMPLETE capture | SN14, SN17 |
+| C2 — journal/borrow/sequence/checksum/replay | C0 recorder + C1/F/I: lifetime, corruption/gap/restart and identity tests | No hotpath writer wait; derivatives are offline | SN15, SN16, SN17 |
+| X1 — old Solana/PAPER latency and Research Strategy C scans | H: separate observation semantics, BSC fee/EV validation | Preserve Solana; no BSC-EV/timing inference | SN18, SN20 |
 
 “Pending” here is an implementation/qualification task, not a claim that the historical experiment failed. Attach completed results as units land. Full source details remain in the original ledger/raw files and provenance manifest; do not copy all raw traces into this plan.
 
@@ -714,7 +714,7 @@ Never expose private keys or credential-bearing endpoints in command output, rep
 
 ## 18. Immediate execution order for Fable
 
-1. Read this plan, the Revision-2 review and cited scope-specific Git evidence. Use the **already executed** Unit-1 compiler results, normalized formatting and actual lock; do not claim they remain uncompiled.
+1. Read this plan, the Revision-2 review and the concrete source/test links in §20 for the unit being built. Freeze the applicable SN→production-symbol→test mapping before changing its semantics. Use the **already executed** Unit-1 compiler results, normalized formatting and actual lock; do not claim they remain uncompiled.
 2. Correct inventory and Event/Clock/Capture proposal to the concrete clock, hash/actionable, producer, adapter boundary, capture/lifetime and fan-out contracts above. Resolve ownership against §4/§7/§12.
 3. Return the corrected review package. Import only after acceptance, without targets, historical migration or unrelated Git changes.
 4. Implement Unit 2 then Unit 3 with their exact golden and negative cases; fill their matrix rows with real test results. Do not wait for original-producer access to build them.
@@ -729,7 +729,7 @@ The fastest correct construction combines early verified information, resident c
 
 This consolidated handoff was written from the following frozen review inputs; no new network or acquisition measurement was made for this document.
 
-The strict acceptance amendment adds mandatory initial birth-entry placement, after-handoff validity/late-execution handling and frozen campaign/release verdicts in response to the user's request for a complete implementation contract. It changes requirements, not historical results. The 22 source-file hashes in the adjacent provenance manifest were rechecked against repository HEAD `eaba1afe5ad5834a92ea0a9fb915792e2473cb15` with zero mismatches before this amendment. No new compiler run, provider qualification, code import or funded test is claimed by this edit.
+The strict acceptance amendment adds mandatory initial birth-entry placement, after-handoff validity/late-execution handling and frozen campaign/release verdicts in response to the user's request for a complete implementation contract. It changes requirements, not historical results. The 22 source-file hashes in the reference provenance manifest were rechecked against repository HEAD `eaba1afe5ad5834a92ea0a9fb915792e2473cb15` with zero mismatches before this amendment. No new compiler run, provider qualification, code import or funded test is claimed by this edit.
 
 ```text
 Git reference HEAD: 24e50ca9685bec27885dee7c551569882d33178a
@@ -747,7 +747,7 @@ Review inputs:
 
 - `/Users/sawyer_ma/Downloads/BSC_PRODUCTION_BUILD_MASTER_PLAN.md`
 - `/Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/FABLE_REVIEW_REV2.md`
-- Adjacent `git_alignment_provenance.json` (22 inspected Git source/evidence files), compiler logs and `command_exit_codes.json`.
+- `production-plan-reference/git_alignment_provenance.json` (22 inspected Git source/evidence files), compiler logs and `command_exit_codes.json`.
 
 Repository root for the paths below: `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot`.
 
@@ -794,15 +794,15 @@ This section is the concrete implementation index for Fable. GitHub links are im
 
 **Reuse contract:** preserve the demonstrated algorithm/invariant and its exact golden/negative cases; change historical harness layout only as required by the bounded production contracts above. Do not invent a replacement formula, discard a failing case, copy a diagnostic shortcut or restart completed feasibility research. Every delivered unit must identify the SN row, source hash, production symbol, ported test name and actual test result. Required new behavior without an existing source stays explicitly new and unproven until tested.
 
-The complementary [source inventory, metric records and test-function index](</Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/bsc_source_audit.json>) covers all **1,314 Git-tracked BSC files**, **1,118 JSON artifacts**, **24 Rust source files**, **32 historical Rust test functions** and **52 selected aggregate-result records**. Hashing, JSON parsing and symbol indexing provide mechanical inventory coverage; they do not claim every raw trace was manually interpreted or all experiments rerun. The semantic review is represented by the linked adoption rows below. Reviewed Unit-1 source is separately linked from a byte-identical isolated extraction of the [normalized review ZIP](</Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/darkbot-c0-einheit1-rev2-reviewed.zip>); these source references are not imported into the production repository. Its 27 compiler-checked tests are a separate snapshot, not 27 additional independent experiments.
+The complementary [source inventory, metric records and test-function index](production-plan-reference/bsc_source_audit.json) covers all **1,314 Git-tracked BSC files**, **1,118 JSON artifacts**, **24 Rust source files**, **32 historical Rust test functions** and **52 selected aggregate-result records**. Hashing, JSON parsing and symbol indexing provide mechanical inventory coverage; they do not claim every raw trace was manually interpreted or all experiments rerun. The semantic review is represented by the linked adoption rows below. Reviewed Unit-1 source is separately linked from a byte-identical isolated extraction of the [normalized review ZIP](production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip); these source references are not imported into the production repository. Its 27 compiler-checked tests are a separate snapshot, not 27 additional independent experiments.
 
 Four historical files named `*_ipfs_metadata.json`/`*_sourcify_metadata.json` contain gateway/HTML responses, not valid JSON metadata. Retain them as failed retrieval evidence, never as ABI authority. Two pre-existing working-tree differences (Gate-0 lock and preflight JSON) are recorded separately; committed evidence is not silently replaced by those local files.
 
 ### SN01 — Checked RLP / legacy TX / signer
 
-**Matrix:** W1, W2, N2. **Code:** [Signer::sign_legacy](</Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/unit1-reference/bsc/native/crates/darkbot-core/src/signer/mod.rs:150>); [expected-chain recovery](</Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/unit1-reference/bsc/native/crates/darkbot-core/src/signer/mod.rs:189>); [legacy encoder/decoder](</Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/unit1-reference/bsc/native/crates/darkbot-core/src/tx/legacy.rs:201>); [RLP writers and strict decoder](</Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/unit1-reference/bsc/native/crates/darkbot-wire/src/rlp.rs:103>).
+**Matrix:** W1, W2, N2. **Code:** [Signer::sign_legacy](production-plan-reference/unit1-reference/bsc/native/crates/darkbot-core/src/signer/mod.rs#L150); [expected-chain recovery](production-plan-reference/unit1-reference/bsc/native/crates/darkbot-core/src/signer/mod.rs#L189); [legacy encoder/decoder](production-plan-reference/unit1-reference/bsc/native/crates/darkbot-core/src/tx/legacy.rs#L201); [RLP writers and strict decoder](production-plan-reference/unit1-reference/bsc/native/crates/darkbot-wire/src/rlp.rs#L103).
 
-**Tests / evidence:** [27-test compiler log](</Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/debug_test.log>); [actual alloy-rlp differential tests](</Users/sawyer_ma/Documents/ChatGPT/DARKBOT 2/c0-review-fable-rev2-2026-10-03/unit1-reference/bsc/native/crates/darkbot-wire/tests/rlp_differential.rs:93>); [historical envelope reconstruction](https://github.com/sawyerma/darkbot/blob/eaba1afe5ad5834a92ea0a9fb915792e2473cb15/bsc/gates/gate0/src/main.rs#L67); [1,024-envelope regression](https://github.com/sawyerma/darkbot/blob/eaba1afe5ad5834a92ea0a9fb915792e2473cb15/bsc/gates/gate0/src/bin/g06_concurrency.rs#L444).
+**Tests / evidence:** [27-test compiler log](production-plan-reference/debug_test.log); [actual alloy-rlp differential tests](production-plan-reference/unit1-reference/bsc/native/crates/darkbot-wire/tests/rlp_differential.rs#L93); [historical envelope reconstruction](https://github.com/sawyerma/darkbot/blob/eaba1afe5ad5834a92ea0a9fb915792e2473cb15/bsc/gates/gate0/src/main.rs#L67); [1,024-envelope regression](https://github.com/sawyerma/darkbot/blob/eaba1afe5ad5834a92ea0a9fb915792e2473cb15/bsc/gates/gate0/src/bin/g06_concurrency.rs#L444).
 
 **Required adoption:** Unit 1: reuse the reviewed normalized implementation and actual lock after the existing package acceptance. Preserve byte-exact vectors, short r/s, low-S, wrong-chain/sender checks and empty output on error. Do not clone old per-binary RLP helpers or treat buffer-capacity tests as proof of zero allocations in every dependency. The local reference copy is byte-identical to the reviewed ZIP, not a production import.
 
@@ -965,3 +965,5 @@ The source audit corrects two descriptions in the earlier consolidated prose: th
 At each unit delivery, use §14 as the status source and attach its concrete SN→production-symbol→test→result mapping. Unmapped mandatory source invariants block that unit; later-phase original producer/capture/access work remains with its named owner. Do not demand reruns of unchanged historic network experiments to start a library unit. Re-run applicable production regressions and integrated measurements when code, state scope or measurement boundaries actually change.
 
 The fixed product acceptance remains **actual successful acquisition with conservatively bounded `T_buy - T0 < 1,000,000 ns`**. Preparation, fast local code, ordered submission, raw retention and later calculation must serve that requirement. No linked snippet or historical test relaxes it.
+
+Repository handoff: supporting review artifacts and isolated source references are in `bsc/docs/production-plan-reference/`; they are documentation fixtures, not the executable `bsc/native` workspace. Relative links resolve within this committed handoff.

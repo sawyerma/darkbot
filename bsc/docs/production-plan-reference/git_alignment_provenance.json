@@ -1,0 +1,123 @@
+{
+  "review_date": "2026-10-03",
+  "git_head": "24e50ca9685bec27885dee7c551569882d33178a",
+  "bsc_latest_commit": "0ab132202e0c71fc69d0adef7acafee34f2dc515",
+  "zip_sha256": "bb16216b79cd37f21002565ea3c540dd79547e79adea89755b83871ec1e8bcd1",
+  "documents_and_selected_evidence": [
+    {
+      "path": "bsc/docs/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md",
+      "git_sha256": "ef8162efa6ce54240c91bedcfd55b684ab196596163834d44b33dc3cdca0ac96",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/GATE0_TESTPLAN_SHORT.md",
+      "git_sha256": "b59f3b8e61c622b17e609b4746ae914a38b91a65f30eb79420d0d6799a0e6608",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/GATE0_FABLE_EXECUTION_CHECKLIST.md",
+      "git_sha256": "53e75d27849ec8e486498626381fa58d0b03426b9b770718865a5ac1a58a3edf",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md",
+      "git_sha256": "a70604c3d47bdaa79d3468d93f4f75acbdd5941c2f3af21ff9f5a42b17b2b9aa",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/BSC_DUAL_VENUE_ROADMAP.md",
+      "git_sha256": "38af4c341afd110d4bf3aedfd7cfbebc1d169eecda5d31c47b602e5d05516970",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md",
+      "git_sha256": "c963599a0083366581228f73e709c055095eac2b2251e5cecdbb90cbb458d8d2",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/BSC_IMPLEMENTATION_HANDOFF_CLAUDE.md",
+      "git_sha256": "c865c1149c3775544f46d6048a196922fd05d4e3b84a7564d23c06d2c8be47ca",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/BSC_PHASE_C_PYTHON_RETIREMENT.md",
+      "git_sha256": "b6ab300ea633e6453aa3ca17e9a44036501bc695f3dcb1ecc0835082030fbee0",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/BSC_PHASE_D_FLAP_READ_ONLY_CONTRACT.md",
+      "git_sha256": "b3dc3f863e00921f5c9ea513603fdc28eab59cdbca42331db2d10911cd296b70",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/docs/BSC_PHASE_F_DUAL_CAPTURE_CONTRACT.md",
+      "git_sha256": "e67f9447d8afb78a770bedbcf746acd5925a1f1759a930bd29c5e4351a017ecb",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "solana/docs/RESEARCH_STATUS_2026-09-23.md",
+      "git_sha256": "4594bab176d6323a82a9b74bdbf75106fc1d96b4d6033be234628d587087b2a3",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "solana/docs/STRATEGY_C_SOURCE_OF_TRUTH.md",
+      "git_sha256": "1aa5aff4b9a5f4a9cb5e24c820e621202b7385573d18d0d397fb91bbaa2ec5ff",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/src/intent_lane.rs",
+      "git_sha256": "e73431a4be6ab9cb61bafc2e50ac5e747df924eae689bf9d1695e97cbdf4ddb0",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/src/restart_fence.rs",
+      "git_sha256": "d3df62dbc9ce06d8a2371d75fe10caa6391300fc14c824b68efed67c39177dce",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/src/acceptance_guard.rs",
+      "git_sha256": "17190bbe1139520af4d673b6338953e5ffe2d63922d0b731313b56b340b197c4",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/src/bin/g06a_self_launch_bundle.rs",
+      "git_sha256": "efecf0b805d97e8e78b3c27f6f3e1b8c68040766d777944dd4d98daee838c086",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/evidence/g03_result.json",
+      "git_sha256": "c355ec61fe0ff2ed43771cc370c8174bc37f3e16147e0e535e9888b86717b8b5",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/evidence/g06a_economics_evm_crosscheck_2026-10-02.json",
+      "git_sha256": "2c244616a78e5ee85f558c84781fa120ea3dd7da3c99618948ae023aca67cdad",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/evidence/g06a_builder_floor_addendum_2026-10-03.json",
+      "git_sha256": "129777f7c7fccabeb541d72fe4599bc8e5c4b93ac90c7a6d1550c61d17b11c84",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/evidence/g06_single_sender_restart/result.json",
+      "git_sha256": "318cf53a7e35d8b03b541b87ddaa129e635ac91adc6f548c8f7310e61d8ae914",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/gates/gate0/evidence/g07_hash_trigger_testnet_20261003T002258Z/result.json",
+      "git_sha256": "eb87aee0a628c51be2de691c070b92dbe11550c87e31c499d7f480fc10dd4fbb",
+      "matches_read_worktree": true
+    },
+    {
+      "path": "bsc/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-archive-witness-quicknode-153754/hotpath_dependency_matrix.json",
+      "git_sha256": "51a4799755d9771ca2067df8ebe5ab647f24ca0639cb2d901778ca9d7dc2b204",
+      "matches_read_worktree": true
+    }
+  ],
+  "excludes": [
+    "pre-existing local modified Gate0 Cargo.lock and preflight JSON as authoritative committed evidence"
+  ],
+  "no_live_calls": true,
+  "no_import": true
+}
