@@ -33,5 +33,15 @@
     "launch_block.json": "eba12d818858acf0d40297d17cface19ada179458e5c7626dd883caa32310979",
     "launch_receipt.json": "20f754142b52ba63735c730ca3af2fab304ed87fd519c9c45cc8067c8de2f074",
     "runner.log": "58f88b5bbf453a2cd55e9156a23733ebf2af68ec8a4f9e6c2f8c9dc4429ffefb"
+  },
+  "block_time_analysis": {
+    "source": "canonical block headers milliTimestamp, not per-transaction execution ticks",
+    "launch_block_timestamp_ms": 1790987097600,
+    "buy_block_timestamp_ms": 1790987098050,
+    "block_timestamp_delta_ms": 450,
+    "one_second_bucket_delta": 1,
+    "same_one_second_bucket": false,
+    "same_one_minute_bucket": true,
+    "T_buy_minus_T0_remains_unknown": true
   }
 }
