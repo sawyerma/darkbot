@@ -18,7 +18,7 @@ use std::str::FromStr;
 use marginfi_type_crate::{
     constants::{ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO},
     pdas::{
-        derive_drift_signer, derive_drift_spot_market_vault, derive_drift_state,
+        derive_drift_signer, derive_drift_spot_market, derive_drift_spot_market_vault, derive_drift_state,
         derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
         derive_juplend_liquidity_vault, derive_juplend_rate_model,
         derive_juplend_rewards_rate_model, JUPLEND_LIQUIDITY_PROGRAM_ID,
@@ -279,6 +279,41 @@ fn kamino_refreshes<S: AccountSource + ?Sized>(
     ])
 }
 
+fn drift_reward_market_keys<S: AccountSource + ?Sized>(
+    state: &S,
+    bank: &Bank,
+) -> Result<Vec<Pubkey>, String> {
+    let market: &drift_mocks::state::MinimalSpotMarket =
+        pod_after_disc(state, &bank.integration_acc_1)?;
+    let user: &drift_mocks::state::MinimalUser =
+        pod_after_disc(state, &bank.integration_acc_2)?;
+
+    let mut indexes: Vec<u16> = user
+        .spot_positions
+        .iter()
+        .filter(|p| {
+            p.scaled_balance > 0
+                && p.balance_type == drift_mocks::state::SpotBalanceType::Deposit
+                && p.market_index != market.market_index
+        })
+        .map(|p| p.market_index)
+        .collect();
+    indexes.sort_unstable();
+    indexes.dedup();
+
+    if indexes.len() > 2 {
+        return Err(format!(
+            "DRIFT_TOO_MANY_REWARD_MARKETS:{}",
+            indexes.len()
+        ));
+    }
+
+    Ok(indexes
+        .into_iter()
+        .map(|i| derive_drift_spot_market(i).0)
+        .collect())
+}
+
 fn drift_refresh<S: AccountSource + ?Sized>(
     state: &S,
     bank: &Bank,
@@ -464,6 +499,9 @@ pub fn projection_targets_for_account<S: AccountSource + ?Sized>(
                 out.push(key);
             }
         }
+        if matches!(kind(bank), Some(IntegrationKind::Drift)) {
+            out.extend(drift_reward_market_keys(state, bank)?);
+        }
     }
 
     // Writable refresh accounts are the exact state mutated by the prefix and must always be
@@ -570,8 +608,9 @@ pub fn dependency_keys_for_bank<S: AccountSource + ?Sized>(
             if market.oracle != Pubkey::default() {
                 out.push(market.oracle);
             }
-            // Reward-market dependencies are discovered from the Drift user at builder time;
-            // if not present in RAM the specific withdraw path remains fail-closed.
+            for reward_market in drift_reward_market_keys(state, bank)? {
+                out.push(reward_market);
+            }
         }
         Some(IntegrationKind::JupLend) => {
             let lending: &juplend_mocks::state::Lending =
