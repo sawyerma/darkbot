@@ -196,7 +196,7 @@ Successful receivership sim:      OPEN — no ShadowTechnicalReady yet
 Current immediate blocker:        ZERO_PREFUND Jupiter route rejection reason; [FIX-105] committed, R105 pending
 Liquidator payer:                 FUNDED / VERIFIED; dedicated Project_0 signer
 Required Trrq ATAs:               WSOL + USDC PREWARMED and confirmed on Mainnet
-R4 hot-path isolation:            OPEN — mandatory before 72 h P6-LT
+R4 hot-path isolation:            PASS — R108 runtime-qualified
 Integration refresh completeness: OPEN (Kamino/Drift/JupLend paths)
 Failed-cost / realized economics: OPEN / UNKNOWN by design
 72 h P6-LT Shadow:                NOT STARTED
@@ -1556,7 +1556,7 @@ P4A sizing/economics      implemented; unknown economics stays UNKNOWN
 P5 receivership builder   implemented and repeatedly Mainnet exercised
 R0/R1/R3                  compiler/workspace gates PASS
 R5                        PARTIAL: Build + Sign + simulation call proven; simulation success OPEN
-R4                        OPEN and mandatory before 72 h Shadow
+R4                        PASS: remote winner/reconciliation RPC isolated and R108-qualified
 R6                        OPEN: integration refresh/withdraw completeness
 R7                        OPEN: failed-cost/economics/edge qualification
 P6-LT 72 h Shadow         NOT STARTED
@@ -1824,4 +1824,48 @@ Next gate:
 2. R108 Mainnet Shadow;
 3. require normal StreamReady/Snapshot/Reconcile/READY and a successful technical candidate path without worker disconnect/panic;
 4. then mark R4 PASS if runtime shows no regression.
+
+### 2026-10-03 — R108 validates FIX-108 / R4 PASS
+
+Run:
+`r108_20261003T223313Z`
+
+Target:
+`Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7`
+
+Result:
+
+```text
+decision=ShadowTechnicalReady
+loss=null
+reason=technical shadow probe: failed-attempt economics unknown
+funding=ZERO_PREFUND_SAME_TX
+tx_version=V0
+serialized_bytes=963
+locked_accounts=28
+simulated_cu=257259
+```
+
+Bootstrap/recovery also remained clean:
+- StreamReady reached;
+- Snapshot A/B complete;
+- required dependencies complete;
+- two optional prewarmed ATAs present;
+- root catch-up PASS;
+- reconcile clean;
+- run_state=Ready;
+- bootstrap probe queued 61 candidates.
+
+FIX-108 runtime result:
+- no synchronous winner RPC remains in the ingress/state/detection loop;
+- no synchronous submission-reconciliation RPC remains in that loop;
+- the full technical receivership path still reaches `ShadowTechnicalReady` after worker isolation.
+
+Gate decision: **R4 PASS**.
+
+Next mandatory work is R6/R7 qualification:
+1. integration refresh/withdraw completeness for Kamino/Drift/JupLend;
+2. remaining rounding / repay-all / Jupiter account-size cases;
+3. failed-attempt cost matrix and deterministic economics thresholds;
+4. then 72 h final-code P6-LT Shadow.
 
