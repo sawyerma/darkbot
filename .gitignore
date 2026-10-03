@@ -65,3 +65,15 @@ node_modules/
 /gate0/
 
 /tests/DARKBOT 2/r5_work/
+
+# Wallet / signer material — NEVER version private keys or seed material
+**/secrets/
+**/.secrets/
+**/wallets/private/
+*.keypair.json
+*.privatekey
+*.private-key
+*.mnemonic
+*.seedphrase
+**/keystore/*.json
+**/keystores/*.json
