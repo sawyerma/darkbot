@@ -6,6 +6,8 @@
 use crate::pending::{try_reconcile, PendingSubmission, ReconcileResult};
 use crate::record::LossReason;
 use crate::winner::{find_winner, Winner};
+use darkbot_solana::submit::rpc::RpcSubmitter;
+use solana_sdk::{account::Account, transaction::VersionedTransaction};
 use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer};
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
@@ -40,11 +42,26 @@ pub struct ReconcileResultMessage {
     pub result: Option<ReconcileResult>,
 }
 
+pub struct ProjectionWork {
+    pub account: Pubkey,
+    pub base_slot: u64,
+    pub tx: VersionedTransaction,
+    pub targets: Vec<Pubkey>,
+}
+
+pub struct ProjectionResultMessage {
+    pub account: Pubkey,
+    pub base_slot: u64,
+    pub result: Result<(u64, Vec<(Pubkey, Account)>, Option<u64>), String>,
+}
+
 pub struct RemoteWorkers {
     pub winner_jobs: Producer<WinnerWatch>,
     pub winner_results: Consumer<WinnerResult>,
     pub reconcile_jobs: Producer<ReconcileWork>,
     pub reconcile_results: Consumer<ReconcileResultMessage>,
+    pub projection_jobs: Producer<ProjectionWork>,
+    pub projection_results: Consumer<ProjectionResultMessage>,
 }
 
 fn push_result<T>(tx: &Producer<T>, mut value: T) -> bool {
@@ -72,6 +89,10 @@ impl RemoteWorkers {
         let (reconcile_jobs, reconcile_job_rx) = bounded::<ReconcileWork>("reconcile-rpc-jobs", capacity);
         let (reconcile_done_tx, reconcile_results) =
             bounded::<ReconcileResultMessage>("reconcile-rpc-results", capacity);
+        let (projection_jobs, projection_job_rx) =
+            bounded::<ProjectionWork>("projection-rpc-jobs", capacity);
+        let (projection_done_tx, projection_results) =
+            bounded::<ProjectionResultMessage>("projection-rpc-results", capacity);
 
         let winner_rpc_url = rpc_url.clone();
         let winner_shutdown = shutdown.clone();
@@ -122,11 +143,43 @@ impl RemoteWorkers {
             }
         })?;
 
+        let projection_shutdown = shutdown.clone();
+        let projection_rpc_url = rpc_url.clone();
+        std::thread::Builder::new()
+            .name("projection-rpc".into())
+            .spawn(move || {
+                let submitter = RpcSubmitter::new(projection_rpc_url, true);
+                while !projection_shutdown.is_requested() {
+                    let Some(work) =
+                        projection_job_rx.pop_timeout(Duration::from_millis(250))
+                    else {
+                        continue;
+                    };
+                    let account = work.account;
+                    let base_slot = work.base_slot;
+                    let result = submitter
+                        .simulate_with_post_accounts(&work.tx, &work.targets)
+                        .map_err(|e| e.to_string());
+                    if !push_result(
+                        &projection_done_tx,
+                        ProjectionResultMessage {
+                            account,
+                            base_slot,
+                            result,
+                        },
+                    ) {
+                        return;
+                    }
+                }
+            })?;
+
         Ok(Self {
             winner_jobs,
             winner_results,
             reconcile_jobs,
             reconcile_results,
+            projection_jobs,
+            projection_results,
         })
     }
 }
