@@ -401,9 +401,26 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             .ok_or_else(|| "headroom division".to_string())?;
         let mut out = Vec::new();
 
+        // [FIX-92] Pair-level rejection census. Diagnostics only: the sizing equations and
+        // fail-closed decisions below are unchanged.
+        let mut rej_asset_equity_nonpositive = 0u32;
+        let mut rej_liab_equity_nonpositive = 0u32;
+        let mut rej_coeff_nonpositive = 0u32;
+        let mut rej_seize_nonpositive = 0u32;
+        let mut rej_withdraw_zero = 0u32;
+        let mut rej_repay_zero = 0u32;
+        let mut rej_repay_above_liability = 0u32;
+        let mut rej_repay_value_nonpositive = 0u32;
+        let mut rej_premium_bound = 0u32;
+
         for asset in &assets {
             for liab in &liabs {
-                if asset.equity_value <= I80F48::ZERO || liab.equity_value <= I80F48::ZERO {
+                if asset.equity_value <= I80F48::ZERO {
+                    rej_asset_equity_nonpositive += 1;
+                    continue;
+                }
+                if liab.equity_value <= I80F48::ZERO {
+                    rej_liab_equity_nonpositive += 1;
                     continue;
                 }
                 let asset_weight = asset.bank.get_asset_weight(RequirementType::Maintenance, &reconciled);
@@ -424,6 +441,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .and_then(|x| x.checked_sub(asset_ratio.checked_mul(asset_weight)?))
                     .ok_or_else(|| "health coefficient overflow".to_string())?;
                 if coeff <= I80F48::ZERO {
+                    rej_coeff_nonpositive += 1;
                     continue;
                 }
                 let health_cap = (-pre_health)
@@ -437,6 +455,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .checked_mul(headroom)
                     .ok_or_else(|| "headroom multiplication".to_string())?;
                 if seize_value <= I80F48::ZERO {
+                    rej_seize_nonpositive += 1;
                     continue;
                 }
 
@@ -450,6 +469,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 .map_err(|e| format!("withdraw amount: {e}"))?;
                 let withdraw_amount = floor_u64(withdraw_exact)?;
                 if withdraw_amount == 0 {
+                    rej_withdraw_zero += 1;
                     continue;
                 }
                 let seized_actual = calc_value(
@@ -470,10 +490,12 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 .map_err(|e| format!("repay amount: {e}"))?;
                 let repay_amount = ceil_u64(repay_exact)?;
                 if repay_amount == 0 {
+                    rej_repay_zero += 1;
                     continue;
                 }
                 // Never plan more than the actual liability native amount.
                 if I80F48::from_num(repay_amount) > liab.amount {
+                    rej_repay_above_liability += 1;
                     continue;
                 }
                 let repay_actual = calc_value(
@@ -484,6 +506,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 )
                 .map_err(|e| format!("rounded repay value: {e}"))?;
                 if repay_actual <= I80F48::ZERO {
+                    rej_repay_value_nonpositive += 1;
                     continue;
                 }
                 // Rounding must remain within the exact EndLiquidation premium bound.
@@ -491,6 +514,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .checked_mul(fee_factor)
                     .ok_or_else(|| "rounded premium bound overflow".to_string())?;
                 if seized_actual > max_seized {
+                    rej_premium_bound += 1;
                     continue;
                 }
                 let premium = seized_actual
@@ -510,6 +534,21 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     flat_sol_fee_lamports: fee.liquidation_flat_sol_fee_lamports,
                 });
             }
+        }
+
+        if out.is_empty() && !assets.is_empty() && !liabs.is_empty() {
+            return Err(format!(
+                "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive={};liab_eq_nonpositive={};coeff_nonpositive={};seize_nonpositive={};withdraw_zero={};repay_zero={};repay_above_liability={};repay_value_nonpositive={};premium_bound={}",
+                rej_asset_equity_nonpositive,
+                rej_liab_equity_nonpositive,
+                rej_coeff_nonpositive,
+                rej_seize_nonpositive,
+                rej_withdraw_zero,
+                rej_repay_zero,
+                rej_repay_above_liability,
+                rej_repay_value_nonpositive,
+                rej_premium_bound,
+            ));
         }
         Ok(out)
     }
