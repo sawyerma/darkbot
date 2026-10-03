@@ -15,7 +15,6 @@ use std::str::FromStr;
 
 const DEFAULT_BASE: &str = "https://api.jup.ag/swap/v2";
 const JUP_PROGRAM: &str = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
-const ATA_PROGRAM: &str = darkbot_project0::protocol::ASSOCIATED_TOKEN_PROGRAM_ID;
 
 #[derive(Clone)]
 pub struct JupiterV2RouteProvider {
@@ -118,10 +117,11 @@ impl JupiterV2RouteProvider {
         }
 
         let jup = Pubkey::from_str(JUP_PROGRAM).map_err(|e| e.to_string())?;
-        let ata = Pubkey::from_str(ATA_PROGRAM).map_err(|e| e.to_string())?;
-        if instructions.iter().any(|ix| ix.program_id != jup && ix.program_id != ata) {
-            // Marginfi receivership validates top-level programs; never smuggle a Token/System
-            // cleanup/setup instruction through a route.
+        if instructions.iter().any(|ix| ix.program_id != jup) {
+            // [FIX-102] The pinned Marginfi validator scans every non-ComputeBudget ix and
+            // requires at least an 8-byte discriminator. ATA create/idempotent is 1 byte, so
+            // Jupiter setup instructions from the Associated Token Program cannot live inside
+            // the receivership TX. Token accounts must already be prewarmed.
             return Ok(None);
         }
 
