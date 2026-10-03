@@ -1905,3 +1905,30 @@ No fake freshness was introduced. Integration sizing remains fail-closed until e
 
 Status: **R6 PARTIAL / compiler verification required before further wiring**.
 
+### 2026-10-04 — FIX-111 exact post-refresh projection foundation
+
+Compiler checkpoint before this step: workspace build/test returned to prompt without visible failure.
+
+Commits:
+- `8a816cb` — [FIX-111a] exact signed simulation can request selected post-execution accounts;
+- `eaa7348` — [FIX-111b] read-only `ProjectedState` overlay;
+- `d66ad9b` — [FIX-111c] expose projection module;
+- `5152993` — [FIX-111d] dedicated bounded `projection-rpc` worker.
+
+Design:
+- canonical reconciled RAM state is never mutated by simulation;
+- refresh projection uses the exact signed refresh transaction;
+- only writable refresh accounts are requested back from `simulateTransaction`;
+- returned account bytes overlay the canonical state for candidate-local Health/Sizing;
+- projection RPC is isolated in its own bounded worker so R4's no-remote-RPC detection-loop invariant remains intact;
+- empty/duplicate/zero-slot projections fail closed.
+
+Still OPEN before R6 can pass:
+- wire projection request/result lifecycle into the runner candidate state machine;
+- reject stale projection results when the candidate account advanced meanwhile;
+- evaluate Health/Sizing on `ProjectedState`;
+- enable integration-bank sizing only on a qualified projected state;
+- integration-specific Mainnet simulation matrix.
+
+Status: **FIX-111a-d IMPLEMENTED / compiler verification required; R6 remains PARTIAL**.
+
