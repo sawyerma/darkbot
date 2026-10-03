@@ -27,9 +27,6 @@ pub struct ReceivershipParams<'a> {
     pub observation: &'a [Pubkey],
     pub init_record: bool,
     pub pre_refreshes: Vec<Instruction>,
-    /// Instructions that must execute after StartLiquidation but before any withdraw.
-    /// Used for idempotent liquidator ATA creation; pre-Start would violate validate_ix_first.
-    pub post_start_setup: Vec<Instruction>,
     pub withdraws: Vec<Instruction>,
     pub swaps: Vec<Instruction>,
     pub repays: Vec<Instruction>,
@@ -135,13 +132,12 @@ pub mod builders {
     }
 
     pub fn build_receivership(p: ReceivershipParams<'_>) -> Vec<Instruction> {
-        let mut v = Vec::with_capacity(4 + p.pre_refreshes.len() + p.post_start_setup.len() + p.withdraws.len() + p.swaps.len() + p.repays.len());
+        let mut v = Vec::with_capacity(4 + p.pre_refreshes.len() + p.withdraws.len() + p.swaps.len() + p.repays.len());
         v.extend(p.pre_refreshes);
         if p.init_record {
             v.push(init_liquidation_record(p.program, p.marginfi_account, p.liquidator));
         }
         v.push(start_liquidation(p.program, p.marginfi_account, p.group, p.liquidator, p.observation));
-        v.extend(p.post_start_setup);
         v.extend(p.withdraws);
         v.extend(p.swaps);
         v.extend(p.repays);
