@@ -206,6 +206,39 @@ pub mod p0 {
             Ok((b.liquidity_vault, b.mint, mint_owner))
         }
 
+
+        fn bank_full(&self, k: &Pubkey) -> Result<Bank, String> {
+            let (owner, _, data) = self.state.account(k).ok_or("bank not in state")?;
+            if owner != self.program {
+                return Err(format!("UNKNOWN_LAYOUT: bank owner {}", owner));
+            }
+            if darkbot_project0::protocol::classify(data)
+                != darkbot_project0::protocol::AccountType::Bank
+            {
+                return Err("UNKNOWN_LAYOUT: not a Bank discriminator".into());
+            }
+            let need = 8 + std::mem::size_of::<Bank>();
+            if data.len() < need {
+                return Err(format!("UNKNOWN_LAYOUT: bank len {} < {}", data.len(), need));
+            }
+            bytemuck::try_from_bytes::<Bank>(&data[8..need])
+                .map(|b| *b)
+                .map_err(|e| format!("{:?}", e))
+        }
+
+        fn pod_after_disc<T: bytemuck::Pod>(&self, k: &Pubkey) -> Result<&T, String> {
+            let (_, _, data) = self
+                .state
+                .account(k)
+                .ok_or_else(|| format!("INTEGRATION_MISSING_ACCOUNT:{k}"))?;
+            let need = 8 + std::mem::size_of::<T>();
+            if data.len() < need {
+                return Err(format!("INTEGRATION_LAYOUT_SHORT:{}:{}<{}", k, data.len(), need));
+            }
+            bytemuck::try_from_bytes::<T>(&data[8..need])
+                .map_err(|e| format!("INTEGRATION_LAYOUT_CAST:{}:{e:?}", k))
+        }
+
         /// [FIX-100] MarginfiAccount itself is the authoritative source for whether its
         /// liquidation-record PDA exists. The protocol writes this field when the record is
         /// created and resets it to Pubkey::default() when the record is closed. This avoids
@@ -258,8 +291,198 @@ pub mod p0 {
             Ok(banks)
         }
 
+        fn asset_withdraw_instruction(
+            &self,
+            account: &Pubkey,
+            obs: &[Pubkey],
+            sz: &Sizing,
+            asset_ata: &Pubkey,
+            asset_tp: &Pubkey,
+        ) -> Result<(Instruction, u64), String> {
+            use darkbot_project0::integration::{execution_amount_for_asset, IntegrationKind};
+            use marginfi_type_crate::pdas::{
+                derive_drift_signer, derive_drift_spot_market_vault, derive_drift_state,
+                derive_juplend_claim_account, derive_juplend_lending_admin,
+                derive_juplend_liquidity, derive_juplend_liquidity_vault,
+                derive_juplend_rate_model, derive_juplend_rewards_rate_model,
+                JUPLEND_LIQUIDITY_PROGRAM_ID,
+            };
+
+            let bank = self.bank_full(&sz.asset_bank)?;
+            let exec = execution_amount_for_asset(self.state, &bank, sz.withdraw_amount)?;
+
+            let Some(exec) = exec else {
+                return Ok((
+                    builders::withdraw(
+                        &self.program,
+                        &self.group,
+                        account,
+                        &self.liquidator,
+                        &sz.asset_bank,
+                        asset_ata,
+                        &bank.liquidity_vault,
+                        asset_tp,
+                        sz.withdraw_amount,
+                        None,
+                        obs,
+                    ),
+                    sz.withdraw_amount,
+                ));
+            };
+
+            let ix = match exec.kind {
+                IntegrationKind::Kamino => {
+                    let reserve: &kamino_mocks::state::MinimalReserve =
+                        self.pod_after_disc(&bank.integration_acc_1)?;
+                    let lending_market = reserve.lending_market;
+                    let supply_vault = reserve.supply_vault;
+                    let collateral_mint = reserve.collateral_mint_pubkey;
+                    let collateral_supply_vault = reserve.collateral_supply_vault;
+                    let farm = reserve.farm_collateral;
+                    let (farm_user, farm_state) = if farm == Pubkey::default() {
+                        (None, None)
+                    } else {
+                        (
+                            Some(
+                                marginfi_type_crate::pdas::derive_kamino_user_state(
+                                    &farm,
+                                    &bank.integration_acc_2,
+                                )
+                                .0,
+                            ),
+                            Some(farm),
+                        )
+                    };
+                    builders::kamino_withdraw_from_bank(
+                        &self.program,
+                        &self.group,
+                        account,
+                        &self.liquidator,
+                        &sz.asset_bank,
+                        &bank,
+                        asset_ata,
+                        asset_tp,
+                        &lending_market,
+                        &supply_vault,
+                        &collateral_mint,
+                        &collateral_supply_vault,
+                        farm_user,
+                        farm_state,
+                        exec.instruction_amount,
+                        false,
+                        obs,
+                    )
+                }
+                IntegrationKind::Drift => {
+                    let market: &drift_mocks::state::MinimalSpotMarket =
+                        self.pod_after_disc(&bank.integration_acc_1)?;
+                    let main_index = market.market_index;
+                    let main_oracle = (market.oracle != Pubkey::default()).then_some(market.oracle);
+                    let main_vault = if market.vault == Pubkey::default() {
+                        derive_drift_spot_market_vault(main_index).0
+                    } else {
+                        market.vault
+                    };
+
+                    let reward_keys =
+                        darkbot_project0::integration::drift_reward_market_keys(self.state, &bank)?;
+                    let mut rewards: Vec<(Pubkey, Pubkey, Pubkey)> = Vec::new();
+                    for key in reward_keys {
+                        let m: &drift_mocks::state::MinimalSpotMarket =
+                            self.pod_after_disc(&key)?;
+                        rewards.push((key, m.oracle, m.mint));
+                    }
+                    if rewards.len() > 2 {
+                        return Err(format!("DRIFT_TOO_MANY_REWARD_MARKETS:{}", rewards.len()));
+                    }
+
+                    let r1 = rewards.get(0).copied();
+                    let r2 = rewards.get(1).copied();
+                    builders::drift_withdraw_from_bank(
+                        &self.program,
+                        &self.group,
+                        account,
+                        &self.liquidator,
+                        &sz.asset_bank,
+                        &bank,
+                        asset_ata,
+                        asset_tp,
+                        main_oracle,
+                        derive_drift_state().0,
+                        main_vault,
+                        r1.and_then(|(_, o, _)| (o != Pubkey::default()).then_some(o)),
+                        r1.map(|(m, _, _)| m),
+                        r1.map(|(_, _, mint)| mint),
+                        r2.and_then(|(_, o, _)| (o != Pubkey::default()).then_some(o)),
+                        r2.map(|(m, _, _)| m),
+                        r2.map(|(_, _, mint)| mint),
+                        derive_drift_signer().0,
+                        exec.instruction_amount,
+                        false,
+                        obs,
+                    )
+                }
+                IntegrationKind::JupLend => {
+                    let lending: &juplend_mocks::state::Lending =
+                        self.pod_after_disc(&bank.integration_acc_1)?;
+                    let mint = lending.mint;
+                    let f_token_mint = lending.f_token_mint;
+                    let reserves = lending.token_reserves_liquidity;
+                    let supply_position = lending.supply_position_on_liquidity;
+                    let rewards_rate_model = lending.rewards_rate_model;
+                    if mint != bank.mint {
+                        return Err(format!(
+                            "JUPLEND_MINT_MISMATCH:lending_mint={} bank_mint={}",
+                            mint, bank.mint
+                        ));
+                    }
+                    let liquidity_vault_authority =
+                        darkbot_project0::protocol::liquidity_vault_authority_pda(
+                            &self.program,
+                            &sz.asset_bank,
+                        );
+                    let cpi = builders::JuplendCpiAccounts {
+                        f_token_mint,
+                        lending_admin: derive_juplend_lending_admin().0,
+                        supply_token_reserves_liquidity: reserves,
+                        lending_supply_position_on_liquidity: supply_position,
+                        rate_model: derive_juplend_rate_model(&mint).0,
+                        vault: derive_juplend_liquidity_vault(&mint, asset_tp),
+                        claim_account: derive_juplend_claim_account(
+                            &liquidity_vault_authority,
+                            &mint,
+                        )
+                        .0,
+                        liquidity: derive_juplend_liquidity().0,
+                        liquidity_program: JUPLEND_LIQUIDITY_PROGRAM_ID,
+                        rewards_rate_model: if rewards_rate_model == Pubkey::default() {
+                            derive_juplend_rewards_rate_model(&mint).0
+                        } else {
+                            rewards_rate_model
+                        },
+                    };
+                    builders::juplend_withdraw_from_bank(
+                        &self.program,
+                        &self.group,
+                        account,
+                        &self.liquidator,
+                        &sz.asset_bank,
+                        &bank,
+                        asset_ata,
+                        asset_tp,
+                        &cpi,
+                        exec.instruction_amount,
+                        false,
+                        obs,
+                    )
+                }
+            };
+
+            Ok((ix, exec.underlying_out))
+        }
+
         fn receivership(&self, account: &Pubkey, obs: &[Pubkey], sz: &Sizing, swaps: Vec<Instruction>, repay_from_inventory: bool) -> Result<(Vec<Instruction>, Vec<Step>), String> {
-            let (asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
+            let (_asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
             let (liab_vault, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
 
             // [FIX-102] Marginfi's validate_ix_first rejects every non-ComputeBudget
@@ -298,8 +521,8 @@ pub mod p0 {
                 }
             };
 
-            let withdraw = builders::withdraw(&self.program, &self.group, account, &self.liquidator, &sz.asset_bank,
-                &asset_ata, &asset_vault, &asset_tp, sz.withdraw_amount, None, obs);
+            let (withdraw, _underlying_out) =
+                self.asset_withdraw_instruction(account, obs, sz, &asset_ata, &asset_tp)?;
             let repay = builders::repay(&self.program, &self.group, account, &self.liquidator, &sz.liab_bank,
                 &liab_ata, &liab_vault, &liab_tp, sz.repay_amount, None);
             let route_steps: Vec<Step> = swaps.iter().map(|i| {
@@ -510,10 +733,19 @@ pub mod p0 {
                 // so this class alone requires ExactIn market evidence. A provider error or
                 // missing route must not invalidate already-built inventory/JIT candidates.
                 if self.zero_prefund_qualified {
+                    let asset_bank = self.bank_full(&sz.asset_bank)?;
+                    let route_input_amount =
+                        darkbot_project0::integration::execution_amount_for_asset(
+                            self.state,
+                            &asset_bank,
+                            sz.withdraw_amount,
+                        )?
+                        .map(|x| x.underlying_out)
+                        .unwrap_or(sz.withdraw_amount);
                     let mark = match self.routes.quote_exact_in(
                         &asset_mint,
                         &liab_mint,
-                        sz.withdraw_amount,
+                        route_input_amount,
                         &prewarmed_atas,
                     ) {
                         Ok(Some(route)) => Some(route),
