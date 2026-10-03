@@ -476,7 +476,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         allowlist.refresh_programs.insert(p); // Pre-Start-Refreshes nur dieser Programme (liquidate_start.rs)
     }
     allowlist.refresh_programs.insert(program); // init_liquidation_record vor Start
-    allowlist.other_programs.insert(Pubkey::from_str(protocol::ASSOCIATED_TOKEN_PROGRAM_ID)?);
     let global_allowed = protocol::receivership_allowed_programs();
     // [FIX-30] Prerequisite-TXs (JIT-Buy): Swap-Programme + System/Token/Token-2022/ATA/ComputeBudget.
     let prereq_allowed: Vec<Pubkey> = [protocol::JUP_SWAP_PROGRAM_ID, protocol::TITAN_SWAP_PROGRAM_ID, protocol::ASSOCIATED_TOKEN_PROGRAM_ID, protocol::COMPUTE_BUDGET_PROGRAM_ID,
