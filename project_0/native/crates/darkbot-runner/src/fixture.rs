@@ -206,7 +206,6 @@ pub mod run {
             observation: &obs,
             init_record: inp.init_record,
             pre_refreshes: vec![],
-            post_start_setup: vec![],
             withdraws: vec![withdraw],
             swaps: inp.route.instructions.clone(),
             repays: vec![repay],
