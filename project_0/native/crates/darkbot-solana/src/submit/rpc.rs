@@ -3,10 +3,13 @@
 //! Status: UNTESTED / VERIFY (solana-client Signaturen; getTransaction-Meta-Felder).
 
 use super::{LandingEvidence, LandingOutcome, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError};
-use solana_client::rpc_config::RpcSimulateTransactionConfig;
+use solana_client::rpc_config::{RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig};
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{RpcSendTransactionConfig, RpcTransactionConfig};
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel}; // [FIX-13]
+use solana_account_decoder::UiAccountEncoding;
+use solana_sdk::account::Account;
+use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status::UiTransactionEncoding;
@@ -29,6 +32,68 @@ impl RpcSubmitter {
 
     pub fn client(&self) -> &RpcClient {
         &self.rpc
+    }
+
+
+    /// [FIX-111][R6] Simulate the exact signed transaction and return selected post-execution
+    /// accounts. This is the authoritative projection primitive for integration refreshes:
+    /// callers can overlay the returned accounts onto reconciled RAM state without mutating the
+    /// canonical state or faking Clock/freshness fields.
+    pub fn simulate_with_post_accounts(
+        &self,
+        tx: &VersionedTransaction,
+        addresses: &[Pubkey],
+    ) -> Result<(u64, Vec<(Pubkey, Account)>, Option<u64>), SubmitError> {
+        if addresses.is_empty() {
+            return Err(SubmitError::Rejected(
+                "projection simulation requested zero post accounts".into(),
+            ));
+        }
+        let cfg = RpcSimulateTransactionConfig {
+            sig_verify: true,
+            replace_recent_blockhash: false,
+            commitment: Some(CommitmentConfig::confirmed()),
+            encoding: Some(UiTransactionEncoding::Base64),
+            accounts: Some(RpcSimulateTransactionAccountsConfig {
+                encoding: Some(UiAccountEncoding::Base64),
+                addresses: addresses.iter().map(ToString::to_string).collect(),
+            }),
+            min_context_slot: None,
+            inner_instructions: false,
+        };
+        let response = self
+            .rpc
+            .simulate_transaction_with_config(tx, cfg)
+            .map_err(|e| SubmitError::Transport(e.to_string()))?;
+        if let Some(err) = response.value.err {
+            return Err(SubmitError::Rejected(format!(
+                "projection simulation failed: {:?} logs={:?}",
+                err, response.value.logs
+            )));
+        }
+        let returned = response
+            .value
+            .accounts
+            .ok_or_else(|| SubmitError::Rejected("projection simulation returned no accounts".into()))?;
+        if returned.len() != addresses.len() {
+            return Err(SubmitError::Rejected(format!(
+                "projection account count mismatch: requested={} returned={}",
+                addresses.len(),
+                returned.len()
+            )));
+        }
+
+        let mut out = Vec::with_capacity(addresses.len());
+        for (key, ui) in addresses.iter().copied().zip(returned.into_iter()) {
+            let ui = ui.ok_or_else(|| {
+                SubmitError::Rejected(format!("projection account missing after simulation: {key}"))
+            })?;
+            let account = ui.decode::<Account>().ok_or_else(|| {
+                SubmitError::Rejected(format!("projection account decode failed: {key}"))
+            })?;
+            out.push((key, account));
+        }
+        Ok((response.context.slot, out, response.value.units_consumed))
     }
 }
 
