@@ -58,7 +58,7 @@ Only sampled records were shown with `bad_debt=true` and `equity_assets_bits=0`.
 Action: instrument planning rejection by stage:
 `no_assets | no_liabilities | unsupported_bank | stale_integration | no_route | funding | missing_ata | cb_gate | sizing_rounding | other`.
 
-### D2 — Possible WSOL valuation-bank selection ambiguity — UNPROVEN
+### D2 — WSOL valuation-bank selection ambiguity — VERIFIED / FIX-94 IMPLEMENTED
 
 `find_bank_by_mint` picks the first group Bank matching the native SOL mint. If multiple WSOL-mint banks exist and an integration bank is selected, execution-cost valuation can inherit integration freshness errors.
 
@@ -176,3 +176,11 @@ The blanket C1 proposal remains rejected for normal liquidations. However, Mainn
 - that branch permits crossing positive post-health and skips the liquidation premium bound.
 
 FIX-93 implements only this source-backed closeout exception. Normal-liquidation health-cap and premium-bound behavior remains unchanged.
+
+
+### FIX-94 deterministic cost-bank selection
+
+D2 is now verified from execution flow:
+a generic sizing candidate reached post-sizing cost valuation and failed with JupLend staleness even though integration banks are excluded from ProtocolSizer. The remaining price access was Flat-SOL-fee valuation via an arbitrary first-match WSOL bank.
+
+FIX-94 restricts that valuation bank to deterministic supported generic WSOL banks, matching the generic sizing support policy.
