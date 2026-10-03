@@ -1719,3 +1719,50 @@ Status: **IMPLEMENTED / VERIFY**.
 Next gate: workspace build/test, then R106 Mainnet Shadow. The required evidence is that the previous
 `AToken...(data_len=1)` route blocker disappears without reintroducing `StartNotFirst`.
 
+### 2026-10-03 — R106 deeper Mainnet simulation / FIX-107
+
+R106 target:
+`Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7`
+
+Observed result:
+
+```text
+decision=ShadowTechnicalSimFailed
+loss=Build
+funding=ZERO_PREFUND_SAME_TX
+tx_version=V0
+serialized_bytes=1041
+locked_accounts=32
+```
+
+The transaction now executes successfully through:
+`StartLiquidation → LendingAccountWithdraw → Jupiter RouteV2/Swap → LendingAccountRepay`.
+
+Failure occurs only at `EndLiquidation`:
+
+```text
+AnchorError: AccountOwnedByWrongProgram (3007)
+Left:  rec2HHDDnjLfj4kE7VyEtFA1HPGQLK33259532cRyHp
+Right: MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA
+```
+
+Source verification against pinned `0dotxyz/marginfi-v2@mrgn-0.1.11-rc1` found the exact mismatch:
+- `StartLiquidation` uses complete bank+oracle observation metas with active banks writable;
+- `EndLiquidation` uses `HealthPriceMode::Cached` and therefore expects **banks only**, with those bank accounts writable;
+- pinned `p0-cli` explicitly builds:
+  - `start_metas = load_observation_account_metas_with_bank_writable(..., true)`
+  - `end_metas = load_observation_bank_only_metas(..., true)`
+- DarkBot incorrectly reused the full bank+oracle observation list for End, so an oracle/receiver account was parsed as a Bank and failed Anchor ownership validation.
+
+FIX-107:
+`77b744fe3f21e15333eea64ee1457a37e03620c8`
+
+Changes:
+- distinct Start and End observation layouts in `ReceivershipParams`;
+- Start gets full bank+oracle metas, with active banks writable;
+- End gets active banks only, writable, descending by raw pubkey order;
+- fixture updated to the same semantics.
+
+Status: **IMPLEMENTED / VERIFY**.
+Next gate: workspace build/test, then R107 Mainnet Shadow. Expected evidence is that EndLiquidation no longer fails with AccountOwnedByWrongProgram.
+
