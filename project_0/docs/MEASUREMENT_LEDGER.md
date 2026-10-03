@@ -2025,3 +2025,44 @@ Safety/non-claims:
 
 Status: **FIX-111 lifecycle IMPLEMENTED / compiler verification required; R6 remains PARTIAL**.
 
+### 2026-10-04 — FIX-112 integration amount/withdraw semantics implemented
+
+Compiler checkpoint before this batch: FIX-111f-k build/test returned to prompt without visible failure.
+
+Commits:
+- `6373ff8` — [FIX-112a] separate integration bank units from underlying output;
+- `e234850` — [FIX-112b] enable projected integration assets in protocol sizing;
+- `073355a` — [FIX-112c] discover Drift reward markets from canonical user state;
+- `164e756` — [FIX-112d] expose Drift reward market discovery;
+- `abf447b` — [FIX-112e] route integration assets through exact withdraw builders.
+
+Semantics now encoded from pinned Marginfi source:
+- Kamino:
+  - Marginfi bank units = collateral-token units;
+  - Kamino withdraw instruction amount = collateral-token units;
+  - post-withdraw Jupiter input = projected reserve `collateral_to_liquidity(...)` underlying amount.
+- Drift:
+  - Marginfi bank units = scaled-balance units;
+  - withdraw instruction amount = underlying native token amount derived from projected cumulative deposit interest;
+  - one-unit Drift round-up edge is reduced exactly as pinned program semantics require;
+  - reward markets are discovered from the canonical Drift user account, capped at the two supported reward positions.
+- JupLend:
+  - Marginfi bank units = fToken shares;
+  - underlying output = floor(shares × token_exchange_price / 1e12);
+  - instruction amount = underlying;
+  - burned shares are recomputed with ceil semantics and must not exceed the sized fToken units.
+
+ProtocolSizer:
+- integration banks are now eligible only on the asset/collateral side;
+- liabilities remain generic-only because pinned Kamino/Drift/JupLend configs are non-borrowable;
+- this path is intended to run only against the FIX-111 ProjectedState.
+
+Receivership builder:
+- selects generic/Kamino/Drift/JupLend withdraw instruction by asset bank tag;
+- ZERO_PREFUND Jupiter ExactIn uses actual underlying output, not wrapped/scaled/share units;
+- JupLend CPI accounts and Drift reward markets are derived from pinned protocol state;
+- Kamino farm accounts are included when the reserve declares a collateral farm.
+
+Status: **FIX-112a-e IMPLEMENTED / compiler verification required**.
+R6 remains **PARTIAL** until compiler passes and the integration-specific Mainnet Shadow matrix proves Kamino/Drift/JupLend paths.
+
