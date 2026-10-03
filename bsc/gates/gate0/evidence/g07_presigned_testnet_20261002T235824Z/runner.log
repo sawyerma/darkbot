@@ -1,0 +1,40 @@
+G0.7 TESTNET BIRTH->BUY CONTROLLED TEST
+chain_id:                 97
+wallet:                   0x9c8a0Db41914beEE52Dd49790c4F087E252743DE
+portal:                   0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9
+nonce_launch:             13
+nonce_buy:                14
+gas_price_wei:            100000000
+launch_gas_estimate:      3883089
+launch_gas_limit:         4659706
+buy_gas_limit:            3000000
+buy_value_wei:            100000000000000
+predicted_token:          0xd490f81793fD8cD97e3073476efBBecB84917777
+vanity_iterations:        44812
+vanity_search_us:         45861.208
+launch_local_tx_hash:     0x72ecc14f16d03a35952a473b8e43f42803725d85b3f21e0d50e5760adb53ec5a
+hotpath_remote_reads:     0
+testnet_min_output:       0 (TESTNET LATENCY ONLY)
+p2p_min_peers:             1
+p2p_head_number:           134530112
+p2p_head_timestamp:        1790985508
+P2P_PEER_COUNT peers=0 required=1
+P2P_SESSION_OPEN peers=1 peer=0xe5c4320eaa3357286cdde303df8b5b84f81013d86a72f91ecb2efc59b48a376bf16904d0a4e8ca44981c8d201bef439e1fb91c551d24aa39b65d930f03fc1823 remote=52.51.80.128:30311 client=Geth/v1.7.6-69b3758c-20260708/linux-amd64/go1.25.11 eth=Eth68 kind=Basic chain=bsc-testnet
+P2P_PEER_COUNT peers=1 required=1
+p2p_ready_peers:           1
+control_wss:                DISABLED_FOR_BUY_PROOF
+HTTPS_TCP_CONNECT_FAIL host=bsc-testnet-dataseed.bnbchain.org port=443 remote=52.223.48.152:443 error=connection timed out
+P2P_SESSION_CLOSE peers=0 peer=0xe5c4320eaa3357286cdde303df8b5b84f81013d86a72f91ecb2efc59b48a376bf16904d0a4e8ca44981c8d201bef439e1fb91c551d24aa39b65d930f03fc1823 reason=None
+P2P_PEER_COUNT peers=0 required=1
+HTTPS_TCP_CONNECT_FAIL host=bsc-testnet-dataseed.bnbchain.org port=443 remote=35.71.129.99:443 error=connection timed out
+HTTPS_CONNECTED host=bsc-testnet.bnbchain.org port=443 remote=52.223.48.152:443
+HTTPS_TCP_CONNECT_FAIL host=bsc-testnet-dataseed.bnbchain.org port=443 remote=35.71.129.99:443 error=connection timed out
+HTTPS_CONNECTED host=bsc-testnet-dataseed.bnbchain.org port=443 remote=52.223.48.152:443
+buy_submission_transport:  prewarmed HTTPS bsc-testnet-dataseed.bnbchain.org:443
+buy_prepared_before_launch: true
+BUY_prebuild_and_sign_ns:  94000
+buy_local_tx_hash:         0x9aa4106221bcb7e360030837e0922d573460711b9919bbb272f86b46cc4dd521
+
+thread 'main' (3805785) panicked at src/bin/g07_testnet_birth_buy.rs:881:14:
+timed out waiting for direct BSC P2P launch signal: Timeout
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

@@ -1,0 +1,13 @@
+{
+  "status": "ABORTED_BEFORE_LAUNCH",
+  "chain_id": 97,
+  "code_commit": "d93887e",
+  "exit_code": 101,
+  "reason": "P2P sensor failed to reach configured 8-peer threshold within 30 seconds",
+  "launch_sent": false,
+  "buy_sent": false,
+  "token_acquisition_proven": false,
+  "T_signal_to_send_ns": null,
+  "T_buy_minus_T0": "NOT_MEASURED",
+  "runner_log_sha256": "3a43b5fcaa63d34953c27eaf682711321e3f44e09b37eecba0e0ab2b785aeaa3"
+}

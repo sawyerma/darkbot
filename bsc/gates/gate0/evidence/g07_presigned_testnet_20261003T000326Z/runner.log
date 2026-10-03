@@ -1,0 +1,84 @@
+G0.7 TESTNET BIRTH->BUY CONTROLLED TEST
+chain_id:                 97
+wallet:                   0x9c8a0Db41914beEE52Dd49790c4F087E252743DE
+portal:                   0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9
+nonce_launch:             14
+nonce_buy:                15
+gas_price_wei:            100000000
+launch_gas_estimate:      3883012
+launch_gas_limit:         4659614
+buy_gas_limit:            3000000
+buy_value_wei:            100000000000000
+predicted_token:          0x80646D82174Ef7E890389B70e41c89Eff6ed7777
+vanity_iterations:        119118
+vanity_search_us:         104179.833
+launch_local_tx_hash:     0x1958d18adc295c8f1e882649d8d82a55647a117e79ba733cb400dd7f8aa27237
+hotpath_remote_reads:     0
+testnet_min_output:       0 (TESTNET LATENCY ONLY)
+HTTPS_CONNECTED host=bsc-testnet-dataseed.bnbchain.org port=443 remote=52.223.48.152:443
+HTTPS_CONNECTED host=bsc-testnet-dataseed.bnbchain.org port=443 remote=52.223.48.152:443
+buy_submission_transport:  prewarmed HTTPS bsc-testnet-dataseed.bnbchain.org:443
+buy_prepared_before_launch: true
+BUY_prebuild_and_sign_ns:  172167
+buy_local_tx_hash:         0x37139afd5bec7441d43750e8cd340fad158f6cb6fe80e74751309e82b956aec8
+control_wss:                DISABLED_FOR_BUY_PROOF
+p2p_min_peers:             1
+p2p_head_number:           134530794
+p2p_head_timestamp:        1790985815
+P2P_PEER_COUNT peers=0 required=1
+P2P_SESSION_OPEN peers=1 peer=0xe5c4320eaa3357286cdde303df8b5b84f81013d86a72f91ecb2efc59b48a376bf16904d0a4e8ca44981c8d201bef439e1fb91c551d24aa39b65d930f03fc1823 remote=52.51.80.128:30311 client=Geth/v1.7.6-69b3758c-20260708/linux-amd64/go1.25.11 eth=Eth68 kind=Basic chain=bsc-testnet
+P2P_PEER_COUNT peers=1 required=1
+P2P_SESSION_OPEN peers=2 peer=0x75601809401e4dedf6477fa9b74170d932b76aba0d1de1c19b27ff0a424ede294b5fc235af64f41dd4003a43793f63f321082b4de6d6a0588b5c84215f909af9 remote=3.209.122.123:30311 client=Geth/v1.7.6-69b3758c-20260708/linux-amd64/go1.25.11 eth=Eth68 kind=Basic chain=bsc-testnet
+P2P_PEER_COUNT peers=2 required=1
+p2p_ready_peers:           1
+launch_injection_transport: independent HTTPS bsc-testnet-dataseed.bnbchain.org:443
+p2p_signal_peers:          2
+p2p_signal_source:         BSC_P2P_HASH_FETCH
+P2P_hash_to_full_ns:       151978500
+P2P_SESSION_OPEN peers=3 peer=0xdb1e2c76e34f85b75fdc2460aad25a64947acc4adabb60b4c95f50c03066a4884f44f2d4d4c1607190712a0315681d30caa8a1c7d850e7aa643e29a6c1692739 remote=52.199.214.252:30311 client=Geth/v1.7.6-69b3758c-20260708/linux-amd64/go1.25.11 eth=Eth68 kind=Basic chain=bsc-testnet
+P2P_PEER_COUNT peers=3 required=1
+P2P_SESSION_CLOSE peers=2 peer=0xe5c4320eaa3357286cdde303df8b5b84f81013d86a72f91ecb2efc59b48a376bf16904d0a4e8ca44981c8d201bef439e1fb91c551d24aa39b65d930f03fc1823 reason=None
+P2P_PEER_COUNT peers=2 required=1
+P2P_SESSION_CLOSE peers=1 peer=0xdb1e2c76e34f85b75fdc2460aad25a64947acc4adabb60b4c95f50c03066a4884f44f2d4d4c1607190712a0315681d30caa8a1c7d850e7aa643e29a6c1692739 reason=None
+P2P_PEER_COUNT peers=1 required=1
+P2P_SESSION_CLOSE peers=0 peer=0x75601809401e4dedf6477fa9b74170d932b76aba0d1de1c19b27ff0a424ede294b5fc235af64f41dd4003a43793f63f321082b4de6d6a0588b5c84215f909af9 reason=None
+P2P_PEER_COUNT peers=0 required=1
+launch_receipt_status:    1
+launch_gas_used:          3648892
+buy_tx:                   0x37139afd5bec7441d43750e8cd340fad158f6cb6fe80e74751309e82b956aec8
+buy_receipt_status:       1
+buy_gas_used:             353067
+buy_gas_limit:            3000000
+
+=== G0.7 TESTNET BIRTH->BUY RESULT ===
+status:                    ACQUISITION_PASS_TIMING_UNPROVEN
+signal_mode:               BSC_P2P_HASH_FETCH
+launch_ack_seen:           INDEPENDENT_HTTPS_NOT_WAITED
+launch_handoff_to_P2P_hash_ns: 229235916
+WSS_minus_P2P_full_ns:     NOT_MEASURED_THIS_RUN
+WSS_minus_P2P_hash_ns:     NOT_MEASURED_THIS_RUN
+launch_tx:                 0x1958d18adc295c8f1e882649d8d82a55647a117e79ba733cb400dd7f8aa27237
+buy_tx:                    0x37139afd5bec7441d43750e8cd340fad158f6cb6fe80e74751309e82b956aec8
+token:                     0x80646D82174Ef7E890389B70e41c89Eff6ed7777
+token_balance_after:       17669034223232267628301
+native_debit_wei:          499295900000000
+launch_block:              134530812
+launch_tx_index:           0
+buy_block:                 134530813
+buy_tx_index:              0
+same_block:                false
+successful_buys_between:   0
+
+postsend_launch_verification_ns: 34875
+BUY_prebuild_and_sign_ns:  172167
+T_ready_to_queue_ns:       6661349000
+T_queue_to_send_ns:        74792
+BUY_ready_before_signal_ns: 6661320375
+T_signal_to_send_ns:       103417
+T_signal_to_ack_ns:        NOT_WAITED_FOR_BUY_PROOF
+launch_handoff_to_signal_ns: 381214416
+T_signal_to_receipts_seen_ns: 3844980667
+race_ingress_boundary:     raw BSC ETH P2P transaction channel before txpool
+transport_boundary:        prewarmed HTTPS write_all+flush for BUY; launch independent HTTPS write_all+flush
+T_buy_minus_T0:            UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA
+G0.7_TESTNET_BIRTH_BUY_PASS: true

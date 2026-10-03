@@ -1,0 +1,8 @@
+{
+  "status": "ABORTED_BEFORE_LAUNCH",
+  "exit_code": 101,
+  "reason": "Flap RateLimitExceeded(address,uint256), selector 0xa7382e9b",
+  "launch_sent": false,
+  "buy_sent": false,
+  "T_buy_minus_T0": "NOT_MEASURED"
+}

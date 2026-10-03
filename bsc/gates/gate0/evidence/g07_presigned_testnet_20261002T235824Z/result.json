@@ -1,0 +1,16 @@
+{
+  "status": "LAUNCH_SUCCESS_BUY_NOT_SENT",
+  "reason": "P2P launch signal timeout; only peer closed during HTTPS warmup",
+  "chain_id": 97,
+  "launch_tx": "0x72ecc14f16d03a35952a473b8e43f42803725d85b3f21e0d50e5760adb53ec5a",
+  "launch_receipt_status": 1,
+  "launch_block": 134530162,
+  "launch_tx_index": 0,
+  "buy_receipt": null,
+  "buy_sent": false,
+  "BUY_prebuild_and_sign_ns": 94000,
+  "T_signal_to_send_ns": null,
+  "T_buy_minus_T0": "NOT_MEASURED",
+  "configured_min_peers": 1,
+  "runner_log_sha256": "afc3f70b05a2d4bee2ea0c0feb00ea532602d91c05dca82d373acb63598e56d0"
+}

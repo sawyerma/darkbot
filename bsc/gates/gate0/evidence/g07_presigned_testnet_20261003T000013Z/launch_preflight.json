@@ -1,0 +1,10 @@
+{
+  "time": "2026-10-03T00:01:42.014Z",
+  "read_only": true,
+  "token": "0xA8f3305e452267b4A51158ECE70d3C5f2a8A7777",
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": "0x3b4011"
+  }
+}

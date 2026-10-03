@@ -454,10 +454,6 @@ fn https_send_prepared(stream: &mut Tls, request: &[u8]) {
     stream.flush().expect("HTTPS flush failed");
 }
 
-fn https_send_json(stream: &mut Tls, host: &str, body: &str) {
-    https_send_prepared(stream, &https_request(host, body));
-}
-
 fn ws_connect() -> Tls {
     let addr = (WSS_HOST, 443)
         .to_socket_addrs()
@@ -816,35 +812,6 @@ fn main() {
         "testnet_min_output:       {TESTNET_MIN_OUTPUT} (TESTNET LATENCY ONLY)"
     );
 
-    // Race ingress: direct BSC devp2p/eth transaction propagation via standalone Reth.
-    // No full-node sync, DB, WSS or synchronous RPC lookup is involved here.
-    let p2p_min_peers = env::var("DARKBOT_G07_P2P_MIN_PEERS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(8)
-        .max(1);
-    println!("p2p_min_peers:             {p2p_min_peers}");
-    let p2p_head = latest_p2p_head();
-    println!("p2p_head_number:           {}", p2p_head.number);
-    println!("p2p_head_timestamp:        {}", p2p_head.timestamp);
-    let p2p = spawn_testnet_flap_sensor(
-        portal,
-        newTokenV6Call::SELECTOR,
-        launch_hash,
-        p2p_min_peers,
-        p2p_head,
-    );
-    let p2p_ready = p2p
-        .ready
-        .recv_timeout(Duration::from_secs(30))
-        .expect("BSC P2P sensor did not reach minimum peer count");
-    println!("p2p_ready_peers:           {}", p2p_ready.peers);
-
-    // Public WSS is deliberately not a dependency of the actual BUY proof.
-    // Previous control runs already established the WSS baseline; an outage must
-    // never prevent the controlled P2P -> BUY path from executing.
-    println!("control_wss:                DISABLED_FOR_BUY_PROOF");
-
     // Independent launch injection. PublicNode WSS is not used to inject the
     // launch, so its subscription remains a genuine control sensor.
     let (launch_https_host, launch_https_port, mut launch_https) =
@@ -871,27 +838,72 @@ fn main() {
         r#"{{"jsonrpc":"2.0","id":2,"method":"eth_sendRawTransaction","params":["0x{}"]}}"#,
         hex::encode(&launch_signed)
     );
-    https_send_json(&mut launch_https, &launch_https_host, &launch_body);
+
+    let launch_request = https_request(&launch_https_host, &launch_body);
+    println!("control_wss:                DISABLED_FOR_BUY_PROOF");
+
+    // Race ingress: direct BSC devp2p/eth transaction propagation via standalone Reth.
+    // No full-node sync, DB, WSS or synchronous RPC lookup is involved here.
+    let p2p_min_peers = env::var("DARKBOT_G07_P2P_MIN_PEERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(8)
+        .max(1);
+    println!("p2p_min_peers:             {p2p_min_peers}");
+    let p2p_head = latest_p2p_head();
+    println!("p2p_head_number:           {}", p2p_head.number);
+    println!("p2p_head_timestamp:        {}", p2p_head.timestamp);
+    let p2p = spawn_testnet_flap_sensor(
+        portal,
+        newTokenV6Call::SELECTOR,
+        launch_hash,
+        p2p_min_peers,
+        p2p_head,
+    );
+    let p2p_ready = p2p
+        .ready
+        .recv_timeout(Duration::from_secs(30))
+        .expect("BSC P2P sensor did not reach minimum peer count");
+
+    // Public WSS is deliberately not a dependency of the actual BUY proof.
+    // Previous control runs already established the WSS baseline; an outage must
+    // never prevent the controlled P2P -> BUY path from executing.
+
+    https_send_prepared(&mut launch_https, &launch_request);
     let launch_handoff = Instant::now();
 
-    let p2p_signal = loop {
-        let signal = p2p
-            .signals
-            .recv_timeout(Duration::from_secs(15))
-            .expect("timed out waiting for direct BSC P2P launch signal");
-        if signal.hash == launch_hash {
-            break signal;
+    // Only for our pre-signed self-launch: the sensor's hash channel is filtered
+    // to launch_hash, whose complete signed bytes are already known locally.
+    // Do not wait for GetPooledTransactions before sending the prepared BUY.
+    let signal_wait_start = Instant::now();
+    let (t_signal, early_full_signal) = loop {
+        if let Ok(observed) = p2p.hashes.try_recv() {
+            break (observed, None);
         }
+        if let Ok(signal) = p2p.signals.try_recv() {
+            if signal.hash == launch_hash {
+                break (signal.observed, Some(signal));
+            }
+        }
+        assert!(signal_wait_start.elapsed() < Duration::from_secs(15),
+            "timed out waiting for exact BSC P2P launch hash");
+        std::hint::spin_loop();
     };
-
-    let t_signal = p2p_signal.observed;
     let t_queue = Instant::now();
     https_send_prepared(&mut buy_https, &buy_request);
     let t_send = Instant::now();
 
     // Everything below is post-handoff evidence; not part of the send path.
+    println!("p2p_ready_peers:           {}", p2p_ready.peers);
     println!("launch_injection_transport: independent HTTPS {launch_https_host}:{launch_https_port}");
-    let signal_mode = p2p_signal.source.as_str();
+    let signal_mode = "BSC_P2P_EXPECTED_HASH_PRESIGNED";
+    // Fetch/decode are evidence only and explicitly after T_send.
+    let p2p_signal = early_full_signal.unwrap_or_else(|| p2p.signals
+        .recv_timeout(Duration::from_secs(15))
+        .expect("post-send full launch evidence unavailable"));
+    assert_eq!(p2p_signal.hash, launch_hash);
+    println!("postsend_full_signal_source: {}", p2p_signal.source.as_str());
+    println!("P2P_trigger_to_full_evidence_ns: {}", (p2p_signal.observed - t_signal).as_nanos());
     let signal_launch_data = p2p_signal.input;
     println!("p2p_signal_peers:          {}", p2p_signal.peers);
     println!("p2p_signal_source:         {signal_mode}");
@@ -917,7 +929,7 @@ fn main() {
 
     // Do not wait for an RPC ACK in the latency path. Receipt + token acquisition
     // below are the authority that the BUY really executed.
-    let t_p2p_hash = p2p.hashes.try_recv().ok();
+    let t_p2p_hash = Some(t_signal);
 
     let launch_receipt = receipt(&launch_hash_hex);
     let buy_receipt = receipt(&buy_hash_hex);
@@ -1037,7 +1049,7 @@ fn main() {
         "T_signal_to_receipts_seen_ns: {}",
         (t_observed - t_signal).as_nanos()
     );
-    println!("race_ingress_boundary:     raw BSC ETH P2P transaction channel before txpool");
+    println!("race_ingress_boundary:     exact expected launch hash on raw BSC ETH P2P before full-TX fetch; known self-launch only");
     println!("transport_boundary:        prewarmed HTTPS write_all+flush for BUY; launch independent HTTPS write_all+flush");
     println!("T_buy_minus_T0:            UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA");
     println!("G0.7_TESTNET_BIRTH_BUY_PASS: true");

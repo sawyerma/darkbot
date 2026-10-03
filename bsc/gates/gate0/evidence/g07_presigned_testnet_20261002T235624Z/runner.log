@@ -1,0 +1,29 @@
+G0.7 TESTNET BIRTH->BUY CONTROLLED TEST
+chain_id:                 97
+wallet:                   0x9c8a0Db41914beEE52Dd49790c4F087E252743DE
+portal:                   0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9
+nonce_launch:             13
+nonce_buy:                14
+gas_price_wei:            100000000
+launch_gas_estimate:      3883025
+launch_gas_limit:         4659630
+buy_gas_limit:            3000000
+buy_value_wei:            100000000000000
+predicted_token:          0x06b4f9029806709d5FC8c6b1C82c403518707777
+vanity_iterations:        50860
+vanity_search_us:         35690.458
+launch_local_tx_hash:     0x68e0f799df299f35c8ded442af7604a3fc3c2fedda166bcc97c5cb99f5ef1966
+hotpath_remote_reads:     0
+testnet_min_output:       0 (TESTNET LATENCY ONLY)
+p2p_min_peers:             8
+p2p_head_number:           134529845
+p2p_head_timestamp:        1790985388
+P2P_PEER_COUNT peers=0 required=8
+P2P_SESSION_OPEN peers=1 peer=0x75601809401e4dedf6477fa9b74170d932b76aba0d1de1c19b27ff0a424ede294b5fc235af64f41dd4003a43793f63f321082b4de6d6a0588b5c84215f909af9 remote=3.209.122.123:30311 client=Geth/v1.7.6-69b3758c-20260708/linux-amd64/go1.25.11 eth=Eth68 kind=Basic chain=bsc-testnet
+P2P_PEER_COUNT peers=1 required=8
+P2P_SESSION_CLOSE peers=0 peer=0x75601809401e4dedf6477fa9b74170d932b76aba0d1de1c19b27ff0a424ede294b5fc235af64f41dd4003a43793f63f321082b4de6d6a0588b5c84215f909af9 reason=None
+P2P_PEER_COUNT peers=0 required=8
+
+thread 'main' (3803205) panicked at src/bin/g07_testnet_birth_buy.rs:840:10:
+BSC P2P sensor did not reach minimum peer count: Timeout
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

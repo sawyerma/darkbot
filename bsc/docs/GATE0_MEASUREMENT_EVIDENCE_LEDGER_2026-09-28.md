@@ -2873,3 +2873,40 @@ Classification:
 - These measurements are transport/hotpath evidence only. They are not T_buy, inclusion acceptance, or ordering evidence.
 - Real controlled Mainnet G0.7/G0.8 remains required for actual token acquisition and Launch=N / BUY=N+1 proof.
 - No numeric sub-ms T0->T_buy claim is permitted without trusted builder/validator execution timing evidence.
+
+
+## 2026-10-03 — Wirklicher presigned Testnet-BUY erfolgreich; Execution-Latenz noch offen
+
+Der bestehende `g07_testnet_birth_buy.rs` baut/signiert den vollständigen BUY und serialisiert den HTTP-Request jetzt vor Launch. Nach dem erwarteten P2P-Signal folgen nur vorbereiteter Write/Flush; Decode und Logging erfolgen nach `T_send`. Beide HTTPS-Verbindungen werden vor der P2P-Bereitschaft aufgewärmt, damit Ready nicht während langsamer Verbindungsaufbauten veraltet. Release-Build: `cargo build --release --locked --offline --manifest-path bsc/gates/gate0/Cargo.toml --bin g07_testnet_birth_buy` erfolgreich; bestehende ungenutzte WSS-Helfer erzeugen Warnungen. WSS bleibt deaktiviert.
+
+**Realer Testnet-Kauf, Chain 97, Exit 0:**
+
+- Wallet: `0x9c8a0Db41914beEE52Dd49790c4F087E252743DE`.
+- Launch: `0x1958d18adc295c8f1e882649d8d82a55647a117e79ba733cb400dd7f8aa27237`, Receipt Status 1, Block 134530812 / Index 0.
+- BUY: `0x37139afd5bec7441d43750e8cd340fad158f6cb6fe80e74751309e82b956aec8`, Receipt Status 1, Block 134530813 / Index 0.
+- Token: `0x80646D82174Ef7E890389B70e41c89Eff6ed7777`.
+- Tatsächlich erhalten: **17669034223232267628301 Basiseinheiten**, sowohl Runner-balanceOf >0 als auch Transfer im BUY-Receipt an die Wallet stimmen exakt überein.
+- BUY-Wert 0,0001 tBNB; gemessener Netto-Wallet-Debit über Launch + BUY: 499295900000000 wei. Kein Mainnet-BNB.
+- BUY im Folgeblock; kein N/N+1-same-block-PASS. Bestehender Scanner findet null erfolgreiche direkte Portal-BUYs dazwischen; er deckt keine beliebigen internen Router-Calls ab.
+- Konfigurierte Peer-Schwelle 1, beim Full-Signal 2 Peers. Keine robuste Ingress-Coverage-Behauptung.
+
+Messwerte dieses erfolgreichen Laufs:
+
+| Grenze | Wert |
+|---|---:|
+| BUY vorab bauen/signieren | 0,172167 ms |
+| vollständiges P2P-Signal → Send | **0,103417 ms** |
+| Queue → Send | 0,074792 ms |
+| Launch-Handoff → P2P-Hash | 229,235916 ms |
+| P2P-Hash → vollständige TX | 151,978500 ms |
+| Launch-Handoff → vollständiges Signal | 381,214416 ms |
+| Signal → Receipts beobachtet | 3844,980667 ms |
+| T0 → T_buy | **UNKNOWN_FROM_STANDARD_BSC_BLOCK_DATA** |
+
+Diese Grenzen sind verschieden. Internet-/Gossip-/Provider-/Beobachtungsanteile dürfen nicht pauschal von einer behaupteten Execution-Zeit abgezogen werden. Weder Folgeblockabstand noch Receipt-Abfragezeit sind `T0 → T_buy`. Echte Sub-ms-Ausführungszeit braucht vertrauenswürdige Builder-/Validator-/Execution-Zeitstempel.
+
+Vorversuche bleiben erhalten: erster Lauf vor Launch wegen 8-Peer-Timeout abgebrochen; zweiter Launch erfolgreich (`0x72ecc14f16d03a35952a473b8e43f42803725d85b3f21e0d50e5760adb53ec5a`), BUY nicht gesendet wegen fehlendem P2P-Signal nach Peer-Abbruch während HTTPS-Warmup; dritter Versuch vor Launch durch `RateLimitExceeded` zurückgewiesen. Keine BUY- oder Latenz-PASS-Werte aus diesen Fehlerfällen.
+
+Evidence-Ordner: `bsc/gates/gate0/evidence/g07_presigned_testnet_20261002T235624Z`, `...20261002T235824Z`, `...20261003T000013Z`, `...20261003T000326Z`. Beim erfolgreichen Lauf sind beide Raw-Receipts und beide Blöcke gespeichert. Historisches balanceOf am BUY-Block scheiterte beim öffentlichen RPC mit `missing trie node`; dieser Fehler bleibt gespeichert und wird nicht als erfolgreicher historischer State-Read ausgegeben.
+
+**Nächste ausschließlich BUY-bezogene Arbeit:** Der neue Runner-Stand reagiert für den vollständig bekannten Self-Launch direkt auf dessen exakt gefilterten P2P-Hash (oder Full-Broadcast), statt vor Send auf GetPooledTransactions zu warten. Das soll die beobachtete Hash→Full-Wartezeit aus dem kritischen Pfad entfernen. Dieser zusätzliche Schritt ist gebaut, **noch nicht live gemessen**; alle obigen Werte stammen vom Full-Signal-Lauf. Danach weiterhin tatsächliche Acquisition/Ordering prüfen und vertrauenswürdige Execution-Zeitstempel beschaffen. Gate 0 bleibt bis zum echten `T0 → T_buy <1 ms`-Nachweis offen. Keys wurden nur über verdeckte lokale Eingabe an jeweils einen Prozess gegeben, weder protokolliert noch gespeichert.
