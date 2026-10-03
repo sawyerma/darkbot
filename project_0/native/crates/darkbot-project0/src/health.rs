@@ -332,6 +332,19 @@ pub fn dependency_keys<S: AccountSource + ?Sized>(state: &S, program: &Pubkey, b
         out.push(bank.mint);
         // [FIX-27] dieselbe Quelle wie die Health-Observation (p0-cli-Semantik).
         if let Ok(keys) = crate_impl::bank_observation_keys(bank) { out.extend(keys); }
+
+        // [FIX-109][R6] Integration state is part of canonical planning state, not an RPC
+        // lookup performed later in the decision path. Keep all non-default integration accounts
+        // subscribed/snapshotted even when a particular oracle setup does not list all of them.
+        for key in [
+            bank.integration_acc_1,
+            bank.integration_acc_2,
+            bank.integration_acc_3,
+        ] {
+            if key != Pubkey::default() {
+                out.push(key);
+            }
+        }
     }
     out.sort_unstable_by_key(|k| k.to_bytes());
     out.dedup();
