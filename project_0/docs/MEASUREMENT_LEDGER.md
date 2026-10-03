@@ -1198,3 +1198,50 @@ Root cause:
 - logs selected cost bank, asset tag, oracle setup and operational state at startup.
 
 Status: **IMPLEMENTED / VERIFY**.
+
+
+### 2026-10-03 — FIX-94 Mainnet PASS / first post-sizing route evidence
+
+Startup selected:
+
+```text
+sol_cost_bank: CCKtUs6Cgwo4aaQUmBPmyoApH2gUDErxNZCAntD6LYGh
+asset_tag=1
+oracle_setup=PythPushOracle
+operational_state=Operational
+```
+
+This confirms FIX-94 no longer selects an integration WSOL bank for SOL-denominated cost valuation.
+
+Mainnet bootstrap-probe distribution after FIX-93/FIX-94:
+
+```text
+HEALTH: 61
+DECISIONS: 61
+
+LOSSES
+55 Bankruptcy
+4 Routing
+1 MissingAta
+1 Sizing
+
+REASONS
+55 bad debt with zero equity assets
+2 Jupiter HTTP 429 Too Many Requests
+1 ATA:MISSING_ASSET:So11111111111111111111111111111111111111112
+1 ROUTING:INSUFFICIENT_ROUTE_OUTPUT
+1 SIZING:NO_VALID_PROTOCOL_PAIR ... coeff_nonpositive=2
+1 Jupiter HTTP 400 No routes found
+```
+
+Important progression:
+- FIX-93 removed the false closeout premium-bound rejection.
+- FIX-94 removed the accidental JupLend cost-valuation dependency.
+- At least one Mainnet candidate now passes Exact Health + Protocol Sizing + route acquisition and reaches the Receivership builder far enough to fail specifically on the liquidator asset ATA.
+- Therefore A6 / R2 (Shadow wallet ATA prerequisites) is now an observed blocker, not a hypothetical one.
+- Jupiter provider errors are now also observed separately: rate-limit (429), no-route (400), and insufficient route output.
+
+Status:
+- FIX-94: **MAINNET PASS**.
+- R2/A6: **CONFIRMED BLOCKER**.
+- First Build/Sign/Simulation evidence remains OPEN.
