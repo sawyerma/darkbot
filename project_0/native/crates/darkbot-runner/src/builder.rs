@@ -20,10 +20,7 @@ pub mod p0 {
     use marginfi_type_crate::types::{Bank, MarginfiAccount};
     use solana_message::AddressLookupTableAccount /* [FIX-13] */;
     use solana_sdk::instruction::Instruction;
-    use spl_associated_token_account::{
-        get_associated_token_address_with_program_id,
-        instruction::create_associated_token_account_idempotent,
-    };
+    use spl_associated_token_account::get_associated_token_address_with_program_id;
     use solana_sdk::pubkey::Pubkey;
     use std::str::FromStr;
 
@@ -221,45 +218,40 @@ pub mod p0 {
             let (asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
             let (liab_vault, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
 
-            // [FIX-95] Missing liquidator ATAs are not a protocol blocker. Marginfi allows the
-            // Associated Token Program inside the receivership transaction after StartLiquidation.
-            // Create them idempotently there; pre-Start would violate validate_ix_first.
-            let mut post_start_setup = Vec::new();
-
-            let asset_ata = if let Some(existing) = (self.ata)(&asset_mint) {
-                existing
-            } else {
-                let ata = get_associated_token_address_with_program_id(
-                    &self.liquidator,
-                    &asset_mint,
-                    &asset_tp,
-                );
-                post_start_setup.push(create_associated_token_account_idempotent(
-                    &self.liquidator,
-                    &self.liquidator,
-                    &asset_mint,
-                    &asset_tp,
-                ));
-                ata
+            // [FIX-102] Marginfi's validate_ix_first rejects every non-ComputeBudget
+            // top-level instruction with data shorter than 8 bytes while scanning the whole TX.
+            // Associated Token Program create/idempotent uses a 1-byte discriminator, so an ATA
+            // create is invalid anywhere inside a receivership TX, including after StartLiquidation.
+            // Required liquidator token accounts must therefore be prewarmed outside the
+            // receivership TX (or later supplied by a separately qualified sequential bundle).
+            let asset_ata = match (self.ata)(&asset_mint) {
+                Some(existing) => existing,
+                None => {
+                    let ata = get_associated_token_address_with_program_id(
+                        &self.liquidator,
+                        &asset_mint,
+                        &asset_tp,
+                    );
+                    return Err(format!(
+                        "PREWARM_REQUIRED: missing asset ATA={} mint={} token_program={}",
+                        ata, asset_mint, asset_tp
+                    ));
+                }
             };
 
-            let liab_ata = if let Some(existing) = (self.ata)(&liab_mint) {
-                existing
-            } else {
-                let ata = get_associated_token_address_with_program_id(
-                    &self.liquidator,
-                    &liab_mint,
-                    &liab_tp,
-                );
-                if ata != asset_ata || asset_mint != liab_mint || asset_tp != liab_tp {
-                    post_start_setup.push(create_associated_token_account_idempotent(
-                        &self.liquidator,
+            let liab_ata = match (self.ata)(&liab_mint) {
+                Some(existing) => existing,
+                None => {
+                    let ata = get_associated_token_address_with_program_id(
                         &self.liquidator,
                         &liab_mint,
                         &liab_tp,
+                    );
+                    return Err(format!(
+                        "PREWARM_REQUIRED: missing liability ATA={} mint={} token_program={}",
+                        ata, liab_mint, liab_tp
                     ));
                 }
-                ata
             };
 
             let withdraw = builders::withdraw(&self.program, &self.group, account, &self.liquidator, &sz.asset_bank,
@@ -274,17 +266,12 @@ pub mod p0 {
                 }
             }).collect();
             let init_record = self.should_init_liquidation_record(account)?;
-            let setup_count = post_start_setup.len();
             let ixs = builders::build_receivership(ReceivershipParams {
                 program: &self.program, group: &self.group, marginfi_account: account, liquidator: &self.liquidator,
                 global_fee_wallet: &self.global_fee_wallet, observation: obs, init_record,
-                pre_refreshes: vec![], post_start_setup, withdraws: vec![withdraw], swaps, repays: vec![repay],
+                pre_refreshes: vec![], withdraws: vec![withdraw], swaps, repays: vec![repay],
             });
-            let ata_program = Pubkey::from_str(darkbot_project0::protocol::ASSOCIATED_TOKEN_PROGRAM_ID).expect("static");
             let mut steps = vec![Step::StartLiquidation];
-            for _ in 0..setup_count {
-                steps.push(Step::Other(ata_program));
-            }
             steps.push(Step::Withdraw);
             steps.extend(route_steps);
             steps.push(if repay_from_inventory { Step::RepayFromInventory } else { Step::Repay });
