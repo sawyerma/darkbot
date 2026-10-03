@@ -1450,3 +1450,23 @@ Interpretation:
 - Jupiter route failures on other candidates remain legitimate ZERO_PREFUND-specific evidence and no longer imply that Inventory feasibility is coupled to ExactIn routing.
 
 Next: **FIX-98** — fail fast at startup if the configured liquidator/fee-payer pubkey has no confirmed on-chain account, and print its lamport balance/owner when present. This distinguishes an unfunded/nonexistent payer from a deeper transaction-account problem before another full census.
+
+
+### 2026-10-03 — FIX-98 payer preflight — Mainnet diagnosis PASS
+
+Qualified code:
+`143e554e0d82e6b9e7db810aadcd912f7017ceab` — `[FIX-98] fail fast on missing Shadow fee payer`.
+
+Mainnet Shadow startup result:
+
+```text
+PAYER_ACCOUNT_NOT_FOUND:
+liquidator=GqRxBgvH94QKFJQVyDv82fK6jxaKrcyjyjSPkN7ue3zd
+has no confirmed on-chain account
+```
+
+Decision: **FIX-98 diagnostic PASS.**
+
+This explains the prior R97 `UiTransactionError(AccountNotFound)` with empty logs: the configured signer/fee-payer itself did not yet exist as a funded Mainnet account, so the transaction failed during account loading/debit before any Marginfi/Jupiter instruction could execute.
+
+No further code change is required for this blocker. The exact fee-payer pubkey must be funded with enough SOL for transaction fees and any rent-bearing accounts created by the Shadow transaction. Then rerun Mainnet Shadow and continue R5 from simulation.
