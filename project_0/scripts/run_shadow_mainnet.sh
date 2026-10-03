@@ -68,11 +68,50 @@ if [[ "$KEYPAIR_MODE" != "600" ]]; then
   echo "insecure Project_0 keypair permissions: mode=$KEYPAIR_MODE (require 600)" >&2
   exit 2
 fi
-command -v solana-keygen >/dev/null 2>&1 || {
-  echo "solana-keygen is required to verify Project_0 signer identity" >&2
+# Verify a standard Solana 64-byte JSON keypair without depending on a globally
+# installed Solana CLI. The public key is the final 32 bytes of the keypair file.
+ACTUAL_PUBKEY="$(
+  python3 - "$KEYPAIR_REAL" <<'PY'
+import json
+import sys
+
+alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+path = sys.argv[1]
+
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+except Exception as exc:
+    print(f"cannot read Project_0 keypair: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+
+if (
+    not isinstance(raw, list)
+    or len(raw) != 64
+    or any(not isinstance(v, int) or isinstance(v, bool) or v < 0 or v > 255 for v in raw)
+):
+    print("invalid Project_0 Solana keypair JSON: expected exactly 64 byte values", file=sys.stderr)
+    raise SystemExit(2)
+
+pub = bytes(raw[32:64])
+n = int.from_bytes(pub, "big")
+encoded = ""
+while n:
+    n, rem = divmod(n, 58)
+    encoded = alphabet[rem] + encoded
+
+leading_zeroes = 0
+for b in pub:
+    if b != 0:
+        break
+    leading_zeroes += 1
+
+print("1" * leading_zeroes + encoded)
+PY
+)" || {
+  echo "failed to derive Project_0 signer identity" >&2
   exit 2
 }
-ACTUAL_PUBKEY="$(solana-keygen pubkey "$KEYPAIR_REAL")"
 if [[ "$ACTUAL_PUBKEY" != "$P0_EXPECTED_PUBKEY" ]]; then
   echo "Project_0 signer identity mismatch: derived=$ACTUAL_PUBKEY expected=$P0_EXPECTED_PUBKEY" >&2
   exit 2
