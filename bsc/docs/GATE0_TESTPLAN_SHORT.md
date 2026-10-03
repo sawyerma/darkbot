@@ -4,11 +4,12 @@
 > For the current BSC Gate-0 work, the only acceptance target is a **real successful on-chain BUY with token acquisition** and a **measured/proven `T0 → T_buy < 1 ms`**.  
 > **Until that is achieved, no other tests, optimizations, features, venues, strategies or follow-up work are allowed.**  
 > The only permitted work is code, instrumentation, transport/inclusion integration or evidence work **strictly required to execute, measure, prove, or reduce the real `T0 → T_buy` BUY path below 1 ms**.  
+> The mandatory first-15-second raw capture and the source-execution measurement in the 2026-10-03 task amendment below are explicitly in scope, including unsuccessful attempts.
 > `T_signal → T_send`, build/sign latency, transport handoff, builder ACK, receipt status or ordering alone **do not satisfy this gate**.  
 > If a real successful BUY cannot be proven below 1 ms, Gate 0 remains **BLOCKED/FAIL** and all unrelated work stays stopped.
 
 Status: **AUTHORITATIVE / FIRST HARD GATE**
-Updated: 2026-10-01
+Updated: 2026-10-03
 
 ## 1. Product question
 
@@ -503,3 +504,70 @@ Current P2P qualification blocker:
 
 Stop condition:
 Do not optimize the Rust BUY hotpath further unless a new measurement shows a regression. The next work item is ingress qualification: identify stable transaction-carrying peers / protocol compatibility, then compare direct full broadcast, hash-fetch, independent WSS control and any verified low-latency relay on the same controlled launch.
+
+
+## Current task amendment — 2026-10-03: earlier acquisition and mandatory T0 + 15 s capture
+
+This amendment defines the next BUY-related work after the historical 2026-10-01 freeze. It does not grant a gate PASS, change frozen risk limits, authorize Mainnet transactions or activate a new venue. Solana remains unchanged; retain the existing Rust path and single-sender ownership. Implementation and instrumentation are still pending.
+
+### A. Improve actual placement first
+
+Latest controlled Testnet evidence: a successful hash-triggered BUY, 45,125 ns local hash-to-send, first recorded Portal BUY, but in the following block. This does not prove positive pre-T0 signal lead. Rank changes by acquired-token placement and first-external-BUY rate, not by local send speed alone.
+
+Work in this order:
+
+1. **Prepare before T0.** Keep verified addresses, quote/fee state, nonce, gas policy, transaction templates and connections ready. Pre-sign only when every signature-bound field is already known and valid. Invalidate on launch replacement, nonce change, relevant head/reorg/state/config changes; never patch signed bytes without signing again. The exact-hash shortcut applies only when the complete matching launch is already known, as in our self-launch test; unknown external launches still require their real actionable data.
+2. **Qualify ordered pre-submission.** Use the existing inclusion adapter to test launch followed immediately by BUY in one accepted payload, or an explicitly supported target/backrun mechanism. For self-launch, both signed TXs can be available before publication. For external launches, require the target's actual signed bytes or a provider-supported target reference. Test target replacement, expiration, revert and merge/order semantics. Do not invent testnet support, validator coverage or an adjacency guarantee from an ACK. If no available testnet provider supports this, require a cooperating testnet producer; do not silently switch to Mainnet.
+3. **Remove avoidable ingress waits.** Keep P2P sessions long-lived and qualify useful full-transaction peers/relays and protocol compatibility. Measure disconnects, hash-to-full delay, signal misses and arrival at the producer. Select region/topology against the relevant peers and inclusion endpoint using measurements. Pending delivery is not automatically pre-T0 delivery; private/unseen launches remain coverage misses.
+4. **Improve delivery within one economic intent.** Keep connections warm. If multiple qualified transports are compared or used for redundancy, send the same signed BUY identity and reconcile globally; do not create extra purchases or independent nonce reservations. Unknown send outcomes remain fail-closed. Compare bounded fee/bid policies only inside already authorized limits; no unlimited bidding, weakened min-output rules or unattended spending.
+5. **Repeat controlled comparisons.** Freeze scope, funding, gas caps and attempt limits before runs; vary one major path choice at a time. Report all selected attempts, first-BUY share, same-block share, transaction distance, missed/reverted/late outcomes, acquisition price and cost. Treat a producer receiving BUY before T0 as an intermediate result, not proof of inclusion. Optimize build/sign further only if new evidence makes it the bottleneck.
+
+Provider semantics are versioned candidates, not promises. Current 48Club references describe signed bundle input and a target-prepending mechanism; endpoint/network support, access requirements, current pricing and exact ordering still require qualification:
+- https://docs.48.club/puissant-builder/send-bundle
+- https://docs.48.club/puissant-builder/auction-transaction-feed
+
+### B. Execution measurement at the source
+
+Obtain instrumented access to a cooperating BSC testnet producer/validator; freeze its client commit and actual production path. A normal follower, historical replay or unrelated candidate simulation cannot establish the original producer's execution timestamps.
+
+Record launch execution/state-availability and successful BUY completion on the same monotonic clock, plus BUY ingress at that producer. Bind records to node/boot ID, execution-attempt ID, parent/block hash, ordered TX hashes/indices and receipt outcome. Do not combine discarded candidate attempts or different machine clocks. Preserve the selected production attempt through sealing and reconcile it with the canonical block and reorg status.
+
+Bracket the semantic boundaries with timestamps so a late hook cannot hide time. Report clock resolution, hook overhead and remaining uncertainty. Conservative sub-ms acceptance requires latest BUY completion minus earliest valid T0 plus remaining uncertainty below 1,000,000 ns, with attributable positive acquisition. Missing source timestamps remain UNKNOWN; improvement and raw capture may continue without falsely satisfying the gate. No RTT subtraction or price-to-time inversion.
+
+### C. Mandatory raw capture: every attempt, first 15 seconds after T0
+
+**Always arm capture before the launch signal/publication and preserve the full [T0, T0 + 15 s] interval**, including failed, skipped, dropped and late BUY attempts. Start a bounded pre-trigger buffer before launch; do not start collecting only when a receipt arrives. Also retain earlier records for this launch and our BUY when available. Self-launch pre-arming and external-launch coverage are reported separately.
+
+If producer T0 is available, align using its clock domain and documented clock mapping for other sources. If it is unavailable, collect a conservative superset using the launch-containing canonical block and local observation windows, include boundary blocks and backfill canonical receipts through the covered horizon. Set `window_basis` and `t0_exact=false`; never relabel a local receipt time or block timestamp as exact T0. Continue reconciliation after the 15-second acquisition window until coverage and canonical status are resolved; if alignment, completeness or source coverage cannot be established, mark INCOMPLETE. Do not stop merely 15 seconds after local detection.
+
+Retain the following, using existing evidence directories and a versioned machine-readable schema:
+
+- Original relevant pending/full-TX messages, TX hashes/raw signed bytes, replacement/drop observations, source and local receive timestamps. Exclude credentials, auth headers and private keys.
+- Canonical block/header identities, full transaction order and receipts/logs covering the selected token's launch and first 15 seconds, including relevant internal Router/Portal calls. Track migration/pool changes if they occur in this window; identify unsupported coverage explicitly.
+- Raw TokenCreated, TokenBought, TokenSold, transfers and other relevant venue/pool state events. Preserve atomic amounts, decimals/provenance, quote asset, tax/fee amounts, post-trade curve price, buyer/recipient and tx/log indices. Obtain traces only when needed to resolve attribution, from the evidence path rather than synchronously in BUY execution.
+- Our raw submission lifecycle, local build/sign/send boundaries, transport errors/ACK, receipt, acquired amount and attributable debit/gas/builder fees. Keep launch/setup cost separate from BUY cost and account for refunds.
+- Producer execution records when available. For every time field store its clock/source, unit, semantic meaning, resolution and uncertainty: execution, event timestamp, block time and indexer/local observation remain distinct.
+- Source health, reconnects, dedup/reorg revisions, dropped-record counts, completeness manifest and hashes of raw artifacts. A returned empty interval is not proof of no trades when the source failed or omitted the venue.
+
+Capture must not block the BUY path: bounded preallocated enqueue, independent writer/collector and deferred decoding/aggregation. No synchronous DB/file/HTTP dependency before send. Overflow or unavailable telemetry invalidates the measurement's completeness; never conceal a gap or claim a full-window PASS. Qualification runs must verify instrumentation does not materially distort the path.
+
+### D. What to calculate from the 15-second evidence
+
+First reconstruct the canonical raw trade sequence, including internal calls; separate launch-internal purchases from independent external purchases. Reconcile our trade by TX hash, recipient and transfer evidence, not by price matching alone.
+
+Calculate: our external-BUY rank, preceding competing BUY count, same-block placement, effective quote paid per net token received (tax/fee treatment explicit), separate all-in cost, price difference versus first external BUY, volume and trade count over the first 15 seconds. Derive post-entry price movement only where observations exist; distinguish observed prices from executable exit value and untested PnL.
+
+Derive OHLCV from the raw trades after acquisition; retain raw ticks. Publish interval width, origin/time basis, price definition and missing-interval policy. One-second candles are an analysis output, not a millisecond latency instrument. Produce millisecond buckets only when the underlying timestamps support that resolution and label observation-time buckets as such; never interpolate execution ticks or fill an empty interval with invented trades. The curve's post-trade spot price differs from average fill price. An equal/repeated price does not identify a unique time.
+
+If exact execution times are missing, the capture still proves supported ordering, prices and coverage. It does not turn seconds-based events into a sub-ms T0-to-BUY proof.
+
+### E. Required deliverables / completion
+
+- [ ] Qualify ordered inclusion and actual producer access for the chosen testnet scope.
+- [ ] Instrument and bind source execution records to the winning canonical production attempt.
+- [ ] Implement nonblocking pre-armed 15-second raw capture, gap detection and reorg reconciliation.
+- [ ] Execute controlled trials within authorized attempt/spend limits, preserving every outcome.
+- [ ] Produce raw-trade/price/cost/ordering analysis and explicit timing uncertainty.
+- [ ] Update existing run result/manifest and the central measurement ledger; commit/push raw evidence without secrets or build artifacts.
+
+Keep acquisition, first-BUY placement, capture completeness and sub-ms timing as separate result fields. All tasks above are directly BUY-related and may proceed even if a run misses the timing target; unrelated production phases remain stopped. Only valid source-execution evidence can satisfy the existing sub-ms gate.
