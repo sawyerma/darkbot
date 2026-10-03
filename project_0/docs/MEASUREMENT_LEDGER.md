@@ -1993,3 +1993,35 @@ Do not claim:
 - landed executions or realized profit exist;
 - LIVE is enabled.
 
+### 2026-10-04 — FIX-111f-k projection lifecycle wired
+
+Compiler checkpoint before this batch: FIX-111e build/test returned to prompt without visible failure.
+
+Commits:
+- `5688c00` — [FIX-111f] allow projected `AccountSource` in receivership builder;
+- `8197c58` — [FIX-111g] define coherent integration projection targets;
+- `7fdcd51` — [FIX-111h] carry candidate identity/hash through projection worker;
+- `f763995` — [FIX-111i] add projection lifecycle state to runner;
+- `39def2b` — [FIX-111j] requeue successful projections without mutating canonical state;
+- `789d8ab` — [FIX-111k] project integration state before candidate evaluation.
+
+Lifecycle now implemented:
+1. candidate with no integration refresh continues on the existing path;
+2. candidate requiring Kamino/Drift/JupLend refresh is intercepted before Health/Sizing;
+3. exact refresh prefix is built and signed from cached blockhash;
+4. bounded `projection-rpc` worker simulates it and requests a coherent account set back;
+5. returned candidate account bytes must match the exact canonical account hash/slot that requested projection;
+6. stale/mismatched projection results are discarded;
+7. valid results are one-shot and requeued as `integration_projection` without writing simulated bytes into `StateCore`;
+8. `ProjectedState` overlays candidate/banks/observations/integration state for Health/Sizing/builder evaluation;
+9. final receivership still contains the refresh prefix, so final Shadow simulation remains the authoritative transaction check.
+
+Safety/non-claims:
+- canonical reconciled StateCore is never mutated by simulation;
+- projection work remains outside the detection loop behind a bounded worker;
+- integration banks are **still not enabled in ProtocolSizer** yet;
+- exact venue-specific collateral/share → underlying sizing and withdraw routing remain the next R6 task;
+- no integration Mainnet matrix has passed yet.
+
+Status: **FIX-111 lifecycle IMPLEMENTED / compiler verification required; R6 remains PARTIAL**.
+
