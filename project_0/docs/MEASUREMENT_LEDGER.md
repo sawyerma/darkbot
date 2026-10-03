@@ -1057,3 +1057,22 @@ Typed loss categories now include `CircuitBreaker`, `Sizing`, `UnsupportedIntegr
 Important: A1 (NoSwap/Preheld incorrectly coupled to a market quote) is **not fixed by FIX-89**. A `ROUTING:NO_ROUTE` result remains evidence of that known blocker until R3.
 
 Status: **IMPLEMENTED / VERIFY**. Next gate: workspace build/test green, then Mainnet Shadow rerun to obtain the real 61-probe rejection distribution.
+
+
+### 2026-10-03 — R1 PASS
+
+Workspace build/test after FIX-88 + FIX-89:
+
+```text
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+Decision: **R1 PASS (compiler/workspace qualification).**
+
+Included:
+- exact shared receivership circuit-breaker eligibility gate before planning;
+- typed rejection diagnostics for sizing, integration support, route, ATA, funding, and circuit-breaker failures;
+- no relaxation of fail-closed protocol behavior;
+- A1 remains intentionally unfixed so the next Mainnet Shadow rerun can measure the true rejection distribution before remediation.
+
+Next gate: Mainnet Shadow rerun and 61-probe outcome census with typed reasons.

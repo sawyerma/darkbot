@@ -320,18 +320,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // explicit required/optional dependencies. Lending-only accounts are excluded.
         #[cfg(feature = "crate_health")]
         let a = snapshot::program_accounts_filtered(&rpc, &program, liability_account_filters(&group), &clock)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("stage=liability_gpa {e}"))?;
         #[cfg(feature = "crate_health")]
         let b = snapshot::program_accounts_filtered(&rpc, &program, bank_filters(&group), &clock)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("stage=bank_gpa {e}"))?;
         #[cfg(not(feature = "crate_health"))]
         let a = snapshot::program_accounts(&rpc, &program, &clock).map_err(|e| e.to_string())?;
         #[cfg(not(feature = "crate_health"))]
         let b = darkbot_solana::state::snapshot::Snapshot { slot: a.slot, accounts: Vec::new(), missing: Vec::new() };
         let required = dep_for_fetch.lock().map_err(|_| "dep lock".to_string())?.clone();
         let optional = opt_for_fetch.lock().map_err(|_| "opt dep lock".to_string())?.clone();
-        let d = snapshot::multiple_accounts(&rpc, &required, &clock).map_err(|e| e.to_string())?;
-        let o = snapshot::multiple_accounts(&rpc, &optional, &clock).map_err(|e| e.to_string())?;
+        let d = snapshot::multiple_accounts(&rpc, &required, &clock)
+            .map_err(|e| format!("stage=required_accounts {e}"))?;
+        let o = snapshot::multiple_accounts(&rpc, &optional, &clock)
+            .map_err(|e| format!("stage=optional_accounts {e}"))?;
         let liability_count = a.accounts.len();
         let bank_count = b.accounts.len();
         let required_count = d.accounts.len();

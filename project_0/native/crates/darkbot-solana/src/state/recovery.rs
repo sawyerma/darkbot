@@ -34,6 +34,16 @@ pub type SnapshotFn<'a> = dyn FnMut() -> Result<SnapshotData, String> + 'a;
 /// Zieht alle aktuell im Ingress-Channel liegenden Events in den State (ohne zu blockieren).
 pub type DrainFn<'a> = dyn FnMut(&mut StateCore) + 'a;
 
+fn safe_recovery_error(s: &str) -> String {
+    // Provider transport errors may embed credential-bearing URLs. Keep the useful prefix only.
+    let no_url = s.split(" for url ").next().unwrap_or(s);
+    if let Some((head, _)) = no_url.split_once("?api-key=") {
+        format!("{head}?api-key=<redacted>")
+    } else {
+        no_url.to_string()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecoveryOutcome {
     Ready,
@@ -68,10 +78,27 @@ impl RecoveryDriver {
     pub fn recover(&mut self, st: &mut StateCore, fetch: &mut SnapshotFn<'_>, drain: &mut DrainFn<'_>) -> RecoveryOutcome {
         for attempt in 1..=self.max_attempts {
             self.attempts_total += 1;
+            eprintln!("[recovery] attempt={}/{} snapshot=A start", attempt, self.max_attempts);
             let a = match fetch() {
                 Ok(s) => s,
-                Err(_) => continue,
+                Err(e) => {
+                    eprintln!(
+                        "[recovery] attempt={}/{} snapshot=A error={}",
+                        attempt,
+                        self.max_attempts,
+                        safe_recovery_error(&e)
+                    );
+                    continue;
+                }
             };
+            eprintln!(
+                "[recovery] attempt={}/{} snapshot=A ok slot={} accounts={} missing_required={}",
+                attempt,
+                self.max_attempts,
+                a.slot,
+                a.accounts.len(),
+                a.missing_required.len()
+            );
             if !a.missing_required.is_empty() {
                 // [FIX-37] fehlende required Accounts: kein READY, nächster Versuch.
                 st.halt(HaltReason::ReconcileFailure);
@@ -80,13 +107,28 @@ impl RecoveryDriver {
             }
             st.install_snapshot(a.slot, a.accounts);
             drain(st); // Deltas, die während Fetch A ankamen
+            eprintln!("[recovery] attempt={}/{} snapshot=B start", attempt, self.max_attempts);
             let b = match fetch() {
                 Ok(s) => s,
-                Err(_) => {
+                Err(e) => {
+                    eprintln!(
+                        "[recovery] attempt={}/{} snapshot=B error={}",
+                        attempt,
+                        self.max_attempts,
+                        safe_recovery_error(&e)
+                    );
                     st.halt(HaltReason::ReconcileFailure);
                     continue;
                 }
             };
+            eprintln!(
+                "[recovery] attempt={}/{} snapshot=B ok slot={} accounts={} missing_required={}",
+                attempt,
+                self.max_attempts,
+                b.slot,
+                b.accounts.len(),
+                b.missing_required.len()
+            );
             drain(st); // Deltas, die während Fetch B ankamen (vor dem Vergleich)
             if !b.missing_required.is_empty() {
                 // [FIX-41] Snapshot B ohne required Dependency → kein Vergleich möglich → nicht sauber.
@@ -96,10 +138,22 @@ impl RecoveryDriver {
             }
             let rep = st.reconcile(b.slot, &b.accounts);
             if rep.is_clean() {
+                eprintln!(
+                    "[recovery] attempt={}/{} reconcile=clean snapshot_slot={}",
+                    attempt,
+                    self.max_attempts,
+                    b.slot
+                );
                 if st.confirm_ready().is_tradable() {
                     return RecoveryOutcome::Ready;
                 }
             } else {
+                eprintln!(
+                    "[recovery] attempt={}/{} reconcile=dirty report={:?}",
+                    attempt,
+                    self.max_attempts,
+                    rep
+                );
                 self.reconcile_failures += 1;
             }
             // Reconcile schmutzig: run_state ist Halted(ReconcileFailure); nächster Versuch

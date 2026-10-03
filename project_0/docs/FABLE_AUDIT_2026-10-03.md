@@ -138,5 +138,5 @@ No Integration-bank support is required for this gate.
 
 - **R0 PASS** — compiler/workspace baseline green after FIX-87.
 - **R1-A5 FIX-88 IMPLEMENTED; build/test reported green** — circuit-breaker eligibility is now in the shared pipeline before planning.
-- **R1 diagnostics FIX-89 IMPLEMENTED / VERIFY** — typed sizing/routing/ATA/integration rejection evidence added.
+- **R1 PASS** — FIX-88 circuit-breaker eligibility and FIX-89 typed rejection diagnostics are build/test green.
 - A1 remains deliberately open until R3; diagnostics must expose it rather than silently changing economics/execution semantics.
