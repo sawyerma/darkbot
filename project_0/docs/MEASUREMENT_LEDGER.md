@@ -1174,3 +1174,27 @@ Pinned marginfi semantics:
 Important: this does **not** validate Fable C1 globally. C1 remains false for normal liquidations; FIX-93 implements only the explicit closeout exception from pinned protocol source.
 
 Status: **IMPLEMENTED / VERIFY**.
+
+
+### 2026-10-03 — FIX-94 deterministic SOL cost bank — IMPLEMENTED / VERIFY
+
+Mainnet evidence after FIX-93:
+- `CwSs...` no longer fails on the closeout premium bound;
+- the next error is `JuplendLendingStale`;
+- the generic ProtocolSizer itself excludes integration banks;
+- inventory value is zero for the empty Shadow wallet and performs no price lookup;
+- therefore the remaining post-sizing integration-price access is the Flat-SOL-fee valuation through `sol_bank`.
+
+Root cause:
+- runner selected `sol_bank` as the first Marginfi bank with the WSOL mint;
+- multiple same-mint banks may exist, including integration banks;
+- cost valuation could therefore accidentally depend on stale JupLend/Kamino state even for an otherwise generic liquidation candidate.
+
+[FIX-94]:
+- replaces first-match WSOL selection with deterministic selection among generic supported banks only:
+  `ASSET_TAG_DEFAULT | ASSET_TAG_SOL`;
+- requires an operational state supported by ProtocolSizer;
+- sorts candidates by pubkey before selecting;
+- logs selected cost bank, asset tag, oracle setup and operational state at startup.
+
+Status: **IMPLEMENTED / VERIFY**.
