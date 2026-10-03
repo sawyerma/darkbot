@@ -1,7 +1,7 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
-Status: **MAINNET Shadow progressed through Build + Sign + simulation call; first successful receivership simulation still OPEN; current blocker = ZERO_PREFUND Jupiter route qualification after ATA prewarm; LIVE remains disabled**  
-Updated: 2026-10-03
+Status: **R4 PASS, R5 PASS; first full Mainnet receivership simulation proven; R6 integration/projection work PARTIAL; latest compile blocker in FIX-111d corrected by FIX-111e but not yet compiler-verified; LIVE remains disabled**  
+Updated: 2026-10-04
 
 This is the single human-readable measurement ledger for the new Solana / Project 0 Liquidator.
 
@@ -1931,4 +1931,65 @@ Still OPEN before R6 can pass:
 - integration-specific Mainnet simulation matrix.
 
 Status: **FIX-111a-d IMPLEMENTED / compiler verification required; R6 remains PARTIAL**.
+
+### 2026-10-04 — CURRENT PROJECT STATUS / authoritative handoff after FIX-111e
+
+Current proven gates:
+
+```text
+R4 hot-path isolation                    PASS  (R108 runtime-qualified)
+R5 generic Mainnet receivership sim      PASS  (R107/R108 ShadowTechnicalReady)
+R6 integration completeness              PARTIAL
+R7 edge/economics qualification          OPEN
+72 h P6-LT final-code Shadow              NOT STARTED
+P8-LT LIVE                               DISABLED
+realized PnL / landed liquidation         NOT PROVEN
+```
+
+Most important Mainnet evidence already proven:
+- R107 and R108 both reached `ShadowTechnicalReady`;
+- complete simulated receivership path:
+  `StartLiquidation → Withdraw → Jupiter swap → Repay → EndLiquidation → simulation success`;
+- R108 result:
+  `ZERO_PREFUND_SAME_TX`, V0, 963 bytes, 28 locked accounts, 257259 simulated CU;
+- payer, recovery, root catch-up, reconcile, prewarmed ATA and Jupiter/EndLiquidation blockers are cleared for the generic path.
+
+R6 work currently present in `main`:
+- FIX-109: pinned Kamino/Drift/JupLend layouts, deterministic refresh planners, canonical integration dependencies, pre-Start refresh prefix;
+- FIX-110: pinned integration-specific withdraw builders;
+- FIX-111a: signed simulation can request post-execution account state;
+- FIX-111b/c: read-only `ProjectedState` overlay exposed;
+- FIX-111d: bounded `projection-rpc` worker added so R4's no-remote-RPC detection-loop invariant remains intact;
+- FIX-111e: compiler ownership bug fixed by cloning the RPC URL before moving it into the reconcile worker closure.
+
+Latest local compiler result before FIX-111e:
+
+```text
+error[E0382]: borrow of moved value: rpc_url
+remote_workers.rs
+reconcile-rpc closure moved rpc_url before projection-rpc cloned it
+```
+
+FIX:
+`6eefae63869754d3b1b3a4c22246319b7293eda8`
+`[FIX-111e] fix RPC URL ownership across remote workers`
+
+Status of FIX-111e: **IMPLEMENTED, compiler/test verification still required**.
+
+Next exact steps:
+1. pull `main`;
+2. workspace build/test with `crate_health txv1`;
+3. if green, continue FIX-111 runner lifecycle:
+   - dispatch refresh projection work;
+   - reject stale projection results if the account/state advanced;
+   - evaluate candidate Health/Sizing against `ProjectedState`;
+   - only then enable integration-bank sizing;
+4. run integration-specific Mainnet Shadow matrix for Kamino/Drift/JupLend;
+5. only after R6 PASS proceed to R7.
+
+Do not claim:
+- integration banks are production-qualified;
+- R6 is complete;
+- landed executions or realized profit exist;
+- LIVE is enabled.
 
