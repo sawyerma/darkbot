@@ -162,7 +162,7 @@ pub mod p0 {
         fn quote_exact_out(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount_out: u64) -> Result<Option<Route>, String>;
     }
 
-    pub struct P0ReceivershipBuilder<'a, S: AccountSource, Z: SizingProvider, R: RouteProvider> {
+    pub struct P0ReceivershipBuilder<'a, S: AccountSource + ?Sized, Z: SizingProvider, R: RouteProvider> {
         pub state: &'a S,
         pub program: Pubkey,
         pub group: Pubkey,
@@ -193,7 +193,7 @@ pub mod p0 {
         }
     }
 
-    impl<'a, S: AccountSource, Z: SizingProvider, R: RouteProvider> P0ReceivershipBuilder<'a, S, Z, R> {
+    impl<'a, S: AccountSource + ?Sized, Z: SizingProvider, R: RouteProvider> P0ReceivershipBuilder<'a, S, Z, R> {
         /// [FIX-19] fail closed: Owner, Discriminator, Länge prüfen — kein Index-Panic bei fremdem Layout.
         fn bank(&self, k: &Pubkey) -> Result<(Pubkey, Pubkey, Pubkey), String> {
             let (owner, _, data) = self.state.account(k).ok_or("bank not in state")?;
@@ -380,7 +380,7 @@ pub mod p0 {
         }
     }
 
-    impl<'a, S: AccountSource, Z: SizingProvider, R: RouteProvider> ReceivershipBuilder for P0ReceivershipBuilder<'a, S, Z, R> {
+    impl<'a, S: AccountSource + ?Sized, Z: SizingProvider, R: RouteProvider> ReceivershipBuilder for P0ReceivershipBuilder<'a, S, Z, R> {
         fn plans(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
             let sizings = self.sizing.sizes(account, now_unix_s, slot)?;
             if sizings.is_empty() {
