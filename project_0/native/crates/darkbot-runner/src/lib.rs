@@ -20,3 +20,4 @@ pub mod shadow_ledger;
 pub mod winner;
 pub mod pipeline;
 pub mod record;
+pub mod remote_workers;
