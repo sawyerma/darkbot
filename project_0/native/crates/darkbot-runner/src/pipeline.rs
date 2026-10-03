@@ -160,7 +160,19 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
             Err(e) => {
                 rec.decision = if e.contains("unavailable") { Decision::Unavailable } else { Decision::Skip };
-                rec.loss = Some(LossReason::Routing);
+                rec.loss = Some(if e.starts_with("SIZING:UNSUPPORTED_INTEGRATION") {
+                    LossReason::UnsupportedIntegration
+                } else if e.starts_with("SIZING:") {
+                    LossReason::Sizing
+                } else if e.starts_with("ATA:") {
+                    LossReason::MissingAta
+                } else if e.starts_with("FUNDING:") {
+                    LossReason::Funding
+                } else if e.contains("ReserveStale") || e.contains("DriftSpotMarketStale") || e.contains("JuplendLendingStale") || e.contains("SolendReserveStale") {
+                    LossReason::IntegrationRefresh
+                } else {
+                    LossReason::Routing
+                });
                 rec.reason = Some(e);
                 return rec.with_timeline(&tl);
             }
