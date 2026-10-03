@@ -42,6 +42,127 @@ pub fn kind(bank: &Bank) -> Option<IntegrationKind> {
     }
 }
 
+
+/// [FIX-112][R6] Exact separation between Marginfi bank units and the underlying tokens
+/// that the external venue sends to the liquidator.
+///
+/// `bank_units` is the amount removed from Marginfi's balance accounting.
+/// `instruction_amount` is the amount encoded in the integration withdraw ix.
+/// `underlying_out` is the conservative native token amount available to Jupiter afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IntegrationExecutionAmount {
+    pub kind: IntegrationKind,
+    pub bank_units: u64,
+    pub instruction_amount: u64,
+    pub underlying_out: u64,
+}
+
+pub fn execution_amount_for_asset<S: AccountSource + ?Sized>(
+    state: &S,
+    bank: &Bank,
+    bank_units: u64,
+) -> Result<Option<IntegrationExecutionAmount>, String> {
+    if bank_units == 0 {
+        return Err("INTEGRATION_WITHDRAW_ZERO".into());
+    }
+
+    let Some(kind) = kind(bank) else {
+        return Ok(None);
+    };
+
+    let out = match kind {
+        IntegrationKind::Kamino => {
+            let reserve: &kamino_mocks::state::MinimalReserve =
+                pod_after_disc(state, &bank.integration_acc_1)?;
+            let underlying = reserve
+                .collateral_to_liquidity(bank_units)
+                .map_err(|e| format!("KAMINO_COLLATERAL_TO_LIQUIDITY:{e}"))?;
+            if underlying == 0 {
+                return Err("KAMINO_UNDERLYING_ZERO".into());
+            }
+            IntegrationExecutionAmount {
+                kind,
+                bank_units,
+                // Marginfi KaminoWithdraw takes collateral-token units.
+                instruction_amount: bank_units,
+                underlying_out: underlying,
+            }
+        }
+        IntegrationKind::Drift => {
+            let market: &drift_mocks::state::MinimalSpotMarket =
+                pod_after_disc(state, &bank.integration_acc_1)?;
+            // Marginfi balance units are Drift scaled-balance units. DriftWithdraw takes
+            // underlying native token units, then rounds the scaled decrement up.
+            let mut token_amount = market
+                .get_withdraw_token_amount(bank_units)
+                .map_err(|e| format!("DRIFT_SCALED_TO_TOKEN:{e}"))?;
+            if token_amount == 0 {
+                return Err("DRIFT_UNDERLYING_ZERO".into());
+            }
+            let mut decrement = market
+                .get_scaled_balance_decrement(token_amount)
+                .map_err(|e| format!("DRIFT_TOKEN_TO_SCALED:{e}"))?;
+            // Pinned Marginfi handles the one-unit round-up edge by reducing output one token.
+            if decrement > bank_units {
+                token_amount = token_amount.saturating_sub(1);
+                if token_amount == 0 {
+                    return Err("DRIFT_ROUNDING_TO_ZERO".into());
+                }
+                decrement = market
+                    .get_scaled_balance_decrement(token_amount)
+                    .map_err(|e| format!("DRIFT_TOKEN_TO_SCALED_AFTER_ADJUST:{e}"))?;
+            }
+            if decrement > bank_units {
+                return Err(format!(
+                    "DRIFT_DECREMENT_EXCEEDS_SIZED_BALANCE:{}>{}",
+                    decrement, bank_units
+                ));
+            }
+            IntegrationExecutionAmount {
+                kind,
+                bank_units,
+                instruction_amount: token_amount,
+                underlying_out: token_amount,
+            }
+        }
+        IntegrationKind::JupLend => {
+            let lending: &juplend_mocks::state::Lending =
+                pod_after_disc(state, &bank.integration_acc_1)?;
+            // Marginfi balance units are fToken shares. JuplendWithdraw takes underlying
+            // assets and burns ceil(assets / exchange_rate) fTokens.
+            let token_exchange_price = lending.token_exchange_price;
+            let underlying = juplend_mocks::state::expected_assets_for_redeem_from_rate(
+                bank_units,
+                token_exchange_price,
+            )
+            .ok_or_else(|| "JUPLEND_SHARES_TO_UNDERLYING".to_string())?;
+            if underlying == 0 {
+                return Err("JUPLEND_UNDERLYING_ZERO".into());
+            }
+            let shares_to_burn =
+                juplend_mocks::state::expected_shares_for_withdraw_from_rate(
+                    underlying,
+                    token_exchange_price,
+                )
+                .ok_or_else(|| "JUPLEND_UNDERLYING_TO_SHARES".to_string())?;
+            if shares_to_burn == 0 || shares_to_burn > bank_units {
+                return Err(format!(
+                    "JUPLEND_BURN_EXCEEDS_SIZED_SHARES:{}>{}",
+                    shares_to_burn, bank_units
+                ));
+            }
+            IntegrationExecutionAmount {
+                kind,
+                bank_units,
+                instruction_amount: underlying,
+                underlying_out: underlying,
+            }
+        }
+    };
+
+    Ok(Some(out))
+}
+
 fn static_pk(s: &str) -> Result<Pubkey, String> {
     Pubkey::from_str(s).map_err(|e| e.to_string())
 }
