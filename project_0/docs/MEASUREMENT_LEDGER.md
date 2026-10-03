@@ -1,7 +1,7 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
-Status: **POST-WIRING BUILD/TEST GATE PASS through `[FIX-70]`; first real Shadow/Simulation qualification next; LIVE remains disabled**  
-Updated: 2026-10-02
+Status: **MAINNET Shadow progressed through Build + Sign + simulation call; first successful receivership simulation still OPEN; current blocker = ZERO_PREFUND Jupiter route qualification after ATA prewarm; LIVE remains disabled**  
+Updated: 2026-10-03
 
 This is the single human-readable measurement ledger for the new Solana / Project 0 Liquidator.
 
@@ -188,9 +188,20 @@ When created, use one canonical location and link it here. Do not scatter Projec
 ## 8. Current status
 
 ~~~text
-Project 0 production code:        POST-WIRING build/tests PASS through `[FIX-70]`
-Project 0 measurements:           Compiler/test evidence only; real Shadow/Mainnet simulation evidence remains open
+Project 0 production code:        Full Rust Long-Tail path active on Mainnet Shadow; fixes through [FIX-105] committed
+Bootstrap/recovery:               MAINNET PASS (StreamReady → Snapshot A/B → root catch-up → reconcile clean → READY)
+Exact Health/Sizing:              MAINNET exercised; bankruptcy/integration cases typed fail-closed
+Build + Sign + simulation call:   MAINNET PROVEN (R97/R99/R101)
+Successful receivership sim:      OPEN — no ShadowTechnicalReady yet
+Current immediate blocker:        ZERO_PREFUND Jupiter route rejection reason; [FIX-105] committed, R105 pending
+Liquidator payer:                 FUNDED / VERIFIED; dedicated Project_0 signer
+Required Trrq ATAs:               WSOL + USDC PREWARMED and confirmed on Mainnet
+R4 hot-path isolation:            OPEN — mandatory before 72 h P6-LT
+Integration refresh completeness: OPEN (Kamino/Drift/JupLend paths)
+Failed-cost / realized economics: OPEN / UNKNOWN by design
+72 h P6-LT Shadow:                NOT STARTED
 Project 0 LIVE:                   NOT ENABLED
+First realized net profit:        NOT PROVEN
 permanent paid provider approved: NONE
 probabilistic ranking approved:   NO
 ~~~
@@ -1525,3 +1536,148 @@ FIX-100 changes the builder to use that canonical field:
 - any other non-default pubkey → fail closed with LIQUIDATION_RECORD_MISMATCH.
 
 This keeps the decision on reconciled MarginfiAccount state and avoids adding a second RPC/source to the hot path.
+
+### 2026-10-03 — CURRENT HANDOFF / Chatwechsel-Checkpoint — after [FIX-105]
+
+**Purpose:** This is the authoritative short resume point when continuing Project_0 in a new chat. Read this section first. Do not infer readiness beyond what is explicitly marked PASS.
+
+#### Where we are
+
+Project_0 is **materially progressing** and is no longer a demo/planning-only path. The production Rust Long-Tail code has run against Mainnet Shadow through real state bootstrap/recovery, exact Marginfi health/sizing, transaction build, signing and an actual RPC simulation call.
+
+What is still not proven: **no complete receivership simulation has succeeded yet, no liquidation transaction has been submitted by the runner, and no realized profit has been proven.**
+
+Roadmap position:
+
+```text
+S1-LT / S2 / S3-CORE     substantially implemented and Mainnet exercised
+P3 exact health           Mainnet exercised
+P4A sizing/economics      implemented; unknown economics stays UNKNOWN
+P5 receivership builder   implemented and repeatedly Mainnet exercised
+R0/R1/R3                  compiler/workspace gates PASS
+R5                        PARTIAL: Build + Sign + simulation call proven; simulation success OPEN
+R4                        OPEN and mandatory before 72 h Shadow
+R6                        OPEN: integration refresh/withdraw completeness
+R7                        OPEN: failed-cost/economics/edge qualification
+P6-LT 72 h Shadow         NOT STARTED
+P8-LT LIVE                BLOCKED intentionally
+first realized net profit NOT PROVEN
+```
+
+#### Mainnet evidence already proven
+
+1. **Recovery / state integrity**
+   - filtered MarginfiAccount + Bank program streams;
+   - subscription ACK barrier reaches StreamReady;
+   - Snapshot A/B;
+   - root catch-up barrier;
+   - byte-for-byte reconcile clean;
+   - `run_state=Ready`;
+   - bootstrap probe repeatedly queues about 61 `was_liquidatable` candidates.
+   - FIX-96 Mainnet PASS.
+
+2. **Real transaction boundary reached**
+   - R97 target candidate `Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7` reached Build + Sign + RPC simulation.
+   - First failure was `AccountNotFound` before program execution.
+   - FIX-98 proved the configured fee payer did not yet exist on Mainnet.
+   - Dedicated Project_0 payer `GqRxBgvH94QKFJQVyDv82fK6jxaKrcyjyjSPkN7ue3zd` was funded and verified.
+
+3. **Liquidation-record state bug fixed**
+   - R99 progressed into Marginfi and failed because DarkBot tried to initialize an already-existing liquidation-record PDA.
+   - FIX-100 now uses canonical `MarginfiAccount.liquidation_record` from reconciled state:
+     default → init; exact expected PDA → reuse; other non-default pubkey → fail closed.
+   - FIX-101 removed the stale liquidation-record resubscription reference after the clean repository rebuild.
+
+4. **StartLiquidation / ATA ordering bug fixed**
+   - R101 reached `StartLiquidation` and failed with Marginfi `StartNotFirst` / error 6086.
+   - Root cause: ATA create/idempotent instructions were inside the receivership transaction. The pinned Marginfi validator scans all non-ComputeBudget top-level instructions and rejects the short ATA instruction encoding.
+   - FIX-102 removed ATA creation from the receivership TX and requires prewarmed token accounts outside it.
+   - ATA setup is no longer accepted as a receivership top-level instruction.
+
+5. **Required token accounts are really present on Mainnet**
+   - FIX-103 exposed the exact missing accounts.
+   - Target `Trrq...` requires:
+     - WSOL ATA `GT3wnkEdqeHtc9zB76GubCmt1m47ybTbpqtWtqGWWuG1`
+     - USDC ATA `DoNVGHiCNWy1y5iR4FqV56z8gLbuQAf9nMREU1ydXjR3`
+   - FIX-104 added guarded `p0-prewarm-atas`.
+   - Dry-run Mainnet simulation PASS: `units_consumed=31330`.
+   - Explicit send created both ATAs.
+   - Each confirmed with 1,488,440 lamports rent.
+   - Post-create payer balance: 7,018,120 lamports.
+   - Follow-up: both `PREWARM_PRESENT`; `PREWARM_READY all requested ATAs already exist`.
+
+#### Latest observed blocker
+
+R104, after both ATAs were present, no longer failed with `MissingAta` and no longer showed `StartNotFirst`. The target candidate stopped before Build with:
+
+```text
+account=Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7
+decision=Skip
+loss=Routing
+reason=no feasible execution candidates
+```
+
+That reason is too generic because the Jupiter adapter had several materially different fail-closed `Ok(None)` paths.
+
+[FIX-105] commit:
+`8386c49ab3efa8eacc12df5d804c7ddda311175a`
+
+FIX-105 preserves fail-closed behavior but exposes the exact ZERO_PREFUND route rejection cause:
+- local zero/identical-mint rejection;
+- HTTP 404 / no executable Jupiter route;
+- invalid input/output amounts;
+- route incompatible with Marginfi top-level validation, including offending program IDs and instruction data lengths.
+
+**FIX-105 is committed but not yet runtime-qualified.**
+
+#### Exact next action
+
+Build/test current `main`, then run **R105 Mainnet Shadow** and inspect the same `Trrq...` decision.
+
+The next record must identify one concrete routing cause rather than generic `no feasible execution candidates`.
+
+Decision after R105:
+- true no-route → ZERO_PREFUND unavailable for that opportunity; continue with other funding classes/opportunities;
+- incompatible Jupiter setup instruction → adapt route/prewarm handling without weakening Marginfi validation;
+- valid route → continue Build → Sign → Simulate and capture the next exact protocol result;
+- `ShadowTechnicalReady` → R5 technical simulation success proven for that candidate, while landing/PnL/LIVE still remain open.
+
+#### Mandatory gate before 72 h Shadow
+
+Even after the first successful simulation, **do not start the 72 h P6-LT qualification until R4 is fixed.**
+
+Current R4 issue: the main ingress/detection loop still performs synchronous remote work for winner/reconciliation paths (`find_winner(...)` and pending submission reconciliation). These must move to bounded worker channels so remote RPC cannot stall the detection/ingress hot path.
+
+After R4, continue R6/R7:
+- integration refresh/withdraw planning for Kamino/Drift/JupLend;
+- failed-attempt cost matrix from real evidence;
+- rounding/repay-all/Jupiter account-size cases;
+- threshold triggers b/c;
+- 72 h final-code Shadow;
+- controlled P8-LT LIVE gates only after all required qualification.
+
+#### Non-claims
+
+- Project_0 has not proven that it earns money.
+- No successful Project_0 liquidation landing exists yet.
+- No realized PnL exists.
+- No p(win)/capture-rate is approved.
+- ZERO_PREFUND remains a Shadow technical probe, not a globally qualified LIVE funding class.
+- LIVE remains hard-disabled.
+
+Key recent commits:
+
+```text
+9797cb3  [FIX-97]  decouple inventory funding from market quote
+143e554  [FIX-98]  fail fast on missing Shadow fee payer
+7d73ba1/
+20ddcac  [FIX-100] canonical liquidation-record existence
+87a7151  [FIX-101] remove stale liquidation-record resubscription filter
+52423e8..
+876fff0  [FIX-102] prewarmed ATA model / remove invalid in-TX ATA setup
+6f091e6  [FIX-103] exact ATA prewarm diagnostics
+1b233df/
+b67f479  [FIX-104] guarded Mainnet ATA prewarm tool
+8386c49  [FIX-105] expose exact Jupiter route rejection reason
+```
+
