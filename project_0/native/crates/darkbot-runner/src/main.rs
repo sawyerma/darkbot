@@ -44,7 +44,7 @@ use solana_sdk::pubkey::Pubkey;
 #[cfg(feature = "crate_health")]
 use marginfi_type_crate::{
     constants::{ASSET_TAG_DEFAULT, ASSET_TAG_SOL},
-    types::{Bank, BankOperationalState, LiquidationRecord, MarginfiAccount},
+    types::{Bank, BankOperationalState, MarginfiAccount},
 };
 use std::str::FromStr;
 use std::time::Duration;
@@ -203,23 +203,6 @@ fn liability_account_filters(group: &Pubkey) -> Vec<serde_json::Value> {
     ]
 }
 
-/// [FIX-100] Liquidation-record existence is part of canonical execution state.
-/// The builder must never infer "missing" merely because the PDA was not subscribed.
-/// Subscribe/snapshot the complete Marginfi LiquidationRecord discriminator set so
-/// presence *and absence* are authoritative after the recovery barrier.
-#[cfg(feature = "crate_health")]
-fn liquidation_record_filters() -> Vec<serde_json::Value> {
-    vec![
-        serde_json::json!({"dataSize": 8 + std::mem::size_of::<LiquidationRecord>()}),
-        serde_json::json!({
-            "memcmp": {
-                "offset": 0,
-                "bytes": bs58::encode(protocol::DISC_LIQUIDATION_RECORD).into_string()
-            }
-        }),
-    ]
-}
-
 fn main() {
     if let Err(e) = run() {
         eprintln!("p0-longtail: {}", e);
@@ -349,7 +332,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         program_filters: vec![
             (program, liability_account_filters(&group)),
             (program, bank_filters(&group)),
-            (program, liquidation_record_filters()),
         ],
         accounts: subscription_keys.clone(),
         slots: true,
@@ -389,25 +371,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut fetch = move || -> Result<SnapshotData, String> {
         let t0 = std::time::Instant::now();
         eprintln!("snapshot: start");
-        // [FIX-78][FIX-100] Recovery snapshot = target-group liability accounts + target-group
-        // banks + all LiquidationRecord PDAs + explicit required/optional dependencies.
-        // Lending-only accounts are excluded. LiquidationRecord coverage makes PDA
-        // existence authoritative for the receivership builder without hot-path RPC.
+        // [FIX-78] Recovery snapshot = target-group liability accounts + target-group banks +
+        // explicit required/optional dependencies. Lending-only accounts are excluded.
         #[cfg(feature = "crate_health")]
         let a = snapshot::program_accounts_filtered(&rpc, &program, liability_account_filters(&group), &clock)
             .map_err(|e| format!("stage=liability_gpa {e}"))?;
         #[cfg(feature = "crate_health")]
         let b = snapshot::program_accounts_filtered(&rpc, &program, bank_filters(&group), &clock)
             .map_err(|e| format!("stage=bank_gpa {e}"))?;
-        #[cfg(feature = "crate_health")]
-        let c = snapshot::program_accounts_filtered(&rpc, &program, liquidation_record_filters(), &clock)
-            .map_err(|e| format!("stage=liquidation_record_gpa {e}"))?;
         #[cfg(not(feature = "crate_health"))]
         let a = snapshot::program_accounts(&rpc, &program, &clock).map_err(|e| e.to_string())?;
         #[cfg(not(feature = "crate_health"))]
         let b = darkbot_solana::state::snapshot::Snapshot { slot: a.slot, accounts: Vec::new(), missing: Vec::new() };
-        #[cfg(not(feature = "crate_health"))]
-        let c = darkbot_solana::state::snapshot::Snapshot { slot: a.slot, accounts: Vec::new(), missing: Vec::new() };
         let required = dep_for_fetch.lock().map_err(|_| "dep lock".to_string())?.clone();
         let optional = opt_for_fetch.lock().map_err(|_| "opt dep lock".to_string())?.clone();
         let d = snapshot::multiple_accounts(&rpc, &required, &clock)
@@ -416,27 +391,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|e| format!("stage=optional_accounts {e}"))?;
         let liability_count = a.accounts.len();
         let bank_count = b.accounts.len();
-        let liquidation_record_count = c.accounts.len();
         let required_count = d.accounts.len();
         let optional_count = o.accounts.len();
         let missing_required_count = d.missing.len();
         let mut accounts = a.accounts;
         accounts.extend(b.accounts);
-        accounts.extend(c.accounts);
         accounts.extend(d.accounts);
         accounts.extend(o.accounts);
         // Required dependencies stay fail-closed; missing optional ATAs only disable that candidate.
         let mut slot = a.slot;
         if b.slot != 0 { slot = slot.min(b.slot); }
-        if c.slot != 0 { slot = slot.min(c.slot); }
         if d.slot != 0 { slot = slot.min(d.slot); }
         if o.slot != 0 { slot = slot.min(o.slot); }
         eprintln!(
-            "snapshot: done slot={} liability_accounts={} banks={} liquidation_records={} required={} optional={} missing_required={} total={} elapsed_ms={}",
+            "snapshot: done slot={} liability_accounts={} banks={} required={} optional={} missing_required={} total={} elapsed_ms={}",
             slot,
             liability_count,
             bank_count,
-            liquidation_record_count,
             required_count,
             optional_count,
             missing_required_count,
@@ -854,28 +825,4 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = summaries.flush();
     let _ = records.flush();
     Ok(())
-}
-
-
-#[cfg(all(test, feature = "crate_health"))]
-mod fix100_tests {
-    use super::*;
-
-    #[test]
-    fn liquidation_record_filter_is_exact() {
-        let filters = liquidation_record_filters();
-        assert_eq!(filters.len(), 2);
-        assert_eq!(
-            filters[0].get("dataSize").and_then(|v| v.as_u64()),
-            Some((8 + std::mem::size_of::<LiquidationRecord>()) as u64)
-        );
-        assert_eq!(
-            filters[1].pointer("/memcmp/offset").and_then(|v| v.as_u64()),
-            Some(0)
-        );
-        assert_eq!(
-            filters[1].pointer("/memcmp/bytes").and_then(|v| v.as_str()),
-            Some(bs58::encode(protocol::DISC_LIQUIDATION_RECORD).into_string().as_str())
-        );
-    }
 }
