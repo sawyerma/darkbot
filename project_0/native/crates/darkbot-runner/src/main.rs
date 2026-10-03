@@ -619,6 +619,77 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+
+        #[cfg(feature = "crate_health")]
+        while let Some(done) = remote.projection_results.try_pop() {
+            projection_pending.remove(&done.account);
+            match done.result {
+                Ok((projection_slot, accounts, units)) => {
+                    let canonical = st.get(&done.account);
+                    let canonical_matches = canonical
+                        .map(|r| r.slot == done.base_slot && hash(&r.data) == done.base_account_hash)
+                        .unwrap_or(false);
+                    let simulated_matches = accounts
+                        .iter()
+                        .find(|(k, _)| *k == done.account)
+                        .map(|(_, a)| hash(&a.data) == done.base_account_hash)
+                        .unwrap_or(false);
+
+                    if canonical_matches && simulated_matches {
+                        projection_cache.insert(
+                            done.account,
+                            CachedProjection {
+                                base_account_hash: done.base_account_hash,
+                                projection_slot,
+                                accounts,
+                            },
+                        );
+                        detect_queue.push_back((
+                            done.account,
+                            done.t_rx_ns,
+                            done.base_slot,
+                            "integration_projection",
+                        ));
+                        let line = serde_json::json!({
+                            "projection": {
+                                "account": done.account.to_string(),
+                                "base_slot": done.base_slot,
+                                "projection_slot": projection_slot,
+                                "status": "ready",
+                                "simulated_cu": units
+                            }
+                        });
+                        let _ = writeln!(records, "{}", line);
+                    } else {
+                        projection_cache.remove(&done.account);
+                        let line = serde_json::json!({
+                            "projection": {
+                                "account": done.account.to_string(),
+                                "base_slot": done.base_slot,
+                                "projection_slot": projection_slot,
+                                "status": "stale",
+                                "canonical_matches": canonical_matches,
+                                "simulated_matches": simulated_matches
+                            }
+                        });
+                        let _ = writeln!(records, "{}", line);
+                    }
+                }
+                Err(error) => {
+                    projection_cache.remove(&done.account);
+                    let line = serde_json::json!({
+                        "projection": {
+                            "account": done.account.to_string(),
+                            "base_slot": done.base_slot,
+                            "status": "failed",
+                            "error": error
+                        }
+                    });
+                    let _ = writeln!(records, "{}", line);
+                }
+            }
+        }
+
         // Bounded non-blocking dispatch. Full queues retain the work item for the next loop.
         if !watch.is_empty() {
             let mut keep = Vec::with_capacity(watch.len());
@@ -656,18 +727,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             pending = keep;
         }
 
-        let Some(ev) = consumer.pop_timeout(Duration::from_millis(250)) else { continue };
-        // Trigger (a) Long-Tail: jedes MarginfiAccount-Update → Detection im Shadow-Modus.
-        let detect = match &ev {
-            IngressEvent::Account(a)
-                if st.run_state().is_tradable()
-                    && marginfi_account_in_group(&a.data, &group) =>
-            {
-                let trigger = if a.source == SourceKind::Snapshot { "bootstrap_snapshot_probe" } else { "account_update" };
-                Some((a.pubkey, a.t_rx_ns, a.slot, trigger))
-            },
-            _ => None,
-        };
+        #[cfg(feature = "crate_health")]
+        let mut detect = detect_queue.pop_front();
+        #[cfg(not(feature = "crate_health"))]
+        let mut detect = None;
+
+        if detect.is_none() {
+            let Some(ev) = consumer.pop_timeout(Duration::from_millis(250)) else { continue };
+            // Trigger (a) Long-Tail: jedes MarginfiAccount-Update → Detection im Shadow-Modus.
+            detect = match &ev {
+                IngressEvent::Account(a)
+                    if st.run_state().is_tradable()
+                        && marginfi_account_in_group(&a.data, &group) =>
+                {
+                    let trigger = if a.source == SourceKind::Snapshot { "bootstrap_snapshot_probe" } else { "account_update" };
+                    Some((a.pubkey, a.t_rx_ns, a.slot, trigger))
+                },
+                _ => None,
+            };
         // [FIX-35] Bank-Pubkey merken; die Dependency-Prüfung läuft NACH dem Anwenden des Updates.
         let updated_bank: Option<Pubkey> = match &ev {
             IngressEvent::Account(a) if classify_account(&a.data) == AccountType::Bank => Some(a.pubkey),
@@ -760,6 +837,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
             }
         }
+        } // normal ingress event path; projected rechecks skip state mutation
+
         if let Some((acct, t_rx, slot, trigger)) = detect {
             // Health über das Crate (Feature crate_health), sonst fail-closed NoHealth → Unavailable-Record.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
