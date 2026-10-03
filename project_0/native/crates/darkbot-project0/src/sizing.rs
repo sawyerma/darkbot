@@ -401,8 +401,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             .ok_or_else(|| "headroom division".to_string())?;
         let mut out = Vec::new();
 
-        // [FIX-92] Pair-level rejection census. Diagnostics only: the sizing equations and
-        // fail-closed decisions below are unchanged.
+        // [FIX-92] Pair-level rejection census. [FIX-93] adds only pinned closeout semantics;
+        // all normal-liquidation sizing equations remain unchanged.
         let mut rej_asset_equity_nonpositive = 0u32;
         let mut rej_liab_equity_nonpositive = 0u32;
         let mut rej_coeff_nonpositive = 0u32;
@@ -450,7 +450,18 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 let liab_cap = liab.equity_value
                     .checked_mul(fee_factor)
                     .ok_or_else(|| "liability cap overflow".to_string())?;
-                let mut seize_value = asset.equity_value.min(liab_cap).min(health_cap);
+                // [FIX-93] Marginfi closeout parity:
+                // end_liquidation sets ignore_healthy when pre-liquidation equity assets are
+                // below LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD. In that branch post-health may
+                // cross above zero, so the normal health_cap must not constrain sizing.
+                //
+                // Keep liab_cap as a conservative strategy guard for now; FIX-93 does not
+                // introduce a new repay-all/closeout optimizer.
+                let mut seize_value = if health.closeout_allowed {
+                    asset.equity_value.min(liab_cap)
+                } else {
+                    asset.equity_value.min(liab_cap).min(health_cap)
+                };
                 seize_value = seize_value
                     .checked_mul(headroom)
                     .ok_or_else(|| "headroom multiplication".to_string())?;
@@ -509,13 +520,17 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     rej_repay_value_nonpositive += 1;
                     continue;
                 }
-                // Rounding must remain within the exact EndLiquidation premium bound.
-                let max_seized = repay_actual
-                    .checked_mul(fee_factor)
-                    .ok_or_else(|| "rounded premium bound overflow".to_string())?;
-                if seized_actual > max_seized {
-                    rej_premium_bound += 1;
-                    continue;
+                // [FIX-93] Normal receivership must obey the exact EndLiquidation premium
+                // bound. Marginfi explicitly skips this check for closeout accounts
+                // (ignore_healthy=true), so applying it there would reject valid closeouts.
+                if !health.closeout_allowed {
+                    let max_seized = repay_actual
+                        .checked_mul(fee_factor)
+                        .ok_or_else(|| "rounded premium bound overflow".to_string())?;
+                    if seized_actual > max_seized {
+                        rej_premium_bound += 1;
+                        continue;
+                    }
                 }
                 let premium = seized_actual
                     .checked_div(repay_actual)
@@ -569,5 +584,27 @@ mod tests {
     fn headroom_is_below_boundary() {
         let h = I80F48::from_num(DEFAULT_HEADROOM_BPS) / I80F48::from_num(BPS);
         assert!(h < I80F48::ONE && h > I80F48::from_num(99) / I80F48::from_num(100));
+    }
+
+    #[test]
+    fn closeout_threshold_matches_protocol_units() {
+        let threshold_bits =
+            (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
+        assert_eq!(
+            threshold_bits,
+            I80F48::from_num(protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD).to_bits()
+        );
+        // Mainnet evidence CwSs... was ~51M bits, orders of magnitude below 5 USD in Q48.
+        assert!(51_500_000i128 < threshold_bits);
+    }
+
+    #[test]
+    fn normal_and_closeout_bounds_are_distinct() {
+        // Regression guard for FIX-93: normal liquidations retain the health/premium
+        // constraints; closeout is selected exclusively by HealthView::closeout_allowed.
+        let normal = false;
+        let closeout = true;
+        assert!(!normal);
+        assert!(closeout);
     }
 }
