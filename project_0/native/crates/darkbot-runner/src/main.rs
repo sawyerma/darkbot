@@ -678,9 +678,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             let mut rec = pipe.evaluate(acct, trigger, t_rx, now, slot, st.run_state().is_tradable());
             if let Ok(h) = &health_result {
-                if h.is_bad_debt && h.equity_assets <= 0 && matches!(rec.loss, Some(darkbot_runner::record::LossReason::Routing)) {
+                // [FIX-91] Bankruptcy/no-collateral is a protocol state, not a routing/sizing
+                // failure. Reclassify independently of the stage that first reported "no plan".
+                if h.is_bad_debt && h.equity_assets <= 0 {
                     rec.loss = Some(darkbot_runner::record::LossReason::Bankruptcy);
-                    rec.reason = Some("bad debt with zero equity assets: bankruptcy/no-collateral case, not a receivership routing failure".into());
+                    rec.reason = Some("bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity".into());
                 }
             }
             if rec.reason.as_deref().map(|s| s.contains("ReserveStale")).unwrap_or(false) {
