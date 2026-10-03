@@ -7,7 +7,7 @@ use crate::pending::{try_reconcile, PendingSubmission, ReconcileResult};
 use crate::record::LossReason;
 use crate::winner::{find_winner, Winner};
 use darkbot_solana::submit::rpc::RpcSubmitter;
-use solana_sdk::{account::Account, transaction::VersionedTransaction};
+use solana_sdk::{account::Account, hash::Hash, transaction::VersionedTransaction};
 use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer};
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
@@ -45,6 +45,8 @@ pub struct ReconcileResultMessage {
 pub struct ProjectionWork {
     pub account: Pubkey,
     pub base_slot: u64,
+    pub base_account_hash: Hash,
+    pub t_rx_ns: u64,
     pub tx: VersionedTransaction,
     pub targets: Vec<Pubkey>,
 }
@@ -52,6 +54,8 @@ pub struct ProjectionWork {
 pub struct ProjectionResultMessage {
     pub account: Pubkey,
     pub base_slot: u64,
+    pub base_account_hash: Hash,
+    pub t_rx_ns: u64,
     pub result: Result<(u64, Vec<(Pubkey, Account)>, Option<u64>), String>,
 }
 
@@ -158,6 +162,8 @@ impl RemoteWorkers {
                     };
                     let account = work.account;
                     let base_slot = work.base_slot;
+                    let base_account_hash = work.base_account_hash;
+                    let t_rx_ns = work.t_rx_ns;
                     let result = submitter
                         .simulate_with_post_accounts(&work.tx, &work.targets)
                         .map_err(|e| e.to_string());
@@ -166,6 +172,8 @@ impl RemoteWorkers {
                         ProjectionResultMessage {
                             account,
                             base_slot,
+                            base_account_hash,
+                            t_rx_ns,
                             result,
                         },
                     ) {
