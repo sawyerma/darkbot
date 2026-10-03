@@ -1270,3 +1270,28 @@ Economic caveat:
 - this is acceptable only for current Shadow technical qualification because FailedCostMatrix/economics remain UNKNOWN and LIVE is disabled.
 
 Status: **IMPLEMENTED / VERIFY**.
+
+
+### 2026-10-03 — FIX-96 recovery catch-up barrier — IMPLEMENTED / VERIFY
+
+Observed failure during long-running Mainnet Shadow:
+- WSS reconnect completed and StreamReady re-established;
+- Snapshot A/B fetches intermittently failed on `liability_gpa` transport/response decoding;
+- successful Snapshot A/B pairs could still reconcile dirty with 10–23 account mismatches and no missing local/remote accounts;
+- mismatch pubkeys changed between attempts.
+
+Interpretation:
+- RPC snapshots and WSS account subscriptions both use `confirmed`;
+- Snapshot B can therefore contain confirmed state whose corresponding WSS account notifications are still in flight / queued locally;
+- immediate reconcile after a single drain can compare a newer Snapshot B against a locally lagging WSS-applied state and produce false mismatches.
+
+[FIX-96]:
+- RecoveryDriver optionally waits after Snapshot B until the observed WSS root reaches the maximum per-account context slot in Snapshot B;
+- ingress is continuously drained while waiting;
+- one final drain occurs after the root barrier;
+- only then does byte-for-byte reconciliation run;
+- production runner enables this barrier with a 30 s timeout;
+- timeout remains fail-closed as ReconcileFailure;
+- provider transport/decode errors remain normal retry failures.
+
+Status: **IMPLEMENTED / VERIFY**.
