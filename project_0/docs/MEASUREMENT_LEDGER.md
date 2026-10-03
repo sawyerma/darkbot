@@ -1681,3 +1681,41 @@ b67f479  [FIX-104] guarded Mainnet ATA prewarm tool
 8386c49  [FIX-105] expose exact Jupiter route rejection reason
 ```
 
+### 2026-10-03 — R105 exact Jupiter ATA blocker / FIX-106 implemented
+
+R105 target:
+`Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7`
+
+Observed after WSOL + USDC ATA prewarm:
+
+```text
+decision=Skip
+loss=Routing
+reason=ROUTING:exact-in So11111111111111111111111111111111111111112→EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v:
+jupiter route incompatible with receivership top-level validator:
+ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL(data_len=1)
+```
+
+Interpretation:
+- FIX-105 successfully exposed the exact blocker.
+- The required WSOL/USDC ATAs are already present in reconciled Mainnet state.
+- Jupiter still emits an idempotent Associated Token setup instruction.
+- Marginfi rejects that 1-byte top-level instruction inside the receivership transaction.
+
+FIX-106:
+`4cbf40945239c76e7988f27e15cbc34a9fc91f01`
+
+Behavior:
+- route planning receives the exact prewarmed ATA identities proven by reconciled state;
+- Jupiter setup instructions are compared against a locally constructed canonical
+  `create_associated_token_account_idempotent` instruction;
+- the setup ix is removed only if program, data, account metas, wallet, mint, token program,
+  and derived ATA all match an already-proven prewarmed ATA exactly;
+- any other ATA instruction remains fail-closed;
+- after filtering, any non-Jupiter top-level instruction still rejects the route;
+- unit coverage added for exact-match removal and mismatched-taker rejection.
+
+Status: **IMPLEMENTED / VERIFY**.
+Next gate: workspace build/test, then R106 Mainnet Shadow. The required evidence is that the previous
+`AToken...(data_len=1)` route blocker disappears without reintroducing `StartNotFirst`.
+
