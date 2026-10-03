@@ -1470,3 +1470,36 @@ Decision: **FIX-98 diagnostic PASS.**
 This explains the prior R97 `UiTransactionError(AccountNotFound)` with empty logs: the configured signer/fee-payer itself did not yet exist as a funded Mainnet account, so the transaction failed during account loading/debit before any Marginfi/Jupiter instruction could execute.
 
 No further code change is required for this blocker. The exact fee-payer pubkey must be funded with enough SOL for transaction fees and any rent-bearing accounts created by the Shadow transaction. Then rerun Mainnet Shadow and continue R5 from simulation.
+
+
+### 2026-10-03 — R99 funded payer / recovery PASS
+
+Run:
+`r99_20261003T202439Z`
+
+Mainnet payer preflight:
+
+```text
+pubkey=GqRxBgvH94QKFJQVyDv82fK6jxaKrcyjyjSPkN7ue3zd
+lamports=10000000
+owner=11111111111111111111111111111111
+executable=false
+```
+
+Bootstrap/recovery evidence:
+
+```text
+StreamReady
+Snapshot A slot=453040250 accounts=83268 missing_required=0
+Snapshot B slot=453040279 accounts=83268 missing_required=0
+root_catchup target=453040308 root=453040308
+reconcile=clean
+run_state=Ready
+bootstrap_probe queued=61
+```
+
+Decision:
+- **Funded fee-payer preflight PASS.**
+- **Recovery/bootstrap remains PASS with the funded signer.**
+- The prior R97 `AccountNotFound` payer blocker is removed.
+- R5 simulation outcome is still pending from the 61 queued candidates; do not mark R5 simulation PASS until the JSONL decisions show a successful `ShadowTechnicalReady` / `ShadowReady` or a new concrete simulation failure.
