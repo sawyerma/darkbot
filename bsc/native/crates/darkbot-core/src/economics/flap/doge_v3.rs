@@ -481,11 +481,15 @@ mod tests {
         let refused = Err(DogeError::OutsideWitnessedExecution);
         // A smaller amount inside the same segment is not qualified.
         assert_eq!(
-            quote_with(FIXTURE_TIMESTAMP, |s| s.native_input = U256::from(1_000_000u64)),
+            quote_with(FIXTURE_TIMESTAMP, |s| {
+                s.native_input = U256::from(1_000_000u64)
+            }),
             refused
         );
         assert_eq!(
-            quote_with(FIXTURE_TIMESTAMP, |s| s.native_input = U256::from(NATIVE_INPUT_WEI + 1)),
+            quote_with(FIXTURE_TIMESTAMP, |s| {
+                s.native_input = U256::from(NATIVE_INPUT_WEI + 1)
+            }),
             refused
         );
         assert_eq!(
@@ -501,7 +505,9 @@ mod tests {
             refused
         );
         assert_eq!(
-            quote_with(FIXTURE_TIMESTAMP, |s| s.pool_sqrt_price_x96 = U256::from(1u64)),
+            quote_with(FIXTURE_TIMESTAMP, |s| {
+                s.pool_sqrt_price_x96 = U256::from(1u64)
+            }),
             refused
         );
         assert_eq!(

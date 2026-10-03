@@ -376,12 +376,8 @@ mod tests {
     /// classification → qualified state → admission → expectation.
     fn admitted_expectation(signer: &Signer, nonce: u64) -> (ExpectedBuy, [u8; 228]) {
         let deployment = validated_mainnet(7);
-        let classified = classify_launch(
-            &deployment,
-            candidate_a(),
-            &witnessed_native_launch(),
-        )
-        .unwrap();
+        let classified =
+            classify_launch(&deployment, candidate_a(), &witnessed_native_launch()).unwrap();
         let terms = WITNESSED_MAINNET_TERMS;
         let state =
             QualifiedNativeState::fresh_launch(&classified, &terms, 0, snapshot(7)).unwrap();
@@ -640,12 +636,8 @@ mod tests {
     #[test]
     fn expectation_requires_matching_code_and_policy_generation() {
         let deployment = validated_mainnet(7);
-        let classified = classify_launch(
-            &deployment,
-            candidate_a(),
-            &witnessed_native_launch(),
-        )
-        .unwrap();
+        let classified =
+            classify_launch(&deployment, candidate_a(), &witnessed_native_launch()).unwrap();
         let terms = WITNESSED_MAINNET_TERMS;
         let state =
             QualifiedNativeState::fresh_launch(&classified, &terms, 0, snapshot(7)).unwrap();

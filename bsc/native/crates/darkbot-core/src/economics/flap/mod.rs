@@ -132,9 +132,7 @@ impl core::fmt::Display for AdmissionError {
         match self {
             Self::GenerationMismatch => f.write_str("admission: code generation mismatch"),
             Self::CandidateMismatch => f.write_str("admission: snapshot of another launch"),
-            Self::PolicyGenerationMismatch => {
-                f.write_str("admission: policy generation mismatch")
-            }
+            Self::PolicyGenerationMismatch => f.write_str("admission: policy generation mismatch"),
             Self::VenueTerms => f.write_str("admission: venue terms differ from the witness"),
             Self::StateNotFresh => f.write_str("admission: token state is not fresh"),
             Self::UnqualifiedAmount => f.write_str("admission: input amount is not qualified"),

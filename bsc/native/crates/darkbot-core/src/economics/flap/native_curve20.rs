@@ -320,6 +320,21 @@ mod tests {
         U256::from(QUALIFIED_MAINNET_INPUT_WEI)
     }
 
+    /// Arithmetic fixture using the already witnessed venue/profile values.
+    fn witnessed(input_amount: u64) -> NativeBuyInputs {
+        let launch = witnessed_native_launch();
+        NativeBuyInputs {
+            curve_id: WITNESSED_MAINNET_TERMS.default_curve_id,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(input_amount),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            buy_tax_bps: launch.buy_tax,
+            tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
+            caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
+        }
+    }
+
     /// Policy of the snapshot's generation.
     fn policy(input_amount: U256, slippage_bps: u16) -> BuyPolicy {
         BuyPolicy::new(

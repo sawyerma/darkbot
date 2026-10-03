@@ -244,10 +244,7 @@ impl<'a> Tails<'a> {
             .checked_next_multiple_of(WORD)
             .ok_or(AbiError::Truncated)?;
         let end = data_start.checked_add(padded).ok_or(AbiError::Truncated)?;
-        let region = self
-            .tuple
-            .get(data_start..end)
-            .ok_or(AbiError::Truncated)?;
+        let region = self.tuple.get(data_start..end).ok_or(AbiError::Truncated)?;
         let (data, padding) = region.split_at(len);
         if padding.iter().any(|b| *b != 0) {
             return Err(AbiError::NonCanonical);

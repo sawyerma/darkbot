@@ -402,8 +402,8 @@ mod tests {
     #[test]
     fn salt_selects_the_token_and_nothing_else_is_free() {
         let deployment = validated_mainnet(1);
-        let witnessed = classify_launch(&deployment, candidate_a(), &witnessed_native_launch())
-            .unwrap();
+        let witnessed =
+            classify_launch(&deployment, candidate_a(), &witnessed_native_launch()).unwrap();
 
         // Another salt is another token of the same profile.
         let mut launch = witnessed_native_launch();
