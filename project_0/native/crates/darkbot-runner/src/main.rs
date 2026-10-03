@@ -843,22 +843,204 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Health über das Crate (Feature crate_health), sonst fail-closed NoHealth → Unavailable-Record.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             let view = StateView(&st);
+
+            // [FIX-111][R6] Integration refreshes are projected by an isolated RPC worker first.
+            // The returned account set is one-shot: only the exact candidate account state that
+            // requested it may consume it, and canonical StateCore is never mutated.
             #[cfg(feature = "crate_health")]
-            let engine = darkbot_project0::health::crate_impl::CrateHealth { state: &view, group };
+            let projected_owned = {
+                let refreshes = match darkbot_project0::integration::refresh_plan_for_account(
+                    &view,
+                    &program,
+                    &acct,
+                ) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let line = serde_json::json!({
+                            "account": acct.to_string(),
+                            "trigger": trigger,
+                            "slot": slot,
+                            "decision": "Skip",
+                            "loss": "IntegrationRefresh",
+                            "reason": format!("integration refresh plan: {e}")
+                        });
+                        let _ = writeln!(records, "{}", line);
+                        continue;
+                    }
+                };
+
+                if refreshes.is_empty() {
+                    None
+                } else {
+                    let Some(base_record) = st.get(&acct) else {
+                        let _ = writeln!(records, "{}", serde_json::json!({
+                            "account": acct.to_string(),
+                            "decision": "Skip",
+                            "loss": "IntegrationRefresh",
+                            "reason": "candidate account disappeared before projection"
+                        }));
+                        continue;
+                    };
+                    let base_account_hash = hash(&base_record.data);
+
+                    let cached = if trigger == "integration_projection" {
+                        projection_cache.remove(&acct).filter(|c| {
+                            c.base_account_hash == base_account_hash && base_record.slot == slot
+                        })
+                    } else {
+                        projection_cache.remove(&acct);
+                        None
+                    };
+
+                    if let Some(cached) = cached {
+                        match darkbot_project0::projection::ProjectedState::new(
+                            &view,
+                            cached.projection_slot,
+                            cached.accounts,
+                        ) {
+                            Ok(p) => Some(p),
+                            Err(e) => {
+                                let _ = writeln!(records, "{}", serde_json::json!({
+                                    "account": acct.to_string(),
+                                    "decision": "Skip",
+                                    "loss": "IntegrationRefresh",
+                                    "reason": format!("projected state invalid: {e}")
+                                }));
+                                continue;
+                            }
+                        }
+                    } else {
+                        if !projection_pending.contains(&acct) {
+                            let targets = match darkbot_project0::integration::projection_targets_for_account(
+                                &view,
+                                &program,
+                                &acct,
+                                &refreshes,
+                            ) {
+                                Ok(v) if !v.is_empty() => v,
+                                Ok(_) => {
+                                    let _ = writeln!(records, "{}", serde_json::json!({
+                                        "account": acct.to_string(),
+                                        "decision": "Skip",
+                                        "loss": "IntegrationRefresh",
+                                        "reason": "integration projection produced zero targets"
+                                    }));
+                                    continue;
+                                }
+                                Err(e) => {
+                                    let _ = writeln!(records, "{}", serde_json::json!({
+                                        "account": acct.to_string(),
+                                        "decision": "Skip",
+                                        "loss": "IntegrationRefresh",
+                                        "reason": format!("projection targets: {e}")
+                                    }));
+                                    continue;
+                                }
+                            };
+
+                            let Some(bh) = blockhash.fresh(clock.now_ns(), 30_000_000_000) else {
+                                let _ = writeln!(records, "{}", serde_json::json!({
+                                    "account": acct.to_string(),
+                                    "decision": "Skip",
+                                    "loss": "IntegrationRefresh",
+                                    "reason": "projection blockhash stale"
+                                }));
+                                continue;
+                            };
+
+                            let projection_plan = tx::TxPlan {
+                                version: tx::BuildVersion::V0,
+                                payer: liquidator,
+                                instructions: refreshes,
+                                lookup_tables: vec![],
+                                resources,
+                            };
+                            let mut built = match tx::build(
+                                &projection_plan,
+                                bh.hash,
+                                &TxLimits::default(),
+                            ) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    let _ = writeln!(records, "{}", serde_json::json!({
+                                        "account": acct.to_string(),
+                                        "decision": "Skip",
+                                        "loss": "IntegrationRefresh",
+                                        "reason": format!("projection tx build: {e}")
+                                    }));
+                                    continue;
+                                }
+                            };
+                            if let Err(e) = tx::sign(&mut built, &[&payer]) {
+                                let _ = writeln!(records, "{}", serde_json::json!({
+                                    "account": acct.to_string(),
+                                    "decision": "Skip",
+                                    "loss": "IntegrationRefresh",
+                                    "reason": format!("projection tx sign: {e}")
+                                }));
+                                continue;
+                            }
+
+                            let work = ProjectionWork {
+                                account: acct,
+                                base_slot: base_record.slot,
+                                base_account_hash,
+                                t_rx_ns: t_rx,
+                                tx: built.tx,
+                                targets,
+                            };
+                            match remote.projection_jobs.try_push(work) {
+                                Ok(()) => {
+                                    projection_pending.insert(acct);
+                                }
+                                Err(ChannelError::Full(_)) => {
+                                    let _ = writeln!(records, "{}", serde_json::json!({
+                                        "account": acct.to_string(),
+                                        "decision": "Skip",
+                                        "loss": "IntegrationRefresh",
+                                        "reason": "projection worker queue full"
+                                    }));
+                                }
+                                Err(ChannelError::Disconnected(_)) => {
+                                    return Err("projection RPC worker disconnected".into());
+                                }
+                            }
+                        }
+                        let _ = writeln!(records, "{}", serde_json::json!({
+                            "account": acct.to_string(),
+                            "trigger": trigger,
+                            "slot": slot,
+                            "decision": "Skip",
+                            "loss": "IntegrationRefresh",
+                            "reason": "integration projection pending"
+                        }));
+                        continue;
+                    }
+                }
+            };
+
+            #[cfg(feature = "crate_health")]
+            let eval_state: &dyn AccountSource = projected_owned
+                .as_ref()
+                .map(|p| p as &dyn AccountSource)
+                .unwrap_or(&view as &dyn AccountSource);
+
+            #[cfg(feature = "crate_health")]
+            let engine = darkbot_project0::health::crate_impl::CrateHealth { state: eval_state, group };
             #[cfg(not(feature = "crate_health"))]
             let engine = darkbot_project0::health::NoHealth;
             #[cfg(feature = "crate_health")]
             let inventory = |bank_key: &Pubkey| -> u64 {
-                let Some(bank) = bank_from_state(&view, &program, bank_key) else { return 0 };
-                validated_liquidator_ata(&view, &bank.mint, &liquidator).map(|(_, amount)| amount).unwrap_or(0)
+                let Some(bank) = bank_from_state(eval_state, &program, bank_key) else { return 0 };
+                validated_liquidator_ata(eval_state, &bank.mint, &liquidator).map(|(_, amount)| amount).unwrap_or(0)
             };
             #[cfg(feature = "crate_health")]
             let ata = |mint: &Pubkey| -> Option<Pubkey> {
-                validated_liquidator_ata(&view, mint, &liquidator).map(|(pk, _)| pk)
+                validated_liquidator_ata(eval_state, mint, &liquidator).map(|(pk, _)| pk)
             };
             #[cfg(feature = "crate_health")]
             let sizing = ProtocolSizingProvider {
-                state: &view,
+                state: eval_state,
                 program,
                 group,
                 sol_bank,
@@ -867,7 +1049,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             #[cfg(feature = "crate_health")]
             let sizer_for_cost = darkbot_project0::sizing::ProtocolSizer {
-                state: &view,
+                state: eval_state,
                 program,
                 group,
                 headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
@@ -880,7 +1062,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or(u64::MAX);
             #[cfg(feature = "crate_health")]
             let builder = P0ReceivershipBuilder {
-                state: &view,
+                state: eval_state,
                 program,
                 group,
                 liquidator,
