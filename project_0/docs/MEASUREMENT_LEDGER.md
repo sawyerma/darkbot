@@ -1341,3 +1341,50 @@ StreamReady
 ```
 
 Any `root_catchup timeout`, `reconcile=dirty`, or exhausted recovery keeps FIX-96 Mainnet qualification open/fail-closed.
+
+
+### 2026-10-03 — FIX-96 Mainnet recovery qualification — PASS
+
+Qualified runtime commit:
+`24e50ca` (code under qualification remains `e8b9143`; `24e50ca` adds only the prior compiler/workspace ledger entry).
+
+Mainnet Shadow bootstrap evidence:
+
+```text
+[ws_rpc] session attempt=1 StreamReady
+[recovery] attempt=1/3 snapshot=A ok slot=453025148 accounts=83266 missing_required=0
+[recovery] attempt=1/3 snapshot=B ok slot=453025183 accounts=83266 missing_required=0
+[recovery] attempt=1/3 root_catchup start target=453025227 current=Some(453025198)
+[recovery] attempt=1/3 root_catchup ok target=453025227 root=453025227 elapsed_ms=7704
+[recovery] attempt=1/3 reconcile=clean snapshot_slot=453025183
+recovery: Ready, run_state=Ready
+bootstrap_probe: queued=61 candidates from was_liquidatable
+```
+
+Snapshot details:
+
+```text
+Snapshot A: slot=453025148, liability_accounts=82678, banks=204,
+required=384, optional=0, missing_required=0, total=83266, elapsed_ms=9530
+
+Snapshot B: slot=453025183, liability_accounts=82678, banks=204,
+required=384, optional=0, missing_required=0, total=83266, elapsed_ms=12257
+```
+
+Root catch-up details:
+
+```text
+target root: 453025227
+initial observed root: 453025198
+caught-up root: 453025227
+elapsed_ms: 7704
+result: reconcile=clean
+```
+
+Decision: **FIX-96 Mainnet PASS**.
+
+The root catch-up hypothesis is validated for this Mainnet recovery/bootstrap instance: the runner did not reconcile until the observed root reached the fixed Snapshot-B account-context target, the final reconcile was clean, and the system transitioned fail-closed to `Ready` only after that clean reconcile.
+
+FIX-96 is therefore complete: compiler/workspace qualification PASS + Mainnet recovery qualification PASS.
+
+Next qualification target: continue the same Mainnet Shadow path through the queued generic candidates and obtain downstream evidence for `ShadowTechnicalReady` or `ShadowTechnicalSimFailed`, or capture the next concrete Build/Sign/Sim blocker.
