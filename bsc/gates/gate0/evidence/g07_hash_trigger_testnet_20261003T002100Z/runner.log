@@ -1,0 +1,32 @@
+G0.7 TESTNET BIRTH->BUY CONTROLLED TEST
+chain_id:                 97
+wallet:                   0x9c8a0Db41914beEE52Dd49790c4F087E252743DE
+portal:                   0x5bEacaF7ABCbB3aB280e80D007FD31fcE26510e9
+nonce_launch:             16
+nonce_buy:                17
+gas_price_wei:            100000000
+launch_gas_estimate:      3883025
+launch_gas_limit:         4659630
+buy_gas_limit:            3000000
+buy_value_wei:            100000000000000
+predicted_token:          0x70586F1a9ED4F291a2aC659DCF34133645aA7777
+vanity_iterations:        137514
+vanity_search_us:         102375.000
+launch_local_tx_hash:     0x43d6e002d35591514533ec0c42815752bce816b49c6656be6c3e355462fc924c
+hotpath_remote_reads:     0
+testnet_min_output:       0 (TESTNET LATENCY ONLY)
+HTTPS_CONNECTED host=bsc-testnet-dataseed.bnbchain.org port=443 remote=52.223.48.152:443
+HTTPS_CONNECTED host=bsc-testnet-dataseed.bnbchain.org port=443 remote=52.223.48.152:443
+buy_submission_transport:  prewarmed HTTPS bsc-testnet-dataseed.bnbchain.org:443
+buy_prepared_before_launch: true
+BUY_prebuild_and_sign_ns:  131458
+buy_local_tx_hash:         0x765a23b2c57b38f6b6017990caca22cd0a6a44f909359e34a9fcadf82a0b137e
+control_wss:                DISABLED_FOR_BUY_PROOF
+p2p_min_peers:             1
+p2p_head_number:           134533139
+p2p_head_timestamp:        1790986870
+P2P_PEER_COUNT peers=0 required=1
+
+thread 'main' (3840767) panicked at src/bin/g07_testnet_birth_buy.rs:866:10:
+BSC P2P sensor did not reach minimum peer count: Timeout
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

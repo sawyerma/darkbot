@@ -1,0 +1,7 @@
+{
+  "status": "ABORTED_BEFORE_LAUNCH",
+  "reason": "P2P readiness timeout after 30 seconds, zero peers",
+  "launch_sent": false,
+  "buy_sent": false,
+  "exit_code": 101
+}

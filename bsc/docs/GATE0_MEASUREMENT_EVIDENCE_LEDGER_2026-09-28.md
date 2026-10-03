@@ -2910,3 +2910,30 @@ Vorversuche bleiben erhalten: erster Lauf vor Launch wegen 8-Peer-Timeout abgebr
 Evidence-Ordner: `bsc/gates/gate0/evidence/g07_presigned_testnet_20261002T235624Z`, `...20261002T235824Z`, `...20261003T000013Z`, `...20261003T000326Z`. Beim erfolgreichen Lauf sind beide Raw-Receipts und beide Blöcke gespeichert. Historisches balanceOf am BUY-Block scheiterte beim öffentlichen RPC mit `missing trie node`; dieser Fehler bleibt gespeichert und wird nicht als erfolgreicher historischer State-Read ausgegeben.
 
 **Nächste ausschließlich BUY-bezogene Arbeit:** Der neue Runner-Stand reagiert für den vollständig bekannten Self-Launch direkt auf dessen exakt gefilterten P2P-Hash (oder Full-Broadcast), statt vor Send auf GetPooledTransactions zu warten. Das soll die beobachtete Hash→Full-Wartezeit aus dem kritischen Pfad entfernen. Dieser zusätzliche Schritt ist gebaut, **noch nicht live gemessen**; alle obigen Werte stammen vom Full-Signal-Lauf. Danach weiterhin tatsächliche Acquisition/Ordering prüfen und vertrauenswürdige Execution-Zeitstempel beschaffen. Gate 0 bleibt bis zum echten `T0 → T_buy <1 ms`-Nachweis offen. Keys wurden nur über verdeckte lokale Eingabe an jeweils einen Prozess gegeben, weder protokolliert noch gespeichert.
+
+
+## 2026-10-03 — Hash-Trigger live getestet: tatsächlicher BUY, erneut Folgeblock
+
+Zielgrenze unverändert: `T0` ist der erste Ausführungspunkt, an dem ein unabhängiger externer BUY gültig ausführbar ist; `T_buy` ist erfolgreiche BUY-Ausführung mit Erwerb. Pending-Erkennung/Vorbereitung vor T0 gehört nicht in dieses Intervall. Dass ein Signal über den Pending/P2P-Pfad kommt, beweist allein noch nicht, dass es lokal vor T0 eintraf. Erste Chart-Kerze und `<1 ms` sind unterschiedliche Aussagen.
+
+Der reale Hash-Trigger-Lauf `bsc/gates/gate0/evidence/g07_hash_trigger_testnet_20261003T002258Z` endete mit Exit 0. Launch `0x0d8cbea2ea060158246a51379fb5dd2cf1310218ab796d3302eb2aebfbaa2ee4` und BUY `0xfcab0afaca413182e879e44dd87b7f86ff547e696e5c5d320b81869d55538d0a` haben beide Receipt-Status 1. Token `0xFC56AC387716B144294a6E896C21E6d523657777`; Erwerb **17669034223232267628301 Basiseinheiten**, Receipt-Transfer an die Testwallet stimmt mit Runner-balanceOf überein. BUY 0,0001 tBNB; Netto-Wallet-Debit 500203100000000 wei.
+
+| Messgrenze | Einzelner realer Lauf |
+|---|---:|
+| P2P-Hash → vorbereiteter HTTPS-Write/Flush abgeschlossen | **0,045125 ms** |
+| Queue → Send | 0,044416 ms |
+| BUY bauen/signieren vor Launch | 0,110916 ms |
+| Launch-Handoff → P2P-Hash | 216,260291 ms |
+| P2P-Hash → vollständige TX, jetzt nach Send | 148,544500 ms |
+| Signal → Receipts beobachtet | 3916,428750 ms |
+| Launch-Position | 134533644:0 |
+| BUY-Position | 134533645:0 |
+| `T_buy - T0` | **UNKNOWN** |
+
+Die Hash→Full-Wartezeit liegt nachweislich nicht mehr vor Send. Dennoch kein Same-block-Ergebnis: schneller lokaler Versand allein hat im getesteten öffentlichen RPC-Pfad keine Platzierung unmittelbar nach Launch erzielt. Weder der Zeitpunkt der Validator-Ankunft noch ein positives Pending-Lead vor T0 ist gemessen; aus diesen Daten lässt sich die verbleibende Verzögerung nicht eindeutig auf Internet, Gossip, RPC oder Blockauswahl aufteilen. Keine Sub-ms-Acquisition-Behauptung. Der bestehende direkte Portal-Scanner fand null erfolgreiche konkurrierende direkte BUYs; interne Router-Calls sind nicht vollständig abgedeckt.
+
+Vorversuch `...20261003T002100Z`: null Peers, 30-s-Timeout vor Launch, keine TX gesendet. Die Startfrist wurde für die Wiederholung auf 120 s erhöht; die erfolgreiche Wiederholung erreichte einen Peer. Zusätzlich wurde die Ausgabe `P2P_hash_to_full_ns` an den tatsächlichen Full-Empfang statt den früheren Hash-Trigger gebunden. Release-Build erfolgreich (sieben bestehende ungenutzte WSS-Helferwarnungen). Keine Mainnet-TX, kein persistierter Key.
+
+**Verbleibender Nachweis an der Quelle:** Es gibt in diesem Testaufbau keinen instrumentierten Blockproduzenten-/Validator-Zugang. Standard-Receipts und die gespeicherten Blöcke (einschließlich `milliTimestamp`) enthalten keine individuellen historischen TX-Ausführungszeiten. Erforderlich sind auf derselben monotonen Uhr erfasste T0- und erfolgreiche BUY-Endpunkte aus der Produktion des später kanonischen Blocks, mit Blockhash, beiden TX-Hashes/Indizes und Reorg-Abgleich. Kandidaten-Simulation, nachträglicher Archive-Replay oder Import auf einem anderen Node messen jeweils ihre eigene Ausführung und dürfen nicht als ursprüngliche kanonische Ausführungszeit ausgegeben werden. Messaufwand und Auflösung müssen für den `<1 ms`-Nachweis ausgewiesen werden.
+
+Geth beschreibt Live-Hooks für Transaktionsverarbeitung und Receipts: https://geth.ethereum.org/docs/developers/evm-tracing/live-tracing . Das ist eine technische Referenz für Instrumentierung, kein Nachweis, dass unser öffentlicher BSC-Testnet-RPC diese Telemetrie bereitstellt. Die Produktions-/Builder-Integration sowie ihre Kompatibilität mit dem konkreten BSC-Client müssen noch hergestellt werden. Parallel bleibt ein geordneter Inclusion-Pfad für Launch→BUY zu qualifizieren; ein öffentlicher SendRawTransaction-Aufruf sichert keine direkte Nachfolgeposition. Zielstatus bleibt OFFEN; kein automatisches Gate-PASS.

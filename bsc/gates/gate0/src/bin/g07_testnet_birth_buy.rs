@@ -1,6 +1,6 @@
 //! Controlled BSC Testnet birth->BUY latency/inclusion test.
 //! Creates a fresh Flap TAXED_V3 token with quoteAmt=0, observes that exact launch
-//! through direct BSC P2P transaction gossip, then builds/signs/sends the BUY.
+//! through direct BSC P2P transaction gossip, then sends the pre-signed BUY.
 //! Public WSS is not required for this controlled BUY proof; the race path uses
 //! direct BSC P2P ingress plus pre-warmed HTTPS submission.
 //! Testnet only. No Mainnet addresses or value are used.
@@ -862,7 +862,7 @@ fn main() {
     );
     let p2p_ready = p2p
         .ready
-        .recv_timeout(Duration::from_secs(30))
+        .recv_timeout(Duration::from_secs(120))
         .expect("BSC P2P sensor did not reach minimum peer count");
 
     // Public WSS is deliberately not a dependency of the actual BUY proof.
@@ -910,7 +910,7 @@ fn main() {
     if let Some(t_hash) = p2p_signal.hash_observed {
         println!(
             "P2P_hash_to_full_ns:       {}",
-            (t_signal - t_hash).as_nanos()
+            (p2p_signal.observed - t_hash).as_nanos()
         );
     } else {
         println!("P2P_hash_to_full_ns:       DIRECT_FULL_BROADCAST");
