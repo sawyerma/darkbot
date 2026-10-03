@@ -1076,3 +1076,34 @@ Included:
 - A1 remains intentionally unfixed so the next Mainnet Shadow rerun can measure the true rejection distribution before remediation.
 
 Next gate: Mainnet Shadow rerun and 61-probe outcome census with typed reasons.
+
+
+### 2026-10-03 — FIX-90 recovery diagnostics / subsequent Mainnet recovery — PASS
+
+A preceding Mainnet Shadow start exhausted all three recovery attempts before completing Snapshot A. The old RecoveryDriver discarded fetch errors, so the exact provider/RPC cause was not observable.
+
+[FIX-90] added:
+- redacted per-attempt Snapshot A/B recovery error logging;
+- stage labels for `liability_gpa`, `bank_gpa`, `required_accounts`, and `optional_accounts`;
+- clean/dirty reconcile logging;
+- no change to recovery/trading semantics.
+
+On the immediately subsequent Mainnet run:
+
+```text
+[recovery] attempt=1/3 snapshot=A start
+snapshot: done slot=452768986 liability_accounts=82686 banks=204 required=384 optional=0 missing_required=0 total=83274 elapsed_ms=6253
+[recovery] attempt=1/3 snapshot=A ok slot=452768986 accounts=83274 missing_required=0
+[recovery] attempt=1/3 snapshot=B start
+snapshot: done slot=452769009 liability_accounts=82686 banks=204 required=384 optional=0 missing_required=0 total=83274 elapsed_ms=6273
+[recovery] attempt=1/3 snapshot=B ok slot=452769009 accounts=83274 missing_required=0
+[recovery] attempt=1/3 reconcile=clean snapshot_slot=452769009
+recovery: Ready, run_state=Ready
+bootstrap_probe: queued=61 candidates from was_liquidatable
+```
+
+Decision:
+- Recovery remains Mainnet-qualified.
+- The previous Exhausted event is classified as **transient / exact root cause unobserved**, because it occurred before FIX-90 exposed fetch errors.
+- FIX-90 diagnostics are confirmed operational.
+- No evidence currently supports changing retry count or recovery semantics.
