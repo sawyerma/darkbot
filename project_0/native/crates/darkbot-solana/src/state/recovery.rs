@@ -22,6 +22,7 @@ use super::{AccountUpdate, StateCore};
 use crate::ingress::IngressEvent;
 use darkbot_common::error::HaltReason;
 use darkbot_common::lifecycle::RunState;
+use std::time::{Duration, Instant};
 
 pub struct SnapshotData {
     pub slot: u64,
@@ -236,7 +237,6 @@ mod tests {
     use super::*;
     use crate::ingress::{AccountUpdate, SourceKind};
     use solana_sdk::pubkey::Pubkey;
-use std::time::{Duration, Instant};
 
     fn upd(pk: Pubkey, slot: u64, data: u8) -> AccountUpdate {
         AccountUpdate { pubkey: pk, owner: Pubkey::new_from_array([0xA5; 32]), lamports: 1, data: vec![data], slot, write_version: None, source: SourceKind::Snapshot, t_rx_ns: 0 } // [FIX-57] stable owner across A/B
