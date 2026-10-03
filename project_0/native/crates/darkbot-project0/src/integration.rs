@@ -279,7 +279,7 @@ fn kamino_refreshes<S: AccountSource + ?Sized>(
     ])
 }
 
-fn drift_reward_market_keys<S: AccountSource + ?Sized>(
+pub fn drift_reward_market_keys<S: AccountSource + ?Sized>(
     state: &S,
     bank: &Bank,
 ) -> Result<Vec<Pubkey>, String> {
