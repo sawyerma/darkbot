@@ -119,14 +119,32 @@ fn fee_bps(v: I80F48) -> Result<u64, String> {
     floor_u64(scaled)
 }
 
+fn supported_operational_state(bank: &Bank) -> bool {
+    matches!(
+        bank.config.operational_state,
+        BankOperationalState::Operational
+            | BankOperationalState::ReduceOnly
+            | BankOperationalState::ReduceOnlyWithBorrowingPower
+    )
+}
+
 fn supported_generic_bank(bank: &Bank) -> bool {
     matches!(bank.config.asset_tag, ASSET_TAG_DEFAULT | ASSET_TAG_SOL)
-        && matches!(
-            bank.config.operational_state,
-            BankOperationalState::Operational
-                | BankOperationalState::ReduceOnly
-                | BankOperationalState::ReduceOnlyWithBorrowingPower
-        )
+        && supported_operational_state(bank)
+}
+
+/// [FIX-112][R6] Integration banks are collateral-only in the pinned Marginfi source
+/// (borrow_limit=0). They are eligible only on the asset side, and only after exact
+/// refresh projection has been applied by the runner.
+fn supported_asset_bank(bank: &Bank) -> bool {
+    matches!(
+        bank.config.asset_tag,
+        ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_JUPLEND
+    ) && supported_operational_state(bank)
+}
+
+fn supported_liability_bank(bank: &Bank) -> bool {
+    supported_generic_bank(bank)
 }
 
 impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
@@ -222,16 +240,15 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 bank.config.asset_tag,
                 ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_JUPLEND
             );
-            let supported = supported_generic_bank(&bank);
             match side {
                 BalanceSide::Assets => {
                     assets += 1;
-                    if supported { supported_assets += 1; }
+                    if supported_asset_bank(&bank) { supported_assets += 1; }
                     if integration { integration_assets += 1; }
                 }
                 BalanceSide::Liabilities => {
                     liabs += 1;
-                    if supported { supported_liabs += 1; }
+                    if supported_liability_bank(&bank) { supported_liabs += 1; }
                     if integration { integration_liabs += 1; }
                 }
             }
@@ -314,9 +331,15 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             }
             let Some(side) = balance.get_side() else { continue };
             let bank = self.bank(&balance.bank_pk)?;
-            // [FIX-59] Until integration withdraw/refresh builders are wired, fail closed by not
-            // generating generic-withdraw candidates for integration banks.
-            if !supported_generic_bank(&bank) || bank.check_utilization_ratio().is_err() {
+            // [FIX-112][R6] Integration banks are eligible only as collateral assets.
+            // Liability sizing remains restricted to generic banks because the pinned integration
+            // configs are non-borrowable. The runner guarantees that integration candidates reach
+            // this sizer only through a qualified ProjectedState.
+            let supported = match side {
+                BalanceSide::Assets => supported_asset_bank(&bank),
+                BalanceSide::Liabilities => supported_liability_bank(&bank),
+            };
+            if !supported || bank.check_utilization_ratio().is_err() {
                 continue;
             }
             let prices = self.prices(&bank, clock)?;
