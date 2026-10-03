@@ -1,8 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$PROJECT_DIR/.." && pwd)"
+
+# [SEC-02] Local secrets are loaded from project_0/.env when present.
+# The file is git-ignored and must be owner-only. Callers may still export values
+# explicitly; exported values remain authoritative if no local file exists.
+ENV_FILE="${P0_ENV_FILE:-$PROJECT_DIR/.env}"
+if [[ -f "$ENV_FILE" ]]; then
+  MODE="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE" 2>/dev/null || true)"
+  if [[ "$MODE" != "600" ]]; then
+    echo "insecure Project_0 env permissions: $ENV_FILE mode=$MODE (require 600)" >&2
+    exit 2
+  fi
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+fi
+
+# Public signer identity is versioned; secret key material is not.
+# shellcheck source=/dev/null
+source "$PROJECT_DIR/config/wallet.public.env"
+
 # Project_0 first Mainnet Shadow qualification.
-# Secrets/endpoints stay in the caller environment; this script never writes them.
+# Secrets/endpoints stay local; this script never writes or prints them.
 
 need() {
   local k="$1"
@@ -25,6 +49,34 @@ export P0_GROUP_ID="${P0_GROUP_ID:-4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8}
 
 need P0_KEYPAIR_PATH
 need P0_MAX_SLIPPAGE_BPS
+need P0_EXPECTED_PUBKEY
+
+# [SEC-02] Fail closed on wrong or weakly protected signer.
+KEYPAIR_REAL="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$P0_KEYPAIR_PATH")"
+case "$KEYPAIR_REAL" in
+  "$REPO_ROOT"/*)
+    echo "refusing Project_0 signer stored inside repository" >&2
+    exit 2
+    ;;
+esac
+if [[ ! -f "$KEYPAIR_REAL" ]]; then
+  echo "Project_0 keypair file not found" >&2
+  exit 2
+fi
+KEYPAIR_MODE="$(stat -f '%Lp' "$KEYPAIR_REAL" 2>/dev/null || stat -c '%a' "$KEYPAIR_REAL" 2>/dev/null || true)"
+if [[ "$KEYPAIR_MODE" != "600" ]]; then
+  echo "insecure Project_0 keypair permissions: mode=$KEYPAIR_MODE (require 600)" >&2
+  exit 2
+fi
+command -v solana-keygen >/dev/null 2>&1 || {
+  echo "solana-keygen is required to verify Project_0 signer identity" >&2
+  exit 2
+}
+ACTUAL_PUBKEY="$(solana-keygen pubkey "$KEYPAIR_REAL")"
+if [[ "$ACTUAL_PUBKEY" != "$P0_EXPECTED_PUBKEY" ]]; then
+  echo "Project_0 signer identity mismatch: derived=$ACTUAL_PUBKEY expected=$P0_EXPECTED_PUBKEY" >&2
+  exit 2
+fi
 
 export P0_PROGRAM_ID="${P0_PROGRAM_ID:-MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA}"
 export P0_MODE=shadow
