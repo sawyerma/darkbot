@@ -20,6 +20,10 @@ pub mod p0 {
     use marginfi_type_crate::types::Bank;
     use solana_message::AddressLookupTableAccount /* [FIX-13] */;
     use solana_sdk::instruction::Instruction;
+    use spl_associated_token_account::{
+        get_associated_token_address_with_program_id,
+        instruction::create_associated_token_account_idempotent,
+    };
     use solana_sdk::pubkey::Pubkey;
     use std::str::FromStr;
 
@@ -181,8 +185,48 @@ pub mod p0 {
         fn receivership(&self, account: &Pubkey, obs: &[Pubkey], sz: &Sizing, swaps: Vec<Instruction>, repay_from_inventory: bool) -> Result<(Vec<Instruction>, Vec<Step>), String> {
             let (asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
             let (liab_vault, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
-            let asset_ata = (self.ata)(&asset_mint).ok_or_else(|| format!("ATA:MISSING_ASSET:{}", asset_mint))?;
-            let liab_ata = (self.ata)(&liab_mint).ok_or_else(|| format!("ATA:MISSING_LIABILITY:{}", liab_mint))?;
+
+            // [FIX-95] Missing liquidator ATAs are not a protocol blocker. Marginfi allows the
+            // Associated Token Program inside the receivership transaction after StartLiquidation.
+            // Create them idempotently there; pre-Start would violate validate_ix_first.
+            let mut post_start_setup = Vec::new();
+
+            let asset_ata = if let Some(existing) = (self.ata)(&asset_mint) {
+                existing
+            } else {
+                let ata = get_associated_token_address_with_program_id(
+                    &self.liquidator,
+                    &asset_mint,
+                    &asset_tp,
+                );
+                post_start_setup.push(create_associated_token_account_idempotent(
+                    &self.liquidator,
+                    &self.liquidator,
+                    &asset_mint,
+                    &asset_tp,
+                ));
+                ata
+            };
+
+            let liab_ata = if let Some(existing) = (self.ata)(&liab_mint) {
+                existing
+            } else {
+                let ata = get_associated_token_address_with_program_id(
+                    &self.liquidator,
+                    &liab_mint,
+                    &liab_tp,
+                );
+                if ata != asset_ata || asset_mint != liab_mint || asset_tp != liab_tp {
+                    post_start_setup.push(create_associated_token_account_idempotent(
+                        &self.liquidator,
+                        &self.liquidator,
+                        &liab_mint,
+                        &liab_tp,
+                    ));
+                }
+                ata
+            };
+
             let withdraw = builders::withdraw(&self.program, &self.group, account, &self.liquidator, &sz.asset_bank,
                 &asset_ata, &asset_vault, &asset_tp, sz.withdraw_amount, None, obs);
             let repay = builders::repay(&self.program, &self.group, account, &self.liquidator, &sz.liab_bank,
@@ -198,9 +242,19 @@ pub mod p0 {
             let ixs = builders::build_receivership(ReceivershipParams {
                 program: &self.program, group: &self.group, marginfi_account: account, liquidator: &self.liquidator,
                 global_fee_wallet: &self.global_fee_wallet, observation: obs, init_record,
-                pre_refreshes: vec![], withdraws: vec![withdraw], swaps, repays: vec![repay],
+                pre_refreshes: vec![], post_start_setup, withdraws: vec![withdraw], swaps, repays: vec![repay],
             });
-            let mut steps = vec![Step::StartLiquidation, Step::Withdraw];
+            let ata_program = Pubkey::from_str(darkbot_project0::protocol::ASSOCIATED_TOKEN_PROGRAM_ID).expect("static");
+            let mut steps = vec![Step::StartLiquidation];
+            let setup_count = ixs.iter()
+                .skip_while(|ix| ix.program_id != self.program || ix.data.get(..8) != Some(&darkbot_project0::protocol::ix::START_LIQUIDATION))
+                .skip(1)
+                .take_while(|ix| ix.program_id == ata_program)
+                .count();
+            for _ in 0..setup_count {
+                steps.push(Step::Other(ata_program));
+            }
+            steps.push(Step::Withdraw);
             steps.extend(route_steps);
             steps.push(if repay_from_inventory { Step::RepayFromInventory } else { Step::Repay });
             steps.push(Step::EndLiquidation);
