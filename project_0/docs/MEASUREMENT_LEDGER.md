@@ -1869,3 +1869,39 @@ Next mandatory work is R6/R7 qualification:
 3. failed-attempt cost matrix and deterministic economics thresholds;
 4. then 72 h final-code P6-LT Shadow.
 
+### 2026-10-03 — R6 integration completeness started (FIX-109/FIX-110)
+
+Implemented source-grounded R6 foundation:
+
+```text
+09ae89e  [FIX-109a] pin integration layout crates for R6
+760566d  [FIX-109b] add deterministic integration refresh planner
+129b01e  [FIX-109c] expose integration planner
+789b1b4  [FIX-109d] subscribe canonical integration state
+5cf73af  [FIX-109e] plan account-wide integration refresh prefix
+2bf02d5  [FIX-109f] wire integration refresh prefix into receivership
+d3e1c31  [FIX-110] add pinned integration withdraw builders
+```
+
+Pinned source: `0dotxyz/marginfi-v2@mrgn-0.1.11-rc1`.
+
+Current implementation:
+- Project_0 directly pins the canonical Kamino/Drift/JupLend layout/client crates from the same Marginfi tag.
+- Integration state accounts `integration_acc_1/2/3` are now explicit snapshot/WSS dependencies.
+- Deterministic pre-Start refresh planning exists for:
+  - Kamino: `refresh_reserve` + `refresh_obligation`, using the Reserve's own oracle configuration;
+  - Drift: `update_spot_market_cumulative_interest`;
+  - JupLend: `update_rate`.
+- The receivership builder now prepends the account-wide integration refresh prefix before `StartLiquidation`.
+- Pinned Marginfi-specific Kamino/Drift/JupLend withdraw instruction builders are implemented.
+
+Still deliberately OPEN:
+- exact projected post-refresh state semantics (R6 A4/B2);
+- enabling integration banks in ProtocolSizer;
+- runner-side account discovery for all optional Drift reward / Kamino farm cases;
+- integration-specific Mainnet simulation matrix.
+
+No fake freshness was introduced. Integration sizing remains fail-closed until exact post-refresh projection is qualified.
+
+Status: **R6 PARTIAL / compiler verification required before further wiring**.
+
