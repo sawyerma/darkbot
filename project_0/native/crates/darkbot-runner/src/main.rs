@@ -338,7 +338,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let rpc = RpcClient::new(rpc_url.clone());
     let rpc_recon = RpcClient::new(rpc_url); // [FIX-5] eigener Client für Reconciliation (fetch-Closure besitzt `rpc`)
     let mut st = StateCore::new(buffer_cap);
-    let mut drv = RecoveryDriver::new(3);
+    // [FIX-96] Production recovery waits for confirmed WSS/root catch-up before
+    // Snapshot-B reconciliation. This prevents false dirty reconciles when RPC Snapshot B
+    // is ahead of account notifications still in flight on the same confirmed stream.
+    let mut drv = RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(30));
     let dep_shared = std::sync::Arc::new(std::sync::Mutex::new(required_dependency_keys.clone()));
     let opt_shared = std::sync::Arc::new(std::sync::Mutex::new(optional_dependency_keys.clone()));
     let dep_for_fetch = dep_shared.clone();
