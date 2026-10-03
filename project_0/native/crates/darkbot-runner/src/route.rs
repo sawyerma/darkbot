@@ -62,8 +62,11 @@ impl JupiterV2RouteProvider {
     }
 
     fn exact_in(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount: u64) -> Result<Option<Route>, String> {
-        if amount == 0 || from_mint == to_mint {
-            return Ok(None);
+        if amount == 0 {
+            return Err("jupiter exact-in rejected locally: amount=0".into());
+        }
+        if from_mint == to_mint {
+            return Err(format!("jupiter exact-in rejected locally: identical mint {}", from_mint));
         }
         let url = format!("{}/build", self.base_url.trim_end_matches('/'));
         let mut req = self.client.get(url).query(&[
@@ -84,13 +87,14 @@ impl JupiterV2RouteProvider {
         }
         let response = req.send().map_err(|e| format!("jupiter /build transport: {e}"))?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
+            return Err("jupiter /build: no route (HTTP 404)".into());
         }
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
             if body.contains("NO_ROUTES_FOUND") || body.contains("COULD_NOT_FIND_ANY_ROUTE") || body.contains("TOKEN_NOT_TRADABLE") {
-                return Ok(None);
+                let short: String = body.chars().take(240).collect();
+                return Err(format!("jupiter /build: no executable route: {}", short));
             }
             return Err(format!("jupiter /build HTTP {status}: {body}"));
         }
@@ -101,7 +105,10 @@ impl JupiterV2RouteProvider {
         let in_amount = build.in_amount.parse::<u64>().map_err(|e| format!("jupiter inAmount: {e}"))?;
         let out_amount = build.out_amount.parse::<u64>().map_err(|e| format!("jupiter outAmount: {e}"))?;
         if in_amount != amount || out_amount == 0 {
-            return Ok(None);
+            return Err(format!(
+                "jupiter /build invalid amounts: requested_in={} response_in={} response_out={}",
+                amount, in_amount, out_amount
+            ));
         }
 
         let mut instructions = Vec::new();
@@ -118,11 +125,17 @@ impl JupiterV2RouteProvider {
 
         let jup = Pubkey::from_str(JUP_PROGRAM).map_err(|e| e.to_string())?;
         if instructions.iter().any(|ix| ix.program_id != jup) {
-            // [FIX-102] The pinned Marginfi validator scans every non-ComputeBudget ix and
-            // requires at least an 8-byte discriminator. ATA create/idempotent is 1 byte, so
-            // Jupiter setup instructions from the Associated Token Program cannot live inside
-            // the receivership TX. Token accounts must already be prewarmed.
-            return Ok(None);
+            let mut bad: Vec<String> = instructions
+                .iter()
+                .filter(|ix| ix.program_id != jup)
+                .map(|ix| format!("{}(data_len={})", ix.program_id, ix.data.len()))
+                .collect();
+            bad.sort();
+            bad.dedup();
+            return Err(format!(
+                "jupiter route incompatible with receivership top-level validator: {}",
+                bad.join(",")
+            ));
         }
 
         let lookup_tables = transform_alts(build.addresses_by_lookup_table_address)?;
