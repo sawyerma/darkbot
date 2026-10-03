@@ -316,10 +316,34 @@ pub mod p0 {
             let mut out = Vec::new();
 
             let mut route_errors = Vec::new();
+            let mut ata_errors = Vec::new();
 
             for sz in sizings {
-                let (_, liab_mint, _) = self.bank(&sz.liab_bank)?;
-                let (_, asset_mint, _) = self.bank(&sz.asset_bank)?;
+                let (_, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
+                let (_, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
+
+                let mut missing = Vec::new();
+                if (self.ata)(&asset_mint).is_none() {
+                    missing.push(format!(
+                        "asset ATA={} mint={} token_program={}",
+                        get_associated_token_address_with_program_id(&self.liquidator, &asset_mint, &asset_tp),
+                        asset_mint,
+                        asset_tp
+                    ));
+                }
+                if (self.ata)(&liab_mint).is_none() {
+                    missing.push(format!(
+                        "liability ATA={} mint={} token_program={}",
+                        get_associated_token_address_with_program_id(&self.liquidator, &liab_mint, &liab_tp),
+                        liab_mint,
+                        liab_tp
+                    ));
+                }
+                if !missing.is_empty() {
+                    ata_errors.extend(missing);
+                    continue;
+                }
+
                 let inv = (self.inventory)(&sz.liab_bank);
 
                 // [FIX-97] Funding feasibility is independent from an asset→liability market
@@ -468,6 +492,11 @@ pub mod p0 {
                 }
             }
 
+            if out.is_empty() && !ata_errors.is_empty() {
+                ata_errors.sort();
+                ata_errors.dedup();
+                return Err(format!("ATA:PREWARM_REQUIRED: {}", ata_errors.join(" | ")));
+            }
             if out.is_empty() && !route_errors.is_empty() {
                 return Err(format!("ROUTING:{}", route_errors.join(" | ")));
             }
