@@ -614,7 +614,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     program_filters: vec![
                         (program, liability_account_filters(&group)),
                         (program, bank_filters(&group)),
-                        (program, liquidation_record_filters()),
                     ],
                     accounts: all_keys,
                     slots: true,
