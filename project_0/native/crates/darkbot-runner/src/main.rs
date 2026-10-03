@@ -5,9 +5,9 @@
 //! und schreibt `Unavailable`-Records — damit ist die Kette messbar, bevor P3 angebunden ist.
 //!
 //! Status: UNTESTED / VERIFY. Threads: Ingress (WSS) → bounded channel → State/Detection-Loop;
-//! Blockhash-Poller separat. Kein RPC im Entscheidungs-Loop.
+//! Blockhash, Winner-Matcher und Submission-Reconciliation separat. Kein Remote-RPC im Entscheidungs-Loop.
 
-use darkbot_common::channel::bounded;
+use darkbot_common::channel::{bounded, ChannelError};
 use darkbot_common::config;
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
@@ -24,10 +24,11 @@ use darkbot_runner::pipeline::{ReceivershipBuilder, ReceivershipPlan};
 use darkbot_runner::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
 #[cfg(feature = "crate_health")]
 use darkbot_runner::route::JupiterV2RouteProvider;
-use darkbot_runner::pending::{try_reconcile, PendingSubmission};
+use darkbot_runner::pending::PendingSubmission;
 use darkbot_runner::record::Decision;
 use darkbot_runner::shadow_ledger::ShadowLedger;
-use darkbot_runner::winner::{find_winner, race_outcome, RaceOutcome};
+use darkbot_runner::winner::{race_outcome, RaceOutcome};
+use darkbot_runner::remote_workers::{RemoteWorkers, ReconcileWork, WinnerWatch};
 use darkbot_solana::ingress::SlotWatch;
 use darkbot_solana::state::blockhash::BlockhashCache;
 use darkbot_solana::submit::rpc::RpcSubmitter;
@@ -358,7 +359,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).
     let rpc = RpcClient::new(rpc_url.clone());
-    let rpc_recon = RpcClient::new(rpc_url); // [FIX-5] eigener Client für Reconciliation (fetch-Closure besitzt `rpc`)
     let mut st = StateCore::new(buffer_cap);
     // [FIX-96] Production recovery waits for confirmed WSS/root catch-up before
     // Snapshot-B reconciliation. This prevents false dirty reconciles when RPC Snapshot B
@@ -496,10 +496,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let resources = Resources { compute_unit_limit: config::parsed_or("P0_CU_LIMIT", 1_400_000)?, priority_micro_lamports_per_cu: config::parsed_or("P0_PRIORITY_MICRO", 0)?, loaded_accounts_data_size: Some(config::parsed_or("P0_LOADED_DATA", 64 * 1024 * 1024)?) };
     let freshness = Freshness { max_opportunity_age_ns: config::parsed_or("P0_MAX_AGE_NS", 2_000_000_000)?, execution_deadline_ns: config::parsed_or("P0_DEADLINE_NS", 2_000_000_000)? };
     let min_profit: i128 = config::parsed_or::<i128>("P0_MIN_PROFIT", 0)?;
-    let mut pending: Vec<PendingSubmission> = Vec::new();
+
+    // [FIX-108][R4] All remote winner/reconciliation RPC is owned by bounded workers.
+    let remote_worker_capacity: usize = config::parsed_or("P0_REMOTE_WORKER_BUFFER", 256)?;
+    if remote_worker_capacity == 0 {
+        return Err("P0_REMOTE_WORKER_BUFFER must be > 0".into());
+    }
+    let remote = RemoteWorkers::start(
+        rpc_url.clone(),
+        program,
+        &shutdown,
+        remote_worker_capacity,
+    )?;
+    let mut pending: Vec<ReconcileWork> = Vec::new();
+
     // [M2][M3] Shadow-Evidence: Kandidaten-Watchlist für den Winner-Vergleich und Tages-Ledger.
     let mut ledger = ShadowLedger::new();
-    let mut watch: Vec<(Pubkey, u64, u64, Option<u64>, Option<i128>, bool, Option<darkbot_runner::record::LossReason>, u64)> = Vec::new(); // (account, rx_slot, detect_slot, sign_slot, expected_net, shadow_ready, our_loss, created_unix)
+    let mut watch: Vec<WinnerWatch> = Vec::new();
     let summary_path = config::parsed_or::<String>("P0_SUMMARY_PATH", "project_0/data/shadow/daily_summary.jsonl".into())?;
     let mut summaries = std::fs::OpenOptions::new().create(true).append(true).open(&summary_path)?;
     let _ = Path::Rpc;
@@ -518,6 +531,112 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if halt.is_raised() {
             st.halt(darkbot_common::error::HaltReason::FeedGap);
         }
+
+        // [FIX-108][R4] Apply completed remote work on the state thread, but never perform RPC here.
+        let worker_now_s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        while let Some(done) = remote.winner_results.try_pop() {
+            let mut w = done.watch;
+            match done.result {
+                Ok(Some(win)) => {
+                    let out = race_outcome(
+                        win.slot,
+                        w.rx_slot,
+                        w.detect_slot,
+                        w.sign_slot,
+                        w.shadow_ready,
+                        w.our_loss,
+                    );
+                    match out {
+                        RaceOutcome::ReadyBeforeWinner => ledger.on_race(true, None, w.expected_net),
+                        RaceOutcome::SameSlotUnknown => ledger.on_same_slot(),
+                        RaceOutcome::Loss(l) => ledger.on_race(false, Some(l), None),
+                    }
+                    let line = serde_json::json!({
+                        "race": {
+                            "account": w.account.to_string(),
+                            "winner": win,
+                            "our_sign_slot": w.sign_slot,
+                            "outcome": out,
+                            "expected_net": w.expected_net
+                        }
+                    });
+                    let _ = writeln!(records, "{}", line);
+                }
+                Ok(None) if worker_now_s.saturating_sub(w.created_unix_s) < 900 => {
+                    w.next_check_unix_s = worker_now_s.saturating_add(5);
+                    watch.push(w);
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    w.next_check_unix_s = worker_now_s.saturating_add(5);
+                    watch.push(w);
+                }
+            }
+        }
+
+        while let Some(done) = remote.reconcile_results.try_pop() {
+            let mut work = done.work;
+            match done.result {
+                Some(r) => {
+                    safety.record_outcome(
+                        worker_now_s,
+                        r.landed_success,
+                        r.realized_pnl,
+                        work.submission.exposure,
+                        0,
+                    );
+                    if let Ok(j) = serde_json::to_string(&r.record) {
+                        let _ = writeln!(records, "{}", j);
+                    }
+                }
+                None => {
+                    work.next_check_unix_s = worker_now_s.saturating_add(1);
+                    pending.push(work);
+                }
+            }
+        }
+
+        // Bounded non-blocking dispatch. Full queues retain the work item for the next loop.
+        if !watch.is_empty() {
+            let mut keep = Vec::with_capacity(watch.len());
+            for w in watch.drain(..) {
+                if worker_now_s < w.next_check_unix_s {
+                    keep.push(w);
+                    continue;
+                }
+                match remote.winner_jobs.try_push(w) {
+                    Ok(()) => {}
+                    Err(ChannelError::Full(w)) => keep.push(w),
+                    Err(ChannelError::Disconnected(_)) => {
+                        return Err("winner RPC worker disconnected".into());
+                    }
+                }
+            }
+            watch = keep;
+        }
+
+        if !pending.is_empty() {
+            let mut keep = Vec::with_capacity(pending.len());
+            for p in pending.drain(..) {
+                if worker_now_s < p.next_check_unix_s {
+                    keep.push(p);
+                    continue;
+                }
+                match remote.reconcile_jobs.try_push(p) {
+                    Ok(()) => {}
+                    Err(ChannelError::Full(p)) => keep.push(p),
+                    Err(ChannelError::Disconnected(_)) => {
+                        return Err("reconcile RPC worker disconnected".into());
+                    }
+                }
+            }
+            pending = keep;
+        }
+
         let Some(ev) = consumer.pop_timeout(Duration::from_millis(250)) else { continue };
         // Trigger (a) Long-Tail: jedes MarginfiAccount-Update → Detection im Shadow-Modus.
         let detect = match &ev {
@@ -756,7 +875,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if matches!(rec.decision, Decision::ShadowReady | Decision::ShadowSimFailed | Decision::Skip) {
                 let shadow_ready = matches!(rec.decision, Decision::ShadowReady);
                 let our_loss = if shadow_ready { None } else { Some(rec.loss.unwrap_or(darkbot_runner::record::LossReason::Build)) };
-                watch.push((acct, slot, slot, rec.sign_slot, rec.net_profit, shadow_ready, our_loss, now));
+                watch.push(WinnerWatch {
+                    account: acct,
+                    rx_slot: slot,
+                    detect_slot: slot,
+                    sign_slot: rec.sign_slot,
+                    expected_net: rec.net_profit,
+                    shadow_ready,
+                    our_loss,
+                    created_unix_s: now,
+                    next_check_unix_s: now.saturating_add(60),
+                });
             }
             // [FIX-18][FIX-23] Submitted und AmbiguousSubmission landen beide in der Reconciliation.
             if let (Some(sig), Some(exp)) = (rec.signature.as_deref(), rec.exposure) {
@@ -764,50 +893,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let sigs = rec.all_signatures.iter().filter_map(|x| x.parse().ok()).collect();
                     // [FIX-33] tatsächlich verwendeter Pfad aus dem Record, nicht die Adapter-Default.
                     let path = match rec.path.as_deref() { Some("JITO_BUNDLE") => darkbot_solana::submit::SubmissionPath::JitoBundle, Some("JITO_SINGLE") => darkbot_solana::submit::SubmissionPath::JitoSingle, _ => darkbot_solana::submit::SubmissionPath::Rpc };
-                    pending.push(PendingSubmission { signature: s, signatures: sigs, bundle_id: rec.bundle_id.clone(), path, exposure: exp, submitted_unix_s: now });
+                    pending.push(ReconcileWork {
+                        submission: PendingSubmission {
+                            signature: s,
+                            signatures: sigs,
+                            bundle_id: rec.bundle_id.clone(),
+                            path,
+                            exposure: exp,
+                            submitted_unix_s: now,
+                        },
+                        next_check_unix_s: now,
+                    });
                 }
             }
         }
-        // [M2] Winner-Vergleich: nach ≥ 60 s nachsehen, wer den Account tatsächlich liquidiert hat; nach 15 min aufgeben.
-        if !watch.is_empty() {
-            let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            let mut keep = Vec::with_capacity(watch.len());
-            for w in watch.drain(..) {
-                let (acct, rx_slot, det_slot, sign_slot, net, shadow_ready, our_loss, created) = w;
-                if now_s.saturating_sub(created) < 60 { keep.push(w); continue; }
-                match find_winner(&rpc_recon, &program, &acct, rx_slot.saturating_sub(2)) {
-                    Ok(Some(win)) => {
-                        let out = race_outcome(win.slot, rx_slot, det_slot, sign_slot, shadow_ready, our_loss);
-                        match out {
-                            RaceOutcome::ReadyBeforeWinner => ledger.on_race(true, None, net),
-                            RaceOutcome::SameSlotUnknown => ledger.on_same_slot(),
-                            RaceOutcome::Loss(l) => ledger.on_race(false, Some(l), None),
-                        }
-                        let line = serde_json::json!({"race": {"account": acct.to_string(), "winner": win, "our_sign_slot": sign_slot, "outcome": out, "expected_net": net}});
-                        let _ = writeln!(records, "{}", line);
-                    }
-                    Ok(None) if now_s.saturating_sub(created) < 900 => keep.push(w),
-                    Ok(None) => { /* niemand hat liquidiert: kein Rennen, keine Zählung */ }
-                    Err(_) => keep.push(w),
-                }
-            }
-            watch = keep;
-        }
-        // [FIX-5] Offene Submissions reconciliieren → Safety-Buchhaltung schließen.
-        if !pending.is_empty() {
-            let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            let mut still = Vec::with_capacity(pending.len());
-            for p in pending.drain(..) {
-                match try_reconcile(&rpc_recon, None, &p, now_s, clock.now_ns(), 90) {
-                    Some(r) => {
-                        safety.record_outcome(now_s, r.landed_success, r.realized_pnl, p.exposure, 0); // [FIX-24] None = UNKNOWN → HALT
-                        if let Ok(j) = serde_json::to_string(&r.record) { let _ = writeln!(records, "{}", j); }
-                    }
-                    None => still.push(p),
-                }
-            }
-            pending = still;
-        }
+        // [FIX-108][R4] Winner/Reconcile RPC is handled only by bounded workers above.
         // Detection/Pipeline (P2→P5) wird hier eingehängt, sobald HealthEngine (P3) verfügbar ist.
         // Bis dahin: nur State + Zähler, damit S1-LT/S2 messbar sind (Ledger).
         let update_total = counts.iter().sum::<u64>();
