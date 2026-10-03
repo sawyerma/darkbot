@@ -18,6 +18,8 @@ pub mod execution;
 pub mod funding;
 pub mod health;
 pub mod index;
+#[cfg(feature = "crate_health")]
+pub mod integration;
 pub mod planner;
 pub mod prepared;
 pub mod protocol;
