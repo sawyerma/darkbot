@@ -39,6 +39,7 @@ use darkbot_solana::state::recovery::{RecoveryDriver, SnapshotData};
 use darkbot_solana::state::snapshot;
 use darkbot_solana::state::StateCore;
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 #[cfg(feature = "crate_health")]
 use marginfi_type_crate::{
@@ -235,6 +236,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // [FIX-78] Bootstrap only the configured group's Banks first. Full-program GPA was ~387 MB
     // in C0 and is unnecessary for dependency discovery.
     let dep_rpc = RpcClient::new(config::require("P0_RPC_URL")?);
+
+    // [FIX-98] A signed Shadow simulation uses the real fee payer. If that pubkey has never
+    // been funded on-chain, Solana rejects the transaction during account loading with
+    // TransactionError::AccountNotFound before any program executes (empty logs). Fail here
+    // with the exact payer instead of misclassifying the first real Build/Sign/Sim candidate.
+    let payer_account = dep_rpc
+        .get_account_with_commitment(&liquidator, CommitmentConfig::confirmed())?
+        .value;
+    let Some(payer_account) = payer_account else {
+        return Err(format!(
+            "PAYER_ACCOUNT_NOT_FOUND: liquidator={} has no confirmed on-chain account; fund this exact fee-payer pubkey with SOL before Shadow Build/Sign/Simulation",
+            liquidator
+        ).into());
+    };
+    eprintln!(
+        "payer_preflight: pubkey={} lamports={} owner={} executable={}",
+        liquidator,
+        payer_account.lamports,
+        payer_account.owner,
+        payer_account.executable
+    );
     #[cfg(feature = "crate_health")]
     let pre = snapshot::program_accounts_filtered(&dep_rpc, &program, bank_filters(&group), &clock)?;
     #[cfg(not(feature = "crate_health"))]

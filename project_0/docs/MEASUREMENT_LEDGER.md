@@ -1407,3 +1407,46 @@ Qualified behavior in code:
 Decision: **R3/FIX-97 compiler/workspace PASS**.
 
 Remaining evidence: Mainnet Shadow must demonstrate that a generic candidate is no longer stopped solely by the old unconditional ExactIn quote and can progress to the next real Build/Sign/Simulation boundary.
+
+
+### 2026-10-03 — R97 Mainnet census / R5 first Build→Sign→Simulation boundary
+
+Run:
+`r97_20261003T193304Z`
+
+Bootstrap/recovery remained clean:
+`StreamReady → Snapshot A/B → root_catchup ok → reconcile=clean → Ready`.
+
+The 61 queued `was_liquidatable` bootstrap candidates resolved as:
+
+```text
+55  Bankruptcy
+ 2  StateRace
+ 2  Routing
+ 1  Sizing
+ 1  ShadowTechnicalSimFailed
+61  total
+```
+
+The first generic candidate to cross the transaction boundary was:
+
+```text
+account=Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7
+decision=ShadowTechnicalSimFailed
+funding=ZERO_PREFUND_SAME_TX
+tx_version=V0
+serialized_bytes=1224
+locked_accounts=35
+sign_slot=453028817
+simulation=UiTransactionError(AccountNotFound)
+logs=[]
+```
+
+Interpretation:
+- **R5 Build + Sign + call to simulation is now proven on Mainnet Shadow.**
+- Simulation success is **not** proven; R5 remains open.
+- The current concrete blocker is a Solana account-loading/debit failure before program execution.
+- This run does not directly exercise an Inventory-funded candidate, so the R3/FIX-97 Mainnet inventory-path proof remains separate from its already-passed compiler/unit qualification.
+- Jupiter route failures on other candidates remain legitimate ZERO_PREFUND-specific evidence and no longer imply that Inventory feasibility is coupled to ExactIn routing.
+
+Next: **FIX-98** — fail fast at startup if the configured liquidator/fee-payer pubkey has no confirmed on-chain account, and print its lamport balance/owner when present. This distinguishes an unfunded/nonexistent payer from a deeper transaction-account problem before another full census.
