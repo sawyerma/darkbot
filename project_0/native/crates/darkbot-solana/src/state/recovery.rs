@@ -55,11 +55,25 @@ pub struct RecoveryDriver {
     pub max_attempts: u32,
     pub attempts_total: u64,
     pub reconcile_failures: u64,
+    /// [FIX-96] Optional production barrier: before reconciling Snapshot B, wait until
+    /// the WSS root has reached every per-account B context slot, while continuously
+    /// draining ingress. Disabled by default so offline unit tests stay deterministic.
+    root_catchup_timeout: Option<Duration>,
 }
 
 impl RecoveryDriver {
     pub fn new(max_attempts: u32) -> Self {
-        RecoveryDriver { max_attempts, attempts_total: 0, reconcile_failures: 0 }
+        RecoveryDriver {
+            max_attempts,
+            attempts_total: 0,
+            reconcile_failures: 0,
+            root_catchup_timeout: None,
+        }
+    }
+
+    pub fn with_root_catchup(mut self, timeout: Duration) -> Self {
+        self.root_catchup_timeout = Some(timeout);
+        self
     }
 
     /// Verarbeitet ein Ingress-Event und startet bei Gap/Reconnect/Fatal die Recovery.
@@ -76,7 +90,7 @@ impl RecoveryDriver {
 
     /// Bootstrap und Recovery sind derselbe Pfad.
     pub fn recover(&mut self, st: &mut StateCore, fetch: &mut SnapshotFn<'_>, drain: &mut DrainFn<'_>) -> RecoveryOutcome {
-        for attempt in 1..=self.max_attempts {
+        'attempts: for attempt in 1..=self.max_attempts {
             self.attempts_total += 1;
             eprintln!("[recovery] attempt={}/{} snapshot=A start", attempt, self.max_attempts);
             let a = match fetch() {
@@ -136,6 +150,54 @@ impl RecoveryDriver {
                 self.reconcile_failures += 1;
                 continue;
             }
+
+            // [FIX-96] Snapshot B can be ahead of account notifications still queued/being
+            // delivered by the same confirmed WSS stream. Comparing immediately creates false
+            // mismatches. Root is the conservative barrier: once root >= every B account context
+            // slot, all B state is finalized; keep draining ingress until that point, then compare.
+            if let Some(timeout) = self.root_catchup_timeout {
+                let target_slot = b.accounts.iter().map(|a| a.slot).max().unwrap_or(b.slot);
+                let started = Instant::now();
+                eprintln!(
+                    "[recovery] attempt={}/{} root_catchup start target={} current={:?}",
+                    attempt,
+                    self.max_attempts,
+                    target_slot,
+                    st.root()
+                );
+                loop {
+                    drain(st);
+                    if st.root().is_some_and(|root| root >= target_slot) {
+                        // One final drain after observing the barrier so already-enqueued account
+                        // notifications cannot remain behind the root event in the local channel.
+                        drain(st);
+                        eprintln!(
+                            "[recovery] attempt={}/{} root_catchup ok target={} root={} elapsed_ms={}",
+                            attempt,
+                            self.max_attempts,
+                            target_slot,
+                            st.root().unwrap_or(0),
+                            started.elapsed().as_millis()
+                        );
+                        break;
+                    }
+                    if started.elapsed() >= timeout {
+                        eprintln!(
+                            "[recovery] attempt={}/{} root_catchup timeout target={} current={:?} elapsed_ms={}",
+                            attempt,
+                            self.max_attempts,
+                            target_slot,
+                            st.root(),
+                            started.elapsed().as_millis()
+                        );
+                        st.halt(HaltReason::ReconcileFailure);
+                        self.reconcile_failures += 1;
+                        continue 'attempts;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+
             let rep = st.reconcile(b.slot, &b.accounts);
             if rep.is_clean() {
                 eprintln!(
@@ -174,6 +236,7 @@ mod tests {
     use super::*;
     use crate::ingress::{AccountUpdate, SourceKind};
     use solana_sdk::pubkey::Pubkey;
+use std::time::{Duration, Instant};
 
     fn upd(pk: Pubkey, slot: u64, data: u8) -> AccountUpdate {
         AccountUpdate { pubkey: pk, owner: Pubkey::new_from_array([0xA5; 32]), lamports: 1, data: vec![data], slot, write_version: None, source: SourceKind::Snapshot, t_rx_ns: 0 } // [FIX-57] stable owner across A/B
