@@ -1503,3 +1503,25 @@ Decision:
 - **Recovery/bootstrap remains PASS with the funded signer.**
 - The prior R97 `AccountNotFound` payer blocker is removed.
 - R5 simulation outcome is still pending from the 61 queued candidates; do not mark R5 simulation PASS until the JSONL decisions show a successful `ShadowTechnicalReady` / `ShadowReady` or a new concrete simulation failure.
+
+
+### 2026-10-03 — R99 simulation / FIX-100 root cause
+
+R99 candidate `Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7` progressed past account loading and into Marginfi. Simulation failed at instruction 2:
+
+```text
+Instruction: MarginfiAccountInitLiqRecord
+Allocate: account 8DP6CQt14htc34gTB38hzYzbDKQ7rUBkx96oP99y84v7 already in use
+InstructionError(2, Custom(0))
+```
+
+Root cause: the builder inferred liquidation-record existence from whether the PDA happened to be present in DarkBot RAM. That PDA was not part of the subscribed state, so an existing on-chain record was incorrectly treated as missing.
+
+Protocol source confirms the correct zero-RPC signal: `MarginfiAccount.liquidation_record` is set to the record PDA when initialized and reset to `Pubkey::default()` when the record is closed.
+
+FIX-100 changes the builder to use that canonical field:
+- default link → include InitLiquidationRecord;
+- exact derived PDA → do not initialize;
+- any other non-default pubkey → fail closed with LIQUIDATION_RECORD_MISMATCH.
+
+This keeps the decision on reconciled MarginfiAccount state and avoids adding a second RPC/source to the hot path.
