@@ -32,7 +32,9 @@
     "exit_code.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
     "launch_block.json": "eba12d818858acf0d40297d17cface19ada179458e5c7626dd883caa32310979",
     "launch_receipt.json": "20f754142b52ba63735c730ca3af2fab304ed87fd519c9c45cc8067c8de2f074",
-    "runner.log": "58f88b5bbf453a2cd55e9156a23733ebf2af68ec8a4f9e6c2f8c9dc4429ffefb"
+    "runner.log": "58f88b5bbf453a2cd55e9156a23733ebf2af68ec8a4f9e6c2f8c9dc4429ffefb",
+    "other_receipt_5a7b5f5f4276048ead13c968544f2be3620ded89f1475cc07fdf554645b36d84.json": "35f0dd757869dbfbb4aedbc585add4a7191a7bb508c05ef4c07d72d7d57d689d",
+    "other_receipt_c569053f95f328a6a24c763c82dc1e9d25164cb946a5d62ad409f2f6ba0ec614.json": "fc0c53e10e7b173763b187544918bb693cf8fd5cc112b1e12d719969203b0329"
   },
   "block_time_analysis": {
     "source": "canonical block headers milliTimestamp, not per-transaction execution ticks",
@@ -43,5 +45,29 @@
     "same_one_second_bucket": false,
     "same_one_minute_bucket": true,
     "T_buy_minus_T0_remains_unknown": true
+  },
+  "trade_event_analysis": {
+    "source": "raw Portal events in every receipt of launch and BUY blocks; no external OHLC feed retrieved",
+    "all_four_receipts_covered": true,
+    "launch_event_ts_seconds": 1790987097,
+    "buy_events": [
+      {
+        "tx_hash": "0xfcab0afaca413182e879e44dd87b7f86ff547e696e5c5d320b81869d55538d0a",
+        "block": 134533645,
+        "tx_index": 0,
+        "log_index": 10,
+        "event_ts_seconds": 1790987098,
+        "amount_base_units": "17669034223232267628301",
+        "quote_input_wei": "100000000000000",
+        "fee_wei": "1000000000000",
+        "post_price_raw": "5546515046"
+      }
+    ],
+    "our_buy_is_first_recorded_portal_buy": true,
+    "prior_portal_buys_including_nested_router_calls": 0,
+    "event_timestamp_field_delta_seconds": 1,
+    "execution_delta_ms": null,
+    "effective_quote_atomic_units_per_received_atomic_unit": "5.659618898044479368682226228898161862940E-9",
+    "external_ohlc_access": "Flap HTTP fetch 403; browser chain menu does not expose BSC testnet; no millisecond trade feed established"
   }
 }
