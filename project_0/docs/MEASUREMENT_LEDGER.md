@@ -1766,3 +1766,24 @@ Changes:
 Status: **IMPLEMENTED / VERIFY**.
 Next gate: workspace build/test, then R107 Mainnet Shadow. Expected evidence is that EndLiquidation no longer fails with AccountOwnedByWrongProgram.
 
+
+
+### 2026-10-03 — R107 full simulation PASS
+
+Run: `r107_20261003T221630Z`
+
+```text
+account=Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7
+decision=ShadowTechnicalReady
+funding=ZERO_PREFUND_SAME_TX
+tx_version=V0
+serialized_bytes=963
+locked_accounts=28
+simulated_cu=256993
+```
+
+R5 technical simulation gate: **PASS**.
+
+The full Mainnet Shadow path completed through StartLiquidation, withdraw, Jupiter swap, repay and EndLiquidation with a successful simulation.
+
+Still open: failed-attempt economics, landed execution, realized PnL, R4 hot-path isolation, R6/R7 qualification, 72 h Shadow, and LIVE.
