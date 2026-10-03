@@ -7,7 +7,7 @@ license = "UNLICENSED"
 
 [features]
 default = []
-crate_health = ["darkbot-project0/crate_health", "marginfi-type-crate"]
+crate_health = ["darkbot-project0/crate_health", "marginfi-type-crate", "kamino-mocks", "drift-mocks", "juplend-mocks"]
 txv1 = ["darkbot-solana/txv1"]
 
 [dependencies]
@@ -27,6 +27,11 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 bytemuck = "1"
 spl-associated-token-account = { version = "8.0.0", default-features = false, features = ["no-entrypoint"] }
 marginfi-type-crate = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["mainnet-beta"], optional = true }
+# [FIX-112f][R6] Runner directly decodes the same pinned integration layouts used by
+# darkbot-project0 when constructing venue-specific withdraw account metas.
+kamino-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
+drift-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
+juplend-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
 
 [[bin]]
 name = "p0-longtail"
