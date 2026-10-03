@@ -1295,3 +1295,49 @@ Interpretation:
 - provider transport/decode errors remain normal retry failures.
 
 Status: **IMPLEMENTED / VERIFY**.
+
+
+### 2026-10-03 — FIX-96 compiler/workspace qualification — PASS
+
+Qualified commit:
+`e8b9143a8e5957ce33832929b11e4beceedab5e2` ([FIX-96c], including FIX-96a/b).
+
+Commands executed:
+
+```text
+cargo build \
+  --manifest-path project_0/native/Cargo.toml \
+  --features "crate_health txv1"
+
+cargo test \
+  --manifest-path project_0/native/Cargo.toml \
+  --workspace \
+  --features "crate_health txv1"
+```
+
+Observed results:
+
+```text
+darkbot-common      19 passed; 0 failed
+darkbot-project0    34 passed; 0 failed
+darkbot-runner       3 passed; 0 failed
+darkbot-solana      30 passed; 0 failed
+doc-tests             0 failed
+total                86 passed; 0 failed
+```
+
+The only compiler warning was the unused test helper `JupiterV2RouteProvider::with_base_url`; it is functionally irrelevant to FIX-96 and does not block qualification.
+
+Decision: **FIX-96 compiler/workspace PASS**.
+
+Remaining FIX-96 evidence is Mainnet-only: observe the production recovery path with the enabled 30 s root catch-up barrier and require
+
+```text
+StreamReady
+→ Snapshot A/B
+→ root_catchup ok
+→ reconcile=clean
+→ recovery: Ready, run_state=Ready
+```
+
+Any `root_catchup timeout`, `reconcile=dirty`, or exhausted recovery keeps FIX-96 Mainnet qualification open/fail-closed.
