@@ -115,7 +115,8 @@ pub mod p0 {
                     // EndLiquidation premium is already represented by seized-vs-repaid value.
                     protocol_fees: 0,
                     flat_sol_fee,
-                    // ATAs must pre-exist; this provider never assumes account-creation rent is zero.
+                    // [FIX-95] Missing ATAs may be created inside the receivership TX for Shadow
+                    // technical qualification. Rent economics remain UNKNOWN/unmeasured for LIVE.
                     rent_and_token: 0,
                     premium_bps: sz.premium_bps,
                     slippage_bps: self.slippage_bps,
@@ -239,6 +240,7 @@ pub mod p0 {
                 }
             }).collect();
             let init_record = self.state.account(&darkbot_project0::protocol::liquidation_record_pda(&self.program, account)).is_none();
+            let setup_count = post_start_setup.len();
             let ixs = builders::build_receivership(ReceivershipParams {
                 program: &self.program, group: &self.group, marginfi_account: account, liquidator: &self.liquidator,
                 global_fee_wallet: &self.global_fee_wallet, observation: obs, init_record,
@@ -246,11 +248,6 @@ pub mod p0 {
             });
             let ata_program = Pubkey::from_str(darkbot_project0::protocol::ASSOCIATED_TOKEN_PROGRAM_ID).expect("static");
             let mut steps = vec![Step::StartLiquidation];
-            let setup_count = ixs.iter()
-                .skip_while(|ix| ix.program_id != self.program || ix.data.get(..8) != Some(&darkbot_project0::protocol::ix::START_LIQUIDATION))
-                .skip(1)
-                .take_while(|ix| ix.program_id == ata_program)
-                .count();
             for _ in 0..setup_count {
                 steps.push(Step::Other(ata_program));
             }
