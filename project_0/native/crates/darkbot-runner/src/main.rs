@@ -28,7 +28,7 @@ use darkbot_runner::pending::PendingSubmission;
 use darkbot_runner::record::Decision;
 use darkbot_runner::shadow_ledger::ShadowLedger;
 use darkbot_runner::winner::{race_outcome, RaceOutcome};
-use darkbot_runner::remote_workers::{RemoteWorkers, ReconcileWork, WinnerWatch};
+use darkbot_runner::remote_workers::{ProjectionWork, RemoteWorkers, ReconcileWork, WinnerWatch};
 use darkbot_solana::ingress::SlotWatch;
 use darkbot_solana::state::blockhash::BlockhashCache;
 use darkbot_solana::submit::rpc::RpcSubmitter;
@@ -41,12 +41,13 @@ use darkbot_solana::state::snapshot;
 use darkbot_solana::state::StateCore;
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{account::Account, hash::{hash, Hash}, pubkey::Pubkey};
 #[cfg(feature = "crate_health")]
 use marginfi_type_crate::{
     constants::{ASSET_TAG_DEFAULT, ASSET_TAG_SOL},
     types::{Bank, BankOperationalState, MarginfiAccount},
 };
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -57,6 +58,17 @@ impl<'a> AccountSource for StateView<'a> {
         self.0.get(key).map(|r| (r.owner, r.lamports, r.data.as_slice()))
     }
 }
+
+
+#[cfg(feature = "crate_health")]
+struct CachedProjection {
+    base_account_hash: Hash,
+    projection_slot: u64,
+    accounts: Vec<(Pubkey, Account)>,
+}
+
+#[cfg(feature = "crate_health")]
+type DetectWork = (Pubkey, u64, u64, &'static str);
 
 #[cfg(not(feature = "crate_health"))]
 struct NoPlans;
@@ -352,9 +364,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })?;
         Ok(session)
     };
-    let mut subscribed: std::collections::HashSet<Pubkey> = subscription_keys.iter().copied().collect();
-    let mut required_set: std::collections::HashSet<Pubkey> = required_dependency_keys.iter().copied().collect();
-    let mut optional_set: std::collections::HashSet<Pubkey> = optional_dependency_keys.iter().copied().collect();
+    let mut subscribed: HashSet<Pubkey> = subscription_keys.iter().copied().collect();
+    let mut required_set: HashSet<Pubkey> = required_dependency_keys.iter().copied().collect();
+    let mut optional_set: HashSet<Pubkey> = optional_dependency_keys.iter().copied().collect();
     let mut ingress_session = spawn_ingress(sub.clone(), producer.clone(), halt.clone())?;
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).
@@ -509,6 +521,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         remote_worker_capacity,
     )?;
     let mut pending: Vec<ReconcileWork> = Vec::new();
+
+    #[cfg(feature = "crate_health")]
+    let mut projection_cache: HashMap<Pubkey, CachedProjection> = HashMap::new();
+    #[cfg(feature = "crate_health")]
+    let mut projection_pending: HashSet<Pubkey> = HashSet::new();
+    #[cfg(feature = "crate_health")]
+    let mut detect_queue: VecDeque<DetectWork> = VecDeque::new();
 
     // [M2][M3] Shadow-Evidence: Kandidaten-Watchlist für den Winner-Vergleich und Tages-Ledger.
     let mut ledger = ShadowLedger::new();
