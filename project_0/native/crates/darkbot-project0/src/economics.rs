@@ -158,7 +158,9 @@ impl FailedCostMatrix {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CandidateInput {
     /// Realisierbarer Wert des beschlagnahmten Collaterals über den gewählten Pfad.
-    pub gross_seized_realizable_usd_micro: u64,
+    /// Executable realizable value. None means market realization is not proven for this path.
+    /// Never substitute oracle/protocol equity or zero for an unknown market value. [FIX-97]
+    pub gross_seized_realizable_usd_micro: Option<u64>,
     pub repay_usd_micro: u64,
     pub protocol_fees_usd_micro: u64,
     pub flat_sol_fee_usd_micro: u64,
@@ -180,6 +182,9 @@ pub enum Evaluation {
 }
 
 pub fn evaluate(c: &CandidateInput, failed: &FailedCostMatrix) -> Evaluation {
+    let Some(gross_seized_realizable_usd_micro) = c.gross_seized_realizable_usd_micro else {
+        return Evaluation::Unknown;
+    };
     let Some(failed_cost) = failed.conservative(c.path) else { return Evaluation::Unknown };
     let costs: u128 = c.repay_usd_micro as u128
         + c.protocol_fees_usd_micro as u128
@@ -189,7 +194,7 @@ pub fn evaluate(c: &CandidateInput, failed: &FailedCostMatrix) -> Evaluation {
         + c.jito_tip_usd_micro as u128
         + c.rent_and_token_usd_micro as u128
         + failed_cost as u128;
-    let net = c.gross_seized_realizable_usd_micro as i128 - costs as i128;
+    let net = gross_seized_realizable_usd_micro as i128 - costs as i128;
     let ppc = if c.required_capital_usd_micro == 0 { i128::MAX } else { net * BPS as i128 / c.required_capital_usd_micro as i128 };
     Evaluation::Known { net, profit_per_capital_bps: ppc }
 }
@@ -306,9 +311,32 @@ mod tests {
     }
 
     #[test]
+    fn unknown_realizable_value_is_unknown() {
+        let c = CandidateInput {
+            gross_seized_realizable_usd_micro: None,
+            repay_usd_micro: 900,
+            protocol_fees_usd_micro: 0,
+            flat_sol_fee_usd_micro: 0,
+            swap_fees_and_impact_usd_micro: 0,
+            priority_fee_usd_micro: 0,
+            jito_tip_usd_micro: 0,
+            rent_and_token_usd_micro: 0,
+            required_capital_usd_micro: 900,
+            path: Path::Rpc,
+            funding: crate::funding::FundingClass::NoSwapInventory,
+        };
+        let failed = FailedCostMatrix {
+            rpc_not_landed: Some(0),
+            rpc_landed_revert: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(evaluate(&c, &failed), Evaluation::Unknown);
+    }
+
+    #[test]
     fn unknown_cost_is_not_zero() {
         let c = CandidateInput {
-            gross_seized_realizable_usd_micro: 1_000,
+            gross_seized_realizable_usd_micro: Some(1_000),
             repay_usd_micro: 900,
             protocol_fees_usd_micro: 0,
             flat_sol_fee_usd_micro: 0,
@@ -337,7 +365,7 @@ mod tests {
     #[test]
     fn funding_class_is_not_a_hardcoded_preference() {
         let base = CandidateInput {
-            gross_seized_realizable_usd_micro: 1_100,
+            gross_seized_realizable_usd_micro: Some(1_100),
             repay_usd_micro: 1_000,
             protocol_fees_usd_micro: 0,
             flat_sol_fee_usd_micro: 0,
@@ -365,7 +393,7 @@ mod tests {
     #[test]
     fn equal_net_prefers_capital_efficiency() {
         let zero = CandidateInput {
-            gross_seized_realizable_usd_micro: 1_100, repay_usd_micro: 1_000, protocol_fees_usd_micro: 0, flat_sol_fee_usd_micro: 0,
+            gross_seized_realizable_usd_micro: Some(1_100), repay_usd_micro: 1_000, protocol_fees_usd_micro: 0, flat_sol_fee_usd_micro: 0,
             swap_fees_and_impact_usd_micro: 0, priority_fee_usd_micro: 0, jito_tip_usd_micro: 0, rent_and_token_usd_micro: 0,
             required_capital_usd_micro: 0, path: Path::Rpc, funding: crate::funding::FundingClass::ZeroPrefundSameTx,
         };

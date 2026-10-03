@@ -267,7 +267,7 @@ pub mod p0 {
             u64::try_from(v).map_err(|_| "realizable value > u64".into())
         }
 
-        fn input(&self, sz: &Sizing, funding: FundingClass, realizable_value_usd_micro: u64, capital_usd_micro: u64) -> CandidateInput {
+        fn input(&self, sz: &Sizing, funding: FundingClass, realizable_value_usd_micro: Option<u64>, capital_usd_micro: u64) -> CandidateInput {
             CandidateInput {
                 gross_seized_realizable_usd_micro: realizable_value_usd_micro,
                 repay_usd_micro: sz.repay_value,
@@ -294,13 +294,17 @@ pub mod p0 {
             let obs = health.observation_accounts(account).map_err(|e| e.to_string())?;
             let mut out = Vec::new();
 
+            let mut route_errors = Vec::new();
+
             for sz in sizings {
                 let (_, liab_mint, _) = self.bank(&sz.liab_bank)?;
                 let (_, asset_mint, _) = self.bank(&sz.asset_bank)?;
                 let inv = (self.inventory)(&sz.liab_bank);
-                // [FIX-60] Ohne executable Marktquote kein Realizable-Value; Oracle-Wert wird nicht eingesetzt.
-                let market = self.routes.quote_exact_in(&asset_mint, &liab_mint, sz.withdraw_amount)?;
-                let ctx = FundingContext {
+
+                // [FIX-97] Funding feasibility is independent from an asset→liability market
+                // quote. Inventory/JIT candidates are built first with UNKNOWN realization
+                // economics; LIVE cannot act on UNKNOWN, while Shadow may Build/Sign/Sim them.
+                let base_ctx = FundingContext {
                     liability_mint: liab_mint,
                     liability_needed: sz.repay_amount,
                     liability_inventory: inv,
@@ -309,52 +313,22 @@ pub mod p0 {
                     funding_bank: sz.funding_bank,
                     funding_available_value: sz.funding_available_value,
                     zero_prefund_qualified: self.zero_prefund_qualified,
-                    route_available: market.is_some(),
+                    route_available: false,
                 };
 
-                for class in funding::feasible_classes(&ctx) {
-                    let capital = funding::capital_required(class, &ctx);
-                    let Some(mark) = market.clone() else { return Err("ROUTING:NO_ROUTE".into()) };
+                for class in funding::feasible_classes(&base_ctx) {
+                    let capital = funding::capital_required(class, &base_ctx);
                     let plan = match class {
-                        FundingClass::ZeroPrefundSameTx => {
-                            if mark.amount_out < sz.repay_amount { return Err("ROUTING:INSUFFICIENT_ROUTE_OUTPUT".into()); }
-                            let (ixs, steps) = self.receivership(account, &obs, &sz, mark.instructions.clone(), false)?;
-                            out.push(ReceivershipPlan {
-                                steps: steps.clone(),
-                                instructions: ixs.clone(),
-                                route: RouteKind::FreePublicAllowed,
-                                input: self.input(&sz, class, self.realizable_value(&sz, mark.amount_out)?, capital),
-                                premium_bps: sz.premium_bps,
-                                exposure: capital,
-                                tip: self.jito_tip_lamports,
-                                slippage_bps: sz.slippage_bps,
-                                assets: vec![asset_mint, liab_mint],
-                                tx_version: BuildVersion::V1,
-                                lookup_tables: vec![],
-                                prerequisite_txs: vec![],
-                            });
-                            ReceivershipPlan {
-                                steps,
-                                instructions: ixs,
-                                route: RouteKind::FreePublicAllowed,
-                                input: self.input(&sz, class, self.realizable_value(&sz, mark.amount_out)?, capital),
-                                premium_bps: sz.premium_bps,
-                                exposure: capital,
-                                tip: self.jito_tip_lamports,
-                                slippage_bps: sz.slippage_bps,
-                                assets: vec![asset_mint, liab_mint],
-                                tx_version: BuildVersion::V0,
-                                lookup_tables: mark.lookup_tables,
-                                prerequisite_txs: vec![],
-                            }
-                        }
+                        // route_available=false above, therefore ZERO_PREFUND is handled
+                        // separately below after its own ExactIn quote.
+                        FundingClass::ZeroPrefundSameTx => continue,
                         FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
                             let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
                             ReceivershipPlan {
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
-                                input: self.input(&sz, class, self.realizable_value(&sz, mark.amount_out)?, capital),
+                                input: self.input(&sz, class, None, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
                                 tip: self.jito_tip_lamports,
@@ -368,14 +342,21 @@ pub mod p0 {
                         FundingClass::JitShortfall => {
                             let Some(fb) = sz.funding_bank else { continue };
                             let (_, funding_mint, _) = self.bank(&fb)?;
-                            let shortfall = funding::shortfall_token_amount(&ctx);
-                            let Some(buy) = self.routes.quote_exact_out(&funding_mint, &liab_mint, shortfall)? else { continue };
+                            let shortfall = funding::shortfall_token_amount(&base_ctx);
+                            let buy = match self.routes.quote_exact_out(&funding_mint, &liab_mint, shortfall) {
+                                Ok(Some(route)) => route,
+                                Ok(None) => continue,
+                                Err(e) => {
+                                    route_errors.push(format!("exact-out {}→{}: {}", funding_mint, liab_mint, e));
+                                    continue;
+                                }
+                            };
                             let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
                             ReceivershipPlan {
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
-                                input: self.input(&sz, class, self.realizable_value(&sz, mark.amount_out)?, capital),
+                                input: self.input(&sz, class, None, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
                                 tip: self.jito_tip_lamports,
@@ -390,6 +371,84 @@ pub mod p0 {
                     };
                     out.push(plan);
                 }
+
+                // ZERO_PREFUND has a real collateral→liability swap in the receivership TX,
+                // so this class alone requires ExactIn market evidence. A provider error or
+                // missing route must not invalidate already-built inventory/JIT candidates.
+                if self.zero_prefund_qualified {
+                    let mark = match self.routes.quote_exact_in(&asset_mint, &liab_mint, sz.withdraw_amount) {
+                        Ok(Some(route)) => Some(route),
+                        Ok(None) => None,
+                        Err(e) => {
+                            route_errors.push(format!("exact-in {}→{}: {}", asset_mint, liab_mint, e));
+                            None
+                        }
+                    };
+                    if let Some(mark) = mark {
+                        let mut zp_ctx = base_ctx.clone();
+                        zp_ctx.route_available = true;
+                        if funding::is_feasible(FundingClass::ZeroPrefundSameTx, &zp_ctx) {
+                            if mark.amount_out < sz.repay_amount {
+                                route_errors.push(format!(
+                                    "exact-in {}→{} insufficient output {} < repay {}",
+                                    asset_mint, liab_mint, mark.amount_out, sz.repay_amount
+                                ));
+                            } else {
+                                let capital = funding::capital_required(FundingClass::ZeroPrefundSameTx, &zp_ctx);
+                                let realizable = Some(self.realizable_value(&sz, mark.amount_out)?);
+                                let (ixs, steps) = self.receivership(
+                                    account,
+                                    &obs,
+                                    &sz,
+                                    mark.instructions.clone(),
+                                    false,
+                                )?;
+                                out.push(ReceivershipPlan {
+                                    steps: steps.clone(),
+                                    instructions: ixs.clone(),
+                                    route: RouteKind::FreePublicAllowed,
+                                    input: self.input(
+                                        &sz,
+                                        FundingClass::ZeroPrefundSameTx,
+                                        realizable,
+                                        capital,
+                                    ),
+                                    premium_bps: sz.premium_bps,
+                                    exposure: capital,
+                                    tip: self.jito_tip_lamports,
+                                    slippage_bps: sz.slippage_bps,
+                                    assets: vec![asset_mint, liab_mint],
+                                    tx_version: BuildVersion::V1,
+                                    lookup_tables: vec![],
+                                    prerequisite_txs: vec![],
+                                });
+                                out.push(ReceivershipPlan {
+                                    steps,
+                                    instructions: ixs,
+                                    route: RouteKind::FreePublicAllowed,
+                                    input: self.input(
+                                        &sz,
+                                        FundingClass::ZeroPrefundSameTx,
+                                        realizable,
+                                        capital,
+                                    ),
+                                    premium_bps: sz.premium_bps,
+                                    exposure: capital,
+                                    tip: self.jito_tip_lamports,
+                                    slippage_bps: sz.slippage_bps,
+                                    assets: vec![asset_mint, liab_mint],
+                                    tx_version: BuildVersion::V0,
+                                    lookup_tables: mark.lookup_tables,
+                                    prerequisite_txs: vec![],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            if out.is_empty() && !route_errors.is_empty() {
+                return Err(format!("ROUTING:{}", route_errors.join(" | ")));
             }
             Ok(out)
         }

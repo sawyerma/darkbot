@@ -154,6 +154,14 @@ mod tests {
     }
 
     #[test]
+    fn inventory_classes_do_not_require_market_route() {
+        let c = feasible_classes(&ctx(100, 100, true, false));
+        assert!(!c.contains(&FundingClass::ZeroPrefundSameTx));
+        assert!(c.contains(&FundingClass::NoSwapInventory));
+        assert!(c.contains(&FundingClass::PreheldInventory));
+    }
+
+    #[test]
     fn no_route_no_inventory_means_no_candidate() {
         assert!(feasible_classes(&ctx(0, 100, false, false)).is_empty());
         assert!(!FundingClass::FlashFunded.valid_for_project0());
