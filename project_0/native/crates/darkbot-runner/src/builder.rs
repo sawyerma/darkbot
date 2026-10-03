@@ -17,7 +17,7 @@ pub mod p0 {
     use darkbot_project0::planner::{RouteKind, Step};
     use darkbot_project0::receivership::{builders, ReceivershipParams};
     use darkbot_solana::tx::BuildVersion;
-    use marginfi_type_crate::types::Bank;
+    use marginfi_type_crate::types::{Bank, MarginfiAccount};
     use solana_message::AddressLookupTableAccount /* [FIX-13] */;
     use solana_sdk::instruction::Instruction;
     use spl_associated_token_account::{
@@ -170,6 +170,16 @@ pub mod p0 {
         pub path: Path,
     }
 
+    fn liquidation_record_init_decision(linked: Pubkey, expected: Pubkey) -> Result<bool, String> {
+        if linked == Pubkey::default() {
+            Ok(true)
+        } else if linked == expected {
+            Ok(false)
+        } else {
+            Err(format!("LIQUIDATION_RECORD_MISMATCH: linked={} expected={}", linked, expected))
+        }
+    }
+
     impl<'a, S: AccountSource, Z: SizingProvider, R: RouteProvider> P0ReceivershipBuilder<'a, S, Z, R> {
         /// [FIX-19] fail closed: Owner, Discriminator, Länge prüfen — kein Index-Panic bei fremdem Layout.
         fn bank(&self, k: &Pubkey) -> Result<(Pubkey, Pubkey, Pubkey), String> {
@@ -181,6 +191,30 @@ pub mod p0 {
             let b: &Bank = bytemuck::try_from_bytes(&data[8..need]).map_err(|e| format!("{:?}", e))?;
             let (mint_owner, _, _) = self.state.account(&b.mint).ok_or("mint not in state")?;
             Ok((b.liquidity_vault, b.mint, mint_owner))
+        }
+
+        /// [FIX-100] MarginfiAccount itself is the authoritative source for whether its
+        /// liquidation-record PDA exists. The protocol writes this field when the record is
+        /// created and resets it to Pubkey::default() when the record is closed. This avoids
+        /// both hot-path RPC and the invalid assumption that "not present in our RAM state"
+        /// means "not present on-chain".
+        fn should_init_liquidation_record(&self, account: &Pubkey) -> Result<bool, String> {
+            let (owner, _, data) = self.state.account(account).ok_or("marginfi account not in state")?;
+            if owner != self.program {
+                return Err(format!("UNKNOWN_LAYOUT: marginfi account owner {}", owner));
+            }
+            if darkbot_project0::protocol::classify(data) != darkbot_project0::protocol::AccountType::MarginfiAccount {
+                return Err("UNKNOWN_LAYOUT: not a MarginfiAccount discriminator".into());
+            }
+            let need = 8 + std::mem::size_of::<MarginfiAccount>();
+            if data.len() < need {
+                return Err(format!("UNKNOWN_LAYOUT: marginfi account len {} < {}", data.len(), need));
+            }
+            let a: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need]).map_err(|e| format!("{:?}", e))?;
+            let expected = darkbot_project0::protocol::liquidation_record_pda(&self.program, account);
+            liquidation_record_init_decision(a.liquidation_record, expected).map_err(|e| {
+                format!("{} account={}", e, account)
+            })
         }
 
         fn receivership(&self, account: &Pubkey, obs: &[Pubkey], sz: &Sizing, swaps: Vec<Instruction>, repay_from_inventory: bool) -> Result<(Vec<Instruction>, Vec<Step>), String> {
@@ -239,7 +273,7 @@ pub mod p0 {
                     Step::Other(i.program_id)
                 }
             }).collect();
-            let init_record = self.state.account(&darkbot_project0::protocol::liquidation_record_pda(&self.program, account)).is_none();
+            let init_record = self.should_init_liquidation_record(account)?;
             let setup_count = post_start_setup.len();
             let ixs = builders::build_receivership(ReceivershipParams {
                 program: &self.program, group: &self.group, marginfi_account: account, liquidator: &self.liquidator,
@@ -451,6 +485,18 @@ pub mod p0 {
                 return Err(format!("ROUTING:{}", route_errors.join(" | ")));
             }
             Ok(out)
+        }
+    }
+    #[cfg(test)]
+    mod fix100_tests {
+        use super::*;
+
+        #[test]
+        fn liquidation_record_link_controls_init() {
+            let expected = Pubkey::new_unique();
+            assert_eq!(liquidation_record_init_decision(Pubkey::default(), expected), Ok(true));
+            assert_eq!(liquidation_record_init_decision(expected, expected), Ok(false));
+            assert!(liquidation_record_init_decision(Pubkey::new_unique(), expected).is_err());
         }
     }
 }
