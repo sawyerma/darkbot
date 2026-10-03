@@ -115,10 +115,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     let send = env::var("P0_PREWARM_SEND").ok().as_deref() == Some("YES");
-    if !send {
-        println!("PREWARM_DRY_RUN no transaction sent; set P0_PREWARM_SEND=YES to create missing ATAs");
-        return Ok(());
-    }
 
     let instructions = missing
         .iter()
@@ -152,6 +148,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         "PREWARM_SIM_OK units_consumed={:?}",
         simulation.value.units_consumed
     );
+
+    if !send {
+        println!("PREWARM_DRY_RUN simulation passed; no transaction sent; set P0_PREWARM_SEND=YES to create missing ATAs");
+        return Ok(());
+    }
 
     let signature = rpc.send_and_confirm_transaction(&transaction)?;
     println!("PREWARM_SENT signature={}", signature);
