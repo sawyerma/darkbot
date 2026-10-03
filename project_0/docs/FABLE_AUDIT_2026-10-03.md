@@ -165,3 +165,14 @@ New protocol-parity check:
 - Therefore `CwSs...` must first be classified as closeout vs non-closeout before changing rounding behavior.
 
 Status: **OPEN — verify CwSs closeout state from existing Health evidence before code change.**
+
+
+### FIX-93 closeout exception
+
+The blanket C1 proposal remains rejected for normal liquidations. However, Mainnet evidence exposed a distinct protocol exception:
+
+- account `CwSs...` is a true closeout case;
+- pinned Marginfi sets `ignore_healthy=true` below the 5 USD equity-assets threshold;
+- that branch permits crossing positive post-health and skips the liquidation premium bound.
+
+FIX-93 implements only this source-backed closeout exception. Normal-liquidation health-cap and premium-bound behavior remains unchanged.
