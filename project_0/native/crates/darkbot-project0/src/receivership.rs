@@ -117,6 +117,197 @@ pub mod builders {
         }
     }
 
+    // [FIX-110][R6] Integration-specific withdraw builders, reproduced from the
+    // pinned marginfi p0-cli account layouts. No RPC or account discovery happens here.
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn kamino_withdraw_from_bank(
+        program: &Pubkey,
+        group: &Pubkey,
+        marginfi_account: &Pubkey,
+        authority: &Pubkey,
+        bank_key: &Pubkey,
+        bank: &marginfi_type_crate::types::Bank,
+        destination_token_account: &Pubkey,
+        token_program: &Pubkey,
+        lending_market: &Pubkey,
+        reserve_liquidity_supply: &Pubkey,
+        reserve_collateral_mint: &Pubkey,
+        reserve_source_collateral: &Pubkey,
+        obligation_farm_user_state: Option<Pubkey>,
+        reserve_farm_state: Option<Pubkey>,
+        amount: u64,
+        withdraw_all: bool,
+        observation: &[Pubkey],
+    ) -> Instruction {
+        let mut accounts = marginfi::accounts::KaminoWithdraw {
+            group: *group,
+            marginfi_account: *marginfi_account,
+            authority: *authority,
+            bank: *bank_key,
+            destination_token_account: *destination_token_account,
+            liquidity_vault_authority: protocol::liquidity_vault_authority_pda(program, bank_key),
+            liquidity_vault: bank.liquidity_vault,
+            integration_acc_2: bank.integration_acc_2,
+            lending_market: *lending_market,
+            lending_market_authority:
+                marginfi_type_crate::pdas::derive_kamino_lending_market_authority(lending_market).0,
+            integration_acc_1: bank.integration_acc_1,
+            mint: bank.mint,
+            reserve_liquidity_supply: *reserve_liquidity_supply,
+            reserve_collateral_mint: *reserve_collateral_mint,
+            reserve_source_collateral: *reserve_source_collateral,
+            obligation_farm_user_state,
+            reserve_farm_state,
+            kamino_program: pk(protocol::KAMINO_PROGRAM_ID),
+            farms_program: marginfi_type_crate::pdas::FARMS_PROGRAM_ID,
+            collateral_token_program: pk(protocol::TOKEN_PROGRAM_ID),
+            liquidity_token_program: *token_program,
+            instruction_sysvar_account: pk(INSTRUCTIONS_SYSVAR),
+        }
+        .to_account_metas(Some(true));
+        accounts.extend(obs(observation));
+        Instruction {
+            program_id: *program,
+            accounts,
+            data: marginfi::instruction::KaminoWithdraw {
+                amount,
+                flags: withdraw_all.then_some(1u8),
+            }
+            .data(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn drift_withdraw_from_bank(
+        program: &Pubkey,
+        group: &Pubkey,
+        marginfi_account: &Pubkey,
+        authority: &Pubkey,
+        bank_key: &Pubkey,
+        bank: &marginfi_type_crate::types::Bank,
+        destination_token_account: &Pubkey,
+        token_program: &Pubkey,
+        drift_oracle: Option<Pubkey>,
+        drift_state: Pubkey,
+        drift_spot_market_vault: Pubkey,
+        drift_reward_oracle: Option<Pubkey>,
+        drift_reward_spot_market: Option<Pubkey>,
+        drift_reward_mint: Option<Pubkey>,
+        drift_reward_oracle_2: Option<Pubkey>,
+        drift_reward_spot_market_2: Option<Pubkey>,
+        drift_reward_mint_2: Option<Pubkey>,
+        drift_signer: Pubkey,
+        amount: u64,
+        withdraw_all: bool,
+        observation: &[Pubkey],
+    ) -> Instruction {
+        let mut accounts = marginfi::accounts::DriftWithdraw {
+            group: *group,
+            marginfi_account: *marginfi_account,
+            authority: *authority,
+            bank: *bank_key,
+            drift_oracle,
+            liquidity_vault_authority: protocol::liquidity_vault_authority_pda(program, bank_key),
+            liquidity_vault: bank.liquidity_vault,
+            destination_token_account: *destination_token_account,
+            drift_state,
+            integration_acc_2: bank.integration_acc_2,
+            integration_acc_3: bank.integration_acc_3,
+            integration_acc_1: bank.integration_acc_1,
+            drift_spot_market_vault,
+            drift_reward_oracle,
+            drift_reward_spot_market,
+            drift_reward_mint,
+            drift_reward_oracle_2,
+            drift_reward_spot_market_2,
+            drift_reward_mint_2,
+            drift_signer,
+            mint: bank.mint,
+            drift_program: pk(protocol::DRIFT_PROGRAM_ID),
+            token_program: *token_program,
+            system_program: pk(SYSTEM_PROGRAM),
+        }
+        .to_account_metas(Some(true));
+        accounts.extend(obs(observation));
+        Instruction {
+            program_id: *program,
+            accounts,
+            data: marginfi::instruction::DriftWithdraw {
+                amount,
+                withdraw_all: withdraw_all.then_some(true),
+            }
+            .data(),
+        }
+    }
+
+    pub struct JuplendCpiAccounts {
+        pub f_token_mint: Pubkey,
+        pub lending_admin: Pubkey,
+        pub supply_token_reserves_liquidity: Pubkey,
+        pub lending_supply_position_on_liquidity: Pubkey,
+        pub rate_model: Pubkey,
+        pub vault: Pubkey,
+        pub claim_account: Pubkey,
+        pub liquidity: Pubkey,
+        pub liquidity_program: Pubkey,
+        pub rewards_rate_model: Pubkey,
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn juplend_withdraw_from_bank(
+        program: &Pubkey,
+        group: &Pubkey,
+        marginfi_account: &Pubkey,
+        authority: &Pubkey,
+        bank_key: &Pubkey,
+        bank: &marginfi_type_crate::types::Bank,
+        destination_token_account: &Pubkey,
+        token_program: &Pubkey,
+        cpi: &JuplendCpiAccounts,
+        amount: u64,
+        withdraw_all: bool,
+        observation: &[Pubkey],
+    ) -> Instruction {
+        let mut accounts = marginfi::accounts::JuplendWithdraw {
+            group: *group,
+            marginfi_account: *marginfi_account,
+            authority: *authority,
+            bank: *bank_key,
+            destination_token_account: *destination_token_account,
+            liquidity_vault_authority: protocol::liquidity_vault_authority_pda(program, bank_key),
+            mint: bank.mint,
+            integration_acc_1: bank.integration_acc_1,
+            f_token_mint: cpi.f_token_mint,
+            integration_acc_2: bank.integration_acc_2,
+            integration_acc_3: bank.integration_acc_3,
+            lending_admin: cpi.lending_admin,
+            supply_token_reserves_liquidity: cpi.supply_token_reserves_liquidity,
+            lending_supply_position_on_liquidity: cpi.lending_supply_position_on_liquidity,
+            rate_model: cpi.rate_model,
+            vault: cpi.vault,
+            claim_account: cpi.claim_account,
+            liquidity: cpi.liquidity,
+            liquidity_program: cpi.liquidity_program,
+            rewards_rate_model: cpi.rewards_rate_model,
+            juplend_program: pk(protocol::JUPLEND_PROGRAM_ID),
+            token_program: *token_program,
+            associated_token_program: pk(protocol::ASSOCIATED_TOKEN_PROGRAM_ID),
+            system_program: pk(SYSTEM_PROGRAM),
+        }
+        .to_account_metas(Some(true));
+        accounts.extend(obs(observation));
+        Instruction {
+            program_id: *program,
+            accounts,
+            data: marginfi::instruction::JuplendWithdraw {
+                amount,
+                withdraw_all: withdraw_all.then_some(true),
+            }
+            .data(),
+        }
+    }
+
     pub fn end_liquidation(program: &Pubkey, marginfi_account: &Pubkey, group: &Pubkey, receiver: &Pubkey,
                            global_fee_wallet: &Pubkey, banks_only: &[Pubkey]) -> Instruction {
         let mut accounts = marginfi::accounts::EndLiquidation {
