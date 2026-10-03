@@ -1787,3 +1787,41 @@ R5 technical simulation gate: **PASS**.
 The full Mainnet Shadow path completed through StartLiquidation, withdraw, Jupiter swap, repay and EndLiquidation with a successful simulation.
 
 Still open: failed-attempt economics, landed execution, realized PnL, R4 hot-path isolation, R6/R7 qualification, 72 h Shadow, and LIVE.
+
+### 2026-10-03 — FIX-108 R4 hot-path isolation implemented
+
+Commits:
+- `3fa97ad` — remote worker module stub
+- `3bc5bea` — bounded remote RPC worker implementation
+- `2d2bf88` — expose worker module
+- `9584b3b` — wire workers into `p0-longtail`
+
+Architecture after FIX-108:
+- `find_winner(...)` no longer executes in the ingress/state/detection loop;
+- `try_reconcile(...)` no longer executes in the ingress/state/detection loop;
+- winner lookup owns a dedicated `RpcClient` in thread `winner-rpc`;
+- submission reconciliation owns a dedicated `RpcClient` in thread `reconcile-rpc`;
+- both directions use bounded channels;
+- queue-full returns ownership to the state loop for retry; no silent work-item drop;
+- worker result queues may block only the worker, never the ingress/detection thread;
+- worker disconnect is fail-closed at dispatch.
+
+Static verification on current `main`:
+```text
+rpc_recon in main.rs:          absent
+synchronous find_winner:       absent
+synchronous try_reconcile:     absent
+RemoteWorkers::start:          present
+winner bounded dispatch:       present
+reconcile bounded dispatch:    present
+result drains on state thread: present
+```
+
+Status: **IMPLEMENTED / COMPILE+RUNTIME VERIFY**.
+
+Next gate:
+1. workspace build/test with `crate_health txv1`;
+2. R108 Mainnet Shadow;
+3. require normal StreamReady/Snapshot/Reconcile/READY and a successful technical candidate path without worker disconnect/panic;
+4. then mark R4 PASS if runtime shows no regression.
+
