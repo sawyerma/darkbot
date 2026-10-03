@@ -1388,3 +1388,22 @@ The root catch-up hypothesis is validated for this Mainnet recovery/bootstrap in
 FIX-96 is therefore complete: compiler/workspace qualification PASS + Mainnet recovery qualification PASS.
 
 Next qualification target: continue the same Mainnet Shadow path through the queued generic candidates and obtain downstream evidence for `ShadowTechnicalReady` or `ShadowTechnicalSimFailed`, or capture the next concrete Build/Sign/Sim blocker.
+
+
+### 2026-10-03 — FIX-97 R3 funding/market decoupling — compiler/workspace PASS
+
+Qualified code commit:
+`9797cb399603272eb188b58bb196288c9131e91c` — `[FIX-97] decouple inventory funding from market quote`.
+
+Local workspace test execution completed successfully and returned to the shell with the final Cargo test result `ok`.
+
+Qualified behavior in code:
+- `NoSwapInventory` and `PreheldInventory` no longer require an ExactIn market quote for technical feasibility/building.
+- `ZeroPrefundSameTx` alone requests the collateral→liability ExactIn route it actually executes.
+- Unknown seized-collateral realizable value is represented explicitly as `None`; economics evaluates it as `Unknown`, never as zero and never as an oracle substitute.
+- Route-provider failure cannot invalidate already-built inventory/JIT candidates.
+- Unit coverage includes inventory feasibility without a market route and fail-closed economics for unknown realizable value.
+
+Decision: **R3/FIX-97 compiler/workspace PASS**.
+
+Remaining evidence: Mainnet Shadow must demonstrate that a generic candidate is no longer stopped solely by the old unconditional ExactIn quote and can progress to the next real Build/Sign/Simulation boundary.
