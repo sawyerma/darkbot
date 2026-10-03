@@ -140,3 +140,28 @@ No Integration-bank support is required for this gate.
 - **R1-A5 FIX-88 IMPLEMENTED; build/test reported green** — circuit-breaker eligibility is now in the shared pipeline before planning.
 - **R1 PASS** — FIX-88 circuit-breaker eligibility and FIX-89 typed rejection diagnostics are build/test green.
 - A1 remains deliberately open until R3; diagnostics must expose it rather than silently changing economics/execution semantics.
+
+
+### R1 pair-level sizing evidence (Mainnet)
+
+After [FIX-92], the two generic `NO_VALID_PROTOCOL_PAIR` cases separated cleanly:
+
+- `AiC3orMdwW2hG9Xhv53nktgDwq4cLkqLAfMcNQFoXWoJ`:
+  `coeff_nonpositive=2`; all other pair rejection counters = 0.
+  Current interpretation: both generic Asset×Liability pairs fail the positive-health-improvement coefficient and are correctly rejected. **No fix justified from current evidence.**
+
+- `CwSsTePXHZUkiZgmKtXwxmEX2uU1ddY5aUjRKkjKvH6d`:
+  `premium_bound=2`; all other pair rejection counters = 0.
+  This is the only currently observed generic sizing edge requiring deeper protocol parity work.
+
+C2 update:
+- Fable's specific claim that ceil rounding deletes candidates by producing `repay_amount > liability` is **NOT OBSERVED** in this Mainnet sample (`repay_above_liability=0` for both cases).
+- C2 therefore remains **PARTIAL / UNCONFIRMED mechanism**, not a verified fix prescription.
+
+New protocol-parity check:
+- pinned `liquidate_end.rs` applies `seized <= repaid * max_fee` only when `ignore_healthy == false`;
+- `ignore_healthy` is true when pre-liquidation equity assets are below `LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD`;
+- current `ProtocolSizer` enforces the premium bound unconditionally.
+- Therefore `CwSs...` must first be classified as closeout vs non-closeout before changing rounding behavior.
+
+Status: **OPEN — verify CwSs closeout state from existing Health evidence before code change.**
