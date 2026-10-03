@@ -1245,3 +1245,28 @@ Status:
 - FIX-94: **MAINNET PASS**.
 - R2/A6: **CONFIRMED BLOCKER**.
 - First Build/Sign/Simulation evidence remains OPEN.
+
+
+### 2026-10-03 — FIX-95 in-TX ATA creation — IMPLEMENTED / VERIFY
+
+Mainnet evidence after FIX-94 exposed a real `ATA:MISSING_ASSET:So111...` blocker after Health + Sizing + route acquisition.
+
+Pinned marginfi introspection was verified:
+- before `StartLiquidation`, only explicit refresh/init discriminators are allowed;
+- the Associated Token Program is in the allowed top-level program set;
+- therefore ATA creation must be **after StartLiquidation** and before the dependent Withdraw/Swap/Repay;
+- `EndLiquidation` remains the final instruction.
+
+[FIX-95]:
+- adds `post_start_setup` to the shared receivership assembler;
+- derives missing liquidator ATAs with the actual mint token program;
+- inserts `create_associated_token_account_idempotent` after Start and before Withdraw;
+- deduplicates identical asset/liability ATA creation;
+- represents the setup as `Step::Other(ATA_PROGRAM)`, already covered by the existing planner allowlist;
+- does not create a separate prerequisite transaction.
+
+Economic caveat:
+- ATA rent is not yet measured into `rent_and_token_usd_micro`;
+- this is acceptable only for current Shadow technical qualification because FailedCostMatrix/economics remain UNKNOWN and LIVE is disabled.
+
+Status: **IMPLEMENTED / VERIFY**.
