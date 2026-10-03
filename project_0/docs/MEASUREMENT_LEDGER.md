@@ -2066,3 +2066,25 @@ Receivership builder:
 Status: **FIX-112a-e IMPLEMENTED / compiler verification required**.
 R6 remains **PARTIAL** until compiler passes and the integration-specific Mainnet Shadow matrix proves Kamino/Drift/JupLend paths.
 
+### 2026-10-04 — FIX-112f runner integration crate linkage
+
+Local compiler after FIX-112a-e failed with four unresolved-crate errors in
+`darkbot-runner/src/builder.rs` for `kamino_mocks`, `drift_mocks`, and
+`juplend_mocks`.
+
+Root cause:
+- the integration crates were pinned only in `darkbot-project0`;
+- FIX-112e also decodes those canonical layouts directly inside `darkbot-runner`;
+- transitive dependencies are not directly nameable from the runner crate.
+
+Fix:
+- `darkbot-runner/Cargo.toml` now pins the same three crates at
+  `0dotxyz/marginfi-v2@mrgn-0.1.11-rc1`;
+- `crate_health` enables those optional direct dependencies.
+
+Commit:
+- `5685480` — [FIX-112f] link pinned integration layouts into runner.
+
+Status: **FIX-112f IMPLEMENTED / compiler verification required**.
+R6 remains PARTIAL until the full FIX-112 batch compiles and the integration Mainnet Shadow matrix passes.
+
