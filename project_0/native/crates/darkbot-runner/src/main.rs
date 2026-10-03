@@ -41,7 +41,10 @@ use darkbot_solana::state::StateCore;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 #[cfg(feature = "crate_health")]
-use marginfi_type_crate::types::{Bank, MarginfiAccount};
+use marginfi_type_crate::{
+    constants::{ASSET_TAG_DEFAULT, ASSET_TAG_SOL},
+    types::{Bank, BankOperationalState, MarginfiAccount},
+};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -126,13 +129,31 @@ fn validated_liquidator_ata<S: AccountSource + ?Sized>(
 }
 
 #[cfg(feature = "crate_health")]
-fn find_bank_by_mint<S: AccountSource + ?Sized>(
+fn find_supported_cost_bank_by_mint<S: AccountSource + ?Sized>(
     state: &S,
     program: &Pubkey,
     banks: &[Pubkey],
     mint: &Pubkey,
-) -> Option<Pubkey> {
-    banks.iter().copied().find(|bk| bank_from_state(state, program, bk).map(|b| b.mint == *mint).unwrap_or(false))
+) -> Option<(Pubkey, Bank)> {
+    // [FIX-94] Cost valuation must not accidentally select an integration bank merely because
+    // it shares the same mint. Mirror ProtocolSizer's supported-generic-bank policy and pick
+    // deterministically by pubkey.
+    let mut candidates: Vec<(Pubkey, Bank)> = banks
+        .iter()
+        .filter_map(|bk| {
+            let bank = bank_from_state(state, program, bk)?;
+            let supported_tag = matches!(bank.config.asset_tag, ASSET_TAG_DEFAULT | ASSET_TAG_SOL);
+            let supported_state = matches!(
+                bank.config.operational_state,
+                BankOperationalState::Operational
+                    | BankOperationalState::ReduceOnly
+                    | BankOperationalState::ReduceOnlyWithBorrowingPower
+            );
+            (bank.mint == *mint && supported_tag && supported_state).then_some((*bk, bank))
+        })
+        .collect();
+    candidates.sort_unstable_by_key(|(pk, _)| pk.to_bytes());
+    candidates.into_iter().next()
 }
 
 #[cfg(feature = "crate_health")]
@@ -259,8 +280,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "crate_health")]
     let native_sol_mint = Pubkey::from_str(protocol::NATIVE_SOL_MINT)?;
     #[cfg(feature = "crate_health")]
-    let sol_bank = find_bank_by_mint(&StateView(&pre_state), &program, &bank_keys, &native_sol_mint)
-        .ok_or("no Marginfi WSOL bank found; cannot value SOL-denominated liquidation costs")?;
+    let (sol_bank, sol_cost_bank) =
+        find_supported_cost_bank_by_mint(&StateView(&pre_state), &program, &bank_keys, &native_sol_mint)
+            .ok_or("no supported generic Marginfi WSOL bank found; cannot value SOL-denominated liquidation costs")?;
+    #[cfg(feature = "crate_health")]
+    eprintln!(
+        "sol_cost_bank: {} asset_tag={} oracle_setup={:?} operational_state={:?}",
+        sol_bank,
+        sol_cost_bank.config.asset_tag,
+        sol_cost_bank.config.oracle_setup,
+        sol_cost_bank.config.operational_state
+    );
 
     let mut subscription_keys = required_dependency_keys.clone();
     subscription_keys.extend(optional_dependency_keys.iter().copied());
