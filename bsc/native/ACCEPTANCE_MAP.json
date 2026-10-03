@@ -1,0 +1,329 @@
+{
+  "schema": "darkbot.native.acceptance-map.v1",
+  "master_plan": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md \u00a714",
+  "purpose": "Machine-readable companion to the acceptance matrix. The master plan stays the human-readable source; this file adds symbols, test names and evidence hashes.",
+  "path_convention": "All evidence paths are repository paths. A path of the form <zip>::<member> names a member inside a ZIP that is itself in the repository.",
+  "unit1_source": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip (rustfmt-normalised sources and Cargo.lock), copied unchanged; only crates/darkbot-core/src/lib.rs differs (module list)",
+  "compiler_run": "Unit 1: executed in the review. Units 2 and 3 and the combined tree: NOT_RUN, no Rust toolchain in the authoring environment",
+  "freeze_status": "Units 2 and 3 are NOT frozen: the combined compiler run is pending and the live-state and invalidation closure (Q1) is PARTIAL and deferred to C2.",
+  "test_count": {
+    "total": 93,
+    "unit1": 27,
+    "unit2": 33,
+    "unit3": 33
+  },
+  "rows": [
+    {
+      "matrix_id": "W1",
+      "adoption": "SN01",
+      "unit": "Unit 1",
+      "status": "IMPLEMENTED_TESTED for the reviewed Revision 2; files in this tree are byte-identical to the reviewed package",
+      "evidence": [
+        {
+          "path": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip",
+          "sha256": "928f915e3d27d5ecbcd7e1ec9296d7f8aae674bf35a7954eed7548f0b7492798"
+        },
+        {
+          "path": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip::REVIEW/FABLE_REVIEW_REV2.md",
+          "note": "review record inside the reviewed ZIP; it states the executed commands and results"
+        },
+        {
+          "path": "bsc/docs/reviews/C0_UNIT1_REV2_REVIEW.md",
+          "sha256": "1863b39f3695270bd741b96e904e77162db0b058bdcb89304f9c7e033019f0ed"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::signer::Signer::sign_legacy",
+        "darkbot_core::signer::recover_legacy_sender",
+        "darkbot_core::tx::legacy::decode_signed"
+      ],
+      "tests": [
+        "darkbot-core::tx::legacy::golden_mainnet_buy_signing_hash_raw_bytes_and_tx_hash",
+        "darkbot-core::tx::legacy::length_bounds_cover_the_golden_transaction_and_the_widest_fields",
+        "darkbot-core::tx::legacy::golden_mainnet_buy_decodes_to_the_same_fields",
+        "darkbot-core::tx::legacy::eip155_specification_example_signing_payload",
+        "darkbot-core::tx::legacy::encode_signed_appends_and_reports_chain_id_overflow_without_writing",
+        "darkbot-core::tx::legacy::short_signature_scalars_are_encoded_without_leading_zeros",
+        "darkbot-core::tx::legacy::decoder_rejects_other_transaction_forms",
+        "darkbot-core::signer::golden_mainnet_buy_recovers_its_canonical_sender",
+        "darkbot-core::signer::eip155_specification_example_signs_byte_exact",
+        "darkbot-core::signer::g06_fixture_first_envelope_is_byte_exact",
+        "darkbot-core::signer::signed_envelopes_are_canonical_low_s_and_recover_the_signer",
+        "darkbot-core::signer::high_s_signature_is_rejected",
+        "darkbot-core::signer::wrong_parity_or_tampered_field_does_not_recover_the_sender",
+        "darkbot-core::signer::invalid_secret_and_zero_scalars_are_errors",
+        "darkbot-core::signer::debug_output_never_contains_key_material",
+        "darkbot-core::signer::sign_legacy_replaces_the_buffer_and_leaves_it_empty_on_error",
+        "darkbot-core::signer::reserved_buffers_never_grow_while_signing"
+      ],
+      "result": "27 tests PASS in debug and release, clippy -D warnings exit 0, fmt check exit 0 after cargo fmt (review run, rustc 1.93.1, per the review record); NOT_RUN in the combined tree",
+      "not_proven": "new-library latency; zero allocation of dependencies; combined-tree run"
+    },
+    {
+      "matrix_id": "W2",
+      "adoption": "SN01",
+      "unit": "Unit 1",
+      "status": "IMPLEMENTED_TESTED for the reviewed Revision 2",
+      "evidence": [
+        {
+          "path": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip",
+          "sha256": "928f915e3d27d5ecbcd7e1ec9296d7f8aae674bf35a7954eed7548f0b7492798"
+        },
+        {
+          "path": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip::REVIEW/FABLE_REVIEW_REV2.md",
+          "note": "review record inside the reviewed ZIP; it states the executed commands and results"
+        },
+        {
+          "path": "bsc/docs/reviews/C0_UNIT1_REV2_REVIEW.md",
+          "sha256": "1863b39f3695270bd741b96e904e77162db0b058bdcb89304f9c7e033019f0ed"
+        }
+      ],
+      "symbols": [
+        "darkbot_wire::rlp"
+      ],
+      "tests": [
+        "darkbot-wire::rlp::ethereum_reference_vectors",
+        "darkbot-wire::rlp::short_long_boundary_at_55_and_56_bytes",
+        "darkbot-wire::rlp::writers_match_reference_and_declared_lengths",
+        "darkbot-wire::rlp::integers_are_canonical_and_round_trip",
+        "darkbot-wire::rlp::uint_be_strips_leading_zeros_like_gate0_rlp_u256",
+        "darkbot-wire::rlp::decoder_rejects_non_canonical_and_truncated_strings",
+        "darkbot-wire::rlp::list_decoder_is_exact",
+        "darkbot-wire::rlp::integer_decoder_rejects_leading_zero_and_overflow",
+        "darkbot-wire::tests::rlp_differential::decoder_agrees_with_alloy_rlp_and_never_panics",
+        "darkbot-wire::tests::rlp_differential::encoders_agree_with_alloy_rlp"
+      ],
+      "result": "PASS in the review run (27,624 differential decoder inputs); NOT_RUN in the combined tree",
+      "not_proven": "exhaustive fuzzing"
+    },
+    {
+      "matrix_id": "P1",
+      "adoption": "SN02",
+      "unit": "Unit 2",
+      "status": "UNTESTED",
+      "evidence": [
+        {
+          "path": "bsc/tests/legacy_gate0/gate0-evidence/verify_flap_g02.py",
+          "sha256": "21fe17e1fb1ad1ef8b9be4e97b533316313b83dfb0b572feaaede03baf0f6cd9"
+        },
+        {
+          "path": "bsc/tests/legacy_gate0/gate0-evidence/2026-09-27-g01/flap_g02_verified_correction.json",
+          "sha256": "12e54dc6ef7c5e44f445ba5dc46e3b7a411f13930bd3d5c7d5359aa076786d16"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g06a_preflight_readonly.json",
+          "sha256": "ae1ecd5b335a8da6cf61dbfee62527cb126b8d248ea51ef4b9a38b9ce1d61292"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g06a_economics_evm_crosscheck_2026-10-02.json",
+          "sha256": "2c244616a78e5ee85f558c84781fa120ea3dd7da3c99618948ae023aca67cdad"
+        },
+        {
+          "path": "bsc/gates/gate0/tools/g06a_economics_evm_crosscheck.cjs",
+          "sha256": "ac64e9e616ee34222797076c599e4a4dd326e53a14d9ed504f28fa675f7a195b"
+        },
+        {
+          "path": "bsc/gates/gate0/src/bin/g06_flap_pending_decode.rs",
+          "sha256": "506ac3b60b95819f2e7663dfc278dfd101befe9312122ed2fb7c1262e54599c7"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::venues::flap::abi::decode_new_token_v6",
+        "darkbot_core::venues::flap::abi::encode_new_token_v6",
+        "darkbot_core::venues::flap::address::create2_address",
+        "darkbot_core::venues::flap::deployment::FlapDeployment::validate",
+        "darkbot_core::venues::flap::deployment::bsc_mainnet_v5_24_0",
+        "darkbot_core::venues::flap::profile::classify_launch"
+      ],
+      "tests": [
+        "darkbot-core::venues::flap::abi::historical_doge_launch_decodes_field_exact",
+        "darkbot-core::venues::flap::abi::captured_native_launches_decode_field_exact",
+        "darkbot-core::venues::flap::abi::accepted_launches_reencode_to_identical_bytes",
+        "darkbot-core::venues::flap::abi::oversize_wrong_selector_and_truncation_are_rejected",
+        "darkbot-core::venues::flap::abi::non_canonical_layouts_are_rejected",
+        "darkbot-core::venues::flap::abi::value_types_with_dirty_high_bits_are_rejected",
+        "darkbot-core::venues::flap::abi::unknown_token_version_decodes_but_is_not_supported",
+        "darkbot-core::venues::flap::abi::extension_tuple_of_the_doge_launch",
+        "darkbot-core::venues::flap::abi::buy_calldata_matches_the_canonical_mainnet_transaction",
+        "darkbot-core::venues::flap::abi::buy_encoder_rejects_zero_amounts",
+        "darkbot-core::venues::flap::abi::buy_decoder_rejects_everything_but_the_canonical_native_form",
+        "darkbot-core::venues::flap::address::eip1014_published_vectors",
+        "darkbot-core::venues::flap::address::deployer_padded_to_32_bytes_is_the_recorded_wrong_address",
+        "darkbot-core::venues::flap::address::wrong_implementation_init_code_or_deployer_yields_another_address",
+        "darkbot-core::venues::flap::deployment::mainnet_constants_match_the_recorded_evidence",
+        "darkbot-core::venues::flap::deployment::token_creation_code_and_hash_match_the_recorded_evidence",
+        "darkbot-core::venues::flap::deployment::historical_and_simulated_mainnet_tokens_are_reproduced",
+        "darkbot-core::venues::flap::deployment::captured_pending_launches_predict_the_tax_token_suffix",
+        "darkbot-core::venues::flap::deployment::matching_live_deployment_validates_and_carries_its_generation",
+        "darkbot-core::venues::flap::deployment::every_deviation_of_the_live_deployment_is_rejected",
+        "darkbot-core::venues::flap::profile::witnessed_native_launch_is_classified_through_its_calldata",
+        "darkbot-core::venues::flap::profile::salt_selects_the_token_and_nothing_else_is_free",
+        "darkbot-core::venues::flap::profile::every_bound_field_fails_closed",
+        "darkbot-core::venues::flap::profile::unwitnessed_beneficiary_and_metadata_fail_closed",
+        "darkbot-core::venues::flap::profile::captured_foreign_launches_decode_but_are_not_admissible",
+        "darkbot-core::venues::flap::profile::doge_launch_is_recognised_and_disabled"
+      ],
+      "result": "NOT_RUN",
+      "coverage": "Two complete G0.4 calldata fixtures and the historical DOGE launch are decoded and classified: the two G0.4 launches are rejected (CreatorPurchase, BuyTax), the DOGE launch is recognised and disabled. For five observed G0.4 salts only the CREATE2 vanity derivation is regression-checked; their complete launches are not classified.",
+      "not_proven": "current live deployment; Chapel deployment (no CREATE2 golden, not exported); DOGE-path dependency closure; relevance of name, symbol, uri and beneficiary to the BUY (they are bound to the single witnessed launch identity until proven from the pinned Portal code or qualified by a further independent execution); binding of the candidate hash to the launch bytes (ingress)"
+    },
+    {
+      "matrix_id": "N2",
+      "adoption": "SN02/SN06",
+      "unit": "Unit 2",
+      "status": "UNTESTED",
+      "evidence": [
+        {
+          "path": "bsc/gates/gate0/src/bin/g06_concurrency.rs",
+          "sha256": "d5e0addf1ed3970fd00843dba907dba7f9464aad078e007a92983b5754d0c2a3"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::venues::flap::binding::ExpectedBuy::from_admitted",
+        "darkbot_core::venues::flap::binding::verify_final_buy",
+        "darkbot_core::economics::policy::BuyPolicy"
+      ],
+      "tests": [
+        "darkbot-core::venues::flap::binding::two_hundred_fifty_six_final_envelopes_bind_sender_nonce_portal_and_token",
+        "darkbot-core::venues::flap::binding::every_bound_field_is_enforced",
+        "darkbot-core::venues::flap::binding::value_and_calldata_amount_must_agree",
+        "darkbot-core::venues::flap::binding::foreign_calldata_and_malformed_bytes_are_rejected",
+        "darkbot-core::venues::flap::binding::admitted_buy_signs_and_binds_end_to_end",
+        "darkbot-core::venues::flap::binding::prepared_buy_is_refused_after_any_snapshot_change",
+        "darkbot-core::venues::flap::binding::expectation_requires_matching_code_and_policy_generation"
+      ],
+      "result": "NOT_RUN",
+      "not_proven": "ticket/nonce-lane binding (Unit 4); cost of sender recovery; budget fields of the operating policy (Unit 6)"
+    },
+    {
+      "matrix_id": "Q3",
+      "adoption": "SN05",
+      "unit": "Unit 3",
+      "status": "UNTESTED",
+      "evidence": [
+        {
+          "path": "bsc/gates/gate0/src/native_bnb_quote.rs",
+          "sha256": "273b20780ff3f7c88b5482e700211922d01399a18587efa4ec5ea26120c04e05"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g06a_economics_evm_crosscheck_2026-10-02.json",
+          "sha256": "2c244616a78e5ee85f558c84781fa120ea3dd7da3c99618948ae023aca67cdad"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g06a_preflight_readonly.json",
+          "sha256": "ae1ecd5b335a8da6cf61dbfee62527cb126b8d248ea51ef4b9a38b9ce1d61292"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g07_hash_trigger_testnet_20261003T002258Z/result.json",
+          "sha256": "eb87aee0a628c51be2de691c070b92dbe11550c87e31c499d7f480fc10dd4fbb"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::economics::arith",
+        "darkbot_core::economics::fees::split_fee",
+        "darkbot_core::economics::slippage::min_output",
+        "darkbot_core::economics::policy::BuyPolicy",
+        "darkbot_core::economics::flap::native_curve20::quote_native_buy",
+        "darkbot_core::economics::flap::native_curve20::QualifiedNativeState::fresh_launch",
+        "darkbot_core::economics::flap::native_curve20::admit_native_buy",
+        "darkbot_core::economics::flap::AdmittedBuy"
+      ],
+      "tests": [
+        "darkbot-core::economics::arith::widened_product_does_not_wrap",
+        "darkbot-core::economics::arith::overflow_underflow_and_zero_divisor_are_errors",
+        "darkbot-core::economics::arith::rounding_direction_is_exact",
+        "darkbot-core::economics::fees::g03_fixture_tax_exceeds_one_percent_floor_by_one",
+        "darkbot-core::economics::fees::native_fixture_splits_evenly",
+        "darkbot-core::economics::fees::zero_tax_and_zero_amount",
+        "darkbot-core::economics::fees::combined_rate_of_one_hundred_percent_is_rejected",
+        "darkbot-core::economics::fees::maximum_amount_does_not_wrap",
+        "darkbot-core::economics::slippage::golden_minimums_at_100_bps",
+        "darkbot-core::economics::slippage::slippage_bounds_0_1_and_9999_bps",
+        "darkbot-core::economics::slippage::ten_thousand_bps_and_above_have_no_admissible_minimum",
+        "darkbot-core::economics::slippage::zero_quote_and_zero_rounded_minimum_are_rejected",
+        "darkbot-core::economics::slippage::maximum_quote_does_not_wrap",
+        "darkbot-core::economics::policy::valid_policy_keeps_its_values_and_generation",
+        "darkbot-core::economics::policy::invalid_values_are_rejected",
+        "darkbot-core::economics::flap::native_curve20::curve20_starts_at_zero_supply",
+        "darkbot-core::economics::flap::native_curve20::g06a_001_bnb_initial_buy_vector",
+        "darkbot-core::economics::flap::native_curve20::g07_0001_bnb_testnet_acquisition_vector",
+        "darkbot-core::economics::flap::native_curve20::second_buy_continues_from_the_first_buys_state",
+        "darkbot-core::economics::flap::native_curve20::unsupported_and_unwitnessed_branches_are_rejected",
+        "darkbot-core::economics::flap::native_curve20::inconsistent_or_extreme_state_is_an_error_not_a_panic",
+        "darkbot-core::economics::flap::native_curve20::admitted_buy_reproduces_the_evm_crosscheck",
+        "darkbot-core::economics::flap::native_curve20::only_the_fresh_state_of_matching_generation_and_terms_is_qualified",
+        "darkbot-core::economics::flap::native_curve20::launch_a_cannot_be_combined_with_the_snapshot_of_launch_b",
+        "darkbot-core::economics::flap::native_curve20::policy_of_another_generation_is_not_admitted",
+        "darkbot-core::economics::flap::native_curve20::only_the_crosschecked_amount_is_admitted",
+        "darkbot-core::economics::flap::native_curve20::admitted_minimum_is_positive_and_never_exceeds_the_expected_output"
+      ],
+      "result": "NOT_RUN",
+      "not_proven": "any amount other than 0.001 BNB on mainnet state; any state after a trade or a creator purchase; tax-disabled and exempt-caller branches; supply of live state, snapshot publication and invalidation (C2)"
+    },
+    {
+      "matrix_id": "Q2",
+      "adoption": "SN03/SN05",
+      "unit": "Unit 3",
+      "status": "UNTESTED; runtime-disabled by API",
+      "evidence": [
+        {
+          "path": "bsc/gates/gate0/src/bin/g03.rs",
+          "sha256": "810a9fc24eb4e1430c84a44da92f03cb5d81e65e40135a312cda0e21c82aab4b"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g03_result.json",
+          "sha256": "c355ec61fe0ff2ed43771cc370c8174bc37f3e16147e0e535e9888b86717b8b5"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g03_rust_inputs.json",
+          "sha256": "7aa4ee40f1fd69aa7253ee46fe1677a60a76050e5954698129df0b22b5eecc23"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g03_rust_output.json",
+          "sha256": "14357e9a1044f6d04848b90164937a6b24dc913fd067b002608bb4be468cb67b"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::economics::flap::doge_v3::quote_doge_fixture",
+        "darkbot_core::economics::flap::doge_v3::OracleAdmissionProof"
+      ],
+      "tests": [
+        "darkbot-core::economics::flap::doge_v3::g03_fixture_reproduces_every_recorded_value",
+        "darkbot-core::economics::flap::doge_v3::every_deviation_from_the_witnessed_execution_is_refused",
+        "darkbot-core::economics::flap::doge_v3::deadline_equality_passes_and_one_second_later_is_rejected",
+        "darkbot-core::economics::flap::doge_v3::scope_check_binds_every_fixture_field",
+        "darkbot-core::economics::flap::doge_v3::scope_check_binds_extension_mode_and_price",
+        "darkbot-core::economics::flap::doge_v3::arithmetic_rejects_bad_state_without_panic"
+      ],
+      "result": "NOT_RUN",
+      "not_proven": "oracle signature and signer role (no Rust verifier); any amount, caller or pool state other than the single witnessed execution; the EVM boundary cases minOutput+1 and before-launch remain offline oracle fixtures in g03_result.json"
+    },
+    {
+      "matrix_id": "Q1",
+      "adoption": "SN04",
+      "unit": "Units 2/3 + C2",
+      "status": "PARTIAL, C2-deferred",
+      "evidence": [
+        {
+          "path": "bsc/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-archive-witness-quicknode-153754/hotpath_dependency_matrix.json",
+          "sha256": "51a4799755d9771ca2067df8ebe5ab647f24ca0639cb2d901778ca9d7dc2b204"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::chain_state::SnapshotId",
+        "darkbot_core::economics::flap::native_curve20 (input contract table)",
+        "darkbot_core::economics::flap::doge_v3 (input contract table)"
+      ],
+      "tests": [
+        "darkbot-core::economics::flap::native_curve20::only_the_fresh_state_of_matching_generation_and_terms_is_qualified",
+        "darkbot-core::economics::flap::native_curve20::launch_a_cannot_be_combined_with_the_snapshot_of_launch_b",
+        "darkbot-core::economics::flap::native_curve20::policy_of_another_generation_is_not_admitted",
+        "darkbot-core::venues::flap::binding::prepared_buy_is_refused_after_any_snapshot_change",
+        "darkbot-core::venues::flap::binding::expectation_requires_matching_code_and_policy_generation",
+        "darkbot-core::economics::flap::doge_v3::deadline_equality_passes_and_one_second_later_is_rejected"
+      ],
+      "result": "NOT_RUN",
+      "not_proven": "the 497 classified dependency rows are not individually mapped to inputs; revoked signer role and missing role storage are not ported; C2 must show that exactly the declared inputs are taken coherently from that witness and invalidated; no live-state closure exists yet"
+    }
+  ]
+}

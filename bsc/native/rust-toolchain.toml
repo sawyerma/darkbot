@@ -1,0 +1,6 @@
+# Compiler used for the Unit-1 review run (2026-10-03). Changing it is a
+# deliberate, reviewed change: re-run tests, clippy and fmt afterwards.
+[toolchain]
+channel = "1.93.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

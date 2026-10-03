@@ -1,0 +1,12 @@
+[package]
+name = "darkbot-core"
+description = "DarkBot BSC runtime core: the single implementation of transaction construction and signing used by replay, PAPER, shadow and LIVE."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+darkbot-wire = { path = "../darkbot-wire" }
+alloy-primitives = { workspace = true }
+k256 = { workspace = true }

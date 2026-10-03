@@ -1,0 +1,28 @@
+# DarkBot BSC native production workspace (Runtime Contract §16).
+#
+# Members are added only when they contain production code. No placeholder
+# crates. Release-profile tuning (LTO, codegen-units, panic strategy) is
+# deliberately absent: Runtime Contract §10 requires each setting to be
+# benchmarked on the target host before it is retained.
+#
+# Reproducibility: the compiler is pinned in rust-toolchain.toml, the direct
+# wire- and signature-relevant dependencies are pinned to exact versions here,
+# and Cargo.lock is committed. Build, test and lint with `--locked`.
+[workspace]
+resolver = "3"
+members = [
+    "crates/darkbot-wire",
+    "crates/darkbot-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+publish = false
+
+[workspace.dependencies]
+# Exactly the versions resolved by the qualified Gate-0 harness and by the
+# Unit-1 review run (2026-10-03).
+alloy-primitives = "=1.7.3"
+k256 = { version = "=0.13.4", features = ["ecdsa"] }

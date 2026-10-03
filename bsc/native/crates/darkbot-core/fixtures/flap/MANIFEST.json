@@ -1,0 +1,50 @@
+{
+  "schema": "darkbot.native.fixture-manifest.v1",
+  "source_archive": "darkbot-main (15), 2026-10-03",
+  "reviewed_commit_per_master_plan": "eaba1afe5ad5834a92ea0a9fb915792e2473cb15",
+  "note": "evidence_sha256 is the hash of the evidence file as found in the source archive; the calldata is the transaction input field extracted from it",
+  "fixtures": [
+    {
+      "fixture": "launch_v6_doge_block_124415357.hex",
+      "chain_id": 56,
+      "venue": "flap",
+      "call": "newTokenV6",
+      "tx_hash": "0x5b8cc9893c403a66d4f43bd73ed5c69227807661a58d1d6b5611def3f1d8352c",
+      "scope": "CANONICAL",
+      "scope_note": "block 124415357, transaction index 0",
+      "evidence_path": "bsc/tests/legacy_gate0/gate0-evidence/2026-09-27-g01/flap_fixture_rpc/001.response.json",
+      "evidence_sha256": "b575cf53ff28923aff71070f9c9af5b1dfc9baa0166fa3f85c77ef6e6308306d",
+      "calldata_bytes": 1444,
+      "calldata_sha256": "deedbda83419091e898b501c522435f87f92d4029d2d9991ef3a9f4a3b543067",
+      "calldata_keccak256": "4695a68e24ed5360acb35cc9e9fff9d82c1fcc0fb874a748653dfac4c53e85da"
+    },
+    {
+      "fixture": "launch_v6_native_creator_buy_pending.hex",
+      "chain_id": 56,
+      "venue": "flap",
+      "call": "newTokenV6",
+      "tx_hash": "0xe67c5b6f8c18731d3362fb844c3356d8a400a7be48e6c70c3edd8d50b7138be9",
+      "scope": "PENDING_CAPTURE",
+      "scope_note": "portal_pending entry; canonical inclusion recorded in the same capture",
+      "evidence_path": "bsc/gates/gate0/evidence/g04_quicknode_coverage_v2/capture.json",
+      "evidence_sha256": "bdda4d0a4bdf6d38e723605bf375513b2d04209ae2ea7af641cac93dc26e2c5d",
+      "calldata_bytes": 1188,
+      "calldata_sha256": "4ea94f7faed314059792426556144881e30fcb9a77a26d5923df86b093773cde",
+      "calldata_keccak256": "7bec0a64177f951ad4290355bc4c55c9e23a16097c1368abf58ec978560b4493"
+    },
+    {
+      "fixture": "launch_v6_native_split_tax_pending.hex",
+      "chain_id": 56,
+      "venue": "flap",
+      "call": "newTokenV6",
+      "tx_hash": "0x37172d6bcb5130aed04abd7e394cdbc3a5b8063cb7f24c9c775524390dd2d377",
+      "scope": "PENDING_CAPTURE",
+      "scope_note": "portal_pending entry; canonical inclusion recorded in the same capture",
+      "evidence_path": "bsc/gates/gate0/evidence/g04_quicknode_coverage_v2/capture.json",
+      "evidence_sha256": "bdda4d0a4bdf6d38e723605bf375513b2d04209ae2ea7af641cac93dc26e2c5d",
+      "calldata_bytes": 1156,
+      "calldata_sha256": "50f8eefd3a0e8794a31e80a996f90ce921e2627b33388a8434d485827a7664b9",
+      "calldata_keccak256": "142128a92efab2c9cf27875e0b48240a6059f527e077d5fbffe9038cf2413417"
+    }
+  ]
+}
