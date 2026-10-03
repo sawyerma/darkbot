@@ -112,8 +112,8 @@ pub mod p0 {
                     // EndLiquidation premium is already represented by seized-vs-repaid value.
                     protocol_fees: 0,
                     flat_sol_fee,
-                    // [FIX-95] Missing ATAs may be created inside the receivership TX for Shadow
-                    // technical qualification. Rent economics remain UNKNOWN/unmeasured for LIVE.
+                    // [FIX-102] Receivership uses prewarmed ATAs created outside the liquidation
+                    // transaction. Historical ATA rent is not charged to every opportunity.
                     rent_and_token: 0,
                     premium_bps: sz.premium_bps,
                     slippage_bps: self.slippage_bps,
@@ -139,9 +139,25 @@ pub mod p0 {
         pub amount_out: u64,
     }
 
+    /// Canonical liquidator ATA already proven present in reconciled state.
+    /// Route sanitization may use this only to remove an exact redundant idempotent ATA-create
+    /// emitted by a router; it is not permission to accept arbitrary ATA instructions.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct PrewarmedAta {
+        pub address: Pubkey,
+        pub mint: Pubkey,
+        pub token_program: Pubkey,
+    }
+
     pub trait RouteProvider {
         /// ExactIn: ZERO_PREFUND (seized asset → liability) mit `withdraw_amount` als Input.
-        fn quote_exact_in(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount_in: u64) -> Result<Option<Route>, String>;
+        fn quote_exact_in(
+            &self,
+            from_mint: &Pubkey,
+            to_mint: &Pubkey,
+            amount_in: u64,
+            prewarmed_atas: &[PrewarmedAta],
+        ) -> Result<Option<Route>, String>;
         /// ExactOut bleibt Provider-Capability. Ein Provider ohne belegten ExactOut-Pfad liefert None.
         fn quote_exact_out(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount_out: u64) -> Result<Option<Route>, String>;
     }
@@ -322,8 +338,10 @@ pub mod p0 {
                 let (_, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
                 let (_, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
 
+                let asset_ata = (self.ata)(&asset_mint);
+                let liab_ata = (self.ata)(&liab_mint);
                 let mut missing = Vec::new();
-                if (self.ata)(&asset_mint).is_none() {
+                if asset_ata.is_none() {
                     missing.push(format!(
                         "asset ATA={} mint={} token_program={}",
                         get_associated_token_address_with_program_id(&self.liquidator, &asset_mint, &asset_tp),
@@ -331,7 +349,7 @@ pub mod p0 {
                         asset_tp
                     ));
                 }
-                if (self.ata)(&liab_mint).is_none() {
+                if liab_ata.is_none() {
                     missing.push(format!(
                         "liability ATA={} mint={} token_program={}",
                         get_associated_token_address_with_program_id(&self.liquidator, &liab_mint, &liab_tp),
@@ -343,6 +361,18 @@ pub mod p0 {
                     ata_errors.extend(missing);
                     continue;
                 }
+                let prewarmed_atas = [
+                    PrewarmedAta {
+                        address: asset_ata.expect("checked above"),
+                        mint: asset_mint,
+                        token_program: asset_tp,
+                    },
+                    PrewarmedAta {
+                        address: liab_ata.expect("checked above"),
+                        mint: liab_mint,
+                        token_program: liab_tp,
+                    },
+                ];
 
                 let inv = (self.inventory)(&sz.liab_bank);
 
@@ -421,7 +451,12 @@ pub mod p0 {
                 // so this class alone requires ExactIn market evidence. A provider error or
                 // missing route must not invalidate already-built inventory/JIT candidates.
                 if self.zero_prefund_qualified {
-                    let mark = match self.routes.quote_exact_in(&asset_mint, &liab_mint, sz.withdraw_amount) {
+                    let mark = match self.routes.quote_exact_in(
+                        &asset_mint,
+                        &liab_mint,
+                        sz.withdraw_amount,
+                        &prewarmed_atas,
+                    ) {
                         Ok(Some(route)) => Some(route),
                         Ok(None) => None,
                         Err(e) => {

@@ -4,12 +4,16 @@
 //! ours: blockhash, CU limit, signing, simulation and submission all stay in DarkBot.
 //! Keyless Jupiter access is supported; an API key is optional.
 
-use crate::builder::p0::{Route, RouteProvider};
+use crate::builder::p0::{PrewarmedAta, Route, RouteProvider};
 use base64::Engine as _;
 use serde::Deserialize;
 use solana_message::AddressLookupTableAccount;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
+use spl_associated_token_account::{
+    get_associated_token_address_with_program_id,
+    instruction::create_associated_token_account_idempotent,
+};
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -61,7 +65,13 @@ impl JupiterV2RouteProvider {
         self
     }
 
-    fn exact_in(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount: u64) -> Result<Option<Route>, String> {
+    fn exact_in(
+        &self,
+        from_mint: &Pubkey,
+        to_mint: &Pubkey,
+        amount: u64,
+        prewarmed_atas: &[PrewarmedAta],
+    ) -> Result<Option<Route>, String> {
         if amount == 0 {
             return Err("jupiter exact-in rejected locally: amount=0".into());
         }
@@ -112,8 +122,12 @@ impl JupiterV2RouteProvider {
         }
 
         let mut instructions = Vec::new();
-        for ix in &build.setup_instructions {
-            instructions.push(to_instruction(ix)?);
+        for raw in &build.setup_instructions {
+            let ix = to_instruction(raw)?;
+            if is_verified_redundant_prewarmed_ata_setup(&ix, &self.taker, prewarmed_atas)? {
+                continue;
+            }
+            instructions.push(ix);
         }
         instructions.push(to_instruction(&build.swap_instruction)?);
         if let Some(ix) = &build.cleanup_instruction {
@@ -133,7 +147,7 @@ impl JupiterV2RouteProvider {
             bad.sort();
             bad.dedup();
             return Err(format!(
-                "jupiter route incompatible with receivership top-level validator: {}",
+                "jupiter route incompatible with receivership top-level validator after prewarm filtering: {}",
                 bad.join(",")
             ));
         }
@@ -150,8 +164,14 @@ impl JupiterV2RouteProvider {
 }
 
 impl RouteProvider for JupiterV2RouteProvider {
-    fn quote_exact_in(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount_in: u64) -> Result<Option<Route>, String> {
-        self.exact_in(from_mint, to_mint, amount_in)
+    fn quote_exact_in(
+        &self,
+        from_mint: &Pubkey,
+        to_mint: &Pubkey,
+        amount_in: u64,
+        prewarmed_atas: &[PrewarmedAta],
+    ) -> Result<Option<Route>, String> {
+        self.exact_in(from_mint, to_mint, amount_in, prewarmed_atas)
     }
 
     fn quote_exact_out(&self, _from_mint: &Pubkey, _to_mint: &Pubkey, _amount_out: u64) -> Result<Option<Route>, String> {
@@ -207,6 +227,62 @@ fn to_instruction(ix: &ApiInstruction) -> Result<Instruction, String> {
     Ok(Instruction { program_id, accounts, data })
 }
 
+/// [FIX-106] Remove only an exact canonical idempotent ATA-create emitted in Jupiter's
+/// setup section when that canonical ATA has already been proven present in reconciled state.
+/// Any other Associated Token instruction remains fail-closed because Marginfi rejects it as
+/// a top-level receivership instruction.
+fn is_verified_redundant_prewarmed_ata_setup(
+    ix: &Instruction,
+    taker: &Pubkey,
+    prewarmed_atas: &[PrewarmedAta],
+) -> Result<bool, String> {
+    let ata_program = Pubkey::from_str(darkbot_project0::protocol::ASSOCIATED_TOKEN_PROGRAM_ID)
+        .map_err(|e| e.to_string())?;
+    if ix.program_id != ata_program {
+        return Ok(false);
+    }
+
+    for known in prewarmed_atas {
+        let derived = get_associated_token_address_with_program_id(
+            taker,
+            &known.mint,
+            &known.token_program,
+        );
+        if derived != known.address {
+            return Err(format!(
+                "prewarmed ATA identity mismatch: recorded={} derived={} mint={} token_program={}",
+                known.address, derived, known.mint, known.token_program
+            ));
+        }
+
+        let expected = create_associated_token_account_idempotent(
+            taker,
+            taker,
+            &known.mint,
+            &known.token_program,
+        );
+        let same_accounts = ix.accounts.len() == expected.accounts.len()
+            && ix.accounts.iter().zip(expected.accounts.iter()).all(|(a, b)| {
+                a.pubkey == b.pubkey
+                    && a.is_signer == b.is_signer
+                    && a.is_writable == b.is_writable
+            });
+
+        if ix.program_id == expected.program_id
+            && ix.data == expected.data
+            && same_accounts
+        {
+            return Ok(true);
+        }
+    }
+
+    Err(format!(
+        "jupiter ATA setup not safely removable: data_len={} accounts={}",
+        ix.data.len(),
+        ix.accounts.len()
+    ))
+}
+
 fn transform_alts(raw: Option<HashMap<String, Vec<String>>>) -> Result<Vec<AddressLookupTableAccount>, String> {
     let Some(raw) = raw else { return Ok(Vec::new()) };
     let mut out = Vec::with_capacity(raw.len());
@@ -224,6 +300,26 @@ fn transform_alts(raw: Option<HashMap<String, Vec<String>>>) -> Result<Vec<Addre
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strips_only_exact_verified_prewarmed_ata_setup() {
+        let taker = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let token_program = Pubkey::from_str(darkbot_project0::protocol::TOKEN_PROGRAM_ID).unwrap();
+        let address = get_associated_token_address_with_program_id(&taker, &mint, &token_program);
+        let known = PrewarmedAta { address, mint, token_program };
+        let ix = create_associated_token_account_idempotent(&taker, &taker, &mint, &token_program);
+
+        assert_eq!(
+            is_verified_redundant_prewarmed_ata_setup(&ix, &taker, &[known]),
+            Ok(true)
+        );
+
+        let other_taker = Pubkey::new_unique();
+        assert!(
+            is_verified_redundant_prewarmed_ata_setup(&ix, &other_taker, &[known]).is_err()
+        );
+    }
 
     #[test]
     fn parses_instruction_and_alt_without_rpc() {
