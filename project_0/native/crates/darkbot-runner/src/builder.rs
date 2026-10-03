@@ -19,7 +19,7 @@ pub mod p0 {
     use darkbot_solana::tx::BuildVersion;
     use marginfi_type_crate::types::{Bank, MarginfiAccount};
     use solana_message::AddressLookupTableAccount /* [FIX-13] */;
-    use solana_sdk::instruction::Instruction;
+    use solana_sdk::instruction::{AccountMeta, Instruction};
     use spl_associated_token_account::get_associated_token_address_with_program_id;
     use solana_sdk::pubkey::Pubkey;
     use std::str::FromStr;
@@ -230,6 +230,34 @@ pub mod p0 {
             })
         }
 
+        /// [FIX-107] Exact bank-only layout used by pinned p0-cli for EndLiquidation.
+        /// Active balance order is normalized descending by raw pubkey bytes, matching
+        /// load_observation_bank_only_metas().
+        fn active_bank_keys(&self, account: &Pubkey) -> Result<Vec<Pubkey>, String> {
+            let (owner, _, data) = self.state.account(account).ok_or("marginfi account not in state")?;
+            if owner != self.program
+                || darkbot_project0::protocol::classify(data)
+                    != darkbot_project0::protocol::AccountType::MarginfiAccount
+            {
+                return Err("UNKNOWN_LAYOUT: invalid MarginfiAccount for observation layout".into());
+            }
+            let need = 8 + std::mem::size_of::<MarginfiAccount>();
+            if data.len() < need {
+                return Err(format!("UNKNOWN_LAYOUT: marginfi account len {} < {}", data.len(), need));
+            }
+            let a: &MarginfiAccount =
+                bytemuck::try_from_bytes(&data[8..need]).map_err(|e| format!("{:?}", e))?;
+            let mut banks: Vec<Pubkey> = a
+                .lending_account
+                .balances
+                .iter()
+                .filter(|bal| bal.is_active())
+                .map(|bal| bal.bank_pk)
+                .collect();
+            banks.sort_by(|x, y| y.cmp(x));
+            Ok(banks)
+        }
+
         fn receivership(&self, account: &Pubkey, obs: &[Pubkey], sz: &Sizing, swaps: Vec<Instruction>, repay_from_inventory: bool) -> Result<(Vec<Instruction>, Vec<Step>), String> {
             let (asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
             let (liab_vault, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
@@ -281,11 +309,33 @@ pub mod p0 {
                     Step::Other(i.program_id)
                 }
             }).collect();
+
+            let end_banks = self.active_bank_keys(account)?;
+            let start_observation: Vec<AccountMeta> = obs
+                .iter()
+                .map(|k| {
+                    if end_banks.contains(k) {
+                        AccountMeta::new(*k, false)
+                    } else {
+                        AccountMeta::new_readonly(*k, false)
+                    }
+                })
+                .collect();
+
             let init_record = self.should_init_liquidation_record(account)?;
             let ixs = builders::build_receivership(ReceivershipParams {
-                program: &self.program, group: &self.group, marginfi_account: account, liquidator: &self.liquidator,
-                global_fee_wallet: &self.global_fee_wallet, observation: obs, init_record,
-                pre_refreshes: vec![], withdraws: vec![withdraw], swaps, repays: vec![repay],
+                program: &self.program,
+                group: &self.group,
+                marginfi_account: account,
+                liquidator: &self.liquidator,
+                global_fee_wallet: &self.global_fee_wallet,
+                start_observation,
+                end_banks,
+                init_record,
+                pre_refreshes: vec![],
+                withdraws: vec![withdraw],
+                swaps,
+                repays: vec![repay],
             });
             let mut steps = vec![Step::StartLiquidation];
             steps.push(Step::Withdraw);

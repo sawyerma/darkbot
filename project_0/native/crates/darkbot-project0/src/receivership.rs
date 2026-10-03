@@ -9,7 +9,7 @@
 //!
 //! Ohne Feature `crate_health`: keine Builder (fail closed). Status: UNTESTED / VERIFY (Staging-Simulation).
 
-use solana_sdk::instruction::Instruction;
+use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
 
 pub const INSTRUCTIONS_SYSVAR: &str = "Sysvar1nstructions1111111111111111111111111";
@@ -23,8 +23,12 @@ pub struct ReceivershipParams<'a> {
     pub liquidator: &'a Pubkey,
     /// Aus FeeState (P1A-Manifest / RAM-State), nicht hart kodiert.
     pub global_fee_wallet: &'a Pubkey,
-    /// Observation-Accounts in Programm-Reihenfolge (HealthEngine::observation_accounts).
-    pub observation: &'a [Pubkey],
+    /// StartLiquidation: complete bank+oracle layout; active banks writable because Start locks
+    /// liquidation prices in each bank cache. Matches pinned p0-cli start_metas.
+    pub start_observation: Vec<AccountMeta>,
+    /// EndLiquidation uses HealthPriceMode::Cached and therefore takes banks only, all writable
+    /// because End clears each bank's liquidation-price-cache lock.
+    pub end_banks: Vec<Pubkey>,
     pub init_record: bool,
     pub pre_refreshes: Vec<Instruction>,
     pub withdraws: Vec<Instruction>,
@@ -37,7 +41,6 @@ pub mod builders {
     use super::*;
     use crate::protocol;
     use anchor_lang::{InstructionData, ToAccountMetas};
-    use solana_sdk::instruction::AccountMeta;
     use std::str::FromStr;
 
     fn pk(s: &str) -> Pubkey {
@@ -62,7 +65,7 @@ pub mod builders {
         }
     }
 
-    pub fn start_liquidation(program: &Pubkey, marginfi_account: &Pubkey, group: &Pubkey, receiver: &Pubkey, observation: &[Pubkey]) -> Instruction {
+    pub fn start_liquidation(program: &Pubkey, marginfi_account: &Pubkey, group: &Pubkey, receiver: &Pubkey, observation: &[AccountMeta]) -> Instruction {
         let mut accounts = marginfi::accounts::StartLiquidation {
             marginfi_account: *marginfi_account,
             liquidation_record: protocol::liquidation_record_pda(program, marginfi_account),
@@ -71,7 +74,7 @@ pub mod builders {
             instruction_sysvar: pk(INSTRUCTIONS_SYSVAR),
         }
         .to_account_metas(Some(true));
-        accounts.extend(obs(observation));
+        accounts.extend_from_slice(observation);
         Instruction { program_id: *program, accounts, data: marginfi::instruction::StartLiquidation.data() }
     }
 
@@ -115,7 +118,7 @@ pub mod builders {
     }
 
     pub fn end_liquidation(program: &Pubkey, marginfi_account: &Pubkey, group: &Pubkey, receiver: &Pubkey,
-                           global_fee_wallet: &Pubkey, observation: &[Pubkey]) -> Instruction {
+                           global_fee_wallet: &Pubkey, banks_only: &[Pubkey]) -> Instruction {
         let mut accounts = marginfi::accounts::EndLiquidation {
             marginfi_account: *marginfi_account,
             liquidation_record: protocol::liquidation_record_pda(program, marginfi_account),
@@ -127,7 +130,7 @@ pub mod builders {
             fee_payer: None,
         }
         .to_account_metas(Some(true));
-        accounts.extend(obs(observation));
+        accounts.extend(banks_only.iter().map(|k| AccountMeta::new(*k, false)));
         Instruction { program_id: *program, accounts, data: marginfi::instruction::EndLiquidation.data() }
     }
 
@@ -137,11 +140,11 @@ pub mod builders {
         if p.init_record {
             v.push(init_liquidation_record(p.program, p.marginfi_account, p.liquidator));
         }
-        v.push(start_liquidation(p.program, p.marginfi_account, p.group, p.liquidator, p.observation));
+        v.push(start_liquidation(p.program, p.marginfi_account, p.group, p.liquidator, &p.start_observation));
         v.extend(p.withdraws);
         v.extend(p.swaps);
         v.extend(p.repays);
-        v.push(end_liquidation(p.program, p.marginfi_account, p.group, p.liquidator, p.global_fee_wallet, p.observation));
+        v.push(end_liquidation(p.program, p.marginfi_account, p.group, p.liquidator, p.global_fee_wallet, &p.end_banks));
         v
     }
 }

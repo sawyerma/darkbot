@@ -197,13 +197,38 @@ pub mod run {
             &inp.program, &inp.group, &inp.account, &inp.liquidator, &inp.liab_bank,
             &inp.liquidator_liab_ata, &liab_vault, &liab_tp, 0, Some(true),
         );
+        let mut end_banks: Vec<Pubkey> = obs
+            .iter()
+            .copied()
+            .filter(|pk| {
+                inp.state.account(pk).map(|(owner, _, data)| {
+                    owner == inp.program
+                        && protocol::classify(data) == protocol::AccountType::Bank
+                }).unwrap_or(false)
+            })
+            .collect();
+        end_banks.sort_by(|a, b| b.cmp(a));
+        end_banks.dedup();
+
+        let start_observation: Vec<AccountMeta> = obs
+            .iter()
+            .map(|pk| {
+                if end_banks.contains(pk) {
+                    AccountMeta::new(*pk, false)
+                } else {
+                    AccountMeta::new_readonly(*pk, false)
+                }
+            })
+            .collect();
+
         let ixs = builders::build_receivership(ReceivershipParams {
             program: &inp.program,
             group: &inp.group,
             marginfi_account: &inp.account,
             liquidator: &inp.liquidator,
             global_fee_wallet: &inp.global_fee_wallet,
-            observation: &obs,
+            start_observation,
+            end_banks,
             init_record: inp.init_record,
             pre_refreshes: vec![],
             withdraws: vec![withdraw],
