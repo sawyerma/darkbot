@@ -1143,3 +1143,34 @@ Status:
 - R1 diagnostics: **Mainnet PASS**.
 - FIX-91: **IMPLEMENTED / VERIFY**.
 - Next diagnostic target: explain the 2 `NO_VALID_PROTOCOL_PAIR` cases at pair-level before touching route/funding.
+
+
+### 2026-10-03 — FIX-93 closeout sizing parity — IMPLEMENTED / VERIFY
+
+Mainnet evidence for account `CwSsTePXHZUkiZgmKtXwxmEX2uU1ddY5aUjRKkjKvH6d`:
+
+```text
+liquidatable=true
+bad_debt=true
+equity_assets_bits≈51.4M
+pair-level rejection: premium_bound=2
+```
+
+Protocol threshold:
+`LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD = 5 USD`, represented in Q48 as `5 << 48`.
+The observed equity-assets value is therefore far below the closeout threshold.
+
+Pinned marginfi semantics:
+- `end_liquidation` sets `ignore_healthy=true` when pre-liquidation equity assets are below the closeout threshold;
+- in closeout, the normal post-health `<= 0` requirement is bypassed;
+- in closeout, the `seized <= repaid * max_fee` premium bound is also bypassed.
+
+[FIX-93]:
+- removes the normal `health_cap` only when `HealthView::closeout_allowed == true`;
+- skips the premium-bound rejection only in that same closeout branch;
+- leaves normal-liquidation sizing unchanged;
+- retains the existing liability cap conservatively; no new repay-all strategy is introduced.
+
+Important: this does **not** validate Fable C1 globally. C1 remains false for normal liquidations; FIX-93 implements only the explicit closeout exception from pinned protocol source.
+
+Status: **IMPLEMENTED / VERIFY**.
