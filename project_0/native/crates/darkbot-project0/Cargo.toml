@@ -12,7 +12,7 @@ license = "UNLICENSED"
 
 [features]
 default = []
-crate_health = ["marginfi", "marginfi-type-crate", "anchor-lang", "dep:fixed"]
+crate_health = ["marginfi", "marginfi-type-crate", "anchor-lang", "dep:fixed", "kamino-mocks", "drift-mocks", "juplend-mocks"]
 
 [dependencies]
 darkbot-common = { path = "../darkbot-common" }
@@ -27,3 +27,10 @@ anchor-lang = { version = "1.0.2", optional = true }
 # BELEGT (Sitzung 4): Programm-Crate main = 0.1.11, features client/no-entrypoint/mainnet-beta; Type-Crate 0.1.10.
 marginfi = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["client", "no-entrypoint", "mainnet-beta"], optional = true }
 marginfi-type-crate = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["mainnet-beta"], optional = true }
+
+# [FIX-109][R6] Exact integration layouts/builders from the same pinned Marginfi source tree.
+# These are already transitive dependencies of marginfi; declaring them directly lets Project_0
+# use the canonical zero-copy layouts and generated client instruction accounts without copying IDLs.
+kamino-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
+drift-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
+juplend-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
