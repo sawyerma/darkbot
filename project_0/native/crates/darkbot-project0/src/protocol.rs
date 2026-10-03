@@ -24,7 +24,9 @@ pub const PYTH_PUSH_ORACLE_ID: &str = "pythWSnswVUd12oZpeFP8e9CVaEqJg25g1Vtc2biR
 /// Receivership-TX: **nur** diese Programme dürfen Top-Level-Instructions stellen
 /// (`validate_instructions` in liquidate_start.rs). Kein System-Programm → **kein SOL-Transfer
 /// (Jito-Tip) in der Receivership-TX**; Tip gehört in eine separate Bundle-TX.
-/// Kein Token-Programm → kein Top-Level ATA-Close/Transfer.
+/// Kein Token-Programm. Associated Token is listed by Marginfi's outer program allowlist, but
+/// the pinned validate_ix_first rejects its 1-byte instruction encoding while scanning the TX;
+/// therefore ATA creation is also excluded here and must be prewarmed outside receivership.
 pub fn receivership_allowed_programs() -> Vec<Pubkey> {
     [
         COMPUTE_BUDGET_PROGRAM_ID,
@@ -34,7 +36,6 @@ pub fn receivership_allowed_programs() -> Vec<Pubkey> {
         JUPLEND_PROGRAM_ID,
         JUP_SWAP_PROGRAM_ID,
         TITAN_SWAP_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID,
     ]
     .iter()
     .map(|s| Pubkey::from_str(s).expect("static"))
@@ -145,7 +146,7 @@ mod tests {
         assert_eq!(classify(&d), AccountType::Bank);
         assert_eq!(bank_layout(d.len()), Some("0.1.11"));
         assert_eq!(bank_layout(100), None);
-        assert_eq!(receivership_allowed_programs().len(), 8);
+        assert_eq!(receivership_allowed_programs().len(), 7);
     }
 
     #[test]
