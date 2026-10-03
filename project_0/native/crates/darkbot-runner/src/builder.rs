@@ -322,6 +322,15 @@ pub mod p0 {
                 })
                 .collect();
 
+            // [FIX-109][R6] Refresh every active integration balance before StartLiquidation.
+            // The planner is deterministic from canonical RAM state and fails closed on any
+            // missing/unknown integration layout.
+            let pre_refreshes =
+                darkbot_project0::integration::refresh_plan_for_account(
+                    self.state,
+                    &self.program,
+                    account,
+                )?;
             let init_record = self.should_init_liquidation_record(account)?;
             let ixs = builders::build_receivership(ReceivershipParams {
                 program: &self.program,
@@ -332,7 +341,7 @@ pub mod p0 {
                 start_observation,
                 end_banks,
                 init_record,
-                pre_refreshes: vec![],
+                pre_refreshes,
                 withdraws: vec![withdraw],
                 swaps,
                 repays: vec![repay],
