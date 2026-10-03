@@ -23,7 +23,7 @@ use marginfi_type_crate::{
         derive_juplend_liquidity_vault, derive_juplend_rate_model,
         derive_juplend_rewards_rate_model, JUPLEND_LIQUIDITY_PROGRAM_ID,
     },
-    types::Bank,
+    types::{Bank, MarginfiAccount},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,6 +225,66 @@ fn juplend_refresh<S: AccountSource + ?Sized>(
         ],
         data: vec![24, 225, 53, 189, 72, 212, 225, 178],
     }])
+}
+
+/// Build the deterministic pre-Start refresh prefix for every active integration balance.
+///
+/// Banks are processed in descending pubkey order, matching the canonical Marginfi observation
+/// order. Duplicate external instructions are removed by (program, data, account-meta) identity.
+pub fn refresh_plan_for_account<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    account_key: &Pubkey,
+) -> Result<Vec<Instruction>, String> {
+    let (owner, _, data) = raw(state, account_key)?;
+    if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
+        return Err("INTEGRATION_REFRESH_NOT_MARGINFI_ACCOUNT".into());
+    }
+    let need = 8 + std::mem::size_of::<MarginfiAccount>();
+    if data.len() < need {
+        return Err(format!("INTEGRATION_MARGINFI_ACCOUNT_SHORT:{}<{}", data.len(), need));
+    }
+    let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
+        .map_err(|e| format!("INTEGRATION_MARGINFI_ACCOUNT_CAST:{e:?}"))?;
+
+    let mut bank_keys: Vec<Pubkey> = account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+        .map(|b| b.bank_pk)
+        .collect();
+    bank_keys.sort_by(|a, b| b.cmp(a));
+    bank_keys.dedup();
+
+    let mut out = Vec::new();
+    for bank_key in bank_keys {
+        let (bank_owner, _, bank_data) = raw(state, &bank_key)?;
+        if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
+            return Err(format!("INTEGRATION_REFRESH_INVALID_BANK:{bank_key}"));
+        }
+        let bank: &Bank = pod_after_disc(state, &bank_key)?;
+        out.extend(refresh_plan_for_bank(state, bank)?);
+    }
+
+    let mut deduped: Vec<Instruction> = Vec::with_capacity(out.len());
+    'outer: for ix in out {
+        for existing in &deduped {
+            if existing.program_id == ix.program_id
+                && existing.data == ix.data
+                && existing.accounts.len() == ix.accounts.len()
+                && existing.accounts.iter().zip(ix.accounts.iter()).all(|(a, b)| {
+                    a.pubkey == b.pubkey
+                        && a.is_signer == b.is_signer
+                        && a.is_writable == b.is_writable
+                })
+            {
+                continue 'outer;
+            }
+        }
+        deduped.push(ix);
+    }
+    Ok(deduped)
 }
 
 /// Refresh instructions required before StartLiquidation for one integration bank.
