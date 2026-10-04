@@ -69,6 +69,14 @@ pub fn pricing_kind(bank: &Bank) -> Option<IntegrationKind> {
 }
 
 
+/// Venue whose state must be refreshed before evaluating this bank.
+/// Pricing/oracle integration is authoritative for freshness. Asset-tag integration is used as a
+/// conservative fallback for layouts that encode the venue only in the bank tag.
+fn refresh_kind(bank: &Bank) -> Option<IntegrationKind> {
+    pricing_kind(bank).or_else(|| kind(bank))
+}
+
+
 /// [FIX-112][R6] Exact separation between Marginfi bank units and the underlying tokens
 /// that the external venue sends to the liquidator.
 ///
@@ -616,7 +624,7 @@ pub fn projection_targets_for_account<S: AccountSource + ?Sized>(
                 out.push(key);
             }
         }
-        if matches!(kind(bank), Some(IntegrationKind::Drift)) {
+        if matches!(refresh_kind(bank), Some(IntegrationKind::Drift)) {
             out.extend(drift_reward_market_keys(state, bank)?);
         }
     }
@@ -644,7 +652,7 @@ pub fn refresh_plan_for_bank<S: AccountSource + ?Sized>(
     state: &S,
     bank: &Bank,
 ) -> Result<Vec<Instruction>, String> {
-    match kind(bank) {
+    match refresh_kind(bank) {
         None => Ok(Vec::new()),
         Some(IntegrationKind::Kamino) => kamino_refreshes(state, bank),
         Some(IntegrationKind::Drift) => drift_refresh(state, bank),
@@ -675,7 +683,7 @@ pub fn dependency_keys_for_bank<S: AccountSource + ?Sized>(
         }
     }
 
-    match kind(bank) {
+    match refresh_kind(bank) {
         None => {}
         Some(IntegrationKind::Kamino) => {
             let reserve = kamino_reserve(state, &bank.integration_acc_1)?;
