@@ -56,7 +56,7 @@ pub struct ProjectionResultMessage {
     pub base_slot: u64,
     pub base_account_hash: Hash,
     pub t_rx_ns: u64,
-    pub result: Result<(u64, Vec<(Pubkey, Account)>, Option<u64>), String>,
+    pub result: Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), String>,
 }
 
 pub struct RemoteWorkers {
