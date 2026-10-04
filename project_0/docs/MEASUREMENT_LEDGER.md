@@ -2763,3 +2763,46 @@ New regressions cover:
 Status: **FIX-128 IMPLEMENTED / workspace compiler+tests and Mainnet Shadow verification required.**
 R6 remains PARTIAL due Drift evidence gap. R7 remains OPEN until FIX-128 is runtime-qualified and FailedCostMatrix / thresholds / v1 execution qualification are closed.
 
+
+
+### 2026-10-04 — FIX-128f / FIX-130 / FIX-131 0.1.12 PRE hardening
+
+Source review:
+- pinned `marginfi-v2@mrgn-0.1.11-rc1` `p0-cli/src/processor/account.rs` and
+  `test-utils/src/marginfi_account.rs` for normal withdraw remaining-account order;
+- `marginfi-v2` 0.1.12 branch / patch notes for Bank resize and post-upgrade semantics;
+- Solana upgradeable-loader source/docs for ProgramData PDA derivation and upgrade lifecycle.
+
+Implemented:
+- **FIX-128f**: normal Token-2022 `LendingAccountWithdraw` now receives the Bank mint
+  and inserts it as the first remaining account before health observations, matching pinned
+  p0-cli/test-utils. Classic SPL Token withdraw does not append the mint. Runner passes
+  `bank.mint` into the builder. Added regressions for Token-2022 ordering and unchanged
+  classic behavior.
+- **FIX-130**: Bank GPA/WSS filters no longer use exact `dataSize`. They filter by the
+  Bank discriminator plus group offset, allowing both the current 1856-byte payload and
+  the announced 3904-byte payload through ingress. Exact supported layout lengths remain
+  a decode/classification concern; MarginfiAccount keeps its exact-size filter.
+- **FIX-131**: derive the Loader-v3 ProgramData PDA from the configured Marginfi program,
+  fetch and hash it at startup, include it in required snapshot/WSS dependencies, compare
+  every ProgramData update and every recovered canonical snapshot to the startup baseline,
+  and latch `HaltReason::ProgramUpgrade` on mismatch. The latch is not cleared by normal
+  reconnect/recovery and therefore requires explicit P1B promotion before execution can resume.
+
+Commits:
+- `728ee809` — FIX-128f withdraw builder + regressions;
+- `8254dfb7` — pass Bank mint from runner builder;
+- `7d0f1c7e` — FIX-130 dual-size-compatible Bank ingress filter;
+- `b05fd3b1` — FIX-131 ProgramData upgrade watcher with latched halt.
+
+Important boundary:
+- this is **PRE-hardening only**. Project_0 remains pinned to `mrgn-0.1.11-rc1`.
+- 0.1.12 changes more than Bank size: variable-borrow premium changes debt, health and
+  `repay_all` economics; new Scope integration oracle variants also require source-exact
+  promotion. None of those semantics are claimed implemented by FIX-130/131.
+- do not switch the dependency pin or claim 0.1.12 compatibility until P1B source parity,
+  compile/tests and Mainnet Shadow evidence are complete.
+
+Status: **IMPLEMENTED IN SOURCE / NOT YET COMPILED OR TESTED after these commits.**
+LIVE remains hard-disabled. 72 h NOT STARTED. Next: compile/test this checkpoint, then
+P1B 0.1.12 source-parity promotion before FIX-129 economics closure / long-run qualification.
