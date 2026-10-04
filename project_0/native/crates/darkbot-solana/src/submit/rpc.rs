@@ -9,10 +9,12 @@ use solana_client::rpc_config::{RpcSendTransactionConfig, RpcTransactionConfig};
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel}; // [FIX-13]
 use solana_account_decoder::UiAccountEncoding;
 use solana_sdk::account::Account;
+use solana_sdk::clock::Clock as SolanaClock;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status::UiTransactionEncoding;
+use std::str::FromStr;
 
 fn safe_rpc_error(e: &solana_client::client_error::ClientError) -> String {
     use solana_client::client_error::ClientErrorKind as K;
@@ -54,12 +56,23 @@ impl RpcSubmitter {
         &self,
         tx: &VersionedTransaction,
         addresses: &[Pubkey],
-    ) -> Result<(u64, Vec<(Pubkey, Account)>, Option<u64>), SubmitError> {
+    ) -> Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), SubmitError> {
         if addresses.is_empty() {
             return Err(SubmitError::Rejected(
                 "projection simulation requested zero post accounts".into(),
             ));
         }
+
+        // [FIX-118a][R6] JupLend freshness is exact to the simulation Clock unix timestamp.
+        // Request the Clock sysvar alongside mutated accounts so downstream Health/Sizing uses
+        // the same protocol time as the refresh instructions, not wall-clock time a second later.
+        let clock_key = Pubkey::from_str("SysvarC1ock11111111111111111111111111111111")
+            .map_err(|e| SubmitError::Rejected(format!("clock sysvar pubkey: {e}")))?;
+        let mut requested = addresses.to_vec();
+        if !requested.contains(&clock_key) {
+            requested.push(clock_key);
+        }
+
         let cfg = RpcSimulateTransactionConfig {
             sig_verify: true,
             replace_recent_blockhash: false,
@@ -67,7 +80,7 @@ impl RpcSubmitter {
             encoding: Some(UiTransactionEncoding::Base64),
             accounts: Some(RpcSimulateTransactionAccountsConfig {
                 encoding: Some(UiAccountEncoding::Base64),
-                addresses: addresses.iter().map(ToString::to_string).collect(),
+                addresses: requested.iter().map(ToString::to_string).collect(),
             }),
             min_context_slot: None,
             inner_instructions: false,
@@ -86,25 +99,47 @@ impl RpcSubmitter {
             .value
             .accounts
             .ok_or_else(|| SubmitError::Rejected("projection simulation returned no accounts".into()))?;
-        if returned.len() != addresses.len() {
+        if returned.len() != requested.len() {
             return Err(SubmitError::Rejected(format!(
                 "projection account count mismatch: requested={} returned={}",
-                addresses.len(),
+                requested.len(),
                 returned.len()
             )));
         }
 
         let mut out = Vec::with_capacity(addresses.len());
-        for (key, ui) in addresses.iter().copied().zip(returned.into_iter()) {
+        let mut simulation_clock: Option<SolanaClock> = None;
+        for (key, ui) in requested.iter().copied().zip(returned.into_iter()) {
             let ui = ui.ok_or_else(|| {
                 SubmitError::Rejected(format!("projection account missing after simulation: {key}"))
             })?;
             let account = ui.decode::<Account>().ok_or_else(|| {
                 SubmitError::Rejected(format!("projection account decode failed: {key}"))
             })?;
-            out.push((key, account));
+            if key == clock_key {
+                let clock: SolanaClock = bincode::deserialize(&account.data).map_err(|e| {
+                    SubmitError::Rejected(format!("projection clock decode failed: {e}"))
+                })?;
+                simulation_clock = Some(clock);
+            } else {
+                out.push((key, account));
+            }
         }
-        Ok((response.context.slot, out, response.value.units_consumed))
+        let simulation_clock = simulation_clock.ok_or_else(|| {
+            SubmitError::Rejected("projection simulation returned no Clock sysvar".into())
+        })?;
+        if simulation_clock.slot != response.context.slot {
+            return Err(SubmitError::Rejected(format!(
+                "projection clock/context slot mismatch: clock={} context={}",
+                simulation_clock.slot, response.context.slot
+            )));
+        }
+        Ok((
+            simulation_clock.slot,
+            simulation_clock.unix_timestamp,
+            out,
+            response.value.units_consumed,
+        ))
     }
 }
 
