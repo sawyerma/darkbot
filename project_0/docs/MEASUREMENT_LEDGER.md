@@ -2227,3 +2227,34 @@ R6 evidence still required:
 
 Status: **R111 census PASS; Kamino/JupLend qualification candidates found; downstream R111 records pending review.**
 
+### 2026-10-04 — R111 downstream review: projection jobs queued, run stopped before results
+
+R111 record review of the 16 targeted integration samples showed:
+
+```text
+8 Kamino-targeted samples
+8 JupLend-targeted samples
+0 Drift samples
+
+all 16:
+  decision=Skip
+  loss=IntegrationRefresh
+  reason="integration projection pending"
+```
+
+Some JupLend samples also contain Kamino balances, so the 16 selected accounts are not mutually exclusive by venue.
+
+No `projection.status=ready|failed|stale` records were present in the reviewed output before the run was interrupted.
+
+Interpretation:
+- FIX-115 successfully discovered and dispatched all 16 targeted candidates;
+- this evidence does **not** yet qualify or fail the projection worker;
+- the Mainnet process was stopped before the asynchronous projection worker returned terminal results;
+- R6 remains PARTIAL.
+
+Next exact evidence required:
+1. rerun the targeted probe;
+2. keep it alive after `integration_target_probe: queued_unique=16`;
+3. wait for 16 terminal projection result records (`ready|failed|stale`);
+4. allow ready projections to re-enter the candidate pipeline and capture their subsequent Health/Sizing/Build/Simulation records.
+
