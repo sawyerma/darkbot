@@ -2188,3 +2188,42 @@ Interpretation:
 Next R6 action:
 build a targeted Mainnet integration census/qualification path across Marginfi accounts/banks rather than waiting for the 61 bootstrap-liquidatable sample to contain an integration candidate.
 
+### 2026-10-04 — FIX-115 / R111 targeted integration census
+
+FIX-115:
+- `88e3f61` — [FIX-115a] targeted integration qualification probe.
+
+R111 targeted Mainnet census:
+
+```text
+integration_target_census:
+  withdraw_kamino=195
+  withdraw_drift=0
+  withdraw_juplend=44
+  pricing_kamino=195
+  pricing_drift=0
+  pricing_juplend=44
+  scan_errors=0
+
+integration_target_probe:
+  queued_unique=16
+  kamino_sample=8
+  drift_sample=0
+  juplend_sample=8
+  limit_per_kind=8
+```
+
+Interpretation:
+- the target-group liability population contains real Kamino and JupLend integration accounts;
+- no Drift integration accounts were present in this current target-group liability snapshot;
+- Kamino/JupLend withdraw and pricing populations are identical in this snapshot;
+- the prior 61-account `was_liquidatable` bootstrap set was simply not representative of integration coverage;
+- 16 deterministic qualification candidates were queued through the normal candidate/projection pipeline.
+
+R6 evidence still required:
+- inspect the queued R111 records for projection status and downstream decisions;
+- at least one Kamino and one JupLend path must reach exact projected Health/Sizing and final receivership simulation;
+- Drift cannot be Mainnet-qualified from this target-group snapshot because no Drift candidate exists; this must be documented as unavailable evidence rather than falsely marked PASS.
+
+Status: **R111 census PASS; Kamino/JupLend qualification candidates found; downstream R111 records pending review.**
+
