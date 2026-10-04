@@ -64,6 +64,7 @@ impl<'a> AccountSource for StateView<'a> {
 struct CachedProjection {
     base_account_hash: Hash,
     projection_slot: u64,
+    projection_unix_s: i64,
     accounts: Vec<(Pubkey, Account)>,
 }
 
@@ -649,7 +650,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let targeted_probe_result = integration_probe_expected.contains(&done.account);
             let mut targeted_status: Option<&'static str> = None;
             match done.result {
-                Ok((projection_slot, accounts, units)) => {
+                Ok((projection_slot, projection_unix_s, accounts, units)) => {
                     let canonical = st.get(&done.account);
                     let canonical_matches = canonical
                         .map(|r| r.slot == done.base_slot && hash(&r.data) == done.base_account_hash)
@@ -667,6 +668,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             CachedProjection {
                                 base_account_hash: done.base_account_hash,
                                 projection_slot,
+                                projection_unix_s,
                                 accounts,
                             },
                         );
@@ -703,6 +705,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 "account": done.account.to_string(),
                                 "base_slot": done.base_slot,
                                 "projection_slot": projection_slot,
+                                "projection_unix_s": projection_unix_s,
                                 "status": "ready",
                                 "integration_kinds": integration_kinds,
                                 "pricing_integration_kinds": pricing_integration_kinds,
@@ -1114,6 +1117,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // The returned account set is one-shot: only the exact candidate account state that
             // requested it may consume it, and canonical StateCore is never mutated.
             #[cfg(feature = "crate_health")]
+            let mut projected_eval_unix_s: Option<u64> = None;
+
+            #[cfg(feature = "crate_health")]
             let projected_owned = {
                 let refreshes = match darkbot_project0::integration::refresh_plan_for_account(
                     &view,
@@ -1159,6 +1165,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     if let Some(cached) = cached {
+                        if cached.projection_unix_s < 0 {
+                            let _ = writeln!(records, "{}", serde_json::json!({
+                                "account": acct.to_string(),
+                                "decision": "Skip",
+                                "loss": "IntegrationRefresh",
+                                "reason": format!("projection unix timestamp invalid: {}", cached.projection_unix_s)
+                            }));
+                            continue;
+                        }
+                        projected_eval_unix_s = Some(cached.projection_unix_s as u64);
                         match darkbot_project0::projection::ProjectedState::new(
                             &view,
                             cached.projection_slot,
@@ -1370,7 +1386,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             let _ = &view;
             if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }
-            let health_result = engine.health(&acct, now as i64, slot);
+            let protocol_now = projected_eval_unix_s.unwrap_or(now);
+            let health_result = engine.health(&acct, protocol_now as i64, slot);
             // [FIX-87] Health evidence as structured JSON. Do not hand-build JSON with format!:
             // braces/escaping are error-prone and error strings may contain quotes.
             let line = match &health_result {
@@ -1416,7 +1433,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 limits: TxLimits::default(), resources, min_profit, blockhash_max_age_ns: 30_000_000_000, p7_passed: false,
                 freshness, tip_account: None, global_allowed: global_allowed.clone(), prereq_allowed: prereq_allowed.clone(), slot_watch: &slot_watch,
             };
-            let mut rec = pipe.evaluate(acct, trigger, t_rx, now, slot, st.run_state().is_tradable());
+            let mut rec = pipe.evaluate(acct, trigger, t_rx, protocol_now, slot, st.run_state().is_tradable());
             if let Ok(h) = &health_result {
                 // [FIX-91] Bankruptcy/no-collateral is a protocol state, not a routing/sizing
                 // failure. Reclassify independently of the stage that first reported "no plan".
