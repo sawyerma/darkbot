@@ -650,12 +650,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             done.base_slot,
                             "integration_projection",
                         ));
+                        let integration_kinds = {
+                            let view = StateView(&st);
+                            darkbot_project0::integration::kinds_for_account(
+                                &view,
+                                &program,
+                                &done.account,
+                            )
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(darkbot_project0::integration::kind_name)
+                            .collect::<Vec<_>>()
+                        };
                         let line = serde_json::json!({
                             "projection": {
                                 "account": done.account.to_string(),
                                 "base_slot": done.base_slot,
                                 "projection_slot": projection_slot,
                                 "status": "ready",
+                                "integration_kinds": integration_kinds,
                                 "simulated_cu": units
                             }
                         });
@@ -793,6 +806,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     eprintln!("bootstrap_probe: queued={} candidates from was_liquidatable", queued);
+
+                    let view = StateView(&st);
+                    let mut kamino = 0usize;
+                    let mut drift = 0usize;
+                    let mut juplend = 0usize;
+                    for (pk, r) in st.iter_owned_by(&program) {
+                        if !bootstrap_probe_candidate(&r.data, &group) {
+                            continue;
+                        }
+                        if let Ok(kinds) =
+                            darkbot_project0::integration::kinds_for_account(&view, &program, pk)
+                        {
+                            for k in kinds {
+                                match k {
+                                    darkbot_project0::integration::IntegrationKind::Kamino => kamino += 1,
+                                    darkbot_project0::integration::IntegrationKind::Drift => drift += 1,
+                                    darkbot_project0::integration::IntegrationKind::JupLend => juplend += 1,
+                                }
+                            }
+                        }
+                    }
+                    eprintln!(
+                        "bootstrap_probe_integrations: kamino={} drift={} juplend={}",
+                        kamino, drift, juplend
+                    );
                 }
             }
         }
@@ -1006,12 +1044,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
+                        let integration_kinds = darkbot_project0::integration::kinds_for_account(
+                            &view,
+                            &program,
+                            &acct,
+                        )
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(darkbot_project0::integration::kind_name)
+                        .collect::<Vec<_>>();
                         let _ = writeln!(records, "{}", serde_json::json!({
                             "account": acct.to_string(),
                             "trigger": trigger,
                             "slot": slot,
                             "decision": "Skip",
                             "loss": "IntegrationRefresh",
+                            "integration_kinds": integration_kinds,
                             "reason": "integration projection pending"
                         }));
                         continue;
