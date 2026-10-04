@@ -539,6 +539,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut projection_pending: HashSet<Pubkey> = HashSet::new();
     #[cfg(feature = "crate_health")]
     let mut detect_queue: VecDeque<DetectWork> = VecDeque::new();
+    #[cfg(feature = "crate_health")]
+    let mut integration_probe_expected: HashSet<Pubkey> = HashSet::new();
+    #[cfg(feature = "crate_health")]
+    let mut integration_probe_terminal: HashSet<Pubkey> = HashSet::new();
+    #[cfg(feature = "crate_health")]
+    let mut integration_probe_projection_ready = 0usize;
+    #[cfg(feature = "crate_health")]
+    let mut integration_probe_projection_failed = 0usize;
+    #[cfg(feature = "crate_health")]
+    let mut integration_probe_projection_stale = 0usize;
+    #[cfg(feature = "crate_health")]
+    let mut integration_probe_completion_reported = false;
 
     // [M2][M3] Shadow-Evidence: Kandidaten-Watchlist für den Winner-Vergleich und Tages-Ledger.
     let mut ledger = ShadowLedger::new();
@@ -634,6 +646,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "crate_health")]
         while let Some(done) = remote.projection_results.try_pop() {
             projection_pending.remove(&done.account);
+            let targeted_probe_result = integration_probe_expected.contains(&done.account);
+            let mut targeted_status: Option<&'static str> = None;
             match done.result {
                 Ok((projection_slot, accounts, units)) => {
                     let canonical = st.get(&done.account);
@@ -645,6 +659,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // refresh prefix and is therefore intentionally not requested as a post-account.
                     // Freshness is proven against canonical StateCore via exact slot+hash identity.
                     if canonical_matches {
+                        if targeted_probe_result {
+                            targeted_status = Some("ready");
+                        }
                         projection_cache.insert(
                             done.account,
                             CachedProjection {
@@ -694,6 +711,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         });
                         let _ = writeln!(records, "{}", line);
                     } else {
+                        if targeted_probe_result {
+                            targeted_status = Some("stale");
+                        }
                         projection_cache.remove(&done.account);
                         let line = serde_json::json!({
                             "projection": {
@@ -708,6 +728,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Err(error) => {
+                    if targeted_probe_result {
+                        targeted_status = Some("failed");
+                    }
                     projection_cache.remove(&done.account);
                     let line = serde_json::json!({
                         "projection": {
@@ -719,6 +742,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     });
                     let _ = writeln!(records, "{}", line);
                 }
+            }
+
+            if targeted_probe_result && integration_probe_terminal.insert(done.account) {
+                match targeted_status {
+                    Some("ready") => integration_probe_projection_ready += 1,
+                    Some("failed") => integration_probe_projection_failed += 1,
+                    Some("stale") => integration_probe_projection_stale += 1,
+                    _ => {}
+                }
+            }
+            if integration_probe_enabled
+                && !integration_probe_completion_reported
+                && !integration_probe_expected.is_empty()
+                && integration_probe_terminal.len() == integration_probe_expected.len()
+            {
+                integration_probe_completion_reported = true;
+                eprintln!(
+                    "integration_target_projection_complete: total={} ready={} failed={} stale={}",
+                    integration_probe_expected.len(),
+                    integration_probe_projection_ready,
+                    integration_probe_projection_failed,
+                    integration_probe_projection_stale
+                );
             }
         }
 
@@ -996,6 +1042,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
+
+                        integration_probe_expected = selected.clone();
+                        integration_probe_terminal.clear();
+                        integration_probe_projection_ready = 0;
+                        integration_probe_projection_failed = 0;
+                        integration_probe_projection_stale = 0;
+                        integration_probe_completion_reported = false;
 
                         eprintln!(
                             "integration_target_probe: queued_unique={} kamino_sample={} drift_sample={} juplend_sample={} limit_per_kind={}",
