@@ -2514,3 +2514,25 @@ Exact next steps:
    submit under the present no-LIVE testing scope without explicit approval.
 3. Repeat downstream Mainnet qualification; continue recording FIX commits and
    evidence here. Keep technical/economic wins separate and unknown costs UNKNOWN.
+
+### 2026-10-04 — FIX-122 exact ATA prerequisite cost / dry run PASS
+
+Extended the existing guarded `p0-prewarm-atas` utility to simulate the exact signed
+message (`sig_verify=true`), request post-create ATA state, validate mint/owner/token
+program, sum actual deposited rent, fetch the message fee and read protocol FeeState.
+This supports actual Token-2022 sizes instead of guessing a universal rent amount.
+Build/test `crate_health txv1`: PASS (101 tests). USDT ATA dry run on Mainnet PASS,
+16417 CU; `P0_PREWARM_SEND=NO`, no transaction sent.
+
+Measured for payer `GqRxBgvH94QKFJQVyDv82fK6jxaKrcyjyjSPkN7ue3zd`:
+- balance: 7018120 lamports;
+- missing USDT ATA: `AFA7wz6gLyiYBxeQKPQNc6qr67xjQi6p1Y2pqwBP3uQS`;
+- actual simulated rent (165 bytes): 1488440 lamports;
+- message fee: 5000 lamports; total: 1493440 lamports;
+- remaining after creation: 5524680 lamports;
+- on-chain protocol flat fee: 1000000 lamports (covered by remaining balance).
+
+Explicit approval requested for this one real prerequisite transaction, capped at
+1493440 lamports. Await approval; never infer it from elapsed time. LIVE remains
+DISABLED. Continue Jupiter compiled-budget work independently. Before any approved
+send recheck the same identity, cost cap, dry-run simulation and available balance.

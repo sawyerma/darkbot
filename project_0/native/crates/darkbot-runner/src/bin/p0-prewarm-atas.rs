@@ -1,6 +1,7 @@
 use darkbot_project0::protocol;
 use darkbot_solana::tx;
 use solana_client::rpc_client::RpcClient;
+use solana_client::rpc_config::{RpcSimulateTransactionConfig, RpcSimulateTransactionAccountsConfig};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -136,7 +137,20 @@ fn run() -> Result<(), Box<dyn Error>> {
         blockhash,
     );
 
-    let simulation = rpc.simulate_transaction(&transaction)?;
+    // [FIX-122] Measure the actual post-create rent for each ATA, including Token-2022
+    // extensions, rather than guessing an account size. Verify the exact signed message.
+    let fee_lamports = rpc.get_fee_for_message(&transaction.message)?;
+    let simulation = rpc.simulate_transaction_with_config(&transaction,
+        RpcSimulateTransactionConfig {
+            sig_verify: true,
+            replace_recent_blockhash: false,
+            commitment: Some(CommitmentConfig::confirmed()),
+            accounts: Some(RpcSimulateTransactionAccountsConfig {
+                encoding: None,
+                addresses: missing.iter().map(|(_, _, ata)| ata.to_string()).collect(),
+            }),
+            ..RpcSimulateTransactionConfig::default()
+        })?;
     if let Some(err) = simulation.value.err {
         return Err(format!(
             "prewarm simulation failed: {:?} logs={:?}",
@@ -148,6 +162,41 @@ fn run() -> Result<(), Box<dyn Error>> {
         "PREWARM_SIM_OK units_consumed={:?}",
         simulation.value.units_consumed
     );
+
+    let post_accounts = simulation.value.accounts.ok_or("prewarm simulation omitted post accounts")?;
+    if post_accounts.len() != missing.len() {
+        return Err("prewarm simulation account count mismatch".into());
+    }
+    let mut rent_lamports = 0u64;
+    for ((mint, token_program, ata), ui) in missing.iter().zip(post_accounts) {
+        let account = ui.ok_or("prewarm simulation account missing")?
+            .decode::<solana_sdk::account::Account>().ok_or("prewarm account decode")?;
+        if account.owner != *token_program || account.data.len() < 64
+            || account.data[..32] != mint.to_bytes()
+            || account.data[32..64] != payer_pk.to_bytes() {
+            return Err("prewarm simulated ATA identity mismatch".into());
+        }
+        rent_lamports = rent_lamports.checked_add(account.lamports).ok_or("rent overflow")?;
+        println!("PREWARM_RENT ata={} data_len={} lamports={}", ata, account.data.len(), account.lamports);
+    }
+    let total = rent_lamports.checked_add(fee_lamports).ok_or("cost overflow")?;
+    let remaining = balance.checked_sub(total).ok_or("insufficient prewarm balance")?;
+    println!("PREWARM_COST rent_lamports={} fee_lamports={} total_lamports={} remaining_lamports={}",
+        rent_lamports, fee_lamports, total, remaining);
+
+    #[cfg(feature = "crate_health")]
+    {
+        let program = Pubkey::from_str(&need("P0_PROGRAM_ID")?)?;
+        let state = rpc.get_account(&protocol::fee_state_pda(&program))?;
+        let need = 8 + std::mem::size_of::<marginfi_type_crate::types::FeeState>();
+        if state.owner != program || protocol::classify(&state.data) != protocol::AccountType::FeeState
+            || state.data.len() < need {
+            return Err("invalid protocol FeeState".into());
+        }
+        let fee: marginfi_type_crate::types::FeeState = bytemuck::pod_read_unaligned(&state.data[8..need]);
+        println!("PREWARM_PROTOCOL_RESERVE flat_fee_lamports={} remaining_after_prewarm={} covers_flat_fee={}",
+            fee.liquidation_flat_sol_fee, remaining, remaining >= fee.liquidation_flat_sol_fee as u64);
+    }
 
     if !send {
         println!("PREWARM_DRY_RUN simulation passed; no transaction sent; set P0_PREWARM_SEND=YES to create missing ATAs");
