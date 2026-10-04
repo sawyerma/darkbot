@@ -2292,3 +2292,30 @@ Next gate:
 3. confirm provider account-limit failures are gone;
 4. then search the broader integration population for currently liquidatable Kamino/JupLend candidates rather than repeatedly probing arbitrary integration accounts.
 
+### 2026-10-04 — FIX-117 targeted projection sweep completion telemetry
+
+Compiler checkpoint before FIX-117: FIX-116 workspace build/test PASS.
+
+Commit:
+- `09c468b` — [FIX-117a] report targeted projection sweep completion.
+
+Behavior:
+- tracks the exact set of targeted integration probe accounts;
+- counts terminal projection outcomes `ready|failed|stale`;
+- emits one deterministic completion line only after every queued targeted projection has returned:
+
+```text
+integration_target_projection_complete: total=N ready=R failed=F stale=S
+```
+
+Purpose:
+- removes manual guesswork about when it is safe to stop the targeted Mainnet qualification run;
+- preserves the existing bounded projection worker and canonical-state immutability;
+- does not alter trading eligibility, LIVE state, or profitability logic.
+
+Next:
+- compile/test;
+- run targeted probe;
+- wait for the completion line before stopping;
+- inspect `integration_projection` records to see whether any projected Kamino/JupLend account is currently liquidatable and, if so, whether it reaches venue-specific sizing/withdraw/final simulation.
+
