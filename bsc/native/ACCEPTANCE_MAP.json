@@ -1,11 +1,11 @@
 {
   "schema": "darkbot.native.acceptance-map.v1",
-  "master_plan": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md \u00a714",
+  "master_plan": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md §14",
   "purpose": "Machine-readable companion to the acceptance matrix. The master plan stays the human-readable source; this file adds symbols, test names and evidence hashes.",
   "path_convention": "All evidence paths are repository paths. A path of the form <zip>::<member> names a member inside a ZIP that is itself in the repository.",
   "unit1_source": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip (rustfmt-normalised sources and Cargo.lock), copied unchanged; only crates/darkbot-core/src/lib.rs differs (module list)",
-  "compiler_run": "Units 1-3: combined tree reported PASS on the target system (2026-10-04). Unit 4: NOT_RUN.",
-  "freeze_status": "Units 1-3 are frozen for their defined scope. Unit 4 is not frozen: its compiler run is pending. Q1 stays PARTIAL and deferred to C2.",
+  "compiler_run": "Units 1-4: combined tree PASS on the user's target system (2026-10-04): cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings.",
+  "freeze_status": "Units 1-4 are IMPLEMENTED_TESTED and FROZEN for their defined scopes. Q1/live state remains PARTIAL and TRACKED_DEFERRED to C2. Unit 5 inclusion adapters are the next task and are not yet implemented/tested.",
   "test_count": {
     "total": 127,
     "unit1": 27,
@@ -330,7 +330,7 @@
       "matrix_id": "N1",
       "adoption": "SN06",
       "unit": "Unit 4",
-      "status": "UNTESTED",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/gates/gate0/src/intent_lane.rs",
@@ -362,7 +362,7 @@
         "darkbot-core::intent::tests::preallocated_scratch_never_grows_across_preparations",
         "darkbot-core::intent::tests::too_small_scratch_is_refused_and_the_intent_stays_reserved"
       ],
-      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "result": "PASS on the user's target system of the combined Unit 1-4 tree on 2026-10-04: cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Full bsc/native SHA256 manifest verification also PASS. Unit 4 implementation commit: c745d92305ee24b0bff76621df0e83e09c9353b8. Raw terminal log is not committed.",
       "coverage": "8,000 signals are reduced to 1,000 contiguous reservations on one owner thread (the Gate-0 test used 8 worker threads behind a mutex). The complete sign, bind, dispatch and inclusion sequence is exercised for 64 intents, not 1,000.",
       "not_proven": "allocation behaviour of the signature library and of the integrated runtime (C3); dedup cost at the configured capacity (C3); actionable-to-permit waiting (measured by the caller, C3)"
     },
@@ -370,7 +370,7 @@
       "matrix_id": "N2",
       "adoption": "SN06",
       "unit": "Unit 4",
-      "status": "UNTESTED",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/gates/gate0/src/bin/g06_concurrency.rs",
@@ -385,14 +385,14 @@
         "darkbot-core::intent::tests::preparation_binds_sender_nonce_and_token_of_the_ticket",
         "darkbot-core::intent::tests::tickets_cannot_cross_sender_or_chain_lanes"
       ],
-      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "result": "PASS on the user's target system of the combined Unit 1-4 tree on 2026-10-04: cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Full bsc/native SHA256 manifest verification also PASS. Unit 4 implementation commit: c745d92305ee24b0bff76621df0e83e09c9353b8. Raw terminal log is not committed.",
       "not_proven": "multi-sender operation (single sender is the baseline)"
     },
     {
       "matrix_id": "S1",
       "adoption": "SN08",
       "unit": "Unit 4",
-      "status": "UNTESTED",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/gates/gate0/src/builder_lifecycle_tests.rs",
@@ -424,14 +424,14 @@
         "darkbot-core::intent::tests::external_halt_stops_admission_and_keeps_the_first_reason",
         "darkbot-core::intent::tests::conflicting_evidence_outranks_an_earlier_reason_but_not_a_quarantine"
       ],
-      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "result": "PASS on the user's target system of the combined Unit 1-4 tree on 2026-10-04: cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Full bsc/native SHA256 manifest verification also PASS. Unit 4 implementation commit: c745d92305ee24b0bff76621df0e83e09c9353b8. Raw terminal log is not committed.",
       "not_proven": "real transport behaviour, partial writes of a real socket and provider responses (Unit 5); that an adapter writes only bytes it received from start_write, since the caller that signed the bytes also holds them (Unit 5 design and review)"
     },
     {
       "matrix_id": "N3",
       "adoption": "SN06/SN08",
       "unit": "Unit 4 + C2",
-      "status": "UNTESTED; arming a lane and releasing a restart quarantine are disabled in this unit: TRACKED_DEFERRED to runner/Unit 6 (ArmedFence constructor) and runner + C2 + Unit 5 (recovery proof)",
+      "status": "Unit 4 consumer-side intent/quarantine semantics IMPLEMENTED_TESTED and FROZEN; production ArmedFence/durable startup fence TRACKED_DEFERRED to runner/Unit 6; restart recovery proof TRACKED_DEFERRED to runner + C2 + Unit 5",
       "evidence": [
         {
           "path": "bsc/gates/gate0/src/restart_fence.rs",
@@ -457,14 +457,14 @@
         "darkbot-core::intent::tests::in_process_stop_without_disclosure_resumes_at_the_same_nonce",
         "darkbot-core::intent::tests::quarantined_lane_offers_no_operation_that_admits_again"
       ],
-      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "result": "PASS on the user's target system of the combined Unit 1-4 tree on 2026-10-04: cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Full bsc/native SHA256 manifest verification also PASS. Unit 4 implementation commit: c745d92305ee24b0bff76621df0e83e09c9353b8. Raw terminal log is not committed.",
       "not_proven": "the durable startup fence, its filesystem failure cases and the production constructor of ArmedFence bound to its successful check (runner/Unit 6: do not exist; until then no production code can create an admitting lane); the recovery proof that could release a restart quarantine, built from durably recovered intents, disclosed bytes, pending and canonical nonce state and adapter late-execution semantics (runner, C2, Unit 5: does not exist); production of a reconciliation proof for in-process stops (C2); real head-of-line waiting times (C3)"
     },
     {
       "matrix_id": "R2",
       "adoption": "SN16",
       "unit": "Unit 4 (consumer side only)",
-      "status": "UNTESTED; evidence production deferred to C2",
+      "status": "Unit 4 proof-consumer side IMPLEMENTED_TESTED and FROZEN; canonical/pending/reorg proof production TRACKED_DEFERRED to C2",
       "evidence": [
         {
           "path": "bsc/docs/BSC_PHASE_C_PYTHON_RETIREMENT.md",
@@ -488,8 +488,12 @@
         "darkbot-core::intent::tests::repeated_evidence_with_another_transaction_or_block_is_conflicting",
         "darkbot-core::intent::tests::repeated_evidence_of_a_foreign_transaction_ignores_its_status"
       ],
-      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "result": "PASS on the user's target system of the combined Unit 1-4 tree on 2026-10-04: cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Full bsc/native SHA256 manifest verification also PASS. Unit 4 implementation commit: c745d92305ee24b0bff76621df0e83e09c9353b8. Raw terminal log is not committed.",
       "not_proven": "every canonical, pending, replacement and reorg counterexample of the retirement contract (C2 owns them); the proofs have no production constructor yet"
     }
-  ]
+  ],
+  "unit4_commit": "c745d92305ee24b0bff76621df0e83e09c9353b8",
+  "unit4_bsc_native_tree": "421352ff59602d15da02556e1527785f0da7a29a",
+  "next_step": "C0 Unit 5 — inclusion adapters: local-geth, 48Club and BlockRazor only within verified capability scopes; freeze capability records before implementation; Unit 4 bytes/nonce/permit invariants remain authoritative.",
+  "product_gate": "LIVE blocked; T_buy - T0 < 1,000,000 ns NOT YET PROVEN; no value-bearing Mainnet action authorized by this status."
 }
