@@ -2088,3 +2088,28 @@ Commit:
 Status: **FIX-112f IMPLEMENTED / compiler verification required**.
 R6 remains PARTIAL until the full FIX-112 batch compiles and the integration Mainnet Shadow matrix passes.
 
+### 2026-10-04 — FIX-113 integration Shadow matrix instrumentation
+
+Compiler checkpoint before this step: FIX-112f build/test returned to prompt without visible failure.
+
+Commits:
+- `c376b38` — [FIX-113a] expose integration-kind census;
+- `fb31425` — [FIX-113b] emit integration matrix census in shadow.
+
+Purpose:
+- identify which bootstrap-liquidatable accounts actually contain Kamino, Drift, and/or JupLend balances;
+- attach `integration_kinds` to projection-pending and projection-ready records;
+- print bootstrap counts:
+  `bootstrap_probe_integrations: kamino=N drift=N juplend=N`.
+
+This turns the R6 Mainnet qualification into an explicit matrix instead of guessing from account addresses.
+
+Required R6 Mainnet evidence per venue:
+1. at least one bootstrap/account-update candidate with that integration kind;
+2. refresh projection reaches `status=ready`;
+3. projected candidate proceeds through Health/Sizing;
+4. venue-specific withdraw builder is selected;
+5. final exact receivership simulation succeeds (`ShadowTechnicalReady`) or yields a venue-specific blocker that can be fixed deterministically.
+
+Status: **FIX-113 instrumentation IMPLEMENTED / compiler + R109 runtime verification required**.
+
