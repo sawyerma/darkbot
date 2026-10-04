@@ -2715,3 +2715,51 @@ transactions sent=0. Next R7: typed v1 execution adapter and provider qualificat
 repay_all edge cases, FailedCostMatrix and P3-02 thresholds. Drift requires a real
 candidate or an explicitly documented external qualification blocker, never a fake
 PASS. 72 h NOT STARTED; LIVE DISABLED.
+
+### 2026-10-04 — FIX-128 repay_all / rounding parity implemented
+
+R7/C2 source review used pinned `marginfi-v2@mrgn-0.1.11-rc1`.
+
+Pinned semantics:
+- normal repay uses the integer SPL amount directly and is RepayOnly;
+- `repay_all` closes the liability balance and transfers `ceil(current_liability_amount)`;
+- `repay_all` is valid only when the liability is positive above
+  `ZERO_AMOUNT_THRESHOLD` and opposite-side asset dust satisfies
+  `abs(asset_amount) < ZERO_AMOUNT_THRESHOLD`;
+- rounding excess and allowed opposite-side asset dust are credited to insurance;
+- in receivership, closing the balance clears the liquidation-price-cache lock;
+- EndLiquidation measures exact pre/post equity deltas, so the protocol-repaid value is
+  the exact liability removed, while economic repayment cost is the actual ceil SPL transfer;
+- pinned receivership tests exclude a bank closed by `repay_all` from EndLiquidation's
+  bank-only remaining-account set.
+
+Commits:
+- `9996bb2` — [FIX-128a] model source-exact near-full repay_all rounding;
+- `1eff18f` — [FIX-128b] mirror repay_all instruction account semantics;
+- `c8eae48` — [FIX-128c] propagate repay_all through execution and economics;
+- `a217ddc` — [FIX-128d] keep repay_all regression independent of generated constants.
+
+Behavior:
+- no silent clamp when ceil(target) exceeds liability;
+- near-full target may use `repay_all` only when it maps exactly to the source-backed
+  full-close transfer amount;
+- protocol health/premium uses exact liability delta and accounts for opposite asset dust;
+- economics/funding uses the actual transferred SPL value, including ceil overpayment;
+- Token-2022 repay includes the mint account as required by the pinned repay instruction;
+- `repay_all` carries full pre-close observation accounts;
+- Start observes the pre-close bank, while End omits a liability bank actually closed by
+  `repay_all`;
+- partial repay behavior remains unchanged.
+
+New regressions cover:
+- near-full repay_all selection;
+- refusal to silently clamp an over-large target;
+- strict opposite-dust threshold boundary;
+- unchanged partial repay;
+- repay_all observation metas;
+- Token-2022 mint ordering;
+- End bank-set removal only for repay_all.
+
+Status: **FIX-128 IMPLEMENTED / workspace compiler+tests and Mainnet Shadow verification required.**
+R6 remains PARTIAL due Drift evidence gap. R7 remains OPEN until FIX-128 is runtime-qualified and FailedCostMatrix / thresholds / v1 execution qualification are closed.
+
