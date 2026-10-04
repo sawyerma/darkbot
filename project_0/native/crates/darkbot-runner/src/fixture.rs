@@ -179,6 +179,18 @@ pub mod run {
         Ok((b.liquidity_vault, b.mint, mint_owner))
     }
 
+    // [FIX-128e] This legacy size fixture intentionally exercises withdraw_all + repay_all.
+    // Both operations close their Marginfi balance during receivership, so neither closing
+    // bank belongs in EndLiquidation's post-close bank-only remaining-account layout.
+    fn end_banks_after_fixture_full_close(
+        mut active_banks: Vec<Pubkey>,
+        asset_bank: Pubkey,
+        liability_bank: Pubkey,
+    ) -> Vec<Pubkey> {
+        active_banks.retain(|pk| *pk != asset_bank && *pk != liability_bank);
+        active_banks
+    }
+
     /// Builds identical business instructions for v0 and v1. v0 gets real Jupiter LUTs;
     /// v1 gets no LUTs and is measured by the official modular v1 message adapter.
     pub fn build_and_measure(
@@ -188,16 +200,16 @@ pub mod run {
         let health = CrateHealth { state: inp.state, group: inp.group };
         let obs = health.observation_accounts(&inp.account).map_err(|e| e.to_string())?;
         let (asset_vault, _asset_mint, asset_tp) = bank_fields(inp.state, &inp.asset_bank)?;
-        let (liab_vault, _liab_mint, liab_tp) = bank_fields(inp.state, &inp.liab_bank)?;
+        let (liab_vault, liab_mint, liab_tp) = bank_fields(inp.state, &inp.liab_bank)?;
         let withdraw = builders::withdraw(
             &inp.program, &inp.group, &inp.account, &inp.liquidator, &inp.asset_bank,
             &inp.liquidator_asset_ata, &asset_vault, &asset_tp, 0, Some(true), &obs,
         );
         let repay = builders::repay(
             &inp.program, &inp.group, &inp.account, &inp.liquidator, &inp.liab_bank,
-            &inp.liquidator_liab_ata, &liab_vault, &liab_tp, 0, Some(true),
+            &liab_mint, &inp.liquidator_liab_ata, &liab_vault, &liab_tp, 0, Some(true), &obs,
         );
-        let mut end_banks: Vec<Pubkey> = obs
+        let mut start_banks: Vec<Pubkey> = obs
             .iter()
             .copied()
             .filter(|pk| {
@@ -207,13 +219,22 @@ pub mod run {
                 }).unwrap_or(false)
             })
             .collect();
-        end_banks.sort_by(|a, b| b.cmp(a));
-        end_banks.dedup();
+        start_banks.sort_by(|a, b| b.cmp(a));
+        start_banks.dedup();
+
+        // StartLiquidation observes the pre-close account, therefore both banks are still
+        // writable here. EndLiquidation observes the post-close account, after this fixture's
+        // withdraw_all and repay_all have closed asset and liability respectively.
+        let end_banks = end_banks_after_fixture_full_close(
+            start_banks.clone(),
+            inp.asset_bank,
+            inp.liab_bank,
+        );
 
         let start_observation: Vec<AccountMeta> = obs
             .iter()
             .map(|pk| {
-                if end_banks.contains(pk) {
+                if start_banks.contains(pk) {
                     AccountMeta::new(*pk, false)
                 } else {
                     AccountMeta::new_readonly(*pk, false)
@@ -304,5 +325,23 @@ pub mod run {
         }
 
         Ok((ixs, out))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn all_close_fixture_omits_both_closed_banks_from_end() {
+            let asset = Pubkey::new_unique();
+            let liability = Pubkey::new_unique();
+            let survivor = Pubkey::new_unique();
+            let end = end_banks_after_fixture_full_close(
+                vec![survivor, asset, liability],
+                asset,
+                liability,
+            );
+            assert_eq!(end, vec![survivor]);
+        }
     }
 }
