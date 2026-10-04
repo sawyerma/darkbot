@@ -203,6 +203,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    // A real prerequisite send requires the explicitly approved total-cost ceiling.
+    let approved_max = need("P0_PREWARM_MAX_LAMPORTS")?.parse::<u64>()?;
+    if total > approved_max {
+        return Err(format!("prewarm cost {} exceeds approved ceiling {}", total, approved_max).into());
+    }
     let signature = rpc.send_and_confirm_transaction(&transaction)?;
     println!("PREWARM_SENT signature={}", signature);
 

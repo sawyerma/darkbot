@@ -2536,3 +2536,23 @@ Explicit approval requested for this one real prerequisite transaction, capped a
 1493440 lamports. Await approval; never infer it from elapsed time. LIVE remains
 DISABLED. Continue Jupiter compiled-budget work independently. Before any approved
 send recheck the same identity, cost cap, dry-run simulation and available balance.
+
+### 2026-10-04 — approved USDT ATA prerequisite CONFIRMED
+
+User explicitly approved only the missing USDT ATA with total ceiling 1493440
+lamports. Added a mandatory `P0_PREWARM_MAX_LAMPORTS` check before any real prewarm
+send. Re-simulation PASS, 16417 CU; cost unchanged and within approved ceiling.
+
+Confirmed transaction:
+`2AAPtxnp6RBsGNikHuEGZJSN6jpFEcFajXV28b97Sbs7gwn6XDnQ775xHkfc3A7xRwXVvEvjgpgwWSyZdcB8n1t2`
+
+Read-only getTransaction verification: slot 453111832, err=null, fee=5000,
+payer before=7018120, after=5524680, actual debit=1493440 lamports. ATA confirmed
+owned by the legacy token program with 1488440 lamports. No USDT bought/transferred;
+no liquidation submitted; LIVE remains DISABLED. The JupLend USDT prerequisite is
+now cleared. Evidence: `evidence/USDT_ATA_20261004.json`.
+
+Workspace build/test both feature sets PASS on the current working tree including
+pending FIX-123: 105/104 tests. R118 now tests the bounded compiled-size Jupiter
+requotes and the newly available JupLend ATA; do not treat R6 as passed before its
+integration-specific final simulation results. R6 PARTIAL, R7 OPEN, 72 h NOT STARTED.
