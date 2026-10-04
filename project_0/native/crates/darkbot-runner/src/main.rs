@@ -218,7 +218,13 @@ fn bootstrap_probe_candidate(data: &[u8], group: &Pubkey) -> bool {
 #[cfg(feature = "crate_health")]
 fn bank_filters(group: &Pubkey) -> Vec<serde_json::Value> {
     vec![
-        serde_json::json!({"dataSize": 8 + std::mem::size_of::<Bank>()}),
+        // [FIX-130] Do not pin Bank account size in RPC/WSS filters. 0.1.12 grows the
+        // Bank payload from 1856 to 3904 bytes while preserving the legacy prefix.
+        // Exact supported lengths remain enforced by protocol classification/decoding.
+        serde_json::json!({"memcmp": {
+            "offset": 0,
+            "bytes": bs58::encode(protocol::DISC_BANK).into_string()
+        }}),
         serde_json::json!({"memcmp": {"offset": 41, "bytes": group.to_string()}}),
     ]
 }
