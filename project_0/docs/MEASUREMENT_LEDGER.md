@@ -2596,3 +2596,44 @@ Next exact step: verify canonical v1 serialization/signature and provider simula
 capability with a read-only/no-send probe before connecting a v1 wire adapter. Also
 inspect reuse of published protocol lookup tables if v0 remains necessary. Do not
 create/fund more accounts or send value-bearing transactions without authorization.
+
+
+### 2026-10-04 — FIX-124 / R120 Kamino complete receivership simulation PASS
+
+Reuse finding: official P0 TypeScript SDK publishes main-pool general/native-stake
+lookup tables in `src/constants/luts.consts.ts`:
+https://raw.githubusercontent.com/0dotxyz/p0-ts-sdk/main/src/constants/luts.consts.ts
+(retrieved 2026-10-04; the five public addresses are pinned in `lookup_tables.rs`).
+The builder previously supplied only Jupiter route LUTs. Reuse these existing
+on-chain protocol tables before expanding the v1 adapter; no new LUT/rent/send.
+
+FIX-124 adds the five group-specific tables to optional Snapshot/WSS dependencies.
+Decode using pinned official `solana-address-lookup-table-interface=3.1.0`, from
+canonical/projected RAM state only. Validate owner/layout, exclude deactivating and
+future-state tables, expose only the prior prefix in an extension slot. Merge with
+route tables by key, preserving state-backed indices, both in budgeting and final
+v0 plans. Absent/invalid tables fall back to static keys subject to unchanged limits.
+Three regressions cover slot activation, invalid/deactivating state, duplicate-key
+indices and measured compiled-byte reduction. Workspace build PASS; tests PASS:
+108 (`crate_health txv1`), 107 (`crate_health`), zero failures.
+
+R120 Mainnet Shadow:
+- five active protocol LUTs, 958 entries observed from state;
+- 231/231 target projections ready; failed=0, stale=0;
+- 231/231 downstream Health successes at their exact simulation slot+timestamp;
+- Kamino account `A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS`:
+  full refresh → Start → Kamino withdraw → Jupiter → repay → End simulation PASS;
+  ZERO_PREFUND_SAME_TX, V0, 1064 bytes, 50 locked accounts, 527915 CU,
+  `ShadowTechnicalReady`. Economics remains UNKNOWN, not an economic shadow win.
+- JupLend `64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk`: liquidatable at this
+  snapshot but no admitted size (`coeff_nonpositive=1; withdraw_zero=1`), unlike
+  prior R119 size/routing failure. No final JupLend simulation claimed.
+- Drift candidate census remains zero. No transactions sent, process stopped
+  after all target projections and decisions completed.
+
+Evidence: `evidence/R120_protocol_luts.json` (all target projections/decisions and
+liquidatable Health). R4/R5 PASS; R6 PARTIAL with Kamino end-to-end now PASS;
+JupLend/Drift still unqualified; R7 OPEN; 72 h NOT STARTED; LIVE DISABLED.
+Next: inspect JupLend exact sizing against pinned protocol semantics and rerun when
+an admissible size exists; continue R7 rounding/repay_all and wire qualification.
+Do not relax sizing or freshness merely to obtain a PASS.

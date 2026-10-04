@@ -326,6 +326,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
     #[cfg(not(feature = "crate_health"))]
     let mut optional_dependency_keys: Vec<Pubkey> = Vec::new();
+    #[cfg(feature = "crate_health")]
+    optional_dependency_keys.extend(darkbot_runner::lookup_tables::published_keys(&group));
     optional_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
     optional_dependency_keys.dedup();
 

@@ -657,6 +657,8 @@ pub mod p0 {
             if sizings.is_empty() {
                 return Err(format!("SIZING:{}", self.sizing.no_size_reason(account)?));
             }
+            let protocol_luts = crate::lookup_tables::from_state(self.state, &self.group, slot);
+            eprintln!("protocol_luts: active={} addresses={}", protocol_luts.len(), protocol_luts.iter().map(|t| t.addresses.len()).sum::<usize>());
             let health = CrateHealth { state: self.state, group: self.group };
             let obs = health.observation_accounts(account).map_err(|e| e.to_string())?;
             let mut out = Vec::new();
@@ -740,7 +742,7 @@ pub mod p0 {
                                 slippage_bps: 0,
                                 assets: vec![asset_mint, liab_mint],
                                 tx_version: BuildVersion::V0,
-                                lookup_tables: vec![],
+                                lookup_tables: protocol_luts.clone(),
                                 prerequisite_txs: vec![],
                             }
                         }
@@ -768,7 +770,7 @@ pub mod p0 {
                                 slippage_bps: sz.slippage_bps,
                                 assets: vec![asset_mint, liab_mint],
                                 tx_version: BuildVersion::V0,
-                                lookup_tables: buy.lookup_tables,
+                                lookup_tables: crate::lookup_tables::merge(&protocol_luts, &buy.lookup_tables),
                                 prerequisite_txs: vec![buy.instructions],
                             }
                         }
@@ -810,7 +812,7 @@ pub mod p0 {
                             // Hash bytes have fixed width; no RPC or signing needed for sizing.
                             tx::build(&TxPlan {
                                 version: BuildVersion::V0, payer: self.liquidator,
-                                instructions: ixs.clone(), lookup_tables: route.lookup_tables.clone(),
+                                instructions: ixs.clone(), lookup_tables: crate::lookup_tables::merge(&protocol_luts, &route.lookup_tables),
                                 resources: self.resources,
                             }, Hash::default(), &self.limits)?;
                             Ok((ixs, steps))
@@ -870,7 +872,7 @@ pub mod p0 {
                                     slippage_bps: sz.slippage_bps,
                                     assets: vec![asset_mint, liab_mint],
                                     tx_version: BuildVersion::V0,
-                                    lookup_tables: mark.lookup_tables,
+                                    lookup_tables: crate::lookup_tables::merge(&protocol_luts, &mark.lookup_tables),
                                     prerequisite_txs: vec![],
                                 });
                             }

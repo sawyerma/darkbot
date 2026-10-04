@@ -21,3 +21,5 @@ pub mod winner;
 pub mod pipeline;
 pub mod record;
 pub mod remote_workers;
+
+pub mod lookup_tables;
