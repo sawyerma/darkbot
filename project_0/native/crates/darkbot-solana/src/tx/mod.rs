@@ -212,7 +212,7 @@ pub fn measure_v1(_plan: &TxPlan, _blockhash: Hash, _limits: &TxLimits) -> Resul
 }
 
 #[cfg(feature = "txv1")]
-pub fn measure_v1(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<V1Measure, BuildError> {
+fn compile_v1_message(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<solana_message_v1::v1::Message, BuildError> {
     use solana_instruction_v1::{AccountMeta as V1AccountMeta, Instruction as V1Instruction};
     use solana_message_v1::v1;
     use solana_pubkey_v1::Pubkey as V1Pubkey;
@@ -245,13 +245,21 @@ pub fn measure_v1(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<V
         .with_priority_fee(plan.resources.priority_total_lamports());
     let msg = v1::Message::try_compile_with_config(&payer, &ixs, hash, cfg)
         .map_err(|e| BuildError::Compile(e.to_string()))?;
-    let message_bytes = msg.size(); // [FIX-58] canonical v1 serialized message size; no wincode feature needed
-    let signatures = msg.header.num_required_signatures as usize;
-    // SIMD-0385: v1 has no short-vec signature-count prefix; count comes from header.
-    let serialized_tx_bytes = message_bytes.saturating_add(signatures.saturating_mul(64));
-    if serialized_tx_bytes > limits.max_bytes_v1 {
-        return Err(BuildError::TooLarge { bytes: serialized_tx_bytes, max: limits.max_bytes_v1 });
+    // Official serialize includes the 0x81 prefix; Message::size() alone does not.
+    let bytes = msg.serialize().len() + usize::from(msg.header.num_required_signatures) * 64;
+    if bytes > limits.max_bytes_v1 {
+        return Err(BuildError::TooLarge { bytes, max: limits.max_bytes_v1 });
     }
+    Ok(msg)
+}
+
+#[cfg(feature = "txv1")]
+pub fn measure_v1(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<V1Measure, BuildError> {
+    let msg = compile_v1_message(plan, blockhash, limits)?;
+    let message_bytes = msg.serialize().len();
+    let signatures = usize::from(msg.header.num_required_signatures);
+    let serialized_tx_bytes = message_bytes + signatures * 64;
+    let locked = msg.account_keys.len();
     Ok(V1Measure {
         message_bytes,
         serialized_tx_bytes,
@@ -259,6 +267,26 @@ pub fn measure_v1(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<V
         instructions: plan.instructions.len(),
         signatures,
     })
+}
+
+/// Canonical SIMD-0385 wire, currently used only by the explicit no-send probe.
+/// Signatures follow the version-prefixed message, with no count prefix.
+#[cfg(feature = "txv1")]
+pub fn signed_v1_wire(plan: &TxPlan, blockhash: Hash, limits: &TxLimits, signers: &[&Keypair]) -> Result<Vec<u8>, BuildError> {
+    let msg = compile_v1_message(plan, blockhash, limits)?;
+    let required = usize::from(msg.header.num_required_signatures);
+    if signers.len() != required {
+        return Err(BuildError::Sign(format!("v1 expects {} signers, got {}", required, signers.len())));
+    }
+    let message = msg.serialize();
+    let mut wire = message.clone();
+    for key in msg.account_keys.iter().take(required) {
+        let signer = signers.iter().find(|s| s.pubkey().to_bytes() == key.to_bytes())
+            .ok_or_else(|| BuildError::Sign(format!("missing v1 signer {key}")))?;
+        let signature = signer.sign_message(&message);
+        wire.extend_from_slice(signature.as_ref());
+    }
+    Ok(wire)
 }
 
 #[cfg(not(feature = "txv1"))]
@@ -308,6 +336,31 @@ pub fn payer_of(kp: &Keypair) -> Pubkey {
 mod tests {
     use super::*;
     use solana_sdk::instruction::AccountMeta;
+
+    #[cfg(feature = "txv1")]
+    #[test]
+    fn v1_wire_signature_and_exact_size_boundary() {
+        let payer = Keypair::new();
+        let plan = TxPlan { version: BuildVersion::V1, payer: payer.pubkey(),
+            instructions: vec![solana_system_interface::instruction::transfer(&payer.pubkey(), &payer.pubkey(), 0)],
+            lookup_tables: vec![], resources: Resources { compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 0, loaded_accounts_data_size: Some(64 * 1024) } };
+        let hash = Hash::new_unique();
+        let wire = signed_v1_wire(&plan, hash, &TxLimits::default(), &[&payer]).unwrap();
+        assert_eq!(wire[0], 0x81);
+        let measurement = measure_v1(&plan, hash, &TxLimits::default()).unwrap();
+        assert_eq!(wire.len(), measurement.serialized_tx_bytes);
+        assert_eq!(wire.len(), measurement.message_bytes + 64);
+        let signature = Signature::try_from(&wire[measurement.message_bytes..]).unwrap();
+        assert!(signature.verify(payer.pubkey().as_ref(), &wire[..measurement.message_bytes]));
+        let mut tampered = wire[..measurement.message_bytes].to_vec(); tampered[0] = 0x80;
+        assert!(!signature.verify(payer.pubkey().as_ref(), &tampered));
+        let mut limits = TxLimits::default(); limits.max_bytes_v1 = wire.len();
+        assert!(signed_v1_wire(&plan, hash, &limits, &[&payer]).is_ok());
+        limits.max_bytes_v1 -= 1;
+        assert!(matches!(signed_v1_wire(&plan, hash, &limits, &[&payer]), Err(BuildError::TooLarge { .. })));
+        assert!(signed_v1_wire(&plan, hash, &TxLimits::default(), &[&Keypair::new()]).is_err());
+    }
 
     #[test]
     fn locked_accounts_are_deduplicated() {

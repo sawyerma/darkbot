@@ -11,7 +11,7 @@ license = "UNLICENSED"
 
 [features]
 default = []
-txv1 = ["dep:solana-pubkey-v1", "dep:solana-hash-v1", "dep:solana-instruction-v1", "dep:solana-message-v1"]
+txv1 = ["dep:solana-pubkey-v1", "dep:solana-hash-v1", "dep:solana-instruction-v1", "dep:solana-message-v1", "dep:solana-short-vec-v1"]
 
 [dependencies]
 darkbot-common = { path = "../darkbot-common" }
@@ -37,7 +37,7 @@ solana-account-decoder = "=3.1.12"  # [FIX-49] marginfi tag Cargo.lock
 solana-pubkey-v1 = { package = "solana-pubkey", version = "4.2.1", optional = true }
 solana-hash-v1 = { package = "solana-hash", version = "4.3.0", optional = true }
 solana-instruction-v1 = { package = "solana-instruction", version = "=3.4.0", optional = true }
-solana-message-v1 = { package = "solana-message", version = "=4.4.1", optional = true }
+solana-message-v1 = { package = "solana-message", version = "=4.4.1", features = ["wincode"], optional = true }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }  # VERIFY Version
@@ -49,4 +49,12 @@ bs58 = "0.5"
 bincode = "1"   # VERIFY: Wire-Format-Serialisierung der VersionedTransaction
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
+# Canonical v1 wincode requires this compatible minor; SDK-3 accepts ^3.0.0.
+solana-short-vec-v1 = { package = "solana-short-vec", version = "=3.2.2", optional = true }
+
 [dev-dependencies]
+
+[[bin]]
+name = "p0-probe-v1"
+path = "src/bin/p0-probe-v1.rs"
+required-features = ["txv1"]

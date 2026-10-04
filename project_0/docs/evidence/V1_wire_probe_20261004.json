@@ -1,0 +1,144 @@
+{
+  "payer": "GqRxBgvH94QKFJQVyDv82fK6jxaKrcyjyjSPkN7ue3zd",
+  "probe": "v1_canonical_wire",
+  "results": [
+    {
+      "case": "small",
+      "result": {
+        "response": {
+          "context": {
+            "apiVersion": "4.3.0",
+            "slot": 453208914
+          },
+          "value": {
+            "accounts": null,
+            "err": null,
+            "fee": 5000,
+            "innerInstructions": null,
+            "loadedAccountsDataSize": 149,
+            "loadedAddresses": {
+              "readonly": [],
+              "writable": []
+            },
+            "logs": [
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success"
+            ],
+            "postBalances": [
+              5519680,
+              1
+            ],
+            "postTokenBalances": [],
+            "preBalances": [
+              5524680,
+              1
+            ],
+            "preTokenBalances": [],
+            "replacementBlockhash": null,
+            "returnData": null,
+            "unitsConsumed": 150
+          }
+        }
+      },
+      "sig_verify": true,
+      "version": "V1",
+      "wire_bytes": 204
+    },
+    {
+      "case": "control",
+      "response": {
+        "context": {
+          "apiVersion": "4.3.0",
+          "slot": 453208915
+        },
+        "value": {
+          "accounts": null,
+          "err": null,
+          "fee": 5000,
+          "innerInstructions": null,
+          "loadedAccountsDataSize": 235,
+          "loadedAddresses": {
+            "readonly": [],
+            "writable": []
+          },
+          "logs": [
+            "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+            "Program ComputeBudget111111111111111111111111111111 success",
+            "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+            "Program ComputeBudget111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success"
+          ],
+          "postBalances": [
+            5519680,
+            1,
+            1
+          ],
+          "postTokenBalances": [],
+          "preBalances": [
+            5524680,
+            1,
+            1
+          ],
+          "preTokenBalances": [],
+          "replacementBlockhash": null,
+          "returnData": null,
+          "unitsConsumed": 450
+        }
+      },
+      "version": "V0"
+    },
+    {
+      "case": "over_legacy_limit",
+      "result": {
+        "response": {
+          "context": {
+            "apiVersion": "4.3.0",
+            "slot": 453208915
+          },
+          "value": {
+            "accounts": null,
+            "err": null,
+            "fee": 5000,
+            "innerInstructions": null,
+            "loadedAccountsDataSize": 75013,
+            "loadedAddresses": {
+              "readonly": [],
+              "writable": []
+            },
+            "logs": [
+              "Program 11111111111111111111111111111111 invoke [1]",
+              "Program 11111111111111111111111111111111 success",
+              "Program MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr invoke [1]",
+              "Program log: Memo (len 1200): \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"",
+              "Program MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr consumed 422168 of 1399850 compute units",
+              "Program MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr success"
+            ],
+            "postBalances": [
+              5519680,
+              1,
+              523015235
+            ],
+            "postTokenBalances": [],
+            "preBalances": [
+              5524680,
+              1,
+              523015235
+            ],
+            "preTokenBalances": [],
+            "replacementBlockhash": null,
+            "returnData": null,
+            "unitsConsumed": 422318
+          }
+        }
+      },
+      "sig_verify": true,
+      "version": "V1",
+      "wire_bytes": 1440
+    }
+  ],
+  "transactions_sent": 0,
+  "fix": "FIX-126",
+  "date": "2026-10-04",
+  "qualification": "Canonical signed v1 wire and primary RPC simulation PASS; production builder/submission not yet integrated; Jito unqualified"
+}

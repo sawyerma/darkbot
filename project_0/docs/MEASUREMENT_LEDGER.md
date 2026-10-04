@@ -2657,3 +2657,30 @@ sizer always uses the ceiling, so a lower-premium healing pair may exist. Next:
 verify/derive a bounded lower-premium candidate and test rounded health parity.
 No threshold/freshness relaxation. R6 PARTIAL; R7 OPEN; 72 h NOT STARTED; LIVE
 DISABLED. R121 stopped after terminal target results; zero sends.
+
+
+### 2026-10-04 — FIX-126 canonical v1 wire / Mainnet RPC simulation PASS
+
+Sources: pinned `solana-message=4.4.1` `v1::Message::serialize`, SIMD-0385
+https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0385-transaction-v1.md
+and https://solana.com/upgrades/larger-transaction-sizes (retrieved 2026-10-04).
+Use official wincode serializer, version-prefixed message followed by signatures.
+The old capability measurement omitted the one-byte version prefix; now corrected
+and checked against actual signed bytes. Compatible `solana-short-vec=3.2.2` pin is
+required by the canonical serializer while preserving the protocol SDK-3 graph.
+
+Added explicit `p0-probe-v1` binary with no sendTransaction path. Probe signs a
+zero-lamport self-transfer and a >1232-byte variant with a Memo; `sigVerify=true`,
+no blockhash replacement. RPC results: V1 204 bytes PASS (150 CU); V0 control PASS;
+V1 1440 bytes PASS (422318 CU), err=null. This proves configured primary RPC accepts
+canonical v1 simulation, including beyond the legacy size cap. Simulated fee 5000
+is not a real debit; transactions sent=0. Evidence:
+`evidence/V1_wire_probe_20261004.json`.
+
+Regression verifies signature over the prefixed message, tamper rejection, wrong
+signer rejection and exact byte-limit boundary. Workspace build PASS; tests with
+pending FIX-127 sizing changes PASS (112 with txv1 / 110 without). Production
+`build_v1` still explicitly unavailable until the typed wire adapter is connected;
+Jito, submission/landing/reconciliation and real integration v1 simulation remain
+OPEN. No claim that all R7 wire qualification is complete. R6 PARTIAL; R7 OPEN;
+72 h NOT STARTED; LIVE DISABLED.
