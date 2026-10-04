@@ -650,9 +650,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             done.base_slot,
                             "integration_projection",
                         ));
-                        let integration_kinds = {
+                        let (integration_kinds, pricing_integration_kinds) = {
                             let view = StateView(&st);
-                            darkbot_project0::integration::kinds_for_account(
+                            let withdraw = darkbot_project0::integration::kinds_for_account(
                                 &view,
                                 &program,
                                 &done.account,
@@ -660,7 +660,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .unwrap_or_default()
                             .into_iter()
                             .map(darkbot_project0::integration::kind_name)
-                            .collect::<Vec<_>>()
+                            .collect::<Vec<_>>();
+                            let pricing = darkbot_project0::integration::pricing_kinds_for_account(
+                                &view,
+                                &program,
+                                &done.account,
+                            )
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(darkbot_project0::integration::kind_name)
+                            .collect::<Vec<_>>();
+                            (withdraw, pricing)
                         };
                         let line = serde_json::json!({
                             "projection": {
@@ -669,6 +679,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 "projection_slot": projection_slot,
                                 "status": "ready",
                                 "integration_kinds": integration_kinds,
+                                "pricing_integration_kinds": pricing_integration_kinds,
                                 "simulated_cu": units
                             }
                         });
@@ -811,6 +822,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let mut kamino = 0usize;
                     let mut drift = 0usize;
                     let mut juplend = 0usize;
+                    let mut pricing_kamino = 0usize;
+                    let mut pricing_drift = 0usize;
+                    let mut pricing_juplend = 0usize;
                     for (pk, r) in st.iter_owned_by(&program) {
                         if !bootstrap_probe_candidate(&r.data, &group) {
                             continue;
@@ -826,10 +840,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
+                        if let Ok(kinds) =
+                            darkbot_project0::integration::pricing_kinds_for_account(&view, &program, pk)
+                        {
+                            for k in kinds {
+                                match k {
+                                    darkbot_project0::integration::IntegrationKind::Kamino => pricing_kamino += 1,
+                                    darkbot_project0::integration::IntegrationKind::Drift => pricing_drift += 1,
+                                    darkbot_project0::integration::IntegrationKind::JupLend => pricing_juplend += 1,
+                                }
+                            }
+                        }
                     }
                     eprintln!(
-                        "bootstrap_probe_integrations: kamino={} drift={} juplend={}",
-                        kamino, drift, juplend
+                        "bootstrap_probe_integrations: withdraw_kamino={} withdraw_drift={} withdraw_juplend={} pricing_kamino={} pricing_drift={} pricing_juplend={}",
+                        kamino, drift, juplend, pricing_kamino, pricing_drift, pricing_juplend
                     );
                 }
             }
@@ -1053,6 +1078,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .into_iter()
                         .map(darkbot_project0::integration::kind_name)
                         .collect::<Vec<_>>();
+                        let pricing_integration_kinds =
+                            darkbot_project0::integration::pricing_kinds_for_account(
+                                &view,
+                                &program,
+                                &acct,
+                            )
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(darkbot_project0::integration::kind_name)
+                            .collect::<Vec<_>>();
                         let _ = writeln!(records, "{}", serde_json::json!({
                             "account": acct.to_string(),
                             "trigger": trigger,
@@ -1060,6 +1095,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             "decision": "Skip",
                             "loss": "IntegrationRefresh",
                             "integration_kinds": integration_kinds,
+                            "pricing_integration_kinds": pricing_integration_kinds,
                             "reason": "integration projection pending"
                         }));
                         continue;
