@@ -1,17 +1,18 @@
 {
   "schema": "darkbot.native.acceptance-map.v1",
-  "master_plan": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md §14",
+  "master_plan": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md \u00a714",
   "purpose": "Machine-readable companion to the acceptance matrix. The master plan stays the human-readable source; this file adds symbols, test names and evidence hashes.",
   "path_convention": "All evidence paths are repository paths. A path of the form <zip>::<member> names a member inside a ZIP that is itself in the repository.",
   "unit1_source": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip (rustfmt-normalised sources and Cargo.lock), copied unchanged; only crates/darkbot-core/src/lib.rs differs (module list)",
   "compiler_run": "Units 1-4: combined tree PASS on the user's target system (2026-10-04): cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings.",
   "freeze_status": "Units 1-4 are IMPLEMENTED_TESTED and FROZEN for their defined scopes. Q1/live state remains PARTIAL and TRACKED_DEFERRED to C2. Unit 5 inclusion adapters are the next task and are not yet implemented/tested.",
   "test_count": {
-    "total": 127,
+    "total": 182,
     "unit1": 27,
     "unit2": 33,
     "unit3": 33,
-    "unit4": 34
+    "unit4": 34,
+    "unit5_core": 55
   },
   "rows": [
     {
@@ -490,10 +491,142 @@
       ],
       "result": "PASS on the user's target system of the combined Unit 1-4 tree on 2026-10-04: cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Full bsc/native SHA256 manifest verification also PASS. Unit 4 implementation commit: c745d92305ee24b0bff76621df0e83e09c9353b8. Raw terminal log is not committed.",
       "not_proven": "every canonical, pending, replacement and reorg counterexample of the retirement contract (C2 owns them); the proofs have no production constructor yet"
+    },
+    {
+      "matrix_id": "S2",
+      "adoption": "SN12",
+      "unit": "Unit 5 (core: capability records and submission plan)",
+      "status": "UNTESTED; runner NOT IMPLEMENTED; LIVE BLOCKED; T0 to T_buy below 1 ms NOT YET PROVEN",
+      "evidence": [
+        {
+          "path": "bsc/native/crates/darkbot-core/fixtures/inclusion/club48_builder_send_bundle.capability.json",
+          "sha256": "629888e2e0524a9724f193502005506755c8412bc8091313d28e0f1357d3b54c"
+        },
+        {
+          "path": "bsc/native/crates/darkbot-core/fixtures/inclusion/blockrazor_builder_send_bundle.capability.json",
+          "sha256": "c92f87196feea6e60861fbaf10a13fb7fafdaa847d17ea5bc57b9b685cba7248"
+        },
+        {
+          "path": "bsc/native/crates/darkbot-core/fixtures/inclusion/blockrazor_rpc_send_bundle.capability.json",
+          "sha256": "64d8b99cd62ea68d95a57a8a86a9591ac41752d4c9e60926151c3dd292e3ae9f"
+        },
+        {
+          "path": "bsc/gates/gate0/evidence/g01_mainnet_acceptance_proposal_v2.json",
+          "sha256": "026b534f4a2e6e76b6eb816a8de84ef71b508aa28b6e24c5c471e9ee6f0b19ff",
+          "note": "bundle_bytes: 48Club noMerge and positionFirst, max block window of send head plus two"
+        }
+      ],
+      "upstream": {
+        "repository": "https://github.com/BlockRazorinc/blockrazor_docs_en",
+        "commit": "a0dc79d6901c50ebeb45887d829bf34527261adb",
+        "files": [
+          {
+            "path": "transaction-submission/block-builder/send-bundle.md",
+            "git_blob_sha1": "db80a34f3e3a01ddb9b141c6cbee7a5b83efe90e"
+          },
+          {
+            "path": "transaction-submission/block-builder/README.md",
+            "git_blob_sha1": "d7a847f74deae5738f20dc35d12a6febd9092918"
+          },
+          {
+            "path": "transaction-submission/rpc/bsc/eth_sendbundle.md",
+            "git_blob_sha1": "1e54a4433f4b0c90cb7e337bf3f1c350b7308ca0"
+          }
+        ],
+        "note": "48Club publishes no source revision; its frozen snapshot is the evidence."
+      },
+      "symbols": [
+        "darkbot_core::inclusion::capability::CapabilityId",
+        "darkbot_core::inclusion::capability::CapabilityRecord",
+        "darkbot_core::inclusion::capability::Property",
+        "darkbot_core::inclusion::capability::Qualification",
+        "darkbot_core::inclusion::capability::AdapterTable",
+        "darkbot_core::inclusion::release::ReleaseProfile",
+        "darkbot_core::inclusion::release::ReleaseBlocker",
+        "darkbot_core::inclusion::release::ReleaseRefusal",
+        "darkbot_core::inclusion::plan::TxRef",
+        "darkbot_core::inclusion::plan::OwnLaunch",
+        "darkbot_core::inclusion::plan::SubmissionPlan",
+        "darkbot_core::inclusion::plan::SubmissionPlan::bind_dispatch",
+        "darkbot_core::inclusion::plan::SubmissionPlan::qualify_for_release",
+        "darkbot_core::inclusion::plan::QualifiedReleasePlan",
+        "darkbot_core::inclusion::plan::BoundDispatch",
+        "darkbot_core::inclusion::plan::EnvelopeOptions",
+        "darkbot_core::inclusion::plan::PreSubmission",
+        "darkbot_core::inclusion::plan::LocalBlockStartDeadline",
+        "darkbot_core::inclusion::plan::TransportStartDeadline::for_profile",
+        "darkbot_core::inclusion::plan::ProviderValidity",
+        "darkbot_core::inclusion::plan::TransactionValidity",
+        "darkbot_core::inclusion::plan::BudgetEnvelope",
+        "darkbot_core::inclusion::plan::Disclosure",
+        "darkbot_core::inclusion::capability::Feature",
+        "darkbot_core::inclusion::release::ReleaseProfile::feature_blocker",
+        "darkbot_core::inclusion::release::UsedFeatures"
+      ],
+      "tests": [
+        "darkbot-core::inclusion::tests::club48_record_matches_the_frozen_scope",
+        "darkbot-core::inclusion::tests::a_documented_gas_price_rule_is_never_recorded_as_no_rule",
+        "darkbot-core::inclusion::tests::blockrazor_builder_record_matches_the_frozen_scope",
+        "darkbot-core::inclusion::tests::bundle_form_and_pre_submission_are_separate_capabilities",
+        "darkbot-core::inclusion::tests::lifecycle_is_recorded_explicitly_and_not_guessed",
+        "darkbot-core::inclusion::tests::documented_is_not_qualified_for_any_frozen_record",
+        "darkbot-core::inclusion::tests::reorg_exposure_is_not_a_provider_rebroadcast_or_public_fallback",
+        "darkbot-core::inclusion::tests::blockrazor_rpc_is_a_different_capability_and_enables_nothing",
+        "darkbot-core::inclusion::tests::local_geth_record_is_single_buy_with_deferred_boundary",
+        "darkbot-core::inclusion::tests::every_record_keeps_the_three_explicit_facts",
+        "darkbot-core::inclusion::tests::provider_evidence_is_frozen_and_pinned",
+        "darkbot-core::inclusion::tests::adapter_table_binds_every_index_and_kind_once",
+        "darkbot-core::inclusion::tests::mainnet_records_are_refused_for_another_chain",
+        "darkbot-core::inclusion::tests::transaction_references_are_made_from_and_checked_against_bytes",
+        "darkbot-core::inclusion::tests::own_launch_facts_are_read_from_its_signed_bytes",
+        "darkbot-core::inclusion::tests::public_full_launch_fans_one_intent_out_and_charges_no_launch_cost",
+        "darkbot-core::inclusion::tests::controlled_self_launch_charges_the_own_launch_cost",
+        "darkbot-core::inclusion::tests::the_launch_must_be_the_pending_candidate",
+        "darkbot-core::inclusion::tests::own_launch_must_be_on_the_buy_chain_and_call_the_buy_portal",
+        "darkbot-core::inclusion::tests::launch_kind_must_fit_the_mode",
+        "darkbot-core::inclusion::tests::self_launch_bundle_is_not_sent_before_the_launch_without_the_capability",
+        "darkbot-core::inclusion::tests::modes_are_admitted_only_where_the_record_enables_them",
+        "darkbot-core::inclusion::tests::blockrazor_rpc_is_never_admitted_in_place_of_the_builder",
+        "darkbot-core::inclusion::tests::unsupported_option_fails_closed",
+        "darkbot-core::inclusion::tests::plan_binds_the_one_economic_identity",
+        "darkbot-core::inclusion::tests::plan_is_bound_to_exactly_the_dispatch_of_the_intent_lane",
+        "darkbot-core::inclusion::tests::every_budget_component_and_the_total_are_enforced",
+        "darkbot-core::inclusion::tests::provider_payment_without_a_carrier_is_refused",
+        "darkbot-core::inclusion::tests::no_per_buy_gas_floor_is_invented_for_blockrazor",
+        "darkbot-core::inclusion::tests::local_deadline_and_provider_validity_are_separate_bounds",
+        "darkbot-core::inclusion::tests::provider_validity_is_inclusive",
+        "darkbot-core::inclusion::tests::the_signed_buy_has_no_time_bound_of_its_own",
+        "darkbot-core::inclusion::tests::final_check_refuses_stale_state_and_passed_bounds",
+        "darkbot-core::inclusion::tests::birth_entry_profile_fixes_the_club48_envelope",
+        "darkbot-core::inclusion::tests::provider_default_merging_is_refused_where_the_profile_requires_no_merge",
+        "darkbot-core::inclusion::tests::a_required_option_must_be_enabled_on_the_adapter",
+        "darkbot-core::inclusion::tests::provider_block_window_is_at_most_two_blocks_beyond_the_head",
+        "darkbot-core::inclusion::tests::full_dispatch_check_accepts_exactly_head_to_head_plus_two",
+        "darkbot-core::inclusion::tests::final_check_enforces_the_tight_block_window",
+        "darkbot-core::inclusion::tests::no_frozen_adapter_counts_for_a_release_yet",
+        "darkbot-core::inclusion::tests::a_required_property_must_be_stated_and_qualified",
+        "darkbot-core::inclusion::tests::a_property_the_profile_does_not_require_never_blocks",
+        "darkbot-core::inclusion::tests::release_plan_exists_only_when_every_selected_adapter_is_established",
+        "darkbot-core::inclusion::tests::release_plan_requires_the_profile_envelope_and_enabled_pre_submission",
+        "darkbot-core::inclusion::tests::enabled_is_not_qualified_for_any_feature_of_a_frozen_record",
+        "darkbot-core::inclusion::tests::every_feature_a_release_plan_uses_must_be_qualified",
+        "darkbot-core::inclusion::tests::a_feature_the_plan_does_not_use_never_blocks_a_release",
+        "darkbot-core::inclusion::tests::a_used_timestamp_bound_must_be_qualified",
+        "darkbot-core::inclusion::tests::release_grade_qualifies_features_explicitly",
+        "darkbot-core::inclusion::tests::transport_deadline_is_strict_and_bound_to_its_clock",
+        "darkbot-core::inclusion::tests::transport_deadline_cannot_be_wider_than_the_profile_allows",
+        "darkbot-core::inclusion::tests::the_block_bound_says_nothing_about_elapsed_time",
+        "darkbot-core::inclusion::tests::expiry_before_the_first_write_is_not_a_disclosure",
+        "darkbot-core::inclusion::tests::nothing_revokes_bytes_that_may_have_left",
+        "darkbot-core::inclusion::tests::one_adapter_expired_unstarted_while_another_disclosed"
+      ],
+      "result": "NOT_RUN: Unit 5 has not been compiled; no Rust toolchain in the authoring environment",
+      "coverage": "Frozen capability records with chain scope; lifecycle properties recorded as what the evidence states and, separately, whether this product qualified them (order, atomicity, same block, extraction, provider rebroadcast, provider public fallback, downstream recipients, public exposure on submission, reorg exposure after inclusion); adapter binding; release profile BirthEntryV1 with required envelope options per adapter, a block window of head to head plus two enforced in the full final check, and a transport start limit of at most 1,000,000 ns; release qualification as a typed gate (QualifiedReleasePlan) distinct from a diagnostic plan, requiring per adapter the established lifecycle properties, a qualified send boundary and, for every provider feature the plan actually uses (noMerge, positionFirst, expiry by block or timestamp, pre-submission), support and qualification of that very feature; the three submission cases; launch bound to the pending candidate; own-launch facts read from signed bytes; binding of the plan to the intent lane dispatch; pre-submission as a separate capability; local block bound, transport start deadline, provider validity and transaction validity as separate bounds; budget by component and total; after-handoff model. No transport, framing, response parsing or timing instrumentation: those are the runner part of Unit 5.",
+      "not_proven": "real provider behaviour for any enabled feature, including how 48Club places a bundle with positionFirst; release eligibility of any adapter (no lifecycle property and no provider feature of any frozen record is qualified, so no plan can be qualified for a release; an enabled feature is documented, not proven); pre-submission of a controlled self-launch before its launch was broadcast (unqualified for every adapter); the gas-price rule of either builder (documented, exact form not established, nothing enforced); 48Club minTimestamp and backrunTarget, BlockRazor positionFirst (unqualified); single private transaction APIs (unqualified); that the bytes of a third-party launch are a valid launch of the candidate (bound by hash only; decoding foreign envelopes is ingress); a direct provider payment (no carrier transaction exists: any claim is refused); that the transport deadline is read on a real monotonic clock and checked immediately before every permit (the contract exists; the read and its placement are the runner part); that a release path accepts only a QualifiedReleasePlan (the type exists; the path that takes it is the runner part); local-geth outbound handoff (C1); funding and balance (C2/Unit 6)"
     }
   ],
   "unit4_commit": "c745d92305ee24b0bff76621df0e83e09c9353b8",
   "unit4_bsc_native_tree": "421352ff59602d15da02556e1527785f0da7a29a",
-  "next_step": "C0 Unit 5 — inclusion adapters: local-geth, 48Club and BlockRazor only within verified capability scopes; freeze capability records before implementation; Unit 4 bytes/nonce/permit invariants remain authoritative.",
+  "next_step": "C0 Unit 5 \u2014 inclusion adapters: local-geth, 48Club and BlockRazor only within verified capability scopes; freeze capability records before implementation; Unit 4 bytes/nonce/permit invariants remain authoritative.",
   "product_gate": "LIVE blocked; T_buy - T0 < 1,000,000 ns NOT YET PROVEN; no value-bearing Mainnet action authorized by this status."
 }

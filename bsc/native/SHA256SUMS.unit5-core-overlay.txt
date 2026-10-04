@@ -1,0 +1,10 @@
+8b31e5ef241f73c6f26d1bcb44c94508dcb9ae7c2605712adbad9f40b2dca75e  ./ACCEPTANCE_MAP.unit5-core.row.json
+c92f87196feea6e60861fbaf10a13fb7fafdaa847d17ea5bc57b9b685cba7248  ./crates/darkbot-core/fixtures/inclusion/blockrazor_builder_send_bundle.capability.json
+64d8b99cd62ea68d95a57a8a86a9591ac41752d4c9e60926151c3dd292e3ae9f  ./crates/darkbot-core/fixtures/inclusion/blockrazor_rpc_send_bundle.capability.json
+629888e2e0524a9724f193502005506755c8412bc8091313d28e0f1357d3b54c  ./crates/darkbot-core/fixtures/inclusion/club48_builder_send_bundle.capability.json
+c3ed11a17f8393750e153e41668ccd9bcccc7cf899b36912f41fafcde22a5364  ./crates/darkbot-core/src/inclusion/capability.rs
+a1926e99466a614f36ef06956dc8336ff46a33d240a73375b0434d620750860a  ./crates/darkbot-core/src/inclusion/mod.rs
+18d30a96044a5d297c3c873ad159a379202f0e14a4e5176e30c4afc13c7a8150  ./crates/darkbot-core/src/inclusion/plan.rs
+e68b69a4d57e923c026d2e903608a7db2c35ea512589eb20057fb31ab91c62b4  ./crates/darkbot-core/src/inclusion/release.rs
+feaf37a533da25b056911a8644d8732971759c2af31a522eb1026508e78999f1  ./crates/darkbot-core/src/inclusion/tests.rs
+049431b1a5ebc1fa879ce937e772849d0c2f9d073baa2a9619545db7c188d8f5  ./crates/darkbot-core/src/lib.rs

@@ -15,6 +15,7 @@
 
 pub mod chain_state;
 pub mod economics;
+pub mod inclusion;
 pub mod intent;
 pub mod signer;
 pub mod tx;

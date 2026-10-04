@@ -1,0 +1,53 @@
+{
+  "schema": "darkbot.native.provider-capability-snapshot.v1",
+  "provider": "BlockRazor BSC RPC",
+  "retrieved_on": "2026-10-04",
+  "sources": [
+    "https://docs.blockrazor.io/transaction-submission/block-builder",
+    "https://docs.blockrazor.io/transaction-submission/rpc/bsc/eth_sendbundle"
+  ],
+  "upstream_repository": "https://github.com/BlockRazorinc/blockrazor_docs_en",
+  "method": "eth_sendBundle",
+  "routing": "the RPC forwards a bundle to several mainstream builders; the block builder endpoint delivers it to the BlockRazor builder only",
+  "parameters": [
+    {
+      "name": "txs",
+      "mandatory": true,
+      "format": "[]bytes",
+      "meaning": "raw transactions, at most 50"
+    },
+    {
+      "name": "revertingTxHashes",
+      "mandatory": false,
+      "format": "[]hash",
+      "meaning": "transactions that are allowed to revert, a subset of txs"
+    },
+    {
+      "name": "maxBlockNumber",
+      "mandatory": false,
+      "format": "uint64",
+      "meaning": "last block for which the bundle is valid; default is current block plus 100"
+    }
+  ],
+  "fee_floor_statements": [
+    {
+      "source": "eth_sendBundle page",
+      "statement": "transactions at 0 gwei are allowed in a bundle, but the average gas price of the transactions that are not from the public mempool must not be below 0.05 gwei"
+    }
+  ],
+  "cancellation": "none documented",
+  "upstream_files": [
+    {
+      "path": "transaction-submission/rpc/bsc/eth_sendbundle.md",
+      "git_blob_sha1": "1e54a4433f4b0c90cb7e337bf3f1c350b7308ca0",
+      "verification": "verified against the upstream repository at the pinned commit"
+    },
+    {
+      "path": "transaction-submission/block-builder/README.md",
+      "git_blob_sha1": "d7a847f74deae5738f20dc35d12a6febd9092918",
+      "verification": "verified against the upstream repository at the pinned commit"
+    }
+  ],
+  "upstream_commit": "a0dc79d6901c50ebeb45887d829bf34527261adb",
+  "method_naming": "the page is titled eth_sendBundle; its fee statement and, per the supplied summary, its example name eth_sendMevBundle. The method name of this path is not established."
+}

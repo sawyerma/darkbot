@@ -1,0 +1,94 @@
+{
+  "schema": "darkbot.native.provider-capability-snapshot.v1",
+  "provider": "48Club puissant builder",
+  "retrieved_on": "2026-10-04",
+  "sources": [
+    "https://docs.48.club/puissant-builder",
+    "https://docs.48.club/puissant-builder/send-bundle",
+    "https://docs.48.club/f.a.q."
+  ],
+  "upstream_revision": null,
+  "upstream_revision_note": "The provider publishes no public source revision for this page. This snapshot is the frozen evidence.",
+  "method": "eth_sendBundle",
+  "transports": {
+    "https": "documented",
+    "wss": "documented, conditional access for 48 SoulPoint members"
+  },
+  "parameters": [
+    {
+      "name": "txs",
+      "mandatory": true,
+      "format": "array[hex]",
+      "meaning": "signed raw transactions"
+    },
+    {
+      "name": "backrunTarget",
+      "mandatory": false,
+      "format": "hash",
+      "meaning": "identifies an auction backrun target"
+    },
+    {
+      "name": "maxBlockNumber",
+      "mandatory": false,
+      "format": "uint64",
+      "meaning": "last block for which the bundle is valid; default is current block plus 100"
+    },
+    {
+      "name": "maxTimestamp",
+      "mandatory": false,
+      "format": "uint64",
+      "meaning": "latest unix time in seconds for which the bundle is valid"
+    },
+    {
+      "name": "revertingTxHashes",
+      "mandatory": false,
+      "format": "array[hash]",
+      "meaning": "transactions that are allowed to revert"
+    },
+    {
+      "name": "noMerge",
+      "mandatory": false,
+      "format": "bool",
+      "meaning": "default false, which allows the bundle to be merged with others"
+    },
+    {
+      "name": "positionFirst",
+      "mandatory": false,
+      "format": "bool",
+      "meaning": "default false; when set, position is strictly by priority fee; when unset, a late bundle may be appended at the block tail"
+    },
+    {
+      "name": "48spSign",
+      "mandatory": false,
+      "format": "hex",
+      "meaning": "48 SoulPoint member signature"
+    }
+  ],
+  "parameters_not_listed": [
+    "minTimestamp"
+  ],
+  "response": {
+    "success": "result is the bundle hash as a string",
+    "failure": "JSON-RPC error object with code and message; the documented example uses code -38000"
+  },
+  "ranking": "gas fees of bundle transactions that are not in the public pool, reduced by ten percent, plus BNB sent to the builder control account",
+  "fee_floor": "no explicit numeric minimum is stated on these pages",
+  "cancellation": "none documented",
+  "downstream": "not stated, except that a chain reorganisation makes included transactions public",
+  "pre_submission": "not stated: the reference documents a list of signed raw transactions; it does not describe a bundle whose first transaction is the submitter's own launch that has not been broadcast",
+  "faq_statements": [
+    {
+      "topic": "gas price",
+      "statement": "for a bundle the average gas price, not that of a single representative transaction, is checked; a transaction at zero gas price is possible when other transactions of the bundle pay enough"
+    },
+    {
+      "topic": "reorg",
+      "statement": "after a chain reorganisation a bundle may land only partly or not through a partner validator; the transactions of the invalidated block become public"
+    },
+    {
+      "topic": "same sender",
+      "statement": "only the first transaction of a bundle, its sender, is checked; several bundles whose first transaction has the same sender are treated as a replacement attempt that needs a higher gas price"
+    }
+  ],
+  "ordering_and_atomicity": "not stated on these pages as a guarantee"
+}
