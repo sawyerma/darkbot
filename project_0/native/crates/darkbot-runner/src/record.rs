@@ -79,3 +79,24 @@ impl OpportunityRecord {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn health_json_preserves_full_protocol_fixed_point_range() {
+        // R115 crashed in json! for an otherwise valid large Health value. These
+        // are raw I80F48 bits, not floats: losing low bits also loses evidence.
+        for bits in [i128::MIN, i64::MIN as i128 - 1, 0, u64::MAX as i128 + 1, i128::MAX] {
+            let row = serde_json::json!({
+                "maint_health_bits": bits,
+                "equity_assets_bits": bits,
+            });
+            let encoded = serde_json::to_string(&row).unwrap();
+            let decoded: std::collections::BTreeMap<String, i128> =
+                serde_json::from_str(&encoded).unwrap();
+            assert_eq!(decoded["maint_health_bits"], bits);
+            assert_eq!(decoded["equity_assets_bits"], bits);
+            assert_eq!(row["maint_health_bits"].to_string(), bits.to_string());
+        }
+    }
+}

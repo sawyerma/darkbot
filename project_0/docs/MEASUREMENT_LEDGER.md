@@ -2441,3 +2441,39 @@ Exact next step: FIX-120 lossless i128 JSON encoding + regression test, build/te
 both feature sets, repeat the complete 230-account sweep as R116, then inspect
 liquidatable integration paths and final simulations. FIX-119 has not yet received
 full-population Mainnet qualification because of the independent JSON panic.
+
+### 2026-10-04 — FIX-120 lossless Health JSON / R116 complete broad sweep
+
+FIX-120 enables serde_json `arbitrary_precision` in the runner. Health I80F48 raw
+bits remain exact JSON integers across the full i128 range. Regression covers
+min/max i128 and both default JSON integer boundaries; no floats or truncation.
+Workspace build/test PASS: `crate_health txv1` 99 tests; `crate_health` 98 tests.
+
+R116 Mainnet (source `9e8ea2b` plus FIX-120, same commit as this evidence):
+- initial snapshot response decode error recovered on attempt 2; subsequent
+  snapshots/root catch-up/reconcile reached Ready with no required state missing;
+- 230 unique targets: 195 Kamino, 44 JupLend, 0 Drift (9 overlap);
+- terminal projections: 209 ready / 21 failed / 0 stale;
+- all 209 projected Health evaluations succeeded; zero JupLend stale errors;
+- all 209 evaluation slot/timestamp pairs exactly match their simulation Clock;
+- large fixed-point JSON values persisted successfully; no panic;
+- 206 healthy; 3 liquidatable. One has zero collateral and is bankruptcy-only.
+- Kamino `A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS` and JupLend
+  `64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk` have nonzero equity assets,
+  but both hit `opportunity stale before planning` after the broad queue delay.
+- all 21 projection failures were `BlockhashNotFound`: transactions were signed
+  at bulk dispatch and expired while waiting for the sequential RPC worker.
+- process stopped after all projection results and downstream records arrived.
+
+Evidence: `evidence/R116_integration_sweep.json` (all projection/Health outcomes,
+exact Clock-pair check, decisions and raw-record checksum; no endpoint secrets).
+Decision: FIX-119/120 runtime PASS for successful evaluations; **R6 PARTIAL**.
+The full sweep is not clean PASS because 21 projections failed. R4/R5 remain PASS;
+R7 OPEN; 72 h NOT STARTED; LIVE DISABLED.
+
+Exact next step: FIX-121 pace the explicit qualification sweep one projection at a
+time, retain unsigned target metadata until dispatch, start each synthetic probe
+at its actual dispatch time, immediately evaluate returned projections, preserve
+all live/account-update timestamps and freshness guards; build/test, then R117.
+The two nonzero-collateral accounts are priority evidence targets, not yet proven
+executable or economic. Never extend deadlines or fake a protocol Clock to pass.

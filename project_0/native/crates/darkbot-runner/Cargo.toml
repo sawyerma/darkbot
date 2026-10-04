@@ -21,7 +21,9 @@ solana-commitment-config = "=3.1.1"
 solana-transaction-status = "=3.1.12"
 bs58 = "0.5"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# [FIX-120] Protocol Health uses I80F48 bits (i128). json! must preserve the entire
+# integer range rather than panic beyond u64/i64 or round through floating point.
+serde_json = { version = "1", features = ["arbitrary_precision"] }
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] } # [FIX-65] Jupiter Swap V2 /build
 bytemuck = "1"
