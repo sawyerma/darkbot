@@ -71,6 +71,7 @@ impl JupiterV2RouteProvider {
         to_mint: &Pubkey,
         amount: u64,
         prewarmed_atas: &[PrewarmedAta],
+        max_accounts: u8,
     ) -> Result<Option<Route>, String> {
         if amount == 0 {
             return Err("jupiter exact-in rejected locally: amount=0".into());
@@ -85,7 +86,7 @@ impl JupiterV2RouteProvider {
             ("amount", amount.to_string()),
             ("taker", self.taker.to_string()),
             ("slippageBps", self.slippage_bps.to_string()),
-            ("maxAccounts", self.max_accounts.to_string()),
+            ("maxAccounts", max_accounts.min(self.max_accounts).max(1).to_string()),
             ("wrapAndUnwrapSol", "false".to_string()),
             ("forJitoBundle", self.for_jito_bundle.to_string()),
         ]);
@@ -171,7 +172,16 @@ impl RouteProvider for JupiterV2RouteProvider {
         amount_in: u64,
         prewarmed_atas: &[PrewarmedAta],
     ) -> Result<Option<Route>, String> {
-        self.exact_in(from_mint, to_mint, amount_in, prewarmed_atas)
+        self.exact_in(from_mint, to_mint, amount_in, prewarmed_atas, self.max_accounts)
+    }
+
+    fn max_accounts(&self) -> u8 { self.max_accounts }
+
+    fn quote_exact_in_with_budget(
+        &self, from_mint: &Pubkey, to_mint: &Pubkey, amount_in: u64,
+        prewarmed_atas: &[PrewarmedAta], max_accounts: u8,
+    ) -> Result<Option<Route>, String> {
+        self.exact_in(from_mint, to_mint, amount_in, prewarmed_atas, max_accounts)
     }
 
     fn quote_exact_out(&self, _from_mint: &Pubkey, _to_mint: &Pubkey, _amount_out: u64) -> Result<Option<Route>, String> {

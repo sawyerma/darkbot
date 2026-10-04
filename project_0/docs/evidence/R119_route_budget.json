@@ -1,0 +1,38 @@
+{
+  "run": "R119",
+  "source_base": "7d74993",
+  "changes": "FIX-123: R118 initial budget heuristic; R119 observed route footprint heuristic",
+  "mode": "shadow",
+  "projection_counts": {
+    "ready": 231
+  },
+  "target_count": 231,
+  "health_success": 231,
+  "health_errors": [],
+  "route_budget_log": [
+    "route_budget: attempt=1 max_accounts=64 route_accounts=13 alts=1 rejected=transaction too large: 1534 > 1232",
+    "route_budget: attempt=1 max_accounts=64 route_accounts=28 alts=2 rejected=transaction too large: 1820 > 1232",
+    "route_budget: attempt=2 max_accounts=9 route_accounts=14 alts=1 rejected=transaction too large: 1559 > 1232"
+  ],
+  "downstream_nonhealthy": [
+    {
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "decision": "Skip",
+      "loss": "Bankruptcy",
+      "reason": "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "decision": "Skip",
+      "loss": "MissingAta",
+      "reason": "ATA:PREWARM_REQUIRED: asset ATA=9eB1ttcpKcSXBMuTmAJ7MjLozfmNiFePZN6F35s837hj mint=J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn token_program=TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA; other pairs ROUTING: exact-in So11111111111111111111111111111111111111112\u2192EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: jupiter /build HTTP 400 Bad Request: {\"error\":\"No routes found\"}"
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "decision": "Skip",
+      "loss": "Routing",
+      "reason": "ROUTING:exact-in Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB\u2192So11111111111111111111111111111111111111112: jupiter /build HTTP 400 Bad Request: {\"error\":\"No routes found\"}"
+    }
+  ],
+  "raw_record_sha256": "8a3980e02c277e32ba00f858388dda1857ef1faccf98f6667c89247f22092189"
+}

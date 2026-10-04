@@ -16,7 +16,8 @@ pub mod p0 {
     use darkbot_project0::health::crate_impl::CrateHealth;
     use darkbot_project0::planner::{RouteKind, Step};
     use darkbot_project0::receivership::{builders, ReceivershipParams};
-    use darkbot_solana::tx::BuildVersion;
+    use darkbot_solana::tx::{self, BuildVersion, BuildError, Resources, TxLimits, TxPlan};
+    use solana_sdk::hash::Hash;
     use marginfi_type_crate::types::{Bank, MarginfiAccount};
     use solana_message::AddressLookupTableAccount /* [FIX-13] */;
     use solana_sdk::instruction::{AccountMeta, Instruction};
@@ -158,8 +159,53 @@ pub mod p0 {
             amount_in: u64,
             prewarmed_atas: &[PrewarmedAta],
         ) -> Result<Option<Route>, String>;
+        fn max_accounts(&self) -> u8 { 64 }
+        fn quote_exact_in_with_budget(
+            &self, from_mint: &Pubkey, to_mint: &Pubkey, amount_in: u64,
+            prewarmed_atas: &[PrewarmedAta], _max_accounts: u8,
+        ) -> Result<Option<Route>, String> {
+            self.quote_exact_in(from_mint, to_mint, amount_in, prewarmed_atas)
+        }
         /// ExactOut bleibt Provider-Capability. Ein Provider ohne belegten ExactOut-Pfad liefert None.
         fn quote_exact_out(&self, from_mint: &Pubkey, to_mint: &Pubkey, amount_out: u64) -> Result<Option<Route>, String>;
+    }
+
+    /// [FIX-123][R7/R6] Router caps are hints; only the complete compiled TX proves fit.
+    /// Bound remote work to six requests. Every changed quote is revalidated and repriced.
+    fn quote_fitting_route<T>(
+        initial_cap: u8,
+        mut quote: impl FnMut(u8) -> Result<Option<Route>, String>,
+        mut compile: impl FnMut(&Route) -> Result<T, BuildError>,
+    ) -> Result<Option<(Route, T)>, String> {
+        let mut cap = initial_cap.clamp(1, 64);
+        let mut rejected = Vec::new();
+        for attempt in 0..6 {
+            let Some(route) = quote(cap)? else { return Ok(None) };
+            match compile(&route) {
+                Ok(compiled) => return Ok(Some((route, compiled))),
+                Err(error) => {
+                    let reduction = match &error {
+                        BuildError::TooLarge { bytes, max } =>
+                            bytes.saturating_sub(*max).div_ceil(32).max(2),
+                        BuildError::TooManyAccounts { count, max } =>
+                            count.saturating_sub(*max).max(2),
+                        _ => return Err(format!("route compilation: {error}")),
+                    };
+                    let route_accounts = route.instructions.iter()
+                        .flat_map(|ix| std::iter::once(ix.program_id).chain(ix.accounts.iter().map(|a| a.pubkey)))
+                        .collect::<std::collections::HashSet<_>>().len();
+                    eprintln!("route_budget: attempt={} max_accounts={} route_accounts={} alts={} rejected={}",
+                        attempt + 1, cap, route_accounts, route.lookup_tables.len(), error);
+                    rejected.push(format!("maxAccounts={cap}: {error}"));
+                    if cap == 1 { break; }
+                    // A cap above the actual route footprint can return the same route over
+                    // and over (R118). Reduce from the observed footprint as well as the hint.
+                    let observed = route_accounts.clamp(1, 64) as u8;
+                    cap = cap.min(observed).saturating_sub(reduction.min(63) as u8).max(1);
+                }
+            }
+        }
+        Err(format!("TX_BUDGET_EXHAUSTED: {}", rejected.join(" | ")))
     }
 
     pub struct P0ReceivershipBuilder<'a, S: AccountSource + ?Sized, Z: SizingProvider, R: RouteProvider> {
@@ -181,6 +227,8 @@ pub mod p0 {
         pub jito_tip_lamports: u64,
         pub zero_prefund_qualified: bool,
         pub path: Path,
+        pub resources: Resources,
+        pub limits: TxLimits,
     }
 
     fn liquidation_record_init_decision(linked: Pubkey, expected: Pubkey) -> Result<bool, String> {
@@ -742,20 +790,40 @@ pub mod p0 {
                         )?
                         .map(|x| x.underlying_out)
                         .unwrap_or(sz.withdraw_amount);
-                    let mark = match self.routes.quote_exact_in(
-                        &asset_mint,
-                        &liab_mint,
-                        route_input_amount,
-                        &prewarmed_atas,
-                    ) {
-                        Ok(Some(route)) => Some(route),
-                        Ok(None) => None,
+                    let fitted = quote_fitting_route(
+                        self.routes.max_accounts(),
+                        |cap| {
+                            let route = self.routes.quote_exact_in_with_budget(
+                                &asset_mint, &liab_mint, route_input_amount, &prewarmed_atas, cap)?;
+                            if let Some(ref route) = route {
+                                if route.amount_in != route_input_amount || route.amount_out < sz.repay_amount {
+                                    return Err(format!("quote amounts invalid: in={} expected={} out={} repay={}",
+                                        route.amount_in, route_input_amount, route.amount_out, sz.repay_amount));
+                                }
+                            }
+                            Ok(route)
+                        },
+                        |route| {
+                            let (ixs, steps) = self.receivership(account, &obs, &sz,
+                                route.instructions.clone(), false).map_err(BuildError::Compile)?;
+                            // Same payer/resources/LUTs/signature placeholders as final build.
+                            // Hash bytes have fixed width; no RPC or signing needed for sizing.
+                            tx::build(&TxPlan {
+                                version: BuildVersion::V0, payer: self.liquidator,
+                                instructions: ixs.clone(), lookup_tables: route.lookup_tables.clone(),
+                                resources: self.resources,
+                            }, Hash::default(), &self.limits)?;
+                            Ok((ixs, steps))
+                        },
+                    );
+                    let fitted = match fitted {
+                        Ok(v) => v,
                         Err(e) => {
                             route_errors.push(format!("exact-in {}→{}: {}", asset_mint, liab_mint, e));
                             None
                         }
                     };
-                    if let Some(mark) = mark {
+                    if let Some((mark, (ixs, steps))) = fitted {
                         let mut zp_ctx = base_ctx.clone();
                         zp_ctx.route_available = true;
                         if funding::is_feasible(FundingClass::ZeroPrefundSameTx, &zp_ctx) {
@@ -767,13 +835,6 @@ pub mod p0 {
                             } else {
                                 let capital = funding::capital_required(FundingClass::ZeroPrefundSameTx, &zp_ctx);
                                 let realizable = Some(self.realizable_value(&sz, mark.amount_out)?);
-                                let (ixs, steps) = self.receivership(
-                                    account,
-                                    &obs,
-                                    &sz,
-                                    mark.instructions.clone(),
-                                    false,
-                                )?;
                                 out.push(ReceivershipPlan {
                                     steps: steps.clone(),
                                     instructions: ixs.clone(),
@@ -821,7 +882,9 @@ pub mod p0 {
             if out.is_empty() && !ata_errors.is_empty() {
                 ata_errors.sort();
                 ata_errors.dedup();
-                return Err(format!("ATA:PREWARM_REQUIRED: {}", ata_errors.join(" | ")));
+                let routing = if route_errors.is_empty() { String::new() }
+                    else { format!("; other pairs ROUTING: {}", route_errors.join(" | ")) };
+                return Err(format!("ATA:PREWARM_REQUIRED: {}{}", ata_errors.join(" | "), routing));
             }
             if out.is_empty() && !route_errors.is_empty() {
                 return Err(format!("ROUTING:{}", route_errors.join(" | ")));
@@ -832,6 +895,78 @@ pub mod p0 {
     #[cfg(test)]
     mod fix100_tests {
         use super::*;
+
+        fn route_for_budget(cap: u8, data_len: usize, accounts: usize) -> Route {
+            Route {
+                instructions: vec![Instruction {
+                    program_id: Pubkey::new_unique(),
+                    accounts: (0..accounts).map(|_| AccountMeta::new(Pubkey::new_unique(), false)).collect(),
+                    data: vec![7; data_len],
+                }],
+                amount_in: 100,
+                amount_out: cap as u64 * 100,
+                ..Route::default()
+            }
+        }
+
+        fn compile_route(route: &Route, limits: TxLimits) -> Result<tx::BuiltTx, BuildError> {
+            tx::build(&TxPlan {
+                version: BuildVersion::V0, payer: Pubkey::new_unique(),
+                instructions: route.instructions.clone(), lookup_tables: route.lookup_tables.clone(),
+                resources: Resources { compute_unit_limit: 1_400_000,
+                    priority_micro_lamports_per_cu: 0, loaded_accounts_data_size: None },
+            }, Hash::default(), &limits)
+        }
+
+        #[test]
+        fn route_requotes_until_actual_serialized_transaction_fits() {
+            let mut caps = Vec::new();
+            let limits = TxLimits { max_bytes_v0: 500, ..TxLimits::default() };
+            let (route, built) = quote_fitting_route(64, |cap| {
+                caps.push(cap);
+                Ok(Some(route_for_budget(cap, cap as usize * 20, 0)))
+            }, |route| compile_route(route, limits)).unwrap().unwrap();
+            assert!(caps.len() > 1 && caps.len() <= 6);
+            assert!(caps.windows(2).all(|v| v[1] < v[0]));
+            assert!(built.serialized_len <= 500);
+            // Return the new quote's economics, never the original larger route's output.
+            assert_eq!(route.amount_out, *caps.last().unwrap() as u64 * 100);
+        }
+
+        #[test]
+        fn route_budget_counts_payer_and_resource_accounts_too() {
+            let mut calls = 0;
+            let limits = TxLimits { max_locked_accounts: 10, max_bytes_v0: 5_000,
+                ..TxLimits::default() };
+            let (_, built) = quote_fitting_route(64, |cap| {
+                calls += 1;
+                Ok(Some(route_for_budget(cap, 0, cap as usize)))
+            }, |route| compile_route(route, limits)).unwrap().unwrap();
+            assert!(calls > 1 && calls <= 6);
+            assert!(built.locked_accounts <= 10);
+        }
+
+        #[test]
+        fn impossible_route_exhausts_bounded_budget_and_fails_closed() {
+            let mut calls = 0;
+            let result = quote_fitting_route(64, |cap| {
+                calls += 1;
+                Ok(Some(route_for_budget(cap, 2_000, 0)))
+            }, |route| compile_route(route, TxLimits::default()));
+            assert!(result.unwrap_err().contains("TX_BUDGET_EXHAUSTED"));
+            assert!(calls > 1 && calls <= 6);
+        }
+
+        #[test]
+        fn non_budget_errors_are_not_retried() {
+            let mut calls = 0;
+            let result = quote_fitting_route(64, |cap| {
+                calls += 1;
+                Ok(Some(route_for_budget(cap, 0, 0)))
+            }, |_| Err::<(), _>(BuildError::Compile("bad account layout".into())));
+            assert!(result.unwrap_err().contains("bad account layout"));
+            assert_eq!(calls, 1);
+        }
 
         #[test]
         fn liquidation_record_link_controls_init() {

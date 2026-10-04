@@ -1398,6 +1398,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 zero_prefund_qualified: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false).unwrap_or(false)
                     || (mode == "shadow" && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false).unwrap_or(false)),
                 path: Path::Rpc,
+                resources,
+                limits: TxLimits::default(),
             };
             let _ = &view;
             if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }

@@ -2556,3 +2556,43 @@ Workspace build/test both feature sets PASS on the current working tree includin
 pending FIX-123: 105/104 tests. R118 now tests the bounded compiled-size Jupiter
 requotes and the newly available JupLend ATA; do not treat R6 as passed before its
 integration-specific final simulation results. R6 PARTIAL, R7 OPEN, 72 h NOT STARTED.
+
+### 2026-10-04 — FIX-123 bounded compiled TX budgeting / R118–R119
+
+Source: Jupiter official reduce-transaction-size documentation
+https://developers.jup.ag/docs/swap/advanced/reduce-transaction-size
+(retrieved 2026-10-04). `maxAccounts` is a route hint, not proof that the final
+receivership fits. Reuse existing pinned transaction compiler and route provider.
+
+FIX-123 compiles the complete v0 receivership with identical payer/resources/LUTs
+and signature placeholders before admitting a route. On TooLarge/TooManyAccounts,
+request a smaller router budget, at most six requests; never relax final limits.
+Only the accepted quote supplies economics. Non-budget errors stop retries; existing
+inventory plans survive route failure. Failure diagnostics retain both missing-ATA
+and routing reasons across distinct pairs. Current v1 builder is unavailable, so
+this precheck qualifies v0 only; revisit version selection with the real v1 adapter.
+
+Four regression tests exercise actual compiled byte/account counts, bounded
+exhaustion, exact returned quote output and no retry on unrelated compile errors.
+Workspace build/tests both features PASS: 105 (`crate_health txv1`) / 104 (`crate_health`).
+
+R118: 231/231 projections ready; 231 downstream Health successes. Initial cap
+reductions could repeatedly return the same route; JupLend eventually got HTTP 429.
+R119: improved cap reduction also uses observed route account footprint. Again
+231/231 projection+Health success. No HTTP 429 in the two target downstream results.
+- Kamino SOL→USDC: 1534 bytes with 13 route accounts and one Jupiter LUT; smaller
+  cap returns no route. Another collateral pair needs a separate JitoSOL ATA.
+- JupLend USDT→SOL: 1820 bytes / 28 route accounts / two LUTs; requote at cap 9
+  gives 1559 bytes / 14 route accounts / one LUT. Further reduction: no route.
+- No final integration simulation was reached. These are size/routing rejections,
+  not economic wins, runtime qualification of v1, or R6 completion.
+
+Evidence: `evidence/R118_route_budget.json`, `evidence/R119_route_budget.json`.
+Both runs stopped after target terminal/downstream completion.
+
+Current gates: R4/R5 PASS; R6 PARTIAL; R7 budget implementation tested but runtime
+fit still blocked; remaining R7 items OPEN; 72 h NOT STARTED; LIVE DISABLED.
+Next exact step: verify canonical v1 serialization/signature and provider simulation
+capability with a read-only/no-send probe before connecting a v1 wire adapter. Also
+inspect reuse of published protocol lookup tables if v0 remains necessary. Do not
+create/fund more accounts or send value-bearing transactions without authorization.
