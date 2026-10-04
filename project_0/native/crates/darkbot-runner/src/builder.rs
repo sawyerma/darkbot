@@ -32,7 +32,9 @@ pub mod p0 {
         pub liab_bank: Pubkey,
         pub withdraw_amount: u64,
         pub repay_amount: u64,
+        pub repay_all: bool,
         pub seized_equity_value: u64,    // USD-Micro, Protocol/EMA only
+        /// Actual economic value of the SPL amount transferred for repayment.
         pub repay_value: u64,            // USD-Micro
         pub liability_needed_value: u64, // USD-Micro
         pub liability_inventory_value: u64,
@@ -103,9 +105,12 @@ pub mod p0 {
                     liab_bank: sz.liab_bank,
                     withdraw_amount: sz.withdraw_amount,
                     repay_amount: sz.repay_amount,
+                    repay_all: sz.repay_all,
                     seized_equity_value: sz.seized_equity_value_micro,
-                    repay_value: sz.repay_equity_value_micro,
-                    liability_needed_value: sz.repay_equity_value_micro,
+                    // [FIX-128] Economics/funding pay the actual SPL transfer. EndLiquidation
+                    // premium/health parity is already encoded in premium_bps by ProtocolSizer.
+                    repay_value: sz.repay_transfer_value_micro,
+                    liability_needed_value: sz.repay_transfer_value_micro,
                     liability_inventory_value: inv_value,
                     // ExactOut/JIT is intentionally disabled until a documented provider path exists.
                     funding_bank: None,
@@ -229,6 +234,17 @@ pub mod p0 {
         pub path: Path,
         pub resources: Resources,
         pub limits: TxLimits,
+    }
+
+    fn end_banks_after_repay(
+        mut active_banks: Vec<Pubkey>,
+        liability_bank: Pubkey,
+        repay_all: bool,
+    ) -> Vec<Pubkey> {
+        if repay_all {
+            active_banks.retain(|k| *k != liability_bank);
+        }
+        active_banks
     }
 
     fn liquidation_record_init_decision(linked: Pubkey, expected: Pubkey) -> Result<bool, String> {
@@ -571,8 +587,20 @@ pub mod p0 {
 
             let (withdraw, _underlying_out) =
                 self.asset_withdraw_instruction(account, obs, sz, &asset_ata, &asset_tp)?;
-            let repay = builders::repay(&self.program, &self.group, account, &self.liquidator, &sz.liab_bank,
-                &liab_ata, &liab_vault, &liab_tp, sz.repay_amount, None);
+            let repay = builders::repay(
+                &self.program,
+                &self.group,
+                account,
+                &self.liquidator,
+                &sz.liab_bank,
+                &liab_mint,
+                &liab_ata,
+                &liab_vault,
+                &liab_tp,
+                sz.repay_amount,
+                sz.repay_all.then_some(true),
+                obs,
+            );
             let route_steps: Vec<Step> = swaps.iter().map(|i| {
                 if i.program_id == Pubkey::from_str(darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID).expect("static") {
                     Step::Swap(i.program_id)
@@ -581,17 +609,24 @@ pub mod p0 {
                 }
             }).collect();
 
-            let end_banks = self.active_bank_keys(account)?;
+            let active_banks_before = self.active_bank_keys(account)?;
             let start_observation: Vec<AccountMeta> = obs
                 .iter()
                 .map(|k| {
-                    if end_banks.contains(k) {
+                    if active_banks_before.contains(k) {
                         AccountMeta::new(*k, false)
                     } else {
                         AccountMeta::new_readonly(*k, false)
                     }
                 })
                 .collect();
+            // Pinned receivership tests exclude a bank closed by repay_all from EndLiquidation's
+            // bank-only layout. Start/Repay still observe the pre-close bank and its oracle.
+            let end_banks = end_banks_after_repay(
+                active_banks_before,
+                sz.liab_bank,
+                sz.repay_all,
+            );
 
             // [FIX-109][R6] Refresh every active integration balance before StartLiquidation.
             // The planner is deterministic from canonical RAM state and fails closed on any
@@ -968,6 +1003,22 @@ pub mod p0 {
             }, |_| Err::<(), _>(BuildError::Compile("bad account layout".into())));
             assert!(result.unwrap_err().contains("bad account layout"));
             assert_eq!(calls, 1);
+        }
+
+        #[test]
+        fn repay_all_removes_closed_bank_only_from_end_layout() {
+            let a = Pubkey::new_unique();
+            let liability = Pubkey::new_unique();
+            let b = Pubkey::new_unique();
+            let banks = vec![a, liability, b];
+            assert_eq!(
+                end_banks_after_repay(banks.clone(), liability, false),
+                banks
+            );
+            assert_eq!(
+                end_banks_after_repay(banks, liability, true),
+                vec![a, b]
+            );
         }
 
         #[test]
