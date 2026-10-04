@@ -2113,3 +2113,44 @@ Required R6 Mainnet evidence per venue:
 
 Status: **FIX-113 instrumentation IMPLEMENTED / compiler + R109 runtime verification required**.
 
+### 2026-10-04 — R109 integration census exposed a semantic gap; FIX-114 applied
+
+R109 Mainnet Shadow:
+- build/release PASS;
+- StreamReady PASS;
+- Snapshot A/B PASS;
+- required dependencies=493, optional ATAs=2, missing_required=0;
+- root catch-up PASS;
+- reconcile clean;
+- bootstrap probe queued 61 candidates;
+- emitted:
+  `bootstrap_probe_integrations: kamino=0 drift=0 juplend=0`.
+
+Important interpretation:
+- the zero counts only covered **asset_tag-based withdraw integrations**;
+- this did **not** prove that no candidate depends on Kamino/Drift/JupLend state for pricing/freshness;
+- historical Mainnet evidence already contained stale Kamino/JupLend oracle-wrapper failures, so the R109 census was incomplete by construction.
+
+Pinned Marginfi semantics confirm two distinct concepts:
+1. **withdraw integration** — encoded by asset tags Kamino/Drift/JupLend;
+2. **pricing integration** — encoded by `OracleSetup` variants such as
+   `KaminoPythPush`, `FixedKamino`, `DriftPythPull`, `FixedDrift`,
+   `JuplendPythPull`, `FixedJuplend`, `KaminoMSOL/LST`, `JuplendMSOL/LST`, etc.
+
+Fixes:
+- `738e91b` — [FIX-114a] separate integration withdraw and pricing footprints;
+- `9fa55aa` — [FIX-114b] drive refreshes from pricing integration semantics;
+- `bcaf303` — [FIX-114c] distinguish withdraw and pricing integrations in shadow census.
+
+Behavior after FIX-114:
+- integration-specific withdraw math/builders still use asset-tag semantics;
+- refresh/projection selection uses pricing integration semantics first, with asset-tag fallback;
+- Shadow bootstrap now prints both:
+  `withdraw_kamino/drift/juplend` and
+  `pricing_kamino/drift/juplend`;
+- projection records carry both `integration_kinds` and
+  `pricing_integration_kinds`.
+
+Status:
+**R109 recovery/runtime baseline PASS; R6 integration matrix not yet qualified because R109's original census was incomplete. FIX-114 compiler/runtime verification required.**
+
