@@ -2258,3 +2258,37 @@ Next exact evidence required:
 3. wait for 16 terminal projection result records (`ready|failed|stale`);
 4. allow ready projections to re-enter the candidate pipeline and capture their subsequent Health/Sizing/Build/Simulation records.
 
+### 2026-10-04 — R112 projection results / FIX-116
+
+R112 targeted Mainnet projection results:
+- 16 targeted integration candidates returned terminal projection records;
+- 4 projections reached `status=ready`:
+  - 3 Kamino;
+  - 1 JupLend;
+- the ready projections re-entered the pipeline and exact Health reported `liquidatable=false`, therefore each failed closed with `decision=Skip`, `reason="not liquidatable"`;
+- the remaining projection attempts failed at the RPC response layer because the post-account request exceeded the provider's returned-account limit;
+- one transport error record also exposed the configured provider URL in the local evidence log. No secret value is repeated here.
+
+Root cause:
+- FIX-111g requested a broad coherent post-account set (candidate + banks + observations + integration accounts);
+- only writable accounts in the refresh prefix can actually change;
+- `ProjectedState` already falls through to canonical RAM for every unchanged readonly account.
+
+Fixes:
+- `81de18f` — [FIX-116a] request only mutated post-refresh accounts;
+- `d750b1c` — [FIX-116b] validate projection freshness against canonical candidate slot+hash instead of requiring the readonly candidate in the returned post-account set;
+- `4ef7f8f` — [SEC-04] redact provider URLs from projection RPC errors.
+
+R6 interpretation:
+- Kamino projection path: **runtime proven to projection-ready**;
+- JupLend projection path: **runtime proven to projection-ready**;
+- downstream exact Health on the sampled ready accounts: **not liquidatable**, so no integration withdraw/final receivership simulation could be exercised from this sample;
+- Drift remains unavailable in the current target-group liability population;
+- R6 remains PARTIAL until a liquidatable Kamino/JupLend candidate reaches integration-specific sizing/withdraw and final exact receivership simulation.
+
+Next gate:
+1. compiler/test FIX-116;
+2. rerun targeted probe;
+3. confirm provider account-limit failures are gone;
+4. then search the broader integration population for currently liquidatable Kamino/JupLend candidates rather than repeatedly probing arbitrary integration accounts.
+
