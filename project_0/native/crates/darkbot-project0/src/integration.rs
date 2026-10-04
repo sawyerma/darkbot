@@ -383,6 +383,56 @@ fn juplend_refresh<S: AccountSource + ?Sized>(
     }])
 }
 
+/// Integration kinds present on active balances of one Marginfi account.
+/// Result order is stable (Kamino, Drift, JupLend) and duplicate-free.
+pub fn kinds_for_account<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    account_key: &Pubkey,
+) -> Result<Vec<IntegrationKind>, String> {
+    let (owner, _, data) = raw(state, account_key)?;
+    if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
+        return Err("INTEGRATION_KIND_NOT_MARGINFI_ACCOUNT".into());
+    }
+    let need = 8 + std::mem::size_of::<MarginfiAccount>();
+    if data.len() < need {
+        return Err(format!("INTEGRATION_KIND_ACCOUNT_SHORT:{}<{}", data.len(), need));
+    }
+    let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
+        .map_err(|e| format!("INTEGRATION_KIND_ACCOUNT_CAST:{e:?}"))?;
+
+    let mut kamino = false;
+    let mut drift = false;
+    let mut juplend = false;
+    for bal in account.lending_account.balances.iter().filter(|b| b.is_active()) {
+        let (bank_owner, _, bank_data) = raw(state, &bal.bank_pk)?;
+        if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
+            return Err(format!("INTEGRATION_KIND_INVALID_BANK:{}", bal.bank_pk));
+        }
+        let bank: &Bank = pod_after_disc(state, &bal.bank_pk)?;
+        match kind(bank) {
+            Some(IntegrationKind::Kamino) => kamino = true,
+            Some(IntegrationKind::Drift) => drift = true,
+            Some(IntegrationKind::JupLend) => juplend = true,
+            None => {}
+        }
+    }
+
+    let mut out = Vec::with_capacity(3);
+    if kamino { out.push(IntegrationKind::Kamino); }
+    if drift { out.push(IntegrationKind::Drift); }
+    if juplend { out.push(IntegrationKind::JupLend); }
+    Ok(out)
+}
+
+pub fn kind_name(kind: IntegrationKind) -> &'static str {
+    match kind {
+        IntegrationKind::Kamino => "Kamino",
+        IntegrationKind::Drift => "Drift",
+        IntegrationKind::JupLend => "JupLend",
+    }
+}
+
 /// Build the deterministic pre-Start refresh prefix for every active integration balance.
 ///
 /// Banks are processed in descending pubkey order, matching the canonical Marginfi observation
