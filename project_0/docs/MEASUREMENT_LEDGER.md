@@ -2154,3 +2154,37 @@ Behavior after FIX-114:
 Status:
 **R109 recovery/runtime baseline PASS; R6 integration matrix not yet qualified because R109's original census was incomplete. FIX-114 compiler/runtime verification required.**
 
+### 2026-10-04 — R110 integration census
+
+Run:
+`r110_20261004T001002Z`
+
+Bootstrap/recovery:
+- release build PASS;
+- StreamReady PASS;
+- Snapshot A/B PASS;
+- required dependencies=493;
+- optional ATAs=2;
+- missing_required=0;
+- root catch-up PASS;
+- reconcile clean;
+- bootstrap probe queued=61.
+
+Integration census:
+```text
+withdraw_kamino=0
+withdraw_drift=0
+withdraw_juplend=0
+pricing_kamino=0
+pricing_drift=0
+pricing_juplend=0
+```
+
+Interpretation:
+- the current 61 bootstrap-liquidatable accounts contain no Kamino/Drift/JupLend withdraw integrations and no Kamino/Drift/JupLend pricing integrations;
+- therefore this R110 sample cannot qualify the integration-specific R6 matrix;
+- this is not a failure of FIX-114; it means the qualification sample lacks integration candidates.
+
+Next R6 action:
+build a targeted Mainnet integration census/qualification path across Marginfi accounts/banks rather than waiting for the 61 bootstrap-liquidatable sample to contain an integration candidate.
+
