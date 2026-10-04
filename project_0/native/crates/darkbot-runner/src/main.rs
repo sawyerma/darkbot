@@ -273,6 +273,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // in C0 and is unnecessary for dependency discovery.
     let dep_rpc = RpcClient::new(config::require("P0_RPC_URL")?);
 
+    // [FIX-131] Loader-v3 upgrades mutate the ProgramData account, not the executable
+    // Program account. Pin its current content hash at startup and subscribe it as a required
+    // dependency. Any later mismatch is a latched PROGRAM_UPGRADE halt; reconnect/recovery
+    // must never auto-promote new protocol code.
+    let upgradeable_loader = Pubkey::from_str("BPFLoaderUpgradeab1e11111111111111111111111")?;
+    let program_data =
+        Pubkey::find_program_address(&[program.as_ref()], &upgradeable_loader).0;
+    let program_data_account = dep_rpc
+        .get_account_with_commitment(&program_data, CommitmentConfig::confirmed())?
+        .value
+        .ok_or_else(|| format!("PROGRAM_DATA_NOT_FOUND: {}", program_data))?;
+    if program_data_account.owner != upgradeable_loader {
+        return Err(format!(
+            "PROGRAM_DATA_OWNER_MISMATCH: {} owner={} expected={}",
+            program_data, program_data_account.owner, upgradeable_loader
+        ).into());
+    }
+    let program_data_baseline_hash = hash(&program_data_account.data);
+    eprintln!(
+        "program_upgrade_watch: program={} program_data={} baseline_hash={}",
+        program, program_data, program_data_baseline_hash
+    );
+
     // [FIX-98] A signed Shadow simulation uses the real fee payer. If that pubkey has never
     // been funded on-chain, Solana rejects the transaction during account loading with
     // TransactionError::AccountNotFound before any program executes (empty logs). Fail here
@@ -325,6 +348,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     #[cfg(not(feature = "crate_health"))]
     let mut required_dependency_keys: Vec<Pubkey> = Vec::new();
+
+    // ProgramData is required in every build: protocol upgrades are a lifecycle concern,
+    // independent of whether crate_health is enabled.
+    required_dependency_keys.push(program_data);
+    required_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
+    required_dependency_keys.dedup();
 
     #[cfg(feature = "crate_health")]
     let mut optional_dependency_keys: Vec<Pubkey> = bank_keys.iter()
@@ -593,6 +622,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut counts = [0u64; 6];
     let mut last_reported_update_total = 0u64; // [FIX-81]
     let mut bootstrap_probe_done = false; // [FIX-84]
+    let mut program_upgrade_latched = false; // [FIX-131]
     loop {
         if shutdown.is_requested() {
             break;
@@ -864,6 +894,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ => None,
         };
         if let IngressEvent::Account(a) = &ev {
+            if a.pubkey == program_data && hash(&a.data) != program_data_baseline_hash {
+                if !program_upgrade_latched {
+                    eprintln!(
+                        "PROGRAM_UPGRADE detected slot={} program_data={} — latched HALT until explicit P1B promotion",
+                        a.slot, program_data
+                    );
+                }
+                program_upgrade_latched = true;
+            }
             let i = match classify_account(&a.data) {
                 AccountType::MarginfiAccount => 0,
                 AccountType::Bank => 1,
@@ -878,6 +917,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("recovery: {:?}, run_state={:?}", o, st.run_state());
             if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
                 halt.clear();
+
+                // A program upgrade can race startup/recovery before its WSS notification is
+                // observed. Re-check the canonical recovered ProgramData bytes against the
+                // startup baseline before allowing any detection work.
+                if st.get(&program_data)
+                    .map(|r| hash(&r.data) != program_data_baseline_hash)
+                    .unwrap_or(true)
+                {
+                    program_upgrade_latched = true;
+                }
+                if program_upgrade_latched {
+                    st.halt(darkbot_common::error::HaltReason::ProgramUpgrade);
+                    eprintln!(
+                        "PROGRAM_UPGRADE HALT active program_data={} — no automatic resume",
+                        program_data
+                    );
+                    continue;
+                }
+
                 #[cfg(feature = "crate_health")]
                 if mode == "shadow" && !bootstrap_probe_done {
                     bootstrap_probe_done = true;
@@ -1132,6 +1190,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
             }
+        }
+        if program_upgrade_latched {
+            st.halt(darkbot_common::error::HaltReason::ProgramUpgrade);
+            detect = None;
         }
         } // normal ingress event path; projected rechecks skip state mutation
 
