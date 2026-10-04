@@ -14,6 +14,17 @@ use solana_sdk::signature::Signature;
 use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status::UiTransactionEncoding;
 
+fn safe_rpc_error(e: &solana_client::client_error::ClientError) -> String {
+    use solana_client::client_error::ClientErrorKind as K;
+    match e.kind() {
+        K::RpcError(rpc) => format!("RPC response error: {rpc}"),
+        K::SerdeJson(err) => format!("RPC decode error: {err}"),
+        K::SigningError(err) => format!("RPC signing error: {err}"),
+        K::TransactionError(err) => format!("RPC transaction error: {err:?}"),
+        _ => "RPC transport error".into(),
+    }
+}
+
 pub struct RpcSubmitter {
     rpc: RpcClient,
     /// Preflight kostet Zeit; für Long-Tail kann es an bleiben (Revert-Kosten sparen).
@@ -64,7 +75,7 @@ impl RpcSubmitter {
         let response = self
             .rpc
             .simulate_transaction_with_config(tx, cfg)
-            .map_err(|e| SubmitError::Transport(e.to_string()))?;
+            .map_err(|e| SubmitError::Transport(safe_rpc_error(&e)))?;
         if let Some(err) = response.value.err {
             return Err(SubmitError::Rejected(format!(
                 "projection simulation failed: {:?} logs={:?}",
