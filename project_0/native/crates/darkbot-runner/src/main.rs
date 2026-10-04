@@ -509,6 +509,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let freshness = Freshness { max_opportunity_age_ns: config::parsed_or("P0_MAX_AGE_NS", 2_000_000_000)?, execution_deadline_ns: config::parsed_or("P0_DEADLINE_NS", 2_000_000_000)? };
     let min_profit: i128 = config::parsed_or::<i128>("P0_MIN_PROFIT", 0)?;
 
+    #[cfg(feature = "crate_health")]
+    let integration_probe_enabled: bool =
+        config::parsed_or("P0_INTEGRATION_PROBE", false)?;
+    #[cfg(feature = "crate_health")]
+    let integration_probe_limit_per_kind: usize =
+        config::parsed_or("P0_INTEGRATION_PROBE_LIMIT_PER_KIND", 8)?;
+    #[cfg(feature = "crate_health")]
+    if integration_probe_enabled && integration_probe_limit_per_kind == 0 {
+        return Err("P0_INTEGRATION_PROBE_LIMIT_PER_KIND must be > 0 when probe is enabled".into());
+    }
+
     // [FIX-108][R4] All remote winner/reconciliation RPC is owned by bounded workers.
     let remote_worker_capacity: usize = config::parsed_or("P0_REMOTE_WORKER_BUFFER", 256)?;
     if remote_worker_capacity == 0 {
@@ -856,6 +867,148 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "bootstrap_probe_integrations: withdraw_kamino={} withdraw_drift={} withdraw_juplend={} pricing_kamino={} pricing_drift={} pricing_juplend={}",
                         kamino, drift, juplend, pricing_kamino, pricing_drift, pricing_juplend
                     );
+
+
+                    // [FIX-115][R6] Optional targeted qualification probe. The historical
+                    // was_liquidatable set can legitimately contain zero integration accounts.
+                    // Scan every liability-bearing account already present in canonical RAM,
+                    // report the actual integration population, then queue a small deterministic
+                    // sample per venue through the existing projection -> Health/Sizing pipeline.
+                    if integration_probe_enabled {
+                        let mut all_withdraw = [0usize; 3];
+                        let mut all_pricing = [0usize; 3];
+                        let mut scan_errors = 0usize;
+                        let mut kamino_accounts: Vec<(Pubkey, u64)> = Vec::new();
+                        let mut drift_accounts: Vec<(Pubkey, u64)> = Vec::new();
+                        let mut juplend_accounts: Vec<(Pubkey, u64)> = Vec::new();
+
+                        for (pk, r) in st.iter_owned_by(&program) {
+                            if !marginfi_account_in_group(&r.data, &group) {
+                                continue;
+                            }
+
+                            let withdraw = match darkbot_project0::integration::kinds_for_account(
+                                &view,
+                                &program,
+                                pk,
+                            ) {
+                                Ok(v) => v,
+                                Err(_) => {
+                                    scan_errors += 1;
+                                    continue;
+                                }
+                            };
+                            let pricing = match darkbot_project0::integration::pricing_kinds_for_account(
+                                &view,
+                                &program,
+                                pk,
+                            ) {
+                                Ok(v) => v,
+                                Err(_) => {
+                                    scan_errors += 1;
+                                    continue;
+                                }
+                            };
+
+                            let mut has_kamino = false;
+                            let mut has_drift = false;
+                            let mut has_juplend = false;
+                            for k in withdraw {
+                                match k {
+                                    darkbot_project0::integration::IntegrationKind::Kamino => {
+                                        all_withdraw[0] += 1;
+                                        has_kamino = true;
+                                    }
+                                    darkbot_project0::integration::IntegrationKind::Drift => {
+                                        all_withdraw[1] += 1;
+                                        has_drift = true;
+                                    }
+                                    darkbot_project0::integration::IntegrationKind::JupLend => {
+                                        all_withdraw[2] += 1;
+                                        has_juplend = true;
+                                    }
+                                }
+                            }
+                            for k in pricing {
+                                match k {
+                                    darkbot_project0::integration::IntegrationKind::Kamino => {
+                                        all_pricing[0] += 1;
+                                        has_kamino = true;
+                                    }
+                                    darkbot_project0::integration::IntegrationKind::Drift => {
+                                        all_pricing[1] += 1;
+                                        has_drift = true;
+                                    }
+                                    darkbot_project0::integration::IntegrationKind::JupLend => {
+                                        all_pricing[2] += 1;
+                                        has_juplend = true;
+                                    }
+                                }
+                            }
+
+                            if has_kamino {
+                                kamino_accounts.push((*pk, r.slot));
+                            }
+                            if has_drift {
+                                drift_accounts.push((*pk, r.slot));
+                            }
+                            if has_juplend {
+                                juplend_accounts.push((*pk, r.slot));
+                            }
+                        }
+
+                        for v in [&mut kamino_accounts, &mut drift_accounts, &mut juplend_accounts] {
+                            v.sort_unstable_by_key(|(pk, _)| pk.to_bytes());
+                            v.dedup_by_key(|(pk, _)| *pk);
+                        }
+
+                        eprintln!(
+                            "integration_target_census: withdraw_kamino={} withdraw_drift={} withdraw_juplend={} pricing_kamino={} pricing_drift={} pricing_juplend={} scan_errors={}",
+                            all_withdraw[0],
+                            all_withdraw[1],
+                            all_withdraw[2],
+                            all_pricing[0],
+                            all_pricing[1],
+                            all_pricing[2],
+                            scan_errors
+                        );
+
+                        let mut selected = HashSet::new();
+                        let mut queued_kamino = 0usize;
+                        let mut queued_drift = 0usize;
+                        let mut queued_juplend = 0usize;
+
+                        for (kind_idx, accounts) in [
+                            (0usize, &kamino_accounts),
+                            (1usize, &drift_accounts),
+                            (2usize, &juplend_accounts),
+                        ] {
+                            for (pk, slot) in accounts.iter().take(integration_probe_limit_per_kind) {
+                                match kind_idx {
+                                    0 => queued_kamino += 1,
+                                    1 => queued_drift += 1,
+                                    _ => queued_juplend += 1,
+                                }
+                                if selected.insert(*pk) {
+                                    detect_queue.push_back((
+                                        *pk,
+                                        clock.now_ns(),
+                                        *slot,
+                                        "integration_target_probe",
+                                    ));
+                                }
+                            }
+                        }
+
+                        eprintln!(
+                            "integration_target_probe: queued_unique={} kamino_sample={} drift_sample={} juplend_sample={} limit_per_kind={}",
+                            selected.len(),
+                            queued_kamino,
+                            queued_drift,
+                            queued_juplend,
+                            integration_probe_limit_per_kind
+                        );
+                    }
                 }
             }
         }
