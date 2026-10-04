@@ -2319,3 +2319,13 @@ Next:
 - wait for the completion line before stopping;
 - inspect `integration_projection` records to see whether any projected Kamino/JupLend account is currently liquidatable and, if so, whether it reaches venue-specific sizing/withdraw/final simulation.
 
+### 2026-10-04 — FIX-117 compiler checkpoint
+
+Workspace build/test with features `crate_health txv1` completed without a reported failure after FIX-117.
+
+Status:
+- FIX-116 compiler/test PASS;
+- FIX-117 compiler/test PASS;
+- next evidence run is the targeted R113 Mainnet projection sweep, which must remain running until
+  `integration_target_projection_complete` is emitted.
+
