@@ -2360,3 +2360,30 @@ Gate impact:
 - JupLend refresh/projection path: Mainnet runtime PASS for this qualification layer;
 - R6 is still PARTIAL until downstream `integration_projection` records show whether any projected candidate is liquidatable and, for a liquidatable integration candidate, the venue-specific sizing/withdraw/final receivership simulation succeeds.
 
+### 2026-10-04 — R113 downstream review exposed JupLend timestamp race; FIX-118
+
+R113 downstream records:
+- multiple Kamino projected candidates evaluated cleanly and were not liquidatable;
+- multiple JupLend projected candidates still failed Health with
+  `JuplendLendingStale` despite projection `status=ready`;
+- this proves the refresh transaction itself executed, but downstream Health was evaluating
+  the projected JupLend state against a later wall-clock second.
+
+Pinned JupLend freshness semantics:
+- `Lending::is_stale(current_timestamp)` is exactly
+  `last_update_timestamp < current_timestamp`;
+- therefore an `update_rate` simulation at second T becomes stale if Health is evaluated at T+1.
+
+Fixes:
+- `b7d8442` — [FIX-118a] request/decode the Clock sysvar from the same projection simulation and return exact simulation slot + unix timestamp;
+- `0e921d6` — [FIX-118b] carry simulation unix time through the projection worker;
+- `ec73807` — [FIX-118c] evaluate projected Health/Sizing/Pipeline at that exact simulation timestamp instead of later wall-clock time.
+
+Safety properties:
+- canonical StateCore remains unchanged;
+- candidate slot/hash freshness check remains mandatory;
+- only projected candidates use simulation time; ordinary live canonical evaluation keeps wall-clock time;
+- no LIVE enablement.
+
+Status: **FIX-118 IMPLEMENTED / compiler + R114 Mainnet verification required**.
+
