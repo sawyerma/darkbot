@@ -199,11 +199,11 @@ pub mod run {
     ) -> Result<(Vec<Instruction>, Vec<FixtureMeasure>), String> {
         let health = CrateHealth { state: inp.state, group: inp.group };
         let obs = health.observation_accounts(&inp.account).map_err(|e| e.to_string())?;
-        let (asset_vault, _asset_mint, asset_tp) = bank_fields(inp.state, &inp.asset_bank)?;
+        let (asset_vault, asset_mint, asset_tp) = bank_fields(inp.state, &inp.asset_bank)?;
         let (liab_vault, liab_mint, liab_tp) = bank_fields(inp.state, &inp.liab_bank)?;
         let withdraw = builders::withdraw(
             &inp.program, &inp.group, &inp.account, &inp.liquidator, &inp.asset_bank,
-            &inp.liquidator_asset_ata, &asset_vault, &asset_tp, 0, Some(true), &obs,
+            &asset_mint, &inp.liquidator_asset_ata, &asset_vault, &asset_tp, 0, Some(true), &obs,
         );
         let repay = builders::repay(
             &inp.program, &inp.group, &inp.account, &inp.liquidator, &inp.liab_bank,
