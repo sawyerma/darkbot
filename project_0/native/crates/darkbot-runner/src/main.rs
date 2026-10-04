@@ -1117,9 +1117,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // The returned account set is one-shot: only the exact candidate account state that
             // requested it may consume it, and canonical StateCore is never mutated.
             #[cfg(feature = "crate_health")]
-            let mut projected_eval_unix_s: Option<u64> = None;
-
-            #[cfg(feature = "crate_health")]
             let projected_owned = {
                 let refreshes = match darkbot_project0::integration::refresh_plan_for_account(
                     &view,
@@ -1165,19 +1162,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     if let Some(cached) = cached {
-                        if cached.projection_unix_s < 0 {
-                            let _ = writeln!(records, "{}", serde_json::json!({
-                                "account": acct.to_string(),
-                                "decision": "Skip",
-                                "loss": "IntegrationRefresh",
-                                "reason": format!("projection unix timestamp invalid: {}", cached.projection_unix_s)
-                            }));
-                            continue;
-                        }
-                        projected_eval_unix_s = Some(cached.projection_unix_s as u64);
                         match darkbot_project0::projection::ProjectedState::new(
                             &view,
                             cached.projection_slot,
+                            cached.projection_unix_s,
                             cached.accounts,
                         ) {
                             Ok(p) => Some(p),
@@ -1328,6 +1316,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|p| p as &dyn AccountSource)
                 .unwrap_or(&view as &dyn AccountSource);
 
+            // [FIX-119][R6] Use both coordinates of the exact simulation Clock for every
+            // projected protocol calculation. The original slot remains trigger provenance.
+            #[cfg(feature = "crate_health")]
+            let (protocol_now, protocol_slot) = projected_owned.as_ref()
+                .map(|p| p.evaluation_time()).unwrap_or((now, slot));
+            #[cfg(not(feature = "crate_health"))]
+            let (protocol_now, protocol_slot) = (now, slot);
+
             #[cfg(feature = "crate_health")]
             let engine = darkbot_project0::health::crate_impl::CrateHealth { state: eval_state, group };
             #[cfg(not(feature = "crate_health"))]
@@ -1361,7 +1357,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let priority_fee_lamports = resources.priority_total_lamports();
             #[cfg(feature = "crate_health")]
             let priority_fee_usd_micro = sizer_for_cost
-                .native_amount_value_usd_micro(&sol_bank, priority_fee_lamports, now as i64, slot)
+                .native_amount_value_usd_micro(&sol_bank, priority_fee_lamports, protocol_now as i64, protocol_slot)
                 .unwrap_or(u64::MAX);
             #[cfg(feature = "crate_health")]
             let builder = P0ReceivershipBuilder {
@@ -1386,8 +1382,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             let _ = &view;
             if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }
-            let protocol_now = projected_eval_unix_s.unwrap_or(now);
-            let health_result = engine.health(&acct, protocol_now as i64, slot);
+            let health_result = engine.health(&acct, protocol_now as i64, protocol_slot);
             // [FIX-87] Health evidence as structured JSON. Do not hand-build JSON with format!:
             // braces/escaping are error-prone and error strings may contain quotes.
             let line = match &health_result {
@@ -1398,6 +1393,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "trigger": trigger,
                         "t_rx_ns": t_rx,
                         "slot": slot,
+                        "evaluation_slot": protocol_slot,
+                        "evaluation_unix_s": protocol_now,
                         "liquidatable": h.liquidatable,
                         "maint_health_bits": h.maintenance_health,
                         "equity_assets_bits": h.equity_assets,
@@ -1411,6 +1408,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "trigger": trigger,
                         "t_rx_ns": t_rx,
                         "slot": slot,
+                        "evaluation_slot": protocol_slot,
+                        "evaluation_unix_s": protocol_now,
                         "decision": "Unavailable",
                     }).to_string()
                 }
@@ -1421,6 +1420,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "trigger": trigger,
                         "t_rx_ns": t_rx,
                         "slot": slot,
+                        "evaluation_slot": protocol_slot,
+                        "evaluation_unix_s": protocol_now,
                         "error": e.to_string(),
                     }).to_string()
                 }
@@ -1433,7 +1434,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 limits: TxLimits::default(), resources, min_profit, blockhash_max_age_ns: 30_000_000_000, p7_passed: false,
                 freshness, tip_account: None, global_allowed: global_allowed.clone(), prereq_allowed: prereq_allowed.clone(), slot_watch: &slot_watch,
             };
-            let mut rec = pipe.evaluate(acct, trigger, t_rx, protocol_now, slot, st.run_state().is_tradable());
+            let mut rec = pipe.evaluate(acct, trigger, t_rx, protocol_now, protocol_slot, st.run_state().is_tradable());
             if let Ok(h) = &health_result {
                 // [FIX-91] Bankruptcy/no-collateral is a protocol state, not a routing/sizing
                 // failure. Reclassify independently of the stage that first reported "no plan".

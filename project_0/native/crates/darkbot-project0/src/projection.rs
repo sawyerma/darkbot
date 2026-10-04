@@ -12,17 +12,21 @@ pub struct ProjectedState<'a, S: AccountSource + ?Sized> {
     base: &'a S,
     overlay: HashMap<Pubkey, Account>,
     projection_slot: u64,
+    projection_unix_s: u64,
 }
 
 impl<'a, S: AccountSource + ?Sized> ProjectedState<'a, S> {
     pub fn new(
         base: &'a S,
         projection_slot: u64,
+        projection_unix_s: i64,
         accounts: impl IntoIterator<Item = (Pubkey, Account)>,
     ) -> Result<Self, String> {
         if projection_slot == 0 {
             return Err("PROJECTION_SLOT_ZERO".into());
         }
+        let projection_unix_s = u64::try_from(projection_unix_s)
+            .map_err(|_| "PROJECTION_TIMESTAMP_NEGATIVE".to_string())?;
         let mut overlay = HashMap::new();
         for (key, account) in accounts {
             if overlay.insert(key, account).is_some() {
@@ -36,11 +40,17 @@ impl<'a, S: AccountSource + ?Sized> ProjectedState<'a, S> {
             base,
             overlay,
             projection_slot,
+            projection_unix_s,
         })
     }
 
     pub fn projection_slot(&self) -> u64 {
         self.projection_slot
+    }
+
+    /// Slot and timestamp come from the same simulation Clock, never the later host clock.
+    pub fn evaluation_time(&self) -> (u64, u64) {
+        (self.projection_unix_s, self.projection_slot)
     }
 
     pub fn overlay_len(&self) -> usize {
@@ -115,7 +125,7 @@ mod tests {
         };
 
         let projected =
-            ProjectedState::new(&base, 42, [(key, projected_account)]).expect("projection");
+            ProjectedState::new(&base, 42, 1_000, [(key, projected_account)]).expect("projection");
         let (_, lamports, data) = projected.account(&key).expect("overlay");
         assert_eq!(lamports, 2);
         assert_eq!(data, &[9, 8, 7]);
@@ -137,6 +147,7 @@ mod tests {
         let projected = ProjectedState::new(
             &base,
             7,
+            1_000,
             [(other, account(owner, 9, &[8]))],
         )
         .expect("projection");
@@ -182,13 +193,43 @@ mod tests {
         let base = Base {
             accounts: HashMap::new(),
         };
-        assert!(ProjectedState::new(&base, 0, [(Pubkey::new_unique(), Account::default())])
+        assert!(ProjectedState::new(&base, 0, 1_000, [(Pubkey::new_unique(), Account::default())])
             .is_err());
         assert!(ProjectedState::new(
             &base,
             1,
+            1_000,
             std::iter::empty::<(Pubkey, Account)>(),
         )
         .is_err());
     }
+    #[test]
+    fn negative_simulation_timestamp_fails_closed() {
+        let base = Base { accounts: HashMap::new() };
+        assert!(ProjectedState::new(&base, 42, -1,
+            [(Pubkey::new_unique(), Account::default())]).is_err());
+    }
+
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn delayed_evaluation_uses_exact_simulation_clock_for_both_venues() {
+        use bytemuck::Zeroable;
+        // Pinned marginfi mrgn-0.1.11-rc1: JupLend is timestamp-based;
+        // Kamino is slot-based. Exercise the actual dependency freshness methods.
+        let mut lending = juplend_mocks::state::Lending::zeroed();
+        lending.last_update_timestamp = 1_000;
+        let mut reserve = kamino_mocks::state::MinimalReserve::zeroed();
+        reserve.slot = 42;
+        let base = Base { accounts: HashMap::new() };
+        let projected = ProjectedState::new(&base, 42, 1_000,
+            [(Pubkey::new_unique(), Account::default())]).unwrap();
+        let (unix_s, slot) = projected.evaluation_time();
+        assert_eq!((unix_s, slot), (1_000, 42));
+        assert!(!lending.is_stale(unix_s as i64));
+        assert!(!reserve.is_stale(slot));
+        assert!(lending.is_stale(1_001));
+        assert!(reserve.is_stale(43));
+        assert_eq!(projected.evaluation_time(), (1_000, 42));
+    }
+
 }

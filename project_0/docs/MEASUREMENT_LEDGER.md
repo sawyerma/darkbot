@@ -2406,3 +2406,38 @@ Status: **FIX-118 IMPLEMENTED / compiler + R114 Mainnet verification required**.
 Decision: **FIX-118 runtime PASS; R6 remains PARTIAL**. R7 remains OPEN. 72 h final-code
 Shadow NOT STARTED; LIVE DISABLED. Next: propagate simulation slot consistently with
 its timestamp, add freshness regression coverage, then widen the integration sweep.
+
+### 2026-10-04 — FIX-119 exact projection Clock pair / R115 broad sweep interrupted
+
+FIX-119 binds the simulation timestamp to `ProjectedState` and supplies its slot and
+unix time to Health, Sizing, Pipeline and priority-fee valuation. Trigger slot stays
+in telemetry separately as provenance; evaluation slot/time are explicit.
+Pinned source: `marginfi-v2@mrgn-0.1.11-rc1`, Kamino `MinimalReserve::is_stale(slot)`
+and JupLend `Lending::is_stale(timestamp)`. Regression tests call those dependency
+methods and prove T+1 / slot+1 is stale while the exact simulation pair stays fresh;
+negative simulation timestamps fail closed.
+
+Validation:
+- workspace build + tests `crate_health txv1`: PASS, 98 tests;
+- workspace build + tests `crate_health`: PASS, 97 tests;
+- `git diff --check`: PASS.
+
+R115 expanded the existing target sweep to limit=256 per venue:
+- 195 Kamino / 44 JupLend / 0 Drift, 230 unique target accounts;
+- clean bootstrap/reconcile, zero missing required dependencies;
+- 23 ready projections and 21 downstream Health records before a runtime panic;
+- one observed liquidatable account was zero-collateral bad debt, not a usable
+  receivership candidate;
+- main panicked at Health `serde_json::json!` with `number out of range`.
+
+Root cause: Health emits signed i128 fixed-point bits; the default serde_json Number
+cannot hold the full range and `json!` unwraps the conversion error. Small target
+samples did not exercise the large-value account. R115 is **INCOMPLETE / FAIL**,
+not a successful full-population sweep. This is a telemetry serialization defect,
+not evidence of a protocol health-calculation failure.
+
+Gate state: R4/R5 PASS; R6 PARTIAL; R7 OPEN; 72 h NOT STARTED; LIVE DISABLED.
+Exact next step: FIX-120 lossless i128 JSON encoding + regression test, build/test
+both feature sets, repeat the complete 230-account sweep as R116, then inspect
+liquidatable integration paths and final simulations. FIX-119 has not yet received
+full-population Mainnet qualification because of the independent JSON panic.
