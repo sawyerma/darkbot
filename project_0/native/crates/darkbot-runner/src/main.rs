@@ -640,13 +640,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let canonical_matches = canonical
                         .map(|r| r.slot == done.base_slot && hash(&r.data) == done.base_account_hash)
                         .unwrap_or(false);
-                    let simulated_matches = accounts
-                        .iter()
-                        .find(|(k, _)| *k == done.account)
-                        .map(|(_, a)| hash(&a.data) == done.base_account_hash)
-                        .unwrap_or(false);
 
-                    if canonical_matches && simulated_matches {
+                    // [FIX-116b] The candidate MarginfiAccount is readonly during the external
+                    // refresh prefix and is therefore intentionally not requested as a post-account.
+                    // Freshness is proven against canonical StateCore via exact slot+hash identity.
+                    if canonical_matches {
                         projection_cache.insert(
                             done.account,
                             CachedProjection {
@@ -703,8 +701,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 "base_slot": done.base_slot,
                                 "projection_slot": projection_slot,
                                 "status": "stale",
-                                "canonical_matches": canonical_matches,
-                                "simulated_matches": simulated_matches
+                                "canonical_matches": canonical_matches
                             }
                         });
                         let _ = writeln!(records, "{}", line);
