@@ -2329,3 +2329,34 @@ Status:
 - next evidence run is the targeted R113 Mainnet projection sweep, which must remain running until
   `integration_target_projection_complete` is emitted.
 
+### 2026-10-04 — R113 targeted projection sweep PASS
+
+R113 targeted Mainnet probe completed all queued integration projections:
+
+```text
+integration_target_probe:
+  queued_unique=16
+  kamino_sample=8
+  drift_sample=0
+  juplend_sample=8
+  limit_per_kind=8
+
+integration_target_projection_complete:
+  total=16
+  ready=16
+  failed=0
+  stale=0
+```
+
+Interpretation:
+- FIX-116 removed the previous provider post-account-limit failures;
+- all 16 targeted Kamino/JupLend candidates completed exact refresh simulation and produced accepted projected state;
+- no projection transport/RPC/account-limit failure remained in this sweep;
+- no stale candidate projection was accepted;
+- Drift remains unavailable in this current target-group liability population.
+
+Gate impact:
+- Kamino refresh/projection path: Mainnet runtime PASS for this qualification layer;
+- JupLend refresh/projection path: Mainnet runtime PASS for this qualification layer;
+- R6 is still PARTIAL until downstream `integration_projection` records show whether any projected candidate is liquidatable and, for a liquidatable integration candidate, the venue-specific sizing/withdraw/final receivership simulation succeeds.
+
