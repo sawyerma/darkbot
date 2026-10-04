@@ -87,6 +87,21 @@ fn load<T: bytemuck::Pod>(data: &[u8]) -> Result<&T, String> {
     bytemuck::try_from_bytes::<T>(slice).map_err(|e| format!("pod cast: {e:?}"))
 }
 
+/// EndLiquidation caps premium; it does not require taking the maximum. If the
+/// maximum would worsen health, retain headroom below the health-neutral ratio.
+fn healing_fee_factor(cap: I80F48, asset_per_usd: I80F48, liab_per_usd: I80F48, headroom: I80F48) -> Option<I80F48> {
+    if cap < I80F48::ONE || asset_per_usd < I80F48::ZERO || liab_per_usd <= I80F48::ZERO { return None; }
+    if liab_per_usd.checked_div(cap)? > asset_per_usd { return Some(cap); }
+    if asset_per_usd == I80F48::ZERO { return None; }
+    let reduced = liab_per_usd.checked_div(asset_per_usd)?.checked_mul(headroom)?.min(cap);
+    (reduced >= I80F48::ONE && liab_per_usd.checked_div(reduced)? > asset_per_usd).then_some(reduced)
+}
+
+fn rounded_health_valid(pre: I80F48, seized: I80F48, repaid: I80F48, asset_per_usd: I80F48, liab_per_usd: I80F48, closeout: bool) -> Option<bool> {
+    let delta = repaid.checked_mul(liab_per_usd)?.checked_sub(seized.checked_mul(asset_per_usd)?)?;
+    Some(delta >= I80F48::ZERO && (closeout || pre.checked_add(delta)? <= I80F48::ZERO))
+}
+
 fn amount_from_equity(value: I80F48, price: I80F48, bank: &Bank) -> Result<I80F48, String> {
     calc_amount(value, price, bank.get_balance_decimals()).map_err(|e| format!("native balance amount: {e}"))
 }
@@ -411,7 +426,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 .ok_or_else(|| "minimum fee division".to_string())?;
             if onchain_fee_rate > minimum { onchain_fee_rate } else { minimum }
         };
-        let fee_factor = I80F48::ONE
+        let max_fee_factor = I80F48::ONE
             .checked_add(fee_rate)
             .ok_or_else(|| "fee factor overflow".to_string())?;
         let clock = Clock {
@@ -440,6 +455,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         let mut rej_repay_value_nonpositive = 0u32;
         let mut rej_premium_bound = 0u32;
         let mut pair_details = Vec::new();
+        let mut rej_rounded_health = 0u32;
 
         for asset in &assets {
             for liab in &liabs {
@@ -461,18 +477,15 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .maintenance_unweighted_value
                     .checked_div(liab.equity_value)
                     .ok_or_else(|| "liability maintenance/equity ratio".to_string())?;
-                // Per $1 of equity-value seized at the protocol max premium, this is the change
-                // in maintenance health. It must be positive for the pair to heal the account.
-                let coeff = liab_ratio
-                    .checked_mul(liab_weight)
-                    .and_then(|x| x.checked_div(fee_factor))
-                    .and_then(|x| x.checked_sub(asset_ratio.checked_mul(asset_weight)?))
-                    .ok_or_else(|| "health coefficient overflow".to_string())?;
-                if coeff <= I80F48::ZERO {
+                let asset_per_usd = asset_ratio.checked_mul(asset_weight).ok_or("asset health value overflow")?;
+                let liab_per_usd = liab_ratio.checked_mul(liab_weight).ok_or("liability health value overflow")?;
+                let Some(fee_factor) = healing_fee_factor(max_fee_factor, asset_per_usd, liab_per_usd, headroom) else {
                     rej_coeff_nonpositive += 1;
-                    if pair_details.len() < 8 { pair_details.push(format!("{}→{}:coeff_nonpositive(coeff_bits={},asset_ratio_bits={},asset_weight_bits={},liab_ratio_bits={},liab_weight_bits={})", asset.bank_pk, liab.bank_pk, coeff.to_bits(), asset_ratio.to_bits(), asset_weight.to_bits(), liab_ratio.to_bits(), liab_weight.to_bits())); }
+                    if pair_details.len() < 8 { pair_details.push(format!("{}→{}:no_nonnegative_premium_healing_pair", asset.bank_pk, liab.bank_pk)); }
                     continue;
-                }
+                };
+                let coeff = liab_per_usd.checked_div(fee_factor)
+                    .and_then(|x| x.checked_sub(asset_per_usd)).ok_or("health coefficient overflow")?;
                 let health_cap = (-pre_health)
                     .checked_div(coeff)
                     .ok_or_else(|| "health cap division".to_string())?;
@@ -540,6 +553,13 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     rej_repay_value_nonpositive += 1;
                     continue;
                 }
+                // Re-evaluate after floor(withdraw)/ceil(repay). Headroom alone cannot
+                // guarantee a near-zero normal account stays nonpositive after rounding.
+                if !rounded_health_valid(pre_health, seized_actual, repay_actual,
+                    asset_per_usd, liab_per_usd, health.closeout_allowed).ok_or("rounded health overflow")? {
+                    rej_rounded_health += 1;
+                    continue;
+                }
                 // [FIX-93] Normal receivership must obey the exact EndLiquidation premium
                 // bound. Marginfi explicitly skips this check for closeout accounts
                 // (ignore_healthy=true), so applying it there would reject valid closeouts.
@@ -573,7 +593,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
         if out.is_empty() && !assets.is_empty() && !liabs.is_empty() {
             return Err(format!(
-                "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive={};liab_eq_nonpositive={};coeff_nonpositive={};seize_nonpositive={};withdraw_zero={};repay_zero={};repay_above_liability={};repay_value_nonpositive={};premium_bound={};pair_details={}",
+                "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive={};liab_eq_nonpositive={};coeff_nonpositive={};seize_nonpositive={};withdraw_zero={};repay_zero={};repay_above_liability={};repay_value_nonpositive={};premium_bound={};rounded_health={};pair_details={}",
                 rej_asset_equity_nonpositive,
                 rej_liab_equity_nonpositive,
                 rej_coeff_nonpositive,
@@ -583,6 +603,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 rej_repay_above_liability,
                 rej_repay_value_nonpositive,
                 rej_premium_bound,
+                rej_rounded_health,
                 pair_details.join(" | "),
             ));
         }
@@ -593,6 +614,29 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn r121_pair_heals_below_maximum_premium() {
+        let asset = I80F48::from_bits(281435444320915);
+        let liab = I80F48::from_bits(281293154858195) * I80F48::from_bits(309622474381722);
+        let cap = I80F48::from_num(1.1);
+        assert!(liab / cap - asset < I80F48::ZERO);
+        let selected = healing_fee_factor(cap, asset, liab, I80F48::from_num(9990) / I80F48::from_num(10000)).unwrap();
+        assert!(selected >= I80F48::ONE && selected < cap);
+        assert!(liab / selected - asset > I80F48::ZERO);
+        assert_eq!(healing_fee_factor(cap, I80F48::from_num(0.8), liab, I80F48::from_num(0.999)), Some(cap));
+        assert!(healing_fee_factor(cap, I80F48::from_num(1.2), I80F48::ONE, I80F48::from_num(0.999)).is_none());
+    }
+
+    #[test]
+    fn rounded_health_keeps_normal_boundary_and_closeout_exception() {
+        let pre = I80F48::from_num(-0.01);
+        let one = I80F48::ONE;
+        let liab = I80F48::from_num(1.1);
+        assert_eq!(rounded_health_valid(pre, one, one, one, liab, false), Some(false));
+        assert_eq!(rounded_health_valid(pre, one, one, one, liab, true), Some(true));
+        assert_eq!(rounded_health_valid(pre, one, one, liab, one, true), Some(false));
+    }
 
     #[test]
     fn drift_sizing_roundtrip_uses_scaled_balance_decimals() {

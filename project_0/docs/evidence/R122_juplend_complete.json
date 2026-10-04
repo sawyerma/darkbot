@@ -1,0 +1,181 @@
+{
+  "run": "R122",
+  "fix": "FIX-127 lower premium with rounded health check",
+  "transactions_sent": 0,
+  "projection_status": {
+    "ready": 231
+  },
+  "health_success": 231,
+  "liquidatable_health": [
+    {
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "bad_debt": true,
+      "equity_assets_bits": 0,
+      "evaluation_slot": 453208840,
+      "evaluation_unix_s": 1791104153,
+      "liquidatable": true,
+      "maint_health_bits": -61519150411768,
+      "slot": 453208725,
+      "t_rx_ns": 31773909459,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "bad_debt": true,
+      "equity_assets_bits": 11181125767930,
+      "evaluation_slot": 453208910,
+      "evaluation_unix_s": 1791104172,
+      "liquidatable": true,
+      "maint_health_bits": -26258663031310305,
+      "slot": 453208725,
+      "t_rx_ns": 50226650250,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "bad_debt": true,
+      "equity_assets_bits": 93819264178034,
+      "evaluation_slot": 453208984,
+      "evaluation_unix_s": 1791104192,
+      "liquidatable": true,
+      "maint_health_bits": -10302657271601,
+      "slot": 453208725,
+      "t_rx_ns": 70301552917,
+      "trigger": "integration_projection"
+    }
+  ],
+  "liquidatable_decisions": [
+    {
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "trigger": "integration_projection",
+      "decision": "Skip",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": null,
+      "t_profitable_unix_s": null,
+      "tx_version": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "path": null,
+      "funding": null,
+      "signature": null,
+      "sign_slot": null,
+      "simulated_cu": null,
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          null
+        ],
+        [
+          "T_detect\u2192T_ready",
+          null
+        ],
+        [
+          "T_ready\u2192T_sign",
+          null
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity",
+      "loss": "Bankruptcy"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "trigger": "integration_projection",
+      "decision": "ShadowTechnicalReady",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": 999,
+      "t_profitable_unix_s": null,
+      "tx_version": "V0",
+      "serialized_bytes": 964,
+      "locked_accounts": 46,
+      "path": null,
+      "funding": "ZERO_PREFUND_SAME_TX",
+      "signature": null,
+      "sign_slot": 453208911,
+      "simulated_cu": 556666,
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          259328209
+        ],
+        [
+          "T_detect\u2192T_ready",
+          356875
+        ],
+        [
+          "T_ready\u2192T_sign",
+          116750
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "technical shadow probe: failed-attempt economics unknown",
+      "loss": null
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "trigger": "integration_projection",
+      "decision": "ShadowTechnicalReady",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": 985,
+      "t_profitable_unix_s": null,
+      "tx_version": "V0",
+      "serialized_bytes": 1227,
+      "locked_accounts": 47,
+      "path": null,
+      "funding": "ZERO_PREFUND_SAME_TX",
+      "signature": null,
+      "sign_slot": 453208987,
+      "simulated_cu": 432536,
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          688341000
+        ],
+        [
+          "T_detect\u2192T_ready",
+          216125
+        ],
+        [
+          "T_ready\u2192T_sign",
+          93458
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "technical shadow probe: failed-attempt economics unknown",
+      "loss": null
+    }
+  ]
+}

@@ -2684,3 +2684,34 @@ pending FIX-127 sizing changes PASS (112 with txv1 / 110 without). Production
 Jito, submission/landing/reconciliation and real integration v1 simulation remain
 OPEN. No claim that all R7 wire qualification is complete. R6 PARTIAL; R7 OPEN;
 72 h NOT STARTED; LIVE DISABLED.
+
+
+### 2026-10-04 — FIX-127 / R122 JupLend complete receivership simulation PASS
+
+Pinned `liquidate_end.rs::end_liquidation/end_receivership` caps premium and rejects
+worsened health; it does not require the maximum premium. FIX-127 preserves the
+maximum when its coefficient heals the account; otherwise reduces the factor below
+the health-neutral ratio using existing sizing headroom. Never selects a negative
+premium. Rechecks weighted health after native-unit floor/ceil rounding; normal
+liquidations must stay <=0, closeout retains its source-backed exception. This is
+not a relaxation of freshness, premium ceiling or post-health conditions.
+
+Tests reproduce R121's exact fixed-point pair ratios, unchanged feasible maximum,
+unhealable pairs and rounded normal/closeout boundaries. Workspace tests PASS:
+112 with txv1 / 110 without; R122 release build PASS.
+
+R122: 231/231 projections ready, zero failed/stale, 231 downstream Health successes.
+- JupLend `64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk`: projection → Health →
+  Sizing → JupLend withdraw → Jupiter → repay → EndLiquidation simulation PASS.
+  ZERO_PREFUND_SAME_TX, V0, 1227 bytes, 47 locked accounts, 432536 CU, premium 985 bps.
+- Kamino `A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS` repeats full simulation
+  PASS: V0, 964 bytes, 46 accounts, 556666 CU.
+- Both `ShadowTechnicalReady`, economics UNKNOWN, no economic win claimed.
+- Drift remains zero candidates in this group. R6 integration matrix therefore
+  Kamino PASS / JupLend PASS / Drift UNPROVEN. R6 stays PARTIAL.
+
+Evidence: `evidence/R122_juplend_complete.json`. Controlled stop after full sweep;
+transactions sent=0. Next R7: typed v1 execution adapter and provider qualification,
+repay_all edge cases, FailedCostMatrix and P3-02 thresholds. Drift requires a real
+candidate or an explicitly documented external qualification blocker, never a fake
+PASS. 72 h NOT STARTED; LIVE DISABLED.
