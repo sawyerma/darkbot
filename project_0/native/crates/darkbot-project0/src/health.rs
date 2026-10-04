@@ -126,7 +126,8 @@ pub mod crate_impl {
             }
             O::PythLegacy | O::SwitchboardV2 | O::PythPushOracle | O::SwitchboardPull | O::Scope | O::PTFixed => vec![keys[0]],
             O::KaminoPythPush | O::KaminoSwitchboardPull | O::DriftPythPull | O::DriftSwitchboardPull
-            | O::SolendPythPull | O::SolendSwitchboardPull | O::JuplendPythPull | O::JuplendSwitchboardPull => vec![keys[0], keys[1]],
+            | O::SolendPythPull | O::SolendSwitchboardPull | O::JuplendPythPull | O::JuplendSwitchboardPull
+            | O::ScopeKamino | O::ScopeJuplend => vec![keys[0], keys[1]],
             O::PythMSOL | O::PythLST | O::PTPyth => vec![keys[0], keys[1]],
             O::KaminoMSOL | O::JuplendMSOL | O::KaminoLST | O::JuplendLST => vec![keys[0], keys[1], keys[2]],
             #[allow(unreachable_patterns)]
@@ -176,8 +177,16 @@ pub mod crate_impl {
                 owned.push((*k, Account { lamports, data: data.to_vec(), owner, executable: false, rent_epoch: 0 }));
             }
             let ais: Vec<_> = owned.iter_mut().map(|(k, a)| (&*k, a).into_account_info()).collect();
-            let (assets, liabs) = get_health_components(acc, group, &ais, req, &mut None, HealthPriceMode::Client(clock.clone()))
-                .map_err(|e| HealthError::Crate(e.to_string()))?;
+            let (assets, liabs) = get_health_components(
+                acc,
+                group,
+                &ais,
+                req,
+                &mut None,
+                HealthPriceMode::Client(clock.clone()),
+                &mut None,
+            )
+            .map_err(|e| HealthError::Crate(e.to_string()))?;
             Ok((assets.to_bits(), liabs.to_bits()))
         }
 
@@ -308,9 +317,13 @@ pub mod crate_impl {
             Err(HealthError::Unsupported("P3-02 thresholds not implemented".into()))
         }
 
-        /// 0.1.11: keine Borrow-Premium → 0. Nach P1B: rate_snapshot × principal × weight / year.
+        /// [P1B-0.1.12] Premium decay is no longer a protocol-wide zero. Until the exact
+        /// per-liability projection is wired from the 0.1.12 premium helpers, fail closed rather
+        /// than reusing the obsolete 0.1.11 assumption.
         fn premium_decay_per_second(&self, _account: &Pubkey) -> Result<u128, HealthError> {
-            Ok(0)
+            Err(HealthError::Unsupported(
+                "P1B 0.1.12 variable-borrow premium decay not yet qualified".into(),
+            ))
         }
     }
 }
