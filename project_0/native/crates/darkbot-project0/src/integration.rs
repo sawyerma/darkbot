@@ -568,10 +568,15 @@ pub fn refresh_plan_for_account<S: AccountSource + ?Sized>(
     Ok(deduped)
 }
 
-/// Accounts that must be returned by the refresh simulation so Health/Sizing sees one
-/// coherent post-refresh context. This includes the candidate account, every active Bank,
-/// its protocol observation inputs, all explicit integration accounts, and every writable
-/// refresh account. Generic accounts with no integration refreshes return an empty target set.
+/// Accounts whose post-refresh bytes must be returned by simulation.
+///
+/// Only writable accounts can change during the refresh prefix. Every readonly Bank/oracle/input
+/// remains valid through the base-state fallback of `ProjectedState`; requesting those unchanged
+/// accounts again is unnecessary and can exceed provider post-account response limits.
+///
+/// The candidate account itself is validated against its canonical slot/hash before accepting the
+/// projection result; it is not mutated by these external refresh instructions and therefore is not
+/// requested as a simulated post-account.
 pub fn projection_targets_for_account<S: AccountSource + ?Sized>(
     state: &S,
     program: &Pubkey,
@@ -582,6 +587,7 @@ pub fn projection_targets_for_account<S: AccountSource + ?Sized>(
         return Ok(Vec::new());
     }
 
+    // Keep strict account identity/layout validation at dispatch time.
     let (owner, _, data) = raw(state, account_key)?;
     if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
         return Err("PROJECTION_NOT_MARGINFI_ACCOUNT".into());
@@ -590,58 +596,13 @@ pub fn projection_targets_for_account<S: AccountSource + ?Sized>(
     if data.len() < need {
         return Err(format!("PROJECTION_MARGINFI_ACCOUNT_SHORT:{}<{}", data.len(), need));
     }
-    let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
+    bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
         .map_err(|e| format!("PROJECTION_MARGINFI_ACCOUNT_CAST:{e:?}"))?;
 
-    let mut out = vec![*account_key];
-    let mut bank_keys: Vec<Pubkey> = account
-        .lending_account
-        .balances
-        .iter()
-        .filter(|b| b.is_active())
-        .map(|b| b.bank_pk)
-        .collect();
-    bank_keys.sort_by(|a, b| b.cmp(a));
-    bank_keys.dedup();
-
-    for bank_key in bank_keys {
-        let (bank_owner, _, bank_data) = raw(state, &bank_key)?;
-        if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
-            return Err(format!("PROJECTION_INVALID_BANK:{bank_key}"));
-        }
-        let bank: &Bank = pod_after_disc(state, &bank_key)?;
-        out.push(bank_key);
-        out.extend(
-            crate::health::crate_impl::bank_observation_keys(bank)
-                .map_err(|e| format!("PROJECTION_OBSERVATION:{bank_key}:{e}"))?,
-        );
-        for key in [
-            bank.integration_acc_1,
-            bank.integration_acc_2,
-            bank.integration_acc_3,
-        ] {
-            if key != Pubkey::default() {
-                out.push(key);
-            }
-        }
-        if matches!(refresh_kind(bank), Some(IntegrationKind::Drift)) {
-            out.extend(drift_reward_market_keys(state, bank)?);
-        }
+    let out = crate::projection::projection_targets(refreshes);
+    if out.is_empty() {
+        return Err("PROJECTION_NO_WRITABLE_REFRESH_ACCOUNTS".into());
     }
-
-    // Writable refresh accounts are the exact state mutated by the prefix and must always be
-    // overlaid even if they are not part of a health observation layout.
-    out.extend(
-        refreshes
-            .iter()
-            .flat_map(|ix| ix.accounts.iter())
-            .filter(|m| m.is_writable)
-            .map(|m| m.pubkey),
-    );
-
-    out.retain(|k| *k != Pubkey::default());
-    out.sort_unstable_by_key(|k| k.to_bytes());
-    out.dedup();
     Ok(out)
 }
 
