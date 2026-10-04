@@ -723,7 +723,9 @@ Never expose private keys or credential-bearing endpoints in command output, rep
    Deliver the §8 capability records and §13/J campaign manifest before acquisition qualification. Obtain review of concrete sample/workload/availability values and identify any unenforced future-bound claim. Implement the verdict evaluator before accepting campaign results. Do not postpone these acceptance decisions until after a successful BUY.
 7. STOP at a phase delivery for the defined review boundary; do not silently enable production LIVE or launch an unapproved funded test.
 
-The fastest correct construction combines early verified information, resident coherent state, safe preparation before T0, warm measured transports and verified ordering at the producer. **A 45-µs local reaction followed by next-block placement must remain visible and drive inclusion work### Current implementation checkpoint — 2026-10-04
+The fastest correct construction combines early verified information, resident coherent state, safe preparation before T0, warm measured transports and verified ordering at the producer. **A 45-µs local reaction followed by next-block placement must remain visible and drive inclusion work, not a false product PASS.**
+
+### Current implementation checkpoint — 2026-10-04
 
 This subsection is the current handoff checkpoint. The requirements and acceptance definitions above remain normative; this records what has actually landed and what must happen next.
 
@@ -734,7 +736,6 @@ This subsection is the current handoff checkpoint. The requirements and acceptan
 - **NEXT TASK: Unit 5 runner/transport integration, then Unit 6 typed startup config/secrets.** The runner must consume the frozen Unit-5 Core contracts rather than duplicate or weaken them. A release path may accept only a successfully qualified release plan; diagnostic paths may use unqualified plans without turning them into release evidence. After the runner/transport slice, complete Unit 6 startup authorization/config/secrets, then the remaining minimal C0 recorder/replay foundation.
 - **Execution order after C0:** C1 pinned bsc-geth Fast Lane → C2 canonical/pending state and controlled recovery → C3 integrated local execution qualification → scoped D–I work and J release campaign. Do not skip directly to a synthetic end-to-end latency claim.
 - **Product gate remains open:** production LIVE is blocked. Real provider qualification is OPEN. No value-bearing Mainnet action is authorized by this checkpoint. `T_buy - T0 < 1,000,000 ns` remains **NOT YET PROVEN**; local send, same-block placement, an adapter ACK or a qualified local transport deadline cannot substitute for original producer-execution proof.
- the producer-execution proof.
 
 ## 19. Provenance and source index
 
