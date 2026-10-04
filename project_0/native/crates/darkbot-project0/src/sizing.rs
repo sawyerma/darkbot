@@ -87,6 +87,10 @@ fn load<T: bytemuck::Pod>(data: &[u8]) -> Result<&T, String> {
     bytemuck::try_from_bytes::<T>(slice).map_err(|e| format!("pod cast: {e:?}"))
 }
 
+fn amount_from_equity(value: I80F48, price: I80F48, bank: &Bank) -> Result<I80F48, String> {
+    calc_amount(value, price, bank.get_balance_decimals()).map_err(|e| format!("native balance amount: {e}"))
+}
+
 fn floor_u64(v: I80F48) -> Result<u64, String> {
     if v <= I80F48::ZERO {
         return Ok(0);
@@ -435,6 +439,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         let mut rej_repay_above_liability = 0u32;
         let mut rej_repay_value_nonpositive = 0u32;
         let mut rej_premium_bound = 0u32;
+        let mut pair_details = Vec::new();
 
         for asset in &assets {
             for liab in &liabs {
@@ -465,6 +470,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .ok_or_else(|| "health coefficient overflow".to_string())?;
                 if coeff <= I80F48::ZERO {
                     rej_coeff_nonpositive += 1;
+                    if pair_details.len() < 8 { pair_details.push(format!("{}→{}:coeff_nonpositive(coeff_bits={},asset_ratio_bits={},asset_weight_bits={},liab_ratio_bits={},liab_weight_bits={})", asset.bank_pk, liab.bank_pk, coeff.to_bits(), asset_ratio.to_bits(), asset_weight.to_bits(), liab_ratio.to_bits(), liab_weight.to_bits())); }
                     continue;
                 }
                 let health_cap = (-pre_health)
@@ -495,15 +501,11 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
                 let asset_prices = self.prices(&asset.bank, &clock)?;
                 let liab_prices = self.prices(&liab.bank, &clock)?;
-                let withdraw_exact = calc_amount(
-                    seize_value,
-                    asset_prices.equity,
-                    asset.bank.mint_decimals,
-                )
-                .map_err(|e| format!("withdraw amount: {e}"))?;
+                let withdraw_exact = amount_from_equity(seize_value, asset_prices.equity, &asset.bank)?;
                 let withdraw_amount = floor_u64(withdraw_exact)?;
                 if withdraw_amount == 0 {
                     rej_withdraw_zero += 1;
+                    if pair_details.len() < 8 { pair_details.push(format!("{}→{}:withdraw_zero(exact_bits={},seize_bits={},asset_equity_bits={},liab_equity_bits={},price_bits={},decimals={})", asset.bank_pk, liab.bank_pk, withdraw_exact.to_bits(), seize_value.to_bits(), asset.equity_value.to_bits(), liab.equity_value.to_bits(), asset_prices.equity.to_bits(), asset.bank.get_balance_decimals())); }
                     continue;
                 }
                 let seized_actual = calc_value(
@@ -516,12 +518,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 let repay_target = seized_actual
                     .checked_div(fee_factor)
                     .ok_or_else(|| "repay target division".to_string())?;
-                let repay_exact = calc_amount(
-                    repay_target,
-                    liab_prices.equity,
-                    liab.bank.mint_decimals,
-                )
-                .map_err(|e| format!("repay amount: {e}"))?;
+                let repay_exact = amount_from_equity(repay_target, liab_prices.equity, &liab.bank)?;
                 let repay_amount = ceil_u64(repay_exact)?;
                 if repay_amount == 0 {
                     rej_repay_zero += 1;
@@ -576,7 +573,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
         if out.is_empty() && !assets.is_empty() && !liabs.is_empty() {
             return Err(format!(
-                "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive={};liab_eq_nonpositive={};coeff_nonpositive={};seize_nonpositive={};withdraw_zero={};repay_zero={};repay_above_liability={};repay_value_nonpositive={};premium_bound={}",
+                "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive={};liab_eq_nonpositive={};coeff_nonpositive={};seize_nonpositive={};withdraw_zero={};repay_zero={};repay_above_liability={};repay_value_nonpositive={};premium_bound={};pair_details={}",
                 rej_asset_equity_nonpositive,
                 rej_liab_equity_nonpositive,
                 rej_coeff_nonpositive,
@@ -586,6 +583,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 rej_repay_above_liability,
                 rej_repay_value_nonpositive,
                 rej_premium_bound,
+                pair_details.join(" | "),
             ));
         }
         Ok(out)
@@ -595,6 +593,23 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drift_sizing_roundtrip_uses_scaled_balance_decimals() {
+        use bytemuck::Zeroable;
+        let mut bank = Bank::zeroed();
+        bank.mint_decimals = 6;
+        bank.config.asset_tag = ASSET_TAG_DRIFT;
+        let amount = I80F48::from_num(1_000_000_000u64);
+        let price = I80F48::from_num(2);
+        let equity = calc_value(amount, price, bank.get_balance_decimals(), None).unwrap();
+        assert_eq!(amount_from_equity(equity, price, &bank).unwrap(), amount);
+        // The previous mint-decimal inverse returned 1/1000 of the bank balance units.
+        assert_ne!(calc_amount(equity, price, bank.mint_decimals).unwrap(), amount);
+        bank.config.asset_tag = ASSET_TAG_JUPLEND;
+        let equity = calc_value(amount, price, bank.get_balance_decimals(), None).unwrap();
+        assert_eq!(amount_from_equity(equity, price, &bank).unwrap(), amount);
+    }
 
     #[test]
     fn integer_conversions_are_conservative() {

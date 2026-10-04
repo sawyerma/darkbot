@@ -1,0 +1,182 @@
+{
+  "run": "R121",
+  "base_commit": "24e68a4",
+  "fix": "FIX-125 balance-unit inverse + sizing diagnostics",
+  "transactions_sent": 0,
+  "projection_status": {
+    "ready": 231
+  },
+  "health_success": 231,
+  "liquidatable_health": [
+    {
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "bad_debt": true,
+      "equity_assets_bits": 0,
+      "evaluation_slot": 453208003,
+      "evaluation_unix_s": 1791103930,
+      "liquidatable": true,
+      "maint_health_bits": -61515713136281,
+      "slot": 453207818,
+      "t_rx_ns": 50546031709,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "bad_debt": true,
+      "equity_assets_bits": 11181680913086,
+      "evaluation_slot": 453208060,
+      "evaluation_unix_s": 1791103945,
+      "liquidatable": true,
+      "maint_health_bits": -26258455305274331,
+      "slot": 453207818,
+      "t_rx_ns": 65887880417,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "bad_debt": true,
+      "equity_assets_bits": 93819381209889,
+      "evaluation_slot": 453208138,
+      "evaluation_unix_s": 1791103966,
+      "liquidatable": true,
+      "maint_health_bits": -10285155203677,
+      "slot": 453207818,
+      "t_rx_ns": 86254490084,
+      "trigger": "integration_projection"
+    }
+  ],
+  "liquidatable_decisions": [
+    {
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "trigger": "integration_projection",
+      "decision": "Skip",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": null,
+      "t_profitable_unix_s": null,
+      "tx_version": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "path": null,
+      "funding": null,
+      "signature": null,
+      "sign_slot": null,
+      "simulated_cu": null,
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          null
+        ],
+        [
+          "T_detect\u2192T_ready",
+          null
+        ],
+        [
+          "T_ready\u2192T_sign",
+          null
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity",
+      "loss": "Bankruptcy"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "trigger": "integration_projection",
+      "decision": "ShadowTechnicalReady",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": 999,
+      "t_profitable_unix_s": null,
+      "tx_version": "V0",
+      "serialized_bytes": 1103,
+      "locked_accounts": 54,
+      "path": null,
+      "funding": "ZERO_PREFUND_SAME_TX",
+      "signature": null,
+      "sign_slot": 453208062,
+      "simulated_cu": 571165,
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          482560167
+        ],
+        [
+          "T_detect\u2192T_ready",
+          368291
+        ],
+        [
+          "T_ready\u2192T_sign",
+          115334
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "technical shadow probe: failed-attempt economics unknown",
+      "loss": null
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "trigger": "integration_projection",
+      "decision": "Skip",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": null,
+      "t_profitable_unix_s": null,
+      "tx_version": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "path": null,
+      "funding": null,
+      "signature": null,
+      "sign_slot": null,
+      "simulated_cu": null,
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          null
+        ],
+        [
+          "T_detect\u2192T_ready",
+          null
+        ],
+        [
+          "T_ready\u2192T_sign",
+          null
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive=0;liab_eq_nonpositive=0;coeff_nonpositive=1;seize_nonpositive=0;withdraw_zero=1;repay_zero=0;repay_above_liability=0;repay_value_nonpositive=0;premium_bound=0;pair_details=6SUMngtaS1Bwzxj85EhaekWkZJ9uHrRQCap6MX6RFufW\u2192DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM:withdraw_zero(exact_bits=421017604648,seize_bits=442861,asset_equity_bits=93829074801442,liab_equity_bits=403005,price_bits=296078568412849,decimals=6) | 6SUMngtaS1Bwzxj85EhaekWkZJ9uHrRQCap6MX6RFufW\u2192CCKtUs6Cgwo4aaQUmBPmyoApH2gUDErxNZCAntD6LYGh:coeff_nonpositive(coeff_bits=-142289462721,asset_ratio_bits=281435444320915,asset_weight_bits=281474976710656,liab_ratio_bits=281293154858195,liab_weight_bits=309622474381722)",
+      "loss": "Sizing"
+    }
+  ]
+}

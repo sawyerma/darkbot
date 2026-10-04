@@ -2637,3 +2637,23 @@ JupLend/Drift still unqualified; R7 OPEN; 72 h NOT STARTED; LIVE DISABLED.
 Next: inspect JupLend exact sizing against pinned protocol semantics and rerun when
 an admissible size exists; continue R7 rounding/repay_all and wire qualification.
 Do not relax sizing or freshness merely to obtain a PASS.
+
+
+### 2026-10-04 — FIX-125 / R121 sizing units and pair diagnostics
+
+Pinned `type-crate/src/types/bank.rs::get_balance_decimals` uses scaled balance
+units for Drift, not mint decimals. The inverse USD→native amount now uses the
+same balance decimals as the forward valuation. A roundtrip regression proves
+Drift's previous 1000x mismatch and unchanged JupLend conversion. No Drift Mainnet
+execution proof is inferred from this unit test. Workspace tests `crate_health txv1`
+PASS: 109, zero failures; R121 release build PASS.
+
+R121: 231/231 projections ready, zero failed/stale, 231 downstream Health successes.
+Evidence: `evidence/R121_sizing_pairs.json`. New bounded pair diagnostics explain
+JupLend: one liability is dust (withdraw would be <1 native unit); the SOL pair's
+health coefficient is negative at the assumed maximum premium. The protocol
+`liquidate_end.rs` enforces a premium CEILING, not a minimum actual premium. The
+sizer always uses the ceiling, so a lower-premium healing pair may exist. Next:
+verify/derive a bounded lower-premium candidate and test rounded health parity.
+No threshold/freshness relaxation. R6 PARTIAL; R7 OPEN; 72 h NOT STARTED; LIVE
+DISABLED. R121 stopped after terminal target results; zero sends.
