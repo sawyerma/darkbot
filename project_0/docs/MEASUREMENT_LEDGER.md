@@ -2477,3 +2477,40 @@ at its actual dispatch time, immediately evaluate returned projections, preserve
 all live/account-update timestamps and freshness guards; build/test, then R117.
 The two nonzero-collateral accounts are priority evidence targets, not yet proven
 executable or economic. Never extend deadlines or fake a protocol Clock to pass.
+
+### 2026-10-04 — FIX-121 / R117 full-population projection and Health PASS
+
+FIX-121 keeps qualification targets as unsigned identities until the projection
+worker is idle. Each synthetic probe starts at actual dispatch; returned projections
+are evaluated first. Real ingress timestamps, RPC latency, canonical slot/hash
+checks, deadlines and protocol freshness guards remain intact. In-flight/real
+opportunity timestamps are never reset.
+
+Build/test PASS: 101 tests (`crate_health txv1`), 100 (`crate_health`). Queue tests
+verify busy-worker retention, FIFO and actual probe-start timestamps.
+Mainnet R117: clean bootstrap/reconcile, 230 targets, 230 ready / 0 failed / 0 stale.
+All 230 Health evaluations succeeded at the exact simulation Clock pair: 227 healthy,
+one zero-collateral bankruptcy case, two liquidatable with nonzero collateral.
+One additional non-target account-update projection also succeeded (231 total).
+No BlockhashNotFound or stale-planning rejection remained in the target sweep.
+
+R6 downstream blockers:
+- Kamino `A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS` reaches route/receivership
+  build feasibility: v0 transaction 1575 > 1232 bytes. The full v1 signing/submission
+  adapter remains unavailable, even with the txv1 capability feature.
+- JupLend `64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk` needs prewarmed USDT ATA
+  `AFA7wz6gLyiYBxeQKPQNc6qr67xjQi6p1Y2pqwBP3uQS`, mint
+  `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB` (legacy token program).
+
+Evidence: `evidence/R117_paced_projection_sweep.json`. Process stopped after full
+completion. FIX-121 runtime PASS; R4/R5 PASS; R6 PARTIAL; R7 OPEN;
+72 h NOT STARTED; LIVE DISABLED.
+
+Exact next steps:
+1. Bounded Jupiter requotes guided by actual compiled bytes/accounts. This planned
+   R7 item is now a direct dependency of R6 proof; R6 is not being skipped.
+2. Prepare/simulate the USDT ATA prerequisite and measure rent, fee and remaining
+   wallet reserve. Creating it spends real SOL on-chain, unlike Shadow; do not
+   submit under the present no-LIVE testing scope without explicit approval.
+3. Repeat downstream Mainnet qualification; continue recording FIX commits and
+   evidence here. Keep technical/economic wins separate and unknown costs UNKNOWN.

@@ -71,6 +71,22 @@ struct CachedProjection {
 #[cfg(feature = "crate_health")]
 type DetectWork = (Pubkey, u64, u64, &'static str);
 
+// [FIX-121][R6] Qualification targets wait as unsigned identities, not signed RPC jobs.
+// This timestamp is the start of an explicit synthetic probe; real ingress timestamps
+// and projection latency remain untouched and are still subject to freshness guards.
+#[cfg(feature = "crate_health")]
+fn next_integration_probe(
+    queue: &mut VecDeque<(Pubkey, u64)>,
+    projection_busy: bool,
+    now_ns: u64,
+) -> Option<DetectWork> {
+    if projection_busy {
+        return None;
+    }
+    queue.pop_front().map(|(account, slot)|
+        (account, now_ns, slot, "integration_target_probe"))
+}
+
 #[cfg(not(feature = "crate_health"))]
 struct NoPlans;
 #[cfg(not(feature = "crate_health"))]
@@ -543,6 +559,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "crate_health")]
     let mut integration_probe_expected: HashSet<Pubkey> = HashSet::new();
     #[cfg(feature = "crate_health")]
+    let mut integration_probe_queue: VecDeque<(Pubkey, u64)> = VecDeque::new();
+    #[cfg(feature = "crate_health")]
     let mut integration_probe_terminal: HashSet<Pubkey> = HashSet::new();
     #[cfg(feature = "crate_health")]
     let mut integration_probe_projection_ready = 0usize;
@@ -672,7 +690,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 accounts,
                             },
                         );
-                        detect_queue.push_back((
+                        detect_queue.push_front((
                             done.account,
                             done.t_rx_ns,
                             done.base_slot,
@@ -809,7 +827,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         #[cfg(feature = "crate_health")]
-        let mut detect = detect_queue.pop_front();
+        let mut detect = detect_queue.pop_front().or_else(|| {
+            next_integration_probe(
+                &mut integration_probe_queue,
+                !projection_pending.is_empty(),
+                clock.now_ns(),
+            )
+        });
         #[cfg(not(feature = "crate_health"))]
         let mut detect = None;
 
@@ -1036,12 +1060,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     _ => queued_juplend += 1,
                                 }
                                 if selected.insert(*pk) {
-                                    detect_queue.push_back((
-                                        *pk,
-                                        clock.now_ns(),
-                                        *slot,
-                                        "integration_target_probe",
-                                    ));
+                                    integration_probe_queue.push_back((*pk, *slot));
                                 }
                             }
                         }
@@ -1508,4 +1527,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = summaries.flush();
     let _ = records.flush();
     Ok(())
+}
+
+#[cfg(all(test, feature = "crate_health"))]
+mod integration_probe_tests {
+    use super::*;
+
+    #[test]
+    fn target_waits_unsigned_until_worker_is_idle() {
+        let account = Pubkey::new_unique();
+        let mut queue = VecDeque::from([(account, 42)]);
+        assert!(next_integration_probe(&mut queue, true, 100).is_none());
+        assert_eq!(queue.len(), 1);
+        // A long qualification backlog does not backdate a newly started probe.
+        assert_eq!(next_integration_probe(&mut queue, false, 9_000),
+            Some((account, 9_000, 42, "integration_target_probe")));
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn only_one_target_is_dispatched_per_idle_turn() {
+        let a = Pubkey::new_unique();
+        let b = Pubkey::new_unique();
+        let mut queue = VecDeque::from([(a, 1), (b, 2)]);
+        assert_eq!(next_integration_probe(&mut queue, false, 100).unwrap().0, a);
+        assert!(next_integration_probe(&mut queue, true, 101).is_none());
+        assert_eq!(queue.front(), Some(&(b, 2)));
+        assert_eq!(next_integration_probe(&mut queue, false, 200).unwrap().0, b);
+        assert!(next_integration_probe(&mut queue, false, 201).is_none());
+    }
 }

@@ -1,0 +1,3314 @@
+{
+  "run": "R117",
+  "date": "2026-10-04",
+  "source_base": "73e7dbf",
+  "source_change": "FIX-121 paced integration probes (same commit as this evidence)",
+  "mode": "shadow",
+  "provider": "Helius",
+  "target_unique": 230,
+  "ready": 230,
+  "failed": 0,
+  "stale": 0,
+  "health_success": 230,
+  "evaluation_clock_matches": 230,
+  "additional_nontarget_projections": 1,
+  "raw_record_sha256": "30f21f0f8e0198ec54acb0ecde656f7496e50fdfcb7f0bd52466025bd7e0bedd",
+  "projection_results": [
+    {
+      "account": "6cLwpnv1g4z2J7qwog2weDJqEvDVLQqGLYm4TmDVVSG",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109555,
+      "projection_unix_s": 1791077644,
+      "simulated_cu": 43375,
+      "status": "ready"
+    },
+    {
+      "account": "E66onksfw2qgWGH7TP28BD8iE7Na37JVDr38isdPZcb",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109558,
+      "projection_unix_s": 1791077645,
+      "simulated_cu": 41005,
+      "status": "ready"
+    },
+    {
+      "account": "LnqAPE9Ww2Nz91FidvMFnfXia8cR97SPXntfnjNAWiD",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109559,
+      "projection_unix_s": 1791077645,
+      "simulated_cu": 43351,
+      "status": "ready"
+    },
+    {
+      "account": "RkF1QW9vMoQNgSLnQT6bSqEjkK2ig9NCdL6oR3BvPJe",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109560,
+      "projection_unix_s": 1791077645,
+      "simulated_cu": 43199,
+      "status": "ready"
+    },
+    {
+      "account": "T7SvRHhDpXKMFBt54QtVKEqEWtjYiwxQm87sz8uUMpL",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109560,
+      "projection_unix_s": 1791077645,
+      "simulated_cu": 40902,
+      "status": "ready"
+    },
+    {
+      "account": "TVyQujeSbZE8KnyuCE354tw4i2BFpw2mxmvzH5W4Vyg",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109561,
+      "projection_unix_s": 1791077646,
+      "simulated_cu": 40976,
+      "status": "ready"
+    },
+    {
+      "account": "Xdx6Q9hi1WK6pfXXx2nULE2vCndQvBQsCdTkGUad2zF",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109563,
+      "projection_unix_s": 1791077646,
+      "simulated_cu": 43555,
+      "status": "ready"
+    },
+    {
+      "account": "dBS1sjAW5VwZkvzarvSEzNBbndBFhUVJtcrcBU2NpnE",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109563,
+      "projection_unix_s": 1791077646,
+      "simulated_cu": 40962,
+      "status": "ready"
+    },
+    {
+      "account": "kjwK3cmwMheX5wxUb4BP81hD4PKyivhZt4FNCVcWTZU",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109564,
+      "projection_unix_s": 1791077646,
+      "simulated_cu": 43555,
+      "status": "ready"
+    },
+    {
+      "account": "pn5cetzRzsfgxkxRWmLiDk277eW2k3Eh6qkwatLMiq5",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109564,
+      "projection_unix_s": 1791077646,
+      "simulated_cu": 40962,
+      "status": "ready"
+    },
+    {
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109565,
+      "projection_unix_s": 1791077647,
+      "simulated_cu": 43549,
+      "status": "ready"
+    },
+    {
+      "account": "wKEBaqTCynZc8G9HUVyTEXY6PpXiVQkJruVUkpgwcaU",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109566,
+      "projection_unix_s": 1791077647,
+      "simulated_cu": 40927,
+      "status": "ready"
+    },
+    {
+      "account": "zBFQnCUV69KQAGk222D3eS1Q7sCZ4Z1UWpdsNgvkcMb",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109567,
+      "projection_unix_s": 1791077647,
+      "simulated_cu": 40810,
+      "status": "ready"
+    },
+    {
+      "account": "28UHxw5YSmg7bhbFMZumK7Ge9d7FddWcRqjwVVC7NiP4",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109568,
+      "projection_unix_s": 1791077647,
+      "simulated_cu": 40927,
+      "status": "ready"
+    },
+    {
+      "account": "294fTCqvA6Vxvpz2W4Lh1D8gfSGhtzr9dHFpRLb6SG4g",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109568,
+      "projection_unix_s": 1791077647,
+      "simulated_cu": 43549,
+      "status": "ready"
+    },
+    {
+      "account": "2FnWBhiDxyPwGUurpoEjJopLNLt1XCBMRSwhuV36dMWw",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109569,
+      "projection_unix_s": 1791077648,
+      "simulated_cu": 81795,
+      "status": "ready"
+    },
+    {
+      "account": "2JtgUAhxqMsqfk7GjjHVTqYdp3qHyitu3Uj5YXGCqvfE",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109570,
+      "projection_unix_s": 1791077648,
+      "simulated_cu": 40926,
+      "status": "ready"
+    },
+    {
+      "account": "2KfTuntUZeswaU1sefAt3XBnew32wT9QMSZQC1sEczgo",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109571,
+      "projection_unix_s": 1791077648,
+      "simulated_cu": 41169,
+      "status": "ready"
+    },
+    {
+      "account": "2Qds2zQ9zgmGbiJURimAyynedKpXEbjVpRLt9vmZVyax",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109571,
+      "projection_unix_s": 1791077648,
+      "simulated_cu": 99157,
+      "status": "ready"
+    },
+    {
+      "account": "2VKXE1oUS8jjCWLN4wxZBwNJ3KR19XMjf1mpJYTdFcr5",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109572,
+      "projection_unix_s": 1791077649,
+      "simulated_cu": 58419,
+      "status": "ready"
+    },
+    {
+      "account": "2ZEYjTHFEnL3UjrQTAoUnDy1cVuxtFr7NtJ4zmZzqcAq",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109573,
+      "projection_unix_s": 1791077649,
+      "simulated_cu": 43325,
+      "status": "ready"
+    },
+    {
+      "account": "2iZARdYDm692ekLcNxbtNpq6smt1QxoLuT6rnV7pZd66",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109574,
+      "projection_unix_s": 1791077649,
+      "simulated_cu": 40999,
+      "status": "ready"
+    },
+    {
+      "account": "2jq5SzmpSvXfkzU2t6SrM22mZ7uFRPot1kyKHZLjdwJ1",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109575,
+      "projection_unix_s": 1791077649,
+      "simulated_cu": 40962,
+      "status": "ready"
+    },
+    {
+      "account": "2wYcFvM2xeeXNXqiVSGiMKE5Ag1pS1Mcwu7dFhYbqKT5",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109576,
+      "projection_unix_s": 1791077650,
+      "simulated_cu": 41056,
+      "status": "ready"
+    },
+    {
+      "account": "31RuvQrnVH2FQ8phm6iYMQym9gesMuFpuo2eHGr8E8tx",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109577,
+      "projection_unix_s": 1791077650,
+      "simulated_cu": 127239,
+      "status": "ready"
+    },
+    {
+      "account": "3BKXGdcDEisaiUJdKuogYz2jSANUQZiJagrEsqq8tMV6",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109578,
+      "projection_unix_s": 1791077650,
+      "simulated_cu": 40984,
+      "status": "ready"
+    },
+    {
+      "account": "3EYjRxehh6GAZWRcgkAVLxovjr91KBow1cmaDSAVZunB",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109578,
+      "projection_unix_s": 1791077650,
+      "simulated_cu": 40984,
+      "status": "ready"
+    },
+    {
+      "account": "3EdFohxtMTMbELvsmybR9PVw25Lb4wEr1UaZULfM25uK",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109579,
+      "projection_unix_s": 1791077650,
+      "simulated_cu": 40981,
+      "status": "ready"
+    },
+    {
+      "account": "3GWmuSmKnS3oDE886jN8XGGCzDhqEKd1NN8U6YRV9f9C",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109579,
+      "projection_unix_s": 1791077650,
+      "simulated_cu": 43551,
+      "status": "ready"
+    },
+    {
+      "account": "3JVkyDkag4pcJUviRWW3wAdMo2K1xinkoWwrZju5qh3V",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109580,
+      "projection_unix_s": 1791077651,
+      "simulated_cu": 83834,
+      "status": "ready"
+    },
+    {
+      "account": "3XnrK7vrVke8UaFHpxPRNJvoBeYH4RZVSgdbi4iiAgEP",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109581,
+      "projection_unix_s": 1791077651,
+      "simulated_cu": 40922,
+      "status": "ready"
+    },
+    {
+      "account": "3byxY53qR2a2PhJvU1dvVV6ENZH133cJKhxz5vGRhxh1",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109582,
+      "projection_unix_s": 1791077651,
+      "simulated_cu": 58685,
+      "status": "ready"
+    },
+    {
+      "account": "3daKT9Q3K6MHdAAxUGbfc3KpZSu1zJSXxus6NDvZqZ4m",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109583,
+      "projection_unix_s": 1791077652,
+      "simulated_cu": 86403,
+      "status": "ready"
+    },
+    {
+      "account": "3fH7J7rgrpsuZmqgJqKQxoFqrmapsei3ALe8tKBUzurb",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109585,
+      "projection_unix_s": 1791077652,
+      "simulated_cu": 42528,
+      "status": "ready"
+    },
+    {
+      "account": "3j44CAYJrePtgtnJRLE7cN13LQKknhsqCocNy4KiMasC",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109586,
+      "projection_unix_s": 1791077652,
+      "simulated_cu": 43358,
+      "status": "ready"
+    },
+    {
+      "account": "3mmDEDXDcap7khhD6YxXprYjp8aeyAXVaEBaRwAqdqeT",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109587,
+      "projection_unix_s": 1791077653,
+      "simulated_cu": 43292,
+      "status": "ready"
+    },
+    {
+      "account": "3nt4gsriYkYssrpcUAVB5wPxXMaUcN5GWReHZSFXAYHe",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109587,
+      "projection_unix_s": 1791077653,
+      "simulated_cu": 40925,
+      "status": "ready"
+    },
+    {
+      "account": "4AsZ18MXW4LTbv9YW3FbxXkaUwBYwNc1ZhdnmdEocCan",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109588,
+      "projection_unix_s": 1791077653,
+      "simulated_cu": 40933,
+      "status": "ready"
+    },
+    {
+      "account": "4CdrxHHngc6CEWu5tPKZjh3Ao9XUVYoquCn8fTjwK7He",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109589,
+      "projection_unix_s": 1791077653,
+      "simulated_cu": 40979,
+      "status": "ready"
+    },
+    {
+      "account": "4Ln61qhyCidkfcLiX17wqjRHMPKgXtGCdCrSgQiMoPrQ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109590,
+      "projection_unix_s": 1791077653,
+      "simulated_cu": 43349,
+      "status": "ready"
+    },
+    {
+      "account": "4MRdXLzEjo7v1dzZzbQFtAzk2zauRz9cCdpipeoxNEQP",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109591,
+      "projection_unix_s": 1791077654,
+      "simulated_cu": 40922,
+      "status": "ready"
+    },
+    {
+      "account": "4PpuknMuXPJa7uNVC3spTsk2m1zzG5rrrZnnwpxjDNNj",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109593,
+      "projection_unix_s": 1791077654,
+      "simulated_cu": 40922,
+      "status": "ready"
+    },
+    {
+      "account": "4bcL4hbhaE73FTzMjvYRSJCC4JXfbsS2FuDjNdKchdar",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109593,
+      "projection_unix_s": 1791077654,
+      "simulated_cu": 56693,
+      "status": "ready"
+    },
+    {
+      "account": "4c78hgUoBs6RCKnSJmQK5ZapNSzVYMF9vJJBnXrX3fDs",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109594,
+      "projection_unix_s": 1791077654,
+      "simulated_cu": 41119,
+      "status": "ready"
+    },
+    {
+      "account": "4gXHMZ9ragUcyuADN38ktqXExBTLERwoPxsqT5tpkoUJ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109594,
+      "projection_unix_s": 1791077654,
+      "simulated_cu": 43575,
+      "status": "ready"
+    },
+    {
+      "account": "4ivkb8Cw3oU51xZCCaqWMcYpMVpa3Ds4NFjyqr6pavyh",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109595,
+      "projection_unix_s": 1791077655,
+      "simulated_cu": 40944,
+      "status": "ready"
+    },
+    {
+      "account": "4un5my3V4t5bQDkBq72sHP6AfwLeVFLN61TDZgfT6iWq",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109596,
+      "projection_unix_s": 1791077655,
+      "simulated_cu": 41097,
+      "status": "ready"
+    },
+    {
+      "account": "52dx19m9PYKQdD8KoJhXyGV2RQqeh6hBu5QEhd7pyzGz",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109597,
+      "projection_unix_s": 1791077655,
+      "simulated_cu": 40944,
+      "status": "ready"
+    },
+    {
+      "account": "5BS54ykfYAyjH8JABrXsnzoXKgFSPSCWfd5zFb5VKAZr",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109597,
+      "projection_unix_s": 1791077655,
+      "simulated_cu": 40944,
+      "status": "ready"
+    },
+    {
+      "account": "5FjVfgZXjoRCxEZgdGMrUtEkGrYSDWazRBZEsbkQBe7P",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109598,
+      "projection_unix_s": 1791077655,
+      "simulated_cu": 40944,
+      "status": "ready"
+    },
+    {
+      "account": "5Ld5dAT75QzLbDaLgbyLmzsfMbJJNh2b5W4fi9V73HFr",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109599,
+      "projection_unix_s": 1791077656,
+      "simulated_cu": 43578,
+      "status": "ready"
+    },
+    {
+      "account": "5ZRXuGZbzvEZQcSmexdPB6FxZtTdBk4eKMWAaF5DW3xG",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109599,
+      "projection_unix_s": 1791077656,
+      "simulated_cu": 43537,
+      "status": "ready"
+    },
+    {
+      "account": "5b5gJ1bmdkUGXr7eAW9HrMjbsacB23UZaY4jxBuhaQ48",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109599,
+      "projection_unix_s": 1791077656,
+      "simulated_cu": 41055,
+      "status": "ready"
+    },
+    {
+      "account": "5ihacSwtEEizcbMXgPFQ5TZERbsMNiJ7AST6dbP8NTCa",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109601,
+      "projection_unix_s": 1791077656,
+      "simulated_cu": 43537,
+      "status": "ready"
+    },
+    {
+      "account": "5iqai34QvB7ENAXwNz4dsjSxWcqGCVzfLCqvWrxCynx4",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109601,
+      "projection_unix_s": 1791077656,
+      "simulated_cu": 40923,
+      "status": "ready"
+    },
+    {
+      "account": "5odYBxoNgQbnV6Qx5MZkyiqYRFENidUK24cYe8rDfXSg",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109602,
+      "projection_unix_s": 1791077657,
+      "simulated_cu": 43354,
+      "status": "ready"
+    },
+    {
+      "account": "5zHLrGW7AiUu43VXpgETqzLAXtPGAPYD6gToS5TkXB6a",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109603,
+      "projection_unix_s": 1791077657,
+      "simulated_cu": 41156,
+      "status": "ready"
+    },
+    {
+      "account": "61bjA1AYZebroz8pcZTk7bAtgsuZnz5xDRuiq4xoQjux",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109603,
+      "projection_unix_s": 1791077657,
+      "simulated_cu": 40935,
+      "status": "ready"
+    },
+    {
+      "account": "63zgfiYmY4oZtPs68wqrPnkkGm6YFfoARQUr822AtjZ9",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109604,
+      "projection_unix_s": 1791077657,
+      "simulated_cu": 41156,
+      "status": "ready"
+    },
+    {
+      "account": "6AmM5s6sh5auVEoD37NEu2ZEkQ6mSgz88oBcfi8DQR5W",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109605,
+      "projection_unix_s": 1791077658,
+      "simulated_cu": 84478,
+      "status": "ready"
+    },
+    {
+      "account": "6LWnWdUFViSCuFwbMYpXgSmEp9TrXutF2gZ8WYXqQYvR",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109606,
+      "projection_unix_s": 1791077658,
+      "simulated_cu": 43532,
+      "status": "ready"
+    },
+    {
+      "account": "6amFfsj75EjabG5XpjPjW7UJtKdkvNhiBFxaW6aDTxTd",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109606,
+      "projection_unix_s": 1791077658,
+      "simulated_cu": 43779,
+      "status": "ready"
+    },
+    {
+      "account": "6da1o5b3SeSngBvmrPss8f9bjcqcwjdnCr1cpruHduSk",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109606,
+      "projection_unix_s": 1791077658,
+      "simulated_cu": 41145,
+      "status": "ready"
+    },
+    {
+      "account": "6gLsQq1KXSi2CmbuRssnAzzpp5YTMCUFAJwB6qJQUN4P",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109607,
+      "projection_unix_s": 1791077658,
+      "simulated_cu": 43532,
+      "status": "ready"
+    },
+    {
+      "account": "6kqcwqj9WAkm4nd8r82aHceqAeJzHmjeHsmTcniTn3mP",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109608,
+      "projection_unix_s": 1791077658,
+      "simulated_cu": 55109,
+      "status": "ready"
+    },
+    {
+      "account": "6mScTg4abqWxRhXakmbnts8Lqsp8jYXAxbbudwqX4mSL",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109609,
+      "projection_unix_s": 1791077659,
+      "simulated_cu": 43469,
+      "status": "ready"
+    },
+    {
+      "account": "6w8nLrSCmMMC6ZEk4hzCYCneg7ci8bi48uNdP2aLgTZq",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109610,
+      "projection_unix_s": 1791077659,
+      "simulated_cu": 41057,
+      "status": "ready"
+    },
+    {
+      "account": "6yKSywnfAyjLjNB6XTEfpT3mm9pGHPjHE8wdoNWhvr4A",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109611,
+      "projection_unix_s": 1791077659,
+      "simulated_cu": 40955,
+      "status": "ready"
+    },
+    {
+      "account": "6z8aHik42jkJ2s4rcCnb9DdRzqRbaht4yLHEvLrhXuDW",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109611,
+      "projection_unix_s": 1791077659,
+      "simulated_cu": 41057,
+      "status": "ready"
+    },
+    {
+      "account": "7FDUzzRG41qbodFhpT5BKj5mYjC2t5frkMtCQqk3PNaW",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109613,
+      "projection_unix_s": 1791077660,
+      "simulated_cu": 40733,
+      "status": "ready"
+    },
+    {
+      "account": "7SqnH5nkRfMABG2bp8eERfS4n6BbzPq1ZNDKLJo69tZw",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109613,
+      "projection_unix_s": 1791077660,
+      "simulated_cu": 40733,
+      "status": "ready"
+    },
+    {
+      "account": "7WKajMSX4RH6PLfBPaVnvqn8DqJ8feuttkqHhRhn9X5M",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109614,
+      "projection_unix_s": 1791077660,
+      "simulated_cu": 40733,
+      "status": "ready"
+    },
+    {
+      "account": "7gpDez8zwE2bgYWCtozY8moFM3wJMTsUqrPsiExf2vvX",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109614,
+      "projection_unix_s": 1791077660,
+      "simulated_cu": 70392,
+      "status": "ready"
+    },
+    {
+      "account": "7jjJZbwh8y5onLTnyMuR7LzUx9VeboKkJeYLp28jVzTv",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109615,
+      "projection_unix_s": 1791077660,
+      "simulated_cu": 41159,
+      "status": "ready"
+    },
+    {
+      "account": "7kYcFyXjykQf5d9M1B8p4AXqPxZBXz3XNJuRwLGCZYpK",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109616,
+      "projection_unix_s": 1791077660,
+      "simulated_cu": 43225,
+      "status": "ready"
+    },
+    {
+      "account": "7tENdwZFEENYmqfiMwiMC1nqK3KgYFG6xrqtZYVBpZiy",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109616,
+      "projection_unix_s": 1791077660,
+      "simulated_cu": 41159,
+      "status": "ready"
+    },
+    {
+      "account": "7vUgBj3GSgLr7yZb6qJY7kWUsCd6fcL6iarUSnyiCrbA",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109617,
+      "projection_unix_s": 1791077661,
+      "simulated_cu": 41210,
+      "status": "ready"
+    },
+    {
+      "account": "7zkbDvzcBvxekYzmagLyQ69d1KD7dojhDC4QjuYMnbep",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109618,
+      "projection_unix_s": 1791077661,
+      "simulated_cu": 84323,
+      "status": "ready"
+    },
+    {
+      "account": "82c1ZuJAgeUzvgecbvdX5BFCdsneh5dY3Uass8EoCNkB",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109619,
+      "projection_unix_s": 1791077661,
+      "simulated_cu": 43376,
+      "status": "ready"
+    },
+    {
+      "account": "83UzL8xX38xo1hueyfar2XZbV1aHyZpKdXTuS87gSDX8",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109619,
+      "projection_unix_s": 1791077661,
+      "simulated_cu": 40974,
+      "status": "ready"
+    },
+    {
+      "account": "88MKk7zJF28kq4b9hcteUMuRHSrrzgwqgrMRpzEHveGR",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109620,
+      "projection_unix_s": 1791077662,
+      "simulated_cu": 40967,
+      "status": "ready"
+    },
+    {
+      "account": "8FyNCntYW1v7LVsdWLRCsypaHTWtaKQBUTzsbEdDTzcr",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109621,
+      "projection_unix_s": 1791077662,
+      "simulated_cu": 41119,
+      "status": "ready"
+    },
+    {
+      "account": "8MG3cXeYPULmTfujbcGdoPWdDouGmqeQKvAFHXAZYGVJ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109622,
+      "projection_unix_s": 1791077662,
+      "simulated_cu": 41119,
+      "status": "ready"
+    },
+    {
+      "account": "8MqNTJHyd6DQBJF6t5WdMaB8pL7TAzxi8xJrYxGm7V1V",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109623,
+      "projection_unix_s": 1791077662,
+      "simulated_cu": 43303,
+      "status": "ready"
+    },
+    {
+      "account": "8P8Tc8JyVULPEkphRGC9RhVrpxYPU4LMGX51TEvq5YaP",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109623,
+      "projection_unix_s": 1791077662,
+      "simulated_cu": 40846,
+      "status": "ready"
+    },
+    {
+      "account": "8Q1TZ6Qt6GtDacCxhcu7fcPUKkVFU5MnbcmMG4dWQMZn",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109624,
+      "projection_unix_s": 1791077663,
+      "simulated_cu": 40959,
+      "status": "ready"
+    },
+    {
+      "account": "8QofJPMg2HAaws7S4NdZzDnt26Yi2W2mHSN996FxvojK",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109624,
+      "projection_unix_s": 1791077663,
+      "simulated_cu": 43614,
+      "status": "ready"
+    },
+    {
+      "account": "8Re5oc9BZfzEuhLqnGCsCmWzuRxUkLnkRzt5tdntsfeJ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109625,
+      "projection_unix_s": 1791077663,
+      "simulated_cu": 42560,
+      "status": "ready"
+    },
+    {
+      "account": "8X93D5pKNCvZCBL3VX2t1iALf66fWS2C4YvJaEB3YEQi",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109626,
+      "projection_unix_s": 1791077663,
+      "simulated_cu": 40959,
+      "status": "ready"
+    },
+    {
+      "account": "8bwuWjeLUCkqptcn7pP2tbDS1gXaorcKeG5LbPez7VU3",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109627,
+      "projection_unix_s": 1791077663,
+      "simulated_cu": 43339,
+      "status": "ready"
+    },
+    {
+      "account": "8c2HGMnxMqDjm3i6t4S18VFVy86aMS9kffGGwsynrhAK",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109628,
+      "projection_unix_s": 1791077664,
+      "simulated_cu": 43227,
+      "status": "ready"
+    },
+    {
+      "account": "8cvDVDkFkWfbbvcWwwHJm3qDiYTjiPEASZjaJEhxzSmE",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109629,
+      "projection_unix_s": 1791077664,
+      "simulated_cu": 40922,
+      "status": "ready"
+    },
+    {
+      "account": "8pbE39stCu8eCCXS8eP1FR4Ci5cYXoc9Eb6WtjNGMEYP",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109630,
+      "projection_unix_s": 1791077664,
+      "simulated_cu": 40942,
+      "status": "ready"
+    },
+    {
+      "account": "8tfFWg2U6aRMau3ULcG5oceteGeXSyPVc7XnuLF86dC5",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109631,
+      "projection_unix_s": 1791077664,
+      "simulated_cu": 40942,
+      "status": "ready"
+    },
+    {
+      "account": "8xDE4dyg7KEjUdKiaEUY6caWiyHkbMibtDNNDzhSNxCK",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109632,
+      "projection_unix_s": 1791077665,
+      "simulated_cu": 41135,
+      "status": "ready"
+    },
+    {
+      "account": "95DXnFBYRuB9bP3j1V8CCBTBCkYYDYurFaoqHDNiMfDD",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109633,
+      "projection_unix_s": 1791077665,
+      "simulated_cu": 48568,
+      "status": "ready"
+    },
+    {
+      "account": "96pRxDYsaWXxtXCWkKf5hQNqxmCvvb316Yp1gSykoLJQ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109633,
+      "projection_unix_s": 1791077665,
+      "simulated_cu": 43137,
+      "status": "ready"
+    },
+    {
+      "account": "97vjmre2i2E8et9Ku4yGRNVV2RKdfz78jc6UgCskqN5w",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109634,
+      "projection_unix_s": 1791077665,
+      "simulated_cu": 41135,
+      "status": "ready"
+    },
+    {
+      "account": "9BEFUYsNsASkQFxBMcXis2giLrFL6QEitsZ49YhVC7Pw",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109635,
+      "projection_unix_s": 1791077666,
+      "simulated_cu": 86891,
+      "status": "ready"
+    },
+    {
+      "account": "9FWCJrv2w2H6Ui6c7TgUa8xka88EppWeJdyLVHSipPHH",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109636,
+      "projection_unix_s": 1791077666,
+      "simulated_cu": 40878,
+      "status": "ready"
+    },
+    {
+      "account": "9GwnvvxjEburDpoXpVygTNbrRPPyjmZy5j4KNcAQcSPQ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109637,
+      "projection_unix_s": 1791077666,
+      "simulated_cu": 41156,
+      "status": "ready"
+    },
+    {
+      "account": "9MpiSk4aUq1RieRc4sjDKkZNQWUprfcx9PWBTb2d8kh6",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109637,
+      "projection_unix_s": 1791077666,
+      "simulated_cu": 43602,
+      "status": "ready"
+    },
+    {
+      "account": "9eE1vijNGrnYbSpVs487ByXZqe6oguhBH2MqnEzRddfv",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109638,
+      "projection_unix_s": 1791077666,
+      "simulated_cu": 41156,
+      "status": "ready"
+    },
+    {
+      "account": "9igqSuESay4NPApoHF49hZyt1Z13LRT7326xxvPQGR5X",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109639,
+      "projection_unix_s": 1791077667,
+      "simulated_cu": 55680,
+      "status": "ready"
+    },
+    {
+      "account": "9qh4ytRGt7dhXeMpPuKuPtpHe2ivZ6q2XEaaKmfuNhPX",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109640,
+      "projection_unix_s": 1791077667,
+      "simulated_cu": 87059,
+      "status": "ready"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109641,
+      "projection_unix_s": 1791077667,
+      "simulated_cu": 41153,
+      "status": "ready"
+    },
+    {
+      "account": "ACmGLdkwbqU94bpsJ9NTjo3pxmEABrfBem35uHYFLoxN",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109643,
+      "projection_unix_s": 1791077668,
+      "simulated_cu": 40922,
+      "status": "ready"
+    },
+    {
+      "account": "AH4EFMQQqCCRfsjshq3ekezid9HLrptsizZSFL8Wksvv",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109643,
+      "projection_unix_s": 1791077668,
+      "simulated_cu": 124454,
+      "status": "ready"
+    },
+    {
+      "account": "AXZVzpzTw6F3hN6m6jrtgXzPeWMrmGcnNJM5mCMDDLNp",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109645,
+      "projection_unix_s": 1791077668,
+      "simulated_cu": 43797,
+      "status": "ready"
+    },
+    {
+      "account": "AgPyVXw9mMCYm8qjVotQrVHVkyu6gdYkQKi3S1yKK1vW",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109646,
+      "projection_unix_s": 1791077668,
+      "simulated_cu": 83832,
+      "status": "ready"
+    },
+    {
+      "account": "AifrcY9EBt488g9QuTsySAeRogeXBLPZZvNC7uV3x3Va",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109647,
+      "projection_unix_s": 1791077669,
+      "simulated_cu": 40925,
+      "status": "ready"
+    },
+    {
+      "account": "AjBat6BJJbw6Y4W4Vuho5GDxKyJrXtLo8Dg989dCnWMY",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109647,
+      "projection_unix_s": 1791077669,
+      "simulated_cu": 40925,
+      "status": "ready"
+    },
+    {
+      "account": "AobXiHoLQAFk64TjzwrHnmpvSgrUs476cWo9UJiXRrFN",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109648,
+      "projection_unix_s": 1791077669,
+      "simulated_cu": 43391,
+      "status": "ready"
+    },
+    {
+      "account": "AuZBPvw66vHqi1RdthjbxLm28Y8DH1wQgBajipeoBCYu",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109649,
+      "projection_unix_s": 1791077669,
+      "simulated_cu": 43216,
+      "status": "ready"
+    },
+    {
+      "account": "AwMesGxj4va5tHRntYCLc7UyGqNQzKZ95s3FW941U72Z",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109650,
+      "projection_unix_s": 1791077670,
+      "simulated_cu": 40923,
+      "status": "ready"
+    },
+    {
+      "account": "B2uTgCuFJneFh3RtdekUHcfrjt32hJvRAPsfs7Auwyqb",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109651,
+      "projection_unix_s": 1791077670,
+      "simulated_cu": 43524,
+      "status": "ready"
+    },
+    {
+      "account": "B6w8C7EAgLnF3AtLc8dd8K5pfRAGU4tHHZ9ezQTAbVon",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109652,
+      "projection_unix_s": 1791077670,
+      "simulated_cu": 43059,
+      "status": "ready"
+    },
+    {
+      "account": "B76ZMYREM2su7FepQVP4KHZkuN2tN66JRDgFr5XUgDhe",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109653,
+      "projection_unix_s": 1791077670,
+      "simulated_cu": 43636,
+      "status": "ready"
+    },
+    {
+      "account": "B7pdbZGT1YQbSFSQ6zDLTgnexdCr3Q6GALun1UWos3dx",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109653,
+      "projection_unix_s": 1791077670,
+      "simulated_cu": 41126,
+      "status": "ready"
+    },
+    {
+      "account": "B9AggZcjwhiuzKxWsJJfeM6JDxH3mp1H4BJRj37h7gW1",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109654,
+      "projection_unix_s": 1791077671,
+      "simulated_cu": 41173,
+      "status": "ready"
+    },
+    {
+      "account": "BHpQTrxvsYbvcXRSLyegW3eaLqXjkuWwvxttNm8D1vwc",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109655,
+      "projection_unix_s": 1791077671,
+      "simulated_cu": 41173,
+      "status": "ready"
+    },
+    {
+      "account": "BMU1ixSZVNzKYmB1VUFCGkQuq6sBTxkLwphc3pdTeFTh",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109655,
+      "projection_unix_s": 1791077671,
+      "simulated_cu": 41185,
+      "status": "ready"
+    },
+    {
+      "account": "BXxNcisf7aTwQGDf3N7jqZ134emtXmE3vZQkBRK1cT1u",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109656,
+      "projection_unix_s": 1791077671,
+      "simulated_cu": 81785,
+      "status": "ready"
+    },
+    {
+      "account": "Bd5AwrtxhRfvmEvXkoLvonLfTbLk1SHubC8eepfqgQiQ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109657,
+      "projection_unix_s": 1791077671,
+      "simulated_cu": 41173,
+      "status": "ready"
+    },
+    {
+      "account": "Bemwo7dHZLTaoos6FpAqzv5M9YbEr3ys66mcECkr7eKY",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109657,
+      "projection_unix_s": 1791077671,
+      "simulated_cu": 43580,
+      "status": "ready"
+    },
+    {
+      "account": "BiojZ8KWVBadyCj9CN3ybXgwmSFPqLT6B7nTmXnSjPat",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109658,
+      "projection_unix_s": 1791077672,
+      "simulated_cu": 43414,
+      "status": "ready"
+    },
+    {
+      "account": "Bmomcj3CLsNm4NkSFve5cR2Sb1DWmuh4rAB88jGyGQbV",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109659,
+      "projection_unix_s": 1791077672,
+      "simulated_cu": 95929,
+      "status": "ready"
+    },
+    {
+      "account": "BtodHFGeEAM1ncyb8guKiZuPLjt85kXazzHosByJxsES",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109660,
+      "projection_unix_s": 1791077672,
+      "simulated_cu": 81620,
+      "status": "ready"
+    },
+    {
+      "account": "BzWBwY29ehRDgMsmPwyyQm1LanmvPcqtK8A32n4yJvHm",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109662,
+      "projection_unix_s": 1791077673,
+      "simulated_cu": 40946,
+      "status": "ready"
+    },
+    {
+      "account": "C2NNQo673cKt1JHCa6hbGvTgkhGzzFbhWVdLHUM9Eby2",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109662,
+      "projection_unix_s": 1791077673,
+      "simulated_cu": 40999,
+      "status": "ready"
+    },
+    {
+      "account": "C2dPkgVF8pP1G6inPwUGbVEjaRBuWtXSnYZwm9ezALqk",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109663,
+      "projection_unix_s": 1791077673,
+      "simulated_cu": 84168,
+      "status": "ready"
+    },
+    {
+      "account": "C5D3EBDJBLGPa7P1JMgp4dK9bns2pWBkZ1UrAAdLSgdD",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109664,
+      "projection_unix_s": 1791077673,
+      "simulated_cu": 43370,
+      "status": "ready"
+    },
+    {
+      "account": "CCEJvBshbXJWG5D4BGE5qgAx6VahPN8829r79EXYhr3t",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109665,
+      "projection_unix_s": 1791077674,
+      "simulated_cu": 43639,
+      "status": "ready"
+    },
+    {
+      "account": "CEhy99ww6Lya6cQi5PcLXqKr8Dnc3BMzLt41XF9RmdpG",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109666,
+      "projection_unix_s": 1791077674,
+      "simulated_cu": 41130,
+      "status": "ready"
+    },
+    {
+      "account": "CFtjTff7dhrvUnq1gjv2Pb2hECvQ5zcNzKAMkdLKQCvL",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109667,
+      "projection_unix_s": 1791077674,
+      "simulated_cu": 40989,
+      "status": "ready"
+    },
+    {
+      "account": "CGnzJGWscJAasjwngK1Jixx4xHfxF5EZaMje6uRtnbMy",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109667,
+      "projection_unix_s": 1791077674,
+      "simulated_cu": 40837,
+      "status": "ready"
+    },
+    {
+      "account": "CHwGKHHuHRCG9Y7JgwbTsV2ZYVE7M2tag2xbdccc3xFZ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109668,
+      "projection_unix_s": 1791077674,
+      "simulated_cu": 41130,
+      "status": "ready"
+    },
+    {
+      "account": "CLUBXC3TqueQB4hQoQ2nqhfu1uWVv87beZxGsnvhZijw",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109668,
+      "projection_unix_s": 1791077674,
+      "simulated_cu": 43639,
+      "status": "ready"
+    },
+    {
+      "account": "CUmsRvndb6WkVvdqu76185Sg5Mts4sDiRtVayQWac279",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109669,
+      "projection_unix_s": 1791077675,
+      "simulated_cu": 43799,
+      "status": "ready"
+    },
+    {
+      "account": "CX8vrXHAv9zw3QM7QBidjuLX8Nzzy2dQgNABurBeoi7W",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109670,
+      "projection_unix_s": 1791077675,
+      "simulated_cu": 43228,
+      "status": "ready"
+    },
+    {
+      "account": "CZ3GAwfHpgVtTZErHB8WaUX9cRmwjdjfcFFmK7qanCo4",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109670,
+      "projection_unix_s": 1791077675,
+      "simulated_cu": 40818,
+      "status": "ready"
+    },
+    {
+      "account": "CwB61gRfhi89XReUyv5dVRchRaZmLdG2CkTDHxzSQL5i",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109671,
+      "projection_unix_s": 1791077675,
+      "simulated_cu": 41161,
+      "status": "ready"
+    },
+    {
+      "account": "CzXpMUCE5zAdgCsTLs9ejoTUu1YVcQeb6Rq3udV51ncc",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109672,
+      "projection_unix_s": 1791077675,
+      "simulated_cu": 40818,
+      "status": "ready"
+    },
+    {
+      "account": "D6qNo7tMsXgKK5Wa288LraxggaLYcbzHwbE3ERScWd35",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109672,
+      "projection_unix_s": 1791077675,
+      "simulated_cu": 43601,
+      "status": "ready"
+    },
+    {
+      "account": "DAZxnKUUwtDYHBpHHf1Jh5D7N2zbfdSc2dXztwPMx4yR",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453109673,
+      "projection_unix_s": 1791077676,
+      "simulated_cu": 58501,
+      "status": "ready"
+    },
+    {
+      "account": "DCu76HXsv32fYbT68rb63vWKrBmp5ukG7boxQi1DL3sj",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109674,
+      "projection_unix_s": 1791077676,
+      "simulated_cu": 40974,
+      "status": "ready"
+    },
+    {
+      "account": "DDqRpCYhiGetNsxRiNKYs74pqDYZfgZPyCu1JiKzDQNo",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109675,
+      "projection_unix_s": 1791077676,
+      "simulated_cu": 40944,
+      "status": "ready"
+    },
+    {
+      "account": "DLgmbqzDHWpbng6aSs4y96pPYawxYhBRY2E9WE5Wv8jQ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109675,
+      "projection_unix_s": 1791077676,
+      "simulated_cu": 40944,
+      "status": "ready"
+    },
+    {
+      "account": "DT6YXUmYScKd5mHb5sEztoCRB2jcxEvkP5MdFoaTjZBg",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109676,
+      "projection_unix_s": 1791077676,
+      "simulated_cu": 40974,
+      "status": "ready"
+    },
+    {
+      "account": "DfF1o28arXikmr4pK2fDyFpPvZywCQcJoN9Hkvd4xt4n",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109678,
+      "projection_unix_s": 1791077677,
+      "simulated_cu": 41128,
+      "status": "ready"
+    },
+    {
+      "account": "DoSkBNnDYEHUohCxktBdYULWtjDsxKeVJSxcKB5tQL9Y",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109678,
+      "projection_unix_s": 1791077677,
+      "simulated_cu": 83646,
+      "status": "ready"
+    },
+    {
+      "account": "DsqJUeWJGy49zfaEXc4AqmTgJLLV2un98QCyytGiTHAx",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109678,
+      "projection_unix_s": 1791077677,
+      "simulated_cu": 33975,
+      "status": "ready"
+    },
+    {
+      "account": "Du6njqygnuSe7rBpAga1S8jWsYNPr9CnZYdNPKHMm5AX",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109679,
+      "projection_unix_s": 1791077677,
+      "simulated_cu": 41128,
+      "status": "ready"
+    },
+    {
+      "account": "E1aTZW8EeHoYfXpyLoyQAmR8pp1D3qDxev3DbgypVkfq",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109680,
+      "projection_unix_s": 1791077678,
+      "simulated_cu": 41036,
+      "status": "ready"
+    },
+    {
+      "account": "ECVrfyFaV89WtVK99LrjgLTSB52EhLcQNxggJ6SvbxMh",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109681,
+      "projection_unix_s": 1791077678,
+      "simulated_cu": 41036,
+      "status": "ready"
+    },
+    {
+      "account": "EFYYTpba3ELtHVFS21nwqw44yaJytT7k1eBNrx6r2LRL",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109682,
+      "projection_unix_s": 1791077678,
+      "simulated_cu": 41036,
+      "status": "ready"
+    },
+    {
+      "account": "EFZkNoJQ8aFhM7o8yVcG2hYmQwbrSSfFMtu8RArygX3X",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109683,
+      "projection_unix_s": 1791077678,
+      "simulated_cu": 40934,
+      "status": "ready"
+    },
+    {
+      "account": "EJPSuKhrcJtWJb6vPGPEUimAMPP56nNwz59w6VVJjjr6",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109683,
+      "projection_unix_s": 1791077678,
+      "simulated_cu": 43576,
+      "status": "ready"
+    },
+    {
+      "account": "EJcREdTftohjWfVfkqjv2HPikdWeopfsDchTQsfZLU4h",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109684,
+      "projection_unix_s": 1791077679,
+      "simulated_cu": 40916,
+      "status": "ready"
+    },
+    {
+      "account": "EN5mTs6Dfn49TcyfjaTcTbRYWfUzMyfsL91sDBYqmzvM",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109685,
+      "projection_unix_s": 1791077679,
+      "simulated_cu": 40959,
+      "status": "ready"
+    },
+    {
+      "account": "EpprryzVLnC6ZfzMhNr1WAv8pSNRXWYtMZan8cozSEtC",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109686,
+      "projection_unix_s": 1791077679,
+      "simulated_cu": 43217,
+      "status": "ready"
+    },
+    {
+      "account": "ExhCsmjiujbH25ddS6ow4mK4expBLqTfDjai6Zty46tr",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109688,
+      "projection_unix_s": 1791077680,
+      "simulated_cu": 43828,
+      "status": "ready"
+    },
+    {
+      "account": "F2VhtpikuxoCXBXHZzLFCtH8ckGRdo2ccaU4kguDDyBH",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109689,
+      "projection_unix_s": 1791077680,
+      "simulated_cu": 81559,
+      "status": "ready"
+    },
+    {
+      "account": "F5nPiycVsFoMpFqE1ghaXhunb8DapF1fpAf6m7BERiDZ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109690,
+      "projection_unix_s": 1791077680,
+      "simulated_cu": 38399,
+      "status": "ready"
+    },
+    {
+      "account": "FPHnj6jJsRUwJ3btDxTdMDQfyrd77vBaQcUw1euXSUpT",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109691,
+      "projection_unix_s": 1791077681,
+      "simulated_cu": 79675,
+      "status": "ready"
+    },
+    {
+      "account": "FSZmqUDyENsifKFETYGUfF7QuV9LCyiroARdpyRV6vfh",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109691,
+      "projection_unix_s": 1791077681,
+      "simulated_cu": 38823,
+      "status": "ready"
+    },
+    {
+      "account": "FTmJRmbnipQUTokKBDRuMBJ1cTsa1g79cqNdcKB9ho84",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109692,
+      "projection_unix_s": 1791077681,
+      "simulated_cu": 41715,
+      "status": "ready"
+    },
+    {
+      "account": "FVqCb1LfRzCRFbuvi6PnqLDVM6WZmYRLuB3PAA8Q9fVR",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109693,
+      "projection_unix_s": 1791077681,
+      "simulated_cu": 43421,
+      "status": "ready"
+    },
+    {
+      "account": "FbDMnCfGGVFo3kZwvbhLavgwgyxmJ1h9jaVUEJWcDf1X",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109694,
+      "projection_unix_s": 1791077681,
+      "simulated_cu": 43782,
+      "status": "ready"
+    },
+    {
+      "account": "Fpyn9mzfoHjdX8zJYYQ1AUkYdZe1ereiiDduUf5Ruf7C",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109695,
+      "projection_unix_s": 1791077682,
+      "simulated_cu": 43597,
+      "status": "ready"
+    },
+    {
+      "account": "FqPRdHh9eybqL5EACQfYwvp3ky4xfovToCW3XvmZgAK5",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109696,
+      "projection_unix_s": 1791077682,
+      "simulated_cu": 41031,
+      "status": "ready"
+    },
+    {
+      "account": "FuNhzGJ54Yx218SNFHkxsmCdifgtA81nhSyZFFASoZHs",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109696,
+      "projection_unix_s": 1791077682,
+      "simulated_cu": 43633,
+      "status": "ready"
+    },
+    {
+      "account": "FuofrAkdvwrYSoTs823EYmaMeJsmKj1GFdyaAqa5PCCg",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109698,
+      "projection_unix_s": 1791077683,
+      "simulated_cu": 40981,
+      "status": "ready"
+    },
+    {
+      "account": "FwBadkrST2bQiVuXoZp2GFpdRE6xnQXa9dHM7BW5cqgZ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109698,
+      "projection_unix_s": 1791077683,
+      "simulated_cu": 39003,
+      "status": "ready"
+    },
+    {
+      "account": "FyZJnB4C9epyhx571entWrCZEK8YEdUvCa4A5MUwqewZ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109699,
+      "projection_unix_s": 1791077683,
+      "simulated_cu": 126886,
+      "status": "ready"
+    },
+    {
+      "account": "G8mwjg7z1otedDhm5beHFjV3pqKzjSrjn4rSHqaEgu96",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109700,
+      "projection_unix_s": 1791077683,
+      "simulated_cu": 40981,
+      "status": "ready"
+    },
+    {
+      "account": "GGVQMGNAagbWBNgPNonfxdSv2jTcypPxULx2cQfn8MzQ",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109701,
+      "projection_unix_s": 1791077683,
+      "simulated_cu": 79684,
+      "status": "ready"
+    },
+    {
+      "account": "GZCV7DN7FZVtVbXqZaALQ1UkuXXcFJHEzWFMURQ656ah",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109703,
+      "projection_unix_s": 1791077684,
+      "simulated_cu": 40911,
+      "status": "ready"
+    },
+    {
+      "account": "Gc5WqYKnTxJAQ6ggEFGZZHdkUbJM9RNjvMV59pRicjXn",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109703,
+      "projection_unix_s": 1791077684,
+      "simulated_cu": 40990,
+      "status": "ready"
+    },
+    {
+      "account": "GiyiY7JXYkEY9sm4BH8TxaSSakDqKzW1j2jtMjYSNDUK",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109704,
+      "projection_unix_s": 1791077684,
+      "simulated_cu": 43417,
+      "status": "ready"
+    },
+    {
+      "account": "GqgFAVMjY5khRaGAudnvBXQMxJor2UHyaPnD3ijSrS6v",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109705,
+      "projection_unix_s": 1791077684,
+      "simulated_cu": 40990,
+      "status": "ready"
+    },
+    {
+      "account": "GrJS3Z1Z7XHzF9VvKjZj6KYYpBP5HgTEbuJaZ45uiQ61",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109706,
+      "projection_unix_s": 1791077685,
+      "simulated_cu": 43593,
+      "status": "ready"
+    },
+    {
+      "account": "H2ee8ZQ2CmoG5UroSrEwPy3oHfrKyFinR7aZopQ31ruy",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109707,
+      "projection_unix_s": 1791077685,
+      "simulated_cu": 43653,
+      "status": "ready"
+    },
+    {
+      "account": "H7k8ac9qVo6H1Spfm25JABozxRnh5CM5d1HauF2VBtAg",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109708,
+      "projection_unix_s": 1791077685,
+      "simulated_cu": 43626,
+      "status": "ready"
+    },
+    {
+      "account": "HCdtjVhXKdxmguEcMXZaoRmVSg4f14i597P8HTYuFq2W",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109710,
+      "projection_unix_s": 1791077686,
+      "simulated_cu": 44114,
+      "status": "ready"
+    },
+    {
+      "account": "HM2NynjcjTgFoCyLxTrDLuLnnbCp9UuwdzCgtZgLDtGv",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109711,
+      "projection_unix_s": 1791077686,
+      "simulated_cu": 43790,
+      "status": "ready"
+    },
+    {
+      "account": "HMRML6yEES4wCe2Etq9UUesqr9eFhNkc9SkMN9yM4eDn",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109711,
+      "projection_unix_s": 1791077686,
+      "simulated_cu": 43270,
+      "status": "ready"
+    },
+    {
+      "account": "HXUV9AwF5mVSuXgNHZGQyL37q4rErrqqrRuwpka3FkXf",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109711,
+      "projection_unix_s": 1791077686,
+      "simulated_cu": 40902,
+      "status": "ready"
+    },
+    {
+      "account": "HdQxskT6Y28pQzMUr7PVYzS8b3XfLiSHZV7Eq4ZBZw4e",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109712,
+      "projection_unix_s": 1791077686,
+      "simulated_cu": 43370,
+      "status": "ready"
+    },
+    {
+      "account": "Hk9huDFbCG38cw7nHCwiTbLZa2nqbPPuc6Y3fy6SZYSt",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109713,
+      "projection_unix_s": 1791077686,
+      "simulated_cu": 40990,
+      "status": "ready"
+    },
+    {
+      "account": "HmvnFVve17tCDaZGsrLEyi2J6KkAiqfN7awfZeoC5bf4",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109714,
+      "projection_unix_s": 1791077686,
+      "simulated_cu": 43436,
+      "status": "ready"
+    },
+    {
+      "account": "Hx7eh4rVA5zTc9u2UdCvXa7S4d4hM3eD6dG9d8rktVhS",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109715,
+      "projection_unix_s": 1791077687,
+      "simulated_cu": 40930,
+      "status": "ready"
+    },
+    {
+      "account": "J1D3qZk7RfugJazbx8YtEuABNTWgy4k69WaU6r8zixvK",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109716,
+      "projection_unix_s": 1791077687,
+      "simulated_cu": 40990,
+      "status": "ready"
+    },
+    {
+      "account": "J1FXYsoxFUqti7nF5t7L7noad1kLiEC5bv4qSVdxVaGA",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109716,
+      "projection_unix_s": 1791077687,
+      "simulated_cu": 43397,
+      "status": "ready"
+    },
+    {
+      "account": "JDcs6cq6aN5f56vrW5UqYGXxiNXfcQvALGeYrxdKHTEB",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453109718,
+      "projection_unix_s": 1791077688,
+      "simulated_cu": 126771,
+      "status": "ready"
+    },
+    {
+      "account": "2okWWtoZnx8Po54tC9wVRbikZZQCw9ZTrW2u8Gqat4F2",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109718,
+      "projection_unix_s": 1791077688,
+      "simulated_cu": 15256,
+      "status": "ready"
+    },
+    {
+      "account": "2q4dFdZozyZ1M7ZyipUxzyS8rpcJhrLMnqvpKo5UPBkF",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109719,
+      "projection_unix_s": 1791077688,
+      "simulated_cu": 14431,
+      "status": "ready"
+    },
+    {
+      "account": "35DC55yRDS2oN5hEu48buH4bZnRNz9h5ad11gstjqLcu",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109719,
+      "projection_unix_s": 1791077688,
+      "simulated_cu": 15404,
+      "status": "ready"
+    },
+    {
+      "account": "37dSpxDAcMKc8ejt2EoEWLBxRFJ2GhzMXN4Uq33Hks4T",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109720,
+      "projection_unix_s": 1791077689,
+      "simulated_cu": 15404,
+      "status": "ready"
+    },
+    {
+      "account": "3jeURUvk9zGGVGfBzGY2MCeMeAtxnkgaerKmJ4JuTcTz",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109720,
+      "projection_unix_s": 1791077689,
+      "simulated_cu": 15448,
+      "status": "ready"
+    },
+    {
+      "account": "3ygcRYjWRe4ijw4mtxrfgmVqV9PhDmHvHJgmmqPsBeKB",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109721,
+      "projection_unix_s": 1791077689,
+      "simulated_cu": 14429,
+      "status": "ready"
+    },
+    {
+      "account": "4AQbQxc9KhVRnbp4Cd4owA8tqHhHLF4sS1kX455qWz98",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109722,
+      "projection_unix_s": 1791077689,
+      "simulated_cu": 14429,
+      "status": "ready"
+    },
+    {
+      "account": "4f31DKbf3dvoYX3ig5igCayEuS32u2HDi1N7cYZV6S4T",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109723,
+      "projection_unix_s": 1791077689,
+      "simulated_cu": 15452,
+      "status": "ready"
+    },
+    {
+      "account": "5TRKSP86b24Dqq8YfZTnrZ8qhrMa3AbNZ8BvvWwoFun4",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109723,
+      "projection_unix_s": 1791077689,
+      "simulated_cu": 14429,
+      "status": "ready"
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109724,
+      "projection_unix_s": 1791077690,
+      "simulated_cu": 15447,
+      "status": "ready"
+    },
+    {
+      "account": "6D41Rm9JJs3iywfCFnwdDGrHcdLv5UokmRpfQoztKopB",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109724,
+      "projection_unix_s": 1791077690,
+      "simulated_cu": 14429,
+      "status": "ready"
+    },
+    {
+      "account": "6S6w6FBUcH8tAgk38HdMAQ48uY6wmQc288w3jEv6ng2c",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109725,
+      "projection_unix_s": 1791077690,
+      "simulated_cu": 14429,
+      "status": "ready"
+    },
+    {
+      "account": "6YidWm7ki9jGVfDCn42SVhpVScxHYyjv7mkxZrhDn7KS",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109726,
+      "projection_unix_s": 1791077690,
+      "simulated_cu": 14429,
+      "status": "ready"
+    },
+    {
+      "account": "6fzRsFZ29ppmdtBWjiF1f8PW6fjm321QqM1NZUQJH3pr",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109727,
+      "projection_unix_s": 1791077691,
+      "simulated_cu": 15402,
+      "status": "ready"
+    },
+    {
+      "account": "6jvwGhm3AxJckJU5H8ZUk4QazjwsXKBbTkjpEtRHhA1s",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109727,
+      "projection_unix_s": 1791077691,
+      "simulated_cu": 14429,
+      "status": "ready"
+    },
+    {
+      "account": "7WQa48KRy7HvBMCMU8UrUTCdjZV73yE3QGKbs4iuabot",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109728,
+      "projection_unix_s": 1791077691,
+      "simulated_cu": 15454,
+      "status": "ready"
+    },
+    {
+      "account": "7sS1vF2aoFvBSPK3XcyC5sXFoWT9rYaTvbdB1L6Z6xD1",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109729,
+      "projection_unix_s": 1791077691,
+      "simulated_cu": 15450,
+      "status": "ready"
+    },
+    {
+      "account": "8Twi8YVZg9pVrZhLomcKpsccd3VgTCiDioc1Xq2CVuud",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109730,
+      "projection_unix_s": 1791077692,
+      "simulated_cu": 14430,
+      "status": "ready"
+    },
+    {
+      "account": "8TxLm9bzj85kkSWbQjvRt44VsSKf6PM6j4t24o74E8go",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109730,
+      "projection_unix_s": 1791077692,
+      "simulated_cu": 15448,
+      "status": "ready"
+    },
+    {
+      "account": "8gJW41Z4XcgGQNUDoGk2ew464D7YPvHRGbWn6ySYX1wt",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109731,
+      "projection_unix_s": 1791077692,
+      "simulated_cu": 14430,
+      "status": "ready"
+    },
+    {
+      "account": "936bRq8QwjbHtBSPibsxjBozgb45Vy2fg9mEny87RRyf",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109732,
+      "projection_unix_s": 1791077692,
+      "simulated_cu": 14430,
+      "status": "ready"
+    },
+    {
+      "account": "9A6r3FZaGYwTfraQFdbnR81KCKRRvk19rJNTfrcLW8zy",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109733,
+      "projection_unix_s": 1791077692,
+      "simulated_cu": 15402,
+      "status": "ready"
+    },
+    {
+      "account": "AMf46GrxmZZqRvBUsBBXMYfq3AMwHAf4MmNxfEZmJssR",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109734,
+      "projection_unix_s": 1791077693,
+      "simulated_cu": 15403,
+      "status": "ready"
+    },
+    {
+      "account": "Ba94HeSdT7xZNQxbzKgtuSRS24nTtKZuu3ek2ZgAYxyi",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109734,
+      "projection_unix_s": 1791077693,
+      "simulated_cu": 15403,
+      "status": "ready"
+    },
+    {
+      "account": "CkB4AW8QcvSQZsjSr2weUkAjN2ZdMPVdDKdNkBdrJaGK",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109735,
+      "projection_unix_s": 1791077693,
+      "simulated_cu": 15450,
+      "status": "ready"
+    },
+    {
+      "account": "D3Z7d75QhTPnkDk8qdViVL186o38gb6TSBQBdqXsj4NN",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109736,
+      "projection_unix_s": 1791077693,
+      "simulated_cu": 15403,
+      "status": "ready"
+    },
+    {
+      "account": "DQmJERf2WU88gVimPxKTXmMEBwn3mDycHEkAv9jdtM5H",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109737,
+      "projection_unix_s": 1791077693,
+      "simulated_cu": 15447,
+      "status": "ready"
+    },
+    {
+      "account": "DrcYEGY273H9ihy7qrmuuiqaGaDGXVD4E2BApUuRs7mo",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109738,
+      "projection_unix_s": 1791077694,
+      "simulated_cu": 14431,
+      "status": "ready"
+    },
+    {
+      "account": "EJVaxyr1bFbCUBx8GBEbbnJzcQ2PxDDNfV7QsycqZuFs",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109739,
+      "projection_unix_s": 1791077694,
+      "simulated_cu": 15600,
+      "status": "ready"
+    },
+    {
+      "account": "EzxC8YDJLPcLJwgkyLsMMq6KyLEVX3kkSUBi3RLqyyGo",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109740,
+      "projection_unix_s": 1791077694,
+      "simulated_cu": 14431,
+      "status": "ready"
+    },
+    {
+      "account": "FhA43csg29h9UjDUj3pEpfRvzrYVa8fg5C6idkVW2kpe",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109740,
+      "projection_unix_s": 1791077694,
+      "simulated_cu": 14431,
+      "status": "ready"
+    },
+    {
+      "account": "GBnV3kwYVbGwjJF7T4Tqz7QMDdyU2sEskMum5Z1SQ49e",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109741,
+      "projection_unix_s": 1791077694,
+      "simulated_cu": 7861,
+      "status": "ready"
+    },
+    {
+      "account": "GmZ64Ag8AEYkQFmYavuZ3psd9iGdxSZVaNLCDnBXTCh5",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109742,
+      "projection_unix_s": 1791077694,
+      "simulated_cu": 7910,
+      "status": "ready"
+    },
+    {
+      "account": "HjEzpSsFZRQdVfL5UQKZWDZqmuPQiNcBkxvKwLmKcRoU",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109743,
+      "projection_unix_s": 1791077695,
+      "simulated_cu": 14429,
+      "status": "ready"
+    },
+    {
+      "account": "Htt7zSrskpYbkE6tm7i12CmUJ21CF5ztJJAaW6DPhPVk",
+      "base_slot": 453109452,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453109744,
+      "projection_unix_s": 1791077695,
+      "simulated_cu": 14429,
+      "status": "ready"
+    }
+  ],
+  "liquidatable_health": [
+    {
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "bad_debt": true,
+      "equity_assets_bits": 0,
+      "evaluation_slot": 453109565,
+      "evaluation_unix_s": 1791077647,
+      "liquidatable": true,
+      "maint_health_bits": -61099244330381,
+      "slot": 453109452,
+      "t_rx_ns": 32875075833,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "bad_debt": true,
+      "equity_assets_bits": 11091696503969,
+      "evaluation_slot": 453109641,
+      "evaluation_unix_s": 1791077667,
+      "liquidatable": true,
+      "maint_health_bits": -26257494662535759,
+      "slot": 453109452,
+      "t_rx_ns": 53318358000,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "bad_debt": true,
+      "equity_assets_bits": 93817898865860,
+      "evaluation_slot": 453109724,
+      "evaluation_unix_s": 1791077690,
+      "liquidatable": true,
+      "maint_health_bits": -9601243264913,
+      "slot": 453109452,
+      "t_rx_ns": 75951540708,
+      "trigger": "integration_projection"
+    }
+  ],
+  "nonhealthy_decisions": [
+    {
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "decision": "Skip",
+      "loss": "Bankruptcy",
+      "reason": "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "decision": "Skip",
+      "loss": "EconomicSkip",
+      "reason": "ZERO_PREFUND_SAME_TX: tx infeasible: tx v1 signing/submission adapter not enabled; v1 capability measurement is available with feature txv1 | ZERO_PREFUND_SAME_TX: tx infeasible: transaction too large: 1575 > 1232"
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "decision": "Skip",
+      "loss": "MissingAta",
+      "reason": "ATA:PREWARM_REQUIRED: asset ATA=AFA7wz6gLyiYBxeQKPQNc6qr67xjQi6p1Y2pqwBP3uQS mint=Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB token_program=TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    }
+  ]
+}
