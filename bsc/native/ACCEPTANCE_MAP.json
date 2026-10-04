@@ -4,8 +4,8 @@
   "purpose": "Machine-readable companion to the acceptance matrix. The master plan stays the human-readable source; this file adds symbols, test names and evidence hashes.",
   "path_convention": "All evidence paths are repository paths. A path of the form <zip>::<member> names a member inside a ZIP that is itself in the repository.",
   "unit1_source": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip (rustfmt-normalised sources and Cargo.lock), copied unchanged; only crates/darkbot-core/src/lib.rs differs (module list)",
-  "compiler_run": "Units 1-4: combined tree PASS on the user's target system (2026-10-04): cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings.",
-  "freeze_status": "Units 1-4 are IMPLEMENTED_TESTED and FROZEN for their defined scopes. Q1/live state remains PARTIAL and TRACKED_DEFERRED to C2. Unit 5 inclusion adapters are the next task and are not yet implemented/tested.",
+  "compiler_run": "Units 1-5: combined tree PASS on the user's target system (2026-10-04): cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings.",
+  "freeze_status": "Units 1-4 remain IMPLEMENTED_TESTED and FROZEN for their defined scopes. Unit 5 Core is IMPLEMENTED_TESTED and FROZEN for its defined scope after the combined Units 1-5 target-system acceptance run. Unit 5 runner/transport implementation and real provider qualification remain pending. LIVE remains BLOCKED and T0 to T_buy below 1 ms is NOT YET PROVEN.",
   "test_count": {
     "total": 182,
     "unit1": 27,
@@ -496,7 +496,7 @@
       "matrix_id": "S2",
       "adoption": "SN12",
       "unit": "Unit 5 (core: capability records and submission plan)",
-      "status": "UNTESTED; runner NOT IMPLEMENTED; LIVE BLOCKED; T0 to T_buy below 1 ms NOT YET PROVEN",
+      "status": "IMPLEMENTED_TESTED, FROZEN for Unit 5 Core scope; runner NOT IMPLEMENTED; real provider qualification OPEN; LIVE BLOCKED; T0 to T_buy below 1 ms NOT YET PROVEN",
       "evidence": [
         {
           "path": "bsc/native/crates/darkbot-core/fixtures/inclusion/club48_builder_send_bundle.capability.json",
@@ -620,7 +620,7 @@
         "darkbot-core::inclusion::tests::nothing_revokes_bytes_that_may_have_left",
         "darkbot-core::inclusion::tests::one_adapter_expired_unstarted_while_another_disclosed"
       ],
-      "result": "NOT_RUN: Unit 5 has not been compiled; no Rust toolchain in the authoring environment",
+      "result": "PASS on the user's target system (2026-10-04): Unit 5 Core contributes 55 tests; combined Units 1-5 inventory is 182 tests. cargo fmt --all -- --check PASS; cargo test --workspace --locked --offline PASS; cargo test --workspace --release --locked --offline PASS; cargo clippy --workspace --all-targets --locked --offline -- -D warnings PASS.",
       "coverage": "Frozen capability records with chain scope; lifecycle properties recorded as what the evidence states and, separately, whether this product qualified them (order, atomicity, same block, extraction, provider rebroadcast, provider public fallback, downstream recipients, public exposure on submission, reorg exposure after inclusion); adapter binding; release profile BirthEntryV1 with required envelope options per adapter, a block window of head to head plus two enforced in the full final check, and a transport start limit of at most 1,000,000 ns; release qualification as a typed gate (QualifiedReleasePlan) distinct from a diagnostic plan, requiring per adapter the established lifecycle properties, a qualified send boundary and, for every provider feature the plan actually uses (noMerge, positionFirst, expiry by block or timestamp, pre-submission), support and qualification of that very feature; the three submission cases; launch bound to the pending candidate; own-launch facts read from signed bytes; binding of the plan to the intent lane dispatch; pre-submission as a separate capability; local block bound, transport start deadline, provider validity and transaction validity as separate bounds; budget by component and total; after-handoff model. No transport, framing, response parsing or timing instrumentation: those are the runner part of Unit 5.",
       "not_proven": "real provider behaviour for any enabled feature, including how 48Club places a bundle with positionFirst; release eligibility of any adapter (no lifecycle property and no provider feature of any frozen record is qualified, so no plan can be qualified for a release; an enabled feature is documented, not proven); pre-submission of a controlled self-launch before its launch was broadcast (unqualified for every adapter); the gas-price rule of either builder (documented, exact form not established, nothing enforced); 48Club minTimestamp and backrunTarget, BlockRazor positionFirst (unqualified); single private transaction APIs (unqualified); that the bytes of a third-party launch are a valid launch of the candidate (bound by hash only; decoding foreign envelopes is ingress); a direct provider payment (no carrier transaction exists: any claim is refused); that the transport deadline is read on a real monotonic clock and checked immediately before every permit (the contract exists; the read and its placement are the runner part); that a release path accepts only a QualifiedReleasePlan (the type exists; the path that takes it is the runner part); local-geth outbound handoff (C1); funding and balance (C2/Unit 6)"
     }
