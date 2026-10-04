@@ -98,21 +98,47 @@ pub mod builders {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn repay(program: &Pubkey, group: &Pubkey, marginfi_account: &Pubkey, authority: &Pubkey, bank: &Pubkey,
-                 signer_token_account: &Pubkey, liquidity_vault: &Pubkey, token_program: &Pubkey,
-                 amount: u64, repay_all: Option<bool>) -> Instruction {
+    pub fn repay(
+        program: &Pubkey,
+        group: &Pubkey,
+        marginfi_account: &Pubkey,
+        authority: &Pubkey,
+        bank: &Pubkey,
+        mint: &Pubkey,
+        signer_token_account: &Pubkey,
+        liquidity_vault: &Pubkey,
+        token_program: &Pubkey,
+        amount: u64,
+        repay_all: Option<bool>,
+        observation: &[Pubkey],
+    ) -> Instruction {
+        let mut accounts = marginfi::accounts::LendingAccountRepay {
+            group: *group,
+            marginfi_account: *marginfi_account,
+            authority: *authority,
+            bank: *bank,
+            signer_token_account: *signer_token_account,
+            liquidity_vault: *liquidity_vault,
+            token_program: *token_program,
+        }
+        .to_account_metas(Some(true));
+
+        // Pinned p0-cli/test-utils parity:
+        // - Token-2022 repay requires the mint as the first remaining account so transfer-fee
+        //   semantics can calculate the exact pre-fee SPL deposit.
+        // - repay_all performs a health observation because it closes the balance. During
+        //   receivership the closing bank remains observable for this instruction even though
+        //   it must be omitted from EndLiquidation after the balance is closed.
+        if *token_program == pk(protocol::TOKEN_2022_PROGRAM_ID) {
+            accounts.push(AccountMeta::new_readonly(*mint, false));
+        }
+        if repay_all.unwrap_or(false) {
+            accounts.extend(obs(observation));
+        }
+
         Instruction {
             program_id: *program,
-            accounts: marginfi::accounts::LendingAccountRepay {
-                group: *group,
-                marginfi_account: *marginfi_account,
-                authority: *authority,
-                bank: *bank,
-                signer_token_account: *signer_token_account,
-                liquidity_vault: *liquidity_vault,
-                token_program: *token_program,
-            }
-            .to_account_metas(Some(true)),
+            accounts,
             data: marginfi::instruction::LendingAccountRepay { amount, repay_all }.data(),
         }
     }
@@ -337,5 +363,66 @@ pub mod builders {
         v.extend(p.repays);
         v.push(end_liquidation(p.program, p.marginfi_account, p.group, p.liquidator, p.global_fee_wallet, &p.end_banks));
         v
+    }
+
+    #[cfg(test)]
+    mod repay_all_tests {
+        use super::*;
+        use anchor_lang::Discriminator;
+
+        fn p() -> Pubkey { Pubkey::new_unique() }
+
+        #[test]
+        fn repay_all_carries_observation_accounts() {
+            let program = p();
+            let group = p();
+            let account = p();
+            let authority = p();
+            let bank = p();
+            let mint = p();
+            let token_account = p();
+            let vault = p();
+            let token_program = pk(protocol::TOKEN_PROGRAM_ID);
+            let obs_keys = vec![p(), p(), p()];
+
+            let ix = repay(
+                &program, &group, &account, &authority, &bank, &mint,
+                &token_account, &vault, &token_program, 11, Some(true), &obs_keys,
+            );
+
+            assert_eq!(ix.program_id, program);
+            assert!(obs_keys.iter().all(|key|
+                ix.accounts.iter().any(|m| m.pubkey == *key && !m.is_writable && !m.is_signer)
+            ));
+            assert!(ix.data.starts_with(&marginfi::instruction::LendingAccountRepay::DISCRIMINATOR));
+        }
+
+        #[test]
+        fn partial_repay_does_not_append_health_observation() {
+            let program = p();
+            let token_program = pk(protocol::TOKEN_PROGRAM_ID);
+            let obs_key = p();
+            let ix = repay(
+                &program, &p(), &p(), &p(), &p(), &p(), &p(), &p(), &token_program,
+                7, None, &[obs_key],
+            );
+            assert!(!ix.accounts.iter().any(|m| m.pubkey == obs_key));
+        }
+
+        #[test]
+        fn token_2022_repay_includes_mint_before_repay_all_observation() {
+            let program = p();
+            let mint = p();
+            let observation = p();
+            let token_program = pk(protocol::TOKEN_2022_PROGRAM_ID);
+            let ix = repay(
+                &program, &p(), &p(), &p(), &p(), &mint, &p(), &p(), &token_program,
+                9, Some(true), &[observation],
+            );
+            let mint_index = ix.accounts.iter().position(|m| m.pubkey == mint).unwrap();
+            let obs_index = ix.accounts.iter().position(|m| m.pubkey == observation).unwrap();
+            assert!(mint_index < obs_index);
+            assert!(!ix.accounts[mint_index].is_writable);
+        }
     }
 }
