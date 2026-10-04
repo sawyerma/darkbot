@@ -383,6 +383,7 @@ pub mod p0 {
                         account,
                         &self.liquidator,
                         &sz.asset_bank,
+                        &bank.mint,
                         asset_ata,
                         &bank.liquidity_vault,
                         asset_tp,
