@@ -29,12 +29,12 @@ base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] } # [FIX-65] Jupiter Swap V2 /build
 bytemuck = "1"
 spl-associated-token-account = { version = "8.0.0", default-features = false, features = ["no-entrypoint"] }
-marginfi-type-crate = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["mainnet-beta"], optional = true }
+marginfi-type-crate = { git = "https://github.com/0dotxyz/marginfi-v2", rev = "7d48d8a3bafa8e03e4020d253aaa2ea426dde68e", default-features = false, features = ["mainnet-beta"], optional = true }
 # [FIX-112f][R6] Runner directly decodes the same pinned integration layouts used by
 # darkbot-project0 when constructing venue-specific withdraw account metas.
-kamino-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
-drift-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
-juplend-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
+kamino-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", rev = "7d48d8a3bafa8e03e4020d253aaa2ea426dde68e", default-features = false, features = ["no-entrypoint"], optional = true }
+drift-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", rev = "7d48d8a3bafa8e03e4020d253aaa2ea426dde68e", default-features = false, features = ["no-entrypoint"], optional = true }
+juplend-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", rev = "7d48d8a3bafa8e03e4020d253aaa2ea426dde68e", default-features = false, features = ["no-entrypoint"], optional = true }
 
 [[bin]]
 name = "p0-longtail"
