@@ -1,0 +1,413 @@
+{
+  "run": "R114",
+  "date": "2026-10-04",
+  "commit": "6fbdb30",
+  "mode": "shadow",
+  "provider": "Helius",
+  "features": [
+    "crate_health",
+    "txv1"
+  ],
+  "build_pass": true,
+  "tests_passed": 96,
+  "projection_ready": 16,
+  "health_success": 16,
+  "liquidatable": 0,
+  "juplend_stale": 0,
+  "projection_results": [
+    {
+      "account": "6cLwpnv1g4z2J7qwog2weDJqEvDVLQqGLYm4TmDVVSG",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453104970,
+      "projection_unix_s": 1791076420,
+      "simulated_cu": 43243,
+      "status": "ready"
+    },
+    {
+      "account": "E66onksfw2qgWGH7TP28BD8iE7Na37JVDr38isdPZcb",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453104971,
+      "projection_unix_s": 1791076420,
+      "simulated_cu": 40866,
+      "status": "ready"
+    },
+    {
+      "account": "LnqAPE9Ww2Nz91FidvMFnfXia8cR97SPXntfnjNAWiD",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453104971,
+      "projection_unix_s": 1791076420,
+      "simulated_cu": 43243,
+      "status": "ready"
+    },
+    {
+      "account": "RkF1QW9vMoQNgSLnQT6bSqEjkK2ig9NCdL6oR3BvPJe",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453104972,
+      "projection_unix_s": 1791076421,
+      "simulated_cu": 43213,
+      "status": "ready"
+    },
+    {
+      "account": "T7SvRHhDpXKMFBt54QtVKEqEWtjYiwxQm87sz8uUMpL",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453104972,
+      "projection_unix_s": 1791076421,
+      "simulated_cu": 41187,
+      "status": "ready"
+    },
+    {
+      "account": "TVyQujeSbZE8KnyuCE354tw4i2BFpw2mxmvzH5W4Vyg",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453104973,
+      "projection_unix_s": 1791076421,
+      "simulated_cu": 40687,
+      "status": "ready"
+    },
+    {
+      "account": "Xdx6Q9hi1WK6pfXXx2nULE2vCndQvBQsCdTkGUad2zF",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453104973,
+      "projection_unix_s": 1791076421,
+      "simulated_cu": 43599,
+      "status": "ready"
+    },
+    {
+      "account": "dBS1sjAW5VwZkvzarvSEzNBbndBFhUVJtcrcBU2NpnE",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino"
+      ],
+      "projection_slot": 453104974,
+      "projection_unix_s": 1791076421,
+      "simulated_cu": 41050,
+      "status": "ready"
+    },
+    {
+      "account": "2Qds2zQ9zgmGbiJURimAyynedKpXEbjVpRLt9vmZVyax",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453104975,
+      "projection_unix_s": 1791076422,
+      "simulated_cu": 99259,
+      "status": "ready"
+    },
+    {
+      "account": "2VKXE1oUS8jjCWLN4wxZBwNJ3KR19XMjf1mpJYTdFcr5",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453104976,
+      "projection_unix_s": 1791076422,
+      "simulated_cu": 58504,
+      "status": "ready"
+    },
+    {
+      "account": "2okWWtoZnx8Po54tC9wVRbikZZQCw9ZTrW2u8Gqat4F2",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453104977,
+      "projection_unix_s": 1791076422,
+      "simulated_cu": 15053,
+      "status": "ready"
+    },
+    {
+      "account": "2q4dFdZozyZ1M7ZyipUxzyS8rpcJhrLMnqvpKo5UPBkF",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453104978,
+      "projection_unix_s": 1791076422,
+      "simulated_cu": 14434,
+      "status": "ready"
+    },
+    {
+      "account": "35DC55yRDS2oN5hEu48buH4bZnRNz9h5ad11gstjqLcu",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453104978,
+      "projection_unix_s": 1791076422,
+      "simulated_cu": 15397,
+      "status": "ready"
+    },
+    {
+      "account": "37dSpxDAcMKc8ejt2EoEWLBxRFJ2GhzMXN4Uq33Hks4T",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453104979,
+      "projection_unix_s": 1791076423,
+      "simulated_cu": 15395,
+      "status": "ready"
+    },
+    {
+      "account": "3byxY53qR2a2PhJvU1dvVV6ENZH133cJKhxz5vGRhxh1",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "Kamino",
+        "JupLend"
+      ],
+      "projection_slot": 453104979,
+      "projection_unix_s": 1791076423,
+      "simulated_cu": 58682,
+      "status": "ready"
+    },
+    {
+      "account": "3jeURUvk9zGGVGfBzGY2MCeMeAtxnkgaerKmJ4JuTcTz",
+      "base_slot": 453104845,
+      "integration_kinds": [
+        "JupLend"
+      ],
+      "pricing_integration_kinds": [
+        "JupLend"
+      ],
+      "projection_slot": 453104980,
+      "projection_unix_s": 1791076423,
+      "simulated_cu": 15054,
+      "status": "ready"
+    }
+  ],
+  "health_results": [
+    {
+      "account": "6cLwpnv1g4z2J7qwog2weDJqEvDVLQqGLYm4TmDVVSG",
+      "bad_debt": false,
+      "equity_assets_bits": 181520678489,
+      "liquidatable": false,
+      "maint_health_bits": 164904624958,
+      "slot": 453104845,
+      "t_rx_ns": 36108100875,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "E66onksfw2qgWGH7TP28BD8iE7Na37JVDr38isdPZcb",
+      "bad_debt": false,
+      "equity_assets_bits": 5869827373194068273,
+      "liquidatable": false,
+      "maint_health_bits": 1606369699293316311,
+      "slot": 453104845,
+      "t_rx_ns": 36108101042,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "LnqAPE9Ww2Nz91FidvMFnfXia8cR97SPXntfnjNAWiD",
+      "bad_debt": false,
+      "equity_assets_bits": 122662694029134944,
+      "liquidatable": false,
+      "maint_health_bits": 16222135056086811,
+      "slot": 453104845,
+      "t_rx_ns": 36108101084,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "RkF1QW9vMoQNgSLnQT6bSqEjkK2ig9NCdL6oR3BvPJe",
+      "bad_debt": false,
+      "equity_assets_bits": 570824142810653,
+      "liquidatable": false,
+      "maint_health_bits": 277733445283289,
+      "slot": 453104845,
+      "t_rx_ns": 36108101375,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "T7SvRHhDpXKMFBt54QtVKEqEWtjYiwxQm87sz8uUMpL",
+      "bad_debt": false,
+      "equity_assets_bits": 63989147427937857,
+      "liquidatable": false,
+      "maint_health_bits": 52191478833999259,
+      "slot": 453104845,
+      "t_rx_ns": 36108101417,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "TVyQujeSbZE8KnyuCE354tw4i2BFpw2mxmvzH5W4Vyg",
+      "bad_debt": false,
+      "equity_assets_bits": 1256229218343021,
+      "liquidatable": false,
+      "maint_health_bits": 397203527000245,
+      "slot": 453104845,
+      "t_rx_ns": 36108102125,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "Xdx6Q9hi1WK6pfXXx2nULE2vCndQvBQsCdTkGUad2zF",
+      "bad_debt": false,
+      "equity_assets_bits": 11719629971823773042,
+      "liquidatable": false,
+      "maint_health_bits": 2604308964936533125,
+      "slot": 453104845,
+      "t_rx_ns": 36108102125,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "dBS1sjAW5VwZkvzarvSEzNBbndBFhUVJtcrcBU2NpnE",
+      "bad_debt": false,
+      "equity_assets_bits": 762522730081694,
+      "liquidatable": false,
+      "maint_health_bits": 498315282940464,
+      "slot": 453104845,
+      "t_rx_ns": 36108102417,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "2Qds2zQ9zgmGbiJURimAyynedKpXEbjVpRLt9vmZVyax",
+      "bad_debt": false,
+      "equity_assets_bits": 6729615525959273,
+      "liquidatable": false,
+      "maint_health_bits": 223317852703123,
+      "slot": 453104845,
+      "t_rx_ns": 36108102417,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "2VKXE1oUS8jjCWLN4wxZBwNJ3KR19XMjf1mpJYTdFcr5",
+      "bad_debt": false,
+      "equity_assets_bits": 2117090670922133857,
+      "liquidatable": false,
+      "maint_health_bits": 440266644550540852,
+      "slot": 453104845,
+      "t_rx_ns": 36108102792,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "2okWWtoZnx8Po54tC9wVRbikZZQCw9ZTrW2u8Gqat4F2",
+      "bad_debt": false,
+      "equity_assets_bits": 994057687048118900,
+      "liquidatable": false,
+      "maint_health_bits": 800405572196860012,
+      "slot": 453104845,
+      "t_rx_ns": 36108102834,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "2q4dFdZozyZ1M7ZyipUxzyS8rpcJhrLMnqvpKo5UPBkF",
+      "bad_debt": false,
+      "equity_assets_bits": 33795268768164840,
+      "liquidatable": false,
+      "maint_health_bits": 14014031631147046,
+      "slot": 453104845,
+      "t_rx_ns": 36108102875,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "35DC55yRDS2oN5hEu48buH4bZnRNz9h5ad11gstjqLcu",
+      "bad_debt": false,
+      "equity_assets_bits": 3383225567237650966,
+      "liquidatable": false,
+      "maint_health_bits": 1272668716603073775,
+      "slot": 453104845,
+      "t_rx_ns": 36108102917,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "37dSpxDAcMKc8ejt2EoEWLBxRFJ2GhzMXN4Uq33Hks4T",
+      "bad_debt": false,
+      "equity_assets_bits": 8125388918702355683,
+      "liquidatable": false,
+      "maint_health_bits": 5401106317725172113,
+      "slot": 453104845,
+      "t_rx_ns": 36108102959,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "3byxY53qR2a2PhJvU1dvVV6ENZH133cJKhxz5vGRhxh1",
+      "bad_debt": false,
+      "equity_assets_bits": 11443218112894067,
+      "liquidatable": false,
+      "maint_health_bits": 5538104349613692,
+      "slot": 453104845,
+      "t_rx_ns": 36108103250,
+      "trigger": "integration_projection"
+    },
+    {
+      "account": "3jeURUvk9zGGVGfBzGY2MCeMeAtxnkgaerKmJ4JuTcTz",
+      "bad_debt": false,
+      "equity_assets_bits": 5057320365469653094,
+      "liquidatable": false,
+      "maint_health_bits": 1734196881587419180,
+      "slot": 453104845,
+      "t_rx_ns": 36108103292,
+      "trigger": "integration_projection"
+    }
+  ],
+  "raw_record_sha256": "a77c28d82785c9080002630a586c51eae04144775c3be3e98aed5a43fb156499",
+  "gate": "FIX-118 PASS; R6 PARTIAL; R7 OPEN; 72h NOT STARTED; LIVE DISABLED"
+}

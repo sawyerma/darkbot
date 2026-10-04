@@ -2387,3 +2387,22 @@ Safety properties:
 
 Status: **FIX-118 IMPLEMENTED / compiler + R114 Mainnet verification required**.
 
+
+### 2026-10-04 — R114 FIX-118 Mainnet verification PASS
+
+- Source commit: `6fbdb30`; `git pull --ff-only` already current.
+- Workspace build and tests (`crate_health txv1`): PASS, 96 tests, zero failures.
+- Provider: existing Helius Mainnet configuration; launcher enforced shadow and
+  `P0_ZERO_PREFUND_QUALIFIED=false`; no transaction submission.
+- Bootstrap: 825/825 subscription ACKs, both snapshots complete, zero missing required
+  dependencies, root catch-up and reconcile clean, `Ready`.
+- Census: 195 Kamino / 0 Drift / 44 JupLend accounts (venue counts can overlap).
+- Target: 8 per available venue, 16 unique; completion: ready=16, failed=0, stale=0.
+- All 16 downstream projected Health evaluations succeeded; zero `JuplendLendingStale`.
+- All 16 were not liquidatable, so no integration-specific withdraw/final simulation
+  evidence was produced. Process stopped after completion and downstream records.
+- Reproducible sanitized evidence: `evidence/R114_projection_clock.json`.
+
+Decision: **FIX-118 runtime PASS; R6 remains PARTIAL**. R7 remains OPEN. 72 h final-code
+Shadow NOT STARTED; LIVE DISABLED. Next: propagate simulation slot consistently with
+its timestamp, add freshness regression coverage, then widen the integration sweep.
