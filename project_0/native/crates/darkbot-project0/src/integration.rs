@@ -42,6 +42,32 @@ pub fn kind(bank: &Bank) -> Option<IntegrationKind> {
     }
 }
 
+/// Venue used as an oracle/exchange-rate wrapper. This is intentionally distinct from
+/// `kind(bank)`: a bank may require Kamino/Drift/JupLend freshness for pricing while still
+/// using a generic Marginfi withdraw path (asset_tag != integration tag).
+pub fn pricing_kind(bank: &Bank) -> Option<IntegrationKind> {
+    use marginfi_type_crate::types::OracleSetup;
+    match bank.config.oracle_setup {
+        OracleSetup::KaminoPythPush
+        | OracleSetup::KaminoSwitchboardPull
+        | OracleSetup::FixedKamino
+        | OracleSetup::KaminoMSOL
+        | OracleSetup::KaminoLST => Some(IntegrationKind::Kamino),
+
+        OracleSetup::DriftPythPull
+        | OracleSetup::DriftSwitchboardPull
+        | OracleSetup::FixedDrift => Some(IntegrationKind::Drift),
+
+        OracleSetup::JuplendPythPull
+        | OracleSetup::JuplendSwitchboardPull
+        | OracleSetup::FixedJuplend
+        | OracleSetup::JuplendMSOL
+        | OracleSetup::JuplendLST => Some(IntegrationKind::JupLend),
+
+        _ => None,
+    }
+}
+
 
 /// [FIX-112][R6] Exact separation between Marginfi bank units and the underlying tokens
 /// that the external venue sends to the liquidator.
@@ -431,6 +457,47 @@ pub fn kind_name(kind: IntegrationKind) -> &'static str {
         IntegrationKind::Drift => "Drift",
         IntegrationKind::JupLend => "JupLend",
     }
+}
+
+
+pub fn pricing_kinds_for_account<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    account_key: &Pubkey,
+) -> Result<Vec<IntegrationKind>, String> {
+    let (owner, _, data) = raw(state, account_key)?;
+    if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
+        return Err("PRICING_KIND_NOT_MARGINFI_ACCOUNT".into());
+    }
+    let need = 8 + std::mem::size_of::<MarginfiAccount>();
+    if data.len() < need {
+        return Err(format!("PRICING_KIND_ACCOUNT_SHORT:{}<{}", data.len(), need));
+    }
+    let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
+        .map_err(|e| format!("PRICING_KIND_ACCOUNT_CAST:{e:?}"))?;
+
+    let mut kamino = false;
+    let mut drift = false;
+    let mut juplend = false;
+    for bal in account.lending_account.balances.iter().filter(|b| b.is_active()) {
+        let (bank_owner, _, bank_data) = raw(state, &bal.bank_pk)?;
+        if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
+            return Err(format!("PRICING_KIND_INVALID_BANK:{}", bal.bank_pk));
+        }
+        let bank: &Bank = pod_after_disc(state, &bal.bank_pk)?;
+        match pricing_kind(bank) {
+            Some(IntegrationKind::Kamino) => kamino = true,
+            Some(IntegrationKind::Drift) => drift = true,
+            Some(IntegrationKind::JupLend) => juplend = true,
+            None => {}
+        }
+    }
+
+    let mut out = Vec::with_capacity(3);
+    if kamino { out.push(IntegrationKind::Kamino); }
+    if drift { out.push(IntegrationKind::Drift); }
+    if juplend { out.push(IntegrationKind::JupLend); }
+    Ok(out)
 }
 
 /// Build the deterministic pre-Start refresh prefix for every active integration balance.
