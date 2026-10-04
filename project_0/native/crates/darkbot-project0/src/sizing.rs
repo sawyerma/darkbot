@@ -14,6 +14,7 @@ use marginfi::state::{
 };
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_SOL, ASSET_TAG_KAMINO, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND,
+    ZERO_AMOUNT_THRESHOLD,
 };
 use marginfi_type_crate::types::{
     reconcile_emode_configs, BalanceSide, Bank, BankOperationalState, EmodeConfig, FeeState,
@@ -37,11 +38,17 @@ pub struct ProtocolSizing {
     pub liab_bank: Pubkey,
     /// Native token units passed to LendingAccountWithdraw.
     pub withdraw_amount: u64,
-    /// Native token units passed to LendingAccountRepay.
+    /// Native token units transferred into LendingAccountRepay.
     pub repay_amount: u64,
-    /// Equity/EMA values after native-unit rounding, in USD-micro.
+    /// Exact source-backed repay-all semantics. When true, `repay_amount` is ceil(current
+    /// liability native amount), but EndLiquidation observes the exact liability equity delta.
+    pub repay_all: bool,
+    /// Equity/EMA values used by EndLiquidation after native-unit rounding / full-close semantics.
     pub seized_equity_value_micro: u64,
     pub repay_equity_value_micro: u64,
+    /// Economic value of the actual SPL amount transferred for repayment. This can exceed
+    /// `repay_equity_value_micro` on repay_all because Marginfi transfers ceil(liability).
+    pub repay_transfer_value_micro: u64,
     /// Actual protocol premium implied by rounded amounts.
     pub premium_bps: u64,
     /// On-chain FeeState cap used by the sizing calculation.
@@ -76,6 +83,9 @@ struct Position {
     bank_pk: Pubkey,
     bank: Bank,
     amount: I80F48,
+    /// Amount on the opposite side of the same balance slot. For a liability this is normally
+    /// zero, but pinned Marginfi permits sub-threshold asset dust during repay_all.
+    opposite_amount: I80F48,
     equity_value: I80F48,
     maintenance_unweighted_value: I80F48,
 }
@@ -100,6 +110,53 @@ fn healing_fee_factor(cap: I80F48, asset_per_usd: I80F48, liab_per_usd: I80F48, 
 fn rounded_health_valid(pre: I80F48, seized: I80F48, repaid: I80F48, asset_per_usd: I80F48, liab_per_usd: I80F48, closeout: bool) -> Option<bool> {
     let delta = repaid.checked_mul(liab_per_usd)?.checked_sub(seized.checked_mul(asset_per_usd)?)?;
     Some(delta >= I80F48::ZERO && (closeout || pre.checked_add(delta)? <= I80F48::ZERO))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RepayChoice {
+    transfer_amount: u64,
+    protocol_amount: I80F48,
+    repay_all: bool,
+}
+
+/// [FIX-128][R7/C2] Pinned Marginfi parity for the near-full-liability rounding edge.
+///
+/// A normal repay receives an integer SPL amount and must not exceed the current liability.
+/// `repay_all` is different: Marginfi closes the balance and transfers ceil(exact liability).
+/// It is valid only when the requested rounded amount is exactly that full-close transfer amount
+/// and any opposite-side asset is below the protocol ZERO_AMOUNT_THRESHOLD. We never clamp a
+/// larger target to the liability silently; final health/premium are rechecked from
+/// `protocol_amount`, which is the exact liability removed by EndLiquidation.
+fn choose_repay(
+    target_exact: I80F48,
+    liability_amount: I80F48,
+    opposite_asset_amount: I80F48,
+) -> Result<Option<RepayChoice>, String> {
+    let rounded = ceil_u64(target_exact)?;
+    if rounded == 0 {
+        return Ok(None);
+    }
+    if I80F48::from_num(rounded) <= liability_amount {
+        return Ok(Some(RepayChoice {
+            transfer_amount: rounded,
+            protocol_amount: I80F48::from_num(rounded),
+            repay_all: false,
+        }));
+    }
+
+    let full_transfer = ceil_u64(liability_amount)?;
+    if rounded != full_transfer
+        || liability_amount <= ZERO_AMOUNT_THRESHOLD
+        || opposite_asset_amount.abs() >= ZERO_AMOUNT_THRESHOLD
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(RepayChoice {
+        transfer_amount: full_transfer,
+        protocol_amount: liability_amount,
+        repay_all: true,
+    }))
 }
 
 fn amount_from_equity(value: I80F48, price: I80F48, bank: &Bank) -> Result<I80F48, String> {
@@ -362,16 +419,20 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 continue;
             }
             let prices = self.prices(&bank, clock)?;
-            let (amount, maint_price, is_asset) = match side {
+            let (amount, opposite_amount, maint_price, is_asset) = match side {
                 BalanceSide::Assets => (
                     bank.get_asset_amount(balance.asset_shares.into())
                         .map_err(|e| format!("asset amount: {e}"))?,
+                    bank.get_liability_amount(balance.liability_shares.into())
+                        .map_err(|e| format!("opposite liability amount: {e}"))?,
                     prices.maint_asset,
                     true,
                 ),
                 BalanceSide::Liabilities => (
                     bank.get_liability_amount(balance.liability_shares.into())
                         .map_err(|e| format!("liability amount: {e}"))?,
+                    bank.get_asset_amount(balance.asset_shares.into())
+                        .map_err(|e| format!("opposite asset amount: {e}"))?,
                     prices.maint_liab,
                     false,
                 ),
@@ -388,6 +449,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 bank_pk: balance.bank_pk,
                 bank,
                 amount,
+                opposite_amount,
                 equity_value,
                 maintenance_unweighted_value,
             };
@@ -532,31 +594,106 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .checked_div(fee_factor)
                     .ok_or_else(|| "repay target division".to_string())?;
                 let repay_exact = amount_from_equity(repay_target, liab_prices.equity, &liab.bank)?;
-                let repay_amount = ceil_u64(repay_exact)?;
-                if repay_amount == 0 {
-                    rej_repay_zero += 1;
+                let Some(repay_choice) = choose_repay(
+                    repay_exact,
+                    liab.amount,
+                    liab.opposite_amount,
+                )? else {
+                    if ceil_u64(repay_exact)? == 0 {
+                        rej_repay_zero += 1;
+                    } else {
+                        rej_repay_above_liability += 1;
+                        if pair_details.len() < 8 {
+                            pair_details.push(format!(
+                                "{}→{}:repay_target_not_source_valid_for_full_close(target_bits={},liability_bits={},opposite_asset_bits={})",
+                                asset.bank_pk,
+                                liab.bank_pk,
+                                repay_exact.to_bits(),
+                                liab.amount.to_bits(),
+                                liab.opposite_amount.to_bits()
+                            ));
+                        }
+                    }
                     continue;
-                }
-                // Never plan more than the actual liability native amount.
-                if I80F48::from_num(repay_amount) > liab.amount {
-                    rej_repay_above_liability += 1;
-                    continue;
-                }
-                let repay_actual = calc_value(
+                };
+                let repay_amount = repay_choice.transfer_amount;
+
+                // EndLiquidation measures the liability equity delta, not the SPL transfer.
+                // For repay_all that is the exact liability amount; the ceil excess is an
+                // economic transfer cost/insurance credit, not extra protocol-repaid equity.
+                let repay_protocol_actual = calc_value(
+                    repay_choice.protocol_amount,
+                    liab_prices.equity,
+                    liab.bank.get_balance_decimals(),
+                    None,
+                )
+                .map_err(|e| format!("protocol repay value: {e}"))?;
+                let repay_transfer_actual = calc_value(
                     I80F48::from_num(repay_amount),
                     liab_prices.equity,
                     liab.bank.get_balance_decimals(),
                     None,
                 )
-                .map_err(|e| format!("rounded repay value: {e}"))?;
-                if repay_actual <= I80F48::ZERO {
+                .map_err(|e| format!("repay transfer value: {e}"))?;
+                if repay_protocol_actual <= I80F48::ZERO || repay_transfer_actual <= I80F48::ZERO {
                     rej_repay_value_nonpositive += 1;
                     continue;
                 }
+
+                // repay_all also removes sub-threshold asset dust from the liability balance and
+                // credits it to insurance. EndLiquidation observes that as additional seized
+                // equity/maintenance loss even though the liquidator never receives the dust.
+                let (repay_all_dust_equity, repay_all_dust_health) = if repay_choice.repay_all
+                    && liab.opposite_amount > I80F48::ZERO
+                {
+                    let dust_equity = calc_value(
+                        liab.opposite_amount,
+                        liab_prices.equity,
+                        liab.bank.get_balance_decimals(),
+                        None,
+                    )
+                    .map_err(|e| format!("repay_all dust equity value: {e}"))?;
+                    let dust_maint = calc_value(
+                        liab.opposite_amount,
+                        liab_prices.maint_asset,
+                        liab.bank.get_balance_decimals(),
+                        None,
+                    )
+                    .map_err(|e| format!("repay_all dust maintenance value: {e}"))?
+                    .checked_mul(liab.bank.get_asset_weight(
+                        RequirementType::Maintenance,
+                        &reconciled,
+                    ))
+                    .ok_or("repay_all dust weighted health overflow")?;
+                    (dust_equity, dust_maint)
+                } else {
+                    (I80F48::ZERO, I80F48::ZERO)
+                };
                 // Re-evaluate after floor(withdraw)/ceil(repay). Headroom alone cannot
                 // guarantee a near-zero normal account stays nonpositive after rounding.
-                if !rounded_health_valid(pre_health, seized_actual, repay_actual,
-                    asset_per_usd, liab_per_usd, health.closeout_allowed).ok_or("rounded health overflow")? {
+                let base_health_valid = rounded_health_valid(
+                    pre_health,
+                    seized_actual,
+                    repay_protocol_actual,
+                    asset_per_usd,
+                    liab_per_usd,
+                    health.closeout_allowed,
+                )
+                .ok_or("rounded health overflow")?;
+                let health_with_dust_valid = if repay_all_dust_health > I80F48::ZERO {
+                    let delta = repay_protocol_actual
+                        .checked_mul(liab_per_usd)
+                        .and_then(|x| x.checked_sub(seized_actual.checked_mul(asset_per_usd)?))
+                        .and_then(|x| x.checked_sub(repay_all_dust_health))
+                        .ok_or("repay_all dust health overflow")?;
+                    delta >= I80F48::ZERO
+                        && (health.closeout_allowed
+                            || pre_health.checked_add(delta).ok_or("repay_all post health overflow")?
+                                <= I80F48::ZERO)
+                } else {
+                    base_health_valid
+                };
+                if !health_with_dust_valid {
                     rej_rounded_health += 1;
                     continue;
                 }
@@ -564,16 +701,22 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 // bound. Marginfi explicitly skips this check for closeout accounts
                 // (ignore_healthy=true), so applying it there would reject valid closeouts.
                 if !health.closeout_allowed {
-                    let max_seized = repay_actual
+                    let max_seized = repay_protocol_actual
                         .checked_mul(fee_factor)
                         .ok_or_else(|| "rounded premium bound overflow".to_string())?;
-                    if seized_actual > max_seized {
+                    let protocol_seized = seized_actual
+                        .checked_add(repay_all_dust_equity)
+                        .ok_or("repay_all seized equity overflow")?;
+                    if protocol_seized > max_seized {
                         rej_premium_bound += 1;
                         continue;
                     }
                 }
-                let premium = seized_actual
-                    .checked_div(repay_actual)
+                let protocol_seized = seized_actual
+                    .checked_add(repay_all_dust_equity)
+                    .ok_or("repay_all seized equity overflow")?;
+                let premium = protocol_seized
+                    .checked_div(repay_protocol_actual)
                     .and_then(|x| x.checked_sub(I80F48::ONE))
                     .unwrap_or(I80F48::ZERO)
                     .max(I80F48::ZERO);
@@ -582,8 +725,10 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     liab_bank: liab.bank_pk,
                     withdraw_amount,
                     repay_amount,
-                    seized_equity_value_micro: usd_micro(seized_actual)?,
-                    repay_equity_value_micro: usd_micro(repay_actual)?,
+                    repay_all: repay_choice.repay_all,
+                    seized_equity_value_micro: usd_micro(protocol_seized)?,
+                    repay_equity_value_micro: usd_micro(repay_protocol_actual)?,
+                    repay_transfer_value_micro: usd_micro(repay_transfer_actual)?,
                     premium_bps: fee_bps(premium)?,
                     fee_state_max_bps: fee.liquidation_max_bps,
                     flat_sol_fee_lamports: fee.liquidation_flat_sol_fee_lamports,
@@ -614,6 +759,61 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn near_full_rounding_uses_source_backed_repay_all() {
+        let debt = I80F48::from_num(9.2);
+        let target = I80F48::from_num(9.8);
+        let c = choose_repay(target, debt, I80F48::ZERO)
+            .unwrap()
+            .expect("repay_all");
+        assert_eq!(c.transfer_amount, 10);
+        assert_eq!(c.protocol_amount, debt);
+        assert!(c.repay_all);
+    }
+
+    #[test]
+    fn repay_all_never_clamps_a_target_above_full_transfer() {
+        let debt = I80F48::from_num(9.2);
+        assert!(choose_repay(
+            I80F48::from_num(10.1),
+            debt,
+            I80F48::ZERO,
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn repay_all_matches_protocol_opposite_dust_boundary() {
+        let debt = I80F48::from_num(9.2);
+        let target = I80F48::from_num(9.8);
+        assert!(choose_repay(
+            target,
+            debt,
+            ZERO_AMOUNT_THRESHOLD - I80F48::DELTA,
+        )
+        .unwrap()
+        .unwrap()
+        .repay_all);
+        assert!(choose_repay(target, debt, ZERO_AMOUNT_THRESHOLD)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn ordinary_partial_repay_semantics_are_unchanged() {
+        let c = choose_repay(
+            I80F48::from_num(4.1),
+            I80F48::from_num(9.2),
+            I80F48::ZERO,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(c.transfer_amount, 5);
+        assert_eq!(c.protocol_amount, I80F48::from_num(5));
+        assert!(!c.repay_all);
+    }
 
     #[test]
     fn r121_pair_heals_below_maximum_premium() {
