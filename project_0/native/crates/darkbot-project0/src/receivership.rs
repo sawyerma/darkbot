@@ -79,9 +79,20 @@ pub mod builders {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn withdraw(program: &Pubkey, group: &Pubkey, marginfi_account: &Pubkey, authority: &Pubkey, bank: &Pubkey,
-                    destination_token_account: &Pubkey, liquidity_vault: &Pubkey, token_program: &Pubkey,
-                    amount: u64, withdraw_all: Option<bool>, observation: &[Pubkey]) -> Instruction {
+    pub fn withdraw(
+        program: &Pubkey,
+        group: &Pubkey,
+        marginfi_account: &Pubkey,
+        authority: &Pubkey,
+        bank: &Pubkey,
+        mint: &Pubkey,
+        destination_token_account: &Pubkey,
+        liquidity_vault: &Pubkey,
+        token_program: &Pubkey,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        observation: &[Pubkey],
+    ) -> Instruction {
         let mut accounts = marginfi::accounts::LendingAccountWithdraw {
             group: *group,
             marginfi_account: *marginfi_account,
@@ -93,8 +104,20 @@ pub mod builders {
             token_program: *token_program,
         }
         .to_account_metas(Some(true));
+
+        // [FIX-128f] Pinned p0-cli/test-utils parity: Token-2022 withdraw requires the
+        // bank mint as the first remaining account, before the health observation accounts.
+        // Classic SPL Token withdraw does not carry this mint account.
+        if *token_program == pk(protocol::TOKEN_2022_PROGRAM_ID) {
+            accounts.push(AccountMeta::new_readonly(*mint, false));
+        }
         accounts.extend(obs(observation));
-        Instruction { program_id: *program, accounts, data: marginfi::instruction::LendingAccountWithdraw { amount, withdraw_all }.data() }
+
+        Instruction {
+            program_id: *program,
+            accounts,
+            data: marginfi::instruction::LendingAccountWithdraw { amount, withdraw_all }.data(),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -369,6 +392,37 @@ pub mod builders {
     mod repay_all_tests {
         use super::*;
         fn p() -> Pubkey { Pubkey::new_unique() }
+
+        #[test]
+        fn token_2022_withdraw_includes_mint_before_observation() {
+            let program = p();
+            let mint = p();
+            let observation = p();
+            let token_program = pk(protocol::TOKEN_2022_PROGRAM_ID);
+            let ix = withdraw(
+                &program, &p(), &p(), &p(), &p(), &mint, &p(), &p(), &token_program,
+                13, None, &[observation],
+            );
+            let mint_index = ix.accounts.iter().position(|m| m.pubkey == mint).unwrap();
+            let obs_index = ix.accounts.iter().position(|m| m.pubkey == observation).unwrap();
+            assert!(mint_index < obs_index);
+            assert!(!ix.accounts[mint_index].is_writable);
+            assert!(!ix.accounts[mint_index].is_signer);
+        }
+
+        #[test]
+        fn classic_withdraw_does_not_append_mint() {
+            let program = p();
+            let mint = p();
+            let observation = p();
+            let token_program = pk(protocol::TOKEN_PROGRAM_ID);
+            let ix = withdraw(
+                &program, &p(), &p(), &p(), &p(), &mint, &p(), &p(), &token_program,
+                13, None, &[observation],
+            );
+            assert!(!ix.accounts.iter().any(|m| m.pubkey == mint));
+            assert!(ix.accounts.iter().any(|m| m.pubkey == observation));
+        }
 
         #[test]
         fn repay_all_carries_observation_accounts() {
