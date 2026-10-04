@@ -6,6 +6,8 @@
 //! and the state it was computed from can be checked for compatibility
 //! (master plan §5).
 
+pub mod canonical;
+
 use alloy_primitives::B256;
 
 /// Identity of one coherent, immutable state snapshot.

@@ -4,20 +4,21 @@
   "purpose": "Machine-readable companion to the acceptance matrix. The master plan stays the human-readable source; this file adds symbols, test names and evidence hashes.",
   "path_convention": "All evidence paths are repository paths. A path of the form <zip>::<member> names a member inside a ZIP that is itself in the repository.",
   "unit1_source": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip (rustfmt-normalised sources and Cargo.lock), copied unchanged; only crates/darkbot-core/src/lib.rs differs (module list)",
-  "compiler_run": "Unit 1: executed in the review. Units 2 and 3 and the combined tree: NOT_RUN, no Rust toolchain in the authoring environment",
-  "freeze_status": "Units 2 and 3 are NOT frozen: the combined compiler run is pending and the live-state and invalidation closure (Q1) is PARTIAL and deferred to C2.",
+  "compiler_run": "Units 1-3: combined tree reported PASS on the target system (2026-10-04). Unit 4: NOT_RUN.",
+  "freeze_status": "Units 1-3 are frozen for their defined scope. Unit 4 is not frozen: its compiler run is pending. Q1 stays PARTIAL and deferred to C2.",
   "test_count": {
-    "total": 93,
+    "total": 127,
     "unit1": 27,
     "unit2": 33,
-    "unit3": 33
+    "unit3": 33,
+    "unit4": 34
   },
   "rows": [
     {
       "matrix_id": "W1",
       "adoption": "SN01",
       "unit": "Unit 1",
-      "status": "IMPLEMENTED_TESTED for the reviewed Revision 2; files in this tree are byte-identical to the reviewed package",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip",
@@ -56,14 +57,14 @@
         "darkbot-core::signer::sign_legacy_replaces_the_buffer_and_leaves_it_empty_on_error",
         "darkbot-core::signer::reserved_buffers_never_grow_while_signing"
       ],
-      "result": "27 tests PASS in debug and release, clippy -D warnings exit 0, fmt check exit 0 after cargo fmt (review run, rustc 1.93.1, per the review record); NOT_RUN in the combined tree",
-      "not_proven": "new-library latency; zero allocation of dependencies; combined-tree run"
+      "result": "PASS on the target system of the combined Unit 1-3 tree, as reported by the reviewer on 2026-10-04: cargo fmt --all -- --check, cargo test (debug), cargo test --release and cargo clippy -D warnings, all with --locked --offline. The run log is not part of this package.",
+      "not_proven": "new-library latency; zero allocation of dependencies"
     },
     {
       "matrix_id": "W2",
       "adoption": "SN01",
       "unit": "Unit 1",
-      "status": "IMPLEMENTED_TESTED for the reviewed Revision 2",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip",
@@ -93,14 +94,14 @@
         "darkbot-wire::tests::rlp_differential::decoder_agrees_with_alloy_rlp_and_never_panics",
         "darkbot-wire::tests::rlp_differential::encoders_agree_with_alloy_rlp"
       ],
-      "result": "PASS in the review run (27,624 differential decoder inputs); NOT_RUN in the combined tree",
+      "result": "PASS on the target system of the combined Unit 1-3 tree, as reported by the reviewer on 2026-10-04: cargo fmt --all -- --check, cargo test (debug), cargo test --release and cargo clippy -D warnings, all with --locked --offline. The run log is not part of this package.",
       "not_proven": "exhaustive fuzzing"
     },
     {
       "matrix_id": "P1",
       "adoption": "SN02",
       "unit": "Unit 2",
-      "status": "UNTESTED",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/tests/legacy_gate0/gate0-evidence/verify_flap_g02.py",
@@ -163,7 +164,7 @@
         "darkbot-core::venues::flap::profile::captured_foreign_launches_decode_but_are_not_admissible",
         "darkbot-core::venues::flap::profile::doge_launch_is_recognised_and_disabled"
       ],
-      "result": "NOT_RUN",
+      "result": "PASS on the target system of the combined Unit 1-3 tree, as reported by the reviewer on 2026-10-04: cargo fmt --all -- --check, cargo test (debug), cargo test --release and cargo clippy -D warnings, all with --locked --offline. The run log is not part of this package.",
       "coverage": "Two complete G0.4 calldata fixtures and the historical DOGE launch are decoded and classified: the two G0.4 launches are rejected (CreatorPurchase, BuyTax), the DOGE launch is recognised and disabled. For five observed G0.4 salts only the CREATE2 vanity derivation is regression-checked; their complete launches are not classified.",
       "not_proven": "current live deployment; Chapel deployment (no CREATE2 golden, not exported); DOGE-path dependency closure; relevance of name, symbol, uri and beneficiary to the BUY (they are bound to the single witnessed launch identity until proven from the pinned Portal code or qualified by a further independent execution); binding of the candidate hash to the launch bytes (ingress)"
     },
@@ -171,7 +172,7 @@
       "matrix_id": "N2",
       "adoption": "SN02/SN06",
       "unit": "Unit 2",
-      "status": "UNTESTED",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/gates/gate0/src/bin/g06_concurrency.rs",
@@ -192,14 +193,14 @@
         "darkbot-core::venues::flap::binding::prepared_buy_is_refused_after_any_snapshot_change",
         "darkbot-core::venues::flap::binding::expectation_requires_matching_code_and_policy_generation"
       ],
-      "result": "NOT_RUN",
+      "result": "PASS on the target system of the combined Unit 1-3 tree, as reported by the reviewer on 2026-10-04: cargo fmt --all -- --check, cargo test (debug), cargo test --release and cargo clippy -D warnings, all with --locked --offline. The run log is not part of this package.",
       "not_proven": "ticket/nonce-lane binding (Unit 4); cost of sender recovery; budget fields of the operating policy (Unit 6)"
     },
     {
       "matrix_id": "Q3",
       "adoption": "SN05",
       "unit": "Unit 3",
-      "status": "UNTESTED",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/gates/gate0/src/native_bnb_quote.rs",
@@ -257,14 +258,14 @@
         "darkbot-core::economics::flap::native_curve20::only_the_crosschecked_amount_is_admitted",
         "darkbot-core::economics::flap::native_curve20::admitted_minimum_is_positive_and_never_exceeds_the_expected_output"
       ],
-      "result": "NOT_RUN",
+      "result": "PASS on the target system of the combined Unit 1-3 tree, as reported by the reviewer on 2026-10-04: cargo fmt --all -- --check, cargo test (debug), cargo test --release and cargo clippy -D warnings, all with --locked --offline. The run log is not part of this package.",
       "not_proven": "any amount other than 0.001 BNB on mainnet state; any state after a trade or a creator purchase; tax-disabled and exempt-caller branches; supply of live state, snapshot publication and invalidation (C2)"
     },
     {
       "matrix_id": "Q2",
       "adoption": "SN03/SN05",
       "unit": "Unit 3",
-      "status": "UNTESTED; runtime-disabled by API",
+      "status": "IMPLEMENTED_TESTED, FROZEN for its defined scope",
       "evidence": [
         {
           "path": "bsc/gates/gate0/src/bin/g03.rs",
@@ -295,14 +296,14 @@
         "darkbot-core::economics::flap::doge_v3::scope_check_binds_extension_mode_and_price",
         "darkbot-core::economics::flap::doge_v3::arithmetic_rejects_bad_state_without_panic"
       ],
-      "result": "NOT_RUN",
+      "result": "PASS on the target system of the combined Unit 1-3 tree, as reported by the reviewer on 2026-10-04: cargo fmt --all -- --check, cargo test (debug), cargo test --release and cargo clippy -D warnings, all with --locked --offline. The run log is not part of this package.",
       "not_proven": "oracle signature and signer role (no Rust verifier); any amount, caller or pool state other than the single witnessed execution; the EVM boundary cases minOutput+1 and before-launch remain offline oracle fixtures in g03_result.json"
     },
     {
       "matrix_id": "Q1",
       "adoption": "SN04",
       "unit": "Units 2/3 + C2",
-      "status": "PARTIAL, C2-deferred",
+      "status": "PARTIAL, C2-deferred (not a defect of Units 1-3)",
       "evidence": [
         {
           "path": "bsc/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-archive-witness-quicknode-153754/hotpath_dependency_matrix.json",
@@ -322,8 +323,173 @@
         "darkbot-core::venues::flap::binding::expectation_requires_matching_code_and_policy_generation",
         "darkbot-core::economics::flap::doge_v3::deadline_equality_passes_and_one_second_later_is_rejected"
       ],
-      "result": "NOT_RUN",
+      "result": "tests listed here: PASS on the target system of the combined Unit 1-3 tree, as reported by the reviewer on 2026-10-04: cargo fmt --all -- --check, cargo test (debug), cargo test --release and cargo clippy -D warnings, all with --locked --offline. The run log is not part of this package.",
       "not_proven": "the 497 classified dependency rows are not individually mapped to inputs; revoked signer role and missing role storage are not ported; C2 must show that exactly the declared inputs are taken coherently from that witness and invalidated; no live-state closure exists yet"
+    },
+    {
+      "matrix_id": "N1",
+      "adoption": "SN06",
+      "unit": "Unit 4",
+      "status": "UNTESTED",
+      "evidence": [
+        {
+          "path": "bsc/gates/gate0/src/intent_lane.rs",
+          "sha256": "e73431a4be6ab9cb61bafc2e50ac5e747df924eae689bf9d1695e97cbdf4ddb0"
+        },
+        {
+          "path": "bsc/gates/gate0/src/bin/g06_concurrency.rs",
+          "sha256": "d5e0addf1ed3970fd00843dba907dba7f9464aad078e007a92983b5754d0c2a3"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::intent::IntentLane::reserve",
+        "darkbot_core::intent::IntentLane::prepare",
+        "darkbot_core::intent::IntentLane::begin_send",
+        "darkbot_core::intent::IntentLane::withdraw",
+        "darkbot_core::intent::IntentLane::invalidate",
+        "darkbot_core::intent::PREPARE_SCRATCH_CAPACITY"
+      ],
+      "tests": [
+        "darkbot-core::intent::tests::duplicate_before_and_after_resolution_never_consumes_a_nonce",
+        "darkbot-core::intent::tests::eight_thousand_signals_yield_one_thousand_contiguous_reservations",
+        "darkbot-core::intent::tests::sixty_four_intents_dispatch_in_nonce_order_with_unique_hashes",
+        "darkbot-core::intent::tests::reversed_preparation_cannot_bypass_an_unready_or_unresolved_head",
+        "darkbot-core::intent::tests::conflicting_preparation_is_rejected",
+        "darkbot-core::intent::tests::capacity_and_nonce_exhaustion_fail_closed",
+        "darkbot-core::intent::tests::tickets_cannot_cross_sender_or_chain_lanes",
+        "darkbot-core::intent::tests::stale_preparation_is_not_dispatched_and_must_be_prepared_again",
+        "darkbot-core::intent::tests::only_the_newest_undisclosed_intent_can_be_withdrawn",
+        "darkbot-core::intent::tests::preallocated_scratch_never_grows_across_preparations",
+        "darkbot-core::intent::tests::too_small_scratch_is_refused_and_the_intent_stays_reserved"
+      ],
+      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "coverage": "8,000 signals are reduced to 1,000 contiguous reservations on one owner thread (the Gate-0 test used 8 worker threads behind a mutex). The complete sign, bind, dispatch and inclusion sequence is exercised for 64 intents, not 1,000.",
+      "not_proven": "allocation behaviour of the signature library and of the integrated runtime (C3); dedup cost at the configured capacity (C3); actionable-to-permit waiting (measured by the caller, C3)"
+    },
+    {
+      "matrix_id": "N2",
+      "adoption": "SN06",
+      "unit": "Unit 4",
+      "status": "UNTESTED",
+      "evidence": [
+        {
+          "path": "bsc/gates/gate0/src/bin/g06_concurrency.rs",
+          "sha256": "d5e0addf1ed3970fd00843dba907dba7f9464aad078e007a92983b5754d0c2a3"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::intent::IntentLane::prepare",
+        "darkbot_core::intent::Ticket"
+      ],
+      "tests": [
+        "darkbot-core::intent::tests::preparation_binds_sender_nonce_and_token_of_the_ticket",
+        "darkbot-core::intent::tests::tickets_cannot_cross_sender_or_chain_lanes"
+      ],
+      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "not_proven": "multi-sender operation (single sender is the baseline)"
+    },
+    {
+      "matrix_id": "S1",
+      "adoption": "SN08",
+      "unit": "Unit 4",
+      "status": "UNTESTED",
+      "evidence": [
+        {
+          "path": "bsc/gates/gate0/src/builder_lifecycle_tests.rs",
+          "sha256": "7cd976f5d25de450e9a1da7173d4e269cce0ca7a59ba3dd2e4e7f250c9f16e41"
+        },
+        {
+          "path": "bsc/gates/gate0/src/intent_lane.rs",
+          "sha256": "e73431a4be6ab9cb61bafc2e50ac5e747df924eae689bf9d1695e97cbdf4ddb0"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::intent::IntentLane::begin_send",
+        "darkbot_core::intent::IntentLane::start_write",
+        "darkbot_core::intent::IntentLane::write_completed",
+        "darkbot_core::intent::IntentLane::write_failed",
+        "darkbot_core::intent::IntentLane::acked",
+        "darkbot_core::intent::IntentLane::rejected",
+        "darkbot_core::intent::AdapterSet"
+      ],
+      "tests": [
+        "darkbot-core::intent::tests::fan_out_uses_one_nonce_and_identical_bytes_for_every_adapter",
+        "darkbot-core::intent::tests::a_permit_is_consumed_exactly_once",
+        "darkbot-core::intent::tests::bytes_are_released_only_by_a_successfully_consumed_permit",
+        "darkbot-core::intent::tests::wrong_hash_or_resolved_intent_releases_no_bytes",
+        "darkbot-core::intent::tests::reversed_ack_order_and_ack_never_confirm_the_intent",
+        "darkbot-core::intent::tests::rejection_leaves_the_intent_unresolved_and_late_execution_is_kept",
+        "darkbot-core::intent::tests::failed_write_is_unknown_halts_and_suppresses_unstarted_permits",
+        "darkbot-core::intent::tests::wrong_hash_at_the_permit_never_reaches_a_writer",
+        "darkbot-core::intent::tests::external_halt_stops_admission_and_keeps_the_first_reason",
+        "darkbot-core::intent::tests::conflicting_evidence_outranks_an_earlier_reason_but_not_a_quarantine"
+      ],
+      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "not_proven": "real transport behaviour, partial writes of a real socket and provider responses (Unit 5); that an adapter writes only bytes it received from start_write, since the caller that signed the bytes also holds them (Unit 5 design and review)"
+    },
+    {
+      "matrix_id": "N3",
+      "adoption": "SN06/SN08",
+      "unit": "Unit 4 + C2",
+      "status": "UNTESTED; arming a lane and releasing a restart quarantine are disabled in this unit: TRACKED_DEFERRED to runner/Unit 6 (ArmedFence constructor) and runner + C2 + Unit 5 (recovery proof)",
+      "evidence": [
+        {
+          "path": "bsc/gates/gate0/src/restart_fence.rs",
+          "sha256": "d3df62dbc9ce06d8a2371d75fe10caa6391300fc14c824b68efed67c39177dce"
+        },
+        {
+          "path": "bsc/gates/gate0/src/intent_lane.rs",
+          "sha256": "e73431a4be6ab9cb61bafc2e50ac5e747df924eae689bf9d1695e97cbdf4ddb0"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::intent::IntentLane::armed",
+        "darkbot_core::intent::IntentLane::quarantined",
+        "darkbot_core::intent::IntentLane::resume",
+        "darkbot_core::intent::ArmedFence",
+        "darkbot_core::intent::LaneStats",
+        "darkbot_core::chain_state::canonical::ReconciliationProof"
+      ],
+      "tests": [
+        "darkbot-core::intent::tests::unresolved_head_blocks_every_prepared_follower_and_is_counted",
+        "darkbot-core::intent::tests::restart_from_every_phase_is_quarantined_and_cannot_be_released",
+        "darkbot-core::intent::tests::crash_between_permits_cannot_continue_the_fan_out",
+        "darkbot-core::intent::tests::in_process_stop_without_disclosure_resumes_at_the_same_nonce",
+        "darkbot-core::intent::tests::quarantined_lane_offers_no_operation_that_admits_again"
+      ],
+      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "not_proven": "the durable startup fence, its filesystem failure cases and the production constructor of ArmedFence bound to its successful check (runner/Unit 6: do not exist; until then no production code can create an admitting lane); the recovery proof that could release a restart quarantine, built from durably recovered intents, disclosed bytes, pending and canonical nonce state and adapter late-execution semantics (runner, C2, Unit 5: does not exist); production of a reconciliation proof for in-process stops (C2); real head-of-line waiting times (C3)"
+    },
+    {
+      "matrix_id": "R2",
+      "adoption": "SN16",
+      "unit": "Unit 4 (consumer side only)",
+      "status": "UNTESTED; evidence production deferred to C2",
+      "evidence": [
+        {
+          "path": "bsc/docs/BSC_PHASE_C_PYTHON_RETIREMENT.md",
+          "sha256": "b6ab300ea633e6453aa3ca17e9a44036501bc695f3dcb1ecc0835082030fbee0"
+        }
+      ],
+      "symbols": [
+        "darkbot_core::chain_state::canonical::InclusionProof",
+        "darkbot_core::chain_state::canonical::FinalityProof",
+        "darkbot_core::chain_state::canonical::OrphanProof",
+        "darkbot_core::intent::IntentLane::apply_inclusion",
+        "darkbot_core::intent::IntentLane::apply_finality",
+        "darkbot_core::intent::IntentLane::apply_orphan"
+      ],
+      "tests": [
+        "darkbot-core::intent::tests::inclusion_finality_and_reorg_transitions",
+        "darkbot-core::intent::tests::revert_consumes_the_nonce_and_stops_the_lane",
+        "darkbot-core::intent::tests::foreign_transaction_on_a_lane_nonce_is_replaced_and_stops_the_lane",
+        "darkbot-core::intent::tests::evidence_for_another_chain_or_sender_is_ignored",
+        "darkbot-core::intent::tests::repeated_inclusion_evidence_must_repeat_the_execution_result",
+        "darkbot-core::intent::tests::repeated_evidence_with_another_transaction_or_block_is_conflicting",
+        "darkbot-core::intent::tests::repeated_evidence_of_a_foreign_transaction_ignores_its_status"
+      ],
+      "result": "NOT_RUN: Unit 4 has not been compiled; no Rust toolchain in the authoring environment",
+      "not_proven": "every canonical, pending, replacement and reorg counterexample of the retirement contract (C2 owns them); the proofs have no production constructor yet"
     }
   ]
 }
