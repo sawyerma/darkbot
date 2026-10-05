@@ -3033,3 +3033,58 @@ qualify the live Oracle wakeup phase: `oracle_trigger_stats`, real
 health still require evidence.
 
 No transaction sent. LIVE disabled. 72 h NOT STARTED.
+
+
+### 2026-10-05 — R125b FIX-133 Oracle trigger runtime qualification
+
+Evidence: `docs/evidence/R125b_oracle_trigger_runtime.json`.
+
+Observed Mainnet Shadow state:
+- Recovery clean: 82,699 liability accounts, 204 Banks, 494 required dependencies,
+  83,405 total accounts, missing_required=0.
+- ReverseIndex: 82,699 accounts, 204 Banks, 0 unsupported oracle layouts.
+- Threshold bootstrap complete: 77,984 liability-bearing accounts considered,
+  77,756 tracked, 228 conservative fallback, bootstrap_remaining=0.
+- Fallback ratio = 0.2924%.
+- Integration census: Kamino 194, JupLend 43, Drift 0 in current account census.
+
+Observed active Oracle-trigger sample:
+- threshold_ready=true;
+- dependency_updates=7;
+- candidate_hits=15,535;
+- enqueued=15,535;
+- coalesced=0 in this short sample;
+- price_fallbacks=38;
+- pending at measurement=0;
+- max_pending=6,578;
+- detect_queue=0.
+- ingress channel: capacity=65,536, sent=6,105, received=5,829, overflow=0.
+
+Observed price-fallback causes were protocol-originated stale integration state:
+Kamino `ReserveStale`, JupLend `JuplendLendingStale`, and at least one Drift
+`DriftSpotMarketStale`. In each case FIX-133 correctly used the conservative Bank-account
+fallback rather than treating missing current pricing as no opportunity.
+
+Assessment:
+- **FIX-133 functional Oracle wakeup path: PASS.**
+  Real dependency updates reached ReverseIndex/Bank mapping, produced candidate wakeups,
+  entered the existing exact pipeline, and the Oracle pending queue drained back to zero.
+- **Threshold-index construction/runtime: PASS.**
+- **Ingress-loss gate for this sample: PASS** (overflow=0).
+- **72 h readiness: NOT YET PASS.**
+  The observed burst max_pending=6,578 from only seven dependency updates is materially high.
+  It appears dominated by conservative all-account wakeups for Banks whose integration pricing
+  is stale. This is safe/correct but potentially too expensive for sustained operation.
+  Coalescing was zero in this short sample, so no evidence yet that repeated updates materially
+  compress this workload.
+
+Decision:
+- Keep FIX-133 enabled on main.
+- Do not weaken stale integration handling or silently exclude those accounts.
+- Before 72 h, reduce safe fallback fan-out by refreshing/projecting the affected integration
+  state before threshold-price extraction, or otherwise prove a bounded per-Bank fallback path
+  that preserves exact Health semantics.
+- Re-run a short R126 load qualification and require bounded pending depth, no ingress overflow,
+  and stable drain under repeated dependency updates.
+
+No transaction sent. LIVE remains disabled. FIX-129 Jito lifecycle cells remain UNKNOWN.
