@@ -612,6 +612,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkbot-qualify"
+version = "0.1.0"
+dependencies = [
+ "darkbot-runner",
+ "ring",
+ "rustls",
+]
+
+[[package]]
 name = "darkbot-runner"
 version = "0.1.0"
 dependencies = [

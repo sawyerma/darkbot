@@ -1,0 +1,18 @@
+[package]
+name = "darkbot-qualify"
+description = "DarkBot BSC qualification harnesses. Measures the frozen production types on the real network and writes evidence; decides and sends nothing that could execute."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The frozen production transport, as it is.
+darkbot-runner = { path = "../darkbot-runner" }
+# SHA-256 of request bodies. Already locked through rustls; without default
+# features, so that the production build's features stay as they are.
+ring = { version = "=0.17.14", default-features = false }
+
+[dev-dependencies]
+# A loopback TLS server for the offline end-to-end tests.
+rustls = { workspace = true }
