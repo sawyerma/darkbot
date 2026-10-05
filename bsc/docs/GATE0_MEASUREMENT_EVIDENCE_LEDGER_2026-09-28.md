@@ -7,7 +7,7 @@
 > **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
 
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
-Stand: **2026-10-03**
+Stand: **2026-10-05**
 Primärer Scope: **BSC / Flap / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3**
 
 > Diese Datei ist die eine zentrale menschlich lesbare Quelle für den aktuellen Gate-0-Stand.
@@ -3042,4 +3042,93 @@ Still open:
 6. keep actual provider ordering/atomicity/same-block behavior, inclusion and `T0 -> T_buy` as separate later evidence.
 
 No provider ACK, TLS handoff result, same-block observation or local latency measurement may be promoted to a `T0 -> T_buy < 1 ms` claim. Product LIVE remains blocked.
+
+## 2026-10-05 — Q5A real TLS transport qualification PASS
+
+This checkpoint supersedes the earlier `real TLS transport qualification = NOT_RUN` status. The Q5A harness was run against both frozen production builder endpoints with the accepted release binary and the resulting raw evidence is now committed.
+
+### Evidence identity and custody
+
+```text
+qualification harness              u5_tls_qualify v1
+release-binary git_head            0635a3978a471bf4916236fb32de6c9ae96d0b9c
+frozen baseline                    92fa5204777e566acbaccf111721d9295ffb3a90
+git_dirty                          false
+baseline_ancestor                  true
+frozen_sources_unchanged           true
+transport implementation           darkbot-runner/tls-v1 rustls-0.23.45 ring http/1.1
+target                             macos / aarch64
+profile                            release
+combined raw evidence              bsc/native/evidence/q5a/q5a-both-20261005T203919Z.json
+combined SHA256                    e2c537765f539f7551d89613c337d2079820731b77a531b7306a14fe4c845849
+first evidence commit              0424e439e49bd21057f6ba64dd722422e5c84a54
+independent checker                PASS / consistent with the harness
+```
+
+The two single-provider supporting files are retained as well:
+
+```text
+48Club:
+  bsc/native/evidence/q5a/q5a-club48-20261005T171555Z.json
+  SHA256 af12d9cc036e33fbbfee071ac7b28b14011b6c0cff4ab9030d023f6a9e6752a5
+
+BlockRazor:
+  bsc/native/evidence/q5a/q5a-blockrazor-20261005T203649Z.json
+  SHA256 e3a12c8e1d3f77b5e21bc66405bf7ad0e1b75d8e8e7fdd6a14598a229324fad3
+```
+
+No BlockRazor authorization value is written to the evidence.
+
+### Combined real-provider result
+
+The accepted combined run used the declared Q5A workload per provider: 10 warmups, 100 measured samples, 200-ms pacing and 3 reconnect cycles with a probe after each reconnect. The strict miss threshold is `>= 1,000,000 ns`.
+
+| Provider | API scope | Handoffs | skipped | unknown | p50 | p95 | p99 | max | >=1 ms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 48Club / `puissant-builder.48.club:443` | ALL_ANSWERED | 113 | 0 | 0 | 178,708 ns | 386,375 ns | 564,208 ns | **766,541 ns** | **0** |
+| BlockRazor / `virginia.builder.blockrazor.io:443` | ALL_ANSWERED | 113 | 0 | 0 | 136,500 ns | 254,833 ns | 335,584 ns | **566,250 ns** | **0** |
+
+```text
+48Club transport verdict           PASS
+BlockRazor transport verdict       PASS
+TLS_TRANSPORT_QUALIFICATION        PASS
+Q5A process exit                   0
+independent raw-timestamp recheck  PASS
+```
+
+For this exact workload, implementation and target, every measured handoff stayed below the strict 1-ms limit and every required handoff/reconnect datum was present.
+
+### Exact meaning of this PASS
+
+Q5A qualifies the frozen production TLS transport path and its declared local boundary:
+
+```text
+t_write_check
+→ first TLS socket write
+→ remaining TLS write/flush
+→ t_boundary
+```
+
+The boundary is userspace TLS write/flush completion with the request ciphertext accepted by the local kernel send path. It is **not** NIC transmission, remote receipt, builder scheduling, block inclusion or EVM execution.
+
+`API ALL_ANSWERED` means the safe empty-bundle probes received complete classifiable responses. It is not a qualification of `positionFirst`, `noMerge`, ordering, atomicity, same-block behaviour, pre-submission, N/N+1 placement, extraction/rebroadcast policy or any other provider lifecycle property.
+
+### Current Unit-5 state after Q5A
+
+```text
+Units 1-4                          IMPLEMENTED_TESTED / FROZEN
+Unit 5 Core                       IMPLEMENTED_TESTED / FROZEN
+Unit 5 Runner v1 Rev3             IMPLEMENTED_TESTED / FROZEN
+Unit 5 TLS/socket transport Rev2  IMPLEMENTED_TESTED / FROZEN
+Q5A qualification harness         IMPLEMENTED_TESTED
+real TLS transport qualification  PASS
+48Club TLS transport              PASS
+BlockRazor TLS transport          PASS
+real provider semantics           OPEN
+Production QualifiedTransport     NONE
+LIVE                               BLOCKED
+T0 -> T_buy < 1 ms                NOT YET PROVEN
+```
+
+The next Unit-5 slice may now introduce the production transport-qualification generation / `QualifiedTransport` construction path **only for this accepted TLS transport scope**. It must remain fail-closed on implementation, endpoint/profile, adapter/capability generation and handoff-boundary mismatches. It must not promote any provider semantic property or authorize LIVE. Provider semantics, inclusion, canonical acquisition and the original-producer `T0 -> T_buy` proof remain separate required gates.
 
