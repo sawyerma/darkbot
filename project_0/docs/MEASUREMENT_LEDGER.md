@@ -3543,3 +3543,123 @@ Next priority is economic proof:
 Evidence: `docs/evidence/R127d_20261005T171043Z.json`.
 
 No transaction sent. LIVE remains disabled.
+
+---
+
+## 2026-10-05 — Astra production/economic audit handoff
+
+### Provenance
+
+Audited runtime source:
+
+```text
+799048f8fa95df4c29f2aa6b35bcc3615405fe19
+```
+
+Preserved audit corpus/bundle:
+
+```text
+project_0/docs/evidence/AUDIT_20261005/
+project_0/docs/evidence/AUDIT_20261005/darkbot_audit_bundle_20261005.zip
+```
+
+Authoritative synthesis / next-work order:
+
+```text
+project_0/docs/AUDIT_HANDOFF_2026-10-05.md
+```
+
+### Tests
+
+- workspace `crate_health,txv1`: 136 PASS / 0 FAIL;
+- workspace `crate_health`: 134 PASS / 0 FAIL.
+
+### R127d interpretation after adversarial audit
+
+The R127d Mainnet Shadow result remains a valid scheduler/queue/fanout performance PASS:
+lossless ingress, materially reduced forwarding and a draining pending queue were measured.
+
+However, Candidate Cache **correctness is reopened** because the checked-in predicate reproduced:
+
+1. same-slot repeated `Liquidatable` suppression after a changed price/profit input;
+2. same `Error` class suppression after changed integration input;
+3. deterministic soft-cap starvation: with 1,025 persistent candidates and cap 1,024, the final candidate received zero periodic forwards for 100 simulated slots.
+
+Evidence:
+
+```text
+project_0/docs/evidence/AUDIT_20261005/cache_counterexamples.py
+project_0/docs/evidence/AUDIT_20261005/cache_counterexamples.txt
+```
+
+Gate decision:
+
+```text
+R127 PERFORMANCE/FANOUT = PASS
+R127 CANDIDATE CORRECTNESS = REOPENED / BLOCKED
+CONTROLLED LIVE = BLOCKED
+```
+
+### Drift
+
+Unsigned current-Mainnet simulation returned:
+
+```text
+InstructionFallbackNotFound
+Custom(101)
+```
+
+Evidence:
+
+```text
+project_0/docs/evidence/AUDIT_20261005/drift_dispatch.json
+```
+
+Drift coverage remains OPEN/BLOCKED until source/deployed-program compatibility is proven, or Drift-dependent candidates are explicitly classified unsupported/fail-closed.
+
+### Historical real liquidation corpus
+
+Six recent successful receivership liquidations are preserved with signatures, slots, decoded instructions, fees and wallet/token deltas.
+
+Gross equity deltas are observable, but:
+
+```text
+complete_realized_usd_pnl = UNKNOWN
+historical_darkbot_classification = UNKNOWN
+historical_prestate_missing = true
+```
+
+No realized profit claim is permitted from this corpus until complete attribution and prestate replay exist.
+
+### Auxiliary winner/economics probe limitation
+
+The helper `p0-audit-json.rs` did not reach its intended winner/economics assertions; execution failed earlier during SDK JSON deserialization. Therefore those intended assertions are **not evidence**.
+
+The route-floor and winner-parser concerns remain high-priority hypotheses requiring independent direct regression tests.
+
+### Current economic verdict
+
+```text
+B — economic mechanism valid; specific implementation/evidence blockers
+currently prevent reliable profitable-capture proof.
+```
+
+### Next ordered gates
+
+```text
+1. Candidate same-slot revision correctness
+2. Candidate repeat fairness/no starvation
+3. R127 scheduler/admission requalification
+4. Executable-floor economics proof/fix
+5. Winner parser fixture proof/fix
+6. Drift qualification or explicit unsupported scoping
+7. Historical prestate reconstruction
+8. Six-case production replay
+9. Complete realized-PnL attribution where defensible
+10. Short competitive Mainnet Shadow
+11. Controlled value-bearing execution
+12. First realized positive net P&L
+```
+
+Long Race/TPU/provider/architecture work is paused unless new measured evidence makes it necessary.
+
