@@ -1563,9 +1563,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         indexed_banks, indexed_accounts, unsupported_banks, threshold_bootstrap.len(), use_threshold_trigger
                     );
                     if !use_threshold_trigger {
+                        // [R127c] eva01 parity: one full debtor scan at startup so an account
+                        // already underwater before StreamReady cannot wait forever for a future
+                        // unrelated write. Reuse the same batched/parallel Health admission path
+                        // by marking every current group Bank dirty exactly once.
+                        let startup_t_rx_ns = clock.now_ns();
+                        let startup_slot = slot_watch.get();
+                        let view = StateView(&st);
+                        let mut startup_banks = 0usize;
+                        for (pk, record) in st.iter_owned_by(&program) {
+                            let Some(bank) = bank_from_state(&view, &program, pk) else {
+                                continue;
+                            };
+                            if bank.group != group || classify_account(&record.data) != AccountType::Bank {
+                                continue;
+                            }
+                            sweep_dirty_banks.insert(*pk, (startup_t_rx_ns, startup_slot));
+                            startup_banks = startup_banks.saturating_add(1);
+                        }
+                        if startup_banks > 0 {
+                            // Force one immediate startup batch; runtime batches use the normal
+                            // event-count/time bounds.
+                            sweep_batch_events = sweep_batch_max_events;
+                            sweep_batch_started_ns = Some(startup_t_rx_ns);
+                            sweep_max_dirty_banks =
+                                sweep_max_dirty_banks.max(sweep_dirty_banks.len());
+                        }
                         eprintln!(
-                            "r127_health_sweep_ready: reverse_accounts={} threshold_trigger=false",
-                            indexed_accounts
+                            "r127_health_sweep_ready: reverse_accounts={} startup_banks={} threshold_trigger=false",
+                            indexed_accounts, startup_banks
                         );
                     }
                 }
