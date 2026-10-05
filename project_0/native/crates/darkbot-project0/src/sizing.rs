@@ -9,16 +9,18 @@ use crate::protocol;
 use fixed::types::I80F48;
 use marginfi::state::{
     bank::BankImpl,
+    liquidation_record::tag_adjusted_premium,
     marginfi_account::{calc_amount, calc_value},
     price::{OraclePriceFeedAdapter, PriceAdapter},
 };
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_SOL, ASSET_TAG_KAMINO, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND,
-    ZERO_AMOUNT_THRESHOLD,
+    PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
 };
 use marginfi_type_crate::types::{
     reconcile_emode_configs, BalanceSide, Bank, BankOperationalState, EmodeConfig, FeeState,
-    MarginfiAccount, OraclePriceType, PriceBias, RequirementType,
+    accrued_premium_total, premium_elapsed_seconds, MarginfiAccount, OraclePriceType, PriceBias,
+    RequirementType,
 };
 use solana_sdk::account::Account;
 use solana_sdk::account_info::IntoAccountInfo;
@@ -88,6 +90,9 @@ struct Position {
     opposite_amount: I80F48,
     equity_value: I80F48,
     maintenance_unweighted_value: I80F48,
+    /// [P1B-0.1.12] Premium projected with the exact type-crate helper at the same client clock.
+    /// Zero for assets, premium-inactive banks, and liabilities with no recognized premium.
+    premium_total: I80F48,
 }
 
 fn load<T: bytemuck::Pod>(data: &[u8]) -> Result<&T, String> {
@@ -130,13 +135,21 @@ struct RepayChoice {
 fn choose_repay(
     target_exact: I80F48,
     liability_amount: I80F48,
+    premium_total: I80F48,
     opposite_asset_amount: I80F48,
 ) -> Result<Option<RepayChoice>, String> {
     let rounded = ceil_u64(target_exact)?;
     if rounded == 0 {
         return Ok(None);
     }
-    if I80F48::from_num(rounded) <= liability_amount {
+
+    // 0.1.12 normal repay is an integer token transfer. The transfer settles recognized
+    // premium first and then principal, so the protocol equity liability delta is the whole
+    // transferred amount as long as it does not exceed total owed.
+    let total_owed = liability_amount
+        .checked_add(premium_total.max(I80F48::ZERO))
+        .ok_or_else(|| "repay total owed overflow".to_string())?;
+    if I80F48::from_num(rounded) <= total_owed {
         return Ok(Some(RepayChoice {
             transfer_amount: rounded,
             protocol_amount: I80F48::from_num(rounded),
@@ -144,7 +157,9 @@ fn choose_repay(
         }));
     }
 
-    let full_transfer = ceil_u64(liability_amount)?;
+    // 0.1.12 repay_all materializes pending premium, adds it to principal, then transfers
+    // ceil(total_owed). The closed balance removes the exact principal + premium liability.
+    let full_transfer = ceil_u64(total_owed)?;
     if rounded != full_transfer
         || liability_amount <= ZERO_AMOUNT_THRESHOLD
         || opposite_asset_amount.abs() >= ZERO_AMOUNT_THRESHOLD
@@ -154,7 +169,7 @@ fn choose_repay(
 
     Ok(Some(RepayChoice {
         transfer_amount: full_transfer,
-        protocol_amount: liability_amount,
+        protocol_amount: total_owed,
         repay_all: true,
     }))
 }
@@ -419,7 +434,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 continue;
             }
             let prices = self.prices(&bank, clock)?;
-            let (amount, opposite_amount, maint_price, is_asset) = match side {
+            let (amount, opposite_amount, maint_price, is_asset, premium_total) = match side {
                 BalanceSide::Assets => (
                     bank.get_asset_amount(balance.asset_shares.into())
                         .map_err(|e| format!("asset amount: {e}"))?,
@@ -427,23 +442,49 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                         .map_err(|e| format!("opposite liability amount: {e}"))?,
                     prices.maint_asset,
                     true,
+                    I80F48::ZERO,
                 ),
-                BalanceSide::Liabilities => (
-                    bank.get_liability_amount(balance.liability_shares.into())
-                        .map_err(|e| format!("liability amount: {e}"))?,
-                    bank.get_asset_amount(balance.asset_shares.into())
-                        .map_err(|e| format!("opposite asset amount: {e}"))?,
-                    prices.maint_liab,
-                    false,
-                ),
+                BalanceSide::Liabilities => {
+                    let principal = bank.get_liability_amount(balance.liability_shares.into())
+                        .map_err(|e| format!("liability amount: {e}"))?;
+                    let premium = if bank.get_flag(PREMIUM_ACTIVE) {
+                        accrued_premium_total(
+                            principal,
+                            balance.premium_rate_snapshot,
+                            I80F48::from(balance.premium_outstanding),
+                            premium_elapsed_seconds(
+                                balance,
+                                bank.premium_activated_at,
+                                clock.unix_timestamp.max(0) as u64,
+                            ),
+                        )
+                        .ok_or_else(|| "premium projection overflow".to_string())?
+                    } else {
+                        I80F48::ZERO
+                    };
+                    (
+                        principal,
+                        bank.get_asset_amount(balance.asset_shares.into())
+                            .map_err(|e| format!("opposite asset amount: {e}"))?,
+                        prices.maint_liab,
+                        false,
+                        premium,
+                    )
+                }
             };
             if amount <= I80F48::ZERO {
                 continue;
             }
-            let equity_value = calc_value(amount, prices.equity, bank.get_balance_decimals(), None)
+            let recognized_amount = if is_asset {
+                amount
+            } else {
+                amount.checked_add(premium_total)
+                    .ok_or_else(|| "liability + premium overflow".to_string())?
+            };
+            let equity_value = calc_value(recognized_amount, prices.equity, bank.get_balance_decimals(), None)
                 .map_err(|e| format!("equity value: {e}"))?;
             let maintenance_unweighted_value =
-                calc_value(amount, maint_price, bank.get_balance_decimals(), None)
+                calc_value(recognized_amount, maint_price, bank.get_balance_decimals(), None)
                     .map_err(|e| format!("maintenance value: {e}"))?;
             let p = Position {
                 bank_pk: balance.bank_pk,
@@ -452,6 +493,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 opposite_amount,
                 equity_value,
                 maintenance_unweighted_value,
+                premium_total,
             };
             if is_asset {
                 assets.push(p);
@@ -474,8 +516,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             return Err("not a MarginfiAccount".into());
         }
         let account = load::<MarginfiAccount>(data)?;
-        let health = CrateHealth { state: self.state, group: self.group }
-            .health(account_key, now_unix_s, slot)
+        let (health, emode_boosted) = CrateHealth { state: self.state, group: self.group }
+            .health_with_emode(account_key, now_unix_s, slot)
             .map_err(|e: HealthError| e.to_string())?;
         if !health.liquidatable || health.maintenance_health >= 0 {
             return Ok(Vec::new());
@@ -488,8 +530,13 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 .ok_or_else(|| "minimum fee division".to_string())?;
             if onchain_fee_rate > minimum { onchain_fee_rate } else { minimum }
         };
+        let premium_cap = if emode_boosted || health.is_bad_debt {
+            fee_rate
+        } else {
+            tag_adjusted_premium(fee_rate, account.liquidation_tagged_at, now_unix_s)
+        };
         let max_fee_factor = I80F48::ONE
-            .checked_add(fee_rate)
+            .checked_add(premium_cap)
             .ok_or_else(|| "fee factor overflow".to_string())?;
         let clock = Clock {
             slot,
@@ -597,6 +644,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 let Some(repay_choice) = choose_repay(
                     repay_exact,
                     liab.amount,
+                    liab.premium_total,
                     liab.opposite_amount,
                 )? else {
                     if ceil_u64(repay_exact)? == 0 {
@@ -697,20 +745,17 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     rej_rounded_health += 1;
                     continue;
                 }
-                // [FIX-93] Normal receivership must obey the exact EndLiquidation premium
-                // bound. Marginfi explicitly skips this check for closeout accounts
-                // (ignore_healthy=true), so applying it there would reject valid closeouts.
-                if !health.closeout_allowed {
-                    let max_seized = repay_protocol_actual
-                        .checked_mul(fee_factor)
-                        .ok_or_else(|| "rounded premium bound overflow".to_string())?;
-                    let protocol_seized = seized_actual
-                        .checked_add(repay_all_dust_equity)
-                        .ok_or("repay_all seized equity overflow")?;
-                    if protocol_seized > max_seized {
-                        rej_premium_bound += 1;
-                        continue;
-                    }
+                // [P1B-0.1.12] Closeout may end healthy, but EndLiquidation still enforces
+                // the premium cap. This check therefore applies to every liquidation.
+                let max_seized = repay_protocol_actual
+                    .checked_mul(fee_factor)
+                    .ok_or_else(|| "rounded premium bound overflow".to_string())?;
+                let protocol_seized = seized_actual
+                    .checked_add(repay_all_dust_equity)
+                    .ok_or("repay_all seized equity overflow")?;
+                if protocol_seized > max_seized {
+                    rej_premium_bound += 1;
+                    continue;
                 }
                 let protocol_seized = seized_actual
                     .checked_add(repay_all_dust_equity)
@@ -764,7 +809,7 @@ mod tests {
     fn near_full_rounding_uses_source_backed_repay_all() {
         let debt = I80F48::from_num(9.2);
         let target = I80F48::from_num(9.8);
-        let c = choose_repay(target, debt, I80F48::ZERO)
+        let c = choose_repay(target, debt, I80F48::ZERO, I80F48::ZERO)
             .unwrap()
             .expect("repay_all");
         assert_eq!(c.transfer_amount, 10);
@@ -779,6 +824,7 @@ mod tests {
             I80F48::from_num(10.1),
             debt,
             I80F48::ZERO,
+            I80F48::ZERO,
         )
         .unwrap()
         .is_none());
@@ -791,12 +837,13 @@ mod tests {
         assert!(choose_repay(
             target,
             debt,
+            I80F48::ZERO,
             ZERO_AMOUNT_THRESHOLD - I80F48::DELTA,
         )
         .unwrap()
         .unwrap()
         .repay_all);
-        assert!(choose_repay(target, debt, ZERO_AMOUNT_THRESHOLD)
+        assert!(choose_repay(target, debt, I80F48::ZERO, ZERO_AMOUNT_THRESHOLD)
             .unwrap()
             .is_none());
     }
@@ -807,12 +854,45 @@ mod tests {
             I80F48::from_num(4.1),
             I80F48::from_num(9.2),
             I80F48::ZERO,
+            I80F48::ZERO,
         )
         .unwrap()
         .unwrap();
         assert_eq!(c.transfer_amount, 5);
         assert_eq!(c.protocol_amount, I80F48::from_num(5));
         assert!(!c.repay_all);
+    }
+
+    #[test]
+    fn p1b_repay_all_includes_recognized_premium() {
+        let principal = I80F48::from_num(9.2);
+        let premium = I80F48::from_num(0.6);
+        let c = choose_repay(
+            I80F48::from_num(9.8),
+            principal,
+            premium,
+            I80F48::ZERO,
+        )
+        .unwrap()
+        .expect("repay_all");
+        assert!(c.repay_all);
+        assert_eq!(c.protocol_amount, I80F48::from_num(9.8));
+        assert_eq!(c.transfer_amount, 10);
+    }
+
+    #[test]
+    fn p1b_partial_repay_can_settle_premium_before_principal() {
+        let c = choose_repay(
+            I80F48::from_num(2),
+            I80F48::from_num(9),
+            I80F48::from_num(3),
+            I80F48::ZERO,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!c.repay_all);
+        assert_eq!(c.transfer_amount, 2);
+        assert_eq!(c.protocol_amount, I80F48::from_num(2));
     }
 
     #[test]
