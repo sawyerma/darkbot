@@ -1,0 +1,100 @@
+{
+  "retrieved_at_utc": "2026-10-05T20:56:37.889146+00:00",
+  "program": "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA",
+  "signatures_scanned": 52,
+  "successful_transactions_inspected": 9,
+  "fetch_failures": [],
+  "events": [
+    {
+      "signature": "59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa",
+      "slot": 453063240,
+      "blockTime": 1791065261,
+      "fee_lamports": 5000,
+      "events": [
+        {
+          "target": "HMjc1LecbCMUqYG3x36gaCzxG5AJ7gJPkPB85fx1pPKK",
+          "receiver": "qbvAGHo9JpVRsuRem8rBCzLJJNV6ZDNv63qYHkcmNCV",
+          "seized_equity_usd": 1.6332248942395253,
+          "repaid_equity_usd": 1.5730421920342934,
+          "protocol_flat_fee_lamports": 1000000
+        }
+      ]
+    },
+    {
+      "signature": "38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F",
+      "slot": 451704201,
+      "blockTime": 1790701629,
+      "fee_lamports": 19000,
+      "events": [
+        {
+          "target": "AzQVTAtLxdaQUJzh7xZ7rj956tkeVNk4D4iuK5EVkxDi",
+          "receiver": "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+          "seized_equity_usd": 0.9979337956812735,
+          "repaid_equity_usd": 0.4661645645327397,
+          "protocol_flat_fee_lamports": 1000000
+        }
+      ]
+    },
+    {
+      "signature": "2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf",
+      "slot": 451703584,
+      "blockTime": 1790701461,
+      "fee_lamports": 19000,
+      "events": [
+        {
+          "target": "3GqwCURBtJZfdQxMSyZ1VyWNSB5WXovg7Q8Q46HY7ihx",
+          "receiver": "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+          "seized_equity_usd": 0.35016135320244146,
+          "repaid_equity_usd": 0.16333974357083747,
+          "protocol_flat_fee_lamports": 1000000
+        }
+      ]
+    },
+    {
+      "signature": "3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB",
+      "slot": 451657746,
+      "blockTime": 1790689143,
+      "fee_lamports": 5000,
+      "events": [
+        {
+          "target": "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+          "receiver": "TraceR2t18nnwkXgHoB54iPD5N4x2EJZC1uS55ggsH8",
+          "seized_equity_usd": 2.102967368506331,
+          "repaid_equity_usd": 1.9170169748105295,
+          "protocol_flat_fee_lamports": 1000000
+        }
+      ]
+    },
+    {
+      "signature": "gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB",
+      "slot": 451643526,
+      "blockTime": 1790685344,
+      "fee_lamports": 19000,
+      "events": [
+        {
+          "target": "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+          "receiver": "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+          "seized_equity_usd": 1.9682291660750835,
+          "repaid_equity_usd": 1.7940287855275017,
+          "protocol_flat_fee_lamports": 1000000
+        }
+      ]
+    },
+    {
+      "signature": "C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ",
+      "slot": 451635082,
+      "blockTime": 1790683086,
+      "fee_lamports": 5000,
+      "events": [
+        {
+          "target": "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+          "receiver": "TraceR2t18nnwkXgHoB54iPD5N4x2EJZC1uS55ggsH8",
+          "seized_equity_usd": 2.372690343180288,
+          "repaid_equity_usd": 2.1628902433213746,
+          "protocol_flat_fee_lamports": 1000000
+        }
+      ]
+    }
+  ],
+  "historical_account_prestate_available": false
+}

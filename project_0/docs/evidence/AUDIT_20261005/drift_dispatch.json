@@ -1,0 +1,61 @@
+{
+  "program": "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH",
+  "discriminator": [
+    39,
+    166,
+    139,
+    243,
+    158,
+    165,
+    155,
+    225
+  ],
+  "purpose": "dispatch-only; deliberately missing venue accounts; unsigned simulation",
+  "response": {
+    "jsonrpc": "2.0",
+    "result": {
+      "context": {
+        "apiVersion": "4.3.0",
+        "slot": 453692452
+      },
+      "value": {
+        "accounts": null,
+        "err": {
+          "InstructionError": [
+            0,
+            {
+              "Custom": 101
+            }
+          ]
+        },
+        "fee": 5000,
+        "innerInstructions": null,
+        "loadedAccountsDataSize": 6673342,
+        "loadedAddresses": {
+          "readonly": [],
+          "writable": []
+        },
+        "logs": [
+          "Program dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH invoke [1]",
+          "Program log: AnchorError occurred. Error Code: InstructionFallbackNotFound. Error Number: 101. Error Message: Fallback functions are not supported.",
+          "Program dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH consumed 1345 of 200000 compute units",
+          "Program dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH failed: custom program error: 0x65"
+        ],
+        "postBalances": [
+          5519680,
+          49155476
+        ],
+        "postTokenBalances": [],
+        "preBalances": [
+          5524680,
+          49155476
+        ],
+        "preTokenBalances": [],
+        "replacementBlockhash": null,
+        "returnData": null,
+        "unitsConsumed": 1345
+      }
+    },
+    "id": 1
+  }
+}

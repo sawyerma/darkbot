@@ -1,0 +1,65 @@
+{
+  "audit_runtime_sha": "799048f8fa95df4c29f2aa6b35bcc3615405fe19",
+  "tracked_file_count": 2086,
+  "top_level_counts": {
+    ".gitignore": 1,
+    "README.md": 1,
+    "WALLET_SECURITY.md": 1,
+    "bsc": 1432,
+    "frontend": 34,
+    "gates": 1,
+    "project_0": 98,
+    "solana": 518
+  },
+  "tests": {
+    "txv1": {
+      "passed": 136,
+      "failed": 0,
+      "suite_count": 12
+    },
+    "health": {
+      "passed": 134,
+      "failed": 0,
+      "suite_count": 11
+    }
+  },
+  "reference_repositories": {
+    "p0-ts-sdk": {
+      "sha": "9860697041532f1a9b19e86a36f9810570cad326",
+      "remote": "https://github.com/0dotxyz/p0-ts-sdk.git"
+    },
+    "eva01": {
+      "sha": "15625d5f57dea2ed0a47e857de814fdd68d2513d",
+      "remote": "https://github.com/0dotxyz/eva01.git"
+    },
+    "mary": {
+      "sha": "c1ba4b0e82118e86def2cccb9fb4b32520e88b15",
+      "remote": "https://github.com/mrgnlabs/mary.git"
+    },
+    "keep-rs": {
+      "sha": "99f94a149f006b2074b7ea7babadb34b07368ea6",
+      "remote": "https://github.com/drift-labs/keep-rs.git"
+    },
+    "solend-public": {
+      "sha": "b3b46ffbc2f5162b6e5680dd3cad1042c2eb3f8e",
+      "remote": "https://github.com/solendprotocol/public.git"
+    },
+    "drift-protocol": {
+      "sha": "13e8e9b8d614f3b62e3a65a8c372c819e6529aeb",
+      "remote": "https://github.com/drift-labs/protocol-v2.git"
+    },
+    "solend-liquidator": {
+      "sha": "db9adbf571ba13414117741475331b1ccf17f1fd",
+      "remote": "https://github.com/solendprotocol/liquidator.git"
+    },
+    "keeper-bots-v2": {
+      "sha": "0e4e93be737384f2b03c93c06ada83937c6c8e42",
+      "remote": "https://github.com/drift-labs/keeper-bots-v2.git"
+    },
+    "marginfi-v2-pinned": {
+      "sha": "33c67987a661f59c6683a65485ebb4f0ef030b77",
+      "tag": "mrgn-0.1.11-rc1"
+    }
+  },
+  "coverage": "All-repository inventory and dependency boundaries; deep review Project_0 execution/state/economics; BSC/Pump implementation correctness not certified."
+}

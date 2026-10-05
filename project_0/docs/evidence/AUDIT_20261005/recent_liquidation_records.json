@@ -1,0 +1,109 @@
+{
+  "context": {
+    "slot": 453692509,
+    "apiVersion": "4.3.0-beta.2"
+  },
+  "record_count": 6330,
+  "selected": [
+    {
+      "record": "C1dMvqbDQRKnSxF8wRArC1wsaMnMGqkNPysSmbpeCsEG",
+      "target": "HMjc1LecbCMUqYG3x36gaCzxG5AJ7gJPkPB85fx1pPKK",
+      "last_liquidation_unix_s": 1791065261
+    },
+    {
+      "record": "kqcdC7uZYa77Sbz5fx8RajXRctAPe3SY2rbufiKg7km",
+      "target": "HasRqVk4SLdBzmibb9RFnTuVPAt2kih9dku7ZLo2LioJ",
+      "last_liquidation_unix_s": 1790775677
+    },
+    {
+      "record": "8Nr4Vywto2hisQXk42fatnnUFLZnE5Qb35iFt9wk4RR",
+      "target": "AzQVTAtLxdaQUJzh7xZ7rj956tkeVNk4D4iuK5EVkxDi",
+      "last_liquidation_unix_s": 1790701629
+    },
+    {
+      "record": "7AowAn5in3wyKeNCdx3jf28JM3YDqSEvv9QB6VqWq4vL",
+      "target": "3GqwCURBtJZfdQxMSyZ1VyWNSB5WXovg7Q8Q46HY7ihx",
+      "last_liquidation_unix_s": 1790701461
+    },
+    {
+      "record": "HVzXpGsazbH5V4jxLjSLPPNpPnELAach1GE39K6QGFQc",
+      "target": "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+      "last_liquidation_unix_s": 1790689143
+    },
+    {
+      "record": "54Jy4aw6rBfg1NXccyiycx5qiK45FThvK3u1Fo94BvaR",
+      "target": "44pFN3Ycu8ygHB6cG12WnhdJvgbRUXAEBnRnrD6NvUn3",
+      "last_liquidation_unix_s": 1790683812
+    },
+    {
+      "record": "6JEgWrAmNMAUjww3GZhDTedUe6cMwYiXieE5A8zUAnGn",
+      "target": "AEn5EcUHrHn3Y6SYoMjaSuxPpsRBmuc5KHdr4ziVvKrS",
+      "last_liquidation_unix_s": 1790633938
+    },
+    {
+      "record": "9QC8M3r4sYRLfKMzdiWKFC1eG1wWvbQewkh9ME7gNJf4",
+      "target": "83UzL8xX38xo1hueyfar2XZbV1aHyZpKdXTuS87gSDX8",
+      "last_liquidation_unix_s": 1790600916
+    },
+    {
+      "record": "6rsLp1SnSqdfE4MP3ydzuYrrWrggmMRDpQRvFJs7uWYP",
+      "target": "3FAaVj3XFRbAwyk7EFdxWqzHnJ7C7q9MSZfhQs5o4iJG",
+      "last_liquidation_unix_s": 1790556691
+    },
+    {
+      "record": "Cg2omfPJyBtzjb5FoPbanTsxyv5QVe3xmDFBATWJ6bs3",
+      "target": "8RhpR9wPzsTaCejysD2ZMjVwnrbr93qZwsxpK9RfJLaR",
+      "last_liquidation_unix_s": 1790497060
+    },
+    {
+      "record": "B9gVZPiCUTJg8dBMuQXBW36eJA1bsNSzXAwx5JoscHWW",
+      "target": "TkBeHe4qPsGFmbyDoUS3UUXZiJyTsocvg8XyAPXuLCS",
+      "last_liquidation_unix_s": 1790496992
+    },
+    {
+      "record": "Ga6MYJJUPoourEAiTpBeg1HkNzco3W8MsxR6QRFRA6tu",
+      "target": "GoH4PjUGy5tAY3FsUFC8mFLhH1WwsDeLMkHHQ2VGzDau",
+      "last_liquidation_unix_s": 1790496965
+    },
+    {
+      "record": "8YGZRBu9rogLtN7146VyoVKvcfeKVpCNAgadDiPnsnr9",
+      "target": "7LdSheuXxuteNpupkAvbHozJPuMi3V5S3RJNPHW391KZ",
+      "last_liquidation_unix_s": 1790496942
+    },
+    {
+      "record": "9Pa35wcziN28XUABmGPKzhr66roB5r1NCUjJAGampHyr",
+      "target": "7ULwGfPQZeRYd3RBfzsugG5DDtidyQQe1DTb6R1sX6WF",
+      "last_liquidation_unix_s": 1790496942
+    },
+    {
+      "record": "DZWvNK55y4DsWEBtucj2GopBCp6EMthA6Rrt11cFpfbq",
+      "target": "9oZf98ja1QYJpijL86aGiEiiSqaivfPtr6c7gMs3UbfN",
+      "last_liquidation_unix_s": 1790496939
+    },
+    {
+      "record": "CeTcHAAKud2odoS8nBVU9kaMuDahcjzQWDw31zzdqK9t",
+      "target": "2iDokbYJECMBrQAYDoGQDiGz8tSjYkfmseTkb9LrmXFJ",
+      "last_liquidation_unix_s": 1790496005
+    },
+    {
+      "record": "6dza8g1pUmUmwveipNKsrABvemKQxNVyTVn3K7CdmwnT",
+      "target": "9g9nwqDbkgBY9uKMX1fkxGDfwV1GrMaXd1efLYfm4PTz",
+      "last_liquidation_unix_s": 1790495861
+    },
+    {
+      "record": "G9JJVsBvPLu4UWz2867y8oGG3iqytBpdNjxzHrKCMo45",
+      "target": "2BQBo2vKPoC3MkbjnW1Tb8wfihePP7qXq2zddEw6zZEN",
+      "last_liquidation_unix_s": 1790495853
+    },
+    {
+      "record": "HdyTBwezrj2PkWX7N4oRcQeNJYPFuxJynopCsfebkjWU",
+      "target": "EvRfp9ySCstAoBWqKe1kqpqvYBDop4R77STV29xRtLsB",
+      "last_liquidation_unix_s": 1790495853
+    },
+    {
+      "record": "GN2FP78tQjmsKcoqgZ8jsKDqX9TDKKqA3NHQNdrYj5Ut",
+      "target": "24kDmgE6khMnPj4RLGDfVWQwa1CheUGrdf5fqko1mqVm",
+      "last_liquidation_unix_s": 1790495849
+    }
+  ]
+}

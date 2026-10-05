@@ -1,0 +1,4 @@
+PASS observed class transitions and forced Bank rearm
+REPRODUCED: second same-slot price/profit change suppressed despite free capacity
+REPRODUCED: same Error class after changed integration input suppressed
+REPRODUCED: lexicographically last candidate starved for 100 slots; first 1,024 rearmed every slot
