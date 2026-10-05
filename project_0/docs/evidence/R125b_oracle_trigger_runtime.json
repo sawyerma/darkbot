@@ -1,0 +1,68 @@
+{
+  "run": "R125b",
+  "date": "2026-10-05",
+  "protocol": "mrgn-0.1.11-rc1",
+  "transactions_sent": 0,
+  "live_enabled": false,
+  "recovery": {
+    "snapshot_liability_accounts": 82699,
+    "banks": 204,
+    "required_dependencies": 494,
+    "total_accounts": 83405,
+    "missing_required": 0,
+    "reverse_index_accounts": 82699,
+    "unsupported_bank_oracle_layouts": 0
+  },
+  "threshold_index": {
+    "bootstrap_population": 77984,
+    "tracked": 77756,
+    "fallback": 228,
+    "fallback_ratio": 0.0029236766516208454,
+    "bootstrap_remaining": 0,
+    "ready": true
+  },
+  "integration_census": {
+    "withdraw_kamino": 194,
+    "withdraw_drift": 0,
+    "withdraw_juplend": 43,
+    "pricing_kamino": 194,
+    "pricing_drift": 0,
+    "pricing_juplend": 43,
+    "scan_errors": 0
+  },
+  "oracle_trigger_stats": {
+    "dependency_updates": 7,
+    "candidate_hits": 15535,
+    "enqueued": 15535,
+    "coalesced": 0,
+    "price_fallbacks": 38,
+    "pending_at_sample": 0,
+    "max_pending": 6578,
+    "detect_queue": 0
+  },
+  "ingress_sample": {
+    "accounts": 61,
+    "banks": 0,
+    "groups": 0,
+    "fee": 0,
+    "liquidation_records": 0,
+    "unknown": 939,
+    "channel_capacity": 65536,
+    "channel_sent": 6105,
+    "channel_received": 5829,
+    "channel_overflow": 0
+  },
+  "observed_price_fallback_causes": [
+    "Kamino ReserveStale",
+    "JupLend JuplendLendingStale",
+    "Drift DriftSpotMarketStale"
+  ],
+  "qualification": {
+    "functional_trigger_path": "PASS",
+    "threshold_bootstrap": "PASS",
+    "ingress_overflow": "PASS",
+    "queue_drains_to_zero": "PASS",
+    "sustained_load": "PARTIAL",
+    "reason": "max_pending reached 6578 during only 7 dependency updates; conservative full-bank wakeups on stale integration pricing dominate bursts. Safe but not yet efficient enough to call 72h-ready."
+  }
+}
