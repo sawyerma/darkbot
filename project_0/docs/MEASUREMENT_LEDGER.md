@@ -3005,3 +3005,31 @@ User-reported local verification:
 Next gate: short Mainnet Shadow qualification. Verify `threshold_index_ready`, fallback ratio,
 real `oracle_threshold` records, ingress/channel health, coalescing effectiveness and bounded
 Oracle pending depth before any 72 h run.
+
+
+### 2026-10-05 — R125 FIX-133 Mainnet Shadow, bootstrap phase PASS / trigger phase pending
+
+Mainnet Shadow reached Recovery READY cleanly:
+- snapshot A/B: 82,700 liability accounts, 204 Banks, 494 required dependencies,
+  83,406 total accounts, missing_required=0;
+- ReverseIndex: 204 Banks, 82,700 MarginfiAccounts, 0 unsupported Bank oracle layouts;
+- liability-bearing threshold bootstrap population: 77,984 accounts.
+
+Threshold bootstrap completed:
+- tracked thresholds: 77,756;
+- conservative fallback accounts: 228;
+- fallback ratio: 228 / 77,984 = 0.2924%.
+
+Observed fallback excerpts are protocol-originated stale integration state:
+Kamino `ReserveStale` and JupLend `JuplendLendingStale`. These accounts remain
+conservative fallback candidates; they are not silently excluded. The integration census in
+the same run found 194 Kamino and 43 JupLend accounts (Drift 0 in the current census).
+
+The run was manually stopped immediately after
+`threshold_index_ready: tracked=77756 fallback=228`.
+Therefore this establishes **bootstrap/runtime construction PASS only**. It does not yet
+qualify the live Oracle wakeup phase: `oracle_trigger_stats`, real
+`trigger=oracle_threshold` records, queue/coalescing behavior and sustained ingress/channel
+health still require evidence.
+
+No transaction sent. LIVE disabled. 72 h NOT STARTED.
