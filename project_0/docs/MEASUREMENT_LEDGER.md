@@ -3088,3 +3088,42 @@ Decision:
   and stable drain under repeated dependency updates.
 
 No transaction sent. LIVE remains disabled. FIX-129 Jito lifecycle cells remain UNKNOWN.
+
+
+### 2026-10-05 — R126 stale-integration Bank projection fanout reduction
+
+Motivation from R125b:
+- functional Oracle-trigger path PASS;
+- queue drained and ingress overflow remained zero;
+- however max Oracle pending reached 6,578 after only seven dependency updates;
+- observed bursts were dominated by conservative full-Bank fallback when Marginfi pricing
+  rejected stale Kamino/JupLend/Drift integration state.
+
+Implemented:
+- `582d73fd`: added a dedicated bounded RPC worker for integration-Bank price projection.
+- `7a08ac06`: on stale canonical integration pricing, the runner now:
+  1. builds the exact existing per-Bank integration refresh prefix;
+  2. simulates it once for that Bank;
+  3. overlays only the refreshed writable integration accounts;
+  4. extracts the fresh Marginfi Maintenance Low/High risk prices;
+  5. applies ThresholdIndex to select Accounts;
+  6. includes existing conservative threshold-fallback Accounts.
+- a second dependency update for the same Bank while projection is pending is coalesced into
+  the latest ingress timestamp/slot rather than spawning another projection.
+- projection result is accepted only if the canonical Bank is unchanged and the returned
+  simulation slot is at least the newest buffered dependency-event slot.
+- simulation/build/sign/queue/projection/price failures retain the previous conservative
+  full-Bank wakeup; correctness is never traded for fanout reduction.
+- `e9014c8c`: result ownership made explicit before compilation to avoid borrow/move ambiguity.
+- telemetry extended with Bank-projection pending/submitted/ready/failed/stale counters.
+
+Expected R126 effect:
+- common stale-integration case should move from thousands of immediate Account wakeups to one
+  Bank refresh simulation plus threshold-selected Accounts;
+- worst-case semantics remain identical to R125b via full-Bank fallback.
+
+Status: **IMPLEMENTED / COMPILE+UNIT TEST PENDING**.
+No transaction sent. LIVE disabled. This is a short-load qualification step; no 72 h run is
+planned. After compile PASS, run approximately 10–30 minutes and compare max_pending,
+candidate_hits/update, price_fallbacks, Bank-projection success ratio and ingress overflow
+against R125b.
