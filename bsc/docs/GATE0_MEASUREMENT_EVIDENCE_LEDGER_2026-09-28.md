@@ -2953,3 +2953,93 @@ Externe OHLC-Daten wurden nicht abgerufen: direkter Flap-HTTP-Aufruf 403; öffen
 Auf ausdrücklichen Nutzerauftrag enthält `bsc/docs/GATE0_TESTPLAN_SHORT.md`, Abschnitt „Current task amendment — 2026-10-03“, nun die nächste Arbeitsreihenfolge: vor T0 vorbereiten, geordnete Pre-Submission/Inclusion qualifizieren, stabilen frühen Ingress und Zustellung prüfen, Produktions-Ausführungszeiten instrumentieren und bei **jedem** Versuch die ersten 15 Sekunden ab T0 als Rohdaten erfassen. Auch fehlgeschlagene/verpasste Käufe bleiben enthalten. Die Aufzeichnung startet vor Launch und wird anschließend kanonisch abgeglichen; unbekannter T0, Datenlücken und Reorgs werden explizit ausgewiesen. Preis/OHLCV/Kosten/Reihenfolge werden nachträglich aus Roh-Trades abgeleitet, ohne dadurch Sub-ms-Ausführungszeiten zu behaupten.
 
 Dies ist ein **Dokumentations-/Aufgabenplan-Update**, keine implementierte Capture-Funktion, kein neuer Testlauf und keine Freigabe zusätzlicher Mainnet-Ausgaben. Die oben gemessenen Ergebnisse bleiben unverändert.
+
+## 2026-10-05 — Unit-5 TLS frozen; Q5A qualification harness accepted
+
+Current BSC handoff state after synchronizing the complete repository and completing the local Q5A harness acceptance run.
+
+Repository baseline before this ledger update:
+
+```text
+tracked local main                 79162927c0df392aaa59ac155a9b600bf7f7180b
+origin/main                        79162927c0df392aaa59ac155a9b600bf7f7180b
+tracked repository state           SYNCHRONIZED
+Q5A harness commit                 79162927c0df392aaa59ac155a9b600bf7f7180b
+```
+
+The two known local Project-0 paths `project_0/data/shadow/` and `project_0/native/Cargo.lock` remained untracked and were not part of this BSC commit/state.
+
+### Frozen Unit-5 implementation state
+
+```text
+Units 1-4                          IMPLEMENTED_TESTED / FROZEN
+Unit 5 Core                       IMPLEMENTED_TESTED / FROZEN
+Unit 5 Runner v1 Rev3             IMPLEMENTED_TESTED / FROZEN
+Unit 5 TLS/socket transport Rev2  IMPLEMENTED_TESTED / FROZEN
+Q5A qualification harness         IMPLEMENTED_TESTED
+real TLS transport qualification  NOT_RUN
+real provider qualification       OPEN
+Production QualifiedTransport     NONE
+LIVE                               BLOCKED
+T0 -> T_buy < 1 ms                NOT YET PROVEN
+```
+
+The frozen TLS implementation uses rustls `0.23.45` with the ring provider and `webpki-roots 1.0.9`. DNS resolution, TCP connect, TLS handshake, warm-up and reconnect remain outside the BUY dispatch. The dispatch prepares TLS records before the final monotonic deadline check; the first `write_tls` socket operation occurs after that check. The recorded local handoff boundary remains userspace TLS write/flush completion, meaning ciphertext accepted by the kernel send path, not NIC transmission, builder receipt, inclusion or execution.
+
+### Q5A qualification harness
+
+The new workspace crate `bsc/native/crates/darkbot-qualify` is committed and uses the frozen production TLS/transport types rather than a second transport implementation.
+
+The harness is deliberately non-value-bearing:
+
+- safe probe only;
+- no funded BUY;
+- no executable transaction;
+- no LIVE authorization;
+- no production `QualifiedTransport` constructor;
+- provider semantics and inclusion remain separate from transport qualification.
+
+The evaluator was hardened fail-closed before acceptance:
+
+- exactly 100 measured timing values are required for a PASS;
+- every `HandedOff` sample requires the mandatory connection/timing/wire evidence;
+- `t_boundary_ns >= t_write_check_ns`;
+- the stored duration must exactly equal `t_boundary_ns - t_write_check_ns`;
+- `wire_bytes > 0`;
+- peer/generation must match the applicable connection scope;
+- the independent Python checker recomputes durations and aggregates from raw timestamps;
+- build identity accepts only the exact expected tri-state values and checks the frozen transport implementation identity.
+
+### Target-system acceptance
+
+Final chained acceptance on the user's arm64 macOS target:
+
+```text
+cargo fmt --all -- --check                                      PASS
+cargo build --workspace --locked --offline                     PASS
+cargo build --workspace --release --locked --offline           PASS
+cargo test --workspace --locked --offline                      PASS
+cargo test --workspace --release --locked --offline            PASS
+cargo clippy --workspace --all-targets --locked --offline
+  -- -D warnings                                                PASS
+workspace test inventory                                        303
+final marker                                                    Q5A_HARNESS_ALL_GATES_PASS
+```
+
+The earlier Clippy-only failure in `darkbot-qualify/tests/offline.rs` was limited to three `type_complexity` warnings in test case array declarations. It was corrected with test-only type aliases; no production, measurement or qualification semantics changed. The complete chained gate then passed.
+
+### Gate interpretation
+
+This checkpoint proves that the Q5A qualification harness itself is implemented and regression-tested on the target machine. It does **not** qualify a real 48Club or BlockRazor transport yet.
+
+Still open:
+
+1. run Q5A from a clean committed release build against the real provider endpoints;
+2. collect 100 measured samples plus reconnect evidence per provider;
+3. require zero UNKNOWN/write/flush/deadline failures and a maximum qualified handoff below 1,000,000 ns for the declared workload;
+4. independently verify the generated evidence;
+5. only then decide whether a production `TransportQualification` / `QualifiedTransport` construction path may be introduced;
+6. keep actual provider ordering/atomicity/same-block behavior, inclusion and `T0 -> T_buy` as separate later evidence.
+
+No provider ACK, TLS handoff result, same-block observation or local latency measurement may be promoted to a `T0 -> T_buy < 1 ms` claim. Product LIVE remains blocked.
+
