@@ -612,6 +612,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkbot-runner"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "darkbot-core",
+]
+
+[[package]]
 name = "darkbot-wire"
 version = "0.1.0"
 dependencies = [

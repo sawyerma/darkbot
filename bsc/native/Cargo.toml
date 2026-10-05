@@ -13,6 +13,7 @@ resolver = "3"
 members = [
     "crates/darkbot-wire",
     "crates/darkbot-core",
+    "crates/darkbot-runner",
 ]
 
 [workspace.package]
