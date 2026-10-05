@@ -3367,3 +3367,42 @@ queue/filter after it.
 
 Status: **R127 FAIL / R127c IMPLEMENTED, COMPILE+UNIT TEST PENDING**.
 No transaction sent. LIVE disabled.
+
+
+### 2026-10-05 — R127c rollback anchor + compile/unit PASS
+
+For an explicit rollback/reproduction point, the exact pre-R127c tree was frozen as:
+
+- commit: `bdcaa41c2c41eeefdacad08e7a8285a7f1921b79`
+- branch: `archive/r127b-pre-batch-20261005`
+
+A dedicated change/rollback document now exists at:
+
+- `project_0/docs/R127C_CHANGELOG_ROLLBACK.md`
+- documentation commit: `f70d3105068c6ff0674ab0a3b8c023005896211a`
+
+That document records:
+- the complete R127c implementation commit chain;
+- exact before/after runtime semantics;
+- new batching ENV controls;
+- new telemetry;
+- startup-sweep behavior;
+- files changed between pre-R127c and complete R127c;
+- safe reproduction and revert procedures.
+
+User-reported local validation after the complete R127c code change:
+- workspace `crate_health txv1`: PASS;
+- workspace `crate_health`: PASS;
+- visible unit-test group: 30 passed / 0 failed;
+- all shown Doc-tests PASS (0 cases where none exist).
+
+The remaining compiler warning
+`value assigned to detect is never read`
+does not fail compilation/tests and is deliberately not changed during the already-running
+R127c Mainnet Shadow qualification, to keep the measured binary/source semantics stable.
+
+Current R127c Shadow qualification prefix:
+`r127_20261005T160040Z`.
+
+Status: **R127c COMPILE+UNIT PASS / MAINNET SHADOW QUALIFICATION RUNNING**.
+No transaction sent. LIVE disabled.
