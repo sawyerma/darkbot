@@ -698,7 +698,6 @@ pub mod p0 {
                 return Err(format!("SIZING:{}", self.sizing.no_size_reason(account)?));
             }
             let protocol_luts = crate::lookup_tables::from_state(self.state, &self.group, slot);
-            eprintln!("protocol_luts: active={} addresses={}", protocol_luts.len(), protocol_luts.iter().map(|t| t.addresses.len()).sum::<usize>());
             let health = CrateHealth { state: self.state, group: self.group };
             let obs = health.observation_accounts(account).map_err(|e| e.to_string())?;
             let mut out = Vec::new();
