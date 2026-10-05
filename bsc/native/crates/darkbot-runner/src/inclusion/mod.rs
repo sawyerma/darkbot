@@ -8,11 +8,13 @@
 //! - [`send`]: the diagnostic and the release dispatch, the placement of
 //!   the last deadline check, and response polling.
 //! - [`response`]: bounded parsing of provider responses.
+//! - [`tls`]: the production transport of the two builders, a warm
+//!   HTTP/1.1-over-TLS connection per builder and the owner that builds and
+//!   keeps it outside any dispatch.
 //!
-//! This is the transport-independent part. A diagnostic dispatch runs over
-//! any [`Transport`]; a release dispatch only over a qualified transport,
-//! which nothing outside the unit tests can make yet. A concrete TLS
-//! connector is a later slice of the same unit. No real provider is
+//! A diagnostic dispatch runs over any [`Transport`], the TLS transport
+//! included; a release dispatch only over a qualified transport, which
+//! nothing outside the unit tests can make yet. No real provider is
 //! contacted, and none is qualified, by anything in here.
 //!
 //! [`Transport`]: transport::Transport
@@ -23,6 +25,7 @@ pub mod frame;
 pub mod local_geth;
 pub mod response;
 pub mod send;
+pub mod tls;
 pub mod transport;
 
 #[cfg(test)]

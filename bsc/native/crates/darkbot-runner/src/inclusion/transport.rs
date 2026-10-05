@@ -57,11 +57,29 @@ pub enum ConnectionState {
 /// `write`, `flush` and `read` have the meaning of `std::io`. `read`
 /// reports "nothing available yet" as `WouldBlock` or `TimedOut`; it must
 /// not wait for a response that has not arrived.
+///
+/// # Sending a request in two stages
+///
+/// A dispatch hands a request over in two stages, so that its last
+/// deadline check lies immediately before the first byte goes to the wire:
+///
+/// 1. [`Transport::prepare`] takes the complete request and does whatever
+///    has to happen before the wire can be written, such as encrypting it
+///    into TLS records, without any I/O;
+/// 2. the dispatch reads the clock and checks its deadline;
+/// 3. `write`, called with the same request, starts with the first write
+///    to the wire, and `flush` completes the handoff.
+///
+/// A transport that writes the request as it is has nothing to prepare;
+/// the default does nothing, and `write` and `flush` keep their plain
+/// meaning.
 pub trait Transport {
     /// Current state of the connection. Must not perform I/O.
     fn state(&self) -> ConnectionState;
 
-    /// Writes some bytes of `buf` and returns how many were accepted.
+    /// Writes some bytes of `buf` and returns how many were accepted. After
+    /// a successful `prepare` of `buf`, its first action is the first write
+    /// to the wire.
     fn write(&mut self, buf: &[u8]) -> io::Result<usize>;
 
     /// Flushes buffers this layer owns.
@@ -72,6 +90,24 @@ pub trait Transport {
 
     /// Records the connection's new state. Never connects.
     fn mark(&mut self, state: ConnectionState);
+
+    /// Prepares the complete `request` for the wire without any I/O. Called
+    /// at most once per request, before its first `write`, which is then
+    /// given the same bytes. An error means nothing reached the wire.
+    ///
+    /// The default has nothing to prepare.
+    fn prepare(&mut self, request: &[u8]) -> io::Result<()> {
+        let _ = request;
+        Ok(())
+    }
+
+    /// Largest request, in bytes, this transport takes. A dispatch refuses
+    /// a larger one before anything is consumed.
+    ///
+    /// The default sets no limit.
+    fn max_request_len(&self) -> usize {
+        usize::MAX
+    }
 }
 
 /// A [`Transport`] over any `std::io` stream, for diagnostics only.

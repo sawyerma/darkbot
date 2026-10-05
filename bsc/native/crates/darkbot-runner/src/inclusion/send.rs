@@ -18,7 +18,8 @@
 //!
 //! Before anything is consumed: the deadline belongs to the plan's
 //! profile, the armed adapters are exactly the plan's, every frame was
-//! built for this plan and adapter and holds no bytes, a release
+//! built for this plan and adapter, holds no bytes and is no larger than
+//! its transport takes, a release
 //! transport's binding matches the plan, the capability table and the
 //! qualification currently valid for its adapter, and the plan's own final
 //! check passes. If the deadline has already passed, or
@@ -35,14 +36,20 @@
 //!    checked. A miss is a skip; no permit is consumed;
 //! 3. `IntentLane::start_write` consumes the permit and releases the BUY;
 //! 4. the BUY is encoded into the frame's slot;
-//! 5. write check: the clock is read again and the deadline checked again.
+//! 5. the transport prepares the complete request for the wire without
+//!    any I/O (`Transport::prepare`): for TLS, it is encrypted into records
+//!    here. A failure now means no byte is written, but the permit is
+//!    consumed, so the submission is unknown;
+//! 6. write check: the clock is read again and the deadline checked again.
 //!    This read is `t_write_check`. A miss now means no byte is written,
 //!    but the permit is consumed, so the submission is unknown;
-//! 6. the call of the first transport write, then the rest and the flush.
+//! 7. the call of the first transport write, whose first action is the
+//!    first write to the wire, then the rest and the flush.
 //!
-//! Between the clock read of step 5 and the call of the first write there
-//! is only the deadline check. No allocation, lock, log, file, name
-//! resolution, connect, read or sleep anywhere from step 2 to step 6.
+//! Between the clock read of step 6 and the call of the first write there
+//! is only the deadline check: no preparation, encryption or framing. No
+//! lock, log, file, name resolution, connect, read or sleep anywhere from
+//! step 2 to step 7; what a transport allocates in step 5 is its own.
 //!
 //! No adapter waits for another one's response. Responses are read
 //! afterwards, without blocking, by [`poll_response`] and
@@ -68,10 +75,11 @@
 //!
 //! Times are read on the given clock: `t_select` once after the
 //! pre-checks; per adapter `t_prepermit_check`, `t_write_check` (the read
-//! of the final deadline check, immediately before the first
-//! `Transport::write` is called; not a time inside that call and not a
-//! send boundary), `t_boundary` after write and flush returned, and
-//! `t_response`. The send time is reported only if the
+//! of the final deadline check, taken once the transport prepared the
+//! request and immediately before the first `Transport::write` is called,
+//! whose first action is the first write to the wire; not a time inside
+//! that call and not a send boundary), `t_boundary` after write and flush
+//! returned, and `t_response`. The send time is reported only if the
 //! adapter's record qualifies its boundary *and* the dispatch went over a
 //! qualified transport bound to that boundary: see [`SendTime`]. These
 //! adapters have no queue, so there is no queue-commit time.
@@ -118,6 +126,7 @@ pub struct ReleaseArmed<'a> {
 trait Slot {
     fn adapter(&self) -> AdapterId;
     fn state(&self) -> ConnectionState;
+    fn max_request_len(&self) -> usize;
     fn frame(&self) -> &Frame;
     fn parts(&mut self) -> (&mut dyn Transport, &mut Frame);
     fn binding(&self) -> Option<TransportBinding>;
@@ -130,6 +139,10 @@ impl Slot for Armed<'_> {
 
     fn state(&self) -> ConnectionState {
         self.transport.state()
+    }
+
+    fn max_request_len(&self) -> usize {
+        self.transport.max_request_len()
     }
 
     fn frame(&self) -> &Frame {
@@ -152,6 +165,10 @@ impl Slot for ReleaseArmed<'_> {
 
     fn state(&self) -> ConnectionState {
         self.transport.transport().state()
+    }
+
+    fn max_request_len(&self) -> usize {
+        self.transport.transport().max_request_len()
     }
 
     fn frame(&self) -> &Frame {
@@ -194,6 +211,9 @@ pub enum EvidenceClass {
 pub enum UnknownCause {
     /// The BUY did not fit the frame's slot. Nothing was written.
     BuyEncoding,
+    /// The transport could not prepare the request after the permit.
+    /// Nothing was written to the wire.
+    Prepare,
     /// The write check after the permit missed the deadline. Nothing was
     /// written.
     WriteDeadline(TransportDeadlineError),
@@ -267,10 +287,11 @@ pub struct AdapterReport {
     pub t_prepermit_check_ns: Option<u64>,
     /// Elapsed time on the deadline at the pre-permit check, if it passed.
     pub elapsed_at_prepermit_ns: Option<u64>,
-    /// Clock read of the final deadline check, the write check, taken
-    /// immediately before the first `Transport::write` is called. Set only
-    /// if that call followed. Not a time inside the write, and not a send
-    /// boundary.
+    /// Clock read of the final deadline check, the write check, taken once
+    /// the transport prepared the request and immediately before the first
+    /// `Transport::write` is called, whose first action is the first write
+    /// to the wire. Set only if that call followed. Not a time inside the
+    /// write, and not a send boundary.
     pub t_write_check_ns: Option<u64>,
     /// Elapsed time on the deadline at the write check, if it passed.
     pub elapsed_at_write_check_ns: Option<u64>,
@@ -330,6 +351,13 @@ impl AdapterReport {
             Some(ResponseOutcome::Ack) => self.t_response_ns,
             _ => None,
         }
+    }
+
+    /// When the first write to the wire started, as closely as this clock
+    /// can say: the write check, after which only the deadline comparison
+    /// and the call come. The same read as `t_write_check_ns`.
+    pub fn t_socket_write_start_ns(&self) -> Option<u64> {
+        self.t_write_check_ns
     }
 
     /// From the write check to the local boundary. A diagnostic duration;
@@ -410,6 +438,8 @@ pub enum DispatchError {
     /// A frame was built for another plan or adapter, for another adapter
     /// kind than the table binds, or still holds bytes.
     FrameMismatch,
+    /// A frame is larger than its transport takes.
+    RequestTooLarge,
     /// A qualified transport is bound to another adapter kind, capability
     /// generation or boundary than the plan and the table have, or was
     /// qualified under another implementation or generation than the one
@@ -430,6 +460,9 @@ impl core::fmt::Display for DispatchError {
             Self::ProfileMismatch => f.write_str("dispatch: deadline of another profile"),
             Self::ArmedSetMismatch => f.write_str("dispatch: armed adapters differ from the plan"),
             Self::FrameMismatch => f.write_str("dispatch: frame of another plan or adapter"),
+            Self::RequestTooLarge => {
+                f.write_str("dispatch: request larger than its transport takes")
+            }
             Self::TransportBindingMismatch => {
                 f.write_str("dispatch: qualified transport bound to something else")
             }
@@ -592,6 +625,9 @@ fn run<S: Slot>(
         {
             return Err(DispatchError::FrameMismatch);
         }
+        if frame.len() > slot.max_request_len() {
+            return Err(DispatchError::RequestTooLarge);
+        }
         if let Mode::Release(qualifications) = mode {
             let current = qualifications.current(adapter);
             let bound = slot.binding().is_some_and(|binding| {
@@ -706,25 +742,35 @@ fn run<S: Slot>(
         let (transport, frame) = slot.parts();
         let written = match lane.start_write(ticket, adapter, buy_hash) {
             Ok(bytes) => match frame.fill_buy(bytes) {
-                Ok(()) => {
-                    // Write check: the last clock read before the first
-                    // write. Nothing lies between it and the write.
-                    let t_write = clock.now_ns();
-                    match deadline.check(clock_id, t_write) {
-                        Ok(elapsed) => {
-                            record.t_write_check_ns = Some(t_write);
-                            record.elapsed_at_write_check_ns = Some(elapsed);
-                            write_all(transport, frame.bytes())
-                        }
-                        Err(error) => {
-                            report.miss();
-                            Written::Failed {
-                                accepted: 0,
-                                cause: UnknownCause::WriteDeadline(error),
+                // Everything the transport must do before the wire, such
+                // as encrypting the request into TLS records, happens now,
+                // before the last clock read.
+                Ok(()) => match transport.prepare(frame.bytes()) {
+                    Ok(()) => {
+                        // Write check: the last clock read before the first
+                        // write to the wire. Nothing lies between it and
+                        // the write but the comparison.
+                        let t_write = clock.now_ns();
+                        match deadline.check(clock_id, t_write) {
+                            Ok(elapsed) => {
+                                record.t_write_check_ns = Some(t_write);
+                                record.elapsed_at_write_check_ns = Some(elapsed);
+                                write_all(transport, frame.bytes())
+                            }
+                            Err(error) => {
+                                report.miss();
+                                Written::Failed {
+                                    accepted: 0,
+                                    cause: UnknownCause::WriteDeadline(error),
+                                }
                             }
                         }
                     }
-                }
+                    Err(_) => Written::Failed {
+                        accepted: 0,
+                        cause: UnknownCause::Prepare,
+                    },
+                },
                 Err(_) => Written::Failed {
                     accepted: 0,
                     cause: UnknownCause::BuyEncoding,

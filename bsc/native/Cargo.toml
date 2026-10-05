@@ -27,3 +27,8 @@ publish = false
 # Unit-1 review run (2026-10-03).
 alloy-primitives = "=1.7.3"
 k256 = { version = "=0.13.4", features = ["ecdsa"] }
+# TLS of the builder transports (Unit 5). The versions the Gate-0 harness
+# resolved and locked (bsc/gates/gate0/Cargo.lock), with the ring crypto
+# provider instead of the default aws-lc-rs, and without logging.
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "=1.0.9"

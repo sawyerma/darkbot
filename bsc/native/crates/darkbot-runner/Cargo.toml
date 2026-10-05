@@ -10,6 +10,8 @@ publish.workspace = true
 # Always without features: the production build of the runner uses the core
 # as it is.
 darkbot-core = { path = "../darkbot-core" }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
 
 [dev-dependencies]
 # The core's test helpers, for this crate's tests only.

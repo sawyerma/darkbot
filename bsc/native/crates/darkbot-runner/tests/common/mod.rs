@@ -220,7 +220,12 @@ pub struct World {
 
 impl World {
     pub fn prepared() -> Self {
-        let launch_raw = foreign_launch_raw();
+        Self::prepared_with_launch(foreign_launch_raw())
+    }
+
+    /// A world whose third-party launch is `launch_raw`, for requests of a
+    /// chosen size.
+    pub fn prepared_with_launch(launch_raw: Vec<u8>) -> Self {
         let candidate = TxRef::of(&launch_raw).hash();
         let fence = ArmedFence::for_tests(CHAIN, buyer().address(), FIRST_NONCE);
         let mut lane = IntentLane::armed(fence, 4).unwrap();
