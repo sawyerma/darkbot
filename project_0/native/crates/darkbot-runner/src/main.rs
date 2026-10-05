@@ -322,7 +322,13 @@ fn rebuild_reverse_index(
         }
         bank_count += 1;
         match bank_observation_keys(&bank) {
-            Ok(keys) => index.set_bank_oracles(*pk, &keys),
+            Ok(_) => {
+                // [R127b] Long-Tail admission must react to every subscribed dependency that
+                // can change effective bank pricing/health, not only the primary oracle key.
+                // Reuse the same source-backed dependency derivation as snapshot/subscription.
+                let deps = darkbot_project0::health::dependency_keys(&view, program, &[*pk]);
+                index.set_bank_oracles(*pk, &deps);
+            }
             Err(_) => {
                 unsupported_banks += 1;
                 index.set_bank_oracles(*pk, &[]);
@@ -1329,8 +1335,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "crate_health")]
         let dependency_update: Option<(Pubkey, u64, u64)> = match &ev {
             IngressEvent::Account(a)
-                if classify_account(&a.data) == AccountType::Unknown
-                    && reverse_index.banks_for_oracle(&a.pubkey).next().is_some() =>
+                if reverse_index.banks_for_oracle(&a.pubkey).next().is_some() =>
             {
                 Some((a.pubkey, a.t_rx_ns, a.slot))
             }
@@ -1700,7 +1705,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let view = StateView(&st);
             match bank_from_state(&view, &program, &bank_pk).filter(|b| b.group == group) {
                 Some(bank) => match bank_observation_keys(&bank) {
-                    Ok(keys) => reverse_index.set_bank_oracles(bank_pk, &keys),
+                    Ok(_) => {
+                        let deps =
+                            darkbot_project0::health::dependency_keys(&view, &program, &[bank_pk]);
+                        reverse_index.set_bank_oracles(bank_pk, &deps);
+                    }
                     Err(e) => {
                         reverse_index.set_bank_oracles(bank_pk, &[]);
                         eprintln!(
