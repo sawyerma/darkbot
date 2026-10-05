@@ -87,6 +87,13 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
     filtered_ratio = healthy / checks if checks else None
     final_pending = int(latest.get("pending", 0)) if latest else None
     final_backlog = int(latest.get("ingress_backlog", 0)) if latest else None
+    forwarded = int(latest.get("sweep_forwarded", 0))
+    batches = int(latest.get("sweep_batches", 0))
+    refs = int(latest.get("sweep_account_refs", 0))
+    unique_accounts = int(latest.get("sweep_unique_accounts", 0))
+    max_unique_batch = int(latest.get("sweep_max_unique_batch", 0))
+    max_dirty_banks = int(latest.get("sweep_max_dirty_banks", 0))
+    batch_dedupe_ratio = (1.0 - unique_accounts / refs) if refs else None
 
     verdict = "PASS"
     reasons: list[str] = []
@@ -109,10 +116,21 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
     if bool(latest.get("threshold_trigger", True)):
         verdict = "FAIL"
         reasons.append("legacy threshold trigger unexpectedly enabled")
+    if batches == 0:
+        verdict = "FAIL"
+        reasons.append("dependency batching was not exercised")
+    if refs > 0 and unique_accounts >= refs:
+        if verdict != "FAIL":
+            verdict = "PARTIAL"
+        reasons.append("batching produced no account-level deduplication")
     if max_pending >= R126B_MAX_PENDING:
         verdict = "FAIL"
         reasons.append(f"max_pending={max_pending} did not improve R126b={R126B_MAX_PENDING}")
-    if final_pending is not None and final_pending > max(5000, max_pending // 4):
+    elif max_pending > 10000:
+        if verdict != "FAIL":
+            verdict = "PARTIAL"
+        reasons.append(f"max_pending still high after batching: {max_pending}")
+    if final_pending is not None and final_pending > 1000:
         if verdict != "FAIL":
             verdict = "PARTIAL"
         reasons.append(f"queue still materially backlogged at stop: pending={final_pending}")
@@ -141,6 +159,13 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
             "liquidatable": liquidatable,
             "errors": errors,
             "healthy_filter_ratio": filtered_ratio,
+            "forwarded": forwarded,
+            "batches": batches,
+            "account_refs": refs,
+            "unique_accounts": unique_accounts,
+            "batch_dedupe_ratio": batch_dedupe_ratio,
+            "max_unique_batch": max_unique_batch,
+            "max_dirty_banks": max_dirty_banks,
         },
         "legacy_bank_projection_lines": {
             "pending": projection_pending,
@@ -151,6 +176,7 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
 def render(r: dict[str, Any]) -> str:
     s=r["sweep"]; latest=r["latest"]
     ratio="n/a" if s["healthy_filter_ratio"] is None else f"{s['healthy_filter_ratio']:.1%}"
+    dedupe="n/a" if s["batch_dedupe_ratio"] is None else f"{s['batch_dedupe_ratio']:.1%}"
     return "\n".join([
         "R127 AUTOMATIC QUALIFICATION",
         f"verdict={r['verdict']}",
@@ -163,6 +189,13 @@ def render(r: dict[str, Any]) -> str:
         f"sweep_liquidatable={s['liquidatable']}",
         f"sweep_errors={s['errors']}",
         f"healthy_filter_ratio={ratio}",
+        f"sweep_batches={s['batches']}",
+        f"sweep_account_refs={s['account_refs']}",
+        f"sweep_unique_accounts={s['unique_accounts']}",
+        f"batch_dedupe_ratio={dedupe}",
+        f"sweep_forwarded={s['forwarded']}",
+        f"sweep_max_unique_batch={s['max_unique_batch']}",
+        f"sweep_max_dirty_banks={s['max_dirty_banks']}",
         "",
         f"pending_final={latest.get('pending','n/a')}",
         f"max_pending={r['max_pending']} (R126b={R126B_MAX_PENDING})",
