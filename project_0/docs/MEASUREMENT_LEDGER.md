@@ -3252,3 +3252,51 @@ Decision for R127 / First-Euro Long-Tail:
   large infrastructure detour.
 
 No transaction sent. LIVE remains disabled.
+
+
+### 2026-10-05 — R127 simplify Long-Tail admission to affected-Bank exact-health sweep
+
+Reason:
+R126b proved that ingress fairness can be kept lossless, but the threshold-trigger admission
+still generated 994,177 candidate hits from 830 dependency updates and max_pending=78,214.
+That mechanism is too complex and too noisy for the First-Euro Long-Tail path.
+
+Reference:
+`0dotxyz/eva01@15625d5f57dea2ed0a47e857de814fdd68d2513d` uses the simpler model:
+- startup scan of debt accounts;
+- Oracle update -> affected Banks -> debt accounts using those Banks;
+- Bank update -> debt accounts using that Bank;
+- MarginfiAccount update -> that account;
+- exact account evaluation uses protocol health math; CPU parallelism is an optimization, not
+  part of protocol semantics.
+
+R127 implementation:
+- `a7160c68`: `P0_USE_THRESHOLD_TRIGGER=false` is now the default.
+- ReverseIndex remains authoritative for Oracle -> Bank -> Account fanout.
+- Oracle dependency update deduplicates only accounts tied to affected Banks and labels them
+  `oracle_bank_sweep`.
+- Bank update likewise queues only accounts tied to that Bank as `bank_update_sweep`.
+- Before integration projection, sizing, routing or economics, those sweep records run exact
+  canonical Marginfi Maintenance health.
+- canonical healthy -> drop immediately;
+- canonical liquidatable -> continue through the existing production pipeline;
+- health error/stale integration -> fail closed and continue through the existing
+  refresh/projection path rather than being silently discarded.
+- Existing direct MarginfiAccount updates remain direct triggers.
+- ThresholdIndex code remains available behind `P0_USE_THRESHOLD_TRIGGER=true` for later
+  Race/optimization research but is no longer the default Long-Tail admission mechanism.
+- `1afebde3`: legacy threshold enqueue compatibility fixed after the generic trigger-aware
+  dedup queue change.
+- `a229cde4`: added `run_r127_qualify.py`, a self-stopping 10-minute qualifier starting only
+  after `r127_health_sweep_ready`. It fails immediately on WSS sink overflow and reports
+  sweep checks/healthy/liquidatable/errors, queue depth and ingress backlog.
+
+Deliberate staging:
+- the eva01-style one-time full startup scan of every debtor is not added in this first R127
+  change. Existing bootstrap probes remain. This isolates the event-driven sweep behavior first;
+  the one-time startup sweep can be added after runtime stability is proven.
+- no new RPC or approximation is introduced in the admission filter; it uses the already-pinned
+  official Marginfi health engine over canonical RAM state.
+
+Status: **IMPLEMENTED / COMPILE+UNIT TEST PENDING**.
+No transaction sent. LIVE disabled.
