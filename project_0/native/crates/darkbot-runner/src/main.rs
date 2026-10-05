@@ -804,6 +804,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(feature = "crate_health")]
     let mut threshold_ready = false;
+    // [R126b] Preserve canonical ingress under detection bursts. When both ingress and
+    // detection work are available, drain at most this many ingress events before forcing
+    // one detection item. This prevents either side from starving the other.
+    #[cfg(feature = "crate_health")]
+    let ingress_burst_before_detect: usize =
+        config::parsed_or("P0_INGRESS_BURST_BEFORE_DETECT", 64)?;
+    #[cfg(feature = "crate_health")]
+    if ingress_burst_before_detect == 0 {
+        return Err("P0_INGRESS_BURST_BEFORE_DETECT must be > 0".into());
+    }
+    #[cfg(feature = "crate_health")]
+    let mut ingress_since_detect: usize = 0;
     loop {
         if shutdown.is_requested() {
             break;
@@ -1247,21 +1259,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         #[cfg(feature = "crate_health")]
-        let mut detect = detect_queue
-            .pop_front()
-            .or_else(|| next_oracle_detect(&mut oracle_detect_order, &mut oracle_detect_pending))
-            .or_else(|| {
-                next_integration_probe(
-                    &mut integration_probe_queue,
-                    !projection_pending.is_empty(),
-                    clock.now_ns(),
-                )
-            });
+        let queued_detection_available =
+            !detect_queue.is_empty()
+                || !oracle_detect_pending.is_empty()
+                || (!integration_probe_queue.is_empty() && projection_pending.is_empty());
+        #[cfg(feature = "crate_health")]
+        let force_detection =
+            queued_detection_available && ingress_since_detect >= ingress_burst_before_detect;
+        #[cfg(feature = "crate_health")]
+        let maybe_ev = if force_detection {
+            None
+        } else if queued_detection_available {
+            consumer.try_pop()
+        } else {
+            consumer.pop_timeout(Duration::from_millis(250))
+        };
         #[cfg(not(feature = "crate_health"))]
+        let maybe_ev = consumer.pop_timeout(Duration::from_millis(250));
+
         let mut detect = None;
 
-        if detect.is_none() {
-            let Some(ev) = consumer.pop_timeout(Duration::from_millis(250)) else { continue };
+        if let Some(ev) = maybe_ev {
+            #[cfg(feature = "crate_health")]
+            {
+                ingress_since_detect = ingress_since_detect.saturating_add(1);
+            }
             // Trigger (a) Long-Tail: jedes MarginfiAccount-Update → Detection im Shadow-Modus.
             detect = match &ev {
                 IngressEvent::Account(a)
@@ -1865,6 +1887,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             st.halt(darkbot_common::error::HaltReason::ProgramUpgrade);
             detect = None;
         }
+        } else {
+            #[cfg(feature = "crate_health")]
+            {
+                detect = detect_queue
+                    .pop_front()
+                    .or_else(|| {
+                        next_oracle_detect(
+                            &mut oracle_detect_order,
+                            &mut oracle_detect_pending,
+                        )
+                    })
+                    .or_else(|| {
+                        next_integration_probe(
+                            &mut integration_probe_queue,
+                            !projection_pending.is_empty(),
+                            clock.now_ns(),
+                        )
+                    });
+                if detect.is_some() {
+                    ingress_since_detect = 0;
+                }
+            }
+            if detect.is_none() {
+                continue;
+            }
         } // normal ingress event path; projected rechecks skip state mutation
 
         if let Some((acct, t_rx, slot, trigger)) = detect {
@@ -2261,7 +2308,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
             #[cfg(feature = "crate_health")]
             eprintln!(
-                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={}",
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={}",
                 threshold_ready,
                 threshold_index.tracked_accounts(),
                 threshold_fallback.len(),
@@ -2278,7 +2325,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 oracle_bank_projection_submitted,
                 oracle_bank_projection_ready,
                 oracle_bank_projection_failed,
-                oracle_bank_projection_stale
+                oracle_bank_projection_stale,
+                consumer.stats().sent.saturating_sub(consumer.stats().received),
+                ingress_since_detect
             );
         }
     }
