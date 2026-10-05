@@ -2996,7 +2996,12 @@ Mainnet Shadow:
 
 Commit: `fba6b5e6`.
 
-Status: **IMPLEMENTED / COMPILE+UNIT TEST PENDING**.
-Next gate: both workspace feature sets. If PASS, run a short Mainnet Shadow qualification and
-verify `threshold_index_ready`, fallback ratio, real `oracle_threshold` records, ingress/channel
-health, and bounded Oracle pending depth before any 72 h run.
+Status: **COMPILE+UNIT TEST PASS** on 2026-10-05.
+User-reported local verification:
+- `cargo test --workspace --features "crate_health txv1"` → PASS;
+- `cargo test --workspace --features "crate_health"` → PASS;
+- no failures; only the pre-existing `JupiterV2RouteProvider::with_base_url` dead-code warning.
+
+Next gate: short Mainnet Shadow qualification. Verify `threshold_index_ready`, fallback ratio,
+real `oracle_threshold` records, ingress/channel health, coalescing effectiveness and bounded
+Oracle pending depth before any 72 h run.
