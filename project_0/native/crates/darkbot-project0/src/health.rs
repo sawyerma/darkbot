@@ -34,7 +34,8 @@ pub struct HealthView {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountThresholds {
-    pub thresholds: Vec<(Pubkey, Side, u64)>,
+    /// (bank, side, maintenance risk-price threshold) where price is positive raw I80F48 bits.
+    pub thresholds: Vec<(Pubkey, Side, u128)>,
 }
 
 #[derive(Debug)]
@@ -70,7 +71,7 @@ pub trait HealthEngine {
     }
     /// Observation-Accounts in Programm-Reihenfolge (remaining_accounts für Start/End/Withdraw).
     fn observation_accounts(&self, account: &Pubkey) -> Result<Vec<Pubkey>, HealthError>;
-    fn thresholds(&self, account: &Pubkey) -> Result<AccountThresholds, HealthError>;
+    fn thresholds(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<AccountThresholds, HealthError>;
     fn premium_decay_per_second(&self, account: &Pubkey) -> Result<u128, HealthError>;
 }
 
@@ -80,7 +81,7 @@ pub struct NoHealth;
 impl HealthEngine for NoHealth {
     fn health(&self, _: &Pubkey, _: i64, _: u64) -> Result<HealthView, HealthError> { Err(HealthError::Unavailable) }
     fn observation_accounts(&self, _: &Pubkey) -> Result<Vec<Pubkey>, HealthError> { Err(HealthError::Unavailable) }
-    fn thresholds(&self, _: &Pubkey) -> Result<AccountThresholds, HealthError> { Err(HealthError::Unavailable) }
+    fn thresholds(&self, _: &Pubkey, _: i64, _: u64) -> Result<AccountThresholds, HealthError> { Err(HealthError::Unavailable) }
     fn premium_decay_per_second(&self, _: &Pubkey) -> Result<u128, HealthError> { Err(HealthError::Unavailable) }
 }
 
@@ -93,15 +94,19 @@ pub trait AccountSource {
 pub mod crate_impl {
     use super::*;
     use crate::protocol; // [FIX-50] used by closeout threshold below
+    use fixed::types::I80F48;
     use marginfi::state::{
         bank::BankImpl,
-        marginfi_account::get_health_components,
-        price::OraclePriceFeedAdapter,
+        marginfi_account::{calc_value, get_health_components},
+        price::{OraclePriceFeedAdapter, PriceAdapter},
     };
-    use marginfi_type_crate::constants::CIRCUIT_BREAKER_ENABLED;
+    use marginfi_type_crate::constants::{
+        BANK_SAME_ASSET_EMODE_ELIGIBLE, CIRCUIT_BREAKER_ENABLED,
+    };
     use marginfi_type_crate::types::{
-        Bank, BankOperationalState, HealthPriceMode, MarginfiAccount, MarginfiGroup,
-        OraclePriceType, RequirementType,
+        compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, BalanceSide, Bank,
+        BankOperationalState, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        OracleSetup, PriceBias, ReconciledEmodeConfig, RequirementType, RiskTier,
     };
     use solana_sdk::account::Account;
     use solana_sdk::account_info::IntoAccountInfo;
@@ -179,6 +184,421 @@ pub mod crate_impl {
             let (assets, liabs) = get_health_components(acc, group, &ais, req, &mut None, HealthPriceMode::Client(clock.clone()))
                 .map_err(|e| HealthError::Crate(e.to_string()))?;
             Ok((assets.to_bits(), liabs.to_bits()))
+        }
+
+        fn maintenance_emode_config(
+            &self,
+            acc: &MarginfiAccount,
+            group: &MarginfiGroup,
+        ) -> Result<ReconciledEmodeConfig, HealthError> {
+            let mut configs = Vec::new();
+            let leverage = u32_to_basis(group.same_asset_emode_maint_leverage);
+            let same_asset_enabled = leverage > I80F48::ONE;
+
+            let mut shared_mint = None;
+            let mut shared_oracle_key = None;
+            let mut shared_feed_family = None;
+            let mut shared_fixed_price: Option<I80F48> = None;
+            let mut lowest_liab_weight: Option<I80F48> = None;
+            let mut same_asset_valid = true;
+
+            for balance in acc.lending_account.balances.iter().filter(|b| b.is_active()) {
+                if balance.is_empty(BalanceSide::Liabilities) {
+                    continue;
+                }
+                let (_, _, bdata) = self.raw(&balance.bank_pk)?;
+                let bank: &Bank = load(bdata)?;
+                configs.push(bank.emode.emode_config);
+
+                if !same_asset_enabled || !same_asset_valid {
+                    continue;
+                }
+
+                if !matches!(
+                    bank.config.oracle_setup,
+                    OracleSetup::PythPushOracle
+                        | OracleSetup::SwitchboardPull
+                        | OracleSetup::StakedWithPythPush
+                        | OracleSetup::PythMSOL
+                        | OracleSetup::PythLST
+                        | OracleSetup::PTPyth
+                ) {
+                    same_asset_valid = false;
+                    lowest_liab_weight = None;
+                    continue;
+                }
+
+                let Some(feed_family) = bank.config.oracle_setup.feed_family() else {
+                    same_asset_valid = false;
+                    lowest_liab_weight = None;
+                    continue;
+                };
+                if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
+                    || bank.config.oracle_keys[0] == Pubkey::default()
+                {
+                    same_asset_valid = false;
+                    lowest_liab_weight = None;
+                    continue;
+                }
+
+                let mint = bank.mint;
+                let oracle_key = bank.config.oracle_keys[0];
+                let fixed_price: I80F48 = bank.config.fixed_price.into();
+                let liab_weight = bank
+                    .config
+                    .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
+
+                match shared_mint {
+                    Some(existing)
+                        if existing != mint
+                            || shared_oracle_key != Some(oracle_key)
+                            || shared_feed_family != Some(feed_family)
+                            || shared_fixed_price != Some(fixed_price) =>
+                    {
+                        same_asset_valid = false;
+                        lowest_liab_weight = None;
+                    }
+                    Some(_) => {
+                        if lowest_liab_weight.is_none_or(|w| liab_weight < w) {
+                            lowest_liab_weight = Some(liab_weight);
+                        }
+                    }
+                    None => {
+                        shared_mint = Some(mint);
+                        shared_oracle_key = Some(oracle_key);
+                        shared_feed_family = Some(feed_family);
+                        shared_fixed_price = Some(fixed_price);
+                        lowest_liab_weight = Some(liab_weight);
+                    }
+                }
+            }
+
+            let mut reconciled =
+                reconcile_emode_configs(configs, RequirementType::Maintenance);
+            if same_asset_enabled && same_asset_valid {
+                if let (
+                    Some(mint),
+                    Some(oracle_key),
+                    Some(feed_family),
+                    Some(fixed_price),
+                    Some(liab_weight),
+                ) = (
+                    shared_mint,
+                    shared_oracle_key,
+                    shared_feed_family,
+                    shared_fixed_price,
+                    lowest_liab_weight,
+                ) {
+                    reconciled.same_asset.mint = mint;
+                    reconciled.same_asset.oracle_key = oracle_key;
+                    reconciled.same_asset.feed_family = Some(feed_family);
+                    reconciled.same_asset.fixed_price = fixed_price;
+                    reconciled.same_asset.asset_weight =
+                        compute_same_asset_emode_weight(leverage, liab_weight);
+                }
+            }
+            Ok(reconciled)
+        }
+
+        fn bank_maintenance_prices(
+            &self,
+            bank: &Bank,
+            clock: &Clock,
+        ) -> Result<(I80F48, I80F48), HealthError> {
+            let keys = bank_observation_keys(bank)?;
+            let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(keys.len());
+            for key in keys {
+                let (owner, lamports, data) = self.raw(&key)?;
+                owned.push((
+                    key,
+                    Account {
+                        lamports,
+                        data: data.to_vec(),
+                        owner,
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                ));
+            }
+            let ais: Vec<_> = owned
+                .iter_mut()
+                .map(|(key, account)| (&*key, account).into_account_info())
+                .collect();
+            let adapter = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
+                .map_err(|e| HealthError::Crate(format!("threshold oracle: {e}")))?;
+            let price_type = RequirementType::Maintenance.get_oracle_price_type();
+            let low = adapter
+                .get_price_of_type(
+                    price_type,
+                    Some(PriceBias::Low),
+                    bank.config.oracle_max_confidence,
+                )
+                .map_err(|e| HealthError::Crate(format!("threshold asset price: {e}")))?;
+            let high = adapter
+                .get_price_of_type(
+                    price_type,
+                    Some(PriceBias::High),
+                    bank.config.oracle_max_confidence,
+                )
+                .map_err(|e| HealthError::Crate(format!("threshold liability price: {e}")))?;
+            Ok((low, high))
+        }
+
+        /// Current maintenance risk prices for one Bank. These are exactly the two price axes
+        /// consumed by Marginfi health: confidence-biased effective price (including integration
+        /// multiplier), Low for collateral and High for liabilities.
+        pub fn maintenance_risk_price_bits(
+            &self,
+            bank_key: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<(u128, u128), HealthError> {
+            let (_, _, data) = self.raw(bank_key)?;
+            let bank: &Bank = load(data)?;
+            let clock = Clock {
+                slot,
+                epoch_start_timestamp: 0,
+                epoch: 0,
+                leader_schedule_epoch: 0,
+                unix_timestamp: now_unix_s,
+            };
+            let (low, high) = self.bank_maintenance_prices(bank, &clock)?;
+            let low_bits = low.to_bits();
+            let high_bits = high.to_bits();
+            if low_bits < 0 || high_bits <= 0 {
+                return Err(HealthError::Unsupported(format!(
+                    "non-positive maintenance risk price bank={} low={} high={}",
+                    bank_key, low, high
+                )));
+            }
+            Ok((low_bits as u128, high_bits as u128))
+        }
+
+        fn first_true_boundary<F>(
+            current: u128,
+            mut predicate: F,
+        ) -> Result<Option<u128>, HealthError>
+        where
+            F: FnMut(u128) -> Result<bool, HealthError>,
+        {
+            let max = i128::MAX as u128;
+            let mut high = current.max(1);
+            if !predicate(high)? {
+                loop {
+                    if high == max {
+                        return Ok(None);
+                    }
+                    high = if high > max / 2 { max } else { high * 2 };
+                    if predicate(high)? {
+                        break;
+                    }
+                }
+            }
+            let mut low = 0u128;
+            while low < high {
+                let mid = low + (high - low) / 2;
+                if predicate(mid)? {
+                    high = mid;
+                } else {
+                    low = mid.saturating_add(1);
+                }
+            }
+            Ok(Some(low))
+        }
+
+        /// [FIX-133c] Source-backed per-bank maintenance thresholds.
+        ///
+        /// We keep Marginfi's own oracle adapter, balance amount conversion, weights and e-mode
+        /// reconciliation. The indexed price is the exact confidence-biased effective Maintenance
+        /// price used by the risk engine, not raw oracle spot. This makes integration multipliers
+        /// and confidence changes first-class price dependencies without inventing a second formula.
+        pub fn thresholds_at(
+            &self,
+            account: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<AccountThresholds, HealthError> {
+            let (_, _, adata) = self.raw(account)?;
+            let acc: &MarginfiAccount = load(adata)?;
+            let (_, _, gdata) = self.raw(&self.group)?;
+            let group: &MarginfiGroup = load(gdata)?;
+            let clock = Clock {
+                slot,
+                epoch_start_timestamp: 0,
+                epoch: 0,
+                leader_schedule_epoch: 0,
+                unix_timestamp: now_unix_s,
+            };
+            let reconciled = self.maintenance_emode_config(acc, group)?;
+
+            let obs = self.observation(acc)?;
+            let (official_assets_bits, official_liabs_bits) =
+                self.components(acc, group, &obs, RequirementType::Maintenance, &clock)?;
+            let official_assets = I80F48::from_bits(official_assets_bits);
+            let official_liabs = I80F48::from_bits(official_liabs_bits);
+            let official_health = official_assets
+                .checked_sub(official_liabs)
+                .ok_or_else(|| HealthError::Crate("threshold official health overflow".into()))?;
+
+            struct Position {
+                bank: Pubkey,
+                side: Side,
+                current_price: I80F48,
+                amount: I80F48,
+                weight: I80F48,
+                decimals: u8,
+                contribution: I80F48,
+            }
+
+            let mut positions = Vec::new();
+            let mut derived_assets = I80F48::ZERO;
+            let mut derived_liabs = I80F48::ZERO;
+
+            for balance in acc.lending_account.balances.iter().filter(|b| b.is_active()) {
+                let (_, _, bdata) = self.raw(&balance.bank_pk)?;
+                let bank: &Bank = load(bdata)?;
+                let Some(balance_side) = balance.get_side() else { continue };
+                let (low, high) = self.bank_maintenance_prices(bank, &clock)?;
+
+                let (side, price, amount, weight) = match balance_side {
+                    BalanceSide::Assets => {
+                        if bank.config.risk_tier != RiskTier::Collateral {
+                            continue;
+                        }
+                        (
+                            Side::Asset,
+                            low,
+                            bank.get_asset_amount(balance.asset_shares.into())
+                                .map_err(|e| HealthError::Crate(format!("threshold asset amount: {e}")))?,
+                            bank.get_asset_weight(
+                                RequirementType::Maintenance,
+                                &reconciled,
+                            ),
+                        )
+                    }
+                    BalanceSide::Liabilities => (
+                        Side::Liability,
+                        high,
+                        bank.get_liability_amount(balance.liability_shares.into())
+                            .map_err(|e| HealthError::Crate(format!("threshold liability amount: {e}")))?,
+                        bank.config.get_weight(
+                            RequirementType::Maintenance,
+                            BalanceSide::Liabilities,
+                        ),
+                    ),
+                };
+                if amount <= I80F48::ZERO || price <= I80F48::ZERO {
+                    continue;
+                }
+                let contribution = calc_value(
+                    amount,
+                    price,
+                    bank.get_balance_decimals(),
+                    Some(weight),
+                )
+                .map_err(|e| HealthError::Crate(format!("threshold contribution: {e}")))?;
+
+                match side {
+                    Side::Asset => {
+                        derived_assets = derived_assets
+                            .checked_add(contribution)
+                            .ok_or_else(|| HealthError::Crate("threshold asset sum overflow".into()))?;
+                    }
+                    Side::Liability => {
+                        derived_liabs = derived_liabs
+                            .checked_add(contribution)
+                            .ok_or_else(|| HealthError::Crate("threshold liability sum overflow".into()))?;
+                    }
+                }
+                positions.push(Position {
+                    bank: balance.bank_pk,
+                    side,
+                    current_price: price,
+                    amount,
+                    weight,
+                    decimals: bank.get_balance_decimals(),
+                    contribution,
+                });
+            }
+
+            if derived_assets != official_assets || derived_liabs != official_liabs {
+                return Err(HealthError::Crate(format!(
+                    "threshold parity mismatch official=({}, {}) derived=({}, {})",
+                    official_assets, official_liabs, derived_assets, derived_liabs
+                )));
+            }
+
+            let mut thresholds = Vec::with_capacity(positions.len());
+            for position in positions {
+                let signed = match position.side {
+                    Side::Asset => position.contribution,
+                    Side::Liability => -position.contribution,
+                };
+                let other_health = official_health
+                    .checked_sub(signed)
+                    .ok_or_else(|| HealthError::Crate("threshold other-health overflow".into()))?;
+                let current_bits = position.current_price.to_bits();
+                if current_bits <= 0 {
+                    continue;
+                }
+
+                let threshold = match position.side {
+                    Side::Asset => {
+                        let at_zero = other_health;
+                        // If collateral can fall to zero and health remains non-negative, this
+                        // Bank can never be the price trigger for liquidation.
+                        if at_zero >= I80F48::ZERO {
+                            None
+                        } else {
+                            Self::first_true_boundary(current_bits as u128, |bits| {
+                                let price = I80F48::from_bits(bits as i128);
+                                let value = match calc_value(
+                                    position.amount,
+                                    price,
+                                    position.decimals,
+                                    Some(position.weight),
+                                ) {
+                                    Ok(v) => v,
+                                    // At an unrepresentably large positive price the monotone
+                                    // asset contribution is necessarily beyond the crossing.
+                                    Err(_) => return Ok(true),
+                                };
+                                Ok(other_health
+                                    .checked_add(value)
+                                    .map(|h| h >= I80F48::ZERO)
+                                    .unwrap_or(true))
+                            })?
+                        }
+                    }
+                    Side::Liability => {
+                        if other_health <= I80F48::ZERO {
+                            Some(0)
+                        } else {
+                            Self::first_true_boundary(current_bits as u128, |bits| {
+                                let price = I80F48::from_bits(bits as i128);
+                                let value = match calc_value(
+                                    position.amount,
+                                    price,
+                                    position.decimals,
+                                    Some(position.weight),
+                                ) {
+                                    Ok(v) => v,
+                                    Err(_) => return Ok(true),
+                                };
+                                Ok(other_health
+                                    .checked_sub(value)
+                                    .map(|h| h <= I80F48::ZERO)
+                                    .unwrap_or(true))
+                            })?
+                        }
+                    }
+                };
+                if let Some(price) = threshold {
+                    thresholds.push((position.bank, position.side, price));
+                }
+            }
+
+            Ok(AccountThresholds { thresholds })
         }
 
         /// [FIX-88] Off-chain parity for the receivership circuit-breaker gate.
@@ -302,16 +722,54 @@ pub mod crate_impl {
             self.observation(load::<MarginfiAccount>(adata)?)
         }
 
-        /// P3-02: Preisschwelle pro Bank — erst nach erstem Compile gegen Tag; bis dahin fail closed,
-        /// damit der ThresholdIndex nie mit falschen Schwellen gefüllt wird.
-        fn thresholds(&self, _account: &Pubkey) -> Result<AccountThresholds, HealthError> {
-            Err(HealthError::Unsupported("P3-02 thresholds not implemented".into()))
+        fn thresholds(
+            &self,
+            account: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<AccountThresholds, HealthError> {
+            self.thresholds_at(account, now_unix_s, slot)
         }
 
         /// 0.1.11: keine Borrow-Premium → 0. Nach P1B: rate_snapshot × principal × weight / year.
         fn premium_decay_per_second(&self, _account: &Pubkey) -> Result<u128, HealthError> {
             Ok(0)
         }
+    }
+}
+
+#[cfg(all(test, feature = "crate_health"))]
+mod threshold_search_tests {
+    use super::crate_impl::CrateHealth;
+    use super::{AccountSource, HealthError};
+    use solana_sdk::pubkey::Pubkey;
+
+    struct EmptySource;
+    impl AccountSource for EmptySource {
+        fn account(&self, _: &Pubkey) -> Option<(Pubkey, u64, &[u8])> { None }
+    }
+
+    #[test]
+    fn first_true_boundary_finds_exact_integer_crossing() {
+        let _engine = CrateHealth { state: &EmptySource, group: Pubkey::new_unique() };
+        let got = CrateHealth::<EmptySource>::first_true_boundary(50, |x| Ok(x >= 73))
+            .unwrap();
+        assert_eq!(got, Some(73));
+    }
+
+    #[test]
+    fn first_true_boundary_expands_above_current() {
+        let got = CrateHealth::<EmptySource>::first_true_boundary(10, |x| Ok(x >= 10_000))
+            .unwrap();
+        assert_eq!(got, Some(10_000));
+    }
+
+    #[test]
+    fn first_true_boundary_propagates_fail_closed_error() {
+        let got = CrateHealth::<EmptySource>::first_true_boundary(10, |x| {
+            if x >= 20 { Err(HealthError::Crate("boom".into())) } else { Ok(false) }
+        });
+        assert!(got.is_err());
     }
 }
 
