@@ -97,7 +97,7 @@ pub mod crate_impl {
     use fixed::types::I80F48;
     use marginfi::state::{
         bank::BankImpl,
-        marginfi_account::{calc_value, get_health_components, BalanceImpl},
+        marginfi_account::{calc_value, get_health_components},
         price::{OraclePriceFeedAdapter, PriceAdapter},
     };
     use marginfi_type_crate::constants::{
@@ -111,6 +111,7 @@ pub mod crate_impl {
     use solana_sdk::account::Account;
     use solana_sdk::account_info::IntoAccountInfo;
     use solana_sdk::clock::Clock;
+    use std::collections::HashMap;
 
     /// [FIX-27] 1:1-Semantik von `p0-cli::bank_observation_keys`. Unbekannte Variante → fail closed.
     pub fn bank_observation_keys(bank: &Bank) -> Result<Vec<Pubkey>, HealthError> {
@@ -440,17 +441,22 @@ pub mod crate_impl {
                 .checked_sub(official_liabs)
                 .ok_or_else(|| HealthError::Crate("threshold official health overflow".into()))?;
 
+            #[derive(Clone)]
+            struct Component {
+                amount: I80F48,
+                weight: I80F48,
+                decimals: u8,
+            }
             struct Position {
                 bank: Pubkey,
                 side: Side,
                 current_price: I80F48,
-                amount: I80F48,
-                weight: I80F48,
-                decimals: u8,
+                components: Vec<Component>,
                 contribution: I80F48,
             }
 
-            let mut positions = Vec::new();
+            let mut positions: HashMap<(Pubkey, Side), Position> = HashMap::new();
+            let mut bank_sides: HashMap<Pubkey, (bool, bool)> = HashMap::new();
             let mut derived_assets = I80F48::ZERO;
             let mut derived_liabs = I80F48::ZERO;
 
@@ -490,6 +496,7 @@ pub mod crate_impl {
                 if amount <= I80F48::ZERO || price <= I80F48::ZERO {
                     continue;
                 }
+
                 let contribution = calc_value(
                     amount,
                     price,
@@ -503,23 +510,48 @@ pub mod crate_impl {
                         derived_assets = derived_assets
                             .checked_add(contribution)
                             .ok_or_else(|| HealthError::Crate("threshold asset sum overflow".into()))?;
+                        bank_sides.entry(balance.bank_pk).or_default().0 = true;
                     }
                     Side::Liability => {
                         derived_liabs = derived_liabs
                             .checked_add(contribution)
                             .ok_or_else(|| HealthError::Crate("threshold liability sum overflow".into()))?;
+                        bank_sides.entry(balance.bank_pk).or_default().1 = true;
                     }
                 }
-                positions.push(Position {
+
+                let entry = positions.entry((balance.bank_pk, side)).or_insert(Position {
                     bank: balance.bank_pk,
                     side,
                     current_price: price,
+                    components: Vec::new(),
+                    contribution: I80F48::ZERO,
+                });
+                if entry.current_price != price {
+                    return Err(HealthError::Crate(format!(
+                        "threshold same-bank price mismatch bank={} side={:?}",
+                        balance.bank_pk, side
+                    )));
+                }
+                entry.components.push(Component {
                     amount,
                     weight,
                     decimals: bank.get_balance_decimals(),
-                    contribution,
                 });
+                entry.contribution = entry
+                    .contribution
+                    .checked_add(contribution)
+                    .ok_or_else(|| HealthError::Crate("threshold grouped contribution overflow".into()))?;
             }
+
+            if let Some((bank, _)) = bank_sides.iter().find(|(_, (asset, liab))| *asset && *liab) {
+                return Err(HealthError::Unsupported(format!(
+                    "threshold fallback required: bank={} appears on both asset and liability sides",
+                    bank
+                )));
+            }
+
+            let positions: Vec<Position> = positions.into_values().collect();
 
             if derived_assets != official_assets || derived_liabs != official_liabs {
                 return Err(HealthError::Crate(format!(
@@ -552,17 +584,24 @@ pub mod crate_impl {
                         } else {
                             Self::first_true_boundary(current_bits as u128, |bits| {
                                 let price = I80F48::from_bits(bits as i128);
-                                let value = match calc_value(
-                                    position.amount,
-                                    price,
-                                    position.decimals,
-                                    Some(position.weight),
-                                ) {
-                                    Ok(v) => v,
-                                    // At an unrepresentably large positive price the monotone
-                                    // asset contribution is necessarily beyond the crossing.
-                                    Err(_) => return Ok(true),
-                                };
+                                let mut value = I80F48::ZERO;
+                                for component in &position.components {
+                                    let part = match calc_value(
+                                        component.amount,
+                                        price,
+                                        component.decimals,
+                                        Some(component.weight),
+                                    ) {
+                                        Ok(v) => v,
+                                        // At an unrepresentably large positive price the monotone
+                                        // asset contribution is necessarily beyond the crossing.
+                                        Err(_) => return Ok(true),
+                                    };
+                                    value = match value.checked_add(part) {
+                                        Some(v) => v,
+                                        None => return Ok(true),
+                                    };
+                                }
                                 Ok(other_health
                                     .checked_add(value)
                                     .map(|h| h >= I80F48::ZERO)
@@ -576,15 +615,22 @@ pub mod crate_impl {
                         } else {
                             Self::first_true_boundary(current_bits as u128, |bits| {
                                 let price = I80F48::from_bits(bits as i128);
-                                let value = match calc_value(
-                                    position.amount,
-                                    price,
-                                    position.decimals,
-                                    Some(position.weight),
-                                ) {
-                                    Ok(v) => v,
-                                    Err(_) => return Ok(true),
-                                };
+                                let mut value = I80F48::ZERO;
+                                for component in &position.components {
+                                    let part = match calc_value(
+                                        component.amount,
+                                        price,
+                                        component.decimals,
+                                        Some(component.weight),
+                                    ) {
+                                        Ok(v) => v,
+                                        Err(_) => return Ok(true),
+                                    };
+                                    value = match value.checked_add(part) {
+                                        Some(v) => v,
+                                        None => return Ok(true),
+                                    };
+                                }
                                 Ok(other_health
                                     .checked_sub(value)
                                     .map(|h| h <= I80F48::ZERO)
