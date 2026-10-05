@@ -3165,3 +3165,40 @@ If the stale-Bank projection path is not exercised during the chosen window, the
 PARTIAL rather than falsely claiming R126 optimization PASS.
 
 Commit: `1002d318`.
+
+
+### 2026-10-05 — R126 runtime FAIL and R126b scheduler fairness fix
+
+R126 automatic qualification report:
+- verdict: FAIL;
+- threshold_ready=true, tracked=76,464, fallback=1,521;
+- dependency_updates=39;
+- candidate_hits=91,861 (2,355.4/update);
+- final pending=0 but max_pending=67,065 versus R125b baseline 6,578;
+- coalesced=319;
+- Bank projections: submitted=31, ready=26, failed=5, stale=0, ready ratio=83.9%;
+- ingress stats sample still reported overflow=0, but WSS emitted repeated
+  `ingress protocol: sink overflow` and reconnect loops, so the run is invalid as a
+  lossless-ingress qualification.
+- 447,541 `oracle_threshold` records were emitted before manual abort.
+
+Interpretation:
+- the stale-Bank projection idea itself is viable (26/31 ready), but it did not solve the
+  dominant load problem;
+- the main state/detection loop starved ingress while draining large detection queues,
+  allowing the bounded ingress sink to fill and forcing reconnects;
+- the observed `max_pending=67,065` is a hard regression versus R125b.
+
+R126b implementation:
+- `a281e7e8`: bounded scheduler fairness between canonical ingress and queued detection.
+  When both are available, ingress is drained non-blocking but at most
+  `P0_INGRESS_BURST_BEFORE_DETECT` events (default 64) before one queued detection item is
+  forced. This prevents either ingress or detection work from starving the other.
+- telemetry now includes estimated `ingress_backlog` and `ingress_since_detect`.
+- `95353b69`: the automated qualifier treats any
+  `ingress protocol: sink overflow` as an immediate hard FAIL, stops the process group and
+  records the overflow in the compact report. The stats parser remains backward-compatible
+  with pre-R126b logs.
+
+Status: **R126 FAIL / R126b IMPLEMENTED, COMPILE+UNIT TEST PENDING**.
+No transaction sent. LIVE disabled.
