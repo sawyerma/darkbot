@@ -94,6 +94,16 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
     max_unique_batch = int(latest.get("sweep_max_unique_batch", 0))
     max_dirty_banks = int(latest.get("sweep_max_dirty_banks", 0))
     batch_dedupe_ratio = (1.0 - unique_accounts / refs) if refs else None
+    cache_entries = int(latest.get("candidate_cache_entries", 0))
+    cache_suppressed = int(latest.get("candidate_cache_suppressed", 0))
+    cache_softcap_suppressed = int(latest.get("candidate_cache_softcap_suppressed", 0))
+    cache_transition_forwards = int(latest.get("candidate_cache_transition_forwards", 0))
+    cache_periodic_forwards = int(latest.get("candidate_cache_periodic_forwards", 0))
+    cache_forced_forwards = int(latest.get("candidate_cache_forced_forwards", 0))
+    cache_total_decisions = cache_suppressed + forwarded
+    cache_suppression_ratio = (
+        cache_suppressed / cache_total_decisions if cache_total_decisions else None
+    )
 
     verdict = "PASS"
     reasons: list[str] = []
@@ -137,8 +147,19 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
     if final_backlog is not None and final_backlog > 1000:
         verdict = "FAIL"
         reasons.append(f"ingress backlog too high: {final_backlog}")
+    if cache_entries == 0:
+        verdict = "FAIL"
+        reasons.append("candidate cache was not populated")
+    if cache_suppressed == 0:
+        if verdict != "FAIL":
+            verdict = "PARTIAL"
+        reasons.append("candidate cache did not suppress any repeated candidates")
+    if cache_transition_forwards == 0 and cache_forced_forwards == 0:
+        if verdict != "FAIL":
+            verdict = "PARTIAL"
+        reasons.append("no candidate transition/forced forwarding observed")
     if verdict == "PASS" and not reasons:
-        reasons.append("lossless ingress; threshold trigger off; targeted exact-health sweep active; queue bounded and draining")
+        reasons.append("lossless ingress; batching active; candidate cache suppresses repeats; downstream queue bounded and draining")
 
     return {
         "run": "R127",
@@ -166,6 +187,13 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
             "batch_dedupe_ratio": batch_dedupe_ratio,
             "max_unique_batch": max_unique_batch,
             "max_dirty_banks": max_dirty_banks,
+            "candidate_cache_entries": cache_entries,
+            "candidate_cache_suppressed": cache_suppressed,
+            "candidate_cache_softcap_suppressed": cache_softcap_suppressed,
+            "candidate_cache_transition_forwards": cache_transition_forwards,
+            "candidate_cache_periodic_forwards": cache_periodic_forwards,
+            "candidate_cache_forced_forwards": cache_forced_forwards,
+            "candidate_cache_suppression_ratio": cache_suppression_ratio,
         },
         "legacy_bank_projection_lines": {
             "pending": projection_pending,
@@ -177,6 +205,7 @@ def render(r: dict[str, Any]) -> str:
     s=r["sweep"]; latest=r["latest"]
     ratio="n/a" if s["healthy_filter_ratio"] is None else f"{s['healthy_filter_ratio']:.1%}"
     dedupe="n/a" if s["batch_dedupe_ratio"] is None else f"{s['batch_dedupe_ratio']:.1%}"
+    cache_ratio="n/a" if s["candidate_cache_suppression_ratio"] is None else f"{s['candidate_cache_suppression_ratio']:.1%}"
     return "\n".join([
         "R127 AUTOMATIC QUALIFICATION",
         f"verdict={r['verdict']}",
@@ -196,6 +225,13 @@ def render(r: dict[str, Any]) -> str:
         f"sweep_forwarded={s['forwarded']}",
         f"sweep_max_unique_batch={s['max_unique_batch']}",
         f"sweep_max_dirty_banks={s['max_dirty_banks']}",
+        f"candidate_cache_entries={s['candidate_cache_entries']}",
+        f"candidate_cache_suppressed={s['candidate_cache_suppressed']}",
+        f"candidate_cache_suppression_ratio={cache_ratio}",
+        f"candidate_cache_softcap_suppressed={s['candidate_cache_softcap_suppressed']}",
+        f"candidate_cache_transition_forwards={s['candidate_cache_transition_forwards']}",
+        f"candidate_cache_periodic_forwards={s['candidate_cache_periodic_forwards']}",
+        f"candidate_cache_forced_forwards={s['candidate_cache_forced_forwards']}",
         "",
         f"pending_final={latest.get('pending','n/a')}",
         f"max_pending={r['max_pending']} (R126b={R126B_MAX_PENDING})",
