@@ -3306,3 +3306,64 @@ Next gate: automated R127 short Mainnet Shadow qualification with
 `project_0/scripts/run_r127_qualify.py`.
 
 No transaction sent. LIVE disabled.
+
+
+### 2026-10-05 — R127 FAIL; R127c complete fanout-before-queue fix
+
+Evidence: `docs/evidence/R127_20261005T143113Z.json`.
+
+R127 automatic qualification:
+- dependency_updates=96,825;
+- exact-health checks=757,250;
+- healthy=697,151 (92.1%);
+- liquidatable=58,007; health errors=2,092;
+- coalesced=15,106,838;
+- pending_final=77,230; max_pending=78,453;
+- ingress backlog final=29, max=439;
+- ingress overflow=0; WSS sink-overflow lines=0.
+
+Assessment:
+- dependency mapping/coverage PASS;
+- ingress losslessness PASS;
+- R127 admission placement FAIL: account fanout happened once per dependency update and only
+  then was deduplicated in the pending queue. The 92.1% healthy rejection proves exact Health is
+  a strong admission filter, but it was applied after the expensive fanout had already happened.
+
+R127c correction:
+- `609ca943`: Rayon enabled specifically for CPU-parallel exact-health admission.
+- `077a7645`: dependency and Bank writes now dirty Banks only; no per-update account fanout.
+  A flush expands the union of dirty Banks once to a unique Account map, runs exact canonical
+  Marginfi Health in parallel, drops healthy accounts before the pending queue, and forwards only
+  liquidatable plus fail-closed health-error accounts to the existing projection/economics path.
+  New metrics: sweep_batches, sweep_account_refs, sweep_unique_accounts, sweep_forwarded,
+  sweep_max_unique_batch, sweep_max_dirty_banks.
+- `abcf3237`: batching is real and latency-bounded: flush after 64 dependency/Bank events or
+  5 ms maximum batch age. An open batch polls ingress every 1 ms so the 5 ms bound cannot turn
+  into the old 250 ms idle timeout.
+- `fcd262e7`: removed per-candidate `protocol_luts` terminal spam; LUT behavior is unchanged.
+- `28474060`: R127 qualifier now requires batch execution/dedup evidence and treats
+  max_pending >10,000 or final pending >1,000 as PARTIAL even when improved; no dependency
+  updates remains FAIL.
+- `69b10360`: added the missing eva01-style one-time startup scan by marking every current
+  group Bank dirty once after recovery; the same parallel exact-health admission handles it.
+
+Resulting default Long-Tail path:
+
+```text
+canonical ingress
+→ apply all updates immediately
+→ dependency/Bank writes mark dirty Banks only
+→ ≤5 ms / ≤64-event batch
+→ union Bank→Accounts once
+→ unique accounts
+→ parallel exact Marginfi Health
+→ healthy DROP
+→ liquidatable / stale-error only
+→ existing refresh/projection → sizing → economics → build/sim
+```
+
+This removes the previous ~78k healthy pending backlog at its source rather than adding another
+queue/filter after it.
+
+Status: **R127 FAIL / R127c IMPLEMENTED, COMPILE+UNIT TEST PENDING**.
+No transaction sent. LIVE disabled.
