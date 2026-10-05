@@ -100,9 +100,10 @@ pub mod crate_impl {
     };
     use marginfi_type_crate::constants::CIRCUIT_BREAKER_ENABLED;
     use marginfi_type_crate::types::{
-        Bank, BankOperationalState, HealthPriceMode, MarginfiAccount, MarginfiGroup,
+        Bank, BankOperationalState, HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup,
         OraclePriceType, RequirementType,
     };
+    use bytemuck::Zeroable;
     use solana_sdk::account::Account;
     use solana_sdk::account_info::IntoAccountInfo;
     use solana_sdk::clock::Clock;
@@ -170,7 +171,15 @@ pub mod crate_impl {
             Ok(out)
         }
 
-        fn components(&self, acc: &MarginfiAccount, group: &MarginfiGroup, obs: &[Pubkey], req: RequirementType, clock: &Clock) -> Result<(i128, i128), HealthError> {
+        fn components(
+            &self,
+            acc: &MarginfiAccount,
+            group: &MarginfiGroup,
+            obs: &[Pubkey],
+            req: RequirementType,
+            clock: &Clock,
+            health_cache: &mut Option<&mut HealthCache>,
+        ) -> Result<(i128, i128), HealthError> {
             let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(obs.len());
             for k in obs {
                 let (owner, lamports, data) = self.raw(k)?;
@@ -182,12 +191,66 @@ pub mod crate_impl {
                 group,
                 &ais,
                 req,
-                &mut None,
+                health_cache,
                 HealthPriceMode::Client(clock.clone()),
                 &mut None,
             )
             .map_err(|e| HealthError::Crate(e.to_string()))?;
             Ok((assets.to_bits(), liabs.to_bits()))
+        }
+
+        /// [P1B-0.1.12] Computes the same fresh maintenance HealthCache that
+        /// StartLiquidation writes on-chain. EndLiquidation reads EMODE_BOOSTED from that cache
+        /// when deciding whether tag-grown liquidation premium is allowed.
+        pub fn health_with_emode(
+            &self,
+            account: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<(HealthView, bool), HealthError> {
+            let (_, _, adata) = self.raw(account)?;
+            let acc: &MarginfiAccount = load(adata)?;
+            let (_, _, gdata) = self.raw(&self.group)?;
+            let group: &MarginfiGroup = load(gdata)?;
+            let obs = self.observation(acc)?;
+            let clock = Clock {
+                slot,
+                epoch_start_timestamp: 0,
+                epoch: 0,
+                leader_schedule_epoch: 0,
+                unix_timestamp: now_unix_s,
+            };
+
+            let mut maintenance_cache = HealthCache::zeroed();
+            let (ma, ml) = self.components(
+                acc,
+                group,
+                &obs,
+                RequirementType::Maintenance,
+                &clock,
+                &mut Some(&mut maintenance_cache),
+            )?;
+            let (ea, el) = self.components(
+                acc,
+                group,
+                &obs,
+                RequirementType::Equity,
+                &clock,
+                &mut None,
+            )?;
+            let five_usd_bits: i128 =
+                (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
+            let view = HealthView {
+                maintenance_health: ma - ml,
+                maint_assets: ma,
+                maint_liabs: ml,
+                equity_assets: ea,
+                equity_liabilities: el,
+                is_bad_debt: el > ea,
+                closeout_allowed: ea < five_usd_bits,
+                liquidatable: ma < ml && ml > 0,
+            };
+            Ok((view, maintenance_cache.is_emode_boosted()))
         }
 
         /// [FIX-88] Off-chain parity for the receivership circuit-breaker gate.
@@ -281,25 +344,7 @@ pub mod crate_impl {
 
     impl<'s, S: AccountSource + ?Sized> HealthEngine for CrateHealth<'s, S> {
         fn health(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<HealthView, HealthError> {
-            let (_, _, adata) = self.raw(account)?;
-            let acc: &MarginfiAccount = load(adata)?;
-            let (_, _, gdata) = self.raw(&self.group)?;
-            let group: &MarginfiGroup = load(gdata)?;
-            let obs = self.observation(acc)?;
-            let clock = Clock { slot, epoch_start_timestamp: 0, epoch: 0, leader_schedule_epoch: 0, unix_timestamp: now_unix_s };
-            let (ma, ml) = self.components(acc, group, &obs, RequirementType::Maintenance, &clock)?;
-            let (ea, el) = self.components(acc, group, &obs, RequirementType::Equity, &clock)?;
-            let five_usd_bits: i128 = (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
-            Ok(HealthView {
-                maintenance_health: ma - ml,
-                maint_assets: ma,
-                maint_liabs: ml,
-                equity_assets: ea,
-                equity_liabilities: el,
-                is_bad_debt: el > ea,
-                closeout_allowed: ea < five_usd_bits,
-                liquidatable: ma < ml && ml > 0,
-            })
+            self.health_with_emode(account, now_unix_s, slot).map(|(view, _)| view)
         }
 
         fn receivership_eligibility(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<(), HealthError> {
