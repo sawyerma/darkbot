@@ -3451,3 +3451,34 @@ R127d:
 
 Status: **R127c PARTIAL / R127d IMPLEMENTED, COMPILE+UNIT TEST PENDING**.
 No transaction sent. LIVE disabled.
+
+
+### 2026-10-05 — R127d qualification-default correction before runtime test
+
+Review of `1047896a` found a mismatch between the intended Candidate Cache semantics and the
+initial config defaults:
+
+- intended: unchanged persistent candidates can be reconsidered once per new Solana slot;
+- initial code: Liquidatable every 64 slots, Error every 16 slots.
+
+The 64/16-slot settings were judged too slow for a profit-sensitive Long-Tail pipeline and were
+not accepted as the qualification configuration.
+
+Correction:
+- `e5577da37941082d3eb1f36da3bdb7fb18b0383c`
+- `P0_CANDIDATE_RECHECK_SLOTS=1`
+- `P0_CANDIDATE_ERROR_RECHECK_SLOTS=1`
+- `P0_CANDIDATE_REPEAT_SOFT_CAP=1024` unchanged;
+- active config is emitted as `r127_candidate_cache_config` and in
+  `oracle_trigger_stats`.
+
+Rollback anchors:
+- pre-Candidate-Cache R127c PARTIAL:
+  `archive/r127c-batch-partial-20261005`;
+- initial 64/16-slot R127d:
+  `archive/r127d-initial-64slot-20261005`;
+- corrected one-slot R127d pre-qualification:
+  `archive/r127d-1slot-prequal-20261005`.
+
+Status: **R127d 1-slot configuration IMPLEMENTED / COMPILE+UNIT TEST PENDING**.
+No transaction sent. LIVE disabled.
