@@ -2934,3 +2934,47 @@ Important boundary:
 Next gate: workspace compile/tests for this structural checkpoint. After PASS, implement
 source-backed threshold derivation and only then enable Oracle→ThresholdIndex→exact Health
 candidate wakeups. No `health_cheap` approximation and no guessed thresholds.
+
+
+### 2026-10-05 — FIX-133c/d source-backed Oracle-trigger implementation
+
+Precondition:
+- FIX-133a/b structural checkpoint passed both workspace test feature sets locally.
+- FIX-133c threshold derivation and repeated-Bank aggregation subsequently passed both
+  workspace feature sets locally; only the pre-existing runner `with_base_url` dead-code
+  warning remained.
+
+Implemented after that gate:
+- `0ab82511`: ThresholdIndex consumes the two distinct Marginfi Maintenance risk-price
+  axes. Collateral compares against confidence-biased `Low`; liabilities compare against
+  confidence-biased `High`. They are never collapsed into one price.
+- `c322a272`: Oracle/dependency wakeups are active in the runner.
+  - Recovery rebuilds ReverseIndex, clears stale threshold state and creates a bounded,
+    incremental threshold-bootstrap queue containing liability-bearing MarginfiAccounts.
+  - `P0_THRESHOLD_BOOTSTRAP_BATCH` defaults to 16 and keeps the WSS/state loop responsive;
+    zero is rejected.
+  - Account updates replace their ReverseIndex entry and immediately recompute that account's
+    source-backed thresholds.
+  - Bank configuration updates invalidate/requeue only accounts using that Bank.
+  - Updates to subscribed pricing dependencies map through
+    dependency -> Bank -> ThresholdIndex -> deduplicated Account candidates.
+  - Candidate evaluation reuses the existing integration projection -> exact Health ->
+    Sizing -> Economics pipeline.
+  - While bootstrap is incomplete, or if a particular account cannot be threshold-qualified,
+    price updates conservatively wake all/fallback accounts for the affected Bank. UNKNOWN never
+    becomes "not a candidate".
+  - If current Maintenance risk-price extraction fails for a Bank, all accounts for that Bank
+    are conservatively woken.
+- FIX-133c threshold math indexes the exact confidence-biased effective Maintenance price
+  produced by Marginfi's own oracle adapter (including integration multiplier), preserves raw
+  positive I80F48 bits, reconciles e-mode from the pinned type-crate, aggregates repeated
+  Balance slots by Bank/side, and refuses mixed asset+liability use of the same Bank.
+- Before accepting any threshold set, the derived total Maintenance asset/liability values
+  must exactly equal the pinned `get_health_components` output; mismatch -> fallback.
+
+No full global account scan is performed per oracle update. The only full account enumeration
+is Recovery bootstrap construction; threshold calculations themselves are bounded across loop
+iterations.
+
+Status: **IMPLEMENTED IN SOURCE / FIX-133d COMPILE+UNIT TEST PENDING.**
+LIVE remains disabled. No transaction sent. FIX-129 Jito lifecycle cells remain UNKNOWN.
