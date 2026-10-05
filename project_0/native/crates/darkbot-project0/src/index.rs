@@ -9,7 +9,7 @@
 //! Preise konstant. Für Liability-Banks steigt Risiko bei steigendem Preis, für
 //! Asset-Banks bei fallendem; `Side` hält das fest.
 //!
-//! Preise als u64 in Fixed-Point (Skalierung = Oracle-Exponent aus P3), keine f64.
+//! Preise als positive rohe I80F48-Bits in u128. Keine Dezimalrundung und kein f64.
 
 use solana_sdk::pubkey::Pubkey;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -127,11 +127,11 @@ impl ReverseIndex {
 #[derive(Default, Debug)]
 pub struct ThresholdIndex {
     /// Asset-Seite: liquidierbar wenn price <= key. Sortiert aufsteigend → Kandidaten = range(price..)
-    asset: HashMap<Pubkey, BTreeMap<u64, HashSet<Pubkey>>>,
+    asset: HashMap<Pubkey, BTreeMap<u128, HashSet<Pubkey>>>,
     /// Liability-Seite: liquidierbar wenn price >= key → Kandidaten = range(..=price)
-    liability: HashMap<Pubkey, BTreeMap<u64, HashSet<Pubkey>>>,
+    liability: HashMap<Pubkey, BTreeMap<u128, HashSet<Pubkey>>>,
     /// Rückwärts, damit ein Account-Update seine alten Einträge löschen kann.
-    entries: HashMap<Pubkey, Vec<(Pubkey, Side, u64)>>,
+    entries: HashMap<Pubkey, Vec<(Pubkey, Side, u128)>>,
 }
 
 impl ThresholdIndex {
@@ -141,7 +141,7 @@ impl ThresholdIndex {
 
     /// Ersetzt alle Schwellen eines Accounts. `thresholds`: (bank, side, liq_price).
     /// Accounts ohne Schwelle (z. B. keine Liabilities) übergeben eine leere Liste.
-    pub fn set_account(&mut self, account: Pubkey, thresholds: &[(Pubkey, Side, u64)]) {
+    pub fn set_account(&mut self, account: Pubkey, thresholds: &[(Pubkey, Side, u128)]) {
         self.remove_account(&account);
         for (bank, side, price) in thresholds {
             let map = match side {
@@ -177,7 +177,7 @@ impl ThresholdIndex {
     /// Kandidaten für einen neuen Bank-Preis: exakt nachzurechnen, nicht "liquidierbar".
     /// `margin` erweitert den Bereich (Preisfehler/Confidence), damit nahe Accounts
     /// mitgeprüft werden.
-    pub fn candidates(&self, bank: &Pubkey, price: u64, margin: u64) -> Vec<Pubkey> {
+    pub fn candidates(&self, bank: &Pubkey, price: u128, margin: u128) -> Vec<Pubkey> {
         let mut out: HashSet<Pubkey> = HashSet::new();
         if let Some(m) = self.asset.get(bank) {
             // liquidierbar wenn price <= key  → alle keys >= price - margin
