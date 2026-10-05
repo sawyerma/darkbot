@@ -3202,3 +3202,53 @@ R126b implementation:
 
 Status: **R126 FAIL / R126b IMPLEMENTED, COMPILE+UNIT TEST PENDING**.
 No transaction sent. LIVE disabled.
+
+
+### 2026-10-05 — R126b ingress fairness PASS / candidate-fanout FAIL; R127 direction
+
+Evidence: `docs/evidence/R126b_scheduler_fairness.json`.
+
+User-reported automatic qualification:
+- threshold_ready=true; tracked=77,756; fallback=229;
+- dependency_updates=830;
+- candidate_hits=994,177 = 1,197.8/update;
+- final Oracle pending=74,005;
+- max_pending=78,214 versus R125b baseline 6,578;
+- price_fallbacks=1,922; coalesced=797,256;
+- Bank projections: submitted=648, ready=513, failed=117, stale=11, ready ratio ~80%;
+- ingress: sink_overflow_lines=0, overflow counter=0, final backlog=6;
+- Oracle-threshold records=246,458.
+
+Assessment:
+- **R126b scheduler fairness: PASS.** The previous WSS sink-starvation/reconnect failure did not
+  recur; canonical ingress remained caught up.
+- **R126b overall: FAIL.** Candidate fanout is still unbounded for sustained operation.
+- Bank refresh projection is useful (80% ready) but is not the dominant fix.
+- Root cause: the current threshold query returns every account already beyond its stored
+  threshold on every relevant price update, so already-endangered accounts are repeatedly
+  re-woken.
+- A pure old-price/new-price crossing query was prototyped in `378a69f` but is **NOT promoted
+  to the production trigger path**: an account's threshold for Bank A depends on the prices of
+  its other Banks, so a stored threshold can become stale after unrelated price updates. Wiring
+  that directly would risk false negatives.
+
+Reference check against `0dotxyz/eva01@15625d5f57dea2ed0a47e857de814fdd68d2513d`:
+- startup: one scan of all accounts with liabilities;
+- Oracle update: Oracle -> affected Banks -> accounts with liabilities using those Banks;
+- Bank update: affected Bank -> accounts with liabilities using that Bank;
+- account updates: only that debtor account;
+- account evaluation is parallelized and uses Marginfi health/protocol math.
+
+Decision for R127 / First-Euro Long-Tail:
+- stop spending iterations trying to make the current threshold index the primary Long-Tail
+  admission mechanism;
+- implement an eva01-style **affected-Bank targeted exact-health sweep**, deduplicated across a
+  burst and isolated from ingress, with measured worker/backlog bounds;
+- this is not a global 78k scan per Oracle tick; only debt accounts tied to the changed Banks are
+  evaluated;
+- keep ThresholdIndex as a later Race optimization only after an exact invalidation model is
+  proven;
+- after R127 is stable, immediately run historical/Shadow profit evidence rather than another
+  large infrastructure detour.
+
+No transaction sent. LIVE remains disabled.
