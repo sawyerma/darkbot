@@ -900,14 +900,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // recheck so route/fee changes that are not represented by Marginfi state are not starved.
     #[cfg(feature = "crate_health")]
     let candidate_recheck_slots: u64 =
-        config::parsed_or("P0_CANDIDATE_RECHECK_SLOTS", 64)?;
+        config::parsed_or("P0_CANDIDATE_RECHECK_SLOTS", 1)?;
     #[cfg(feature = "crate_health")]
     if candidate_recheck_slots == 0 {
         return Err("P0_CANDIDATE_RECHECK_SLOTS must be > 0".into());
     }
     #[cfg(feature = "crate_health")]
     let candidate_error_recheck_slots: u64 =
-        config::parsed_or("P0_CANDIDATE_ERROR_RECHECK_SLOTS", 16)?;
+        config::parsed_or("P0_CANDIDATE_ERROR_RECHECK_SLOTS", 1)?;
     #[cfg(feature = "crate_health")]
     if candidate_error_recheck_slots == 0 {
         return Err("P0_CANDIDATE_ERROR_RECHECK_SLOTS must be > 0".into());
@@ -919,6 +919,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if candidate_repeat_soft_cap == 0 {
         return Err("P0_CANDIDATE_REPEAT_SOFT_CAP must be > 0".into());
     }
+    #[cfg(feature = "crate_health")]
+    eprintln!(
+        "r127_candidate_cache_config: recheck_slots={} error_recheck_slots={} repeat_soft_cap={}",
+        candidate_recheck_slots,
+        candidate_error_recheck_slots,
+        candidate_repeat_soft_cap
+    );
     #[cfg(feature = "crate_health")]
     let mut candidate_cache: HashMap<Pubkey, CandidateCacheEntry> = HashMap::new();
     #[cfg(feature = "crate_health")]
@@ -2792,7 +2799,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
             #[cfg(feature = "crate_health")]
             eprintln!(
-                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={}",
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={} candidate_recheck_slots={} candidate_error_recheck_slots={} candidate_repeat_soft_cap={}",
                 threshold_ready,
                 threshold_index.tracked_accounts(),
                 threshold_fallback.len(),
@@ -2829,7 +2836,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 candidate_cache_softcap_suppressed,
                 candidate_cache_transition_forwards,
                 candidate_cache_periodic_forwards,
-                candidate_cache_forced_forwards
+                candidate_cache_forced_forwards,
+                candidate_recheck_slots,
+                candidate_error_recheck_slots,
+                candidate_repeat_soft_cap
             );
         }
     }
@@ -2894,6 +2904,10 @@ mod integration_probe_tests {
         assert!(!candidate_should_forward(Some(prev), liquid, 120, 64, false, true));
         assert!(candidate_should_forward(Some(prev), liquid, 164, 64, false, true));
         assert!(!candidate_should_forward(Some(prev), liquid, 164, 64, false, false));
+        // Production default is one slot: unchanged candidates may be reconsidered on the
+        // next slot, but never every 5 ms batch within the same slot.
+        assert!(candidate_should_forward(Some(prev), liquid, 101, 1, false, true));
+        assert!(!candidate_should_forward(Some(prev), liquid, 100, 1, false, true));
         assert!(candidate_should_forward(Some(prev), liquid, 101, 64, true, false));
         assert!(!candidate_should_forward(Some(prev), healthy, 1000, 64, true, true));
 
