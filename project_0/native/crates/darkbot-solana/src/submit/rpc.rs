@@ -197,7 +197,7 @@ impl SubmissionAdapter for RpcSubmitter {
 /// `tx_index_in_slot` bleibt None (nur über getBlock ermittelbar; P6/H0).
 pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns: u64) -> Result<LandingEvidence, SubmitError> {
     let statuses = rpc
-        .get_signature_statuses(&[*sig])
+        .get_signature_statuses_with_history(&[*sig])
         .map_err(|e| SubmitError::Transport(e.to_string()))?;
     let status = match statuses.value.into_iter().next().flatten() {
         None => {

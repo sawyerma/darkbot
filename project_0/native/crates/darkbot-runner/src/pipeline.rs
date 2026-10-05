@@ -100,6 +100,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             exposure: None,
             all_signatures: vec![],
             bundle_id: None,
+            submitted_tip: None,
             intervals_ns: vec![],
             reason: None,
             loss: None,
@@ -361,7 +362,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
             bundle_txs.push(built.tx.clone());
             match submit::build_tip_tx(self.payer, &tip_account, plan.tip, bh.hash) {
-                Ok(t) => bundle_txs.push(t),
+                Ok(t) => {
+                    rec.submitted_tip = t.signatures.first().map(|s| crate::pending::SubmittedTip { signature:s.to_string(), lamports:plan.tip });
+                    bundle_txs.push(t);
+                },
                 Err(e) => { release_if(self.safety, reserved, plan.exposure); rec.loss = Some(LossReason::Build); rec.reason = Some(format!("tip tx: {}", e)); return rec.with_timeline(&tl); }
             }
         }
@@ -391,6 +395,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             };
             return rec.with_timeline(&tl);
         }
+        rec.path = Some(if use_bundle { SubmissionPath::JitoBundle } else { self.submitter.path() }.as_str().into());
         let t_handoff = self.clock.now_ns();
         let result = if use_bundle {
             self.submitter.submit_bundle(&bundle_txs, t_handoff)

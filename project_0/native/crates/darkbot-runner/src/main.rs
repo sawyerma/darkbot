@@ -1577,6 +1577,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             path,
                             exposure: exp,
                             submitted_unix_s: now,
+                            tip: rec.submitted_tip.clone(),
                         },
                         next_check_unix_s: now,
                     });

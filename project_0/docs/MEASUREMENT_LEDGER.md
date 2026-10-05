@@ -2806,3 +2806,37 @@ Important boundary:
 Status: **IMPLEMENTED IN SOURCE / NOT YET COMPILED OR TESTED after these commits.**
 LIVE remains hard-disabled. 72 h NOT STARTED. Next: compile/test this checkpoint, then
 P1B 0.1.12 source-parity promotion before FIX-129 economics closure / long-run qualification.
+
+### 2026-10-05 — FIX-129a reconciliation evidence, deployed 0.1.11 main
+
+User-directed scope: resume deployed `mrgn-0.1.11-rc1` main, leave
+`p1b-marginfi-0.1.12` unchanged. Remote P1B ledger at `b47797f` records R123 STOP /
+VERSION MISMATCH (1856-byte deployed Bank payload vs 3904-byte compiled layout).
+No coercion, no P1B runtime retry, no P3-02/Oracle/72h work in FIX-129.
+
+Audit: FailedCostMatrix already has the required failure dimensions; retain them.
+1814 existing local Shadow rows contain no actual network/tip fee observations.
+The confirmed USDT prewarm transaction proves its own meta.fee=5000 and rent
+1488440 only; neither is a universal liquidation fee/rent constant. Winner matching
+observes competitors; their submission path/tip attribution is not ours.
+
+FIX-129a removes false zero-PnL conclusions from elapsed timeout and Jito inflight
+Failed. Reconcile every distinct submitted signature with history search and actual
+getTransaction meta.fee. Missing lifecycle/metadata/member evidence stays UNKNOWN;
+partial bundles cannot be treated as all-or-nothing zero-cost. Carry our explicit
+signed tip-transfer signature/amount; charge it only when that transaction landed
+successfully, zero transfer on its confirmed revert. Network fee and tip remain
+separate; absent Jito intent/evidence stays UNKNOWN. Ambiguous submissions retain
+actual path. Complete realized PnL still requires token/protocol/rent deltas.
+
+Sources (retrieved 2026-10-05):
+https://solana.com/docs/core/fees
+https://solana.com/docs/rpc/http/getfeeformessage
+https://docs.jito.wtf/lowlatencytxnsend/ (including uncled-block rebroadcast caveat).
+
+Baseline: 123 tests PASS with txv1. FIX-129a: 126 PASS with txv1 / 124 without,
+zero failures. Regressions: landed success/revert meta.fee, missing metadata and
+not-landed UNKNOWN, tip payment tied to our successful transaction, partial bundles.
+No send. Next FIX-129b: exact-message prospective fee measurement and candidate
+Economics wiring, with evidence/provenance and no guessed matrix population.
+FIX-129 remains IN PROGRESS. LIVE DISABLED; 72 h NOT STARTED.

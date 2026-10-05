@@ -68,6 +68,7 @@ pub struct OpportunityRecord {
     /// [FIX-18] Alle Signaturen des Handoffs + Bundle-ID (vollständige Reconciliation).
     pub all_signatures: Vec<String>,
     pub bundle_id: Option<String>,
+    pub submitted_tip: Option<crate::pending::SubmittedTip>,
     pub intervals_ns: Vec<(String, Option<u64>)>,
     pub reason: Option<String>,
     pub loss: Option<LossReason>,
