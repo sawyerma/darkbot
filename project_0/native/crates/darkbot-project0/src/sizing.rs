@@ -42,8 +42,9 @@ pub struct ProtocolSizing {
     pub withdraw_amount: u64,
     /// Native token units transferred into LendingAccountRepay.
     pub repay_amount: u64,
-    /// Exact source-backed repay-all semantics. When true, `repay_amount` is ceil(current
-    /// liability native amount), but EndLiquidation observes the exact liability equity delta.
+    /// Exact source-backed repay-all semantics. In 0.1.12, when true, `repay_amount` is
+    /// ceil(principal + recognized variable-borrow premium), while EndLiquidation observes the
+    /// exact principal + premium liability equity delta.
     pub repay_all: bool,
     /// Equity/EMA values used by EndLiquidation after native-unit rounding / full-close semantics.
     pub seized_equity_value_micro: u64,
@@ -115,6 +116,22 @@ fn healing_fee_factor(cap: I80F48, asset_per_usd: I80F48, liab_per_usd: I80F48, 
 fn rounded_health_valid(pre: I80F48, seized: I80F48, repaid: I80F48, asset_per_usd: I80F48, liab_per_usd: I80F48, closeout: bool) -> Option<bool> {
     let delta = repaid.checked_mul(liab_per_usd)?.checked_sub(seized.checked_mul(asset_per_usd)?)?;
     Some(delta >= I80F48::ZERO && (closeout || pre.checked_add(delta)? <= I80F48::ZERO))
+}
+
+/// [P1B-0.1.12] Exact EndLiquidation premium-cap selection.
+/// Tag growth is disabled for a fresh maintenance E-Mode boost and for pre-existing bad debt.
+fn liquidation_premium_cap(
+    base_premium: I80F48,
+    tagged_at: i64,
+    now: i64,
+    emode_boosted: bool,
+    in_bad_debt: bool,
+) -> I80F48 {
+    if emode_boosted || in_bad_debt {
+        base_premium
+    } else {
+        tag_adjusted_premium(base_premium, tagged_at, now)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -530,11 +547,13 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 .ok_or_else(|| "minimum fee division".to_string())?;
             if onchain_fee_rate > minimum { onchain_fee_rate } else { minimum }
         };
-        let premium_cap = if emode_boosted || health.is_bad_debt {
-            fee_rate
-        } else {
-            tag_adjusted_premium(fee_rate, account.liquidation_tagged_at, now_unix_s)
-        };
+        let premium_cap = liquidation_premium_cap(
+            fee_rate,
+            account.liquidation_tagged_at,
+            now_unix_s,
+            emode_boosted,
+            health.is_bad_debt,
+        );
         let max_fee_factor = I80F48::ONE
             .checked_add(premium_cap)
             .ok_or_else(|| "fee factor overflow".to_string())?;
@@ -861,6 +880,23 @@ mod tests {
         assert_eq!(c.transfer_amount, 5);
         assert_eq!(c.protocol_amount, I80F48::from_num(5));
         assert!(!c.repay_all);
+    }
+
+    #[test]
+    fn p1b_tag_premium_is_suppressed_for_emode_and_bad_debt() {
+        let base = I80F48::from_num(5) / I80F48::from_num(100);
+        let tagged_at = 1_000_000i64;
+        let now = tagged_at + 2 * 24 * 60 * 60;
+        let grown = liquidation_premium_cap(base, tagged_at, now, false, false);
+        assert!(grown > base);
+        assert_eq!(liquidation_premium_cap(base, tagged_at, now, true, false), base);
+        assert_eq!(liquidation_premium_cap(base, tagged_at, now, false, true), base);
+    }
+
+    #[test]
+    fn p1b_untagged_premium_stays_at_base() {
+        let base = I80F48::from_num(7) / I80F48::from_num(100);
+        assert_eq!(liquidation_premium_cap(base, 0, 2_000_000, false, false), base);
     }
 
     #[test]
