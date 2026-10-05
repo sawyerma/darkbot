@@ -181,3 +181,64 @@ Compared with R127c:
 
 R127d must not be promoted on cache suppression alone. A PASS still requires lossless ingress,
 active batching, bounded/down-draining pending work, and observed transition/forced forwarding.
+
+
+## Qualification result — PASS
+
+Mainnet Shadow run:
+
+- run id: `r127_20261005T171043Z`
+- runtime anchor: `cf5085e796b4956fcf2376d08369b2b818dff39a`
+- frozen branch: `archive/r127d-pass-runtime-20261005`
+- verdict: **PASS**
+
+Measured result:
+
+- dependency_updates=96,816;
+- sweep_checks=12,430,220;
+- healthy=11,316,714 (91.0%);
+- liquidatable=1,054,611;
+- errors=58,895;
+- batches=22,023;
+- raw Bank→Account refs=20,657,014;
+- unique Accounts=12,430,220;
+- batch dedupe=39.8%;
+- forwarded downstream=151,045;
+- Candidate Cache entries=78,488;
+- repeated candidates suppressed=962,461 (86.4%);
+- transition forwards=6,891;
+- periodic forwards=108,728;
+- forced forwards=35,426;
+- pending_final=835;
+- max_pending=6,285;
+- ingress backlog final=0, max=460;
+- ingress overflow=0;
+- WSS sink overflow lines=0.
+
+Compared with R127c:
+- forwarded: 1,113,854 → 151,045 (~86.4% reduction);
+- pending_final: 6,154 → 835;
+- coalesced downstream work: 986,849 → 32,342;
+- ingress remains lossless.
+
+The startup/full-debtor scan still creates the dominant peak: max_pending is essentially unchanged
+(6,279 → 6,285). This is not considered a steady-state scheduler failure because the queue drains
+to 835 and ingress drains to zero during the qualification window. If later latency work requires
+it, startup admission can be separately staged/rate-limited without changing steady-state
+semantics.
+
+Evidence:
+`project_0/docs/evidence/R127d_20261005T171043Z.json`.
+
+Scope of PASS:
+- batching/admission scheduler;
+- Candidate Cache suppression/re-arm;
+- bounded/down-draining pending queue under this short Mainnet Shadow workload;
+- lossless ingress under the measured workload.
+
+Not proven by this PASS:
+- positive-net real liquidation capture;
+- Drift refresh correctness;
+- full Kamino/JupLend/Drift economic parity;
+- competitive Race latency;
+- LIVE safety qualification.
