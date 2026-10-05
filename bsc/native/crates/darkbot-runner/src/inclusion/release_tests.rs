@@ -1,8 +1,10 @@
 //! The release dispatch over qualified transports.
 //!
-//! Only these unit tests can make a [`QualifiedTransport`] or a
-//! [`TransportQualification`]: their sole constructors are compiled for
-//! them. They use the fixtures of the integration tests.
+//! These unit tests use test-only constructors for [`QualifiedTransport`]
+//! and [`TransportQualification`]. Production has a separate fail-closed
+//! TLS path in `inclusion::tls::qualify_transport`, which cannot accept a
+//! test double or arbitrary `dyn Transport`. The tests here continue to
+//! exercise the release binding and rotation semantics with fixtures.
 
 use darkbot_core::inclusion::capability::{
     AdapterKind, AdapterTable, CapabilityId, HandoffBoundary,
