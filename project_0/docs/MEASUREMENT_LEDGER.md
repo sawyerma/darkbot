@@ -2844,3 +2844,34 @@ ZERO_PREFUND only as a Shadow probe. Re-qualify projection → Health → Sizing
 integration withdraw → Jupiter → repay → EndLiquidation simulation against the
 0.1.12 pin. Preserve exact slot/timestamp evidence and record any premium-bearing
 liability encountered. No value-bearing send.
+
+
+### 2026-10-05 — R123 pre-upgrade Mainnet probe STOP / VERSION MISMATCH
+
+Attempted `project_0/scripts/run_shadow_mainnet.sh` on the P1B 0.1.12 promotion branch.
+Release build completed, then startup stopped before ingress/Shadow with:
+
+`no supported generic Marginfi WSOL bank found; cannot value SOL-denominated liquidation costs`.
+
+Root cause is version/layout mismatch, not absence of WSOL itself:
+- current Mainnet Banks are still the deployed 0.1.11 layout (1856-byte payload);
+- the promotion branch is compiled against the 0.1.12 `Bank` type (3904-byte payload);
+- FIX-130 correctly allows both sizes through the RPC/WSS filter;
+- however `bank_from_state`, `health::dependency_keys`, and `ProtocolSizer::bank`
+  still require/cast the full compiled 0.1.12 `Bank` size, so current 0.1.11 Banks are
+  rejected before cost-bank selection;
+- the WSOL lookup is therefore only the first visible downstream failure.
+
+Decision:
+- **do not zero-extend or otherwise coerce 0.1.11 Mainnet Banks into 0.1.12 and call the
+  result R123/P1B runtime qualification.** That would exercise 0.1.12 client code against
+  the still-0.1.11 deployed program and cannot prove post-upgrade protocol behavior.
+- keep the P1B branch compile/unit-test qualified and isolated from `main`;
+- perform true Mainnet runtime qualification only after the deployed program has upgraded
+  to the pinned/verified 0.1.12 semantics, or against an independently verified environment
+  actually running that program revision.
+- until then, continue non-P1B work on the current deployed-version branch (notably R7
+  FailedCostMatrix/P3-02/v1 qualification) rather than blocking the project on a future upgrade.
+
+R123 decision: **STOP / NOT A FAILURE OF 0.1.12 LOGIC; ENVIRONMENT VERSION MISMATCH.**
+No transaction sent. LIVE remains disabled.
