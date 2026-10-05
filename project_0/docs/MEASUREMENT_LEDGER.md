@@ -3406,3 +3406,48 @@ Current R127c Shadow qualification prefix:
 
 Status: **R127c COMPILE+UNIT PASS / MAINNET SHADOW QUALIFICATION RUNNING**.
 No transaction sent. LIVE disabled.
+
+
+### 2026-10-05 — R127c PARTIAL → R127d Candidate Cache implemented
+
+R127c Mainnet Shadow `r127_20261005T161806Z`:
+- verdict: PARTIAL;
+- dependency_updates=95,833;
+- sweep_checks=12,326,220;
+- healthy=11,212,366 (91.0%);
+- liquidatable=1,056,733;
+- errors=57,121;
+- batches=26,253;
+- account refs=20,407,185;
+- unique accounts=12,326,220;
+- batch dedupe=39.6%;
+- forwarded=1,113,854;
+- max_pending=6,279 (R126b baseline 78,214);
+- pending_final=6,154;
+- ingress backlog max=506; final=24;
+- ingress overflow=0; sink-overflow lines=0.
+
+Evidence: `docs/evidence/R127c_20261005T161806Z.json`.
+
+Interpretation:
+- R127c batching is structurally successful and remains the base architecture.
+- Remaining backlog is repeated downstream admission of persistent Liquidatable/Error Accounts,
+  not raw ingress or pre-queue fanout.
+- PHASENPLAN P2 explicitly requires a Candidate Cache with hard invalidation; R127d implements
+  that missing layer.
+
+Rollback anchor before R127d:
+- commit `dde69699a9943e376ca4343d454f8e3177ee9b36`;
+- branch `archive/r127c-batch-partial-20261005`.
+
+R127d:
+- `1047896a`: Candidate Health-state cache; exact Health still runs every affected batch;
+  transitions forward immediately; Bank writes force-rearm; persistent Liquidatable candidates
+  recheck every 64 slots by default; persistent health errors every 16 slots; repeat work is
+  soft-capped at 1,024 pending while transition/forced work bypasses that cap; cache clears on
+  Recovery.
+- `a319e0a1`: qualifier adds cache suppression/re-arm evidence and gates.
+- `project_0/docs/R127D_CHANGELOG_ROLLBACK.md`: exact semantics + rollback procedure.
+
+Status: **R127c PARTIAL / R127d IMPLEMENTED, COMPILE+UNIT TEST PENDING**.
+No transaction sent. LIVE disabled.
