@@ -4,7 +4,7 @@
 //! does not claim oracle value is realizable market value. P4A-01 must value the resulting seized
 //! amount through an executable route.
 
-use crate::health::{crate_impl::{bank_observation_keys, CrateHealth}, AccountSource, HealthEngine, HealthError};
+use crate::health::{crate_impl::{bank_observation_keys, CrateHealth}, AccountSource, HealthError};
 use crate::protocol;
 use fixed::types::I80F48;
 use marginfi::state::{
@@ -403,7 +403,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             .iter_mut()
             .map(|(key, account)| (&*key, account).into_account_info())
             .collect();
-        let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
+        // 0.1.12 adds an explicit admin-deleverage pricing override. Normal
+        // liquidation sizing must stay on the canonical risk-price path.
+        let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock, false)
             .map_err(|e| format!("oracle adapter: {e}"))?;
         let equity = feed
             .get_price_of_type(OraclePriceType::TimeWeighted, None, bank.config.oracle_max_confidence)
