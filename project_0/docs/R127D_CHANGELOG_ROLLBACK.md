@@ -49,11 +49,22 @@ Behavior:
 8. Transition/forced work bypasses the repeat soft cap; it is never silently suppressed.
 9. Cache is cleared on recovery/reconciliation rebuild.
 
-Defaults:
+Initial implementation defaults in `1047896a` were:
 
 - `P0_CANDIDATE_RECHECK_SLOTS=64`
 - `P0_CANDIDATE_ERROR_RECHECK_SLOTS=16`
+
+That initial setting was **not promoted for qualification** because it could delay re-evaluation
+of persistent candidates for many seconds.
+
+Current qualification defaults since `e5577da3` are:
+
+- `P0_CANDIDATE_RECHECK_SLOTS=1`
+- `P0_CANDIDATE_ERROR_RECHECK_SLOTS=1`
 - `P0_CANDIDATE_REPEAT_SOFT_CAP=1024`
+
+This preserves the intended semantics: unchanged candidates may be reconsidered once per new
+Solana slot, but not repeatedly every 5 ms batch within the same slot.
 
 The cache does **not** replace Health. It only controls repeated admission into the expensive
 Projection/Sizing/Economics pipeline after exact Health has already been recomputed.
@@ -82,6 +93,21 @@ Qualification now requires:
 
 Stores the completed R127c Mainnet Shadow PARTIAL result as structured evidence:
 `project_0/docs/evidence/R127c_20261005T161806Z.json`.
+
+
+### `e5577da37941082d3eb1f36da3bdb7fb18b0383c`
+
+Corrects the qualification defaults from the initial 64/16-slot experiment to 1/1 slot:
+
+- persistent Liquidatable recheck: every new Solana slot;
+- persistent Error recheck: every new Solana slot;
+- repeat soft cap remains 1,024 pending;
+- startup log and periodic telemetry now expose the active candidate-cache config.
+
+Rollback anchors:
+
+- initial 64/16-slot R127d: `archive/r127d-initial-64slot-20261005`;
+- corrected 1/1-slot pre-qualification R127d: `archive/r127d-1slot-prequal-20261005`.
 
 ## Runtime ordering after R127d
 
