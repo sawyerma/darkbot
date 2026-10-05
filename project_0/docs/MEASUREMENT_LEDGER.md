@@ -3482,3 +3482,64 @@ Rollback anchors:
 
 Status: **R127d 1-slot configuration IMPLEMENTED / COMPILE+UNIT TEST PENDING**.
 No transaction sent. LIVE disabled.
+
+
+### 2026-10-05 — R127d Mainnet Shadow PASS
+
+Run: `r127_20261005T171043Z`.
+
+Runtime qualification anchor:
+- commit `cf5085e796b4956fcf2376d08369b2b818dff39a`;
+- branch `archive/r127d-pass-runtime-20261005`.
+
+Result:
+- verdict: **PASS**;
+- dependency_updates=96,816;
+- sweep_checks=12,430,220;
+- healthy=11,316,714 (91.0%);
+- liquidatable=1,054,611;
+- errors=58,895;
+- sweep_batches=22,023;
+- sweep_account_refs=20,657,014;
+- sweep_unique_accounts=12,430,220;
+- batch_dedupe=39.8%;
+- sweep_forwarded=151,045;
+- candidate_cache_entries=78,488;
+- candidate_cache_suppressed=962,461 (86.4%);
+- candidate_cache_softcap_suppressed=945,968;
+- candidate_cache_transition_forwards=6,891;
+- candidate_cache_periodic_forwards=108,728;
+- candidate_cache_forced_forwards=35,426;
+- pending_final=835;
+- max_pending=6,285;
+- coalesced=32,342;
+- ingress backlog final=0, max=460;
+- ingress overflow=0;
+- WSS sink-overflow lines=0.
+
+Comparison to R127c PARTIAL:
+- downstream forwards 1,113,854 → 151,045;
+- pending_final 6,154 → 835;
+- downstream coalesces 986,849 → 32,342;
+- steady-state queue now drains below the qualification limit while ingress stays lossless.
+
+Interpretation:
+- R127c solved the pre-queue dependency fanout;
+- R127d solved repeated downstream admission of persistent candidates;
+- the remaining max_pending ~6.3k peak is consistent with the one-time startup/full-debtor sweep
+  and is not accompanied by sustained backlog or ingress loss in this run.
+
+Gate decision:
+**R127 scheduler/admission gate PASS.**
+Do not spend another architecture iteration on this scheduler without new evidence.
+
+Next priority is economic proof:
+1. historical/real profitable liquidation replay through the current pipeline;
+2. Drift refresh source-exact repair/verification where required by those cases;
+3. exact net-profit evidence;
+4. short Mainnet Shadow competition evidence;
+5. only then controlled value-bearing qualification.
+
+Evidence: `docs/evidence/R127d_20261005T171043Z.json`.
+
+No transaction sent. LIVE remains disabled.
