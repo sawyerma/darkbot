@@ -246,7 +246,7 @@ fn liability_account_in_group(data: &[u8], group: &Pubkey) -> bool {
                     .lending_account
                     .balances
                     .iter()
-                    .any(|b| b.is_active() && b.get_side() == Some(BalanceSide::Liabilities))
+                    .any(|b| b.is_active() && matches!(b.get_side(), Some(BalanceSide::Liabilities)))
         })
         .unwrap_or(false)
 }
