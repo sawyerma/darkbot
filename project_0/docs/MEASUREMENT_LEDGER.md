@@ -2903,3 +2903,34 @@ Next within FIX-129: obtain concrete Jito bundle lifecycle + all constituent
 transaction metadata before qualifying its cells. Do not manufacture zero costs,
 assign competitor paths, or send fee-bearing trials without explicit authorization.
 No P3-02, Oracle-trigger, 72h or P1B development was performed in this work.
+
+
+### 2026-10-05 — FIX-133a/b Oracle-trigger foundation (pre-threshold)
+
+Baseline: `main@56e9d47` after FIX-129 RPC economics qualification.
+
+Implemented without changing candidate admission/detection semantics:
+- **FIX-133a**: instantiate and maintain the existing `ReverseIndex` in the runner.
+  On Recovery READY it is rebuilt deterministically from canonical RAM state:
+  Bank → official observation/dependency keys and MarginfiAccount → active Banks.
+  Subsequent canonical Bank/Account updates replace only their own reverse-index entries.
+  Unsupported oracle layouts are removed from the trigger map fail-closed and reported;
+  no guessed dependency mapping is inserted.
+- **FIX-133b foundation**: `ThresholdIndex` price keys changed from `u64` to `u128`
+  positive raw I80F48 bits. The index was not yet wired into detection, so this is a
+  precision/type preparation only and does not create Oracle-trigger candidates.
+
+Commits:
+- `2c1d08e2` — FIX-133a canonical Oracle/Bank/Account reverse index.
+- `b914e6fc` — FIX-133b preserve exact I80F48 price bits in threshold index.
+
+Important boundary:
+- Oracle updates do **not** yet enqueue accounts.
+- `CrateHealth::thresholds()` remains fail-closed/Unsupported.
+- no Full Scan per Oracle update was introduced.
+- FIX-129 Jito cells remain UNKNOWN; no fee-bearing Jito trial was sent.
+- LIVE remains disabled; 72 h has not started.
+
+Next gate: workspace compile/tests for this structural checkpoint. After PASS, implement
+source-backed threshold derivation and only then enable Oracle→ThresholdIndex→exact Health
+candidate wakeups. No `health_cheap` approximation and no guessed thresholds.
