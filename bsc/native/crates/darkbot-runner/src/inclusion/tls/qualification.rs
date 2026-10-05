@@ -26,6 +26,7 @@ use super::{
 };
 use crate::inclusion::transport::{
     ConnectionState, QualifiedTransport, TransportBinding, TransportQualification,
+    bind_accepted_tls,
 };
 
 pub const Q5A_TLS_EVIDENCE_PATH: &str =
@@ -33,6 +34,15 @@ pub const Q5A_TLS_EVIDENCE_PATH: &str =
 pub const Q5A_TLS_EVIDENCE_SHA256: &str =
     "e2c537765f539f7551d89613c337d2079820731b77a531b7306a14fe4c845849";
 pub const Q5A_TLS_QUALIFICATION_GENERATION: u64 = 1;
+
+/// Opaque proof that the current owner/profile passed the accepted Q5A
+/// checks in this module. The type is crate-visible so the transport module
+/// can accept it, but its field is private here: no other module can
+/// construct one.
+pub(crate) struct AcceptedTlsEvidence {
+    _sealed: (),
+}
+
 pub const Q5A_TLS_POLICY: TlsPolicy = TlsPolicy {
     connect_timeout: Duration::from_secs(5),
     handshake_timeout: Duration::from_secs(5),
@@ -199,17 +209,15 @@ pub fn qualify_transport<'a>(
     let profile = owner.profile().ok_or(TlsQualificationError::NoConnection)?;
     validate_profile(kind, &profile)?;
 
-    let qualification = TransportQualification::from_accepted_evidence(
-        TLS_TRANSPORT_IMPLEMENTATION,
-        Q5A_TLS_QUALIFICATION_GENERATION,
-    );
-    let transport = QualifiedTransport::from_tls(
+    let evidence = AcceptedTlsEvidence { _sealed: () };
+    let (transport, qualification) = bind_accepted_tls(
         owner.transport(),
         adapter,
         kind,
         table.generation(),
         boundary,
-        qualification,
+        evidence,
+        Q5A_TLS_QUALIFICATION_GENERATION,
     );
     Ok(QualifiedTlsTransport {
         transport,
