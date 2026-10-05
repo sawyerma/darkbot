@@ -22,12 +22,12 @@
 //! therefore retires every transport made under the previous one.
 //!
 //! Neither a qualification nor a qualified transport has a public
-//! constructor; the only constructors are compiled for this crate's unit
-//! tests alone. Without them the set of current qualifications can only be
-//! empty, and every release dispatch is refused. A qualified TLS transport
-//! will add the first production constructors, from the concrete transport
-//! type and the evidence of its qualification, never from a `dyn
-//! Transport`.
+//! constructor that lets callers mint trust. Unit tests retain their test
+//! constructors. Production construction is crate-private and is reachable
+//! only through the TLS qualification module after it has matched the
+//! concrete `TlsConnectionOwner` against the accepted Q5A evidence. The
+//! qualified wrapper is created from the concrete `TlsTransport`, never
+//! from a caller-supplied `dyn Transport`.
 
 use std::io;
 use std::time::Instant;
@@ -180,6 +180,18 @@ impl TransportQualification {
         self.generation
     }
 
+    /// Mints a qualification token from an accepted production-evidence
+    /// path. Crate-private: callers cannot manufacture trust.
+    pub(crate) const fn from_accepted_evidence(
+        implementation: &'static str,
+        generation: u64,
+    ) -> Self {
+        Self {
+            implementation,
+            generation,
+        }
+    }
+
     /// A qualification for the unit tests of the release path only.
     #[cfg(test)]
     pub(crate) fn for_tests(implementation: &'static str, generation: u64) -> Self {
@@ -274,6 +286,29 @@ impl<'a> QualifiedTransport<'a> {
 
     pub(crate) fn transport_mut(&mut self) -> &mut dyn Transport {
         &mut *self.transport
+    }
+
+    /// Binds the concrete production TLS transport after the TLS
+    /// qualification module has matched its owner against accepted
+    /// evidence. Crate-private and concrete by type.
+    pub(crate) fn from_tls(
+        transport: &'a mut crate::inclusion::tls::TlsTransport,
+        adapter: AdapterId,
+        kind: AdapterKind,
+        capability_generation: u64,
+        boundary: HandoffBoundary,
+        qualification: TransportQualification,
+    ) -> Self {
+        Self {
+            transport,
+            binding: TransportBinding {
+                adapter,
+                kind,
+                capability_generation,
+                boundary,
+                qualification,
+            },
+        }
     }
 
     /// A test double bound as qualified under `qualification`. Unit tests
