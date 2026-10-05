@@ -13,6 +13,7 @@
 
 use solana_sdk::pubkey::Pubkey;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Bound::{Excluded, Included};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Side {
@@ -202,6 +203,52 @@ impl ThresholdIndex {
         out.into_iter().collect()
     }
 
+    /// Accounts whose liquidation boundary was crossed in the dangerous direction
+    /// between two consecutive effective Maintenance price observations.
+    ///
+    /// Asset risk increases only when Low falls: new <= threshold < previous.
+    /// Liability risk increases only when High rises: previous < threshold <= new.
+    /// Favorable price moves intentionally produce no threshold wakeup.
+    pub fn crossed_candidates(
+        &self,
+        bank: &Pubkey,
+        previous_asset_price: u128,
+        asset_price: u128,
+        previous_liability_price: u128,
+        liability_price: u128,
+    ) -> Vec<Pubkey> {
+        let mut out: HashSet<Pubkey> = HashSet::new();
+
+        if asset_price < previous_asset_price {
+            if let Some(m) = self.asset.get(bank) {
+                for (_, set) in m.range(asset_price..previous_asset_price) {
+                    out.extend(set.iter().copied());
+                }
+            }
+        }
+
+        if liability_price > previous_liability_price {
+            if let Some(m) = self.liability.get(bank) {
+                for (_, set) in m.range((
+                    Excluded(previous_liability_price),
+                    Included(liability_price),
+                )) {
+                    out.extend(set.iter().copied());
+                }
+            }
+        }
+
+        out.into_iter().collect()
+    }
+
+    pub fn bank_keys(&self) -> HashSet<Pubkey> {
+        self.asset
+            .keys()
+            .chain(self.liability.keys())
+            .copied()
+            .collect()
+    }
+
     pub fn tracked_accounts(&self) -> usize {
         self.entries.len()
     }
@@ -264,5 +311,37 @@ mod tests {
         assert_eq!(t.candidates(&bank, 40, 40, 0), vec![a_asset]);
         t.remove_account(&a_asset);
         assert_eq!(t.tracked_accounts(), 2);
+    }
+
+    #[test]
+    fn threshold_crossings_only_wake_newly_endangered_accounts() {
+        let mut t = ThresholdIndex::new();
+        let bank = Pubkey::new_unique();
+        let a100 = Pubkey::new_unique();
+        let a80 = Pubkey::new_unique();
+        let l200 = Pubkey::new_unique();
+        let l250 = Pubkey::new_unique();
+
+        t.set_account(a100, &[(bank, Side::Asset, 100)]);
+        t.set_account(a80, &[(bank, Side::Asset, 80)]);
+        t.set_account(l200, &[(bank, Side::Liability, 200)]);
+        t.set_account(l250, &[(bank, Side::Liability, 250)]);
+
+        let got: HashSet<_> = t
+            .crossed_candidates(&bank, 120, 90, 150, 220)
+            .into_iter()
+            .collect();
+        assert_eq!(got, HashSet::from([a100, l200]));
+
+        // Favorable moves cannot create a new liquidation through this Bank.
+        assert!(t.crossed_candidates(&bank, 90, 120, 220, 150).is_empty());
+
+        // Exact boundary semantics: an Account already on the old boundary is not re-woken;
+        // landing on the new boundary is a crossing.
+        let got: HashSet<_> = t
+            .crossed_candidates(&bank, 100, 80, 200, 250)
+            .into_iter()
+            .collect();
+        assert_eq!(got, HashSet::from([a80, l250]));
     }
 }
