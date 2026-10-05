@@ -13,9 +13,12 @@
 //!   keeps it outside any dispatch.
 //!
 //! A diagnostic dispatch runs over any [`Transport`], the TLS transport
-//! included; a release dispatch only over a qualified transport, which
-//! nothing outside the unit tests can make yet. No real provider is
-//! contacted, and none is qualified, by anything in here.
+//! included. After the accepted Q5A run, the TLS module can bind a concrete
+//! 48Club or BlockRazor connection as transport-qualified when its complete
+//! measured profile matches fail-closed. This does not make either provider
+//! release-qualified: the frozen provider semantic properties are still
+//! unqualified, so a release plan remains blocked until those separate
+//! gates pass.
 //!
 //! [`Transport`]: transport::Transport
 
