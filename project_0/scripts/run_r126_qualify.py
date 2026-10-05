@@ -51,6 +51,8 @@ STATS_RE = re.compile(
     r"bank_projection_ready=(?P<bank_projection_ready>\d+)\s+"
     r"bank_projection_failed=(?P<bank_projection_failed>\d+)\s+"
     r"bank_projection_stale=(?P<bank_projection_stale>\d+)"
+    r"(?:\s+ingress_backlog=(?P<ingress_backlog>\d+)\s+"
+    r"ingress_since_detect=(?P<ingress_since_detect>\d+))?"
 )
 CHANNEL_RE = re.compile(
     r'channel=ChannelStats\s*\{\s*name:\s*"ingress",\s*'
@@ -68,6 +70,8 @@ def utc_stamp() -> str:
 def parse_kv(match: re.Match[str]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in match.groupdict().items():
+        if value is None:
+            continue
         if value in ("true", "false"):
             out[key] = value == "true"
         else:
@@ -119,6 +123,7 @@ def analyze(log_path: Path, record_path: Path, run_meta: dict[str, Any]) -> dict
         "bank_projection_fallback_lines": 0,
         "threshold_bootstrap_fallback_lines": 0,
         "program_upgrade_halt_lines": 0,
+        "sink_overflow_lines": 0,
     }
 
     if log_path.exists():
@@ -140,6 +145,8 @@ def analyze(log_path: Path, record_path: Path, run_meta: dict[str, Any]) -> dict
                     line_counts["threshold_bootstrap_fallback_lines"] += 1
                 if "PROGRAM_UPGRADE HALT" in line:
                     line_counts["program_upgrade_halt_lines"] += 1
+                if "ingress protocol: sink overflow" in line:
+                    line_counts["sink_overflow_lines"] += 1
 
     latest_stats = stats_samples[-1] if stats_samples else {}
     latest_threshold = threshold_samples[-1] if threshold_samples else {}
@@ -165,7 +172,7 @@ def analyze(log_path: Path, record_path: Path, run_meta: dict[str, Any]) -> dict
     reasons: list[str] = []
     verdict = "PASS"
 
-    if run_meta.get("exit_reason") in {"startup_timeout", "early_exit"}:
+    if run_meta.get("exit_reason") in {"startup_timeout", "early_exit", "sink_overflow"}:
         verdict = "FAIL"
         reasons.append(f"runner ended before qualification window: {run_meta.get('exit_reason')}")
     if not latest_threshold:
@@ -177,6 +184,11 @@ def analyze(log_path: Path, record_path: Path, run_meta: dict[str, Any]) -> dict
     if max_overflow > 0:
         verdict = "FAIL"
         reasons.append(f"ingress overflow observed: {max_overflow}")
+    if line_counts["sink_overflow_lines"]:
+        verdict = "FAIL"
+        reasons.append(
+            f"WSS sink overflow/reconnect observed: {line_counts['sink_overflow_lines']}"
+        )
 
     if verdict != "FAIL":
         if not stats_samples or dep_updates == 0:
@@ -292,6 +304,8 @@ def human_report(report: dict[str, Any]) -> str:
         f"bank_projection_fallback_lines={bp['bank_projection_fallback_lines']}",
         "",
         f"ingress_max_overflow={ingress['max_overflow']}",
+        f"sink_overflow_lines={bp['sink_overflow_lines']}",
+        f"ingress_backlog_final={latest.get('ingress_backlog', 'n/a')}",
         f"oracle_threshold_records={report['records']['oracle_threshold_records']}",
         f"terminal_log={report['run_meta']['log_path']}",
         f"evidence_json={report['run_meta']['report_json_path']}",
@@ -375,6 +389,7 @@ def main() -> int:
 
     command = [str(script_dir / "run_shadow_mainnet.sh")]
     ready_event = threading.Event()
+    overflow_event = threading.Event()
     stop_reader = threading.Event()
 
     with log_path.open("w", encoding="utf-8", buffering=1) as log:
@@ -397,6 +412,8 @@ def main() -> int:
                 log.write(line)
                 if "threshold_index_ready:" in line:
                     ready_event.set()
+                if "ingress protocol: sink overflow" in line:
+                    overflow_event.set()
             stop_reader.set()
 
         thread = threading.Thread(target=reader, name="r126-log-reader", daemon=True)
@@ -409,6 +426,11 @@ def main() -> int:
 
         try:
             while proc.poll() is None and not ready_event.is_set():
+                if overflow_event.is_set():
+                    exit_reason = "sink_overflow"
+                    print("\n[R126] sink overflow detected; stopping immediately")
+                    stop_group(proc)
+                    break
                 if time.monotonic() >= startup_deadline:
                     exit_reason = "startup_timeout"
                     stop_group(proc)
@@ -424,8 +446,13 @@ def main() -> int:
                 )
                 deadline = ready_at + observation_seconds
                 while proc.poll() is None and time.monotonic() < deadline:
-                    time.sleep(0.5)
-                if proc.poll() is None:
+                    if overflow_event.is_set():
+                        exit_reason = "sink_overflow"
+                        print("\n[R126] sink overflow detected; stopping immediately")
+                        stop_group(proc)
+                        break
+                    time.sleep(0.2)
+                if proc.poll() is None and not overflow_event.is_set():
                     exit_reason = "observation_complete"
                     print("\n[R126] observation complete; sending SIGINT to Shadow process group")
                     stop_group(proc)
