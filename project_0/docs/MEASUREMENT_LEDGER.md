@@ -2978,3 +2978,25 @@ iterations.
 
 Status: **IMPLEMENTED IN SOURCE / FIX-133d COMPILE+UNIT TEST PENDING.**
 LIVE remains disabled. No transaction sent. FIX-129 Jito lifecycle cells remain UNKNOWN.
+
+
+### 2026-10-05 — FIX-133e Oracle wakeup coalescing / runtime telemetry
+
+After FIX-133d passed local compile/unit tests, the Oracle-trigger queue was hardened before
+Mainnet Shadow:
+- repeated Oracle/dependency updates for the same MarginfiAccount are coalesced into one pending
+  wakeup;
+- the queued work is replaced with the newest ingress timestamp/slot so freshness is measured
+  from the latest observed price-state transition;
+- stale queue-order entries are skipped deterministically;
+- runtime counters now expose dependency updates, threshold/fallback candidate hits, newly
+  enqueued wakeups, coalesced wakeups, price-extraction fallbacks, current/max pending Oracle
+  queue depth, bootstrap remaining, tracked threshold accounts and fallback accounts;
+- regression tests cover coalesced-latest work and stale-order skipping.
+
+Commit: `fba6b5e6`.
+
+Status: **IMPLEMENTED / COMPILE+UNIT TEST PENDING**.
+Next gate: both workspace feature sets. If PASS, run a short Mainnet Shadow qualification and
+verify `threshold_index_ready`, fallback ratio, real `oracle_threshold` records, ingress/channel
+health, and bounded Oracle pending depth before any 72 h run.
