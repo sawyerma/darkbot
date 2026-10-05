@@ -425,8 +425,11 @@ pub struct ArmedFence {
 
 impl ArmedFence {
     /// Test-only attestation. Production code cannot arm a lane yet.
-    #[cfg(test)]
-    pub(crate) fn for_tests(chain_id: u64, sender: Address, first_nonce: u64) -> Self {
+    /// Also compiled for the tests of dependent crates behind the
+    /// `test-support` feature, which is enabled only under
+    /// `[dev-dependencies]` and never in a production build.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn for_tests(chain_id: u64, sender: Address, first_nonce: u64) -> Self {
         Self {
             chain_id,
             sender,

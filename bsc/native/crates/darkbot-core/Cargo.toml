@@ -10,3 +10,9 @@ publish.workspace = true
 darkbot-wire = { path = "../darkbot-wire" }
 alloy-primitives = { workspace = true }
 k256 = { workspace = true }
+
+[features]
+default = []
+# Makes the crate's test helpers available to the tests of dependent crates.
+# Enable it only under [dev-dependencies]. Never in a production build.
+test-support = []

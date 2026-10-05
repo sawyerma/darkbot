@@ -757,69 +757,71 @@ impl AdapterTable {
 
 /// Altered records and tables for negative tests. Production code has no
 /// way to alter a record or to bind anything but a frozen capability.
-#[cfg(test)]
-pub(crate) mod testkit {
+/// Compiled for tests only: this crate's and, behind the `test-support`
+/// feature, those of dependent crates. Never part of a production build.
+#[cfg(any(test, feature = "test-support"))]
+pub mod testkit {
     use super::*;
 
     impl CapabilityRecord {
-        pub(crate) fn with_chain_id(mut self, chain_id: u64) -> Self {
+        pub fn with_chain_id(mut self, chain_id: u64) -> Self {
             self.chain_id = chain_id;
             self
         }
 
-        pub(crate) fn with_no_merge(mut self, support: Support) -> Self {
+        pub fn with_no_merge(mut self, support: Support) -> Self {
             self.no_merge.support = support;
             self
         }
 
-        pub(crate) fn with_max_block_number(mut self, support: Support) -> Self {
+        pub fn with_max_block_number(mut self, support: Support) -> Self {
             self.max_block_number.support = support;
             self
         }
 
-        pub(crate) fn with_max_txs(mut self, max_txs: u8) -> Self {
+        pub fn with_max_txs(mut self, max_txs: u8) -> Self {
             self.max_txs = max_txs;
             self
         }
 
-        pub(crate) fn with_pre_submission(mut self, support: Support) -> Self {
+        pub fn with_pre_submission(mut self, support: Support) -> Self {
             self.pre_submission_before_launch_execution.support = support;
             self
         }
 
-        pub(crate) fn with_position_first(mut self, support: Support) -> Self {
+        pub fn with_position_first(mut self, support: Support) -> Self {
             self.position_first.support = support;
             self
         }
 
         // Qualification of single features. Support is left as it is.
 
-        pub(crate) fn no_merge_qualified(mut self, qualification: Qualification) -> Self {
+        pub fn no_merge_qualified(mut self, qualification: Qualification) -> Self {
             self.no_merge.qualification = qualification;
             self
         }
 
-        pub(crate) fn position_first_qualified(mut self, qualification: Qualification) -> Self {
+        pub fn position_first_qualified(mut self, qualification: Qualification) -> Self {
             self.position_first.qualification = qualification;
             self
         }
 
-        pub(crate) fn max_block_number_qualified(mut self, qualification: Qualification) -> Self {
+        pub fn max_block_number_qualified(mut self, qualification: Qualification) -> Self {
             self.max_block_number.qualification = qualification;
             self
         }
 
-        pub(crate) fn min_timestamp_qualified(mut self, qualification: Qualification) -> Self {
+        pub fn min_timestamp_qualified(mut self, qualification: Qualification) -> Self {
             self.min_timestamp.qualification = qualification;
             self
         }
 
-        pub(crate) fn max_timestamp_qualified(mut self, qualification: Qualification) -> Self {
+        pub fn max_timestamp_qualified(mut self, qualification: Qualification) -> Self {
             self.max_timestamp.qualification = qualification;
             self
         }
 
-        pub(crate) fn pre_submission_qualified(mut self, qualification: Qualification) -> Self {
+        pub fn pre_submission_qualified(mut self, qualification: Qualification) -> Self {
             self.pre_submission_before_launch_execution.qualification = qualification;
             self
         }
@@ -831,7 +833,7 @@ pub(crate) mod testkit {
         /// expiry by block) are explicitly qualified. Being enabled does
         /// not make a feature qualified; it is set here, feature by
         /// feature. Timestamps and pre-submission are not part of it.
-        pub(crate) fn release_grade(mut self) -> Self {
+        pub fn release_grade(mut self) -> Self {
             self.no_merge.qualification = Qualification::Qualified;
             self.position_first.qualification = Qualification::Qualified;
             self.max_block_number.qualification = Qualification::Qualified;
@@ -849,34 +851,34 @@ pub(crate) mod testkit {
             self
         }
 
-        pub(crate) fn with_atomic(mut self, property: Property) -> Self {
+        pub fn with_atomic(mut self, property: Property) -> Self {
             self.atomic = property;
             self
         }
 
-        pub(crate) fn with_provider_rebroadcast(mut self, property: Property) -> Self {
+        pub fn with_provider_rebroadcast(mut self, property: Property) -> Self {
             self.provider_rebroadcast = property;
             self
         }
 
-        pub(crate) fn with_provider_public_fallback(mut self, property: Property) -> Self {
+        pub fn with_provider_public_fallback(mut self, property: Property) -> Self {
             self.provider_public_fallback = property;
             self
         }
 
-        pub(crate) fn with_reorg_exposure(mut self, property: Property) -> Self {
+        pub fn with_reorg_exposure(mut self, property: Property) -> Self {
             self.reorg_post_inclusion_public_exposure = property;
             self
         }
 
-        pub(crate) fn with_send_time_qualified(mut self, qualified: bool) -> Self {
+        pub fn with_send_time_qualified(mut self, qualified: bool) -> Self {
             self.qualified_as_t_send = qualified;
             self
         }
     }
 
     /// A property that is stated and qualified.
-    pub(crate) fn qualified(knowledge: Knowledge) -> Property {
+    pub fn qualified(knowledge: Knowledge) -> Property {
         Property {
             knowledge,
             qualification: Qualification::Qualified,
@@ -884,7 +886,7 @@ pub(crate) mod testkit {
     }
 
     /// A property that is stated and not qualified.
-    pub(crate) fn unqualified(knowledge: Knowledge) -> Property {
+    pub fn unqualified(knowledge: Knowledge) -> Property {
         Property {
             knowledge,
             qualification: Qualification::Unqualified,
@@ -893,7 +895,7 @@ pub(crate) mod testkit {
 
     impl AdapterTable {
         /// A table of arbitrary records, validated like a production one.
-        pub(crate) fn for_tests(
+        pub fn for_tests(
             chain_id: u64,
             generation: u64,
             records: &[(AdapterId, CapabilityRecord)],
