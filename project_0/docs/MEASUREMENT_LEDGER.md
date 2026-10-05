@@ -3132,3 +3132,36 @@ No transaction sent. LIVE disabled. This is a short-load qualification step; no 
 planned. Next: run approximately 10–30 minutes and compare max_pending,
 candidate_hits/update, price_fallbacks, Bank-projection success ratio and ingress overflow
 against R125b.
+
+
+### 2026-10-05 — R126 automated qualification runner
+
+Added `project_0/scripts/run_r126_qualify.py` to remove manual timing/log collection.
+
+Behavior:
+- launches the existing send-disabled `run_shadow_mainnet.sh` in its own process group;
+- waits for `threshold_index_ready`;
+- starts the qualification timer only after threshold bootstrap is complete;
+- default observation window = 15 minutes;
+- startup timeout = 12 minutes;
+- captures terminal log, opportunity JSONL, summary JSONL, JSON report and text report under
+  `project_0/data/shadow/r126_<UTC stamp>_*`;
+- stops the entire Shadow process group with SIGINT after the observation window, escalating
+  only if the process does not exit;
+- automatically parses threshold readiness, Oracle trigger stats, ingress overflow,
+  Bank-projection counters, queue depth and opportunity records;
+- compares `max_pending` to the R125b baseline of 6,578;
+- emits PASS / PARTIAL / FAIL and a compact report suitable for review without copying full logs.
+
+PASS requires, among other safety checks:
+- threshold_index_ready observed;
+- real Oracle dependency updates observed;
+- ingress overflow = 0;
+- max_pending below the R125b baseline;
+- final Oracle pending queue drained;
+- R126 stale-Bank projection path exercised and at least one projected Bank price became ready.
+
+If the stale-Bank projection path is not exercised during the chosen window, the result is
+PARTIAL rather than falsely claiming R126 optimization PASS.
+
+Commit: `1002d318`.
