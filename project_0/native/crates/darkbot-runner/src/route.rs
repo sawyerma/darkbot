@@ -59,12 +59,6 @@ impl JupiterV2RouteProvider {
         })
     }
 
-    #[cfg(test)]
-    fn with_base_url(mut self, base: String) -> Self {
-        self.base_url = base;
-        self
-    }
-
     fn exact_in(
         &self,
         from_mint: &Pubkey,
