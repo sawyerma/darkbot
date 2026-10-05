@@ -922,9 +922,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         #[cfg(feature = "crate_health")]
         while let Some(done) = remote.oracle_price_projection_results.try_pop() {
-            let latest = oracle_bank_projection_pending.remove(&done.bank);
+            let bank = done.bank;
+            let base_slot = done.base_slot;
+            let base_bank_hash = done.base_bank_hash;
+            let result = done.result;
+            let latest = oracle_bank_projection_pending.remove(&bank);
             let all_accounts: Vec<Pubkey> =
-                reverse_index.accounts_for_bank(&done.bank).copied().collect();
+                reverse_index.accounts_for_bank(&bank).copied().collect();
             let fallback_all = |reason: &str,
                                 oracle_price_fallbacks: &mut u64,
                                 oracle_candidate_hits: &mut u64,
@@ -934,7 +938,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 oracle_detect_order: &mut VecDeque<Pubkey>,
                                 oracle_detect_pending: &mut HashMap<Pubkey, DetectWork>| {
                 *oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
-                let (t_rx_ns, event_slot) = latest.unwrap_or((clock.now_ns(), done.base_slot));
+                let (t_rx_ns, event_slot) = latest.unwrap_or((clock.now_ns(), base_slot));
                 let count = enqueue_oracle_accounts(
                     all_accounts.iter().copied(),
                     t_rx_ns,
@@ -948,17 +952,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 *oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
                 eprintln!(
                     "oracle_bank_projection_fallback: bank={} reason={} accounts={}",
-                    done.bank, reason, count
+                    bank, reason, count
                 );
             };
 
-            match done.result {
+            match result {
                 Ok((projection_slot, projection_unix_s, accounts, _units)) => {
                     let canonical_matches = st
                         .get(&done.bank)
-                        .map(|r| r.slot == done.base_slot && hash(&r.data) == done.base_bank_hash)
+                        .map(|r| r.slot == base_slot && hash(&r.data) == base_bank_hash)
                         .unwrap_or(false);
-                    let newest_event_slot = latest.map(|(_, slot)| slot).unwrap_or(done.base_slot);
+                    let newest_event_slot = latest.map(|(_, slot)| slot).unwrap_or(base_slot);
                     if !canonical_matches || projection_slot < newest_event_slot {
                         oracle_bank_projection_stale =
                             oracle_bank_projection_stale.saturating_add(1);
@@ -992,14 +996,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 group,
                             };
                             match engine.maintenance_risk_price_bits(
-                                &done.bank,
+                                &bank,
                                 projection_unix_s,
                                 projection_slot,
                             ) {
                                 Ok((asset_price, liability_price)) => {
                                     let mut candidates: HashSet<Pubkey> = threshold_index
                                         .candidates(
-                                            &done.bank,
+                                            &bank,
                                             asset_price,
                                             liability_price,
                                             0,
