@@ -1,0 +1,2978 @@
+{
+  "schema": "darkbot.bsc.q5a.tls-transport-evidence.v1",
+  "kind": "Q5A real TLS transport qualification. Transport only; not a provider qualification. The probe is an eth_sendBundle without transactions.",
+  "identity": {
+    "baseline": "92fa5204777e566acbaccf111721d9295ffb3a90",
+    "git_head": "0635a3978a471bf4916236fb32de6c9ae96d0b9c",
+    "git_dirty": "false",
+    "baseline_ancestor": "true",
+    "frozen_sources_unchanged": "true",
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew)",
+    "cargo": "cargo 1.93.1 (Homebrew)",
+    "rustls": "0.23.45",
+    "ring": "0.17.14",
+    "profile": "release",
+    "os": "macos",
+    "arch": "aarch64",
+    "transport_implementation": "darkbot-runner/tls-v1 rustls-0.23.45 ring http/1.1",
+    "harness": "u5_tls_qualify v1"
+  },
+  "required": {
+    "workload": {
+      "warmup": 10,
+      "measured": 100,
+      "pacing_ms": 200,
+      "reconnect_cycles": 3
+    },
+    "miss_limit_ns": 1000000,
+    "providers": [
+      "club48",
+      "blockrazor"
+    ]
+  },
+  "providers": [
+    {
+      "provider": "blockrazor",
+      "host": "virginia.builder.blockrazor.io",
+      "port": 443,
+      "auth_scope": "PRESENT",
+      "policy": {
+        "connect_timeout_ms": 5000,
+        "handshake_timeout_ms": 5000,
+        "max_idle_ms": 10000,
+        "response_timeout_ms": 5000,
+        "max_plaintext_request_len": 65536
+      },
+      "workload": {
+        "warmup": 10,
+        "measured": 100,
+        "pacing_ms": 200,
+        "reconnect_cycles": 3
+      },
+      "started_at": "2026-10-05T20:36:49Z",
+      "ended_at": "2026-10-05T20:37:36Z",
+      "connect": {
+        "ok": true,
+        "facts": {
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "tls_version": "TLSv1_3",
+          "cipher_suite": "TLS13_AES_128_GCM_SHA256",
+          "http": "Http11",
+          "alpn_selected": true
+        }
+      },
+      "samples": [
+        {
+          "phase": "warmup",
+          "index": 0,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "8cfec8c405f5090d751fb433071b4e4ab01a21fbe539bcebebc1ede871cd6ab5",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 14083,
+          "t_write_check_ns": 292019916,
+          "t_boundary_ns": 292084666,
+          "write_check_to_boundary_ns": 64750,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 322669250,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 1,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "7a2ea2a0b178a9850bd073ba189516b1a7f882d26599c952cb42c9a48ba39523",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9083,
+          "t_write_check_ns": 819828166,
+          "t_boundary_ns": 820007708,
+          "write_check_to_boundary_ns": 179542,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 203317125,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 2,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "69649785d863edb07e0bd82bb2ca088a904f95c76a5e6e2424ad209e0fe55ca5",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 15583,
+          "t_write_check_ns": 1225843083,
+          "t_boundary_ns": 1226024041,
+          "write_check_to_boundary_ns": 180958,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 293391792,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 3,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "4fde6c9dcc5ac3b9577c8ba120f32cafb21a26a8f753ea7a66620d0ce2d95ceb",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8750,
+          "t_write_check_ns": 1724491083,
+          "t_boundary_ns": 1724830333,
+          "write_check_to_boundary_ns": 339250,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191624750,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 4,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "83a3a6ebd1a764883b3a491e5d27c0c7bbd319dd10ceb5d7e07a6fe27c5ba70f",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6959,
+          "t_write_check_ns": 2121510750,
+          "t_boundary_ns": 2121696375,
+          "write_check_to_boundary_ns": 185625,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191270083,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 5,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "19114cee9ddb99c5b728a9a363b3608ee2c87194aef37d662b507b4ead4aabbc",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6042,
+          "t_write_check_ns": 2518022083,
+          "t_boundary_ns": 2518209916,
+          "write_check_to_boundary_ns": 187833,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189244000,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 6,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "00643d8ff771b9886af3bc3a1c6d83b23240e925ec930bd2761a0be1228330d6",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10042,
+          "t_write_check_ns": 2912544875,
+          "t_boundary_ns": 2912731000,
+          "write_check_to_boundary_ns": 186125,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 288986291,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 7,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "78e264a4ea59c550c96ca56a4635b45c54ef1d81bb5eb8e619215f9725bbdd80",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8458,
+          "t_write_check_ns": 3406791083,
+          "t_boundary_ns": 3406980291,
+          "write_check_to_boundary_ns": 189208,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 297107500,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 8,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "5bbbb2427b36eb44a348e26ee536db601d9d83248ff47f42884e5314b0609000",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 7875,
+          "t_write_check_ns": 3909159500,
+          "t_boundary_ns": 3909339875,
+          "write_check_to_boundary_ns": 180375,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 293942875,
+          "state_after": "ready"
+        },
+        {
+          "phase": "warmup",
+          "index": 9,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "1f8970d2e006a7072b32b9c3d56a6a17eb6e4aea14810838d8de5c0b809a84a1",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8500,
+          "t_write_check_ns": 4408345000,
+          "t_boundary_ns": 4408525333,
+          "write_check_to_boundary_ns": 180333,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 202648500,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 0,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "ddb2a2f56e03c1490012c57059e57a948d1d272c407a2c12786ab9ffff3090f6",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10458,
+          "t_write_check_ns": 4816264916,
+          "t_boundary_ns": 4816530000,
+          "write_check_to_boundary_ns": 265084,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190006916,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 1,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "13c32b588e07e5db3c8a4f17a32f48b9f31e8470fd6b9a6cd493da20d90554a0",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8917,
+          "t_write_check_ns": 5211687708,
+          "t_boundary_ns": 5211901916,
+          "write_check_to_boundary_ns": 214208,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 197408667,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 2,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "fa8743fd964af26d342ba91ea4d2b5828dad6cbe4c1662eefcc90607794e22bc",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 5209,
+          "t_write_check_ns": 5614350625,
+          "t_boundary_ns": 5614399208,
+          "write_check_to_boundary_ns": 48583,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191822375,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 3,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "0bf56598c24ab81f5b90c504bdddc6dfc5bd301d0d05b4c42fca3104c82b5c7f",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 3084,
+          "t_write_check_ns": 6008030125,
+          "t_boundary_ns": 6008077625,
+          "write_check_to_boundary_ns": 47500,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 196989583,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 4,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "0f0800bd2f9ce248a5c20809bd1082837d3e2946c79b60fb055b7d70e4c9791a",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9708,
+          "t_write_check_ns": 6408078208,
+          "t_boundary_ns": 6408207833,
+          "write_check_to_boundary_ns": 129625,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 298344000,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 5,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "78c4fd95c70ed20305ac2232ae4b7f74c8e16adb21c3f14b677ac520f77b3b87",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11083,
+          "t_write_check_ns": 6911632958,
+          "t_boundary_ns": 6911823083,
+          "write_check_to_boundary_ns": 190125,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 197020250,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 6,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "b280976067f5a0e65ede97ca46aa6092910c817b318c959c27621ba9dc4f40e6",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10041,
+          "t_write_check_ns": 7314027666,
+          "t_boundary_ns": 7314323500,
+          "write_check_to_boundary_ns": 295834,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191180416,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 7,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "14e5b5256c10f06ec0964cd92055685e48d013d8505b281c350728c5d0ef0bcf",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8291,
+          "t_write_check_ns": 7710541416,
+          "t_boundary_ns": 7710779666,
+          "write_check_to_boundary_ns": 238250,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 192761417,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 8,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "149d32dd7771f143ecd2e79843f02c03296a461dcd9c032d88441945743f0e17",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8000,
+          "t_write_check_ns": 8108627375,
+          "t_boundary_ns": 8108795250,
+          "write_check_to_boundary_ns": 167875,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194871166,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 9,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "e59bf326ec06d075889d7e09e7fef8781385e6dc7105281360dc30e8053163eb",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10333,
+          "t_write_check_ns": 8508730708,
+          "t_boundary_ns": 8508945750,
+          "write_check_to_boundary_ns": 215042,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190518958,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 10,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "4682c626646c6a636c3a8a6b6553b2c153de39288854188539986711a757cdff",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6667,
+          "t_write_check_ns": 8904504000,
+          "t_boundary_ns": 8904569791,
+          "write_check_to_boundary_ns": 65791,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190513125,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 11,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "9b08a10b58a32d5b9eedf98663a1f08a7e9d25336b8ffc73b308efe339cadf66",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9458,
+          "t_write_check_ns": 9300188916,
+          "t_boundary_ns": 9300557000,
+          "write_check_to_boundary_ns": 368084,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193942916,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 12,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "6b51614ec96a00431303273242521b5eac11bd342150dad52db286e4e4e94b02",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10250,
+          "t_write_check_ns": 9699579583,
+          "t_boundary_ns": 9699770083,
+          "write_check_to_boundary_ns": 190500,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 293775875,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 13,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "1da4157519c49fbc754d1f585b56e4eaf026ca6bdbbd21c4e33bd39126c2273a",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 7084,
+          "t_write_check_ns": 10198616750,
+          "t_boundary_ns": 10198718833,
+          "write_check_to_boundary_ns": 102083,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191518500,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 14,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "6e16f9b4d0dfe3a15294932d4c7138a456a9887240d4b8bad174ccf1ac6123d7",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8292,
+          "t_write_check_ns": 10595312333,
+          "t_boundary_ns": 10595632041,
+          "write_check_to_boundary_ns": 319708,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 197889584,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 15,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "e8a4ed2db7051c0db25ee5c36485c5d695074a4632a86efc4280f8c4ee65c2a3",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 3334,
+          "t_write_check_ns": 10998556500,
+          "t_boundary_ns": 10998601750,
+          "write_check_to_boundary_ns": 45250,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190801291,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 16,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "ac1d4a81fb54a295543ab6c115fef81909a1e8c9aa3d184f6e90f6609240b44b",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9041,
+          "t_write_check_ns": 11394499916,
+          "t_boundary_ns": 11394677416,
+          "write_check_to_boundary_ns": 177500,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193856250,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 17,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "86e201c3be7df7bd9dd182103943d51a519115e96bfd90f28b54255818755a5f",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 55542,
+          "t_write_check_ns": 11788940125,
+          "t_boundary_ns": 11789118083,
+          "write_check_to_boundary_ns": 177958,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189307375,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 18,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "62ce59bc0cb62d7f543f98b3c926cec8709fca85aee546bc5181d19567842d83",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9750,
+          "t_write_check_ns": 12182661625,
+          "t_boundary_ns": 12182797916,
+          "write_check_to_boundary_ns": 136291,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191227834,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 19,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "a34d994f5cb78c4496692f8c6462e82260eb7ad02a74349d5063c6dfd5f61972",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10000,
+          "t_write_check_ns": 12577993666,
+          "t_boundary_ns": 12578142583,
+          "write_check_to_boundary_ns": 148917,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191436875,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 20,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "56da52c6638b69bbaf74ff384735911db64bea9aee5bb0c22d916884e7375b9b",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 5500,
+          "t_write_check_ns": 12973831583,
+          "t_boundary_ns": 12973966916,
+          "write_check_to_boundary_ns": 135333,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189455334,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 21,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "1fddb7825127bb356bc52baa7008ea2415b137d9780be6b43f4aa71bc19bf07d",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6084,
+          "t_write_check_ns": 13368469125,
+          "t_boundary_ns": 13368554958,
+          "write_check_to_boundary_ns": 85833,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191248000,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 22,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "897b8543c8fcb37873806d0603770f818f4271872beacde182a3fe858293eee8",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11416,
+          "t_write_check_ns": 13763764541,
+          "t_boundary_ns": 13763952125,
+          "write_check_to_boundary_ns": 187584,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189559291,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 23,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "a055391de381dc44f3830006fad8695583b09f00ec40296adb53317d49da1cf4",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9500,
+          "t_write_check_ns": 14158585458,
+          "t_boundary_ns": 14158751541,
+          "write_check_to_boundary_ns": 166083,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 290503000,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 24,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "2df71416a2706dda60325fbbd3810df448557dada5636bf739bbfc96f2ffe968",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6584,
+          "t_write_check_ns": 14652982500,
+          "t_boundary_ns": 14653124625,
+          "write_check_to_boundary_ns": 142125,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191394833,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 25,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "e968c88f9c4accfd1caeab5e901e84cc9db077d6417ee4f4ff8fa8722ede0c91",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9250,
+          "t_write_check_ns": 15044954666,
+          "t_boundary_ns": 15045277250,
+          "write_check_to_boundary_ns": 322584,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194228875,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 26,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "2b7c0b1e18cbfb8868e85068fdc982309b3b8bdd367c5f46cb48007d95efa2dc",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 44000,
+          "t_write_check_ns": 15444624208,
+          "t_boundary_ns": 15444814166,
+          "write_check_to_boundary_ns": 189958,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195470542,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 27,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "a7fd84c3b2e12765ef55bc707584c1e0657da95ece1a132a8c9317df80fc314c",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9708,
+          "t_write_check_ns": 15845365541,
+          "t_boundary_ns": 15845700833,
+          "write_check_to_boundary_ns": 335292,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 294548375,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 28,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "7801b971925053ef9255b591fe1948f7c900f6fe7d4a7a40bc369a71870deba9",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10791,
+          "t_write_check_ns": 16345329416,
+          "t_boundary_ns": 16345520000,
+          "write_check_to_boundary_ns": 190584,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195259083,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 29,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "aab189c70cc74d8235d9f051c5bcc1ae2db38fbd1f2126421abd2195be66a1d1",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10000,
+          "t_write_check_ns": 16745761458,
+          "t_boundary_ns": 16745973416,
+          "write_check_to_boundary_ns": 211958,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193680417,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 30,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "e02cef58f762f742ccec44c34de2e081b8ea956f6a70c6cd527ef43186bfcc02",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10833,
+          "t_write_check_ns": 17144651083,
+          "t_boundary_ns": 17144804333,
+          "write_check_to_boundary_ns": 153250,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190601500,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 31,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "43232bf96ad745aba3db71fc0798821463f0499eab11c6c6ba59d835ca548b33",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9083,
+          "t_write_check_ns": 17540328958,
+          "t_boundary_ns": 17540494125,
+          "write_check_to_boundary_ns": 165167,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193160875,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 32,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "49110b6c81bec688bde125e23449c42ac15c07d68251f37991c44024c1e7fbe5",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9625,
+          "t_write_check_ns": 17938745791,
+          "t_boundary_ns": 17938946791,
+          "write_check_to_boundary_ns": 201000,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194515875,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 33,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "e0f6832800b93f645bb1b24a69452b5ce8cc26846467f068975dff13fb27ef29",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10209,
+          "t_write_check_ns": 18338528375,
+          "t_boundary_ns": 18338727708,
+          "write_check_to_boundary_ns": 199333,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189988625,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 34,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "ff69724595d657e4b830916fd4463c03627b848234998aa10c92de6cd5852b7a",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 7916,
+          "t_write_check_ns": 18733796291,
+          "t_boundary_ns": 18734162500,
+          "write_check_to_boundary_ns": 366209,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190488708,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 35,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "c19bd0cf391beb4b9064e5f04a8a35a564cfb6888a13362f511692cfa7288962",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8708,
+          "t_write_check_ns": 19129727083,
+          "t_boundary_ns": 19130151750,
+          "write_check_to_boundary_ns": 424667,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 293660416,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 36,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "de70d43adbd68056433ec884187dde7904d860877cabeb95e708eb0e905bc663",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10250,
+          "t_write_check_ns": 19628007750,
+          "t_boundary_ns": 19628207791,
+          "write_check_to_boundary_ns": 200041,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191460792,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 37,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "aecb6397ad46e60bda52828f0ba56e093071f01e3a74fef3af7daefa888e2022",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8708,
+          "t_write_check_ns": 20024756583,
+          "t_boundary_ns": 20025008333,
+          "write_check_to_boundary_ns": 251750,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194573708,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 38,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "8f9d9bf225ca8433796b8775e0679cf5e6458da563641b1644cbc0e020f5a275",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 13917,
+          "t_write_check_ns": 20424685708,
+          "t_boundary_ns": 20424881125,
+          "write_check_to_boundary_ns": 195417,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193835833,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 39,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "6e9a416475d5d8d79c84b737a7bae7acae92febd985987027ce285671fe266fc",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10541,
+          "t_write_check_ns": 20823815416,
+          "t_boundary_ns": 20824103708,
+          "write_check_to_boundary_ns": 288292,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189411625,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 40,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "93976d7cb1e75b0f8d8b9c500a3ddf261cda66e9dd1846710f283b0c38ecdc7b",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 23750,
+          "t_write_check_ns": 21218178375,
+          "t_boundary_ns": 21218280250,
+          "write_check_to_boundary_ns": 101875,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190337458,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 41,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "05cf1623980c3fa77a45b067f2503c118a06ef91950b935c12d5a246ff82a89e",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 7583,
+          "t_write_check_ns": 21613752333,
+          "t_boundary_ns": 21613953625,
+          "write_check_to_boundary_ns": 201292,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 200641750,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 42,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "eaa49c8d28f299413c2387d39587b57b9cd46c576af4f2e8a669cfe0374eb37c",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11459,
+          "t_write_check_ns": 22019674000,
+          "t_boundary_ns": 22019884125,
+          "write_check_to_boundary_ns": 210125,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193603958,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 43,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "8854fa5e7fa1439f72f7ee5c5f4f3f3d767b5f2c2979d9dabc03d3be83f57eaa",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 7000,
+          "t_write_check_ns": 22418557750,
+          "t_boundary_ns": 22418783750,
+          "write_check_to_boundary_ns": 226000,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195779750,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 44,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "067aeeacd8116d7faddb792b6f770878e8c7c9748092a550ca99feed60fc2f12",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9333,
+          "t_write_check_ns": 22819648041,
+          "t_boundary_ns": 22819843958,
+          "write_check_to_boundary_ns": 195917,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 293931292,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 45,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "bccd5e2caa2d319b42e65976c17cbe9544322f433f131f22a518bd1b386a7e63",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8583,
+          "t_write_check_ns": 23316028208,
+          "t_boundary_ns": 23316196916,
+          "write_check_to_boundary_ns": 168708,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 192298042,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 46,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "073158f760f068b212a223e8a8cb284c75e6bcf701d02988f9a6ab82f9f53220",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9709,
+          "t_write_check_ns": 23712315500,
+          "t_boundary_ns": 23712506791,
+          "write_check_to_boundary_ns": 191291,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194988584,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 47,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "76bac49896319c471c887b7d6e74936a5d2cbedb4d36f811bcecd78ae010614b",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11458,
+          "t_write_check_ns": 24112583333,
+          "t_boundary_ns": 24112773958,
+          "write_check_to_boundary_ns": 190625,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 188725583,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 48,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "81b8669e2f4cea32d92b7642d8caaf4463df5efa4a307bfb93dc501cb44e5d46",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9958,
+          "t_write_check_ns": 24506577333,
+          "t_boundary_ns": 24506753375,
+          "write_check_to_boundary_ns": 176042,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189749166,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 49,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "0a0fe6a650142b112091ec0819ef9eb9dc9f4b4293a9ccd333d7b1916f66fcfd",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8917,
+          "t_write_check_ns": 24901577250,
+          "t_boundary_ns": 24901746833,
+          "write_check_to_boundary_ns": 169583,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189750250,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 50,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "c2d0cc1c8bf7e0f80438dd1374a2e43d39a276dc53f5a8362dfbf1c177144c4c",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9958,
+          "t_write_check_ns": 25295655583,
+          "t_boundary_ns": 25295823291,
+          "write_check_to_boundary_ns": 167708,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 199770542,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 51,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "0cac3c6f9d061c95345a6e0dfe5ed200c98264178d165c308a7371028b30d263",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9208,
+          "t_write_check_ns": 25700654333,
+          "t_boundary_ns": 25700820875,
+          "write_check_to_boundary_ns": 166542,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191821083,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 52,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "a2b86199d59936e526486bda6047b0700da6819e417d69958cff7cd0d48b50a6",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6875,
+          "t_write_check_ns": 26097703708,
+          "t_boundary_ns": 26097806000,
+          "write_check_to_boundary_ns": 102292,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191817750,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 53,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "a524a63c3591f39427b425693b0e68ac10b7a42a01829e90fbec520db022af1e",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9875,
+          "t_write_check_ns": 26494696791,
+          "t_boundary_ns": 26494884083,
+          "write_check_to_boundary_ns": 187292,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 196803583,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 54,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "ac917140520bb5b05b5a87d7051eeeb9622cd0b0f7498a9c11f0fa09ecb02afa",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 7375,
+          "t_write_check_ns": 26896766041,
+          "t_boundary_ns": 26896935000,
+          "write_check_to_boundary_ns": 168959,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 192982958,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 55,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "69ba34f6b20038a8d89b737ca60313d336837b00846cedcdd6d56a6639d76064",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8791,
+          "t_write_check_ns": 27295014916,
+          "t_boundary_ns": 27295184291,
+          "write_check_to_boundary_ns": 169375,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195345375,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 56,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "a4dfc5428d54894f9f2d9c56bdcb008f7681a90c1f62d6468546c1d37235718d",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 14375,
+          "t_write_check_ns": 27695638708,
+          "t_boundary_ns": 27695760666,
+          "write_check_to_boundary_ns": 121958,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193816209,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 57,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "ae52784987d4898efb02b0c2413632bf0e390eaaa3d635b35f07b008466f1b51",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6875,
+          "t_write_check_ns": 28092455333,
+          "t_boundary_ns": 28092651125,
+          "write_check_to_boundary_ns": 195792,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 192038791,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 58,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "c5450d26bde70220cd75c2be54808781d4f7bc172d9ca42686c5536dbe0a5c03",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6041,
+          "t_write_check_ns": 28488568541,
+          "t_boundary_ns": 28488788500,
+          "write_check_to_boundary_ns": 219959,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191266083,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 59,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "ca907ba17bbf4a68390b64a0f194551c39581960fcd5307d8558b29028aa85ac",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9500,
+          "t_write_check_ns": 28885130000,
+          "t_boundary_ns": 28885311750,
+          "write_check_to_boundary_ns": 181750,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194123625,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 60,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "8cf92b31c4974484a42a499829770b22de4987d7b58a7136e8a6f205fa13b716",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11167,
+          "t_write_check_ns": 29284516750,
+          "t_boundary_ns": 29284711458,
+          "write_check_to_boundary_ns": 194708,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 198825250,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 61,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "8078d08f7c4cf1e3fba13be8d2409d56c2bec30b3121316b934b355ec62927a0",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 68459,
+          "t_write_check_ns": 29686745375,
+          "t_boundary_ns": 29686941958,
+          "write_check_to_boundary_ns": 196583,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 196789833,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 62,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "6d61add0f3415eef640be03cb5c7d7c2ffb0a67ed16ed9546883d8c31fd4db04",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8083,
+          "t_write_check_ns": 30086705166,
+          "t_boundary_ns": 30086875625,
+          "write_check_to_boundary_ns": 170459,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191881125,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 63,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "bbb55ab502178a4f214af863ce99147df49238062f32799352824bfd48b885c7",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6083,
+          "t_write_check_ns": 30479016083,
+          "t_boundary_ns": 30479152166,
+          "write_check_to_boundary_ns": 136083,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190551750,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 64,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "fed63db170a56f754b6033259b0cb83083bd54afe001c94f1c8f0c8e4bfff371",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 7958,
+          "t_write_check_ns": 30874403958,
+          "t_boundary_ns": 30874592750,
+          "write_check_to_boundary_ns": 188792,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190053791,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 65,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "3414f49fbefb7000fab47e76469ae2c625dfbe8ecd82cb54b5a2c149bc5379db",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 5375,
+          "t_write_check_ns": 31269700083,
+          "t_boundary_ns": 31269835916,
+          "write_check_to_boundary_ns": 135833,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 188932042,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 66,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "b731d1b0f5c0f487fe0eea4b14ee6fbdc394ed6ef64c5d298c5938eebb4230fa",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10042,
+          "t_write_check_ns": 31663859625,
+          "t_boundary_ns": 31664100958,
+          "write_check_to_boundary_ns": 241333,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 187565417,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 67,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "1a23c75d054befd8e3618c655741052dc566b55e9c4f6ac73e582d8ddc9d0577",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11166,
+          "t_write_check_ns": 32056753166,
+          "t_boundary_ns": 32056965833,
+          "write_check_to_boundary_ns": 212667,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191985958,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 68,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "756b48187ea5ed5e95c5648739f55d4df750618e1234445b78fcaa2e5bd495b1",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10708,
+          "t_write_check_ns": 32454022291,
+          "t_boundary_ns": 32454238583,
+          "write_check_to_boundary_ns": 216292,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193663208,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 69,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "82ebb0e408cfd657645af29a35b01fc1dbd3e4bc34d381411d42a92567731b9f",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 5125,
+          "t_write_check_ns": 32852950125,
+          "t_boundary_ns": 32853069125,
+          "write_check_to_boundary_ns": 119000,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190498041,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 70,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "9958516b03bf81ecb7c1bdf6b5fb3df66ba1581829dc9d287a29493865761b09",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10834,
+          "t_write_check_ns": 33248652500,
+          "t_boundary_ns": 33248828541,
+          "write_check_to_boundary_ns": 176041,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191843209,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 71,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "9724a2cc8e18920c19b7176fef66ea19fd96ce39fdf700805b4994fd62ceb6f2",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9375,
+          "t_write_check_ns": 33645744500,
+          "t_boundary_ns": 33645912875,
+          "write_check_to_boundary_ns": 168375,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191691333,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 72,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "0d067af5be49cdb52c0432d07e3170ec1f8a1085f0631359dd7f70bc7f39979f",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10042,
+          "t_write_check_ns": 34042693083,
+          "t_boundary_ns": 34043092416,
+          "write_check_to_boundary_ns": 399333,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190586500,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 73,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "775f9a4b226bc3232a4a1c257e5155de2681da92ef04cfb5f294a916fada7324",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 4125,
+          "t_write_check_ns": 34438713750,
+          "t_boundary_ns": 34438777375,
+          "write_check_to_boundary_ns": 63625,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190043250,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 74,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "0bf8f8b4f71c8b65e71757f004a02b0d8b65252bb80df2a460f4b36b0897b197",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10625,
+          "t_write_check_ns": 34832759333,
+          "t_boundary_ns": 34832929625,
+          "write_check_to_boundary_ns": 170292,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195809333,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 75,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "40a93b291dc9948dce9db9c4ea7d0dd5ee94cd36cb8fb1eb18c0855979aa43fd",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 4292,
+          "t_write_check_ns": 35233783000,
+          "t_boundary_ns": 35233857208,
+          "write_check_to_boundary_ns": 74208,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190948500,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 76,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "2421cca344e70fff4da495495b3b0276526180b5bc91eb623ff3f1b8dff12293",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9209,
+          "t_write_check_ns": 35629893500,
+          "t_boundary_ns": 35630095125,
+          "write_check_to_boundary_ns": 201625,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191687750,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 77,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "ef4647dab37f9a8e823e1ac8636df88d9ee9a5d33505ce5a492d4a618943793a",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9833,
+          "t_write_check_ns": 36026857708,
+          "t_boundary_ns": 36027036416,
+          "write_check_to_boundary_ns": 178708,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 197904292,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 78,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "efaa8c70c8a2b5547cd8906092236f002350b31ed4f67ab1acb69d50a6ff4e87",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10666,
+          "t_write_check_ns": 36430023166,
+          "t_boundary_ns": 36430222416,
+          "write_check_to_boundary_ns": 199250,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195861084,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 79,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "b0ae61ff85a398ed05c138bed85ede5347d824f6172a9cd42bd7f6a892293d2a",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11417,
+          "t_write_check_ns": 36831178500,
+          "t_boundary_ns": 36831397875,
+          "write_check_to_boundary_ns": 219375,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193270250,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 80,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "6bc27bddfbbbca43a77566758d72f26a0e8c4b96962873e66451b6e8ef065666",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8000,
+          "t_write_check_ns": 37224824250,
+          "t_boundary_ns": 37224970791,
+          "write_check_to_boundary_ns": 146541,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193721792,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 81,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "0977ae19ecde237ef59a620c9daffb058ee8e6529ccfa57458c29a7bd16b9f3a",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10583,
+          "t_write_check_ns": 37623777208,
+          "t_boundary_ns": 37623944791,
+          "write_check_to_boundary_ns": 167583,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194830000,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 82,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "350e58b06402bbb07a96a4debc2fd27a2df594d03eee6ba0a4d5925f0190dcfe",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10292,
+          "t_write_check_ns": 38022790125,
+          "t_boundary_ns": 38022935250,
+          "write_check_to_boundary_ns": 145125,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 190747833,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 83,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "2c68604e06666c70e4556ede2148b300a8181893c8d61a695fd7e0423bdac52c",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 5375,
+          "t_write_check_ns": 38416498875,
+          "t_boundary_ns": 38416587166,
+          "write_check_to_boundary_ns": 88291,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195696709,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 84,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "087b1a5e50b9f4b63e3176006d3ab584bc1748e617a991b6c5e471238f586622",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9000,
+          "t_write_check_ns": 38815587708,
+          "t_boundary_ns": 38815796833,
+          "write_check_to_boundary_ns": 209125,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194112458,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 85,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "e7e325f4925338913e67e1e393ca8b04e5eda699986b5c1c619628ca7aed6834",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 5708,
+          "t_write_check_ns": 39214965083,
+          "t_boundary_ns": 39215067666,
+          "write_check_to_boundary_ns": 102583,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193670167,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 86,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "eebab25601a080bc31af6b91266d635bfc003369c653e3962405ef34a450080d",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9625,
+          "t_write_check_ns": 39613819125,
+          "t_boundary_ns": 39614010625,
+          "write_check_to_boundary_ns": 191500,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195316041,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 87,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "83772edbce7b9a937847a1fef59b9513f343d6af6e2d1bf8e6a188906d1f1246",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6167,
+          "t_write_check_ns": 40014391083,
+          "t_boundary_ns": 40014498958,
+          "write_check_to_boundary_ns": 107875,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 189214875,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 88,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "7148b6b114c4ed6c982e714689407355842321e654289623c09f8b0d28cbcc83",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 12292,
+          "t_write_check_ns": 40410837458,
+          "t_boundary_ns": 40411581166,
+          "write_check_to_boundary_ns": 743708,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193367125,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 89,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "c2202c21d64408599a8ec92db9539ad7217868083962195c2eca7e17a47554e4",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 8167,
+          "t_write_check_ns": 40810032375,
+          "t_boundary_ns": 40810215208,
+          "write_check_to_boundary_ns": 182833,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 201717750,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 90,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "03eac4aff0eac1221892ee4dbb1dba5815a5cca26d514d221d8e4efdaa76d863",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10125,
+          "t_write_check_ns": 41217029666,
+          "t_boundary_ns": 41217233125,
+          "write_check_to_boundary_ns": 203459,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191447458,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 91,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "62f325b699be1602e77364e8f82c0de248876e715f2c962c5901bce8842ca8ce",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10292,
+          "t_write_check_ns": 41613767458,
+          "t_boundary_ns": 41613961416,
+          "write_check_to_boundary_ns": 193958,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 194708667,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 92,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "d06f40dae6759004ce9892199371040373fcbebdf6d39679d912bca17b7f1a36",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 22833,
+          "t_write_check_ns": 42012022458,
+          "t_boundary_ns": 42012171041,
+          "write_check_to_boundary_ns": 148583,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 197546667,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 93,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "52cc3c664c52a6cf2321e65c1e326a883edd704377f568166994440b410a51ac",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11459,
+          "t_write_check_ns": 42414790000,
+          "t_boundary_ns": 42414965875,
+          "write_check_to_boundary_ns": 175875,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 188779666,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 94,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "dc4ddaa8802e33dd3b52482edfe22dcf286ccd2045d12e8659b9aade9608be5e",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11667,
+          "t_write_check_ns": 42808233250,
+          "t_boundary_ns": 42808351958,
+          "write_check_to_boundary_ns": 118708,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 191364625,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 95,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "da3011a04df4dba08a5ad6d10499e4ba82dc5641bed32d6ecf70b3317726efeb",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9166,
+          "t_write_check_ns": 43199943916,
+          "t_boundary_ns": 43200070833,
+          "write_check_to_boundary_ns": 126917,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 188631625,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 96,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "70f46a33df24011c5e159d99228b9191324e3e3da38f4b0f519698c0b3895621",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 11542,
+          "t_write_check_ns": 43593803583,
+          "t_boundary_ns": 43594003250,
+          "write_check_to_boundary_ns": 199667,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 196030958,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 97,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "c547ff61ed79154a84131bf3b1facd3569561c3dc0618c4ad3883a162a2a27eb",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 6458,
+          "t_write_check_ns": 43991332041,
+          "t_boundary_ns": 43991427375,
+          "write_check_to_boundary_ns": 95334,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 198237750,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 98,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "af25ba6bea5f4f9cdc8d20baeb55deb7ad829d5742f016955e0efaf63a4e5d6a",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 10042,
+          "t_write_check_ns": 44394746333,
+          "t_boundary_ns": 44394926083,
+          "write_check_to_boundary_ns": 179750,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 193506958,
+          "state_after": "ready"
+        },
+        {
+          "phase": "measured",
+          "index": 99,
+          "generation": 1,
+          "peer": "99.86.253.108:443",
+          "state_before": "ready",
+          "request_plaintext_bytes": 371,
+          "body_bytes": 148,
+          "body_sha256": "b67b626e6275d0beec6e83ee99b5f90681cf410b3b8cbf5871af6eff192b1107",
+          "outcome": {
+            "kind": "handed_off"
+          },
+          "prepare_ns": 9375,
+          "t_write_check_ns": 44793509958,
+          "t_boundary_ns": 44793685458,
+          "write_check_to_boundary_ns": 175500,
+          "wire_bytes": 393,
+          "response": {
+            "class": "reject",
+            "detail": -38000,
+            "answered": true
+          },
+          "response_latency_ns": 195226208,
+          "state_after": "ready"
+        }
+      ],
+      "reconnects": [
+        {
+          "cycle": 0,
+          "previous_generation": 1,
+          "result": {
+            "ok": true,
+            "facts": {
+              "generation": 2,
+              "peer": "99.86.253.108:443",
+              "tls_version": "TLSv1_3",
+              "cipher_suite": "TLS13_AES_128_GCM_SHA256",
+              "http": "Http11",
+              "alpn_selected": true
+            }
+          },
+          "previous_still_current": false,
+          "probe": {
+            "phase": "reconnect",
+            "index": 0,
+            "generation": 2,
+            "peer": "99.86.253.108:443",
+            "state_before": "ready",
+            "request_plaintext_bytes": 371,
+            "body_bytes": 148,
+            "body_sha256": "b55470119135ed884b1fb7928c5ca94231db8f99b59314e3b9d41d47fa618634",
+            "outcome": {
+              "kind": "handed_off"
+            },
+            "prepare_ns": 5833,
+            "t_write_check_ns": 45366378708,
+            "t_boundary_ns": 45366461250,
+            "write_check_to_boundary_ns": 82542,
+            "wire_bytes": 393,
+            "response": {
+              "class": "reject",
+              "detail": -38000,
+              "answered": true
+            },
+            "response_latency_ns": 194606291,
+            "state_after": "ready"
+          }
+        },
+        {
+          "cycle": 1,
+          "previous_generation": 2,
+          "result": {
+            "ok": true,
+            "facts": {
+              "generation": 3,
+              "peer": "99.86.253.108:443",
+              "tls_version": "TLSv1_3",
+              "cipher_suite": "TLS13_AES_128_GCM_SHA256",
+              "http": "Http11",
+              "alpn_selected": true
+            }
+          },
+          "previous_still_current": false,
+          "probe": {
+            "phase": "reconnect",
+            "index": 1,
+            "generation": 3,
+            "peer": "99.86.253.108:443",
+            "state_before": "ready",
+            "request_plaintext_bytes": 371,
+            "body_bytes": 148,
+            "body_sha256": "53df0a0d3ffedc8840430a8e7a2985bff29f3e87e2677632b5777a11684e52b0",
+            "outcome": {
+              "kind": "handed_off"
+            },
+            "prepare_ns": 5208,
+            "t_write_check_ns": 45948356333,
+            "t_boundary_ns": 45948672000,
+            "write_check_to_boundary_ns": 315667,
+            "wire_bytes": 393,
+            "response": {
+              "class": "reject",
+              "detail": -38000,
+              "answered": true
+            },
+            "response_latency_ns": 199075166,
+            "state_after": "ready"
+          }
+        },
+        {
+          "cycle": 2,
+          "previous_generation": 3,
+          "result": {
+            "ok": true,
+            "facts": {
+              "generation": 4,
+              "peer": "99.86.253.108:443",
+              "tls_version": "TLSv1_3",
+              "cipher_suite": "TLS13_AES_128_GCM_SHA256",
+              "http": "Http11",
+              "alpn_selected": true
+            }
+          },
+          "previous_still_current": false,
+          "probe": {
+            "phase": "reconnect",
+            "index": 2,
+            "generation": 4,
+            "peer": "99.86.253.108:443",
+            "state_before": "ready",
+            "request_plaintext_bytes": 371,
+            "body_bytes": 148,
+            "body_sha256": "1d72fbbf236e2da41f5d368f75b99de1b931daf07b0fc8a73a8847a3364b534f",
+            "outcome": {
+              "kind": "handed_off"
+            },
+            "prepare_ns": 5209,
+            "t_write_check_ns": 46527497375,
+            "t_boundary_ns": 46527597166,
+            "write_check_to_boundary_ns": 99791,
+            "wire_bytes": 393,
+            "response": {
+              "class": "reject",
+              "detail": -38000,
+              "answered": true
+            },
+            "response_latency_ns": 217229542,
+            "state_after": "ready"
+          }
+        }
+      ],
+      "summary": {
+        "count": 100,
+        "p50_ns": 179750,
+        "p95_ns": 335292,
+        "p99_ns": 424667,
+        "max_ns": 743708,
+        "limit_ns": 1000000,
+        "at_or_above_limit": 0,
+        "fraction_at_or_above_limit": 0.000000
+      },
+      "counts": {
+        "handed_off": 113,
+        "skipped": 0,
+        "unknown": 0,
+        "stale_after": 0,
+        "disconnected_after": 0,
+        "reconnects": 3
+      },
+      "api_scope": "ALL_ANSWERED",
+      "transport_verdict": "PASS",
+      "reasons": []
+    }
+  ],
+  "verdict": {
+    "tls_transport_qualification": "INCOMPLETE"
+  },
+  "not_qualified_by_this_evidence": [
+    "48Club positionFirst effect on block placement",
+    "noMerge effect",
+    "ordered, atomic and same-block behaviour of either builder",
+    "pre-submission behaviour",
+    "placement N/N+1 behind a launch",
+    "builder inclusion",
+    "any provider feature or lifecycle property",
+    "T0 to T_buy"
+  ]
+}
