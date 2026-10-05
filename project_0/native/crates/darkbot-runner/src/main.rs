@@ -835,9 +835,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("P0_SWEEP_BATCH_MAX_EVENTS must be > 0".into());
     }
     #[cfg(feature = "crate_health")]
+    let sweep_batch_max_age_ns: u64 =
+        config::parsed_or("P0_SWEEP_BATCH_MAX_AGE_NS", 5_000_000)?;
+    #[cfg(feature = "crate_health")]
+    if sweep_batch_max_age_ns == 0 {
+        return Err("P0_SWEEP_BATCH_MAX_AGE_NS must be > 0".into());
+    }
+    #[cfg(feature = "crate_health")]
     let mut sweep_dirty_banks: HashMap<Pubkey, (u64, u64)> = HashMap::new();
     #[cfg(feature = "crate_health")]
     let mut sweep_batch_events: usize = 0;
+    #[cfg(feature = "crate_health")]
+    let mut sweep_batch_started_ns: Option<u64> = None;
     #[cfg(feature = "crate_health")]
     let mut sweep_batches: u64 = 0;
     #[cfg(feature = "crate_health")]
@@ -1318,12 +1327,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             && st.run_state().is_tradable()
             && !sweep_dirty_banks.is_empty()
         {
-            let ingress_stats = consumer.stats();
-            let ingress_backlog =
-                ingress_stats.sent.saturating_sub(ingress_stats.received) as usize;
-            if ingress_backlog == 0 || sweep_batch_events >= sweep_batch_max_events {
+            let batch_age_ns = sweep_batch_started_ns
+                .map(|t| clock.now_ns().saturating_sub(t))
+                .unwrap_or(0);
+            if sweep_batch_events >= sweep_batch_max_events
+                || batch_age_ns >= sweep_batch_max_age_ns
+            {
                 let dirty = std::mem::take(&mut sweep_dirty_banks);
                 sweep_batch_events = 0;
+                sweep_batch_started_ns = None;
                 sweep_batches = sweep_batches.saturating_add(1);
 
                 let mut account_work: HashMap<Pubkey, (u64, u64)> = HashMap::new();
@@ -1434,6 +1446,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             None
         } else if queued_detection_available {
             consumer.try_pop()
+        } else if !sweep_dirty_banks.is_empty() {
+            consumer.pop_timeout(Duration::from_millis(1))
         } else {
             consumer.pop_timeout(Duration::from_millis(250))
         };
@@ -1530,6 +1544,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     reverse_index = rebuilt;
                     sweep_dirty_banks.clear();
                     sweep_batch_events = 0;
+                    sweep_batch_started_ns = None;
                     threshold_index = ThresholdIndex::new();
                     threshold_fallback.clear();
                     threshold_bootstrap.clear();
@@ -1830,6 +1845,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 threshold_ready = threshold_bootstrap.is_empty();
             } else if st.run_state().is_tradable() {
                 if let Some((_, t_rx_ns, event_slot)) = updated_bank_event {
+                    if sweep_batch_started_ns.is_none() {
+                        sweep_batch_started_ns = Some(clock.now_ns());
+                    }
                     sweep_dirty_banks
                         .entry(bank_pk)
                         .and_modify(|w| {
@@ -1921,6 +1939,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     reverse_index.banks_for_oracle(&dependency).copied().collect();
 
                 if !use_threshold_trigger {
+                    if sweep_batch_started_ns.is_none() {
+                        sweep_batch_started_ns = Some(clock.now_ns());
+                    }
                     for bank in banks {
                         sweep_dirty_banks
                             .entry(bank)
