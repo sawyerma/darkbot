@@ -59,6 +59,24 @@ pub struct ProjectionResultMessage {
     pub result: Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), String>,
 }
 
+/// [R126] One integration-Bank refresh projection is enough to obtain a fresh pricing state
+/// before selecting account thresholds. This prevents stale integration pricing from fanning
+/// out to every account using the Bank.
+pub struct OraclePriceProjectionWork {
+    pub bank: Pubkey,
+    pub base_slot: u64,
+    pub base_bank_hash: Hash,
+    pub tx: VersionedTransaction,
+    pub targets: Vec<Pubkey>,
+}
+
+pub struct OraclePriceProjectionResultMessage {
+    pub bank: Pubkey,
+    pub base_slot: u64,
+    pub base_bank_hash: Hash,
+    pub result: Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), String>,
+}
+
 pub struct RemoteWorkers {
     pub winner_jobs: Producer<WinnerWatch>,
     pub winner_results: Consumer<WinnerResult>,
@@ -66,6 +84,8 @@ pub struct RemoteWorkers {
     pub reconcile_results: Consumer<ReconcileResultMessage>,
     pub projection_jobs: Producer<ProjectionWork>,
     pub projection_results: Consumer<ProjectionResultMessage>,
+    pub oracle_price_projection_jobs: Producer<OraclePriceProjectionWork>,
+    pub oracle_price_projection_results: Consumer<OraclePriceProjectionResultMessage>,
 }
 
 fn push_result<T>(tx: &Producer<T>, mut value: T) -> bool {
@@ -97,6 +117,10 @@ impl RemoteWorkers {
             bounded::<ProjectionWork>("projection-rpc-jobs", capacity);
         let (projection_done_tx, projection_results) =
             bounded::<ProjectionResultMessage>("projection-rpc-results", capacity);
+        let (oracle_price_projection_jobs, oracle_price_projection_job_rx) =
+            bounded::<OraclePriceProjectionWork>("oracle-price-projection-rpc-jobs", capacity);
+        let (oracle_price_projection_done_tx, oracle_price_projection_results) =
+            bounded::<OraclePriceProjectionResultMessage>("oracle-price-projection-rpc-results", capacity);
 
         let winner_rpc_url = rpc_url.clone();
         let winner_shutdown = shutdown.clone();
@@ -182,6 +206,38 @@ impl RemoteWorkers {
                 }
             })?;
 
+        let oracle_projection_shutdown = shutdown.clone();
+        let oracle_projection_rpc_url = rpc_url.clone();
+        std::thread::Builder::new()
+            .name("oracle-price-projection-rpc".into())
+            .spawn(move || {
+                let submitter = RpcSubmitter::new(oracle_projection_rpc_url, true);
+                while !oracle_projection_shutdown.is_requested() {
+                    let Some(work) =
+                        oracle_price_projection_job_rx.pop_timeout(Duration::from_millis(250))
+                    else {
+                        continue;
+                    };
+                    let bank = work.bank;
+                    let base_slot = work.base_slot;
+                    let base_bank_hash = work.base_bank_hash;
+                    let result = submitter
+                        .simulate_with_post_accounts(&work.tx, &work.targets)
+                        .map_err(|e| e.to_string());
+                    if !push_result(
+                        &oracle_price_projection_done_tx,
+                        OraclePriceProjectionResultMessage {
+                            bank,
+                            base_slot,
+                            base_bank_hash,
+                            result,
+                        },
+                    ) {
+                        return;
+                    }
+                }
+            })?;
+
         Ok(Self {
             winner_jobs,
             winner_results,
@@ -189,6 +245,8 @@ impl RemoteWorkers {
             reconcile_results,
             projection_jobs,
             projection_results,
+            oracle_price_projection_jobs,
+            oracle_price_projection_results,
         })
     }
 }
