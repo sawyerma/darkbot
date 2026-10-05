@@ -100,9 +100,8 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
         verdict = "FAIL"
         reasons.append(f"ingress overflow: sink_lines={sink_overflow} counter={max_overflow}")
     if not stats or int(latest.get("dependency_updates", 0)) == 0:
-        if verdict != "FAIL":
-            verdict = "PARTIAL"
-        reasons.append("no Oracle dependency-update sample")
+        verdict = "FAIL"
+        reasons.append("no Oracle/bank dependency updates were recognized; trigger coverage unproven")
     if checks == 0:
         if verdict != "FAIL":
             verdict = "PARTIAL"
