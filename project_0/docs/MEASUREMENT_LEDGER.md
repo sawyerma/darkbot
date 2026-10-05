@@ -3122,8 +3122,13 @@ Expected R126 effect:
   Bank refresh simulation plus threshold-selected Accounts;
 - worst-case semantics remain identical to R125b via full-Bank fallback.
 
-Status: **IMPLEMENTED / COMPILE+UNIT TEST PENDING**.
+Status: **COMPILE+UNIT TEST PASS** on 2026-10-05.
+User-reported local verification:
+- `cargo test --workspace --features "crate_health txv1"` → PASS;
+- `cargo test --workspace --features "crate_health"` → PASS;
+- no failures.
+
 No transaction sent. LIVE disabled. This is a short-load qualification step; no 72 h run is
-planned. After compile PASS, run approximately 10–30 minutes and compare max_pending,
+planned. Next: run approximately 10–30 minutes and compare max_pending,
 candidate_hits/update, price_fallbacks, Bank-projection success ratio and ingress overflow
 against R125b.
