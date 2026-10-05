@@ -180,18 +180,6 @@ impl TransportQualification {
         self.generation
     }
 
-    /// Mints a qualification token from an accepted production-evidence
-    /// path. Crate-private: callers cannot manufacture trust.
-    pub(crate) const fn from_accepted_evidence(
-        implementation: &'static str,
-        generation: u64,
-    ) -> Self {
-        Self {
-            implementation,
-            generation,
-        }
-    }
-
     /// A qualification for the unit tests of the release path only.
     #[cfg(test)]
     pub(crate) fn for_tests(implementation: &'static str, generation: u64) -> Self {
@@ -206,9 +194,10 @@ impl TransportQualification {
 /// runner holds it. A release dispatch admits a transport only if its
 /// qualification is exactly the current one of its adapter.
 ///
-/// It can be built freely, but only from [`TransportQualification`]s,
-/// which nothing outside the unit tests can make: in a production build it
-/// is empty.
+/// It can be built freely, but only from [`TransportQualification`]s.
+/// Production qualification tokens are created only by the sealed accepted
+/// TLS-evidence binding below; callers cannot manufacture one from strings
+/// or generation numbers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TransportQualifications {
     current: [Option<TransportQualification>; MAX_ADAPTERS],
@@ -288,29 +277,6 @@ impl<'a> QualifiedTransport<'a> {
         &mut *self.transport
     }
 
-    /// Binds the concrete production TLS transport after the TLS
-    /// qualification module has matched its owner against accepted
-    /// evidence. Crate-private and concrete by type.
-    pub(crate) fn from_tls(
-        transport: &'a mut crate::inclusion::tls::TlsTransport,
-        adapter: AdapterId,
-        kind: AdapterKind,
-        capability_generation: u64,
-        boundary: HandoffBoundary,
-        qualification: TransportQualification,
-    ) -> Self {
-        Self {
-            transport,
-            binding: TransportBinding {
-                adapter,
-                kind,
-                capability_generation,
-                boundary,
-                qualification,
-            },
-        }
-    }
-
     /// A test double bound as qualified under `qualification`. Unit tests
     /// of the release path only.
     #[cfg(test)]
@@ -333,6 +299,38 @@ impl<'a> QualifiedTransport<'a> {
             },
         }
     }
+}
+
+/// Sealed production promotion from accepted Q5A TLS evidence.
+///
+/// The evidence token's field is private to the TLS qualification module,
+/// so other runner code cannot manufacture the token needed to call this
+/// function. Keeping the construction here also keeps the private fields of
+/// [`TransportQualification`] and [`QualifiedTransport`] closed.
+pub(super) fn bind_accepted_tls<'a>(
+    transport: &'a mut crate::inclusion::tls::TlsTransport,
+    adapter: AdapterId,
+    kind: AdapterKind,
+    capability_generation: u64,
+    boundary: HandoffBoundary,
+    _evidence: crate::inclusion::tls::qualification::AcceptedTlsEvidence,
+    qualification_generation: u64,
+) -> (QualifiedTransport<'a>, TransportQualification) {
+    let qualification = TransportQualification {
+        implementation: crate::inclusion::tls::TLS_TRANSPORT_IMPLEMENTATION,
+        generation: qualification_generation,
+    };
+    let qualified = QualifiedTransport {
+        transport,
+        binding: TransportBinding {
+            adapter,
+            kind,
+            capability_generation,
+            boundary,
+            qualification,
+        },
+    };
+    (qualified, qualification)
 }
 
 /// A monotonic clock with an identity. Times of different clocks are never
