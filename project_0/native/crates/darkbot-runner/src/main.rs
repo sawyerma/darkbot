@@ -1663,6 +1663,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(not(feature = "crate_health"))]
         let maybe_ev = consumer.pop_timeout(Duration::from_millis(250));
 
+        #[cfg(feature = "crate_health")]
+        let mut detect;
+        #[cfg(not(feature = "crate_health"))]
         let mut detect = None;
 
         if let Some(ev) = maybe_ev {
