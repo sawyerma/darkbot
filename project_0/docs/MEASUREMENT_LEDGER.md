@@ -3298,5 +3298,11 @@ Deliberate staging:
 - no new RPC or approximation is introduced in the admission filter; it uses the already-pinned
   official Marginfi health engine over canonical RAM state.
 
-Status: **IMPLEMENTED / COMPILE+UNIT TEST PENDING**.
+Status: **COMPILE+UNIT TEST PASS** on 2026-10-05.
+User-reported local workspace test run completed without failures; final Doc-tests also PASS
+(`0 passed; 0 failed` means no doctest cases existed, not a failure).
+
+Next gate: automated R127 short Mainnet Shadow qualification with
+`project_0/scripts/run_r127_qualify.py`.
+
 No transaction sent. LIVE disabled.
