@@ -91,6 +91,19 @@ fn next_integration_probe(
         (account, now_ns, slot, "integration_target_probe"))
 }
 
+#[cfg(feature = "crate_health")]
+fn next_oracle_detect(
+    order: &mut VecDeque<Pubkey>,
+    pending: &mut HashMap<Pubkey, DetectWork>,
+) -> Option<DetectWork> {
+    while let Some(account) = order.pop_front() {
+        if let Some(work) = pending.remove(&account) {
+            return Some(work);
+        }
+    }
+    None
+}
+
 #[cfg(not(feature = "crate_health"))]
 struct NoPlans;
 #[cfg(not(feature = "crate_health"))]
@@ -686,6 +699,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "crate_health")]
     let mut detect_queue: VecDeque<DetectWork> = VecDeque::new();
     #[cfg(feature = "crate_health")]
+    let mut oracle_detect_order: VecDeque<Pubkey> = VecDeque::new();
+    #[cfg(feature = "crate_health")]
+    let mut oracle_detect_pending: HashMap<Pubkey, DetectWork> = HashMap::new();
+    #[cfg(feature = "crate_health")]
+    let mut oracle_dependency_updates: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut oracle_candidate_hits: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut oracle_enqueued: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut oracle_coalesced: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut oracle_price_fallbacks: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut oracle_max_pending: usize = 0;
+    #[cfg(feature = "crate_health")]
     let mut integration_probe_expected: HashSet<Pubkey> = HashSet::new();
     #[cfg(feature = "crate_health")]
     let mut integration_probe_queue: VecDeque<(Pubkey, u64)> = VecDeque::new();
@@ -1013,13 +1042,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         #[cfg(feature = "crate_health")]
-        let mut detect = detect_queue.pop_front().or_else(|| {
-            next_integration_probe(
-                &mut integration_probe_queue,
-                !projection_pending.is_empty(),
-                clock.now_ns(),
-            )
-        });
+        let mut detect = detect_queue
+            .pop_front()
+            .or_else(|| next_oracle_detect(&mut oracle_detect_order, &mut oracle_detect_pending))
+            .or_else(|| {
+                next_integration_probe(
+                    &mut integration_probe_queue,
+                    !projection_pending.is_empty(),
+                    clock.now_ns(),
+                )
+            });
         #[cfg(not(feature = "crate_health"))]
         let mut detect = None;
 
@@ -1446,6 +1478,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "crate_health")]
         if st.run_state().is_tradable() {
             if let Some((dependency, t_rx_ns, event_slot)) = dependency_update {
+                oracle_dependency_updates = oracle_dependency_updates.saturating_add(1);
                 let now_s = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs() as i64)
@@ -1476,6 +1509,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                             Err(e) => {
+                                oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
                                 eprintln!(
                                     "oracle_trigger_price_fallback: dependency={} bank={} error={}",
                                     dependency, bank, e
@@ -1487,16 +1521,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         candidates.extend(all_accounts);
                     }
                 }
+
+                oracle_candidate_hits =
+                    oracle_candidate_hits.saturating_add(candidates.len() as u64);
                 let mut candidates: Vec<Pubkey> = candidates.into_iter().collect();
                 candidates.sort_unstable_by_key(|pk| pk.to_bytes());
-                for account in candidates.into_iter().rev() {
-                    detect_queue.push_front((
-                        account,
-                        t_rx_ns,
-                        event_slot,
-                        "oracle_threshold",
-                    ));
+                for account in candidates {
+                    let work = (account, t_rx_ns, event_slot, "oracle_threshold");
+                    if let Some(existing) = oracle_detect_pending.get_mut(&account) {
+                        // Coalesce repeated price events for the same account, but preserve the
+                        // newest ingress timestamp/slot so freshness is measured from the latest
+                        // state transition rather than a stale queued event.
+                        *existing = work;
+                        oracle_coalesced = oracle_coalesced.saturating_add(1);
+                    } else {
+                        oracle_detect_order.push_back(account);
+                        oracle_detect_pending.insert(account, work);
+                        oracle_enqueued = oracle_enqueued.saturating_add(1);
+                    }
                 }
+                oracle_max_pending = oracle_max_pending.max(oracle_detect_pending.len());
             }
         }
 
@@ -1898,6 +1942,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             last_reported_update_total = update_total;
             eprintln!("updates: accounts={} banks={} groups={} fee={} liqrec={} unknown={} channel={:?}",
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
+            #[cfg(feature = "crate_health")]
+            eprintln!(
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={}",
+                threshold_ready,
+                threshold_index.tracked_accounts(),
+                threshold_fallback.len(),
+                threshold_bootstrap.len(),
+                oracle_dependency_updates,
+                oracle_candidate_hits,
+                oracle_enqueued,
+                oracle_coalesced,
+                oracle_price_fallbacks,
+                oracle_detect_pending.len(),
+                oracle_max_pending,
+                detect_queue.len()
+            );
         }
     }
     // [FIX-46] Letzten (Teil-)Tag beim regulären Shutdown schreiben, damit das Ledger vollständig ist.
@@ -1922,6 +1982,33 @@ mod integration_probe_tests {
         assert_eq!(next_integration_probe(&mut queue, false, 9_000),
             Some((account, 9_000, 42, "integration_target_probe")));
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn oracle_detect_returns_latest_coalesced_work_once() {
+        let a = Pubkey::new_unique();
+        let mut order = VecDeque::from([a]);
+        let mut pending = HashMap::from([
+            (a, (a, 200, 9, "oracle_threshold"))
+        ]);
+        assert_eq!(
+            next_oracle_detect(&mut order, &mut pending),
+            Some((a, 200, 9, "oracle_threshold"))
+        );
+        assert!(pending.is_empty());
+        assert!(next_oracle_detect(&mut order, &mut pending).is_none());
+    }
+
+    #[test]
+    fn oracle_detect_skips_stale_order_entries() {
+        let stale = Pubkey::new_unique();
+        let live = Pubkey::new_unique();
+        let mut order = VecDeque::from([stale, live]);
+        let mut pending = HashMap::from([
+            (live, (live, 300, 10, "oracle_threshold"))
+        ]);
+        assert_eq!(next_oracle_detect(&mut order, &mut pending).unwrap().0, live);
+        assert!(order.is_empty());
     }
 
     #[test]
