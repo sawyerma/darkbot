@@ -1,0 +1,44 @@
+{
+  "run": "R126b",
+  "date": "2026-10-05",
+  "protocol": "mrgn-0.1.11-rc1",
+  "transactions_sent": 0,
+  "live_enabled": false,
+  "verdict": "FAIL",
+  "threshold": {
+    "ready": true,
+    "tracked": 77756,
+    "fallback": 229
+  },
+  "oracle": {
+    "dependency_updates": 830,
+    "candidate_hits": 994177,
+    "candidates_per_update": 1197.8,
+    "pending_final": 74005,
+    "max_pending": 78214,
+    "r125b_max_pending_baseline": 6578,
+    "price_fallbacks": 1922,
+    "coalesced": 797256,
+    "oracle_threshold_records": 246458
+  },
+  "bank_projection": {
+    "submitted": 648,
+    "ready": 513,
+    "failed": 117,
+    "stale": 11,
+    "ready_ratio": 0.8,
+    "fallback_lines": 131
+  },
+  "ingress": {
+    "max_overflow_counter": 0,
+    "sink_overflow_lines": 0,
+    "backlog_final": 6
+  },
+  "assessment": [
+    "R126b scheduler fairness fixed the ingress starvation observed in R126: no sink-overflow reconnects and final ingress backlog was 6.",
+    "The dominant failure moved to candidate fanout: 994177 candidate hits for 830 dependency updates and max_pending 78214.",
+    "Bank projection is viable but not sufficient as the primary fanout-control mechanism: 513/641 terminal projections were ready (~80%).",
+    "The current threshold query repeatedly wakes accounts already beyond their stored threshold; a pure crossing-index replacement was considered but is not safe by itself because thresholds depend on other bank prices."
+  ],
+  "decision": "Do not qualify R126b. For the first-euro/long-tail path, pivot to eva01-style affected-bank account collection plus exact health evaluation; retain threshold-index work only as a later race optimization after correctness/performance proof."
+}
