@@ -1,9 +1,10 @@
 //! P3: Health-Engine = offizielles `marginfi`-Crate (Apache-2.0). **Keine eigene Formel.**
 //!
-//! API aus `programs/marginfi/src/state/marginfi_account.rs` (main, 0.1.11), BELEGT:
+//! API aus dem gepinnten Marginfi-0.1.12-Source, BELEGT:
 //! ```text
 //! get_health_components(&MarginfiAccount, &MarginfiGroup, &[AccountInfo], RequirementType,
-//!                       &mut Option<&mut HealthCache>, HealthPriceMode) -> Result<(I80F48 assets, I80F48 liabs)>
+//!                       &mut Option<&mut HealthCache>, HealthPriceMode,
+//!                       &mut Option<&mut PremiumScratch>) -> Result<(I80F48 assets, I80F48 liabs)>
 //! HealthPriceMode::Client(Clock)   ← Off-Chain-Modus mit eigener Clock
 //! RequirementType::{Initial, Maintenance, Equity}
 //! ```
@@ -14,7 +15,8 @@
 //! remaining_accounts: aktive Banks **absteigend** nach Pubkey, je Bank `bank` + Oracle-/Integrations-
 //! Accounts gemäß `crate_impl::bank_observation_keys` (= p0-cli::bank_observation_keys).
 //!
-//! Status: Feature `crate_health` — UNTESTED / VERIFY (Compile gegen Tag; Pyth-PDA-Ableitung).
+//! Status: Feature `crate_health` — compiler/unit-test qualified against pinned 0.1.12 source;
+//! Mainnet runtime qualification remains separate evidence.
 
 use crate::index::Side;
 use solana_sdk::pubkey::Pubkey;
@@ -157,7 +159,7 @@ pub mod crate_impl {
 
         /// [FIX-27] Observation-Accounts **exakt wie `p0-cli/src/utils.rs::bank_observation_keys`**
         /// (mrgn-0.1.11-rc1): Banks absteigend nach Pubkey; je Bank `bank` + Keys aus
-        /// `bank.config.oracle_keys` gemäß `OracleSetup`-Enum — keine eigene PDA-Ableitung, keine u8-Magie.
+        /// `bank.config.oracle_keys` gemäß gepinntem `OracleSetup`-Enum — keine u8-Magie.
         pub fn observation(&self, acc: &MarginfiAccount) -> Result<Vec<Pubkey>, HealthError> {
             let mut banks: Vec<Pubkey> = acc.lending_account.balances.iter().filter(|b| b.is_active()).map(|b| b.bank_pk).collect();
             banks.sort_by(|a, b| b.cmp(a));
