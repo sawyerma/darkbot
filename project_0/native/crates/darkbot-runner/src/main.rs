@@ -32,7 +32,9 @@ use darkbot_runner::pending::PendingSubmission;
 use darkbot_runner::record::Decision;
 use darkbot_runner::shadow_ledger::ShadowLedger;
 use darkbot_runner::winner::{race_outcome, RaceOutcome};
-use darkbot_runner::remote_workers::{ProjectionWork, RemoteWorkers, ReconcileWork, WinnerWatch};
+use darkbot_runner::remote_workers::{
+    OraclePriceProjectionWork, ProjectionWork, RemoteWorkers, ReconcileWork, WinnerWatch,
+};
 use darkbot_solana::ingress::SlotWatch;
 use darkbot_solana::state::blockhash::BlockhashCache;
 use darkbot_solana::submit::rpc::RpcSubmitter;
@@ -102,6 +104,37 @@ fn next_oracle_detect(
         }
     }
     None
+}
+
+#[cfg(feature = "crate_health")]
+fn enqueue_oracle_accounts(
+    accounts: impl IntoIterator<Item = Pubkey>,
+    t_rx_ns: u64,
+    event_slot: u64,
+    order: &mut VecDeque<Pubkey>,
+    pending: &mut HashMap<Pubkey, DetectWork>,
+    enqueued: &mut u64,
+    coalesced: &mut u64,
+    max_pending: &mut usize,
+) -> usize {
+    let mut unique = HashSet::new();
+    unique.extend(accounts);
+    let count = unique.len();
+    let mut accounts: Vec<Pubkey> = unique.into_iter().collect();
+    accounts.sort_unstable_by_key(|pk| pk.to_bytes());
+    for account in accounts {
+        let work = (account, t_rx_ns, event_slot, "oracle_threshold");
+        if let Some(existing) = pending.get_mut(&account) {
+            *existing = work;
+            *coalesced = coalesced.saturating_add(1);
+        } else {
+            order.push_back(account);
+            pending.insert(account, work);
+            *enqueued = enqueued.saturating_add(1);
+        }
+    }
+    *max_pending = (*max_pending).max(pending.len());
+    count
 }
 
 #[cfg(not(feature = "crate_health"))]
@@ -715,6 +748,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "crate_health")]
     let mut oracle_max_pending: usize = 0;
     #[cfg(feature = "crate_health")]
+    let mut oracle_bank_projection_pending: HashMap<Pubkey, (u64, u64)> = HashMap::new();
+    #[cfg(feature = "crate_health")]
+    let mut oracle_bank_projection_submitted: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut oracle_bank_projection_ready: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut oracle_bank_projection_failed: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut oracle_bank_projection_stale: u64 = 0;
+    #[cfg(feature = "crate_health")]
     let mut integration_probe_expected: HashSet<Pubkey> = HashSet::new();
     #[cfg(feature = "crate_health")]
     let mut integration_probe_queue: VecDeque<(Pubkey, u64)> = VecDeque::new();
@@ -876,6 +919,164 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+
+        #[cfg(feature = "crate_health")]
+        while let Some(done) = remote.oracle_price_projection_results.try_pop() {
+            let latest = oracle_bank_projection_pending.remove(&done.bank);
+            let all_accounts: Vec<Pubkey> =
+                reverse_index.accounts_for_bank(&done.bank).copied().collect();
+            let fallback_all = |reason: &str,
+                                oracle_price_fallbacks: &mut u64,
+                                oracle_candidate_hits: &mut u64,
+                                oracle_enqueued: &mut u64,
+                                oracle_coalesced: &mut u64,
+                                oracle_max_pending: &mut usize,
+                                oracle_detect_order: &mut VecDeque<Pubkey>,
+                                oracle_detect_pending: &mut HashMap<Pubkey, DetectWork>| {
+                *oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
+                let (t_rx_ns, event_slot) = latest.unwrap_or((clock.now_ns(), done.base_slot));
+                let count = enqueue_oracle_accounts(
+                    all_accounts.iter().copied(),
+                    t_rx_ns,
+                    event_slot,
+                    oracle_detect_order,
+                    oracle_detect_pending,
+                    oracle_enqueued,
+                    oracle_coalesced,
+                    oracle_max_pending,
+                );
+                *oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
+                eprintln!(
+                    "oracle_bank_projection_fallback: bank={} reason={} accounts={}",
+                    done.bank, reason, count
+                );
+            };
+
+            match done.result {
+                Ok((projection_slot, projection_unix_s, accounts, _units)) => {
+                    let canonical_matches = st
+                        .get(&done.bank)
+                        .map(|r| r.slot == done.base_slot && hash(&r.data) == done.base_bank_hash)
+                        .unwrap_or(false);
+                    let newest_event_slot = latest.map(|(_, slot)| slot).unwrap_or(done.base_slot);
+                    if !canonical_matches || projection_slot < newest_event_slot {
+                        oracle_bank_projection_stale =
+                            oracle_bank_projection_stale.saturating_add(1);
+                        fallback_all(
+                            if !canonical_matches {
+                                "canonical bank changed"
+                            } else {
+                                "projection older than newest dependency update"
+                            },
+                            &mut oracle_price_fallbacks,
+                            &mut oracle_candidate_hits,
+                            &mut oracle_enqueued,
+                            &mut oracle_coalesced,
+                            &mut oracle_max_pending,
+                            &mut oracle_detect_order,
+                            &mut oracle_detect_pending,
+                        );
+                        continue;
+                    }
+
+                    let view = StateView(&st);
+                    match darkbot_project0::projection::ProjectedState::new(
+                        &view,
+                        projection_slot,
+                        projection_unix_s,
+                        accounts,
+                    ) {
+                        Ok(projected) => {
+                            let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                                state: &projected,
+                                group,
+                            };
+                            match engine.maintenance_risk_price_bits(
+                                &done.bank,
+                                projection_unix_s,
+                                projection_slot,
+                            ) {
+                                Ok((asset_price, liability_price)) => {
+                                    let mut candidates: HashSet<Pubkey> = threshold_index
+                                        .candidates(
+                                            &done.bank,
+                                            asset_price,
+                                            liability_price,
+                                            0,
+                                        )
+                                        .into_iter()
+                                        .collect();
+                                    candidates.extend(
+                                        all_accounts
+                                            .iter()
+                                            .copied()
+                                            .filter(|a| threshold_fallback.contains(a)),
+                                    );
+                                    let (t_rx_ns, event_slot) =
+                                        latest.unwrap_or((clock.now_ns(), projection_slot));
+                                    let count = enqueue_oracle_accounts(
+                                        candidates,
+                                        t_rx_ns,
+                                        event_slot,
+                                        &mut oracle_detect_order,
+                                        &mut oracle_detect_pending,
+                                        &mut oracle_enqueued,
+                                        &mut oracle_coalesced,
+                                        &mut oracle_max_pending,
+                                    );
+                                    oracle_candidate_hits =
+                                        oracle_candidate_hits.saturating_add(count as u64);
+                                    oracle_bank_projection_ready =
+                                        oracle_bank_projection_ready.saturating_add(1);
+                                }
+                                Err(e) => {
+                                    oracle_bank_projection_failed =
+                                        oracle_bank_projection_failed.saturating_add(1);
+                                    fallback_all(
+                                        &format!("projected price error: {e}"),
+                                        &mut oracle_price_fallbacks,
+                                        &mut oracle_candidate_hits,
+                                        &mut oracle_enqueued,
+                                        &mut oracle_coalesced,
+                                        &mut oracle_max_pending,
+                                        &mut oracle_detect_order,
+                                        &mut oracle_detect_pending,
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            oracle_bank_projection_failed =
+                                oracle_bank_projection_failed.saturating_add(1);
+                            fallback_all(
+                                &format!("projected state invalid: {e}"),
+                                &mut oracle_price_fallbacks,
+                                &mut oracle_candidate_hits,
+                                &mut oracle_enqueued,
+                                &mut oracle_coalesced,
+                                &mut oracle_max_pending,
+                                &mut oracle_detect_order,
+                                &mut oracle_detect_pending,
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    oracle_bank_projection_failed =
+                        oracle_bank_projection_failed.saturating_add(1);
+                    fallback_all(
+                        &format!("simulation failed: {e}"),
+                        &mut oracle_price_fallbacks,
+                        &mut oracle_candidate_hits,
+                        &mut oracle_enqueued,
+                        &mut oracle_coalesced,
+                        &mut oracle_max_pending,
+                        &mut oracle_detect_order,
+                        &mut oracle_detect_pending,
+                    );
+                }
+            }
+        }
 
         #[cfg(feature = "crate_health")]
         while let Some(done) = remote.projection_results.try_pop() {
@@ -1509,12 +1710,131 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                             Err(e) => {
-                                oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
-                                eprintln!(
-                                    "oracle_trigger_price_fallback: dependency={} bank={} error={}",
-                                    dependency, bank, e
-                                );
-                                candidates.extend(all_accounts);
+                                // [R126] Integration pricing may be stale in canonical state even
+                                // though the exact pre-Start refresh is deterministic. Project one
+                                // Bank refresh once, then threshold-select accounts from that fresh
+                                // pricing state instead of waking the whole Bank immediately.
+                                if let Some(existing) = oracle_bank_projection_pending.get_mut(&bank) {
+                                    *existing = (t_rx_ns, event_slot);
+                                    eprintln!(
+                                        "oracle_bank_projection_coalesced: dependency={} bank={} error={}",
+                                        dependency, bank, e
+                                    );
+                                } else {
+                                    let Some(bank_record) = st.get(&bank) else {
+                                        oracle_price_fallbacks =
+                                            oracle_price_fallbacks.saturating_add(1);
+                                        candidates.extend(all_accounts);
+                                        continue;
+                                    };
+                                    let Some(bank_state) = bank_from_state(&view, &program, &bank) else {
+                                        oracle_price_fallbacks =
+                                            oracle_price_fallbacks.saturating_add(1);
+                                        candidates.extend(all_accounts);
+                                        continue;
+                                    };
+                                    let refreshes =
+                                        match darkbot_project0::integration::refresh_plan_for_bank(
+                                            &view,
+                                            &bank_state,
+                                        ) {
+                                            Ok(v) if !v.is_empty() => v,
+                                            Ok(_) => {
+                                                oracle_price_fallbacks =
+                                                    oracle_price_fallbacks.saturating_add(1);
+                                                candidates.extend(all_accounts);
+                                                continue;
+                                            }
+                                            Err(refresh_error) => {
+                                                oracle_price_fallbacks =
+                                                    oracle_price_fallbacks.saturating_add(1);
+                                                eprintln!(
+                                                    "oracle_bank_projection_plan_fallback: dependency={} bank={} price_error={} refresh_error={}",
+                                                    dependency, bank, e, refresh_error
+                                                );
+                                                candidates.extend(all_accounts);
+                                                continue;
+                                            }
+                                        };
+                                    let targets =
+                                        darkbot_project0::projection::projection_targets(&refreshes);
+                                    if targets.is_empty() {
+                                        oracle_price_fallbacks =
+                                            oracle_price_fallbacks.saturating_add(1);
+                                        candidates.extend(all_accounts);
+                                        continue;
+                                    }
+                                    let Some(bh) = blockhash.fresh(clock.now_ns(), 30_000_000_000) else {
+                                        oracle_price_fallbacks =
+                                            oracle_price_fallbacks.saturating_add(1);
+                                        candidates.extend(all_accounts);
+                                        continue;
+                                    };
+                                    let projection_plan = tx::TxPlan {
+                                        version: tx::BuildVersion::V0,
+                                        payer: liquidator,
+                                        instructions: refreshes,
+                                        lookup_tables: vec![],
+                                        resources,
+                                    };
+                                    let mut built = match tx::build(
+                                        &projection_plan,
+                                        bh.hash,
+                                        &TxLimits::default(),
+                                    ) {
+                                        Ok(v) => v,
+                                        Err(build_error) => {
+                                            oracle_price_fallbacks =
+                                                oracle_price_fallbacks.saturating_add(1);
+                                            eprintln!(
+                                                "oracle_bank_projection_build_fallback: dependency={} bank={} error={}",
+                                                dependency, bank, build_error
+                                            );
+                                            candidates.extend(all_accounts);
+                                            continue;
+                                        }
+                                    };
+                                    if let Err(sign_error) = tx::sign(&mut built, &[&payer]) {
+                                        oracle_price_fallbacks =
+                                            oracle_price_fallbacks.saturating_add(1);
+                                        eprintln!(
+                                            "oracle_bank_projection_sign_fallback: dependency={} bank={} error={}",
+                                            dependency, bank, sign_error
+                                        );
+                                        candidates.extend(all_accounts);
+                                        continue;
+                                    }
+                                    let work = OraclePriceProjectionWork {
+                                        bank,
+                                        base_slot: bank_record.slot,
+                                        base_bank_hash: hash(&bank_record.data),
+                                        tx: built.tx,
+                                        targets,
+                                    };
+                                    match remote.oracle_price_projection_jobs.try_push(work) {
+                                        Ok(()) => {
+                                            oracle_bank_projection_pending
+                                                .insert(bank, (t_rx_ns, event_slot));
+                                            oracle_bank_projection_submitted =
+                                                oracle_bank_projection_submitted.saturating_add(1);
+                                            eprintln!(
+                                                "oracle_bank_projection_pending: dependency={} bank={} price_error={}",
+                                                dependency, bank, e
+                                            );
+                                        }
+                                        Err(ChannelError::Full(_)) => {
+                                            oracle_price_fallbacks =
+                                                oracle_price_fallbacks.saturating_add(1);
+                                            candidates.extend(all_accounts);
+                                        }
+                                        Err(ChannelError::Disconnected(_)) => {
+                                            return Err(
+                                                "oracle price projection RPC worker disconnected"
+                                                    .into(),
+                                            );
+                                        }
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -1522,25 +1842,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
 
+                let count = enqueue_oracle_accounts(
+                    candidates,
+                    t_rx_ns,
+                    event_slot,
+                    &mut oracle_detect_order,
+                    &mut oracle_detect_pending,
+                    &mut oracle_enqueued,
+                    &mut oracle_coalesced,
+                    &mut oracle_max_pending,
+                );
                 oracle_candidate_hits =
-                    oracle_candidate_hits.saturating_add(candidates.len() as u64);
-                let mut candidates: Vec<Pubkey> = candidates.into_iter().collect();
-                candidates.sort_unstable_by_key(|pk| pk.to_bytes());
-                for account in candidates {
-                    let work = (account, t_rx_ns, event_slot, "oracle_threshold");
-                    if let Some(existing) = oracle_detect_pending.get_mut(&account) {
-                        // Coalesce repeated price events for the same account, but preserve the
-                        // newest ingress timestamp/slot so freshness is measured from the latest
-                        // state transition rather than a stale queued event.
-                        *existing = work;
-                        oracle_coalesced = oracle_coalesced.saturating_add(1);
-                    } else {
-                        oracle_detect_order.push_back(account);
-                        oracle_detect_pending.insert(account, work);
-                        oracle_enqueued = oracle_enqueued.saturating_add(1);
-                    }
-                }
-                oracle_max_pending = oracle_max_pending.max(oracle_detect_pending.len());
+                    oracle_candidate_hits.saturating_add(count as u64);
             }
         }
 
@@ -1944,7 +2257,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
             #[cfg(feature = "crate_health")]
             eprintln!(
-                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={}",
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={}",
                 threshold_ready,
                 threshold_index.tracked_accounts(),
                 threshold_fallback.len(),
@@ -1956,7 +2269,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 oracle_price_fallbacks,
                 oracle_detect_pending.len(),
                 oracle_max_pending,
-                detect_queue.len()
+                detect_queue.len(),
+                oracle_bank_projection_pending.len(),
+                oracle_bank_projection_submitted,
+                oracle_bank_projection_ready,
+                oracle_bank_projection_failed,
+                oracle_bank_projection_stale
             );
         }
     }
