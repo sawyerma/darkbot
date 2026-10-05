@@ -15,7 +15,7 @@ use darkbot_project0::health::{AccountSource, HealthEngine, HealthError};
 #[cfg(feature = "crate_health")]
 use darkbot_project0::health::crate_impl::bank_observation_keys;
 #[cfg(feature = "crate_health")]
-use darkbot_project0::index::ReverseIndex;
+use darkbot_project0::index::{ReverseIndex, ThresholdIndex};
 use darkbot_project0::economics::{FailedCostMatrix, Path};
 use darkbot_project0::execution::Freshness;
 use darkbot_project0::planner::Allowlist;
@@ -49,7 +49,7 @@ use solana_sdk::{account::Account, hash::{hash, Hash}, pubkey::Pubkey};
 #[cfg(feature = "crate_health")]
 use marginfi_type_crate::{
     constants::{ASSET_TAG_DEFAULT, ASSET_TAG_SOL},
-    types::{Bank, BankOperationalState, MarginfiAccount},
+    types::{BalanceSide, Bank, BankOperationalState, MarginfiAccount},
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::FromStr;
@@ -228,6 +228,27 @@ fn active_banks_in_group_account(data: &[u8], group: &Pubkey) -> Option<Vec<Pubk
     banks.sort_unstable_by_key(|pk| pk.to_bytes());
     banks.dedup();
     Some(banks)
+}
+
+#[cfg(feature = "crate_health")]
+fn liability_account_in_group(data: &[u8], group: &Pubkey) -> bool {
+    if classify_account(data) != AccountType::MarginfiAccount {
+        return false;
+    }
+    let need = 8 + std::mem::size_of::<MarginfiAccount>();
+    if data.len() < need {
+        return false;
+    }
+    bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
+        .map(|account| {
+            account.group == *group
+                && account
+                    .lending_account
+                    .balances
+                    .iter()
+                    .any(|b| b.is_active() && b.get_side() == Some(BalanceSide::Liabilities))
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(feature = "crate_health")]
@@ -696,12 +717,66 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut program_upgrade_latched = false; // [FIX-131]
     #[cfg(feature = "crate_health")]
     let mut reverse_index = ReverseIndex::new(); // [FIX-133a]
+    #[cfg(feature = "crate_health")]
+    let mut threshold_index = ThresholdIndex::new(); // [FIX-133d]
+    #[cfg(feature = "crate_health")]
+    let mut threshold_fallback: HashSet<Pubkey> = HashSet::new();
+    #[cfg(feature = "crate_health")]
+    let mut threshold_bootstrap: VecDeque<Pubkey> = VecDeque::new();
+    #[cfg(feature = "crate_health")]
+    let threshold_bootstrap_batch: usize =
+        config::parsed_or("P0_THRESHOLD_BOOTSTRAP_BATCH", 16)?;
+    #[cfg(feature = "crate_health")]
+    if threshold_bootstrap_batch == 0 {
+        return Err("P0_THRESHOLD_BOOTSTRAP_BATCH must be > 0".into());
+    }
+    #[cfg(feature = "crate_health")]
+    let mut threshold_ready = false;
     loop {
         if shutdown.is_requested() {
             break;
         }
         if halt.is_raised() {
             st.halt(darkbot_common::error::HaltReason::FeedGap);
+        }
+
+        #[cfg(feature = "crate_health")]
+        if st.run_state().is_tradable() && !threshold_ready && !threshold_bootstrap.is_empty() {
+            let now_s = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let slot = slot_watch.get();
+            let view = StateView(&st);
+            let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                state: &view,
+                group,
+            };
+            for _ in 0..threshold_bootstrap_batch {
+                let Some(account) = threshold_bootstrap.pop_front() else { break };
+                match engine.thresholds(&account, now_s, slot) {
+                    Ok(t) => {
+                        threshold_index.set_account(account, &t.thresholds);
+                        threshold_fallback.remove(&account);
+                    }
+                    Err(e) => {
+                        threshold_index.remove_account(&account);
+                        threshold_fallback.insert(account);
+                        eprintln!(
+                            "threshold_bootstrap_fallback: account={} error={}",
+                            account, e
+                        );
+                    }
+                }
+            }
+            if threshold_bootstrap.is_empty() {
+                threshold_ready = true;
+                eprintln!(
+                    "threshold_index_ready: tracked={} fallback={}",
+                    threshold_index.tracked_accounts(),
+                    threshold_fallback.len()
+                );
+            }
         }
 
         // [FIX-108][R4] Apply completed remote work on the state thread, but never perform RPC here.
@@ -971,6 +1046,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             IngressEvent::Account(a) if classify_account(&a.data) == AccountType::MarginfiAccount => Some(a.pubkey),
             _ => None,
         };
+        #[cfg(feature = "crate_health")]
+        let dependency_update: Option<(Pubkey, u64, u64)> = match &ev {
+            IngressEvent::Account(a)
+                if classify_account(&a.data) == AccountType::Unknown
+                    && reverse_index.banks_for_oracle(&a.pubkey).next().is_some() =>
+            {
+                Some((a.pubkey, a.t_rx_ns, a.slot))
+            }
+            _ => None,
+        };
         if let IngressEvent::Account(a) = &ev {
             if a.pubkey == program_data && hash(&a.data) != program_data_baseline_hash {
                 if !program_upgrade_latched {
@@ -1019,9 +1104,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let (rebuilt, indexed_banks, indexed_accounts, unsupported_banks) =
                         rebuild_reverse_index(&st, &program, &group);
                     reverse_index = rebuilt;
+                    threshold_index = ThresholdIndex::new();
+                    threshold_fallback.clear();
+                    threshold_bootstrap.clear();
+                    for (pk, record) in st.iter_owned_by(&program) {
+                        if liability_account_in_group(&record.data, &group) {
+                            threshold_bootstrap.push_back(*pk);
+                        }
+                    }
+                    threshold_ready = threshold_bootstrap.is_empty();
                     eprintln!(
-                        "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={}",
-                        indexed_banks, indexed_accounts, unsupported_banks
+                        "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={}",
+                        indexed_banks, indexed_accounts, unsupported_banks, threshold_bootstrap.len()
                     );
                 }
 
@@ -1247,12 +1341,51 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             match st.get(&account_pk)
                 .and_then(|r| active_banks_in_group_account(&r.data, &group))
             {
-                Some(banks) => reverse_index.set_account_banks(account_pk, &banks),
-                None => reverse_index.remove_account(&account_pk),
+                Some(banks) => {
+                    reverse_index.set_account_banks(account_pk, &banks);
+                    let now_s = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let slot = st.get(&account_pk).map(|r| r.slot).unwrap_or(slot_watch.get());
+                    let view = StateView(&st);
+                    let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                        state: &view,
+                        group,
+                    };
+                    match engine.thresholds(&account_pk, now_s, slot) {
+                        Ok(t) => {
+                            threshold_index.set_account(account_pk, &t.thresholds);
+                            threshold_fallback.remove(&account_pk);
+                        }
+                        Err(e) => {
+                            threshold_index.remove_account(&account_pk);
+                            threshold_fallback.insert(account_pk);
+                            eprintln!(
+                                "threshold_account_fallback: account={} error={}",
+                                account_pk, e
+                            );
+                        }
+                    }
+                }
+                None => {
+                    reverse_index.remove_account(&account_pk);
+                    threshold_index.remove_account(&account_pk);
+                    threshold_fallback.remove(&account_pk);
+                }
             }
         }
         #[cfg(feature = "crate_health")]
         if let Some(bank_pk) = updated_bank {
+            let affected_accounts: Vec<Pubkey> =
+                reverse_index.accounts_for_bank(&bank_pk).copied().collect();
+            for account in affected_accounts {
+                threshold_index.remove_account(&account);
+                threshold_fallback.insert(account);
+                threshold_bootstrap.push_back(account);
+            }
+            threshold_ready = threshold_bootstrap.is_empty();
+
             let view = StateView(&st);
             match bank_from_state(&view, &program, &bank_pk).filter(|b| b.group == group) {
                 Some(bank) => match bank_observation_keys(&bank) {
@@ -1310,6 +1443,63 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
             }
         }
+        #[cfg(feature = "crate_health")]
+        if st.run_state().is_tradable() {
+            if let Some((dependency, t_rx_ns, event_slot)) = dependency_update {
+                let now_s = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                let view = StateView(&st);
+                let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                    state: &view,
+                    group,
+                };
+                let banks: Vec<Pubkey> =
+                    reverse_index.banks_for_oracle(&dependency).copied().collect();
+                let mut candidates: HashSet<Pubkey> = HashSet::new();
+                for bank in banks {
+                    let all_accounts: Vec<Pubkey> =
+                        reverse_index.accounts_for_bank(&bank).copied().collect();
+                    if threshold_ready {
+                        match engine.maintenance_risk_price_bits(&bank, now_s, event_slot) {
+                            Ok((asset_price, liability_price)) => {
+                                candidates.extend(
+                                    threshold_index
+                                        .candidates(&bank, asset_price, liability_price, 0)
+                                );
+                                candidates.extend(
+                                    all_accounts
+                                        .iter()
+                                        .copied()
+                                        .filter(|a| threshold_fallback.contains(a))
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "oracle_trigger_price_fallback: dependency={} bank={} error={}",
+                                    dependency, bank, e
+                                );
+                                candidates.extend(all_accounts);
+                            }
+                        }
+                    } else {
+                        candidates.extend(all_accounts);
+                    }
+                }
+                let mut candidates: Vec<Pubkey> = candidates.into_iter().collect();
+                candidates.sort_unstable_by_key(|pk| pk.to_bytes());
+                for account in candidates.into_iter().rev() {
+                    detect_queue.push_front((
+                        account,
+                        t_rx_ns,
+                        event_slot,
+                        "oracle_threshold",
+                    ));
+                }
+            }
+        }
+
         if program_upgrade_latched {
             st.halt(darkbot_common::error::HaltReason::ProgramUpgrade);
             detect = None;
