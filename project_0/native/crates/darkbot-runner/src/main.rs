@@ -111,6 +111,7 @@ fn enqueue_oracle_accounts(
     accounts: impl IntoIterator<Item = Pubkey>,
     t_rx_ns: u64,
     event_slot: u64,
+    trigger: &'static str,
     order: &mut VecDeque<Pubkey>,
     pending: &mut HashMap<Pubkey, DetectWork>,
     enqueued: &mut u64,
@@ -123,7 +124,7 @@ fn enqueue_oracle_accounts(
     let mut accounts: Vec<Pubkey> = unique.into_iter().collect();
     accounts.sort_unstable_by_key(|pk| pk.to_bytes());
     for account in accounts {
-        let work = (account, t_rx_ns, event_slot, "oracle_threshold");
+        let work = (account, t_rx_ns, event_slot, trigger);
         if let Some(existing) = pending.get_mut(&account) {
             *existing = work;
             *coalesced = coalesced.saturating_add(1);
@@ -803,7 +804,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("P0_THRESHOLD_BOOTSTRAP_BATCH must be > 0".into());
     }
     #[cfg(feature = "crate_health")]
-    let mut threshold_ready = false;
+    let use_threshold_trigger: bool =
+        config::parsed_or("P0_USE_THRESHOLD_TRIGGER", false)?;
+    #[cfg(feature = "crate_health")]
+    let mut threshold_ready = !use_threshold_trigger;
+    #[cfg(feature = "crate_health")]
+    let mut health_sweep_checks: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut health_sweep_healthy: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut health_sweep_liquidatable: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut health_sweep_errors: u64 = 0;
     // [R126b] Preserve canonical ingress under detection bursts. When both ingress and
     // detection work are available, drain at most this many ingress events before forcing
     // one detection item. This prevents either side from starving the other.
@@ -825,7 +837,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         #[cfg(feature = "crate_health")]
-        if st.run_state().is_tradable() && !threshold_ready && !threshold_bootstrap.is_empty() {
+        if use_threshold_trigger
+            && st.run_state().is_tradable()
+            && !threshold_ready
+            && !threshold_bootstrap.is_empty()
+        {
             let now_s = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
@@ -1034,6 +1050,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         candidates,
                                         t_rx_ns,
                                         event_slot,
+                                        "oracle_threshold",
                                         &mut oracle_detect_order,
                                         &mut oracle_detect_pending,
                                         &mut oracle_enqueued,
@@ -1296,10 +1313,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 _ => None,
             };
         // [FIX-35] Bank-Pubkey merken; die Dependency-Prüfung läuft NACH dem Anwenden des Updates.
-        let updated_bank: Option<Pubkey> = match &ev {
-            IngressEvent::Account(a) if classify_account(&a.data) == AccountType::Bank => Some(a.pubkey),
+        let updated_bank_event: Option<(Pubkey, u64, u64)> = match &ev {
+            IngressEvent::Account(a) if classify_account(&a.data) == AccountType::Bank => {
+                Some((a.pubkey, a.t_rx_ns, a.slot))
+            }
             _ => None,
         };
+        let updated_bank: Option<Pubkey> = updated_bank_event.map(|(pk, _, _)| pk);
         #[cfg(feature = "crate_health")]
         let updated_marginfi_account: Option<Pubkey> = match &ev {
             IngressEvent::Account(a) if classify_account(&a.data) == AccountType::MarginfiAccount => Some(a.pubkey),
@@ -1366,16 +1386,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     threshold_index = ThresholdIndex::new();
                     threshold_fallback.clear();
                     threshold_bootstrap.clear();
-                    for (pk, record) in st.iter_owned_by(&program) {
-                        if liability_account_in_group(&record.data, &group) {
-                            threshold_bootstrap.push_back(*pk);
+                    if use_threshold_trigger {
+                        for (pk, record) in st.iter_owned_by(&program) {
+                            if liability_account_in_group(&record.data, &group) {
+                                threshold_bootstrap.push_back(*pk);
+                            }
                         }
+                        threshold_ready = threshold_bootstrap.is_empty();
+                    } else {
+                        threshold_ready = true;
                     }
-                    threshold_ready = threshold_bootstrap.is_empty();
                     eprintln!(
-                        "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={}",
-                        indexed_banks, indexed_accounts, unsupported_banks, threshold_bootstrap.len()
+                        "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={} threshold_trigger={}",
+                        indexed_banks, indexed_accounts, unsupported_banks, threshold_bootstrap.len(), use_threshold_trigger
                     );
+                    if !use_threshold_trigger {
+                        eprintln!(
+                            "r127_health_sweep_ready: reverse_accounts={} threshold_trigger=false",
+                            indexed_accounts
+                        );
+                    }
                 }
 
                 #[cfg(feature = "crate_health")]
@@ -1602,6 +1632,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             {
                 Some(banks) => {
                     reverse_index.set_account_banks(account_pk, &banks);
+                    if !use_threshold_trigger {
+                        // R127 Long-Tail admission uses targeted exact-health sweeps.
+                    } else {
                     let now_s = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs() as i64)
@@ -1626,11 +1659,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             );
                         }
                     }
+                    }
                 }
                 None => {
                     reverse_index.remove_account(&account_pk);
-                    threshold_index.remove_account(&account_pk);
-                    threshold_fallback.remove(&account_pk);
+                    if use_threshold_trigger {
+                        threshold_index.remove_account(&account_pk);
+                        threshold_fallback.remove(&account_pk);
+                    }
                 }
             }
         }
@@ -1638,12 +1674,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(bank_pk) = updated_bank {
             let affected_accounts: Vec<Pubkey> =
                 reverse_index.accounts_for_bank(&bank_pk).copied().collect();
-            for account in affected_accounts {
-                threshold_index.remove_account(&account);
-                threshold_fallback.insert(account);
-                threshold_bootstrap.push_back(account);
+            if use_threshold_trigger {
+                for account in affected_accounts.iter().copied() {
+                    threshold_index.remove_account(&account);
+                    threshold_fallback.insert(account);
+                    threshold_bootstrap.push_back(account);
+                }
+                threshold_ready = threshold_bootstrap.is_empty();
+            } else if let Some((_, t_rx_ns, event_slot)) = updated_bank_event {
+                let count = enqueue_oracle_accounts(
+                    affected_accounts,
+                    t_rx_ns,
+                    event_slot,
+                    "bank_update_sweep",
+                    &mut oracle_detect_order,
+                    &mut oracle_detect_pending,
+                    &mut oracle_enqueued,
+                    &mut oracle_coalesced,
+                    &mut oracle_max_pending,
+                );
+                oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
             }
-            threshold_ready = threshold_bootstrap.is_empty();
 
             let view = StateView(&st);
             match bank_from_state(&view, &program, &bank_pk).filter(|b| b.group == group) {
@@ -1717,6 +1768,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 let banks: Vec<Pubkey> =
                     reverse_index.banks_for_oracle(&dependency).copied().collect();
+
+                if !use_threshold_trigger {
+                    let mut candidates: HashSet<Pubkey> = HashSet::new();
+                    for bank in banks {
+                        candidates.extend(reverse_index.accounts_for_bank(&bank).copied());
+                    }
+                    let count = enqueue_oracle_accounts(
+                        candidates,
+                        t_rx_ns,
+                        event_slot,
+                        "oracle_bank_sweep",
+                        &mut oracle_detect_order,
+                        &mut oracle_detect_pending,
+                        &mut oracle_enqueued,
+                        &mut oracle_coalesced,
+                        &mut oracle_max_pending,
+                    );
+                    oracle_candidate_hits =
+                        oracle_candidate_hits.saturating_add(count as u64);
+                } else {
                 let mut candidates: HashSet<Pubkey> = HashSet::new();
                 for bank in banks {
                     let all_accounts: Vec<Pubkey> =
@@ -1872,6 +1943,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     candidates,
                     t_rx_ns,
                     event_slot,
+                    "oracle_threshold",
                     &mut oracle_detect_order,
                     &mut oracle_detect_pending,
                     &mut oracle_enqueued,
@@ -1880,6 +1952,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 oracle_candidate_hits =
                     oracle_candidate_hits.saturating_add(count as u64);
+                }
             }
         }
 
@@ -1918,6 +1991,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Health über das Crate (Feature crate_health), sonst fail-closed NoHealth → Unavailable-Record.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             let view = StateView(&st);
+
+            // [R127] Simple/robust Long-Tail admission, matching eva01's affected-Bank model:
+            // before any integration projection/routing/sizing, run exact canonical Marginfi
+            // Maintenance health. Healthy accounts stop here. Stale/unknown health remains
+            // fail-closed and continues to the existing refresh/projection path.
+            #[cfg(feature = "crate_health")]
+            if matches!(trigger, "oracle_bank_sweep" | "bank_update_sweep") {
+                health_sweep_checks = health_sweep_checks.saturating_add(1);
+                let sweep_engine = darkbot_project0::health::crate_impl::CrateHealth {
+                    state: &view,
+                    group,
+                };
+                match sweep_engine.health(&acct, now as i64, slot) {
+                    Ok(h) if !h.liquidatable => {
+                        health_sweep_healthy = health_sweep_healthy.saturating_add(1);
+                        continue;
+                    }
+                    Ok(_) => {
+                        health_sweep_liquidatable =
+                            health_sweep_liquidatable.saturating_add(1);
+                    }
+                    Err(_) => {
+                        health_sweep_errors = health_sweep_errors.saturating_add(1);
+                    }
+                }
+            }
 
             // [FIX-111][R6] Integration refreshes are projected by an isolated RPC worker first.
             // The returned account set is one-shot: only the exact candidate account state that
@@ -2308,7 +2407,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
             #[cfg(feature = "crate_health")]
             eprintln!(
-                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={}",
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={}",
                 threshold_ready,
                 threshold_index.tracked_accounts(),
                 threshold_fallback.len(),
@@ -2327,7 +2426,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 oracle_bank_projection_failed,
                 oracle_bank_projection_stale,
                 consumer.stats().sent.saturating_sub(consumer.stats().received),
-                ingress_since_detect
+                ingress_since_detect,
+                use_threshold_trigger,
+                health_sweep_checks,
+                health_sweep_healthy,
+                health_sweep_liquidatable,
+                health_sweep_errors
             );
         }
     }
