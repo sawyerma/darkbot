@@ -29,8 +29,7 @@ use crate::inclusion::transport::{
     bind_accepted_tls,
 };
 
-pub const Q5A_TLS_EVIDENCE_PATH: &str =
-    "bsc/native/evidence/q5a/q5a-both-20261005T203919Z.json";
+pub const Q5A_TLS_EVIDENCE_PATH: &str = "bsc/native/evidence/q5a/q5a-both-20261005T203919Z.json";
 pub const Q5A_TLS_EVIDENCE_SHA256: &str =
     "e2c537765f539f7551d89613c337d2079820731b77a531b7306a14fe4c845849";
 pub const Q5A_TLS_QUALIFICATION_GENERATION: u64 = 1;
@@ -75,19 +74,33 @@ impl fmt::Display for TlsQualificationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnboundAdapter => f.write_str("tls qualification: adapter is not bound"),
-            Self::UnsupportedAdapter => f.write_str("tls qualification: adapter kind was not qualified by Q5A"),
-            Self::HandoffBoundaryMismatch => f.write_str("tls qualification: capability handoff boundary differs"),
+            Self::UnsupportedAdapter => {
+                f.write_str("tls qualification: adapter kind was not qualified by Q5A")
+            }
+            Self::HandoffBoundaryMismatch => {
+                f.write_str("tls qualification: capability handoff boundary differs")
+            }
             Self::NoConnection => f.write_str("tls qualification: no established connection"),
-            Self::ConnectionNotReady(state) => write!(f, "tls qualification: connection is not ready ({state:?})"),
-            Self::ImplementationMismatch => f.write_str("tls qualification: transport implementation differs"),
+            Self::ConnectionNotReady(state) => {
+                write!(f, "tls qualification: connection is not ready ({state:?})")
+            }
+            Self::ImplementationMismatch => {
+                f.write_str("tls qualification: transport implementation differs")
+            }
             Self::HostMismatch => f.write_str("tls qualification: endpoint host differs"),
             Self::PortMismatch => f.write_str("tls qualification: endpoint port differs"),
             Self::PolicyMismatch => f.write_str("tls qualification: TLS policy differs"),
             Self::TargetMismatch => f.write_str("tls qualification: target platform differs"),
-            Self::ConnectionGenerationInvalid => f.write_str("tls qualification: connection generation is invalid"),
+            Self::ConnectionGenerationInvalid => {
+                f.write_str("tls qualification: connection generation is invalid")
+            }
             Self::PeerMismatch => f.write_str("tls qualification: connected peer differs"),
-            Self::TlsVersionMismatch => f.write_str("tls qualification: negotiated TLS version differs"),
-            Self::CipherSuiteMismatch => f.write_str("tls qualification: negotiated cipher suite differs"),
+            Self::TlsVersionMismatch => {
+                f.write_str("tls qualification: negotiated TLS version differs")
+            }
+            Self::CipherSuiteMismatch => {
+                f.write_str("tls qualification: negotiated cipher suite differs")
+            }
             Self::HttpMismatch => f.write_str("tls qualification: HTTP version differs"),
             Self::AlpnMismatch => f.write_str("tls qualification: ALPN selection differs"),
         }
@@ -125,7 +138,9 @@ fn binding(
     table: &AdapterTable,
     adapter: AdapterId,
 ) -> Result<(AdapterKind, HandoffBoundary), TlsQualificationError> {
-    let record = table.record(adapter).ok_or(TlsQualificationError::UnboundAdapter)?;
+    let record = table
+        .record(adapter)
+        .ok_or(TlsQualificationError::UnboundAdapter)?;
     let kind = record.kind();
     let _ = accepted_profile(kind)?;
     let boundary = record.handoff_boundary();
@@ -135,10 +150,7 @@ fn binding(
     Ok((kind, boundary))
 }
 
-fn validate_profile(
-    kind: AdapterKind,
-    profile: &TlsProfile,
-) -> Result<(), TlsQualificationError> {
+fn validate_profile(kind: AdapterKind, profile: &TlsProfile) -> Result<(), TlsQualificationError> {
     let accepted = accepted_profile(kind)?;
     if profile.implementation != TLS_TRANSPORT_IMPLEMENTATION {
         return Err(TlsQualificationError::ImplementationMismatch);
@@ -286,19 +298,37 @@ mod tests {
 
     #[test]
     fn both_measured_provider_profiles_pass() {
-        assert_eq!(validate_profile(AdapterKind::Club48Builder, &profile(AdapterKind::Club48Builder)), Ok(()));
-        assert_eq!(validate_profile(AdapterKind::BlockRazorBuilder, &profile(AdapterKind::BlockRazorBuilder)), Ok(()));
+        assert_eq!(
+            validate_profile(
+                AdapterKind::Club48Builder,
+                &profile(AdapterKind::Club48Builder)
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            validate_profile(
+                AdapterKind::BlockRazorBuilder,
+                &profile(AdapterKind::BlockRazorBuilder)
+            ),
+            Ok(())
+        );
     }
 
     #[test]
     fn only_the_two_direct_builder_capabilities_can_inherit_q5a() {
         assert_eq!(
             binding(&table(CapabilityId::Club48BuilderV1), adapter(0)),
-            Ok((AdapterKind::Club48Builder, HandoffBoundary::TlsUserspaceWriteFlushReturned))
+            Ok((
+                AdapterKind::Club48Builder,
+                HandoffBoundary::TlsUserspaceWriteFlushReturned
+            ))
         );
         assert_eq!(
             binding(&table(CapabilityId::BlockRazorBuilderV1), adapter(0)),
-            Ok((AdapterKind::BlockRazorBuilder, HandoffBoundary::TlsUserspaceWriteFlushReturned))
+            Ok((
+                AdapterKind::BlockRazorBuilder,
+                HandoffBoundary::TlsUserspaceWriteFlushReturned
+            ))
         );
         assert_eq!(
             binding(&table(CapabilityId::LocalGethV1), adapter(0)),
@@ -318,45 +348,75 @@ mod tests {
     fn implementation_endpoint_policy_and_target_mismatches_fail_closed() {
         let mut p = profile(AdapterKind::Club48Builder);
         p.implementation = "other";
-        assert_eq!(validate_profile(AdapterKind::Club48Builder, &p), Err(TlsQualificationError::ImplementationMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::Club48Builder, &p),
+            Err(TlsQualificationError::ImplementationMismatch)
+        );
 
         let mut p = profile(AdapterKind::Club48Builder);
         p.host = BLOCKRAZOR_DOCUMENTED_HOST.to_owned();
-        assert_eq!(validate_profile(AdapterKind::Club48Builder, &p), Err(TlsQualificationError::HostMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::Club48Builder, &p),
+            Err(TlsQualificationError::HostMismatch)
+        );
 
         let mut p = profile(AdapterKind::Club48Builder);
         p.port = HTTPS_PORT + 1;
-        assert_eq!(validate_profile(AdapterKind::Club48Builder, &p), Err(TlsQualificationError::PortMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::Club48Builder, &p),
+            Err(TlsQualificationError::PortMismatch)
+        );
 
         let mut p = profile(AdapterKind::Club48Builder);
         p.policy.max_idle = Duration::from_secs(11);
-        assert_eq!(validate_profile(AdapterKind::Club48Builder, &p), Err(TlsQualificationError::PolicyMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::Club48Builder, &p),
+            Err(TlsQualificationError::PolicyMismatch)
+        );
 
         let mut p = profile(AdapterKind::Club48Builder);
         p.target = ("linux", "aarch64");
-        assert_eq!(validate_profile(AdapterKind::Club48Builder, &p), Err(TlsQualificationError::TargetMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::Club48Builder, &p),
+            Err(TlsQualificationError::TargetMismatch)
+        );
     }
 
     #[test]
     fn peer_generation_tls_cipher_and_alpn_mismatches_fail_closed() {
         let mut p = profile(AdapterKind::BlockRazorBuilder);
         p.connection.generation = 0;
-        assert_eq!(validate_profile(AdapterKind::BlockRazorBuilder, &p), Err(TlsQualificationError::ConnectionGenerationInvalid));
+        assert_eq!(
+            validate_profile(AdapterKind::BlockRazorBuilder, &p),
+            Err(TlsQualificationError::ConnectionGenerationInvalid)
+        );
 
         let mut p = profile(AdapterKind::BlockRazorBuilder);
         p.connection.peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), HTTPS_PORT);
-        assert_eq!(validate_profile(AdapterKind::BlockRazorBuilder, &p), Err(TlsQualificationError::PeerMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::BlockRazorBuilder, &p),
+            Err(TlsQualificationError::PeerMismatch)
+        );
 
         let mut p = profile(AdapterKind::BlockRazorBuilder);
         p.connection.tls_version = ProtocolVersion::TLSv1_2;
-        assert_eq!(validate_profile(AdapterKind::BlockRazorBuilder, &p), Err(TlsQualificationError::TlsVersionMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::BlockRazorBuilder, &p),
+            Err(TlsQualificationError::TlsVersionMismatch)
+        );
 
         let mut p = profile(AdapterKind::BlockRazorBuilder);
         p.connection.cipher_suite = CipherSuite::TLS13_AES_256_GCM_SHA384;
-        assert_eq!(validate_profile(AdapterKind::BlockRazorBuilder, &p), Err(TlsQualificationError::CipherSuiteMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::BlockRazorBuilder, &p),
+            Err(TlsQualificationError::CipherSuiteMismatch)
+        );
 
         let mut p = profile(AdapterKind::BlockRazorBuilder);
         p.connection.alpn_selected = false;
-        assert_eq!(validate_profile(AdapterKind::BlockRazorBuilder, &p), Err(TlsQualificationError::AlpnMismatch));
+        assert_eq!(
+            validate_profile(AdapterKind::BlockRazorBuilder, &p),
+            Err(TlsQualificationError::AlpnMismatch)
+        );
     }
 }
