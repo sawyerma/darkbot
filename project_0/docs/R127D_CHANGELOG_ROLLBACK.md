@@ -242,3 +242,45 @@ Not proven by this PASS:
 - full Kamino/JupLend/Drift economic parity;
 - competitive Race latency;
 - LIVE safety qualification.
+
+---
+
+## Post-qualification correctness correction — 2026-10-05 Astra audit
+
+The qualification result above is **not deleted or rewritten**. Its measured scheduler/fanout numbers remain valid for the stated Mainnet Shadow workload.
+
+However, the subsequent adversarial production/economic audit at runtime source
+`799048f8fa95df4c29f2aa6b35bcc3615405fe19` reproduced correctness counterexamples in the exact checked-in Candidate Cache admission predicate.
+
+Evidence:
+
+```text
+project_0/docs/evidence/AUDIT_20261005/cache_counterexamples.py
+project_0/docs/evidence/AUDIT_20261005/cache_counterexamples.txt
+project_0/docs/AUDIT_HANDOFF_2026-10-05.md
+```
+
+Reproduced:
+
+- a second same-slot `Liquidatable` evaluation can be suppressed even after a relevant input change;
+- the same `Error` class can be suppressed after changed integration input;
+- fixed pubkey ordering plus the repeat soft cap can starve later persistent candidates indefinitely in the reproduced workload (1,025 candidates, cap 1,024, 100 slots).
+
+Therefore the correct status is now:
+
+```text
+R127d queue/fanout performance: PASS
+R127d candidate-admission correctness: REOPENED
+R127d safe-profitability implication: NOT PROVEN
+```
+
+The next fix must preserve the measured R127d fanout reduction while adding:
+
+1. a same-slot causal input revision/generation to admission semantics; and
+2. a no-starvation repeat scheduling policy.
+
+Do not roll back blindly to R127c: R127c had materially worse repeated downstream fanout and pending backlog. The target is a minimal R127d correctness repair plus requalification.
+
+Detailed acceptance criteria and ordered follow-up are frozen in
+`project_0/docs/AUDIT_HANDOFF_2026-10-05.md`.
+
