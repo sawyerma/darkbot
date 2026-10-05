@@ -1,0 +1,27 @@
+{
+  "run": "R127",
+  "date": "2026-10-05",
+  "verdict": "FAIL",
+  "threshold_trigger": false,
+  "dependency_updates": 96825,
+  "sweep_checks": 757250,
+  "sweep_healthy": 697151,
+  "sweep_liquidatable": 58007,
+  "sweep_errors": 2092,
+  "healthy_filter_ratio": 0.921,
+  "pending_final": 77230,
+  "max_pending": 78453,
+  "r126b_max_pending_baseline": 78214,
+  "coalesced": 15106838,
+  "ingress_backlog_final": 29,
+  "ingress_backlog_max": 439,
+  "ingress_overflow_counter": 0,
+  "sink_overflow_lines": 0,
+  "assessment": [
+    "Dependency coverage is now exercised and ingress remains lossless.",
+    "R127 still fans out once per dependency update before pending-queue coalescing, producing 15.1M coalesces and a ~78k pending ceiling.",
+    "Exact canonical health rejects 92.1% as healthy, proving that health admission is useful but was placed too late in the scheduling pipeline.",
+    "Root fix is bank-level burst coalescing before account fanout, followed by one unique-account exact-health pass per batch."
+  ],
+  "followup": "R127c"
+}
