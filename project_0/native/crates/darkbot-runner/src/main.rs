@@ -12,6 +12,10 @@ use darkbot_common::config;
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
 use darkbot_project0::health::{AccountSource, HealthEngine, HealthError};
+#[cfg(feature = "crate_health")]
+use darkbot_project0::health::crate_impl::bank_observation_keys;
+#[cfg(feature = "crate_health")]
+use darkbot_project0::index::ReverseIndex;
 use darkbot_project0::economics::{FailedCostMatrix, Path};
 use darkbot_project0::execution::Freshness;
 use darkbot_project0::planner::Allowlist;
@@ -199,6 +203,73 @@ fn marginfi_account_in_group(data: &[u8], group: &Pubkey) -> bool {
     bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
         .map(|a| a.group == *group)
         .unwrap_or(false)
+}
+
+#[cfg(feature = "crate_health")]
+fn active_banks_in_group_account(data: &[u8], group: &Pubkey) -> Option<Vec<Pubkey>> {
+    if classify_account(data) != AccountType::MarginfiAccount {
+        return None;
+    }
+    let need = 8 + std::mem::size_of::<MarginfiAccount>();
+    if data.len() < need {
+        return None;
+    }
+    let account = bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need]).ok()?;
+    if account.group != *group {
+        return None;
+    }
+    let mut banks: Vec<Pubkey> = account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+        .map(|b| b.bank_pk)
+        .collect();
+    banks.sort_unstable_by_key(|pk| pk.to_bytes());
+    banks.dedup();
+    Some(banks)
+}
+
+#[cfg(feature = "crate_health")]
+fn rebuild_reverse_index(
+    st: &StateCore,
+    program: &Pubkey,
+    group: &Pubkey,
+) -> (ReverseIndex, usize, usize, usize) {
+    let view = StateView(st);
+    let mut index = ReverseIndex::new();
+    let mut bank_count = 0usize;
+    let mut account_count = 0usize;
+    let mut unsupported_banks = 0usize;
+
+    for (pk, record) in st.iter_owned_by(program) {
+        if classify_account(&record.data) != AccountType::Bank {
+            continue;
+        }
+        let Some(bank) = bank_from_state(&view, program, pk) else {
+            continue;
+        };
+        if bank.group != *group {
+            continue;
+        }
+        bank_count += 1;
+        match bank_observation_keys(&bank) {
+            Ok(keys) => index.set_bank_oracles(*pk, &keys),
+            Err(_) => {
+                unsupported_banks += 1;
+                index.set_bank_oracles(*pk, &[]);
+            }
+        }
+    }
+
+    for (pk, record) in st.iter_owned_by(program) {
+        if let Some(banks) = active_banks_in_group_account(&record.data, group) {
+            index.set_account_banks(*pk, &banks);
+            account_count += 1;
+        }
+    }
+
+    (index, bank_count, account_count, unsupported_banks)
 }
 
 #[cfg(feature = "crate_health")]
@@ -623,6 +694,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_reported_update_total = 0u64; // [FIX-81]
     let mut bootstrap_probe_done = false; // [FIX-84]
     let mut program_upgrade_latched = false; // [FIX-131]
+    #[cfg(feature = "crate_health")]
+    let mut reverse_index = ReverseIndex::new(); // [FIX-133a]
     loop {
         if shutdown.is_requested() {
             break;
@@ -893,6 +966,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             IngressEvent::Account(a) if classify_account(&a.data) == AccountType::Bank => Some(a.pubkey),
             _ => None,
         };
+        #[cfg(feature = "crate_health")]
+        let updated_marginfi_account: Option<Pubkey> = match &ev {
+            IngressEvent::Account(a) if classify_account(&a.data) == AccountType::MarginfiAccount => Some(a.pubkey),
+            _ => None,
+        };
         if let IngressEvent::Account(a) = &ev {
             if a.pubkey == program_data && hash(&a.data) != program_data_baseline_hash {
                 if !program_upgrade_latched {
@@ -934,6 +1012,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         program_data
                     );
                     continue;
+                }
+
+                #[cfg(feature = "crate_health")]
+                {
+                    let (rebuilt, indexed_banks, indexed_accounts, unsupported_banks) =
+                        rebuild_reverse_index(&st, &program, &group);
+                    reverse_index = rebuilt;
+                    eprintln!(
+                        "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={}",
+                        indexed_banks, indexed_accounts, unsupported_banks
+                    );
                 }
 
                 #[cfg(feature = "crate_health")]
@@ -1150,6 +1239,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        // [FIX-133a] Keep reverse indices in lockstep with the canonical post-event state.
+        // This does not trigger detection yet; FIX-133b will consume it only after threshold
+        // qualification. Unknown oracle layouts are removed from the trigger map fail-closed.
+        #[cfg(feature = "crate_health")]
+        if let Some(account_pk) = updated_marginfi_account {
+            match st.get(&account_pk)
+                .and_then(|r| active_banks_in_group_account(&r.data, &group))
+            {
+                Some(banks) => reverse_index.set_account_banks(account_pk, &banks),
+                None => reverse_index.remove_account(&account_pk),
+            }
+        }
+        #[cfg(feature = "crate_health")]
+        if let Some(bank_pk) = updated_bank {
+            let view = StateView(&st);
+            match bank_from_state(&view, &program, &bank_pk).filter(|b| b.group == group) {
+                Some(bank) => match bank_observation_keys(&bank) {
+                    Ok(keys) => reverse_index.set_bank_oracles(bank_pk, &keys),
+                    Err(e) => {
+                        reverse_index.set_bank_oracles(bank_pk, &[]);
+                        eprintln!(
+                            "reverse_index_bank_unsupported: bank={} error={}",
+                            bank_pk, e
+                        );
+                    }
+                },
+                None => reverse_index.set_bank_oracles(bank_pk, &[]),
+            }
+        }
+
         // [FIX-34][FIX-35] Nach dem Anwenden: zeigt die NEUE Bank-Konfiguration auf nicht abonnierte Accounts?
         #[cfg(feature = "crate_health")]
         if let Some(bk) = updated_bank {
