@@ -1,0 +1,196 @@
+{
+  "run": "R124",
+  "date": "2026-10-05",
+  "protocol": "mrgn-0.1.11-rc1",
+  "transactions_sent": 0,
+  "projection_status": {
+    "ready": 229
+  },
+  "health_success": 229,
+  "candidate_records": [
+    {
+      "account": "Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7",
+      "trigger": "bootstrap_snapshot_probe",
+      "decision": "Skip",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": null,
+      "t_profitable_unix_s": null,
+      "tx_version": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "path": null,
+      "funding": null,
+      "signature": null,
+      "sign_slot": null,
+      "simulated_cu": null,
+      "candidate_costs": [
+        {
+          "funding": "ZERO_PREFUND_SAME_TX",
+          "path": "Rpc",
+          "message_fee_quote": {
+            "message_hash": "3uFysncc8vr5iAnRYbF7gZfvjMm4Qy3jKxzg6h2qCgAb",
+            "context_slot": 453574814,
+            "lamports": 5000
+          },
+          "transaction_fee_usd_micro": 604,
+          "failed_attempt_reserve_usd_micro": 604,
+          "rent_and_token_usd_micro": 0,
+          "economics_known": true,
+          "net_profit_usd_micro": -121889
+        }
+      ],
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "submitted_tip": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          null
+        ],
+        [
+          "T_detect\u2192T_ready",
+          null
+        ],
+        [
+          "T_ready\u2192T_sign",
+          null
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "ZERO_PREFUND_SAME_TX: tx infeasible: tx v1 signing/submission adapter not enabled; v1 capability measurement is available with feature txv1 | ZERO_PREFUND_SAME_TX: economics Known { net: -121889, profit_per_capital_bps: 170141183460469231731687303715884105727 }",
+      "loss": "EconomicSkip"
+    },
+    {
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "trigger": "integration_projection",
+      "decision": "Skip",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": null,
+      "t_profitable_unix_s": null,
+      "tx_version": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "path": null,
+      "funding": null,
+      "signature": null,
+      "sign_slot": null,
+      "simulated_cu": null,
+      "candidate_costs": [
+        {
+          "funding": "ZERO_PREFUND_SAME_TX",
+          "path": "Rpc",
+          "message_fee_quote": {
+            "message_hash": "5k9nQU4aEJV2tEhqtrDMRCXXudAusghWMtu1xn8Sy7qg",
+            "context_slot": 453574906,
+            "lamports": 5000
+          },
+          "transaction_fee_usd_micro": 604,
+          "failed_attempt_reserve_usd_micro": 604,
+          "rent_and_token_usd_micro": 0,
+          "economics_known": true,
+          "net_profit_usd_micro": -118606
+        }
+      ],
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "submitted_tip": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          null
+        ],
+        [
+          "T_detect\u2192T_ready",
+          null
+        ],
+        [
+          "T_ready\u2192T_sign",
+          null
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "ZERO_PREFUND_SAME_TX: tx infeasible: tx v1 signing/submission adapter not enabled; v1 capability measurement is available with feature txv1 | ZERO_PREFUND_SAME_TX: economics Known { net: -118606, profit_per_capital_bps: 170141183460469231731687303715884105727 }",
+      "loss": "EconomicSkip"
+    },
+    {
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "trigger": "integration_projection",
+      "decision": "Skip",
+      "net_profit": null,
+      "economics_known": false,
+      "premium_bps": null,
+      "t_profitable_unix_s": null,
+      "tx_version": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "path": null,
+      "funding": null,
+      "signature": null,
+      "sign_slot": null,
+      "simulated_cu": null,
+      "candidate_costs": [
+        {
+          "funding": "ZERO_PREFUND_SAME_TX",
+          "path": "Rpc",
+          "message_fee_quote": {
+            "message_hash": "8tVVMyKRaTqNR8mBQhMk3AzvwpYVX7KtxbpkNvRn9T79",
+            "context_slot": 453574985,
+            "lamports": 5000
+          },
+          "transaction_fee_usd_micro": 604,
+          "failed_attempt_reserve_usd_micro": 604,
+          "rent_and_token_usd_micro": 0,
+          "economics_known": true,
+          "net_profit_usd_micro": -91691
+        }
+      ],
+      "exposure": null,
+      "all_signatures": [],
+      "bundle_id": null,
+      "submitted_tip": null,
+      "intervals_ns": [
+        [
+          "T_rx\u2192T_detect",
+          null
+        ],
+        [
+          "T_detect\u2192T_ready",
+          null
+        ],
+        [
+          "T_ready\u2192T_sign",
+          null
+        ],
+        [
+          "T_sign\u2192T_handoff",
+          null
+        ],
+        [
+          "T_rx\u2192T_handoff",
+          null
+        ]
+      ],
+      "reason": "ZERO_PREFUND_SAME_TX: tx infeasible: tx v1 signing/submission adapter not enabled; v1 capability measurement is available with feature txv1 | ZERO_PREFUND_SAME_TX: economics Known { net: -91691, profit_per_capital_bps: 170141183460469231731687303715884105727 }",
+      "loss": "EconomicSkip"
+    }
+  ],
+  "qualification": "Concrete RPC message fee and negative economics exclusion PASS. This run predates top-level skipped-record metadata alignment; candidate_costs is authoritative. No Jito lifecycle or P1B qualification."
+}

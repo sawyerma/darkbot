@@ -375,6 +375,15 @@ mod tests {
     }
 
     #[test]
+    fn priority_fee_uses_requested_limit_not_simulated_consumption() {
+        let resources = Resources { compute_unit_limit:1_400_000,
+            priority_micro_lamports_per_cu:2_000, loaded_accounts_data_size:None };
+        assert_eq!(resources.priority_total_lamports(), 2_800);
+        let simulated_consumption = 600u64;
+        assert_ne!(resources.priority_total_lamports(), simulated_consumption * 2_000 / 1_000_000);
+    }
+
+    #[test]
     fn v1_priority_fee_is_total_lamports() {
         let r = Resources { compute_unit_limit: 200_000, priority_micro_lamports_per_cu: 5_000, loaded_accounts_data_size: None };
         assert_eq!(r.priority_total_lamports(), 1_000);

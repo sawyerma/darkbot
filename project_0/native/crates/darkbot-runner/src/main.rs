@@ -1443,11 +1443,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
             };
             #[cfg(feature = "crate_health")]
-            let priority_fee_lamports = resources.priority_total_lamports();
-            #[cfg(feature = "crate_health")]
-            let priority_fee_usd_micro = sizer_for_cost
-                .native_amount_value_usd_micro(&sol_bank, priority_fee_lamports, protocol_now as i64, protocol_slot)
-                .unwrap_or(u64::MAX);
+            let lamports_to_usd_micro = |lamports| sizer_for_cost
+                .native_amount_cost_usd_micro(&sol_bank, lamports, protocol_now as i64, protocol_slot).ok();
             #[cfg(feature = "crate_health")]
             let builder = P0ReceivershipBuilder {
                 state: eval_state,
@@ -1462,7 +1459,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 routes: &routes,
                 inventory: &inventory,
                 ata: &ata,
-                priority_fee_usd_micro,
+                lamports_to_usd_micro: &lamports_to_usd_micro,
                 jito_tip_usd_micro: 0,
                 jito_tip_lamports: 0,
                 zero_prefund_qualified: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false).unwrap_or(false)

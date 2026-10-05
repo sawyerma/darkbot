@@ -226,7 +226,7 @@ pub mod p0 {
         /// ATA des Liquidators je Mint.
         pub ata: &'a dyn Fn(&Pubkey) -> Option<Pubkey>,
         /// Economics cost after explicit conversion, never raw lamports. [FIX-61]
-        pub priority_fee_usd_micro: u64,
+        pub lamports_to_usd_micro: &'a dyn Fn(u64) -> Option<u64>,
         pub jito_tip_usd_micro: u64,
         /// Execution amount for Jito tip transaction.
         pub jito_tip_lamports: u64,
@@ -677,9 +677,9 @@ pub mod p0 {
                 protocol_fees_usd_micro: sz.protocol_fees,
                 flat_sol_fee_usd_micro: sz.flat_sol_fee,
                 swap_fees_and_impact_usd_micro: 0,
-                priority_fee_usd_micro: self.priority_fee_usd_micro,
+                transaction_fee_usd_micro: None,
                 jito_tip_usd_micro: self.jito_tip_usd_micro,
-                rent_and_token_usd_micro: sz.rent_and_token,
+                rent_and_token_usd_micro: Some(sz.rent_and_token),
                 required_capital_usd_micro: capital_usd_micro,
                 path: self.path,
                 funding,
@@ -688,6 +688,10 @@ pub mod p0 {
     }
 
     impl<'a, S: AccountSource + ?Sized, Z: SizingProvider, R: RouteProvider> ReceivershipBuilder for P0ReceivershipBuilder<'a, S, Z, R> {
+        fn native_cost_usd_micro(&self, lamports: u64) -> Option<u64> {
+            (self.lamports_to_usd_micro)(lamports)
+        }
+
         fn plans(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
             let sizings = self.sizing.sizes(account, now_unix_s, slot)?;
             if sizings.is_empty() {
@@ -926,6 +930,11 @@ pub mod p0 {
             }
             if out.is_empty() && !route_errors.is_empty() {
                 return Err(format!("ROUTING:{}", route_errors.join(" | ")));
+            }
+            if self.should_init_liquidation_record(account)? {
+                // ATA prewarm rent is sunk; new protocol-account rent is a separate,
+                // presently unmeasured debit. Do not qualify it as zero.
+                for plan in &mut out { plan.input.rent_and_token_usd_micro = None; }
             }
             Ok(out)
         }

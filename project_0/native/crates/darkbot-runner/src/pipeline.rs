@@ -45,6 +45,7 @@ pub struct ReceivershipPlan {
 pub trait ReceivershipBuilder {
     /// Liefert **alle** technisch machbaren Funding-/Route-Candidates. Keine harte
     /// Funding-Präferenz im Builder; P4A + TX-Feasibility entscheiden danach.
+    fn native_cost_usd_micro(&self, _lamports: u64) -> Option<u64> { None }
     fn plans(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String>;
 }
 
@@ -97,6 +98,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             signature: None,
             sign_slot: None,
             simulated_cu: None,
+            candidate_costs: vec![],
             exposure: None,
             all_signatures: vec![],
             bundle_id: None,
@@ -189,7 +191,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let mut best_probe: Option<(ReceivershipPlan, darkbot_solana::tx::BuiltTx, Evaluation)> = None;
         let mut threshold_hits: u32 = 0;
         let mut rejected = Vec::new();
-        for plan in plans {
+        for mut plan in plans {
             if let Err(e) = planner::validate_receivership(&plan.steps, self.allowlist, plan.route, self.p7_passed) {
                 rejected.push(format!("{}: plan invalid: {:?}", plan.input.funding.as_str(), e));
                 continue;
@@ -205,7 +207,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 rejected.push(format!("{}: prerequisite program not allowed: {}", plan.input.funding.as_str(), bad.program_id));
                 continue;
             }
-            let eval = economics::evaluate(&plan.input, self.failed_costs);
             // Shadow muss den finalen Pfad messen können, auch wenn LIVE absichtlich deaktiviert
             // ist. Safety ist dort Evidence, kein Send-Gate. Erst LIVE previewt die Limits
             // nicht-reservierend, damit bei einem Safety-Verstoß eine andere Funding-Klasse
@@ -231,21 +232,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     }
                 },
             };
-            let actionable = economics::actionable(eval, self.min_profit, true, state_valid, safety_valid);
-            let technical_probe = self.mode == Mode::Shadow
-                && matches!(eval, Evaluation::Unknown)
-                && state_valid
-                && safety_valid;
-            if !actionable && !technical_probe {
-                if let Evaluation::Known { net, .. } = eval {
-                    if net > 0 && net <= self.min_profit { threshold_hits += 1; }
-                }
-                rejected.push(format!("{}: economics {:?}", plan.input.funding.as_str(), eval));
-                continue;
-            }
-            if tl.get(Stage::Detect).is_none() {
-                tl.mark(Stage::Detect, self.clock.now_ns());
-            }
 
             // [FIX-3] Prerequisite-TXs nur über Bundle-Pfad; sonst ist der Kandidat nicht ausführbar.
             if !self.submitter.supports_tx_version(plan.tx_version) { // [FIX-38]
@@ -255,6 +241,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             if !plan.prerequisite_txs.is_empty() && !self.submitter.supports_bundle() { // [FIX-14]
                 rejected.push(format!("{}: needs bundle path", plan.input.funding.as_str()));
                 continue;
+            }
+            if tl.get(Stage::Detect).is_none() {
+                tl.mark(Stage::Detect, self.clock.now_ns());
             }
             let txplan = TxPlan {
                 version: plan.tx_version,
@@ -270,6 +259,44 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     continue;
                 }
             };
+
+            let fee_quote = if plan.input.path == Path::Rpc && self.submitter.path() == SubmissionPath::Rpc
+                && plan.prerequisite_txs.is_empty() && plan.tip == 0 {
+                self.submitter.fee_for_message(&built.tx)
+                    .filter(|q| q.message_hash == built.tx.message.hash().to_string())
+            } else { None };
+            plan.input.transaction_fee_usd_micro = fee_quote.as_ref()
+                .and_then(|q| self.builder.native_cost_usd_micro(q.lamports));
+            let candidate_failed = if fee_quote.is_some() {
+                economics::rpc_message_failure_costs(plan.input.transaction_fee_usd_micro)
+            } else { *self.failed_costs };
+            let failed_reserve = candidate_failed.conservative(plan.input.path);
+            let eval = economics::evaluate(&plan.input, &candidate_failed);
+            rec.candidate_costs.push(crate::record::CandidateCostRecord {
+                funding:plan.input.funding.as_str().into(), path:format!("{:?}", plan.input.path),
+                message_fee_quote:fee_quote.clone(), transaction_fee_usd_micro:plan.input.transaction_fee_usd_micro,
+                failed_attempt_reserve_usd_micro:failed_reserve, rent_and_token_usd_micro:plan.input.rent_and_token_usd_micro,
+                economics_known:matches!(eval, Evaluation::Known {..}),
+                net_profit_usd_micro:match eval { Evaluation::Known {net,..} => Some(net), _ => None },
+            });
+            let actionable = economics::actionable(eval, self.min_profit, true, state_valid, safety_valid);
+            let technical_probe = self.mode == Mode::Shadow
+                && matches!(eval, Evaluation::Unknown)
+                && state_valid
+                && safety_valid;
+            if !actionable && !technical_probe {
+                if let Evaluation::Known { net, .. } = eval {
+                    if net > 0 && net <= self.min_profit { threshold_hits += 1; }
+                    if rec.net_profit.map_or(true, |current| net > current) {
+                        rec.net_profit = Some(net);
+                        rec.economics_known = true;
+                        rec.premium_bps = Some(plan.premium_bps);
+                        rec.funding = Some(plan.input.funding.as_str().into());
+                    }
+                }
+                rejected.push(format!("{}: economics {:?}", plan.input.funding.as_str(), eval));
+                continue;
+            }
 
             if actionable {
                 let replace = best_actionable.as_ref().map_or(true, |(_, _, current)| {
@@ -303,10 +330,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         rec.premium_bps = Some(plan.premium_bps);
         rec.funding = Some(plan.input.funding.as_str().to_string());
         rec.economics_known = matches!(eval, Evaluation::Known { .. });
+        rec.net_profit = None;
         if let Evaluation::Known { net, .. } = eval {
             rec.net_profit = Some(net);
         } else if self.mode == Mode::Shadow {
-            rec.reason = Some("technical shadow probe: failed-attempt economics unknown".into());
+            rec.reason = Some("technical shadow probe: cost or realization evidence incomplete".into());
         }
 
         rec.serialized_bytes = Some(built.serialized_len);

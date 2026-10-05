@@ -125,6 +125,7 @@ pub enum Path {
 }
 
 /// Pfadabhängige Kosten eines **fehlgeschlagenen** Versuchs (Ledger §4).
+/// Monetary unit: USD-micro, after explicit conversion; never raw lamports.
 /// `None` = ungemessen. Ein Kandidat mit `None` in seiner Pfadzelle ist nicht bewertbar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FailedCostMatrix {
@@ -152,6 +153,17 @@ impl FailedCostMatrix {
     }
 }
 
+/// Candidate-specific scenario pricing, not a historical landing classification.
+/// RPC genuinely not landed pays no network fee; a landed execution revert pays
+/// the exact message fee. A null quote cannot qualify either prospective cell.
+/// Jito lifecycle/tip cells are deliberately untouched. Amounts are USD-micro.
+pub fn rpc_message_failure_costs(message_fee_usd_micro: Option<u64>) -> FailedCostMatrix {
+    match message_fee_usd_micro {
+        Some(fee) => FailedCostMatrix { rpc_not_landed:Some(0), rpc_landed_revert:Some(fee), ..Default::default() },
+        None => FailedCostMatrix::default(),
+    }
+}
+
 /// Eingaben pro Kandidat. **Jedes Geldfeld ist explizit USD-Micro.**
 /// Lamports/native token units dürfen hier niemals direkt eingetragen werden; die Umrechnung
 /// muss vorher über einen expliziten, ausführbaren Preis-/Kostenprovider erfolgt sein. [FIX-61]
@@ -165,9 +177,10 @@ pub struct CandidateInput {
     pub protocol_fees_usd_micro: u64,
     pub flat_sol_fee_usd_micro: u64,
     pub swap_fees_and_impact_usd_micro: u64,
-    pub priority_fee_usd_micro: u64,
+    /// Exact-message total network fee (base + requested priority), once per success.
+    pub transaction_fee_usd_micro: Option<u64>,
     pub jito_tip_usd_micro: u64,
-    pub rent_and_token_usd_micro: u64,
+    pub rent_and_token_usd_micro: Option<u64>,
     pub required_capital_usd_micro: u64,
     pub path: Path,
     pub funding: crate::funding::FundingClass,
@@ -186,13 +199,14 @@ pub fn evaluate(c: &CandidateInput, failed: &FailedCostMatrix) -> Evaluation {
         return Evaluation::Unknown;
     };
     let Some(failed_cost) = failed.conservative(c.path) else { return Evaluation::Unknown };
+    let (Some(transaction_fee), Some(rent_and_token)) = (c.transaction_fee_usd_micro, c.rent_and_token_usd_micro) else { return Evaluation::Unknown };
     let costs: u128 = c.repay_usd_micro as u128
         + c.protocol_fees_usd_micro as u128
         + c.flat_sol_fee_usd_micro as u128
         + c.swap_fees_and_impact_usd_micro as u128
-        + c.priority_fee_usd_micro as u128
+        + transaction_fee as u128
         + c.jito_tip_usd_micro as u128
-        + c.rent_and_token_usd_micro as u128
+        + rent_and_token as u128
         + failed_cost as u128;
     let net = gross_seized_realizable_usd_micro as i128 - costs as i128;
     let ppc = if c.required_capital_usd_micro == 0 { i128::MAX } else { net * BPS as i128 / c.required_capital_usd_micro as i128 };
@@ -262,6 +276,13 @@ mod tests {
     use solana_sdk::pubkey::Pubkey;
 
     #[test]
+    fn exact_rpc_fee_qualifies_only_rpc_scenarios() {
+        assert_eq!(rpc_message_failure_costs(Some(73)).conservative(Path::Rpc), Some(73));
+        assert_eq!(rpc_message_failure_costs(None).conservative(Path::Rpc), None);
+        assert_eq!(rpc_message_failure_costs(Some(73)).conservative(Path::JitoBundle), None);
+    }
+
+    #[test]
     fn premium_curve_matches_release_notes() {
         let t0 = 1_000_000;
         assert_eq!(premium_bps(t0, Some(t0), 0, false), 500, "Basis 5 %");
@@ -318,9 +339,9 @@ mod tests {
             protocol_fees_usd_micro: 0,
             flat_sol_fee_usd_micro: 0,
             swap_fees_and_impact_usd_micro: 0,
-            priority_fee_usd_micro: 0,
+            transaction_fee_usd_micro: Some(0),
             jito_tip_usd_micro: 0,
-            rent_and_token_usd_micro: 0,
+            rent_and_token_usd_micro: Some(0),
             required_capital_usd_micro: 900,
             path: Path::Rpc,
             funding: crate::funding::FundingClass::NoSwapInventory,
@@ -341,9 +362,9 @@ mod tests {
             protocol_fees_usd_micro: 0,
             flat_sol_fee_usd_micro: 0,
             swap_fees_and_impact_usd_micro: 0,
-            priority_fee_usd_micro: 0,
+            transaction_fee_usd_micro: Some(0),
             jito_tip_usd_micro: 0,
-            rent_and_token_usd_micro: 0,
+            rent_and_token_usd_micro: Some(0),
             required_capital_usd_micro: 900,
             path: Path::JitoBundle,
             funding: crate::funding::FundingClass::NoSwapInventory,
@@ -357,6 +378,10 @@ mod tests {
             }
             _ => panic!(),
         }
+        assert_eq!(evaluate(&CandidateInput { transaction_fee_usd_micro:None, ..c }, &m), Evaluation::Unknown);
+        assert_eq!(evaluate(&CandidateInput { rent_and_token_usd_micro:None, ..c }, &m), Evaluation::Unknown);
+        assert_eq!(evaluate(&CandidateInput { transaction_fee_usd_micro:Some(23), ..c }, &m),
+            Evaluation::Known {net:77, profit_per_capital_bps:77 * 10_000 / 900});
         assert!(actionable(evaluate(&c, &m), 0, true, true, true));
         assert!(!actionable(evaluate(&c, &m), 100, true, true, true));
         assert!(!actionable(evaluate(&c, &m), 0, true, false, true));
@@ -370,9 +395,9 @@ mod tests {
             protocol_fees_usd_micro: 0,
             flat_sol_fee_usd_micro: 0,
             swap_fees_and_impact_usd_micro: 0,
-            priority_fee_usd_micro: 0,
+            transaction_fee_usd_micro: Some(0),
             jito_tip_usd_micro: 0,
-            rent_and_token_usd_micro: 0,
+            rent_and_token_usd_micro: Some(0),
             required_capital_usd_micro: 0,
             path: Path::Rpc,
             funding: crate::funding::FundingClass::ZeroPrefundSameTx,
@@ -394,7 +419,7 @@ mod tests {
     fn equal_net_prefers_capital_efficiency() {
         let zero = CandidateInput {
             gross_seized_realizable_usd_micro: Some(1_100), repay_usd_micro: 1_000, protocol_fees_usd_micro: 0, flat_sol_fee_usd_micro: 0,
-            swap_fees_and_impact_usd_micro: 0, priority_fee_usd_micro: 0, jito_tip_usd_micro: 0, rent_and_token_usd_micro: 0,
+            swap_fees_and_impact_usd_micro: 0, transaction_fee_usd_micro: Some(0), jito_tip_usd_micro: 0, rent_and_token_usd_micro: Some(0),
             required_capital_usd_micro: 0, path: Path::Rpc, funding: crate::funding::FundingClass::ZeroPrefundSameTx,
         };
         let preheld = CandidateInput { required_capital_usd_micro: 1_000, funding: crate::funding::FundingClass::PreheldInventory, ..zero };

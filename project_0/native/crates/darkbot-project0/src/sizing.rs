@@ -351,6 +351,38 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         Ok("NO_VALID_PROTOCOL_PAIR".into())
     }
 
+    /// Cost conversion rounds up; executable proceeds use the value method.
+    pub fn native_amount_cost_usd_micro(
+        &self,
+        bank_key: &Pubkey,
+        native_amount: u64,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<u64, String> {
+        if native_amount == 0 {
+            return Ok(0);
+        }
+        let bank = self.bank(bank_key)?;
+        let clock = Clock {
+            slot,
+            epoch_start_timestamp: 0,
+            epoch: 0,
+            leader_schedule_epoch: 0,
+            unix_timestamp: now_unix_s,
+        };
+        let price = self.prices(&bank, &clock)?.equity;
+        if price <= I80F48::ZERO { return Err("nonpositive cost conversion price".into()); }
+        let value = calc_value(
+            I80F48::from_num(native_amount),
+            price,
+            bank.get_balance_decimals(),
+            None,
+        )
+        .map_err(|e| format!("native amount value: {e}"))?;
+        ceil_u64(value.checked_mul(I80F48::from_num(USD_MICRO)).ok_or("cost conversion overflow")?)
+    }
+
+
     fn prices(&self, bank: &Bank, clock: &Clock) -> Result<Prices, String> {
         let keys = bank_observation_keys(bank).map_err(|e| e.to_string())?;
         let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(keys.len());

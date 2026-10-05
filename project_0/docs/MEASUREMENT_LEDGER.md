@@ -2840,3 +2840,66 @@ not-landed UNKNOWN, tip payment tied to our successful transaction, partial bund
 No send. Next FIX-129b: exact-message prospective fee measurement and candidate
 Economics wiring, with evidence/provenance and no guessed matrix population.
 FIX-129 remains IN PROGRESS. LIVE DISABLED; 72 h NOT STARTED.
+
+### 2026-10-05 — FIX-129b / R124 exact-message RPC economics PASS
+
+Branch: deployed 0.1.11 `main`; P1B branch untouched. Detailed qualification matrix
+and sources: `FIX_129_COST_QUALIFICATION.md`. Existing FailedCostMatrix dimensions
+retained. Actual landing reconciliation and prospective scenario pricing are
+separate: missing/expired status still does NOT prove a zero-cost attempt.
+
+Implementation:
+- RPC adapter obtains getFeeForMessage for the exact compiled message, retaining
+  message hash/context slot/lamports. No fixed 5000×signature calculation.
+- CandidateInput explicitly requires total transaction fee (base + requested
+  priority) and incremental rent evidence. Total fee replaces priority-only cost;
+  it is not added on top of an already total fee. Cost conversion rounds upwards;
+  missing conversion stays None instead of a sentinel/zero.
+- For a measured single RPC message with no prerequisite/tip: source-backed
+  prospective not-landed network charge=0 and landed-revert charge=message fee.
+  Existing conservative policy reserves ONE ADDITIONAL failed attempt. This is
+  a strategy reserve, not measured PnL or double charging one transaction.
+- No RPC sample populates Jito cells. A missing exact fee/rent/market value remains
+  UNKNOWN. Jupiter output already includes route cost/impact; no invented second
+  deduction. ATA prewarm rent is not recharged. New LiquidationRecord rent remains
+  UNKNOWN pending exact incremental measurement.
+- Per-candidate cost evidence remains visible on negative EconomicSkip records;
+  top-level economics flags are also aligned with the best known rejected result.
+
+Evidence:
+`evidence/FIX129_fee_sources.json`: no-send signed simulations and finalized reads.
+No priority: quote/simulation 5000 lamports. Requested 1,400,000 CU at 2000
+micro-lamports/CU: quote/simulation 7800 = 5000 + 2800 priority despite only 600 CU
+consumed. A simulated execution revert has the same measured fee, but is NOT a
+landed-revert claim. Historical authorized USDT ATA meta.fee=5000; third-party
+finalized revert meta.fee=11001, actual err present. Its submission path is UNKNOWN
+and its expense is not ours. Replay regressions use these actual metadata values.
+
+`evidence/R124_rpc_economics.json`: 229/229 target projections ready, 0 failed/stale,
+229 downstream Health successes. Three actual candidate messages quote 5000 each;
+converted network cost=604 USD-micro and separate failure reserve=604. Net values:
+- generic Trrq...: -121889 USD-micro;
+- Kamino A45d...: -118606 USD-micro;
+- JupLend 64vk...: -91691 USD-micro.
+All correctly EconomicSkip; no liquidation signed/simulated after economic rejection,
+no send, no economic win. R124 stopped after all target results. The run predates
+final top-level skipped-record metadata alignment; per-candidate evidence is complete.
+
+Final requested workspace commands PASS:
+- `cargo test --workspace --features crate_health,txv1`: 129 passed, 0 failed;
+- `cargo test --workspace --features crate_health`: 127 passed, 0 failed.
+Workspace build and diff whitespace check PASS. Regressions cover actual landed
+success/revert fee preservation; absence/missing metadata UNKNOWN; exact RPC
+scenario pricing; missing network/rent evidence UNKNOWN; requested-CU priority;
+our matching landed tip vs revert/partial bundle; historical metadata replay.
+
+Precise claim: FIX-129 implementation and current RPC candidate-cost qualification
+PASS. Full provider/outcome empirical qualification is NOT claimed: Jito lifecycle,
+actual paid Jito tip and our landed-revert sample remain UNKNOWN. Complete realized
+liquidation PnL still requires token/protocol/rent deltas. R7 overall remains OPEN.
+R6 retains Kamino/JupLend PASS and Drift UNPROVEN. LIVE DISABLED; 72 h NOT STARTED.
+
+Next within FIX-129: obtain concrete Jito bundle lifecycle + all constituent
+transaction metadata before qualifying its cells. Do not manufacture zero costs,
+assign competitor paths, or send fee-bearing trials without explicit authorization.
+No P3-02, Oracle-trigger, 72h or P1B development was performed in this work.

@@ -144,6 +144,17 @@ impl RpcSubmitter {
 }
 
 impl SubmissionAdapter for RpcSubmitter {
+    fn fee_for_message(&self, tx: &VersionedTransaction) -> Option<super::MessageFeeQuote> {
+        use base64::Engine;
+        let response: solana_client::rpc_response::Response<Option<u64>> = self.rpc.send(
+            solana_client::rpc_request::RpcRequest::GetFeeForMessage,
+            serde_json::json!([base64::engine::general_purpose::STANDARD.encode(tx.message.serialize()),
+                {"commitment":"confirmed"}]),
+        ).ok()?;
+        Some(super::MessageFeeQuote { message_hash:tx.message.hash().to_string(),
+            context_slot:response.context.slot, lamports:response.value? })
+    }
+
     fn path(&self) -> SubmissionPath {
         SubmissionPath::Rpc
     }

@@ -72,8 +72,17 @@ pub enum SimResult {
     Unavailable(String),
 }
 
+/// RPC quote for the exact serialized message, not an observed landed fee.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct MessageFeeQuote {
+    pub message_hash: String,
+    pub context_slot: u64,
+    pub lamports: u64,
+}
+
 pub trait SubmissionAdapter {
     fn path(&self) -> SubmissionPath;
+    fn fee_for_message(&self, _tx: &VersionedTransaction) -> Option<MessageFeeQuote> { None }
     /// [FIX-14] Fähigkeit, nicht Pfad: nur Adapter mit `true` dürfen Prerequisite-/Tip-Bundles senden.
     fn supports_bundle(&self) -> bool { false }
     /// [FIX-38] TxVersion-Fähigkeit des Pfads. v1 über Jito-Bundle/BAM ist **nicht belegt**

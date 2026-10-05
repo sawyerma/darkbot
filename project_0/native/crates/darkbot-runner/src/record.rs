@@ -44,6 +44,18 @@ pub enum LossReason {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct CandidateCostRecord {
+    pub funding: String,
+    pub path: String,
+    pub message_fee_quote: Option<darkbot_solana::submit::MessageFeeQuote>,
+    pub transaction_fee_usd_micro: Option<u64>,
+    pub failed_attempt_reserve_usd_micro: Option<u64>,
+    pub rent_and_token_usd_micro: Option<u64>,
+    pub economics_known: bool,
+    pub net_profit_usd_micro: Option<i128>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct OpportunityRecord {
     pub account: String,
     pub trigger: String,
@@ -63,6 +75,7 @@ pub struct OpportunityRecord {
     pub sign_slot: Option<u64>,
     /// [FIX-6] CU aus der Simulation derselben TX.
     pub simulated_cu: Option<u64>,
+    pub candidate_costs: Vec<CandidateCostRecord>,
     /// [FIX-5] Reserviertes Kapital der Submission (für Reconciliation).
     pub exposure: Option<u64>,
     /// [FIX-18] Alle Signaturen des Handoffs + Bundle-ID (vollständige Reconciliation).

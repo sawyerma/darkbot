@@ -121,6 +121,19 @@ mod tests {
             error:None, t_observed_landed_ns:Some(1) })
     }
     #[test]
+    fn recorded_mainnet_success_and_revert_fees_are_preserved() {
+        // The third-party revert's submission path is unknown. This test validates
+        // the fee reducer with real meta values, not attribution to our RPC path.
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../../../../docs/evidence/FIX129_fee_sources.json")).unwrap();
+        for transaction in [&fixture["landed_ata_transaction"], &fixture["third_party_landed_revert"]["transaction"]] {
+            let fee = transaction["meta"]["fee"].as_u64().unwrap();
+            let outcome = if transaction["meta"]["err"].is_null() { LandingOutcome::LandedSuccess } else { LandingOutcome::LandedFailed };
+            let (p, e) = sample(SubmissionPath::Rpc, outcome, Some(fee));
+            assert_eq!(measured_attempt_costs(&p, &[e]).0, Some(fee));
+        }
+    }
+
+    #[test]
     fn landed_success_and_revert_use_meta_fee() {
         for outcome in [LandingOutcome::LandedSuccess, LandingOutcome::LandedFailed] {
             let (p,e) = sample(SubmissionPath::Rpc, outcome, Some(7123));
