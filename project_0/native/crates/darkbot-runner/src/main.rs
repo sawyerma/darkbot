@@ -79,6 +79,39 @@ struct CachedProjection {
 #[cfg(feature = "crate_health")]
 type DetectWork = (Pubkey, u64, u64, &'static str);
 
+#[cfg(feature = "crate_health")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CandidateHealthState {
+    Healthy,
+    Liquidatable,
+    Error,
+}
+
+#[cfg(feature = "crate_health")]
+#[derive(Clone, Copy, Debug)]
+struct CandidateCacheEntry {
+    state: CandidateHealthState,
+    last_forwarded_slot: u64,
+}
+
+#[cfg(feature = "crate_health")]
+fn candidate_should_forward(
+    previous: Option<CandidateCacheEntry>,
+    current: CandidateHealthState,
+    evaluation_slot: u64,
+    recheck_slots: u64,
+    forced: bool,
+    repeat_capacity: bool,
+) -> bool {
+    if current == CandidateHealthState::Healthy {
+        return false;
+    }
+    let transition = previous.map(|e| e.state) != Some(current);
+    let last_forwarded = previous.map(|e| e.last_forwarded_slot).unwrap_or(0);
+    let periodic_due = evaluation_slot.saturating_sub(last_forwarded) >= recheck_slots;
+    forced || transition || (periodic_due && repeat_capacity)
+}
+
 // [FIX-121][R6] Qualification targets wait as unsigned identities, not signed RPC jobs.
 // This timestamp is the start of an explicit synthetic probe; real ingress timestamps
 // and projection latency remain untouched and are still subject to freshness guards.
@@ -859,6 +892,48 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut sweep_max_unique_batch: usize = 0;
     #[cfg(feature = "crate_health")]
     let mut sweep_max_dirty_banks: usize = 0;
+
+    // [R127d/P2] Candidate cache: do not re-run Projection/Sizing/Economics for the
+    // same persistently-liquidatable account every 5 ms batch. Health is still recomputed
+    // exactly on every affected batch. New unhealthy transitions and Bank-state invalidations
+    // are always forwarded immediately. Unchanged candidates get a bounded periodic Long-Tail
+    // recheck so route/fee changes that are not represented by Marginfi state are not starved.
+    #[cfg(feature = "crate_health")]
+    let candidate_recheck_slots: u64 =
+        config::parsed_or("P0_CANDIDATE_RECHECK_SLOTS", 64)?;
+    #[cfg(feature = "crate_health")]
+    if candidate_recheck_slots == 0 {
+        return Err("P0_CANDIDATE_RECHECK_SLOTS must be > 0".into());
+    }
+    #[cfg(feature = "crate_health")]
+    let candidate_error_recheck_slots: u64 =
+        config::parsed_or("P0_CANDIDATE_ERROR_RECHECK_SLOTS", 16)?;
+    #[cfg(feature = "crate_health")]
+    if candidate_error_recheck_slots == 0 {
+        return Err("P0_CANDIDATE_ERROR_RECHECK_SLOTS must be > 0".into());
+    }
+    #[cfg(feature = "crate_health")]
+    let candidate_repeat_soft_cap: usize =
+        config::parsed_or("P0_CANDIDATE_REPEAT_SOFT_CAP", 1024)?;
+    #[cfg(feature = "crate_health")]
+    if candidate_repeat_soft_cap == 0 {
+        return Err("P0_CANDIDATE_REPEAT_SOFT_CAP must be > 0".into());
+    }
+    #[cfg(feature = "crate_health")]
+    let mut candidate_cache: HashMap<Pubkey, CandidateCacheEntry> = HashMap::new();
+    #[cfg(feature = "crate_health")]
+    let mut candidate_force_rearm: HashSet<Pubkey> = HashSet::new();
+    #[cfg(feature = "crate_health")]
+    let mut candidate_cache_suppressed: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_cache_softcap_suppressed: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_cache_transition_forwards: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_cache_periodic_forwards: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_cache_forced_forwards: u64 = 0;
+
     // [R126b] Preserve canonical ingress under detection bursts. When both ingress and
     // detection work are available, drain at most this many ingress events before forcing
     // one detection item. This prevents either side from starving the other.
@@ -1372,7 +1447,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let view = StateView(&st);
 
                 // CPU-only and independent per account. No RPC, no state mutation.
-                let evaluated: Vec<(Pubkey, u64, u64, u8)> = account_work
+                let mut evaluated: Vec<(Pubkey, u64, u64, CandidateHealthState)> = account_work
                     .into_par_iter()
                     .map(|(account, (t_rx_ns, event_slot))| {
                         let engine = darkbot_project0::health::crate_impl::CrateHealth {
@@ -1380,53 +1455,187 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             group,
                         };
                         let status = match engine.health(&account, now_s, evaluation_slot) {
-                            Ok(h) if !h.liquidatable => 0u8,
-                            Ok(_) => 1u8,
-                            Err(_) => 2u8,
+                            Ok(h) if !h.liquidatable => CandidateHealthState::Healthy,
+                            Ok(_) => CandidateHealthState::Liquidatable,
+                            Err(_) => CandidateHealthState::Error,
                         };
                         (account, t_rx_ns, event_slot, status)
                     })
                     .collect();
 
+                // Deterministic order gives periodic rechecks fair progress when the soft cap
+                // is active. Accounts forwarded in this pass move their last_forwarded_slot,
+                // so still-due accounts naturally advance on later batches.
+                evaluated.sort_unstable_by_key(|(account, _, _, _)| account.to_bytes());
+
                 for (account, t_rx_ns, event_slot, status) in evaluated {
+                    let previous = candidate_cache.get(&account).copied();
+                    let forced = candidate_force_rearm.remove(&account);
+
                     match status {
-                        0 => {
+                        CandidateHealthState::Healthy => {
                             health_sweep_healthy =
                                 health_sweep_healthy.saturating_add(1);
+                            candidate_cache.insert(
+                                account,
+                                CandidateCacheEntry {
+                                    state: CandidateHealthState::Healthy,
+                                    last_forwarded_slot: previous
+                                        .map(|e| e.last_forwarded_slot)
+                                        .unwrap_or(0),
+                                },
+                            );
                         }
-                        1 => {
+                        CandidateHealthState::Liquidatable => {
                             health_sweep_liquidatable =
                                 health_sweep_liquidatable.saturating_add(1);
-                            sweep_forwarded = sweep_forwarded.saturating_add(1);
-                            let _ = enqueue_oracle_accounts(
-                                [account],
-                                t_rx_ns,
-                                event_slot,
-                                "oracle_health_ready",
-                                &mut oracle_detect_order,
-                                &mut oracle_detect_pending,
-                                &mut oracle_enqueued,
-                                &mut oracle_coalesced,
-                                &mut oracle_max_pending,
+
+                            let transition = !matches!(
+                                previous,
+                                Some(CandidateCacheEntry {
+                                    state: CandidateHealthState::Liquidatable,
+                                    ..
+                                })
                             );
+                            let last_forwarded = previous
+                                .map(|e| e.last_forwarded_slot)
+                                .unwrap_or(0);
+                            let periodic_due =
+                                evaluation_slot.saturating_sub(last_forwarded)
+                                    >= candidate_recheck_slots;
+                            let repeat_capacity =
+                                oracle_detect_pending.len() < candidate_repeat_soft_cap;
+                            let should_forward = candidate_should_forward(
+                                previous,
+                                CandidateHealthState::Liquidatable,
+                                evaluation_slot,
+                                candidate_recheck_slots,
+                                forced,
+                                repeat_capacity,
+                            );
+
+                            if should_forward {
+                                sweep_forwarded = sweep_forwarded.saturating_add(1);
+                                if forced {
+                                    candidate_cache_forced_forwards =
+                                        candidate_cache_forced_forwards.saturating_add(1);
+                                } else if transition {
+                                    candidate_cache_transition_forwards =
+                                        candidate_cache_transition_forwards.saturating_add(1);
+                                } else {
+                                    candidate_cache_periodic_forwards =
+                                        candidate_cache_periodic_forwards.saturating_add(1);
+                                }
+                                let _ = enqueue_oracle_accounts(
+                                    [account],
+                                    t_rx_ns,
+                                    event_slot,
+                                    "oracle_health_ready",
+                                    &mut oracle_detect_order,
+                                    &mut oracle_detect_pending,
+                                    &mut oracle_enqueued,
+                                    &mut oracle_coalesced,
+                                    &mut oracle_max_pending,
+                                );
+                                candidate_cache.insert(
+                                    account,
+                                    CandidateCacheEntry {
+                                        state: CandidateHealthState::Liquidatable,
+                                        last_forwarded_slot: evaluation_slot,
+                                    },
+                                );
+                            } else {
+                                candidate_cache_suppressed =
+                                    candidate_cache_suppressed.saturating_add(1);
+                                if periodic_due && !repeat_capacity {
+                                    candidate_cache_softcap_suppressed =
+                                        candidate_cache_softcap_suppressed.saturating_add(1);
+                                }
+                                candidate_cache.insert(
+                                    account,
+                                    CandidateCacheEntry {
+                                        state: CandidateHealthState::Liquidatable,
+                                        last_forwarded_slot: last_forwarded,
+                                    },
+                                );
+                            }
                         }
-                        _ => {
-                            // Fail closed: stale/unknown Health must reach the existing
-                            // integration refresh/projection path, not disappear as "healthy".
+                        CandidateHealthState::Error => {
+                            // Fail closed, but do not hammer the exact same stale/error Account
+                            // through refresh/projection every 5 ms. Error state gets a shorter
+                            // bounded recheck cadence than a stable liquidatable candidate.
                             health_sweep_errors =
                                 health_sweep_errors.saturating_add(1);
-                            sweep_forwarded = sweep_forwarded.saturating_add(1);
-                            let _ = enqueue_oracle_accounts(
-                                [account],
-                                t_rx_ns,
-                                event_slot,
-                                "oracle_health_error",
-                                &mut oracle_detect_order,
-                                &mut oracle_detect_pending,
-                                &mut oracle_enqueued,
-                                &mut oracle_coalesced,
-                                &mut oracle_max_pending,
+
+                            let transition = !matches!(
+                                previous,
+                                Some(CandidateCacheEntry {
+                                    state: CandidateHealthState::Error,
+                                    ..
+                                })
                             );
+                            let last_forwarded = previous
+                                .map(|e| e.last_forwarded_slot)
+                                .unwrap_or(0);
+                            let periodic_due =
+                                evaluation_slot.saturating_sub(last_forwarded)
+                                    >= candidate_error_recheck_slots;
+                            let repeat_capacity =
+                                oracle_detect_pending.len() < candidate_repeat_soft_cap;
+                            let should_forward = candidate_should_forward(
+                                previous,
+                                CandidateHealthState::Error,
+                                evaluation_slot,
+                                candidate_error_recheck_slots,
+                                forced,
+                                repeat_capacity,
+                            );
+
+                            if should_forward {
+                                sweep_forwarded = sweep_forwarded.saturating_add(1);
+                                if forced {
+                                    candidate_cache_forced_forwards =
+                                        candidate_cache_forced_forwards.saturating_add(1);
+                                } else if transition {
+                                    candidate_cache_transition_forwards =
+                                        candidate_cache_transition_forwards.saturating_add(1);
+                                } else {
+                                    candidate_cache_periodic_forwards =
+                                        candidate_cache_periodic_forwards.saturating_add(1);
+                                }
+                                let _ = enqueue_oracle_accounts(
+                                    [account],
+                                    t_rx_ns,
+                                    event_slot,
+                                    "oracle_health_error",
+                                    &mut oracle_detect_order,
+                                    &mut oracle_detect_pending,
+                                    &mut oracle_enqueued,
+                                    &mut oracle_coalesced,
+                                    &mut oracle_max_pending,
+                                );
+                                candidate_cache.insert(
+                                    account,
+                                    CandidateCacheEntry {
+                                        state: CandidateHealthState::Error,
+                                        last_forwarded_slot: evaluation_slot,
+                                    },
+                                );
+                            } else {
+                                candidate_cache_suppressed =
+                                    candidate_cache_suppressed.saturating_add(1);
+                                if periodic_due && !repeat_capacity {
+                                    candidate_cache_softcap_suppressed =
+                                        candidate_cache_softcap_suppressed.saturating_add(1);
+                                }
+                                candidate_cache.insert(
+                                    account,
+                                    CandidateCacheEntry {
+                                        state: CandidateHealthState::Error,
+                                        last_forwarded_slot: last_forwarded,
+                                    },
+                                );
+                            }
                         }
                     }
                 }
@@ -1545,6 +1754,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     sweep_dirty_banks.clear();
                     sweep_batch_events = 0;
                     sweep_batch_started_ns = None;
+                    candidate_cache.clear();
+                    candidate_force_rearm.clear();
                     threshold_index = ThresholdIndex::new();
                     threshold_fallback.clear();
                     threshold_bootstrap.clear();
@@ -1870,6 +2081,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 threshold_ready = threshold_bootstrap.is_empty();
             } else if st.run_state().is_tradable() {
+                // A canonical Bank write can change weights, fees, operational state or
+                // integration configuration without changing the debtor account bytes.
+                // Hard-invalidate admission suppression for all accounts using that Bank.
+                candidate_force_rearm.extend(affected_accounts.iter().copied());
                 if let Some((_, t_rx_ns, event_slot)) = updated_bank_event {
                     if sweep_batch_started_ns.is_none() {
                         sweep_batch_started_ns = Some(clock.now_ns());
@@ -2574,7 +2789,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
             #[cfg(feature = "crate_health")]
             eprintln!(
-                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={}",
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={}",
                 threshold_ready,
                 threshold_index.tracked_accounts(),
                 threshold_fallback.len(),
@@ -2605,7 +2820,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 sweep_unique_accounts,
                 sweep_forwarded,
                 sweep_max_unique_batch,
-                sweep_max_dirty_banks
+                sweep_max_dirty_banks,
+                candidate_cache.len(),
+                candidate_cache_suppressed,
+                candidate_cache_softcap_suppressed,
+                candidate_cache_transition_forwards,
+                candidate_cache_periodic_forwards,
+                candidate_cache_forced_forwards
             );
         }
     }
@@ -2658,6 +2879,23 @@ mod integration_probe_tests {
         ]);
         assert_eq!(next_oracle_detect(&mut order, &mut pending).unwrap().0, live);
         assert!(order.is_empty());
+    }
+
+    #[test]
+    fn candidate_cache_forwards_transition_force_and_bounded_periodic_recheck() {
+        let liquid = CandidateHealthState::Liquidatable;
+        let healthy = CandidateHealthState::Healthy;
+        let prev = CandidateCacheEntry { state: liquid, last_forwarded_slot: 100 };
+
+        assert!(candidate_should_forward(None, liquid, 100, 64, false, true));
+        assert!(!candidate_should_forward(Some(prev), liquid, 120, 64, false, true));
+        assert!(candidate_should_forward(Some(prev), liquid, 164, 64, false, true));
+        assert!(!candidate_should_forward(Some(prev), liquid, 164, 64, false, false));
+        assert!(candidate_should_forward(Some(prev), liquid, 101, 64, true, false));
+        assert!(!candidate_should_forward(Some(prev), healthy, 1000, 64, true, true));
+
+        let was_healthy = CandidateCacheEntry { state: healthy, last_forwarded_slot: 100 };
+        assert!(candidate_should_forward(Some(was_healthy), liquid, 101, 64, false, false));
     }
 
     #[test]
