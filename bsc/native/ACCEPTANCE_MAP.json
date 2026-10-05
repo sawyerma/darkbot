@@ -1,13 +1,13 @@
 {
   "schema": "darkbot.native.acceptance-map.v1",
-  "master_plan": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md \u00a714",
+  "master_plan": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md §14",
   "purpose": "Machine-readable companion to the acceptance matrix. The master plan stays the human-readable source; this file adds symbols, test names and evidence hashes.",
   "path_convention": "All evidence paths are repository paths. A path of the form <zip>::<member> names a member inside a ZIP that is itself in the repository.",
   "unit1_source": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip (rustfmt-normalised sources and Cargo.lock), copied unchanged; only crates/darkbot-core/src/lib.rs differs (module list)",
-  "compiler_run": "Units 1-5 including Unit 5 runner v1 rev3 and Unit 5 TLS transport rev2: combined tree PASS on the user's arm64 macOS target (2026-10-05): cargo fmt --all -- --check, debug and release workspace builds, debug and release workspace tests, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Chained final marker: UNIT5_TLS_ALL_GATES_PASS. Measured workspace inventory: 271 tests.",
-  "freeze_status": "Units 1-4 remain IMPLEMENTED_TESTED and FROZEN for their defined scopes. Unit 5 Core remains IMPLEMENTED_TESTED and FROZEN. Unit 5 runner v1 rev3 remains IMPLEMENTED_TESTED and FROZEN. Unit 5 TLS/socket transport rev2 is IMPLEMENTED_TESTED and FROZEN for its implementation scope. Real TLS transport qualification and real provider qualification remain OPEN; no production QualifiedTransport constructor exists. Local-geth native outbound remains deferred to C1. LIVE remains BLOCKED and T0 to T_buy below 1 ms is NOT YET PROVEN.",
+  "compiler_run": "Units 1-5 including Unit 5 runner v1 rev3, Unit 5 TLS transport rev2, and the Q5A qualification harness: combined tree PASS on the user's arm64 macOS target (2026-10-05): cargo fmt --all -- --check, debug and release workspace builds, debug and release workspace tests, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Chained final marker: Q5A_HARNESS_ALL_GATES_PASS. Measured workspace inventory: 303 tests.",
+  "freeze_status": "Units 1-4 remain IMPLEMENTED_TESTED and FROZEN for their defined scopes. Unit 5 Core remains IMPLEMENTED_TESTED and FROZEN. Unit 5 runner v1 rev3 remains IMPLEMENTED_TESTED and FROZEN. Unit 5 TLS/socket transport rev2 remains IMPLEMENTED_TESTED and FROZEN for its implementation scope. The Q5A real-TLS qualification harness is IMPLEMENTED_TESTED on the target machine, but no real 48Club or BlockRazor qualification run has yet been accepted. Real TLS transport qualification is NOT_RUN; real provider qualification remains OPEN; no production QualifiedTransport constructor exists. Local-geth native outbound remains deferred to C1. LIVE remains BLOCKED and T0 to T_buy below 1 ms is NOT YET PROVEN.",
   "test_count": {
-    "total": 271,
+    "total": 303,
     "unit1": 27,
     "unit2": 33,
     "unit3": 33,
@@ -15,7 +15,8 @@
     "unit5_core": 55,
     "core_test_support": 2,
     "unit5_runner": 56,
-    "unit5_tls_transport": 31
+    "unit5_tls_transport": 31,
+    "q5a_qualification_harness": 32
   },
   "rows": [
     {
@@ -803,10 +804,65 @@
       },
       "coverage": "Connection owner per builder with DNS, TCP connect with timeout, TLS handshake with deadline on a blocking socket, ALPN offering http/1.1 only (anything else refused, none taken as HTTP/1.1), switch to non-blocking; TlsTransport implementing the frozen Transport trait with explicit rustls buffering and write_tls draining, WouldBlock and partial writes surfaced unchanged; eligibility rules; maintenance probe (peer close, unsolicited data, overdue response) and reconnect with a new connection generation; provider targets binding the HTTP Host header to the TLS server name, authorization as a redacted token; documented hosts as references only; TlsProfile listing what a future qualification must bind. Tested against a loopback rustls server with test certificates: handshake success, certificate for another name, untrusted issuer, h2-only server, handshake timeout, connect failure, dispatch and ACK over TLS, identical bytes to two builders, fragmented response, malformed response to Stale, EOF to Disconnected, overdue response, idle limit, one request in flight, no reconnect from a dispatch, maintenance probe, backpressure before the permit skipped without disclosure, backpressure after the permit Unknown, peer closed before the write Unknown, no qualified send time over TLS, no credential in Debug or errors, pin consistency. Rev2: two-stage send (prepare before the final check, first write_tls after it), late final check after TLS preparation writes nothing (wire_bytes 0) and is Unknown, final check between preparation and first socket write with the handoff measured separately, request size refused before the admission at limit+1 and sent at the limit, output buffer capacity bound, transactional lock script (tested with a fake cargo: failure at metadata, update, verify and fetch restores Cargo.lock byte for byte).",
       "not_proven": "real provider behaviour (no request to 48Club or BlockRazor was made); TLS transport qualification and the production QualifiedTransport constructor (none added); real handoff boundary and latency distribution on the target system; allocation behaviour of the TLS write path (rustls buffered API, not measured, not claimed); DNS resolution time (std resolver, blocking, maintenance only, no timeout of its own); provider keep-alive and idle-close behaviour; TLS session resumption behaviour; Unit 6 loading and authorisation of endpoints and credentials; local-geth native outbound (C1); T0 to T_buy below 1 ms"
+    },
+    {
+      "matrix_id": "S2-q5a",
+      "adoption": "SN12",
+      "unit": "Unit 5 (Q5A real TLS transport qualification harness)",
+      "status": "IMPLEMENTED_TESTED for the qualification-harness scope; real TLS transport qualification NOT_RUN; real provider qualification OPEN; no production QualifiedTransport constructor; LIVE BLOCKED; T0 to T_buy below 1 ms NOT YET PROVEN",
+      "symbols": [
+        "darkbot_qualify::measure::run_provider",
+        "darkbot_qualify::measure::QUALIFICATION_POLICY",
+        "darkbot_qualify::evidence::QUALIFICATION_WORKLOAD",
+        "darkbot_qualify::verdict::evaluate",
+        "darkbot_qualify::verdict::overall",
+        "darkbot_qualify::verdict::handoff_issue",
+        "darkbot_qualify::identity::Identity",
+        "darkbot_qualify::identity::EXPECTED_BASELINE",
+        "darkbot-qualify::bin::u5_tls_qualify",
+        "bsc/native/tools/q5a_check_evidence.py"
+      ],
+      "tests": [
+        "darkbot-qualify::offline::the_probe_carries_no_transaction_and_a_last_block_of_zero",
+        "darkbot-qualify::offline::the_probe_is_framed_like_the_runner_frames_a_bundle",
+        "darkbot-qualify::offline::sha256_is_the_standard_one",
+        "darkbot-qualify::offline::percentiles_are_nearest_rank_and_the_limit_itself_is_a_miss",
+        "darkbot-qualify::offline::no_percentile_hides_a_maximum_miss",
+        "darkbot-qualify::offline::json_escapes_and_renders_deterministically",
+        "darkbot-qualify::offline::timestamps_are_rfc3339_utc",
+        "darkbot-qualify::offline::a_complete_answer_keeps_the_connection_and_anything_else_ends_it",
+        "darkbot-qualify::offline::a_run_that_meets_every_rule_passes",
+        "darkbot-qualify::offline::a_handoff_of_one_millisecond_fails_and_one_nanosecond_less_does_not",
+        "darkbot-qualify::offline::a_single_slow_handoff_fails_even_below_p99",
+        "darkbot-qualify::offline::a_skip_or_an_unknown_anywhere_fails",
+        "darkbot-qualify::offline::fewer_measured_samples_or_another_workload_is_incomplete",
+        "darkbot-qualify::offline::a_failure_outweighs_incompleteness",
+        "darkbot-qualify::offline::a_missing_authorization_measures_the_handshake_only_and_stays_incomplete",
+        "darkbot-qualify::offline::a_failed_connection_fails",
+        "darkbot-qualify::offline::a_handed_off_sample_without_its_timing_is_never_a_pass",
+        "darkbot-qualify::offline::every_handoff_must_be_complete_and_consistent",
+        "darkbot-qualify::offline::a_reconnect_probe_belongs_to_its_new_connection",
+        "darkbot-qualify::offline::a_build_flag_with_an_unexpected_value_is_never_accepted",
+        "darkbot-qualify::offline::every_gap_in_the_identity_leaves_the_run_incomplete",
+        "darkbot-qualify::offline::every_reconnect_must_advance_retire_and_probe",
+        "darkbot-qualify::offline::the_measured_series_must_stay_on_one_connection",
+        "darkbot-qualify::offline::the_api_scope_is_reported_beside_the_transport_verdict",
+        "darkbot-qualify::offline::the_overall_verdict_needs_both_builders_to_pass",
+        "darkbot-qualify::offline::the_evidence_binds_identity_workload_and_verdict_and_holds_no_secret",
+        "darkbot-qualify::loopback::a_run_measures_every_sample_over_one_connection_and_reconnects_explicitly",
+        "darkbot-qualify::loopback::the_authorization_is_sent_and_never_recorded",
+        "darkbot-qualify::loopback::without_an_authorization_only_the_handshake_is_measured",
+        "darkbot-qualify::loopback::a_refused_authorization_keeps_the_connection_and_is_reported_as_such",
+        "darkbot-qualify::loopback::a_closed_connection_ends_the_series_without_repair",
+        "darkbot-qualify::loopback::an_untrusted_certificate_fails_the_connection"
+      ],
+      "result": "PASS on the user's arm64 macOS target (2026-10-05): cargo fmt --all -- --check PASS; cargo build --workspace --locked --offline PASS; cargo build --workspace --release --locked --offline PASS; cargo test --workspace --locked --offline PASS; cargo test --workspace --release --locked --offline PASS; cargo clippy --workspace --all-targets --locked --offline -- -D warnings PASS. Chained final marker: Q5A_HARNESS_ALL_GATES_PASS. Q5A contributes 32 tests; combined workspace inventory is 303 tests.",
+      "coverage": "Qualification-only crate over the frozen production TlsConnectionOwner/TlsTransport path; safe non-value-bearing empty eth_sendBundle probe; build identity bound to baseline, commit, tracked-tree cleanliness, frozen-source equality, release profile, rustls/ring versions and transport implementation id; exactly 10 warmups, 100 measured samples and 3 reconnect cycles per provider; fail-closed handed-off evidence consistency; >= 1,000,000 ns is a miss; independent Python evidence checker recomputes durations and aggregates from raw timestamps; authorization secret is never written and evidence is scanned before persistence. The harness does not create a QualifiedTransport and does not qualify provider ordering/inclusion semantics.",
+      "not_proven": "No accepted real Q5A run against 48Club or BlockRazor yet; therefore no real TLS transport qualification, no production transport qualification generation, no real provider lifecycle/ordering/atomicity/same-block/pre-submission qualification, no inclusion proof, no canonical acquisition proof and no T0 to T_buy below 1 ms proof. A transport PASS from Q5A, when obtained, will still not by itself qualify provider semantics or T_buy."
     }
   ],
   "unit4_commit": "c745d92305ee24b0bff76621df0e83e09c9353b8",
   "unit4_bsc_native_tree": "421352ff59602d15da02556e1527785f0da7a29a",
-  "next_step": "C0 Unit 5 \u2014 inclusion adapters: local-geth, 48Club and BlockRazor only within verified capability scopes; freeze capability records before implementation; Unit 4 bytes/nonce/permit invariants remain authoritative.",
+  "next_step": "C0 Unit 5 — inclusion adapters: local-geth, 48Club and BlockRazor only within verified capability scopes; freeze capability records before implementation; Unit 4 bytes/nonce/permit invariants remain authoritative.",
   "product_gate": "LIVE blocked; T_buy - T0 < 1,000,000 ns NOT YET PROVEN; no value-bearing Mainnet action authorized by this status."
 }
