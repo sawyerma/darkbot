@@ -2806,3 +2806,41 @@ Important boundary:
 Status: **IMPLEMENTED IN SOURCE / NOT YET COMPILED OR TESTED after these commits.**
 LIVE remains hard-disabled. 72 h NOT STARTED. Next: compile/test this checkpoint, then
 P1B 0.1.12 source-parity promotion before FIX-129 economics closure / long-run qualification.
+
+
+### 2026-10-05 — P1B 0.1.12 compiler/unit-test gate PASS
+
+Promotion branch: `p1b-marginfi-0.1.12`.
+
+Pinned Marginfi source commit:
+`7d48d8a3bafa8e03e4020d253aaa2ea426dde68e`.
+
+Implemented 0.1.12 semantic deltas in the active sizing/health path:
+- projected variable-borrow premium from the official type-crate helpers;
+- `repay_all` closes principal + recognized premium and transfers ceil(total owed);
+- partial repay settles recognized premium before principal;
+- tag-adjusted liquidation premium is source-backed;
+- fresh StartLiquidation maintenance E-Mode suppresses tag growth;
+- pre-existing bad debt suppresses tag growth;
+- closeout may end healthy but remains subject to the liquidation premium cap.
+
+User-reported local Mac verification on 2026-10-05:
+- `cargo test --workspace --features crate_health,txv1` → PASS;
+- `cargo test --workspace --features crate_health` → PASS;
+- zero failures reported.
+
+This closes compiler/unit-test qualification only. It does **not** prove Mainnet
+runtime parity, technical liquidation success under 0.1.12, economic profitability,
+Drift coverage, P3-02 thresholds, FailedCostMatrix closure, v1 production submission,
+or LIVE readiness.
+
+Current branch head after documentation-only cleanup remains P1B-only and has not
+been promoted to `main`. `main` advanced independently, so the branch must be
+reconciled only after runtime qualification rather than merged blindly.
+
+Next exact gate: R123 Mainnet Shadow using the existing
+`project_0/scripts/run_shadow_mainnet.sh` launcher, with LIVE disabled and
+ZERO_PREFUND only as a Shadow probe. Re-qualify projection → Health → Sizing →
+integration withdraw → Jupiter → repay → EndLiquidation simulation against the
+0.1.12 pin. Preserve exact slot/timestamp evidence and record any premium-bearing
+liability encountered. No value-bearing send.
