@@ -97,7 +97,7 @@ pub mod crate_impl {
     use fixed::types::I80F48;
     use marginfi::state::{
         bank::BankImpl,
-        marginfi_account::{calc_value, get_health_components},
+        marginfi_account::{calc_value, get_health_components, BalanceImpl},
         price::{OraclePriceFeedAdapter, PriceAdapter},
     };
     use marginfi_type_crate::constants::{
@@ -374,7 +374,7 @@ pub mod crate_impl {
             Ok((low_bits as u128, high_bits as u128))
         }
 
-        fn first_true_boundary<F>(
+        pub(super) fn first_true_boundary<F>(
             current: u128,
             mut predicate: F,
         ) -> Result<Option<u128>, HealthError>
