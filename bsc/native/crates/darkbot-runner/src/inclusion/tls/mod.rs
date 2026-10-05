@@ -31,15 +31,19 @@
 //! `WouldBlock` or a partial write surfaces exactly where it happens, and
 //! no encryption lies between the last check and the wire.
 //!
-//! # Not qualified
+//! # Qualification
 //!
-//! Nothing here makes a transport qualified. A `TlsTransport` is a
-//! `Transport` and can be used for a diagnostic dispatch; a release
-//! dispatch needs a `QualifiedTransport`, which still has no production
-//! constructor. That constructor needs evidence from a real qualification
-//! of this implementation against each builder, bound to what
-//! [`TlsProfile`] lists and to the adapter, kind, capability generation,
-//! handoff boundary and qualification generation.
+//! Q5A qualified this exact production TLS implementation on the target
+//! machine against both builder endpoints. [`qualify_transport`] is the
+//! only production path that can turn a concrete owner's `TlsTransport`
+//! into a `QualifiedTransport`. It fails closed unless the current
+//! connection profile matches the accepted Q5A endpoint, policy, platform,
+//! peer, TLS version/cipher and HTTP/ALPN facts, and unless the capability
+//! table binds the same builder kind and TLS handoff boundary.
+//!
+//! This is transport qualification only. It does not qualify provider
+//! ordering, atomicity, same-block placement, `noMerge`, `positionFirst`,
+//! pre-submission, inclusion or `T0 -> T_buy`; those gates remain separate.
 //!
 //! # Credentials
 //!
@@ -51,6 +55,7 @@
 mod config;
 mod connection;
 mod owner;
+mod qualification;
 mod transport;
 
 pub use config::{
@@ -62,4 +67,9 @@ pub use connection::{
     ConnectError, ConnectionFacts, HttpVersion, TLS_TRANSPORT_IMPLEMENTATION, WarmTlsConnection,
 };
 pub use owner::{Maintenance, TlsConnectionOwner, TlsProfile};
+pub use qualification::{
+    Q5A_TLS_EVIDENCE_PATH, Q5A_TLS_EVIDENCE_SHA256, Q5A_TLS_POLICY,
+    Q5A_TLS_QUALIFICATION_GENERATION, QualifiedTlsTransport, TlsQualificationError,
+    qualify_transport,
+};
 pub use transport::TlsTransport;
