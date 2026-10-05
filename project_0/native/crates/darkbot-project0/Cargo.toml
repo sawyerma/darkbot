@@ -5,10 +5,9 @@ edition = "2021"
 description = "DarkBot Project 0: protocol glue (P1/P3 via marginfi crate), state engine + indices + schedulers (P2), deterministic economics (P4A), receivership planner (P5), tagger (T)"
 license = "UNLICENSED"
 
-# UNTESTED / VERIFY.
-# `marginfi` (Apache-2.0) wird als Health-Engine eingebunden, sobald P0-01/P1A-01 den
-# deployed Tag bestätigt haben. Bis dahin ist das Feature `crate_health` aus und
-# `health::CrateHealth` ein dokumentierter Stub — keine eigene Health-Formel.
+# P1B 0.1.12 promotion: official marginfi crates remain the Health/risk source of truth.
+# Compiler/unit tests are qualified on the promotion branch; Mainnet Shadow evidence remains
+# a separate gate before promotion to main/LIVE.
 
 [features]
 default = []
@@ -23,8 +22,7 @@ bytemuck = "1"
 fixed = { version = "=1.28.0", optional = true } # [FIX-59] exact protocol sizing math; matches marginfi lock
 anchor-lang = { version = "1.0.2", optional = true }
 
-# VERIFY: Tag = deployed Mainnet-Version aus P1A-01 (erwartet 0.1.12-main@7d48d8a3, nach Upgrade 0.1.12).
-# BELEGT (Sitzung 4): Programm-Crate main = 0.1.11, features client/no-entrypoint/mainnet-beta; Type-Crate 0.1.10.
+# P1B pin: 0.1.12 source commit selected for promotion/runtime qualification.
 marginfi = { git = "https://github.com/0dotxyz/marginfi-v2", rev = "7d48d8a3bafa8e03e4020d253aaa2ea426dde68e", default-features = false, features = ["client", "no-entrypoint", "mainnet-beta"], optional = true }
 marginfi-type-crate = { git = "https://github.com/0dotxyz/marginfi-v2", rev = "7d48d8a3bafa8e03e4020d253aaa2ea426dde68e", default-features = false, features = ["mainnet-beta"], optional = true }
 
