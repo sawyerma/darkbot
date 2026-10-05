@@ -174,21 +174,27 @@ impl ThresholdIndex {
         }
     }
 
-    /// Kandidaten für einen neuen Bank-Preis: exakt nachzurechnen, nicht "liquidierbar".
-    /// `margin` erweitert den Bereich (Preisfehler/Confidence), damit nahe Accounts
-    /// mitgeprüft werden.
-    pub fn candidates(&self, bank: &Pubkey, price: u128, margin: u128) -> Vec<Pubkey> {
+    /// Kandidaten für die zwei Maintenance-Risk-Preisachsen einer Bank:
+    /// collateral uses confidence-biased Low, liabilities use confidence-biased High.
+    /// Die beiden Achsen dürfen nicht zusammengelegt werden.
+    pub fn candidates(
+        &self,
+        bank: &Pubkey,
+        asset_price: u128,
+        liability_price: u128,
+        margin: u128,
+    ) -> Vec<Pubkey> {
         let mut out: HashSet<Pubkey> = HashSet::new();
         if let Some(m) = self.asset.get(bank) {
-            // liquidierbar wenn price <= key  → alle keys >= price - margin
-            let lo = price.saturating_sub(margin);
+            // Asset-Halter wird liquidierbar wenn Low-price <= threshold.
+            let lo = asset_price.saturating_sub(margin);
             for (_, set) in m.range(lo..) {
                 out.extend(set.iter().copied());
             }
         }
         if let Some(m) = self.liability.get(bank) {
-            // liquidierbar wenn price >= key → alle keys <= price + margin
-            let hi = price.saturating_add(margin);
+            // Schuldner wird liquidierbar wenn High-price >= threshold.
+            let hi = liability_price.saturating_add(margin);
             for (_, set) in m.range(..=hi) {
                 out.extend(set.iter().copied());
             }
@@ -240,19 +246,22 @@ mod tests {
         // Schuldner wird liquidierbar, wenn Preis >= 200
         t.set_account(a_liab, &[(bank, Side::Liability, 200)]);
         t.set_account(far, &[(bank, Side::Asset, 10)]);
-        let c = t.candidates(&bank, 150, 0);
+        let c = t.candidates(&bank, 150, 150, 0);
         assert!(c.is_empty(), "150 liegt zwischen beiden Schwellen: {:?}", c);
-        let c = t.candidates(&bank, 95, 0);
+        let c = t.candidates(&bank, 95, 95, 0);
         assert_eq!(c, vec![a_asset]);
-        let c = t.candidates(&bank, 250, 0);
+        let c = t.candidates(&bank, 250, 250, 0);
         assert_eq!(c, vec![a_liab]);
         // margin zieht nahe Accounts hinein
-        let c = t.candidates(&bank, 105, 10);
+        let c = t.candidates(&bank, 105, 105, 10);
         assert_eq!(c, vec![a_asset]);
+        // Low/High sind getrennte Risk-Preisachsen: nur High überschreitet Liability.
+        let c = t.candidates(&bank, 150, 250, 0);
+        assert_eq!(c, vec![a_liab]);
         // Update ersetzt alte Schwelle
         t.set_account(a_asset, &[(bank, Side::Asset, 50)]);
-        assert!(t.candidates(&bank, 95, 0).is_empty());
-        assert_eq!(t.candidates(&bank, 40, 0), vec![a_asset]);
+        assert!(t.candidates(&bank, 95, 95, 0).is_empty());
+        assert_eq!(t.candidates(&bank, 40, 40, 0), vec![a_asset]);
         t.remove_account(&a_asset);
         assert_eq!(t.tracked_accounts(), 2);
     }
