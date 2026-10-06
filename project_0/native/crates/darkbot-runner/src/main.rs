@@ -92,6 +92,10 @@ enum CandidateHealthState {
 struct CandidateCacheEntry {
     state: CandidateHealthState,
     last_forwarded_slot: u64,
+    /// [FIX-134] Monotonic causal revision of the newest canonical Bank/dependency
+    /// input that was admitted downstream for this candidate. Slot alone is insufficient:
+    /// WSS can deliver multiple distinct writes inside one Solana slot.
+    last_forwarded_revision: u64,
 }
 
 #[cfg(feature = "crate_health")]
@@ -99,6 +103,7 @@ fn candidate_should_forward(
     previous: Option<CandidateCacheEntry>,
     current: CandidateHealthState,
     evaluation_slot: u64,
+    input_revision: u64,
     recheck_slots: u64,
     forced: bool,
     repeat_capacity: bool,
@@ -108,8 +113,12 @@ fn candidate_should_forward(
     }
     let transition = previous.map(|e| e.state) != Some(current);
     let last_forwarded = previous.map(|e| e.last_forwarded_slot).unwrap_or(0);
+    let last_revision = previous.map(|e| e.last_forwarded_revision).unwrap_or(0);
+    let revision_changed = input_revision > last_revision;
     let periodic_due = evaluation_slot.saturating_sub(last_forwarded) >= recheck_slots;
-    forced || transition || (periodic_due && repeat_capacity)
+    // [FIX-134] A changed canonical input is correctness work, not a periodic repeat:
+    // it bypasses the repeat soft-cap exactly like a class transition / forced re-arm.
+    forced || transition || revision_changed || (periodic_due && repeat_capacity)
 }
 
 // [FIX-121][R6] Qualification targets wait as unsigned identities, not signed RPC jobs.
@@ -930,6 +939,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut candidate_cache: HashMap<Pubkey, CandidateCacheEntry> = HashMap::new();
     #[cfg(feature = "crate_health")]
     let mut candidate_force_rearm: HashSet<Pubkey> = HashSet::new();
+    // [FIX-134] Global monotonic epoch plus per-Bank latest causal revision.
+    // Dependency updates (oracle / integration source) advance every affected Bank.
+    // Direct Bank writes advance that Bank. This survives multiple writes in one slot.
+    #[cfg(feature = "crate_health")]
+    let mut candidate_input_epoch: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut bank_input_revision: HashMap<Pubkey, u64> = HashMap::new();
+    #[cfg(feature = "crate_health")]
+    let mut candidate_revision_forwards: u64 = 0;
     #[cfg(feature = "crate_health")]
     let mut candidate_cache_suppressed: u64 = 0;
     #[cfg(feature = "crate_health")]
@@ -1420,19 +1438,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 sweep_batch_started_ns = None;
                 sweep_batches = sweep_batches.saturating_add(1);
 
-                let mut account_work: HashMap<Pubkey, (u64, u64)> = HashMap::new();
+                // [FIX-134] Carry the newest causal Bank/dependency revision into
+                // each deduped Account evaluation. Multiple dirty Banks collapse to one Account
+                // while retaining the newest revision and newest event timing.
+                let mut account_work: HashMap<Pubkey, (u64, u64, u64)> = HashMap::new();
                 let mut refs = 0usize;
                 for (bank, (t_rx_ns, event_slot)) in dirty {
+                    let input_revision = bank_input_revision.get(&bank).copied().unwrap_or(0);
                     for account in reverse_index.accounts_for_bank(&bank).copied() {
                         refs = refs.saturating_add(1);
                         account_work
                             .entry(account)
                             .and_modify(|w| {
                                 if event_slot > w.1 || (event_slot == w.1 && t_rx_ns > w.0) {
-                                    *w = (t_rx_ns, event_slot);
+                                    w.0 = t_rx_ns;
+                                    w.1 = event_slot;
                                 }
+                                w.2 = w.2.max(input_revision);
                             })
-                            .or_insert((t_rx_ns, event_slot));
+                            .or_insert((t_rx_ns, event_slot, input_revision));
                     }
                 }
 
@@ -1454,9 +1478,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let view = StateView(&st);
 
                 // CPU-only and independent per account. No RPC, no state mutation.
-                let mut evaluated: Vec<(Pubkey, u64, u64, CandidateHealthState)> = account_work
+                let mut evaluated: Vec<(Pubkey, u64, u64, u64, CandidateHealthState)> = account_work
                     .into_par_iter()
-                    .map(|(account, (t_rx_ns, event_slot))| {
+                    .map(|(account, (t_rx_ns, event_slot, input_revision))| {
                         let engine = darkbot_project0::health::crate_impl::CrateHealth {
                             state: &view,
                             group,
@@ -1466,16 +1490,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             Ok(_) => CandidateHealthState::Liquidatable,
                             Err(_) => CandidateHealthState::Error,
                         };
-                        (account, t_rx_ns, event_slot, status)
+                        (account, t_rx_ns, event_slot, input_revision, status)
                     })
                     .collect();
 
-                // Deterministic order gives periodic rechecks fair progress when the soft cap
-                // is active. Accounts forwarded in this pass move their last_forwarded_slot,
-                // so still-due accounts naturally advance on later batches.
-                evaluated.sort_unstable_by_key(|(account, _, _, _)| account.to_bytes());
+                // FIX-135 fairness is intentionally separate. Keep current ordering in FIX-134
+                // so this change only closes same-slot causal revision blindness.
+                evaluated.sort_unstable_by_key(|(account, _, _, _, _)| account.to_bytes());
 
-                for (account, t_rx_ns, event_slot, status) in evaluated {
+                for (account, t_rx_ns, event_slot, input_revision, status) in evaluated {
                     let previous = candidate_cache.get(&account).copied();
                     let forced = candidate_force_rearm.remove(&account);
 
@@ -1489,6 +1512,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     state: CandidateHealthState::Healthy,
                                     last_forwarded_slot: previous
                                         .map(|e| e.last_forwarded_slot)
+                                        .unwrap_or(0),
+                                    last_forwarded_revision: previous
+                                        .map(|e| e.last_forwarded_revision)
                                         .unwrap_or(0),
                                 },
                             );
@@ -1510,12 +1536,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let periodic_due =
                                 evaluation_slot.saturating_sub(last_forwarded)
                                     >= candidate_recheck_slots;
+                            let revision_changed = input_revision
+                                > previous.map(|e| e.last_forwarded_revision).unwrap_or(0);
                             let repeat_capacity =
                                 oracle_detect_pending.len() < candidate_repeat_soft_cap;
                             let should_forward = candidate_should_forward(
                                 previous,
                                 CandidateHealthState::Liquidatable,
                                 evaluation_slot,
+                                input_revision,
                                 candidate_recheck_slots,
                                 forced,
                                 repeat_capacity,
@@ -1529,6 +1558,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 } else if transition {
                                     candidate_cache_transition_forwards =
                                         candidate_cache_transition_forwards.saturating_add(1);
+                                } else if revision_changed {
+                                    candidate_revision_forwards =
+                                        candidate_revision_forwards.saturating_add(1);
                                 } else {
                                     candidate_cache_periodic_forwards =
                                         candidate_cache_periodic_forwards.saturating_add(1);
@@ -1549,6 +1581,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     CandidateCacheEntry {
                                         state: CandidateHealthState::Liquidatable,
                                         last_forwarded_slot: evaluation_slot,
+                                        last_forwarded_revision: input_revision,
                                     },
                                 );
                             } else {
@@ -1563,6 +1596,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     CandidateCacheEntry {
                                         state: CandidateHealthState::Liquidatable,
                                         last_forwarded_slot: last_forwarded,
+                                        last_forwarded_revision: previous
+                                            .map(|e| e.last_forwarded_revision)
+                                            .unwrap_or(0),
                                     },
                                 );
                             }
@@ -1587,12 +1623,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let periodic_due =
                                 evaluation_slot.saturating_sub(last_forwarded)
                                     >= candidate_error_recheck_slots;
+                            let revision_changed = input_revision
+                                > previous.map(|e| e.last_forwarded_revision).unwrap_or(0);
                             let repeat_capacity =
                                 oracle_detect_pending.len() < candidate_repeat_soft_cap;
                             let should_forward = candidate_should_forward(
                                 previous,
                                 CandidateHealthState::Error,
                                 evaluation_slot,
+                                input_revision,
                                 candidate_error_recheck_slots,
                                 forced,
                                 repeat_capacity,
@@ -1606,6 +1645,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 } else if transition {
                                     candidate_cache_transition_forwards =
                                         candidate_cache_transition_forwards.saturating_add(1);
+                                } else if revision_changed {
+                                    candidate_revision_forwards =
+                                        candidate_revision_forwards.saturating_add(1);
                                 } else {
                                     candidate_cache_periodic_forwards =
                                         candidate_cache_periodic_forwards.saturating_add(1);
@@ -1626,6 +1668,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     CandidateCacheEntry {
                                         state: CandidateHealthState::Error,
                                         last_forwarded_slot: evaluation_slot,
+                                        last_forwarded_revision: input_revision,
                                     },
                                 );
                             } else {
@@ -1640,6 +1683,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     CandidateCacheEntry {
                                         state: CandidateHealthState::Error,
                                         last_forwarded_slot: last_forwarded,
+                                        last_forwarded_revision: previous
+                                            .map(|e| e.last_forwarded_revision)
+                                            .unwrap_or(0),
                                     },
                                 );
                             }
@@ -1766,6 +1812,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     sweep_batch_started_ns = None;
                     candidate_cache.clear();
                     candidate_force_rearm.clear();
+                    candidate_input_epoch = 0;
+                    bank_input_revision.clear();
                     threshold_index = ThresholdIndex::new();
                     threshold_fallback.clear();
                     threshold_bootstrap.clear();
@@ -2093,7 +2141,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             } else if st.run_state().is_tradable() {
                 // A canonical Bank write can change weights, fees, operational state or
                 // integration configuration without changing the debtor account bytes.
-                // Hard-invalidate admission suppression for all accounts using that Bank.
+                // [FIX-134] Record a causal revision in addition to the existing force-rearm.
+                candidate_input_epoch = candidate_input_epoch.saturating_add(1);
+                bank_input_revision.insert(bank_pk, candidate_input_epoch);
                 candidate_force_rearm.extend(affected_accounts.iter().copied());
                 if let Some((_, t_rx_ns, event_slot)) = updated_bank_event {
                     if sweep_batch_started_ns.is_none() {
@@ -2188,6 +2238,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 let banks: Vec<Pubkey> =
                     reverse_index.banks_for_oracle(&dependency).copied().collect();
+
+                // [FIX-134] Oracle and integration source writes are causal candidate inputs.
+                // A global epoch makes multiple writes inside one slot distinguishable and
+                // lets a candidate collapse several changed Banks to a single newest revision.
+                if !banks.is_empty() {
+                    candidate_input_epoch = candidate_input_epoch.saturating_add(1);
+                    for bank in banks.iter().copied() {
+                        bank_input_revision.insert(bank, candidate_input_epoch);
+                    }
+                }
 
                 if !use_threshold_trigger {
                     if sweep_batch_started_ns.is_none() {
@@ -2799,7 +2859,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
             #[cfg(feature = "crate_health")]
             eprintln!(
-                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={} candidate_recheck_slots={} candidate_error_recheck_slots={} candidate_repeat_soft_cap={}",
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_revision_forwards={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={} candidate_recheck_slots={} candidate_error_recheck_slots={} candidate_repeat_soft_cap={}",
                 threshold_ready,
                 threshold_index.tracked_accounts(),
                 threshold_fallback.len(),
@@ -2835,6 +2895,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 candidate_cache_suppressed,
                 candidate_cache_softcap_suppressed,
                 candidate_cache_transition_forwards,
+                candidate_revision_forwards,
                 candidate_cache_periodic_forwards,
                 candidate_cache_forced_forwards,
                 candidate_recheck_slots,
@@ -2895,24 +2956,64 @@ mod integration_probe_tests {
     }
 
     #[test]
-    fn candidate_cache_forwards_transition_force_and_bounded_periodic_recheck() {
+    fn candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck() {
         let liquid = CandidateHealthState::Liquidatable;
         let healthy = CandidateHealthState::Healthy;
-        let prev = CandidateCacheEntry { state: liquid, last_forwarded_slot: 100 };
+        let prev = CandidateCacheEntry {
+            state: liquid,
+            last_forwarded_slot: 100,
+            last_forwarded_revision: 7,
+        };
 
-        assert!(candidate_should_forward(None, liquid, 100, 64, false, true));
-        assert!(!candidate_should_forward(Some(prev), liquid, 120, 64, false, true));
-        assert!(candidate_should_forward(Some(prev), liquid, 164, 64, false, true));
-        assert!(!candidate_should_forward(Some(prev), liquid, 164, 64, false, false));
+        assert!(candidate_should_forward(None, liquid, 100, 7, 64, false, true));
+        assert!(!candidate_should_forward(Some(prev), liquid, 120, 7, 64, false, true));
+        assert!(candidate_should_forward(Some(prev), liquid, 164, 7, 64, false, true));
+        assert!(!candidate_should_forward(Some(prev), liquid, 164, 7, 64, false, false));
+
+        // [FIX-134] Same slot, same class, changed canonical dependency revision:
+        // must forward even when periodic repeat capacity is exhausted.
+        assert!(candidate_should_forward(Some(prev), liquid, 100, 8, 64, false, false));
+        // Identical revision remains suppressible inside the same slot.
+        assert!(!candidate_should_forward(Some(prev), liquid, 100, 7, 1, false, true));
+
         // Production default is one slot: unchanged candidates may be reconsidered on the
         // next slot, but never every 5 ms batch within the same slot.
-        assert!(candidate_should_forward(Some(prev), liquid, 101, 1, false, true));
-        assert!(!candidate_should_forward(Some(prev), liquid, 100, 1, false, true));
-        assert!(candidate_should_forward(Some(prev), liquid, 101, 64, true, false));
-        assert!(!candidate_should_forward(Some(prev), healthy, 1000, 64, true, true));
+        assert!(candidate_should_forward(Some(prev), liquid, 101, 7, 1, false, true));
+        assert!(candidate_should_forward(Some(prev), liquid, 101, 7, 64, true, false));
+        assert!(!candidate_should_forward(Some(prev), healthy, 1000, 99, 64, true, true));
 
-        let was_healthy = CandidateCacheEntry { state: healthy, last_forwarded_slot: 100 };
-        assert!(candidate_should_forward(Some(was_healthy), liquid, 101, 64, false, false));
+        let was_healthy = CandidateCacheEntry {
+            state: healthy,
+            last_forwarded_slot: 100,
+            last_forwarded_revision: 7,
+        };
+        assert!(candidate_should_forward(Some(was_healthy), liquid, 101, 7, 64, false, false));
+
+        let was_error = CandidateCacheEntry {
+            state: CandidateHealthState::Error,
+            last_forwarded_slot: 100,
+            last_forwarded_revision: 12,
+        };
+        // Changed integration/dependency input in the same slot must retry an Error.
+        assert!(candidate_should_forward(
+            Some(was_error),
+            CandidateHealthState::Error,
+            100,
+            13,
+            64,
+            false,
+            false,
+        ));
+        // Exact duplicate input is still suppressed.
+        assert!(!candidate_should_forward(
+            Some(was_error),
+            CandidateHealthState::Error,
+            100,
+            12,
+            64,
+            false,
+            true,
+        ));
     }
 
     #[test]
