@@ -1,0 +1,960 @@
+diff --git a/core/blockchain.go b/core/blockchain.go
+index aa21ae183..aa1c1fbac 100644
+--- a/core/blockchain.go
++++ b/core/blockchain.go
+@@ -47,6 +47,7 @@ import (
+ 	"github.com/ethereum/go-ethereum/core/tracing"
+ 	"github.com/ethereum/go-ethereum/core/types"
+ 	"github.com/ethereum/go-ethereum/core/vm"
++	"github.com/ethereum/go-ethereum/darkbot/fastlane"
+ 	"github.com/ethereum/go-ethereum/ethdb"
+ 	"github.com/ethereum/go-ethereum/event"
+ 	"github.com/ethereum/go-ethereum/internal/syncx"
+@@ -2104,6 +2105,7 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
+ 	bc.futureBlocks.Remove(block.Hash())
+ 
+ 	if status == CanonStatTy {
++		fastlane.PublishCanonical(block.Header(), len(block.Transactions()))
+ 		bc.chainFeed.Send(ChainEvent{
+ 			Header:       block.Header(),
+ 			Receipts:     receipts,
+@@ -2985,6 +2987,7 @@ func (bc *BlockChain) collectReceiptsAndLogs(b *types.Block, removed bool) ([]*t
+ // Note the new head block won't be processed here, callers need to handle it
+ // externally.
+ func (bc *BlockChain) reorg(oldHead *types.Header, newHead *types.Header) error {
++	originalOldHead, originalNewHead := oldHead, newHead
+ 	var (
+ 		newChain    []*types.Header
+ 		oldChain    []*types.Header
+@@ -3053,6 +3056,8 @@ func (bc *BlockChain) reorg(oldHead *types.Header, newHead *types.Header) error
+ 		// rewind the canonical chain to a lower point.
+ 		log.Error("Impossible reorg, please file an issue", "oldnum", oldHead.Number, "oldhash", oldHead.Hash(), "oldblocks", len(oldChain), "newnum", newHead.Number, "newhash", newHead.Hash(), "newblocks", len(newChain))
+ 	}
++	fastlane.PublishReorg(originalOldHead, originalNewHead, commonBlock)
++
+ 	// Acquire the tx-lookup lock before mutation. This step is essential
+ 	// as the txlookups should be changed atomically, and all subsequent
+ 	// reads should be blocked until the mutation is complete.
+@@ -3210,6 +3215,7 @@ func (bc *BlockChain) SetCanonical(head *types.Block) (common.Hash, error) {
+ 	// Emit events
+ 	receipts, logs := bc.collectReceiptsAndLogs(head, false)
+ 
++	fastlane.PublishCanonical(head.Header(), len(head.Transactions()))
+ 	bc.chainFeed.Send(ChainEvent{
+ 		Header:       head.Header(),
+ 		Receipts:     receipts,
+diff --git a/eth/handler.go b/eth/handler.go
+index 1ea417074..b90e3f9da 100644
+--- a/eth/handler.go
++++ b/eth/handler.go
+@@ -24,6 +24,7 @@ import (
+ 	"maps"
+ 	"math"
+ 	"math/big"
++	"runtime"
+ 	"slices"
+ 	"strings"
+ 	"sync"
+@@ -39,6 +40,7 @@ import (
+ 	"github.com/ethereum/go-ethereum/core/rawdb"
+ 	"github.com/ethereum/go-ethereum/core/txpool"
+ 	"github.com/ethereum/go-ethereum/core/types"
++	"github.com/ethereum/go-ethereum/darkbot/fastlane"
+ 	"github.com/ethereum/go-ethereum/eth/downloader"
+ 	"github.com/ethereum/go-ethereum/eth/ethconfig"
+ 	"github.com/ethereum/go-ethereum/eth/fetcher"
+@@ -204,6 +206,19 @@ type handler struct {
+ 
+ // newHandler returns a handler for all Ethereum chain management protocol.
+ func newHandler(config *handlerConfig) (*handler, error) {
++	fastLaneOwned := false
++	if err := fastlane.InitFromEnv(); err != nil {
++		return nil, fmt.Errorf("darkbot fastlane init: %w", err)
++	}
++	if fastlane.Enabled() {
++		fastLaneOwned = true
++		defer func() {
++			if fastLaneOwned {
++				fastlane.Close()
++			}
++		}()
++	}
++
+ 	// Create the protocol manager with the base fields
+ 	if config.EventMux == nil {
+ 		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
+@@ -404,6 +419,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
+ 	}
+ 	h.txFetcher = fetcher.NewTxFetcher(h.txpool.Has, addTxs, fetchTx, h.removePeer)
+ 	h.chainSync = newChainSyncer(h)
++	fastLaneOwned = false
+ 	return h, nil
+ }
+ 
+@@ -721,6 +737,10 @@ func (h *handler) unregisterPeer(id string) {
+ func (h *handler) Start(maxPeers int, maxPeersPerIP int) {
+ 	h.maxPeers = maxPeers
+ 	h.maxPeersPerIP = maxPeersPerIP
++	if fastlane.Enabled() {
++		h.wg.Add(1)
++		go h.fastLaneOutboundLoop()
++	}
+ 	// broadcast and announce transactions (only new ones, not resurrected ones)
+ 	h.wg.Add(1)
+ 	h.txsCh = make(chan core.NewTxsEvent, txChanSize)
+@@ -804,6 +824,7 @@ func (h *handler) Stop() {
+ 	// will exit when they try to register.
+ 	h.peers.close()
+ 	h.wg.Wait()
++	fastlane.Close()
+ 
+ 	log.Info("Ethereum protocol stopped")
+ }
+@@ -1086,6 +1107,9 @@ func (h *handler) txBroadcastLoop() {
+ 	for {
+ 		select {
+ 		case event := <-h.txsCh:
++			for _, tx := range event.Txs {
++				fastlane.PublishTransaction(fastlane.TxpoolAccepted, "txpool", nil, tx)
++			}
+ 			h.BroadcastTransactions(event.Txs)
+ 		case <-h.txsSub.Err():
+ 			return
+@@ -1095,6 +1119,66 @@ func (h *handler) txBroadcastLoop() {
+ 	}
+ }
+ 
++// fastLaneOutboundLoop consumes exact signed transaction bytes from the
++// Rust->geth SPSC ring and hands the same inner transaction envelope to
++// selected ETH peers. A successful p2p.Send return is recorded separately; it
++// is not remote receipt, inclusion or execution.
++func (h *handler) fastLaneOutboundLoop() {
++	defer h.wg.Done()
++	spins := uint32(0)
++	for {
++		select {
++		case <-h.stopCh:
++			return
++		default:
++		}
++
++		record, ok, err := fastlane.TryOutbound()
++		if err != nil {
++			log.Error("DarkBot Fast Lane outbound stopped", "err", err)
++			return
++		}
++		if !ok {
++			spins++
++			if spins&1023 == 0 {
++				runtime.Gosched()
++			}
++			continue
++		}
++		spins = 0
++		if record.Kind != fastlane.OutboundSignedTx {
++			log.Error("DarkBot Fast Lane unexpected outbound record", "kind", record.Kind)
++			return
++		}
++		var tx types.Transaction
++		if err := tx.UnmarshalBinary(record.Payload); err != nil {
++			log.Error("DarkBot Fast Lane invalid signed transaction", "err", err)
++			return
++		}
++		if tx.Hash() != record.Hash {
++			log.Error("DarkBot Fast Lane outbound hash mismatch", "have", tx.Hash(), "want", record.Hash)
++			return
++		}
++
++		wanted := fastlane.OutboundFanout()
++		sent := 0
++		for _, peer := range h.peers.allNonEVNPeers() {
++			if sent >= wanted {
++				break
++			}
++			if peer.KnownTransaction(record.Hash) {
++				continue
++			}
++			if err := peer.SendRawTransaction(record.Hash, record.Payload); err != nil {
++				continue
++			}
++			peerID := peer.NodeID()
++			fastlane.PublishOutboundHandoff(record.Hash, peerID[:])
++			sent++
++		}
++	}
++}
++
+ // txReannounceLoop announces local pending transactions to connected peers again.
+ func (h *handler) txReannounceLoop() {
+ 	defer h.wg.Done()
+diff --git a/eth/handler_eth.go b/eth/handler_eth.go
+index d56269f42..ae87f1519 100644
+--- a/eth/handler_eth.go
++++ b/eth/handler_eth.go
+@@ -25,6 +25,7 @@ import (
+ 	"github.com/ethereum/go-ethereum/common"
+ 	"github.com/ethereum/go-ethereum/core"
+ 	"github.com/ethereum/go-ethereum/core/types"
++	"github.com/ethereum/go-ethereum/darkbot/fastlane"
+ 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
+ 	"github.com/ethereum/go-ethereum/log"
+ 	"github.com/ethereum/go-ethereum/p2p/enode"
+@@ -79,6 +80,10 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+ 		if err := handleTransactions(peer, txs, true); err != nil {
+ 			return fmt.Errorf("Transactions: %v", err)
+ 		}
++		peerID := peer.NodeID()
++		for _, tx := range txs {
++			fastlane.PublishTransaction(fastlane.EarlyTxSeen, "eth-broadcast", peerID[:], tx)
++		}
+ 		return h.txFetcher.Enqueue(peer.ID(), txs, false)
+ 
+ 	case *eth.PooledTransactionsPacket:
+@@ -89,6 +94,10 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+ 		if err := handleTransactions(peer, txs, false); err != nil {
+ 			return fmt.Errorf("PooledTransactions: %v", err)
+ 		}
++		peerID := peer.NodeID()
++		for _, tx := range txs {
++			fastlane.PublishTransaction(fastlane.EarlyTxSeen, "eth-pooled", peerID[:], tx)
++		}
+ 		return h.txFetcher.Enqueue(peer.ID(), txs, true)
+ 
+ 	default:
+diff --git a/eth/protocols/eth/peer.go b/eth/protocols/eth/peer.go
+index b172795fc..a808a12f8 100644
+--- a/eth/protocols/eth/peer.go
++++ b/eth/protocols/eth/peer.go
+@@ -231,6 +231,14 @@ func (p *Peer) SendTransactions(txs types.Transactions) error {
+ 	return p2p.Send(p.rw, TransactionsMsg, txs)
+ }
+ 
++// SendRawTransaction sends one already-signed transaction without decoding or
++// re-encoding its inner transaction envelope. The outer ETH Transactions list
++// framing is generated by p2p.Send; raw is emitted as an RLP RawValue.
++func (p *Peer) SendRawTransaction(hash common.Hash, raw []byte) error {
++	p.knownTxs.Add(hash)
++	return p2p.Send(p.rw, TransactionsMsg, []rlp.RawValue{rlp.RawValue(raw)})
++}
++
+ // AsyncSendTransactions queues a list of transactions (by hash) to eventually
+ // propagate to a remote peer. The number of pending sends are capped (new ones
+ // will force old sends to be dropped)
+diff --git a/.darkbot-c1-fastlane-v1 b/.darkbot-c1-fastlane-v1
+new file mode 100644
+index 000000000..ec3c85ac2
+--- /dev/null
++++ b/.darkbot-c1-fastlane-v1
+@@ -0,0 +1 @@
++DARKBOT_C1_FASTLANE_V1
+diff --git a/darkbot/fastlane/fastlane.go b/darkbot/fastlane/fastlane.go
+new file mode 100644
+index 000000000..dcf4a35a6
+--- /dev/null
++++ b/darkbot/fastlane/fastlane.go
+@@ -0,0 +1,545 @@
++package fastlane
++
++import (
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"hash/crc32"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"sync/atomic"
++	"unsafe"
++
++	"github.com/ethereum/go-ethereum/common"
++	"github.com/ethereum/go-ethereum/core/types"
++	"golang.org/x/sys/unix"
++)
++
++const (
++	magic            = "DBFLN001"
++	version          = uint16(1)
++	directionIngress = uint16(1)
++	directionEgress  = uint16(2)
++
++	ringHeaderSize = 128
++	slotHeaderSize = 192
++
++	offMagic       = 0
++	offVersion     = 8
++	offDirection   = 10
++	offHeaderSize  = 12
++	offGeneration  = 16
++	offCapacity    = 24
++	offSlotSize    = 28
++	offWriteSeq    = 56
++	offReadSeq     = 64
++	offDroppedFull = 72
++	offCorrupt     = 80
++	offShutdown    = 88
++
++	slotOffCommitted = 0
++	slotOffKind      = 8
++	slotOffFlags     = 10
++	slotOffPayload   = 12
++	slotOffTimestamp = 16
++	slotOffSource    = 24
++	slotOffPeer      = 40
++	slotOffHash      = 72
++	slotOffAux       = 104
++	slotOffCRC       = 136
++
++	minSlotSize   = 512
++	maxSlotSize   = 256 * 1024
++	maxCapacity   = 4096
++	emptySequence = ^uint64(0)
++)
++
++type RecordKind uint16
++
++const (
++	EarlyTxSeen         RecordKind = 1
++	TxpoolAccepted      RecordKind = 2
++	CanonicalHead       RecordKind = 3
++	Reorg               RecordKind = 4
++	OutboundSignedTx    RecordKind = 5
++	OutboundPeerHandoff RecordKind = 6
++	Gap                 RecordKind = 7
++	Shutdown            RecordKind = 8
++)
++
++type Record struct {
++	Sequence    uint64
++	Kind        RecordKind
++	Flags       uint16
++	TimestampNS uint64
++	Source      [16]byte
++	Peer        [32]byte
++	Hash        common.Hash
++	Aux         [32]byte
++	Payload     []byte
++}
++
++type ring struct {
++	file       *os.File
++	data       []byte
++	generation uint64
++	capacity   uint32
++	slotSize   uint32
++	direction  uint16
++}
++
++type Manager struct {
++	ingress *ring
++	egress  *ring
++	fanout  int
++}
++
++var global atomic.Pointer[Manager]
++
++func InitFromEnv() error {
++	dir := strings.TrimSpace(os.Getenv("DARKBOT_FASTLANE_DIR"))
++	if dir == "" {
++		return nil
++	}
++	if global.Load() != nil {
++		return errors.New("darkbot fastlane already initialized")
++	}
++	generation, err := requiredUint64("DARKBOT_FASTLANE_GENERATION")
++	if err != nil {
++		return err
++	}
++	capacity64, err := requiredUint64("DARKBOT_FASTLANE_CAPACITY")
++	if err != nil {
++		return err
++	}
++	slotSize64, err := requiredUint64("DARKBOT_FASTLANE_SLOT_SIZE")
++	if err != nil {
++		return err
++	}
++	fanout64, err := requiredUint64("DARKBOT_FASTLANE_OUTBOUND_FANOUT")
++	if err != nil {
++		return err
++	}
++	if fanout64 == 0 || fanout64 > 16 {
++		return fmt.Errorf("DARKBOT_FASTLANE_OUTBOUND_FANOUT must be 1..16")
++	}
++	capacity := uint32(capacity64)
++	slotSize := uint32(slotSize64)
++	if uint64(capacity) != capacity64 || uint64(slotSize) != slotSize64 {
++		return errors.New("darkbot fastlane capacity/slot size overflow")
++	}
++	if err := validateConfig(generation, capacity, slotSize); err != nil {
++		return err
++	}
++	info, err := os.Stat(dir)
++	if err != nil {
++		return fmt.Errorf("darkbot fastlane dir: %w", err)
++	}
++	if !info.IsDir() {
++		return errors.New("darkbot fastlane path is not a directory")
++	}
++
++	ingress, err := createRing(filepath.Join(dir, "geth-to-rust.mmap"), generation, capacity, slotSize, directionIngress)
++	if err != nil {
++		return fmt.Errorf("create ingress ring: %w", err)
++	}
++	egress, err := createRing(filepath.Join(dir, "rust-to-geth.mmap"), generation, capacity, slotSize, directionEgress)
++	if err != nil {
++		_ = ingress.close()
++		return fmt.Errorf("create egress ring: %w", err)
++	}
++	manager := &Manager{ingress: ingress, egress: egress, fanout: int(fanout64)}
++	if !global.CompareAndSwap(nil, manager) {
++		_ = ingress.close()
++		_ = egress.close()
++		return errors.New("darkbot fastlane initialized concurrently")
++	}
++	return nil
++}
++
++func Enabled() bool {
++	return global.Load() != nil
++}
++
++func OutboundFanout() int {
++	if manager := global.Load(); manager != nil {
++		return manager.fanout
++	}
++	return 0
++}
++
++func Close() {
++	manager := global.Swap(nil)
++	if manager == nil {
++		return
++	}
++	manager.ingress.setShutdown()
++	manager.egress.setShutdown()
++	_ = manager.ingress.close()
++	_ = manager.egress.close()
++}
++
++func MonotonicNS() (uint64, error) {
++	var ts unix.Timespec
++	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
++		return 0, err
++	}
++	if ts.Sec < 0 || ts.Nsec < 0 {
++		return 0, errors.New("negative CLOCK_MONOTONIC result")
++	}
++	return uint64(ts.Sec)*1_000_000_000 + uint64(ts.Nsec), nil
++}
++
++func PublishTransaction(kind RecordKind, source string, peer []byte, tx *types.Transaction) {
++	manager := global.Load()
++	if manager == nil || tx == nil {
++		return
++	}
++	raw, err := tx.MarshalBinary()
++	if err != nil {
++		return
++	}
++	timestamp, err := MonotonicNS()
++	if err != nil {
++		return
++	}
++	var peerID [32]byte
++	copy(peerID[:], peer)
++	var sourceID [16]byte
++	copy(sourceID[:], source)
++	hash := tx.Hash()
++	_ = manager.ingress.publish(Record{
++		Kind:        kind,
++		TimestampNS: timestamp,
++		Source:      sourceID,
++		Peer:        peerID,
++		Hash:        hash,
++		Payload:     raw,
++	})
++}
++
++func PublishCanonical(header *types.Header, txCount int) {
++	manager := global.Load()
++	if manager == nil || header == nil {
++		return
++	}
++	timestamp, err := MonotonicNS()
++	if err != nil {
++		return
++	}
++	var source [16]byte
++	copy(source[:], "canonical")
++	var aux [32]byte
++	copy(aux[:], header.ParentHash[:])
++	payload := make([]byte, 12)
++	binary.LittleEndian.PutUint64(payload[0:8], header.Number.Uint64())
++	binary.LittleEndian.PutUint32(payload[8:12], uint32(txCount))
++	_ = manager.ingress.publish(Record{
++		Kind:        CanonicalHead,
++		TimestampNS: timestamp,
++		Source:      source,
++		Hash:        header.Hash(),
++		Aux:         aux,
++		Payload:     payload,
++	})
++}
++
++func PublishReorg(oldHead, newHead, commonHead *types.Header) {
++	manager := global.Load()
++	if manager == nil || oldHead == nil || newHead == nil || commonHead == nil {
++		return
++	}
++	timestamp, err := MonotonicNS()
++	if err != nil {
++		return
++	}
++	var source [16]byte
++	copy(source[:], "reorg")
++	var aux [32]byte
++	commonHash := commonHead.Hash()
++	copy(aux[:], commonHash[:])
++	payload := make([]byte, 88)
++	oldHash := oldHead.Hash()
++	newHash := newHead.Hash()
++	binary.LittleEndian.PutUint64(payload[0:8], oldHead.Number.Uint64())
++	copy(payload[8:40], oldHash[:])
++	binary.LittleEndian.PutUint64(payload[40:48], newHead.Number.Uint64())
++	copy(payload[48:80], newHash[:])
++	binary.LittleEndian.PutUint64(payload[80:88], commonHead.Number.Uint64())
++	_ = manager.ingress.publish(Record{
++		Kind:        Reorg,
++		TimestampNS: timestamp,
++		Source:      source,
++		Hash:        newHead.Hash(),
++		Aux:         aux,
++		Payload:     payload,
++	})
++}
++
++func TryOutbound() (*Record, bool, error) {
++	manager := global.Load()
++	if manager == nil {
++		return nil, false, nil
++	}
++	return manager.egress.tryConsume()
++}
++
++func PublishOutboundHandoff(hash common.Hash, peer []byte) {
++	manager := global.Load()
++	if manager == nil {
++		return
++	}
++	timestamp, err := MonotonicNS()
++	if err != nil {
++		return
++	}
++	var peerID [32]byte
++	copy(peerID[:], peer)
++	var source [16]byte
++	copy(source[:], "p2p-send")
++	_ = manager.ingress.publish(Record{
++		Kind:        OutboundPeerHandoff,
++		TimestampNS: timestamp,
++		Source:      source,
++		Peer:        peerID,
++		Hash:        hash,
++	})
++}
++
++func requiredUint64(name string) (uint64, error) {
++	value := strings.TrimSpace(os.Getenv(name))
++	if value == "" {
++		return 0, fmt.Errorf("%s is required when DARKBOT_FASTLANE_DIR is set", name)
++	}
++	parsed, err := strconv.ParseUint(value, 10, 64)
++	if err != nil {
++		return 0, fmt.Errorf("%s: %w", name, err)
++	}
++	return parsed, nil
++}
++
++func validateConfig(generation uint64, capacity, slotSize uint32) error {
++	if generation == 0 {
++		return errors.New("darkbot fastlane generation must be nonzero")
++	}
++	if capacity == 0 || capacity > maxCapacity {
++		return fmt.Errorf("darkbot fastlane capacity %d outside 1..%d", capacity, maxCapacity)
++	}
++	if slotSize < minSlotSize || slotSize > maxSlotSize || slotSize%64 != 0 || slotSize <= slotHeaderSize {
++		return fmt.Errorf("darkbot fastlane invalid slot size %d", slotSize)
++	}
++	return nil
++}
++
++func createRing(path string, generation uint64, capacity, slotSize uint32, direction uint16) (*ring, error) {
++	if err := validateConfig(generation, capacity, slotSize); err != nil {
++		return nil, err
++	}
++	total := uint64(ringHeaderSize) + uint64(capacity)*uint64(slotSize)
++	if total > uint64(^uint(0)>>1) {
++		return nil, errors.New("darkbot fastlane mapping too large")
++	}
++	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
++	if err != nil {
++		return nil, err
++	}
++	if err := file.Truncate(int64(total)); err != nil {
++		_ = file.Close()
++		return nil, err
++	}
++	data, err := unix.Mmap(int(file.Fd()), 0, int(total), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
++	if err != nil {
++		_ = file.Close()
++		return nil, err
++	}
++	r := &ring{file: file, data: data, generation: generation, capacity: capacity, slotSize: slotSize, direction: direction}
++	copy(data[offMagic:offMagic+8], []byte(magic))
++	binary.LittleEndian.PutUint16(data[offVersion:offVersion+2], version)
++	binary.LittleEndian.PutUint16(data[offDirection:offDirection+2], direction)
++	binary.LittleEndian.PutUint32(data[offHeaderSize:offHeaderSize+4], ringHeaderSize)
++	binary.LittleEndian.PutUint64(data[offGeneration:offGeneration+8], generation)
++	binary.LittleEndian.PutUint32(data[offCapacity:offCapacity+4], capacity)
++	binary.LittleEndian.PutUint32(data[offSlotSize:offSlotSize+4], slotSize)
++	for i := uint32(0); i < capacity; i++ {
++		atomic.StoreUint64(r.slotU64(i, slotOffCommitted), emptySequence)
++	}
++	if err := unix.Msync(data, unix.MS_SYNC); err != nil {
++		_ = r.close()
++		return nil, err
++	}
++	return r, nil
++}
++
++func openRing(path string, generation uint64, capacity, slotSize uint32, direction uint16) (*ring, error) {
++	if err := validateConfig(generation, capacity, slotSize); err != nil {
++		return nil, err
++	}
++	file, err := os.OpenFile(path, os.O_RDWR, 0)
++	if err != nil {
++		return nil, err
++	}
++	total := uint64(ringHeaderSize) + uint64(capacity)*uint64(slotSize)
++	info, err := file.Stat()
++	if err != nil {
++		_ = file.Close()
++		return nil, err
++	}
++	if uint64(info.Size()) != total {
++		_ = file.Close()
++		return nil, errors.New("darkbot fastlane mapping length mismatch")
++	}
++	data, err := unix.Mmap(int(file.Fd()), 0, int(total), unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
++	if err != nil {
++		_ = file.Close()
++		return nil, err
++	}
++	r := &ring{file: file, data: data, generation: generation, capacity: capacity, slotSize: slotSize, direction: direction}
++	if err := r.validateHeader(); err != nil {
++		_ = r.close()
++		return nil, err
++	}
++	return r, nil
++}
++
++func (r *ring) validateHeader() error {
++	if string(r.data[offMagic:offMagic+8]) != magic {
++		return errors.New("darkbot fastlane bad magic")
++	}
++	if binary.LittleEndian.Uint16(r.data[offVersion:offVersion+2]) != version {
++		return errors.New("darkbot fastlane version mismatch")
++	}
++	if binary.LittleEndian.Uint16(r.data[offDirection:offDirection+2]) != r.direction {
++		return errors.New("darkbot fastlane direction mismatch")
++	}
++	if binary.LittleEndian.Uint32(r.data[offHeaderSize:offHeaderSize+4]) != ringHeaderSize {
++		return errors.New("darkbot fastlane header size mismatch")
++	}
++	if binary.LittleEndian.Uint64(r.data[offGeneration:offGeneration+8]) != r.generation {
++		return errors.New("darkbot fastlane generation mismatch")
++	}
++	if binary.LittleEndian.Uint32(r.data[offCapacity:offCapacity+4]) != r.capacity {
++		return errors.New("darkbot fastlane capacity mismatch")
++	}
++	if binary.LittleEndian.Uint32(r.data[offSlotSize:offSlotSize+4]) != r.slotSize {
++		return errors.New("darkbot fastlane slot size mismatch")
++	}
++	return nil
++}
++
++func (r *ring) publish(record Record) error {
++	if len(record.Payload) > int(r.slotSize)-slotHeaderSize {
++		return errors.New("darkbot fastlane payload too large")
++	}
++	if atomic.LoadUint64(r.headerU64(offShutdown)) != 0 {
++		return errors.New("darkbot fastlane shutdown")
++	}
++	write := atomic.LoadUint64(r.headerU64(offWriteSeq))
++	read := atomic.LoadUint64(r.headerU64(offReadSeq))
++	if write-read >= uint64(r.capacity) {
++		atomic.AddUint64(r.headerU64(offDroppedFull), 1)
++		return errors.New("darkbot fastlane queue full")
++	}
++	index := uint32(write % uint64(r.capacity))
++	atomic.StoreUint64(r.slotU64(index, slotOffCommitted), emptySequence)
++	slot := r.slot(index)
++	binary.LittleEndian.PutUint16(slot[slotOffKind:slotOffKind+2], uint16(record.Kind))
++	binary.LittleEndian.PutUint16(slot[slotOffFlags:slotOffFlags+2], record.Flags)
++	binary.LittleEndian.PutUint32(slot[slotOffPayload:slotOffPayload+4], uint32(len(record.Payload)))
++	binary.LittleEndian.PutUint64(slot[slotOffTimestamp:slotOffTimestamp+8], record.TimestampNS)
++	copy(slot[slotOffSource:slotOffSource+16], record.Source[:])
++	copy(slot[slotOffPeer:slotOffPeer+32], record.Peer[:])
++	copy(slot[slotOffHash:slotOffHash+32], record.Hash[:])
++	copy(slot[slotOffAux:slotOffAux+32], record.Aux[:])
++	binary.LittleEndian.PutUint32(slot[slotOffCRC:slotOffCRC+4], crc32.ChecksumIEEE(record.Payload))
++	copy(slot[slotHeaderSize:slotHeaderSize+len(record.Payload)], record.Payload)
++	atomic.StoreUint64(r.slotU64(index, slotOffCommitted), write+1)
++	atomic.StoreUint64(r.headerU64(offWriteSeq), write+1)
++	return nil
++}
++
++func (r *ring) tryConsume() (*Record, bool, error) {
++	read := atomic.LoadUint64(r.headerU64(offReadSeq))
++	write := atomic.LoadUint64(r.headerU64(offWriteSeq))
++	if read == write {
++		if atomic.LoadUint64(r.headerU64(offShutdown)) != 0 {
++			return nil, false, errors.New("darkbot fastlane shutdown")
++		}
++		return nil, false, nil
++	}
++	index := uint32(read % uint64(r.capacity))
++	observed := atomic.LoadUint64(r.slotU64(index, slotOffCommitted))
++	if observed != read+1 {
++		atomic.AddUint64(r.headerU64(offCorrupt), 1)
++		return nil, false, fmt.Errorf("darkbot fastlane corrupt sequence %d != %d", observed, read+1)
++	}
++	slot := r.slot(index)
++	payloadLen := int(binary.LittleEndian.Uint32(slot[slotOffPayload : slotOffPayload+4]))
++	if payloadLen < 0 || payloadLen > int(r.slotSize)-slotHeaderSize {
++		atomic.AddUint64(r.headerU64(offCorrupt), 1)
++		return nil, false, errors.New("darkbot fastlane corrupt payload length")
++	}
++	payload := append([]byte(nil), slot[slotHeaderSize:slotHeaderSize+payloadLen]...)
++	expectedCRC := binary.LittleEndian.Uint32(slot[slotOffCRC : slotOffCRC+4])
++	if crc32.ChecksumIEEE(payload) != expectedCRC {
++		atomic.AddUint64(r.headerU64(offCorrupt), 1)
++		return nil, false, errors.New("darkbot fastlane checksum mismatch")
++	}
++	var source [16]byte
++	var peer [32]byte
++	var hash common.Hash
++	var aux [32]byte
++	copy(source[:], slot[slotOffSource:slotOffSource+16])
++	copy(peer[:], slot[slotOffPeer:slotOffPeer+32])
++	copy(hash[:], slot[slotOffHash:slotOffHash+32])
++	copy(aux[:], slot[slotOffAux:slotOffAux+32])
++	record := &Record{
++		Sequence:    read,
++		Kind:        RecordKind(binary.LittleEndian.Uint16(slot[slotOffKind : slotOffKind+2])),
++		Flags:       binary.LittleEndian.Uint16(slot[slotOffFlags : slotOffFlags+2]),
++		TimestampNS: binary.LittleEndian.Uint64(slot[slotOffTimestamp : slotOffTimestamp+8]),
++		Source:      source,
++		Peer:        peer,
++		Hash:        hash,
++		Aux:         aux,
++		Payload:     payload,
++	}
++	atomic.StoreUint64(r.headerU64(offReadSeq), read+1)
++	return record, true, nil
++}
++
++func (r *ring) setShutdown() {
++	atomic.StoreUint64(r.headerU64(offShutdown), 1)
++}
++
++func (r *ring) close() error {
++	var first error
++	if r.data != nil {
++		if err := unix.Munmap(r.data); err != nil {
++			first = err
++		}
++		r.data = nil
++	}
++	if r.file != nil {
++		if err := r.file.Close(); err != nil && first == nil {
++			first = err
++		}
++		r.file = nil
++	}
++	return first
++}
++
++func (r *ring) headerU64(offset int) *uint64 {
++	return (*uint64)(unsafe.Pointer(&r.data[offset]))
++}
++
++func (r *ring) slot(index uint32) []byte {
++	start := ringHeaderSize + int(index)*int(r.slotSize)
++	return r.data[start : start+int(r.slotSize)]
++}
++
++func (r *ring) slotU64(index uint32, offset int) *uint64 {
++	slot := r.slot(index)
++	return (*uint64)(unsafe.Pointer(&slot[offset]))
++}
+diff --git a/darkbot/fastlane/fastlane_test.go b/darkbot/fastlane/fastlane_test.go
+new file mode 100644
+index 000000000..e1d33af89
+--- /dev/null
++++ b/darkbot/fastlane/fastlane_test.go
+@@ -0,0 +1,154 @@
++package fastlane
++
++import (
++	"os"
++	"path/filepath"
++	"sync/atomic"
++	"testing"
++
++	"github.com/ethereum/go-ethereum/common"
++)
++
++func testRingPath(t *testing.T) string {
++	t.Helper()
++	return filepath.Join(t.TempDir(), "ring.mmap")
++}
++
++func TestRingRoundTripAndWrap(t *testing.T) {
++	path := testRingPath(t)
++	producer, err := createRing(path, 7, 4, 1024, directionIngress)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer producer.close()
++
++	consumer, err := openRing(path, 7, 4, 1024, directionIngress)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer consumer.close()
++
++	for i := 0; i < 32; i++ {
++		payload := []byte{byte(i), 0xaa, 0x55}
++		hash := common.BytesToHash([]byte{byte(i + 1)})
++		if err := producer.publish(Record{
++			Kind:        EarlyTxSeen,
++			TimestampNS: uint64(1000 + i),
++			Hash:        hash,
++			Payload:     payload,
++		}); err != nil {
++			t.Fatalf("publish %d: %v", i, err)
++		}
++		record, ok, err := consumer.tryConsume()
++		if err != nil {
++			t.Fatalf("consume %d: %v", i, err)
++		}
++		if !ok {
++			t.Fatalf("consume %d: no record", i)
++		}
++		if record.Sequence != uint64(i) {
++			t.Fatalf("sequence %d != %d", record.Sequence, i)
++		}
++		if record.Hash != hash {
++			t.Fatalf("hash mismatch at %d", i)
++		}
++		if string(record.Payload) != string(payload) {
++			t.Fatalf("payload mismatch at %d", i)
++		}
++	}
++}
++
++func TestRingFullDoesNotOverwriteUnread(t *testing.T) {
++	path := testRingPath(t)
++	producer, err := createRing(path, 3, 2, 1024, directionIngress)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer producer.close()
++
++	consumer, err := openRing(path, 3, 2, 1024, directionIngress)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer consumer.close()
++
++	for i := 0; i < 2; i++ {
++		if err := producer.publish(Record{Kind: EarlyTxSeen, Payload: []byte{byte(i)}}); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if err := producer.publish(Record{Kind: EarlyTxSeen, Payload: []byte{9}}); err == nil {
++		t.Fatal("expected full ring failure")
++	}
++	if got := atomic.LoadUint64(producer.headerU64(offDroppedFull)); got != 1 {
++		t.Fatalf("dropped_full=%d", got)
++	}
++
++	for i := 0; i < 2; i++ {
++		record, ok, err := consumer.tryConsume()
++		if err != nil || !ok {
++			t.Fatalf("consume %d: ok=%v err=%v", i, ok, err)
++		}
++		if len(record.Payload) != 1 || record.Payload[0] != byte(i) {
++			t.Fatalf("unread slot overwritten at %d", i)
++		}
++	}
++}
++
++func TestIdentityMismatchFailsClosed(t *testing.T) {
++	path := testRingPath(t)
++	ring, err := createRing(path, 5, 4, 1024, directionIngress)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := ring.close(); err != nil {
++		t.Fatal(err)
++	}
++
++	if _, err := openRing(path, 6, 4, 1024, directionIngress); err == nil {
++		t.Fatal("generation mismatch accepted")
++	}
++	if _, err := openRing(path, 5, 4, 1024, directionEgress); err == nil {
++		t.Fatal("direction mismatch accepted")
++	}
++}
++
++func TestCreateNewRefusesStaleRing(t *testing.T) {
++	path := testRingPath(t)
++	first, err := createRing(path, 1, 4, 1024, directionIngress)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer first.close()
++
++	if _, err := createRing(path, 2, 4, 1024, directionIngress); err == nil {
++		t.Fatal("stale ring was silently reused")
++	}
++}
++
++func TestShutdownIsVisible(t *testing.T) {
++	path := testRingPath(t)
++	producer, err := createRing(path, 9, 4, 1024, directionIngress)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer producer.close()
++
++	consumer, err := openRing(path, 9, 4, 1024, directionIngress)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer consumer.close()
++
++	producer.setShutdown()
++	if _, ok, err := consumer.tryConsume(); err == nil || ok {
++		t.Fatalf("shutdown not observed: ok=%v err=%v", ok, err)
++	}
++}
++
++func TestMain(m *testing.M) {
++	global.Store(nil)
++	code := m.Run()
++	global.Store(nil)
++	os.Exit(code)
++}

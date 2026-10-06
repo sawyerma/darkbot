@@ -1,0 +1,52 @@
+{
+  "acceptance_claim": {
+    "arrival_advantage": "NOT_YET_PROVEN",
+    "compile_and_tests": "USER_REPORTED_C1_GETH_HOOKS_ALL_GATES_PASS",
+    "latency": "NOT_YET_MEASURED",
+    "live_authorization": false,
+    "t0_to_t_buy_lt_1ms": "NOT_YET_PROVEN"
+  },
+  "base": {
+    "commit": "cdb7548b5baacfdae92f9f63437d6456411665f3",
+    "release": "v1.7.8",
+    "repository": "https://github.com/bnb-chain/bsc.git",
+    "tree": "d8d88097521d43cef66047fdd93dd6825a2a7843"
+  },
+  "built_geth": {
+    "bytes": 116222130,
+    "present": true,
+    "sha256": "2b0765f5df476b086626561fd660c65619f4eca03ba4c8c92188b1a264115e08"
+  },
+  "go": {
+    "go_mod_sha256": "7f905ddc445ddacfe488114235bd4e8d5e5e3a184da666fa2935e03830d36d36",
+    "go_sum_sha256": "a35e56da61bf2ce50ea62477babb6640f057285fcbf3672d5fc5d897f8dfb91c",
+    "version": "go version go1.25.0 darwin/arm64"
+  },
+  "overlay_marker": "DARKBOT_C1_FASTLANE_V1",
+  "patch": {
+    "bytes": 29373,
+    "path": "bsc/native/evidence/c1/c1-geth-fastlane-v1.patch",
+    "sha256": "2485888eb909d326ea763ee635eed548e9aa0f382561f886cd2e911b24b95bc5"
+  },
+  "schema": "darkbot.c1.geth_fastlane_evidence.v1",
+  "source_sha256": {
+    ".darkbot-c1-fastlane-v1": "661bdf039bb41411c6500468e3a2b2060cef5eea4c353f322535d34aabe84df3",
+    "core/blockchain.go": "78c8d71d0e299f2d0b1d43a1e0bd1d7efa67946f7eee9345133bc4f92c7145f6",
+    "darkbot/fastlane/fastlane.go": "c578cf5f53754b226666a2753ed12a48a94bf6007fb93c390e24f4ff60b4948a",
+    "darkbot/fastlane/fastlane_test.go": "5956e479446a57895bcbf8e32a21424c37ba0d94acac90f4a86943d56451d432",
+    "eth/handler.go": "a0750b90b4f4b4053678878e3621d033a95aad64ce3d5c1b2a0fe366a6fd3074",
+    "eth/handler_eth.go": "7d56f1c039b0beef108a617b16b9124e9018c4ee78119fe8f1eba5eb6b5343f4",
+    "eth/protocols/eth/peer.go": "f8b52738a1321b3d4d103a6c99758fa37e1352c62dfde8f0917eb6aa24e35d9e"
+  },
+  "tracked_modified": [
+    "core/blockchain.go",
+    "eth/handler.go",
+    "eth/handler_eth.go",
+    "eth/protocols/eth/peer.go"
+  ],
+  "untracked_overlay": [
+    ".darkbot-c1-fastlane-v1",
+    "darkbot/fastlane/fastlane.go",
+    "darkbot/fastlane/fastlane_test.go"
+  ]
+}
