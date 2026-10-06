@@ -3769,3 +3769,258 @@ FIX-135 = INTEGRATED
 R127 scheduler/admission = READY FOR MAINNET SHADOW REQUALIFICATION
 CONTROLLED LIVE = BLOCKED
 ```
+
+
+---
+
+## 2026-10-06 — Experimental parallelism evidence retained after rollback
+
+**Status:** EVIDENCE RETAINED / EXPERIMENTAL IMPLEMENTATION REVERTED
+
+The FIX-140..143 implementation branches were experimental and are **not** the current Project-0 runtime baseline. Their runtime code was intentionally removed from `main`. The measurements below are retained because they materially inform the new authoritative parallel-execution design.
+
+Current implementation baseline remains the clean pre-parallel FIX-139 Project-0 content.
+
+Authoritative implementation plan:
+
+`project_0/docs/PARALLEL_EXECUTION_MASTER_PLAN.md`
+
+### A. FIX-137 single-flight evidence
+
+Run:
+
+`r127_20261006T122505Z`
+
+Measured:
+
+```text
+sweep_forwarded=1,016,955
+candidate_cache_revision_forwards=993,356
+candidate_pending_coalesced=890,319
+candidate_revision_coalesced=890,319
+candidate_physical_enqueues=126,636
+pending_final=6,179
+max_pending=6,294
+ingress_overflow_counter=0
+sink_overflow_lines=0
+```
+
+Conclusion:
+
+- logical causal-revision forwarding was heavily coalesced before physical execution work;
+- the million-level logical forwarding count was not itself the physical queue bottleneck;
+- downstream execution/drain remained the material bottleneck.
+
+### B. FIX-138 serial pipeline timing baseline
+
+Run:
+
+`r127_20261006T130642Z`
+
+Measured:
+
+```text
+dependency_updates=28,894
+dependency_content_unchanged=7
+dependency_content_changed=28,887
+
+detect_health_calls=70,022
+detect_health_ns_total=237,557,841
+detect_health_ns_max=117,709
+
+detect_pipeline_calls=70,022
+detect_pipeline_ns_total=109,925,348,708
+detect_pipeline_ns_max=2,654,144,083
+
+candidate_physical_enqueues=78,878
+pending_final=6,239
+```
+
+Derived:
+
+```text
+Health average   ≈ 3.39 µs/call
+Pipeline average ≈ 1.57 ms/call
+Pipeline max     ≈ 2.654 s
+Pipeline / Health average ratio ≈ 460x
+unchanged dependency writes ≈ 0.024 %
+```
+
+Conclusion:
+
+- exact Health was not the primary bottleneck;
+- duplicate dependency updates were negligible;
+- synchronous planning / fee RPC / simulation inside the serial candidate consumer was the dominant latency risk;
+- this measurement is the primary justification for redesigning execution parallelism.
+
+### C. R127 15:21 coalescing follow-up
+
+Run:
+
+`r127_20261006T152101Z`
+
+Measured:
+
+```text
+sweep_forwarded=315,802
+candidate_cache_revision_forwards=304,944
+candidate_cache_transition_forwards=6,480
+candidate_cache_forced_forwards=4,378
+candidate_cache_suppressed=0
+
+coalesced=231,212
+enqueued=84,590
+pending_final=5,184
+max_pending=6,306
+
+ingress_backlog_final=0
+ingress_backlog_max=266
+ingress_overflow_counter=0
+sink_overflow_lines=0
+```
+
+Identity:
+
+```text
+315,802 logical forwards
+- 231,212 coalesced
+= 84,590 physical enqueues
+```
+
+Approximately 73.2% of logical forwards were collapsed into existing pending work.
+
+Conclusion:
+
+- `candidate_cache_suppressed=0` alone does not mean single-flight/coalescing is ineffective;
+- further cache-suppression tuning was not the correct primary lever;
+- execution drain remained the relevant target.
+
+### D. FIX-141 experimental cross-candidate execution result
+
+Run:
+
+`r127_20261006T204714Z`
+
+Measured:
+
+```text
+exec_workers=11
+exec_dispatched=118,977
+exec_completed=118,680
+exec_inflight=297
+exec_job_backlog=286
+exec_job_overflow=1,500,739
+exec_queue_full=128,813
+exec_stale_results=7,695
+exec_same_account_coalesced=7
+exec_max_inflight=716
+exec_latency_ns_total=1,096,835,779,624
+exec_latency_ns_max=3,105,137,167
+pending_final=6,309
+candidate_physical_enqueues=121,508
+ingress_overflow_counter=0
+sink_overflow_lines=0
+```
+
+Derived over 180 s:
+
+```text
+completed throughput ≈ 659.3 candidates/s
+serial FIX-138 throughput ≈ 389.0 candidates/s
+throughput gain ≈ +69.5 %
+
+average worker execution latency ≈ 9.24 ms
+average concurrent worker occupancy ≈ 6.09 / 11
+stale-result fraction ≈ 6.5 %
+```
+
+Evidence conclusion:
+
+- cross-candidate parallel execution can materially improve throughput;
+- the measured gain was approximately +69.5% versus the serial FIX-138 baseline;
+- however this specific implementation suffered severe dispatch retry churn:
+  `exec_queue_full=128,813`,
+  `exec_job_overflow=1,500,739`;
+- therefore FIX-141 is evidence for the architectural direction, **not** approved implementation code.
+
+### E. FIX-142 experimental dispatch-churn result
+
+Run:
+
+`r127_20261006T205631Z`
+
+Measured:
+
+```text
+candidate_physical_enqueues=118,617
+
+exec_workers=11
+exec_dispatched=112,847
+exec_completed=112,735
+exec_inflight=112
+exec_job_backlog=101
+exec_job_overflow=0
+exec_queue_full=0
+exec_stale_results=4,428
+exec_same_account_coalesced=12
+exec_max_inflight=716
+exec_latency_ns_total=1,044,099,656,610
+exec_latency_ns_max=2,889,421,584
+exec_available_slots=603
+
+pending_final=6,217
+max_pending=6,988
+ingress_backlog_final=9
+ingress_backlog_max=42
+ingress_overflow_counter=0
+sink_overflow_lines=0
+```
+
+Derived:
+
+```text
+completed throughput ≈ 626.3 candidates/s
+average worker execution latency ≈ 9.26 ms
+average execution concurrency ≈ 5.8 workers
+physical admissions - completed ≈ 5,882
+pending_final = 6,217
+```
+
+Evidence conclusion:
+
+- dispatch retry churn was successfully eliminated in this experiment:
+  - `exec_job_overflow: 1,500,739 -> 0`
+  - `exec_queue_full: 128,813 -> 0`;
+- worker backlog fell from 286 to 101;
+- stale results fell from 7,695 to 4,428;
+- 603 execution queue slots were still free at stop;
+- despite free execution capacity, total pending remained ~6.2k;
+- therefore the next bottleneck moved upstream into candidate preparation / dispatch preparation;
+- simply increasing execution worker count would not solve the queue.
+
+### F. What is retained vs discarded
+
+Retained as evidence:
+
+```text
+FIX-138 serial timing baseline
+FIX-137/coalescing measurements
+FIX-141 +69.5% throughput observation
+FIX-141 queue/retry failure evidence
+FIX-142 zero-overflow dispatch observation
+FIX-142 upstream-preparation bottleneck conclusion
+```
+
+Discarded as implementation:
+
+```text
+FIX-140 runtime changes
+FIX-141 worker implementation
+FIX-142 dispatch implementation
+FIX-143 batch-preparation implementation
+subsequent branch-only hardening patches
+```
+
+These discarded implementations must not be resurrected wholesale or cherry-picked.
+
+The new implementation must follow `PARALLEL_EXECUTION_MASTER_PLAN.md` from MT0 onward, with one bounded step, one test gate, and one measurement gate at a time.
