@@ -193,15 +193,23 @@ func MonotonicNS() (uint64, error) {
 }
 
 func PublishTransaction(kind RecordKind, source string, peer []byte, tx *types.Transaction) {
-	manager := global.Load()
-	if manager == nil || tx == nil {
-		return
-	}
-	raw, err := tx.MarshalBinary()
+	timestamp, err := MonotonicNS()
 	if err != nil {
 		return
 	}
-	timestamp, err := MonotonicNS()
+	PublishTransactionAt(kind, source, peer, timestamp, tx)
+}
+
+// PublishTransactionAt preserves a caller-captured hook timestamp. For C1
+// ingress latency this timestamp is taken in the ETH handler immediately
+// before the Fast-Lane call, so transaction serialization and mmap
+// publication remain inside the measured interval.
+func PublishTransactionAt(kind RecordKind, source string, peer []byte, timestamp uint64, tx *types.Transaction) {
+	manager := global.Load()
+	if manager == nil || tx == nil || timestamp == 0 {
+		return
+	}
+	raw, err := tx.MarshalBinary()
 	if err != nil {
 		return
 	}
