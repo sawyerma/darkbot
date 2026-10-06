@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 use darkbot_core::inclusion::capability::{AdapterKind, AdapterTable};
 use darkbot_core::inclusion::release::ReleaseProfile;
 use darkbot_core::intent::{
@@ -66,7 +66,6 @@ impl fmt::Debug for SecretSources {
 /// Economic and capacity policy that must be known before the lane exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StartupEconomics {
-    pub funding_wei: U256,
     pub buy_amount_wei: u128,
     pub gas_price_wei: u128,
     pub gas_limit: u64,
@@ -95,6 +94,18 @@ pub struct StartupConfig {
     pub adapters: AdapterSet,
     pub endpoints: Vec<BuilderEndpointConfig>,
     pub economics: StartupEconomics,
+}
+
+/// Independently observed startup facts. These are not operator policy:
+/// they must come from the startup reconciliation owner before this module
+/// can authorize an admitting lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartupFacts {
+    pub chain_id: u64,
+    pub sender: Address,
+    pub next_nonce: u64,
+    pub balance_wei: U256,
+    pub canonical_block_hash: B256,
 }
 
 /// Current immutable generations observed by the runtime.
@@ -178,6 +189,7 @@ pub struct StartupAuthorization {
     sender: Address,
     first_nonce: u64,
     lane_capacity: usize,
+    canonical_block_hash: B256,
     generations: GenerationSnapshot,
 }
 
@@ -357,6 +369,10 @@ pub enum StartupError {
     InvalidLaneCapacity,
     InvalidCaptureCapacity,
     InvalidClock,
+    ObservedChainMismatch,
+    ObservedSenderMismatch,
+    ObservedNonceMismatch,
+    MissingCanonicalCheckpoint,
     EmptyAdapters,
     IneligibleAdapter,
     AdapterKindMismatch,
@@ -393,6 +409,18 @@ impl fmt::Display for StartupError {
             Self::InvalidLaneCapacity => f.write_str("startup: invalid lane capacity"),
             Self::InvalidCaptureCapacity => f.write_str("startup: invalid capture capacity"),
             Self::InvalidClock => f.write_str("startup: clock id must be nonzero"),
+            Self::ObservedChainMismatch => {
+                f.write_str("startup: observed chain does not match configuration")
+            }
+            Self::ObservedSenderMismatch => {
+                f.write_str("startup: observed sender does not match configuration")
+            }
+            Self::ObservedNonceMismatch => {
+                f.write_str("startup: observed next nonce does not match configuration")
+            }
+            Self::MissingCanonicalCheckpoint => {
+                f.write_str("startup: canonical checkpoint is missing")
+            }
             Self::EmptyAdapters => f.write_str("startup: no eligible adapter selected"),
             Self::IneligibleAdapter => f.write_str("startup: adapter is not currently eligible"),
             Self::AdapterKindMismatch => {
@@ -432,8 +460,10 @@ pub fn validate_startup(
     config: StartupConfig,
     table: &AdapterTable,
     sources: &SecretSources,
+    facts: StartupFacts,
 ) -> Result<ValidatedStartup, StartupError> {
     validate_config(&config, table)?;
+    validate_facts(&config, facts)?;
 
     let mut secret = read_signer_secret(&sources.signer_key_file)?;
     let signer_result = Signer::from_secret_bytes(&secret).map_err(StartupError::Signer);
@@ -469,6 +499,7 @@ pub fn validate_startup(
         sender: config.sender,
         first_nonce: config.first_nonce,
         lane_capacity: config.lane_capacity,
+        canonical_block_hash: facts.canonical_block_hash,
         generations: snapshot,
     };
     Ok(ValidatedStartup {
@@ -561,6 +592,25 @@ fn validate_config(config: &StartupConfig, table: &AdapterTable) -> Result<(), S
     validate_economics(config.economics)
 }
 
+fn validate_facts(config: &StartupConfig, facts: StartupFacts) -> Result<(), StartupError> {
+    if facts.chain_id != config.chain_id {
+        return Err(StartupError::ObservedChainMismatch);
+    }
+    if facts.sender != config.sender {
+        return Err(StartupError::ObservedSenderMismatch);
+    }
+    if facts.next_nonce != config.first_nonce {
+        return Err(StartupError::ObservedNonceMismatch);
+    }
+    if facts.canonical_block_hash == B256::ZERO {
+        return Err(StartupError::MissingCanonicalCheckpoint);
+    }
+    if facts.balance_wei < U256::from(config.economics.max_total_wei) {
+        return Err(StartupError::InsufficientFunding);
+    }
+    Ok(())
+}
+
 fn validate_economics(e: StartupEconomics) -> Result<(), StartupError> {
     if e.buy_amount_wei == 0
         || e.gas_price_wei == 0
@@ -586,31 +636,35 @@ fn validate_economics(e: StartupEconomics) -> Result<(), StartupError> {
     if total > e.max_total_wei {
         return Err(StartupError::InvalidEconomics);
     }
-    if e.funding_wei < U256::from(e.max_total_wei) {
-        return Err(StartupError::InsufficientFunding);
-    }
     Ok(())
 }
 
 fn read_signer_secret(path: &Path) -> Result<[u8; 32], StartupError> {
-    let bytes = fs::read(path).map_err(|error| StartupError::SecretIo(error.kind()))?;
-    if bytes.len() == 32 {
+    let mut bytes = fs::read(path).map_err(|error| StartupError::SecretIo(error.kind()))?;
+    let result = if bytes.len() == 32 {
         let mut out = [0u8; 32];
         out.copy_from_slice(&bytes);
-        return Ok(out);
-    }
-    let text = std::str::from_utf8(&bytes).map_err(|_| StartupError::InvalidSignerEncoding)?;
-    let trimmed = text.trim();
-    let hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-    if hex.len() != 64 {
-        return Err(StartupError::InvalidSignerEncoding);
-    }
-    let mut out = [0u8; 32];
-    for (index, slot) in out.iter_mut().enumerate() {
-        let pair = &hex[index * 2..index * 2 + 2];
-        *slot = u8::from_str_radix(pair, 16).map_err(|_| StartupError::InvalidSignerEncoding)?;
-    }
-    Ok(out)
+        Ok(out)
+    } else {
+        (|| {
+            let text =
+                std::str::from_utf8(&bytes).map_err(|_| StartupError::InvalidSignerEncoding)?;
+            let trimmed = text.trim();
+            let hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+            if hex.len() != 64 {
+                return Err(StartupError::InvalidSignerEncoding);
+            }
+            let mut out = [0u8; 32];
+            for (index, slot) in out.iter_mut().enumerate() {
+                let pair = &hex[index * 2..index * 2 + 2];
+                *slot =
+                    u8::from_str_radix(pair, 16).map_err(|_| StartupError::InvalidSignerEncoding)?;
+            }
+            Ok(out)
+        })()
+    };
+    bytes.fill(0);
+    result
 }
 
 fn read_authorization(path: &Path) -> Result<AuthorizationToken, StartupError> {
@@ -644,13 +698,14 @@ fn durable_fence(
 
     let generations = authorization.generations();
     let record = format!(
-        "version=1\nchain_id={}\nsender={}\nfirst_nonce={}\nlane_capacity={}\ncapture_capacity={}\nclock_id={}\npolicy_generation={}\ncodehash_generation={}\ncapability_generation={}\nauthorization_generation={}\nrestart_action=QUARANTINE\nautomatic_resume=false\n",
+        "version=1\nchain_id={}\nsender={}\nfirst_nonce={}\nlane_capacity={}\ncapture_capacity={}\nclock_id={}\ncanonical_block_hash={}\npolicy_generation={}\ncodehash_generation={}\ncapability_generation={}\nauthorization_generation={}\nrestart_action=QUARANTINE\nautomatic_resume=false\n",
         authorization.chain_id,
         sender,
         authorization.first_nonce,
         authorization.lane_capacity,
         config.capture_capacity,
         config.clock_id,
+        authorization.canonical_block_hash,
         generations.policy,
         generations.codehash,
         generations.capability,
@@ -745,7 +800,6 @@ mod tests {
                 },
             ],
             economics: StartupEconomics {
-                funding_wei: U256::from(10_000_000_000_000_000u128),
                 buy_amount_wei: 1_000_000_000_000u128,
                 gas_price_wei: 1_000_000_000u128,
                 gas_limit: 300_000,
@@ -766,11 +820,22 @@ mod tests {
         (config(signer.address()), sources)
     }
 
+    fn facts(config: &StartupConfig) -> StartupFacts {
+        StartupFacts {
+            chain_id: config.chain_id,
+            sender: config.sender,
+            next_nonce: config.first_nonce,
+            balance_wei: U256::from(config.economics.max_total_wei),
+            canonical_block_hash: B256::repeat_byte(0x44),
+        }
+    }
+
     #[test]
     fn complete_startup_validates_and_loads_secrets_once_without_debug_leakage() {
         let root = tmp("valid");
         let (config, sources) = valid(&root);
-        let startup = validate_startup(config, &table(), &sources).unwrap();
+        let observed = facts(&config);
+        let startup = validate_startup(config, &table(), &sources, observed).unwrap();
         let printed = format!("{startup:?} {sources:?}");
         assert!(!printed.contains("unit-test-secret"));
         assert!(!printed.contains("2222222222"));
@@ -783,11 +848,12 @@ mod tests {
     fn configuration_fails_closed_on_chain_generation_endpoint_capacity_and_budget() {
         let root = tmp("bad-config");
         let (base, sources) = valid(&root);
+        let observed = facts(&base);
 
         let mut c = base.clone();
         c.chain_id = 97;
         assert!(matches!(
-            validate_startup(c, &table(), &sources),
+            validate_startup(c, &table(), &sources, observed),
             Err(StartupError::WrongChain)
         ));
 
