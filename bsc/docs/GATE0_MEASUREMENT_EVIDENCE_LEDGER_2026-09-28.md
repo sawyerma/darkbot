@@ -3186,3 +3186,71 @@ Q5B does **not** qualify `positionFirst`, `noMerge`, ordering, atomicity, same-b
 
 The next C0 task is Unit 6 typed startup config/secrets/authorization plus the remaining minimal recorder/replay foundation. Q5B does not authorize a funded Mainnet action.
 
+## 2026-10-06 — C0 Unit 6 startup authorization + recorder/replay foundation
+
+Final tested production-workspace commit:
+
+```text
+57e7dbbdf83c0c479c0e0a7c5365044914e181e3
+UNIT6_FINAL_ALL_GATES_PASS
+```
+
+The target-system chained acceptance completed:
+
+```text
+cargo fmt --all -- --check
+cargo build --workspace --locked --offline
+cargo build --workspace --release --locked --offline
+cargo test --workspace --locked --offline
+cargo test --workspace --release --locked --offline
+cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+```
+
+### Unit 6 startup scope accepted
+
+The runner now owns a typed, fail-closed startup boundary:
+
+- typed chain/profile, policy/codehash/capability/authorization generations, sender/first nonce, lane/capture capacity, clock identity, eligible adapters/endpoints and economic gas/bid/amount/slippage/budget policy;
+- signer secret and BlockRazor authorization are loaded before trading; debug output redacts credential material and the temporary signer-file byte buffer is overwritten after parsing;
+- startup funding, next nonce, chain, sender and canonical checkpoint are supplied separately as `StartupFacts` and must agree with the configured policy before authorization is minted;
+- actual observed balance must cover the configured maximum total exposure;
+- a zero canonical checkpoint, observed chain/sender/nonce mismatch, missing credential, wrong signer, wrong endpoint, stale generation or invalid budget fails closed;
+- background policy/codehash/capability/authorization invalidation is represented by immutable generation snapshots; old startup authorization stops comparing current after a generation changes;
+- the production `ArmedFence` constructor is feature-gated to the runner startup path;
+- the admitting `IntentLane` is created only after a create-new startup fence is written and fsynced; an existing fence always returns restart quarantine and no automatic resume exists;
+- the durable fence binds chain, sender, first nonce, capacities, clock, canonical block checkpoint and the four startup generations.
+
+The source that obtains/reconciles the `StartupFacts` from the live chain is **not** invented in Unit 6. Canonical/pending/recovery ownership remains C2; the eventual runner assembly must provide independently reconciled facts to this already tested validation boundary.
+
+### C0 recorder/replay foundation accepted
+
+The new `darkbot-capture` crate provides the concrete minimum C0 foundation:
+
+- versioned binary journal framing with explicit little-endian fields;
+- per-frame CRC32 integrity;
+- SHA-256 manifest over the exact journal bytes;
+- sequence-preserving replay with corruption, truncation, payload-bound and sequence-gap rejection;
+- bounded non-waiting producer API using `try_send`, with overflow/disconnect/oversize counters and visible sequence identities;
+- background drain/writer ownership rather than filesystem writes in the decision path.
+
+This is a **foundation**, not a C1/C3 latency qualification. The current recorder copies the payload and the standard bounded channel is not claimed lock-free or allocation-free. C1 must provide the production mmap/SPSC Fast Lane, and C3 must qualify the integrated hot path under recorder load.
+
+New Unit-6/C0 tests: 7 startup tests + 8 capture/replay tests = 15. With the previously accepted 308-workspace inventory after Q5B, the current source inventory is 323 workspace tests.
+
+### Status
+
+```text
+Units 1-4                         IMPLEMENTED_TESTED / FROZEN
+Unit 5 Core/runner/TLS            IMPLEMENTED_TESTED / FROZEN
+Q5A real TLS qualification        PASS
+Q5B production TLS binding        IMPLEMENTED_TESTED / FROZEN
+Unit 6 startup authorization      IMPLEMENTED_TESTED / FROZEN
+C0 recorder/replay foundation     IMPLEMENTED_TESTED / FROZEN for foundation scope
+provider semantic qualification  OPEN
+C1 geth mmap/SPSC Fast Lane       NEXT
+LIVE                              BLOCKED
+T0 -> T_buy < 1 ms                NOT YET PROVEN
+```
+
+Unit 6 does not qualify provider ordering/inclusion semantics, does not implement the C2 canonical-state owner, does not establish the C1 producer hook or mmap/SPSC latency, and authorizes no funded Mainnet action.
+
