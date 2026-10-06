@@ -67,7 +67,13 @@ def main() -> int:
 \t\t}
 \t\tpeerID := peer.NodeID()
 \t\tfor _, tx := range txs {
-\t\t\tfastlane.PublishTransaction(fastlane.EarlyTxSeen, "eth-broadcast", peerID[:], tx)
+\t\t\ttHook, err := fastlane.MonotonicNS()
+\t\t\tif err != nil {
+\t\t\t\treturn fmt.Errorf("Transactions: fastlane clock: %v", err)
+\t\t\t}
+\t\t\tif err := fastlane.PublishTransactionAt(fastlane.EarlyTxSeen, "eth-broadcast", peerID[:], tHook, tx); err != nil {
+\t\t\t\treturn fmt.Errorf("Transactions: fastlane publish: %v", err)
+\t\t\t}
 \t\t}
 \t\treturn h.txFetcher.Enqueue(peer.ID(), txs, false)
 ''',
@@ -85,7 +91,13 @@ def main() -> int:
 \t\t}
 \t\tpeerID := peer.NodeID()
 \t\tfor _, tx := range txs {
-\t\t\tfastlane.PublishTransaction(fastlane.EarlyTxSeen, "eth-pooled", peerID[:], tx)
+\t\t\ttHook, err := fastlane.MonotonicNS()
+\t\t\tif err != nil {
+\t\t\t\treturn fmt.Errorf("PooledTransactions: fastlane clock: %v", err)
+\t\t\t}
+\t\t\tif err := fastlane.PublishTransactionAt(fastlane.EarlyTxSeen, "eth-pooled", peerID[:], tHook, tx); err != nil {
+\t\t\t\treturn fmt.Errorf("PooledTransactions: fastlane publish: %v", err)
+\t\t\t}
 \t\t}
 \t\treturn h.txFetcher.Enqueue(peer.ID(), txs, true)
 ''',
