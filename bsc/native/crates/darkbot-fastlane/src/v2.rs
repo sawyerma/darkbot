@@ -15,7 +15,7 @@ use std::ptr::{self, NonNull};
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{RecordKind, AUX_LEN, HASH_LEN, PEER_LEN, SOURCE_LEN};
+use crate::{AUX_LEN, HASH_LEN, PEER_LEN, RecordKind, SOURCE_LEN};
 
 pub const MAGIC_V2: [u8; 8] = *b"DBFLN002";
 pub const VERSION_V2: u16 = 2;
@@ -213,7 +213,10 @@ impl fmt::Display for V2Error {
             Self::BadEndian(v) => write!(f, "fastlane v2: bad endian marker {v:#x}"),
             Self::BadLayout(v) => write!(f, "fastlane v2: bad layout {v}"),
             Self::GenerationMismatch { expected, observed } => {
-                write!(f, "fastlane v2: generation mismatch {observed} != {expected}")
+                write!(
+                    f,
+                    "fastlane v2: generation mismatch {observed} != {expected}"
+                )
             }
             Self::LaneNotFound(v) => write!(f, "fastlane v2: lane {v} not found"),
             Self::LaneMismatch(v) => write!(f, "fastlane v2: lane mismatch {v}"),
@@ -264,7 +267,11 @@ impl MappingV2 {
         }
         let ptr = NonNull::new(raw.cast::<u8>())
             .ok_or_else(|| V2Error::MapFailed(io::Error::other("mmap returned null")))?;
-        Ok(Self { _file: file, ptr, len })
+        Ok(Self {
+            _file: file,
+            ptr,
+            len,
+        })
     }
 
     fn bytes(&self) -> &[u8] {
@@ -371,8 +378,7 @@ impl ArenaV2 {
                 bytes[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32].fill(0);
 
                 for slot in 0..lane.capacity {
-                    let slot_offset =
-                        lane_offset + LANE_HEADER_SIZE_V2 + slot * lane.slot_stride;
+                    let slot_offset = lane_offset + LANE_HEADER_SIZE_V2 + slot * lane.slot_stride;
                     put_u64(bytes, slot_offset + SLOT_OFF_COMMITTED, EMPTY_SEQUENCE);
                 }
             }
@@ -387,11 +393,7 @@ impl ArenaV2 {
 }
 
 impl ProducerV2 {
-    pub fn open(
-        path: &Path,
-        generation: u64,
-        expected: LaneConfigV2,
-    ) -> Result<Self, V2Error> {
+    pub fn open(path: &Path, generation: u64, expected: LaneConfigV2) -> Result<Self, V2Error> {
         let (mapping, lane_offset) = open_lane(path, generation, expected)?;
         Ok(Self {
             mapping,
@@ -420,8 +422,7 @@ impl ProducerV2 {
         }
         let lane_epoch = self.atomic(LH_OFF_LANE_EPOCH).load(Ordering::Acquire);
         let index = (write % self.config.capacity as u64) as usize;
-        let slot_offset =
-            self.lane_offset + LANE_HEADER_SIZE_V2 + index * self.config.slot_stride;
+        let slot_offset = self.lane_offset + LANE_HEADER_SIZE_V2 + index * self.config.slot_stride;
 
         self.mapping
             .atomic_u64(slot_offset + SLOT_OFF_COMMITTED)
@@ -465,11 +466,7 @@ impl ProducerV2 {
 }
 
 impl ConsumerV2 {
-    pub fn open(
-        path: &Path,
-        generation: u64,
-        expected: LaneConfigV2,
-    ) -> Result<Self, V2Error> {
+    pub fn open(path: &Path, generation: u64, expected: LaneConfigV2) -> Result<Self, V2Error> {
         let (mapping, lane_offset) = open_lane(path, generation, expected)?;
         Ok(Self {
             mapping,
@@ -489,8 +486,7 @@ impl ConsumerV2 {
         }
 
         let index = (read % self.config.capacity as u64) as usize;
-        let slot_offset =
-            self.lane_offset + LANE_HEADER_SIZE_V2 + index * self.config.slot_stride;
+        let slot_offset = self.lane_offset + LANE_HEADER_SIZE_V2 + index * self.config.slot_stride;
         let observed = self
             .mapping
             .atomic_u64(slot_offset + SLOT_OFF_COMMITTED)
@@ -534,7 +530,8 @@ impl ConsumerV2 {
         }
 
         let kind_raw = get_u16(slot, SLOT_OFF_KIND);
-        let kind = RecordKind::try_from(kind_raw).map_err(|_| V2Error::UnknownRecordKind(kind_raw))?;
+        let kind =
+            RecordKind::try_from(kind_raw).map_err(|_| V2Error::UnknownRecordKind(kind_raw))?;
         let mut source = [0u8; SOURCE_LEN];
         let mut peer = [0u8; PEER_LEN];
         let mut hash = [0u8; HASH_LEN];
@@ -897,8 +894,7 @@ mod tests {
         slot[SLOT_OFF_HASH..SLOT_OFF_HASH + HASH_LEN].copy_from_slice(&r.hash);
         slot[SLOT_OFF_AUX..SLOT_OFF_AUX + AUX_LEN].copy_from_slice(&r.aux);
         put_u64(&mut slot, SLOT_OFF_LANE_EPOCH, 7);
-        slot[SLOT_HEADER_SIZE_V2..SLOT_HEADER_SIZE_V2 + r.payload.len()]
-            .copy_from_slice(r.payload);
+        slot[SLOT_HEADER_SIZE_V2..SLOT_HEADER_SIZE_V2 + r.payload.len()].copy_from_slice(r.payload);
         assert_eq!(record_crc32c(&slot, r.payload.len()), 0xde71_4cce);
     }
 
