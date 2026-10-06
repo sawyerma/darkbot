@@ -116,7 +116,7 @@ impl LaneConfigV2 {
         }
         if self.slot_stride < MIN_SLOT_STRIDE_V2
             || self.slot_stride > MAX_SLOT_STRIDE_V2
-            || self.slot_stride % ALIGN_V2 != 0
+            || !self.slot_stride.is_multiple_of(ALIGN_V2)
             || self.slot_stride <= SLOT_HEADER_SIZE_V2
         {
             return Err(V2Error::InvalidSlotStride(self.slot_stride));
