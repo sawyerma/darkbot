@@ -3,6 +3,7 @@ package fastlane
 import (
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -79,7 +80,7 @@ func TestRingFullDoesNotOverwriteUnread(t *testing.T) {
 	if err := producer.publish(Record{Kind: EarlyTxSeen, Payload: []byte{9}}); err == nil {
 		t.Fatal("expected full ring failure")
 	}
-	if got := atomicLoad(producer.headerU64(offDroppedFull)); got != 1 {
+	if got := atomic.LoadUint64(producer.headerU64(offDroppedFull)); got != 1 {
 		t.Fatalf("dropped_full=%d", got)
 	}
 
