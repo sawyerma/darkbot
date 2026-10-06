@@ -3730,3 +3730,42 @@ Next ordered gate:
 ```text
 FIX-135 / P1-B: Candidate repeat fairness / no-starvation
 ```
+
+
+---
+
+## 2026-10-06 — FIX-135 P1-B fairness / no-starvation integrated
+
+Integrated commit:
+
+```text
+cacdbc82941d5a277ce49e1e52d3d5b4fd8c3b3b
+```
+
+Regression evidence:
+
+```text
+candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+candidate_fairness_repeat_admission_remains_bounded ... ok
+
+FIX135_WORKSPACE_TXV1_PASS
+FIX135_WORKSPACE_HEALTH_PASS
+FIX135_ALL_REGRESSION_GATES_PASS
+```
+
+Acceptance covered:
+
+- persistent candidates above the 1,024 repeat cap are serviced without deterministic starvation;
+- repeat admission remains bounded by the configured cap;
+- FIX-134 transition / forced / causal-revision correctness path remains green;
+- fairness telemetry added for wait depth, fairness rotations and periodic deferrals.
+
+Gate decision:
+
+```text
+P1-B candidate repeat fairness / no-starvation = PASS
+FIX-135 = INTEGRATED
+R127 scheduler/admission = READY FOR MAINNET SHADOW REQUALIFICATION
+CONTROLLED LIVE = BLOCKED
+```

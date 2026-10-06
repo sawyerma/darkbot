@@ -326,3 +326,39 @@ repeat fairness/no-starvation: STILL OPEN
 ```
 
 Do not declare Candidate Cache fully requalified yet. The reproduced fixed-order / soft-cap starvation counterexample remains the next blocking item and is assigned to FIX-135.
+
+
+---
+
+## FIX-135 follow-up — fair bounded repeat admission integrated 2026-10-06
+
+Integrated commit:
+
+```text
+cacdbc82941d5a277ce49e1e52d3d5b4fd8c3b3b
+```
+
+Direct regressions PASS:
+
+- same-slot causal revision regression retained;
+- 1,025 persistent candidates / repeat cap 1,024: all serviced within bounded rotation;
+- 4,097 candidate bounded-repeat regression: admitted work remains capped.
+
+Workspace markers:
+
+```text
+FIX135_WORKSPACE_TXV1_PASS
+FIX135_WORKSPACE_HEALTH_PASS
+FIX135_ALL_REGRESSION_GATES_PASS
+```
+
+Current status:
+
+```text
+same-slot causal revision safety: PASS
+repeat fairness / no-starvation: PASS
+R127d historical queue/fanout performance: preserved as historical evidence
+R127 scheduler/admission production requalification: NEXT
+```
+
+Next gate is the short Mainnet Shadow requalification required by AUDIT_HANDOFF_2026-10-05.md.
