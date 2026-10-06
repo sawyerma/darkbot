@@ -77,3 +77,6 @@ node_modules/
 *.seedphrase
 **/keystore/*.json
 **/keystores/*.json
+
+# Local pinned bsc-geth source checkout for C1; provenance is versioned separately.
+/bsc/vendor/
