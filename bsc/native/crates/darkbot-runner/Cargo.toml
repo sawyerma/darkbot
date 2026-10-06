@@ -12,6 +12,7 @@ publish.workspace = true
 darkbot-core = { path = "../darkbot-core", features = ["runner-startup"] }
 rustls = { workspace = true }
 webpki-roots = { workspace = true }
+alloy-primitives = { workspace = true }
 
 [dev-dependencies]
 # The core's test helpers, for this crate's tests only.
