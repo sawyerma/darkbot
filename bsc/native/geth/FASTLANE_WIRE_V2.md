@@ -103,7 +103,7 @@ The 384-byte header is deliberately split by writer ownership.
 | 296..327 | 32 | owner tag |
 | 328..383 | 56 | reserved |
 
-C1.2 initializes `lane_epoch = 1` and state = 1 for configured lanes. C1.3 defines the complete FREE/BOUND/CLOSING lifecycle and reuse rules.
+C1.3 freezes the lifecycle states as: `FREE=0`, `BOUND=1`, `CLOSING=2`, `QUARANTINED=3`. Peer-ingress lanes are created `FREE`; dedicated non-peer lanes are created `BOUND`. Binding increments `lane_epoch` before publishing `BOUND`; closing freezes `final_write_sequence` before publishing `CLOSING`; Rust may acknowledge `drained_epoch == lane_epoch` only after `read_sequence == final_write_sequence`; reuse is forbidden until that acknowledgement is visible. Generation mismatch remains fail-closed and old-generation lanes are not reusable by the new runtime.
 
 ## Slot header
 
