@@ -16,3 +16,6 @@ default = []
 # Makes the crate's test helpers available to the tests of dependent crates.
 # Enable it only under [dev-dependencies]. Never in a production build.
 test-support = []
+# Exposes only the production ArmedFence constructor consumed by the
+# darkbot-runner Unit-6 durable startup path. No I/O is added to core.
+runner-startup = []
