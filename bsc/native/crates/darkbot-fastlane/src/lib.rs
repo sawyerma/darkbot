@@ -189,10 +189,16 @@ impl fmt::Display for FastLaneError {
             Self::QueueFull { sequence } => write!(f, "fastlane: queue full at {sequence}"),
             Self::Shutdown => f.write_str("fastlane: ring is shut down"),
             Self::CorruptSequence { expected, observed } => {
-                write!(f, "fastlane: corrupt slot sequence {observed} != {expected}")
+                write!(
+                    f,
+                    "fastlane: corrupt slot sequence {observed} != {expected}"
+                )
             }
             Self::ChecksumMismatch { expected, actual } => {
-                write!(f, "fastlane: checksum mismatch {actual:#x} != {expected:#x}")
+                write!(
+                    f,
+                    "fastlane: checksum mismatch {actual:#x} != {expected:#x}"
+                )
             }
             Self::UnknownRecordKind(value) => {
                 write!(f, "fastlane: unknown record kind {value}")
@@ -294,7 +300,9 @@ impl Mapping {
                 },
             );
             for index in 0..config.capacity {
-                let slot = mapping.slot_ptr(index, config.slot_size).cast::<SlotHeader>();
+                let slot = mapping
+                    .slot_ptr(index, config.slot_size)
+                    .cast::<SlotHeader>();
                 ptr::write(
                     slot,
                     SlotHeader {
@@ -325,7 +333,8 @@ impl Mapping {
             .open(path)
             .map_err(FastLaneError::Io)?;
         let metadata = file.metadata().map_err(FastLaneError::Io)?;
-        let observed_len = usize::try_from(metadata.len()).map_err(|_| FastLaneError::SizeOverflow)?;
+        let observed_len =
+            usize::try_from(metadata.len()).map_err(|_| FastLaneError::SizeOverflow)?;
         let expected_len = total_len(expected.capacity, expected.slot_size)?;
         if observed_len != expected_len {
             return Err(FastLaneError::Io(io::Error::new(
@@ -354,9 +363,8 @@ impl Mapping {
         if raw == libc::MAP_FAILED {
             return Err(FastLaneError::MapFailed(io::Error::last_os_error()));
         }
-        let ptr = NonNull::new(raw.cast::<u8>()).ok_or_else(|| {
-            FastLaneError::MapFailed(io::Error::other("mmap returned null"))
-        })?;
+        let ptr = NonNull::new(raw.cast::<u8>())
+            .ok_or_else(|| FastLaneError::MapFailed(io::Error::other("mmap returned null")))?;
         Ok(Self {
             _file: file,
             ptr,
