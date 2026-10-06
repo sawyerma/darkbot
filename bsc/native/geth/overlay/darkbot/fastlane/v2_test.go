@@ -91,6 +91,9 @@ func TestV2RoundTripWrapAndDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := created.bindPeerLane(10, [32]byte{0x10}); err != nil {
+		t.Fatal(err)
+	}
 	if len(created.data)%v2Alignment != 0 {
 		t.Fatalf("arena len %d not aligned", len(created.data))
 	}
@@ -147,6 +150,9 @@ func TestV2FullNeverOverwritesUnread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := created.bindPeerLane(1, [32]byte{0x01}); err != nil {
+		t.Fatal(err)
+	}
 	created.close()
 
 	pa, _ := openArenaV2(path, 9)
@@ -185,6 +191,9 @@ func TestV2HeaderAndPayloadCorruptionDetected(t *testing.T) {
 			cfg := testPeerLaneV2(2)
 			created, err := createArenaV2(path, 11, []laneConfigV2{cfg})
 			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := created.bindPeerLane(2, [32]byte{0x02}); err != nil {
 				t.Fatal(err)
 			}
 			created.close()
@@ -227,6 +236,12 @@ func TestV2IndependentLanesHaveIndependentProducers(t *testing.T) {
 	lanes := []laneConfigV2{testPeerLaneV2(20), testPeerLaneV2(21)}
 	created, err := createArenaV2(path, 13, lanes)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.bindPeerLane(20, [32]byte{0x20}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.bindPeerLane(21, [32]byte{0x21}); err != nil {
 		t.Fatal(err)
 	}
 	created.close()
@@ -331,3 +346,125 @@ func TestV2FileIsOwnerOnly(t *testing.T) {
 		t.Fatalf("mode=%#o", info.Mode().Perm())
 	}
 }
+
+
+func TestV2PeerLaneLifecycleRequiresDrainBeforeReuse(t *testing.T) {
+	path := testArenaV2Path(t)
+	cfg := testPeerLaneV2(30)
+	arena, err := createArenaV2(path, 21, []laneConfigV2{cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer arena.close()
+
+	ownerA := [32]byte{0xa1}
+	ownerB := [32]byte{0xb2}
+
+	lane, err := arena.lane(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := atomic.LoadUint32(v2AtomicU32(arena.data, lane.offset+v2LHState)); state != v2LaneStateFree {
+		t.Fatalf("initial state=%d", state)
+	}
+	epochA, err := arena.bindPeerLane(30, ownerA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if epochA != 2 {
+		t.Fatalf("epochA=%d", epochA)
+	}
+
+	producerArena, _ := openArenaV2(path, 21)
+	defer producerArena.close()
+	producer, _ := producerArena.lane(cfg)
+	consumerArena, _ := openArenaV2(path, 21)
+	defer consumerArena.close()
+	consumer, _ := consumerArena.lane(cfg)
+
+	if err := producer.publish(testRecordV2([]byte("one"))); err != nil {
+		t.Fatal(err)
+	}
+	finalWrite, err := arena.beginClosePeerLane(30, ownerA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalWrite != 1 {
+		t.Fatalf("finalWrite=%d", finalWrite)
+	}
+	if err := arena.releasePeerLane(30, ownerA); err == nil {
+		t.Fatal("released before drain")
+	}
+	if consumer.acknowledgeDrainedIfClosing() {
+		t.Fatal("acknowledged before consuming final record")
+	}
+	if _, ok, err := consumer.tryConsume(); err != nil || !ok {
+		t.Fatalf("consume ok=%v err=%v", ok, err)
+	}
+	if !consumer.acknowledgeDrainedIfClosing() {
+		t.Fatal("drain was not acknowledged")
+	}
+	if err := arena.releasePeerLane(30, ownerA); err != nil {
+		t.Fatal(err)
+	}
+
+	if state := atomic.LoadUint32(v2AtomicU32(arena.data, lane.offset+v2LHState)); state != v2LaneStateFree {
+		t.Fatalf("released state=%d", state)
+	}
+	if got := arena.data[lane.offset+v2LHOwner : lane.offset+v2LHOwner+32]; string(got) != string(make([]byte, 32)) {
+		t.Fatal("owner not cleared")
+	}
+	epochB, err := arena.bindPeerLane(30, ownerB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if epochB != 3 {
+		t.Fatalf("epochB=%d", epochB)
+	}
+}
+
+func TestV2PeerLaneLifecycleRejectsWrongOwnerAndFreePublish(t *testing.T) {
+	path := testArenaV2Path(t)
+	cfg := testPeerLaneV2(31)
+	arena, err := createArenaV2(path, 22, []laneConfigV2{cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer arena.close()
+
+	freeArena, _ := openArenaV2(path, 22)
+	freeLane, _ := freeArena.lane(cfg)
+	if err := freeLane.publish(testRecordV2([]byte("x"))); err == nil {
+		t.Fatal("FREE peer lane accepted publish")
+	}
+	freeArena.close()
+
+	owner := [32]byte{0x11}
+	wrong := [32]byte{0x22}
+	if _, err := arena.bindPeerLane(31, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := arena.bindPeerLane(31, owner); err == nil {
+		t.Fatal("double bind accepted")
+	}
+	if _, err := arena.beginClosePeerLane(31, wrong); err == nil {
+		t.Fatal("wrong owner closed lane")
+	}
+	if _, err := arena.beginClosePeerLane(31, owner); err != nil {
+		t.Fatal(err)
+	}
+
+	consumerArena, _ := openArenaV2(path, 22)
+	defer consumerArena.close()
+	consumer, _ := consumerArena.lane(cfg)
+	if !consumer.acknowledgeDrainedIfClosing() {
+		t.Fatal("empty closing lane did not acknowledge drain")
+	}
+	if err := arena.releasePeerLane(31, wrong); err == nil {
+		t.Fatal("wrong owner released lane")
+	}
+	if err := arena.releasePeerLane(31, owner); err != nil {
+		t.Fatal(err)
+	}
+}
+
