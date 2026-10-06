@@ -952,6 +952,6 @@
   ],
   "unit4_commit": "c745d92305ee24b0bff76621df0e83e09c9353b8",
   "unit4_bsc_native_tree": "421352ff59602d15da02556e1527785f0da7a29a",
-  "next_step": "C1 — pin the production bsc-geth source/build and implement the bidirectional mmap/SPSC Fast Lane: earliest useful complete-TX ingress plus acceptance/canonical/reorg provenance and local signed-TX outbound hook, with frozen wire version/bounds/framing/endianness/alignment, generation/ownership, acquire-release ordering, wraparound/backpressure, restart/shutdown/corruption behavior and compatible boundary clocks. Do not enable LIVE.",
+  "next_step": "C1 — execute the stop-gated C1.1→C1.10 Parallel Fast Lane plan in bsc/docs/BSC_C1_PARALLEL_FAST_LANE_PLAN.md: reproduce the V1 multi-producer defect; implement Wire V2 sharded SPSC ownership, lane lifecycle, validated actionable ingress with T_packet_decoded kept separate from T_ingress, Rust HOT0 zero-copy, M4 topology/QoS development evidence, local-geth outbound, concurrency/state-safety stress, native latency qualification and Testnet hook/path-early qualification; then freeze final geth/Rust/wire/config/evidence hashes. Parallel 48Club+BlockRazor workers remain deferred to Unit-5 Runner Rev4 in C3. Do not enable LIVE.",
   "product_gate": "LIVE blocked; T_buy - T0 < 1,000,000 ns NOT YET PROVEN; no value-bearing Mainnet action authorized by this status."
 }
