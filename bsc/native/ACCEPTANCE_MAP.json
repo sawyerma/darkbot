@@ -5,9 +5,9 @@
   "path_convention": "All evidence paths are repository paths. A path of the form <zip>::<member> names a member inside a ZIP that is itself in the repository.",
   "unit1_source": "bsc/docs/production-plan-reference/darkbot-c0-einheit1-rev2-reviewed.zip (rustfmt-normalised sources and Cargo.lock), copied unchanged; only crates/darkbot-core/src/lib.rs differs (module list)",
   "compiler_run": "Units 1-5 including Unit 5 runner v1 rev3, Unit 5 TLS transport rev2, and the Q5A qualification harness: combined tree PASS on the user's arm64 macOS target (2026-10-05): cargo fmt --all -- --check, debug and release workspace builds, debug and release workspace tests, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Chained final marker: Q5A_HARNESS_ALL_GATES_PASS. Measured workspace inventory: 303 tests.",
-  "freeze_status": "Units 1-4 remain IMPLEMENTED_TESTED and FROZEN for their defined scopes. Unit 5 Core, runner v1 rev3 and TLS/socket transport rev2 remain IMPLEMENTED_TESTED and FROZEN. Q5A real TLS transport qualification is PASS for 48Club and BlockRazor. Q5B production TLS qualification binding is IMPLEMENTED_TESTED and FROZEN at bc51d96352f906050239455aad254b957112e8e6: the only production QualifiedTransport path is sealed and fail-closed against the accepted Q5A evidence/profile, adapter/capability generation and handoff boundary. Provider lifecycle/ordering/atomicity/same-block/pre-submission qualification remains OPEN. Local-geth native outbound remains deferred to C1. LIVE remains BLOCKED and T0 to T_buy below 1 ms is NOT YET PROVEN.",
+  "freeze_status": "Units 1-4 remain IMPLEMENTED_TESTED and FROZEN for their defined scopes. Unit 5 Core, runner v1 rev3, TLS/socket transport rev2 and Q5B production transport binding remain IMPLEMENTED_TESTED/FROZEN; Q5A real TLS transport qualification is PASS for 48Club and BlockRazor. Unit 6 typed startup config/secrets/authorization and the C0 recorder/replay foundation are IMPLEMENTED_TESTED/FROZEN for their declared scopes at 57e7dbbdf83c0c479c0e0a7c5365044914e181e3, with UNIT6_FINAL_ALL_GATES_PASS. Live StartupFacts acquisition/reconciliation remains owned by later runner/C2 integration; the recorder foundation is not claimed lock-free or C3 latency-qualified. Provider lifecycle/ordering/atomicity/same-block/pre-submission qualification remains OPEN. LIVE remains BLOCKED and T0 to T_buy below 1 ms is NOT YET PROVEN.",
   "test_count": {
-    "total": 308,
+    "total": 323,
     "unit1": 27,
     "unit2": 33,
     "unit3": 33,
@@ -17,7 +17,9 @@
     "unit5_runner": 56,
     "unit5_tls_transport": 31,
     "q5a_qualification_harness": 32,
-    "q5b_transport_binding": 5
+    "q5b_transport_binding": 5,
+    "unit6_startup": 7,
+    "c0_capture_replay": 8
   },
   "rows": [
     {
@@ -888,10 +890,68 @@
       "result": "PASS on the user's arm64 macOS target on 2026-10-06 at final tested commit bc51d96352f906050239455aad254b957112e8e6. The chained command completed cargo fmt check, debug/release workspace builds, debug/release workspace tests and clippy -D warnings and ended with Q5B_FINAL_ALL_GATES_PASS.",
       "coverage": "Sealed promotion of the accepted combined Q5A evidence SHA256 e2c537765f539f7551d89613c337d2079820731b77a531b7306a14fe4c845849 into an opaque production TransportQualification/QualifiedTransport. Fail-closed checks bind the direct builder capability and TLS handoff boundary to the exact transport implementation, endpoint host/port, Q5A policy, macOS/aarch64 target, connection generation, accepted peer, TLSv1.3/cipher and HTTP/1.1 ALPN facts. Callers cannot manufacture the production evidence token or a qualification from strings/generation values.",
       "not_proven": "Any provider semantic property, provider placement/inclusion, release eligibility of the frozen capability records, canonical acquisition, local-geth native outbound or T0 to T_buy below 1 ms. Q5B authorizes no funded Mainnet action."
+    },
+    {
+      "matrix_id": "C0-U6",
+      "adoption": "SN08/SN12",
+      "unit": "Unit 6 (typed startup config/secrets/authorization and durable fence)",
+      "status": "IMPLEMENTED_TESTED and FROZEN for the declared startup-boundary scope at 57e7dbbdf83c0c479c0e0a7c5365044914e181e3; LIVE BLOCKED",
+      "symbols": [
+        "darkbot_runner::startup::StartupConfig",
+        "darkbot_runner::startup::StartupFacts",
+        "darkbot_runner::startup::StartupEconomics",
+        "darkbot_runner::startup::GenerationOwner",
+        "darkbot_runner::startup::StartupAuthorization",
+        "darkbot_runner::startup::ValidatedStartup",
+        "darkbot_runner::startup::ArmedStartup",
+        "darkbot_runner::startup::validate_startup",
+        "darkbot_core::intent::ArmedFence",
+        "darkbot_core::intent::IntentLane::armed"
+      ],
+      "tests": [
+        "complete_startup_validates_and_loads_secrets_once_without_debug_leakage",
+        "configuration_fails_closed_on_chain_generation_endpoint_capacity_and_budget",
+        "independently_observed_nonce_funding_and_checkpoint_fail_closed",
+        "missing_or_wrong_secret_never_arms_startup",
+        "durable_fence_arms_once_and_every_restart_is_quarantined",
+        "generation_revocation_invalidates_authorization_without_mutating_old_snapshot",
+        "provider_targets_are_built_only_from_validated_loaded_material"
+      ],
+      "result": "PASS on the user's arm64 macOS target on 2026-10-06. Final chained workspace acceptance ended with UNIT6_FINAL_ALL_GATES_PASS and included fmt, locked/offline debug+release builds, locked/offline debug+release tests, and clippy -D warnings.",
+      "coverage": "Typed fail-closed startup policy and secret handling; separately supplied observed chain/sender/next-nonce/balance/canonical checkpoint; economic and endpoint validation; immutable generation invalidation; durable create-new+fsync restart fence; production ArmedFence/IntentLane construction only after the fence succeeds.",
+      "not_proven": "The live source/reconciliation of StartupFacts, canonical safe-resume, provider semantic qualification, local-geth Fast Lane, integrated latency, funded Mainnet authorization or T0 to T_buy below 1 ms."
+    },
+    {
+      "matrix_id": "C0-CAPTURE",
+      "adoption": "SN14/SN17",
+      "unit": "C0 minimal recorder/replay foundation",
+      "status": "IMPLEMENTED_TESTED and FROZEN for the minimal foundation scope at 57e7dbbdf83c0c479c0e0a7c5365044914e181e3; production Fast-Lane/C3 performance qualification remains OPEN",
+      "symbols": [
+        "darkbot_capture::Recorder",
+        "darkbot_capture::RecorderDrain",
+        "darkbot_capture::JournalWriter",
+        "darkbot_capture::JournalReader",
+        "darkbot_capture::JournalManifest",
+        "darkbot_capture::CaptureRecord"
+      ],
+      "tests": [
+        "crc32_matches_the_standard_vector",
+        "sha256_matches_the_standard_vector",
+        "journal_roundtrip_preserves_exact_records_and_manifest",
+        "corruption_and_truncation_fail_closed",
+        "sequence_gaps_are_rejected_by_writer_and_replay",
+        "recorder_never_waits_and_overflow_is_counted_with_sequence",
+        "oversize_payload_is_refused_before_sequence_consumption",
+        "reader_enforces_payload_bound_before_allocating_payload",
+        "manifest_hash_is_over_exact_journal_bytes"
+      ],
+      "result": "PASS as part of UNIT6_FINAL_ALL_GATES_PASS on 2026-10-06.",
+      "coverage": "Concrete binary journal framing, CRC integrity, exact-byte SHA-256 manifest, bounded replay, explicit corruption/truncation/gap failure and non-waiting bounded producer API with overflow visibility.",
+      "not_proven": "Lock-free/allocation-free producer behavior, mmap/SPSC transport, producer-source completeness, 15-second/30-minute production capture quality or C3 latency under recorder load."
     }
   ],
   "unit4_commit": "c745d92305ee24b0bff76621df0e83e09c9353b8",
   "unit4_bsc_native_tree": "421352ff59602d15da02556e1527785f0da7a29a",
-  "next_step": "C0 Unit 6 — implement typed startup config/secrets/authorization and the remaining minimal recorder/replay foundation, including the durable startup authorization/fence required before an admitting lane can exist. Do not enable LIVE. Then continue C1/C2/C3 in the master-plan order.",
+  "next_step": "C1 — pin the production bsc-geth source/build and implement the bidirectional mmap/SPSC Fast Lane: earliest useful complete-TX ingress plus acceptance/canonical/reorg provenance and local signed-TX outbound hook, with frozen wire version/bounds/framing/endianness/alignment, generation/ownership, acquire-release ordering, wraparound/backpressure, restart/shutdown/corruption behavior and compatible boundary clocks. Do not enable LIVE.",
   "product_gate": "LIVE blocked; T_buy - T0 < 1,000,000 ns NOT YET PROVEN; no value-bearing Mainnet action authorized by this status."
 }
