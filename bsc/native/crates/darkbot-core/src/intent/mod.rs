@@ -409,13 +409,11 @@ pub struct LaneStats {
 /// reconciled next nonce. It is consumed by [`IntentLane::armed`]: one
 /// attestation arms one lane.
 ///
-/// The fence, its I/O and its recovery check belong to the runner (Unit 6)
-/// and do not exist yet. Until they do, this type has **no production
-/// constructor**: nothing outside this crate's tests can create an
-/// admitting lane, and in particular nothing can replace a restart
-/// quarantine by arming a fresh lane. The production constructor will be
-/// added together with the durable startup fence and bound to its
-/// successful check.
+/// The fence, its I/O and its recovery check belong to the runner (Unit 6).
+/// Production construction is feature-gated to that runner path and is
+/// permitted only after the runner durably creates the startup fence and
+/// validates its complete startup authorization. A restart with an existing
+/// fence stays quarantined; this type provides no automatic recovery.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ArmedFence {
     chain_id: u64,
@@ -424,10 +422,27 @@ pub struct ArmedFence {
 }
 
 impl ArmedFence {
-    /// Test-only attestation. Production code cannot arm a lane yet.
+    /// Production attestation created only after the runner's Unit-6
+    /// durable startup fence completed successfully. The constructor is
+    /// absent unless the `runner-startup` feature is enabled by the
+    /// production runner dependency; core still performs no filesystem I/O.
+    ///
+    /// The runner must never call this before its create-new/write/fsync
+    /// sequence and startup validation have all succeeded.
+    #[cfg(feature = "runner-startup")]
+    #[doc(hidden)]
+    pub fn from_durable_startup(chain_id: u64, sender: Address, first_nonce: u64) -> Self {
+        Self {
+            chain_id,
+            sender,
+            first_nonce,
+        }
+    }
+
+    /// Test-only attestation.
     /// Also compiled for the tests of dependent crates behind the
     /// `test-support` feature, which is enabled only under
-    /// `[dev-dependencies]` and never in a production build.
+    /// `[dev-dependencies]`.
     #[cfg(any(test, feature = "test-support"))]
     pub fn for_tests(chain_id: u64, sender: Address, first_nonce: u64) -> Self {
         Self {
