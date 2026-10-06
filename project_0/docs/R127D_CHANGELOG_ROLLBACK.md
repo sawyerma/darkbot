@@ -284,3 +284,45 @@ Do not roll back blindly to R127c: R127c had materially worse repeated downstrea
 Detailed acceptance criteria and ordered follow-up are frozen in
 `project_0/docs/AUDIT_HANDOFF_2026-10-05.md`.
 
+
+
+---
+
+## FIX-134 follow-up — causal revision repair integrated 2026-10-06
+
+The first audit correctness repair is complete.
+
+Original fix commit:
+
+```text
+45a7cbcea60346ce030da132cd9af39d6aba9563
+```
+
+Integrated on current `main` as:
+
+```text
+35184b42ef5c4df16dfa90a4fda1badff103f586
+```
+
+Regression evidence:
+
+```text
+candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+1 passed / 0 failed
+
+FIX134_WORKSPACE_TXV1_PASS
+FIX134_WORKSPACE_HEALTH_PASS
+FIX134_ALL_REGRESSION_GATES_PASS
+```
+
+Status after FIX-134:
+
+```text
+same-slot causal revision safety: PASS
+exact same-revision suppression: preserved
+changed-input forwarding despite repeat soft cap: PASS
+R127d queue/fanout performance evidence: preserved
+repeat fairness/no-starvation: STILL OPEN
+```
+
+Do not declare Candidate Cache fully requalified yet. The reproduced fixed-order / soft-cap starvation counterexample remains the next blocking item and is assigned to FIX-135.

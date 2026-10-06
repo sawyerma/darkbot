@@ -3663,3 +3663,70 @@ currently prevent reliable profitable-capture proof.
 
 Long Race/TPU/provider/architecture work is paused unless new measured evidence makes it necessary.
 
+
+
+---
+
+## 2026-10-06 — FIX-134 P1-A same-slot causal revision repair integrated
+
+### Source / integration
+
+Original FIX-134 commit:
+
+```text
+45a7cbcea60346ce030da132cd9af39d6aba9563
+```
+
+Integrated onto then-current `main` as:
+
+```text
+35184b42ef5c4df16dfa90a4fda1badff103f586
+```
+
+Only:
+
+```text
+project_0/native/crates/darkbot-runner/src/main.rs
+```
+
+changed relative to the prior `main`. Concurrent BSC work was not modified.
+
+### Correctness change
+
+FIX-134 closes the reproduced same-slot Candidate Cache blindness by carrying a monotonic causal input revision from Bank/oracle/integration dependency updates into candidate admission.
+
+Changed causal input is correctness work and bypasses the ordinary periodic-repeat soft cap. Exact duplicate same-revision evaluations remain suppressible.
+
+Recovery clears Candidate Cache revision state. Multiple dirty Banks collapse per account while retaining the newest causal revision.
+
+### Regression evidence
+
+Targeted regression:
+
+```text
+test integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+test result: ok. 1 passed; 0 failed
+```
+
+Full workspace regression markers:
+
+```text
+FIX134_WORKSPACE_TXV1_PASS
+FIX134_WORKSPACE_HEALTH_PASS
+FIX134_ALL_REGRESSION_GATES_PASS
+```
+
+Gate decision:
+
+```text
+P1-A same-slot candidate revision correctness = PASS
+FIX-134 = INTEGRATED
+R127 candidate-admission correctness = STILL OPEN pending P1-B fairness/no-starvation
+CONTROLLED LIVE = BLOCKED
+```
+
+Next ordered gate:
+
+```text
+FIX-135 / P1-B: Candidate repeat fairness / no-starvation
+```
