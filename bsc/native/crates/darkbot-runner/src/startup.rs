@@ -236,10 +236,7 @@ impl ValidatedStartup {
 
     /// Creates a provider target from already loaded startup material.
     /// No file or environment access occurs here.
-    pub fn provider_target(
-        &self,
-        adapter: AdapterId,
-    ) -> Result<ProviderTarget, StartupError> {
+    pub fn provider_target(&self, adapter: AdapterId) -> Result<ProviderTarget, StartupError> {
         let endpoint = self
             .config
             .endpoints
@@ -398,13 +395,19 @@ impl fmt::Display for StartupError {
             Self::InvalidClock => f.write_str("startup: clock id must be nonzero"),
             Self::EmptyAdapters => f.write_str("startup: no eligible adapter selected"),
             Self::IneligibleAdapter => f.write_str("startup: adapter is not currently eligible"),
-            Self::AdapterKindMismatch => f.write_str("startup: adapter kind does not match capability"),
+            Self::AdapterKindMismatch => {
+                f.write_str("startup: adapter kind does not match capability")
+            }
             Self::DuplicateEndpoint => f.write_str("startup: duplicate adapter endpoint"),
             Self::MissingEndpoint => f.write_str("startup: selected adapter has no endpoint"),
-            Self::UnexpectedEndpoint => f.write_str("startup: endpoint exists for unselected adapter"),
+            Self::UnexpectedEndpoint => {
+                f.write_str("startup: endpoint exists for unselected adapter")
+            }
             Self::WrongEndpoint => f.write_str("startup: endpoint differs from qualified builder"),
             Self::MissingAuthorization => f.write_str("startup: required authorization is missing"),
-            Self::UnexpectedAuthorization => f.write_str("startup: authorization supplied but unused"),
+            Self::UnexpectedAuthorization => {
+                f.write_str("startup: authorization supplied but unused")
+            }
             Self::InvalidEconomics => f.write_str("startup: economic policy is invalid"),
             Self::BudgetOverflow => f.write_str("startup: economic budget overflow"),
             Self::InsufficientFunding => f.write_str("startup: funding is below maximum exposure"),
@@ -413,7 +416,9 @@ impl fmt::Display for StartupError {
             Self::Signer(error) => write!(f, "startup: {error}"),
             Self::Target(error) => write!(f, "startup: {error}"),
             Self::FenceIo(kind) => write!(f, "startup: fence I/O {kind:?}"),
-            Self::RestartQuarantined(_) => f.write_str("startup: existing fence requires quarantine"),
+            Self::RestartQuarantined(_) => {
+                f.write_str("startup: existing fence requires quarantine")
+            }
             Self::StaleAuthorization => f.write_str("startup: authorization generation is stale"),
             Self::Lane(error) => write!(f, "startup: {error}"),
         }
@@ -674,12 +679,8 @@ mod tests {
 
     fn tmp(name: &str) -> PathBuf {
         let id = ID.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "darkbot-u6-{}-{}-{}",
-            std::process::id(),
-            id,
-            name
-        ));
+        let path =
+            std::env::temp_dir().join(format!("darkbot-u6-{}-{}-{}", std::process::id(), id, name));
         fs::create_dir_all(&path).unwrap();
         path
     }
