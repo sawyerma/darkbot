@@ -848,10 +848,10 @@ mod tests {
     fn configuration_fails_closed_on_chain_generation_endpoint_capacity_and_budget() {
         let root = tmp("bad-config");
         let (base, sources) = valid(&root);
-        let observed = facts(&base);
 
         let mut c = base.clone();
         c.chain_id = 97;
+        let observed = facts(&c);
         assert!(matches!(
             validate_startup(c, &table(), &sources, observed),
             Err(StartupError::WrongChain)
@@ -859,30 +859,70 @@ mod tests {
 
         let mut c = base.clone();
         c.capability_generation = 99;
+        let observed = facts(&c);
         assert!(matches!(
-            validate_startup(c, &table(), &sources),
+            validate_startup(c, &table(), &sources, observed),
             Err(StartupError::CapabilityGenerationMismatch)
         ));
 
         let mut c = base.clone();
         c.endpoints[0].host = "example.invalid".into();
+        let observed = facts(&c);
         assert!(matches!(
-            validate_startup(c, &table(), &sources),
+            validate_startup(c, &table(), &sources, observed),
             Err(StartupError::WrongEndpoint)
         ));
 
         let mut c = base.clone();
         c.lane_capacity = 0;
+        let observed = facts(&c);
         assert!(matches!(
-            validate_startup(c, &table(), &sources),
+            validate_startup(c, &table(), &sources, observed),
             Err(StartupError::InvalidLaneCapacity)
         ));
 
         let mut c = base.clone();
-        c.economics.funding_wei = U256::ZERO;
+        c.economics.max_total_wei = c.economics.max_buy_input_wei - 1;
+        let observed = facts(&c);
         assert!(matches!(
-            validate_startup(c, &table(), &sources),
+            validate_startup(c, &table(), &sources, observed),
+            Err(StartupError::InvalidEconomics)
+        ));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn independently_observed_nonce_funding_and_checkpoint_fail_closed() {
+        let root = tmp("facts");
+        let (config, sources) = valid(&root);
+
+        let mut observed = facts(&config);
+        observed.next_nonce += 1;
+        assert!(matches!(
+            validate_startup(config.clone(), &table(), &sources, observed),
+            Err(StartupError::ObservedNonceMismatch)
+        ));
+
+        let mut observed = facts(&config);
+        observed.balance_wei = U256::ZERO;
+        assert!(matches!(
+            validate_startup(config.clone(), &table(), &sources, observed),
             Err(StartupError::InsufficientFunding)
+        ));
+
+        let mut observed = facts(&config);
+        observed.canonical_block_hash = B256::ZERO;
+        assert!(matches!(
+            validate_startup(config.clone(), &table(), &sources, observed),
+            Err(StartupError::MissingCanonicalCheckpoint)
+        ));
+
+        let mut observed = facts(&config);
+        observed.sender = Address::repeat_byte(0x99);
+        assert!(matches!(
+            validate_startup(config, &table(), &sources, observed),
+            Err(StartupError::ObservedSenderMismatch)
         ));
 
         fs::remove_dir_all(root).unwrap();
@@ -892,9 +932,10 @@ mod tests {
     fn missing_or_wrong_secret_never_arms_startup() {
         let root = tmp("bad-secret");
         let (config, mut sources) = valid(&root);
+        let observed = facts(&config);
         sources.blockrazor_authorization_file = None;
         assert!(matches!(
-            validate_startup(config.clone(), &table(), &sources),
+            validate_startup(config.clone(), &table(), &sources, observed),
             Err(StartupError::MissingAuthorization)
         ));
 
@@ -903,7 +944,7 @@ mod tests {
         sources.signer_key_file = bad;
         sources.blockrazor_authorization_file = Some(root.join("blockrazor.auth"));
         assert!(matches!(
-            validate_startup(config, &table(), &sources),
+            validate_startup(config, &table(), &sources, observed),
             Err(StartupError::Signer(SignerError::InvalidSecretKey))
         ));
         fs::remove_dir_all(root).unwrap();
@@ -915,15 +956,19 @@ mod tests {
         let secrets = root.join("secrets");
         fs::create_dir(&secrets).unwrap();
         let (config, sources) = valid(&secrets);
+        let observed = facts(&config);
         let fence_root = root.join("fences");
 
-        let startup = validate_startup(config.clone(), &table(), &sources).unwrap();
+        let startup =
+            validate_startup(config.clone(), &table(), &sources, observed).unwrap();
         let armed = startup.arm(&fence_root).unwrap();
         assert_eq!(armed.lane().identity(), (56, config.sender));
         assert!(armed.fence_path().exists());
+        let fence = fs::read_to_string(armed.fence_path()).unwrap();
+        assert!(fence.contains("canonical_block_hash=0x4444444444444444444444444444444444444444444444444444444444444444"));
         drop(armed);
 
-        let startup = validate_startup(config, &table(), &sources).unwrap();
+        let startup = validate_startup(config, &table(), &sources, observed).unwrap();
         assert!(matches!(
             startup.arm(&fence_root),
             Err(StartupError::RestartQuarantined(_))
@@ -936,7 +981,8 @@ mod tests {
     fn generation_revocation_invalidates_authorization_without_mutating_old_snapshot() {
         let root = tmp("generation");
         let (config, sources) = valid(&root);
-        let startup = validate_startup(config, &table(), &sources).unwrap();
+        let observed = facts(&config);
+        let startup = validate_startup(config, &table(), &sources, observed).unwrap();
         let authorization = startup.authorization();
         let before = authorization.generations();
         assert!(authorization.is_current(startup.generations()));
@@ -955,7 +1001,8 @@ mod tests {
     fn provider_targets_are_built_only_from_validated_loaded_material() {
         let root = tmp("targets");
         let (config, sources) = valid(&root);
-        let startup = validate_startup(config, &table(), &sources).unwrap();
+        let observed = facts(&config);
+        let startup = validate_startup(config, &table(), &sources, observed).unwrap();
         let club = startup.provider_target(adapter(0)).unwrap();
         let razor = startup.provider_target(adapter(1)).unwrap();
         assert_eq!(club.kind(), AdapterKind::Club48Builder);
