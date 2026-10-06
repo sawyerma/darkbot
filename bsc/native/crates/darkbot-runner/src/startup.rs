@@ -657,8 +657,8 @@ fn read_signer_secret(path: &Path) -> Result<[u8; 32], StartupError> {
             let mut out = [0u8; 32];
             for (index, slot) in out.iter_mut().enumerate() {
                 let pair = &hex[index * 2..index * 2 + 2];
-                *slot =
-                    u8::from_str_radix(pair, 16).map_err(|_| StartupError::InvalidSignerEncoding)?;
+                *slot = u8::from_str_radix(pair, 16)
+                    .map_err(|_| StartupError::InvalidSignerEncoding)?;
             }
             Ok(out)
         })()
@@ -959,8 +959,7 @@ mod tests {
         let observed = facts(&config);
         let fence_root = root.join("fences");
 
-        let startup =
-            validate_startup(config.clone(), &table(), &sources, observed).unwrap();
+        let startup = validate_startup(config.clone(), &table(), &sources, observed).unwrap();
         let armed = startup.arm(&fence_root).unwrap();
         assert_eq!(armed.lane().identity(), (56, config.sender));
         assert!(armed.fence_path().exists());
