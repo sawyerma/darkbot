@@ -1,0 +1,36 @@
+{
+  "schema": "darkbot.c1.v1_baseline.v1",
+  "date": "2026-10-06",
+  "darkbot_tested_commit": "710e071850f21a6aed82355c074c792d85d9f2c6",
+  "pinned_geth": {
+    "repository": "https://github.com/bnb-chain/bsc.git",
+    "release": "v1.7.8",
+    "commit": "cdb7548b5baacfdae92f9f63437d6456411665f3"
+  },
+  "gates": {
+    "go test ./darkbot/fastlane": "PASS",
+    "go test ./eth/protocols/eth ./eth": "PASS",
+    "go test ./core": "PASS",
+    "go build ./cmd/geth": "PASS",
+    "go test -race -run ^TestC1V1ConcurrentPublishersProbe$ -count=1 -v ./darkbot/fastlane": "PASS_EXPECTED_DEFECT_REPRODUCED"
+  },
+  "defect_reproduction": {
+    "marker": "C1_V1_SPSC_VIOLATION_REPRODUCED",
+    "round": 0,
+    "expected_visible": 8,
+    "observed_visible": 6,
+    "read_sequence": 0,
+    "write_sequence": 6,
+    "interpretation": "Eight synchronized producers all returned success against the V1 ring, but only six records became visible. This confirms that the shared V1 producer path violates the SPSC ownership contract under concurrent peer publishers.",
+    "latency_baseline": "NOT_ACCEPTED_FOR_CONCURRENT_PEERS"
+  },
+  "linker_note": "The macOS race-test link emitted a malformed LC_DYSYMTAB warning; linking completed, the probe executed, and the expected logical ownership defect was reproduced. This warning is not treated as a C1.1 failure.",
+  "verdict": "C1.1_PASS",
+  "next": "C1.2_WIRE_V2",
+  "non_claims": {
+    "v1_concurrent_latency_qualified": false,
+    "wire_v2_implemented_tested": false,
+    "t0_to_t_buy_lt_1ms": "NOT_PROVEN",
+    "live": false
+  }
+}
