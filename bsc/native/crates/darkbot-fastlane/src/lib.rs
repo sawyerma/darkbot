@@ -21,6 +21,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const FASTLANE_MAGIC: [u8; 8] = *b"DBFLN001";
 pub const FASTLANE_VERSION: u16 = 1;
+pub const RING_HEADER_SIZE: usize = 128;
+pub const SLOT_HEADER_SIZE: usize = 192;
 pub const MIN_SLOT_SIZE: usize = 512;
 pub const MAX_SLOT_SIZE: usize = 256 * 1024;
 pub const MAX_CAPACITY: usize = 4096;
@@ -236,8 +238,8 @@ struct SlotHeader {
 
 const _: () = assert!(align_of::<RingHeader>() == SLOT_ALIGN);
 const _: () = assert!(align_of::<SlotHeader>() == SLOT_ALIGN);
-const _: () = assert!(size_of::<RingHeader>().is_multiple_of(SLOT_ALIGN));
-const _: () = assert!(size_of::<SlotHeader>().is_multiple_of(SLOT_ALIGN));
+const _: () = assert!(size_of::<RingHeader>() == RING_HEADER_SIZE);
+const _: () = assert!(size_of::<SlotHeader>() == SLOT_HEADER_SIZE);
 
 struct Mapping {
     _file: File,
@@ -450,6 +452,11 @@ impl Producer {
         Ok(Self { mapping, config })
     }
 
+    pub fn open(path: &Path, config: RingConfig) -> Result<Self, FastLaneError> {
+        let mapping = Mapping::open(path, config)?;
+        Ok(Self { mapping, config })
+    }
+
     pub fn publish(&mut self, record: &Record<'_>) -> Result<u64, FastLaneError> {
         if record.payload.len() > self.config.max_payload() {
             return Err(FastLaneError::PayloadTooLarge {
@@ -516,6 +523,11 @@ impl Producer {
 }
 
 impl Consumer {
+    pub fn create(path: &Path, config: RingConfig) -> Result<Self, FastLaneError> {
+        let mapping = Mapping::create(path, config)?;
+        Ok(Self { mapping, config })
+    }
+
     pub fn open(path: &Path, config: RingConfig) -> Result<Self, FastLaneError> {
         let mapping = Mapping::open(path, config)?;
         Ok(Self { mapping, config })
@@ -685,6 +697,25 @@ mod tests {
             c.validate(),
             Err(FastLaneError::InvalidSlotSize(513))
         ));
+    }
+
+    #[test]
+    fn creator_role_is_independent_from_spsc_role() {
+        let path = tmp("creator-role");
+        let cfg = config(Direction::RustToGeth);
+        let consumer = Consumer::create(&path, cfg).unwrap();
+        let mut producer = Producer::open(&path, cfg).unwrap();
+        producer
+            .publish(&record(RecordKind::OutboundSignedTx, b"buy"))
+            .unwrap();
+        let mut consumer = consumer;
+        let out = consumer.try_consume().unwrap().unwrap();
+        assert_eq!(out.kind, RecordKind::OutboundSignedTx);
+        assert_eq!(&*out.payload, b"buy");
+
+        drop(consumer);
+        drop(producer);
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
