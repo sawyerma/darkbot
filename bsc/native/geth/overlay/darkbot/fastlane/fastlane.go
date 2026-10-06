@@ -261,10 +261,12 @@ func PublishReorg(oldHead, newHead, commonHead *types.Header) {
 	commonHash := commonHead.Hash()
 	copy(aux[:], commonHash[:])
 	payload := make([]byte, 88)
+	oldHash := oldHead.Hash()
+	newHash := newHead.Hash()
 	binary.LittleEndian.PutUint64(payload[0:8], oldHead.Number.Uint64())
-	copy(payload[8:40], oldHead.Hash()[:])
+	copy(payload[8:40], oldHash[:])
 	binary.LittleEndian.PutUint64(payload[40:48], newHead.Number.Uint64())
-	copy(payload[48:80], newHead.Hash()[:])
+	copy(payload[48:80], newHash[:])
 	binary.LittleEndian.PutUint64(payload[80:88], commonHead.Number.Uint64())
 	_ = manager.ingress.publish(Record{
 		Kind:        Reorg,
