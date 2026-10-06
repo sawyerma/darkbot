@@ -92,7 +92,10 @@ pub enum RecordError {
 }
 
 impl Recorder {
-    pub fn bounded(capacity: usize, max_payload: usize) -> Result<(Self, RecorderDrain), JournalError> {
+    pub fn bounded(
+        capacity: usize,
+        max_payload: usize,
+    ) -> Result<(Self, RecorderDrain), JournalError> {
         if capacity == 0 || max_payload == 0 {
             return Err(JournalError::InvalidBound);
         }
@@ -131,10 +134,7 @@ impl Recorder {
                 max: self.max_payload,
             });
         }
-        let sequence = self
-            .counters
-            .next_sequence
-            .fetch_add(1, Ordering::AcqRel);
+        let sequence = self.counters.next_sequence.fetch_add(1, Ordering::AcqRel);
         let record = CaptureRecord {
             sequence,
             kind,
@@ -172,7 +172,9 @@ impl RecorderDrain {
     /// Background-owner receive. It may block and must never run on the
     /// decision hot path.
     pub fn recv(&self) -> Result<CaptureRecord, JournalError> {
-        self.receiver.recv().map_err(|_| JournalError::QueueDisconnected)
+        self.receiver
+            .recv()
+            .map_err(|_| JournalError::QueueDisconnected)
     }
 
     pub fn try_recv(&self) -> Result<Option<CaptureRecord>, JournalError> {
@@ -312,10 +314,26 @@ impl<R: Read> JournalReader<R> {
             return Err(JournalError::BadVersion(version));
         }
         let kind = RecordKind::try_from(u16::from_le_bytes([header[10], header[11]]))?;
-        let sequence = u64::from_le_bytes(header[12..20].try_into().map_err(|_| JournalError::Truncated)?);
-        let timestamp_ns = u64::from_le_bytes(header[20..28].try_into().map_err(|_| JournalError::Truncated)?);
-        let payload_len = u32::from_le_bytes(header[28..32].try_into().map_err(|_| JournalError::Truncated)?) as usize;
-        let expected_crc = u32::from_le_bytes(header[32..36].try_into().map_err(|_| JournalError::Truncated)?);
+        let sequence = u64::from_le_bytes(
+            header[12..20]
+                .try_into()
+                .map_err(|_| JournalError::Truncated)?,
+        );
+        let timestamp_ns = u64::from_le_bytes(
+            header[20..28]
+                .try_into()
+                .map_err(|_| JournalError::Truncated)?,
+        );
+        let payload_len = u32::from_le_bytes(
+            header[28..32]
+                .try_into()
+                .map_err(|_| JournalError::Truncated)?,
+        ) as usize;
+        let expected_crc = u32::from_le_bytes(
+            header[32..36]
+                .try_into()
+                .map_err(|_| JournalError::Truncated)?,
+        );
         if payload_len > self.max_payload {
             return Err(JournalError::PayloadBound {
                 len: payload_len,
@@ -332,13 +350,13 @@ impl<R: Read> JournalReader<R> {
             }
         }
         let mut payload = vec![0u8; payload_len];
-        self.inner
-            .read_exact(&mut payload)
-            .map_err(|error| if error.kind() == io::ErrorKind::UnexpectedEof {
+        self.inner.read_exact(&mut payload).map_err(|error| {
+            if error.kind() == io::ErrorKind::UnexpectedEof {
                 JournalError::Truncated
             } else {
                 JournalError::Io(error)
-            })?;
+            }
+        })?;
         let actual_crc = frame_crc(&header, &payload);
         if actual_crc != expected_crc {
             return Err(JournalError::Checksum {
@@ -388,7 +406,10 @@ impl fmt::Display for JournalError {
                 write!(f, "capture: checksum mismatch {actual:#x} != {expected:#x}")
             }
             Self::SequenceGap { expected, observed } => {
-                write!(f, "capture: sequence gap expected {expected} observed {observed}")
+                write!(
+                    f,
+                    "capture: sequence gap expected {expected} observed {observed}"
+                )
             }
             Self::SequenceOverflow => f.write_str("capture: sequence overflow"),
             Self::QueueDisconnected => f.write_str("capture: recorder queue disconnected"),
@@ -443,13 +464,7 @@ impl Sha256 {
     fn new() -> Self {
         Self {
             state: [
-                0x6a09e667,
-                0xbb67ae85,
-                0x3c6ef372,
-                0xa54ff53a,
-                0x510e527f,
-                0x9b05688c,
-                0x1f83d9ab,
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
                 0x5be0cd19,
             ],
             buffer: [0u8; 64],
@@ -464,8 +479,7 @@ impl Sha256 {
             .saturating_add(u64::try_from(input.len()).unwrap_or(u64::MAX));
         if self.buffer_len != 0 {
             let take = (64 - self.buffer_len).min(input.len());
-            self.buffer[self.buffer_len..self.buffer_len + take]
-                .copy_from_slice(&input[..take]);
+            self.buffer[self.buffer_len..self.buffer_len + take].copy_from_slice(&input[..take]);
             self.buffer_len += take;
             input = &input[take..];
             if self.buffer_len == 64 {
@@ -511,14 +525,16 @@ impl Sha256 {
 
     fn compress(&mut self, block: &[u8; 64]) {
         const K: [u32; 64] = [
-            0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-            0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-            0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-            0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-            0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-            0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-            0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-            0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+            0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+            0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+            0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+            0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+            0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+            0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+            0xc67178f2,
         ];
         let mut w = [0u32; 64];
         for (index, chunk) in block.chunks_exact(4).take(16).enumerate() {
@@ -643,7 +659,10 @@ mod tests {
         let last = bytes.len() - 1;
         bytes[last] ^= 1;
         let mut reader = JournalReader::new(Cursor::new(bytes), 1024).unwrap();
-        assert!(matches!(reader.next_record(), Err(JournalError::Checksum { .. })));
+        assert!(matches!(
+            reader.next_record(),
+            Err(JournalError::Checksum { .. })
+        ));
 
         let mut writer = JournalWriter::new(Vec::new());
         writer.append(&record).unwrap();
