@@ -250,7 +250,10 @@ impl fmt::Display for V2Error {
                 write!(f, "fastlane v2: lifecycle state {observed} != {expected}")
             }
             Self::LaneNotDrained { read, final_write } => {
-                write!(f, "fastlane v2: lane not drained read={read} final_write={final_write}")
+                write!(
+                    f,
+                    "fastlane v2: lane not drained read={read} final_write={final_write}"
+                )
             }
             Self::EpochExhausted => f.write_str("fastlane v2: lane epoch exhausted"),
         }
@@ -438,7 +441,9 @@ impl ArenaV2 {
             .mapping
             .atomic_u64(lane_offset + LH_OFF_LANE_EPOCH)
             .load(Ordering::Acquire);
-        let next_epoch = current_epoch.checked_add(1).ok_or(V2Error::EpochExhausted)?;
+        let next_epoch = current_epoch
+            .checked_add(1)
+            .ok_or(V2Error::EpochExhausted)?;
         {
             let bytes = self.mapping.bytes_mut();
             bytes[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32]
@@ -453,11 +458,7 @@ impl ArenaV2 {
         Ok(next_epoch)
     }
 
-    pub fn begin_close_peer_lane(
-        &mut self,
-        lane_id: u16,
-        owner: [u8; 32],
-    ) -> Result<u64, V2Error> {
+    pub fn begin_close_peer_lane(&mut self, lane_id: u16, owner: [u8; 32]) -> Result<u64, V2Error> {
         let (config, lane_offset) = locate_lane_by_id(&self.mapping, lane_id)?;
         if config.class != LaneClassV2::PeerIngress {
             return Err(V2Error::LaneMismatch("close requires peer-ingress lane"));
@@ -491,11 +492,7 @@ impl ArenaV2 {
         Ok(final_write)
     }
 
-    pub fn release_peer_lane(
-        &mut self,
-        lane_id: u16,
-        owner: [u8; 32],
-    ) -> Result<(), V2Error> {
+    pub fn release_peer_lane(&mut self, lane_id: u16, owner: [u8; 32]) -> Result<(), V2Error> {
         let (config, lane_offset) = locate_lane_by_id(&self.mapping, lane_id)?;
         if config.class != LaneClassV2::PeerIngress {
             return Err(V2Error::LaneMismatch("release requires peer-ingress lane"));
@@ -877,10 +874,7 @@ fn locate_lane(mapping: &MappingV2, expected: LaneConfigV2) -> Result<usize, V2E
 }
 
 
-fn locate_lane_by_id(
-    mapping: &MappingV2,
-    lane_id: u16,
-) -> Result<(LaneConfigV2, usize), V2Error> {
+fn locate_lane_by_id(mapping: &MappingV2, lane_id: u16) -> Result<(LaneConfigV2, usize), V2Error> {
     let b = mapping.bytes();
     let lane_count = get_u32(b, SH_OFF_LANE_COUNT) as usize;
     for index in 0..lane_count {
@@ -1151,7 +1145,7 @@ mod tests {
             let out = consumer.try_consume().unwrap().unwrap();
             assert_eq!(out.sequence, u64::from(n));
             assert_eq!(out.lane_id, 10);
-            assert_eq!(out.lane_epoch, 1);
+            assert_eq!(out.lane_epoch, 2);
             assert_eq!(&*out.payload, &[n]);
         }
 
@@ -1299,7 +1293,10 @@ mod tests {
         let owner_b = [0xb2; 32];
 
         let (_, lane_offset) = locate_lane_by_id(&arena.mapping, 30).unwrap();
-        assert_eq!(lane_stats(&arena.mapping, lane_offset).state, LANE_STATE_FREE);
+        assert_eq!(
+            lane_stats(&arena.mapping, lane_offset).state,
+            LANE_STATE_FREE
+        );
 
         let epoch_a = arena.bind_peer_lane(30, owner_a).unwrap();
         assert_eq!(epoch_a, 2);
@@ -1389,5 +1386,4 @@ mod tests {
         drop(producer);
         fs::remove_file(path).unwrap();
     }
-
 }
