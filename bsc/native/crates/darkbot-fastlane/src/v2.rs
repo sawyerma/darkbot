@@ -356,11 +356,19 @@ impl ArenaV2 {
                 put_u64(bytes, dir + DE_OFF_LANE_OFFSET, lane_offset as u64);
                 put_u64(bytes, dir + DE_OFF_LANE_BYTES, lane_len as u64);
 
+                put_u64(bytes, lane_offset + LH_OFF_WRITE_SEQUENCE, 0);
+                put_u64(bytes, lane_offset + LH_OFF_DROPPED_FULL, 0);
+                put_u64(bytes, lane_offset + LH_OFF_OVERSIZE, 0);
+                put_u64(bytes, lane_offset + LH_OFF_PRODUCER_STATUS, 0);
+                put_u64(bytes, lane_offset + LH_OFF_READ_SEQUENCE, 0);
+                put_u64(bytes, lane_offset + LH_OFF_CORRUPT, 0);
+                put_u64(bytes, lane_offset + LH_OFF_DRAINED_EPOCH, 0);
                 put_u64(bytes, lane_offset + LH_OFF_GENERATION, generation);
                 put_u64(bytes, lane_offset + LH_OFF_LANE_EPOCH, 1);
                 put_u32(bytes, lane_offset + LH_OFF_STATE, 1);
                 put_u64(bytes, lane_offset + LH_OFF_FINAL_WRITE, 0);
                 put_u64(bytes, lane_offset + LH_OFF_SHUTDOWN, 0);
+                bytes[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32].fill(0);
 
                 for slot in 0..lane.capacity {
                     let slot_offset =
@@ -373,7 +381,7 @@ impl ArenaV2 {
         Ok(Self { mapping })
     }
 
-    pub fn len(&self) -> usize {
+    pub fn mapped_len(&self) -> usize {
         self.mapping.len
     }
 }
@@ -899,7 +907,7 @@ mod tests {
         let path = tmp("roundtrip");
         let lanes = [peer_lane(10), peer_lane(11)];
         let arena = ArenaV2::create(&path, 7, &lanes).unwrap();
-        assert_eq!(arena.len() % ALIGN_V2, 0);
+        assert_eq!(arena.mapped_len() % ALIGN_V2, 0);
         drop(arena);
 
         let mut producer = ProducerV2::open(&path, 7, lanes[0]).unwrap();
