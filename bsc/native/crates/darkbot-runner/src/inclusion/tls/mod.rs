@@ -55,7 +55,7 @@
 mod config;
 mod connection;
 mod owner;
-mod qualification;
+pub(crate) mod qualification;
 mod transport;
 
 pub use config::{
