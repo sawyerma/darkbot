@@ -128,7 +128,7 @@ func TestV2RoundTripWrapAndDirectory(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatalf("consume %d: ok=%v err=%v", i, ok, err)
 		}
-		if record.Sequence != uint64(i) || record.LaneID != 10 || record.LaneEpoch != 1 {
+		if record.Sequence != uint64(i) || record.LaneID != 10 || record.LaneEpoch != 2 {
 			t.Fatalf("bad identity at %d: %+v", i, record)
 		}
 		if len(record.Payload) != 1 || record.Payload[0] != byte(i) {
