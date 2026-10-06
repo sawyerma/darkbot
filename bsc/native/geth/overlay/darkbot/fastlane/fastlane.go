@@ -197,28 +197,32 @@ func PublishTransaction(kind RecordKind, source string, peer []byte, tx *types.T
 	if err != nil {
 		return
 	}
-	PublishTransactionAt(kind, source, peer, timestamp, tx)
+	_ = PublishTransactionAt(kind, source, peer, timestamp, tx)
 }
 
 // PublishTransactionAt preserves a caller-captured hook timestamp. For C1
 // ingress latency this timestamp is taken in the ETH handler immediately
-// before the Fast-Lane call, so transaction serialization and mmap
-// publication remain inside the measured interval.
-func PublishTransactionAt(kind RecordKind, source string, peer []byte, timestamp uint64, tx *types.Transaction) {
+// after a complete transaction envelope was decoded and before the Fast-Lane
+// call. Transaction serialization and mmap publication therefore remain
+// inside the measured interval.
+func PublishTransactionAt(kind RecordKind, source string, peer []byte, timestamp uint64, tx *types.Transaction) error {
 	manager := global.Load()
-	if manager == nil || tx == nil || timestamp == 0 {
-		return
+	if manager == nil {
+		return nil
+	}
+	if tx == nil || timestamp == 0 {
+		return errors.New("darkbot fastlane invalid timestamp or transaction")
 	}
 	raw, err := tx.MarshalBinary()
 	if err != nil {
-		return
+		return err
 	}
 	var peerID [32]byte
 	copy(peerID[:], peer)
 	var sourceID [16]byte
 	copy(sourceID[:], source)
 	hash := tx.Hash()
-	_ = manager.ingress.publish(Record{
+	return manager.ingress.publish(Record{
 		Kind:        kind,
 		TimestampNS: timestamp,
 		Source:      sourceID,
