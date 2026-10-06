@@ -616,9 +616,7 @@ fn read_signer_secret(path: &Path) -> Result<[u8; 32], StartupError> {
 fn read_authorization(path: &Path) -> Result<AuthorizationToken, StartupError> {
     let bytes = fs::read(path).map_err(|error| StartupError::SecretIo(error.kind()))?;
     let text = String::from_utf8(bytes).map_err(|_| StartupError::MissingAuthorization)?;
-    let value = text
-        .trim_end_matches(['\r', '\n'])
-        .to_owned();
+    let value = text.trim_end_matches(['\r', '\n']).to_owned();
     AuthorizationToken::new(value).map_err(StartupError::Target)
 }
 
