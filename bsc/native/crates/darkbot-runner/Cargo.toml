@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 # Always without features: the production build of the runner uses the core
 # as it is.
-darkbot-core = { path = "../darkbot-core" }
+darkbot-core = { path = "../darkbot-core", features = ["runner-startup"] }
 rustls = { workspace = true }
 webpki-roots = { workspace = true }
 
