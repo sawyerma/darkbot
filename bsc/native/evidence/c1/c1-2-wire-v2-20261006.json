@@ -1,0 +1,53 @@
+{
+  "schema": "darkbot.c1.wire_v2_acceptance.v1",
+  "date": "2026-10-06",
+  "pinned_geth": {
+    "repository": "https://github.com/bnb-chain/bsc.git",
+    "release": "v1.7.8",
+    "commit": "cdb7548b5baacfdae92f9f63437d6456411665f3"
+  },
+  "implementation": {
+    "specification": "bsc/native/geth/FASTLANE_WIRE_V2.md",
+    "rust": "bsc/native/crates/darkbot-fastlane/src/v2.rs",
+    "go": [
+      "bsc/native/geth/overlay/darkbot/fastlane/v2.go",
+      "bsc/native/geth/overlay/darkbot/fastlane/v2_test.go"
+    ],
+    "final_rust_fix_commit": "6cbefab458166180b2a67fa3e03c07e8fd3baa04"
+  },
+  "wire": {
+    "version": 2,
+    "magic": "DBFLN002",
+    "alignment_bytes": 128,
+    "arena": "single mmap arena with independently owned SPSC lanes",
+    "integrity": "CRC32C over explicit metadata byte domain plus payload",
+    "ordering": "per-lane only; no cross-lane ordering claim"
+  },
+  "user_reported_gates": {
+    "rust": [
+      "cargo fmt --all -- --check PASS",
+      "cargo test -p darkbot-fastlane --locked --offline PASS",
+      "cargo test -p darkbot-fastlane --release --locked --offline PASS",
+      "cargo clippy -p darkbot-fastlane --all-targets --locked --offline -- -D warnings PASS",
+      "C1_2_RUST_WIRE_V2_PASS"
+    ],
+    "geth": [
+      "go test -race ./darkbot/fastlane PASS",
+      "go test ./eth/protocols/eth ./eth PASS",
+      "go test ./core PASS",
+      "go build ./cmd/geth PASS",
+      "C1_2_GETH_WIRE_V2_PASS"
+    ]
+  },
+  "verdict": "C1.2_PASS",
+  "next": "C1.3_LANE_LIFECYCLE",
+  "non_claims": {
+    "peer_lane_lifecycle_reuse_qualified": false,
+    "geth_ingress_switched_to_v2": false,
+    "rust_zero_copy_hot_consumer": false,
+    "local_geth_parallel_fanout": false,
+    "mainnet_ingress_coverage": "NOT_PROVEN",
+    "t0_to_t_buy_lt_1ms": "NOT_PROVEN",
+    "live": false
+  }
+}
