@@ -17,6 +17,7 @@
 )]
 
 pub mod inclusion;
+pub mod startup;
 
 // The unit tests of the release path share the fixtures of the
 // integration tests, which name this crate by its name.
