@@ -2,6 +2,7 @@ package fastlane
 
 import (
 	"encoding/binary"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"runtime"
