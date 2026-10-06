@@ -21,7 +21,7 @@ use darkbot_project0::execution::Freshness;
 use darkbot_project0::planner::Allowlist;
 use darkbot_project0::protocol;
 use darkbot_project0::safety::{Allow, Limits, Safety};
-use darkbot_runner::pipeline::{Mode, Pipeline};
+use darkbot_runner::pipeline::{pipeline_timing_snapshot, Mode, Pipeline};
 #[cfg(not(feature = "crate_health"))]
 use darkbot_runner::pipeline::{ReceivershipBuilder, ReceivershipPlan};
 #[cfg(feature = "crate_health")]
@@ -181,6 +181,42 @@ fn next_oracle_detect(
         }
     }
     None
+}
+
+#[cfg(feature = "crate_health")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CandidateQueueAdmission {
+    Enqueued,
+    Coalesced,
+}
+
+#[cfg(feature = "crate_health")]
+fn enqueue_or_coalesce_candidate(
+    account: Pubkey,
+    t_rx_ns: u64,
+    event_slot: u64,
+    trigger: &'static str,
+    order: &mut VecDeque<Pubkey>,
+    pending: &mut HashMap<Pubkey, DetectWork>,
+    enqueued: &mut u64,
+    coalesced: &mut u64,
+    max_pending: &mut usize,
+) -> CandidateQueueAdmission {
+    let work = (account, t_rx_ns, event_slot, trigger);
+    if let Some(existing) = pending.get_mut(&account) {
+        // [FIX-137] Single-flight latest-state semantics: the queue token already
+        // exists, so carry the newest causal work into that token instead of
+        // allocating/deduping another one. Downstream reads canonical state again.
+        *existing = work;
+        *coalesced = coalesced.saturating_add(1);
+        CandidateQueueAdmission::Coalesced
+    } else {
+        order.push_back(account);
+        pending.insert(account, work);
+        *enqueued = enqueued.saturating_add(1);
+        *max_pending = (*max_pending).max(pending.len());
+        CandidateQueueAdmission::Enqueued
+    }
 }
 
 #[cfg(feature = "crate_health")]
@@ -982,6 +1018,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "crate_health")]
     let mut candidate_revision_forwards: u64 = 0;
     #[cfg(feature = "crate_health")]
+    let mut candidate_pending_coalesced: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_revision_coalesced: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_physical_enqueues: u64 = 0;
+    #[cfg(feature = "crate_health")]
     let mut candidate_cache_suppressed: u64 = 0;
     #[cfg(feature = "crate_health")]
     let mut candidate_cache_softcap_suppressed: u64 = 0;
@@ -1007,6 +1049,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut candidate_fairness_rotations: u64 = 0;
     #[cfg(feature = "crate_health")]
     let mut candidate_periodic_due_but_deferred: u64 = 0;
+    // [FIX-138] Measurement only: quantify whether remaining drain pressure comes
+    // from semantically duplicate dependency writes or from downstream evaluation cost.
+    #[cfg(feature = "crate_health")]
+    let mut dependency_content_unchanged: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut dependency_content_changed: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut detect_health_calls: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut detect_health_ns_total: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut detect_health_ns_max: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut detect_pipeline_calls: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut detect_pipeline_ns_total: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut detect_pipeline_ns_max: u64 = 0;
 
     // [R126b] Preserve canonical ingress under detection bursts. When both ingress and
     // detection work are available, drain at most this many ingress events before forcing
@@ -1675,8 +1735,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     candidate_cache_periodic_forwards =
                                         candidate_cache_periodic_forwards.saturating_add(1);
                                 }
-                                let _ = enqueue_oracle_accounts(
-                                    [account],
+                                let queue_admission = enqueue_or_coalesce_candidate(
+                                    account,
                                     t_rx_ns,
                                     event_slot,
                                     "oracle_health_ready",
@@ -1686,6 +1746,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     &mut oracle_coalesced,
                                     &mut oracle_max_pending,
                                 );
+                                match queue_admission {
+                                    CandidateQueueAdmission::Enqueued => {
+                                        candidate_physical_enqueues =
+                                            candidate_physical_enqueues.saturating_add(1);
+                                    }
+                                    CandidateQueueAdmission::Coalesced => {
+                                        candidate_pending_coalesced =
+                                            candidate_pending_coalesced.saturating_add(1);
+                                        if revision_changed {
+                                            candidate_revision_coalesced =
+                                                candidate_revision_coalesced.saturating_add(1);
+                                        }
+                                    }
+                                }
                                 candidate_cache.insert(
                                     account,
                                     CandidateCacheEntry {
@@ -1781,8 +1855,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     candidate_cache_periodic_forwards =
                                         candidate_cache_periodic_forwards.saturating_add(1);
                                 }
-                                let _ = enqueue_oracle_accounts(
-                                    [account],
+                                let queue_admission = enqueue_or_coalesce_candidate(
+                                    account,
                                     t_rx_ns,
                                     event_slot,
                                     "oracle_health_error",
@@ -1792,6 +1866,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     &mut oracle_coalesced,
                                     &mut oracle_max_pending,
                                 );
+                                match queue_admission {
+                                    CandidateQueueAdmission::Enqueued => {
+                                        candidate_physical_enqueues =
+                                            candidate_physical_enqueues.saturating_add(1);
+                                    }
+                                    CandidateQueueAdmission::Coalesced => {
+                                        candidate_pending_coalesced =
+                                            candidate_pending_coalesced.saturating_add(1);
+                                        if revision_changed {
+                                            candidate_revision_coalesced =
+                                                candidate_revision_coalesced.saturating_add(1);
+                                        }
+                                    }
+                                }
                                 candidate_cache.insert(
                                     account,
                                     CandidateCacheEntry {
@@ -1890,6 +1978,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => None,
         };
+        #[cfg(feature = "crate_health")]
+        if let (Some((dependency, _, _)), IngressEvent::Account(a)) = (dependency_update, &ev) {
+            if let Some(existing) = st.get(&dependency) {
+                let same_content =
+                    existing.owner == a.owner
+                    && existing.lamports == a.lamports
+                    && existing.data == a.data;
+                if same_content {
+                    dependency_content_unchanged =
+                        dependency_content_unchanged.saturating_add(1);
+                } else {
+                    dependency_content_changed =
+                        dependency_content_changed.saturating_add(1);
+                }
+            } else {
+                dependency_content_changed =
+                    dependency_content_changed.saturating_add(1);
+            }
+        }
+
         if let IngressEvent::Account(a) = &ev {
             if a.pubkey == program_data && hash(&a.data) != program_data_baseline_hash {
                 if !program_upgrade_latched {
@@ -2869,7 +2977,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             let _ = &view;
             if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }
+            #[cfg(feature = "crate_health")]
+            let health_started_ns = clock.now_ns();
             let health_result = engine.health(&acct, protocol_now as i64, protocol_slot);
+            #[cfg(feature = "crate_health")]
+            {
+                let elapsed = clock.now_ns().saturating_sub(health_started_ns);
+                detect_health_calls = detect_health_calls.saturating_add(1);
+                detect_health_ns_total = detect_health_ns_total.saturating_add(elapsed);
+                detect_health_ns_max = detect_health_ns_max.max(elapsed);
+            }
             // [FIX-87] Health evidence as structured JSON. Do not hand-build JSON with format!:
             // braces/escaping are error-prone and error strings may contain quotes.
             let line = match &health_result {
@@ -2921,7 +3038,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 limits: TxLimits::default(), resources, min_profit, blockhash_max_age_ns: 30_000_000_000, p7_passed: false,
                 freshness, tip_account: None, global_allowed: global_allowed.clone(), prereq_allowed: prereq_allowed.clone(), slot_watch: &slot_watch,
             };
+            #[cfg(feature = "crate_health")]
+            let pipeline_started_ns = clock.now_ns();
             let mut rec = pipe.evaluate(acct, trigger, t_rx, protocol_now, protocol_slot, st.run_state().is_tradable());
+            #[cfg(feature = "crate_health")]
+            {
+                let elapsed = clock.now_ns().saturating_sub(pipeline_started_ns);
+                detect_pipeline_calls = detect_pipeline_calls.saturating_add(1);
+                detect_pipeline_ns_total = detect_pipeline_ns_total.saturating_add(elapsed);
+                detect_pipeline_ns_max = detect_pipeline_ns_max.max(elapsed);
+            }
             if let Ok(h) = &health_result {
                 // [FIX-91] Bankruptcy/no-collateral is a protocol state, not a routing/sizing
                 // failure. Reclassify independently of the stage that first reported "no plan".
@@ -2989,8 +3115,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("updates: accounts={} banks={} groups={} fee={} liqrec={} unknown={} channel={:?}",
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
             #[cfg(feature = "crate_health")]
+            let pipeline_timing = pipeline_timing_snapshot();
+            #[cfg(feature = "crate_health")]
             eprintln!(
-                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_revision_forwards={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={} candidate_repeat_wait_slots_max={} candidate_repeat_wait_slots_1={} candidate_repeat_wait_slots_2_3={} candidate_repeat_wait_slots_4_7={} candidate_repeat_wait_slots_8_15={} candidate_repeat_wait_slots_ge_16={} candidate_fairness_rotations={} candidate_periodic_due_but_deferred={} candidate_recheck_slots={} candidate_error_recheck_slots={} candidate_repeat_soft_cap={}",
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_revision_forwards={} candidate_pending_coalesced={} candidate_revision_coalesced={} candidate_physical_enqueues={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={} candidate_repeat_wait_slots_max={} candidate_repeat_wait_slots_1={} candidate_repeat_wait_slots_2_3={} candidate_repeat_wait_slots_4_7={} candidate_repeat_wait_slots_8_15={} candidate_repeat_wait_slots_ge_16={} candidate_fairness_rotations={} candidate_periodic_due_but_deferred={} dependency_content_unchanged={} dependency_content_changed={} detect_health_calls={} detect_health_ns_total={} detect_health_ns_max={} detect_pipeline_calls={} detect_pipeline_ns_total={} detect_pipeline_ns_max={} pipeline_planning_calls={} pipeline_planning_ns_total={} pipeline_planning_ns_max={} pipeline_fee_calls={} pipeline_fee_ns_total={} pipeline_fee_ns_max={} pipeline_simulation_calls={} pipeline_simulation_ns_total={} pipeline_simulation_ns_max={} candidate_recheck_slots={} candidate_error_recheck_slots={} candidate_repeat_soft_cap={}",
                 threshold_ready,
                 threshold_index.tracked_accounts(),
                 threshold_fallback.len(),
@@ -3027,6 +3155,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 candidate_cache_softcap_suppressed,
                 candidate_cache_transition_forwards,
                 candidate_revision_forwards,
+                candidate_pending_coalesced,
+                candidate_revision_coalesced,
+                candidate_physical_enqueues,
                 candidate_cache_periodic_forwards,
                 candidate_cache_forced_forwards,
                 candidate_repeat_wait_slots_max,
@@ -3037,6 +3168,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 candidate_repeat_wait_slots_ge_16,
                 candidate_fairness_rotations,
                 candidate_periodic_due_but_deferred,
+                dependency_content_unchanged,
+                dependency_content_changed,
+                detect_health_calls,
+                detect_health_ns_total,
+                detect_health_ns_max,
+                detect_pipeline_calls,
+                detect_pipeline_ns_total,
+                detect_pipeline_ns_max,
+                pipeline_timing.planning_calls,
+                pipeline_timing.planning_ns_total,
+                pipeline_timing.planning_ns_max,
+                pipeline_timing.fee_calls,
+                pipeline_timing.fee_ns_total,
+                pipeline_timing.fee_ns_max,
+                pipeline_timing.simulation_calls,
+                pipeline_timing.simulation_ns_total,
+                pipeline_timing.simulation_ns_max,
                 candidate_recheck_slots,
                 candidate_error_recheck_slots,
                 candidate_repeat_soft_cap
@@ -3065,6 +3213,71 @@ mod integration_probe_tests {
         assert_eq!(next_integration_probe(&mut queue, false, 9_000),
             Some((account, 9_000, 42, "integration_target_probe")));
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() {
+        let account = Pubkey::new_unique();
+        let mut order = VecDeque::new();
+        let mut pending = HashMap::new();
+        let mut enqueued = 0u64;
+        let mut coalesced = 0u64;
+        let mut max_pending = 0usize;
+
+        assert_eq!(
+            enqueue_or_coalesce_candidate(
+                account,
+                100,
+                7,
+                "oracle_health_ready",
+                &mut order,
+                &mut pending,
+                &mut enqueued,
+                &mut coalesced,
+                &mut max_pending,
+            ),
+            CandidateQueueAdmission::Enqueued
+        );
+        assert_eq!(
+            enqueue_or_coalesce_candidate(
+                account,
+                200,
+                7,
+                "oracle_health_ready",
+                &mut order,
+                &mut pending,
+                &mut enqueued,
+                &mut coalesced,
+                &mut max_pending,
+            ),
+            CandidateQueueAdmission::Coalesced
+        );
+        assert_eq!(
+            enqueue_or_coalesce_candidate(
+                account,
+                300,
+                8,
+                "oracle_health_error",
+                &mut order,
+                &mut pending,
+                &mut enqueued,
+                &mut coalesced,
+                &mut max_pending,
+            ),
+            CandidateQueueAdmission::Coalesced
+        );
+
+        assert_eq!(order.len(), 1);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(enqueued, 1);
+        assert_eq!(coalesced, 2);
+        assert_eq!(max_pending, 1);
+        assert_eq!(
+            next_oracle_detect(&mut order, &mut pending),
+            Some((account, 300, 8, "oracle_health_error"))
+        );
+        assert!(pending.is_empty());
+        assert!(order.is_empty());
     }
 
     #[test]

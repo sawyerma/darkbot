@@ -14,6 +14,51 @@ use solana_message::AddressLookupTableAccount /* [FIX-13] */;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PipelineTimingSnapshot {
+    pub planning_calls: u64,
+    pub planning_ns_total: u64,
+    pub planning_ns_max: u64,
+    pub fee_calls: u64,
+    pub fee_ns_total: u64,
+    pub fee_ns_max: u64,
+    pub simulation_calls: u64,
+    pub simulation_ns_total: u64,
+    pub simulation_ns_max: u64,
+}
+
+static PLANNING_CALLS: AtomicU64 = AtomicU64::new(0);
+static PLANNING_NS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PLANNING_NS_MAX: AtomicU64 = AtomicU64::new(0);
+static FEE_CALLS: AtomicU64 = AtomicU64::new(0);
+static FEE_NS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static FEE_NS_MAX: AtomicU64 = AtomicU64::new(0);
+static SIMULATION_CALLS: AtomicU64 = AtomicU64::new(0);
+static SIMULATION_NS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static SIMULATION_NS_MAX: AtomicU64 = AtomicU64::new(0);
+
+fn record_timing(calls: &AtomicU64, total: &AtomicU64, max: &AtomicU64, elapsed_ns: u64) {
+    calls.fetch_add(1, Ordering::Relaxed);
+    total.fetch_add(elapsed_ns, Ordering::Relaxed);
+    max.fetch_max(elapsed_ns, Ordering::Relaxed);
+}
+
+pub fn pipeline_timing_snapshot() -> PipelineTimingSnapshot {
+    PipelineTimingSnapshot {
+        planning_calls: PLANNING_CALLS.load(Ordering::Relaxed),
+        planning_ns_total: PLANNING_NS_TOTAL.load(Ordering::Relaxed),
+        planning_ns_max: PLANNING_NS_MAX.load(Ordering::Relaxed),
+        fee_calls: FEE_CALLS.load(Ordering::Relaxed),
+        fee_ns_total: FEE_NS_TOTAL.load(Ordering::Relaxed),
+        fee_ns_max: FEE_NS_MAX.load(Ordering::Relaxed),
+        simulation_calls: SIMULATION_CALLS.load(Ordering::Relaxed),
+        simulation_ns_total: SIMULATION_NS_TOTAL.load(Ordering::Relaxed),
+        simulation_ns_max: SIMULATION_NS_MAX.load(Ordering::Relaxed),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -154,7 +199,15 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some("opportunity stale before planning".into());
             return rec.with_timeline(&tl);
         }
-        let plans = match self.builder.plans(&account, now_unix_s, slot) {
+        let planning_started = Instant::now();
+        let planning_result = self.builder.plans(&account, now_unix_s, slot);
+        record_timing(
+            &PLANNING_CALLS,
+            &PLANNING_NS_TOTAL,
+            &PLANNING_NS_MAX,
+            planning_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+        );
+        let plans = match planning_result {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => {
                 rec.loss = Some(LossReason::Routing);
@@ -262,8 +315,15 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
 
             let fee_quote = if plan.input.path == Path::Rpc && self.submitter.path() == SubmissionPath::Rpc
                 && plan.prerequisite_txs.is_empty() && plan.tip == 0 {
-                self.submitter.fee_for_message(&built.tx)
-                    .filter(|q| q.message_hash == built.tx.message.hash().to_string())
+                let fee_started = Instant::now();
+                let fee = self.submitter.fee_for_message(&built.tx);
+                record_timing(
+                    &FEE_CALLS,
+                    &FEE_NS_TOTAL,
+                    &FEE_NS_MAX,
+                    fee_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+                );
+                fee.filter(|q| q.message_hash == built.tx.message.hash().to_string())
             } else { None };
             plan.input.transaction_fee_usd_micro = fee_quote.as_ref()
                 .and_then(|q| self.builder.native_cost_usd_micro(q.lamports));
@@ -397,7 +457,18 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 Err(e) => { release_if(self.safety, reserved, plan.exposure); rec.loss = Some(LossReason::Build); rec.reason = Some(format!("tip tx: {}", e)); return rec.with_timeline(&tl); }
             }
         }
-        let sim = if use_bundle { self.submitter.simulate_bundle(&bundle_txs) } else { self.submitter.simulate(&built.tx) };
+        let simulation_started = Instant::now();
+        let sim = if use_bundle {
+            self.submitter.simulate_bundle(&bundle_txs)
+        } else {
+            self.submitter.simulate(&built.tx)
+        };
+        record_timing(
+            &SIMULATION_CALLS,
+            &SIMULATION_NS_TOTAL,
+            &SIMULATION_NS_MAX,
+            simulation_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+        );
         match sim {
             SimResult::Ok { units_consumed } => {
                 rec.simulated_cu = units_consumed;

@@ -98,8 +98,37 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
     cache_suppressed = int(latest.get("candidate_cache_suppressed", 0))
     cache_softcap_suppressed = int(latest.get("candidate_cache_softcap_suppressed", 0))
     cache_transition_forwards = int(latest.get("candidate_cache_transition_forwards", 0))
+    cache_revision_forwards = int(latest.get("candidate_cache_revision_forwards", 0))
+    candidate_pending_coalesced = int(latest.get("candidate_pending_coalesced", 0))
+    candidate_revision_coalesced = int(latest.get("candidate_revision_coalesced", 0))
+    candidate_physical_enqueues = int(latest.get("candidate_physical_enqueues", 0))
     cache_periodic_forwards = int(latest.get("candidate_cache_periodic_forwards", 0))
     cache_forced_forwards = int(latest.get("candidate_cache_forced_forwards", 0))
+    repeat_wait_slots_max = int(latest.get("candidate_repeat_wait_slots_max", 0))
+    repeat_wait_slots_1 = int(latest.get("candidate_repeat_wait_slots_1", 0))
+    repeat_wait_slots_2_3 = int(latest.get("candidate_repeat_wait_slots_2_3", 0))
+    repeat_wait_slots_4_7 = int(latest.get("candidate_repeat_wait_slots_4_7", 0))
+    repeat_wait_slots_8_15 = int(latest.get("candidate_repeat_wait_slots_8_15", 0))
+    repeat_wait_slots_ge_16 = int(latest.get("candidate_repeat_wait_slots_ge_16", 0))
+    fairness_rotations = int(latest.get("candidate_fairness_rotations", 0))
+    periodic_due_but_deferred = int(latest.get("candidate_periodic_due_but_deferred", 0))
+    dependency_content_unchanged = int(latest.get("dependency_content_unchanged", 0))
+    dependency_content_changed = int(latest.get("dependency_content_changed", 0))
+    detect_health_calls = int(latest.get("detect_health_calls", 0))
+    detect_health_ns_total = int(latest.get("detect_health_ns_total", 0))
+    detect_health_ns_max = int(latest.get("detect_health_ns_max", 0))
+    detect_pipeline_calls = int(latest.get("detect_pipeline_calls", 0))
+    detect_pipeline_ns_total = int(latest.get("detect_pipeline_ns_total", 0))
+    detect_pipeline_ns_max = int(latest.get("detect_pipeline_ns_max", 0))
+    pipeline_planning_calls = int(latest.get("pipeline_planning_calls", 0))
+    pipeline_planning_ns_total = int(latest.get("pipeline_planning_ns_total", 0))
+    pipeline_planning_ns_max = int(latest.get("pipeline_planning_ns_max", 0))
+    pipeline_fee_calls = int(latest.get("pipeline_fee_calls", 0))
+    pipeline_fee_ns_total = int(latest.get("pipeline_fee_ns_total", 0))
+    pipeline_fee_ns_max = int(latest.get("pipeline_fee_ns_max", 0))
+    pipeline_simulation_calls = int(latest.get("pipeline_simulation_calls", 0))
+    pipeline_simulation_ns_total = int(latest.get("pipeline_simulation_ns_total", 0))
+    pipeline_simulation_ns_max = int(latest.get("pipeline_simulation_ns_max", 0))
     cache_total_decisions = cache_suppressed + forwarded
     cache_suppression_ratio = (
         cache_suppressed / cache_total_decisions if cache_total_decisions else None
@@ -150,14 +179,30 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
     if cache_entries == 0:
         verdict = "FAIL"
         reasons.append("candidate cache was not populated")
-    if cache_suppressed == 0:
+    # After FIX-134 every causal revision is correctness work and may legitimately
+    # make logical cache suppression near zero. The production fanout gate is now
+    # whether those revision-forwards collapse into bounded physical queue tokens.
+    if cache_suppressed == 0 and candidate_pending_coalesced == 0:
         if verdict != "FAIL":
             verdict = "PARTIAL"
-        reasons.append("candidate cache did not suppress any repeated candidates")
-    if cache_transition_forwards == 0 and cache_forced_forwards == 0:
+        reasons.append("neither candidate cache nor candidate single-flight coalescing reduced repeated work")
+    required_fix135_keys = {
+        "candidate_cache_revision_forwards",
+        "candidate_pending_coalesced",
+        "candidate_revision_coalesced",
+        "candidate_physical_enqueues",
+        "candidate_repeat_wait_slots_max",
+        "candidate_fairness_rotations",
+        "candidate_periodic_due_but_deferred",
+    }
+    missing_fix135_keys = sorted(k for k in required_fix135_keys if k not in latest)
+    if missing_fix135_keys:
+        verdict = "FAIL"
+        reasons.append("missing FIX-134/135 telemetry: " + ",".join(missing_fix135_keys))
+    if cache_transition_forwards == 0 and cache_forced_forwards == 0 and cache_revision_forwards == 0:
         if verdict != "FAIL":
             verdict = "PARTIAL"
-        reasons.append("no candidate transition/forced forwarding observed")
+        reasons.append("no candidate transition/forced/revision forwarding observed")
     if verdict == "PASS" and not reasons:
         reasons.append("lossless ingress; batching active; candidate cache suppresses repeats; downstream queue bounded and draining")
 
@@ -191,8 +236,37 @@ def analyze(log_path: Path, meta: dict[str, Any]) -> dict[str, Any]:
             "candidate_cache_suppressed": cache_suppressed,
             "candidate_cache_softcap_suppressed": cache_softcap_suppressed,
             "candidate_cache_transition_forwards": cache_transition_forwards,
+            "candidate_cache_revision_forwards": cache_revision_forwards,
+            "candidate_pending_coalesced": candidate_pending_coalesced,
+            "candidate_revision_coalesced": candidate_revision_coalesced,
+            "candidate_physical_enqueues": candidate_physical_enqueues,
             "candidate_cache_periodic_forwards": cache_periodic_forwards,
             "candidate_cache_forced_forwards": cache_forced_forwards,
+            "candidate_repeat_wait_slots_max": repeat_wait_slots_max,
+            "candidate_repeat_wait_slots_1": repeat_wait_slots_1,
+            "candidate_repeat_wait_slots_2_3": repeat_wait_slots_2_3,
+            "candidate_repeat_wait_slots_4_7": repeat_wait_slots_4_7,
+            "candidate_repeat_wait_slots_8_15": repeat_wait_slots_8_15,
+            "candidate_repeat_wait_slots_ge_16": repeat_wait_slots_ge_16,
+            "candidate_fairness_rotations": fairness_rotations,
+            "candidate_periodic_due_but_deferred": periodic_due_but_deferred,
+            "dependency_content_unchanged": dependency_content_unchanged,
+            "dependency_content_changed": dependency_content_changed,
+            "detect_health_calls": detect_health_calls,
+            "detect_health_ns_total": detect_health_ns_total,
+            "detect_health_ns_max": detect_health_ns_max,
+            "detect_pipeline_calls": detect_pipeline_calls,
+            "detect_pipeline_ns_total": detect_pipeline_ns_total,
+            "detect_pipeline_ns_max": detect_pipeline_ns_max,
+            "pipeline_planning_calls": pipeline_planning_calls,
+            "pipeline_planning_ns_total": pipeline_planning_ns_total,
+            "pipeline_planning_ns_max": pipeline_planning_ns_max,
+            "pipeline_fee_calls": pipeline_fee_calls,
+            "pipeline_fee_ns_total": pipeline_fee_ns_total,
+            "pipeline_fee_ns_max": pipeline_fee_ns_max,
+            "pipeline_simulation_calls": pipeline_simulation_calls,
+            "pipeline_simulation_ns_total": pipeline_simulation_ns_total,
+            "pipeline_simulation_ns_max": pipeline_simulation_ns_max,
             "candidate_cache_suppression_ratio": cache_suppression_ratio,
         },
         "legacy_bank_projection_lines": {
@@ -230,8 +304,37 @@ def render(r: dict[str, Any]) -> str:
         f"candidate_cache_suppression_ratio={cache_ratio}",
         f"candidate_cache_softcap_suppressed={s['candidate_cache_softcap_suppressed']}",
         f"candidate_cache_transition_forwards={s['candidate_cache_transition_forwards']}",
+        f"candidate_cache_revision_forwards={s['candidate_cache_revision_forwards']}",
+        f"candidate_pending_coalesced={s['candidate_pending_coalesced']}",
+        f"candidate_revision_coalesced={s['candidate_revision_coalesced']}",
+        f"candidate_physical_enqueues={s['candidate_physical_enqueues']}",
         f"candidate_cache_periodic_forwards={s['candidate_cache_periodic_forwards']}",
         f"candidate_cache_forced_forwards={s['candidate_cache_forced_forwards']}",
+        f"candidate_repeat_wait_slots_max={s['candidate_repeat_wait_slots_max']}",
+        f"candidate_repeat_wait_slots_1={s['candidate_repeat_wait_slots_1']}",
+        f"candidate_repeat_wait_slots_2_3={s['candidate_repeat_wait_slots_2_3']}",
+        f"candidate_repeat_wait_slots_4_7={s['candidate_repeat_wait_slots_4_7']}",
+        f"candidate_repeat_wait_slots_8_15={s['candidate_repeat_wait_slots_8_15']}",
+        f"candidate_repeat_wait_slots_ge_16={s['candidate_repeat_wait_slots_ge_16']}",
+        f"candidate_fairness_rotations={s['candidate_fairness_rotations']}",
+        f"candidate_periodic_due_but_deferred={s['candidate_periodic_due_but_deferred']}",
+        f"dependency_content_unchanged={s['dependency_content_unchanged']}",
+        f"dependency_content_changed={s['dependency_content_changed']}",
+        f"detect_health_calls={s['detect_health_calls']}",
+        f"detect_health_ns_total={s['detect_health_ns_total']}",
+        f"detect_health_ns_max={s['detect_health_ns_max']}",
+        f"detect_pipeline_calls={s['detect_pipeline_calls']}",
+        f"detect_pipeline_ns_total={s['detect_pipeline_ns_total']}",
+        f"detect_pipeline_ns_max={s['detect_pipeline_ns_max']}",
+        f"pipeline_planning_calls={s['pipeline_planning_calls']}",
+        f"pipeline_planning_ns_total={s['pipeline_planning_ns_total']}",
+        f"pipeline_planning_ns_max={s['pipeline_planning_ns_max']}",
+        f"pipeline_fee_calls={s['pipeline_fee_calls']}",
+        f"pipeline_fee_ns_total={s['pipeline_fee_ns_total']}",
+        f"pipeline_fee_ns_max={s['pipeline_fee_ns_max']}",
+        f"pipeline_simulation_calls={s['pipeline_simulation_calls']}",
+        f"pipeline_simulation_ns_total={s['pipeline_simulation_ns_total']}",
+        f"pipeline_simulation_ns_max={s['pipeline_simulation_ns_max']}",
         "",
         f"pending_final={latest.get('pending','n/a')}",
         f"max_pending={r['max_pending']} (R126b={R126B_MAX_PENDING})",
