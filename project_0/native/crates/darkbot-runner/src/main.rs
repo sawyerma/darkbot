@@ -121,6 +121,39 @@ fn candidate_should_forward(
     forced || transition || revision_changed || (periodic_due && repeat_capacity)
 }
 
+#[cfg(feature = "crate_health")]
+fn candidate_fairness_key(
+    account: Pubkey,
+    previous: Option<CandidateCacheEntry>,
+    current: CandidateHealthState,
+    evaluation_slot: u64,
+    input_revision: u64,
+    forced: bool,
+    recheck_slots: u64,
+) -> (u8, std::cmp::Reverse<u64>, [u8; 32]) {
+    // [FIX-135] Correctness work always sorts before ordinary repeats and is never
+    // throttled by repeat capacity. Ordinary repeats are ordered oldest-first so
+    // a persistent candidate that was deferred becomes strictly more urgent.
+    if current == CandidateHealthState::Healthy {
+        return (2, std::cmp::Reverse(0), account.to_bytes());
+    }
+
+    let transition = previous.map(|e| e.state) != Some(current);
+    let last_revision = previous.map(|e| e.last_forwarded_revision).unwrap_or(0);
+    let revision_changed = input_revision > last_revision;
+    if forced || transition || revision_changed {
+        return (0, std::cmp::Reverse(u64::MAX), account.to_bytes());
+    }
+
+    let last_forwarded = previous.map(|e| e.last_forwarded_slot).unwrap_or(0);
+    let wait_slots = evaluation_slot.saturating_sub(last_forwarded);
+    if wait_slots >= recheck_slots {
+        (1, std::cmp::Reverse(wait_slots), account.to_bytes())
+    } else {
+        (2, std::cmp::Reverse(wait_slots), account.to_bytes())
+    }
+}
+
 // [FIX-121][R6] Qualification targets wait as unsigned identities, not signed RPC jobs.
 // This timestamp is the start of an explicit synthetic probe; real ingress timestamps
 // and projection latency remain untouched and are still subject to freshness guards.
@@ -958,6 +991,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut candidate_cache_periodic_forwards: u64 = 0;
     #[cfg(feature = "crate_health")]
     let mut candidate_cache_forced_forwards: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_repeat_wait_slots_max: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_repeat_wait_slots_1: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_repeat_wait_slots_2_3: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_repeat_wait_slots_4_7: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_repeat_wait_slots_8_15: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_repeat_wait_slots_ge_16: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_fairness_rotations: u64 = 0;
+    #[cfg(feature = "crate_health")]
+    let mut candidate_periodic_due_but_deferred: u64 = 0;
 
     // [R126b] Preserve canonical ingress under detection bursts. When both ingress and
     // detection work are available, drain at most this many ingress events before forcing
@@ -1494,9 +1543,53 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     })
                     .collect();
 
-                // FIX-135 fairness is intentionally separate. Keep current ordering in FIX-134
-                // so this change only closes same-slot causal revision blindness.
-                evaluated.sort_unstable_by_key(|(account, _, _, _, _)| account.to_bytes());
+                // [FIX-135] Preserve bounded repeat work but remove deterministic starvation:
+                // correctness work first; ordinary repeats oldest last-forwarded slot first;
+                // pubkey is only the deterministic tie-breaker.
+                let fairness_round = evaluated.iter().any(
+                    |(account, _, _, input_revision, status)| {
+                        let previous = candidate_cache.get(account).copied();
+                        let forced = candidate_force_rearm.contains(account);
+                        let recheck_slots = match status {
+                            CandidateHealthState::Liquidatable => candidate_recheck_slots,
+                            CandidateHealthState::Error => candidate_error_recheck_slots,
+                            CandidateHealthState::Healthy => u64::MAX,
+                        };
+                        candidate_fairness_key(
+                            *account,
+                            previous,
+                            *status,
+                            evaluation_slot,
+                            *input_revision,
+                            forced,
+                            recheck_slots,
+                        ).0 == 1
+                    },
+                );
+                if fairness_round {
+                    candidate_fairness_rotations =
+                        candidate_fairness_rotations.saturating_add(1);
+                }
+                evaluated.sort_unstable_by_key(
+                    |(account, _, _, input_revision, status)| {
+                        let previous = candidate_cache.get(account).copied();
+                        let forced = candidate_force_rearm.contains(account);
+                        let recheck_slots = match status {
+                            CandidateHealthState::Liquidatable => candidate_recheck_slots,
+                            CandidateHealthState::Error => candidate_error_recheck_slots,
+                            CandidateHealthState::Healthy => u64::MAX,
+                        };
+                        candidate_fairness_key(
+                            *account,
+                            previous,
+                            *status,
+                            evaluation_slot,
+                            *input_revision,
+                            forced,
+                            recheck_slots,
+                        )
+                    },
+                );
 
                 for (account, t_rx_ns, event_slot, input_revision, status) in evaluated {
                     let previous = candidate_cache.get(&account).copied();
@@ -1533,11 +1626,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let last_forwarded = previous
                                 .map(|e| e.last_forwarded_slot)
                                 .unwrap_or(0);
-                            let periodic_due =
-                                evaluation_slot.saturating_sub(last_forwarded)
-                                    >= candidate_recheck_slots;
+                            let wait_slots =
+                                evaluation_slot.saturating_sub(last_forwarded);
+                            let periodic_due = wait_slots >= candidate_recheck_slots;
                             let revision_changed = input_revision
                                 > previous.map(|e| e.last_forwarded_revision).unwrap_or(0);
+                            if periodic_due && !transition && !forced && !revision_changed {
+                                candidate_repeat_wait_slots_max =
+                                    candidate_repeat_wait_slots_max.max(wait_slots);
+                                match wait_slots {
+                                    0 => {}
+                                    1 => candidate_repeat_wait_slots_1 =
+                                        candidate_repeat_wait_slots_1.saturating_add(1),
+                                    2..=3 => candidate_repeat_wait_slots_2_3 =
+                                        candidate_repeat_wait_slots_2_3.saturating_add(1),
+                                    4..=7 => candidate_repeat_wait_slots_4_7 =
+                                        candidate_repeat_wait_slots_4_7.saturating_add(1),
+                                    8..=15 => candidate_repeat_wait_slots_8_15 =
+                                        candidate_repeat_wait_slots_8_15.saturating_add(1),
+                                    _ => candidate_repeat_wait_slots_ge_16 =
+                                        candidate_repeat_wait_slots_ge_16.saturating_add(1),
+                                }
+                            }
                             let repeat_capacity =
                                 oracle_detect_pending.len() < candidate_repeat_soft_cap;
                             let should_forward = candidate_should_forward(
@@ -1590,6 +1700,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 if periodic_due && !repeat_capacity {
                                     candidate_cache_softcap_suppressed =
                                         candidate_cache_softcap_suppressed.saturating_add(1);
+                                    candidate_periodic_due_but_deferred =
+                                        candidate_periodic_due_but_deferred.saturating_add(1);
                                 }
                                 candidate_cache.insert(
                                     account,
@@ -1620,11 +1732,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let last_forwarded = previous
                                 .map(|e| e.last_forwarded_slot)
                                 .unwrap_or(0);
-                            let periodic_due =
-                                evaluation_slot.saturating_sub(last_forwarded)
-                                    >= candidate_error_recheck_slots;
+                            let wait_slots =
+                                evaluation_slot.saturating_sub(last_forwarded);
+                            let periodic_due = wait_slots >= candidate_error_recheck_slots;
                             let revision_changed = input_revision
                                 > previous.map(|e| e.last_forwarded_revision).unwrap_or(0);
+                            if periodic_due && !transition && !forced && !revision_changed {
+                                candidate_repeat_wait_slots_max =
+                                    candidate_repeat_wait_slots_max.max(wait_slots);
+                                match wait_slots {
+                                    0 => {}
+                                    1 => candidate_repeat_wait_slots_1 =
+                                        candidate_repeat_wait_slots_1.saturating_add(1),
+                                    2..=3 => candidate_repeat_wait_slots_2_3 =
+                                        candidate_repeat_wait_slots_2_3.saturating_add(1),
+                                    4..=7 => candidate_repeat_wait_slots_4_7 =
+                                        candidate_repeat_wait_slots_4_7.saturating_add(1),
+                                    8..=15 => candidate_repeat_wait_slots_8_15 =
+                                        candidate_repeat_wait_slots_8_15.saturating_add(1),
+                                    _ => candidate_repeat_wait_slots_ge_16 =
+                                        candidate_repeat_wait_slots_ge_16.saturating_add(1),
+                                }
+                            }
                             let repeat_capacity =
                                 oracle_detect_pending.len() < candidate_repeat_soft_cap;
                             let should_forward = candidate_should_forward(
@@ -1677,6 +1806,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 if periodic_due && !repeat_capacity {
                                     candidate_cache_softcap_suppressed =
                                         candidate_cache_softcap_suppressed.saturating_add(1);
+                                    candidate_periodic_due_but_deferred =
+                                        candidate_periodic_due_but_deferred.saturating_add(1);
                                 }
                                 candidate_cache.insert(
                                     account,
@@ -2859,7 +2990,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
             #[cfg(feature = "crate_health")]
             eprintln!(
-                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_revision_forwards={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={} candidate_recheck_slots={} candidate_error_recheck_slots={} candidate_repeat_soft_cap={}",
+                "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_revision_forwards={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={} candidate_repeat_wait_slots_max={} candidate_repeat_wait_slots_1={} candidate_repeat_wait_slots_2_3={} candidate_repeat_wait_slots_4_7={} candidate_repeat_wait_slots_8_15={} candidate_repeat_wait_slots_ge_16={} candidate_fairness_rotations={} candidate_periodic_due_but_deferred={} candidate_recheck_slots={} candidate_error_recheck_slots={} candidate_repeat_soft_cap={}",
                 threshold_ready,
                 threshold_index.tracked_accounts(),
                 threshold_fallback.len(),
@@ -2898,6 +3029,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 candidate_revision_forwards,
                 candidate_cache_periodic_forwards,
                 candidate_cache_forced_forwards,
+                candidate_repeat_wait_slots_max,
+                candidate_repeat_wait_slots_1,
+                candidate_repeat_wait_slots_2_3,
+                candidate_repeat_wait_slots_4_7,
+                candidate_repeat_wait_slots_8_15,
+                candidate_repeat_wait_slots_ge_16,
+                candidate_fairness_rotations,
+                candidate_periodic_due_but_deferred,
                 candidate_recheck_slots,
                 candidate_error_recheck_slots,
                 candidate_repeat_soft_cap
@@ -3014,6 +3153,137 @@ mod integration_probe_tests {
             false,
             true,
         ));
+    }
+
+    #[test]
+    fn candidate_fairness_services_all_above_soft_cap_without_starvation() {
+        const N: usize = 1025;
+        const CAP: usize = 1024;
+
+        let accounts: Vec<Pubkey> = (0..N)
+            .map(|i| {
+                let mut bytes = [0u8; 32];
+                bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+                Pubkey::new_from_array(bytes)
+            })
+            .collect();
+        let mut cache: HashMap<Pubkey, CandidateCacheEntry> = accounts
+            .iter()
+            .copied()
+            .map(|account| {
+                (
+                    account,
+                    CandidateCacheEntry {
+                        state: CandidateHealthState::Liquidatable,
+                        last_forwarded_slot: 0,
+                        last_forwarded_revision: 1,
+                    },
+                )
+            })
+            .collect();
+        let mut serviced = HashSet::new();
+
+        for slot in 1..=2u64 {
+            let mut ordered = accounts.clone();
+            ordered.sort_unstable_by_key(|account| {
+                candidate_fairness_key(
+                    *account,
+                    cache.get(account).copied(),
+                    CandidateHealthState::Liquidatable,
+                    slot,
+                    1,
+                    false,
+                    1,
+                )
+            });
+
+            let mut admitted = 0usize;
+            for account in ordered {
+                let previous = cache.get(&account).copied();
+                let repeat_capacity = admitted < CAP;
+                if candidate_should_forward(
+                    previous,
+                    CandidateHealthState::Liquidatable,
+                    slot,
+                    1,
+                    1,
+                    false,
+                    repeat_capacity,
+                ) {
+                    admitted += 1;
+                    serviced.insert(account);
+                    cache.insert(
+                        account,
+                        CandidateCacheEntry {
+                            state: CandidateHealthState::Liquidatable,
+                            last_forwarded_slot: slot,
+                            last_forwarded_revision: 1,
+                        },
+                    );
+                }
+            }
+            assert!(admitted <= CAP);
+        }
+
+        assert_eq!(serviced.len(), N);
+    }
+
+    #[test]
+    fn candidate_fairness_repeat_admission_remains_bounded() {
+        const N: usize = 4097;
+        const CAP: usize = 1024;
+        let mut cache = HashMap::new();
+        let mut accounts = Vec::with_capacity(N);
+        for i in 0..N {
+            let mut bytes = [0u8; 32];
+            bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+            let account = Pubkey::new_from_array(bytes);
+            accounts.push(account);
+            cache.insert(
+                account,
+                CandidateCacheEntry {
+                    state: CandidateHealthState::Liquidatable,
+                    last_forwarded_slot: 0,
+                    last_forwarded_revision: 1,
+                },
+            );
+        }
+
+        accounts.sort_unstable_by_key(|account| {
+            candidate_fairness_key(
+                *account,
+                cache.get(account).copied(),
+                CandidateHealthState::Liquidatable,
+                1,
+                1,
+                false,
+                1,
+            )
+        });
+
+        let mut admitted = 0usize;
+        let mut deferred = 0usize;
+        for account in accounts {
+            let previous = cache.get(&account).copied();
+            let repeat_capacity = admitted < CAP;
+            if candidate_should_forward(
+                previous,
+                CandidateHealthState::Liquidatable,
+                1,
+                1,
+                1,
+                false,
+                repeat_capacity,
+            ) {
+                admitted += 1;
+            } else {
+                deferred += 1;
+            }
+        }
+
+        assert_eq!(admitted, CAP);
+        assert_eq!(deferred, N - CAP);
+        assert!(admitted <= CAP);
     }
 
     #[test]
