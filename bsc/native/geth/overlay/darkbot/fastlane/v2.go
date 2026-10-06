@@ -29,6 +29,11 @@ const (
 	v2CRCKindCRC32C   = uint32(1)
 	v2ClockMonotonic  = uint32(1)
 
+	v2LaneStateFree        = uint32(0)
+	v2LaneStateBound       = uint32(1)
+	v2LaneStateClosing     = uint32(2)
+	v2LaneStateQuarantined = uint32(3)
+
 	v2SHMagic          = 0
 	v2SHVersion        = 8
 	v2SHEndian         = 10
@@ -236,7 +241,11 @@ func createArenaV2(path string, generation uint64, lanes []laneConfigV2) (*arena
 		o := int(offsets[i])
 		binary.LittleEndian.PutUint64(data[o+v2LHGeneration:], generation)
 		binary.LittleEndian.PutUint64(data[o+v2LHEpoch:], 1)
-		binary.LittleEndian.PutUint32(data[o+v2LHState:], 1)
+		initialState := v2LaneStateBound
+		if lane.Class == v2PeerIngress {
+			initialState = v2LaneStateFree
+		}
+		binary.LittleEndian.PutUint32(data[o+v2LHState:], initialState)
 		for slot := uint32(0); slot < lane.Capacity; slot++ {
 			s := o + v2LaneHeaderSize + int(slot)*int(lane.SlotStride)
 			atomic.StoreUint64(v2AtomicU64(data, s+v2SlotCommitted), v2EmptySequence)
@@ -339,7 +348,108 @@ func (a *arenaV2) lane(expected laneConfigV2) (*laneV2, error) {
 	return nil, fmt.Errorf("fastlane v2 lane %d not found", expected.ID)
 }
 
+
+func (a *arenaV2) bindPeerLane(id uint16, owner [32]byte) (uint64, error) {
+	lane, err := a.laneByID(id)
+	if err != nil {
+		return 0, err
+	}
+	if lane.config.Class != v2PeerIngress {
+		return 0, errors.New("fastlane v2 bind requires peer-ingress lane")
+	}
+	state := atomic.LoadUint32(v2AtomicU32(a.data, lane.offset+v2LHState))
+	if state != v2LaneStateFree {
+		return 0, fmt.Errorf("fastlane v2 lifecycle state %d != %d", state, v2LaneStateFree)
+	}
+	epoch := atomic.LoadUint64(lane.atomic(v2LHEpoch))
+	if epoch == ^uint64(0) {
+		return 0, errors.New("fastlane v2 lane epoch exhausted")
+	}
+	next := epoch + 1
+	copy(a.data[lane.offset+v2LHOwner:lane.offset+v2LHOwner+32], owner[:])
+	binary.LittleEndian.PutUint64(a.data[lane.offset+v2LHEpoch:], next)
+	binary.LittleEndian.PutUint64(a.data[lane.offset+v2LHFinalWrite:], 0)
+	binary.LittleEndian.PutUint64(a.data[lane.offset+v2LHShutdown:], 0)
+	atomic.StoreUint32(v2AtomicU32(a.data, lane.offset+v2LHState), v2LaneStateBound)
+	return next, nil
+}
+
+func (a *arenaV2) beginClosePeerLane(id uint16, owner [32]byte) (uint64, error) {
+	lane, err := a.laneByID(id)
+	if err != nil {
+		return 0, err
+	}
+	if lane.config.Class != v2PeerIngress {
+		return 0, errors.New("fastlane v2 close requires peer-ingress lane")
+	}
+	state := atomic.LoadUint32(v2AtomicU32(a.data, lane.offset+v2LHState))
+	if state != v2LaneStateBound {
+		return 0, fmt.Errorf("fastlane v2 lifecycle state %d != %d", state, v2LaneStateBound)
+	}
+	if string(a.data[lane.offset+v2LHOwner:lane.offset+v2LHOwner+32]) != string(owner[:]) {
+		return 0, errors.New("fastlane v2 owner mismatch")
+	}
+	finalWrite := atomic.LoadUint64(lane.atomic(v2LHWriteSeq))
+	binary.LittleEndian.PutUint64(a.data[lane.offset+v2LHFinalWrite:], finalWrite)
+	atomic.StoreUint32(v2AtomicU32(a.data, lane.offset+v2LHState), v2LaneStateClosing)
+	return finalWrite, nil
+}
+
+func (a *arenaV2) releasePeerLane(id uint16, owner [32]byte) error {
+	lane, err := a.laneByID(id)
+	if err != nil {
+		return err
+	}
+	if lane.config.Class != v2PeerIngress {
+		return errors.New("fastlane v2 release requires peer-ingress lane")
+	}
+	state := atomic.LoadUint32(v2AtomicU32(a.data, lane.offset+v2LHState))
+	if state != v2LaneStateClosing {
+		return fmt.Errorf("fastlane v2 lifecycle state %d != %d", state, v2LaneStateClosing)
+	}
+	if string(a.data[lane.offset+v2LHOwner:lane.offset+v2LHOwner+32]) != string(owner[:]) {
+		return errors.New("fastlane v2 owner mismatch")
+	}
+	epoch := atomic.LoadUint64(lane.atomic(v2LHEpoch))
+	drained := atomic.LoadUint64(lane.atomic(v2LHDrained))
+	if drained != epoch {
+		return fmt.Errorf(
+			"fastlane v2 lane not drained read=%d final_write=%d",
+			atomic.LoadUint64(lane.atomic(v2LHReadSeq)),
+			binary.LittleEndian.Uint64(a.data[lane.offset+v2LHFinalWrite:]),
+		)
+	}
+	clear(a.data[lane.offset+v2LHOwner : lane.offset+v2LHOwner+32])
+	binary.LittleEndian.PutUint64(a.data[lane.offset+v2LHFinalWrite:], 0)
+	atomic.StoreUint32(v2AtomicU32(a.data, lane.offset+v2LHState), v2LaneStateFree)
+	return nil
+}
+
+func (a *arenaV2) laneByID(id uint16) (*laneV2, error) {
+	count := int(binary.LittleEndian.Uint32(a.data[v2SHLaneCount:]))
+	for i := 0; i < count; i++ {
+		d := v2SuperHeaderSize + i*v2DirEntrySize
+		if binary.LittleEndian.Uint16(a.data[d+v2DELaneID:]) != id {
+			continue
+		}
+		cfg := laneConfigV2{
+			ID:         id,
+			Direction:  laneDirectionV2(binary.LittleEndian.Uint16(a.data[d+v2DEDirection:])),
+			Class:      laneClassV2(binary.LittleEndian.Uint16(a.data[d+v2DEClass:])),
+			Flags:      binary.LittleEndian.Uint16(a.data[d+v2DEFlags:]),
+			Capacity:   binary.LittleEndian.Uint32(a.data[d+v2DECapacity:]),
+			SlotStride: binary.LittleEndian.Uint32(a.data[d+v2DESlotStride:]),
+		}
+		return a.lane(cfg)
+	}
+	return nil, fmt.Errorf("fastlane v2 lane %d not found", id)
+}
+
 func (l *laneV2) publish(record recordV2) error {
+	state := atomic.LoadUint32(v2AtomicU32(l.arena.data, l.offset+v2LHState))
+	if state != v2LaneStateBound {
+		return fmt.Errorf("fastlane v2 lifecycle state %d != %d", state, v2LaneStateBound)
+	}
 	maxPayload := int(l.config.SlotStride) - v2SlotHeaderSize
 	if len(record.Payload) > maxPayload {
 		atomic.AddUint64(l.atomic(v2LHOversize), 1)
@@ -436,6 +546,22 @@ func (l *laneV2) tryConsume() (*recordV2, bool, error) {
 	return record, true, nil
 }
 
+
+func (l *laneV2) acknowledgeDrainedIfClosing() bool {
+	state := atomic.LoadUint32(v2AtomicU32(l.arena.data, l.offset+v2LHState))
+	if state != v2LaneStateClosing {
+		return false
+	}
+	read := atomic.LoadUint64(l.atomic(v2LHReadSeq))
+	finalWrite := binary.LittleEndian.Uint64(l.arena.data[l.offset+v2LHFinalWrite:])
+	if read != finalWrite {
+		return false
+	}
+	epoch := atomic.LoadUint64(l.atomic(v2LHEpoch))
+	atomic.StoreUint64(l.atomic(v2LHDrained), epoch)
+	return true
+}
+
 func (l *laneV2) atomic(relative int) *uint64 {
 	return v2AtomicU64(l.arena.data, l.offset+relative)
 }
@@ -471,4 +597,8 @@ func recordCRC32CV2(slot []byte, payloadLen int) uint32 {
 
 func v2AtomicU64(data []byte, offset int) *uint64 {
 	return (*uint64)(unsafe.Pointer(&data[offset]))
+}
+
+func v2AtomicU32(data []byte, offset int) *uint32 {
+	return (*uint32)(unsafe.Pointer(&data[offset]))
 }
