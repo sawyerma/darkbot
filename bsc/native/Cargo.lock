@@ -616,6 +616,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkbot-fastlane"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "darkbot-qualify"
 version = "0.1.0"
 dependencies = [
