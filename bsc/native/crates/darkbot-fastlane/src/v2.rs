@@ -31,6 +31,10 @@ pub const MAX_CAPACITY_V2: usize = 4096;
 pub const MAX_LANES_V2: usize = 1024;
 pub const CRC_KIND_CRC32C: u32 = 1;
 pub const CLOCK_ID_MONOTONIC: u32 = 1;
+pub const LANE_STATE_FREE: u32 = 0;
+pub const LANE_STATE_BOUND: u32 = 1;
+pub const LANE_STATE_CLOSING: u32 = 2;
+pub const LANE_STATE_QUARANTINED: u32 = 3;
 const EMPTY_SEQUENCE: u64 = u64::MAX;
 
 const SH_OFF_MAGIC: usize = 0;
@@ -87,6 +91,95 @@ const SLOT_OFF_CRC32C: usize = 152;
 pub enum DirectionV2 {
     GethToRust = 1,
     RustToGeth = 2,
+    #[test]
+    fn peer_lane_lifecycle_requires_drain_before_reuse() {
+        let path = tmp("lifecycle");
+        let lane = peer_lane(30);
+        let mut arena = ArenaV2::create(&path, 21, &[lane]).unwrap();
+        let owner_a = [0xa1; 32];
+        let owner_b = [0xb2; 32];
+
+        assert_eq!(lane_stats(&arena.mapping, locate_lane_by_id(&arena.mapping, 30).unwrap().1).state, LANE_STATE_FREE);
+        let epoch_a = arena.bind_peer_lane(30, owner_a).unwrap();
+        assert_eq!(epoch_a, 2);
+
+        let mut producer = ProducerV2::open(&path, 21, lane).unwrap();
+        let consumer = ConsumerV2::open(&path, 21, lane).unwrap();
+        producer.publish(&record(b"one")).unwrap();
+        let final_write = arena.begin_close_peer_lane(30, owner_a).unwrap();
+        assert_eq!(final_write, 1);
+
+        assert!(matches!(
+            arena.release_peer_lane(30, owner_a),
+            Err(V2Error::LaneNotDrained { .. })
+        ));
+        assert!(!consumer.acknowledge_drained_if_closing().unwrap());
+
+        let mut consumer = consumer;
+        assert!(consumer.try_consume().unwrap().is_some());
+        assert!(consumer.acknowledge_drained_if_closing().unwrap());
+        arena.release_peer_lane(30, owner_a).unwrap();
+
+        let stats = lane_stats(&arena.mapping, locate_lane_by_id(&arena.mapping, 30).unwrap().1);
+        assert_eq!(stats.state, LANE_STATE_FREE);
+        assert_eq!(stats.owner, [0; 32]);
+
+        let epoch_b = arena.bind_peer_lane(30, owner_b).unwrap();
+        assert_eq!(epoch_b, 3);
+        assert_eq!(producer.stats().write_sequence, consumer.stats().read_sequence);
+
+        drop(producer);
+        drop(consumer);
+        drop(arena);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn peer_lane_lifecycle_rejects_wrong_owner_and_wrong_state() {
+        let path = tmp("owner");
+        let lane = peer_lane(31);
+        let mut arena = ArenaV2::create(&path, 22, &[lane]).unwrap();
+        let owner = [0x11; 32];
+        let wrong = [0x22; 32];
+
+        arena.bind_peer_lane(31, owner).unwrap();
+        assert!(matches!(
+            arena.bind_peer_lane(31, owner),
+            Err(V2Error::LifecycleState { .. })
+        ));
+        assert!(matches!(
+            arena.begin_close_peer_lane(31, wrong),
+            Err(V2Error::LaneMismatch("owner"))
+        ));
+        arena.begin_close_peer_lane(31, owner).unwrap();
+
+        let consumer = ConsumerV2::open(&path, 22, lane).unwrap();
+        assert!(consumer.acknowledge_drained_if_closing().unwrap());
+        assert!(matches!(
+            arena.release_peer_lane(31, wrong),
+            Err(V2Error::LaneMismatch("owner"))
+        ));
+        arena.release_peer_lane(31, owner).unwrap();
+
+        drop(consumer);
+        drop(arena);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn stale_generation_cannot_open_reused_lifecycle() {
+        let path = tmp("generation");
+        let lane = peer_lane(32);
+        let arena = ArenaV2::create(&path, 23, &[lane]).unwrap();
+        drop(arena);
+
+        assert!(matches!(
+            ProducerV2::open(&path, 24, lane),
+            Err(V2Error::GenerationMismatch { .. })
+        ));
+        fs::remove_file(path).unwrap();
+    }
+
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +262,10 @@ pub struct LaneStatsV2 {
     pub lane_epoch: u64,
     pub generation: u64,
     pub shutdown: bool,
+    pub state: u32,
+    pub final_write_sequence: u64,
+    pub drained_epoch: u64,
+    pub owner: [u8; 32],
 }
 
 #[derive(Debug)]
@@ -195,6 +292,9 @@ pub enum V2Error {
     LaneEpochMismatch { expected: u64, observed: u64 },
     ChecksumMismatch { expected: u32, actual: u32 },
     UnknownRecordKind(u16),
+    LifecycleState { expected: u32, observed: u32 },
+    LaneNotDrained { read: u64, final_write: u64 },
+    EpochExhausted,
 }
 
 impl fmt::Display for V2Error {
@@ -235,6 +335,13 @@ impl fmt::Display for V2Error {
                 write!(f, "fastlane v2: checksum {actual:#x} != {expected:#x}")
             }
             Self::UnknownRecordKind(v) => write!(f, "fastlane v2: unknown record kind {v}"),
+            Self::LifecycleState { expected, observed } => {
+                write!(f, "fastlane v2: lifecycle state {observed} != {expected}")
+            }
+            Self::LaneNotDrained { read, final_write } => {
+                write!(f, "fastlane v2: lane not drained read={read} final_write={final_write}")
+            }
+            Self::EpochExhausted => f.write_str("fastlane v2: lane epoch exhausted"),
         }
     }
 }
@@ -372,7 +479,12 @@ impl ArenaV2 {
                 put_u64(bytes, lane_offset + LH_OFF_DRAINED_EPOCH, 0);
                 put_u64(bytes, lane_offset + LH_OFF_GENERATION, generation);
                 put_u64(bytes, lane_offset + LH_OFF_LANE_EPOCH, 1);
-                put_u32(bytes, lane_offset + LH_OFF_STATE, 1);
+                let initial_state = if lane.class == LaneClassV2::PeerIngress {
+                    LANE_STATE_FREE
+                } else {
+                    LANE_STATE_BOUND
+                };
+                put_u32(bytes, lane_offset + LH_OFF_STATE, initial_state);
                 put_u64(bytes, lane_offset + LH_OFF_FINAL_WRITE, 0);
                 put_u64(bytes, lane_offset + LH_OFF_SHUTDOWN, 0);
                 bytes[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32].fill(0);
@@ -389,6 +501,97 @@ impl ArenaV2 {
 
     pub fn mapped_len(&self) -> usize {
         self.mapping.len
+    }
+
+    pub fn bind_peer_lane(&mut self, lane_id: u16, owner: [u8; 32]) -> Result<u64, V2Error> {
+        let (config, lane_offset) = locate_lane_by_id(&self.mapping, lane_id)?;
+        if config.class != LaneClassV2::PeerIngress {
+            return Err(V2Error::LaneMismatch("bind requires peer-ingress lane"));
+        }
+        let state = get_u32(self.mapping.bytes(), lane_offset + LH_OFF_STATE);
+        if state != LANE_STATE_FREE {
+            return Err(V2Error::LifecycleState {
+                expected: LANE_STATE_FREE,
+                observed: state,
+            });
+        }
+        let current_epoch = get_u64(self.mapping.bytes(), lane_offset + LH_OFF_LANE_EPOCH);
+        let next_epoch = current_epoch.checked_add(1).ok_or(V2Error::EpochExhausted)?;
+        {
+            let bytes = self.mapping.bytes_mut();
+            bytes[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32]
+                .copy_from_slice(&owner);
+            put_u64(bytes, lane_offset + LH_OFF_LANE_EPOCH, next_epoch);
+            put_u64(bytes, lane_offset + LH_OFF_FINAL_WRITE, 0);
+            put_u64(bytes, lane_offset + LH_OFF_SHUTDOWN, 0);
+            put_u32(bytes, lane_offset + LH_OFF_STATE, LANE_STATE_BOUND);
+        }
+        Ok(next_epoch)
+    }
+
+    pub fn begin_close_peer_lane(&mut self, lane_id: u16, owner: [u8; 32]) -> Result<u64, V2Error> {
+        let (config, lane_offset) = locate_lane_by_id(&self.mapping, lane_id)?;
+        if config.class != LaneClassV2::PeerIngress {
+            return Err(V2Error::LaneMismatch("close requires peer-ingress lane"));
+        }
+        let state = get_u32(self.mapping.bytes(), lane_offset + LH_OFF_STATE);
+        if state != LANE_STATE_BOUND {
+            return Err(V2Error::LifecycleState {
+                expected: LANE_STATE_BOUND,
+                observed: state,
+            });
+        }
+        if self.mapping.bytes()[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32] != owner {
+            return Err(V2Error::LaneMismatch("owner"));
+        }
+        let final_write = self
+            .mapping
+            .atomic_u64(lane_offset + LH_OFF_WRITE_SEQUENCE)
+            .load(Ordering::Acquire);
+        {
+            let bytes = self.mapping.bytes_mut();
+            put_u64(bytes, lane_offset + LH_OFF_FINAL_WRITE, final_write);
+            put_u32(bytes, lane_offset + LH_OFF_STATE, LANE_STATE_CLOSING);
+        }
+        Ok(final_write)
+    }
+
+    pub fn release_peer_lane(&mut self, lane_id: u16, owner: [u8; 32]) -> Result<(), V2Error> {
+        let (config, lane_offset) = locate_lane_by_id(&self.mapping, lane_id)?;
+        if config.class != LaneClassV2::PeerIngress {
+            return Err(V2Error::LaneMismatch("release requires peer-ingress lane"));
+        }
+        let state = get_u32(self.mapping.bytes(), lane_offset + LH_OFF_STATE);
+        if state != LANE_STATE_CLOSING {
+            return Err(V2Error::LifecycleState {
+                expected: LANE_STATE_CLOSING,
+                observed: state,
+            });
+        }
+        if self.mapping.bytes()[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32] != owner {
+            return Err(V2Error::LaneMismatch("owner"));
+        }
+        let epoch = get_u64(self.mapping.bytes(), lane_offset + LH_OFF_LANE_EPOCH);
+        let drained = self
+            .mapping
+            .atomic_u64(lane_offset + LH_OFF_DRAINED_EPOCH)
+            .load(Ordering::Acquire);
+        if drained != epoch {
+            return Err(V2Error::LaneNotDrained {
+                read: self
+                    .mapping
+                    .atomic_u64(lane_offset + LH_OFF_READ_SEQUENCE)
+                    .load(Ordering::Acquire),
+                final_write: get_u64(self.mapping.bytes(), lane_offset + LH_OFF_FINAL_WRITE),
+            });
+        }
+        {
+            let bytes = self.mapping.bytes_mut();
+            bytes[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32].fill(0);
+            put_u64(bytes, lane_offset + LH_OFF_FINAL_WRITE, 0);
+            put_u32(bytes, lane_offset + LH_OFF_STATE, LANE_STATE_FREE);
+        }
+        Ok(())
     }
 }
 
@@ -454,6 +657,22 @@ impl ProducerV2 {
         self.atomic(LH_OFF_WRITE_SEQUENCE)
             .store(write.wrapping_add(1), Ordering::Release);
         Ok(write)
+    }
+
+    pub fn acknowledge_drained_if_closing(&self) -> Result<bool, V2Error> {
+        let state = get_u32(self.mapping.bytes(), self.lane_offset + LH_OFF_STATE);
+        if state != LANE_STATE_CLOSING {
+            return Ok(false);
+        }
+        let read = self.atomic(LH_OFF_READ_SEQUENCE).load(Ordering::Acquire);
+        let final_write = get_u64(self.mapping.bytes(), self.lane_offset + LH_OFF_FINAL_WRITE);
+        if read != final_write {
+            return Ok(false);
+        }
+        let epoch = self.atomic(LH_OFF_LANE_EPOCH).load(Ordering::Acquire);
+        self.atomic(LH_OFF_DRAINED_EPOCH)
+            .store(epoch, Ordering::Release);
+        Ok(true)
     }
 
     pub fn stats(&self) -> LaneStatsV2 {
@@ -695,6 +914,44 @@ fn locate_lane(mapping: &MappingV2, expected: LaneConfigV2) -> Result<usize, V2E
     Err(V2Error::LaneNotFound(expected.lane_id))
 }
 
+
+fn locate_lane_by_id(mapping: &MappingV2, lane_id: u16) -> Result<(LaneConfigV2, usize), V2Error> {
+    let b = mapping.bytes();
+    let lane_count = get_u32(b, SH_OFF_LANE_COUNT) as usize;
+    for index in 0..lane_count {
+        let off = SUPER_HEADER_SIZE_V2 + index * DIRECTORY_ENTRY_SIZE_V2;
+        if get_u16(b, off + DE_OFF_LANE_ID) != lane_id {
+            continue;
+        }
+        let direction = match get_u16(b, off + DE_OFF_DIRECTION) {
+            1 => DirectionV2::GethToRust,
+            2 => DirectionV2::RustToGeth,
+            _ => return Err(V2Error::BadLayout("direction")),
+        };
+        let class = match get_u16(b, off + DE_OFF_CLASS) {
+            1 => LaneClassV2::PeerIngress,
+            2 => LaneClassV2::TxpoolEvidence,
+            3 => LaneClassV2::ChainEvidence,
+            4 => LaneClassV2::OutboundHandoffEvidence,
+            5 => LaneClassV2::SignedTransactionEgress,
+            _ => return Err(V2Error::BadLayout("lane class")),
+        };
+        let config = LaneConfigV2 {
+            lane_id,
+            direction,
+            class,
+            flags: get_u16(b, off + DE_OFF_FLAGS),
+            capacity: get_u32(b, off + DE_OFF_CAPACITY) as usize,
+            slot_stride: get_u32(b, off + DE_OFF_SLOT_STRIDE) as usize,
+        };
+        config.validate()?;
+        let lane_offset = usize::try_from(get_u64(b, off + DE_OFF_LANE_OFFSET))
+            .map_err(|_| V2Error::SizeOverflow)?;
+        return Ok((config, lane_offset));
+    }
+    Err(V2Error::LaneNotFound(lane_id))
+}
+
 fn lane_stats(mapping: &MappingV2, lane_offset: usize) -> LaneStatsV2 {
     LaneStatsV2 {
         write_sequence: mapping
@@ -722,6 +979,16 @@ fn lane_stats(mapping: &MappingV2, lane_offset: usize) -> LaneStatsV2 {
             .atomic_u64(lane_offset + LH_OFF_SHUTDOWN)
             .load(Ordering::Acquire)
             != 0,
+        state: get_u32(mapping.bytes(), lane_offset + LH_OFF_STATE),
+        final_write_sequence: get_u64(mapping.bytes(), lane_offset + LH_OFF_FINAL_WRITE),
+        drained_epoch: mapping
+            .atomic_u64(lane_offset + LH_OFF_DRAINED_EPOCH)
+            .load(Ordering::Acquire),
+        owner: {
+            let mut owner = [0u8; 32];
+            owner.copy_from_slice(&mapping.bytes()[lane_offset + LH_OFF_OWNER..lane_offset + LH_OFF_OWNER + 32]);
+            owner
+        },
     }
 }
 
