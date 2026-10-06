@@ -15,6 +15,7 @@ members = [
     "crates/darkbot-core",
     "crates/darkbot-runner",
     "crates/darkbot-qualify",
+    "crates/darkbot-capture",
 ]
 
 [workspace.package]
