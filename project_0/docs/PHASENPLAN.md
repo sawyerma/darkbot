@@ -1,12 +1,12 @@
-# DarkBot — Project 0 — Produktions-Phasenplan v4.4
+# DarkBot — Project 0 — Produktions-Phasenplan v4.5
 
-**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.4
-**Promoted:** 2026-09-30 nach Fable-Review (Checkliste 12A beantwortet in `FABLE_REVIEW_v4.4.md`); ersetzt v4.2.  
-**Stand:** 2026-09-30  
+**Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.5
+**Promoted:** 2026-10-07; v4.5 übernimmt v4.4 vollständig und ergänzt das verbindliche P6-MT-v2-Runtime-Subgate nach Review von FIX-139-Code, Mainnet-Messungen, Provider-Grenzen und Fables P6-MT-v2-Fassung.  
+**Stand:** 2026-10-07  
 **Geltungsbereich:** DarkBot / Project 0 Liquidator  
-**Source of Truth:** Diese Datei. Ältere Fassungen (v4.2, v4.3) sind nicht autoritativ.
+**Source of Truth:** Diese Datei. Ältere Fassungen (v4.2, v4.3, v4.4) sind historisch, nicht autoritativ.
 
-## Aktueller Umsetzungsstand — 2026-10-02
+## Aktueller Umsetzungsstand — 2026-10-07
 
 Dieser Block ändert **nicht** die eingefrorene Architektur v4.4; er dokumentiert nur den realen Implementierungs-/Evidence-Stand.
 
@@ -18,10 +18,13 @@ G4  Jupiter V2 RouteProvider + P0 Builder          IMPLEMENTIERT + build/test gr
 G5  Mainnet Bootstrap / Recovery / READY           NÄCHSTER GATE — noch nicht real belegt
 
 P6-LT technische Shadow-Kette                      IMPLEMENTIERT, Mainnet-Evidence offen
+P6-MT v2 Runtime-Hardening                          AUTHORITATIVER PLAN; IMPLEMENTIERUNG PENDING
 P8-LT Landing / Token-Deltas / realized PnL        OFFEN
 LIVE                                                HART GESPERRT
 Produktionsprofitabilität                           NICHT BEWIESEN
 ```
+
+**Project-0 Runtime-Baseline:** FIX-139-Inhalt auf `main`. Die experimentellen FIX-140..143-Parallelisierungsimplementierungen wurden vollständig verworfen; ausschließlich ihre Mess-Evidence bleibt im `MEASUREMENT_LEDGER.md`. P6-MT wird neu und ticketweise nach diesem Phasenplan implementiert.
 
 Mainnet-C0 für Group `4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8`: `165123` Accounts, davon `82680` mit Liability, `61` beim letzten Pulse liquidierbar, `5114` historisch bereits liquidiert.
 
@@ -854,6 +857,24 @@ T_handoff
 T_observed_landed
     Landing von uns beobachtet
 ```
+
+P6-MT ergänzt ausschließlich **diagnostische** Grenzen; die normativen Zeitpunkte oben bleiben unverändert:
+
+```text
+T_rx_first      ältester noch unbedienter Auslöser einer coalesced Candidate-Revision
+T_admit         Candidate erhält Owner-Credit / wird einer Ausführungsstufe übergeben
+T_prep_start    Start von prepare_candidate
+T_prep_done     PreparedCandidate fertig
+T_route_start   Route-Remotegrenze beginnt
+T_route_done    Route-Remotegrenze beendet
+T_build_done    lokaler Build der betrachteten Planvariante fertig
+T_owner_final   finale Owner-Prüfung vor Reservation/Sign
+T_sim_start     Simulation desselben SignedIntent beginnt
+T_sim_done      Simulation beendet
+T_result_owner  asynchrones Resultat beim Canonical Owner angekommen
+```
+
+Für jede P6-MT-Queue werden `wait_ns`, `service_ns`, Tiefe und Maximaltiefe als count/p50/p95/p99/max nach Lane und Trigger-Klasse gemessen. Queue-Alter und State-Freshness bleiben getrennte Größen.
 
 Ableitungen:
 
@@ -2864,6 +2885,754 @@ UNKNOWN
 
 Finaler Code erkennt, bewertet, plant und misst beide Opportunity-Klassen vollständig.
 
+
+## P6-MT — BOUNDED PARALLEL RUNTIME / APPLE-M-SERIES
+
+### Status / Zweck
+
+P6-MT ist ein **verbindliches Subgate von P6-LT**. Es wurde durch FIX-138/139-Messungen ausgelöst und ersetzt keinen bestehenden Health-/Economics-/Planner-/TX-Core.
+
+```text
+Baseline: Project-0 FIX-139 content
+LIVE:     HART GESPERRT
+
+Ziel:
+minimale T_rx_first → T_sign-Latenz
+für wirtschaftlich relevante Kandidaten
+
+unter:
+korrektem Canonical State
+deterministischer Recovery
+bounded Remote-Budget
+null verlorenen Kandidaten
+```
+
+Messbasis:
+
+```text
+FIX-138 serial:
+  Health Ø      ≈ 3.39 µs
+  Pipeline Ø    ≈ 1.57 ms
+  Pipeline max  ≈ 2.654 s
+  pending       ≈ 6,239
+
+FIX-141 experiment:
+  ≈ 659/s vs. ≈389/s serial
+  ≈ +69.5 % throughput
+  aber Queue-/Retry-/Ownership-Probleme
+
+FIX-142 experiment:
+  exec_job_overflow 1,500,739 → 0
+  exec_queue_full   128,813 → 0
+  603 freie Exec-Slots
+  pending ≈ 6,217
+```
+
+Konsequenz: Nicht „mehr Threads“ optimieren, sondern Owner-Entlastung, wertvolle Kandidaten zuerst, Remote-Budget, vermiedene Remote-Arbeit und erst danach gemessene Cross-Account-Parallelität.
+
+Der verworfene FIX-140..143-Code darf **nicht** wiederverwendet oder cherry-gepickt werden.
+
+### P6-MT.1 Canonical Owner / Ownership
+
+Genau ein Owner verändert:
+
+- `StateCore`;
+- Fork/Root/Recovery;
+- ProgramData-/Upgrade-Latch;
+- Reverse Indices;
+- Candidate Cache / Epochen;
+- per-Account Ownership;
+- Safety / Reservations;
+- Ledger / Winner / Submission Commit.
+
+Verboten:
+
+```text
+Arc<Mutex<StateCore>>
+Arc<RwLock<StateCore>>
+&mut StateCore in Workern
+Worker-seitige Safety-/Ledger-/State-Mutation
+unbounded spawn
+Thread pro Candidate
+Thread pro Jupiter-Quote
+```
+
+Per Account:
+
+```text
+IDLE
+→ EXECUTING(candidate_id)
+→ SIGNED
+→ SUBMITTED(signature,last_valid_block_height)
+→ RELEASED
+
+max 1 EXECUTING|SIGNED|SUBMITTED
++
+max 1 newest pending revision
+```
+
+Neue Revisionen coalescen auf genau die neueste Pending-Version.
+
+### P6-MT.2 Generationen / Readset / Recovery
+
+Der Owner führt eine monotone `state_epoch`; jeder relevante Record erhält `last_changed_epoch`.
+
+`prepare_candidate` liest über einen automatischen `ReadSetRecorder`:
+
+```text
+(pubkey, observed_epoch)
+```
+
+fehlende Keys als `ABSENT`.
+
+Candidate-Identität bindet mindestens:
+
+```text
+candidate_id
+account
+trigger_class/lane
+recovery_generation
+program_generation
+policy_generation
+config_generation
+candidate_revision
+t_rx_first / t_rx_latest
+trigger_slot
+evaluation_slot / time
+valid_until
+read_set
+prepared
+blockhash identity / validity, falls bereits gebunden
+```
+
+Result-Aktionen ausschließlich zentral:
+
+```text
+ACCEPT
+DROP_OLD_GENERATION
+DROP_FOREIGN_INFLIGHT
+RETRY_NEWEST_PENDING
+RECHECK_CURRENT
+DROP
+```
+
+Ein altes Resultat darf niemals einen neueren Inflight-Eintrag löschen.
+
+Recovery erhöht `recovery_generation` und invalidiert alle älteren Candidate-, Pending-, Ownership-, Route-, Fee-, Simulation-, Projection-, Prepared- und Intent-Arbeiten. Alte Resultate erzeugen keine Folgearbeit.
+
+### P6-MT.3 Eine Preparation-Semantik
+
+Es existiert exakt eine pure/read-only Semantik:
+
+```text
+prepare_candidate(...)
+```
+
+Sie umfasst:
+
+- Exact Health;
+- Receivership Eligibility;
+- Integration-Klassifikation;
+- Sizing-Inputs;
+- ATA-/Inventar-Prüfung;
+- lokale Fee-Inputs;
+- automatisches Readset;
+- lokale Profit-Obergrenze zunächst nur als Priorisierungssignal;
+- immutable PreparedCandidate.
+
+Heutige Baseline:
+
+```text
+Oracle/Bank-Sweep-Pfad:
+Health bis zu 3× pro Candidate-Revision
+
+andere Trigger:
+typischerweise weniger
+```
+
+Ziel:
+
+```text
+Health genau 1× pro Candidate-Revision
+und weitergereicht
+```
+
+Gate:
+
+```text
+serial prepare == parallel prepare
+100 % feldweise
+```
+
+### P6-MT.4 Owner-Diät / Owner-Inbox
+
+Owner-Duty-Cycle pro 1-s-Fenster messen:
+
+```text
+ingress_apply
+sweep
+admission
+commit
+sign
+evidence_enqueue
+other
+```
+
+Startziel p99 <= 60 %, MT0 darf es evidenzbasiert korrigieren.
+
+Vom Owner weg, sofern MT0 bestätigt:
+
+- JSON/Base58/File-I/O;
+- Mehrfach-Health;
+- Planning/Route;
+- Fee-RPC;
+- Simulation;
+- Remote-Retry-Schlaf.
+
+Evidence läuft über bounded compact records zu einem Writer. `evidence_overflow > 0` ist FAIL.
+
+FAST-/Remote-/Control-Resultate wecken den Owner ohne 1-/250-ms-Pollingverzögerung. Kein Busy-Spin.
+
+### P6-MT.5 Prioritäts-Lanes
+
+Zweistufig:
+
+**Trigger-Priorität vor Preparation**
+
+```text
+L0: Transition / Forced Rearm / fällige Premium- oder t_profitable-Grenze
+L1: materielle Revision bereits relevanter Candidates
+L2: periodisch / Error / Maintenance
+```
+
+**Prepared-Priorität nach Preparation**
+
+lokale Economics / konservative UB dürfen Remote-Reihenfolge weiter priorisieren.
+
+Innerhalb der Lanes:
+
+- L0: früheste Deadline, dann höchste konservative wirtschaftliche Priorität;
+- L1: ältestes `t_rx_first`;
+- L2: ältester `last_forwarded_slot` / FIX-135-Fairness.
+
+Startgewicht WDRR 8:3:1; erst nach MT0 festschreiben.
+
+Coalescing bewahrt `t_rx_first`, `t_rx_latest`, newest revision.
+
+Eine neuere canonical Revision darf promoten, **demoten oder canceln**. Keine bloße altersbedingte Herabstufung.
+
+### P6-MT.6 Freshness ist eigenes P1-Gate
+
+FIX-21-Freshness wird nicht still im Lane-Ticket geändert.
+
+Zu prüfen:
+
+```text
+heute:
+Opportunity-Alter ab Trigger/Detect
+
+Alternative:
+Freshness des neu evaluierten States
++
+Queue-Alter nur diagnostisch
+```
+
+Änderung nur nach eigenem `FRESHNESS-REVIEW PASS`.
+
+### P6-MT.7 Remote-Budget
+
+Startannahmen, vor Umsetzung aktuell verifizieren:
+
+```text
+Helius Free:
+general RPC = 10 RPS
+plus methodenspezifische niedrigere Caps
+
+Jupiter Free:
+API-Key = 1 RPS
+keyless  = 0.5 RPS
+```
+
+Concurrency pro Klasse:
+
+```text
+inflight_max
+=
+ceil(rate_budget × measured_latency_p95 × safety_factor)
++ kleine Reserve
+```
+
+Token-Bucket je Provider/Klasse mit Rate, Burst, Inflight-Semaphore, Priorität und Deadline.
+
+Recovery/Snapshot präemptiert Candidate-Budget.
+
+Ohne Token:
+
+```text
+prepared Candidate bleibt pending
+neuere Revision ersetzt ihn
+kein Reprepare
+kein Spin
+kein Rückwurf in Detection
+```
+
+HTTP 429 → typisiertes `RateLimited`; kein Worker schläft auf Retry. `remote_retry_sleep_ns = 0` ist Gate.
+
+### P6-MT.8 Remote-Arbeit vermeiden
+
+Eine lokale Profit-Obergrenze darf zunächst **nur priorisieren**.
+
+Hard-Drop erst nach:
+
+1. P1-C / Executable-Floor-Economics PASS;
+2. mathematischem/protokollseitigem Obergrenzenbeweis;
+3. einheitlichen Units;
+4. Property-/Boundary-/Replay-Tests;
+5. `dominance_violations = 0`.
+
+Bis dahin:
+
+```text
+niedrige UB
+→ niedrige Priorität
+NICHT
+→ Opportunity verwerfen
+```
+
+Lokales Fee-Modell ersetzt `getFeeForMessage` erst nach 100 % Parität über >=10.000 qualifizierte v0/v1-Messages mit/ohne Priority und Bundle-Bestandteile. Mismatch → RPC-Fallback + Gate-FAIL.
+
+Route-Cap-Cache ist nur Hint, nie Quote-Wahrheit:
+
+```text
+input mint
+output mint
+RouteFootprintClass
+```
+
+Der echte kompilierte TX beweist Fit.
+
+### P6-MT.9 Remote Runtime / Transport
+
+Eine gemeinsame async Runtime ist zulässig; eine gemeinsame unstrukturierte Queue nicht.
+
+Getrennte bounded Klassen mindestens:
+
+```text
+Recovery/Snapshot
+Jupiter
+Fee RPC solange nötig
+Simulation
+Integration Projection
+Oracle Projection
+Winner
+Reconcile
+Blockhash
+```
+
+Jede Klasse besitzt eigene Queue, Semaphore, Timeout-/429-Taxonomie, Request-/Generation-ID und Telemetrie. Recovery höchste Priorität.
+
+Kein blockierender Solana-`RpcClient` auf async Executor-Threads; final nonblocking RPC oder eigener async `RpcSender`.
+
+Pro Hostklasse ein persistenter HTTP-Client/Pool:
+
+- kein Clientbau pro Candidate;
+- DNS/TLS nicht bewusst im Hotpath;
+- Keepalive;
+- getrennte Connect-/Request-Timeouts;
+- `tcp_nodelay` verifiziert;
+- HTTP/2 als Capability-/Messvariante, HTTP/1.1-Fallback;
+- warm / idle 1s / 10s / 60s messen.
+
+Fehlerpfade `RateLimited|Timeout|BudgetDeferred|RemoteUnavailable` erzeugen keine automatische Zusatzsimulation, Technical Probe, Reprepare oder Retry-Spin.
+
+### P6-MT.10 Lokaler Fast Path / Snapshot
+
+Lokale kleine Schritte run-to-completion:
+
+```text
+OWNER admission
+→ FAST prepare/local plan/build/local fee/economics
+→ OWNER final current-state check/reservation/sign
+→ REMOTE simulation
+→ OWNER deterministic commit
+```
+
+Route-Pfad:
+
+```text
+FAST S1
+→ REMOTE Jupiter
+→ FAST S2 Build/Economics
+→ OWNER final/sign
+```
+
+Worker lesen nie live in mutable `StateCore`.
+
+Snapshot-Varianten **ohne Vorentscheidung**:
+
+1. versionierter persistenter State / Arc-Root;
+2. Arc<Record> + vollständiger Readset;
+3. owned Kopie des minimalen Readsets.
+
+Wahl nach `snapshot_build_ns`, `owner_apply_overhead_ns`, Bytes, Retention, Misses und Recovery-Parität.
+
+### P6-MT.11 SignedIntent / Ressourcen
+
+Nach finaler Owner-Prüfung genau ein immutable `SignedIntent`:
+
+```text
+candidate_id
+Generationen
+Readset-/Policy-Versionen
+message hash
+signierte Bytes
+Economics
+Exposure
+Reservationen
+Blockhash-Lifetime
+```
+
+Simulation und spätere Submission benutzen denselben Intent. Kein Rebuild, keine zweite Signatur.
+
+Owner reserviert vor Sign mindestens:
+
+- Liability-Inventar;
+- Fee-Payer-Lamports;
+- Rent;
+- Safety/Exposure.
+
+**Shadow erzwingt dieselbe virtuelle Arbitration wie LIVE.**
+
+Konkurrierende Candidates dürfen nicht beide als executable gezählt werden, wenn sie dieselbe exklusive Ressource benötigen.
+
+### P6-MT.12 Apple-M4 Runtime
+
+Keine feste Kernzahl.
+
+Startup-Evidence:
+
+```text
+hw.nperflevels
+hw.perflevel0.logicalcpu
+hw.perflevel1.logicalcpu
+hw.perflevelN.cpusperl2
+hw.perflevelN.l2cachesize
+hw.logicalcpu
+hw.cachelinesize
+active CPU count
+arm64/native
+macOS / Power / Thermal
+```
+
+Qualifizierende M4-Läufe nicht unter Rosetta.
+
+Startmodell:
+
+```text
+Owner            1
+Ingress WSS      bestehend, getrennt
+Remote async     1–2 Runtime-Threads
+FAST CPU         Start 2, nur nach Messung erhöhen
+Evidence Writer  1
+BULK Pool        nur bei gemessenem Bedarf
+```
+
+QoS:
+
+```text
+Owner/Ingress/FAST/Remote = USER_INITIATED
+Evidence                  = UTILITY
+USER_INTERACTIVE          = nur Messvariante
+```
+
+Keine behauptete harte P-/E-Core-Affinität auf macOS.
+
+FAST wächst nur, wenn Queue-Wartezeit p99 verletzt **und** FAST-Auslastung >70 %.
+
+GPU/Neural Engine/Metal/CoreML bleiben aus dem Online-Hotpath ohne profilierten homogenen Batch-Kernel.
+
+### P6-MT.13 Pflichttelemetrie
+
+Mindestens:
+
+```text
+owner_busy_ns{category}
+owner_duty_cycle
+owner_wakeup_ns
+lane_wait_ns{L0,L1,L2}
+lane_promotions/demotions/cancellations
+staterace_by_queue_age
+prepare_calls / prepare_health_calls / prepare_ns
+snapshot_build_ns / snapshot_bytes / snapshot_miss
+remote_requests{provider,class}
+remote_429{provider,class}
+remote_retry_sleep_ns
+budget_denied{class,lane}
+budget_denied_ub_sum
+remote_inflight{class}
+remote_queue_depth{class}
+route_cap_cache_hits/misses
+jupiter_requests_per_routed_revision
+local_fee_checks/mismatches
+dominance_samples/violations
+reservation_conflicts
+intents_live
+evidence_overflow / evidence_queue_depth
+thermal_state / active_cpu / fast_utilization
+```
+
+Histogramme: count/p50/p95/p99/max.
+
+### P6-MT.14 Pflicht-Tests
+
+Vor Gesamt-Shadow mindestens:
+
+1. verschiedene Accounts laufen parallel;
+2. ein Account nie doppelt in Execution;
+3. newest pending gewinnt;
+4. ältere pending revisions erzeugen keine volle Remote-Arbeit;
+5. altes Resultat löscht keine neue Ownership;
+6. Recovery invalidiert alte lokale/remote Jobs;
+7. alte Projection-Generation kann nicht committen;
+8. geändertes Readset kann nicht committen;
+9. ABSENT wird bei Anlage invalidiert;
+10. Queue-full verliert keinen Candidate;
+11. Backpressure erzeugt keinen Retry-/Reprepare-Spin;
+12. serial prepare == parallel prepare;
+13. Completion Order ändert Business-Commit nicht;
+14. Shared HTTP Client ändert Route-Mapping nicht;
+15. Worker/Remote-Fehler fail closed;
+16. Shadow kann nicht submitten;
+17. derselbe SignedIntent wird simuliert;
+18. FIX-134/135/137 Regressionen PASS;
+19. Recovery/StreamReady/Gap PASS;
+20. Workspace + Clippy `-D warnings` PASS;
+21. L0 überholt großen L2-Backlog;
+22. L2 bleibt starvation-frei;
+23. Coalescing behält `t_rx_first`;
+24. Resultat weckt Owner ohne Ingress;
+25. 429 erzeugt keinen Retry-Schlaf;
+26. Budgetmangel erzeugt keinen Spin;
+27. Inflight-Grenzen nie überschritten;
+28. UB verletzt bewiesene Obergrenze nie;
+29. Schwellenkreuzung kann hochpriorisieren;
+30. lokale Fee-Parität PASS;
+31. Route-Hint wird durch echten Build validiert;
+32. ReadSetRecorder vollständig;
+33. `valid_until` invalidiert korrekt;
+34. SUBMITTED verhindert Doppel-Submission;
+35. exklusive Ressourcen nur einmal reserviert;
+36. Evidence Writer blockiert Owner nie;
+37. M4-Qualifikation nativ arm64;
+38. Snapshot konsistent unter Owner-Writes;
+39. neuere Revision darf Lane demoten/canceln;
+40. Policy/Config-Generation invalidiert alten Candidate;
+41. Shadow-Reservation verhindert Doppelzählung unmöglicher Parallelität.
+
+### P6-MT.15 PASS-Gate
+
+Startwerte; MT0 darf nur evidenzbasiert präzisieren:
+
+```text
+ingress_overflow                 = 0
+sink_overflow                    = 0
+evidence_overflow                = 0
+remote_retry_sleep_ns            = 0
+stale commits                    = 0
+lost candidates                  = 0
+serial/parallel prepare parity   = 100 %
+LIVE                             = gesperrt
+
+owner_duty_cycle p99             <= 60 %
+owner_wakeup p99                 <= 1 ms
+L0 T_rx_first → T_admit p99      <= 50 ms
+L0 max wait                      <= 500 ms
+L0 queue-age drops               = 0
+NO_SWAP T_state → T_sign p99     <= 2 ms
+pending over 10 min              drainfähig
+```
+
+Aktivierte Dominance-/Fee-Gates verlangen jeweils 0 Violations/Mismatches.
+
+### P6-MT.16 Umsetzungstickets
+
+Verbindliche Reihenfolge:
+
+```text
+MT0  Instrumentierung / H1–H6
+MT1  Remote-Client-Hygiene
+P1-C Audit Step 4: Executable-Floor-Economics
+MT2  Owner-Diät + eine prepare_candidate
+MT3  Prioritäts-Lanes + t_rx_first
+     Freshness NICHT ohne eigenes Review
+MT4  Remote-Arbeit vermeiden; UB nur so hart wie bewiesen
+MT5  Generationen + Readset + Ownership-Lifecycle
+MT6  Snapshot-Modell messen und wählen
+MT7  FAST-Pool / Cross-Account-Admission
+MT8  async Remote-Runtime / getrennte bounded Klassen
+MT9  SignedIntent + virtuelle/echte Reservations + Commit
+MT10 M4-Feintuning, je eine Messvariante
+MT11 Mainnet Shadow 3 min
+MT12 Mainnet Shadow 10 min
+MT13 Freeze
+```
+
+MT0 entscheidet mindestens:
+
+- 429-/Retry-Anteil am Tail;
+- Latenz pro Remote-Klasse;
+- Queue-Wartezeit pro Trigger-Klasse;
+- Owner-Duty-Cycle;
+- Health-Mehrfacharbeit pro Triggerpfad;
+- vermeidbare Remote-Arbeit;
+- Fee-RPC-Paritätspotential.
+
+Nach MT4: Wenn die Gates schon mit weniger Parallelität erfüllt sind, wird MT6–MT8 auf das gemessen Nötige reduziert. Parallelität ist Mittel, kein Liefergegenstand.
+
+### P6-MT.17 Implementierungs-Ownership — Fable-Regel
+
+P6-MT ist groß genug, dass die **nichttrivialen Runtime-Tickets von Fable implementiert werden**.
+
+Fable schreibt ein Ticket vollständig, sobald es mindestens einen dieser Bereiche berührt:
+
+- Canonical State / Recovery;
+- async Remote Runtime / eigener RpcSender;
+- Budget Scheduler;
+- Lanes / Fairness / Coalescing;
+- Readset / Epochen / Ownership;
+- Snapshot-Repräsentation;
+- Cross-Account-Concurrency;
+- SignedIntent / Reservation / Safety;
+- Economics / UB / Fee-Semantik;
+- mehrere Produktionsdateien mit gemeinsamem Verhalten;
+- grob >50 nichttriviale Runtime-Codezeilen.
+
+Wir geben Fable pro Ticket:
+
+```text
+aktuellen main SHA
+relevante Source-Dateien
+exaktes Ticketziel
+Invarianten
+verbotene Änderungen
+Pflicht-Tests
+Pflicht-Telemetrie
+PASS/STOP-Gate
+```
+
+Fable liefert:
+
+```text
+vollständige Production-Implementierung
+keine Demo/Minimalversion
+betroffene Dateien
+Tests
+Rollback-/Migrationshinweise
+keine Branch-Annahme
+```
+
+Wir übernehmen Review, Compiler/Clippy, Regressionen, Shadow-Evidence und Integration.
+
+**Kleine Eigenänderungen** sind nur zulässig, wenn alle Bedingungen erfüllt sind:
+
+```text
+grob <= 50 LOC
+klar mechanisch/begrenzt
+keine State-/Recovery-/Economics-/Concurrency-/Async-/Safety-Semantik
+keine neue Architektur
+Tests eindeutig
+```
+
+Bei Zweifel: Fable implementiert.
+
+### P6-MT.18 Git-Disziplin
+
+Project 0 arbeitet auf `main`.
+
+```text
+keine Project-0 Featurebranches
+keine Rescue-/Hardening-/Experimentbranches
+keine ad-hoc Patch-Kaskaden
+```
+
+Die globale Repo-main-SHA darf durch BSC weiterlaufen. Project-0-Baselines sind daher **path-/content-spezifisch**.
+
+Vor jedem Project-0-Write:
+
+1. aktuellen `origin/main`-SHA lesen;
+2. Project-0-Zieldateien gegen erwartete Baseline prüfen;
+3. keine BSC-Datei verändern;
+4. genau ein freigegebenes Ticket integrieren;
+5. Ref-Update nur gegen erwartete Main-SHA;
+6. bei Abweichung STOP und Diff;
+7. niemals Force;
+8. Ledger aktualisieren.
+
+### P6-MT.19 Verhältnis zu Audit / anderen Phasen
+
+P6-MT ersetzt weder P4A noch P5 noch P7/P8.
+
+```text
+P1-C Executable Floor
+→ Voraussetzung für harte ökonomische Remote-Unterdrückung
+
+P4A
+→ normative Profit-Wahrheit
+
+P5
+→ normative Planner-/Route-/TX-Semantik
+
+P6-MT
+→ Runtime-/Scheduling-/Remote-Budget-Hardening
+
+P7
+→ Competition-/Provider-Economics
+
+P8
+→ einziges value-bearing LIVE-Gate
+```
+
+Winner Parser, Drift, Historical Prestate, Replay und PnL dürfen zwischen MT-Tickets weiterlaufen, sofern sie nicht von Runtime-Änderungen abhängen.
+
+Kompetitive Mainnet-Shadow-Evidence erst nach MT12.
+
+### P6-MT.20 Stop Conditions / Gate
+
+Sofort STOP bei:
+
+- mutable Canonical State im Worker;
+- mehrdeutiger Ownership;
+- unklarer Recovery-Generation;
+- serial/parallel-Divergenz;
+- unvollständigem Snapshot ohne fail-closed;
+- internem Remote-Retry-Schlaf;
+- Remote-Call am Budget vorbei;
+- Retry-Spin;
+- unbewiesenem Dominance-Hardfilter;
+- Fee-Mismatch;
+- systematisch blockiertem L0;
+- Owner >90 % bei leerem Downstream;
+- Shadow-Doppelzählung exklusiver Ressourcen;
+- BSC-Dateiänderung;
+- erreichbarem LIVE.
+
+P6-MT PASS erst nach:
+
+```text
+MT0–MT10 Ticket-Gates PASS
+MT11 3-min Shadow PASS
+MT12 10-min Stability PASS
+alle Pflicht-Tests PASS
+keine unbounded Queue / Spawn
+Owner wartet nie auf Candidate-Remote-I/O
+persistente Remote-Clients
+keine Retry-Sleeps
+Priorität + Fairness PASS
+virtuelle Shadow-Reservation PASS
+M4-Konfiguration gemessen gewählt
+LIVE gesperrt
+```
+
 ---
 
 # PHASE P7 — COMPETITION + PROVIDER ECONOMICS
@@ -3186,17 +3955,22 @@ Raw Shred Delivery / eigener validatornaher Deshred-Pfad bleibt noch eine Stufe 
 
 ## CPU
 
-Wenn `LOSS_REASON = CPU/BUILD`:
+Die grundlegende Runtime-/Parallelarchitektur ist **kein K-Thema mehr**; sie muss bereits über **P6-MT PASS** qualifiziert sein.
+
+Wenn danach `LOSS_REASON = CPU/BUILD` verbleibt, ist K ausschließlich Feintuning desselben Production-Cores:
 
 ```text
 Profiling
 → Data Layout
 → Allocation Tuning
 → Cache Locality
-→ Lock Reduction
-→ CPU Affinity
-→ Sharding / Parallelism
+→ nachgewiesene ARM64/SIMD-Hebel
+→ PGO
+→ simd-json / Decode-Tuning bei gemessenem Bedarf
+→ weitere ISA-/Scheduler-Feinarbeit
 ```
+
+Kein zweiter Parallel-Core und keine nachträgliche Runtime-Neuentwicklung in K.
 
 ## Routing
 
@@ -3684,6 +4458,7 @@ S1-LT PASS
 → P5
 → T
 → P6-LT
+→ P6-MT PASS
 → S4 PASS vor value-bearing LIVE
 → P8-LT
 → erster realisierter Netto-Profit
@@ -3713,4 +4488,4 @@ H0, P7 und P4B laufen als Evidence/Optimization weiter, dürfen aber den First-E
 
 **Keine zweite Entwicklung. Kein späterer Race-Rewrite. Kein späterer Rust-Rewrite.  
 Ein finaler Core; Long-Tail/Premium wird zuerst wirtschaftlich aktiviert, Race wird danach auf demselben Core freigeschaltet.  
-Diese v4.4 ist nach Fable-Review promoted und eingefroren.**
+Diese v4.5 ist mit P6-MT-v2-Review promoted und eingefroren.**
