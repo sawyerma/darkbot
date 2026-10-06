@@ -3132,3 +3132,57 @@ T0 -> T_buy < 1 ms                NOT YET PROVEN
 
 The next Unit-5 slice may now introduce the production transport-qualification generation / `QualifiedTransport` construction path **only for this accepted TLS transport scope**. It must remain fail-closed on implementation, endpoint/profile, adapter/capability generation and handoff-boundary mismatches. It must not promote any provider semantic property or authorize LIVE. Provider semantics, inclusion, canonical acquisition and the original-producer `T0 -> T_buy` proof remain separate required gates.
 
+## 2026-10-06 — Q5B fail-closed production TLS qualification binding
+
+Q5B promotes the accepted Q5A TLS evidence into the production runner without promoting any provider semantic property.
+
+### Implementation and acceptance
+
+```text
+final tested commit                  bc51d96352f906050239455aad254b957112e8e6
+accepted Q5A evidence                bsc/native/evidence/q5a/q5a-both-20261005T203919Z.json
+accepted Q5A SHA256                  e2c537765f539f7551d89613c337d2079820731b77a531b7306a14fe4c845849
+transport implementation             darkbot-runner/tls-v1 rustls-0.23.45 ring http/1.1
+Q5A qualification generation        1
+target                               macos / aarch64
+Q5B final chained acceptance         Q5B_FINAL_ALL_GATES_PASS
+```
+
+The final target-system acceptance command completed all of:
+
+```text
+cargo fmt --all -- --check
+cargo build --workspace --locked --offline
+cargo build --workspace --release --locked --offline
+cargo test --workspace --locked --offline
+cargo test --workspace --release --locked --offline
+cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+```
+
+### Production trust boundary
+
+The production qualification path is fail-closed and sealed:
+
+- `tls::qualification` is the only production module that can create the opaque accepted-evidence token.
+- `transport::bind_accepted_tls` consumes that token and creates the opaque `TransportQualification` plus concrete `QualifiedTransport`.
+- Callers cannot manufacture a production qualification from a string, generation number or arbitrary `dyn Transport`.
+- The binding checks the frozen capability adapter/kind and `TlsUserspaceWriteFlushReturned` handoff boundary plus the accepted endpoint/profile: implementation id, host, port, exact Q5A policy, target OS/arch, nonzero connection generation, accepted peer, TLS version, cipher suite, HTTP/1.1 and ALPN.
+- The qualification is bound to the current capability-table generation. The existing release dispatch also requires the runner's current `TransportQualifications` entry to equal the transport binding, so qualification-generation rotation retires older transports.
+
+The five Q5B qualification tests cover the pinned evidence identity/generation, both accepted provider profiles, rejection of unqualified adapter kinds, implementation/endpoint/policy/target mismatches, and peer/generation/TLS/cipher/ALPN mismatches.
+
+### Scope remains deliberately narrow
+
+```text
+Q5B transport binding                IMPLEMENTED_TESTED / FROZEN
+real TLS transport qualification     PASS
+production QualifiedTransport path   PRESENT, fail-closed
+provider semantic qualification      OPEN
+LIVE                                 BLOCKED
+T0 -> T_buy < 1 ms                   NOT YET PROVEN
+```
+
+Q5B does **not** qualify `positionFirst`, `noMerge`, ordering, atomicity, same-block placement, pre-submission, N/N+1 placement, extraction/rebroadcast/downstream exposure, builder inclusion, canonical acquisition or the product-level `T0 -> T_buy` requirement. The frozen capability records remain unchanged, so those missing semantic qualifications still prevent release eligibility.
+
+The next C0 task is Unit 6 typed startup config/secrets/authorization plus the remaining minimal recorder/replay foundation. Q5B does not authorize a funded Mainnet action.
+
