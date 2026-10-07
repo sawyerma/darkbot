@@ -3,11 +3,11 @@
   "date": "2026-10-07",
   "base_darkbot_commit": "c804bf74bb6a868a8610b79a100e3729038ec82d",
   "candidate": {
-    "name": "DarkBot_C1_4_rev6_against_main_c804bf7",
-    "integration": "NOT_APPLIED",
-    "exact_apply_verification": "NOT_RUN",
+    "name": "main_cdaf402_C1_4_final",
+    "integration": "APPLIED_TESTED_ON_MAIN",
+    "exact_apply_verification": "PASS",
     "project_0_untouched": true,
-    "revision": "rev6",
+    "revision": "rev6_plus_verified_shutdown_eof_test_fix",
     "rev1_to_rev2": [
       "false-negative audit: earliest valid peer T_ingress per hash; ObservedOnPeerLane only if earliest T_ingress <= TXPOOL_ACCEPTED timestamp",
       "audit compares only records inside the C1.4 contract (clock_id CLOCK_MONOTONIC, sources, boundary fields); others are invalid evidence",
@@ -58,14 +58,15 @@
       "go_build_cmd_geth": "PASS",
       "c13_lifecycle_interop": "not reported",
       "c14_ingress_interop": "not reported"
-    }
+    },
+    "tested_darkbot_commit": "cdaf402454e6315643b169879673ba200e3a7453"
   },
   "pinned_geth": {
     "release": "v1.7.8",
     "commit": "cdb7548b5baacfdae92f9f63437d6456411665f3",
     "tree": "d8d88097521d43cef66047fdd93dd6825a2a7843",
     "go_version": "1.25.0",
-    "pin_verification": "NOT_RUN",
+    "pin_verification": "PASS",
     "source_available_to_author": false,
     "anchor_provenance": {
       "transaction_hooks_handler_eth": "anchors already verified against the pin by the C1.1-C1.3 overlay tool",
@@ -155,7 +156,7 @@
       "launch_v6_native_creator_buy_pending",
       "launch_v6_native_split_tax_pending"
     ],
-    "false_negative_suite": "NOT_RUN"
+    "false_negative_suite": "PASS"
   },
   "pool": {
     "qualified_peer_lane_bound": 256,
@@ -179,19 +180,19 @@
     "exhaustion": "explicit coverage gap: counters, bounded structured gap events (pool_exhausted, peer_limit, shutdown, bind_failed, close_failed, lane_lost)"
   },
   "gates": {
-    "note": "rev6 gates not run by the author (no toolchain); results above were reported by the local run on rev5",
-    "cargo_fmt_check": "NOT_RUN on rev6 (rev6 contains the rustfmt output of the local run)",
-    "cargo_test_debug": "NOT_RUN on rev6",
-    "cargo_test_release": "NOT_RUN on rev6",
-    "cargo_clippy_deny_warnings": "NOT_RUN on rev6",
-    "darkbot_core_c14_prefilter_scope_test": "NOT_RUN on rev6 (file unchanged since rev2)",
-    "gofmt": "NOT_RUN on rev6",
-    "go_fastlane_race": "NOT_RUN on rev6",
-    "go_eth_protocols_eth_and_eth": "NOT_RUN on rev6",
-    "go_core": "NOT_RUN on rev6",
-    "geth_build": "NOT_RUN on rev6",
-    "c13_lifecycle_interop": "NOT_RUN",
-    "c14_ingress_interop": "NOT_RUN"
+    "note": "Final local acceptance run on DarkBot commit cdaf402454e6315643b169879673ba200e3a7453 with pinned bsc-geth cdb7548b5baacfdae92f9f63437d6456411665f3",
+    "cargo_fmt_check": "PASS",
+    "cargo_test_debug": "PASS (84 passed, 0 failed, 5 ignored)",
+    "cargo_test_release": "PASS (84 passed, 0 failed, 5 ignored)",
+    "cargo_clippy_deny_warnings": "PASS",
+    "darkbot_core_c14_prefilter_scope_test": "PASS (1 passed, 0 failed)",
+    "gofmt": "PASS",
+    "go_fastlane_race": "PASS",
+    "go_eth_protocols_eth_and_eth": "PASS",
+    "go_core": "PASS",
+    "geth_build": "PASS",
+    "c13_lifecycle_interop": "PASS",
+    "c14_ingress_interop": "PASS"
   },
   "author_checks_without_toolchains": [
     "patch reproduces every delivered file byte for byte on a copy of c804bf7; git apply --check OK",
@@ -201,11 +202,11 @@
     "Wire V2 layout constants unchanged",
     "scope canonical bytes and CRC32C recomputed independently in Python"
   ],
-  "current_verdict": "C1.4_IMPLEMENTED_TESTING_PENDING",
-  "c1_4_pass": false,
+  "current_verdict": "C1.4_PASS",
+  "c1_4_pass": true,
   "non_claims": {
     "geth_ingress_switched_to_v2": true,
-    "geth_ingress_switched_to_v2_note": "implemented in this candidate; not yet applied or gated",
+    "geth_ingress_switched_to_v2_note": "implemented, applied and locally gated on main; does not prove Mainnet ingress coverage or T0_to_T_buy_lt_1ms",
     "t_packet_decoded_directly_at_protocol_decode": "RESOLVED by independent review against the pin (directly after packet.Items())",
     "end_to_end_live_p2p_session_test": false,
     "c1_5_zero_copy_hot0": "NOT DONE",
@@ -261,5 +262,14 @@
   "formatting": {
     "gofmt": "not executable here; fastlane.go fixed to the reported gofmt output; all seven overlay Go files checked for alignment groups, whitespace and indentation",
     "rustfmt": "not executable here; ingress.rs carries the two changes cargo fmt made locally on rev5; no other Rust file changed"
+  },
+  "final_acceptance": {
+    "tested_darkbot_commit": "cdaf402454e6315643b169879673ba200e3a7453",
+    "pinned_geth_commit": "cdb7548b5baacfdae92f9f63437d6456411665f3",
+    "c13_go_rust_lifecycle_interop": "PASS",
+    "c14_go_rust_ingress_interop": "PASS",
+    "classification": "C1.4_PASS",
+    "next_gate": "C1.4a mandatory early architecture feasibility measurement",
+    "final_darkbot_commit": "cdaf402454e6315643b169879673ba200e3a7453"
   }
 }
