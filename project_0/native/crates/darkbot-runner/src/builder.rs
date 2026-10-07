@@ -142,7 +142,107 @@ pub mod p0 {
         /// Vom Router bestimmte native Tokenmengen. Marktwert wird erst im Builder aus dem
         /// executable Output relativ zum protocol-exakten Liability-Wert normalisiert. [FIX-64]
         pub amount_in: u64,
-        pub amount_out: u64,
+        /// [P1-C] Router quote (expected output, native units). Diagnostics / route comparison
+        /// only. Never a realizable value and never a feasibility proof.
+        pub quoted_out: u64,
+        /// [P1-C] Minimum output the swap instruction enforces on-chain (Jupiter
+        /// `otherAmountThreshold` for ExactIn). `None` = unknown -> fail closed.
+        pub minimum_executable_out: Option<u64>,
+    }
+
+    /// [P1-C] Classification of a fitted ZERO_PREFUND route by its executable floor.
+    /// The quote never proves feasibility and is never used as realizable value.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) enum ZeroPrefundFloor {
+        /// Floor known and >= repay: executable, realizable value at the floor.
+        Executable(u64),
+        /// Floor not provided: economics must be `Evaluation::Unknown` (fail closed).
+        Unknown,
+        /// Floor known and < repay: the swap cannot be guaranteed to fund the repay.
+        BelowRepay { floor: u64, repay: u64 },
+        /// Floor > quote: provider/schema invalid.
+        Invalid { floor: u64, quoted_out: u64 },
+    }
+
+    pub(crate) fn classify_zero_prefund_floor(route: &Route, repay_amount: u64) -> ZeroPrefundFloor {
+        match route.minimum_executable_out {
+            None => ZeroPrefundFloor::Unknown,
+            Some(floor) if floor > route.quoted_out => {
+                ZeroPrefundFloor::Invalid { floor, quoted_out: route.quoted_out }
+            }
+            Some(floor) if floor < repay_amount => ZeroPrefundFloor::BelowRepay { floor, repay: repay_amount },
+            Some(floor) => ZeroPrefundFloor::Executable(floor),
+        }
+    }
+
+    /// Reason string for a rejected classification; `None` for Executable/Unknown.
+    pub(crate) fn zero_prefund_rejection(route: &Route, repay_amount: u64) -> Option<String> {
+        match classify_zero_prefund_floor(route, repay_amount) {
+            ZeroPrefundFloor::Executable(_) | ZeroPrefundFloor::Unknown => None,
+            ZeroPrefundFloor::BelowRepay { floor, repay } => Some(format!(
+                "ROUTE_FLOOR_BELOW_REPAY: floor={floor} repay={repay} quoted_out={}",
+                route.quoted_out
+            )),
+            ZeroPrefundFloor::Invalid { floor, quoted_out } => {
+                Some(format!("ROUTE_MIN_OUT_INVALID: floor={floor} > quoted_out={quoted_out}"))
+            }
+        }
+    }
+
+    /// Economics input for one plan (single construction used by every funding class).
+    pub(crate) fn candidate_input(
+        sz: &Sizing,
+        funding: FundingClass,
+        realizable_value_usd_micro: Option<u64>,
+        capital_usd_micro: u64,
+        jito_tip_usd_micro: u64,
+        path: Path,
+    ) -> CandidateInput {
+        CandidateInput {
+            gross_seized_realizable_usd_micro: realizable_value_usd_micro,
+            repay_usd_micro: sz.repay_value,
+            protocol_fees_usd_micro: sz.protocol_fees,
+            flat_sol_fee_usd_micro: sz.flat_sol_fee,
+            swap_fees_and_impact_usd_micro: 0,
+            transaction_fee_usd_micro: None,
+            jito_tip_usd_micro,
+            rent_and_token_usd_micro: Some(sz.rent_and_token),
+            required_capital_usd_micro: capital_usd_micro,
+            path,
+            funding,
+        }
+    }
+
+    /// [P1-C] The production mapping from a fitted ZERO_PREFUND route to its economics input:
+    /// known floor >= repay -> realizable value at the floor; unknown floor -> `None`, which
+    /// `economics::evaluate` turns into `Evaluation::Unknown`; known floor < repay or invalid
+    /// floor -> `Err` (no plan). The quote is never a substitute.
+    pub(crate) fn zero_prefund_input(
+        sz: &Sizing,
+        route: &Route,
+        capital_usd_micro: u64,
+        jito_tip_usd_micro: u64,
+        path: Path,
+    ) -> Result<CandidateInput, String> {
+        if let Some(reason) = zero_prefund_rejection(route, sz.repay_amount) {
+            return Err(reason);
+        }
+        let realizable = match classify_zero_prefund_floor(route, sz.repay_amount) {
+            ZeroPrefundFloor::Executable(floor) => Some(realizable_value_usd_micro(sz, floor)?),
+            _ => None,
+        };
+        Ok(candidate_input(sz, FundingClass::ZeroPrefundSameTx, realizable, capital_usd_micro, jito_tip_usd_micro, path))
+    }
+
+    /// Economic value of `liability_out` native units, normalised by the protocol-exact repay
+    /// value/amount ratio. [P1-C] Callers pass the executable floor, never the quote.
+    pub(crate) fn realizable_value_usd_micro(sz: &Sizing, liability_out: u64) -> Result<u64, String> {
+        if sz.repay_amount == 0 { return Err("repay_amount=0".into()); }
+        let v = (liability_out as u128)
+            .checked_mul(sz.repay_value as u128)
+            .ok_or("realizable value overflow")?
+            / sz.repay_amount as u128;
+        u64::try_from(v).map_err(|_| "realizable value > u64".into())
     }
 
     /// Canonical liquidator ATA already proven present in reconciled state.
@@ -661,29 +761,8 @@ pub mod p0 {
             Ok((ixs, steps))
         }
 
-        fn realizable_value(&self, sz: &Sizing, liability_out: u64) -> Result<u64, String> {
-            if sz.repay_amount == 0 { return Err("repay_amount=0".into()); }
-            let v = (liability_out as u128)
-                .checked_mul(sz.repay_value as u128)
-                .ok_or("realizable value overflow")?
-                / sz.repay_amount as u128;
-            u64::try_from(v).map_err(|_| "realizable value > u64".into())
-        }
-
         fn input(&self, sz: &Sizing, funding: FundingClass, realizable_value_usd_micro: Option<u64>, capital_usd_micro: u64) -> CandidateInput {
-            CandidateInput {
-                gross_seized_realizable_usd_micro: realizable_value_usd_micro,
-                repay_usd_micro: sz.repay_value,
-                protocol_fees_usd_micro: sz.protocol_fees,
-                flat_sol_fee_usd_micro: sz.flat_sol_fee,
-                swap_fees_and_impact_usd_micro: 0,
-                transaction_fee_usd_micro: None,
-                jito_tip_usd_micro: self.jito_tip_usd_micro,
-                rent_and_token_usd_micro: Some(sz.rent_and_token),
-                required_capital_usd_micro: capital_usd_micro,
-                path: self.path,
-                funding,
-            }
+            candidate_input(sz, funding, realizable_value_usd_micro, capital_usd_micro, self.jito_tip_usd_micro, self.path)
         }
     }
 
@@ -837,9 +916,14 @@ pub mod p0 {
                             let route = self.routes.quote_exact_in_with_budget(
                                 &asset_mint, &liab_mint, route_input_amount, &prewarmed_atas, cap)?;
                             if let Some(ref route) = route {
-                                if route.amount_in != route_input_amount || route.amount_out < sz.repay_amount {
-                                    return Err(format!("quote amounts invalid: in={} expected={} out={} repay={}",
-                                        route.amount_in, route_input_amount, route.amount_out, sz.repay_amount));
+                                if route.amount_in != route_input_amount {
+                                    return Err(format!("quote amounts invalid: in={} expected={} quoted_out={} repay={}",
+                                        route.amount_in, route_input_amount, route.quoted_out, sz.repay_amount));
+                                }
+                                // [P1-C] Known floor below repay or invalid floor: not executable.
+                                // An unknown floor passes and becomes Evaluation::Unknown downstream.
+                                if let Some(reason) = zero_prefund_rejection(route, sz.repay_amount) {
+                                    return Err(reason);
                                 }
                             }
                             Ok(route)
@@ -868,24 +952,20 @@ pub mod p0 {
                         let mut zp_ctx = base_ctx.clone();
                         zp_ctx.route_available = true;
                         if funding::is_feasible(FundingClass::ZeroPrefundSameTx, &zp_ctx) {
-                            if mark.amount_out < sz.repay_amount {
-                                route_errors.push(format!(
-                                    "exact-in {}→{} insufficient output {} < repay {}",
-                                    asset_mint, liab_mint, mark.amount_out, sz.repay_amount
-                                ));
-                            } else {
-                                let capital = funding::capital_required(FundingClass::ZeroPrefundSameTx, &zp_ctx);
-                                let realizable = Some(self.realizable_value(&sz, mark.amount_out)?);
+                            let capital = funding::capital_required(FundingClass::ZeroPrefundSameTx, &zp_ctx);
+                            // [P1-C] One production mapping: floor known -> realizable at the floor,
+                            // floor unknown -> Evaluation::Unknown, floor < repay / invalid -> no plan.
+                            match zero_prefund_input(&sz, &mark, capital, self.jito_tip_usd_micro, self.path) {
+                                Err(e) => route_errors.push(format!(
+                                    "exact-in {}→{}: {}",
+                                    asset_mint, liab_mint, e
+                                )),
+                                Ok(zp_input) => {
                                 out.push(ReceivershipPlan {
                                     steps: steps.clone(),
                                     instructions: ixs.clone(),
                                     route: RouteKind::FreePublicAllowed,
-                                    input: self.input(
-                                        &sz,
-                                        FundingClass::ZeroPrefundSameTx,
-                                        realizable,
-                                        capital,
-                                    ),
+                                    input: zp_input,
                                     premium_bps: sz.premium_bps,
                                     exposure: capital,
                                     tip: self.jito_tip_lamports,
@@ -899,12 +979,7 @@ pub mod p0 {
                                     steps,
                                     instructions: ixs,
                                     route: RouteKind::FreePublicAllowed,
-                                    input: self.input(
-                                        &sz,
-                                        FundingClass::ZeroPrefundSameTx,
-                                        realizable,
-                                        capital,
-                                    ),
+                                    input: zp_input,
                                     premium_bps: sz.premium_bps,
                                     exposure: capital,
                                     tip: self.jito_tip_lamports,
@@ -914,6 +989,7 @@ pub mod p0 {
                                     lookup_tables: crate::lookup_tables::merge(&protocol_luts, &mark.lookup_tables),
                                     prerequisite_txs: vec![],
                                 });
+                                }
                             }
                         }
                     }
@@ -942,6 +1018,113 @@ pub mod p0 {
     mod fix100_tests {
         use super::*;
 
+        fn floor_route(quoted_out: u64, floor: Option<u64>) -> Route {
+            Route { amount_in: 1_000, quoted_out, minimum_executable_out: floor, ..Route::default() }
+        }
+
+        fn sizing(repay_amount: u64, repay_value: u64) -> Sizing {
+            Sizing {
+                asset_bank: Pubkey::new_unique(),
+                liab_bank: Pubkey::new_unique(),
+                withdraw_amount: 1_000,
+                repay_amount,
+                repay_all: false,
+                seized_equity_value: 0,
+                repay_value,
+                liability_needed_value: repay_value,
+                liability_inventory_value: 0,
+                funding_bank: None,
+                funding_available_value: 0,
+                protocol_fees: 0,
+                flat_sol_fee: 150_000,
+                rent_and_token: 0,
+                premium_bps: 0,
+                slippage_bps: 50,
+            }
+        }
+
+        #[test]
+        fn p1c_zero_prefund_feasibility_uses_floor_not_quote() {
+            use ZeroPrefundFloor::*;
+            // quote >= repay, floor < repay -> NOT executable
+            assert_eq!(classify_zero_prefund_floor(&floor_route(1_000, Some(900)), 950), BelowRepay { floor: 900, repay: 950 });
+            assert!(zero_prefund_rejection(&floor_route(1_000, Some(900)), 950).is_some());
+            // floor == repay / floor > repay / quote == floor -> executable at the floor
+            assert_eq!(classify_zero_prefund_floor(&floor_route(1_000, Some(950)), 950), Executable(950));
+            assert_eq!(classify_zero_prefund_floor(&floor_route(1_000, Some(990)), 950), Executable(990));
+            assert_eq!(classify_zero_prefund_floor(&floor_route(990, Some(990)), 950), Executable(990));
+            // missing floor -> Unknown (not rejected, not the quote)
+            assert_eq!(classify_zero_prefund_floor(&floor_route(1_000, None), 1), Unknown);
+            assert!(zero_prefund_rejection(&floor_route(1_000, None), 1).is_none());
+            // floor > quote -> provider/schema invalid -> rejected
+            assert_eq!(classify_zero_prefund_floor(&floor_route(1_000, Some(1_001)), 1), Invalid { floor: 1_001, quoted_out: 1_000 });
+            assert!(zero_prefund_rejection(&floor_route(1_000, Some(1_001)), 1).is_some());
+        }
+
+        #[test]
+        fn p1c_quote_profitable_floor_unprofitable_is_not_actionable() {
+            use darkbot_project0::economics::{actionable, evaluate, rpc_message_failure_costs, Evaluation};
+            let sz = sizing(1_000, 1_000_000); // 1_000 native units repay = 1.00 USD
+            let quote_value = realizable_value_usd_micro(&sz, 1_200).unwrap();
+            let floor_value = realizable_value_usd_micro(&sz, 1_050).unwrap();
+            assert_eq!((quote_value, floor_value), (1_200_000, 1_050_000));
+            let input = |gross: u64| CandidateInput {
+                gross_seized_realizable_usd_micro: Some(gross),
+                repay_usd_micro: sz.repay_value,
+                protocol_fees_usd_micro: sz.protocol_fees,
+                flat_sol_fee_usd_micro: sz.flat_sol_fee,
+                swap_fees_and_impact_usd_micro: 0,
+                transaction_fee_usd_micro: Some(1_000),
+                jito_tip_usd_micro: 0,
+                rent_and_token_usd_micro: Some(0),
+                required_capital_usd_micro: 0,
+                path: Path::Rpc,
+                funding: FundingClass::ZeroPrefundSameTx,
+            };
+            let failed = rpc_message_failure_costs(Some(1_000));
+            let min_profit: i128 = 10_000;
+            let at_quote = evaluate(&input(quote_value), &failed);
+            let at_floor = evaluate(&input(floor_value), &failed);
+            assert!(matches!(at_quote, Evaluation::Known { net, .. } if net == 48_000));
+            assert!(matches!(at_floor, Evaluation::Known { net, .. } if net == -102_000));
+            // Old (quote-based) semantics would have admitted it; floor semantics must not.
+            assert!(actionable(at_quote, min_profit, true, true, true));
+            assert!(!actionable(at_floor, min_profit, true, true, true));
+            // Floor safely above threshold -> actionable.
+            let rich = realizable_value_usd_micro(&sz, 1_200).unwrap();
+            assert!(actionable(evaluate(&input(rich), &failed), min_profit, true, true, true));
+        }
+
+        /// [P1-C] Production path: the builder's ZERO_PREFUND mapping (`zero_prefund_input`, used by
+        /// `plans()`) feeds the pipeline's economic gate (`plan_economic_gate`, used by
+        /// `Pipeline::evaluate`). A missing floor must end as `Evaluation::Unknown`: never actionable,
+        /// in Shadow at most a technical probe, never the quote.
+        #[test]
+        fn missing_floor_production_path_is_unknown_and_never_actionable() {
+            use crate::pipeline::{plan_economic_gate, Mode};
+            use darkbot_project0::economics::{rpc_message_failure_costs, Evaluation};
+            let sz = sizing(1_000, 1_000_000);
+            let failed = rpc_message_failure_costs(Some(1_000));
+            // Very profitable quote, but no executable floor.
+            let mut input = zero_prefund_input(&sz, &floor_route(5_000, None), 0, 0, Path::Rpc).unwrap();
+            assert_eq!(input.gross_seized_realizable_usd_micro, None);
+            assert_eq!(input.funding, FundingClass::ZeroPrefundSameTx);
+            input.transaction_fee_usd_micro = Some(1_000); // as the pipeline sets it from the fee quote
+            let (eval, actionable, probe) = plan_economic_gate(&input, &failed, 0, Mode::Live, true, true);
+            assert_eq!((eval, actionable, probe), (Evaluation::Unknown, false, false));
+            let (eval, actionable, probe) = plan_economic_gate(&input, &failed, 0, Mode::Shadow, true, true);
+            assert_eq!((eval, actionable, probe), (Evaluation::Unknown, false, true));
+            // Same route with a profitable floor -> Known and actionable (P1-C unchanged).
+            let mut known = zero_prefund_input(&sz, &floor_route(5_000, Some(1_200)), 0, 0, Path::Rpc).unwrap();
+            known.transaction_fee_usd_micro = Some(1_000);
+            let (eval, actionable, _) = plan_economic_gate(&known, &failed, 10_000, Mode::Live, true, true);
+            assert!(matches!(eval, Evaluation::Known { net, .. } if net == 48_000));
+            assert!(actionable);
+            // Floor below repay or invalid -> no plan at all.
+            assert!(zero_prefund_input(&sz, &floor_route(5_000, Some(900)), 0, 0, Path::Rpc).is_err());
+            assert!(zero_prefund_input(&sz, &floor_route(1_000, Some(1_001)), 0, 0, Path::Rpc).is_err());
+        }
+
         fn route_for_budget(cap: u8, data_len: usize, accounts: usize) -> Route {
             Route {
                 instructions: vec![Instruction {
@@ -950,7 +1133,8 @@ pub mod p0 {
                     data: vec![7; data_len],
                 }],
                 amount_in: 100,
-                amount_out: cap as u64 * 100,
+                quoted_out: cap as u64 * 100,
+                minimum_executable_out: Some(cap as u64 * 100),
                 ..Route::default()
             }
         }
@@ -976,7 +1160,7 @@ pub mod p0 {
             assert!(caps.windows(2).all(|v| v[1] < v[0]));
             assert!(built.serialized_len <= 500);
             // Return the new quote's economics, never the original larger route's output.
-            assert_eq!(route.amount_out, *caps.last().unwrap() as u64 * 100);
+            assert_eq!(route.quoted_out, *caps.last().unwrap() as u64 * 100);
         }
 
         #[test]

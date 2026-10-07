@@ -18,6 +18,7 @@ pub mod pending;
 pub mod route;
 pub mod shadow_ledger;
 pub mod winner;
+pub mod winner_tracker;
 pub mod pipeline;
 pub mod record;
 pub mod remote_workers;

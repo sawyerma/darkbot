@@ -52,6 +52,10 @@ pub struct CandidateCostRecord {
     pub failed_attempt_reserve_usd_micro: Option<u64>,
     pub rent_and_token_usd_micro: Option<u64>,
     pub economics_known: bool,
+    /// [P1-C] True iff a ZERO_PREFUND candidate reached economics without
+    /// a router-provided executable minimum output. Evidence only:
+    /// this never makes the candidate actionable.
+    pub route_min_out_unknown: bool,
     pub net_profit_usd_micro: Option<i128>,
 }
 

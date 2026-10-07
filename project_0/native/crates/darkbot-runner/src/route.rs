@@ -107,14 +107,12 @@ impl JupiterV2RouteProvider {
         if build.swap_mode != "ExactIn" {
             return Err(format!("jupiter unexpected swapMode {}", build.swap_mode));
         }
-        let in_amount = build.in_amount.parse::<u64>().map_err(|e| format!("jupiter inAmount: {e}"))?;
-        let out_amount = build.out_amount.parse::<u64>().map_err(|e| format!("jupiter outAmount: {e}"))?;
-        if in_amount != amount || out_amount == 0 {
-            return Err(format!(
-                "jupiter /build invalid amounts: requested_in={} response_in={} response_out={}",
-                amount, in_amount, out_amount
-            ));
-        }
+        let (in_amount, quoted_out, minimum_executable_out) = parse_build_amounts(
+            amount,
+            &build.in_amount,
+            &build.out_amount,
+            build.other_amount_threshold.as_ref(),
+        )?;
 
         let mut instructions = Vec::new();
         for raw in &build.setup_instructions {
@@ -153,7 +151,8 @@ impl JupiterV2RouteProvider {
             lookup_tables,
             swap_program: jup,
             amount_in: in_amount,
-            amount_out: out_amount,
+            quoted_out,
+            minimum_executable_out,
         }))
     }
 }
@@ -206,6 +205,10 @@ struct ApiInstruction {
 struct BuildResponse {
     in_amount: String,
     out_amount: String,
+    /// [P1-C] ExactIn: minimum output enforced on-chain (slippage floor). Accepted as JSON
+    /// string or number; absent = unknown (fail closed downstream).
+    #[serde(default)]
+    other_amount_threshold: Option<serde_json::Value>,
     swap_mode: String,
     setup_instructions: Vec<ApiInstruction>,
     swap_instruction: ApiInstruction,
@@ -213,6 +216,51 @@ struct BuildResponse {
     #[serde(default)]
     other_instructions: Vec<ApiInstruction>,
     addresses_by_lookup_table_address: Option<HashMap<String, Vec<String>>>,
+}
+
+/// [P1-C] Parse and validate `/build` amounts for ExactIn.
+/// `outAmount` is the quote. `otherAmountThreshold` is the minimum output the swap instruction
+/// enforces on-chain. No local `quote - slippage` arithmetic: the provider floor is the truth.
+fn parse_build_amounts(
+    requested_in: u64,
+    in_amount: &str,
+    out_amount: &str,
+    other_amount_threshold: Option<&serde_json::Value>,
+) -> Result<(u64, u64, Option<u64>), String> {
+    let in_amount = in_amount.parse::<u64>().map_err(|e| format!("jupiter inAmount: {e}"))?;
+    let quoted_out = out_amount.parse::<u64>().map_err(|e| format!("jupiter outAmount: {e}"))?;
+    if in_amount != requested_in || quoted_out == 0 {
+        return Err(format!(
+            "jupiter /build invalid amounts: requested_in={} response_in={} response_out={}",
+            requested_in, in_amount, quoted_out
+        ));
+    }
+    let floor = match other_amount_threshold {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(raw)) => Some(
+            raw.parse::<u64>()
+                .map_err(|e| format!("jupiter otherAmountThreshold malformed: {e}"))?,
+        ),
+        Some(serde_json::Value::Number(n)) => Some(
+            n.as_u64()
+                .ok_or_else(|| format!("jupiter otherAmountThreshold malformed: {n}"))?,
+        ),
+        Some(other) => {
+            return Err(format!("jupiter otherAmountThreshold malformed type: {other}"));
+        }
+    };
+    if let Some(floor) = floor {
+        if floor == 0 {
+            return Err("jupiter otherAmountThreshold=0: no executable floor".into());
+        }
+        if floor > quoted_out {
+            return Err(format!(
+                "jupiter otherAmountThreshold {} > outAmount {}: schema invalid",
+                floor, quoted_out
+            ));
+        }
+    }
+    Ok((in_amount, quoted_out, floor))
 }
 
 fn to_instruction(ix: &ApiInstruction) -> Result<Instruction, String> {
@@ -323,6 +371,31 @@ mod tests {
         assert!(
             is_verified_redundant_prewarmed_ata_setup(&ix, &other_taker, &[known]).is_err()
         );
+    }
+
+    #[test]
+    fn p1c_parses_quote_and_executable_floor_separately() {
+        use serde_json::json;
+        // quote > floor
+        assert_eq!(parse_build_amounts(10, "10", "1000", Some(&json!("950"))), Ok((10, 1000, Some(950))));
+        // quote == floor
+        assert_eq!(parse_build_amounts(10, "10", "1000", Some(&json!("1000"))), Ok((10, 1000, Some(1000))));
+        // numeric threshold accepted
+        assert_eq!(parse_build_amounts(10, "10", "1000", Some(&json!(900))), Ok((10, 1000, Some(900))));
+        // missing / null floor -> unknown, never the quote
+        assert_eq!(parse_build_amounts(10, "10", "1000", None), Ok((10, 1000, None)));
+        assert_eq!(parse_build_amounts(10, "10", "1000", Some(&json!(null))), Ok((10, 1000, None)));
+        // malformed floor -> fail closed
+        assert!(parse_build_amounts(10, "10", "1000", Some(&json!("abc"))).is_err());
+        assert!(parse_build_amounts(10, "10", "1000", Some(&json!(""))).is_err());
+        assert!(parse_build_amounts(10, "10", "1000", Some(&json!(-5))).is_err());
+        assert!(parse_build_amounts(10, "10", "1000", Some(&json!(["1"]))).is_err());
+        // floor > quote -> schema invalid -> fail closed
+        assert!(parse_build_amounts(10, "10", "1000", Some(&json!("1001"))).is_err());
+        // zero floor -> no protection -> fail closed
+        assert!(parse_build_amounts(10, "10", "1000", Some(&json!("0"))).is_err());
+        // input mismatch still rejected
+        assert!(parse_build_amounts(11, "10", "1000", Some(&json!("950"))).is_err());
     }
 
     #[test]

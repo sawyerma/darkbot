@@ -60,6 +60,23 @@ pub fn pipeline_timing_snapshot() -> PipelineTimingSnapshot {
     }
 }
 
+/// [P1-C] Economic gate for one built plan (used by `Pipeline::evaluate`). LIVE acts only on
+/// `Known` economics above the threshold; `Unknown` (e.g. missing executable floor) can at most
+/// become a Shadow technical probe. Returns `(evaluation, actionable, technical_probe)`.
+pub(crate) fn plan_economic_gate(
+    input: &CandidateInput,
+    failed: &FailedCostMatrix,
+    min_profit: i128,
+    mode: Mode,
+    state_valid: bool,
+    safety_valid: bool,
+) -> (Evaluation, bool, bool) {
+    let eval = economics::evaluate(input, failed);
+    let actionable = economics::actionable(eval, min_profit, true, state_valid, safety_valid);
+    let technical_probe = mode == Mode::Shadow && matches!(eval, Evaluation::Unknown) && state_valid && safety_valid;
+    (eval, actionable, technical_probe)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Shadow,
@@ -331,19 +348,24 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 economics::rpc_message_failure_costs(plan.input.transaction_fee_usd_micro)
             } else { *self.failed_costs };
             let failed_reserve = candidate_failed.conservative(plan.input.path);
-            let eval = economics::evaluate(&plan.input, &candidate_failed);
+            let (eval, actionable, technical_probe) = plan_economic_gate(
+                &plan.input,
+                &candidate_failed,
+                self.min_profit,
+                self.mode,
+                state_valid,
+                safety_valid,
+            );
             rec.candidate_costs.push(crate::record::CandidateCostRecord {
                 funding:plan.input.funding.as_str().into(), path:format!("{:?}", plan.input.path),
                 message_fee_quote:fee_quote.clone(), transaction_fee_usd_micro:plan.input.transaction_fee_usd_micro,
                 failed_attempt_reserve_usd_micro:failed_reserve, rent_and_token_usd_micro:plan.input.rent_and_token_usd_micro,
                 economics_known:matches!(eval, Evaluation::Known {..}),
+                route_min_out_unknown:
+                    plan.input.funding == darkbot_project0::funding::FundingClass::ZeroPrefundSameTx
+                    && plan.input.gross_seized_realizable_usd_micro.is_none(),
                 net_profit_usd_micro:match eval { Evaluation::Known {net,..} => Some(net), _ => None },
             });
-            let actionable = economics::actionable(eval, self.min_profit, true, state_valid, safety_valid);
-            let technical_probe = self.mode == Mode::Shadow
-                && matches!(eval, Evaluation::Unknown)
-                && state_valid
-                && safety_valid;
             if !actionable && !technical_probe {
                 if let Evaluation::Known { net, .. } = eval {
                     if net > 0 && net <= self.min_profit { threshold_hits += 1; }

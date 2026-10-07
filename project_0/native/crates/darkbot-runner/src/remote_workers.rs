@@ -15,7 +15,11 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[derive(Clone, Debug)]
 pub struct WinnerWatch {
+    /// [F1] Monotonic revision assigned by the `WinnerTracker`; travels through the worker so a
+    /// stale completion can be recognised. Callers pass 0.
+    pub revision: u64,
     pub account: Pubkey,
     pub rx_slot: u64,
     pub detect_slot: u64,
@@ -258,6 +262,7 @@ mod tests {
     #[test]
     fn winner_watch_keeps_retry_deadline() {
         let w = WinnerWatch {
+            revision: 0,
             account: Pubkey::new_unique(),
             rx_slot: 1,
             detect_slot: 2,

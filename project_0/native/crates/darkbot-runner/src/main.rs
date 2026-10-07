@@ -32,6 +32,9 @@ use darkbot_runner::pending::PendingSubmission;
 use darkbot_runner::record::Decision;
 use darkbot_runner::shadow_ledger::ShadowLedger;
 use darkbot_runner::winner::{race_outcome, RaceOutcome};
+use darkbot_runner::winner_tracker::{
+    is_winner_relevant, WinnerDispatch, WinnerResolution, WinnerTracker, WinnerTrackerConfig,
+};
 use darkbot_runner::remote_workers::{
     OraclePriceProjectionWork, ProjectionWork, RemoteWorkers, ReconcileWork, WinnerWatch,
 };
@@ -894,7 +897,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // [M2][M3] Shadow-Evidence: Kandidaten-Watchlist für den Winner-Vergleich und Tages-Ledger.
     let mut ledger = ShadowLedger::new();
-    let mut watch: Vec<WinnerWatch> = Vec::new();
+    // [F1] Bounded, deduplicated winner watches with TTL for Ok(None) and Err. PROVISIONAL defaults.
+    let winner_watch_cfg = WinnerTrackerConfig {
+        capacity: config::parsed_or("P0_WINNER_WATCH_CAPACITY", WinnerTrackerConfig::DEFAULT.capacity)?,
+        ttl_s: config::parsed_or("P0_WINNER_WATCH_TTL_S", WinnerTrackerConfig::DEFAULT.ttl_s)?,
+        initial_delay_s: config::parsed_or(
+            "P0_WINNER_WATCH_INITIAL_DELAY_S",
+            WinnerTrackerConfig::DEFAULT.initial_delay_s,
+        )?,
+        recheck_interval_s: config::parsed_or(
+            "P0_WINNER_WATCH_RECHECK_S",
+            WinnerTrackerConfig::DEFAULT.recheck_interval_s,
+        )?,
+        full_queue_backoff_s: config::parsed_or(
+            "P0_WINNER_WATCH_FULL_BACKOFF_S",
+            WinnerTrackerConfig::DEFAULT.full_queue_backoff_s,
+        )?,
+    }
+    .validate()?;
+    eprintln!(
+        "winner_watch_config: capacity={} ttl_s={} initial_delay_s={} recheck_s={} full_backoff_s={} provisional=true",
+        winner_watch_cfg.capacity,
+        winner_watch_cfg.ttl_s,
+        winner_watch_cfg.initial_delay_s,
+        winner_watch_cfg.recheck_interval_s,
+        winner_watch_cfg.full_queue_backoff_s
+    );
+    let mut winner_tracker = WinnerTracker::new(winner_watch_cfg);
     let summary_path = config::parsed_or::<String>("P0_SUMMARY_PATH", "project_0/data/shadow/daily_summary.jsonl".into())?;
     let mut summaries = std::fs::OpenOptions::new().create(true).append(true).open(&summary_path)?;
     let _ = Path::Rpc;
@@ -1138,9 +1167,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(0);
 
         while let Some(done) = remote.winner_results.try_pop() {
-            let mut w = done.watch;
-            match done.result {
-                Ok(Some(win)) => {
+            // [F1] Resolution, rescheduling and TTL expiry (Ok(None) and Err) live in the tracker.
+            if let WinnerResolution::Resolved { watch: w, winner: win } =
+                winner_tracker.on_result(done.watch, done.result, worker_now_s)
+            {
+                {
                     let out = race_outcome(
                         win.slot,
                         w.rx_slot,
@@ -1164,15 +1195,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     });
                     let _ = writeln!(records, "{}", line);
-                }
-                Ok(None) if worker_now_s.saturating_sub(w.created_unix_s) < 900 => {
-                    w.next_check_unix_s = worker_now_s.saturating_add(5);
-                    watch.push(w);
-                }
-                Ok(None) => {}
-                Err(_) => {
-                    w.next_check_unix_s = worker_now_s.saturating_add(5);
-                    watch.push(w);
                 }
             }
         }
@@ -1491,24 +1513,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Bounded non-blocking dispatch. Full queues retain the work item for the next loop.
-        if !watch.is_empty() {
-            let mut keep = Vec::with_capacity(watch.len());
-            for w in watch.drain(..) {
-                if worker_now_s < w.next_check_unix_s {
-                    keep.push(w);
-                    continue;
-                }
-                match remote.winner_jobs.try_push(w) {
-                    Ok(()) => {}
-                    Err(ChannelError::Full(w)) => keep.push(w),
-                    Err(ChannelError::Disconnected(_)) => {
-                        return Err("winner RPC worker disconnected".into());
-                    }
-                }
+        // [F1] Bounded non-blocking dispatch of due watches only (min-heap, no full rebuild per
+        // loop). The first full-queue refusal ends the round; the tracker keeps and backs off the
+        // watch, so a saturated worker queue costs at most one attempt per loop.
+        winner_tracker.dispatch_due(worker_now_s, remote_worker_capacity, |w| {
+            match remote.winner_jobs.try_push(w) {
+                Ok(()) => Ok(WinnerDispatch::Sent),
+                Err(ChannelError::Full(_)) => Ok(WinnerDispatch::QueueFull),
+                Err(ChannelError::Disconnected(_)) => Err("winner RPC worker disconnected"),
             }
-            watch = keep;
-        }
+        })?;
 
         if !pending.is_empty() {
             let mut keep = Vec::with_capacity(pending.len());
@@ -3070,10 +3084,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             ledger.on_record(&rec, sim_ok);
             // [FIX-43][FIX-71] Nur wirtschaftlich bekannter ShadowReady darf als virtueller Win/PnL zählen.
             // Technische Probes liefern ausschließlich Build/Sign/Simulation-Evidence.
-            if matches!(rec.decision, Decision::ShadowReady | Decision::ShadowSimFailed | Decision::Skip) {
+            // [F1] Only exact-Health-liquidatable candidates are winner-relevant; one watch per account.
+            let health_liquidatable = matches!(&health_result, Ok(h) if h.liquidatable);
+            if is_winner_relevant(health_liquidatable, rec.decision) {
                 let shadow_ready = matches!(rec.decision, Decision::ShadowReady);
                 let our_loss = if shadow_ready { None } else { Some(rec.loss.unwrap_or(darkbot_runner::record::LossReason::Build)) };
-                watch.push(WinnerWatch {
+                winner_tracker.observe(WinnerWatch {
+                    revision: 0, // assigned by the tracker
                     account: acct,
                     rx_slot: slot,
                     detect_slot: slot,
@@ -3082,8 +3099,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     shadow_ready,
                     our_loss,
                     created_unix_s: now,
-                    next_check_unix_s: now.saturating_add(60),
-                });
+                    next_check_unix_s: now,
+                }, now);
             }
             // [FIX-18][FIX-23] Submitted und AmbiguousSubmission landen beide in der Reconciliation.
             if let (Some(sig), Some(exp)) = (rec.signature.as_deref(), rec.exposure) {
@@ -3114,6 +3131,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             last_reported_update_total = update_total;
             eprintln!("updates: accounts={} banks={} groups={} fee={} liqrec={} unknown={} channel={:?}",
                 counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
+            // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
+            let ws = winner_tracker.stats();
+            eprintln!(
+                "winner_watch_stats: len={} max={} observed={} deduped={} expired={} overflow={} dispatched={} queue_full_backoffs={} results={} stale_results={} errors={} resolved={} winner_requests=N/A winner_429=N/A",
+                ws.len, ws.max, ws.observed, ws.deduped, ws.expired, ws.overflow, ws.dispatched, ws.queue_full_backoffs, ws.results, ws.stale_results, ws.errors, ws.resolved
+            );
             #[cfg(feature = "crate_health")]
             let pipeline_timing = pipeline_timing_snapshot();
             #[cfg(feature = "crate_health")]
