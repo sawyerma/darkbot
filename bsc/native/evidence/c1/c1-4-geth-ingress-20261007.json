@@ -1,0 +1,265 @@
+{
+  "schema": "darkbot.c1.geth_ingress.v1",
+  "date": "2026-10-07",
+  "base_darkbot_commit": "c804bf74bb6a868a8610b79a100e3729038ec82d",
+  "candidate": {
+    "name": "DarkBot_C1_4_rev6_against_main_c804bf7",
+    "integration": "NOT_APPLIED",
+    "exact_apply_verification": "NOT_RUN",
+    "project_0_untouched": true,
+    "revision": "rev6",
+    "rev1_to_rev2": [
+      "false-negative audit: earliest valid peer T_ingress per hash; ObservedOnPeerLane only if earliest T_ingress <= TXPOOL_ACCEPTED timestamp",
+      "audit compares only records inside the C1.4 contract (clock_id CLOCK_MONOTONIC, sources, boundary fields); others are invalid evidence",
+      "peer-ingress prefilter reduced to the launch-selector superset (newTokenV6); swapExactInput removed",
+      "Go formatting corrected for gofmt (one-line closures replaced); Rust hand-formatted to rustfmt rules",
+      "R1 and R2 recorded as resolved by independent review against the pin"
+    ],
+    "current_main_checked_by_review": "3c3ddf7c493e9a4aff1b6096b74712368c0a21ee (the four modified BSC files are byte-identical to c804bf7)",
+    "rev2_to_rev3": [
+      "qualification is fail-closed: Pass only for closed, drained, contract-conforming evidence",
+      "foreign record kinds and lane consumer errors make the evidence invalid",
+      "txpool producer counters (refused, serialize, clock) enter the qualification; unavailable counters are incomplete",
+      "txpool lane read == write, producer published == write and every read record judged are required",
+      "TXPOOL_ACCEPTED contract also requires zero peer and zero aux",
+      "Txpool lane corrupt records or quarantine make the evidence invalid",
+      "geth counts each transaction lost to a txpool clock error (was: one per batch)",
+      "one rustfmt tuple-width defect from rev2 corrected in the interop test"
+    ],
+    "rev3_to_rev4": [
+      "qualification requires a sealed Txpool lane: shutdown == true, otherwise Incomplete(\"txpool producer window still open\")",
+      "qualification requires Txpool lane state BOUND; any other state is InvalidEvidence (QUARANTINED stays InvalidEvidence)",
+      "a recorded Txpool lane quarantine reason is InvalidEvidence",
+      "closed test evidence is sealed (shutdown, BOUND); real-arena test shows shutdown closes the window and refuses a later publish",
+      "documented: final producer counters are read after the last producer call and before the qualification"
+    ],
+    "rev4_to_rev5": [
+      "audit consume adapter: V2Error::Shutdown from ConsumerV2::try_consume (only after the state check and only at read == write) is the normal end of a sealed lane, not a consumer error; every other error still counts",
+      "regression tests: sealed lane with records read to its end; empty sealed lanes; quarantined lane stays LaneQuarantined and InvalidEvidence",
+      "v2.rs and C1.3 semantics unchanged"
+    ],
+    "rev5_to_rev6": [
+      "ingress_test.go: TestC14TxpoolProducerFailuresAreCounted shuts down its own runtime handle (r.shutdown()); ShutdownIngressV2() was a no-op there because c14Start does not install the runtime globally",
+      "fastlane.go (C1.1 overlay, now in the patch): const block aligned as gofmt outputs it",
+      "ingress.rs: the two rustfmt changes reported by the local run (single-child chain on one line, check_peer_record signature on one line)",
+      "no production semantics changed; v2.rs unchanged"
+    ],
+    "changed_files_note": "fastlane.go joins the patch only for gofmt; 12 files against c804bf7",
+    "local_run_rev5_reported_by_review": {
+      "cargo_fmt_check": "FAIL on rev5 as delivered (two spots in ingress.rs); PASS after cargo fmt --all; rev6 carries that output",
+      "cargo_test_darkbot_fastlane_debug": "84 passed, 0 failed, 5 ignored (after cargo fmt)",
+      "cargo_test_darkbot_fastlane_release": "84 passed, 0 failed, 5 ignored (after cargo fmt)",
+      "cargo_clippy_darkbot_fastlane": "PASS",
+      "darkbot_core_c14_prefilter_scope": "1 passed",
+      "gofmt_gate": "FAIL: darkbot/fastlane/fastlane.go (fixed in rev6)",
+      "go_test_race_darkbot_fastlane": "FAIL only TestC14TxpoolProducerFailuresAreCounted (fixed in rev6)",
+      "go_test_eth_protocols_eth_and_eth": "PASS",
+      "go_test_core": "PASS (164.338 s)",
+      "go_build_cmd_geth": "PASS",
+      "c13_lifecycle_interop": "not reported",
+      "c14_ingress_interop": "not reported"
+    }
+  },
+  "pinned_geth": {
+    "release": "v1.7.8",
+    "commit": "cdb7548b5baacfdae92f9f63437d6456411665f3",
+    "tree": "d8d88097521d43cef66047fdd93dd6825a2a7843",
+    "go_version": "1.25.0",
+    "pin_verification": "NOT_RUN",
+    "source_available_to_author": false,
+    "anchor_provenance": {
+      "transaction_hooks_handler_eth": "anchors already verified against the pin by the C1.1-C1.3 overlay tool",
+      "txpool_start_stop_newhandler": "anchors already verified against the pin by the C1.1-C1.3 overlay tool",
+      "run_eth_peer_registration": "anchor 'defer h.unregisterPeer(peer.ID())'; existence in the pin confirmed by independent review; enforced as exactly-one match at apply time",
+      "peer_struct_and_import": "anchors 'type Peer struct {' and core/types import; existence in the pin confirmed by independent review; enforced as exactly-one match at apply time"
+    },
+    "independent_review": {
+      "pin_checked": "cdb7548b5baacfdae92f9f63437d6456411665f3",
+      "r1_anchors": "RESOLVED: runEthPeer, Peer and handler anchors exist in the pinned source (independent review)",
+      "r2_t_packet_decoded": "RESOLVED: TransactionsPacket and PooledTransactionsPacket run packet.Items(), its error check, then handleTransactions; the boundary sits directly after the successful Items() (independent review)"
+    }
+  },
+  "changed_files": {
+    "modified": [
+      "bsc/native/geth/overlay/darkbot/fastlane/v2.go",
+      "bsc/native/tools/c1_apply_geth_overlay.py",
+      "bsc/native/geth/FASTLANE_WIRE_V2.md",
+      "bsc/native/crates/darkbot-fastlane/src/lib.rs"
+    ],
+    "added": [
+      "bsc/native/geth/overlay/darkbot/fastlane/ingress.go",
+      "bsc/native/geth/overlay/darkbot/fastlane/ingress_test.go",
+      "bsc/native/geth/overlay/darkbot/fastlane/ingress_fixtures_test.go",
+      "bsc/native/crates/darkbot-fastlane/src/ingress.rs",
+      "bsc/native/crates/darkbot-core/tests/c14_prefilter_scope.rs",
+      "bsc/native/tools/c14_ingress_interop.sh",
+      "bsc/native/evidence/c1/c1-4-geth-ingress-20261007.json"
+    ],
+    "cargo_lock_changed": false,
+    "wire_v2_layout_changed": false
+  },
+  "geth_hooks": {
+    "eth/handler_eth.go ethHandler.Handle TransactionsPacket": "fastlane.IngressV2(peer.DarkBotFastLane(), IngressSourceEthBroadcast, txs, func() error { return handleTransactions(peer, txs, true) })",
+    "eth/handler_eth.go ethHandler.Handle PooledTransactions": "fastlane.IngressV2(peer.DarkBotFastLane(), IngressSourceEthPooled, txs, func() error { return handleTransactions(peer, txs, false) })",
+    "eth/handler.go runEthPeer": "after registerPeer and 'defer h.unregisterPeer': BindPeerIngressV2(peer.NodeID()), SetDarkBotFastLane, defer Close (runs after handler(peer) returned, before unregisterPeer)",
+    "eth/handler.go txBroadcastLoop": "PublishTxpoolAcceptedV2(event.Txs), sole producer of the Txpool lane",
+    "eth/handler.go newHandler": "InitIngressV2FromEnv after V1 InitFromEnv; failure fails handler construction",
+    "eth/handler.go Start": "CheckIngressV2PeerCapacity(maxPeers); log.Crit when geth MaxPeers exceeds the configured Fast-Lane max_peers",
+    "eth/handler.go Stop": "ShutdownIngressV2 after h.wg.Wait(); never unmaps (K11)",
+    "eth/protocols/eth/peer.go": "field darkbotFastLane *fastlane.PeerIngressV2; DarkBotFastLane/SetDarkBotFastLane",
+    "removed_v1_paths": [
+      "V1 PublishTransactionAt EARLY_TX_SEEN in both ingress hooks",
+      "V1 PublishTransaction TXPOOL_ACCEPTED in txBroadcastLoop"
+    ],
+    "remaining_v1_paths_not_c1_4_authoritative": [
+      "CANONICAL_HEAD",
+      "REORG",
+      "local-geth outbound (OUTBOUND_SIGNED_TX, OUTBOUND_PEER_HANDOFF)"
+    ],
+    "structural_verification": "c1_apply_geth_overlay.py verify_hooks prints C1_4_HOOK_ORDER_VERIFIED",
+    "txpool_producer_counters": "IngressV2Snapshot(): txpool_published, txpool_refused, txpool_serialize_errors, txpool_clock_errors; each counts transactions; input of the Rust qualification, not on the wire"
+  },
+  "boundaries": {
+    "t_packet_decoded": "once per Transactions/PooledTransactions packet, directly after the successful packet.Items() decode and its error check, before geth basic validation (handleTransactions); position confirmed against the pin by independent review",
+    "t_ingress": "once per packet, immediately after handleTransactions returned nil, before prefilter, serialization and publication",
+    "validation_rejected_packet": "nothing published; validation error returned to geth unchanged",
+    "fast_lane_refusals": "counted (queue_full, oversize, refused, serialize/clock errors); never returned to geth",
+    "early_tx_seen_wire": {
+      "timestamp_ns": "T_ingress",
+      "aux_0_8": "T_packet_decoded u64 LE",
+      "aux_8_32": "zero, reserved",
+      "clock_id": 1,
+      "aux_golden": "T_packet_decoded 0x0102030405060708 -> 0807060504030201 + 24 zero bytes"
+    },
+    "hot_path": "validation -> prefilter (destination, then selector) -> canonical signed bytes (MarshalBinary) -> lease-bound publish; no mutex, channel, sleep, file access or lookup; no direct-slot serialization"
+  },
+  "prefilter": {
+    "version": "DBC14PF1",
+    "binding": "immutable package-level snapshot bound by the ingress runtime at startup",
+    "scope": "supported launch-selector superset (C1 plan section 7)",
+    "derived_from": "darkbot-core venues::flap deployment::bsc_mainnet_v5_24_0, abi::NEW_TOKEN_V6_SELECTOR",
+    "chain_id": 56,
+    "addresses": [
+      "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0"
+    ],
+    "selectors": [
+      "0x8cb5772c:launch"
+    ],
+    "excluded": {
+      "0xef7ec2e7 swapExactInput": "BUY traffic; not launch detection; no C1 requirement needs it on the early peer lane"
+    },
+    "canonical_hex": "444243313450463138000000000000000100e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de001008cb5772c01",
+    "fingerprint_crc32c": "0x1692c814",
+    "launch_variants_covered": [
+      "launch_v6_doge_block_124415357",
+      "launch_v6_native_creator_buy_pending",
+      "launch_v6_native_split_tax_pending"
+    ],
+    "false_negative_suite": "NOT_RUN"
+  },
+  "pool": {
+    "qualified_peer_lane_bound": 256,
+    "txpool_lane": {
+      "id": 1,
+      "capacity": 4096,
+      "slot_stride": 4096,
+      "sole_producer": "txBroadcastLoop"
+    },
+    "peer_lanes": {
+      "first_id": 16,
+      "capacity": 64,
+      "slot_stride": 4096
+    },
+    "configuration_env": [
+      "DARKBOT_FASTLANE_V2_DIR",
+      "DARKBOT_FASTLANE_V2_GENERATION",
+      "DARKBOT_FASTLANE_V2_MAX_PEERS",
+      "DARKBOT_FASTLANE_V2_CHURN_RESERVE"
+    ],
+    "exhaustion": "explicit coverage gap: counters, bounded structured gap events (pool_exhausted, peer_limit, shutdown, bind_failed, close_failed, lane_lost)"
+  },
+  "gates": {
+    "note": "rev6 gates not run by the author (no toolchain); results above were reported by the local run on rev5",
+    "cargo_fmt_check": "NOT_RUN on rev6 (rev6 contains the rustfmt output of the local run)",
+    "cargo_test_debug": "NOT_RUN on rev6",
+    "cargo_test_release": "NOT_RUN on rev6",
+    "cargo_clippy_deny_warnings": "NOT_RUN on rev6",
+    "darkbot_core_c14_prefilter_scope_test": "NOT_RUN on rev6 (file unchanged since rev2)",
+    "gofmt": "NOT_RUN on rev6",
+    "go_fastlane_race": "NOT_RUN on rev6",
+    "go_eth_protocols_eth_and_eth": "NOT_RUN on rev6",
+    "go_core": "NOT_RUN on rev6",
+    "geth_build": "NOT_RUN on rev6",
+    "c13_lifecycle_interop": "NOT_RUN",
+    "c14_ingress_interop": "NOT_RUN"
+  },
+  "author_checks_without_toolchains": [
+    "patch reproduces every delivered file byte for byte on a copy of c804bf7; git apply --check OK",
+    "overlay patch_sources and verify_hooks executed against a synthetic tree carrying every anchor text; negative test rejects a remaining V1 hook",
+    "Go: brace balance, no duplicate declarations across all seven package files, no unused imports, alignment-group check",
+    "Rust: brace balance, line length, call-argument width, chain width and struct-literal width heuristics",
+    "Wire V2 layout constants unchanged",
+    "scope canonical bytes and CRC32C recomputed independently in Python"
+  ],
+  "current_verdict": "C1.4_IMPLEMENTED_TESTING_PENDING",
+  "c1_4_pass": false,
+  "non_claims": {
+    "geth_ingress_switched_to_v2": true,
+    "geth_ingress_switched_to_v2_note": "implemented in this candidate; not yet applied or gated",
+    "t_packet_decoded_directly_at_protocol_decode": "RESOLVED by independent review against the pin (directly after packet.Items())",
+    "end_to_end_live_p2p_session_test": false,
+    "c1_5_zero_copy_hot0": "NOT DONE",
+    "c1_6_m4_profile": "NOT DONE",
+    "c1_7_local_geth_outbound_qualification": "NOT DONE",
+    "c1_8_full_stress_qualification": "NOT DONE",
+    "c1_9_latency_qualification": "NOT DONE",
+    "mainnet_ingress_coverage": "NOT_PROVEN",
+    "t0_to_t_buy_lt_1ms": "NOT_PROVEN",
+    "live": "BLOCKED",
+    "c1_frozen": false
+  },
+  "false_negative_audit": {
+    "module": "darkbot-fastlane::ingress::IngressAuditV2",
+    "order": "drain Txpool lane, then every peer lane, then judge",
+    "time_rule": "ObservedOnPeerLane iff earliest valid peer T_ingress <= TXPOOL_ACCEPTED.timestamp_ns (equality observed); later peer observations are FalseNegative with earliest_peer_ingress_ns recorded",
+    "comparability": "EARLY_TX_SEEN: clock_id 1, source eth-broadcast/eth-pooled, aux[8..32] zero, 0 < T_packet_decoded <= T_ingress; TXPOOL_ACCEPTED: clock_id 1, source txpool, zero peer, zero aux; otherwise counted invalid",
+    "qualification": {
+      "point": "quiescent: Txpool lane sealed (shutdown set; geth ShutdownIngressV2 after txBroadcastLoop stopped, Rust ArenaV2::begin_shutdown), final producer counters read after the last producer call and before the qualification, audit polled until the lane is drained",
+      "pass_requires": [
+        "invalid_peer_records == 0",
+        "invalid_txpool_records == 0",
+        "foreign_records == 0",
+        "consumer_errors == 0",
+        "txpool lane corrupt_records == 0",
+        "txpool lane quarantine_reason == 0",
+        "txpool lane state != QUARANTINED",
+        "false_negatives == 0",
+        "producer counters available",
+        "producer refused == 0",
+        "producer serialize_errors == 0",
+        "producer clock_errors == 0",
+        "txpool lane dropped_full == 0",
+        "txpool lane oversize == 0",
+        "unsupported_envelopes == 0",
+        "malformed_envelopes == 0",
+        "txpool lane shutdown == true",
+        "txpool lane state == BOUND",
+        "txpool lane read_sequence == write_sequence",
+        "producer published == txpool lane write_sequence",
+        "txpool_judged == txpool lane read_sequence"
+      ],
+      "order": [
+        "InvalidEvidence",
+        "FalseNegatives",
+        "Incomplete",
+        "Pass"
+      ],
+      "interop_note": "geth interop phase 1 leaves the arena unsealed because phase 2 rebinds a peer lane; its qualification is FalseNegatives(2), which precedes the window check"
+    },
+    "sealed_lane_end": "V2Error::Shutdown at read == write ends a poll normally; LaneQuarantined and all other consumer errors count as consumer_errors"
+  },
+  "formatting": {
+    "gofmt": "not executable here; fastlane.go fixed to the reported gofmt output; all seven overlay Go files checked for alignment groups, whitespace and indentation",
+    "rustfmt": "not executable here; ingress.rs carries the two changes cargo fmt made locally on rev5; no other Rust file changed"
+  }
+}

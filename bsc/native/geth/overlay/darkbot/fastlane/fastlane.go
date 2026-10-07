@@ -50,9 +50,9 @@ const (
 	slotOffAux       = 104
 	slotOffCRC       = 136
 
-	minSlotSize  = 512
-	maxSlotSize  = 256 * 1024
-	maxCapacity  = 4096
+	minSlotSize   = 512
+	maxSlotSize   = 256 * 1024
+	maxCapacity   = 4096
 	emptySequence = ^uint64(0)
 )
 

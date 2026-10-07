@@ -19,6 +19,7 @@ use std::ptr::{self, NonNull};
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub mod ingress;
 pub mod v2;
 
 pub const FASTLANE_MAGIC: [u8; 8] = *b"DBFLN001";

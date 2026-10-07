@@ -1,6 +1,6 @@
 # DarkBot Fast Lane Wire V2
 
-Status: C1.2 byte layout plus the C1.3 lane-lifecycle protocol. This document defines the byte layout and the lifecycle shared by pinned bsc-geth and `darkbot-fastlane`. C1.3 changes no offset, size or field. C1.4 binds peer ingress to these lanes; C1.5 replaces the Rust owned-copy receive path with a borrowed guard.
+Status: C1.2 byte layout, the C1.3 lane-lifecycle protocol and the C1.4 geth ingress record semantics. This document defines the byte layout and the lifecycle shared by pinned bsc-geth and `darkbot-fastlane`. C1.3 changes no offset, size or field. C1.4 binds peer ingress to these lanes; C1.5 replaces the Rust owned-copy receive path with a borrowed guard.
 
 ## Byte order and alignment
 
@@ -252,6 +252,152 @@ The pool owns all peer-ingress lanes of one arena. Its bounds are `max_peers + c
 - counts allocations, exhaustions, peer-limit refusals and releases.
 
 The pool is the allocator role above; its calls are serialized (a mutex in geth). After shutdown began, allocation is refused. Mapping a pool result to GAP/health evidence is C1.4.
+
+## C1.4 geth ingress records
+
+C1.4 changes no offset, size or field of Wire V2. It fixes the meaning of fields for the records geth's ETH ingress publishes.
+
+### Lane plan
+
+| Lane | ID | Class | Initial state | Capacity × stride | Sole producer |
+| --- | --- | --- | --- | --- | --- |
+| Txpool | 1 | `TXPOOL_EVIDENCE` | `BOUND` | 4096 × 4096 | geth `txBroadcastLoop` |
+| Peer *n* | 16 + *n* | `PEER_INGRESS` | `FREE` | 64 × 4096 | the bound peer's handler goroutine |
+
+- There are `max_peers + churn_reserve` peer lanes. The qualified bound for that sum is 256.
+- Startup fails above the bound. Handler start also fails if geth's `MaxPeers` exceeds the configured `max_peers`.
+- Configuration: `DARKBOT_FASTLANE_V2_DIR`, `DARKBOT_FASTLANE_V2_GENERATION`, `DARKBOT_FASTLANE_V2_MAX_PEERS`, `DARKBOT_FASTLANE_V2_CHURN_RESERVE`.
+- The arena file, role lease, generation, shutdown and mapping lifetime follow the C1.3 rules above.
+
+### Peer lane = connection
+
+1. **Bind.** After geth registered the peer (`runEthPeer`, after `registerPeer`), one FREE peer lane is bound to the peer's node ID, outside the transaction hot path.
+2. **Lease.** The lease (lane id, owner = node ID, epoch) is held on the connection's `eth.Peer`. Publishing needs no lock and no lookup.
+3. **Single producer.** The peer's handler goroutine, which runs the connection's message loop, is the lane's only producer.
+4. **Close.** Close is deferred in `runEthPeer`. It runs after the message loop returned, i.e. after the last publish, and before `unregisterPeer`: `BOUND → CLOSING`.
+5. **Release.** The lane is released only after Rust acknowledged the drain of that epoch. Release is attempted on later binds and snapshots.
+6. **Stale handles.** Publishing checks `lane_epoch == lease epoch` before writing anything. A closed handle, or any handle of an earlier binding, never writes into a later binding.
+
+If no lane can be bound, the peer still takes part in normal ETH processing, but its Fast-Lane coverage gap is explicit, never silent:
+
+- **Reasons:** `pool_exhausted`, `peer_limit`, `shutdown`, `bind_failed`.
+- **Counters:** uncovered binds and the uncovered peer's prefilter-matching candidates are counted.
+- **Gap events:** bounded structured events (peer, reason, monotonic time) record each gap.
+
+A lane that can no longer be released (quarantined) leaves the pool visibly (`lane_lost`).
+
+### Boundaries
+
+| Boundary | Where | Count | Actionable |
+| --- | --- | --- | --- |
+| `T_packet_decoded` | Immediately after the Transactions/PooledTransactions packet is decoded into transaction objects, before geth's basic validation for the hook (`handleTransactions`). | Once per packet. | No, diagnostic only. |
+| `T_ingress` | Immediately after that validation succeeded, before prefilter, serialization and publication. | Once per packet. | Yes. |
+
+A packet the validation rejects publishes nothing. Its error reaches geth unchanged, and geth drops the peer as before. Fast-Lane refusals (queue full, oversize, lane state, stale lease) are counted and never returned to geth.
+
+### `EARLY_TX_SEEN` on a peer lane
+
+| Field | C1.4 meaning |
+| --- | --- |
+| `timestamp_ns` | `T_ingress` |
+| `aux[0..8]` | `T_packet_decoded`, u64 little-endian, `≤ timestamp_ns` |
+| `aux[8..32]` | zero, reserved |
+| `clock_id` | `1` (`CLOCK_MONOTONIC`) for both times |
+| `source` | `eth-broadcast` (Transactions) or `eth-pooled` (PooledTransactions), zero-padded to 16 bytes |
+| `peer` | the sending peer's 32-byte node ID |
+| `hash` | the transaction hash |
+| payload | the canonical signed transaction (`MarshalBinary`) |
+
+Golden: `T_packet_decoded = 0x0102030405060708` encodes as `aux = 0807060504030201` followed by 24 zero bytes.
+
+### `TXPOOL_ACCEPTED` on the Txpool lane
+
+Every transaction the local txpool accepted is published, independent of the peer prefilter. The fields are:
+
+- `source = txpool`, zero `peer`, zero `aux`;
+- `timestamp_ns` is the observation time in `txBroadcastLoop`;
+- the payload is the canonical signed transaction.
+
+Queue-full and oversize refusals are counted in the lane header. They make the false-negative audit incomplete, not passed.
+
+### Prefilter
+
+After `T_ingress`, the peer handler applies a conservative superset filter to each transaction:
+
+1. destination in the address set;
+2. 4-byte selector in the selector set;
+3. only then serialize and publish.
+
+A non-matching transaction is not published on the peer lane; its normal geth path is unchanged. The filter is never venue authority; Rust is.
+
+The scope is an immutable startup snapshot (`DBC14PF1`). Its canonical bytes are:
+
+```text
+"DBC14PF1" | chain_id u64 LE | address count u16 LE | addresses (20 B, ascending)
+| selector count u16 LE | (selector 4 B, role u8) ascending by selector    role 1 = launch
+```
+
+The peer-ingress prefilter is the supported launch-selector superset (C1 plan §7). For C1.4 it is taken only from the committed Rust venue scope (`darkbot-core::venues::flap`):
+
+- deployment `bsc_mainnet_v5_24_0` (chain 56, Portal `0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0`);
+- `NEW_TOKEN_V6_SELECTOR` `0x8cb5772c`, the launch call of every supported `newTokenV6` mode.
+
+BUY traffic (`swapExactInput`) is not launch detection and is not published on peer lanes; its normal geth path is unchanged. The only role value is 1 (launch).
+
+```text
+canonical  444243313450463138000000000000000100e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de001008cb5772c01
+fingerprint CRC32C 0x1692c814
+```
+
+Go, the Rust mirror and a darkbot-core test recomputing the bytes from the venue constants must all produce this value.
+
+### False-negative audit (Rust, outside the hot path)
+
+The audit decodes each `TXPOOL_ACCEPTED` payload itself (legacy, types 1–4) and judges it against the scope. It shares no parsing with geth.
+
+**Ordering.** A transaction's peer-lane publish happens before geth hands it to the fetcher and txpool, so it happens before its `TXPOOL_ACCEPTED` publish. The audit therefore drains the Txpool lane first, then every peer lane, and only then judges.
+
+**Time rule.** Per hash the audit keeps the earliest valid peer-lane `T_ingress` (`EARLY_TX_SEEN.timestamp_ns`). An in-scope transaction counts as observed only if that earliest `T_ingress` is not later than its `TXPOOL_ACCEPTED.timestamp_ns`; equality counts as observed. A peer record stamped after the acceptance does not count, even if it is drained before the judgement.
+
+**Comparability.** Only records inside the C1.4 contract take part in the comparison:
+- `EARLY_TX_SEEN` needs `clock_id` 1, source `eth-broadcast` or `eth-pooled`, zero `aux[8..32]` and `0 < T_packet_decoded ≤ T_ingress`.
+- `TXPOOL_ACCEPTED` needs `clock_id` 1, source `txpool`, zero `peer` and zero `aux`.
+
+A record outside that contract is counted and makes the audit result invalid evidence; it is never treated as an observation.
+
+**Verdicts.**
+- In-scope transactions without an observation at or before their acceptance are C1.4 false-negative evidence and fail the qualification.
+- The evidence names the transaction, its acceptance time and, if a peer lane carried it later, that later `T_ingress`.
+- Txpool-lane drops, refusals or undecodable payloads make the audit incomplete.
+
+**Qualification (fail-closed).** `IngressAuditV2::qualification(txpool_lane_stats, producer_counters)` runs at a quiescent point, in this order:
+
+1. The Txpool lane is sealed: `shutdown` is set (geth `ShutdownIngressV2`, which runs after the handler stopped `txBroadcastLoop`; Rust `ArenaV2::begin_shutdown`). From then on every publish is refused.
+2. The final producer counters are read after the last producer call and before the qualification.
+3. The audit polls until the lane is drained.
+
+A lane that is drained but not sealed is not closed: the producer could publish the next record.
+
+On a sealed lane the consumer returns `Shutdown` once `read == write` (C1.3 semantics, unchanged). The audit treats that as the normal end of the lane, never as an error. Records written before the shutdown are still read in full. Every other consumer error (including `LaneQuarantined`, although quarantine also sets `shutdown`) is counted and makes the evidence invalid. The producer counters are those of `fastlane.IngressV2Snapshot()` (`txpool_published`, `txpool_refused`, `txpool_serialize_errors`, `txpool_clock_errors`, each counting transactions). They are the only evidence of a transaction the producer could not stamp, serialize or publish, because such a transaction leaves no `TXPOOL_ACCEPTED` record. They travel outside the wire; the layout is unchanged. The result is `Pass` only if every condition holds:
+
+| Condition | Otherwise |
+|---|---|
+| no invalid peer or txpool record, no foreign record kind, no lane consumer error | `InvalidEvidence` |
+| Txpool lane without corrupt records, not quarantined, no recorded quarantine reason | `InvalidEvidence` |
+| no false negative | `FalseNegatives(n)` |
+| producer counters available | `Incomplete` |
+| producer `refused`, `serialize_errors`, `clock_errors` all zero | `Incomplete` |
+| Txpool lane `dropped_full` and `oversize` zero | `Incomplete` |
+| no unsupported or malformed txpool payload | `Incomplete` |
+| Txpool lane `shutdown` set: producer window closed | `Incomplete` (`txpool producer window still open`) |
+| Txpool lane state `BOUND` | `InvalidEvidence` |
+| Txpool lane `read_sequence == write_sequence` | `Incomplete` |
+| producer `published == write_sequence` | `Incomplete` |
+| every read txpool record judged | `Incomplete` |
+
+### V1 status after C1.4
+
+The C1.4 overlay removes V1 peer ingress (`EARLY_TX_SEEN`) and V1 `TXPOOL_ACCEPTED`. The V1 ring still carries `CANONICAL_HEAD`, `REORG` and local-geth outbound until later C1 packages migrate them. V1 is not C1.4-authoritative ingress.
 
 ## Slot header
 

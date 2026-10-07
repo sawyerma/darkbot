@@ -197,6 +197,10 @@ var (
 	errV2RoleLeaseHeld  = errors.New("fastlane v2 role lease held by another process")
 	errV2ArenaExists    = errors.New("fastlane v2 arena already exists")
 	errV2RuntimeActive  = errors.New("fastlane v2 runtime already installed")
+	// Same texts as before C1.4; now sentinels so that callers can count
+	// them without comparing strings.
+	errV2QueueFull       = errors.New("fastlane v2 queue full")
+	errV2PayloadTooLarge = errors.New("fastlane v2 payload too large")
 )
 
 // corruptRecordErrorV2: the first structural defect of a record. The lane is
@@ -783,14 +787,29 @@ func (a *arenaV2) laneByID(id uint16) (*laneV2, error) {
 }
 
 func (l *laneV2) publish(record recordV2) error {
+	return l.publishChecked(record, 0, false)
+}
+
+// publishLeased publishes only while the lane is still bound to leaseEpoch.
+// A producer handle of an earlier binding is refused before it writes
+// anything, so it can never write into a later binding of the lane (C1.4).
+func (l *laneV2) publishLeased(record recordV2, leaseEpoch uint64) error {
+	return l.publishChecked(record, leaseEpoch, true)
+}
+
+func (l *laneV2) publishChecked(record recordV2, leaseEpoch uint64, leased bool) error {
 	state := atomic.LoadUint32(v2AtomicU32(l.arena.data, l.offset+v2LHState))
 	if state != v2LaneStateBound {
 		return v2StateError(v2LaneStateBound, state)
 	}
+	epoch := atomic.LoadUint64(l.atomic(v2LHEpoch))
+	if leased && epoch != leaseEpoch {
+		return &leaseEpochErrorV2{Expected: epoch, Observed: leaseEpoch}
+	}
 	maxPayload := int(l.config.SlotStride) - v2SlotHeaderSize
 	if len(record.Payload) > maxPayload {
 		atomic.AddUint64(l.atomic(v2LHOversize), 1)
-		return errors.New("fastlane v2 payload too large")
+		return errV2PayloadTooLarge
 	}
 	if atomic.LoadUint64(l.atomic(v2LHShutdown)) != 0 {
 		return errV2Shutdown
@@ -799,9 +818,8 @@ func (l *laneV2) publish(record recordV2) error {
 	read := atomic.LoadUint64(l.atomic(v2LHReadSeq))
 	if write-read >= uint64(l.config.Capacity) {
 		atomic.AddUint64(l.atomic(v2LHDroppedFull), 1)
-		return errors.New("fastlane v2 queue full")
+		return errV2QueueFull
 	}
-	epoch := atomic.LoadUint64(l.atomic(v2LHEpoch))
 	index := uint32(write % uint64(l.config.Capacity))
 	slot := l.slot(index)
 	atomic.StoreUint64(v2AtomicU64(slot, v2SlotCommitted), v2EmptySequence)
