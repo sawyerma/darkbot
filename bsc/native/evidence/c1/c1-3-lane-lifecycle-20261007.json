@@ -1,0 +1,72 @@
+{
+  "schema": "darkbot.c1.lane_lifecycle_acceptance.v1",
+  "date": "2026-10-07",
+  "base_darkbot_commit": "a3918c2a40fc46f50d3964d3b7850bf2117c4c41",
+  "candidate": {
+    "name": "DarkBot_C1_3_rev2_against_main_a3918c2",
+    "integration": "LOCAL_APPLIED",
+    "exact_apply_verification": "PASS",
+    "project_0_untouched": true
+  },
+  "pinned_geth": {
+    "release": "v1.7.8",
+    "commit": "cdb7548b5baacfdae92f9f63437d6456411665f3",
+    "tree": "d8d88097521d43cef66047fdd93dd6825a2a7843",
+    "go_version": "1.25.0",
+    "pin_verification": "PASS"
+  },
+  "scope": [
+    "K11 mapping lifetime primitives",
+    "K12 terminal structural quarantine",
+    "K14 role leases",
+    "K15 generation/restart isolation",
+    "peer lane bind/close/drain/reuse",
+    "lane epoch ownership",
+    "bounded pool and explicit exhaustion",
+    "Go-Rust lifecycle interoperability"
+  ],
+  "rust_gates": {
+    "cargo_fmt_check": "PASS",
+    "debug_tests": {
+      "result": "PASS",
+      "passed": 45,
+      "failed": 0,
+      "ignored": 3
+    },
+    "release_tests": {
+      "result": "PASS",
+      "passed": 45,
+      "failed": 0,
+      "ignored": 3
+    },
+    "clippy_deny_warnings": "PASS"
+  },
+  "geth_gates": {
+    "overlay_apply": "PASS",
+    "overlay_exact_match": "PASS",
+    "fastlane_race": "PASS",
+    "eth_protocols_eth": "PASS",
+    "eth": "PASS",
+    "core": "PENDING_FINAL_OUTPUT",
+    "geth_build": "PENDING",
+    "go_rust_lifecycle_interop": "PENDING"
+  },
+  "current_verdict": "IMPLEMENTED_TESTING_IN_PROGRESS",
+  "c1_3_pass": false,
+  "freeze": false,
+  "pending_before_pass": [
+    "go test ./core",
+    "go build ./cmd/geth",
+    "C1.3 Go-Rust lifecycle interoperability",
+    "final root/project_0 safety check",
+    "final evidence update and commit"
+  ],
+  "non_claims": {
+    "c1_3_frozen": false,
+    "geth_ingress_switched_to_v2": false,
+    "rust_zero_copy_hot_consumer": false,
+    "mainnet_ingress_coverage": "NOT_PROVEN",
+    "t0_to_t_buy_lt_1ms": "NOT_PROVEN",
+    "live": false
+  }
+}
