@@ -838,9 +838,14 @@ func TestC14TxpoolProducerFailuresAreCounted(t *testing.T) {
 	if s.TxpoolPublished != 1 || s.TxpoolSerializeErrs != 2 || s.TxpoolRefused != 1 || s.TxpoolClockErrors != 0 {
 		t.Fatalf("txpool counters %+v", s)
 	}
-	recs := testDrainV2(t, c14Consumer(t, cfg, c14TxpoolLane(cfg)))
-	if len(recs) != 1 || recs[0].Hash != good.Hash() {
-		t.Fatalf("%d txpool records", len(recs))
+	consumer := c14Consumer(t, cfg, c14TxpoolLane(cfg))
+	record, ok, err := consumer.tryConsume()
+	if err != nil || !ok || record == nil || record.Hash != good.Hash() {
+		t.Fatalf("first txpool record: ok=%v err=%v record=%+v", ok, err, record)
+	}
+	record, ok, err = consumer.tryConsume()
+	if !errors.Is(err, errV2Shutdown) || ok || record != nil {
+		t.Fatalf("txpool lane end after shutdown: ok=%v err=%v record=%+v", ok, err, record)
 	}
 }
 
