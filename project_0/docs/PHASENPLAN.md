@@ -18,7 +18,7 @@ G4  Jupiter V2 RouteProvider + P0 Builder          IMPLEMENTIERT + build/test gr
 G5  Mainnet Bootstrap / Recovery / READY           NÄCHSTER GATE — noch nicht real belegt
 
 P6-LT technische Shadow-Kette                      IMPLEMENTIERT, Mainnet-Evidence offen
-P6-MT v2 Runtime-Hardening                          AUTHORITATIVER PLAN; IMPLEMENTIERUNG PENDING
+P6-MT v2 Runtime-Hardening                          IMPLEMENTIERUNG LÄUFT; Tranche 1 (F1/F8/P1-C) lokal qualifiziert
 P8-LT Landing / Token-Deltas / realized PnL        OFFEN
 LIVE                                                HART GESPERRT
 Produktionsprofitabilität                           NICHT BEWIESEN

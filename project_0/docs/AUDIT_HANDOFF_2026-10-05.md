@@ -14,6 +14,44 @@ The next work is therefore evidence-driven and deliberately narrow.
 
 ---
 
+## Current override — 2026-10-07 — P6-MT Tranche 1
+
+The sections below preserve the 2026-10-05 audit findings. This newer qualification overrides only the specifically listed implementation/evidence items.
+
+Qualified code commit:
+
+```text
+91435080ca7eb01d6ae201402b31d2f368210c26
+[Project 0] integrate P6-MT tranche 1 r3
+```
+
+Local qualification:
+
+```text
+F1 WinnerTracker revision/stale-result hardening    PASS locally
+F8 typed winner parser + regression/probe           PASS locally
+P1-C executable-floor economics                     PASS locally
+workspace builds, both feature sets                 PASS
+workspace tests, both feature sets                  PASS
+new strict-Clippy lints vs exact base               0
+```
+
+Scope boundary:
+
+- F1 here is WinnerTracker hardening; it does **not** close P1-A/P1-B candidate-admission revision/fairness.
+- P1-C/F8 are locally compiler/test-qualified; Mainnet evidence remains a separate gate where required.
+- Full P6-MT is not complete.
+- Drift qualification remains open.
+- No realized Project-0 profit has been proven.
+- Controlled LIVE and production LIVE remain blocked.
+
+Canonical evidence:
+`project_0/docs/evidence/P6MT_T1_R3_20261007/`
+
+Continue the authoritative P6-MT sequence in `PHASENPLAN.md`; later sequence positions must not cause P1-C to be reimplemented merely because it has already been qualified here.
+
+---
+
 ## 1. Frozen provenance
 
 ### Audited runtime source

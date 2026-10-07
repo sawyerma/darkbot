@@ -1,0 +1,24 @@
+P6-MT Tranche 1 r3 — differential Clippy capture
+date=2026-10-07
+tool=clippy 0.1.93
+base_commit=9e2a7a4a6893b078e984f33c67c9c27f1d53624a
+candidate_commit=91435080ca7eb01d6ae201402b31d2f368210c26
+
+[crate_health]
+baseline_normalized_lints=8
+candidate_normalized_lints=8
+candidate_only_lints=0
+
+[crate_health_txv1]
+baseline_normalized_lints=8
+candidate_normalized_lints=8
+candidate_only_lints=0
+
+Observed normalized baseline/candidate lint classes:
+- builder.rs :: explicit closure for copying elements (map_clone)
+- builder.rs :: rewards.get(0) (get_first)
+- pipeline.rs :: unnecessary map_or (3 occurrences)
+- remote_workers.rs :: type_complexity (2 occurrences)
+- lookup_tables.rs :: cloned_ref_to_slice_refs (1 occurrence)
+
+Candidate line numbers differ where Tranche 1 inserted source above the pre-existing lint location.

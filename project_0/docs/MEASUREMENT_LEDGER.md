@@ -1,7 +1,7 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
-Status: **R4 PASS, R5 PASS; first full Mainnet receivership simulation proven; R6 integration/projection work PARTIAL; latest compile blocker in FIX-111d corrected by FIX-111e but not yet compiler-verified; LIVE remains disabled**  
-Updated: 2026-10-04
+Status: **P6-MT Tranche 1 r3 LOCAL CODE QUALIFICATION PASS (F1/F8/P1-C); full P6-MT and Mainnet qualification remain open; LIVE remains disabled**  
+Updated: 2026-10-07
 
 This is the single human-readable measurement ledger for the new Solana / Project 0 Liquidator.
 
@@ -4024,3 +4024,73 @@ subsequent branch-only hardening patches
 These discarded implementations must not be resurrected wholesale or cherry-picked.
 
 The new implementation must follow `PARALLEL_EXECUTION_MASTER_PLAN.md` from MT0 onward, with one bounded step, one test gate, and one measurement gate at a time.
+
+### 2026-10-07 — P6-MT Tranche 1 r3 local qualification — PASS
+
+Qualified code commit:
+`91435080ca7eb01d6ae201402b31d2f368210c26` — `[Project 0] integrate P6-MT tranche 1 r3`
+
+Integration base:
+`9e2a7a4a6893b078e984f33c67c9c27f1d53624a`
+
+External candidate:
+`P6MT_v4.6_tranche1_r3.zip`
+
+SHA-256:
+`a95b8b7405a74bbcbee8e9c7cc94c4506439ec3f04774815cc23ccfd74a0cb1d`
+
+Qualified scope:
+
+- **F1:** bounded/deduplicated WinnerTracker with monotonic revisions, stale-completion protection and at most one in-flight query per account.
+- **F8:** typed winner parsing with versioned/loaded-address handling, explicit transaction identity/slot checks, target/receiver validation, failed-transaction filtering and fail-closed parsing.
+- **P1-C:** executable-floor economics; quoted output never substitutes for an unknown executable minimum. Missing floor remains `Evaluation::Unknown` and cannot become actionable.
+- Evidence marker: `route_min_out_unknown` in `CandidateCostRecord`.
+- Three candidate-specific Clippy corrections: `ok_or`, `if let`, and boxing the large resolved `WinnerWatch` variant.
+
+Final local acceptance on the committed code:
+
+```text
+cargo build --locked --workspace --features crate_health
+PASS
+
+cargo build --locked --workspace --features "crate_health txv1"
+PASS
+
+cargo test --locked --workspace --features crate_health
+PASS
+
+cargo test --locked --workspace --features "crate_health txv1"
+PASS
+
+F8_SDK_DECODE_PROBE ok=true err=None
+test winner::tests::f8_probe_sdk_encoded_transaction_decoding ... ok
+```
+
+Strict Clippy 0.1.93 differential qualification:
+
+```text
+darkbot-runner baseline / crate_health            8 normalized lints
+darkbot-runner candidate / crate_health           8 normalized lints
+new candidate lints                               0
+
+darkbot-runner baseline / crate_health + txv1     8 normalized lints
+darkbot-runner candidate / crate_health + txv1    8 normalized lints
+new candidate lints                               0
+```
+
+The eight remaining strict-Clippy findings are present on the exact pre-tranche base. This is **not** a claim that the complete workspace is strict-Clippy clean.
+
+Evidence:
+`project_0/docs/evidence/P6MT_T1_R3_20261007/`
+
+Decision:
+**P6-MT Tranche 1 r3 LOCAL CODE QUALIFICATION PASS.**
+
+Scope boundary / non-claims:
+
+- This F1 result is WinnerTracker hardening and does **not** close the separate audit findings P1-A/P1-B for candidate-admission revision/fairness.
+- No Mainnet Shadow qualification is claimed by this entry.
+- Full P6-MT remains incomplete.
+- Drift qualification remains open.
+- No landing/capture probability or realized Project-0 PnL is proven.
+- LIVE remains blocked.
