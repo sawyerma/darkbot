@@ -413,6 +413,40 @@ Report sample count, min, mean, p50, p95, p99, p99.9, p99.99 only when sample su
 
 C1 never accepts a p99 in place of max.
 
+### Mandatory early architecture feasibility gate (C1.4a)
+
+C1.4a is a **mandatory stop gate immediately after C1.4 and before C1.5 implementation proceeds**. Its purpose is to determine early whether the selected native ingress architecture is operating in a latency range that can still plausibly support the strict complete-path target. It is not deferred to C1.9.
+
+Measure the actually integrated C1.4 path, with the pinned geth build and Wire V2 active:
+
+```text
+T_packet_decoded → T_ingress
+T_ingress → L1
+L1 → L2
+T_ingress → L2
+```
+
+C1.4a must preserve raw per-sample timestamps and report sample count, min, mean, p50, p95, p99, p99.9 where supported, max, deadline-band counts, queue depth, drops, oversize, corruption, active peer-lane count, source/build/config hashes and the exact clock domain. The repeatable local harness must exercise the real C1.4 producer path with simultaneous independent peer producers; it may use a controlled local transaction fixture and the existing Rust Wire-V2 consumer. It must not substitute V1, a mock queue, a userspace timestamp taken after publication, or a synthetic arithmetic sum of component percentiles.
+
+The authoritative early decision metric is **max observed `T_ingress → L2`**, with all samples retained:
+
+| max `T_ingress → L2` | C1.4a classification | Required action |
+| ---: | --- | --- |
+| < 200,000 ns | `GREEN_STRONG_HEADROOM` | continue to C1.5 |
+| 200,000..499,999 ns | `GREEN_FEASIBLE` | continue to C1.5; retain breakdown for optimization |
+| 500,000..999,999 ns | `AMBER_LOW_HEADROOM` | do not proceed routinely; profile/filter/serialization/wire/consumer handoff and obtain reviewed disposition before C1.5 |
+| >= 1,000,000 ns | `RED_ARCHITECTURE_FAIL` | stop C1 progression; the ingress→Rust segment alone consumes the complete local target and must be corrected/requalified |
+
+Any dropped qualifying record, silent lane-exhaustion coverage loss, corruption, timestamp-domain incompatibility or unaccounted measurement gap makes C1.4a `FAIL` regardless of the numerical latency.
+
+The classification is a **feasibility result only**. Even `GREEN_STRONG_HEADROOM` does not prove `T0 → T_buy < 1 ms`, Mainnet ingress advantage, provider ordering, inclusion or acquisition. It only establishes that the measured native ingress→Rust boundary leaves quantified local headroom for later C1/C2/C3 work. C1.9 remains the full native latency qualification after C1.5–C1.8 are integrated.
+
+Required evidence artifact:
+
+`bsc/native/evidence/c1/c1-4a-early-latency-<date>.json`
+
+It must contain the raw-sample reference(s), exact command(s), host/build/config identity, threshold counts, max, classification and the standard C1 non-claims.
+
 ### Hook/path-early qualification
 
 Controlled Testnet launches may measure:
@@ -469,6 +503,21 @@ Implement:
 - direct-slot serialization only if measurement later justifies it.
 
 **Exit:** no invalid transaction authorized by moving the hook; filter false-negative suite PASS.
+
+### C1.4a — early architecture feasibility gate
+
+Immediately after C1.4, before C1.5 changes the Rust receive path, run the mandatory §18 early-feasibility measurement against the real integrated C1.4 geth→Wire-V2→Rust boundary.
+
+Required:
+
+- simultaneous independent peer producers on their own V2 lanes;
+- preserved raw samples for `T_packet_decoded`, `T_ingress`, L1 and L2;
+- exact source/build/config/clock identity;
+- counts for drops, oversize, corruption, queue pressure and uncovered lane exhaustion;
+- max-based classification using the §18 thresholds;
+- committed C1.4a evidence artifact.
+
+**Exit:** `GREEN_STRONG_HEADROOM` or `GREEN_FEASIBLE` with zero integrity/coverage failures. `AMBER_LOW_HEADROOM` requires explicit reviewed optimization/disposition before C1.5. `RED_ARCHITECTURE_FAIL` blocks C1 progression until corrected and requalified.
 
 ### C1.5 — Rust HOT0 / zero-copy
 
@@ -539,7 +588,7 @@ Only after C1.10 may execution proceed to C2.
 
 ## 20. Required C1 completion statement
 
-C1 can be marked `IMPLEMENTED_TESTED/FROZEN` only when C1.1–C1.10 exits are satisfied.
+C1 can be marked `IMPLEMENTED_TESTED/FROZEN` only when C1.1–C1.10 exits are satisfied, including the mandatory C1.4a early-feasibility gate and C1.9b hook/path qualification.
 
 The C1 completion statement must still say:
 
