@@ -47,20 +47,14 @@
     "fastlane_race": "PASS",
     "eth_protocols_eth": "PASS",
     "eth": "PASS",
-    "core": "PENDING_FINAL_OUTPUT",
-    "geth_build": "PENDING",
-    "go_rust_lifecycle_interop": "PENDING"
+    "core": "PASS",
+    "geth_build": "PASS",
+    "go_rust_lifecycle_interop": "PASS"
   },
-  "current_verdict": "IMPLEMENTED_TESTING_IN_PROGRESS",
-  "c1_3_pass": false,
+  "current_verdict": "C1.3_PASS",
+  "c1_3_pass": true,
   "freeze": false,
-  "pending_before_pass": [
-    "go test ./core",
-    "go build ./cmd/geth",
-    "C1.3 Go-Rust lifecycle interoperability",
-    "final root/project_0 safety check",
-    "final evidence update and commit"
-  ],
+  "pending_before_pass": [],
   "non_claims": {
     "c1_3_frozen": false,
     "geth_ingress_switched_to_v2": false,
@@ -68,5 +62,10 @@
     "mainnet_ingress_coverage": "NOT_PROVEN",
     "t0_to_t_buy_lt_1ms": "NOT_PROVEN",
     "live": false
+  },
+  "implementation_checkpoint_commit": "5550108",
+  "root_safety": {
+    "project_0_untouched": "PASS",
+    "git_diff_check": "PASS"
   }
 }
