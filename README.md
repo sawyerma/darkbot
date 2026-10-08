@@ -134,9 +134,21 @@ If a ZIP is handed to an external implementer, record its SHA-256 as well as the
 
 ### 3a. Preferred Fable handoff: compiled baseline bundle
 
-For substantial Fable implementation work, especially native Go/Rust work, prefer a **compiled baseline bundle** over a source-only ZIP.
+For substantial Fable implementation work, especially native Go/Rust work, prefer a **slim compiled baseline bundle** over a source-only ZIP.
+
+**Hard package limit:** the final Fable ZIP must not exceed **80 MiB (83,886,080 bytes)** unless a task explicitly documents and approves an exception before packaging.
 
 Reason: Fable may not have the required Go/Rust toolchains or network access. A source-only archive is still the authoritative source snapshot, but it does not tell Fable which exact baseline was locally proven to compile and pass the current gates. The compiled baseline bundle adds that evidence without weakening the rule that Fable's later modifications must be recompiled and requalified locally.
+
+Keep the compiled bundle small by default:
+
+- export only the project/task scope actually needed by Fable, plus required root/normative documents;
+- do not include unrelated projects merely because they share the monorepo;
+- never package Cargo `target/`, Go build caches or other build caches;
+- do not package a complete second copy of a large pinned external repository when selected pinned source context plus exact pin identity is sufficient;
+- do not package large host-specific binaries merely to prove they were built: record their SHA-256 and retain the build/test logs instead;
+- include full binaries only when Fable actually needs to inspect or execute them and the 80 MiB cap still holds;
+- retain exact build/test logs, toolchain identity, source hashes and package checksums.
 
 The rule is:
 
@@ -190,7 +202,7 @@ If a repository integration script requires Git metadata to verify a pin, use a 
   SHA256SUMS.txt
 ```
 
-Compiled binaries are supporting baseline evidence, not a substitute for source or logs. They may be host-specific and may not run in Fable's environment.
+Compiled binaries are supporting baseline evidence, not a substitute for source or logs. They may be host-specific and may not run in Fable's environment. Under the default 80 MiB limit, prefer recording the binary SHA-256 in `BASELINE_BUILD_STATUS.md` and omitting the binary itself.
 
 #### BSC/Fable example
 
@@ -314,10 +326,20 @@ find . \
 
 cd "$OUT"
 
-zip -qry "$ZIP" "$NAME"
+zip -qry -9 "$ZIP" "$NAME"
 
 shasum -a 256 "$ZIP"
 ls -lh "$ZIP"
+
+BYTES="$(stat -f%z "$ZIP")"
+MAX_BYTES=83886080
+
+test "$BYTES" -le "$MAX_BYTES" || {
+  echo "FABLE_PACKAGE_TOO_LARGE bytes=$BYTES max=$MAX_BYTES" >&2
+  exit 1
+}
+
+echo "FABLE_PACKAGE_SIZE_PASS bytes=$BYTES max=$MAX_BYTES"
 ```
 
 The package must include a short `BASELINE_BUILD_STATUS.md` stating that the bundled build/test results prove only the supplied **baseline**, not Fable's subsequent changes.
