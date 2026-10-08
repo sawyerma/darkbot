@@ -1,4 +1,4 @@
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 
 //! Runner: Ingress → State → Detection (3 Trigger) → Health → Economics → Planner → TX → Submit → Reconcile.
 //!
@@ -16,14 +16,14 @@
 pub mod builder;
 pub mod fixture;
 pub mod pending;
+pub mod pipeline;
+pub mod record;
+pub mod remote_workers;
 #[cfg(feature = "crate_health")]
 pub mod route;
 pub mod shadow_ledger;
 pub mod winner;
 pub mod winner_tracker;
-pub mod pipeline;
-pub mod record;
-pub mod remote_workers;
 
 pub mod lookup_tables;
 pub mod market_observer;

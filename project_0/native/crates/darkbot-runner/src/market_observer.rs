@@ -32,6 +32,7 @@
 //!
 //! This measures MARKET EDGE only. It is not DarkBot executable edge, capture rate or PnL.
 
+use crate::winner::{check_transaction_identity, end_liquidation_instructions, RpcTransaction};
 use base64::Engine as _;
 use darkbot_common::channel::bounded;
 use darkbot_common::lifecycle::Shutdown;
@@ -796,7 +797,16 @@ pub struct MarketStats {
     pub decoder_error_count: u64,
     pub decoder_errors_successful_tx: u64,
     pub base64_error_count: u64,
+    /// Successful transactions whose logs were truncated by the runtime (total).
     pub logs_truncated: u64,
+    /// [r6] Truncated logs proven complete for liquidations via the F8 instruction truth.
+    pub logs_truncated_qualified: u64,
+    /// [r6] Truncated logs that could not be checked (fetch/parse/identity/...): fail closed.
+    pub logs_truncated_unqualified: u64,
+    /// [r6] Instruction end_liquidations and logged receiver events disagree: fail closed.
+    pub logs_truncated_liquidation_mismatch: u64,
+    pub truncated_instruction_end_liquidations: u64,
+    pub truncated_log_end_liquidations: u64,
     pub log_messages_missing: u64,
     pub gap_count: u64,
     pub reconnect_count: u64,
@@ -816,6 +826,66 @@ pub struct MarketStats {
     pub max_stream_silence_ms: u64,
     pub first_observed_slot: Option<u64>,
     pub last_observed_slot: Option<u64>,
+}
+
+/// [r6] A successful transaction with truncated logs awaiting instruction-based qualification.
+struct TruncatedPending {
+    signature: String,
+    slot: u64,
+    /// Receiver events decoded from the (truncated) logs as `(target, receiver)`.
+    logged: Vec<(Pubkey, Pubkey)>,
+}
+
+/// [r6] Outcome of checking a truncated-log transaction against the F8 instruction truth.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TruncationQualification {
+    /// Instruction end_liquidations == logged events (multiset of target+receiver).
+    Qualified { instruction_liquidations: usize },
+    /// Instruction end_liquidations and logged events differ.
+    Mismatch { instruction_liquidations: usize },
+    /// Could not be checked; bounded reason code.
+    Unqualified(&'static str),
+}
+
+/// [r6] Pure qualification of a fetched/payload transaction (typed F8 view) against the logged
+/// receiver events. No second decoder: `end_liquidation_instructions` is the winner-parser truth.
+pub fn qualify_truncated(
+    tx_json: Value,
+    signature: &str,
+    slot: u64,
+    program: &Pubkey,
+    logged: &[(Pubkey, Pubkey)],
+) -> TruncationQualification {
+    let tx: RpcTransaction = match serde_json::from_value(tx_json) {
+        Ok(t) => t,
+        Err(_) => return TruncationQualification::Unqualified("TX_DECODE"),
+    };
+    if check_transaction_identity(&tx, signature, slot).is_err() {
+        return TruncationQualification::Unqualified("IDENTITY_MISMATCH");
+    }
+    let Some(meta) = tx.meta.as_ref() else {
+        return TruncationQualification::Unqualified("META_MISSING");
+    };
+    if meta.err.is_some() {
+        return TruncationQualification::Unqualified("TX_FAILED_ON_CHAIN");
+    }
+    match end_liquidation_instructions(&tx, program) {
+        Err(e) => TruncationQualification::Unqualified(e.code()),
+        Ok(mut instruction) => {
+            let mut logged = logged.to_vec();
+            instruction.sort();
+            logged.sort();
+            if instruction == logged {
+                TruncationQualification::Qualified {
+                    instruction_liquidations: instruction.len(),
+                }
+            } else {
+                TruncationQualification::Mismatch {
+                    instruction_liquidations: instruction.len(),
+                }
+            }
+        }
+    }
 }
 
 struct DeferredLiquidation {
@@ -846,6 +916,8 @@ pub struct ObserverCore {
     edges: Vec<f64>,
     receivers: HashMap<String, (u64, f64)>,
     deferred: VecDeque<DeferredLiquidation>,
+    truncated_pending: VecDeque<TruncatedPending>,
+    truncated_unqualified_reasons: BTreeMap<&'static str, u64>,
     incomplete_reasons: BTreeSet<&'static str>,
     last_slot_frame_ns: Option<u64>,
     enrichment_init_error: Option<String>,
@@ -901,6 +973,8 @@ impl ObserverCore {
             edges: Vec::new(),
             receivers: HashMap::new(),
             deferred: VecDeque::new(),
+            truncated_pending: VecDeque::new(),
+            truncated_unqualified_reasons: BTreeMap::new(),
             incomplete_reasons: BTreeSet::new(),
             last_slot_frame_ns: None,
             enrichment_init_error: None,
@@ -936,10 +1010,91 @@ impl ObserverCore {
             && self.stats.fatal_count == 0
     }
 
+    /// [r6] Truncated logs no longer fail by themselves: only unqualified or mismatching ones do
+    /// (and any still awaiting qualification).
     pub fn decode_complete(&self) -> bool {
-        self.stats.logs_truncated == 0
-            && self.stats.log_messages_missing == 0
+        self.stats.log_messages_missing == 0
             && self.stats.decoder_errors_successful_tx == 0
+            && self.stats.logs_truncated_unqualified == 0
+            && self.stats.logs_truncated_liquidation_mismatch == 0
+            && self.truncated_pending.is_empty()
+    }
+
+    pub fn has_truncated_pending(&self) -> bool {
+        !self.truncated_pending.is_empty()
+    }
+
+    fn apply_truncation(&mut self, q: TruncationQualification) {
+        match q {
+            TruncationQualification::Qualified {
+                instruction_liquidations,
+            } => {
+                self.stats.logs_truncated_qualified += 1;
+                self.stats.truncated_instruction_end_liquidations +=
+                    instruction_liquidations as u64;
+            }
+            TruncationQualification::Mismatch {
+                instruction_liquidations,
+            } => {
+                self.stats.logs_truncated_liquidation_mismatch += 1;
+                self.stats.truncated_instruction_end_liquidations +=
+                    instruction_liquidations as u64;
+                self.mark_incomplete("TRUNCATED_LIQUIDATION_MISMATCH");
+            }
+            TruncationQualification::Unqualified(code) => {
+                self.stats.logs_truncated_unqualified += 1;
+                *self.truncated_unqualified_reasons.entry(code).or_insert(0) += 1;
+                self.mark_incomplete("LOGS_TRUNCATED_UNQUALIFIED");
+            }
+        }
+    }
+
+    /// Records a successful truncated transaction: counts and returns the logged pairs.
+    fn note_truncated(&mut self, decoded: &LogDecode) -> Vec<(Pubkey, Pubkey)> {
+        self.stats.logs_truncated += 1;
+        self.stats.truncated_log_end_liquidations += decoded.events.len() as u64;
+        decoded
+            .events
+            .iter()
+            .map(|e| (e.target, e.receiver))
+            .collect()
+    }
+
+    /// [r6] Post-capture qualification of truncated `logs`-source transactions (never during
+    /// capture). Same bounded fetch contract as enrichment; failures fail closed.
+    pub fn qualify_truncated_deferred(
+        &mut self,
+        fetch: &mut dyn FnMut(&str) -> Result<Option<Value>, String>,
+        wait: &mut dyn FnMut(Duration),
+        budget_left: &mut dyn FnMut() -> bool,
+    ) {
+        let retry = Duration::from_millis(self.enrich_cfg.retry_ms);
+        let max_attempts = self.enrich_cfg.max_attempts;
+        while let Some(p) = self.truncated_pending.pop_front() {
+            let mut q = TruncationQualification::Unqualified("FETCH_FAILED");
+            for attempt in 1..=max_attempts {
+                if !budget_left() {
+                    q = TruncationQualification::Unqualified("PHASE_BUDGET_EXHAUSTED");
+                    break;
+                }
+                self.stats.rpc_fallback_count += 1;
+                if let Ok(Some(tx)) = fetch(&p.signature) {
+                    q = qualify_truncated(tx, &p.signature, p.slot, &self.program, &p.logged);
+                    break;
+                }
+                if attempt < max_attempts {
+                    wait(retry);
+                }
+            }
+            self.apply_truncation(q);
+        }
+    }
+
+    /// Every still-pending truncated transaction fails closed with `code`.
+    pub fn fail_truncated_pending(&mut self, code: &'static str) {
+        while self.truncated_pending.pop_front().is_some() {
+            self.apply_truncation(TruncationQualification::Unqualified(code));
+        }
     }
 
     pub fn enrichment_complete(&self) -> bool {
@@ -1052,10 +1207,6 @@ impl ObserverCore {
             if d.decoder_errors > 0 {
                 self.stats.decoder_errors_successful_tx += d.decoder_errors;
                 self.mark_incomplete("DECODER_ERROR");
-            }
-            if d.truncated {
-                self.stats.logs_truncated += 1;
-                self.mark_incomplete("LOGS_TRUNCATED");
             }
         } else {
             self.stats.failed_tx_receiver_events_ignored += d.events.len() as u64;
@@ -1227,6 +1378,25 @@ impl ObserverCore {
         };
         let decoded = decode_receiver_events(&logs, &self.program);
         self.absorb_decode(&decoded, success);
+        if success && decoded.truncated {
+            // [r6] the payload already carries the full transaction: qualify immediately, no RPC.
+            let logged = self.note_truncated(&decoded);
+            let q = match tx {
+                Some(Value::Object(obj)) => {
+                    let mut with_slot = obj.clone();
+                    with_slot.insert("slot".to_string(), json!(t.slot));
+                    qualify_truncated(
+                        Value::Object(with_slot),
+                        &t.signature,
+                        t.slot,
+                        &self.program,
+                        &logged,
+                    )
+                }
+                _ => TruncationQualification::Unqualified("TX_DECODE"),
+            };
+            self.apply_truncation(q);
+        }
         if !success || decoded.events.is_empty() {
             return Ok(());
         }
@@ -1283,6 +1453,19 @@ impl ObserverCore {
         }
         let decoded = decode_receiver_events(&l.logs, &self.program);
         self.absorb_decode(&decoded, success);
+        if success && decoded.truncated {
+            // [r6] qualified after capture against the fetched transaction (bounded, counted).
+            let logged = self.note_truncated(&decoded);
+            if self.truncated_pending.len() >= self.enrich_cfg.max_pending {
+                self.apply_truncation(TruncationQualification::Unqualified("QUEUE_FULL"));
+            } else {
+                self.truncated_pending.push_back(TruncatedPending {
+                    signature: l.signature.clone(),
+                    slot: l.slot,
+                    logged,
+                });
+            }
+        }
         if !success || decoded.events.is_empty() {
             return Ok(());
         }
@@ -1581,6 +1764,13 @@ impl ObserverCore {
             "foreign_program_events": s.foreign_program_events,
             "failed_tx_receiver_events_ignored": s.failed_tx_receiver_events_ignored,
             "logs_truncated": s.logs_truncated,
+            "logs_truncated_total": s.logs_truncated,
+            "logs_truncated_qualified": s.logs_truncated_qualified,
+            "logs_truncated_unqualified": s.logs_truncated_unqualified,
+            "logs_truncated_liquidation_mismatch": s.logs_truncated_liquidation_mismatch,
+            "truncated_instruction_end_liquidations": s.truncated_instruction_end_liquidations,
+            "truncated_log_end_liquidations": s.truncated_log_end_liquidations,
+            "truncated_unqualified_reasons": self.truncated_unqualified_reasons,
             "log_messages_missing": s.log_messages_missing,
             "events_outside_observation": s.events_outside_observation,
             "events_after_cutoff": s.events_after_cutoff,
@@ -1669,6 +1859,13 @@ const REPORT_KEYS: &[&str] = &[
     "reconnect_count",
     "ingress_overflow_count",
     "decoder_error_count",
+    "logs_truncated_total",
+    "logs_truncated_qualified",
+    "logs_truncated_unqualified",
+    "logs_truncated_liquidation_mismatch",
+    "truncated_instruction_end_liquidations",
+    "truncated_log_end_liquidations",
+    "truncated_unqualified_reasons",
     "rpc_fallback_count",
     "events_after_cutoff",
     "max_stream_silence_ms",
@@ -1711,6 +1908,7 @@ pub fn finalize(
 ) -> Result<(Value, String), String> {
     core.write_deferred_unenriched(sink, "NOT_ENRICHED")
         .map_err(|e| format!("liquidations write: {e}"))?;
+    core.fail_truncated_pending("NOT_QUALIFIED");
     core.coverage(sink, "STOPPED", now_unix_s, None, detail)
         .map_err(|e| format!("coverage write: {e}"))?;
     sink.flush().map_err(|e| format!("flush: {e}"))?;
@@ -1835,35 +2033,53 @@ pub fn finish_capture(
     outcome: CaptureOutcome,
 ) -> Result<(Value, String, Option<String>), String> {
     let mut write_error = outcome.write_error;
-    if cfg.source == MarketSource::Logs && core.has_deferred() && write_error.is_none() {
+    let needs_rpc = core.has_deferred() || core.has_truncated_pending();
+    if cfg.source == MarketSource::Logs && needs_rpc && write_error.is_none() {
         let fetcher = cfg
             .rpc_url
             .clone()
             .ok_or_else(|| "P0_RPC_URL missing: enrichment unavailable".to_string())
             .and_then(|url| RpcFetcher::new(url, cfg.enrich.timeout_ms, cfg.commitment));
         let deadline = Instant::now() + Duration::from_secs(cfg.enrich.phase_max_secs);
-        let r = match fetcher {
+        match fetcher {
             Ok(f) => {
                 let mut fetch = |sig: &str| f.get_transaction(sig);
-                let fetch_dyn: &mut dyn FnMut(&str) -> Result<Option<Value>, String> = &mut fetch;
-                core.enrichment_phase(
-                    sink,
-                    Ok(fetch_dyn),
+                if core.has_deferred() {
+                    let fetch_dyn: &mut dyn FnMut(&str) -> Result<Option<Value>, String> =
+                        &mut fetch;
+                    let r = core.enrichment_phase(
+                        sink,
+                        Ok(fetch_dyn),
+                        &mut |d: Duration| std::thread::sleep(d),
+                        &mut || Instant::now() < deadline,
+                        unix_now_s(),
+                    );
+                    if let Err(e) = r {
+                        write_error = Some(e.to_string());
+                    }
+                }
+                // [r6] truncated-log qualification against the full transaction instructions
+                core.qualify_truncated_deferred(
+                    &mut fetch,
                     &mut |d: Duration| std::thread::sleep(d),
                     &mut || Instant::now() < deadline,
-                    unix_now_s(),
-                )
+                );
             }
-            Err(e) => core.enrichment_phase(
-                sink,
-                Err(e),
-                &mut |_d: Duration| {},
-                &mut || false,
-                unix_now_s(),
-            ),
-        };
-        if let Err(e) = r {
-            write_error = Some(e.to_string());
+            Err(e) => {
+                if core.has_deferred() {
+                    let r = core.enrichment_phase(
+                        sink,
+                        Err(e),
+                        &mut |_d: Duration| {},
+                        &mut || false,
+                        unix_now_s(),
+                    );
+                    if let Err(e) = r {
+                        write_error = Some(e.to_string());
+                    }
+                }
+                core.fail_truncated_pending("NO_RPC_FOR_QUALIFICATION");
+            }
         }
     }
     let ready = outcome.ready_unix_s;
@@ -3280,6 +3496,338 @@ mod tests {
         assert_eq!(utc_iso(0), "1970-01-01T00:00:00Z");
         assert_eq!(utc_iso(1_700_000_000), "2023-11-14T22:13:20Z");
         assert_eq!(utc_compact(951_782_400), "20000229T000000Z");
+    }
+
+    // ---------------------------------------------------------------- [r6] truncated-log qualification
+
+    #[allow(clippy::too_many_arguments)]
+    fn liq_tx_json(
+        sig: &str,
+        slot: u64,
+        ixs: &[(Pubkey, Pubkey)],
+        receiver_in_lut: bool,
+        with_loaded: bool,
+        logs: Vec<String>,
+        failed: bool,
+    ) -> Value {
+        fn push(keys: &mut Vec<String>, k: String) -> usize {
+            keys.push(k);
+            keys.len() - 1
+        }
+        let mut statics: Vec<String> =
+            vec![Pubkey::new_unique().to_string(), program().to_string()];
+        let mut loaded_w: Vec<String> = Vec::new();
+        let mut layouts: Vec<(usize, usize, usize, Result<usize, usize>, usize)> = Vec::new();
+        for (t, r) in ixs {
+            let ti = push(&mut statics, t.to_string());
+            let rec = push(&mut statics, Pubkey::new_unique().to_string());
+            let grp = push(&mut statics, Pubkey::new_unique().to_string());
+            let recv = if receiver_in_lut {
+                loaded_w.push(r.to_string());
+                Err(loaded_w.len() - 1)
+            } else {
+                Ok(push(&mut statics, r.to_string()))
+            };
+            let fee = push(&mut statics, Pubkey::new_unique().to_string());
+            layouts.push((ti, rec, grp, recv, fee));
+        }
+        let n_static = statics.len();
+        let data = bs58::encode(darkbot_project0::protocol::ix::END_LIQUIDATION).into_string();
+        let instructions: Vec<Value> = layouts
+            .iter()
+            .map(|(ti, rec, grp, recv, fee)| {
+                let ri = match recv {
+                    Ok(i) => *i,
+                    Err(pos) => n_static + *pos,
+                };
+                json!({"programIdIndex": 1, "accounts": [ti, rec, grp, ri, fee], "data": data})
+            })
+            .collect();
+        let lookups = if receiver_in_lut {
+            json!([{"accountKey": Pubkey::new_unique().to_string(), "writableIndexes": [0], "readonlyIndexes": []}])
+        } else {
+            json!([])
+        };
+        let err = if failed {
+            json!({"InstructionError": [0, "Custom"]})
+        } else {
+            Value::Null
+        };
+        let mut meta = json!({"err": err, "fee": 5000, "logMessages": logs, "preBalances": [], "postBalances": [],
+            "preTokenBalances": [], "postTokenBalances": []});
+        if with_loaded {
+            meta["loadedAddresses"] = json!({"writable": loaded_w, "readonly": []});
+        }
+        json!({"slot": slot, "version": 0,
+            "transaction": {"signatures": [sig], "message": {"accountKeys": statics, "instructions": instructions, "addressTableLookups": lookups}},
+            "meta": meta})
+    }
+
+    /// Helius `transactionNotification.result` shape built from a getTransaction-shaped tx.
+    fn as_observed(tx: &Value, sig: &str, slot: u64, failed: bool) -> TransactionObserved {
+        let mut inner = tx.clone();
+        inner.as_object_mut().unwrap().remove("slot");
+        TransactionObserved {
+            signature: sig.into(),
+            slot,
+            tx_index_in_slot: None,
+            version: TxVersion::V0,
+            err: if failed { Some("Custom".into()) } else { None },
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 1,
+            raw: json!({"signature": sig, "slot": slot, "transaction": inner}),
+        }
+    }
+
+    fn truncated_logs(events: &[(Pubkey, Pubkey)]) -> Vec<String> {
+        let p = program();
+        let mut v = vec![format!("Program {p} invoke [1]")];
+        v.extend(events.iter().map(|(t, r)| data_line(*t, *r, 2.0, 1.0, 1)));
+        v.push("Log truncated".into());
+        v
+    }
+
+    fn observe_truncated(
+        ixs: &[(Pubkey, Pubkey)],
+        events: &[(Pubkey, Pubkey)],
+        lut: bool,
+        loaded: bool,
+    ) -> ObserverCore {
+        let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+        let mut sink = VecSink::default();
+        let tx = liq_tx_json("sigT", 50, ixs, lut, loaded, truncated_logs(events), false);
+        core.on_transaction(&as_observed(&tx, "sigT", 50, false), 0, &mut sink)
+            .unwrap();
+        core
+    }
+
+    #[test]
+    fn truncated_logs_with_no_end_liquidation_can_be_qualified() {
+        let core = observe_truncated(&[], &[], false, false);
+        assert_eq!(
+            (
+                core.stats.logs_truncated,
+                core.stats.logs_truncated_qualified,
+                core.stats.logs_truncated_unqualified
+            ),
+            (1, 1, 0)
+        );
+        assert!(core.decode_complete());
+        let s = core.summary(&ctx(true, true, 600.0));
+        assert_eq!(s["market_capture_complete"].as_bool(), Some(true));
+        assert_eq!(
+            s["verdict"].as_str(),
+            Some("MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED")
+        ); // coverage stays fail closed
+        assert_eq!(s["source_coverage_verified"].as_bool(), Some(false));
+        // logs source: deferred until after capture, then qualified against the fetched transaction
+        let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
+        let mut sink = VecSink::default();
+        core.on_logs(
+            &logs_event("sigL", 51, truncated_logs(&[]), None, 1),
+            0,
+            &mut sink,
+        )
+        .unwrap();
+        assert!(!core.decode_complete()); // pending qualification is not complete
+        let fetched = liq_tx_json("sigL", 51, &[], false, false, truncated_logs(&[]), false);
+        core.qualify_truncated_deferred(
+            &mut |_s: &str| Ok(Some(fetched.clone())),
+            &mut |_d: Duration| {},
+            &mut || true,
+        );
+        assert_eq!(core.stats.logs_truncated_qualified, 1);
+        assert!(core.decode_complete());
+    }
+
+    #[test]
+    fn truncated_logs_with_exact_instruction_event_parity_can_be_qualified() {
+        let (t1, r1, t2, r2) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        // multiset parity, independent of order
+        let core = observe_truncated(&[(t1, r1), (t2, r2)], &[(t2, r2), (t1, r1)], false, false);
+        assert_eq!(core.stats.logs_truncated_qualified, 1);
+        assert_eq!(
+            (
+                core.stats.truncated_instruction_end_liquidations,
+                core.stats.truncated_log_end_liquidations
+            ),
+            (2, 2)
+        );
+        assert_eq!(core.stats.liquidation_events, 2);
+        assert!(core.decode_complete());
+    }
+
+    #[test]
+    fn truncated_logs_missing_liquidation_event_fail_closed() {
+        let (t, r) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let core = observe_truncated(&[(t, r)], &[], false, false);
+        assert_eq!(core.stats.logs_truncated_liquidation_mismatch, 1);
+        assert!(!core.decode_complete());
+        let s = core.summary(&ctx(true, true, 600.0));
+        assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
+        assert!(s["incomplete_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == "TRUNCATED_LIQUIDATION_MISMATCH"));
+        assert_eq!(s["liquidation_events"].as_u64(), Some(0)); // nothing invented
+    }
+
+    #[test]
+    fn truncated_logs_wrong_target_or_receiver_fail_closed() {
+        let (t, r) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let wrong_receiver =
+            observe_truncated(&[(t, r)], &[(t, Pubkey::new_unique())], false, false);
+        assert_eq!(wrong_receiver.stats.logs_truncated_liquidation_mismatch, 1);
+        let wrong_target = observe_truncated(&[(t, r)], &[(Pubkey::new_unique(), r)], false, false);
+        assert_eq!(wrong_target.stats.logs_truncated_liquidation_mismatch, 1);
+        let duplicated = observe_truncated(&[(t, r)], &[(t, r), (t, r)], false, false);
+        assert_eq!(duplicated.stats.logs_truncated_liquidation_mismatch, 1); // multiset, not set
+        assert!(
+            !wrong_receiver.decode_complete()
+                && !wrong_target.decode_complete()
+                && !duplicated.decode_complete()
+        );
+    }
+
+    #[test]
+    fn truncated_v0_loaded_addresses_are_resolved() {
+        let (t, r) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let core = observe_truncated(&[(t, r)], &[(t, r)], true, true);
+        assert_eq!(
+            (
+                core.stats.logs_truncated_qualified,
+                core.stats.logs_truncated_liquidation_mismatch
+            ),
+            (1, 0)
+        );
+        assert!(core.decode_complete());
+    }
+
+    #[test]
+    fn truncated_missing_loaded_addresses_fail_closed() {
+        let (t, r) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let core = observe_truncated(&[(t, r)], &[(t, r)], true, false);
+        assert_eq!(core.stats.logs_truncated_unqualified, 1);
+        assert!(!core.decode_complete());
+        let s = core.summary(&ctx(true, true, 600.0));
+        assert_eq!(
+            s["truncated_unqualified_reasons"]["LOADED_ADDRESSES_MISSING"].as_u64(),
+            Some(1)
+        );
+        assert!(s["incomplete_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == "LOGS_TRUNCATED_UNQUALIFIED"));
+    }
+
+    #[test]
+    fn truncated_fetch_failure_or_wrong_transaction_fail_closed() {
+        let mut core = open_core(
+            MarketSource::Logs,
+            EnrichConfig {
+                max_attempts: 2,
+                ..EnrichConfig::DEFAULT
+            },
+        );
+        let mut sink = VecSink::default();
+        core.on_logs(
+            &logs_event("a", 1, truncated_logs(&[]), None, 1),
+            0,
+            &mut sink,
+        )
+        .unwrap();
+        core.on_logs(
+            &logs_event("b", 2, truncated_logs(&[]), None, 2),
+            0,
+            &mut sink,
+        )
+        .unwrap();
+        let other = liq_tx_json("zzz", 2, &[], false, false, vec![], false);
+        core.qualify_truncated_deferred(
+            &mut |sig: &str| {
+                if sig == "a" {
+                    Err("http 429".into())
+                } else {
+                    Ok(Some(other.clone()))
+                }
+            },
+            &mut |_d: Duration| {},
+            &mut || true,
+        );
+        assert_eq!(core.stats.logs_truncated_unqualified, 2);
+        let s = core.summary(&ctx(true, true, 600.0));
+        assert_eq!(
+            s["truncated_unqualified_reasons"]["FETCH_FAILED"].as_u64(),
+            Some(1)
+        );
+        assert_eq!(
+            s["truncated_unqualified_reasons"]["IDENTITY_MISMATCH"].as_u64(),
+            Some(1)
+        );
+        // never qualified before finalize -> fail closed
+        let mut late = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
+        late.on_logs(
+            &logs_event("c", 3, truncated_logs(&[]), None, 3),
+            0,
+            &mut sink,
+        )
+        .unwrap();
+        late.fail_truncated_pending("NO_RPC_FOR_QUALIFICATION");
+        assert_eq!(late.stats.logs_truncated_unqualified, 1);
+    }
+
+    #[test]
+    fn failed_transaction_does_not_create_liquidation() {
+        let (t, r) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+        let mut sink = VecSink::default();
+        let tx = liq_tx_json(
+            "f",
+            9,
+            &[(t, r)],
+            false,
+            false,
+            truncated_logs(&[(t, r)]),
+            true,
+        );
+        core.on_transaction(&as_observed(&tx, "f", 9, true), 0, &mut sink)
+            .unwrap();
+        assert_eq!(
+            (core.stats.liquidation_events, core.stats.logs_truncated),
+            (0, 0)
+        );
+        assert!(sink.liq.is_empty());
+        assert!(core.decode_complete());
+    }
+
+    #[test]
+    fn non_truncated_existing_behavior_unchanged() {
+        let (t, r) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+        let mut sink = VecSink::default();
+        let logs = logs_with(&program(), &[data_line(t, r, 2.0, 1.0, 1)]);
+        let tx = liq_tx_json("n", 7, &[(t, r)], false, false, logs, false);
+        core.on_transaction(&as_observed(&tx, "n", 7, false), 0, &mut sink)
+            .unwrap();
+        assert_eq!(core.stats.liquidation_events, 1);
+        assert_eq!(
+            (
+                core.stats.logs_truncated,
+                core.stats.logs_truncated_qualified,
+                core.stats.truncated_instruction_end_liquidations
+            ),
+            (0, 0, 0)
+        );
+        assert!(core.decode_complete());
+        let s = core.summary(&ctx(true, true, 600.0));
+        assert_eq!(s["market_capture_complete"].as_bool(), Some(true));
     }
 
     // ---------------------------------------------------------------- real audit fixtures (6/6)

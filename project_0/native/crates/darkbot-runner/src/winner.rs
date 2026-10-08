@@ -40,7 +40,11 @@ pub struct Winner {
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum WinnerIdentity {
     /// Exactly one successful end_liquidation for the account in the earliest slot.
-    Unique { signature: String, receiver: String, tx_version: String },
+    Unique {
+        signature: String,
+        receiver: String,
+        tx_version: String,
+    },
     /// [F8] Several successful end_liquidations for the account in the same earliest slot.
     /// Intra-slot order is UNKNOWN: no signature/receiver is asserted as winner. All candidates
     /// are retained as evidence, sorted by signature for determinism only (no ordering meaning).
@@ -134,13 +138,30 @@ pub(crate) enum WinnerParseError {
     InvalidInstructionData,
 }
 
+impl WinnerParseError {
+    /// Stable, bounded reason code (no keys or indices) for telemetry.
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            WinnerParseError::MetaMissing => "META_MISSING",
+            WinnerParseError::InvalidKey(_) => "INVALID_KEY",
+            WinnerParseError::LoadedAddressesMissing => "LOADED_ADDRESSES_MISSING",
+            WinnerParseError::IndexOutOfRange { .. } => "INDEX_OUT_OF_RANGE",
+            WinnerParseError::EndLiquidationLayout { .. } => "END_LIQUIDATION_LAYOUT",
+            WinnerParseError::InvalidInstructionData => "INVALID_INSTRUCTION_DATA",
+        }
+    }
+}
+
 impl std::fmt::Display for WinnerParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WinnerParseError::MetaMissing => write!(f, "WINNER_META_MISSING"),
             WinnerParseError::InvalidKey(k) => write!(f, "WINNER_INVALID_KEY:{k}"),
             WinnerParseError::LoadedAddressesMissing => {
-                write!(f, "WINNER_LOADED_ADDRESSES_MISSING: v0 lookups without meta.loadedAddresses")
+                write!(
+                    f,
+                    "WINNER_LOADED_ADDRESSES_MISSING: v0 lookups without meta.loadedAddresses"
+                )
             }
             WinnerParseError::IndexOutOfRange { index, keys } => {
                 write!(f, "WINNER_INDEX_OUT_OF_RANGE: index={index} keys={keys}")
@@ -148,7 +169,9 @@ impl std::fmt::Display for WinnerParseError {
             WinnerParseError::EndLiquidationLayout { accounts } => {
                 write!(f, "WINNER_END_LIQUIDATION_LAYOUT: accounts={accounts}")
             }
-            WinnerParseError::InvalidInstructionData => write!(f, "WINNER_INVALID_INSTRUCTION_DATA"),
+            WinnerParseError::InvalidInstructionData => {
+                write!(f, "WINNER_INVALID_INSTRUCTION_DATA")
+            }
         }
     }
 }
@@ -161,7 +184,10 @@ fn key_at(keys: &[Pubkey], index: u64) -> Result<Pubkey, WinnerParseError> {
     usize::try_from(index)
         .ok()
         .and_then(|i| keys.get(i).copied())
-        .ok_or(WinnerParseError::IndexOutOfRange { index, keys: keys.len() })
+        .ok_or(WinnerParseError::IndexOutOfRange {
+            index,
+            keys: keys.len(),
+        })
 }
 
 fn version_label(v: Option<&serde_json::Value>) -> String {
@@ -170,6 +196,75 @@ fn version_label(v: Option<&serde_json::Value>) -> String {
         Some(serde_json::Value::Number(n)) => format!("v{n}"),
         _ => "unknown".to_string(),
     }
+}
+
+/// [C0-MO r6] Shared F8 instruction truth, part 1: every account key in v0 index order
+/// (static keys + meta.loadedAddresses.writable + meta.loadedAddresses.readonly).
+/// Lookups without loaded addresses cannot be resolved and fail closed.
+pub(crate) fn resolve_account_keys(tx: &RpcTransaction) -> Result<Vec<Pubkey>, WinnerParseError> {
+    let message = &tx.transaction.message;
+    let mut keys = Vec::with_capacity(message.account_keys.len());
+    for k in &message.account_keys {
+        keys.push(parse_key(k)?);
+    }
+    let has_lookups = message
+        .address_table_lookups
+        .as_ref()
+        .is_some_and(|l| !l.is_empty());
+    match tx.meta.as_ref().and_then(|m| m.loaded_addresses.as_ref()) {
+        Some(loaded) => {
+            for k in loaded.writable.iter().chain(loaded.readonly.iter()) {
+                keys.push(parse_key(k)?);
+            }
+        }
+        None if has_lookups => return Err(WinnerParseError::LoadedAddressesMissing),
+        None => {}
+    }
+    Ok(keys)
+}
+
+/// [C0-MO r6] Shared F8 instruction truth, part 2: `(target_index, receiver_index)` of a
+/// top-level marginfi `end_liquidation` instruction (discriminator + account layout 0/3), else
+/// `None`. Malformed program index, data or layout fail closed.
+pub(crate) fn end_liquidation_indices(
+    ix: &RpcInstruction,
+    keys: &[Pubkey],
+    program: &Pubkey,
+) -> Result<Option<(u64, u64)>, WinnerParseError> {
+    if key_at(keys, ix.program_id_index)? != *program {
+        return Ok(None);
+    }
+    let data = bs58::decode(&ix.data)
+        .into_vec()
+        .map_err(|_| WinnerParseError::InvalidInstructionData)?;
+    if data.len() < 8 || data[..8] != END_LIQUIDATION {
+        return Ok(None);
+    }
+    let (Some(&target_idx), Some(&receiver_idx)) = (
+        ix.accounts.get(END_LIQ_IDX_MARGINFI_ACCOUNT),
+        ix.accounts.get(END_LIQ_IDX_RECEIVER),
+    ) else {
+        return Err(WinnerParseError::EndLiquidationLayout {
+            accounts: ix.accounts.len(),
+        });
+    };
+    Ok(Some((target_idx, receiver_idx)))
+}
+
+/// [C0-MO r6] Every top-level marginfi `end_liquidation` of a transaction as `(target, receiver)`,
+/// in instruction order. Same truth as the winner parser; any parse uncertainty fails closed.
+pub(crate) fn end_liquidation_instructions(
+    tx: &RpcTransaction,
+    program: &Pubkey,
+) -> Result<Vec<(Pubkey, Pubkey)>, WinnerParseError> {
+    let keys = resolve_account_keys(tx)?;
+    let mut out = Vec::new();
+    for ix in &tx.transaction.message.instructions {
+        if let Some((target_idx, receiver_idx)) = end_liquidation_indices(ix, &keys, program)? {
+            out.push((key_at(&keys, target_idx)?, key_at(&keys, receiver_idx)?));
+        }
+    }
+    Ok(out)
 }
 
 /// Successful top-level marginfi `end_liquidation` for exactly `account`?
@@ -183,39 +278,10 @@ pub(crate) fn end_liquidation_hit(
     if meta.err.is_some() {
         return Ok(None); // [FIX-44] failed transactions never win
     }
-    let message = &tx.transaction.message;
-    let mut keys = Vec::with_capacity(message.account_keys.len());
-    for k in &message.account_keys {
-        keys.push(parse_key(k)?);
-    }
-    let has_lookups = message
-        .address_table_lookups
-        .as_ref()
-        .is_some_and(|l| !l.is_empty());
-    match &meta.loaded_addresses {
-        Some(loaded) => {
-            for k in loaded.writable.iter().chain(loaded.readonly.iter()) {
-                keys.push(parse_key(k)?);
-            }
-        }
-        None if has_lookups => return Err(WinnerParseError::LoadedAddressesMissing),
-        None => {}
-    }
-    for ix in &message.instructions {
-        if key_at(&keys, ix.program_id_index)? != *program {
+    let keys = resolve_account_keys(tx)?;
+    for ix in &tx.transaction.message.instructions {
+        let Some((target_idx, receiver_idx)) = end_liquidation_indices(ix, &keys, program)? else {
             continue;
-        }
-        let data = bs58::decode(&ix.data)
-            .into_vec()
-            .map_err(|_| WinnerParseError::InvalidInstructionData)?;
-        if data.len() < 8 || data[..8] != END_LIQUIDATION {
-            continue;
-        }
-        let (Some(&target_idx), Some(&receiver_idx)) = (
-            ix.accounts.get(END_LIQ_IDX_MARGINFI_ACCOUNT),
-            ix.accounts.get(END_LIQ_IDX_RECEIVER),
-        ) else {
-            return Err(WinnerParseError::EndLiquidationLayout { accounts: ix.accounts.len() });
         };
         if key_at(&keys, target_idx)? != *account {
             continue; // end_liquidation of a different MarginfiAccount
@@ -240,7 +306,11 @@ pub(crate) fn select_earliest(hits: Vec<(u64, String, EndLiquidationHit)>) -> Op
         .collect();
     let identity = if same.len() == 1 {
         let (signature, hit) = same.pop()?;
-        WinnerIdentity::Unique { signature, receiver: hit.receiver.to_string(), tx_version: hit.tx_version }
+        WinnerIdentity::Unique {
+            signature,
+            receiver: hit.receiver.to_string(),
+            tx_version: hit.tx_version,
+        }
     } else {
         same.sort_by(|a, b| a.0.cmp(&b.0));
         WinnerIdentity::SameSlotAmbiguous {
@@ -255,19 +325,37 @@ pub(crate) fn select_earliest(hits: Vec<(u64, String, EndLiquidationHit)>) -> Op
                 .collect(),
         }
     };
-    Some(Winner { slot: min_slot, identity })
+    Some(Winner {
+        slot: min_slot,
+        identity,
+    })
 }
 
 /// The fetched transaction must be exactly the one requested: first signature (transaction id)
 /// and slot must match what `getSignaturesForAddress` reported. Otherwise fail closed.
-pub(crate) fn check_transaction_identity(tx: &RpcTransaction, signature: &str, slot: u64) -> Result<(), String> {
+pub(crate) fn check_transaction_identity(
+    tx: &RpcTransaction,
+    signature: &str,
+    slot: u64,
+) -> Result<(), String> {
     match tx.transaction.signatures.first() {
         Some(first) if first == signature => {}
-        Some(first) => return Err(format!("signature mismatch requested={signature} returned={first}")),
-        None => return Err(format!("signature missing in returned transaction for {signature}")),
+        Some(first) => {
+            return Err(format!(
+                "signature mismatch requested={signature} returned={first}"
+            ))
+        }
+        None => {
+            return Err(format!(
+                "signature missing in returned transaction for {signature}"
+            ))
+        }
     }
     if tx.slot != slot {
-        return Err(format!("slot mismatch signatures={slot} transaction={}", tx.slot));
+        return Err(format!(
+            "slot mismatch signatures={slot} transaction={}",
+            tx.slot
+        ));
     }
     Ok(())
 }
@@ -288,7 +376,11 @@ fn fetch_transaction(rpc: &RpcClient, signature: &str) -> Result<RpcTransaction,
         Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
         Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
     };
-    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Winner, mt0_start.elapsed(), mt0_outcome);
+    darkbot_common::mt0::MT0.record_remote(
+        darkbot_common::mt0::RemoteClass::Winner,
+        mt0_start.elapsed(),
+        mt0_outcome,
+    );
     let value = value?;
     if value.is_null() {
         return Err(format!("transaction {signature} not found"));
@@ -299,28 +391,57 @@ fn fetch_transaction(rpc: &RpcClient, signature: &str) -> Result<RpcTransaction,
 /// Früheste **erfolgreiche** `end_liquidation` auf `account` mit Slot ≥ `since_slot`.
 /// `Err` bei abgeschnittener Pagination oder nicht lesbarer Kandidaten-TX (fail closed),
 /// `Ok(None)` wenn niemand liquidiert hat.
-pub fn find_winner(rpc: &RpcClient, program: &Pubkey, account: &Pubkey, since_slot: u64) -> Result<Option<Winner>, String> {
+pub fn find_winner(
+    rpc: &RpcClient,
+    program: &Pubkey,
+    account: &Pubkey,
+    since_slot: u64,
+) -> Result<Option<Winner>, String> {
     let mut before: Option<Signature> = None;
     let mut candidates: Vec<(u64, String)> = Vec::new();
     let mut reached_since = false;
     for _ in 0..MAX_PAGES {
-        let cfg = GetConfirmedSignaturesForAddress2Config { before, until: None, limit: Some(PAGE), commitment: Some(CommitmentConfig::confirmed()) };
+        let cfg = GetConfirmedSignaturesForAddress2Config {
+            before,
+            until: None,
+            limit: Some(PAGE),
+            commitment: Some(CommitmentConfig::confirmed()),
+        };
         let mt0_start = std::time::Instant::now(); // [MT0]
-        let sigs = rpc.get_signatures_for_address_with_config(account, cfg).map_err(|e| e.to_string());
+        let sigs = rpc
+            .get_signatures_for_address_with_config(account, cfg)
+            .map_err(|e| e.to_string());
         let mt0_outcome = match &sigs {
             Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
             Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
         };
-        darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Winner, mt0_start.elapsed(), mt0_outcome);
+        darkbot_common::mt0::MT0.record_remote(
+            darkbot_common::mt0::RemoteClass::Winner,
+            mt0_start.elapsed(),
+            mt0_outcome,
+        );
         let sigs = sigs?;
-        if sigs.is_empty() { reached_since = true; break; }
+        if sigs.is_empty() {
+            reached_since = true;
+            break;
+        }
         for s in &sigs {
-            if s.slot < since_slot { reached_since = true; continue; }
-            if s.err.is_some() { continue; } // [FIX-44] nur erfolgreiche TXs
+            if s.slot < since_slot {
+                reached_since = true;
+                continue;
+            }
+            if s.err.is_some() {
+                continue;
+            } // [FIX-44] nur erfolgreiche TXs
             candidates.push((s.slot, s.signature.clone()));
         }
-        if reached_since || sigs.len() < PAGE { reached_since = true; break; }
-        before = sigs.last().and_then(|s| Signature::from_str(&s.signature).ok());
+        if reached_since || sigs.len() < PAGE {
+            reached_since = true;
+            break;
+        }
+        before = sigs
+            .last()
+            .and_then(|s| Signature::from_str(&s.signature).ok());
     }
     if !reached_since {
         return Err(format!("winner search truncated after {} pages", MAX_PAGES));
@@ -335,7 +456,8 @@ pub fn find_winner(rpc: &RpcClient, program: &Pubkey, account: &Pubkey, since_sl
         }
         let tx = fetch_transaction(rpc, &signature)?;
         // Fail closed if getTransaction returns another transaction or another slot.
-        check_transaction_identity(&tx, &signature, slot).map_err(|e| format!("winner tx {signature}: {e}"))?;
+        check_transaction_identity(&tx, &signature, slot)
+            .map_err(|e| format!("winner tx {signature}: {e}"))?;
         match end_liquidation_hit(&tx, program, account) {
             Ok(Some(hit)) => {
                 earliest_hit_slot = Some(earliest_hit_slot.map_or(tx.slot, |s| s.min(tx.slot)));
@@ -358,7 +480,14 @@ pub enum RaceOutcome {
 }
 
 /// Rennen auswerten. `our_loss` = strukturierter Grund aus dem Record, wenn wir nicht bis ShadowReady kamen.
-pub fn race_outcome(winner_slot: u64, our_rx_slot: u64, our_detect_slot: u64, our_sign_slot: Option<u64>, shadow_ready: bool, our_loss: Option<LossReason>) -> RaceOutcome {
+pub fn race_outcome(
+    winner_slot: u64,
+    our_rx_slot: u64,
+    our_detect_slot: u64,
+    our_sign_slot: Option<u64>,
+    shadow_ready: bool,
+    our_loss: Option<LossReason>,
+) -> RaceOutcome {
     if !shadow_ready {
         return RaceOutcome::Loss(our_loss.unwrap_or(LossReason::Build));
     }
@@ -366,9 +495,13 @@ pub fn race_outcome(winner_slot: u64, our_rx_slot: u64, our_detect_slot: u64, ou
         Some(s) if s < winner_slot => RaceOutcome::ReadyBeforeWinner,
         Some(s) if s == winner_slot => RaceOutcome::SameSlotUnknown,
         Some(_) | None => {
-            if winner_slot < our_rx_slot { RaceOutcome::Loss(LossReason::Ingress) }
-            else if winner_slot < our_detect_slot { RaceOutcome::Loss(LossReason::StateRace) }
-            else { RaceOutcome::Loss(LossReason::Build) }
+            if winner_slot < our_rx_slot {
+                RaceOutcome::Loss(LossReason::Ingress)
+            } else if winner_slot < our_detect_slot {
+                RaceOutcome::Loss(LossReason::StateRace)
+            } else {
+                RaceOutcome::Loss(LossReason::Build)
+            }
         }
     }
 }
@@ -379,14 +512,42 @@ mod tests {
 
     #[test]
     fn outcomes() {
-        assert_eq!(race_outcome(105, 100, 101, Some(104), true, None), RaceOutcome::ReadyBeforeWinner);
-        assert_eq!(race_outcome(105, 100, 101, Some(105), true, None), RaceOutcome::SameSlotUnknown);
-        assert_eq!(race_outcome(100, 101, 102, Some(107), true, None), RaceOutcome::Loss(LossReason::Ingress));
-        assert_eq!(race_outcome(101, 100, 102, Some(107), true, None), RaceOutcome::Loss(LossReason::StateRace));
-        assert_eq!(race_outcome(105, 100, 101, Some(107), true, None), RaceOutcome::Loss(LossReason::Build));
+        assert_eq!(
+            race_outcome(105, 100, 101, Some(104), true, None),
+            RaceOutcome::ReadyBeforeWinner
+        );
+        assert_eq!(
+            race_outcome(105, 100, 101, Some(105), true, None),
+            RaceOutcome::SameSlotUnknown
+        );
+        assert_eq!(
+            race_outcome(100, 101, 102, Some(107), true, None),
+            RaceOutcome::Loss(LossReason::Ingress)
+        );
+        assert_eq!(
+            race_outcome(101, 100, 102, Some(107), true, None),
+            RaceOutcome::Loss(LossReason::StateRace)
+        );
+        assert_eq!(
+            race_outcome(105, 100, 101, Some(107), true, None),
+            RaceOutcome::Loss(LossReason::Build)
+        );
         // ShadowSimFailed / Skip: nie ein Win, Grund aus dem Record
-        assert_eq!(race_outcome(105, 100, 101, Some(104), false, Some(LossReason::ThresholdTooHigh)), RaceOutcome::Loss(LossReason::ThresholdTooHigh));
-        assert_eq!(race_outcome(105, 100, 101, Some(104), false, None), RaceOutcome::Loss(LossReason::Build));
+        assert_eq!(
+            race_outcome(
+                105,
+                100,
+                101,
+                Some(104),
+                false,
+                Some(LossReason::ThresholdTooHigh)
+            ),
+            RaceOutcome::Loss(LossReason::ThresholdTooHigh)
+        );
+        assert_eq!(
+            race_outcome(105, 100, 101, Some(104), false, None),
+            RaceOutcome::Loss(LossReason::Build)
+        );
     }
 
     // ---------------------------------------------------------------- [F8] fixtures
@@ -399,7 +560,11 @@ mod tests {
     }
 
     fn fx() -> Fx {
-        Fx { program: Pubkey::new_unique(), target: Pubkey::new_unique(), receiver: Pubkey::new_unique() }
+        Fx {
+            program: Pubkey::new_unique(),
+            target: Pubkey::new_unique(),
+            receiver: Pubkey::new_unique(),
+        }
     }
 
     fn end_liq_data() -> String {
@@ -454,8 +619,17 @@ mod tests {
 
     /// Static layout: [payer, target, record, group, receiver, fee_state, fee_wallet, system, program]
     fn legacy_keys(f: &Fx) -> Vec<Pubkey> {
-        vec![Pubkey::new_unique(), f.target, Pubkey::new_unique(), Pubkey::new_unique(), f.receiver,
-             Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), f.program]
+        vec![
+            Pubkey::new_unique(),
+            f.target,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            f.receiver,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            f.program,
+        ]
     }
 
     fn end_liq_ix(program_idx: u64, accounts: &[u64]) -> serde_json::Value {
@@ -465,9 +639,19 @@ mod tests {
     #[test]
     fn f8_legacy_successful_winner() {
         let f = fx();
-        let t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false,
-            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]), json!(null));
-        let hit = end_liquidation_hit(&t, &f.program, &f.target).unwrap().unwrap();
+        let t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]),
+            json!(null),
+        );
+        let hit = end_liquidation_hit(&t, &f.program, &f.target)
+            .unwrap()
+            .unwrap();
         assert_eq!(hit.receiver, f.receiver);
         assert_eq!(hit.tx_version, "legacy");
     }
@@ -476,9 +660,19 @@ mod tests {
     fn f8_v0_winner_without_relevant_lut_address() {
         let f = fx();
         let unrelated = [Pubkey::new_unique()];
-        let t = tx(100, json!(0), &legacy_keys(&f), &unrelated, &[], true,
-            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]), json!(null));
-        let hit = end_liquidation_hit(&t, &f.program, &f.target).unwrap().unwrap();
+        let t = tx(
+            100,
+            json!(0),
+            &legacy_keys(&f),
+            &unrelated,
+            &[],
+            true,
+            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]),
+            json!(null),
+        );
+        let hit = end_liquidation_hit(&t, &f.program, &f.target)
+            .unwrap()
+            .unwrap();
         assert_eq!(hit.receiver, f.receiver);
         assert_eq!(hit.tx_version, "v0");
     }
@@ -487,21 +681,47 @@ mod tests {
     fn f8_v0_winner_with_receiver_from_lut() {
         let f = fx();
         // static: [payer, target, record, group, fee_state, fee_wallet, system, program] (0..=7)
-        let statics = vec![Pubkey::new_unique(), f.target, Pubkey::new_unique(), Pubkey::new_unique(),
-            Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), f.program];
+        let statics = vec![
+            Pubkey::new_unique(),
+            f.target,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            f.program,
+        ];
         let ro = [Pubkey::new_unique()];
         // receiver = loaded writable[0] -> combined index 8; a readonly LUT key follows at 9.
-        let t = tx(100, json!(0), &statics, &[f.receiver], &ro, true,
-            end_liq_ix(7, &[1, 2, 3, 8, 4, 5, 6, 9]), json!(null));
-        let hit = end_liquidation_hit(&t, &f.program, &f.target).unwrap().unwrap();
+        let t = tx(
+            100,
+            json!(0),
+            &statics,
+            &[f.receiver],
+            &ro,
+            true,
+            end_liq_ix(7, &[1, 2, 3, 8, 4, 5, 6, 9]),
+            json!(null),
+        );
+        let hit = end_liquidation_hit(&t, &f.program, &f.target)
+            .unwrap()
+            .unwrap();
         assert_eq!(hit.receiver, f.receiver);
     }
 
     #[test]
     fn f8_failed_liquidation_is_not_a_winner() {
         let f = fx();
-        let t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false,
-            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]), json!({"InstructionError": [0, {"Custom": 101}]}));
+        let t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]),
+            json!({"InstructionError": [0, {"Custom": 101}]}),
+        );
         assert_eq!(end_liquidation_hit(&t, &f.program, &f.target), Ok(None));
     }
 
@@ -509,21 +729,53 @@ mod tests {
     fn f8_unrelated_successful_tx_is_not_a_winner() {
         let f = fx();
         // other program
-        let t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false,
-            end_liq_ix(0, &[1, 2, 3, 4, 5, 6, 7]), json!(null));
+        let t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            end_liq_ix(0, &[1, 2, 3, 4, 5, 6, 7]),
+            json!(null),
+        );
         assert_eq!(end_liquidation_hit(&t, &f.program, &f.target), Ok(None));
         // marginfi program, other discriminator
         let other = json!([{"programIdIndex": 8, "accounts": [1, 2, 3, 4], "data": bs58::encode([1u8; 8]).into_string()}]);
-        let t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false, other, json!(null));
+        let t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            other,
+            json!(null),
+        );
         assert_eq!(end_liquidation_hit(&t, &f.program, &f.target), Ok(None));
         // end_liquidation for a different MarginfiAccount
-        let t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false,
-            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]), json!(null));
-        assert_eq!(end_liquidation_hit(&t, &f.program, &Pubkey::new_unique()), Ok(None));
+        let t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]),
+            json!(null),
+        );
+        assert_eq!(
+            end_liquidation_hit(&t, &f.program, &Pubkey::new_unique()),
+            Ok(None)
+        );
     }
 
     fn hit(receiver: Pubkey, transaction_index: Option<u64>) -> EndLiquidationHit {
-        EndLiquidationHit { receiver, tx_version: "v0".into(), transaction_index }
+        EndLiquidationHit {
+            receiver,
+            tx_version: "v0".into(),
+            transaction_index,
+        }
     }
 
     #[test]
@@ -537,14 +789,22 @@ mod tests {
         assert_eq!(w.slot, 101);
         assert_eq!(
             w.identity,
-            WinnerIdentity::Unique { signature: "bbb".into(), receiver: b.to_string(), tx_version: "v0".into() }
+            WinnerIdentity::Unique {
+                signature: "bbb".into(),
+                receiver: b.to_string(),
+                tx_version: "v0".into()
+            }
         );
         assert!(select_earliest(vec![]).is_none());
     }
 
     #[test]
     fn f8_same_slot_hits_are_ambiguous_never_guessed() {
-        let (a, b, c) = (Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique());
+        let (a, b, c) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
         let w = select_earliest(vec![
             (105, "zzz".into(), hit(a, None)),
             (101, "bbb".into(), hit(b, Some(9))),
@@ -582,23 +842,69 @@ mod tests {
     fn f8_fail_closed_shapes() {
         let f = fx();
         // meta missing
-        let mut t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false,
-            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]), json!(null));
+        let mut t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]),
+            json!(null),
+        );
         t.meta = None;
-        assert_eq!(end_liquidation_hit(&t, &f.program, &f.target), Err(WinnerParseError::MetaMissing));
+        assert_eq!(
+            end_liquidation_hit(&t, &f.program, &f.target),
+            Err(WinnerParseError::MetaMissing)
+        );
         // v0 lookups without loadedAddresses
-        let mut t = tx(100, json!(0), &legacy_keys(&f), &[], &[], true,
-            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]), json!(null));
-        if let Some(m) = t.meta.as_mut() { m.loaded_addresses = None; }
-        assert_eq!(end_liquidation_hit(&t, &f.program, &f.target), Err(WinnerParseError::LoadedAddressesMissing));
+        let mut t = tx(
+            100,
+            json!(0),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            true,
+            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]),
+            json!(null),
+        );
+        if let Some(m) = t.meta.as_mut() {
+            m.loaded_addresses = None;
+        }
+        assert_eq!(
+            end_liquidation_hit(&t, &f.program, &f.target),
+            Err(WinnerParseError::LoadedAddressesMissing)
+        );
         // program index out of range
-        let t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false,
-            end_liq_ix(42, &[1, 2, 3, 4]), json!(null));
-        assert!(matches!(end_liquidation_hit(&t, &f.program, &f.target), Err(WinnerParseError::IndexOutOfRange { .. })));
+        let t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            end_liq_ix(42, &[1, 2, 3, 4]),
+            json!(null),
+        );
+        assert!(matches!(
+            end_liquidation_hit(&t, &f.program, &f.target),
+            Err(WinnerParseError::IndexOutOfRange { .. })
+        ));
         // truncated end_liquidation account list
-        let t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false,
-            end_liq_ix(8, &[1, 2]), json!(null));
-        assert!(matches!(end_liquidation_hit(&t, &f.program, &f.target), Err(WinnerParseError::EndLiquidationLayout { .. })));
+        let t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            end_liq_ix(8, &[1, 2]),
+            json!(null),
+        );
+        assert!(matches!(
+            end_liquidation_hit(&t, &f.program, &f.target),
+            Err(WinnerParseError::EndLiquidationLayout { .. })
+        ));
     }
 
     /// [F8] Audit Step 5 gate: the six frozen real Mainnet winners (raw RPC `getTransaction`
@@ -616,8 +922,12 @@ mod tests {
             (include_str!("../../../../docs/evidence/AUDIT_20261005/gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB.json"), "gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB", 451643526, "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8", "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn"),
         ];
         for (raw, signature, slot, target, receiver) in cases {
-            let tx: RpcTransaction = serde_json::from_str(raw).expect("audit fixture decodes into typed view");
-            assert_eq!(tx.transaction.signatures.first().map(String::as_str), Some(signature));
+            let tx: RpcTransaction =
+                serde_json::from_str(raw).expect("audit fixture decodes into typed view");
+            assert_eq!(
+                tx.transaction.signatures.first().map(String::as_str),
+                Some(signature)
+            );
             assert_eq!(tx.slot, slot);
             assert_eq!(check_transaction_identity(&tx, signature, slot), Ok(()));
             let target = Pubkey::from_str(target).unwrap();
@@ -625,15 +935,71 @@ mod tests {
                 .expect("fixture parses")
                 .expect("winner found");
             assert_eq!(hit.receiver, Pubkey::from_str(receiver).unwrap());
-            assert_eq!(end_liquidation_hit(&tx, &program, &Pubkey::new_unique()), Ok(None));
+            assert_eq!(
+                end_liquidation_hit(&tx, &program, &Pubkey::new_unique()),
+                Ok(None)
+            );
+        }
+    }
+
+    /// [C0-MO r6] The shared instruction helper yields exactly the audit winners' (target, receiver).
+    #[test]
+    fn f8_shared_instruction_truth_matches_six_audit_winners() {
+        let program = Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET).unwrap();
+        for (raw, target, receiver) in [
+            (
+                include_str!("../../../../docs/evidence/AUDIT_20261005/2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf.json"),
+                "3GqwCURBtJZfdQxMSyZ1VyWNSB5WXovg7Q8Q46HY7ihx",
+                "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+            ),
+            (
+                include_str!("../../../../docs/evidence/AUDIT_20261005/38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F.json"),
+                "AzQVTAtLxdaQUJzh7xZ7rj956tkeVNk4D4iuK5EVkxDi",
+                "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+            ),
+            (
+                include_str!("../../../../docs/evidence/AUDIT_20261005/3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB.json"),
+                "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+                "TraceR2t18nnwkXgHoB54iPD5N4x2EJZC1uS55ggsH8",
+            ),
+            (
+                include_str!("../../../../docs/evidence/AUDIT_20261005/59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa.json"),
+                "HMjc1LecbCMUqYG3x36gaCzxG5AJ7gJPkPB85fx1pPKK",
+                "qbvAGHo9JpVRsuRem8rBCzLJJNV6ZDNv63qYHkcmNCV",
+            ),
+            (
+                include_str!("../../../../docs/evidence/AUDIT_20261005/C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ.json"),
+                "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+                "TraceR2t18nnwkXgHoB54iPD5N4x2EJZC1uS55ggsH8",
+            ),
+            (
+                include_str!("../../../../docs/evidence/AUDIT_20261005/gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB.json"),
+                "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+                "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+            ),
+        ] {
+            let tx: RpcTransaction = serde_json::from_str(raw).unwrap();
+            let ixs = end_liquidation_instructions(&tx, &program).unwrap();
+            assert_eq!(
+                ixs,
+                vec![(Pubkey::from_str(target).unwrap(), Pubkey::from_str(receiver).unwrap())]
+            );
         }
     }
 
     #[test]
     fn f8_transaction_identity_is_fail_closed() {
         let f = fx();
-        let mut t = tx(100, json!("legacy"), &legacy_keys(&f), &[], &[], false,
-            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]), json!(null));
+        let mut t = tx(
+            100,
+            json!("legacy"),
+            &legacy_keys(&f),
+            &[],
+            &[],
+            false,
+            end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]),
+            json!(null),
+        );
         assert_eq!(check_transaction_identity(&t, "sig", 100), Ok(()));
         assert!(check_transaction_identity(&t, "other", 100).is_err());
         assert!(check_transaction_identity(&t, "sig", 101).is_err());
@@ -659,7 +1025,13 @@ mod tests {
                 "innerInstructions": [], "logMessages": [], "preTokenBalances": [], "postTokenBalances": [],
                 "rewards": [], "loadedAddresses": {"writable": [], "readonly": []}, "computeUnitsConsumed": 1}
         });
-        let r = serde_json::from_value::<solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta>(v);
-        eprintln!("F8_SDK_DECODE_PROBE ok={} err={:?}", r.is_ok(), r.err().map(|e| e.to_string()));
+        let r = serde_json::from_value::<
+            solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta,
+        >(v);
+        eprintln!(
+            "F8_SDK_DECODE_PROBE ok={} err={:?}",
+            r.is_ok(),
+            r.err().map(|e| e.to_string())
+        );
     }
 }

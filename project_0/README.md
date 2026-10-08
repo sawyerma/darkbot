@@ -560,7 +560,7 @@ nie Summary und Report); (4) Summary. Die Market-Session sendet einen Transport-
 **Verdicts.** `MARKET_DATA_VALID` (vollständige Aufnahme **und** verifizierte Quelle; derzeit ist keine Quelle
 verifiziert) · `MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED` (vollständige Aufnahme; ob Transaktionen, die das Programm nur
 über eine Address Lookup Table referenzieren, geliefert werden, ist weder für `transactions` noch für `logs` belegt) ·
-`MARKET_DATA_INCOMPLETE` (Gap, Overflow, Fatal, abgeschnittene/fehlende Logs, Decoder-Fehler, Drain unvollständig,
+`MARKET_DATA_INCOMPLETE` (Gap, Overflow, Fatal, fehlende Logs, Decoder-Fehler, nicht qualifizierte oder abweichende abgeschnittene Logs, Drain unvollständig,
 vorzeitiges Ende) · `MARKET_OBSERVER_STREAM_NOT_READY`. Enrichment-Vollständigkeit (`enrichment_complete`,
 `fee_totals_complete`) wird getrennt ausgewiesen und ändert die Gross Edge nie.
 
