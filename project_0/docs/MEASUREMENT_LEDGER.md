@@ -4094,3 +4094,188 @@ Scope boundary / non-claims:
 - Drift qualification remains open.
 - No landing/capture probability or realized Project-0 PnL is proven.
 - LIVE remains blocked.
+
+
+### 2026-10-08 — C0-E1 Fable handoff / 4h economic-race measurement preparation
+
+Status: **HANDOFF READY / FABLE IMPLEMENTATION PENDING**
+
+### Qualified source state
+
+Authoritative C0-E1 implementation base:
+
+`57bef334e60764f614712785438a95edb7638352`
+
+This base contains qualified C0-MO r6.
+
+C0-MO r6 local qualification:
+
+```text
+build crate_health                     PASS
+build crate_health + txv1              PASS
+workspace tests crate_health           PASS
+workspace tests crate_health + txv1    PASS
+rustfmt                                PASS
+differential Clippy crate_health       candidate-only=0
+differential Clippy crate_health+txv1  candidate-only=0
+```
+
+600 s Mainnet logs smoke:
+
+```text
+verdict=MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED
+actual_observation_seconds=600.0
+transactions_received=63
+unique_transactions=63
+successful_transactions=26
+failed_transactions=37
+liquidation_transactions=0
+liquidation_events=0
+gap_count=0
+reconnect_count=0
+ingress_overflow_count=0
+decoder_error_count=0
+logs_truncated_total=2
+logs_truncated_qualified=2
+logs_truncated_unqualified=0
+logs_truncated_liquidation_mismatch=0
+rpc_fallback_count=2
+decode_complete=true
+market_capture_complete=true
+source_coverage_verified=false
+incomplete_reasons=[]
+FINAL_REPORT_KEYS=PASS
+R6_600S_QUALIFICATION=PASS
+```
+
+The zero-liquidation 600 s smoke is a technical qualification, not economic evidence.
+
+### Decision: expand the 4-hour gate before running it
+
+The previously planned 4-hour C0-MO observation is not started yet.
+
+Before spending the 4-hour window, the measurement is expanded to **C0-E1** so one run measures the complete decision funnel:
+
+```text
+Market Gross Edge
+→ current Shadow Executable Net Edge
+→ Funding / required capital
+→ capital buckets 200/500/1000/2500/5000/10000 USD
+→ actual winner / competition
+→ pre/same/post winner-slot evidence
+→ same-clock local race margin
+→ required observed speedup for late opportunities
+→ stage latency attribution
+→ bottleneck edge attribution
+→ runtime stability
+```
+
+C0-E1 must reuse the actual existing Project_0 pipeline and economics. Unknown costs/economics remain UNKNOWN.
+
+No submission is allowed. LIVE remains blocked.
+
+### Compiled Fable baseline package
+
+File:
+
+`DarkBot_Project0_C0E1_FULL_COMPILED_BASE_57bef33.zip`
+
+SHA-256:
+
+`e829116253cd14da0236e31b0b10dd469becb52dc5d309406a2758600634b850`
+
+Bytes:
+
+`1660074`
+
+Base:
+
+`57bef334e60764f614712785438a95edb7638352`
+
+Marginfi pin:
+
+`33c67987a661f59c6683a65485ebb4f0ef030b77` / `mrgn-0.1.11-rc1`
+
+Packaging timestamp:
+
+`2026-10-08T20:09:36Z`
+
+Baseline machine/toolchain:
+
+```text
+macOS 15.6.1
+Darwin 24.6.0
+arm64
+rustc 1.93.1
+cargo 1.93.1
+```
+
+Packaging/build verification:
+
+```text
+SOURCE_BASE_PASS
+SOURCE_ARCHIVE_PASS
+MARGINFI_PIN_CONTEXT_PASS
+PACKAGE_HYGIENE_PASS
+cargo_metadata=PASS
+build_crate_health=PASS
+build_crate_health_txv1=PASS
+test_crate_health=PASS
+test_crate_health_txv1=PASS
+clippy_crate_health=PASS
+clippy_crate_health_txv1=PASS
+release_p0_longtail=PASS
+INTERNAL_SHA256_PASS
+FABLE_PACKAGE_SIZE_PASS
+```
+
+The package proves only the supplied baseline. It does not prove Fable's modified candidate.
+
+### Required post-Fable gates
+
+After candidate return:
+
+1. verify declared base `57bef334...`;
+2. verify ZIP/internal SHA-256 and changed-file scope;
+3. inspect secrets/generated data/binaries;
+4. `git apply --check`;
+5. apply locally;
+6. `git diff --check` and exact-scope review;
+7. authoritative builds for both feature sets;
+8. both workspace test suites;
+9. candidate formatting check;
+10. differential Clippy, candidate-only warnings = 0;
+11. C0-E1 accelerated smoke:
+    - `P0_ECON_DURATION_SECS=600`
+    - `P0_ECON_SNAPSHOT_SECS=150`
+    - exactly four snapshots + final JSON;
+12. only if that passes: real 4-hour C0-E1 run:
+    - `P0_ECON_DURATION_SECS=14400`
+    - `P0_ECON_SNAPSHOT_SECS=3600`;
+13. record the four hourly JSON summaries + final decision metrics in the ledger;
+14. derive Economic GO / CONDITIONAL / STOP;
+15. prioritize MT6–MT10 from the measured dominant bottleneck, not assumption.
+
+### Required 4-hour decision outputs
+
+The final report must be sufficient without uploading raw 4-hour JSONL data to answer:
+
+- observed Market Gross Edge and distribution;
+- current known Project_0 executable net edge;
+- required working capital / known fee reserve;
+- edge by default capital budget;
+- PRE / SAME / POST winner-slot counts and known net edge;
+- unresolved race/economics/capital counts;
+- local observed race-margin distributions;
+- required observed speedup p50/p90/p99 for late opportunities;
+- speedup sensitivity;
+- Rx→Detect / Detect→Ready / Ready→Sign attribution;
+- top bottlenecks by known blocked net edge;
+- technical stability for the complete four hours.
+
+### Non-claims
+
+The test does not establish a true competitor send deadline, guaranteed Shadow capture, realized PnL, future daily/monthly profit, source coverage, or LIVE readiness.
+
+**LIVE remains blocked.**
+

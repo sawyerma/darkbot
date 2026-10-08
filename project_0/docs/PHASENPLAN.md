@@ -4542,3 +4542,206 @@ H0, P7 und P4B laufen als Evidence/Optimization weiter, dürfen aber den First-E
 **Keine zweite Entwicklung. Kein späterer Race-Rewrite. Kein späterer Rust-Rewrite.  
 Ein finaler Core; Long-Tail/Premium wird zuerst wirtschaftlich aktiviert, Race wird danach auf demselben Core freigeschaltet.  
 Diese v4.5 ist mit P6-MT-v2-Review promoted und eingefroren.**
+
+---
+
+## C0-E1 — 4H ECONOMIC / CAPITAL / COMPETITION / RACE ATTRIBUTION
+
+**Status (2026-10-08): FABLE HANDOFF READY / IMPLEMENTATION AUSSTEHEND.**
+
+### Ausgangsstand
+
+C0-MO r6 ist lokal qualifiziert, committed und auf `main` gepusht:
+
+`57bef334e60764f614712785438a95edb7638352`
+
+Der 600-s-Mainnet-`logs`-Smoke auf diesem Stand ist **PASS**:
+
+- `verdict=MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED`
+- `actual_observation_seconds=600.0`
+- `transactions_received=63`
+- `unique_transactions=63`
+- `successful_transactions=26`
+- `failed_transactions=37`
+- `liquidation_transactions=0`
+- `liquidation_events=0`
+- `gap_count=0`
+- `reconnect_count=0`
+- `ingress_overflow_count=0`
+- `decoder_error_count=0`
+- `logs_truncated_total=2`
+- `logs_truncated_qualified=2`
+- `logs_truncated_unqualified=0`
+- `logs_truncated_liquidation_mismatch=0`
+- `rpc_fallback_count=2`
+- `decode_complete=true`
+- `market_capture_complete=true`
+- `source_coverage_verified=false`
+- `incomplete_reasons=[]`
+- `FINAL_REPORT_KEYS=PASS`
+- `R6_600S_QUALIFICATION=PASS`
+
+Builds, beide Workspace-Test-Sets, rustfmt und differential Clippy (`candidate-only=0` für beide Feature-Sets) sind PASS.
+
+### Warum C0-E1 vor dem 4-h-Lauf eingeführt wird
+
+Der ursprünglich geplante C0-MO-4-h-Lauf beantwortet Marktaktivität und Market Gross Edge, aber nicht vollständig:
+
+- welcher Teil mit dem **aktuellen Project_0** ausführbar wäre;
+- wie viel Working Capital benötigt wird;
+- welche Kapitalstufe welchen Teil der bekannten Net Edge abdeckt;
+- welche Opportunities vor / im gleichen / nach dem realen Winner-Slot fertig wären;
+- wie groß die lokale Race-Margin in ms ist;
+- wie viel gemessener lokaler Speedup bei verlorenen Races nötig gewesen wäre;
+- in welcher Stufe Rx→Detect, Detect→Ready oder Ready→Sign die Zeit verloren geht;
+- welcher konkrete Bottleneck den größten bekannten wirtschaftlichen Wert blockiert.
+
+Darum wird der 4-h-Lauf vor dem Start zu **C0-E1** erweitert. C0-E1 kombiniert zwei strikt getrennte Wahrheiten:
+
+```text
+A) C0-MO Market Truth
+   reale Marginfi-TX / reale Liquidation / reale Market Gross Edge
+
+B) Project_0 Shadow Truth
+   Health → Sizing → Funding → Economics → Build → Sign → Simulation
+   → Winner/Race Evidence
+   → KEINE Submission
+```
+
+C0-E1 darf weder eine vereinfachte zweite Economics-Engine noch einen `repaid <= capital`-Pseudo-Executable-Filter einführen.
+
+### Verbindliche C0-E1-Ausgabe
+
+Der qualifizierte Produktionslauf bleibt:
+
+- Dauer: `14400 s`
+- Snapshot: `3600 s`
+- vier automatische Stunden-Snapshots:
+  - `hour_01.json`
+  - `hour_02.json`
+  - `hour_03.json`
+  - `hour_04.json`
+- ein Abschluss:
+  - `economics_final.json`
+
+Jede Stunden-JSON enthält **Stundendelta + kumulierten Stand**.
+
+Die Reports müssen ohne Upload der Rohdaten mindestens enthalten:
+
+1. technische Stabilität / Capture-Vollständigkeit;
+2. Market Gross Edge und Verteilung;
+3. aktuelle bekannte Project_0 Executable Net Edge;
+4. Kapital-/Funding-Evidence;
+5. Standardszenarien `$200 / $500 / $1,000 / $2,500 / $5,000 / $10,000`;
+6. Winner-/Competition-Korrelation;
+7. Slot-Race:
+   - `PRE_WINNER_SLOT_PROVEN`
+   - `SAME_SLOT_UNKNOWN`
+   - `POST_WINNER_SLOT_PROVEN_LATE`
+   - unresolved/fail-closed Klassen;
+8. gleiche monotone Uhr für Market + Shadow;
+9. lokale Winner-Race-Margins in ns/ms;
+10. `required_speedup` für verlorene, qualifizierte Opportunities;
+11. Speedup-Sensitivity bei 1/5/10/25/50/100/200/500/1000 ms;
+12. Stage-Latenzen Rx→Detect / Detect→Ready / Ready→Sign / Rx→Sign;
+13. Bottleneck-Ranking nach bekannt blockierter Net Edge;
+14. alle UNKNOWN-Zähler und Non-Claims.
+
+Die **wahre gegnerische Submission-Deadline bleibt UNKNOWN**. Lokale Provider-/Host-Beobachtungszeit darf nicht als exakter Send-Zeitpunkt des Konkurrenten ausgegeben werden.
+
+### Fable-Handoff
+
+Fable-Basis bleibt absichtlich der bereits qualifizierte Code-Stand:
+
+`57bef334e60764f614712785438a95edb7638352`
+
+Das separate nachgelagerte Dokumentations-Commit dieses Statusblocks verändert **nicht** Fables Implementierungsbasis.
+
+Erzeugtes Baseline-Paket:
+
+`DarkBot_Project0_C0E1_FULL_COMPILED_BASE_57bef33.zip`
+
+SHA-256:
+
+`e829116253cd14da0236e31b0b10dd469becb52dc5d309406a2758600634b850`
+
+Größe:
+
+`1,660,074 bytes`
+
+Marginfi-Pin:
+
+`33c67987a661f59c6683a65485ebb4f0ef030b77` (`mrgn-0.1.11-rc1`)
+
+Packaging-Gates:
+
+- exact `HEAD == origin/main == 57bef334...`: PASS
+- `project_0/.env` geschützt / nicht paketiert: PASS
+- `git archive` source export: PASS
+- exact Marginfi pin context: PASS
+- kein `.git`, kein `target/`, keine Secrets im Paket: PASS
+- Cargo metadata: PASS
+- build `crate_health`: PASS
+- build `crate_health txv1`: PASS
+- tests `crate_health`: PASS
+- tests `crate_health txv1`: PASS
+- Clippy beide Feature-Sets: PASS auf Baseline
+- Release-`p0-longtail`: PASS
+- interne SHA-256-Prüfung: PASS
+- Paketgröße <=80 MiB: PASS
+
+Toolchain der Baseline:
+
+- macOS 15.6.1 / arm64
+- rustc 1.93.1
+- cargo 1.93.1
+
+### Was als Nächstes verbindlich passiert
+
+```text
+C0-MO r6 code + 600-s smoke PASS
+        ↓
+C0-E1 Fable handoff READY          ← aktueller Stand
+        ↓
+Fable candidate zurück
+        ↓
+Base/Scope/Diff/Secrets/SHA Review
+        ↓
+git apply --check
+        ↓
+lokale Builds + Workspace Tests
+        ↓
+rustfmt + differential Clippy
+        ↓
+C0-E1 600-s combined smoke
+  duration=600
+  snapshot=150
+  → 4 Snapshots + Final
+        ↓
+nur bei PASS:
+C0-E1 real 4-h run
+  duration=14400
+  snapshot=3600
+        ↓
+hour_01..04.json + economics_final.json
+        ↓
+Economic GO / CONDITIONAL / STOP
+        ↓
+MT6–MT10 nur nach gemessenem Bottleneck priorisieren
+```
+
+### C0-E1 Non-Claims
+
+C0-E1 kann Market Edge, bekannte aktuelle Shadow-Executable-Edge, Kapitalbedarf, Race-Slot-Evidence, lokale beobachtete Race-Margins, Speedup-Sensitivity und Bottlenecks messen.
+
+C0-E1 beweist **nicht**:
+
+- dass eine Shadow-ready TX bei echter Submission garantiert gewonnen hätte;
+- den echten Send-Zeitpunkt des Konkurrenten;
+- realisierten PnL;
+- zukünftigen Tages-/Monatsgewinn aus einem einzelnen 4-h-Fenster;
+- Provider Source Coverage;
+- LIVE-Readiness.
+
+**LIVE bleibt blockiert.**
+
