@@ -152,6 +152,7 @@ fn main() {
     let values = manifest(&dir.join("manifest.txt"));
     let generation = values["generation"].parse::<u64>().unwrap();
     let peers = values["peers"].parse::<usize>().unwrap();
+    let warmup_per_peer = values["warmup_per_peer"].parse::<usize>().unwrap();
     let samples_per_peer = values["samples_per_peer"].parse::<usize>().unwrap();
     let capacity = values["peer_lane_capacity"].parse::<usize>().unwrap();
     let slot_stride = values["peer_lane_slot_stride"].parse::<usize>().unwrap();
@@ -189,7 +190,7 @@ fn main() {
 
     fs::write(dir.join("rust.ready"), b"ok\n").unwrap();
 
-    let expected = peers * samples_per_peer;
+    let expected = peers * (warmup_per_peer + samples_per_peer);
     let mut samples = Vec::with_capacity(expected);
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut cursor = 0usize;

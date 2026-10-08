@@ -96,10 +96,12 @@ import (
 )
 
 const (
-	c14aGeneration     = uint64(1410)
-	c14aPeers          = 4
-	c14aSamplesPerPeer = 250
-	c14aPeerCapacity   = uint32(1024)
+	c14aGeneration        = uint64(1410)
+	c14aPeers             = 4
+	c14aWarmupPerPeer     = 32
+	c14aSamplesPerPeer    = 250
+	c14aTotalPerPeer      = c14aWarmupPerPeer + c14aSamplesPerPeer
+	c14aPeerCapacity      = uint32(1024)
 	c14aPeerSlotStride = uint32(4096)
 	c14aSyncTimeout    = 30 * time.Second
 	c14aSyncPoll       = time.Millisecond
@@ -149,9 +151,9 @@ func TestC14AEarlyLatencyProducer(t *testing.T) {
 	for peer := 0; peer < c14aPeers; peer++ {
 		handles[peer] = c14Bind(t, r, c14Node(byte(0x20+peer)))
 		laneIDs[peer] = strconv.FormatUint(uint64(handles[peer].lease.LaneID), 10)
-		txs[peer] = make([]*types.Transaction, c14aSamplesPerPeer)
-		for sample := 0; sample < c14aSamplesPerPeer; sample++ {
-			nonce := uint64(peer*c14aSamplesPerPeer + sample)
+		txs[peer] = make([]*types.Transaction, c14aTotalPerPeer)
+		for sample := 0; sample < c14aTotalPerPeer; sample++ {
+			nonce := uint64(peer*c14aTotalPerPeer + sample)
 			txs[peer][sample] = c14Tx(
 				t,
 				nonce,
@@ -165,12 +167,13 @@ func TestC14AEarlyLatencyProducer(t *testing.T) {
 	manifest := strings.Join([]string{
 		"generation=" + strconv.FormatUint(cfg.Generation, 10),
 		"peers=" + strconv.Itoa(c14aPeers),
+		"warmup_per_peer=" + strconv.Itoa(c14aWarmupPerPeer),
 		"samples_per_peer=" + strconv.Itoa(c14aSamplesPerPeer),
 		"peer_lane_capacity=" + strconv.FormatUint(uint64(cfg.PeerLaneCapacity), 10),
 		"peer_lane_slot_stride=" + strconv.FormatUint(uint64(cfg.PeerLaneSlotStride), 10),
 		"lane_ids=" + strings.Join(laneIDs, ","),
 		"clock_id=" + strconv.FormatUint(uint64(v2ClockMonotonic), 10),
-		"load_model=parallel_peers_one_outstanding_per_lane",
+		"load_model=parallel_peers_one_outstanding_per_lane_with_explicit_warmup",
 	}, "\n") + "\n"
 	c14aWriteFile(t, filepath.Join(dir, "manifest.txt"), []byte(manifest))
 	c14aWaitForFile(t, filepath.Join(dir, "rust.ready"))
@@ -187,7 +190,7 @@ func TestC14AEarlyLatencyProducer(t *testing.T) {
 			if peer%2 != 0 {
 				source = IngressSourceEthPooled
 			}
-			for sample := 0; sample < c14aSamplesPerPeer; sample++ {
+			for sample := 0; sample < c14aTotalPerPeer; sample++ {
 				if err := IngressV2(
 					handles[peer],
 					source,
@@ -224,7 +227,7 @@ func TestC14AEarlyLatencyProducer(t *testing.T) {
 	}
 
 	snapshot := r.snapshot()
-	expected := uint64(c14aPeers * c14aSamplesPerPeer)
+	expected := uint64(c14aPeers * c14aTotalPerPeer)
 	if snapshot.LiveCovered != c14aPeers || snapshot.LiveUncovered != 0 ||
 		snapshot.GapTotal != 0 || snapshot.Peers.Published != expected ||
 		snapshot.Peers.QueueFull != 0 || snapshot.Peers.Oversize != 0 ||

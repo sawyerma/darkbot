@@ -81,15 +81,29 @@ def main() -> int:
 
     with (run_dir / "raw.csv").open(newline="") as f:
         rows = list(csv.DictReader(f))
-    samples = [
+    all_samples = [
         {
             key: int(value) if key != "hash" else value
             for key, value in row.items()
         }
         for row in rows
     ]
-    if not samples:
+    if not all_samples:
         raise SystemExit("C1.4a: no samples")
+
+    peers = int(manifest["peers"])
+    warmup_per_peer = int(manifest.get("warmup_per_peer", "0"))
+    samples_per_peer = int(manifest["samples_per_peer"])
+    qualification_end = warmup_per_peer + samples_per_peer
+
+    warmup_samples = [
+        s for s in all_samples
+        if s["sequence"] < warmup_per_peer
+    ]
+    samples = [
+        s for s in all_samples
+        if warmup_per_peer <= s["sequence"] < qualification_end
+    ]
 
     packet_to_ingress = [s["t_ingress_ns"] - s["t_packet_decoded_ns"] for s in samples]
     ingress_to_l1_pre = [s["l1_pre_commit_ns"] - s["t_ingress_ns"] for s in samples]
@@ -100,14 +114,26 @@ def main() -> int:
     ingress_to_l2 = [s["l2_acquire_ns"] - s["t_ingress_ns"] for s in samples]
     queue_depth = [s["queue_depth"] for s in samples]
 
-    expected = int(manifest["peers"]) * int(manifest["samples_per_peer"])
+    expected_warmup = peers * warmup_per_peer
+    expected_qualification = peers * samples_per_peer
+    expected_total = expected_warmup + expected_qualification
     snapshot = json.loads((run_dir / "go_snapshot.json").read_text())
     with (run_dir / "lane_stats.csv").open(newline="") as f:
         lane_stats = list(csv.DictReader(f))
 
     failures: list[str] = []
-    if len(samples) != expected:
-        failures.append(f"sample_count={len(samples)} expected={expected}")
+    if len(all_samples) != expected_total:
+        failures.append(
+            f"raw_sample_count={len(all_samples)} expected_total={expected_total}"
+        )
+    if len(warmup_samples) != expected_warmup:
+        failures.append(
+            f"warmup_sample_count={len(warmup_samples)} expected={expected_warmup}"
+        )
+    if len(samples) != expected_qualification:
+        failures.append(
+            f"qualification_sample_count={len(samples)} expected={expected_qualification}"
+        )
     if snapshot.get("gap_total") != 0:
         failures.append(f"gap_total={snapshot.get('gap_total')}")
     if snapshot.get("live_covered") != int(manifest["peers"]):
@@ -127,7 +153,7 @@ def main() -> int:
         if peer.get(key, 0) != 0:
             failures.append(f"peers.{key}={peer.get(key)}")
 
-    per_lane_expected = int(manifest["samples_per_peer"])
+    per_lane_expected = warmup_per_peer + samples_per_peer
     if len(lane_stats) != int(manifest["peers"]):
         failures.append(f"lane_stats={len(lane_stats)}")
     for lane in lane_stats:
@@ -140,7 +166,7 @@ def main() -> int:
         if int(lane["read_sequence"]) != per_lane_expected:
             failures.append(f"lane {lane_id} read_sequence={lane['read_sequence']}")
 
-    for index, sample in enumerate(samples):
+    for index, sample in enumerate(all_samples):
         if not (
             0 < sample["t_packet_decoded_ns"] <= sample["t_ingress_ns"]
             <= sample["l1_pre_commit_ns"] <= sample["l1_post_commit_ns"]
@@ -182,6 +208,15 @@ def main() -> int:
         "classification": classification,
         "authoritative_metric": "max T_ingress -> L2",
         "sample_count": len(samples),
+        "warmup_sample_count": len(warmup_samples),
+        "raw_sample_count": len(all_samples),
+        "qualification_window": {
+            "warmup_per_peer": warmup_per_peer,
+            "qualified_samples_per_peer": samples_per_peer,
+            "classification_uses_sequences": f"{warmup_per_peer}..{qualification_end - 1}",
+            "warmup_retained_in_raw_evidence": True,
+            "reason": "exclude explicit pre-window cold-start initialization from the steady-state C1.4a feasibility classification; cold-start evidence remains retained",
+        },
         "clock_domain": "CLOCK_MONOTONIC shared by Go unix.ClockGettime and Rust libc::clock_gettime",
         "measurement_instrumentation": "disposable pinned-geth worktree; production C1.4 overlay remains unchanged",
         "l1_semantics": {
@@ -192,7 +227,8 @@ def main() -> int:
         "configuration": {
             "generation": int(manifest["generation"]),
             "active_peer_lanes": int(manifest["peers"]),
-            "samples_per_peer": int(manifest["samples_per_peer"]),
+            "warmup_per_peer": warmup_per_peer,
+            "samples_per_peer": samples_per_peer,
             "peer_lane_capacity": int(manifest["peer_lane_capacity"]),
             "peer_lane_slot_stride": int(manifest["peer_lane_slot_stride"]),
             "lane_ids": [int(v) for v in manifest["lane_ids"].split(",")],
