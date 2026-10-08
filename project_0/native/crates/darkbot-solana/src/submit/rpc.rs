@@ -146,11 +146,18 @@ impl RpcSubmitter {
 impl SubmissionAdapter for RpcSubmitter {
     fn fee_for_message(&self, tx: &VersionedTransaction) -> Option<super::MessageFeeQuote> {
         use base64::Engine;
-        let response: solana_client::rpc_response::Response<Option<u64>> = self.rpc.send(
+        let mt0_start = std::time::Instant::now(); // [MT0]
+        let sent = self.rpc.send::<solana_client::rpc_response::Response<Option<u64>>>(
             solana_client::rpc_request::RpcRequest::GetFeeForMessage,
             serde_json::json!([base64::engine::general_purpose::STANDARD.encode(tx.message.serialize()),
                 {"commitment":"confirmed"}]),
-        ).ok()?;
+        );
+        let mt0_outcome = match &sent {
+            Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
+        };
+        darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::FeeRpc, mt0_start.elapsed(), mt0_outcome);
+        let response = sent.ok()?;
         Some(super::MessageFeeQuote { message_hash:tx.message.hash().to_string(),
             context_slot:response.context.slot, lamports:response.value? })
     }
@@ -194,7 +201,14 @@ impl SubmissionAdapter for RpcSubmitter {
             min_context_slot: None,
             inner_instructions: false,
         };
-        match self.rpc.simulate_transaction_with_config(tx, cfg) {
+        let mt0_start = std::time::Instant::now(); // [MT0]
+        let simulated = self.rpc.simulate_transaction_with_config(tx, cfg);
+        let mt0_outcome = match &simulated {
+            Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
+        };
+        darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Simulation, mt0_start.elapsed(), mt0_outcome);
+        match simulated {
             Ok(r) => match r.value.err {
                 None => SimResult::Ok { units_consumed: r.value.units_consumed },
                 Some(e) => SimResult::Failed(format!("{:?} logs={:?}", e, r.value.logs)),
@@ -207,9 +221,15 @@ impl SubmissionAdapter for RpcSubmitter {
 /// Landing-Reconciliation: getSignatureStatuses → getTransaction (json, maxSupportedTransactionVersion=1).
 /// `tx_index_in_slot` bleibt None (nur über getBlock ermittelbar; P6/H0).
 pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns: u64) -> Result<LandingEvidence, SubmitError> {
-    let statuses = rpc
-        .get_signature_statuses_with_history(&[*sig])
-        .map_err(|e| SubmitError::Transport(e.to_string()))?;
+    // [MT0] every network request of the reconcile path is counted individually.
+    let mt0_start = std::time::Instant::now();
+    let statuses = rpc.get_signature_statuses_with_history(&[*sig]);
+    let mt0_outcome = match &statuses {
+        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
+    };
+    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Reconcile, mt0_start.elapsed(), mt0_outcome);
+    let statuses = statuses.map_err(|e| SubmitError::Transport(e.to_string()))?;
     let status = match statuses.value.into_iter().next().flatten() {
         None => {
             return Ok(LandingEvidence {
@@ -232,7 +252,14 @@ pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns:
         commitment: Some(CommitmentConfig::confirmed()),
         max_supported_transaction_version: Some(1), // Pflicht seit v1 (sonst -32015)
     };
-    let (fee, cu) = match rpc.get_transaction_with_config(sig, cfg) {
+    let mt0_start = std::time::Instant::now(); // [MT0]
+    let fetched = rpc.get_transaction_with_config(sig, cfg);
+    let mt0_outcome = match &fetched {
+        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
+    };
+    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Reconcile, mt0_start.elapsed(), mt0_outcome);
+    let (fee, cu) = match fetched {
         Ok(t) => {
             let meta = t.transaction.meta;
             // VERIFY: Feldnamen `fee` und `compute_units_consumed` (OptionSerializer) in solana-transaction-status 3.x

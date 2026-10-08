@@ -179,6 +179,10 @@ impl StateCore {
                 self.highest_slot = self.highest_slot.max(t.slot);
                 None // Shadow/H0-Evidence, kein State
             }
+            IngressEvent::Logs(l) => {
+                self.highest_slot = self.highest_slot.max(l.slot);
+                None // [C0-MO] Market evidence, kein State
+            }
             IngressEvent::Health(_) => None, // Telemetrie, kein State
             IngressEvent::Root { slot, .. } => {
                 self.root = Some(self.root.map_or(slot, |r| r.max(slot)));

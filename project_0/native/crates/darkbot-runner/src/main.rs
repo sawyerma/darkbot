@@ -1,6 +1,6 @@
 //! `p0-longtail`: Long-Tail-Runner. Konfiguration ausschließlich aus Env (kein Wert im Code):
 //!   P0_WS_URL, P0_RPC_URL, P0_PROGRAM_ID, P0_GROUP_ID (aus P1A-Manifest), P0_KEYPAIR_PATH,
-//!   P0_MODE=shadow|live, P0_MIN_PROFIT, P0_MAX_*, P0_RECORD_PATH
+//!   P0_MODE=shadow|live|market (market = C0-MO read-only observer), P0_MIN_PROFIT, P0_MAX_*, P0_RECORD_PATH
 //! Ohne Health-Engine (Feature crate_health) läuft der Prozess im Shadow-Modus bis Detection
 //! und schreibt `Unavailable`-Records — damit ist die Kette messbar, bevor P3 angebunden ist.
 //!
@@ -508,6 +508,11 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    // [C0-MO] Market mode branches off before any trading-stack initialisation: no RPC URL,
+    // keypair, signer, health engine, planner, simulation or submission is constructed.
+    if config::require("P0_MODE")? == "market" {
+        return darkbot_runner::market_observer::run_from_env().map_err(|e| e.into());
+    }
     let ws_url = config::require("P0_WS_URL")?;
     let ws_url_for_spawn = ws_url.clone();
     let rpc_url = config::require("P0_RPC_URL")?;
@@ -665,6 +670,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         slots: true,
         roots: true,
         transactions_mentioning: vec![],
+        logs_mentioning: vec![],
     };
     // [FIX-34] Ingress als neu startbare Session: bei Änderung der Dependency-Menge wird die alte
     // Session beendet, eine neue mit erweiterter Subscription gestartet, dann HALT → Recovery → READY.
@@ -761,7 +767,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::Builder::new().name("blockhash".into()).spawn(move || {
         let mut degraded = false;
         loop {
-            match bh_cache.refresh(&bh_rpc, bh_clock.now_ns()) {
+            let mt0_start = std::time::Instant::now(); // [MT0]
+            let refreshed = bh_cache.refresh(&bh_rpc, bh_clock.now_ns());
+            let mt0_outcome = match &refreshed {
+                Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+                Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+            };
+            darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Blockhash, mt0_start.elapsed(), mt0_outcome);
+            match refreshed {
                 Ok(_) => {
                     if degraded {
                         eprintln!("blockhash refresh: recovered");
@@ -1109,7 +1122,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(feature = "crate_health")]
     let mut ingress_since_detect: usize = 0;
+    // [MT0] Measurement only: owner-section timing, queue-age tracking and an off-owner
+    // reporter thread (the only place that writes MT0 evidence to disk).
+    let mt0_path = config::parsed_or::<String>("P0_MT0_PATH", "project_0/data/shadow/mt0.jsonl".into())?;
+    let mt0_interval_secs: u64 = config::parsed_or("P0_MT0_INTERVAL_SECS", 10)?;
+    let _mt0_reporter = darkbot_common::mt0::spawn_reporter(std::path::PathBuf::from(mt0_path), Duration::from_secs(mt0_interval_secs.max(1)), shutdown.clone())?;
+    let mut mt0_owner = darkbot_common::mt0::OwnerTimer::new();
+    // [MT0] First-trigger receive time (`t_rx` of the enqueue that created the token) of every
+    // token in `oracle_detect_order`: same length, same order. Pushed in lockstep at the physical
+    // enqueue; coalescing never touches it, so the first unserved trigger is kept.
+    #[cfg(feature = "crate_health")]
+    let mut mt0_order_rx: VecDeque<u64> = VecDeque::new();
     loop {
+        mt0_owner.enter(darkbot_common::mt0::OwnerCat::RemoteResults);
+        #[cfg(feature = "crate_health")]
+        {
+            // Backlog age covers both queues counted in `pending_current`: head-of-line token of the
+            // oracle queue (FIFO) and the oldest entry of `detect_queue`.
+            let oldest_rx = mt0_order_rx
+                .front()
+                .copied()
+                .into_iter()
+                .chain(detect_queue.iter().map(|w| w.1))
+                .min();
+            let oldest = oldest_rx.map(|t| clock.now_ns().saturating_sub(t));
+            darkbot_common::mt0::MT0.set_backlog((oracle_detect_pending.len() + detect_queue.len()) as u64, oldest);
+        }
         if shutdown.is_requested() {
             break;
         }
@@ -1238,9 +1276,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 oracle_coalesced: &mut u64,
                                 oracle_max_pending: &mut usize,
                                 oracle_detect_order: &mut VecDeque<Pubkey>,
-                                oracle_detect_pending: &mut HashMap<Pubkey, DetectWork>| {
+                                oracle_detect_pending: &mut HashMap<Pubkey, DetectWork>,
+                                mt0_order_rx: &mut VecDeque<u64>| {
                 *oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
                 let (t_rx_ns, event_slot) = latest.unwrap_or((clock.now_ns(), base_slot));
+                let mt0_len_before = oracle_detect_order.len(); // [MT0]
                 let count = enqueue_oracle_accounts(
                     all_accounts.iter().copied(),
                     t_rx_ns,
@@ -1252,6 +1292,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     oracle_coalesced,
                     oracle_max_pending,
                 );
+                for _ in mt0_len_before..oracle_detect_order.len() {
+                    mt0_order_rx.push_back(t_rx_ns);
+                }
                 *oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
                 eprintln!(
                     "oracle_bank_projection_fallback: bank={} reason={} accounts={}",
@@ -1281,7 +1324,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             &mut oracle_coalesced,
                             &mut oracle_max_pending,
                             &mut oracle_detect_order,
-                            &mut oracle_detect_pending,
+                            &mut oracle_detect_pending, &mut mt0_order_rx,
                         );
                         continue;
                     }
@@ -1321,6 +1364,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     );
                                     let (t_rx_ns, event_slot) =
                                         latest.unwrap_or((clock.now_ns(), projection_slot));
+                                    let mt0_len_before = oracle_detect_order.len(); // [MT0]
                                     let count = enqueue_oracle_accounts(
                                         candidates,
                                         t_rx_ns,
@@ -1332,6 +1376,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         &mut oracle_coalesced,
                                         &mut oracle_max_pending,
                                     );
+                                    for _ in mt0_len_before..oracle_detect_order.len() {
+                                        mt0_order_rx.push_back(t_rx_ns);
+                                    }
                                     oracle_candidate_hits =
                                         oracle_candidate_hits.saturating_add(count as u64);
                                     oracle_bank_projection_ready =
@@ -1348,7 +1395,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         &mut oracle_coalesced,
                                         &mut oracle_max_pending,
                                         &mut oracle_detect_order,
-                                        &mut oracle_detect_pending,
+                                        &mut oracle_detect_pending, &mut mt0_order_rx,
                                     );
                                 }
                             }
@@ -1364,7 +1411,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 &mut oracle_coalesced,
                                 &mut oracle_max_pending,
                                 &mut oracle_detect_order,
-                                &mut oracle_detect_pending,
+                                &mut oracle_detect_pending, &mut mt0_order_rx,
                             );
                         }
                     }
@@ -1380,7 +1427,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         &mut oracle_coalesced,
                         &mut oracle_max_pending,
                         &mut oracle_detect_order,
-                        &mut oracle_detect_pending,
+                        &mut oracle_detect_pending, &mut mt0_order_rx,
                     );
                 }
             }
@@ -1542,6 +1589,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             pending = keep;
         }
 
+        mt0_owner.enter(darkbot_common::mt0::OwnerCat::Sweep);
         // [R127c] Flush the accumulated Bank set only after an ingress burst is drained,
         // or after a bounded number of dependency events. This mirrors eva01's "drain updates,
         // dedupe affected accounts, then evaluate" behavior and prevents per-update fanout.
@@ -1608,6 +1656,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             state: &view,
                             group,
                         };
+                        darkbot_common::mt0::MT0.count_health(darkbot_common::mt0::HealthSite::Sweep); // [MT0]
                         let status = match engine.health(&account, now_s, evaluation_slot) {
                             Ok(h) if !h.liquidatable => CandidateHealthState::Healthy,
                             Ok(_) => CandidateHealthState::Liquidatable,
@@ -1749,6 +1798,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     candidate_cache_periodic_forwards =
                                         candidate_cache_periodic_forwards.saturating_add(1);
                                 }
+                                let mt0_len_before = oracle_detect_order.len(); // [MT0]
                                 let queue_admission = enqueue_or_coalesce_candidate(
                                     account,
                                     t_rx_ns,
@@ -1760,6 +1810,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     &mut oracle_coalesced,
                                     &mut oracle_max_pending,
                                 );
+                                for _ in mt0_len_before..oracle_detect_order.len() {
+                                    mt0_order_rx.push_back(t_rx_ns);
+                                }
                                 match queue_admission {
                                     CandidateQueueAdmission::Enqueued => {
                                         candidate_physical_enqueues =
@@ -1869,6 +1922,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     candidate_cache_periodic_forwards =
                                         candidate_cache_periodic_forwards.saturating_add(1);
                                 }
+                                let mt0_len_before = oracle_detect_order.len(); // [MT0]
                                 let queue_admission = enqueue_or_coalesce_candidate(
                                     account,
                                     t_rx_ns,
@@ -1880,6 +1934,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     &mut oracle_coalesced,
                                     &mut oracle_max_pending,
                                 );
+                                for _ in mt0_len_before..oracle_detect_order.len() {
+                                    mt0_order_rx.push_back(t_rx_ns);
+                                }
                                 match queue_admission {
                                     CandidateQueueAdmission::Enqueued => {
                                         candidate_physical_enqueues =
@@ -1928,6 +1985,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        mt0_owner.enter(darkbot_common::mt0::OwnerCat::Wait);
         #[cfg(feature = "crate_health")]
         let queued_detection_available =
             !detect_queue.is_empty()
@@ -1949,6 +2007,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(not(feature = "crate_health"))]
         let maybe_ev = consumer.pop_timeout(Duration::from_millis(250));
 
+        mt0_owner.enter(darkbot_common::mt0::OwnerCat::IngressApply);
+        if let Some(ev) = &maybe_ev {
+            darkbot_common::mt0::MT0.record_ingress_queue_wait(clock.now_ns().saturating_sub(ev.t_rx_ns()));
+        }
         #[cfg(feature = "crate_health")]
         let mut detect;
         #[cfg(not(feature = "crate_health"))]
@@ -2472,6 +2534,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     slots: true,
                     roots: true,
                     transactions_mentioning: vec![],
+                    logs_mentioning: vec![],
                 };
                 ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
             }
@@ -2670,6 +2733,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
 
+                let mt0_len_before = oracle_detect_order.len(); // [MT0]
                 let count = enqueue_oracle_accounts(
                     candidates,
                     t_rx_ns,
@@ -2681,6 +2745,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     &mut oracle_coalesced,
                     &mut oracle_max_pending,
                 );
+                for _ in mt0_len_before..oracle_detect_order.len() {
+                    mt0_order_rx.push_back(t_rx_ns);
+                }
                 oracle_candidate_hits =
                     oracle_candidate_hits.saturating_add(count as u64);
                 }
@@ -2697,10 +2764,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 detect = detect_queue
                     .pop_front()
                     .or_else(|| {
-                        next_oracle_detect(
+                        let mt0_len_before = oracle_detect_order.len();
+                        let work = next_oracle_detect(
                             &mut oracle_detect_order,
                             &mut oracle_detect_pending,
-                        )
+                        );
+                        let mut mt0_first = None;
+                        for _ in 0..mt0_len_before.saturating_sub(oracle_detect_order.len()) {
+                            mt0_first = mt0_order_rx.pop_front();
+                        }
+                        if let (Some(w), Some(first)) = (&work, mt0_first) {
+                            darkbot_common::mt0::MT0.record_queue_wait_first(
+                                darkbot_common::mt0::TriggerClass::from_trigger(w.3),
+                                clock.now_ns().saturating_sub(first),
+                            );
+                        }
+                        work
                     })
                     .or_else(|| {
                         next_integration_probe(
@@ -2718,7 +2797,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         } // normal ingress event path; projected rechecks skip state mutation
 
+        mt0_owner.enter(darkbot_common::mt0::OwnerCat::Detect);
         if let Some((acct, t_rx, slot, trigger)) = detect {
+            darkbot_common::mt0::MT0.record_queue_wait(darkbot_common::mt0::TriggerClass::from_trigger(trigger), clock.now_ns().saturating_sub(t_rx), None);
             // Health über das Crate (Feature crate_health), sonst fail-closed NoHealth → Unavailable-Record.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             let view = StateView(&st);
@@ -2993,6 +3074,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }
             #[cfg(feature = "crate_health")]
             let health_started_ns = clock.now_ns();
+            darkbot_common::mt0::MT0.count_health(darkbot_common::mt0::HealthSite::DetectConsumer); // [MT0]
             let health_result = engine.health(&acct, protocol_now as i64, protocol_slot);
             #[cfg(feature = "crate_health")]
             {
@@ -3054,6 +3136,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             #[cfg(feature = "crate_health")]
             let pipeline_started_ns = clock.now_ns();
+            darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::PipelineEvaluations, 1); // [MT0]
             let mut rec = pipe.evaluate(acct, trigger, t_rx, protocol_now, protocol_slot, st.run_state().is_tradable());
             #[cfg(feature = "crate_health")]
             {
@@ -3127,6 +3210,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Detection/Pipeline (P2→P5) wird hier eingehängt, sobald HealthEngine (P3) verfügbar ist.
         // Bis dahin: nur State + Zähler, damit S1-LT/S2 messbar sind (Ledger).
         let update_total = counts.iter().sum::<u64>();
+        mt0_owner.enter(darkbot_common::mt0::OwnerCat::Stats);
         if update_total > 0 && update_total % 1000 == 0 && update_total != last_reported_update_total {
             last_reported_update_total = update_total;
             eprintln!("updates: accounts={} banks={} groups={} fee={} liqrec={} unknown={} channel={:?}",

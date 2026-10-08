@@ -284,7 +284,9 @@ pub mod p0 {
     ) -> Result<Option<(Route, T)>, String> {
         let mut cap = initial_cap.clamp(1, 64);
         let mut rejected = Vec::new();
+        darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::RouteFitCalls, 1); // [MT0]
         for attempt in 0..6 {
+            darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::RouteFitAttempts, 1); // [MT0]
             let Some(route) = quote(cap)? else { return Ok(None) };
             match compile(&route) {
                 Ok(compiled) => return Ok(Some((route, compiled))),

@@ -90,7 +90,20 @@ impl JupiterV2RouteProvider {
         if let Some(key) = self.api_key.as_deref() {
             req = req.header("x-api-key", key);
         }
-        let response = req.send().map_err(|e| format!("jupiter /build transport: {e}"))?;
+        // [MT0] latency + outcome per request (measurement only).
+        let mt0_start = std::time::Instant::now();
+        let response = match req.send() {
+            Ok(r) => r,
+            Err(e) => {
+                let outcome = if e.is_timeout() { darkbot_common::mt0::RemoteOutcome::Timeout } else { darkbot_common::mt0::RemoteOutcome::Error };
+                darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Jupiter, mt0_start.elapsed(), outcome);
+                return Err(format!("jupiter /build transport: {e}"));
+            }
+        };
+        let mt0_status = response.status().as_u16();
+        // 404 is Jupiter's regular "no route" answer, not a transport failure.
+        let mt0_outcome = if mt0_status == 404 { darkbot_common::mt0::RemoteOutcome::Ok } else { darkbot_common::mt0::RemoteOutcome::from_http_status(mt0_status) };
+        darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Jupiter, mt0_start.elapsed(), mt0_outcome);
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err("jupiter /build: no route (HTTP 404)".into());
         }

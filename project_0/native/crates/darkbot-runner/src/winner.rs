@@ -274,7 +274,8 @@ pub(crate) fn check_transaction_identity(tx: &RpcTransaction, signature: &str, s
 
 fn fetch_transaction(rpc: &RpcClient, signature: &str) -> Result<RpcTransaction, String> {
     Signature::from_str(signature).map_err(|e| format!("signature {signature}: {e:?}"))?;
-    let value: serde_json::Value = rpc
+    let mt0_start = std::time::Instant::now(); // [MT0]
+    let value: Result<serde_json::Value, String> = rpc
         .send(
             RpcRequest::GetTransaction,
             serde_json::json!([
@@ -282,7 +283,13 @@ fn fetch_transaction(rpc: &RpcClient, signature: &str) -> Result<RpcTransaction,
                 {"encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 1}
             ]),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string());
+    let mt0_outcome = match &value {
+        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+    };
+    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Winner, mt0_start.elapsed(), mt0_outcome);
+    let value = value?;
     if value.is_null() {
         return Err(format!("transaction {signature} not found"));
     }
@@ -298,7 +305,14 @@ pub fn find_winner(rpc: &RpcClient, program: &Pubkey, account: &Pubkey, since_sl
     let mut reached_since = false;
     for _ in 0..MAX_PAGES {
         let cfg = GetConfirmedSignaturesForAddress2Config { before, until: None, limit: Some(PAGE), commitment: Some(CommitmentConfig::confirmed()) };
-        let sigs = rpc.get_signatures_for_address_with_config(account, cfg).map_err(|e| e.to_string())?;
+        let mt0_start = std::time::Instant::now(); // [MT0]
+        let sigs = rpc.get_signatures_for_address_with_config(account, cfg).map_err(|e| e.to_string());
+        let mt0_outcome = match &sigs {
+            Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+        };
+        darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Winner, mt0_start.elapsed(), mt0_outcome);
+        let sigs = sigs?;
         if sigs.is_empty() { reached_since = true; break; }
         for s in &sigs {
             if s.slot < since_slot { reached_since = true; continue; }

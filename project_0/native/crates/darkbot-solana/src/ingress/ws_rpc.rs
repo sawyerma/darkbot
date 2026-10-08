@@ -39,6 +39,24 @@ pub struct WsRpcConfig {
     pub reconnect_max: Duration,
     /// Ohne Frame innerhalb dieser Zeit gilt der Stream als tot (Ping/Pong reicht nicht).
     pub idle_timeout: Duration,
+    /// [C0-MO] Optional transport heartbeat: send a WebSocket Ping at this interval. `None`
+    /// (default, Shadow/Live) keeps the previous behaviour exactly; the market mode enables it.
+    pub heartbeat_interval: Option<Duration>,
+}
+
+/// Wait before the next frame read. `None` heartbeat: exactly the idle timeout (previous
+/// behaviour). With heartbeat: the shorter of the remaining idle budget (measured from the last
+/// APPLICATION frame) and the time to the next heartbeat.
+pub(crate) fn heartbeat_wait(idle_timeout: Duration, since_last_app_frame: Duration, until_heartbeat: Option<Duration>) -> Duration {
+    match until_heartbeat {
+        None => idle_timeout,
+        Some(until) => idle_timeout.saturating_sub(since_last_app_frame).min(until),
+    }
+}
+
+/// Application data (JSON-RPC text/binary). Ping/Pong/Close/raw frames are transport only.
+pub(crate) fn is_application_frame(frame: &Message) -> bool {
+    matches!(frame, Message::Text(_) | Message::Binary(_))
 }
 
 impl WsRpcConfig {
@@ -50,6 +68,7 @@ impl WsRpcConfig {
             reconnect_initial: Duration::from_millis(500),
             reconnect_max: Duration::from_secs(30),
             idle_timeout: Duration::from_secs(60),
+            heartbeat_interval: None,
         }
     }
 }
@@ -72,6 +91,7 @@ pub(crate) enum SubKind { // [FIX-52] matches parse_notification visibility
     Slot,
     Root,
     Transaction,
+    Logs,
 }
 
 /// Baut die Subscribe-Requests. Request-ID → Art, damit die Bestätigungen
@@ -121,8 +141,20 @@ fn build_subscribe_requests(sub: &Subscription, commitment: &str) -> Vec<(u64, S
             id,
             SubKind::Transaction,
             json!({"jsonrpc":"2.0","id":id,"method":"transactionSubscribe",
-                   "params":[{"accountInclude":[p.to_string()], "failed": true},
+                   // [C0-MO] No `failed`/`vote` key: on Helius/LaserStream a set `failed` flag selects
+                   // one status class only; omitted means successful AND failed are delivered.
+                   "params":[{"accountInclude":[p.to_string()]},
                              {"commitment":commitment, "encoding":"json", "transactionDetails":"full", "maxSupportedTransactionVersion": 1}]}),
+        ));
+        id += 1;
+    }
+    // [C0-MO] Standard Solana method (all provider plans). `mentions` accepts exactly one key.
+    for p in &sub.logs_mentioning {
+        out.push((
+            id,
+            SubKind::Logs,
+            json!({"jsonrpc":"2.0","id":id,"method":"logsSubscribe",
+                   "params":[{"mentions":[p.to_string()]}, {"commitment":commitment}]}),
         ));
         id += 1;
     }
@@ -216,6 +248,21 @@ pub(crate) fn parse_notification(
             let err = tx.pointer("/meta/err").filter(|e| !e.is_null()).map(|e| e.to_string());
             Ok(vec![IngressEvent::Transaction(super::TransactionObserved {
                 signature: sig, slot, tx_index_in_slot: None, version, err, source: SourceKind::WsRpcControl, t_rx_ns,
+                raw: result.clone(),
+            })])
+        }
+        "logsNotification" => {
+            // [C0-MO] {result:{context:{slot}, value:{signature, err, logs}}}
+            let slot = result.pointer("/context/slot").and_then(|s| s.as_u64()).ok_or_else(|| IngressError::Protocol("context.slot missing".into()))?;
+            let value = result.get("value").ok_or_else(|| IngressError::Protocol("value missing".into()))?;
+            let signature = value.get("signature").and_then(|s| s.as_str()).ok_or_else(|| IngressError::Protocol("signature missing".into()))?.to_string();
+            let err = value.get("err").filter(|e| !e.is_null()).map(|e| e.to_string());
+            let logs = match value.get("logs") {
+                Some(Value::Array(items)) => items.iter().filter_map(|l| l.as_str().map(str::to_string)).collect(),
+                _ => Vec::new(),
+            };
+            Ok(vec![IngressEvent::Logs(super::LogsObserved {
+                signature, slot, err, logs, source: SourceKind::WsRpcControl, t_rx_ns, raw: result.clone(),
             })])
         }
         "rootNotification" => {
@@ -315,12 +362,38 @@ impl WsRpcControlSource {
         let mut frames: u64 = 0;
         let mut last_frame_ns: Option<u64> = None;
         let mut last_health_ns: u64 = self.clock.now_ns();
+        let heartbeat = self.cfg.heartbeat_interval;
+        let mut last_app_frame_at = tokio::time::Instant::now();
+        let mut next_heartbeat_at = heartbeat.map(|h| tokio::time::Instant::now() + h);
 
         loop {
             if shutdown.is_requested() {
                 return Ok(());
             }
-            let frame = tokio::time::timeout(self.cfg.idle_timeout, rx.next()).await;
+            // [C0-MO] Transport heartbeat (only when configured). A failed send is a connection
+            // loss and takes the existing reconnect/Gap path.
+            if let (Some(h), Some(at)) = (heartbeat, next_heartbeat_at) {
+                let now = tokio::time::Instant::now();
+                if now >= at {
+                    tx.send(Message::Ping(Default::default()))
+                        .await
+                        .map_err(|e| IngressError::Connect(format!("heartbeat: {e}")))?;
+                    next_heartbeat_at = Some(now + h);
+                }
+            }
+            let now = tokio::time::Instant::now();
+            let wait = heartbeat_wait(
+                self.cfg.idle_timeout,
+                now.saturating_duration_since(last_app_frame_at),
+                next_heartbeat_at.map(|at| at.saturating_duration_since(now)),
+            );
+            let frame = tokio::time::timeout(wait, rx.next()).await;
+            if frame.is_err()
+                && heartbeat.is_some()
+                && last_app_frame_at.elapsed() < self.cfg.idle_timeout
+            {
+                continue; // woke up for the heartbeat, not because the stream went idle
+            }
             let t_rx_ns = self.clock.now_ns(); // T_rx: vor Parse
             // Health-Event alle 5 s (Ledger: stream health), unabhängig vom Frame-Inhalt.
             if t_rx_ns.saturating_sub(last_health_ns) >= 5_000_000_000 {
@@ -342,6 +415,11 @@ impl WsRpcControlSource {
                 Ok(Some(Ok(f))) => f,
             };
             frames += 1;
+            // [C0-MO r5] Only application frames prove the subscription stream is alive;
+            // transport Ping/Pong (incl. replies to our heartbeat) never reset the idle budget.
+            if is_application_frame(&frame) {
+                last_app_frame_at = tokio::time::Instant::now();
+            }
             last_frame_ns = Some(t_rx_ns);
             let text = match frame {
                 Message::Text(t) => t.to_string(),
@@ -434,6 +512,7 @@ mod tests {
             slots: true,
             roots: true,
             transactions_mentioning: vec![],
+            logs_mentioning: vec![],
         };
         let reqs = build_subscribe_requests(&sub, "confirmed");
         assert_eq!(reqs.len(), 4);
@@ -442,6 +521,89 @@ mod tests {
         assert_eq!(reqs[2].2["method"], "slotSubscribe");
         assert_eq!(reqs[3].2["method"], "rootSubscribe");
         assert_eq!(reqs[0].2["params"][1]["encoding"], "base64");
+    }
+
+    #[test]
+    fn c0mo_market_subscriptions_are_opt_in() {
+        let p = Pubkey::new_unique();
+        // Shadow-shaped subscription: no transaction/logs subscriptions (FIX-139 unchanged).
+        let shadow = Subscription { slots: true, roots: true, ..Subscription::default() };
+        assert!(build_subscribe_requests(&shadow, "confirmed")
+            .iter()
+            .all(|r| r.2["method"] != "logsSubscribe" && r.2["method"] != "transactionSubscribe"));
+        let market = Subscription { logs_mentioning: vec![p], ..Subscription::default() };
+        let reqs = build_subscribe_requests(&market, "confirmed");
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].1, SubKind::Logs);
+        assert_eq!(reqs[0].2["method"], "logsSubscribe");
+        assert_eq!(reqs[0].2["params"][0]["mentions"][0], p.to_string());
+    }
+
+    #[test]
+    fn shadow_config_keeps_heartbeat_disabled_and_wait_unchanged() {
+        let cfg = WsRpcConfig::new("wss://h".into(), Subscription::default());
+        assert_eq!(cfg.heartbeat_interval, None);
+        let idle = cfg.idle_timeout;
+        // Without heartbeat the read wait is exactly the idle timeout, as before.
+        assert_eq!(heartbeat_wait(idle, Duration::from_secs(59), None), idle);
+        // With heartbeat: the shorter of remaining idle budget and time to the next ping.
+        assert_eq!(heartbeat_wait(idle, Duration::from_secs(10), Some(Duration::from_secs(5))), Duration::from_secs(5));
+        assert_eq!(heartbeat_wait(idle, Duration::from_secs(58), Some(Duration::from_secs(30))), Duration::from_secs(2));
+        assert_eq!(heartbeat_wait(idle, Duration::from_secs(70), Some(Duration::from_secs(30))), Duration::ZERO);
+    }
+
+    #[test]
+    fn transport_ping_pong_never_counts_as_stream_activity() {
+        assert!(is_application_frame(&Message::Text("{}".to_string())));
+        assert!(is_application_frame(&Message::Binary(vec![1u8])));
+        assert!(!is_application_frame(&Message::Ping(Default::default())));
+        assert!(!is_application_frame(&Message::Pong(Default::default())));
+        assert!(!is_application_frame(&Message::Close(None)));
+    }
+
+    #[test]
+    fn c0mo_transaction_subscription_requests_successful_and_failed() {
+        let p = Pubkey::new_unique();
+        let sub = Subscription { transactions_mentioning: vec![p], ..Subscription::default() };
+        let reqs = build_subscribe_requests(&sub, "finalized");
+        assert_eq!(reqs.len(), 1);
+        let filter = &reqs[0].2["params"][0];
+        assert_eq!(reqs[0].2["method"], "transactionSubscribe");
+        assert_eq!(filter["accountInclude"][0], p.to_string());
+        assert!(filter.get("failed").is_none(), "failed filter would select one status class only");
+        assert!(filter.get("vote").is_none());
+        assert_eq!(reqs[0].2["params"][1]["commitment"], "finalized");
+        assert_eq!(reqs[0].2["params"][1]["transactionDetails"], "full");
+    }
+
+    #[test]
+    fn c0mo_logs_and_transaction_notifications_keep_raw_payload() {
+        let ids = HashMap::new();
+        let logs = json!({"jsonrpc":"2.0","method":"logsNotification","params":{"subscription":7,
+            "result":{"context":{"slot":42},"value":{"signature":"sigL","err":null,"logs":["Program x invoke [1]"]}}}});
+        match parse_notification(&logs, &ids, 5).unwrap().pop().unwrap() {
+            IngressEvent::Logs(l) => {
+                assert_eq!((l.signature.as_str(), l.slot, l.err.clone(), l.logs.len()), ("sigL", 42, None, 1));
+                assert_eq!(l.raw["value"]["signature"], "sigL");
+            }
+            other => panic!("expected Logs, got {other:?}"),
+        }
+        let failed = json!({"jsonrpc":"2.0","method":"logsNotification","params":{"subscription":7,
+            "result":{"context":{"slot":43},"value":{"signature":"sigF","err":{"InstructionError":[0,"Custom"]},"logs":null}}}});
+        match parse_notification(&failed, &ids, 5).unwrap().pop().unwrap() {
+            IngressEvent::Logs(l) => assert!(l.err.is_some() && l.logs.is_empty()),
+            other => panic!("expected Logs, got {other:?}"),
+        }
+        let tx = json!({"jsonrpc":"2.0","method":"transactionNotification","params":{"subscription":8,
+            "result":{"signature":"sigT","slot":44,"transaction":{"transaction":{"signatures":["sigT"],"message":{"accountKeys":[],"instructions":[]}},
+            "meta":{"err":null,"fee":5000,"logMessages":["a"]},"version":0}}}});
+        match parse_notification(&tx, &ids, 5).unwrap().pop().unwrap() {
+            IngressEvent::Transaction(t) => {
+                assert_eq!(t.raw["transaction"]["meta"]["fee"], 5000);
+                assert_eq!(t.raw["transaction"]["meta"]["logMessages"][0], "a");
+            }
+            other => panic!("expected Transaction, got {other:?}"),
+        }
     }
 
     #[test]

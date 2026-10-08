@@ -192,9 +192,15 @@ impl RemoteWorkers {
                     let base_slot = work.base_slot;
                     let base_account_hash = work.base_account_hash;
                     let t_rx_ns = work.t_rx_ns;
+                    let mt0_start = std::time::Instant::now(); // [MT0]
                     let result = submitter
                         .simulate_with_post_accounts(&work.tx, &work.targets)
                         .map_err(|e| e.to_string());
+                    let mt0_outcome = match &result {
+                        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+                        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+                    };
+                    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::IntegrationProjection, mt0_start.elapsed(), mt0_outcome);
                     if !push_result(
                         &projection_done_tx,
                         ProjectionResultMessage {
@@ -225,9 +231,15 @@ impl RemoteWorkers {
                     let bank = work.bank;
                     let base_slot = work.base_slot;
                     let base_bank_hash = work.base_bank_hash;
+                    let mt0_start = std::time::Instant::now(); // [MT0]
                     let result = submitter
                         .simulate_with_post_accounts(&work.tx, &work.targets)
                         .map_err(|e| e.to_string());
+                    let mt0_outcome = match &result {
+                        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+                        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+                    };
+                    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::OracleProjection, mt0_start.elapsed(), mt0_outcome);
                     if !push_result(
                         &oracle_price_projection_done_tx,
                         OraclePriceProjectionResultMessage {

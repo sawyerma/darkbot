@@ -96,6 +96,23 @@ pub struct TransactionObserved {
     pub err: Option<String>,
     pub source: SourceKind,
     pub t_rx_ns: u64,
+    /// [C0-MO] Complete provider payload of the notification (`result`), lossless.
+    /// Shadow/Live ignore it; the market observer uses it as primary raw evidence.
+    pub raw: serde_json::Value,
+}
+
+/// [C0-MO] Standard `logsSubscribe` notification (signature, err, log messages). Unlike
+/// `TransactionObserved` it carries no message/meta; the version is therefore unknown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogsObserved {
+    pub signature: String,
+    pub slot: u64,
+    pub err: Option<String>,
+    pub logs: Vec<String>,
+    pub source: SourceKind,
+    pub t_rx_ns: u64,
+    /// Complete provider payload of the notification (`result`), lossless.
+    pub raw: serde_json::Value,
 }
 
 /// Quellen-Gesundheit, periodisch vom Adapter emittiert (Ledger: stream health).
@@ -114,6 +131,8 @@ pub struct SourceHealth {
 pub enum IngressEvent {
     Account(AccountUpdate),
     Transaction(TransactionObserved),
+    /// [C0-MO] `logsSubscribe` notification.
+    Logs(LogsObserved),
     Health(SourceHealth),
     Slot(SlotUpdate),
     /// Neuer Root (Finalisierung) — Fork-Policy in S2.
@@ -132,6 +151,7 @@ impl IngressEvent {
         match self {
             IngressEvent::Account(a) => a.t_rx_ns,
             IngressEvent::Transaction(t) => t.t_rx_ns,
+            IngressEvent::Logs(l) => l.t_rx_ns,
             IngressEvent::Health(h) => h.t_rx_ns,
             IngressEvent::Slot(s) => s.t_rx_ns,
             IngressEvent::Root { t_rx_ns, .. }
@@ -174,6 +194,8 @@ pub struct Subscription {
     pub roots: bool,
     /// Transaktionen, die ein Programm berühren (Shadow/Winner-Vergleich; Stufe 1 optional).
     pub transactions_mentioning: Vec<Pubkey>,
+    /// [C0-MO] Standard `logsSubscribe` (`mentions`) per program. Empty in Shadow/Live.
+    pub logs_mentioning: Vec<Pubkey>,
 }
 
 /// Contract für alle Ingress-Adapter. `run` blockiert bis Shutdown oder Fatal.

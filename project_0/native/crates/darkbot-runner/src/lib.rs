@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! Runner: Ingress → State → Detection (3 Trigger) → Health → Economics → Planner → TX → Submit → Reconcile.
 //!
 //! Zwei Modi, ein Code:
@@ -24,3 +26,4 @@ pub mod record;
 pub mod remote_workers;
 
 pub mod lookup_tables;
+pub mod market_observer;

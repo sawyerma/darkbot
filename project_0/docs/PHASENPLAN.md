@@ -2886,6 +2886,50 @@ UNKNOWN
 Finaler Code erkennt, bewertet, plant und misst beide Opportunity-Klassen vollständig.
 
 
+## C0-MO — UNFILTERED LIVE MARKET ECONOMICS (Evidence-Subgate)
+
+**Status:** IMPLEMENTED (Code), MAINNET-LAUF AUSSTEHEND. Kein wirtschaftlicher PASS ohne realen Lauf im Measurement Ledger.
+
+**Zweck.** C0-MO beantwortet vor weiterer größerer Runtime-Optimierung: Wie viele reale Receivership-Liquidationen entstehen? Wie viel Gross Edge wird real abgeschöpft? Wie verteilt sich die Edge? Welche Receiver gewinnen? Wie konzentriert ist der Markt?
+
+**Architekturvertrag.**
+
+```text
+S1 / WsRpcControlSource (P0_MODE=market, früher Abzweig vor jedem Trading-Objekt)
+→ Marginfi transactionSubscribe   (source=transactions, Helius Developer+, ohne failed-Filter)
+  oder logsSubscribe mentions      (source=logs, alle Pläne; Enrichment erst NACH der Capture,
+                                    gezählt und begrenzt per getTransaction)
+  + WebSocket-Heartbeat (Ping, 30 s), slotSubscribe nur als Telemetrie; Commitment finalized (Default)
+→ Cutoff = t_rx(StreamReady) + Dauer; Ingress stoppen, Queue drainen, nur t_rx ≤ Cutoff zählt
+→ Raw Transaction Evidence         (transactions.jsonl, jede eindeutige Marginfi-TX inkl. failed)
+→ erfolgreicher LiquidationReceiverEvent-Decode (programm-attribuiert, fail closed)
+→ Market Gross-Edge Evidence       (liquidations.jsonl, coverage.jsonl, summary.json, final_report.txt)
+```
+
+Gross Edge = `seized_equity_usd − repaid_equity_usd` aus dem Event. Einheiten bleiben getrennt (USD, Lamports, native Token-Units); keine erzwungene SOL/USD-Umrechnung. `GAP`, `INGRESS_OVERFLOW` oder `FATAL` im Beobachtungsfenster → `coverage_complete=false`; abgeschnittene/fehlende Logs oder Decoder-Fehler in erfolgreichen TXs → `decode_complete=false`; unvollständiger Drain oder vorzeitiges Ende → jeweils `MARKET_DATA_INCOMPLETE`. Keine Quelle gilt derzeit als coverage-verifiziert (LUT-only-Referenzen auf das Programm unbelegt); jeder Lauf endet daher höchstens als `MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED`. `MARKET_DATA_VALID` erst nach autoritativer Provider-Garantie oder reproduzierbarem LUT-only-Zustellungstest. Ein Fehler des Enrichment-Clients verhindert nie Summary und Report. Enrichment-Vollständigkeit wird getrennt ausgewiesen (`enrichment_complete`, `fee_totals_complete`).
+
+**Non-Claims.** C0-MO ist kein zweiter Bot. C0-MO verändert FIX-139 nicht. C0-MO ersetzt weder P1-C noch F1/F8, P6-MT, die Competition-/Capture-Messung oder P8 realized PnL. Keine Tages-, Monats- oder Jahreshochrechnung aus einem einzelnen Lauf.
+
+**Wirtschaftliche Messkette (dürfen nicht vermischt werden).**
+
+```text
+A) C0-MO — MARKET EDGE
+   Was wurde im beobachteten Markt real liquidiert, welche Gross Edge real abgeschöpft?
+        ↓
+B) P1-C / F1 / F8 — EXECUTABLE EDGE
+   Welcher Teil dieser Markt-Edge wäre mit unseren Production-Regeln ausführbar?
+        ↓
+C) COMPETITION / CAPTURE
+   Welchen Teil der ausführbaren Edge können wir gegen andere Liquidatoren gewinnen?
+        ↓
+D) P8 — REALIZED NET PNL
+   Was landet tatsächlich als realisierter Netto-Profit bei DarkBot?
+```
+
+**Priorität.** Wirtschaftliches Stop/Continue-Gate vor dem großen Runtime-Ausbau MT6–MT10; verbindlich eingeordnet in P6-MT.16 nach MT5. Blockiert keine notwendigen Correctness-Arbeiten, verhindert aber, dass umfangreiche Performance-Arbeit allein auf Basis interner Shadow-Candidates priorisiert wird.
+
+**Qualifikation.** Erst Smoke-Test (`P0_MARKET_DURATION_SECS=600`), dann 4-Stunden-Lauf (`14400`). Eintrag im Measurement Ledger mit source commit, run_id, provider class, source, start/end, actual duration, first/last slot, coverage_complete, gap/overflow, unique/liquidation transactions, events, gross edge total/hour/median/p90/p99/max, unique receivers, top/top-3 share und den Non-Claims.
+
 ## P6-MT — BOUNDED PARALLEL RUNTIME / APPLE-M-SERIES
 
 ### Status / Zweck
@@ -3461,12 +3505,21 @@ Verbindliche Reihenfolge:
 ```text
 MT0  Instrumentierung / H1–H6
 MT1  Remote-Client-Hygiene
-P1-C Audit Step 4: Executable-Floor-Economics
+P1-C Executable-Floor-Economics
+     → bereits durch Tranche 1 r3 lokal qualifiziert; nicht neu implementieren
 MT2  Owner-Diät + eine prepare_candidate
 MT3  Prioritäts-Lanes + t_rx_first
      Freshness NICHT ohne eigenes Review
 MT4  Remote-Arbeit vermeiden; UB nur so hart wie bewiesen
 MT5  Generationen + Readset + Ownership-Lifecycle
+
+C0-MO
+     → 10-min Smoke
+     → danach 4-h Market Observation
+     → MARKET EDGE / Marktgröße / Gross Edge bewerten
+     → vor großem MT6–MT10-Ausbau
+     (kein Ersatz für MT0–MT5, kein LIVE-Gate; wirtschaftliches Stop/Continue-Gate)
+
 MT6  Snapshot-Modell messen und wählen
 MT7  FAST-Pool / Cross-Account-Admission
 MT8  async Remote-Runtime / getrennte bounded Klassen

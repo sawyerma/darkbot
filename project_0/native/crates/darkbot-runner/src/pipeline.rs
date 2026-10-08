@@ -60,6 +60,52 @@ pub fn pipeline_timing_snapshot() -> PipelineTimingSnapshot {
     }
 }
 
+const LAMPORTS_PER_SIGNATURE: u64 = 5_000;
+const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
+const DEFAULT_CU_PER_INSTRUCTION: u64 = 200_000;
+const MAX_CU_LIMIT: u64 = 1_400_000;
+const MICRO_LAMPORTS_PER_LAMPORT: u128 = 1_000_000;
+
+/// [MT0] H6 measurement only (never used for a decision): local fee estimate for legacy/v0
+/// messages = signatures x 5_000 + ceil(CU limit x CU price / 10^6). `None` for other formats.
+fn local_fee_estimate_lamports(tx: &solana_sdk::transaction::VersionedTransaction) -> Option<u64> {
+    use solana_sdk::message::VersionedMessage;
+    if !matches!(tx.message, VersionedMessage::Legacy(_) | VersionedMessage::V0(_)) {
+        return None;
+    }
+    let keys = tx.message.static_account_keys();
+    let (mut limit, mut price, mut other_ixs) = (None, None, 0u64);
+    for ix in tx.message.instructions() {
+        let is_cb = keys
+            .get(usize::from(ix.program_id_index))
+            .is_some_and(|k| k.to_string() == COMPUTE_BUDGET_PROGRAM_ID);
+        if !is_cb {
+            other_ixs += 1;
+            continue;
+        }
+        match ix.data.first() {
+            Some(2) if ix.data.len() >= 5 => {
+                limit = Some(u64::from(u32::from_le_bytes([ix.data[1], ix.data[2], ix.data[3], ix.data[4]])));
+            }
+            Some(3) if ix.data.len() >= 9 => {
+                let mut a = [0u8; 8];
+                a.copy_from_slice(&ix.data[1..9]);
+                price = Some(u64::from_le_bytes(a));
+            }
+            _ => {}
+        }
+    }
+    let base = u64::from(tx.message.header().num_required_signatures).checked_mul(LAMPORTS_PER_SIGNATURE)?;
+    let priority = match price {
+        None | Some(0) => 0,
+        Some(p) => {
+            let cu = limit.unwrap_or_else(|| (other_ixs * DEFAULT_CU_PER_INSTRUCTION).min(MAX_CU_LIMIT));
+            u64::try_from((u128::from(cu) * u128::from(p)).div_ceil(MICRO_LAMPORTS_PER_LAMPORT)).ok()?
+        }
+    };
+    base.checked_add(priority)
+}
+
 /// [P1-C] Economic gate for one built plan (used by `Pipeline::evaluate`). LIVE acts only on
 /// `Known` economics above the threshold; `Unknown` (e.g. missing executable floor) can at most
 /// become a Shadow technical probe. Returns `(evaluation, actionable, technical_probe)`.
@@ -177,6 +223,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         }
 
         // Health (P3)
+        darkbot_common::mt0::MT0.count_health(darkbot_common::mt0::HealthSite::Pipeline); // [MT0]
         let hv = match self.health.health(&account, now_unix_s as i64, slot) {
             Ok(h) => h,
             Err(HealthError::Unavailable) => {
@@ -217,7 +264,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             return rec.with_timeline(&tl);
         }
         let planning_started = Instant::now();
+        let mt0_jupiter_before = darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter); // [MT0]
         let planning_result = self.builder.plans(&account, now_unix_s, slot);
+        let mt0_jupiter = darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter).saturating_sub(mt0_jupiter_before);
+        if mt0_jupiter > 0 {
+            darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::RoutedEvaluations, 1);
+            darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::JupiterRequestsRouted, mt0_jupiter);
+        }
         record_timing(
             &PLANNING_CALLS,
             &PLANNING_NS_TOTAL,
@@ -334,6 +387,14 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 && plan.prerequisite_txs.is_empty() && plan.tip == 0 {
                 let fee_started = Instant::now();
                 let fee = self.submitter.fee_for_message(&built.tx);
+                // [MT0] H6: would a local fee model have matched the RPC fee? (measurement only)
+                if let Some(q) = &fee {
+                    match local_fee_estimate_lamports(&built.tx) {
+                        Some(local) if local == q.lamports => darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
+                        Some(_) => darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::FeeParityMismatch, 1),
+                        None => darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::FeeParityUnsupported, 1),
+                    }
+                }
                 record_timing(
                     &FEE_CALLS,
                     &FEE_NS_TOTAL,
@@ -356,6 +417,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 state_valid,
                 safety_valid,
             );
+            // [MT0] avoidable remote work, classified only from decisions already made above.
+            if fee_quote.is_some() && matches!(eval, Evaluation::Known { .. }) && !actionable {
+                darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::FeeRpcForKnownNonActionable, 1);
+            }
+            if technical_probe && plan.input.transaction_fee_usd_micro.is_none() {
+                darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::ProbeCandidatesWithFeeUnknown, 1);
+            }
             rec.candidate_costs.push(crate::record::CandidateCostRecord {
                 funding:plan.input.funding.as_str().into(), path:format!("{:?}", plan.input.path),
                 message_fee_quote:fee_quote.clone(), transaction_fee_usd_micro:plan.input.transaction_fee_usd_micro,
@@ -559,5 +627,39 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
     /// aufgerufen werden, sonst bleibt `outstanding` belegt.
     pub fn reconcile_outcome(&mut self, now_unix_s: u64, landed_success: bool, realized_pnl: Option<i128>, exposure_released: u64, inventory_delta: i128) {
         self.safety.record_outcome(now_unix_s, landed_success, realized_pnl, exposure_released, inventory_delta);
+    }
+}
+
+#[cfg(test)]
+mod mt0_tests {
+    use super::*;
+    use solana_sdk::instruction::Instruction;
+    use solana_sdk::message::{Message, VersionedMessage};
+    use solana_sdk::pubkey::Pubkey;
+    use solana_sdk::signature::Signature;
+    use solana_sdk::transaction::VersionedTransaction;
+    use std::str::FromStr;
+
+    fn tx_with(ixs: Vec<Instruction>) -> VersionedTransaction {
+        let payer = Pubkey::new_unique();
+        let message = VersionedMessage::Legacy(Message::new(&ixs, Some(&payer)));
+        VersionedTransaction { signatures: vec![Signature::default()], message }
+    }
+
+    fn cb(data: Vec<u8>) -> Instruction {
+        Instruction { program_id: Pubkey::from_str(COMPUTE_BUDGET_PROGRAM_ID).unwrap(), accounts: vec![], data }
+    }
+
+    /// [MT0/H6] The local estimator (measurement only) reproduces the FIX-129 observations:
+    /// 5_000 without priority and 7_800 = 5_000 + 1_400_000 CU x 2_000 uLamports / 10^6.
+    #[test]
+    fn local_fee_estimate_reproduces_fix129_observations() {
+        let plain = Instruction { program_id: Pubkey::new_unique(), accounts: vec![], data: vec![1] };
+        assert_eq!(local_fee_estimate_lamports(&tx_with(vec![plain.clone()])), Some(5_000));
+        let mut limit = vec![2u8];
+        limit.extend_from_slice(&1_400_000u32.to_le_bytes());
+        let mut price = vec![3u8];
+        price.extend_from_slice(&2_000u64.to_le_bytes());
+        assert_eq!(local_fee_estimate_lamports(&tx_with(vec![cb(limit), cb(price), plain])), Some(7_800));
     }
 }
