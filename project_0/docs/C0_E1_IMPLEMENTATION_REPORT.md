@@ -1042,3 +1042,49 @@ Market-source coverage remains
 
 The implementation is technically qualified for the four-hour C0-E1
 measurement, but is not yet economically qualified or LIVE-ready.
+
+## Authoritative qualified revision before 4h observation
+
+Qualified C0-E1 implementation revision:
+
+`b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`
+
+Commit message:
+
+`project0: qualify C0-E1 retention-safe economics harness`
+
+This is the exact code source that passed:
+
+- the 1,000,000-evaluation retention stress test;
+- 26 targeted C0-E1 tests;
+- both builds;
+- both complete workspace-test configurations;
+- rustfmt and diff checks;
+- Differential Clippy candidate-only 0/0;
+- the second real 600-second Mainnet smoke with technical PASS.
+
+Successful Mainnet retest:
+
+`c0e1_retention_smoke_20261008T215650Z`
+
+Key retention/safety evidence:
+
+- actual duration 600.0 s;
+- four snapshots present;
+- market capture complete;
+- clean automatic shutdown;
+- analytics queue drops 0;
+- retention overflow 0;
+- evaluations received 840,518;
+- evaluations streamed 840,518;
+- evaluations coalesced 816,112;
+- semantic entries max 24,406;
+- semantic evictions 0;
+- submissions 0;
+- live_ready false.
+
+Next execution step:
+
+Run the 14,400-second C0-E1 observation from this exact code revision. No production-path optimization should be inserted between this qualified checkpoint and that measurement unless qualification is repeated.
+
+The implementation remains observe-only and is not LIVE-ready.

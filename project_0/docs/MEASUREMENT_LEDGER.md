@@ -4500,3 +4500,65 @@ Next gate:
 from the exact committed and pushed source revision.**
 
 LIVE and transaction submission remain blocked.
+
+## C0-E1 QUALIFIED SOURCE CHECKPOINT — 2026-10-08
+
+Authoritative qualified C0-E1 code commit:
+
+`b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`
+
+Commit message:
+
+`project0: qualify C0-E1 retention-safe economics harness`
+
+This exact revision passed the complete pre-4h qualification chain:
+
+- retention architecture correction implemented;
+- 1,000,000-evaluation retention stress PASS:
+  - received 1,000,000;
+  - streamed 1,000,000;
+  - coalesced 999,984;
+  - semantic max 16;
+  - retention overflow 0;
+  - semantic evictions 0;
+- targeted C0-E1 regression suite: 26 passed, 0 failed;
+- rustfmt PASS;
+- git diff check PASS;
+- build `crate_health` PASS;
+- build `crate_health txv1` PASS;
+- full workspace tests for both feature sets PASS;
+- Differential Clippy against `57bef334e60764f614712785438a95edb7638352`: candidate-only 0/0;
+- retention-safe Mainnet retest `c0e1_retention_smoke_20261008T215650Z`: technical PASS;
+- actual duration 600.0 s;
+- four snapshots present;
+- final reconciliation complete;
+- market capture complete;
+- analytics queue drops 0;
+- retention overflow 0;
+- Shadow evaluations received/streamed: 840,518 / 840,518;
+- Shadow evaluations coalesced: 816,112;
+- semantic entries max: 24,406;
+- semantic evictions: 0;
+- submissions: 0;
+- live_ready: false.
+
+The preceding run `c0e1_smoke_20261008T212122Z` remains failure evidence:
+technical `INCOMPLETE` because `retention_overflow=293482`.
+
+Open non-claims:
+
+- profitability is not yet established;
+- the ten-minute retest had zero observed market liquidations and remains `INSUFFICIENT_SAMPLE`;
+- market-source coverage remains `MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED`;
+- exact competitor submission deadlines remain `UNKNOWN`;
+- same-slot capture probability is not established;
+- four-hour stability is not yet established;
+- LIVE readiness is not established.
+
+Next gate:
+
+Run the 14,400-second C0-E1 Economic + Capital + Competition + Race Attribution measurement with four 3,600-second snapshots, LIVE disabled and submissions disabled.
+
+The 4h measurement must identify its tested Project_0 code source as `b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`.
+
+Do not optimize observed Winner/Shadow bottlenecks before this measurement; they are part of the system being measured.

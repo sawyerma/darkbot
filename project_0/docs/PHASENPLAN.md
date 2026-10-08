@@ -4808,3 +4808,39 @@ Next:
 
 **Run the four-hour C0-E1 qualification from the exact committed/pushed
 revision.**
+
+## C0-E1 AUTHORITATIVE PRE-4H CHECKPOINT — 2026-10-08
+
+Qualified C0-E1 code source:
+
+`b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`
+
+The retention-safe 600-second gate is complete and PASS. This exact code revision passed the full local build/test/static qualification and the real Mainnet retention retest.
+
+Current phase boundary:
+
+**C0-E1 implementation + 600s qualification complete → next gate: 4-hour observation.**
+
+4-hour run requirements:
+
+- duration 14,400 seconds;
+- four snapshots at 3,600-second intervals;
+- C0-MO Market Truth plus the real Shadow production path;
+- capital bands 200 / 500 / 1000 / 2500 / 5000 / 10000 USD;
+- Economics, Capital, Competition and Race Attribution;
+- raw Shadow evaluations streamed to disk;
+- analytics queue drops 0;
+- retention overflow 0;
+- semantic evictions 0;
+- LIVE disabled;
+- submissions 0;
+- tested source identity recorded as `b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`.
+
+The 4-hour run may still produce an insufficient economic sample; that must not be converted into a profitability claim.
+
+Still open unless separately proven:
+
+- complete market-source coverage;
+- exact competitor submission timing;
+- same-slot ordering/capture probability;
+- LIVE readiness.
