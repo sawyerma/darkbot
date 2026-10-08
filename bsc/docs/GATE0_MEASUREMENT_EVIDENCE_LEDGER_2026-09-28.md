@@ -110,6 +110,7 @@ Wichtig:
 | **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT — wartet auf 2 getrennte Wallets, Funding und explizite v2-Autorisierung/Arming** |
 | G0.8 | tatsächliche Acquisition + Ordering | **offen — folgt unmittelbar auf G0.7** |
 | G0.9+ | Builder-/Feasibility-Folgeschritte | blockiert |
+| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **IN PROGRESS — C1.5-C1.8 lokal PASS; C1.9 qualification measurement integrity PASS/eligible, final source/build bind noch offen; C1.9b und C1.10 offen** |
 
 **Es wird kein Gate übersprungen.**
 
@@ -3247,10 +3248,389 @@ Q5B production TLS binding        IMPLEMENTED_TESTED / FROZEN
 Unit 6 startup authorization      IMPLEMENTED_TESTED / FROZEN
 C0 recorder/replay foundation     IMPLEMENTED_TESTED / FROZEN for foundation scope
 provider semantic qualification  OPEN
-C1 geth mmap/SPSC Fast Lane       NEXT
-LIVE                              BLOCKED
-T0 -> T_buy < 1 ms                NOT YET PROVEN
+C1 geth mmap/SPSC Fast Lane       IN PROGRESS — C1.5-C1.8 LOCAL PASS; C1.9 MEASUREMENT COMPLETE / FINAL BIND OPEN
+C1.9b Testnet hook/path            NEXT
+C1.10 freeze                       BLOCKED until C1.9 final bind + C1.9b PASS
+LIVE                               BLOCKED
+T0 -> T_buy < 1 ms                 NOT YET PROVEN
 ```
 
 Unit 6 does not qualify provider ordering/inclusion semantics, does not implement the C2 canonical-state owner, does not establish the C1 producer hook or mmap/SPSC latency, and authorizes no funded Mainnet action.
 
+
+## 2026-10-08 — C1 REV2 lokale sequentielle Qualifikation: Common + C1.4a + C1.5-C1.8 PASS; C1.9 Messung vollständig/eligible
+
+Dieser Eintrag dokumentiert den lokal erreichten C1-Stand nach Integration des C1.5-C1.10-REV2-Kandidaten. Er ersetzt keine normative Exit-Regel. Die Reihenfolge bleibt:
+
+```text
+reopened C1.3/C1.4 regressions
+-> C1.4a
+-> C1.5
+-> C1.6
+-> C1.7
+-> C1.8
+-> C1.9
+-> C1.9b
+-> C1.10 freeze
+-> erst danach C2
+```
+
+### Source-/Basisidentität
+
+REV2-Kandidat ursprünglich gegen:
+
+```text
+faba91395198d1deb21cd1a318f12d1c2b653aab
+```
+
+Lokaler Repository-HEAD während der heutigen Integration/Qualifikation:
+
+```text
+12c4616f9b24bf036d99cdd549e56ff2d448d372
+```
+
+Pinned bsc-geth:
+
+```text
+cdb7548b5baacfdae92f9f63437d6456411665f3
+```
+
+Wichtig: Die integrierten C1-REV2-Änderungen liegen während dieses Checkpoints noch lokal/uncommitted auf diesem HEAD. Deshalb darf der endgültige C1.10-Freeze den obigen Git-HEAD nicht als alleinige Bindung des finalen C1-Quellstands behandeln. Der REV2-Freeze-Pfad muss den finalen clean commit plus vollständigen deterministischen C1-Source-/Patch-Hash binden.
+
+Unabhängige lokale Project-0-Arbeit bleibt außerhalb dieses C1-Scope und wurde nicht verändert.
+
+### REV2-Korrekturen vor der lokalen Gate-Sequenz
+
+Der REV2-Kandidat schloss die drei unabhängigen Review-Blocker:
+
+1. **C1.7 queued BUY target binding**
+   - jeder eingereihte BUY bindet den bei Dispatch ausgewählten Peer/Target-Snapshot;
+   - Reassignment darf einen bereits queued BUY nicht still auf einen anderen Peer umbiegen;
+   - Evidence bleibt dem gebundenen Ziel zurechenbar;
+   - deterministischer Reassignment-Test vorhanden.
+
+2. **C1.9 echter Production-Transportpfad**
+   - Qualification-Modus nutzt lokale authentifizierte devp2p/RLPx-Peers;
+   - gemessener Outbound-Pfad enthält tatsächlich `Peer.SendRawTransaction -> p2p.Send -> protoRW -> rlpxTransport`;
+   - `loopback_microbenchmark` bleibt separat und ist nicht C1.9-qualifizierend;
+   - C1.9b bleibt der getrennte controlled-Testnet Ingress-/Hook-Pfad.
+
+3. **C1.10 fail-closed final-source binding**
+   - fehlender Git-HEAD, dirty/ungebundener Source-Zustand, fehlender/abweichender finaler C1-Source-/Patch-Hash und nachträgliche Änderungen blockieren Freeze/Verify;
+   - ein Loopback-only-C1.9-Report kann C1.10 nicht erfüllen.
+
+Zusätzliche während REV2 gefundene Korrekturen:
+- C1.9b capture: Rust-Borrow vor Lane-drain-ACK beendet; E0502 beseitigt ohne Borrowed-slot-Lifetime abzuschwächen.
+- C1.8 churn test: negativer Owner wird garantiert vom echten Owner unterschieden; der alte feste Wert kollidierte in einem Zyklus.
+- Typed EIP-2718 outbound: der echte Receiver zeigte die Envelope-Grenze; typed TX-Bytes werden als RLP string innerhalb der ETH Transactions list gewrappt, Legacy-list envelopes bleiben unverändert.
+- Nach lokaler Integration wurde ein reiner Formatting-Defekt im Overlay-Generator gefunden: `c1_apply_geth_overlay.py` erzeugte in `peer.go` ein einzeiliges `if err != nil { return err }`. Die Generatorquelle wurde lokal korrigiert; danach erzeugt ein frischer Overlay-Lauf gofmt-sauberen Go-Code. Keine Semantikänderung.
+
+Fables Integrations-/Regressionstand vor der lokalen Phase-Qualifikation war:
+
+```text
+INTEGRATED / COMPILED / REGRESSION CHECKED / NOT PHASE-QUALIFIED
+Rust Debug/Release: je 122 unit tests PASS, 5 ignored
+C1.8 stress: 8 PASS
+doctests: 3 PASS
+cargo clippy -D warnings: PASS
+cargo fmt --check: PASS
+C1.4 prefilter regression: PASS
+Go fastlane race: PASS
+overlay hook/outbound/chain ownership checks: PASS
+full geth build: PASS
+Python qualification tools: 20 PASS
+integrated devp2p smoke: integrity PASS / not phase-eligible
+```
+
+Diese Fable-Ergebnisse allein wurden nicht als Gate-PASS übernommen; danach lief die lokale sequentielle Abnahme.
+
+### Reopened/common C1.3/C1.4-Requalification — PASS
+
+Frischer pinned-geth-Overlay-Lauf nach dem lokalen Generator-Formatting-Fix:
+
+```text
+C1_4_HOOK_ORDER_VERIFIED              PASS
+C1_7_OUTBOUND_HOOKS_VERIFIED          PASS
+C1_8_CHAIN_OWNERSHIP_VERIFIED         PASS
+C1_GETH_OVERLAY_APPLIED               PASS
+marker                                 DARKBOT_C1_FASTLANE_C1_7
+RUSTFMT                                PASS
+CLIPPY -D warnings                     PASS
+C1.4 prefilter scope                   PASS
+GOFMT                                  PASS
+GO common eth/protocols/eth + eth + core PASS
+GETH_BUILD                             PASS
+C1_3_GO_RUST_LIFECYCLE_INTEROP         PASS
+C1_4_GO_RUST_INGRESS_INTEROP           PASS
+COMMON_REQUALIFICATION                 PASS
+```
+
+Damit sind die durch REV2 wieder geöffneten gemeinsamen C1.3/C1.4-Schnittstellen lokal nachqualifiziert.
+
+### C1.4a Rev2-Rerun — PASS / GREEN_STRONG_HEADROOM
+
+Separater Rev2-Rerun; die vorher akzeptierte C1.4a-Evidence wurde nicht überschrieben.
+
+Evidence-Verzeichnis:
+
+```text
+bsc/native/evidence/c1/rev2-c14a-rerun-20261008/
+```
+
+Ergebnis:
+
+```text
+qualification samples        1000
+max T_ingress -> L2          20,000 ns = 20 us
+classification               GREEN_STRONG_HEADROOM
+C1_4A_GATE_PASS              PASS
+C1_4A_REV2_RERUN_PASS        PASS
+```
+
+Bedeutung unverändert: C1.4a beweist die lokale geth/Wire-V2/Rust-Feasibility, nicht tatsächliche Acquisition, Mainnet-Coverage oder `T0 -> T_buy`.
+
+### C1.5 Rust HOT0 / zero-copy — LOCAL PASS
+
+Ausgeführt:
+
+```text
+darkbot-fastlane debug suite     PASS
+darkbot-fastlane release suite   PASS
+c15_hot0_alloc                   PASS
+C1_5_ACCEPTANCE_TESTS_PASS       PASS
+```
+
+Der entscheidende Allocation-Test:
+
+```text
+the_hot0_receive_path_allocates_nothing ... ok
+```
+
+Damit ist der lokal getestete HOT0-Receive-Pfad allocation-free. Borrowed-slot/guard- und IntentSlot-/Poller-Tests sind Bestandteil der bestandenen Suite.
+
+### C1.6 M4 Development Profile — LOCAL PASS
+
+Host-Evidence:
+
+```text
+OS                    macOS
+arch                  aarch64
+model                 Mac16,6
+CPU                   Apple M4 Max
+physical CPUs         16
+logical CPUs          16
+Performance CPUs      12
+Efficiency CPUs       4
+cache line            128 bytes
+page size             16384 bytes
+memory                137438953472 bytes
+topology CRC32C       0xfc5501a8
+```
+
+Abnahme:
+
+```text
+C16_HOST_TESTS_PASS                  PASS
+Profile S run A                      PASS
+Profile S run B                      PASS
+bit-identical/reproducible report    PASS
+Profile P explicit refusal exit=2    PASS
+Go C16 QoS race tests                PASS
+C1_6_ACCEPTANCE_TESTS_PASS           PASS
+```
+
+Der Report markiert Topologie nur als initialen Experiment-Hinweis. QoS ist advisory, kein Core-Pinning. Der M4-C1-Host qualifiziert ausdrücklich nicht den späteren Linux-C3-Host.
+
+### C1.7 local-geth outbound — LOCAL PASS
+
+```text
+C17_GO_OUTBOUND_PASS            PASS
+C17_RUST_OUTBOUND_PASS          PASS
+C1_7_ACCEPTANCE_TESTS_PASS      PASS
+```
+
+Damit sind unter den lokalen Tests insbesondere Slow-/Failure-/Ordering-/Worker-Lifecycle-Verhalten und der REV2-Reassignment-Fall abgedeckt: ein bereits queued BUY wird nicht still auf ein später neu zugewiesenes Peer-Ziel umgebogen.
+
+### C1.8 concurrency/state-safety stress — LOCAL PASS
+
+```text
+C18_GO_FOCUSED_PASS             PASS
+C18_GO_FULL_RACE_PASS           PASS
+C18_RUST_DEBUG_PASS             PASS
+C18_RUST_RELEASE_PASS           PASS
+C1_8_CHAIN_OWNERSHIP_VERIFIED   PASS
+C18_CHAIN_OWNERSHIP_PASS        PASS
+C18_OWNERSHIP_DOC_PRESENT       PASS
+C1_8_ACCEPTANCE_TESTS_PASS      PASS
+```
+
+Scope umfasst die geforderten Ownership-/Churn-/Reuse-/Restart-/Generation-/Wrap-/Full-/Corruption-/Oversize-/Stall-/Burst-Fälle sowie Chain-Lane-single-producer/chainmu-Verifikation und slow/failing local peers. Kein beobachteter Invariant-Verstoß im akzeptierten Testumfang.
+
+### C1.9 full native latency run — MEASUREMENT COMPLETE / ELIGIBLE / FINAL GATE BINDING OPEN
+
+Run-Konfiguration wurde vor der Messung festgelegt:
+
+```text
+purpose                         qualification
+outbound_mode                   production_devp2p_selected_peer_handoff
+peers                           4
+warmup_per_peer                 32
+samples_per_peer                2500
+outbound_workers                2
+warmup raw retained             128
+qualification samples           10000
+load model                      parallel_peers_one_outstanding_per_lane_with_explicit_warmup
+```
+
+Primary report:
+
+```text
+bsc/native/evidence/c1/c1-9-native-latency-20261008T225213.json
+```
+
+Report verdict fields:
+
+```text
+integrity                       PASS
+c1_9_qualification_eligible     true
+```
+
+Ingress timings:
+
+```text
+T_packet_decoded -> T_ingress
+p50        0 us
+p95        1 us
+p99        1 us
+p99.9      1 us
+p99.99     4 us
+max        5 us
+
+T_ingress -> L2
+p50        81 us
+p95        102 us
+p99        116 us
+p99.9      265 us
+p99.99     401 us
+max        418 us
+misses >=1 ms  0
+queue_depth_max 2
+```
+
+Outbound timings:
+
+```text
+egress commit -> coordinator observed
+p50        3 us
+p95        9 us
+p99        14 us
+p99.9      22 us
+p99.99     64 us
+max        113 us
+misses >=1 ms 0
+
+egress commit -> first selected-peer handoff
+p50        15 us
+p95        22 us
+p99        29 us
+p99.9      43 us
+p99.99     139 us
+max        157 us
+misses >=1 ms 0
+
+egress commit -> each selected-peer handoff
+samples    20000
+p50        17 us
+p95        27 us
+p99        34 us
+p99.9      63 us
+p99.99     162 us
+max        184 us
+misses >=1 ms 0
+
+egress commit -> all selected-peer handoffs
+p50        19 us
+p95        29 us
+p99        36 us
+p99.9      72 us
+p99.99     182 us
+max        184 us
+misses >=1 ms 0
+```
+
+Prepared integrated local path:
+
+```text
+T_ingress -> egress commit
+p50        81 us
+p95        103 us
+p99        117 us
+p99.9      265 us
+p99.99     402 us
+max        419 us
+misses >=1 ms 0
+
+T_ingress -> first selected-peer handoff
+p50        97 us
+p95        120 us
+p99        136 us
+p99.9      299 us
+p99.99     424 us
+max        438 us
+misses >=1 ms 0
+```
+
+Observed failure/resource counters:
+
+```text
+peer_queue_full                           0
+outbound_queue_full_hol                   0
+peer_oversize                             0
+hot0_dropped                              0
+hot0_allocations_in_qualification_window  0
+HOT0 receive-path locks                   none by construction; not instrumented
+```
+
+Measurement identity present in the report:
+
+```text
+darkbot_commit                 12c4616f9b24bf036d99cdd549e56ff2d448d372
+pinned_geth_commit             cdb7548b5baacfdae92f9f63437d6456411665f3
+config_manifest_sha256         70975678dfcccf73860b0f63f35bb384f2c31d70ae6f7f7b16b56f1066f5317e
+topology_fingerprint_crc32c    0xfc5501a8
+clock_id                       1
+```
+
+**Gate interpretation:** This is a valid, integrity-PASS, qualification-eligible C1.9 measurement over the actual local production devp2p handoff fixture. It demonstrates substantial local C1 latency headroom; the measured maximum `T_ingress -> first selected-peer handoff` was 438 us across 10,000 qualification samples.
+
+However, **C1.9 is not yet promoted to final PASS in this ledger**. The measured working tree contained the integrated REV2 candidate on top of HEAD `12c4616...`, and the currently printed identity does not by itself bind a clean final committed C1 source tree/build artifact. The normative C1.9 exit requires exact source/build/config binding. Final promotion therefore waits for the final candidate source/build binding required before C1.10.
+
+The 15-second raw market/acquisition capture from the production master plan is a separate later acquisition/`T0 -> T_buy` requirement. It is not substituted by this C1.9 local-native measurement.
+
+### Current C1 state after this checkpoint
+
+```text
+reopened C1.3/C1.4 common regressions     PASS
+C1.4a REV2 rerun                          PASS / GREEN_STRONG_HEADROOM
+C1.5 HOT0/zero-copy                       LOCAL PASS
+C1.6 M4 development profile               LOCAL PASS
+C1.7 local-geth outbound                  LOCAL PASS
+C1.8 concurrency/state-safety stress      LOCAL PASS
+C1.9 native latency measurement           COMPLETE / integrity PASS / eligible
+C1.9 final source/build/config binding     OPEN
+C1.9b controlled Testnet hook/path         NEXT
+C1.10 clean committed freeze               BLOCKED until C1.9 final bind + C1.9b PASS
+C2                                         NOT STARTED
+LIVE                                       BLOCKED
+```
+
+Required non-claims remain:
+
+```text
+T0_TO_T_BUY_LT_1MS = NOT_PROVEN
+MAINNET_INGRESS_COVERAGE = NOT_PROVEN
+PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED
+LIVE = BLOCKED
+```
+
+The product requirement remains an actual successful acquisition with conservatively bounded original-producer `T0 -> T_buy < 1,000,000 ns`. Local send/handoff latency is not acquisition.

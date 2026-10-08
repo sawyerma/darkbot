@@ -87,9 +87,9 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | G0.9 | **BLOCKED** | Classify external builder dependency: NONE / BENEFICIAL / REQUIRED / UNKNOWN |
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
-| C0 | **BLOCKED BY G0 PASS** | Production Rust wire/event/journal/replay foundation |
-| C1 | **BLOCKED** | Production bsc-geth Fast Lane + SPSC ingress |
-| C2 | **BLOCKED** | Production pending/canonical/reorg/nonce/replacement state |
+| C0 | **IN PROGRESS / FOUNDATION FROZEN** | Unit-6 startup authorization + recorder/replay foundation IMPLEMENTED_TESTED/FROZEN for foundation scope; full production qualification remains separate |
+| C1 | **IN PROGRESS** | C1.5-C1.8 local PASS; C1.9 production-devp2p measurement integrity PASS/eligible with max T_ingress→first handoff 438 us; final source/build bind, C1.9b and C1.10 still open |
+| C2 | **BLOCKED BY C1.10** | Production pending/canonical/reorg/nonce/replacement state |
 | C3 | **BLOCKED** | Production local build/sign/geth path benchmark; engineering proof only |
 | D | **BLOCKED** | Full production Flap Rust decoder |
 | E | **BLOCKED** | Full production Four.meme Rust decoder |
@@ -209,6 +209,27 @@ Implement minimal pinned bsc-geth hooks:
 Measure peer decode → Rust visibility.
 
 Pending coverage remains a quality metric; do not assume completeness.
+
+Current local qualification checkpoint, 2026-10-08:
+
+```text
+reopened C1.3/C1.4 regressions       PASS
+C1.4a REV2                           PASS / GREEN_STRONG_HEADROOM / max 20 us
+C1.5 Rust HOT0                       PASS
+C1.6 M4 development profile          PASS
+C1.7 local-geth outbound             PASS
+C1.8 concurrency/state safety        PASS
+C1.9 measurement                     COMPLETE / integrity PASS / eligible
+C1.9 measured max T_ingress->L2      418 us
+C1.9 measured max ingress->1st peer  438 us
+C1.9 final source/build binding       OPEN
+C1.9b controlled Testnet              NEXT
+C1.10 freeze                          BLOCKED until preceding exits pass
+T0->T_buy <1 ms                       NOT PROVEN
+LIVE                                  BLOCKED
+```
+
+Detailed commands, identities, distributions, counters and scope/non-claims are recorded in `GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md`. The C1.9 local selected-peer handoff is not a purchase/acquisition timestamp.
 
 STOP.
 
