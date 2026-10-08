@@ -132,6 +132,206 @@ For another project, replace only the exported scope and destination. Include ad
 
 If a ZIP is handed to an external implementer, record its SHA-256 as well as the exact source commit.
 
+### 3a. Preferred Fable handoff: compiled baseline bundle
+
+For substantial Fable implementation work, especially native Go/Rust work, prefer a **compiled baseline bundle** over a source-only ZIP.
+
+Reason: Fable may not have the required Go/Rust toolchains or network access. A source-only archive is still the authoritative source snapshot, but it does not tell Fable which exact baseline was locally proven to compile and pass the current gates. The compiled baseline bundle adds that evidence without weakening the rule that Fable's later modifications must be recompiled and requalified locally.
+
+The rule is:
+
+```text
+exact committed DarkBot base
++ exact pinned external dependency source
++ disposable real Git checkout when an integration tool requires .git
++ locally applied accepted overlay
++ locally executed authoritative baseline build/tests
++ build/test logs
++ toolchain identity
++ useful baseline binaries
++ package manifest/checksums
+→ remove all .git metadata
+→ ZIP
+→ record ZIP SHA-256
+```
+
+Never build the Fable package by copying the current working tree. Local uncommitted work, unrelated project changes, captures and untracked evidence must not leak into the package.
+
+#### Mandatory package identity
+
+Every compiled Fable baseline must record:
+
+- exact DarkBot base commit;
+- exact pin/commit of any external repository used by the build;
+- exact source/archive name;
+- local OS/architecture;
+- Go/Rust/toolchain versions used;
+- exact build/test commands actually executed;
+- exact results, including failures if any;
+- SHA-256 of the final ZIP;
+- SHA-256 manifest for the files inside the package where practical.
+
+The final package itself should normally contain **no `.git` directory**.
+
+If a repository integration script requires Git metadata to verify a pin, use a disposable real checkout for the build step, then remove its `.git` directory before packaging. Do not bypass the script's pin verification merely to make an archive tree work.
+
+#### Recommended package layout
+
+```text
+<bundle>/
+  repo/                       # exact DarkBot git archive of BASE
+  upstream_<dependency>/      # pristine exact pinned dependency source
+  build/
+    <dependency>-overlayed/   # accepted overlay applied for baseline build
+    bin/                      # useful locally built baseline binaries
+    logs/                     # baseline build/test logs
+    cargo-metadata.json       # when relevant
+  BASELINE_BUILD_STATUS.md
+  SHA256SUMS.txt
+```
+
+Compiled binaries are supporting baseline evidence, not a substitute for source or logs. They may be host-specific and may not run in Fable's environment.
+
+#### BSC/Fable example
+
+For BSC native work, the pattern is:
+
+```bash
+REPO="/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot"
+OUT="/Users/sawyer_ma/Desktop/Delta_Mac"
+
+BASE="$(git -C "$REPO" rev-parse origin/main)"
+GETH_PIN="<authoritative pinned bsc-geth commit>"
+SOURCE_GETH="$REPO/bsc/vendor/bsc-geth"
+
+NAME="DarkBot_<scope>_FULL_COMPILED_BASE_${BASE:0:7}"
+WORK="$OUT/$NAME"
+ZIP="$OUT/$NAME.zip"
+
+git -C "$REPO" fetch origin
+
+test "$(git -C "$REPO" rev-parse origin/main)" = "$BASE"
+
+rm -rf "$WORK"
+rm -f "$ZIP"
+
+mkdir -p \
+  "$WORK/repo" \
+  "$WORK/upstream_bsc_geth" \
+  "$WORK/build/logs" \
+  "$WORK/build/bin"
+
+git -C "$REPO" archive "$BASE" | tar -x -C "$WORK/repo"
+
+test "$(git -C "$SOURCE_GETH" rev-parse "$GETH_PIN")" = "$GETH_PIN"
+
+git -C "$SOURCE_GETH" archive "$GETH_PIN" | \
+  tar -x -C "$WORK/upstream_bsc_geth"
+
+git clone --shared --no-checkout \
+  "$SOURCE_GETH" \
+  "$WORK/build/bsc-geth-overlayed"
+
+git -C "$WORK/build/bsc-geth-overlayed" \
+  checkout --detach "$GETH_PIN"
+
+test "$(
+  git -C "$WORK/build/bsc-geth-overlayed" rev-parse HEAD
+)" = "$GETH_PIN"
+
+python3 \
+  "$WORK/repo/bsc/native/tools/c1_apply_geth_overlay.py" \
+  "$WORK/build/bsc-geth-overlayed" \
+  | tee "$WORK/build/logs/geth-overlay.log"
+```
+
+Then run the **actual authoritative baseline gates for the current phase**. Do not mechanically reuse an old test list when the phase has changed.
+
+For the C1 native baseline used for the C1.5-C1.10 Fable handoff, this included the relevant pattern:
+
+```bash
+export PATH="$HOME/sdk/go1.25.0/bin:$PATH"
+
+sw_vers
+uname -a
+uname -m
+go version
+rustc --version
+cargo --version
+
+cd "$WORK/repo/bsc/native"
+
+cargo metadata --format-version 1 --locked --offline \
+  > "$WORK/build/cargo-metadata.json"
+
+cargo fmt --all -- --check
+
+cargo test \
+  -p darkbot-fastlane \
+  --locked \
+  --offline
+
+cargo test \
+  -p darkbot-fastlane \
+  --release \
+  --locked \
+  --offline
+
+cargo clippy \
+  -p darkbot-fastlane \
+  --all-targets \
+  --locked \
+  --offline \
+  -- \
+  -D warnings
+
+cd "$WORK/build/bsc-geth-overlayed"
+
+go test -race ./darkbot/fastlane
+go test ./eth/protocols/eth ./eth
+go test ./core
+go build -o "$WORK/build/bin/geth_macos_arm64" ./cmd/geth
+```
+
+Capture the complete output of these commands under `build/logs/`. Add any phase-specific Rust binaries or tools that were actually built and useful for the handoff.
+
+Before producing the final ZIP:
+
+```bash
+rm -rf "$WORK/build/bsc-geth-overlayed/.git"
+
+test ! -e "$WORK/build/bsc-geth-overlayed/.git"
+
+cd "$WORK"
+
+find . \
+  -type f \
+  ! -name SHA256SUMS.txt \
+  -print0 \
+  | sort -z \
+  | xargs -0 shasum -a 256 \
+  > SHA256SUMS.txt
+
+cd "$OUT"
+
+zip -qry "$ZIP" "$NAME"
+
+shasum -a 256 "$ZIP"
+ls -lh "$ZIP"
+```
+
+The package must include a short `BASELINE_BUILD_STATUS.md` stating that the bundled build/test results prove only the supplied **baseline**, not Fable's subsequent changes.
+
+If Fable cannot compile its returned candidate, its report must still say the exact truth, for example:
+
+```text
+IMPLEMENTED / NOT COMPILED
+```
+
+The locally compiled baseline does **not** authorize Fable to claim its modified candidate compiles. After Fable returns a ZIP/patch, integrate and qualify it locally under the normal gate-by-gate workflow below.
+
+For future Fable work, this compiled-baseline procedure is the default whenever the task materially depends on native compilation, pinned external repositories or exact build/test compatibility.
+
 ### 4. External candidates are never integrated blindly
 
 Before applying a returned ZIP/patch:
