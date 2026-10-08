@@ -1,9 +1,9 @@
 //! P6-LT: Opportunity-Record (Ledger-Vokabular). Eine Zeile JSONL pro Entscheidung.
 
 use darkbot_common::timing::Timeline;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Decision {
     Skip,
     ShadowReady,
@@ -20,7 +20,7 @@ pub enum Decision {
     Unavailable,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LossReason {
     Ingress,
     State,
@@ -43,8 +43,16 @@ pub enum LossReason {
     Unknown,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CandidateCostRecord {
+    pub required_working_capital_usd_micro: Option<u64>,
+    pub profit_per_capital_bps: Option<i128>,
+    pub gross_seized_realizable_usd_micro: Option<u64>,
+    pub repay_usd_micro: Option<u64>,
+    pub protocol_fees_usd_micro: Option<u64>,
+    pub flat_sol_fee_usd_micro: Option<u64>,
+    pub swap_fees_and_impact_usd_micro: Option<u64>,
+    pub jito_tip_usd_micro: Option<u64>,
     pub funding: String,
     pub path: String,
     pub message_fee_quote: Option<darkbot_solana::submit::MessageFeeQuote>,
@@ -59,8 +67,77 @@ pub struct CandidateCostRecord {
     pub net_profit_usd_micro: Option<i128>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+/// Same-clock points; missing evidence stays absent. Slot provenance is separate.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TimingEvidence {
+    pub t_rx_ns: Option<u64>,
+    pub t_state_ns: Option<u64>,
+    pub t_detect_ns: Option<u64>,
+    pub t_ready_ns: Option<u64>,
+    pub t_sign_ns: Option<u64>,
+    pub t_handoff_ns: Option<u64>,
+}
+
+impl CandidateCostRecord {
+    /// Conservative cash reserve, distinct from inventory. No unknown term is zero.
+    /// Swap cost is embedded in the executable floor, not an extra upfront cash debit.
+    pub fn fee_tip_reserve(&self) -> Option<u64> {
+        self.transaction_fee_usd_micro?
+            .checked_add(self.jito_tip_usd_micro?)?
+            .checked_add(self.rent_and_token_usd_micro?)?
+            .checked_add(self.flat_sol_fee_usd_micro?)?
+            .checked_add(self.protocol_fees_usd_micro?)?
+            .checked_add(self.failed_attempt_reserve_usd_micro?)
+    }
+    pub fn total_budget(&self) -> Option<u64> {
+        self.required_working_capital_usd_micro?
+            .checked_add(self.fee_tip_reserve()?)
+    }
+    pub fn from_input(
+        input: &darkbot_project0::economics::CandidateInput,
+        eval: darkbot_project0::economics::Evaluation,
+        failed: Option<u64>,
+        quote: Option<darkbot_solana::submit::MessageFeeQuote>,
+    ) -> Self {
+        use darkbot_project0::economics::Evaluation;
+        let (net, ppc) = match eval {
+            Evaluation::Known {
+                net,
+                profit_per_capital_bps,
+            } => (Some(net), Some(profit_per_capital_bps)),
+            Evaluation::Unknown => (None, None),
+        };
+        Self {
+            required_working_capital_usd_micro: Some(input.required_capital_usd_micro),
+            profit_per_capital_bps: ppc,
+            gross_seized_realizable_usd_micro: input.gross_seized_realizable_usd_micro,
+            repay_usd_micro: Some(input.repay_usd_micro),
+            protocol_fees_usd_micro: Some(input.protocol_fees_usd_micro),
+            flat_sol_fee_usd_micro: Some(input.flat_sol_fee_usd_micro),
+            swap_fees_and_impact_usd_micro: Some(input.swap_fees_and_impact_usd_micro),
+            jito_tip_usd_micro: Some(input.jito_tip_usd_micro),
+            funding: input.funding.as_str().into(),
+            path: format!("{:?}", input.path),
+            message_fee_quote: quote,
+            transaction_fee_usd_micro: input.transaction_fee_usd_micro,
+            failed_attempt_reserve_usd_micro: failed,
+            rent_and_token_usd_micro: input.rent_and_token_usd_micro,
+            economics_known: net.is_some(),
+            route_min_out_unknown: input.funding
+                == darkbot_project0::funding::FundingClass::ZeroPrefundSameTx
+                && input.gross_seized_realizable_usd_micro.is_none(),
+            net_profit_usd_micro: net,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OpportunityRecord {
+    pub timing: TimingEvidence,
+    pub rx_slot: Option<u64>,
+    pub detect_slot: Option<u64>,
+    pub selected_costs: Option<CandidateCostRecord>,
+    pub simulation_result: Option<String>,
     pub account: String,
     pub trigger: String,
     pub decision: Decision,
@@ -93,7 +170,20 @@ pub struct OpportunityRecord {
 
 impl OpportunityRecord {
     pub fn with_timeline(mut self, t: &Timeline) -> Self {
-        self.intervals_ns = t.standard_intervals().iter().map(|(n, v)| (n.to_string(), *v)).collect();
+        use darkbot_common::timing::Stage;
+        self.timing = TimingEvidence {
+            t_rx_ns: t.get(Stage::Rx),
+            t_state_ns: t.get(Stage::State),
+            t_detect_ns: t.get(Stage::Detect),
+            t_ready_ns: t.get(Stage::Ready),
+            t_sign_ns: t.get(Stage::Sign),
+            t_handoff_ns: t.get(Stage::Handoff),
+        };
+        self.intervals_ns = t
+            .standard_intervals()
+            .iter()
+            .map(|(n, v)| (n.to_string(), *v))
+            .collect();
         self
     }
 }
@@ -104,7 +194,13 @@ mod tests {
     fn health_json_preserves_full_protocol_fixed_point_range() {
         // R115 crashed in json! for an otherwise valid large Health value. These
         // are raw I80F48 bits, not floats: losing low bits also loses evidence.
-        for bits in [i128::MIN, i64::MIN as i128 - 1, 0, u64::MAX as i128 + 1, i128::MAX] {
+        for bits in [
+            i128::MIN,
+            i64::MIN as i128 - 1,
+            0,
+            u64::MAX as i128 + 1,
+            i128::MAX,
+        ] {
             let row = serde_json::json!({
                 "maint_health_bits": bits,
                 "equity_assets_bits": bits,

@@ -3,14 +3,14 @@
 use crate::record::{Decision, LossReason, OpportunityRecord};
 use darkbot_common::timing::{Clock, Stage, Timeline};
 use darkbot_project0::economics::{self, CandidateInput, Evaluation, FailedCostMatrix, Path};
+use darkbot_project0::execution::Freshness;
 use darkbot_project0::health::{HealthEngine, HealthError};
 use darkbot_project0::planner::{self, Allowlist, RouteKind, Step};
 use darkbot_project0::safety::Safety;
-use darkbot_project0::execution::Freshness;
 use darkbot_solana::state::blockhash::BlockhashCache;
 use darkbot_solana::submit::{self as submit, SimResult, SubmissionAdapter, SubmissionPath};
 use darkbot_solana::tx::{self, BuildVersion, Resources, TxLimits, TxPlan};
-use solana_message::AddressLookupTableAccount /* [FIX-13] */;
+use solana_message::AddressLookupTableAccount; /* [FIX-13] */
 use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
@@ -70,7 +70,10 @@ const MICRO_LAMPORTS_PER_LAMPORT: u128 = 1_000_000;
 /// messages = signatures x 5_000 + ceil(CU limit x CU price / 10^6). `None` for other formats.
 fn local_fee_estimate_lamports(tx: &solana_sdk::transaction::VersionedTransaction) -> Option<u64> {
     use solana_sdk::message::VersionedMessage;
-    if !matches!(tx.message, VersionedMessage::Legacy(_) | VersionedMessage::V0(_)) {
+    if !matches!(
+        tx.message,
+        VersionedMessage::Legacy(_) | VersionedMessage::V0(_)
+    ) {
         return None;
     }
     let keys = tx.message.static_account_keys();
@@ -85,7 +88,9 @@ fn local_fee_estimate_lamports(tx: &solana_sdk::transaction::VersionedTransactio
         }
         match ix.data.first() {
             Some(2) if ix.data.len() >= 5 => {
-                limit = Some(u64::from(u32::from_le_bytes([ix.data[1], ix.data[2], ix.data[3], ix.data[4]])));
+                limit = Some(u64::from(u32::from_le_bytes([
+                    ix.data[1], ix.data[2], ix.data[3], ix.data[4],
+                ])));
             }
             Some(3) if ix.data.len() >= 9 => {
                 let mut a = [0u8; 8];
@@ -95,12 +100,15 @@ fn local_fee_estimate_lamports(tx: &solana_sdk::transaction::VersionedTransactio
             _ => {}
         }
     }
-    let base = u64::from(tx.message.header().num_required_signatures).checked_mul(LAMPORTS_PER_SIGNATURE)?;
+    let base = u64::from(tx.message.header().num_required_signatures)
+        .checked_mul(LAMPORTS_PER_SIGNATURE)?;
     let priority = match price {
         None | Some(0) => 0,
         Some(p) => {
-            let cu = limit.unwrap_or_else(|| (other_ixs * DEFAULT_CU_PER_INSTRUCTION).min(MAX_CU_LIMIT));
-            u64::try_from((u128::from(cu) * u128::from(p)).div_ceil(MICRO_LAMPORTS_PER_LAMPORT)).ok()?
+            let cu =
+                limit.unwrap_or_else(|| (other_ixs * DEFAULT_CU_PER_INSTRUCTION).min(MAX_CU_LIMIT));
+            u64::try_from((u128::from(cu) * u128::from(p)).div_ceil(MICRO_LAMPORTS_PER_LAMPORT))
+                .ok()?
         }
     };
     base.checked_add(priority)
@@ -119,7 +127,8 @@ pub(crate) fn plan_economic_gate(
 ) -> (Evaluation, bool, bool) {
     let eval = economics::evaluate(input, failed);
     let actionable = economics::actionable(eval, min_profit, true, state_valid, safety_valid);
-    let technical_probe = mode == Mode::Shadow && matches!(eval, Evaluation::Unknown) && state_valid && safety_valid;
+    let technical_probe =
+        mode == Mode::Shadow && matches!(eval, Evaluation::Unknown) && state_valid && safety_valid;
     (eval, actionable, technical_probe)
 }
 
@@ -153,8 +162,15 @@ pub struct ReceivershipPlan {
 pub trait ReceivershipBuilder {
     /// Liefert **alle** technisch machbaren Funding-/Route-Candidates. Keine harte
     /// Funding-Präferenz im Builder; P4A + TX-Feasibility entscheiden danach.
-    fn native_cost_usd_micro(&self, _lamports: u64) -> Option<u64> { None }
-    fn plans(&self, account: &Pubkey, now_unix_s: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String>;
+    fn native_cost_usd_micro(&self, _lamports: u64) -> Option<u64> {
+        None
+    }
+    fn plans(
+        &self,
+        account: &Pubkey,
+        now_unix_s: u64,
+        slot: u64,
+    ) -> Result<Vec<ReceivershipPlan>, String>;
 }
 
 pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> {
@@ -186,11 +202,24 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
     /// Ein Kandidat, ein Trigger → ein Record. T_rx wird vom Aufrufer gesetzt.
-    pub fn evaluate(&mut self, account: Pubkey, trigger: &str, t_rx_ns: u64, now_unix_s: u64, slot: u64, state_valid: bool) -> OpportunityRecord {
+    pub fn evaluate(
+        &mut self,
+        account: Pubkey,
+        trigger: &str,
+        t_rx_ns: u64,
+        now_unix_s: u64,
+        slot: u64,
+        state_valid: bool,
+    ) -> OpportunityRecord {
         let _trigger_slot = slot; // [FIX-40] Trigger-Slot ist nur Provenienz des Updates, nicht T_sign
         let mut tl = Timeline::new();
         tl.mark(Stage::Rx, t_rx_ns);
         let mut rec = OpportunityRecord {
+            timing: Default::default(),
+            rx_slot: Some(slot),
+            detect_slot: None,
+            selected_costs: None,
+            simulation_result: None,
             account: account.to_string(),
             trigger: trigger.to_string(),
             decision: Decision::Skip,
@@ -246,7 +275,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // [FIX-88] Exact receivership eligibility beyond health: pinned marginfi circuit-breaker
         // state + CB price gate. This is part of the shared pipeline, so Shadow/LIVE/replay do not
         // diverge at the protocol boundary.
-        if let Err(e) = self.health.receivership_eligibility(&account, now_unix_s as i64, slot) {
+        if let Err(e) = self
+            .health
+            .receivership_eligibility(&account, now_unix_s as i64, slot)
+        {
             rec.loss = Some(LossReason::CircuitBreaker);
             rec.reason = Some(e.to_string());
             return rec.with_timeline(&tl);
@@ -264,12 +296,18 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             return rec.with_timeline(&tl);
         }
         let planning_started = Instant::now();
-        let mt0_jupiter_before = darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter); // [MT0]
+        let mt0_jupiter_before =
+            darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter); // [MT0]
         let planning_result = self.builder.plans(&account, now_unix_s, slot);
-        let mt0_jupiter = darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter).saturating_sub(mt0_jupiter_before);
+        let mt0_jupiter = darkbot_common::mt0::MT0
+            .remote_requests(darkbot_common::mt0::RemoteClass::Jupiter)
+            .saturating_sub(mt0_jupiter_before);
         if mt0_jupiter > 0 {
             darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::RoutedEvaluations, 1);
-            darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::JupiterRequestsRouted, mt0_jupiter);
+            darkbot_common::mt0::MT0.add(
+                darkbot_common::mt0::Counter::JupiterRequestsRouted,
+                mt0_jupiter,
+            );
         }
         record_timing(
             &PLANNING_CALLS,
@@ -285,7 +323,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 return rec.with_timeline(&tl);
             }
             Err(e) => {
-                rec.decision = if e.contains("unavailable") { Decision::Unavailable } else { Decision::Skip };
+                rec.decision = if e.contains("unavailable") {
+                    Decision::Unavailable
+                } else {
+                    Decision::Skip
+                };
                 rec.loss = Some(if e.starts_with("SIZING:UNSUPPORTED_INTEGRATION") {
                     LossReason::UnsupportedIntegration
                 } else if e.starts_with("SIZING:") {
@@ -294,7 +336,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     LossReason::MissingAta
                 } else if e.starts_with("FUNDING:") {
                     LossReason::Funding
-                } else if e.contains("ReserveStale") || e.contains("DriftSpotMarketStale") || e.contains("JuplendLendingStale") || e.contains("SolendReserveStale") {
+                } else if e.contains("ReserveStale")
+                    || e.contains("DriftSpotMarketStale")
+                    || e.contains("JuplendLendingStale")
+                    || e.contains("SolendReserveStale")
+                {
                     LossReason::IntegrationRefresh
                 } else {
                     LossReason::Routing
@@ -304,30 +350,69 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
         };
 
-        let Some(bh) = self.blockhash.fresh(self.clock.now_ns(), self.blockhash_max_age_ns) else {
+        let Some(bh) = self
+            .blockhash
+            .fresh(self.clock.now_ns(), self.blockhash_max_age_ns)
+        else {
             rec.loss = Some(LossReason::Build);
             rec.reason = Some("blockhash stale".into());
             return rec.with_timeline(&tl);
         };
 
-        let mut best_actionable: Option<(ReceivershipPlan, darkbot_solana::tx::BuiltTx, Evaluation)> = None;
-        let mut best_probe: Option<(ReceivershipPlan, darkbot_solana::tx::BuiltTx, Evaluation)> = None;
+        let mut best_actionable: Option<(
+            ReceivershipPlan,
+            darkbot_solana::tx::BuiltTx,
+            Evaluation,
+            crate::record::CandidateCostRecord,
+        )> = None;
+        let mut best_probe: Option<(
+            ReceivershipPlan,
+            darkbot_solana::tx::BuiltTx,
+            Evaluation,
+            crate::record::CandidateCostRecord,
+        )> = None;
         let mut threshold_hits: u32 = 0;
         let mut rejected = Vec::new();
         for mut plan in plans {
-            if let Err(e) = planner::validate_receivership(&plan.steps, self.allowlist, plan.route, self.p7_passed) {
-                rejected.push(format!("{}: plan invalid: {:?}", plan.input.funding.as_str(), e));
+            if let Err(e) = planner::validate_receivership(
+                &plan.steps,
+                self.allowlist,
+                plan.route,
+                self.p7_passed,
+            ) {
+                rejected.push(format!(
+                    "{}: plan invalid: {:?}",
+                    plan.input.funding.as_str(),
+                    e
+                ));
                 continue;
             }
 
             // [FIX-22][FIX-30] P0-Top-Level-Allowlist gilt nur für die Receivership-TX; Prerequisite-TXs
             // (JIT-Buy) liegen außerhalb Start/End und haben ihre eigene Allowlist (`prereq_allowed`).
-            if let Some(bad) = plan.instructions.iter().find(|ix| !self.global_allowed.contains(&ix.program_id)) {
-                rejected.push(format!("{}: receivership program not allowlisted: {}", plan.input.funding.as_str(), bad.program_id));
+            if let Some(bad) = plan
+                .instructions
+                .iter()
+                .find(|ix| !self.global_allowed.contains(&ix.program_id))
+            {
+                rejected.push(format!(
+                    "{}: receivership program not allowlisted: {}",
+                    plan.input.funding.as_str(),
+                    bad.program_id
+                ));
                 continue;
             }
-            if let Some(bad) = plan.prerequisite_txs.iter().flatten().find(|ix| !self.prereq_allowed.contains(&ix.program_id)) {
-                rejected.push(format!("{}: prerequisite program not allowed: {}", plan.input.funding.as_str(), bad.program_id));
+            if let Some(bad) = plan
+                .prerequisite_txs
+                .iter()
+                .flatten()
+                .find(|ix| !self.prereq_allowed.contains(&ix.program_id))
+            {
+                rejected.push(format!(
+                    "{}: prerequisite program not allowed: {}",
+                    plan.input.funding.as_str(),
+                    bad.program_id
+                ));
                 continue;
             }
             // Shadow muss den finalen Pfad messen können, auch wenn LIVE absichtlich deaktiviert
@@ -357,16 +442,27 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             };
 
             // [FIX-3] Prerequisite-TXs nur über Bundle-Pfad; sonst ist der Kandidat nicht ausführbar.
-            if !self.submitter.supports_tx_version(plan.tx_version) { // [FIX-38]
-                rejected.push(format!("{}: tx version {:?} not supported on {}", plan.input.funding.as_str(), plan.tx_version, self.submitter.path().as_str()));
+            if !self.submitter.supports_tx_version(plan.tx_version) {
+                // [FIX-38]
+                rejected.push(format!(
+                    "{}: tx version {:?} not supported on {}",
+                    plan.input.funding.as_str(),
+                    plan.tx_version,
+                    self.submitter.path().as_str()
+                ));
                 continue;
             }
-            if !plan.prerequisite_txs.is_empty() && !self.submitter.supports_bundle() { // [FIX-14]
-                rejected.push(format!("{}: needs bundle path", plan.input.funding.as_str()));
+            if !plan.prerequisite_txs.is_empty() && !self.submitter.supports_bundle() {
+                // [FIX-14]
+                rejected.push(format!(
+                    "{}: needs bundle path",
+                    plan.input.funding.as_str()
+                ));
                 continue;
             }
             if tl.get(Stage::Detect).is_none() {
                 tl.mark(Stage::Detect, self.clock.now_ns());
+                rec.detect_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
             }
             let txplan = TxPlan {
                 version: plan.tx_version,
@@ -378,21 +474,31 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             let built = match tx::build(&txplan, bh.hash, &self.limits) {
                 Ok(b) => b,
                 Err(e) => {
-                    rejected.push(format!("{}: tx infeasible: {}", plan.input.funding.as_str(), e));
+                    rejected.push(format!(
+                        "{}: tx infeasible: {}",
+                        plan.input.funding.as_str(),
+                        e
+                    ));
                     continue;
                 }
             };
 
-            let fee_quote = if plan.input.path == Path::Rpc && self.submitter.path() == SubmissionPath::Rpc
-                && plan.prerequisite_txs.is_empty() && plan.tip == 0 {
+            let fee_quote = if plan.input.path == Path::Rpc
+                && self.submitter.path() == SubmissionPath::Rpc
+                && plan.prerequisite_txs.is_empty()
+                && plan.tip == 0
+            {
                 let fee_started = Instant::now();
                 let fee = self.submitter.fee_for_message(&built.tx);
                 // [MT0] H6: would a local fee model have matched the RPC fee? (measurement only)
                 if let Some(q) = &fee {
                     match local_fee_estimate_lamports(&built.tx) {
-                        Some(local) if local == q.lamports => darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
-                        Some(_) => darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::FeeParityMismatch, 1),
-                        None => darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::FeeParityUnsupported, 1),
+                        Some(local) if local == q.lamports => darkbot_common::mt0::MT0
+                            .add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
+                        Some(_) => darkbot_common::mt0::MT0
+                            .add(darkbot_common::mt0::Counter::FeeParityMismatch, 1),
+                        None => darkbot_common::mt0::MT0
+                            .add(darkbot_common::mt0::Counter::FeeParityUnsupported, 1),
                     }
                 }
                 record_timing(
@@ -402,12 +508,17 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     fee_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
                 );
                 fee.filter(|q| q.message_hash == built.tx.message.hash().to_string())
-            } else { None };
-            plan.input.transaction_fee_usd_micro = fee_quote.as_ref()
+            } else {
+                None
+            };
+            plan.input.transaction_fee_usd_micro = fee_quote
+                .as_ref()
                 .and_then(|q| self.builder.native_cost_usd_micro(q.lamports));
             let candidate_failed = if fee_quote.is_some() {
                 economics::rpc_message_failure_costs(plan.input.transaction_fee_usd_micro)
-            } else { *self.failed_costs };
+            } else {
+                *self.failed_costs
+            };
             let failed_reserve = candidate_failed.conservative(plan.input.path);
             let (eval, actionable, technical_probe) = plan_economic_gate(
                 &plan.input,
@@ -419,56 +530,79 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             );
             // [MT0] avoidable remote work, classified only from decisions already made above.
             if fee_quote.is_some() && matches!(eval, Evaluation::Known { .. }) && !actionable {
-                darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::FeeRpcForKnownNonActionable, 1);
+                darkbot_common::mt0::MT0
+                    .add(darkbot_common::mt0::Counter::FeeRpcForKnownNonActionable, 1);
             }
             if technical_probe && plan.input.transaction_fee_usd_micro.is_none() {
-                darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::ProbeCandidatesWithFeeUnknown, 1);
+                darkbot_common::mt0::MT0.add(
+                    darkbot_common::mt0::Counter::ProbeCandidatesWithFeeUnknown,
+                    1,
+                );
             }
-            rec.candidate_costs.push(crate::record::CandidateCostRecord {
-                funding:plan.input.funding.as_str().into(), path:format!("{:?}", plan.input.path),
-                message_fee_quote:fee_quote.clone(), transaction_fee_usd_micro:plan.input.transaction_fee_usd_micro,
-                failed_attempt_reserve_usd_micro:failed_reserve, rent_and_token_usd_micro:plan.input.rent_and_token_usd_micro,
-                economics_known:matches!(eval, Evaluation::Known {..}),
-                route_min_out_unknown:
-                    plan.input.funding == darkbot_project0::funding::FundingClass::ZeroPrefundSameTx
-                    && plan.input.gross_seized_realizable_usd_micro.is_none(),
-                net_profit_usd_micro:match eval { Evaluation::Known {net,..} => Some(net), _ => None },
-            });
+            let cost_record = crate::record::CandidateCostRecord::from_input(
+                &plan.input,
+                eval,
+                failed_reserve,
+                fee_quote.clone(),
+            );
+            rec.candidate_costs.push(cost_record.clone());
             if !actionable && !technical_probe {
                 if let Evaluation::Known { net, .. } = eval {
-                    if net > 0 && net <= self.min_profit { threshold_hits += 1; }
+                    if net > 0 && net <= self.min_profit {
+                        threshold_hits += 1;
+                    }
                     if rec.net_profit.map_or(true, |current| net > current) {
                         rec.net_profit = Some(net);
+                        rec.selected_costs = Some(cost_record);
                         rec.economics_known = true;
                         rec.premium_bps = Some(plan.premium_bps);
                         rec.funding = Some(plan.input.funding.as_str().into());
                     }
                 }
-                rejected.push(format!("{}: economics {:?}", plan.input.funding.as_str(), eval));
+                rejected.push(format!(
+                    "{}: economics {:?}",
+                    plan.input.funding.as_str(),
+                    eval
+                ));
                 continue;
             }
 
             if actionable {
-                let replace = best_actionable.as_ref().map_or(true, |(_, _, current)| {
+                let replace = best_actionable.as_ref().map_or(true, |(_, _, current, _)| {
                     economics::compare_evaluations(eval, *current).is_gt()
                 });
                 if replace {
-                    best_actionable = Some((plan, built, eval));
+                    best_actionable = Some((plan, built, eval, cost_record));
                 }
             } else {
-                let candidate_key = (built.serialized_len, built.locked_accounts, plan.input.funding.as_str());
-                let replace = best_probe.as_ref().map_or(true, |(cur_plan, cur_built, _)| {
-                    candidate_key < (cur_built.serialized_len, cur_built.locked_accounts, cur_plan.input.funding.as_str())
-                });
+                let candidate_key = (
+                    built.serialized_len,
+                    built.locked_accounts,
+                    plan.input.funding.as_str(),
+                );
+                let replace = best_probe
+                    .as_ref()
+                    .map_or(true, |(cur_plan, cur_built, _, _)| {
+                        candidate_key
+                            < (
+                                cur_built.serialized_len,
+                                cur_built.locked_accounts,
+                                cur_plan.input.funding.as_str(),
+                            )
+                    });
                 if replace {
-                    best_probe = Some((plan, built, eval));
+                    best_probe = Some((plan, built, eval, cost_record));
                 }
             }
         }
 
-        let Some((plan, mut built, eval)) = best_actionable.or(best_probe) else {
+        let Some((plan, mut built, eval, selected_costs)) = best_actionable.or(best_probe) else {
             // [FIX-43] ThresholdTooHigh nur, wenn mindestens ein Kandidat positiv, aber unter MIN_PROFIT lag.
-            rec.loss = Some(if threshold_hits > 0 { LossReason::ThresholdTooHigh } else { LossReason::EconomicSkip });
+            rec.loss = Some(if threshold_hits > 0 {
+                LossReason::ThresholdTooHigh
+            } else {
+                LossReason::EconomicSkip
+            });
             rec.reason = Some(if rejected.is_empty() {
                 "no actionable execution candidate".into()
             } else {
@@ -477,6 +611,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             return rec.with_timeline(&tl);
         };
 
+        rec.selected_costs = Some(selected_costs);
+        rec.path = Some(self.submitter.path().as_str().into());
         rec.premium_bps = Some(plan.premium_bps);
         rec.funding = Some(plan.input.funding.as_str().to_string());
         rec.economics_known = matches!(eval, Evaluation::Known { .. });
@@ -484,7 +620,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         if let Evaluation::Known { net, .. } = eval {
             rec.net_profit = Some(net);
         } else if self.mode == Mode::Shadow {
-            rec.reason = Some("technical shadow probe: cost or realization evidence incomplete".into());
+            rec.reason =
+                Some("technical shadow probe: cost or realization evidence incomplete".into());
         }
 
         rec.serialized_bytes = Some(built.serialized_len);
@@ -497,19 +634,32 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some(e.to_string());
             return rec.with_timeline(&tl);
         }
-        tl.mark(Stage::Sign, self.clock.now_ns());
+        if plan.prerequisite_txs.is_empty() && plan.tip == 0 {
+            tl.mark(Stage::Sign, self.clock.now_ns());
+        }
+        rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
 
         // Drift-Muster: stale Opportunity / Deadline → nicht senden (Record bleibt für P6).
         let t_detect = tl.get(Stage::Detect).unwrap_or(t_rx_ns);
-        if self.freshness.deadline_passed(t_detect, self.clock.now_ns()) {
+        if self
+            .freshness
+            .deadline_passed(t_detect, self.clock.now_ns())
+        {
             rec.loss = Some(LossReason::Build);
             rec.reason = Some("execution deadline passed".into());
             return rec.with_timeline(&tl);
         }
-        rec.sign_slot = Some(self.slot_watch.get()); // [FIX-40] exakt bei T_sign gelesen, lockfrei
-        // [M1] Shadow baut und simuliert identisch zu LIVE; nur Reservierung und Senden entfallen.
+        rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0); // [FIX-40] exakt bei T_sign gelesen, lockfrei
+                                                                        // [M1] Shadow baut und simuliert identisch zu LIVE; nur Reservierung und Senden entfallen.
         let reserved = if self.mode == Mode::Live {
-            if let Err(d) = self.safety.check(now_unix_s, plan.exposure, plan.tip, plan.slippage_bps, &plan.assets, "longtail") {
+            if let Err(d) = self.safety.check(
+                now_unix_s,
+                plan.exposure,
+                plan.tip,
+                plan.slippage_bps,
+                &plan.assets,
+                "longtail",
+            ) {
                 rec.decision = Decision::DeniedBySafety;
                 rec.reason = Some(format!("{:?}", d));
                 return rec.with_timeline(&tl);
@@ -518,12 +668,17 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         } else {
             false
         };
-        fn release_if(s: &mut Safety, reserved: bool, exposure: u64) { if reserved { s.release_without_outcome(exposure); } }
+        fn release_if(s: &mut Safety, reserved: bool, exposure: u64) {
+            if reserved {
+                s.release_without_outcome(exposure);
+            }
+        }
         // [FIX-6] Simulate-first auf genau dieser signierten TX. Nur Ok sendet; Fehler/Unavailable → SKIP,
         // Kapital deterministisch freigeben (kein Fehlversuch im Tagesstatus, es wurde nichts gesendet).
         // [FIX-15] Bundle-Kandidaten werden als Bundle simuliert, Einzel-TX als Einzel-TX — nie gemischt.
         // [FIX-4] Bundle = [prerequisite TXs…, receivership TX, tip TX]; Tip nie in der Receivership-TX.
-        let use_bundle = self.submitter.supports_bundle() && (!plan.prerequisite_txs.is_empty() || plan.tip > 0);
+        let use_bundle =
+            self.submitter.supports_bundle() && (!plan.prerequisite_txs.is_empty() || plan.tip > 0);
         let mut bundle_txs: Vec<solana_sdk::transaction::VersionedTransaction> = Vec::new();
         if use_bundle {
             let Some(tip_account) = self.tip_account else {
@@ -533,19 +688,52 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 return rec.with_timeline(&tl);
             };
             for pre in &plan.prerequisite_txs {
-                let pre_plan = TxPlan { version: BuildVersion::V0, payer: tx::payer_of(self.payer), instructions: pre.clone(), lookup_tables: plan.lookup_tables.clone(), resources: self.resources };
-                let mut b = match tx::build(&pre_plan, bh.hash, &self.limits) { Ok(b) => b, Err(e) => { release_if(self.safety, reserved, plan.exposure); rec.loss = Some(LossReason::Build); rec.reason = Some(format!("prerequisite build: {}", e)); return rec.with_timeline(&tl); } };
-                if let Err(e) = tx::sign(&mut b, &[self.payer]) { release_if(self.safety, reserved, plan.exposure); rec.loss = Some(LossReason::Build); rec.reason = Some(e.to_string()); return rec.with_timeline(&tl); }
+                let pre_plan = TxPlan {
+                    version: BuildVersion::V0,
+                    payer: tx::payer_of(self.payer),
+                    instructions: pre.clone(),
+                    lookup_tables: plan.lookup_tables.clone(),
+                    resources: self.resources,
+                };
+                let mut b = match tx::build(&pre_plan, bh.hash, &self.limits) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        release_if(self.safety, reserved, plan.exposure);
+                        rec.loss = Some(LossReason::Build);
+                        rec.reason = Some(format!("prerequisite build: {}", e));
+                        return rec.with_timeline(&tl);
+                    }
+                };
+                if let Err(e) = tx::sign(&mut b, &[self.payer]) {
+                    release_if(self.safety, reserved, plan.exposure);
+                    rec.loss = Some(LossReason::Build);
+                    rec.reason = Some(e.to_string());
+                    return rec.with_timeline(&tl);
+                }
                 bundle_txs.push(b.tx);
             }
             bundle_txs.push(built.tx.clone());
             match submit::build_tip_tx(self.payer, &tip_account, plan.tip, bh.hash) {
                 Ok(t) => {
-                    rec.submitted_tip = t.signatures.first().map(|s| crate::pending::SubmittedTip { signature:s.to_string(), lamports:plan.tip });
+                    rec.submitted_tip =
+                        t.signatures.first().map(|s| crate::pending::SubmittedTip {
+                            signature: s.to_string(),
+                            lamports: plan.tip,
+                        });
                     bundle_txs.push(t);
-                },
-                Err(e) => { release_if(self.safety, reserved, plan.exposure); rec.loss = Some(LossReason::Build); rec.reason = Some(format!("tip tx: {}", e)); return rec.with_timeline(&tl); }
+                }
+                Err(e) => {
+                    release_if(self.safety, reserved, plan.exposure);
+                    rec.loss = Some(LossReason::Build);
+                    rec.reason = Some(format!("tip tx: {}", e));
+                    return rec.with_timeline(&tl);
+                }
             }
+        }
+        if use_bundle {
+            tl.mark(Stage::Sign, self.clock.now_ns());
+            rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
+            rec.path = Some(SubmissionPath::JitoBundle.as_str().into());
         }
         let simulation_started = Instant::now();
         let sim = if use_bundle {
@@ -557,18 +745,27 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             &SIMULATION_CALLS,
             &SIMULATION_NS_TOTAL,
             &SIMULATION_NS_MAX,
-            simulation_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+            simulation_started
+                .elapsed()
+                .as_nanos()
+                .min(u64::MAX as u128) as u64,
         );
         match sim {
             SimResult::Ok { units_consumed } => {
+                rec.simulation_result = Some("PASS".into());
                 rec.simulated_cu = units_consumed;
             }
             other => {
+                rec.simulation_result = Some(format!("{:?}", other));
                 release_if(self.safety, reserved, plan.exposure);
                 rec.loss = Some(LossReason::Build);
                 rec.reason = Some(format!("simulation not ok: {:?}", other));
                 rec.decision = if self.mode == Mode::Shadow {
-                    if rec.economics_known { Decision::ShadowSimFailed } else { Decision::ShadowTechnicalSimFailed }
+                    if rec.economics_known {
+                        Decision::ShadowSimFailed
+                    } else {
+                        Decision::ShadowTechnicalSimFailed
+                    }
                 } else {
                     rec.decision
                 };
@@ -584,7 +781,15 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             };
             return rec.with_timeline(&tl);
         }
-        rec.path = Some(if use_bundle { SubmissionPath::JitoBundle } else { self.submitter.path() }.as_str().into());
+        rec.path = Some(
+            if use_bundle {
+                SubmissionPath::JitoBundle
+            } else {
+                self.submitter.path()
+            }
+            .as_str()
+            .into(),
+        );
         let t_handoff = self.clock.now_ns();
         let result = if use_bundle {
             self.submitter.submit_bundle(&bundle_txs, t_handoff)
@@ -610,9 +815,28 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             Err(submit::SubmitError::Transport(e)) => {
                 // [FIX-23] Transportfehler nach Request-Send: Annahme unbekannt → KEIN Release; Reconciliation
                 // über die lokal bekannten Signaturen (wir haben signiert). Kein Doppelversand.
-                let sigs: Vec<String> = if use_bundle { bundle_txs.iter().filter_map(|t| t.signatures.first()).map(|s| s.to_string()).collect() } else { built.tx.signatures.first().map(|s| vec![s.to_string()]).unwrap_or_default() };
+                let sigs: Vec<String> = if use_bundle {
+                    bundle_txs
+                        .iter()
+                        .filter_map(|t| t.signatures.first())
+                        .map(|s| s.to_string())
+                        .collect()
+                } else {
+                    built
+                        .tx
+                        .signatures
+                        .first()
+                        .map(|s| vec![s.to_string()])
+                        .unwrap_or_default()
+                };
                 rec.decision = Decision::AmbiguousSubmission;
-                rec.signature = sigs.get(if use_bundle && sigs.len() >= 2 { sigs.len() - 2 } else { 0 }).cloned();
+                rec.signature = sigs
+                    .get(if use_bundle && sigs.len() >= 2 {
+                        sigs.len() - 2
+                    } else {
+                        0
+                    })
+                    .cloned();
                 rec.all_signatures = sigs;
                 rec.exposure = Some(plan.exposure);
                 rec.reason = Some(format!("transport after handoff: {}", e));
@@ -625,8 +849,21 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
 
     /// Landing-Reconciliation (S3-06) → Safety. Muss für **jede** Submission genau einmal
     /// aufgerufen werden, sonst bleibt `outstanding` belegt.
-    pub fn reconcile_outcome(&mut self, now_unix_s: u64, landed_success: bool, realized_pnl: Option<i128>, exposure_released: u64, inventory_delta: i128) {
-        self.safety.record_outcome(now_unix_s, landed_success, realized_pnl, exposure_released, inventory_delta);
+    pub fn reconcile_outcome(
+        &mut self,
+        now_unix_s: u64,
+        landed_success: bool,
+        realized_pnl: Option<i128>,
+        exposure_released: u64,
+        inventory_delta: i128,
+    ) {
+        self.safety.record_outcome(
+            now_unix_s,
+            landed_success,
+            realized_pnl,
+            exposure_released,
+            inventory_delta,
+        );
     }
 }
 
@@ -643,23 +880,40 @@ mod mt0_tests {
     fn tx_with(ixs: Vec<Instruction>) -> VersionedTransaction {
         let payer = Pubkey::new_unique();
         let message = VersionedMessage::Legacy(Message::new(&ixs, Some(&payer)));
-        VersionedTransaction { signatures: vec![Signature::default()], message }
+        VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message,
+        }
     }
 
     fn cb(data: Vec<u8>) -> Instruction {
-        Instruction { program_id: Pubkey::from_str(COMPUTE_BUDGET_PROGRAM_ID).unwrap(), accounts: vec![], data }
+        Instruction {
+            program_id: Pubkey::from_str(COMPUTE_BUDGET_PROGRAM_ID).unwrap(),
+            accounts: vec![],
+            data,
+        }
     }
 
     /// [MT0/H6] The local estimator (measurement only) reproduces the FIX-129 observations:
     /// 5_000 without priority and 7_800 = 5_000 + 1_400_000 CU x 2_000 uLamports / 10^6.
     #[test]
     fn local_fee_estimate_reproduces_fix129_observations() {
-        let plain = Instruction { program_id: Pubkey::new_unique(), accounts: vec![], data: vec![1] };
-        assert_eq!(local_fee_estimate_lamports(&tx_with(vec![plain.clone()])), Some(5_000));
+        let plain = Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![],
+            data: vec![1],
+        };
+        assert_eq!(
+            local_fee_estimate_lamports(&tx_with(vec![plain.clone()])),
+            Some(5_000)
+        );
         let mut limit = vec![2u8];
         limit.extend_from_slice(&1_400_000u32.to_le_bytes());
         let mut price = vec![3u8];
         price.extend_from_slice(&2_000u64.to_le_bytes());
-        assert_eq!(local_fee_estimate_lamports(&tx_with(vec![cb(limit), cb(price), plain])), Some(7_800));
+        assert_eq!(
+            local_fee_estimate_lamports(&tx_with(vec![cb(limit), cb(price), plain])),
+            Some(7_800)
+        );
     }
 }

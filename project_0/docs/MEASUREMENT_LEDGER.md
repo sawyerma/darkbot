@@ -1,7 +1,7 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
-Status: **P6-MT Tranche 1 r3 LOCAL CODE QUALIFICATION PASS (F1/F8/P1-C); full P6-MT and Mainnet qualification remain open; LIVE remains disabled**  
-Updated: 2026-10-07
+Status: **C0-E1 locally integrated; both builds and workspace test suites PASS; differential Clippy / combined Mainnet smoke / 4-hour observation OPEN; LIVE disabled**
+Updated: 2026-10-08
 
 This is the single human-readable measurement ledger for the new Solana / Project 0 Liquidator.
 
@@ -4279,3 +4279,224 @@ The test does not establish a true competitor send deadline, guaranteed Shadow c
 
 **LIVE remains blocked.**
 
+
+## 2026-10-08 — C0-E1 integrated locally into DarkBot
+
+User authorized direct integration after isolated package delivery. Integration HEAD:
+`12c4616f9b24bf036d99cdd549e56ff2d448d372`; implementation base:
+`57bef334e60764f614712785438a95edb7638352`.
+
+Only PHASENPLAN and this ledger had changed within Project_0 since that base.
+The complete patch check correctly rejected the appended PHASENPLAN hunk; the
+code patch passed `git apply --check --exclude=project_0/docs/PHASENPLAN.md` and
+was applied unchanged. PHASENPLAN was merged manually, retaining the existing
+handoff requirements. All nine other package files match the verified return
+end_state byte-for-byte and in file permissions. Cargo.lock is unchanged.
+Existing untracked BSC evidence and market data were preserved.
+
+### Local qualification on the integrated working tree
+
+Commands were executed from `project_0/native`:
+
+```bash
+cargo build --locked --features crate_health
+cargo build --locked --features 'crate_health txv1'
+cargo test --locked --workspace --features crate_health
+cargo test --locked --workspace --features 'crate_health txv1'
+```
+
+- Both builds: PASS.
+- Workspace `crate_health`: 242 PASS / 0 FAIL / 1 existing ignored test.
+- Workspace `crate_health txv1`: 244 PASS / 0 FAIL / 1 existing ignored test.
+- `git diff --check`: PASS.
+- `bash -n project_0/scripts/run_econ4h.sh`: PASS.
+- Targeted rustfmt (`econ.rs`, `econ_tests.rs`, `record.rs`, edition 2021,
+  `skip_children=true`): PASS; this is not a full candidate-formatting claim.
+- Package internal SHA256SUMS: all 13 PASS before integration.
+
+Evidence: `project_0/evidence/C0_E1_local_integration_20261008/results.json`
+and `1.log` through `4.log`. Historical implementation commands/results and
+non-claims: `project_0/docs/C0_E1_IMPLEMENTATION_REPORT.md`.
+
+### Handoff / exact next steps
+
+1. Complete candidate formatting and differential Clippy versus the base for both feature sets.
+2. Run combined Mainnet smoke from repository root:
+   `P0_ECON_DURATION_SECS=600 P0_ECON_SNAPSHOT_SECS=150 project_0/scripts/run_econ4h.sh`.
+3. Inspect all four snapshots and `economics_final.json`; require technical completeness,
+   inspect UNKNOWN evidence and source identity before qualifying the run.
+4. Only after successful smoke: `project_0/scripts/run_econ4h.sh` for 14400/3600 observation.
+
+The user takes over further qualification to conserve credits. No combined Mainnet
+smoke, four-hour observation, candidate release build or differential Clippy was
+performed in this integration. Uncommitted source identity remains UNKNOWN as
+implemented; version the reviewed candidate before a run intended to qualify a
+specific source commit. No commit or push was made during integration.
+No submission was performed. LIVE remains disabled. This is local code/test
+qualification, not economic GO, source-coverage proof, P8 PASS or LIVE readiness.
+
+## C0-E1 RETENTION QUALIFICATION — 2026-10-08
+
+### Scope
+
+C0-E1 combines C0-MO Market Truth with the existing Project_0 Shadow
+production path:
+
+Health → Sizing → Funding → Economics → Build → Sign → Simulation → Winner/F8
+
+Submission remains disabled and LIVE remains blocked.
+
+### Initial 600-second smoke
+
+Run:
+
+`c0e1_smoke_20261008T212122Z`
+
+The full 600-second run completed with four snapshots, complete market
+capture, clean shutdown, zero submissions and LIVE disabled, but the
+technical verdict was `INCOMPLETE`.
+
+Root cause:
+
+- pipeline evaluations: 555626
+- retention capacity: 262144
+- retention overflow: 293482
+
+Exact relation:
+
+`555626 - 262144 = 293482`
+
+The original C0-E1 analytics implementation retained effectively one
+in-memory record per Shadow evaluation/revision. This was structurally
+unsuitable for the planned four-hour run.
+
+### Retention architecture fix
+
+The analytics retention path was redesigned:
+
+- every Shadow evaluation remains streamed to `shadow_evaluations.jsonl`;
+- normal revisions are no longer retained one-for-one in RAM;
+- bounded semantic state is retained per report-relevant opportunity group;
+- revision coalescing does not count as evidence loss;
+- `shadow_offsets.bin` provides disk-backed lookup for later Winner
+  recorrelations;
+- later Winner evidence can reconstruct relevant account history from disk;
+- complete evaluation counters and hour deltas are retained;
+- real semantic capacity loss remains fail-closed.
+
+New telemetry:
+
+- `shadow_evaluations_received`
+- `shadow_evaluations_streamed`
+- `shadow_evaluations_coalesced`
+- `shadow_semantic_entries_current`
+- `shadow_semantic_entries_max`
+- `shadow_semantic_evictions`
+
+### Stress qualification
+
+Synthetic stress:
+
+- evaluations received: 1000000
+- evaluations streamed: 1000000
+- evaluations coalesced: 999984
+- maximum semantic RAM entries: 16
+- retention overflow: 0
+- semantic evictions: 0
+- raw rows: 1000000
+
+Targeted C0-E1 regression tests:
+
+- 26 passed
+- 0 failed
+
+### Full local qualification
+
+After the retention correction:
+
+- rustfmt: PASS
+- git diff check: PASS
+- build `crate_health`: PASS
+- build `crate_health txv1`: PASS
+- full workspace tests `crate_health`: PASS
+- full workspace tests `crate_health txv1`: PASS
+- Differential Clippy `crate_health`: candidate-only 0
+- Differential Clippy `crate_health txv1`: candidate-only 0
+
+Result:
+
+`C0E1_RETENTION_LOCAL_QUALIFICATION_PASS`
+
+### Retention-safe 600-second Mainnet retest
+
+Run:
+
+`c0e1_retention_smoke_20261008T215650Z`
+
+Result:
+
+- runner exit: 0
+- technical verdict: `PASS`
+- actual duration: 600.0 s
+- four snapshots present: true
+- snapshot writes: 4
+- final reconciliation: complete
+- market capture complete: true
+- clean automatic shutdown: true
+- analytics queue drops: 0
+- retention overflow: 0
+- submissions: 0
+- live_ready: false
+
+Retention telemetry:
+
+- evaluations received: 840518
+- evaluations streamed: 840518
+- evaluations coalesced: 816112
+- semantic entries current: 24406
+- semantic entries maximum: 24406
+- semantic evictions: 0
+
+Therefore all received Shadow evaluations were persisted by the analytics
+layer and no semantic evidence was evicted.
+
+The ten-minute economic sample contained no observed market liquidation:
+
+- liquidations: 0
+- executable opportunities: 0
+- market status: `MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED`
+- sample status: `INSUFFICIENT_SAMPLE`
+- economics unknown: 24406
+- winner unresolved: 24406
+- exact competitor submission deadline: `UNKNOWN`
+
+Observed bottleneck labels included:
+
+- MissingAta
+- Routing
+- Bankruptcy
+
+These are measurements of the current Shadow system, not conclusions about
+their final economic importance.
+
+### Qualification decision
+
+C0-E1 600-second technical qualification: **PASS**
+
+Original retention scalability blocker: **RESOLVED**
+
+Still not established:
+
+- representative profitability;
+- verified complete market-source coverage;
+- exact competitor submission deadlines;
+- same-slot capture probability;
+- four-hour stability;
+- LIVE readiness.
+
+Next gate:
+
+**Four-hour C0-E1 Economic + Capital + Competition + Race Attribution run
+from the exact committed and pushed source revision.**
+
+LIVE and transaction submission remain blocked.

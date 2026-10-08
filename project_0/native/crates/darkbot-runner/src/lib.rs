@@ -27,3 +27,5 @@ pub mod winner_tracker;
 
 pub mod lookup_tables;
 pub mod market_observer;
+
+pub mod econ;

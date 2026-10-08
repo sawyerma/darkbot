@@ -365,7 +365,7 @@ fn unix_now_s() -> u64 {
 // LiquidationReceiverEvent decoder (fail closed, program-attributed)
 // ------------------------------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ReceiverEvent {
     pub event_index: u32,
     pub target: Pubkey,
@@ -783,7 +783,7 @@ impl MarketSink for JsonlSink {
 // Observer core (pure bookkeeping; I/O only via MarketSink)
 // ------------------------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct MarketStats {
     pub transactions_received: u64,
     pub unique_transactions: u64,
@@ -904,6 +904,7 @@ pub struct ReceiverRank {
 }
 
 pub struct ObserverCore {
+    econ: Option<crate::econ::Handle>,
     program: Pubkey,
     source: MarketSource,
     enrich_cfg: EnrichConfig,
@@ -962,6 +963,7 @@ fn ratio(part: f64, total: f64) -> Option<f64> {
 impl ObserverCore {
     pub fn new(program: Pubkey, source: MarketSource, enrich_cfg: EnrichConfig) -> Self {
         Self {
+            econ: None,
             program,
             source,
             enrich_cfg,
@@ -1181,6 +1183,20 @@ impl ObserverCore {
                 return false;
             }
         }
+        if self
+            .econ
+            .as_ref()
+            .is_some_and(|h| self.seen.len() >= h.capacity() && !self.seen.contains(signature))
+        {
+            self.mark_incomplete("C0_E1_MARKET_RETENTION_OVERFLOW");
+            self.econ
+                .as_ref()
+                .unwrap()
+                .shared
+                .retention_overflow
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return false;
+        }
         self.stats.transactions_received += 1;
         if !self.seen.insert(signature.to_string()) {
             self.stats.duplicate_transactions += 1;
@@ -1213,11 +1229,41 @@ impl ObserverCore {
         }
     }
 
-    fn aggregate(&mut self, signature: &str, events: &[ReceiverEvent]) {
+    fn aggregate(
+        &mut self,
+        signature: &str,
+        slot: u64,
+        t_rx_ns: u64,
+        transaction_index: Option<u32>,
+        events: &[ReceiverEvent],
+    ) {
         if self.liquidation_signatures.insert(signature.to_string()) {
             self.stats.liquidation_transactions += 1;
         }
         for ev in events {
+            if let Some(h) = &self.econ {
+                h.emit(crate::econ::Evidence::Market(crate::econ::MarketEvent {
+                    signature: signature.into(),
+                    slot,
+                    t_rx_ns,
+                    transaction_index,
+                    event: ev.clone(),
+                }));
+            }
+            if self
+                .econ
+                .as_ref()
+                .is_some_and(|h| self.edges.len() >= h.capacity())
+            {
+                self.mark_incomplete("C0_E1_EVENT_RETENTION_OVERFLOW");
+                self.econ
+                    .as_ref()
+                    .unwrap()
+                    .shared
+                    .retention_overflow
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
             let edge = ev.gross_edge_usd();
             self.stats.liquidation_events += 1;
             self.stats.protocol_flat_fee_total_lamports += u64::from(ev.protocol_flat_fee_lamports);
@@ -1293,7 +1339,9 @@ impl ObserverCore {
         now_unix_s: u64,
         sink: &mut dyn MarketSink,
     ) -> std::io::Result<()> {
-        match ev {
+        let before = self.econ.as_ref().map(|_| self.stats.clone());
+        let at = ev.t_rx_ns();
+        let result = match ev {
             IngressEvent::Reconnected {
                 attempt, t_rx_ns, ..
             } => self.coverage(
@@ -1331,11 +1379,25 @@ impl ObserverCore {
                 self.on_logs(&l, now_unix_s, sink)
             }
             IngressEvent::Slot(s) => {
+                if let Some(h) = &self.econ {
+                    h.emit(crate::econ::Evidence::Slot {
+                        slot: s.slot,
+                        t_rx_ns: s.t_rx_ns,
+                    });
+                }
                 self.on_slot_frame(s.t_rx_ns);
                 Ok(())
             }
             _ => Ok(()),
+        };
+        if let (Some(h), Some(before)) = (&self.econ, before) {
+            h.emit(crate::econ::Evidence::MarketCounters {
+                at_ns: at,
+                before,
+                after: Box::new(self.stats.clone()),
+            });
         }
+        result
     }
 
     /// `transactions` source: the full payload is the primary raw evidence; no RPC.
@@ -1400,7 +1462,13 @@ impl ObserverCore {
         if !success || decoded.events.is_empty() {
             return Ok(());
         }
-        self.aggregate(&t.signature, &decoded.events);
+        self.aggregate(
+            &t.signature,
+            t.slot,
+            t.t_rx_ns,
+            t.tx_index_in_slot,
+            &decoded.events,
+        );
         self.stats.enrichment_requested += 1;
         let meta_available = tx.and_then(|x| x.get("meta")).is_some_and(Value::is_object);
         let status = if meta_available {
@@ -1469,7 +1537,7 @@ impl ObserverCore {
         if !success || decoded.events.is_empty() {
             return Ok(());
         }
-        self.aggregate(&l.signature, &decoded.events);
+        self.aggregate(&l.signature, l.slot, l.t_rx_ns, None, &decoded.events);
         self.stats.enrichment_requested += 1;
         if self.deferred.len() >= self.enrich_cfg.max_pending {
             self.stats.enrichment_failed += 1;
@@ -2122,13 +2190,23 @@ pub fn run_from_env() -> Result<(), String> {
 }
 
 pub fn run(cfg: MarketConfig) -> Result<(), String> {
+    run_embedded(cfg, Clock::new(), None)
+}
+
+/// Existing C0-MO capture/drain/enrichment with an optional typed evidence tap.
+pub fn run_embedded(
+    cfg: MarketConfig,
+    clock: Clock,
+    econ: Option<crate::econ::Handle>,
+) -> Result<(), String> {
     let process_started = unix_now_s();
     fs::create_dir_all(&cfg.run_dir)
         .map_err(|e| format!("create {}: {e}", cfg.run_dir.display()))?;
     let mut sink = JsonlSink::create(&cfg.run_dir)?;
-    print_banner(&cfg);
+    if econ.is_none() {
+        print_banner(&cfg);
+    }
 
-    let clock = Clock::new();
     let (producer, consumer) = bounded::<IngressEvent>("market-ingress", cfg.ingress_buffer);
     let halt = IngressHalt::new();
     let slots = SlotWatch::new();
@@ -2145,6 +2223,8 @@ pub fn run(cfg: MarketConfig) -> Result<(), String> {
         .map_err(|e| format!("spawn ingress: {e}"))?;
 
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
+    core.econ = econ.clone();
+    let mut checkpoint_index = 0usize;
     core.coverage(&mut sink, "START", process_started, None, json!({
         "source": cfg.source.as_str(), "commitment": cfg.commitment, "program": cfg.program.to_string(),
         "configured_duration_seconds": cfg.duration_secs, "ws_host": redact_url(&cfg.ws_url),
@@ -2163,6 +2243,36 @@ pub fn run(cfg: MarketConfig) -> Result<(), String> {
 
     // ---- phase 1: CAPTURE (no RPC) ----
     loop {
+        if econ
+            .as_ref()
+            .is_some_and(|h| h.shared.abort.load(std::sync::atomic::Ordering::Acquire))
+        {
+            stop_reason = "C0_E1_ABORT";
+            break;
+        }
+        if let (Some(h), Some((start, cutoff))) = (&econ, window) {
+            let due = (clock.now_ns().min(cutoff).saturating_sub(start)
+                / (h.cfg.snapshot_secs * 1_000_000_000)) as usize;
+            while checkpoint_index < due.min(4) {
+                checkpoint_index += 1;
+                let seconds = checkpoint_index as u64 * h.cfg.snapshot_secs;
+                let summary = core.summary(&SummaryContext {
+                    run_id: cfg.run_id.clone(),
+                    commitment: cfg.commitment.into(),
+                    configured_duration_seconds: seconds,
+                    actual_observation_seconds: seconds as f64,
+                    stream_ready: true,
+                    full_duration_observed: true,
+                    drain_complete: false,
+                    min_sample_liquidations: cfg.min_sample_liquidations,
+                    ..Default::default()
+                });
+                h.emit(crate::econ::Evidence::MarketCheckpoint {
+                    index: checkpoint_index,
+                    summary,
+                });
+            }
+        }
         if window.is_none() && started.elapsed() >= ready_timeout {
             stop_reason = "STREAM_NOT_READY";
             break;
@@ -2196,6 +2306,9 @@ pub fn run(cfg: MarketConfig) -> Result<(), String> {
                 window = Some((t_rx_ns, cutoff));
                 ready_unix_s = Some(now_s);
                 core.start_observation(t_rx_ns, cutoff);
+                if let Some(h) = &econ {
+                    h.start(t_rx_ns, cutoff);
+                }
                 core.coverage(&mut sink, "STREAM_READY", now_s, Some(t_rx_ns), json!({
                     "attempt": attempt, "observation_start_t_rx_ns": t_rx_ns, "observation_cutoff_t_rx_ns": cutoff,
                 }))
@@ -2303,11 +2416,15 @@ pub fn run(cfg: MarketConfig) -> Result<(), String> {
         drain_complete,
         write_error,
     };
-    let (_, report, write_error) = finish_capture(&cfg, &mut core, &mut sink, outcome)?;
+    let (summary, report, write_error) = finish_capture(&cfg, &mut core, &mut sink, outcome)?;
     if ingress.is_finished() {
         let _ = ingress.join();
     }
-    print!("{report}");
+    if let Some(h) = &econ {
+        h.emit(crate::econ::Evidence::MarketFinal(summary));
+    } else {
+        print!("{report}");
+    }
     if window.is_none() {
         let hint = if cfg.source == MarketSource::Transactions {
             " MARKET_OBSERVER_UNSUPPORTED_TRANSACTION_SUBSCRIBE suspected: Helius transactionSubscribe needs a Developer/Business/Professional plan; on the Free plan use P0_MARKET_SOURCE=logs."

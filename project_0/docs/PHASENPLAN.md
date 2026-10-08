@@ -4547,7 +4547,7 @@ Diese v4.5 ist mit P6-MT-v2-Review promoted und eingefroren.**
 
 ## C0-E1 — 4H ECONOMIC / CAPITAL / COMPETITION / RACE ATTRIBUTION
 
-**Status (2026-10-08): FABLE HANDOFF READY / IMPLEMENTATION AUSSTEHEND.**
+**Status (2026-10-08): C0-E1 LOCAL INTEGRATION / BOTH BUILDS AND WORKSPACE TEST SUITES PASS; DIFFERENTIAL CLIPPY AND MAINNET SMOKE OPEN.**
 
 ### Ausgangsstand
 
@@ -4701,7 +4701,7 @@ Toolchain der Baseline:
 ```text
 C0-MO r6 code + 600-s smoke PASS
         ↓
-C0-E1 Fable handoff READY          ← aktueller Stand
+C0-E1 Fable handoff READY          (abgeschlossen)
         ↓
 Fable candidate zurück
         ↓
@@ -4745,3 +4745,66 @@ C0-E1 beweist **nicht**:
 
 **LIVE bleibt blockiert.**
 
+
+## C0-E1 — Economic / Capital / Competition / Race measurement candidate
+
+Implementation extends C0-MO plus the existing Shadow pipeline under `P0_MODE=econ4h`.
+One monotonic Clock, bounded typed analytics channel, no submission, unchanged pinned Health /
+Sizing / Funding / Economics / Build / Sign / Simulation and authoritative F8 winner semantics.
+Four automatic interval/cumulative reports and one reconciled final report replace manual
+four-hour raw-data analysis. Capital scenarios default to 200/500/1000/2500/5000/10000 USD.
+
+This is a measurement candidate, not a new economics engine or MT6–MT10 optimization.
+It preserves independent market truth, UNKNOWN costs, ambiguous same-slot identity, and
+unverified source coverage. Chain-slot evidence, local-observation speedup bounds and the
+unobservable true competitor send deadline remain distinct. Shadow evidence is not realized
+PnL or guaranteed capture. LIVE remains blocked.
+
+Qualification order: external patch review and apply-check against its exact export base →
+local build/tests → candidate formatting/differential Clippy → 600/150 combined smoke →
+14400/3600 observation. No Mainnet or P8 PASS is implied by this implementation note.
+Operational entry, output schema and limitations: `project_0/README.md`, section 18.
+
+## C0-E1 RETENTION-SAFE 600S GATE — PASS
+
+Status 2026-10-08:
+
+1. C0-E1 implementation completed.
+2. Initial 600-second Mainnet smoke exposed retention overflow:
+   `293482`.
+3. Analytics retention was converted from per-revision RAM retention to
+   complete disk streaming plus bounded semantic state.
+4. One-million-evaluation stress test passed:
+   - received 1000000
+   - streamed 1000000
+   - coalesced 999984
+   - semantic max 16
+   - overflow 0
+   - evictions 0
+5. Both builds passed.
+6. Both full workspace test configurations passed.
+7. Differential Clippy against `57bef334...` passed candidate-only 0/0.
+8. Mainnet retest `c0e1_retention_smoke_20261008T215650Z` passed:
+   - 600 seconds
+   - four snapshots
+   - technical PASS
+   - market capture complete
+   - analytics queue drops 0
+   - retention overflow 0
+   - received 840518
+   - streamed 840518
+   - coalesced 816112
+   - semantic max 24406
+   - semantic evictions 0
+   - submissions 0
+   - live_ready false
+
+C0-E1 is technically qualified for the four-hour measurement gate.
+
+This does not yet establish profitability, representative sample size,
+complete market-source coverage, exact competitor timing or LIVE readiness.
+
+Next:
+
+**Run the four-hour C0-E1 qualification from the exact committed/pushed
+revision.**

@@ -11,46 +11,43 @@ use darkbot_common::channel::{bounded, ChannelError};
 use darkbot_common::config;
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
-use darkbot_project0::health::{AccountSource, HealthEngine, HealthError};
-#[cfg(feature = "crate_health")]
-use darkbot_project0::health::crate_impl::bank_observation_keys;
-#[cfg(feature = "crate_health")]
-use darkbot_project0::index::{ReverseIndex, ThresholdIndex};
 use darkbot_project0::economics::{FailedCostMatrix, Path};
 use darkbot_project0::execution::Freshness;
+#[cfg(feature = "crate_health")]
+use darkbot_project0::health::crate_impl::bank_observation_keys;
+use darkbot_project0::health::{AccountSource, HealthEngine, HealthError};
+#[cfg(feature = "crate_health")]
+use darkbot_project0::index::{ReverseIndex, ThresholdIndex};
 use darkbot_project0::planner::Allowlist;
 use darkbot_project0::protocol;
+use darkbot_project0::protocol::{classify as classify_account, AccountType}; // [FIX-47] Alias
 use darkbot_project0::safety::{Allow, Limits, Safety};
+#[cfg(feature = "crate_health")]
+use darkbot_runner::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
+use darkbot_runner::pending::PendingSubmission;
 use darkbot_runner::pipeline::{pipeline_timing_snapshot, Mode, Pipeline};
 #[cfg(not(feature = "crate_health"))]
 use darkbot_runner::pipeline::{ReceivershipBuilder, ReceivershipPlan};
-#[cfg(feature = "crate_health")]
-use darkbot_runner::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
+use darkbot_runner::record::Decision;
+use darkbot_runner::remote_workers::{
+    OraclePriceProjectionWork, ProjectionWork, ReconcileWork, RemoteWorkers, WinnerWatch,
+};
 #[cfg(feature = "crate_health")]
 use darkbot_runner::route::JupiterV2RouteProvider;
-use darkbot_runner::pending::PendingSubmission;
-use darkbot_runner::record::Decision;
 use darkbot_runner::shadow_ledger::ShadowLedger;
 use darkbot_runner::winner::{race_outcome, RaceOutcome};
 use darkbot_runner::winner_tracker::{
     is_winner_relevant, WinnerDispatch, WinnerResolution, WinnerTracker, WinnerTrackerConfig,
 };
-use darkbot_runner::remote_workers::{
-    OraclePriceProjectionWork, ProjectionWork, RemoteWorkers, ReconcileWork, WinnerWatch,
-};
-use darkbot_solana::ingress::SlotWatch;
-use darkbot_solana::state::blockhash::BlockhashCache;
-use darkbot_solana::submit::rpc::RpcSubmitter;
-use darkbot_solana::tx::{self, Resources, TxLimits};
-use darkbot_project0::protocol::{classify as classify_account, AccountType}; // [FIX-47] Alias
 use darkbot_solana::ingress::ws_rpc::{WsRpcConfig, WsRpcControlSource};
+use darkbot_solana::ingress::SlotWatch;
 use darkbot_solana::ingress::{IngressEvent, IngressHalt, IngressSource, SourceKind, Subscription};
+use darkbot_solana::state::blockhash::BlockhashCache;
 use darkbot_solana::state::recovery::{RecoveryDriver, SnapshotData};
 use darkbot_solana::state::snapshot;
 use darkbot_solana::state::StateCore;
-use solana_client::rpc_client::RpcClient;
-use solana_commitment_config::CommitmentConfig;
-use solana_sdk::{account::Account, hash::{hash, Hash}, pubkey::Pubkey};
+use darkbot_solana::submit::rpc::RpcSubmitter;
+use darkbot_solana::tx::{self, Resources, TxLimits};
 #[cfg(feature = "crate_health")]
 use marginfi_type_crate::{
     constants::{ASSET_TAG_DEFAULT, ASSET_TAG_SOL},
@@ -58,6 +55,13 @@ use marginfi_type_crate::{
 };
 #[cfg(feature = "crate_health")]
 use rayon::prelude::*;
+use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::{
+    account::Account,
+    hash::{hash, Hash},
+    pubkey::Pubkey,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 use std::time::Duration;
@@ -65,11 +69,15 @@ use std::time::Duration;
 /// S2-State als AccountSource für die Health-Engine (keine Kopie, keine RPC).
 struct StateView<'a>(&'a StateCore);
 impl<'a> AccountSource for StateView<'a> {
-    fn account(&self, key: &solana_sdk::pubkey::Pubkey) -> Option<(solana_sdk::pubkey::Pubkey, u64, &[u8])> {
-        self.0.get(key).map(|r| (r.owner, r.lamports, r.data.as_slice()))
+    fn account(
+        &self,
+        key: &solana_sdk::pubkey::Pubkey,
+    ) -> Option<(solana_sdk::pubkey::Pubkey, u64, &[u8])> {
+        self.0
+            .get(key)
+            .map(|r| (r.owner, r.lamports, r.data.as_slice()))
     }
 }
-
 
 #[cfg(feature = "crate_health")]
 struct CachedProjection {
@@ -169,8 +177,9 @@ fn next_integration_probe(
     if projection_busy {
         return None;
     }
-    queue.pop_front().map(|(account, slot)|
-        (account, now_ns, slot, "integration_target_probe"))
+    queue
+        .pop_front()
+        .map(|(account, slot)| (account, now_ns, slot, "integration_target_probe"))
 }
 
 #[cfg(feature = "crate_health")]
@@ -258,13 +267,22 @@ fn enqueue_oracle_accounts(
 struct NoPlans;
 #[cfg(not(feature = "crate_health"))]
 impl ReceivershipBuilder for NoPlans {
-    fn plans(&self, _: &solana_sdk::pubkey::Pubkey, _: u64, _: u64) -> Result<Vec<ReceivershipPlan>, String> {
+    fn plans(
+        &self,
+        _: &solana_sdk::pubkey::Pubkey,
+        _: u64,
+        _: u64,
+    ) -> Result<Vec<ReceivershipPlan>, String> {
         Err("unavailable: crate_health disabled".into())
     }
 }
 
 #[cfg(feature = "crate_health")]
-fn bank_from_state<S: AccountSource + ?Sized>(state: &S, program: &Pubkey, bank_key: &Pubkey) -> Option<Bank> {
+fn bank_from_state<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    bank_key: &Pubkey,
+) -> Option<Bank> {
     let (owner, _, data) = state.account(bank_key)?;
     if owner != *program || classify_account(data) != AccountType::Bank {
         return None;
@@ -273,16 +291,20 @@ fn bank_from_state<S: AccountSource + ?Sized>(state: &S, program: &Pubkey, bank_
     if data.len() < need {
         return None;
     }
-    bytemuck::try_from_bytes::<Bank>(&data[8..need]).ok().copied()
+    bytemuck::try_from_bytes::<Bank>(&data[8..need])
+        .ok()
+        .copied()
 }
 
 #[cfg(feature = "crate_health")]
 fn associated_token_address(owner: &Pubkey, mint: &Pubkey, token_program: &Pubkey) -> Pubkey {
-    let ata_program = Pubkey::from_str(protocol::ASSOCIATED_TOKEN_PROGRAM_ID).expect("static ATA program");
+    let ata_program =
+        Pubkey::from_str(protocol::ASSOCIATED_TOKEN_PROGRAM_ID).expect("static ATA program");
     Pubkey::find_program_address(
         &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
         &ata_program,
-    ).0
+    )
+    .0
 }
 
 #[cfg(feature = "crate_health")]
@@ -292,7 +314,9 @@ fn ata_candidates_for_bank<S: AccountSource + ?Sized>(
     bank_key: &Pubkey,
     liquidator: &Pubkey,
 ) -> Vec<Pubkey> {
-    let Some(bank) = bank_from_state(state, program, bank_key) else { return Vec::new() };
+    let Some(bank) = bank_from_state(state, program, bank_key) else {
+        return Vec::new();
+    };
     [protocol::TOKEN_PROGRAM_ID, protocol::TOKEN_2022_PROGRAM_ID]
         .iter()
         .filter_map(|s| Pubkey::from_str(s).ok())
@@ -311,7 +335,9 @@ fn validated_liquidator_ata<S: AccountSource + ?Sized>(
         .filter_map(|s| Pubkey::from_str(s).ok())
     {
         let ata = associated_token_address(liquidator, mint, &token_program);
-        let Some((owner, _, data)) = state.account(&ata) else { continue };
+        let Some((owner, _, data)) = state.account(&ata) else {
+            continue;
+        };
         if owner != token_program || data.len() < 72 {
             continue;
         }
@@ -405,11 +431,9 @@ fn liability_account_in_group(data: &[u8], group: &Pubkey) -> bool {
     bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
         .map(|account| {
             account.group == *group
-                && account
-                    .lending_account
-                    .balances
-                    .iter()
-                    .any(|b| b.is_active() && matches!(b.get_side(), Some(BalanceSide::Liabilities)))
+                && account.lending_account.balances.iter().any(|b| {
+                    b.is_active() && matches!(b.get_side(), Some(BalanceSide::Liabilities))
+                })
         })
         .unwrap_or(false)
 }
@@ -513,23 +537,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if config::require("P0_MODE")? == "market" {
         return darkbot_runner::market_observer::run_from_env().map_err(|e| e.into());
     }
+    if config::require("P0_MODE")? == "econ4h" {
+        return run_econ4h().map_err(|e| e.into());
+    }
+    run_shadow(Clock::new(), None)
+}
+
+fn run_shadow(
+    clock: Clock,
+    econ: Option<darkbot_runner::econ::Handle>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let ws_url = config::require("P0_WS_URL")?;
     let ws_url_for_spawn = ws_url.clone();
     let rpc_url = config::require("P0_RPC_URL")?;
     let program = Pubkey::from_str(&config::require("P0_PROGRAM_ID")?)?;
     let mode = config::require("P0_MODE")?;
-    if mode != "shadow" && mode != "live" {
+    if mode != "shadow" && mode != "live" && !(mode == "econ4h" && econ.is_some()) {
         return Err("P0_MODE must be shadow|live".into());
     }
     if mode == "live" {
-        return Err("live mode requires P8-LT qualification in MEASUREMENT_LEDGER; not enabled".into());
+        return Err(
+            "live mode requires P8-LT qualification in MEASUREMENT_LEDGER; not enabled".into(),
+        );
     }
     let buffer_cap: usize = config::parsed_or("P0_INGRESS_BUFFER", 65_536)?;
 
     let group = Pubkey::from_str(&config::require("P0_GROUP_ID")?)?;
     let payer = tx::load_keypair_json(&config::require("P0_KEYPAIR_PATH")?)?;
     let liquidator = tx::payer_of(&payer);
-    let clock = Clock::new();
     let shutdown = Shutdown::new();
     let halt = IngressHalt::new();
     let slot_watch = SlotWatch::new(); // [FIX-40]
@@ -544,8 +579,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // dependency. Any later mismatch is a latched PROGRAM_UPGRADE halt; reconnect/recovery
     // must never auto-promote new protocol code.
     let upgradeable_loader = Pubkey::from_str("BPFLoaderUpgradeab1e11111111111111111111111")?;
-    let program_data =
-        Pubkey::find_program_address(&[program.as_ref()], &upgradeable_loader).0;
+    let program_data = Pubkey::find_program_address(&[program.as_ref()], &upgradeable_loader).0;
     let program_data_account = dep_rpc
         .get_account_with_commitment(&program_data, CommitmentConfig::confirmed())?
         .value
@@ -554,7 +588,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!(
             "PROGRAM_DATA_OWNER_MISMATCH: {} owner={} expected={}",
             program_data, program_data_account.owner, upgradeable_loader
-        ).into());
+        )
+        .into());
     }
     let program_data_baseline_hash = hash(&program_data_account.data);
     eprintln!(
@@ -577,13 +612,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     eprintln!(
         "payer_preflight: pubkey={} lamports={} owner={} executable={}",
-        liquidator,
-        payer_account.lamports,
-        payer_account.owner,
-        payer_account.executable
+        liquidator, payer_account.lamports, payer_account.owner, payer_account.executable
     );
     #[cfg(feature = "crate_health")]
-    let pre = snapshot::program_accounts_filtered(&dep_rpc, &program, bank_filters(&group), &clock)?;
+    let pre =
+        snapshot::program_accounts_filtered(&dep_rpc, &program, bank_filters(&group), &clock)?;
     #[cfg(not(feature = "crate_health"))]
     let pre = snapshot::program_accounts(&dep_rpc, &program, &clock)?;
     let mut pre_state = StateCore::new(1);
@@ -591,7 +624,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let bank_keys: Vec<Pubkey> = pre_state
         .iter_owned_by(&program)
         .filter_map(|(k, r)| {
-            if classify_account(&r.data) != AccountType::Bank { return None; }
+            if classify_account(&r.data) != AccountType::Bank {
+                return None;
+            }
             #[cfg(feature = "crate_health")]
             {
                 let view = StateView(&pre_state);
@@ -600,12 +635,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .map(|_| *k);
             }
             #[cfg(not(feature = "crate_health"))]
-            { Some(*k) }
+            {
+                Some(*k)
+            }
         })
         .collect();
     #[cfg(feature = "crate_health")]
     let mut required_dependency_keys = {
-        let mut v = darkbot_project0::health::dependency_keys(&StateView(&pre_state), &program, &bank_keys);
+        let mut v =
+            darkbot_project0::health::dependency_keys(&StateView(&pre_state), &program, &bank_keys);
         v.push(group);
         v.push(protocol::fee_state_pda(&program));
         v.sort_unstable_by_key(|k| k.to_bytes());
@@ -622,7 +660,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     required_dependency_keys.dedup();
 
     #[cfg(feature = "crate_health")]
-    let mut optional_dependency_keys: Vec<Pubkey> = bank_keys.iter()
+    let mut optional_dependency_keys: Vec<Pubkey> = bank_keys
+        .iter()
         .flat_map(|bk| ata_candidates_for_bank(&StateView(&pre_state), &program, bk, &liquidator))
         .collect();
     #[cfg(not(feature = "crate_health"))]
@@ -675,14 +714,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // [FIX-34] Ingress als neu startbare Session: bei Änderung der Dependency-Menge wird die alte
     // Session beendet, eine neue mit erweiterter Subscription gestartet, dann HALT → Recovery → READY.
     let slot_watch_for_spawn = slot_watch.clone();
-    let spawn_ingress = |sub: Subscription, producer: darkbot_common::channel::Producer<IngressEvent>, halt: IngressHalt| -> std::io::Result<Shutdown> {
+    let spawn_ingress = |sub: Subscription,
+                         producer: darkbot_common::channel::Producer<IngressEvent>,
+                         halt: IngressHalt|
+     -> std::io::Result<Shutdown> {
         let session = Shutdown::new();
         let src = WsRpcControlSource::new(WsRpcConfig::new(ws_url_for_spawn.clone(), sub), clock);
         let sd = session.clone();
         let sw = slot_watch_for_spawn.clone();
-        std::thread::Builder::new().name("ingress-ws".into()).spawn(move || {
-            if let Err(e) = src.run(producer, sd, halt, sw) { eprintln!("ingress ended: {}", e); }
-        })?;
+        std::thread::Builder::new()
+            .name("ingress-ws".into())
+            .spawn(move || {
+                if let Err(e) = src.run(producer, sd, halt, sw) {
+                    eprintln!("ingress ended: {}", e);
+                }
+            })?;
         Ok(session)
     };
     let mut subscribed: HashSet<Pubkey> = subscription_keys.iter().copied().collect();
@@ -707,17 +753,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // [FIX-78] Recovery snapshot = target-group liability accounts + target-group banks +
         // explicit required/optional dependencies. Lending-only accounts are excluded.
         #[cfg(feature = "crate_health")]
-        let a = snapshot::program_accounts_filtered(&rpc, &program, liability_account_filters(&group), &clock)
-            .map_err(|e| format!("stage=liability_gpa {e}"))?;
+        let a = snapshot::program_accounts_filtered(
+            &rpc,
+            &program,
+            liability_account_filters(&group),
+            &clock,
+        )
+        .map_err(|e| format!("stage=liability_gpa {e}"))?;
         #[cfg(feature = "crate_health")]
         let b = snapshot::program_accounts_filtered(&rpc, &program, bank_filters(&group), &clock)
             .map_err(|e| format!("stage=bank_gpa {e}"))?;
         #[cfg(not(feature = "crate_health"))]
         let a = snapshot::program_accounts(&rpc, &program, &clock).map_err(|e| e.to_string())?;
         #[cfg(not(feature = "crate_health"))]
-        let b = darkbot_solana::state::snapshot::Snapshot { slot: a.slot, accounts: Vec::new(), missing: Vec::new() };
-        let required = dep_for_fetch.lock().map_err(|_| "dep lock".to_string())?.clone();
-        let optional = opt_for_fetch.lock().map_err(|_| "opt dep lock".to_string())?.clone();
+        let b = darkbot_solana::state::snapshot::Snapshot {
+            slot: a.slot,
+            accounts: Vec::new(),
+            missing: Vec::new(),
+        };
+        let required = dep_for_fetch
+            .lock()
+            .map_err(|_| "dep lock".to_string())?
+            .clone();
+        let optional = opt_for_fetch
+            .lock()
+            .map_err(|_| "opt dep lock".to_string())?
+            .clone();
         let d = snapshot::multiple_accounts(&rpc, &required, &clock)
             .map_err(|e| format!("stage=required_accounts {e}"))?;
         let o = snapshot::multiple_accounts(&rpc, &optional, &clock)
@@ -733,9 +794,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         accounts.extend(o.accounts);
         // Required dependencies stay fail-closed; missing optional ATAs only disable that candidate.
         let mut slot = a.slot;
-        if b.slot != 0 { slot = slot.min(b.slot); }
-        if d.slot != 0 { slot = slot.min(d.slot); }
-        if o.slot != 0 { slot = slot.min(o.slot); }
+        if b.slot != 0 {
+            slot = slot.min(b.slot);
+        }
+        if d.slot != 0 {
+            slot = slot.min(d.slot);
+        }
+        if o.slot != 0 {
+            slot = slot.min(o.slot);
+        }
         eprintln!(
             "snapshot: done slot={} liability_accounts={} banks={} required={} optional={} missing_required={} total={} elapsed_ms={}",
             slot,
@@ -747,7 +814,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             accounts.len(),
             t0.elapsed().as_millis()
         );
-        Ok(SnapshotData { slot, accounts, missing_required: d.missing })
+        Ok(SnapshotData {
+            slot,
+            accounts,
+            missing_required: d.missing,
+        })
     };
     // Barrier: während der RPC-Fetches gepufferte Events in den State ziehen.
     let mut drain = |s: &mut StateCore| {
@@ -764,35 +835,45 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let bh_rpc = RpcClient::new(config::require("P0_RPC_URL")?);
     let bh_cache = blockhash.clone();
     let bh_clock = clock;
-    std::thread::Builder::new().name("blockhash".into()).spawn(move || {
-        let mut degraded = false;
-        loop {
-            let mt0_start = std::time::Instant::now(); // [MT0]
-            let refreshed = bh_cache.refresh(&bh_rpc, bh_clock.now_ns());
-            let mt0_outcome = match &refreshed {
-                Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
-                Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
-            };
-            darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Blockhash, mt0_start.elapsed(), mt0_outcome);
-            match refreshed {
-                Ok(_) => {
-                    if degraded {
-                        eprintln!("blockhash refresh: recovered");
-                        degraded = false;
+    let bh_econ = econ.clone();
+    std::thread::Builder::new()
+        .name("blockhash".into())
+        .spawn(move || {
+            let mut degraded = false;
+            loop {
+                if bh_econ.as_ref().is_some_and(|h| h.admission_closed()) {
+                    break;
+                }
+                let mt0_start = std::time::Instant::now(); // [MT0]
+                let refreshed = bh_cache.refresh(&bh_rpc, bh_clock.now_ns());
+                let mt0_outcome = match &refreshed {
+                    Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+                    Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+                };
+                darkbot_common::mt0::MT0.record_remote(
+                    darkbot_common::mt0::RemoteClass::Blockhash,
+                    mt0_start.elapsed(),
+                    mt0_outcome,
+                );
+                match refreshed {
+                    Ok(_) => {
+                        if degraded {
+                            eprintln!("blockhash refresh: recovered");
+                            degraded = false;
+                        }
+                    }
+                    Err(e) => {
+                        if !degraded {
+                            // [FIX-82] Never print provider URLs/API keys embedded in transport errors.
+                            let safe = e.split(" for url ").next().unwrap_or("rpc transport error");
+                            eprintln!("blockhash refresh: {}", safe);
+                            degraded = true;
+                        }
                     }
                 }
-                Err(e) => {
-                    if !degraded {
-                        // [FIX-82] Never print provider URLs/API keys embedded in transport errors.
-                        let safe = e.split(" for url ").next().unwrap_or("rpc transport error");
-                        eprintln!("blockhash refresh: {}", safe);
-                        degraded = true;
-                    }
-                }
+                std::thread::sleep(Duration::from_secs(10));
             }
-            std::thread::sleep(Duration::from_secs(10));
-        }
-    })?;
+        })?;
     let limits = Limits {
         max_total_capital: config::parsed_or("P0_MAX_TOTAL_CAPITAL", 0)?,
         max_outstanding_inventory: config::parsed_or("P0_MAX_INVENTORY", 0)?,
@@ -809,8 +890,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut safety = Safety::new(limits, allow, false);
     // [FIX-25] Semantische Kategorien getrennt; die globale Top-Level-Allowlist prüft die Pipeline separat.
     let mut allowlist = Allowlist::default();
-    for s in [protocol::JUP_SWAP_PROGRAM_ID, protocol::TITAN_SWAP_PROGRAM_ID] { allowlist.swap_programs.insert(Pubkey::from_str(s)?); }
-    for s in [protocol::KAMINO_PROGRAM_ID, protocol::DRIFT_PROGRAM_ID, protocol::JUPLEND_PROGRAM_ID] {
+    for s in [
+        protocol::JUP_SWAP_PROGRAM_ID,
+        protocol::TITAN_SWAP_PROGRAM_ID,
+    ] {
+        allowlist.swap_programs.insert(Pubkey::from_str(s)?);
+    }
+    for s in [
+        protocol::KAMINO_PROGRAM_ID,
+        protocol::DRIFT_PROGRAM_ID,
+        protocol::JUPLEND_PROGRAM_ID,
+    ] {
         let p = Pubkey::from_str(s)?;
         allowlist.integration_programs.insert(p);
         allowlist.refresh_programs.insert(p); // Pre-Start-Refreshes nur dieser Programme (liquidate_start.rs)
@@ -818,28 +908,50 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     allowlist.refresh_programs.insert(program); // init_liquidation_record vor Start
     let global_allowed = protocol::receivership_allowed_programs();
     // [FIX-30] Prerequisite-TXs (JIT-Buy): Swap-Programme + System/Token/Token-2022/ATA/ComputeBudget.
-    let prereq_allowed: Vec<Pubkey> = [protocol::JUP_SWAP_PROGRAM_ID, protocol::TITAN_SWAP_PROGRAM_ID, protocol::ASSOCIATED_TOKEN_PROGRAM_ID, protocol::COMPUTE_BUDGET_PROGRAM_ID,
-        darkbot_project0::receivership::SYSTEM_PROGRAM, "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"].iter().map(|s| Pubkey::from_str(s)).collect::<Result<_, _>>()?;
-    let submitter = RpcSubmitter::new(config::require("P0_RPC_URL")?, true);
+    let prereq_allowed: Vec<Pubkey> = [
+        protocol::JUP_SWAP_PROGRAM_ID,
+        protocol::TITAN_SWAP_PROGRAM_ID,
+        protocol::ASSOCIATED_TOKEN_PROGRAM_ID,
+        protocol::COMPUTE_BUDGET_PROGRAM_ID,
+        darkbot_project0::receivership::SYSTEM_PROGRAM,
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    ]
+    .iter()
+    .map(|s| Pubkey::from_str(s))
+    .collect::<Result<_, _>>()?;
+    let submitter = darkbot_runner::econ::ObserveOnly::new(RpcSubmitter::new(
+        config::require("P0_RPC_URL")?,
+        true,
+    ));
     let failed_costs = FailedCostMatrix::default(); // alle None → Unknown → nicht handelbar, bis gemessen
     #[cfg(feature = "crate_health")]
     let routes = JupiterV2RouteProvider::new(
         liquidator,
-        std::env::var("P0_JUPITER_API_KEY").ok().filter(|s| !s.trim().is_empty()),
+        std::env::var("P0_JUPITER_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
         config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0)?,
         config::parsed_or("P0_JUPITER_MAX_ACCOUNTS", 64u8)?,
         true,
         false,
-    ).map_err(|e| format!("route provider: {e}"))?;
+    )
+    .map_err(|e| format!("route provider: {e}"))?;
     #[cfg(not(feature = "crate_health"))]
     let builder = NoPlans;
-    let resources = Resources { compute_unit_limit: config::parsed_or("P0_CU_LIMIT", 1_400_000)?, priority_micro_lamports_per_cu: config::parsed_or("P0_PRIORITY_MICRO", 0)?, loaded_accounts_data_size: Some(config::parsed_or("P0_LOADED_DATA", 64 * 1024 * 1024)?) };
-    let freshness = Freshness { max_opportunity_age_ns: config::parsed_or("P0_MAX_AGE_NS", 2_000_000_000)?, execution_deadline_ns: config::parsed_or("P0_DEADLINE_NS", 2_000_000_000)? };
+    let resources = Resources {
+        compute_unit_limit: config::parsed_or("P0_CU_LIMIT", 1_400_000)?,
+        priority_micro_lamports_per_cu: config::parsed_or("P0_PRIORITY_MICRO", 0)?,
+        loaded_accounts_data_size: Some(config::parsed_or("P0_LOADED_DATA", 64 * 1024 * 1024)?),
+    };
+    let freshness = Freshness {
+        max_opportunity_age_ns: config::parsed_or("P0_MAX_AGE_NS", 2_000_000_000)?,
+        execution_deadline_ns: config::parsed_or("P0_DEADLINE_NS", 2_000_000_000)?,
+    };
     let min_profit: i128 = config::parsed_or::<i128>("P0_MIN_PROFIT", 0)?;
 
     #[cfg(feature = "crate_health")]
-    let integration_probe_enabled: bool =
-        config::parsed_or("P0_INTEGRATION_PROBE", false)?;
+    let integration_probe_enabled: bool = config::parsed_or("P0_INTEGRATION_PROBE", false)?;
     #[cfg(feature = "crate_health")]
     let integration_probe_limit_per_kind: usize =
         config::parsed_or("P0_INTEGRATION_PROBE_LIMIT_PER_KIND", 8)?;
@@ -853,12 +965,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if remote_worker_capacity == 0 {
         return Err("P0_REMOTE_WORKER_BUFFER must be > 0".into());
     }
-    let remote = RemoteWorkers::start(
-        rpc_url.clone(),
-        program,
-        &shutdown,
-        remote_worker_capacity,
-    )?;
+    let remote = RemoteWorkers::start(rpc_url.clone(), program, &shutdown, remote_worker_capacity)?;
     let mut pending: Vec<ReconcileWork> = Vec::new();
 
     #[cfg(feature = "crate_health")]
@@ -912,7 +1019,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut ledger = ShadowLedger::new();
     // [F1] Bounded, deduplicated winner watches with TTL for Ok(None) and Err. PROVISIONAL defaults.
     let winner_watch_cfg = WinnerTrackerConfig {
-        capacity: config::parsed_or("P0_WINNER_WATCH_CAPACITY", WinnerTrackerConfig::DEFAULT.capacity)?,
+        capacity: config::parsed_or(
+            "P0_WINNER_WATCH_CAPACITY",
+            WinnerTrackerConfig::DEFAULT.capacity,
+        )?,
         ttl_s: config::parsed_or("P0_WINNER_WATCH_TTL_S", WinnerTrackerConfig::DEFAULT.ttl_s)?,
         initial_delay_s: config::parsed_or(
             "P0_WINNER_WATCH_INITIAL_DELAY_S",
@@ -937,12 +1047,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         winner_watch_cfg.full_queue_backoff_s
     );
     let mut winner_tracker = WinnerTracker::new(winner_watch_cfg);
-    let summary_path = config::parsed_or::<String>("P0_SUMMARY_PATH", "project_0/data/shadow/daily_summary.jsonl".into())?;
-    let mut summaries = std::fs::OpenOptions::new().create(true).append(true).open(&summary_path)?;
+    let summary_path = config::parsed_or::<String>(
+        "P0_SUMMARY_PATH",
+        "project_0/data/shadow/daily_summary.jsonl".into(),
+    )?;
+    let mut summaries = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&summary_path)?;
     let _ = Path::Rpc;
-    let record_path = config::parsed_or::<String>("P0_RECORD_PATH", "project_0/data/shadow/opportunities.jsonl".into())?;
-    std::fs::create_dir_all(std::path::Path::new(&record_path).parent().unwrap_or(std::path::Path::new(".")))?;
-    let mut records = std::fs::OpenOptions::new().create(true).append(true).open(&record_path)?;
+    let record_path = config::parsed_or::<String>(
+        "P0_RECORD_PATH",
+        "project_0/data/shadow/opportunities.jsonl".into(),
+    )?;
+    std::fs::create_dir_all(
+        std::path::Path::new(&record_path)
+            .parent()
+            .unwrap_or(std::path::Path::new(".")),
+    )?;
+    let mut records = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&record_path)?;
     use std::io::Write;
 
     let mut counts = [0u64; 6];
@@ -958,15 +1084,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "crate_health")]
     let mut threshold_bootstrap: VecDeque<Pubkey> = VecDeque::new();
     #[cfg(feature = "crate_health")]
-    let threshold_bootstrap_batch: usize =
-        config::parsed_or("P0_THRESHOLD_BOOTSTRAP_BATCH", 16)?;
+    let threshold_bootstrap_batch: usize = config::parsed_or("P0_THRESHOLD_BOOTSTRAP_BATCH", 16)?;
     #[cfg(feature = "crate_health")]
     if threshold_bootstrap_batch == 0 {
         return Err("P0_THRESHOLD_BOOTSTRAP_BATCH must be > 0".into());
     }
     #[cfg(feature = "crate_health")]
-    let use_threshold_trigger: bool =
-        config::parsed_or("P0_USE_THRESHOLD_TRIGGER", false)?;
+    let use_threshold_trigger: bool = config::parsed_or("P0_USE_THRESHOLD_TRIGGER", false)?;
     #[cfg(feature = "crate_health")]
     let mut threshold_ready = !use_threshold_trigger;
     #[cfg(feature = "crate_health")]
@@ -981,15 +1105,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // current ingress burst is drained (or this hard event cap is reached) do we fan out
     // once to unique accounts and run exact Health in parallel.
     #[cfg(feature = "crate_health")]
-    let sweep_batch_max_events: usize =
-        config::parsed_or("P0_SWEEP_BATCH_MAX_EVENTS", 64)?;
+    let sweep_batch_max_events: usize = config::parsed_or("P0_SWEEP_BATCH_MAX_EVENTS", 64)?;
     #[cfg(feature = "crate_health")]
     if sweep_batch_max_events == 0 {
         return Err("P0_SWEEP_BATCH_MAX_EVENTS must be > 0".into());
     }
     #[cfg(feature = "crate_health")]
-    let sweep_batch_max_age_ns: u64 =
-        config::parsed_or("P0_SWEEP_BATCH_MAX_AGE_NS", 5_000_000)?;
+    let sweep_batch_max_age_ns: u64 = config::parsed_or("P0_SWEEP_BATCH_MAX_AGE_NS", 5_000_000)?;
     #[cfg(feature = "crate_health")]
     if sweep_batch_max_age_ns == 0 {
         return Err("P0_SWEEP_BATCH_MAX_AGE_NS must be > 0".into());
@@ -1019,8 +1141,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // are always forwarded immediately. Unchanged candidates get a bounded periodic Long-Tail
     // recheck so route/fee changes that are not represented by Marginfi state are not starved.
     #[cfg(feature = "crate_health")]
-    let candidate_recheck_slots: u64 =
-        config::parsed_or("P0_CANDIDATE_RECHECK_SLOTS", 1)?;
+    let candidate_recheck_slots: u64 = config::parsed_or("P0_CANDIDATE_RECHECK_SLOTS", 1)?;
     #[cfg(feature = "crate_health")]
     if candidate_recheck_slots == 0 {
         return Err("P0_CANDIDATE_RECHECK_SLOTS must be > 0".into());
@@ -1033,8 +1154,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("P0_CANDIDATE_ERROR_RECHECK_SLOTS must be > 0".into());
     }
     #[cfg(feature = "crate_health")]
-    let candidate_repeat_soft_cap: usize =
-        config::parsed_or("P0_CANDIDATE_REPEAT_SOFT_CAP", 1024)?;
+    let candidate_repeat_soft_cap: usize = config::parsed_or("P0_CANDIDATE_REPEAT_SOFT_CAP", 1024)?;
     #[cfg(feature = "crate_health")]
     if candidate_repeat_soft_cap == 0 {
         return Err("P0_CANDIDATE_REPEAT_SOFT_CAP must be > 0".into());
@@ -1042,9 +1162,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "crate_health")]
     eprintln!(
         "r127_candidate_cache_config: recheck_slots={} error_recheck_slots={} repeat_soft_cap={}",
-        candidate_recheck_slots,
-        candidate_error_recheck_slots,
-        candidate_repeat_soft_cap
+        candidate_recheck_slots, candidate_error_recheck_slots, candidate_repeat_soft_cap
     );
     #[cfg(feature = "crate_health")]
     let mut candidate_cache: HashMap<Pubkey, CandidateCacheEntry> = HashMap::new();
@@ -1124,9 +1242,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut ingress_since_detect: usize = 0;
     // [MT0] Measurement only: owner-section timing, queue-age tracking and an off-owner
     // reporter thread (the only place that writes MT0 evidence to disk).
-    let mt0_path = config::parsed_or::<String>("P0_MT0_PATH", "project_0/data/shadow/mt0.jsonl".into())?;
+    let mt0_path =
+        config::parsed_or::<String>("P0_MT0_PATH", "project_0/data/shadow/mt0.jsonl".into())?;
     let mt0_interval_secs: u64 = config::parsed_or("P0_MT0_INTERVAL_SECS", 10)?;
-    let _mt0_reporter = darkbot_common::mt0::spawn_reporter(std::path::PathBuf::from(mt0_path), Duration::from_secs(mt0_interval_secs.max(1)), shutdown.clone())?;
+    let _mt0_reporter = darkbot_common::mt0::spawn_reporter(
+        std::path::PathBuf::from(mt0_path),
+        Duration::from_secs(mt0_interval_secs.max(1)),
+        shutdown.clone(),
+    )?;
     let mut mt0_owner = darkbot_common::mt0::OwnerTimer::new();
     // [MT0] First-trigger receive time (`t_rx` of the enqueue that created the token) of every
     // token in `oracle_detect_order`: same length, same order. Pushed in lockstep at the physical
@@ -1146,7 +1269,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .chain(detect_queue.iter().map(|w| w.1))
                 .min();
             let oldest = oldest_rx.map(|t| clock.now_ns().saturating_sub(t));
-            darkbot_common::mt0::MT0.set_backlog((oracle_detect_pending.len() + detect_queue.len()) as u64, oldest);
+            darkbot_common::mt0::MT0.set_backlog(
+                (oracle_detect_pending.len() + detect_queue.len()) as u64,
+                oldest,
+            );
+        }
+        if let Some(h) = &econ {
+            h.shared.upgrade.store(
+                program_upgrade_latched,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            if h.drain_expired() {
+                break;
+            }
         }
         if shutdown.is_requested() {
             break;
@@ -1172,7 +1307,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 group,
             };
             for _ in 0..threshold_bootstrap_batch {
-                let Some(account) = threshold_bootstrap.pop_front() else { break };
+                let Some(account) = threshold_bootstrap.pop_front() else {
+                    break;
+                };
                 match engine.thresholds(&account, now_s, slot) {
                     Ok(t) => {
                         threshold_index.set_account(account, &t.thresholds);
@@ -1206,10 +1343,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         while let Some(done) = remote.winner_results.try_pop() {
             // [F1] Resolution, rescheduling and TTL expiry (Ok(None) and Err) live in the tracker.
-            if let WinnerResolution::Resolved { watch: w, winner: win } =
-                winner_tracker.on_result(done.watch, done.result, worker_now_s)
+            if let WinnerResolution::Resolved {
+                watch: w,
+                winner: win,
+            } = winner_tracker.on_result(done.watch, done.result, worker_now_s)
             {
                 {
+                    if let Some(h) = &econ {
+                        h.emit(darkbot_runner::econ::Evidence::Winner {
+                            target: w.account.to_string(),
+                            rx_slot: w.rx_slot,
+                            winner: win.clone(),
+                        });
+                    }
                     let out = race_outcome(
                         win.slot,
                         w.rx_slot,
@@ -1219,7 +1365,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         w.our_loss,
                     );
                     match out {
-                        RaceOutcome::ReadyBeforeWinner => ledger.on_race(true, None, w.expected_net),
+                        RaceOutcome::ReadyBeforeWinner => {
+                            ledger.on_race(true, None, w.expected_net)
+                        }
                         RaceOutcome::SameSlotUnknown => ledger.on_same_slot(),
                         RaceOutcome::Loss(l) => ledger.on_race(false, Some(l), None),
                     }
@@ -1258,7 +1406,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-
 
         #[cfg(feature = "crate_health")]
         while let Some(done) = remote.oracle_price_projection_results.try_pop() {
@@ -1324,7 +1471,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             &mut oracle_coalesced,
                             &mut oracle_max_pending,
                             &mut oracle_detect_order,
-                            &mut oracle_detect_pending, &mut mt0_order_rx,
+                            &mut oracle_detect_pending,
+                            &mut mt0_order_rx,
                         );
                         continue;
                     }
@@ -1348,12 +1496,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             ) {
                                 Ok((asset_price, liability_price)) => {
                                     let mut candidates: HashSet<Pubkey> = threshold_index
-                                        .candidates(
-                                            &bank,
-                                            asset_price,
-                                            liability_price,
-                                            0,
-                                        )
+                                        .candidates(&bank, asset_price, liability_price, 0)
                                         .into_iter()
                                         .collect();
                                     candidates.extend(
@@ -1395,7 +1538,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         &mut oracle_coalesced,
                                         &mut oracle_max_pending,
                                         &mut oracle_detect_order,
-                                        &mut oracle_detect_pending, &mut mt0_order_rx,
+                                        &mut oracle_detect_pending,
+                                        &mut mt0_order_rx,
                                     );
                                 }
                             }
@@ -1411,14 +1555,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 &mut oracle_coalesced,
                                 &mut oracle_max_pending,
                                 &mut oracle_detect_order,
-                                &mut oracle_detect_pending, &mut mt0_order_rx,
+                                &mut oracle_detect_pending,
+                                &mut mt0_order_rx,
                             );
                         }
                     }
                 }
                 Err(e) => {
-                    oracle_bank_projection_failed =
-                        oracle_bank_projection_failed.saturating_add(1);
+                    oracle_bank_projection_failed = oracle_bank_projection_failed.saturating_add(1);
                     fallback_all(
                         &format!("simulation failed: {e}"),
                         &mut oracle_price_fallbacks,
@@ -1427,7 +1571,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         &mut oracle_coalesced,
                         &mut oracle_max_pending,
                         &mut oracle_detect_order,
-                        &mut oracle_detect_pending, &mut mt0_order_rx,
+                        &mut oracle_detect_pending,
+                        &mut mt0_order_rx,
                     );
                 }
             }
@@ -1442,7 +1587,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Ok((projection_slot, projection_unix_s, accounts, units)) => {
                     let canonical = st.get(&done.account);
                     let canonical_matches = canonical
-                        .map(|r| r.slot == done.base_slot && hash(&r.data) == done.base_account_hash)
+                        .map(|r| {
+                            r.slot == done.base_slot && hash(&r.data) == done.base_account_hash
+                        })
                         .unwrap_or(false);
 
                     // [FIX-116b] The candidate MarginfiAccount is readonly during the external
@@ -1571,6 +1718,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         })?;
 
+        if let Some(h) = &econ {
+            if h.admission_closed() {
+                ingress_session.request();
+                if winner_tracker.stats().len == 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+        }
         if !pending.is_empty() {
             let mut keep = Vec::with_capacity(pending.len());
             for p in pending.drain(..) {
@@ -1594,10 +1751,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // or after a bounded number of dependency events. This mirrors eva01's "drain updates,
         // dedupe affected accounts, then evaluate" behavior and prevents per-update fanout.
         #[cfg(feature = "crate_health")]
-        if !use_threshold_trigger
-            && st.run_state().is_tradable()
-            && !sweep_dirty_banks.is_empty()
-        {
+        if !use_threshold_trigger && st.run_state().is_tradable() && !sweep_dirty_banks.is_empty() {
             let batch_age_ns = sweep_batch_started_ns
                 .map(|t| clock.now_ns().saturating_sub(t))
                 .unwrap_or(0);
@@ -1633,13 +1787,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                 let unique = account_work.len();
                 sweep_account_refs = sweep_account_refs.saturating_add(refs as u64);
-                sweep_unique_accounts =
-                    sweep_unique_accounts.saturating_add(unique as u64);
+                sweep_unique_accounts = sweep_unique_accounts.saturating_add(unique as u64);
                 sweep_max_unique_batch = sweep_max_unique_batch.max(unique);
-                oracle_candidate_hits =
-                    oracle_candidate_hits.saturating_add(unique as u64);
-                health_sweep_checks =
-                    health_sweep_checks.saturating_add(unique as u64);
+                oracle_candidate_hits = oracle_candidate_hits.saturating_add(unique as u64);
+                health_sweep_checks = health_sweep_checks.saturating_add(unique as u64);
 
                 let now_s = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -1649,70 +1800,71 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let view = StateView(&st);
 
                 // CPU-only and independent per account. No RPC, no state mutation.
-                let mut evaluated: Vec<(Pubkey, u64, u64, u64, CandidateHealthState)> = account_work
-                    .into_par_iter()
-                    .map(|(account, (t_rx_ns, event_slot, input_revision))| {
-                        let engine = darkbot_project0::health::crate_impl::CrateHealth {
-                            state: &view,
-                            group,
-                        };
-                        darkbot_common::mt0::MT0.count_health(darkbot_common::mt0::HealthSite::Sweep); // [MT0]
-                        let status = match engine.health(&account, now_s, evaluation_slot) {
-                            Ok(h) if !h.liquidatable => CandidateHealthState::Healthy,
-                            Ok(_) => CandidateHealthState::Liquidatable,
-                            Err(_) => CandidateHealthState::Error,
-                        };
-                        (account, t_rx_ns, event_slot, input_revision, status)
-                    })
-                    .collect();
+                let mut evaluated: Vec<(Pubkey, u64, u64, u64, CandidateHealthState)> =
+                    account_work
+                        .into_par_iter()
+                        .map(|(account, (t_rx_ns, event_slot, input_revision))| {
+                            let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                                state: &view,
+                                group,
+                            };
+                            darkbot_common::mt0::MT0
+                                .count_health(darkbot_common::mt0::HealthSite::Sweep); // [MT0]
+                            let status = match engine.health(&account, now_s, evaluation_slot) {
+                                Ok(h) if !h.liquidatable => CandidateHealthState::Healthy,
+                                Ok(_) => CandidateHealthState::Liquidatable,
+                                Err(_) => CandidateHealthState::Error,
+                            };
+                            (account, t_rx_ns, event_slot, input_revision, status)
+                        })
+                        .collect();
 
                 // [FIX-135] Preserve bounded repeat work but remove deterministic starvation:
                 // correctness work first; ordinary repeats oldest last-forwarded slot first;
                 // pubkey is only the deterministic tie-breaker.
-                let fairness_round = evaluated.iter().any(
-                    |(account, _, _, input_revision, status)| {
-                        let previous = candidate_cache.get(account).copied();
-                        let forced = candidate_force_rearm.contains(account);
-                        let recheck_slots = match status {
-                            CandidateHealthState::Liquidatable => candidate_recheck_slots,
-                            CandidateHealthState::Error => candidate_error_recheck_slots,
-                            CandidateHealthState::Healthy => u64::MAX,
-                        };
-                        candidate_fairness_key(
-                            *account,
-                            previous,
-                            *status,
-                            evaluation_slot,
-                            *input_revision,
-                            forced,
-                            recheck_slots,
-                        ).0 == 1
-                    },
-                );
+                let fairness_round =
+                    evaluated
+                        .iter()
+                        .any(|(account, _, _, input_revision, status)| {
+                            let previous = candidate_cache.get(account).copied();
+                            let forced = candidate_force_rearm.contains(account);
+                            let recheck_slots = match status {
+                                CandidateHealthState::Liquidatable => candidate_recheck_slots,
+                                CandidateHealthState::Error => candidate_error_recheck_slots,
+                                CandidateHealthState::Healthy => u64::MAX,
+                            };
+                            candidate_fairness_key(
+                                *account,
+                                previous,
+                                *status,
+                                evaluation_slot,
+                                *input_revision,
+                                forced,
+                                recheck_slots,
+                            )
+                            .0 == 1
+                        });
                 if fairness_round {
-                    candidate_fairness_rotations =
-                        candidate_fairness_rotations.saturating_add(1);
+                    candidate_fairness_rotations = candidate_fairness_rotations.saturating_add(1);
                 }
-                evaluated.sort_unstable_by_key(
-                    |(account, _, _, input_revision, status)| {
-                        let previous = candidate_cache.get(account).copied();
-                        let forced = candidate_force_rearm.contains(account);
-                        let recheck_slots = match status {
-                            CandidateHealthState::Liquidatable => candidate_recheck_slots,
-                            CandidateHealthState::Error => candidate_error_recheck_slots,
-                            CandidateHealthState::Healthy => u64::MAX,
-                        };
-                        candidate_fairness_key(
-                            *account,
-                            previous,
-                            *status,
-                            evaluation_slot,
-                            *input_revision,
-                            forced,
-                            recheck_slots,
-                        )
-                    },
-                );
+                evaluated.sort_unstable_by_key(|(account, _, _, input_revision, status)| {
+                    let previous = candidate_cache.get(account).copied();
+                    let forced = candidate_force_rearm.contains(account);
+                    let recheck_slots = match status {
+                        CandidateHealthState::Liquidatable => candidate_recheck_slots,
+                        CandidateHealthState::Error => candidate_error_recheck_slots,
+                        CandidateHealthState::Healthy => u64::MAX,
+                    };
+                    candidate_fairness_key(
+                        *account,
+                        previous,
+                        *status,
+                        evaluation_slot,
+                        *input_revision,
+                        forced,
+                        recheck_slots,
+                    )
+                });
 
                 for (account, t_rx_ns, event_slot, input_revision, status) in evaluated {
                     let previous = candidate_cache.get(&account).copied();
@@ -1720,8 +1872,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     match status {
                         CandidateHealthState::Healthy => {
-                            health_sweep_healthy =
-                                health_sweep_healthy.saturating_add(1);
+                            health_sweep_healthy = health_sweep_healthy.saturating_add(1);
                             candidate_cache.insert(
                                 account,
                                 CandidateCacheEntry {
@@ -1736,8 +1887,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             );
                         }
                         CandidateHealthState::Liquidatable => {
-                            health_sweep_liquidatable =
-                                health_sweep_liquidatable.saturating_add(1);
+                            health_sweep_liquidatable = health_sweep_liquidatable.saturating_add(1);
 
                             let transition = !matches!(
                                 previous,
@@ -1746,11 +1896,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     ..
                                 })
                             );
-                            let last_forwarded = previous
-                                .map(|e| e.last_forwarded_slot)
-                                .unwrap_or(0);
-                            let wait_slots =
-                                evaluation_slot.saturating_sub(last_forwarded);
+                            let last_forwarded =
+                                previous.map(|e| e.last_forwarded_slot).unwrap_or(0);
+                            let wait_slots = evaluation_slot.saturating_sub(last_forwarded);
                             let periodic_due = wait_slots >= candidate_recheck_slots;
                             let revision_changed = input_revision
                                 > previous.map(|e| e.last_forwarded_revision).unwrap_or(0);
@@ -1759,16 +1907,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     candidate_repeat_wait_slots_max.max(wait_slots);
                                 match wait_slots {
                                     0 => {}
-                                    1 => candidate_repeat_wait_slots_1 =
-                                        candidate_repeat_wait_slots_1.saturating_add(1),
-                                    2..=3 => candidate_repeat_wait_slots_2_3 =
-                                        candidate_repeat_wait_slots_2_3.saturating_add(1),
-                                    4..=7 => candidate_repeat_wait_slots_4_7 =
-                                        candidate_repeat_wait_slots_4_7.saturating_add(1),
-                                    8..=15 => candidate_repeat_wait_slots_8_15 =
-                                        candidate_repeat_wait_slots_8_15.saturating_add(1),
-                                    _ => candidate_repeat_wait_slots_ge_16 =
-                                        candidate_repeat_wait_slots_ge_16.saturating_add(1),
+                                    1 => {
+                                        candidate_repeat_wait_slots_1 =
+                                            candidate_repeat_wait_slots_1.saturating_add(1)
+                                    }
+                                    2..=3 => {
+                                        candidate_repeat_wait_slots_2_3 =
+                                            candidate_repeat_wait_slots_2_3.saturating_add(1)
+                                    }
+                                    4..=7 => {
+                                        candidate_repeat_wait_slots_4_7 =
+                                            candidate_repeat_wait_slots_4_7.saturating_add(1)
+                                    }
+                                    8..=15 => {
+                                        candidate_repeat_wait_slots_8_15 =
+                                            candidate_repeat_wait_slots_8_15.saturating_add(1)
+                                    }
+                                    _ => {
+                                        candidate_repeat_wait_slots_ge_16 =
+                                            candidate_repeat_wait_slots_ge_16.saturating_add(1)
+                                    }
                                 }
                             }
                             let repeat_capacity =
@@ -1860,8 +2018,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             // Fail closed, but do not hammer the exact same stale/error Account
                             // through refresh/projection every 5 ms. Error state gets a shorter
                             // bounded recheck cadence than a stable liquidatable candidate.
-                            health_sweep_errors =
-                                health_sweep_errors.saturating_add(1);
+                            health_sweep_errors = health_sweep_errors.saturating_add(1);
 
                             let transition = !matches!(
                                 previous,
@@ -1870,11 +2027,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     ..
                                 })
                             );
-                            let last_forwarded = previous
-                                .map(|e| e.last_forwarded_slot)
-                                .unwrap_or(0);
-                            let wait_slots =
-                                evaluation_slot.saturating_sub(last_forwarded);
+                            let last_forwarded =
+                                previous.map(|e| e.last_forwarded_slot).unwrap_or(0);
+                            let wait_slots = evaluation_slot.saturating_sub(last_forwarded);
                             let periodic_due = wait_slots >= candidate_error_recheck_slots;
                             let revision_changed = input_revision
                                 > previous.map(|e| e.last_forwarded_revision).unwrap_or(0);
@@ -1883,16 +2038,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     candidate_repeat_wait_slots_max.max(wait_slots);
                                 match wait_slots {
                                     0 => {}
-                                    1 => candidate_repeat_wait_slots_1 =
-                                        candidate_repeat_wait_slots_1.saturating_add(1),
-                                    2..=3 => candidate_repeat_wait_slots_2_3 =
-                                        candidate_repeat_wait_slots_2_3.saturating_add(1),
-                                    4..=7 => candidate_repeat_wait_slots_4_7 =
-                                        candidate_repeat_wait_slots_4_7.saturating_add(1),
-                                    8..=15 => candidate_repeat_wait_slots_8_15 =
-                                        candidate_repeat_wait_slots_8_15.saturating_add(1),
-                                    _ => candidate_repeat_wait_slots_ge_16 =
-                                        candidate_repeat_wait_slots_ge_16.saturating_add(1),
+                                    1 => {
+                                        candidate_repeat_wait_slots_1 =
+                                            candidate_repeat_wait_slots_1.saturating_add(1)
+                                    }
+                                    2..=3 => {
+                                        candidate_repeat_wait_slots_2_3 =
+                                            candidate_repeat_wait_slots_2_3.saturating_add(1)
+                                    }
+                                    4..=7 => {
+                                        candidate_repeat_wait_slots_4_7 =
+                                            candidate_repeat_wait_slots_4_7.saturating_add(1)
+                                    }
+                                    8..=15 => {
+                                        candidate_repeat_wait_slots_8_15 =
+                                            candidate_repeat_wait_slots_8_15.saturating_add(1)
+                                    }
+                                    _ => {
+                                        candidate_repeat_wait_slots_ge_16 =
+                                            candidate_repeat_wait_slots_ge_16.saturating_add(1)
+                                    }
                                 }
                             }
                             let repeat_capacity =
@@ -1987,10 +2152,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         mt0_owner.enter(darkbot_common::mt0::OwnerCat::Wait);
         #[cfg(feature = "crate_health")]
-        let queued_detection_available =
-            !detect_queue.is_empty()
-                || !oracle_detect_pending.is_empty()
-                || (!integration_probe_queue.is_empty() && projection_pending.is_empty());
+        let queued_detection_available = !detect_queue.is_empty()
+            || !oracle_detect_pending.is_empty()
+            || (!integration_probe_queue.is_empty() && projection_pending.is_empty());
         #[cfg(feature = "crate_health")]
         let force_detection =
             queued_detection_available && ingress_since_detect >= ingress_burst_before_detect;
@@ -2009,7 +2173,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         mt0_owner.enter(darkbot_common::mt0::OwnerCat::IngressApply);
         if let Some(ev) = &maybe_ev {
-            darkbot_common::mt0::MT0.record_ingress_queue_wait(clock.now_ns().saturating_sub(ev.t_rx_ns()));
+            darkbot_common::mt0::MT0
+                .record_ingress_queue_wait(clock.now_ns().saturating_sub(ev.t_rx_ns()));
         }
         #[cfg(feature = "crate_health")]
         let mut detect;
@@ -2027,322 +2192,348 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if st.run_state().is_tradable()
                         && marginfi_account_in_group(&a.data, &group) =>
                 {
-                    let trigger = if a.source == SourceKind::Snapshot { "bootstrap_snapshot_probe" } else { "account_update" };
+                    let trigger = if a.source == SourceKind::Snapshot {
+                        "bootstrap_snapshot_probe"
+                    } else {
+                        "account_update"
+                    };
                     Some((a.pubkey, a.t_rx_ns, a.slot, trigger))
-                },
+                }
                 _ => None,
             };
-        // [FIX-35] Bank-Pubkey merken; die Dependency-Prüfung läuft NACH dem Anwenden des Updates.
-        let updated_bank_event: Option<(Pubkey, u64, u64)> = match &ev {
-            IngressEvent::Account(a) if classify_account(&a.data) == AccountType::Bank => {
-                Some((a.pubkey, a.t_rx_ns, a.slot))
-            }
-            _ => None,
-        };
-        let updated_bank: Option<Pubkey> = updated_bank_event.map(|(pk, _, _)| pk);
-        #[cfg(feature = "crate_health")]
-        let updated_marginfi_account: Option<Pubkey> = match &ev {
-            IngressEvent::Account(a) if classify_account(&a.data) == AccountType::MarginfiAccount => Some(a.pubkey),
-            _ => None,
-        };
-        #[cfg(feature = "crate_health")]
-        let dependency_update: Option<(Pubkey, u64, u64)> = match &ev {
-            IngressEvent::Account(a)
-                if reverse_index.banks_for_oracle(&a.pubkey).next().is_some() =>
-            {
-                Some((a.pubkey, a.t_rx_ns, a.slot))
-            }
-            _ => None,
-        };
-        #[cfg(feature = "crate_health")]
-        if let (Some((dependency, _, _)), IngressEvent::Account(a)) = (dependency_update, &ev) {
-            if let Some(existing) = st.get(&dependency) {
-                let same_content =
-                    existing.owner == a.owner
-                    && existing.lamports == a.lamports
-                    && existing.data == a.data;
-                if same_content {
-                    dependency_content_unchanged =
-                        dependency_content_unchanged.saturating_add(1);
-                } else {
-                    dependency_content_changed =
-                        dependency_content_changed.saturating_add(1);
+            // [FIX-35] Bank-Pubkey merken; die Dependency-Prüfung läuft NACH dem Anwenden des Updates.
+            let updated_bank_event: Option<(Pubkey, u64, u64)> = match &ev {
+                IngressEvent::Account(a) if classify_account(&a.data) == AccountType::Bank => {
+                    Some((a.pubkey, a.t_rx_ns, a.slot))
                 }
-            } else {
-                dependency_content_changed =
-                    dependency_content_changed.saturating_add(1);
+                _ => None,
+            };
+            let updated_bank: Option<Pubkey> = updated_bank_event.map(|(pk, _, _)| pk);
+            #[cfg(feature = "crate_health")]
+            let updated_marginfi_account: Option<Pubkey> = match &ev {
+                IngressEvent::Account(a)
+                    if classify_account(&a.data) == AccountType::MarginfiAccount =>
+                {
+                    Some(a.pubkey)
+                }
+                _ => None,
+            };
+            #[cfg(feature = "crate_health")]
+            let dependency_update: Option<(Pubkey, u64, u64)> = match &ev {
+                IngressEvent::Account(a)
+                    if reverse_index.banks_for_oracle(&a.pubkey).next().is_some() =>
+                {
+                    Some((a.pubkey, a.t_rx_ns, a.slot))
+                }
+                _ => None,
+            };
+            #[cfg(feature = "crate_health")]
+            if let (Some((dependency, _, _)), IngressEvent::Account(a)) = (dependency_update, &ev) {
+                if let Some(existing) = st.get(&dependency) {
+                    let same_content = existing.owner == a.owner
+                        && existing.lamports == a.lamports
+                        && existing.data == a.data;
+                    if same_content {
+                        dependency_content_unchanged =
+                            dependency_content_unchanged.saturating_add(1);
+                    } else {
+                        dependency_content_changed = dependency_content_changed.saturating_add(1);
+                    }
+                } else {
+                    dependency_content_changed = dependency_content_changed.saturating_add(1);
+                }
             }
-        }
 
-        if let IngressEvent::Account(a) = &ev {
-            if a.pubkey == program_data && hash(&a.data) != program_data_baseline_hash {
-                if !program_upgrade_latched {
-                    eprintln!(
+            if let IngressEvent::Account(a) = &ev {
+                if a.pubkey == program_data && hash(&a.data) != program_data_baseline_hash {
+                    if !program_upgrade_latched {
+                        eprintln!(
                         "PROGRAM_UPGRADE detected slot={} program_data={} — latched HALT until explicit P1B promotion",
                         a.slot, program_data
                     );
-                }
-                program_upgrade_latched = true;
-            }
-            let i = match classify_account(&a.data) {
-                AccountType::MarginfiAccount => 0,
-                AccountType::Bank => 1,
-                AccountType::MarginfiGroup => 2,
-                AccountType::FeeState => 3,
-                AccountType::LiquidationRecord => 4,
-                AccountType::Unknown => 5,
-            };
-            counts[i] += 1;
-        }
-        if let Some(o) = drv.on_event(&mut st, ev, &mut fetch, &mut drain) {
-            eprintln!("recovery: {:?}, run_state={:?}", o, st.run_state());
-            if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
-                halt.clear();
-
-                // A program upgrade can race startup/recovery before its WSS notification is
-                // observed. Re-check the canonical recovered ProgramData bytes against the
-                // startup baseline before allowing any detection work.
-                if st.get(&program_data)
-                    .map(|r| hash(&r.data) != program_data_baseline_hash)
-                    .unwrap_or(true)
-                {
+                    }
                     program_upgrade_latched = true;
                 }
-                if program_upgrade_latched {
-                    st.halt(darkbot_common::error::HaltReason::ProgramUpgrade);
-                    eprintln!(
-                        "PROGRAM_UPGRADE HALT active program_data={} — no automatic resume",
-                        program_data
-                    );
-                    continue;
-                }
+                let i = match classify_account(&a.data) {
+                    AccountType::MarginfiAccount => 0,
+                    AccountType::Bank => 1,
+                    AccountType::MarginfiGroup => 2,
+                    AccountType::FeeState => 3,
+                    AccountType::LiquidationRecord => 4,
+                    AccountType::Unknown => 5,
+                };
+                counts[i] += 1;
+            }
+            if let Some(o) = drv.on_event(&mut st, ev, &mut fetch, &mut drain) {
+                eprintln!("recovery: {:?}, run_state={:?}", o, st.run_state());
+                if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
+                    halt.clear();
 
-                #[cfg(feature = "crate_health")]
-                {
-                    let (rebuilt, indexed_banks, indexed_accounts, unsupported_banks) =
-                        rebuild_reverse_index(&st, &program, &group);
-                    reverse_index = rebuilt;
-                    sweep_dirty_banks.clear();
-                    sweep_batch_events = 0;
-                    sweep_batch_started_ns = None;
-                    candidate_cache.clear();
-                    candidate_force_rearm.clear();
-                    candidate_input_epoch = 0;
-                    bank_input_revision.clear();
-                    threshold_index = ThresholdIndex::new();
-                    threshold_fallback.clear();
-                    threshold_bootstrap.clear();
-                    if use_threshold_trigger {
-                        for (pk, record) in st.iter_owned_by(&program) {
-                            if liability_account_in_group(&record.data, &group) {
-                                threshold_bootstrap.push_back(*pk);
-                            }
-                        }
-                        threshold_ready = threshold_bootstrap.is_empty();
-                    } else {
-                        threshold_ready = true;
+                    // A program upgrade can race startup/recovery before its WSS notification is
+                    // observed. Re-check the canonical recovered ProgramData bytes against the
+                    // startup baseline before allowing any detection work.
+                    if st
+                        .get(&program_data)
+                        .map(|r| hash(&r.data) != program_data_baseline_hash)
+                        .unwrap_or(true)
+                    {
+                        program_upgrade_latched = true;
                     }
-                    eprintln!(
+                    if program_upgrade_latched {
+                        st.halt(darkbot_common::error::HaltReason::ProgramUpgrade);
+                        eprintln!(
+                            "PROGRAM_UPGRADE HALT active program_data={} — no automatic resume",
+                            program_data
+                        );
+                        continue;
+                    }
+
+                    #[cfg(feature = "crate_health")]
+                    {
+                        let (rebuilt, indexed_banks, indexed_accounts, unsupported_banks) =
+                            rebuild_reverse_index(&st, &program, &group);
+                        reverse_index = rebuilt;
+                        sweep_dirty_banks.clear();
+                        sweep_batch_events = 0;
+                        sweep_batch_started_ns = None;
+                        candidate_cache.clear();
+                        candidate_force_rearm.clear();
+                        candidate_input_epoch = 0;
+                        bank_input_revision.clear();
+                        threshold_index = ThresholdIndex::new();
+                        threshold_fallback.clear();
+                        threshold_bootstrap.clear();
+                        if use_threshold_trigger {
+                            for (pk, record) in st.iter_owned_by(&program) {
+                                if liability_account_in_group(&record.data, &group) {
+                                    threshold_bootstrap.push_back(*pk);
+                                }
+                            }
+                            threshold_ready = threshold_bootstrap.is_empty();
+                        } else {
+                            threshold_ready = true;
+                        }
+                        eprintln!(
                         "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={} threshold_trigger={}",
                         indexed_banks, indexed_accounts, unsupported_banks, threshold_bootstrap.len(), use_threshold_trigger
                     );
-                    if !use_threshold_trigger {
-                        // [R127c] eva01 parity: one full debtor scan at startup so an account
-                        // already underwater before StreamReady cannot wait forever for a future
-                        // unrelated write. Reuse the same batched/parallel Health admission path
-                        // by marking every current group Bank dirty exactly once.
-                        let startup_t_rx_ns = clock.now_ns();
-                        let startup_slot = slot_watch.get();
-                        let view = StateView(&st);
-                        let mut startup_banks = 0usize;
-                        for (pk, record) in st.iter_owned_by(&program) {
-                            let Some(bank) = bank_from_state(&view, &program, pk) else {
-                                continue;
-                            };
-                            if bank.group != group || classify_account(&record.data) != AccountType::Bank {
-                                continue;
+                        if !use_threshold_trigger {
+                            // [R127c] eva01 parity: one full debtor scan at startup so an account
+                            // already underwater before StreamReady cannot wait forever for a future
+                            // unrelated write. Reuse the same batched/parallel Health admission path
+                            // by marking every current group Bank dirty exactly once.
+                            let startup_t_rx_ns = clock.now_ns();
+                            let startup_slot = slot_watch.get();
+                            let view = StateView(&st);
+                            let mut startup_banks = 0usize;
+                            for (pk, record) in st.iter_owned_by(&program) {
+                                let Some(bank) = bank_from_state(&view, &program, pk) else {
+                                    continue;
+                                };
+                                if bank.group != group
+                                    || classify_account(&record.data) != AccountType::Bank
+                                {
+                                    continue;
+                                }
+                                sweep_dirty_banks.insert(*pk, (startup_t_rx_ns, startup_slot));
+                                startup_banks = startup_banks.saturating_add(1);
                             }
-                            sweep_dirty_banks.insert(*pk, (startup_t_rx_ns, startup_slot));
-                            startup_banks = startup_banks.saturating_add(1);
-                        }
-                        if startup_banks > 0 {
-                            // Force one immediate startup batch; runtime batches use the normal
-                            // event-count/time bounds.
-                            sweep_batch_events = sweep_batch_max_events;
-                            sweep_batch_started_ns = Some(startup_t_rx_ns);
-                            sweep_max_dirty_banks =
-                                sweep_max_dirty_banks.max(sweep_dirty_banks.len());
-                        }
-                        eprintln!(
+                            if startup_banks > 0 {
+                                // Force one immediate startup batch; runtime batches use the normal
+                                // event-count/time bounds.
+                                sweep_batch_events = sweep_batch_max_events;
+                                sweep_batch_started_ns = Some(startup_t_rx_ns);
+                                sweep_max_dirty_banks =
+                                    sweep_max_dirty_banks.max(sweep_dirty_banks.len());
+                            }
+                            eprintln!(
                             "r127_health_sweep_ready: reverse_accounts={} startup_banks={} threshold_trigger=false",
                             indexed_accounts, startup_banks
                         );
+                        }
                     }
-                }
 
-                #[cfg(feature = "crate_health")]
-                if mode == "shadow" && !bootstrap_probe_done {
-                    bootstrap_probe_done = true;
-                    let mut probes = Vec::new();
-                    for (pk, r) in st.iter_owned_by(&program) {
-                        if bootstrap_probe_candidate(&r.data, &group) {
-                            probes.push(darkbot_solana::ingress::AccountUpdate {
-                                pubkey: *pk,
-                                owner: r.owner,
-                                lamports: r.lamports,
-                                data: r.data.clone(),
-                                slot: r.slot,
-                                write_version: r.write_version,
-                                source: SourceKind::Snapshot,
-                                t_rx_ns: clock.now_ns(),
-                            });
+                    #[cfg(feature = "crate_health")]
+                    if mode == "shadow" && !bootstrap_probe_done {
+                        bootstrap_probe_done = true;
+                        let mut probes = Vec::new();
+                        for (pk, r) in st.iter_owned_by(&program) {
+                            if bootstrap_probe_candidate(&r.data, &group) {
+                                probes.push(darkbot_solana::ingress::AccountUpdate {
+                                    pubkey: *pk,
+                                    owner: r.owner,
+                                    lamports: r.lamports,
+                                    data: r.data.clone(),
+                                    slot: r.slot,
+                                    write_version: r.write_version,
+                                    source: SourceKind::Snapshot,
+                                    t_rx_ns: clock.now_ns(),
+                                });
+                            }
                         }
-                    }
-                    probes.sort_unstable_by_key(|a| a.pubkey.to_bytes());
-                    let mut queued = 0usize;
-                    for a in probes {
-                        if producer.try_push(IngressEvent::Account(a)).is_ok() {
-                            queued += 1;
-                        } else {
-                            break;
+                        probes.sort_unstable_by_key(|a| a.pubkey.to_bytes());
+                        let mut queued = 0usize;
+                        for a in probes {
+                            if producer.try_push(IngressEvent::Account(a)).is_ok() {
+                                queued += 1;
+                            } else {
+                                break;
+                            }
                         }
-                    }
-                    eprintln!("bootstrap_probe: queued={} candidates from was_liquidatable", queued);
+                        eprintln!(
+                            "bootstrap_probe: queued={} candidates from was_liquidatable",
+                            queued
+                        );
 
-                    let view = StateView(&st);
-                    let mut kamino = 0usize;
-                    let mut drift = 0usize;
-                    let mut juplend = 0usize;
-                    let mut pricing_kamino = 0usize;
-                    let mut pricing_drift = 0usize;
-                    let mut pricing_juplend = 0usize;
-                    for (pk, r) in st.iter_owned_by(&program) {
-                        if !bootstrap_probe_candidate(&r.data, &group) {
-                            continue;
-                        }
-                        if let Ok(kinds) =
-                            darkbot_project0::integration::kinds_for_account(&view, &program, pk)
-                        {
-                            for k in kinds {
-                                match k {
-                                    darkbot_project0::integration::IntegrationKind::Kamino => kamino += 1,
-                                    darkbot_project0::integration::IntegrationKind::Drift => drift += 1,
-                                    darkbot_project0::integration::IntegrationKind::JupLend => juplend += 1,
+                        let view = StateView(&st);
+                        let mut kamino = 0usize;
+                        let mut drift = 0usize;
+                        let mut juplend = 0usize;
+                        let mut pricing_kamino = 0usize;
+                        let mut pricing_drift = 0usize;
+                        let mut pricing_juplend = 0usize;
+                        for (pk, r) in st.iter_owned_by(&program) {
+                            if !bootstrap_probe_candidate(&r.data, &group) {
+                                continue;
+                            }
+                            if let Ok(kinds) = darkbot_project0::integration::kinds_for_account(
+                                &view, &program, pk,
+                            ) {
+                                for k in kinds {
+                                    match k {
+                                        darkbot_project0::integration::IntegrationKind::Kamino => {
+                                            kamino += 1
+                                        }
+                                        darkbot_project0::integration::IntegrationKind::Drift => {
+                                            drift += 1
+                                        }
+                                        darkbot_project0::integration::IntegrationKind::JupLend => {
+                                            juplend += 1
+                                        }
+                                    }
+                                }
+                            }
+                            if let Ok(kinds) =
+                                darkbot_project0::integration::pricing_kinds_for_account(
+                                    &view, &program, pk,
+                                )
+                            {
+                                for k in kinds {
+                                    match k {
+                                        darkbot_project0::integration::IntegrationKind::Kamino => {
+                                            pricing_kamino += 1
+                                        }
+                                        darkbot_project0::integration::IntegrationKind::Drift => {
+                                            pricing_drift += 1
+                                        }
+                                        darkbot_project0::integration::IntegrationKind::JupLend => {
+                                            pricing_juplend += 1
+                                        }
+                                    }
                                 }
                             }
                         }
-                        if let Ok(kinds) =
-                            darkbot_project0::integration::pricing_kinds_for_account(&view, &program, pk)
-                        {
-                            for k in kinds {
-                                match k {
-                                    darkbot_project0::integration::IntegrationKind::Kamino => pricing_kamino += 1,
-                                    darkbot_project0::integration::IntegrationKind::Drift => pricing_drift += 1,
-                                    darkbot_project0::integration::IntegrationKind::JupLend => pricing_juplend += 1,
-                                }
-                            }
-                        }
-                    }
-                    eprintln!(
+                        eprintln!(
                         "bootstrap_probe_integrations: withdraw_kamino={} withdraw_drift={} withdraw_juplend={} pricing_kamino={} pricing_drift={} pricing_juplend={}",
                         kamino, drift, juplend, pricing_kamino, pricing_drift, pricing_juplend
                     );
 
+                        // [FIX-115][R6] Optional targeted qualification probe. The historical
+                        // was_liquidatable set can legitimately contain zero integration accounts.
+                        // Scan every liability-bearing account already present in canonical RAM,
+                        // report the actual integration population, then queue a small deterministic
+                        // sample per venue through the existing projection -> Health/Sizing pipeline.
+                        if integration_probe_enabled {
+                            let mut all_withdraw = [0usize; 3];
+                            let mut all_pricing = [0usize; 3];
+                            let mut scan_errors = 0usize;
+                            let mut kamino_accounts: Vec<(Pubkey, u64)> = Vec::new();
+                            let mut drift_accounts: Vec<(Pubkey, u64)> = Vec::new();
+                            let mut juplend_accounts: Vec<(Pubkey, u64)> = Vec::new();
 
-                    // [FIX-115][R6] Optional targeted qualification probe. The historical
-                    // was_liquidatable set can legitimately contain zero integration accounts.
-                    // Scan every liability-bearing account already present in canonical RAM,
-                    // report the actual integration population, then queue a small deterministic
-                    // sample per venue through the existing projection -> Health/Sizing pipeline.
-                    if integration_probe_enabled {
-                        let mut all_withdraw = [0usize; 3];
-                        let mut all_pricing = [0usize; 3];
-                        let mut scan_errors = 0usize;
-                        let mut kamino_accounts: Vec<(Pubkey, u64)> = Vec::new();
-                        let mut drift_accounts: Vec<(Pubkey, u64)> = Vec::new();
-                        let mut juplend_accounts: Vec<(Pubkey, u64)> = Vec::new();
-
-                        for (pk, r) in st.iter_owned_by(&program) {
-                            if !marginfi_account_in_group(&r.data, &group) {
-                                continue;
-                            }
-
-                            let withdraw = match darkbot_project0::integration::kinds_for_account(
-                                &view,
-                                &program,
-                                pk,
-                            ) {
-                                Ok(v) => v,
-                                Err(_) => {
-                                    scan_errors += 1;
+                            for (pk, r) in st.iter_owned_by(&program) {
+                                if !marginfi_account_in_group(&r.data, &group) {
                                     continue;
                                 }
-                            };
-                            let pricing = match darkbot_project0::integration::pricing_kinds_for_account(
-                                &view,
-                                &program,
-                                pk,
-                            ) {
-                                Ok(v) => v,
-                                Err(_) => {
-                                    scan_errors += 1;
-                                    continue;
-                                }
-                            };
 
-                            let mut has_kamino = false;
-                            let mut has_drift = false;
-                            let mut has_juplend = false;
-                            for k in withdraw {
-                                match k {
-                                    darkbot_project0::integration::IntegrationKind::Kamino => {
-                                        all_withdraw[0] += 1;
-                                        has_kamino = true;
-                                    }
-                                    darkbot_project0::integration::IntegrationKind::Drift => {
-                                        all_withdraw[1] += 1;
-                                        has_drift = true;
-                                    }
-                                    darkbot_project0::integration::IntegrationKind::JupLend => {
-                                        all_withdraw[2] += 1;
-                                        has_juplend = true;
-                                    }
-                                }
-                            }
-                            for k in pricing {
-                                match k {
-                                    darkbot_project0::integration::IntegrationKind::Kamino => {
-                                        all_pricing[0] += 1;
-                                        has_kamino = true;
-                                    }
-                                    darkbot_project0::integration::IntegrationKind::Drift => {
-                                        all_pricing[1] += 1;
-                                        has_drift = true;
-                                    }
-                                    darkbot_project0::integration::IntegrationKind::JupLend => {
-                                        all_pricing[2] += 1;
-                                        has_juplend = true;
+                                let withdraw =
+                                    match darkbot_project0::integration::kinds_for_account(
+                                        &view, &program, pk,
+                                    ) {
+                                        Ok(v) => v,
+                                        Err(_) => {
+                                            scan_errors += 1;
+                                            continue;
+                                        }
+                                    };
+                                let pricing =
+                                    match darkbot_project0::integration::pricing_kinds_for_account(
+                                        &view, &program, pk,
+                                    ) {
+                                        Ok(v) => v,
+                                        Err(_) => {
+                                            scan_errors += 1;
+                                            continue;
+                                        }
+                                    };
+
+                                let mut has_kamino = false;
+                                let mut has_drift = false;
+                                let mut has_juplend = false;
+                                for k in withdraw {
+                                    match k {
+                                        darkbot_project0::integration::IntegrationKind::Kamino => {
+                                            all_withdraw[0] += 1;
+                                            has_kamino = true;
+                                        }
+                                        darkbot_project0::integration::IntegrationKind::Drift => {
+                                            all_withdraw[1] += 1;
+                                            has_drift = true;
+                                        }
+                                        darkbot_project0::integration::IntegrationKind::JupLend => {
+                                            all_withdraw[2] += 1;
+                                            has_juplend = true;
+                                        }
                                     }
                                 }
+                                for k in pricing {
+                                    match k {
+                                        darkbot_project0::integration::IntegrationKind::Kamino => {
+                                            all_pricing[0] += 1;
+                                            has_kamino = true;
+                                        }
+                                        darkbot_project0::integration::IntegrationKind::Drift => {
+                                            all_pricing[1] += 1;
+                                            has_drift = true;
+                                        }
+                                        darkbot_project0::integration::IntegrationKind::JupLend => {
+                                            all_pricing[2] += 1;
+                                            has_juplend = true;
+                                        }
+                                    }
+                                }
+
+                                if has_kamino {
+                                    kamino_accounts.push((*pk, r.slot));
+                                }
+                                if has_drift {
+                                    drift_accounts.push((*pk, r.slot));
+                                }
+                                if has_juplend {
+                                    juplend_accounts.push((*pk, r.slot));
+                                }
                             }
 
-                            if has_kamino {
-                                kamino_accounts.push((*pk, r.slot));
+                            for v in [
+                                &mut kamino_accounts,
+                                &mut drift_accounts,
+                                &mut juplend_accounts,
+                            ] {
+                                v.sort_unstable_by_key(|(pk, _)| pk.to_bytes());
+                                v.dedup_by_key(|(pk, _)| *pk);
                             }
-                            if has_drift {
-                                drift_accounts.push((*pk, r.slot));
-                            }
-                            if has_juplend {
-                                juplend_accounts.push((*pk, r.slot));
-                            }
-                        }
 
-                        for v in [&mut kamino_accounts, &mut drift_accounts, &mut juplend_accounts] {
-                            v.sort_unstable_by_key(|(pk, _)| pk.to_bytes());
-                            v.dedup_by_key(|(pk, _)| *pk);
-                        }
-
-                        eprintln!(
+                            eprintln!(
                             "integration_target_census: withdraw_kamino={} withdraw_drift={} withdraw_juplend={} pricing_kamino={} pricing_drift={} pricing_juplend={} scan_errors={}",
                             all_withdraw[0],
                             all_withdraw[1],
@@ -2353,36 +2544,38 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             scan_errors
                         );
 
-                        let mut selected = HashSet::new();
-                        let mut queued_kamino = 0usize;
-                        let mut queued_drift = 0usize;
-                        let mut queued_juplend = 0usize;
+                            let mut selected = HashSet::new();
+                            let mut queued_kamino = 0usize;
+                            let mut queued_drift = 0usize;
+                            let mut queued_juplend = 0usize;
 
-                        for (kind_idx, accounts) in [
-                            (0usize, &kamino_accounts),
-                            (1usize, &drift_accounts),
-                            (2usize, &juplend_accounts),
-                        ] {
-                            for (pk, slot) in accounts.iter().take(integration_probe_limit_per_kind) {
-                                match kind_idx {
-                                    0 => queued_kamino += 1,
-                                    1 => queued_drift += 1,
-                                    _ => queued_juplend += 1,
-                                }
-                                if selected.insert(*pk) {
-                                    integration_probe_queue.push_back((*pk, *slot));
+                            for (kind_idx, accounts) in [
+                                (0usize, &kamino_accounts),
+                                (1usize, &drift_accounts),
+                                (2usize, &juplend_accounts),
+                            ] {
+                                for (pk, slot) in
+                                    accounts.iter().take(integration_probe_limit_per_kind)
+                                {
+                                    match kind_idx {
+                                        0 => queued_kamino += 1,
+                                        1 => queued_drift += 1,
+                                        _ => queued_juplend += 1,
+                                    }
+                                    if selected.insert(*pk) {
+                                        integration_probe_queue.push_back((*pk, *slot));
+                                    }
                                 }
                             }
-                        }
 
-                        integration_probe_expected = selected.clone();
-                        integration_probe_terminal.clear();
-                        integration_probe_projection_ready = 0;
-                        integration_probe_projection_failed = 0;
-                        integration_probe_projection_stale = 0;
-                        integration_probe_completion_reported = false;
+                            integration_probe_expected = selected.clone();
+                            integration_probe_terminal.clear();
+                            integration_probe_projection_ready = 0;
+                            integration_probe_projection_failed = 0;
+                            integration_probe_projection_stale = 0;
+                            integration_probe_completion_reported = false;
 
-                        eprintln!(
+                            eprintln!(
                             "integration_target_probe: queued_unique={} kamino_sample={} drift_sample={} juplend_sample={} limit_per_kind={}",
                             selected.len(),
                             queued_kamino,
@@ -2390,241 +2583,267 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             queued_juplend,
                             integration_probe_limit_per_kind
                         );
+                        }
                     }
                 }
             }
-        }
-        // [FIX-133a] Keep reverse indices in lockstep with the canonical post-event state.
-        // This does not trigger detection yet; FIX-133b will consume it only after threshold
-        // qualification. Unknown oracle layouts are removed from the trigger map fail-closed.
-        #[cfg(feature = "crate_health")]
-        if let Some(account_pk) = updated_marginfi_account {
-            match st.get(&account_pk)
-                .and_then(|r| active_banks_in_group_account(&r.data, &group))
-            {
-                Some(banks) => {
-                    reverse_index.set_account_banks(account_pk, &banks);
-                    if !use_threshold_trigger {
-                        // R127 Long-Tail admission uses targeted exact-health sweeps.
-                    } else {
-                    let now_s = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0);
-                    let slot = st.get(&account_pk).map(|r| r.slot).unwrap_or(slot_watch.get());
-                    let view = StateView(&st);
-                    let engine = darkbot_project0::health::crate_impl::CrateHealth {
-                        state: &view,
-                        group,
-                    };
-                    match engine.thresholds(&account_pk, now_s, slot) {
-                        Ok(t) => {
-                            threshold_index.set_account(account_pk, &t.thresholds);
+            // [FIX-133a] Keep reverse indices in lockstep with the canonical post-event state.
+            // This does not trigger detection yet; FIX-133b will consume it only after threshold
+            // qualification. Unknown oracle layouts are removed from the trigger map fail-closed.
+            #[cfg(feature = "crate_health")]
+            if let Some(account_pk) = updated_marginfi_account {
+                match st
+                    .get(&account_pk)
+                    .and_then(|r| active_banks_in_group_account(&r.data, &group))
+                {
+                    Some(banks) => {
+                        reverse_index.set_account_banks(account_pk, &banks);
+                        if !use_threshold_trigger {
+                            // R127 Long-Tail admission uses targeted exact-health sweeps.
+                        } else {
+                            let now_s = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(0);
+                            let slot = st
+                                .get(&account_pk)
+                                .map(|r| r.slot)
+                                .unwrap_or(slot_watch.get());
+                            let view = StateView(&st);
+                            let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                                state: &view,
+                                group,
+                            };
+                            match engine.thresholds(&account_pk, now_s, slot) {
+                                Ok(t) => {
+                                    threshold_index.set_account(account_pk, &t.thresholds);
+                                    threshold_fallback.remove(&account_pk);
+                                }
+                                Err(e) => {
+                                    threshold_index.remove_account(&account_pk);
+                                    threshold_fallback.insert(account_pk);
+                                    eprintln!(
+                                        "threshold_account_fallback: account={} error={}",
+                                        account_pk, e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        reverse_index.remove_account(&account_pk);
+                        if use_threshold_trigger {
+                            threshold_index.remove_account(&account_pk);
                             threshold_fallback.remove(&account_pk);
                         }
-                        Err(e) => {
-                            threshold_index.remove_account(&account_pk);
-                            threshold_fallback.insert(account_pk);
-                            eprintln!(
-                                "threshold_account_fallback: account={} error={}",
-                                account_pk, e
-                            );
-                        }
-                    }
-                    }
-                }
-                None => {
-                    reverse_index.remove_account(&account_pk);
-                    if use_threshold_trigger {
-                        threshold_index.remove_account(&account_pk);
-                        threshold_fallback.remove(&account_pk);
                     }
                 }
             }
-        }
-        #[cfg(feature = "crate_health")]
-        if let Some(bank_pk) = updated_bank {
-            let affected_accounts: Vec<Pubkey> =
-                reverse_index.accounts_for_bank(&bank_pk).copied().collect();
-            if use_threshold_trigger {
-                for account in affected_accounts.iter().copied() {
-                    threshold_index.remove_account(&account);
-                    threshold_fallback.insert(account);
-                    threshold_bootstrap.push_back(account);
-                }
-                threshold_ready = threshold_bootstrap.is_empty();
-            } else if st.run_state().is_tradable() {
-                // A canonical Bank write can change weights, fees, operational state or
-                // integration configuration without changing the debtor account bytes.
-                // [FIX-134] Record a causal revision in addition to the existing force-rearm.
-                candidate_input_epoch = candidate_input_epoch.saturating_add(1);
-                bank_input_revision.insert(bank_pk, candidate_input_epoch);
-                candidate_force_rearm.extend(affected_accounts.iter().copied());
-                if let Some((_, t_rx_ns, event_slot)) = updated_bank_event {
-                    if sweep_batch_started_ns.is_none() {
-                        sweep_batch_started_ns = Some(clock.now_ns());
+            #[cfg(feature = "crate_health")]
+            if let Some(bank_pk) = updated_bank {
+                let affected_accounts: Vec<Pubkey> =
+                    reverse_index.accounts_for_bank(&bank_pk).copied().collect();
+                if use_threshold_trigger {
+                    for account in affected_accounts.iter().copied() {
+                        threshold_index.remove_account(&account);
+                        threshold_fallback.insert(account);
+                        threshold_bootstrap.push_back(account);
                     }
-                    sweep_dirty_banks
-                        .entry(bank_pk)
-                        .and_modify(|w| {
-                            if event_slot > w.1 || (event_slot == w.1 && t_rx_ns > w.0) {
-                                *w = (t_rx_ns, event_slot);
-                            }
-                        })
-                        .or_insert((t_rx_ns, event_slot));
-                    sweep_batch_events = sweep_batch_events.saturating_add(1);
-                    sweep_max_dirty_banks = sweep_max_dirty_banks.max(sweep_dirty_banks.len());
-                }
-            }
-
-            let view = StateView(&st);
-            match bank_from_state(&view, &program, &bank_pk).filter(|b| b.group == group) {
-                Some(bank) => match bank_observation_keys(&bank) {
-                    Ok(_) => {
-                        let deps =
-                            darkbot_project0::health::dependency_keys(&view, &program, &[bank_pk]);
-                        reverse_index.set_bank_oracles(bank_pk, &deps);
-                    }
-                    Err(e) => {
-                        reverse_index.set_bank_oracles(bank_pk, &[]);
-                        eprintln!(
-                            "reverse_index_bank_unsupported: bank={} error={}",
-                            bank_pk, e
-                        );
-                    }
-                },
-                None => reverse_index.set_bank_oracles(bank_pk, &[]),
-            }
-        }
-
-        // [FIX-34][FIX-35] Nach dem Anwenden: zeigt die NEUE Bank-Konfiguration auf nicht abonnierte Accounts?
-        #[cfg(feature = "crate_health")]
-        if let Some(bk) = updated_bank {
-            let view = StateView(&st);
-            let required_now = darkbot_project0::health::dependency_keys(&view, &program, &[bk]);
-            let optional_now = ata_candidates_for_bank(&view, &program, &bk, &liquidator);
-            let new_required: Vec<Pubkey> = required_now.into_iter().filter(|k| !required_set.contains(k)).collect();
-            let new_optional: Vec<Pubkey> = optional_now.into_iter().filter(|k| !subscribed.contains(k)).collect();
-            if !new_required.is_empty() || !new_optional.is_empty() {
-                eprintln!(
-                    "dependency set changed: +{} required +{} optional → HALT, resubscribe; Recovery follows StreamReady",
-                    new_required.len(),
-                    new_optional.len()
-                );
-                st.halt(darkbot_common::error::HaltReason::StateGap);
-                ingress_session.request();
-                required_set.extend(new_required.iter().copied());
-                optional_set.extend(new_optional.iter().copied());
-                required_dependency_keys = required_set.iter().copied().collect();
-                optional_dependency_keys = optional_set.iter().copied().collect();
-                required_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
-                optional_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
-                subscribed = required_set.union(&optional_set).copied().collect();
-                if let Ok(mut g) = dep_shared.lock() { *g = required_dependency_keys.clone(); }
-                if let Ok(mut g) = opt_shared.lock() { *g = optional_dependency_keys.clone(); }
-                let mut all_keys: Vec<Pubkey> = subscribed.iter().copied().collect();
-                all_keys.sort_unstable_by_key(|k| k.to_bytes());
-                let sub2 = Subscription {
-                    programs: vec![],
-                    program_filters: vec![
-                        (program, liability_account_filters(&group)),
-                        (program, bank_filters(&group)),
-                    ],
-                    accounts: all_keys,
-                    slots: true,
-                    roots: true,
-                    transactions_mentioning: vec![],
-                    logs_mentioning: vec![],
-                };
-                ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
-            }
-        }
-        #[cfg(feature = "crate_health")]
-        if st.run_state().is_tradable() {
-            if let Some((dependency, t_rx_ns, event_slot)) = dependency_update {
-                oracle_dependency_updates = oracle_dependency_updates.saturating_add(1);
-                let now_s = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
-                let view = StateView(&st);
-                let engine = darkbot_project0::health::crate_impl::CrateHealth {
-                    state: &view,
-                    group,
-                };
-                let banks: Vec<Pubkey> =
-                    reverse_index.banks_for_oracle(&dependency).copied().collect();
-
-                // [FIX-134] Oracle and integration source writes are causal candidate inputs.
-                // A global epoch makes multiple writes inside one slot distinguishable and
-                // lets a candidate collapse several changed Banks to a single newest revision.
-                if !banks.is_empty() {
+                    threshold_ready = threshold_bootstrap.is_empty();
+                } else if st.run_state().is_tradable() {
+                    // A canonical Bank write can change weights, fees, operational state or
+                    // integration configuration without changing the debtor account bytes.
+                    // [FIX-134] Record a causal revision in addition to the existing force-rearm.
                     candidate_input_epoch = candidate_input_epoch.saturating_add(1);
-                    for bank in banks.iter().copied() {
-                        bank_input_revision.insert(bank, candidate_input_epoch);
-                    }
-                }
-
-                if !use_threshold_trigger {
-                    if sweep_batch_started_ns.is_none() {
-                        sweep_batch_started_ns = Some(clock.now_ns());
-                    }
-                    for bank in banks {
+                    bank_input_revision.insert(bank_pk, candidate_input_epoch);
+                    candidate_force_rearm.extend(affected_accounts.iter().copied());
+                    if let Some((_, t_rx_ns, event_slot)) = updated_bank_event {
+                        if sweep_batch_started_ns.is_none() {
+                            sweep_batch_started_ns = Some(clock.now_ns());
+                        }
                         sweep_dirty_banks
-                            .entry(bank)
+                            .entry(bank_pk)
                             .and_modify(|w| {
                                 if event_slot > w.1 || (event_slot == w.1 && t_rx_ns > w.0) {
                                     *w = (t_rx_ns, event_slot);
                                 }
                             })
                             .or_insert((t_rx_ns, event_slot));
+                        sweep_batch_events = sweep_batch_events.saturating_add(1);
+                        sweep_max_dirty_banks = sweep_max_dirty_banks.max(sweep_dirty_banks.len());
                     }
-                    sweep_batch_events = sweep_batch_events.saturating_add(1);
-                    sweep_max_dirty_banks = sweep_max_dirty_banks.max(sweep_dirty_banks.len());
-                } else {
-                let mut candidates: HashSet<Pubkey> = HashSet::new();
-                for bank in banks {
-                    let all_accounts: Vec<Pubkey> =
-                        reverse_index.accounts_for_bank(&bank).copied().collect();
-                    if threshold_ready {
-                        match engine.maintenance_risk_price_bits(&bank, now_s, event_slot) {
-                            Ok((asset_price, liability_price)) => {
-                                candidates.extend(
-                                    threshold_index
-                                        .candidates(&bank, asset_price, liability_price, 0)
-                                );
-                                candidates.extend(
-                                    all_accounts
-                                        .iter()
-                                        .copied()
-                                        .filter(|a| threshold_fallback.contains(a))
-                                );
-                            }
-                            Err(e) => {
-                                // [R126] Integration pricing may be stale in canonical state even
-                                // though the exact pre-Start refresh is deterministic. Project one
-                                // Bank refresh once, then threshold-select accounts from that fresh
-                                // pricing state instead of waking the whole Bank immediately.
-                                if let Some(existing) = oracle_bank_projection_pending.get_mut(&bank) {
-                                    *existing = (t_rx_ns, event_slot);
-                                    eprintln!(
+                }
+
+                let view = StateView(&st);
+                match bank_from_state(&view, &program, &bank_pk).filter(|b| b.group == group) {
+                    Some(bank) => match bank_observation_keys(&bank) {
+                        Ok(_) => {
+                            let deps = darkbot_project0::health::dependency_keys(
+                                &view,
+                                &program,
+                                &[bank_pk],
+                            );
+                            reverse_index.set_bank_oracles(bank_pk, &deps);
+                        }
+                        Err(e) => {
+                            reverse_index.set_bank_oracles(bank_pk, &[]);
+                            eprintln!(
+                                "reverse_index_bank_unsupported: bank={} error={}",
+                                bank_pk, e
+                            );
+                        }
+                    },
+                    None => reverse_index.set_bank_oracles(bank_pk, &[]),
+                }
+            }
+
+            // [FIX-34][FIX-35] Nach dem Anwenden: zeigt die NEUE Bank-Konfiguration auf nicht abonnierte Accounts?
+            #[cfg(feature = "crate_health")]
+            if let Some(bk) = updated_bank {
+                let view = StateView(&st);
+                let required_now =
+                    darkbot_project0::health::dependency_keys(&view, &program, &[bk]);
+                let optional_now = ata_candidates_for_bank(&view, &program, &bk, &liquidator);
+                let new_required: Vec<Pubkey> = required_now
+                    .into_iter()
+                    .filter(|k| !required_set.contains(k))
+                    .collect();
+                let new_optional: Vec<Pubkey> = optional_now
+                    .into_iter()
+                    .filter(|k| !subscribed.contains(k))
+                    .collect();
+                if !new_required.is_empty() || !new_optional.is_empty() {
+                    eprintln!(
+                    "dependency set changed: +{} required +{} optional → HALT, resubscribe; Recovery follows StreamReady",
+                    new_required.len(),
+                    new_optional.len()
+                );
+                    st.halt(darkbot_common::error::HaltReason::StateGap);
+                    ingress_session.request();
+                    required_set.extend(new_required.iter().copied());
+                    optional_set.extend(new_optional.iter().copied());
+                    required_dependency_keys = required_set.iter().copied().collect();
+                    optional_dependency_keys = optional_set.iter().copied().collect();
+                    required_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
+                    optional_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
+                    subscribed = required_set.union(&optional_set).copied().collect();
+                    if let Ok(mut g) = dep_shared.lock() {
+                        *g = required_dependency_keys.clone();
+                    }
+                    if let Ok(mut g) = opt_shared.lock() {
+                        *g = optional_dependency_keys.clone();
+                    }
+                    let mut all_keys: Vec<Pubkey> = subscribed.iter().copied().collect();
+                    all_keys.sort_unstable_by_key(|k| k.to_bytes());
+                    let sub2 = Subscription {
+                        programs: vec![],
+                        program_filters: vec![
+                            (program, liability_account_filters(&group)),
+                            (program, bank_filters(&group)),
+                        ],
+                        accounts: all_keys,
+                        slots: true,
+                        roots: true,
+                        transactions_mentioning: vec![],
+                        logs_mentioning: vec![],
+                    };
+                    ingress_session = spawn_ingress(sub2, producer.clone(), halt.clone())?;
+                }
+            }
+            #[cfg(feature = "crate_health")]
+            if st.run_state().is_tradable() {
+                if let Some((dependency, t_rx_ns, event_slot)) = dependency_update {
+                    oracle_dependency_updates = oracle_dependency_updates.saturating_add(1);
+                    let now_s = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let view = StateView(&st);
+                    let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                        state: &view,
+                        group,
+                    };
+                    let banks: Vec<Pubkey> = reverse_index
+                        .banks_for_oracle(&dependency)
+                        .copied()
+                        .collect();
+
+                    // [FIX-134] Oracle and integration source writes are causal candidate inputs.
+                    // A global epoch makes multiple writes inside one slot distinguishable and
+                    // lets a candidate collapse several changed Banks to a single newest revision.
+                    if !banks.is_empty() {
+                        candidate_input_epoch = candidate_input_epoch.saturating_add(1);
+                        for bank in banks.iter().copied() {
+                            bank_input_revision.insert(bank, candidate_input_epoch);
+                        }
+                    }
+
+                    if !use_threshold_trigger {
+                        if sweep_batch_started_ns.is_none() {
+                            sweep_batch_started_ns = Some(clock.now_ns());
+                        }
+                        for bank in banks {
+                            sweep_dirty_banks
+                                .entry(bank)
+                                .and_modify(|w| {
+                                    if event_slot > w.1 || (event_slot == w.1 && t_rx_ns > w.0) {
+                                        *w = (t_rx_ns, event_slot);
+                                    }
+                                })
+                                .or_insert((t_rx_ns, event_slot));
+                        }
+                        sweep_batch_events = sweep_batch_events.saturating_add(1);
+                        sweep_max_dirty_banks = sweep_max_dirty_banks.max(sweep_dirty_banks.len());
+                    } else {
+                        let mut candidates: HashSet<Pubkey> = HashSet::new();
+                        for bank in banks {
+                            let all_accounts: Vec<Pubkey> =
+                                reverse_index.accounts_for_bank(&bank).copied().collect();
+                            if threshold_ready {
+                                match engine.maintenance_risk_price_bits(&bank, now_s, event_slot) {
+                                    Ok((asset_price, liability_price)) => {
+                                        candidates.extend(threshold_index.candidates(
+                                            &bank,
+                                            asset_price,
+                                            liability_price,
+                                            0,
+                                        ));
+                                        candidates.extend(
+                                            all_accounts
+                                                .iter()
+                                                .copied()
+                                                .filter(|a| threshold_fallback.contains(a)),
+                                        );
+                                    }
+                                    Err(e) => {
+                                        // [R126] Integration pricing may be stale in canonical state even
+                                        // though the exact pre-Start refresh is deterministic. Project one
+                                        // Bank refresh once, then threshold-select accounts from that fresh
+                                        // pricing state instead of waking the whole Bank immediately.
+                                        if let Some(existing) =
+                                            oracle_bank_projection_pending.get_mut(&bank)
+                                        {
+                                            *existing = (t_rx_ns, event_slot);
+                                            eprintln!(
                                         "oracle_bank_projection_coalesced: dependency={} bank={} error={}",
                                         dependency, bank, e
                                     );
-                                } else {
-                                    let Some(bank_record) = st.get(&bank) else {
-                                        oracle_price_fallbacks =
-                                            oracle_price_fallbacks.saturating_add(1);
-                                        candidates.extend(all_accounts);
-                                        continue;
-                                    };
-                                    let Some(bank_state) = bank_from_state(&view, &program, &bank) else {
-                                        oracle_price_fallbacks =
-                                            oracle_price_fallbacks.saturating_add(1);
-                                        candidates.extend(all_accounts);
-                                        continue;
-                                    };
-                                    let refreshes =
+                                        } else {
+                                            let Some(bank_record) = st.get(&bank) else {
+                                                oracle_price_fallbacks =
+                                                    oracle_price_fallbacks.saturating_add(1);
+                                                candidates.extend(all_accounts);
+                                                continue;
+                                            };
+                                            let Some(bank_state) =
+                                                bank_from_state(&view, &program, &bank)
+                                            else {
+                                                oracle_price_fallbacks =
+                                                    oracle_price_fallbacks.saturating_add(1);
+                                                candidates.extend(all_accounts);
+                                                continue;
+                                            };
+                                            let refreshes =
                                         match darkbot_project0::integration::refresh_plan_for_bank(
                                             &view,
                                             &bank_state,
@@ -2647,117 +2866,123 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 continue;
                                             }
                                         };
-                                    let targets =
-                                        darkbot_project0::projection::projection_targets(&refreshes);
-                                    if targets.is_empty() {
-                                        oracle_price_fallbacks =
-                                            oracle_price_fallbacks.saturating_add(1);
-                                        candidates.extend(all_accounts);
-                                        continue;
-                                    }
-                                    let Some(bh) = blockhash.fresh(clock.now_ns(), 30_000_000_000) else {
-                                        oracle_price_fallbacks =
-                                            oracle_price_fallbacks.saturating_add(1);
-                                        candidates.extend(all_accounts);
-                                        continue;
-                                    };
-                                    let projection_plan = tx::TxPlan {
-                                        version: tx::BuildVersion::V0,
-                                        payer: liquidator,
-                                        instructions: refreshes,
-                                        lookup_tables: vec![],
-                                        resources,
-                                    };
-                                    let mut built = match tx::build(
-                                        &projection_plan,
-                                        bh.hash,
-                                        &TxLimits::default(),
-                                    ) {
-                                        Ok(v) => v,
-                                        Err(build_error) => {
-                                            oracle_price_fallbacks =
-                                                oracle_price_fallbacks.saturating_add(1);
-                                            eprintln!(
+                                            let targets =
+                                                darkbot_project0::projection::projection_targets(
+                                                    &refreshes,
+                                                );
+                                            if targets.is_empty() {
+                                                oracle_price_fallbacks =
+                                                    oracle_price_fallbacks.saturating_add(1);
+                                                candidates.extend(all_accounts);
+                                                continue;
+                                            }
+                                            let Some(bh) =
+                                                blockhash.fresh(clock.now_ns(), 30_000_000_000)
+                                            else {
+                                                oracle_price_fallbacks =
+                                                    oracle_price_fallbacks.saturating_add(1);
+                                                candidates.extend(all_accounts);
+                                                continue;
+                                            };
+                                            let projection_plan = tx::TxPlan {
+                                                version: tx::BuildVersion::V0,
+                                                payer: liquidator,
+                                                instructions: refreshes,
+                                                lookup_tables: vec![],
+                                                resources,
+                                            };
+                                            let mut built = match tx::build(
+                                                &projection_plan,
+                                                bh.hash,
+                                                &TxLimits::default(),
+                                            ) {
+                                                Ok(v) => v,
+                                                Err(build_error) => {
+                                                    oracle_price_fallbacks =
+                                                        oracle_price_fallbacks.saturating_add(1);
+                                                    eprintln!(
                                                 "oracle_bank_projection_build_fallback: dependency={} bank={} error={}",
                                                 dependency, bank, build_error
                                             );
-                                            candidates.extend(all_accounts);
-                                            continue;
-                                        }
-                                    };
-                                    if let Err(sign_error) = tx::sign(&mut built, &[&payer]) {
-                                        oracle_price_fallbacks =
-                                            oracle_price_fallbacks.saturating_add(1);
-                                        eprintln!(
+                                                    candidates.extend(all_accounts);
+                                                    continue;
+                                                }
+                                            };
+                                            if let Err(sign_error) = tx::sign(&mut built, &[&payer])
+                                            {
+                                                oracle_price_fallbacks =
+                                                    oracle_price_fallbacks.saturating_add(1);
+                                                eprintln!(
                                             "oracle_bank_projection_sign_fallback: dependency={} bank={} error={}",
                                             dependency, bank, sign_error
                                         );
-                                        candidates.extend(all_accounts);
-                                        continue;
-                                    }
-                                    let work = OraclePriceProjectionWork {
-                                        bank,
-                                        base_slot: bank_record.slot,
-                                        base_bank_hash: hash(&bank_record.data),
-                                        tx: built.tx,
-                                        targets,
-                                    };
-                                    match remote.oracle_price_projection_jobs.try_push(work) {
-                                        Ok(()) => {
-                                            oracle_bank_projection_pending
-                                                .insert(bank, (t_rx_ns, event_slot));
-                                            oracle_bank_projection_submitted =
-                                                oracle_bank_projection_submitted.saturating_add(1);
-                                            eprintln!(
+                                                candidates.extend(all_accounts);
+                                                continue;
+                                            }
+                                            let work = OraclePriceProjectionWork {
+                                                bank,
+                                                base_slot: bank_record.slot,
+                                                base_bank_hash: hash(&bank_record.data),
+                                                tx: built.tx,
+                                                targets,
+                                            };
+                                            match remote.oracle_price_projection_jobs.try_push(work)
+                                            {
+                                                Ok(()) => {
+                                                    oracle_bank_projection_pending
+                                                        .insert(bank, (t_rx_ns, event_slot));
+                                                    oracle_bank_projection_submitted =
+                                                        oracle_bank_projection_submitted
+                                                            .saturating_add(1);
+                                                    eprintln!(
                                                 "oracle_bank_projection_pending: dependency={} bank={} price_error={}",
                                                 dependency, bank, e
                                             );
-                                        }
-                                        Err(ChannelError::Full(_)) => {
-                                            oracle_price_fallbacks =
-                                                oracle_price_fallbacks.saturating_add(1);
-                                            candidates.extend(all_accounts);
-                                        }
-                                        Err(ChannelError::Disconnected(_)) => {
-                                            return Err(
+                                                }
+                                                Err(ChannelError::Full(_)) => {
+                                                    oracle_price_fallbacks =
+                                                        oracle_price_fallbacks.saturating_add(1);
+                                                    candidates.extend(all_accounts);
+                                                }
+                                                Err(ChannelError::Disconnected(_)) => {
+                                                    return Err(
                                                 "oracle price projection RPC worker disconnected"
                                                     .into(),
                                             );
+                                                }
+                                            }
                                         }
                                     }
                                 }
+                            } else {
+                                candidates.extend(all_accounts);
                             }
                         }
-                    } else {
-                        candidates.extend(all_accounts);
+
+                        let mt0_len_before = oracle_detect_order.len(); // [MT0]
+                        let count = enqueue_oracle_accounts(
+                            candidates,
+                            t_rx_ns,
+                            event_slot,
+                            "oracle_threshold",
+                            &mut oracle_detect_order,
+                            &mut oracle_detect_pending,
+                            &mut oracle_enqueued,
+                            &mut oracle_coalesced,
+                            &mut oracle_max_pending,
+                        );
+                        for _ in mt0_len_before..oracle_detect_order.len() {
+                            mt0_order_rx.push_back(t_rx_ns);
+                        }
+                        oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
                     }
                 }
-
-                let mt0_len_before = oracle_detect_order.len(); // [MT0]
-                let count = enqueue_oracle_accounts(
-                    candidates,
-                    t_rx_ns,
-                    event_slot,
-                    "oracle_threshold",
-                    &mut oracle_detect_order,
-                    &mut oracle_detect_pending,
-                    &mut oracle_enqueued,
-                    &mut oracle_coalesced,
-                    &mut oracle_max_pending,
-                );
-                for _ in mt0_len_before..oracle_detect_order.len() {
-                    mt0_order_rx.push_back(t_rx_ns);
-                }
-                oracle_candidate_hits =
-                    oracle_candidate_hits.saturating_add(count as u64);
-                }
             }
-        }
 
-        if program_upgrade_latched {
-            st.halt(darkbot_common::error::HaltReason::ProgramUpgrade);
-            detect = None;
-        }
+            if program_upgrade_latched {
+                st.halt(darkbot_common::error::HaltReason::ProgramUpgrade);
+                detect = None;
+            }
         } else {
             #[cfg(feature = "crate_health")]
             {
@@ -2799,9 +3024,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         mt0_owner.enter(darkbot_common::mt0::OwnerCat::Detect);
         if let Some((acct, t_rx, slot, trigger)) = detect {
-            darkbot_common::mt0::MT0.record_queue_wait(darkbot_common::mt0::TriggerClass::from_trigger(trigger), clock.now_ns().saturating_sub(t_rx), None);
+            darkbot_common::mt0::MT0.record_queue_wait(
+                darkbot_common::mt0::TriggerClass::from_trigger(trigger),
+                clock.now_ns().saturating_sub(t_rx),
+                None,
+            );
             // Health über das Crate (Feature crate_health), sonst fail-closed NoHealth → Unavailable-Record.
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             let view = StateView(&st);
 
             // [FIX-111][R6] Integration refreshes are projected by an isolated RPC worker first.
@@ -2810,9 +3042,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(feature = "crate_health")]
             let projected_owned = {
                 let refreshes = match darkbot_project0::integration::refresh_plan_for_account(
-                    &view,
-                    &program,
-                    &acct,
+                    &view, &program, &acct,
                 ) {
                     Ok(v) => v,
                     Err(e) => {
@@ -2833,12 +3063,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     None
                 } else {
                     let Some(base_record) = st.get(&acct) else {
-                        let _ = writeln!(records, "{}", serde_json::json!({
-                            "account": acct.to_string(),
-                            "decision": "Skip",
-                            "loss": "IntegrationRefresh",
-                            "reason": "candidate account disappeared before projection"
-                        }));
+                        let _ = writeln!(
+                            records,
+                            "{}",
+                            serde_json::json!({
+                                "account": acct.to_string(),
+                                "decision": "Skip",
+                                "loss": "IntegrationRefresh",
+                                "reason": "candidate account disappeared before projection"
+                            })
+                        );
                         continue;
                     };
                     let base_account_hash = hash(&base_record.data);
@@ -2861,51 +3095,65 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         ) {
                             Ok(p) => Some(p),
                             Err(e) => {
-                                let _ = writeln!(records, "{}", serde_json::json!({
-                                    "account": acct.to_string(),
-                                    "decision": "Skip",
-                                    "loss": "IntegrationRefresh",
-                                    "reason": format!("projected state invalid: {e}")
-                                }));
+                                let _ = writeln!(
+                                    records,
+                                    "{}",
+                                    serde_json::json!({
+                                        "account": acct.to_string(),
+                                        "decision": "Skip",
+                                        "loss": "IntegrationRefresh",
+                                        "reason": format!("projected state invalid: {e}")
+                                    })
+                                );
                                 continue;
                             }
                         }
                     } else {
                         if !projection_pending.contains(&acct) {
-                            let targets = match darkbot_project0::integration::projection_targets_for_account(
-                                &view,
-                                &program,
-                                &acct,
-                                &refreshes,
-                            ) {
-                                Ok(v) if !v.is_empty() => v,
-                                Ok(_) => {
-                                    let _ = writeln!(records, "{}", serde_json::json!({
-                                        "account": acct.to_string(),
-                                        "decision": "Skip",
-                                        "loss": "IntegrationRefresh",
-                                        "reason": "integration projection produced zero targets"
-                                    }));
-                                    continue;
-                                }
-                                Err(e) => {
-                                    let _ = writeln!(records, "{}", serde_json::json!({
-                                        "account": acct.to_string(),
-                                        "decision": "Skip",
-                                        "loss": "IntegrationRefresh",
-                                        "reason": format!("projection targets: {e}")
-                                    }));
-                                    continue;
-                                }
-                            };
+                            let targets =
+                                match darkbot_project0::integration::projection_targets_for_account(
+                                    &view, &program, &acct, &refreshes,
+                                ) {
+                                    Ok(v) if !v.is_empty() => v,
+                                    Ok(_) => {
+                                        let _ = writeln!(
+                                            records,
+                                            "{}",
+                                            serde_json::json!({
+                                                "account": acct.to_string(),
+                                                "decision": "Skip",
+                                                "loss": "IntegrationRefresh",
+                                                "reason": "integration projection produced zero targets"
+                                            })
+                                        );
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        let _ = writeln!(
+                                            records,
+                                            "{}",
+                                            serde_json::json!({
+                                                "account": acct.to_string(),
+                                                "decision": "Skip",
+                                                "loss": "IntegrationRefresh",
+                                                "reason": format!("projection targets: {e}")
+                                            })
+                                        );
+                                        continue;
+                                    }
+                                };
 
                             let Some(bh) = blockhash.fresh(clock.now_ns(), 30_000_000_000) else {
-                                let _ = writeln!(records, "{}", serde_json::json!({
-                                    "account": acct.to_string(),
-                                    "decision": "Skip",
-                                    "loss": "IntegrationRefresh",
-                                    "reason": "projection blockhash stale"
-                                }));
+                                let _ = writeln!(
+                                    records,
+                                    "{}",
+                                    serde_json::json!({
+                                        "account": acct.to_string(),
+                                        "decision": "Skip",
+                                        "loss": "IntegrationRefresh",
+                                        "reason": "projection blockhash stale"
+                                    })
+                                );
                                 continue;
                             };
 
@@ -2916,29 +3164,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 lookup_tables: vec![],
                                 resources,
                             };
-                            let mut built = match tx::build(
-                                &projection_plan,
-                                bh.hash,
-                                &TxLimits::default(),
-                            ) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    let _ = writeln!(records, "{}", serde_json::json!({
+                            let mut built =
+                                match tx::build(&projection_plan, bh.hash, &TxLimits::default()) {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        let _ = writeln!(
+                                            records,
+                                            "{}",
+                                            serde_json::json!({
+                                                "account": acct.to_string(),
+                                                "decision": "Skip",
+                                                "loss": "IntegrationRefresh",
+                                                "reason": format!("projection tx build: {e}")
+                                            })
+                                        );
+                                        continue;
+                                    }
+                                };
+                            if let Err(e) = tx::sign(&mut built, &[&payer]) {
+                                let _ = writeln!(
+                                    records,
+                                    "{}",
+                                    serde_json::json!({
                                         "account": acct.to_string(),
                                         "decision": "Skip",
                                         "loss": "IntegrationRefresh",
-                                        "reason": format!("projection tx build: {e}")
-                                    }));
-                                    continue;
-                                }
-                            };
-                            if let Err(e) = tx::sign(&mut built, &[&payer]) {
-                                let _ = writeln!(records, "{}", serde_json::json!({
-                                    "account": acct.to_string(),
-                                    "decision": "Skip",
-                                    "loss": "IntegrationRefresh",
-                                    "reason": format!("projection tx sign: {e}")
-                                }));
+                                        "reason": format!("projection tx sign: {e}")
+                                    })
+                                );
                                 continue;
                             }
 
@@ -2955,12 +3208,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     projection_pending.insert(acct);
                                 }
                                 Err(ChannelError::Full(_)) => {
-                                    let _ = writeln!(records, "{}", serde_json::json!({
-                                        "account": acct.to_string(),
-                                        "decision": "Skip",
-                                        "loss": "IntegrationRefresh",
-                                        "reason": "projection worker queue full"
-                                    }));
+                                    let _ = writeln!(
+                                        records,
+                                        "{}",
+                                        serde_json::json!({
+                                            "account": acct.to_string(),
+                                            "decision": "Skip",
+                                            "loss": "IntegrationRefresh",
+                                            "reason": "projection worker queue full"
+                                        })
+                                    );
                                 }
                                 Err(ChannelError::Disconnected(_)) => {
                                     return Err("projection RPC worker disconnected".into());
@@ -2968,9 +3225,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         let integration_kinds = darkbot_project0::integration::kinds_for_account(
-                            &view,
-                            &program,
-                            &acct,
+                            &view, &program, &acct,
                         )
                         .unwrap_or_default()
                         .into_iter()
@@ -2978,24 +3233,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .collect::<Vec<_>>();
                         let pricing_integration_kinds =
                             darkbot_project0::integration::pricing_kinds_for_account(
-                                &view,
-                                &program,
-                                &acct,
+                                &view, &program, &acct,
                             )
                             .unwrap_or_default()
                             .into_iter()
                             .map(darkbot_project0::integration::kind_name)
                             .collect::<Vec<_>>();
-                        let _ = writeln!(records, "{}", serde_json::json!({
-                            "account": acct.to_string(),
-                            "trigger": trigger,
-                            "slot": slot,
-                            "decision": "Skip",
-                            "loss": "IntegrationRefresh",
-                            "integration_kinds": integration_kinds,
-                            "pricing_integration_kinds": pricing_integration_kinds,
-                            "reason": "integration projection pending"
-                        }));
+                        let _ = writeln!(
+                            records,
+                            "{}",
+                            serde_json::json!({
+                                "account": acct.to_string(),
+                                "trigger": trigger,
+                                "slot": slot,
+                                "decision": "Skip",
+                                "loss": "IntegrationRefresh",
+                                "integration_kinds": integration_kinds,
+                                "pricing_integration_kinds": pricing_integration_kinds,
+                                "reason": "integration projection pending"
+                            })
+                        );
                         continue;
                     }
                 }
@@ -3010,19 +3267,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // [FIX-119][R6] Use both coordinates of the exact simulation Clock for every
             // projected protocol calculation. The original slot remains trigger provenance.
             #[cfg(feature = "crate_health")]
-            let (protocol_now, protocol_slot) = projected_owned.as_ref()
-                .map(|p| p.evaluation_time()).unwrap_or((now, slot));
+            let (protocol_now, protocol_slot) = projected_owned
+                .as_ref()
+                .map(|p| p.evaluation_time())
+                .unwrap_or((now, slot));
             #[cfg(not(feature = "crate_health"))]
             let (protocol_now, protocol_slot) = (now, slot);
 
             #[cfg(feature = "crate_health")]
-            let engine = darkbot_project0::health::crate_impl::CrateHealth { state: eval_state, group };
+            let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                state: eval_state,
+                group,
+            };
             #[cfg(not(feature = "crate_health"))]
             let engine = darkbot_project0::health::NoHealth;
             #[cfg(feature = "crate_health")]
             let inventory = |bank_key: &Pubkey| -> u64 {
-                let Some(bank) = bank_from_state(eval_state, &program, bank_key) else { return 0 };
-                validated_liquidator_ata(eval_state, &bank.mint, &liquidator).map(|(_, amount)| amount).unwrap_or(0)
+                let Some(bank) = bank_from_state(eval_state, &program, bank_key) else {
+                    return 0;
+                };
+                validated_liquidator_ata(eval_state, &bank.mint, &liquidator)
+                    .map(|(_, amount)| amount)
+                    .unwrap_or(0)
             };
             #[cfg(feature = "crate_health")]
             let ata = |mint: &Pubkey| -> Option<Pubkey> {
@@ -3045,8 +3311,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
             };
             #[cfg(feature = "crate_health")]
-            let lamports_to_usd_micro = |lamports| sizer_for_cost
-                .native_amount_cost_usd_micro(&sol_bank, lamports, protocol_now as i64, protocol_slot).ok();
+            let lamports_to_usd_micro = |lamports| {
+                sizer_for_cost
+                    .native_amount_cost_usd_micro(
+                        &sol_bank,
+                        lamports,
+                        protocol_now as i64,
+                        protocol_slot,
+                    )
+                    .ok()
+            };
             #[cfg(feature = "crate_health")]
             let builder = P0ReceivershipBuilder {
                 state: eval_state,
@@ -3064,14 +3338,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 lamports_to_usd_micro: &lamports_to_usd_micro,
                 jito_tip_usd_micro: 0,
                 jito_tip_lamports: 0,
-                zero_prefund_qualified: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false).unwrap_or(false)
-                    || (mode == "shadow" && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false).unwrap_or(false)),
+                zero_prefund_qualified: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false)
+                    .unwrap_or(false)
+                    || (mode == "shadow"
+                        && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false)
+                            .unwrap_or(false)),
                 path: Path::Rpc,
                 resources,
                 limits: TxLimits::default(),
             };
             let _ = &view;
-            if let Some(day) = ledger.on_account_update(now) { if let Ok(j) = serde_json::to_string(&day) { let _ = writeln!(summaries, "{}", j); } }
+            if let Some(day) = ledger.on_account_update(now) {
+                if let Ok(j) = serde_json::to_string(&day) {
+                    let _ = writeln!(summaries, "{}", j);
+                }
+            }
             #[cfg(feature = "crate_health")]
             let health_started_ns = clock.now_ns();
             darkbot_common::mt0::MT0.count_health(darkbot_common::mt0::HealthSite::DetectConsumer); // [MT0]
@@ -3099,7 +3380,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "maint_health_bits": h.maintenance_health,
                         "equity_assets_bits": h.equity_assets,
                         "bad_debt": h.is_bad_debt,
-                    }).to_string()
+                    })
+                    .to_string()
                 }
                 Err(HealthError::Unavailable) => {
                     ledger.on_health(false, false);
@@ -3111,7 +3393,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "evaluation_slot": protocol_slot,
                         "evaluation_unix_s": protocol_now,
                         "decision": "Unavailable",
-                    }).to_string()
+                    })
+                    .to_string()
                 }
                 Err(e) => {
                     ledger.on_health(false, matches!(e, HealthError::Unsupported(_)));
@@ -3123,21 +3406,46 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "evaluation_slot": protocol_slot,
                         "evaluation_unix_s": protocol_now,
                         "error": e.to_string(),
-                    }).to_string()
+                    })
+                    .to_string()
                 }
             };
             let _ = writeln!(records, "{}", line);
             // [FIX-1] Pipeline (Shadow): Health → Pläne → Economics → Build → Sign → Send-Boundary.
             let mut pipe = Pipeline {
-                mode: Mode::Shadow, clock: &clock, health: &engine, builder: &builder, submitter: &submitter,
-                safety: &mut safety, blockhash: &blockhash, payer: &payer, allowlist: &allowlist, failed_costs: &failed_costs,
-                limits: TxLimits::default(), resources, min_profit, blockhash_max_age_ns: 30_000_000_000, p7_passed: false,
-                freshness, tip_account: None, global_allowed: global_allowed.clone(), prereq_allowed: prereq_allowed.clone(), slot_watch: &slot_watch,
+                mode: Mode::Shadow,
+                clock: &clock,
+                health: &engine,
+                builder: &builder,
+                submitter: &submitter,
+                safety: &mut safety,
+                blockhash: &blockhash,
+                payer: &payer,
+                allowlist: &allowlist,
+                failed_costs: &failed_costs,
+                limits: TxLimits::default(),
+                resources,
+                min_profit,
+                blockhash_max_age_ns: 30_000_000_000,
+                p7_passed: false,
+                freshness,
+                tip_account: None,
+                global_allowed: global_allowed.clone(),
+                prereq_allowed: prereq_allowed.clone(),
+                slot_watch: &slot_watch,
             };
             #[cfg(feature = "crate_health")]
             let pipeline_started_ns = clock.now_ns();
             darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::PipelineEvaluations, 1); // [MT0]
-            let mut rec = pipe.evaluate(acct, trigger, t_rx, protocol_now, protocol_slot, st.run_state().is_tradable());
+            let mut rec = pipe.evaluate(
+                acct,
+                trigger,
+                t_rx,
+                protocol_now,
+                protocol_slot,
+                st.run_state().is_tradable(),
+            );
+            rec.rx_slot = Some(slot); // trigger provenance differs from projected evaluation slot
             #[cfg(feature = "crate_health")]
             {
                 let elapsed = clock.now_ns().saturating_sub(pipeline_started_ns);
@@ -3153,11 +3461,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     rec.reason = Some("bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity".into());
                 }
             }
-            if rec.reason.as_deref().map(|s| s.contains("ReserveStale")).unwrap_or(false) {
+            if rec
+                .reason
+                .as_deref()
+                .map(|s| s.contains("ReserveStale"))
+                .unwrap_or(false)
+            {
                 rec.loss = Some(darkbot_runner::record::LossReason::IntegrationRefresh);
                 rec.reason = Some("integration reserve stale: required reserve refresh prerequisite missing before exact sizing".into());
             }
-            if let Ok(j) = serde_json::to_string(&rec) { let _ = writeln!(records, "{}", j); }
+            if let Some(h) = &econ {
+                h.emit(darkbot_runner::econ::Evidence::Shadow(Box::new(
+                    rec.clone(),
+                )));
+            }
+            if let Ok(j) = serde_json::to_string(&rec) {
+                let _ = writeln!(records, "{}", j);
+            }
             // [M3] Ledger + [M2] Watchlist (nur Shadow-relevante Entscheidungen).
             let sim_ok = match rec.decision {
                 Decision::ShadowReady | Decision::ShadowTechnicalReady => Some(true),
@@ -3171,26 +3491,44 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let health_liquidatable = matches!(&health_result, Ok(h) if h.liquidatable);
             if is_winner_relevant(health_liquidatable, rec.decision) {
                 let shadow_ready = matches!(rec.decision, Decision::ShadowReady);
-                let our_loss = if shadow_ready { None } else { Some(rec.loss.unwrap_or(darkbot_runner::record::LossReason::Build)) };
-                winner_tracker.observe(WinnerWatch {
-                    revision: 0, // assigned by the tracker
-                    account: acct,
-                    rx_slot: slot,
-                    detect_slot: slot,
-                    sign_slot: rec.sign_slot,
-                    expected_net: rec.net_profit,
-                    shadow_ready,
-                    our_loss,
-                    created_unix_s: now,
-                    next_check_unix_s: now,
-                }, now);
+                let our_loss = if shadow_ready {
+                    None
+                } else {
+                    Some(
+                        rec.loss
+                            .unwrap_or(darkbot_runner::record::LossReason::Build),
+                    )
+                };
+                winner_tracker.observe(
+                    WinnerWatch {
+                        revision: 0, // assigned by the tracker
+                        account: acct,
+                        rx_slot: slot,
+                        detect_slot: slot,
+                        sign_slot: rec.sign_slot,
+                        expected_net: rec.net_profit,
+                        shadow_ready,
+                        our_loss,
+                        created_unix_s: now,
+                        next_check_unix_s: now,
+                    },
+                    now,
+                );
             }
             // [FIX-18][FIX-23] Submitted und AmbiguousSubmission landen beide in der Reconciliation.
             if let (Some(sig), Some(exp)) = (rec.signature.as_deref(), rec.exposure) {
                 if let Ok(s) = sig.parse() {
-                    let sigs = rec.all_signatures.iter().filter_map(|x| x.parse().ok()).collect();
+                    let sigs = rec
+                        .all_signatures
+                        .iter()
+                        .filter_map(|x| x.parse().ok())
+                        .collect();
                     // [FIX-33] tatsächlich verwendeter Pfad aus dem Record, nicht die Adapter-Default.
-                    let path = match rec.path.as_deref() { Some("JITO_BUNDLE") => darkbot_solana::submit::SubmissionPath::JitoBundle, Some("JITO_SINGLE") => darkbot_solana::submit::SubmissionPath::JitoSingle, _ => darkbot_solana::submit::SubmissionPath::Rpc };
+                    let path = match rec.path.as_deref() {
+                        Some("JITO_BUNDLE") => darkbot_solana::submit::SubmissionPath::JitoBundle,
+                        Some("JITO_SINGLE") => darkbot_solana::submit::SubmissionPath::JitoSingle,
+                        _ => darkbot_solana::submit::SubmissionPath::Rpc,
+                    };
                     pending.push(ReconcileWork {
                         submission: PendingSubmission {
                             signature: s,
@@ -3211,10 +3549,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Bis dahin: nur State + Zähler, damit S1-LT/S2 messbar sind (Ledger).
         let update_total = counts.iter().sum::<u64>();
         mt0_owner.enter(darkbot_common::mt0::OwnerCat::Stats);
-        if update_total > 0 && update_total % 1000 == 0 && update_total != last_reported_update_total {
+        if update_total > 0
+            && update_total % 1000 == 0
+            && update_total != last_reported_update_total
+        {
             last_reported_update_total = update_total;
-            eprintln!("updates: accounts={} banks={} groups={} fee={} liqrec={} unknown={} channel={:?}",
-                counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], consumer.stats());
+            eprintln!(
+                "updates: accounts={} banks={} groups={} fee={} liqrec={} unknown={} channel={:?}",
+                counts[0],
+                counts[1],
+                counts[2],
+                counts[3],
+                counts[4],
+                counts[5],
+                consumer.stats()
+            );
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = winner_tracker.stats();
             eprintln!(
@@ -3298,12 +3647,115 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
+    if let Some(h) = &econ {
+        let ws = winner_tracker.stats();
+        h.shared.submission_attempts.store(
+            submitter
+                .attempts
+                .load(std::sync::atomic::Ordering::Relaxed),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        h.emit(darkbot_runner::econ::Evidence::ShadowStats(serde_json::json!({
+            "winner_watch_current": ws.len, "winner_watch_max": ws.max, "winner_watch_overflow":ws.overflow,
+            "winner_watch_errors":ws.errors,"winner_watch_resolved":ws.resolved,"winner_watch_expired":ws.expired,
+            "winner_queue_full_backoffs":ws.queue_full_backoffs,
+            "ingress_overflow":consumer.stats().overflow,
+            "winner_pending_at_deadline":ws.len,
+            "shadow_state_ready_at_shutdown":st.run_state().is_tradable(),
+            "remote_winner_queue_depth":remote.winner_jobs.stats().sent.saturating_sub(remote.winner_jobs.stats().received),
+            "remote_projection_queue_depth":remote.projection_jobs.stats().sent.saturating_sub(remote.projection_jobs.stats().received),
+        })));
+        shutdown.request();
+        ingress_session.request();
+    }
     // [FIX-46] Letzten (Teil-)Tag beim regulären Shutdown schreiben, damit das Ledger vollständig ist.
     let final_summary = ledger.finish();
-    if let Ok(j) = serde_json::to_string(&final_summary) { let _ = writeln!(summaries, "{}", j); }
+    if let Ok(j) = serde_json::to_string(&final_summary) {
+        let _ = writeln!(summaries, "{}", j);
+    }
     let _ = summaries.flush();
     let _ = records.flush();
     Ok(())
+}
+
+fn run_econ4h() -> Result<(), String> {
+    use darkbot_runner::{econ, market_observer};
+    use std::sync::atomic::Ordering;
+    let clock = Clock::new();
+    let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
+    let cfg = econ::EconConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
+    let mut market = market_observer::MarketConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
+    if let Ok(url) = std::env::var("P0_MARKET_WS_URL") {
+        market.ws_url = url;
+    }
+    market.duration_secs = cfg.duration_secs;
+    market.run_id = cfg.run_id.clone();
+    market.run_dir = cfg.run_dir.join("market");
+    let timeout = market.ready_timeout_secs
+        + cfg.duration_secs
+        + cfg.drain_secs
+        + market.drain_timeout_secs
+        + market.enrich.phase_max_secs
+        + 60;
+    let (handle, analytics) = econ::spawn(cfg, clock, &market)?;
+    let shadow_handle = handle.clone();
+    let shadow = std::thread::Builder::new()
+        .name("econ-shadow-owner".into())
+        .spawn(move || {
+            let result = run_shadow(clock, Some(shadow_handle.clone())).map_err(|e| e.to_string());
+            if result.is_err() || !shadow_handle.admission_closed() {
+                shadow_handle
+                    .shared
+                    .shadow_failed
+                    .store(true, Ordering::Release);
+                shadow_handle.shared.abort.store(true, Ordering::Release);
+            }
+            shadow_handle
+                .shared
+                .shadow_done
+                .store(true, Ordering::Release);
+            result
+        })
+        .map_err(|e| e.to_string())?;
+    let market_handle = handle.clone();
+    let observer = std::thread::Builder::new()
+        .name("econ-market".into())
+        .spawn(move || {
+            let result = market_observer::run_embedded(market, clock, Some(market_handle.clone()));
+            if result.is_err() {
+                market_handle
+                    .shared
+                    .market_failed
+                    .store(true, Ordering::Release);
+                market_handle.shared.abort.store(true, Ordering::Release);
+            }
+            market_handle
+                .shared
+                .market_done
+                .store(true, Ordering::Release);
+            result
+        })
+        .map_err(|e| e.to_string())?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(timeout);
+    while !shadow.is_finished() || !observer.is_finished() {
+        if analytics.is_finished() || std::time::Instant::now() >= deadline {
+            handle.shared.abort.store(true, Ordering::Release);
+            handle.shared.shadow_failed.store(true, Ordering::Release);
+            handle.shared.market_failed.store(true, Ordering::Release);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if shadow.is_finished() && !matches!(shadow.join(), Ok(Ok(()))) {
+        handle.shared.shadow_failed.store(true, Ordering::Release);
+    }
+    if observer.is_finished() && !matches!(observer.join(), Ok(Ok(()))) {
+        handle.shared.market_failed.store(true, Ordering::Release);
+    }
+    handle.shared.finish.store(true, Ordering::Release);
+    analytics
+        .join()
+        .map_err(|_| "C0-E1 analytics panic".to_string())?
 }
 
 #[cfg(all(test, feature = "crate_health"))]
@@ -3317,8 +3769,10 @@ mod integration_probe_tests {
         assert!(next_integration_probe(&mut queue, true, 100).is_none());
         assert_eq!(queue.len(), 1);
         // A long qualification backlog does not backdate a newly started probe.
-        assert_eq!(next_integration_probe(&mut queue, false, 9_000),
-            Some((account, 9_000, 42, "integration_target_probe")));
+        assert_eq!(
+            next_integration_probe(&mut queue, false, 9_000),
+            Some((account, 9_000, 42, "integration_target_probe"))
+        );
         assert!(queue.is_empty());
     }
 
@@ -3391,9 +3845,7 @@ mod integration_probe_tests {
     fn oracle_detect_returns_latest_coalesced_work_once() {
         let a = Pubkey::new_unique();
         let mut order = VecDeque::from([a]);
-        let mut pending = HashMap::from([
-            (a, (a, 200, 9, "oracle_threshold"))
-        ]);
+        let mut pending = HashMap::from([(a, (a, 200, 9, "oracle_threshold"))]);
         assert_eq!(
             next_oracle_detect(&mut order, &mut pending),
             Some((a, 200, 9, "oracle_threshold"))
@@ -3407,10 +3859,11 @@ mod integration_probe_tests {
         let stale = Pubkey::new_unique();
         let live = Pubkey::new_unique();
         let mut order = VecDeque::from([stale, live]);
-        let mut pending = HashMap::from([
-            (live, (live, 300, 10, "oracle_threshold"))
-        ]);
-        assert_eq!(next_oracle_detect(&mut order, &mut pending).unwrap().0, live);
+        let mut pending = HashMap::from([(live, (live, 300, 10, "oracle_threshold"))]);
+        assert_eq!(
+            next_oracle_detect(&mut order, &mut pending).unwrap().0,
+            live
+        );
         assert!(order.is_empty());
     }
 
@@ -3424,29 +3877,103 @@ mod integration_probe_tests {
             last_forwarded_revision: 7,
         };
 
-        assert!(candidate_should_forward(None, liquid, 100, 7, 64, false, true));
-        assert!(!candidate_should_forward(Some(prev), liquid, 120, 7, 64, false, true));
-        assert!(candidate_should_forward(Some(prev), liquid, 164, 7, 64, false, true));
-        assert!(!candidate_should_forward(Some(prev), liquid, 164, 7, 64, false, false));
+        assert!(candidate_should_forward(
+            None, liquid, 100, 7, 64, false, true
+        ));
+        assert!(!candidate_should_forward(
+            Some(prev),
+            liquid,
+            120,
+            7,
+            64,
+            false,
+            true
+        ));
+        assert!(candidate_should_forward(
+            Some(prev),
+            liquid,
+            164,
+            7,
+            64,
+            false,
+            true
+        ));
+        assert!(!candidate_should_forward(
+            Some(prev),
+            liquid,
+            164,
+            7,
+            64,
+            false,
+            false
+        ));
 
         // [FIX-134] Same slot, same class, changed canonical dependency revision:
         // must forward even when periodic repeat capacity is exhausted.
-        assert!(candidate_should_forward(Some(prev), liquid, 100, 8, 64, false, false));
+        assert!(candidate_should_forward(
+            Some(prev),
+            liquid,
+            100,
+            8,
+            64,
+            false,
+            false
+        ));
         // Identical revision remains suppressible inside the same slot.
-        assert!(!candidate_should_forward(Some(prev), liquid, 100, 7, 1, false, true));
+        assert!(!candidate_should_forward(
+            Some(prev),
+            liquid,
+            100,
+            7,
+            1,
+            false,
+            true
+        ));
 
         // Production default is one slot: unchanged candidates may be reconsidered on the
         // next slot, but never every 5 ms batch within the same slot.
-        assert!(candidate_should_forward(Some(prev), liquid, 101, 7, 1, false, true));
-        assert!(candidate_should_forward(Some(prev), liquid, 101, 7, 64, true, false));
-        assert!(!candidate_should_forward(Some(prev), healthy, 1000, 99, 64, true, true));
+        assert!(candidate_should_forward(
+            Some(prev),
+            liquid,
+            101,
+            7,
+            1,
+            false,
+            true
+        ));
+        assert!(candidate_should_forward(
+            Some(prev),
+            liquid,
+            101,
+            7,
+            64,
+            true,
+            false
+        ));
+        assert!(!candidate_should_forward(
+            Some(prev),
+            healthy,
+            1000,
+            99,
+            64,
+            true,
+            true
+        ));
 
         let was_healthy = CandidateCacheEntry {
             state: healthy,
             last_forwarded_slot: 100,
             last_forwarded_revision: 7,
         };
-        assert!(candidate_should_forward(Some(was_healthy), liquid, 101, 7, 64, false, false));
+        assert!(candidate_should_forward(
+            Some(was_healthy),
+            liquid,
+            101,
+            7,
+            64,
+            false,
+            false
+        ));
 
         let was_error = CandidateCacheEntry {
             state: CandidateHealthState::Error,
