@@ -1,7 +1,7 @@
 # DarkBot Solana + BSC Roadmap — Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-10-02
+Updated: 2026-10-09
 
 ## TOP PRIORITY — LATENCY MEASUREMENT
 
@@ -88,7 +88,7 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
 | C0 | **IN PROGRESS / FOUNDATION FROZEN** | Unit-6 startup authorization + recorder/replay foundation IMPLEMENTED_TESTED/FROZEN for foundation scope; full production qualification remains separate |
-| C1 | **IN PROGRESS** | C1.5-C1.8 local PASS; C1.9 production-devp2p measurement integrity PASS/eligible with max T_ingress→first handoff 438 us; final source/build bind, C1.9b and C1.10 still open |
+| C1 | **IN PROGRESS** | C1.5-C1.8 local PASS; C1.9 production-devp2p measurement integrity PASS/eligible (max T_ingress→first handoff 438 us), final source/build bind open; C1.9b infrastructure READY through real Chapel peer + Fast-Lane arena, capture/controlled launches/analyzer still open; C1.10 blocked |
 | C2 | **BLOCKED BY C1.10** | Production pending/canonical/reorg/nonce/replacement state |
 | C3 | **BLOCKED** | Production local build/sign/geth path benchmark; engineering proof only |
 | D | **BLOCKED** | Full production Flap Rust decoder |
@@ -210,7 +210,7 @@ Measure peer decode → Rust visibility.
 
 Pending coverage remains a quality metric; do not assume completeness.
 
-Current local qualification checkpoint, 2026-10-08:
+Current local qualification checkpoint, 2026-10-09:
 
 ```text
 reopened C1.3/C1.4 regressions       PASS
@@ -223,13 +223,24 @@ C1.9 measurement                     COMPLETE / integrity PASS / eligible
 C1.9 measured max T_ingress->L2      418 us
 C1.9 measured max ingress->1st peer  438 us
 C1.9 final source/build binding       OPEN
-C1.9b controlled Testnet              NEXT
-C1.10 freeze                          BLOCKED until preceding exits pass
+C1.9b Testnet infrastructure          READY / REAL CHAPEL PEER PASS
+C1.9b chain                           97 / 0x61
+C1.9b pinned geth                     v1.7.8 / cdb7548b5baacf...
+C1.9b Fast-Lane generation           202610090001
+C1.9b real peers                      1
+C1.9b arena bytes                     20454656
+C1.9b capture                         NOT YET ATTACHED
+C1.9b controlled launches             NOT YET RUN
+C1.9b analyzer report                 NOT YET RUN
+C1.9b gate                            NOT YET PASS
+C1.10 freeze                          BLOCKED until C1.9 final bind + C1.9b PASS
 T0->T_buy <1 ms                       NOT PROVEN
 LIVE                                  BLOCKED
 ```
 
 Detailed commands, identities, distributions, counters and scope/non-claims are recorded in `GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md`. The C1.9 local selected-peer handoff is not a purchase/acquisition timestamp.
+
+The C1.9b G07 monotonic-timestamp and explicit Testnet-scope changes at this checkpoint are local working-tree changes and are **not yet final committed/frozen C1 source**. The next operation is to attach `c19b_capture` to generation `202610090001`, run controlled Chapel launches, and analyze the raw hook/path evidence.
 
 STOP.
 

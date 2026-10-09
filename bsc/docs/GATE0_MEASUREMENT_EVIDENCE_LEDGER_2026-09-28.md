@@ -7,7 +7,7 @@
 > **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
 
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
-Stand: **2026-10-05**
+Stand: **2026-10-09**
 Primärer Scope: **BSC / Flap / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3**
 
 > Diese Datei ist die eine zentrale menschlich lesbare Quelle für den aktuellen Gate-0-Stand.
@@ -110,7 +110,7 @@ Wichtig:
 | **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT — wartet auf 2 getrennte Wallets, Funding und explizite v2-Autorisierung/Arming** |
 | G0.8 | tatsächliche Acquisition + Ordering | **offen — folgt unmittelbar auf G0.7** |
 | G0.9+ | Builder-/Feasibility-Folgeschritte | blockiert |
-| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **IN PROGRESS — C1.5-C1.8 lokal PASS; C1.9 qualification measurement integrity PASS/eligible, final source/build bind noch offen; C1.9b und C1.10 offen** |
+| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **IN PROGRESS — C1.5-C1.8 lokal PASS; C1.9 measurement integrity PASS/eligible, final source/build bind offen; C1.9b Testnet infrastructure READY through real Chapel peer/Fast-Lane, capture/controlled launches/analyzer still open; C1.10 blocked** |
 
 **Es wird kein Gate übersprungen.**
 
@@ -3634,3 +3634,143 @@ LIVE = BLOCKED
 ```
 
 The product requirement remains an actual successful acquisition with conservatively bounded original-producer `T0 -> T_buy < 1,000,000 ns`. Local send/handoff latency is not acquisition.
+
+
+---
+
+## C1.9b checkpoint — real Chapel peer/Fast-Lane ready (2026-10-09)
+
+Purpose of this checkpoint: record the exact point reached before attaching the C1.9b capture and emitting controlled Testnet launches. This is **not yet a C1.9b measurement PASS**.
+
+### What is now working
+
+```text
+C1.9b capture example build                 PASS
+C1.9b analyzer unit tests                   PASS
+host boot ID obtained                       PASS
+G07 absolute monotonic handoff timestamp    LOCAL BUILD PASS
+C1.9b explicit Testnet scope                LOCAL TEST PASS
+Mainnet scope regression                    PASS
+pinned bsc-geth build                       PASS
+Chapel / chain 97 startup                   PASS
+Fast-Lane arena creation                    PASS
+official v1.7.8 Testnet config verified     PASS
+real Chapel static-peer connection          PASS
+```
+
+The local G07 launcher was minimally extended to emit an absolute monotonic launch-handoff timestamp immediately after the prepared launch HTTPS `write_all+flush`. The modified launcher compiled successfully with `cargo build --release --offline`. A `--locked` build was not possible because the pre-existing Gate0 `Cargo.lock` is incomplete/stale relative to the manifest; the diagnostic offline build regenerated dependencies in the lockfile, then the original lockfile was restored. No lockfile change is accepted as evidence from this checkpoint.
+
+The C1.4 ingress scope was also extended locally with an explicit qualification-only scope selector:
+
+```text
+unset / mainnet                         -> frozen Mainnet chain 56 scope
+DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet -> Chapel chain 97 scope
+any other value                        -> startup refusal
+```
+
+The existing Mainnet scope remains chain 56 / Portal `0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0`. The explicit C1.9b Testnet scope is chain 97 / Portal `0x5beacaf7abcbb3ab280e80d007fd31fce26510e9`, with launch selector `0x8cb5772c`.
+
+The following local checks passed after applying the overlay to the pinned geth checkout:
+
+```text
+C19B_SCOPE_DIFF_CHECK_PASS
+C19B_OVERLAY_PASS
+C19B_NEW_SCOPE_TEST_PASS
+C19B_MAINNET_REGRESSION_PASS
+MAINNET_SCOPE_56_PRESENT
+C19B_SCOPE_97_PRESENT
+C19B_EXPLICIT_OPT_IN_PRESENT
+C1_9B_TESTNET_SCOPE_PASS
+```
+
+### Chapel / pinned-geth qualification setup
+
+Pinned client:
+
+```text
+bnb-chain/bsc v1.7.8
+commit cdb7548b5baacfdae92f9f63437d6456411665f3
+network Chapel / chain ID 97
+```
+
+A fresh isolated Chapel datadir was started with the C1.9b Testnet scope. Initial discovery had zero peers because the pinned client has Mainnet bootnodes as the generic default and no built-in Chapel DNS discovery tree. The official **v1.7.8 `testnet.zip`** release asset was therefore used for its Testnet static-peer configuration.
+
+Verified release asset:
+
+```text
+testnet.zip SHA256
+0d9de8b7f1bafc36711eed80e97bf33f906fadc2ceb5457361645941d7ad19f7
+
+StaticNodes = 4
+```
+
+With that official Testnet config, the real node reached:
+
+```text
+CHAIN_ID=0x61
+PEERS=1
+generation=202610090001
+arena=/tmp/darkbot-c19b-fastlane/fastlane-v2-g00000000202610090001.mmap
+arena_bytes=20454656
+process_state=SN
+C1_9B_REAL_TESTNET_PEERING_PASS
+```
+
+This proves the qualification infrastructure is now connected through:
+
+```text
+real Chapel peer
+-> pinned bsc-geth ETH ingress
+-> local C1.4 Fast-Lane runtime
+-> generation-bound mmap arena
+```
+
+It does **not** yet prove controlled-launch observation latency because no C1.9b controlled launch has been emitted and analyzed in this checkpoint.
+
+### Failed setup attempts that are not product failures
+
+Two setup failures were diagnosed and removed:
+
+1. `--authrpc.addr` was rejected by the built CLI; AuthRPC is unnecessary for C1.9b and was removed from the invocation.
+2. A background geth was suspended by zsh job control (`SIGTTOU`, process state `T`) before startup. It produced a zero-byte log and no arena. The corrected detached invocation uses stdin `/dev/null` and redirected stdout/stderr.
+
+A later Chapel run with correct detachment reached chain 97 and created the Fast-Lane arena but remained at `PEERS=0`; loading the official v1.7.8 Testnet static nodes resolved that and produced the real peer PASS above.
+
+### Important source/evidence binding status
+
+The G07 timestamp addition and C1.9b Testnet-scope addition are currently **local working-tree changes**. They are not represented by this documentation commit and are not yet the clean final C1 source commit. Therefore:
+
+```text
+C1.9 final source/build/config binding   OPEN
+C1.9b infrastructure                     READY THROUGH REAL TESTNET PEER
+C1.9b c19b_capture attached              NOT YET
+C1.9b controlled launches                NOT YET
+C1.9b analyzer report                    NOT YET
+C1.9b gate                               NOT YET PASS
+C1.10 clean committed freeze             BLOCKED
+C2                                      NOT STARTED
+LIVE                                    BLOCKED
+```
+
+### Immediate next step
+
+Do not add another architecture branch. The next C1.9b operation is:
+
+```text
+attach c19b_capture to generation 202610090001
+-> verify same host/boot/monotonic clock and clean capture startup
+-> emit predeclared controlled Chapel launches
+-> retain raw launch handoff + peer/source timestamps
+-> run c19b_hook_path.py
+-> record misses/lateness and broadcast-vs-pooled attribution
+-> only then decide C1.9b PASS/FAIL
+```
+
+Required non-claims remain unchanged:
+
+```text
+T0_TO_T_BUY_LT_1MS = NOT_PROVEN
+MAINNET_INGRESS_COVERAGE = NOT_PROVEN
+PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED
+LIVE = BLOCKED
+```
