@@ -4844,3 +4844,51 @@ Still open unless separately proven:
 - exact competitor submission timing;
 - same-slot ordering/capture probability;
 - LIVE readiness.
+
+## C0-E1 4H ATTEMPT 1 — BLOCKED BY MARKET GAP RECOVERY
+
+Run `c0e1_4h_20261008T222326Z` completed the full 14,400-second duration on qualified code
+`b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`, but returned technical `INCOMPLETE`.
+
+The retention architecture itself passed the four-hour load:
+
+- 20,056,722 Shadow evaluations received;
+- 20,056,722 streamed;
+- retention overflow 0;
+- semantic evictions 0;
+- analytics queue drops 0;
+- four snapshots and final reconciliation complete;
+- clean automatic shutdown;
+- submissions 0;
+- LIVE false.
+
+The blocking condition was one C0-MO WebSocket continuity gap:
+
+- last safe slot: 454701191;
+- gap at 2026-10-09T00:10:54Z;
+- reconnect/StreamReady at 2026-10-09T00:10:55Z;
+- observed transport interruption approximately 1.125408459 s;
+- current gap event has `to_slot=None`;
+- `gap_count=1`;
+- `coverage_complete=false`;
+- `market_capture_complete=false`.
+
+All 81 truncated-log transactions were qualified; decoder, drain and enrichment completed without
+their own qualification failure.
+
+Phase decision:
+
+**Do not rerun four hours unchanged.**
+
+Next gate is a fail-closed C0-MO gap-recovery/backfill correction that derives the post-reconnect
+slot boundary, backfills the missing slot range outside the capture hot path, deduplicates recovered
+transactions, and restores coverage only when the entire missing range is proven complete.
+
+After that correction:
+
+1. build/tests/static qualification;
+2. deterministic gap/backfill regression tests;
+3. short Mainnet smoke with reconnect/gap recovery evidence;
+4. only then repeat the 14,400-second C0-E1 economic observation.
+
+The zero observed liquidations in this failed 4h attempt are not a qualified market-zero claim.

@@ -4562,3 +4562,124 @@ Run the 14,400-second C0-E1 Economic + Capital + Competition + Race Attribution 
 The 4h measurement must identify its tested Project_0 code source as `b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`.
 
 Do not optimize observed Winner/Shadow bottlenecks before this measurement; they are part of the system being measured.
+
+## C0-E1 FIRST 4H MAINNET OBSERVATION — INCOMPLETE (2026-10-09)
+
+Run:
+
+`c0e1_4h_20261008T222326Z`
+
+Qualified code under test:
+
+`b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`
+
+Repository head during run:
+
+`cb4528554948d094ba590d065b90bd41fa3dee08`
+
+The repository-head delta from the qualified code commit contained documentation only.
+
+### Runtime result
+
+- requested duration: 14,400 s
+- actual duration: 14,400.0 s
+- four snapshots present: true
+- final reconciliation complete: true
+- clean automatic shutdown: true
+- analytics queue drops: 0
+- retention overflow: 0
+- semantic evictions: 0
+- submissions: 0
+- live_ready: false
+- Shadow evaluations received: 20,056,722
+- Shadow evaluations streamed: 20,056,722
+
+The retention redesign therefore survived the full four-hour load without loss.
+
+### Market qualification failure
+
+Technical verdict:
+
+`INCOMPLETE`
+
+Market verdict:
+
+`MARKET_DATA_INCOMPLETE`
+
+Exact market reason:
+
+- `gap_count=1`
+- `reconnect_count=1`
+- `coverage_complete=false`
+- `market_capture_complete=false`
+
+Gap evidence:
+
+- timestamp: 2026-10-09T00:10:54Z
+- t_rx_ns: 6447081629916
+- from_slot: 454701191
+- to_slot: UNKNOWN at gap emission
+
+Reconnect evidence:
+
+- timestamp: 2026-10-09T00:10:55Z
+- t_rx_ns: 6448207038375
+- attempt: 2
+
+Observed transport outage between GAP and StreamReady/Reconnected evidence was approximately
+1.125408459 seconds.
+
+The missing slot interval is not yet proven because the current `WsRpcControlSource`
+emits `Gap { from_slot, to_slot: None }` on session failure and emits
+`Reconnected` after subscription ACK completion, before a subsequent slot frame provides the
+post-reconnect slot boundary.
+
+### What remained healthy
+
+- ingress overflow: 0
+- fatal count: 0
+- decoder complete: true
+- decoder errors on successful transactions: 0
+- drain complete: true
+- enrichment complete: true
+- truncated logs total: 81
+- truncated logs qualified: 81
+- truncated logs unqualified: 0
+- truncated liquidation mismatch: 0
+
+Therefore the run failed specifically on market-stream continuity, not retention, decode,
+truncation qualification, drain, analytics queueing or shutdown.
+
+### Economic interpretation
+
+The report contained zero observed market liquidations, but this run MUST NOT be interpreted as
+proof that no liquidation occurred during the four-hour window because one unbackfilled
+WebSocket gap exists.
+
+Gross edge, Market↔Shadow match counts, executable edge and race/capture conclusions from this run
+are therefore not qualified economic evidence.
+
+### Required correction before another 4h run
+
+Do not weaken the fail-closed gate.
+
+Add deterministic C0-MO gap recovery:
+
+1. On `GAP`, preserve the last safe slot and mark a pending gap.
+2. On successful reconnect, keep the gap pending.
+3. Close the gap range using the first trustworthy post-reconnect slot frame.
+4. Conservatively include boundary slots in recovery so partial-slot loss cannot be silently
+   excluded.
+5. Perform RPC backfill only after the capture phase / outside the capture hot path.
+6. Reconstruct the missing Marginfi transaction evidence through the existing decoder/F8 truth.
+7. Deduplicate against already captured signatures.
+8. Mark a gap recovered only if every required slot is deterministically fetched and decoded.
+9. Any unavailable/pruned/error/ambiguous slot remains fail-closed and leaves
+   `market_capture_complete=false`.
+10. Record explicit recovered/unrecovered gap telemetry and recovered liquidation counts.
+
+Before repeating the 4h gate, qualify this correction with deterministic unit/regression tests and
+a short Mainnet smoke including a controlled/forced reconnect.
+
+Winner/Shadow performance bottlenecks observed during this run remain measurement targets and are
+not to be optimized as part of the market gap-recovery fix.
