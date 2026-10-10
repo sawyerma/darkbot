@@ -737,7 +737,15 @@ fn run_shadow(
     let mut ingress_session = spawn_ingress(sub.clone(), producer.clone(), halt.clone())?;
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).
-    let rpc = RpcClient::new(rpc_url.clone());
+    // Large, filtered Marginfi getProgramAccounts payloads regularly approach the
+    // RpcClient::new() 30-second default. Keep a bounded, independently configurable
+    // timeout for snapshot/dependency fetches; never weaken recovery/reconcile gates.
+    let snapshot_rpc_timeout_secs: u64 = config::parsed_or("P0_SNAPSHOT_RPC_TIMEOUT_SECS", 90)?;
+    if !(30..=180).contains(&snapshot_rpc_timeout_secs) {
+        return Err("P0_SNAPSHOT_RPC_TIMEOUT_SECS must be 30..=180".into());
+    }
+    eprintln!("snapshot: rpc_timeout_s={snapshot_rpc_timeout_secs}");
+    let rpc = RpcClient::new_with_timeout(rpc_url.clone(), Duration::from_secs(snapshot_rpc_timeout_secs));
     let mut st = StateCore::new(buffer_cap);
     // [FIX-96] Production recovery waits for confirmed WSS/root catch-up before
     // Snapshot-B reconciliation. This prevents false dirty reconciles when RPC Snapshot B
@@ -763,7 +771,11 @@ fn run_shadow(
             liability_account_filters(&group),
             &clock,
         )
-        .map_err(|e| format!("stage=liability_gpa {e}"))?;
+        .map_err(|e| {
+            // Log a duration without provider URL, response body or API credentials.
+            eprintln!("snapshot: failed stage=liability_gpa elapsed_ms={}", t0.elapsed().as_millis());
+            format!("stage=liability_gpa {e}")
+        })?;
         #[cfg(feature = "crate_health")]
         let b = snapshot::program_accounts_filtered(&rpc, &program, bank_filters(&group), &clock)
             .map_err(|e| format!("stage=bank_gpa {e}"))?;
