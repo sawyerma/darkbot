@@ -188,7 +188,7 @@ fn scan_loop(
             std::thread::sleep(Duration::from_millis(POLL_MS));
             continue;
         }
-        let mut core = ObserverCore::new(program, MarketSource::Logs, EnrichConfig::default());
+        let mut core = ObserverCore::new(program, MarketSource::Logs, EnrichConfig::DEFAULT);
         core.reconcile_cfg = cfg;
         core.reconcile_cfg.requests_per_second = cfg.requests_per_second.min(4);
         core.reconcile_cfg.max_attempts = cfg.max_attempts.min(3);
