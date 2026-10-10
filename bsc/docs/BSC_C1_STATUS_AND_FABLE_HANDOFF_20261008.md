@@ -1,5 +1,11 @@
 # DarkBot BSC — C1 Status + Fable Implementation Handoff (C1.5–C1.10)
 
+> ## **STOP — DO NOT CONTINUE C1.10/C2 BEFORE THE REAL MAINNET BUY**
+>
+> The next product task is **G0.7 controlled value-bearing BSC Mainnet BUY**, followed immediately by **G0.8 actual token-acquisition / ordering / cost verification**.  
+> C1 work is preserved but **PAUSED before freeze**. Testnet BUYs, local Fast-Lane latency, builder ACKs and synthetic measurements do not replace the required real BUY.
+
+
 **Date:** 2026-10-08  
 **Status checkpoint before this documentation-only handoff:** `353c936bd973b032cc28d1ec6fa226acef50a3b9`  
 **Pinned bsc-geth:** `cdb7548b5baacfdae92f9f63437d6456411665f3` (bnb-chain/bsc v1.7.8)  
@@ -23,7 +29,7 @@ The following C1 gates are accepted and must be treated as frozen inputs unless 
 | C1.8 | PASS / LOCAL QUALIFIED | concurrency/state-safety qualification passed |
 | C1.9 | COMPLETE / INTEGRITY PASS / ELIGIBLE | production-devp2p native latency measurement accepted; final full-regression/source-build freeze bind still open |
 | C1.9b | PASS — CONTROLLED TESTNET HOOK/PATH ONLY | hardened ETH/68→geth→Fast-Lane→Rust controlled path 1/1 observed, 0 missed; Mainnet coverage not proven |
-| C1.10 | IN PROGRESS / NOT FROZEN | C1.10A pre-freeze regression started; Python/Rust/C14/targeted geth and Fast-Lane race checks passed; pinned-upstream race baseline documented; full non-race geth regression/final build/binding still open |
+| C1.10 | PAUSED BEFORE FREEZE | C1.10A final regression PASS with pinned-upstream baseline exception and C1.10B final C1.9 measurement PASS locally; freeze is deliberately deferred until G0.7/G0.8 real Mainnet BUY/acquisition evidence is completed |
 
 Authoritative C1.4a evidence:
 

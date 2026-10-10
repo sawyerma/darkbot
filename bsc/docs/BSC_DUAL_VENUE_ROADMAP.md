@@ -3,6 +3,25 @@
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-10-09
 
+## **ABSOLUTE STOP RULE — REAL MAINNET BUY BEFORE ANY MORE C1/C2 WORK**
+
+> **DO NOT continue C1, C1.10 freeze, C2, C3, decoder work, optimization, refactoring or additional synthetic benchmarking before G0.7/G0.8.**
+>
+> **THE NEXT PRODUCT TEST IS THE REAL CONTROLLED BSC MAINNET BUY:** a value-bearing on-chain BUY must execute successfully, the intended token must actually arrive at the intended buyer, and acquisition/ordering evidence must be recorded.
+>
+> **Local latency, Testnet BUYs, geth/Fast-Lane measurements, builder ACKs, handoff timing and receipts without acquisition are NOT substitutes for this test.**
+>
+> Required next sequence:
+>
+> ```text
+> G0.7  controlled minimal-value Mainnet BUY
+>   -> G0.8  prove actual token acquisition + ordering + costs
+>   -> PASS / ADAPT / STOP
+>   -> only then resume C1 freeze / C2 production work
+> ```
+>
+> C1 engineering may remain preserved at its current qualified checkpoint, but it is **PAUSED** until the real BUY test is executed and evaluated.
+
 ## TOP PRIORITY — LATENCY MEASUREMENT
 
 The immediate Gate-0 priority is to reach the real end-to-end latency measurement as quickly as technically valid.
@@ -82,13 +101,13 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | G0.4 | **BLOCKED** | Start bounded pending/actionable coverage in parallel as soon as launch evidence is frozen |
 | G0.5 | **BLOCKED** | Benchmark/optimize complete local path through T_send after semantic BUY validity is proven |
 | G0.6 | **BLOCKED** | Race full ingress×inclusion combinations plus concurrent-launch/nonce correctness |
-| G0.7 | **BLOCKED** | Controlled minimal-value Mainnet validation |
-| G0.8 | **BLOCKED** | Prove actual token acquisition, ordering, competing external BUYs, costs and entry price |
+| G0.7 | **NEXT / ONLY PRODUCT WORK** | Controlled minimal-value Mainnet BUY with value-bearing execution |
+| G0.8 | **IMMEDIATELY AFTER G0.7** | Prove actual token acquisition, ordering, competing external BUYs, costs and entry price |
 | G0.9 | **BLOCKED** | Classify external builder dependency: NONE / BENEFICIAL / REQUIRED / UNKNOWN |
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
 | C0 | **IN PROGRESS / FOUNDATION FROZEN** | Unit-6 startup authorization + recorder/replay foundation IMPLEMENTED_TESTED/FROZEN for foundation scope; full production qualification remains separate |
-| C1 | **IN PROGRESS / C1.10A STARTED** | C1.5-C1.8 PASS; C1.9 COMPLETE / integrity PASS / eligible; C1.9b controlled Testnet hook/path PASS; C1.10A Python/Rust/C14/targeted-geth + Fast-Lane race PASS, pinned upstream race baseline documented; full non-race geth regression/final build/bind still open; C1.10 not frozen |
+| C1 | **PAUSED BEFORE FREEZE — DO NOT CONTINUE BEFORE G0.7/G0.8** | C1.5-C1.8 PASS; C1.9/C1.9b qualified; C1.10A final regression PASS with pinned-baseline exception and C1.10B final C1.9 measurement PASS locally; freeze deliberately deferred until the real Mainnet BUY/acquisition test is executed and evaluated |
 | C2 | **BLOCKED BY C1.10** | Production pending/canonical/reorg/nonce/replacement state |
 | C3 | **BLOCKED** | Production local build/sign/geth path benchmark; engineering proof only |
 | D | **BLOCKED** | Full production Flap Rust decoder |

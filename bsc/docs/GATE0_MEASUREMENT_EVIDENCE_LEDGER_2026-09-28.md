@@ -1,5 +1,8 @@
 # DarkBot Gate 0 — Masterprotokoll BSC Birth-to-BUY
 
+> **EXECUTION ORDER LOCK (2026-10-10): G0.7/G0.8 NOW. C1/C2 ARE PAUSED.**  
+> **Do not resume C1.10 freeze, C2, C3 or any synthetic optimization before the controlled value-bearing Mainnet BUY has actually executed and G0.8 has verified token acquisition, ordering and costs.**
+
 > **ABSOLUTE TOP PRIORITY / STOP RULE:** Der nächste und einzige relevante Gate-0-Nachweis ist ein **wirklich erfolgreich ausgeführter on-chain BUY mit tatsächlicher Token-Akquisition** und **gemessenem/belegtem `T0 → T_buy < 1 ms`**.  
 > **Bis dieser Nachweis PASS ist, wird nichts anderes getestet, optimiert oder gebaut.** Erlaubt sind ausschließlich Code-, Mess-, Transport-/Inclusion- und Evidence-Arbeiten, die direkt notwendig sind, um diesen realen BUY auszuführen, `T0 → T_buy` zu messen/belegen oder unter 1 ms zu bringen.  
 > `T_signal → T_send`, reine Build-/Sign-Latenz, Transport-Handoff, Builder-ACK, Receipt oder Ordering allein zählen **nicht** als Erfolg. Ohne belegten realen BUY <1 ms bleibt Gate 0 **BLOCKED/FAIL**.
@@ -107,10 +110,10 @@ Wichtig:
 | G0.4 | Pending/actionable Coverage und frühestes brauchbares Signal | **PARTIAL — QuickNode-Quellenprobe; noch kein Coverage-PASS** |
 | **G0.5** | vollständige vorbereitete Self-Launch-Hotpath-Latenz bis echtem `T_send` | **PASS — 48Club p99 0.584 ms, BlockRazor p99 0.527 ms, jeweils 0/100 >1 ms** |
 | **G0.6** | Ingress × Inclusion Dry-Qualifikation + Concurrency | **PARTIAL / SELF-LAUNCH DRY-3 POLICY READY; finale wallet-gebundene DRY-1..4 noch offen** |
-| **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT — wartet auf 2 getrennte Wallets, Funding und explizite v2-Autorisierung/Arming** |
-| G0.8 | tatsächliche Acquisition + Ordering | **offen — folgt unmittelbar auf G0.7** |
+| **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT / ONLY PRODUCT WORK — realer value-bearing Mainnet-BUY; benötigt finalen wallet-gebundenen DRY-PASS, Funding und explizite v2-Autorisierung/Arming** |
+| **G0.8** | tatsächliche Acquisition + Ordering | **IMMEDIATELY AFTER G0.7 — Token-Balance-Delta, Receipt, Blockposition/Ordering, Kosten und externe BUYs auswerten** |
 | G0.9+ | Builder-/Feasibility-Folgeschritte | blockiert |
-| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **IN PROGRESS — C1.5-C1.8 PASS; C1.9 COMPLETE / integrity PASS / eligible; C1.9b controlled Testnet hook/path PASS; C1.10A pre-freeze regression IN PROGRESS with pinned-upstream race baseline documented; full non-race geth regression + final build/bind still open; C1.10 freeze not yet PASS** |
+| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **PAUSED BEFORE FREEZE — C1.10A final regression PASS with pinned-baseline exception; C1.10B final C1.9 qualification PASS locally; DO NOT continue C1.10 freeze until G0.7/G0.8 real Mainnet BUY/acquisition test is completed and evaluated** |
 
 **Es wird kein Gate übersprungen.**
 
