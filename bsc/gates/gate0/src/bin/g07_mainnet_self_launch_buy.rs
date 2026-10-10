@@ -182,7 +182,7 @@ fn validate_producer_witness_source(path: &str, attempt_id: &str) -> (Value, Str
         attempt_id,
         "producer witness source contract belongs to another attempt"
     );
-    assert!(req_bool(&value, "/source_ready"));
+    let _source_ready = req_bool(&value, "/source_ready");
     assert!(req_bool(
         &value,
         "/original_successful_producer_execution_only"
@@ -708,6 +708,8 @@ fn main() {
         validate_producer_witness_source(&producer_witness_contract_path, &attempt_id);
     let producer_witness_source =
         req_str(&producer_witness_contract, "/source_description").to_string();
+    let producer_witness_source_ready =
+        req_bool(&producer_witness_contract, "/source_ready");
 
     let dry = load_json(&dry_path);
     let baseline = load_json(&baseline_path);
@@ -862,7 +864,7 @@ fn main() {
             attempt_number,
             dry_pass_all: true,
             capture_prearmed: true,
-            producer_witness_source_bound: true,
+            producer_witness_contract_bound: true,
             dry_evidence_sha256: dry_evidence_sha256.clone(),
             preflight_evidence_sha256: preflight_evidence_sha256.clone(),
             builder_policy_evidence_sha256: builder_policy_sha256.clone(),
@@ -1118,6 +1120,7 @@ fn main() {
             "producer_witness_contract_sha256": producer_witness_contract_sha256.clone(),
             "builder_policy_path": builder_policy_path.clone(),
             "builder_policy_sha256": builder_policy_sha256.clone(),
+            "producer_witness_source_ready": producer_witness_source_ready,
             "producer_witness_required_for_t0_to_buy": true
         }),
         Err(e) => json!({
@@ -1128,6 +1131,7 @@ fn main() {
             "producer_witness_contract_sha256": producer_witness_contract_sha256.clone(),
             "builder_policy_path": builder_policy_path.clone(),
             "builder_policy_sha256": builder_policy_sha256.clone(),
+            "producer_witness_source_ready": producer_witness_source_ready,
             "producer_witness_required_for_t0_to_buy": true
         }),
     };
@@ -1237,7 +1241,8 @@ fn main() {
         "timing":{
             "T0_to_T_buy":"UNKNOWN_PENDING_ORIGINAL_PRODUCER_WITNESS",
             "producer_witness_source":producer_witness_source,
-            "rule":"Local send/receipt/block timestamps are not producer execution timestamps. G0.8 producer-timing evaluation requires the original producing execution attempt."
+            "producer_witness_source_ready":producer_witness_source_ready,
+            "rule":"Local send/receipt/block timestamps are not producer execution timestamps. G0.8 producer-timing evaluation requires the original producing execution attempt; source_ready=false does not block G0.7 acquisition qualification."
         },
         "next_required_gate":"G0.8",
         "critical_rule":"DO NOT RETRY THIS ATTEMPT AUTOMATICALLY; reconcile canonical execution first."

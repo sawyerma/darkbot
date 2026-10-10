@@ -27,7 +27,7 @@ pub struct LiveGuardContext {
     pub attempt_number: u64,
     pub dry_pass_all: bool,
     pub capture_prearmed: bool,
-    pub producer_witness_source_bound: bool,
+    pub producer_witness_contract_bound: bool,
     pub dry_evidence_sha256: String,
     pub preflight_evidence_sha256: String,
     pub builder_policy_evidence_sha256: String,
@@ -53,7 +53,7 @@ pub struct ContractSnapshot {
     pub absolute_budget_wei: u128,
     pub max_direct_builder_tip_wei: u128,
     pub capture_required: bool,
-    pub producer_witness_source_required: bool,
+    pub producer_witness_contract_required: bool,
     pub dry_evidence_sha256: Option<String>,
     pub preflight_evidence_sha256: Option<String>,
     pub builder_policy_evidence_sha256: Option<String>,
@@ -162,8 +162,8 @@ pub fn inspect_v2(path: &Path) -> Result<ContractSnapshot, String> {
             .pointer("/retention_observability/pre_arm_bounded_capture_required")
             .and_then(Value::as_bool)
             .unwrap_or(true),
-        producer_witness_source_required: v
-            .pointer("/retention_observability/producer_witness_source_required_before_execution")
+        producer_witness_contract_required: v
+            .pointer("/retention_observability/producer_witness_contract_required_before_execution")
             .and_then(Value::as_bool)
             .unwrap_or(true),
         dry_evidence_sha256: opt_string(&v, "/authorization/evidence_bindings/dry_evidence_sha256"),
@@ -232,8 +232,8 @@ pub fn verify_live_authorization(
     if snap.capture_required && !ctx.capture_prearmed {
         return Err("required bounded capture is not pre-armed".into());
     }
-    if snap.producer_witness_source_required && !ctx.producer_witness_source_bound {
-        return Err("producer-witness source/owner is not bound for this attempt".into());
+    if snap.producer_witness_contract_required && !ctx.producer_witness_contract_bound {
+        return Err("producer-witness schema/source contract is not bound for this attempt; actual producer access may arrive asynchronously".into());
     }
 
     verify_bound_sha256(

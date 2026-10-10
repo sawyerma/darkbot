@@ -24,7 +24,8 @@
       "minLength": 1
     },
     "source_ready": {
-      "const": true
+      "type": "boolean",
+      "description": "Whether original-producer witness access is already available for this attempt. false is allowed for G0.7; it leaves T0_TO_BUY UNKNOWN until a valid original witness is delivered."
     },
     "original_successful_producer_execution_only": {
       "const": true
