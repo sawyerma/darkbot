@@ -1465,6 +1465,56 @@ impl Worker {
             self.h.shared.writer_errors.fetch_add(1, Ordering::Relaxed);
         })
     }
+/// Human-readable authoritative MARKET conclusion next to the C0-E1 console
+/// summary. Read existing report data only; no RPC, scanner, or parallel ledger.
+fn market_terminal_summary(report: &Value) -> String {
+    let final_market = &report["market"]["cumulative"]["c0_mo_r6"];
+    let scan = &final_market["full_slot_reconciliation"];
+    let all_paths = &report["canonical"]["cumulative"]["market"];
+    let count = |v: &Value| v.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "UNKNOWN".into());
+    let gross = |v: &Value| {
+        let known = &v["gross_edge_usd"];
+        if known["count_known"].as_u64().unwrap_or(0) == 0 {
+            "UNKNOWN".to_string()
+        } else {
+            known["distribution"]["total"].as_f64()
+                .map(|n| format!("{n:.6}"))
+                .unwrap_or_else(|| "UNKNOWN".into())
+        }
+    };
+    let canonical_complete = scan["complete"].as_bool() == Some(true)
+        && final_market["full_slot_reconciliation_complete"].as_bool() == Some(true);
+    let mut lines = vec![
+        "================ MARKET FINAL (canonical all-path) ================".to_string(),
+        format!("status={} canonical_complete={} sample={}",
+            final_market["verdict"].as_str().unwrap_or("UNKNOWN"),
+            canonical_complete,
+            report["economic_sample_status"].as_str().unwrap_or("UNKNOWN")),
+        format!("capture: received={} success={} failed={}",
+            count(&final_market["unique_transactions"]),
+            count(&final_market["successful_transactions"]),
+            count(&final_market["failed_transactions"])),
+        format!("finalized_slots: expected={} fetched={} skipped_confirmed={} failed={}",
+            count(&scan["slots_expected"]),
+            count(&scan["slots_fetched"]),
+            count(&scan["slots_skipped_confirmed"]),
+            count(&scan["slots_failed"])),
+    ];
+    for key in ["ALL", "CLASSIC", "RECEIVERSHIP", "FORCED_DELEVERAGE", "BANKRUPTCY_SETTLEMENT"] {
+        let v = &all_paths[key];
+        lines.push(format!(
+            "{key}: events={} gross_known_usd={} gross_known_events={} gross_unknown_events={}",
+            count(&v["events"]),
+            gross(v),
+            count(&v["gross_edge_usd"]["count_known"]),
+            count(&v["gross_edge_usd"]["count_unknown"])
+        ));
+    }
+    lines.push("gross_known_usd is NOT realized profit; unknown values are not zero.".to_string());
+    lines.push("===============================================================".to_string());
+    lines.join("\n")
+}
+
     fn run(mut self) -> Result<(), String> {
         loop {
             if let Some(ev) = self.rx.pop_timeout(Duration::from_millis(100)) {
@@ -1524,6 +1574,7 @@ impl Worker {
             final_report["canonical"]["cumulative"]["loss_attribution"],
             final_report["technical_qualification"]["verdict"]
         );
+        println!("{}", market_terminal_summary(&final_report));
         if final_report["technical_qualification"]["verdict"] != "PASS" {
             return Err(
                 "C0-E1 technical qualification incomplete; see economics_final.json".into(),
