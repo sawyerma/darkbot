@@ -742,7 +742,11 @@ fn run_shadow(
     // [FIX-96] Production recovery waits for confirmed WSS/root catch-up before
     // Snapshot-B reconciliation. This prevents false dirty reconciles when RPC Snapshot B
     // is ahead of account notifications still in flight on the same confirmed stream.
-    let mut drv = RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(30));
+    let root_catchup_secs: u64 = config::parsed_or("P0_RECOVERY_ROOT_CATCHUP_SECS", 30)?;
+    if !(30..=300).contains(&root_catchup_secs) {
+        return Err("P0_RECOVERY_ROOT_CATCHUP_SECS must be 30..=300".into());
+    }
+    let mut drv = RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(root_catchup_secs));
     let dep_shared = std::sync::Arc::new(std::sync::Mutex::new(required_dependency_keys.clone()));
     let opt_shared = std::sync::Arc::new(std::sync::Mutex::new(optional_dependency_keys.clone()));
     let dep_for_fetch = dep_shared.clone();
@@ -3675,6 +3679,9 @@ fn run_shadow(
     }
     let _ = summaries.flush();
     let _ = records.flush();
+    if econ.is_some() {
+        remote.wait_stopped(Duration::from_secs(120))?;
+    }
     Ok(())
 }
 
@@ -3696,7 +3703,9 @@ fn run_econ4h() -> Result<(), String> {
         + cfg.drain_secs
         + market.drain_timeout_secs
         + market.enrich.phase_max_secs
-        + 60;
+        + market.gap.phase_max_secs
+        + market.reconcile.phase_max_secs
+        + 180;
     let (handle, analytics) = econ::spawn(cfg, clock, &market)?;
     let shadow_handle = handle.clone();
     let shadow = std::thread::Builder::new()

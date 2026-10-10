@@ -1088,3 +1088,237 @@ Next execution step:
 Run the 14,400-second C0-E1 observation from this exact code revision. No production-path optimization should be inserted between this qualified checkpoint and that measurement unless qualification is repeated.
 
 The implementation remains observe-only and is not LIVE-ready.
+# 2026-10-09 master-contract checkpoint — NOT FULLY IMPLEMENTED
+
+The historical implementation report below does not qualify the expanded master contract.
+Current normative resume: top of MEASUREMENT_LEDGER.md. Local HEAD is still db78cdb3...;
+no commit/push, pin change, BSC edit, wallet change or submission was performed.
+
+## Pinned-source findings (source evidence, not current deployment attestation)
+
+Inspected Cargo's exact pinned checkout:
+`~/.cargo/git/checkouts/marginfi-v2-8cb09da044851022/33c6798`, whose git HEAD is
+`33c67987a661f59c6683a65485ebb4f0ef030b77`. `id-crate/src/lib.rs:5` declares
+`MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA` under mainnet-beta. Cargo.lock/pins unchanged.
+The existing upgrade-halt evidence remains separate; no new bytecode equivalence or
+deployment-version claim was established in this checkpoint.
+
+| Path | Entry point in programs/marginfi/src/lib.rs | Event / source |
+| --- | --- | --- |
+| Classic | lending_account_liquidate, line 450 | LendingAccountLiquidateEvent, events.rs:210; instructions/marginfi_account/liquidate.rs:549 |
+| Receivership | start_liquidation / end_liquidation, lines 739/747 | LiquidationReceiverEvent, events.rs:279; instructions/marginfi_account/liquidate_end.rs |
+| Forced deleverage | start_deleverage / end_deleverage, lines 753/758 | DeleverageEvent, events.rs:288; same liquidation-end module |
+| Bad-debt settlement | lending_pool_handle_bankruptcy, line 265 | LendingPoolBankHandleBankruptcyEvent, events.rs:113; instructions/marginfi_group/handle_bankruptcy.rs:224 |
+| Sunset balance purge | purge_deleverage_balance, line 888 | Administrative removal of abandoned lending balances after debt settlement; audit classification still open |
+
+The old observer counts only LiquidationReceiverEvent. Classic/Deleverage/Bankruptcy event
+coverage is not implemented by the gap patch. No claim that this initial entry-point audit
+is exhaustive. In particular, an administrative debt write-off must not be conflated with
+collateral seized by a competing profitable bot.
+
+Anchor discriminator derivations (first 8 bytes of SHA256 of exact namespace:name):
+
+| Kind/name | Hex |
+| --- | --- |
+| global:lending_account_liquidate | d6a997d5fba756db |
+| global:start_liquidation | f45d5ad6c0a6bf15 |
+| global:end_liquidation | 6e0bf436e5b516b8 |
+| global:start_deleverage | 0a8a0a3928e8b6c1 |
+| global:end_deleverage | 720efa8ffc68d6d1 |
+| global:lending_pool_handle_bankruptcy | a20b388b5a8046ad |
+| event:LendingAccountLiquidateEvent | a6a0f99ab72717f2 |
+| event:LiquidationReceiverEvent | 2883e0dc975318e6 |
+| event:DeleverageEvent | a1086cccd1c60c1e |
+| event:LendingPoolBankHandleBankruptcyEvent | a64d298c245e0a39 |
+
+Classic fixed account order (`liquidate.rs:572`): group=0, asset_bank=1, liability_bank=2,
+liquidator_marginfi_account=3, authority=4, liquidatee_marginfi_account=5; vault authority,
+liquidity vault, insurance vault and token program follow. These indices must be resolved
+through full static+loaded addresses, including inner-instruction inspection where applicable.
+
+Classic event header contains optional signer, liquidator account, account authority and
+group. Then liquidatee account/authority, asset bank/mint, liability bank/mint, pre/post health,
+and two LiquidationBalances records of five f64 amounts each. It contains no direct pair of
+USD seized/repaid values. Preserve f64 provenance; do not pretend these are exact integers.
+Instruction asset_amount is separately exact, subject to actual instruction decoding.
+
+Source economic caveat (`liquidate.rs:260–318,330–418`): collateral uses the low-biased asset
+price, liability the realtime high-biased oracle price. The liquidator pays C_L and the target
+receives smaller debt reduction R_L; C_L-R_L is the insurance component. The liquidator may
+spend an existing liability-bank deposit before assuming debt. Thus observed liability cost
+requires BOTH debt increase AND deposit reduction, not merely target debt reduction.
+Historical USD gross edge requires the slot-correct price/decimal evidence. Insurance already
+included in C_L must not be subtracted twice. Health differences do not supply the missing prices.
+
+Receivership derives seized/repaid from pre/post Equity health with cached liquidation prices
+in liquidation-end processing. Its logged values already provide protocol equity amounts;
+gross edge is seized minus repaid. The separate lamps_fee_paid is a SOL-denominated protocol
+cost; historical SOL/USD and further winner costs are not inferred from today's prices.
+Network meta.fee includes priority; do not subtract priority again. Unobservable external
+payments/funding/tips must keep winner-net completeness false until evidenced.
+
+## Implemented gap foundation
+
+`market_gap.rs` adds bounded gap state, persisted GAP_BOUNDARY evidence, post-drain inclusive
+getBlock recovery, F8 full-key relevance and instruction/event parity, dedupe and sanitized
+error codes. Skipped proof uses a finalized successor parent link; getBlocks is only used
+to locate the successor. References: https://solana.com/docs/rpc/http/getblock and
+https://solana.com/docs/rpc/http/getblocks. One block at a time; RPC body limit 64 MiB;
+default limits 32 gaps, 512 slots/gap, 3 attempts, 10s RPC timeout, 250ms backoff,
+180s phase deadline, 2,000,000 scanned TX. Every limit fails closed.
+
+`MarketEvent.t_rx_ns` is now optional, with Live/GapBackfill provenance. Recovered chain slot
+classes remain usable with authoritative winner identity, but local receive margins and
+speedup stay null. Existing gap-only accounting assigns backfill to final resolution hour 4;
+the master engine still needs canonical chain-window/hour attribution. This temporary
+accounting is explicitly not historical live receipt time.
+
+`run_gap_reconnect_smoke.sh` and qualification-only `p0-gap-ws-proxy.rs` close one market WSS
+session after a real slot notification. The proxy rejects non-market RPC methods and binds
+only loopback; Shadow ingress remains separate. The first smoke failed upstream reconnect.
+The follow-up upstream timeout change is unqualified on Mainnet. No new four-hour run.
+
+## Offline evidence / current limits
+
+Old original run remains untouched. Checksums read during inspection:
+
+```text
+b6baade3228eee3c038c91f0e751304540465f87edcf4030bb6c1583b8cb739b market/coverage.jsonl
+9121c55c54c9c4a6ca7122f056579f75ffe8da73f5d84394388906761ca73a27 market/summary.json
+4a9cd8bbe5e396c09737fda3eb8c8fade95164bf1b207213b78583e6fea3915f economics_final.json
+```
+
+Inspected coverage, summary, final economics, runtime and schemas of raw Shadow/market/MT0
+streams. No canonical market first/last slot frame or first post-reconnect slot was persisted.
+Transaction min/max and Shadow slot samples are not substitutes. OLD_4H_REQUALIFIED=false;
+no whole-market count, Classic split or whole-market gross/net edge can be claimed.
+
+Still required: full-slot engine + slot ledger; exhaustive source classification; Classic and
+additional event decoders; historical economics with explicit unknown counts; typed per-event
+Market↔Shadow joins and loss attribution; ALL/type/hour aggregates; real Classic fixtures;
+expanded mandatory tests; controlled full-slot smoke. Current top-level Market completeness
+is deliberately blocked until these exist. No strategy/performance optimization was made.
+
+
+## RESUME — 2026-10-09 canonical scanner and typed decoder implementation
+
+**MASTER PARTIAL / NOT QUALIFIED. No new 4h run.** This block supersedes the
+older gap-only checkpoint immediately below. Starting Project_0 base remains
+`db78cdb3d3507da66fe93450742a8235fefcde1a`; current repository HEAD observed on
+resume is `ec853c4d38492869388440b5b034c0d8a6ee2677` (BSC-only documentation commit).
+No pull/merge/reset/clean, staging, commit or push was performed here. BSC untouched.
+
+Implemented in this continuation:
+- `market_reconcile.rs`: inclusive canonical slot window with persisted slotSubscribe
+  boundary provenance; bounded finalized getSlot/getBlocks/getBlock pass over the whole
+  window, every transaction scanned, static/loaded keys and inner instruction indices
+  checked. Parent slot AND previousBlockhash continuity proves omitted slots; trailing
+  skips require a fetched finalized successor. No absent/null block treated as skipped.
+- Captured slot boundaries are the first and highest in-window processed slot frames,
+  subsequently reconciled at finalized. This is an explicit whole-slot window, NOT an
+  exact transaction-level wall-clock boundary. blockTime span and monotonic duration are
+  different quantities. The old run cannot obtain these missing boundaries retroactively.
+- Legacy, v0 and JSON v1 account/instruction views are supported; real six-fixture F8
+  coverage includes v0/v1. Unsupported versions, missing inner instruction recording,
+  incomplete LUT views, malformed data, timeout and budgets fail closed.
+- `market_truth.rs`: pinned-source Classic / existing F8 Receivership / ForcedDeleverage /
+  BankruptcySettlement classification; instruction-event identity parity, CPI inspection,
+  distinct multiple-event identities, raw relevant TX stored before classification.
+  Deleverage and bankruptcy are explicitly not permissionless bot-profit opportunities.
+- Exact Classic seized amount comes from instruction u64. Event f64 native balances retain
+  their provenance. Liability cost includes assumed debt PLUS consumed liability-bank
+  deposits; insurance is already included. Slot-price/decimal evidence absent => USD edge
+  UNKNOWN. Receivership/deleverage use protocol cached-equity seized minus repaid.
+  meta.fee is transaction context (includes priority), never summed per event. Explicit
+  legacy/v0 requested CU-limit/price gives priority with ceil; v1 config priority remains
+  UNKNOWN pending authoritative fee-semantic qualification. Winner net remains UNKNOWN.
+- Live receipts are retained separately; reconciliation-only events have no receive clock.
+  Canonical typed ALL/per-type aggregates are exposed separately from legacy receiver
+  analytics. Final econ reports explicitly label legacy scope; generalized join and hourly
+  canonical attribution remain false/unqualified.
+- Fixed existing gap dedupe: live-seen signatures still undergo instruction/event parity
+  validation before skipping duplicate aggregation.
+
+Mainnet diagnostic `project_0/data/market/canonical_probe_20261009T132213Z`:
+30-second capture; canonical slots 454878435..454878545; 111 expected/produced/fetched,
+0 failed, 0 unresolved, 118502 TX scanned, 3 Marginfi TX, 0 decoded liquidations,
+0 transport gaps. **Full-slot pass succeeded**, overall MARKET_DATA_INCOMPLETE as designed.
+This was a read-only market run, not combined C0-E1 and not a controlled reconnect.
+It cannot qualify all liquidation paths without events. It also precedes final CPI-order,
+truncation-guard and report-label refinements; repeat on final source before qualification.
+Evidence, hashes and local build/test logs: `docs/evidence/C0E1_CANONICAL_CHECKPOINT_20261009/`.
+
+Exact remaining work (real implementation, not only tests):
+1. Generalize Market↔Shadow identity/instrumentation to type + bank pair + target + slot;
+   existing OpportunityRecord lacks bank-pair/type evidence. Preserve original production
+   economics/capital/race pipeline, extend the evidence rather than infer missing fields.
+2. Complete canonical hourly aggregation, capital/loss-dollar attribution, network fee
+   dedupe/fee payer and observed winner costs, historical price provenance and economic
+   completeness. No guessed historical prices, no artificial zero unknown costs.
+3. Finish exhaustive pinned-source/deployment upgrade qualification; sunset balance purge
+   is administrative cleanup after debt settlement (lib.rs:880-895), not collateral profit.
+   Drift bad-debt claim likewise needs explicit scope documentation before exhaustive claim.
+4. Add real Classic/Deleverage/Bankruptcy fixtures, mixed-path same-TX and CPI-order/rollback
+   fixtures; qualify all path coverage. Receivership has six real existing fixtures.
+5. Integrate full-window recovery with transport-gap bookkeeping, then repeat controlled
+   reconnect/full-slot combined Mainnet smoke on the final candidate. Existing separate
+   gap recovery remains; an unresolved transport gap cannot yet pass the master gate.
+6. Only after full master acceptance consider the next 4h run. Original old 4h remains
+   OLD_4H_REQUALIFIED=false because canonical boundaries were never recorded.
+
+LIVE/submission disabled. No source pin change. Current full workspace results and
+Clippy differential are stored in the checkpoint results files; no master PASS implied.
+
+
+## 2026-10-10 canonical economics and pinned-path completion (qualification in progress)
+
+The canonical finalized ledger now drives `canonical.window_delta` and
+`canonical.cumulative` in hour_01..04.json and economics_final.json. Earlier top-level
+receiver analytics remain explicitly marked legacy for compatibility; they are not
+whole-market statistics. `canonical_market_shadow.jsonl` includes each signature,
+transaction/event index, type/target/banks, pipeline evidence and six capital outcomes.
+All journal rows for each relevant target are replayed with byte-offset and backward
+link validation; the earliest executable exact plan is retained. Two identical
+same-slot event identities are ambiguous and receive no shared executable edge.
+No approximate wall-clock window supplies financial identity. BlockTime lacking
+hour attribution is exposed and retained in the final total.
+
+Costs are never re-modelled here: our net/budget come from production selected_costs,
+including working capital, fees, rent and reserve. Market meta.fee is deduplicated by
+transaction. Compute priority uses requested limit, is already part of meta.fee, and
+is not subtracted twice. Visible System transfers have UNKNOWN cost attribution.
+Absent slot-correct historical prices keep Classic USD UNKNOWN; absent complete
+winner execution costs keep winner net UNKNOWN. Loss dollar figures are opportunity
+attribution, never realized monetary loss or guaranteed capture. Stage bottlenecks
+are measured correlation, not causal attribution. Same-slot races remain UNKNOWN;
+backfill cannot invent a live receipt timestamp or real competitor send deadline.
+
+Pinned source exclusions are now closed: purge_deleverage_balance requires risk_admin,
+TOKENLESS_REPAYMENTS_COMPLETE and a liability-free balance; it removes abandoned
+asset shares with no payment to a liquidator. drift_claim_bad_debt claims the bank's
+allocation into its vault-authority ATA and sweeps to the global fee wallet. Its payer
+pays costs and receives no account-liquidation profit. Forced Deleverage and Bankruptcy
+remain separately counted administrative settlement. The full exported instruction
+namespace of pin 33c67987... is inventoried and unknown successful opcodes fail closed.
+Source file hashes and namespace: evidence/C0E1_CANONICAL_FINAL_20261010/source_path_inventory.json.
+
+Deployment qualification uses the existing 0.1.11 upgrade-watch reference ProgramData
+hash H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f, checked via finalized reads before
+capture and after full reconciliation. This proves continuity against the qualified
+reference; it is explicitly NOT a reproducible-build bytecode/source-equivalence
+attestation. The user's contract treats the pinned source as authoritative. New code
+hashes require a new audit; no environment switch silently promotes them.
+
+Fixtures: six real finalized Receivership transactions reused; Classic, Deleverage
+and Bankruptcy layouts source-grounded; failed TX/CPI, LUT, mixed paths, multiple
+events, execution order and UNKNOWN covered. Mixed real receiver + source Classic
+is labelled a composed regression fixture, not a real mixed chain transaction.
+Current short observation has not supplied new real Classic/Deleverage/Bankruptcy
+examples; absence is not evidence that these paths cannot occur.
+
+The first 120s reconnect diagnostic reached a real reconnect slot boundary, but Shadow
+root catchup exhausted the original 30s wait and stayed HALTED. The configurable
+30..300s wait retains the exact readiness condition; qualification launcher uses120s.
+Eight bounded post-drain block reads replace serial loading; ordering, retries,
+full-TX validation and fail-closed slot accounting are unchanged. Final qualification
+and the 600s combined smoke must still complete. The user explicitly owns the 4h run.

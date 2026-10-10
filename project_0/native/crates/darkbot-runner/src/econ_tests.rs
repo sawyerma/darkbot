@@ -19,7 +19,7 @@ fn input(capital: u64) -> CandidateInput {
         funding: FundingClass::ZeroPrefundSameTx,
     }
 }
-fn costs(capital: u64) -> CandidateCostRecord {
+pub(super) fn costs(capital: u64) -> CandidateCostRecord {
     let input = input(capital);
     let failed = economics::rpc_message_failure_costs(input.transaction_fee_usd_micro);
     CandidateCostRecord::from_input(
@@ -29,9 +29,11 @@ fn costs(capital: u64) -> CandidateCostRecord {
         None,
     )
 }
-fn rec() -> OpportunityRecord {
+pub(super) fn rec() -> OpportunityRecord {
     let c = costs(100_000_000);
     OpportunityRecord {
+        progress: Default::default(),
+        market_plan_identity: None,
         timing: TimingEvidence {
             t_rx_ns: Some(10),
             t_state_ns: Some(15),
@@ -83,7 +85,8 @@ fn pair(rec: &OpportunityRecord, slot: u64, rx: u64) -> (Winner, MarketEvent) {
         MarketEvent {
             signature: "winner".into(),
             slot,
-            t_rx_ns: rx,
+            t_rx_ns: Some(rx),
+            source: MarketEvidenceSource::Live,
             transaction_index: Some(5),
             event: ReceiverEvent {
                 event_index: 0,
@@ -99,7 +102,7 @@ fn pair(rec: &OpportunityRecord, slot: u64, rx: u64) -> (Winner, MarketEvent) {
 fn config() -> EconConfig {
     EconConfig::from_lookup(&|_| None, 0).unwrap()
 }
-fn worker() -> Worker {
+pub(super) fn worker() -> Worker {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let mut cfg = config();
     cfg.snapshot_secs = 1;
@@ -129,6 +132,7 @@ fn worker() -> Worker {
     .unwrap()
 }
 fn complete(w: &mut Worker) {
+    w.canonical_finalized = true;
     w.snapshots = 4;
     w.market_final = Some(
         json!({"actual_observation_seconds":4.0,"market_capture_complete":true,"drain_complete":true,"decode_complete":true,"source_coverage_verified":false,"verdict":"MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED"}),
@@ -600,6 +604,7 @@ impl crate::pipeline::ReceivershipBuilder for TestBuilder {
     ) -> Result<Vec<crate::pipeline::ReceivershipPlan>, String> {
         use darkbot_project0::planner::{RouteKind, Step};
         Ok(vec![crate::pipeline::ReceivershipPlan {
+            market_identity: None,
             steps: vec![Step::StartLiquidation, Step::Repay, Step::EndLiquidation],
             instructions: vec![],
             route: RouteKind::NoSwap,
@@ -745,6 +750,47 @@ fn unknown_capital_does_not_remove_market_match() {
     assert_eq!(b.fundable.count, 0);
 }
 
+#[test]
+fn backfill_preserves_chain_race_but_never_live_rx_or_speedup() {
+    let r = rec();
+    let (win, mut market) = pair(&r, 4, 50);
+    market.source = MarketEvidenceSource::GapBackfill;
+    market.t_rx_ns = None;
+    for (slot, expected) in [
+        (3, RaceClass::PreWinnerSlotProven),
+        (4, RaceClass::SameSlotUnknown),
+        (5, RaceClass::PostWinnerSlotProvenLate),
+    ] {
+        let mut r = r.clone();
+        r.sign_slot = Some(slot);
+        let race = race(&r, Some(&win), Some(&market), Some(100));
+        assert_eq!(race.class, expected);
+        assert!(!race.live_timestamp_qualified);
+        assert_eq!(race.margin_to_winner_rx_ns, None);
+        assert_eq!(race.margin_to_winner_slot_seen_ns, None);
+        assert_eq!(race.required_speedup_to_winner_rx_ns, None);
+        assert_eq!(race.required_speedup_to_winner_slot_seen_ns, None);
+    }
+    let mut w = worker();
+    w.accept(Evidence::Market(market)).unwrap();
+    w.accept(Evidence::Winner {
+        target: r.account.clone(),
+        rx_slot: 1,
+        winner: win,
+    })
+    .unwrap();
+    w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
+    let output = w.opportunity(&r);
+    assert_eq!(output["strong_join"], true);
+    assert_eq!(output["t_winner_rx_ns"], Value::Null);
+    assert_eq!(w.metrics(0, 3)["market"]["liquidation_events"], 0);
+    assert_eq!(w.metrics(3, 4)["market"]["liquidation_events"], 1);
+    assert_eq!(
+        w.metrics(0, 4)["matching"]["winner_live_observation_matched"],
+        0
+    );
+}
+
 // Deliberately preserve the pre-fix forward reduction as a differential oracle.
 fn original_selection(w: &Worker, rows: &[(usize, OpportunityRecord)]) -> Value {
     let mut selected: BTreeMap<String, (usize, &OpportunityRecord)> = BTreeMap::new();
@@ -756,7 +802,7 @@ fn original_selection(w: &Worker, rows: &[(usize, OpportunityRecord)]) -> Value 
         };
         let assigned = w
             .market_for(r, win)
-            .and_then(|m| w.hour(m.t_rx_ns))
+            .and_then(|m| w.market_hour(m))
             .unwrap_or(*hour);
         let replace = match selected.get(&key) {
             None => true,
@@ -939,4 +985,31 @@ fn duplicate_winner_at_capacity_does_not_lose_evidence() {
     }
     assert_eq!(w.winners[&r.account].len(), 1);
     assert_eq!(w.h.shared.retention_overflow.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn market_rpc_barrier_waits_for_shadow_and_rejects_failed_shadow() {
+    let (tx, _rx) = bounded("barrier-test", 1);
+    let h = Handle {
+        tx,
+        shared: Arc::new(Shared::default()),
+        clock: Clock::new(),
+        cfg: config(),
+    };
+    assert_eq!(
+        h.wait_shadow_quiescent(Duration::ZERO).unwrap_err(),
+        "SHADOW_DRAIN_BARRIER_TIMEOUT"
+    );
+    let shared = h.shared.clone();
+    let worker = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(30));
+        shared.shadow_done.store(true, Ordering::Release);
+    });
+    h.wait_shadow_quiescent(Duration::from_secs(2)).unwrap();
+    worker.join().unwrap();
+    h.shared.shadow_failed.store(true, Ordering::Release);
+    assert_eq!(
+        h.wait_shadow_quiescent(Duration::ZERO).unwrap_err(),
+        "SHADOW_FAILED_BEFORE_MARKET_RECONCILIATION"
+    );
 }

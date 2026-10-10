@@ -51,6 +51,17 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[path = "market_gap.rs"]
+mod gap;
+pub use gap::GapConfig;
+#[path = "market_reconcile.rs"]
+mod reconcile;
+pub use reconcile::ReconcileConfig;
+#[path = "market_paths.rs"]
+mod paths;
+#[path = "market_truth.rs"]
+pub mod truth;
+
 /// `sha256("event:LiquidationReceiverEvent")[..8]` (verified against the six audit fixtures).
 pub const LIQUIDATION_RECEIVER_EVENT_DISCRIMINATOR: [u8; 8] = [40, 131, 224, 220, 151, 83, 24, 230];
 /// 8 discriminator + 32 target + 32 receiver + f64 seized + f64 repaid + u32 flat fee.
@@ -139,6 +150,8 @@ pub struct MarketConfig {
     pub run_id: String,
     pub run_dir: PathBuf,
     pub enrich: EnrichConfig,
+    pub gap: GapConfig,
+    pub reconcile: ReconcileConfig,
 }
 
 pub const DEFAULT_DURATION_SECS: u64 = 14_400;
@@ -280,6 +293,8 @@ impl MarketConfig {
             run_id,
             run_dir,
             enrich,
+            gap: GapConfig::from_lookup(get)?,
+            reconcile: ReconcileConfig::from_lookup(get)?,
         })
     }
 }
@@ -922,6 +937,15 @@ pub struct ObserverCore {
     incomplete_reasons: BTreeSet<&'static str>,
     last_slot_frame_ns: Option<u64>,
     enrichment_init_error: Option<String>,
+    gap_cfg: GapConfig,
+    reconcile_cfg: ReconcileConfig,
+    reconciliation: reconcile::Reconciliation,
+    truth: truth::TruthLedger,
+    deployment_before: Option<paths::Deployment>,
+    deployment_after: Option<paths::Deployment>,
+    deployment_error: Option<&'static str>,
+    gaps: Vec<gap::MarketGap>,
+    gap_stats: gap::GapStats,
     pub stats: MarketStats,
 }
 
@@ -980,6 +1004,15 @@ impl ObserverCore {
             incomplete_reasons: BTreeSet::new(),
             last_slot_frame_ns: None,
             enrichment_init_error: None,
+            gap_cfg: GapConfig::default(),
+            reconcile_cfg: ReconcileConfig::default(),
+            reconciliation: reconcile::Reconciliation::default(),
+            truth: truth::TruthLedger::default(),
+            deployment_before: None,
+            deployment_after: None,
+            deployment_error: None,
+            gaps: Vec::new(),
+            gap_stats: gap::GapStats::default(),
             stats: MarketStats::default(),
         }
     }
@@ -1007,7 +1040,7 @@ impl ObserverCore {
     }
 
     pub fn coverage_complete(&self) -> bool {
-        self.stats.gap_count == 0
+        self.stats.gap_count == self.gap_stats.gap_recovered
             && self.stats.ingress_overflow_count == 0
             && self.stats.fatal_count == 0
     }
@@ -1130,9 +1163,13 @@ impl ObserverCore {
             match kind {
                 "GAP" => {
                     self.stats.gap_count += 1;
+                    self.record_gap(t_rx_ns, &detail);
                     self.mark_incomplete("GAP");
                 }
-                "RECONNECT" => self.stats.reconnect_count += 1,
+                "RECONNECT" => {
+                    self.stats.reconnect_count += 1;
+                    self.record_gap_reconnect(t_rx_ns, &detail);
+                }
                 "INGRESS_OVERFLOW" => {
                     self.stats.ingress_overflow_count += 1;
                     self.mark_incomplete("INGRESS_OVERFLOW");
@@ -1183,6 +1220,20 @@ impl ObserverCore {
                 return false;
             }
         }
+        let cap = self.econ.as_ref().map(|h| h.capacity()).unwrap_or(100_000);
+        if self.truth.live_receipts.len() < cap || self.truth.live_receipts.contains_key(signature)
+        {
+            self.truth
+                .live_receipts
+                .entry(signature.to_owned())
+                .or_insert((slot, t_rx_ns));
+        } else {
+            self.truth.retention_error = true;
+        }
+        self.admit_identity(signature, slot, success)
+    }
+
+    fn admit_identity(&mut self, signature: &str, slot: u64, success: bool) -> bool {
         if self
             .econ
             .as_ref()
@@ -1233,7 +1284,7 @@ impl ObserverCore {
         &mut self,
         signature: &str,
         slot: u64,
-        t_rx_ns: u64,
+        t_rx_ns: Option<u64>,
         transaction_index: Option<u32>,
         events: &[ReceiverEvent],
     ) {
@@ -1246,6 +1297,11 @@ impl ObserverCore {
                     signature: signature.into(),
                     slot,
                     t_rx_ns,
+                    source: if t_rx_ns.is_some() {
+                        crate::econ::MarketEvidenceSource::Live
+                    } else {
+                        crate::econ::MarketEvidenceSource::GapBackfill
+                    },
                     transaction_index,
                     event: ev.clone(),
                 }));
@@ -1284,7 +1340,7 @@ impl ObserverCore {
         sink: &mut dyn MarketSink,
         signature: &str,
         slot: u64,
-        t_rx_ns: u64,
+        t_rx_ns: Option<u64>,
         observed_unix_s: u64,
         events: &[ReceiverEvent],
         tx: Option<&Value>,
@@ -1306,8 +1362,10 @@ impl ObserverCore {
                 .map(|d| json!({"mint": d.mint, "native_delta": d.native_delta.to_string(), "decimals": d.decimals}))
                 .collect();
             sink.liquidation(&json!({
-                "observed_at_utc": utc_iso(observed_unix_s),
+                "observed_at_utc": t_rx_ns.map(|_| utc_iso(observed_unix_s)),
                 "t_rx_ns": t_rx_ns,
+                "source": if t_rx_ns.is_some() { "live" } else { "gap_backfill" },
+                "live_timestamp_qualified": t_rx_ns.is_some(),
                 "slot": slot,
                 "signature": signature,
                 "event_index": ev.event_index,
@@ -1379,6 +1437,8 @@ impl ObserverCore {
                 self.on_logs(&l, now_unix_s, sink)
             }
             IngressEvent::Slot(s) => {
+                self.record_slot_boundary(s.slot, s.t_rx_ns, now_unix_s, sink)?;
+                self.close_gap_ranges(s.slot, s.t_rx_ns, now_unix_s, sink)?;
                 if let Some(h) = &self.econ {
                     h.emit(crate::econ::Evidence::Slot {
                         slot: s.slot,
@@ -1465,7 +1525,7 @@ impl ObserverCore {
         self.aggregate(
             &t.signature,
             t.slot,
-            t.t_rx_ns,
+            Some(t.t_rx_ns),
             t.tx_index_in_slot,
             &decoded.events,
         );
@@ -1482,7 +1542,7 @@ impl ObserverCore {
             sink,
             &t.signature,
             t.slot,
-            t.t_rx_ns,
+            Some(t.t_rx_ns),
             now_unix_s,
             &decoded.events,
             tx,
@@ -1537,7 +1597,7 @@ impl ObserverCore {
         if !success || decoded.events.is_empty() {
             return Ok(());
         }
-        self.aggregate(&l.signature, l.slot, l.t_rx_ns, None, &decoded.events);
+        self.aggregate(&l.signature, l.slot, Some(l.t_rx_ns), None, &decoded.events);
         self.stats.enrichment_requested += 1;
         if self.deferred.len() >= self.enrich_cfg.max_pending {
             self.stats.enrichment_failed += 1;
@@ -1546,7 +1606,7 @@ impl ObserverCore {
                 sink,
                 &l.signature,
                 l.slot,
-                l.t_rx_ns,
+                Some(l.t_rx_ns),
                 now_unix_s,
                 &decoded.events,
                 None,
@@ -1603,7 +1663,7 @@ impl ObserverCore {
                         sink,
                         &p.signature,
                         p.slot,
-                        p.t_rx_ns,
+                        Some(p.t_rx_ns),
                         p.observed_unix_s,
                         &p.events,
                         Some(&tx),
@@ -1616,7 +1676,7 @@ impl ObserverCore {
                         sink,
                         &p.signature,
                         p.slot,
-                        p.t_rx_ns,
+                        Some(p.t_rx_ns),
                         p.observed_unix_s,
                         &p.events,
                         None,
@@ -1667,7 +1727,7 @@ impl ObserverCore {
                 sink,
                 &p.signature,
                 p.slot,
-                p.t_rx_ns,
+                Some(p.t_rx_ns),
                 p.observed_unix_s,
                 &p.events,
                 None,
@@ -1722,13 +1782,45 @@ impl ObserverCore {
             .sum();
         let coverage_complete = self.coverage_complete();
         let decode_complete = self.decode_complete();
-        let market_capture_complete = coverage_complete
+        let receivership_transport_capture_complete = coverage_complete
             && decode_complete
             && cfg.full_duration_observed
             && cfg.drain_complete;
-        let source_coverage_verified = self.source.coverage_verified();
+        // Master contract: transport completeness is no longer whole-market proof.
+        // Until the full-slot/all-liquidation-path engine is qualified, fail closed.
+        let full_slot_reconciliation_complete = self.reconciliation.complete;
+        let liquidation_path_coverage_complete = paths::verified(
+            self.deployment_before.as_ref(),
+            self.deployment_after.as_ref(),
+            self.reconciliation.market_slot_end.as_ref().map(|b| b.slot),
+        );
+        let market_capture_complete = cfg.stream_ready
+            && cfg.full_duration_observed
+            && cfg.drain_complete
+            && full_slot_reconciliation_complete
+            && !self.truth.retention_error
+            && liquidation_path_coverage_complete;
+        let source_coverage_verified =
+            full_slot_reconciliation_complete && liquidation_path_coverage_complete;
         let enrichment_complete = self.enrichment_complete();
-        let mut reasons: Vec<&str> = self.incomplete_reasons.iter().copied().collect();
+        let mut reasons: Vec<&str> = if full_slot_reconciliation_complete {
+            vec![]
+        } else {
+            self.incomplete_reasons.iter().copied().collect()
+        };
+        if !full_slot_reconciliation_complete {
+            reasons.push(
+                self.reconciliation
+                    .error
+                    .unwrap_or("FULL_SLOT_RECONCILIATION_PENDING"),
+            );
+        }
+        if !liquidation_path_coverage_complete {
+            reasons.push(
+                self.deployment_error
+                    .unwrap_or("AUDITED_DEPLOYMENT_CONTINUITY_UNPROVEN"),
+            );
+        }
         if cfg.stream_ready
             && !cfg.full_duration_observed
             && !reasons.contains(&"OBSERVATION_ENDED_EARLY")
@@ -1775,11 +1867,22 @@ impl ObserverCore {
             "actual_observation_seconds": cfg.actual_observation_seconds,
             "verdict": verdict,
             "market_capture_complete": market_capture_complete,
+            "receivership_transport_capture_complete": receivership_transport_capture_complete,
+            "full_slot_reconciliation_complete": full_slot_reconciliation_complete,
+            "full_slot_reconciliation": self.reconciliation,
+            "canonical_market_truth": self.truth.summary(self.reconciliation.first_block_time.zip(self.reconciliation.last_block_time).map(|(a,b)|(b-a) as f64)),
+            "liquidation_path_coverage_complete": liquidation_path_coverage_complete,
+            "liquidation_count_scope": "RECEIVERSHIP_ONLY_NOT_TOTAL_MARGINFI_MARKET",
+            "live_source_coverage_verified": self.source.coverage_verified(),
+            "deployment_continuity":{"before":self.deployment_before,"after":self.deployment_after,"error":self.deployment_error,"source_pin":"33c67987a661f59c6683a65485ebb4f0ef030b77","bytecode_source_equivalence":"NOT_ATTESTED; pinned source is contract authority; hash continuity against existing upgrade-watch reference"},
+            "completeness_authority":"FULL_FINALIZED_SLOT_RECONCILIATION_AND_PATH_QUALIFICATION",
+            "transport_issues_are_telemetry":true,
+            "transport_incomplete_reasons":self.incomplete_reasons,
             "coverage_complete": coverage_complete,
             "decode_complete": decode_complete,
             "drain_complete": cfg.drain_complete,
             "source_coverage_verified": source_coverage_verified,
-            "source_coverage_note": self.source.coverage_note(),
+            "source_coverage_note": if source_coverage_verified {"Finalized full-slot scan is authoritative; live WSS source completeness remains separately unverified"} else {self.source.coverage_note()},
             "incomplete_reasons": reasons,
             "first_observed_slot": s.first_observed_slot,
             "last_observed_slot": s.last_observed_slot,
@@ -1823,6 +1926,19 @@ impl ObserverCore {
             "top3_receiver_liquidation_share": ratio(top3_events as f64, total_events),
             "top3_receiver_gross_edge_share": ratio(top3_gross, total),
             "gap_count": s.gap_count,
+            "gap_recovery_attempted": self.gap_stats.gap_recovery_attempted,
+            "gap_recovered": self.gap_stats.gap_recovered,
+            "gap_unrecovered": s.gap_count.saturating_sub(self.gap_stats.gap_recovered),
+            "gap_slots_requested": self.gap_stats.gap_slots_requested,
+            "gap_slots_fetched": self.gap_stats.gap_slots_fetched,
+            "gap_slots_skipped_confirmed": self.gap_stats.gap_slots_skipped_confirmed,
+            "gap_slots_failed": self.gap_stats.gap_slots_failed,
+            "gap_transactions_scanned": self.gap_stats.gap_transactions_scanned,
+            "gap_transactions_deduplicated": self.gap_stats.gap_transactions_deduplicated,
+            "gap_transactions_recovered": self.gap_stats.gap_transactions_recovered,
+            "gap_liquidation_transactions": self.gap_stats.gap_liquidation_transactions,
+            "gap_liquidation_events": self.gap_stats.gap_liquidation_events,
+            "gaps": self.gaps,
             "reconnect_count": s.reconnect_count,
             "ingress_overflow_count": s.ingress_overflow_count,
             "fatal_count": s.fatal_count,
@@ -2101,6 +2217,16 @@ pub fn finish_capture(
     outcome: CaptureOutcome,
 ) -> Result<(Value, String, Option<String>), String> {
     let mut write_error = outcome.write_error;
+    if outcome.drain_complete && write_error.is_none() {
+        if let Err(e) = core.full_reconciliation_phase(cfg.rpc_url.as_deref(), sink) {
+            write_error = Some(e.to_string());
+        }
+    }
+    if outcome.drain_complete && write_error.is_none() {
+        if let Err(e) = core.gap_recovery_phase(cfg.rpc_url.as_deref(), sink) {
+            write_error = Some(e.to_string());
+        }
+    }
     let needs_rpc = core.has_deferred() || core.has_truncated_pending();
     if cfg.source == MarketSource::Logs && needs_rpc && write_error.is_none() {
         let fetcher = cfg
@@ -2171,6 +2297,12 @@ pub fn finish_capture(
         min_sample_liquidations: cfg.min_sample_liquidations,
         enrichment_available: cfg.source == MarketSource::Transactions || cfg.rpc_url.is_some(),
     };
+    if core.deployment_before.is_some() {
+        match paths::inspect(cfg.rpc_url.as_deref(), &cfg.program) {
+            Ok(v) => core.deployment_after = Some(v),
+            Err(e) => core.deployment_error = Some(e),
+        }
+    }
     let (summary, report) = finalize(
         core,
         sink,
@@ -2207,6 +2339,7 @@ pub fn run_embedded(
         print_banner(&cfg);
     }
 
+    let deployment_before = paths::inspect(cfg.rpc_url.as_deref(), &cfg.program);
     let (producer, consumer) = bounded::<IngressEvent>("market-ingress", cfg.ingress_buffer);
     let halt = IngressHalt::new();
     let slots = SlotWatch::new();
@@ -2223,7 +2356,13 @@ pub fn run_embedded(
         .map_err(|e| format!("spawn ingress: {e}"))?;
 
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
+    match deployment_before {
+        Ok(v) => core.deployment_before = Some(v),
+        Err(e) => core.deployment_error = Some(e),
+    }
     core.econ = econ.clone();
+    core.gap_cfg = cfg.gap;
+    core.reconcile_cfg = cfg.reconcile;
     let mut checkpoint_index = 0usize;
     core.coverage(&mut sink, "START", process_started, None, json!({
         "source": cfg.source.as_str(), "commitment": cfg.commitment, "program": cfg.program.to_string(),
@@ -2405,6 +2544,29 @@ pub fn run_embedded(
         }),
     );
 
+    // A separate capture drain is insufficient: Shadow keeps winner RPCs alive
+    // through its own drain. Release the heavy scan only after ALL workers exit.
+    if let Some(h) = &econ {
+        let barrier = h.wait_shadow_quiescent(Duration::from_secs(h.cfg.drain_secs + 150));
+        let event = if barrier.is_ok() {
+            "SHADOW_RPC_QUIESCENT"
+        } else {
+            "SHADOW_RPC_BARRIER_FAILED"
+        };
+        if let Err(e) = core.coverage(
+            &mut sink,
+            event,
+            unix_now_s(),
+            None,
+            json!({"at_ns": clock.now_ns(), "error": barrier.as_ref().err()}),
+        ) {
+            write_error = Some(e.to_string());
+        }
+        if let Err(e) = barrier {
+            write_error = Some(e);
+        }
+    }
+
     // ---- phase 3 + summary + report: one shared production path ----
     let outcome = CaptureOutcome {
         process_started_unix_s: process_started,
@@ -2444,6 +2606,9 @@ pub fn run_embedded(
 
 #[cfg(test)]
 mod tests {
+    include!("market_gap_tests.rs");
+    include!("market_reconcile_tests.rs");
+    include!("market_truth_tests.rs");
     use super::*;
     use darkbot_solana::ingress::{SlotStatus, SlotUpdate, SourceKind, TxVersion};
 
@@ -2899,20 +3064,17 @@ mod tests {
     fn verdicts_by_source_and_without_liquidations() {
         let tx = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT)
             .summary(&ctx(true, true, 14_400.0));
-        assert_eq!(
-            tx["verdict"].as_str(),
-            Some("MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED")
-        );
+        assert_eq!(tx["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
         assert_eq!(tx["source_coverage_verified"].as_bool(), Some(false));
-        assert_eq!(tx["market_capture_complete"].as_bool(), Some(true));
+        assert_eq!(
+            tx["receivership_transport_capture_complete"].as_bool(),
+            Some(true)
+        );
         assert!(tx["gross_edge_median_usd"].is_null() && tx["top_receiver"].is_null());
         assert_eq!(tx["liquidations_per_hour"].as_f64(), Some(0.0));
         let logs = open_core(MarketSource::Logs, EnrichConfig::DEFAULT)
             .summary(&ctx(true, true, 14_400.0));
-        assert_eq!(
-            logs["verdict"].as_str(),
-            Some("MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED")
-        );
+        assert_eq!(logs["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
         assert_eq!(logs["source_coverage_verified"].as_bool(), Some(false));
         assert!(logs["source_coverage_note"]
             .as_str()
@@ -3064,7 +3226,10 @@ mod tests {
             (Some(false), Some(false))
         );
         assert_eq!(s["liquidation_events"].as_u64(), Some(2)); // enrichment never removes gross edge
-        assert_eq!(s["market_capture_complete"].as_bool(), Some(true));
+        assert_eq!(
+            s["receivership_transport_capture_complete"].as_bool(),
+            Some(true)
+        );
     }
 
     #[test]
@@ -3185,12 +3350,9 @@ mod tests {
             json!({"reason": "TIMER"}),
         )
         .unwrap();
-        assert_eq!(
-            summary["verdict"].as_str(),
-            Some("MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED")
-        );
+        assert_eq!(summary["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
         assert_eq!(summary["commitment"].as_str(), Some("finalized"));
-        assert!(report.contains("verdict=MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED"));
+        assert!(report.contains("verdict=MARKET_DATA_INCOMPLETE"));
         assert!(fs::read_to_string(dir.join("liquidations.jsonl"))
             .unwrap()
             .contains("NOT_ENRICHED"));
@@ -3327,12 +3489,12 @@ mod tests {
         for source in [MarketSource::Transactions, MarketSource::Logs] {
             assert!(!source.coverage_verified());
             let s = open_core(source, EnrichConfig::DEFAULT).summary(&ctx(true, true, 14_400.0));
-            assert_eq!(s["market_capture_complete"].as_bool(), Some(true));
-            assert_ne!(s["verdict"].as_str(), Some("MARKET_DATA_VALID"));
             assert_eq!(
-                s["verdict"].as_str(),
-                Some("MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED")
+                s["receivership_transport_capture_complete"].as_bool(),
+                Some(true)
             );
+            assert_ne!(s["verdict"].as_str(), Some("MARKET_DATA_VALID"));
+            assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
         }
         assert_eq!(market_verdict(true, true, true), "MARKET_DATA_VALID");
         assert_eq!(
@@ -3439,7 +3601,10 @@ mod tests {
             summary["enrichment_init_error"].as_str(),
             Some("enrichment client: tls init failed")
         );
-        assert_eq!(summary["market_capture_complete"].as_bool(), Some(true));
+        assert_eq!(
+            summary["receivership_transport_capture_complete"].as_bool(),
+            Some(true)
+        );
         assert!(dir.join("summary.json").exists() && dir.join("final_report.txt").exists());
         assert!(report.contains("enrichment_complete=false"));
         assert!(fs::read_to_string(dir.join("liquidations.jsonl"))
@@ -3731,11 +3896,11 @@ mod tests {
         );
         assert!(core.decode_complete());
         let s = core.summary(&ctx(true, true, 600.0));
-        assert_eq!(s["market_capture_complete"].as_bool(), Some(true));
         assert_eq!(
-            s["verdict"].as_str(),
-            Some("MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED")
-        ); // coverage stays fail closed
+            s["receivership_transport_capture_complete"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE")); // coverage stays fail closed
         assert_eq!(s["source_coverage_verified"].as_bool(), Some(false));
         // logs source: deferred until after capture, then qualified against the fetched transaction
         let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
@@ -3944,7 +4109,10 @@ mod tests {
         );
         assert!(core.decode_complete());
         let s = core.summary(&ctx(true, true, 600.0));
-        assert_eq!(s["market_capture_complete"].as_bool(), Some(true));
+        assert_eq!(
+            s["receivership_transport_capture_complete"].as_bool(),
+            Some(true)
+        );
     }
 
     // ---------------------------------------------------------------- real audit fixtures (6/6)
@@ -4028,11 +4196,11 @@ mod tests {
             core.on_transaction(&ev, 0, &mut sink).unwrap();
         }
         let s = core.summary(&ctx(true, true, 3_600.0));
+        assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
         assert_eq!(
-            s["verdict"].as_str(),
-            Some("MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED")
+            s["receivership_transport_capture_complete"].as_bool(),
+            Some(true)
         );
-        assert_eq!(s["market_capture_complete"].as_bool(), Some(true));
         assert_eq!(
             (
                 s["liquidation_events"].as_u64(),

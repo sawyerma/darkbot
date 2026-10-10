@@ -1,0 +1,17 @@
+{
+  "workspace_tests": {
+    "crate_health": {
+      "passed": 280,
+      "failed": 0,
+      "ignored": 1
+    },
+    "crate_health_txv1": {
+      "passed": 282,
+      "failed": 0,
+      "ignored": 1
+    }
+  },
+  "builds": "both PASS",
+  "differential_clippy_candidate_only": 0,
+  "master_qualified": false
+}

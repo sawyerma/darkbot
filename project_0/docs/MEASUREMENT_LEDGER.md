@@ -1,5 +1,237 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
+## LATEST QUALIFICATION — 2026-10-10, rate-limit correction pending smoke
+
+**MASTER PARTIAL; do not start 4h yet.** User explicitly owns the future 4h run.
+Code is integrated in the production repository's `project_0/` tree, not a ZIP.
+No stage/commit/push. No BSC changes by this task. LIVE/submission disabled.
+
+Final-candidate 600s run `data/econ4h/c0e1_gap_smoke_20261010T021411Z`:
+- Actual controlled reconnect: gap_count=1, recovered=1, unrecovered=0.
+- Shadow state READY at shutdown, ingress overflow=0, winner overflow=0,
+  analytics queue drops=0, retention overflow=0, program upgrade halt=false.
+- Pinned path/deployment continuity: liquidation_path_coverage_complete=true;
+  before/after finalized ProgramData hash matches existing 0.1.11 reference.
+- **Full-slot FAIL: RPC_RATE_LIMIT**, fetched43 / expected2752, unresolved2709.
+  market_capture_complete=false, technical INCOMPLETE. No Fake-PASS.
+- Earlier 120s diagnostic did finish full-slot reconciliation:544/544 blocks,
+  591719 TX scanned,0 unresolved; its Shadow recovery failed the old30s timeout.
+
+Correction now implemented: pace parallel getBlock starts at5 requests/sec,
+rate-limit retries1s/2s (bounded exponential policy); retain at most8 responses.
+Default full-window budget100000 slots/14400s to cover a4h window at the observed
+~4.5 slots/sec without truncating the ledger. Post-capture reconciliation can take
+hours, separate from the4h observation duration. Unknown/unfetched slots remain FAIL.
+Per-run candidate_manifest.json binds executable SHA256 and all code/script hashes.
+Missing Shadow rx_slot now means UNKNOWN detection attribution, never false NOT_DETECTED.
+
+Pre-rate-fix complete matrix:buildsPASS,294/296 testsPASS,0FAIL,1ignored each,
+differential Clippy0/0. Updated full matrix logs and exact commands are in
+`docs/evidence/C0E1_CANONICAL_FINAL_20261010/rate_limit_fix/`.
+Next: verify updated matrix, repeat600s controlled reconnect with paced block fetch,
+then record exact final status and commit only if master qualification fullyPASS.
+
+## ACTIVE CONTINUATION — 2026-10-10 canonical join and qualification
+
+**MASTER PARTIAL while final qualification is running.** User will run the 4h
+observation personally; do not start it. LIVE=false / SUBMISSION=false.
+Current HEAD remains ec853c4d38492869388440b5b034c0d8a6ee2677. No pull, merge,
+reset, clean, staging, commit or push. BSC and original run evidence untouched.
+
+Implemented beyond the previous checkpoint:
+- Typed production plan identity and explicit pipeline progress; final market-driven
+  replay of the complete disk journal, exact type/target/bank-pair plus canonical
+  chain episode. Same-slot duplicate identities remain ambiguous; missing identity
+  cannot create executable/economic proof.
+- Canonical event-level join JSONL and four reconciled UTC/blockTime hour windows,
+  cumulative/final all-path economics, six capital buckets, loss-dollar attribution,
+  stage/race/competition evidence. Production selected_costs is the sole local
+  economics source. UNKNOWN is never zero. Unassignable blockTime remains explicit.
+- Transaction fees deduplicated by signature; actual meta.fee includes priority.
+  Visible transfers retained without invented tip attribution; incremental rent and
+  winner net remain UNKNOWN where unproven.
+- Pinned instruction namespace inventory; source-qualified Classic, Receivership,
+  Forced Deleverage and Bankruptcy. Sunset purge and Drift bad-debt claim explicitly
+  excluded from permissionless profit. Deployment continuity checked before/after
+  capture against the existing upgrade-watch reference hash; no bytecode/source
+  reproducible-build equivalence claim. Different hash or unknown opcode fails closed.
+- Full finalized slot proof is completeness authority; contained gaps reuse this
+  proof. Post-drain block fetch is bounded to eight concurrent responses, validated
+  and recorded in canonical order. Overall owner deadline includes reconciliation.
+
+Local checkpoint: runner 165 PASS / 0 FAIL / 1 ignored before the final report-field
+addition. Full builds/tests and differential Clippy now running; exact commands and
+logs: `docs/evidence/C0E1_CANONICAL_FINAL_20261010/` (commands.json).
+
+Controlled 120s diagnostic: `data/econ4h/c0e1_gap_smoke_20261010T020556Z`.
+Actual forced disconnect and reconnect succeeded; first real post-reconnect slot
+455084278 closes the gap from 455084270. Not a final candidate PASS: this binary
+predates final path qualification/read-ahead and Shadow root catchup exhausted its
+old 30s limit. Root stayed behind snapshot B, so readiness correctly remained HALTED.
+The launcher now permits a bounded 120s catchup (same root/reconcile condition;
+config 30..300s), and the final controlled smoke is 600s / four 150s snapshots.
+
+Next: finish matrix, remove any candidate-only Clippy warnings, execute final 600s
+combined reconnect smoke, record exact completeness and Shadow results. Commit only
+if complete master qualification PASS; safe fetch/remote check before any push.
+Never start the user's 4h run automatically.
+
+## RESUME — 2026-10-09 canonical scanner and typed decoder implementation
+
+**MASTER PARTIAL / NOT QUALIFIED. No new 4h run.** This block supersedes the
+older gap-only checkpoint immediately below. Starting Project_0 base remains
+`db78cdb3d3507da66fe93450742a8235fefcde1a`; current repository HEAD observed on
+resume is `ec853c4d38492869388440b5b034c0d8a6ee2677` (BSC-only documentation commit).
+No pull/merge/reset/clean, staging, commit or push was performed here. BSC untouched.
+
+Implemented in this continuation:
+- `market_reconcile.rs`: inclusive canonical slot window with persisted slotSubscribe
+  boundary provenance; bounded finalized getSlot/getBlocks/getBlock pass over the whole
+  window, every transaction scanned, static/loaded keys and inner instruction indices
+  checked. Parent slot AND previousBlockhash continuity proves omitted slots; trailing
+  skips require a fetched finalized successor. No absent/null block treated as skipped.
+- Captured slot boundaries are the first and highest in-window processed slot frames,
+  subsequently reconciled at finalized. This is an explicit whole-slot window, NOT an
+  exact transaction-level wall-clock boundary. blockTime span and monotonic duration are
+  different quantities. The old run cannot obtain these missing boundaries retroactively.
+- Legacy, v0 and JSON v1 account/instruction views are supported; real six-fixture F8
+  coverage includes v0/v1. Unsupported versions, missing inner instruction recording,
+  incomplete LUT views, malformed data, timeout and budgets fail closed.
+- `market_truth.rs`: pinned-source Classic / existing F8 Receivership / ForcedDeleverage /
+  BankruptcySettlement classification; instruction-event identity parity, CPI inspection,
+  distinct multiple-event identities, raw relevant TX stored before classification.
+  Deleverage and bankruptcy are explicitly not permissionless bot-profit opportunities.
+- Exact Classic seized amount comes from instruction u64. Event f64 native balances retain
+  their provenance. Liability cost includes assumed debt PLUS consumed liability-bank
+  deposits; insurance is already included. Slot-price/decimal evidence absent => USD edge
+  UNKNOWN. Receivership/deleverage use protocol cached-equity seized minus repaid.
+  meta.fee is transaction context (includes priority), never summed per event. Explicit
+  legacy/v0 requested CU-limit/price gives priority with ceil; v1 config priority remains
+  UNKNOWN pending authoritative fee-semantic qualification. Winner net remains UNKNOWN.
+- Live receipts are retained separately; reconciliation-only events have no receive clock.
+  Canonical typed ALL/per-type aggregates are exposed separately from legacy receiver
+  analytics. Final econ reports explicitly label legacy scope; generalized join and hourly
+  canonical attribution remain false/unqualified.
+- Fixed existing gap dedupe: live-seen signatures still undergo instruction/event parity
+  validation before skipping duplicate aggregation.
+
+Mainnet diagnostic `project_0/data/market/canonical_probe_20261009T132213Z`:
+30-second capture; canonical slots 454878435..454878545; 111 expected/produced/fetched,
+0 failed, 0 unresolved, 118502 TX scanned, 3 Marginfi TX, 0 decoded liquidations,
+0 transport gaps. **Full-slot pass succeeded**, overall MARKET_DATA_INCOMPLETE as designed.
+This was a read-only market run, not combined C0-E1 and not a controlled reconnect.
+It cannot qualify all liquidation paths without events. It also precedes final CPI-order,
+truncation-guard and report-label refinements; repeat on final source before qualification.
+Evidence, hashes and local build/test logs: `docs/evidence/C0E1_CANONICAL_CHECKPOINT_20261009/`.
+
+Exact remaining work (real implementation, not only tests):
+1. Generalize Market↔Shadow identity/instrumentation to type + bank pair + target + slot;
+   existing OpportunityRecord lacks bank-pair/type evidence. Preserve original production
+   economics/capital/race pipeline, extend the evidence rather than infer missing fields.
+2. Complete canonical hourly aggregation, capital/loss-dollar attribution, network fee
+   dedupe/fee payer and observed winner costs, historical price provenance and economic
+   completeness. No guessed historical prices, no artificial zero unknown costs.
+3. Finish exhaustive pinned-source/deployment upgrade qualification; sunset balance purge
+   is administrative cleanup after debt settlement (lib.rs:880-895), not collateral profit.
+   Drift bad-debt claim likewise needs explicit scope documentation before exhaustive claim.
+4. Add real Classic/Deleverage/Bankruptcy fixtures, mixed-path same-TX and CPI-order/rollback
+   fixtures; qualify all path coverage. Receivership has six real existing fixtures.
+5. Integrate full-window recovery with transport-gap bookkeeping, then repeat controlled
+   reconnect/full-slot combined Mainnet smoke on the final candidate. Existing separate
+   gap recovery remains; an unresolved transport gap cannot yet pass the master gate.
+6. Only after full master acceptance consider the next 4h run. Original old 4h remains
+   OLD_4H_REQUALIFIED=false because canonical boundaries were never recorded.
+
+Final checkpoint validation: locked workspace builds PASS; crate_health **280 PASS / 0 FAIL / 1 ignored**; crate_health txv1 **282 PASS / 0 FAIL / 1 ignored**; differential Clippy candidate-only **0 for both** against the preserved b7f5ed3 baseline. Edited-file rustfmt and git diff --check PASS. Whole-workspace fmt remains subject to the previously documented baseline failures.
+
+LIVE/submission disabled. No source pin change. Current full workspace results and
+Clippy differential are stored in the checkpoint results files; no master PASS implied.
+
+
+## RESUME — 2026-10-09 MASTER CONTRACT SUPERSEDES GAP-ONLY TASK
+
+**MASTER IMPLEMENTATION PARTIAL / NOT QUALIFIED. No new 4h run permitted.**
+This resume block supersedes older completion/next-run statements below. Local starting
+HEAD remains `db78cdb3d3507da66fe93450742a8235fefcde1a`; regression reference is
+`b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a`. No pull/merge/reset/clean was performed.
+BSC work and the original runtime evidence were not modified or staged.
+
+Implemented before the expanded master contract: bounded Gap -> Reconnect ACK -> first
+post-reconnect Slot state; inclusive finalized-block recovery after drain; per-slot audit;
+full static/loaded-key relevance checks using the F8 parser; signature dedupe; source-tagged
+backfill events with null live timestamps; bounded retries/time/body/transaction budgets.
+Skipped slots require a finalized successor's parent link, not null/-32007 alone.
+The existing receiver decoder/F8 instruction truth is reused. This is **gap-only,
+receivership-only infrastructure**, not the requested full-market engine.
+
+Controlled smoke `c0e1_gap_smoke_20261009T081918Z` completed 120 seconds but is **FAIL**:
+the proxy interrupted once, then reported `GAP_PROXY_UPSTREAM_CONNECT_FAILED`.
+Both observed gaps lacked a post-reconnect boundary (`POST_RECONNECT_SLOT_UNKNOWN`);
+`gap_count=2`, `gap_recovered=0`, `gap_unrecovered=2`, no recovery slots fetched.
+Therefore this run does NOT qualify block recovery on Mainnet. The proxy's upstream
+connection is now bounded by a 10-second timeout; this adjustment has not been retested live.
+All original smoke files remain under `project_0/data/econ4h/`.
+
+Master-contract safety adaptation: summaries now expose the previous narrower measure as
+`receivership_transport_capture_complete`. Until full-slot reconciliation AND all active
+liquidation families are implemented, `market_capture_complete=false`,
+`full_slot_reconciliation_complete=false`, `liquidation_path_coverage_complete=false` and
+`verdict=MARKET_DATA_INCOMPLETE`. Explicit missing-implementation reasons prevent a
+gap-only success from being mistaken for complete Marginfi Market Truth.
+
+Source audit at pinned Marginfi commit `33c67987a661f59c6683a65485ebb4f0ef030b77`:
+Classic `lending_account_liquidate` and Receivership `start/end_liquidation` exist, but so
+do forced `start/end_deleverage` and terminal bad-debt settlement
+`lending_pool_handle_bankruptcy`. These additional paths require explicit classification;
+the active-path audit is not yet exhaustive or Mainnet-qualified. Exact source locations,
+discriminators and Classic economic caveats are recorded in C0_E1_IMPLEMENTATION_REPORT.md.
+
+Old run `c0e1_4h_20261008T222326Z`: **OLD_4H_REQUALIFIED=false**. It contains no
+persisted first/last canonical market slot boundary and no first post-reconnect slot frame.
+The market summary's first/last observed slots come from admitted Marginfi transactions;
+they are not canonical observation boundaries. Shadow rx/evaluation slots are from another
+pipeline/session and cannot establish the missing market boundaries. Runtime contains no
+serialized SlotUpdate/slotNotification records. No full-range salvage was attempted from
+guessed endpoints; original data remain retention/stability evidence, not whole-market
+economic proof. Zero receiver events is NOT zero Marginfi liquidations.
+
+### Exact next implementation sequence (master contract)
+
+1. Finish pinned-source path audit, including forced deleverage/bad-debt settlement, CPI/
+   inner instructions, and current upgrade evidence. Define distinct event types without
+   treating administrative settlement as permissionless bot profit.
+2. Persist canonical slot-complete start/end and boundary provenance during capture;
+   keep monotonic duration and chain-window duration separate.
+3. Implement bounded post-capture reconciliation of EVERY produced finalized block across
+   that entire window, with a slot ledger and proven skipped slots. Gap telemetry becomes
+   a subset of this proof; live WSS is not completeness authority.
+4. Add source-derived Classic/additional decoders, instruction/event parity, raw native
+   amount provenance, unknown historical valuations, per-type and ALL economic aggregates.
+   Do not turn a missing price or winner cost into zero.
+5. Generalize MarketEvent and Market↔Shadow identity to type/bank pair/target/slot;
+   preserve independent market counts, UNKNOWN costs, capital scenarios and race non-claims.
+   Reconciliation-only events must never acquire a fake live receive timestamp.
+6. Complete mandatory synthetic + real-fixture tests, builds, differential Clippy against
+   b7f5ed3850..., and a controlled reconnect/full-slot Mainnet smoke. Only then enable
+   completeness, consider salvage, and qualify a new four-hour run.
+
+No commit or push has been made for this work. LIVE/submission remain disabled.
+Local qualification evidence for the checkpoint is stored in
+`project_0/docs/evidence/C0E1_GAP_MASTER_CHECKPOINT_20261009/` (commands/results/logs);
+it is explicitly not a master-contract PASS.
+
+Final checkpoint checks, after the master-contract fail-closed gate change:
+both locked builds PASS; workspace `crate_health` 261 PASS / 0 FAIL / 1 ignored;
+workspace `crate_health txv1` 263 PASS / 0 FAIL / 1 ignored; differential Clippy
+`--workspace --all-targets` against b7f5ed3850... candidate-only 0/0.
+Targeted rustfmt on all edited Rust files and `git diff --check` PASS.
+Workspace-wide `cargo fmt --all -- --check` is NOT PASS: it exits 1 on existing
+formatting outside the edited files; the exact b7f5ed3850... baseline also exits 1.
+No broad formatting of unrelated Project_0 files or BSC files was performed.
+The original Cargo archive for baseline Clippy initially lacked docs/evidence fixtures;
+after exporting those exact baseline fixtures both baseline runs completed successfully.
+No new full-slot or all-path Mainnet qualification is implied by these local checks.
+
 Status: **C0-E1 locally integrated; both builds and workspace test suites PASS; differential Clippy / combined Mainnet smoke / 4-hour observation OPEN; LIVE disabled**
 Updated: 2026-10-08
 

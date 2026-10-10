@@ -141,6 +141,7 @@ pub enum Mode {
 /// Was der Receivership-Builder (P5-06) liefern muss. Implementierung gegen das
 /// marginfi-Crate/IDL; hier nur der Contract.
 pub struct ReceivershipPlan {
+    pub market_identity: Option<crate::record::MarketPlanIdentity>,
     pub steps: Vec<Step>,
     pub instructions: Vec<Instruction>,
     pub route: RouteKind,
@@ -215,6 +216,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let mut tl = Timeline::new();
         tl.mark(Stage::Rx, t_rx_ns);
         let mut rec = OpportunityRecord {
+            progress: Default::default(),
+            market_plan_identity: None,
             timing: Default::default(),
             rx_slot: Some(slot),
             detect_slot: None,
@@ -267,6 +270,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 return rec.with_timeline(&tl);
             }
         };
+        rec.progress.health_liquidatable = Some(hv.liquidatable);
         if !hv.liquidatable {
             rec.reason = Some("not liquidatable".into());
             return rec.with_timeline(&tl);
@@ -315,6 +319,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             &PLANNING_NS_MAX,
             planning_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
         );
+        rec.progress.candidates_created = planning_result.as_ref().ok().map(|p| !p.is_empty());
         let plans = match planning_result {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => {
@@ -387,6 +392,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 ));
                 continue;
             }
+
+            rec.progress.plan_validated = Some(true);
 
             // [FIX-22][FIX-30] P0-Top-Level-Allowlist gilt nur für die Receivership-TX; Prerequisite-TXs
             // (JIT-Buy) liegen außerhalb Start/End und haben ihre eigene Allowlist (`prereq_allowed`).
@@ -483,6 +490,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 }
             };
 
+            rec.progress.transaction_built = Some(true);
             let fee_quote = if plan.input.path == Path::Rpc
                 && self.submitter.path() == SubmissionPath::Rpc
                 && plan.prerequisite_txs.is_empty()
@@ -553,6 +561,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     }
                     if rec.net_profit.map_or(true, |current| net > current) {
                         rec.net_profit = Some(net);
+                        rec.market_plan_identity = plan.market_identity.clone();
                         rec.selected_costs = Some(cost_record);
                         rec.economics_known = true;
                         rec.premium_bps = Some(plan.premium_bps);
@@ -611,6 +620,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             return rec.with_timeline(&tl);
         };
 
+        rec.market_plan_identity = plan.market_identity.clone();
         rec.selected_costs = Some(selected_costs);
         rec.path = Some(self.submitter.path().as_str().into());
         rec.premium_bps = Some(plan.premium_bps);

@@ -1,0 +1,16 @@
+{
+  "baseline": "b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a",
+  "normalization": "primary crate path, diagnostic code, message; multiplicity retained",
+  "results": {
+    "health": {
+      "candidate_only_count": 0,
+      "new": [],
+      "baseline_log_sha256": "06f67d6e5e4ffbcccaad3ef3754c11cb37e5f7439642adb78be8e5144244ddec"
+    },
+    "txv1": {
+      "candidate_only_count": 0,
+      "new": [],
+      "baseline_log_sha256": "d73957879e3e3d3008216ff9891f4859e16849a6d0a2fddefe33b65a52057b8f"
+    }
+  }
+}

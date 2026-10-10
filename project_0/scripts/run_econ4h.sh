@@ -122,6 +122,9 @@ case "${P0_LIVE_ENABLED:-false}:${P0_SUBMISSION_ENABLED:-false}" in
   false:false|0:0|false:0|0:false) ;;
   *) echo "econ4h requires LIVE and submission disabled" >&2; exit 2 ;;
 esac
+# Allow provider WSS backlog to reach the unchanged finalized-root barrier.
+# The 2026-10-10 smoke exceeded the old 30s wait; this never skips reconciliation.
+export P0_RECOVERY_ROOT_CATCHUP_SECS="${P0_RECOVERY_ROOT_CATCHUP_SECS:-120}"
 export P0_MODE=econ4h
 export P0_LIVE_ENABLED=false
 export P0_SUBMISSION_ENABLED=false
@@ -133,6 +136,24 @@ export P0_MARKET_SOURCE="${P0_MARKET_SOURCE:-logs}"
 RUN_DIR="$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID"
 if [[ -e "$RUN_DIR" ]]; then echo "econ run directory already exists" >&2; exit 2; fi
 mkdir -p "$RUN_DIR"
+# The preserved 2026-10-08 four-hour evidence occupies ~43 GiB. Budget60GiB
+# for a new four-hour run; this is a storage guard, not an output-size guarantee.
+python3 - "$RUN_DIR" "$P0_ECON_DURATION_SECS" <<'STORAGE'
+import json, math, pathlib, shutil, sys
+run = pathlib.Path(sys.argv[1])
+duration = int(sys.argv[2])
+required_gib = max(8, math.ceil(60 * duration / 14400))
+free = shutil.disk_usage(run).free
+with (run / 'storage_preflight.json').open('x') as f:
+    json.dump({'free_bytes': free, 'required_bytes': required_gib * 2**30,
+               'duration_seconds': duration, 'passed': free >= required_gib * 2**30,
+               'basis': 'preserved four-hour evidence ~43GiB; conservative60GiB allocation'}, f, indent=2)
+    f.write('\n')
+if free < required_gib * 2**30:
+    print(f'Insufficient output storage: {free / 2**30:.1f} GiB free; require {required_gib} GiB. '
+          'Free space without deleting preserved evidence, or set P0_ECON_OUT_DIR on another volume.', file=sys.stderr)
+    raise SystemExit(2)
+STORAGE
 export P0_RECORD_PATH="$RUN_DIR/opportunities.jsonl"
 export P0_SUMMARY_PATH="$RUN_DIR/daily_summary.jsonl"
 export P0_MT0_PATH="$RUN_DIR/mt0.jsonl"
@@ -157,6 +178,25 @@ cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" 
   echo "Build failed: $RUN_DIR/build.log" >&2; exit 2;
 }
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
+# Bind local (possibly uncommitted) source and the actual executable to this run.
+# Do not record environment values, endpoints or signer paths.
+python3 - "$BIN" "$RUN_DIR" <<'MANIFEST'
+import hashlib, json, pathlib, subprocess, sys
+binary, run = map(pathlib.Path, sys.argv[1:])
+paths = subprocess.check_output(['git', 'ls-files', '-co', '--exclude-standard', '--',
+    'project_0/native', 'project_0/scripts'], text=True).splitlines()
+source = {}
+for name in sorted(set(paths)):
+    p = pathlib.Path(name)
+    if p.is_file() and p.suffix in ('.rs', '.toml', '.lock', '.sh'):
+        source[name] = hashlib.sha256(p.read_bytes()).hexdigest()
+manifest = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+    'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'source_sha256': source,
+    'live_enabled': False, 'submission_enabled': False}
+with (run / 'candidate_manifest.json').open('x') as f:
+    json.dump(manifest, f, indent=2)
+    f.write('\n')
+MANIFEST
 status=0
 "$BIN" > "$RUN_DIR/console_summary.txt" 2> "$RUN_DIR/runtime.log" || status=$?
 cat "$RUN_DIR/console_summary.txt"

@@ -1,0 +1,47 @@
+{
+  "run": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/data/market/canonical_probe_20261009T132213Z",
+  "mode": "market",
+  "capture_seconds": 30,
+  "submission_enabled": false,
+  "live_enabled": false,
+  "full_slot_reconciliation": {
+    "attempted": true,
+    "complete": true,
+    "error": null,
+    "first_block_time": 1791552134,
+    "last_block_time": 1791552164,
+    "marginfi_transactions": 3,
+    "market_slot_end": {
+      "observed_unix_s": 1791552164,
+      "provenance": "IN_WINDOW_SLOT_SUBSCRIBE_PROCESSED",
+      "slot": 454878545,
+      "t_rx_ns": 30801919250
+    },
+    "market_slot_start": {
+      "observed_unix_s": 1791552134,
+      "provenance": "IN_WINDOW_SLOT_SUBSCRIBE_PROCESSED",
+      "slot": 454878435,
+      "t_rx_ns": 1255883375
+    },
+    "slots_expected": 111,
+    "slots_failed": 0,
+    "slots_fetched": 111,
+    "slots_produced": 111,
+    "slots_skipped_confirmed": 0,
+    "slots_unresolved": 0,
+    "transactions_scanned": 118502
+  },
+  "overall_verdict": "MARKET_DATA_INCOMPLETE",
+  "liquidation_events": 0,
+  "limitations": [
+    "No controlled reconnect in this probe",
+    "No liquidation in this window",
+    "Probe binary precedes final CPI-order/truncation guards and report scope labels; final-source Mainnet qualification remains pending"
+  ],
+  "sha256": {
+    "summary.json": "ac4552fec9788c36a07b696c8eb8119ab196f8572d753a4757f2ea7fcd9c3576",
+    "coverage.jsonl": "93c8a0643574169dfbb6170db40fc675bc2c78149609e7ad608277f93d0ae01a",
+    "transactions.jsonl": "f1043776d55a7920b3de9b9501bdc38ce4284c964a3a04221b9aac3c3a2c58f1",
+    "liquidations.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

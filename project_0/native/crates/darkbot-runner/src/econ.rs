@@ -19,6 +19,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+#[path = "econ_canonical.rs"]
+mod canonical;
+
 pub const CAPITAL_USD: [u64; 6] = [200, 500, 1000, 2500, 5000, 10000];
 pub const SPEEDUP_MS: [u64; 9] = [1, 5, 10, 25, 50, 100, 200, 500, 1000];
 pub const NON_CLAIMS: [&str; 8] = [
@@ -170,16 +173,24 @@ impl<S: SubmissionAdapter> SubmissionAdapter for ObserveOnly<S> {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketEvidenceSource {
+    Live,
+    GapBackfill,
+}
+#[derive(Clone, Debug, Serialize)]
 pub struct MarketEvent {
     pub signature: String,
     pub slot: u64,
-    pub t_rx_ns: u64,
+    pub t_rx_ns: Option<u64>,
+    pub source: MarketEvidenceSource,
     pub transaction_index: Option<u32>,
     pub event: ReceiverEvent,
 }
 #[derive(Clone, Debug)]
 pub enum Evidence {
     Market(MarketEvent),
+    CanonicalMarket(Box<crate::market_observer::truth::TruthEvent>),
     Slot {
         slot: u64,
         t_rx_ns: u64,
@@ -253,6 +264,23 @@ impl Handle {
             || self.cutoff().is_some_and(|c| {
                 self.clock.now_ns() >= c.saturating_add(self.cfg.drain_secs * 1_000_000_000)
             })
+    }
+    /// End of capture alone does not end Shadow's winner/projection RPC drain.
+    pub fn wait_shadow_quiescent(&self, timeout: Duration) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self.shared.shadow_done.load(Ordering::Acquire) {
+                return if self.shared.shadow_failed.load(Ordering::Acquire) {
+                    Err("SHADOW_FAILED_BEFORE_MARKET_RECONCILIATION".into())
+                } else {
+                    Ok(())
+                };
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("SHADOW_DRAIN_BARRIER_TIMEOUT".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
     pub fn capacity(&self) -> usize {
         self.cfg.retention
@@ -413,7 +441,10 @@ pub fn race(
         && market.is_some()
         && !identity_ok
         && !matches!(chain, RaceClass::WinnerIdentityAmbiguous);
-    let qualified = identity_ok && rec.timing.t_sign_ns.is_some();
+    let qualified = identity_ok
+        && rec.timing.t_sign_ns.is_some()
+        && market
+            .is_some_and(|m| matches!(m.source, MarketEvidenceSource::Live) && m.t_rx_ns.is_some());
     let class = if mismatch {
         RaceClass::LiveTimestampUnqualified
     } else if winner.is_some()
@@ -427,8 +458,8 @@ pub fn race(
     } else {
         chain.clone()
     };
-    let rx_margin =
-        qualified.then(|| market.unwrap().t_rx_ns as i128 - rec.timing.t_sign_ns.unwrap() as i128);
+    let rx_margin = qualified
+        .then(|| market.unwrap().t_rx_ns.unwrap() as i128 - rec.timing.t_sign_ns.unwrap() as i128);
     let slot_margin = if qualified {
         slot_seen.map(|s| s as i128 - rec.timing.t_sign_ns.unwrap() as i128)
     } else {
@@ -545,6 +576,9 @@ struct Worker {
     commit: String,
     min_sample: u64,
     market: Vec<MarketEvent>,
+    canonical_market: Vec<crate::market_observer::truth::TruthEvent>,
+    canonical_joined: Vec<canonical::Joined>,
+    canonical_finalized: bool,
     slots: BTreeMap<u64, u64>,
     // One best record per target/winner-slot or unresolved target/hour.
     shadow: BTreeMap<String, RetainedShadow>,
@@ -595,6 +629,9 @@ impl Worker {
             commit,
             min_sample,
             market: vec![],
+            canonical_market: vec![],
+            canonical_joined: vec![],
+            canonical_finalized: false,
             slots: BTreeMap::new(),
             shadow: BTreeMap::new(),
             shadow_heads: BTreeMap::new(),
@@ -636,6 +673,19 @@ impl Worker {
     }
     fn accept(&mut self, e: Evidence) -> Result<(), String> {
         match e {
+            Evidence::CanonicalMarket(event) => {
+                if self.canonical_market.len() >= self.h.capacity() {
+                    self.over_limit();
+                } else if self
+                    .canonical_market
+                    .iter()
+                    .any(|e| e.signature == event.signature && e.event_index == event.event_index)
+                {
+                    return Err("duplicate canonical event".into());
+                } else {
+                    self.canonical_market.push(*event);
+                }
+            }
             Evidence::Market(e) => {
                 if self.market.len() >= self.h.capacity() {
                     self.over_limit();
@@ -801,8 +851,8 @@ impl Worker {
             "stage_intervals_ns":stage_intervals(rec),
             "stage_latency_budget_sufficient_if_fully_removed":stage_intervals(rec).into_iter().map(|(k,v)|(k,
                 v.zip(r.required_speedup_to_winner_rx_ns).map(|(stage,speed)|speed>0 && speed<=stage))).collect::<BTreeMap<_,_>>(),
-            "t_winner_rx_ns":if strong {m.map(|m|m.t_rx_ns)}else{None},
-            "t_winner_slot_first_seen_ns":if strong {w.and_then(|w|self.slots.get(&w.slot).copied())}else{None}})
+            "t_winner_rx_ns":if r.live_timestamp_qualified {m.and_then(|m|m.t_rx_ns)}else{None},
+            "t_winner_slot_first_seen_ns":if r.live_timestamp_qualified {w.and_then(|w|self.slots.get(&w.slot).copied())}else{None}})
     }
     fn retain_shadow(&mut self, hour: usize, sequence: u64, rec: OpportunityRecord, count: bool) {
         let key = match self.winner_for(&rec) {
@@ -899,13 +949,19 @@ impl Worker {
         }
         Ok(())
     }
+    fn market_hour(&self, market: &MarketEvent) -> Option<usize> {
+        match market.source {
+            MarketEvidenceSource::Live => market.t_rx_ns.and_then(|t| self.hour(t)),
+            MarketEvidenceSource::GapBackfill => Some(3),
+        }
+    }
     fn selected(&self) -> Vec<(usize, &OpportunityRecord)> {
         self.shadow
             .values()
             .map(|entry| {
                 let m = self.market_for(&entry.rec, self.winner_for(&entry.rec));
                 (
-                    m.and_then(|m| self.hour(m.t_rx_ns)).unwrap_or(entry.hour),
+                    m.and_then(|m| self.market_hour(m)).unwrap_or(entry.hour),
                     &entry.rec,
                 )
             })
@@ -917,7 +973,7 @@ impl Worker {
             .market
             .iter()
             .filter(|m| {
-                self.hour(m.t_rx_ns)
+                self.market_hour(m)
                     .is_some_and(|h| h >= from && h < through)
             })
             .collect();
@@ -1058,7 +1114,11 @@ impl Worker {
             ) {
                 ambiguous += 1;
             }
-            if strong {
+            if strong
+                && m.is_some_and(|m| {
+                    matches!(m.source, MarketEvidenceSource::Live) && m.t_rx_ns.is_some()
+                })
+            {
                 live_matched += 1;
             } else if w.is_some() {
                 missing += 1;
@@ -1227,11 +1287,10 @@ impl Worker {
             }
         }
         let s = &self.h.shared;
-        let market_ok = self.market_final.as_ref().is_some_and(|v| {
-            v["market_capture_complete"] == true
-                && v["drain_complete"] == true
-                && v["decode_complete"] == true
-        });
+        let market_ok = self
+            .market_final
+            .as_ref()
+            .is_some_and(|v| v["market_capture_complete"] == true && v["drain_complete"] == true);
         let writer_ok = s.writer_errors.load(Ordering::Relaxed) == 0;
         let duration_ok = self
             .market_final
@@ -1242,6 +1301,7 @@ impl Worker {
             && self.shadow_stats["winner_watch_overflow"].as_u64() == Some(0)
             && self.shadow_stats["shadow_state_ready_at_shutdown"] == true;
         let pass = finalizing
+            && self.canonical_finalized
             && shadow_ok
             && market_ok
             && duration_ok
@@ -1277,7 +1337,7 @@ impl Worker {
             "retention_capacity":self.h.cfg.retention,"retention_overflow":s.retention_overflow.load(Ordering::Relaxed),
             "shadow_runtime_terminated_early":s.shadow_failed.load(Ordering::Relaxed),"shadow_runtime_finished":s.shadow_done.load(Ordering::Relaxed),
             "program_upgrade_halt":s.upgrade.load(Ordering::Relaxed),"submission_attempts_blocked":s.submission_attempts.load(Ordering::Relaxed),
-            "submissions":0,"live_ready":false,"source_coverage_verified":false,"final_reconciliation_complete":finalizing,
+            "submissions":0,"live_ready":false,"source_coverage_verified":self.market_final.as_ref().is_some_and(|m|m["source_coverage_verified"]==true),"final_reconciliation_complete":finalizing && self.canonical_finalized,
             "shadow_telemetry":self.shadow_stats,"remote_and_backlog_telemetry":serde_json::from_str::<Value>(&mt0).ok()})
     }
     fn report(&self, index: usize, finalizing: bool) -> Value {
@@ -1302,7 +1362,8 @@ impl Worker {
             "snapshot_index":index,"snapshot_interval_seconds":self.h.cfg.snapshot_secs,"complete":complete,"live_enabled":false},
             "window":{"from_seconds":(index-1) as u64*self.h.cfg.snapshot_secs,"through_seconds":index as u64*self.h.cfg.snapshot_secs,
                 "provisional":!finalizing,"reconciled_after_drain":finalizing,"join_assignment":"matched event receive hour; unmatched candidate trigger hour",
-                "coalescing":"earliest executable sign per target/winner; unresolved per target/hour; all input evaluations streamed to disk; bounded semantic representatives; disk-indexed late-winner recorrelation"},
+                "coalescing":"earliest executable sign per target/winner; unresolved per target/hour; all input evaluations streamed to disk; bounded semantic representatives; disk-indexed late-winner recorrelation",
+                "backfill_hour_assignment":"final resolution window (hour 4), not a live receive time"},
             "technical_qualification":self.technical(finalizing),"non_claims":NON_CLAIMS,
             "economic_sample_status":if cumulative["market"]["liquidation_events"].as_u64().unwrap_or(0)>=self.min_sample {"SAMPLE_SUFFICIENT"}else{"INSUFFICIENT_SAMPLE"},
             "market_edge_status":if cumulative["market"]["liquidation_events"].as_u64().unwrap_or(0)>0 {"OBSERVED"}else{"NO_OBSERVED_LIQUIDATIONS"},
@@ -1322,6 +1383,34 @@ impl Worker {
         ] {
             report[key] = json!({"window_delta":delta[key],"cumulative":cumulative[key]});
         }
+        report["market"]["scope"] = json!("LEGACY_RECEIVERSHIP_ANALYTICS; not total Marginfi market; canonical is the authoritative all-path market/economics join");
+        report["canonical_market_truth"] = self
+            .market_final
+            .as_ref()
+            .map(|v| {
+                json!({"full_window_summary": v["canonical_market_truth"],
+                "reconciliation": v["full_slot_reconciliation"],
+                "hourly_attribution_qualified": self.canonical_finalized, "market_shadow_join_qualified": self.canonical_finalized})
+            })
+            .unwrap_or(Value::Null);
+        report["canonical"] = json!({"window_delta":self.canonical_metrics(index-1,index),
+            "cumulative":self.canonical_metrics(0,index)});
+        report["authoritative_analytics"] = json!(
+            "canonical; other top-level analytics retain legacy receiver scope for compatibility"
+        );
+        let canonical_count = report["canonical"]["cumulative"]["market"]["ALL"]["events"]
+            .as_u64()
+            .unwrap_or(0);
+        report["economic_sample_status"] = json!(if canonical_count >= self.min_sample {
+            "SAMPLE_SUFFICIENT"
+        } else {
+            "INSUFFICIENT_SAMPLE"
+        });
+        report["market_edge_status"] = json!(if canonical_count > 0 {
+            "OBSERVED"
+        } else {
+            "NO_OBSERVED_LIQUIDATIONS"
+        });
         let r6 = if index == 4 && finalizing {
             self.market_final.as_ref()
         } else {
@@ -1376,6 +1465,7 @@ impl Worker {
         }
         self.evaluations.flush().map_err(|e| e.to_string())?;
         self.journal.flush().map_err(|e| e.to_string())?;
+        self.finalize_canonical()?;
         // Freeze one final telemetry snapshot, so hour 4 and final reconcile byte-for-byte.
         self.final_technical = Some(self.technical(true));
         // Reconcile delayed F8/qualification evidence atomically. No fifth snapshot.
@@ -1400,6 +1490,13 @@ impl Worker {
             final_report["matching"]["cumulative"]["market_with_shadow_match"],final_report["economics"]["cumulative"]["known_executable"],
             json!(final_report["capital"]["cumulative"].as_array().unwrap().iter().map(|b|json!({"usd":b["budget_usd"],"fundable":b["fundable_known_opportunities"],"net_usd":b["known_executable_net_edge_usd"]})).collect::<Vec<_>>()),final_report["competition"]["cumulative"],final_report["race_timing"]["cumulative"]["required_speedup_to_winner_rx_ms"],
             json!(final_report["bottlenecks"]["cumulative"]["ranking"].as_array().unwrap().iter().take(3).collect::<Vec<_>>()),final_report["unknowns"]["cumulative"],self.h.cfg.run_dir.display());
+        println!(
+            "C0-E1 CANONICAL ALL-PATH market={} capital={} losses={} completeness={}",
+            final_report["canonical"]["cumulative"]["market"],
+            final_report["canonical"]["cumulative"]["capital"],
+            final_report["canonical"]["cumulative"]["loss_attribution"],
+            final_report["technical_qualification"]["verdict"]
+        );
         if final_report["technical_qualification"]["verdict"] != "PASS" {
             return Err(
                 "C0-E1 technical qualification incomplete; see economics_final.json".into(),

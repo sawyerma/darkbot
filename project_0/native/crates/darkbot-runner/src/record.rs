@@ -131,8 +131,28 @@ impl CandidateCostRecord {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PipelineProgress {
+    pub health_liquidatable: Option<bool>,
+    pub candidates_created: Option<bool>,
+    pub plan_validated: Option<bool>,
+    pub transaction_built: Option<bool>,
+}
+
+/// Identity of the actual selected production plan. Missing legacy evidence stays absent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketPlanIdentity {
+    pub liquidation_type: String,
+    pub asset_bank: String,
+    pub liability_bank: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OpportunityRecord {
+    #[serde(default)]
+    pub progress: PipelineProgress,
+    #[serde(default)]
+    pub market_plan_identity: Option<MarketPlanIdentity>,
     pub timing: TimingEvidence,
     pub rx_slot: Option<u64>,
     pub detect_slot: Option<u64>,

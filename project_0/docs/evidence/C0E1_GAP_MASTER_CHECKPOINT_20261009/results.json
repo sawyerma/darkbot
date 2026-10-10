@@ -1,0 +1,66 @@
+{
+  "status": "PARTIAL_MASTER_IMPLEMENTATION_NOT_QUALIFIED",
+  "head": "db78cdb3d3507da66fe93450742a8235fefcde1a",
+  "baseline": "b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a",
+  "working_directory": "repository root",
+  "checks": [
+    {
+      "command": "cargo build --manifest-path project_0/native/Cargo.toml --locked --features \"crate_health\"",
+      "pass": true
+    },
+    {
+      "command": "cargo test --workspace --manifest-path project_0/native/Cargo.toml --locked --features \"crate_health\"",
+      "pass": true,
+      "passed": 261,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "command": "cargo clippy --manifest-path project_0/native/Cargo.toml --locked --workspace --all-targets --features \"crate_health\" --message-format=json",
+      "baseline_success": true,
+      "candidate_success": true,
+      "candidate_only": 0,
+      "new_warnings": [],
+      "pass": true
+    },
+    {
+      "command": "cargo build --manifest-path project_0/native/Cargo.toml --locked --features \"crate_health txv1\"",
+      "pass": true
+    },
+    {
+      "command": "cargo test --workspace --manifest-path project_0/native/Cargo.toml --locked --features \"crate_health txv1\"",
+      "pass": true,
+      "passed": 263,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "command": "cargo clippy --manifest-path project_0/native/Cargo.toml --locked --workspace --all-targets --features \"crate_health txv1\" --message-format=json",
+      "baseline_success": true,
+      "candidate_success": true,
+      "candidate_only": 0,
+      "new_warnings": [],
+      "pass": true
+    }
+  ],
+  "source_sha256": {
+    "project_0/native/crates/darkbot-runner/src/market_observer.rs": "5a5129a37000c4e42d345b906e1af0e6aa41db5818912a800dfd4b876616eb34",
+    "project_0/native/crates/darkbot-runner/src/market_gap.rs": "782d5ba3bc922f8f24834523e5af5f46f4e895ef6649ca70ffcb8f8d072a2a08",
+    "project_0/native/crates/darkbot-runner/src/market_gap_tests.rs": "0d44e1c168c61f86579922dc9f4038629e5dbe2e8933c0b0941e9564bf220c4e",
+    "project_0/native/crates/darkbot-runner/src/econ.rs": "16e67f5c35207b1dbe3972b3ac663777584155eeba0295a8bc8f14124ca3a4f9",
+    "project_0/native/crates/darkbot-runner/src/econ_tests.rs": "1e0bbb41fe56dc962f6c50f5abb9c2d73311638ae6d447c04783460586484363",
+    "project_0/native/crates/darkbot-runner/src/main.rs": "ddc201ce0b9eebb5fea51c5cafcf72a59056c8d413f5e96de2d74d740d8ef271",
+    "project_0/native/crates/darkbot-solana/examples/p0-gap-ws-proxy.rs": "4bd1c0a478b97159d73b854c453fc32585d1bf90e73be557a5193de6998d307a",
+    "project_0/scripts/run_gap_reconnect_smoke.sh": "e052d71a37fd19e50e1bf411d8eb81824ed1dd6a423a3d9eff6024dd6f050394"
+  },
+  "smoke": {
+    "run": "c0e1_gap_smoke_20261009T081918Z",
+    "result": "FAIL",
+    "reason": "proxy upstream reconnect failed; no post-reconnect slot boundary",
+    "gap_count": 2,
+    "gap_recovered": 0,
+    "master_engine_exercised": false
+  },
+  "old_4h_requalified": false,
+  "old_4h_reason": "No persisted canonical market slot boundaries; no persisted first post-reconnect slot. Transaction min/max and Shadow slot samples are not substitutes."
+}

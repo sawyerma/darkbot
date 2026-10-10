@@ -6,13 +6,13 @@
 use crate::pending::{try_reconcile, PendingSubmission, ReconcileResult};
 use crate::record::LossReason;
 use crate::winner::{find_winner, Winner};
-use darkbot_solana::submit::rpc::RpcSubmitter;
-use solana_sdk::{account::Account, hash::Hash, transaction::VersionedTransaction};
 use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer};
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
+use darkbot_solana::submit::rpc::RpcSubmitter;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{account::Account, hash::Hash, transaction::VersionedTransaction};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
@@ -82,6 +82,7 @@ pub struct OraclePriceProjectionResultMessage {
 }
 
 pub struct RemoteWorkers {
+    threads: Vec<std::thread::JoinHandle<()>>,
     pub winner_jobs: Producer<WinnerWatch>,
     pub winner_results: Consumer<WinnerResult>,
     pub reconcile_jobs: Producer<ReconcileWork>,
@@ -92,8 +93,11 @@ pub struct RemoteWorkers {
     pub oracle_price_projection_results: Consumer<OraclePriceProjectionResultMessage>,
 }
 
-fn push_result<T>(tx: &Producer<T>, mut value: T) -> bool {
+fn push_result<T>(tx: &Producer<T>, mut value: T, shutdown: &Shutdown) -> bool {
     loop {
+        if shutdown.is_requested() {
+            return false;
+        }
         match tx.try_push(value) {
             Ok(()) => return true,
             Err(ChannelError::Full(v)) => {
@@ -106,6 +110,25 @@ fn push_result<T>(tx: &Producer<T>, mut value: T) -> bool {
 }
 
 impl RemoteWorkers {
+    /// The market scanner must not start while an in-flight shadow RPC remains alive.
+    /// Result queues stop accepting completions on shutdown, so a full queue cannot
+    /// deadlock this barrier after the state-thread consumer has stopped.
+    pub fn wait_stopped(self, timeout: Duration) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + timeout;
+        while self.threads.iter().any(|thread| !thread.is_finished()) {
+            if std::time::Instant::now() >= deadline {
+                return Err("SHADOW_REMOTE_QUIESCENCE_TIMEOUT".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        for thread in self.threads {
+            thread
+                .join()
+                .map_err(|_| "SHADOW_REMOTE_WORKER_PANIC".to_string())?;
+        }
+        Ok(())
+    }
+
     pub fn start(
         rpc_url: String,
         program: Pubkey,
@@ -113,8 +136,10 @@ impl RemoteWorkers {
         capacity: usize,
     ) -> std::io::Result<Self> {
         let (winner_jobs, winner_job_rx) = bounded::<WinnerWatch>("winner-rpc-jobs", capacity);
-        let (winner_done_tx, winner_results) = bounded::<WinnerResult>("winner-rpc-results", capacity);
-        let (reconcile_jobs, reconcile_job_rx) = bounded::<ReconcileWork>("reconcile-rpc-jobs", capacity);
+        let (winner_done_tx, winner_results) =
+            bounded::<WinnerResult>("winner-rpc-results", capacity);
+        let (reconcile_jobs, reconcile_job_rx) =
+            bounded::<ReconcileWork>("reconcile-rpc-jobs", capacity);
         let (reconcile_done_tx, reconcile_results) =
             bounded::<ReconcileResultMessage>("reconcile-rpc-results", capacity);
         let (projection_jobs, projection_job_rx) =
@@ -124,137 +149,164 @@ impl RemoteWorkers {
         let (oracle_price_projection_jobs, oracle_price_projection_job_rx) =
             bounded::<OraclePriceProjectionWork>("oracle-price-projection-rpc-jobs", capacity);
         let (oracle_price_projection_done_tx, oracle_price_projection_results) =
-            bounded::<OraclePriceProjectionResultMessage>("oracle-price-projection-rpc-results", capacity);
+            bounded::<OraclePriceProjectionResultMessage>(
+                "oracle-price-projection-rpc-results",
+                capacity,
+            );
 
+        let mut threads = Vec::new();
         let winner_rpc_url = rpc_url.clone();
         let winner_shutdown = shutdown.clone();
-        std::thread::Builder::new().name("winner-rpc".into()).spawn(move || {
-            let rpc = RpcClient::new(winner_rpc_url);
-            while !winner_shutdown.is_requested() {
-                let Some(watch) = winner_job_rx.pop_timeout(Duration::from_millis(250)) else {
-                    continue;
-                };
-                let result = find_winner(
-                    &rpc,
-                    &program,
-                    &watch.account,
-                    watch.rx_slot.saturating_sub(2),
-                );
-                if !push_result(&winner_done_tx, WinnerResult { watch, result }) {
-                    return;
-                }
-            }
-        })?;
+        threads.push(
+            std::thread::Builder::new()
+                .name("winner-rpc".into())
+                .spawn(move || {
+                    let rpc = RpcClient::new(winner_rpc_url);
+                    while !winner_shutdown.is_requested() {
+                        let Some(watch) = winner_job_rx.pop_timeout(Duration::from_millis(250))
+                        else {
+                            continue;
+                        };
+                        let result = find_winner(
+                            &rpc,
+                            &program,
+                            &watch.account,
+                            watch.rx_slot.saturating_sub(2),
+                        );
+                        if !push_result(
+                            &winner_done_tx,
+                            WinnerResult { watch, result },
+                            &winner_shutdown,
+                        ) {
+                            return;
+                        }
+                    }
+                })?,
+        );
 
         let reconcile_shutdown = shutdown.clone();
         let reconcile_rpc_url = rpc_url.clone();
-        std::thread::Builder::new().name("reconcile-rpc".into()).spawn(move || {
-            let rpc = RpcClient::new(reconcile_rpc_url);
-            let clock = Clock::new();
-            while !reconcile_shutdown.is_requested() {
-                let Some(work) = reconcile_job_rx.pop_timeout(Duration::from_millis(250)) else {
-                    continue;
-                };
-                let now_s = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let result = try_reconcile(
-                    &rpc,
-                    None,
-                    &work.submission,
-                    now_s,
-                    clock.now_ns(),
-                    90,
-                );
-                if !push_result(
-                    &reconcile_done_tx,
-                    ReconcileResultMessage { work, result },
-                ) {
-                    return;
-                }
-            }
-        })?;
+        threads.push(
+            std::thread::Builder::new()
+                .name("reconcile-rpc".into())
+                .spawn(move || {
+                    let rpc = RpcClient::new(reconcile_rpc_url);
+                    let clock = Clock::new();
+                    while !reconcile_shutdown.is_requested() {
+                        let Some(work) = reconcile_job_rx.pop_timeout(Duration::from_millis(250))
+                        else {
+                            continue;
+                        };
+                        let now_s = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let result =
+                            try_reconcile(&rpc, None, &work.submission, now_s, clock.now_ns(), 90);
+                        if !push_result(
+                            &reconcile_done_tx,
+                            ReconcileResultMessage { work, result },
+                            &reconcile_shutdown,
+                        ) {
+                            return;
+                        }
+                    }
+                })?,
+        );
 
         let projection_shutdown = shutdown.clone();
         let projection_rpc_url = rpc_url.clone();
-        std::thread::Builder::new()
-            .name("projection-rpc".into())
-            .spawn(move || {
-                let submitter = RpcSubmitter::new(projection_rpc_url, true);
-                while !projection_shutdown.is_requested() {
-                    let Some(work) =
-                        projection_job_rx.pop_timeout(Duration::from_millis(250))
-                    else {
-                        continue;
-                    };
-                    let account = work.account;
-                    let base_slot = work.base_slot;
-                    let base_account_hash = work.base_account_hash;
-                    let t_rx_ns = work.t_rx_ns;
-                    let mt0_start = std::time::Instant::now(); // [MT0]
-                    let result = submitter
-                        .simulate_with_post_accounts(&work.tx, &work.targets)
-                        .map_err(|e| e.to_string());
-                    let mt0_outcome = match &result {
-                        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
-                        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
-                    };
-                    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::IntegrationProjection, mt0_start.elapsed(), mt0_outcome);
-                    if !push_result(
-                        &projection_done_tx,
-                        ProjectionResultMessage {
-                            account,
-                            base_slot,
-                            base_account_hash,
-                            t_rx_ns,
-                            result,
-                        },
-                    ) {
-                        return;
+        threads.push(
+            std::thread::Builder::new()
+                .name("projection-rpc".into())
+                .spawn(move || {
+                    let submitter = RpcSubmitter::new(projection_rpc_url, true);
+                    while !projection_shutdown.is_requested() {
+                        let Some(work) = projection_job_rx.pop_timeout(Duration::from_millis(250))
+                        else {
+                            continue;
+                        };
+                        let account = work.account;
+                        let base_slot = work.base_slot;
+                        let base_account_hash = work.base_account_hash;
+                        let t_rx_ns = work.t_rx_ns;
+                        let mt0_start = std::time::Instant::now(); // [MT0]
+                        let result = submitter
+                            .simulate_with_post_accounts(&work.tx, &work.targets)
+                            .map_err(|e| e.to_string());
+                        let mt0_outcome = match &result {
+                            Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+                            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+                        };
+                        darkbot_common::mt0::MT0.record_remote(
+                            darkbot_common::mt0::RemoteClass::IntegrationProjection,
+                            mt0_start.elapsed(),
+                            mt0_outcome,
+                        );
+                        if !push_result(
+                            &projection_done_tx,
+                            ProjectionResultMessage {
+                                account,
+                                base_slot,
+                                base_account_hash,
+                                t_rx_ns,
+                                result,
+                            },
+                            &projection_shutdown,
+                        ) {
+                            return;
+                        }
                     }
-                }
-            })?;
+                })?,
+        );
 
         let oracle_projection_shutdown = shutdown.clone();
         let oracle_projection_rpc_url = rpc_url.clone();
-        std::thread::Builder::new()
-            .name("oracle-price-projection-rpc".into())
-            .spawn(move || {
-                let submitter = RpcSubmitter::new(oracle_projection_rpc_url, true);
-                while !oracle_projection_shutdown.is_requested() {
-                    let Some(work) =
-                        oracle_price_projection_job_rx.pop_timeout(Duration::from_millis(250))
-                    else {
-                        continue;
-                    };
-                    let bank = work.bank;
-                    let base_slot = work.base_slot;
-                    let base_bank_hash = work.base_bank_hash;
-                    let mt0_start = std::time::Instant::now(); // [MT0]
-                    let result = submitter
-                        .simulate_with_post_accounts(&work.tx, &work.targets)
-                        .map_err(|e| e.to_string());
-                    let mt0_outcome = match &result {
-                        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
-                        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
-                    };
-                    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::OracleProjection, mt0_start.elapsed(), mt0_outcome);
-                    if !push_result(
-                        &oracle_price_projection_done_tx,
-                        OraclePriceProjectionResultMessage {
-                            bank,
-                            base_slot,
-                            base_bank_hash,
-                            result,
-                        },
-                    ) {
-                        return;
+        threads.push(
+            std::thread::Builder::new()
+                .name("oracle-price-projection-rpc".into())
+                .spawn(move || {
+                    let submitter = RpcSubmitter::new(oracle_projection_rpc_url, true);
+                    while !oracle_projection_shutdown.is_requested() {
+                        let Some(work) =
+                            oracle_price_projection_job_rx.pop_timeout(Duration::from_millis(250))
+                        else {
+                            continue;
+                        };
+                        let bank = work.bank;
+                        let base_slot = work.base_slot;
+                        let base_bank_hash = work.base_bank_hash;
+                        let mt0_start = std::time::Instant::now(); // [MT0]
+                        let result = submitter
+                            .simulate_with_post_accounts(&work.tx, &work.targets)
+                            .map_err(|e| e.to_string());
+                        let mt0_outcome = match &result {
+                            Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+                            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+                        };
+                        darkbot_common::mt0::MT0.record_remote(
+                            darkbot_common::mt0::RemoteClass::OracleProjection,
+                            mt0_start.elapsed(),
+                            mt0_outcome,
+                        );
+                        if !push_result(
+                            &oracle_price_projection_done_tx,
+                            OraclePriceProjectionResultMessage {
+                                bank,
+                                base_slot,
+                                base_bank_hash,
+                                result,
+                            },
+                            &oracle_projection_shutdown,
+                        ) {
+                            return;
+                        }
                     }
-                }
-            })?;
+                })?,
+        );
 
         Ok(Self {
+            threads,
             winner_jobs,
             winner_results,
             reconcile_jobs,
@@ -270,6 +322,31 @@ impl RemoteWorkers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn full_result_queue_does_not_block_shutdown() {
+        let (tx, _rx) = bounded("stop-test", 1);
+        tx.try_push(1_u64).unwrap();
+        let shutdown = Shutdown::new();
+        let stop = shutdown.clone();
+        let worker = std::thread::spawn(move || push_result(&tx, 2, &stop));
+        shutdown.request();
+        assert!(!worker.join().unwrap());
+    }
+
+    #[test]
+    fn remote_workers_confirm_actual_thread_exit() {
+        let shutdown = Shutdown::new();
+        let workers = RemoteWorkers::start(
+            "http://127.0.0.1:1".into(),
+            Pubkey::new_unique(),
+            &shutdown,
+            1,
+        )
+        .unwrap();
+        shutdown.request();
+        workers.wait_stopped(Duration::from_secs(2)).unwrap();
+    }
 
     #[test]
     fn winner_watch_keeps_retry_deadline() {

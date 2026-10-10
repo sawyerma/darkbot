@@ -852,6 +852,11 @@ pub mod p0 {
                         FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
                             let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
                             ReceivershipPlan {
+                                    market_identity: Some(crate::record::MarketPlanIdentity {
+                                        liquidation_type: "RECEIVERSHIP".into(),
+                                        asset_bank: sz.asset_bank.to_string(),
+                                        liability_bank: sz.liab_bank.to_string(),
+                                    }),
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
@@ -880,6 +885,11 @@ pub mod p0 {
                             };
                             let (ixs, steps) = self.receivership(account, &obs, &sz, vec![], true)?;
                             ReceivershipPlan {
+                                    market_identity: Some(crate::record::MarketPlanIdentity {
+                                        liquidation_type: "RECEIVERSHIP".into(),
+                                        asset_bank: sz.asset_bank.to_string(),
+                                        liability_bank: sz.liab_bank.to_string(),
+                                    }),
                                 steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
@@ -964,6 +974,11 @@ pub mod p0 {
                                 )),
                                 Ok(zp_input) => {
                                 out.push(ReceivershipPlan {
+                                    market_identity: Some(crate::record::MarketPlanIdentity {
+                                        liquidation_type: "RECEIVERSHIP".into(),
+                                        asset_bank: sz.asset_bank.to_string(),
+                                        liability_bank: sz.liab_bank.to_string(),
+                                    }),
                                     steps: steps.clone(),
                                     instructions: ixs.clone(),
                                     route: RouteKind::FreePublicAllowed,
@@ -978,6 +993,11 @@ pub mod p0 {
                                     prerequisite_txs: vec![],
                                 });
                                 out.push(ReceivershipPlan {
+                                    market_identity: Some(crate::record::MarketPlanIdentity {
+                                        liquidation_type: "RECEIVERSHIP".into(),
+                                        asset_bank: sz.asset_bank.to_string(),
+                                        liability_bank: sz.liab_bank.to_string(),
+                                    }),
                                     steps,
                                     instructions: ixs,
                                     route: RouteKind::FreePublicAllowed,

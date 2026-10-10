@@ -1,0 +1,438 @@
+{
+  "baseline": [
+    {
+      "key": [
+        "darkbot-solana/src/ingress/ws_rpc.rs",
+        "clippy::useless_conversion",
+        "useless conversion to the same type: `std::string::String`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/ingress/ws_rpc.rs",
+        "clippy::manual_is_multiple_of",
+        "manual implementation of `.is_multiple_of()`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/state/fork.rs",
+        "clippy::unnecessary_map_or",
+        "this `map_or` can be simplified"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/submit/rpc.rs",
+        "clippy::type_complexity",
+        "very complex type used. Consider factoring parts into `type` definitions"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/tx/mod.rs",
+        "clippy::manual_div_ceil",
+        "manually reimplementing `div_ceil`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/state/recovery.rs",
+        "clippy::manual_is_multiple_of",
+        "manual implementation of `.is_multiple_of()`"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-solana/src/tx/mod.rs",
+        "clippy::field_reassign_with_default",
+        "field assignment outside of initializer for an instance created with Default::default()"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-common/src/histogram.rs",
+        "clippy::manual_range_contains",
+        "manual `RangeInclusive::contains` implementation"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/economics.rs",
+        "clippy::manual_div_ceil",
+        "manually reimplementing `div_ceil`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/economics.rs",
+        "clippy::too_many_arguments",
+        "this function has too many arguments (9/7)"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/execution.rs",
+        "clippy::ptr_arg",
+        "writing `&mut Vec` instead of `&mut [_]` involves a new object where a slice will do"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/execution.rs",
+        "clippy::unnecessary_map_or",
+        "this `map_or` can be simplified"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/sizing.rs",
+        "clippy::type_complexity",
+        "very complex type used. Consider factoring parts into `type` definitions"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/sizing.rs",
+        "clippy::useless_conversion",
+        "explicit call to `.into_iter()` in function argument accepting `IntoIterator`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/schedule.rs",
+        "clippy::manual_div_ceil",
+        "manually reimplementing `div_ceil`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/protocol.rs",
+        "clippy::empty_line_after_doc_comments",
+        "empty line after doc comment"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-project0/src/economics.rs",
+        "clippy::manual_range_contains",
+        "manual `Range::contains` implementation"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-project0/src/economics.rs",
+        "clippy::manual_range_contains",
+        "manual `RangeInclusive::contains` implementation"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-runner/src/builder.rs",
+        "clippy::map_clone",
+        "you are using an explicit closure for copying elements"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-runner/src/builder.rs",
+        "clippy::get_first",
+        "accessing first element with `rewards.get(0)`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-runner/src/pipeline.rs",
+        "clippy::unnecessary_map_or",
+        "this `map_or` can be simplified"
+      ],
+      "count": 6
+    },
+    {
+      "key": [
+        "darkbot-runner/src/remote_workers.rs",
+        "clippy::type_complexity",
+        "very complex type used. Consider factoring parts into `type` definitions"
+      ],
+      "count": 4
+    },
+    {
+      "key": [
+        "darkbot-runner/src/main.rs",
+        "clippy::too_many_arguments",
+        "this function has too many arguments (9/7)"
+      ],
+      "count": 4
+    },
+    {
+      "key": [
+        "darkbot-runner/src/main.rs",
+        "clippy::needless_return",
+        "unneeded `return` statement"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-runner/src/bin/p0-prewarm-atas.rs",
+        "clippy::manual_is_multiple_of",
+        "manual implementation of `.is_multiple_of()`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-runner/src/lookup_tables.rs",
+        "clippy::cloned_ref_to_slice_refs",
+        "this call to `clone` can be replaced with `std::slice::from_ref`"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-runner/src/market_observer.rs",
+        "clippy::type_complexity",
+        "very complex type used. Consider factoring parts into `type` definitions"
+      ],
+      "count": 1
+    }
+  ],
+  "candidate": [
+    {
+      "key": [
+        "darkbot-solana/src/ingress/ws_rpc.rs",
+        "clippy::useless_conversion",
+        "useless conversion to the same type: `std::string::String`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/ingress/ws_rpc.rs",
+        "clippy::manual_is_multiple_of",
+        "manual implementation of `.is_multiple_of()`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/state/fork.rs",
+        "clippy::unnecessary_map_or",
+        "this `map_or` can be simplified"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/submit/rpc.rs",
+        "clippy::type_complexity",
+        "very complex type used. Consider factoring parts into `type` definitions"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/tx/mod.rs",
+        "clippy::manual_div_ceil",
+        "manually reimplementing `div_ceil`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-solana/src/state/recovery.rs",
+        "clippy::manual_is_multiple_of",
+        "manual implementation of `.is_multiple_of()`"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-solana/src/tx/mod.rs",
+        "clippy::field_reassign_with_default",
+        "field assignment outside of initializer for an instance created with Default::default()"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-common/src/histogram.rs",
+        "clippy::manual_range_contains",
+        "manual `RangeInclusive::contains` implementation"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/economics.rs",
+        "clippy::manual_div_ceil",
+        "manually reimplementing `div_ceil`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/economics.rs",
+        "clippy::too_many_arguments",
+        "this function has too many arguments (9/7)"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/execution.rs",
+        "clippy::ptr_arg",
+        "writing `&mut Vec` instead of `&mut [_]` involves a new object where a slice will do"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/execution.rs",
+        "clippy::unnecessary_map_or",
+        "this `map_or` can be simplified"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/sizing.rs",
+        "clippy::type_complexity",
+        "very complex type used. Consider factoring parts into `type` definitions"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/sizing.rs",
+        "clippy::useless_conversion",
+        "explicit call to `.into_iter()` in function argument accepting `IntoIterator`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/schedule.rs",
+        "clippy::manual_div_ceil",
+        "manually reimplementing `div_ceil`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-project0/src/protocol.rs",
+        "clippy::empty_line_after_doc_comments",
+        "empty line after doc comment"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-project0/src/economics.rs",
+        "clippy::manual_range_contains",
+        "manual `Range::contains` implementation"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-project0/src/economics.rs",
+        "clippy::manual_range_contains",
+        "manual `RangeInclusive::contains` implementation"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-runner/src/builder.rs",
+        "clippy::map_clone",
+        "you are using an explicit closure for copying elements"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-runner/src/builder.rs",
+        "clippy::get_first",
+        "accessing first element with `rewards.get(0)`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-runner/src/pipeline.rs",
+        "clippy::unnecessary_map_or",
+        "this `map_or` can be simplified"
+      ],
+      "count": 6
+    },
+    {
+      "key": [
+        "darkbot-runner/src/remote_workers.rs",
+        "clippy::type_complexity",
+        "very complex type used. Consider factoring parts into `type` definitions"
+      ],
+      "count": 4
+    },
+    {
+      "key": [
+        "darkbot-runner/src/lookup_tables.rs",
+        "clippy::cloned_ref_to_slice_refs",
+        "this call to `clone` can be replaced with `std::slice::from_ref`"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-runner/src/bin/p0-prewarm-atas.rs",
+        "clippy::manual_is_multiple_of",
+        "manual implementation of `.is_multiple_of()`"
+      ],
+      "count": 2
+    },
+    {
+      "key": [
+        "darkbot-runner/src/market_observer.rs",
+        "clippy::type_complexity",
+        "very complex type used. Consider factoring parts into `type` definitions"
+      ],
+      "count": 1
+    },
+    {
+      "key": [
+        "darkbot-runner/src/main.rs",
+        "clippy::too_many_arguments",
+        "this function has too many arguments (9/7)"
+      ],
+      "count": 4
+    },
+    {
+      "key": [
+        "darkbot-runner/src/main.rs",
+        "clippy::needless_return",
+        "unneeded `return` statement"
+      ],
+      "count": 2
+    }
+  ]
+}

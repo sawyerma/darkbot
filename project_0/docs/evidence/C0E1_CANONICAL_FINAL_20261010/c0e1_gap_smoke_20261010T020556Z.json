@@ -1,0 +1,69 @@
+{
+  "run": "project_0/data/econ4h/c0e1_gap_smoke_20261010T020556Z",
+  "verdict": "INCOMPLETE",
+  "market": {
+    "gap_count": 1,
+    "gap_recovered": 1,
+    "gap_unrecovered": 0,
+    "full_slot_reconciliation": {
+      "attempted": true,
+      "complete": true,
+      "error": null,
+      "first_block_time": 1791597965,
+      "last_block_time": 1791598084,
+      "marginfi_transactions": 5,
+      "market_slot_end": {
+        "observed_unix_s": 1791598084,
+        "provenance": "IN_WINDOW_SLOT_SUBSCRIBE_PROCESSED",
+        "slot": 455084721,
+        "t_rx_ns": 120024538625
+      },
+      "market_slot_start": {
+        "observed_unix_s": 1791597965,
+        "provenance": "IN_WINDOW_SLOT_SUBSCRIBE_PROCESSED",
+        "slot": 455084178,
+        "t_rx_ns": 899962542
+      },
+      "slots_expected": 544,
+      "slots_failed": 0,
+      "slots_fetched": 544,
+      "slots_produced": 544,
+      "slots_skipped_confirmed": 0,
+      "slots_unresolved": 0,
+      "transactions_scanned": 591719
+    },
+    "full_slot_reconciliation_complete": true,
+    "liquidation_path_coverage_complete": false,
+    "market_capture_complete": false,
+    "deployment_continuity": null,
+    "incomplete_reasons": [
+      "ALL_PATH_MAINNET_QUALIFICATION_AND_MASTER_JOIN_PENDING"
+    ]
+  },
+  "shadow": {
+    "shadow_telemetry": {
+      "ingress_overflow": 0,
+      "remote_projection_queue_depth": 0,
+      "remote_winner_queue_depth": 0,
+      "shadow_state_ready_at_shutdown": false,
+      "winner_pending_at_deadline": 0,
+      "winner_queue_full_backoffs": 0,
+      "winner_watch_current": 0,
+      "winner_watch_errors": 0,
+      "winner_watch_expired": 0,
+      "winner_watch_max": 0,
+      "winner_watch_overflow": 0,
+      "winner_watch_resolved": 0
+    },
+    "analytics_queue_drops": 0,
+    "retention_overflow": 0,
+    "program_upgrade_halt": false,
+    "submissions": 0
+  },
+  "sha256": {
+    "market/summary.json": "a573bca1a82ff31163651f9f2f315ceec4e12c349c1b9e401b12c7dc4006e3fb",
+    "economics_final.json": "78888cf8748ca85e879aa8f52816cf6cd543d9cd84dd92b852a25f2d1f85e618",
+    "runtime.log": "ff971a69448b4e09f570e7354688ab227bd1280189ad4a4739d1760255ed83ed",
+    "market/coverage.jsonl": "e9912bad9c0aec52c421c9da986c5694c1f0e7538a8c414c299e3d3c932748f7"
+  }
+}

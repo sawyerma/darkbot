@@ -1,0 +1,29 @@
+{
+  "rustfmt": [
+    "rustfmt",
+    "--edition",
+    "2021",
+    "--check",
+    "project_0/native/crates/darkbot-runner/src/econ.rs",
+    "project_0/native/crates/darkbot-runner/src/econ_canonical.rs",
+    "project_0/native/crates/darkbot-runner/src/econ_tests.rs",
+    "project_0/native/crates/darkbot-runner/src/market_gap.rs",
+    "project_0/native/crates/darkbot-runner/src/market_gap_tests.rs",
+    "project_0/native/crates/darkbot-runner/src/market_observer.rs",
+    "project_0/native/crates/darkbot-runner/src/market_reconcile.rs",
+    "project_0/native/crates/darkbot-runner/src/market_reconcile_tests.rs",
+    "project_0/native/crates/darkbot-runner/src/market_truth.rs",
+    "project_0/native/crates/darkbot-runner/src/market_truth_tests.rs",
+    "project_0/native/crates/darkbot-runner/src/market_paths.rs",
+    "project_0/native/crates/darkbot-runner/src/record.rs",
+    "project_0/native/crates/darkbot-solana/examples/p0-gap-ws-proxy.rs"
+  ],
+  "diff_check": [
+    "git",
+    "diff",
+    "--check",
+    "--",
+    "project_0"
+  ],
+  "note": "main.rs/pipeline.rs/builder.rs already contain baseline formatting differences; only new local hunks were edited, not blanket formatted"
+}

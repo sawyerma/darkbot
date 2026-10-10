@@ -1,0 +1,83 @@
+{
+  "run": "project_0/data/econ4h/c0e1_gap_smoke_20261010T021411Z",
+  "verdict": "INCOMPLETE",
+  "market": {
+    "gap_count": 1,
+    "gap_recovered": 1,
+    "gap_unrecovered": 0,
+    "full_slot_reconciliation": {
+      "attempted": true,
+      "complete": false,
+      "error": "RPC_RATE_LIMIT",
+      "first_block_time": 1791598459,
+      "last_block_time": 1791598469,
+      "marginfi_transactions": 0,
+      "market_slot_end": {
+        "observed_unix_s": 1791599059,
+        "provenance": "IN_WINDOW_SLOT_SUBSCRIBE_PROCESSED",
+        "slot": 455089186,
+        "t_rx_ns": 606172182958
+      },
+      "market_slot_start": {
+        "observed_unix_s": 1791598460,
+        "provenance": "IN_WINDOW_SLOT_SUBSCRIBE_PROCESSED",
+        "slot": 455086435,
+        "t_rx_ns": 6472659667
+      },
+      "slots_expected": 2752,
+      "slots_failed": 1,
+      "slots_fetched": 43,
+      "slots_produced": 2752,
+      "slots_skipped_confirmed": 0,
+      "slots_unresolved": 2709,
+      "transactions_scanned": 51198
+    },
+    "full_slot_reconciliation_complete": false,
+    "liquidation_path_coverage_complete": true,
+    "market_capture_complete": false,
+    "deployment_continuity": {
+      "after": {
+        "context_slot": 455089479,
+        "hash": "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f",
+        "program_data": "4Q8u2ny8YYgytJEncwZQfVWbd5axZtfgDxYKHehvPQR7"
+      },
+      "before": {
+        "context_slot": 455086379,
+        "hash": "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f",
+        "program_data": "4Q8u2ny8YYgytJEncwZQfVWbd5axZtfgDxYKHehvPQR7"
+      },
+      "bytecode_source_equivalence": "NOT_ATTESTED; pinned source is contract authority; hash continuity against existing upgrade-watch reference",
+      "error": null,
+      "source_pin": "33c67987a661f59c6683a65485ebb4f0ef030b77"
+    },
+    "incomplete_reasons": [
+      "RPC_RATE_LIMIT"
+    ]
+  },
+  "shadow": {
+    "shadow_telemetry": {
+      "ingress_overflow": 0,
+      "remote_projection_queue_depth": 0,
+      "remote_winner_queue_depth": 256,
+      "shadow_state_ready_at_shutdown": true,
+      "winner_pending_at_deadline": 6034,
+      "winner_queue_full_backoffs": 369737,
+      "winner_watch_current": 6034,
+      "winner_watch_errors": 0,
+      "winner_watch_expired": 0,
+      "winner_watch_max": 6034,
+      "winner_watch_overflow": 0,
+      "winner_watch_resolved": 0
+    },
+    "analytics_queue_drops": 0,
+    "retention_overflow": 0,
+    "program_upgrade_halt": false,
+    "submissions": 0
+  },
+  "sha256": {
+    "market/summary.json": "583d073bf2099da5d909d8eaff020b8c2378a54fe26b3d69695e20fdeeb6dccf",
+    "economics_final.json": "3fabe66e7c987e7b7d654fc567780308827914fb74fa4c7540ad5f273768ea98",
+    "runtime.log": "332a8a37e84b6f89ead0b93bb02f87e9e68cb7b70089e76ca2526b2f958791d2",
+    "market/coverage.jsonl": "2d42a1220d96c2bfdc91805a16056771910b021ceaceae1c11af92d2f24324d9"
+  }
+}

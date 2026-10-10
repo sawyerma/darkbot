@@ -1,3 +1,5 @@
+> 2026-10-09: canonical full-slot scanner and typed four-path decoder implemented locally; master remains PARTIAL. Current resume/evidence and exact remaining steps are at the top of MEASUREMENT_LEDGER.md. No 4h qualification or LIVE release.
+
 # DarkBot — Project 0 — Produktions-Phasenplan v4.5
 
 **Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.5
@@ -4892,3 +4894,22 @@ After that correction:
 4. only then repeat the 14,400-second C0-E1 economic observation.
 
 The zero observed liquidations in this failed 4h attempt are not a qualified market-zero claim.
+# C0-E1 master-contract override — 2026-10-09
+
+The current normative C0-E1 objective supersedes prior gap-only and receivership-only
+qualification: **capture all real Marginfi liquidation paths, reconcile the entire finalized
+slot window, reconstruct evidenced economics, then join/filter against our Shadow pipeline**.
+The existing locally edited gap-recovery code is a partial foundation. Classic, forced
+deleverage/settlement classification, complete slot reconciliation and expanded per-type
+economics/join are still OPEN. No new four-hour run until the expanded controlled smoke PASS.
+Current resume point and exact open work: `MEASUREMENT_LEDGER.md`, top RESUME block.
+
+
+### C0-E1 continuation 2026-10-10
+
+Canonical join, hourly all-path economics, capital/loss-dollar attribution and pinned
+source scope are implemented; final qualification is tracked at the top of
+MEASUREMENT_LEDGER.md. Final controlled smoke: 600s, actual transport interruption,
+full finalized reconciliation. No MASTER PASS until the final matrix and combined
+smoke pass. The user will start the four-hour observation; do not launch it automatically.
+LIVE/submission remain disabled.

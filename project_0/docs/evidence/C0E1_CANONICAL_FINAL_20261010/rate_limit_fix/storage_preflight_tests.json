@@ -1,0 +1,26 @@
+[
+  {
+    "duration": 14400,
+    "free_gib": 14,
+    "exit": 2,
+    "expected": 2
+  },
+  {
+    "duration": 14400,
+    "free_gib": 65,
+    "exit": 0,
+    "expected": 0
+  },
+  {
+    "duration": 600,
+    "free_gib": 14,
+    "exit": 0,
+    "expected": 0
+  },
+  {
+    "duration": 600,
+    "free_gib": 7,
+    "exit": 2,
+    "expected": 2
+  }
+]
