@@ -1,5 +1,37 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
+## CURRENT HANDOFF — 2026-10-10 19:57 Europe/Berlin — C0-E1 startup + controlled-gap smoke IN PROGRESS
+
+**Evidence cutoff:** latest user-supplied terminal excerpt from run `c0e1_gap_smoke_20261010T195016Z`. This is a checkpoint, NOT a final run verdict. Historical entries below remain as-recorded and must not be read as current state. **No C0-E1 end-to-end PASS, no economics qualification, no 4h stability/profit claim, LIVE=false, submission=false.**
+
+### Branch, implementation, test qualifications
+
+- GitHub `main` baseline: `3fdf30b` after Project_0-only checkpoint; separate WIP branch `project0/c0e1-startup-wip-20261010` at `c2ba995e647296d1c3d3b0a134d2f30ff8db1d64` contains Astra's six Rust-file startup patch (+179/-9 lines). BSC uncommitted files are explicitly out of scope; no BSC changes staged or written.
+- WIP patch: compressed `base64+zstd` getProgramAccounts snapshot; real Shadow READY barrier before the market capture clock; READY/first-ready monotonic timestamp; technical PASS requires actual in-window Shadow evaluations and readiness before capture; recovery cancellation remains fail-closed. The market-gap loopback proxy and finalized full-slot backfill were already present from previous checkpoints; neither is a production hotpath dependency.
+- Local test correction 1, `snapshot.rs`: removed ambiguous `.into()` from two `RpcClient::new_mock_with_mocks("succeeds", ...)` fixtures. Initially Rust E0283/type-inference failure, then `cargo test --locked -p darkbot-solana state::` **exit 0, 19 PASS, 0 FAIL, 20 filtered**, including compressed/corrupt account and cancellation tests.
+- Local test correction 2, `econ_tests.rs`: the real-timer 4-report fixture lacked an in-window Shadow evaluation after the new nonempty-measurement gate; added `w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();` to `runtime_worker_writes_four_snapshots_then_identical_final`. Prior Runner `crate_health`: 173 PASS / 1 FAIL / 1 ignored, exit 101; corrected targeted test **exit 0, 1 PASS**. No production-code changes in these two corrections.
+- After corrections, complete Runner test commands with `--features crate_health` and `--features "crate_health txv1"` both **exit 0** (user's tail output did not expose aggregate exact counts). Release `cargo build --locked --release -p darkbot-runner --features "crate_health txv1"` **exit 0**; `cargo clippy --locked -p darkbot-runner --all-targets --features "crate_health txv1"` **exit 0** with three reported bin warnings. The warning baseline/differential is NOT yet established for these latest edits.
+- At this evidence cutoff the two local test-fixture corrections had **not yet been committed/pushed**. The new documentation checkpoint is a separate remote-only branch update; do not claim `main` or the local Mac worktree includes it before fetching. Do not `git add -A`, reset or clean the mixed BSC/Project_0 worktree.
+
+### Real Mainnet combined smoke — observed, not finished
+
+- Run ID: `c0e1_gap_smoke_20261010T195016Z`; started with `bash project_0/scripts/run_gap_reconnect_smoke.sh`. Actual run files on user's Mac: `project_0/data/econ4h/<run-id>/runtime.log`, market coverage/summary, economics final (when created), and `gap_proxy.log` (copied after launcher completion). These artifacts are LOCAL/UNTRACKED; their existence on GitHub is NOT implied by this entry.
+- Launcher printed `C0-E1: build, then 60 seconds; four automatic snapshots; submission disabled`. Capture duration is 60 seconds, **not** total walltime: upstream preflight, Shadow bootstrap, drain, finalized full-slot reconciliation and reporting add time. Market warmup bound 120s (`P0_MARKET_READY_TIMEOUT_SECS`); root-catchup per recovery attempt defaults to 120s in the economics launcher.
+- `C0_E1_WARMUP_WAIT timeout_s=120` emitted. Recovery attempt 1 Snapshot A failed at `liability_gpa` with `snapshot: error decoding response body` **despite compression**; RPC/provider response reliability is still open.
+- Attempt 2: Snapshot A `slot=455376771`, `liability_accounts=82810`, `banks=204`, `required=494`, `optional=8`, `missing_required=0`, `total=83516`, elapsed `28425 ms`. Snapshot B `slot=455376902`, same counts, elapsed `29561 ms`. Root catch-up `target=455377037`, previous `Some(455376992)`, reached root `455377037` after `12546 ms`.
+- Verified exact log order: `[recovery] ... root_catchup ok` -> `recovery: Ready, run_state=Ready` -> `C0_E1_WARMUP_READY; starting market stream and measurement window`. **Shadow reached actual READY before the measurement** in this run; prior 60s-startup race is addressed for this observation, but not yet a repeatability/profitability claim.
+- Later runtime excerpt includes market WSS `session ended: ... Connection reset without closing handshake`, followed by `session attempt=2 connecting`, `connected; subscriptions=2 (programs=0 filtered_programs=0 accounts=0 slots=1 roots=0 tx=0)`, `subscription ACKs=1/2`, `2/2`, and `StreamReady`. This **shows a real reconnect and re-subscription**. The provided runtime excerpt alone does **not** show proxy `GAP_PROXY_CONTROLLED_DISCONNECT`, `GAP_RECOVERED`, `FULL_SLOT_RECONCILIATION_FINAL` or final `CONTROLLED_GAP_SMOKE_PASS`; therefore **controlled-gap end-to-end verdict PENDING**.
+- Last displayed live Shadow telemetry (intermediate, not final): `ingress` sent=29978, received=29978, overflow=0; `threshold_ready=true`, `sweep_checks=1111897`, `sweep_liquidatable=97536`, `sweep_errors=4504`, `winner_watch dispatched=265`, `results=8`, `resolved=0`, `queue_full_backoffs=671`. Sweep candidates and 'liquidatable' health classifications **are NOT finalized market liquidation events or executable profits**. Winner/RPC backlog and error rates need final interpretation.
+
+### Next decisive checks (in order; no speculative PASS)
+
+1. Allow current test to finish normally; inspect its exit code plus `runtime.log`, `gap_proxy.log`, `market/coverage.jsonl`, `market/summary.json`, `economics_final.json`, four `hour_*.json` and `candidate_manifest.json`. Record the exact terminal `CONTROLLED_GAP_SMOKE_PASS` only if the harness actually emits it.
+2. Demand explicit injected disconnect, reconnect subscription ACK + post-slot boundary, drain then `FULL_SLOT_RECONCILIATION_FINAL`, finalized `GAP_RECOVERED`, `gap_count>=1`, `gap_unrecovered=0`, `slots_unresolved=0`, zero analytics drops, four reconciled reports, real Shadow evaluation and no submissions. Any timeout/unresolved slot must remain `INCOMPLETE`.
+3. If full-slot RPC backfill again exceeds budget, distinguish provider timeout/rate-limit/pruned slots from local recovery; do not silently truncate the slot window or infer economic zero. The `base64+zstd` change only improves snapshot payload size, not guaranteed upstream reliability.
+4. Separately qualify **Shadow-WSS interruption** as distinct from the existing market-only loopback-proxy test; the latter cannot by itself prove Shadow's recovery after its own websocket loss.
+5. After final short combined smoke qualification, user alone may start the 14,400s C0-E1 study with sufficient free disk. `main` promotion, LIVE trading, real fills, realized PnL, and profitable daily income remain **NOT QUALIFIED**.
+
+---
 ## HANDOFF — 2026-10-10, stopped per user testing/credit priority
 
 **Implemented and locally tested; NOT end-to-end qualified; no4h stability claim.**
