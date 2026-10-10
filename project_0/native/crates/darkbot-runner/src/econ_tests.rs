@@ -132,6 +132,7 @@ pub(super) fn worker() -> Worker {
     .unwrap()
 }
 fn complete(w: &mut Worker) {
+    w.h.shared.shadow_ready_ns.store(1, Ordering::Release);
     w.canonical_finalized = true;
     w.snapshots = 4;
     w.market_final = Some(
@@ -414,6 +415,7 @@ fn all_loss_reasons_are_retained_exactly() {
 fn bounded_queue_and_retention_overflow_fail_qualification() {
     let mut w = worker();
     complete(&mut w);
+    w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
     assert_eq!(w.technical(true)["verdict"], "PASS");
     for _ in 0..65 {
         w.h.emit(Evidence::Slot {
@@ -1012,4 +1014,28 @@ fn market_rpc_barrier_waits_for_shadow_and_rejects_failed_shadow() {
         h.wait_shadow_quiescent(Duration::ZERO).unwrap_err(),
         "SHADOW_FAILED_BEFORE_MARKET_RECONCILIATION"
     );
+}
+
+#[test]
+fn startup_barrier_never_starts_clock_on_timeout_or_failed_shadow() {
+    let (tx, _rx) = bounded("warmup", 1);
+    let h=Handle { tx,shared:Arc::new(Shared::default()),clock:Clock::new(),cfg:config() };
+    assert_eq!(h.wait_shadow_ready(Duration::ZERO).unwrap_err(),"SHADOW_STARTUP_TIMEOUT");
+    assert_eq!(h.cutoff(),None);
+    let shared=h.shared.clone();
+    let t=std::thread::spawn(move || {std::thread::sleep(Duration::from_millis(20)); shared.shadow_ready.store(true,Ordering::Release);});
+    h.wait_shadow_ready(Duration::from_secs(1)).unwrap();t.join().unwrap();
+    assert_eq!(h.cutoff(),None); // ACK of the subsequent market stream owns the clock.
+    h.shared.shadow_failed.store(true,Ordering::Release);
+    assert_eq!(h.wait_shadow_ready(Duration::ZERO).unwrap_err(),"SHADOW_STARTUP_FAILED");
+}
+
+#[test]
+fn empty_measurement_or_recovery_after_start_cannot_pass() {
+    let mut w=worker();complete(&mut w);
+    assert_eq!(w.technical(true)["verdict"],"INCOMPLETE");
+    w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
+    assert_eq!(w.technical(true)["verdict"],"PASS");
+    w.h.shared.shadow_ready_ns.store(2,Ordering::Release); // capture started at1
+    assert_eq!(w.technical(true)["verdict"],"INCOMPLETE");
 }

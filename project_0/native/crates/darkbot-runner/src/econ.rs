@@ -225,6 +225,8 @@ pub struct Shared {
     pub submission_attempts: AtomicU64,
     pub upgrade: AtomicBool,
     pub shadow_done: AtomicBool,
+    pub shadow_ready: AtomicBool,
+    pub shadow_ready_ns: AtomicU64,
     pub shadow_failed: AtomicBool,
     pub market_done: AtomicBool,
     pub market_failed: AtomicBool,
@@ -265,6 +267,24 @@ impl Handle {
                 self.clock.now_ns() >= c.saturating_add(self.cfg.drain_secs * 1_000_000_000)
             })
     }
+    /// The shared economic measurement must not spend its window bootstrapping.
+    /// This does not bypass Recovery: only the owner publishes actual readiness.
+    pub fn wait_shadow_ready(&self, timeout: Duration) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self.shared.abort.load(Ordering::Acquire)
+                || self.shared.shadow_done.load(Ordering::Acquire)
+                || self.shared.shadow_failed.load(Ordering::Acquire) {
+                return Err("SHADOW_STARTUP_FAILED".into());
+            }
+            if self.shared.shadow_ready.load(Ordering::Acquire) { return Ok(()); }
+            if std::time::Instant::now() >= deadline {
+                return Err("SHADOW_STARTUP_TIMEOUT".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// End of capture alone does not end Shadow's winner/projection RPC drain.
     pub fn wait_shadow_quiescent(&self, timeout: Duration) -> Result<(), String> {
         let deadline = std::time::Instant::now() + timeout;
@@ -1300,7 +1320,13 @@ impl Worker {
         let shadow_ok = self.shadow_stats["ingress_overflow"].as_u64() == Some(0)
             && self.shadow_stats["winner_watch_overflow"].as_u64() == Some(0)
             && self.shadow_stats["shadow_state_ready_at_shutdown"] == true;
+        let ready_ns = s.shadow_ready_ns.load(Ordering::Acquire);
+        let start_ns = s.start_ns.load(Ordering::Acquire);
+        let startup_ok = ready_ns > 0 && ready_ns <= start_ns;
+        let measured_evaluations: u64 = self.evaluation_counts.iter().sum();
         let pass = finalizing
+            && startup_ok
+            && measured_evaluations > 0
             && self.canonical_finalized
             && shadow_ok
             && market_ok
@@ -1335,6 +1361,7 @@ impl Worker {
             "shadow_semantic_evictions":self.shadow_semantic_evictions,
             "shadow_journal_target_heads":self.shadow_heads.len(),
             "retention_capacity":self.h.cfg.retention,"retention_overflow":s.retention_overflow.load(Ordering::Relaxed),
+            "shadow_ready_at_ns":s.shadow_ready_ns.load(Ordering::Acquire),"startup_excluded_from_measurement":startup_ok,"shadow_evaluations_in_window":measured_evaluations,
             "shadow_runtime_terminated_early":s.shadow_failed.load(Ordering::Relaxed),"shadow_runtime_finished":s.shadow_done.load(Ordering::Relaxed),
             "program_upgrade_halt":s.upgrade.load(Ordering::Relaxed),"submission_attempts_blocked":s.submission_attempts.load(Ordering::Relaxed),
             "submissions":0,"live_ready":false,"source_coverage_verified":self.market_final.as_ref().is_some_and(|m|m["source_coverage_verified"]==true),"final_reconciliation_complete":finalizing && self.canonical_finalized,

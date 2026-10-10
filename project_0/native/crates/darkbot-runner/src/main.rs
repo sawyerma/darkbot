@@ -1279,6 +1279,15 @@ fn run_shadow(
             );
         }
         if let Some(h) = &econ {
+            let ready = st.run_state().is_tradable() && !program_upgrade_latched;
+            #[cfg(feature = "crate_health")]
+            let ready = ready && threshold_ready;
+            h.shared.shadow_ready.store(ready, std::sync::atomic::Ordering::Release);
+            if ready {
+                let _ = h.shared.shadow_ready_ns.compare_exchange(
+                    0, clock.now_ns(), std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire);
+            }
             h.shared.upgrade.store(
                 program_upgrade_latched,
                 std::sync::atomic::Ordering::Relaxed,
@@ -2268,7 +2277,8 @@ fn run_shadow(
                 };
                 counts[i] += 1;
             }
-            if let Some(o) = drv.on_event(&mut st, ev, &mut fetch, &mut drain) {
+            if let Some(o) = drv.on_event_cancellable(&mut st, ev, &mut fetch, &mut drain,
+                &|| shutdown.is_requested() || econ.as_ref().is_some_and(|h| h.drain_expired())) {
                 eprintln!("recovery: {:?}, run_state={:?}", o, st.run_state());
                 if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
                     halt.clear();
@@ -3723,7 +3733,7 @@ fn run_econ4h() -> Result<(), String> {
     market.duration_secs = cfg.duration_secs;
     market.run_id = cfg.run_id.clone();
     market.run_dir = cfg.run_dir.join("market");
-    let timeout = market.ready_timeout_secs
+    let timeout = 2 * market.ready_timeout_secs
         + cfg.duration_secs
         + cfg.drain_secs
         + market.drain_timeout_secs

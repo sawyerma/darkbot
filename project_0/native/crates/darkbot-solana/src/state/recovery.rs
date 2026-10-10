@@ -48,6 +48,8 @@ fn safe_recovery_error(s: &str) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecoveryOutcome {
     Ready,
+    /// Owner stopped or measurement aborted; never promotes a partial recovery.
+    Cancelled,
     /// Nach allen Versuchen nicht sauber; State bleibt HALTED.
     Exhausted { attempts: u32 },
 }
@@ -80,18 +82,33 @@ impl RecoveryDriver {
     /// Verarbeitet ein Ingress-Event und startet bei Gap/Reconnect/Fatal die Recovery.
     /// Gibt `Some(outcome)` zurück, wenn eine Recovery gelaufen ist.
     pub fn on_event(&mut self, st: &mut StateCore, ev: IngressEvent, fetch: &mut SnapshotFn<'_>, drain: &mut DrainFn<'_>) -> Option<RecoveryOutcome> {
+        self.on_event_cancellable(st, ev, fetch, drain, &|| false)
+    }
+
+    pub fn on_event_cancellable(&mut self, st: &mut StateCore, ev: IngressEvent,
+        fetch: &mut SnapshotFn<'_>, drain: &mut DrainFn<'_>, cancelled: &dyn Fn() -> bool,
+    ) -> Option<RecoveryOutcome> {
         let trigger = matches!(ev, IngressEvent::Reconnected { .. });
-        st.on_event(ev); // Gap/Fatal → HALT; Reconnected → HALT + Recovery
-        if trigger {
-            Some(self.recover(st, fetch, drain))
-        } else {
-            None
-        }
+        st.on_event(ev);
+        if trigger { Some(self.recover_cancellable(st, fetch, drain, cancelled)) } else { None }
     }
 
     /// Bootstrap und Recovery sind derselbe Pfad.
     pub fn recover(&mut self, st: &mut StateCore, fetch: &mut SnapshotFn<'_>, drain: &mut DrainFn<'_>) -> RecoveryOutcome {
+        self.recover_cancellable(st, fetch, drain, &|| false)
+    }
+
+    pub fn recover_cancellable(&mut self, st: &mut StateCore, fetch: &mut SnapshotFn<'_>,
+        drain: &mut DrainFn<'_>, cancelled: &dyn Fn() -> bool,
+    ) -> RecoveryOutcome {
+        macro_rules! check_cancelled {
+            () => { if cancelled() {
+                st.halt(HaltReason::FeedGap);
+                return RecoveryOutcome::Cancelled;
+            } };
+        }
         'attempts: for attempt in 1..=self.max_attempts {
+            check_cancelled!();
             self.attempts_total += 1;
             eprintln!("[recovery] attempt={}/{} snapshot=A start", attempt, self.max_attempts);
             let a = match fetch() {
@@ -120,6 +137,7 @@ impl RecoveryDriver {
                 self.reconcile_failures += 1;
                 continue;
             }
+            check_cancelled!();
             st.install_snapshot(a.slot, a.accounts);
             drain(st); // Deltas, die während Fetch A ankamen
             eprintln!("[recovery] attempt={}/{} snapshot=B start", attempt, self.max_attempts);
@@ -144,6 +162,7 @@ impl RecoveryDriver {
                 b.accounts.len(),
                 b.missing_required.len()
             );
+            check_cancelled!();
             drain(st); // Deltas, die während Fetch B ankamen (vor dem Vergleich)
             if !b.missing_required.is_empty() {
                 // [FIX-41] Snapshot B ohne required Dependency → kein Vergleich möglich → nicht sauber.
@@ -167,6 +186,7 @@ impl RecoveryDriver {
                     st.root()
                 );
                 loop {
+                    check_cancelled!();
                     drain(st);
                     if st.root().is_some_and(|root| root >= target_slot) {
                         // One final drain after observing the barrier so already-enqueued account
@@ -199,6 +219,7 @@ impl RecoveryDriver {
                 }
             }
 
+            check_cancelled!();
             let rep = st.reconcile(b.slot, &b.accounts);
             if rep.is_clean() {
                 eprintln!(
@@ -314,4 +335,34 @@ mod tests {
         assert!(is_halted(&st));
         assert_eq!(drv.reconcile_failures, 2);
     }
+    #[test]
+    fn cancellation_during_root_catchup_never_confirms_ready_or_retries() {
+        use std::cell::Cell;
+        let stop=Cell::new(false);
+        let pk=Pubkey::new_unique();
+        let mut state=StateCore::new(10);
+        let mut driver=RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(30));
+        let calls=Cell::new(0);
+        let mut fetch=|| {calls.set(calls.get()+1); Ok(SnapshotData{slot:10,accounts:vec![upd(pk,10,1)],missing_required:vec![]})};
+        let mut drains=0;
+        let mut drain=|_: &mut StateCore| {drains+=1;if drains==3 {stop.set(true);} };
+        assert_eq!(driver.recover_cancellable(&mut state,&mut fetch,&mut drain,&||stop.get()),RecoveryOutcome::Cancelled);
+        assert_eq!(calls.get(),2);
+        assert!(!state.run_state().is_tradable());
+        assert_eq!(driver.attempts_total,1);
+    }
+
+    #[test]
+    fn cancellation_after_snapshot_a_does_not_fetch_b() {
+        use std::cell::Cell;
+        let stop=Cell::new(false);
+        let mut state=StateCore::new(10);
+        let mut driver=RecoveryDriver::new(3);
+        let calls=Cell::new(0);
+        let mut fetch=|| {calls.set(calls.get()+1);stop.set(true);Ok(SnapshotData{slot:10,accounts:vec![],missing_required:vec![]})};
+        assert_eq!(driver.recover_cancellable(&mut state,&mut fetch,&mut |_|{},&||stop.get()),RecoveryOutcome::Cancelled);
+        assert_eq!(calls.get(),1);
+        assert!(!state.run_state().is_tradable());
+    }
+
 }
