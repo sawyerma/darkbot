@@ -316,3 +316,45 @@ fn truth_mixed_real_receiver_and_source_classic_preserves_event_order() {
     assert_eq!(events[1].liquidation_type, truth::LiquidationType::Classic);
     assert_eq!(events[1].event_index, 1);
 }
+
+#[test]
+fn live_nonreceiver_events_reuse_existing_canonical_decoder() {
+    for (tx, kind) in [
+        (classic_truth_fixture(), truth::LiquidationType::Classic),
+        (administrative_truth_fixture(false), truth::LiquidationType::ForcedDeleverage),
+        (administrative_truth_fixture(true), truth::LiquidationType::BankruptcySettlement),
+    ] {
+        let logs = tx["meta"]["logMessages"].as_array().unwrap().iter()
+            .map(|v| v.as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let observed = decode_receiver_events(&logs, &program());
+        assert_eq!(observed.decoder_errors, 0);
+        assert!(observed.events.is_empty());
+        assert_eq!(observed.additional_events.len(), 1);
+        assert_eq!(observed.additional_events[0].kind, kind);
+        let canonical = truth::classify(&tx, &program(), None, None).unwrap();
+        assert_eq!(observed.additional_events[0].gross_edge_usd, canonical[0].gross_edge_usd);
+    }
+}
+
+#[test]
+fn live_nonreceiver_events_ignore_foreign_emitter() {
+    let tx = classic_truth_fixture();
+    let line = tx["meta"]["logMessages"].as_array().unwrap().iter()
+        .filter_map(Value::as_str)
+        .find(|v| v.starts_with(PROGRAM_DATA_PREFIX)).unwrap().to_owned();
+    let foreign_logs = logs_with(&Pubkey::new_unique(), &[line]);
+    let observed = decode_receiver_events(&foreign_logs, &program());
+    assert_eq!(observed.decoder_errors, 0);
+    assert!(observed.additional_events.is_empty());
+}
+
+#[test]
+fn live_nonreceiver_corrupt_known_event_fails_closed() {
+    let mut bytes = vec![166, 160, 249, 154, 183, 39, 23, 242];
+    bytes.push(1);
+    let data = format!("Program data: {}",
+        base64::engine::general_purpose::STANDARD.encode(bytes));
+    let observed = decode_receiver_events(&logs_with(&program(), &[data]), &program());
+    assert_eq!(observed.decoder_errors, 1);
+    assert!(observed.additional_events.is_empty());
+}

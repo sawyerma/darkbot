@@ -61,8 +61,6 @@ pub use reconcile::ReconcileConfig;
 mod paths;
 #[path = "market_truth.rs"]
 pub mod truth;
-#[path = "market_live.rs"]
-mod live;
 
 /// `sha256("event:LiquidationReceiverEvent")[..8]` (verified against the six audit fixtures).
 pub const LIQUIDATION_RECEIVER_EVENT_DISCRIMINATOR: [u8; 8] = [40, 131, 224, 220, 151, 83, 24, 230];
@@ -401,6 +399,8 @@ impl ReceiverEvent {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LogDecode {
     pub events: Vec<ReceiverEvent>,
+    /// Other liquidation types decoded provisionally from the same attributed logs.
+    pub additional_events: Vec<truth::ProvisionalLogEvent>,
     /// Marginfi-emitted data that could hide a receiver event: receiver discriminator with
     /// too-short/non-finite payload, or undecodable base64 while Marginfi is executing.
     pub decoder_errors: u64,
@@ -477,6 +477,14 @@ pub fn decode_receiver_events(logs: &[String], program: &Pubkey) -> LogDecode {
                 continue;
             };
             match parse_receiver_payload(&bytes) {
+                Payload::NotReceiverEvent if program_executing => {
+                    // Reuse the existing canonical event decoder: no second RPC scanner.
+                    match truth::provisional_event(&bytes) {
+                        Ok(Some(ev)) => out.additional_events.push(ev),
+                        Ok(None) => {}
+                        Err(_) => out.decoder_errors += 1,
+                    }
+                }
                 Payload::NotReceiverEvent => {}
                 Payload::Invalid if program_executing => out.decoder_errors += 1,
                 Payload::Invalid => out.foreign_program_events += 1,
@@ -809,6 +817,9 @@ pub struct MarketStats {
     pub failed_transactions: u64,
     pub liquidation_transactions: u64,
     pub liquidation_events: u64,
+    pub provisional_classic_events: u64,
+    pub provisional_deleverage_events: u64,
+    pub provisional_bankruptcy_events: u64,
     pub failed_tx_receiver_events_ignored: u64,
     pub foreign_program_events: u64,
     pub decoder_error_count: u64,
@@ -1583,6 +1594,21 @@ impl ObserverCore {
         }
         let decoded = decode_receiver_events(&l.logs, &self.program);
         self.absorb_decode(&decoded, success);
+        if success {
+            for ev in &decoded.additional_events {
+                match ev.kind {
+                    truth::LiquidationType::Classic => self.stats.provisional_classic_events += 1,
+                    truth::LiquidationType::ForcedDeleverage => self.stats.provisional_deleverage_events += 1,
+                    truth::LiquidationType::BankruptcySettlement => self.stats.provisional_bankruptcy_events += 1,
+                    truth::LiquidationType::Receivership => unreachable!("original receiver decoder handles this type"),
+                }
+                eprintln!(
+                    "[MARKET/LIQUIDATION] provisional=true type={} slot={} signature={} target={} actor={} gross_usd={}",
+                    ev.kind.as_str(), l.slot, l.signature, ev.target, ev.actor,
+                    ev.gross_edge_usd.map(|v| format!("{v:.6}")).unwrap_or_else(|| "UNKNOWN".to_owned())
+                );
+            }
+        }
         if success && decoded.truncated {
             // [r6] qualified after capture against the fetched transaction (bounded, counted).
             let logged = self.note_truncated(&decoded);
@@ -2228,9 +2254,19 @@ pub fn finish_capture(
 ) -> Result<(Value, String, Option<String>), String> {
     let mut write_error = outcome.write_error;
     if outcome.drain_complete && write_error.is_none() {
+        eprintln!("[MARKET/CANONICAL] phase=START rpc_after_shadow_quiescence=true");
         if let Err(e) = core.full_reconciliation_phase(cfg.rpc_url.as_deref(), sink) {
             write_error = Some(e.to_string());
         }
+        eprintln!(
+            "[MARKET/CANONICAL] phase=DONE complete={} produced_slots={} fetched_slots={} skipped_slots={} events={} error={}",
+            core.reconciliation.complete,
+            core.reconciliation.slots_produced,
+            core.reconciliation.slots_fetched,
+            core.reconciliation.slots_skipped_confirmed,
+            core.truth.events.len(),
+            core.reconciliation.error.unwrap_or("NONE")
+        );
     }
     if outcome.drain_complete && write_error.is_none() {
         if let Err(e) = core.gap_recovery_phase(cfg.rpc_url.as_deref(), sink) {
@@ -2391,9 +2427,8 @@ pub fn run_embedded(
     core.econ = econ.clone();
     core.gap_cfg = cfg.gap;
     core.reconcile_cfg = cfg.reconcile;
-    // Read-only bounded worker: uses the SAME canonical full-slot classifier, never
-    // substitutes live hints for the authoritative final reconciliation.
-    let mut live_scan = live::LiveScan::start(&cfg)?;
+    // Provisional all-path counts come from the existing program-attributed
+    // WebSocket decoder. Canonical RPC happens only after Shadow is quiescent.
     let mut last_live_display = Instant::now() - Duration::from_secs(5);
     let mut checkpoint_index = 0usize;
     core.coverage(&mut sink, "START", process_started, None, json!({
@@ -2492,28 +2527,21 @@ pub fn run_embedded(
             stop_reason = "WRITE_ERROR";
             break;
         }
-        if window.is_some() {
-            live_scan.observe_slots(
-                core.reconciliation.market_slot_start.as_ref().map(|v| v.slot),
-                core.reconciliation.market_slot_end.as_ref().map(|v| v.slot),
-            );
-        }
         if last_live_display.elapsed() >= Duration::from_secs(2) {
             last_live_display = Instant::now();
-            let s = live_scan.snapshot();
             let gross: f64 = core.edges.iter().sum();
             eprintln!(
-                "[MARKET/LIVE] phase={} tx={} success={} receiver_events={} receiver_gross_usd={:.6} gaps={} decoder_errors={} finalized_events={} classic={} receivership={} deleverage={} bankruptcy={} finalized_gross_usd_known={} finalized_gross_usd={:.6} scanned_through={} target_slot={} scan_errors={} scanner_status={}",
+                "[MARKET/LIVE] phase={} tx={} success={} provisional_classic={} provisional_receivership={} provisional_deleverage={} provisional_bankruptcy={} receiver_gross_usd={:.6} gaps={} decoder_errors={} canonical_status=POST_CAPTURE_ONLY",
                 if window.is_some() { "CAPTURE" } else { "WAITING_FOR_MARKET_STREAM" },
                 core.stats.unique_transactions,
                 core.stats.successful_transactions,
+                core.stats.provisional_classic_events,
                 core.stats.liquidation_events,
+                core.stats.provisional_deleverage_events,
+                core.stats.provisional_bankruptcy_events,
                 gross,
                 core.stats.gap_count,
-                core.stats.decoder_error_count,
-                s.events, s.classic, s.receivership, s.deleverage, s.bankruptcy,
-                s.known_gross_events, s.gross_usd,
-                s.scanned_through, s.target_slot, s.errors, s.status
+                core.stats.decoder_error_count
             );
         }
         let overflow = consumer.stats().overflow;
@@ -2590,9 +2618,6 @@ pub fn run_embedded(
         }
     }
     core.stop_observation();
-    // Stop the auxiliary scanner before the authoritative full-window scan.
-    // No competing getBlock RPC traffic during final reconciliation.
-    live_scan.stop();
     let _ = core.coverage(
         &mut sink,
         "DRAINED",

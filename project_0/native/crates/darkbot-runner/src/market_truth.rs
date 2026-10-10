@@ -233,6 +233,38 @@ fn decode_payload(bytes: &[u8]) -> Result<Option<Decoded>, &'static str> {
     Ok(Some(e))
 }
 
+/// Provisional event identified from the authenticated Marginfi program log.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProvisionalLogEvent {
+    pub kind: LiquidationType,
+    pub target: String,
+    pub actor: String,
+    pub gross_edge_usd: Option<f64>,
+}
+
+/// Reuse the audited canonical event payload decoder for a WSS-only read.
+/// All-path instruction/CPI consistency still belongs to final reconciliation.
+pub(super) fn provisional_event(bytes: &[u8]) -> Result<Option<ProvisionalLogEvent>, &'static str> {
+    let discriminator = bytes.get(..8);
+    if discriminator != Some(CLASSIC_EVENT.as_slice())
+        && discriminator != Some(DELEVERAGE_EVENT.as_slice())
+        && discriminator != Some(BANKRUPTCY_EVENT.as_slice())
+    {
+        return Ok(None);
+    }
+    let event = decode_payload(bytes)?.ok_or("PROVISIONAL_KNOWN_EVENT_UNDECODED")?;
+    let gross_edge_usd = event.seized.zip(event.repaid).map(|(seized, repaid)| seized - repaid);
+    if gross_edge_usd.is_some_and(|value| !value.is_finite()) {
+        return Err("PROVISIONAL_NONFINITE_EDGE");
+    }
+    Ok(Some(ProvisionalLogEvent {
+        kind: event.kind,
+        target: event.target,
+        actor: event.actor,
+        gross_edge_usd,
+    }))
+}
+
 #[derive(Debug)]
 struct InstructionEvidence {
     kind: LiquidationType,
