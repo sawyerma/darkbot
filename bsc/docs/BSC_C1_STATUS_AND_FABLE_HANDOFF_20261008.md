@@ -23,7 +23,7 @@ The following C1 gates are accepted and must be treated as frozen inputs unless 
 | C1.8 | PASS / LOCAL QUALIFIED | concurrency/state-safety qualification passed |
 | C1.9 | COMPLETE / INTEGRITY PASS / ELIGIBLE | production-devp2p native latency measurement accepted; final full-regression/source-build freeze bind still open |
 | C1.9b | PASS — CONTROLLED TESTNET HOOK/PATH ONLY | hardened ETH/68→geth→Fast-Lane→Rust controlled path 1/1 observed, 0 missed; Mainnet coverage not proven |
-| C1.10 | BLOCKED | requires complete final regression plus final source/build/config/evidence binding |
+| C1.10 | IN PROGRESS / NOT FROZEN | C1.10A pre-freeze regression started; Python/Rust/C14/targeted geth and Fast-Lane race checks passed; pinned-upstream race baseline documented; full non-race geth regression/final build/binding still open |
 
 Authoritative C1.4a evidence:
 
@@ -103,6 +103,44 @@ LIVE = BLOCKED
 ```
 
 The final C1.10 freeze is still blocked. Before C1.10, rerun the complete C1.5-C1.9/REV2 regression against the hardened integrated source and bind the final source/build/config/evidence identities.
+
+
+
+### 1.2 C1.10A pre-freeze regression checkpoint — 2026-10-10
+
+C1.10A is now active but incomplete.
+
+Passed on the hardened integrated candidate:
+
+```text
+Python qualification tooling                 PASS
+Rust fmt/clippy/debug/release                 PASS
+C14 Go/Rust interop                          PASS
+targeted geth tests                          PASS
+DarkBot fastlane -race                       PASS
+overlay/vendor ingress byte match            PASS
+```
+
+C14 initially stopped because the prepared overlay had one additional blank line compared with the verified vendor `ingress.go`. The diff was whitespace-only; after byte-syncing the overlay to the already verified vendor source, C14 passed.
+
+Race differential against clean pinned bsc-geth:
+
+```text
+eth/protocols/eth current                     FAIL under -race
+eth/protocols/eth clean pin                   FAIL under -race
+common race family                            CachingDB.NoTries / core/state/database.go:280
+
+eth current warnings                          55
+eth clean-pin warnings                        51
+eth current RC                                1
+eth clean-pin RC                              1
+common signatures                             core/blockchain.go, core/state/, core/rawdb/, triedb/
+classification                                PINNED_BASELINE_PRESENT
+```
+
+The warning counts are not identical. Do not upgrade this to an exact equivalence claim. The accepted conclusion is limited: the pinned upstream tree independently exhibits the race family; DarkBot Fast-Lane's targeted race suite passes; full pinned-geth race cleanliness is not claimed.
+
+Still open: full non-race `go test ./...`, final geth build, final source/build/config/evidence identity binding, final measurement binding, and fail-closed C1.10 freeze.
 
 
 ## 2. Fable assignment

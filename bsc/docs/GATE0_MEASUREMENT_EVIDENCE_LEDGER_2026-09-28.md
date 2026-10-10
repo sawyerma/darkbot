@@ -110,7 +110,7 @@ Wichtig:
 | **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT — wartet auf 2 getrennte Wallets, Funding und explizite v2-Autorisierung/Arming** |
 | G0.8 | tatsächliche Acquisition + Ordering | **offen — folgt unmittelbar auf G0.7** |
 | G0.9+ | Builder-/Feasibility-Folgeschritte | blockiert |
-| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **IN PROGRESS — C1.5-C1.8 lokal PASS; C1.9 production-devp2p measurement COMPLETE / integrity PASS / eligible, final full-regression/source-build freeze bind noch offen; C1.9b controlled Testnet ETH/68→geth→Fast-Lane→Rust hook/path PASS with hardened qualification gate; C1.10 blocked pending final C1 regression + freeze** |
+| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **IN PROGRESS — C1.5-C1.8 PASS; C1.9 COMPLETE / integrity PASS / eligible; C1.9b controlled Testnet hook/path PASS; C1.10A pre-freeze regression IN PROGRESS with pinned-upstream race baseline documented; full non-race geth regression + final build/bind still open; C1.10 freeze not yet PASS** |
 
 **Es wird kein Gate übersprungen.**
 
@@ -208,6 +208,76 @@ Next:
 4. only after C1.10 PASS/FROZEN proceed to C2
 ```
 
+
+
+## C1.10A pre-freeze regression checkpoint — 2026-10-10
+
+C1.10 has started. This checkpoint records the state **before** the final C1.10 freeze and deliberately does not mark C1 frozen.
+
+Completed on the hardened integrated source:
+
+```text
+Python qualification tooling compile/tests   PASS
+Rust fmt                                     PASS
+Rust clippy -D warnings                      PASS
+Rust debug workspace tests                   PASS
+Rust release workspace tests                 PASS
+C14 Go/Rust interop                          PASS
+targeted geth tests                          PASS
+DarkBot fastlane -race                       PASS
+overlay/vendor ingress byte identity         PASS
+```
+
+The initial C14 interop stop was traced to a single extra blank line in the prepared overlay `ingress.go`; there was no semantic code difference. The overlay was synchronized to the already Fresh-Pin-generated, built and runtime-tested vendor source and C14 then passed.
+
+### Pinned upstream race baseline
+
+The broad Go race suites are not race-clean at the accepted bsc-geth pin `cdb7548b5baacfdae92f9f63437d6456411665f3`.
+
+For `./eth/protocols/eth`, current and clean-pin runs both failed with the same `core/state/database.go:280 / CachingDB.NoTries` race family and the same affected protocol tests; DarkBot `./darkbot/fastlane -race` passed.
+
+For `./eth`, the differential run produced:
+
+```text
+current WARNING: DATA RACE count            55
+clean pinned WARNING: DATA RACE count       51
+current package RC                           1
+clean pinned package RC                      1
+common core signatures                       core/blockchain.go, core/state/, core/rawdb/, triedb/
+classification                               PINNED_BASELINE_PRESENT
+```
+
+There is broad overlap in failed upstream tests, including the block-broadcast, blob-sync, vote/transaction propagation and timeout cases. Counts are **not identical** (55 current vs 51 clean pin), so this checkpoint does **not** claim byte-for-byte or warning-for-warning race equivalence and does not claim the entire pinned upstream tree is race-free. It records only that the pinned upstream race family is independently present and that the DarkBot Fast-Lane package itself passed its race test.
+
+Therefore the correct C1.10A interpretation is:
+
+```text
+DARKBOT_FASTLANE_RACE              = PASS
+ETHPROTO_RACE                      = PINNED_BASELINE_EXCEPTION
+ETH_PACKAGE_RACE                   = PINNED_BASELINE_PRESENT
+FULL_PINNED_GETH_RACE_CLEAN        = NOT CLAIMED
+C1_10A_COMPLETE                    = NO
+```
+
+Still required before C1.10A can close:
+
+```text
+1. full non-race go test ./...
+2. final geth build from the exact hardened integrated source
+3. final source/overlay/vendor consistency checks
+4. bind final binary/source/config/evidence identities
+5. rerun/attach final C1.9 measurement to the frozen binary as required
+6. execute fail-closed C1.10 freeze
+```
+
+Required non-claims remain unchanged:
+
+```text
+T0_TO_T_BUY_LT_1MS = NOT_PROVEN
+MAINNET_INGRESS_COVERAGE = NOT_PROVEN
+PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED unless separately qualified
+LIVE = BLOCKED
+```
 
 ## 4. Primärer historische Flap-Fixture
 

@@ -88,7 +88,7 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
 | C0 | **IN PROGRESS / FOUNDATION FROZEN** | Unit-6 startup authorization + recorder/replay foundation IMPLEMENTED_TESTED/FROZEN for foundation scope; full production qualification remains separate |
-| C1 | **IN PROGRESS** | C1.5-C1.8 local PASS; C1.9 production-devp2p measurement COMPLETE / integrity PASS / eligible (max T_ingress→first handoff 438 us), final full-regression/freeze bind open; C1.9b controlled Testnet ETH/68→geth→Fast-Lane→Rust hook/path PASS with hardened fail-closed qualification gate; C1.10 blocked pending final regression + freeze |
+| C1 | **IN PROGRESS / C1.10A STARTED** | C1.5-C1.8 PASS; C1.9 COMPLETE / integrity PASS / eligible; C1.9b controlled Testnet hook/path PASS; C1.10A Python/Rust/C14/targeted-geth + Fast-Lane race PASS, pinned upstream race baseline documented; full non-race geth regression/final build/bind still open; C1.10 not frozen |
 | C2 | **BLOCKED BY C1.10** | Production pending/canonical/reorg/nonce/replacement state |
 | C3 | **BLOCKED** | Production local build/sign/geth path benchmark; engineering proof only |
 | D | **BLOCKED** | Full production Flap Rust decoder |
@@ -242,6 +242,15 @@ LIVE                                  BLOCKED
 Detailed commands, identities, distributions, counters and scope/non-claims are recorded in `GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md`. The C1.9 local selected-peer handoff is not a purchase/acquisition timestamp.
 
 C1.9b controlled Testnet hook/path qualification is now locally PASS. The qualification-only pre-sync override is hardened: it requires `DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet`, `DARKBOT_C19B_ACCEPT_TXS_UNSYNCED=YES`, and network ID 97; invalid combinations fail closed. A fresh-pin generated candidate passed targeted/affected geth tests and build, then the hardened runtime produced 1/1 controlled observation with zero misses, invalid records, or lane faults. The hardened candidate was copied byte-for-byte into the local vendor files and rebuilt/retested. These local source changes are **not yet C1.10-frozen**. The next operation is the complete final C1.5-C1.9/REV2 regression and source/build/config binding, followed by C1.10 freeze.
+
+
+### C1.10A checkpoint — 2026-10-10
+
+Pre-freeze regression has started. Python qualification tooling, Rust fmt/clippy/debug/release tests, C14 interop, targeted geth tests and `go test -race ./darkbot/fastlane` are PASS.
+
+Broad pinned-geth race suites are not clean even on the untouched accepted pin. `./eth/protocols/eth -race` reproduces the same `CachingDB.NoTries` / `core/state/database.go:280` family on current and clean-pin trees. `./eth -race` also fails on both; the current run reported 55 race warnings and the clean pin 51 with common core signatures and substantial failed-test overlap. This is recorded as `PINNED_BASELINE_PRESENT`, not as a claim of exact race equivalence or a race-free upstream tree. DarkBot Fast-Lane itself is race-clean in the targeted run.
+
+C1.10A remains open until the full non-race geth suite, final exact build, source/build/config/evidence binding and final measurement/freeze steps complete.
 
 STOP.
 
