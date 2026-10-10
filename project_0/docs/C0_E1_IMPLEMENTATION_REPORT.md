@@ -2,6 +2,24 @@
 
 # C0-E1 Implementation Report
 
+## Verified continuation — 2026-10-10 19:57 Europe/Berlin (WIP, not final qualification)
+
+Latest observed source checkpoint: GitHub WIP branch `project0/c0e1-startup-wip-20261010` at `c2ba995e647296d1c3d3b0a134d2f30ff8db1d64` (before documentation commits), separated from `main` `3fdf30b`. Six Astra-modified Rust files implement compressed getProgramAccounts snapshots (`base64+zstd`), true Shadow-READY startup barrier before market observation, first-ready timestamp, no technical PASS with zero in-window evaluations, and cancellable fail-closed recovery. Two **local, not yet pushed** test-only fixture fixes: remove ambiguous `.into()` from two snapshot mock-RPC tests and inject one synthetic Shadow evaluation in the four-report worker fixture. No production implementation was edited by these fixes.
+
+User-reported validations after both fixes: `darkbot-solana state::` 19 PASS/0 FAIL (20 filtered); full `darkbot-runner --features crate_health` exit0 and `--features "crate_health txv1"` exit0; release binary build exit0; Clippy all-targets txv1 exit0 (three warnings in bin, differential not established). Before second fixture fix, Runner had 173 PASS/1 FAIL/1 ignored; the updated isolated test subsequently passed. These are static/local validations, not full Mainnet qualification.
+
+Active real 60-second **capture** (not 60-second walltime) controlled market WSS interruption smoke `c0e1_gap_smoke_20261010T195016Z`:
+- Shadow startup attempt1 snapshot A failed decoding the RPC response body at `liability_gpa`. Attempt2 Snapshot A: slot455376771, 83,516 total, 82,810 liabilities, 204 banks, 494 required, 8 optional, 0 missing required, 28,425ms. B: slot455376902, same counts, 29,561ms.
+- Root catch-up from Some(455376992) to target455377037 succeeded in12,546ms. Log has `recovery: Ready, run_state=Ready` **before** `C0_E1_WARMUP_READY; starting market stream and measurement window`: the startup sequencing worked in this observed trial.
+- During subsequent observation the `ws_rpc` source logged a connection reset without closing handshake and automatic attempt2 reconnect, two subscription ACKs and StreamReady. That is reconnect evidence; the supplied excerpt does not yet prove the proxy-induced interruption marker, post-capture finalized all-slot backfill, `GAP_RECOVERED`, zero unresolved slots, or `CONTROLLED_GAP_SMOKE_PASS`.
+- Intermediate Shadow ingress latest sent/received29978/29978 overflow0; health sweeps 1,111,897, liquidatable classifications97,536, health errors4,504, winner requests dispatched265 and results8, resolved0. Intermediate, not the final economics sample, and NOT observed market liquidations / profit.
+- Existing qualification proxy interrupts the **market** WSS only. A separate intentional interruption of Shadow's WSS remains an unproven case.
+
+**Gate stays PENDING.** Inspect after test completion: `project_0/data/econ4h/c0e1_gap_smoke_20261010T195016Z/runtime.log`, `gap_proxy.log`, `market/coverage.jsonl`, `market/summary.json`, `economics_final.json`, `hour_01..04.json`, plus exit code. Only an actual full-slot finalized reconciliation with 0 unresolved slots, gap recovery, real Shadow evaluations, clean shutdown and 0 submissions can support the complete short smoke. No 4h re-run until then. LIVE and submission disabled. Local evidence not automatically included in the GitHub documentation commit. See top of `MEASUREMENT_LEDGER.md` for full handoff.
+
+---
+
+
 ## Transport completion — 2026-10-10 (current local candidate)
 
 This section supersedes older package-only status for the current working tree.
