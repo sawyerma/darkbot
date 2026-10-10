@@ -1574,7 +1574,7 @@ fn market_terminal_summary(report: &Value) -> String {
             final_report["canonical"]["cumulative"]["loss_attribution"],
             final_report["technical_qualification"]["verdict"]
         );
-        println!("{}", market_terminal_summary(&final_report));
+        println!("{}", Self::market_terminal_summary(&final_report));
         if final_report["technical_qualification"]["verdict"] != "PASS" {
             return Err(
                 "C0-E1 technical qualification incomplete; see economics_final.json".into(),
