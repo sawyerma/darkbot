@@ -2339,6 +2339,24 @@ pub fn run_embedded(
         print_banner(&cfg);
     }
 
+    if let Some(h) = &econ {
+        // No measurement clock or market ingress yet: initialization is separately
+        // bounded and recorded, so a short run measures a running Shadow bot.
+        eprintln!("C0_E1_WARMUP_WAIT timeout_s={}", cfg.ready_timeout_secs);
+        sink.coverage(&json!({"event":"SHADOW_WARMUP_WAIT","timestamp_utc":utc_iso(unix_now_s())}))
+            .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
+        if let Err(e) = h.wait_shadow_ready(Duration::from_secs(cfg.ready_timeout_secs)) {
+            let _ = sink.coverage(&json!({"event":"SHADOW_WARMUP_FAILED","error":e}));
+            let _ = sink.flush();
+            eprintln!("C0_E1_WARMUP_FAILED code={e}");
+            return Err(e);
+        }
+        sink.coverage(&json!({"event":"SHADOW_WARMUP_READY","at_ns":clock.now_ns(),
+            "timestamp_utc":utc_iso(unix_now_s())}))
+            .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
+        eprintln!("C0_E1_WARMUP_READY; starting market stream and measurement window");
+    }
+
     let deployment_before = paths::inspect(cfg.rpc_url.as_deref(), &cfg.program);
     let (producer, consumer) = bounded::<IngressEvent>("market-ingress", cfg.ingress_buffer);
     let halt = IngressHalt::new();

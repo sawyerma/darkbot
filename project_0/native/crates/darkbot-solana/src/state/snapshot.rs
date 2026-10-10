@@ -40,7 +40,7 @@ fn decode_program_accounts(
     clock: &Clock,
 ) -> Result<Snapshot, SnapshotError> {
     let mut cfg = serde_json::json!({
-        "encoding": "base64",
+        "encoding": "base64+zstd",
         "commitment": "confirmed",
         "withContext": true
     });
@@ -119,4 +119,42 @@ pub fn multiple_accounts(rpc: &RpcClient, keys: &[Pubkey], clock: &Clock) -> Res
         }
     }
     Ok(Snapshot { slot: if slot_min == u64::MAX { 0 } else { slot_min }, accounts, missing })
+}
+
+#[cfg(test)]
+mod compressed_snapshot_tests {
+    use super::*;
+    use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
+    use solana_sdk::account::Account;
+    use std::collections::HashMap;
+
+    #[test]
+    fn compressed_gpa_preserves_all_bytes_owner_lamports_and_context() {
+        let key = Pubkey::new_unique();
+        let account = Account { lamports: 987, data: (0..2304).map(|i|(i%251) as u8).collect(),
+            owner: Pubkey::new_unique(), executable: false, rent_epoch: 0 };
+        let ui = encode_ui_account(&key, &account, UiAccountEncoding::Base64Zstd, None, None);
+        let plain = encode_ui_account(&key, &account, UiAccountEncoding::Base64, None, None);
+        let reply = serde_json::json!({"context":{"slot":123},"value":[{"pubkey":key.to_string(),"account":ui}]});
+        let rpc = RpcClient::new_mock_with_mocks("succeeds", HashMap::from([(RpcRequest::GetProgramAccounts,reply)]));
+        let snapshot = program_accounts_filtered(&rpc, &Pubkey::new_unique(),vec![],&Clock::new()).unwrap();
+        assert_eq!(snapshot.slot,123);
+        assert_eq!(snapshot.accounts.len(),1);
+        let got = &snapshot.accounts[0];
+        assert_eq!(got.pubkey,key);assert_eq!(got.slot,123);
+        assert_eq!(got.owner,account.owner);assert_eq!(got.lamports,account.lamports);
+        assert_eq!(got.data,account.data);
+        assert_eq!(got.data, plain.decode::<Account>().unwrap().data);
+    }
+
+    #[test]
+    fn corrupt_compressed_account_cannot_produce_partial_snapshot() {
+        let key=Pubkey::new_unique();
+        let account=Account {lamports:1,data:vec![7;2304],owner:Pubkey::new_unique(),executable:false,rent_epoch:0};
+        let mut ui=serde_json::to_value(encode_ui_account(&key,&account,UiAccountEncoding::Base64Zstd,None,None)).unwrap();
+        ui["data"]=serde_json::json!(["AAAA","base64+zstd"]);
+        let reply=serde_json::json!({"context":{"slot":123},"value":[{"pubkey":key.to_string(),"account":ui}]});
+        let rpc=RpcClient::new_mock_with_mocks("succeeds",HashMap::from([(RpcRequest::GetProgramAccounts,reply)]));
+        assert!(program_accounts_filtered(&rpc,&Pubkey::new_unique(),vec![],&Clock::new()).is_err());
+    }
 }

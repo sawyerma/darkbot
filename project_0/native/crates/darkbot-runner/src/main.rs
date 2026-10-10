@@ -737,7 +737,15 @@ fn run_shadow(
     let mut ingress_session = spawn_ingress(sub.clone(), producer.clone(), halt.clone())?;
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).
-    let rpc = RpcClient::new(rpc_url.clone());
+    // Large, filtered Marginfi getProgramAccounts payloads regularly approach the
+    // RpcClient::new() 30-second default. Keep a bounded, independently configurable
+    // timeout for snapshot/dependency fetches; never weaken recovery/reconcile gates.
+    let snapshot_rpc_timeout_secs: u64 = config::parsed_or("P0_SNAPSHOT_RPC_TIMEOUT_SECS", 90)?;
+    if !(30..=180).contains(&snapshot_rpc_timeout_secs) {
+        return Err("P0_SNAPSHOT_RPC_TIMEOUT_SECS must be 30..=180".into());
+    }
+    eprintln!("snapshot: rpc_timeout_s={snapshot_rpc_timeout_secs}");
+    let rpc = RpcClient::new_with_timeout(rpc_url.clone(), Duration::from_secs(snapshot_rpc_timeout_secs));
     let mut st = StateCore::new(buffer_cap);
     // [FIX-96] Production recovery waits for confirmed WSS/root catch-up before
     // Snapshot-B reconciliation. This prevents false dirty reconciles when RPC Snapshot B
@@ -746,7 +754,23 @@ fn run_shadow(
     if !(30..=300).contains(&root_catchup_secs) {
         return Err("P0_RECOVERY_ROOT_CATCHUP_SECS must be 30..=300".into());
     }
-    let mut drv = RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(root_catchup_secs));
+    // Adaptive root-only stall extension. All limits are bounded and the hard
+    // deadline is independent of progress, with no impact on trading hot paths.
+    let root_stall_secs: u64 = config::parsed_or("P0_RECOVERY_ROOT_STALL_SECS", 60)?;
+    let root_hard_secs: u64 = config::parsed_or("P0_RECOVERY_ROOT_HARD_MAX_SECS", 300)?;
+    if !(5..=180).contains(&root_stall_secs)
+        || !(30..=900).contains(&root_hard_secs)
+        || root_hard_secs < root_catchup_secs
+    {
+        return Err("P0_RECOVERY_ROOT_STALL_SECS must be 5..=180 and P0_RECOVERY_ROOT_HARD_MAX_SECS must be 30..=900 and >= P0_RECOVERY_ROOT_CATCHUP_SECS".into());
+    }
+    eprintln!(
+        "recovery: root_soft_s={} root_stall_s={} root_hard_s={}",
+        root_catchup_secs, root_stall_secs, root_hard_secs
+    );
+    let mut drv = RecoveryDriver::new(3)
+        .with_root_catchup(Duration::from_secs(root_catchup_secs))
+        .with_root_progress_limits(Duration::from_secs(root_stall_secs), Duration::from_secs(root_hard_secs));
     let dep_shared = std::sync::Arc::new(std::sync::Mutex::new(required_dependency_keys.clone()));
     let opt_shared = std::sync::Arc::new(std::sync::Mutex::new(optional_dependency_keys.clone()));
     let dep_for_fetch = dep_shared.clone();
@@ -763,7 +787,11 @@ fn run_shadow(
             liability_account_filters(&group),
             &clock,
         )
-        .map_err(|e| format!("stage=liability_gpa {e}"))?;
+        .map_err(|e| {
+            // Log a duration without provider URL, response body or API credentials.
+            eprintln!("snapshot: failed stage=liability_gpa elapsed_ms={}", t0.elapsed().as_millis());
+            format!("stage=liability_gpa {e}")
+        })?;
         #[cfg(feature = "crate_health")]
         let b = snapshot::program_accounts_filtered(&rpc, &program, bank_filters(&group), &clock)
             .map_err(|e| format!("stage=bank_gpa {e}"))?;
@@ -1279,6 +1307,15 @@ fn run_shadow(
             );
         }
         if let Some(h) = &econ {
+            let ready = st.run_state().is_tradable() && !program_upgrade_latched;
+            #[cfg(feature = "crate_health")]
+            let ready = ready && threshold_ready;
+            h.shared.shadow_ready.store(ready, std::sync::atomic::Ordering::Release);
+            if ready {
+                let _ = h.shared.shadow_ready_ns.compare_exchange(
+                    0, clock.now_ns(), std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire);
+            }
             h.shared.upgrade.store(
                 program_upgrade_latched,
                 std::sync::atomic::Ordering::Relaxed,
@@ -2268,7 +2305,8 @@ fn run_shadow(
                 };
                 counts[i] += 1;
             }
-            if let Some(o) = drv.on_event(&mut st, ev, &mut fetch, &mut drain) {
+            if let Some(o) = drv.on_event_cancellable(&mut st, ev, &mut fetch, &mut drain,
+                &|| shutdown.is_requested() || econ.as_ref().is_some_and(|h| h.drain_expired())) {
                 eprintln!("recovery: {:?}, run_state={:?}", o, st.run_state());
                 if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
                     halt.clear();
@@ -3723,7 +3761,7 @@ fn run_econ4h() -> Result<(), String> {
     market.duration_secs = cfg.duration_secs;
     market.run_id = cfg.run_id.clone();
     market.run_dir = cfg.run_dir.join("market");
-    let timeout = market.ready_timeout_secs
+    let timeout = 2 * market.ready_timeout_secs
         + cfg.duration_secs
         + cfg.drain_secs
         + market.drain_timeout_secs
