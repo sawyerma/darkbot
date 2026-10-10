@@ -54,6 +54,51 @@ pub enum RecoveryOutcome {
     Exhausted { attempts: u32 },
 }
 
+// A root-only progress watchdog. Time values are elapsed from a single Instant,
+// so decision logic can be unit-tested without wall-clock sleeps.
+#[derive(Clone, Copy, Debug)]
+struct RootProgressLimits {
+    stall: Duration,
+    hard: Duration,
+}
+
+#[derive(Debug)]
+struct RootProgressWatchdog {
+    last_root: Option<u64>,
+    last_progress_elapsed: Duration,
+}
+
+impl RootProgressWatchdog {
+    fn new(initial_root: Option<u64>) -> Self {
+        Self { last_root: initial_root, last_progress_elapsed: Duration::ZERO }
+    }
+
+    fn observe_root(&mut self, root: Option<u64>, elapsed: Duration) {
+        // Only a strictly increasing finalized root counts. Repeated notifications,
+        // processed slots and account updates do NOT extend the stall deadline.
+        if root > self.last_root {
+            self.last_root = root;
+            self.last_progress_elapsed = elapsed;
+        }
+    }
+
+    fn timeout_reason(
+        &self,
+        elapsed: Duration,
+        soft: Duration,
+        adaptive: Option<RootProgressLimits>,
+    ) -> Option<&'static str> {
+        match adaptive {
+            Some(limits) if elapsed >= limits.hard => Some("hard"),
+            Some(limits) if elapsed >= soft
+                && elapsed.saturating_sub(self.last_progress_elapsed) >= limits.stall => Some("stall"),
+            Some(_) => None,
+            None if elapsed >= soft => Some("fixed"),
+            None => None,
+        }
+    }
+}
+
 pub struct RecoveryDriver {
     pub max_attempts: u32,
     pub attempts_total: u64,
@@ -62,6 +107,8 @@ pub struct RecoveryDriver {
     /// the WSS root has reached every per-account B context slot, while continuously
     /// draining ingress. Disabled by default so offline unit tests stay deterministic.
     root_catchup_timeout: Option<Duration>,
+    // Production-only bounded adaptive extension; legacy fixed-timeout calls unchanged.
+    root_progress_limits: Option<RootProgressLimits>,
 }
 
 impl RecoveryDriver {
@@ -71,11 +118,21 @@ impl RecoveryDriver {
             attempts_total: 0,
             reconcile_failures: 0,
             root_catchup_timeout: None,
+            root_progress_limits: None,
         }
     }
 
     pub fn with_root_catchup(mut self, timeout: Duration) -> Self {
         self.root_catchup_timeout = Some(timeout);
+        self
+    }
+
+    /// Extend a configured root-catchup soft timeout only while real root progress
+    /// continues, and never past the mandatory hard maximum. Runner validates values.
+    pub fn with_root_progress_limits(mut self, stall: Duration, hard: Duration) -> Self {
+        assert!(self.root_catchup_timeout.is_some());
+        assert!(!stall.is_zero() && hard >= self.root_catchup_timeout.unwrap());
+        self.root_progress_limits = Some(RootProgressLimits { stall, hard });
         self
     }
 
@@ -178,42 +235,60 @@ impl RecoveryDriver {
             if let Some(timeout) = self.root_catchup_timeout {
                 let target_slot = b.accounts.iter().map(|a| a.slot).max().unwrap_or(b.slot);
                 let started = Instant::now();
+                let mut progress = RootProgressWatchdog::new(st.root());
+                let mut extension_logged = false;
                 eprintln!(
-                    "[recovery] attempt={}/{} root_catchup start target={} current={:?}",
-                    attempt,
-                    self.max_attempts,
-                    target_slot,
-                    st.root()
+                    "[recovery] attempt={}/{} root_catchup start target={} current={:?} soft_ms={} stall_ms={:?} hard_ms={:?}",
+                    attempt, self.max_attempts, target_slot, st.root(), timeout.as_millis(),
+                    self.root_progress_limits.map(|p| p.stall.as_millis()),
+                    self.root_progress_limits.map(|p| p.hard.as_millis())
                 );
                 loop {
                     check_cancelled!();
                     drain(st);
-                    if st.root().is_some_and(|root| root >= target_slot) {
-                        // One final drain after observing the barrier so already-enqueued account
-                        // notifications cannot remain behind the root event in the local channel.
-                        drain(st);
+                    let elapsed = started.elapsed();
+                    let root = st.root();
+                    progress.observe_root(root, elapsed);
+                    let reason = progress.timeout_reason(elapsed, timeout, self.root_progress_limits);
+                    // The hard limit takes precedence even if a blocked drain returned
+                    // with a new root. Never promote an expired recovery attempt.
+                    if reason == Some("hard") {
                         eprintln!(
-                            "[recovery] attempt={}/{} root_catchup ok target={} root={} elapsed_ms={}",
-                            attempt,
-                            self.max_attempts,
-                            target_slot,
-                            st.root().unwrap_or(0),
-                            started.elapsed().as_millis()
-                        );
-                        break;
-                    }
-                    if started.elapsed() >= timeout {
-                        eprintln!(
-                            "[recovery] attempt={}/{} root_catchup timeout target={} current={:?} elapsed_ms={}",
-                            attempt,
-                            self.max_attempts,
-                            target_slot,
-                            st.root(),
-                            started.elapsed().as_millis()
+                            "[recovery] attempt={}/{} root_catchup timeout reason=hard target={} current={:?} elapsed_ms={} stalled_ms={}",
+                            attempt, self.max_attempts, target_slot, root,
+                            elapsed.as_millis(), elapsed.saturating_sub(progress.last_progress_elapsed).as_millis()
                         );
                         st.halt(HaltReason::ReconcileFailure);
                         self.reconcile_failures += 1;
                         continue 'attempts;
+                    }
+                    if root.is_some_and(|r| r >= target_slot) {
+                        // Flush all already-enqueued notifications before reconciliation;
+                        // a gap during drain must still leave StateCore HALTED.
+                        drain(st);
+                        eprintln!(
+                            "[recovery] attempt={}/{} root_catchup ok target={} root={} elapsed_ms={}",
+                            attempt, self.max_attempts, target_slot,
+                            st.root().unwrap_or(0), started.elapsed().as_millis()
+                        );
+                        break;
+                    }
+                    if let Some(reason) = reason {
+                        eprintln!(
+                            "[recovery] attempt={}/{} root_catchup timeout reason={} target={} current={:?} elapsed_ms={} stalled_ms={}",
+                            attempt, self.max_attempts, reason, target_slot, root,
+                            elapsed.as_millis(), elapsed.saturating_sub(progress.last_progress_elapsed).as_millis()
+                        );
+                        st.halt(HaltReason::ReconcileFailure);
+                        self.reconcile_failures += 1;
+                        continue 'attempts;
+                    }
+                    if self.root_progress_limits.is_some() && elapsed >= timeout && !extension_logged {
+                        extension_logged = true;
+                        eprintln!(
+                            "[recovery] attempt={}/{} root_catchup extending target={} current={:?} elapsed_ms={}",
+                            attempt, self.max_attempts, target_slot, root, elapsed.as_millis()
+                        );
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
@@ -336,12 +411,63 @@ mod tests {
         assert_eq!(drv.reconcile_failures, 2);
     }
     #[test]
+    fn adaptive_root_progress_extends_soft_budget_but_stalls_and_hard_caps() {
+        let soft = Duration::from_secs(120);
+        let limits = Some(RootProgressLimits {
+            stall: Duration::from_secs(60), hard: Duration::from_secs(300),
+        });
+        let mut w = RootProgressWatchdog::new(Some(455385463));
+        w.observe_root(Some(455385799), Duration::from_secs(119));
+        w.observe_root(Some(455385799), Duration::from_secs(151));
+        assert_eq!(w.last_progress_elapsed, Duration::from_secs(119));
+        assert_eq!(w.timeout_reason(Duration::from_secs(120), soft, limits), None);
+        assert_eq!(w.timeout_reason(Duration::from_secs(178), soft, limits), None);
+        assert_eq!(w.timeout_reason(Duration::from_secs(179), soft, limits), Some("stall"));
+        w.observe_root(Some(455385800), Duration::from_secs(178));
+        assert_eq!(w.timeout_reason(Duration::from_secs(179), soft, limits), None);
+        assert_eq!(w.timeout_reason(Duration::from_secs(300), soft, limits), Some("hard"));
+    }
+
+    #[test]
+    fn legacy_fixed_budget_and_adaptive_soft_boundary_are_fail_closed() {
+        let soft = Duration::from_secs(120);
+        let w = RootProgressWatchdog::new(None);
+        assert_eq!(w.timeout_reason(Duration::from_secs(119), soft, None), None);
+        assert_eq!(w.timeout_reason(Duration::from_secs(120), soft, None), Some("fixed"));
+        let limits = Some(RootProgressLimits {
+            stall: Duration::from_secs(60), hard: Duration::from_secs(300),
+        });
+        assert_eq!(w.timeout_reason(Duration::from_secs(119), soft, limits), None);
+        assert_eq!(w.timeout_reason(Duration::from_secs(120), soft, limits), Some("stall"));
+    }
+
+    #[test]
+    fn adaptive_recovery_requires_real_root_before_ready() {
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(1)
+            .with_root_catchup(Duration::from_secs(1))
+            .with_root_progress_limits(Duration::from_secs(1), Duration::from_secs(2));
+        let mut fetch = || Ok(SnapshotData {
+            slot: 10, accounts: vec![upd(pk, 10, 1)], missing_required: vec![],
+        });
+        let mut drain = |st: &mut StateCore| {
+            st.on_event(IngressEvent::Root {
+                slot: 10, source: SourceKind::WsRpcControl, t_rx_ns: 0,
+            });
+        };
+        assert_eq!(driver.recover(&mut state, &mut fetch, &mut drain), RecoveryOutcome::Ready);
+        assert!(state.run_state().is_tradable());
+    }
+
+    #[test]
     fn cancellation_during_root_catchup_never_confirms_ready_or_retries() {
         use std::cell::Cell;
         let stop=Cell::new(false);
         let pk=Pubkey::new_unique();
         let mut state=StateCore::new(10);
-        let mut driver=RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(30));
+        let mut driver=RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(30))
+            .with_root_progress_limits(Duration::from_secs(60), Duration::from_secs(300));
         let calls=Cell::new(0);
         let mut fetch=|| {calls.set(calls.get()+1); Ok(SnapshotData{slot:10,accounts:vec![upd(pk,10,1)],missing_required:vec![]})};
         let mut drains=0;

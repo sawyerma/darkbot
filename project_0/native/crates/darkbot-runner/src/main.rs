@@ -754,7 +754,23 @@ fn run_shadow(
     if !(30..=300).contains(&root_catchup_secs) {
         return Err("P0_RECOVERY_ROOT_CATCHUP_SECS must be 30..=300".into());
     }
-    let mut drv = RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(root_catchup_secs));
+    // Adaptive root-only stall extension. All limits are bounded and the hard
+    // deadline is independent of progress, with no impact on trading hot paths.
+    let root_stall_secs: u64 = config::parsed_or("P0_RECOVERY_ROOT_STALL_SECS", 60)?;
+    let root_hard_secs: u64 = config::parsed_or("P0_RECOVERY_ROOT_HARD_MAX_SECS", 300)?;
+    if !(5..=180).contains(&root_stall_secs)
+        || !(30..=900).contains(&root_hard_secs)
+        || root_hard_secs < root_catchup_secs
+    {
+        return Err("P0_RECOVERY_ROOT_STALL_SECS must be 5..=180 and P0_RECOVERY_ROOT_HARD_MAX_SECS must be 30..=900 and >= P0_RECOVERY_ROOT_CATCHUP_SECS".into());
+    }
+    eprintln!(
+        "recovery: root_soft_s={} root_stall_s={} root_hard_s={}",
+        root_catchup_secs, root_stall_secs, root_hard_secs
+    );
+    let mut drv = RecoveryDriver::new(3)
+        .with_root_catchup(Duration::from_secs(root_catchup_secs))
+        .with_root_progress_limits(Duration::from_secs(root_stall_secs), Duration::from_secs(root_hard_secs));
     let dep_shared = std::sync::Arc::new(std::sync::Mutex::new(required_dependency_keys.clone()));
     let opt_shared = std::sync::Arc::new(std::sync::Mutex::new(optional_dependency_keys.clone()));
     let dep_for_fetch = dep_shared.clone();

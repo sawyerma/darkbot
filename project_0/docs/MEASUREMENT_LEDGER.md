@@ -1,5 +1,16 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
+## ADAPTIVE ROOT RECOVERY CANDIDATE — 2026-10-10 (LOCAL PATCH / UNQUALIFIED UNTIL TESTED)
+
+- Source base: `f9a877c805272de410a5f8f313cdd7521fdfea9d`, WIP branch `project0/c0e1-startup-wip-20261010`; BSC/main untouched by intended patch.
+- User-tested controlled market WSS disconnect smoke `c0e1_gap_smoke_20261010T195016Z`: technical PASS, MARKET_DATA_VALID, 72,816 Shadow evaluations, all 273 slots reconciled, gaps 1/1 recovered, 0 unresolved, 4 reports, 0 submissions; event-order check PASS.
+- User-tested normal smoke `econ4h_20261010T204530Z`: final `completeness=PASS`, shell exit0 (detailed field-by-field output not yet independently inspected here). Earlier normal runs INCOMPLETE on 30s RPC response decode then 120s root catch-up soft timeout; `P0_SNAPSHOT_RPC_TIMEOUT_SECS=90` eliminated initial snapshot transport failures in the last inspected attempt.
+- Proposed root-only adaptive policy: soft root wait120s, stall60s measured only from strictly higher finalized root notifications, absolute hard cap300s per attempt; 600s Shadow warmup absolute cap. Legacy fixed-timeout calls preserved. A root crossing its B target permits immediate final drain + existing exact reconcile. No overrides for gaps, missing accounts, dirty reconcile, explicit cancellation, ProgramData upgrades, submissions, or LIVE.
+- Added deterministic watchdog regressions cover moving-root extension, stall, hard cap, fixed-timeout legacy behavior, and immediate readiness on completed root. Existing cancellation regression exercises adaptive limits. Full Rust matrix, release build and real 60s Mainnet run are **NOT YET PERFORMED ON THIS PATCH**.
+- **Gate:** cargo test (both runner feature modes + solana state), cargo release build, `git diff --check`, then user-directed normal 60s Mainnet smoke, then separate Shadow WSS disconnect/ready smoke. Only then consider 4h. No profitability or long-run claim.
+
+---
+
 ## CURRENT HANDOFF — 2026-10-10 19:57 Europe/Berlin — C0-E1 startup + controlled-gap smoke IN PROGRESS
 
 **Evidence cutoff:** latest user-supplied terminal excerpt from run `c0e1_gap_smoke_20261010T195016Z`. This is a checkpoint, NOT a final run verdict. Historical entries below remain as-recorded and must not be read as current state. **No C0-E1 end-to-end PASS, no economics qualification, no 4h stability/profit claim, LIVE=false, submission=false.**

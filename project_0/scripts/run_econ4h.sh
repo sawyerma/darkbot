@@ -125,6 +125,11 @@ esac
 # Allow provider WSS backlog to reach the unchanged finalized-root barrier.
 # The 2026-10-10 smoke exceeded the old 30s wait; this never skips reconciliation.
 export P0_RECOVERY_ROOT_CATCHUP_SECS="${P0_RECOVERY_ROOT_CATCHUP_SECS:-120}"
+# Soft deadline 120s, real finalized-root stall 60s, absolute phase cap 300s.
+# Startup wait includes snapshot A+B and may be longer than the 60s measurement.
+export P0_RECOVERY_ROOT_STALL_SECS="${P0_RECOVERY_ROOT_STALL_SECS:-60}"
+export P0_RECOVERY_ROOT_HARD_MAX_SECS="${P0_RECOVERY_ROOT_HARD_MAX_SECS:-300}"
+export P0_MARKET_READY_TIMEOUT_SECS="${P0_MARKET_READY_TIMEOUT_SECS:-600}"
 export P0_MODE=econ4h
 export P0_LIVE_ENABLED=false
 export P0_SUBMISSION_ENABLED=false
