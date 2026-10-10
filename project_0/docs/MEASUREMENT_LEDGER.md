@@ -1,5 +1,100 @@
 # Solana / Project 0 — Measurement & Evidence Ledger
 
+## HANDOFF — 2026-10-10, stopped per user testing/credit priority
+
+**Implemented and locally tested; NOT end-to-end qualified; no4h stability claim.**
+Latest local base2c03b03. Corrections remain saved directly underproject_0; no new
+commit/push because full runtime qualification remains incomplete. BSC untouched.
+LIVE/submission disabled. No tests remain running from this task.
+
+- Final workspace builds+release: exit0. Tests:302 health /304 txv1 PASS,
+  0FAIL,1ignored each. Proxy2 testsPASS. Extra Shadow error-category testPASS.
+- Differential Clippy vsb7f5ed3:0 new warnings in both configurations after
+  removing one unnecessary unwrap in the test proxy; proxy tests rerunPASS.
+- Edited-file formatting/shell syntax/diff checksPASS. Global cargo fmt remains
+  baseline-dirty: all39 files in the user's reported format diffs also differ
+  atb7f5ed3. No broad unrelated reformat.
+- Direct upstream HTTP/WSS and short proxy ACK/slot/disconnect/reconnectPASS.
+-600s runT191151Z: ABORTED_BY_USER,exit143; preserved evidence.
+-60s runT191322Z: actual market capture reachedDRAINED, but Shadow still in
+  startup recovery (SnapshotB/root catch-up,attempt3) with zero evaluations at
+  the inspected fourth snapshot. Stopped prolonged wait under the user's credit
+  priority,exit143. **INCOMPLETE**, no finalized full-slot or economic verdict.
+  See `smoke_60s_incomplete.json` and `smoke_60s_recovery_excerpt.log`.
+
+Remaining work is runtime diagnosis/qualification, not a claimed PASS:
+1. Inspect the preserved60s recovery excerpt and actual runtime log: why the
+   streamed root lags SnapshotB; determine provider/backlog versus local recovery
+   failure before another combined run. Do not guess a network/TLS root cause.
+2. Complete a controlled short combined smoke with real Shadow processing,
+   finalized full-slot reconciliation,0unresolved slots/gaps,0drops and four
+   reconciled reports. Current60s test starts Market capture before Shadow's
+   potentially longer bootstrap; a60s capture alone cannot prove4h stability.
+3. Only user starts4h after technical qualification. No additional600s run by
+   the agent. No financial zero/known-profit claims from failed or empty runs.
+
+Exact commands if the user resumes tests (already-green matrix need not repeat):
+```bash
+cd "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot"
+# Optional isolated endpoint/proxy verification; no full bot:
+P0_GAP_PROBE_ONLY=true P0_GAP_INTERRUPT_AFTER_SECS=2 bash project_0/scripts/run_gap_reconnect_smoke.sh
+# AFTER recovery diagnosis; current defaults60s capture,4x15s snapshots,15s drain:
+bash project_0/scripts/run_gap_reconnect_smoke.sh
+```
+Block reconstruction adds wall time after capture. A stopped run is not PASS.
+Exact build/test argv+exit codes, first failed/outdated assertion and its correction,
+Clippy differentials, source hashes and diagnosis are saved in
+`docs/evidence/C0E1_TRANSPORT_FINISH_20261010/`. The full Rust matrix predates only
+an equivalent unwrap removal in the test proxy; its2 tests and both Clippy runs
+were repeated after that edit. The smoke manifest identifies its actual binary.
+
+
+## USER PRIORITY UPDATE — 2026-10-10
+
+User explicitly stopped600s testing to conserve credits. Run
+`c0e1_gap_smoke_20261010T191151Z` terminated with SIGTERM,exit143;
+`user_requested_stop.json` preserves ABORTED_BY_USER. No PASS claim.
+The existing reconnect smoke now defaults to60s capture, four15s snapshots and
+15s Shadow drain. Finalized block reconciliation adds wall time after capture.
+This short smoke is not four-hour stability proof. No more600s tests by this agent.
+
+## ACTIVE — 2026-10-10 transport finish, implementation first
+
+User checkpoint is now `2c03b03ad166b0c92589da295c3ff5284a51e2db`.
+No pull/reset/merge/clean. BSC untouched. LIVE/submission remain disabled.
+The user owns the future 4h run. Prioritize code, targeted checks, then additional
+qualification only within available budget; never promote unexecuted checks.
+
+New evidence: `docs/evidence/C0E1_TRANSPORT_FINISH_20261010/`.
+- Prior phase-barrier smoke `c0e1_gap_smoke_20261010T125859Z`: actual600s,
+  Shadow RPC quiescence at782.353s,216/2767 fetched,226991 TX,2551 unresolved,
+  RPC_TIMEOUT + failed subsequent deployment RPC; **INCOMPLETE**.873696 evaluations
+  received=streamed,4 snapshots,0 analytics drops. The429-only hypothesis was not
+  a complete diagnosis; network/provider availability remains a separate risk.
+- User run `...T131358Z`: no valid capture; direct local proxy connection was
+  insufficient proof of upstream readiness. Historical IO cause remains UNKNOWN.
+  DEPLOYMENT_RPC is a separate HTTP failure; SHADOW_RPC_BARRIER_FAILED is a
+  consequence of Shadow exiting early, not proof of a barrier deadlock.
+- Current direct HTTP200/finalized slot and direct WSS2ACKs+slot verified. Short
+  proxy probe PASS: upstream preflight, both ACKs,real slot,controlled disconnect,
+  reconnect,post-slot455365112. No change to production ingress.
+- Code: proxy readiness now requires upstream2ACKs+slot; safe IO kind/OS-code
+  diagnostics, bounded20s probe/connect; optional short probe mode in existing
+  smoke script. Retry of a failed prefetched block now fetches only that block,
+  never expands the batch under provider pressure; all reconciliation RPC starts
+  paced; transient failures use bounded exponential backoff,5 total attempts.
+  Deployment checks retry at most3 times and retain safe error categories.
+- Targeted regression initially found an outdated assertion expecting250ms for
+  timeout backoff; updated to the new2s policy. Original failed result preserved.
+
+**Code corrections implemented; MASTER runtime qualification remains PARTIAL.**
+Final full matrix: builds/releasePASS,302 health /304 txv1 testsPASS,0FAIL,
+1ignored each; Clippy differential recorded separately. Proxy2 testsPASS and
+error-redaction regressionPASS. No new4h run. No new commit/push yet.
+The later user instruction supersedes600s: finish the single60s smoke, record its
+actual result, then hand off. Do not launch more long tests.
+
+
 ## LATEST QUALIFICATION — 2026-10-10, rate-limit correction pending smoke
 
 **MASTER PARTIAL; do not start 4h yet.** User explicitly owns the future 4h run.

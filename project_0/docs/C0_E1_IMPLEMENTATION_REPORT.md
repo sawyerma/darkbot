@@ -2,6 +2,51 @@
 
 # C0-E1 Implementation Report
 
+## Transport completion — 2026-10-10 (current local candidate)
+
+This section supersedes older package-only status for the current working tree.
+Base checkpoint: `2c03b03ad166b0c92589da295c3ff5284a51e2db` (user-pushed).
+Evidence: `docs/evidence/C0E1_TRANSPORT_FINISH_20261010/`.
+
+Confirmed defects repaired:
+- Test proxy had advertised a local listener before proving upstream availability.
+  Readiness now requires the exact endpoint's successful WebSocket handshake,
+  both market subscription ACKs and a real slot. A failed preflight exits2 without
+  a readiness file; the launcher never starts the expensive combined measurement.
+- Proxy diagnostics now include safe IO kind/OS code and HTTP status, never the
+  library's URL-bearing error text. Existing tool supports a short direct probe
+  and controlled proxy disconnect/reconnect probe; it stays outside normal ingress.
+- A retry of a prefetched failed block could extend the read-ahead batch. Retries
+  now request only that slot, without more speculative traffic. All reconciliation
+  request starts use the same5/s pacer;5 bounded attempts, exponential transient
+  backoff1/2/4/8 seconds, total phase deadline unchanged.
+- Deployment HTTP failures formerly collapsed to DEPLOYMENT_RPC. Three bounded
+  attempts retain safe timeout/connect/rate-limit/decode categories. An unknown
+  hash or incomplete deployment evidence still prevents qualification.
+- The combined owner formerly discarded Shadow's returned failure. It now logs
+  a typed, secret-free failure category before setting the existing failed flag.
+
+No trading, health, sizing, sign/submit, candidate choice, market identity, or
+financial valuation semantics changed in this follow-up. The existing final
+join continues consuming production cost evidence; missing terms remain null.
+
+Historical diagnosis limitations: the IO-only log from T131358Z does not prove a
+specific endpoint/TLS/provider root cause. Its independent deployment HTTP failure
+also lost detail; Shadow's original returned error was not retained. The barrier
+failure follows Shadow's early exit, and is not evidence of a barrier deadlock.
+Current direct HTTP and WSS checks, then the short proxy reconnect, passed.
+
+The supplied terminal transcript reports300/302 workspace tests PASS,0FAIL,
+1ignored each. It does not capture independent shell exit codes for every command.
+All39 files reported by its global fmt check already differ from rustfmt at the
+pinned b7f5ed3 baseline. No broad formatting cleanup was performed. Edited modules
+are checked separately; whole-workspace fmt must not be called PASS.
+
+Qualification status remains PARTIAL until the current combined600s smoke and
+final matrix are complete. No4h measurement is started by the agent. Commands,
+exits and initial failed regression assertion are preserved, not overwritten.
+
+
 ## Before any source changes
 
 Read and confirmed package SOURCE_COMMIT.txt: **57bef334e60764f614712785438a95edb7638352**.
@@ -1322,3 +1367,12 @@ root catchup exhausted the original 30s wait and stayed HALTED. The configurable
 Eight bounded post-drain block reads replace serial loading; ordering, retries,
 full-TX validation and fail-closed slot accounting are unchanged. Final qualification
 and the 600s combined smoke must still complete. The user explicitly owns the 4h run.
+
+
+Final user-directed handoff2026-10-10: no more600s agent testing. Implemented
+transport corrections and local302/304-test matrix are green; differentialClippy
+0/0. Short upstream/proxy probePASS.60s combined smoke remainedINCOMPLETE because
+Shadow bootstrap/root catch-up had not produced evaluations; prolonged waiting
+was stopped to preserve credits. All evidence retained, no new commit/push,
+no4h launch. MEASUREMENT_LEDGER.md contains the exact remaining diagnosis and
+resume commands. Code completion is not an end-to-end profitability/stabilityPASS.

@@ -36,7 +36,28 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|_| "DEPLOYMENT_CLIENT")?;
-    let response:Value=client.post(url).json(&json!({"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":[address.to_string(),{"encoding":"base64","commitment":"finalized"}]})).send().and_then(|r|r.error_for_status()).and_then(|r|r.json()).map_err(|_|"DEPLOYMENT_RPC")?;
+    let mut response = Err("DEPLOYMENT_RPC");
+    for attempt in 0..3 {
+        response = client.post(url).json(&json!({"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":[address.to_string(),{"encoding":"base64","commitment":"finalized"}]}))
+            .send().and_then(|r|r.error_for_status()).and_then(|r|r.json::<Value>())
+            .map_err(|e| {
+                if e.status().is_some_and(|s|s.as_u16()==429) { "DEPLOYMENT_RPC_RATE_LIMIT" }
+                else if e.is_timeout() { "DEPLOYMENT_RPC_TIMEOUT" }
+                else if e.is_connect() { "DEPLOYMENT_RPC_CONNECT" }
+                else if e.is_decode() { "DEPLOYMENT_RPC_JSON" }
+                else { "DEPLOYMENT_RPC_HTTP_OR_TRANSPORT" }
+            });
+        if response.is_ok() {
+            break;
+        }
+        if attempt < 2 {
+            std::thread::sleep(Duration::from_secs(1 << attempt));
+        }
+    }
+    let response = response?;
+    if response.get("error").is_some() {
+        return Err("DEPLOYMENT_RPC_REMOTE_ERROR");
+    }
     let v = &response["result"]["value"];
     if v["owner"] != LOADER || v["executable"] != false {
         return Err("DEPLOYMENT_ACCOUNT_OWNER");

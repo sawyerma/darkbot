@@ -20,7 +20,7 @@ impl Default for ReconcileConfig {
         Self {
             max_slots: 100_000,
             max_transactions: 200_000_000,
-            max_attempts: 3,
+            max_attempts: 5,
             timeout_ms: 10_000,
             retry_ms: 250,
             phase_max_secs: 14_400,
@@ -474,11 +474,13 @@ impl ObserverCore {
         let pacer = RequestPacer::new(cfg.requests_per_second);
         let mut produced = Vec::new();
         let mut cache = BTreeMap::new();
+        let mut previous_request = None;
         self.reconcile_slots(
             &mut |method, params, remaining| {
                 let rpc = rpc.as_ref().map_err(|e| *e)?;
                 let deadline = Instant::now() + remaining;
                 if method == "getBlocks" {
+                    pacer.wait(deadline)?;
                     let result = rpc.gap_request(method, params, deadline, cfg.timeout_ms)?;
                     produced = result
                         .as_array()
@@ -488,18 +490,13 @@ impl ObserverCore {
                 }
                 if method == "getBlock" {
                     let slot = params[0].as_u64().ok_or("BLOCK_SLOT_INVALID")?;
-                    if let Some(value) = cache.remove(&slot) {
-                        return value;
-                    }
-                    if let Some(index) = produced.iter().position(|s| *s == slot) {
-                        let group: Vec<_> = produced[index..]
-                            .iter()
-                            .take(8)
-                            .copied()
-                            .filter(|s| !cache.contains_key(s))
-                            .collect();
-                        let options = params[1].clone();
-                        let loaded = prefetch_blocks(&group, &|s| {
+                    let options = params[1].clone();
+                    return read_ahead_block(
+                        slot,
+                        &produced,
+                        &mut cache,
+                        &mut previous_request,
+                        &|s| {
                             pacer.wait(deadline)?;
                             rpc.gap_request(
                                 "getBlock",
@@ -507,15 +504,48 @@ impl ObserverCore {
                                 deadline,
                                 cfg.timeout_ms,
                             )
-                        });
-                        cache.extend(loaded);
-                        return cache.remove(&slot).unwrap_or(Err("PREFETCH_SLOT_MISSING"));
-                    }
+                        },
+                    );
                 }
+                pacer.wait(deadline)?;
                 rpc.gap_request(method, params, deadline, cfg.timeout_ms)
             },
             sink,
         )
+    }
+}
+
+/// A retry must fetch only the failed slot. Expanding read-ahead during backoff
+/// adds unrelated RPC load precisely while the provider is rejecting requests.
+fn read_ahead_block<F>(
+    slot: u64,
+    produced: &[u64],
+    cache: &mut BTreeMap<u64, Result<Value, &'static str>>,
+    previous_request: &mut Option<u64>,
+    fetch: &F,
+) -> Result<Value, &'static str>
+where
+    F: Fn(u64) -> Result<Value, &'static str> + Sync,
+{
+    let retry = *previous_request == Some(slot);
+    *previous_request = Some(slot);
+    if retry {
+        return fetch(slot);
+    }
+    if let Some(value) = cache.remove(&slot) {
+        return value;
+    }
+    if let Some(index) = produced.iter().position(|s| *s == slot) {
+        let group: Vec<_> = produced[index..]
+            .iter()
+            .take(8)
+            .copied()
+            .filter(|s| !cache.contains_key(s))
+            .collect();
+        cache.extend(prefetch_blocks(&group, fetch));
+        cache.remove(&slot).unwrap_or(Err("PREFETCH_SLOT_MISSING"))
+    } else {
+        fetch(slot)
     }
 }
 
@@ -558,7 +588,10 @@ mod prefetch_tests {
 }
 
 fn retry_delay(error: Option<&str>, attempt: u32, base_ms: u64) -> Duration {
-    if error == Some("RPC_RATE_LIMIT") {
+    if matches!(
+        error,
+        Some("RPC_RATE_LIMIT" | "RPC_TIMEOUT" | "RPC_TRANSPORT" | "RPC_READ")
+    ) {
         Duration::from_millis(
             base_ms
                 .max(1000)
@@ -605,6 +638,37 @@ impl RequestPacer {
 mod pacing_tests {
     use super::*;
     #[test]
+    fn failed_prefetched_slot_retries_alone_without_extending_batch() {
+        let calls = std::sync::Mutex::new(Vec::new());
+        let produced: Vec<_> = (0..16).collect();
+        let mut cache = BTreeMap::new();
+        let mut previous = None;
+        let fetch = |slot| {
+            calls.lock().unwrap().push(slot);
+            if slot == 3 {
+                Err("RPC_RATE_LIMIT")
+            } else {
+                Ok(json!(slot))
+            }
+        };
+        for slot in 0..3 {
+            assert!(read_ahead_block(slot, &produced, &mut cache, &mut previous, &fetch).is_ok());
+        }
+        assert_eq!(
+            read_ahead_block(3, &produced, &mut cache, &mut previous, &fetch),
+            Err("RPC_RATE_LIMIT")
+        );
+        assert_eq!(calls.lock().unwrap().len(), 8);
+        assert_eq!(
+            read_ahead_block(3, &produced, &mut cache, &mut previous, &fetch),
+            Err("RPC_RATE_LIMIT")
+        );
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 9);
+        assert_eq!(calls[8], 3);
+        assert_eq!(cache.len(), 4);
+    }
+    #[test]
     fn concurrent_reservations_are_spaced_and_deadline_is_hard() {
         let p = RequestPacer::new(5);
         let now = Instant::now();
@@ -615,7 +679,7 @@ mod pacing_tests {
         assert_eq!(p.reserve(now, end), Err("RECONCILIATION_DEADLINE"));
     }
     #[test]
-    fn rate_limit_backoff_is_bounded_and_distinct_from_transport_retry() {
+    fn transient_rpc_backoff_is_bounded() {
         assert_eq!(
             retry_delay(Some("RPC_RATE_LIMIT"), 0, 250),
             Duration::from_secs(1)
@@ -630,7 +694,7 @@ mod pacing_tests {
         );
         assert_eq!(
             retry_delay(Some("RPC_TIMEOUT"), 1, 250),
-            Duration::from_millis(250)
+            Duration::from_secs(2)
         );
     }
 }

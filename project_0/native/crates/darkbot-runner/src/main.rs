@@ -3685,6 +3685,31 @@ fn run_shadow(
     Ok(())
 }
 
+// Keep the first Shadow failure diagnosable without exposing provider URLs,
+// response payloads or wallet paths from library Display implementations.
+fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'static str {
+    use solana_client::client_error::{ClientError, ClientErrorKind};
+    if let Some(e) = error.downcast_ref::<ClientError>() {
+        return match e.kind() {
+            ClientErrorKind::Reqwest(e) if e.is_timeout() => "RPC_TIMEOUT",
+            ClientErrorKind::Reqwest(e) if e.is_connect() => "RPC_CONNECT",
+            ClientErrorKind::Reqwest(e) if e.status().is_some_and(|s| s.as_u16() == 429) => {
+                "RPC_RATE_LIMIT"
+            }
+            ClientErrorKind::Reqwest(_) => "RPC_HTTP_OR_TRANSPORT",
+            ClientErrorKind::Io(_) => "RPC_IO",
+            ClientErrorKind::RpcError(_) => "RPC_RESPONSE_ERROR",
+            ClientErrorKind::SerdeJson(_) => "RPC_DECODE",
+            _ => "RPC_OTHER",
+        };
+    }
+    if error.is::<std::io::Error>() {
+        "LOCAL_IO"
+    } else {
+        "SHADOW_RUNTIME_ERROR"
+    }
+}
+
 fn run_econ4h() -> Result<(), String> {
     use darkbot_runner::{econ, market_observer};
     use std::sync::atomic::Ordering;
@@ -3711,7 +3736,11 @@ fn run_econ4h() -> Result<(), String> {
     let shadow = std::thread::Builder::new()
         .name("econ-shadow-owner".into())
         .spawn(move || {
-            let result = run_shadow(clock, Some(shadow_handle.clone())).map_err(|e| e.to_string());
+            let result = run_shadow(clock, Some(shadow_handle.clone())).map_err(|e| {
+                let code = shadow_failure_code(e.as_ref());
+                eprintln!("C0_E1_SHADOW_FAILED category={code}");
+                code.to_string()
+            });
             if result.is_err() || !shadow_handle.admission_closed() {
                 shadow_handle
                     .shared
@@ -3770,6 +3799,20 @@ fn run_econ4h() -> Result<(), String> {
 #[cfg(all(test, feature = "crate_health"))]
 mod integration_probe_tests {
     use super::*;
+
+    #[test]
+    fn shadow_error_category_never_formats_secret_payload() {
+        let e = solana_client::client_error::ClientError::from(
+            solana_client::client_error::ClientErrorKind::Custom(
+                "https://host/?api-key=SECRET".into(),
+            ),
+        );
+        assert_eq!(shadow_failure_code(&e), "RPC_OTHER");
+        assert_eq!(
+            shadow_failure_code(&std::io::Error::other("SECRET")),
+            "LOCAL_IO"
+        );
+    }
 
     #[test]
     fn target_waits_unsigned_until_worker_is_idle() {

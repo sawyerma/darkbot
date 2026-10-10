@@ -4913,3 +4913,27 @@ MEASUREMENT_LEDGER.md. Final controlled smoke: 600s, actual transport interrupti
 full finalized reconciliation. No MASTER PASS until the final matrix and combined
 smoke pass. The user will start the four-hour observation; do not launch it automatically.
 LIVE/submission remain disabled.
+
+
+### C0-E1 transport qualification checkpoint — 2026-10-10
+
+Current follow-up uses checkpoint2c03b03. Implementation first, then targeted
+checks and remaining qualification within the user's credit priority. Proxy
+readiness is upstream ACK+slot proven; isolated short reconnect test PASS.
+Full-slot retry now isolates the failing block, retaining pacing, bounded retry
+and fail-closed completeness. Economics remains the production-cost-based
+canonical join. No new trading features or hotpath RPC dependencies.
+
+Authoritative current verdict and exact commands are in MEASUREMENT_LEDGER.md
+and docs/evidence/C0E1_TRANSPORT_FINISH_20261010/. A short probe or green Rust
+suite alone does not qualify4h. User exclusively starts the4h run after combined
+600s completeness/clean-shutdown/report checks pass. LIVE/submission stay blocked.
+
+
+Final user-directed handoff2026-10-10: no more600s agent testing. Implemented
+transport corrections and local302/304-test matrix are green; differentialClippy
+0/0. Short upstream/proxy probePASS.60s combined smoke remainedINCOMPLETE because
+Shadow bootstrap/root catch-up had not produced evaluations; prolonged waiting
+was stopped to preserve credits. All evidence retained, no new commit/push,
+no4h launch. MEASUREMENT_LEDGER.md contains the exact remaining diagnosis and
+resume commands. Code completion is not an end-to-end profitability/stabilityPASS.

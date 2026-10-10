@@ -21,8 +21,9 @@ case "${P0_LIVE_ENABLED:-false}:${P0_SUBMISSION_ENABLED:-false}" in
 esac
 export P0_LIVE_ENABLED=false P0_SUBMISSION_ENABLED=false
 export P0_MARKET_SOURCE=logs
-export P0_ECON_DURATION_SECS="${P0_ECON_DURATION_SECS:-600}"
-export P0_ECON_SNAPSHOT_SECS="${P0_ECON_SNAPSHOT_SECS:-150}"
+export P0_ECON_DURATION_SECS="${P0_ECON_DURATION_SECS:-60}"
+export P0_ECON_SNAPSHOT_SECS="${P0_ECON_SNAPSHOT_SECS:-$((P0_ECON_DURATION_SECS / 4))}"
+export P0_ECON_DRAIN_SECS="${P0_ECON_DRAIN_SECS:-15}"
 export P0_ECON_RUN_ID="${P0_ECON_RUN_ID:-c0e1_gap_smoke_$(date -u +%Y%m%dT%H%M%SZ)}"
 export P0_ECON_OUT_DIR="${P0_ECON_OUT_DIR:-$ROOT/project_0/data/econ4h}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/p0-gap-proxy.XXXXXX")"
@@ -36,13 +37,21 @@ cd "$ROOT"
 cargo build --locked --manifest-path project_0/native/Cargo.toml -p darkbot-solana --example p0-gap-ws-proxy > "$scratch/build.log" 2>&1
 "${CARGO_TARGET_DIR:-$ROOT/project_0/native/target}/debug/examples/p0-gap-ws-proxy" > "$scratch/proxy.stdout" 2> "$scratch/proxy.log" &
 proxy_pid=$!
-for _ in {1..100}; do
+for _ in {1..300}; do
   [[ -s "$P0_GAP_PROXY_READY_FILE" ]] && break
   kill -0 "$proxy_pid" 2>/dev/null || { echo "proxy failed; logs: $scratch"; exit 2; }
   sleep 0.1
 done
 [[ -s "$P0_GAP_PROXY_READY_FILE" ]] || { echo 'proxy readiness timeout'; exit 2; }
 export P0_MARKET_WS_URL="$(< "$P0_GAP_PROXY_READY_FILE")"
+if [[ "${P0_GAP_PROBE_ONLY:-false}" == true ]]; then
+  P0_GAP_UPSTREAM_WS_URL="$P0_MARKET_WS_URL" \
+    "${CARGO_TARGET_DIR:-$ROOT/project_0/native/target}/debug/examples/p0-gap-ws-proxy" --probe-proxy \
+    > "$scratch/probe.stdout" 2> "$scratch/probe.log"
+  cat "$scratch/probe.log"
+  echo "Short proxy qualification evidence: $scratch"
+  exit 0
+fi
 # Environment was already sourced; preserve the proxy override in the inner launcher.
 status=0
 P0_ENV_FILE="$scratch/not-present.env" bash project_0/scripts/run_econ4h.sh || status=$?
