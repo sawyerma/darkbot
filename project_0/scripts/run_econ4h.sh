@@ -179,7 +179,7 @@ mkdir -p "$(dirname "$P0_RECORD_PATH")" "$(dirname "$P0_SUMMARY_PATH")"
 cd "$REPO_ROOT"
 echo "C0-E1: build, then $P0_ECON_DURATION_SECS seconds; four automatic snapshots; submission disabled"
 cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
-  --features "crate_health txv1" --bin p0-longtail > "$RUN_DIR/build.log" 2>&1 || {
+  --features "crate_health txv1" --bin p0-longtail 2>&1 | tee "$RUN_DIR/build.log" || {
   echo "Build failed: $RUN_DIR/build.log" >&2; exit 2;
 }
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
@@ -203,7 +203,8 @@ with (run / 'candidate_manifest.json').open('x') as f:
     f.write('\n')
 MANIFEST
 status=0
-"$BIN" > "$RUN_DIR/console_summary.txt" 2> "$RUN_DIR/runtime.log" || status=$?
+# Show the Rust market/shadow status immediately; still retain the exact stderr ledger.
+"$BIN" > "$RUN_DIR/console_summary.txt" 2> >(tee "$RUN_DIR/runtime.log" >&2) || status=$?
 cat "$RUN_DIR/console_summary.txt"
 echo "Reports and detailed logs: $RUN_DIR"
 exit "$status"

@@ -61,6 +61,8 @@ pub use reconcile::ReconcileConfig;
 mod paths;
 #[path = "market_truth.rs"]
 pub mod truth;
+#[path = "market_live.rs"]
+mod live;
 
 /// `sha256("event:LiquidationReceiverEvent")[..8]` (verified against the six audit fixtures).
 pub const LIQUIDATION_RECEIVER_EVENT_DISCRIMINATOR: [u8; 8] = [40, 131, 224, 220, 151, 83, 24, 230];
@@ -1598,6 +1600,14 @@ impl ObserverCore {
             return Ok(());
         }
         self.aggregate(&l.signature, l.slot, Some(l.t_rx_ns), None, &decoded.events);
+        // The accounting ledger remains deferred for exact post-capture enrichment.
+        // The operator must still see every successfully decoded live liquidation NOW.
+        for ev in &decoded.events {
+            eprintln!(
+                "[MARKET/RECEIVERSHIP] provisional=true slot={} signature={} event={} target={} receiver={} gross_usd={:.6}",
+                l.slot, l.signature, ev.event_index, ev.target, ev.receiver, ev.gross_edge_usd()
+            );
+        }
         self.stats.enrichment_requested += 1;
         if self.deferred.len() >= self.enrich_cfg.max_pending {
             self.stats.enrichment_failed += 1;
@@ -2381,6 +2391,10 @@ pub fn run_embedded(
     core.econ = econ.clone();
     core.gap_cfg = cfg.gap;
     core.reconcile_cfg = cfg.reconcile;
+    // Read-only bounded worker: uses the SAME canonical full-slot classifier, never
+    // substitutes live hints for the authoritative final reconciliation.
+    let mut live_scan = live::LiveScan::start(&cfg)?;
+    let mut last_live_display = Instant::now() - Duration::from_secs(5);
     let mut checkpoint_index = 0usize;
     core.coverage(&mut sink, "START", process_started, None, json!({
         "source": cfg.source.as_str(), "commitment": cfg.commitment, "program": cfg.program.to_string(),
@@ -2478,6 +2492,30 @@ pub fn run_embedded(
             stop_reason = "WRITE_ERROR";
             break;
         }
+        if window.is_some() {
+            live_scan.observe_slots(
+                core.reconciliation.market_slot_start.as_ref().map(|v| v.slot),
+                core.reconciliation.market_slot_end.as_ref().map(|v| v.slot),
+            );
+        }
+        if last_live_display.elapsed() >= Duration::from_secs(2) {
+            last_live_display = Instant::now();
+            let s = live_scan.snapshot();
+            let gross: f64 = core.edges.iter().sum();
+            eprintln!(
+                "[MARKET/LIVE] phase={} tx={} success={} receiver_events={} receiver_gross_usd={:.6} gaps={} decoder_errors={} finalized_events={} classic={} receivership={} deleverage={} bankruptcy={} finalized_gross_usd_known={} finalized_gross_usd={:.6} scanned_through={} target_slot={} scan_errors={} scanner_status={}",
+                if window.is_some() { "CAPTURE" } else { "WAITING_FOR_MARKET_STREAM" },
+                core.stats.unique_transactions,
+                core.stats.successful_transactions,
+                core.stats.liquidation_events,
+                gross,
+                core.stats.gap_count,
+                core.stats.decoder_error_count,
+                s.events, s.classic, s.receivership, s.deleverage, s.bankruptcy,
+                s.known_gross_events, s.gross_usd,
+                s.scanned_through, s.target_slot, s.errors, s.status
+            );
+        }
         let overflow = consumer.stats().overflow;
         if overflow > last_overflow {
             last_overflow = overflow;
@@ -2552,6 +2590,9 @@ pub fn run_embedded(
         }
     }
     core.stop_observation();
+    // Stop the auxiliary scanner before the authoritative full-window scan.
+    // No competing getBlock RPC traffic during final reconciliation.
+    live_scan.stop();
     let _ = core.coverage(
         &mut sink,
         "DRAINED",

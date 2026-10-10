@@ -3813,7 +3813,19 @@ fn run_econ4h() -> Result<(), String> {
         })
         .map_err(|e| e.to_string())?;
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout);
+    let mut shadow_status_at = std::time::Instant::now() - Duration::from_secs(10);
     while !shadow.is_finished() || !observer.is_finished() {
+        if shadow_status_at.elapsed() >= Duration::from_secs(10) {
+            shadow_status_at = std::time::Instant::now();
+            eprintln!(
+                "[SHADOW/STATUS] ready={} done={} failed={} market_done={} market_failed={} live=false submission=false",
+                handle.shared.shadow_ready.load(Ordering::Acquire),
+                handle.shared.shadow_done.load(Ordering::Acquire),
+                handle.shared.shadow_failed.load(Ordering::Acquire),
+                handle.shared.market_done.load(Ordering::Acquire),
+                handle.shared.market_failed.load(Ordering::Acquire)
+            );
+        }
         if analytics.is_finished() || std::time::Instant::now() >= deadline {
             handle.shared.abort.store(true, Ordering::Release);
             handle.shared.shadow_failed.store(true, Ordering::Release);
