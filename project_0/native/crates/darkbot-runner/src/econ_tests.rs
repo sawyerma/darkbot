@@ -725,6 +725,7 @@ fn runtime_worker_writes_four_snapshots_then_identical_final() {
     let mut w = worker();
     complete(&mut w);
     w.snapshots = 0;
+    w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
     let h = w.h.clone();
     let dir = h.cfg.run_dir.clone();
     let join = std::thread::spawn(move || w.run());

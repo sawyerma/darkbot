@@ -136,7 +136,7 @@ mod compressed_snapshot_tests {
         let ui = encode_ui_account(&key, &account, UiAccountEncoding::Base64Zstd, None, None);
         let plain = encode_ui_account(&key, &account, UiAccountEncoding::Base64, None, None);
         let reply = serde_json::json!({"context":{"slot":123},"value":[{"pubkey":key.to_string(),"account":ui}]});
-        let rpc = RpcClient::new_mock_with_mocks("succeeds".into(), HashMap::from([(RpcRequest::GetProgramAccounts,reply)]));
+        let rpc = RpcClient::new_mock_with_mocks("succeeds", HashMap::from([(RpcRequest::GetProgramAccounts,reply)]));
         let snapshot = program_accounts_filtered(&rpc, &Pubkey::new_unique(),vec![],&Clock::new()).unwrap();
         assert_eq!(snapshot.slot,123);
         assert_eq!(snapshot.accounts.len(),1);
@@ -154,7 +154,7 @@ mod compressed_snapshot_tests {
         let mut ui=serde_json::to_value(encode_ui_account(&key,&account,UiAccountEncoding::Base64Zstd,None,None)).unwrap();
         ui["data"]=serde_json::json!(["AAAA","base64+zstd"]);
         let reply=serde_json::json!({"context":{"slot":123},"value":[{"pubkey":key.to_string(),"account":ui}]});
-        let rpc=RpcClient::new_mock_with_mocks("succeeds".into(),HashMap::from([(RpcRequest::GetProgramAccounts,reply)]));
+        let rpc=RpcClient::new_mock_with_mocks("succeeds",HashMap::from([(RpcRequest::GetProgramAccounts,reply)]));
         assert!(program_accounts_filtered(&rpc,&Pubkey::new_unique(),vec![],&Clock::new()).is_err());
     }
 }
