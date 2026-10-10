@@ -44,6 +44,81 @@ The frontend technical base comes from the existing `ws_ai_front` React/Vite/Tai
 - `solana/README.md`
 - `frontend/README.md`
 
+## Fable ZIP fast path — default procedure
+
+When the user asks for a Fable handoff ZIP, **do not turn packaging into a new qualification project**.
+
+The default goal is simple:
+
+```text
+current committed source
++ the task-specific work order
++ already-existing build/test evidence for that same source, when available
++ source identity + checksums
+→ ZIP
+```
+
+### Mandatory assistant behavior
+
+1. **Use `origin/main` as the source commit. Never copy the working tree.**
+2. **Do not touch or clean unrelated untracked/local work.**
+3. **Do not rerun compilation/tests merely because a ZIP is being created** when the exact project source at `origin/main` already has a successful current baseline recorded.
+4. If the relevant project source changed since the last successful baseline, run only the **minimum authoritative build/test commands needed for that changed scope**.
+5. `cargo fmt --check`, compiler warnings, dead-code warnings, cosmetic formatting differences, or other already-known non-fatal baseline warnings are **documentation only** and must **not block packaging** unless the project plan explicitly defines them as a release gate.
+6. A stale `Cargo.lock` is fixed once in an isolated worktree; commit only the intended lockfile change, then continue packaging. Do not create repeated packaging/preflight loops.
+7. Revisions in unrelated project trees (for example `project_0/**` while packaging BSC) must not force a new BSC review. Compare only the exported/task-relevant scope.
+8. The final ZIP must contain:
+   - exact committed source for the requested scope;
+   - `SOURCE_COMMIT.txt`;
+   - the task-specific Fable work order;
+   - `BASELINE_BUILD_STATUS.md` when baseline evidence exists;
+   - `SHA256SUMS.txt`;
+   - no `.git`, Cargo `target/`, caches, captures, secrets, or unrelated projects.
+9. Final ZIP size limit remains **80 MiB** unless explicitly overridden.
+10. Once the ZIP passes the structural checks, **stop**. Do not invent another review cycle before handing it to the user.
+
+### 10-second packaging path
+
+For a project whose current committed source is already qualified enough for handoff:
+
+```bash
+REPO="/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot"
+OUT="/Users/sawyer_ma/Desktop/Delta_Mac"
+SCOPE="bsc"
+BASE="$(git -C "$REPO" rev-parse origin/main)"
+NAME="DarkBot_${SCOPE}_FABLE_${BASE:0:7}"
+WORK="$OUT/$NAME"
+ZIP="$OUT/$NAME.zip"
+
+rm -rf "$WORK" "$ZIP"
+mkdir -p "$WORK/repo"
+
+git -C "$REPO" archive "$BASE" "$SCOPE" README.md | tar -x -C "$WORK/repo"
+
+cat > "$WORK/SOURCE_COMMIT.txt" <<EOF
+repository=https://github.com/sawyerma/darkbot.git
+commit=$BASE
+scope=$SCOPE
+EOF
+
+# Copy the prepared task-specific work order into:
+#   $WORK/FABLE_WORK_ORDER.md
+# Reuse existing current baseline evidence when it is already valid for BASE.
+
+cd "$WORK"
+find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 shasum -a 256 > SHA256SUMS.txt
+
+cd "$OUT"
+zip -qry -9 "$ZIP" "$NAME"
+
+test "$(stat -f%z "$ZIP")" -le 83886080
+shasum -a 256 "$ZIP"
+
+echo "FABLE_ZIP=$ZIP"
+```
+
+If the task needs additional files outside the selected scope, add only those explicitly required by the work order. **Do not expand the package to unrelated projects.**
+
 ## Standard workflow for external code deliveries and project exports
 
 This workflow is mandatory for **all DarkBot projects** (`bsc/`, `project_0/`, `solana/`, `frontend/`) whenever code is exported for external implementation/review and later integrated back into `main`.
