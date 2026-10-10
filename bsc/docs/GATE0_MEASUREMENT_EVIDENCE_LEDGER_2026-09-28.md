@@ -7,7 +7,7 @@
 > **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
 
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
-Stand: **2026-10-09**
+Stand: **2026-10-10**
 Primärer Scope: **BSC / Flap / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3**
 
 > Diese Datei ist die eine zentrale menschlich lesbare Quelle für den aktuellen Gate-0-Stand.
@@ -110,11 +110,104 @@ Wichtig:
 | **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT — wartet auf 2 getrennte Wallets, Funding und explizite v2-Autorisierung/Arming** |
 | G0.8 | tatsächliche Acquisition + Ordering | **offen — folgt unmittelbar auf G0.7** |
 | G0.9+ | Builder-/Feasibility-Folgeschritte | blockiert |
-| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **IN PROGRESS — C1.5-C1.8 lokal PASS; C1.9 measurement integrity PASS/eligible, final source/build bind offen; C1.9b Testnet infrastructure READY through real Chapel peer/Fast-Lane, capture/controlled launches/analyzer still open; C1.10 blocked** |
+| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **IN PROGRESS — C1.5-C1.8 lokal PASS; C1.9 production-devp2p measurement COMPLETE / integrity PASS / eligible, final full-regression/source-build freeze bind noch offen; C1.9b controlled Testnet ETH/68→geth→Fast-Lane→Rust hook/path PASS with hardened qualification gate; C1.10 blocked pending final C1 regression + freeze** |
 
 **Es wird kein Gate übersprungen.**
 
 ---
+
+
+## C1.9b Testnet hook/path checkpoint — 2026-10-10
+
+This checkpoint records the locally integrated C1.9b qualification result. It is a **controlled Testnet hook/path result only** and does not change the Gate-0 acquisition requirement.
+
+### Root cause closed
+
+The fresh Chapel node was still initial-syncing. In pinned bsc-geth v1.7.8, the ETH protocol handler checks `backend.AcceptTxs()` before decoding/forwarding a `Transactions` packet to the backend handler. With `acceptTxs=false`, both the public Chapel launch and an authenticated controlled ETH/68 replay were dropped before the C1 ingress hook, explaining the earlier zero-row captures.
+
+The qualification-only pre-sync override is now hardened and fail-closed. It requires all of:
+
+```text
+DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet
+DARKBOT_C19B_ACCEPT_TXS_UNSYNCED=YES
+networkID=97
+```
+
+Unset arm leaves normal behavior unchanged. Invalid arm, wrong scope, or wrong network ID fails closed. The earlier scope-string-only bypass is absent from the hardened generated/vendor source.
+
+### Reproducibility and regression evidence
+
+Pinned base:
+
+```text
+bnb-chain/bsc v1.7.8
+cdb7548b5baacfdae92f9f63437d6456411665f3
+```
+
+Verified locally:
+
+```text
+fresh-pin overlay generation                  PASS
+C1.9b qualification-gate targeted tests       PASS
+affected geth tests                           PASS
+geth build                                    PASS
+root diff check                               PASS
+vendor diff check                             PASS
+verified candidate -> vendor byte match       PASS for handler.go / ingress.go / ingress_test.go
+Project 0 touched by vendor integration        NO
+```
+
+The controlled hardened runtime replay then produced:
+
+```text
+chain                                         97 / 0x61
+ETH protocol                                  68
+RLPx handshake                                PASS
+controlled launch observations                1
+capture rows                                  1
+invalid_records                               0
+lane_faults                                   0
+launches                                      1
+observed                                      1
+missed                                        0
+analyzer                                      PASS
+C1_9B_HARDENED_RUNTIME_PATH                   PASS
+```
+
+The handoff timestamp was captured immediately before the controlled local ETH/68 RLPx `Transactions` write and the observation was captured from the real C1 Fast-Lane arena by the Rust C1.9b consumer.
+
+### Exact interpretation
+
+Accepted statement:
+
+```text
+C1.9b CONTROLLED TESTNET ETH/68 HOOK/PATH = PASS
+```
+
+Not established by this result:
+
+```text
+MAINNET_INGRESS_COVERAGE = NOT_PROVEN
+T0_TO_T_BUY_LT_1MS      = NOT_PROVEN
+PROVIDER_ORDERING        = UNQUALIFIED unless separately qualified
+LIVE                     = BLOCKED
+```
+
+The earlier real public Chapel launch remains useful evidence that the chain launch occurred, but its zero Fast-Lane capture occurred while the fresh node's normal `AcceptTxs` initial-sync gate was closed. The controlled qualification override exists only to exercise the real ETH/68 -> geth backend hook -> Fast-Lane -> Rust path without waiting for historical sync.
+
+### Remaining C1 work
+
+C1.9 production-devp2p measurement remains COMPLETE / integrity PASS / eligible with the previously recorded native latency distribution. The final C1 source/build/config freeze binding is **not yet closed** because the complete C1.5-C1.9 regression must be rerun against the final hardened integrated source before C1.10.
+
+Next:
+
+```text
+1. run complete final C1.5-C1.9 / REV2 regression on hardened integrated source
+2. bind final source/build/config/evidence identities
+3. run C1.10 fail-closed freeze
+4. only after C1.10 PASS/FROZEN proceed to C2
+```
+
 
 ## 4. Primärer historische Flap-Fixture
 

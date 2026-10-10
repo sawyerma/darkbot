@@ -17,7 +17,13 @@ The following C1 gates are accepted and must be treated as frozen inputs unless 
 | C1.3 | PASS / COMPLETE | lifecycle accepted; acceptance commit `c804bf74bb6a868a8610b79a100e3729038ec82d` |
 | C1.4 | PASS / COMPLETE | geth ingress accepted; acceptance commit `cefd94659b7bc318ddd02a737b87f8be39e71857` |
 | C1.4a | PASS / COMPLETE | `GREEN_STRONG_HEADROOM`; evidence commit `353c936bd973b032cc28d1ec6fa226acef50a3b9` |
-| C1.5–C1.10 | NOT YET QUALIFIED | implementation tranche authorized now |
+| C1.5 | PASS / LOCAL QUALIFIED | Rust HOT0 / zero-copy qualification passed |
+| C1.6 | PASS / LOCAL QUALIFIED | M4 development profile qualification passed |
+| C1.7 | PASS / LOCAL QUALIFIED | local-geth outbound qualification passed |
+| C1.8 | PASS / LOCAL QUALIFIED | concurrency/state-safety qualification passed |
+| C1.9 | COMPLETE / INTEGRITY PASS / ELIGIBLE | production-devp2p native latency measurement accepted; final full-regression/source-build freeze bind still open |
+| C1.9b | PASS — CONTROLLED TESTNET HOOK/PATH ONLY | hardened ETH/68→geth→Fast-Lane→Rust controlled path 1/1 observed, 0 missed; Mainnet coverage not proven |
+| C1.10 | BLOCKED | requires complete final regression plus final source/build/config/evidence binding |
 
 Authoritative C1.4a evidence:
 
@@ -40,6 +46,64 @@ Authoritative files:
 - `bsc/native/evidence/c1/c1-4a-early-latency-20261008-lane-stats.csv`
 
 These C1.4a results are an ingress→Rust feasibility result only. They do not prove acquisition latency, Mainnet ingress coverage, provider ordering, inclusion quality, or LIVE readiness.
+
+
+### 1.1 Local qualification checkpoint — 2026-10-10
+
+The implementation handoff has now progressed through local C1.9b path qualification.
+
+C1.9b root cause and qualification boundary:
+
+- pinned bsc-geth drops inbound `Transactions` before the backend handler while `AcceptTxs()==false` during initial sync;
+- the earlier public Chapel launch and first controlled replay therefore produced zero C1.9b rows before the Fast-Lane hook;
+- the qualification-only override is now fail-closed and requires the exact triple:
+  - `DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet`;
+  - `DARKBOT_C19B_ACCEPT_TXS_UNSYNCED=YES`;
+  - `networkID == 97`;
+- unset arm preserves normal behavior; invalid arm/scope/network combinations return an error;
+- production/default scope remains unchanged.
+
+Fresh-pin and integration checks passed:
+
+```text
+generator Python compile                  PASS
+fresh pinned checkout                     PASS
+overlay generation                        PASS
+old scope-only bypass absent              PASS
+targeted C1.9b gate tests                 PASS
+affected geth tests                       PASS
+geth build                                PASS
+hardened runtime path                     PASS
+vendor byte equivalence for copied files  PASS
+vendor rebuild/retest                     PASS
+diff checks                               PASS
+```
+
+Controlled hardened runtime result:
+
+```text
+ETH/68 handshake                          PASS
+network                                   97
+launches                                  1
+observed                                  1
+missed                                    0
+capture rows                              1
+invalid_records                           0
+lane_faults                               0
+C1_9B_HARDENED_RUNTIME_PATH               PASS
+```
+
+This is not Mainnet coverage or acquisition proof. Preserve:
+
+```text
+T0_TO_T_BUY_LT_1MS = NOT_PROVEN
+MAINNET_INGRESS_COVERAGE = NOT_PROVEN
+PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED unless separately qualified
+LIVE = BLOCKED
+```
+
+The final C1.10 freeze is still blocked. Before C1.10, rerun the complete C1.5-C1.9/REV2 regression against the hardened integrated source and bind the final source/build/config/evidence identities.
+
 
 ## 2. Fable assignment
 

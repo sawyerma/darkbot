@@ -88,7 +88,7 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
 | C0 | **IN PROGRESS / FOUNDATION FROZEN** | Unit-6 startup authorization + recorder/replay foundation IMPLEMENTED_TESTED/FROZEN for foundation scope; full production qualification remains separate |
-| C1 | **IN PROGRESS** | C1.5-C1.8 local PASS; C1.9 production-devp2p measurement integrity PASS/eligible (max T_ingress→first handoff 438 us), final source/build bind open; C1.9b infrastructure READY through real Chapel peer + Fast-Lane arena, capture/controlled launches/analyzer still open; C1.10 blocked |
+| C1 | **IN PROGRESS** | C1.5-C1.8 local PASS; C1.9 production-devp2p measurement COMPLETE / integrity PASS / eligible (max T_ingress→first handoff 438 us), final full-regression/freeze bind open; C1.9b controlled Testnet ETH/68→geth→Fast-Lane→Rust hook/path PASS with hardened fail-closed qualification gate; C1.10 blocked pending final regression + freeze |
 | C2 | **BLOCKED BY C1.10** | Production pending/canonical/reorg/nonce/replacement state |
 | C3 | **BLOCKED** | Production local build/sign/geth path benchmark; engineering proof only |
 | D | **BLOCKED** | Full production Flap Rust decoder |
@@ -222,25 +222,26 @@ C1.8 concurrency/state safety        PASS
 C1.9 measurement                     COMPLETE / integrity PASS / eligible
 C1.9 measured max T_ingress->L2      418 us
 C1.9 measured max ingress->1st peer  438 us
-C1.9 final source/build binding       OPEN
+C1.9 final source/build binding       OPEN pending final full regression/freeze bind
 C1.9b Testnet infrastructure          READY / REAL CHAPEL PEER PASS
 C1.9b chain                           97 / 0x61
 C1.9b pinned geth                     v1.7.8 / cdb7548b5baacf...
-C1.9b Fast-Lane generation           202610090001
-C1.9b real peers                      1
-C1.9b arena bytes                     20454656
-C1.9b capture                         NOT YET ATTACHED
-C1.9b controlled launches             NOT YET RUN
-C1.9b analyzer report                 NOT YET RUN
-C1.9b gate                            NOT YET PASS
-C1.10 freeze                          BLOCKED until C1.9 final bind + C1.9b PASS
+C1.9b controlled ETH/68 hook/path     PASS
+C1.9b hardened qualification gate     PASS
+C1.9b fresh-pin reproducibility       PASS
+C1.9b affected geth tests/build       PASS
+C1.9b controlled observations         1/1
+C1.9b invalid_records/lane_faults     0 / 0
+C1.9b analyzer                        PASS / missed=0
+C1.9b Mainnet ingress coverage        NOT PROVEN
+C1.10 freeze                          BLOCKED pending complete final C1 regression + bind
 T0->T_buy <1 ms                       NOT PROVEN
 LIVE                                  BLOCKED
 ```
 
 Detailed commands, identities, distributions, counters and scope/non-claims are recorded in `GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md`. The C1.9 local selected-peer handoff is not a purchase/acquisition timestamp.
 
-The C1.9b G07 monotonic-timestamp and explicit Testnet-scope changes at this checkpoint are local working-tree changes and are **not yet final committed/frozen C1 source**. The next operation is to attach `c19b_capture` to generation `202610090001`, run controlled Chapel launches, and analyze the raw hook/path evidence.
+C1.9b controlled Testnet hook/path qualification is now locally PASS. The qualification-only pre-sync override is hardened: it requires `DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet`, `DARKBOT_C19B_ACCEPT_TXS_UNSYNCED=YES`, and network ID 97; invalid combinations fail closed. A fresh-pin generated candidate passed targeted/affected geth tests and build, then the hardened runtime produced 1/1 controlled observation with zero misses, invalid records, or lane faults. The hardened candidate was copied byte-for-byte into the local vendor files and rebuilt/retested. These local source changes are **not yet C1.10-frozen**. The next operation is the complete final C1.5-C1.9/REV2 regression and source/build/config binding, followed by C1.10 freeze.
 
 STOP.
 
