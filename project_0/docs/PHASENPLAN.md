@@ -2,6 +2,17 @@
 
 # DarkBot — Project 0 — Produktions-Phasenplan v4.5
 
+### C0-E1 current gate update — 2026-10-10 19:57 Europe/Berlin (newer than earlier historical entries)
+
+The current user-observed work is on `project0/c0e1-startup-wip-20261010`, base commit `c2ba995e647296d1c3d3b0a134d2f30ff8db1d64`; `main` remained on `3fdf30b` at this checkpoint. Startup fixes: `base64+zstd` snapshots, actual Shadow READY gate before the market measurement clock, in-window evaluation required for technical PASS, and cancellable fail-closed recovery. Two test-only local corrections compile and pass. Solana State 19/19; Runner both `crate_health` and `crate_health txv1` exit0; release build exit0; Clippy exit0 with reported warnings. These are **local gates**, not certification of a full Mainnet campaign.
+
+Run `c0e1_gap_smoke_20261010T195016Z` (60-second capture, longer walltime) has demonstrated actual Shadow snapshot A/B + root catch-up `Ready` *before* market observation; first RPC GPA snapshot attempt did fail body decoding, retry succeeded. Later market WebSocket connection-reset and reconnect `2/2` subscription ACKs and StreamReady were recorded. **No verified `GAP_RECOVERED`, full-slot completed market reconciliation, zero unresolved slots or final `CONTROLLED_GAP_SMOKE_PASS` at last supplied evidence.** Proxy forces market WSS disconnect, not Shadow WSS disconnect.
+
+**NEXT BLOCKING GATE:** capture actual final controlled-gap run verdict, inspect complete archived logs and market/full-slot reconciliation. On any incomplete interval fail closed; investigate RPC response decode failures and backfill limits. Separately qualify Shadow WSS disconnect/recovery. Preserve evidence, no financial claims from health sweep counts. User alone may start subsequent 4h after complete short smoke qualification, sufficient disk and explicit decision. Production LIVE/submission remain hard disabled. Detailed evidence and commands: top of `MEASUREMENT_LEDGER.md`.
+
+---
+
+
 **Status:** ARCHITECTURE FREEZE — AUTHORITATIVE — FROZEN v4.5
 **Promoted:** 2026-10-07; v4.5 übernimmt v4.4 vollständig und ergänzt das verbindliche P6-MT-v2-Runtime-Subgate nach Review von FIX-139-Code, Mainnet-Messungen, Provider-Grenzen und Fables P6-MT-v2-Fassung.  
 **Stand:** 2026-10-07  
