@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "darkbot.producer-execution-witness.v1",
+  "title": "DarkBot original producer execution witness",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "schema",
+    "attempt_id",
+    "node_id",
+    "producer_boot_id",
+    "client_version",
+    "client_commit",
+    "clock_id",
+    "execution_attempt_id",
+    "parent_hash",
+    "block_hash",
+    "launch_tx_hash",
+    "launch_tx_index",
+    "buy_tx_hash",
+    "buy_tx_index",
+    "semantic_hook_ids",
+    "original_raw_timestamps",
+    "clock_resolution_ns",
+    "hook_read_overhead_ns",
+    "remaining_non_overlapping_uncertainty_ns",
+    "remaining_uncertainty_excludes_bracketed_uncertainty",
+    "clock_resolution_accounted_in_brackets_or_remaining_uncertainty",
+    "hook_overhead_accounted_in_brackets_or_remaining_uncertainty",
+    "launch_status",
+    "buy_status",
+    "canonical_status",
+    "reorg_status",
+    "acquisition_evidence_refs",
+    "clock_source",
+    "clock_raw_unit",
+    "clock_raw_resolution",
+    "normalized_timestamps_ns",
+    "normalization_to_ns_method",
+    "normalization_error_ns",
+    "normalization_error_accounted_in_remaining_uncertainty"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "schema": {
+      "const": "darkbot.producer-execution-witness.v1"
+    },
+    "attempt_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "producer_boot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "client_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "client_commit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clock_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution_attempt_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "block_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "launch_tx_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "launch_tx_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "buy_tx_hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$"
+    },
+    "buy_tx_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "semantic_hook_ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "T0",
+        "T_buy"
+      ],
+      "properties": {
+        "T0": {
+          "type": "string",
+          "minLength": 1
+        },
+        "T_buy": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "original_raw_timestamps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "T0_before",
+        "T0_after",
+        "T_buy_before",
+        "T_buy_after"
+      ],
+      "properties": {
+        "T0_before": {
+          "type": "string",
+          "minLength": 1
+        },
+        "T0_after": {
+          "type": "string",
+          "minLength": 1
+        },
+        "T_buy_before": {
+          "type": "string",
+          "minLength": 1
+        },
+        "T_buy_after": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "clock_resolution_ns": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "hook_read_overhead_ns": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "remaining_non_overlapping_uncertainty_ns": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "remaining_uncertainty_excludes_bracketed_uncertainty": {
+      "const": true
+    },
+    "clock_resolution_accounted_in_brackets_or_remaining_uncertainty": {
+      "const": true
+    },
+    "hook_overhead_accounted_in_brackets_or_remaining_uncertainty": {
+      "const": true
+    },
+    "launch_status": {
+      "const": 1
+    },
+    "buy_status": {
+      "const": 1
+    },
+    "canonical_status": {
+      "const": "CANONICAL"
+    },
+    "reorg_status": {
+      "const": "NONE"
+    },
+    "acquisition_evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "clock_source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clock_raw_unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clock_raw_resolution": {
+      "type": "string",
+      "minLength": 1
+    },
+    "normalized_timestamps_ns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "T0_before_ns",
+        "T0_after_ns",
+        "T_buy_before_ns",
+        "T_buy_after_ns"
+      ],
+      "properties": {
+        "T0_before_ns": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "T0_after_ns": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "T_buy_before_ns": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "T_buy_after_ns": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        }
+      }
+    },
+    "normalization_to_ns_method": {
+      "type": "string",
+      "minLength": 1
+    },
+    "normalization_error_ns": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "normalization_error_accounted_in_remaining_uncertainty": {
+      "const": true
+    }
+  }
+}
