@@ -89,7 +89,7 @@ impl Decodable for UpgradeStatusExtension {
 impl Encodable for UpgradeStatus {
     fn encode(&self, out: &mut dyn BufMut) {
         UPGRADE_STATUS_MESSAGE_ID.encode(out);
-        vec![&self.extension].encode(out);
+        self.extension.encode(out);
     }
 }
 
@@ -99,11 +99,8 @@ impl Decodable for UpgradeStatus {
         if message_id != UPGRADE_STATUS_MESSAGE_ID {
             return Err(alloy_rlp::Error::Custom("invalid BSC UpgradeStatus message id"));
         }
-        let extension = Vec::<UpgradeStatusExtension>::decode(buf)?;
-        if extension.len() != 1 {
-            return Err(alloy_rlp::Error::Custom("invalid BSC UpgradeStatus extension length"));
-        }
-        Ok(Self { extension: extension[0] })
+        let extension = UpgradeStatusExtension::decode(buf)?;
+        Ok(Self { extension })
     }
 }
 
@@ -568,5 +565,32 @@ pub fn spawn_testnet_flap_sensor(
         ready: ready_rx,
         signals: signal_rx,
         hashes: hash_rx,
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrade_status_wire_shape_matches_bsc_reference() {
+        let wire = UpgradeStatus {
+            extension: UpgradeStatusExtension {
+                disable_peer_tx_broadcast: false,
+            },
+        }
+        .into_rlpx();
+
+        let mut direct_extension = &wire.as_ref()[1..];
+        let extension = UpgradeStatusExtension::decode(&mut direct_extension)
+            .expect("extension must follow message id directly");
+        assert!(!extension.disable_peer_tx_broadcast);
+        assert!(direct_extension.is_empty());
+
+        let mut full = wire.as_ref();
+        let decoded = UpgradeStatus::decode(&mut full).expect("UpgradeStatus roundtrip");
+        assert!(!decoded.extension.disable_peer_tx_broadcast);
+        assert!(full.is_empty());
     }
 }
