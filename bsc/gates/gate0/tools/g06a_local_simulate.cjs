@@ -35,15 +35,28 @@ function clean(x) {
   return JSON.parse(JSON.stringify(x, (_, v) => typeof v === 'bigint' ? v.toString() : v));
 }
 async function rpc(url, method, params = []) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  if (!res.ok) throw new Error(`RPC HTTP ${res.status} for ${method}`);
-  const body = await res.json();
-  if (body.error) throw new Error(`RPC ${method}: ${JSON.stringify(body.error)}`);
-  return body.result;
+  const delaysMs = [0, 150, 500, 1200];
+  let lastError;
+  for (let attempt = 0; attempt < delaysMs.length; attempt++) {
+    if (delaysMs[attempt]) {
+      await new Promise(resolve => setTimeout(resolve, delaysMs[attempt]));
+    }
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) throw new Error(`RPC HTTP ${res.status} for ${method}`);
+      const body = await res.json();
+      if (body.error) throw new Error(`RPC ${method}: ${JSON.stringify(body.error)}`);
+      return body.result;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw new Error(`RPC transport failed after 4 attempts for ${method}: ${lastError?.message || lastError}`);
 }
 function blockHeaderFromRpc(b) {
   return {
