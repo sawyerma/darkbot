@@ -45,9 +45,9 @@ const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
 const TAX_V3_IMPL = '0x024f18294970b5c76c0691b87f138a0317156422';
 const DEFAULT_PREFLIGHT_PATH = path.join(__dirname, '../evidence/g06a_preflight_readonly.json');
 
-const BUY_VALUE = 1_000_000_000_000_000n; // 0.001 BNB
+const BUY_VALUE = BigInt(process.env.DARKBOT_G06A_BUY_VALUE_WEI || '1000000000000000');
 const LAUNCH_VALUE = 0n;
-const GAS_PRICE = 50_000_000n; // frozen preflight observation, 0.05 gwei
+const GAS_PRICE = BigInt(process.env.DARKBOT_G06A_GAS_PRICE_WEI || '50000000');
 const LAUNCH_GAS_LIMIT = 5_000_000n;
 const BUY_GAS_LIMIT = 3_000_000n;
 
