@@ -353,6 +353,33 @@ A synthetic allocation/projection PASS alone does not prove submission idempoten
 
 The same qualified ingress × inclusion combinations that survive G0.6 become the frozen candidate matrix for G0.7.
 
+
+**G0.6 final dry status — 2026-10-11: PASS**
+
+Authoritative run evidence:
+`bsc/gates/gate0/evidence/g06a_final_dry_20261011T110407Z`
+
+Recorded result:
+
+- `PREFLIGHT=PASS`
+- `QUOTE=PASS`
+- `EVM_CROSSCHECK=PASS`, exact output match
+- `WALLET_BINDING=PASS`
+- `EXACT_LOCAL_SIMULATION=PASS`
+- `DRY_1_bytes_and_signers=PASS`
+- `DRY_2_independent_local_simulation=PASS`
+- `DRY_3_gas_floor_and_budget=PASS`
+- `DRY_4_expiry_nonces_zero_egress=PASS`
+- `FINAL_DRY=PASS`
+- `zero_egress_structural=true`
+- identical ordered `[launch_A, buy_B]` transaction bytes across both builder projections
+- launcher/buyer roles distinct
+- `LIVE_GUARD=UNARMED`
+- `LIVE_SUBMISSION=NOT_AUTHORIZED`
+- Mainnet funding remains `PENDING`
+
+G0.6 dry qualification is complete. Do not reopen Testnet/P2P qualification unless a concrete regression requires it. The next product step remains G0.7 controlled Mainnet validation, followed immediately by G0.8 acquisition/order/cost verification. This dry PASS does not itself authorize a value-bearing send.
+
 ### G0.7 Controlled Mainnet validation
 Only after dry qualification and after the G0.1 acceptance contract is frozen, use minimal user-authorized test value.
 
