@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent read-only Solana finalized signature-index audit of a timeboxed Project_0 capture.
+"""Independent read-only Solana finalized signature-index audit of a Project_0 capture.
 
 Does not import or call the DarkBot market decoder. Counts actual program
 instructions and program-emitted event discriminators from raw finalized blocks.
@@ -189,12 +189,26 @@ def quick_main():
         ap.error("Set P0_AUDIT_RPC_URL or P0_RPC_URL/HELIUS_API_KEY (no wallet needed)")
     if not (0 < args.rps <= 10 and 1 <= args.max_pages <= 500):
         ap.error("--rps must be 0..10 and --max-pages 1..500")
-    report_path = args.run_dir/"quick_timebox_report.json"
+    quick_path = args.run_dir/"quick_timebox_report.json"
+    full_path = args.run_dir/"market"/"summary.json"
     ledger_path = args.run_dir/"market"/"transactions.jsonl"
-    if not report_path.is_file() or not ledger_path.is_file():
-        ap.error("Quick report or market/transactions.jsonl missing: "+str(args.run_dir))
-    quick = json.loads(report_path.read_text())
-    lo, hi = quick.get("observed_slot_min"), quick.get("observed_slot_max")
+    if not ledger_path.is_file():
+        ap.error("Missing market/transactions.jsonl: "+str(args.run_dir))
+    full = None
+    if full_path.is_file():
+        full = json.loads(full_path.read_text())
+        reconciled = full.get("full_slot_reconciliation") or {}
+        lo = (reconciled.get("market_slot_start") or {}).get("slot")
+        hi = (reconciled.get("market_slot_end") or {}).get("slot")
+        mode = "FULL_CANONICAL"
+        quick = {}
+    elif quick_path.is_file():
+        quick = json.loads(quick_path.read_text())
+        lo, hi = quick.get("observed_slot_min"), quick.get("observed_slot_max")
+        reconciled = {}
+        mode = "QUICK_TIMEBOX"
+    else:
+        ap.error("Missing market/summary.json or quick_timebox_report.json")
     if not isinstance(lo, int) or not isinstance(hi, int) or lo <= 0 or hi < lo:
         ap.error("Missing or invalid captured slot boundaries")
     saved = []
@@ -207,11 +221,20 @@ def quick_main():
                 break
             if rec.get("signature") and isinstance(rec.get("slot"), int):
                 saved.append(rec)
-    bot_signatures = {row["signature"] for row in saved}
-    if len(bot_signatures) != len(saved):
-        raise SystemExit("FAIL: repeated signatures in saved bot ledger")
-    print("AUDIT_SLOTS=",lo,hi,"BOT_SAVED_TX=",len(saved),
-          "BOT_LAST_LIVE_TX=",quick.get("market_live_last_observed",{}).get("tx"), flush=True)
+    # Full canonical reconciliation intentionally writes another copy of a live
+    # transaction. Do not mistake those two evidence sources for a double count.
+    live_saved = [r for r in saved if r.get("source") in ("logsSubscribe", "transactionSubscribe")]
+    canonical_saved = [r for r in saved if r.get("source") == "full_slot_reconciliation"]
+    if not full:
+        live_saved = saved
+    live_signatures = {row["signature"] for row in live_saved}
+    canonical_signatures = {row["signature"] for row in canonical_saved}
+    if len(live_signatures) != len(live_saved) or len(canonical_signatures) != len(canonical_saved):
+        raise SystemExit("FAIL: duplicate signatures within the same bot evidence source")
+    bot_signatures = live_signatures
+    print("AUDIT_MODE=",mode,"AUDIT_SLOTS=",lo,hi,
+          "BOT_LIVE_SAVED=",len(live_saved),"BOT_CANONICAL_SAVED=",len(canonical_saved),
+          "CANONICAL_COMPLETE=",reconciled.get("complete") if full else "N/A", flush=True)
     rpc = RPC(args.rpc_url, args.rps, args.timeout)
     indexed, before, crossed = {}, None, False
     for page in range(args.max_pages):
@@ -266,25 +289,48 @@ def quick_main():
     # First and last slots are partial observations; interior is stronger evidence.
     missing_interior = [tx for tx in missing_in_bot if lo < tx["slot"] < hi]
     external_signatures = {tx["signature"] for tx in external}
-    bot_only = [tx for tx in saved if tx["signature"] not in external_signatures]
+    bot_only = [tx for tx in live_saved if tx["signature"] not in external_signatures]
+    canonical_only = [sig for sig in canonical_signatures if sig not in external_signatures]
+    missing_canonical = [tx for tx in external if tx["signature"] not in canonical_signatures]
     last = quick.get("market_live_last_observed",{})
     mapping = {"CLASSIC":"provisional_classic",
                "RECEIVERSHIP":"provisional_receivership",
                "FORCED_DELEVERAGE":"provisional_deleverage",
                "BANKRUPTCY_SETTLEMENT":"provisional_bankruptcy"}
     discrepancies = []
-    for kind,field in mapping.items():
-        if field in last and int(last[field]) < event_counts[kind]:
-            discrepancies.append("BOT_EVENT_UNDERCOUNT_"+kind)
+    if not full:
+        for kind,field in mapping.items():
+            if field in last and int(last[field]) < event_counts[kind]:
+                discrepancies.append("BOT_EVENT_UNDERCOUNT_"+kind)
     if missing_interior:
-        discrepancies.append("MISSING_BOT_SIGNATURES_INTERIOR")
+        discrepancies.append("MISSING_BOT_LIVE_SIGNATURES_INTERIOR")
+    canonical_event_counts = {}
+    if full:
+        if reconciled.get("complete") is not True:
+            discrepancies.append("CANONICAL_RECONCILIATION_INCOMPLETE")
+        for kind in ("CLASSIC", "RECEIVERSHIP", "FORCED_DELEVERAGE", "BANKRUPTCY_SETTLEMENT"):
+            groups = (full.get("canonical_market_truth") or {}).get("groups") or {}
+            val = (groups.get(kind) or {}).get("liquidation_events")
+            canonical_event_counts[kind] = val
+            if not isinstance(val, int) or val != event_counts[kind]:
+                discrepancies.append("CANONICAL_EVENT_MISMATCH_"+kind)
+        if missing_canonical:
+            discrepancies.append("MISSING_CANONICAL_SIGNATURES")
+        if canonical_only:
+            discrepancies.append("EXTRA_CANONICAL_SIGNATURES")
     summary = {
         "method":"INDEPENDENT_FINALIZED_ADDRESS_INDEX",
         "range":{"lo":lo,"hi":hi,"partial_boundary_slots":True},
-        "scope_warning":"Address-index audit, NOT full block reconciliation",
+        "scope_warning":"Address-index audit, NOT full block reconciliation. Canonical completion is established separately by the bot.",
+        "mode":mode,
         "rpc_finalized_tx":len(external),
-        "bot_saved_tx":len(saved),
+        "bot_saved_tx":len(live_saved),
+        "bot_canonical_saved_tx":len(canonical_saved),
         "bot_live_last_count":last.get("tx"),
+        "bot_canonical_reconciliation_complete":reconciled.get("complete") if full else None,
+        "bot_canonical_event_counts":canonical_event_counts,
+        "missing_canonical":missing_canonical if full else [],
+        "extra_canonical":canonical_only if full else [],
         "rpc_event_counts":dict(event_counts),
         "rpc_liquidation_instruction_counts":dict(instruction_counts),
         "liquidations":liquidations,
@@ -293,24 +339,29 @@ def quick_main():
         "bot_only":bot_only,
         "discrepancies":discrepancies,
         "rpc_calls":rpc.calls,
-        "qualification":"DISCREPANCY" if discrepancies else "INDEX_SCOPE_MATCH_ONLY",
+        "qualification":"DISCREPANCY" if discrepancies else ("CANONICAL_AND_INDEX_MATCH" if full else "INDEX_SCOPE_MATCH_ONLY"),
         "note":"Zero in both does NOT prove whole-chain absence; full-slot proof separately required."
     }
     output = args.run_dir/"market"/"quick_independent_crosscheck.json"
     output.write_text(json.dumps(summary,indent=2)+"\n",encoding="utf-8")
     print("\n=== INDEPENDENT MARGINFI CROSSCHECK ===")
-    print("RPC_FINALIZED_TX=",len(external),"BOT_SAVED_TX=",len(saved),
-          "BOT_LIVE_TX=",last.get("tx"))
+    print("RPC_FINALIZED_TX=",len(external),"BOT_LIVE_SAVED_TX=",len(live_saved),
+          "BOT_CANONICAL_SAVED_TX=",len(canonical_saved))
+    if full:
+        print("CANONICAL_COMPLETE=",reconciled.get("complete"),
+              "CANONICAL_EVENTS=",canonical_event_counts)
     print("RPC_LIQUIDATION_INSTRUCTIONS=",dict(instruction_counts))
     print("RPC_LIQUIDATION_EVENTS=",dict(event_counts))
-    print("MISSING_BOT_INTERIOR=",len(missing_interior),"BOT_ONLY=",len(bot_only))
+    print("MISSING_LIVE_INTERIOR=",len(missing_interior),"BOT_LIVE_ONLY=",len(bot_only),
+          "MISSING_CANONICAL=",len(missing_canonical) if full else "N/A",
+          "EXTRA_CANONICAL=",len(canonical_only) if full else "N/A")
     for tx in liquidations:
         print("LIQUIDATION:",tx["slot"],tx["signature"],
               "instructions=",tx["instructions"],"events=",tx["program_events"],
               "https://solscan.io/tx/"+tx["signature"])
     for tx in missing_interior[:20]:
         print("MISSING_BOT:",tx["slot"],tx["signature"])
-    print("RESULT=","DISCREPANCY" if discrepancies else "INDEX_SCOPE_MATCH_ONLY",
+    print("RESULT=",summary["qualification"],"DISCREPANCIES=",discrepancies,
           "EVIDENCE=",output)
     return 1 if discrepancies else 0
 
