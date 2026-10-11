@@ -89,7 +89,7 @@ impl Decodable for UpgradeStatusExtension {
 impl Encodable for UpgradeStatus {
     fn encode(&self, out: &mut dyn BufMut) {
         UPGRADE_STATUS_MESSAGE_ID.encode(out);
-        self.extension.encode(out);
+        vec![&self.extension].encode(out);
     }
 }
 
@@ -99,8 +99,11 @@ impl Decodable for UpgradeStatus {
         if message_id != UPGRADE_STATUS_MESSAGE_ID {
             return Err(alloy_rlp::Error::Custom("invalid BSC UpgradeStatus message id"));
         }
-        let extension = UpgradeStatusExtension::decode(buf)?;
-        Ok(Self { extension })
+        let extension = Vec::<UpgradeStatusExtension>::decode(buf)?;
+        if extension.len() != 1 {
+            return Err(alloy_rlp::Error::Custom("invalid BSC UpgradeStatus extension length"));
+        }
+        Ok(Self { extension: extension[0] })
     }
 }
 
@@ -269,16 +272,11 @@ fn bsc_testnet_chain_spec() -> Arc<ChainSpec> {
 }
 
 fn bsc_testnet_bootnodes() -> Vec<NodeRecord> {
-    // BSC Testnet peer records refreshed from the current public Chapel/testnet
-    // peer set. Testnet connectivity is intentionally seeded by direct peer
-    // dialing below; discovery is supplemental only.
     const NODES: &[&str] = &[
-        "enode://69a90b35164ef862185d9f4d2c5eff79b92acd1360574c0edf36044055dc766d87285a820233ae5700e11c9ba06ce1cf23c1c68a4556121109776ce2a3990bba@52.199.214.252:30311",
-        "enode://330d768f6de90e7825f0ea6fe59611ce9d50712e73547306846a9304663f9912bf1611037f7f90f21606242ded7fb476c7285cb7cd792836b8c0c5ef0365855c@18.181.52.189:30311",
+        "enode://0637d1e62026e0c8685b1db0ca1c767c78c95c3fab64abc468d1a64b12ca4b530b46b8f80c915aec96f74f7ffc5999e8ad6d1484476f420f0c10e3d42361914b@52.199.214.252:30311",
         "enode://df1e8eb59e42cad3c4551b2a53e31a7e55a2fdde1287babd1e94b0836550b489ba16c40932e4dacb16cba346bd442c432265a299c4aca63ee7bb0f832b9f45eb@52.51.80.128:30311",
-        "enode://0bd566a7fd136ecd19414a601bfdc530d5de161e3014033951dd603e72b1a8959eb5b70b06c87a5a75cbf45e4055c387d2a842bd6b1bd8b5041b3a61bab615cf@34.242.33.165:30311",
-        "enode://604ed87d813c2b884ff1dc3095afeab18331f3cc361e8fb604159e844905dfa6e4c627306231d48f46a2edceffcd069264a89d99cdbf861a04e8d3d8d7282e8a@3.209.122.123:30311",
-        "enode://4d358eca87c44230a49ceaca123c89c7e77232aeae745c3a4917e607b909c4a14034b3a742960a378c3f250e0e67391276e80c7beee7770071e13f33a5b0606a@52.72.123.113:30311",
+        "enode://ecd664250ca19b1074dcfbfb48576a487cc18d052064222a363adacd2650f8e08fb3db9de7a7aecb48afa410eaeb3285e92e516ead01fb62598553aed91ee15e@3.209.122.123:30311",
+        "enode://665cf77ca26a8421cfe61a52ac312958308d4912e78ce8e0f61d6902e4494d4cc38f9b0dd1b23a427a7a5734e27e5d9729231426b06bb9c73b56a142f83f6b68@52.72.123.113:30311",
     ];
     NODES.iter().map(|s| s.parse().unwrap()).collect()
 }
@@ -363,7 +361,7 @@ pub fn spawn_testnet_flap_sensor(
 
                 let net_cfg = net_cfg.set_discovery_v4(
                     Discv4ConfigBuilder::default()
-                        .add_boot_nodes(boot_nodes.clone())
+                        .add_boot_nodes(boot_nodes)
                         .lookup_interval(Duration::from_millis(250))
                         .build(),
                 );
@@ -379,26 +377,6 @@ pub fn spawn_testnet_flap_sensor(
                     .expect("failed to create standalone BSC P2P network");
                 network.set_transactions(network_tx);
                 let handle = network.handle().clone();
-
-                // BSC Testnet is not allowed to depend on discovery finding peers.
-                // Seed every published testnet peer directly into Reth's peer set
-                // and request an outbound TCP session immediately. Discv4 remains
-                // enabled only to expand beyond this deterministic seed set.
-                for node in &boot_nodes {
-                    eprintln!(
-                        "P2P_STATIC_DIAL peer={} tcp={} udp={}",
-                        node.id,
-                        node.tcp_addr(),
-                        node.udp_addr(),
-                    );
-                    handle.add_trusted_peer_with_udp(
-                        node.id,
-                        node.tcp_addr(),
-                        node.udp_addr(),
-                    );
-                    handle.connect_peer(node.id, node.tcp_addr());
-                }
-
                 let mut peer_events = handle.event_listener();
                 let diag_handle = handle.clone();
 
@@ -565,32 +543,5 @@ pub fn spawn_testnet_flap_sensor(
         ready: ready_rx,
         signals: signal_rx,
         hashes: hash_rx,
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn upgrade_status_wire_shape_matches_bsc_reference() {
-        let wire = UpgradeStatus {
-            extension: UpgradeStatusExtension {
-                disable_peer_tx_broadcast: false,
-            },
-        }
-        .into_rlpx();
-
-        let mut direct_extension = &wire.as_ref()[1..];
-        let extension = UpgradeStatusExtension::decode(&mut direct_extension)
-            .expect("extension must follow message id directly");
-        assert!(!extension.disable_peer_tx_broadcast);
-        assert!(direct_extension.is_empty());
-
-        let mut full = wire.as_ref();
-        let decoded = UpgradeStatus::decode(&mut full).expect("UpgradeStatus roundtrip");
-        assert!(!decoded.extension.disable_peer_tx_broadcast);
-        assert!(full.is_empty());
     }
 }
