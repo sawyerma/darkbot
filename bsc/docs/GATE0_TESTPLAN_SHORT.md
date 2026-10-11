@@ -380,6 +380,23 @@ Recorded result:
 
 G0.6 dry qualification is complete. Do not reopen Testnet/P2P qualification unless a concrete regression requires it. The next product step remains G0.7 controlled Mainnet validation, followed immediately by G0.8 acquisition/order/cost verification. This dry PASS does not itself authorize a value-bearing send.
 
+## G0.7 single-attempt spend freeze — 2026-10-11
+
+User constraint for the first real Mainnet qualification is now frozen:
+
+- exactly **one** economic G0.7 Mainnet attempt;
+- no automatic retry;
+- no manual second attempt under the same approval;
+- any second attempt requires a new explicit user authorization and a new review of the evidence from attempt 1;
+- do not fund the wallets for repeated trials;
+- do not transfer Mainnet BNB until all non-value-bearing checks are PASS;
+- before funding, minimize the required reserve by revalidating the lowest safe signed gas-price policy and the smallest safe BUY value consistent with the G0.7 acquisition proof;
+- if lower gas/value parameters are adopted, rerun the exact G0.6 DRY once for those final bytes and freeze that evidence before funding;
+- if the existing 1-gwei / 0.001-BNB profile is retained, one-attempt worst-case reserve is 0.01060327 BNB total across launcher and buyer;
+- G0.7 remains UNARMED / NOT_AUTHORIZED until explicit user approval after funding PASS.
+
+This is a spend/risk constraint, not authorization to transmit a Mainnet bundle.
+
 ### G0.7 Controlled Mainnet validation
 Only after dry qualification and after the G0.1 acceptance contract is frozen, use minimal user-authorized test value.
 
