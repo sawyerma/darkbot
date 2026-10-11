@@ -16,7 +16,13 @@ const ABI_TOOLS = path.join(ROOT, 'tests/legacy_gate0/gate0-evidence/abi-tools/n
 const { createEVM } = require(path.join(LEGACY_TOOLS, '@ethereumjs/evm'));
 const { createCustomCommon, Mainnet, Hardfork } = require(path.join(LEGACY_TOOLS, '@ethereumjs/common'));
 const { RPCStateManager, RPCBlockChain } = require(path.join(LEGACY_TOOLS, '@ethereumjs/statemanager'));
-const { createAddressFromString, hexToBytes, bytesToHex } = require(path.join(LEGACY_TOOLS, '@ethereumjs/util'));
+const {
+  KECCAK256_RLP,
+  createAccount,
+  createAddressFromString,
+  hexToBytes,
+  bytesToHex,
+} = require(path.join(LEGACY_TOOLS, '@ethereumjs/util'));
 const { createLegacyTx } = require(path.join(LEGACY_TOOLS, '@ethereumjs/tx'));
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
 
@@ -57,6 +63,24 @@ async function rpc(url, method, params = []) {
     }
   }
   throw new Error(`RPC transport failed after 4 attempts for ${method}: ${lastError?.message || lastError}`);
+}
+
+function installBasicAccountLoader(state, rpcUrl, blockTag) {
+  state.getAccountFromProvider = async function(address) {
+    const a = address.toString();
+    const balanceHex = await rpc(rpcUrl, 'eth_getBalance', [a, blockTag]);
+    const nonceHex = await rpc(rpcUrl, 'eth_getTransactionCount', [a, blockTag]);
+    const codeHex = await rpc(rpcUrl, 'eth_getCode', [a, blockTag]);
+    if (balanceHex == null || nonceHex == null || codeHex == null) {
+      throw new Error(`incomplete basic account RPC data for ${a}`);
+    }
+    return createAccount({
+      balance: BigInt(balanceHex),
+      nonce: BigInt(nonceHex),
+      codeHash: hexToBytes(ethers.keccak256(codeHex)),
+      storageRoot: KECCAK256_RLP,
+    });
+  };
 }
 function blockHeaderFromRpc(b) {
   return {
@@ -176,8 +200,10 @@ async function main() {
 
   const chain = BigInt(await rpc(rpcUrl, 'eth_chainId'));
   if (chain !== CHAIN_ID) throw new Error(`wrong chain: ${chain}`);
-  const parent = await rpc(rpcUrl, 'eth_getBlockByNumber', ['latest', false]);
-  const parentNumber = BigInt(parent.number);
+  const parentNumber = dec('DARKBOT_G06A_SEND_HEAD');
+  const parentTag = '0x' + parentNumber.toString(16);
+  const parent = await rpc(rpcUrl, 'eth_getBlockByNumber', [parentTag, false]);
+  if (!parent) throw new Error(`preflight parent block unavailable: ${parentTag}`);
 
   const common = createCustomCommon(
     { chainId: Number(CHAIN_ID) },
@@ -185,6 +211,7 @@ async function main() {
     { hardfork: Hardfork.Osaka }
   );
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: parentNumber });
+  installBasicAccountLoader(state, rpcUrl, parentTag);
   const blockchain = new RPCBlockChain(rpcUrl);
   const evm = await createEVM({ common, stateManager: state, blockchain });
   const block = { header: blockHeaderFromRpc(parent) };
