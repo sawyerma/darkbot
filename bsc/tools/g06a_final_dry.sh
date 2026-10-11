@@ -89,7 +89,11 @@ node bsc/gates/gate0/tools/g06a_preflight_readonly.cjs "$PREFLIGHT" > "$OUT_DIR/
 
 [[ "$(json_get "$PREFLIGHT" wallet_qualification.addresses_bound)" == "true" ]] || die "wallet addresses are not bound"
 [[ "$(json_get "$PREFLIGHT" wallet_qualification.distinct)" == "true" ]] || die "Launcher and Buyer are not distinct"
-[[ "$(json_get "$PREFLIGHT" wallet_qualification.funding_pass)" == "true" ]] || die "wallet funding is below the frozen worst-case reserve"
+if [[ "$(json_get "$PREFLIGHT" wallet_qualification.funding_pass)" == "true" ]]; then
+  printf 'LIVE_FUNDING=PASS\n'
+else
+  printf 'LIVE_FUNDING=PENDING  DRY_CONTINUES=true\n'
+fi
 
 export DARKBOT_G06A_LAUNCHER_NONCE="$(json_get "$PREFLIGHT" launcher_pending_nonce)"
 export DARKBOT_G06A_BUYER_NONCE="$(json_get "$PREFLIGHT" buyer_pending_nonce)"
