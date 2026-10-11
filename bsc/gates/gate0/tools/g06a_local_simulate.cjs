@@ -17,6 +17,7 @@ const { createEVM } = require(path.join(LEGACY_TOOLS, '@ethereumjs/evm'));
 const { createCustomCommon, Mainnet, Hardfork } = require(path.join(LEGACY_TOOLS, '@ethereumjs/common'));
 const { RPCStateManager, RPCBlockChain } = require(path.join(LEGACY_TOOLS, '@ethereumjs/statemanager'));
 const {
+  Account,
   KECCAK256_RLP,
   createAccount,
   createAddressFromString,
@@ -219,6 +220,14 @@ async function main() {
   const launcherAddr = createAddressFromString(launcherWallet.address);
   const buyerAddr = createAddressFromString(buyerWallet.address);
   const portalAddr = createAddressFromString(portal);
+
+  // DRY-only local EOA overlay. Keep the real wallet identities and frozen
+  // preflight nonces, but do not depend on historical balance/account reads
+  // from a pruned public BSC RPC. Contract code/storage still comes from the
+  // exact frozen Mainnet parent state through RPCStateManager.
+  const dryBalance = 100_000_000_000_000_000_000n;
+  await state.putAccount(launcherAddr, new Account(launcherNonce, dryBalance));
+  await state.putAccount(buyerAddr, new Account(buyerNonce, dryBalance));
 
   const launchRes = await evm.runCall({
     caller: launcherAddr,
