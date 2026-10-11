@@ -1,0 +1,86 @@
+{
+  "schema": "C0-E1/INDEX/1",
+  "run_id": "market5h_20261011T010758Z",
+  "window": {
+    "start_ns": 1791680918000000000,
+    "end_ns": 1791698918000000000,
+    "start_utc": "2026-10-11T01:08:38.000000000Z",
+    "end_utc": "2026-10-11T06:08:38.000000000Z",
+    "actual_observation_ended_at": "2026-10-11T06:08:38Z",
+    "provenance": "LEGACY_START_PLUS_REQUESTED_DURATION; actual end retained separately",
+    "blocktime_semantics": "integer chain blockTime in [start,end); not local T_rx; boundary seconds uncertain",
+    "source_identity": {
+      "summary_sha256": "3da8deafffcbb3f57796b28e2df26c28bb0413429422b7c0239a80d8526bd5fd"
+    }
+  },
+  "status": "HISTORICAL_INCOMPLETE",
+  "canonical_verified": false,
+  "c0_e1_master_pass": false,
+  "live_ready": false,
+  "reason": "RPC_RATE_LIMIT",
+  "incomplete_reasons": [
+    "RPC_RATE_LIMIT",
+    "INDEX_START_NOT_CROSSED",
+    "HISTORICAL_PAYLOAD_UNKNOWN"
+  ],
+  "crossed_start": false,
+  "head_after_end": true,
+  "pages_persisted": 2,
+  "indexed_signatures": 2000,
+  "in_window_transactions": 0,
+  "unresolved_transactions": 2000,
+  "unknown_transactions": 0,
+  "qualified_liquidations": {
+    "CLASSIC": 0,
+    "RECEIVERSHIP": 0,
+    "FORCED_DELEVERAGE": 0,
+    "BANKRUPTCY_SETTLEMENT": 0
+  },
+  "observed_events_including_unknown_transactions": {
+    "CLASSIC": 0,
+    "RECEIVERSHIP": 0,
+    "FORCED_DELEVERAGE": 0,
+    "BANKRUPTCY_SETTLEMENT": 0
+  },
+  "zero_liquidations_proven_within_index_scope": false,
+  "comparison_counts": {
+    "BOT_ONLY_INDEX_MISSING": 181
+  },
+  "bot_import_complete": true,
+  "live_coverage": {
+    "first_slot_evidence_utc": "2026-10-11T01:08:38.000000000Z",
+    "last_slot_evidence_utc": "2026-10-11T01:42:38.000000000Z",
+    "last_live_slot": 455473465,
+    "open_gap_start_utc": "2026-10-11T01:42:38.000000000Z",
+    "tail_without_slot_evidence_seconds": 15960.0
+  },
+  "rpc_this_attempt": {
+    "calls": 4,
+    "methods": {
+      "getSignaturesForAddress": 4
+    },
+    "response_bytes": 504600,
+    "request_bytes": 974
+  },
+  "provider_identity": "opaque SHA256 binding retained in checkpoint; credential/endpoint changes reject mixed-source resume",
+  "provider_assumptions": [
+    "finalized address index pagination supplied by configured provider; no independent provider crosscheck",
+    "address-index LUT-only/CPI delivery completeness unproven; INDEX_VERIFIED is conditional index-scope evidence",
+    "blockTime is coarse chain evidence, not local receive/decision time; boundary seconds not classified as live misses"
+  ],
+  "economic_non_claims": [
+    "No realized PnL; no historical race/speed/profit reconstruction",
+    "meta.fee retained per transaction; not multiplied by event count; absent cost/price/amount remains null",
+    "No full-block downloads; transaction_index unknown unless actually supplied by provider"
+  ],
+  "resources": {
+    "cpu_seconds": 0.822078,
+    "max_rss_platform_units": 39354368,
+    "verification_disk_bytes": 4989241
+  },
+  "rpc_all_attempts": {
+    "calls": 4,
+    "response_bytes": 504600,
+    "request_bytes": 974
+  }
+}

@@ -1,0 +1,30 @@
+usage: audit_market_quick.py [-h] [--run RUN] [--mode {index}] [--rps RPS]
+                             [--max-pages MAX_PAGES] [--max-calls MAX_CALLS]
+                             [--max-seconds MAX_SECONDS] [--timeout TIMEOUT]
+                             [--attempts ATTEMPTS] [--max-bytes MAX_BYTES]
+                             [--offline] [--self-test]
+                             [run_dir]
+
+Independent, resumable finalized Marginfi UTC index verification; read-only
+RPC
+
+positional arguments:
+  run_dir
+
+options:
+  -h, --help            show this help message and exit
+  --run RUN
+  --mode {index}        strict remains the existing Rust qualification;
+                        crosscheck not claimed
+  --rps RPS
+  --max-pages MAX_PAGES
+                        per invocation; exhaustion is INCOMPLETE, cursor
+                        resumes
+  --max-calls MAX_CALLS
+  --max-seconds MAX_SECONDS
+  --timeout TIMEOUT
+  --attempts ATTEMPTS
+  --max-bytes MAX_BYTES
+  --offline             import local evidence and write missing-RPC status
+                        without network
+  --self-test

@@ -1,0 +1,9 @@
+test_help_and_required_argument_do_not_start_run (__main__.MeasurementCli.test_help_and_required_argument_do_not_start_run) ... ok
+test_invalid_and_conflicting_input (__main__.MeasurementCli.test_invalid_and_conflicting_input) ... ok
+test_launcher_uses_persisted_plan_and_no_total_capture_timebox (__main__.MeasurementCli.test_launcher_uses_persisted_plan_and_no_total_capture_timebox) ... ok
+test_release_duration_matrix (__main__.MeasurementCli.test_release_duration_matrix) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 2.649s
+
+OK

@@ -1,0 +1,68 @@
+{
+  "scope": "P3 local index implementation",
+  "local_qualification": "PASS",
+  "historical_qualification": "OPEN / RPC_RATE_LIMIT",
+  "python_tests": {
+    "passed": 26,
+    "failed": 0,
+    "real_mainnet_receivership_fixtures": 6,
+    "other_three_kinds": "synthetic valid payloads from pinned 0.1.11 schema"
+  },
+  "p1_cli_integration_tests": {
+    "passed": 4,
+    "failed": 0,
+    "uses_existing_release_measurement_plan_compiler": true
+  },
+  "syntax": "Python py_compile / bash -n / git diff --check PASS",
+  "rust": "NOT_RUN: no Rust source modified; P1 schema and release plan consumer tested",
+  "source_sha256": {
+    "project_0/scripts/audit_market_quick.py": "da7f30e304feac397eb87d10ecc4cb2d8afa27fcf18e132ede25145dae583017",
+    "project_0/scripts/verify.sh": "01b9887a54d347c448d5f754c684bd093267926566334f004e28a47db25d0b62",
+    "project_0/scripts/test_audit_market_quick.py": "e5618ab48b24708e2bbf06518ab75203be44e02cf885f08b99df0678ccbe93f3"
+  },
+  "fixtures": [
+    {
+      "path": "project_0/docs/evidence/AUDIT_20261005/C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ.json",
+      "signature": "C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ",
+      "sha256": "5dbaa1dd5bccdeb89637e8fb3fdb62c8c029c0ec1b1d9ed9df353664d52a8251",
+      "tested_kind": "RECEIVERSHIP"
+    },
+    {
+      "path": "project_0/docs/evidence/AUDIT_20261005/38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F.json",
+      "signature": "38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F",
+      "sha256": "e657660c193834f907ae90782c9353439a292bf3c21d0e0ba2290559824d43b6",
+      "tested_kind": "RECEIVERSHIP"
+    },
+    {
+      "path": "project_0/docs/evidence/AUDIT_20261005/59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa.json",
+      "signature": "59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa",
+      "sha256": "b165bd3f55a931a9475614952fad12a5dc940ad18d85ac8822eedbf80a8b95e0",
+      "tested_kind": "RECEIVERSHIP"
+    },
+    {
+      "path": "project_0/docs/evidence/AUDIT_20261005/gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB.json",
+      "signature": "gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB",
+      "sha256": "3fcb335041090423158fb05d883b4c55e7e0897c9bbe9fdba541f8b7a6964dbb",
+      "tested_kind": "RECEIVERSHIP"
+    },
+    {
+      "path": "project_0/docs/evidence/AUDIT_20261005/3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB.json",
+      "signature": "3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB",
+      "sha256": "3a0d2e639d1efea1fef30ff6ff9dbc4f0476056f04e8559e5df4d466d51c1643",
+      "tested_kind": "RECEIVERSHIP"
+    },
+    {
+      "path": "project_0/docs/evidence/AUDIT_20261005/2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf.json",
+      "signature": "2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf",
+      "sha256": "9822cde8c32c5544fe90571c6a208e3b770a0effe0e92e1388a59b4fecad4329",
+      "tested_kind": "RECEIVERSHIP"
+    }
+  ],
+  "initial_p1_base": "a097a59a30ed82223316c734897f13091b109651",
+  "concurrent_intermediate_checkpoint": "bc5a18a (unfinished prefix of this implementation; preserved)",
+  "historical_command": "./project_0/scripts/verify.sh --run market5h_20261011T010758Z --mode index --max-seconds 60 --max-pages 8 --max-calls 100 --attempts 2",
+  "mainnet_capture_started": false,
+  "full_blocks_downloaded": 0,
+  "submission": false,
+  "next": "P2, after user direction; stop after P3 status"
+}

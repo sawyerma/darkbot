@@ -1,0 +1,36 @@
+{
+  "run_id": "market5h_20261011T010758Z",
+  "pages": 2,
+  "cursor_present": true,
+  "cursor_sha256": "edb7588d4928aa66b4ddef9fba09ef309edd37ed6ab89191c44171853dfc7a55",
+  "indexed_signatures": 2000,
+  "live_transactions": 181,
+  "local_input_checkpoints": [
+    [
+      "market/transactions.jsonl",
+      721328,
+      721328
+    ],
+    [
+      "market/liquidations.jsonl",
+      0,
+      0
+    ],
+    [
+      "canonical_market_shadow.jsonl",
+      0,
+      0
+    ],
+    [
+      "opportunity_economics.jsonl",
+      14119318,
+      14119318
+    ],
+    [
+      "market/coverage.jsonl",
+      5447441,
+      5447441
+    ]
+  ],
+  "source_matches_tested_auditor": true
+}

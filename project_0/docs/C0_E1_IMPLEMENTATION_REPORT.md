@@ -1,3 +1,44 @@
+## P3 — UTC historical index verification, 2026-10-11
+
+**P3 IMPLEMENTED / LOCAL TECHNICAL PASS. Real five-hour historical qualification: OPEN (`RPC_RATE_LIMIT`), not a zero-liquidation result. Stop after this package; next P2.**
+
+Implementation extends `scripts/audit_market_quick.py`; entry point:
+
+```bash
+./project_0/scripts/verify.sh --run market5h_20261011T010758Z --mode index
+# Bounded historical qualification / resume (same persisted cursor and raw responses):
+./project_0/scripts/verify.sh --run market5h_20261011T010758Z --mode index --max-seconds 60 --max-pages 8 --max-calls 100 --attempts 2
+```
+
+- P1 manifest + CAPTURE journal supplies exact UTC nanosecond boundaries. Legacy reports supply start + requested duration; actual end is retained separately. Last observed slot never truncates the requested historical window. No five-hour constants in production code.
+- Finalized `getSignaturesForAddress` pages continue through short pages until an entirely timed page precedes start. Dedupe, conflicting duplicates, reverse slot order, cursor stalls, null blockTime and history/page-budget exhaustion are explicit. `getTransaction` fetches all eligible indexed TX, including failed ones and unknown-time rows; no liquidation prefilter. Only those two RPC methods allowed; no full-block downloads.
+- Existing independent base58/discriminator/frame decoder extended with pinned 0.1.11 event payload layouts, known instruction/event surface, outer/CPI execution positions, loaded addresses, versions legacy/0/1, exact instruction target/actor binding, start/end separation, caught-CPI rollback/truncation/malformed/unknown handling. Event position, target, actor, amounts, meta.fee, fee payer and raw token/lamport balances retained; missing prices/costs stay unknown. Runtime never invokes the bot decoder to establish external truth.
+- SQLite disk-backed, bounded import and signature state; atomic per-page cursor/checkpoint, cached original RPC responses, exclusive writer lock, immutable run/window/decoder identity and opaque provider binding. Successful responses survive interruption before DB checkpoint; already completed TX/pages are not fetched again. Local input size/mtime guards prevent silently mixing altered capture files. Per-invocation rate/call/time/response-byte limits and bounded HTTP-429 Retry-After/backoff. No endpoint or credential logging.
+- Comparison by signature/slot/event position, type, target/actor and comparable amounts. Live records, independently decoded live payload and canonical records remain separate. A missing record inside a documented outage differs from a missing liquidation record with an existing live TX; merely observed slot intervals do not establish universal provider coverage. Legacy non-receivership live detection was not always materialized, therefore payload presence is **DETECTION_UNPROVEN**, not a invented bot detection/miss claim.
+- Shadow join consumes existing materialized `canonical_market_shadow.jsonl` and `opportunity_economics.jsonl`, preserving available economics/capital/race evidence. `SHADOW_MATCH` requires event identity; absence means no evidence in those reports, **not** proof no raw Shadow evaluation existed. This verifier does not re-run simulation, re-price old assets or infer historical live execution speed/profit.
+- Outputs under `<run>/verification/index_v1/`: `checkpoint.sqlite3`, immutable page/transaction response files, per-attempt summaries, `comparison.jsonl`, `bot_only.jsonl`, `summary.json`, `report.txt`. Finalized index coverage can produce only `INDEX_VERIFIED`; `canonical_verified=false`, `c0_e1_master_pass=false`, LIVE disabled. Cross-provider verification is not claimed; strict remains its existing separate qualification. Provider/decoder identity changes deliberately reject mixing persisted evidence and require an explicit migration/new evidence namespace.
+
+Qualification actually executed:
+
+```bash
+python3 -m unittest discover -s project_0/scripts -p test_audit_market_quick.py -v
+./project_0/scripts/verify.sh --self-test
+python3 project_0/scripts/test_measurement_plan.py
+python3 -m py_compile project_0/scripts/audit_market_quick.py project_0/scripts/test_audit_market_quick.py
+bash -n project_0/scripts/verify.sh
+git diff --check
+```
+
+**26 tests PASS / 0 FAIL**, including six existing real Mainnet receivership TX fixtures from `docs/evidence/AUDIT_20261005`; classic/deleverage/bankruptcy tested with synthetic payloads derived from the exact pinned event schema (not claimed as real Mainnet positives). Includes fractional P1 UTC, legacy planned-vs-actual end, duplicate/short pages, checkpoint interruption/resume without repeat fetch, unavailable TX then resume, 429 Retry-After and finite retry/secret-free errors, unsupported versions, CPI/LUT-only program references, failed/foreign/truncated/malformed events, amount/type/slot mismatch, Shadow identity and unknown economics. CLI self-test repeats the same 26 tests. Existing P1 CLI/release-plan integration **4 PASS**. No Rust source changed; no redundant Rust rebuild/workspace tests claimed.
+
+**Real preserved five-hour run:** automatically found `project_0/data/econ4h/market5h_20261011T010758Z`; derived `2026-10-11T01:08:38Z` through `06:08:38Z` from its report. Imported **181 live TX**, full local coverage file and materialized Shadow reports. Last slot evidence at **01:42:38Z**, unresolved GAP starts there, **15,960 seconds** without later slot evidence. Four total RPC attempts (including failures) returned **two pages / 2,000 persisted signatures**, **504,600 response bytes**, then bounded retry stopped with **RPC_RATE_LIMIT**. Start not yet crossed; **no historical getTransaction evaluation completed**. Historical liquidation counts remain **UNKNOWN**; zeros in observed counters do not prove absence. Cursor, original responses and local-file offsets remain available for the resume command above. No repeated quota probes or new capture performed.
+
+Evidence: `project_0/docs/evidence/C0E1_P3_20261011/` (tests, source/fixture hashes, real partial summary, resume proof, exact command). Existing raw runs untouched; only new verifier-owned output created inside the old run. Initial P1 base was `a097a59`; concurrent local commit `bc5a18a` checkpointed this implementation's unfinished prefix while BSC work progressed. Those commits were preserved; final P3 staging contains Project_0 files only.
+
+**Next:** report P3 commit/push and stop. P2 WebSocket/provider stability remains next, P4 strict partition/resume remains OPEN. No long run, provider purchase, LIVE or submission authorized by this result.
+
+---
+
 ## P1 — Dynamic MeasurementPlan, 2026-10-11
 
 **P1 IMPLEMENTED / LOCAL TECHNICAL PASS. No Mainnet capture performed. P3 next; P2/P4–P6 remain OPEN.**

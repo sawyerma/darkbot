@@ -1,0 +1,10 @@
+HISTORICAL_INCOMPLETE — market5h_20261011T010758Z
+2026-10-11T01:08:38.000000000Z → 2026-10-11T06:08:38.000000000Z
+Reason: RPC_RATE_LIMIT; pages: 2; transactions in window: 0
+Qualified events: {"CLASSIC": 0, "RECEIVERSHIP": 0, "FORCED_DELEVERAGE": 0, "BANKRUPTCY_SETTLEMENT": 0}
+Unknown transactions: 0; unresolved: 2000
+DarkBot: {"BOT_ONLY_INDEX_MISSING": 181}
+RPC: {"calls": 4, "methods": {"getSignaturesForAddress": 4}, "response_bytes": 504600, "request_bytes": 974}
+INDEX scope only. CANONICAL_VERIFIED=false; C0_E1_MASTER_PASS=false. UNKNOWN is never zero.
+Historical chain data does not establish that DarkBot could have traded an event in time.
+Evidence: /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/data/econ4h/market5h_20261011T010758Z/verification/index_v1
