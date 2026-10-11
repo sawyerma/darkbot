@@ -449,17 +449,17 @@ impl ObserverCore {
             // relevant transactions and canonical evidence) has passed validation
             // and its coverage row was accepted by the sink.
             // Do not repeat unchanged Shadow status during slow post-capture RPC.
-            if r.slots_fetched == 1
-                || r.slots_fetched % 50 == 0
-                || r.slots_fetched == r.slots_produced
+            if self.reconciliation.slots_fetched == 1
+                || self.reconciliation.slots_fetched % 50 == 0
+                || self.reconciliation.slots_fetched == self.reconciliation.slots_produced
             {
                 eprintln!(
                     "[MARKET/CANONICAL] phase=SCANNING verified_blocks={} produced_blocks={} confirmed_skips={} expected_slots={} marginfi_tx={} liquidations={}",
-                    r.slots_fetched,
-                    r.slots_produced,
-                    r.slots_skipped_confirmed,
-                    r.slots_expected,
-                    r.marginfi_transactions,
+                    self.reconciliation.slots_fetched,
+                    self.reconciliation.slots_produced,
+                    self.reconciliation.slots_skipped_confirmed,
+                    self.reconciliation.slots_expected,
+                    self.reconciliation.marginfi_transactions,
                     self.truth.events.len()
                 );
             }
