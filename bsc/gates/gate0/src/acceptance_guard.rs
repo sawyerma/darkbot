@@ -299,7 +299,13 @@ pub fn verify_live_authorization(
             ctx.reserved_attempt_wei, snap.max_total_per_attempt
         ));
     }
-    if ctx.attempt_number == 0 || ctx.attempt_number > snap.max_attempts {
+    if ctx.attempt_number != 1 {
+        return Err(format!(
+            "single-attempt freeze: only G0.7 attempt 1 is permitted, got {}",
+            ctx.attempt_number
+        ));
+    }
+    if ctx.attempt_number > snap.max_attempts {
         return Err(format!(
             "attempt {} exceeds approved maximum {}",
             ctx.attempt_number, snap.max_attempts
