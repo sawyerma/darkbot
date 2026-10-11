@@ -51,7 +51,7 @@ if v.get("status") != "DRY3_POLICY_READY" or v.get("dry3_ready") is not True:
     raise SystemExit("STOP: builder policy is not ready")
 if v.get("strictest_explicit_verified_floor_wei") != "50000000":
     raise SystemExit("STOP: unexpected strict builder floor")
-if v.get("stage1_signed_gas_price_policy_wei") != "1000000000":
+if v.get("stage1_signed_gas_price_policy_wei") != "50000000":
     raise SystemExit("STOP: unexpected Stage-1 signed gas policy")
 print("BUILDER_POLICY=PASS")
 PY
