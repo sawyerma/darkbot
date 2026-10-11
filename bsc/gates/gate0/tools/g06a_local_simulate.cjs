@@ -189,6 +189,8 @@ async function main() {
     gasLimit: launchGasLimit,
     gasPrice,
     block,
+    // DRY-only local execution; G0.7 independently requires funding_pass=true.
+    skipBalance: true,
   });
   const launchError = launchRes.execResult.exceptionError?.error || null;
   if (launchError) throw new Error(`local launch simulation reverted: ${launchError}`);
@@ -202,6 +204,8 @@ async function main() {
     gasLimit: buyGasLimit,
     gasPrice,
     block,
+    // DRY-only ephemeral local EVM state.
+    skipBalance: true,
   });
   const buyError = buyRes.execResult.exceptionError?.error || null;
   if (buyError) throw new Error(`local BUY simulation reverted: ${buyError}`);
