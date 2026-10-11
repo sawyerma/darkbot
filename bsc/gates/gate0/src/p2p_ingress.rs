@@ -366,7 +366,7 @@ pub fn spawn_testnet_flap_sensor(
 
                 let net_cfg = net_cfg.set_discovery_v4(
                     Discv4ConfigBuilder::default()
-                        .add_boot_nodes(boot_nodes)
+                        .add_boot_nodes(boot_nodes.clone())
                         .lookup_interval(Duration::from_millis(250))
                         .build(),
                 );
