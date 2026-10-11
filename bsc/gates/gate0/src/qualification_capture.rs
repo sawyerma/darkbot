@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 #[path = "../../../native/crates/darkbot-capture/src/lib.rs"]
 mod capture_impl;
 
