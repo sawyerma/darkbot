@@ -445,6 +445,24 @@ impl ObserverCore {
             sink.coverage(&json!({"event":"FULL_SLOT_RESULT","slot":slot,"status":"PRODUCED_FETCHED",
                 "blockhash":hash,"parent_slot":parent,"previous_blockhash":prev_hash,"block_time":block["blockTime"],"transactions_scanned":txs.len()}))?;
             self.reconciliation.slots_fetched += 1;
+            // A progress unit is counted ONLY after the full block (including
+            // relevant transactions and canonical evidence) has passed validation
+            // and its coverage row was accepted by the sink.
+            // Do not repeat unchanged Shadow status during slow post-capture RPC.
+            if r.slots_fetched == 1
+                || r.slots_fetched % 50 == 0
+                || r.slots_fetched == r.slots_produced
+            {
+                eprintln!(
+                    "[MARKET/CANONICAL] phase=SCANNING verified_blocks={} produced_blocks={} confirmed_skips={} expected_slots={} marginfi_tx={} liquidations={}",
+                    r.slots_fetched,
+                    r.slots_produced,
+                    r.slots_skipped_confirmed,
+                    r.slots_expected,
+                    r.marginfi_transactions,
+                    self.truth.events.len()
+                );
+            }
             let time = block["blockTime"].as_i64();
             if self.reconciliation.slots_fetched == 1 {
                 self.reconciliation.first_block_time = time;

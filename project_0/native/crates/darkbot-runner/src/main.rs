@@ -3813,18 +3813,30 @@ fn run_econ4h() -> Result<(), String> {
         })
         .map_err(|e| e.to_string())?;
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout);
-    let mut shadow_status_at = std::time::Instant::now() - Duration::from_secs(10);
+    // Report state transitions instead of repeating a finished Shadow state
+    // throughout the (potentially long) finalized block reconciliation.
+    let mut last_status = None;
     while !shadow.is_finished() || !observer.is_finished() {
-        if shadow_status_at.elapsed() >= Duration::from_secs(10) {
-            shadow_status_at = std::time::Instant::now();
-            eprintln!(
-                "[SHADOW/STATUS] ready={} done={} failed={} market_done={} market_failed={} live=false submission=false",
-                handle.shared.shadow_ready.load(Ordering::Acquire),
-                handle.shared.shadow_done.load(Ordering::Acquire),
-                handle.shared.shadow_failed.load(Ordering::Acquire),
-                handle.shared.market_done.load(Ordering::Acquire),
-                handle.shared.market_failed.load(Ordering::Acquire)
-            );
+        let status = (
+            handle.shared.shadow_ready.load(Ordering::Acquire),
+            handle.shared.shadow_done.load(Ordering::Acquire),
+            handle.shared.shadow_failed.load(Ordering::Acquire),
+            handle.shared.market_done.load(Ordering::Acquire),
+            handle.shared.market_failed.load(Ordering::Acquire),
+        );
+        if last_status != Some(status) {
+            if status.1 && !status.3 {
+                eprintln!(
+                    "[MARKET/STATUS] phase=POST_CAPTURE_FINALIZATION shadow_done={} shadow_failed={} market_done={} market_failed={} live=false submission=false",
+                    status.1, status.2, status.3, status.4
+                );
+            } else {
+                eprintln!(
+                    "[SHADOW/STATUS] ready={} done={} failed={} market_done={} market_failed={} live=false submission=false",
+                    status.0, status.1, status.2, status.3, status.4
+                );
+            }
+            last_status = Some(status);
         }
         if analytics.is_finished() || std::time::Instant::now() >= deadline {
             handle.shared.abort.store(true, Ordering::Release);
