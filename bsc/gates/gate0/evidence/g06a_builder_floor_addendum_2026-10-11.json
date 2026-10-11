@@ -24,12 +24,19 @@
   },
   "strictest_explicit_verified_floor_wei": "50000000",
   "strictest_explicit_verified_floor_source": "BlockRazor",
-  "stage1_signed_gas_price_policy_wei": "1000000000",
-  "stage1_policy_note": "1 gwei remains DarkBot's conservative Stage-1 signed-gas-price policy inside the frozen v2 budget; it is not claimed as a provider minimum.",
+  "stage1_signed_gas_price_policy_wei": "50000000",
+  "stage1_policy_note": "Final one-attempt minimal-spend policy: 0.05 gwei equals the strictest explicit verified BlockRazor floor and the 2026-10-11 observed BSC RPC gas price during the minimum-spend probe. This is a DarkBot signed-gas policy, not a claimed 48Club minimum.",
   "dry3_ready": true,
   "non_claims": [
     "This evidence does not prove valid bundle inclusion.",
     "This evidence does not prove hidden undocumented 48Club requirements.",
     "Real G0.7 ordering/acquisition evidence is still required."
-  ]
+  ],
+  "minimum_spend_probe": {
+    "date": "2026-10-11",
+    "current_rpc_gas_price_wei": "50000000",
+    "selected_signed_gas_price_wei": "50000000",
+    "selected_buy_value_wei": "1000000000000",
+    "rationale": "Smallest evidence-backed gas price and lowest BUY value already locally probed with positive expected/min output; full G0.6 DRY must requalify exact final bytes before funding."
+  }
 }
