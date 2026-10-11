@@ -1,3 +1,5 @@
+> **AKTUELLER C0-E1 ASTRA-MASTERAUFTRAG (2026-10-11):** Siehe den neuen verbindlichen Abschnitt „C0-E1 — ASTRA MASTER IMPLEMENTATION CONTRACT 2026-10-11“ am Dokumentende. Der fehlgeschlagene 5h-Run (527 GAPs, langanhaltende 429, 15.960s fehlende Slot-Evidence, 0 kanonische Blocks) ist analysiert. Implementierungs- und Mainnet-Requalifikation sind OFFEN; LIVE/Submission gesperrt. Ältere C0-E1-Handoffs sind historische Evidence, kein erneuter Run-Befehl.
+
 > 2026-10-09: canonical full-slot scanner and typed four-path decoder implemented locally; master remains PARTIAL. Current resume/evidence and exact remaining steps are at the top of MEASUREMENT_LEDGER.md. No 4h qualification or LIVE release.
 
 # DarkBot — Project 0 — Produktions-Phasenplan v4.5
@@ -4948,3 +4950,150 @@ Shadow bootstrap/root catch-up had not produced evaluations; prolonged waiting
 was stopped to preserve credits. All evidence retained, no new commit/push,
 no4h launch. MEASUREMENT_LEDGER.md contains the exact remaining diagnosis and
 resume commands. Code completion is not an end-to-end profitability/stabilityPASS.
+
+---
+
+## C0-E1 — ASTRA MASTER IMPLEMENTATION CONTRACT 2026-10-11
+
+**Status: VERBINDLICHE UMSETZUNGSSPEZIFIKATION / NOT IMPLEMENTED / NO NEW LONG RUN AUTHORIZED.** Dieser neue Abschnitt ist der maßgebliche aktuelle Auftrag für C0-E1-Teststeuerung, Transport- und Provider-Robustheit sowie den unabhängigen historischen Marginfi-Marktvergleich. Er **ersetzt** ältere Handlungsanweisungen zum unveränderten 4h/5h-Neustart und zur Pflicht, vor jeder Daueränderung Shell/Rust-Parameter manuell zu setzen. Er **ersetzt nicht** den strengeren bestehenden C0-E1-Vertrag zur vollständigen finalisierten Markt-/Slot-Qualifikation, die Trading-Sicherheitsregeln oder das v4.5-Produktziel. Ältere Evidence bleibt historisch unverändert.
+
+**Repo:** sawyerma/darkbot, aktuelles origin/main beim Arbeitsbeginn selbst verifizieren; keine SHA blind übernehmen. **Scope:** ausschließlich project_0/**; bsc/** niemals bearbeiten. **Auftraggeber-Freigabe:** Astra darf den spezifizierten Code implementieren, reviewen, testen und kleine projektbezogene Commits auf main pushen. **Keine Freigabe** für neue 5h-/24h-Mainnet-Captures, LIVE, Submission, Providerkäufe oder das Löschen bisheriger Evidence. Fehler ehrlich als OPEN dokumentieren; keinen vollständigen PASS durch abweichende Definitionen erzwingen.
+
+### A. Bereits abgeschlossene Fehleranalyse – als Fakten übernehmen, nicht als neue Forschungsphase
+
+Quelle: Anwenderausgaben, market/summary.json, market/coverage.jsonl und runtime.log des tatsächlich durchgeführten Runs **market5h_20261011T010758Z**. Rohdateien liegen auf dem Mac des Anwenders und nicht notwendigerweise in Git; keine Verfügbarkeit im Remote erfinden.
+
+| Befund | Gemessen | Schlussfolgerung / Evidenzgrenze |
+| --- | --- | --- |
+| Configured/elapsed | 18.000 s; 2026-10-11T01:08:38Z bis 06:08:38Z | Die Messuhr lief 5h; das ist kein Beweis für 5h Market-Coverage |
+| Live Capture | 181 Transaktionen, davon 100 success / 81 failed | Teilbeobachtung, kein vollständiger Markt-Census |
+| Slotdaten | 9.369 Notifications; Slot 455464097 (01:08:38Z) bis 455473465 (01:42:38Z) | 15.960 s vor Capture-Ende ohne später nachgewiesene Slot-Grenze |
+| Transport | 527 GAP, 0 erfolgreich gezählte Reconnects, 0 ingress overflows | Einmalige StreamReady-Barriere; später anhaltende Verbindungsabbrüche und 429, keine erfolgreich dokumentierte Wiederaufnahme |
+| WSS-Log | anfänglich close frame, dann vielfach HTTP 429; Backoff erreicht 30s und 429 wiederholt sich | Provider verweigert Verbindungen; genaue Kontingentursache und beteiligte Client-Last noch nicht belegt |
+| Gap-State | 32 GAP_UNRECOVERED und GAP_STATE_CAPACITY | default max_gaps=32; ein langanhaltender Ausfall verbrauchte die Zustandskapazität |
+| Canonical | slots_expected=9369, produced=0, fetched=0, skipped=0, unresolved=9369; error=RPC_RATE_LIMIT | Vor dem ersten erfolgreich verarbeiteten Block gescheitert; ob getSlot oder getBlocks den ersten endgültigen 429 lieferte, aus Summary allein nicht bestimmbar |
+| Deployment | DEPLOYMENT_RPC_RATE_LIMIT | weiterer Provider-429; keine Bytecode-Kontinuitätsqualifikation |
+| Decoder | LOGS_TRUNCATED_UNQUALIFIED=2 | zwei Truncation-Fälle ohne nachgewiesene Auflösung |
+| Endstatus | MARKET_DATA_INCOMPLETE, canonical_complete=false, TEST_EXIT=2 | NULL gemeldete kanonische Liquidationen ist **UNKNOWN**, keine bestätigte Marktnull |
+
+**Getrennte frühere Evidenz:** 10-Minuten-Run market10m_20261011T003528Z: externer finalized Marginfi-Adressindex 32 Signaturen, Bot-Live-Zähler 32, persistent gespeichert 31, eine im Inneren des Fensters fehlende Signatur, keine vom unabhängigen Prüfskript erkannten Liquidationsinstruktionen/-Events. Danach wurde pro Live-Transaktion Flush ergänzt; Rust-Release-Build und Decoder-Selbsttest PASS. **Nicht** daraus ableiten: vollständige Blockabdeckung, hundertprozentige Event-Decoder-Korrektheit oder erfolgreiche 5h-Wiederholung.
+
+**Unmittelbar aus Git belegte Gründe:** econ.rs erzwingt duration_secs == 4 * snapshot_secs; run_econ4h.sh wechselt bei short/auto (<3600s) auf harte gesamte Walltime, die Bootstrap und Cleanup einschließt; market_observer.rs startet seine Uhr nach StreamReady, aktualisiert Markt-Slotgrenzen aber nur bei empfangenen Slot-Notifications; ws_rpc.rs emittiert Gap bei Sessionfehler und Reconnected erst nach allen Subscription-ACKs; market_gap.rs führt maximal 32 offene GAP-Datensätze standardmäßig; market_reconcile.rs hat 100.000 Slots Gesamtgrenze, 14.400s Phasenlimit und verarbeitet ganze finalized Blöcke; der bestehende Python-Auditor liest beim Full-Run den verkürzten observerseitigen Slotbereich. Diese Tatsachen bilden die zu behebenden Codepfade.
+
+**Wichtige Grenze:** 43 GiB des älteren Vierstundenlaufs sind gespeicherte Run-Evidence, NICHT nachgewiesene 43 GiB heruntergeladene Blöcke. Ein indexbasierter Vergleich reduziert voraussichtlich Netzwerk-/Block-I/O, aber nicht automatisch das Shadow-Journaling. Speicherverbrauch nach Dateityp empirisch messen, nicht die Ursachen vermischen.
+
+### B. Lieferziel und Bedienungsvertrag (ein Parameter statt manueller Nachjustierung)
+
+Verbindliche Soll-CLI; Namenswahl test.sh und verify.sh nur ändern, wenn eine bessere bestehende konsistente Schnittstelle nachgewiesen wird und gleichwertige Beispiele dokumentiert sind:
+
+~~~bash
+./project_0/scripts/test.sh --duration 10m
+./project_0/scripts/test.sh --duration 1h
+./project_0/scripts/test.sh --duration 5h
+./project_0/scripts/test.sh --duration 24h
+./project_0/scripts/test.sh --duration 5h --verify index
+./project_0/scripts/verify.sh --run market5h_20261011T010758Z --mode index
+./project_0/scripts/verify.sh --run market5h_20261011T010758Z --mode strict
+~~~
+
+Die CLI darf weder Snapshots noch Slots noch Timeout-Höhen manuell voraussetzen. Dauer wird genau einmal validiert (z.B. 10m/1h/5h/24h; gültige ganzzahlige Grenzen dokumentieren) und als typisierter MeasurementPlan/Run-Manifest durch Launcher, Rust-Capture, Analytics und Nachverifikation geführt. Optionen dürfen Overrides für Fachleute anbieten, müssen auf Konflikte prüfen und sich selbst dokumentieren. **Keine stille Umschaltung auf kürzere Capture-Walltime**: 10m bedeutet 600s tatsächlich gewünschte Beobachtung ab StreamReady, sofern kein offen ausgewiesener Fail-closed-Abbruch eintritt. Bootstrap, Capture, Drain, Historienprüfung und optional strict reconciliation besitzen getrennte Deadlines. Ablauf einer Uhr ≠ Proof von Source-Coverage.
+
+Standardmäßig vier deterministisch bei 1/4, 2/4, 3/4, 4/4 der gewählten Gesamtdauer liegende Snapshots (auch bei nicht durch vier teilbaren Sekunden ohne Drift/Doppelzählung). Beispielabstände 10m→150s, 1h→900s, 5h→4500s, 24h→21600s. Entferne sämtliche impliziten *4-/min(4)-Annahmen in Capture, econ.rs-Report/Attribution, Snapshot-Fenstern und Tests oder setze sie über exakt eine gemeinsame Planquelle um. Snapshot-Beweiskette und Report-Metadaten müssen in 10m-, 1h-, 5h- und 24h-Konfiguration denselben Cutoff bezeichnen. 24h nicht durch starres 100.000-Slot-Gesamtlimit blockieren: strict slot-scans in dauerunabhängige, versionierte, bounded, überlappungsfrei/parent-proven Batches aufteilen, nicht nur max_slots hochsetzen.
+
+Run-Manifest vor Start persistent erzeugen: run_id, UTC+monotonic Zeitpunkt/Definition, duration, Planversion, Schema, Snapshot-Grenzen, tested commit/source/binary hashes, provider-class **ohne URLs/Keys**, capture/transport/verification budgets, risk limits, permitted modes. Spätere Zustände append-only/journaled; niemals Roh-Evidence überschreiben. Durations und Grenzen **nicht** nachträglich aus dem letzten empfangenen Slot stillschweigend abkürzen.
+
+### C. Transport-/Provider-Fix – dokumentierte 429-Kaskade, keine bloßen Limit-Erhöhungen
+
+1. Inventar aller realen RPC-/WSS-Verbraucher des kombinierten Prozesses (Shadow bootstrap, health, simulation/winner, deployment, Market WSS, kanonischer Scanner, External Indexer) samt vorhandenem globalem/kundenseitigem Providerbudget und tatsächlicher paralleler Last erstellen. Für noch nicht belegte Details kurze gezielte, sichere read-only Diagnostik und Methoden-/Status-Logging ergänzen; **keine neue allgemeine Ursachenanalysephase**, kein mehrstündiger Lauf. Rotierte/private API-Keys niemals ausgeben.
+2. Gemeinsame Provider-Awareness und zulässige Rate-/Concurrency-Limits pro Endpunkt und Workload herstellen; Token-Bucket/Leaky-Bucket oder gleichwertige deterministische Budgetregel mit Fairness. Historien-Verification **erst nach Capture/Shadow-Quiescence** beziehungsweise auf separatem qualifizierten Provider, nie im Hot Path. Für HTTP 429 Retry-After respektieren, exponentielles begrenztes Backoff mit Jitter, Circuit Breaker/Quota-exhaustion, endliches Recoverybudget und eindeutige Errors. WSS-Verbindungsversuche nicht endlos 429-Spam produzieren lassen. Providerkontingent nicht durch eine algorithmische Zahl „wegkonfigurieren“.
+3. WSS-State-Machine anhand bestätigter Subscription-ACKs UND verwertbarer Anwendungsframes/Slotfortschritte: STARTING, READY, CAPTURING, DEGRADED, RECOVERING, RECOVERED, INCOMPLETE_ABORT/FINISHED. Erkenne mangelhafte Anwendungsliveness, nicht nur Ping/Pong. Dokumentiere Start/Ende jedes wirklichen Ausfalls (monotonic und UTC), letzte gültige Slot- und Payload-Evidence, erfolglose Reconnects, tatsächliche Wiederherstellung. Ein einziges anfängliches StreamReady beweist keine fünfstündige Abdeckung.
+4. Bei anhaltender Transportstörung Fail-closed nach begrenztem, fachlich festgelegtem Recoverybudget **frühzeitig**: markiere Live-Coverage INCOMPLETE und stoppe teure Shadow-/Capture-Arbeit geordnet (sofern sichere Shutdown-Kette), statt Stunden „CAPTURE“ vorzutäuschen. Keine automatische Erhöhung von Budgets proportional zur Messdauer; ein 24h-Lauf braucht gleichwertige Fehlersemantik.
+5. GAPs als zusammenhängende/überlappende zeit- und slotbezogene Ausfallintervalle behandeln, wiederholte 429-Reconnect-Versuche ohne echte Erholung nicht als hunderte autonome Gap-Recovery-Fälle in RAM halten. Trotzdem einzelne Roh-GAP-Meldungen und Ursache historisch journalisieren, Grenzen und Unsicherheiten kennzeichnen; Recovery erst mit nachgewiesenen finalized Grenzen/Events als vollständig markieren. Niemals unbekannte Anfangs-/Endslots erfinden oder Recovery-PASS trotz Lücke.
+6. Deployment-Continuity separat mit providerverträglichem Retry-/Quotamanagement ausführen; ausgefallenes Deployment-RPC wird separat INCOMPLETE, nicht stillschweigend als validiert gewertet.
+
+**Externe technische Voraussetzung:** Falls der Anbieter trotz budgetgerechter Clientlast alle notwendigen RPC/WSS/Archivzugriffe über Stunden sperrt, kann kein Code einen vollständigen 5h-Beweis garantieren. Verfügbarkeit/Quota/Archivhorizont müssen vor einem Langlauf durch kurze definierte Preflight-Probes nachgewiesen sein. Providerwechsel oder kostenpflichtiger Upgrade bedarf expliziter Benutzerentscheidung; niemals automatisch kaufen oder neue Zugangsdaten voraussetzen.
+
+### D. Automatischer effizienter historischer Marginfi-Transaktionsvergleich – primärer Normalpfad
+
+**Ziel:** Alle indexierten Program-Transaktionen für das **tatsächliche geplante UTC-Capture-Fenster** automatisch ermitteln, ohne Slots manuell zu setzen und ohne volle Solana-Blöcke der gesamten Kette pauschal herunterzuladen. Programm: **MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA**.
+
+**Default-Workflow nach Capture und nachträglich für alte Runs:**
+
+1. UTC start/end aus Run-Manifest bzw. vorhandenen nachweisbaren Reportdaten bestimmen. Bei abgebrochenen Captures gewünschtes Intervall und tatsächlich erreichte Beobachtungszeit getrennt halten. Für alten 5h-Run explizit 2026-10-11T01:08:38Z bis 06:08:38Z und 15.960s fehlende Slot-Evidence, jedoch **keine hardcodierten Werte im Programm**.
+2. Unabhängigen historischen Provider über Solana-JSON-RPC **getSignaturesForAddress** (oder gleichwertige spezifizierte Index-API) abfragen, opaque Pagination-Cursor bis zuverlässig **vor** Anfangsgrenze zurückführen, blockTime==null behandeln. Beginne am aktuellen Historienende; sehr alte Daten/Providerpruning/Seitenlimits müssen als INCOMPLETE enden. UTC-/Blocktime ist nicht identisch mit T_rx; Grenzslots und zensierte/fehlende Zeiten explizit qualifizieren. Keine Annahmen über genau einen TX je Slot oder eine feste Signatur pro Programminstruktion.
+3. Sämtliche indexierten Signaturen für den definierten Zeitbereich persistent und dedupliziert erfassen, einschließlich fehlgeschlagener; erfolgreiche TX für alle relevanten Instruktionen/Eventdiscriminators **vollständig prüfen**, nicht durch unbewiesene „nur potenzielle“ Vorfilter Liquidationen verlieren. Per **getTransaction** vollständige relevante Roh-Transaktionen abrufen, äußere und innere CPI, Legacy/v0/v1 soweit RPC unterstützt, loaded addresses/LUTs, Logs, gesonderte start/end/settlement-Semantik, Success, fee payer, Lamport-/Token-Deltas und optional historisch korrekt bewertete USD-Daten qualifizieren. Nicht unterstützte Transaktionsversionen/Pruning/fehlende Payload: UNKNOWN, nicht „kein Event“.
+4. Für jede gefundene Liquidation Signatur, Slot, TX-Index (sofern beweisbar), Instructions-/Event-Index, Typ, betroffene Konten, Actor/Liquidator, Gebühren-/Mengen-Provenienz, Solscan-Link und die Beweisquelle erfassen. Vier Kategorien CLASSIC, RECEIVERSHIP, FORCED_DELEVERAGE, BANKRUPTCY_SETTLEMENT; start_liquidation und end_liquidation dürfen nicht zu doppelten realisierten Liquidationen werden. Keine Kauf-/Trade-Aktionen.
+5. Innerhalb des Prüfers **eigenständig** dekodieren; nicht die Bot-Eventzählung als Input für externe Wahrheit benutzen. Belegte Protokoll-Event-Discriminators und Pinned-Source/Semantik als Autorität verwenden; bekannte reale Mainnet-Positivfixtures aus Repo verifizieren bzw. aus öffentlich verifizierbaren Signaturen ergänzen (nicht behaupten, sechs Fixtures seien vorhanden, ehe sie lokal nachgewiesen sind). Negative failed-TX, foreign-program frame, log truncation, CPI-/LUT-only, versionierte TX testen.
+6. **Auto-Join** Signatur + Slot + nachgewiesener Instruktions-/Event-Position zu live transactions, canonical events, Shadow evaluations, Winner/Capital/Economics; je Klasse MATCH, MISSING_LIVE, MISSING_LIQUIDATION, TYPE_MISMATCH, AMOUNT_MISMATCH, SHADOW_MATCH, SHADOW_NO_EVIDENCE, HISTORICAL_UNKNOWN. Live-Zählung bleibt getrennt von Canonical-/Index-Zählung; eindeutige Grenzslot-Semantik und unsichere Zuordnungen als UNKNOWN. Keine Profit-Zuschreibung allein aus Marktaktivität; Market Gross Edge ≠ executable Edge ≠ realized PnL. Fehlende Tokenpreise, Gas/priority/rent/DEX-Kosten niemals als 0 imputieren.
+7. Optional zweiter tatsächlich **unabhängiger** Indexprovider (Konfiguration/Abdeckung/Quellprovenienz dokumentieren). Solscan vor allem für Explorer-Links; pro-API nur optional, kein bezahlter Dienst als notwendige Voraussetzung, kein Browser-Scraping. **Adressindex-Completeness nicht unterstellen:** LUT-only/Indexer-Coverage, CPI, providerseitige Lücken sind als eigene Risiken zu qualifizieren.
+
+**Drei explizite Prüfmodi:** index (Default, schnelle RPC-Indizierung), crosscheck (unabhängige zweite Quelle bei Verfügbarkeit), strict (finalized vollständige Slot-/Block-Reconciliation mit dokumentierter Parent-Link-/Skip-Proof-Semantik). Ein grüner Index- oder Zweiindex-Abgleich = maximal **INDEX_VERIFIED/CROSSCHECK_VERIFIED**. Der bisherige C0-E1-MASTER-Gate verlangt strengere CANONICAL_VERIFIED-Abdeckung zusätzlich zu Capture-/Economics-Qualifikation. Strict darf fehlschlagen/OPEN bleiben, ohne den nutzbaren Indexbericht zu vernichten. **Falls vollständige Canonical-Zusage ohne große Blockdaten nicht erreichbar ist, offen ausweisen, nicht das Gate heimlich absenken.**
+
+**Resume statt Re-Run:** nutze run_id + manifest/data/schema-version als Identität, append-only Signaturjournale, stabilen Pagination-Cursor, Transaktionsstatus, atomare idempotente Checkpoints, Abschnittsbeweise, Retry-/Quota-Status, Bounded Queues; beim nächsten Aufruf nur unvollständige Bereiche/Fälle bearbeiten. Keine nachträgliche Manipulation originaler Capture-Daten. Ausgabe maschinenlesbare JSON/JSONL + lesbarer Bericht, Anbieter/Abdeckung/RPC-Calls, Bytes übertragen, Datenmenge auf Disk, CPU-/RAM-Max soweit messbar, Zeit/Fehlergrund/Unbekanntanteile; ohne API-Schlüssel oder kompletten geheimen Endpoint.
+
+### E. Strict Canonical bleibt qualifiziert, wird aber streamingfähig/fortsetzbar
+
+Der bestehende getBlocks/getBlock-Scanner behält seinen Proof-Vertrag (finality, Parent-Chain, Skips, Decoder, Economics). Baue statt einer einzelnen großflächigen Abfrage **endlich budgetierte Abschnittsscans** mit journaled Resume und Bounded Prefetch/Retention; Protokollinkonsistenzen strikt fail-closed. Die starre 100.000-Slot-Gesamtgrenze darf eine 24h-Messung nicht grundsätzlich ungültig machen; die Limitierung gilt sinnvoll pro batch/operation. Überprüfe die aktuelle 8er-Prefetch-/Retry-Semantik gegen HTTP 429; Nebenlast aus gleichzeitigen Requests und Massendownloads nicht gegen denselben Provider ohne ausreichende Quota zulassen. Ursprüngliche kanonische Source-of-Truth und per-slot Fehler/Parent-Proof nachweisbar erhalten. Keine Speicher- oder Netzwerkvolumen-Garantie aus einer Schätzung ableiten.
+
+Das Standardprofil **index** darf schnell aussagekräftige Markt-Liquidationen liefern, selbst wenn **strict** mangels Providerzugang nicht qualifizierbar ist. Beide Ergebnisse müssen strikt getrennt in der Summary stehen.
+
+### F. Echter Ressourcen- und Speicherschutz
+
+Vorhandene 4h-Evidence (~43 GiB) nach Dateigruppen, Writer-Raten, RAM-Peaks, Queue-Drops, Snapshotgrößen und I/O messbar auseinanderhalten. **Indexing allein behebt weder großen Shadow-JSONL-Output noch RAM-Overflows.** Limitierte Worker, streamingfähige Datenstrukturen, sichere Checkpoints/Rotation bzw. verlustfreie Kompression dort, wo originalgetreue Evidence erhalten bleibt. Laufzeitabhängige Speicher-Preflight nach empirischen Bytes/s + Sicherheitsreserve, Reserve über gesamte gewählte Dauer, während Capture freien Platz überwachen; bei Disk-Engpass kontrollierte fail-closed Terminierung ohne stillen Verlust. Keine vorhandenen Evidence-Dateien automatisch löschen. Eventuelle Kompression erfordert identitätsgetreuen Replay-Test und manifestierte Hashes.
+
+### G. Verbindlicher historischer Replay-Gate des fehlgeschlagenen Runs
+
+**Nicht erneut fünf Stunden messen.** Als ersten echten End-to-End-Historienfall vorhandenen Run **market5h_20261011T010758Z** wählen, sobald Dateien auf dem ausführenden Host vorhanden sind. Die CLI muss Start/Ende **aus Report** ableiten, nicht die bekannten UTC-Konstanten oder Slot 455473465 in Code einbauen. Der Auftrag gilt nur als erfüllt, wenn entweder ein überprüfbarer indexierter Gesamtfensterbericht mit Detailmatches existiert oder ein präziser HISTORICAL_INCOMPLETE-Grund genannt wird; Null Liquidationen bei fehlerhaftem Index ist niemals PASS. Schon erhaltene 181 Live-TX inkl. success/fail mit historischen Index-TX vergleichen; 01:42:38Z bis 06:08:38Z separat als LIVE_COVERAGE_INCOMPLETE ausweisen. Erhaltene Shadow-Entscheidungen nur für belegte Live-Intervalle qualifizieren; historische Indexdaten ersetzen keine historische T_rx-Entscheidung.
+
+### H. Report-Vertrag und Gate-Semantik
+
+Getrennte maschinenlesbare Felder, ohne Rückwärtskompatibilität der bisherigen Ledger künstlich zu brechen:
+
+- **Clock:** requested_seconds, elapsed_seconds, boot/warmup_seconds, capture_start_utc/end_utc, cutoff_provenance, observed_active_seconds vs transport_covered_seconds, last_live_slot_age_s, manifest/commit identity.
+- **Transport:** WebSocket connected/ACKed, gap_intervals, gap_count_raw, gaps_merged, reconnect_attempts, reconnect_successful, first_failure_at, last_healthy_at, HTTP_429_count, coverage_outage_seconds, recovered/unrecovered, log_truncation, ingress_overflow.
+- **Index:** provider identity, exact time/range provenance, cursor-completion, raw signatures, unique signatures, failed/successful, TX details retrieved/unknown, liquidation counts per type, fees/amounts known-vs-unknown, RPC volume, discrepancies, second-index agreement.
+- **Strict:** per-range parent/skip/finality evidence, progress, unresolved, resume, canonical_complete and blocker.
+- **Economics:** canonical Market Gross Edge / executable Shadow Net Edge / unknown costs / realized PnL **separat** und keine Hochrechnung ohne ausreichendes Sample.
+
+Statusklassen: CAPTURE_CLOCK_COMPLETE, LIVE_COVERAGE_INCOMPLETE, INDEX_VERIFIED, INDEX_MISMATCH, HISTORICAL_INCOMPLETE, CROSSCHECK_VERIFIED, CANONICAL_VERIFIED, CANONICAL_INCOMPLETE, ECONOMICS_INSUFFICIENT_SAMPLE, C0_E1_MASTER_PASS oder C0_E1_NOT_QUALIFIED. **CAPTURE_CLOCK_COMPLETE darf zusammen mit LIVE_COVERAGE_INCOMPLETE gelten. INDEX_VERIFIED impliziert niemals C0_E1_MASTER_PASS.** Fehlende/verdächtige/zensierte Daten sind UNKNOWN, keine Null.
+
+### I. Ausführung in klaren Paketen (KEINE erneute allgemeine Analyse)
+
+**P0 – Baseline-Freeze (kurz):** Remote/main+aktuelles Ledger lesen, gegen reale Dateien prüfen, zu 429-Methoden/Quotas bestehende Logevidenz zuordnen. Details, die nicht belegbar sind, als offene externe Voraussetzungen dokumentieren. Kein erneuter allgemeiner Planungsdurchlauf.
+
+**P1 – CLI + gemeinsamer MeasurementPlan:** Zeitparser, deterministische 4 Snapshots, monotonic cutoff, UTC manifest, vorhandene quick/full-Logik bereinigen, End-to-End-Start ohne zweite manuelle Zeitvariable. Unit-Gates für 10m, 1h, 5h, 24h und ungerade Sekundendauer.
+
+**P2 – Transport/Provider:** WSS-Liveness-State, begrenzte 429-/Reconnect-Recovery, Gap-Intervalljournal + Semantik, Early fail-closed, getrennte Quotas; Simulation 527 Fehler, Provider-Rate-Limit, WSS Frame-Unterbrechung und nachgewiesene tatsächliche Recovery.
+
+**P3 – Index-Verifier:** Abfrage per UTC-Manifest, Pagination + Null-Blocktime + Versions-/LUT-/CPI-Support, unabhängige Klassifikation, Event-/Signatur-Differenz, atomare Resume-Journals, optional Crosscheck; echte historische positive TX-Fixtures mit nachgewiesenen Signaturen + negative Fixtures.
+
+**P4 – Strict partition/resume + Ressourcen:** strenger Kanonikpfad in Batches, Parent-Link/Skip Proof, rate-limited serial/bounded requests, Speicher-/Disk-Schutz und Evidenz-Integrität.
+
+**P5 – Bericht/alte 5h-Evidence:** automatische Verifier-Ausführung auf vorhandener 5h-Run-ID, Ergebnis gegen 181 Live-TX, klare Index/Capture/Strict-Trennung, belegte Fehlerquote; keine 5h-Neumessung.
+
+**P6 – Qualifikation/Review/Push:** Rust fmt, locked release build, relevante Unit-/Integrationstests, Clippy, Negativ-/Positiv-Fixtures, kontrollierter WSS-Disconnect, 429-Dauer-Ausfall, Replay-Resume, 10m Mainnet smoke **nur nach Provider-Preflight und mit Anwenderfreigabe für externen Live-Read**, Source-Identity sichern. Keine 5h/24h-Mainnet-Neuläufe ohne Benutzerfreigabe nach überprüfbaren Vor-Gates. Tatsächlich nicht ausgeführte Tests = NOT_RUN, nicht PASS.
+
+### J. Harte Abnahmekriterien und Stop-Gates
+
+**Architektur-PASS für Astra** nur bei Beweisen für:
+
+1. Eine beliebig zulässige Dauer pro Aufruf, keine zweite manuelle Snapshotvariable, ein einziges identisches Run-Manifest/Cutoff-Modell in Shell/Rust/Audit; 10m ist reale Capture-Zeit nach READY, kein walltime-gekürzter Pseudo-Test.
+2. Zeitablauf ist getrennt von kontinuierlicher Datenverfügbarkeit; 15.960s ohne Slot-Beweis werden sichtbar INCOMPLETE statt „5h MARKET PASS“.
+3. 527 transportbedingte GAPs brauchen bounded state und korrekt erhaltene Intervalle; kein Silent-Drop, kein unendlicher 429-Reconnect-Loop, nachgewiesene ACK- und Anwendungsdaten nach Recovery.
+4. Rate-Limits, Provider-Quota und HTTP 429 werden korrekt behandelt; ein endlicher Verbindungs-/Historien-Ausfall führt zu einem kontrollierten Abbruch/Checkpoint. Fehlt ausreichende externe Providerkapazität, bleibt der Mainnet-Gate BLOCKED trotz fehlerfreien Codes.
+5. Historischer 5h-Run kann unabhängig **ohne manuelle Slots, ohne neue Capture** über vollständige UTC-Zeiten indexiert werden; geprüfte Signaturen, Liquidationen, verlorene Live-TX, unbekannte TX werden maschinenlesbar berichtet.
+6. Jeder positive Liquidationstyp und echte historische Erfolgs-/CPI-Fälle sind durch Fixtures nachgewiesen; keine „NULL=VERIFIED“-Behauptung durch leeren/abgeschnittenen Index. Pagination und Resume erzeugen deterministisch denselben Satz wie ununterbrochene Verifikation.
+7. index/crosscheck/strict sind beweislogisch unabhängig ausgewiesen; strict behält vollständige Finality-/Parent-/Skip-Pflichten; >100.000 Slots können segmentiert behandelt werden.
+8. Kein blindes RAM-/Datei-Wachstum, dokumentierte Speichergrenzen, keine Löschung alter Evidenz, keine unbekannten Economics als 0, LIVE=false und submission=false.
+9. Git source SHA/Tests/Clippy und echte Read-only-/Mainnet-Probes nachvollziehbar, keine BSC-Dateien berührt.
+10. Erst nach vorherigen Gates **und** dokumentierter Provider-Archiv-/Stream-Kapazität ist ein 5h-Mainnet-Retest technisch sinnvoll. **Niemand kann den fehlerfreien Abschluss eines zukünftigen fünfstündigen Provider-abhängigen Mainnet-Laufs garantieren.** Beim externen Ausfall muss das System jedoch früh, verständlich, beweiserhaltend und ohne Scheingültigkeit reagieren.
+
+### K. Git-/Sicherheits- und Abschlussvertrag für Astra
+
+- Nur project_0/** ändern; vorhandene native Pipeline, Shadow-Economics, Source-Freeze, FIX-139, LIVE-/Submission-Gates beibehalten. BSC-only-Commits auf main dürfen nicht versehentlich rückgängig gemacht werden.
+- Remote HEAD vor jedem Commit abgleichen; bei parallelen Pushes re-fetch/rebase/fast-forward; nicht blind force-pushen.
+- Arbeitspakete als kleine überprüfte Commits; in **MEASUREMENT_LEDGER.md** aktuelle Resultate mit SHA, Beweispfad, Testkommandos, Ergebnissen und OPEN-Risiken dokumentieren; historische Einträge unverändert. Große Raw-Runs/API-Keys/Sensitivdaten nie nach Git pushen.
+- Keine bezahlten Provider-Aktionen, keine unautorisierten 5h-/24h-Läufe, keine LIVE- oder Submission-Tests.
+- Astra-Abschlussbericht: Ausgangs-/End-HEAD, genaue Dateien, nachweislich behobene Ursachen vs verbleibende Providerfragen, Testmatrix PASS/FAIL/NOT_RUN, gemessene bytes/RPC-Calls/Storage, Ergebnisse des historischen 5h-Verifiers, Index-vs-Strict-Status, weitere Gating-Kriterien und exakt ein dokumentierter CLI-Aufruf für die spätere Benutzerfreigabe.
+
+**Endzustand:** Bedienung über eine dynamische Dauer (10m/1h/5h/24h), providerbewusste robuste Laufzeit, früher Fail-closed bei Ausfällen, gezielte historische Marginfi-Index-Liquidationsprüfung einschließlich CPI/LUT, reproduzierbarer automatischer Vergleich gegen Bot und Shadow, separate streng kanonische Completion, Resume nach RPC-429, echte ressourcenbezogene Evidence. **Kein Claim auf alle Probleme behoben oder 5h-Verwertbarkeit vor realem grünen Gate.**
