@@ -213,7 +213,7 @@ fn validate_builder_policy(path: &str, signed_gas_price: u64) -> (Value, String)
         .unwrap_or_else(|e| panic!("parse builder policy evidence {path}: {e}"));
     assert_eq!(
         req_str(&value, "/schema"),
-        "darkbot.g06a.builder-floor-evidence-addendum.v1"
+        "darkbot.g06a.builder-floor-evidence-addendum.v2"
     );
     assert!(req_bool(&value, "/dry3_ready"));
     assert!(req_bool(&value, "/blockrazor/verified"));
