@@ -74,7 +74,9 @@ sol! {
 }
 
 const RPC_DEFAULT: &str = "https://bsc-testnet-dataseed.bnbchain.org/";
+#[allow(dead_code)]
 const WSS_HOST: &str = "bsc-testnet-rpc.publicnode.com";
+#[allow(dead_code)]
 const WSS_PATH: &str = "/";
 const TESTNET_HTTPS_PRIMARY: &str = "bsc-testnet-dataseed.bnbchain.org";
 const TESTNET_HTTPS_FALLBACK: &str = "bsc-testnet.bnbchain.org";
@@ -454,6 +456,7 @@ fn https_send_prepared(stream: &mut Tls, request: &[u8]) {
     stream.flush().expect("HTTPS flush failed");
 }
 
+#[allow(dead_code)]
 fn ws_connect() -> Tls {
     let addr = (WSS_HOST, 443)
         .to_socket_addrs()
@@ -506,6 +509,7 @@ fn ws_connect() -> Tls {
     stream
 }
 
+#[allow(dead_code)]
 fn ws_send_frame(stream: &mut Tls, opcode: u8, payload: &[u8], mask_counter: &mut u32) {
     let mut frame = Vec::with_capacity(payload.len() + 14);
     frame.push(0x80 | opcode);
@@ -533,10 +537,12 @@ fn ws_send_frame(stream: &mut Tls, opcode: u8, payload: &[u8], mask_counter: &mu
     stream.flush().expect("WSS flush failed");
 }
 
+#[allow(dead_code)]
 fn ws_send_text(stream: &mut Tls, text: &str, mask_counter: &mut u32) {
     ws_send_frame(stream, 0x1, text.as_bytes(), mask_counter);
 }
 
+#[allow(dead_code)]
 fn ws_read_message(stream: &mut Tls, mask_counter: &mut u32) -> String {
     let mut collected = Vec::new();
     let mut started = false;
@@ -596,6 +602,7 @@ fn ws_read_message(stream: &mut Tls, mask_counter: &mut u32) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn wait_rpc_id(stream: &mut Tls, id: u64, mask_counter: &mut u32) -> Value {
     loop {
         let text = ws_read_message(stream, mask_counter);
