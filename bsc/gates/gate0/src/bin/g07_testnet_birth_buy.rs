@@ -847,7 +847,7 @@ fn main() {
     let p2p_min_peers = env::var("DARKBOT_G07_P2P_MIN_PEERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(8)
+        .unwrap_or(4)
         .max(1);
     println!("p2p_min_peers:             {p2p_min_peers}");
     let p2p_head = latest_p2p_head();
