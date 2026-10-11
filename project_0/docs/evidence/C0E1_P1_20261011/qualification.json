@@ -1,0 +1,47 @@
+{
+  "scope": "P1 local qualification only",
+  "base_commit": "504353d88e1c45e1ed695eb7eb47fa516ac3e516",
+  "verdict": "PASS",
+  "runner_txv1": {
+    "passed": 192,
+    "failed": 0,
+    "ignored": 1
+  },
+  "runner_health": {
+    "passed": 192,
+    "failed": 0,
+    "ignored": 1,
+    "note": "before final fractional UTC/report journal additions; final txv1 suite and release cover those"
+  },
+  "cli_tests": {
+    "passed": 4,
+    "failed": 0,
+    "offline_mocked_capture": true
+  },
+  "release_build": "PASS",
+  "format": "changed Rust files and changed main function PASS; no full workspace claim",
+  "shell_syntax": "PASS",
+  "clippy": "completed with diagnostics; see clippy_summary.json",
+  "mainnet": "NOT_RUN",
+  "live": false,
+  "submission": false,
+  "source_sha256": {
+    "project_0/native/crates/darkbot-runner/src/econ.rs": "358ff08a3b54c3830889728d75f220a6f9210b4c0ee87ea75e62e2c233e9a7fc",
+    "project_0/native/crates/darkbot-runner/src/econ_canonical.rs": "fb743d1b2c5fed50f9d7ae1cbb40f3db86f0f57d0158b4899ef471b632d3a671",
+    "project_0/native/crates/darkbot-runner/src/econ_tests.rs": "f350009f81764f004640b79174cab762f480e4c47c08066779c972ff01c188ba",
+    "project_0/native/crates/darkbot-runner/src/lib.rs": "c71210742477bae04256fc86682c266989321fef3f394d5133de7469db06f59a",
+    "project_0/native/crates/darkbot-runner/src/main.rs": "7259731238d93f73ff279158a660409badf069e5253b338c420044f6729d9693",
+    "project_0/native/crates/darkbot-runner/src/market_observer.rs": "393a36ea12cb842a6e23b8d0432f4ec94ab756ce4464cefa278724a38936c440",
+    "project_0/scripts/run_econ4h.sh": "3979ff199c614cc0f99d1a75a1aed6200c74d8b97a1f753ba6e12b3b1a4140cf",
+    "project_0/scripts/run_gap_reconnect_smoke.sh": "3ed654b8c52f99111ac0574ec3732452323930fc8d79e50e0f41ebe6821dc0a8",
+    "project_0/native/crates/darkbot-runner/src/measurement.rs": "48483a77503e5e3f87a7ad870c9852bd2da88c48368c20a042c3eff7cb848820",
+    "project_0/native/crates/darkbot-runner/src/bin/p0-measurement-plan.rs": "13bbc15be2fd25153b009b5388362275af2b6844259487020e45740b4161a03c",
+    "project_0/scripts/test.sh": "3844346e7c3302c534649bb0ee2a4e1234d35a43275b51ec1ef82c914b261246",
+    "project_0/scripts/test_measurement_plan.py": "48fb2c9b2ef1f10a6597fd54282340d6456865a05d19e78e0211ea5e62e2c74b"
+  },
+  "release_sha256": {
+    "p0-longtail": "314f92bcf1a33fc70d52b4776d70cfe7758c0f27f7e6414596b06366ad8382c1",
+    "p0-measurement-plan": "554af8787118b069a69e4021fb9435fd74e6f76a82f839d16e8ef684861b0a84"
+  },
+  "next": "P3; no P2/P4/P5/P6 implementation in this commit"
+}

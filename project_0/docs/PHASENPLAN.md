@@ -4955,7 +4955,7 @@ resume commands. Code completion is not an end-to-end profitability/stabilityPAS
 
 ## C0-E1 — ASTRA MASTER IMPLEMENTATION CONTRACT 2026-10-11
 
-**Status: VERBINDLICHE UMSETZUNGSSPEZIFIKATION / NOT IMPLEMENTED / NO NEW LONG RUN AUTHORIZED.** Dieser neue Abschnitt ist der maßgebliche aktuelle Auftrag für C0-E1-Teststeuerung, Transport- und Provider-Robustheit sowie den unabhängigen historischen Marginfi-Marktvergleich. Er **ersetzt** ältere Handlungsanweisungen zum unveränderten 4h/5h-Neustart und zur Pflicht, vor jeder Daueränderung Shell/Rust-Parameter manuell zu setzen. Er **ersetzt nicht** den strengeren bestehenden C0-E1-Vertrag zur vollständigen finalisierten Markt-/Slot-Qualifikation, die Trading-Sicherheitsregeln oder das v4.5-Produktziel. Ältere Evidence bleibt historisch unverändert.
+**Status: VERBINDLICHE UMSETZUNGSSPEZIFIKATION / P1 LOCAL TECHNICAL PASS / P2–P6 OPEN / NO NEW LONG RUN AUTHORIZED.** Dieser neue Abschnitt ist der maßgebliche aktuelle Auftrag für C0-E1-Teststeuerung, Transport- und Provider-Robustheit sowie den unabhängigen historischen Marginfi-Marktvergleich. Er **ersetzt** ältere Handlungsanweisungen zum unveränderten 4h/5h-Neustart und zur Pflicht, vor jeder Daueränderung Shell/Rust-Parameter manuell zu setzen. Er **ersetzt nicht** den strengeren bestehenden C0-E1-Vertrag zur vollständigen finalisierten Markt-/Slot-Qualifikation, die Trading-Sicherheitsregeln oder das v4.5-Produktziel. Ältere Evidence bleibt historisch unverändert.
 
 **Repo:** sawyerma/darkbot, aktuelles origin/main beim Arbeitsbeginn selbst verifizieren; keine SHA blind übernehmen. **Scope:** ausschließlich project_0/**; bsc/** niemals bearbeiten. **Auftraggeber-Freigabe:** Astra darf den spezifizierten Code implementieren, reviewen, testen und kleine projektbezogene Commits auf main pushen. **Keine Freigabe** für neue 5h-/24h-Mainnet-Captures, LIVE, Submission, Providerkäufe oder das Löschen bisheriger Evidence. Fehler ehrlich als OPEN dokumentieren; keinen vollständigen PASS durch abweichende Definitionen erzwingen.
 
@@ -5062,6 +5062,8 @@ Statusklassen: CAPTURE_CLOCK_COMPLETE, LIVE_COVERAGE_INCOMPLETE, INDEX_VERIFIED,
 **P0 – Baseline-Freeze (kurz):** Remote/main+aktuelles Ledger lesen, gegen reale Dateien prüfen, zu 429-Methoden/Quotas bestehende Logevidenz zuordnen. Details, die nicht belegbar sind, als offene externe Voraussetzungen dokumentieren. Kein erneuter allgemeiner Planungsdurchlauf.
 
 **P1 – CLI + gemeinsamer MeasurementPlan:** Zeitparser, deterministische 4 Snapshots, monotonic cutoff, UTC manifest, vorhandene quick/full-Logik bereinigen, End-to-End-Start ohne zweite manuelle Zeitvariable. Unit-Gates für 10m, 1h, 5h, 24h und ungerade Sekundendauer.
+
+**Umsetzungsstand 2026-10-11:** P1 implementiert und lokal technisch geprüft; Details/Kommandos im `MEASUREMENT_LEDGER.md`, Evidence in `docs/evidence/C0E1_P1_20261011/`. CLI `scripts/test.sh --duration 10m`; Sekundenbereich 1..86400, exakte Nanosekunden-Viertel. Keine Mainnet-/Langlauf-Qualifikation. Nach expliziter Paketfreigabe folgt P3, danach P2; P4–P6 bleiben offen.
 
 **P2 – Transport/Provider:** WSS-Liveness-State, begrenzte 429-/Reconnect-Recovery, Gap-Intervalljournal + Semantik, Early fail-closed, getrennte Quotas; Simulation 527 Fehler, Provider-Rate-Limit, WSS Frame-Unterbrechung und nachgewiesene tatsächliche Recovery.
 

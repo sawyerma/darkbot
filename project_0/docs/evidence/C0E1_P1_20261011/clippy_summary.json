@@ -1,0 +1,538 @@
+{
+  "success": true,
+  "diagnostics": [
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::useless_conversion",
+        "explanation": null
+      },
+      "message": "useless conversion to the same type: `std::string::String`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-solana/src/ingress/ws_rpc.rs",
+          "line": 356
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::manual_is_multiple_of",
+        "explanation": null
+      },
+      "message": "manual implementation of `.is_multiple_of()`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-solana/src/ingress/ws_rpc.rs",
+          "line": 449
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::unnecessary_map_or",
+        "explanation": null
+      },
+      "message": "this `map_or` can be simplified",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-solana/src/state/fork.rs",
+          "line": 25
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::type_complexity",
+        "explanation": null
+      },
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-solana/src/submit/rpc.rs",
+          "line": 59
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::manual_div_ceil",
+        "explanation": null
+      },
+      "message": "manually reimplementing `div_ceil`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-solana/src/tx/mod.rs",
+          "line": 59
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::manual_div_ceil",
+        "explanation": null
+      },
+      "message": "manually reimplementing `div_ceil`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-project0/src/economics.rs",
+          "line": 64
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::too_many_arguments",
+        "explanation": null
+      },
+      "message": "this function has too many arguments (9/7)",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-project0/src/economics.rs",
+          "line": 72
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::ptr_arg",
+        "explanation": null
+      },
+      "message": "writing `&mut Vec` instead of `&mut [_]` involves a new object where a slice will do",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-project0/src/execution.rs",
+          "line": 51
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::unnecessary_map_or",
+        "explanation": null
+      },
+      "message": "this `map_or` can be simplified",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-project0/src/execution.rs",
+          "line": 105
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::type_complexity",
+        "explanation": null
+      },
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-project0/src/sizing.rs",
+          "line": 432
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::useless_conversion",
+        "explanation": null
+      },
+      "message": "explicit call to `.into_iter()` in function argument accepting `IntoIterator`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-project0/src/sizing.rs",
+          "line": 534
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::manual_div_ceil",
+        "explanation": null
+      },
+      "message": "manually reimplementing `div_ceil`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-project0/src/schedule.rs",
+          "line": 121
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::map_clone",
+        "explanation": null
+      },
+      "message": "you are using an explicit closure for copying elements",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/builder.rs",
+          "line": 390
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::get_first",
+        "explanation": null
+      },
+      "message": "accessing first element with `rewards.get(0)`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/builder.rs",
+          "line": 566
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::unnecessary_map_or",
+        "explanation": null
+      },
+      "message": "this `map_or` can be simplified",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/pipeline.rs",
+          "line": 562
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::unnecessary_map_or",
+        "explanation": null
+      },
+      "message": "this `map_or` can be simplified",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/pipeline.rs",
+          "line": 580
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::unnecessary_map_or",
+        "explanation": null
+      },
+      "message": "this `map_or` can be simplified",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/pipeline.rs",
+          "line": 592
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::type_complexity",
+        "explanation": null
+      },
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/remote_workers.rs",
+          "line": 63
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::type_complexity",
+        "explanation": null
+      },
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/remote_workers.rs",
+          "line": 81
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::map_clone",
+        "explanation": null
+      },
+      "message": "you are using an explicit closure for copying elements",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/builder.rs",
+          "line": 390
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::manual_is_multiple_of",
+        "explanation": null
+      },
+      "message": "manual implementation of `.is_multiple_of()`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/market_reconcile.rs",
+          "line": 453
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::get_first",
+        "explanation": null
+      },
+      "message": "accessing first element with `rewards.get(0)`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/builder.rs",
+          "line": 566
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::unnecessary_map_or",
+        "explanation": null
+      },
+      "message": "this `map_or` can be simplified",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/pipeline.rs",
+          "line": 562
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::unnecessary_map_or",
+        "explanation": null
+      },
+      "message": "this `map_or` can be simplified",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/pipeline.rs",
+          "line": 580
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::unnecessary_map_or",
+        "explanation": null
+      },
+      "message": "this `map_or` can be simplified",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/pipeline.rs",
+          "line": 592
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::type_complexity",
+        "explanation": null
+      },
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/remote_workers.rs",
+          "line": 63
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::type_complexity",
+        "explanation": null
+      },
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/remote_workers.rs",
+          "line": 81
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::cloned_ref_to_slice_refs",
+        "explanation": null
+      },
+      "message": "this call to `clone` can be replaced with `std::slice::from_ref`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/lookup_tables.rs",
+          "line": 98
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::manual_is_multiple_of",
+        "explanation": null
+      },
+      "message": "manual implementation of `.is_multiple_of()`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/market_reconcile.rs",
+          "line": 453
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::type_complexity",
+        "explanation": null
+      },
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/market_observer.rs",
+          "line": 3953
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::manual_is_multiple_of",
+        "explanation": null
+      },
+      "message": "manual implementation of `.is_multiple_of()`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/bin/p0-prewarm-atas.rs",
+          "line": 52
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::manual_is_multiple_of",
+        "explanation": null
+      },
+      "message": "manual implementation of `.is_multiple_of()`",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/bin/p0-prewarm-atas.rs",
+          "line": 52
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::too_many_arguments",
+        "explanation": null
+      },
+      "message": "this function has too many arguments (9/7)",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/main.rs",
+          "line": 206
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::too_many_arguments",
+        "explanation": null
+      },
+      "message": "this function has too many arguments (9/7)",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/main.rs",
+          "line": 235
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::needless_return",
+        "explanation": null
+      },
+      "message": "unneeded `return` statement",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/main.rs",
+          "line": 633
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::too_many_arguments",
+        "explanation": null
+      },
+      "message": "this function has too many arguments (9/7)",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/main.rs",
+          "line": 206
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::too_many_arguments",
+        "explanation": null
+      },
+      "message": "this function has too many arguments (9/7)",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/main.rs",
+          "line": 235
+        }
+      ]
+    },
+    {
+      "level": "warning",
+      "code": {
+        "code": "clippy::needless_return",
+        "explanation": null
+      },
+      "message": "unneeded `return` statement",
+      "primary_spans": [
+        {
+          "file": "crates/darkbot-runner/src/main.rs",
+          "line": 633
+        }
+      ]
+    }
+  ],
+  "scope": "runner all-targets plus dependencies, crate_health+txv1; not a full baseline differential"
+}

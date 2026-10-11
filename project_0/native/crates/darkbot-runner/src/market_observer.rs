@@ -1602,9 +1602,15 @@ impl ObserverCore {
             for ev in &decoded.additional_events {
                 match ev.kind {
                     truth::LiquidationType::Classic => self.stats.provisional_classic_events += 1,
-                    truth::LiquidationType::ForcedDeleverage => self.stats.provisional_deleverage_events += 1,
-                    truth::LiquidationType::BankruptcySettlement => self.stats.provisional_bankruptcy_events += 1,
-                    truth::LiquidationType::Receivership => unreachable!("original receiver decoder handles this type"),
+                    truth::LiquidationType::ForcedDeleverage => {
+                        self.stats.provisional_deleverage_events += 1
+                    }
+                    truth::LiquidationType::BankruptcySettlement => {
+                        self.stats.provisional_bankruptcy_events += 1
+                    }
+                    truth::LiquidationType::Receivership => {
+                        unreachable!("original receiver decoder handles this type")
+                    }
                 }
                 eprintln!(
                     "[MARKET/LIQUIDATION] provisional=true type={} slot={} signature={} target={} actor={} gross_usd={}",
@@ -2021,7 +2027,7 @@ pub struct SummaryContext {
     pub stream_ready_at: Option<String>,
     pub observation_started_at: Option<String>,
     pub observation_ended_at: Option<String>,
-    pub configured_duration_seconds: u64,
+    pub configured_duration_seconds: f64,
     pub actual_observation_seconds: f64,
     pub stream_ready: bool,
     pub full_duration_observed: bool,
@@ -2036,6 +2042,8 @@ const REPORT_KEYS: &[&str] = &[
     "commitment",
     "program",
     "configured_duration_seconds",
+    "measurement_plan",
+    "capture_window",
     "actual_observation_seconds",
     "verdict",
     "market_capture_complete",
@@ -2136,7 +2144,19 @@ pub fn finalize(
     core.coverage(sink, "STOPPED", now_unix_s, None, detail)
         .map_err(|e| format!("coverage write: {e}"))?;
     sink.flush().map_err(|e| format!("flush: {e}"))?;
-    let summary = core.summary(ctx);
+    let mut summary = core.summary(ctx);
+    if let Some(h) = &core.econ {
+        summary["measurement_plan"] =
+            serde_json::to_value(&h.cfg.plan).map_err(|e| e.to_string())?;
+        summary["capture_window"] = if let Some(cutoff) = h.cutoff() {
+            h.cfg.plan.capture_window(
+                h.clock,
+                cutoff - h.cfg.plan.duration_seconds * crate::measurement::NS,
+            )?
+        } else {
+            Value::Null
+        };
+    }
     let summary_path = run_dir.join("summary.json");
     let pretty = serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?;
     fs::write(&summary_path, pretty).map_err(|e| format!("summary.json: {e}"))?;
@@ -2334,7 +2354,7 @@ pub fn finish_capture(
         stream_ready_at: ready.map(utc_iso),
         observation_started_at: ready.map(utc_iso),
         observation_ended_at: ready.map(|_| utc_iso(outcome.observation_end_unix_s)),
-        configured_duration_seconds: cfg.duration_secs,
+        configured_duration_seconds: cfg.duration_secs as f64,
         actual_observation_seconds: outcome
             .window
             .map(|(start, cutoff)| {
@@ -2392,18 +2412,31 @@ pub fn run_embedded(
     if let Some(h) = &econ {
         // No measurement clock or market ingress yet: initialization is separately
         // bounded and recorded, so a short run measures a running Shadow bot.
-        eprintln!("C0_E1_WARMUP_WAIT timeout_s={}", cfg.ready_timeout_secs);
+        eprintln!(
+            "C0_E1_WARMUP_WAIT timeout_s={}",
+            h.cfg.plan.budgets.bootstrap_seconds
+        );
         sink.coverage(&json!({"event":"SHADOW_WARMUP_WAIT","timestamp_utc":utc_iso(unix_now_s())}))
             .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
-        if let Err(e) = h.wait_shadow_ready(Duration::from_secs(cfg.ready_timeout_secs)) {
+        if let Err(e) =
+            h.wait_shadow_ready(Duration::from_secs(h.cfg.plan.budgets.bootstrap_seconds))
+        {
             let _ = sink.coverage(&json!({"event":"SHADOW_WARMUP_FAILED","error":e}));
             let _ = sink.flush();
             eprintln!("C0_E1_WARMUP_FAILED code={e}");
             return Err(e);
         }
-        sink.coverage(&json!({"event":"SHADOW_WARMUP_READY","at_ns":clock.now_ns(),
-            "timestamp_utc":utc_iso(unix_now_s())}))
-            .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
+        sink.coverage(
+            &json!({"event":"SHADOW_WARMUP_READY","at_ns":clock.now_ns(),
+            "timestamp_utc":utc_iso(unix_now_s())}),
+        )
+        .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
+        crate::measurement::journal(
+            &h.cfg.run_dir,
+            clock,
+            "WAIT_STREAM_READY",
+            json!({"budget_seconds":h.cfg.plan.budgets.stream_ready_seconds}),
+        )?;
         eprintln!("C0_E1_WARMUP_READY; starting market stream and measurement window");
     }
 
@@ -2461,16 +2494,18 @@ pub fn run_embedded(
             break;
         }
         if let (Some(h), Some((start, cutoff))) = (&econ, window) {
-            let due = (clock.now_ns().min(cutoff).saturating_sub(start)
-                / (h.cfg.snapshot_secs * 1_000_000_000)) as usize;
-            while checkpoint_index < due.min(4) {
+            let due = h
+                .cfg
+                .plan
+                .due(clock.now_ns().min(cutoff).saturating_sub(start));
+            while checkpoint_index < due {
                 checkpoint_index += 1;
-                let seconds = checkpoint_index as u64 * h.cfg.snapshot_secs;
+                let seconds = h.cfg.plan.seconds(checkpoint_index);
                 let summary = core.summary(&SummaryContext {
                     run_id: cfg.run_id.clone(),
                     commitment: cfg.commitment.into(),
                     configured_duration_seconds: seconds,
-                    actual_observation_seconds: seconds as f64,
+                    actual_observation_seconds: seconds,
                     stream_ready: true,
                     full_duration_observed: true,
                     drain_complete: false,
@@ -2514,9 +2549,11 @@ pub fn run_embedded(
             }) if window.is_none() => {
                 let cutoff = t_rx_ns.saturating_add(duration_ns);
                 window = Some((t_rx_ns, cutoff));
-                ready_unix_s = Some(now_s);
+                ready_unix_s = Some((clock.unix_ns(t_rx_ns) / 1_000_000_000) as u64);
                 core.start_observation(t_rx_ns, cutoff);
                 if let Some(h) = &econ {
+                    let evidence = h.cfg.plan.capture_window(clock, t_rx_ns)?;
+                    crate::measurement::journal(&h.cfg.run_dir, clock, "CAPTURE", evidence)?;
                     h.start(t_rx_ns, cutoff);
                 }
                 core.coverage(&mut sink, "STREAM_READY", now_s, Some(t_rx_ns), json!({
@@ -2573,7 +2610,21 @@ pub fn run_embedded(
         }
     }
     let capture_end_ns = clock.now_ns();
-    let observation_end_s = unix_now_s();
+    if let Some(h) = &econ {
+        crate::measurement::journal(
+            &h.cfg.run_dir,
+            clock,
+            "DRAIN",
+            json!({
+            "stop_reason":stop_reason,"actual_capture_end_ns":capture_end_ns,
+            "actual_capture_elapsed_ns":window.map(|(start,cutoff)|capture_end_ns.min(cutoff).saturating_sub(start)),
+            "shadow_budget_seconds":h.cfg.plan.budgets.shadow_drain_seconds,
+            "market_budget_seconds":h.cfg.plan.budgets.market_drain_seconds}),
+        )?;
+    }
+    let observation_end_s = window
+        .map(|(_, cutoff)| (clock.unix_ns(capture_end_ns.min(cutoff)) / 1_000_000_000) as u64)
+        .unwrap_or_else(unix_now_s);
 
     // ---- phase 2: STOP ingress + DRAIN (events with t_rx <= cutoff still count) ----
     let _ = core.coverage(
@@ -2635,7 +2686,9 @@ pub fn run_embedded(
     // A separate capture drain is insufficient: Shadow keeps winner RPCs alive
     // through its own drain. Release the heavy scan only after ALL workers exit.
     if let Some(h) = &econ {
-        let barrier = h.wait_shadow_quiescent(Duration::from_secs(h.cfg.drain_secs + 150));
+        let barrier = h.wait_shadow_quiescent(Duration::from_secs(
+            h.cfg.plan.budgets.shadow_drain_seconds + h.cfg.plan.budgets.quiescence_grace_seconds,
+        ));
         let event = if barrier.is_ok() {
             "SHADOW_RPC_QUIESCENT"
         } else {
@@ -2655,6 +2708,16 @@ pub fn run_embedded(
         }
     }
 
+    if let Some(h) = &econ {
+        crate::measurement::journal(
+            &h.cfg.run_dir,
+            clock,
+            "VERIFICATION",
+            json!({
+            "strict_seconds":h.cfg.plan.budgets.strict_seconds,"gap_seconds":h.cfg.plan.budgets.gap_seconds,
+            "enrichment_seconds":h.cfg.plan.budgets.enrichment_seconds,"shadow_quiescent":write_error.is_none()}),
+        )?;
+    }
     // ---- phase 3 + summary + report: one shared production path ----
     let outcome = CaptureOutcome {
         process_started_unix_s: process_started,
@@ -2807,7 +2870,7 @@ mod tests {
             full_duration_observed: full,
             drain_complete: true,
             actual_observation_seconds: secs,
-            configured_duration_seconds: 14_400,
+            configured_duration_seconds: 14_400.0,
             ..SummaryContext::default()
         }
     }

@@ -22,7 +22,6 @@ esac
 export P0_LIVE_ENABLED=false P0_SUBMISSION_ENABLED=false
 export P0_MARKET_SOURCE=logs
 export P0_ECON_DURATION_SECS="${P0_ECON_DURATION_SECS:-60}"
-export P0_ECON_SNAPSHOT_SECS="${P0_ECON_SNAPSHOT_SECS:-$((P0_ECON_DURATION_SECS / 4))}"
 export P0_ECON_DRAIN_SECS="${P0_ECON_DRAIN_SECS:-15}"
 export P0_ECON_RUN_ID="${P0_ECON_RUN_ID:-c0e1_gap_smoke_$(date -u +%Y%m%dT%H%M%SZ)}"
 export P0_ECON_OUT_DIR="${P0_ECON_OUT_DIR:-$ROOT/project_0/data/econ4h}"

@@ -242,14 +242,15 @@ impl Worker {
             .h
             .clock
             .unix_ns(self.h.shared.start_ns.load(Ordering::Acquire)) as i128;
-        let width = i128::from(self.h.cfg.snapshot_secs) * 1_000_000_000;
         let hour = |r: &Joined| {
             r.market.block_time.and_then(|s| {
                 let delta = i128::from(s) * 1_000_000_000 - start;
-                (delta >= 0 && delta < 4 * width).then(|| (delta / width) as usize)
+                u64::try_from(delta)
+                    .ok()
+                    .and_then(|ns| self.h.cfg.plan.chain_bucket(ns))
             })
         };
-        let final_total = from == 0 && through == 4;
+        let final_total = from == 0 && through == SNAPSHOT_COUNT;
         let rows: Vec<_> = self
             .canonical_joined
             .iter()
@@ -260,7 +261,7 @@ impl Worker {
             .iter()
             .filter(|r| hour(r).is_none())
             .count();
-        let seconds = (through - from) as f64 * self.h.cfg.snapshot_secs as f64;
+        let seconds = self.h.cfg.plan.span_seconds(from, through);
         summarize(&rows, seconds, unassigned, self.canonical_finalized)
     }
 }
@@ -655,7 +656,7 @@ mod regression {
         let mut w = worker();
         let mut r = identified();
         let start = (w.h.clock.unix_ns(1) / 1_000_000_000) as i64 + 1;
-        w.h.cfg.snapshot_secs = 3600;
+        w.h.cfg.plan = MeasurementPlan::new(14400).unwrap();
         for i in 0..4 {
             let mut e = row(&r, 10 + i, 0).market;
             e.block_time = Some(start + i as i64 * 3600);

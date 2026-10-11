@@ -1,3 +1,39 @@
+## P1 — Dynamic MeasurementPlan, 2026-10-11
+
+**P1 IMPLEMENTED / LOCAL TECHNICAL PASS. No Mainnet capture performed. P3 next; P2/P4–P6 remain OPEN.**
+
+Authorized baseline: local `8f4e9d21dd7da5d9754fb14193ebac6268508b5e` fast-forwarded to remote `504353d88e1c45e1ed695eb7eb47fa516ac3e516` after status/fetch/delta checks. The accepted remote delta was only `bsc/tools/g07_pre_live_readiness.sh`; no local BSC work was edited or staged. Existing untracked run data was preserved.
+
+Implemented:
+- `project_0/scripts/test.sh --duration 10m|1h|5h|24h`; also whole-number `s/m/h` durations resolving to 1..86400 seconds. No second snapshot time parameter required.
+- Single typed Rust `MeasurementPlan`, persisted as `measurement_plan.json` by the offline `p0-measurement-plan` compiler, then loaded by the runner. Four exact nanosecond quarter boundaries, including 1s and 61s, shared by market checkpoints, live/chain attribution, analytics and reports. One `SNAPSHOT_COUNT` source. Existing live `(previous_end,end]` and chain `[start,end)` conventions preserved explicitly.
+- Bootstrap and StreamReady precede actual capture; planned cutoff is start + full duration. Separate bootstrap, stream-ready, Shadow drain, market drain, quiescence, strict, gap and enrichment budgets. Owner watchdog sums phase budgets rather than limiting the whole process to capture duration. Removed implicit short/auto wall-timebox; explicit obsolete `quick` fails with an explanation.
+- Exclusive `measurement_manifest.json` before producers start: plan/schema, fixed monotonic/UTC clock origin, Git HEAD, SHA256 source/binary identities, sanitized provider class, numeric risk settings and observe-only permissions. Append-only, synchronized `measurement_phases.jsonl`: bootstrap, readiness, exact capture window/cutoff, drain, verification, owner state and final reports. Exact UTC nanosecond fields retain fractional boundaries. Report time comes from the shared Clock, not a later wall-clock sample.
+- Legacy `run_econ4h.sh`, consistent `P0_ECON_DURATION_SECS`/`P0_ECON_SNAPSHOT_SECS`, existing report names `hour_01..04.json` and historical run files remain supported. Conflicting time overrides fail closed; old fractional-incompatible snapshot settings must be unset. New additive `measurement_plan`, `capture_window` and offset-ns metadata define the meaning of snapshot filenames. No trading/economics formulas or submission gates changed.
+
+Local qualification (commands run from repository root):
+
+```bash
+cargo test --locked --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health,txv1
+cargo test --locked --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health
+cargo test --locked --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health,txv1 measurement
+cargo test --locked --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health,txv1 runtime_worker_writes_four_snapshots_then_identical_final
+cargo build --release --locked --manifest-path project_0/native/Cargo.toml --features crate_health,txv1 --bin p0-longtail --bin p0-measurement-plan
+python3 project_0/scripts/test_measurement_plan.py
+bash -n project_0/scripts/test.sh project_0/scripts/run_econ4h.sh project_0/scripts/run_gap_reconnect_smoke.sh
+cargo clippy --locked --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health,txv1 --all-targets --message-format=json
+```
+
+- Each full runner configuration: **192 passed, 0 failed, 1 existing ignored** (`winner::tests::f8_probe_sdk_encoded_transaction_decoding`). Final txv1 suite rerun after fractional UTC/report journal changes. Health suite preceded those presentation/journal changes; no claim of a subsequent whole-workspace run.
+- Additional focused measurement regressions **7 passed** and real four-second automatic snapshot worker **1 passed**. Invalid/overflow/Unicode durations, legacy conflict rejection, exclusive manifest persistence and fractional boundary attribution covered.
+- Release build **PASS**; offline CLI/launcher tests **4 passed**. Launcher test uses the real release plan compiler, dummy signer, mocked Cargo/storage and a fake capture executable: verifies forwarding, persisted plan, matching storage duration, safe flags and no quick timebox. It is not a Mainnet or real Shadow startup smoke.
+- Format **PASS for changed Rust files and the changed `run_econ4h` function in main.rs**; shell syntax and `git diff --check` PASS. Whole-workspace formatting was not claimed or applied. Clippy completed successfully with existing diagnostics; no warning-free workspace or full differential-Clippy claim.
+- Evidence and retained logs: `project_0/docs/evidence/C0E1_P1_20261011/`.
+
+**Limits / exact next step:** P1 proves time planning and local integration, not uninterrupted 5h/24h market coverage or economic profitability. Legacy strict verification is retained; `--verify index` and the automatic historical UTC verifier belong to **P3** and are not exposed as working here. Existing strict 100,000-slot limit and streaming/resume are **P4 OPEN**, including 24h strict qualification. Provider 429/reconnect stability is **P2 OPEN**. No new long Mainnet run, LIVE, submission, provider purchase or evidence deletion. Stop after P1 commit/push status; next user-directed package is P3 on the existing auditor.
+
+---
+
 # Solana / Project 0 — Measurement & Evidence Ledger
 
 ## ADAPTIVE ROOT RECOVERY CANDIDATE — 2026-10-10 (LOCAL PATCH / UNQUALIFIED UNTIL TESTED)

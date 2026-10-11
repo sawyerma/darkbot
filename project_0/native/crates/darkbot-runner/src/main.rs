@@ -3758,17 +3758,15 @@ fn run_econ4h() -> Result<(), String> {
     if let Ok(url) = std::env::var("P0_MARKET_WS_URL") {
         market.ws_url = url;
     }
-    market.duration_secs = cfg.duration_secs;
+    market.duration_secs = cfg.plan.duration_seconds;
+    market.ready_timeout_secs = cfg.plan.budgets.stream_ready_seconds;
+    market.drain_timeout_secs = cfg.plan.budgets.market_drain_seconds;
+    market.enrich.phase_max_secs = cfg.plan.budgets.enrichment_seconds;
+    market.gap.phase_max_secs = cfg.plan.budgets.gap_seconds;
+    market.reconcile.phase_max_secs = cfg.plan.budgets.strict_seconds;
     market.run_id = cfg.run_id.clone();
     market.run_dir = cfg.run_dir.join("market");
-    let timeout = 2 * market.ready_timeout_secs
-        + cfg.duration_secs
-        + cfg.drain_secs
-        + market.drain_timeout_secs
-        + market.enrich.phase_max_secs
-        + market.gap.phase_max_secs
-        + market.reconcile.phase_max_secs
-        + 180;
+    let timeout = cfg.plan.owner_budget_seconds();
     let (handle, analytics) = econ::spawn(cfg, clock, &market)?;
     let shadow_handle = handle.clone();
     let shadow = std::thread::Builder::new()
@@ -3853,6 +3851,14 @@ fn run_econ4h() -> Result<(), String> {
         handle.shared.market_failed.store(true, Ordering::Release);
     }
     handle.shared.finish.store(true, Ordering::Release);
+    darkbot_runner::measurement::journal(
+        &handle.cfg.run_dir,
+        clock,
+        "OWNERS_FINISHED",
+        serde_json::json!({"aborted":handle.shared.abort.load(Ordering::Acquire),
+            "shadow_failed":handle.shared.shadow_failed.load(Ordering::Acquire),
+            "market_failed":handle.shared.market_failed.load(Ordering::Acquire)}),
+    )?;
     analytics
         .join()
         .map_err(|_| "C0-E1 analytics panic".to_string())?

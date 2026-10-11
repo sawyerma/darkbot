@@ -21,6 +21,18 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
+case "${P0_ECON_RUN_MODE:-auto}" in
+  auto|full) ;;
+  *) echo "P0_ECON_RUN_MODE quick is incompatible with a complete capture; unset it. Duration now starts after StreamReady." >&2; exit 2 ;;
+esac
+
+if [[ "$#" != 0 ]]; then
+  if [[ "$#" != 2 || "$1" != --duration ]]; then
+    echo 'Usage: run_econ4h.sh [--duration 10m|1h|5h|24h]' >&2; exit 2
+  fi
+  export P0_MEASUREMENT_DURATION="$2"
+fi
+
 # Public signer identity is versioned; secret key material is not.
 # shellcheck source=/dev/null
 source "$PROJECT_DIR/config/wallet.public.env"
@@ -129,18 +141,39 @@ export P0_RECOVERY_ROOT_CATCHUP_SECS="${P0_RECOVERY_ROOT_CATCHUP_SECS:-120}"
 # Startup wait includes snapshot A+B and may be longer than the 60s measurement.
 export P0_RECOVERY_ROOT_STALL_SECS="${P0_RECOVERY_ROOT_STALL_SECS:-60}"
 export P0_RECOVERY_ROOT_HARD_MAX_SECS="${P0_RECOVERY_ROOT_HARD_MAX_SECS:-300}"
-export P0_MARKET_READY_TIMEOUT_SECS="${P0_MARKET_READY_TIMEOUT_SECS:-600}"
 export P0_MODE=econ4h
 export P0_LIVE_ENABLED=false
 export P0_SUBMISSION_ENABLED=false
-export P0_ECON_DURATION_SECS="${P0_ECON_DURATION_SECS:-14400}"
-export P0_ECON_SNAPSHOT_SECS="${P0_ECON_SNAPSHOT_SECS:-3600}"
 export P0_ECON_RUN_ID="${P0_ECON_RUN_ID:-econ4h_$(date -u +%Y%m%dT%H%M%SZ)}"
 export P0_ECON_OUT_DIR="${P0_ECON_OUT_DIR:-$PROJECT_DIR/data/econ4h}"
 export P0_MARKET_SOURCE="${P0_MARKET_SOURCE:-logs}"
+export P0_ECON_OUT_DIR="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$P0_ECON_OUT_DIR")"
+if [[ ! "$P0_ECON_RUN_ID" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "invalid econ run id" >&2; exit 2
+fi
 RUN_DIR="$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID"
 if [[ -e "$RUN_DIR" ]]; then echo "econ run directory already exists" >&2; exit 2; fi
 mkdir -p "$RUN_DIR"
+cd "$REPO_ROOT"
+echo "C0-E1: build; capture starts after bootstrap and StreamReady; submission disabled"
+cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
+  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan 2>&1 | tee "$RUN_DIR/build.log" || {
+  echo "Build failed: $RUN_DIR/build.log" >&2; exit 2;
+}
+BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
+PLAN_BIN="$(dirname "$BIN")/p0-measurement-plan"
+# Plan is compiled exactly once. Every consumer loads this persisted typed plan.
+if [[ -n "${P0_MEASUREMENT_PLAN:-}" ]]; then
+  echo "launcher creates its own plan; unset P0_MEASUREMENT_PLAN" >&2; exit 2
+fi
+"$PLAN_BIN" > "$RUN_DIR/measurement_plan.json"
+export P0_MEASUREMENT_PLAN="$RUN_DIR/measurement_plan.json"
+export P0_ECON_DURATION_SECS="$(python3 - "$P0_MEASUREMENT_PLAN" <<'PLAN'
+import json, sys
+print(json.load(open(sys.argv[1]))['duration_seconds'])
+PLAN
+)"
+echo "Capture: ${P0_ECON_DURATION_SECS}s; separate bootstrap, drain and verification budgets in measurement_plan.json"
 # The preserved 2026-10-08 four-hour evidence occupies ~43 GiB. Budget60GiB
 # for a new four-hour run; this is a storage guard, not an output-size guarantee.
 python3 - "$RUN_DIR" "$P0_ECON_DURATION_SECS" <<'STORAGE'
@@ -176,13 +209,6 @@ export P0_DEADLINE_NS="${P0_DEADLINE_NS:-2000000000}"
 
 mkdir -p "$(dirname "$P0_RECORD_PATH")" "$(dirname "$P0_SUMMARY_PATH")"
 
-cd "$REPO_ROOT"
-echo "C0-E1: build, then $P0_ECON_DURATION_SECS seconds; four automatic snapshots; submission disabled"
-cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
-  --features "crate_health txv1" --bin p0-longtail 2>&1 | tee "$RUN_DIR/build.log" || {
-  echo "Build failed: $RUN_DIR/build.log" >&2; exit 2;
-}
-BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
 # Bind local (possibly uncommitted) source and the actual executable to this run.
 # Do not record environment values, endpoints or signer paths.
 python3 - "$BIN" "$RUN_DIR" <<'MANIFEST'
@@ -203,125 +229,9 @@ with (run / 'candidate_manifest.json').open('x') as f:
     f.write('\n')
 MANIFEST
 status=0
-# Runs shorter than an hour are diagnostic SHORT TESTS, not C0-E1 qualification.
-# Timebox starts when the binary starts, covers bootstrap+capture+cleanup, and
-# forcibly terminates the entire local process group at the requested deadline.
-# Thus a 600 s test NEVER silently performs an hour of post-capture scanning.
-# Full-length qualification is unchanged. Force it for a short diagnostic only
-# by setting P0_ECON_RUN_MODE=full (explicitly accepts the long reconciliation).
-if [[ "${P0_ECON_RUN_MODE:-auto}" == "quick" ]] || {
-     [[ "${P0_ECON_RUN_MODE:-auto}" == "auto" ]] &&
-     [[ "$P0_ECON_DURATION_SECS" =~ ^[0-9]+$ ]] &&
-     (( 10#$P0_ECON_DURATION_SECS < 3600 ));
-   }; then
-  echo "C0-E1 QUICK: hard wall deadline=${P0_ECON_DURATION_SECS}s includes bootstrap, capture and shutdown; canonical reconciliation NOT guaranteed"
-  if python3 - "$BIN" "$RUN_DIR" "$P0_ECON_DURATION_SECS" <<'QUICK_TIMEBOX'
-import json
-import os
-import pathlib
-import re
-import signal
-import subprocess
-import sys
-import threading
-import time
-
-binary, folder, limit = sys.argv[1], pathlib.Path(sys.argv[2]), int(sys.argv[3])
-if not 1 <= limit <= 86400:
-    raise SystemExit("invalid quick-test seconds")
-started = time.monotonic()
-deadline = started + limit
-runtime = folder / "runtime.log"
-summary_path = folder / "console_summary.txt"
-timeboxed = False
-
-with runtime.open("w", encoding="utf-8") as log, summary_path.open("w", encoding="utf-8") as out:
-    # The detached session permits killing ONLY this process and its descendants.
-    process = subprocess.Popen([binary], stdout=out, stderr=subprocess.PIPE,
-                               text=True, errors="replace", bufsize=1,
-                               start_new_session=True)
-    def forward_stderr():
-        for line in process.stderr:
-            log.write(line)
-            log.flush()
-            sys.stderr.write(line)
-            sys.stderr.flush()
-    copier = threading.Thread(target=forward_stderr, daemon=True)
-    copier.start()
-    try:
-        process.wait(timeout=max(0, deadline - time.monotonic()))
-    except subprocess.TimeoutExpired:
-        timeboxed = True
-        print("[QUICK/TIMEBOX] wall deadline reached; stopping process group; post-capture block scan is NOT qualified",
-              file=sys.stderr, flush=True)
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
-    copier.join(timeout=1)
-    elapsed = time.monotonic() - started
-    if timeboxed:
-        print("[QUICK/TIMEBOX] terminated=true finalized_qualification=false", file=sys.stderr, flush=True)
-
-# Use only evidence actually written. NEVER turn absent/unknown canonical
-# values into zeros or report the short test as a valid C0-E1 qualification.
-live = {}
-for line in runtime.read_text(encoding="utf-8", errors="replace").splitlines():
-    if "[MARKET/LIVE]" in line:
-        live = dict(re.findall(r"([a-z_]+)=([^\s]+)", line.split("[MARKET/LIVE]", 1)[1]))
-first = last = None
-coverage = folder / "market" / "coverage.jsonl"
-if coverage.exists():
-    with coverage.open(encoding="utf-8", errors="replace") as stream:
-        for row in stream:
-            try:
-                item = json.loads(row)
-            except (ValueError, UnicodeError):
-                continue
-            if item.get("event") == "MARKET_SLOT_BOUNDARY_EVIDENCE":
-                slot = item.get("slot")
-                if isinstance(slot, int):
-                    first = slot if first is None else min(first, slot)
-                    last = slot if last is None else max(last, slot)
-
-report = {
-    "mode": "QUICK_WALL_TIMEBOX",
-    "requested_wall_seconds": limit,
-    "actual_wall_seconds": round(elapsed, 2),
-    "deadline_reached": timeboxed,
-    "process_returncode": process.returncode,
-    "qualification": "NOT_QUALIFIED" if timeboxed else "CHECK_CANONICAL_REPORT",
-    "market_live_last_observed": live,
-    "observed_slot_min": first,
-    "observed_slot_max": last,
-    "canonical_reconciliation_complete": False if timeboxed else None,
-    "note": "Provisional WebSocket counts cannot prove that zero liquidations occurred."
-}
-(folder / "quick_timebox_report.json").write_text(json.dumps(report, indent=2)+"\n", encoding="utf-8")
-if summary_path.exists():
-    print(summary_path.read_text(encoding="utf-8", errors="replace"), end="")
-print("[MARKET QUICK] status=" + ("TIMEBOX_REACHED_NOT_QUALIFIED" if timeboxed else "PROCESS_EXITED") +
-      f" wall_seconds={elapsed:.1f} slots={first}..{last} provisional_counts=" +
-      json.dumps({key: live.get(key, "UNKNOWN") for key in (
-        "tx", "success", "provisional_classic", "provisional_receivership",
-        "provisional_deleverage", "provisional_bankruptcy", "gaps", "decoder_errors")}, sort_keys=True))
-print("[MARKET QUICK] note=NO_CANONICAL_PASS_IF_TIMEBOX_REACHED saved=" + str(folder / "quick_timebox_report.json"))
-# 124 explicitly denotes intentional wall-clock truncation, never technical PASS.
-sys.exit(124 if timeboxed else process.returncode)
-QUICK_TIMEBOX
-  then
-    status=0
-  else
-    status=$?
-  fi
-else
-  # Complete C0-E1 qualification: preserve Astras full reconciliation.
-  "$BIN" > "$RUN_DIR/console_summary.txt" 2> >(tee "$RUN_DIR/runtime.log" >&2) || status=$?
-  cat "$RUN_DIR/console_summary.txt"
-fi
+# All durations follow the same capture lifecycle. Never timebox the entire
+# process by capture duration: bootstrap and verification have separate budgets.
+"$BIN" > "$RUN_DIR/console_summary.txt" 2> >(tee "$RUN_DIR/runtime.log" >&2) || status=$?
+cat "$RUN_DIR/console_summary.txt"
 echo "Reports and detailed logs: $RUN_DIR"
 exit "$status"

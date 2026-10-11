@@ -1,6 +1,7 @@
 //! C0-E1: observation only. Both producers use one Clock; analytics never call RPC.
 //! Arrival-time hourly snapshots are provisional; final drain atomically reconciles them.
-use crate::market_observer::{utc_compact, utc_iso, MarketConfig, ReceiverEvent};
+use crate::market_observer::{utc_compact, MarketConfig, ReceiverEvent};
+use crate::measurement::{MeasurementPlan, SNAPSHOT_COUNT};
 use crate::record::{CandidateCostRecord, Decision, OpportunityRecord};
 use crate::winner::{Winner, WinnerIdentity};
 use darkbot_common::channel::{bounded, Consumer, Producer};
@@ -37,11 +38,9 @@ pub const NON_CLAIMS: [&str; 8] = [
 
 #[derive(Clone)]
 pub struct EconConfig {
-    pub duration_secs: u64,
-    pub snapshot_secs: u64,
+    pub plan: MeasurementPlan,
     pub queue_capacity: usize,
     pub retention: usize,
-    pub drain_secs: u64,
     pub capital: Vec<u64>,
     pub run_dir: PathBuf,
     pub run_id: String,
@@ -59,24 +58,13 @@ impl EconConfig {
                 v.parse().map_err(|_| format!("invalid {key}"))
             })
         };
-        let duration_secs = num("P0_ECON_DURATION_SECS", 14400)?;
-        let snapshot_secs = num("P0_ECON_SNAPSHOT_SECS", 3600)?;
-        if snapshot_secs == 0
-            || snapshot_secs.checked_mul(4) != Some(duration_secs)
-            || duration_secs > 86400
-        {
-            return Err(
-                "econ4h requires exactly four equal snapshots and duration <=86400s".into(),
-            );
-        }
+        let plan = MeasurementPlan::from_lookup(get)?;
         let queue_capacity = usize::try_from(num("P0_ECON_QUEUE_CAPACITY", 8192)?)
             .map_err(|_| "queue capacity overflow")?;
         let retention =
             usize::try_from(num("P0_ECON_RETENTION", 262144)?).map_err(|_| "retention overflow")?;
-        let drain_secs = num("P0_ECON_DRAIN_SECS", 180)?;
         if queue_capacity == 0
             || retention == 0
-            || drain_secs == 0
             || queue_capacity > 1_000_000
             || retention > 2_000_000
         {
@@ -114,11 +102,9 @@ impl EconConfig {
             PathBuf::from(get("P0_ECON_OUT_DIR").unwrap_or_else(|| "project_0/data/econ4h".into()))
                 .join(&run_id);
         Ok(Self {
-            duration_secs,
-            snapshot_secs,
+            plan,
             queue_capacity,
             retention,
-            drain_secs,
             capital,
             run_dir,
             run_id,
@@ -264,7 +250,8 @@ impl Handle {
     pub fn drain_expired(&self) -> bool {
         self.shared.abort.load(Ordering::Acquire)
             || self.cutoff().is_some_and(|c| {
-                self.clock.now_ns() >= c.saturating_add(self.cfg.drain_secs * 1_000_000_000)
+                self.clock.now_ns()
+                    >= c.saturating_add(self.cfg.plan.budgets.shadow_drain_seconds * 1_000_000_000)
             })
     }
     /// The shared economic measurement must not spend its window bootstrapping.
@@ -274,10 +261,13 @@ impl Handle {
         loop {
             if self.shared.abort.load(Ordering::Acquire)
                 || self.shared.shadow_done.load(Ordering::Acquire)
-                || self.shared.shadow_failed.load(Ordering::Acquire) {
+                || self.shared.shadow_failed.load(Ordering::Acquire)
+            {
                 return Err("SHADOW_STARTUP_FAILED".into());
             }
-            if self.shared.shadow_ready.load(Ordering::Acquire) { return Ok(()); }
+            if self.shared.shadow_ready.load(Ordering::Acquire) {
+                return Ok(());
+            }
             if std::time::Instant::now() >= deadline {
                 return Err("SHADOW_STARTUP_TIMEOUT".into());
             }
@@ -337,6 +327,13 @@ pub fn spawn(
     market: &MarketConfig,
 ) -> Result<(Handle, std::thread::JoinHandle<Result<(), String>>), String> {
     fs::create_dir_all(&cfg.run_dir).map_err(|e| e.to_string())?;
+    crate::measurement::persist_manifest(
+        &cfg.run_dir,
+        &cfg.run_id,
+        &cfg.provider_class,
+        &cfg.plan,
+        clock,
+    )?;
     let (tx, rx) = bounded("econ-analytics", cfg.queue_capacity);
     let handle = Handle {
         tx,
@@ -612,13 +609,13 @@ struct Worker {
     shadow_evaluations_coalesced: u64,
     shadow_semantic_entries_max: usize,
     shadow_semantic_evictions: u64,
-    market_counters: [BTreeMap<String, u64>; 4],
+    market_counters: [BTreeMap<String, u64>; SNAPSHOT_COUNT],
     winners: BTreeMap<String, Vec<(u64, Winner)>>,
     checkpoints: BTreeMap<usize, Value>,
     market_final: Option<Value>,
     shadow_stats: Value,
     final_technical: Option<Value>,
-    evaluation_counts: [u64; 4],
+    evaluation_counts: [u64; SNAPSHOT_COUNT],
     evaluations: BufWriter<File>,
     snapshots: usize,
 }
@@ -669,7 +666,7 @@ impl Worker {
             market_final: None,
             shadow_stats: Value::Null,
             final_technical: None,
-            evaluation_counts: [0; 4],
+            evaluation_counts: [0; SNAPSHOT_COUNT],
             evaluations: BufWriter::new(file),
             snapshots: 0,
         })
@@ -680,10 +677,7 @@ impl Worker {
         if ns < start || ns > cutoff {
             return None;
         }
-        Some(
-            ((ns - start).saturating_sub(1) / (self.h.cfg.snapshot_secs * 1_000_000_000)).min(3)
-                as usize,
-        )
+        self.h.cfg.plan.live_bucket(ns - start)
     }
     fn over_limit(&self) {
         self.h
@@ -972,7 +966,7 @@ impl Worker {
     fn market_hour(&self, market: &MarketEvent) -> Option<usize> {
         match market.source {
             MarketEvidenceSource::Live => market.t_rx_ns.and_then(|t| self.hour(t)),
-            MarketEvidenceSource::GapBackfill => Some(3),
+            MarketEvidenceSource::GapBackfill => Some(SNAPSHOT_COUNT - 1),
         }
     }
     fn selected(&self) -> Vec<(usize, &OpportunityRecord)> {
@@ -988,7 +982,7 @@ impl Worker {
             .collect()
     }
     fn metrics(&self, from: usize, through: usize) -> Value {
-        let seconds = ((through - from) as u64 * self.h.cfg.snapshot_secs) as f64;
+        let seconds = self.h.cfg.plan.span_seconds(from, through);
         let markets: Vec<_> = self
             .market
             .iter()
@@ -1316,7 +1310,7 @@ impl Worker {
             .market_final
             .as_ref()
             .and_then(|v| v["actual_observation_seconds"].as_f64())
-            == Some(self.h.cfg.duration_secs as f64);
+            == Some(self.h.cfg.plan.duration_seconds as f64);
         let shadow_ok = self.shadow_stats["ingress_overflow"].as_u64() == Some(0)
             && self.shadow_stats["winner_watch_overflow"].as_u64() == Some(0)
             && self.shadow_stats["shadow_state_ready_at_shutdown"] == true;
@@ -1331,7 +1325,7 @@ impl Worker {
             && shadow_ok
             && market_ok
             && duration_ok
-            && self.snapshots == 4
+            && self.snapshots == SNAPSHOT_COUNT
             && writer_ok
             && self.shadow_evaluations_received == self.shadow_evaluations_streamed
             && self.shadow_semantic_evictions == 0
@@ -1349,9 +1343,9 @@ impl Worker {
             &Default::default(),
         );
         json!({"verdict":if pass {"PASS"}else if finalizing {"INCOMPLETE"}else{"IN_PROGRESS"},
-            "requested_duration_seconds":self.h.cfg.duration_secs,"actual_duration_seconds":self.market_final.as_ref().map(|v|&v["actual_observation_seconds"]),
+            "requested_duration_seconds":self.h.cfg.plan.duration_seconds,"actual_duration_seconds":self.market_final.as_ref().map(|v|&v["actual_observation_seconds"]),
             "clean_automatic_shutdown":finalizing && !s.abort.load(Ordering::Relaxed),"market_capture_complete":market_ok,
-            "four_snapshots_present":self.snapshots==4,"snapshot_write_success":self.snapshots,"snapshot_write_failures":s.writer_errors.load(Ordering::Relaxed),
+            "four_snapshots_present":self.snapshots==SNAPSHOT_COUNT,"snapshot_write_success":self.snapshots,"snapshot_write_failures":s.writer_errors.load(Ordering::Relaxed),
             "analytics_queue_capacity":self.h.cfg.queue_capacity,"analytics_queue_max_depth":s.max_depth.load(Ordering::Relaxed),"analytics_queue_drops":s.drops.load(Ordering::Relaxed),
             "shadow_evaluations_received":self.shadow_evaluations_received,
             "shadow_evaluations_streamed":self.shadow_evaluations_streamed,
@@ -1371,23 +1365,28 @@ impl Worker {
         let cumulative = self.metrics(0, index);
         let delta = self.metrics(index - 1, index);
         let start = self.h.shared.start_ns.load(Ordering::Acquire);
-        let end = start + index as u64 * self.h.cfg.snapshot_secs * 1_000_000_000;
+        let end = start + self.h.cfg.plan.offset_ns(index);
         let elapsed = if finalizing {
             self.market_final
                 .as_ref()
                 .and_then(|v| v["actual_observation_seconds"].as_f64())
                 .unwrap_or(0.0)
-                .min(index as f64 * self.h.cfg.snapshot_secs as f64)
+                .min(self.h.cfg.plan.seconds(index))
         } else {
             self.h.clock.now_ns().saturating_sub(start) as f64 / 1e9
         };
-        let complete = finalizing && elapsed >= index as f64 * self.h.cfg.snapshot_secs as f64;
-        let mut report = json!({"identity":{"schema_version":"C0-E1/1","run_id":self.h.cfg.run_id,"source_commit":self.commit,
+        let complete = finalizing && elapsed >= self.h.cfg.plan.seconds(index);
+        let capture_window = if self.h.cutoff().is_some() {
+            self.h.cfg.plan.capture_window(self.h.clock, start).ok()
+        } else {
+            None
+        };
+        let mut report = json!({"measurement_plan":self.h.cfg.plan,"capture_window":capture_window,"identity":{"schema_version":"C0-E1/1","run_id":self.h.cfg.run_id,"source_commit":self.commit,
             "marginfi_pin":"33c67987a661f59c6683a65485ebb4f0ef030b77","mode":"econ4h","market_source":self.source,"provider_class":self.h.cfg.provider_class,
-            "commitment":self.commitment,"started_at_utc":utc_iso((self.h.clock.unix_ns(start)/1_000_000_000) as u64),
-            "ended_at_utc":utc_iso((self.h.clock.unix_ns(end)/1_000_000_000) as u64),"actual_elapsed_seconds":elapsed,
-            "snapshot_index":index,"snapshot_interval_seconds":self.h.cfg.snapshot_secs,"complete":complete,"live_enabled":false},
-            "window":{"from_seconds":(index-1) as u64*self.h.cfg.snapshot_secs,"through_seconds":index as u64*self.h.cfg.snapshot_secs,
+            "commitment":self.commitment,"started_at_utc":crate::measurement::utc_ns(self.h.clock.unix_ns(start)),
+            "ended_at_utc":crate::measurement::utc_ns(self.h.clock.unix_ns(end)),"actual_elapsed_seconds":elapsed,
+            "snapshot_index":index,"measurement_plan":self.h.cfg.plan,"snapshot_interval_seconds":self.h.cfg.plan.span_seconds(index-1,index),"complete":complete,"live_enabled":false},
+            "window":{"from_offset_ns":self.h.cfg.plan.offset_ns(index-1),"through_offset_ns":self.h.cfg.plan.offset_ns(index),"from_seconds":self.h.cfg.plan.seconds(index-1),"through_seconds":self.h.cfg.plan.seconds(index),
                 "provisional":!finalizing,"reconciled_after_drain":finalizing,"join_assignment":"matched event receive hour; unmatched candidate trigger hour",
                 "coalescing":"earliest executable sign per target/winner; unresolved per target/hour; all input evaluations streamed to disk; bounded semantic representatives; disk-indexed late-winner recorrelation",
                 "backfill_hour_assignment":"final resolution window (hour 4), not a live receive time"},
@@ -1438,7 +1437,7 @@ impl Worker {
         } else {
             "NO_OBSERVED_LIQUIDATIONS"
         });
-        let r6 = if index == 4 && finalizing {
+        let r6 = if index == SNAPSHOT_COUNT && finalizing {
             self.market_final.as_ref()
         } else {
             self.checkpoints.get(&index)
@@ -1447,7 +1446,7 @@ impl Worker {
         report["market"]["window_delta"]["c0_mo_counter_delta"] =
             counter_delta(r6, self.checkpoints.get(&(index - 1)));
         report["market"]["cumulative"]["c0_mo_checkpoint_qualification"] =
-            json!(if index == 4 && finalizing {
+            json!(if index == SNAPSHOT_COUNT && finalizing {
                 "FINAL_AFTER_ENRICHMENT"
             } else {
                 "CAPTURE_CHECKPOINT_ENRICHMENT_PENDING"
@@ -1465,55 +1464,76 @@ impl Worker {
             self.h.shared.writer_errors.fetch_add(1, Ordering::Relaxed);
         })
     }
-/// Human-readable authoritative MARKET conclusion next to the C0-E1 console
-/// summary. Read existing report data only; no RPC, scanner, or parallel ledger.
-fn market_terminal_summary(report: &Value) -> String {
-    let final_market = &report["market"]["cumulative"]["c0_mo_r6"];
-    let scan = &final_market["full_slot_reconciliation"];
-    let all_paths = &report["canonical"]["cumulative"]["market"];
-    let count = |v: &Value| v.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "UNKNOWN".into());
-    let gross = |v: &Value| {
-        let known = &v["gross_edge_usd"];
-        if known["count_known"].as_u64().unwrap_or(0) == 0 {
-            "UNKNOWN".to_string()
-        } else {
-            known["distribution"]["total"].as_f64()
-                .map(|n| format!("{n:.6}"))
+    /// Human-readable authoritative MARKET conclusion next to the C0-E1 console
+    /// summary. Read existing report data only; no RPC, scanner, or parallel ledger.
+    fn market_terminal_summary(report: &Value) -> String {
+        let final_market = &report["market"]["cumulative"]["c0_mo_r6"];
+        let scan = &final_market["full_slot_reconciliation"];
+        let all_paths = &report["canonical"]["cumulative"]["market"];
+        let count = |v: &Value| {
+            v.as_u64()
+                .map(|n| n.to_string())
                 .unwrap_or_else(|| "UNKNOWN".into())
+        };
+        let gross = |v: &Value| {
+            let known = &v["gross_edge_usd"];
+            if known["count_known"].as_u64().unwrap_or(0) == 0 {
+                "UNKNOWN".to_string()
+            } else {
+                known["distribution"]["total"]
+                    .as_f64()
+                    .map(|n| format!("{n:.6}"))
+                    .unwrap_or_else(|| "UNKNOWN".into())
+            }
+        };
+        let canonical_complete = scan["complete"].as_bool() == Some(true)
+            && final_market["full_slot_reconciliation_complete"].as_bool() == Some(true);
+        let mut lines = vec![
+            "================ MARKET FINAL (canonical all-path) ================".to_string(),
+            format!(
+                "status={} canonical_complete={} sample={}",
+                final_market["verdict"].as_str().unwrap_or("UNKNOWN"),
+                canonical_complete,
+                report["economic_sample_status"]
+                    .as_str()
+                    .unwrap_or("UNKNOWN")
+            ),
+            format!(
+                "capture: received={} success={} failed={}",
+                count(&final_market["unique_transactions"]),
+                count(&final_market["successful_transactions"]),
+                count(&final_market["failed_transactions"])
+            ),
+            format!(
+                "finalized_slots: expected={} fetched={} skipped_confirmed={} failed={}",
+                count(&scan["slots_expected"]),
+                count(&scan["slots_fetched"]),
+                count(&scan["slots_skipped_confirmed"]),
+                count(&scan["slots_failed"])
+            ),
+        ];
+        for key in [
+            "ALL",
+            "CLASSIC",
+            "RECEIVERSHIP",
+            "FORCED_DELEVERAGE",
+            "BANKRUPTCY_SETTLEMENT",
+        ] {
+            let v = &all_paths[key];
+            lines.push(format!(
+                "{key}: events={} gross_known_usd={} gross_known_events={} gross_unknown_events={}",
+                count(&v["events"]),
+                gross(v),
+                count(&v["gross_edge_usd"]["count_known"]),
+                count(&v["gross_edge_usd"]["count_unknown"])
+            ));
         }
-    };
-    let canonical_complete = scan["complete"].as_bool() == Some(true)
-        && final_market["full_slot_reconciliation_complete"].as_bool() == Some(true);
-    let mut lines = vec![
-        "================ MARKET FINAL (canonical all-path) ================".to_string(),
-        format!("status={} canonical_complete={} sample={}",
-            final_market["verdict"].as_str().unwrap_or("UNKNOWN"),
-            canonical_complete,
-            report["economic_sample_status"].as_str().unwrap_or("UNKNOWN")),
-        format!("capture: received={} success={} failed={}",
-            count(&final_market["unique_transactions"]),
-            count(&final_market["successful_transactions"]),
-            count(&final_market["failed_transactions"])),
-        format!("finalized_slots: expected={} fetched={} skipped_confirmed={} failed={}",
-            count(&scan["slots_expected"]),
-            count(&scan["slots_fetched"]),
-            count(&scan["slots_skipped_confirmed"]),
-            count(&scan["slots_failed"])),
-    ];
-    for key in ["ALL", "CLASSIC", "RECEIVERSHIP", "FORCED_DELEVERAGE", "BANKRUPTCY_SETTLEMENT"] {
-        let v = &all_paths[key];
-        lines.push(format!(
-            "{key}: events={} gross_known_usd={} gross_known_events={} gross_unknown_events={}",
-            count(&v["events"]),
-            gross(v),
-            count(&v["gross_edge_usd"]["count_known"]),
-            count(&v["gross_edge_usd"]["count_unknown"])
-        ));
+        lines.push(
+            "gross_known_usd is NOT realized profit; unknown values are not zero.".to_string(),
+        );
+        lines.push("===============================================================".to_string());
+        lines.join("\n")
     }
-    lines.push("gross_known_usd is NOT realized profit; unknown values are not zero.".to_string());
-    lines.push("===============================================================".to_string());
-    lines.join("\n")
-}
 
     fn run(mut self) -> Result<(), String> {
         loop {
@@ -1525,9 +1545,12 @@ fn market_terminal_summary(report: &Value) -> String {
             }
             if let Some(cutoff) = self.h.cutoff() {
                 let start = self.h.shared.start_ns.load(Ordering::Acquire);
-                let n = (self.h.clock.now_ns().min(cutoff).saturating_sub(start)
-                    / (self.h.cfg.snapshot_secs * 1_000_000_000)) as usize;
-                while self.snapshots < n.min(4) {
+                let n = self
+                    .h
+                    .cfg
+                    .plan
+                    .due(self.h.clock.now_ns().min(cutoff).saturating_sub(start));
+                while self.snapshots < n {
                     let i = self.snapshots + 1;
                     self.write_snapshot(i, false)?;
                     self.snapshots = i;
@@ -1549,7 +1572,7 @@ fn market_terminal_summary(report: &Value) -> String {
         for i in 1..=self.snapshots {
             self.write_snapshot(i, true)?;
         }
-        let final_report = self.report(4, true);
+        let final_report = self.report(SNAPSHOT_COUNT, true);
         atomic_json(
             &self.h.cfg.run_dir.join("economics_final.json"),
             &final_report,
@@ -1575,6 +1598,13 @@ fn market_terminal_summary(report: &Value) -> String {
             final_report["technical_qualification"]["verdict"]
         );
         println!("{}", Self::market_terminal_summary(&final_report));
+        crate::measurement::journal(
+            &self.h.cfg.run_dir,
+            self.h.clock,
+            "REPORTS_FINALIZED",
+            json!({"technical_qualification":final_report["technical_qualification"]["verdict"],
+                "snapshot_count":self.snapshots,"report":"economics_final.json"}),
+        )?;
         if final_report["technical_qualification"]["verdict"] != "PASS" {
             return Err(
                 "C0-E1 technical qualification incomplete; see economics_final.json".into(),

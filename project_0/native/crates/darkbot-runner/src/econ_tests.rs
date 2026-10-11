@@ -105,8 +105,7 @@ fn config() -> EconConfig {
 pub(super) fn worker() -> Worker {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let mut cfg = config();
-    cfg.snapshot_secs = 1;
-    cfg.duration_secs = 4;
+    cfg.plan = MeasurementPlan::new(4).unwrap();
     cfg.run_dir = std::env::temp_dir().join(format!(
         "c0_e1_{}_{}",
         std::process::id(),
@@ -134,7 +133,7 @@ pub(super) fn worker() -> Worker {
 fn complete(w: &mut Worker) {
     w.h.shared.shadow_ready_ns.store(1, Ordering::Release);
     w.canonical_finalized = true;
-    w.snapshots = 4;
+    w.snapshots = SNAPSHOT_COUNT;
     w.market_final = Some(
         json!({"actual_observation_seconds":4.0,"market_capture_complete":true,"drain_complete":true,"decode_complete":true,"source_coverage_verified":false,"verdict":"MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED"}),
     );
@@ -149,7 +148,7 @@ fn config_requires_four_snapshots_and_live_disabled() {
         ("P0_LIVE_ENABLED", "true"),
         ("P0_SUBMISSION_ENABLED", "1"),
         ("P0_ECON_SNAPSHOT_SECS", "0"),
-        ("P0_ECON_DURATION_SECS", "600"),
+        ("P0_ECON_DURATION_SECS", "0"),
     ] {
         assert!(EconConfig::from_lookup(&|k| (k == key).then(|| value.into()), 0).is_err());
     }
@@ -162,7 +161,8 @@ fn config_requires_four_snapshots_and_live_disabled() {
         0,
     )
     .unwrap();
-    assert_eq!(c.duration_secs, 4 * c.snapshot_secs);
+    assert_eq!(c.plan.duration_seconds, 600);
+    assert_eq!(c.plan.seconds(1), 150.0);
 }
 #[test]
 fn shared_clock_preserves_origin_across_producers() {
@@ -440,7 +440,7 @@ fn early_end_missing_snapshot_upgrade_and_writer_failures_are_incomplete() {
     complete(&mut w);
     w.snapshots = 3;
     assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
-    w.snapshots = 4;
+    w.snapshots = SNAPSHOT_COUNT;
     w.market_final.as_mut().unwrap()["actual_observation_seconds"] = json!(3.0);
     assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
     complete(&mut w);
@@ -1020,23 +1020,73 @@ fn market_rpc_barrier_waits_for_shadow_and_rejects_failed_shadow() {
 #[test]
 fn startup_barrier_never_starts_clock_on_timeout_or_failed_shadow() {
     let (tx, _rx) = bounded("warmup", 1);
-    let h=Handle { tx,shared:Arc::new(Shared::default()),clock:Clock::new(),cfg:config() };
-    assert_eq!(h.wait_shadow_ready(Duration::ZERO).unwrap_err(),"SHADOW_STARTUP_TIMEOUT");
-    assert_eq!(h.cutoff(),None);
-    let shared=h.shared.clone();
-    let t=std::thread::spawn(move || {std::thread::sleep(Duration::from_millis(20)); shared.shadow_ready.store(true,Ordering::Release);});
-    h.wait_shadow_ready(Duration::from_secs(1)).unwrap();t.join().unwrap();
-    assert_eq!(h.cutoff(),None); // ACK of the subsequent market stream owns the clock.
-    h.shared.shadow_failed.store(true,Ordering::Release);
-    assert_eq!(h.wait_shadow_ready(Duration::ZERO).unwrap_err(),"SHADOW_STARTUP_FAILED");
+    let h = Handle {
+        tx,
+        shared: Arc::new(Shared::default()),
+        clock: Clock::new(),
+        cfg: config(),
+    };
+    assert_eq!(
+        h.wait_shadow_ready(Duration::ZERO).unwrap_err(),
+        "SHADOW_STARTUP_TIMEOUT"
+    );
+    assert_eq!(h.cutoff(), None);
+    let shared = h.shared.clone();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(20));
+        shared.shadow_ready.store(true, Ordering::Release);
+    });
+    h.wait_shadow_ready(Duration::from_secs(1)).unwrap();
+    t.join().unwrap();
+    assert_eq!(h.cutoff(), None); // ACK of the subsequent market stream owns the clock.
+    h.shared.shadow_failed.store(true, Ordering::Release);
+    assert_eq!(
+        h.wait_shadow_ready(Duration::ZERO).unwrap_err(),
+        "SHADOW_STARTUP_FAILED"
+    );
 }
 
 #[test]
 fn empty_measurement_or_recovery_after_start_cannot_pass() {
-    let mut w=worker();complete(&mut w);
-    assert_eq!(w.technical(true)["verdict"],"INCOMPLETE");
+    let mut w = worker();
+    complete(&mut w);
+    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
     w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
-    assert_eq!(w.technical(true)["verdict"],"PASS");
-    w.h.shared.shadow_ready_ns.store(2,Ordering::Release); // capture started at1
-    assert_eq!(w.technical(true)["verdict"],"INCOMPLETE");
+    assert_eq!(w.technical(true)["verdict"], "PASS");
+    w.h.shared.shadow_ready_ns.store(2, Ordering::Release); // capture started at1
+    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+}
+
+#[test]
+fn measurement_plan_report_and_attribution_agree_for_all_durations() {
+    for seconds in [1, 61, 600, 3600, 18000, 86400] {
+        let mut w = worker();
+        w.h.cfg.plan = MeasurementPlan::new(seconds).unwrap();
+        let start = 599_000_000_001; // Bootstrap is deliberately longer than short captures.
+        let cutoff = w.h.cfg.plan.cutoff(start).unwrap();
+        w.h.start(start, cutoff);
+        complete(&mut w);
+        w.market_final.as_mut().unwrap()["actual_observation_seconds"] = json!(seconds as f64);
+        for i in 1..=SNAPSHOT_COUNT {
+            let end = start + w.h.cfg.plan.offset_ns(i);
+            assert_eq!(w.hour(end), Some(i - 1));
+            if i < SNAPSHOT_COUNT {
+                assert_eq!(w.hour(end + 1), Some(i));
+            }
+            let report = w.report(i, true);
+            assert_eq!(
+                report["window"]["through_offset_ns"],
+                w.h.cfg.plan.offset_ns(i)
+            );
+            assert_eq!(report["window"]["through_seconds"], w.h.cfg.plan.seconds(i));
+            assert_eq!(report["identity"]["complete"], true);
+            assert_eq!(report["capture_window"]["capture_cutoff_ns"], cutoff);
+            assert_eq!(report["measurement_plan"]["duration_seconds"], seconds);
+        }
+        assert_eq!(w.hour(cutoff + 1), None);
+        assert_eq!(
+            w.report(SNAPSHOT_COUNT, true)["identity"]["actual_elapsed_seconds"],
+            seconds as f64
+        );
+    }
 }

@@ -1,0 +1,70 @@
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-runner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.75s
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_runner-6830e0bba0ad474c)
+
+running 7 tests
+test measurement::tests::bootstrap_does_not_consume_capture_budget ... ok
+test measurement::tests::reject_invalid_duration ... ok
+test measurement::tests::legacy_conflicts_and_tampered_plan_fail_closed ... ok
+test measurement::tests::durations_and_exact_quarters ... ok
+test econ::tests::empty_measurement_or_recovery_after_start_cannot_pass ... ok
+test econ::tests::measurement_plan_report_and_attribution_agree_for_all_durations ... ok
+test measurement::persistence_tests::manifest_is_exclusive_and_phase_journal_preserves_exact_window ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 177 filtered out; finished in 1.42s
+
+     Running unittests src/main.rs (project_0/native/target/debug/deps/p0_longtail-27149dfa1f50697b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-measurement-plan.rs (project_0/native/target/debug/deps/p0_measurement_plan-4ce8a0152e5efda9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-prewarm-atas.rs (project_0/native/target/debug/deps/p0_prewarm_atas-854cbe7fc7bbe1ff)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-probe-costs.rs (project_0/native/target/debug/deps/p0_probe_costs-91e8b1f0725e7886)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_runner-6830e0bba0ad474c)
+
+running 1 test
+test econ::tests::runtime_worker_writes_four_snapshots_then_identical_final ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 183 filtered out; finished in 4.54s
+
+     Running unittests src/main.rs (project_0/native/target/debug/deps/p0_longtail-27149dfa1f50697b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-measurement-plan.rs (project_0/native/target/debug/deps/p0_measurement_plan-4ce8a0152e5efda9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-prewarm-atas.rs (project_0/native/target/debug/deps/p0_prewarm_atas-854cbe7fc7bbe1ff)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-probe-costs.rs (project_0/native/target/debug/deps/p0_probe_costs-91e8b1f0725e7886)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

@@ -1,0 +1,5 @@
+{
+  "changed_rust_files_format_exit": 0,
+  "main_run_econ4h_format_matches": true,
+  "scope": "P1 files + changed main function; no whole-workspace formatting claim"
+}

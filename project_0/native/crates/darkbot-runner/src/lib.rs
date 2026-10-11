@@ -29,3 +29,5 @@ pub mod lookup_tables;
 pub mod market_observer;
 
 pub mod econ;
+
+pub mod measurement;
