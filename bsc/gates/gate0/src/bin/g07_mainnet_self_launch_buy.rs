@@ -422,13 +422,26 @@ fn hex_u64(v: &Value) -> u64 {
     .expect("bad hex u64")
 }
 
-fn run_current_preflight(launcher: Address, buyer: Address) -> Value {
+fn run_current_preflight(
+    launcher: Address,
+    buyer: Address,
+    gas_price: u64,
+    launch_gas_limit: u64,
+    buy_gas_limit: u64,
+    launch_value: u128,
+    buy_value: u64,
+) -> Value {
     let path = format!("/tmp/darkbot-g07-preflight-{}.json", std::process::id());
     let out = Command::new("node")
         .arg("bsc/gates/gate0/tools/g06a_preflight_readonly.cjs")
         .arg(&path)
         .env("DARKBOT_G06A_LAUNCHER_ADDRESS", launcher.to_string())
         .env("DARKBOT_G06A_BUYER_ADDRESS", buyer.to_string())
+        .env("DARKBOT_G06A_GAS_PRICE_WEI", gas_price.to_string())
+        .env("DARKBOT_G06A_LAUNCH_GAS_LIMIT", launch_gas_limit.to_string())
+        .env("DARKBOT_G06A_BUY_GAS_LIMIT", buy_gas_limit.to_string())
+        .env("DARKBOT_G06A_LAUNCH_VALUE_WEI", launch_value.to_string())
+        .env("DARKBOT_G06A_BUY_VALUE_WEI", buy_value.to_string())
         .output()
         .expect("failed to execute G0.6a readonly Mainnet preflight");
     let _ = fs::remove_file(&path);
@@ -746,7 +759,15 @@ fn main() {
     .expect("invalid DRY local_expected_output");
     assert!(local_expected_output > U256::ZERO);
 
-    let current = run_current_preflight(launcher, buyer);
+    let current = run_current_preflight(
+        launcher,
+        buyer,
+        gas_price,
+        launch_gas_limit,
+        buy_gas_limit,
+        launch_value,
+        buy_value,
+    );
     let (launcher_nonce, buyer_nonce, send_head) = validate_current_preflight(
         &baseline,
         &current,
