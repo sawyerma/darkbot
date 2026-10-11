@@ -1585,6 +1585,10 @@ impl ObserverCore {
             "source": "logsSubscribe",
             "raw": l.raw,
         }))?;
+        // A timeboxed diagnostic can be terminated before graceful finalization.
+        // Make each admitted live signature visible on disk immediately rather
+        // than letting the final BufWriter batch disappear on SIGTERM.
+        sink.flush()?;
         if l.logs.is_empty() {
             if success {
                 self.stats.log_messages_missing += 1;
