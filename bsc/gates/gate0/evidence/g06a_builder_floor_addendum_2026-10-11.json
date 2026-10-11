@@ -1,0 +1,35 @@
+{
+  "schema": "darkbot.g06a.builder-floor-evidence-addendum.v2",
+  "observed_date": "2026-10-11",
+  "scope": "G0.6a DRY-3 current builder floor/ranking check for controlled Flap self-launch",
+  "status": "DRY3_POLICY_READY",
+  "blockrazor": {
+    "verified": true,
+    "explicit_minimum_bundle_gas_price_wei": "50000000",
+    "rule": "Average gas price of a BSC bundle must be >= 0.05 gwei; mempool transactions are excluded from the average calculation.",
+    "source": "https://blockrazor.io/support/",
+    "checked": "2026-10-11"
+  },
+  "fortyeightclub": {
+    "verified": true,
+    "explicit_minimum_documented": false,
+    "explicit_minimum_bundle_gas_price_wei": null,
+    "ranking_rule": "Current public bundle-status documentation describes priority as included transaction gas fees after adjustments plus direct transfers. No explicit public minimum bundle gas-price floor was found in the current public builder documentation checked for this DRY.",
+    "official_sources": [
+      "https://web3.48.club/builder",
+      "https://web3.48.club/docs/mev-builder/bundle-status"
+    ],
+    "checked": "2026-10-11",
+    "policy": "Do not label 1 gwei as a 48Club minimum."
+  },
+  "strictest_explicit_verified_floor_wei": "50000000",
+  "strictest_explicit_verified_floor_source": "BlockRazor",
+  "stage1_signed_gas_price_policy_wei": "1000000000",
+  "stage1_policy_note": "1 gwei remains DarkBot's conservative Stage-1 signed-gas-price policy inside the frozen v2 budget; it is not claimed as a provider minimum.",
+  "dry3_ready": true,
+  "non_claims": [
+    "This evidence does not prove valid bundle inclusion.",
+    "This evidence does not prove hidden undocumented 48Club requirements.",
+    "Real G0.7 ordering/acquisition evidence is still required."
+  ]
+}
