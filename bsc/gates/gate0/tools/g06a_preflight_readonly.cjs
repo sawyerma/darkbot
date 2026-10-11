@@ -28,6 +28,16 @@ function req(name) {
   return v.trim();
 }
 
+function plannedWei(name, fallback, max) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  if (!/^[0-9]+$/.test(raw)) throw new Error(name + ' must be decimal wei');
+  const v = BigInt(raw);
+  if (v > max) throw new Error(name + ' exceeds frozen v2 ceiling');
+  return v;
+}
+
+
 function requireRpcUrl() {
   const url = req('BSC_MAINNET_RPC_HTTPS');
   if (url === 'DEIN_RPC' || url.includes('DEIN_RPC')) {
@@ -163,17 +173,42 @@ async function main() {
     buyerBalance = BigInt(await rpc(url, 'eth_getBalance', [buyer, 'latest']));
   }
 
+  const plannedGasPriceWei = plannedWei(
+    'DARKBOT_G06A_GAS_PRICE_WEI', MAX_SIGNED_GAS_PRICE_WEI, MAX_SIGNED_GAS_PRICE_WEI
+  );
+  const plannedLaunchGasLimit = plannedWei(
+    'DARKBOT_G06A_LAUNCH_GAS_LIMIT', MAX_LAUNCH_GAS_LIMIT, MAX_LAUNCH_GAS_LIMIT
+  );
+  const plannedBuyGasLimit = plannedWei(
+    'DARKBOT_G06A_BUY_GAS_LIMIT', MAX_BUY_GAS_LIMIT, MAX_BUY_GAS_LIMIT
+  );
+  const plannedLaunchValueWei = plannedWei(
+    'DARKBOT_G06A_LAUNCH_VALUE_WEI', MAX_LAUNCH_VALUE_WEI, MAX_LAUNCH_VALUE_WEI
+  );
+  const plannedBuyValueWei = plannedWei(
+    'DARKBOT_G06A_BUY_VALUE_WEI', MAX_BUY_VALUE_WEI, MAX_BUY_VALUE_WEI
+  );
+
   const launcherRequiredWorstCase =
-    MAX_LAUNCH_VALUE_WEI + MAX_LAUNCH_GAS_LIMIT * MAX_SIGNED_GAS_PRICE_WEI;
+    plannedLaunchValueWei + plannedLaunchGasLimit * plannedGasPriceWei;
   const buyerRequiredWorstCase =
-    MAX_BUY_VALUE_WEI + MAX_BUY_GAS_LIMIT * MAX_SIGNED_GAS_PRICE_WEI;
+    plannedBuyValueWei + plannedBuyGasLimit * plannedGasPriceWei;
+  const combinedAttemptReserveWei = launcherRequiredWorstCase + buyerRequiredWorstCase;
 
   const walletQualification = {
     addresses_bound: Boolean(launcher && buyer),
     distinct: launcher && buyer ? launcher !== buyer : null,
     launcher_required_worst_case_wei: launcherRequiredWorstCase.toString(),
     buyer_required_worst_case_wei: buyerRequiredWorstCase.toString(),
-    combined_attempt_reserve_wei: MAX_ATTEMPT_RESERVE_WEI.toString(),
+    combined_attempt_reserve_wei: combinedAttemptReserveWei.toString(),
+    proposal_max_attempt_reserve_wei: MAX_ATTEMPT_RESERVE_WEI.toString(),
+    funding_profile: {
+      gas_price_wei: plannedGasPriceWei.toString(),
+      launch_gas_limit: plannedLaunchGasLimit.toString(),
+      buy_gas_limit: plannedBuyGasLimit.toString(),
+      launch_value_wei: plannedLaunchValueWei.toString(),
+      buy_value_wei: plannedBuyValueWei.toString()
+    },
     launcher_sufficient: launcherBalance === null ? null : launcherBalance >= launcherRequiredWorstCase,
     buyer_sufficient: buyerBalance === null ? null : buyerBalance >= buyerRequiredWorstCase,
     funding_pass:
