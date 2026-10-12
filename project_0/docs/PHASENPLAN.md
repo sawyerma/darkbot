@@ -4,6 +4,8 @@
 
 # DarkBot — Project 0 — Produktions-Phasenplan v4.5
 
+> **VERBINDLICHE PRÄZISIERUNG v4.5.1 (2026-10-12):** Die in §0.4, P4A, P5, P6-MT, P7, P8 und C0-E1 Abschnitt L integrierten Ergänzungen gelten zusätzlich zum v4.5-Architekturvertrag. Alte C0-E1-CLI-Beispiele sind, soweit widersprüchlich, von Abschnitt L abgelöst; der kanonische Master-PASS und alle LIVE-/Submission-Gates bleiben unverändert. Dies ist Sollplanung, keine Implementierungs-/Mainnet-Qualifikation.
+
 ### C0-E1 current gate update — 2026-10-10 19:57 Europe/Berlin (newer than earlier historical entries)
 
 The current user-observed work is on `project0/c0e1-startup-wip-20261010`, base commit `c2ba995e647296d1c3d3b0a134d2f30ff8db1d64`; `main` remained on `3fdf30b` at this checkpoint. Startup fixes: `base64+zstd` snapshots, actual Shadow READY gate before the market measurement clock, in-window evaluation required for technical PASS, and cancellable fail-closed recovery. Two test-only local corrections compile and pass. Solana State 19/19; Runner both `crate_health` and `crate_health txv1` exit0; release build exit0; Clippy exit0 with reported warnings. These are **local gates**, not certification of a full Mainnet campaign.
@@ -205,8 +207,8 @@ kostenlos / bereits vorhanden + technisch ausreichend
 → verwenden
 
 laufende Zusatzkosten
-→ nur wenn gemessener zusätzlicher Netto-Profit
-   > vollständige Zusatzkosten + Abhängigkeitsrisiko
+→ unter FREE_ONLY nicht autorisiert, auch nicht bei positivem kontrafaktischem Profit
+→ nur nach separater ausdrücklicher Änderung der verbindlichen Kostenpolitik
 ```
 
 Dies gilt insbesondere für:
@@ -219,6 +221,8 @@ Dies gilt insbesondere für:
 - zusätzliche Regionen;
 - DoubleZero;
 - kostenpflichtige Routing-/Submission-Dienste.
+
+**FREE_ONLY — harte aktive Betriebsregel v4.5.1:** Keine verpflichtenden kostenpflichtigen API-, RPC-, Geyser-, Routing-, Submission- oder Server-/Infrastruktur-Abonnements; **kein automatischer Paid-Fallback**, auch nicht bei HTTP 429. Paid-Capabilities können dokumentiert/kontrafaktisch bewertet werden, bleiben im aktiven FREE_ONLY-Profil aber BLOCKED. Ein Wechsel braucht ausdrücklich eine gesonderte Benutzerfreigabe. Providerweite harte Quoten gelten auch bei Parallelität, dokumentiert als requested/allowed/effective. FREE_ONLY bedeutet nicht fee-free: Base-/Priority-Fees, Jito Tips, Swap-/DEX-Kosten, Price Impact, Slippage, Rent, Gebühren gelandeter fehlgeschlagener Transaktionen und Kapitalbindung sind vollständig zu bewerten.
 
 **Eine kostenlose Infrastruktur darf die Architektur nicht verschlechtern.**
 Adapter und Interfaces werden so gebaut, dass bessere Infrastruktur später ohne Rewrite genutzt werden kann.
@@ -1758,7 +1762,8 @@ kein kostenloser geeigneter Binary-Source
 → Long-Tail/Premium-LIVE nutzt WSS/RPC
 
 Paid Binary Feed
-→ erst wenn incremental_net_profit > full_cost + dependency_risk
+→ unter FREE_ONLY nicht zugelassen (kein automatischer Fallback)
+→ allenfalls kontrafaktisch auswerten, später nur gesonderte Nutzerfreigabe
 ```
 
 Damit kann der kostenlose Long-Tail-/Premium-Betrieb den wirtschaftlichen Nachweis bzw. das Kapital für eine spätere Race-Infrastruktur liefern, ohne eine zweite Codebasis zu erzeugen.
@@ -2570,6 +2575,12 @@ bundle failed
 
 Unbekannt = `UNKNOWN`, niemals 0.
 
+## P4A v4.5.1 — verbindlicher JIT-ExactIn-Fundingpfad
+
+Der aktuelle Jupiter-V2-Provider liefert über `quote_exact_out` keinen ausführbaren ExactOut-Pfad. Ergänze im bestehenden Builder-/Router-/Economics-System einen bounded ExactIn-Shortfall-Solver: Ermittelt wird ein Funding-Token-Input `x`, sodass der **ausführbare** Liability-Token-Floor `minimum_executable_out(x) >= liability_shortfall` erreicht. Niemals `amount_in = shortfall` setzen, da dies verschiedene Token-Einheiten sind. Gemeinsames begrenztes Request-/RouteAttemptBudget inklusive Route-Fit, Frische-/Allowlist-/Slippage-/Simulations-Gates; kein erzwungener Remote-Hop im Race-Hotpath.
+
+`NO_SWAP_INVENTORY`, `JIT_SHORTFALL_EXACT_IN`, `ZERO_PREFUND_SAME_TX`, `PREHELD_INVENTORY` als technisch qualifizierte Kandidaten nach tatsächlichem realisierbarem Nettoedge, Kapitalbindung und Safety vergleichen; Enum-Reihenfolge ist kein Ranking. Unknown Route/Fees/Economics ergeben keinen fingierten ausführbaren Kandidaten. Vor LIVE mindestens deterministische Vergleichsfixtures und korrekte Ausführbarkeitsnachweise.
+
 ## Gate P4A
 
 Jede unterstützte Opportunity deterministisch und reproduzierbar bewertet.
@@ -2662,11 +2673,9 @@ Remote Route Source ist hier erlaubt, wenn:
 - Programme allowlisted sind;
 - Abhängigkeit und Latenz gemessen werden.
 
-### `PAID_ALLOWED`
+### `PAID_ALLOWED` — im aktiven FREE_ONLY-Profil gesperrt
 
-Remote Route Source / API / Key mit laufenden oder nutzungsabhängigen Kosten.
-
-Nur wenn gemessener zusätzlicher Netto-Profit die vollständigen Kosten rechtfertigt.
+Die Capability darf aus Kompatibilitätsgründen dokumentiert bleiben. Sie ist keine operative Freigabe eines kostenpflichtigen Routing-/API-/Key-Pfads. Ein automatischer Paid-Fallback ist verboten; eine künftige Änderung benötigt ausdrückliche, separate Benutzerfreigabe.
 
 ## `solana-dex-superagg`
 
@@ -2691,7 +2700,7 @@ aktuell kostenlos + Rate Limits ausreichend
 → FREE_PUBLIC_ALLOWED
 
 laufende/Usage-Kosten
-→ PAID_ALLOWED
+→ PAID_ALLOWED als Capability, unter FREE_ONLY BLOCKED
 ```
 
 P0 muss API-Key-Pflicht, aktuelle Free Tiers, Rate Limits, Kosten und Hotpath-Latenz **vor** Dependency-Freigabe prüfen.
@@ -3362,6 +3371,8 @@ Owner reserviert vor Sign mindestens:
 
 **Shadow erzwingt dieselbe virtuelle Arbitration wie LIVE.**
 
+**v4.5.1 globale atomare Ressourcenreservation:** Multi-Mint Liability-/Funding-Bestände, Fee-Payer-SOL, Base-/Priority-Fee-Maximum, Jito Tip, Rent und Exposure werden in **einem** Commit reserviert oder gar nicht. Verfügbar = reconciled Wallet minus alle aktiven Reservationen über sämtliche Target-Accounts. Reservationen sind generation-/candidategebunden, restartfest und bleiben bei unklarem Submission-/Landing-Handoff `UNKNOWN` bis zur eindeutigen Reconciliation gesperrt; ein lokaler Timeout darf sie nicht freigeben. Shadow bildet dieselbe Arbitration virtuell nach. Contention-, Crash- und Replay-Regression vor parallelem LIVE.
+
 Konkurrierende Candidates dürfen nicht beide als executable gezählt werden, wenn sie dieselbe exklusive Ressource benötigen.
 
 ### P6-MT.12 Apple-M4 Runtime
@@ -3764,7 +3775,9 @@ p(win |
   timing)
 ```
 
-Versioniert und Holdout-/Forward-validiert.
+Versioniert und Holdout-/Forward-validiert. 
+
+**v4.5.1:** SHADOW/UNKNOWN sind keine belegten Winnerlabels. Ein `p(win)`-Modell braucht hinreichend vollständige echte Chain-/Landing-/Konkurrenzlabels, zeitlich getrennte Forward-Validierung und ökonomischen Zusatznutzen gegenüber deterministischer Baseline.
 
 ## Gate P7
 
@@ -3841,6 +3854,12 @@ Runtime Config:
 - max concurrent positions;
 - allowlisted assets;
 - allowlisted execution classes.
+
+## P8 v4.5.1 — Walletreservation und Inventory Target Policy
+
+Vor parallelem LIVE ist die globale atomare, persistente Liability-/Funding-/SOL-/Priority-/Tip-/Rent-Reservation aus P6-MT.11 **Pflicht**. Keine zwei Worker dürfen dasselbe Inventar oder dieselbe Fee-Reserve verplanen. Status `AVAILABLE → RESERVED → SUBMITTED → RECONCILED → RELEASED/INVENTORY_UPDATED`; bei `UNKNOWN` keine voreilige Freigabe. Alle Token-/Lamport-Deltas nach tatsächlichem Chain-Outcome prüfen.
+
+Rebalancing folgt Sollbeständen für Liability-/Fee-Reserve, Safetybuffer, Risk-/Dust-Limits und vollständigen Umwandlungskosten; kein pauschaler Komplettverkauf von Collateral. Nur nachweisbar nötige oder profitable/riskoreduzierende Inventarverwertung. Ein von Rebalancing abhängiger LIVE-Pfad bleibt bis zum Verwertungs-/Risikogate gesperrt. Mark-to-market ist kein realisierter Gewinn.
 
 ## Hard Halts
 
