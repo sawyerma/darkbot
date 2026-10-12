@@ -22,6 +22,16 @@ Updated: 2026-10-09
 >
 > C1 engineering may remain preserved at its current qualified checkpoint, but it is **PAUSED** until the real BUY test is executed and evaluated.
 
+## Gate-0: dynamic gas-price qualification (binding, 2026-10-13)
+
+- Separate automatic minimum executable BUY search from dynamic gas price selection.
+- Determine a read-only candidate gas price from current BSC `eth_gasPrice` and verified applicable builder floors. Neither 0.05 gwei nor 1 gwei is a permanently correct price. Historical DRY policies are not dynamic.
+- Candidate policy: max(current RPC suggestion, verified applicable builder floor); if above the approved gas or spend ceiling, STOP, never silently clamp or authorize a larger spend.
+- Record block, RPC observation, builder evidence, gas candidate and ceiling. A dynamic candidate alone does NOT prove fastest inclusion; label it DYNAMIC_GAS_CANDIDATE_ONLY.
+- Execute automatic BUY bracketing/refinement at the chosen gas candidate. Only a true BUY rejection after a successful launch may move the BUY lower bound. Separate launch errors, RPC errors and local EVM divergence; keep diagnostic evidence.
+- Recheck current gas and builder policy before G0.7. Any change invalidates exact-byte qualification: rerun complete G0.6 DRY, sign/nonce, cost and builder validations. Never alter signed bytes after qualification. No live submission without explicit authorization.
+- Product objective remains actual earliest successful on-chain BUY and measured T0-to-T_buy, never cheapest gas alone.
+
 ## TOP PRIORITY — LATENCY MEASUREMENT
 
 The immediate Gate-0 priority is to reach the real end-to-end latency measurement as quickly as technically valid.
