@@ -5128,3 +5128,76 @@ P4–P6 bleiben offen; P2-Status melden, danach nächstes Paket abstimmen.
 - Astra-Abschlussbericht: Ausgangs-/End-HEAD, genaue Dateien, nachweislich behobene Ursachen vs verbleibende Providerfragen, Testmatrix PASS/FAIL/NOT_RUN, gemessene bytes/RPC-Calls/Storage, Ergebnisse des historischen 5h-Verifiers, Index-vs-Strict-Status, weitere Gating-Kriterien und exakt ein dokumentierter CLI-Aufruf für die spätere Benutzerfreigabe.
 
 **Endzustand:** Bedienung über eine dynamische Dauer (10m/1h/5h/24h), providerbewusste robuste Laufzeit, früher Fail-closed bei Ausfällen, gezielte historische Marginfi-Index-Liquidationsprüfung einschließlich CPI/LUT, reproduzierbarer automatischer Vergleich gegen Bot und Shadow, separate streng kanonische Completion, Resume nach RPC-429, echte ressourcenbezogene Evidence. **Kein Claim auf alle Probleme behoben oder 5h-Verwertbarkeit vor realem grünen Gate.**
+
+### L. C0-E1 v4.5.1 — Verbindlicher Terminal-, Verifikations- und Frontend-Vertrag (2026-10-12)
+
+**Autorität und Status:** Dieser Abschnitt ergänzt Astras Masterauftrag 2026-10-11, insbesondere C0-E1 P3–P6; ältere widersprüchliche Soll-CLI-/Statusbeispiele sind dadurch präzisiert. Er ändert **keine** kanonischen Master-, LIVE- oder Submission-Gates. Bestehende Observer-, P3-Verifier-, Reconciliation-, MeasurementPlan-, Economics- und Shadow-Komponenten **weiterverwenden**, nicht neu bauen. P2 ist auf Remote lokal qualifiziert; P3-Historienprüfung wegen 429 offen; P4–P6 noch nicht qualifiziert. Keine neuen 5h-/24h-Captures ohne Anwenderfreigabe.
+
+#### L.1 P3: sechs Instruktionsmarker / vier fachliche Liquidationsarten
+
+`audit_market_quick.py → INSTRUCTION_TYPES` enthält fünf Marker: `lending_account_liquidate`, `start_liquidation`, `end_liquidation`, `end_deleverage`, `lending_pool_handle_bankruptcy`. **`start_deleverage` fehlt in diesem Mapping**, nicht generell in allen Instruktionsdefinitionen. `end_deleverage` ist bereits erkannt; daraus folgt **nicht**, dass sämtliche Forced-Deleverage-Liquidationen fehlen. Nachzubessern sind die vollständige Startmarker-Erkennung, Paar-/Abschluss-Semantik und Regressionen mit gepinnter Marginfi-Quelle, CPI/LUT, Legacy/v0/v1, failed/truncated und echten Positiv-/Negativ-Fixtures.
+
+Vier Klassen: CLASSIC (`lending_account_liquidate`), RECEIVERSHIP (`start_liquidation`/`end_liquidation`), FORCED_DELEVERAGE (`start_deleverage`/`end_deleverage`), BANKRUPTCY_SETTLEMENT (`lending_pool_handle_bankruptcy`). Sechs Marker sind **keine sechs selbstständigen Gewinne**. Start und Abschluss niemals doppelt als realisierte Liquidationen zählen. Unvollständige Paare, unbekannte Outcomes und misslungene TX nicht zu Erfolgen umetikettieren. Alle Marker einzeln **nur für Darstellung/Report** schaltbar, nicht als Capture-/Decoder-/Verifier-Auslassfilter.
+
+#### L.2 P4: Strict aus Capture-Finalizer lösen, Verification als eigene Schicht
+
+Aktuell ruft `market_observer::finish_capture()` bei regulärem Abschluss `full_reconciliation_phase()` fest auf; `econ.rs` bindet den bisherigen technischen PASS an Kanonik. Trennung ist zwingend: **Capture inkl. Drain/Gap/Raw Evidence → optional Post-Capture Chain-Verification → Normalisierung/Report → getrennte Masterqualifikation**. `off` schaltet historischen RPC-Abgleich ab, **nicht** notwendige Evidence-Sicherung oder Capture-Finalisierung. Qualifikationsachsen: Capture-Clock, Live-Coverage/Transport, Verification, Economics, Trading/LIVE und C0-E1 Master.
+
+- `off`: Verification `NOT_RUN`; kein Chain-Beweis.
+- `index` (Default nur bei ausreichenden geprüften FREE_ONLY-Quoten): vorhandener P3-TX-Index, maximal `INDEX_VERIFIED`; 429/Pruning erzeugt `HISTORICAL_INCOMPLETE` mit Checkpoint.
+- `strict` (nur explizit): finalized vollständige Slot-/Block-/Parent-/Skip-Proofs, maximal `CANONICAL_VERIFIED`.
+- Optionaler zweiter unabhängiger `crosscheck`-Index aus dem bisherigen Mastervertrag bleibt zulässig; maximal `CROSSCHECK_VERIFIED`.
+
+**C0-E1 MASTER-PASS bleibt an vollständige kanonische Evidence und seine übrigen harten Gates gebunden.** Ein grüner Index-/Crosscheck-Bericht ist kein kanonischer Markt-Census. Strict: bounded idempotente, fortsetzbare Batches, Parent-/Skip-Proofs, Journal, Preflight für Providerarchiv/-quota, Disk/RAM/Netz/Walltime, gemeinsame P2-Admission, requested/allowed/effective-RPC-Budgets. Die interne 100.000-Slot-Gesamtgrenze ist keine allgemeine Solana-Protokollgrenze; längere Intervalle segmentieren. HTTP 429, Pruning oder offene Slots ergeben INCOMPLETE, kein stilles PASS.
+
+**Resume nur für Index-/Strict-Verifikation und Reportverarbeitung**, nicht als Reparatur vergangener Live-Coverage: Ein ursprünglich unterbrochener fünfstündiger Capture bleibt `LIVE_COVERAGE_INCOMPLETE`, selbst wenn später die historischen kanonischen Slots vollständig nachgewiesen werden.
+
+#### L.3 Drei unabhängige persistierte Identitäten
+
+| ID | Gebundener Inhalt | Invariante |
+| --- | --- | --- |
+| `capture_identity` | Run-ID, geplantes und tatsächlich beobachtetes Fenster, Capture-Source, Version/Pins, Raw-Evidence-Hashes | Neuauswertung oder nachträgliches Strict erzeugt **keinen neuen Capture-Run**. |
+| `verification_identity` | Capture-ID, mode, Decoder-/Protocol-/Provider-/Schema-/Scope-Version, Attempt/Checkpoint und Proof-Ergebnisdigest | Getrennte versionierte Index-/Crosscheck-/Strict-Prüfungen; Resume nur mit kompatibler Identität. |
+| `report_query_identity` | Capture-ID und gewähltes Verification-Ergebnis, Typ-/Marker-/Zeitraum-/Net-/View-/Provenienz-/Format-Filter plus Renderer-Version | Beliebige reproduzierbare Reports, **ohne** Veränderung von Capture-/Verifier-Rohdaten. |
+
+Typisierter, versionierter `MeasurementConfigV2` mit intern getrennten `RunConfig`, `VerificationConfig`, `ReportQuery`. Bereits vorhandener `MeasurementPlan` bleibt alleinige Zeit-/Viertel-Snapshot-/Cutoff-Quelle. Frontend und Terminal benutzen denselben Backend-Vertrag; Bash/React implementieren keine eigene Liquidations-/Economics-Klassifikation. Alte Manifeste werden nicht rückwirkend verändert.
+
+#### L.4 Provenienz: SHADOW ist niemals Chain-Beweis
+
+Für **belegte tatsächliche On-chain-Ereignisse** darf `--report-provenance best` feldabhängig nach **STRICT → INDEX → LIVE** auswählen. Bei T_rx etwa zählt die originäre Live-Evidence. **SHADOW ist kein Fallback** bei fehlender Chain-Transaktion, fehlendem Winner oder fehlendem realisiertem Gewinn. SHADOW ist hypothetische Kandidaten-/Simulations-Evidence, die tatsächlichen Entities optional zugeordnet wird; Shadow-only erscheint **separat** als `SHADOW_ONLY/HYPOTHETICAL` und nicht in bestätigten Chain-Liquidations-/Winner-/Realized-PnL-Summen.
+
+Korrelationsschlüssel: Signature + Slot und belegbare TX-/Instruction-/Eventposition, weil eine TX mehrere Marker/Ereignisse enthalten kann. `provenance=all` zeigt mehrere Evidence-Quellen, aggregiert dieselbe Entität aber nur einmal. Unklare Quellenzuordnung = UNKNOWN.
+
+#### L.5 P5: vollständige Terminalsteuerung, automatischer Post-Capture-Verifier und Frontend-Vertrag
+
+**Ziel-CLI, ausdrücklich nicht bereits implementiert:**
+
+~~~bash
+./project_0/scripts/test.sh --duration 5h --chain-verify index --capture-source logs
+./project_0/scripts/test.sh --duration 5h --chain-verify off
+./project_0/scripts/test.sh --duration 5h --chain-verify strict
+./project_0/scripts/verify.sh --run RUN_ID --mode strict --resume-verification
+./project_0/scripts/report.sh --run RUN_ID --report-types all --report-markers all --report-related-events off --report-provenance best --report-view economics --format table
+~~~
+
+Altes `--verify index` nur als Alias desselben Parsers zu `--chain-verify index`. `--capture-source logs|transactions` ist **nicht** die Report-Provenienz und **nicht** die Verification. Keine überladene `--source live/index/strict/shadow`-Option.
+
+Zielparameter: `--duration` (validierter MeasurementPlan; 10m/1h/5h/24h), `--chain-verify off|index|strict`, `--capture-source logs|transactions`, `--report-types` (vier Arten/all), `--report-markers` (sechs Marker einzeln/all/none), `--report-related-events on|off`, `--report-view summary|liquidations|winners|competition|economics`, `--report-provenance best|live|index|strict|shadow|all`, `--report-from`, `--report-to`, `--report-min-net-usd`, `--format table|json|csv`, `--verify-rps`, `--verify-max-calls`, `--verify-max-seconds`, passende Disk-/RAM-Limits und `--resume-verification`.
+
+**Jeder Reportfilter wirkt nur auf die Ansicht**, niemals auf Rohaufzeichnung, Verifier-Scope, Klassifizierung, gespeicherte Economics oder Trading-MinProfit. Unbekannte Nettoergebnisse bleiben UNKNOWN und werden separat gezählt. Andere Marginfi-Ereignisse separat typisieren, nicht als Liquidationen ausgeben.
+
+Nach Capture-Drain/Manifest-Sicherung den Verifier nach Wahl **automatisch** starten (bei `off` keinen historischen Chain-RPC; Strict nur nach ausdrücklichem Preflight). Bei 429 checkpointen und `HISTORICAL_INCOMPLETE` melden, ohne das Capture fälschlich als vollständige Live-Coverage zu deklarieren. Normalisierte gemeinsame Records für Chain-Entities, vier Klassen/sechs Marker, Live/Index/Strict, Winner, Konkurrenz, Shadow-Zuordnung, tatsächliche Gebühren, Gross/Executable/Realized Economics, UNKNOWN und Statusachsen. Table/JSON/CSV sind nur Renderer **identischer Datensemantik**.
+
+#### L.6 P6: verpflichtende Offline-/Property-/Integrationstests
+
+Raw-Evidence-Hashes invariant unter Reportfiltern; sechs Marker/vier Klassen mit korrekten Start-/Endpaaren; failed/CPI/LUT/v0/v1/Legacy/truncated; kein Marker-Ausblenden ändert LiquidationType; table/json/csv semantisch identisch; `all` ohne Doppelzählung; Shadow-only nie als Chain-Liquidation/-Winner/-Profit; `off/index/crosscheck` nie Canonical; Strict nur bei vollständigen Proofs; abgeschnittener Live-Capture bleibt abgeschnitten; Wiederaufnahme identisch zur ununterbrochenen Verification; HTTP 429/Pruning/defekter Checkpoint/Diskvoll sauber fail-closed; Providerhardlimits nicht überschreibbar; Reportflags aktivieren weder Paid-Fallback noch LIVE/Submission. Sicherheitskritische Invarianten vollständig, übrige Kombinationen systematisch/Pairwise testen.
+
+Code-/Git-SHA, drei Identitäten, Testliste PASS/FAIL/NOT_RUN, tatsächliche Ressourcen-/RPC-/Evidence-Werte und offene Provider-/Mainnet-Qualifikationen im `MEASUREMENT_LEDGER.md` dokumentieren. Keine erfundenen fünfstündigen Marktergebnisse und kein abgesenkter C0-E1-MASTER-PASS.
+
+#### L.7 Querverweise zu Produktphasen und Reihenfolge
+
+**§0.4/S1.6:** FREE_ONLY ohne verpflichtende laufende Provider-/Serverabos und ohne automatische Paid-Fallbacks; variable On-chain Fees, Jito Tips, Swapkosten, Slippage und Rent bleiben echte Kosten. **P4A/P5 (Produkt):** bounded JIT-ExactIn als realer Fundingkandidat im bestehenden Router, gegen NO_SWAP/ZERO_PREFUND/PREHELD wirtschaftlich prüfen. **P6-MT.11/P8:** globale atomare, restartfeste Wallet-/Inventory-/Fee-/Tip-/Rent-Reservation, UNKNOWN bis Reconciliation halten; Inventar-Sollbestände und risikobasiertes Rebalancing, kein pauschaler Vollverkauf. **S3.R/P7/K:** RPC/JitoSingle/JitoBundle und später experimentelles Direct TPU nach realer Landingquote, p95/p99 Handoff-to-Landing, Fees/Tip, Fehlversuch/UNKNOWN und realisiertem Nettoedge vergleichen, Jito-Receipt ist kein Landing-Beweis; Direct TPU braucht SWQoS-/Capability-Beleg. **P6-MT:** bestehender Single-Canonical-Owner, bounded Worker und M4-Safety-/Tail-Gates. **P7/P4B:** `p(win)` erst bei echten ausreichend gelabelten Winner-/Landing-Daten gegen Forward-/Holdout-Baseline; Shadow/UNKNOWN sind keine echten Winnerlabels.
+
+**C0-E1-Abnahmereihenfolge:** P3 Marker-/Paarfix → P4 Strict-Entkopplung/Status/Resume/Budgets → P5 gemeinsame Terminal-/Frontend-Konfiguration/Reports/Auto-Post-Capture → P6 Gesamtinvarianten. Unabhängige Race-/Jito-/Prepared-TX-/JIT-/Reservations-/Rebalancing-/M4-Produktarbeiten dürfen **parallel** vorankommen, ohne bestehende State-/LIVE-/Submission-Gates aufzuweichen.
+
+**Non-Claims:** Diese Planänderung autorisiert weder LIVE/Submission, noch Paid-Provider, neue 5h-/24h-Captures oder Profit-/Markt-Vollständigkeitsbehauptungen.
