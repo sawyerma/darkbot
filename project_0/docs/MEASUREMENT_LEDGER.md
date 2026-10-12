@@ -1,3 +1,26 @@
+## 2026-10-13 — C0-E1 P4 core implementation / local qualification
+
+Base `aa37dd3`. Capture finalization now saves local evidence without implicitly
+starting strict/gap/enrichment RPC. Added separate capture-clock/live-coverage/
+verification status, immutable capture identity/final evidence and spec/attempt/
+result lifecycle. Independent Strict driver reuses existing reconciliation in
+32-slot restartable batches with cross-batch blockhash anchors and bounded UTC
+archive discovery. Missing archive/429/checkpoint/resource proof fails closed.
+
+Executed: **190 Rust PASS / 0 FAIL / 1 ignored**, **release build PASS** (runner,
+MeasurementPlan, strict worker), **5 contract + 29 index + 4 CLI Python PASS**.
+Evidence/commands: [evidence/C0E1_P4_20261013/README.md](evidence/C0E1_P4_20261013/README.md).
+Historical index gate remains **OPEN**, actual provider/archive qualification and
+Mainnet smoke **NOT_RUN**. Optional crosscheck retains a separate INCOMPLETE gate
+until independent-source qualification. No index result is canonical; no proof
+repairs original live coverage. LIVE/submission disabled.
+
+**Continue with P5:** wire typed CLI/post-capture finalization+verification and
+normalized reports with all required display filters, reuse existing Economics.
+Then P6 offline/recovery/replay tests. No new long capture.
+
+---
+
 ## 2026-10-13 — C0-E1 P3 marker/pair fix — LOCAL PASS
 
 Base `c78ae68`; v4.5.1 section L and the downloaded plan are identical.

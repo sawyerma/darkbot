@@ -1,0 +1,10 @@
+test_capture_mutation_and_disk_fail_closed (test_measurement_contract.ContractTests.test_capture_mutation_and_disk_fail_closed) ... ok
+test_config_filters_and_limits (test_measurement_contract.ContractTests.test_config_filters_and_limits) ... ok
+test_off_no_rpc_and_immutable_lifecycle (test_measurement_contract.ContractTests.test_off_no_rpc_and_immutable_lifecycle) ... ok
+test_preflight_no_qualification_never_calls_rpc (test_measurement_contract.ContractTests.test_preflight_no_qualification_never_calls_rpc) ... ok
+test_spec_invariant_to_results_and_display_parameters (test_measurement_contract.ContractTests.test_spec_invariant_to_results_and_display_parameters) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.119s
+
+OK

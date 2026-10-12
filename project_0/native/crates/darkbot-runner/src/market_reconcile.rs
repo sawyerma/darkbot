@@ -620,12 +620,12 @@ fn retry_delay(error: Option<&str>, attempt: u32, base_ms: u64) -> Duration {
         Duration::from_millis(base_ms)
     }
 }
-struct RequestPacer {
+pub(super) struct RequestPacer {
     next: std::sync::Mutex<Instant>,
     interval: Duration,
 }
 impl RequestPacer {
-    fn new(per_second: u64) -> Self {
+    pub(super) fn new(per_second: u64) -> Self {
         Self {
             next: std::sync::Mutex::new(Instant::now()),
             interval: Duration::from_nanos(1_000_000_000 / per_second.clamp(1, 20)),
@@ -643,7 +643,7 @@ impl RequestPacer {
         *next = at + self.interval;
         Ok(at.saturating_duration_since(now))
     }
-    fn wait(&self, deadline: Instant) -> Result<(), &'static str> {
+    pub(super) fn wait(&self, deadline: Instant) -> Result<(), &'static str> {
         std::thread::sleep(self.reserve(Instant::now(), deadline)?);
         if Instant::now() >= deadline {
             Err("RECONCILIATION_DEADLINE")

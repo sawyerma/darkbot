@@ -12,4 +12,7 @@ if [[ " ${*} " != *" --help "* && " ${*} " != *" --self-test "* && " ${*} " != *
     set +a
   fi
 fi
-exec python3 "$DIR/audit_market_quick.py" "$@"
+if [[ " ${*} " == *" --self-test "* ]]; then
+  exec python3 "$DIR/audit_market_quick.py" "$@"
+fi
+exec python3 "$DIR/measurement_verify.py" "$@"

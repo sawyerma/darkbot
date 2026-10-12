@@ -368,13 +368,13 @@ pub fn persist_manifest(
         .create_new(true)
         .open(dir.join("measurement_manifest.json"))
         .map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut f,&json!({"schema":"C0-E1/MeasurementManifest/1","run_id":run_id,
+    serde_json::to_writer_pretty(&mut f,&json!({"schema":"C0-E1/MeasurementManifest/2","run_id":run_id,"capture_run_id":run_id,
         "plan":plan,"created_unix_ns":clock.unix_ns(clock.now_ns()),"clock_origin_unix_ns":clock.unix_ns(0),
         "clock_definition":"process monotonic ns; UTC = fixed origin + monotonic ns; capture boundaries journaled after StreamReady",
         "head":head.trim(),"binary_sha256":sha(&fs::read(binary).map_err(|e|e.to_string())?),"source_sha256":sources,
         "provider_class":if provider_class.bytes().all(|c|c.is_ascii_alphanumeric() || b"_-".contains(&c)){provider_class}else{"UNKNOWN"},
         "risk_limits":risk,"permitted_modes":["SHADOW_OBSERVE_ONLY"],"live_enabled":false,"submission_enabled":false,
-        "verification_mode":"legacy_strict; index wiring belongs to P3","capture_window":null,
+        "verification_mode":"SEPARATE_POST_CAPTURE","capture_window":null,"protocol_pin":"33c67987a661f59c6683a65485ebb4f0ef030b77",
         "phase_journal":"measurement_phases.jsonl","compatibility":"hour_01..04 names retained; use plan offsets, not filename as hours"})).map_err(|e|e.to_string())?;
     f.sync_all().map_err(|e| e.to_string())?;
     journal(

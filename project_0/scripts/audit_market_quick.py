@@ -625,7 +625,7 @@ def read_window(run):
     summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
     if manifest.exists():
         m = json.loads(manifest.read_text())
-        if m.get('schema') != 'C0-E1/MeasurementManifest/1':
+        if m.get('schema') not in ('C0-E1/MeasurementManifest/1','C0-E1/MeasurementManifest/2'):
             raise AuditError('MANIFEST_SCHEMA_UNKNOWN')
         captures = [r['details'] for r,_ in rows(run/'measurement_phases.jsonl') if r.get('phase') == 'CAPTURE']
         if len(captures) != 1:
@@ -657,11 +657,11 @@ def read_window(run):
 
 
 class Audit:
-    def __init__(self, run, rpc, max_pages=50, seconds=300, clock=time.monotonic):
+    def __init__(self, run, rpc, max_pages=50, seconds=300, clock=time.monotonic, output=None):
         self.run, self.rpc, self.max_pages, self.clock = Path(run), rpc, max_pages, clock
         self.deadline = clock()+seconds
         self.window = read_window(self.run)
-        self.out = self.run/'verification/index_v2'
+        self.out = Path(output) if output else self.run/'verification/index_v2'
         self.out.mkdir(parents=True,exist_ok=True)
         self.lock = (self.out/'writer.lock').open('a')
         try:

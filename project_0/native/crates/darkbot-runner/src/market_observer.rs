@@ -56,6 +56,8 @@ mod gap;
 pub use gap::GapConfig;
 #[path = "market_reconcile.rs"]
 mod reconcile;
+#[path = "market_verification.rs"]
+pub mod verification;
 pub use reconcile::ReconcileConfig;
 #[path = "market_paths.rs"]
 mod paths;
@@ -1907,11 +1909,7 @@ impl ObserverCore {
         let source_coverage_verified =
             full_slot_reconciliation_complete && liquidation_path_coverage_complete;
         let enrichment_complete = self.enrichment_complete();
-        let mut reasons: Vec<&str> = if full_slot_reconciliation_complete {
-            vec![]
-        } else {
-            self.incomplete_reasons.iter().copied().collect()
-        };
+        let mut reasons: Vec<&str> = self.incomplete_reasons.iter().copied().collect();
         if !full_slot_reconciliation_complete {
             reasons.push(
                 self.reconciliation
@@ -1985,6 +1983,9 @@ impl ObserverCore {
             "coverage_complete": coverage_complete,
             "decode_complete": decode_complete,
             "drain_complete": cfg.drain_complete,
+            "live_coverage_status": if receivership_transport_capture_complete { "LIVE_COVERAGE_COMPLETE" } else { "LIVE_COVERAGE_INCOMPLETE" },
+            "capture_clock_complete": cfg.stream_ready && cfg.full_duration_observed,
+            "verification_status": if full_slot_reconciliation_complete { "CANONICAL_VERIFIED" } else if self.reconciliation.attempted { "HISTORICAL_INCOMPLETE" } else { "NOT_RUN" },
             "source_coverage_verified": source_coverage_verified,
             "source_coverage_note": if source_coverage_verified {"Finalized full-slot scan is authoritative; live WSS source completeness remains separately unverified"} else {self.source.coverage_note()},
             "incomplete_reasons": reasons,
@@ -2350,7 +2351,7 @@ pub fn finish_capture(
     sink: &mut dyn MarketSink,
     outcome: CaptureOutcome,
 ) -> Result<(Value, String, Option<String>), String> {
-    let mut write_error = outcome.write_error;
+    let write_error = outcome.write_error;
     // Outage abort is not a request for a lengthy repair scan. Preserve evidence
     // for explicit resumable verification; stop capture/Shadow first.
     let verify_allowed = outcome.stop_reason == "TIMER";
@@ -2358,74 +2359,11 @@ pub fn finish_capture(
         core.mark_incomplete("TRANSPORT_CAPTURE_ABORT");
         core.reconciliation.error = Some("VERIFICATION_DEFERRED_AFTER_ABORT");
     }
-    if verify_allowed && outcome.drain_complete && write_error.is_none() {
-        eprintln!("[MARKET/CANONICAL] phase=START rpc_after_shadow_quiescence=true");
-        if let Err(e) = core.full_reconciliation_phase(cfg.rpc_url.as_deref(), sink) {
-            write_error = Some(e.to_string());
-        }
-        eprintln!(
-            "[MARKET/CANONICAL] phase=DONE complete={} produced_slots={} fetched_slots={} skipped_slots={} events={} error={}",
-            core.reconciliation.complete,
-            core.reconciliation.slots_produced,
-            core.reconciliation.slots_fetched,
-            core.reconciliation.slots_skipped_confirmed,
-            core.truth.events.len(),
-            core.reconciliation.error.unwrap_or("NONE")
-        );
-    }
-    if verify_allowed && outcome.drain_complete && write_error.is_none() {
-        if let Err(e) = core.gap_recovery_phase(cfg.rpc_url.as_deref(), sink) {
-            write_error = Some(e.to_string());
-        }
-    }
-    let needs_rpc = core.has_deferred() || core.has_truncated_pending();
-    if verify_allowed && cfg.source == MarketSource::Logs && needs_rpc && write_error.is_none() {
-        let fetcher = cfg
-            .rpc_url
-            .clone()
-            .ok_or_else(|| "P0_RPC_URL missing: enrichment unavailable".to_string())
-            .and_then(|url| RpcFetcher::new(url, cfg.enrich.timeout_ms, cfg.commitment));
-        let deadline = Instant::now() + Duration::from_secs(cfg.enrich.phase_max_secs);
-        match fetcher {
-            Ok(f) => {
-                let mut fetch = |sig: &str| f.get_transaction(sig);
-                if core.has_deferred() {
-                    let fetch_dyn: &mut dyn FnMut(&str) -> Result<Option<Value>, String> =
-                        &mut fetch;
-                    let r = core.enrichment_phase(
-                        sink,
-                        Ok(fetch_dyn),
-                        &mut |d: Duration| std::thread::sleep(d),
-                        &mut || Instant::now() < deadline,
-                        unix_now_s(),
-                    );
-                    if let Err(e) = r {
-                        write_error = Some(e.to_string());
-                    }
-                }
-                // [r6] truncated-log qualification against the full transaction instructions
-                core.qualify_truncated_deferred(
-                    &mut fetch,
-                    &mut |d: Duration| std::thread::sleep(d),
-                    &mut || Instant::now() < deadline,
-                );
-            }
-            Err(e) => {
-                if core.has_deferred() {
-                    let r = core.enrichment_phase(
-                        sink,
-                        Err(e),
-                        &mut |_d: Duration| {},
-                        &mut || false,
-                        unix_now_s(),
-                    );
-                    if let Err(e) = r {
-                        write_error = Some(e.to_string());
-                    }
-                }
-                core.fail_truncated_pending("NO_RPC_FOR_QUALIFICATION");
-            }
-        }
+    // Capture finalization is local-only. Historical repair/enrichment belongs
+    // to the separately budgeted verifier after the immutable raw manifest.
+    // Keep every pending gap/truncated record as evidence, never mark repaired.
+    if verify_allowed {
+        core.reconciliation.error = Some("VERIFICATION_NOT_RUN");
     }
     let ready = outcome.ready_unix_s;
     let ctx = SummaryContext {
@@ -2449,14 +2387,7 @@ pub fn finish_capture(
         enrichment_available: cfg.source == MarketSource::Transactions || cfg.rpc_url.is_some(),
     };
     if core.deployment_before.is_some() {
-        match if verify_allowed {
-            paths::inspect(cfg.rpc_url.as_deref(), &cfg.program)
-        } else {
-            Err("DEPLOYMENT_DEFERRED_AFTER_ABORT")
-        } {
-            Ok(v) => core.deployment_after = Some(v),
-            Err(e) => core.deployment_error = Some(e),
-        }
+        core.deployment_error = Some("POST_CAPTURE_DEPLOYMENT_VERIFICATION_NOT_RUN");
     }
     let (summary, report) = finalize(
         core,
@@ -4005,10 +3936,9 @@ mod tests {
             ),
             (Some(false), Some(false))
         );
-        assert!(summary["enrichment_init_error"]
-            .as_str()
-            .unwrap()
-            .contains("P0_RPC_URL"));
+        assert!(summary["enrichment_init_error"].is_null());
+        assert_eq!(summary["verification_status"], "NOT_RUN");
+        assert_eq!(summary["full_slot_reconciliation"]["error"], "VERIFICATION_NOT_RUN");
         assert_eq!(
             summary["sample_status"].as_str(),
             Some("INSUFFICIENT_SAMPLE")
@@ -4016,7 +3946,7 @@ mod tests {
         assert_eq!(summary["unique_targets"].as_u64(), Some(1));
         assert!((summary["actual_observation_seconds"].as_f64().unwrap() - 600.0).abs() < 1e-9);
         assert!(report.contains("sample_status=INSUFFICIENT_SAMPLE"));
-        assert!(fs::read_to_string(cfg.run_dir.join("coverage.jsonl"))
+        assert!(!fs::read_to_string(cfg.run_dir.join("coverage.jsonl"))
             .unwrap()
             .contains("ENRICHMENT_INIT_FAILED"));
         let _ = fs::remove_dir_all(&root);

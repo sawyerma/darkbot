@@ -505,6 +505,17 @@ impl RpcFetcher {
         deadline: Instant,
         timeout_ms: u64,
     ) -> Result<Value, &'static str> {
+        self.gap_request_metered(method, params, deadline, timeout_ms, 64 * 1024 * 1024)
+            .map(|(value, _bytes)| value)
+    }
+    pub(super) fn gap_request_metered(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: Instant,
+        timeout_ms: u64,
+        response_limit: u64,
+    ) -> Result<(Value, u64), &'static str> {
         let deadline = deadline.min(Instant::now() + Duration::from_millis(timeout_ms));
         let _permit = darkbot_solana::provider::shared()
             .acquire(darkbot_solana::provider::Workload::History, deadline)?;
@@ -526,13 +537,13 @@ impl RpcFetcher {
                 }
             })?;
         darkbot_solana::provider::observe_response(&response, method)?;
-        const LIMIT: u64 = 64 * 1024 * 1024;
+        let limit = response_limit.min(64 * 1024 * 1024);
         let mut bytes = Vec::new();
         response
-            .take(LIMIT + 1)
+            .take(limit + 1)
             .read_to_end(&mut bytes)
             .map_err(|_| "RPC_READ")?;
-        if bytes.len() as u64 > LIMIT {
+        if bytes.len() as u64 > limit {
             return Err("RPC_BODY_LIMIT");
         }
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| "RPC_JSON")?;
@@ -544,12 +555,15 @@ impl RpcFetcher {
                 _ => "RPC_ERROR",
             });
         }
+        let length = bytes.len() as u64;
         value
             .get("result")
             .cloned()
             .filter(|v| !v.is_null())
+            .map(|value| (value, length))
             .ok_or("RPC_MISSING_BLOCK")
     }
+
     fn gap_slot(
         &self,
         slot: u64,
