@@ -18,7 +18,7 @@ grep -Fq 'pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";' \
 
 # Automatic bounded search. No hand-maintained value list.
 MAX_BUY_VALUE_WEI="${DARKBOT_G07_SEARCH_MAX_BUY_VALUE_WEI:-1000000000000000}"
-RESOLUTION_WEI="${DARKBOT_G07_SEARCH_RESOLUTION_WEI:-1000000}"
+RESOLUTION_WEI="${DARKBOT_G07_SEARCH_RESOLUTION_WEI:-1}"
 PROBE_RUNS="${DARKBOT_G07_SEARCH_PROBE_RUNS:-3}"
 REQUIRED_PASSES="${DARKBOT_G07_SEARCH_REQUIRED_PASSES:-2}"
 
@@ -27,6 +27,8 @@ REQUIRED_PASSES="${DARKBOT_G07_SEARCH_REQUIRED_PASSES:-2}"
 [[ "$PROBE_RUNS" =~ ^[1-9][0-9]*$ ]] || { echo "bad PROBE_RUNS" >&2; exit 2; }
 [[ "$REQUIRED_PASSES" =~ ^[1-9][0-9]*$ ]] || { echo "bad REQUIRED_PASSES" >&2; exit 2; }
 (( REQUIRED_PASSES <= PROBE_RUNS )) || { echo "REQUIRED_PASSES > PROBE_RUNS" >&2; exit 2; }
+(( MAX_BUY_VALUE_WEI >= RESOLUTION_WEI )) || { echo "MAX below resolution" >&2; exit 2; }
+(( MAX_BUY_VALUE_WEI <= 1000000000000000 )) || { echo "MAX exceeds frozen buy ceiling" >&2; exit 2; }
 
 mkdir -p bsc/local_diagnostics
 tmp="$(mktemp -d bsc/local_diagnostics/g07-search.XXXXXX)"
@@ -153,4 +155,5 @@ if lo: print("LAST_CONFIRMED_BUY_REJECT_BNB=" + str(lo / scale))
 print("FIRST_STABLE_PASS_BNB=" + str(hi / scale))
 PY
 echo "LIVE_SEND=NONE"
-echo "NEXT=Freeze FIRST_STABLE_PASS_WEI and run one full G0.6 final DRY before funding."
+echo "EVIDENCE_DIR=$tmp"
+echo "NEXT=Requalify exact gas and BUY in full G0.6 DRY before any authorization."
