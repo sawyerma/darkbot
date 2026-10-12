@@ -1,3 +1,25 @@
+## 2026-10-13 — C0-E1 P3 marker/pair fix — LOCAL PASS
+
+Base `c78ae68`; v4.5.1 section L and the downloaded plan are identical.
+`start_deleverage` added to the independent verifier, six markers mapped to four
+classes. Complete starts/ends require matching target/actor/order and supported
+outer start. Missing/ambiguous pairs remain UNKNOWN, failed TX never realized.
+Completion events are bound to individual instruction positions: duplicate logs
+cannot fill a missing completion elsewhere. `end_deleverage` was already detected;
+this is not evidence that all previous deleverage events were absent.
+
+Executed: Python verifier suite **29 PASS / 0 FAIL**, including six real saved
+Mainnet fixtures. Evidence and exact command:
+[evidence/C0E1_P3_MARKERS_20261013/README.md](evidence/C0E1_P3_MARKERS_20261013/README.md).
+New decoder uses `verification/index_v2`; prior index_v1 evidence remains intact.
+Historical 429/index gate **OPEN**; no new RPC/Mainnet/capture/submission.
+
+**Next authorized work:** P4 separate capture/verification, stable identities and
+bounded resumable strict proofs; then P5 normalized reports/typed display filters,
+then P6 offline qualification. Long capture remains the user's action. LIVE disabled.
+
+---
+
 ## 2026-10-12 — C0-E1 P2: bounded transport recovery / shared provider budgets — LOCAL PASS
 
 **Resume:** P1 and P3 implemented; P2 now implemented and locally qualified from

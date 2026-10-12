@@ -34,6 +34,7 @@ INSTRUCTION_TYPES = {
     'lending_account_liquidate': 'CLASSIC',
     'end_liquidation': 'RECEIVERSHIP_END',
     'start_liquidation': 'RECEIVERSHIP_START',
+    'start_deleverage': 'FORCED_DELEVERAGE_START',
     'end_deleverage': 'FORCED_DELEVERAGE',
     'lending_pool_handle_bankruptcy': 'BANKRUPTCY_SETTLEMENT',
 }
@@ -43,6 +44,8 @@ EVENT_DISCRIMINATORS = {
     bytes([161, 8, 108, 204, 209, 198, 12, 30]): 'FORCED_DELEVERAGE',
     bytes([166, 77, 41, 140, 36, 94, 10, 57]): 'BANKRUPTCY_SETTLEMENT',
 }
+MARKER_NAMES = {hashlib.sha256(('global:' + s).encode()).digest()[:8]: s
+                for s in INSTRUCTION_TYPES}
 DISC = {hashlib.sha256(('global:' + s).encode()).digest()[:8]: typ
         for s, typ in INSTRUCTION_TYPES.items()}
 
@@ -56,7 +59,7 @@ def base58_decode(text):
 
 # Layout authority: marginfi-v2 33c67987a661f59c6683a65485ebb4f0ef030b77,
 # programs/marginfi/src/events.rs. Independent Python interpretation, never calls bot decoder.
-SCHEMA = 'C0-E1/INDEX/1'
+SCHEMA = 'C0-E1/INDEX/2'
 NS = 10**9
 KINDS = ('CLASSIC', 'RECEIVERSHIP', 'FORCED_DELEVERAGE', 'BANKRUPTCY_SETTLEMENT')
 COMPLETION = {'CLASSIC': 'CLASSIC', 'RECEIVERSHIP_END': 'RECEIVERSHIP',
@@ -461,6 +464,36 @@ def decode_logs(logs, instructions=None):
     return [e for e in events if not e.get('rolled_back')], errors
 
 
+def liquidation_pairs(instructions, success):
+    """Pinned 33c6798: receiver/deleverage start + end in the same TX/account.
+
+    Terminal events remain separate from marker evidence. A missing start does
+    not erase an observed event, but cannot produce a qualified complete pair.
+    """
+    pairs, issues = [], []
+    for start_kind, end_kind, category in (
+        ('RECEIVERSHIP_START', 'RECEIVERSHIP_END', 'RECEIVERSHIP'),
+        ('FORCED_DELEVERAGE_START', 'FORCED_DELEVERAGE', 'FORCED_DELEVERAGE'),
+    ):
+        starts = [i for i in instructions if i['kind'] == start_kind]
+        ends = [i for i in instructions if i['kind'] == end_kind]
+        if not starts and not ends:
+            continue
+        valid = (len(starts) == len(ends) == 1
+                 and instructions.index(starts[0]) < instructions.index(ends[0])
+                 and starts[0].get('target') == ends[0].get('target')
+                 and starts[0].get('actor') == ends[0].get('actor')
+                 and starts[0]['position'][1] is None)
+        status = ('FAILED_TRANSACTION' if success is False else
+                  'COMPLETE' if success is True and valid else 'INCOMPLETE_OR_AMBIGUOUS')
+        pairs.append({'type':category,'status':status,
+                      'start_positions':[i['position'] for i in starts],
+                      'end_positions':[i['position'] for i in ends]})
+        if success is True and not valid:
+            issues.append('START_END_PAIR_UNPROVEN_' + category)
+    return pairs, issues
+
+
 def detect(tx, slot):
     """Preserve original discriminator/frame audit, adding strict payload and identity evidence."""
     errors, instructions, counts = [], [], collections.Counter()
@@ -490,12 +523,13 @@ def detect(tx, slot):
             if raw[:8] not in KNOWN_INSTRUCTIONS:
                 errors.append('UNAUDITED_INSTRUCTION')
             kind = DISC.get(raw[:8])
-            item = {'position':position,'kind':kind,'discriminator':raw[:8].hex()}
+            item = {'position':position,'kind':kind,'marker':MARKER_NAMES.get(raw[:8]),'discriminator':raw[:8].hex()}
             if kind:
                 counts[kind] += 1
-                if kind in COMPLETION:
+                if kind in COMPLETION or kind.endswith('_START'):
                     ti,ai={'CLASSIC':(5,4),'RECEIVERSHIP_END':(0,3),
-                           'FORCED_DELEVERAGE':(0,3),'BANKRUPTCY_SETTLEMENT':(3,1)}[kind]
+                           'FORCED_DELEVERAGE':(0,3),'BANKRUPTCY_SETTLEMENT':(3,1),
+                           'RECEIVERSHIP_START':(0,3),'FORCED_DELEVERAGE_START':(0,3)}[kind]
                     accounts=ix['accounts']
                     def account_at(index):
                         n=accounts[index]
@@ -510,6 +544,8 @@ def detect(tx, slot):
             instructions.append(item)
         result['instructions'] = dict(counts)
         result['instruction_evidence'] = instructions
+        result['liquidation_pairs'], pair_errors = liquidation_pairs(instructions, result['success'])
+        errors.extend(pair_errors)
         if not result['success']:
             result['classification'] = 'FAILED_TRANSACTION'
             return result
@@ -518,6 +554,10 @@ def detect(tx, slot):
             raise ValueError('LOGS_MISSING')
         events, log_errors = decode_logs(logs,instructions)
         errors.extend(log_errors)
+        positions = collections.Counter(tuple(e['instruction_position']) for e in events if e['instruction_position'] is not None)
+        for item in instructions:
+            if item['kind'] in COMPLETION and positions[tuple(item['position'])] != 1:
+                errors.append('COMPLETION_EVENT_POSITION_AMBIGUOUS')
         event_counts = collections.Counter(e['type'] for e in events)
         for kind, expected in COMPLETION.items():
             if counts[kind] != event_counts[expected]:
@@ -621,7 +661,7 @@ class Audit:
         self.run, self.rpc, self.max_pages, self.clock = Path(run), rpc, max_pages, clock
         self.deadline = clock()+seconds
         self.window = read_window(self.run)
-        self.out = self.run/'verification/index_v1'
+        self.out = self.run/'verification/index_v2'
         self.out.mkdir(parents=True,exist_ok=True)
         self.lock = (self.out/'writer.lock').open('a')
         try:

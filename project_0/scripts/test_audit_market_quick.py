@@ -35,12 +35,20 @@ def tx(sig='sig',slot=10,bt=150,kind='RECEIVERSHIP',version='legacy'):
     raw=a.hashlib.sha256(('global:'+name).encode()).digest()[:8]
     if kind=='CLASSIC':
         raw+=struct.pack('<QH',42,0)
-    return {'slot':slot,'blockTime':bt,'version':version,
+    result = {'slot':slot,'blockTime':bt,'version':version,
         'transaction':{'signatures':[sig],'message':{'accountKeys':[a.PROGRAM,TARGET,ACTOR],
             'instructions':[{'programIdIndex':0,'data':a.base58_encode(raw),'accounts':({'CLASSIC':[0,1,1,1,2,1,0,0], 'RECEIVERSHIP':[1,0,0,2,0,0,0,0], 'FORCED_DELEVERAGE':[1,0,0,2], 'BANKRUPTCY_SETTLEMENT':[0,2,0,1]}[kind])}]}},
         'meta':{'err':None,'fee':12345,'loadedAddresses':{'writable':[],'readonly':[]},
                 'innerInstructions':[], 'logMessages':[f'Program {a.PROGRAM} invoke [1]',
                     'Program data: '+base64.b64encode(payload(kind)).decode(),f'Program {a.PROGRAM} success']}}
+
+    if kind in ('RECEIVERSHIP','FORCED_DELEVERAGE'):
+        marker='start_liquidation' if kind=='RECEIVERSHIP' else 'start_deleverage'
+        result['transaction']['message']['instructions'].insert(0,{'programIdIndex':0,
+            'data':a.base58_encode(a.hashlib.sha256(('global:'+marker).encode()).digest()[:8]),
+            'accounts':[1,0,0,2,0]})
+        result['meta']['logMessages']=[f'Program {a.PROGRAM} invoke [1]',f'Program {a.PROGRAM} success']+result['meta']['logMessages']
+    return result
 
 
 def row(sig,slot,bt,err=None):
@@ -195,7 +203,7 @@ class TempRun(unittest.TestCase):
         ev.update(signature='one',slot=20,event_index=0,liquidation_type='RECEIVERSHIP')
         self.write('canonical_market_shadow.jsonl',[{'join':{'market':ev,'our':{'economics_known':False,'selected_costs':None}}}])
         self.execute(self.normal_rpc())
-        rows=[json.loads(s) for s in (self.run/'verification/index_v1/comparison.jsonl').read_text().splitlines()]
+        rows=[json.loads(s) for s in (self.run/'verification/index_v2/comparison.jsonl').read_text().splitlines()]
         ev=rows[0]['darkbot']['events'][0]
         self.assertEqual(ev['shadow_status'],'SHADOW_MATCH')
         self.assertIsNone(ev['shadow_evidence']['our']['selected_costs'])
@@ -206,7 +214,7 @@ class TempRun(unittest.TestCase):
         self.write('canonical_market_shadow.jsonl',[{'join':{'market':{'signature':'one','slot':20,'event_index':0,'type':'CLASSIC','target':TARGET,'actor':ACTOR}}}])
         s=self.execute(self.normal_rpc())
         self.assertEqual(s['comparison_counts']['SLOT_MISMATCH'],1)
-        row=json.loads((self.run/'verification/index_v1/comparison.jsonl').read_text())
+        row=json.loads((self.run/'verification/index_v2/comparison.jsonl').read_text())
         self.assertEqual(row['darkbot']['events'][0]['comparisons'][0]['status'],'TYPE_MISMATCH')
 
     def test_malformed_cursor_and_conflicting_duplicates_fail_closed(self):
@@ -231,13 +239,53 @@ class DecodeTests(unittest.TestCase):
             self.assertEqual(result['fee_lamports'],12345)
 
     def test_start_end_not_double_counted(self):
-        t=tx();start={'programIdIndex':0,'data':a.base58_encode(a.hashlib.sha256(b'global:start_liquidation').digest()[:8]),'accounts':[]}
-        t['transaction']['message']['instructions'].insert(0,start)
-        t['meta']['logMessages']=[f'Program {a.PROGRAM} invoke [1]',f'Program {a.PROGRAM} success']+t['meta']['logMessages']
-        r=a.detect(t,10);self.assertEqual(r['program_events'],{'RECEIVERSHIP':1});self.assertEqual(r['classification'],'CLASSIFIED',r)
+        for kind in ('RECEIVERSHIP','FORCED_DELEVERAGE'):
+            r=a.detect(tx(kind=kind),10)
+            self.assertEqual(r['program_events'],{kind:1})
+            self.assertEqual(r['classification'],'CLASSIFIED',r)
+            self.assertEqual(r['liquidation_pairs'][0]['status'],'COMPLETE')
+
+    def test_incomplete_reversed_duplicate_and_mismatched_pairs(self):
+        for kind in ('RECEIVERSHIP','FORCED_DELEVERAGE'):
+            for fault in ('start_only','end_only','reversed','duplicate_start','target','actor','cpi_start'):
+                with self.subTest(kind=kind,fault=fault):
+                    t=tx(kind=kind);ix=t['transaction']['message']['instructions']
+                    if fault=='start_only':
+                        ix.pop();t['meta']['logMessages']=t['meta']['logMessages'][:2]
+                    elif fault=='end_only':
+                        ix.pop(0);t['meta']['logMessages']=t['meta']['logMessages'][2:]
+                    elif fault=='reversed':ix.reverse()
+                    elif fault=='duplicate_start':ix.insert(0,copy.deepcopy(ix[0]))
+                    elif fault in ('target','actor'):ix[0]['accounts'][0 if fault=='target' else 3]=0
+                    else:
+                        start=ix[0];ix[0]={'programIdIndex':1,'data':'','accounts':[]}
+                        t['meta']['innerInstructions']=[{'index':0,'instructions':[start]}]
+                    r=a.detect(t,10)
+                    self.assertEqual(r['classification'],'UNKNOWN',r)
+                    self.assertEqual(r['liquidation_pairs'][0]['status'],'INCOMPLETE_OR_AMBIGUOUS')
+                    t['meta']['err']={'InstructionError':[0,'failed']}
+                    r=a.detect(t,10)
+                    self.assertEqual(r['classification'],'FAILED_TRANSACTION')
+                    self.assertEqual(r['events'],[])
+
+    def test_duplicate_event_cannot_fill_other_instruction_position(self):
+        t=tx(kind='CLASSIC');t['transaction']['message']['instructions']*=2
+        logs=t['meta']['logMessages'];event=logs[1]
+        t['meta']['logMessages']=[logs[0],event,event,logs[2],logs[0],logs[2]]
+        r=a.detect(t,10)
+        self.assertEqual(r['program_events'],{'CLASSIC':2})
+        self.assertEqual(r['classification'],'UNKNOWN')
+        self.assertIn('COMPLETION_EVENT_POSITION_AMBIGUOUS',r['unknown_reasons'])
+
+    def test_six_markers_exact_discriminators(self):
+        self.assertEqual(len(a.INSTRUCTION_TYPES),6)
+        for name,kind in a.INSTRUCTION_TYPES.items():
+            discriminator=a.hashlib.sha256(('global:'+name).encode()).digest()[:8]
+            self.assertEqual(a.DISC[discriminator],kind)
+            self.assertEqual(a.MARKER_NAMES[discriminator],name)
 
     def test_loaded_program_key_cpi_and_supported_versions(self):
-        t=tx(version=0);ix=t['transaction']['message']['instructions'][0];ix['programIdIndex']=3
+        t=tx(version=0,kind='CLASSIC');ix=t['transaction']['message']['instructions'][0];ix['programIdIndex']=3
         t['transaction']['message'].update(accountKeys=['11111111111111111111111111111111',TARGET,ACTOR],addressTableLookups=[{'accountKey':'x'}],instructions=[{'programIdIndex':0,'data':'','accounts':[]}])
         t['meta']['loadedAddresses']['readonly']=[a.PROGRAM]
         t['meta']['innerInstructions']=[{'index':0,'instructions':[ix]}]
@@ -250,7 +298,7 @@ class DecodeTests(unittest.TestCase):
 
     def test_truncated_malformed_foreign_and_failed(self):
         t=tx();t['meta']['logMessages'].insert(2,'Log truncated');self.assertEqual(a.detect(t,10)['classification'],'UNKNOWN')
-        t=tx();t['meta']['logMessages'][1]='Program data: !!!!';self.assertEqual(a.detect(t,10)['classification'],'UNKNOWN')
+        t=tx();t['meta']['logMessages'][-2]='Program data: !!!!';self.assertEqual(a.detect(t,10)['classification'],'UNKNOWN')
         t=tx();t['meta']['logMessages']=[s.replace(a.PROGRAM,'11111111111111111111111111111111') for s in t['meta']['logMessages']]
         r=a.detect(t,10);self.assertEqual(r['program_events'],{});self.assertEqual(r['classification'],'UNKNOWN')
         t=tx();t['meta']['err']={'InstructionError':[0,'bad']};r=a.detect(t,10);self.assertEqual(r['classification'],'FAILED_TRANSACTION');self.assertEqual(r['events'],[])
@@ -272,13 +320,13 @@ class DecodeTests(unittest.TestCase):
             self.assertEqual(r['signature'],p.stem)
 
     def test_completion_identity_and_caught_cpi_fail_closed(self):
-        t=tx();t['transaction']['message']['instructions'][0]['accounts'][0]=2
+        t=tx();t['transaction']['message']['instructions'][-1]['accounts'][0]=2
         self.assertEqual(a.detect(t,10)['classification'],'UNKNOWN')
         t=tx();t['meta']['logMessages'][-1]=f'Program {a.PROGRAM} failed: caught'
         r=a.detect(t,10);self.assertEqual(r['program_events'],{});self.assertEqual(r['classification'],'UNKNOWN')
 
     def test_multiple_events_and_positions(self):
-        t=tx();t['transaction']['message']['instructions']*=2;t['meta']['logMessages']*=2
+        t=tx(kind='CLASSIC');t['transaction']['message']['instructions']*=2;t['meta']['logMessages']*=2
         r=a.detect(t,10);self.assertEqual(r['classification'],'CLASSIFIED')
         self.assertEqual([e['instruction_position'] for e in r['events']],[(0,None),(1,None)])
         self.assertEqual([e['event_index'] for e in r['events']],[0,1])
