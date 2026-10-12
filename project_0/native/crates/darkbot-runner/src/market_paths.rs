@@ -37,21 +37,39 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
         .build()
         .map_err(|_| "DEPLOYMENT_CLIENT")?;
     let mut response = Err("DEPLOYMENT_RPC");
+    let deadline = Instant::now() + Duration::from_secs(30);
     for attempt in 0..3 {
-        response = client.post(url).json(&json!({"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":[address.to_string(),{"encoding":"base64","commitment":"finalized"}]}))
-            .send().and_then(|r|r.error_for_status()).and_then(|r|r.json::<Value>())
+        let permit = darkbot_solana::provider::shared()
+            .acquire(darkbot_solana::provider::Workload::Deployment, deadline)
             .map_err(|e| {
-                if e.status().is_some_and(|s|s.as_u16()==429) { "DEPLOYMENT_RPC_RATE_LIMIT" }
-                else if e.is_timeout() { "DEPLOYMENT_RPC_TIMEOUT" }
-                else if e.is_connect() { "DEPLOYMENT_RPC_CONNECT" }
-                else if e.is_decode() { "DEPLOYMENT_RPC_JSON" }
-                else { "DEPLOYMENT_RPC_HTTP_OR_TRANSPORT" }
-            });
-        if response.is_ok() {
+                if e == "RPC_RATE_LIMIT" {
+                    "DEPLOYMENT_RPC_RATE_LIMIT"
+                } else {
+                    "DEPLOYMENT_RPC_BUDGET"
+                }
+            })?;
+        response = (|| {
+            let resp=client.post(url).timeout(deadline.saturating_duration_since(Instant::now()).min(Duration::from_secs(10)))
+                .json(&json!({"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":[address.to_string(),{"encoding":"base64","commitment":"finalized"}]}))
+                .send().map_err(|_| "DEPLOYMENT_RPC_TRANSPORT")?;
+            darkbot_solana::provider::observe_response(&resp, "getAccountInfo").map_err(|e| {
+                if e == "RPC_RATE_LIMIT" {
+                    "DEPLOYMENT_RPC_RATE_LIMIT"
+                } else {
+                    "DEPLOYMENT_RPC_HTTP"
+                }
+            })?;
+            resp.json::<Value>().map_err(|_| "DEPLOYMENT_RPC_JSON")
+        })();
+        drop(permit);
+        if response.is_ok() || Instant::now() >= deadline {
             break;
         }
         if attempt < 2 {
-            std::thread::sleep(Duration::from_secs(1 << attempt));
+            std::thread::sleep(
+                Duration::from_millis(500 * (1 << attempt))
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
     }
     let response = response?;

@@ -10,7 +10,6 @@ use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer};
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
 use darkbot_solana::submit::rpc::RpcSubmitter;
-use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{account::Account, hash::Hash, transaction::VersionedTransaction};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -161,7 +160,12 @@ impl RemoteWorkers {
             std::thread::Builder::new()
                 .name("winner-rpc".into())
                 .spawn(move || {
-                    let rpc = RpcClient::new(winner_rpc_url);
+                    let rpc = darkbot_solana::provider::rpc_client(
+                        winner_rpc_url,
+                        Duration::from_secs(30),
+                        Default::default(),
+                        darkbot_solana::provider::Workload::Winner,
+                    );
                     while !winner_shutdown.is_requested() {
                         let Some(watch) = winner_job_rx.pop_timeout(Duration::from_millis(250))
                         else {
@@ -190,7 +194,12 @@ impl RemoteWorkers {
             std::thread::Builder::new()
                 .name("reconcile-rpc".into())
                 .spawn(move || {
-                    let rpc = RpcClient::new(reconcile_rpc_url);
+                    let rpc = darkbot_solana::provider::rpc_client(
+                        reconcile_rpc_url,
+                        Duration::from_secs(30),
+                        Default::default(),
+                        darkbot_solana::provider::Workload::Winner,
+                    );
                     let clock = Clock::new();
                     while !reconcile_shutdown.is_requested() {
                         let Some(work) = reconcile_job_rx.pop_timeout(Duration::from_millis(250))

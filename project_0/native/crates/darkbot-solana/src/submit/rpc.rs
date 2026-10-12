@@ -37,7 +37,12 @@ pub struct RpcSubmitter {
 impl RpcSubmitter {
     pub fn new(url: String, skip_preflight: bool) -> Self {
         RpcSubmitter {
-            rpc: RpcClient::new_with_commitment(url, CommitmentConfig::confirmed()),
+            rpc: crate::provider::rpc_client(
+                url,
+                std::time::Duration::from_secs(30),
+                CommitmentConfig::confirmed(),
+                crate::provider::Workload::Simulation,
+            ),
             skip_preflight,
             max_retries: Some(0),
         }

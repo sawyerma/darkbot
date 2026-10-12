@@ -5067,6 +5067,14 @@ Statusklassen: CAPTURE_CLOCK_COMPLETE, LIVE_COVERAGE_INCOMPLETE, INDEX_VERIFIED,
 
 **P2 – Transport/Provider:** WSS-Liveness-State, begrenzte 429-/Reconnect-Recovery, Gap-Intervalljournal + Semantik, Early fail-closed, getrennte Quotas; Simulation 527 Fehler, Provider-Rate-Limit, WSS Frame-Unterbrechung und nachgewiesene tatsächliche Recovery.
 
+**Umsetzungsstand 2026-10-12:** P2 implementiert und lokal qualifiziert: gemeinsame
+RPC-/WSS-Admission, Retry-After/Circuit, feste 120-s-/8-Versuchs-Recovery,
+ACK+Slotfortschritt als Startbarriere, GAP-Intervalljournal und früher geordneter
+INCOMPLETE-Abbruch. 240 bzw. 238 Bibliothekstests PASS (txv1 an/aus), 9 Binary- und
+4 CLI-Tests PASS; Release-Build PASS. Evidence/Scope/Provider-Inventar unter
+`docs/evidence/C0E1_P2_20261012/`. Kein neuer Mainnet-Lauf, kein Provider-/5h-PASS.
+P4–P6 bleiben offen; P2-Status melden, danach nächstes Paket abstimmen.
+
 **P3 – Index-Verifier:** Abfrage per UTC-Manifest, Pagination + Null-Blocktime + Versions-/LUT-/CPI-Support, unabhängige Klassifikation, Event-/Signatur-Differenz, atomare Resume-Journals, optional Crosscheck; echte historische positive TX-Fixtures mit nachgewiesenen Signaturen + negative Fixtures.
 
 **Umsetzungsstand 2026-10-11:** P3 lokal qualifiziert (26 Offline-/Fixture-Tests, 4 P1-CLI-Regressionsprüfungen). `scripts/verify.sh --run <run-id> --mode index`; realer 5h-Abgleich nach 2 Seiten/2.000 Signaturen mit `RPC_RATE_LIMIT` gestoppt, Cursor gesichert, historische Qualifikation OPEN. Kein CANONICAL-/MASTER-PASS. Details und Resume-Befehl im `MEASUREMENT_LEDGER.md`; danach P2, kein Vorziehen von P4–P6.

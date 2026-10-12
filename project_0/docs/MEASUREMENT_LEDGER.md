@@ -1,3 +1,52 @@
+## 2026-10-12 — C0-E1 P2: bounded transport recovery / shared provider budgets — LOCAL PASS
+
+**Resume:** P1 and P3 implemented; P2 now implemented and locally qualified from
+`d40d89d8fef98e69c505141ea17dc4a7a3cde658`. No new Mainnet run, historical RPC
+attempt or submission. User performs the long measurement after the remaining gates.
+
+Implemented in the existing production path:
+- C0-E1 readiness = subscription ACKs + actual advancing slot frame, exact common
+  T_rx. Application/slot liveness independent of Ping/Pong; safe state/health journal.
+- Fixed outage recovery 120 s / 8 failed attempts, 60 s idle detection, bounded
+  backoff/Retry-After and cancellable shutdown. Slot progress across 10 s is needed
+  before resetting the failure budget; duration 10m/24h does not raise it.
+- 527 repeated failures coalesce into one gap interval without losing raw rows or
+  unknown boundaries. Restored transport is separate from finalized gap recovery.
+- Process-wide Solana quota ceiling: FIFO, 5 request/handshake starts/s, 2 in flight,
+  64 waiters, per-workload spacing; shared 429 cooldown/circuit. SDK reads use the
+  existing RpcSender interface; results and structured protocol errors preserved.
+  Market deployment/history fetchers share the same budget. Jupiter remains its
+  separate existing quote service. Actual provider capacity remains unqualified.
+- Exhaustion aborts capture + Shadow through the existing shared flag, drains,
+  saves INCOMPLETE reports and **defers expensive post-abort verification**.
+  Ordinary submission construction, ObserveOnly/LIVE gates, protocol/economics
+  decisions and actual fee/UNKNOWN rules are retained.
+
+Actually executed: library matrix `crate_health,txv1` **240 PASS / 0 FAIL / 1 ignored**;
+`crate_health` **238 PASS / 0 FAIL / 1 ignored** (ignored test pre-existing).
+Runner binary **9 PASS**, P1 CLI **4 PASS**, final provider HTTP regressions **5 PASS**.
+Locked offline release build of `p0-longtail` + `p0-measurement-plan` **PASS**.
+Targeted changed-region formatting and `git diff --check` **PASS**. Relevant Clippy
+completed, existing warnings retained; no full-workspace zero-warning claim.
+Local actual socket fixtures prove WSS disconnect/recovery, ping-only/old-slot
+failure, HTTP429 rejection/circuit, prompt cancellation, bounded concurrency and
+SDK response/error preservation. Development failures were corrected before the
+final qualification and their logs are retained.
+
+Full scope, exact commands, source/binary hashes, consumer inventory and results:
+[`evidence/C0E1_P2_20261012/README.md`](evidence/C0E1_P2_20261012/README.md).
+
+**OPEN:** real provider quotas/account-sharing/archive/WSS availability; Mainnet
+preflight/smoke; P4 strict partition/resume + resource safety; P5/P6 qualification.
+Existing five-hour history remains resumable/HISTORICAL_INCOMPLETE (P3, RPC_RATE_LIMIT).
+No historical liquidation count, economics profitability or five-hour stability
+PASS follows from these local tests. LIVE remains disabled.
+
+**Next:** report P2 and stop. P4 is the next implementation package; do not start a
+new long run. Preserve `bsc/**`, all existing run data and evidence.
+
+---
+
 ## P3 — UTC historical index verification, 2026-10-11
 
 **P3 IMPLEMENTED / LOCAL TECHNICAL PASS. Real five-hour historical qualification: OPEN (`RPC_RATE_LIMIT`), not a zero-liquidation result. Stop after this package; next P2.**

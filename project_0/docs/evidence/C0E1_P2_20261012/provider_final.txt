@@ -1,0 +1,12 @@
+   Compiling darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-solana)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.58s
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_solana-2f987e01c6edfbb2)
+
+running 5 tests
+test provider::tests::retry_after_seconds_dates_and_invalid_are_safe ... ok
+test provider::tests::shared_429_circuit_prevents_requests_across_workloads ... ok
+test provider::http_tests::actual_http_429_blocks_other_workload_and_does_not_leak_body ... ok
+test provider::http_tests::sdk_preserves_success_response_and_structured_simulation_failure ... ok
+test provider::tests::aggregate_concurrency_is_bounded_and_cancelled_tickets_do_not_block ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 49 filtered out; finished in 0.43s

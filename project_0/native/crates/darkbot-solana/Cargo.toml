@@ -52,6 +52,9 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # Canonical v1 wincode requires this compatible minor; SDK-3 accepts ^3.0.0.
 solana-short-vec-v1 = { package = "solana-short-vec", version = "=3.2.2", optional = true }
 
+async-trait = "0.1"
+time = { version = "0.3", features = ["parsing"] }
+
 [dev-dependencies]
 
 [[bin]]

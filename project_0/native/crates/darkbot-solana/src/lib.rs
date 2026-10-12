@@ -13,6 +13,7 @@
 //! Status: UNTESTED / VERIFY — geschrieben ohne Compiler und ohne Netzwerk.
 
 pub mod ingress;
+pub mod provider;
 pub mod state;
 pub mod submit;
 pub mod tx;

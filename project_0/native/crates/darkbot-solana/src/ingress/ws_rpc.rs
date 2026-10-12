@@ -37,11 +37,14 @@ pub struct WsRpcConfig {
     pub commitment: &'static str,
     pub reconnect_initial: Duration,
     pub reconnect_max: Duration,
-    /// Ohne Frame innerhalb dieser Zeit gilt der Stream als tot (Ping/Pong reicht nicht).
+    /// Without usable application frames / slot progress the stream is dead; ACK/Ping/Pong do not extend it.
     pub idle_timeout: Duration,
     /// [C0-MO] Optional transport heartbeat: send a WebSocket Ping at this interval. `None`
     /// (default, Shadow/Live) keeps the previous behaviour exactly; the market mode enables it.
     pub heartbeat_interval: Option<Duration>,
+    /// Fixed outage budget, independent of capture duration (C0-E1 opt-in).
+    pub recovery_budget: Option<Duration>,
+    pub recovery_attempts: u32,
 }
 
 /// Wait before the next frame read. `None` heartbeat: exactly the idle timeout (previous
@@ -49,12 +52,13 @@ pub struct WsRpcConfig {
 /// APPLICATION frame) and the time to the next heartbeat.
 pub(crate) fn heartbeat_wait(idle_timeout: Duration, since_last_app_frame: Duration, until_heartbeat: Option<Duration>) -> Duration {
     match until_heartbeat {
-        None => idle_timeout,
+        None => idle_timeout.saturating_sub(since_last_app_frame),
         Some(until) => idle_timeout.saturating_sub(since_last_app_frame).min(until),
     }
 }
 
 /// Application data (JSON-RPC text/binary). Ping/Pong/Close/raw frames are transport only.
+#[cfg(test)]
 pub(crate) fn is_application_frame(frame: &Message) -> bool {
     matches!(frame, Message::Text(_) | Message::Binary(_))
 }
@@ -69,18 +73,32 @@ impl WsRpcConfig {
             reconnect_max: Duration::from_secs(30),
             idle_timeout: Duration::from_secs(60),
             heartbeat_interval: None,
+            recovery_budget: None,
+            recovery_attempts: 8,
         }
     }
+}
+
+struct SessionAttempt {
+    attempt: u32,
+    deadline: Option<tokio::time::Instant>,
+    healthy: bool,
+    retry_after: Duration,
 }
 
 pub struct WsRpcControlSource {
     cfg: WsRpcConfig,
     clock: Clock,
+    provider_budget: std::sync::Arc<crate::provider::Budget>,
 }
 
 impl WsRpcControlSource {
     pub fn new(cfg: WsRpcConfig, clock: Clock) -> Self {
-        WsRpcControlSource { cfg, clock }
+        WsRpcControlSource {
+            cfg,
+            clock,
+            provider_budget: crate::provider::shared(),
+        }
     }
 }
 
@@ -290,33 +308,144 @@ impl IngressSource for WsRpcControlSource {
 impl WsRpcControlSource {
     async fn run_async(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt, slots: SlotWatch) -> Result<(), IngressError> {
         let mut attempt: u32 = 0;
-        let mut backoff = self.cfg.reconnect_initial;
+        let mut failures: u32 = 0;
         let mut last_slot: Option<u64> = None;
-
+        let mut outage = tokio::time::Instant::now();
         while !shutdown.is_requested() {
-            attempt += 1;
-            match self.session(&sink, &shutdown, &halt, &slots, &mut last_slot, attempt).await {
-                Ok(()) => return Ok(()), // Shutdown
+            attempt = attempt.saturating_add(1);
+            self.transport(
+                &sink,
+                if attempt == 1 {
+                    "STARTING"
+                } else {
+                    "RECOVERING"
+                },
+                "CONNECT",
+                attempt,
+                last_slot,
+            );
+            let deadline = self.cfg.recovery_budget.map(|b| outage + b);
+            let mut recovery = SessionAttempt {
+                attempt,
+                deadline,
+                healthy: false,
+                retry_after: Duration::ZERO,
+            };
+            let result = tokio::select! {
+                r = self.session(&sink, &shutdown, &halt, &slots, &mut last_slot, &mut recovery) => r,
+                _ = wait_shutdown(&shutdown) => Ok(()),
+            };
+            match result {
+                Ok(()) => {
+                    self.transport(&sink, "FINISHED", "SHUTDOWN", attempt, last_slot);
+                    return Ok(());
+                }
                 Err(e) => {
-                    let t = self.clock.now_ns();
-                    // Out-of-Band zuerst: sichtbar, auch wenn der Channel voll ist.
+                    if shutdown.is_requested() {
+                        return Ok(());
+                    }
+                    if recovery.healthy {
+                        failures = 0;
+                        outage = tokio::time::Instant::now();
+                    }
+                    failures = failures.saturating_add(1);
                     halt.raise();
-                    // Reconnect ist für WSS immer eine Lücke (kein Replay).
+                    let t = self.clock.now_ns();
                     let _ = sink.try_push(IngressEvent::Gap {
                         source: SourceKind::WsRpcControl,
                         from_slot: last_slot,
                         to_slot: None,
                         t_rx_ns: t,
                     });
-                    // [FIX-36] KEIN `Reconnected` hier — der Stream ist unten. StreamReady kommt aus der
-                    // nächsten Session, sobald alle ACKs da sind.
-                    eprintln!("[ws_rpc] session ended: {} — reconnect in {:?}", e, backoff);
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(self.cfg.reconnect_max);
+                    let code = if !recovery.retry_after.is_zero() {
+                        "WSS_HTTP_429"
+                    } else {
+                        match &e {
+                            IngressError::Connect(s) if s == "WSS_SLOT_PROGRESS_TIMEOUT" => {
+                                "WSS_SLOT_PROGRESS_TIMEOUT"
+                            }
+                            IngressError::Connect(s) if s == "idle timeout" => {
+                                "WSS_APPLICATION_IDLE"
+                            }
+                            IngressError::Connect(s) if s == "WSS_RECOVERY_BUDGET" => {
+                                "WSS_RECOVERY_BUDGET"
+                            }
+                            IngressError::Protocol(_) => "WSS_PROTOCOL_ERROR",
+                            _ => "WSS_SESSION_FAILED",
+                        }
+                    };
+                    self.transport(&sink, "DEGRADED", code, attempt, last_slot);
+                    // Error text may contain provider response bodies/URLs: emit safe classes only.
+                    eprintln!("[ws_rpc] state=DEGRADED attempt={attempt} code={code}");
+                    let delay = reconnect_delay(
+                        self.cfg.reconnect_initial,
+                        self.cfg.reconnect_max,
+                        failures,
+                        t,
+                    )
+                    .max(recovery.retry_after);
+                    if self.cfg.recovery_budget.is_some_and(|b| {
+                        failures >= self.cfg.recovery_attempts
+                            || outage.elapsed().saturating_add(delay) >= b
+                    }) {
+                        self.transport(
+                            &sink,
+                            "INCOMPLETE_ABORT",
+                            "WSS_RECOVERY_EXHAUSTED",
+                            attempt,
+                            last_slot,
+                        );
+                        let _ = sink.try_push(IngressEvent::Fatal {
+                            source: SourceKind::WsRpcControl,
+                            detail: "WSS_RECOVERY_EXHAUSTED".into(),
+                            t_rx_ns: self.clock.now_ns(),
+                        });
+                        return Err(IngressError::Connect("WSS_RECOVERY_EXHAUSTED".into()));
+                    }
+                    let _ = e; // no secret-bearing Display
+                    tokio::select! {
+                        _ = tokio::time::sleep(delay) => {},
+                        _ = wait_shutdown(&shutdown) => return Ok(()),
+                    }
                 }
             }
         }
         Ok(())
+    }
+
+    fn ready(
+        &self,
+        sink: &Producer<IngressEvent>,
+        halt: &IngressHalt,
+        attempt: u32,
+        t_rx_ns: u64,
+    ) -> Result<(), IngressError> {
+        sink.try_push(IngressEvent::Reconnected {
+            source: SourceKind::WsRpcControl,
+            attempt,
+            t_rx_ns,
+        })
+        .map_err(|_| {
+            halt.raise();
+            IngressError::Protocol("WSS_READY_NOT_DELIVERED".into())
+        })
+    }
+
+    fn transport(
+        &self,
+        sink: &Producer<IngressEvent>,
+        state: &'static str,
+        code: &'static str,
+        attempt: u32,
+        last_slot: Option<u64>,
+    ) {
+        let _ = sink.try_push(IngressEvent::Transport {
+            state,
+            code,
+            attempt,
+            last_slot,
+            t_rx_ns: self.clock.now_ns(),
+        });
     }
 
     async fn session(
@@ -326,12 +455,65 @@ impl WsRpcControlSource {
         halt: &IngressHalt,
         slots: &SlotWatch,
         last_slot: &mut Option<u64>,
-        attempt: u32,
+        recovery: &mut SessionAttempt,
     ) -> Result<(), IngressError> {
+        let attempt = recovery.attempt;
+        let deadline = recovery.deadline;
+        let healthy = &mut recovery.healthy;
+        let retry_after = &mut recovery.retry_after;
         eprintln!("[ws_rpc] session attempt={} connecting", attempt);
-        let (ws, _) = tokio_tungstenite::connect_async(&self.cfg.ws_url)
-            .await
-            .map_err(|e| IngressError::Connect(e.to_string()))?;
+        let connect_budget = deadline
+            .map(|d| d.saturating_duration_since(tokio::time::Instant::now()))
+            .unwrap_or(self.cfg.idle_timeout)
+            .min(self.cfg.idle_timeout);
+        let _permit = if self.cfg.recovery_budget.is_some() {
+            let deadline = std::time::Instant::now()
+                + deadline
+                    .map(|d| d.saturating_duration_since(tokio::time::Instant::now()))
+                    .unwrap_or(connect_budget);
+            let budget = self.provider_budget.clone();
+            let cancellation = shutdown.clone();
+            Some(
+                tokio::task::spawn_blocking(move || {
+                    budget.acquire_cancellable(
+                        crate::provider::Workload::Websocket,
+                        deadline,
+                        Some(&cancellation),
+                    )
+                })
+                .await
+                .map_err(|_| IngressError::Connect("WSS_ADMISSION_JOIN".into()))?
+                .map_err(|_| IngressError::Connect("WSS_ADMISSION_BUDGET".into()))?,
+            )
+        } else {
+            None
+        };
+        let connect_budget = deadline
+            .map(|d| d.saturating_duration_since(tokio::time::Instant::now()))
+            .unwrap_or(connect_budget)
+            .min(connect_budget);
+        let (ws, _) = tokio::time::timeout(
+            connect_budget,
+            tokio_tungstenite::connect_async(&self.cfg.ws_url),
+        )
+        .await
+        .map_err(|_| IngressError::Connect("WSS_CONNECT_TIMEOUT".into()))?
+        .map_err(|e| {
+            if let tokio_tungstenite::tungstenite::Error::Http(r) = &e {
+                if r.status().as_u16() == 429 {
+                    *retry_after = crate::provider::retry_after(
+                        r.headers().get("retry-after").and_then(|h| h.to_str().ok()),
+                        std::time::SystemTime::now(),
+                    )
+                    .max(Duration::from_millis(1));
+                    if self.cfg.recovery_budget.is_some() {
+                        self.provider_budget.rate_limited(*retry_after);
+                    }
+                }
+            }
+            IngressError::Connect("WSS_CONNECT_FAILED".into())
+        })?;
+        drop(_permit);
         let (mut tx, mut rx) = ws.split();
 
         // Subscribe-Requests senden; Bestätigungen (id → subscription) einsammeln.
@@ -353,8 +535,16 @@ impl WsRpcControlSource {
         for (id, kind, req) in &requests {
             let pk = if *kind == SubKind::Account { acc_iter.next().copied() } else { None };
             pending.insert(*id, (*kind, pk));
-            tx.send(Message::Text(req.to_string().into()))
+            let send_budget = deadline
+                .map(|d| d.saturating_duration_since(tokio::time::Instant::now()))
+                .unwrap_or(self.cfg.idle_timeout)
+                .min(self.cfg.idle_timeout);
+            if send_budget.is_zero() {
+                return Err(IngressError::Connect("WSS_RECOVERY_BUDGET".into()));
+            }
+            tokio::time::timeout(send_budget, tx.send(Message::Text(req.to_string())))
                 .await
+                .map_err(|_| IngressError::Connect("WSS_SUBSCRIBE_TIMEOUT".into()))?
                 .map_err(|e| IngressError::Connect(e.to_string()))?;
         }
         let mut sub_ids: HashMap<u64, (SubKind, Option<Pubkey>)> = HashMap::new();
@@ -364,20 +554,35 @@ impl WsRpcControlSource {
         let mut last_health_ns: u64 = self.clock.now_ns();
         let heartbeat = self.cfg.heartbeat_interval;
         let mut last_app_frame_at = tokio::time::Instant::now();
+        let mut last_progress_at = last_app_frame_at;
+        let mut progress_slot = *last_slot;
+        let mut first_progress_at = None;
+        let mut recovered = false;
         let mut next_heartbeat_at = heartbeat.map(|h| tokio::time::Instant::now() + h);
 
         loop {
             if shutdown.is_requested() {
                 return Ok(());
             }
+            let now = tokio::time::Instant::now();
+            if !*healthy && deadline.is_some_and(|d| now >= d) {
+                return Err(IngressError::Connect("WSS_RECOVERY_BUDGET".into()));
+            }
+            if self.cfg.subscription.slots && last_progress_at.elapsed() >= self.cfg.idle_timeout {
+                return Err(IngressError::Connect("WSS_SLOT_PROGRESS_TIMEOUT".into()));
+            }
             // [C0-MO] Transport heartbeat (only when configured). A failed send is a connection
             // loss and takes the existing reconnect/Gap path.
             if let (Some(h), Some(at)) = (heartbeat, next_heartbeat_at) {
                 let now = tokio::time::Instant::now();
                 if now >= at {
-                    tx.send(Message::Ping(Default::default()))
-                        .await
-                        .map_err(|e| IngressError::Connect(format!("heartbeat: {e}")))?;
+                    tokio::time::timeout(
+                        Duration::from_secs(5),
+                        tx.send(Message::Ping(Default::default())),
+                    )
+                    .await
+                    .map_err(|_| IngressError::Connect("WSS_HEARTBEAT_TIMEOUT".into()))?
+                    .map_err(|e| IngressError::Connect(format!("heartbeat: {e}")))?;
                     next_heartbeat_at = Some(now + h);
                 }
             }
@@ -387,11 +592,9 @@ impl WsRpcControlSource {
                 now.saturating_duration_since(last_app_frame_at),
                 next_heartbeat_at.map(|at| at.saturating_duration_since(now)),
             );
+            let wait = wait.min(Duration::from_millis(250));
             let frame = tokio::time::timeout(wait, rx.next()).await;
-            if frame.is_err()
-                && heartbeat.is_some()
-                && last_app_frame_at.elapsed() < self.cfg.idle_timeout
-            {
+            if frame.is_err() && last_app_frame_at.elapsed() < self.cfg.idle_timeout {
                 continue; // woke up for the heartbeat, not because the stream went idle
             }
             let t_rx_ns = self.clock.now_ns(); // T_rx: vor Parse
@@ -414,17 +617,19 @@ impl WsRpcControlSource {
                 Ok(Some(Err(e))) => return Err(IngressError::Connect(e.to_string())),
                 Ok(Some(Ok(f))) => f,
             };
-            frames += 1;
+
             // [C0-MO r5] Only application frames prove the subscription stream is alive;
             // transport Ping/Pong (incl. replies to our heartbeat) never reset the idle budget.
-            if is_application_frame(&frame) {
-                last_app_frame_at = tokio::time::Instant::now();
-            }
-            last_frame_ns = Some(t_rx_ns);
+
             let text = match frame {
                 Message::Text(t) => t.to_string(),
+                Message::Binary(b) => String::from_utf8(b.to_vec())
+                    .map_err(|_| IngressError::Protocol("WSS_UTF8".into()))?,
                 Message::Ping(p) => {
-                    let _ = tx.send(Message::Pong(p)).await;
+                    tokio::time::timeout(Duration::from_secs(5), tx.send(Message::Pong(p)))
+                        .await
+                        .map_err(|_| IngressError::Connect("WSS_PONG_TIMEOUT".into()))?
+                        .map_err(|_| IngressError::Connect("WSS_PONG_FAILED".into()))?;
                     continue;
                 }
                 Message::Close(_) => return Err(IngressError::Connect("close frame".into())),
@@ -446,19 +651,16 @@ impl WsRpcControlSource {
                     }
                 }
                 let acked = request_total.saturating_sub(pending.len());
-                if acked == request_total || acked == 1 || acked % 100 == 0 {
+                if acked == request_total || acked == 1 || acked.is_multiple_of(100) {
                     eprintln!("[ws_rpc] session attempt={} subscription ACKs={}/{}", attempt, acked, request_total);
                 }
                 // [FIX-36] StreamReady-Barriere: alle Subscriptions bestätigt → genau ein `Reconnected`.
                 if !stream_ready && pending.is_empty() {
                     stream_ready = true;
+                    self.transport(sink, "READY", "SUBSCRIPTIONS_ACKED", attempt, *last_slot);
                     eprintln!("[ws_rpc] session attempt={} StreamReady", attempt);
-                    if let Err(ChannelError::Disconnected(_)) = sink.try_push(IngressEvent::Reconnected {
-                        source: SourceKind::WsRpcControl,
-                        attempt,
-                        t_rx_ns: self.clock.now_ns(),
-                    }) {
-                        return Ok(());
+                    if self.cfg.recovery_budget.is_none() {
+                        self.ready(sink, halt, attempt, t_rx_ns)?;
                     }
                 }
                 continue;
@@ -467,10 +669,54 @@ impl WsRpcControlSource {
                 return Err(IngressError::Protocol(format!("rpc error: {}", err)));
             }
 
+            if v.get("method").is_some()
+                && !v
+                    .pointer("/params/subscription")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|id| sub_ids.contains_key(&id))
+            {
+                return Err(IngressError::Protocol("WSS_UNKNOWN_SUBSCRIPTION".into()));
+            }
             let events = parse_notification(&v, &sub_ids, t_rx_ns)?;
+            if stream_ready && !events.is_empty() {
+                last_app_frame_at = tokio::time::Instant::now();
+                last_frame_ns = Some(t_rx_ns);
+                frames += 1;
+            }
             for ev in events {
+                let progress = match &ev {
+                    IngressEvent::Slot(s) => Some(s.slot),
+                    IngressEvent::Account(a) if !self.cfg.subscription.slots => Some(a.slot),
+                    _ => None,
+                };
+                if stream_ready && progress.is_some_and(|s| progress_slot.is_none_or(|p| s > p)) {
+                    progress_slot = progress;
+                    last_progress_at = tokio::time::Instant::now();
+                    let since = first_progress_at.get_or_insert(last_progress_at);
+                    if !recovered {
+                        recovered = true;
+                        if self.cfg.recovery_budget.is_some() {
+                            self.ready(sink, halt, attempt, t_rx_ns)?;
+                        }
+                        self.transport(
+                            sink,
+                            if attempt == 1 {
+                                "CAPTURING"
+                            } else {
+                                "RECOVERED"
+                            },
+                            "APPLICATION_SLOT_PROGRESS",
+                            attempt,
+                            progress,
+                        );
+                    }
+                    // One frame / a flapping connection cannot reset the outage budget.
+                    if last_progress_at.duration_since(*since) >= Duration::from_secs(10) {
+                        *healthy = true;
+                    }
+                }
                 if let IngressEvent::Slot(s) = &ev {
-                    *last_slot = Some(s.slot);
+                    *last_slot = Some(last_slot.map_or(s.slot, |p| p.max(s.slot)));
                     slots.observe(s.slot); // [FIX-40]
                 }
                 if let IngressEvent::Account(a) = &ev {
@@ -497,9 +743,24 @@ impl WsRpcControlSource {
     }
 }
 
+async fn wait_shutdown(shutdown: &Shutdown) {
+    while !shutdown.is_requested() {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+fn reconnect_delay(initial: Duration, maximum: Duration, failures: u32, seed: u64) -> Duration {
+    let base = initial
+        .saturating_mul(1u32 << failures.saturating_sub(1).min(16))
+        .min(maximum);
+    // Per-attempt monotonic jitter avoids synchronized retries; it never shortens Retry-After.
+    base.saturating_add(Duration::from_millis(seed % 251))
+        .min(maximum)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("ws_rpc_recovery_tests.rs");
 
     #[test]
     fn subscribe_requests_cover_all_kinds() {
@@ -545,7 +806,10 @@ mod tests {
         assert_eq!(cfg.heartbeat_interval, None);
         let idle = cfg.idle_timeout;
         // Without heartbeat the read wait is exactly the idle timeout, as before.
-        assert_eq!(heartbeat_wait(idle, Duration::from_secs(59), None), idle);
+        assert_eq!(
+            heartbeat_wait(idle, Duration::from_secs(59), None),
+            Duration::from_secs(1)
+        );
         // With heartbeat: the shorter of remaining idle budget and time to the next ping.
         assert_eq!(heartbeat_wait(idle, Duration::from_secs(10), Some(Duration::from_secs(5))), Duration::from_secs(5));
         assert_eq!(heartbeat_wait(idle, Duration::from_secs(58), Some(Duration::from_secs(30))), Duration::from_secs(2));

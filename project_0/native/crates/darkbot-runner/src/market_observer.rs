@@ -316,6 +316,7 @@ pub fn market_ws_config(cfg: &MarketConfig) -> Result<WsRpcConfig, String> {
     };
     let mut ws = WsRpcConfig::new(cfg.ws_url.clone(), sub);
     ws.commitment = cfg.commitment;
+    ws.recovery_budget = Some(Duration::from_secs(120));
     let heartbeat = Duration::from_secs(cfg.heartbeat_secs);
     if heartbeat >= ws.idle_timeout {
         return Err(format!(
@@ -330,7 +331,13 @@ pub fn market_ws_config(cfg: &MarketConfig) -> Result<WsRpcConfig, String> {
 
 /// Host part of an endpoint, without query string (API keys live in the query).
 pub fn redact_url(url: &str) -> String {
-    url.split('?').next().unwrap_or("").to_string()
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| {
+            u.host_str()
+                .map(|host| format!("{}://{}", u.scheme(), host))
+        })
+        .unwrap_or_else(|| "INVALID_ENDPOINT".into())
 }
 
 // ------------------------------------------------------------------------------------------
@@ -838,6 +845,9 @@ pub struct MarketStats {
     pub log_messages_missing: u64,
     pub gap_count: u64,
     pub reconnect_count: u64,
+    pub transport_reconnect_attempts: u64,
+    pub transport_recovered: u64,
+    pub transport_http_429: u64,
     pub ingress_overflow_count: u64,
     pub fatal_count: u64,
     pub rpc_fallback_count: u64,
@@ -949,6 +959,7 @@ pub struct ObserverCore {
     truncated_unqualified_reasons: BTreeMap<&'static str, u64>,
     incomplete_reasons: BTreeSet<&'static str>,
     last_slot_frame_ns: Option<u64>,
+    last_slot_progress_ns: Option<u64>,
     enrichment_init_error: Option<String>,
     gap_cfg: GapConfig,
     reconcile_cfg: ReconcileConfig,
@@ -1016,6 +1027,7 @@ impl ObserverCore {
             truncated_unqualified_reasons: BTreeMap::new(),
             incomplete_reasons: BTreeSet::new(),
             last_slot_frame_ns: None,
+            last_slot_progress_ns: None,
             enrichment_init_error: None,
             gap_cfg: GapConfig::default(),
             reconcile_cfg: ReconcileConfig::default(),
@@ -1053,7 +1065,9 @@ impl ObserverCore {
     }
 
     pub fn coverage_complete(&self) -> bool {
-        self.stats.gap_count == self.gap_stats.gap_recovered
+        self.gaps.len() as u64 == self.gap_stats.gap_recovered
+            && self.stats.gap_count == self.gaps.iter().map(|g| g.raw_failures).sum::<u64>()
+            && !self.incomplete_reasons.contains("GAP_STATE_CAPACITY")
             && self.stats.ingress_overflow_count == 0
             && self.stats.fatal_count == 0
     }
@@ -1176,7 +1190,7 @@ impl ObserverCore {
             match kind {
                 "GAP" => {
                     self.stats.gap_count += 1;
-                    self.record_gap(t_rx_ns, &detail);
+                    self.record_gap(t_rx_ns, now_unix_s, &detail);
                     self.mark_incomplete("GAP");
                 }
                 "RECONNECT" => {
@@ -1413,6 +1427,36 @@ impl ObserverCore {
         let before = self.econ.as_ref().map(|_| self.stats.clone());
         let at = ev.t_rx_ns();
         let result = match ev {
+            IngressEvent::Health(h) => self.coverage(
+                sink,
+                "TRANSPORT_HEALTH",
+                now_unix_s,
+                Some(h.t_rx_ns),
+                json!({"connected":h.connected,"last_application_frame_age_ns":h.last_frame_age_ns,
+                    "application_frames":h.frames,"last_slot":h.last_slot}),
+            ),
+            IngressEvent::Transport {
+                state,
+                code,
+                attempt,
+                last_slot,
+                t_rx_ns,
+            } => {
+                if state == "RECOVERING" {
+                    self.stats.transport_reconnect_attempts += 1;
+                }
+                if state == "RECOVERED" {
+                    self.stats.transport_recovered += 1;
+                }
+                if code == "WSS_HTTP_429" {
+                    self.stats.transport_http_429 += 1;
+                }
+                if state == "INCOMPLETE_ABORT" {
+                    self.mark_incomplete("WSS_RECOVERY_EXHAUSTED");
+                }
+                self.coverage(sink, "TRANSPORT_STATE", now_unix_s, Some(t_rx_ns),
+                    json!({"state":state,"code":code,"attempt":attempt,"last_valid_slot":last_slot}))
+            }
             IngressEvent::Reconnected {
                 attempt, t_rx_ns, ..
             } => self.coverage(
@@ -1450,6 +1494,11 @@ impl ObserverCore {
                 self.on_logs(&l, now_unix_s, sink)
             }
             IngressEvent::Slot(s) => {
+                let progress = self
+                    .reconciliation
+                    .market_slot_end
+                    .as_ref()
+                    .is_none_or(|b| s.slot > b.slot);
                 self.record_slot_boundary(s.slot, s.t_rx_ns, now_unix_s, sink)?;
                 self.close_gap_ranges(s.slot, s.t_rx_ns, now_unix_s, sink)?;
                 if let Some(h) = &self.econ {
@@ -1457,6 +1506,9 @@ impl ObserverCore {
                         slot: s.slot,
                         t_rx_ns: s.t_rx_ns,
                     });
+                }
+                if progress && self.in_window(Some(s.t_rx_ns)) {
+                    self.last_slot_progress_ns = Some(s.t_rx_ns);
                 }
                 self.on_slot_frame(s.t_rx_ns);
                 Ok(())
@@ -1805,6 +1857,12 @@ impl ObserverCore {
 
     pub fn summary(&self, cfg: &SummaryContext) -> Value {
         let s = &self.stats;
+        let observed_end = self.window.map(|(start, cutoff)| {
+            start
+                .saturating_add((cfg.actual_observation_seconds.max(0.0) * 1e9) as u64)
+                .min(cutoff)
+        });
+        let outage = observed_end.and_then(|end| self.transport_outage_ns(end));
         let mut sorted = self.edges.clone();
         sorted.sort_by(f64::total_cmp);
         let total: f64 = sorted.iter().sum();
@@ -1974,7 +2032,15 @@ impl ObserverCore {
             "gap_count": s.gap_count,
             "gap_recovery_attempted": self.gap_stats.gap_recovery_attempted,
             "gap_recovered": self.gap_stats.gap_recovered,
-            "gap_unrecovered": s.gap_count.saturating_sub(self.gap_stats.gap_recovered),
+            "gap_unrecovered": (self.gaps.len() as u64).saturating_sub(self.gap_stats.gap_recovered),
+            "gap_intervals": self.gaps.len(),
+            "coverage_outage_seconds": outage.map(|ns| ns as f64/1e9),
+            "transport_covered_seconds": outage.map(|ns| (cfg.actual_observation_seconds-ns as f64/1e9).max(0.0)),
+            "transport_coverage_provenance":"LOCAL_SLOT_PROGRESS_AND_JOURNALED_OUTAGE_INTERVALS_NOT_SOURCE_COMPLETENESS",
+            "last_live_slot_age_s": observed_end.zip(self.last_slot_progress_ns).map(|(end,last)| end.saturating_sub(last) as f64/1e9),
+            "gap_count_raw": s.gap_count,
+            "gaps_merged": self.gaps.iter().map(|g| g.raw_failures.saturating_sub(1)).sum::<u64>(),
+            "provider_budget": darkbot_solana::provider::shared().snapshot(),
             "gap_slots_requested": self.gap_stats.gap_slots_requested,
             "gap_slots_fetched": self.gap_stats.gap_slots_fetched,
             "gap_slots_skipped_confirmed": self.gap_stats.gap_slots_skipped_confirmed,
@@ -1986,6 +2052,9 @@ impl ObserverCore {
             "gap_liquidation_events": self.gap_stats.gap_liquidation_events,
             "gaps": self.gaps,
             "reconnect_count": s.reconnect_count,
+            "reconnect_attempts": s.transport_reconnect_attempts,
+            "reconnect_successful": s.transport_recovered,
+            "wss_http_429_count": s.transport_http_429,
             "ingress_overflow_count": s.ingress_overflow_count,
             "fatal_count": s.fatal_count,
             "decoder_error_count": s.decoder_error_count,
@@ -2199,19 +2268,24 @@ impl RpcFetcher {
     fn get_transaction(&self, signature: &str) -> Result<Option<Value>, String> {
         let body = json!({"jsonrpc": "2.0", "id": 1, "method": "getTransaction",
             "params": [signature, {"encoding": "json", "commitment": self.commitment, "maxSupportedTransactionVersion": 1}]});
+        let _permit = darkbot_solana::provider::shared()
+            .acquire(
+                darkbot_solana::provider::Workload::History,
+                Instant::now() + Duration::from_secs(10),
+            )
+            .map_err(str::to_string)?;
         let resp = self
             .client
             .post(&self.url)
             .json(&body)
             .send()
             .map_err(|e| e.without_url().to_string())?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(format!("http {status}"));
-        }
+        darkbot_solana::provider::observe_response(&resp, "getTransaction")
+            .map_err(str::to_string)?;
         let v: Value = resp.json().map_err(|e| e.without_url().to_string())?;
         if let Some(err) = v.get("error") {
-            return Err(format!("rpc error: {err}"));
+            let _ = err;
+            return Err("RPC_REMOTE_ERROR".into());
         }
         Ok(v.get("result").filter(|r| !r.is_null()).cloned())
     }
@@ -2277,7 +2351,14 @@ pub fn finish_capture(
     outcome: CaptureOutcome,
 ) -> Result<(Value, String, Option<String>), String> {
     let mut write_error = outcome.write_error;
-    if outcome.drain_complete && write_error.is_none() {
+    // Outage abort is not a request for a lengthy repair scan. Preserve evidence
+    // for explicit resumable verification; stop capture/Shadow first.
+    let verify_allowed = outcome.stop_reason == "TIMER";
+    if !verify_allowed {
+        core.mark_incomplete("TRANSPORT_CAPTURE_ABORT");
+        core.reconciliation.error = Some("VERIFICATION_DEFERRED_AFTER_ABORT");
+    }
+    if verify_allowed && outcome.drain_complete && write_error.is_none() {
         eprintln!("[MARKET/CANONICAL] phase=START rpc_after_shadow_quiescence=true");
         if let Err(e) = core.full_reconciliation_phase(cfg.rpc_url.as_deref(), sink) {
             write_error = Some(e.to_string());
@@ -2292,13 +2373,13 @@ pub fn finish_capture(
             core.reconciliation.error.unwrap_or("NONE")
         );
     }
-    if outcome.drain_complete && write_error.is_none() {
+    if verify_allowed && outcome.drain_complete && write_error.is_none() {
         if let Err(e) = core.gap_recovery_phase(cfg.rpc_url.as_deref(), sink) {
             write_error = Some(e.to_string());
         }
     }
     let needs_rpc = core.has_deferred() || core.has_truncated_pending();
-    if cfg.source == MarketSource::Logs && needs_rpc && write_error.is_none() {
+    if verify_allowed && cfg.source == MarketSource::Logs && needs_rpc && write_error.is_none() {
         let fetcher = cfg
             .rpc_url
             .clone()
@@ -2368,7 +2449,11 @@ pub fn finish_capture(
         enrichment_available: cfg.source == MarketSource::Transactions || cfg.rpc_url.is_some(),
     };
     if core.deployment_before.is_some() {
-        match paths::inspect(cfg.rpc_url.as_deref(), &cfg.program) {
+        match if verify_allowed {
+            paths::inspect(cfg.rpc_url.as_deref(), &cfg.program)
+        } else {
+            Err("DEPLOYMENT_DEFERRED_AFTER_ABORT")
+        } {
             Ok(v) => core.deployment_after = Some(v),
             Err(e) => core.deployment_error = Some(e),
         }
@@ -2471,6 +2556,8 @@ pub fn run_embedded(
     core.coverage(&mut sink, "START", process_started, None, json!({
         "source": cfg.source.as_str(), "commitment": cfg.commitment, "program": cfg.program.to_string(),
         "configured_duration_seconds": cfg.duration_secs, "ws_host": redact_url(&cfg.ws_url),
+        "transport_policy":{"recovery_seconds":120,"maximum_failed_attempts":8,"slot_idle_seconds":60,"healthy_reset_seconds":10,"readiness":"ALL_ACKS_AND_NEW_SLOT_PROGRESS"},
+        "provider_budget":darkbot_solana::provider::shared().snapshot(),
     }))
     .map_err(|e| format!("market evidence write failed: {e}"))?;
 
@@ -2530,7 +2617,7 @@ pub fn run_embedded(
                 &mut sink,
                 "FATAL",
                 unix_now_s(),
-                None,
+                Some(clock.now_ns()),
                 json!({"reason": "INGRESS_THREAD_ENDED"}),
             ) {
                 write_error = Some(e.to_string());
@@ -2560,7 +2647,10 @@ pub fn run_embedded(
                     "attempt": attempt, "observation_start_t_rx_ns": t_rx_ns, "observation_cutoff_t_rx_ns": cutoff,
                 }))
             }
-            Some(ev) => core.on_ingress_event(ev, now_s, &mut sink),
+            Some(ev) => {
+                let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
+                core.on_ingress_event(ev, event_unix_s, &mut sink)
+            }
             None => Ok(()),
         };
         if let Err(e) = step {
@@ -2622,6 +2712,17 @@ pub fn run_embedded(
             "market_budget_seconds":h.cfg.plan.budgets.market_drain_seconds}),
         )?;
     }
+    if stop_reason != "TIMER" {
+        core.mark_incomplete("TRANSPORT_CAPTURE_ABORT");
+        if let Some(h) = &econ {
+            h.shared
+                .market_failed
+                .store(true, std::sync::atomic::Ordering::Release);
+            h.shared
+                .abort
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
     let observation_end_s = window
         .map(|(_, cutoff)| (clock.unix_ns(capture_end_ns.min(cutoff)) / 1_000_000_000) as u64)
         .unwrap_or_else(unix_now_s);
@@ -2641,13 +2742,15 @@ pub fn run_embedded(
         let now_s = unix_now_s();
         match consumer.pop_timeout(Duration::from_millis(100)) {
             Some(ev) => {
-                if let Err(e) = core.on_ingress_event(ev, now_s, &mut sink) {
+                let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
+                if let Err(e) = core.on_ingress_event(ev, event_unix_s, &mut sink) {
                     write_error = Some(e.to_string());
                 }
             }
             None if ingress.is_finished() => {
                 while let Some(ev) = consumer.try_pop() {
-                    if let Err(e) = core.on_ingress_event(ev, now_s, &mut sink) {
+                    let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
+                    if let Err(e) = core.on_ingress_event(ev, event_unix_s, &mut sink) {
                         write_error = Some(e.to_string());
                         break;
                     }
@@ -2751,6 +2854,9 @@ pub fn run_embedded(
     }
     if let Some(e) = write_error {
         return Err(format!("market evidence write failed: {e}"));
+    }
+    if stop_reason != "TIMER" {
+        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
     }
     Ok(())
 }
@@ -3598,7 +3704,11 @@ mod tests {
             0
         )
         .is_err());
-        assert_eq!(redact_url("wss://h/?api-key=secret"), "wss://h/");
+        assert_eq!(redact_url("wss://h/?api-key=secret"), "wss://h");
+        assert_eq!(
+            redact_url("https://private:secret@host/PRIVATE_KEY?q=SECRET"),
+            "https://host"
+        );
     }
 
     #[test]

@@ -59,9 +59,15 @@ impl GapConfig {
 #[derive(Debug, Serialize)]
 pub(super) struct MarketGap {
     from_slot: Option<u64>,
+    pub(super) raw_failures: u64,
+    last_failure_t_rx_ns: Option<u64>,
+    first_failure_unix_s: u64,
+    last_failure_unix_s: u64,
+    restored_unix_s: Option<u64>,
     first_post_reconnect_slot: Option<u64>,
     first_post_reconnect_t_rx_ns: Option<u64>,
     gap_t_rx_ns: Option<u64>,
+    last_healthy_t_rx_ns: Option<u64>,
     reconnect_t_rx_ns: Option<u64>,
     reconnect_attempt: Option<u64>,
     recovery_status: &'static str,
@@ -98,16 +104,35 @@ pub(super) enum GapSlot {
 type SlotFetcher<'a> = dyn FnMut(u64, Duration) -> Result<GapSlot, &'static str> + 'a;
 
 impl ObserverCore {
-    pub(super) fn record_gap(&mut self, at: Option<u64>, detail: &Value) {
+    pub(super) fn record_gap(&mut self, at: Option<u64>, now: u64, detail: &Value) {
+        if let Some(g) = self
+            .gaps
+            .last_mut()
+            .filter(|g| g.first_post_reconnect_slot.is_none())
+        {
+            // Preserve the earliest unknown boundary. New ACKs do not prove restoration.
+            g.raw_failures = g.raw_failures.saturating_add(1);
+            g.last_failure_t_rx_ns = at;
+            g.last_failure_unix_s = now;
+            g.reconnect_t_rx_ns = None;
+            g.reconnect_attempt = None;
+            return;
+        }
         if self.gaps.len() >= self.gap_cfg.max_gaps {
             self.mark_incomplete("GAP_STATE_CAPACITY");
             return;
         }
         self.gaps.push(MarketGap {
             from_slot: detail["from_slot"].as_u64(),
+            raw_failures: 1,
+            last_failure_t_rx_ns: at,
+            first_failure_unix_s: now,
+            last_failure_unix_s: now,
+            restored_unix_s: None,
             first_post_reconnect_slot: None,
             first_post_reconnect_t_rx_ns: None,
             gap_t_rx_ns: at,
+            last_healthy_t_rx_ns: self.last_slot_progress_ns,
             reconnect_t_rx_ns: None,
             reconnect_attempt: None,
             recovery_status: "PENDING",
@@ -143,6 +168,7 @@ impl ObserverCore {
                 && g.from_slot.is_none_or(|s| slot >= s)
             {
                 g.first_post_reconnect_slot = Some(slot);
+                g.restored_unix_s = Some(now);
                 g.first_post_reconnect_t_rx_ns = Some(at);
                 sink.coverage(
                     &json!({"event":"GAP_BOUNDARY", "timestamp_utc":utc_iso(now),
@@ -151,6 +177,21 @@ impl ObserverCore {
             }
         }
         Ok(())
+    }
+
+    /// Measured outage interval; a stalled feed starts at the last proven slot,
+    /// not only when the idle timer finally diagnoses it. Missing bounds stay UNKNOWN.
+    pub(super) fn transport_outage_ns(&self, end: u64) -> Option<u64> {
+        let mut total = 0u64;
+        let mut previous_end = 0;
+        for g in &self.gaps {
+            let start = g.last_healthy_t_rx_ns.or(g.gap_t_rx_ns)?;
+            let stop = g.first_post_reconnect_t_rx_ns.unwrap_or(end).min(end);
+            let start = start.max(previous_end);
+            total = total.saturating_add(stop.saturating_sub(start));
+            previous_end = previous_end.max(stop);
+        }
+        Some(total)
     }
 
     /// This API refuses to invoke its fetcher until capture has stopped. Production
@@ -269,7 +310,7 @@ impl ObserverCore {
                 "gap_index":index, "detail":g}),
             )?;
         }
-        if self.stats.gap_count == self.gap_stats.gap_recovered {
+        if self.coverage_complete() {
             self.incomplete_reasons.remove("GAP");
         }
         Ok(())
@@ -464,6 +505,9 @@ impl RpcFetcher {
         deadline: Instant,
         timeout_ms: u64,
     ) -> Result<Value, &'static str> {
+        let deadline = deadline.min(Instant::now() + Duration::from_millis(timeout_ms));
+        let _permit = darkbot_solana::provider::shared()
+            .acquire(darkbot_solana::provider::Workload::History, deadline)?;
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err("RECOVERY_BUDGET");
@@ -481,12 +525,7 @@ impl RpcFetcher {
                     "RPC_TRANSPORT"
                 }
             })?;
-        if response.status().as_u16() == 429 {
-            return Err("RPC_RATE_LIMIT");
-        }
-        if !response.status().is_success() {
-            return Err("RPC_HTTP_ERROR");
-        }
+        darkbot_solana::provider::observe_response(&response, method)?;
         const LIMIT: u64 = 64 * 1024 * 1024;
         let mut bytes = Vec::new();
         response

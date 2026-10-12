@@ -134,6 +134,14 @@ pub enum IngressEvent {
     /// [C0-MO] `logsSubscribe` notification.
     Logs(LogsObserved),
     Health(SourceHealth),
+    /// Transport evidence only; never releases canonical state or authorizes trading.
+    Transport {
+        state: &'static str,
+        code: &'static str,
+        attempt: u32,
+        last_slot: Option<u64>,
+        t_rx_ns: u64,
+    },
     Slot(SlotUpdate),
     /// Neuer Root (Finalisierung) — Fork-Policy in S2.
     Root { slot: u64, source: SourceKind, t_rx_ns: u64 },
@@ -157,7 +165,8 @@ impl IngressEvent {
             IngressEvent::Root { t_rx_ns, .. }
             | IngressEvent::Reconnected { t_rx_ns, .. }
             | IngressEvent::Gap { t_rx_ns, .. }
-            | IngressEvent::Fatal { t_rx_ns, .. } => *t_rx_ns,
+            | IngressEvent::Fatal { t_rx_ns, .. }
+            | IngressEvent::Transport { t_rx_ns, .. } => *t_rx_ns,
         }
     }
 }

@@ -1,3 +1,17 @@
+## P2 continuation — 2026-10-12
+
+P2 transport/provider implementation is **LOCAL PASS**, with 120 s / 8-attempt
+outage recovery, advancing-slot readiness/liveness, coalesced gap intervals,
+shared bounded provider admission/429 cooldown and early incomplete shutdown.
+Existing state/recovery/economics/ObserveOnly paths reused. No Mainnet measurement
+or submission performed. P4–P6 and provider qualification remain OPEN.
+
+Evidence, exact commands, known limits and consumer inventory:
+[`evidence/C0E1_P2_20261012/README.md`](evidence/C0E1_P2_20261012/README.md).
+Current resume status: `MEASUREMENT_LEDGER.md` (P2 entry at the top).
+
+---
+
 ## P3 — UTC historical index verification, 2026-10-11
 
 **P3 IMPLEMENTED / LOCAL TECHNICAL PASS. Real five-hour historical qualification: OPEN (`RPC_RATE_LIMIT`), not a zero-liquidation result. Stop after this package; next P2.**

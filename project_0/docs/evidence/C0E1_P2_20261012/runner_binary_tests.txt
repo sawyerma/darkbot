@@ -1,0 +1,18 @@
+   Compiling darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-solana)
+   Compiling darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-project0)
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-runner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.42s
+     Running unittests src/main.rs (project_0/native/target/debug/deps/p0_longtail-ad9b85509db167ea)
+
+running 9 tests
+test integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+test integration_probe_tests::only_one_target_is_dispatched_per_idle_turn ... ok
+test integration_probe_tests::oracle_detect_returns_latest_coalesced_work_once ... ok
+test integration_probe_tests::candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token ... ok
+test integration_probe_tests::oracle_detect_skips_stale_order_entries ... ok
+test integration_probe_tests::shadow_error_category_never_formats_secret_payload ... ok
+test integration_probe_tests::target_waits_unsigned_until_worker_is_idle ... ok
+test integration_probe_tests::candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+test integration_probe_tests::candidate_fairness_repeat_admission_remains_bounded ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s

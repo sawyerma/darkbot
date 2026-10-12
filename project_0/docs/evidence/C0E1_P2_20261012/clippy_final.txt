@@ -1,0 +1,339 @@
+warning: this `map_or` can be simplified
+  --> crates/darkbot-solana/src/state/fork.rs:25:16
+   |
+25 |             if self.root.map_or(true, |r| slot >= r) {
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unnecessary_map_or
+   = note: `#[warn(clippy::unnecessary_map_or)]` on by default
+help: use is_none_or instead
+   |
+25 -             if self.root.map_or(true, |r| slot >= r) {
+25 +             if self.root.is_none_or(|r| slot >= r) {
+   |
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> crates/darkbot-solana/src/submit/rpc.rs:64:10
+   |
+64 |     ) -> Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), SubmitError> {
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#type_complexity
+   = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: manually reimplementing `div_ceil`
+  --> crates/darkbot-solana/src/tx/mod.rs:59:9
+   |
+59 |         ((self.priority_micro_lamports_per_cu as u128 * self.compute_unit_limit as u128 + 999_999) / 1_000_000u128) as u64
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.div_ceil()`: `(self.priority_micro_lamports_per_cu as u128 * self.compute_unit_limit as u128).div_ceil(1_000_000u128)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#manual_div_ceil
+   = note: `#[warn(clippy::manual_div_ceil)]` on by default
+
+warning: `darkbot-solana` (lib) generated 3 warnings (run `cargo clippy --fix --lib -p darkbot-solana` to apply 2 suggestions)
+warning: manual implementation of `.is_multiple_of()`
+   --> crates/darkbot-solana/src/state/recovery.rs:389:30
+    |
+389 |             let missing = if n % 2 == 0 { vec![(Pubkey::new_unique(), 10)] } else { vec![] };
+    |                              ^^^^^^^^^^ help: replace with: `n.is_multiple_of(2)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#manual_is_multiple_of
+    = note: `#[warn(clippy::manual_is_multiple_of)]` on by default
+
+warning: field assignment outside of initializer for an instance created with Default::default()
+   --> crates/darkbot-solana/src/tx/mod.rs:358:47
+    |
+358 |         let mut limits = TxLimits::default(); limits.max_bytes_v1 = wire.len();
+    |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: consider initializing the variable with `tx::TxLimits { max_bytes_v1: wire.len(), ..Default::default() }` and removing relevant reassignments
+   --> crates/darkbot-solana/src/tx/mod.rs:358:9
+    |
+358 |         let mut limits = TxLimits::default(); limits.max_bytes_v1 = wire.len();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#field_reassign_with_default
+    = note: `#[warn(clippy::field_reassign_with_default)]` on by default
+
+warning: `darkbot-solana` (lib test) generated 5 warnings (3 duplicates) (run `cargo clippy --fix --lib -p darkbot-solana --tests` to apply 1 suggestion)
+warning: manually reimplementing `div_ceil`
+  --> crates/darkbot-project0/src/economics.rs:64:19
+   |
+64 |     let elapsed = ((num + span as u128 - 1) / span as u128) as u64;
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.div_ceil()`: `num.div_ceil(span as u128)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#manual_div_ceil
+   = note: `#[warn(clippy::manual_div_ceil)]` on by default
+
+warning: this function has too many arguments (9/7)
+  --> crates/darkbot-project0/src/economics.rs:72:1
+   |
+72 | / pub fn t_profitable(
+73 | |     now_unix_s: u64,
+74 | |     tagged_at: Option<u64>,
+75 | |     fee_state_max_bps: u64,
+...  |
+81 | |     min_profit: i128,
+82 | | ) -> Option<u64> {
+   | |________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#too_many_arguments
+   = note: `#[warn(clippy::too_many_arguments)]` on by default
+
+warning: writing `&mut Vec` instead of `&mut [_]` involves a new object where a slice will do
+  --> crates/darkbot-project0/src/execution.rs:51:41
+   |
+51 | pub fn priority_fee_percentile(samples: &mut Vec<u64>, p: f64, cap: u64) -> Option<u64> {
+   |                                         ^^^^^^^^^^^^^ help: change this to: `&mut [u64]`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#ptr_arg
+   = note: `#[warn(clippy::ptr_arg)]` on by default
+
+warning: this `map_or` can be simplified
+   --> crates/darkbot-project0/src/execution.rs:105:9
+    |
+105 |         self.targets.get(account).map_or(true, |t| now >= t.next_allowed)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unnecessary_map_or
+    = note: `#[warn(clippy::unnecessary_map_or)]` on by default
+help: use is_none_or instead
+    |
+105 -         self.targets.get(account).map_or(true, |t| now >= t.next_allowed)
+105 +         self.targets.get(account).is_none_or(|t| now >= t.next_allowed)
+    |
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> crates/darkbot-project0/src/sizing.rs:432:10
+    |
+432 |     ) -> Result<(Vec<Position>, Vec<Position>, Vec<EmodeConfig>), String> {
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#type_complexity
+    = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: explicit call to `.into_iter()` in function argument accepting `IntoIterator`
+   --> crates/darkbot-project0/src/sizing.rs:534:50
+    |
+534 |         let reconciled = reconcile_emode_configs(emodes.into_iter(), RequirementType::Maintenance);
+    |                                                  ^^^^^^------------
+    |                                                        |
+    |                                                        help: consider removing the `.into_iter()`
+    |
+note: this parameter accepts any `IntoIterator`, so you don't need to call `.into_iter()`
+   --> /Users/sawyer_ma/.cargo/git/checkouts/marginfi-v2-8cb09da044851022/33c6798/type-crate/src/types/emode.rs:269:8
+    |
+269 |     I: IntoIterator<Item = EmodeConfig>,
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#useless_conversion
+    = note: `#[warn(clippy::useless_conversion)]` on by default
+
+warning: manually reimplementing `div_ceil`
+   --> crates/darkbot-project0/src/schedule.rs:121:16
+    |
+121 |     let secs = (health_value as u128 + per_second_decay - 1) / per_second_decay; // ceil
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider using `.div_ceil()`: `(health_value as u128).div_ceil(per_second_decay)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#manual_div_ceil
+
+warning: `darkbot-project0` (lib) generated 7 warnings (run `cargo clippy --fix --lib -p darkbot-project0` to apply 4 suggestions)
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-runner)
+warning: you are using an explicit closure for copying elements
+   --> crates/darkbot-runner/src/builder.rs:390:13
+    |
+390 | /             bytemuck::try_from_bytes::<Bank>(&data[8..need])
+391 | |                 .map(|b| *b)
+    | |____________________________^ help: consider calling the dedicated `copied` method: `bytemuck::try_from_bytes::<Bank>(&data[8..need]).copied()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#map_clone
+    = note: `#[warn(clippy::map_clone)]` on by default
+
+warning: accessing first element with `rewards.get(0)`
+   --> crates/darkbot-runner/src/builder.rs:566:30
+    |
+566 |                     let r1 = rewards.get(0).copied();
+    |                              ^^^^^^^^^^^^^^ help: try: `rewards.first()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#get_first
+    = note: `#[warn(clippy::get_first)]` on by default
+
+warning: this `map_or` can be simplified
+   --> crates/darkbot-runner/src/pipeline.rs:562:24
+    |
+562 |                     if rec.net_profit.map_or(true, |current| net > current) {
+    |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unnecessary_map_or
+    = note: `#[warn(clippy::unnecessary_map_or)]` on by default
+help: use is_none_or instead
+    |
+562 -                     if rec.net_profit.map_or(true, |current| net > current) {
+562 +                     if rec.net_profit.is_none_or(|current| net > current) {
+    |
+
+warning: this `map_or` can be simplified
+   --> crates/darkbot-runner/src/pipeline.rs:580:31
+    |
+580 |                   let replace = best_actionable.as_ref().map_or(true, |(_, _, current, _)| {
+    |  _______________________________^
+581 | |                     economics::compare_evaluations(eval, *current).is_gt()
+582 | |                 });
+    | |__________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unnecessary_map_or
+help: use is_none_or instead
+    |
+580 -                 let replace = best_actionable.as_ref().map_or(true, |(_, _, current, _)| {
+580 +                 let replace = best_actionable.as_ref().is_none_or(|(_, _, current, _)| {
+    |
+
+warning: this `map_or` can be simplified
+   --> crates/darkbot-runner/src/pipeline.rs:592:31
+    |
+592 |                   let replace = best_probe
+    |  _______________________________^
+593 | |                     .as_ref()
+594 | |                     .map_or(true, |(cur_plan, cur_built, _, _)| {
+595 | |                         candidate_key
+...   |
+601 | |                     });
+    | |______________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unnecessary_map_or
+help: use is_none_or instead
+    |
+594 -                     .map_or(true, |(cur_plan, cur_built, _, _)| {
+594 +                     .is_none_or(|(cur_plan, cur_built, _, _)| {
+    |
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> crates/darkbot-runner/src/remote_workers.rs:62:17
+   |
+62 |     pub result: Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), String>,
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#type_complexity
+   = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> crates/darkbot-runner/src/remote_workers.rs:80:17
+   |
+80 |     pub result: Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), String>,
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#type_complexity
+
+warning: manual implementation of `.is_multiple_of()`
+   --> crates/darkbot-runner/src/market_reconcile.rs:453:20
+    |
+453 |                 || self.reconciliation.slots_fetched % 50 == 0
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace with: `self.reconciliation.slots_fetched.is_multiple_of(50)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#manual_is_multiple_of
+    = note: `#[warn(clippy::manual_is_multiple_of)]` on by default
+
+warning: large size difference between variants
+   --> crates/darkbot-runner/src/econ.rs:177:1
+    |
+177 | /  pub enum Evidence {
+178 | |      Market(MarketEvent),
+    | |      ------------------- the second-largest variant contains at least 152 bytes
+179 | |      CanonicalMarket(Box<crate::market_observer::truth::TruthEvent>),
+180 | |      Slot {
+...   |
+195 | |/     MarketCounters {
+196 | ||         at_ns: u64,
+197 | ||         before: crate::market_observer::MarketStats,
+198 | ||         after: Box<crate::market_observer::MarketStats>,
+199 | ||     },
+    | ||_____- the largest variant contains at least 376 bytes
+200 | |      ShadowStats(Value),
+201 | |  }
+    | |__^ the entire enum is at least 376 bytes
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#large_enum_variant
+    = note: `#[warn(clippy::large_enum_variant)]` on by default
+help: consider boxing the large fields or introducing indirection in some other way to reduce the total size of the enum
+    |
+197 -         before: crate::market_observer::MarketStats,
+197 +         before: Box<crate::market_observer::MarketStats>,
+    |
+
+warning: this call to `clone` can be replaced with `std::slice::from_ref`
+  --> crates/darkbot-runner/src/lookup_tables.rs:98:28
+   |
+98 |         let tables = merge(&[table.clone()], &[conflicting]);
+   |                            ^^^^^^^^^^^^^^^^ help: try: `std::slice::from_ref(&table)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cloned_ref_to_slice_refs
+   = note: `#[warn(clippy::cloned_ref_to_slice_refs)]` on by default
+
+warning: `darkbot-runner` (lib) generated 9 warnings (run `cargo clippy --fix --lib -p darkbot-runner` to apply 6 suggestions)
+warning: very complex type used. Consider factoring parts into `type` definitions
+    --> crates/darkbot-runner/src/market_observer.rs:4063:26
+     |
+4063 |         let mut layouts: Vec<(usize, usize, usize, Result<usize, usize>, usize)> = Vec::new();
+     |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#type_complexity
+
+warning: `darkbot-runner` (lib test) generated 11 warnings (9 duplicates)
+warning: manual implementation of `.is_multiple_of()`
+  --> crates/darkbot-runner/src/bin/p0-prewarm-atas.rs:52:27
+   |
+52 |     if args.is_empty() || args.len() % 2 != 0 {
+   |                           ^^^^^^^^^^^^^^^^^^^ help: replace with: `!args.len().is_multiple_of(2)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#manual_is_multiple_of
+   = note: `#[warn(clippy::manual_is_multiple_of)]` on by default
+
+warning: `darkbot-runner` (bin "p0-prewarm-atas") generated 1 warning (run `cargo clippy --fix --bin "p0-prewarm-atas" -p darkbot-runner` to apply 1 suggestion)
+warning: `darkbot-runner` (bin "p0-prewarm-atas" test) generated 1 warning (1 duplicate)
+warning: this function has too many arguments (9/7)
+   --> crates/darkbot-runner/src/main.rs:205:1
+    |
+205 | / fn enqueue_or_coalesce_candidate(
+206 | |     account: Pubkey,
+207 | |     t_rx_ns: u64,
+208 | |     event_slot: u64,
+...   |
+214 | |     max_pending: &mut usize,
+215 | | ) -> CandidateQueueAdmission {
+    | |____________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#too_many_arguments
+    = note: `#[warn(clippy::too_many_arguments)]` on by default
+
+warning: this function has too many arguments (9/7)
+   --> crates/darkbot-runner/src/main.rs:234:1
+    |
+234 | / fn enqueue_oracle_accounts(
+235 | |     accounts: impl IntoIterator<Item = Pubkey>,
+236 | |     t_rx_ns: u64,
+237 | |     event_slot: u64,
+...   |
+243 | |     max_pending: &mut usize,
+244 | | ) -> usize {
+    | |__________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#too_many_arguments
+
+warning: unneeded `return` statement
+   --> crates/darkbot-runner/src/main.rs:637:17
+    |
+637 | /                 return bank_from_state(&view, &program, k)
+638 | |                     .filter(|b| b.group == group)
+639 | |                     .map(|_| *k);
+    | |________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#needless_return
+    = note: `#[warn(clippy::needless_return)]` on by default
+help: remove `return`
+    |
+637 ~                 bank_from_state(&view, &program, k)
+638 +                     .filter(|b| b.group == group)
+639 ~                     .map(|_| *k)
+    |
+
+warning: `darkbot-runner` (bin "p0-longtail") generated 3 warnings (1 duplicate)
+warning: `darkbot-runner` (bin "p0-longtail" test) generated 3 warnings (2 duplicates) (run `cargo clippy --fix --bin "p0-longtail" -p darkbot-runner --tests` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.67s

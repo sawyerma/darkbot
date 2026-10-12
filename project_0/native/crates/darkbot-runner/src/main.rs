@@ -55,7 +55,6 @@ use marginfi_type_crate::{
 };
 #[cfg(feature = "crate_health")]
 use rayon::prelude::*;
-use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
     account::Account,
@@ -572,7 +571,12 @@ fn run_shadow(
 
     // [FIX-78] Bootstrap only the configured group's Banks first. Full-program GPA was ~387 MB
     // in C0 and is unnecessary for dependency discovery.
-    let dep_rpc = RpcClient::new(config::require("P0_RPC_URL")?);
+    let dep_rpc = darkbot_solana::provider::rpc_client(
+        config::require("P0_RPC_URL")?,
+        Duration::from_secs(30),
+        Default::default(),
+        darkbot_solana::provider::Workload::Bootstrap,
+    );
 
     // [FIX-131] Loader-v3 upgrades mutate the ProgramData account, not the executable
     // Program account. Pin its current content hash at startup and subscribe it as a required
@@ -719,7 +723,12 @@ fn run_shadow(
                          halt: IngressHalt|
      -> std::io::Result<Shutdown> {
         let session = Shutdown::new();
-        let src = WsRpcControlSource::new(WsRpcConfig::new(ws_url_for_spawn.clone(), sub), clock);
+        let mut ws_config = WsRpcConfig::new(ws_url_for_spawn.clone(), sub);
+        if econ.is_some() {
+            ws_config.recovery_budget = Some(Duration::from_secs(120));
+        }
+        let src = WsRpcControlSource::new(ws_config, clock);
+        let failure_handle = econ.clone();
         let sd = session.clone();
         let sw = slot_watch_for_spawn.clone();
         std::thread::Builder::new()
@@ -727,6 +736,14 @@ fn run_shadow(
             .spawn(move || {
                 if let Err(e) = src.run(producer, sd, halt, sw) {
                     eprintln!("ingress ended: {}", e);
+                    if let Some(h) = failure_handle {
+                        h.shared
+                            .shadow_failed
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        h.shared
+                            .abort
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
                 }
             })?;
         Ok(session)
@@ -745,7 +762,12 @@ fn run_shadow(
         return Err("P0_SNAPSHOT_RPC_TIMEOUT_SECS must be 30..=180".into());
     }
     eprintln!("snapshot: rpc_timeout_s={snapshot_rpc_timeout_secs}");
-    let rpc = RpcClient::new_with_timeout(rpc_url.clone(), Duration::from_secs(snapshot_rpc_timeout_secs));
+    let rpc = darkbot_solana::provider::rpc_client(
+        rpc_url.clone(),
+        Duration::from_secs(snapshot_rpc_timeout_secs),
+        Default::default(),
+        darkbot_solana::provider::Workload::Bootstrap,
+    );
     let mut st = StateCore::new(buffer_cap);
     // [FIX-96] Production recovery waits for confirmed WSS/root catch-up before
     // Snapshot-B reconciliation. This prevents false dirty reconciles when RPC Snapshot B
@@ -864,7 +886,12 @@ fn run_shadow(
     // [FIX-1] Pipeline-Bausteine: Keypair (nur signieren, Shadow sendet nicht), Blockhash-Cache,
     // Safety aus Env (Limits sind Konfiguration), Allowlist aus Source, Submitter nur für Simulation.
     let blockhash = BlockhashCache::new();
-    let bh_rpc = RpcClient::new(config::require("P0_RPC_URL")?);
+    let bh_rpc = darkbot_solana::provider::rpc_client(
+        config::require("P0_RPC_URL")?,
+        Duration::from_secs(30),
+        Default::default(),
+        darkbot_solana::provider::Workload::LiveRead,
+    );
     let bh_cache = blockhash.clone();
     let bh_clock = clock;
     let bh_econ = econ.clone();
@@ -3749,6 +3776,7 @@ fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'static st
 }
 
 fn run_econ4h() -> Result<(), String> {
+    darkbot_solana::provider::enable_measurement_budget();
     use darkbot_runner::{econ, market_observer};
     use std::sync::atomic::Ordering;
     let clock = Clock::new();

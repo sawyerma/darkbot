@@ -422,3 +422,95 @@ fn complete_canonical_window_is_authority_despite_transport_gap_telemetry() {
         false
     );
 }
+
+#[test]
+fn p2_527_failures_coalesce_without_losing_raw_evidence_or_claiming_recovery() {
+    let mut c = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
+    c.start_observation(0, 10_000);
+    let mut s = VecSink::default();
+    for n in 0..527 {
+        gap_open(&mut c, &mut s, Some(10), 10 + n * 3);
+        gap_reconnect(&mut c, &mut s, 11 + n * 3); // ACKs alone don't close an interval
+    }
+    assert_eq!(c.gaps.len(), 1);
+    assert_eq!(s.cov.iter().filter(|v| v["event"] == "GAP").count(), 527);
+    let v = c.summary(&ctx(true, false, 4.0));
+    assert_eq!(v["gap_count_raw"], 527);
+    assert_eq!(v["gaps_merged"], 526);
+    assert_eq!(v["gap_unrecovered"], 1);
+    assert!(!c.incomplete_reasons.contains("GAP_STATE_CAPACITY"));
+    assert!(!c.coverage_complete());
+    gap_slot_frame(&mut c, &mut s, 12, 2000);
+    c.stop_observation();
+    c.recover_gaps(&mut |slot, _| Ok(gap_block(slot, vec![])), &mut s)
+        .unwrap();
+    assert!(c.coverage_complete()); // finalized backfill, not ACKs, repairs this interval
+    assert_eq!(c.gap_stats.gap_recovered, 1);
+}
+
+#[test]
+fn p2_failure_after_ack_invalidates_pending_restoration() {
+    let mut c = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
+    let mut s = VecSink::default();
+    gap_open(&mut c, &mut s, None, 10);
+    gap_reconnect(&mut c, &mut s, 20);
+    gap_open(&mut c, &mut s, Some(10), 21);
+    gap_slot_frame(&mut c, &mut s, 12, 30);
+    let v = c.summary(&ctx(true, false, 4.0));
+    assert_eq!(v["gaps"][0]["from_slot"], Value::Null);
+    assert_eq!(v["gaps"][0]["first_post_reconnect_slot"], Value::Null);
+    assert_eq!(v["gaps"][0]["raw_failures"], 2);
+}
+
+#[test]
+fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
+    let root = std::env::temp_dir().join(format!(
+        "p2-abort-{}-{}",
+        std::process::id(),
+        Clock::new().unix_ns(0)
+    ));
+    let cfg = MarketConfig::from_lookup(
+        &env_of(&[
+            ("P0_WS_URL", "ws://127.0.0.1:1"),
+            ("P0_RPC_URL", "http://127.0.0.1:1"),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET,
+            ),
+            ("P0_MARKET_SOURCE", "logs"),
+            ("P0_MARKET_OUT_DIR", root.to_str().unwrap()),
+            ("P0_MARKET_RUN_ID", "abort"),
+        ]),
+        0,
+    )
+    .unwrap();
+    fs::create_dir_all(&cfg.run_dir).unwrap();
+    let mut sink = JsonlSink::create(&cfg.run_dir).unwrap();
+    let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
+    core.start_observation(0, 18_000_000_000_000);
+    core.stop_observation();
+    let outcome = CaptureOutcome {
+        process_started_unix_s: 0,
+        ready_unix_s: Some(0),
+        window: Some((0, 18_000_000_000_000)),
+        capture_end_ns: 120_000_000_000,
+        observation_end_unix_s: 120,
+        stop_reason: "INGRESS_THREAD_ENDED",
+        drain_complete: true,
+        write_error: None,
+    };
+    let before = darkbot_solana::provider::shared().snapshot()["requests"].clone();
+    let (summary, _, error) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
+    assert!(error.is_none());
+    assert_eq!(summary["market_capture_complete"], false);
+    assert_eq!(summary["actual_observation_seconds"], 120.0);
+    assert_eq!(
+        summary["full_slot_reconciliation"]["error"],
+        "VERIFICATION_DEFERRED_AFTER_ABORT"
+    );
+    assert_eq!(
+        darkbot_solana::provider::shared().snapshot()["requests"],
+        before
+    );
+    fs::remove_dir_all(root).unwrap();
+}

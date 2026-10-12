@@ -1,0 +1,25 @@
+{
+  "base_commit": "d40d89d8fef98e69c505141ea17dc4a7a3cde658",
+  "build_source": "local tested candidate before commit; hashes below",
+  "source_sha256": {
+    "project_0/native/Cargo.lock": "462acd00c86e2e3387ea8f1b1f9016c57720156e3cd7912514e9ffdc35ae01c5",
+    "project_0/native/crates/darkbot-runner/src/main.rs": "c2620f83525b5da9d58e773200c2cee3e94c25c2759fe47c93ac19fe74413b98",
+    "project_0/native/crates/darkbot-runner/src/market_gap.rs": "17bc26826b64e8e9e88aa84eb4ad382e8ef8cea82b4498ca26a88c7c13494f5b",
+    "project_0/native/crates/darkbot-runner/src/market_gap_tests.rs": "d83a6e016f9d85d27f0cf1c30824b9e30c9c2c4598295f9bca52fe55d4f55123",
+    "project_0/native/crates/darkbot-runner/src/market_observer.rs": "e2201026b5dd511a8cbe3215be899c949a4e7bdf3279e765c29759ba2ef50226",
+    "project_0/native/crates/darkbot-runner/src/market_paths.rs": "87ff450f97749bf83fcca78a9631d281bf7366b8600053cf34d9ffeed4886441",
+    "project_0/native/crates/darkbot-runner/src/remote_workers.rs": "0aac992e910633e40ea9a471af3417d5f4d842dddf4f4c0ce41b68645e6190fc",
+    "project_0/native/crates/darkbot-solana/Cargo.toml": "8fd609ec8c68ecb0b2613213fa9a785c1af02aa1443dfa803360e04edaabfa89",
+    "project_0/native/crates/darkbot-solana/src/ingress/mod.rs": "352b60dc584e175a9a5aba9bb7b72a2037729f177dfa8bc176bd85e46a5f9939",
+    "project_0/native/crates/darkbot-solana/src/ingress/ws_rpc.rs": "df5fdf1e8f6ed906501012759d2bdd3904593bab57b4e691d2e6bd42308d4a8d",
+    "project_0/native/crates/darkbot-solana/src/ingress/ws_rpc_recovery_tests.rs": "738fb496041dd7f95441ad48fefdc1232247c08f6f37bef2eb9c4e3f0ec6c772",
+    "project_0/native/crates/darkbot-solana/src/lib.rs": "040c2de133c5c9bf5ee10756b37a13cf01f531dfbaafc6800d4a4347fab9266c",
+    "project_0/native/crates/darkbot-solana/src/provider.rs": "21e73600f5c2b2db7660aeba934e94714de1c76402e80778fe361477aa094d92",
+    "project_0/native/crates/darkbot-solana/src/state/mod.rs": "04cc8ec75bc76cac7f3971c0f9bae3deeea84af577f28478c94a3d6762e2efd2",
+    "project_0/native/crates/darkbot-solana/src/submit/rpc.rs": "a3520a6cbebf7391ee766456f4d3fa531dd1529a2153530647f1cb8c1d624fc8"
+  },
+  "release_binary_sha256": {
+    "p0-longtail": "e6ce7903c2f332a569802474fe030e25a3f6c6b31b9df406bfa51bc1ba764902",
+    "p0-measurement-plan": "7c876a91ac0691b45580893d35112acde80fbe9a72800ac0cb74cf28d8208d82"
+  }
+}
