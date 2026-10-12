@@ -4,6 +4,25 @@ IFS=$'\n\t'
 
 cd "$(git rev-parse --show-toplevel)"
 
+# A pruned RPC cannot serve one frozen historical parent indefinitely.
+# Restart the ENTIRE independent search with a new preflight; never mix blocks.
+if [[ "${DARKBOT_G07_SEARCH_INNER:-}" != YES ]]; then
+  mkdir -p bsc/local_diagnostics
+  for restart in 0 1 2; do
+    log="$(mktemp bsc/local_diagnostics/g07-controller.XXXXXX.log)"
+    if DARKBOT_G07_SEARCH_INNER=YES bash "$0" >"$log" 2>&1; then
+      cat "$log"
+      exit 0
+    fi
+    cat "$log"
+    if grep -Eq "missing trie node|state .* unavailable|pruned state" "$log" && (( restart < 2 )); then
+      echo "RPC_PRUNED_STATE_RESTART=$((restart + 1))/2; restarting entire search with a fresh block"
+      continue
+    fi
+    echo "STOP: search failed; controller evidence: $log" >&2
+    exit 5
+  done
+fi
 source bsc/secrets.env
 export BSC_MAINNET_RPC_HTTPS="${BSC_MAINNET_RPC_HTTPS:-https://bsc-dataseed.bnbchain.org}"
 # Current read-only gas suggestion; builder floor from frozen evidence.
