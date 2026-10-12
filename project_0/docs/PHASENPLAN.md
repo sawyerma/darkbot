@@ -1673,7 +1673,7 @@ Race-LIVE = BLOCKED
 Long-Tail/Premium-LIVE = DARF WEITERLAUFEN
 ```
 
-Ein Paid Geyser wird **nicht** allein deshalb gekauft. Er kommt erst nach positivem wirtschaftlichem Nachweis.
+**FREE_ONLY-Override v4.5.1:** Ein Paid Geyser ist im aktiven Profil **immer gesperrt**; selbst ein positiver erwarteter Mehrgewinn erlaubt keine operative Aktivierung. Prüfung und Kostenvergleich sind nur kontrafaktisch. Ein Wechsel benötigt eine separate ausdrückliche Benutzerentscheidung und eine versionierte Änderung von §0.4; bei fehlender kostenloser qualifizierter Binary-Source bleibt Race-LIVE BLOCKED.
 
 ## S1.3 LONG-TAIL/PREMIUM PRODUCTION — `WsRpcControlSource`
 
@@ -1982,13 +1982,13 @@ build
 
 `S3-CORE PASS` ist die Voraussetzung für P2 im First-Euro-Pfad.
 
-## S3.R — RACE EXTENSIONS — nur nach `S1-RACE PASS`
+## S3.R — RACE EXTENSIONS — Vorbereitungen parallel erlaubt; Race-Promotion nur nach `S1-RACE PASS`
 
-Diese Tickets blockieren P2/P3/P4A/P5/T/P8-LT nicht.
+**Zweistufiger Gate-Vertrag v4.5.1:** Unabhängig von `S1-RACE PASS` dürfen FREE_ONLY-Zugangs-/Capability-Prüfung für Jito (ohne bezahlten Vertrag), Offline-Adapter-/Parser-/Serialization-Tests, Mock-Benchmarks, Prewarm-Design, deterministische Bench-Harnesses und kontrollierte read-only Netzwerkdiagnostik parallel laufen. Keine LIVE-Submission, keine echten kostenpflichtigen Requests, keine vorgezogene Race-Primary-Promotion. Produktiver Race-gRPC-/Prewarm-Einsatz, echte Race-Benchmarks unter Mainnet-Last und Race-LIVE bleiben an `S1-RACE PASS` und die bestehenden Submission-/Safety-Gates gebunden. Diese Tickets blockieren P2/P3/P4A/P5/T/P8-LT nicht.
 
 ### `JitoGrpcSubmitter`
 
-Erst bauen/messen, wenn ein qualifizierter Race-Ingress existiert.
+**Vorarbeit vor `S1-RACE PASS`:** Kostenlosen Zugang/Capability prüfen, Adapter gegen lokale Fixtures/Mocks bauen und dessen API-/Encoding-/Version-/Tip-Semantik offline testen. **Produktive Race-Integration und echte Landingqualifikation erst nach `S1-RACE PASS`.**
 
 Qualifikation:
 - Access/Auth;
@@ -2003,7 +2003,7 @@ Qualifikation:
 
 ### Race Prewarm Manager
 
-Erst nach `S1-RACE PASS`:
+Offline-/Mock-Design und lokale Worker-/Reconnection-Tests sind vor `S1-RACE PASS` parallel erlaubt. Erst nach `S1-RACE PASS` als realer produktiver Race-Prewarm:
 - Jito gRPC connections;
 - block-engine region state;
 - Race submission buffers/queues;
@@ -3741,7 +3741,7 @@ Aus echten Daten bestimmen, was zusätzlichen Profit erzeugt.
 
 ## Provider Economics
 
-Für jede optionale bezahlte Komponente:
+Für jede optional betrachtete bezahlte Komponente **ausschließlich kontrafaktisch**, nicht als FREE_ONLY-Ausführungsfreigabe:
 
 ```text
 incremental_net_value
@@ -3756,7 +3756,7 @@ zusätzlicher realisierter/realistisch attribuierbarer Profit
 - Abhängigkeitskosten
 ```
 
-Nur bei positivem, relevantem Wert einsetzen.
+Im aktiven **FREE_ONLY**-Betrieb **nicht einsetzen**. Auch ein positiver `incremental_net_value` ist ausschließlich eine Messgröße für eine mögliche spätere, separat ausdrücklich vom Benutzer freizugebende Kostenpolitikänderung. Kein automatischer Tarif-/Providerwechsel und kein versteckter Paid-Routing-/RPC-/Geyser-Fallback.
 
 ## p(win)
 
@@ -3982,10 +3982,10 @@ prüfen, in dieser Reihenfolge:
 
 1. Filter/Region/Provider des bestehenden Mainnet-Geyser optimieren;
 2. besserer kostenloser/bereits verfügbarer Mainnet-Binary-Feed;
-3. Paid Geyser nur bei positivem incremental net value;
-4. eigener Geyser / validatornaher Aufbau;
-5. eigener Node / Region;
-6. **erst danach pre-execution / Shred / Deshred**, wenn Geyser nachweislich nicht reicht.
+3. Paid-Geyser-Angebote **nur kontrafaktisch** dokumentieren; unter FREE_ONLY nicht aktivieren;
+4. eigener Geyser / validatornaher Aufbau **nur soweit ohne verpflichtende neue laufende Infrastrukturkosten realisierbar**;
+5. eigener Node / andere Region **nur als bestehende kostenlose Ressource oder nach späterer expliziter Policy-Änderung**, nicht als automatischer Ausbau;
+6. **erst danach pre-execution / Shred / Deshred** bezüglich realer kostenloser Source-Capability untersuchen, wenn Geyser nicht reicht; fehlende freie Capability bleibt BLOCKED.
 
 ### K-INGRESS-PRE — `SubscribeDeshred` Sensor
 
@@ -4130,7 +4130,7 @@ Jito gRPC / staked provider path / full operating cost
 
 - Submission Redundancy derselben signierten TX nur bei sicherer Semantik;
 - Block-Engine-/Region-Nähe;
-- dedizierter Host erst nach Messung;
+- dedizierter Host nur bei bereits kostenlos verfügbarer Ressource; jeder kostenpflichtige Host bleibt unter FREE_ONLY gesperrt, auch bei positiver Messung;
 - Kernel/NIC-Spezialisierung erst als späteste Stufe.
 ## Transaction Version
 
@@ -4206,9 +4206,10 @@ S3-04 RpcSubmitter
 S3-05 JitoSubmitter core
 S3-06 landing reconciliation
 
-S3-R01 JitoGrpcSubmitter                  requires S1-RACE PASS
-S3-R02 race prewarm manager              requires S1-RACE PASS
-S3-R03 submission race benchmark         requires S1-RACE PASS
+S3-R00 Jito FREE_ONLY access/capability, offline adapter + prewarm mock tests   parallel OK / no LIVE
+S3-R01 JitoGrpcSubmitter                  offline preparation OK; production Race requires S1-RACE PASS
+S3-R02 race prewarm manager              offline design/mock OK; production prewarm requires S1-RACE PASS
+S3-R03 submission race benchmark         harness offline OK; Mainnet/Race qualification requires S1-RACE PASS
 
 S4-01 parity corpus
 S4-02 decode/state parity
@@ -4217,6 +4218,21 @@ S4-04 performance baseline
 ```
 
 ## Project 0
+
+**C0-E1 Implementierungstickets (eigene P3–P6-Paketnummern; nicht mit Produkt-P3/P4A/P5/P6 verwechseln):**
+
+```text
+C0E1-P3-M06      start_deleverage six-marker + start/end pairing/protocol fixtures
+C0E1-P4-VC       decouple strict from capture; OFF/INDEX/STRICT proof-status separation
+C0E1-P4-ID       stable capture_run_id, verification_spec_id; separate attempt/result digests
+C0E1-P4-RESUME   bounded strict batches, provider quotas, restart-proof verification
+C0E1-P5-CLI      MeasurementConfigV2, common typed CLI / future frontend contract
+C0E1-P5-REPORT   normalized evidence, four types/six markers, related events, views/formats
+C0E1-P5-AUTO     auto post-capture verification; historical 5h replay without new capture
+C0E1-P6-GATE     identity/resume, 429, evidence invariants, Shadow separation, FREE_ONLY/LIVE safety
+```
+
+**Abnahme je Ticket:** ein nachvollziehbarer Commit, ausführbare Positive-/Negativ-/Fail-Closed-Fixtures, reproduzierbare CLI/Report-Ausgaben, `MEASUREMENT_LEDGER.md` mit PASS/FAIL/NOT_RUN und Beweisgrenzen; P6-C0E1-Master-PASS nie ohne kanonische Gate-Evidence. `C0E1-P4-ID`: Spec-ID muss vor erstem Verifier-RPC feststehen und bei Resume bitidentisch bleiben; Attempt-/Resultat-IDs entstehen separat. `C0E1-P5-REPORT`: vier Related Events dürfen nie zu Liquidationssummen beitragen.
 
 ```text
 P2-01 Project0 RAM model
@@ -4239,6 +4255,8 @@ P4A-03 failed-attempt matrix
 P4A-04 t_profitable
 P4A-05 capital model
 P4A-06 ranking
+P4A-JIT-01 bounded Jupiter-V2 ExactIn shortfall solver; executable out floor + shared quote budget
+P4A-JIT-02 NO_SWAP vs JIT vs ZERO_PREFUND vs PREHELD deterministic executable net/capital tests
 
 P5-01 allowlist enforcement
 P5-02 refresh planner
@@ -4248,6 +4266,7 @@ P5-05 free route
 P5-06 receivership builder
 P5-07 prepared execution plan
 P5-08 staging fixtures
+P5-JIT-01 route/transaction builder integration for JIT ExactIn with allowlist/freshness/simulation
 
 T-01 tag transaction
 T-02 tag state tracking
@@ -4277,6 +4296,9 @@ P8-02 wallet/capital limits
 P8-03 staging live
 P8-04 controlled mainnet
 P8-05 reconciliation
+P8-RES-01 global atomic multi-mint/SOL fee-tip-rent reservation; no double allocation
+P8-RES-02 durable UNKNOWN, crash/restart/landing reconciliation, race/contending targets fixtures
+P8-INV-01 inventory target, minimal rebalance, costs/dust/collateral risk and LIVE gate
 
 P9-01 production metrics
 P9-02 provider review
@@ -4469,12 +4491,13 @@ RACE SUBMISSION:
     UNSTAKED/UNPAIRED DIRECT TPU = NOT RACE-PRIMARY
 
 PAID PROVIDER:
-    NONE REQUIRED BY ARCHITECTURE
-    ONLY AFTER MEASURED POSITIVE INCREMENTAL NET VALUE
+    FREE_ONLY HARD BLOCK / NO AUTOMATIC PAID FALLBACK
+    POSITIVE INCREMENTAL NET VALUE IS CONTRAFACTUAL ONLY
+    POLICY CHANGE REQUIRES EXPLICIT SEPARATE USER AUTHORIZATION
 
 OWN NODE:
     NOT REQUIRED
-    ONLY AFTER MEASURED ECONOMIC CASE
+    NO MANDATORY PAID OPERATION UNDER FREE_ONLY
 
 LIVE:
     NOT ENABLED
@@ -5129,7 +5152,7 @@ P4–P6 bleiben offen; P2-Status melden, danach nächstes Paket abstimmen.
 
 **Endzustand:** Bedienung über eine dynamische Dauer (10m/1h/5h/24h), providerbewusste robuste Laufzeit, früher Fail-closed bei Ausfällen, gezielte historische Marginfi-Index-Liquidationsprüfung einschließlich CPI/LUT, reproduzierbarer automatischer Vergleich gegen Bot und Shadow, separate streng kanonische Completion, Resume nach RPC-429, echte ressourcenbezogene Evidence. **Kein Claim auf alle Probleme behoben oder 5h-Verwertbarkeit vor realem grünen Gate.**
 
-### L. C0-E1 v4.5.1 — Verbindlicher Terminal-, Verifikations- und Frontend-Vertrag (2026-10-12)
+### L. C0-E1 v4.5.1 — Verbindlicher Terminal-, Verifikations- und Frontend-Vertrag (2026-10-12; Konsistenzkorrekturen 2026-10-13)
 
 **Autorität und Status:** Dieser Abschnitt ergänzt Astras Masterauftrag 2026-10-11, insbesondere C0-E1 P3–P6; ältere widersprüchliche Soll-CLI-/Statusbeispiele sind dadurch präzisiert. Er ändert **keine** kanonischen Master-, LIVE- oder Submission-Gates. Bestehende Observer-, P3-Verifier-, Reconciliation-, MeasurementPlan-, Economics- und Shadow-Komponenten **weiterverwenden**, nicht neu bauen. P2 ist auf Remote lokal qualifiziert; P3-Historienprüfung wegen 429 offen; P4–P6 noch nicht qualifiziert. Keine neuen 5h-/24h-Captures ohne Anwenderfreigabe.
 
@@ -5156,9 +5179,13 @@ Aktuell ruft `market_observer::finish_capture()` bei regulärem Abschluss `full_
 
 | ID | Gebundener Inhalt | Invariante |
 | --- | --- | --- |
-| `capture_identity` | Run-ID, geplantes und tatsächlich beobachtetes Fenster, Capture-Source, Version/Pins, Raw-Evidence-Hashes | Neuauswertung oder nachträgliches Strict erzeugt **keinen neuen Capture-Run**. |
-| `verification_identity` | Capture-ID, mode, Decoder-/Protocol-/Provider-/Schema-/Scope-Version, Attempt/Checkpoint und Proof-Ergebnisdigest | Getrennte versionierte Index-/Crosscheck-/Strict-Prüfungen; Resume nur mit kompatibler Identität. |
-| `report_query_identity` | Capture-ID und gewähltes Verification-Ergebnis, Typ-/Marker-/Zeitraum-/Net-/View-/Provenienz-/Format-Filter plus Renderer-Version | Beliebige reproduzierbare Reports, **ohne** Veränderung von Capture-/Verifier-Rohdaten. |
+| `capture_identity` | **Stabile `capture_run_id`** und immutable Start-Spezifikation: geplantes UTC-/monotones Fenster, Capture-Source, RunConfig-/Plan-/Code-/Protokollpins | Run-ID **vor Capture** erzeugen und persistieren; sie wechselt durch Finalizing, zusätzliche Verifikation, Resume oder Report **niemals**. |
+| `verification_identity` | **Stabile `verification_spec_id`** = deterministischer Hash aus `capture_run_id` + unveränderlichem Prüfmodus/-Scope + Decoder-/Protokoll-/Schema-Version + unveränderlicher Provider-Policy bzw. definierter Datenquellenbindung (ohne Secrets) | Weder Checkpoint/Retry/Attempts noch Ergebnisdigest sind Bestandteil dieser stabilen ID. Dieselbe Prüfdefinition kann nach Abbruch wiederaufgenommen werden. |
+| `report_query_identity` | `capture_run_id`, **ausgewählte finale `verification_result_id`**, Reportfilter, View, Provenienz und Report-/Renderer-Version | Jede Ansicht ist reproduzierbar; sie verändert Capture/Proof nicht und behauptet keinen fertigen Verifikationsbeweis, wenn kein finaler Resultatdigest existiert. |
+
+**Zweistufiges Capture-Finalizing:** Zuerst `capture_run_id` + Start-Manifest dauerhaft schreiben, dann Capture/Drain/Originaldaten; erst **nach** abgeschlossenem oder fail-closed gestopptem Capture Hashes/Dateiindex/Integrität in einer unveränderlichen `capture_evidence_manifest`-Finalisierung sichern (unterbrechungsfestes Journal). Der Raw-Evidence-Hash ist **nicht Bestandteil der zuvor vergebenen Run-ID**; zusätzliche Proofs dürfen keine neue Run-ID erzeugen. Der Manifeststatus muss vollständige bzw. unvollständige Live-Coverage beibehalten.
+
+**Verifikations-Lebenszyklus:** `verification_spec_id` bleibt stabil; jede Ausführung erhält eine eigene `verification_attempt_id` mit veränderlichem Cursor, Fortschritt, `Retry-After`, Kosten und Checkpoint. Ein erfolgreiches oder terminal unvollständiges Prüfergebnis erhält separat `verification_result_id` (Proof-/Resultatdigest, Abschlussstatus, Evidence-Scope und Provenienz). Resume prüft Spec-/Schema-/Capture-/Source-Identität und lädt nur den zulässigen Checkpoint; es verändert weder `capture_run_id` noch die stabile Spec-ID. Unveränderliche Resultate werden nicht überschrieben. Ein Report auf unvollständiger Verification ist ausdrücklich als `PROVISIONAL/INCOMPLETE` zu kennzeichnen und darf keinen finalen Proof vortäuschen.
 
 Typisierter, versionierter `MeasurementConfigV2` mit intern getrennten `RunConfig`, `VerificationConfig`, `ReportQuery`. Bereits vorhandener `MeasurementPlan` bleibt alleinige Zeit-/Viertel-Snapshot-/Cutoff-Quelle. Frontend und Terminal benutzen denselben Backend-Vertrag; Bash/React implementieren keine eigene Liquidations-/Economics-Klassifikation. Alte Manifeste werden nicht rückwirkend verändert.
 
@@ -5184,13 +5211,15 @@ Altes `--verify index` nur als Alias desselben Parsers zu `--chain-verify index`
 
 Zielparameter: `--duration` (validierter MeasurementPlan; 10m/1h/5h/24h), `--chain-verify off|index|strict`, `--capture-source logs|transactions`, `--report-types` (vier Arten/all), `--report-markers` (sechs Marker einzeln/all/none), `--report-related-events on|off`, `--report-view summary|liquidations|winners|competition|economics`, `--report-provenance best|live|index|strict|shadow|all`, `--report-from`, `--report-to`, `--report-min-net-usd`, `--format table|json|csv`, `--verify-rps`, `--verify-max-calls`, `--verify-max-seconds`, passende Disk-/RAM-Limits und `--resume-verification`.
 
-**Jeder Reportfilter wirkt nur auf die Ansicht**, niemals auf Rohaufzeichnung, Verifier-Scope, Klassifizierung, gespeicherte Economics oder Trading-MinProfit. Unbekannte Nettoergebnisse bleiben UNKNOWN und werden separat gezählt. Andere Marginfi-Ereignisse separat typisieren, nicht als Liquidationen ausgeben.
+**Jeder Reportfilter wirkt nur auf die Ansicht**, niemals auf Rohaufzeichnung, Verifier-Scope, Klassifizierung, gespeicherte Economics oder Trading-MinProfit. Unbekannte Nettoergebnisse bleiben UNKNOWN und werden separat gezählt.
+
+**`--report-related-events`: vier explizite Marginfi-Nicht-Liquidationsinstruktionen** anhand des gepinnten Programmstands: `drift_claim_bad_debt` (Bad-Debt-Claim), `purge_deleverage_balance` (Bereinigung eines Deleverage-Bestands), `marginfi_account_keeper_close_order` (Keeper-Schließvorgang) und `marginfi_account_init_liq_record` (Anlegen eines Liquidationsrecords). Jede Operation wird in `RELATED_NON_LIQUIDATION` mit eigener Signature/Slot/Instruktionsprovenienz und Erfolg/Fehler/UNKNOWN ausgewiesen; **nie** als eine der vier realisierten Liquidationsarten, nie in Liquidations-/Winner-/Profitzählungen. Besonders `marginfi_account_init_liq_record` darf als Vorbereitung nicht einen Receivership-Erfolg belegen. Der `on/off`-Schalter beeinflusst ausschließlich die Reportansicht; Erfassung und Decoder bleiben vollständig. P3/P5 prüfen exakte gepinnte Discriminators und negative Fixtures; keine bloße Namens-/Logtext-Heuristik.
 
 Nach Capture-Drain/Manifest-Sicherung den Verifier nach Wahl **automatisch** starten (bei `off` keinen historischen Chain-RPC; Strict nur nach ausdrücklichem Preflight). Bei 429 checkpointen und `HISTORICAL_INCOMPLETE` melden, ohne das Capture fälschlich als vollständige Live-Coverage zu deklarieren. Normalisierte gemeinsame Records für Chain-Entities, vier Klassen/sechs Marker, Live/Index/Strict, Winner, Konkurrenz, Shadow-Zuordnung, tatsächliche Gebühren, Gross/Executable/Realized Economics, UNKNOWN und Statusachsen. Table/JSON/CSV sind nur Renderer **identischer Datensemantik**.
 
 #### L.6 P6: verpflichtende Offline-/Property-/Integrationstests
 
-Raw-Evidence-Hashes invariant unter Reportfiltern; sechs Marker/vier Klassen mit korrekten Start-/Endpaaren; failed/CPI/LUT/v0/v1/Legacy/truncated; kein Marker-Ausblenden ändert LiquidationType; table/json/csv semantisch identisch; `all` ohne Doppelzählung; Shadow-only nie als Chain-Liquidation/-Winner/-Profit; `off/index/crosscheck` nie Canonical; Strict nur bei vollständigen Proofs; abgeschnittener Live-Capture bleibt abgeschnitten; Wiederaufnahme identisch zur ununterbrochenen Verification; HTTP 429/Pruning/defekter Checkpoint/Diskvoll sauber fail-closed; Providerhardlimits nicht überschreibbar; Reportflags aktivieren weder Paid-Fallback noch LIVE/Submission. Sicherheitskritische Invarianten vollständig, übrige Kombinationen systematisch/Pairwise testen.
+Raw-Evidence-Hashes invariant unter Reportfiltern; stabile `capture_run_id` vor Capture und nach Finalisierung; `verification_spec_id` invariant unter Abbruch/Checkpoint/Retry/Resume bei identischer Prüfdefinition; getrennte `verification_attempt_id` und unveränderliche `verification_result_id`; reproduzierbare `report_query_identity` mit korrekter Resultatbindung; die vier benannten `RELATED_NON_LIQUIDATION`-Operationen niemals als Liquidations-/Gewinnereignisse; sechs Marker/vier Klassen mit korrekten Start-/Endpaaren; failed/CPI/LUT/v0/v1/Legacy/truncated; kein Marker-Ausblenden ändert LiquidationType; table/json/csv semantisch identisch; `all` ohne Doppelzählung; Shadow-only nie als Chain-Liquidation/-Winner/-Profit; `off/index/crosscheck` nie Canonical; Strict nur bei vollständigen Proofs; abgeschnittener Live-Capture bleibt abgeschnitten; Wiederaufnahme identisch zur ununterbrochenen Verification; HTTP 429/Pruning/defekter Checkpoint/Diskvoll sauber fail-closed; Providerhardlimits nicht überschreibbar; Reportflags aktivieren weder Paid-Fallback noch LIVE/Submission. Sicherheitskritische Invarianten vollständig, übrige Kombinationen systematisch/Pairwise testen.
 
 Code-/Git-SHA, drei Identitäten, Testliste PASS/FAIL/NOT_RUN, tatsächliche Ressourcen-/RPC-/Evidence-Werte und offene Provider-/Mainnet-Qualifikationen im `MEASUREMENT_LEDGER.md` dokumentieren. Keine erfundenen fünfstündigen Marktergebnisse und kein abgesenkter C0-E1-MASTER-PASS.
 
