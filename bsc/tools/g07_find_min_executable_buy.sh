@@ -6,7 +6,9 @@ cd "$(git rev-parse --show-toplevel)"
 
 source bsc/secrets.env
 export BSC_MAINNET_RPC_HTTPS="${BSC_MAINNET_RPC_HTTPS:-https://bsc-dataseed.bnbchain.org}"
-export DARKBOT_G06A_GAS_PRICE_WEI="${DARKBOT_G06A_GAS_PRICE_WEI:-50000000}"
+# Current read-only gas suggestion; builder floor from frozen evidence.
+DARKBOT_G06A_GAS_PRICE_WEI="$(node -e '(async()=>{const fs=require("fs");const p=JSON.parse(fs.readFileSync("bsc/gates/gate0/evidence/g06a_builder_floor_addendum_2026-10-11.json"));if(!p.blockrazor.verified)throw Error("unverified builder floor");const floor=BigInt(p.blockrazor.explicit_minimum_bundle_gas_price_wei);const r=await fetch(process.env.BSC_MAINNET_RPC_HTTPS,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_gasPrice",params:[]}),signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error("gas RPC HTTP "+r.status);const j=await r.json();if(j.error||!j.result)throw Error("invalid eth_gasPrice");const rpc=BigInt(j.result);const gas=rpc>floor?rpc:floor;if(gas<=0n||gas>1000000000n)throw Error("gas exceeds authorized ceiling");console.error("RPC_GAS_PRICE_WEI="+rpc+" BUILDER_FLOOR_WEI="+floor+" GAS_POLICY=DYNAMIC_CANDIDATE_ONLY");process.stdout.write(String(gas));})().catch(e=>{console.error("STOP gas: "+e.message);process.exitCode=1})' )"
+export DARKBOT_G06A_GAS_PRICE_WEI
 
 grep -Fq 'pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";' \
   bsc/gates/gate0/src/acceptance_guard.rs || {
@@ -26,8 +28,9 @@ REQUIRED_PASSES="${DARKBOT_G07_SEARCH_REQUIRED_PASSES:-2}"
 [[ "$REQUIRED_PASSES" =~ ^[1-9][0-9]*$ ]] || { echo "bad REQUIRED_PASSES" >&2; exit 2; }
 (( REQUIRED_PASSES <= PROBE_RUNS )) || { echo "REQUIRED_PASSES > PROBE_RUNS" >&2; exit 2; }
 
-tmp="$(mktemp -d -t darkbot-g07-buy-search.XXXXXX)"
-trap 'rm -rf "$tmp"' EXIT
+mkdir -p bsc/local_diagnostics
+tmp="$(mktemp -d bsc/local_diagnostics/g07-search.XXXXXX)"
+echo "EVIDENCE_DIR=$tmp"
 preflight="$tmp/preflight.json"
 
 node bsc/gates/gate0/tools/g06a_preflight_readonly.cjs "$preflight" >/dev/null
@@ -43,6 +46,12 @@ probe() {
     if node bsc/gates/gate0/tools/g06a_economics_evm_crosscheck.cjs "$preflight" \
         >"$tmp/${v}_${run}.json" 2>"$tmp/${v}_${run}.err"; then
       passes=$((passes + 1))
+    elif grep -Eq "local BUY simulation reverted:|independent EVM BUY returned zero" "$tmp/${v}_${run}.err"; then
+      echo "  BUY_REJECT=$v run=$run"
+    else
+      echo "STOP: NON_BUY_FAILURE value=$v run=$run" >&2
+      cat "$tmp/${v}_${run}.err" >&2
+      exit 5
     fi
 
     # Decide early once either outcome can no longer change.
@@ -132,7 +141,7 @@ for run in 1 2 3; do
 done
 
 echo
-echo "LAST_CONFIRMED_FAIL_WEI=$lo"
+if (( lo == 0 )); then echo "LOWER_BOUND=UNTESTED_BELOW_RESOLUTION"; else echo "LAST_CONFIRMED_BUY_REJECT_WEI=$lo"; fi
 echo "FIRST_STABLE_PASS_WEI=$hi"
 echo "SEARCH_RESOLUTION_WEI=$RESOLUTION_WEI"
 python3 - "$lo" "$hi" <<'PY'
@@ -140,7 +149,7 @@ from decimal import Decimal
 import sys
 lo, hi = map(Decimal, sys.argv[1:3])
 scale = Decimal(10) ** 18
-print("LAST_CONFIRMED_FAIL_BNB=" + str(lo / scale))
+if lo: print("LAST_CONFIRMED_BUY_REJECT_BNB=" + str(lo / scale))
 print("FIRST_STABLE_PASS_BNB=" + str(hi / scale))
 PY
 echo "LIVE_SEND=NONE"
