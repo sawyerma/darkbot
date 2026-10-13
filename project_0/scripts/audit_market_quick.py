@@ -80,7 +80,10 @@ class AuditError(Exception):
 
 class RPC:
     def __init__(self, url, rps=2, timeout=15, attempts=3, max_calls=2000, seconds=300,
-                 max_bytes=256*1024*1024, opener=None, sleep=time.sleep, clock=time.monotonic):
+                 max_bytes=256*1024*1024, opener=None, sleep=time.sleep, clock=time.monotonic, allowed_methods=None):
+        self.allowed_methods=frozenset(('getSignaturesForAddress','getTransaction') if allowed_methods is None else allowed_methods)
+        if not self.allowed_methods <= {'getSignaturesForAddress','getTransaction','getAccountInfo','getMultipleAccounts'}:
+            raise AuditError('RPC_READONLY_METHODS_REQUIRED')
         self.url, self.interval, self.timeout = url, 1/rps, timeout
         self.attempts, self.max_calls, self.max_bytes = attempts, max_calls, max_bytes
         self.opener, self.sleep, self.clock = opener or urllib.request.urlopen, sleep, clock
@@ -94,7 +97,7 @@ class RPC:
         self.sleep(seconds)
 
     def call(self, method, params):
-        if method not in ('getSignaturesForAddress', 'getTransaction'):
+        if method not in self.allowed_methods:
             raise AuditError('INDEX_METHOD_FORBIDDEN')
         for attempt in range(self.attempts):
             if self.calls >= self.max_calls:

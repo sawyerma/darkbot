@@ -252,16 +252,18 @@ def load_shadow(ds,row,replace_existing=False):
 
 def best_record(rows):
     rows.sort(key=lambda r:PRIORITY[r['source']],reverse=True)
+    factual=[r for r in rows if r['source']!='unverified']
+    fallback=factual or rows
     record=dict(rows[0]);record['provenance']=[{'source':r['source'],'digest':c.digest(r)} for r in rows]
     # Fields from lower-ranked ACTUAL evidence may fill missing facts, but not
     # UNKNOWN outcome/qualification from a stronger source. Shadow is separate.
     for key in ('asset_mint','liability_mint','native_amounts','transaction_fee_lamports','priority_fee_lamports',
                 'jito_tip_lamports','incremental_rent_lamports','lamport_deltas','token_deltas','market_gross_edge_usd'):
         if record.get(key) is None:
-            record[key]=next((r[key] for r in rows if r.get(key) is not None),None)
-    record['field_provenance']={key:next((r['source'] for r in rows if r.get(key)==value and value is not None),None)
+            record[key]=next((r[key] for r in fallback if r.get(key) is not None),None)
+    record['field_provenance']={key:next((r['source'] for r in fallback if r.get(key)==value and value is not None),None)
                                 for key,value in record.items() if key not in ('provenance','shadow')}
-    positions={tuple(r['instruction_position']) for r in rows if r.get('instruction_position') is not None}
+    positions={tuple(r['instruction_position']) for r in fallback if r.get('instruction_position') is not None}
     if len(positions)>1:
         record['classification']='UNKNOWN';record['chain_liquidation_confirmed']=False;record['winner']=None
         record['missing_reasons']=record.get('missing_reasons',[])+['CONFLICTING_INSTRUCTION_POSITIONS']

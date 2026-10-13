@@ -1,0 +1,9 @@
+{
+  "baseline": "28f6d53 compiled Rust",
+  "comparison": "warning code + message + primary paths; ignore moved line numbers",
+  "baseline_count": 38,
+  "current_count": 38,
+  "added": [],
+  "removed": [],
+  "status": "PASS"
+}

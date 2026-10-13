@@ -1,0 +1,9 @@
+cargo test --manifest-path project_0/native/Cargo.toml --workspace --features crate_health,txv1 --locked --offline
+cargo test --manifest-path project_0/native/Cargo.toml --workspace --features crate_health --locked --offline
+cargo test --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health,txv1 --lib one_shot --locked --offline
+cargo test --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health --lib one_shot --locked --offline
+cargo build --manifest-path project_0/native/Cargo.toml --workspace --features crate_health,txv1 --release --locked --offline
+cargo build --manifest-path project_0/native/Cargo.toml --workspace --features crate_health --release --locked --offline
+cargo clippy --manifest-path project_0/native/Cargo.toml --workspace --all-targets --features crate_health,txv1 --locked --offline --message-format=json
+python3 project_0/docs/evidence/FE04_LOCAL_20261013/check_changed_format.py
+python3 -m unittest discover -s project_0/scripts -p 'test_*.py' -v

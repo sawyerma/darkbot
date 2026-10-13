@@ -1,0 +1,5 @@
+# NOT EXECUTED. Requires the explicitly requested user permission.
+# No signer/transfer. Max 3 calls, 1rps, 30s alarm, 16MiB; existing local endpoint only.
+./project_0/scripts/fe_readonly_preflight.sh --execute --output project_0/docs/evidence/FE01_CURRENT_20261013/probe.json
+# This only observes program/ProgramData and two archived R122 accounts.
+# It does not prove 0.1.11 source parity, current health, simulation or profitability.

@@ -1,0 +1,18 @@
+{
+  "source_sha256": {
+    "project_0/native/crates/darkbot-runner/src/one_shot.rs": "8b68597015bc7ff414b0a7976b4924b9d1a301f1b5eb29e9c17bf96f7ae17451",
+    "project_0/native/crates/darkbot-runner/src/lib.rs": "ff0fa660a347012cc75c8bd6c41b378d080ba7a8ca6941a06a9db350a188f0fe",
+    "project_0/native/crates/darkbot-project0/src/safety.rs": "9a43f3c4f74af910dbcfddd0d2fa78a7a0eb557c9c674ba82c64e5baaf858e70",
+    "project_0/scripts/audit_market_quick.py": "0d5619f32beb39bdfd0515defccb9a6f1519c736a2f462aec6c69b6adfe5ebba",
+    "project_0/scripts/market_report.py": "2da5db87133bfebf7f28244ef1221999e8d37a50b07d425adaaa554a190b294c",
+    "project_0/scripts/test_market_report.py": "3588810ceea154c06fba7d7767824186342eb304df701c1f64e0f5cbc0da8fb3",
+    "project_0/scripts/fe_readonly_preflight.py": "d0701152f2be6a0a80fd63b867d2ee1ebab9df0a602b2cde62bbd3807f870e6f",
+    "project_0/scripts/fe_readonly_preflight.sh": "950f47cf04340f945edfb2848c8489d0b6bcfa86e408541adb8c4fc59d25ada0",
+    "project_0/scripts/test_fe_preflight.py": "f1ca7386d45d462763088d34da3f3bd6146adb2fc3f16ea57a45065d39acdf37"
+  },
+  "base": "b1e69300fe520d12a6fce5a9358c117b3b19124d",
+  "mainnet": "NOT_RUN_PENDING_PERMISSION",
+  "FE04": "PARTIAL_OFFLINE_FOUNDATION",
+  "live": false,
+  "submission": false
+}

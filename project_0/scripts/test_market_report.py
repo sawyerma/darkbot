@@ -103,6 +103,13 @@ class Reports(unittest.TestCase):
         self.assertEqual(manifest['historical_status'],'HISTORICAL_INCOMPLETE')
         self.assertIsNone(json.loads((out/'economics_final.json').read_text())['market_total_liquidations'])
 
+    def test_unverified_source_cannot_fill_verified_unknown_economics(self):
+        unknown={'source':'index','market_gross_edge_usd':None,'transaction_fee_lamports':None,'instruction_position':None}
+        forged={'source':'unverified','market_gross_edge_usd':99999,'transaction_fee_lamports':0,'instruction_position':None}
+        best=r.best_record([unknown,forged])
+        self.assertIsNone(best['market_gross_edge_usd']);self.assertIsNone(best['transaction_fee_lamports'])
+        self.assertIsNone(best['field_provenance']['market_gross_edge_usd'])
+
     def test_result_requires_capture_bound_immutable_spec(self):
         result=self.setup_events();out,_=r.normalize(self.run,result)
         qualified=[x for x in r.values(out/'all_records.jsonl') if x['chain_liquidation_confirmed']]

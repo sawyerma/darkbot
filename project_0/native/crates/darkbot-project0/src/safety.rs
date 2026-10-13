@@ -148,10 +148,16 @@ impl Safety {
     /// Reconciled-Ergebnis eines Versuchs. `realized_pnl` ist der **echte** Netto-Wert aus
     /// Token-Deltas, Fees, Tips — nicht der geplante.
     /// `exposure_released`: freigegebenes Kapital; `inventory_delta`: gehaltenes Collateral (NO_SWAP) ±.
-    /// [FIX-24] `realized_pnl: None` = UNKNOWN → Buchhaltung schließt, aber HALT(UnknownEconomics):
-    /// ein unbekannter Ausgang darf das Tagesbudget nicht besser aussehen lassen.
+    /// [FIX-24] `realized_pnl: None` = UNKNOWN → Buchhaltung bleibt offen und HALT(UnknownEconomics):
+    /// ein unbekannter Ausgang hält Reservierungen und darf das Tagesbudget nicht besser aussehen lassen.
     pub fn record_outcome(&mut self, now_unix_s: u64, landed_success: bool, realized_pnl: Option<i128>, exposure_released: u64, inventory_delta: i128) {
         self.roll_day(now_unix_s);
+        // UNKNOWN cannot release capital/inventory or reduce outstanding count.
+        // A later complete reconciliation may close it, but never clears HALT.
+        if realized_pnl.is_none() {
+            self.halt(HaltReason::UnknownEconomics);
+            return;
+        }
         self.outstanding = self.outstanding.saturating_sub(1);
         self.open_positions = self.open_positions.saturating_sub(1);
         self.capital_in_use = self.capital_in_use.saturating_sub(exposure_released);
@@ -227,6 +233,21 @@ mod tests {
         assert_eq!(s.capital_in_use(), 0);
         assert_eq!(s.check(0, 50, 1, 1, &[], "longtail"), Ok(()));
         assert_eq!(s.capital_in_use(), 50);
+    }
+
+    #[test]
+    fn unknown_outcome_keeps_hold_until_complete_reconciliation() {
+        let mut s = Safety::new(lim(), allow(), true);
+        s.check(0, 50, 1, 1, &[], "longtail").unwrap();
+        s.record_outcome(0, true, None, 50, 0);
+        assert_eq!(s.capital_in_use(), 50);
+        assert_eq!(s.outstanding, 1);
+        assert_eq!(s.open_positions, 1);
+        assert_eq!(s.halted(), Some(HaltReason::UnknownEconomics));
+        s.record_outcome(0, true, Some(5), 50, 0);
+        assert_eq!(s.capital_in_use(), 0);
+        assert_eq!(s.outstanding, 0);
+        assert_eq!(s.halted(), Some(HaltReason::UnknownEconomics));
     }
 
     #[test]
