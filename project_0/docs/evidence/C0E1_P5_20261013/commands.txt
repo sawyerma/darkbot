@@ -1,0 +1,6 @@
+python3 -m unittest discover -s project_0/scripts -p 'test_*.py' -v
+cargo test --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health,txv1 --lib --locked --offline
+cargo build --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health,txv1 --release --bin p0-econ-replay --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --locked --offline
+python3 project_0/docs/evidence/C0E1_P5_20261013/check_changed_format.py
+bash -n project_0/scripts/test.sh project_0/scripts/verify.sh project_0/scripts/report.sh project_0/scripts/run_econ4h.sh
+git diff --check

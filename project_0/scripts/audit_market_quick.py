@@ -464,6 +464,11 @@ def decode_logs(logs, instructions=None):
     return [e for e in events if not e.get('rolled_back')], errors
 
 
+RELATED_TYPES = ('drift_claim_bad_debt','purge_deleverage_balance',
+                 'marginfi_account_keeper_close_order','marginfi_account_init_liq_record')
+RELATED_DISC = {hashlib.sha256(('global:'+name).encode()).digest()[:8]:name for name in RELATED_TYPES}
+
+
 def liquidation_pairs(instructions, success):
     """Pinned 33c6798: receiver/deleverage start + end in the same TX/account.
 
@@ -494,6 +499,21 @@ def liquidation_pairs(instructions, success):
     return pairs, issues
 
 
+def requested_priority_fee(tx):
+    """Explicit requested CU limit/price only; meta.fee remains total-cost authority."""
+    try:
+        keys=resolve_keys(tx);limits=[];prices=[]
+        for ix in tx['transaction']['message']['instructions']:
+            if program_of(ix,keys)!='ComputeBudget111111111111111111111111111111':continue
+            raw=base58_decode(ix['data'])
+            if len(raw)==5 and raw[0]==2:limits.append(int.from_bytes(raw[1:],'little'))
+            if len(raw)==9 and raw[0]==3:prices.append(int.from_bytes(raw[1:],'little'))
+        if len(limits)==len(prices)==1 and 0<=limits[0]<=1_400_000:
+            return (limits[0]*prices[0]+999999)//1000000
+    except (ValueError,KeyError,TypeError,IndexError):pass
+    return None
+
+
 def detect(tx, slot):
     """Preserve original discriminator/frame audit, adding strict payload and identity evidence."""
     errors, instructions, counts = [], [], collections.Counter()
@@ -507,6 +527,7 @@ def detect(tx, slot):
             raise ValueError('META_MISSING')
         result['success'] = meta['err'] is None
         result['fee_lamports'] = meta.get('fee')
+        result['priority_fee_lamports'] = requested_priority_fee(tx)
         result['version'] = tx.get('version','legacy')
         if result['version'] not in ('legacy',0,1):
             raise ValueError('UNSUPPORTED_TX_VERSION')
@@ -523,7 +544,22 @@ def detect(tx, slot):
             if raw[:8] not in KNOWN_INSTRUCTIONS:
                 errors.append('UNAUDITED_INSTRUCTION')
             kind = DISC.get(raw[:8])
-            item = {'position':position,'kind':kind,'marker':MARKER_NAMES.get(raw[:8]),'discriminator':raw[:8].hex()}
+            item = {'position':position,'kind':kind,'marker':MARKER_NAMES.get(raw[:8]),'related_type':RELATED_DISC.get(raw[:8]),'discriminator':raw[:8].hex()}
+            indexes=ix.get('accounts',[])
+            if any(type(n) is not int or not 0<=n<len(keys) for n in indexes):
+                raise ValueError('ACCOUNT_INDEX')
+            item['accounts']=[keys[n] for n in indexes]
+            related=item.get('related_type')
+            if related:
+                # Exact pinned Accounts order. Keeper's fee_recipient is NOT a
+                # signer/actor; Drift claim affects a bank, not a liquidated user.
+                ti,ai={'drift_claim_bad_debt':(None,0),'purge_deleverage_balance':(1,2),
+                       'marginfi_account_keeper_close_order':(0,None),
+                       'marginfi_account_init_liq_record':(0,1)}[related]
+                item['target']=item['accounts'][ti] if ti is not None else None
+                item['actor']=item['accounts'][ai] if ai is not None else None
+                if related=='drift_claim_bad_debt':item['affected_bank']=item['accounts'][1]
+                if related=='marginfi_account_keeper_close_order':item['fee_recipient']=item['accounts'][1]
             if kind:
                 counts[kind] += 1
                 if kind in COMPLETION or kind.endswith('_START'):

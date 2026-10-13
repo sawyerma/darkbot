@@ -1,0 +1,31 @@
+{
+  "base_project0_commit": "2c62d135f8beb755a82a63a3be5daf9d5420130f",
+  "parent_at_qualification": "da19b3a0864351829cdffca29ff05e1bc6c162ea",
+  "sources": {
+    "project_0/native/crates/darkbot-runner/src/econ.rs": "f6f97448c6d592f43d132b9e8e663adceaa429bb4f205bb310e1b86a81fb4053",
+    "project_0/native/crates/darkbot-runner/src/econ_canonical.rs": "7b061ce3c1780ee1c3de286196b7a11e1babc6e2591d035a603b058f41150c8f",
+    "project_0/native/crates/darkbot-runner/src/econ_tests.rs": "d784695b6e5d1c79b1485ac9772f708b71128c88e9770e98b99ef81d255db6be",
+    "project_0/native/crates/darkbot-runner/src/market_truth.rs": "1e7ff02c545ccb8278e88e0544830aae9a120ffa11b20233d00290e66c218096",
+    "project_0/native/crates/darkbot-runner/src/market_verification.rs": "f7bb58880c1857f31d44c0decac43d44bbb2174a848dcf468215dda5d9076de5",
+    "project_0/scripts/audit_market_quick.py": "8e48280319ad1fc960d72fd174e7f830c8e58b7bfac2aff3e153e0a9bdf1a8d8",
+    "project_0/scripts/measurement_contract.py": "ecb1c0977a3f56e08e7e89bd9c6359670c545a5b6d6b9784f6e5fdaf651be506",
+    "project_0/scripts/run_econ4h.sh": "6122c42887ee0c017d3cb64b2437c6d581f1d316d7199a4997eae1828b420099",
+    "project_0/scripts/test.sh": "316e9202d36a809606c63a61379d66c45cd9b4626a87ced93a4d950e5edc1d58",
+    "project_0/scripts/test_measurement_plan.py": "f587a1897b4dcb51e7e81874cf91a80edcf8dd76365f3356776aaf9c3f5e54f2",
+    "project_0/scripts/market_report.py": "1680d4b23144d9ad36257da5709f25bdfd59383f8c061193738633400febfcf6",
+    "project_0/scripts/measurement_cli.py": "a316f2bb174a8aff507b57acf3665e3cf7890d38f992933bf40b76238f881cb3",
+    "project_0/scripts/report.sh": "ac9b265368c78acdd4be70aa0c3db5ac18532a296638c41fd3ca503f99cd0883",
+    "project_0/scripts/test_market_report.py": "3fb889904aadc313091431a5ef0b93ed8c084889907064bf080bf4b803aacc1b",
+    "project_0/native/crates/darkbot-runner/src/bin/p0-econ-replay.rs": "1e29e56a2fe14d5dc6722c358d6480345b20bfa1ba02a87915b1020f778b3610"
+  },
+  "binaries": {
+    "p0-econ-replay": "54b4f5a632547228bc1f455593ad74de32e66ad7419b7a8effe091b1d3ce8ab5",
+    "p0-longtail": "916ff814152f71e49524e3a7b136825f671e891120342c7de9c9beb5dd9bf5ba",
+    "p0-measurement-plan": "99fa96ef86635215c31793ed5d3650fbf2648686c4f9468c059629edbd218e55",
+    "p0-strict-verify": "11d2d837a866735e3a8d1087b19f5f04895d7f2970244b4454b7095c89f7f5a3"
+  },
+  "mainnet": "NOT_RUN",
+  "real_5h_replay": "NOT_RUN_USER_OWNED",
+  "live": false,
+  "submission": false
+}

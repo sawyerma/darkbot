@@ -222,15 +222,7 @@ impl Worker {
             .map_err(|e| e.to_string())?;
         let mut out = BufWriter::new(file);
         for row in &result {
-            line(
-                &mut out,
-                &json!({"join":row,"race_class":race_class(row),"local_observed_race_margin_ns":margin(row),"loss_reason":loss(row),
-                    "signed":row.our.as_ref().map(|r|r.timing.t_sign_ns.is_some()),
-                    "simulation_result":row.our.as_ref().and_then(|r|r.simulation_result.as_deref()),
-                    "economic_net_usd":net(row.our.as_ref()),"economics_known":row.our.as_ref().map(|r|r.economics_known),
-                    "fundable_by_budget":CAPITAL_USD.iter().map(|budget|json!({"budget_usd":budget,"fundable":row.our.as_ref().and_then(|r|r.selected_costs.as_ref()).and_then(CandidateCostRecord::total_budget).map(|n|n<=budget*1_000_000)})).collect::<Vec<_>>(),
-                    "loss_provenance":if row.our.is_some(){"EXACT_PLAN_MATCH"}else if row.diagnostic.is_some(){"TARGET_EPISODE_DIAGNOSTIC; executable identity unproven"}else{"NO_TARGET_EPISODE_RECORD"}}),
-            )?;
+            line(&mut out, &joined_value(row))?;
         }
         out.flush().map_err(|e| e.to_string())?;
         self.canonical_joined = result;
@@ -547,6 +539,66 @@ mod regression {
         r
     }
     #[test]
+    fn offline_replay_uses_same_selector_and_exact_odd_plan_boundaries() {
+        let mut w = worker();
+        let r = identified();
+        w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
+        w.evaluations.flush().unwrap();
+        let mut event = row(&r, 10, 0).market;
+        event.block_time = Some(101);
+        let input = w.h.cfg.run_dir.join("replay_market.jsonl");
+        fs::write(
+            &input,
+            format!("{}\n", serde_json::to_string(&event).unwrap()),
+        )
+        .unwrap();
+        let out = w.h.cfg.run_dir.join("offline_replay");
+        let plan = MeasurementPlan::new(61).unwrap();
+        replay(
+            &input,
+            &w.h.cfg.run_dir.join("shadow_evaluations.jsonl"),
+            &out,
+            &plan,
+            100_000_000_000,
+            30,
+        )
+        .unwrap();
+        let got: Value = serde_json::from_str(
+            fs::read_to_string(out.join("canonical_market_shadow.jsonl"))
+                .unwrap()
+                .trim(),
+        )
+        .unwrap();
+        let mut expected = vec![row(&r, 10, 0)];
+        expected[0].market = event;
+        assign_record(&mut expected, &r);
+        assert_eq!(
+            got["economic_net_usd"],
+            joined_value(&expected[0])["economic_net_usd"]
+        );
+        assert_eq!(
+            got["join"]["identity_status"],
+            "TYPE_TARGET_BANK_PAIR_CANONICAL_EVENT"
+        );
+        for i in 1..=4 {
+            let v: Value =
+                serde_json::from_reader(File::open(out.join(format!("hour_{i:02}.json"))).unwrap())
+                    .unwrap();
+            assert_eq!(v["cutoff_unix_ns"], 100_000_000_000u64 + plan.offset_ns(i));
+            assert_eq!(v["cumulative"]["market"]["ALL"]["events"], 1);
+            assert_eq!(v["master_pass"], false);
+        }
+        assert!(replay(
+            &input,
+            &w.h.cfg.run_dir.join("shadow_evaluations.jsonl"),
+            &out,
+            &plan,
+            100_000_000_000,
+            30
+        )
+        .is_err());
+    }
+    #[test]
     fn exact_identity_and_chain_episode_prevent_cross_event_allocation() {
         let r = identified();
         let mut rows = vec![row(&r, 10, 0), row(&r, 20, 0)];
@@ -687,4 +739,158 @@ mod regression {
             .join("canonical_market_shadow.jsonl")
             .is_file());
     }
+}
+
+fn joined_value(row: &Joined) -> Value {
+    json!({"join":row,"race_class":race_class(row),"local_observed_race_margin_ns":margin(row),"loss_reason":loss(row),
+                    "signed":row.our.as_ref().map(|r|r.timing.t_sign_ns.is_some()),
+                    "simulation_result":row.our.as_ref().and_then(|r|r.simulation_result.as_deref()),
+                    "economic_net_usd":net(row.our.as_ref()),"economics_known":row.our.as_ref().map(|r|r.economics_known),
+                    "fundable_by_budget":CAPITAL_USD.iter().map(|budget|json!({"budget_usd":budget,"fundable":row.our.as_ref().and_then(|r|r.selected_costs.as_ref()).and_then(CandidateCostRecord::total_budget).map(|n|n<=budget*1_000_000)})).collect::<Vec<_>>(),
+                    "loss_provenance":if row.our.is_some(){"EXACT_PLAN_MATCH"}else if row.diagnostic.is_some(){"TARGET_EPISODE_DIAGNOSTIC; executable identity unproven"}else{"NO_TARGET_EPISODE_RECORD"}})
+}
+
+/// Offline replay uses the identical production episode/plan selector and
+/// economics/attribution functions. It cannot call a provider or submit a TX.
+pub(super) fn replay(
+    market_path: &Path,
+    shadow_path: &Path,
+    out: &Path,
+    plan: &MeasurementPlan,
+    start_ns: u64,
+    max_seconds: u64,
+) -> Result<(), String> {
+    use std::io::BufRead;
+    plan.validate()?;
+    if max_seconds == 0 || max_seconds > 7200 {
+        return Err("REPLAY_TIME_BUDGET".into());
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(max_seconds);
+    let mut grouped: BTreeMap<String, Vec<Joined>> = BTreeMap::new();
+    let mut seen = BTreeSet::new();
+    let mut reader = BufReader::new(File::open(market_path).map_err(|_| "MARKET_INPUT")?);
+    let mut count = 0usize;
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err("REPLAY_TIME_BUDGET".into());
+        }
+        let mut line = Vec::new();
+        let len = (&mut reader)
+            .take(16 * 1024 * 1024 + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|_| "MARKET_READ")?;
+        if len == 0 {
+            break;
+        }
+        if len > 16 * 1024 * 1024 || line.last() != Some(&b'\n') {
+            return Err("REPLAY_ROW_BUDGET".into());
+        }
+        let mut market: TruthEvent = serde_json::from_slice(&line).map_err(|_| "MARKET_DECODE")?;
+        market.discovery_source = "OFFLINE_FINALIZED_EVIDENCE";
+        market.economic_provenance = "PERSISTED_PROTOCOL_EVENT_AND_ACTUAL_TX_META";
+        let key = (market.signature.clone(), market.slot, market.event_index);
+        if !seen.insert(key) {
+            return Err("DUPLICATE_MARKET_EVENT".into());
+        }
+        count += 1;
+        if count > 100_000 {
+            return Err("REPLAY_MARKET_CAPACITY".into());
+        }
+        grouped
+            .entry(market.target.clone())
+            .or_default()
+            .push(Joined {
+                market,
+                target_seen: false,
+                target_seen_without_slot: false,
+                health_liquidatable: None,
+                candidates_created: None,
+                plan_validated: None,
+                built: None,
+                identity_status: "NO_MATCH",
+                our: None,
+                diagnostic: None,
+            });
+    }
+    for rows in grouped.values_mut() {
+        rows.sort_by_key(|r| {
+            (
+                r.market.slot,
+                r.market.transaction_index,
+                r.market.event_index,
+            )
+        });
+    }
+    // One bounded streaming pass. No RPC repricing/re-simulation and no synthetic
+    // evaluation when the original capture lost data.
+    if count > 0 && !shadow_path.exists() {
+        return Err("SHADOW_JOURNAL_MISSING".into());
+    }
+    if count > 0 && shadow_path.exists() {
+        let mut reader = BufReader::new(File::open(shadow_path).map_err(|_| "SHADOW_INPUT")?);
+        loop {
+            if std::time::Instant::now() >= deadline {
+                return Err("REPLAY_TIME_BUDGET".into());
+            }
+            let mut line = Vec::new();
+            let len = (&mut reader)
+                .take(16 * 1024 * 1024 + 1)
+                .read_until(b'\n', &mut line)
+                .map_err(|_| "SHADOW_READ")?;
+            if len == 0 {
+                break;
+            }
+            if len > 16 * 1024 * 1024 || line.last() != Some(&b'\n') {
+                return Err("REPLAY_ROW_BUDGET".into());
+            }
+            let rec: OpportunityRecord =
+                serde_json::from_slice(&line).map_err(|_| "SHADOW_DECODE")?;
+            if let Some(rows) = grouped.get_mut(&rec.account) {
+                assign_record(rows, &rec);
+            }
+        }
+    }
+    fs::create_dir_all(out).map_err(|_| "REPLAY_OUTPUT")?;
+    let mut rows: Vec<_> = grouped.into_values().flatten().collect();
+    rows.sort_by_key(|r| {
+        (
+            r.market.slot,
+            r.market.transaction_index,
+            r.market.event_index,
+        )
+    });
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(out.join("canonical_market_shadow.jsonl"))
+        .map_err(|_| "REPLAY_OUTPUT_EXISTS")?;
+    let mut writer = BufWriter::new(file);
+    for row in &rows {
+        line(&mut writer, &joined_value(row))?;
+    }
+    writer.flush().map_err(|_| "REPLAY_WRITE")?;
+    let bucket = |r: &Joined| {
+        r.market
+            .block_time
+            .and_then(|t| u64::try_from((t as i128) * 1_000_000_000 - start_ns as i128).ok())
+            .and_then(|n| plan.chain_bucket(n))
+    };
+    for i in 1..=SNAPSHOT_COUNT {
+        let cumulative: Vec<_> = rows
+            .iter()
+            .filter(|r| bucket(r).is_some_and(|b| b < i))
+            .collect();
+        let delta: Vec<_> = rows.iter().filter(|r| bucket(r) == Some(i - 1)).collect();
+        let unassigned = rows.iter().filter(|r| bucket(r).is_none()).count();
+        let value = json!({"schema":"C0-E1/OfflineCanonicalEconomics/1","scope":"EXPLICIT_FINALIZED_EVENT_INPUT; verification coverage is separate",
+            "start_unix_ns":start_ns,"cutoff_unix_ns":start_ns+plan.offset_ns(i),"plan":plan,
+            "cumulative":summarize(&cumulative,plan.span_seconds(0,i),unassigned,true),
+            "window_delta":summarize(&delta,plan.span_seconds(i-1,i),unassigned,true),
+            "raw_shadow_available":shadow_path.exists(),"live_enabled":false,"master_pass":false});
+        atomic_json(&out.join(format!("hour_{i:02}.json")), &value)?;
+        if i == SNAPSHOT_COUNT {
+            atomic_json(&out.join("economics_final.json"), &value)?;
+        }
+    }
+    Ok(())
 }

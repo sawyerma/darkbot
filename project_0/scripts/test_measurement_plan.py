@@ -60,6 +60,12 @@ class MeasurementCli(unittest.TestCase):
             capture = target / 'p0-longtail'
             capture.write_text('#!/usr/bin/env bash\nset -eu\n'
                                'cp "$P0_MEASUREMENT_PLAN" "$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID/consumed_plan.json"\n'
+                               'python3 - "$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID" "$P0_ECON_DURATION_SECS" <<\'MOCK\'\n'
+                               'import json,sys,pathlib,datetime\n'
+                               'r=pathlib.Path(sys.argv[1]); (r/"market").mkdir()\n'
+                               'n=int(sys.argv[2]); end=datetime.datetime.fromtimestamp(100+n,datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")\n'
+                               '(r/"market/summary.json").write_text(json.dumps({"observation_started_at":"1970-01-01T00:01:40Z","observation_ended_at":end,"configured_duration_seconds":n,"capture_clock_complete":True,"live_coverage_status":"LIVE_COVERAGE_COMPLETE"}))\n'
+                               'MOCK\n'
                                'printf "%s:%s:%s" "$P0_ECON_DURATION_SECS" "$P0_LIVE_ENABLED" "$P0_SUBMISSION_ENABLED"\n')
             capture.chmod(0o700)
             mock = tmp / 'mock'

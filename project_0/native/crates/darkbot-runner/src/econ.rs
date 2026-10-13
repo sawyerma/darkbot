@@ -1722,3 +1722,15 @@ impl Capital {
 #[cfg(test)]
 #[path = "econ_tests.rs"]
 mod tests;
+
+/// Exposes the existing canonical selector/economics to offline reporting only.
+pub fn replay_canonical(
+    market: &Path,
+    shadow: &Path,
+    out: &Path,
+    plan: &MeasurementPlan,
+    start_ns: u64,
+    max_seconds: u64,
+) -> Result<(), String> {
+    canonical::replay(market, shadow, out, plan, start_ns, max_seconds)
+}

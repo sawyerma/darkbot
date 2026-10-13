@@ -5224,3 +5224,16 @@ a short Mainnet smoke including a controlled/forced reconnect.
 
 Winner/Shadow performance bottlenecks observed during this run remain measurement targets and are
 not to be optimized as part of the market gap-recovery fix.
+
+
+## 2026-10-13 — C0-E1 P5 normalized reports / typed post-capture workflow
+
+**IMPLEMENTED / LOCAL QUALIFICATION PASS.** P3 `aa37dd3` and P4 `2c62d13` reused. Evidence: `docs/evidence/C0E1_P5_20261013/` (commands, outputs, source/binary hashes, first failed timer fixture retained).
+
+`test.sh`, `verify.sh`, `report.sh` share `MeasurementConfigV2`. Automatic existing verifier after drain: off/index/strict, with existing FREE_ONLY preflight. Normalized unfiltered records and immutable result-bound queries; all four classes, six markers, four individually selectable related operations; provenance/time/winner/competition/economics filters affect display only. All three renderers use identical records. Captured raw evidence remains immutable. Strict partial checkpoints are exposed for reporting without changing their proof rules.
+
+`p0-econ-replay` calls the existing production canonical selector, cost/capital/loss/race functions on saved evidence. No RPC, new economics model or approximate repricing. Four MeasurementPlan snapshots and final report; canonical inputs absent => replay NOT_RUN/UNKNOWN. Shadow-only never a chain winner or realized profit. Historical verification never repairs the live-coverage axis. Report restart and wrong-run result rejection covered.
+
+Tests: **44 Python PASS; runner lib 191 PASS / 0 FAIL / 1 pre-existing ignored; four release binaries PASS; changed-region rustfmt, shell syntax, diff whitespace PASS.** First runner attempt failed the fixed-sleep snapshot fixture; bounded observed-snapshot synchronization repaired the test, not production qualification.
+
+**OPEN / NOT_RUN:** P6 full offline matrix next; real failed-5h replay reserved to user; provider quota/archive/WSS qualification and separately authorized Mainnet smoke NOT_RUN; historical 429 gate OPEN. No 4h/5h capture, LIVE or submission. No Master PASS / profitability claim. Next: P6 offline invariants and fixture replay; user subsequently performs actual-run replay and approved Mainnet qualification.

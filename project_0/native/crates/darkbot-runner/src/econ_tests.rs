@@ -730,7 +730,15 @@ fn runtime_worker_writes_four_snapshots_then_identical_final() {
     let dir = h.cfg.run_dir.clone();
     let join = std::thread::spawn(move || w.run());
     // Real automatic timer; no manually invoked snapshot writer in this integration test.
-    std::thread::sleep(Duration::from_millis(4150));
+    // The worker polls periodically; a fixed 150 ms grace races its next poll
+    // under parallel test load. Wait for the real automatic fourth snapshot.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !dir.join("hour_04.json").exists()
+        && !join.is_finished()
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(20));
+    }
     h.shared.finish.store(true, Ordering::Release);
     join.join().unwrap().unwrap();
     let hour: Value = serde_json::from_slice(&fs::read(dir.join("hour_04.json")).unwrap()).unwrap();

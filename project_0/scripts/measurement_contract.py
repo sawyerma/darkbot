@@ -32,6 +32,7 @@ def file_hash(path):
     return h.hexdigest()
 
 def immutable(path,value):
+    value=json.loads(json.dumps(value,allow_nan=False))
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     if path.exists():
         if json.loads(path.read_text())!=value:raise ContractError('IMMUTABLE_CONFLICT')
@@ -102,6 +103,22 @@ class ReportQuery:
     competition: bool=True
     economics: bool=True
     format: str='table'
+
+    def __post_init__(self):
+        for value,allowed in ((self.types,KINDS),(self.markers,MARKERS),(self.related_types,RELATED)):
+            if not isinstance(value,(list,tuple)) or any(x not in allowed for x in value) or len(set(value))!=len(value):
+                raise ContractError('REPORT_SELECTION_INVALID')
+        if self.view not in ('summary','liquidations','winners','competition','economics') or self.provenance not in ('best','live','index','strict','shadow','all') or self.format not in ('table','json','csv'):
+            raise ContractError('REPORT_ENUM_INVALID')
+        if any(type(v) is not bool for v in (self.related_events,self.winners,self.competition,self.economics)):
+            raise ContractError('REPORT_BOOLEAN_INVALID')
+        if self.min_net_usd is not None and (type(self.min_net_usd) not in (int,float) or not math.isfinite(self.min_net_usd)):
+            raise ContractError('REPORT_NET_NONFINITE')
+        from audit_market_quick import utc_ns
+        if self.from_utc:utc_ns(self.from_utc)
+        if self.to_utc:utc_ns(self.to_utc)
+        if self.from_utc and self.to_utc and utc_ns(self.from_utc)>=utc_ns(self.to_utc):
+            raise ContractError('REPORT_WINDOW_INVALID')
 
 @dataclass(frozen=True)
 class MeasurementConfigV2:

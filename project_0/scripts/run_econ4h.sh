@@ -26,11 +26,17 @@ case "${P0_ECON_RUN_MODE:-auto}" in
   *) echo "P0_ECON_RUN_MODE quick is incompatible with a complete capture; unset it. Duration now starts after StreamReady." >&2; exit 2 ;;
 esac
 
+MEASUREMENT_CONFIG_INPUT=""
 if [[ "$#" != 0 ]]; then
-  if [[ "$#" != 2 || "$1" != --duration ]]; then
-    echo 'Usage: run_econ4h.sh [--duration 10m|1h|5h|24h]' >&2; exit 2
+  if [[ "$#" == 2 && "$1" == --measurement-config ]]; then
+    MEASUREMENT_CONFIG_INPUT="$2"
+    export P0_MEASUREMENT_DURATION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config"]["run"]["duration"])' "$2")"
+    export P0_MARKET_SOURCE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config"]["run"]["capture_source"])' "$2")"
+  elif [[ "$#" == 2 && "$1" == --duration ]]; then
+    export P0_MEASUREMENT_DURATION="$2"
+  else
+    echo 'Usage: test.sh --duration 10m|1h|5h|24h [typed verification/report options]' >&2; exit 2
   fi
-  export P0_MEASUREMENT_DURATION="$2"
 fi
 
 # Public signer identity is versioned; secret key material is not.
@@ -154,10 +160,13 @@ fi
 RUN_DIR="$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID"
 if [[ -e "$RUN_DIR" ]]; then echo "econ run directory already exists" >&2; exit 2; fi
 mkdir -p "$RUN_DIR"
+if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
+  python3 "$SCRIPT_DIR/measurement_cli.py" prepare "$RUN_DIR" "$MEASUREMENT_CONFIG_INPUT"
+fi
 cd "$REPO_ROOT"
 echo "C0-E1: build; capture starts after bootstrap and StreamReady; submission disabled"
 cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
-  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan 2>&1 | tee "$RUN_DIR/build.log" || {
+  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --bin p0-econ-replay 2>&1 | tee "$RUN_DIR/build.log" || {
   echo "Build failed: $RUN_DIR/build.log" >&2; exit 2;
 }
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
@@ -219,7 +228,7 @@ paths = subprocess.check_output(['git', 'ls-files', '-co', '--exclude-standard',
 source = {}
 for name in sorted(set(paths)):
     p = pathlib.Path(name)
-    if p.is_file() and p.suffix in ('.rs', '.toml', '.lock', '.sh'):
+    if p.is_file() and p.suffix in ('.rs', '.toml', '.lock', '.sh', '.py'):
         source[name] = hashlib.sha256(p.read_bytes()).hexdigest()
 manifest = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
     'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'source_sha256': source,
@@ -232,6 +241,11 @@ status=0
 # All durations follow the same capture lifecycle. Never timebox the entire
 # process by capture duration: bootstrap and verification have separate budgets.
 "$BIN" > "$RUN_DIR/console_summary.txt" 2> >(tee "$RUN_DIR/runtime.log" >&2) || status=$?
+wait # stderr tee must finish before immutable evidence hashing
 cat "$RUN_DIR/console_summary.txt"
+if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
+  # Actual process has drained/exited. Freeze raw evidence before historical RPC.
+  python3 "$SCRIPT_DIR/measurement_cli.py" finish "$RUN_DIR" "$MEASUREMENT_CONFIG_INPUT" || status=$?
+fi
 echo "Reports and detailed logs: $RUN_DIR"
 exit "$status"

@@ -3,7 +3,7 @@
 //! events.rs and liquidate.rs/liquidate_end.rs/handle_bankruptcy.rs.
 use super::*;
 use crate::winner::{resolve_account_keys, RpcInstruction};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const CLASSIC_IX: [u8; 8] = [214, 169, 151, 213, 251, 167, 86, 219];
 const DELEVERAGE_IX: [u8; 8] = [114, 14, 250, 143, 252, 104, 214, 209];
@@ -12,7 +12,7 @@ const CLASSIC_EVENT: [u8; 8] = [166, 160, 249, 154, 183, 39, 23, 242];
 const DELEVERAGE_EVENT: [u8; 8] = [161, 8, 108, 204, 209, 198, 12, 30];
 const BANKRUPTCY_EVENT: [u8; 8] = [166, 77, 41, 140, 36, 94, 10, 57];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum LiquidationType {
     Classic,
@@ -31,7 +31,7 @@ impl LiquidationType {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TruthEvent {
     pub signature: String,
     pub slot: u64,
@@ -58,9 +58,11 @@ pub struct TruthEvent {
     pub priority_fee_lamports: Option<u64>,
     pub winner_net_edge_usd: Option<f64>,
     pub winner_net_edge_complete: bool,
+    #[serde(skip_deserializing)]
     pub economic_provenance: &'static str,
     pub block_time: Option<i64>,
     pub live_t_rx_ns: Option<u64>,
+    #[serde(skip_deserializing)]
     pub discovery_source: &'static str,
     pub permissionless_profit_opportunity: bool,
 }

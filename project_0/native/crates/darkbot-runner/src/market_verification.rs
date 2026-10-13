@@ -84,6 +84,7 @@ struct Client<'a> {
     pacer: RequestPacer,
     calls: u64,
     bytes: u64,
+    completed_batches: Vec<Value>,
 }
 impl Client<'_> {
     fn guard(&self) -> Result<(), &'static str> {
@@ -253,6 +254,7 @@ pub fn run(job: Job) -> Result<Value, String> {
         pacer: RequestPacer::new(job.rps),
         calls: 0,
         bytes: 0,
+        completed_batches: Vec::new(),
         job: &job,
     };
     let work = (|| -> Result<Value, &'static str> {
@@ -390,6 +392,7 @@ pub fn run(job: Job) -> Result<Value, String> {
             }
             last_time = saved["proof"]["last_block_time"].as_i64().or(last_time);
             batches.push(json!({"checkpoint":checkpoint.file_name().unwrap().to_string_lossy(),"digest":digest(&saved)}));
+            c.completed_batches = batches.clone();
             next = end.checked_add(1).ok_or("SLOT_OVERFLOW")?;
         }
         if !first_time.is_some_and(|v| (v as i128) * 1_000_000_000 < job.start_ns as i128)
@@ -404,6 +407,7 @@ pub fn run(job: Job) -> Result<Value, String> {
     let mut result = work.unwrap_or_else(
         |error| json!({"status":"HISTORICAL_INCOMPLETE","reason":error,"canonical_verified":false}),
     );
+    result["batches"] = json!(c.completed_batches);
     result["verification_spec_id"] = json!(job.verification_spec_id);
     result["rpc_calls"] = json!(c.calls);
     result["successful_response_bytes"] = json!(c.bytes);
