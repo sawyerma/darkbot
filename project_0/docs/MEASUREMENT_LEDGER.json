@@ -1,0 +1,174 @@
+{
+  "schema": "Project0/MeasurementLedgerContext/1",
+  "snapshot_date": "2026-10-13",
+  "source": {
+    "path": "project_0/docs/MEASUREMENT_LEDGER.md",
+    "git_blob_sha": "0ec87a4da77e8df1e153574221a89356a857268b",
+    "as_of_code_commit": "a9a8c34553026a845bc959e1116651d8b437d55a",
+    "line_count": 5273,
+    "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification."
+  },
+  "companion_plan": "project_0/docs/PHASENPLAN.json",
+  "read_first": "Use this JSON to locate the current gate and exact relevant Markdown section. Read only targeted Markdown ranges; do not load the complete 5273-line ledger unless a full-file audit is explicitly required.",
+  "freshness_check": {
+    "method": "git rev-parse HEAD:project_0/docs/MEASUREMENT_LEDGER.md",
+    "compare_with": "source.git_blob_sha",
+    "on_mismatch": "STALE_INDEX: consult changed/last ledger sections and refresh this JSON; do not rely on stale status."
+  },
+  "current_status": {
+    "overall": "FIRST_REALIZED_PROFIT_NOT_PROVEN",
+    "live": "DISABLED",
+    "submission": "DISABLED",
+    "first_profit_release_train": {
+      "FE-00": {
+        "implementation": "LOCAL_PASS",
+        "economics": "NO_ECONOMIC_GO",
+        "selected_for_requalification": "ZERO_PREFUND_SAME_TX",
+        "commit": "b1e69300fe520d12a6fce5a9358c117b3b19124d",
+        "evidence": "project_0/docs/evidence/FE00_20261013/candidates.json"
+      },
+      "FE-01": {
+        "status": "OPEN",
+        "details": "Funding class provisionally selected; current on-chain ProgramData/source/target health and state parity NOT_RUN. Separate permission required for bounded Mainnet read-only check."
+      },
+      "FE-02": {
+        "status": "OPEN",
+        "details": "Current executable route floor, final TX simulation, all costs, realizable exit and positive conservative net edge NOT_PROVEN. Historical R107/R108 technical simulation is not a current economic GO."
+      },
+      "FE-03": {
+        "status": "OPEN",
+        "details": "Targeted production shadow plus candidate-specific winner/latency/economics evidence still to qualify."
+      },
+      "FE-04": {
+        "status": "PARTIAL_LOCAL",
+        "commit": "a9a8c34553026a845bc959e1116651d8b437d55a",
+        "evidence": "project_0/docs/evidence/FE04_LOCAL_20261013/README.md",
+        "implemented": "Persistent one-shot approval/intent, wallet lock, fsynced journal, holds, UNKNOWN/HALT and local regression tests.",
+        "missing": "Terminal approval lifecycle; production Intent/Current assembly; submission adapter binding to signed bytes; actual finalized receipt, token/fee/exit reconciliation."
+      },
+      "FE-05": {
+        "status": "NOT_RUN",
+        "details": "Bounded read-only Mainnet smoke and FREE_ONLY provider qualification require separate user permission."
+      },
+      "FE-06": {
+        "status": "NOT_AUTHORIZED",
+        "details": "No value-bearing LIVE or submission permitted without separate approval."
+      },
+      "FE-07": {
+        "status": "NOT_RUN",
+        "details": "Realized net PnL requires actual finalized chain/fee/token/exit/cumulative-loss evidence."
+      }
+    },
+    "c0_e1": {
+      "p1_p6_implementation": "OFFLINE_LOCAL_PASS",
+      "p6_tests": {
+        "python": 52,
+        "rust_crate_health_txv1": 340,
+        "rust_crate_health": 338,
+        "existing_ignored_rust_each": 1,
+        "failures": 0
+      },
+      "market_master": "OPEN",
+      "historical_verification": "OPEN_RPC_429_AND_PROVIDER_ARCHIVE_UNQUALIFIED",
+      "existing_5h_replay": "NOT_RUN_USER_OWNED",
+      "short_mainnet_smoke": "NOT_RUN_PERMISSION_REQUIRED",
+      "four_hour_market_master": "NOT_QUALIFIED"
+    },
+    "latest_fe04_tests": {
+      "python": 59,
+      "rust_crate_health_txv1": 346,
+      "rust_crate_health": 344,
+      "existing_ignored_rust_each": 1,
+      "failures": 0,
+      "release_builds": "PASS",
+      "note": "Reported from FE-04 evidence; full workspace counts precede the final journal fixture addition, which was verified by targeted tests."
+    }
+  },
+  "economic_evidence": {
+    "historical_transaction_fixtures": 6,
+    "historical_technical_zero_prefund_successes": "R122: 2, not executable current opportunities",
+    "historical_negative_edges_usd_micro": [
+      -121889,
+      -118606,
+      -91691
+    ],
+    "current_positive_executable_net_edge": "UNKNOWN",
+    "real_profit": "NOT_PROVEN",
+    "funding_classes": {
+      "ZERO_PREFUND_SAME_TX": "FIRST_REQUALIFICATION_CANDIDATE, not PILOT_READY",
+      "NO_SWAP_INVENTORY": "BLOCKED: qualified inventory and realizable collateral exit missing",
+      "JIT_SHORTFALL_EXACT_IN": "REQUIRED_FULL_PRODUCT; move to first-profit critical path if other classes fail; ExactOut unsupported/funding bank missing"
+    }
+  },
+  "next_decisive_work": [
+    "After separate permission: bounded current Program/ProgramData/target read-only observation (3 RPC calls, 1 request/s, <=30s, <=16 MiB); this alone does NOT qualify current profitability.",
+    "Revalidate real candidate-specific Health, Oracle/Bank, Funding, Jupiter ExactIn minimum output, fee, full signed TX simulation, exit economics; require positive conservative net edge or keep NO_ECONOMIC_GO.",
+    "Finish one-shot CLI/adapter/finalized reconciliation integration before any separately approved LIVE.",
+    "Preserve old user-owned five-hour replay and provider qualification as independent unresolved gates."
+  ],
+  "permissions_and_invariants": [
+    "No paid provider or automatic paid fallback (FREE_ONLY).",
+    "No LIVE, signing handoff, or value-bearing submission without explicit separate approval.",
+    "Do not rerun/rewrite preserved five-hour raw data without user authorization.",
+    "Unknown economics/chain evidence is never zero or an assumed pass.",
+    "Modify only project_0/**; preserve bsc/** and saved evidence."
+  ],
+  "reference_sections": {
+    "fe00_selection": {
+      "line_start": 5255,
+      "line_end": 5263,
+      "heading": "2026-10-13 — FE-00/FE-01 selection and source-trust correction"
+    },
+    "fe04_foundation": {
+      "line_start": 5264,
+      "line_end": 5273,
+      "heading": "2026-10-13 — FE-04 durable hold foundation; pilot remains blocked"
+    },
+    "c0e1_p6": {
+      "line_start": 5242,
+      "line_end": 5254,
+      "heading": "2026-10-13 — C0-E1 P6 offline invariants / handoff"
+    },
+    "c0e1_p5": {
+      "line_start": 5229,
+      "line_end": 5241,
+      "heading": "2026-10-13 — C0-E1 P5 normalized reports / typed post-capture workflow"
+    },
+    "c0e1_p4": {
+      "line_start": 1,
+      "line_end": 23,
+      "heading": "2026-10-13 — C0-E1 P4 core implementation / local qualification"
+    },
+    "c0e1_p3_marker": {
+      "line_start": 24,
+      "line_end": 45,
+      "heading": "2026-10-13 — C0-E1 P3 marker/pair fix — LOCAL PASS"
+    },
+    "c0e1_p2": {
+      "line_start": 46,
+      "line_end": 94,
+      "heading": "2026-10-12 — C0-E1 P2: bounded transport recovery / shared provider budgets — LOCAL PASS"
+    },
+    "c0e1_p1": {
+      "line_start": 136,
+      "line_end": 171,
+      "heading": "P1 — Dynamic MeasurementPlan, 2026-10-11"
+    },
+    "historic_index_429": {
+      "line_start": 95,
+      "line_end": 135,
+      "heading": "P3 — UTC historical index verification, 2026-10-11"
+    },
+    "previous_market_incomplete": {
+      "line_start": 5107,
+      "line_end": 5228,
+      "heading": "C0-E1 FIRST 4H MAINNET OBSERVATION — INCOMPLETE (2026-10-09)"
+    },
+    "measured_state_overview": {
+      "line_start": 729,
+      "line_end": 749,
+      "heading": "8. Current status"
+    }
+  },
+  "updates": "After any change to the canonical Markdown ledger, refresh this JSON's snapshot, statuses, anchors and source.git_blob_sha in the same logical delivery. Do not infer current statuses from older historical ledger entries."
+}
