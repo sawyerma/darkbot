@@ -1,0 +1,292 @@
+{
+  "schema": "Project0/PhasePlanContext/1",
+  "snapshot_date": "2026-10-13",
+  "source": {
+    "path": "project_0/docs/PHASENPLAN.md",
+    "git_blob_sha": "c2f52f7fe46c42c23eac16c74df211446753149d",
+    "as_of_code_commit": "a9a8c34553026a845bc959e1116651d8b437d55a",
+    "line_count": 5234,
+    "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification."
+  },
+  "companion_ledger": "project_0/docs/MEASUREMENT_LEDGER.json",
+  "read_first": "Use this compact contract and section index first; read only the corresponding Markdown ranges for exact technical implementation, source constraints and acceptance details.",
+  "freshness_check": {
+    "method": "git rev-parse HEAD:project_0/docs/PHASENPLAN.md",
+    "compare_with": "source.git_blob_sha",
+    "on_mismatch": "STALE_INDEX: read changed relevant Markdown sections and refresh this JSON."
+  },
+  "priority_contract": {
+    "policy": "FIRST_REALIZED_PROFIT",
+    "interpretation": "Only delivery priority and the scope of one authorized safe pilot change. No original mandatory development item, performance research, acceptance or safety gate is deleted or made optional.",
+    "financial_target": "Earliest evidenced positive CUMULATIVE REALIZED NET PNL after fees, tips, failed attempts, capital/asset exit and previous own losses; profitability never guaranteed.",
+    "initial_scope": "One qualified funding/execution class, one wallet, persistently reserved single-flight attempt, explicit separate user authorization, immediate auto-HALT.",
+    "same_core": "Reuse current Project_0 Rust State/Health/Sizing/Economics/Builder/Submission/Reconciliation. No second execution engine, parallel verifier or strategy rewrite.",
+    "economy_policy": "FREE_ONLY until separate explicit budget approval; no required paid services or automatic paid fallbacks.",
+    "pilot_exemptions_only": "Full C0-E1 market master, general Race/Geyser, Jito-gRPC, all H0/P7, JIT-ExactIn if a different completely qualified class works, full MT/parallel multi-wallet and frontend need not precede the single safe pilot.",
+    "mandatory_before_value_transfer": [
+      "Exact current program/source/State/Bank/Oracle/Health parity",
+      "Candidate-specific freshness/fork/gap gates",
+      "Protocol-exact repay/seize and executable funding/route floor",
+      "Built and simulated complete intended signed transaction or correctly simulated bundle",
+      "Conservative realized exit economics including all costs and failure risk",
+      "Production Shadow/replay evidence for selected class",
+      "Persisted single-flight wallet/SOL/fee/tip/rent/capital holds and crash-safe UNKNOWN reconciliation",
+      "Qualified FREE_ONLY provider reads and explicit individual user authorization"
+    ],
+    "mandatory_final_product": [
+      "Full Long-Tail/Premium execution",
+      "Complete C0-E1 index/strict/crosscheck market qualification and H0 full-market comparison",
+      "Race Binary/Geyser ingress, prepared transactions, fast submission and measured latency",
+      "Jito single/bundle/gRPC, Prewarm and race benchmarking",
+      "JIT_SHORTFALL_EXACT_IN and all required funding classes",
+      "Full P6-MT/Apple-M4 parallelization",
+      "Global atomic persistent multi-wallet/multi-mint reservations and capital/SOL/fees/tips/rent",
+      "Inventory management, exit and rebalancing",
+      "Winner/competition analytics, p(win), P7/P4B",
+      "Frontend, P8/P9 controlled and production LIVE",
+      "Experimental K methods: mandatory investigation, productive rollout only when technically and economically qualified"
+    ]
+  },
+  "first_profit_tickets": {
+    "FE-00": {
+      "name": "Opportunity Selection",
+      "accept": "Evidence-backed current feasible positive candidate or NO_ECONOMIC_GO; historical cases only qualify logic, never current tradeability."
+    },
+    "FE-01": {
+      "name": "One-Class Freeze",
+      "accept": "Verified deployed ProgramData/source, group, banks, oracles, integrations, exact protocol/state parity and one genuinely executable funding class."
+    },
+    "FE-02": {
+      "name": "Executable Economics",
+      "accept": "Complete protocol-exact repay/seize, funding/route/min-out, signed TX plan/full simulation, conservative fees and exit; positive executable net edge or NOT_ACTIONABLE."
+    },
+    "FE-03": {
+      "name": "Targeted Production Shadow",
+      "accept": "Production-core replay/shadow plus positive/negative candidate evidence and measured winner/latency/loss reasons; no shadow profit as realized."
+    },
+    "FE-04": {
+      "name": "Serial Safety and Accounting",
+      "accept": "Versioned one-shot approval, one in-flight attempt, persistent holds, double-send prevention, crash/unknown HALT, finalized wallet/fee/exit reconciliation."
+    },
+    "FE-05": {
+      "name": "Read-only Preflight",
+      "accept": "Separately authorized bounded FREE_ONLY Mainnet observation, protocol/fee/simulation/candidate evidence; PILOT_READY or BLOCKED."
+    },
+    "FE-06": {
+      "name": "Controlled One-Shot Mainnet",
+      "accept": "Explicit separate user approval for code/wallet/program/budget/limits; one submission attempt, then HALT; no auto-rearm."
+    },
+    "FE-07": {
+      "name": "Realized Net PnL",
+      "accept": "Finalized signature/token/SOL/fee/tip/inventory/actual exit and all cumulative failed costs; positive cumulative realized only = FIRST_REALIZED_PROFIT_EVIDENCED."
+    }
+  },
+  "current_prioritized_technical_path": [
+    "FE-00 historical selection/evidence",
+    "FE-01 deploy/current state and one funding class",
+    "FE-02 exact executable economics, full TX simulation and realizable exit",
+    "FE-03 production shadow and competitor evidence",
+    "FE-04 scoped crash-safe wallet/approval/reconciliation",
+    "FE-05 approved read-only smoke and provider qualification",
+    "FE-06 separately authorized one-shot",
+    "FE-07 finalized realized cumulative PnL"
+  ],
+  "phase_section_index": {
+    "profit_priority": {
+      "line_start": 259,
+      "line_end": 293,
+      "heading": "0.6 FIRST REALIZED PROFIT PATH — höchste Umsetzungspriorität (binding 2026-10-13)"
+    },
+    "cost_policy": {
+      "line_start": 186,
+      "line_end": 231,
+      "heading": "0.4 Kostenoptimierung ohne technische Verkrüppelung"
+    },
+    "speed_policy": {
+      "line_start": 232,
+      "line_end": 258,
+      "heading": "0.5 Speed-Regel v4.3"
+    },
+    "fail_closed": {
+      "line_start": 473,
+      "line_end": 507,
+      "heading": "1.6 Fail Closed"
+    },
+    "hotpath": {
+      "line_start": 508,
+      "line_end": 563,
+      "heading": "1.7 Hotpath-Verbote"
+    },
+    "architecture": {
+      "line_start": 683,
+      "line_end": 765,
+      "heading": "4. Finale Zielarchitektur"
+    },
+    "roadmap": {
+      "line_start": 916,
+      "line_end": 951,
+      "heading": "7. Gesamtphasenplan — FIRST PROFIT vor Ausbau"
+    },
+    "P0": {
+      "line_start": 952,
+      "line_end": 1132,
+      "heading": "PHASE P0 — REFERENZ-, REUSE- UND LIZENZSTUDIE"
+    },
+    "P1A": {
+      "line_start": 1133,
+      "line_end": 1188,
+      "heading": "PHASE P1A — CURRENT MAINNET FREEZE"
+    },
+    "P1B": {
+      "line_start": 1189,
+      "line_end": 1303,
+      "heading": "PHASE P1B — UPCOMING 0.1.12 FREEZE"
+    },
+    "C0": {
+      "line_start": 1304,
+      "line_end": 1391,
+      "heading": "PHASE C0 — MARKET- UND ACCOUNT-CENSUS"
+    },
+    "H0": {
+      "line_start": 1392,
+      "line_end": 1527,
+      "heading": "TRACK H0 — HISTORICAL LIQUIDATION INTELLIGENCE"
+    },
+    "S0": {
+      "line_start": 1528,
+      "line_end": 1585,
+      "heading": "PHASE S0 — FINAL NATIVE FOUNDATION"
+    },
+    "S1": {
+      "line_start": 1586,
+      "line_end": 1849,
+      "heading": "PHASE S1 — FINAL SOLANA INGRESS"
+    },
+    "S1_RACE": {
+      "line_start": 1622,
+      "line_end": 1667,
+      "heading": "S1.2 RACE PRIMARY — `BinaryGeyserSource`"
+    },
+    "S2": {
+      "line_start": 1850,
+      "line_end": 1924,
+      "heading": "PHASE S2 — FINAL CANONICAL SOLANA STATE"
+    },
+    "S3": {
+      "line_start": 1925,
+      "line_end": 2070,
+      "heading": "PHASE S3 — FINAL SOLANA EXECUTION CORE"
+    },
+    "S3_RACE": {
+      "line_start": 1975,
+      "line_end": 2013,
+      "heading": "S3.R — RACE EXTENSIONS — Vorbereitungen parallel erlaubt; Race-Promotion nur nach `S1-RACE PASS`"
+    },
+    "S4": {
+      "line_start": 2071,
+      "line_end": 2117,
+      "heading": "PHASE S4 — CORE PARITY + PERFORMANCE BASELINE"
+    },
+    "P2": {
+      "line_start": 2163,
+      "line_end": 2289,
+      "heading": "PHASE P2 — FINAL PROJECT-0 STATE ENGINE"
+    },
+    "P3": {
+      "line_start": 2290,
+      "line_end": 2428,
+      "heading": "PHASE P3 — FINAL PROJECT-0 HEALTH ENGINE"
+    },
+    "P4A": {
+      "line_start": 2429,
+      "line_end": 2581,
+      "heading": "PHASE P4A — DETERMINISTIC PROFIT ENGINE"
+    },
+    "P4A_JIT": {
+      "line_start": 2570,
+      "line_end": 2575,
+      "heading": "P4A v4.5.1 — verbindlicher JIT-ExactIn-Fundingpfad"
+    },
+    "P5": {
+      "line_start": 2582,
+      "line_end": 2754,
+      "heading": "PHASE P5 — FINAL RECEIVERSHIP EXECUTION PLANNER"
+    },
+    "T": {
+      "line_start": 2755,
+      "line_end": 2805,
+      "heading": "PHASE T — TAGGER"
+    },
+    "P6": {
+      "line_start": 2806,
+      "line_end": 3708,
+      "heading": "PHASE P6 — FULL PRODUCTION SHADOW"
+    },
+    "P6_MT": {
+      "line_start": 2949,
+      "line_end": 3708,
+      "heading": "P6-MT — BOUNDED PARALLEL RUNTIME / APPLE-M-SERIES"
+    },
+    "P7": {
+      "line_start": 3709,
+      "line_end": 3781,
+      "heading": "PHASE P7 — COMPETITION + PROVIDER ECONOMICS"
+    },
+    "P4B": {
+      "line_start": 3782,
+      "line_end": 3822,
+      "heading": "PHASE P4B — PROBABILISTIC PROFIT OPTIMIZER"
+    },
+    "P8": {
+      "line_start": 3823,
+      "line_end": 3903,
+      "heading": "PHASE P8 — CONTROLLED LIVE"
+    },
+    "P8_RES": {
+      "line_start": 3852,
+      "line_end": 3857,
+      "heading": "P8 v4.5.1 — Walletreservation und Inventory Target Policy"
+    },
+    "P9": {
+      "line_start": 3904,
+      "line_end": 3964,
+      "heading": "PHASE P9 — PRODUCTION LIVE"
+    },
+    "K": {
+      "line_start": 3965,
+      "line_end": 4136,
+      "heading": "PHASE K — MEASURED CONTINUOUS OPTIMIZATION"
+    },
+    "ticket_order": {
+      "line_start": 4137,
+      "line_end": 4326,
+      "heading": "8. Verbindliche Ticket-Reihenfolge"
+    },
+    "first_profit_tickets": {
+      "line_start": 4139,
+      "line_end": 4153,
+      "heading": "First-Profit-Tickets — höchste Produktpriorität (scope FE-00…FE-07)"
+    },
+    "release_train": {
+      "line_start": 4554,
+      "line_end": 4950,
+      "heading": "13. Verbindlicher Start — FIRST PROFIT RELEASE TRAIN (13.10.2026)"
+    },
+    "race_binding": {
+      "line_start": 4574,
+      "line_end": 4603,
+      "heading": "Parallel / danach — Race (vollständig verbindlich)"
+    },
+    "C0_E1": {
+      "line_start": 4604,
+      "line_end": 4804,
+      "heading": "C0-E1 — 4H ECONOMIC / CAPITAL / COMPETITION / RACE ATTRIBUTION"
+    },
+    "C0_E1_MASTER": {
+      "line_start": 4997,
+      "line_end": 5234,
+      "heading": "C0-E1 — ASTRA MASTER IMPLEMENTATION CONTRACT 2026-10-11"
+    }
+  },
+  "updates": "On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS."
+}
