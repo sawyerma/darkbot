@@ -1010,6 +1010,13 @@ fn main() {
         .expect("capture transport-prewarm event failed before egress");
     assert!(capture.healthy(), "capture unhealthy immediately before egress");
 
+    // Fail closed if the short-lived bundle is already stale after both TLS
+    // connections were established. Keep the frozen signed transactions intact.
+    let fresh_head = hex_u64(&rpc("eth_blockNumber", json!([]))
+        .expect("cannot verify dispatch head before release"));
+    assert!(fresh_head == send_head,
+        "G0.7 PRE_EGRESS_STOP: block head moved after the signed bundle's expiry window was frozen; do not send stale bundle");
+
     let barrier = Arc::new(Barrier::new(3));
     let mut release_before_ns = 0u64;
     let mut release_after_ns = 0u64;
