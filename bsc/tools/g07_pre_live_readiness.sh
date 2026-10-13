@@ -121,7 +121,40 @@ export DARKBOT_G06A_BUYER_ADDRESS="$BSC_BUYER_ADDRESS"
 
 TMP_PREFLIGHT="$(mktemp -t darkbot-g07-prelive.XXXXXX.json)"
 trap 'rm -f "$TMP_PREFLIGHT"' EXIT
-node bsc/gates/gate0/tools/g06a_preflight_readonly.cjs "$TMP_PREFLIGHT" >/dev/null
+# Qualify the exact signed G0.6 DRY profile, never Node's broader v2 ceiling
+# defaults (1 gwei / 0.001 BNB). Otherwise FUNDING=PENDING is a false block.
+python3 - "$DRY" "$TMP_PREFLIGHT" "$BUILDER_POLICY" <<'PY'
+import json, os, subprocess, sys
+
+dry = json.load(open(sys.argv[1]))
+builder = json.load(open(sys.argv[3]))
+tx = dry["transactions"]
+keys = {
+    "gas_price_wei": "DARKBOT_G06A_GAS_PRICE_WEI",
+    "launch_gas_limit": "DARKBOT_G06A_LAUNCH_GAS_LIMIT",
+    "buy_gas_limit": "DARKBOT_G06A_BUY_GAS_LIMIT",
+    "launch_value_wei": "DARKBOT_G06A_LAUNCH_VALUE_WEI",
+    "buy_value_wei": "DARKBOT_G06A_BUY_VALUE_WEI",
+}
+env = os.environ.copy()
+for field, key in keys.items():
+    value = tx.get(field)
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise SystemExit(f"STOP: invalid DRY signed parameter {field}")
+    text = str(value)
+    if not text.isdecimal():
+        raise SystemExit(f"STOP: non-decimal DRY signed parameter {field}")
+    env[key] = text
+if env["DARKBOT_G06A_GAS_PRICE_WEI"] != builder["stage1_signed_gas_price_policy_wei"]:
+    raise SystemExit("STOP: frozen DRY gas price is inconsistent with qualified builder policy")
+subprocess.run(
+    ["node", "bsc/gates/gate0/tools/g06a_preflight_readonly.cjs", sys.argv[2]],
+    env=env, stdout=subprocess.DEVNULL, check=True
+)
+print("FUNDING_PROFILE_SOURCE=EXACT_G06_SIGNED_DRY")
+print("SIGNED_GAS_PRICE_WEI=" + env["DARKBOT_G06A_GAS_PRICE_WEI"])
+print("SIGNED_BUY_VALUE_WEI=" + env["DARKBOT_G06A_BUY_VALUE_WEI"])
+PY
 
 python3 - "$TMP_PREFLIGHT" "$BASELINE" <<'PY'
 import json, sys
