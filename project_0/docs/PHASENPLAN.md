@@ -4,6 +4,8 @@
 
 # DarkBot — Project 0 — Produktions-Phasenplan v4.5.2 (First Realized Profit)
 
+> **VERBINDLICH: NUR PRIORITÄT UND ERSTER PILOTUMFANG GEÄNDERT (2026-10-13).** v4.5.2 **streicht, optionalisiert und verwirft keine** ursprünglich verpflichtende Phase, Capability oder Abnahme aus v4.5/v4.5.1. Race/Binary-Geyser, Prepared TX, Jito Single/Bundle/gRPC, Prewarm und Race-Benchmarks, JIT-ExactIn und alle Fundingklassen, vollständige Markt-/Chain-Qualifikation (C0-E1/Index/Strict), H0/Winner/Konkurrenz/P7/P4B, P6-MT/M4, persistente atomare Multi-Asset-/SOL-/Fee-/Tip-/Rent-Reservierungen, Inventar-Rebalancing, P8/P9, K-Mess-/Entscheidungsphase und Frontend **bleiben verbindlicher Entwicklungsumfang**. Profit-First verkürzt nur den für **einen** sicheren LIVE-Pilot benötigten Critical Path; kein Gate und keine LIVE-Freigabe werden dadurch vorweggenommen. Extern unmögliche kostenlose Fähigkeiten bleiben mit Evidence `EXTERNAL_BLOCKED`, nicht `DONE` oder gestrichen. Experimentelle K-Technik muss untersucht werden; ein Deployment ist weiterhin an Machbarkeit, wirtschaftliche Evidence, Safety und FREE_ONLY gebunden.
+
 > **VERBINDLICHE PRÄZISIERUNG v4.5.1 (2026-10-12):** Die in §0.4, P4A, P5, P6-MT, P7, P8 und C0-E1 Abschnitt L integrierten Ergänzungen gelten zusätzlich zum v4.5-Architekturvertrag. Alte C0-E1-CLI-Beispiele sind, soweit widersprüchlich, von Abschnitt L abgelöst; der kanonische Master-PASS und alle LIVE-/Submission-Gates bleiben unverändert. Dies ist Sollplanung, keine Implementierungs-/Mainnet-Qualifikation.
 
 ### C0-E1 current gate update — 2026-10-10 19:57 Europe/Berlin (newer than earlier historical entries)
@@ -258,7 +260,9 @@ Priorität:
 
 **Vorrangiges Produktziel: der frühestmögliche nachweisbare positive kumulierte REALIZED NET PNL des bestehenden Project_0-Rust-Cores im kontrollierten Mainnet-Betrieb.** Kein Profit wird garantiert. Ein positiver Shadow-Edge, eine positive lokale Simulation, ein BUY-Receipt, eine nicht verkaufte Collateral-Position und ein einzelner positiver Trade trotz größerer Fehlversuchskosten sind **kein** Nachweis des Break-even. Alle Gebühren, Verluste und Inventarverkäufe gehen in die Bilanz ein.
 
-**Konsolenbetrieb ist Produktionsbetrieb:** CLI, Logs, Replay, Ledger, Chain-Reconciliation und harte Safety-Gates reichen für die erste freigegebene Execution-Klasse; GUI, LLM, vollständige Wettbewerbsmodelle und generelle Race-Infrastruktur sind keine First-Profit-Voraussetzung.
+**Konsolenbetrieb ist Produktionsbetrieb:** CLI, Logs, Replay, Ledger, Chain-Reconciliation und harte Safety-Gates reichen für die erste freigegebene Execution-Klasse; GUI, LLM, vollständige Wettbewerbsmodelle und generelle Race-Infrastruktur sind **keine First-Profit-Voraussetzung, bleiben jedoch für das endgültige Produkt verbindlich**. Unabhängige Entwicklung daran darf parallel erfolgen.
+
+**Kein Profit als Abbruch der Roadmap:** Falls FE-00 keinen aktuellen Kandidaten findet oder FE-07 mit NO_TRADE/LOSS/UNKNOWN endet, wird ausschließlich das nicht freigegebene LIVE angehalten. Sämtliche Produkt-, Race-, Markt-, JIT-, M4- und Wallet-Entwicklungstickets bleiben weiter verpflichtend bzw. evidenzbasiert blockiert; der erste Profit ist **kein Startgate** für die restliche Implementierung.
 
 ```text
 CURRENT MAINNET source/program pin (P1A) + gezielte C0/H0-Evidence für die gewählte Klasse
@@ -283,7 +287,7 @@ CURRENT MAINNET source/program pin (P1A) + gezielte C0/H0-Evidence für die gew�
 
 **Scope statt Schein-Master-PASS:** Der vollständige C0-E1-v4.5.1-Markt-Census, Crosscheck und Strict-Master bleiben eigenständig und OPEN, bis ihre Gates real bestanden sind. Sie dürfen das Initial-Pilot nicht *allein aufgrund fehlender Vollmarktabdeckung* blockieren, sofern **für den konkreten ausgewählten Kandidaten** aktuelle Chain-State-/Programm-/Bank-/Oracle-Parität, Quellenfrische, komplette TX-Simulation, Gebühren, realistische Exit-Route, Shadow-Replay und P8-Safety unabhängig bewiesen sind. Fehlende Kandidatenbelege oder nicht hinreichend verifizierte Eingangsquelle blockieren den Pilot dagegen zwingend. Pilot-Evidence ist niemals als vierstündiger Market-Master-PASS auszugeben.
 
-**Nach dem ersten nachgewiesenen positiven kumulierten Ergebnis:** kleine wiederholte, je Versuch begrenzte kontrollierte LIVE-Schritte nur mit neuer dokumentierter Freigabe; parallel weitere Fundingklassen, `P4A-JIT`, `P6-MT`, P8-RES/INV, P7/P4B, H0, S1-RACE/Jito-gRPC und optional K. Gewinne werden zuerst gegen Verlust-/Liquiditäts-/Fee-Puffer gerechnet; KI-Credits oder zusätzliche Infrastruktur sind **keine automatische Ausgabe** und bleiben bei laufenden Kosten unter §0.4 FREE_ONLY gesperrt, bis eine separate ausdrückliche Kostenpolitik-Freigabe erfolgt.
+**Nach dem ersten nachgewiesenen positiven kumulierten Ergebnis:** kleine wiederholte, je Versuch begrenzte kontrollierte LIVE-Schritte nur mit neuer dokumentierter Freigabe. **Weiterhin verpflichtend umzusetzen und zu qualifizieren:** alle Fundingklassen inklusive `P4A-JIT`, `P6-MT`/M4, P8-RES/INV und parallele Walletverwaltung, H0/P7/P4B, vollständiger C0-E1-Index-/Strict-Master, S1-RACE/Binary-Geyser, Jito Single/Bundle/gRPC/Prewarm, Race-Benchmarks und Race-LIVE-Gates, K-Untersuchungen, Frontend sowie P9. Diese Arbeit darf bereits vorher parallel laufen; ihre Pflicht hängt **weder von positivem FE-07 noch von prognostiziertem Race-Mehrgewinn ab**. Messungen entscheiden über Reihenfolge und produktive Optimierungspromotion, nicht über Streichung. Gewinne werden zuerst gegen Verlust-/Liquiditäts-/Fee-Puffer gerechnet; KI-Credits oder zusätzliche Infrastruktur sind **keine automatische Ausgabe** und bleiben bei laufenden Kosten unter §0.4 FREE_ONLY gesperrt, bis eine separate ausdrückliche Kostenpolitik-Freigabe erfolgt.
 
 ---
 
@@ -934,8 +938,12 @@ Landing Evidence:
        Mehrfach-LIVE nur nach vollen P6-MT/P8-RES Gates
        P4A-JIT / P7 / P4B / Inventar / P9
        Race: S1-RACE → S3.R → P6-RACE → Race-LIVE
-       K: nur gemessen notwendige Optimierungen
+       K: Forschung/Capability-Benchmarks verpflichtend; Einsatz bei nachgewiesener Eignung
+       Vollständige C0-E1/H0/P6-MT/P8-RES+INV/Frontend/P9-Lieferung bleibt Pflicht
+       auch falls der erste Pilot NO_TRADE/LOSS/UNKNOWN liefert
 ```
+
+**Vollständiger Umfang bleibt verbindlich:** Das Flussdiagramm ist **keine Kürzung** des detaillierten `P0–P9`-, `S0–S4`-, `C0/C0-E1/H0/T`-, `S1-RACE/S3.R/P6-RACE`-, `P4A-JIT`-, `P6-MT`-, `P8-RES/INV`-, `P7/P4B`-, K- oder Frontend-Auftrags. Eine externe FREE_ONLY-Geyser-Sperre wird belegbar `EXTERNAL_BLOCKED`, nicht zum Entfall von Race. FE-07 ist kein Startgate für die übrige Entwicklung.
 
 Diese Darstellung ist eine **Priorisierung und Scope-Abgrenzung**, kein Ersatz der technischen Detailphasen, kein pauschaler P6-MT-PASS, keine LIVE-/Provider-Freigabe und keine Garantie einer rentablen Opportunity. Die autoritativen Bedingungen für den einmaligen Pilot stehen in §0.6, §13 und dem P8-LT-Gate.
 
@@ -4141,7 +4149,7 @@ FE-06  einzeln genehmigter, budgetierter Mainnet-Versuch + Auto-HALT
 FE-07  finalized chain/cost/exit reconciliation + kumulierter REALIZED NET PNL; GO/STOP
 ```
 
-Diese Tickets überlagern die nachfolgenden technischen Produkt-Tickets nur in der **Reihenfolge**; sie sind keine zweite Strategy/Runtime. Produkt-Scope bewusst auf eine Klasse begrenzt, alle relevanten P8-Safety-Gates bleiben erhalten. FULL P6-MT/mehrfache Reservations vor jeder Erhöhung auf parallele Live-Versuche. Wer FE-06 ohne FE-00…FE-05 PASS freigibt, verletzt den bindenden §0.6/§13 Vertrag.
+Diese Tickets überlagern die nachfolgenden technischen Produkt-Tickets **ausschließlich in der Priorität und für den Scope des einzelnen First-Profit-Piloten**, nicht im endgültigen Lieferumfang. Kein ursprüngliches Produkt-/Race-/Jito-/JIT-/Market-/Wallet-/M4-/Frontend-/K-Ticket wird gestrichen oder auf freiwillig gesetzt. Bis zur späteren Bearbeitung gilt `DEFERRED_PRIORITY`, bei paralleler Arbeit `PARALLEL_IN_PROGRESS`, bei evidenzbelegten externen Grenzen `EXTERNAL_BLOCKED` — **niemals stillschweigend CANCELLED oder PASS**. Sie bleiben dieselbe Strategy/Runtime; voller P8-Safety-Umfang gilt vor Mehrfach-LIVE. Wer FE-06 ohne FE-00…FE-05 PASS freigibt, verletzt §0.6/§13.
 
 ## Sofort parallel
 
@@ -4559,11 +4567,13 @@ Erst nach dieser Prüfung darf v4.4 die autoritative v4.2 ersetzen.
 | **FE-07 – Profit / Stop Decision** | TX-/Bundle-Outcome, Signature, finalized Token-/Lamport-Deltas, Gebühren aller eigenen Versuche, Restinventar und belegten tatsächlichen Verkauf/Exit auswerten; kumulierten realisierten Nettoertrag berichten | `FIRST_REALIZED_PROFIT_EVIDENCED` nur bei positiver *kumulierter* realisierter Bilanz nach allen angefallenen Kosten; sonst `LOSS/UNKNOWN/NO_TRADE`, STOP und Analyse |
 
 **Spezifische Scope-Regeln vor dem ersten Profit:**
-- **Nicht verpflichtend vor FE-06:** vollständige C0-E1-Master-Strict-/Index-Marktvollständigkeit, generelle Race-Geyser-Infrastruktur, Jito-gRPC, gesamtes H0/P7/p(win), genereller JIT-ExactIn-Betrieb, vollständige MT6–MT13, Mehrfach-Wallet/Parallel-Reservations oder Frontend. Sie bleiben als *eigene* Produktions-/Skalierungsphasen OPEN und dürfen bei ungelöstem Kandidatenrisiko nicht durch den Pilot ersetzt werden.
+- **Nur für FE-06 nicht vorgelagert, für das Endprodukt weiterhin VERBINDLICH:** vollständige C0-E1-Strict-/Index-Marktqualifikation, S1-RACE/Binary-Geyser und sämtliche Race-/Jito-Optimierungen, H0/P7/P4B/`p(win)`, JIT-ExactIn, MT6–MT13/M4, globale Multi-Wallet-/Gebührenreservierung, Rebalancing und Frontend. Alle ursprünglichen Abnahmekriterien bleiben erhalten. Eigenständige parallele Umsetzung ist ausdrücklich erlaubt; die Verschiebung gilt **nur** für den One-Shot-Critical-Path.
 - **Weiterhin verpflichtend vor FE-06:** vollständige konkrete Program-/Health-/State-Parität, aktuelle State-Frische, korrekter TX-Plan, ausführbares ökonomisches Ergebnis, ausreichend tatsächliches Shadow-/Rehearsal-Evidence, P8-Single-Flight-Kapital-/Safety-/Crash-Reconciliation und echte FREE_ONLY-Providerfähigkeit für den gewählten Kandidaten. Ohne einen gewinnfähigen Kandidaten gibt es **keinen** Finanzierungs-/LIVE-Freifahrtschein.
-- **Nach FE-07:** Zuerst nachgewiesen profitablen Pfad mit begrenztem Risiko wiederholbar machen und netto messen; erforderlichen JIT-ExactIn-/Inventory-Ausbau umsetzen, danach MT2–MT13 mit gemessenem Engpass, volles P8-RES/INV vor parallelem LIVE, H0/P7/P4B und S1-RACE nur bei zusätzlichem erwarteten Netto-Nutzen. Ein erster erfolgreicher Trade allein hebt die LIVE-Gates nicht global auf.
+- **Nach FE-07 und unabhängig vom FE-07-Ergebnis:** Den ersten qualifizierten Pfad nach Freigabe begrenzt wiederholbar machen und die gesamte v4.5/v4.5.1-Architektur **verbindlich fertigstellen**: JIT-ExactIn und alle Fundingklassen, MT2–MT13/M4, globale P8-RES/INV vor Parallel-LIVE, voller C0-E1-Master, H0/P7/P4B, S1-RACE/Geyser, Jito Single/Bundle/gRPC/Prewarm, P6-RACE, K-Qualifikationen, Frontend und P9. Erwarteter zusätzlicher Netto-Nutzen steuert Test-/Optimierungspriorität und späteren produktiven Einsatz, **nicht die Entwicklungspflicht**. LIVE-Gates bleiben bestehen.
 
-## Parallel / danach — Race
+## Parallel / danach — Race (vollständig verbindlich)
+
+**Race ist keine optionale Erweiterung nach dem ersten Gewinn.** S1-RACE-Geyser-/Binary-Ingress-Qualifikation, Jito Single/Bundle/gRPC, Prepared TX, Prewarm, Submission-Race und p95/p99-/Landing-/Profit-Optimierung sind weiterhin als Produktphasen verpflichtend. Wenn keine qualifizierte kostenlose Quelle verfügbar ist: `EXTERNAL_BLOCKED` mit Alternativen und Mess-Evidence statt Streichung oder Paid-Fallback. Offline-Vorarbeiten dürfen parallel zum FE-Train stattfinden.
 
 ```text
 S1-RACE qualification
@@ -4574,20 +4584,20 @@ S1-RACE qualification
 → Race LIVE gate
 ```
 
-Nur bei gemessenem Bottleneck/Mehrwert:
+**K-Research, Capability-Checks und Messentscheidungen bleiben verpflichtend.** Der produktive Ausbau einer K-Technik erfolgt weiterhin nur bei belegtem Bottleneck/Mehrwert, Machbarkeit, Safety und FREE_ONLY (insbesondere keine neuen kostenpflichtigen Nodes):
 
 ```text
-K SubscribeDeshred
-K Raw Shred
-K Direct TPU + SWQoS/stake path
-K own validator/node/region/kernel/NIC
+K SubscribeDeshred — prüfen und messen
+K Raw Shred — prüfen und messen
+K Direct TPU + SWQoS/stake path — technische/ökonomische Qualifikation
+K own validator/node/region/kernel/NIC — bewerten, unter FREE_ONLY keine Paid-Pflicht
 ```
 
-H0, P7 und P4B laufen als Evidence/Optimization weiter, dürfen aber den First-Euro-Build nicht künstlich verzögern, solange die für sichere Controlled-LIVE-Freigabe notwendigen Gates erfüllt sind.
+H0, P7 und P4B bleiben verbindliche Evidence- und Optimierungsphasen. Ihre parallele Umsetzung darf den sicher qualifizierten First-Profit-Pilot nicht künstlich verzögern; aus fehlendem unmittelbarem Profit darf aber kein späteres Streichen dieser Phasen folgen.
 
 **Keine zweite Entwicklung. Kein späterer Race-Rewrite. Kein späterer Rust-Rewrite.  
 Ein finaler Core; Long-Tail/Premium wird zuerst wirtschaftlich aktiviert, Race wird danach auf demselben Core freigeschaltet.  
-Diese v4.5 ist mit P6-MT-v2-Review promoted und eingefroren.**
+v4.5.2 ändert nur Reihenfolge/Pilotumfang; die mit P6-MT-v2 eingefrorene v4.5/v4.5.1-Gesamtarchitektur und alle verbindlichen Lieferziele bleiben erhalten.**
 
 ---
 
