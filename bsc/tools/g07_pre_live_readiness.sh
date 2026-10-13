@@ -56,16 +56,27 @@ if v.get("stage1_signed_gas_price_policy_wei") != "50000000":
 print("BUILDER_POLICY=PASS")
 PY
 
-DRY_DIR="$(find "$ROOT/bsc/gates/gate0/evidence" -maxdepth 1 -type d -name 'g06a_final_dry_*' -print | sort | tail -n 1)"
-[[ -n "$DRY_DIR" ]] || die "no local g06a_final_dry evidence directory found"
+# A previous interrupted DRY can leave a newer directory without dry_result.json.
+# Select the most recent COMPLETE evidence set, never a merely newest directory.
+# The existing checks immediately below must still validate the selected DRY PASS.
+DRY_DIR=""
+while IFS= read -r candidate; do
+  if [[ -f "$candidate/dry_result.json" \
+     && -f "$candidate/preflight.json" \
+     && -f "$candidate/local_simulation.json" \
+     && -f "$candidate/economics_crosscheck.json" ]]; then
+    DRY_DIR="$candidate"
+    break
+  fi
+  printf 'G06_INCOMPLETE_EVIDENCE_SKIPPED=%s\n' "$candidate" >&2
+done < <(find "$ROOT/bsc/gates/gate0/evidence" -maxdepth 1 -type d -name 'g06a_final_dry_*' -print | sort -r)
+[[ -n "$DRY_DIR" ]] || die "no COMPLETE local G0.6 DRY evidence set found; existing PASS evidence must be located, not invented"
 
 DRY="$DRY_DIR/dry_result.json"
 BASELINE="$DRY_DIR/preflight.json"
 LOCAL_SIM="$DRY_DIR/local_simulation.json"
 ECON="$DRY_DIR/economics_crosscheck.json"
-for f in "$DRY" "$BASELINE" "$LOCAL_SIM" "$ECON"; do
-  [[ -f "$f" ]] || die "missing G0.6 evidence file: $f"
-done
+printf 'G06_EVIDENCE_SELECTED=%s\n' "$DRY_DIR"
 
 python3 - "$DRY" "$LOCAL_SIM" "$ECON" <<'PY'
 import json, sys
