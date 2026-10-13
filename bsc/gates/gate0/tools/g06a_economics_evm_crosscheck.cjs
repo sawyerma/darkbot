@@ -394,6 +394,11 @@ async function main() {
   for (const [trialIndex, value] of BUY_VALUES.entries()) {
     let trialDepth = null;
     if (BATCH_RAW) {
+      // OriginalStorageCache is transaction-local and is not part of state.revert().
+      if (typeof state.originalStorageCache?.clear !== 'function') {
+        throw new Error('G07_BATCH_ORIGINAL_STORAGE_CACHE_UNAVAILABLE');
+      }
+      state.originalStorageCache.clear();
       trialDepth = batchCacheDepth('before trial=' + trialIndex);
       await state.checkpoint();
       if (batchCacheDepth('checkpoint trial=' + trialIndex) !== trialDepth + 1) {
@@ -506,6 +511,7 @@ async function main() {
     post_launch_checkpoint_revert: Boolean(BATCH_RAW),
     batch_cache_all_layers_commit_patch: Boolean(BATCH_RAW),
     batch_post_revert_zero_token_balance_checked: Boolean(BATCH_RAW),
+    batch_transaction_original_storage_cleared: Boolean(BATCH_RAW),
     rust_expected_output_was_execution_input: false,
     signed_transactions_created: false,
     signed_transactions_submitted: false,
