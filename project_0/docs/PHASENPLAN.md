@@ -2,7 +2,7 @@
 
 > 2026-10-09: canonical full-slot scanner and typed four-path decoder implemented locally; master remains PARTIAL. Current resume/evidence and exact remaining steps are at the top of MEASUREMENT_LEDGER.md. No 4h qualification or LIVE release.
 
-# DarkBot — Project 0 — Produktions-Phasenplan v4.5
+# DarkBot — Project 0 — Produktions-Phasenplan v4.5.2 (First Realized Profit)
 
 > **VERBINDLICHE PRÄZISIERUNG v4.5.1 (2026-10-12):** Die in §0.4, P4A, P5, P6-MT, P7, P8 und C0-E1 Abschnitt L integrierten Ergänzungen gelten zusätzlich zum v4.5-Architekturvertrag. Alte C0-E1-CLI-Beispiele sind, soweit widersprüchlich, von Abschnitt L abgelöst; der kanonische Master-PASS und alle LIVE-/Submission-Gates bleiben unverändert. Dies ist Sollplanung, keine Implementierungs-/Mainnet-Qualifikation.
 
@@ -254,50 +254,36 @@ Priorität:
 
 ---
 
-## 0.6 FIRST EURO PATH — höchste Umsetzungspriorität
+## 0.6 FIRST REALIZED PROFIT PATH — höchste Umsetzungspriorität (binding 2026-10-13)
 
-Der erste wirtschaftliche Produktionspfad ist **Long-Tail/Premium**, nicht Race.
+**Vorrangiges Produktziel: der frühestmögliche nachweisbare positive kumulierte REALIZED NET PNL des bestehenden Project_0-Rust-Cores im kontrollierten Mainnet-Betrieb.** Kein Profit wird garantiert. Ein positiver Shadow-Edge, eine positive lokale Simulation, ein BUY-Receipt, eine nicht verkaufte Collateral-Position und ein einzelner positiver Trade trotz größerer Fehlversuchskosten sind **kein** Nachweis des Break-even. Alle Gebühren, Verluste und Inventarverkäufe gehen in die Bilanz ein.
 
-```text
-P0 minimal required reuse/protocol decisions
-+ P1A current mainnet freeze
-+ C0 long-tail market evidence
-
-S0
-→ S1-LT PASS
-→ S2
-→ S3-CORE PASS
-→ P2
-→ P3
-→ P4A
-→ P5
-→ T
-→ P6-LT shadow
-→ S4 parity before value-bearing LIVE
-→ P8-LT controlled LIVE
-→ first realized net profit
-```
-
-Parallel, aber **nicht blockierend für P2/Long-Tail-Bau**:
-
-- H0 vertiefen;
-- P1B vorbereiten und bei Deployment promoten;
-- S1-RACE Binary-Source suchen/qualifizieren;
-- Race-spezifische Submission-Forschung;
-- P7/P4B Competition-/Provider-Optimierung.
-
-Regel:
+**Konsolenbetrieb ist Produktionsbetrieb:** CLI, Logs, Replay, Ledger, Chain-Reconciliation und harte Safety-Gates reichen für die erste freigegebene Execution-Klasse; GUI, LLM, vollständige Wettbewerbsmodelle und generelle Race-Infrastruktur sind keine First-Profit-Voraussetzung.
 
 ```text
-kein kostenloser Mainnet-Geyser
-≠ Projekt blockiert
-
-sondern:
-Long-Tail/Premium weiterbauen und LIVE qualifizieren
-Race bleibt deaktiviert
+CURRENT MAINNET source/program pin (P1A) + gezielte C0/H0-Evidence für die gewählte Klasse
+→ vorhandene S0 / S1-LT / S2 / S3-CORE wiederverwenden und qualifizieren
+→ Produkt-P2 / P3 / P4A / P5 für GENAU EINE tatsächlich ausführbare Klasse qualifizieren
+→ targeted S4-Parity + Produkt-P6-LT Shadow + realer Kandidaten-/Kostenbeleg
+→ persistentes SINGLE-FLIGHT Safety/Wallet/UNKNOWN-Reconciliation-Gate
+→ explizite individuelle Benutzerfreigabe mit Gesamt-Spend- und Verlustgrenze
+→ P8-LT CONTROLLED MAINNET: genau ein begrenzter Versuch, danach automatischer HALT
+→ Signature + finalisierte Chain-Deltas + Fees/Tip/Swap/Rent + Inventarabschluss beweisen
+→ kumulierter REALIZED NET PNL nach allen eigenen Fehlversuchen > 0?
+   JA: FIRST_REALIZED_PROFIT_EVIDENCED; kontrolliert wiederholen / Kapital erhalten
+   NEIN oder UNKNOWN: STOP, Ursache analysieren, kein Gewinnanspruch, kein Auto-Rearm
 ```
 
-0.1.12-spezifisches Tagging/T-Pfad darf erst LIVE, wenn der entsprechende Program-Stand tatsächlich on-chain deployed und über P1B→P1A promoted ist.
+**Funding-Entscheidung anhand aktueller Simulation und Kosten, nicht Enum-Reihenfolge:**
+- Zuerst den am schnellsten qualifizierbaren wirtschaftlich plausiblen Pfad wählen: `NO_SWAP_INVENTORY` **nur** bei wirklich vorhandenem Liability-Inventar, protocol-exaktem Repay und einem belegbar ausführbaren Weg zur späteren Collateral-Verwertung; alternativ `ZERO_PREFUND_SAME_TX` nur bei aktueller, erlaubter und ausführbar simulierter Swap-Route mit Mindest-Output-Floor, der den Repay deckt. Beide sind zu überspringen, wenn Profit, Route oder Chain-Semantik UNKNOWN sind.
+- `JIT_SHORTFALL_EXACT_IN` ist für den **vollen Produktumfang verpflichtend**, blockiert aber den ersten begrenzten Profitversuch mit einem *anderen vollständig qualifizierten* Fundingpfad nicht. Fehlt ohne JIT jeder wirtschaftlich ausführbare Pfad, wird JIT auf die Critical Path vorgezogen, niemals simuliert oder fingiert.
+- Tagging/Premium-Instruktionen aus 0.1.12 sind für diesen Pfad **nur** zulässig, wenn der dazugehörige Stand nachweisbar deployed und P1B→P1A promoted wurde. `T` ist nur dann Pflicht, wenn der freigegebene Ablauf Tagging benutzt.
+
+**Keine Sicherheitsabkürzung:** Der vorhandene `P0_MODE=live`-Block bleibt bestehen, bis die gewählte Klasse ihren eigenen P8-LT-Pilot-Gate belegt. Ein Pilot darf **nicht** bloß `live_enabled=true` setzen: autorisierter, codegebundener One-Shot, maximal ein in-flight Attempt, ein kontrolliertes Wallet-/Mint-Budget, persistente Holds für Liability/SOL/Fee/Tip/Rent und `SUBMITTED/UNKNOWN` über Restart hinweg, Reconciliation vor Freigabe, automatische Abschaltung und manuelle Neubewilligung sind Pflicht. Bei Unknown State, unklarer Nonce/Blockhash-Lifetime, Feed-Gap, Health-/Fee-/Cost-UNKNOWN oder Portfolio-Risiko STOP. Für paralleles LIVE gilt weiterhin die vollständige globale P6-MT.11/P8-RES-Reservation.
+
+**Scope statt Schein-Master-PASS:** Der vollständige C0-E1-v4.5.1-Markt-Census, Crosscheck und Strict-Master bleiben eigenständig und OPEN, bis ihre Gates real bestanden sind. Sie dürfen das Initial-Pilot nicht *allein aufgrund fehlender Vollmarktabdeckung* blockieren, sofern **für den konkreten ausgewählten Kandidaten** aktuelle Chain-State-/Programm-/Bank-/Oracle-Parität, Quellenfrische, komplette TX-Simulation, Gebühren, realistische Exit-Route, Shadow-Replay und P8-Safety unabhängig bewiesen sind. Fehlende Kandidatenbelege oder nicht hinreichend verifizierte Eingangsquelle blockieren den Pilot dagegen zwingend. Pilot-Evidence ist niemals als vierstündiger Market-Master-PASS auszugeben.
+
+**Nach dem ersten nachgewiesenen positiven kumulierten Ergebnis:** kleine wiederholte, je Versuch begrenzte kontrollierte LIVE-Schritte nur mit neuer dokumentierter Freigabe; parallel weitere Fundingklassen, `P4A-JIT`, `P6-MT`, P8-RES/INV, P7/P4B, H0, S1-RACE/Jito-gRPC und optional K. Gewinne werden zuerst gegen Verlust-/Liquiditäts-/Fee-Puffer gerechnet; KI-Credits oder zusätzliche Infrastruktur sind **keine automatische Ausgabe** und bleiben bei laufenden Kosten unter §0.4 FREE_ONLY gesperrt, bis eine separate ausdrückliche Kostenpolitik-Freigabe erfolgt.
 
 ---
 
@@ -923,39 +909,35 @@ Landing Evidence:
 
 ---
 
-# 7. Gesamtphasenplan
-
-Parallelstart:
+# 7. Gesamtphasenplan — FIRST PROFIT vor Ausbau
 
 ```text
-TRACK A — NATIVE CORE                 TRACK B — PROJECT-0 EVIDENCE
-
-S0 Native Foundation                  P0  eva01/mary/reuse/licenses
-S1 Solana Ingress                     P1A Current Mainnet Freeze
-S2 Canonical State                    P1B Upcoming 0.1.12 Freeze
-S3 Execution Core                     C0  Market / Account Census
-S4 Core Parity                        H0  Historical Liquidations
-          │                                      │
-          └──────────────────┬───────────────────┘
-                             ↓
-                         MERGE GATE
-                             ↓
-            P2 → P3 → P4A → P5 → T
-                             ↓
-                            P6
-                             ↓
-                            P7
-                             ↓
-                           P4B
-                             ↓
-                            P8
-                             ↓
-                            P9
-                             ↓
-                             K
+  BASELINE + TARGETED MARKET EVIDENCE
+  P0/P1A + C0/H0 für genau eine belegte Mainnet-Opportunity
+               +
+  S0 → S1-LT → S2 → S3-CORE
+               ↓
+      Produkt-P2 → P3 → P4A → P5
+               ↓
+      S4 targeted Parity + P6-LT Shadow
+               ↓
+  FE-SINGLE-FLIGHT + P8-LT scoped safety gate
+               ↓
+      kontrollierter 1-Versuch Mainnet-Pilot
+               ↓
+     Reconciliation + tatsächlicher Exit
+               ↓
+      KUMULIERTER REALIZED NET PROFIT > 0?
+           ├─ Nein/UNKNOWN: STOP + Diagnose
+           └─ Ja: First-Profit-Meilenstein
+                    ↓
+       Mehrfach-LIVE nur nach vollen P6-MT/P8-RES Gates
+       P4A-JIT / P7 / P4B / Inventar / P9
+       Race: S1-RACE → S3.R → P6-RACE → Race-LIVE
+       K: nur gemessen notwendige Optimierungen
 ```
 
-Race und Long-Tail bleiben in **allen** Project-0-Phasen gleichzeitig Bestandteil des Systems.
+Diese Darstellung ist eine **Priorisierung und Scope-Abgrenzung**, kein Ersatz der technischen Detailphasen, kein pauschaler P6-MT-PASS, keine LIVE-/Provider-Freigabe und keine Garantie einer rentablen Opportunity. Die autoritativen Bedingungen für den einmaligen Pilot stehen in §0.6, §13 und dem P8-LT-Gate.
 
 ---
 
@@ -2575,6 +2557,8 @@ bundle failed
 
 Unbekannt = `UNKNOWN`, niemals 0.
 
+**First-Profit-Abgrenzung v4.5.2:** JIT-ExactIn bleibt ein verpflichtender Entwicklungs- und späterer Vergleichskandidat, aber kein Vorab-Gate für den einmaligen P8-LT-Pilot, **wenn** eine andere Klasse nach §0.6/§13 in sämtlichen für sie geltenden P4A/P5/P8-Prüfungen qualifiziert ist. Fehlt ein solcher wirtschaftlicher Pfad, rückt JIT wieder auf die FE-Critical-Path. Es ist weder erlaubt, die JIT-Capability vorzutäuschen, noch einen unbekannten Economy-/Swap-Floor als positive Ausführung zu buchen.
+
 ## P4A v4.5.1 — verbindlicher JIT-ExactIn-Fundingpfad
 
 Der aktuelle Jupiter-V2-Provider liefert über `quote_exact_out` keinen ausführbaren ExactOut-Pfad. Ergänze im bestehenden Builder-/Router-/Economics-System einen bounded ExactIn-Shortfall-Solver: Ermittelt wird ein Funding-Token-Input `x`, sodass der **ausführbare** Liability-Token-Floor `minimum_executable_out(x) >= liability_shortfall` erreicht. Niemals `amount_in = shortfall` setzen, da dies verschiedene Token-Einheiten sind. Gemeinsames begrenztes Request-/RouteAttemptBudget inklusive Route-Fit, Frische-/Allowlist-/Slippage-/Simulations-Gates; kein erzwungener Remote-Hop im Race-Hotpath.
@@ -3855,6 +3839,8 @@ Runtime Config:
 - allowlisted assets;
 - allowlisted execution classes.
 
+**First-Profit-Pilot (§0.6/§13):** Vor dem einmaligen seriellen LIVE braucht auch ein einzelner Wallet-/Fundingpfad eine persistente, restartfeste `RESERVED/SUBMITTED/UNKNOWN`-Sperre gegen doppelte wirtschaftliche Handoffs und gegen irrtümliche Freigabe vor finaler Chain-Reconciliation. `Safety::check()` mit ausschließlich flüchtigen Zählern ist hierfür nicht ausreichend. Der One-Shot-Pilot hat `max_inflight=1`, bindet die konkret genehmigte Transaktion und hält bei unbekanntem Outcome. **Diese scoped Pilot-Reservation ist kein Ersatz** für die weiter unten verlangte globale atomare Multi-Mint-/SOL-/Tip-/Rent-Reservation vor parallelem LIVE.
+
 ## P8 v4.5.1 — Walletreservation und Inventory Target Policy
 
 Vor parallelem LIVE ist die globale atomare, persistente Liability-/Funding-/SOL-/Priority-/Tip-/Rent-Reservation aus P6-MT.11 **Pflicht**. Keine zwei Worker dürfen dasselbe Inventar oder dieselbe Fee-Reserve verplanen. Status `AVAILABLE → RESERVED → SUBMITTED → RECONCILED → RELEASED/INVENTORY_UPDATED`; bei `UNKNOWN` keine voreilige Freigabe. Alle Token-/Lamport-Deltas nach tatsächlichem Chain-Outcome prüfen.
@@ -4141,6 +4127,21 @@ Keine ideologische Bindung.
 ---
 
 # 8. Verbindliche Ticket-Reihenfolge
+
+## First-Profit-Tickets — höchste Produktpriorität (scope FE-00…FE-07)
+
+```text
+FE-00  Existing 5h offline report, verfügbare reale Kandidaten / FREE_ONLY-Zugang, NO_ECONOMIC_GO
+FE-01  current-mainnet protocol/source freeze + GENAU EIN ausführbarer Fundingpfad
+FE-02  exact Health/Size/Route/Build/Sim/Fees + überprüfbarer Collateral-Exit
+FE-03  production Shadow + replay/competition for selected class
+FE-04  one-shot CLI / persistenter single-flight Wallet-/Fee-Hold / UNKNOWN / Exit-Ledger
+FE-05  provider-aware read-only smoke (nur nach separater Freigabe)
+FE-06  einzeln genehmigter, budgetierter Mainnet-Versuch + Auto-HALT
+FE-07  finalized chain/cost/exit reconciliation + kumulierter REALIZED NET PNL; GO/STOP
+```
+
+Diese Tickets überlagern die nachfolgenden technischen Produkt-Tickets nur in der **Reihenfolge**; sie sind keine zweite Strategy/Runtime. Produkt-Scope bewusst auf eine Klasse begrenzt, alle relevanten P8-Safety-Gates bleiben erhalten. FULL P6-MT/mehrfache Reservations vor jeder Erhöhung auf parallele Live-Versuche. Wer FE-06 ohne FE-00…FE-05 PASS freigibt, verletzt den bindenden §0.6/§13 Vertrag.
 
 ## Sofort parallel
 
@@ -4542,37 +4543,25 @@ Erst nach dieser Prüfung darf v4.4 die autoritative v4.2 ersetzen.
 
 ---
 
-# 13. Verbindlicher Start
+# 13. Verbindlicher Start — FIRST PROFIT RELEASE TRAIN (13.10.2026)
 
-## Hauptpfad — First Euro
+**Nur der nachweislich kürzeste sichere Weg zur ersten positiven kumulierten realisierten Netto-Bilanz hat Produktpriorität.** Bereits implementierte Module bleiben erhalten. Keine neue GUI, kein zweiter Bot, kein Pfadwechsel ohne Messbeleg. Die folgenden Tickets erhalten im Ledger eigene PASS/PARTIAL/OPEN/NOT_RUN-Gates und Commit-/Fixture-/Chain-Evidence.
 
-Parallel vorbereiten:
+| Schritt | Verbindliche Arbeit | Abnahme / Stop |
+| --- | --- | --- |
+| **FE-00 – Opportunity-Selection** | Bestehende C0-E1 P1–P6 Offline-PASS respektieren, vorhandene 5h-Evidence mit neuer CLI auswerten; einen aktuellen echten Receivership-/Long-Tail-Kandidaten und brauchbare kostenlose Feed-/Chain-Quellen feststellen | Ein realitätsnaher belegter positiver ausführbarer Nettoedge-Kandidat, sonst `NO_ECONOMIC_GO`; alter 5h-Run mit Lücken darf keine vollständige Marktstatistik beweisen |
+| **FE-01 – One-Class Freeze** | Tatsächlich deployten 0.1.11/aktuellen ProgramData-Stand, Group, Banken, Integrationen, Oracles und aktuelle Solana-TX-Version pinnen; genau eine `NO_SWAP_INVENTORY`- oder `ZERO_PREFUND_SAME_TX`-Klasse wählen | P1A/S1-LT/S2/S3-CORE/P3/S4-Parität und nur erforderliche P5-Regeln/Accounts für diesen Pfad belegt; bei NULL/UNKNOWN STOP |
+| **FE-02 – Executable Economics** | Bestehenden exakten Health/Sizer/Builder/Router/Economics-Weg mit echten TX-/Route-Fixtures und `simulateTransaction` prüfen; gesicherten executable min-out, Repay, Feeds, CU, Fees, Tips, erwarteten Failure-Cost, benötigtes Inventar und realistische Collateral-Exit-Route sichern | Kein Oracle-Gross-Edge als Profit; bei fehlender Exit-/MinOut-/Cost-Provenienz `NOT_ACTIONABLE`, keine Submission |
+| **FE-03 – Targeted Production Shadow** | Dieselbe Production-Pipeline ohne Submission über echte erreichbare Kandidaten; verifizierbare Winner-/Loss-/State-/Queue-Latenz und eine vollständige Replay-/Simulationsbeweiskette | Genug echte positive und negative Kandidaten- und Replay-Evidence für genau diese Klasse; kein Mindeststundenwert erfindet fehlende Marktereignisse |
+| **FE-04 – Serial Safety + Accounting** | Versioniertes CLI-Einmalfreigabeprofil, harte nominelle/Max-Fee/Tip/Rent-/Verlustgrenzen, `max_inflight=1`, persistent signiertes Intent-/Hold-Journal vor Handoff, Reload→UNKNOWN-Hold und finalisierte Chain-Reconciliation; kontrollierte Inventory-Exit/Realized-PnL-Kette | Crash/Restart, Doppelereignis, TX-failed, nicht gelandet, unknown, Feed-Gap und unvollständiger Exit mit fail-closed-Tests bestanden. **Kein Parallel-LIVE** |
+| **FE-05 – Read-only Vorprüfung** | Offline-Freeze und kurzer, ausdrücklichermaßen genehmigter FREE_ONLY Mainnet-WSS/RPC-/Shadow-Smoke mit gültiger Anbieterqualifikation; gezielte Programm-/TX-Simulation gegen reale Zustände | Kein fehlender oder unqualifizierter Provider-/Archive-/Snapshot-Beleg für die im Pilot benötigten Zugriffe, kein stiller Paid-Fallback; vierstündiger C0-E1-Master bleibt separat |
+| **FE-06 – Controlled ONE-SHOT** | Nutzer sieht Signatur-/Code-/Programm-/Wallet-Bindung, maximalen Gesamtaufwand und Verlustgrenze; erst nach **separater expliziter Werttransfer-Freigabe** einmaligen `P0_MODE=live`-Pilot-Gate für den freigegebenen Pfad implementierungsseitig öffnen | Genau EIN begrenzter, vom User genehmigter Versuch, danach HALT; keine Auto-Retries/Auto-Arm, kein Jito-ACK als Landing-Nachweis |
+| **FE-07 – Profit / Stop Decision** | TX-/Bundle-Outcome, Signature, finalized Token-/Lamport-Deltas, Gebühren aller eigenen Versuche, Restinventar und belegten tatsächlichen Verkauf/Exit auswerten; kumulierten realisierten Nettoertrag berichten | `FIRST_REALIZED_PROFIT_EVIDENCED` nur bei positiver *kumulierter* realisierter Bilanz nach allen angefallenen Kosten; sonst `LOSS/UNKNOWN/NO_TRADE`, STOP und Analyse |
 
-```text
-P0  → nur die für Current Mainnet / Health / Reuse unmittelbar nötigen Entscheidungen zuerst
-P1A → aktuellen Mainnet-Stand einfrieren
-P1B → 0.1.12 vorbereiten; bei Deployment sofort Promotion/Requalification
-C0  → Long-Tail/Premium-Markt quantifizieren
-S0  → finalen Rust-Workspace
-```
-
-Dann höchste Priorität:
-
-```text
-S1-LT PASS
-→ S2
-→ S3-CORE PASS
-→ P2
-→ P3
-→ P4A
-→ P5
-→ T
-→ P6-LT
-→ P6-MT PASS
-→ S4 PASS vor value-bearing LIVE
-→ P8-LT
-→ erster realisierter Netto-Profit
-```
+**Spezifische Scope-Regeln vor dem ersten Profit:**
+- **Nicht verpflichtend vor FE-06:** vollständige C0-E1-Master-Strict-/Index-Marktvollständigkeit, generelle Race-Geyser-Infrastruktur, Jito-gRPC, gesamtes H0/P7/p(win), genereller JIT-ExactIn-Betrieb, vollständige MT6–MT13, Mehrfach-Wallet/Parallel-Reservations oder Frontend. Sie bleiben als *eigene* Produktions-/Skalierungsphasen OPEN und dürfen bei ungelöstem Kandidatenrisiko nicht durch den Pilot ersetzt werden.
+- **Weiterhin verpflichtend vor FE-06:** vollständige konkrete Program-/Health-/State-Parität, aktuelle State-Frische, korrekter TX-Plan, ausführbares ökonomisches Ergebnis, ausreichend tatsächliches Shadow-/Rehearsal-Evidence, P8-Single-Flight-Kapital-/Safety-/Crash-Reconciliation und echte FREE_ONLY-Providerfähigkeit für den gewählten Kandidaten. Ohne einen gewinnfähigen Kandidaten gibt es **keinen** Finanzierungs-/LIVE-Freifahrtschein.
+- **Nach FE-07:** Zuerst nachgewiesen profitablen Pfad mit begrenztem Risiko wiederholbar machen und netto messen; erforderlichen JIT-ExactIn-/Inventory-Ausbau umsetzen, danach MT2–MT13 mit gemessenem Engpass, volles P8-RES/INV vor parallelem LIVE, H0/P7/P4B und S1-RACE nur bei zusätzlichem erwarteten Netto-Nutzen. Ein erster erfolgreicher Trade allein hebt die LIVE-Gates nicht global auf.
 
 ## Parallel / danach — Race
 
@@ -5155,6 +5144,8 @@ P4–P6 bleiben offen; P2-Status melden, danach nächstes Paket abstimmen.
 ### L. C0-E1 v4.5.1 — Verbindlicher Terminal-, Verifikations- und Frontend-Vertrag (2026-10-12; Konsistenzkorrekturen 2026-10-13)
 
 **Autorität und Status:** Dieser Abschnitt ergänzt Astras Masterauftrag 2026-10-11, insbesondere C0-E1 P3–P6; ältere widersprüchliche Soll-CLI-/Statusbeispiele sind dadurch präzisiert. Er ändert **keine** kanonischen Master-, LIVE- oder Submission-Gates. Bestehende Observer-, P3-Verifier-, Reconciliation-, MeasurementPlan-, Economics- und Shadow-Komponenten **weiterverwenden**, nicht neu bauen. P2 ist auf Remote lokal qualifiziert; P3-Historienprüfung wegen 429 offen; P4–P6 noch nicht qualifiziert. Keine neuen 5h-/24h-Captures ohne Anwenderfreigabe.
+
+**Fortschrittsnachtrag 13.10.2026:** Der vorstehende historische Implementierungsstatus ist überholt: `C0E1-P3-M06` (`aa37dd3`), P4 (`2c62d13`), P5 (`c092bcd`) und P6-Offline (`763c98a`) sind auf Remote lokal qualifiziert. Reale 5h-Replay-, HTTP-429-/Provider-/Archive-, Mainnet- und Master-Gates bleiben OPEN/NOT_RUN gemäß `MEASUREMENT_LEDGER.md`. Der First-Profit-Release-Train in §0.6/§13 priorisiert ausschließlich einen sicher qualifizierten individuellen Pilot; er macht C0-E1 **nicht** zum Markt-Master-PASS.
 
 #### L.1 P3: sechs Instruktionsmarker / vier fachliche Liquidationsarten
 
