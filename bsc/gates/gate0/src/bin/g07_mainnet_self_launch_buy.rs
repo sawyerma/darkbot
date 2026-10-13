@@ -27,6 +27,8 @@ use std::{
     time::Duration,
 };
 
+mod one_shot_guard;
+
 type Tls = StreamOwned<ClientConnection, TcpStream>;
 
 const CHAIN_ID: u64 = 56;
@@ -1016,6 +1018,20 @@ fn main() {
         .expect("cannot verify dispatch head before release"));
     assert!(fresh_head == send_head,
         "G0.7 PRE_EGRESS_STOP: block head moved after the signed bundle's expiry window was frozen; do not send stale bundle");
+
+    // Persist before any provider write. A new capture filename or restart must
+    // not silently permit a second economic transaction attempt.
+    one_shot_guard::reserve_once(
+        Path::new(one_shot_guard::GUARD_PATH),
+        &attempt_id,
+        &contract.sha256,
+        &launch_hash,
+        &buy_hash,
+    ).expect("G0.7 one-shot guard refused: do not retry without chain reconciliation");
+    capture.record_text(
+        "ONE_SHOT_RESERVED", capture_clock.now_ns(), one_shot_guard::GUARD_PATH,
+    ).expect("one-shot reservation capture failed; no egress");
+    assert!(capture.healthy(), "capture unhealthy after one-shot reservation");
 
     let barrier = Arc::new(Barrier::new(3));
     let mut release_before_ns = 0u64;
