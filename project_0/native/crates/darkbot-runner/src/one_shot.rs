@@ -1,5 +1,7 @@
 //! FE-04 durable single-wallet hold at the existing submission boundary.
 //! No signer, provider, state/price engine or automatic LIVE activation.
+pub mod transport;
+
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -196,12 +198,7 @@ impl Journal {
         self.saved = Some(saved);
         Ok(())
     }
-    pub fn reserve(
-        &mut self,
-        approval: Approval,
-        intent: Intent,
-        now: &Current,
-    ) -> Result<(), String> {
+    fn reserve(&mut self, approval: Approval, intent: Intent, now: &Current) -> Result<(), String> {
         if self.saved.is_some() {
             return Err(err("ONE_SHOT_ALREADY_CONSUMED_OR_UNKNOWN"));
         }
@@ -218,7 +215,7 @@ impl Journal {
     }
     /// The callback must be the existing adapter's single submit/submit_bundle
     /// invocation over exactly the bound bytes. No automatic retry is provided.
-    pub fn handoff<T>(
+    fn handoff<T>(
         &mut self,
         wire_sha256: &str,
         now: &Current,
@@ -441,6 +438,262 @@ mod tests {
             bundle_simulated: false,
         };
         (path, a, i, c)
+    }
+    struct RecordingAdapter {
+        path: darkbot_solana::submit::SubmissionPath,
+        simulation: darkbot_solana::submit::SimResult,
+        failure: u8,
+        calls: std::cell::Cell<u32>,
+        simulated: std::cell::RefCell<Vec<Vec<u8>>>,
+    }
+    impl darkbot_solana::submit::SubmissionAdapter for RecordingAdapter {
+        fn path(&self) -> darkbot_solana::submit::SubmissionPath {
+            self.path
+        }
+        fn supports_bundle(&self) -> bool {
+            self.path != darkbot_solana::submit::SubmissionPath::Rpc
+        }
+        fn simulate(
+            &self,
+            tx: &solana_sdk::transaction::VersionedTransaction,
+        ) -> darkbot_solana::submit::SimResult {
+            self.simulate_bundle(std::slice::from_ref(tx))
+        }
+        fn simulate_bundle(
+            &self,
+            txs: &[solana_sdk::transaction::VersionedTransaction],
+        ) -> darkbot_solana::submit::SimResult {
+            *self.simulated.borrow_mut() = txs
+                .iter()
+                .map(|tx| darkbot_solana::submit::serialize_tx(tx).unwrap())
+                .collect();
+            self.simulation.clone()
+        }
+        fn submit(
+            &self,
+            tx: &solana_sdk::transaction::VersionedTransaction,
+            t: u64,
+        ) -> Result<darkbot_solana::submit::SubmitAck, darkbot_solana::submit::SubmitError>
+        {
+            self.submit_bundle(std::slice::from_ref(tx), t)
+        }
+        fn submit_bundle(
+            &self,
+            txs: &[solana_sdk::transaction::VersionedTransaction],
+            t: u64,
+        ) -> Result<darkbot_solana::submit::SubmitAck, darkbot_solana::submit::SubmitError>
+        {
+            self.calls.set(self.calls.get() + 1);
+            let bytes: Vec<_> = txs
+                .iter()
+                .map(|tx| darkbot_solana::submit::serialize_tx(tx).unwrap())
+                .collect();
+            assert_eq!(*self.simulated.borrow(), bytes);
+            if self.failure == 1 {
+                return Err(darkbot_solana::submit::SubmitError::Transport(
+                    "possible acceptance".into(),
+                ));
+            }
+            if self.failure == 2 {
+                return Err(darkbot_solana::submit::SubmitError::Rejected(
+                    "provider error".into(),
+                ));
+            }
+            let mut signatures: Vec<_> = txs.iter().map(|tx| tx.signatures[0]).collect();
+            if self.failure == 3 {
+                signatures[0] = solana_sdk::signature::Signature::new_unique();
+            }
+            Ok(darkbot_solana::submit::SubmitAck {
+                path: self.path,
+                signature: signatures[0],
+                signatures,
+                submission_id: (self.path == darkbot_solana::submit::SubmissionPath::JitoBundle)
+                    .then(|| "mock-bundle-id".into()),
+                t_handoff_ns: t,
+                serialized_len: bytes.iter().map(Vec::len).sum(),
+            })
+        }
+    }
+    fn adapter(path: darkbot_solana::submit::SubmissionPath, failure: u8) -> RecordingAdapter {
+        RecordingAdapter {
+            path,
+            failure,
+            calls: Default::default(),
+            simulated: Default::default(),
+            simulation: darkbot_solana::submit::SimResult::Ok {
+                units_consumed: Some(10),
+            },
+        }
+    }
+    fn signed(
+        payer: &solana_sdk::signature::Keypair,
+    ) -> solana_sdk::transaction::VersionedTransaction {
+        use solana_sdk::signature::Signer;
+        let message = solana_sdk::message::Message::new_with_blockhash(
+            &[],
+            Some(&payer.pubkey()),
+            &solana_sdk::hash::Hash::new_unique(),
+        );
+        solana_sdk::transaction::VersionedTransaction::try_new(
+            solana_sdk::message::VersionedMessage::Legacy(message),
+            &[payer],
+        )
+        .unwrap()
+    }
+    #[test]
+    fn exact_adapter_bytes_ack_timeout_and_rejection_never_rearm() {
+        use darkbot_solana::submit::SubmissionPath;
+        use solana_sdk::signature::{Keypair, Signer};
+        for path_kind in [
+            SubmissionPath::Rpc,
+            SubmissionPath::JitoSingle,
+            SubmissionPath::JitoBundle,
+        ] {
+            for failure in 0..4 {
+                let (dir, mut a, mut i, mut c) = setup();
+                let payer = Keypair::new();
+                a.wallet = payer.pubkey().to_string();
+                i.wallet = a.wallet.clone();
+                let txs = if path_kind == SubmissionPath::JitoBundle {
+                    vec![signed(&payer), signed(&payer)]
+                } else {
+                    vec![signed(&payer)]
+                };
+                let payload =
+                    transport::SignedPayload::new(txs, path_kind, payer.pubkey()).unwrap();
+                i.signatures = payload.signatures().to_vec();
+                i.signed_wire_sha256 = payload.wire_sha256().into();
+                c.bundle_simulated = path_kind == SubmissionPath::JitoBundle;
+                let adapter = adapter(path_kind, failure);
+                let simulated = payload.simulate(&adapter).unwrap();
+                let mut j = Journal::open(&dir, &a.wallet).unwrap();
+                j.reserve_payload(a.clone(), i.clone(), &c, &simulated)
+                    .unwrap();
+                let result = j.submit_payload(&simulated, &c, 123);
+                assert_eq!(result.is_ok(), failure == 0);
+                assert_eq!(j.saved.as_ref().unwrap().phase, Phase::HandoffUnknown);
+                assert_eq!(j.holds(), i.holds);
+                assert!(j.submit_payload(&simulated, &c, 124).is_err());
+                assert_eq!(adapter.calls.get(), 1);
+                drop(j);
+                let mut reopened = Journal::open(&dir, &a.wallet).unwrap();
+                assert!(reopened.submit_payload(&simulated, &c, 125).is_err());
+                assert_eq!(reopened.holds(), i.holds);
+                drop(reopened);
+                fs::remove_dir_all(dir).unwrap();
+            }
+        }
+    }
+    #[test]
+    fn changed_signed_payload_order_path_and_signature_cannot_reach_adapter() {
+        use darkbot_solana::submit::SubmissionPath;
+        use solana_sdk::signature::{Keypair, Signer};
+        let payer = Keypair::new();
+        let first = signed(&payer);
+        let second = signed(&payer);
+        let original = transport::SignedPayload::new(
+            vec![first.clone(), second.clone()],
+            SubmissionPath::JitoBundle,
+            payer.pubkey(),
+        )
+        .unwrap();
+        let reversed = transport::SignedPayload::new(
+            vec![second.clone(), first.clone()],
+            SubmissionPath::JitoBundle,
+            payer.pubkey(),
+        )
+        .unwrap();
+        assert_ne!(original.wire_sha256(), reversed.wire_sha256());
+        let rpc =
+            transport::SignedPayload::new(vec![first.clone()], SubmissionPath::Rpc, payer.pubkey())
+                .unwrap();
+        let bundle = transport::SignedPayload::new(
+            vec![first.clone()],
+            SubmissionPath::JitoBundle,
+            payer.pubkey(),
+        )
+        .unwrap();
+        assert_ne!(rpc.wire_sha256(), bundle.wire_sha256());
+        assert!(transport::SignedPayload::new(
+            vec![first.clone(), first.clone()],
+            SubmissionPath::JitoBundle,
+            payer.pubkey()
+        )
+        .is_err());
+        assert!(transport::SignedPayload::new(
+            vec![first.clone(), second],
+            SubmissionPath::Rpc,
+            payer.pubkey()
+        )
+        .is_err());
+        assert!(transport::SignedPayload::new(
+            vec![first.clone()],
+            SubmissionPath::Rpc,
+            Keypair::new().pubkey()
+        )
+        .is_err());
+        let mut tampered = first.clone();
+        tampered.signatures[0] = solana_sdk::signature::Signature::new_unique();
+        assert!(
+            transport::SignedPayload::new(vec![tampered], SubmissionPath::Rpc, payer.pubkey())
+                .is_err()
+        );
+        let mut tampered = first;
+        tampered
+            .message
+            .set_recent_blockhash(solana_sdk::hash::Hash::new_unique());
+        assert!(
+            transport::SignedPayload::new(vec![tampered], SubmissionPath::Rpc, payer.pubkey())
+                .is_err()
+        );
+        let (dir, mut a, mut i, mut c) = setup();
+        a.wallet = payer.pubkey().to_string();
+        i.wallet = a.wallet.clone();
+        c.bundle_simulated = true;
+        i.signatures = original.signatures().to_vec();
+        i.signed_wire_sha256 = original.wire_sha256().into();
+        let adapter = adapter(SubmissionPath::JitoBundle, 0);
+        let original = original.simulate(&adapter).unwrap();
+        let reversed = reversed.simulate(&adapter).unwrap();
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        assert!(j
+            .reserve_payload(a.clone(), i.clone(), &c, &reversed)
+            .is_err());
+        j.reserve_payload(a, i, &c, &original).unwrap();
+        assert!(j.submit_payload(&reversed, &c, 1).is_err());
+        assert_eq!(adapter.calls.get(), 0);
+        drop(j);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn failed_unavailable_and_wrong_path_simulation_never_create_send_token() {
+        use darkbot_solana::submit::{SimResult, SubmissionPath};
+        use solana_sdk::signature::{Keypair, Signer};
+        let payer = Keypair::new();
+        for simulation in [
+            SimResult::Failed("revert".into()),
+            SimResult::Unavailable("429".into()),
+        ] {
+            let mut a = adapter(SubmissionPath::Rpc, 0);
+            a.simulation = simulation;
+            let p = transport::SignedPayload::new(
+                vec![signed(&payer)],
+                SubmissionPath::Rpc,
+                payer.pubkey(),
+            )
+            .unwrap();
+            assert!(p.simulate(&a).is_err());
+            assert_eq!(a.calls.get(), 0);
+        }
+        let a = adapter(SubmissionPath::Rpc, 0);
+        let p = transport::SignedPayload::new(
+            vec![signed(&payer)],
+            SubmissionPath::JitoBundle,
+            payer.pubkey(),
+        )
+        .unwrap();
+        assert!(p.simulate(&a).is_err());
+        assert!(a.simulated.borrow().is_empty());
     }
     #[test]
     fn crash_before_and_after_handoff_retains_hold_and_cannot_rearm() {

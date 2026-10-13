@@ -3,13 +3,14 @@
   "snapshot_date": "2026-10-13",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "0ec87a4da77e8df1e153574221a89356a857268b",
-    "as_of_code_commit": "a9a8c34553026a845bc959e1116651d8b437d55a",
-    "line_count": 5273,
-    "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification."
+    "git_blob_sha": "0c3128894336611809d35ccb6420cbc2b98a0359",
+    "as_of_code_commit": null,
+    "line_count": 5281,
+    "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
+    "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/FE04_BINDING_20261013"
   },
   "companion_plan": "project_0/docs/PHASENPLAN.json",
-  "read_first": "Use this JSON to locate the current gate and exact relevant Markdown section. Read only targeted Markdown ranges; do not load the complete 5273-line ledger unless a full-file audit is explicitly required.",
+  "read_first": "Use this JSON to locate current gates and targeted Markdown sections; do not reload the whole ledger.",
   "freshness_check": {
     "method": "git rev-parse HEAD:project_0/docs/MEASUREMENT_LEDGER.md",
     "compare_with": "source.git_blob_sha",
@@ -41,10 +42,11 @@
       },
       "FE-04": {
         "status": "PARTIAL_LOCAL",
-        "commit": "a9a8c34553026a845bc959e1116651d8b437d55a",
-        "evidence": "project_0/docs/evidence/FE04_LOCAL_20261013/README.md",
-        "implemented": "Persistent one-shot approval/intent, wallet lock, fsynced journal, holds, UNKNOWN/HALT and local regression tests.",
-        "missing": "Terminal approval lifecycle; production Intent/Current assembly; submission adapter binding to signed bytes; actual finalized receipt, token/fee/exit reconciliation."
+        "commit": null,
+        "evidence": "project_0/docs/evidence/FE04_BINDING_20261013/README.md",
+        "implemented": "Durable journal plus immutable signed payload, signature verification, adapter-owned full simulation token and exact RPC/Jito handoff binding. UNKNOWN holds retained for ACK/errors/restart.",
+        "missing": "Terminal approval lifecycle; production Intent/Current assembly; actual finalized receipt, token/fee/exit reconciliation.",
+        "previous_commit": "a9a8c34553026a845bc959e1116651d8b437d55a"
       },
       "FE-05": {
         "status": "NOT_RUN",
@@ -76,12 +78,12 @@
     },
     "latest_fe04_tests": {
       "python": 59,
-      "rust_crate_health_txv1": 346,
-      "rust_crate_health": 344,
+      "rust_crate_health_txv1": 350,
+      "rust_crate_health": 348,
       "existing_ignored_rust_each": 1,
       "failures": 0,
       "release_builds": "PASS",
-      "note": "Reported from FE-04 evidence; full workspace counts precede the final journal fixture addition, which was verified by targeted tests."
+      "note": "Full matrix includes final signed payload binding and all 9 journal tests; local mock adapters, no Mainnet execution."
     }
   },
   "economic_evidence": {
@@ -168,6 +170,11 @@
       "line_start": 729,
       "line_end": 749,
       "heading": "8. Current status"
+    },
+    "fe04_adapter_binding": {
+      "line_start": 5274,
+      "line_end": 5281,
+      "heading": "2026-10-13 — FE-04 exact signed adapter binding; runtime integration remains OPEN"
     }
   },
   "updates": "After any change to the canonical Markdown ledger, refresh this JSON's snapshot, statuses, anchors and source.git_blob_sha in the same logical delivery. Do not infer current statuses from older historical ledger entries."
