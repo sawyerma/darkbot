@@ -167,6 +167,37 @@ for run in 1 2 3; do
   echo "  final $hi wei: PASS ($run/3)"
 done
 
+# Monotonicity sanity witnesses for the frozen parent and gas candidate.
+# This cannot establish universal monotonicity, but catches immediate counterexamples.
+echo
+echo "=== MONOTONICITY WITNESSES ==="
+for factor in 2 10; do
+  witness=$((hi * factor))
+  if (( witness <= hi || witness > MAX_BUY_VALUE_WEI )); then
+    continue
+  fi
+  if ! probe "$witness"; then
+    echo "STOP: QUALIFICATION_INCOMPLETE nonmonotonic witness=$witness above passing candidate=$hi" >&2
+    exit 6
+  fi
+done
+
+# All final records must refer to the same parent, buyer output and buy value.
+python3 - "$tmp" "$hi" <<'PY'
+import json, pathlib, sys
+d = pathlib.Path(sys.argv[1])
+v = str(sys.argv[2])
+rows = [json.loads((d / f"final_{i}.json").read_text()) for i in (1, 2, 3)]
+keys = ("buy_value_wei", "simulated_received_amount", "simulated_buyer_balance_after", "launch_execution_gas", "buy_execution_gas")
+base = rows[0]
+if any(str(r.get("buy_value_wei")) != v or r.get("status") != "EVM_SEQUENCE_PASS" for r in rows):
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE invalid final record")
+if any(r.get("state_source") != base.get("state_source") or any(r.get(k) != base.get(k) for k in keys) for r in rows[1:]):
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE nondeterministic final records")
+print("FINAL_RECORD_CONSISTENCY=PASS")
+print("TOKEN_RAW_UNITS=" + str(base["simulated_received_amount"]))
+PY
+
 echo
 if (( lo == 0 )); then echo "LOWER_BOUND=UNTESTED_BELOW_RESOLUTION"; else echo "LAST_CONFIRMED_BUY_REJECT_WEI=$lo"; fi
 echo "FIRST_STABLE_PASS_WEI=$hi"
