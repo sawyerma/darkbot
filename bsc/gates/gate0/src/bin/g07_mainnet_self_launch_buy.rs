@@ -27,6 +27,7 @@ use std::{
     time::Duration,
 };
 
+#[path = "g07_mainnet_self_launch_buy/one_shot_guard.rs"]
 mod one_shot_guard;
 
 type Tls = StreamOwned<ClientConnection, TcpStream>;
