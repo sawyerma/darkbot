@@ -1,0 +1,4 @@
+Local compile fixes before qualification: added Eq/PartialEq for persisted receipt observations; removed ambiguous generic .into() in mock-RPC test.
+Targeted journal/receipt tests: 17 PASS before final tuple-to-named-struct readability change; final workspace runs cover the resulting source.
+Python scripts unchanged since 48db13c (59 tests PASS); evidence retained in FE04_BINDING_20261013/python.txt.
+No Mainnet calls, submission, paid provider or historical 5h replay.

@@ -5279,3 +5279,13 @@ FE-01 limited read-only observation (3 RPC, 1 rps, 30s, 16MiB; program/ProgramDa
 - Evidence: `project_0/docs/evidence/FE04_BINDING_20261013/` (commands, complete test/build logs, warning comparison). No Mainnet calls and no 5h replay.
 - FE-04 remains PARTIAL_LOCAL: terminal approval lifecycle, production Intent/Current ownership immediately at handoff and finalized token/fee/exit reconciliation remain open. FE-01/02 positive current economic proof and FE-05/06 permission remain unresolved; no realized profit claim.
 - Next: complete finalized receipt parsing and production-owned pilot integration; bounded current Mainnet observation only after explicit permission. JSON source hash/status/references refreshed with this delivery; phase plan unchanged.
+
+## 2026-10-13 — FE-04 finalized fee/wallet observation; exit accounting remains OPEN
+
+- Reused RPC reconciliation metadata transport with an explicit finalized-only entrypoint. Parser binds signature, intent minimum slot, wallet payer and raw/loaded account mapping. Missing fee/metadata never becomes zero. Existing confirmed reconciliation behavior is preserved.
+- Fee = meta.fee on success/revert; SOL delta already includes network fees/rent/transfers. Token amounts remain exact integers, aggregated by mint/owner. Missing/ambiguous token metadata, invalid indices, changed ownership/mints and unproven create/close transitions remain UNKNOWN. No price/PnL approximation.
+- Journal persists finalized member observations without releasing holds. Partial bundle results and unknown token deltas remain HandoffUnknown; old journals without observation fields retain their hold. Normal LIVE remains blocked.
+- LOCAL PASS: 17 targeted journal/receipt tests; final workspace txv1 358 / health 356, zero failures, one existing ignored each; both release builds; changed-region format/diff; Differential Clippy 38→38, no added warnings. Python code unchanged from the preceding 59 PASS package. Local mock/loopback tests only, no Mainnet or 5h replay.
+- Evidence: `project_0/docs/evidence/FE04_RECEIPTS_20261013/`. Preceding signed adapter binding committed/pushed as `48db13c90a638e6034b7a8d39689a2c9368a2bd7`.
+- FE-04 still PARTIAL_LOCAL: terminal approval lifecycle, production-owned Intent/Current immediately at the actual pipeline boundary, qualified exit and complete attempt/cumulative-loss accounting remain OPEN. Fee/token observations alone are not realized profit or exit proof. FE-01/02/05/06 gates unchanged.
+- Next: integrate those runtime/approval/exit gates using the existing pipeline; obtain separately authorized current parity/candidate evidence. Do not infer a LIVE permit from these offline tests. Markdown/JSON source hash and section references updated together.

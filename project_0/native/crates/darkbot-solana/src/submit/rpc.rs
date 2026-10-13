@@ -223,6 +223,41 @@ impl SubmissionAdapter for RpcSubmitter {
     }
 }
 
+/// Shared metadata request for landing reconciliation and one-shot accounting.
+/// The finalized entrypoint does not accept a caller-selected weaker commitment.
+fn transaction_with_meta(
+    rpc: &RpcClient,
+    sig: &Signature,
+    commitment: CommitmentConfig,
+) -> Result<solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta, SubmitError> {
+    let cfg = RpcTransactionConfig {
+        encoding: Some(UiTransactionEncoding::Json),
+        commitment: Some(commitment),
+        max_supported_transaction_version: Some(1),
+    };
+    let started = std::time::Instant::now();
+    let result = rpc.get_transaction_with_config(sig, cfg);
+    let outcome = match &result {
+        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
+    };
+    darkbot_common::mt0::MT0.record_remote(
+        darkbot_common::mt0::RemoteClass::Reconcile,
+        started.elapsed(),
+        outcome,
+    );
+    result.map_err(|e| SubmitError::Transport(safe_rpc_error(&e)))
+}
+
+/// Uses the existing RPC client; caller owns timeout/quota policy. No signer or submission.
+/// Missing/not-yet-finalized transactions return an error, never zero fees.
+pub fn finalized_transaction(
+    rpc: &RpcClient,
+    sig: &Signature,
+) -> Result<solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta, SubmitError> {
+    transaction_with_meta(rpc, sig, CommitmentConfig::finalized())
+}
+
 /// Landing-Reconciliation: getSignatureStatuses → getTransaction (json, maxSupportedTransactionVersion=1).
 /// `tx_index_in_slot` bleibt None (nur über getBlock ermittelbar; P6/H0).
 pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns: u64) -> Result<LandingEvidence, SubmitError> {
@@ -252,18 +287,7 @@ pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns:
         }
         Some(s) => s,
     };
-    let cfg = RpcTransactionConfig {
-        encoding: Some(UiTransactionEncoding::Json),
-        commitment: Some(CommitmentConfig::confirmed()),
-        max_supported_transaction_version: Some(1), // Pflicht seit v1 (sonst -32015)
-    };
-    let mt0_start = std::time::Instant::now(); // [MT0]
-    let fetched = rpc.get_transaction_with_config(sig, cfg);
-    let mt0_outcome = match &fetched {
-        Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
-        Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
-    };
-    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Reconcile, mt0_start.elapsed(), mt0_outcome);
+    let fetched = transaction_with_meta(rpc, sig, CommitmentConfig::confirmed());
     let (fee, cu) = match fetched {
         Ok(t) => {
             let meta = t.transaction.meta;

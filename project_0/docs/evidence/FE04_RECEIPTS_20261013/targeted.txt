@@ -1,0 +1,75 @@
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-runner)
+warning: field `commitment` is never read
+    --> crates/darkbot-runner/src/market_observer.rs:2253:5
+     |
+2250 | struct RpcFetcher {
+     |        ---------- field in this struct
+...
+2253 |     commitment: &'static str,
+     |     ^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `get_transaction` is never used
+    --> crates/darkbot-runner/src/market_observer.rs:2269:8
+     |
+2256 | impl RpcFetcher {
+     | --------------- method in this implementation
+...
+2269 |     fn get_transaction(&self, signature: &str) -> Result<Option<Value>, String> {
+     |        ^^^^^^^^^^^^^^^
+
+warning: method `gap_recovery_phase` is never used
+   --> crates/darkbot-runner/src/market_gap.rs:461:19
+    |
+106 | impl ObserverCore {
+    | ----------------- method in this implementation
+...
+461 |     pub(super) fn gap_recovery_phase(
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: methods `gap_request` and `gap_slot` are never used
+   --> crates/darkbot-runner/src/market_gap.rs:501:19
+    |
+499 | impl RpcFetcher {
+    | --------------- methods in this implementation
+500 |     /// Bounded JSON body and sanitized error codes; no provider text or endpoint escapes.
+501 |     pub(super) fn gap_request(
+    |                   ^^^^^^^^^^^
+...
+567 |     fn gap_slot(
+    |        ^^^^^^^^
+
+warning: method `full_reconciliation_phase` is never used
+   --> crates/darkbot-runner/src/market_reconcile.rs:480:19
+    |
+182 | impl ObserverCore {
+    | ----------------- method in this implementation
+...
+480 |     pub(super) fn full_reconciliation_phase(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `darkbot-runner` (lib test) generated 5 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.71s
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_runner-61b551e3055d9ccf)
+
+running 17 tests
+test one_shot::receipts::tests::missing_fee_or_metadata_signature_wallet_slot_and_key_mismatch_are_not_receipts ... ok
+test one_shot::receipts::tests::multiple_wallet_accounts_aggregate_by_mint_without_other_owners ... ok
+test one_shot::receipts::tests::finalized_success_and_revert_preserve_actual_fees_and_integer_deltas ... ok
+test one_shot::receipts::tests::account_creation_close_and_loaded_keys_require_balance_evidence ... ok
+test one_shot::tests::failed_unavailable_and_wrong_path_simulation_never_create_send_token ... ok
+test one_shot::receipts::tests::incomplete_token_metadata_preserves_fee_but_never_invents_zero ... ok
+test one_shot::receipts::tests::finalized_rpc_request_uses_shared_transport_with_no_submission ... ok
+test one_shot::tests::torn_or_corrupt_journal_is_a_halt_not_a_new_approval ... ok
+test one_shot::tests::changed_signed_payload_order_path_and_signature_cannot_reach_adapter ... ok
+test one_shot::tests::revalidate_stale_fork_upgrade_wallet_and_bundle_at_actual_boundary ... ok
+test one_shot::tests::legacy_journal_without_observations_reopens_with_hold ... ok
+test one_shot::tests::double_trigger_signed_bytes_and_all_budget_guards ... ok
+test one_shot::tests::bundle_partial_landing_does_not_release_single_flight_hold ... ok
+test one_shot::tests::crash_before_and_after_handoff_retains_hold_and_cannot_rearm ... ok
+test one_shot::tests::all_finalized_members_fees_deltas_and_exit_required_even_on_revert ... ok
+test one_shot::receipts::tests::finalized_partial_bundle_and_missing_tokens_persist_without_releasing_holds ... ok
+test one_shot::tests::exact_adapter_bytes_ack_timeout_and_rejection_never_rearm ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 192 filtered out; finished in 0.61s

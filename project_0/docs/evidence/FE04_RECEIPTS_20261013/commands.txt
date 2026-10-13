@@ -1,0 +1,9 @@
+cargo test --manifest-path project_0/native/Cargo.toml -p darkbot-runner --features crate_health,txv1 --lib one_shot --locked --offline
+cargo test --manifest-path project_0/native/Cargo.toml --workspace --features crate_health,txv1 --locked --offline
+cargo test --manifest-path project_0/native/Cargo.toml --workspace --features crate_health --locked --offline
+cargo build --manifest-path project_0/native/Cargo.toml --workspace --features crate_health,txv1 --release --locked --offline
+cargo build --manifest-path project_0/native/Cargo.toml --workspace --features crate_health --release --locked --offline
+cargo clippy --manifest-path project_0/native/Cargo.toml --workspace --all-targets --features crate_health,txv1 --locked --offline --message-format=json
+python3 project_0/docs/evidence/FE04_LOCAL_20261013/check_changed_format.py
+rustfmt --check --edition 2021 --config skip_children=true project_0/native/crates/darkbot-runner/src/one_shot/receipts.rs project_0/native/crates/darkbot-runner/src/one_shot/transport.rs
+git diff --check -- project_0

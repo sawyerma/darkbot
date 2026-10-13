@@ -1,5 +1,6 @@
 //! FE-04 durable single-wallet hold at the existing submission boundary.
 //! No signer, provider, state/price engine or automatic LIVE activation.
+pub mod receipts;
 pub mod transport;
 
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,8 @@ struct Saved {
     intent: Intent,
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
+    #[serde(default)]
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Receipt {
@@ -211,6 +214,7 @@ impl Journal {
             intent,
             phase: Phase::Reserved,
             finalized: None,
+            observations: BTreeMap::new(),
         })
     }
     /// The callback must be the existing adapter's single submit/submit_bundle
@@ -371,7 +375,7 @@ fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
-    fn setup() -> (PathBuf, Approval, Intent, Current) {
+    pub(super) fn setup() -> (PathBuf, Approval, Intent, Current) {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
             "p0-shot-{}-{}",
@@ -694,6 +698,32 @@ mod tests {
         .unwrap();
         assert!(p.simulate(&a).is_err());
         assert!(a.simulated.borrow().is_empty());
+    }
+    #[test]
+    fn legacy_journal_without_observations_reopens_with_hold() {
+        let (dir, a, i, c) = setup();
+        let mut journal = Journal::open(&dir, &a.wallet).unwrap();
+        journal.reserve(a.clone(), i.clone(), &c).unwrap();
+        let path = journal.path.clone();
+        drop(journal);
+        let mut wrapper: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        wrapper["record"]
+            .as_object_mut()
+            .unwrap()
+            .remove("observations");
+        wrapper["digest"] =
+            serde_json::json!(digest(&serde_json::to_vec(&wrapper["record"]).unwrap()));
+        fs::write(&path, serde_json::to_vec(&wrapper).unwrap()).unwrap();
+        let reopened = Journal::open(&dir, &a.wallet).unwrap();
+        assert_eq!(reopened.holds(), i.holds);
+        assert!(reopened.saved.as_ref().unwrap().observations.is_empty());
+        assert_eq!(
+            reopened.saved.as_ref().unwrap().phase,
+            Phase::HandoffUnknown
+        );
+        drop(reopened);
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn crash_before_and_after_handoff_retains_hold_and_cannot_rearm() {
