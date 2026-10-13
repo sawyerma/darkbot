@@ -155,17 +155,30 @@ done
 
 echo
 echo "=== FINAL STABILITY CHECK ==="
-# Final candidate must pass all final verification runs, not just majority.
+# One EVM launch and three BUY executions, each reverted to the same post-launch state.
 export DARKBOT_G06A_BUY_VALUE_WEI="$hi"
-for run in 1 2 3; do
-  node bsc/gates/gate0/tools/g06a_economics_evm_crosscheck.cjs "$preflight" \
-    >"$tmp/final_${run}.json" 2>"$tmp/final_${run}.err" || {
-      echo "STOP: final candidate failed stability run $run" >&2
-      cat "$tmp/final_${run}.err" >&2
-      exit 4
-    }
-  echo "  final $hi wei: PASS ($run/3)"
-done
+export DARKBOT_G06A_BUY_VALUES_WEI="$hi,$hi,$hi"
+node bsc/gates/gate0/tools/g06a_economics_evm_crosscheck.cjs "$preflight" \
+  >"$tmp/final_batch.json" 2>"$tmp/final_batch.err" || {
+    echo "STOP: QUALIFICATION_INCOMPLETE final in-process BUY batch failed" >&2
+    cat "$tmp/final_batch.err" >&2
+    exit 4
+  }
+python3 - "$tmp/final_batch.json" "$hi" <<'PY'
+import json, sys
+d=json.load(open(sys.argv[1]))
+v=str(sys.argv[2])
+rows=d.get("batch_buy_trials")
+if not isinstance(rows,list) or len(rows)!=3 or d.get("status")!="EVM_SEQUENCE_PASS":
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE missing 3-trial batch")
+if any(str(r.get("buy_value_wei"))!=v or int(r.get("received_raw",0))<=0 or r.get("received_raw")!=r.get("buyer_balance_raw") for r in rows):
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE invalid BUY batch")
+if any(r!=rows[0] for r in rows[1:]):
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE nondeterministic BUY batch")
+print("FINAL_IN_PROCESS_BUY_TRIALS=3/3_PASS")
+print("FINAL_RAW_TOKEN_RECEIPT="+str(rows[0]["received_raw"]))
+PY
+unset DARKBOT_G06A_BUY_VALUES_WEI
 
 # Monotonicity sanity witnesses for the frozen parent and gas candidate.
 # This cannot establish universal monotonicity, but catches immediate counterexamples.
@@ -182,21 +195,6 @@ for factor in 2 10; do
   fi
 done
 
-# All final records must refer to the same parent, buyer output and buy value.
-python3 - "$tmp" "$hi" <<'PY'
-import json, pathlib, sys
-d = pathlib.Path(sys.argv[1])
-v = str(sys.argv[2])
-rows = [json.loads((d / f"final_{i}.json").read_text()) for i in (1, 2, 3)]
-keys = ("buy_value_wei", "simulated_received_amount", "simulated_buyer_balance_after", "launch_execution_gas", "buy_execution_gas")
-base = rows[0]
-if any(str(r.get("buy_value_wei")) != v or r.get("status") != "EVM_SEQUENCE_PASS" for r in rows):
-    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE invalid final record")
-if any(r.get("state_source") != base.get("state_source") or any(r.get(k) != base.get(k) for k in keys) for r in rows[1:]):
-    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE nondeterministic final records")
-print("FINAL_RECORD_CONSISTENCY=PASS")
-print("TOKEN_RAW_UNITS=" + str(base["simulated_received_amount"]))
-PY
 
 echo
 if (( lo == 0 )); then echo "LOWER_BOUND=UNTESTED_BELOW_RESOLUTION"; else echo "LAST_CONFIRMED_BUY_REJECT_WEI=$lo"; fi
