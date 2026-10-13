@@ -341,8 +341,7 @@ fn capture_chain_window(
     let first_block = launch_block.saturating_sub(1);
     let mut number = first_block;
     let mut crossed_horizon = false;
-    let mut last_block = first_block;
-    loop {
+    let last_block = loop {
         let mut waits = 0u16;
         let block = loop {
             let value = rpc(
@@ -383,10 +382,8 @@ fn capture_chain_window(
             .append(&receipt_record)
             .map_err(|e| format!("append receipts {number}: {e}"))?;
         sequence = sequence.checked_add(1).ok_or("chain capture sequence overflow")?;
-        last_block = number;
-
         if crossed_horizon {
-            break;
+            break number;
         }
         if timestamp >= horizon_timestamp {
             crossed_horizon = true;
