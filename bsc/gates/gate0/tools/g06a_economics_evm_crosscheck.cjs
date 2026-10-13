@@ -324,6 +324,32 @@ async function main() {
   );
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: parentNum });
   installBasicAccountLoader(state, rpcUrl, parentTag);
+  // @ethereumjs/statemanager 10.1.3 RPCStateManager.commit() only commits
+  // its account cache although checkpoint/revert handle account, storage
+  // and code. Nested EVM commits therefore leave storage/code checkpoint
+  // depths out of sync, making a later BUY rollback leak token balances.
+  // Correct this ONLY for the opt-in G07 batch protocol; G0.6 single
+  // execution keeps the original library semantics and evidence.
+  let batchCacheDepth = null;
+  if (BATCH_RAW) {
+    const caches = state._caches;
+    if (!caches || !caches.account || !caches.storage || !caches.code ||
+        typeof caches.commit !== 'function') {
+      throw new Error('G07_BATCH_UNSUPPORTED_STATE_CACHE_LAYOUT');
+    }
+    const depth = (phase) => {
+      const values = [caches.account, caches.storage, caches.code]
+        .map(c => c._checkpoints);
+      if (values.some(v => !Number.isInteger(v) || v < 0 || v !== values[0])) {
+        throw new Error('G07_BATCH_CHECKPOINT_DEPTH_DIVERGENCE at ' + phase +
+          ': ' + values.join('/'));
+      }
+      return values[0];
+    };
+    // Batch-local upstream correction: commit all three cache layers.
+    state.commit = async () => { caches.commit(); depth('commit'); };
+    batchCacheDepth = depth;
+  }
   const blockchain = new RPCBlockChain(rpcUrl);
 
   const launcherAddr = createAddressFromString(LAUNCHER);
@@ -366,7 +392,14 @@ async function main() {
 
   const trialResults = [];
   for (const [trialIndex, value] of BUY_VALUES.entries()) {
-    if (BATCH_RAW) await state.checkpoint();
+    let trialDepth = null;
+    if (BATCH_RAW) {
+      trialDepth = batchCacheDepth('before trial=' + trialIndex);
+      await state.checkpoint();
+      if (batchCacheDepth('checkpoint trial=' + trialIndex) !== trialDepth + 1) {
+        throw new Error('G07_BATCH_CHECKPOINT_FAILED trial=' + trialIndex);
+      }
+    }
     try {
       const buyRes = await evm.runCall({
         caller: buyerAddr,
@@ -405,7 +438,30 @@ async function main() {
       }
       trialResults.push({ buy_value_wei: value, received_raw: returned, buyer_balance_raw: balance, execution_gas: buyRes.execResult.executionGasUsed });
     } finally {
-      if (BATCH_RAW) await state.revert();
+      if (BATCH_RAW) {
+        await state.revert();
+        if (batchCacheDepth('revert trial=' + trialIndex) !== trialDepth) {
+          throw new Error('G07_BATCH_REVERT_DEPTH_MISMATCH trial=' + trialIndex);
+        }
+        // Fail closed: actual token balance must be restored, not merely the
+        // reported BUY return. A repeated BUY may never accumulate balance.
+        const reset = await evm.runCall({
+          caller: buyerAddr,
+          origin: buyerAddr,
+          to: createAddressFromString(saltChoice.token),
+          value: 0n,
+          data: hexToBytes(balanceOfCalldata(BUYER)),
+          gasLimit: 500_000n,
+          gasPrice: 0n,
+          block,
+          isStatic: true,
+        });
+        if (reset.execResult.exceptionError ||
+            BigInt(bytesToHex(reset.execResult.returnValue) || '0x0') !== 0n) {
+          throw new Error('G07_BATCH_POST_REVERT_TOKEN_BALANCE_NONZERO trial=' + trialIndex);
+        }
+        batchCacheDepth('after reset balance read trial=' + trialIndex);
+      }
     }
   }
   const returned = trialResults[0].received_raw;
@@ -448,6 +504,8 @@ async function main() {
     buy_execution_gas: buyExecutionGas,
     batch_buy_trials: BATCH_RAW ? trialResults : undefined,
     post_launch_checkpoint_revert: Boolean(BATCH_RAW),
+    batch_cache_all_layers_commit_patch: Boolean(BATCH_RAW),
+    batch_post_revert_zero_token_balance_checked: Boolean(BATCH_RAW),
     rust_expected_output_was_execution_input: false,
     signed_transactions_created: false,
     signed_transactions_submitted: false,
