@@ -62,6 +62,68 @@ preflight="$tmp/preflight.json"
 
 node bsc/gates/gate0/tools/g06a_preflight_readonly.cjs "$preflight" >/dev/null
 
+# 1 wei is the smallest positive native amount. Avoid redundant fresh historical
+# launch replays if it is locally executable. Qualify 1/1/1 + 2/10 witnesses
+# against ONE post-launch EVM state via existing in-process checkpoint/revert.
+if (( RESOLUTION_WEI == 1 )); then
+  echo "=== SINGLE-PARENT MINIMUM PATH ==="
+  export DARKBOT_G06A_BUY_VALUE_WEI=1
+  export DARKBOT_G06A_BUY_VALUES_WEI="1,1,1,2,10"
+  if node bsc/gates/gate0/tools/g06a_economics_evm_crosscheck.cjs "$preflight" \
+      >"$tmp/one_wei_batch.json" 2>"$tmp/one_wei_batch.err"; then
+    python3 - "$tmp/one_wei_batch.json" "$DARKBOT_G06A_GAS_PRICE_WEI" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+gas_price = int(sys.argv[2])
+values = [1, 1, 1, 2, 10]
+rows = d.get("batch_buy_trials")
+if d.get("status") != "EVM_SEQUENCE_PASS" or not isinstance(rows, list) or len(rows) != len(values):
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE invalid single-parent batch")
+for i, (v, r) in enumerate(zip(values, rows)):
+    if (int(r.get("buy_value_wei", -1)) != v or
+        int(r.get("received_raw", 0)) <= 0 or
+        r.get("received_raw") != r.get("buyer_balance_raw")):
+        raise SystemExit("STOP: QUALIFICATION_INCOMPLETE invalid trial " + str(i))
+if any(rows[i] != rows[0] for i in (1, 2)):
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE nondeterministic 1-wei trials")
+if int(rows[3]["received_raw"]) < int(rows[0]["received_raw"]) or int(rows[4]["received_raw"]) < int(rows[3]["received_raw"]):
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE nonmonotonic local receipt")
+if not d.get("post_launch_checkpoint_revert") or d.get("mainnet_eth_call_launch_success") is not True:
+    raise SystemExit("STOP: QUALIFICATION_INCOMPLETE missing launch/source binding")
+print("SINGLE_PARENT_BLOCK=" + str(d["state_source"]["block_number"]))
+print("SINGLE_PARENT_HASH=" + str(d["state_source"]["block_hash"]))
+print("ONE_WEI_BUY_REPLAY=3/3_PASS")
+print("MONOTONICITY_WITNESSES=2_WEI_AND_10_WEI_PASS_LOCAL")
+print("FIRST_LOCALLY_QUALIFIED_POSITIVE_VALUE_WEI=1")
+print("RAW_TOKEN_RECEIVED_1_WEI=" + str(rows[0]["received_raw"]))
+limit_gas = (6603270 + 3000000) * gas_price
+print("LAUNCH_PLUS_BUY_GAS_LIMIT_RESERVE_WEI=" + str(limit_gas))
+print("SIMULATED_LAUNCH_PLUS_BUY_GAS_FEE_WEI=" +
+      str((int(d["launch_execution_gas"]) + int(rows[0]["execution_gas"])) * gas_price))
+print("BUILDER_TIPS_AND_EXTRA_FEES=NOT_QUALIFIED")
+print("VERDICT=LOCAL_EVM_ONE_WEI_SINGLE_PARENT_PASS_NOT_MAINNET_AUTHORIZED")
+PY
+    echo "LIVE_SEND=NONE"
+    echo "EVIDENCE_DIR=$tmp"
+    echo "NEXT=Qualify exact proposed Mainnet test value/gas/builder expenses in scoped G0.6 DRY."
+    exit 0
+  fi
+
+  # Only the first BUY itself may reject the minimal amount; infrastructure
+  # failure or later inconsistent BUY trials are not economic counterexamples.
+  if grep -Eq '^Error: (local BUY simulation reverted:.*trial=0|independent EVM BUY returned zero; trial=0)' \
+       "$tmp/one_wei_batch.err"; then
+    echo "ONE_WEI=BUY_REJECT_AFTER_LAUNCH; continuing automatic bracketing"
+    unset DARKBOT_G06A_BUY_VALUES_WEI
+  else
+    echo "STOP: QUALIFICATION_INCOMPLETE single-parent replay failed" >&2
+    cat "$tmp/one_wei_batch.err" >&2
+    exit 4
+  fi
+fi
+
+
+
 probe() {
   local v="$1"
   local passes=0
