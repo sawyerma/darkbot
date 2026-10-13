@@ -1,7 +1,7 @@
 # DarkBot Solana + BSC Roadmap — Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-10-09
+Updated: 2026-10-13
 
 ## **ABSOLUTE STOP RULE — REAL MAINNET BUY BEFORE ANY MORE C1/C2 WORK**
 
@@ -22,15 +22,46 @@ Updated: 2026-10-09
 >
 > C1 engineering may remain preserved at its current qualified checkpoint, but it is **PAUSED** until the real BUY test is executed and evaluated.
 
-## Gate-0: dynamic gas-price qualification (binding, 2026-10-13)
+## G0.6a–G0.8 qualification update — binding 2026-10-13
 
-- Separate automatic minimum executable BUY search from dynamic gas price selection.
-- Determine a read-only candidate gas price from current BSC `eth_gasPrice` and verified applicable builder floors. Neither 0.05 gwei nor 1 gwei is a permanently correct price. Historical DRY policies are not dynamic.
-- Candidate policy: max(current RPC suggestion, verified applicable builder floor); if above the approved gas or spend ceiling, STOP, never silently clamp or authorize a larger spend.
-- Record block, RPC observation, builder evidence, gas candidate and ceiling. A dynamic candidate alone does NOT prove fastest inclusion; label it DYNAMIC_GAS_CANDIDATE_ONLY.
-- Execute automatic BUY bracketing/refinement at the chosen gas candidate. Only a true BUY rejection after a successful launch may move the BUY lower bound. Separate launch errors, RPC errors and local EVM divergence; keep diagnostic evidence.
-- Recheck current gas and builder policy before G0.7. Any change invalidates exact-byte qualification: rerun complete G0.6 DRY, sign/nonce, cost and builder validations. Never alter signed bytes after qualification. No live submission without explicit authorization.
-- Product objective remains actual earliest successful on-chain BUY and measured T0-to-T_buy, never cheapest gas alone.
+**Existing evidence remains valid.** The existing G0.6 DRY1–DRY4 PASS is retained with its original scope and exact parameters. This update does not reopen all of G0.6 or authorize a live transaction. Additional qualification applies to the new G07 minimum-value and dynamic gas candidate and to any modified signed parameters. The absolute Gate-0 stop rule above remains unchanged.
+
+### Evidence and scope
+
+| Evidence | Status |
+| --- | --- |
+| Existing G0.6 final DRY | PASS, preserved |
+| G07 1 wei local BUY | PARTIAL: two EthereumJS executions each returned 180299145 raw token units, matching buyer balance; launch gas 5223342, BUY gas 167077 |
+| Stable minimum qualification | OPEN: later stability attempt failed during local launch, before BUY |
+| Historical RPC state | PARTIAL: observed missing trie node; bounded whole-search fresh-preflight restart exists but does not prove persistent state availability |
+| Dynamic gas | PARTIAL: current read-only candidate max(eth_gasPrice, verified applicable builder floor), subject to cap; not optimal bidding |
+| G0.7 actual Mainnet BUY and G0.8 acquisition/ordering | NOT EXECUTED / NOT AUTHORIZED |
+
+One wei is the smallest positive native unit, **not a qualified final minimum** until a reproducible, complete launch-then-BUY test passes. Raw token output is not an economically meaningful quantity without independently verified token decimals and fees.
+
+### G07 reproducibility and monotonicity gates
+
+- Keep using existing local EVM crosscheck, diagnostics and bounded complete restart with fresh preflight. Do not mix evidence from different parent blocks. Do not build a new snapshot subsystem unless the existing mechanisms demonstrably cannot reproduce the frozen test.
+- Distinguish LAUNCH_FAIL, RPC_STATE_UNAVAILABLE, EVM_DIVERGENCE, BUY_REJECT and QUALIFICATION_INCOMPLETE. Only a true BUY_REJECT **after successful launch** may advance the failed-BUY lower boundary. An intermittent local launch revert invalidates the candidate's final qualification.
+- Exponential bracketing and binary search require a supported monotonic-executability assumption. Validate it for the frozen contract/state and relevant amounts; if violated or unprovable, output QUALIFICATION_INCOMPLETE rather than a false exact minimum.
+- Maintain distinct outputs for TECHNICAL_MINIMUM and QUALIFIED_MAINNET_TEST_VALUE. A positive local 1-wei token return alone does not authorize a 1-wei Mainnet test.
+
+### Dynamic gas and total-budget gates
+
+- Gas is selected dynamically for the candidate from current BSC eth_gasPrice and verified *applicable* provider rules, not a permanently correct 0.05 or 1 gwei. BlockRazor, 48Club and direct P2P have different admission/ranking economics. Current max-rule is DYNAMIC_GAS_CANDIDATE_ONLY, not proof of the fastest inclusion.
+- Freeze the RPC observation, block, builder mode/evidence, gas candidate and approved ceiling. If pricing or total approved spend exceeds the ceiling, STOP; never auto-increase, silently clamp or substitute unqualified bids.
+- Budget the **entire** attempt: launch gas + BUY gas + builder tips/payments + BUY input value + other charges. Distinguish worst-case gas-limit reserve from actual charged fees.
+- If any final signed field, gas price, nonce, calldata, gas limit or BUY value differs from the prior qualified DRY, requalify the affected exact-byte transaction and necessary G0.6 DRY1–DRY4 acceptance checks. The historical PASS remains intact. Refresh gas and builder requirements before G0.7, then require explicit acceptance and funding approval.
+
+### Priority and deferred optimization
+
+1. Preserve existing G0.6 DRY PASS; fix only observed G07 state/launch instability and verify minimum-search assumptions.
+2. Qualify technical minimum, economically allowed minimal test spend, gas candidate and exact signed G0.7 parameters.
+3. Run required changed-parameter final DRY checks, followed by explicit authorization for at most the approved Mainnet attempt.
+4. G0.7 actual controlled on-chain BUY; G0.8 confirm canonical buyer token acquisition, position relative to launch and competition, builder route and complete costs. Treat T0-to-T_buy as UNKNOWN without a valid producing-execution witness; position N+1 alone is not sub-ms timing.
+5. PASS / ADAPT / STOP. Only then resume frozen C1/C2 work.
+
+**DYNAMIC_INCLUSION_BID_OPTIMIZER: PLANNED / BLOCKED UNTIL G0.7/G0.8.** Develop distinct P2P, 48Club and BlockRazor gas/bundle/tip policies under hard total-spend and profitability bounds, with safe signing invalidation on bid changes. Benchmark actual successful acquisition, inclusion position, validator reach and net costs, not RPC suggestions, ACKs or local handoff alone.
 
 ## TOP PRIORITY — LATENCY MEASUREMENT
 
