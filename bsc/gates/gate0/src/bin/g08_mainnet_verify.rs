@@ -389,7 +389,7 @@ fn capture_chain_window(
             crossed_horizon = true;
         }
         number = number.checked_add(1).ok_or("block number overflow")?;
-    }
+    };
 
     writer
         .flush()
