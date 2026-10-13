@@ -9,7 +9,8 @@ cd "$(git rev-parse --show-toplevel)"
 if [[ "${DARKBOT_G07_SEARCH_INNER:-}" != YES ]]; then
   mkdir -p bsc/local_diagnostics
   for restart in 0 1 2; do
-    log="$(mktemp bsc/local_diagnostics/g07-controller.XXXXXX.log)"
+    logdir="$(mktemp -d bsc/local_diagnostics/g07-controller.XXXXXX)"
+    log="$logdir/controller.log"
     if DARKBOT_G07_SEARCH_INNER=YES bash "$0" >"$log" 2>&1; then
       cat "$log"
       exit 0
@@ -18,6 +19,11 @@ if [[ "${DARKBOT_G07_SEARCH_INNER:-}" != YES ]]; then
     if grep -Eq "missing trie node|state .* unavailable|pruned state" "$log" && (( restart < 2 )); then
       echo "RPC_PRUNED_STATE_RESTART=$((restart + 1))/2; restarting entire search with a fresh block"
       continue
+    fi
+    if grep -Eq "local launch simulation reverted|EVM_DIVERGENCE_LAUNCH" "$log"; then
+      echo "VERDICT=QUALIFICATION_INCOMPLETE reason=EVM_DIVERGENCE_LAUNCH" >&2
+    elif grep -Eq "missing trie node|pruned state" "$log"; then
+      echo "VERDICT=QUALIFICATION_INCOMPLETE reason=RPC_STATE_UNAVAILABLE" >&2
     fi
     echo "STOP: search failed; controller evidence: $log" >&2
     exit 5
@@ -77,7 +83,7 @@ probe() {
 
     # Decide early once either outcome can no longer change.
     if (( passes >= REQUIRED_PASSES )); then
-      echo "  probe $v wei: PASS ($passes/$run)"
+      echo "  probe $v wei: PROVISIONAL_PASS ($passes/$run; final stability pending)"
       return 0
     fi
     if (( passes + (PROBE_RUNS - run) < REQUIRED_PASSES )); then
@@ -125,7 +131,7 @@ done
 
 echo
 echo "BRACKET_FAIL_WEI=$lo"
-echo "BRACKET_PASS_WEI=$hi"
+echo "BRACKET_PROVISIONAL_PASS_WEI=$hi"
 echo
 echo "=== BINARY REFINEMENT ==="
 
@@ -164,6 +170,7 @@ done
 echo
 if (( lo == 0 )); then echo "LOWER_BOUND=UNTESTED_BELOW_RESOLUTION"; else echo "LAST_CONFIRMED_BUY_REJECT_WEI=$lo"; fi
 echo "FIRST_STABLE_PASS_WEI=$hi"
+echo "VERDICT=LOCAL_EVM_MINIMUM_CANDIDATE_STABLE_NOT_MAINNET_AUTHORIZED"
 echo "SEARCH_RESOLUTION_WEI=$RESOLUTION_WEI"
 python3 - "$lo" "$hi" <<'PY'
 from decimal import Decimal
