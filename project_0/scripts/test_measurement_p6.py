@@ -111,16 +111,18 @@ class Qualification(unittest.TestCase):
         # Fixture proof status is supplied deliberately; this is not real chain qualification.
         self.write('shadow_evaluations.jsonl',[])
         evidence=c.finalize_capture(self.run)
-        root=self.run/'verification/strict-fixture';batchdir=root/'batch';batchdir.mkdir(parents=True)
+        spec=c.specification(self.run,c.VerificationConfig(mode='strict'),'offline-fixture');sid=spec['verification_spec_id']
+        root=self.run/'verification'/sid;batchdir=root/'batch';batchdir.mkdir(parents=True);c.immutable(root/'spec.json',spec)
         tx=f.tx('strict-event',10,150,'CLASSIC');decoded=a.detect(tx,10);ev=decoded['events'][0]
         event={**ev,'liquidation_type':'CLASSIC','transaction_index':0,'liquidator':ev['actor'],
             'visible_payments':{},'winner_net_edge_complete':False,'block_time':150,'permissionless_profit_opportunity':True}
         (batchdir/'transactions.jsonl').write_text(json.dumps({'signature':'strict-event','slot':10,'block_time':150,'raw':tx})+'\n')
         (batchdir/'liquidations.jsonl').write_text(json.dumps({'source':'canonical_market_truth','event':event})+'\n')
-        batch={'directory':'batch','files':{p.name:a.base58_encode(bytes.fromhex(c.file_hash(p))) for p in batchdir.iterdir()}}
+        (batchdir/'coverage.jsonl').write_text('')
+        batch={'spec':sid,'proof':{'complete':True},'directory':'batch','files':{p.name:a.base58_encode(bytes.fromhex(c.file_hash(p))) for p in batchdir.iterdir()}}
         checkpoint=root/'batch.json';c.immutable(checkpoint,batch)
         payload={'capture_run_id':evidence['capture_run_id'],'capture_evidence_digest':evidence['evidence_digest'],
-                 'verification_spec_id':'fixture','verification_attempt_id':'fixture','mode':'strict',
+                 'verification_spec_id':sid,'verification_attempt_id':'fixture','mode':'strict',
                  'summary':{'status':'CANONICAL_VERIFIED'},'finished_unix_ns':1,
                  'artifacts':{'batch':{'path':str(checkpoint.relative_to(self.run)),'sha256':c.file_hash(checkpoint)}}}
         result={**payload,'verification_result_id':c.digest(payload)}

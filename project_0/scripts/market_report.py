@@ -20,7 +20,7 @@ import audit_market_quick as a
 import measurement_contract as c
 
 VERSION='C0-E1/NormalizedReport/2'
-PRIORITY={'strict':3,'index':2,'live':1,'shadow':0}
+PRIORITY={'strict':3,'index':2,'live':1,'shadow':0,'unverified':-1}
 
 
 def values(path):
@@ -49,12 +49,27 @@ def strict_directory(run,checkpoint,batch):
 
 
 def validate_result(run,result):
+    sid=result.get('verification_spec_id','')
+    if len(sid)!=64 or any(x not in '0123456789abcdef' for x in sid):raise c.ContractError('RESULT_SPEC_BINDING_INVALID')
+    specpath=run/'verification'/sid/'spec.json'
+    if not specpath.is_file():raise c.ContractError('RESULT_SPEC_BINDING_MISSING')
+    spec=json.loads(specpath.read_text())
+    if c.digest({k:v for k,v in spec.items() if k!='verification_spec_id'})!=sid:raise c.ContractError('RESULT_SPEC_DIGEST_MISMATCH')
+    capture=c.finalize_capture(run)
+    if (spec.get('capture_run_id')!=capture['capture_run_id'] or result.get('capture_run_id')!=capture['capture_run_id']
+        or result.get('capture_evidence_digest')!=capture['evidence_digest']
+        or spec.get('mode')!=result.get('mode') or spec.get('window')!=a.read_window(run)):
+        raise c.ContractError('RESULT_SPEC_CAPTURE_MISMATCH')
     payload={k:x for k,x in result.items() if k!='verification_result_id'}
     if c.digest(payload)!=result.get('verification_result_id'):raise c.ContractError('RESULT_DIGEST_MISMATCH')
     for item in result['artifacts'].values():
         artifact=(run/item['path']).resolve()
         if not artifact.is_relative_to(run.resolve()) or c.file_hash(artifact)!=item['sha256']:raise c.ContractError('RESULT_EVIDENCE_CHANGED')
-        if result['mode']=='strict':strict_directory(run,artifact,json.loads(artifact.read_text()))
+        if result['mode']=='strict':
+            batch=json.loads(artifact.read_text())
+            if batch.get('spec')!=sid or batch.get('proof',{}).get('complete') is not True:raise c.ContractError('STRICT_BATCH_PROOF_UNBOUND')
+            if not {'transactions.jsonl','liquidations.jsonl','coverage.jsonl'}<=set(batch.get('files',{})):raise c.ContractError('STRICT_BATCH_PROOF_MISSING')
+            strict_directory(run,artifact,batch)
 
 
 def finite(value):
@@ -107,15 +122,15 @@ class Dataset:
             record.get('instruction_position') if record['record_kind']!='LIQUIDATION' else None,record.get('event_index'),record.get('liquidation_type'),record.get('related_type')])
         record['entity_id']=key
         self.db.execute('INSERT OR IGNORE INTO evidence VALUES(?,?,?,?)',(key,source,c.digest(record),json.dumps(record,allow_nan=False)))
-    def transaction(self,decoded,source,raw=None,metadata=None):
+    def transaction(self,decoded,source,raw=None,metadata=None,proof_binding=None):
         metadata=metadata or {};sig,slot=decoded.get('signature'),decoded.get('slot')
         if not isinstance(sig,str) or type(slot) is not int:raise c.ContractError('NORMALIZED_TX_IDENTITY_UNKNOWN')
         success=decoded.get('success');classification=decoded.get('classification','UNKNOWN')
-        qualified=success is True and classification=='CLASSIFIED' and source in ('index','strict')
+        qualified=success is True and classification=='CLASSIFIED' and source in ('index','strict') and proof_binding is not None
         base={'schema':VERSION,'signature':sig,'slot':slot,'transaction_index':(raw or {}).get('transactionIndex'),
             'block_time':decoded.get('block_time',(raw or {}).get('blockTime')),
             'block_utc':None,'live_t_rx_ns':metadata.get('t_rx_ns'),'live_received_utc':metadata.get('observed_at_utc'),
-            'capture_source':metadata.get('source'),'outcome':'SUCCESS' if success is True else 'FAILED' if success is False else 'UNKNOWN',
+            'capture_source':metadata.get('source'),'verification_binding':proof_binding,'outcome':'SUCCESS' if success is True else 'FAILED' if success is False else 'UNKNOWN',
             'classification':classification,'boundary_second':decoded.get('boundary_second',False),'protocol_pin':c.PROTOCOL,'decoder_version':a.SCHEMA,
             'instruction_position':None,'event_index':None,'liquidation_type':None,'related_type':None,
             'markers':[],'pairing':decoded.get('liquidation_pairs',[]),'target':None,'actor':None,'winner':None,
@@ -181,7 +196,7 @@ def load_live(ds,run):
     market=run/'market' if (run/'market').exists() else run
     for row in values(market/'transactions.jsonl'):
         source=row.get('source','')
-        normalized_source='live' if source in ('logsSubscribe','transactionSubscribe') else ('strict' if source=='full_slot_reconciliation' else 'index')
+        normalized_source='live' if source in ('logsSubscribe','transactionSubscribe') else 'unverified'
         raw=raw_tx(row)
         if raw:
             decoded=a.detect(raw,row['slot'])
@@ -196,11 +211,13 @@ def load_live(ds,run):
 
 def load_result(ds,run,result):
     if not result:return
+    validate_result(run,result)
+    proof={k:result[k] for k in ('capture_run_id','capture_evidence_digest','verification_spec_id','verification_result_id')}
     if result['mode']=='index':
         for item in result['artifacts'].values():
             if not item['path'].endswith('/comparison.jsonl'):continue
             for row in values(run/item['path']):
-                ds.transaction(row['historical'],'index',metadata=row.get('darkbot'))
+                ds.transaction(row['historical'],'index',metadata=row.get('darkbot'),proof_binding=proof)
                 for ev in row.get('darkbot',{}).get('events',[]):
                     if ev.get('shadow_status')=='SHADOW_MATCH':load_shadow(ds,ev['shadow_evidence'])
     elif result['mode']=='strict':
@@ -218,7 +235,7 @@ def load_result(ds,run,result):
                 if key in seen:continue
                 seen.add(key)
                 raw=row['raw'];decoded=a.detect(raw,row['slot']);decoded['block_time']=row.get('block_time')
-                ds.transaction(decoded,'strict',raw)
+                ds.transaction(decoded,'strict',raw,proof_binding=proof)
 
 
 def load_shadow(ds,row,replace_existing=False):

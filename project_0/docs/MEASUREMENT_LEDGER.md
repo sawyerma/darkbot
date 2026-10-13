@@ -5250,3 +5250,12 @@ P6 fixes found by qualification: cached report revalidates nested strict evidenc
 **Overall P6/provider qualification remains OPEN.** Real failed-5h replay **NOT_RUN / USER-OWNED**, by explicit user instruction; provider WSS/RPC/free-quota/archive measurement **NOT_RUN**; Mainnet smoke **NOT_RUN / separate permission required**. Historical index/429 gate **OPEN**. No new long run, LIVE or submission. **No Master PASS, four-hour stability or profitability claim.**
 
 **Exact next step:** user runs saved-data replay/report on their existing run; then measured FREE_ONLY provider qualification and explicitly authorized short read-only Mainnet smoke before a user-started four-hour capture. P1/P2/P3/P4 were not reimplemented. All original run data and BSC work preserved.
+
+
+## 2026-10-13 — FE-00/FE-01 selection and source-trust correction
+
+Base **28f6d53e779857a1b4342ced929bb61f8c35225d**, fast-forward only; BSC/raw runs preserved. FE-00 report and source-trust fix **IMPLEMENTED / LOCAL TEST PASS**. Raw source names (including `full_slot_reconciliation`) no longer qualify INDEX/STRICT; source requires immutable capture-bound spec/result proof, strict complete batch + files. Positive/negative regressions included.
+
+Evidence: `docs/evidence/FE00_20261013/candidates.json` and adjacent logs. Six real historical TX signatures/slots decoded; R122 two historical technical ZERO_PREFUND successes; R124 three known negative edges: **−121889 / −118606 / −91691 USD-micro**. Historical != currently tradable. **NO_ECONOMIC_GO.** First class for requalification: **ZERO_PREFUND_SAME_TX**, existing atomic collateral exit + floor; NO_SWAP has no qualified executable exit, inventory UNKNOWN. JIT remains required when neither initial class qualifies; its ExactOut/absent funding-bank blockers retained.
+
+Tests: **55 Python PASS; workspace 340 txv1 / 338 health PASS, 0 FAIL, 1 pre-existing ignored each; both release builds PASS.** Clippy baseline warnings retained; compiled Rust unchanged in this package (differential delta zero). No fresh Mainnet RPC or 5h replay. FE-01 current deployment/state and FE-02 profitable complete simulation **NOT_RUN / authorization-dependent**, no PILOT_READY. Independent FE-04 persistent one-shot reservation work continues. LIVE/SUBMISSION=false.

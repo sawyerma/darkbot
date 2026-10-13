@@ -35,10 +35,11 @@ class Reports(unittest.TestCase):
         self.write('market/transactions.jsonl',live)
         self.write('opportunity_economics.jsonl',[{'target':f.TARGET,'market':None,'our':{'account':f.TARGET,'economics_known':True,'net_profit':9999,'signature':'shadow-sig','timing':{'t_rx_ns':7}}}])
         evidence=c.finalize_capture(self.run)
-        out=self.run/'verification/test';out.mkdir(parents=True)
-        self.write('verification/test/comparison.jsonl',historical)
-        payload={'capture_run_id':evidence['capture_run_id'],'verification_spec_id':'test','verification_attempt_id':'test',
-            'mode':'index','summary':{'status':'INDEX_VERIFIED'},'artifacts':{'comparison':{'path':'verification/test/comparison.jsonl','sha256':c.file_hash(out/'comparison.jsonl')}},'finished_unix_ns':1}
+        spec=c.specification(self.run,c.VerificationConfig(mode='index'),'offline-fixture');sid=spec['verification_spec_id']
+        out=self.run/'verification'/sid;out.mkdir(parents=True);c.immutable(out/'spec.json',spec)
+        self.write(str((out/'comparison.jsonl').relative_to(self.run)),historical)
+        payload={'capture_run_id':evidence['capture_run_id'],'verification_spec_id':sid,'capture_evidence_digest':evidence['evidence_digest'],'verification_attempt_id':'test',
+            'mode':'index','summary':{'status':'INDEX_VERIFIED'},'artifacts':{'comparison':{'path':str((out/'comparison.jsonl').relative_to(self.run)),'sha256':c.file_hash(out/'comparison.jsonl')}},'finished_unix_ns':1}
         result={**payload,'verification_result_id':c.digest(payload)}
         c.immutable(out/'results'/(result['verification_result_id']+'.json'),result)
         return result
@@ -89,6 +90,30 @@ class Reports(unittest.TestCase):
         one=r.report(self.run,c.ReportQuery(),result['verification_result_id'],io.StringIO())
         two=r.report(self.run,c.ReportQuery(),result['verification_result_id'],io.StringIO())
         self.assertEqual(one['report_query_identity'],two['report_query_identity'])
+
+    def test_capture_source_names_never_grant_chain_proof(self):
+        sources=['new-provider','index','strict','full_slot_reconciliation','logsSubscribe','transactionSubscribe']
+        self.write('market/transactions.jsonl',[{'source':source,'signature':'unbound'+str(i),'slot':10+i,'raw':f.tx('unbound'+str(i),10+i,150,'CLASSIC')} for i,source in enumerate(sources)])
+        out,manifest=r.normalize(self.run)
+        rows=list(r.values(out/'all_records.jsonl'))
+        self.assertEqual(sum(x['record_kind']=='LIQUIDATION' for x in rows),6)
+        self.assertTrue(all(not x['chain_liquidation_confirmed'] and x['winner'] is None for x in rows))
+        self.assertTrue(all(x['source'] in ('live','unverified') for x in rows))
+        self.assertTrue(all(x['verification_binding'] is None for x in rows))
+        self.assertEqual(manifest['historical_status'],'HISTORICAL_INCOMPLETE')
+        self.assertIsNone(json.loads((out/'economics_final.json').read_text())['market_total_liquidations'])
+
+    def test_result_requires_capture_bound_immutable_spec(self):
+        result=self.setup_events();out,_=r.normalize(self.run,result)
+        qualified=[x for x in r.values(out/'all_records.jsonl') if x['chain_liquidation_confirmed']]
+        self.assertEqual(len(qualified),4)
+        self.assertTrue(all(x['verification_binding']['verification_result_id']==result['verification_result_id'] for x in qualified))
+        spec=self.run/'verification'/result['verification_spec_id']/'spec.json'
+        original=spec.read_text();spec.unlink()
+        with self.assertRaisesRegex(c.ContractError,'SPEC_BINDING_MISSING'):r.normalize(self.run,result)
+        spec.write_text(original)
+        changed=json.loads(original);changed['capture_run_id']='unrelated';spec.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(c.ContractError,'SPEC_DIGEST_MISMATCH'):r.normalize(self.run,result)
 
     def test_failed_related_and_priority_requested_limit(self):
         t=f.tx(kind='CLASSIC');keys=t['transaction']['message']['accountKeys'];keys.append('ComputeBudget111111111111111111111111111111')

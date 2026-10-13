@@ -1,0 +1,440 @@
+{
+  "schema": "Project0/FE00/1",
+  "status": "NO_ECONOMIC_GO",
+  "historical": [
+    {
+      "source": "docs/evidence/AUDIT_20261005/2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf.json",
+      "source_sha256": "9822cde8c32c5544fe90571c6a208e3b770a0effe0e92e1388a59b4fecad4329",
+      "evidence_scope": "ARCHIVED_RPC_FIXTURE; NOT_CURRENT_VERIFICATION",
+      "signature": "2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf",
+      "slot": 451703584,
+      "block_time": 1790701461,
+      "classification": "CLASSIFIED",
+      "success": true,
+      "events": [
+        {
+          "type": "RECEIVERSHIP",
+          "seized_value_usd": 0.35016135320244146,
+          "repaid_value_usd": 0.16333974357083747,
+          "protocol_fee_lamports": 1000000,
+          "native_evidence": null,
+          "target": "3GqwCURBtJZfdQxMSyZ1VyWNSB5WXovg7Q8Q46HY7ihx",
+          "actor": "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+          "payload_sha256": "6fb568895afb6db8ae04abe08c3e9ec0ce79fbe62eb14f69ef2275dfaa4ad90a",
+          "log_index": 72,
+          "event_index": 0,
+          "instruction_position": [
+            4,
+            null
+          ],
+          "seized_asset_native_exact": null,
+          "signature": "2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf",
+          "slot": 451703584,
+          "transaction_index": 176,
+          "source": "INDEPENDENT_FINALIZED_GET_TRANSACTION",
+          "solscan": "https://solscan.io/tx/2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf"
+        }
+      ],
+      "actual_meta_fee_lamports": 19000,
+      "requested_priority_fee_lamports": null,
+      "priority_included_in_meta_fee": true,
+      "current_executable": false,
+      "realized_net_pnl_usd": null,
+      "unknowns": [
+        "CURRENT_HEALTH",
+        "CURRENT_PROGRAM_PARITY",
+        "CURRENT_ROUTE",
+        "OUR_WALLET_INVENTORY",
+        "FULL_EXIT_AND_COST_LEDGER"
+      ]
+    },
+    {
+      "source": "docs/evidence/AUDIT_20261005/38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F.json",
+      "source_sha256": "e657660c193834f907ae90782c9353439a292bf3c21d0e0ba2290559824d43b6",
+      "evidence_scope": "ARCHIVED_RPC_FIXTURE; NOT_CURRENT_VERIFICATION",
+      "signature": "38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F",
+      "slot": 451704201,
+      "block_time": 1790701629,
+      "classification": "CLASSIFIED",
+      "success": true,
+      "events": [
+        {
+          "type": "RECEIVERSHIP",
+          "seized_value_usd": 0.9979337956812735,
+          "repaid_value_usd": 0.4661645645327397,
+          "protocol_fee_lamports": 1000000,
+          "native_evidence": null,
+          "target": "AzQVTAtLxdaQUJzh7xZ7rj956tkeVNk4D4iuK5EVkxDi",
+          "actor": "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+          "payload_sha256": "e78fbac94279ea0d39fbfcaa0d7a8b6bfa0aa4d7509a52f46b08b452265088e7",
+          "log_index": 66,
+          "event_index": 0,
+          "instruction_position": [
+            4,
+            null
+          ],
+          "seized_asset_native_exact": null,
+          "signature": "38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F",
+          "slot": 451704201,
+          "transaction_index": 1270,
+          "source": "INDEPENDENT_FINALIZED_GET_TRANSACTION",
+          "solscan": "https://solscan.io/tx/38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F"
+        }
+      ],
+      "actual_meta_fee_lamports": 19000,
+      "requested_priority_fee_lamports": null,
+      "priority_included_in_meta_fee": true,
+      "current_executable": false,
+      "realized_net_pnl_usd": null,
+      "unknowns": [
+        "CURRENT_HEALTH",
+        "CURRENT_PROGRAM_PARITY",
+        "CURRENT_ROUTE",
+        "OUR_WALLET_INVENTORY",
+        "FULL_EXIT_AND_COST_LEDGER"
+      ]
+    },
+    {
+      "source": "docs/evidence/AUDIT_20261005/3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB.json",
+      "source_sha256": "3a0d2e639d1efea1fef30ff6ff9dbc4f0476056f04e8559e5df4d466d51c1643",
+      "evidence_scope": "ARCHIVED_RPC_FIXTURE; NOT_CURRENT_VERIFICATION",
+      "signature": "3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB",
+      "slot": 451657746,
+      "block_time": 1790689143,
+      "classification": "CLASSIFIED",
+      "success": true,
+      "events": [
+        {
+          "type": "RECEIVERSHIP",
+          "seized_value_usd": 2.102967368506331,
+          "repaid_value_usd": 1.9170169748105295,
+          "protocol_fee_lamports": 1000000,
+          "native_evidence": null,
+          "target": "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+          "actor": "TraceR2t18nnwkXgHoB54iPD5N4x2EJZC1uS55ggsH8",
+          "payload_sha256": "f3a386a70c1b5826525bfb57f9e2b07506a73eef88571a7728b986790e11ce7f",
+          "log_index": 28,
+          "event_index": 0,
+          "instruction_position": [
+            5,
+            null
+          ],
+          "seized_asset_native_exact": null,
+          "signature": "3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB",
+          "slot": 451657746,
+          "transaction_index": 1088,
+          "source": "INDEPENDENT_FINALIZED_GET_TRANSACTION",
+          "solscan": "https://solscan.io/tx/3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB"
+        }
+      ],
+      "actual_meta_fee_lamports": 5000,
+      "requested_priority_fee_lamports": null,
+      "priority_included_in_meta_fee": true,
+      "current_executable": false,
+      "realized_net_pnl_usd": null,
+      "unknowns": [
+        "CURRENT_HEALTH",
+        "CURRENT_PROGRAM_PARITY",
+        "CURRENT_ROUTE",
+        "OUR_WALLET_INVENTORY",
+        "FULL_EXIT_AND_COST_LEDGER"
+      ]
+    },
+    {
+      "source": "docs/evidence/AUDIT_20261005/59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa.json",
+      "source_sha256": "b165bd3f55a931a9475614952fad12a5dc940ad18d85ac8822eedbf80a8b95e0",
+      "evidence_scope": "ARCHIVED_RPC_FIXTURE; NOT_CURRENT_VERIFICATION",
+      "signature": "59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa",
+      "slot": 453063240,
+      "block_time": 1791065261,
+      "classification": "CLASSIFIED",
+      "success": true,
+      "events": [
+        {
+          "type": "RECEIVERSHIP",
+          "seized_value_usd": 1.6332248942395253,
+          "repaid_value_usd": 1.5730421920342934,
+          "protocol_fee_lamports": 1000000,
+          "native_evidence": null,
+          "target": "HMjc1LecbCMUqYG3x36gaCzxG5AJ7gJPkPB85fx1pPKK",
+          "actor": "qbvAGHo9JpVRsuRem8rBCzLJJNV6ZDNv63qYHkcmNCV",
+          "payload_sha256": "5a8123b64d60cf48a25fd18f5a989963602441306214aa3f6fc190211567cc06",
+          "log_index": 28,
+          "event_index": 0,
+          "instruction_position": [
+            4,
+            null
+          ],
+          "seized_asset_native_exact": null,
+          "signature": "59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa",
+          "slot": 453063240,
+          "transaction_index": 194,
+          "source": "INDEPENDENT_FINALIZED_GET_TRANSACTION",
+          "solscan": "https://solscan.io/tx/59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa"
+        }
+      ],
+      "actual_meta_fee_lamports": 5000,
+      "requested_priority_fee_lamports": null,
+      "priority_included_in_meta_fee": true,
+      "current_executable": false,
+      "realized_net_pnl_usd": null,
+      "unknowns": [
+        "CURRENT_HEALTH",
+        "CURRENT_PROGRAM_PARITY",
+        "CURRENT_ROUTE",
+        "OUR_WALLET_INVENTORY",
+        "FULL_EXIT_AND_COST_LEDGER"
+      ]
+    },
+    {
+      "source": "docs/evidence/AUDIT_20261005/C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ.json",
+      "source_sha256": "5dbaa1dd5bccdeb89637e8fb3fdb62c8c029c0ec1b1d9ed9df353664d52a8251",
+      "evidence_scope": "ARCHIVED_RPC_FIXTURE; NOT_CURRENT_VERIFICATION",
+      "signature": "C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ",
+      "slot": 451635082,
+      "block_time": 1790683086,
+      "classification": "CLASSIFIED",
+      "success": true,
+      "events": [
+        {
+          "type": "RECEIVERSHIP",
+          "seized_value_usd": 2.372690343180288,
+          "repaid_value_usd": 2.1628902433213746,
+          "protocol_fee_lamports": 1000000,
+          "native_evidence": null,
+          "target": "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+          "actor": "TraceR2t18nnwkXgHoB54iPD5N4x2EJZC1uS55ggsH8",
+          "payload_sha256": "dd22b99fb96ef28743114523131206aeac66050e9efd5ddc309e7c226380bad3",
+          "log_index": 28,
+          "event_index": 0,
+          "instruction_position": [
+            5,
+            null
+          ],
+          "seized_asset_native_exact": null,
+          "signature": "C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ",
+          "slot": 451635082,
+          "transaction_index": 528,
+          "source": "INDEPENDENT_FINALIZED_GET_TRANSACTION",
+          "solscan": "https://solscan.io/tx/C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ"
+        }
+      ],
+      "actual_meta_fee_lamports": 5000,
+      "requested_priority_fee_lamports": null,
+      "priority_included_in_meta_fee": true,
+      "current_executable": false,
+      "realized_net_pnl_usd": null,
+      "unknowns": [
+        "CURRENT_HEALTH",
+        "CURRENT_PROGRAM_PARITY",
+        "CURRENT_ROUTE",
+        "OUR_WALLET_INVENTORY",
+        "FULL_EXIT_AND_COST_LEDGER"
+      ]
+    },
+    {
+      "source": "docs/evidence/AUDIT_20261005/gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB.json",
+      "source_sha256": "3fcb335041090423158fb05d883b4c55e7e0897c9bbe9fdba541f8b7a6964dbb",
+      "evidence_scope": "ARCHIVED_RPC_FIXTURE; NOT_CURRENT_VERIFICATION",
+      "signature": "gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB",
+      "slot": 451643526,
+      "block_time": 1790685344,
+      "classification": "CLASSIFIED",
+      "success": true,
+      "events": [
+        {
+          "type": "RECEIVERSHIP",
+          "seized_value_usd": 1.9682291660750835,
+          "repaid_value_usd": 1.7940287855275017,
+          "protocol_fee_lamports": 1000000,
+          "native_evidence": null,
+          "target": "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8",
+          "actor": "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
+          "payload_sha256": "dcb32bfd7ef7722d376e6ee7b5054284a2459a276945c08368986f480aff21b9",
+          "log_index": 68,
+          "event_index": 0,
+          "instruction_position": [
+            4,
+            null
+          ],
+          "seized_asset_native_exact": null,
+          "signature": "gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB",
+          "slot": 451643526,
+          "transaction_index": 303,
+          "source": "INDEPENDENT_FINALIZED_GET_TRANSACTION",
+          "solscan": "https://solscan.io/tx/gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB"
+        }
+      ],
+      "actual_meta_fee_lamports": 19000,
+      "requested_priority_fee_lamports": null,
+      "priority_included_in_meta_fee": true,
+      "current_executable": false,
+      "realized_net_pnl_usd": null,
+      "unknowns": [
+        "CURRENT_HEALTH",
+        "CURRENT_PROGRAM_PARITY",
+        "CURRENT_ROUTE",
+        "OUR_WALLET_INVENTORY",
+        "FULL_EXIT_AND_COST_LEDGER"
+      ]
+    }
+  ],
+  "archived_shadow_probes": [
+    {
+      "source": "docs/evidence/R122_juplend_complete.json",
+      "source_sha256": "3b50e87e2d02abbe0b92913b5d24a2ca764472ac1492f840b37348d496b0f187",
+      "account": "u5BNmEEUW8Wf2MU2Y5j1MiNhPZLaoMCeqRQzq1QXHs1",
+      "decision": "Skip",
+      "funding": null,
+      "sign_slot": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "simulated_cu": null,
+      "candidate_costs": [],
+      "reason": "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity",
+      "current_executable": false
+    },
+    {
+      "source": "docs/evidence/R122_juplend_complete.json",
+      "source_sha256": "3b50e87e2d02abbe0b92913b5d24a2ca764472ac1492f840b37348d496b0f187",
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "decision": "ShadowTechnicalReady",
+      "funding": "ZERO_PREFUND_SAME_TX",
+      "sign_slot": 453208911,
+      "serialized_bytes": 964,
+      "locked_accounts": 46,
+      "simulated_cu": 556666,
+      "candidate_costs": [],
+      "reason": "technical shadow probe: failed-attempt economics unknown",
+      "current_executable": false
+    },
+    {
+      "source": "docs/evidence/R122_juplend_complete.json",
+      "source_sha256": "3b50e87e2d02abbe0b92913b5d24a2ca764472ac1492f840b37348d496b0f187",
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "decision": "ShadowTechnicalReady",
+      "funding": "ZERO_PREFUND_SAME_TX",
+      "sign_slot": 453208987,
+      "serialized_bytes": 1227,
+      "locked_accounts": 47,
+      "simulated_cu": 432536,
+      "candidate_costs": [],
+      "reason": "technical shadow probe: failed-attempt economics unknown",
+      "current_executable": false
+    },
+    {
+      "source": "docs/evidence/R124_rpc_economics.json",
+      "source_sha256": "132c4ee35aee3bf73f602162335b5ae76d0ad722d46e67ae777884c27774ef7d",
+      "account": "Trrq3M5iixykEzCgCV4LuPvW4inagYTTNy3cmYrtnn7",
+      "decision": "Skip",
+      "funding": null,
+      "sign_slot": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "simulated_cu": null,
+      "candidate_costs": [
+        {
+          "funding": "ZERO_PREFUND_SAME_TX",
+          "path": "Rpc",
+          "message_fee_quote": {
+            "message_hash": "3uFysncc8vr5iAnRYbF7gZfvjMm4Qy3jKxzg6h2qCgAb",
+            "context_slot": 453574814,
+            "lamports": 5000
+          },
+          "transaction_fee_usd_micro": 604,
+          "failed_attempt_reserve_usd_micro": 604,
+          "rent_and_token_usd_micro": 0,
+          "economics_known": true,
+          "net_profit_usd_micro": -121889
+        }
+      ],
+      "reason": "ZERO_PREFUND_SAME_TX: tx infeasible: tx v1 signing/submission adapter not enabled; v1 capability measurement is available with feature txv1 | ZERO_PREFUND_SAME_TX: economics Known { net: -121889, profit_per_capital_bps: 170141183460469231731687303715884105727 }",
+      "current_executable": false
+    },
+    {
+      "source": "docs/evidence/R124_rpc_economics.json",
+      "source_sha256": "132c4ee35aee3bf73f602162335b5ae76d0ad722d46e67ae777884c27774ef7d",
+      "account": "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS",
+      "decision": "Skip",
+      "funding": null,
+      "sign_slot": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "simulated_cu": null,
+      "candidate_costs": [
+        {
+          "funding": "ZERO_PREFUND_SAME_TX",
+          "path": "Rpc",
+          "message_fee_quote": {
+            "message_hash": "5k9nQU4aEJV2tEhqtrDMRCXXudAusghWMtu1xn8Sy7qg",
+            "context_slot": 453574906,
+            "lamports": 5000
+          },
+          "transaction_fee_usd_micro": 604,
+          "failed_attempt_reserve_usd_micro": 604,
+          "rent_and_token_usd_micro": 0,
+          "economics_known": true,
+          "net_profit_usd_micro": -118606
+        }
+      ],
+      "reason": "ZERO_PREFUND_SAME_TX: tx infeasible: tx v1 signing/submission adapter not enabled; v1 capability measurement is available with feature txv1 | ZERO_PREFUND_SAME_TX: economics Known { net: -118606, profit_per_capital_bps: 170141183460469231731687303715884105727 }",
+      "current_executable": false
+    },
+    {
+      "source": "docs/evidence/R124_rpc_economics.json",
+      "source_sha256": "132c4ee35aee3bf73f602162335b5ae76d0ad722d46e67ae777884c27774ef7d",
+      "account": "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk",
+      "decision": "Skip",
+      "funding": null,
+      "sign_slot": null,
+      "serialized_bytes": null,
+      "locked_accounts": null,
+      "simulated_cu": null,
+      "candidate_costs": [
+        {
+          "funding": "ZERO_PREFUND_SAME_TX",
+          "path": "Rpc",
+          "message_fee_quote": {
+            "message_hash": "8tVVMyKRaTqNR8mBQhMk3AzvwpYVX7KtxbpkNvRn9T79",
+            "context_slot": 453574985,
+            "lamports": 5000
+          },
+          "transaction_fee_usd_micro": 604,
+          "failed_attempt_reserve_usd_micro": 604,
+          "rent_and_token_usd_micro": 0,
+          "economics_known": true,
+          "net_profit_usd_micro": -91691
+        }
+      ],
+      "reason": "ZERO_PREFUND_SAME_TX: tx infeasible: tx v1 signing/submission adapter not enabled; v1 capability measurement is available with feature txv1 | ZERO_PREFUND_SAME_TX: economics Known { net: -91691, profit_per_capital_bps: 170141183460469231731687303715884105727 }",
+      "current_executable": false
+    }
+  ],
+  "selected_for_requalification": "ZERO_PREFUND_SAME_TX",
+  "pilot_ready": false,
+  "decision_basis": "R122 proves historical full technical build/simulation; R124 known RPC net edges are negative. Current candidate/route/profit remains unproved.",
+  "funding_comparison": {
+    "NO_SWAP_INVENTORY": {
+      "status": "BLOCKED",
+      "reason": "builder passes realizable value None: unsold collateral is not cash proceeds; no qualified exit instructions/costs, no current wallet inventory proof"
+    },
+    "ZERO_PREFUND_SAME_TX": {
+      "status": "REQUALIFY_ONLY",
+      "reason": "Existing same-TX collateral-to-liability exit, floor checked >= repay, compiled full TX. Fresh route, actual fee, inventory/rent and positive conservative edge still required."
+    },
+    "JIT_SHORTFALL_EXACT_IN": {
+      "status": "REQUIRED_IF_FIRST_TWO_FAIL_CURRENT_QUALIFICATION",
+      "reason": "Existing branch calls unsupported ExactOut and production sizing supplies funding_bank=None. Requires bounded ExactIn + reconciled funding bank + bundle simulation and collateral exit; do not pretend these exist."
+    }
+  },
+  "live_enabled": false,
+  "submission_enabled": false,
+  "next_mainnet_evidence": [
+    "CURRENT_PROGRAMDATA_SOURCE_PARITY",
+    "CURRENT_TARGET_HEALTH_BANK_ORACLE_STATE",
+    "EXACT_ROUTE_FLOOR_AND_TX_FIT",
+    "CURRENT_FEE_AND_WALLET_BALANCES",
+    "FULL_TX_SIMULATION_AND_POSITIVE_CONSERVATIVE_EDGE"
+  ],
+  "five_hour_replay": "NOT_RUN_USER_OWNED"
+}
