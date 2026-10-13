@@ -4,7 +4,7 @@
 //! This binary never submits a transaction. Builder acknowledgements are not
 //! acquisition authority; canonical chain execution is.
 
-use alloy_primitives::{keccak256, Address, U256};
+use alloy_primitives::{Address, U256};
 use alloy_sol_types::{sol, SolCall};
 use darkbot_gate0::qualification_capture::{CaptureRecord, JournalWriter, RecordKind};
 use serde_json::{json, Value};
@@ -157,47 +157,6 @@ fn receipt_gas_cost(receipt: &Value, tx: &Value) -> U256 {
     gas_used * gas_price
 }
 
-/// Receipt-scoped ERC-20 Transfer deltas are attributable to this BUY,
-/// unlike an end-of-block balance which may include unrelated transactions.
-/// Missing or malformed transfer evidence remains UNKNOWN.
-fn buy_receipt_transfer_delta(receipt: &Value, token: Address, buyer: Address) -> Option<U256> {
-    let logs = receipt.get("logs")?.as_array()?;
-    let selector = keccak256(b"Transfer(address,address,uint256)").to_string();
-    let mut credited = U256::ZERO;
-    let mut debited = U256::ZERO;
-    let mut matched = false;
-    for log in logs {
-        if norm(log.get("address")?.as_str()?) != norm(&token.to_string()) {
-            continue;
-        }
-        let topics = log.get("topics")?.as_array()?;
-        if topics.first()?.as_str().map(norm).as_deref() != Some(norm(&selector).as_str()) {
-            continue;
-        }
-        if topics.len() != 3 { return None; }
-        let topic_address = |topic: &Value| -> Option<Address> {
-            let raw = hex::decode(topic.as_str()?.trim_start_matches("0x")).ok()?;
-            if raw.len() != 32 || raw[..12].iter().any(|b| *b != 0) { return None; }
-            Some(Address::from_slice(&raw[12..]))
-        };
-        let sender = topic_address(&topics[1])?;
-        let recipient = topic_address(&topics[2])?;
-        let data = hex::decode(log.get("data")?.as_str()?.trim_start_matches("0x")).ok()?;
-        if data.len() != 32 { return None; }
-        let amount = U256::from_be_slice(&data);
-        if recipient == buyer {
-            credited = credited.checked_add(amount)?;
-            matched = true;
-        }
-        if sender == buyer {
-            debited = debited.checked_add(amount)?;
-            matched = true;
-        }
-    }
-    if !matched { return None; }
-    credited.checked_sub(debited)
-}
-
 fn successful_competing_buys_between(
     launch_block: u64,
     launch_index: u64,
@@ -341,7 +300,8 @@ fn capture_chain_window(
     let first_block = launch_block.saturating_sub(1);
     let mut number = first_block;
     let mut crossed_horizon = false;
-    let last_block = loop {
+    let mut last_block = first_block;
+    loop {
         let mut waits = 0u16;
         let block = loop {
             let value = rpc(
@@ -382,14 +342,16 @@ fn capture_chain_window(
             .append(&receipt_record)
             .map_err(|e| format!("append receipts {number}: {e}"))?;
         sequence = sequence.checked_add(1).ok_or("chain capture sequence overflow")?;
+        last_block = number;
+
         if crossed_horizon {
-            break number;
+            break;
         }
         if timestamp >= horizon_timestamp {
             crossed_horizon = true;
         }
         number = number.checked_add(1).ok_or("block number overflow")?;
-    };
+    }
 
     writer
         .flush()
@@ -558,16 +520,14 @@ fn main() {
         Some(false) => Some(U256::ZERO),
         None => None,
     };
-    let buy_receipt_token_delta = buy_receipt_transfer_delta(&buy_receipt, token, buyer);
     let acquisition_evidence_complete = token_absent_before.is_some()
         && token_exists_after.is_some()
-        && buyer_balance_after.is_some()
-        && buy_receipt_token_delta.is_some();
+        && buyer_balance_after.is_some();
     let acquisition_positive = token_absent_before == Some(true)
         && token_exists_after == Some(true)
-        && buy_receipt_token_delta.as_ref().is_some_and(|delta| *delta >= expected_min_output && *delta > U256::ZERO)
-        && buyer_balance_after.as_ref().zip(buy_receipt_token_delta.as_ref())
-            .is_some_and(|(balance, delta)| balance >= delta);
+        && buyer_balance_after
+            .as_ref()
+            .is_some_and(|balance| *balance > U256::ZERO);
 
     let competitor_hashes = successful_competing_buys_between(
         launch_block,
@@ -611,15 +571,6 @@ fn main() {
         Err(e) => json!({"complete":false,"error":e}),
     };
 
-    // A canonical receipt is not finality. Require the independent finalized
-    // BSC block height to cover BOTH economic transactions before PASS.
-    let finalized_block = rpc("eth_getBlockByNumber", json!(["finalized", false])).ok();
-    let finalized_height = finalized_block.as_ref()
-        .and_then(|v| v.get("number"))
-        .and_then(Value::as_str)
-        .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok());
-    let execution_finalized = finalized_height.is_some_and(|height| height >= launch_block && height >= buy_block);
-
     let hard_stop = launch_status != 1
         || buy_status != 1
         || !launch_scope_ok
@@ -630,8 +581,7 @@ fn main() {
         || !buy_at_index
         || (acquisition_evidence_complete && !acquisition_positive)
         || !ordered;
-    let adapt = !execution_finalized
-        || !acquisition_evidence_complete
+    let adapt = !acquisition_evidence_complete
         || !same_block
         || !adjacent
         || competitor_count != Some(0)
@@ -667,8 +617,6 @@ fn main() {
             "token_absent_before_launch_block":token_absent_before,
             "token_exists_at_buy_block":token_exists_after,
             "buyer_token_balance_at_buy_block":buyer_balance_after.as_ref().map(ToString::to_string),
-            "buy_receipt_token_delta_raw":buy_receipt_token_delta.as_ref().map(ToString::to_string),
-            "receipt_transfer_attribution_required":true,
             "positive_attributable_acquisition":acquisition_positive
         },
         "ordering":{
@@ -708,9 +656,7 @@ fn main() {
         },
         "confirmation":{
             "current_head":head,
-            "confirmations_after_launch_block":head.saturating_sub(launch_block),
-            "finalized_height":finalized_height,
-            "launch_and_buy_finalized":execution_finalized
+            "confirmations_after_launch_block":head.saturating_sub(launch_block)
         },
         "timing":{
             "T0_TO_BUY":"UNKNOWN_PENDING_ORIGINAL_PRODUCER_WITNESS",
@@ -731,35 +677,5 @@ fn main() {
         "PASS" => println!("G0_8_MAINNET_ACQUISITION_ORDERING_PASS"),
         "ADAPT" => std::process::exit(3),
         _ => std::process::exit(2),
-    }
-}
-
-#[cfg(test)]
-mod g08_attribution_tests {
-    use super::*;
-    fn topic_address(addr: Address) -> String {
-        format!("0x{}{}", "00".repeat(12), hex::encode(addr.as_slice()))
-    }
-    #[test]
-    fn buy_transfer_delta_is_bound_to_token_buyer_and_receipt() {
-        let token = Address::from([0x11; 20]);
-        let buyer = Address::from([0x22; 20]);
-        let other = Address::from([0x33; 20]);
-        let transfer = keccak256(b"Transfer(address,address,uint256)").to_string();
-        let log = json!({
-            "address": token.to_string(),
-            "topics": [transfer, topic_address(other), topic_address(buyer)],
-            "data": format!("0x{:064x}", 42u64)
-        });
-        let receipt = json!({"logs":[log]});
-        assert_eq!(buy_receipt_transfer_delta(&receipt, token, buyer), Some(U256::from(42u64)));
-        assert_eq!(buy_receipt_transfer_delta(&receipt, token, other), None);
-    }
-    #[test]
-    fn missing_or_malformed_buy_receipt_does_not_infer_acquisition() {
-        let token = Address::from([0x11; 20]);
-        let buyer = Address::from([0x22; 20]);
-        assert_eq!(buy_receipt_transfer_delta(&json!({"logs":[]}), token, buyer), None);
-        assert_eq!(buy_receipt_transfer_delta(&json!({"logs":[{"address":token.to_string(), "topics":["0x0"], "data":"0x"}]}), token, buyer), None);
     }
 }

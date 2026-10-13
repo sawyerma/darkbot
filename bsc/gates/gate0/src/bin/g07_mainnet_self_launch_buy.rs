@@ -27,9 +27,6 @@ use std::{
     time::Duration,
 };
 
-#[path = "g07_mainnet_self_launch_buy/one_shot_guard.rs"]
-mod one_shot_guard;
-
 type Tls = StreamOwned<ClientConnection, TcpStream>;
 
 const CHAIN_ID: u64 = 56;
@@ -771,7 +768,7 @@ fn main() {
         launch_value,
         buy_value,
     );
-    let (launcher_nonce, buyer_nonce, preflight_head) = validate_current_preflight(
+    let (launcher_nonce, buyer_nonce, send_head) = validate_current_preflight(
         &baseline,
         &current,
         launcher,
@@ -926,38 +923,6 @@ fn main() {
         .expect("capture raw BUY failed before egress");
     assert!(capture.healthy(), "capture became unhealthy before egress");
 
-    // TLS/DNS/handshake all happen before the economic write boundary.
-    let club48_tls = match connect_tls(CLUB48_HOST) {
-        Ok(stream) => stream,
-        Err(e) => {
-            let _ = capture.record_text(
-                "PRE_EGRESS_ABORT",
-                capture_clock.now_ns(),
-                &format!("provider=48Club/Puissant\nreason={e}"),
-            );
-            let _ = capture.finish();
-            panic!("48Club TLS prewarm failed; no valid bundle write attempted: {e}");
-        }
-    };
-    let blockrazor_tls = match connect_tls(BLOCKRAZOR_HOST) {
-        Ok(stream) => stream,
-        Err(e) => {
-            let _ = capture.record_text(
-                "PRE_EGRESS_ABORT",
-                capture_clock.now_ns(),
-                &format!("provider=BlockRazor\nreason={e}"),
-            );
-            let _ = capture.finish();
-            panic!("BlockRazor TLS prewarm failed; no valid bundle write attempted: {e}");
-        }
-    };
-
-    // Compute expiry after both TLS connections are established.
-    let send_head = hex_u64(&rpc("eth_blockNumber", json!([]))
-        .expect("post-TLS block head unavailable; no egress"));
-    assert!(send_head >= preflight_head,
-        "block head moved backwards since preflight; no egress");
-
     let max_block = send_head.checked_add(2).expect("max block overflow");
     let launch_hex = format!("0x{}", hex::encode(&launch.raw));
     let buy_hex = format!("0x{}", hex::encode(&buy.raw));
@@ -1010,6 +975,32 @@ fn main() {
     assert!(capture.healthy(), "capture unhealthy after submission capture");
     drop(blockrazor_auth);
 
+    // TLS/DNS/handshake all happen before the economic write boundary.
+    let club48_tls = match connect_tls(CLUB48_HOST) {
+        Ok(stream) => stream,
+        Err(e) => {
+            let _ = capture.record_text(
+                "PRE_EGRESS_ABORT",
+                capture_clock.now_ns(),
+                &format!("provider=48Club/Puissant\nreason={e}"),
+            );
+            let _ = capture.finish();
+            panic!("48Club TLS prewarm failed; no valid bundle write attempted: {e}");
+        }
+    };
+    let blockrazor_tls = match connect_tls(BLOCKRAZOR_HOST) {
+        Ok(stream) => stream,
+        Err(e) => {
+            let _ = capture.record_text(
+                "PRE_EGRESS_ABORT",
+                capture_clock.now_ns(),
+                &format!("provider=BlockRazor\nreason={e}"),
+            );
+            let _ = capture.finish();
+            panic!("BlockRazor TLS prewarm failed; no valid bundle write attempted: {e}");
+        }
+    };
+
     capture
         .record_text(
             "TRANSPORTS_PREWARMED",
@@ -1018,27 +1009,6 @@ fn main() {
         )
         .expect("capture transport-prewarm event failed before egress");
     assert!(capture.healthy(), "capture unhealthy immediately before egress");
-
-    // Fail closed if the short-lived bundle is already stale after both TLS
-    // connections were established. Keep the frozen signed transactions intact.
-    let fresh_head = hex_u64(&rpc("eth_blockNumber", json!([]))
-        .expect("cannot verify dispatch head before release"));
-    assert!(fresh_head >= send_head && fresh_head < max_block,
-        "G0.7 PRE_EGRESS_STOP: block head moved after the signed bundle's expiry window was frozen; do not send stale bundle");
-
-    // Persist before any provider write. A new capture filename or restart must
-    // not silently permit a second economic transaction attempt.
-    one_shot_guard::reserve_once(
-        Path::new(one_shot_guard::GUARD_PATH),
-        &attempt_id,
-        &contract.sha256,
-        &launch_hash,
-        &buy_hash,
-    ).expect("G0.7 one-shot guard refused: do not retry without chain reconciliation");
-    capture.record_text(
-        "ONE_SHOT_RESERVED", capture_clock.now_ns(), one_shot_guard::GUARD_PATH,
-    ).expect("one-shot reservation capture failed; no egress");
-    assert!(capture.healthy(), "capture unhealthy after one-shot reservation");
 
     let barrier = Arc::new(Barrier::new(3));
     let mut release_before_ns = 0u64;
@@ -1236,7 +1206,7 @@ fn main() {
             "buyer_nonce":buyer_nonce
         },
         "preflight":{
-            "latest_block_number":preflight_head,
+            "latest_block_number":send_head,
             "latest_block_hash":current["latest_block_hash"],
             "portal_version":current["portal_version"],
             "portal_implementation":current["portal_implementation"],

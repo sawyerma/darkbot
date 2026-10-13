@@ -81,6 +81,3 @@ node_modules/
 
 # Local pinned bsc-geth source checkout for C1; provenance is versioned separately.
 /bsc/vendor/
-
-# G0.7 local economic one-shot latch; never commit runtime attempt state
-/bsc/local_diagnostics/g07_mainnet_one_shot.json
