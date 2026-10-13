@@ -1,0 +1,83 @@
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-runner)
+warning: field `commitment` is never read
+    --> crates/darkbot-runner/src/market_observer.rs:2253:5
+     |
+2250 | struct RpcFetcher {
+     |        ---------- field in this struct
+...
+2253 |     commitment: &'static str,
+     |     ^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `get_transaction` is never used
+    --> crates/darkbot-runner/src/market_observer.rs:2269:8
+     |
+2256 | impl RpcFetcher {
+     | --------------- method in this implementation
+...
+2269 |     fn get_transaction(&self, signature: &str) -> Result<Option<Value>, String> {
+     |        ^^^^^^^^^^^^^^^
+
+warning: enum `GapSlot` is never used
+  --> crates/darkbot-runner/src/market_gap.rs:94:17
+   |
+94 | pub(super) enum GapSlot {
+   |                 ^^^^^^^
+
+warning: type alias `SlotFetcher` is never used
+   --> crates/darkbot-runner/src/market_gap.rs:104:6
+    |
+104 | type SlotFetcher<'a> = dyn FnMut(u64, Duration) -> Result<GapSlot, &'static str> + 'a;
+    |      ^^^^^^^^^^^
+
+warning: methods `recover_gaps`, `recover_block`, and `gap_recovery_phase` are never used
+   --> crates/darkbot-runner/src/market_gap.rs:199:19
+    |
+106 | impl ObserverCore {
+    | ----------------- methods in this implementation
+...
+199 |     pub(super) fn recover_gaps(
+    |                   ^^^^^^^^^^^^
+...
+319 |     fn recover_block(
+    |        ^^^^^^^^^^^^^
+...
+461 |     pub(super) fn gap_recovery_phase(
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: methods `gap_request` and `gap_slot` are never used
+   --> crates/darkbot-runner/src/market_gap.rs:501:19
+    |
+499 | impl RpcFetcher {
+    | --------------- methods in this implementation
+500 |     /// Bounded JSON body and sanitized error codes; no provider text or endpoint escapes.
+501 |     pub(super) fn gap_request(
+    |                   ^^^^^^^^^^^
+...
+567 |     fn gap_slot(
+    |        ^^^^^^^^
+
+warning: method `full_reconciliation_phase` is never used
+   --> crates/darkbot-runner/src/market_reconcile.rs:480:19
+    |
+182 | impl ObserverCore {
+    | ----------------- method in this implementation
+...
+480 |     pub(super) fn full_reconciliation_phase(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `read_ahead_block` is never used
+   --> crates/darkbot-runner/src/market_reconcile.rs:538:4
+    |
+538 | fn read_ahead_block<F>(
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `prefetch_blocks` is never used
+   --> crates/darkbot-runner/src/market_reconcile.rs:570:4
+    |
+570 | fn prefetch_blocks<F>(slots: &[u64], fetch: &F) -> BTreeMap<u64, Result<Value, &'static str>>
+    |    ^^^^^^^^^^^^^^^
+
+warning: `darkbot-runner` (lib) generated 9 warnings
+    Finished `release` profile [optimized] target(s) in 6.80s

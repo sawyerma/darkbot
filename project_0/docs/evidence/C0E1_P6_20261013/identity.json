@@ -1,0 +1,13 @@
+{
+  "source_sha256": {
+    "project_0/scripts/market_report.py": "01d4e4833154f07b31b8fd1d7349c6dac13f8dabe881166401c5ad27858b9198",
+    "project_0/scripts/test_measurement_p6.py": "43def40bf1e1b07a2827a9bf715160d56924616742655717dc133e6b2d602901",
+    "project_0/native/crates/darkbot-runner/src/market_verification.rs": "462b2158a9f052fcc5427ffbf83cc06e68093b38b5b4e8c91de4cfa96ac23a45"
+  },
+  "binary_sha256": {
+    "p0-econ-replay": "54b4f5a632547228bc1f455593ad74de32e66ad7419b7a8effe091b1d3ce8ab5",
+    "p0-strict-verify": "11d2d837a866735e3a8d1087b19f5f04895d7f2970244b4454b7095c89f7f5a3",
+    "p0-longtail": "916ff814152f71e49524e3a7b136825f671e891120342c7de9c9beb5dd9bf5ba",
+    "p0-measurement-plan": "99fa96ef86635215c31793ed5d3650fbf2648686c4f9468c059629edbd218e55"
+  }
+}

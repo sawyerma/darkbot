@@ -1,0 +1,75 @@
+test_all_four_valid_payloads (test_audit_market_quick.DecodeTests.test_all_four_valid_payloads) ... ok
+test_completion_identity_and_caught_cpi_fail_closed (test_audit_market_quick.DecodeTests.test_completion_identity_and_caught_cpi_fail_closed) ... ok
+test_duplicate_event_cannot_fill_other_instruction_position (test_audit_market_quick.DecodeTests.test_duplicate_event_cannot_fill_other_instruction_position) ... ok
+test_incomplete_reversed_duplicate_and_mismatched_pairs (test_audit_market_quick.DecodeTests.test_incomplete_reversed_duplicate_and_mismatched_pairs) ... ok
+test_loaded_program_key_cpi_and_supported_versions (test_audit_market_quick.DecodeTests.test_loaded_program_key_cpi_and_supported_versions) ... ok
+test_multiple_events_and_positions (test_audit_market_quick.DecodeTests.test_multiple_events_and_positions) ... ok
+test_real_six_mainnet_receivership_fixtures (test_audit_market_quick.DecodeTests.test_real_six_mainnet_receivership_fixtures) ... ok
+test_six_markers_exact_discriminators (test_audit_market_quick.DecodeTests.test_six_markers_exact_discriminators) ... ok
+test_start_end_not_double_counted (test_audit_market_quick.DecodeTests.test_start_end_not_double_counted) ... ok
+test_truncated_malformed_foreign_and_failed (test_audit_market_quick.DecodeTests.test_truncated_malformed_foreign_and_failed) ... ok
+test_429_retry_after_and_counter_includes_failed_attempts (test_audit_market_quick.HttpTests.test_429_retry_after_and_counter_includes_failed_attempts) ... ok
+test_persistent_429_is_bounded_and_secret_free (test_audit_market_quick.HttpTests.test_persistent_429_is_bounded_and_secret_free) ... ok
+test_empty_input_file_cannot_mutate_between_resumes (test_audit_market_quick.TempRun.test_empty_input_file_cannot_mutate_between_resumes) ... ok
+test_failed_and_unknown_versions_not_zero_success (test_audit_market_quick.TempRun.test_failed_and_unknown_versions_not_zero_success) ... ok
+test_live_signature_and_amount_type_comparison (test_audit_market_quick.TempRun.test_live_signature_and_amount_type_comparison) ... ok
+test_malformed_cursor_and_conflicting_duplicates_fail_closed (test_audit_market_quick.TempRun.test_malformed_cursor_and_conflicting_duplicates_fail_closed) ... ok
+test_missing_transaction_retry_and_429_saved (test_audit_market_quick.TempRun.test_missing_transaction_retry_and_429_saved) ... ok
+test_null_blocktime_resolved_by_transaction_or_remains_unknown (test_audit_market_quick.TempRun.test_null_blocktime_resolved_by_transaction_or_remains_unknown) ... ok
+test_outage_distinct_from_live_signature_missing_detection (test_audit_market_quick.TempRun.test_outage_distinct_from_live_signature_missing_detection) ... ok
+test_p1_manifest_exact_nanosecond_boundary (test_audit_market_quick.TempRun.test_p1_manifest_exact_nanosecond_boundary) ... ok
+test_page_limits_and_exhaustion_never_prove_zero (test_audit_market_quick.TempRun.test_page_limits_and_exhaustion_never_prove_zero) ... ok
+test_pagination_dedup_and_short_pages_do_not_stop_early (test_audit_market_quick.TempRun.test_pagination_dedup_and_short_pages_do_not_stop_early) ... ok
+test_resume_does_not_repeat_pages_or_completed_transactions (test_audit_market_quick.TempRun.test_resume_does_not_repeat_pages_or_completed_transactions) ... ok
+test_resume_raw_page_after_checkpoint_interruption (test_audit_market_quick.TempRun.test_resume_raw_page_after_checkpoint_interruption) ... ok
+test_shadow_exact_event_identity_and_unknown_economics_preserved (test_audit_market_quick.TempRun.test_shadow_exact_event_identity_and_unknown_economics_preserved) ... ok
+test_source_mutation_rejected_and_no_rpc_access_reports_open (test_audit_market_quick.TempRun.test_source_mutation_rejected_and_no_rpc_access_reports_open) ... ok
+test_type_mismatch_and_slot_mismatch (test_audit_market_quick.TempRun.test_type_mismatch_and_slot_mismatch) ... ok
+test_unknown_version_provider_error_does_not_skip_other_transactions (test_audit_market_quick.TempRun.test_unknown_version_provider_error_does_not_skip_other_transactions) ... ok
+test_utc_bounds_ignore_last_received_slot (test_audit_market_quick.TempRun.test_utc_bounds_ignore_last_received_slot) ... ok
+test_failed_related_and_priority_requested_limit (test_market_report.Reports.test_failed_related_and_priority_requested_limit) ... ok
+test_four_classes_six_markers_four_related_no_double_count (test_market_report.Reports.test_four_classes_six_markers_four_related_no_double_count) ... ok
+test_individual_filters_and_raw_hash_invariance (test_market_report.Reports.test_individual_filters_and_raw_hash_invariance) ... ok
+test_interrupted_report_resume_and_foreign_result_rejected (test_market_report.Reports.test_interrupted_report_resume_and_foreign_result_rejected) ... ok
+test_renderer_semantics_equal_and_identity_result_bound (test_market_report.Reports.test_renderer_semantics_equal_and_identity_result_bound) ... ok
+test_unknown_fee_and_no_verification_never_zero_market (test_market_report.Reports.test_unknown_fee_and_no_verification_never_zero_market) ... ok
+test_capture_mutation_and_disk_fail_closed (test_measurement_contract.ContractTests.test_capture_mutation_and_disk_fail_closed) ... ok
+test_config_filters_and_limits (test_measurement_contract.ContractTests.test_config_filters_and_limits) ... ok
+test_off_no_rpc_and_immutable_lifecycle (test_measurement_contract.ContractTests.test_off_no_rpc_and_immutable_lifecycle) ... ok
+test_preflight_no_qualification_never_calls_rpc (test_measurement_contract.ContractTests.test_preflight_no_qualification_never_calls_rpc) ... ok
+test_spec_invariant_to_results_and_display_parameters (test_measurement_contract.ContractTests.test_spec_invariant_to_results_and_display_parameters) ... ok
+test_cached_reports_revalidate_proof_and_snapshots (test_measurement_p6.Qualification.test_cached_reports_revalidate_proof_and_snapshots) ... ok
+test_crosscheck_offline_never_canonical_or_paid (test_measurement_p6.Qualification.test_crosscheck_offline_never_canonical_or_paid) ... ok
+test_display_cartesian_matrix_preserves_raw_proof_and_economics (test_measurement_p6.Qualification.test_display_cartesian_matrix_preserves_raw_proof_and_economics) ... ok
+test_off_resume_result_ids_and_report_binding (test_measurement_p6.Qualification.test_off_resume_result_ids_and_report_binding) ... ok
+test_related_discriminators_cpi_lut_and_negative_programs (test_measurement_p6.Qualification.test_related_discriminators_cpi_lut_and_negative_programs) ... ok
+test_strict_fixture_replay_and_nested_batch_integrity (test_measurement_p6.Qualification.test_strict_fixture_replay_and_nested_batch_integrity) ... ok
+test_time_filters_half_open_unknown_net_retained (test_measurement_p6.Qualification.test_time_filters_half_open_unknown_net_retained) ... ok
+test_truncated_raw_jsonl_stops_report (test_measurement_p6.Qualification.test_truncated_raw_jsonl_stops_report) ... ok
+test_help_and_required_argument_do_not_start_run (test_measurement_plan.MeasurementCli.test_help_and_required_argument_do_not_start_run) ... ok
+test_invalid_and_conflicting_input (test_measurement_plan.MeasurementCli.test_invalid_and_conflicting_input) ... ok
+test_launcher_uses_persisted_plan_and_no_total_capture_timebox (test_measurement_plan.MeasurementCli.test_launcher_uses_persisted_plan_and_no_total_capture_timebox) ... ok
+test_release_duration_matrix (test_measurement_plan.MeasurementCli.test_release_duration_matrix) ... ok
+
+----------------------------------------------------------------------
+Ran 52 tests in 3.481s
+
+OK
+        3.55 real         1.40 user         0.69 sys
+            47742976  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              120371  page reclaims
+                1377  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                  27  signals received
+                1395  voluntary context switches
+                1136  involuntary context switches
+         14732368451  instructions retired
+          3483607374  cycles elapsed
+            27525600  peak memory footprint

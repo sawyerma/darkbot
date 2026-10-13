@@ -5237,3 +5237,16 @@ not to be optimized as part of the market gap-recovery fix.
 Tests: **44 Python PASS; runner lib 191 PASS / 0 FAIL / 1 pre-existing ignored; four release binaries PASS; changed-region rustfmt, shell syntax, diff whitespace PASS.** First runner attempt failed the fixed-sleep snapshot fixture; bounded observed-snapshot synchronization repaired the test, not production qualification.
 
 **OPEN / NOT_RUN:** P6 full offline matrix next; real failed-5h replay reserved to user; provider quota/archive/WSS qualification and separately authorized Mainnet smoke NOT_RUN; historical 429 gate OPEN. No 4h/5h capture, LIVE or submission. No Master PASS / profitability claim. Next: P6 offline invariants and fixture replay; user subsequently performs actual-run replay and approved Mainnet qualification.
+
+
+## 2026-10-13 — C0-E1 P6 offline invariants / handoff
+
+P5 pushed: **`c092bcd9f7c27c0305203ef29a65214bef376e48`**. P6 local evidence: `docs/evidence/C0E1_P6_20261013/` (exact commands, raw outputs, source/binary hashes, machine-readable gates, user handoff).
+
+**P6 OFFLINE PASS:** 52 Python tests; workspace `crate_health,txv1` **340 PASS / 0 FAIL / 1 existing ignored**; workspace `crate_health` **338 PASS / 0 FAIL / 1 existing ignored**. Four release binaries, changed-region format and shell checks PASS. Eight added P6 tests include 240 filter combinations × 3 renderers, immutable raw/proof/economics invariance, related-event negative/CPI/LUT fixtures, exact time filters, UNKNOWN-net preservation, stable capture/spec IDs across resume with separate attempt/result/query IDs, cached-proof/snapshot corruption rejection and strict→production-economics fixture replay. Existing strict interruption test additionally proves completed partial batches remain exposed after a later failure.
+
+P6 fixes found by qualification: cached report revalidates nested strict evidence and snapshots; missing/disagreeing canonical event inputs cannot yield zero replay economics; boundary-second gap attribution stays UNKNOWN. No new verifier/economics engine. Live coverage is never upgraded by historic proof. Python fixture resource measurement: **3.55s / 47,742,976-byte maximum RSS**, not representative of a 4h multi-GB run.
+
+**Overall P6/provider qualification remains OPEN.** Real failed-5h replay **NOT_RUN / USER-OWNED**, by explicit user instruction; provider WSS/RPC/free-quota/archive measurement **NOT_RUN**; Mainnet smoke **NOT_RUN / separate permission required**. Historical index/429 gate **OPEN**. No new long run, LIVE or submission. **No Master PASS, four-hour stability or profitability claim.**
+
+**Exact next step:** user runs saved-data replay/report on their existing run; then measured FREE_ONLY provider qualification and explicitly authorized short read-only Mainnet smoke before a user-started four-hour capture. P1/P2/P3/P4 were not reimplemented. All original run data and BSC work preserved.

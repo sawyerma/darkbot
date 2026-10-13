@@ -1,0 +1,44 @@
+{
+  "schema": "C0-E1/P6LocalQualification/1",
+  "p5_commit": "c092bcd9f7c27c0305203ef29a65214bef376e48",
+  "local_parent": "c092bcd9f7c27c0305203ef29a65214bef376e48",
+  "python": {
+    "status": "PASS",
+    "passed": 52,
+    "failed": 0,
+    "filter_combinations": 240,
+    "renderers_per_combination": 3,
+    "wall_seconds": 3.55,
+    "max_rss_bytes": 47742976,
+    "resource_scope": "small temporary fixtures; NOT a 4h capacity measurement"
+  },
+  "workspace_crate_health_txv1": {
+    "status": "PASS",
+    "passed": 340,
+    "failed": 0,
+    "ignored": 1
+  },
+  "workspace_crate_health": {
+    "status": "PASS",
+    "passed": 338,
+    "failed": 0,
+    "ignored": 1
+  },
+  "ignored": "winner::tests::f8_probe_sdk_encoded_transaction_decoding (pre-existing)",
+  "release": "PASS",
+  "changed_region_format": "PASS",
+  "shell_syntax": "PASS",
+  "whitespace": "PASS",
+  "raw_filter_hash_invariance": "PASS",
+  "strict_fixture_resume_and_corruption": "PASS",
+  "synthetic_strict_economics_replay": "PASS",
+  "actual_5h_replay": "NOT_RUN_USER_OWNED",
+  "provider_wss_rpc_quota_archive": "NOT_RUN",
+  "mainnet_smoke": "NOT_RUN_NEEDS_EXPLICIT_PERMISSION",
+  "long_capture": "NOT_RUN_USER_OWNED",
+  "historical_index_429_gate": "OPEN",
+  "c0_e1_master": "NOT_QUALIFIED",
+  "live_enabled": false,
+  "submission_enabled": false,
+  "paid_provider_used": false
+}

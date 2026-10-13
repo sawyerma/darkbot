@@ -506,6 +506,7 @@ mod tests {
         assert_eq!(first["status"], "HISTORICAL_INCOMPLETE");
         let checkpoint = j.output.join("batch_10_41.json");
         assert!(checkpoint.exists());
+        assert_eq!(first["batches"].as_array().unwrap().len(), 1);
         let before = file_hash(&checkpoint).unwrap();
         fixture(&j, None);
         let resumed = run(reload(&j)).unwrap();

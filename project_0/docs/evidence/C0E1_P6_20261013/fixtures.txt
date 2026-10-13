@@ -1,0 +1,13 @@
+test_cached_reports_revalidate_proof_and_snapshots (test_measurement_p6.Qualification.test_cached_reports_revalidate_proof_and_snapshots) ... ok
+test_crosscheck_offline_never_canonical_or_paid (test_measurement_p6.Qualification.test_crosscheck_offline_never_canonical_or_paid) ... ok
+test_display_cartesian_matrix_preserves_raw_proof_and_economics (test_measurement_p6.Qualification.test_display_cartesian_matrix_preserves_raw_proof_and_economics) ... ok
+test_off_resume_result_ids_and_report_binding (test_measurement_p6.Qualification.test_off_resume_result_ids_and_report_binding) ... ok
+test_related_discriminators_cpi_lut_and_negative_programs (test_measurement_p6.Qualification.test_related_discriminators_cpi_lut_and_negative_programs) ... ok
+test_strict_fixture_replay_and_nested_batch_integrity (test_measurement_p6.Qualification.test_strict_fixture_replay_and_nested_batch_integrity) ... ok
+test_time_filters_half_open_unknown_net_retained (test_measurement_p6.Qualification.test_time_filters_half_open_unknown_net_retained) ... ok
+test_truncated_raw_jsonl_stops_report (test_measurement_p6.Qualification.test_truncated_raw_jsonl_stops_report) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.793s
+
+OK

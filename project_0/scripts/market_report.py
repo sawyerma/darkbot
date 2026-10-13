@@ -32,14 +32,29 @@ def selected_result(run,rid=None):
     candidates=[]
     for p in (run/'verification').glob('*/results/*.json'):
         if rid and p.stem!=rid:continue
-        v=json.loads(p.read_text());payload={k:x for k,x in v.items() if k!='verification_result_id'}
-        if c.digest(payload)!=v.get('verification_result_id'):raise c.ContractError('RESULT_DIGEST_MISMATCH')
-        for item in v['artifacts'].values():
-            artifact=(run/item['path']).resolve()
-            if not artifact.is_relative_to(run.resolve()) or c.file_hash(artifact)!=item['sha256']:raise c.ContractError('RESULT_EVIDENCE_CHANGED')
+        v=json.loads(p.read_text());validate_result(run,v)
         candidates.append(v)
     if rid and len(candidates)!=1:raise c.ContractError('RESULT_NOT_FOUND_OR_AMBIGUOUS')
     return max(candidates,key=lambda v:v['finished_unix_ns']) if candidates else None
+
+
+def strict_directory(run,checkpoint,batch):
+    directory=(checkpoint.parent/batch['directory']).resolve()
+    if not directory.is_relative_to(run.resolve()):raise c.ContractError('STRICT_BATCH_PATH_INVALID')
+    for name,expected in batch['files'].items():
+        path=(directory/name).resolve()
+        if not path.is_relative_to(directory):raise c.ContractError('STRICT_BATCH_PATH_INVALID')
+        if a.base58_encode(bytes.fromhex(c.file_hash(path)))!=expected:raise c.ContractError('STRICT_BATCH_EVIDENCE_CHANGED')
+    return directory
+
+
+def validate_result(run,result):
+    payload={k:x for k,x in result.items() if k!='verification_result_id'}
+    if c.digest(payload)!=result.get('verification_result_id'):raise c.ContractError('RESULT_DIGEST_MISMATCH')
+    for item in result['artifacts'].values():
+        artifact=(run/item['path']).resolve()
+        if not artifact.is_relative_to(run.resolve()) or c.file_hash(artifact)!=item['sha256']:raise c.ContractError('RESULT_EVIDENCE_CHANGED')
+        if result['mode']=='strict':strict_directory(run,artifact,json.loads(artifact.read_text()))
 
 
 def finite(value):
@@ -249,6 +264,7 @@ def normalize_locked(run,result=None):
     evidence=c.finalize_capture(run);c.check_capture(run,evidence,hashes=True)
     if result and (result.get('capture_run_id')!=evidence['capture_run_id'] or result.get('capture_evidence_digest',evidence['evidence_digest'])!=evidence['evidence_digest']):
         raise c.ContractError('RESULT_CAPTURE_MISMATCH')
+    if result:validate_result(run,result)
     identity={'version':VERSION,'normalizer_sha256':c.file_hash(Path(__file__)),
         'capture_run_id':evidence['capture_run_id'],'capture_digest':evidence['evidence_digest'],
         'decoder_sha256':c.file_hash(Path(a.__file__)),'contract_sha256':c.file_hash(Path(c.__file__)),
@@ -259,6 +275,9 @@ def normalize_locked(run,result=None):
     if final.exists():
         manifest=json.loads(final.read_text())
         if c.file_hash(out/'all_records.jsonl')!=manifest['records_sha256']:raise c.ContractError('NORMALIZED_DATASET_CHANGED')
+        if any(manifest.get(k)!=v for k,v in identity.items()):raise c.ContractError('NORMALIZED_IDENTITY_CHANGED')
+        for name,sha in manifest['snapshot_sha256'].items():
+            if c.file_hash(out/name)!=sha:raise c.ContractError('SNAPSHOT_EVIDENCE_CHANGED')
         return out,manifest
     # A partial build is preserved; a fresh attempt never overwrites it.
     out.mkdir(parents=True,exist_ok=True);work=out/('attempt_'+uuid.uuid4().hex);work.mkdir()
@@ -283,7 +302,8 @@ def normalize_locked(run,result=None):
                     record['live_t_rx_ns'],record['live_received_utc']=receipt
                     record['field_provenance']['live_t_rx_ns']='live'
                     record['field_provenance']['live_received_utc']='live'
-                record['gap_correlation']=coverage.coverage_at(record.get('block_time'),any(r.get('boundary_second',False) for r in sources))
+                boundary=record.get('block_time') in (coverage.window['start_ns']//a.NS,coverage.window['end_ns']//a.NS)
+                record['gap_correlation']=coverage.coverage_at(record.get('block_time'),boundary or any(r.get('boundary_second',False) for r in sources))
                 shadowkey=c.digest([record['signature'],record['slot'],record['event_index'],record['liquidation_type'],record['target']])
                 shadow=ds.db.execute('SELECT data FROM shadow WHERE entity=?',(shadowkey,)).fetchone()
                 if shadow:
@@ -327,6 +347,7 @@ def normalize_locked(run,result=None):
             'normalization_unknown_transactions':ds.db.execute("SELECT count(DISTINCT entity) FROM evidence WHERE source IN ('index','strict') AND json_extract(data,'$.record_kind')='TRANSACTION' AND json_extract(data,'$.classification')='UNKNOWN'").fetchone()[0],
             'c0_e1_master_pass':False,'window':a.read_window(run),'economics_replay':replay}
         write_snapshots(run,out,manifest,work/'economics')
+        manifest['snapshot_sha256']={name:c.file_hash(out/name) for name in [*(f'hour_{i:02}.json' for i in range(1,5)),'economics_final.json']}
         c.immutable(final,manifest);return out,manifest
     finally:
         if coverage:coverage.close()
@@ -355,7 +376,7 @@ def production_replay(run,result,work,ds,clock_origin):
         return {'status':'NOT_RUN','reason':'FINALIZED_CANONICAL_EVENT_INPUT_UNAVAILABLE'}
     window=a.read_window(run);plan=measurement_plan(run,window)
     c.immutable(work/'plan.json',plan)
-    seen=set();count=0
+    seen=set();included=set();count=0
     with (work/'canonical_events.jsonl').open('x') as out:
         for item in result['artifacts'].values():
             checkpoint=run/item['path'];batch=json.loads(checkpoint.read_text())
@@ -368,7 +389,13 @@ def production_replay(run,result,work,ds,clock_origin):
                 if type(bt) is not int or not window['start_ns']<=bt*a.NS<window['end_ns']:continue
                 receipt=ds.db.execute('SELECT ns FROM receipts WHERE sig=? AND slot=?',(ev['signature'],ev['slot'])).fetchone()
                 ev['live_t_rx_ns']=receipt[0] if receipt and type(clock_origin) is int else None
-                count+=1;out.write(json.dumps(ev)+'\n')
+                included.add(key);count+=1;out.write(json.dumps(ev)+'\n')
+    expected=set()
+    for (data,) in ds.db.execute("SELECT data FROM evidence WHERE source='strict' AND json_extract(data,'$.record_kind')='LIQUIDATION'"):
+        row=json.loads(data);bt=row.get('block_time')
+        if type(bt) is int and window['start_ns']<=bt*a.NS<window['end_ns']:
+            expected.add((row['signature'],row['slot'],row['event_index']))
+    if included!=expected:return {'status':'INCOMPLETE','reason':'CANONICAL_EVENT_INPUT_MISMATCH'}
     binary=Path(__file__).resolve().parents[1]/'native/target/release/p0-econ-replay'
     if not binary.exists():return {'status':'NOT_RUN','reason':'ECON_REPLAY_BINARY_MISSING'}
     with (work/'replay_stderr.txt').open('x') as err:
