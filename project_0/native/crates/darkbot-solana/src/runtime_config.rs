@@ -9,7 +9,7 @@ macro_rules! parameters {
         #[serde(deny_unknown_fields)]
         pub struct Limits { $(pub $name: u64,)* }
         impl Default for Limits { fn default() -> Self { Self { $($name: $default,)* } } }
-        pub fn descriptors() -> Vec<Value> { vec![$(json!({"name":stringify!($name).replace('_',"-"),"field":stringify!($name),"type":"u64","unit":$unit,"default":$default,"minimum":1,"maximum":u32::MAX,"env":$env,"change":"restart_required"}),)*] }
+        pub fn descriptors() -> Vec<Value> { vec![$(json!({"name":stringify!($name).replace('_',"-"),"field":stringify!($name),"type":"u64","unit":$unit,"default":$default,"minimum":1,"maximum":if stringify!($name) == "fe_batch_size" { 100 } else { u32::MAX },"env":$env,"change":"restart_required"}),)*] }
     }
 }
 parameters! {
@@ -62,6 +62,9 @@ parameters! {
     verify_free_mib = 1024, "MiB", "P0_VERIFY_FREE_MIB";
     verify_pages = 50, "pages", "P0_VERIFY_PAGES";
     verify_timeout_seconds = 15, "s", "P0_VERIFY_TIMEOUT_SECONDS";
+    fe_snapshot_rounds = 8, "rounds", "P0_FE_SNAPSHOT_ROUNDS";
+    fe_batch_size = 100, "accounts (RPC protocol maximum 100)", "P0_FE_BATCH_SIZE";
+    fe_qualification_age_seconds = 86400, "s", "P0_FE_QUALIFICATION_AGE_SECONDS";
     fe_calls = 3, "requests", "P0_FE_CALLS";
     fe_seconds = 30, "s", "P0_FE_SECONDS";
     fe_max_mib = 16, "MiB", "P0_FE_MAX_MIB";
@@ -86,6 +89,9 @@ pub struct RuntimeConfig {
     pub duration: String,
     pub verification: String,
     pub diagnostics: bool,
+    pub fe_mode: String,
+    pub fe_targets: Vec<String>,
+    pub fe_group: String,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -99,6 +105,12 @@ impl Default for RuntimeConfig {
             duration: "4h".into(),
             verification: "off".into(),
             diagnostics: false,
+            fe_mode: "smoke".into(),
+            fe_targets: vec![
+                "A45dVtuyLccxs1xpbVJsTNh7AdtAotAZi4UxEcyMQDMS".into(),
+                "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk".into(),
+            ],
+            fe_group: "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8".into(),
         }
     }
 }
@@ -181,6 +193,26 @@ impl RuntimeConfig {
         }
         if !["off", "index", "strict", "crosscheck"].contains(&self.verification.as_str()) {
             return Err("invalid verification mode".into());
+        }
+        if !["smoke", "full"].contains(&self.fe_mode.as_str()) {
+            return Err("fe-mode must be smoke|full".into());
+        }
+        if self.fe_targets.is_empty() || self.limits.fe_batch_size > 100 {
+            return Err("FE target scope empty or batch exceeds Solana RPC maximum 100".into());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for key in &self.fe_targets {
+            key.parse::<solana_sdk::pubkey::Pubkey>()
+                .map_err(|_| "invalid FE target pubkey")?;
+            if !seen.insert(key) {
+                return Err("duplicate FE target".into());
+            }
+        }
+        self.fe_group
+            .parse::<solana_sdk::pubkey::Pubkey>()
+            .map_err(|_| "invalid FE group pubkey")?;
+        if self.fe_mode == "smoke" && self.fe_targets.len() > 100 {
+            return Err("smoke scope exceeds one getMultipleAccounts; use full".into());
         }
         duration_seconds(&self.duration)?;
         Ok(())
@@ -301,7 +333,24 @@ impl Resolved {
                 profile_name = p.as_str().ok_or("invalid profile type")?.into();
             }
         }
-        let base = RuntimeConfig::profile(profile(&profile_name)?);
+        let mut base = RuntimeConfig::profile(profile(&profile_name)?);
+        let fe_mode = cli
+            .get("fe_mode")
+            .cloned()
+            .or_else(|| {
+                file.get("fe_mode")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .or_else(|| env("P0_FE_MODE"))
+            .unwrap_or_else(|| "smoke".into());
+        base.fe_mode = fe_mode.clone();
+        if fe_mode == "full" {
+            base.limits.fe_calls = 1000;
+            base.limits.fe_seconds = 300;
+            base.limits.fe_max_mib = 512;
+        }
+
         let mut v = serde_json::to_value(base).unwrap();
         let mut sources = BTreeMap::new();
         for name in [
@@ -313,8 +362,14 @@ impl Resolved {
             "duration",
             "verification",
             "diagnostics",
+            "fe_mode",
+            "fe_targets",
+            "fe_group",
         ] {
             sources.insert(name.into(), format!("profile:{profile_name}"));
+        }
+        if env("P0_FE_MODE").is_some() {
+            sources.insert("fe_mode".into(), "environment".into());
         }
         for d in descriptors() {
             let field = d["field"].as_str().unwrap();
@@ -325,6 +380,14 @@ impl Resolved {
                     .map_err(|_| format!("invalid numeric environment field {field}"))?);
                 sources.insert(field.into(), "environment".into());
             }
+        }
+        if let Some(group) = env("P0_FE_GROUP").or_else(|| env("P0_GROUP_ID")) {
+            v["fe_group"] = json!(group);
+            sources.insert("fe_group".into(), "environment".into());
+        }
+        if let Some(targets) = env("P0_FE_TARGETS") {
+            v["fe_targets"] = json!(targets.split(',').collect::<Vec<_>>());
+            sources.insert("fe_targets".into(), "environment".into());
         }
         for (f, e) in [
             ("rpc_endpoints", "P0_RPC_URL"),
@@ -372,8 +435,10 @@ impl Resolved {
                     .map_err(|_| format!("invalid --{}", k.replace('_', "-")))?);
             } else {
                 match k.as_str() {
-                    "profile" | "duration" | "verification" => v[&k] = json!(val),
-                    "rpc_endpoints" | "wss_endpoints" => {
+                    "profile" | "duration" | "verification" | "fe_mode" | "fe_group" => {
+                        v[&k] = json!(val)
+                    }
+                    "rpc_endpoints" | "wss_endpoints" | "fe_targets" => {
                         v[&k] = json!(val.split(',').collect::<Vec<_>>())
                     }
                     "fallback" | "adaptive" | "diagnostics" => {
@@ -391,6 +456,13 @@ impl Resolved {
         let config: RuntimeConfig =
             serde_json::from_value(v).map_err(|_| "configuration type mismatch")?;
         config.validate()?;
+        if fe_mode == "full" {
+            for f in ["fe_calls", "fe_seconds", "fe_max_mib"] {
+                if sources[f].starts_with("profile:") {
+                    sources.insert(f.into(), "fe_mode:full".into());
+                }
+            }
+        }
         Ok(Self {
             config,
             sources,
@@ -420,9 +492,23 @@ impl Resolved {
         }
         let active = serde_json::to_value(&self.config.limits).unwrap();
         let mut parameters = descriptors();
+        let defaults = serde_json::to_value(RuntimeConfig::default()).unwrap();
+        for (name, kind, allowed) in [
+            ("fe_mode", "enum", json!(["smoke", "full"])),
+            ("fe_group", "pubkey", json!("Solana pubkey")),
+            (
+                "fe_targets",
+                "array<pubkey>",
+                json!("unique nonempty target scope"),
+            ),
+        ] {
+            parameters.push(json!({"name":name.replace('_',"-"),"field":name,"type":kind,"unit":"scope","default":defaults[name],"allowed":allowed,"active":values[name],"source":self.sources.get(name),"change":"restart_required"}));
+        }
         for d in &mut parameters {
             let f = d["field"].as_str().unwrap().to_string();
-            d["active"] = active[&f].clone();
+            if !active[&f].is_null() {
+                d["active"] = active[&f].clone();
+            }
             d["source"] = json!(self.sources.get(&f));
         }
         for (name, kind, unit, default, allowed) in [
@@ -501,14 +587,14 @@ impl Resolved {
             .map_err(|_| "config export failed".into())
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--fallback on|off --adaptive on|off --diagnostics on|off --verification off|index|strict|crosscheck --print-effective-config\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off --verification off|index|strict|crosscheck --print-effective-config\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for d in descriptors() {
             s += &format!(
                 "--{} <u64> [{}; default={}; 1..={}]\n",
                 d["name"].as_str().unwrap(),
                 d["unit"].as_str().unwrap(),
                 d["default"],
-                u32::MAX
+                d["maximum"]
             );
         }
         s
@@ -653,6 +739,29 @@ mod tests {
                 .as_deref(),
             Some("https://audit.invalid")
         );
+    }
+    #[test]
+    fn full_mode_has_its_own_defaults_and_shared_explicit_budgets() {
+        let smoke = parse(&[]).unwrap();
+        assert_eq!(smoke.config.limits.fe_calls, 3);
+        let full = parse(&["--fe-mode", "full"]).unwrap();
+        assert_eq!(full.config.limits.fe_calls, 1000);
+        assert_eq!(full.sources["fe_calls"], "fe_mode:full");
+        let full = parse(&[
+            "--fe-mode",
+            "full",
+            "--fe-calls",
+            "1500",
+            "--fe-seconds",
+            "45",
+            "--fe-batch-size",
+            "17",
+        ])
+        .unwrap();
+        assert_eq!(full.config.limits.fe_calls, 1500);
+        assert_eq!(full.config.limits.fe_batch_size, 17);
+        assert!(parse(&["--fe-mode", "full", "--fe-batch-size", "101"]).is_err());
+        assert!(parse(&["--fe-targets", "invalid"]).is_err());
     }
     #[test]
     fn numeric_schema_covers_every_environment_consumer() {

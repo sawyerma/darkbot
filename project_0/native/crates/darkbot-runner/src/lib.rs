@@ -34,3 +34,6 @@ pub mod measurement;
 
 /// FE-04 offline-qualified durable hold; normal LIVE entrypoint remains blocked.
 pub mod one_shot;
+
+#[cfg(feature = "crate_health")]
+pub mod fe_qualification;
