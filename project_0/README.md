@@ -78,6 +78,7 @@ project_0/
 │   ├── R127C_CHANGELOG_ROLLBACK.md   <- R127c history / rollback
 │   ├── R127D_CHANGELOG_ROLLBACK.md   <- R127d history / rollback / correction
 │   ├── architecture/                 <- upstream reuse decisions, parallel execution design
+│   ├── operations/                   <- operational configuration: profiles, precedence, budgets
 │   ├── measurements/
 │   │   ├── protocols/                <- P6-LT Shadow, C0-MO, C0-E1 econ4h protocols
 │   │   └── historical_reports/       <- FIX-129 cost, C0-E1 implementation/qualification reports
@@ -224,6 +225,14 @@ Directory: [docs/architecture/](docs/architecture/)
 |---|---|
 | [p0_reuse_matrix.md](docs/architecture/p0_reuse_matrix.md) | P0 reference study and upstream reuse/merge decisions (eva01, marginfi-v2). |
 | [parallel_execution_plan.md](docs/architecture/parallel_execution_plan.md) | Parallel execution design and MT0–MT10 sequence (baseline 2026-10-06). |
+
+### Operations
+
+Directory: [docs/operations/](docs/operations/)
+
+| File | Purpose |
+|---|---|
+| [operational_config.md](docs/operations/operational_config.md) | Operational configuration: inspection commands, precedence, profiles, budgets, authorization limits. |
 
 ### Measurement protocols
 
