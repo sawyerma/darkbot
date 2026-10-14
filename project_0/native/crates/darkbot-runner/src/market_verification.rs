@@ -232,10 +232,10 @@ pub fn run(job: Job) -> Result<Value, String> {
     if job.start_ns >= job.end_ns
         || job.max_calls == 0
         || job.max_seconds == 0
-        || job.max_seconds > 14_400
-        || job.max_calls > 100_000
-        || !(1..=5).contains(&job.rps)
-        || job.max_ram_bytes < 1024 * 1024 * 1024
+        || job.max_seconds > u64::from(u32::MAX)
+        || job.rps == 0
+        || job.rps > u64::from(u32::MAX)
+        || job.max_ram_bytes == 0
         || job.max_bytes == 0
     {
         return Err("VERIFICATION_CONFIG_INVALID".into());
@@ -248,7 +248,16 @@ pub fn run(job: Job) -> Result<Value, String> {
             let url = std::env::var("P0_AUDIT_RPC_URL")
                 .or_else(|_| std::env::var("P0_RPC_URL"))
                 .map_err(|_| "RPC_URL_MISSING")?;
-            Some(RpcFetcher::new(url, 10_000, "finalized").map_err(|_| "RPC_INIT")?)
+            Some(
+                RpcFetcher::new(
+                    url,
+                    darkbot_solana::runtime_config::active()
+                        .limits
+                        .rpc_timeout_ms,
+                    "finalized",
+                )
+                .map_err(|_| "RPC_INIT")?,
+            )
         },
         deadline: Instant::now() + Duration::from_secs(job.max_seconds),
         pacer: RequestPacer::new(job.rps),

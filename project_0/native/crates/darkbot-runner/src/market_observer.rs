@@ -318,7 +318,11 @@ pub fn market_ws_config(cfg: &MarketConfig) -> Result<WsRpcConfig, String> {
     };
     let mut ws = WsRpcConfig::new(cfg.ws_url.clone(), sub);
     ws.commitment = cfg.commitment;
-    ws.recovery_budget = Some(Duration::from_secs(120));
+    ws.recovery_budget = Some(Duration::from_millis(
+        darkbot_solana::runtime_config::active()
+            .limits
+            .wss_recovery_ms,
+    ));
     let heartbeat = Duration::from_secs(cfg.heartbeat_secs);
     if heartbeat >= ws.idle_timeout {
         return Err(format!(
@@ -2255,8 +2259,10 @@ struct RpcFetcher {
 
 impl RpcFetcher {
     fn new(url: String, timeout_ms: u64, commitment: &'static str) -> Result<Self, String> {
+        let limits = &darkbot_solana::runtime_config::active().limits;
         let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms))
+            .connect_timeout(Duration::from_millis(limits.rpc_connect_timeout_ms))
+            .timeout(Duration::from_millis(timeout_ms.min(limits.rpc_timeout_ms)))
             .build()
             .map_err(|e| format!("enrichment client: {}", e.without_url()))?;
         Ok(Self {
@@ -2272,8 +2278,17 @@ impl RpcFetcher {
         let _permit = darkbot_solana::provider::shared()
             .acquire(
                 darkbot_solana::provider::Workload::History,
-                Instant::now() + Duration::from_secs(10),
+                Instant::now()
+                    + Duration::from_millis(
+                        darkbot_solana::runtime_config::active()
+                            .limits
+                            .rpc_timeout_ms,
+                    ),
             )
+            .map_err(str::to_string)?;
+        let budget = darkbot_solana::provider::shared();
+        budget
+            .account_bytes(serde_json::to_vec(&body).map_err(|_| "RPC_ENCODE")?.len())
             .map_err(str::to_string)?;
         let resp = self
             .client
@@ -2283,7 +2298,17 @@ impl RpcFetcher {
             .map_err(|e| e.without_url().to_string())?;
         darkbot_solana::provider::observe_response(&resp, "getTransaction")
             .map_err(str::to_string)?;
-        let v: Value = resp.json().map_err(|e| e.without_url().to_string())?;
+        let bytes = darkbot_solana::provider::read_body(
+            resp,
+            darkbot_solana::runtime_config::active()
+                .limits
+                .max_response_mib
+                * 1024
+                * 1024,
+            &budget,
+        )
+        .map_err(str::to_string)?;
+        let v: Value = serde_json::from_slice(&bytes).map_err(|_| "RPC_JSON")?;
         if let Some(err) = v.get("error") {
             let _ = err;
             return Err("RPC_REMOTE_ERROR".into());

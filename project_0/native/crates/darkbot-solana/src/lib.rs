@@ -14,6 +14,7 @@
 
 pub mod ingress;
 pub mod provider;
+pub mod runtime_config;
 pub mod state;
 pub mod submit;
 pub mod tx;

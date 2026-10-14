@@ -2,7 +2,6 @@
 use super::*;
 use crate::winner::resolve_account_keys;
 use serde::Serialize;
-use std::io::Read;
 
 #[derive(Clone, Copy, Debug)]
 pub struct GapConfig {
@@ -46,7 +45,11 @@ impl GapConfig {
             max_attempts: n("P0_MARKET_GAP_MAX_ATTEMPTS", u64::from(d.max_attempts), 10)? as u32,
             timeout_ms: n("P0_MARKET_GAP_TIMEOUT_MS", d.timeout_ms, 60_000)?,
             retry_ms: n("P0_MARKET_GAP_RETRY_MS", d.retry_ms, 10_000)?,
-            phase_max_secs: n("P0_MARKET_GAP_PHASE_MAX_SECS", d.phase_max_secs, 3600)?,
+            phase_max_secs: n(
+                "P0_MARKET_GAP_PHASE_MAX_SECS",
+                d.phase_max_secs,
+                u64::from(u32::MAX),
+            )?,
             max_transactions: n(
                 "P0_MARKET_GAP_MAX_TRANSACTIONS",
                 d.max_transactions,
@@ -516,6 +519,8 @@ impl RpcFetcher {
         timeout_ms: u64,
         response_limit: u64,
     ) -> Result<(Value, u64), &'static str> {
+        let limits = &darkbot_solana::runtime_config::active().limits;
+        let timeout_ms = timeout_ms.min(limits.rpc_timeout_ms);
         let deadline = deadline.min(Instant::now() + Duration::from_millis(timeout_ms));
         let _permit = darkbot_solana::provider::shared()
             .acquire(darkbot_solana::provider::Workload::History, deadline)?;
@@ -523,11 +528,14 @@ impl RpcFetcher {
         if remaining.is_zero() {
             return Err("RECOVERY_BUDGET");
         }
+        let body = json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params});
+        darkbot_solana::provider::shared()
+            .account_bytes(serde_json::to_vec(&body).map_err(|_| "RPC_ENCODE")?.len())?;
         let response = self
             .client
             .post(&self.url)
             .timeout(remaining.min(Duration::from_millis(timeout_ms)))
-            .json(&json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params}))
+            .json(&body)
             .send()
             .map_err(|e| {
                 if e.is_timeout() {
@@ -537,15 +545,14 @@ impl RpcFetcher {
                 }
             })?;
         darkbot_solana::provider::observe_response(&response, method)?;
-        let limit = response_limit.min(64 * 1024 * 1024);
-        let mut bytes = Vec::new();
-        response
-            .take(limit + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| "RPC_READ")?;
-        if bytes.len() as u64 > limit {
-            return Err("RPC_BODY_LIMIT");
-        }
+        let limit = response_limit
+            .min(64 * 1024 * 1024)
+            .min(limits.max_response_mib * 1024 * 1024);
+        let bytes = darkbot_solana::provider::read_body(
+            response,
+            limit,
+            &darkbot_solana::provider::shared(),
+        )?;
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| "RPC_JSON")?;
         if value.get("error").is_some() {
             return Err(match value["error"]["code"].as_i64() {

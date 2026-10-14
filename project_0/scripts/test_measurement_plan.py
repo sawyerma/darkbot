@@ -24,7 +24,7 @@ def call_plan(**values):
 
 class MeasurementCli(unittest.TestCase):
     def test_release_duration_matrix(self):
-        for duration, seconds in [('10m', 600), ('1h', 3600), ('5h', 18000), ('24h', 86400), ('61s', 61), ('1s', 1)]:
+        for duration, seconds in [('10m', 600), ('1h', 3600), ('5h', 18000), ('24h', 86400), ('25h',90000), ('61s', 61), ('1s', 1)]:
             with self.subTest(duration=duration):
                 p = call_plan(P0_MEASUREMENT_DURATION=duration)
                 self.assertEqual(p.returncode, 0, p.stderr)
@@ -39,7 +39,7 @@ class MeasurementCli(unittest.TestCase):
                     self.assertEqual(json.loads(loaded.stdout), plan)
 
     def test_invalid_and_conflicting_input(self):
-        for duration in ['0s', '25h', '1.5h', '1', 'é', '1🦀']:
+        for duration in ['0s', '18446744073709551615h', '1.5h', '1', 'é', '1🦀']:
             self.assertNotEqual(call_plan(P0_MEASUREMENT_DURATION=duration).returncode, 0)
         self.assertNotEqual(call_plan(P0_MEASUREMENT_DURATION='10m', P0_ECON_SNAPSHOT_SECS='3600').returncode, 0)
         self.assertNotEqual(call_plan(P0_MEASUREMENT_DURATION='10m', P0_MARKET_DURATION_SECS='300').returncode, 0)

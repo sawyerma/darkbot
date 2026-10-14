@@ -12,6 +12,7 @@ import time
 import uuid
 import audit_market_quick as audit
 import measurement_contract as c
+import operational_config
 
 
 def resource_guard(output,v,deadline):
@@ -52,7 +53,7 @@ def verify(run,v,qualification=None,offline=False,resume=False):
                 # promote a single index or a same-provider duplicate into a crosscheck.
                 summary.update(status='HISTORICAL_INCOMPLETE',reason='INDEPENDENT_CROSSCHECK_QUALIFICATION_OPEN')
             elif v.mode=='index':
-                rpc=audit.RPC(url,min(v.rps,2),v.timeout,v.attempts,v.max_calls,v.max_seconds,v.max_bytes) if url and not offline else None
+                rpc=audit.RPC(url,v.rps,v.timeout,v.attempts,v.max_calls,v.max_seconds,v.max_bytes,**operational_config.transport_options()) if url and not offline else None
                 if rpc:
                     call=rpc.call
                     def bounded(method,params):
@@ -76,7 +77,7 @@ def verify(run,v,qualification=None,offline=False,resume=False):
                 if not binary.exists():raise audit.AuditError('STRICT_BINARY_NOT_BUILT')
                 job={**asdict(v),'verification_spec_id':sid,'output':str(out/'strict'),
                      'program':audit.PROGRAM,'start_ns':spec['window']['start_ns'],'end_ns':spec['window']['end_ns'],
-                     'rps':min(v.rps,2),'offline':offline}
+                     'rps':v.rps,'offline':offline}
                 c.immutable(attemptdir/'job.json',job)
                 with (attemptdir/'worker_stderr.txt').open('x') as err:
                     proc=subprocess.run([str(binary),str(attemptdir/'job.json')],capture_output=False,
@@ -113,7 +114,14 @@ def verify(run,v,qualification=None,offline=False,resume=False):
 def main(argv=None):
     parser=c.parser('Read-only C0-E1 verifier. No capture, signer or submission.')
     parser.set_defaults(mode='index')
-    args=parser.parse_args(argv)
+    try:
+        with operational_config.parsed(parser,argv) as (args,effective,environment):
+            return execute(parser,args)
+    except (OSError,ValueError) as exc:
+        print('HISTORICAL_INCOMPLETE: OPERATIONAL_CONFIG_INVALID',file=sys.stderr);return 2
+
+
+def execute(parser,args):
     try:
         cfg=c.config(args)
         if not args.run:parser.error('--run required')

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import measurement_contract as c
+import operational_config
 
 
 def finish(run,path):
@@ -27,17 +28,22 @@ def finish(run,path):
 
 def launch(argv):
     p=c.parser('C0-E1: --duration 10m|1h|5h|24h. Rust MeasurementPlan owns every boundary; no total capture timebox.')
-    args=p.parse_args(argv);cfg=c.config(args)
+    with operational_config.parsed(p,argv) as (args,effective,environment):
+        return launch_config(p,argv,args,effective,environment)
+
+
+def launch_config(p,argv,args,effective,environment):
+    cfg=c.config(args)
     if not args.duration:p.error('--duration required')
     if argv.count('--duration')>1:p.error('exactly one duration required')
     if args.run or args.resume_verification:p.error('capture cannot resume; use verify.sh or report.sh on an existing run')
     if args.offline:p.error('capture uses real streams; offline operations are verify.sh/report.sh')
-    data={'config':asdict(cfg),'provider_qualification':str(args.provider_qualification.resolve()) if args.provider_qualification else None}
+    data={'operational_config':effective,'config':asdict(cfg),'provider_qualification':str(args.provider_qualification.resolve()) if args.provider_qualification else None}
     # Keep CLI precedence over sourced local env. Shell receives only this file;
     # interpretation/validation stays in the shared typed backend.
     with tempfile.TemporaryDirectory(prefix='p0-measurement-cli-') as tmp:
         path=Path(tmp)/'config.json';c.immutable(path,data)
-        return subprocess.call([str(Path(__file__).with_name('run_econ4h.sh')),'--measurement-config',str(path)])
+        return subprocess.call([str(Path(__file__).with_name('run_econ4h.sh')),'--measurement-config',str(path)],env=environment)
 
 
 def prepare(run,path):
@@ -45,6 +51,10 @@ def prepare(run,path):
     qpath=Path(data['provider_qualification']) if data.get('provider_qualification') else None
     pf=c.preflight(run,v,qpath,c.endpoint())
     c.immutable(run/'measurement_config.json',data['config'])
+    if data.get('operational_config'):
+        # Re-resolve after the existing shell has loaded local endpoints. Private
+        # file/CLI values still dominate; only inherited endpoints are completed.
+        with operational_config.resolve([]) as (_,effective,__):c.immutable(run/'operational_config.json',effective)
     c.immutable(run/'verification_preflight.json',pf)
     if v.mode!='off' and not pf['passed']:raise c.ContractError('VERIFICATION_PREFLIGHT_OPEN; choose off or qualify the FREE_ONLY provider first')
 

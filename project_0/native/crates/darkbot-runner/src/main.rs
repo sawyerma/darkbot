@@ -531,6 +531,39 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|s| s == "--help" || s == "-h") {
+        print!("{}", darkbot_solana::runtime_config::Resolved::help());
+        return Ok(());
+    }
+    if !args.is_empty()
+        || std::env::var_os("P0_PROFILE").is_some()
+        || std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
+    {
+        let resolved =
+            darkbot_solana::runtime_config::Resolved::parse(&args, &|k| std::env::var(k).ok())?;
+        if let Some(path) = &resolved.export {
+            resolved.export_private(path)?;
+            println!("{}", serde_json::to_string_pretty(&resolved.json())?);
+            return Ok(());
+        }
+        if resolved.print {
+            println!("{}", serde_json::to_string_pretty(&resolved.json())?);
+            return Ok(());
+        }
+        if resolved.config.verification != "off"
+            && std::env::var_os("P0_MEASUREMENT_PLAN").is_none()
+        {
+            return Err("verification requires test.sh/verify.sh post-capture lifecycle".into());
+        }
+        // Single-threaded startup only. Existing constructors keep their typed
+        // gates while obtaining operational values from the shared contract.
+        for (k, v) in resolved.config.environment() {
+            std::env::set_var(k, v);
+        }
+        resolved.activate()?;
+        darkbot_solana::provider::enable_measurement_budget();
+    }
     // [C0-MO] Market mode branches off before any trading-stack initialisation: no RPC URL,
     // keypair, signer, health engine, planner, simulation or submission is constructed.
     if config::require("P0_MODE")? == "market" {
@@ -546,6 +579,15 @@ fn run_shadow(
     clock: Clock,
     econ: Option<darkbot_runner::econ::Handle>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let operational_start = clock.now_ns();
+    let mut operational_window = if econ.is_none() && darkbot_solana::runtime_config::configured() {
+        Some(darkbot_runner::measurement::ReadyWindow::new(
+            darkbot_runner::measurement::MeasurementPlan::from_lookup(&|k| std::env::var(k).ok())?,
+        ))
+    } else {
+        None
+    };
+    let mut operational_failure = None;
     let ws_url = config::require("P0_WS_URL")?;
     let ws_url_for_spawn = ws_url.clone();
     let rpc_url = config::require("P0_RPC_URL")?;
@@ -725,7 +767,11 @@ fn run_shadow(
         let session = Shutdown::new();
         let mut ws_config = WsRpcConfig::new(ws_url_for_spawn.clone(), sub);
         if econ.is_some() {
-            ws_config.recovery_budget = Some(Duration::from_secs(120));
+            ws_config.recovery_budget = Some(Duration::from_millis(
+                darkbot_solana::runtime_config::active()
+                    .limits
+                    .wss_recovery_ms,
+            ));
         }
         let src = WsRpcControlSource::new(ws_config, clock);
         let failure_handle = econ.clone();
@@ -758,8 +804,8 @@ fn run_shadow(
     // RpcClient::new() 30-second default. Keep a bounded, independently configurable
     // timeout for snapshot/dependency fetches; never weaken recovery/reconcile gates.
     let snapshot_rpc_timeout_secs: u64 = config::parsed_or("P0_SNAPSHOT_RPC_TIMEOUT_SECS", 90)?;
-    if !(30..=180).contains(&snapshot_rpc_timeout_secs) {
-        return Err("P0_SNAPSHOT_RPC_TIMEOUT_SECS must be 30..=180".into());
+    if snapshot_rpc_timeout_secs == 0 {
+        return Err("P0_SNAPSHOT_RPC_TIMEOUT_SECS must be positive".into());
     }
     eprintln!("snapshot: rpc_timeout_s={snapshot_rpc_timeout_secs}");
     let rpc = darkbot_solana::provider::rpc_client(
@@ -1129,6 +1175,18 @@ fn run_shadow(
         .append(true)
         .open(&record_path)?;
     use std::io::Write;
+    if let Some(report) = darkbot_solana::runtime_config::report() {
+        let parent = std::path::Path::new(&record_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let name = format!("operational_config_{}.json", clock.unix_ns(clock.now_ns()));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(parent.join(name))?;
+        serde_json::to_writer_pretty(&mut file, report)?;
+        file.sync_all()?;
+    }
 
     let mut counts = [0u64; 6];
     let mut last_reported_update_total = 0u64; // [FIX-81]
@@ -1349,6 +1407,19 @@ fn run_shadow(
             );
             if h.drain_expired() {
                 break;
+            }
+        }
+        if let Some(window) = &mut operational_window {
+            let ready = st.run_state().is_tradable() && !program_upgrade_latched;
+            #[cfg(feature = "crate_health")]
+            let ready = ready && threshold_ready;
+            match window.poll(clock.now_ns().saturating_sub(operational_start), ready) {
+                Ok(true) => break,
+                Err(reason) => {
+                    operational_failure = Some(reason);
+                    break;
+                }
+                Ok(false) => {}
             }
         }
         if shutdown.is_requested() {
@@ -3737,6 +3808,10 @@ fn run_shadow(
         shutdown.request();
         ingress_session.request();
     }
+    if operational_window.is_some() {
+        shutdown.request();
+        ingress_session.request();
+    }
     // [FIX-46] Letzten (Teil-)Tag beim regulären Shutdown schreiben, damit das Ledger vollständig ist.
     let final_summary = ledger.finish();
     if let Ok(j) = serde_json::to_string(&final_summary) {
@@ -3744,8 +3819,15 @@ fn run_shadow(
     }
     let _ = summaries.flush();
     let _ = records.flush();
-    if econ.is_some() {
-        remote.wait_stopped(Duration::from_secs(120))?;
+    if econ.is_some() || operational_window.is_some() {
+        remote.wait_stopped(Duration::from_secs(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .shutdown_seconds,
+        ))?;
+    }
+    if let Some(reason) = operational_failure {
+        return Err(reason.into());
     }
     Ok(())
 }

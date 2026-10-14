@@ -80,7 +80,12 @@ class AuditError(Exception):
 
 class RPC:
     def __init__(self, url, rps=2, timeout=15, attempts=3, max_calls=2000, seconds=300,
-                 max_bytes=256*1024*1024, opener=None, sleep=time.sleep, clock=time.monotonic, allowed_methods=None):
+                 max_bytes=256*1024*1024, opener=None, sleep=time.sleep, clock=time.monotonic, allowed_methods=None, max_response_bytes=16*1024*1024, backoff_initial=1, backoff_max=8, adaptive=False, fallback_urls=(), rps_ceiling=None, calls_ceiling=None, bytes_ceiling=None):
+        rps=min(rps,rps_ceiling) if rps_ceiling is not None else rps
+        max_calls=min(max_calls,calls_ceiling) if calls_ceiling is not None else max_calls
+        max_bytes=min(max_bytes,bytes_ceiling) if bytes_ceiling is not None else max_bytes
+        self.adaptive=adaptive;self.ceiling_rps=rps;self.effective_rps=rps;self.successes=0;self.fallback_urls=tuple(fallback_urls)
+        self.max_response_bytes=max_response_bytes;self.backoff_initial=backoff_initial;self.backoff_max=backoff_max
         self.allowed_methods=frozenset(('getSignaturesForAddress','getTransaction') if allowed_methods is None else allowed_methods)
         if not self.allowed_methods <= {'getSignaturesForAddress','getTransaction','getAccountInfo','getMultipleAccounts'}:
             raise AuditError('RPC_READONLY_METHODS_REQUIRED')
@@ -102,19 +107,21 @@ class RPC:
         for attempt in range(self.attempts):
             if self.calls >= self.max_calls:
                 raise AuditError('RPC_CALL_BUDGET')
-            if self.bytes_received >= self.max_bytes:
+            if self.bytes_received+self.bytes_sent >= self.max_bytes:
                 raise AuditError('RPC_BYTE_BUDGET')
             self.pause(max(0, self.last+self.interval-self.clock()))
             self.last = self.clock()
             data = json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode()
-            req = urllib.request.Request(self.url, data, {'Content-Type':'application/json'}, method='POST')
+            if len(data)+self.bytes_received+self.bytes_sent>self.max_bytes:raise AuditError('RPC_BYTE_BUDGET')
+            endpoint=self.fallback_urls[min(attempt,len(self.fallback_urls)-1)] if self.fallback_urls and self.fallback_urls[0]==self.url else self.url
+            req = urllib.request.Request(endpoint, data, {'Content-Type':'application/json'}, method='POST')
             retry_after = None
             self.calls += 1
             self.methods[method] += 1
             self.bytes_sent += len(data)
             try:
                 with self.opener(req, timeout=min(self.timeout, self.deadline-self.clock())) as response:
-                    limit = min(16*1024*1024, self.max_bytes-self.bytes_received)
+                    limit = min(self.max_response_bytes, self.max_bytes-self.bytes_received-self.bytes_sent)
                     raw = response.read(limit+1)
                     self.bytes_received += len(raw)
                     if len(raw) > limit:
@@ -136,6 +143,9 @@ class RPC:
                 elif 'result' not in body:
                     raise AuditError('RPC_MALFORMED_RESPONSE')
                 else:
+                    self.successes+=1
+                    if self.adaptive and self.successes>=8:
+                        self.effective_rps=min(self.ceiling_rps,self.effective_rps+1);self.interval=1/self.effective_rps;self.successes=0
                     return body['result']
             except urllib.error.HTTPError as exc:
                 reason = 'RPC_RATE_LIMIT' if exc.code == 429 else 'RPC_HTTP_ERROR'
@@ -157,9 +167,11 @@ class RPC:
                 reason = 'RPC_TRANSPORT'
             except (ValueError,KeyError,TypeError):
                 raise AuditError('RPC_MALFORMED_RESPONSE') from None
+            if self.adaptive:
+                self.effective_rps=max(1,self.effective_rps/2);self.interval=1/self.effective_rps;self.successes=0
             if attempt+1 == self.attempts:
                 raise AuditError(reason)
-            self.pause(max(retry_after or 0, min(2**attempt,8)+random.random()/4))
+            self.pause(max(retry_after or 0, min(self.backoff_initial*2**min(attempt,32),self.backoff_max)+random.random()/4))
         raise AssertionError('unreachable')
 
 
@@ -1147,8 +1159,8 @@ def quick_main(argv=None):
         ap.error('--run or legacy positional run path required')
     if args.run and args.run_dir:
         ap.error('choose --run or positional path, not both')
-    if not (0<args.rps<=10 and 1<=args.max_pages<=500 and 1<=args.max_calls<=100000 and 1<=args.max_seconds<=3600
-            and 1<=args.timeout<=60 and 1<=args.attempts<=5 and 1024<=args.max_bytes<=2**30):
+    if not (0<args.rps<=2**32-1 and 1<=args.max_pages<=2**32-1 and 1<=args.max_calls<=2**32-1 and 1<=args.max_seconds<=2**32-1
+            and 1<=args.timeout<=2**32-1 and 1<=args.attempts<=2**32-1 and 1<=args.max_bytes<=2**63-1):
         ap.error('invalid bounded RPC settings; see --help')
     try:
         run=find_run(args.run or args.run_dir)

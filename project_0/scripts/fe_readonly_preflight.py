@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import time
 import signal
+import operational_config
 import audit_market_quick as audit
 import measurement_contract as contract
 
@@ -52,21 +53,32 @@ def probe(rpc):
 
 
 def main(argv=None):
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--execute',action='store_true');p.add_argument('--output',type=Path,required=True)
-    args=p.parse_args(argv)
-    if not args.execute:p.error('--execute only after explicit permission; at most 3 calls / 30s / 16MiB / 1rps')
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--execute',action='store_true');p.add_argument('--output',type=Path,required=False)
+    args,operational=p.parse_known_args(argv)
+    if '--print-effective-config' in operational:
+        with operational_config.resolve(operational) as (_,effective,__):print(json.dumps(effective,indent=2));return 0
+    if args.output is None:p.error('--output required for execution')
+    if not args.execute:p.error('--execute only after explicit permission; operational limits are configurable through --profile/--config/CLI')
     if args.output.exists():p.error('output exists; preserve prior evidence')
-    url=contract.endpoint()
-    if not url:p.error('RPC endpoint missing in local environment')
-    rpc=audit.RPC(url,1,8,1,3,30,16*1024*1024,allowed_methods={'getAccountInfo','getMultipleAccounts'})
+    with operational_config.resolve(operational or ['--profile','smoke']) as (config,effective,environment):
+        return execute(args.output,config,effective,environment)
+
+
+def execute(output,config,effective,environment):
+    url=environment.get('P0_RPC_URL') or contract.endpoint()
+    if not url:raise ValueError('RPC endpoint missing in local environment')
+    limits=config['limits']
+    rpc=audit.RPC(url,min(limits['rpc_rps'],limits['hotpath_rps']),limits['rpc_timeout_ms']/1000,limits['rpc_attempts'],min(limits['fe_calls'],limits['max_requests']),limits['fe_seconds'],min(limits['fe_max_mib'],limits['max_total_mib'])*1024*1024,allowed_methods={'getAccountInfo','getMultipleAccounts'},max_response_bytes=limits['max_response_mib']*1024*1024,backoff_initial=limits['rpc_backoff_ms']/1000,backoff_max=limits['rpc_backoff_max_ms']/1000,adaptive=config['adaptive'],fallback_urls=config['rpc_endpoints'] if config['fallback'] else ())
     def deadline(signum,frame):raise audit.AuditError('RPC_TIME_BUDGET')
-    signal.signal(signal.SIGALRM,deadline);signal.alarm(30)
+    signal.signal(signal.SIGALRM,deadline);signal.alarm(limits['fe_seconds'])
     try:result=probe(rpc)
     except (audit.AuditError,OSError,ValueError,KeyError,TypeError) as exc:
         result={'status':'EXTERNAL_BLOCKED','reason':str(exc) if isinstance(exc,audit.AuditError) else 'LOCAL_OR_PROVIDER_DATA_INVALID','pilot_ready':False,'live_enabled':False,'submission_enabled':False}
     finally:signal.alarm(0)
     result['rpc_actual']={'calls':rpc.calls,'bytes_sent':rpc.bytes_sent,'bytes_received':rpc.bytes_received,'methods':dict(rpc.methods)}
-    result['observed_at_unix_s']=int(time.time());result['request_budget']=3
-    contract.immutable(args.output,result);print(json.dumps(result,indent=2));return 0 if result['status']=='OBSERVED_NOT_QUALIFIED' else 2
+    result['observed_at_unix_s']=int(time.time());result['request_budget']=limits['fe_calls'];result['operational_config']=effective
+    contract.immutable(output,result);print(json.dumps(result,indent=2));return 0 if result['status']=='OBSERVED_NOT_QUALIFIED' else 2
 
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':
+    try:raise SystemExit(main())
+    except ValueError as exc:raise SystemExit(str(exc))

@@ -65,7 +65,7 @@ pub(crate) fn is_application_frame(frame: &Message) -> bool {
 
 impl WsRpcConfig {
     pub fn new(ws_url: String, subscription: Subscription) -> Self {
-        WsRpcConfig {
+        let mut config = WsRpcConfig {
             ws_url,
             subscription,
             commitment: "confirmed",
@@ -75,7 +75,16 @@ impl WsRpcConfig {
             heartbeat_interval: None,
             recovery_budget: None,
             recovery_attempts: 8,
+        };
+        if crate::runtime_config::configured() {
+            let p = &crate::runtime_config::active().limits;
+            config.reconnect_initial = Duration::from_millis(p.wss_reconnect_ms);
+            config.reconnect_max = Duration::from_millis(p.wss_reconnect_max_ms);
+            config.idle_timeout = Duration::from_millis(p.wss_idle_timeout_ms);
+            config.recovery_budget = Some(Duration::from_millis(p.wss_recovery_ms));
+            config.recovery_attempts = p.wss_attempts as u32;
         }
+        config
     }
 }
 
@@ -457,6 +466,12 @@ impl WsRpcControlSource {
         last_slot: &mut Option<u64>,
         recovery: &mut SessionAttempt,
     ) -> Result<(), IngressError> {
+        let runtime = crate::runtime_config::active();
+        let requests = build_subscribe_requests(&self.cfg.subscription, self.cfg.commitment);
+        let _socket_permit = self
+            .provider_budget
+            .acquire_socket(requests.len() as u64)
+            .map_err(|e| IngressError::Config(e.into()))?;
         let attempt = recovery.attempt;
         let deadline = recovery.deadline;
         let healthy = &mut recovery.healthy;
@@ -465,7 +480,8 @@ impl WsRpcControlSource {
         let connect_budget = deadline
             .map(|d| d.saturating_duration_since(tokio::time::Instant::now()))
             .unwrap_or(self.cfg.idle_timeout)
-            .min(self.cfg.idle_timeout);
+            .min(self.cfg.idle_timeout)
+            .min(Duration::from_millis(runtime.limits.wss_connect_timeout_ms));
         let _permit = if self.cfg.recovery_budget.is_some() {
             let deadline = std::time::Instant::now()
                 + deadline
@@ -492,9 +508,24 @@ impl WsRpcControlSource {
             .map(|d| d.saturating_duration_since(tokio::time::Instant::now()))
             .unwrap_or(connect_budget)
             .min(connect_budget);
+        let endpoint =
+            if runtime.fallback && runtime.wss_endpoints.first() == Some(&self.cfg.ws_url) {
+                runtime
+                    .wss_endpoints
+                    .get(
+                        (attempt.saturating_sub(1) as usize)
+                            .min(runtime.wss_endpoints.len().saturating_sub(1)),
+                    )
+                    .unwrap_or(&self.cfg.ws_url)
+            } else {
+                &self.cfg.ws_url
+            };
+        let mut wire = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+        wire.max_message_size = Some((runtime.limits.wss_message_mib * 1024 * 1024) as usize);
+        wire.max_frame_size = wire.max_message_size;
         let (ws, _) = tokio::time::timeout(
             connect_budget,
-            tokio_tungstenite::connect_async(&self.cfg.ws_url),
+            tokio_tungstenite::connect_async_with_config(endpoint, Some(wire), false),
         )
         .await
         .map_err(|_| IngressError::Connect("WSS_CONNECT_TIMEOUT".into()))?
@@ -517,7 +548,6 @@ impl WsRpcControlSource {
         let (mut tx, mut rx) = ws.split();
 
         // Subscribe-Requests senden; Bestätigungen (id → subscription) einsammeln.
-        let requests = build_subscribe_requests(&self.cfg.subscription, self.cfg.commitment);
         let request_total = requests.len();
         eprintln!(
             "[ws_rpc] session attempt={} connected; subscriptions={} (programs={} filtered_programs={} accounts={} slots={} roots={} tx={})",
@@ -618,6 +648,9 @@ impl WsRpcControlSource {
                 Ok(Some(Ok(f))) => f,
             };
 
+            self.provider_budget
+                .account_bytes(frame.len())
+                .map_err(|e| IngressError::Protocol(e.into()))?;
             // [C0-MO r5] Only application frames prove the subscription stream is alive;
             // transport Ping/Pong (incl. replies to our heartbeat) never reset the idle budget.
 

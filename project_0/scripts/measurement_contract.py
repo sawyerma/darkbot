@@ -81,10 +81,8 @@ class VerificationConfig:
     attempts: int=3
     def validate(self):
         if self.mode not in ('off','index','strict','crosscheck'):raise ContractError('VERIFICATION_MODE')
-        if not (1<=self.rps<=5 and 1<=self.max_calls<=100000 and 1<=self.max_seconds<=14400
-                and 1024<=self.max_bytes<=16*1024**3 and 1024**3<=self.max_ram_bytes<=16*1024**3
-                and 1024**2<=self.max_disk_bytes<=1024**4 and self.min_free_bytes>=1024**2
-                and 1<=self.max_pages<=500 and 1<=self.timeout<=60 and 1<=self.attempts<=5):
+        quantities=(self.rps,self.max_calls,self.max_seconds,self.max_bytes,self.max_ram_bytes,self.max_disk_bytes,self.min_free_bytes,self.max_pages,self.timeout,self.attempts)
+        if any(type(n) is not int or n<1 or n>2**63-1 for n in quantities):
             raise ContractError('VERIFICATION_BUDGET_INVALID')
         return self
 
@@ -129,7 +127,7 @@ class MeasurementConfigV2:
 
 
 def parser(description='C0-E1 measurement/verification/report contract'):
-    p=argparse.ArgumentParser(description=description)
+    p=argparse.ArgumentParser(description=description,epilog="Operational options: --profile smoke|standard|performance|custom, --config FILE, --rpc-rps N, --rpc-concurrency N, --print-effective-config. Full typed schema: native/target/release/p0-longtail --help. Capture/verifier profiles never authorize LIVE.")
     p.add_argument('--run');p.add_argument('--duration')
     p.add_argument('--capture-source',choices=['logs','transactions'],default='logs')
     p.add_argument('--chain-verify','--verify','--mode',dest='mode',choices=['off','index','strict','crosscheck'],default='off')
@@ -219,6 +217,9 @@ def check_capture(run,evidence,hashes=False):
 
 
 def endpoint():
+    if os.environ.get('P0_OPERATIONAL_CONFIG_FILE'):
+        data=json.loads(Path(os.environ['P0_OPERATIONAL_CONFIG_FILE']).read_text())
+        if data.get('rpc_endpoints'):return data['rpc_endpoints'][0]
     url=os.environ.get('P0_AUDIT_RPC_URL') or os.environ.get('P0_RPC_URL')
     if not url and os.environ.get('HELIUS_API_KEY'):url='https://mainnet.helius-rpc.com/?api-key='+os.environ['HELIUS_API_KEY']
     return url
@@ -235,11 +236,11 @@ def preflight(run,v,qualification,url):
         if (q.get('policy')!='FREE_ONLY' or q.get('provider_binding')!=binding
             or q.get('measured_at_unix_s',0)<time.time()-86400 or q.get('measured_at_unix_s',0)>time.time()
             or q.get('passed') is not True or not q.get('evidence_sha256')):reasons.append('FREE_ONLY_PROVIDER_QUALIFICATION_OPEN')
-        if q.get('allowed_rps',0)<min(v.rps,2) or q.get('available_calls',0)<v.max_calls:reasons.append('PROVIDER_QUOTA_INSUFFICIENT_OR_UNKNOWN')
+        if q.get('allowed_rps',0)<v.rps or q.get('available_calls',0)<v.max_calls:reasons.append('PROVIDER_QUOTA_INSUFFICIENT_OR_UNKNOWN')
         if v.mode=='strict' and q.get('archive_qualified') is not True:reasons.append('ARCHIVE_QUALIFICATION_OPEN')
     return {'passed':not reasons,'reasons':reasons,'free_disk_bytes':free,'requested':asdict(v),
-            'allowed':{'global_rps_ceiling':5,'history_rps_ceiling':2,'inflight':1,'policy':'FREE_ONLY'},
-            'effective_rps':min(v.rps,2),'provider_binding':binding,'qualification_digest':digest(q) if q else None}
+            'allowed':{'qualified_rps':q.get('allowed_rps'),'inflight':1,'policy':'FREE_ONLY'},
+            'effective_rps':v.rps,'provider_binding':binding,'qualification_digest':digest(q) if q else None}
 
 
 def specification(run,v,provider_binding):

@@ -6,6 +6,7 @@ use std::{fs, io::Write, path::Path};
 
 pub const SNAPSHOT_COUNT: usize = 4;
 pub const NS: u64 = 1_000_000_000;
+pub const MAX_SECONDS: u64 = u64::MAX / NS / SNAPSHOT_COUNT as u64;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct MeasurementPlan {
@@ -44,8 +45,8 @@ impl Default for PhaseBudgets {
 }
 impl MeasurementPlan {
     pub fn new(seconds: u64) -> Result<Self, String> {
-        if !(1..=86400).contains(&seconds) {
-            return Err("duration must be 1..=86400 whole seconds".into());
+        if !(1..=MAX_SECONDS).contains(&seconds) {
+            return Err("duration is zero or exceeds exact nanosecond representation".into());
         }
         Ok(Self {
             schema_version: 1,
@@ -89,7 +90,7 @@ impl MeasurementPlan {
         let seconds = if let Some(s) = get("P0_MEASUREMENT_DURATION") {
             Self::parse_duration(&s)?
         } else {
-            number(get, "P0_ECON_DURATION_SECS", 14400, 86400)?
+            number(get, "P0_ECON_DURATION_SECS", 14400, MAX_SECONDS)?
         };
         let mut plan = Self::new(seconds)?;
         let b = &mut plan.budgets;
@@ -97,33 +98,65 @@ impl MeasurementPlan {
             get,
             "P0_MARKET_READY_TIMEOUT_SECS",
             b.stream_ready_seconds,
-            86400,
+            MAX_SECONDS,
         )?;
-        b.bootstrap_seconds = number(get, "P0_ECON_BOOTSTRAP_SECS", b.stream_ready_seconds, 86400)?;
-        b.shadow_drain_seconds = number(get, "P0_ECON_DRAIN_SECS", b.shadow_drain_seconds, 86400)?;
+        b.bootstrap_seconds = number(
+            get,
+            "P0_ECON_BOOTSTRAP_SECS",
+            b.stream_ready_seconds,
+            MAX_SECONDS,
+        )?;
+        b.shadow_drain_seconds = number(
+            get,
+            "P0_ECON_DRAIN_SECS",
+            b.shadow_drain_seconds,
+            MAX_SECONDS,
+        )?;
         b.market_drain_seconds = number(
             get,
             "P0_MARKET_DRAIN_TIMEOUT_SECS",
             b.market_drain_seconds,
-            86400,
+            MAX_SECONDS,
         )?;
         b.strict_seconds = number(
             get,
             "P0_MARKET_RECONCILE_PHASE_MAX_SECS",
             b.strict_seconds,
-            14400,
+            MAX_SECONDS,
         )?;
-        b.gap_seconds = number(get, "P0_MARKET_GAP_PHASE_MAX_SECS", b.gap_seconds, 3600)?;
+        b.gap_seconds = number(
+            get,
+            "P0_MARKET_GAP_PHASE_MAX_SECS",
+            b.gap_seconds,
+            MAX_SECONDS,
+        )?;
         b.enrichment_seconds = number(
             get,
             "P0_MARKET_ENRICH_PHASE_MAX_SECS",
             b.enrichment_seconds,
-            86400,
+            MAX_SECONDS,
+        )?;
+        b.quiescence_grace_seconds = number(
+            get,
+            "P0_QUIESCENCE_SECS",
+            b.quiescence_grace_seconds,
+            MAX_SECONDS,
+        )?;
+        b.shutdown_grace_seconds = number(
+            get,
+            "P0_SHUTDOWN_SECS",
+            b.shutdown_grace_seconds,
+            MAX_SECONDS,
         )?;
         plan.check_legacy(get)?;
         Ok(plan)
     }
     fn check_legacy(&self, get: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
+        if let Some(duration) = get("P0_MEASUREMENT_DURATION") {
+            if Self::parse_duration(&duration)? != self.duration_seconds {
+                return Err("duration conflicts with MeasurementPlan".into());
+            }
+        }
         for (key, expected) in [
             ("P0_ECON_DURATION_SECS", self.duration_seconds),
             ("P0_MARKET_DURATION_SECS", self.duration_seconds),
@@ -133,6 +166,8 @@ impl MeasurementPlan {
                 self.budgets.stream_ready_seconds,
             ),
             ("P0_ECON_DRAIN_SECS", self.budgets.shadow_drain_seconds),
+            ("P0_QUIESCENCE_SECS", self.budgets.quiescence_grace_seconds),
+            ("P0_SHUTDOWN_SECS", self.budgets.shutdown_grace_seconds),
             (
                 "P0_MARKET_DRAIN_TIMEOUT_SECS",
                 self.budgets.market_drain_seconds,
@@ -178,11 +213,11 @@ impl MeasurementPlan {
                 b.enrichment_seconds,
             ]
             .iter()
-            .any(|n| !(1..=86400).contains(n))
-            || !(1..=14400).contains(&b.strict_seconds)
-            || !(1..=3600).contains(&b.gap_seconds)
-            || b.quiescence_grace_seconds != 150
-            || b.shutdown_grace_seconds != 180
+            .any(|n| !(1..=MAX_SECONDS).contains(n))
+            || !(1..=MAX_SECONDS).contains(&b.strict_seconds)
+            || !(1..=MAX_SECONDS).contains(&b.gap_seconds)
+            || !(1..=MAX_SECONDS).contains(&b.quiescence_grace_seconds)
+            || !(1..=MAX_SECONDS).contains(&b.shutdown_grace_seconds)
         {
             return Err("invalid MeasurementPlan schema, boundaries or budgets".into());
         }
@@ -373,7 +408,7 @@ pub fn persist_manifest(
         "clock_definition":"process monotonic ns; UTC = fixed origin + monotonic ns; capture boundaries journaled after StreamReady",
         "head":head.trim(),"binary_sha256":sha(&fs::read(binary).map_err(|e|e.to_string())?),"source_sha256":sources,
         "provider_class":if provider_class.bytes().all(|c|c.is_ascii_alphanumeric() || b"_-".contains(&c)){provider_class}else{"UNKNOWN"},
-        "risk_limits":risk,"permitted_modes":["SHADOW_OBSERVE_ONLY"],"live_enabled":false,"submission_enabled":false,
+        "operational_config":darkbot_solana::runtime_config::report(),"risk_limits":risk,"permitted_modes":["SHADOW_OBSERVE_ONLY"],"live_enabled":false,"submission_enabled":false,
         "verification_mode":"SEPARATE_POST_CAPTURE","capture_window":null,"protocol_pin":"33c67987a661f59c6683a65485ebb4f0ef030b77",
         "phase_journal":"measurement_phases.jsonl","compatibility":"hour_01..04 names retained; use plan offsets, not filename as hours"})).map_err(|e|e.to_string())?;
     f.sync_all().map_err(|e| e.to_string())?;
@@ -395,6 +430,8 @@ mod tests {
             ("1h", 3600),
             ("5h", 18000),
             ("24h", 86400),
+            ("25h", 90000),
+            ("86401s", 86401),
             ("61s", 61),
             ("1s", 1),
         ] {
@@ -435,8 +472,6 @@ mod tests {
             "-1h",
             "+1h",
             "1.5h",
-            "25h",
-            "86401s",
             "1",
             "1d",
             "é",
@@ -511,5 +546,48 @@ mod persistence_tests {
             rows[1]["details"]["snapshot_monotonic_ns"][0],
             615_250_000_000u64
         );
+    }
+}
+
+/// Standalone Shadow uses the same duration and readiness rule as a measurement.
+/// No capture time is spent while initial recovery is incomplete.
+pub struct ReadyWindow {
+    plan: MeasurementPlan,
+    capture_start: Option<u64>,
+}
+impl ReadyWindow {
+    pub fn new(plan: MeasurementPlan) -> Self {
+        Self {
+            plan,
+            capture_start: None,
+        }
+    }
+    /// elapsed_ns is monotonic elapsed since entering Shadow bootstrap.
+    pub fn poll(&mut self, elapsed_ns: u64, ready: bool) -> Result<bool, &'static str> {
+        if self.capture_start.is_none() {
+            if elapsed_ns >= self.plan.budgets.bootstrap_seconds.saturating_mul(NS) {
+                return Err("SHADOW_BOOTSTRAP_BUDGET");
+            }
+            if ready {
+                self.capture_start = Some(elapsed_ns);
+            }
+        }
+        Ok(self.capture_start.is_some_and(|start| {
+            elapsed_ns.saturating_sub(start) >= self.plan.duration_seconds * NS
+        }))
+    }
+}
+#[cfg(test)]
+mod operational_window_tests {
+    use super::*;
+    #[test]
+    fn bootstrap_does_not_consume_capture_and_reconnect_does_not_extend_it() {
+        let mut w = ReadyWindow::new(MeasurementPlan::new(61).unwrap());
+        assert_eq!(w.poll(59 * NS, false), Ok(false));
+        assert_eq!(w.poll(60 * NS, true), Ok(false));
+        assert_eq!(w.poll(120 * NS, false), Ok(false));
+        assert_eq!(w.poll(121 * NS, false), Ok(true));
+        let mut w = ReadyWindow::new(MeasurementPlan::new(600).unwrap());
+        assert_eq!(w.poll(600 * NS, false), Err("SHADOW_BOOTSTRAP_BUDGET"));
     }
 }

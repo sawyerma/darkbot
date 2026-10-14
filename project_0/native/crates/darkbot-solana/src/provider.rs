@@ -1,6 +1,6 @@
 //! C0-E1 process-wide Solana provider budget. All endpoints share a conservative
 //! account-level ceiling: distinct URLs are NOT evidence of independent quotas.
-//! FIFO admission + per-workload spacing, 2 in flight, 5 starts/sec aggregate.
+//! Bounded priority admission, per-workload spacing and adaptive shared ceilings.
 //! This is a client ceiling, NOT qualification of purchased provider capacity.
 use serde_json::Value;
 use solana_client::{
@@ -39,19 +39,18 @@ impl Workload {
     fn index(self) -> usize {
         self as usize
     }
-    fn spacing(self) -> Duration {
-        Duration::from_millis(match self {
-            Self::History | Self::Simulation | Self::Winner => 500,
-            Self::Websocket => 1000,
-            _ => 200,
-        })
-    }
 }
 struct State {
-    queue: VecDeque<u64>,
+    queue: VecDeque<(u64, Workload)>,
     next_ticket: u64,
     active: usize,
-    next_global: Instant,
+    sockets: u64,
+    subscriptions: u64,
+    tokens: f64,
+    refill_at: Instant,
+    effective_rps: f64,
+    bytes: u64,
+    successes: u32,
     next_workload: [Instant; 7],
     cooldown: Instant,
     rate_limits: u32,
@@ -59,11 +58,27 @@ struct State {
     retry_after_overflow: bool,
 }
 pub struct Budget {
+    limits: crate::runtime_config::Limits,
+    adaptive: bool,
+    fallback: bool,
+    rpc_endpoints: Vec<String>,
     state: Mutex<State>,
     changed: Condvar,
 }
 pub struct Permit {
     budget: Arc<Budget>,
+}
+pub struct SocketPermit {
+    budget: Arc<Budget>,
+    subscriptions: u64,
+}
+impl Drop for SocketPermit {
+    fn drop(&mut self) {
+        let mut s = self.budget.state.lock().unwrap();
+        s.sockets -= 1;
+        s.subscriptions -= self.subscriptions;
+        self.budget.changed.notify_all();
+    }
 }
 impl Drop for Permit {
     fn drop(&mut self) {
@@ -74,13 +89,28 @@ impl Drop for Permit {
 }
 impl Default for Budget {
     fn default() -> Self {
+        Self::configured(crate::runtime_config::active())
+    }
+}
+impl Budget {
+    pub fn configured(config: &crate::runtime_config::RuntimeConfig) -> Self {
         let now = Instant::now();
         Self {
+            limits: config.limits.clone(),
+            adaptive: config.adaptive,
+            fallback: config.fallback,
+            rpc_endpoints: config.rpc_endpoints.clone(),
             state: Mutex::new(State {
                 queue: VecDeque::new(),
                 next_ticket: 0,
                 active: 0,
-                next_global: now,
+                sockets: 0,
+                subscriptions: 0,
+                tokens: config.limits.rpc_burst as f64,
+                refill_at: now,
+                effective_rps: config.limits.rpc_rps as f64,
+                bytes: 0,
+                successes: 0,
                 next_workload: [now; 7],
                 cooldown: now,
                 rate_limits: 0,
@@ -96,6 +126,29 @@ pub fn shared() -> Arc<Budget> {
     B.get_or_init(|| Arc::new(Budget::default())).clone()
 }
 impl Budget {
+    pub fn acquire_socket(
+        self: &Arc<Self>,
+        subscriptions: u64,
+    ) -> Result<SocketPermit, &'static str> {
+        let mut s = self.state.lock().unwrap();
+        if s.sockets >= self.limits.wss_connections {
+            return Err("WSS_CONNECTION_LIMIT");
+        }
+        if subscriptions
+            > self
+                .limits
+                .wss_subscriptions
+                .saturating_sub(s.subscriptions)
+        {
+            return Err("WSS_SUBSCRIPTION_LIMIT");
+        }
+        s.sockets += 1;
+        s.subscriptions += subscriptions;
+        Ok(SocketPermit {
+            budget: self.clone(),
+            subscriptions,
+        })
+    }
     pub fn acquire(
         self: &Arc<Self>,
         work: Workload,
@@ -113,21 +166,28 @@ impl Budget {
         if s.retry_after_overflow {
             return Err("RPC_RATE_LIMIT");
         }
-        if s.queue.len() >= 64 {
+        if s.queue.len() as u64 >= self.limits.rpc_queue {
             return Err("RPC_ADMISSION_QUEUE_FULL");
         }
         let ticket = s.next_ticket;
         s.next_ticket += 1;
-        s.queue.push_back(ticket);
+        s.queue.push_back((ticket, work));
         loop {
             let now = Instant::now();
-            let ready = s
-                .next_global
+            let elapsed = now.saturating_duration_since(s.refill_at).as_secs_f64();
+            s.tokens = (s.tokens + elapsed * s.effective_rps).min(self.limits.rpc_burst as f64);
+            s.refill_at = now;
+            let token_ready = if s.tokens >= 1.0 {
+                now
+            } else {
+                now + Duration::from_secs_f64((1.0 - s.tokens) / s.effective_rps)
+            };
+            let ready = token_ready
                 .max(s.next_workload[work.index()])
                 .max(s.cooldown);
             let cancelled = shutdown.is_some_and(|s| s.is_requested());
             if s.retry_after_overflow || cancelled || now >= deadline || ready >= deadline {
-                s.queue.retain(|t| *t != ticket);
+                s.queue.retain(|(t, _)| *t != ticket);
                 self.changed.notify_all();
                 return Err(if cancelled {
                     "RPC_ADMISSION_CANCELLED"
@@ -137,12 +197,52 @@ impl Budget {
                     "RPC_ADMISSION_BUDGET"
                 });
             }
-            if s.queue.front() == Some(&ticket) && s.active < 2 && now >= ready {
-                s.queue.pop_front();
+            if s.bytes >= self.limits.max_total_mib * 1024 * 1024 {
+                s.queue.retain(|(t, _)| *t != ticket);
+                self.changed.notify_all();
+                return Err("RPC_BYTE_BUDGET");
+            }
+            if s.requests >= self.limits.max_requests {
+                s.queue.retain(|(t, _)| *t != ticket);
+                self.changed.notify_all();
+                return Err("RPC_CALL_BUDGET");
+            }
+            // Reserve every eighth admission for the oldest waiter; otherwise
+            // prioritize health/state/simulation without starving reconciliation.
+            let selected = if s.requests % 8 == 7 {
+                s.queue.front().map(|(t, _)| *t)
+            } else {
+                s.queue
+                    .iter()
+                    .min_by_key(|(t, w)| {
+                        (
+                            match w {
+                                Workload::LiveRead | Workload::Simulation => 0,
+                                Workload::Bootstrap | Workload::Websocket => 1,
+                                _ => 2,
+                            },
+                            *t,
+                        )
+                    })
+                    .map(|(t, _)| *t)
+            };
+            if selected == Some(ticket)
+                && (s.active as u64) < self.limits.rpc_concurrency
+                && now >= ready
+            {
+                s.queue.retain(|(t, _)| *t != ticket);
                 s.active += 1;
                 s.requests += 1;
-                s.next_global = now + Duration::from_millis(200);
-                s.next_workload[work.index()] = now + work.spacing();
+                s.tokens -= 1.0;
+                let rate = match work {
+                    Workload::Bootstrap => self.limits.bootstrap_rps,
+                    Workload::LiveRead | Workload::Deployment => self.limits.hotpath_rps,
+                    Workload::Simulation => self.limits.simulation_rps,
+                    Workload::History => self.limits.history_rps,
+                    Workload::Winner => self.limits.analytics_rps,
+                    Workload::Websocket => self.limits.wss_rps,
+                };
+                s.next_workload[work.index()] = now + Duration::from_secs_f64(1.0 / rate as f64);
                 self.changed.notify_all();
                 return Ok(Permit {
                     budget: self.clone(),
@@ -157,12 +257,17 @@ impl Budget {
     pub fn rate_limited(&self, retry: Duration) {
         let mut s = self.state.lock().unwrap();
         s.rate_limits = s.rate_limits.saturating_add(1);
-        let backoff = Duration::from_secs(1u64 << s.rate_limits.min(5));
-        let circuit = if s.rate_limits >= 3 {
-            Duration::from_secs(60)
-        } else {
-            backoff
-        };
+        if self.adaptive {
+            s.effective_rps = (s.effective_rps / 2.0).max(1.0);
+            s.tokens = s.tokens.min(1.0);
+            s.successes = 0;
+        }
+        let circuit = Duration::from_millis(
+            self.limits
+                .rpc_backoff_ms
+                .saturating_mul(1u64 << s.rate_limits.min(20))
+                .min(self.limits.rpc_backoff_max_ms),
+        );
         let jitter = Duration::from_millis((s.requests.wrapping_mul(137)) % 251);
         // Never clamp a server's longer Retry-After to our local maximum.
         if let Some(until) = Instant::now().checked_add(retry.max(circuit + jitter)) {
@@ -172,9 +277,63 @@ impl Budget {
         }
         self.changed.notify_all();
     }
+    pub fn account_bytes(&self, bytes: usize) -> Result<(), &'static str> {
+        let mut s = self.state.lock().unwrap();
+        s.bytes = s.bytes.checked_add(bytes as u64).ok_or("RPC_BYTE_BUDGET")?;
+        if s.bytes > self.limits.max_total_mib * 1024 * 1024 {
+            return Err("RPC_BYTE_BUDGET");
+        }
+        Ok(())
+    }
+    pub fn degraded(&self) {
+        let mut s = self.state.lock().unwrap();
+        if self.adaptive {
+            s.effective_rps = (s.effective_rps / 2.0).max(1.0);
+            s.tokens = s.tokens.min(1.0);
+            s.successes = 0;
+        }
+        s.cooldown = s
+            .cooldown
+            .max(Instant::now() + Duration::from_millis(self.limits.rpc_backoff_ms));
+        self.changed.notify_all();
+    }
+    pub fn succeeded(&self) {
+        let mut s = self.state.lock().unwrap();
+        s.successes = s.successes.saturating_add(1);
+        if self.adaptive && s.successes >= 8 {
+            s.effective_rps = (s.effective_rps + 1.0).min(self.limits.rpc_rps as f64);
+            s.successes = 0;
+        }
+    }
     pub fn snapshot(&self) -> Value {
         let s = self.state.lock().unwrap();
-        serde_json::json!({"scope":"PROCESS_SOLANA_PROVIDER_ACCOUNT","requests":s.requests,"http_429_count":s.rate_limits,"in_flight":s.active,"queued":s.queue.len(),"max_rps":5,"max_concurrency":2,"quota_qualified":false})
+        serde_json::json!({"scope":"PROCESS_SOLANA_PROVIDER_ACCOUNT","requests":s.requests,"http_429_count":s.rate_limits,"in_flight":s.active,"queued":s.queue.len(),"max_rps":self.limits.rpc_rps,"effective_rps":s.effective_rps,"max_concurrency":self.limits.rpc_concurrency,"burst":self.limits.rpc_burst,"bytes":s.bytes,"quota_qualified":false})
+    }
+}
+/// Meter blocking read paths chunk-by-chunk against the same process budget.
+pub fn read_body(
+    mut reader: impl std::io::Read,
+    limit: u64,
+    budget: &Budget,
+) -> Result<Vec<u8>, &'static str> {
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let remaining = limit
+            .saturating_sub(bytes.len() as u64)
+            .saturating_add(1)
+            .min(chunk.len() as u64) as usize;
+        let n = reader
+            .read(&mut chunk[..remaining])
+            .map_err(|_| "RPC_BODY_READ")?;
+        if n == 0 {
+            return Ok(bytes);
+        }
+        budget.account_bytes(n)?;
+        if bytes.len() as u64 + n as u64 > limit {
+            return Err("RPC_BODY_LIMIT");
+        }
+        bytes.extend_from_slice(&chunk[..n]);
     }
 }
 pub fn retry_after(raw: Option<&str>, now: SystemTime) -> Duration {
@@ -225,7 +384,7 @@ pub fn observe_response(
     }
 }
 
-/// Only C0-E1 opts in; normal submission/client construction remains unchanged.
+/// C0-E1 and explicit operational profiles opt in. Legacy clients remain unchanged.
 pub fn rpc_client(
     url: String,
     timeout: Duration,
@@ -240,7 +399,14 @@ pub fn rpc_client(
             url,
             timeout,
             work,
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .connect_timeout(Duration::from_millis(
+                    crate::runtime_config::active()
+                        .limits
+                        .rpc_connect_timeout_ms,
+                ))
+                .build()
+                .expect("HTTP client configuration"),
             budget: shared(),
             stats: Mutex::new(RpcTransportStats::default()),
         },
@@ -278,12 +444,15 @@ impl RpcSender for BudgetedSender {
             stats: &self.stats,
             started: Instant::now(),
         };
-        let deadline = Instant::now() + self.timeout;
+        let deadline = Instant::now()
+            + self
+                .timeout
+                .min(Duration::from_millis(self.budget.limits.rpc_timeout_ms));
         // Repeating submission can spend funds. This transport never retries sendTransaction.
         let attempts = if request == RpcRequest::SendTransaction {
             1
         } else {
-            3
+            self.budget.limits.rpc_attempts
         };
         for attempt in 0..attempts {
             let work = self.work;
@@ -297,14 +466,44 @@ impl RpcSender for BudgetedSender {
                 return Err(rpc_error("RPC_REQUEST_BUDGET"));
             }
             self.stats.lock().unwrap().request_count += 1;
-            let mut response = self
+            let body = request.build_request_json(1, params.clone());
+            self.budget
+                .account_bytes(
+                    serde_json::to_vec(&body)
+                        .map_err(|_| rpc_error("RPC_ENCODE"))?
+                        .len(),
+                )
+                .map_err(rpc_error)?;
+            let config = &self.budget;
+            let endpoint = if config.fallback
+                && request != RpcRequest::SendTransaction
+                && config.rpc_endpoints.first() == Some(&self.url)
+            {
+                config
+                    .rpc_endpoints
+                    .get((attempt as usize).min(config.rpc_endpoints.len().saturating_sub(1)))
+                    .unwrap_or(&self.url)
+            } else {
+                &self.url
+            };
+            let response = self
                 .http
-                .post(&self.url)
+                .post(endpoint)
                 .timeout(remaining)
-                .json(&request.build_request_json(1, params.clone()))
+                .json(&body)
                 .send()
-                .await
-                .map_err(|_| rpc_error("RPC_TRANSPORT"))?;
+                .await;
+            let mut response = match response {
+                Ok(r) => r,
+                Err(_) => {
+                    self.budget.degraded();
+                    drop(permit);
+                    if attempt + 1 == attempts {
+                        return Err(rpc_error("RPC_TRANSPORT"));
+                    }
+                    continue;
+                }
+            };
             if !response.status().is_success() {
                 eprintln!(
                     "[PROVIDER/RPC] method={request} status={} workload={:?} attempt={}",
@@ -328,6 +527,13 @@ impl RpcSender for BudgetedSender {
                 continue;
             }
             if !response.status().is_success() {
+                if response.status().is_server_error() {
+                    self.budget.degraded();
+                    drop(permit);
+                    if attempt + 1 < attempts {
+                        continue;
+                    }
+                }
                 return Err(rpc_error("RPC_HTTP_ERROR"));
             }
             let mut bytes = Vec::new();
@@ -336,11 +542,9 @@ impl RpcSender for BudgetedSender {
                 .await
                 .map_err(|_| rpc_error("RPC_BODY_READ"))?
             {
+                self.budget.account_bytes(chunk.len()).map_err(rpc_error)?;
                 if bytes.len().saturating_add(chunk.len())
-                    > match self.work {
-                        Workload::Bootstrap => 512 * 1024 * 1024,
-                        _ => 64 * 1024 * 1024,
-                    }
+                    > (self.budget.limits.max_response_mib * 1024 * 1024) as usize
                 {
                     return Err(rpc_error("RPC_BODY_LIMIT"));
                 }
@@ -368,6 +572,7 @@ impl RpcSender for BudgetedSender {
                 }
                 .into());
             }
+            self.budget.succeeded();
             return value
                 .get_mut("result")
                 .map(Value::take)
@@ -386,6 +591,103 @@ impl RpcSender for BudgetedSender {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn configured_capacity_and_exhaustion_release_all_tickets() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.rpc_rps = 100;
+        c.limits.rpc_burst = 4;
+        c.limits.rpc_concurrency = 4;
+        c.limits.max_requests = 4;
+        let b = Arc::new(Budget::configured(&c));
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let permits = [
+            Workload::Bootstrap,
+            Workload::LiveRead,
+            Workload::Simulation,
+            Workload::Winner,
+        ]
+        .map(|w| b.acquire(w, deadline).unwrap());
+        assert_eq!(b.snapshot()["in_flight"], 4);
+        drop(permits);
+        assert!(matches!(
+            b.acquire(Workload::History, deadline),
+            Err("RPC_CALL_BUDGET")
+        ));
+        assert_eq!(b.snapshot()["queued"], 0);
+        let b = Arc::new(Budget::configured(&c));
+        assert_eq!(
+            b.account_bytes((c.limits.max_total_mib * 1024 * 1024 + 1) as usize),
+            Err("RPC_BYTE_BUDGET")
+        );
+        assert!(matches!(
+            b.acquire(Workload::History, deadline),
+            Err("RPC_BYTE_BUDGET")
+        ));
+        assert_eq!(b.snapshot()["requests"], 0);
+    }
+    #[test]
+    fn adaptive_recovery_is_bounded_and_keeps_provider_unknown() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.rpc_rps = 20;
+        let b = Budget::configured(&c);
+        b.rate_limited(Duration::ZERO);
+        assert_eq!(b.snapshot()["effective_rps"], 10.0);
+        for _ in 0..800 {
+            b.succeeded();
+        }
+        assert_eq!(b.snapshot()["effective_rps"], 20.0);
+        assert_eq!(b.snapshot()["quota_qualified"], false);
+        b.degraded();
+        assert_eq!(b.snapshot()["effective_rps"], 10.0);
+        assert_eq!(b.snapshot()["http_429_count"], 1);
+    }
+    #[test]
+    fn socket_capacity_is_local_bounded_and_released() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.wss_connections = 1;
+        c.limits.wss_subscriptions = 2;
+        let b = Arc::new(Budget::configured(&c));
+        assert!(matches!(b.acquire_socket(3), Err("WSS_SUBSCRIPTION_LIMIT")));
+        let lease = b.acquire_socket(2).unwrap();
+        assert!(matches!(b.acquire_socket(1), Err("WSS_CONNECTION_LIMIT")));
+        let other = Arc::new(Budget::configured(&c));
+        assert!(other.acquire_socket(1).is_ok());
+        drop(lease);
+        assert!(b.acquire_socket(2).is_ok());
+    }
+    #[test]
+    fn blocking_body_read_is_metered_and_bounded_before_json_decode() {
+        let b = Budget::default();
+        assert_eq!(
+            read_body(std::io::Cursor::new(b"12345"), 4, &b),
+            Err("RPC_BODY_LIMIT")
+        );
+        assert_eq!(b.snapshot()["bytes"], 5);
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.max_total_mib = 1;
+        let b = Budget::configured(&c);
+        assert_eq!(
+            read_body(std::io::repeat(0), 2 * 1024 * 1024, &b),
+            Err("RPC_BYTE_BUDGET")
+        );
+        assert!(b.snapshot()["bytes"].as_u64().unwrap() <= 1024 * 1024 + 8192);
+    }
+    #[test]
+    fn queue_backpressure_does_not_allocate_more_tickets() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.rpc_queue = 1;
+        let b = Arc::new(Budget::configured(&c));
+        b.state
+            .lock()
+            .unwrap()
+            .queue
+            .push_back((99, Workload::History));
+        assert!(matches!(
+            b.acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(1)),
+            Err("RPC_ADMISSION_QUEUE_FULL")
+        ));
+        assert_eq!(b.snapshot()["queued"], 1);
+    }
     #[test]
     fn retry_after_seconds_dates_and_invalid_are_safe() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(784111777);
@@ -482,6 +784,45 @@ mod http_tests {
             budget: Arc::new(Budget::default()),
             stats: Mutex::new(RpcTransportStats::default()),
         }
+    }
+    #[tokio::test]
+    async fn explicit_read_fallback_shares_budget_and_send_is_never_retried() {
+        let (primary, a) = server(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .into(),
+        );
+        let (backup,b)=server("HTTP/1.1 200 OK\r\nContent-Length: 36\r\nConnection: close\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":42}".into());
+        let mut config = crate::runtime_config::RuntimeConfig::default();
+        config.rpc_endpoints = vec![primary.clone(), backup];
+        config.fallback = true;
+        config.limits.rpc_backoff_ms = 1;
+        config.limits.rpc_rps = 100;
+        config.limits.simulation_rps = 100;
+        let mut s = sender(primary);
+        s.timeout = Duration::from_secs(2);
+        s.budget = Arc::new(Budget::configured(&config));
+        assert_eq!(
+            s.send(RpcRequest::GetSlot, serde_json::json!([]))
+                .await
+                .unwrap(),
+            42
+        );
+        assert_eq!(s.budget.snapshot()["requests"], 2);
+        a.join().unwrap();
+        b.join().unwrap();
+        let (url, t) = server(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .into(),
+        );
+        config.rpc_endpoints = vec![url.clone(), "http://127.0.0.1:1".into()];
+        let mut s = sender(url);
+        s.budget = Arc::new(Budget::configured(&config));
+        assert!(s
+            .send(RpcRequest::SendTransaction, serde_json::json!([]))
+            .await
+            .is_err());
+        assert_eq!(s.budget.snapshot()["requests"], 1);
+        t.join().unwrap();
     }
     #[tokio::test]
     async fn actual_http_429_blocks_other_workload_and_does_not_leak_body() {

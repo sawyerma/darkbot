@@ -60,7 +60,7 @@ impl ReconcileConfig {
             phase_max_secs: n(
                 "P0_MARKET_RECONCILE_PHASE_MAX_SECS",
                 d.phase_max_secs,
-                14_400,
+                u64::from(u32::MAX),
             )?,
             requests_per_second: n(
                 "P0_MARKET_RECONCILE_REQUESTS_PER_SECOND",
@@ -628,7 +628,7 @@ impl RequestPacer {
     pub(super) fn new(per_second: u64) -> Self {
         Self {
             next: std::sync::Mutex::new(Instant::now()),
-            interval: Duration::from_nanos(1_000_000_000 / per_second.clamp(1, 20)),
+            interval: Duration::from_nanos(1_000_000_000u64.div_ceil(per_second.max(1))),
         }
     }
     fn reserve(&self, now: Instant, deadline: Instant) -> Result<Duration, &'static str> {

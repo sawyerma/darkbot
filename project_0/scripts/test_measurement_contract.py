@@ -55,7 +55,7 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn('CLASSIC',cfg.report.types)
         self.assertEqual(cfg.report.markers,())
         self.assertEqual(cfg.report.related_types,('drift_claim_bad_debt',))
-        for kwargs in ({'rps':6},{'max_calls':100001},{'max_seconds':14401},{'max_ram_bytes':1}):
+        for kwargs in ({'rps':0},{'max_calls':-1},{'max_seconds':0},{'max_ram_bytes':False}):
             with self.assertRaises(c.ContractError):c.VerificationConfig(**kwargs).validate()
 
     def test_capture_mutation_and_disk_fail_closed(self):
