@@ -75,9 +75,9 @@ project_0/
 │   ├── MEASUREMENT_LEDGER.md         <- measurements / gates / decisions
 │   ├── FABLE_WORK_ORDER.md           <- historical implementation work order
 │   ├── FABLE_AUDIT_2026-10-03.md     <- prior audit record
-│   ├── P0_REUSE_MATRIX.md            <- upstream reuse decisions
 │   ├── R127C_CHANGELOG_ROLLBACK.md   <- R127c history / rollback
 │   ├── R127D_CHANGELOG_ROLLBACK.md   <- R127d history / rollback / correction
+│   ├── architecture/                 <- upstream reuse decisions, parallel execution design
 │   ├── measurements/
 │   │   ├── protocols/                <- P6-LT Shadow, C0-MO, C0-E1 econ4h protocols
 │   │   └── historical_reports/       <- FIX-129 cost, C0-E1 implementation/qualification reports
@@ -216,6 +216,15 @@ Directory: [docs/](docs/)
 | [MEASUREMENT_LEDGER.md](docs/MEASUREMENT_LEDGER.md) | Historical measurements, PASS/FAIL/OPEN decisions and evidence references. |
 | [R127D_CHANGELOG_ROLLBACK.md](docs/R127D_CHANGELOG_ROLLBACK.md) | R127d implementation, measured queue PASS, rollback points and post-audit correctness reopening. |
 
+### Architecture
+
+Directory: [docs/architecture/](docs/architecture/)
+
+| File | Purpose |
+|---|---|
+| [p0_reuse_matrix.md](docs/architecture/p0_reuse_matrix.md) | P0 reference study and upstream reuse/merge decisions (eva01, marginfi-v2). |
+| [parallel_execution_plan.md](docs/architecture/parallel_execution_plan.md) | Parallel execution design and MT0–MT10 sequence (baseline 2026-10-06). |
+
 ### Measurement protocols
 
 Directory: [docs/measurements/protocols/](docs/measurements/protocols/)
@@ -240,7 +249,6 @@ Directory: [docs/measurements/historical_reports/](docs/measurements/historical_
 | File | Purpose |
 |---|---|
 | [R127C_CHANGELOG_ROLLBACK.md](docs/R127C_CHANGELOG_ROLLBACK.md) | R127c batching implementation and rollback. |
-| [P0_REUSE_MATRIX.md](docs/P0_REUSE_MATRIX.md) | Reuse/source decisions. |
 | [FABLE_AUDIT_2026-10-03.md](docs/FABLE_AUDIT_2026-10-03.md) | Earlier audit snapshot; historical, not current status. |
 | [FABLE_WORK_ORDER.md](docs/FABLE_WORK_ORDER.md) | Earlier work order; historical unless referenced by current handoff. |
 
