@@ -10,7 +10,7 @@ It answers two questions:
 
 For the current engineering state and the exact next work order, start here:
 
-> **[Current Audit Handoff — 2026-10-05](docs/AUDIT_HANDOFF_2026-10-05.md)**
+> **[Current Audit Handoff — 2026-10-05](docs/development_history/audit_handoff_20261005.md)**
 
 ---
 
@@ -18,11 +18,11 @@ For the current engineering state and the exact next work order, start here:
 
 | Need | Canonical file / directory |
 |---|---|
-| Current status, blockers and exact next steps | **[docs/AUDIT_HANDOFF_2026-10-05.md](docs/AUDIT_HANDOFF_2026-10-05.md)** |
+| Current status, blockers and exact next steps | **[docs/development_history/audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md)** |
 | Authoritative production roadmap / architecture | [docs/PHASENPLAN.md](docs/PHASENPLAN.md) |
 | Measurements, gates and historical decisions | [docs/MEASUREMENT_LEDGER.md](docs/MEASUREMENT_LEDGER.md) |
-| Current R127d implementation / rollback / audit correction | [docs/R127D_CHANGELOG_ROLLBACK.md](docs/R127D_CHANGELOG_ROLLBACK.md) |
-| Previous R127c batching change / rollback | [docs/R127C_CHANGELOG_ROLLBACK.md](docs/R127C_CHANGELOG_ROLLBACK.md) |
+| Current R127d implementation / rollback / audit correction | [docs/development_history/r127d_changelog_rollback.md](docs/development_history/r127d_changelog_rollback.md) |
+| Previous R127c batching change / rollback | [docs/development_history/r127c_changelog_rollback.md](docs/development_history/r127c_changelog_rollback.md) |
 | Complete Astra audit findings | [docs/evidence/AUDIT_20261005/AUDIT_FINDINGS.md](docs/evidence/AUDIT_20261005/AUDIT_FINDINGS.md) |
 | Exact audit commands and results | [docs/evidence/AUDIT_20261005/COMMANDS_AND_RESULTS.md](docs/evidence/AUDIT_20261005/COMMANDS_AND_RESULTS.md) |
 | Complete preserved Astra audit bundle | [docs/evidence/AUDIT_20261005/darkbot_audit_bundle_20261005.zip](docs/evidence/AUDIT_20261005/darkbot_audit_bundle_20261005.zip) |
@@ -46,10 +46,10 @@ When resuming Project 0 after a break, audit, model switch or handoff, read in t
 
 ```text
 1. project_0/README.md
-2. project_0/docs/AUDIT_HANDOFF_2026-10-05.md
+2. project_0/docs/development_history/audit_handoff_20261005.md
 3. project_0/docs/MEASUREMENT_LEDGER.md
 4. project_0/docs/PHASENPLAN.md
-5. project_0/docs/R127D_CHANGELOG_ROLLBACK.md
+5. project_0/docs/development_history/r127d_changelog_rollback.md
 6. project_0/docs/evidence/AUDIT_20261005/AUDIT_FINDINGS.md
 7. project_0/docs/evidence/AUDIT_20261005/COMMANDS_AND_RESULTS.md
 8. relevant production source under project_0/native/
@@ -70,19 +70,16 @@ project_0/
 │
 ├── docs/                             <- human-readable Project 0 documentation
 │   ├── README.md
-│   ├── AUDIT_HANDOFF_2026-10-05.md  <- CURRENT STATUS + NEXT WORK
 │   ├── PHASENPLAN.md                 <- authoritative production plan
 │   ├── MEASUREMENT_LEDGER.md         <- measurements / gates / decisions
-│   ├── FABLE_WORK_ORDER.md           <- historical implementation work order
-│   ├── FABLE_AUDIT_2026-10-03.md     <- prior audit record
-│   ├── R127C_CHANGELOG_ROLLBACK.md   <- R127c history / rollback
-│   ├── R127D_CHANGELOG_ROLLBACK.md   <- R127d history / rollback / correction
 │   ├── architecture/                 <- upstream reuse decisions, parallel execution design
 │   ├── operations/                   <- operational configuration: profiles, precedence, budgets
 │   ├── qualification/                <- qualification / gate documentation index
 │   ├── measurements/
 │   │   ├── protocols/                <- P6-LT Shadow, C0-MO, C0-E1 econ4h protocols
 │   │   └── historical_reports/       <- FIX-129 cost, C0-E1 implementation/qualification reports
+│   ├── development_history/          <- audit handoff (CURRENT STATUS + NEXT WORK), audits, work order,
+│   │                                    R127c/R127d changelogs and rollback
 │   └── evidence/                     <- IMMUTABLE versioned evidence
 │       ├── AUDIT_20261005/           <- complete Astra audit corpus
 │       ├── R114_*.json
@@ -212,10 +209,10 @@ Directory: [docs/](docs/)
 
 | File | Purpose |
 |---|---|
-| **[AUDIT_HANDOFF_2026-10-05.md](docs/AUDIT_HANDOFF_2026-10-05.md)** | Current state, open blockers, economic verdict, ordered next work. **Read first.** |
+| **[audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md)** | Current state, open blockers, economic verdict, ordered next work. **Read first.** |
 | [PHASENPLAN.md](docs/PHASENPLAN.md) | Long-term production architecture, phases and constraints. |
 | [MEASUREMENT_LEDGER.md](docs/MEASUREMENT_LEDGER.md) | Historical measurements, PASS/FAIL/OPEN decisions and evidence references. |
-| [R127D_CHANGELOG_ROLLBACK.md](docs/R127D_CHANGELOG_ROLLBACK.md) | R127d implementation, measured queue PASS, rollback points and post-audit correctness reopening. |
+| [r127d_changelog_rollback.md](docs/development_history/r127d_changelog_rollback.md) | R127d implementation, measured queue PASS, rollback points and post-audit correctness reopening. |
 
 ### Architecture
 
@@ -261,13 +258,17 @@ Directory: [docs/measurements/historical_reports/](docs/measurements/historical_
 | [fix129_cost_qualification.md](docs/measurements/historical_reports/fix129_cost_qualification.md) | FIX-129 cost-model qualification history (2026-10-05). |
 | [c0e1_implementation_report.md](docs/measurements/historical_reports/c0e1_implementation_report.md) | C0-E1 implementation, validation and qualification history (2026-10-08 to 2026-10-12). |
 
-### Historical / supporting
+### Development history
+
+Directory: [docs/development_history/](docs/development_history/)
 
 | File | Purpose |
 |---|---|
-| [R127C_CHANGELOG_ROLLBACK.md](docs/R127C_CHANGELOG_ROLLBACK.md) | R127c batching implementation and rollback. |
-| [FABLE_AUDIT_2026-10-03.md](docs/FABLE_AUDIT_2026-10-03.md) | Earlier audit snapshot; historical, not current status. |
-| [FABLE_WORK_ORDER.md](docs/FABLE_WORK_ORDER.md) | Earlier work order; historical unless referenced by current handoff. |
+| [audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md) | Post-audit handoff (2026-10-05, P6-MT override 2026-10-07); see "Current / authoritative". |
+| [r127d_changelog_rollback.md](docs/development_history/r127d_changelog_rollback.md) | R127d candidate cache / re-arm change, rollback and audit correction; see "Current / authoritative". |
+| [r127c_changelog_rollback.md](docs/development_history/r127c_changelog_rollback.md) | R127c batching implementation and rollback. |
+| [fable_audit_20261003.md](docs/development_history/fable_audit_20261003.md) | Earlier audit snapshot; historical, not current status. |
+| [fable_work_order.md](docs/development_history/fable_work_order.md) | Earlier work order; historical unless referenced by current handoff. |
 
 ---
 
@@ -418,7 +419,7 @@ Public addresses and non-secret configuration may be versioned when useful.
 
 The current canonical status is maintained in:
 
-> [docs/AUDIT_HANDOFF_2026-10-05.md](docs/AUDIT_HANDOFF_2026-10-05.md)
+> [docs/development_history/audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md)
 
 At the time this repository map was written:
 
@@ -539,8 +540,8 @@ archive/project0-audit-baseline-20261005
 
 Use the changelog/rollback documents before reverting runtime behavior:
 
-- [R127C_CHANGELOG_ROLLBACK.md](docs/R127C_CHANGELOG_ROLLBACK.md)
-- [R127D_CHANGELOG_ROLLBACK.md](docs/R127D_CHANGELOG_ROLLBACK.md)
+- [r127c_changelog_rollback.md](docs/development_history/r127c_changelog_rollback.md)
+- [r127d_changelog_rollback.md](docs/development_history/r127d_changelog_rollback.md)
 
 ---
 
