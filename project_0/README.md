@@ -76,11 +76,11 @@ project_0/
 │   ├── FABLE_WORK_ORDER.md           <- historical implementation work order
 │   ├── FABLE_AUDIT_2026-10-03.md     <- prior audit record
 │   ├── P0_REUSE_MATRIX.md            <- upstream reuse decisions
-│   ├── FIX_129_COST_QUALIFICATION.md <- cost-qualification documentation
 │   ├── R127C_CHANGELOG_ROLLBACK.md   <- R127c history / rollback
 │   ├── R127D_CHANGELOG_ROLLBACK.md   <- R127d history / rollback / correction
 │   ├── measurements/
-│   │   └── protocols/                <- P6-LT Shadow, C0-MO, C0-E1 econ4h protocols
+│   │   ├── protocols/                <- P6-LT Shadow, C0-MO, C0-E1 econ4h protocols
+│   │   └── historical_reports/       <- FIX-129 cost, C0-E1 implementation/qualification reports
 │   └── evidence/                     <- IMMUTABLE versioned evidence
 │       ├── AUDIT_20261005/           <- complete Astra audit corpus
 │       ├── R114_*.json
@@ -226,12 +226,20 @@ Directory: [docs/measurements/protocols/](docs/measurements/protocols/)
 | [c0mo_market_observer.md](docs/measurements/protocols/c0mo_market_observer.md) | C0-MO unfiltered read-only market observer. |
 | [c0e1_econ4h.md](docs/measurements/protocols/c0e1_econ4h.md) | C0-E1 combined economic observation (`P0_MODE=econ4h`). |
 
+### Historical measurement reports
+
+Directory: [docs/measurements/historical_reports/](docs/measurements/historical_reports/)
+
+| File | Purpose |
+|---|---|
+| [fix129_cost_qualification.md](docs/measurements/historical_reports/fix129_cost_qualification.md) | FIX-129 cost-model qualification history (2026-10-05). |
+| [c0e1_implementation_report.md](docs/measurements/historical_reports/c0e1_implementation_report.md) | C0-E1 implementation, validation and qualification history (2026-10-08 to 2026-10-12). |
+
 ### Historical / supporting
 
 | File | Purpose |
 |---|---|
 | [R127C_CHANGELOG_ROLLBACK.md](docs/R127C_CHANGELOG_ROLLBACK.md) | R127c batching implementation and rollback. |
-| [FIX_129_COST_QUALIFICATION.md](docs/FIX_129_COST_QUALIFICATION.md) | Cost-model qualification history. |
 | [P0_REUSE_MATRIX.md](docs/P0_REUSE_MATRIX.md) | Reuse/source decisions. |
 | [FABLE_AUDIT_2026-10-03.md](docs/FABLE_AUDIT_2026-10-03.md) | Earlier audit snapshot; historical, not current status. |
 | [FABLE_WORK_ORDER.md](docs/FABLE_WORK_ORDER.md) | Earlier work order; historical unless referenced by current handoff. |

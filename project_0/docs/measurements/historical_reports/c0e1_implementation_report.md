@@ -7,7 +7,7 @@ Existing state/recovery/economics/ObserveOnly paths reused. No Mainnet measureme
 or submission performed. P4–P6 and provider qualification remain OPEN.
 
 Evidence, exact commands, known limits and consumer inventory:
-[`evidence/C0E1_P2_20261012/README.md`](evidence/C0E1_P2_20261012/README.md).
+[`docs/evidence/C0E1_P2_20261012/README.md`](../../evidence/C0E1_P2_20261012/README.md).
 Current resume status: `MEASUREMENT_LEDGER.md` (P2 entry at the top).
 
 ---
@@ -1454,7 +1454,7 @@ allocation into its vault-authority ATA and sweeps to the global fee wallet. Its
 pays costs and receives no account-liquidation profit. Forced Deleverage and Bankruptcy
 remain separately counted administrative settlement. The full exported instruction
 namespace of pin 33c67987... is inventoried and unknown successful opcodes fail closed.
-Source file hashes and namespace: evidence/C0E1_CANONICAL_FINAL_20261010/source_path_inventory.json.
+Source file hashes and namespace: docs/evidence/C0E1_CANONICAL_FINAL_20261010/source_path_inventory.json.
 
 Deployment qualification uses the existing 0.1.11 upgrade-watch reference ProgramData
 hash H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f, checked via finalized reads before
