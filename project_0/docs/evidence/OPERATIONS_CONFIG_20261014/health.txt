@@ -1,0 +1,547 @@
+   Compiling darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-solana)
+   Compiling darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-project0)
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-runner)
+warning: field `commitment` is never read
+    --> crates/darkbot-runner/src/market_observer.rs:2257:5
+     |
+2254 | struct RpcFetcher {
+     |        ---------- field in this struct
+...
+2257 |     commitment: &'static str,
+     |     ^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `get_transaction` is never used
+    --> crates/darkbot-runner/src/market_observer.rs:2275:8
+     |
+2260 | impl RpcFetcher {
+     | --------------- method in this implementation
+...
+2275 |     fn get_transaction(&self, signature: &str) -> Result<Option<Value>, String> {
+     |        ^^^^^^^^^^^^^^^
+
+warning: enum `GapSlot` is never used
+  --> crates/darkbot-runner/src/market_gap.rs:97:17
+   |
+97 | pub(super) enum GapSlot {
+   |                 ^^^^^^^
+
+warning: type alias `SlotFetcher` is never used
+   --> crates/darkbot-runner/src/market_gap.rs:107:6
+    |
+107 | type SlotFetcher<'a> = dyn FnMut(u64, Duration) -> Result<GapSlot, &'static str> + 'a;
+    |      ^^^^^^^^^^^
+
+warning: methods `recover_gaps`, `recover_block`, and `gap_recovery_phase` are never used
+   --> crates/darkbot-runner/src/market_gap.rs:202:19
+    |
+109 | impl ObserverCore {
+    | ----------------- methods in this implementation
+...
+202 |     pub(super) fn recover_gaps(
+    |                   ^^^^^^^^^^^^
+...
+322 |     fn recover_block(
+    |        ^^^^^^^^^^^^^
+...
+464 |     pub(super) fn gap_recovery_phase(
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: methods `gap_request` and `gap_slot` are never used
+   --> crates/darkbot-runner/src/market_gap.rs:504:19
+    |
+502 | impl RpcFetcher {
+    | --------------- methods in this implementation
+503 |     /// Bounded JSON body and sanitized error codes; no provider text or endpoint escapes.
+504 |     pub(super) fn gap_request(
+    |                   ^^^^^^^^^^^
+...
+574 |     fn gap_slot(
+    |        ^^^^^^^^
+
+warning: method `full_reconciliation_phase` is never used
+   --> crates/darkbot-runner/src/market_reconcile.rs:480:19
+    |
+182 | impl ObserverCore {
+    | ----------------- method in this implementation
+...
+480 |     pub(super) fn full_reconciliation_phase(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `read_ahead_block` is never used
+   --> crates/darkbot-runner/src/market_reconcile.rs:538:4
+    |
+538 | fn read_ahead_block<F>(
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `prefetch_blocks` is never used
+   --> crates/darkbot-runner/src/market_reconcile.rs:570:4
+    |
+570 | fn prefetch_blocks<F>(slots: &[u64], fetch: &F) -> BTreeMap<u64, Result<Value, &'static str>>
+    |    ^^^^^^^^^^^^^^^
+
+warning: method `gap_recovery_phase` is never used
+   --> crates/darkbot-runner/src/market_gap.rs:464:19
+    |
+109 | impl ObserverCore {
+    | ----------------- method in this implementation
+...
+464 |     pub(super) fn gap_recovery_phase(
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: `darkbot-runner` (lib) generated 9 warnings
+warning: `darkbot-runner` (lib test) generated 5 warnings (4 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.93s
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_common-84f89d61913e24bf)
+
+running 26 tests
+test channel::tests::overflow_is_explicit_and_returns_element ... ok
+test channel::tests::disconnect_is_reported ... ok
+test histogram::tests::empty_is_none_not_zero ... ok
+test histogram::tests::index_and_upper_are_consistent ... ok
+test error::tests::display_carries_reason_and_detail ... ok
+test config::tests::parsed_or_uses_explicit_default_and_rejects_garbage ... ok
+test config::tests::missing_is_error_not_default ... ok
+test histogram::tests::merge_keeps_extremes ... ok
+test journal::tests::append_and_replay_in_order ... ok
+test histogram::tests::percentiles_are_conservative_and_bounded ... ok
+test journal::tests::gap_is_rejected ... ok
+test lifecycle::tests::bootstrapping_is_not_tradable ... ok
+test lifecycle::tests::halted_keeps_first_reason_and_needs_explicit_recovery ... ok
+test lifecycle::tests::shutdown_flag ... ok
+test mt0::tests::error_classification_separates_429_timeout_and_other ... ok
+test mt0::tests::long_running_section_is_visible_before_it_ends ... ok
+test mt0::tests::histogram_is_deterministic_bounded_and_conservative ... ok
+test mt0::tests::remote_classes_and_outcomes_are_separate ... ok
+test timing::tests::clock_is_monotonic ... ok
+test timing::tests::stage_names_are_ledger_vocabulary ... ok
+test timing::tests::timeline_intervals_and_no_overwrite ... ok
+test timing::tests::timeline_rejects_negative_interval ... ok
+test mt0::tests::owner_sections_sum_to_elapsed_time ... ok
+test mt0::tests::trigger_mapping_and_health_counters_count_actual_calls ... ok
+test mt0::tests::unmeasured_metrics_are_marked_not_zero_and_snapshot_is_bounded ... ok
+test channel::tests::pop_timeout_returns_none_on_empty ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_project0-4038e8499495edd7)
+
+running 61 tests
+test economics::tests::exact_rpc_fee_qualifies_only_rpc_scenarios ... ok
+test economics::tests::funding_class_is_not_a_hardcoded_preference ... ok
+test economics::tests::equal_net_prefers_capital_efficiency ... ok
+test economics::tests::premium_curve_matches_release_notes ... ok
+test economics::tests::seize_bound_from_source ... ok
+test economics::tests::t_profitable_solver ... ok
+test economics::tests::ranking_by_net_then_capital_efficiency ... ok
+test economics::tests::time_for_premium_inverts_curve ... ok
+test economics::tests::unknown_cost_is_not_zero ... ok
+test economics::tests::unknown_realizable_value_is_unknown ... ok
+test execution::tests::freshness_route_fee ... ok
+test execution::tests::gates ... ok
+test funding::tests::emits_all_feasible_candidates_instead_of_picking_one ... ok
+test execution::tests::backoff_grows_and_drops ... ok
+test execution::tests::quarantine_expires ... ok
+test funding::tests::inventory_classes_do_not_require_market_route ... ok
+test funding::tests::jit_is_only_shortfall_fallback ... ok
+test funding::tests::no_route_no_inventory_means_no_candidate ... ok
+test health::threshold_search_tests::first_true_boundary_expands_above_current ... ok
+test health::threshold_search_tests::first_true_boundary_finds_exact_integer_crossing ... ok
+test health::threshold_search_tests::first_true_boundary_propagates_fail_closed_error ... ok
+test index::tests::reverse_index_fanout_and_replacement ... ok
+test index::tests::threshold_crossings_only_wake_newly_endangered_accounts ... ok
+test index::tests::threshold_lookup_both_sides ... ok
+test integration::tests::pinned_refresh_discriminators_match_expected ... ok
+test planner::tests::bundle_rules ... ok
+test planner::tests::end_must_be_last_without_exception ... ok
+test planner::tests::no_swap_plan_rejects_swap_and_requires_repay ... ok
+test planner::tests::non_allowlisted_swap_and_paid_route ... ok
+test planner::tests::valid_swap_plan ... ok
+test prepared::tests::exact_key_or_rebuild ... ok
+test projection::tests::delayed_evaluation_uses_exact_simulation_clock_for_both_venues ... ok
+test projection::tests::empty_and_zero_slot_projection_fail_closed ... ok
+test projection::tests::negative_simulation_timestamp_fails_closed ... ok
+test projection::tests::non_projected_account_falls_through_to_base ... ok
+test projection::tests::projected_account_overrides_base_without_mutating_it ... ok
+test projection::tests::writable_refresh_accounts_are_canonical_projection_targets ... ok
+test protocol::tests::classify_and_layouts ... ok
+test receivership::builders::repay_all_tests::partial_repay_does_not_append_health_observation ... ok
+test receivership::builders::repay_all_tests::repay_all_carries_observation_accounts ... ok
+test receivership::builders::repay_all_tests::classic_withdraw_does_not_append_mint ... ok
+test receivership::builders::repay_all_tests::token_2022_repay_includes_mint_before_repay_all_observation ... ok
+test protocol::tests::pdas_are_deterministic ... ok
+test safety::tests::limits_and_halts ... ok
+test safety::tests::live_disabled_and_day_roll ... ok
+test safety::tests::preview_does_not_reserve_capital ... ok
+test safety::tests::unknown_outcome_keeps_hold_until_complete_reconciliation ... ok
+test schedule::tests::premium_boundary_math ... ok
+test sizing::tests::closeout_threshold_matches_protocol_units ... ok
+test schedule::tests::scheduler_orders_and_invalidates ... ok
+test receivership::builders::repay_all_tests::token_2022_withdraw_includes_mint_before_observation ... ok
+test sizing::tests::drift_sizing_roundtrip_uses_scaled_balance_decimals ... ok
+test sizing::tests::headroom_is_below_boundary ... ok
+test sizing::tests::integer_conversions_are_conservative ... ok
+test sizing::tests::near_full_rounding_uses_source_backed_repay_all ... ok
+test sizing::tests::normal_and_closeout_bounds_are_distinct ... ok
+test sizing::tests::ordinary_partial_repay_semantics_are_unchanged ... ok
+test sizing::tests::r121_pair_heals_below_maximum_premium ... ok
+test sizing::tests::repay_all_matches_protocol_opposite_dust_boundary ... ok
+test sizing::tests::repay_all_never_clamps_a_target_above_full_transfer ... ok
+test sizing::tests::rounded_health_keeps_normal_boundary_and_closeout_exception ... ok
+
+test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_runner-3add95fb645c5672)
+
+running 210 tests
+test builder::p0::fix100_tests::p1c_quote_profitable_floor_unprofitable_is_not_actionable ... ok
+test builder::p0::fix100_tests::repay_all_removes_closed_bank_only_from_end_layout ... ok
+test builder::p0::fix100_tests::liquidation_record_link_controls_init ... ok
+test builder::p0::fix100_tests::p1c_zero_prefund_feasibility_uses_floor_not_quote ... ok
+test builder::p0::fix100_tests::missing_floor_production_path_is_unknown_and_never_actionable ... ok
+test builder::p0::fix100_tests::non_budget_errors_are_not_retried ... ok
+test econ::canonical::regression::same_slot_same_pair_ambiguous_but_distinct_pair_resolves ... ok
+test econ::canonical::regression::race_same_slot_never_proves_win_and_backfill_has_no_fake_margin ... ok
+test econ::canonical::regression::exact_identity_and_chain_episode_prevent_cross_event_allocation ... ok
+test builder::p0::fix100_tests::route_budget_counts_payer_and_resource_accounts_too ... ok
+test builder::p0::fix100_tests::impossible_route_exhausts_bounded_budget_and_fails_closed ... ok
+test builder::p0::fix100_tests::route_requotes_until_actual_serialized_transaction_fits ... ok
+test econ::canonical::regression::transaction_fee_dedup_unknown_costs_and_loss_dollars ... ok
+test econ::canonical::regression::capital_uses_full_production_budget_and_excludes_admin ... ok
+test econ::tests::absent_sign_winner_market_and_ambiguous_identity_fail_closed ... ok
+test econ::tests::all_loss_reasons_are_retained_exactly ... ok
+test econ::tests::actual_shadow_pipeline_builds_signs_simulates_and_never_submits ... ok
+test econ::canonical::tests::missing_values_have_no_zero_total ... ok
+test econ::canonical::regression::unknown_identity_and_old_records_never_become_known_economics ... ok
+test econ::tests::config_requires_four_snapshots_and_live_disabled ... ok
+test econ::tests::backfill_preserves_chain_race_but_never_live_rx_or_speedup ... ok
+test econ::tests::economics_input_and_profit_capital_preserved ... ok
+test econ::tests::every_default_capital_boundary_includes_reserve ... ok
+test econ::tests::identity_mismatch_never_yields_timing ... ok
+test econ::tests::duplicate_winner_at_capacity_does_not_lose_evidence ... ok
+test econ::tests::counters_use_event_receive_hour_even_if_processed_after_boundary ... ok
+test econ::tests::small_sample_percentiles_and_missing_intervals ... ok
+test econ::tests::early_end_missing_snapshot_upgrade_and_writer_failures_are_incomplete ... ok
+test econ::tests::bounded_queue_and_retention_overflow_fail_qualification ... ok
+test econ::canonical::regression::journal_replay_preserves_earliest_signed_record_and_hourly_final_reconcile ... ok
+test econ::tests::empty_measurement_or_recovery_after_start_cannot_pass ... ok
+test econ::tests::shared_clock_preserves_origin_across_producers ... ok
+test econ::tests::unique_winner_slot_classes_and_signed_margins ... ok
+test econ::tests::atomic_writer_only_exposes_whole_json ... ok
+test econ::tests::unknown_capital_does_not_remove_market_match ... ok
+test econ::tests::unknown_costs_and_economics_remain_null ... ok
+test econ::tests::zero_prefund_does_not_erase_fees_and_unknown_budget_is_not_fundable ... ok
+test fixture::run::tests::all_close_fixture_omits_both_closed_banks_from_end ... ok
+test lookup_tables::tests::extension_slot_only_exposes_old_prefix ... ok
+test lookup_tables::tests::invalid_and_deactivating_tables_are_excluded ... ok
+test econ::tests::simulation_bottleneck_and_unknown_edge_not_fabricated ... ok
+test lookup_tables::tests::tables_reduce_compiled_size_and_merge_preserves_canonical_indices ... ok
+test market_observer::paths::tests::upgrade_or_missing_proof_never_qualifies ... ok
+test market_observer::reconcile::pacing_tests::concurrent_reservations_are_spaced_and_deadline_is_hard ... ok
+test market_observer::reconcile::pacing_tests::transient_rpc_backoff_is_bounded ... ok
+test market_observer::reconcile::prefetch_tests::bounded_fetch_keeps_slot_identity_and_errors ... ok
+test market_observer::reconcile::pacing_tests::failed_prefetched_slot_retries_alone_without_extending_batch ... ok
+test market_observer::tests::backfill_never_runs_during_capture_and_limits_fail_closed ... ok
+test market_observer::paths::tests::instruction_namespace_is_unique_and_unknown_fails_closed ... ok
+test market_observer::tests::backfill_uses_loaded_addresses_and_rejects_missing_loaded_view ... ok
+test market_observer::tests::backfilled_non_liquidation_and_failed_transaction_do_not_create_event ... ok
+test econ::tests::winner_without_live_observation_is_visible_and_not_race_qualified ... ok
+test market_observer::tests::data_from_another_program_is_never_counted ... ok
+test market_observer::tests::backfilled_truncated_mismatch_fails_closed ... ok
+test market_observer::tests::cutoff_counts_queued_events_received_before_and_rejects_events_after ... ok
+test market_observer::tests::decodes_valid_receiver_event ... ok
+test market_observer::tests::decoder_error_in_successful_transaction_blocks_valid ... ok
+test market_observer::tests::confirmed_skipped_slot_is_not_false_failure ... ok
+test market_observer::tests::complete_canonical_window_is_authority_despite_transport_gap_telemetry ... ok
+test market_observer::tests::duplicate_backfill_does_not_double_count_and_restores_market_gross_edge ... ok
+test market_observer::tests::duplicate_signature_counts_once ... ok
+test econ::tests::strong_join_unmatched_diagnostics_and_speedup_math ... ok
+test market_observer::tests::events_before_observation_are_not_counted ... ok
+test econ::tests::market_rpc_barrier_waits_for_shadow_and_rejects_failed_shadow ... ok
+test market_observer::tests::duplicate_live_and_backfilled_signature_counted_once ... ok
+test market_observer::tests::explicit_ws_url_overrides_helius_derived_url ... ok
+test market_observer::tests::enrichment_budget_identity_and_queue_limits_are_explicit ... ok
+test market_observer::tests::failed_transaction_is_recorded_but_not_a_liquidation ... ok
+test market_observer::tests::failed_transaction_does_not_create_liquidation ... ok
+test market_observer::tests::full_slot_cannot_run_in_capture_or_without_boundaries ... ok
+test econ::tests::semantic_overflow_and_corrupt_journal_fail_closed ... ok
+test econ::tests::startup_barrier_never_starts_clock_on_timeout_or_failed_shadow ... ok
+test market_observer::tests::five_hundred_slot_recovery_is_streamed_and_bounded ... ok
+test market_observer::tests::full_slot_skipped_slots_require_finalized_parent_proof_including_tail ... ok
+test market_observer::tests::full_slot_missing_produced_block_cannot_masquerade_as_skipped ... ok
+test market_observer::tests::full_slot_live_duplicate_still_validates_instruction_event_parity ... ok
+test market_observer::tests::full_slot_repeat_and_live_duplicate_do_not_double_count ... ok
+test market_observer::tests::full_slot_every_produced_block_and_transaction_are_scanned ... ok
+test market_observer::tests::full_slot_unproven_tail_rpc_failure_and_future_window_fail_closed ... ok
+test market_observer::tests::gap_before_stream_ready_is_recorded_but_not_counted ... ok
+test market_observer::tests::full_transaction_checks_loaded_address_counts_even_when_present ... ok
+test market_observer::tests::full_transaction_rejects_unsupported_version_and_bad_inner_index ... ok
+test market_observer::tests::live_nonreceiver_corrupt_known_event_fails_closed ... ok
+test market_observer::tests::gap_without_post_reconnect_slot_or_from_slot_fails_closed ... ok
+test market_observer::tests::full_window_proof_recovers_contained_gap_without_refetch ... ok
+test market_observer::tests::ingress_overflow_makes_data_incomplete ... ok
+test market_observer::tests::gap_then_reconnect_then_slot_closes_range ... ok
+test market_observer::tests::gap_boundary_slots_are_included_and_complete_backfill_restores_coverage ... ok
+test market_observer::tests::live_nonreceiver_events_ignore_foreign_emitter ... ok
+test market_observer::tests::market_ws_config_enables_heartbeat_and_shadow_default_does_not ... ok
+test market_observer::tests::enrichment_init_failure_still_produces_summary_and_report ... ok
+test market_observer::tests::market_config_needs_no_keypair_and_validates_source_and_commitment ... ok
+test market_observer::tests::multiple_gaps_are_independent ... ok
+test market_observer::tests::live_nonreceiver_events_reuse_existing_canonical_decoder ... ok
+test market_observer::tests::non_truncated_existing_behavior_unchanged ... ok
+test market_observer::tests::finalize_writes_summary_report_and_unenriched_rows ... ok
+test market_observer::tests::p2_failure_after_ack_invalidates_pending_restoration ... ok
+test market_observer::tests::logs_capture_never_fetches_and_enrichment_runs_after_capture ... ok
+test market_observer::tests::quantiles_are_nearest_rank ... ok
+test market_observer::tests::short_non_finite_or_undecodable_marginfi_data_is_a_decoder_error ... ok
+test market_observer::tests::logs_without_rpc_url_still_reaches_finalize_and_report ... ok
+test market_observer::tests::slot_telemetry_frames_measure_stream_silence ... ok
+test market_observer::tests::transactions_with_helius_key_uses_enhanced_mainnet_endpoint ... ok
+test market_observer::tests::missing_block_rpc_error_timeout_and_pruned_keep_gap_unrecovered ... ok
+test market_observer::tests::truncated_fetch_failure_or_wrong_transaction_fail_closed ... ok
+test market_observer::tests::market_mode_has_no_signing_simulation_or_submission_path ... ok
+test market_observer::tests::transport_recovery_is_not_full_market_truth_under_master_contract ... ok
+test market_observer::tests::truncated_logs_are_flagged ... ok
+test market_observer::tests::p4_timer_finalizes_locally_without_verification_rpc ... ok
+test market_observer::tests::truncated_logs_with_exact_instruction_event_parity_can_be_qualified ... ok
+test market_observer::tests::truncated_logs_missing_liquidation_event_fail_closed ... ok
+test market_observer::tests::truncated_logs_with_no_end_liquidation_can_be_qualified ... ok
+test market_observer::tests::truncated_missing_loaded_addresses_fail_closed ... ok
+test market_observer::tests::p2_abort_writes_incomplete_report_and_never_enters_verification_rpc ... ok
+test market_observer::tests::truncated_logs_wrong_target_or_receiver_fail_closed ... ok
+test market_observer::tests::truncated_v0_loaded_addresses_are_resolved ... ok
+test market_observer::tests::truth_classic_decodes_native_amount_and_liability_deposit_cost ... ok
+test market_observer::tests::truth_aggregate_all_types_preserves_known_and_unknown ... ok
+test market_observer::tests::truth_foreign_emitter_and_failed_cpi_never_produce_liquidation ... ok
+test market_observer::tests::six_real_audit_liquidations_decode_enrich_and_verify_identity ... ok
+test market_observer::tests::truth_classic_failed_normal_and_mismatched_events ... ok
+test market_observer::tests::truth_priority_uses_requested_limit_not_consumed_units ... ok
+test market_observer::tests::p2_527_failures_coalesce_without_losing_raw_evidence_or_claiming_recovery ... ok
+test market_observer::tests::truth_deleverage_and_bankruptcy_are_separate_from_permissionless_profit ... ok
+test market_observer::tests::truth_classic_loaded_program_and_cpi_are_resolved ... ok
+test market_observer::tests::utc_formatting ... ok
+test market_observer::tests::truth_multiple_classic_events_in_one_transaction_are_not_collapsed ... ok
+test market_observer::tests::v0_loaded_addresses_resolve_receiver_and_lookups_without_loaded_are_unknown ... ok
+test market_observer::tests::wrong_discriminator_is_not_a_liquidation_event ... ok
+test market_observer::tests::two_events_in_one_transaction_keep_distinct_indices ... ok
+test market_observer::tests::unverified_sources_never_yield_market_data_valid ... ok
+test measurement::operational_window_tests::bootstrap_does_not_consume_capture_and_reconnect_does_not_extend_it ... ok
+test market_observer::tests::verdicts_by_source_and_without_liquidations ... ok
+test measurement::tests::bootstrap_does_not_consume_capture_budget ... ok
+test market_observer::tests::truth_mixed_real_receiver_and_source_classic_preserves_event_order ... ok
+test market_observer::tests::six_real_audit_liquidations_aggregate_into_market_summary ... ok
+test measurement::tests::legacy_conflicts_and_tampered_plan_fail_closed ... ok
+test measurement::tests::durations_and_exact_quarters ... ok
+test market_observer::tests::truth_receivership_reuses_six_real_f8_fixtures ... ok
+test measurement::tests::reject_invalid_duration ... ok
+test one_shot::receipts::tests::account_creation_close_and_loaded_keys_require_balance_evidence ... ok
+test one_shot::receipts::tests::finalized_success_and_revert_preserve_actual_fees_and_integer_deltas ... ok
+test one_shot::receipts::tests::finalized_rpc_request_uses_shared_transport_with_no_submission ... ok
+test one_shot::receipts::tests::multiple_wallet_accounts_aggregate_by_mint_without_other_owners ... ok
+test one_shot::receipts::tests::missing_fee_or_metadata_signature_wallet_slot_and_key_mismatch_are_not_receipts ... ok
+test one_shot::receipts::tests::incomplete_token_metadata_preserves_fee_but_never_invents_zero ... ok
+test econ::tests::late_winners_split_coalesced_groups_exactly_like_original_selection ... ok
+test market_observer::tests::full_slot_budget_and_large_range_are_bounded ... ok
+test one_shot::tests::changed_signed_payload_order_path_and_signature_cannot_reach_adapter ... ok
+test econ::tests::measurement_plan_report_and_attribution_agree_for_all_durations ... ok
+test one_shot::tests::failed_unavailable_and_wrong_path_simulation_never_create_send_token ... ok
+test one_shot::tests::double_trigger_signed_bytes_and_all_budget_guards ... ok
+test one_shot::tests::revalidate_stale_fork_upgrade_wallet_and_bundle_at_actual_boundary ... ok
+test one_shot::tests::bundle_partial_landing_does_not_release_single_flight_hold ... ok
+test pending::tests::absence_and_missing_metadata_never_invent_fee ... ok
+test pending::tests::landed_success_and_revert_use_meta_fee ... ok
+test pending::tests::recorded_mainnet_success_and_revert_fees_are_preserved ... ok
+test pending::tests::tip_requires_our_matching_landed_transfer_and_partial_bundle_is_unknown ... ok
+test pipeline::mt0_tests::local_fee_estimate_reproduces_fix129_observations ... ok
+test record::tests::health_json_preserves_full_protocol_fixed_point_range ... ok
+test remote_workers::tests::full_result_queue_does_not_block_shutdown ... ok
+test remote_workers::tests::remote_workers_confirm_actual_thread_exit ... ok
+test remote_workers::tests::winner_watch_keeps_retry_deadline ... ok
+test route::tests::p1c_parses_quote_and_executable_floor_separately ... ok
+test one_shot::tests::legacy_journal_without_observations_reopens_with_hold ... ok
+test route::tests::parses_instruction_and_alt_without_rpc ... ok
+test route::tests::strips_only_exact_verified_prewarmed_ata_setup ... ok
+test shadow_ledger::tests::aggregates_and_rolls ... ok
+test winner::tests::f8_fail_closed_shapes ... ok
+test winner::tests::f8_failed_liquidation_is_not_a_winner ... ok
+test winner::tests::f8_legacy_successful_winner ... ok
+test winner::tests::f8_probe_sdk_encoded_transaction_decoding ... ignored
+test winner::tests::f8_same_slot_hits_are_ambiguous_never_guessed ... ok
+test winner::tests::f8_single_earliest_hit_is_unique_winner ... ok
+test winner::tests::f8_shared_instruction_truth_matches_six_audit_winners ... ok
+test winner::tests::f8_six_real_audit_winners_resolve_6_of_6 ... ok
+test winner::tests::f8_transaction_identity_is_fail_closed ... ok
+test winner::tests::f8_unrelated_successful_tx_is_not_a_winner ... ok
+test winner::tests::f8_v0_winner_with_receiver_from_lut ... ok
+test winner::tests::f8_winner_serializes_ambiguity_explicitly ... ok
+test winner::tests::f8_v0_winner_without_relevant_lut_address ... ok
+test winner::tests::outcomes ... ok
+test winner_tracker::tests::capacity_overflow_is_counted_not_silent ... ok
+test winner_tracker::tests::config_validation ... ok
+test winner_tracker::tests::due_after_initial_delay_and_never_dispatched_twice ... ok
+test winner_tracker::tests::not_liquidatable_skip_creates_no_watch ... ok
+test winner_tracker::tests::full_worker_queue_stops_round_and_backs_off ... ok
+test winner_tracker::tests::ok_none_and_err_reschedule_then_expire ... ok
+test winner_tracker::tests::older_inflight_completion_cannot_resolve_or_remove_newer_revision ... ok
+test winner_tracker::tests::one_watch_per_account_and_dedupe ... ok
+test winner_tracker::tests::partial_dispatch_until_first_full ... ok
+test winner_tracker::tests::resolved_uses_coalesced_earliest_readiness ... ok
+test winner_tracker::tests::result_for_untracked_account_is_ignored ... ok
+test winner_tracker::tests::send_error_propagates_and_leaves_nothing_in_flight ... ok
+test winner_tracker::tests::stale_none_or_error_never_reschedules_the_older_revision ... ok
+test winner_tracker::tests::undispatched_watch_expires_without_worker ... ok
+test one_shot::tests::crash_before_and_after_handoff_retains_hold_and_cannot_rearm ... ok
+test one_shot::tests::torn_or_corrupt_journal_is_a_halt_not_a_new_approval ... ok
+test one_shot::tests::all_finalized_members_fees_deltas_and_exit_required_even_on_revert ... ok
+test one_shot::receipts::tests::finalized_partial_bundle_and_missing_tokens_persist_without_releasing_holds ... ok
+test market_observer::tests::full_slot_transient_rate_limit_retries_without_skipping_block ... ok
+test measurement::persistence_tests::manifest_is_exclusive_and_phase_journal_preserves_exact_window ... ok
+test one_shot::tests::exact_adapter_bytes_ack_timeout_and_rejection_never_rearm ... ok
+test market_observer::verification::tests::disk_budget_and_changed_scope_fail_closed ... ok
+test market_observer::verification::tests::wrong_parent_and_corrupt_cached_response_never_pass ... ok
+test market_observer::verification::tests::interrupted_batches_resume_identically_with_parent_skip_proofs ... ok
+test econ::canonical::regression::offline_replay_uses_same_selector_and_exact_odd_plan_boundaries ... ok
+test econ::tests::four_boundaries_delta_cumulative_and_final_reconcile ... ok
+test econ::tests::runtime_worker_writes_four_snapshots_then_identical_final ... ok
+test econ::tests::million_revisions_stream_every_row_with_bounded_semantic_retention ... ok
+
+test result: ok. 209 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 24.95s
+
+     Running unittests src/bin/p0-econ-replay.rs (project_0/native/target/debug/deps/p0_econ_replay-3d04fee537d34f30)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (project_0/native/target/debug/deps/p0_longtail-2b63d06514f660b3)
+
+running 9 tests
+test integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+test integration_probe_tests::only_one_target_is_dispatched_per_idle_turn ... ok
+test integration_probe_tests::candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token ... ok
+test integration_probe_tests::oracle_detect_returns_latest_coalesced_work_once ... ok
+test integration_probe_tests::oracle_detect_skips_stale_order_entries ... ok
+test integration_probe_tests::shadow_error_category_never_formats_secret_payload ... ok
+test integration_probe_tests::target_waits_unsigned_until_worker_is_idle ... ok
+test integration_probe_tests::candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+test integration_probe_tests::candidate_fairness_repeat_admission_remains_bounded ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src/bin/p0-measurement-plan.rs (project_0/native/target/debug/deps/p0_measurement_plan-ddda8e98428856a9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-prewarm-atas.rs (project_0/native/target/debug/deps/p0_prewarm_atas-81798f6b02fc3bc1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-probe-costs.rs (project_0/native/target/debug/deps/p0_probe_costs-22ca1e3ed67f67bb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/p0-strict-verify.rs (project_0/native/target/debug/deps/p0_strict_verify-f4d337f17304fd2a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_solana-cd6305f41b92be39)
+
+running 63 tests
+test ingress::tests::config_wins_over_version_field ... ok
+test ingress::tests::bytes_prefix ... ok
+test ingress::tests::version_field_and_legacy ... ok
+test ingress::ws_rpc::tests::account_notification_needs_known_subscription ... ok
+test ingress::ws_rpc::tests::c0mo_transaction_subscription_requests_successful_and_failed ... ok
+test ingress::ws_rpc::tests::shadow_config_keeps_heartbeat_disabled_and_wait_unchanged ... ok
+test ingress::ws_rpc::tests::subscribe_requests_cover_all_kinds ... ok
+test ingress::ws_rpc::tests::parses_slot_and_root ... ok
+test ingress::ws_rpc::tests::c0mo_market_subscriptions_are_opt_in ... ok
+test ingress::ws_rpc::tests::transport_ping_pong_never_counts_as_stream_activity ... ok
+test ingress::ws_rpc::tests::parses_program_notification ... ok
+test ingress::ws_rpc::tests::c0mo_logs_and_transaction_notifications_keep_raw_payload ... ok
+test provider::tests::configured_capacity_and_exhaustion_release_all_tickets ... ok
+test provider::tests::queue_backpressure_does_not_allocate_more_tickets ... ok
+test provider::tests::adaptive_recovery_is_bounded_and_keeps_provider_unknown ... ok
+test provider::tests::shared_429_circuit_prevents_requests_across_workloads ... ok
+test provider::tests::socket_capacity_is_local_bounded_and_released ... ok
+test provider::tests::retry_after_seconds_dates_and_invalid_are_safe ... ok
+test provider::tests::blocking_body_read_is_metered_and_bounded_before_json_decode ... ok
+test state::blockhash::tests::staleness ... ok
+test state::fork::tests::root_backwards_is_ignored ... ok
+test state::fork::tests::detects_orphaned_branch ... ok
+test state::recovery::tests::adaptive_root_progress_extends_soft_budget_but_stalls_and_hard_caps ... ok
+test state::recovery::tests::adaptive_recovery_requires_real_root_before_ready ... ok
+test state::recovery::tests::cancellation_after_snapshot_a_does_not_fetch_b ... ok
+test state::recovery::tests::dirty_reconcile_stays_halted ... ok
+test ingress::ws_rpc::tests::p2_429_retry_after_exhausts_budget_without_spam_or_secret_leak ... ok
+test runtime_config::tests::explicit_endpoint_beats_legacy_audit_alias ... ok
+test state::recovery::tests::gap_to_ready_full_loop ... ok
+test state::recovery::tests::legacy_fixed_budget_and_adaptive_soft_boundary_are_fail_closed ... ok
+test state::recovery::tests::missing_required_dependency_blocks_ready ... ok
+test state::recovery::tests::snapshot_b_missing_required_blocks_ready ... ok
+test state::tests::bootstrap_buffers_then_applies_only_newer_than_snapshot ... ok
+test state::tests::gap_halts_and_reconcile_recovers ... ok
+test state::tests::ordering_rules ... ok
+test state::tests::reconcile_mismatch_halts ... ok
+test state::tests::reconcile_mixed_slot_batches_detects_stale_local ... ok
+test state::tests::reconcile_owner_mismatch_halts ... ok
+test state::snapshot::compressed_snapshot_tests::corrupt_compressed_account_cannot_produce_partial_snapshot ... ok
+test state::tests::root_policy_rejects_below_root ... ok
+test provider::http_tests::actual_http_429_blocks_other_workload_and_does_not_leak_body ... ok
+test state::snapshot::compressed_snapshot_tests::compressed_gpa_preserves_all_bytes_owner_lamports_and_context ... ok
+test state::tests::slot_events_track_highest ... ok
+test submit::tests::path_names_match_ledger ... ok
+test tx::tests::locked_accounts_are_deduplicated ... ok
+test tx::tests::priority_fee_uses_requested_limit_not_simulated_consumption ... ok
+test tx::tests::v1_effective_list_has_no_compute_budget_instructions ... ok
+test tx::tests::v1_is_unavailable_without_feature ... ok
+test tx::tests::v1_priority_fee_is_total_lamports ... ok
+test tx::tests::v1_priority_fee_rounds_up_to_total_lamports ... ok
+test tx::tests::too_many_accounts_is_rejected_before_compile ... ok
+test provider::http_tests::sdk_preserves_success_response_and_structured_simulation_failure ... ok
+test runtime_config::tests::rejects_invalid_types_unknown_financial_keys_and_resource_ranges ... ok
+test runtime_config::tests::precedence_redaction_private_handoff_and_metadata ... ok
+test state::recovery::tests::cancellation_during_root_catchup_never_confirms_ready_or_retries ... ok
+test runtime_config::tests::numeric_schema_covers_every_environment_consumer ... ok
+test runtime_config::tests::profiles_and_overrides_are_ceilings_not_authorization ... ok
+test ingress::ws_rpc::tests::p2_shutdown_cancels_admission_wait_without_background_runtime_hang ... ok
+test provider::http_tests::explicit_read_fallback_shares_budget_and_send_is_never_retried ... ok
+test ingress::ws_rpc::tests::p2_acks_and_ping_pong_do_not_start_capture ... ok
+test ingress::ws_rpc::tests::p2_stale_slot_frames_do_not_keep_capture_alive ... ok
+test provider::tests::aggregate_concurrency_is_bounded_and_cancelled_tickets_do_not_block ... ok
+test ingress::ws_rpc::tests::p2_disconnect_recovers_only_after_new_acked_slot_progress_and_shutdown_is_prompt ... ok
+
+test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
+
+   Doc-tests darkbot_common
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests darkbot_project0
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests darkbot_runner
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests darkbot_solana
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

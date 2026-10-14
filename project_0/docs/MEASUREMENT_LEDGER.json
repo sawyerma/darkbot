@@ -1,13 +1,13 @@
 {
   "schema": "Project0/MeasurementLedgerContext/1",
-  "snapshot_date": "2026-10-13",
+  "snapshot_date": "2026-10-14",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "5624a52f99a381e8af0011d4ccf8961c256e1154",
+    "git_blob_sha": "aa1efc128c8cc4087adc25cc269b6abccda1ebc3",
     "as_of_code_commit": null,
-    "line_count": 5291,
+    "line_count": 5304,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
-    "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/FE04_RECEIPTS_20261013"
+    "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014"
   },
   "companion_plan": "project_0/docs/PHASENPLAN.json",
   "read_first": "Use this JSON to locate current gates and targeted Markdown sections; do not reload the whole ledger.",
@@ -84,6 +84,13 @@
       "failures": 0,
       "release_builds": "PASS",
       "note": "Final workspace includes 17 journal/receipt tests; 59 Python PASS retained for unchanged scripts. Mock RPC and local loopback, no Mainnet."
+    },
+    "operational_configuration": {
+      "status": "LOCAL_PASS",
+      "evidence": "project_0/docs/evidence/OPERATIONS_CONFIG_20261014/qualification.json",
+      "provider_capacity": "UNKNOWN",
+      "mainnet": "NOT_RUN_PERMISSION_GATE",
+      "implementation_preview": "e01560f7e37c5bbca39a0068e6887c576d797e73"
     }
   },
   "economic_evidence": {
@@ -103,7 +110,7 @@
     }
   },
   "next_decisive_work": [
-    "After separate permission: bounded current Program/ProgramData/target read-only observation (3 RPC calls, 1 request/s, <=30s, <=16 MiB); this alone does NOT qualify current profitability.",
+    "After separate permission: bounded current Program/ProgramData/target read-only observation using reviewed effective operational settings. Smoke defaults (3 calls, 1 RPS, 30s, 16 MiB) are configurable, not permanent product limits; this alone does NOT qualify profitability.",
     "Revalidate real candidate-specific Health, Oracle/Bank, Funding, Jupiter ExactIn minimum output, fee, full signed TX simulation, exit economics; require positive conservative net edge or keep NO_ECONOMIC_GO.",
     "Finish terminal approval lifecycle and production-owned Intent/Current at the existing pipeline boundary; qualify actual exit and complete attempt/cumulative-loss accounting. Adapter binding and finalized fee/wallet observation APIs have local evidence, not full runtime pilot qualification.",
     "Preserve old user-owned five-hour replay and provider qualification as independent unresolved gates."
@@ -180,7 +187,12 @@
       "line_start": 5283,
       "line_end": 5291,
       "heading": "2026-10-13 — FE-04 finalized fee/wallet observation; exit accounting remains OPEN"
+    },
+    "operational_configuration": {
+      "line_start": 5294,
+      "line_end": 5304,
+      "heading": "2026-10-14 — Configurable operational contract / FE continuation (LOCAL PASS)"
     }
   },
-  "updates": "After any change to the canonical Markdown ledger, refresh this JSON's snapshot, statuses, anchors and source.git_blob_sha in the same logical delivery. Do not infer current statuses from older historical ledger entries."
+  "updates": "After any change to the canonical Markdown ledger, refresh this JSON's snapshot, statuses, anchors and source.git_blob_sha in the same logical delivery. Do not infer current statuses from older historical ledger entries. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed."
 }

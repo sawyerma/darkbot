@@ -134,6 +134,15 @@ impl RuntimeConfig {
         }
         c
     }
+    /// Explicit operational endpoint wins over legacy verifier aliases, so
+    /// provider qualification and the strict worker bind the same endpoint.
+    pub fn rpc_url(&self, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+        self.rpc_endpoints
+            .first()
+            .cloned()
+            .or_else(|| env("P0_AUDIT_RPC_URL"))
+            .or_else(|| env("P0_RPC_URL"))
+    }
     pub fn validate(&self) -> Result<(), String> {
         let limits = serde_json::to_value(&self.limits).map_err(|_| "CONFIG_ENCODE")?;
         for d in descriptors() {
@@ -628,6 +637,22 @@ mod tests {
         let reread = parse(&["--config", export.to_str().unwrap()]).unwrap();
         assert_eq!(r.config, reread.config);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn explicit_endpoint_beats_legacy_audit_alias() {
+        let r = parse(&["--rpc-endpoints", "https://explicit.invalid"]).unwrap();
+        assert_eq!(
+            r.config
+                .rpc_url(&|_| Some("https://legacy.invalid".into()))
+                .as_deref(),
+            Some("https://explicit.invalid")
+        );
+        assert_eq!(
+            RuntimeConfig::default()
+                .rpc_url(&|k| (k == "P0_AUDIT_RPC_URL").then(|| "https://audit.invalid".into()))
+                .as_deref(),
+            Some("https://audit.invalid")
+        );
     }
     #[test]
     fn numeric_schema_covers_every_environment_consumer() {

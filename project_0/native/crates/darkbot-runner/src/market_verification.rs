@@ -245,9 +245,9 @@ pub fn run(job: Job) -> Result<Value, String> {
         rpc: if job.offline {
             None
         } else {
-            let url = std::env::var("P0_AUDIT_RPC_URL")
-                .or_else(|_| std::env::var("P0_RPC_URL"))
-                .map_err(|_| "RPC_URL_MISSING")?;
+            let url = darkbot_solana::runtime_config::active()
+                .rpc_url(&|k| std::env::var(k).ok())
+                .ok_or("RPC_URL_MISSING")?;
             Some(
                 RpcFetcher::new(
                     url,

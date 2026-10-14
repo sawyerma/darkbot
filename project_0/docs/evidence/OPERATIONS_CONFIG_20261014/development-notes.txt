@@ -1,0 +1,8 @@
+This package continues the existing local implementation rather than importing or resetting the repository.
+An initial global WSS active-connection counter interfered with parallel recovery tests. It was replaced by an RAII connection/subscription lease owned by the specific provider Budget. The complete Solana suite then passed.
+The changed duration policy intentionally accepts 25h and representable odd-second durations; legacy tests asserting an arbitrary 24h ceiling were updated. Existing exact snapshot boundary and overflow assertions remain.
+The verifier formerly capped effective RPS at 2 while preflight compared against that cap. Both were corrected; preflight now requires evidence for the requested rate. Independent process/job ceilings can still reduce actual throughput.
+Blocking history/enrichment originally bypassed aggregate payload accounting. Their reads now use chunked metering under the same Budget. Async oversized-body reads are charged before rejection.
+A review identified a possible provider identity mismatch: strict verification preferred legacy P0_AUDIT_RPC_URL even when the operational config selected another endpoint. Explicit operational endpoints now win; a dedicated regression and rebuilt release binaries qualify this follow-up.
+A concurrent preview checkpoint e01560f captured the implementation during qualification. It was preserved; no reset, merge or BSC edit was performed. Final evidence records the actual suite status and remaining gates separately.
+No Mainnet requests or money actions were performed. Profiling/configuration is not evidence of positive executable edge or realized profit.

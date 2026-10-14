@@ -1,12 +1,13 @@
 {
   "schema": "Project0/PhasePlanContext/1",
-  "snapshot_date": "2026-10-13",
+  "snapshot_date": "2026-10-14",
   "source": {
     "path": "project_0/docs/PHASENPLAN.md",
-    "git_blob_sha": "c2f52f7fe46c42c23eac16c74df211446753149d",
-    "as_of_code_commit": "a9a8c34553026a845bc959e1116651d8b437d55a",
-    "line_count": 5233,
-    "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification."
+    "git_blob_sha": "aaea022045f00644a773e225cb12d5ab4d0f3363",
+    "as_of_code_commit": null,
+    "line_count": 5243,
+    "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
+    "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014"
   },
   "companion_ledger": "project_0/docs/MEASUREMENT_LEDGER.json",
   "read_first": "Use this compact contract and section index first; read only the corresponding Markdown ranges for exact technical implementation, source constraints and acceptance details.",
@@ -286,7 +287,23 @@
       "line_start": 4997,
       "line_end": 5234,
       "heading": "C0-E1 — ASTRA MASTER IMPLEMENTATION CONTRACT 2026-10-11"
+    },
+    "operational_configuration": {
+      "line_start": 5235,
+      "line_end": 5243,
+      "heading": "Operational RPC/WSS/Mainnet configuration — binding extension 2026-10-14"
     }
   },
-  "updates": "On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS."
+  "updates": "On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed.",
+  "operational_configuration": {
+    "contract": "project_0/docs/OPERATIONAL_CONFIG.md",
+    "implementation": "project_0/native/crates/darkbot-solana/src/runtime_config.rs",
+    "profiles": [
+      "smoke",
+      "standard",
+      "performance",
+      "custom"
+    ],
+    "policy": "FREE_ONLY; throughput is not provider capacity or money authorization; FE00–FE07/Race/Jito/M4 remain binding"
+  }
 }

@@ -1,0 +1,37 @@
+{
+  "schema": "Project0/OperationalQualification/1",
+  "date": "2026-10-14",
+  "functional_base": "cf540f4ae36bf57e1ba2b0cdf82f34ad12582374",
+  "preview_commit": "e01560f7e37c5bbca39a0068e6887c576d797e73",
+  "status": "LOCAL_PASS",
+  "tests": {
+    "txv1": {
+      "passed": 370,
+      "failed": 0,
+      "ignored": 1
+    },
+    "health": {
+      "passed": 368,
+      "failed": 0,
+      "ignored": 1
+    }
+  },
+  "python": {
+    "passed": 65,
+    "failed": 0
+  },
+  "clippy": {
+    "baseline": 38,
+    "current": 38,
+    "added": 0
+  },
+  "format": "CHANGED_REGIONS_PASS",
+  "release_health": "PASS",
+  "release_txv1": "PASS",
+  "mainnet": "NOT_RUN_PERMISSION_GATE",
+  "provider_capacity": "UNKNOWN",
+  "live": "DISABLED",
+  "submission": "DISABLED",
+  "first_realized_profit": "NOT_PROVEN",
+  "fe04": "PARTIAL_LOCAL"
+}

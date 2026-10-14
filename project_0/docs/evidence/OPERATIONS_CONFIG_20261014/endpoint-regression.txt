@@ -1,0 +1,12 @@
+   Compiling darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/darkbot-solana)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.31s
+     Running unittests src/lib.rs (project_0/native/target/debug/deps/darkbot_solana-2ad2ef5f2424c86c)
+
+running 5 tests
+test runtime_config::tests::explicit_endpoint_beats_legacy_audit_alias ... ok
+test runtime_config::tests::rejects_invalid_types_unknown_financial_keys_and_resource_ranges ... ok
+test runtime_config::tests::precedence_redaction_private_handoff_and_metadata ... ok
+test runtime_config::tests::profiles_and_overrides_are_ceilings_not_authorization ... ok
+test runtime_config::tests::numeric_schema_covers_every_environment_consumer ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 58 filtered out; finished in 0.01s

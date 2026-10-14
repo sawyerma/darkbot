@@ -792,9 +792,11 @@ mod http_tests {
                 .into(),
         );
         let (backup,b)=server("HTTP/1.1 200 OK\r\nContent-Length: 36\r\nConnection: close\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":42}".into());
-        let mut config = crate::runtime_config::RuntimeConfig::default();
-        config.rpc_endpoints = vec![primary.clone(), backup];
-        config.fallback = true;
+        let mut config = crate::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec![primary.clone(), backup],
+            fallback: true,
+            ..Default::default()
+        };
         config.limits.rpc_backoff_ms = 1;
         config.limits.rpc_rps = 100;
         config.limits.simulation_rps = 100;

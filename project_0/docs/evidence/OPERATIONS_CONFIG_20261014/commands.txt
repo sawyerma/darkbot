@@ -1,0 +1,16 @@
+# Executed from repository root. All RPC fixture traffic is loopback/offline.
+cargo test --manifest-path project_0/native/Cargo.toml --locked --offline -p darkbot-solana
+cargo test --manifest-path project_0/native/Cargo.toml --locked --offline -p darkbot-solana provider
+cargo test --manifest-path project_0/native/Cargo.toml --locked --offline --workspace --features crate_health,txv1
+cargo test --manifest-path project_0/native/Cargo.toml --locked --offline --workspace --features crate_health
+cargo build --manifest-path project_0/native/Cargo.toml --locked --offline --release --workspace --features crate_health
+cargo build --manifest-path project_0/native/Cargo.toml --locked --offline --release --workspace --features crate_health,txv1
+python3 -m unittest discover -s project_0/scripts -p 'test_*.py'
+cargo clippy --manifest-path project_0/native/Cargo.toml --locked --offline --workspace --all-targets --features crate_health,txv1 --message-format=json
+python3 project_0/docs/evidence/FE04_LOCAL_20261013/check_changed_format.py
+rustfmt --edition 2021 --check project_0/native/crates/darkbot-solana/src/runtime_config.rs
+git diff --check -- project_0
+# Review follow-up: explicit operational endpoint must dominate legacy P0_AUDIT_RPC_URL.
+cargo test --manifest-path project_0/native/Cargo.toml --locked --offline -p darkbot-solana runtime_config
+# Both release builds and all-targets Clippy repeated after endpoint precedence correction.
+# Mainnet / FE preflight --execute / capture / user-owned 5h replay / LIVE: NOT_RUN.
