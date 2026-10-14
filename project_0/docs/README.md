@@ -6,6 +6,7 @@
 - `MEASUREMENT_LEDGER.md` — measured evidence and gate decisions.
 - `architecture/` — architecture decisions: P0 upstream reuse matrix, parallel execution plan.
 - `operations/` — operational configuration: profiles, precedence, budgets, authorization limits.
+- `qualification/` — qualification/gate documentation index.
 - `R127D_CHANGELOG_ROLLBACK.md` — R127d implementation, qualification, rollback and post-audit correctness correction.
 - `measurements/protocols/` — measurement protocols: P6-LT Shadow, C0-MO market observer, C0-E1 econ4h.
 - `measurements/historical_reports/` — historical measurement/qualification reports: FIX-129 cost qualification, C0-E1 implementation report.
@@ -29,8 +30,12 @@ Ledger and PHASENPLAN entries, evidence inventories and checksums keep the path 
 | `docs/P0_REUSE_MATRIX.md` | [architecture/p0_reuse_matrix.md](architecture/p0_reuse_matrix.md) |
 | `docs/PARALLEL_EXECUTION_MASTER_PLAN.md` | [architecture/parallel_execution_plan.md](architecture/parallel_execution_plan.md) |
 | `docs/OPERATIONAL_CONFIG.md` | [operations/operational_config.md](operations/operational_config.md) |
+| `gates/README.md` | [qualification/README.md](qualification/README.md) |
 
 Inside the moved historical reports only location-relative paths to `docs/evidence/` were re-rooted; measurement results and wording are unchanged.
 
 `OPERATIONAL_CONFIG.md` remains as a redirect because `PHASENPLAN.json` and hash-protected evidence
 reference that path and are not edited during the structure reform.
+
+In `qualification/README.md` the two dead links of the former `gates/README.md` were corrected and its
+"reserved for gate code" sentence replaced by the current role; the top-level `gates/` directory no longer exists.

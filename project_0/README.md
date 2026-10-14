@@ -35,7 +35,7 @@ For the current engineering state and the exact next work order, start here:
 | Versioned raw evidence | [docs/evidence/](docs/evidence/) |
 | Public/non-secret config | [config/](config/) |
 | Local/generated runtime data | [data/](data/) |
-| Gate documentation | [gates/](gates/) |
+| Qualification / gate documentation | [docs/qualification/](docs/qualification/) |
 | Project 0 frontend | [../frontend/src/features/project0/](../frontend/src/features/project0/) |
 
 ---
@@ -79,6 +79,7 @@ project_0/
 │   ├── R127D_CHANGELOG_ROLLBACK.md   <- R127d history / rollback / correction
 │   ├── architecture/                 <- upstream reuse decisions, parallel execution design
 │   ├── operations/                   <- operational configuration: profiles, precedence, budgets
+│   ├── qualification/                <- qualification / gate documentation index
 │   ├── measurements/
 │   │   ├── protocols/                <- P6-LT Shadow, C0-MO, C0-E1 econ4h protocols
 │   │   └── historical_reports/       <- FIX-129 cost, C0-E1 implementation/qualification reports
@@ -120,7 +121,6 @@ project_0/
 │
 ├── data/                             <- local/generated runtime datasets
 ├── exports/                          <- generated exports / reports
-├── gates/                            <- gate definitions / gate documentation
 ├── src/                              <- application/control boundary, not Rust production core
 ├── tests/                            <- non-Rust project-level test area
 └── tools/                            <- reserved project-specific tooling area
@@ -233,6 +233,14 @@ Directory: [docs/operations/](docs/operations/)
 | File | Purpose |
 |---|---|
 | [operational_config.md](docs/operations/operational_config.md) | Operational configuration: inspection commands, precedence, profiles, budgets, authorization limits. |
+
+### Qualification
+
+Directory: [docs/qualification/](docs/qualification/)
+
+| File | Purpose |
+|---|---|
+| [README.md](docs/qualification/README.md) | Qualification/gate documentation index: where gate definitions, results and raw evidence live. |
 
 ### Measurement protocols
 
@@ -468,7 +476,7 @@ Do not start another broad architecture rewrite unless new evidence requires it.
 | Local generated run data | `data/` |
 | Generated export/report | `exports/` |
 | Public non-secret configuration | `config/` |
-| Gate definition/documentation | `gates/` |
+| Gate definition/documentation | `docs/qualification/` |
 | Project-wide non-Rust tests | `tests/` |
 
 Rules:
