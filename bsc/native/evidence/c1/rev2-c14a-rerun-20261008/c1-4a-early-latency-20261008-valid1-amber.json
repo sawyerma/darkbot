@@ -1,0 +1,300 @@
+{
+  "schema": "darkbot.c1.c1_4a_early_latency.v1",
+  "gate": "C1.4a",
+  "classification": "AMBER_LOW_HEADROOM",
+  "authoritative_metric": "max T_ingress -> L2",
+  "sample_count": 1000,
+  "clock_domain": "CLOCK_MONOTONIC shared by Go unix.ClockGettime and Rust libc::clock_gettime",
+  "measurement_instrumentation": "disposable pinned-geth worktree; production C1.4 overlay remains unchanged",
+  "l1_semantics": {
+    "definition": "SPSC write_sequence Release commit",
+    "measurement": "bracketed by CLOCK_MONOTONIC reads immediately before and immediately after the write_sequence atomic store",
+    "note": "classification does not depend on L1 interpolation; T_ingress -> L2 is measured directly"
+  },
+  "configuration": {
+    "generation": 1410,
+    "active_peer_lanes": 4,
+    "samples_per_peer": 250,
+    "peer_lane_capacity": 1024,
+    "peer_lane_slot_stride": 4096,
+    "lane_ids": [
+      16,
+      17,
+      18,
+      19
+    ],
+    "clock_id": 1,
+    "load_model": "parallel_peers_one_outstanding_per_lane",
+    "manifest_sha256": "10b5396836666ecd4c17099fb478662775cb1b4442e2ae1417c4792b087c808b"
+  },
+  "metrics": {
+    "T_packet_decoded_to_T_ingress": {
+      "min_ns": 0,
+      "mean_ns": 253.0,
+      "p50_ns": 0,
+      "p95_ns": 1000,
+      "p99_ns": 1000,
+      "p99_9_ns": 37000,
+      "max_ns": 68000
+    },
+    "T_ingress_to_L1_pre_commit_lower_bound": {
+      "min_ns": 2000,
+      "mean_ns": 7156.0,
+      "p50_ns": 4000,
+      "p95_ns": 9000,
+      "p99_ns": 43000,
+      "p99_9_ns": 525000,
+      "max_ns": 532000
+    },
+    "T_ingress_to_L1_post_commit_upper_bound": {
+      "min_ns": 2000,
+      "mean_ns": 7310.0,
+      "p50_ns": 4000,
+      "p95_ns": 9000,
+      "p99_ns": 43000,
+      "p99_9_ns": 525000,
+      "max_ns": 532000
+    },
+    "L1_commit_bracket_width": {
+      "min_ns": 0,
+      "mean_ns": 154.0,
+      "p50_ns": 0,
+      "p95_ns": 1000,
+      "p99_ns": 1000,
+      "p99_9_ns": 1000,
+      "max_ns": 2000
+    },
+    "L1_to_L2_lower_bound": {
+      "min_ns": 0,
+      "mean_ns": 1900.0,
+      "p50_ns": 1000,
+      "p95_ns": 6000,
+      "p99_ns": 22000,
+      "p99_9_ns": 53000,
+      "max_ns": 68000
+    },
+    "L1_to_L2_upper_bound": {
+      "min_ns": 0,
+      "mean_ns": 2053.0,
+      "p50_ns": 1000,
+      "p95_ns": 6000,
+      "p99_ns": 22000,
+      "p99_9_ns": 53000,
+      "max_ns": 68000
+    },
+    "T_ingress_to_L2": {
+      "min_ns": 2000,
+      "mean_ns": 9209.0,
+      "p50_ns": 5000,
+      "p95_ns": 14000,
+      "p99_ns": 85000,
+      "p99_9_ns": 532000,
+      "max_ns": 578000
+    },
+    "queue_depth_at_L2": {
+      "min_ns": 1,
+      "mean_ns": 1.0,
+      "p50_ns": 1,
+      "p95_ns": 1,
+      "p99_ns": 1,
+      "p99_9_ns": 1,
+      "max_ns": 1
+    }
+  },
+  "deadline_bands_T_ingress_to_L2": {
+    "lt_200us": 995,
+    "200_to_499_999ns": 2,
+    "500_to_999_999ns": 3,
+    "ge_1ms": 0
+  },
+  "integrity": {
+    "pass": true,
+    "failures": [],
+    "go_snapshot": {
+      "dir": "/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T//darkbot-c14a.JNYJqk/run",
+      "generation": 1410,
+      "max_peers": 4,
+      "churn_reserve": 0,
+      "qualified_pool_bound": 256,
+      "peer_lane_capacity": 1024,
+      "peer_lane_slot_stride": 4096,
+      "txpool_lane_capacity": 64,
+      "txpool_lane_slot_stride": 4096,
+      "prefilter_scope": {
+        "version": "DBC14PF1",
+        "chain_id": 56,
+        "addresses": [
+          "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0"
+        ],
+        "selectors": [
+          "0x8cb5772c:launch"
+        ],
+        "canonical_hex": "444243313450463138000000000000000100e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de001008cb5772c01",
+        "fingerprint_crc32c": "0x1692c814"
+      },
+      "pool": {
+        "PeerLanes": 4,
+        "Free": 0,
+        "Bound": 4,
+        "Closing": 0,
+        "Quarantined": 0,
+        "Allocations": 4,
+        "Exhausted": 0,
+        "PeerLimitRefusals": 0,
+        "Releases": 0
+      },
+      "live_peers": 4,
+      "live_covered": 4,
+      "live_uncovered": 0,
+      "covered_binds": 4,
+      "uncovered_binds": 0,
+      "pending_release": 0,
+      "reclaimed": 0,
+      "release_failures": 0,
+      "close_failures": 0,
+      "peers": {
+        "packets": 1000,
+        "rejected_packets": 0,
+        "matched": 1000,
+        "filtered": 0,
+        "published": 1000,
+        "queue_full": 0,
+        "oversize": 0,
+        "refused": 0,
+        "serialize_errors": 0,
+        "clock_errors": 0,
+        "uncovered_candidates": 0
+      },
+      "txpool_published": 0,
+      "txpool_refused": 0,
+      "txpool_serialize_errors": 0,
+      "txpool_clock_errors": 0,
+      "txpool_lane": {
+        "WriteSequence": 0,
+        "ReadSequence": 0,
+        "DroppedFull": 0,
+        "Oversize": 0,
+        "CorruptRecords": 0,
+        "LaneEpoch": 1,
+        "Generation": 1410,
+        "Shutdown": false,
+        "State": 1,
+        "FinalWriteSequence": 0,
+        "DrainedEpoch": 0,
+        "Owner": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "QuarantineReason": 0
+      },
+      "gap_total": 0,
+      "gaps": null
+    },
+    "rust_lane_stats": [
+      {
+        "lane_id": "16",
+        "write_sequence": "250",
+        "read_sequence": "250",
+        "dropped_full": "0",
+        "oversize": "0",
+        "corrupt_records": "0",
+        "state": "1",
+        "quarantine_reason": "0"
+      },
+      {
+        "lane_id": "17",
+        "write_sequence": "250",
+        "read_sequence": "250",
+        "dropped_full": "0",
+        "oversize": "0",
+        "corrupt_records": "0",
+        "state": "1",
+        "quarantine_reason": "0"
+      },
+      {
+        "lane_id": "18",
+        "write_sequence": "250",
+        "read_sequence": "250",
+        "dropped_full": "0",
+        "oversize": "0",
+        "corrupt_records": "0",
+        "state": "1",
+        "quarantine_reason": "0"
+      },
+      {
+        "lane_id": "19",
+        "write_sequence": "250",
+        "read_sequence": "250",
+        "dropped_full": "0",
+        "oversize": "0",
+        "corrupt_records": "0",
+        "state": "1",
+        "quarantine_reason": "0"
+      }
+    ]
+  },
+  "identity": {
+    "darkbot_commit": "183a7bc375caf8f04c974edb30ec8dd7d456dec2",
+    "pinned_geth_commit": "cdb7548b5baacfdae92f9f63437d6456411665f3",
+    "go_test_binary_sha256": "85c38ddbcdbd78f93811d1dc138fe47f45f3ca07893be3b4966014bc775f3c82",
+    "rust_test_binary_sha256": "c6d9472b6956143afc2208e8041d6402f474b40837c6f03b865ef2bedc8d43e1",
+    "go_overlay_sources_sha256": "97faf61ad3399454c204764113d484fc3ca63ad01fe4d37fcbd994085916b0d8",
+    "measurement_geth_v2_sha256": "fedd6b3caba33089118244afa605a907e3b80e87c5c5987b0b515cabd1882489",
+    "measurement_probe_sha256": "c7637136629f089419d72622a4ce8b96f309fcfc4b8a47f22647895f9ba2129f",
+    "measurement_go_test_sha256": "a727b9a5c7e35a8804c98ff38be7a670324b35a261031c7570f8fa33f05430a4",
+    "rust_v2_source_sha256": "7362986c72935f350d9539ec6648e28fe141818fc642638dbc7acc58e780af4c",
+    "rust_consumer_source_sha256": "10510a4896afbebb0750aecdf6ac64d054badf1bbe6386e3d238df62bbdb66a0",
+    "harness_script_sha256": "055f3322fd51b1019b5970162aaa4dcc54f3ca7cf389342d4a88e6129b82fa0a",
+    "analyzer_sha256": "382863226ac956292aa2700bb3a26af0615c9a621eec1879703ce869e4257bb2",
+    "go_version": "go version go1.25.0 darwin/arm64",
+    "rustc_version": "rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew)",
+    "cargo_version": "cargo 1.93.1 (Homebrew)"
+  },
+  "artifacts": {
+    "raw_samples": "bsc/native/evidence/c1/c1-4a-early-latency-20261008.csv",
+    "raw_samples_sha256": "93ab6ba1a0cead2746fe4b3502dfee3b50128bbdb67bfba08ee2a5b06fb487f9",
+    "go_log": "c1-4a-early-latency-20261008-go.log",
+    "rust_log": "c1-4a-early-latency-20261008-rust.log"
+  },
+  "commands": [
+    "go test -c -o <temporary-c14a-go.test> ./darkbot/fastlane",
+    "cargo build -p darkbot-fastlane --release --example c14a_consumer --locked --offline",
+    "bsc/native/tools/c14a_early_latency.sh"
+  ],
+  "non_claims": {
+    "T0_TO_T_BUY_LT_1MS": "NOT_PROVEN",
+    "MAINNET_INGRESS_COVERAGE": "NOT_PROVEN",
+    "PROVIDER_ORDERING_PLACEMENT": "UNQUALIFIED",
+    "LIVE": "BLOCKED"
+  }
+}

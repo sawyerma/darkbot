@@ -1,0 +1,21 @@
+=== C1.9 CREATE DISPOSABLE PINNED GETH CLONE ===
+C1_4_HOOK_ORDER_VERIFIED
+C1_7_OUTBOUND_HOOKS_VERIFIED
+C1_8_CHAIN_OWNERSHIP_VERIFIED
+C1_GETH_OVERLAY_APPLIED
+marker=DARKBOT_C1_FASTLANE_C1_7
+base=cdb7548b5baacfdae92f9f63437d6456411665f3
+=== C1.9 BUILD GO MEASUREMENT BINARY ===
+=== C1.9 BUILD RUST RELEASE CONSUMER AND HOST PROFILE ===
+   Compiling darkbot-fastlane v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/native/crates/darkbot-fastlane)
+    Finished `release` profile [optimized] target(s) in 0.76s
+=== C1.9 HOST PROFILE ===
+C1_6_HOST_PROFILE_CAPTURED
+=== C1.9 START GO PRODUCERS ===
+=== C1.9 RUN RUST CONSUMER ===
+integrity=PASS
+max_T_ingress_to_L2_ns=81000
+max_egress_commit_to_first_handoff_ns=48000
+=== C1.9 RESULT ===
+evidence=/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/native/evidence/c1/c1-9-native-latency-20261008T221328.json
+C1_9_MEASUREMENT_COMPLETE (review the evidence; this script does not pass the gate)

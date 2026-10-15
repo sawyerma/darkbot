@@ -1,6 +1,6 @@
 # BSC — schlanke Produktionsarchitektur und verbindlicher Umstrukturierungsplan
 
-**Status: VERBINDLICHER UMSTRUKTURIERUNGSAUFTRAG / ZIELSTRUKTUR NOCH NICHT UMGESETZT.**  
+**Status: STRUKTURREFORM R1–R8 UMGESETZT (2026-10-15) — ABNAHME UND COMMIT DURCH DEN NUTZER AUSSTEHEND.** Ist-Stand, Abweichungen und Prüfprotokoll: §7.  
 **Stand: 2026-10-15.** Maßgeblich sind der tatsächliche Git-Stand und die existierenden Nachweise, nicht diese Zielgrafik als vermeintlicher Ist-Zustand.
 
 > **Auftrag für Claude Code:** Das bestehende BSC-Projekt **vollständig und schrittweise** in eine schlanke, funktionsfähige Architektur umstrukturieren. Alles weiterhin Benötigte aus `bsc/gates/gate0/` und anderen Altpfaden übernehmen, alle Referenzen korrigieren, **jede umgebaute Gruppe sofort prüfen** und erst nach PASS mit der nächsten Gruppe fortfahren. Keine zweite aktive Gate0-Engine, keine bloße Ablage von altem Code an einer anderen Stelle. Historisches nach `prestudy/bsc/` **außerhalb des produktiven BSC-Projekts**. Kein Codeverlust, keine stillen Änderungen an Handelssemantik, Nachweisen, Sicherheitsgates oder Hot-Path.
@@ -171,3 +171,45 @@ Bei echten Änderungen an einem Rust-Modul sind dessen eigene Tests zu verwenden
 7. Jeder der acht Gruppen liegt ein verständlicher, kurzer Prüfbericht mit Ziel, Diff, Testergebnis und nächster Freigabe zugrunde. Am Ende ist die Gesamtprüfung grün.
 
 **Arbeitsbeginn für Claude:** Der Nutzer führt zuerst `git pull --ff-only origin main` aus (nur bei geeignetem Git-Status). Danach liest Claude dieses README, den verbindlichen fachlichen BSC-Phasenplan, den aktuellen HEAD, beide Cargo-Manifeste sowie die tatsächlichen Verbraucher von G0.7/G0.8. **R1 bis R8 in der beschriebenen Reihenfolge umsetzen, jeweils umbauen, Referenzen prüfen, höchstens einen gezielten Test pro Gruppe und erst bei PASS weiterarbeiten.** Maximal zehn Tests insgesamt. Kein selbstständiger Commit/Push, kein überflüssiges Testing und niemals eine value-bearing Transaktion.
+
+## 7. Umsetzungsstand R1–R8 (2026-10-15)
+
+Ausgangscommit `7f3c08b`. Vollständige Migrationsmatrix, Originalpfade, Hash-Nachweise und Prüfprotokoll: [docs/EVIDENCE.md](docs/EVIDENCE.md). Einstieg: [docs/PHASENPLAN.md](docs/PHASENPLAN.md), [docs/STATUS.md](docs/STATUS.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+**Ist-Baum** (entspricht §2 bis auf die begründeten Abweichungen unten):
+
+~~~~text
+bsc/
+├── README.md · .gitignore            # /.local/ (lokale Secrets-Ablage/Backups), /data/ (Laufdaten)
+├── native/                           # einziger Cargo-Workspace
+│   ├── Cargo.toml · Cargo.lock · rust-toolchain.toml (1.93.1)
+│   ├── crates/{core,wire,fastlane,runtime,capture,qualify}   # Paketnamen unverändert (darkbot-*)
+│   ├── geth/                         # README, Pin, Wire-V1/V2-Spezifikation, overlay/
+│   └── evidence/                     # Abweichung: pfadgebundene Q5A-/C1-Nachweise
+├── config/                           # v2-Acceptance, Builder-Floor, Preflight-Baseline, Witness-Schemas, wallet.public.env
+├── tools/                            # G0.6a/G0.7-Skripte, EVM-Crosscheck (+ npm-Locks), C1-Interop/-Freeze, lock_qualify
+└── docs/                             # PHASENPLAN, STATUS, ARCHITECTURE, EVIDENCE + alle gültigen Verträge, ACCEPTANCE_MAP.json
+prestudy/bsc/{experiments,references,evidence}/   # historisch, kein Build-Member
+~~~~
+
+**Begründete Abweichungen vom Zielbaum**
+
+- `native/evidence/` bleibt: Pfad und SHA-256 der Q5A-Evidence sind als Qualifikationsidentität im Runtime-Transport einkompiliert (`Q5A_TLS_EVIDENCE_PATH`, Generation 1); ein Umzug wäre eine Neuqualifikation.
+- `native/geth/` enthält neben `README.md`/`overlay/` die aktiven Wire-Spezifikationen und den geth-Pin.
+- Aktive Verträge bleiben als eigene Dateien in `docs/`; die vier Einstiegsdokumente fassen sie nicht verbindlich neu.
+
+**Funktionen am neuen Ort**
+
+| Funktion | Ort | Aufruf (aus `bsc/native` bauen, aus dem Repo-Root starten) |
+|---|---|---|
+| G0.7 (kontrolliert, `UNARMED`) | `crates/runtime/src/bin/g07_mainnet_self_launch_buy.rs` | `cargo build --locked -p darkbot-runner --features g07-mainnet --bin g07_mainnet_self_launch_buy` |
+| v2-Acceptance-Guard | `crates/runtime/src/acceptance_guard.rs` | Feature `acceptance-guard`; Tests `crates/runtime/tests/acceptance_guard.rs` |
+| G0.8 Acquisition/Ordering, Producer-Timing | `crates/qualify/src/bin/g08_mainnet_verify.rs`, `g08_producer_timing.rs` | `cargo build --locked -p darkbot-qualify --bins` |
+| G0.6a DRY (Quote über Core, Bundle) | `crates/qualify/src/bin/g06a_native_bnb_quote.rs`, `g06a_self_launch_bundle.rs` | `bash bsc/tools/g06a_final_dry.sh` (benötigt Secrets + read-only RPC) |
+| Unabhängige EVM-Gegenprüfung | `tools/g06a_economics_evm_crosscheck.cjs`, `g06a_local_simulate.cjs` | `npm ci` in `tools/evm-audit-tools/` und `tools/abi-tools/` |
+
+**Prüfprotokoll (10-Test-Budget, 9 genutzt):** T1 Baseline · T2 Guard (20+6) · T3 Quote-Byte-Parität 7/7 · T4 G0.7/Capture/Guard (21+6+4) · T5 G0.8/qualify (3+4+6+26) · T6 Workspace **426 PASS / 0 FAIL / 5 ignored** · T7 C1-Tool-Tests PASS · T8 Nachtest nach `cargo fmt` (154 PASS) · T9 Offline-Toolkette **17/17**. Struktur: `cargo metadata --locked`, `cargo check --locked --workspace`, `cargo fmt --all -- --check` sauber, `cargo clippy` ohne Fehler (6 Stil-Warnungen im unverändert übernommenen G0.7/G0.8-Code), `bash -n`/`node --check`/Python-Syntax aller Tools.
+
+**Nicht ausgeführt, daher nicht PASS:** voller G0.6a-DRY, EVM-Crosscheck gegen RPC, `g07_pre_live_readiness.sh`, jede G0.7-Ausführung, G0.8 gegen echte Blöcke. Vor einer Scharfschaltung ist ein neuer DRY-Lauf nötig (der DRY-Report enthält den neuen v2-Pfad).
+
+**Offen:** flaky `fastlane`-Test `role_leases_are_exclusive_per_role_and_coexist_across_roles` (einmal rot in der Baseline vor jeder Änderung); nicht eingebundene C1-Vorarbeit (untracked Fastlane-/Go-Dateien, Stash „local-before-p2p-fix-20261011“ `5753f70`) ist erhalten, muss nach dem Commit der Reform beim Einspielen auf die neuen Ordner (`crates/fastlane`, `tools/`) abgeglichen werden.

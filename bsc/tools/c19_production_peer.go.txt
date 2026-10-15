@@ -1,0 +1,92 @@
+// Installed only into the disposable pinned-geth measurement clone.
+package eth
+
+import (
+ "fmt"
+ "sync/atomic"
+ "testing"
+ "time"
+
+ "github.com/ethereum/go-ethereum/crypto"
+ "github.com/ethereum/go-ethereum/darkbot/fastlane"
+ "github.com/ethereum/go-ethereum/p2p"
+ "github.com/ethereum/go-ethereum/p2p/enode"
+ "github.com/ethereum/go-ethereum/p2p/netutil"
+)
+
+func c19ProductionTarget(t *testing.T, id byte, total int) fastlane.OutboundTargetV2 {
+ t.Helper()
+ ready := make(chan fastlane.OutboundTargetV2, 1)
+ stop := make(chan struct{})
+ errors := make(chan error, 2)
+ var received atomic.Int64
+ restrict, err := netutil.ParseNetlist("127.0.0.0/8")
+ if err != nil { t.Fatal(err) }
+ receiverKey, err := crypto.GenerateKey()
+ if err != nil { t.Fatal(err) }
+ senderKey, err := crypto.GenerateKey()
+ if err != nil { t.Fatal(err) }
+ receiver := &p2p.Server{Config: p2p.Config{
+  PrivateKey: receiverKey, MaxPeers: 1, NoDiscovery: true, NoDial: true,
+  ListenAddr: "127.0.0.1:0", NetRestrict: restrict,
+  Protocols: []p2p.Protocol{{Name: "eth", Version: ETH68, Length: protocolLengths[ETH68],
+   Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+    for {
+     msg, err := rw.ReadMsg()
+     if err != nil { return err }
+     if msg.Code != TransactionsMsg { err = fmt.Errorf("unexpected message %d", msg.Code) } else {
+      var txs TransactionsPacket
+      err = msg.Decode(&txs)
+      if err == nil {
+       items, decodeErr := txs.Items()
+       err = decodeErr
+       if err == nil && len(items) != 1 { err = fmt.Errorf("transaction count %d", len(items)) }
+      }
+      if err == nil { received.Add(1) }
+     }
+     msg.Discard()
+     if err != nil { errors <- err; return err }
+    }
+   }}},
+ }}
+ if err := receiver.Start(); err != nil { t.Fatal(err) }
+ t.Cleanup(receiver.Stop)
+ sender := &p2p.Server{Config: p2p.Config{
+  PrivateKey: senderKey, MaxPeers: 1, NoDiscovery: true,
+  ListenAddr: "127.0.0.1:0", NetRestrict: restrict,
+  StaticNodes: []*enode.Node{receiver.Self()},
+  Protocols: []p2p.Protocol{{Name: "eth", Version: ETH68, Length: protocolLengths[ETH68],
+   Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+    // Use the actual production method with the negotiated devp2p protoRW.
+    // No ETH status/chain session or remote acceptance is claimed here.
+    ethPeer := &Peer{Peer: peer, rw: rw, knownTxs: newKnownCache(maxKnownTxs)}
+    ready <- fastlane.OutboundTargetV2{
+     NodeID: [32]byte(peer.ID()), Send: ethPeer.SendRawTransaction, Known: ethPeer.KnownTransaction,
+    }
+    <-stop
+    return nil
+   }}},
+ }}
+ if err := sender.Start(); err != nil { t.Fatal(err) }
+ t.Cleanup(func() { close(stop); sender.Stop() })
+ // Decode verification is post-window transport integrity, never an ACK
+ // timestamp or part of the worker's locally captured handoff timestamp.
+ t.Cleanup(func() {
+  deadline := time.Now().Add(10*time.Second)
+  for received.Load() < int64(total) && time.Now().Before(deadline) {
+   select { case err := <-errors: t.Error(err); return; default: }
+   time.Sleep(time.Millisecond)
+  }
+  if received.Load() != int64(total) { t.Errorf("peer %d received %d/%d", id, received.Load(), total) }
+ })
+ select {
+ case target := <-ready: return target
+ case err := <-errors: t.Fatal(err)
+ case <-time.After(15*time.Second): t.Fatal("devp2p selected peer did not connect")
+ }
+ return fastlane.OutboundTargetV2{}
+}
+
+func TestC19NativeLatencyProducer(t *testing.T) {
+ fastlane.C19RunProducer(t, c19ProductionTarget)
+}

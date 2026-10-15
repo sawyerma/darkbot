@@ -1,0 +1,28 @@
+...........C1_10_INCOMPLETE C1.9b: not locally accepted (verdict 'PENDING')
+C1_10_FREEZE_REFUSED
+C1_10_VERIFY_FAIL the record is not a frozen record
+C1_10_VERIFY_FAIL darkbot_commit: missing HEAD or exact expected commit mismatch
+C1_10_VERIFY_FAIL the files no longer match the frozen record
+C1_10_VERIFY_FAIL final C1 source hash missing or mismatch
+C1_10_VERIFY_FAIL the files no longer match the frozen record
+C1_10_VERIFY_FAIL final C1 source hash missing or mismatch
+C1_10_VERIFY_FAIL the files no longer match the frozen record
+C1_10_VERIFY_FAIL DarkBot working tree is dirty
+C1_10_VERIFY_FAIL final C1 source differs from committed source
+C1_10_VERIFY_FAIL final C1 source hash missing or mismatch
+C1_10_VERIFY_FAIL the files no longer match the frozen record
+C1_10_VERIFY_FAIL darkbot_commit: missing HEAD or exact expected commit mismatch
+C1_10_VERIFY_FAIL final C1 source/working tree cannot be bound: Command '['git', '-C', '/private/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/tmpdj2homc0', 'rev-parse', '--show-toplevel']' returned non-zero exit status 128.
+C1_10_VERIFY_FAIL the files no longer match the frozen record
+C1_10_VERIFY_FAIL DarkBot working tree is dirty
+C1_10_VERIFY_FAIL the files no longer match the frozen record
+.........
+----------------------------------------------------------------------
+Ran 20 tests in 1.849s
+
+OK
+status=INCOMPLETE bindings_sha256=bff8a2ee208d82a49bbde07f27a48f79887a4f167f2f81592b82a000abfddcf6
+status=READY_TO_FREEZE bindings_sha256=a221764f530f3ebf08d9ad66fa1e134efef3aed24a32c8124a1cdf4ef0b3d967
+status=IMPLEMENTED_TESTED/FROZEN bindings_sha256=a221764f530f3ebf08d9ad66fa1e134efef3aed24a32c8124a1cdf4ef0b3d967
+C1_10_FROZEN_RECORD_VERIFIED a221764f530f3ebf08d9ad66fa1e134efef3aed24a32c8124a1cdf4ef0b3d967
+C1_10_FROZEN_RECORD_VERIFIED a221764f530f3ebf08d9ad66fa1e134efef3aed24a32c8124a1cdf4ef0b3d967

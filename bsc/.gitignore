@@ -1,0 +1,7 @@
+# Local-only state of the BSC product. Never versioned.
+# Secrets, local backups and moved legacy env files (mode 700/600).
+/.local/
+
+# Local runtime data: DRY evidence runs (tools/g06a_final_dry.sh), G0.7 search
+# diagnostics and other run output. Never versioned as a tree.
+/data/

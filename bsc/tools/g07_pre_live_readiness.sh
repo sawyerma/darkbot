@@ -8,9 +8,9 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT"
 
 SECRETS="$ROOT/bsc/secrets.env"
-CONTRACT="$ROOT/bsc/gates/gate0/evidence/g01_mainnet_acceptance_proposal_v2.json"
-BUILDER_POLICY="$ROOT/bsc/gates/gate0/evidence/g06a_builder_floor_addendum_2026-10-11.json"
-GUARD="$ROOT/bsc/gates/gate0/src/acceptance_guard.rs"
+CONTRACT="$ROOT/bsc/config/g01_mainnet_acceptance_proposal_v2.json"
+BUILDER_POLICY="$ROOT/bsc/config/g06a_builder_floor_addendum_2026-10-11.json"
+GUARD="$ROOT/bsc/native/crates/runtime/src/acceptance_guard.rs"
 
 die() {
   printf 'STOP: %s\n' "$*" >&2
@@ -69,7 +69,7 @@ while IFS= read -r candidate; do
     break
   fi
   printf 'G06_INCOMPLETE_EVIDENCE_SKIPPED=%s\n' "$candidate" >&2
-done < <(find "$ROOT/bsc/gates/gate0/evidence" -maxdepth 1 -type d -name 'g06a_final_dry_*' -print | sort -r)
+done < <(find "$ROOT/bsc/data/g06a_final_dry" -maxdepth 1 -type d -name 'g06a_final_dry_*' -print | sort -r)
 [[ -n "$DRY_DIR" ]] || die "no COMPLETE local G0.6 DRY evidence set found; existing PASS evidence must be located, not invented"
 
 DRY="$DRY_DIR/dry_result.json"
@@ -121,7 +121,7 @@ export DARKBOT_G06A_BUYER_ADDRESS="$BSC_BUYER_ADDRESS"
 
 TMP_PREFLIGHT="$(mktemp -t darkbot-g07-prelive.XXXXXX.json)"
 trap 'rm -f "$TMP_PREFLIGHT"' EXIT
-node bsc/gates/gate0/tools/g06a_preflight_readonly.cjs "$TMP_PREFLIGHT" >/dev/null
+node bsc/tools/g06a_preflight_readonly.cjs "$TMP_PREFLIGHT" >/dev/null
 
 python3 - "$TMP_PREFLIGHT" "$BASELINE" <<'PY'
 import json, sys

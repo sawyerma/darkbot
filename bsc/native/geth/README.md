@@ -22,7 +22,7 @@ commit. Any upstream change or rebase requires a new pin and requalification.
 Verify a checkout with:
 
 ```bash
-bsc/native/tools/c1_verify_geth_pin.sh /path/to/bsc-geth
+bsc/tools/c1_verify_geth_pin.sh /path/to/bsc-geth
 ```
 
 A valid untouched checkout ends with `C1_GETH_PIN_PASS`. The verifier rejects

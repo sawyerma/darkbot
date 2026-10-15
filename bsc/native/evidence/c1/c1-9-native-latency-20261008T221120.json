@@ -1,0 +1,381 @@
+{
+  "outbound_mode": "production_devp2p_selected_peer_handoff",
+  "c1_9_production_path_present": true,
+  "c1_9_qualification_eligible": true,
+  "schema": "darkbot.c1.native_latency.v1",
+  "result": "MEASURED",
+  "integrity": "PASS",
+  "integrity_failures": [],
+  "gate": "NOT_DECIDED_BY_THIS_TOOL",
+  "clock": {
+    "clock_id": "1",
+    "domain": "CLOCK_MONOTONIC of one host; geth (Go) and Rust read the same clock"
+  },
+  "window": {
+    "fixed_before_run": true,
+    "peers": 2,
+    "warmup_per_peer": 8,
+    "samples_per_peer": 32,
+    "warmup_samples_retained_in_raw": 16,
+    "qualification_samples": 64,
+    "load_model": "parallel_peers_one_outstanding_per_lane_with_explicit_warmup"
+  },
+  "l1_semantics": {
+    "pre_commit": "clock read after the slot commit, before write_sequence Release",
+    "post_commit": "clock read after write_sequence Release",
+    "note": "L1 lies inside this bracket; T_ingress -> L2 is measured directly"
+  },
+  "ingress_metrics": {
+    "T_packet_decoded_to_T_ingress": {
+      "samples": 64,
+      "min_ns": 0,
+      "mean_ns": 156.25,
+      "p50_ns": 0,
+      "p95_ns": 1000,
+      "p99_ns": 1000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 1000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "T_ingress_to_L1_pre_commit_lower_bound": {
+      "samples": 64,
+      "min_ns": 1000,
+      "mean_ns": 2968.75,
+      "p50_ns": 2000,
+      "p95_ns": 5000,
+      "p99_ns": 36000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 36000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "T_ingress_to_L1_post_commit_upper_bound": {
+      "samples": 64,
+      "min_ns": 1000,
+      "mean_ns": 3000.0,
+      "p50_ns": 2000,
+      "p95_ns": 5000,
+      "p99_ns": 36000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 36000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "L1_commit_bracket_width": {
+      "samples": 64,
+      "min_ns": 0,
+      "mean_ns": 31.25,
+      "p50_ns": 0,
+      "p95_ns": 0,
+      "p99_ns": 1000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 1000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "L1_to_L2_lower_bound": {
+      "samples": 64,
+      "min_ns": 5000,
+      "mean_ns": 32343.75,
+      "p50_ns": 32000,
+      "p95_ns": 48000,
+      "p99_ns": 61000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 61000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "L1_to_L2_upper_bound": {
+      "samples": 64,
+      "min_ns": 5000,
+      "mean_ns": 32375.0,
+      "p50_ns": 32000,
+      "p95_ns": 48000,
+      "p99_ns": 61000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 61000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "T_ingress_to_L2": {
+      "samples": 64,
+      "min_ns": 14000,
+      "mean_ns": 35343.75,
+      "p50_ns": 35000,
+      "p95_ns": 52000,
+      "p99_ns": 63000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 63000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "queue_depth_max": 1
+  },
+  "outbound_metrics": {
+    "enabled": true,
+    "workers": 2,
+    "buys_in_window": 64,
+    "worker_slot_outcomes": {
+      "HANDED_OFF": 128
+    },
+    "buys_without_all_selected_handoffs": 0,
+    "egress_commit_to_coordinator_observed": {
+      "samples": 64,
+      "min_ns": 1000,
+      "mean_ns": 2843.75,
+      "p50_ns": 3000,
+      "p95_ns": 5000,
+      "p99_ns": 9000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 9000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "egress_commit_to_first_selected_peer_handoff": {
+      "samples": 64,
+      "min_ns": 10000,
+      "mean_ns": 16968.75,
+      "p50_ns": 17000,
+      "p95_ns": 24000,
+      "p99_ns": 32000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 32000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "egress_commit_to_each_selected_peer_handoff": {
+      "samples": 128,
+      "min_ns": 10000,
+      "mean_ns": 19265.625,
+      "p50_ns": 18000,
+      "p95_ns": 30000,
+      "p99_ns": 37000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 49000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 128,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 128 samples < 1000",
+      "p99_99_note": "not reported: 128 samples < 10000"
+    },
+    "egress_commit_to_all_selected_peer_handoffs": {
+      "samples": 64,
+      "min_ns": 12000,
+      "mean_ns": 21562.5,
+      "p50_ns": 20000,
+      "p95_ns": 33000,
+      "p99_ns": 49000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 49000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 64,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 64 samples < 1000",
+      "p99_99_note": "not reported: 64 samples < 10000"
+    },
+    "worker_send_call_duration": {
+      "samples": 128,
+      "min_ns": 4000,
+      "mean_ns": 7265.625,
+      "p50_ns": 7000,
+      "p95_ns": 12000,
+      "p99_ns": 15000,
+      "p99_9_ns": null,
+      "p99_99_ns": null,
+      "max_ns": 30000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 128,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      },
+      "p99_9_note": "not reported: 128 samples < 1000",
+      "p99_99_note": "not reported: 128 samples < 10000"
+    },
+    "prepared_buy_path": {
+      "scope": "harness path with a prepared signed BUY: scope match, one launch copy, seal, egress commit. It excludes venue decode beyond the scope match, state, economics, admission, build and sign, and it is not the complete local reaction.",
+      "T_ingress_to_egress_commit": {
+        "samples": 64,
+        "min_ns": 14000,
+        "mean_ns": 35562.5,
+        "p50_ns": 35000,
+        "p95_ns": 53000,
+        "p99_ns": 63000,
+        "p99_9_ns": null,
+        "p99_99_ns": null,
+        "max_ns": 63000,
+        "misses_ge_1ms": 0,
+        "bands": {
+          "lt_200us": 64,
+          "200us_to_lt_500us": 0,
+          "500us_to_lt_1ms": 0,
+          "ge_1ms": 0
+        },
+        "p99_9_note": "not reported: 64 samples < 1000",
+        "p99_99_note": "not reported: 64 samples < 10000"
+      },
+      "T_ingress_to_first_selected_peer_handoff": {
+        "samples": 64,
+        "min_ns": 26000,
+        "mean_ns": 52531.25,
+        "p50_ns": 52000,
+        "p95_ns": 74000,
+        "p99_ns": 79000,
+        "p99_9_ns": null,
+        "p99_99_ns": null,
+        "max_ns": 79000,
+        "misses_ge_1ms": 0,
+        "bands": {
+          "lt_200us": 64,
+          "200us_to_lt_500us": 0,
+          "500us_to_lt_1ms": 0,
+          "ge_1ms": 0
+        },
+        "p99_9_note": "not reported: 64 samples < 1000",
+        "p99_99_note": "not reported: 64 samples < 10000"
+      }
+    },
+    "handoff_boundary": "return of the worker's send call (harness: one write to a loopback TCP socket with TCP_NODELAY); not remote receipt, inclusion or execution"
+  },
+  "counters": {
+    "peer_published": 80,
+    "peer_queue_full": 0,
+    "peer_oversize": 0,
+    "peer_refused": 0,
+    "uncovered_candidates": 0,
+    "gap_total": 0,
+    "chain_published": 5,
+    "chain_lost": 0,
+    "chain_ownership_violations": 0,
+    "outbound_queue_full_hol": 0,
+    "outbound_invalid_egress": 0,
+    "outbound_evidence_lost": 0,
+    "hot0_lane_faults": 0,
+    "hot0_invalid_records": 0,
+    "hot0_dropped": 0,
+    "hot0_chain_gaps": 0,
+    "hot0_allocations_in_qualification_window": 0,
+    "hot0_locks": "none in the receive path by construction; not instrumented"
+  },
+  "identity": {
+    "darkbot_commit": "12c4616f9b24bf036d99cdd549e56ff2d448d372",
+    "darkbot_tree": "dirty",
+    "pinned_geth_commit": "cdb7548b5baacfdae92f9f63437d6456411665f3",
+    "go_test_binary_sha256": "5906027d97e4ffb5d81a569c2e6d8c18c55426c071cebd05f4cfe4ed3e52ed3d",
+    "rust_consumer_binary_sha256": "861272d8e1407b8b9b8a3faa551affa617cfc9bd6f0b2fc3f998deee12428d49",
+    "go_overlay_sources_sha256": "3fda92dbbd9f936e7b46e5e14406b4128b25560c8df78bfef1f9879dccdc7376",
+    "rust_fastlane_sources_sha256": "f4e1a2ada299bf89eda7d626cece6d55d98645ef219c988a15093440957291c8",
+    "overlay_tool_sha256": "db2ed8e685a3a364bb1dbb11723f49c586268b64dc9f4f609671756d9118e0f8",
+    "harness_script_sha256": "b082e8bee95c3f518494c4b332b48b7fee298d06597480979032e4ee2b0f6eb1",
+    "analyzer_sha256": "572370c14a1f6292357029d2f92c18409da641a8dafc32c3bbab73c1035e7803",
+    "config_manifest_sha256": "2df503eb415b2e000a5e5199d4300878b9ed6d16a3eb9de6abc7529c4972d847",
+    "host_profile_sha256": "09581417cf34aa01d57235f9b681acce57c6ac8920521b9e518aabd5b9b800d0",
+    "topology_fingerprint_crc32c": "0xfc5501a8",
+    "profile_selection": {
+      "profile": "S",
+      "source": "configured"
+    },
+    "raw_ingress_sha256": "f7dcdd24de83259908340ff19433cfcb2e1fad248d6a46bbc756fd61a0f9a4c1",
+    "raw_outbound_sha256": "ac7e19f754f226b32db33bef93b77053568ce5a52ba7f8909c96b150f1a2e716",
+    "go_snapshot_sha256": "5d24b16dfb3f3a4910feaab009d33d023d219bf779df5252d82fabe9df951774"
+  },
+  "rules": [
+    "every statistic is over directly measured per-sample differences of one clock",
+    "no end-to-end figure is built by adding component percentiles",
+    "max is reported for every quantity; no percentile stands in for it",
+    "a miss is a value >= 1000000 ns",
+    "p99.9 needs >= 1000 samples, p99.99 >= 10000"
+  ],
+  "non_claims": [
+    "T0_TO_T_BUY_LT_1MS = NOT_PROVEN",
+    "MAINNET_INGRESS_COVERAGE = NOT_PROVEN",
+    "PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED",
+    "LIVE = BLOCKED",
+    "a local geth handoff is not acquisition",
+    "macOS/M4 evidence does not qualify the Linux C3 target"
+  ]
+}

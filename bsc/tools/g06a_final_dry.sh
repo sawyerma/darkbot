@@ -8,13 +8,22 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT"
 
 SECRETS="$ROOT/bsc/secrets.env"
-CONTRACT="$ROOT/bsc/gates/gate0/evidence/g01_mainnet_acceptance_proposal_v2.json"
-BUILDER_POLICY="$ROOT/bsc/gates/gate0/evidence/g06a_builder_floor_addendum_2026-10-11.json"
-GATE0_MANIFEST="$ROOT/bsc/gates/gate0/Cargo.toml"
+CONTRACT="$ROOT/bsc/config/g01_mainnet_acceptance_proposal_v2.json"
+BUILDER_POLICY="$ROOT/bsc/config/g06a_builder_floor_addendum_2026-10-11.json"
+NATIVE="$ROOT/bsc/native"
 
 die() {
   printf 'STOP: %s\n' "$*" >&2
   exit 1
+}
+
+# Build in the single Cargo workspace (its rust-toolchain.toml applies there),
+# then run the binary from the repository root as `cargo run` did before: the
+# binaries resolve repository-relative contract paths.
+native_run() {
+  local bin="$1"; shift
+  (cd "$NATIVE" && cargo build --quiet --locked -p darkbot-qualify --bin "$bin") || return 1
+  "$NATIVE/target/debug/$bin" "$@"
 }
 
 json_get() {
@@ -36,7 +45,7 @@ PY
 [[ -f "$SECRETS" ]] || die "missing $SECRETS"
 git check-ignore -q bsc/secrets.env || die "bsc/secrets.env is not ignored by Git"
 grep -Fq 'pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";' \
-  bsc/gates/gate0/src/acceptance_guard.rs \
+  bsc/native/crates/runtime/src/acceptance_guard.rs \
   || die "Mainnet live guard is not UNARMED"
 
 python3 - "$CONTRACT" <<'PY'
@@ -76,7 +85,7 @@ export DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI="50000000"
 # 2026-10-11 final one-attempt minimal-spend candidate: 0.05 gwei + 0.000001 BNB BUY.
 
 RUN_ID="g06a_final_dry_$(date -u +%Y%m%dT%H%M%SZ)"
-OUT_DIR="$ROOT/bsc/gates/gate0/evidence/$RUN_ID"
+OUT_DIR="$ROOT/bsc/data/g06a_final_dry/$RUN_ID"
 mkdir -p "$OUT_DIR"
 
 PREFLIGHT="$OUT_DIR/preflight.json"
@@ -86,7 +95,7 @@ LOCAL_SIM="$OUT_DIR/local_simulation.json"
 DRY="$OUT_DIR/dry_result.json"
 
 printf '\n=== 1/5 READ-ONLY MAINNET PREFLIGHT ===\n'
-node bsc/gates/gate0/tools/g06a_preflight_readonly.cjs "$PREFLIGHT" > "$OUT_DIR/preflight_console.json"
+node bsc/tools/g06a_preflight_readonly.cjs "$PREFLIGHT" > "$OUT_DIR/preflight_console.json"
 
 [[ "$(json_get "$PREFLIGHT" wallet_qualification.addresses_bound)" == "true" ]] || die "wallet addresses are not bound"
 [[ "$(json_get "$PREFLIGHT" wallet_qualification.distinct)" == "true" ]] || die "Launcher and Buyer are not distinct"
@@ -103,13 +112,13 @@ export DARKBOT_G06A_MAX_BLOCK="$((DARKBOT_G06A_SEND_HEAD + 2))"
 printf 'PREFLIGHT=PASS  head=%s  launcher_nonce=%s  buyer_nonce=%s\n' "$DARKBOT_G06A_SEND_HEAD" "$DARKBOT_G06A_LAUNCHER_NONCE" "$DARKBOT_G06A_BUYER_NONCE"
 
 printf '\n=== 2/5 LOCAL CURVE-20 QUOTE ===\n'
-cargo run --quiet --locked --manifest-path "$GATE0_MANIFEST" --bin g06a_native_bnb_quote -- "$PREFLIGHT" > "$QUOTE"
+native_run g06a_native_bnb_quote "$PREFLIGHT" > "$QUOTE"
 export DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT="$(json_get "$QUOTE" expected_output)"
 [[ -n "$DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT" ]] || die "native quote did not produce expected_output"
 printf 'QUOTE=PASS  expected_output=%s\n' "$DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT"
 
 printf '\n=== 3/5 INDEPENDENT READ-ONLY EVM CROSS-CHECK ===\n'
-node bsc/gates/gate0/tools/g06a_economics_evm_crosscheck.cjs "$PREFLIGHT" > "$ECON"
+node bsc/tools/g06a_economics_evm_crosscheck.cjs "$PREFLIGHT" > "$ECON"
 [[ "$(json_get "$ECON" status)" == "EVM_SEQUENCE_PASS" ]] || die "independent EVM cross-check did not pass"
 EVM_OUTPUT="$(json_get "$ECON" simulated_received_amount)"
 [[ "$EVM_OUTPUT" == "$DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT" ]] || die "Curve-20 quote and independent EVM output differ"
@@ -121,7 +130,7 @@ printf 'EVM_CROSSCHECK=PASS  exact_output_match=true\n'
 export DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256="$(shasum -a 256 "$BUILDER_POLICY" | awk '{print $1}')"
 
 printf '\n=== 4/5 EXACT WALLET-BOUND LOCAL SIMULATION ===\n'
-node bsc/gates/gate0/tools/g06a_local_simulate.cjs "$LOCAL_SIM"
+node bsc/tools/g06a_local_simulate.cjs "$LOCAL_SIM"
 python3 - "$LOCAL_SIM" "$BSC_LAUNCHER_ADDRESS" "$BSC_BUYER_ADDRESS" <<'PY'
 import json, sys
 v = json.load(open(sys.argv[1]))
@@ -140,7 +149,7 @@ print("EXACT_LOCAL_SIMULATION=PASS")
 PY
 
 printf '\n=== 5/5 DRY1-DRY4 -- ZERO LIVE EGRESS ===\n'
-cargo run --quiet --locked --manifest-path "$GATE0_MANIFEST" --bin g06a_self_launch_bundle -- --verify-evidence "$LOCAL_SIM" | tee "$DRY"
+native_run g06a_self_launch_bundle --verify-evidence "$LOCAL_SIM" | tee "$DRY"
 python3 - "$DRY" <<'PY'
 import json, sys
 v = json.load(open(sys.argv[1]))

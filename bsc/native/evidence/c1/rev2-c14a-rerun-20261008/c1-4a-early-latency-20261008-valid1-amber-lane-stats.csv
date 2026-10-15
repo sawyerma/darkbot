@@ -1,0 +1,5 @@
+lane_id,write_sequence,read_sequence,dropped_full,oversize,corrupt_records,state,quarantine_reason
+16,250,250,0,0,0,1,0
+17,250,250,0,0,0,1,0
+18,250,250,0,0,0,1,0
+19,250,250,0,0,0,1,0

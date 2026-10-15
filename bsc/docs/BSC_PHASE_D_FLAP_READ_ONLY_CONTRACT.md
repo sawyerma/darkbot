@@ -58,7 +58,7 @@ Gate-0 facts must be reconfirmed if contracts changed.
 Normative implementation:
 
 ```
-native/crates/darkbot-core/src/venues/flap.rs
+native/crates/core/src/venues/flap.rs
 ```
 
 One production implementation only.

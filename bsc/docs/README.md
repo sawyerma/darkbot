@@ -15,14 +15,15 @@ Earliest technically possible direct on-chain BUY after a supported BSC launch, 
 5. [BSC_ECONOMICS_GATE_CONTRACT.md](BSC_ECONOMICS_GATE_CONTRACT.md) — economics gate.
 6. [GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md](GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md) — measurement/evidence ledger.
 
-Additional phase contracts, evidence freezes and Phase-A artifacts remain in this folder.
+Entry points: [PHASENPLAN.md](PHASENPLAN.md) (binding plan index), [STATUS.md](STATUS.md) (code / evidence / LIVE), [ARCHITECTURE.md](ARCHITECTURE.md) (tree, crate ownership), [EVIDENCE.md](EVIDENCE.md) (evidence locations, original paths, R1–R8 migration record). Additional phase contracts, evidence freezes and the acceptance map ([ACCEPTANCE_MAP.json](ACCEPTANCE_MAP.json)) remain in this folder as complete files. Superseded material (Phase-A artifacts, reviews, the Phase-B draft, the Unit-1 production-plan reference) is in [../../prestudy/bsc/](../../prestudy/bsc/).
 
 ## Code and evidence
 
-- [BSC application boundary](../../darkbot/bsc/)
-- [Gate-0 Rust workspace](../../gates/bsc/gate0/)
-- [Gate-0 source](../../gates/bsc/gate0/src/)
-- [Gate-0 evidence](../../gates/bsc/gate0/evidence/)
-- [Config](../../config/bsc/)
-- [Tests](../../tests/bsc/)
-- [Tools](../../tools/bsc/)
+- [Single Cargo workspace](../native/) — crates in [../native/crates/](../native/crates/)
+- [G0.7 binary and acceptance guard](../native/crates/runtime/src/)
+- [G0.6a DRY and G0.8 binaries](../native/crates/qualify/src/bin/)
+- [Pinned bsc-geth overlay](../native/geth/)
+- [Path-bound C1/Q5A evidence](../native/evidence/)
+- [Active contracts](../config/)
+- [Tools](../tools/)
+- [Historical Gate-0 workspace and evidence](../../prestudy/bsc/experiments/gate0/)

@@ -1,0 +1,11 @@
+{
+  "status": "TEMPLATE_NOT_EVIDENCE",
+  "how_to_use": "Written by the controlled Testnet launcher, on the host that runs geth and c19b_capture. Remove this status line in the real file.",
+  "chain_id": 97,
+  "clock_id": 1,
+  "host_boot_id": "<the same boot id passed to c19b_capture>",
+  "handoff_boundary": "<what handoff_ns marks, e.g. return of the raw transaction send to peer X>",
+  "launches": [
+    {"tx_hash": "<64 hex digits>", "handoff_ns": 0}
+  ]
+}

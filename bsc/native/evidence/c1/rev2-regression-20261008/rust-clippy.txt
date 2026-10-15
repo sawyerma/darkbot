@@ -1,0 +1,2 @@
+    Checking darkbot-fastlane v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/native/crates/darkbot-fastlane)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.75s

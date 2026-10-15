@@ -357,7 +357,7 @@ The same qualified ingress × inclusion combinations that survive G0.6 become th
 **G0.6 final dry status — 2026-10-11: PASS**
 
 Authoritative run evidence:
-`bsc/gates/gate0/evidence/g06a_final_dry_20261011T110407Z`
+`bsc/data/g06a_final_dry/g06a_final_dry_20261011T110407Z` (local, untracked run data; recorded at `bsc/gates/gate0/evidence/` and relocated unchanged in the R1–R8 restructure)
 
 Recorded result:
 

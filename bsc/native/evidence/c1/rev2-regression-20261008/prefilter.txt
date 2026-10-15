@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running tests/c14_prefilter_scope.rs (target/debug/deps/c14_prefilter_scope-b2229b01817d6555)
+
+running 1 test
+test the_c14_prefilter_scope_is_the_committed_launch_scope ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

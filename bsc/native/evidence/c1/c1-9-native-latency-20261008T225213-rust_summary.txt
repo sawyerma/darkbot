@@ -1,0 +1,16 @@
+ingress_samples=10128
+outbound_evidence_rows=30384
+chain_records_serviced=461
+hot0_allocations_in_qualification_window=0
+hot0_polls=10951
+hot0_idle_polls=823
+hot0_peer_records=10128
+hot0_admitted=10128
+hot0_rejected=0
+hot0_duplicates=0
+hot0_invalid_records=0
+hot0_lane_faults=0
+hot0_chain_gaps=0
+hot0_dropped=0
+hot0_dedup_evictions=708
+clock=CLOCK_MONOTONIC

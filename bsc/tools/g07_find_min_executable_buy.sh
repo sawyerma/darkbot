@@ -7,9 +7,9 @@ cd "$(git rev-parse --show-toplevel)"
 # A pruned RPC cannot serve one frozen historical parent indefinitely.
 # Restart the ENTIRE independent search with a new preflight; never mix blocks.
 if [[ "${DARKBOT_G07_SEARCH_INNER:-}" != YES ]]; then
-  mkdir -p bsc/local_diagnostics
+  mkdir -p bsc/data/local_diagnostics
   for restart in 0 1 2; do
-    log="$(mktemp bsc/local_diagnostics/g07-controller.XXXXXX.log)"
+    log="$(mktemp bsc/data/local_diagnostics/g07-controller.XXXXXX.log)"
     if DARKBOT_G07_SEARCH_INNER=YES bash "$0" >"$log" 2>&1; then
       cat "$log"
       exit 0
@@ -26,11 +26,11 @@ fi
 source bsc/secrets.env
 export BSC_MAINNET_RPC_HTTPS="${BSC_MAINNET_RPC_HTTPS:-https://bsc-dataseed.bnbchain.org}"
 # Current read-only gas suggestion; builder floor from frozen evidence.
-DARKBOT_G06A_GAS_PRICE_WEI="$(node -e '(async()=>{const fs=require("fs");const p=JSON.parse(fs.readFileSync("bsc/gates/gate0/evidence/g06a_builder_floor_addendum_2026-10-11.json"));if(!p.blockrazor.verified)throw Error("unverified builder floor");const floor=BigInt(p.blockrazor.explicit_minimum_bundle_gas_price_wei);const r=await fetch(process.env.BSC_MAINNET_RPC_HTTPS,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_gasPrice",params:[]}),signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error("gas RPC HTTP "+r.status);const j=await r.json();if(j.error||!j.result)throw Error("invalid eth_gasPrice");const rpc=BigInt(j.result);const gas=rpc>floor?rpc:floor;if(gas<=0n||gas>1000000000n)throw Error("gas exceeds authorized ceiling");console.error("RPC_GAS_PRICE_WEI="+rpc+" BUILDER_FLOOR_WEI="+floor+" GAS_POLICY=DYNAMIC_CANDIDATE_ONLY");process.stdout.write(String(gas));})().catch(e=>{console.error("STOP gas: "+e.message);process.exitCode=1})' )"
+DARKBOT_G06A_GAS_PRICE_WEI="$(node -e '(async()=>{const fs=require("fs");const p=JSON.parse(fs.readFileSync("bsc/config/g06a_builder_floor_addendum_2026-10-11.json"));if(!p.blockrazor.verified)throw Error("unverified builder floor");const floor=BigInt(p.blockrazor.explicit_minimum_bundle_gas_price_wei);const r=await fetch(process.env.BSC_MAINNET_RPC_HTTPS,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_gasPrice",params:[]}),signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error("gas RPC HTTP "+r.status);const j=await r.json();if(j.error||!j.result)throw Error("invalid eth_gasPrice");const rpc=BigInt(j.result);const gas=rpc>floor?rpc:floor;if(gas<=0n||gas>1000000000n)throw Error("gas exceeds authorized ceiling");console.error("RPC_GAS_PRICE_WEI="+rpc+" BUILDER_FLOOR_WEI="+floor+" GAS_POLICY=DYNAMIC_CANDIDATE_ONLY");process.stdout.write(String(gas));})().catch(e=>{console.error("STOP gas: "+e.message);process.exitCode=1})' )"
 export DARKBOT_G06A_GAS_PRICE_WEI
 
 grep -Fq 'pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";' \
-  bsc/gates/gate0/src/acceptance_guard.rs || {
+  bsc/native/crates/runtime/src/acceptance_guard.rs || {
     echo "STOP: guard is not UNARMED" >&2
     exit 1
   }
@@ -49,12 +49,12 @@ REQUIRED_PASSES="${DARKBOT_G07_SEARCH_REQUIRED_PASSES:-2}"
 (( MAX_BUY_VALUE_WEI >= RESOLUTION_WEI )) || { echo "MAX below resolution" >&2; exit 2; }
 (( MAX_BUY_VALUE_WEI <= 1000000000000000 )) || { echo "MAX exceeds frozen buy ceiling" >&2; exit 2; }
 
-mkdir -p bsc/local_diagnostics
-tmp="$(mktemp -d bsc/local_diagnostics/g07-search.XXXXXX)"
+mkdir -p bsc/data/local_diagnostics
+tmp="$(mktemp -d bsc/data/local_diagnostics/g07-search.XXXXXX)"
 echo "EVIDENCE_DIR=$tmp"
 preflight="$tmp/preflight.json"
 
-node bsc/gates/gate0/tools/g06a_preflight_readonly.cjs "$preflight" >/dev/null
+node bsc/tools/g06a_preflight_readonly.cjs "$preflight" >/dev/null
 
 probe() {
   local v="$1"
@@ -64,7 +64,7 @@ probe() {
   export DARKBOT_G06A_BUY_VALUE_WEI="$v"
 
   for ((run=1; run<=PROBE_RUNS; run++)); do
-    if node bsc/gates/gate0/tools/g06a_economics_evm_crosscheck.cjs "$preflight" \
+    if node bsc/tools/g06a_economics_evm_crosscheck.cjs "$preflight" \
         >"$tmp/${v}_${run}.json" 2>"$tmp/${v}_${run}.err"; then
       passes=$((passes + 1))
     elif grep -Eq "local BUY simulation reverted:|independent EVM BUY returned zero" "$tmp/${v}_${run}.err"; then
@@ -152,7 +152,7 @@ echo "=== FINAL STABILITY CHECK ==="
 # Final candidate must pass all final verification runs, not just majority.
 export DARKBOT_G06A_BUY_VALUE_WEI="$hi"
 for run in 1 2 3; do
-  node bsc/gates/gate0/tools/g06a_economics_evm_crosscheck.cjs "$preflight" \
+  node bsc/tools/g06a_economics_evm_crosscheck.cjs "$preflight" \
     >"$tmp/final_${run}.json" 2>"$tmp/final_${run}.err" || {
       echo "STOP: final candidate failed stability run $run" >&2
       cat "$tmp/final_${run}.err" >&2

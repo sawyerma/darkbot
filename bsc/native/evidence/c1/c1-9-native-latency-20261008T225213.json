@@ -1,0 +1,356 @@
+{
+  "outbound_mode": "production_devp2p_selected_peer_handoff",
+  "c1_9_production_path_present": true,
+  "purpose": "qualification",
+  "c1_9_qualification_eligible": true,
+  "schema": "darkbot.c1.native_latency.v1",
+  "result": "MEASURED",
+  "integrity": "PASS",
+  "integrity_failures": [],
+  "gate": "NOT_DECIDED_BY_THIS_TOOL",
+  "clock": {
+    "clock_id": "1",
+    "domain": "CLOCK_MONOTONIC of one host; geth (Go) and Rust read the same clock"
+  },
+  "window": {
+    "fixed_before_run": true,
+    "peers": 4,
+    "warmup_per_peer": 32,
+    "samples_per_peer": 2500,
+    "warmup_samples_retained_in_raw": 128,
+    "qualification_samples": 10000,
+    "load_model": "parallel_peers_one_outstanding_per_lane_with_explicit_warmup"
+  },
+  "l1_semantics": {
+    "pre_commit": "clock read after the slot commit, before write_sequence Release",
+    "post_commit": "clock read after write_sequence Release",
+    "note": "L1 lies inside this bracket; T_ingress -> L2 is measured directly"
+  },
+  "ingress_metrics": {
+    "T_packet_decoded_to_T_ingress": {
+      "samples": 10000,
+      "min_ns": 0,
+      "mean_ns": 70.5,
+      "p50_ns": 0,
+      "p95_ns": 1000,
+      "p99_ns": 1000,
+      "p99_9_ns": 1000,
+      "p99_99_ns": 4000,
+      "max_ns": 5000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 10000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "T_ingress_to_L1_pre_commit_lower_bound": {
+      "samples": 10000,
+      "min_ns": 1000,
+      "mean_ns": 2357.2,
+      "p50_ns": 2000,
+      "p95_ns": 4000,
+      "p99_ns": 7000,
+      "p99_9_ns": 14000,
+      "p99_99_ns": 42000,
+      "max_ns": 50000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 10000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "T_ingress_to_L1_post_commit_upper_bound": {
+      "samples": 10000,
+      "min_ns": 1000,
+      "mean_ns": 2486.6,
+      "p50_ns": 2000,
+      "p95_ns": 4000,
+      "p99_ns": 7000,
+      "p99_9_ns": 14000,
+      "p99_99_ns": 42000,
+      "max_ns": 50000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 10000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "L1_commit_bracket_width": {
+      "samples": 10000,
+      "min_ns": 0,
+      "mean_ns": 129.4,
+      "p50_ns": 0,
+      "p95_ns": 1000,
+      "p99_ns": 1000,
+      "p99_9_ns": 1000,
+      "p99_99_ns": 4000,
+      "max_ns": 5000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 10000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "L1_to_L2_lower_bound": {
+      "samples": 10000,
+      "min_ns": 35000,
+      "mean_ns": 79571.7,
+      "p50_ns": 78000,
+      "p95_ns": 100000,
+      "p99_ns": 113000,
+      "p99_9_ns": 257000,
+      "p99_99_ns": 399000,
+      "max_ns": 415000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 9981,
+        "200us_to_lt_500us": 19,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "L1_to_L2_upper_bound": {
+      "samples": 10000,
+      "min_ns": 35000,
+      "mean_ns": 79701.1,
+      "p50_ns": 78000,
+      "p95_ns": 100000,
+      "p99_ns": 114000,
+      "p99_9_ns": 257000,
+      "p99_99_ns": 399000,
+      "max_ns": 415000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 9981,
+        "200us_to_lt_500us": 19,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "T_ingress_to_L2": {
+      "samples": 10000,
+      "min_ns": 40000,
+      "mean_ns": 82058.3,
+      "p50_ns": 81000,
+      "p95_ns": 102000,
+      "p99_ns": 116000,
+      "p99_9_ns": 265000,
+      "p99_99_ns": 401000,
+      "max_ns": 418000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 9981,
+        "200us_to_lt_500us": 19,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "queue_depth_max": 2
+  },
+  "outbound_metrics": {
+    "enabled": true,
+    "workers": 2,
+    "buys_in_window": 10000,
+    "worker_slot_outcomes": {
+      "HANDED_OFF": 20000
+    },
+    "buys_without_all_selected_handoffs": 0,
+    "egress_commit_to_coordinator_observed": {
+      "samples": 10000,
+      "min_ns": 1000,
+      "mean_ns": 3299.5,
+      "p50_ns": 3000,
+      "p95_ns": 9000,
+      "p99_ns": 14000,
+      "p99_9_ns": 22000,
+      "p99_99_ns": 64000,
+      "max_ns": 113000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 10000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "egress_commit_to_first_selected_peer_handoff": {
+      "samples": 10000,
+      "min_ns": 8000,
+      "mean_ns": 15500.3,
+      "p50_ns": 15000,
+      "p95_ns": 22000,
+      "p99_ns": 29000,
+      "p99_9_ns": 43000,
+      "p99_99_ns": 139000,
+      "max_ns": 157000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 10000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "egress_commit_to_each_selected_peer_handoff": {
+      "samples": 20000,
+      "min_ns": 8000,
+      "mean_ns": 17746.95,
+      "p50_ns": 17000,
+      "p95_ns": 27000,
+      "p99_ns": 34000,
+      "p99_9_ns": 63000,
+      "p99_99_ns": 162000,
+      "max_ns": 184000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 20000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "egress_commit_to_all_selected_peer_handoffs": {
+      "samples": 10000,
+      "min_ns": 10000,
+      "mean_ns": 19993.6,
+      "p50_ns": 19000,
+      "p95_ns": 29000,
+      "p99_ns": 36000,
+      "p99_9_ns": 72000,
+      "p99_99_ns": 182000,
+      "max_ns": 184000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 10000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "worker_send_call_duration": {
+      "samples": 20000,
+      "min_ns": 3000,
+      "mean_ns": 5798.75,
+      "p50_ns": 5000,
+      "p95_ns": 9000,
+      "p99_ns": 13000,
+      "p99_9_ns": 27000,
+      "p99_99_ns": 74000,
+      "max_ns": 144000,
+      "misses_ge_1ms": 0,
+      "bands": {
+        "lt_200us": 20000,
+        "200us_to_lt_500us": 0,
+        "500us_to_lt_1ms": 0,
+        "ge_1ms": 0
+      }
+    },
+    "prepared_buy_path": {
+      "scope": "harness path with a prepared signed BUY: scope match, one launch copy, seal, egress commit. It excludes venue decode beyond the scope match, state, economics, admission, build and sign, and it is not the complete local reaction.",
+      "T_ingress_to_egress_commit": {
+        "samples": 10000,
+        "min_ns": 41000,
+        "mean_ns": 82422.1,
+        "p50_ns": 81000,
+        "p95_ns": 103000,
+        "p99_ns": 117000,
+        "p99_9_ns": 265000,
+        "p99_99_ns": 402000,
+        "max_ns": 419000,
+        "misses_ge_1ms": 0,
+        "bands": {
+          "lt_200us": 9981,
+          "200us_to_lt_500us": 19,
+          "500us_to_lt_1ms": 0,
+          "ge_1ms": 0
+        }
+      },
+      "T_ingress_to_first_selected_peer_handoff": {
+        "samples": 10000,
+        "min_ns": 50000,
+        "mean_ns": 97922.4,
+        "p50_ns": 97000,
+        "p95_ns": 120000,
+        "p99_ns": 136000,
+        "p99_9_ns": 299000,
+        "p99_99_ns": 424000,
+        "max_ns": 438000,
+        "misses_ge_1ms": 0,
+        "bands": {
+          "lt_200us": 9974,
+          "200us_to_lt_500us": 26,
+          "500us_to_lt_1ms": 0,
+          "ge_1ms": 0
+        }
+      }
+    },
+    "handoff_boundary": "return of the worker's send call (harness: one write to a loopback TCP socket with TCP_NODELAY); not remote receipt, inclusion or execution"
+  },
+  "counters": {
+    "peer_published": 10128,
+    "peer_queue_full": 0,
+    "peer_oversize": 0,
+    "peer_refused": 0,
+    "uncovered_candidates": 0,
+    "gap_total": 0,
+    "chain_published": 461,
+    "chain_lost": 0,
+    "chain_ownership_violations": 0,
+    "outbound_queue_full_hol": 0,
+    "outbound_invalid_egress": 0,
+    "outbound_evidence_lost": 0,
+    "hot0_lane_faults": 0,
+    "hot0_invalid_records": 0,
+    "hot0_dropped": 0,
+    "hot0_chain_gaps": 0,
+    "hot0_allocations_in_qualification_window": 0,
+    "hot0_locks": "none in the receive path by construction; not instrumented"
+  },
+  "identity": {
+    "darkbot_commit": "12c4616f9b24bf036d99cdd549e56ff2d448d372",
+    "darkbot_tree": "dirty",
+    "pinned_geth_commit": "cdb7548b5baacfdae92f9f63437d6456411665f3",
+    "go_test_binary_sha256": "c8c4d060195c8524cc4b3f01fb365e8adbad0807bbb60975257c3727d164c6dc",
+    "rust_consumer_binary_sha256": "e07884c7e682078969cd238c1fd589b6e6109b9c9299574761cdf79413ec8aef",
+    "go_overlay_sources_sha256": "3fda92dbbd9f936e7b46e5e14406b4128b25560c8df78bfef1f9879dccdc7376",
+    "rust_fastlane_sources_sha256": "aa790fc2576c8a9c1b69279994e18542d1da104cd6ad46b45fb0eebceb8325f5",
+    "overlay_tool_sha256": "0d6819ee6d35bc7b6b163633a13f4d1965b6e0bf32746e350fb496c7e16426c2",
+    "harness_script_sha256": "9e76761c7cafc1938dfbba75f12d64f0b7d14bb94346085427a0d91232621ca2",
+    "analyzer_sha256": "61d66ab6519f5b713f626bded678601a14467073cacd2a589e84cb1c04e36f83",
+    "production_bridge_sha256": "eb3f9aa3bd5f050313ddad39fac52067566e8091f6aebafb6deb63885d226265",
+    "production_peer_harness_sha256": "f1ef7d77d1a605a94605c2190411ace2c453beed68f6bfe5c301a6a32db050c9",
+    "config_manifest_sha256": "70975678dfcccf73860b0f63f35bb384f2c31d70ae6f7f7b16b56f1066f5317e",
+    "host_profile_sha256": "09581417cf34aa01d57235f9b681acce57c6ac8920521b9e518aabd5b9b800d0",
+    "topology_fingerprint_crc32c": "0xfc5501a8",
+    "profile_selection": {
+      "profile": "S",
+      "source": "configured"
+    },
+    "raw_ingress_sha256": "d2b0f0f80e850e3ba08ed090424b0ae7e96d9aa3100a59747cee4c542a1d8a46",
+    "raw_outbound_sha256": "05bc6faa170f3be0ad5054d6fe1266a2871726e138c4e7076aae11d85bff73e3",
+    "go_snapshot_sha256": "090baba5799ca8a4e657794e697c34cc3049d3fcceac8dccd0abfdf98e96417d"
+  },
+  "rules": [
+    "every statistic is over directly measured per-sample differences of one clock",
+    "no end-to-end figure is built by adding component percentiles",
+    "max is reported for every quantity; no percentile stands in for it",
+    "a miss is a value >= 1000000 ns",
+    "p99.9 needs >= 1000 samples, p99.99 >= 10000"
+  ],
+  "non_claims": [
+    "T0_TO_T_BUY_LT_1MS = NOT_PROVEN",
+    "MAINNET_INGRESS_COVERAGE = NOT_PROVEN",
+    "PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED",
+    "LIVE = BLOCKED",
+    "a local geth handoff is not acquisition",
+    "macOS/M4 evidence does not qualify the Linux C3 target"
+  ]
+}

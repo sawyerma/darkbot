@@ -11,12 +11,12 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/darkbot-wire",
-    "crates/darkbot-core",
-    "crates/darkbot-runner",
-    "crates/darkbot-qualify",
-    "crates/darkbot-capture",
-    "crates/darkbot-fastlane",
+    "crates/wire",
+    "crates/core",
+    "crates/runtime",
+    "crates/qualify",
+    "crates/capture",
+    "crates/fastlane",
 ]
 
 [workspace.package]
@@ -31,8 +31,15 @@ publish = false
 alloy-primitives = "=1.7.3"
 k256 = { version = "=0.13.4", features = ["ecdsa"] }
 # TLS of the builder transports (Unit 5). The versions the Gate-0 harness
-# resolved and locked (bsc/gates/gate0/Cargo.lock), with the ring crypto
+# resolved and locked (prestudy/bsc/experiments/gate0/Cargo.lock), with the ring crypto
 # provider instead of the default aws-lc-rs, and without logging.
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "=1.0.9"
 libc = "=0.2.189"
+# G0.7/G0.8 qualification support (migrated from the retired Gate-0 harness,
+# exactly the versions its Cargo.lock resolved). Used only behind the
+# qualification features of darkbot-runner and by darkbot-qualify.
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
+hex = "=0.4.3"
+alloy-sol-types = { version = "=1.7.3", features = ["more-tuple-impls"] }
