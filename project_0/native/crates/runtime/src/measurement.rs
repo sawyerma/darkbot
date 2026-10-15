@@ -367,6 +367,7 @@ pub fn persist_manifest(
         "--exclude-standard",
         "--",
         "project_0/native",
+        "project_0/operations",
         "project_0/scripts",
     ])?
     .split(|b| *b == 0)

@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import io
 import json
 import os
@@ -14,9 +14,9 @@ import hashlib
 import unittest
 import urllib.error
 from unittest.mock import patch
-import operational_config as o
-import measurement_contract as c
-import audit_market_quick as a
+from operations.cli import operational_config as o
+from operations.cli import measurement_contract as c
+from operations.verification import audit_market_quick as a
 from p0_paths import clean_env
 
 class OperationalTests(unittest.TestCase):

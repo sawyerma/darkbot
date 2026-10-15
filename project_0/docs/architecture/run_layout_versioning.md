@@ -1,6 +1,6 @@
 # Run layout versioning
 
-Status 2026-10-15, structure iterations 8b.2/8b.3, **PENDING_INDEPENDENT_REVIEW**. Decision: **Option A, one coordinated,
+Status 2026-10-15, structure iterations 8b.2/8b.3 (pushed in `46be33c`, no independent acceptance claimed); relocation in 16–29 see section 7. Decision: **Option A, one coordinated,
 versioned re-pin** (implemented). Operating instructions: [run storage](../operations/run_storage.md).
 
 ## 1. Layout versions
@@ -12,8 +12,8 @@ versioned re-pin** (implemented). Operating instructions: [run storage](../opera
 
 Anything else is `RUN_LAYOUT_INVALID` (mixed names, a V2 run without its manifest, a malformed manifest); a layout tag
 `Project0/RunLayout/<n>` other than 1 or 2 is `RUN_LAYOUT_UNSUPPORTED`. No fallback guesses a layout. Implementation:
-`detect_layout` in [`scripts/run_store.py`](../../scripts/run_store.py); the artifact map is `ARTIFACTS` there and
-`RunPaths` in `native/crates/darkbot-runner/src/run_layout.rs` (Rust writers). Tests pin both to the same literal paths.
+`detect_layout` in [`operations/capture/run_store.py`](../../operations/capture/run_store.py); the artifact map is `ARTIFACTS` there and
+`RunPaths` in `native/crates/runtime/src/run_layout.rs` (Rust writers). Tests pin both to the same literal paths.
 
 In V2 there are no reader fallbacks: the manifest is the only identity and plan source, the phase journal and the three market
 streams must exist (`RUN_ARTIFACT_MISSING`), and the capture evidence index is validated before reuse.
@@ -22,12 +22,13 @@ streams must exist (`RUN_ARTIFACT_MISSING`), and the capture evidence index is v
 
 | Pinned file | Identities that hash it |
 |---|---|
-| `measurement_contract.py` | `verification_spec_id` (decoder pin), report dataset key (`contract_sha256`) |
-| `audit_market_quick.py` | `verification_spec_id` (decoder pin), index checkpoint (`decoder_sha256`), report dataset key (`decoder_sha256`) |
-| `market_report.py` | report dataset key (`normalizer_sha256`) |
-| `run_store.py` (**new pin**) | `verification_spec_id` (decoder pin), index checkpoint (`layout_sha256`), report dataset key (`layout_sha256`) |
+| `operations/cli/measurement_contract.py` | `verification_spec_id` (decoder pin), report dataset key (`contract_sha256`) |
+| `operations/verification/audit_market_quick.py` | `verification_spec_id` (decoder pin), index checkpoint (`decoder_sha256`), report dataset key (`decoder_sha256`) |
+| `operations/reporting/market_report.py` | report dataset key (`normalizer_sha256`) |
+| `operations/capture/run_store.py` (**pin since 8b.2**) | `verification_spec_id` (decoder pin), index checkpoint (`layout_sha256`), report dataset key (`layout_sha256`) |
 
-Strict mode additionally pins `market_verification.rs`, `market_reconcile.rs`, `market_truth.rs`, `market_gap.rs` (unchanged)
+Strict mode additionally pins `market_verification.rs`, `market_reconcile.rs`, `market_truth.rs`, `market_gap.rs` (contents unchanged; since
+iteration 29 in `native/crates/runtime/src`; pins are keyed by file name and content hash)
 and the `p0-strict-verify` binary; report datasets pin the `p0-econ-replay` binary. Not pinned: `measurement_verify.py`,
 `measurement_cli.py`, `operational_config.py`, the shell launchers. Because `run_store.py` is pinned, any later change to it
 creates new identities exactly like a change to the readers.
@@ -82,3 +83,14 @@ self-test without tests fails), `tests/regression/test_v1_archived_parity.py` (V
 `tests/integration/test_run_store.py` (launcher end-to-end in V1 and V2, V2 verify and report through
 `verify.sh` / `report.sh` by id), Rust `run_layout`, `measurement` (V1 and V2 manifest) and `econ_tests`
 (`runtime_worker_writes_layout_v2_capture_and_snapshots`).
+
+## 7. Relocation in structure iterations 16–29
+
+The pinned modules moved from `scripts/` into the `operations` package (`cli/`, `capture/`, `verification/`, `reporting/`) and the
+crate directory `darkbot-runner` became `native/crates/runtime` (package name unchanged). The pinned Python files were edited for
+package imports, project-root anchors and the strict source path; no identity algorithm, schema version or record format changed
+(still `C0-E1/VerificationSpec/3`, `C0-E1/INDEX/3`, `C0-E1/NormalizedReport/3`, records `/2`). Because the file hashes changed,
+new verifications get new `verification_spec_id`s, checkpoint identities and dataset keys compared with `46be33c`; the resume
+rules of section 4 apply unchanged (`RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION`, never a false resume PASS). The strict-pinned Rust
+sources are byte-identical, so their `decoder_pins` entries are unchanged. V1 parity with the archived readers of `908b14c`
+is still verified (`tests/regression/test_v1_archived_parity.py`).

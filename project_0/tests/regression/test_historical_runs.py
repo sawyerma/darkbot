@@ -2,9 +2,9 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import unittest
-import audit_market_quick as a
+from operations.verification import audit_market_quick as a
 
 REPO=p0_paths.REPO
 

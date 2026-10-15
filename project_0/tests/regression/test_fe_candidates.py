@@ -1,9 +1,9 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import unittest
-from fe_candidate_report import report
+from operations.qualification.fe_candidate_report import report
 
 class Candidates(unittest.TestCase):
     def test_historical_positive_technical_is_not_current_profit(self):

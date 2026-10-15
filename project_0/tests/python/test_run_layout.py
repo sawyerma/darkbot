@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import json
 import os
 from pathlib import Path
@@ -13,11 +13,11 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-import audit_market_quick as a
-import market_report as r
-import measurement_contract as c
-import measurement_verify as v
-import run_store as s
+from operations.verification import audit_market_quick as a
+from operations.reporting import market_report as r
+from operations.cli import measurement_contract as c
+from operations.verification import measurement_verify as v
+from operations.capture import run_store as s
 from p0_paths import clean_env
 from p0_runs import PLAN,TX,manifest_run
 
@@ -129,7 +129,7 @@ class Identities(unittest.TestCase):
                 self.assertEqual((x['spec']['schema'],x['spec']['layout']),(c.SPEC_SCHEMA,tag))
                 self.assertIn('run_store.py',x['spec']['decoder_pins'])
                 self.assertEqual((x['manifest']['version'],x['manifest']['layout']),(r.DATASET_VERSION,tag))
-                self.assertEqual(x['manifest']['layout_sha256'],c.file_hash(SCRIPTS/'run_store.py'))
+                self.assertEqual(x['manifest']['layout_sha256'],c.file_hash(p0_paths.OPERATIONS/'capture/run_store.py'))
             self.assertNotEqual(v1['spec']['verification_spec_id'],v2['spec']['verification_spec_id'])
             self.assertEqual(v1['records'],v2['records']);self.assertNotEqual(v1['records'],b'')
             self.assertEqual(json.loads(v1['records'].splitlines()[0])['schema'],r.VERSION)
@@ -182,11 +182,11 @@ class Resume(unittest.TestCase):
 class SelfTest(unittest.TestCase):
     def test_self_test_without_tests_fails_closed(self):
         with tempfile.TemporaryDirectory() as folder:
-            scripts=Path(folder)/'project_0/scripts';scripts.mkdir(parents=True)
-            for name in ('audit_market_quick.py','run_store.py'):shutil.copy2(SCRIPTS/name,scripts/name)
-            call=lambda:subprocess.run([sys.executable,str(scripts/'audit_market_quick.py'),'--self-test'],capture_output=True,text=True,timeout=60,env=clean_env())
+            project=Path(folder)/'project_0'
+            shutil.copytree(p0_paths.OPERATIONS,project/'operations',ignore=shutil.ignore_patterns('__pycache__'))
+            call=lambda:subprocess.run([sys.executable,str(project/'operations/verification/audit_market_quick.py'),'--self-test'],capture_output=True,text=True,timeout=60,env=clean_env())
             p=call();self.assertEqual(p.returncode,2);self.assertIn('SELF_TEST_NOT_FOUND',p.stderr)
-            (scripts/'test_audit_market_quick.py').write_text('')
+            (project/'tests/python').mkdir(parents=True);(project/'tests/python/test_audit_market_quick.py').write_text('')
             self.assertEqual(call().returncode,2)
 
 

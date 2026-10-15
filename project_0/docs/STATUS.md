@@ -13,7 +13,7 @@ Every statement below names its source. Line numbers refer to the ledger/plan bl
 | Item | Status | Source |
 |---|---|---|
 | First realized net profit | **NOT PROVEN** (`FIRST_REALIZED_PROFIT_NOT_PROVEN`) | `MEASUREMENT_LEDGER.json` → `current_status.overall` |
-| LIVE | **DISABLED** — `P0_MODE=live` is refused in code | `native/crates/darkbot-runner/src/main.rs:599-603`; ledger JSON `current_status.live` |
+| LIVE | **DISABLED** — `P0_MODE=live` is refused in code | `native/crates/runtime/src/main.rs:599-603`; ledger JSON `current_status.live` |
 | Value-bearing submission | **DISABLED** — econ4h wraps the submitter in `ObserveOnly` | `main.rs:1028`; ledger JSON `current_status.submission` |
 | Current positive executable candidate | **NOT ESTABLISHED** — FE-00 verdict `NO_ECONOMIC_GO` | ledger L5255-5263; `evidence/FE00_20261013/candidates.json` |
 | Provider capacity (FREE_ONLY) | **UNKNOWN** — not measured | `evidence/OPERATIONS_CONFIG_20261014/qualification.json` |
@@ -26,7 +26,7 @@ Offline test success is not evidence of profitability, provider capacity or LIVE
 | Commit / tag | Content | Qualification | Source |
 |---|---|---|---|
 | `0782d8b` · tag `project0-last-qualified-20261014` | Configurable operational contract (profiles, budgets, endpoints) on top of FE-04 `cf540f4` | **LOCAL_PASS**: Rust 370 (`crate_health txv1`) / 368 (`crate_health`) PASS, 1 ignored each; Python 65 PASS; Clippy 38→38; both release builds PASS. Mainnet NOT_RUN | ledger L5294-5304; `evidence/OPERATIONS_CONFIG_20261014/qualification.json` |
-| `4c271cb` · tag `project0-last-unstructured-20261014` | **FE-01 work in progress** (+898 lines): `darkbot-runner/src/fe_qualification.rs`, `bin/p0-fe-qualify.rs`, `darkbot-solana/src/runtime_config.rs`, `scripts/fe_readonly_preflight.py` (+7 Rust, +3 Python tests) | **Offline tests green, qualification record missing.** User-reported offline baseline 2026-10-14: Python 68 PASS; Rust `crate_health` 375 PASS / 1 ignored; `crate_health txv1` 377 PASS / 1 ignored. No ledger entry, no evidence directory, no recorded Clippy/format differential | `git diff 0782d8b 4c271cb`; tag message "FE01 development WIP, qualification pending" |
+| `4c271cb` · tag `project0-last-unstructured-20261014` | **FE-01 work in progress** (+898 lines): `runtime/src/fe_qualification.rs`, `bin/p0-fe-qualify.rs`, `solana/src/runtime_config.rs`, `operations/qualification/fe_readonly_preflight.py` (+7 Rust, +3 Python tests) | **Offline tests green, qualification record missing.** User-reported offline baseline 2026-10-14: Python 68 PASS; Rust `crate_health` 375 PASS / 1 ignored; `crate_health txv1` 377 PASS / 1 ignored. No ledger entry, no evidence directory, no recorded Clippy/format differential | `git diff 0782d8b 4c271cb`; tag message "FE01 development WIP, qualification pending" |
 | `ae6f96d` … `1b87387` | Structure reform, documentation only | Code unchanged: `git diff 4c271cb HEAD` touches no file outside `docs/`, `README.md`, `gates/` | git history |
 
 ## 3. Status levels
@@ -43,14 +43,14 @@ Offline test success is not evidence of profitability, provider capacity or LIVE
 
 | Capability | Implemented | Offline tested | Mainnet measured | Economically qualified | LIVE approved |
 |---|---|---|---|---|---|
-| WSS/RPC ingress, bootstrap, recovery | Yes (`darkbot-solana/src/ingress`, `state`) | Yes | Bootstrap PASS 2026-10-02 (L1389); recovery PASS 2026-10-03 (L1633, L1898); controlled 60 s market WSS disconnect: gap 1/1 recovered (user-tested, L177). Long-run continuity **FAILED**: 4h run 1 unrecovered gap (L5107-5228); 5h run 527 GAPs / HTTP 429 (PHASENPLAN L5005-5016) | n/a | No |
+| WSS/RPC ingress, bootstrap, recovery | Yes (`solana/src/ingress`, `state`) | Yes | Bootstrap PASS 2026-10-02 (L1389); recovery PASS 2026-10-03 (L1633, L1898); controlled 60 s market WSS disconnect: gap 1/1 recovered (user-tested, L177). Long-run continuity **FAILED**: 4h run 1 unrecovered gap (L5107-5228); 5h run 527 GAPs / HTTP 429 (PHASENPLAN L5005-5016) | n/a | No |
 | Canonical state (snapshot → reconcile → READY) | Yes | Yes | PASS in bootstrap and C0-E1 runs (L1389, L4971-5044) | n/a | No |
-| Exact Health (marginfi crate) and sizing | Yes (`darkbot-project0/src/health.rs`, `sizing.rs`) | Yes | Exercised at scale: R127d 12.4 M sweep checks (L4028) | n/a | No |
+| Exact Health (marginfi crate) and sizing | Yes (`liquidation/src/health.rs`, `sizing.rs`) | Yes | Exercised at scale: R127d 12.4 M sweep checks (L4028) | n/a | No |
 | Candidate admission (R127d cache, P1-A revision, P1-B fairness) | Yes | P1-A PASS (FIX-134, L4211-4270); P1-B PASS (FIX-135, L4278-4310) | R127d Shadow PASS 2026-10-05 **before** FIX-134/135 (L4028); dedicated R127 requalification after the fixes **not recorded** | n/a | No |
 | Economics, executable floor (P1-C), funding classes | Yes (`economics.rs`, `funding.rs`) | P1-C PASS (P6-MT T1, L4569) | Historical candidates only: 3 negative edges −121889 / −118606 / −91691 USD-micro (R124) | **No** — `NO_ECONOMIC_GO` (L5255-5263) | No |
-| Builder, signing, transaction simulation | Yes (`builder.rs`, `darkbot-solana/src/tx`) | Yes | Simulation call path proven (R97/R99/R101, L1964; FIX-126 v1 wire, L3203); R122: 2 historical technical ZERO_PREFUND successes, not current opportunities (ledger JSON `economic_evidence`) | **No** — full current candidate simulation NOT_PROVEN (FE-02) | No |
+| Builder, signing, transaction simulation | Yes (`builder.rs`, `solana/src/tx`) | Yes | Simulation call path proven (R97/R99/R101, L1964; FIX-126 v1 wire, L3203); R122: 2 historical technical ZERO_PREFUND successes, not current opportunities (ledger JSON `economic_evidence`) | **No** — full current candidate simulation NOT_PROVEN (FE-02) | No |
 | Winner tracking / parsing (F1, F8) | Yes (`winner.rs`, `winner_tracker.rs`) | PASS locally (P6-MT T1, L4569); 6/6 real audit winners resolve (fixture tests) | No qualified Mainnet winner/race result | n/a | No |
-| RPC / Jito submission infrastructure | Yes (`darkbot-solana/src/submit`) | Mock/loopback only | No liquidation was ever submitted. Only separately authorized ATA prewarm/creation transactions (ledger L739, FIX-129 doc) | Jito lifecycle and tip costs UNKNOWN (FIX-129) | **No** |
+| RPC / Jito submission infrastructure | Yes (`solana/src/submit`) | Mock/loopback only | No liquidation was ever submitted. Only separately authorized ATA prewarm/creation transactions (ledger L739, FIX-129 doc) | Jito lifecycle and tip costs UNKNOWN (FIX-129) | **No** |
 | C0-MO market observer | Yes (`market_observer.rs`) | Yes | 600 s smoke 2026-10-08: enhanced `transactionSubscribe` HTTP 403; `logs` source observed 6 liquidations, verdict `MARKET_DATA_INCOMPLETE` (truncated logs), `INSUFFICIENT_SAMPLE` (`evidence/C0MO_20261008/SMOKE_600S.md`) | n/a | No |
 | C0-E1 econ4h harness, MeasurementPlan, index/strict verification, reports (P1–P6) | Yes | P6 OFFLINE PASS (L5242-5254) | 600 s retention retest **PASS** 2026-10-08 (L4971-5044); 4h **INCOMPLETE** 2026-10-09 (L5107); 5h **INCOMPLETE** 2026-10-11 (PHASENPLAN L5005); historical index **OPEN** (RPC 429, L95-135) | n/a | No |
 | Operational configuration contract | Yes (`runtime_config.rs`) | LOCAL_PASS (L5294-5304) | NOT_RUN | n/a | No |

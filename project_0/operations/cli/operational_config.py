@@ -11,7 +11,7 @@ import tempfile
 @contextmanager
 def resolve(arguments, env=None):
     environment=dict(os.environ if env is None else env)
-    binary=Path(environment.get('P0_CONFIG_BIN',str(Path(__file__).resolve().parents[1]/'native/target/release/p0-longtail')))
+    binary=Path(environment.get('P0_CONFIG_BIN',str(Path(__file__).resolve().parents[2]/'native/target/release/p0-longtail')))
     if not binary.is_file():raise ValueError('OPERATIONAL_CONFIG_BINARY_NOT_BUILT')
     with tempfile.TemporaryDirectory(prefix='p0-operational-') as directory:
         path=Path(directory)/'config.json'

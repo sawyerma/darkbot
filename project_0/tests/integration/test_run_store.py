@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import json
 import os
 from pathlib import Path
@@ -11,13 +11,14 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-import audit_market_quick as a
-import measurement_contract as c
-import run_store as s
+from operations.verification import audit_market_quick as a
+from operations.cli import measurement_contract as c
+from operations.capture import run_store as s
 from p0_paths import clean_env
 from p0_runs import legacy_run,manifest_run,v2_run
 
 SCRIPTS=p0_paths.SCRIPTS
+RUN_STORE=p0_paths.OPERATIONS/'capture/run_store.py'
 REPO=p0_paths.REPO
 
 
@@ -98,15 +99,15 @@ class Allocate(unittest.TestCase):
     def test_cli_prints_paths_and_stable_error_codes(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)/'runs'
-            ok=subprocess.run(['python3',str(SCRIPTS/'run_store.py'),'allocate',str(root),'cli_run'],capture_output=True,text=True)
+            ok=subprocess.run(['python3',str(RUN_STORE),'allocate',str(root),'cli_run'],capture_output=True,text=True)
             self.assertEqual((ok.returncode,ok.stdout.strip()),(0,str(root/'cli_run')))
-            again=subprocess.run(['python3',str(SCRIPTS/'run_store.py'),'allocate',str(root),'cli_run'],capture_output=True,text=True)
+            again=subprocess.run(['python3',str(RUN_STORE),'allocate',str(root),'cli_run'],capture_output=True,text=True)
             self.assertEqual(again.returncode,2);self.assertTrue(again.stderr.startswith('RUN_ID_COLLISION:'))
-            check=subprocess.run(['python3',str(SCRIPTS/'run_store.py'),'check',str(root),'fresh'],capture_output=True,text=True)
+            check=subprocess.run(['python3',str(RUN_STORE),'check',str(root),'fresh'],capture_output=True,text=True)
             self.assertEqual((check.returncode,check.stdout.strip()),(0,str(root/'fresh')));self.assertFalse((root/'fresh').exists())
-            check=subprocess.run(['python3',str(SCRIPTS/'run_store.py'),'check',str(root),'cli_run'],capture_output=True,text=True)
+            check=subprocess.run(['python3',str(RUN_STORE),'check',str(root),'cli_run'],capture_output=True,text=True)
             self.assertEqual(check.returncode,2);self.assertTrue(check.stderr.startswith('RUN_ID_COLLISION:'))
-            bad=subprocess.run(['python3',str(SCRIPTS/'run_store.py'),'root','econ4h'],env={**clean_env(),'P0_RUN_STORE':'bogus'},capture_output=True,text=True)
+            bad=subprocess.run(['python3',str(RUN_STORE),'root','econ4h'],env={**clean_env(),'P0_RUN_STORE':'bogus'},capture_output=True,text=True)
             self.assertEqual(bad.returncode,2);self.assertTrue(bad.stderr.startswith('RUN_STORE_INVALID:'))
 
 
@@ -182,7 +183,8 @@ class Launchers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             tmp=Path(folder);project=tmp/'repo/project_0'
             (project/'scripts').mkdir(parents=True);(project/'config').mkdir()
-            for name in ('run_econ4h.sh','run_store.py'):shutil.copy2(SCRIPTS/name,project/'scripts'/name)
+            for name in ('capture.sh','run_econ4h.sh'):shutil.copy2(SCRIPTS/name,project/'scripts'/name)
+            shutil.copytree(p0_paths.OPERATIONS,project/'operations',ignore=shutil.ignore_patterns('__pycache__'))
             shutil.copy2(REPO/'project_0/config/wallet.public.env',project/'config/wallet.public.env')
             git=['git','-C',str(tmp/'repo'),'-c','user.name=t','-c','user.email=t@invalid','-c','core.hooksPath=/dev/null','-c','commit.gpgsign=false']
             subprocess.run(git+['init','-q'],check=True);subprocess.run(git+['commit','-q','--allow-empty','-m','fixture'],check=True)
@@ -231,7 +233,8 @@ class Launchers(unittest.TestCase):
             self.assertFalse((project/'data/runs/old_run').exists())
 
     def test_changed_launchers_parse(self):
-        for name in ('run_econ4h.sh','run_market_observer.sh','run_gap_reconnect_smoke.sh'):
+        for name in ('capture.sh','smoke.sh','preflight.sh','verify.sh','report.sh','test.sh','run_econ4h.sh','run_market_observer.sh',
+                     'run_shadow_mainnet.sh','run_gap_reconnect_smoke.sh','fe_readonly_preflight.sh'):
             self.assertEqual(subprocess.run(['bash','-n',str(SCRIPTS/name)]).returncode,0,name)
 
 
@@ -297,13 +300,12 @@ class ReaderCli(unittest.TestCase):
     """verify.sh / report.sh with byte-identical copies of the pinned readers in a temporary project."""
     def project(self,tmp,fake=False):
         project=tmp/'project_0';scripts=project/'scripts';scripts.mkdir(parents=True)
-        for name in ('verify.sh','report.sh','run_store.py'):shutil.copy2(SCRIPTS/name,scripts/name)
+        for name in ('verify.sh','report.sh'):shutil.copy2(SCRIPTS/name,scripts/name)
+        shutil.copytree(p0_paths.OPERATIONS,project/'operations',ignore=shutil.ignore_patterns('__pycache__'))
         if fake:
-            for name in ('measurement_verify.py','market_report.py','audit_market_quick.py'):
-                (scripts/name).write_text('import json,sys\nprint(json.dumps(sys.argv[1:]))\n')
+            for name in ('verification/measurement_verify.py','reporting/market_report.py','verification/audit_market_quick.py'):
+                (project/'operations'/name).write_text('import json,sys\nprint(json.dumps(sys.argv[1:]))\n')
         else:
-            for name in ('measurement_verify.py','market_report.py','audit_market_quick.py','measurement_contract.py','operational_config.py'):
-                shutil.copy2(SCRIPTS/name,scripts/name)
             (project/'native').symlink_to(REPO/'project_0/native')
         return project
 
@@ -328,8 +330,8 @@ class ReaderCli(unittest.TestCase):
     def test_verify_resume_and_report_by_id_keep_identities(self):
         with tempfile.TemporaryDirectory() as folder:
             project=self.project(Path(folder))
-            for name in ('measurement_contract.py','audit_market_quick.py','market_report.py','run_store.py'):
-                self.assertEqual(c.file_hash(project/'scripts'/name),c.file_hash(SCRIPTS/name))
+            for name in ('cli/measurement_contract.py','verification/audit_market_quick.py','reporting/market_report.py','capture/run_store.py'):
+                self.assertEqual(c.file_hash(project/'operations'/name),c.file_hash(p0_paths.OPERATIONS/name))
             run=project/'data/runs/run_v1';(run/'market').mkdir(parents=True)
             (run/'market/summary.json').write_text(json.dumps({'observation_started_at':a.iso_ns(100*a.NS),'observation_ended_at':a.iso_ns(200*a.NS),
                 'configured_duration_seconds':100,'full_slot_reconciliation':{'market_slot_end':{'slot':11}}}))

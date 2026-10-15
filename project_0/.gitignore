@@ -4,17 +4,17 @@
 # Versioned evidence belongs in docs/evidence/ and is not affected by this file.
 
 # Run and capture output at the default locations used by the runtime and launchers.
-# econ.rs P0_ECON_OUT_DIR; run_econ4h.sh; run_gap_reconnect_smoke.sh
+# econ.rs P0_ECON_OUT_DIR; scripts/capture.sh (P0_RUN_STORE=legacy); scripts/smoke.sh
 /data/econ4h/
-# market_observer.rs P0_MARKET_OUT_DIR; run_market_observer.sh
+# market_observer.rs P0_MARKET_OUT_DIR; scripts/capture.sh market
 /data/market/
-# main.rs P0_RECORD_PATH, P0_SUMMARY_PATH, P0_MT0_PATH; run_shadow_mainnet.sh; run_econ4h.sh
+# main.rs P0_RECORD_PATH, P0_SUMMARY_PATH, P0_MT0_PATH; scripts/capture.sh shadow and econ4h
 /data/shadow/
-# c0_census.py --out default
+# operations/capture/c0_census.py --out default
 /data/c0/
-# Default run store for new econ4h runs, layout V2 (scripts/run_store.py)
+# Default run store for new econ4h runs, layout V2 (operations/capture/run_store.py)
 /data/runs/
-# Reconstructible caches and working data (docs/operations/data_policy.md); run_gap_reconnect_smoke.sh
+# Reconstructible caches and working data (docs/operations/data_policy.md); scripts/smoke.sh
 /data/cache/
 
 # Local integration results kept outside docs/evidence/; never versioned.

@@ -11,9 +11,9 @@ crate_health = ["darkbot-project0/crate_health", "marginfi-type-crate", "kamino-
 txv1 = ["darkbot-solana/txv1"]
 
 [dependencies]
-darkbot-common = { path = "../darkbot-common" }
-darkbot-solana = { path = "../darkbot-solana" }
-darkbot-project0 = { path = "../darkbot-project0" }
+darkbot-common = { path = "../common" }
+darkbot-solana = { path = "../solana" }
+darkbot-project0 = { path = "../liquidation" }
 solana-sdk = "=3.0.0"
 solana-client = "=3.1.12"
 solana-address-lookup-table-interface = { version = "=3.1.0", features = ["bincode", "bytemuck"] }

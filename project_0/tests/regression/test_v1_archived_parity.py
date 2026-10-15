@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import json
 import os
 import shutil
@@ -11,9 +11,9 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-import audit_market_quick as a
-import market_report as r
-import measurement_contract as c
+from operations.verification import audit_market_quick as a
+from operations.reporting import market_report as r
+from operations.cli import measurement_contract as c
 from p0_paths import clean_env
 from p0_runs import manifest_run
 

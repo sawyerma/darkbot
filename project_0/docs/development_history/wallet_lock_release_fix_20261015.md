@@ -1,6 +1,6 @@
 # Wallet journal lock release — technical finding (2026-10-15)
 
-Status: **PENDING_INDEPENDENT_REVIEW**. This fix is separate from the run-layout restructuring.
+Status: committed (see below); no independent acceptance is claimed here. This fix is separate from the run-layout restructuring.
 Committed by the user as `6ec4483` (unlock in `Drop for Journal`) and `218710b` (`WalletLock` guard for every release path).
 
 ## Symptom

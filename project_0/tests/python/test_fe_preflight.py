@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import base64
 import unittest
 import io,json
@@ -9,8 +9,8 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from unittest.mock import patch, Mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import audit_market_quick as a
-import fe_readonly_preflight as p
+from operations.verification import audit_market_quick as a
+from operations.qualification import fe_readonly_preflight as p
 
 class Preflight(unittest.TestCase):
     def test_full_dispatch_preserves_private_rust_config_and_never_smoke_probes(self):

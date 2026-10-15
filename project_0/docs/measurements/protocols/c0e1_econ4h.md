@@ -10,9 +10,9 @@ submission call; startup rejects LIVE/submission flags. No P8 gate is changed.
 
 ```bash
 # Usual owner-only project_0/.env and external signer prerequisites apply.
-project_0/scripts/run_econ4h.sh
+project_0/scripts/capture.sh econ4h-launcher
 # Integration qualification before the full run:
-P0_ECON_DURATION_SECS=600 P0_ECON_SNAPSHOT_SECS=150 project_0/scripts/run_econ4h.sh
+P0_ECON_DURATION_SECS=600 P0_ECON_SNAPSHOT_SECS=150 project_0/scripts/capture.sh econ4h-launcher
 ```
 
 Defaults: 14400 seconds, 3600-second snapshots, capital scenarios

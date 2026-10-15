@@ -1,8 +1,8 @@
 """Synthetic run directories in layout V1 and V2 (paths from run_store.ARTIFACTS)."""
 import json
-import p0_paths  # noqa: F401  (puts project_0/scripts on sys.path)
-import audit_market_quick as a
-import run_store as s
+import p0_paths  # noqa: F401  (puts project_0 on sys.path)
+from operations.verification import audit_market_quick as a
+from operations.capture import run_store as s
 
 PLAN={'schema_version':1,'duration_seconds':100,'snapshot_offsets_ns':[25*a.NS,50*a.NS,75*a.NS,100*a.NS],'budgets':{}}
 TX={'signature':'sig1','slot':20,'source':'logsSubscribe','success':True,'t_rx_ns':5,'raw':{'value':{'logs':[]}}}

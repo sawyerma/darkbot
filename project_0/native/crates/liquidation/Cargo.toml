@@ -15,8 +15,8 @@ default = []
 crate_health = ["marginfi", "marginfi-type-crate", "anchor-lang", "dep:fixed", "kamino-mocks", "drift-mocks", "juplend-mocks"]
 
 [dependencies]
-darkbot-common = { path = "../darkbot-common" }
-darkbot-solana = { path = "../darkbot-solana" }
+darkbot-common = { path = "../common" }
+darkbot-solana = { path = "../solana" }
 # BELEGT: marginfi-v2 Workspace pinnt solana-sdk =3.0.0, solana-client =3.1.12, anchor-lang 1.0.2
 solana-sdk = "=3.0.0"
 bytemuck = "1"

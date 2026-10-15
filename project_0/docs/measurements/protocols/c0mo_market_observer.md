@@ -10,8 +10,8 @@ Simulation, keine Submission, keine Health-/Candidate-/P1-C-/F1-/F8-/Routing-/Fu
 
 ```bash
 cd "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot"
-P0_MARKET_DURATION_SECS=14400 project_0/scripts/run_market_observer.sh                          # Helius Developer+
-P0_MARKET_SOURCE=logs P0_MARKET_DURATION_SECS=14400 project_0/scripts/run_market_observer.sh    # Helius Free
+P0_MARKET_DURATION_SECS=14400 project_0/scripts/capture.sh market                          # Helius Developer+
+P0_MARKET_SOURCE=logs P0_MARKET_DURATION_SECS=14400 project_0/scripts/capture.sh market    # Helius Free
 ```
 
 Smoke-Test: `P0_MARKET_DURATION_SECS=600`. Commitment: `P0_MARKET_COMMITMENT=finalized` (Default; `confirmed`

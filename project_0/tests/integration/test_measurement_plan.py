@@ -5,7 +5,7 @@ Run AFTER building release p0-measurement-plan; never contacts RPC or starts Sha
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import json
 import os
 from pathlib import Path

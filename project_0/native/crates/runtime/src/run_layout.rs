@@ -1,6 +1,6 @@
 //! Run directory layout of an econ4h capture. V1 keeps every historical file name at the run
 //! root; V2 is `manifest.json`, `config.json`, `capture/`, `snapshots/`, `verification/`,
-//! `reports/` and `logs/`. The Python contract `scripts/run_store.py` (ARTIFACTS) maps the same
+//! `reports/` and `logs/`. The Python contract `operations/capture/run_store.py` (ARTIFACTS) maps the same
 //! logical artifacts; both tables must stay identical.
 use std::path::{Path, PathBuf};
 

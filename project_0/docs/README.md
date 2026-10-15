@@ -10,7 +10,7 @@ Repository paths are rooted at `project_0/`; the Rust workspace is `project_0/na
 | File | Role |
 |---|---|
 | [STATUS.md](STATUS.md) | Current status summary derived from ledger, plan, evidence and code. Never upgrades a gate. |
-| [operations/restructure_handoff.md](operations/restructure_handoff.md) | **Active repository-reform handoff**: 1–7, 8a, 8b.1 done; 8b.2–15 implemented, PENDING_INDEPENDENT_REVIEW; tests and Git rules. |
+| [operations/restructure_handoff.md](operations/restructure_handoff.md) | **Active repository-reform handoff**: 1–7, 8a, 8b.1 done; 8b.2–15 pushed in `46be33c`; 16–29 implemented in the working tree; 30–32 open; tests and Git rules. |
 | [architecture/restructure_32_step_plan.md](architecture/restructure_32_step_plan.md) | **32-iteration structure roadmap**: A–F phases, milestones, all remaining tasks and target tree. |
 | [PHASENPLAN.md](PHASENPLAN.md) · [PHASENPLAN.json](PHASENPLAN.json) | Authoritative production plan; the JSON is a compact index, the Markdown is canonical. |
 | [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md) · [MEASUREMENT_LEDGER.json](MEASUREMENT_LEDGER.json) | Measured evidence and gate decisions, newest entries first; the JSON is a compact index. |
@@ -111,6 +111,19 @@ Ledger and PHASENPLAN entries, evidence inventories and checksums keep the path 
 | `docs/FABLE_WORK_ORDER.md` | [development_history/fable_work_order.md](development_history/fable_work_order.md) |
 | `docs/R127C_CHANGELOG_ROLLBACK.md` | [development_history/r127c_changelog_rollback.md](development_history/r127c_changelog_rollback.md) |
 | `docs/R127D_CHANGELOG_ROLLBACK.md` | [development_history/r127d_changelog_rollback.md](development_history/r127d_changelog_rollback.md) |
+| `scripts/measurement_cli.py`, `measurement_contract.py`, `operational_config.py` | [operations/cli/](../operations/cli/) |
+| `scripts/run_store.py`, `scripts/c0_census.py` | [operations/capture/](../operations/capture/) |
+| `scripts/audit_market_quick.py`, `scripts/measurement_verify.py` | [operations/verification/](../operations/verification/) |
+| `scripts/market_report.py` | [operations/reporting/](../operations/reporting/) |
+| `scripts/fe_readonly_preflight.py`, `fe_candidate_report.py`, `run_r126_qualify.py`, `run_r127_qualify.py` | [operations/qualification/](../operations/qualification/) |
+| `scripts/test.sh`, `run_econ4h.sh`, `run_market_observer.sh`, `run_shadow_mainnet.sh` | [scripts/capture.sh](../scripts/capture.sh) (`econ4h`, `econ4h-launcher`, `market`, `shadow`); old names forward |
+| `scripts/run_gap_reconnect_smoke.sh`, `scripts/fe_readonly_preflight.sh` | [scripts/smoke.sh](../scripts/smoke.sh), [scripts/preflight.sh](../scripts/preflight.sh); old names forward |
+| `scripts/test_*.py` | [tests/](../tests/README.md) (`python/`, `integration/`, `regression/`, `fixtures/`) |
+| `native/crates/darkbot-common`, `darkbot-solana`, `darkbot-project0`, `darkbot-runner` | `native/crates/common`, `solana`, `liquidation`, `runtime` (Cargo package names unchanged) |
+
+Old `python3 project_0/scripts/<module>.py` command lines still work through thin forwarding files in `scripts/`; the old test
+discovery command runs the suite through `scripts/test_suite.py`. `PHASENPLAN.json` still names
+`darkbot-solana/src/runtime_config.rs`, now `native/crates/solana/src/runtime_config.rs`.
 
 Inside the moved historical reports only location-relative paths to `docs/evidence/` were re-rooted; measurement results and wording are unchanged.
 

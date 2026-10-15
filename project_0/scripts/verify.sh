@@ -13,7 +13,7 @@ if [[ " ${*} " != *" --help "* && " ${*} " != *" --self-test "* && " ${*} " != *
   fi
 fi
 if [[ " ${*} " == *" --self-test "* ]]; then
-  exec python3 "$DIR/audit_market_quick.py" "$@"
+  exec python3 "$DIR/../operations/verification/audit_market_quick.py" "$@"
 fi
-# --run ID|PATH is located across all run roots and checked for layout V1 before the pinned readers run.
-exec python3 "$DIR/run_store.py" exec "$DIR/measurement_verify.py" "$@"
+# --run ID|PATH is located across all run roots and its layout checked before the pinned readers run.
+exec python3 "$DIR/../operations/capture/run_store.py" exec "$DIR/../operations/verification/measurement_verify.py" "$@"

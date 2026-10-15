@@ -13,7 +13,7 @@ import os
 import shutil
 import time
 import uuid
-import run_store
+from operations.capture import run_store
 
 SCHEMA='C0-E1/MeasurementConfigV2'
 SPEC_SCHEMA='C0-E1/VerificationSpec/3'
@@ -114,7 +114,7 @@ class ReportQuery:
             raise ContractError('REPORT_BOOLEAN_INVALID')
         if self.min_net_usd is not None and (type(self.min_net_usd) not in (int,float) or not math.isfinite(self.min_net_usd)):
             raise ContractError('REPORT_NET_NONFINITE')
-        from audit_market_quick import utc_ns
+        from operations.verification.audit_market_quick import utc_ns
         if self.from_utc:utc_ns(self.from_utc)
         if self.to_utc:utc_ns(self.to_utc)
         if self.from_utc and self.to_utc and utc_ns(self.from_utc)>=utc_ns(self.to_utc):
@@ -161,7 +161,7 @@ def config(args):
         args.report_view,args.report_provenance,args.report_from,args.report_to,args.report_min_net_usd,
         args.report_winners=='on',args.report_competition=='on',args.report_economics=='on',args.format)
     if query.min_net_usd is not None and not math.isfinite(query.min_net_usd):raise ContractError('REPORT_NET_NONFINITE')
-    from audit_market_quick import utc_ns
+    from operations.verification.audit_market_quick import utc_ns
     if query.from_utc:utc_ns(query.from_utc)
     if query.to_utc:utc_ns(query.to_utc)
     if query.from_utc and query.to_utc and utc_ns(query.from_utc)>=utc_ns(query.to_utc):raise ContractError('REPORT_WINDOW_INVALID')
@@ -283,16 +283,16 @@ def preflight(run,v,qualification,url):
 
 
 def specification(run,v,provider_binding):
-    from audit_market_quick import read_window
+    from operations.verification import audit_market_quick as audit
     identity=capture_identity(run);kind=layout(run)
-    files=[Path(__file__),Path(__file__).with_name('audit_market_quick.py'),Path(__file__).with_name('run_store.py')]
-    native=Path(__file__).resolve().parents[1]/'native/crates/darkbot-runner/src'
+    files=[Path(__file__),Path(audit.__file__),Path(run_store.__file__)]
+    native=run_store.PROJECT/'native/crates/runtime/src'
     if v.mode=='strict':
         files += [native/x for x in ('market_verification.rs','market_reconcile.rs','market_truth.rs','market_gap.rs')]
         binary=native.parents[2]/'target/release/p0-strict-verify'
         if binary.exists():files.append(binary)
     payload={'schema':SPEC_SCHEMA,'layout':run_store.LAYOUT_TAGS[kind],'capture_run_id':identity['capture_run_id'],
-             'capture_identity':identity,'window':read_window(run),'mode':v.mode,'protocol_pin':PROTOCOL,
+             'capture_identity':identity,'window':audit.read_window(run),'mode':v.mode,'protocol_pin':PROTOCOL,
              'decoder_pins':{p.name:file_hash(p) for p in files},'policy':{'name':'FREE_ONLY','provider_binding':provider_binding},
              'budgets':asdict(v)}
     return {**payload,'verification_spec_id':digest(payload)}

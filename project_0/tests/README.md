@@ -1,6 +1,6 @@
 # Project 0 Python tests
 
-Status: structure iterations 13–15, **PENDING_INDEPENDENT_REVIEW**. Offline only: temporary synthetic runs, fake RPC and fake
+Status: structure iterations 13–15 (`46be33c`); imports switched to the `operations` package in iterations 16–20. Offline only: temporary synthetic runs, fake RPC and fake
 binaries; no network, no mainnet, no signer. Rust tests stay inline in `native/crates/*/src` (`cargo test`).
 
 ## Run
@@ -21,9 +21,9 @@ Integration tests need the release binaries `p0-measurement-plan`, `p0-econ-repl
 | Directory | Content |
 |---|---|
 | `python/` | unit tests: index decoder and verifier (`test_audit_market_quick.py`), FE preflight, measurement contract, run layout V1/V2 contract and identities (`test_run_layout.py`) |
-| `integration/` | release binaries, launchers and CLI end to end: measurement plan / `test.sh`, operational config bridge, run store and launchers incl. V1/V2 runs through `verify.sh`/`report.sh`, report normalization, P6 invariants |
+| `integration/` | release binaries, launchers and CLI end to end: measurement plan / `capture.sh` (via `test.sh`), operational config bridge, run store and launchers incl. V1/V2 runs through `verify.sh`/`report.sh`, report normalization, P6 invariants |
 | `regression/` | historical references: FE candidate evidence, preserved local runs resolve by id (names only, read-only), V1 parity with the archived pinned readers |
-| `fixtures/` | shared helpers, not tests: `p0_paths.py` (paths, clean environment, puts `scripts/` on `sys.path`), `p0_market.py` (synthetic transactions, fake RPC, temporary V1 run, report events), `p0_runs.py` (synthetic V1/V2 run directories) |
+| `fixtures/` | shared helpers, not tests: `p0_paths.py` (paths, clean environment, puts `project_0/` on `sys.path` for the `operations` package), `p0_market.py` (synthetic transactions, fake RPC, temporary V1 run, report events), `p0_runs.py` (synthetic V1/V2 run directories) |
 
 Historical raw evidence (`docs/evidence/AUDIT_20261005`, `R122`/`R124` JSON) is read in place and never copied into
 `fixtures/`; Rust tests embed the same files with `include_str!`.

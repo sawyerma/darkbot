@@ -30,10 +30,10 @@ The 2026-10-05 audit handoff is historical: [docs/development_history/audit_hand
 | Exact audit commands and results | [docs/evidence/AUDIT_20261005/COMMANDS_AND_RESULTS.md](docs/evidence/AUDIT_20261005/COMMANDS_AND_RESULTS.md) |
 | Complete preserved Astra audit bundle | [docs/evidence/AUDIT_20261005/darkbot_audit_bundle_20261005.zip](docs/evidence/AUDIT_20261005/darkbot_audit_bundle_20261005.zip) |
 | Rust production workspace | [native/](native/) |
-| Runtime orchestration / Mainnet runner | [native/crates/darkbot-runner/](native/crates/darkbot-runner/) |
-| Marginfi / Project 0 domain logic | [native/crates/darkbot-project0/](native/crates/darkbot-project0/) |
-| Solana ingress/state/transaction/submission infrastructure | [native/crates/darkbot-solana/](native/crates/darkbot-solana/) |
-| Shared timing/config/lifecycle primitives | [native/crates/darkbot-common/](native/crates/darkbot-common/) |
+| Runtime orchestration / Mainnet runner | [native/crates/runtime/](native/crates/runtime/) |
+| Marginfi / Project 0 domain logic | [native/crates/liquidation/](native/crates/liquidation/) |
+| Solana ingress/state/transaction/submission infrastructure | [native/crates/solana/](native/crates/solana/) |
+| Shared timing/config/lifecycle primitives | [native/crates/common/](native/crates/common/) |
 | Qualification and Mainnet-shadow scripts | [scripts/](scripts/) |
 | Versioned raw evidence | [docs/evidence/](docs/evidence/) |
 | Public/non-secret config | [config/](config/) |
@@ -253,16 +253,24 @@ project_0/
 │   ├── Cargo.toml
 │   ├── Cargo.lock                    <- tracked reproducible dependency lock
 │   └── crates/
-│       ├── darkbot-common/           <- common runtime primitives
-│       ├── darkbot-solana/           <- Solana transport/state/tx/submit
-│       ├── darkbot-project0/          <- Project 0 protocol/domain logic
-│       └── darkbot-runner/            <- production orchestration/runtime
+│       ├── common/                   <- package darkbot-common: common runtime primitives
+│       ├── solana/                   <- package darkbot-solana: Solana transport/state/tx/submit
+│       ├── liquidation/              <- package darkbot-project0: Project 0 protocol/domain logic
+│       └── runtime/                  <- package darkbot-runner: production orchestration/runtime
 │
-├── scripts/                          <- reproducible operational/qualification scripts
-│   ├── c0_census.py
-│   ├── run_shadow_mainnet.sh
-│   ├── run_r126_qualify.py
-│   └── run_r127_qualify.py
+├── operations/                       <- Python implementations (package `operations`, iterations 16-20)
+│   ├── cli/                          <- measurement_cli.py, measurement_contract.py, operational_config.py
+│   ├── capture/                      <- run_store.py (run storage/layout contract), c0_census.py
+│   ├── verification/                 <- audit_market_quick.py, measurement_verify.py
+│   ├── reporting/                    <- market_report.py
+│   └── qualification/                <- fe_readonly_preflight.py, fe_candidate_report.py, run_r126/r127_qualify.py
+│
+├── scripts/                          <- stable shell entry points (iterations 21-25)
+│   ├── capture.sh                    <- econ4h typed measurement, econ4h-launcher, market, shadow
+│   ├── smoke.sh                      <- controlled gap/reconnect smoke
+│   ├── verify.sh / report.sh         <- read-only verification and reports
+│   ├── preflight.sh                  <- read-only FE preflight
+│   └── compatibility wrappers        <- test.sh, run_*.sh, fe_readonly_preflight.sh, old *.py paths, test_suite.py
 │
 ├── config/                           <- PUBLIC / NON-SECRET versioned config
 │   ├── profiles/                     <- typed runtime profiles (single source, embedded in Rust)
@@ -286,71 +294,71 @@ Do **not** create new top-level Project 0 directories without updating this READ
 
 The production implementation lives under **[native/](native/)**.
 
-### 4.1 `darkbot-common` — shared infrastructure
+### 4.1 `crates/common` (package `darkbot-common`) — shared infrastructure
 
-Directory: [native/crates/darkbot-common/](native/crates/darkbot-common/)
+Directory: [native/crates/common/](native/crates/common/)
 
 | Area | File |
 |---|---|
-| bounded channels / overflow semantics | [channel.rs](native/crates/darkbot-common/src/channel.rs) |
-| config parsing | [config.rs](native/crates/darkbot-common/src/config.rs) |
-| typed errors / halt reasons | [error.rs](native/crates/darkbot-common/src/error.rs) |
-| metrics histograms | [histogram.rs](native/crates/darkbot-common/src/histogram.rs) |
-| journal / replay primitives | [journal.rs](native/crates/darkbot-common/src/journal.rs) |
-| lifecycle / run state | [lifecycle.rs](native/crates/darkbot-common/src/lifecycle.rs) |
-| timing vocabulary / timelines | [timing.rs](native/crates/darkbot-common/src/timing.rs) |
+| bounded channels / overflow semantics | [channel.rs](native/crates/common/src/channel.rs) |
+| config parsing | [config.rs](native/crates/common/src/config.rs) |
+| typed errors / halt reasons | [error.rs](native/crates/common/src/error.rs) |
+| metrics histograms | [histogram.rs](native/crates/common/src/histogram.rs) |
+| journal / replay primitives | [journal.rs](native/crates/common/src/journal.rs) |
+| lifecycle / run state | [lifecycle.rs](native/crates/common/src/lifecycle.rs) |
+| timing vocabulary / timelines | [timing.rs](native/crates/common/src/timing.rs) |
 
-### 4.2 `darkbot-solana` — Solana infrastructure
+### 4.2 `crates/solana` (package `darkbot-solana`) — Solana infrastructure
 
-Directory: [native/crates/darkbot-solana/](native/crates/darkbot-solana/)
+Directory: [native/crates/solana/](native/crates/solana/)
 
 | Area | Directory |
 |---|---|
-| event ingress / WSS / source handling | [src/ingress/](native/crates/darkbot-solana/src/ingress/) |
-| canonical state / recovery | [src/state/](native/crates/darkbot-solana/src/state/) |
-| transaction construction primitives | [src/tx/](native/crates/darkbot-solana/src/tx/) |
-| RPC / Jito submission infrastructure | [src/submit/](native/crates/darkbot-solana/src/submit/) |
-| probes / binaries | [src/bin/](native/crates/darkbot-solana/src/bin/) |
+| event ingress / WSS / source handling | [src/ingress/](native/crates/solana/src/ingress/) |
+| canonical state / recovery | [src/state/](native/crates/solana/src/state/) |
+| transaction construction primitives | [src/tx/](native/crates/solana/src/tx/) |
+| RPC / Jito submission infrastructure | [src/submit/](native/crates/solana/src/submit/) |
+| probes / binaries | [src/bin/](native/crates/solana/src/bin/) |
 
-### 4.3 `darkbot-project0` — Project 0 protocol/domain logic
+### 4.3 `crates/liquidation` (package `darkbot-project0`) — Project 0 protocol/domain logic
 
-Directory: [native/crates/darkbot-project0/](native/crates/darkbot-project0/)
-
-| Responsibility | File |
-|---|---|
-| exact health / Marginfi health integration | [health.rs](native/crates/darkbot-project0/src/health.rs) |
-| Bank/Account reverse and threshold indices | [index.rs](native/crates/darkbot-project0/src/index.rs) |
-| integration projection/refresh semantics | [integration.rs](native/crates/darkbot-project0/src/integration.rs) |
-| state projection | [projection.rs](native/crates/darkbot-project0/src/projection.rs) |
-| receivership planning | [planner.rs](native/crates/darkbot-project0/src/planner.rs) |
-| receivership instructions / rules | [receivership.rs](native/crates/darkbot-project0/src/receivership.rs) |
-| liquidation sizing | [sizing.rs](native/crates/darkbot-project0/src/sizing.rs) |
-| deterministic economics / candidate ranking | [economics.rs](native/crates/darkbot-project0/src/economics.rs) |
-| funding classification | [funding.rs](native/crates/darkbot-project0/src/funding.rs) |
-| execution abstractions | [execution.rs](native/crates/darkbot-project0/src/execution.rs) |
-| prepared candidate / execution state | [prepared.rs](native/crates/darkbot-project0/src/prepared.rs) |
-| scheduling logic | [schedule.rs](native/crates/darkbot-project0/src/schedule.rs) |
-| safety rules | [safety.rs](native/crates/darkbot-project0/src/safety.rs) |
-| protocol constants / IDs | [protocol.rs](native/crates/darkbot-project0/src/protocol.rs) |
-
-### 4.4 `darkbot-runner` — production orchestration
-
-Directory: [native/crates/darkbot-runner/](native/crates/darkbot-runner/)
+Directory: [native/crates/liquidation/](native/crates/liquidation/)
 
 | Responsibility | File |
 |---|---|
-| main runtime / candidate cache / event loop | **[main.rs](native/crates/darkbot-runner/src/main.rs)** |
-| receivership builder integration | [builder.rs](native/crates/darkbot-runner/src/builder.rs) |
-| end-to-end pipeline helpers | [pipeline.rs](native/crates/darkbot-runner/src/pipeline.rs) |
-| pending candidate handling | [pending.rs](native/crates/darkbot-runner/src/pending.rs) |
-| Jupiter route integration | [route.rs](native/crates/darkbot-runner/src/route.rs) |
-| LUT handling | [lookup_tables.rs](native/crates/darkbot-runner/src/lookup_tables.rs) |
-| winner / competitor matching | [winner.rs](native/crates/darkbot-runner/src/winner.rs) |
-| shadow evidence record model | [record.rs](native/crates/darkbot-runner/src/record.rs) |
-| shadow ledger | [shadow_ledger.rs](native/crates/darkbot-runner/src/shadow_ledger.rs) |
-| fixture support | [fixture.rs](native/crates/darkbot-runner/src/fixture.rs) |
-| remote worker helpers | [remote_workers.rs](native/crates/darkbot-runner/src/remote_workers.rs) |
-| runtime/probe binaries | [src/bin/](native/crates/darkbot-runner/src/bin/) |
+| exact health / Marginfi health integration | [health.rs](native/crates/liquidation/src/health.rs) |
+| Bank/Account reverse and threshold indices | [index.rs](native/crates/liquidation/src/index.rs) |
+| integration projection/refresh semantics | [integration.rs](native/crates/liquidation/src/integration.rs) |
+| state projection | [projection.rs](native/crates/liquidation/src/projection.rs) |
+| receivership planning | [planner.rs](native/crates/liquidation/src/planner.rs) |
+| receivership instructions / rules | [receivership.rs](native/crates/liquidation/src/receivership.rs) |
+| liquidation sizing | [sizing.rs](native/crates/liquidation/src/sizing.rs) |
+| deterministic economics / candidate ranking | [economics.rs](native/crates/liquidation/src/economics.rs) |
+| funding classification | [funding.rs](native/crates/liquidation/src/funding.rs) |
+| execution abstractions | [execution.rs](native/crates/liquidation/src/execution.rs) |
+| prepared candidate / execution state | [prepared.rs](native/crates/liquidation/src/prepared.rs) |
+| scheduling logic | [schedule.rs](native/crates/liquidation/src/schedule.rs) |
+| safety rules | [safety.rs](native/crates/liquidation/src/safety.rs) |
+| protocol constants / IDs | [protocol.rs](native/crates/liquidation/src/protocol.rs) |
+
+### 4.4 `crates/runtime` (package `darkbot-runner`) — production orchestration
+
+Directory: [native/crates/runtime/](native/crates/runtime/)
+
+| Responsibility | File |
+|---|---|
+| main runtime / candidate cache / event loop | **[main.rs](native/crates/runtime/src/main.rs)** |
+| receivership builder integration | [builder.rs](native/crates/runtime/src/builder.rs) |
+| end-to-end pipeline helpers | [pipeline.rs](native/crates/runtime/src/pipeline.rs) |
+| pending candidate handling | [pending.rs](native/crates/runtime/src/pending.rs) |
+| Jupiter route integration | [route.rs](native/crates/runtime/src/route.rs) |
+| LUT handling | [lookup_tables.rs](native/crates/runtime/src/lookup_tables.rs) |
+| winner / competitor matching | [winner.rs](native/crates/runtime/src/winner.rs) |
+| shadow evidence record model | [record.rs](native/crates/runtime/src/record.rs) |
+| shadow ledger | [shadow_ledger.rs](native/crates/runtime/src/shadow_ledger.rs) |
+| fixture support | [fixture.rs](native/crates/runtime/src/fixture.rs) |
+| remote worker helpers | [remote_workers.rs](native/crates/runtime/src/remote_workers.rs) |
+| runtime/probe binaries | [src/bin/](native/crates/runtime/src/bin/) |
 
 ---
 
@@ -496,12 +504,17 @@ Raw evidence should identify the source commit, run/dataset ID, environment/prov
 
 Directory: [scripts/](scripts/)
 
-| Script | Purpose |
+| Entry point | Purpose |
 |---|---|
-| [c0_census.py](scripts/c0_census.py) | Mainnet account census / classification tooling. |
-| [run_shadow_mainnet.sh](scripts/run_shadow_mainnet.sh) | Standard Mainnet Shadow runner entry. |
-| [run_r126_qualify.py](scripts/run_r126_qualify.py) | R126 qualification parser/gates. |
-| [run_r127_qualify.py](scripts/run_r127_qualify.py) | R127/R127c/R127d qualification parser/gates. |
+| [capture.sh](scripts/capture.sh) | `capture.sh --duration 10m` typed C0-E1 measurement (verification and report follow); `capture.sh econ4h-launcher`, `capture.sh market` (C0-MO), `capture.sh shadow` (Mainnet Shadow, observe only). |
+| [smoke.sh](scripts/smoke.sh) | Controlled gap/reconnect smoke through a market-only loopback proxy. |
+| [verify.sh](scripts/verify.sh) / [report.sh](scripts/report.sh) | Read-only historical verification and offline reports for a run id or path. |
+| [preflight.sh](scripts/preflight.sh) | Read-only FE preflight and effective-config inspection. |
+| Compatibility wrappers | `test.sh`, `run_econ4h.sh`, `run_market_observer.sh`, `run_shadow_mainnet.sh`, `run_gap_reconnect_smoke.sh`, `fe_readonly_preflight.sh` and the old `scripts/<module>.py` paths forward unchanged; `test_suite.py` keeps the old test discovery command. Review in step 30. |
+
+Python implementations live in [operations/](operations/): [c0_census.py](operations/capture/c0_census.py) (account census),
+[run_r126_qualify.py](operations/qualification/run_r126_qualify.py) and [run_r127_qualify.py](operations/qualification/run_r127_qualify.py)
+(historical Shadow qualification harnesses), and the measurement CLI, verifier and report modules listed above.
 
 A qualification script must exercise production components; it must not silently implement a second version of business logic.
 
@@ -645,13 +658,13 @@ cargo test --locked --workspace --features "crate_health txv1"
 Mainnet Shadow entry:
 
 ```bash
-project_0/scripts/run_shadow_mainnet.sh
+project_0/scripts/capture.sh shadow
 ```
 
 Qualification:
 
 ```bash
-python3 project_0/scripts/run_r127_qualify.py ...
+python3 project_0/operations/qualification/run_r127_qualify.py ...
 ```
 
 Do not enable value-bearing LIVE solely because workspace tests are green. Follow the gates in `docs/STATUS.md` and the measurement ledger.

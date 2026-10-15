@@ -1,7 +1,7 @@
 # Project_0 — aktiver Handoff für neue Chats
 
 **Aufnahme:** 2026-10-15. **Repository:** `sawyerma/darkbot`, Branch `main`.
-**Strukturstatus:** Phase A abgeschlossen (1–7); 8a (`958d0b3`) und 8b.1 (`e8e904c`) DONE; Wallet-Lock-Fix `6ec4483`/`218710b`. **Iterationen 8b.2 bis 15 umgesetzt und offline getestet: PENDING_INDEPENDENT_REVIEW** (Zwischenstände vom Nutzer als `95697c8` gesichert, Rest gestaged). Streng gezählt bis zur Abnahme **7/32 DONE**. **Iteration 16 nicht begonnen.**
+**Strukturstatus:** Phase A (1–7), 8a (`958d0b3`), 8b.1 (`e8e904c`), Wallet-Lock-Fix (`6ec4483`, `218710b`); **8b.2–15 umgesetzt und mit `46be33c` auf `main` gepusht** (Claudes Offline-Tests; keine unabhängige Abnahme behauptet). **16–29 im Arbeitsbaum umgesetzt und gezielt geprüft, nicht committed.** Offen: 30–32 (Bereinigung, Verweise, Gesamtqualifikation).
 **Vollständige Fortschrittstabelle:** [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
 **Fachlicher Bot-Status:** [STATUS.md](../STATUS.md). Maßgeblich bleiben das [Measurement-Ledger](../MEASUREMENT_LEDGER.md) und der [Phasenplan](../PHASENPLAN.md).
 
@@ -31,10 +31,13 @@ Wir bauen einen **vollwertigen professionellen Solana-/Marginfi-Liquidationsbot*
 | **8a** | **Projekt-`.gitignore`: lokale Laufzeitdaten/Secrets schützen** | **DONE** `958d0b3` |
 | **8b.1** | **Validierter Opt-in Run-Store** mit Lock und Kollisionsschutz, bestehenden Legacy-Defaults und synthetischen Tests; [Run-Store-Dokumentation](run_storage.md) | **DONE** `e8e904c`, 11 Dateien, +409/−13 Zeilen |
 | — | Wallet-Journal-Lock-Fix ([Befund](../development_history/wallet_lock_release_fix_20261015.md)) | `6ec4483`, `218710b` |
-| **8b.2** | Layout V2, versionierter Re-Pin Option A ([Entscheidung](../architecture/run_layout_versioning.md)) | **PENDING_INDEPENDENT_REVIEW** |
-| **8b.3** | `data/runs` + Layout V2 Standard für econ4h ([Run-Ablage](run_storage.md)) | **PENDING_INDEPENDENT_REVIEW** |
-| **9–12** | `data/cache/`, `config/profiles/`, `config/examples/`, [Daten-/Export-Policy](data_policy.md) | **PENDING_INDEPENDENT_REVIEW** |
-| **13–15** | `tests/{python,integration,regression,fixtures}/` ([Testkarte](../../tests/README.md)) | **PENDING_INDEPENDENT_REVIEW** |
+| **8b.2** | Layout V2, versionierter Re-Pin Option A ([Entscheidung](../architecture/run_layout_versioning.md)) | `46be33c` |
+| **8b.3** | `data/runs` + Layout V2 Standard für econ4h ([Run-Ablage](run_storage.md)) | `46be33c` |
+| **9–12** | `data/cache/`, `config/profiles/`, `config/examples/`, [Daten-/Export-Policy](data_policy.md) | `46be33c` |
+| **13–15** | `tests/{python,integration,regression,fixtures}/` ([Testkarte](../../tests/README.md)) | `46be33c` |
+| **16–20** | Python-Paket `operations/{cli,capture,verification,reporting,qualification}` | Arbeitsbaum |
+| **21–25** | `scripts/{capture,smoke,verify,report,preflight}.sh`, alte Namen als Weiterleitung | Arbeitsbaum |
+| **26–29** | Crates `common/`, `solana/`, `liquidation/`, `runtime/`; Test- und Hilfsmodule aus `main.rs`/`market_observer.rs` getrennt | Arbeitsbaum |
 
 Die 32 Schritte mit den offenen Phasen B–F stehen vollständig in [restructure_32_step_plan.md](../architecture/restructure_32_step_plan.md).
 
@@ -85,34 +88,34 @@ Sechs Marker sind **keine sechs selbstständigen Gewinne**. Reportfilter für Ar
 
 **Die Commit-Nachricht von `958d0b3` ist irreführend** (`preserve restructure roadmap and handoff`), weil jener Commit tatsächlich **nur `project_0/.gitignore`** enthält. Die Roadmap und dieser Handoff wurden deshalb erst **nachträglich** in separaten Dokumentations-Commits angelegt. Historie nicht nachträglich umschreiben.
 
-## 6. NÄCHSTE AUFGABE: unabhängige Abnahme von 8b.2–15, danach Iteration 16
+## 6. NÄCHSTE AUFGABE: Iterationen 30–32 (Bereinigung, Verweise, Gesamtqualifikation)
 
-**Ist (PENDING_INDEPENDENT_REVIEW):** Layout V2 (`data/runs/<id>/{manifest.json,config.json,capture,snapshots,verification,reports,logs}`)
-wird von Rust (`run_layout.rs`), Launchern und den gepinnten Lesern gemeinsam benutzt; `run_store.py` ist neu gepinnt.
-Identitäten: Spec `C0-E1/VerificationSpec/3`, Checkpoint `C0-E1/INDEX/3` (`index_v3`), Dataset `C0-E1/NormalizedReport/3`;
-Record-/Snapshot-Format und Decoder-Version unverändert; V1-Ausgaben byte-identisch zu den archivierten Lesern (`908b14c`).
-Resume alter Versuche endet mit `RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION`. Standard: econ4h → `data/runs` V2,
-`P0_RUN_STORE=legacy` → `data/econ4h` V1, C0-MO → `data/market` V1. 9–12: `data/cache/`, typisierte Profile als einzige
-Quelle (`config/profiles/`, in Rust eingebettet), geprüfte Beispiele, Datenpolitik. 13–15: Tests unter `tests/`,
-Kompatibilitätswrapper `scripts/test_suite.py`, `verify.sh --self-test` unverändert 29 Tests.
+**Stand 8b.2–15 (`46be33c`):** Layout V2 (`data/runs/<id>/{manifest.json,config.json,capture,snapshots,verification,reports,logs}`),
+versionierte Identitäten (Spec/3, INDEX/3 `index_v3`, Dataset NormalizedReport/3, `RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION`),
+econ4h-Standard `data/runs` V2, `data/cache/`, typisierte Profile, geprüfte Beispiele, Datenpolitik, Tests unter `tests/`.
+Details: [Run-Layout-Versionierung](../architecture/run_layout_versioning.md), [Run-Ablage](run_storage.md), [Datenpolitik](data_policy.md).
 
-**Lokale Offline-Ergebnisse 2026-10-15 (je einmal ausgeführt):** Python **102 PASS** (vorher 90; aus beliebigem
-Arbeitsverzeichnis und über den alten Discover-Befehl), `verify.sh --self-test` 29 PASS; Rust `crate_health` **382 PASS / 1 ignored**,
-`crate_health,txv1` **384 PASS / 1 ignored** (vorher 375/377: +2 Lock-, +5 Layout-/Profil-/Beispieltests); beide Release-Builds
-PASS; Differential-Clippy 38→38; alle geänderten Rust-Dateien rustfmt-sauber; Shell- und Python-Syntax PASS.
+**Stand 16–29 (Arbeitsbaum):** Python unter `operations/` (Paket-Imports; alte `scripts/<modul>.py`-Aufrufe leiten weiter),
+Shell-Einstiegspunkte `capture.sh` (econ4h/econ4h-launcher/market/shadow), `smoke.sh`, `verify.sh`, `report.sh`, `preflight.sh`
+(alte Namen leiten weiter), Crates `native/crates/{common,solana,liquidation,runtime}` (Paketnamen unverändert), getrennte
+Test- und Hilfsmodule im Runtime-Crate. Die gepinnten Python-Dateien wurden für Imports und Pfade angepasst: neue
+Verifikationen erhalten neue IDs gegenüber `46be33c`, Identitätsversionen und Recordformat sind unverändert
+([Abschnitt 7](../architecture/run_layout_versioning.md)).
 
-**Abnahmeprüfungen:** Abschnitt 7 (Befehle) und der Abschlussbericht. Nicht ausgeführt: echte V2-Mainnet-Captures
-(keine Freigabe), `cargo fmt --check` für den ganzen Workspace (Altbestand, siehe Risiken).
+**Gezielte Prüfungen 16–29 (je einmal):** Python 102 PASS (aus beliebigem Arbeitsverzeichnis, über den alten Discover-Befehl
+und `verify.sh --self-test` 29); alle alten und neuen Einstiegspunkte `--help`/Syntax PASS; `cargo metadata --locked`, `cargo check`
+`crate_health,txv1` alle Targets PASS; Runtime-Crate-Tests `crate_health` und `crate_health,txv1` je 220 + 9 PASS (1 ignored);
+Testanzahl je Crate vor/nach identisch (common 26, solana 70, liquidation 61, runtime 230); Differential-Clippy 38→38 (alte
+Crate-Namen zugeordnet); neue/geänderte Rust-Dateien rustfmt-sauber; keine defekten relativen Markdown-Links. Vollständige
+Workspace-Matrizen und Release-Builds nicht erneut ausgeführt (gemäß Auftrag erst in Iteration 32).
 
-**Offene Risiken:** (1) `cargo fmt --check` schlägt wegen ~500 Alt-Hunks in 42 unveränderten Dateien fehl, darunter das
-strict-gepinnte `market_truth.rs`; alle geänderten Rust-Dateien sind formatiert, ein eigener Formatierungs-Commit ist
-Nutzerentscheidung. (2) Neue Verifikationen erhalten neue IDs; unfertige alte Versuche sind nur mit der archivierten
-Implementierung fortsetzbar (lokal existiert keiner). (3) Python-Leser erwarten Release-Binaries unter `native/target/release/`.
-(4) Testdateien liegen nicht mehr unter `scripts/` und gehen daher nicht mehr in `source_sha256` neuer Run-Manifeste ein.
-(5) Systempython < 3.10 (`/usr/bin/python3` auf macOS) kann die Skripte wie bisher nicht ausführen.
+**Offene Risiken:** (1) `cargo fmt --check` scheitert an Alt-Hunks in unveränderten Dateien (u. a. strict-gepinntes
+`market_truth.rs`). (2) Der Binärbau ohne `crate_health` schlug schon auf `46be33c` fehl; alle Launcher nutzen `crate_health`.
+(3) Python-Leser erwarten Release-Binaries unter `native/target/release/`. (4) Kompatibilitäts-Weiterleitungen in `scripts/`
+sind in Schritt 30 per Verbrauchernachweis zu bewerten. (5) Systempython < 3.10 führt die Skripte wie bisher nicht aus.
 
-**Danach:** 16–20 Python-Operations, 21–25 Shell-Entry-Points, 26–29 Rust-Crates (Pfad `config/profiles` in
-`runtime_config.rs` mitziehen), 30–32 Abschluss. Details: [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
+**Danach:** 30 Altlasten/Wrapper bereinigen, 31 Verweise finalisieren, 32 Gesamtqualifikation
+([32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md)).
 
 ## 7. Rollen, Sicherheitsgrenzen und Abnahme
 
@@ -146,4 +149,4 @@ Bei Rust-/Programmumzügen zusätzlich passende Release-Builds, gezielte CLI-/Fi
 
 ## 8. Neuen Chat exakt hier fortsetzen
 
-> Öffne das GitHub-Repository `sawyerma/darkbot`, Branch `main`. Lies **zuerst** `project_0/docs/operations/restructure_handoff.md`, danach `project_0/docs/architecture/restructure_32_step_plan.md`, `project_0/docs/architecture/run_layout_versioning.md`, `project_0/docs/STATUS.md` und die neuesten Ledger-Einträge. Das **Strukturprojekt** hat 1–7, 8a, 8b.1 DONE; **8b.2–15 sind umgesetzt und PENDING_INDEPENDENT_REVIEW** (Abschnitt 6). Die **fachliche** FE-00–FE-07-Roadmap läuft unabhängig. Verifiziere Remote-HEAD und lokales Staging, beginne keine unbekannte Folgetätigkeit, keine LIVE-/Mainnet-Aktion. Nach der Abnahme folgt Iteration 16 (Python-CLI unter `operations/cli/`); stoppe vor Commit/Push.
+> Öffne das GitHub-Repository `sawyerma/darkbot`, Branch `main`. Lies **zuerst** `project_0/docs/operations/restructure_handoff.md`, danach `project_0/docs/architecture/restructure_32_step_plan.md`, `project_0/README.md` (Zielbaum und Bereinigungsvertrag), `project_0/docs/architecture/run_layout_versioning.md` und `project_0/docs/STATUS.md`. Strukturprojekt: 1–15 auf `main` (`46be33c`), 16–29 laut Abschnitt 6 umgesetzt; als Nächstes Iterationen 30–32. Die **fachliche** FE-00–FE-07-Roadmap läuft unabhängig. Verifiziere Remote-HEAD und lokales Staging, keine LIVE-/Mainnet-Aktion, stoppe vor Commit/Push.

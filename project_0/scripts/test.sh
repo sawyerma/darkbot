@@ -1,5 +1,3 @@
 #!/usr/bin/env bash
-# One shared typed terminal/frontend contract; Rust owns time boundaries.
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec python3 "$SCRIPT_DIR/measurement_cli.py" "$@"
+# Compatibility entry point: forwards to capture.sh econ4h (typed C0-E1 measurement). Review for removal in structure step 30.
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/capture.sh" econ4h "$@"

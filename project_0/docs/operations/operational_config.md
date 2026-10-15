@@ -1,6 +1,6 @@
 # Project_0 operational configuration
 
-The shared Rust contract is `native/crates/darkbot-solana/src/runtime_config.rs`.
+The shared Rust contract is `native/crates/solana/src/runtime_config.rs`.
 It configures existing transports, admission budgets, workers, MeasurementPlan and
 read-only verifier/preflight tools. It does not authorize financial actions.
 
@@ -12,7 +12,7 @@ From the repository root, after building the release workspace:
 project_0/native/target/release/p0-longtail --help
 project_0/native/target/release/p0-longtail --profile smoke --print-effective-config
 project_0/native/target/release/p0-longtail --profile custom --rpc-rps 20 --rpc-burst 4 --rpc-concurrency 4 --duration 61s --print-effective-config
-project_0/scripts/test.sh --profile custom --duration 61s --verify index --verify-rps 6 --print-effective-config
+project_0/scripts/capture.sh --profile custom --duration 61s --verify index --verify-rps 6 --print-effective-config
 python3 project_0/scripts/fe_readonly_preflight.py --profile smoke --print-effective-config
 ```
 
@@ -60,7 +60,7 @@ ceiling controls a request. `workers` selects the existing Rayon worker count;
 fixed-role remote workers keep their existing ownership and use `worker-queue`.
 No second execution engine or new submission path is introduced.
 `diagnostics` controls the existing integration probe. `verification` controls
-post-capture verification through `test.sh`/`verify.sh`; direct runner invocations
+post-capture verification through `capture.sh`/`verify.sh`; direct runner invocations
 cannot silently request an unconnected post-capture verifier.
 
 The process budget bounds active HTTP calls, queued admissions, calls, payload

@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
-import p0_paths  # shared paths; puts project_0/scripts on sys.path
+import p0_paths  # shared paths; puts project_0 on sys.path
 import base64
 import copy
 import io
@@ -13,7 +13,7 @@ import tempfile
 import unittest
 import urllib.error
 from unittest.mock import patch
-import audit_market_quick as a
+from operations.verification import audit_market_quick as a
 
 from p0_market import START,END,KEY,TARGET,ACTOR,NAMES,payload,tx,row,FakeRPC,TempRunBase
 

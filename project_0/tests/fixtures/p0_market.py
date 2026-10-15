@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 import struct
 import tempfile
-import p0_paths  # noqa: F401  (puts project_0/scripts on sys.path)
-import audit_market_quick as a
-import measurement_contract as c
+import p0_paths  # noqa: F401  (puts project_0 on sys.path)
+from operations.verification import audit_market_quick as a
+from operations.cli import measurement_contract as c
 
 START=100* a.NS
 END=200*a.NS

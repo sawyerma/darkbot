@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/darkbot-common",
-    "crates/darkbot-solana",
-    "crates/darkbot-project0",
-    "crates/darkbot-runner",
+    "crates/common",
+    "crates/solana",
+    "crates/liquidation",
+    "crates/runtime",
 ]
 
 # Weitere Crates werden erst aufgenommen, wenn ihr Ticket freigegeben ist:
