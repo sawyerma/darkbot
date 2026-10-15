@@ -1,18 +1,38 @@
-# Project 0 — Repository Map
+# Project_0 — Solana Liquidator | Repository und Architektur
 
-Solana / Marginfi Project 0 liquidation system.
+**Ein produktives System für Marginfi-Liquidationen auf Solana.** Diese README ist der zentrale Einstieg für Menschen und ausführende KI-Agenten: tatsächliche Dateien, Zuständigkeiten, verbindliche Produktphasen, Architekturziel und sichere Arbeitsreihenfolge.
 
-This README is the **navigation, target-architecture, cleanup and file-placement contract** for `project_0/`.
-It answers two questions:
+**Stand dieser Dokumentation: 2026-10-15.** Im GitHub-Repository ist der unverändert produktive Rust-Workspace weiterhin `native/crates/{common,solana,liquidation,runtime}`. Die Strukturreform 1–29 liegt bis `d234913` auf GitHub; Iterationen 30–32 und nachträgliche Launcher-/Keypair-/Feature-/Testbereinigungen sind laut lokalem Handoff umgesetzt und gestaged, aber **nicht in GitHub sichtbar und nicht unabhängig abgenommen**. Die Umbenennung `native → engine` sowie die neue interne Runtime-Modularisierung sind **ZIELE**, keine bereits implementierten GitHub-Dateien.
 
-1. **Where is the authoritative information?**
-2. **Where must new code, evidence, scripts and generated data be placed?**
+**VERBINDLICHES NEUES DOKUMENT:** [Produktionsarchitektur und vollständiger Ausführungsauftrag](docs/architecture/production_architecture_refactor_contract.md). Der Produkt-[PHASENPLAN v4.5.2](docs/PHASENPLAN.md) und das [Measurement Ledger](docs/MEASUREMENT_LEDGER.md) bleiben fachlich autoritativ. Keine dieser Dokumentationsänderungen autorisiert LIVE, Submission, Paid-Provider oder Mainnet-Runs.
+
+Die ausführende KI beginnt mit **A0 (nur lokaler Bestands- und Sicherheitscheck)** und stoppt danach. Kein automatisches Überschreiben oder Auflösen des lokal gestagten Project_0-Standes durch `git pull`. `bsc/` ist explizit außerhalb dieses Auftrags.
 
 For the current engineering state and the next technically necessary steps, start here:
 
 > **[Current status — docs/STATUS.md](docs/STATUS.md)**
 
 The 2026-10-05 audit handoff is historical: [docs/development_history/audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md).
+
+---
+
+## Architektur- und Ausführungsentscheidung (verbindlich)
+
+Der langfristige Zielaufbau ist absichtlich **klein**: ein Rust-Workspace (optional nach qualifizierter Migration `engine/`), vier Crates `common`, `solana`, `liquidation`, `runtime`; keine zweite Race-/Shadow-/Live-Engine, keine neue Crate ohne nachgewiesenen Bedarf. `runtime` wird **nicht** zu `execution` umbenannt. Die Runtime erhält bei tatsächlicher Codeaufteilung die vier fachlichen Bereiche `orchestration`, `execution`, `market`, `analytics`.
+
+- **`solana/state`** ist der einzige kanonische Chain-/Fork-State. **`runtime/orchestration`** koordiniert Ereignisreihenfolge, Owner, Generationen, Recovery und Kandidaten, ohne einen zweiten State zu erzeugen.
+- **`solana/submit`** ist der Blockchain-Submission-Adapter; **`runtime/execution`** orchestriert zulässige Pläne, Build/Sign/Submit, persistente One-Shot-/Wallet-/Inventory-Holds, Reconciliation und tatsächliche Abrechnung.
+- **`liquidation/economics`** entscheidet über ausführbare wirtschaftliche Chancen. **`runtime/analytics`** untersucht Markt-/Konkurrenz-Evidence; finale Realized-PnL-Reconciliation ist davon getrennt.
+- **Winner-Chain-Nachweis** gehört zur Market-Verifikation, **Winner-Tracker** zur Orchestrierung, statistische Wettbewerbsmodelle zu Analytics. Nichtblockierende Hot-Path-Zeitmessung bleibt bei den produktiven Events; Analytics wertet nur aus.
+- **`operations/`** bleibt das Python-Betriebspaket, **`scripts/`** die stabilen Shell-Einstiege. Keine Zusammenführung allein aus kosmetischen Gründen.
+- Der gesamte Produktumfang **FE-00…FE-07, S0–S4, S1-RACE, S3.R, P2–P9, C0/C0-E1/H0/T, JIT, Tagger, P6-MT/M4, P8-RES/INV, P7/P4B, K, Frontend, Jito und Binary-Geyser** bleibt im Phasenplan verpflichtend. Geplante Modulnamen sind keine implementierten Features.
+- Keine neue Mock-/Fake-/Stub-/Demo-Engine. Echte aufgezeichnete Chain-Daten, erforderliche Protokollkomponenten und historische Evidence dürfen nicht blind entfernt werden. `FREE_ONLY`, LIVE-/Submission-Sperren und Gepinnte-Identitätsverträge bleiben unverändert.
+
+**Arbeitsreihenfolge:** A0 lokaler Stand / staged 30–32 + Pfad-/Keypair-Fixes prüfen → A1 aktive Dateien/Verbraucher/Ownership inventarisieren → A2 Regressions-/Performance-Baseline → A3 Runtime-Orchestrierung → A4 Market/Winner → A5 WSS/Execution → A6 optional Namens-/Pfadmigration → A7 vollständige Differenzqualifikation. Jede Gruppe hat ein eigenes Stop-Gate, kein pauschaler Umbau. Details, Datei-/Modulgrenzen, Migrationsmatrix, Checks und Verbote: **[Architecture Refactor Contract](docs/architecture/production_architecture_refactor_contract.md)**.
+
+### Lokale Git-Arbeit ist zu schützen
+
+Bevor du die neue Dokumentation lokal übernimmst, prüfe `git status --short` und die gestagten Project_0-Dateien. Insbesondere darf ein Pull weder lokale Änderungen noch `delete/`-Quarantäne überschreiben. Bei Konflikten **STOP und diffen**, nicht resetten/cleannen, keine anderen Projekte stagen.
 
 ---
 
@@ -23,7 +43,8 @@ The 2026-10-05 audit handoff is historical: [docs/development_history/audit_hand
 | Current status, open gates and next steps | **[docs/STATUS.md](docs/STATUS.md)** |
 | Documentation navigation | [docs/README.md](docs/README.md) |
 | Structure reform handoff and 32-iteration tracker | **[docs/operations/restructure_handoff.md](docs/operations/restructure_handoff.md)** · [32-step plan](docs/architecture/restructure_32_step_plan.md) · **[Target structure and cleanup contract](#3-verbindliche-soll-struktur-nach-iteration-32-und-bereinigungspflichten)** |
-| Authoritative production roadmap / architecture | [docs/PHASENPLAN.md](docs/PHASENPLAN.md) |
+| Authoritative production roadmap / architecture | [docs/PHASENPLAN.md](docs/PHASENPLAN.md) | 
+| **Binding architecture ownership and AI implementation order (A0–A7)** | **[docs/architecture/production_architecture_refactor_contract.md](docs/architecture/production_architecture_refactor_contract.md)** |
 | Measurements, gates and historical decisions | [docs/MEASUREMENT_LEDGER.md](docs/MEASUREMENT_LEDGER.md) |
 | Development history (2026-10-05 audit handoff, audits, R127c/R127d changelogs and rollback) | [docs/development_history/](docs/development_history/) |
 | Complete Astra audit findings | [docs/evidence/AUDIT_20261005/AUDIT_FINDINGS.md](docs/evidence/AUDIT_20261005/AUDIT_FINDINGS.md) |
@@ -60,18 +81,18 @@ When resuming Project 0 after a break, audit, model switch or handoff, read in t
 
 `docs/STATUS.md` summarizes; the newest dated ledger entries and the code remain canonical. Historical documents and measurements are never erased.
 
-**For the active 32-iteration repository restructuring, start with [restructure_handoff.md](docs/operations/restructure_handoff.md) and the [32-step progress register](docs/architecture/restructure_32_step_plan.md).** This is separate from FE-00…FE-07.
+**For the local, staged 30–32 final qualification**, first read [restructure_handoff.md](docs/operations/restructure_handoff.md) and [32-step progress register](docs/architecture/restructure_32_step_plan.md), then verify their local state; the tracked versions are older than the reported staged work. The follow-on architecture work is defined separately in [production_architecture_refactor_contract.md](docs/architecture/production_architecture_refactor_contract.md). Both are separate from the FE-00…FE-07 product gate.
 
 ---
 
 ## 3. Verbindliche SOLL-Struktur nach Iteration 32 und Bereinigungspflichten
 
-**SOLL, noch nicht vollständig umgesetzt.** Dies ist die verbindliche Zielordnung für die
+**HISTORISCHER 32-SCHRITTE-STRUKTURVERTRAG (GitHub-Baseline bis Iteration 29; Iteration 30–32 lokal gemeldet, remote noch nicht prüfbar).** Dies ist die Zielordnung für die
 [32-Schritte-Strukturreform](docs/architecture/restructure_32_step_plan.md), **kein Nachweis über
 bereits fertiggestellte Dateien oder Tests**. Den tatsächlich erreichten Stand ausschließlich
 aus dem [aktiven Struktur-Handoff](docs/operations/restructure_handoff.md), der
 [Roadmap](docs/architecture/restructure_32_step_plan.md) und dem aktuellen Code ableiten.
-Die fachliche FE-00–FE-07-Roadmap ist davon unabhängig.
+Die fachliche FE-00–FE-07-Roadmap ist davon unabhängig. Die **nachfolgende** interne Architektur-Härtung A0–A7 hat ihren eigenen [verbindlichen Vertrag](docs/architecture/production_architecture_refactor_contract.md); der ältere §3.1-Baum beschreibt nicht die neue interne Modulaufteilung.
 
 ### 3.1 Zielbaum (nach Schritt 32)
 
