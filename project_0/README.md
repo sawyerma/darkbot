@@ -22,6 +22,7 @@ The 2026-10-05 audit handoff is historical: [docs/development_history/audit_hand
 |---|---|
 | Current status, open gates and next steps | **[docs/STATUS.md](docs/STATUS.md)** |
 | Documentation navigation | [docs/README.md](docs/README.md) |
+| Structure reform handoff and 32-iteration tracker | **[docs/operations/restructure_handoff.md](docs/operations/restructure_handoff.md)** · [32-step plan](docs/architecture/restructure_32_step_plan.md) |
 | Authoritative production roadmap / architecture | [docs/PHASENPLAN.md](docs/PHASENPLAN.md) |
 | Measurements, gates and historical decisions | [docs/MEASUREMENT_LEDGER.md](docs/MEASUREMENT_LEDGER.md) |
 | Development history (2026-10-05 audit handoff, audits, R127c/R127d changelogs and rollback) | [docs/development_history/](docs/development_history/) |
@@ -58,6 +59,8 @@ When resuming Project 0 after a break, audit, model switch or handoff, read in t
 ```
 
 `docs/STATUS.md` summarizes; the newest dated ledger entries and the code remain canonical. Historical documents and measurements are never erased.
+
+**For the active 32-iteration repository restructuring, start with [restructure_handoff.md](docs/operations/restructure_handoff.md) and the [32-step progress register](docs/architecture/restructure_32_step_plan.md).** This is separate from FE-00…FE-07.
 
 ---
 
