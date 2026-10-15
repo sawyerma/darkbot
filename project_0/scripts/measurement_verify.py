@@ -13,6 +13,7 @@ import uuid
 import audit_market_quick as audit
 import measurement_contract as c
 import operational_config
+import run_store
 
 
 def resource_guard(output,v,deadline):
@@ -25,11 +26,27 @@ def resource_guard(output,v,deadline):
     if rss+64*1024**2>v.max_ram_bytes:raise audit.AuditError('VERIFICATION_RAM_BUDGET')
 
 
+def archived_specs(run,spec):
+    """Specs for this capture and mode written by another implementation (schema, decoder pins or layout)."""
+    found=[]
+    for p in sorted((run/'verification').glob('*/spec.json')):
+        old=json.loads(p.read_text())
+        if (old.get('capture_run_id')==spec['capture_run_id'] and old.get('mode')==spec['mode']
+            and any(old.get(k)!=spec.get(k) for k in ('schema','decoder_pins','layout'))):
+            found.append(f"{p.parent.name} ({old.get('schema')})")
+    return found
+
+
 def verify(run,v,qualification=None,offline=False,resume=False):
     run=Path(run).resolve();evidence=c.finalize_capture(run);c.check_capture(run,evidence,hashes=True)
     url=c.endpoint();pf=c.preflight(run,v,qualification,url)
     spec=c.specification(run,v,pf['provider_binding']);sid=spec['verification_spec_id']
-    out=run/'verification'/sid;out.mkdir(parents=True,exist_ok=True)
+    out=run/'verification'/sid
+    if resume and not (out/'spec.json').exists():
+        # Never continue an attempt of another implementation; it needs the archived code that wrote it.
+        archived=archived_specs(run,spec)
+        if archived:raise c.ContractError('RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION: '+', '.join(archived))
+    out.mkdir(parents=True,exist_ok=True)
     lock=(out/'writer.lock').open('a')
     try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:

@@ -28,7 +28,10 @@ P0_ECON_OUT_DIR="$(python3 "$ROOT/project_0/scripts/run_store.py" root econ4h "$
 export P0_ECON_OUT_DIR
 # Reject an invalid or existing run id before the proxy connects upstream; run_econ4h.sh allocates it.
 python3 "$ROOT/project_0/scripts/run_store.py" check "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" >/dev/null || exit 2
-scratch="$(mktemp -d "${TMPDIR:-/tmp}/p0-gap-proxy.XXXXXX")"
+# Proxy build log, readiness file and probe output are reconstructible working data (data/cache policy);
+# the proxy log that belongs to a run is copied into the run below.
+mkdir -p "$ROOT/project_0/data/cache/gap_proxy"
+scratch="$(mktemp -d "$ROOT/project_0/data/cache/gap_proxy/$P0_ECON_RUN_ID.XXXXXX")"
 export P0_GAP_PROXY_READY_FILE="$scratch/ready"
 proxy_pid=''
 cleanup() {
@@ -58,17 +61,23 @@ fi
 status=0
 P0_ENV_FILE="$scratch/not-present.env" bash project_0/scripts/run_econ4h.sh || status=$?
 run="$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID"
-if [[ -d "$run" ]]; then cp "$scratch/proxy.log" "$run/gap_proxy.log"; fi
+if [[ -d "$run" ]]; then
+  # Layout V1 keeps the log at the run root, layout V2 under logs/ (run_store artifact gap_proxy_log).
+  layout="$(python3 "$ROOT/project_0/scripts/run_store.py" layout econ4h "$P0_ECON_OUT_DIR")" || exit 2
+  cp "$scratch/proxy.log" "$(python3 "$ROOT/project_0/scripts/run_store.py" path "$run" gap_proxy_log "$layout")"
+fi
 echo "Controlled interruption evidence: $scratch/proxy.log"
 [[ "$status" == 0 ]] || exit "$status"
-python3 - "$run" <<'PY'
+python3 - "$run" "$ROOT/project_0/scripts" <<'PY'
 import json, pathlib, sys
+sys.path.insert(0, sys.argv[2])
+import run_store
 p = pathlib.Path(sys.argv[1])
-f = json.loads((p / 'economics_final.json').read_text())
-m = json.loads((p / 'market/summary.json').read_text())
-events = [json.loads(line) for line in (p / 'market/coverage.jsonl').read_text().splitlines()]
+f = json.loads(run_store.artifact(p, 'economics_final').read_text())
+m = json.loads(run_store.market_summary(p).read_text())
+events = [json.loads(line) for line in (run_store.market_dir(p) / 'coverage.jsonl').read_text().splitlines()]
 names = [e['event'] for e in events]
-assert 'GAP_PROXY_CONTROLLED_DISCONNECT' in (p / 'gap_proxy.log').read_text()
+assert 'GAP_PROXY_CONTROLLED_DISCONNECT' in run_store.artifact(p, 'gap_proxy_log').read_text()
 assert names.index('DRAINED') < names.index('SHADOW_RPC_QUIESCENT') < names.index('FULL_SLOT_RECONCILIATION_FINAL')
 assert names.index('DRAINED') < names.index('GAP_RECOVERY_STARTED') < names.index('GAP_RECOVERED')
 assert m['gap_count'] >= 1 and m['gap_recovered'] == m['gap_count'] and m['gap_unrecovered'] == 0
@@ -80,6 +89,6 @@ assert names.index('FULL_SLOT_RECONCILIATION_FINAL') < names.index('GAP_RECOVERE
 assert f['canonical']['cumulative']['finalized'] is True
 t = f['technical_qualification']
 assert t['verdict'] == 'PASS' and t['submissions'] == 0 and t['analytics_queue_drops'] == 0
-assert all((p / ('hour_%02d.json' % i)).is_file() for i in range(1, 5))
+assert all(run_store.artifact(p, 'hour_%02d' % i).is_file() for i in range(1, 5))
 print('CONTROLLED_GAP_SMOKE_PASS')
 PY

@@ -18,8 +18,10 @@ import subprocess
 import uuid
 import audit_market_quick as a
 import measurement_contract as c
+import run_store
 
-VERSION='C0-E1/NormalizedReport/2'
+VERSION='C0-E1/NormalizedReport/2'  # record, snapshot and renderer format
+DATASET_VERSION='C0-E1/NormalizedReport/3'  # dataset identity, bound to the run layout contract
 PRIORITY={'strict':3,'index':2,'live':1,'shadow':0,'unverified':-1}
 
 
@@ -193,7 +195,7 @@ def raw_tx(row):
 
 
 def load_live(ds,run):
-    market=run/'market' if (run/'market').exists() else run
+    market=run_store.market_dir(run,c.layout(run))
     for row in values(market/'transactions.jsonl'):
         source=row.get('source','')
         normalized_source='live' if source in ('logsSubscribe','transactionSubscribe') else 'unverified'
@@ -284,7 +286,9 @@ def normalize_locked(run,result=None):
     if result and (result.get('capture_run_id')!=evidence['capture_run_id'] or result.get('capture_evidence_digest',evidence['evidence_digest'])!=evidence['evidence_digest']):
         raise c.ContractError('RESULT_CAPTURE_MISMATCH')
     if result:validate_result(run,result)
-    identity={'version':VERSION,'normalizer_sha256':c.file_hash(Path(__file__)),
+    layout=c.layout(run)
+    identity={'version':DATASET_VERSION,'layout':run_store.LAYOUT_TAGS[layout],'layout_sha256':c.file_hash(Path(run_store.__file__)),
+        'normalizer_sha256':c.file_hash(Path(__file__)),
         'capture_run_id':evidence['capture_run_id'],'capture_digest':evidence['evidence_digest'],
         'decoder_sha256':c.file_hash(Path(a.__file__)),'contract_sha256':c.file_hash(Path(c.__file__)),
         'replay_binary_sha256':c.file_hash(Path(__file__).resolve().parents[1]/'native/target/release/p0-econ-replay') if (Path(__file__).resolve().parents[1]/'native/target/release/p0-econ-replay').exists() else None,
@@ -301,14 +305,14 @@ def normalize_locked(run,result=None):
     # A partial build is preserved; a fresh attempt never overwrites it.
     out.mkdir(parents=True,exist_ok=True);work=out/('attempt_'+uuid.uuid4().hex);work.mkdir()
     ds=Dataset(work);coverage=None
-    clock_manifest=run/'measurement_manifest.json'
+    clock_manifest=run_store.artifact(run,'manifest',layout)
     clock_origin=json.loads(clock_manifest.read_text()).get('clock_origin_unix_ns') if clock_manifest.exists() else None
     try:
         coverage=a.Audit(run,None,output=work/'coverage_index')
         coverage.import_bot()
         load_live(ds,run);load_result(ds,run,result)
-        for name in ('canonical_market_shadow.jsonl','opportunity_economics.jsonl'):
-            for row in values(run/name):load_shadow(ds,row)
+        for name in ('canonical_market_shadow','opportunity_economics'):
+            for row in values(run_store.artifact(run,name,layout)):load_shadow(ds,row)
         replay=production_replay(run,result,work,ds,clock_origin)
         for row in values(work/'economics/canonical_market_shadow.jsonl'):load_shadow(ds,row,replace_existing=True)
         ds.db.commit();count=0
@@ -374,6 +378,11 @@ def normalize_locked(run,result=None):
 
 
 def measurement_plan(run,window):
+    if c.layout(run)=='v2':
+        # Layout V2 has one plan authority: the pre-capture manifest. No file or binary fallback.
+        plan=json.loads(run_store.artifact(run,'manifest','v2').read_text()).get('plan')
+        if not isinstance(plan,dict):raise c.ContractError('MEASUREMENT_PLAN_MISSING')
+        return plan
     for name in ('measurement_manifest.json','measurement_plan.json'):
         p=run/name
         if p.exists():
@@ -419,7 +428,7 @@ def production_replay(run,result,work,ds,clock_origin):
     if not binary.exists():return {'status':'NOT_RUN','reason':'ECON_REPLAY_BINARY_MISSING'}
     with (work/'replay_stderr.txt').open('x') as err:
         try:
-            p=subprocess.run([str(binary),str(work/'canonical_events.jsonl'),str(run/'shadow_evaluations.jsonl'),
+            p=subprocess.run([str(binary),str(work/'canonical_events.jsonl'),str(run_store.artifact(run,'shadow_evaluations')),
                 str(work/'economics'),str(work/'plan.json'),str(window['start_ns']),'300'],stderr=err,stdout=subprocess.DEVNULL,timeout=305)
         except subprocess.TimeoutExpired:return {'status':'INCOMPLETE','reason':'REPLAY_TIME_BUDGET'}
     return {'status':'PASS' if p.returncode==0 else 'INCOMPLETE','events':count,'binary_sha256':c.file_hash(binary),
@@ -444,7 +453,7 @@ def write_snapshots(run,out,manifest,economics):
     for i,(offset,bucket) in enumerate(zip(offsets,counts),1):
         cumulative.update(bucket)
         econ=economics/f'hour_{i:02}.json'
-        previous_path=run/f'hour_{i:02}.json'
+        previous_path=run_store.artifact(run,f'hour_{i:02}')
         previous=json.loads(previous_path.read_text()) if previous_path.exists() else {}
         source_window=previous.get('window',{})
         aligned=(source_window.get('through_seconds')==offset/a.NS and source_window.get('from_seconds')==(offsets[i-2] if i>1 else 0)/a.NS)

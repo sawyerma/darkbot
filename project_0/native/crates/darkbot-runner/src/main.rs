@@ -567,6 +567,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // [C0-MO] Market mode branches off before any trading-stack initialisation: no RPC URL,
     // keypair, signer, health engine, planner, simulation or submission is constructed.
     if config::require("P0_MODE")? == "market" {
+        darkbot_runner::run_layout::RunLayout::standalone_market(&|k| std::env::var(k).ok())?;
         return darkbot_runner::market_observer::run_from_env().map_err(|e| e.into());
     }
     if config::require("P0_MODE")? == "econ4h" {
@@ -3875,7 +3876,7 @@ fn run_econ4h() -> Result<(), String> {
     market.gap.phase_max_secs = cfg.plan.budgets.gap_seconds;
     market.reconcile.phase_max_secs = cfg.plan.budgets.strict_seconds;
     market.run_id = cfg.run_id.clone();
-    market.run_dir = cfg.run_dir.join("market");
+    market.run_dir = cfg.paths().market_dir();
     let timeout = cfg.plan.owner_budget_seconds();
     let (handle, analytics) = econ::spawn(cfg, clock, &market)?;
     let shadow_handle = handle.clone();
@@ -3962,7 +3963,7 @@ fn run_econ4h() -> Result<(), String> {
     }
     handle.shared.finish.store(true, Ordering::Release);
     darkbot_runner::measurement::journal(
-        &handle.cfg.run_dir,
+        &handle.cfg.paths(),
         clock,
         "OWNERS_FINISHED",
         serde_json::json!({"aborted":handle.shared.abort.load(Ordering::Acquire),

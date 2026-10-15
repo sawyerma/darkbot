@@ -2473,7 +2473,7 @@ pub fn run_embedded(
         )
         .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
         crate::measurement::journal(
-            &h.cfg.run_dir,
+            &h.cfg.paths(),
             clock,
             "WAIT_STREAM_READY",
             json!({"budget_seconds":h.cfg.plan.budgets.stream_ready_seconds}),
@@ -2596,7 +2596,7 @@ pub fn run_embedded(
                 core.start_observation(t_rx_ns, cutoff);
                 if let Some(h) = &econ {
                     let evidence = h.cfg.plan.capture_window(clock, t_rx_ns)?;
-                    crate::measurement::journal(&h.cfg.run_dir, clock, "CAPTURE", evidence)?;
+                    crate::measurement::journal(&h.cfg.paths(), clock, "CAPTURE", evidence)?;
                     h.start(t_rx_ns, cutoff);
                 }
                 core.coverage(&mut sink, "STREAM_READY", now_s, Some(t_rx_ns), json!({
@@ -2658,7 +2658,7 @@ pub fn run_embedded(
     let capture_end_ns = clock.now_ns();
     if let Some(h) = &econ {
         crate::measurement::journal(
-            &h.cfg.run_dir,
+            &h.cfg.paths(),
             clock,
             "DRAIN",
             json!({
@@ -2769,7 +2769,7 @@ pub fn run_embedded(
 
     if let Some(h) = &econ {
         crate::measurement::journal(
-            &h.cfg.run_dir,
+            &h.cfg.paths(),
             clock,
             "VERIFICATION",
             json!({

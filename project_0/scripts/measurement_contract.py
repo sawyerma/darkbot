@@ -13,8 +13,10 @@ import os
 import shutil
 import time
 import uuid
+import run_store
 
 SCHEMA='C0-E1/MeasurementConfigV2'
+SPEC_SCHEMA='C0-E1/VerificationSpec/3'
 PROTOCOL='33c67987a661f59c6683a65485ebb4f0ef030b77'
 KINDS=('CLASSIC','RECEIVERSHIP','FORCED_DELEVERAGE','BANKRUPTCY_SETTLEMENT')
 MARKERS=('lending_account_liquidate','start_liquidation','end_liquidation','start_deleverage','end_deleverage','lending_pool_handle_bankruptcy')
@@ -166,7 +168,18 @@ def config(args):
     return MeasurementConfigV2(RunConfig(args.duration,args.capture_source),verification,query)
 
 
+def layout(run):
+    try:return run_store.detect_layout(run)
+    except run_store.RunStoreError as exc:raise ContractError(str(exc)) from None
+
+
 def capture_identity(run):
+    if layout(run)=='v2':
+        # Layout V2 has exactly one identity source: the pre-capture manifest.
+        manifest=run_store.artifact(run,'manifest','v2');m=json.loads(manifest.read_text())
+        if (m.get('schema')!=run_store.MANIFEST_V2_SCHEMA or m.get('layout')!=run_store.LAYOUT_V2
+            or not isinstance(m.get('capture_run_id'),str) or not m['capture_run_id']):raise ContractError('CAPTURE_MANIFEST_INVALID')
+        return {'capture_run_id':m['capture_run_id'],'manifest_sha256':file_hash(manifest),'provenance':'PRE_CAPTURE_MANIFEST'}
     manifest=run/'measurement_manifest.json'
     if manifest.exists():
         m=json.loads(manifest.read_text())
@@ -184,6 +197,7 @@ def capture_identity(run):
 
 def finalize_capture(run):
     """Streaming file index; never includes subsequently appended verifier/report outputs."""
+    if layout(run)=='v2':return finalize_capture_v2(run)
     target=run/'capture_evidence_manifest.json'
     if target.exists():return json.loads(target.read_text())
     identity=capture_identity(run)
@@ -204,6 +218,31 @@ def finalize_capture(run):
     live=s.get('live_coverage_status') or ('LIVE_COVERAGE_COMPLETE' if
         s.get('receivership_transport_capture_complete') is True else 'LIVE_COVERAGE_INCOMPLETE')
     v={'schema':'C0-E1/CaptureEvidence/2',**identity,'live_coverage_status':live,
+       'capture_clock_complete':s.get('capture_clock_complete',s.get('full_duration_observed',False)),
+       'files':files,'evidence_digest':digest(files)}
+    immutable(target,v);return v
+
+
+def finalize_capture_v2(run):
+    target=run_store.artifact(run,'capture_evidence','v2');identity=capture_identity(run)
+    if target.exists():
+        v=json.loads(target.read_text())
+        if (v.get('schema')!='C0-E1/CaptureEvidence/3' or v.get('layout')!=run_store.LAYOUT_V2
+            or v.get('capture_run_id')!=identity['capture_run_id']):raise ContractError('CAPTURE_EVIDENCE_INVALID')
+        return v
+    summary=run_store.market_summary(run,'v2')
+    if not summary.exists():raise ContractError('CAPTURE_NOT_FINALIZED')
+    s=json.loads(summary.read_text())
+    files={}
+    for p in sorted(run.rglob('*')):
+        rel=p.relative_to(run)
+        if rel.parts[0] in ('verification','reports') or p.name.startswith('.') or not p.is_file():continue
+        before=p.stat();sha=file_hash(p);after=p.stat()
+        if (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns):raise ContractError('CAPTURE_STILL_MUTATING')
+        files[str(rel)]={'bytes':before.st_size,'sha256':sha}
+    live=s.get('live_coverage_status') or ('LIVE_COVERAGE_COMPLETE' if
+        s.get('receivership_transport_capture_complete') is True else 'LIVE_COVERAGE_INCOMPLETE')
+    v={'schema':'C0-E1/CaptureEvidence/3','layout':run_store.LAYOUT_V2,**identity,'live_coverage_status':live,
        'capture_clock_complete':s.get('capture_clock_complete',s.get('full_duration_observed',False)),
        'files':files,'evidence_digest':digest(files)}
     immutable(target,v);return v
@@ -245,14 +284,14 @@ def preflight(run,v,qualification,url):
 
 def specification(run,v,provider_binding):
     from audit_market_quick import read_window
-    identity=capture_identity(run)
-    files=[Path(__file__),Path(__file__).with_name('audit_market_quick.py')]
+    identity=capture_identity(run);kind=layout(run)
+    files=[Path(__file__),Path(__file__).with_name('audit_market_quick.py'),Path(__file__).with_name('run_store.py')]
     native=Path(__file__).resolve().parents[1]/'native/crates/darkbot-runner/src'
     if v.mode=='strict':
         files += [native/x for x in ('market_verification.rs','market_reconcile.rs','market_truth.rs','market_gap.rs')]
         binary=native.parents[2]/'target/release/p0-strict-verify'
         if binary.exists():files.append(binary)
-    payload={'schema':'C0-E1/VerificationSpec/2','capture_run_id':identity['capture_run_id'],
+    payload={'schema':SPEC_SCHEMA,'layout':run_store.LAYOUT_TAGS[kind],'capture_run_id':identity['capture_run_id'],
              'capture_identity':identity,'window':read_window(run),'mode':v.mode,'protocol_pin':PROTOCOL,
              'decoder_pins':{p.name:file_hash(p) for p in files},'policy':{'name':'FREE_ONLY','provider_binding':provider_binding},
              'budgets':asdict(v)}

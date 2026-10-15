@@ -43,10 +43,14 @@ pub struct EconConfig {
     pub retention: usize,
     pub capital: Vec<u64>,
     pub run_dir: PathBuf,
+    pub layout: crate::run_layout::RunLayout,
     pub run_id: String,
     pub provider_class: String,
 }
 impl EconConfig {
+    pub fn paths(&self) -> crate::run_layout::RunPaths {
+        crate::run_layout::RunPaths::new(&self.run_dir, self.layout)
+    }
     pub fn from_lookup(get: &dyn Fn(&str) -> Option<String>, unix_s: u64) -> Result<Self, String> {
         for key in ["P0_LIVE_ENABLED", "P0_SUBMISSION_ENABLED"] {
             if get(key).is_some_and(|v| !matches!(v.as_str(), "false" | "0" | "")) {
@@ -59,6 +63,7 @@ impl EconConfig {
             })
         };
         let plan = MeasurementPlan::from_lookup(get)?;
+        let layout = crate::run_layout::RunLayout::from_lookup(get)?;
         let queue_capacity = usize::try_from(num("P0_ECON_QUEUE_CAPACITY", 8192)?)
             .map_err(|_| "queue capacity overflow")?;
         let retention =
@@ -107,6 +112,7 @@ impl EconConfig {
             retention,
             capital,
             run_dir,
+            layout,
             run_id,
             provider_class: get("P0_PROVIDER_CLASS").unwrap_or_else(|| "UNKNOWN".into()),
         })
@@ -326,9 +332,9 @@ pub fn spawn(
     clock: Clock,
     market: &MarketConfig,
 ) -> Result<(Handle, std::thread::JoinHandle<Result<(), String>>), String> {
-    fs::create_dir_all(&cfg.run_dir).map_err(|e| e.to_string())?;
+    cfg.paths().create().map_err(|e| e.to_string())?;
     crate::measurement::persist_manifest(
-        &cfg.run_dir,
+        &cfg.paths(),
         &cfg.run_id,
         &cfg.provider_class,
         &cfg.plan,
@@ -631,12 +637,12 @@ impl Worker {
         let file = OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(h.cfg.run_dir.join("shadow_evaluations.jsonl"))
+            .open(h.cfg.paths().capture("shadow_evaluations.jsonl"))
             .map_err(|e| e.to_string())?;
         let journal = OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(h.cfg.run_dir.join("shadow_offsets.bin"))
+            .open(h.cfg.paths().capture("shadow_offsets.bin"))
             .map_err(|e| e.to_string())?;
         Ok(Self {
             h,
@@ -916,10 +922,11 @@ impl Worker {
         self.evaluations.flush().map_err(|e| e.to_string())?;
         self.journal.flush().map_err(|e| e.to_string())?;
         let mut journal = BufReader::new(
-            File::open(self.h.cfg.run_dir.join("shadow_offsets.bin")).map_err(|e| e.to_string())?,
+            File::open(self.h.cfg.paths().capture("shadow_offsets.bin"))
+                .map_err(|e| e.to_string())?,
         );
         let mut raw = BufReader::new(
-            File::open(self.h.cfg.run_dir.join("shadow_evaluations.jsonl"))
+            File::open(self.h.cfg.paths().capture("shadow_evaluations.jsonl"))
                 .map_err(|e| e.to_string())?,
         );
         self.shadow.retain(|_, entry| entry.rec.account != target);
@@ -1456,11 +1463,8 @@ impl Worker {
     }
     fn write_snapshot(&mut self, index: usize, finalizing: bool) -> Result<(), String> {
         let report = self.report(index, finalizing);
-        atomic_json(
-            &self.h.cfg.run_dir.join(format!("hour_{index:02}.json")),
-            &report,
-        )
-        .inspect_err(|_| {
+        let name = format!("hour_{index:02}.json");
+        atomic_json(&self.h.cfg.paths().snapshot(&name), &report).inspect_err(|_| {
             self.h.shared.writer_errors.fetch_add(1, Ordering::Relaxed);
         })
     }
@@ -1574,10 +1578,10 @@ impl Worker {
         }
         let final_report = self.report(SNAPSHOT_COUNT, true);
         atomic_json(
-            &self.h.cfg.run_dir.join("economics_final.json"),
+            &self.h.cfg.paths().snapshot("economics_final.json"),
             &final_report,
         )?;
-        let f = File::create(self.h.cfg.run_dir.join("opportunity_economics.jsonl"))
+        let f = File::create(self.h.cfg.paths().snapshot("opportunity_economics.jsonl"))
             .map_err(|e| e.to_string())?;
         let mut out = BufWriter::new(f);
         for (_, rec) in self.selected() {
@@ -1599,7 +1603,7 @@ impl Worker {
         );
         println!("{}", Self::market_terminal_summary(&final_report));
         crate::measurement::journal(
-            &self.h.cfg.run_dir,
+            &self.h.cfg.paths(),
             self.h.clock,
             "REPORTS_FINALIZED",
             json!({"technical_qualification":final_report["technical_qualification"]["verdict"],

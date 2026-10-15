@@ -23,14 +23,15 @@ Repository paths are rooted at `project_0/`; the Rust workspace is `project_0/na
 |---|---|
 | [p0_reuse_matrix.md](architecture/p0_reuse_matrix.md) | P0 reference study and upstream reuse/merge decisions (eva01, marginfi-v2). |
 | [parallel_execution_plan.md](architecture/parallel_execution_plan.md) | Parallel execution design and MT0–MT10 sequence (baseline 2026-10-06). |
-| [run_layout_versioning.md](architecture/run_layout_versioning.md) | Run layout V1/V2, pinned reader identities, decision required before layout V2. |
+| [run_layout_versioning.md](architecture/run_layout_versioning.md) | Run layout V1/V2, pinned files, versioned identities (Option A implemented) and resume rules. |
 
 ### [operations/](operations/)
 
 | File | Purpose |
 |---|---|
 | [operational_config.md](operations/operational_config.md) | Operational configuration: inspection commands, precedence, profiles, budgets, authorization limits. |
-| [run_storage.md](operations/run_storage.md) | Run storage contract: run roots, opt-in `data/runs/`, run id and collision rules, run path inventory. |
+| [data_policy.md](operations/data_policy.md) | Data, cache and export classes, writers, ignore boundaries, retention and deletion limits. |
+| [run_storage.md](operations/run_storage.md) | Run storage contract: `data/runs/` default (layout V2), legacy roots, run id and collision rules, run path inventory. |
 
 ### [qualification/](qualification/)
 
@@ -57,6 +58,7 @@ Repository paths are rooted at `project_0/`; the Rust workspace is `project_0/na
 
 | File | Purpose |
 |---|---|
+| [wallet_lock_release_fix_20261015.md](development_history/wallet_lock_release_fix_20261015.md) | Wallet journal lock release fix: root cause, reproduction, `WalletLock` guard, validation (2026-10-15). |
 | [audit_handoff_20261005.md](development_history/audit_handoff_20261005.md) | **Historical** post-audit handoff (2026-10-05, P6-MT override 2026-10-07); superseded by [STATUS.md](STATUS.md). |
 | [r127d_changelog_rollback.md](development_history/r127d_changelog_rollback.md) | R127d candidate cache / re-arm change, rollback and post-audit correctness correction. |
 | [r127c_changelog_rollback.md](development_history/r127c_changelog_rollback.md) | R127c batching implementation and rollback. |

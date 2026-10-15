@@ -52,7 +52,8 @@ export P0_MODE=market
 export P0_MARKET_DURATION_SECS="${P0_MARKET_DURATION_SECS:-14400}"
 export P0_MARKET_COMMITMENT="${P0_MARKET_COMMITMENT:-finalized}"
 export P0_MARKET_RUN_ID="${P0_MARKET_RUN_ID:-market_$(date -u +%Y%m%dT%H%M%SZ)}"
-# Run storage contract: data/market by default, data/runs with P0_RUN_STORE=runs.
+# Run storage contract: data/market (layout V1) by default, data/runs with P0_RUN_STORE=runs.
+# Standalone C0-MO has no pre-capture manifest, so it always writes layout V1.
 P0_MARKET_OUT_DIR="$(python3 "$SCRIPT_DIR/run_store.py" root market "${P0_MARKET_OUT_DIR:-}")" || exit 2
 export P0_MARKET_OUT_DIR
 export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"

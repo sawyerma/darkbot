@@ -265,9 +265,11 @@ project_0/
 │   └── run_r127_qualify.py
 │
 ├── config/                           <- PUBLIC / NON-SECRET versioned config
+│   ├── profiles/                     <- typed runtime profiles (single source, embedded in Rust)
+│   ├── examples/                     <- secret-free examples, validated by the real parsers
 │   └── wallet.public.env
 │
-├── data/                             <- local/generated runtime datasets
+├── data/                             <- local/generated runtime datasets (runs/, cache/, legacy roots)
 ├── exports/                          <- generated exports / reports
 ├── src/                              <- application/control boundary, not Rust production core
 ├── tests/                            <- non-Rust project-level test area
@@ -515,8 +517,11 @@ Use for generated/local runtime datasets, shadow output and temporary measuremen
 
 **Do not treat local `data/` files as durable evidence.**
 
-New runs go to `data/econ4h/` and `data/market/` by default, or to `data/runs/` with `P0_RUN_STORE=runs`;
-see [docs/operations/run_storage.md](docs/operations/run_storage.md). Run directories are git-ignored.
+New econ4h / C0-E1 runs go to `data/runs/<run_id>/` in layout V2 by default (`P0_RUN_STORE=legacy` keeps `data/econ4h/`);
+C0-MO market runs keep `data/market/`. Historical runs are not moved and stay readable. See
+[docs/operations/run_storage.md](docs/operations/run_storage.md). Run directories are git-ignored.
+Reconstructible caches go to `data/cache/`; classes, retention and deletion boundaries are in
+[docs/operations/data_policy.md](docs/operations/data_policy.md).
 
 When a run becomes a gate/decision input:
 
@@ -531,7 +536,8 @@ data/... raw/local result
 
 Directory: [exports/](exports/)
 
-Generated human/machine exports may live here. They are non-authoritative unless separately frozen under `docs/evidence/` and referenced by the ledger.
+Generated human/machine exports may live here, e.g. `scripts/report.sh --run <id> --format csv > project_0/exports/<id>.csv`.
+They are non-authoritative unless separately frozen under `docs/evidence/` and referenced by the ledger.
 
 ### Build artifacts
 
@@ -545,10 +551,11 @@ Rust `target/`, caches, temporary logs and other build outputs are **not reposit
 
 Directory: [config/](config/)
 
-Current public wallet/config example:
-
-- [config/wallet.public.env](config/wallet.public.env)
-- [.env.example](.env.example)
+- [config/profiles/](config/profiles/): typed runtime profiles `smoke`, `standard`, `performance`, `custom`
+  (single source of profile values; see [operational config](docs/operations/operational_config.md))
+- [config/examples/](config/examples/): secret-free override and provider-qualification examples
+- [config/wallet.public.env](config/wallet.public.env): public signer identity
+- [.env.example](.env.example): environment template
 
 ### Secrets
 

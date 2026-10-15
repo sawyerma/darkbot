@@ -103,15 +103,19 @@ fn config() -> EconConfig {
     EconConfig::from_lookup(&|_| None, 0).unwrap()
 }
 pub(super) fn worker() -> Worker {
+    worker_in(crate::run_layout::RunLayout::V1)
+}
+fn worker_in(layout: crate::run_layout::RunLayout) -> Worker {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let mut cfg = config();
+    cfg.layout = layout;
     cfg.plan = MeasurementPlan::new(4).unwrap();
     cfg.run_dir = std::env::temp_dir().join(format!(
         "c0_e1_{}_{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     ));
-    fs::create_dir_all(&cfg.run_dir).unwrap();
+    cfg.paths().create().unwrap();
     let (tx, rx) = bounded("test-econ", 64);
     let h = Handle {
         tx,
@@ -722,18 +726,35 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
 }
 #[test]
 fn runtime_worker_writes_four_snapshots_then_identical_final() {
-    let mut w = worker();
+    four_snapshots_then_identical_final(crate::run_layout::RunLayout::V1);
+}
+#[test]
+fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
+    let root = four_snapshots_then_identical_final(crate::run_layout::RunLayout::V2);
+    let mut names: Vec<_> = fs::read_dir(&root)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["capture", "snapshots"]);
+    for name in ["shadow_evaluations.jsonl", "shadow_offsets.bin"] {
+        assert!(root.join("capture").join(name).is_file(), "{name}");
+    }
+    assert!(root.join("snapshots/opportunity_economics.jsonl").is_file());
+}
+fn four_snapshots_then_identical_final(layout: crate::run_layout::RunLayout) -> std::path::PathBuf {
+    let mut w = worker_in(layout);
     complete(&mut w);
     w.snapshots = 0;
     w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
     let h = w.h.clone();
-    let dir = h.cfg.run_dir.clone();
+    let paths = h.cfg.paths();
     let join = std::thread::spawn(move || w.run());
     // Real automatic timer; no manually invoked snapshot writer in this integration test.
     // The worker polls periodically; a fixed 150 ms grace races its next poll
     // under parallel test load. Wait for the real automatic fourth snapshot.
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while !dir.join("hour_04.json").exists()
+    while !paths.snapshot("hour_04.json").exists()
         && !join.is_finished()
         && std::time::Instant::now() < deadline
     {
@@ -741,13 +762,15 @@ fn runtime_worker_writes_four_snapshots_then_identical_final() {
     }
     h.shared.finish.store(true, Ordering::Release);
     join.join().unwrap().unwrap();
-    let hour: Value = serde_json::from_slice(&fs::read(dir.join("hour_04.json")).unwrap()).unwrap();
+    let hour: Value =
+        serde_json::from_slice(&fs::read(paths.snapshot("hour_04.json")).unwrap()).unwrap();
     let end: Value =
-        serde_json::from_slice(&fs::read(dir.join("economics_final.json")).unwrap()).unwrap();
+        serde_json::from_slice(&fs::read(paths.snapshot("economics_final.json")).unwrap()).unwrap();
     assert_eq!(hour, end);
     for n in 1..=4 {
-        assert!(dir.join(format!("hour_{n:02}.json")).exists());
+        assert!(paths.snapshot(&format!("hour_{n:02}.json")).exists());
     }
+    paths.root
 }
 
 #[test]

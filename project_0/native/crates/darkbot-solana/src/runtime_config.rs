@@ -114,6 +114,65 @@ impl Default for RuntimeConfig {
         }
     }
 }
+/// Typed profile overlay from `config/profiles/<profile>.json`, embedded at build time. Only
+/// limits, duration and the worker rule exist: endpoints, modes and approvals cannot be expressed.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileFile {
+    pub schema: String,
+    pub profile: Profile,
+    pub description: String,
+    #[serde(default)]
+    pub duration: Option<String>,
+    #[serde(default)]
+    pub limits: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub workers: Option<WorkerRule>,
+}
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerRule {
+    AvailableParallelism,
+}
+pub const PROFILE_FILES: [(&str, &str); 4] = [
+    (
+        "smoke",
+        include_str!("../../../../config/profiles/smoke.json"),
+    ),
+    (
+        "standard",
+        include_str!("../../../../config/profiles/standard.json"),
+    ),
+    (
+        "performance",
+        include_str!("../../../../config/profiles/performance.json"),
+    ),
+    (
+        "custom",
+        include_str!("../../../../config/profiles/custom.json"),
+    ),
+];
+impl ProfileFile {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let file: Self = serde_json::from_str(text).map_err(|_| "invalid profile file")?;
+        let known = serde_json::to_value(Limits::default()).unwrap();
+        if file.schema != "Project0/RuntimeProfile/1"
+            || file.limits.keys().any(|k| known.get(k).is_none())
+        {
+            return Err("invalid profile file".into());
+        }
+        Ok(file)
+    }
+    fn load(profile: &Profile) -> Self {
+        let name = serde_json::to_value(profile).unwrap();
+        let text = PROFILE_FILES
+            .iter()
+            .find(|(n, _)| name == *n)
+            .map(|(_, t)| *t)
+            .expect("every profile has a file");
+        Self::parse(text).expect("embedded profile files are validated by tests")
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Resolved {
     pub config: RuntimeConfig,
@@ -125,24 +184,20 @@ pub struct Resolved {
 impl RuntimeConfig {
     fn profile(profile: Profile) -> Self {
         let mut c = Self {
-            profile,
+            profile: profile.clone(),
             ..Self::default()
         };
-        match c.profile {
-            Profile::Smoke => {
-                c.limits.rpc_rps = 1;
-                c.limits.rpc_burst = 1;
-                c.limits.rpc_concurrency = 1;
-                c.limits.rpc_attempts = 1;
-                c.duration = "60s".into();
-                c.limits.max_response_mib = 16;
-                c.limits.max_total_mib = 64;
-            }
-            Profile::Performance => {
-                c.limits.workers =
-                    std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
-            }
-            _ => {}
+        let file = ProfileFile::load(&profile);
+        if let Some(duration) = file.duration {
+            c.duration = duration;
+        }
+        let mut limits = serde_json::to_value(&c.limits).unwrap();
+        for (field, value) in file.limits {
+            limits[field] = json!(value);
+        }
+        c.limits = serde_json::from_value(limits).expect("profile limits validated by tests");
+        if file.workers == Some(WorkerRule::AvailableParallelism) {
+            c.limits.workers = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
         }
         c
     }
@@ -656,6 +711,81 @@ mod tests {
             }
             assert!(!r.config.environment().contains_key("P0_MODE"));
         }
+    }
+    #[test]
+    fn profile_files_are_the_only_profile_source_and_cannot_authorize() {
+        // Values formerly hard-coded in RuntimeConfig::profile, now read from config/profiles/.
+        let standard = RuntimeConfig::default();
+        let smoke = RuntimeConfig::profile(Profile::Smoke);
+        assert_eq!(
+            (
+                smoke.limits.rpc_rps,
+                smoke.limits.rpc_burst,
+                smoke.limits.rpc_concurrency
+            ),
+            (1, 1, 1)
+        );
+        assert_eq!(
+            (
+                smoke.limits.rpc_attempts,
+                smoke.limits.max_response_mib,
+                smoke.limits.max_total_mib
+            ),
+            (1, 16, 64)
+        );
+        assert_eq!(smoke.duration, "60s");
+        let mut rest = smoke.limits.clone();
+        (rest.rpc_rps, rest.rpc_burst, rest.rpc_concurrency) = (5, 1, 2);
+        (rest.rpc_attempts, rest.max_response_mib, rest.max_total_mib) = (3, 512, 4096);
+        assert_eq!(rest, standard.limits);
+        for (profile, expected) in [(Profile::Standard, &standard), (Profile::Custom, &standard)] {
+            let c = RuntimeConfig::profile(profile.clone());
+            assert_eq!(
+                (c.limits, c.duration, c.profile),
+                (expected.limits.clone(), "4h".into(), profile)
+            );
+        }
+        let performance = RuntimeConfig::profile(Profile::Performance);
+        assert_eq!(
+            performance.limits.workers,
+            std::thread::available_parallelism().map_or(1, |n| n.get() as u64)
+        );
+        for (name, text) in PROFILE_FILES {
+            let file = ProfileFile::parse(text).unwrap();
+            assert_eq!(serde_json::to_value(&file.profile).unwrap(), name);
+            RuntimeConfig::profile(file.profile).validate().unwrap();
+        }
+        for forbidden in [
+            r#"{"schema":"Project0/RuntimeProfile/1","profile":"smoke","description":"x","rpc_endpoints":["https://x"]}"#,
+            r#"{"schema":"Project0/RuntimeProfile/1","profile":"smoke","description":"x","live":true}"#,
+            r#"{"schema":"Project0/RuntimeProfile/1","profile":"smoke","description":"x","submission_enabled":true}"#,
+            r#"{"schema":"Project0/RuntimeProfile/1","profile":"smoke","description":"x","limits":{"min_profit":0}}"#,
+            r#"{"schema":"Project0/RuntimeProfile/2","profile":"smoke","description":"x"}"#,
+        ] {
+            assert!(ProfileFile::parse(forbidden).is_err(), "{forbidden}");
+        }
+    }
+    #[test]
+    fn config_examples_parse_with_the_real_parser() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../config/examples");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !(name.starts_with("operational_") && name.ends_with(".json")) {
+                continue;
+            }
+            let env = |k: &str| (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string());
+            let r =
+                Resolved::parse(&["--config".into(), path.display().to_string()], &env).unwrap();
+            assert_eq!(r.config.rpc_endpoints, ["https://rpc.invalid/"], "{name}");
+            assert_eq!(r.sources["rpc_endpoints"], "environment", "{name}");
+            for key in ["live_authorized", "submission_authorized"] {
+                assert_eq!(r.json()[key], false);
+            }
+            seen += 1;
+        }
+        assert_eq!(seen, 2);
     }
     #[test]
     fn rejects_invalid_types_unknown_financial_keys_and_resource_ranges() {

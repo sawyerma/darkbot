@@ -12,8 +12,10 @@
 /data/shadow/
 # c0_census.py --out default
 /data/c0/
-# New runs with P0_RUN_STORE=runs (scripts/run_store.py)
+# Default run store for new econ4h runs, layout V2 (scripts/run_store.py)
 /data/runs/
+# Reconstructible caches and working data (docs/operations/data_policy.md); run_gap_reconnect_smoke.sh
+/data/cache/
 
 # Local integration results kept outside docs/evidence/; never versioned.
 /evidence/C0_E1_local_integration_20261008/

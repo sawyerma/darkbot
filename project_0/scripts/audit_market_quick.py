@@ -27,6 +27,7 @@ import email.utils
 import time
 import urllib.error
 import urllib.request
+import run_store
 
 PROGRAM = 'MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA'
 ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -59,7 +60,8 @@ def base58_decode(text):
 
 # Layout authority: marginfi-v2 33c67987a661f59c6683a65485ebb4f0ef030b77,
 # programs/marginfi/src/events.rs. Independent Python interpretation, never calls bot decoder.
-SCHEMA = 'C0-E1/INDEX/2'
+SCHEMA = 'C0-E1/INDEX/2'  # decoder version, recorded in index summaries and report records
+CHECKPOINT = 'C0-E1/INDEX/3'  # resumable checkpoint identity, bound to the run layout contract
 NS = 10**9
 KINDS = ('CLASSIC', 'RECEIVERSHIP', 'FORCED_DELEVERAGE', 'BANKRUPTCY_SETTLEMENT')
 COMPLETION = {'CLASSIC': 'CLASSIC', 'RECEIVERSHIP_END': 'RECEIVERSHIP',
@@ -667,7 +669,42 @@ def atomic_json(path, value):
     os.replace(tmp,path)
 
 
+def run_layout(run):
+    try:
+        return run_store.detect_layout(run)
+    except run_store.RunStoreError as exc:
+        raise AuditError(str(exc)) from None
+
+
+def read_window_v2(run):
+    manifest = run_store.artifact(run,'manifest','v2')
+    summary_path = run_store.market_summary(run,'v2')
+    if not manifest.is_file():
+        raise AuditError('MANIFEST_MISSING')
+    m = json.loads(manifest.read_text())
+    if m.get('schema') != run_store.MANIFEST_V2_SCHEMA:
+        raise AuditError('MANIFEST_SCHEMA_UNKNOWN')
+    captures = [r['details'] for r,_ in rows(run_store.artifact(run,'phases','v2')) if r.get('phase') == 'CAPTURE']
+    if len(captures) != 1:
+        raise AuditError('CAPTURE_WINDOW_NOT_UNIQUE')
+    start, end = captures[0]['capture_start_unix_ns'], captures[0]['capture_cutoff_unix_ns']
+    if end-start != m['plan']['duration_seconds']*NS:
+        raise AuditError('PLAN_WINDOW_MISMATCH')
+    if type(start) is not int or type(end) is not int or not 0 < end-start <= 86400*NS:
+        raise AuditError('INVALID_WINDOW')
+    summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
+    sources = {'measurement_manifest_sha256':hashlib.sha256(manifest.read_bytes()).hexdigest()}
+    if summary_path.exists():
+        sources['summary_sha256'] = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    return {'start_ns':start,'end_ns':end,'start_utc':iso_ns(start),'end_utc':iso_ns(end),
+            'actual_observation_ended_at':summary.get('observation_ended_at'),
+            'provenance':'P1_MANIFEST_AND_CAPTURE_PHASE','blocktime_semantics':'integer chain blockTime in [start,end); not local T_rx; boundary seconds uncertain',
+            'source_identity':sources}
+
+
 def read_window(run):
+    if run_layout(run) == 'v2':
+        return read_window_v2(run)
     manifest = run/'measurement_manifest.json'
     summary_path = run/'market/summary.json'
     if not summary_path.exists():
@@ -712,7 +749,8 @@ class Audit:
         self.run, self.rpc, self.max_pages, self.clock = Path(run), rpc, max_pages, clock
         self.deadline = clock()+seconds
         self.window = read_window(self.run)
-        self.out = Path(output) if output else self.run/'verification/index_v2'
+        self.layout = run_layout(self.run)
+        self.out = Path(output) if output else self.run/'verification/index_v3'
         self.out.mkdir(parents=True,exist_ok=True)
         self.lock = (self.out/'writer.lock').open('a')
         try:
@@ -732,11 +770,14 @@ class Audit:
           CREATE TABLE IF NOT EXISTS input_cursor(path TEXT PRIMARY KEY,size INTEGER,mtime INTEGER,offset INTEGER);
           CREATE TABLE IF NOT EXISTS shadow(sig TEXT,slot INTEGER,target TEXT,data TEXT,PRIMARY KEY(sig,slot,target));
         ''')
-        identity = {'schema':SCHEMA,'run_id':self.run.name,'window':self.window,
-                    'decoder_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+        identity = {'schema':CHECKPOINT,'layout':run_store.LAYOUT_TAGS[self.layout],'run_id':self.run.name,'window':self.window,
+                    'decoder_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                    'layout_sha256':hashlib.sha256(Path(run_store.__file__).read_bytes()).hexdigest()}
         previous = self.get('identity')
         if previous is not None and previous != identity:
-            self.close();raise AuditError('RESUME_IDENTITY_MISMATCH')
+            # A checkpoint written by another implementation is never continued with this decoder.
+            archived = not isinstance(previous,dict) or any(previous.get(k) != identity[k] for k in ('schema','decoder_sha256','layout_sha256'))
+            self.close();raise AuditError('RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION' if archived else 'RESUME_IDENTITY_MISMATCH')
         self.set('identity',identity)
         if rpc is not None:
             binding=hashlib.sha256(getattr(rpc,'url','OFFLINE_FIXTURE').encode()).hexdigest()
@@ -878,7 +919,9 @@ class Audit:
             self.db.execute('INSERT OR REPLACE INTO input_cursor VALUES(?,?,?,?)',(name,stat.st_size,stat.st_mtime_ns,stat.st_size))
 
     def import_bot(self):
-        market=self.run/'market' if (self.run/'market').is_dir() else self.run
+        market=run_store.market_dir(self.run,self.layout)
+        if self.layout=='v2' and not all((market/name).is_file() for name in ('transactions.jsonl','liquidations.jsonl','coverage.jsonl')):
+            raise AuditError('RUN_ARTIFACT_MISSING')
         def transaction(row):
             sig,slot,source=row.get('signature'),row.get('slot'),row.get('source','UNKNOWN')
             if not sig or type(slot) is not int:
@@ -938,8 +981,8 @@ class Audit:
         self.import_file(market/'transactions.jsonl',transaction)
         self.import_file(market/'liquidations.jsonl',lambda r:event(r,'BOT_LIVE' if r.get('source')=='live' else 'BOT_BACKFILL'))
         # Existing canonical final join contains canonical truth records (distinct from live).
-        self.import_file(self.run/'canonical_market_shadow.jsonl',lambda r:(event(r.get('join',r).get('market') or {},'BOT_CANONICAL'),shadow(r)))
-        self.import_file(self.run/'opportunity_economics.jsonl',shadow)
+        self.import_file(run_store.artifact(self.run,'canonical_market_shadow',self.layout),lambda r:(event(r.get('join',r).get('market') or {},'BOT_CANONICAL'),shadow(r)))
+        self.import_file(run_store.artifact(self.run,'opportunity_economics',self.layout),shadow)
         self.import_file(market/'coverage.jsonl',coverage)
         self.set('bot_import_complete',True);self.db.commit()
 
@@ -1127,13 +1170,11 @@ class Audit:
 
 
 def find_run(value):
-    direct=Path(value).expanduser()
-    root=Path(__file__).resolve().parents[1]
-    candidates=[direct] if direct.is_dir() else [root/'data/econ4h'/value,root/'data/market'/value]
-    candidates=[p.resolve() for p in candidates if p.is_dir()]
-    if len(candidates)!=1:
-        raise AuditError('RUN_NOT_FOUND_OR_AMBIGUOUS')
-    return candidates[0]
+    # One locator for every entry point: explicit path or exact id across all run roots, layout checked.
+    try:
+        return run_store.locate_run(value)
+    except run_store.RunStoreError as exc:
+        raise AuditError(str(exc)) from None
 
 
 def quick_main(argv=None):
@@ -1153,8 +1194,13 @@ def quick_main(argv=None):
     args=ap.parse_args(argv)
     if args.self_test:
         import unittest
-        suite=unittest.defaultTestLoader.discover(str(Path(__file__).parent),'test_audit_market_quick.py')
-        return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 2
+        here=Path(__file__).resolve().parent
+        folder=next((d for d in (here.parent/'tests'/'python',here) if (d/'test_audit_market_quick.py').is_file()),None)
+        if folder is None:
+            print('SELF_TEST_NOT_FOUND',file=sys.stderr)
+            return 2
+        result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.discover(str(folder),'test_audit_market_quick.py'))
+        return 0 if result.wasSuccessful() and result.testsRun>0 else 2
     if not args.run and not args.run_dir:
         ap.error('--run or legacy positional run path required')
     if args.run and args.run_dir:

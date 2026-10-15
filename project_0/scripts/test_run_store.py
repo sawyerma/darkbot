@@ -11,6 +11,7 @@ import audit_market_quick as a
 import measurement_contract as c
 import run_store as s
 from test_measurement_plan import clean_env
+from test_run_layout import manifest_run
 
 SCRIPTS=Path(__file__).resolve().parent
 REPO=SCRIPTS.parents[1]
@@ -25,7 +26,7 @@ def legacy_run(root,name):
 
 
 class RunRoot(unittest.TestCase):
-    def test_legacy_default_runs_opt_in_and_invalid_store(self):
+    def test_runs_default_for_econ4h_legacy_opt_out_and_invalid_store(self):
         with tempfile.TemporaryDirectory() as folder:
             p=Path(folder)
             self.assertEqual(s.run_root('econ4h',store='legacy',project=p),p/'data/econ4h')
@@ -37,6 +38,9 @@ class RunRoot(unittest.TestCase):
             with patch.dict(os.environ,{'P0_RUN_STORE':'runs'}):
                 self.assertEqual(s.run_root('econ4h',project=p),p/'data/runs')
             with patch.dict(os.environ,{'P0_RUN_STORE':''}):
+                self.assertEqual(s.run_root('econ4h',project=p),p/'data/runs')
+                self.assertEqual(s.run_root('market',project=p),p/'data/market')
+            with patch.dict(os.environ,{'P0_RUN_STORE':'legacy'}):
                 self.assertEqual(s.run_root('econ4h',project=p),p/'data/econ4h')
 
     def test_explicit_root_kept_unless_it_contradicts_runs_store(self):
@@ -183,7 +187,8 @@ class Launchers(unittest.TestCase):
             self.assertNotIn('proxy',p.stdout+p.stderr);self.assertEqual([x.name for x in (econ/'g1').iterdir()],['keep.json'])
 
     def test_launcher_end_to_end_legacy_and_runs_store_synthetic(self):
-        # Copy of the launcher in a temporary project, so the default roots are temporary too.
+        # Copy of the launcher in a temporary project, so the default roots are temporary too. The fake capture
+        # binary writes the files of run layout P0_RUN_LAYOUT with the literal paths of the Rust writers.
         plan=REPO/'project_0/native/target/release/p0-measurement-plan'
         if not plan.exists():self.skipTest('release p0-measurement-plan not built')
         with tempfile.TemporaryDirectory() as folder:
@@ -195,23 +200,44 @@ class Launchers(unittest.TestCase):
             subprocess.run(git+['init','-q'],check=True);subprocess.run(git+['commit','-q','--allow-empty','-m','fixture'],check=True)
             target=tmp/'target/release';target.mkdir(parents=True);(target/'p0-measurement-plan').symlink_to(plan.resolve())
             capture=target/'p0-longtail'
-            capture.write_text('#!/usr/bin/env bash\nset -eu\ncp "$P0_MEASUREMENT_PLAN" "$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID/consumed_plan.json"\n'
-                               'printf "%s|%s" "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID"\n')
+            capture.write_text('#!/usr/bin/env python3\nimport json,os,pathlib\n'
+                'run=pathlib.Path(os.environ["P0_ECON_OUT_DIR"])/os.environ["P0_ECON_RUN_ID"];v2=os.environ["P0_RUN_LAYOUT"]=="v2"\n'
+                'plan=json.load(open(os.environ["P0_MEASUREMENT_PLAN"]));cap=run/"capture" if v2 else run;snap=run/"snapshots" if v2 else run\n'
+                'm={"schema":"C0-E1/MeasurementManifest/3","layout":"Project0/RunLayout/2"} if v2 else {"schema":"C0-E1/MeasurementManifest/2"}\n'
+                'm.update(run_id=run.name,capture_run_id=run.name,plan=plan)\n'
+                '(run/("manifest.json" if v2 else "measurement_manifest.json")).write_text(json.dumps(m))\n'
+                '(cap/"market").mkdir(parents=True)\n'
+                'for n in ("transactions.jsonl","liquidations.jsonl","coverage.jsonl"):(cap/"market"/n).write_text("")\n'
+                '(cap/"market/summary.json").write_text(json.dumps({"capture_clock_complete":True}))\n'
+                '(cap/"measurement_phases.jsonl").write_text(json.dumps({"phase":"CAPTURE","details":{"capture_start_unix_ns":0,"capture_cutoff_unix_ns":plan["duration_seconds"]*10**9}})+"\\n")\n'
+                'for k in ("P0_RECORD_PATH","P0_SUMMARY_PATH","P0_MT0_PATH"):pathlib.Path(os.environ[k]).write_text("")\n'
+                'for n in ("hour_01.json","hour_02.json","hour_03.json","hour_04.json","economics_final.json"):(snap/n).write_text("{}")\n'
+                'print(os.environ["P0_ECON_OUT_DIR"]+"|"+run.name)\n')
             capture.chmod(0o700)
             mock=tmp/'mock';mock.mkdir();(mock/'cargo').write_text('#!/usr/bin/env bash\nexit 0\n');(mock/'cargo').chmod(0o700)
             (mock/'sitecustomize.py').write_text('import shutil\nshutil.disk_usage = lambda path: (type("Disk", (), {"free": 2**50}))()\n')
-            env={**self.environment(tmp),'CARGO_TARGET_DIR':str(target.parent),'PATH':str(mock)+os.pathsep+os.environ['PATH'],'PYTHONPATH':str(mock)}
+            staging=tmp/'tmpdir';staging.mkdir()
+            env={**self.environment(tmp),'CARGO_TARGET_DIR':str(target.parent),'PATH':str(mock)+os.pathsep+os.environ['PATH'],'PYTHONPATH':str(mock),'TMPDIR':str(staging)}
             launch=lambda extra:subprocess.run(['bash',str(project/'scripts/run_econ4h.sh'),'--duration','61s'],env={**env,**extra},
                                                capture_output=True,text=True,timeout=30,cwd=tmp)
-            for store,run_id,root in (({},'old_run','data/econ4h'),({'P0_RUN_STORE':'runs'},'new_run','data/runs')):
-                with self.subTest(store=store):
+            for store,run_id,root,layout in (({'P0_RUN_STORE':'legacy'},'old_run','data/econ4h','v1'),({},'new_run','data/runs','v2')):
+                with self.subTest(layout=layout):
                     p=launch({**store,'P0_ECON_RUN_ID':run_id})
                     self.assertEqual(p.returncode,0,p.stderr)
                     run=project/root/run_id
                     self.assertIn(f'{run.parent}|{run_id}',p.stdout)
-                    self.assertEqual(json.loads((run/'measurement_plan.json').read_text()),json.loads((run/'consumed_plan.json').read_text()))
-                    self.assertTrue((run/'candidate_manifest.json').is_file() and (run/'storage_preflight.json').is_file())
-                    self.assertEqual(a.find_run(str(run)),run.resolve())
+                    self.assertEqual(s.detect_layout(run),layout);self.assertEqual(a.find_run(str(run)),run.resolve())
+                    manifest=json.loads(s.artifact(run,'manifest').read_text())
+                    self.assertEqual(manifest['plan'],s.config_part(run,'measurement_plan'))
+                    for part in ('storage_preflight','candidate_manifest'):self.assertIsInstance(s.config_part(run,part),dict)
+                    for name in ('build_log','console_summary','runtime_log','opportunities','daily_summary','mt0','phases','economics_final'):
+                        self.assertTrue(s.artifact(run,name).is_file(),name)
+                    self.assertEqual(c.finalize_capture(run)['capture_run_id'],run_id)
+            new=project/'data/runs/new_run'
+            self.assertEqual(sorted(x.name for x in new.iterdir()),['capture','config.json','logs','manifest.json','snapshots','verification'])
+            self.assertEqual(json.loads((new/'config.json').read_text())['schema'],s.RUN_CONFIG_SCHEMA)
+            self.assertEqual(list(staging.iterdir()),[])  # staging directory removed on exit
+            self.assertFalse(any((project/'data/econ4h/old_run'/n).exists() for n in s.V2_ONLY))
             p=launch({'P0_RUN_STORE':'runs','P0_ECON_RUN_ID':'old_run'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr)
             self.assertFalse((project/'data/runs/old_run').exists())
@@ -222,8 +248,8 @@ class Launchers(unittest.TestCase):
 
 
 def v2_run(root,name,layout=s.LAYOUT_V2):
-    run=root/name;run.mkdir(parents=True)
-    (run/'manifest.json').write_text(json.dumps({'layout':layout,'run_id':name}))
+    run=manifest_run(root,name,'v2',name)
+    if layout!=s.LAYOUT_V2:(run/'manifest.json').write_text(json.dumps({'layout':layout,'run_id':name}))
     return run
 
 
@@ -238,7 +264,9 @@ class Layout(unittest.TestCase):
     def test_mixed_or_malformed_layouts_are_rejected_not_guessed(self):
         with tempfile.TemporaryDirectory() as folder:
             p=Path(folder)
-            v2_run(p,'wrong_tag','Project0/RunLayout/9')
+            with self.assertRaisesRegex(s.RunStoreError,'RUN_LAYOUT_UNSUPPORTED'):s.detect_layout(v2_run(p,'wrong_tag','Project0/RunLayout/9'))
+            shutil.rmtree(p/'wrong_tag')
+            v2_run(p,'not_a_tag','layout-two')
             (p/'not_json').mkdir();(p/'not_json/manifest.json').write_text('{')
             (p/'list').mkdir();(p/'list/manifest.json').write_text('[]')
             (p/'dir_manifest/manifest.json').mkdir(parents=True)
@@ -261,8 +289,10 @@ class Locate(unittest.TestCase):
             legacy_run(p/'data/econ4h','twice');legacy_run(p/'data/runs','twice')
             for bad in ('twice','missing','../e1','a/b','',None):
                 with self.assertRaisesRegex(s.RunStoreError,'RUN_NOT_FOUND_OR_AMBIGUOUS'):s.locate_run(bad,project=p)
-            v2_run(p/'data/runs','new_layout')
-            with self.assertRaisesRegex(s.RunStoreError,'RUN_LAYOUT_UNSUPPORTED'):s.locate_run('new_layout',project=p)
+            run=v2_run(p/'data/runs','new_layout')
+            self.assertEqual(s.locate_run('new_layout',project=p),run.resolve())
+            v2_run(p/'data/runs','future','Project0/RunLayout/3')
+            with self.assertRaisesRegex(s.RunStoreError,'RUN_LAYOUT_UNSUPPORTED'):s.locate_run('future',project=p)
             (legacy_run(p/'data/runs','broken')/'logs').mkdir()
             with self.assertRaisesRegex(s.RunStoreError,'RUN_LAYOUT_INVALID'):s.locate_run('broken',project=p)
 
@@ -316,7 +346,7 @@ class ReaderCli(unittest.TestCase):
     def test_verify_resume_and_report_by_id_keep_identities(self):
         with tempfile.TemporaryDirectory() as folder:
             project=self.project(Path(folder))
-            for name in ('measurement_contract.py','audit_market_quick.py','market_report.py'):
+            for name in ('measurement_contract.py','audit_market_quick.py','market_report.py','run_store.py'):
                 self.assertEqual(c.file_hash(project/'scripts'/name),c.file_hash(SCRIPTS/name))
             run=project/'data/runs/run_v1';(run/'market').mkdir(parents=True)
             (run/'market/summary.json').write_text(json.dumps({'observation_started_at':a.iso_ns(100*a.NS),'observation_ended_at':a.iso_ns(200*a.NS),
@@ -345,11 +375,17 @@ class ReaderCli(unittest.TestCase):
             self.assertEqual(results[0]['verification_spec_id'],results[1]['verification_spec_id'])
             self.assertTrue(all(x['summary']['status']=='HISTORICAL_INCOMPLETE' and x['summary']['reason']=='RPC_ACCESS_MISSING' for x in results))
             self.assertNotIn('RESUME_IDENTITY_MISMATCH',index[1].stdout+index[1].stderr)
-            v2=v2_run(project/'data/runs','run_v2');before=sorted(x.name for x in v2.iterdir())
-            for script in ('verify.sh','report.sh'):
-                p=self.call(project,script,'--run','run_v2','--offline')
-                self.assertEqual(p.returncode,2);self.assertIn('RUN_LAYOUT_UNSUPPORTED',p.stderr)
-            self.assertEqual(sorted(x.name for x in v2.iterdir()),before)
+            # Layout V2 by id through the same wrappers: own spec version and layout, writes only verification/ and reports/.
+            v2=v2_run(project/'data/runs','run_v2');before={str(x.relative_to(v2)) for x in v2.rglob('*')}
+            p=self.call(project,'verify.sh','--run','run_v2','--offline','--mode','off')
+            self.assertEqual(p.returncode,0,p.stderr);result=json.loads(p.stdout)
+            spec=json.loads((v2/'verification'/result['verification_spec_id']/'spec.json').read_text())
+            self.assertEqual((spec['schema'],spec['layout'],result['capture_run_id']),(c.SPEC_SCHEMA,s.LAYOUT_V2,'run_v2'))
+            p=self.call(project,'report.sh','--run','run_v2','--verification-result',result['verification_result_id'],'--format','json')
+            self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(len(json.loads(p.stdout)),1)
+            added={str(x.relative_to(v2)) for x in v2.rglob('*')}-before
+            self.assertTrue(added and all(x.split('/')[0] in ('verification','reports') for x in added),sorted(added))
+            self.assertIn('verification/capture_evidence_manifest.json',added)
 
 
 class GitIgnore(unittest.TestCase):
@@ -360,6 +396,7 @@ class GitIgnore(unittest.TestCase):
             return p.returncode==0
         self.assertTrue(ignored('project_0/data/runs/econ4h_x/manifest.json'))
         self.assertTrue(ignored('project_0/data/runs/econ4h_x/capture/transactions.jsonl'))
+        self.assertTrue(ignored('project_0/data/cache/gap_proxy/g1.abc123/proxy.log'))
         for path in ('project_0/docs/evidence/NEW_20261015/results.json','project_0/config/profiles/smoke.json',
                      'project_0/exports/report.json','project_0/data/.gitkeep'):
             self.assertFalse(ignored(path),path)

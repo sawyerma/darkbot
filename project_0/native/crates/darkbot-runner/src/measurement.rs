@@ -305,7 +305,12 @@ fn number(
     }
     Ok(value)
 }
-pub fn journal(dir: &Path, clock: Clock, phase: &str, details: Value) -> Result<(), String> {
+pub fn journal(
+    paths: &crate::run_layout::RunPaths,
+    clock: Clock,
+    phase: &str,
+    details: Value,
+) -> Result<(), String> {
     // Owner timeout and observer completion may race. A JSONL row must stay whole.
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LOCK
@@ -314,7 +319,7 @@ pub fn journal(dir: &Path, clock: Clock, phase: &str, details: Value) -> Result<
     let mut f = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join("measurement_phases.jsonl"))
+        .open(paths.phases())
         .map_err(|e| e.to_string())?;
     let now = clock.now_ns();
     serde_json::to_writer(
@@ -327,7 +332,7 @@ pub fn journal(dir: &Path, clock: Clock, phase: &str, details: Value) -> Result<
         .map_err(|e| e.to_string())
 }
 pub fn persist_manifest(
-    dir: &Path,
+    paths: &crate::run_layout::RunPaths,
     run_id: &str,
     provider_class: &str,
     plan: &MeasurementPlan,
@@ -401,19 +406,26 @@ pub fn persist_manifest(
     let mut f = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(dir.join("measurement_manifest.json"))
+        .open(paths.manifest())
         .map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut f,&json!({"schema":"C0-E1/MeasurementManifest/2","run_id":run_id,"capture_run_id":run_id,
+    let mut manifest = json!({"schema":"C0-E1/MeasurementManifest/2","run_id":run_id,"capture_run_id":run_id,
         "plan":plan,"created_unix_ns":clock.unix_ns(clock.now_ns()),"clock_origin_unix_ns":clock.unix_ns(0),
         "clock_definition":"process monotonic ns; UTC = fixed origin + monotonic ns; capture boundaries journaled after StreamReady",
         "head":head.trim(),"binary_sha256":sha(&fs::read(binary).map_err(|e|e.to_string())?),"source_sha256":sources,
         "provider_class":if provider_class.bytes().all(|c|c.is_ascii_alphanumeric() || b"_-".contains(&c)){provider_class}else{"UNKNOWN"},
         "operational_config":darkbot_solana::runtime_config::report(),"risk_limits":risk,"permitted_modes":["SHADOW_OBSERVE_ONLY"],"live_enabled":false,"submission_enabled":false,
         "verification_mode":"SEPARATE_POST_CAPTURE","capture_window":null,"protocol_pin":"33c67987a661f59c6683a65485ebb4f0ef030b77",
-        "phase_journal":"measurement_phases.jsonl","compatibility":"hour_01..04 names retained; use plan offsets, not filename as hours"})).map_err(|e|e.to_string())?;
+        "phase_journal":"measurement_phases.jsonl","compatibility":"hour_01..04 names retained; use plan offsets, not filename as hours"});
+    if paths.layout == crate::run_layout::RunLayout::V2 {
+        // Layout V2 is a separately versioned manifest; V1 output stays byte-identical.
+        manifest["schema"] = json!("C0-E1/MeasurementManifest/3");
+        manifest["layout"] = json!(paths.layout.tag());
+        manifest["phase_journal"] = json!("capture/measurement_phases.jsonl");
+    }
+    serde_json::to_writer_pretty(&mut f, &manifest).map_err(|e| e.to_string())?;
     f.sync_all().map_err(|e| e.to_string())?;
     journal(
-        dir,
+        paths,
         clock,
         "BOOTSTRAP",
         json!({"budget_seconds":plan.budgets.bootstrap_seconds}),
@@ -512,6 +524,7 @@ mod persistence_tests {
     use super::*;
     #[test]
     fn manifest_is_exclusive_and_phase_journal_preserves_exact_window() {
+        use crate::run_layout::{RunLayout, RunPaths};
         let dir = std::env::temp_dir().join(format!("p0-plan-manifest-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         // Unique child; never overwrite earlier evidence, even after a failed test.
@@ -519,33 +532,59 @@ mod persistence_tests {
         let dir = dir.join(clock.unix_ns(0).to_string());
         fs::create_dir(&dir).unwrap();
         let plan = MeasurementPlan::new(61).unwrap();
-        persist_manifest(&dir, "test", "https://secret/?key=hidden", &plan, clock).unwrap();
-        let before = fs::read(dir.join("measurement_manifest.json")).unwrap();
-        let manifest: Value = serde_json::from_slice(&before).unwrap();
-        assert_eq!(manifest["provider_class"], "UNKNOWN");
-        assert_eq!(manifest["binary_sha256"].as_str().unwrap().len(), 64);
-        assert!(!manifest["source_sha256"].as_object().unwrap().is_empty());
-        assert!(persist_manifest(&dir, "test", "UNKNOWN", &plan, clock).is_err());
-        assert_eq!(
-            before,
-            fs::read(dir.join("measurement_manifest.json")).unwrap()
-        );
-        let window = plan.capture_window(clock, 600 * NS).unwrap();
-        journal(&dir, clock, "CAPTURE", window.clone()).unwrap();
-        journal(&dir, clock, "DRAIN", json!({"stop_reason":"TIMER"})).unwrap();
-        let rows: Vec<Value> = fs::read_to_string(dir.join("measurement_phases.jsonl"))
-            .unwrap()
-            .lines()
-            .map(|s| serde_json::from_str(s).unwrap())
-            .collect();
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[1]["details"], window);
-        assert_eq!(rows[1]["details"]["capture_cutoff_ns"], 661 * NS);
+        for (layout, manifest_name, phases_name, schema) in [
+            (
+                RunLayout::V1,
+                "measurement_manifest.json",
+                "measurement_phases.jsonl",
+                "C0-E1/MeasurementManifest/2",
+            ),
+            (
+                RunLayout::V2,
+                "manifest.json",
+                "capture/measurement_phases.jsonl",
+                "C0-E1/MeasurementManifest/3",
+            ),
+        ] {
+            let root = dir.join(layout.tag().replace('/', "_"));
+            let paths = RunPaths::new(&root, layout);
+            paths.create().unwrap();
+            persist_manifest(&paths, "test", "https://secret/?key=hidden", &plan, clock).unwrap();
+            let before = fs::read(root.join(manifest_name)).unwrap();
+            let manifest: Value = serde_json::from_slice(&before).unwrap();
+            assert_eq!(manifest["schema"], schema);
+            assert_eq!(manifest["phase_journal"], phases_name);
+            assert_eq!(manifest["capture_run_id"], "test");
+            match layout {
+                RunLayout::V1 => assert!(manifest.get("layout").is_none()),
+                RunLayout::V2 => {
+                    assert_eq!(manifest["layout"], "Project0/RunLayout/2");
+                    assert!(!root.join("measurement_manifest.json").exists());
+                    assert!(!root.join("measurement_phases.jsonl").exists());
+                }
+            }
+            assert_eq!(manifest["provider_class"], "UNKNOWN");
+            assert_eq!(manifest["binary_sha256"].as_str().unwrap().len(), 64);
+            assert!(!manifest["source_sha256"].as_object().unwrap().is_empty());
+            assert!(persist_manifest(&paths, "test", "UNKNOWN", &plan, clock).is_err());
+            assert_eq!(before, fs::read(root.join(manifest_name)).unwrap());
+            let window = plan.capture_window(clock, 600 * NS).unwrap();
+            journal(&paths, clock, "CAPTURE", window.clone()).unwrap();
+            journal(&paths, clock, "DRAIN", json!({"stop_reason":"TIMER"})).unwrap();
+            let rows: Vec<Value> = fs::read_to_string(root.join(phases_name))
+                .unwrap()
+                .lines()
+                .map(|s| serde_json::from_str(s).unwrap())
+                .collect();
+            assert_eq!(rows.len(), 3);
+            assert_eq!(rows[1]["details"], window);
+            assert_eq!(rows[1]["details"]["capture_cutoff_ns"], 661 * NS);
+            assert_eq!(
+                rows[1]["details"]["snapshot_monotonic_ns"][0],
+                615_250_000_000u64
+            );
+        }
         assert_eq!(utc_ns(15_250_000_001), "1970-01-01T00:00:15.250000001Z");
-        assert_eq!(
-            rows[1]["details"]["snapshot_monotonic_ns"][0],
-            615_250_000_000u64
-        );
     }
 }
 

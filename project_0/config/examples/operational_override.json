@@ -1,0 +1,7 @@
+{
+  "profile": "custom",
+  "duration": "61s",
+  "limits": {
+    "rpc_rps": 12
+  }
+}

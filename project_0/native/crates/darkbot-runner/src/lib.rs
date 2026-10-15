@@ -31,6 +31,8 @@ pub mod market_observer;
 pub mod econ;
 
 pub mod measurement;
+/// Run directory layout V1/V2 of econ4h captures; mirrors scripts/run_store.py.
+pub mod run_layout;
 
 /// FE-04 offline-qualified durable hold; normal LIVE entrypoint remains blocked.
 pub mod one_shot;

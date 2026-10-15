@@ -1,83 +1,83 @@
 # Run layout versioning
 
-Status 2026-10-15, structure iteration 8b.2. Decision record for moving runs to the target layout without
-breaking historical identities. Operating instructions: [run storage](../operations/run_storage.md).
+Status 2026-10-15, structure iterations 8b.2/8b.3, **PENDING_INDEPENDENT_REVIEW**. Decision: **Option A, one coordinated,
+versioned re-pin** (implemented). Operating instructions: [run storage](../operations/run_storage.md).
 
 ## 1. Layout versions
 
-| Version | Runs | Identification | Readable by the current verifier and reports |
+| Version | Runs | Identification | Readers |
 |---|---|---|---|
-| **V1** | every run written so far (`data/econ4h`, `data/market`, and `data/runs` since 8b.1) | no layout marker; no `manifest.json`, `config.json`, `capture/`, `snapshots/` or `logs/` at the run root | yes |
-| **V2** | none yet; no writer produces it | `manifest.json` with `"layout": "Project0/RunLayout/2"` | **no**; rejected with `RUN_LAYOUT_UNSUPPORTED` |
+| **V1** `Project0/RunLayout/1` | every historical run (`data/econ4h`, `data/market`, `data/runs` from 8b.1), new C0-MO runs, explicit legacy roots | no `manifest.json`; none of `manifest.json, config.json, capture, snapshots, logs` at the root | yes, unchanged behaviour |
+| **V2** `Project0/RunLayout/2` | new econ4h / C0-E1 runs in `data/runs` (default since 8b.3) | `manifest.json` with `"layout": "Project0/RunLayout/2"` and `"schema": "C0-E1/MeasurementManifest/3"`; root contains only `manifest.json, config.json, capture/, snapshots/, verification/, reports/, logs/` (dotfiles ignored) | yes |
 
-Anything else, for example a V1 run with a `logs/` directory or a `manifest.json` without the V2 tag, is
-`RUN_LAYOUT_INVALID`. There is no fallback that guesses a layout. Implementation: `detect_layout` in
-[`scripts/run_store.py`](../../scripts/run_store.py). All local runs were checked on 2026-10-15; none contains a V2-only name.
+Anything else is `RUN_LAYOUT_INVALID` (mixed names, a V2 run without its manifest, a malformed manifest); a layout tag
+`Project0/RunLayout/<n>` other than 1 or 2 is `RUN_LAYOUT_UNSUPPORTED`. No fallback guesses a layout. Implementation:
+`detect_layout` in [`scripts/run_store.py`](../../scripts/run_store.py); the artifact map is `ARTIFACTS` there and
+`RunPaths` in `native/crates/darkbot-runner/src/run_layout.rs` (Rust writers). Tests pin both to the same literal paths.
 
-## 2. Pinned readers and what they bind
+In V2 there are no reader fallbacks: the manifest is the only identity and plan source, the phase journal and the three market
+streams must exist (`RUN_ARTIFACT_MISSING`), and the capture evidence index is validated before reuse.
 
-Three Python files are hashed into identities. They read V1 paths directly.
+## 2. Pinned files
 
-| Pinned file | Reads / writes in the run directory | Identities that hash this file |
+| Pinned file | Identities that hash it |
+|---|---|
+| `measurement_contract.py` | `verification_spec_id` (decoder pin), report dataset key (`contract_sha256`) |
+| `audit_market_quick.py` | `verification_spec_id` (decoder pin), index checkpoint (`decoder_sha256`), report dataset key (`decoder_sha256`) |
+| `market_report.py` | report dataset key (`normalizer_sha256`) |
+| `run_store.py` (**new pin**) | `verification_spec_id` (decoder pin), index checkpoint (`layout_sha256`), report dataset key (`layout_sha256`) |
+
+Strict mode additionally pins `market_verification.rs`, `market_reconcile.rs`, `market_truth.rs`, `market_gap.rs` (unchanged)
+and the `p0-strict-verify` binary; report datasets pin the `p0-econ-replay` binary. Not pinned: `measurement_verify.py`,
+`measurement_cli.py`, `operational_config.py`, the shell launchers. Because `run_store.py` is pinned, any later change to it
+creates new identities exactly like a change to the readers.
+
+## 3. Identity versions after the re-pin
+
+| Identity | Before (archived) | Now | Effect |
+|---|---|---|---|
+| `capture_run_id` | manifest `capture_run_id`/`run_id`, or legacy name + summary hash | unchanged; V2 only from `manifest.json` | independent of root and layout |
+| capture evidence | `C0-E1/CaptureEvidence/2` in `capture_evidence_manifest.json` | V1 unchanged (byte-identical); V2 `C0-E1/CaptureEvidence/3` with `layout` in `verification/capture_evidence_manifest.json` | — |
+| `verification_spec_id` | `C0-E1/VerificationSpec/2` | `C0-E1/VerificationSpec/3` with `layout`, `run_store.py` in `decoder_pins` | new spec ids for new verifications |
+| index checkpoint | `C0-E1/INDEX/2`, default `verification/index_v2` | `C0-E1/INDEX/3` with `layout` and `layout_sha256`, default `verification/index_v3` | old checkpoints are not continued |
+| report dataset key | `C0-E1/NormalizedReport/2` | `C0-E1/NormalizedReport/3` with `layout` and `layout_sha256` | a new dataset is built from raw evidence |
+| report records, hourly snapshots, renderer | `C0-E1/NormalizedReport/2` | unchanged format and version | identical records give identical `records_sha256` and `report_query_identity` |
+| decoder version in records and index summaries | `C0-E1/INDEX/2` | unchanged (decoder logic unchanged) | — |
+| Rust manifest | `C0-E1/MeasurementManifest/2` | V1 unchanged (byte-identical); V2 `C0-E1/MeasurementManifest/3` with `layout` and `phase_journal` `capture/measurement_phases.jsonl` | — |
+
+**V1 stays historically reproducible.** For V1 runs the re-pinned readers produce byte-identical capture evidence, legacy
+identity, window, report records and hourly snapshots compared with the archived readers of checkpoint
+`p0-before-claude-iter15-20261015` (`908b14c`); only versioned identities differ (test `ArchivedParity` in
+`scripts/test_run_layout.py`). Stored specs, results and datasets are validated against their own digests, never recomputed,
+so all existing verification and report ids stay readable and traceable. Reproducing an archived id bit for bit needs the
+commit whose pinned file hashes equal the `decoder_pins` in its `spec.json`.
+
+## 4. Resume rules
+
+- **Verification spec:** `--resume-verification` when the current spec does not exist yet, but a spec for the same capture and
+  mode written by another implementation (different `schema`, `decoder_pins` or `layout`) does, fails with
+  `RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION: <spec id> (<schema>)` before anything is created. Resume that attempt with the archived
+  implementation, or start a new verification without `--resume-verification`. Same implementation with other budgets or
+  provider behaves as before.
+- **Index checkpoint:** a stored identity with another `schema`, `decoder_sha256` or `layout_sha256` fails with
+  `RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION`; same implementation but another run or window fails with
+  `RESUME_IDENTITY_MISMATCH`. A false resume PASS is impossible.
+- **Report datasets:** a changed dataset identity builds a new dataset; existing datasets stay untouched and verified.
+- Local inventory 2026-10-15: no spec-based verification directory exists in any local run; the only checkpoint is
+  `market5h_20261011T010758Z/verification/index_v1`, which neither the archived nor the current code resumes.
+
+## 5. Options considered
+
+| Option | Content | Decision |
 |---|---|---|
-| `measurement_contract.py` | `measurement_manifest.json`, `market/summary.json` or `summary.json`; writes `capture_legacy_identity.json`, `capture_evidence_manifest.json`; hashes every file except `verification/` and `reports/` | `verification_spec_id` (decoder pin), report dataset key (`contract_sha256`) |
-| `audit_market_quick.py` | `measurement_manifest.json`, `measurement_phases.jsonl`, `market/summary.json`, `market/transactions.jsonl`, `market/liquidations.jsonl`, `market/coverage.jsonl`, `canonical_market_shadow.jsonl`, `opportunity_economics.jsonl`; writes `verification/index_v2/` | `verification_spec_id` (decoder pin), index checkpoint identity, report dataset key (`decoder_sha256`) |
-| `market_report.py` | `verification/*/spec.json` and `results/`, `market/`, `measurement_manifest.json`, `shadow_evaluations.jsonl`, `canonical_market_shadow.jsonl`, `opportunity_economics.jsonl`, `hour_01..04.json`, `economics_final.json`; writes `reports/` | report dataset key (`normalizer_sha256`) |
+| **A: one coordinated, versioned re-pin** | readers resolve paths through `run_store` by layout; explicit identity versions | **implemented** |
+| B: separate V2 reader copies | second verifier and report implementation | rejected (no second engine) |
+| C: postpone V2 | keep V1 under `data/runs` | superseded |
 
-Not pinned: `measurement_verify.py`, `measurement_cli.py`, `operational_config.py`, `run_store.py`, the shell launchers.
-In strict mode the spec also pins `market_verification.rs`, `market_reconcile.rs`, `market_truth.rs`, `market_gap.rs`
-and the `p0-strict-verify` binary; report datasets also pin the `p0-econ-replay` binary.
+## 6. Tests
 
-## 3. Identity chains
-
-| Identity | Inputs | On a changed pin |
-|---|---|---|
-| `capture_run_id` | `measurement_manifest.json` (`capture_run_id` or `run_id`); legacy: run directory name + summary hash | unchanged; independent of the root |
-| `verification_spec_id` | schema `C0-E1/VerificationSpec/2`, capture identity, window, mode, protocol pin, decoder pins, FREE_ONLY provider binding, budgets | new verifications get a new spec id |
-| `verification_attempt_id` / `verification_result_id` | random per attempt / digest of the result payload | new ids, as for every attempt |
-| index checkpoint | schema `C0-E1/INDEX/2`, run directory name, window, `sha256(audit_market_quick.py)` | resume fails closed with `RESUME_IDENTITY_MISMATCH` |
-| report dataset key | `C0-E1/NormalizedReport/2`, normalizer, decoder, contract and replay-binary hashes, capture and result ids | a new dataset is built from raw evidence |
-| `report_query_identity` | capture id, result id, query, renderer version, `records_sha256` of the dataset | unchanged if the records are unchanged |
-
-Stored artifacts are never recomputed with current code: reports validate a stored `spec.json` against its own
-digest, results against their digest and artifact hashes. Historical verifications therefore stay readable under
-their original ids after a re-pin; reproducing them bit for bit needs the commit that created them.
-
-**What a re-pin breaks:** only in-progress resumes. An unfinished verification attempt or index checkpoint created
-before the change can no longer be resumed and fails closed (`RESUME_IDENTITY_MISMATCH`, or a new spec id without
-the old attempt). Local inventory 2026-10-15: no spec-based verification directory exists in any local run; the only
-checkpoint is `market5h_20261011T010758Z/verification/index_v1`, which the current code (`index_v2`) already does not resume.
-
-## 4. Decision required before V2 readers and writers
-
-Layout V2 needs the three pinned readers to resolve paths by layout. That is a re-pin and is not done in 8b.2.
-
-| Option | Content | Consequence |
-|---|---|---|
-| **A: one coordinated, versioned re-pin** (recommended) | Pinned readers resolve paths through `run_store` by layout; `run_store.py` joins the decoder pins; spec schema `C0-E1/VerificationSpec/3`, index schema `C0-E1/INDEX/3` and report version `C0-E1/NormalizedReport/3` carry the layout | V1 and V2 both readable; new ids for all new verifications; unfinished attempts must be finished with the old commit or restarted, never mixed |
-| B: separate V2 reader copies | new modules for V2, V1 files untouched | second implementation of the verifier and report logic; contradicts the reform rules |
-| C: postpone V2 | keep V1 under `data/runs` (current state) and continue with 8b.3 and phase C | no identity change; target layout deferred |
-
-Preconditions for A: confirm on every machine that no unfinished verification or index checkpoint must be resumed;
-record the transition in the ledger; tests as in section 6.
-
-## 5. V2 artifact map (for the writer step after the decision)
-
-| V1 path | V2 path | Writer |
-|---|---|---|
-| `measurement_manifest.json` | `manifest.json` (plus `layout`) | Rust `measurement.rs` |
-| `measurement_phases.jsonl` | `capture/measurement_phases.jsonl` | Rust `measurement.rs` |
-| `measurement_plan.json`, `measurement_config.json`, `operational_config.json`, `verification_preflight.json` | `config.json` and `config/` details | launcher, `measurement_cli.py` |
-| `market/*` | `capture/market/*` | Rust `market_observer.rs` |
-| `shadow_evaluations.jsonl`, `shadow_offsets.bin`, `opportunities.jsonl`, `daily_summary.jsonl`, `mt0.jsonl` | `capture/` | Rust `econ.rs`, `main.rs` |
-| `hour_01..04.json`, `economics_final.json`, `opportunity_economics.jsonl`, `canonical_market_shadow.jsonl` | `snapshots/` | Rust `econ.rs` |
-| `verification/`, `reports/` | unchanged | `measurement_verify.py`, `market_report.py` |
-| `build.log`, `runtime.log`, `console_summary.txt`, `gap_proxy.log` | `logs/` | launchers |
-| `capture_evidence_manifest.json`, `candidate_manifest.json`, `storage_preflight.json` | to be fixed in the decision | `measurement_contract.py`, launcher |
-
-## 6. Tests required for the V2 step
-
-Synthetic end-to-end runs in V1 and V2 through the same launcher; byte-identical results for V1 before and after;
-spec, checkpoint and report schema versions present in new artifacts; resume under the old spec id refused, never
-mixed; `capture_run_id` equal for identical runs in either layout; collision and parallel allocation; malformed
-mixed layouts rejected; full Python suite, both Rust matrices, both release builds, differential Clippy.
+`scripts/test_run_layout.py` (artifact table, store/layout rules, V2 skeleton, `config.json` assembly, detection and whitelist,
+identity versions, equal capture id and records in V1 and V2, archived resume detection, V1 parity with the archived readers,
+self-test without tests fails), `scripts/test_run_store.py` (launcher end-to-end in V1 and V2, V2 verify and report through
+`verify.sh` / `report.sh` by id), Rust `run_layout`, `measurement` (V1 and V2 manifest) and `econ_tests`
+(`runtime_worker_writes_layout_v2_capture_and_snapshots`).

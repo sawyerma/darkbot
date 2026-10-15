@@ -8,6 +8,7 @@ import sys
 import tempfile
 import measurement_contract as c
 import operational_config
+import run_store
 
 
 def finish(run,path):
@@ -18,9 +19,11 @@ def finish(run,path):
     q=c.ReportQuery(**cfg['report'])
     qualification=Path(data['provider_qualification']) if data.get('provider_qualification') else None
     result=verify.verify(run,v,qualification)
-    with (run/('post_capture_report.'+q.format)).open('x') as f:
+    layout=c.layout(run);target=run_store.artifact(run,'post_capture_report_'+q.format,layout)
+    target.parent.mkdir(exist_ok=True)
+    with target.open('x') as f:
         metadata=market_report.report(run,q,result['verification_result_id'],f)
-    c.immutable(run/'post_capture_result.json',{'verification_result_id':result['verification_result_id'],
+    c.immutable(run_store.artifact(run,'post_capture_result',layout),{'verification_result_id':result['verification_result_id'],
         'report':metadata,'capture_status_separate_from_verification':True})
     print('Verification:',result['summary']['status'],'; report:',metadata['dataset'])
     return 0 if result['summary']['status'] in ('NOT_RUN','INDEX_VERIFIED','CANONICAL_VERIFIED') else 2
@@ -46,27 +49,31 @@ def launch_config(p,argv,args,effective,environment):
         return subprocess.call([str(Path(__file__).with_name('run_econ4h.sh')),'--measurement-config',str(path)],env=environment)
 
 
-def prepare(run,path):
+def prepare(run,path,out=None):
+    """Pre-capture documents go into the run (layout V1) or into the staging directory that
+    run_store.write_config assembles into config.json (layout V2). Disk is checked on the run volume."""
     data=json.loads(Path(path).read_text());v=c.VerificationConfig(**data['config']['verification']).validate()
     qpath=Path(data['provider_qualification']) if data.get('provider_qualification') else None
-    pf=c.preflight(run,v,qpath,c.endpoint())
-    c.immutable(run/'measurement_config.json',data['config'])
+    pf=c.preflight(run,v,qpath,c.endpoint());out=out or run
+    c.immutable(out/'measurement_config.json',data['config'])
     if data.get('operational_config'):
         # Re-resolve after the existing shell has loaded local endpoints. Private
         # file/CLI values still dominate; only inherited endpoints are completed.
-        with operational_config.resolve([]) as (_,effective,__):c.immutable(run/'operational_config.json',effective)
-    c.immutable(run/'verification_preflight.json',pf)
+        with operational_config.resolve([]) as (_,effective,__):c.immutable(out/'operational_config.json',effective)
+    c.immutable(out/'verification_preflight.json',pf)
     if v.mode!='off' and not pf['passed']:raise c.ContractError('VERIFICATION_PREFLIGHT_OPEN; choose off or qualify the FREE_ONLY provider first')
 
 
 def main():
     try:
+        if len(sys.argv)==5 and sys.argv[1]=='prepare':
+            prepare(Path(sys.argv[2]).resolve(),sys.argv[3],Path(sys.argv[4]).resolve());return 0
         if len(sys.argv)==4 and sys.argv[1] in ('finish','prepare'):
             run=Path(sys.argv[2]).resolve()
             if sys.argv[1]=='prepare':prepare(run,sys.argv[3]);return 0
             return finish(run,sys.argv[3])
         return launch(sys.argv[1:])
-    except (c.ContractError,OSError,ValueError,KeyError,TypeError) as exc:
+    except (c.ContractError,run_store.RunStoreError,OSError,ValueError,KeyError,TypeError) as exc:
         print(str(exc) if isinstance(exc,c.ContractError) else 'MEASUREMENT_WORKFLOW_INPUT_OR_IO_ERROR',file=sys.stderr);return 2
 
 if __name__=='__main__':sys.exit(main())

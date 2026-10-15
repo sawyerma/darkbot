@@ -203,7 +203,7 @@ class TempRun(unittest.TestCase):
         ev.update(signature='one',slot=20,event_index=0,liquidation_type='RECEIVERSHIP')
         self.write('canonical_market_shadow.jsonl',[{'join':{'market':ev,'our':{'economics_known':False,'selected_costs':None}}}])
         self.execute(self.normal_rpc())
-        rows=[json.loads(s) for s in (self.run/'verification/index_v2/comparison.jsonl').read_text().splitlines()]
+        rows=[json.loads(s) for s in (self.run/'verification/index_v3/comparison.jsonl').read_text().splitlines()]
         ev=rows[0]['darkbot']['events'][0]
         self.assertEqual(ev['shadow_status'],'SHADOW_MATCH')
         self.assertIsNone(ev['shadow_evidence']['our']['selected_costs'])
@@ -214,7 +214,7 @@ class TempRun(unittest.TestCase):
         self.write('canonical_market_shadow.jsonl',[{'join':{'market':{'signature':'one','slot':20,'event_index':0,'type':'CLASSIC','target':TARGET,'actor':ACTOR}}}])
         s=self.execute(self.normal_rpc())
         self.assertEqual(s['comparison_counts']['SLOT_MISMATCH'],1)
-        row=json.loads((self.run/'verification/index_v2/comparison.jsonl').read_text())
+        row=json.loads((self.run/'verification/index_v3/comparison.jsonl').read_text())
         self.assertEqual(row['darkbot']['events'][0]['comparisons'][0]['status'],'TYPE_MISMATCH')
 
     def test_malformed_cursor_and_conflicting_duplicates_fail_closed(self):

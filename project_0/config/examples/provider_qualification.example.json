@@ -1,0 +1,10 @@
+{
+  "policy": "FREE_ONLY",
+  "provider_binding": "<sha256 of the RPC URL; computed by measurement_contract.preflight>",
+  "measured_at_unix_s": 0,
+  "passed": false,
+  "evidence_sha256": null,
+  "allowed_rps": 0,
+  "available_calls": 0,
+  "archive_qualified": false
+}

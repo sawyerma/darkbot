@@ -152,19 +152,28 @@ export P0_LIVE_ENABLED=false
 export P0_SUBMISSION_ENABLED=false
 export P0_ECON_RUN_ID="${P0_ECON_RUN_ID:-econ4h_$(date -u +%Y%m%dT%H%M%SZ)}"
 export P0_MARKET_SOURCE="${P0_MARKET_SOURCE:-logs}"
-# Run storage contract: data/econ4h by default, data/runs with P0_RUN_STORE=runs.
-# The run id is validated and the run directory is created exactly once.
+# Run storage contract: data/runs (layout V2) by default, data/econ4h (layout V1) with
+# P0_RUN_STORE=legacy. The run id is validated and the run directory is created exactly once.
+P0_RUN_LAYOUT="$(python3 "$SCRIPT_DIR/run_store.py" layout econ4h "${P0_ECON_OUT_DIR:-}")" || exit 2
 P0_ECON_OUT_DIR="$(python3 "$SCRIPT_DIR/run_store.py" root econ4h "${P0_ECON_OUT_DIR:-}")" || exit 2
-export P0_ECON_OUT_DIR
-RUN_DIR="$(python3 "$SCRIPT_DIR/run_store.py" allocate "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID")" || exit 2
+export P0_ECON_OUT_DIR P0_RUN_LAYOUT
+RUN_DIR="$(python3 "$SCRIPT_DIR/run_store.py" allocate "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" "$P0_RUN_LAYOUT")" || exit 2
+if [[ "$P0_RUN_LAYOUT" == v2 ]]; then
+  # Pre-capture documents are staged and assembled into config.json before the capture starts.
+  CONFIG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/p0-run-config.XXXXXX")"
+  trap 'rm -rf "$CONFIG_DIR"' EXIT
+  LOG_DIR="$RUN_DIR/logs"; CAPTURE_DIR="$RUN_DIR/capture"
+else
+  CONFIG_DIR="$RUN_DIR"; LOG_DIR="$RUN_DIR"; CAPTURE_DIR="$RUN_DIR"
+fi
 if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
-  python3 "$SCRIPT_DIR/measurement_cli.py" prepare "$RUN_DIR" "$MEASUREMENT_CONFIG_INPUT"
+  python3 "$SCRIPT_DIR/measurement_cli.py" prepare "$RUN_DIR" "$MEASUREMENT_CONFIG_INPUT" "$CONFIG_DIR"
 fi
 cd "$REPO_ROOT"
 echo "C0-E1: build; capture starts after bootstrap and StreamReady; submission disabled"
 cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
-  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --bin p0-econ-replay 2>&1 | tee "$RUN_DIR/build.log" || {
-  echo "Build failed: $RUN_DIR/build.log" >&2; exit 2;
+  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --bin p0-econ-replay 2>&1 | tee "$LOG_DIR/build.log" || {
+  echo "Build failed: $LOG_DIR/build.log" >&2; exit 2;
 }
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
 PLAN_BIN="$(dirname "$BIN")/p0-measurement-plan"
@@ -172,23 +181,23 @@ PLAN_BIN="$(dirname "$BIN")/p0-measurement-plan"
 if [[ -n "${P0_MEASUREMENT_PLAN:-}" ]]; then
   echo "launcher creates its own plan; unset P0_MEASUREMENT_PLAN" >&2; exit 2
 fi
-"$PLAN_BIN" > "$RUN_DIR/measurement_plan.json"
-export P0_MEASUREMENT_PLAN="$RUN_DIR/measurement_plan.json"
+"$PLAN_BIN" > "$CONFIG_DIR/measurement_plan.json"
+export P0_MEASUREMENT_PLAN="$CONFIG_DIR/measurement_plan.json"
 export P0_ECON_DURATION_SECS="$(python3 - "$P0_MEASUREMENT_PLAN" <<'PLAN'
 import json, sys
 print(json.load(open(sys.argv[1]))['duration_seconds'])
 PLAN
 )"
-echo "Capture: ${P0_ECON_DURATION_SECS}s; separate bootstrap, drain and verification budgets in measurement_plan.json"
+echo "Capture: ${P0_ECON_DURATION_SECS}s; separate bootstrap, drain and verification budgets in the measurement plan"
 # The preserved 2026-10-08 four-hour evidence occupies ~43 GiB. Budget60GiB
 # for a new four-hour run; this is a storage guard, not an output-size guarantee.
-python3 - "$RUN_DIR" "$P0_ECON_DURATION_SECS" <<'STORAGE'
+python3 - "$RUN_DIR" "$P0_ECON_DURATION_SECS" "$CONFIG_DIR" <<'STORAGE'
 import json, math, pathlib, shutil, sys
 run = pathlib.Path(sys.argv[1])
 duration = int(sys.argv[2])
 required_gib = max(8, math.ceil(60 * duration / 14400))
 free = shutil.disk_usage(run).free
-with (run / 'storage_preflight.json').open('x') as f:
+with (pathlib.Path(sys.argv[3]) / 'storage_preflight.json').open('x') as f:
     json.dump({'free_bytes': free, 'required_bytes': required_gib * 2**30,
                'duration_seconds': duration, 'passed': free >= required_gib * 2**30,
                'basis': 'preserved four-hour evidence ~43GiB; conservative60GiB allocation'}, f, indent=2)
@@ -198,9 +207,9 @@ if free < required_gib * 2**30:
           'Free space without deleting preserved evidence, or set P0_ECON_OUT_DIR on another volume.', file=sys.stderr)
     raise SystemExit(2)
 STORAGE
-export P0_RECORD_PATH="$RUN_DIR/opportunities.jsonl"
-export P0_SUMMARY_PATH="$RUN_DIR/daily_summary.jsonl"
-export P0_MT0_PATH="$RUN_DIR/mt0.jsonl"
+export P0_RECORD_PATH="$CAPTURE_DIR/opportunities.jsonl"
+export P0_SUMMARY_PATH="$CAPTURE_DIR/daily_summary.jsonl"
+export P0_MT0_PATH="$CAPTURE_DIR/mt0.jsonl"
 export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
@@ -217,7 +226,7 @@ mkdir -p "$(dirname "$P0_RECORD_PATH")" "$(dirname "$P0_SUMMARY_PATH")"
 
 # Bind local (possibly uncommitted) source and the actual executable to this run.
 # Do not record environment values, endpoints or signer paths.
-python3 - "$BIN" "$RUN_DIR" <<'MANIFEST'
+python3 - "$BIN" "$CONFIG_DIR" <<'MANIFEST'
 import hashlib, json, pathlib, subprocess, sys
 binary, run = map(pathlib.Path, sys.argv[1:])
 paths = subprocess.check_output(['git', 'ls-files', '-co', '--exclude-standard', '--',
@@ -234,12 +243,15 @@ with (run / 'candidate_manifest.json').open('x') as f:
     json.dump(manifest, f, indent=2)
     f.write('\n')
 MANIFEST
+if [[ "$P0_RUN_LAYOUT" == v2 ]]; then
+  python3 "$SCRIPT_DIR/run_store.py" config "$RUN_DIR" "$CONFIG_DIR" >/dev/null || exit 2
+fi
 status=0
 # All durations follow the same capture lifecycle. Never timebox the entire
 # process by capture duration: bootstrap and verification have separate budgets.
-"$BIN" > "$RUN_DIR/console_summary.txt" 2> >(tee "$RUN_DIR/runtime.log" >&2) || status=$?
+"$BIN" > "$LOG_DIR/console_summary.txt" 2> >(tee "$LOG_DIR/runtime.log" >&2) || status=$?
 wait # stderr tee must finish before immutable evidence hashing
-cat "$RUN_DIR/console_summary.txt"
+cat "$LOG_DIR/console_summary.txt"
 if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
   # Actual process has drained/exited. Freeze raw evidence before historical RPC.
   python3 "$SCRIPT_DIR/measurement_cli.py" finish "$RUN_DIR" "$MEASUREMENT_CONFIG_INPUT" || status=$?

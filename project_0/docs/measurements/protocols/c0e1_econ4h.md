@@ -19,13 +19,15 @@ Defaults: 14400 seconds, 3600-second snapshots, capital scenarios
 `200,500,1000,2500,5000,10000` USD. Exactly four equal intervals are required. Optional:
 `P0_ECON_CAPITAL_USD`, `P0_ECON_QUEUE_CAPACITY` (8192), `P0_ECON_RETENTION` (262144),
 `P0_ECON_DRAIN_SECS` (180), `P0_ECON_OUT_DIR`, `P0_ECON_RUN_ID`, `P0_PROVIDER_CLASS`,
-`P0_RUN_STORE=runs` (run directory under `data/runs/`, see [run storage](../../operations/run_storage.md)).
+`P0_RUN_STORE=legacy` (historical `data/econ4h/` root and layout V1; default since 8b.3 is `data/runs/` in layout V2,
+see [run storage](../../operations/run_storage.md)).
 The market source defaults to `logs` in the script; a distinct `P0_MARKET_WS_URL` can supply
 an enhanced transaction stream while Shadow keeps its existing `P0_WS_URL`.
 
-Generated output: `data/econ4h/<run_id>/hour_01.json` through `hour_04.json`,
-`economics_final.json`, `opportunity_economics.jsonl`, `shadow_evaluations.jsonl`, detailed
-runtime/MT0 logs, and the unchanged C0-MO evidence files under `market/`.
+Generated output (layout V2 path in parentheses; V1 keeps every file at the run root):
+`hour_01.json` through `hour_04.json`, `economics_final.json`, `opportunity_economics.jsonl` (`snapshots/`),
+`shadow_evaluations.jsonl` and MT0/runtime records (`capture/`), console and runtime logs (`logs/`), and the unchanged
+C0-MO evidence files under `market/` (`capture/market/`).
 These files are runtime data, not versioned evidence. The run stops automatically; bounded
 winner and market drain/enrichment can extend wall time beyond the observation duration.
 

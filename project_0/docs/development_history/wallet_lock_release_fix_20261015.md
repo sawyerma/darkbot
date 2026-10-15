@@ -1,7 +1,7 @@
 # Wallet journal lock release — technical finding (2026-10-15)
 
 Status: **PENDING_INDEPENDENT_REVIEW**. This fix is separate from the run-layout restructuring.
-First part committed by the user as `6ec4483`; error-path hardening in this working tree.
+Committed by the user as `6ec4483` (unlock in `Drop for Journal`) and `218710b` (`WalletLock` guard for every release path).
 
 ## Symptom
 
@@ -41,7 +41,7 @@ concurrently spawned child still references. Because the wrapper owns the lock f
 the failed-open paths (`JOURNAL_INTERRUPTED_WRITE_HALT`, `JOURNAL_SIZE_LIMIT`, `JOURNAL_READ`, `JOURNAL_CORRUPT`,
 `JOURNAL_WALLET_MISMATCH`, a failed re-persist) release it the same way.
 
-Commit `6ec4483` added the explicit unlock in `Drop for Journal`. The working tree moves it into `WalletLock` so the
+Commit `6ec4483` added the explicit unlock in `Drop for Journal`. Commit `218710b` moves it into `WalletLock` so the
 error paths are covered too, and adds the error-path regression test.
 
 ## Invariants kept
@@ -56,4 +56,19 @@ error paths are covered too, and adds the error-path regression test.
 
 ## Validation
 
-FINAL_VALIDATION_PLACEHOLDER
+Offline, `--locked`, default test parallelism, on the final code (`218710b`):
+
+| Check | `crate_health` | `crate_health,txv1` |
+|---|---|---|
+| Isolated `exact_adapter_bytes_ack_timeout_and_rejection_never_rearm`, 200 runs | 0 failed | 0 failed |
+| Both new lock tests, 50 runs | 0 failed | 0 failed |
+| Whole `one_shot` module, 50 runs | 0 failed | 0 failed |
+| Whole `darkbot-runner` lib, 10 runs | 0 failed | 0 failed |
+| Full workspace test matrix | **377 passed, 0 failed, 1 ignored** | **379 passed, 0 failed, 1 ignored** |
+| Release build | PASS | PASS |
+
+The previous baseline of 375/377 rises by the two new tests. Differential Clippy (`--all-targets`, `crate_health,txv1`)
+against `docs/evidence/OPERATIONS_CONFIG_20261014/clippy-diagnostics.json`: 38 → 38 unique warnings, none added.
+`one_shot.rs` passes `rustfmt --check`. Before the error-path change, the `Drop for Journal` version (`6ec4483`) also
+passed 25 of 25 full lib runs and 14 of 14 lock-heavy module runs under `crate_health`. Logs are local only, not
+versioned.

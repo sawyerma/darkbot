@@ -140,10 +140,11 @@ impl Worker {
                 .push(event.clone());
         }
         let mut journal = BufReader::new(
-            File::open(self.h.cfg.run_dir.join("shadow_offsets.bin")).map_err(|e| e.to_string())?,
+            File::open(self.h.cfg.paths().capture("shadow_offsets.bin"))
+                .map_err(|e| e.to_string())?,
         );
         let mut raw = BufReader::new(
-            File::open(self.h.cfg.run_dir.join("shadow_evaluations.jsonl"))
+            File::open(self.h.cfg.paths().capture("shadow_evaluations.jsonl"))
                 .map_err(|e| e.to_string())?,
         );
         let mut result = Vec::new();
@@ -218,7 +219,7 @@ impl Worker {
         let file = OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(self.h.cfg.run_dir.join("canonical_market_shadow.jsonl"))
+            .open(self.h.cfg.paths().snapshot("canonical_market_shadow.jsonl"))
             .map_err(|e| e.to_string())?;
         let mut out = BufWriter::new(file);
         for row in &result {

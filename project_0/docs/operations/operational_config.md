@@ -25,7 +25,8 @@ Precedence is **profile < environment < JSON file < CLI**. Unknown fields, inval
 types, zero budgets, arithmetic overflow and inconsistent limits are errors.
 Use `--config FILE`, `P0_OPERATIONAL_CONFIG_FILE`, `P0_PROFILE`, or the environment
 aliases printed in the JSON schema. Config files may contain only overridden
-fields, e.g. `{"profile":"custom","duration":"61s","limits":{"rpc_rps":12}}`.
+fields, e.g. `{"profile":"custom","duration":"61s","limits":{"rpc_rps":12}}`
+([`config/examples/`](../../config/examples/) holds parser-validated examples).
 Empty endpoint arrays inherit local endpoints. The first explicit endpoint has
 highest priority; fallbacks require `--fallback on` and explicit ordered URLs.
 Store secret-bearing config files outside Git with owner-only permissions.
@@ -36,6 +37,13 @@ uses the compiled Rust parser; it does not maintain a second set of profile defa
 `P0_CONFIG_BIN` can point to the matching built configuration binary.
 
 ## Profiles and execution scope
+
+The four profiles are typed files in [`config/profiles/`](../../config/profiles/) (schema
+`Project0/RuntimeProfile/1`): the only source of their values. `runtime_config.rs` embeds them at
+build time and validates them; a profile file may set only `duration`, known `limits` fields and the
+`workers` rule. Endpoints, modes, signer, LIVE or submission cannot be expressed, unknown keys fail.
+Profiles stay the lowest precedence layer; `--config FILE` remains the override file format.
+Changing a profile file requires a rebuild; the binary hash recorded in run manifests covers it.
 
 - `smoke`: 1 aggregate RPC start/s, burst 1, concurrency 1, one HTTP attempt,
   60s capture, 16 MiB response cap, 64 MiB process payload budget. FE observation

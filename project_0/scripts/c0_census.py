@@ -283,7 +283,7 @@ def main():
     ap.add_argument("--rpc", help="RPC URL; Default: P0_RPC_URL, danach HELIUS_API_KEY")
     ap.add_argument("--program", default=DEFAULT_PROGRAM_ID)
     ap.add_argument("--group", default=DEFAULT_GROUP_ID)
-    ap.add_argument("--out", default="project_0/data/c0")
+    ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "c0"))
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
