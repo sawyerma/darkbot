@@ -1,7 +1,7 @@
 # Project_0 — aktiver Handoff für neue Chats
 
 **Aufnahme:** 2026-10-15. **Repository:** `sawyerma/darkbot`, Branch `main`.
-**Strukturstatus:** Phase A abgeschlossen (Iterationen 1–7); **Iteration 8a Gitignore-Schutz abgeschlossen** (Commit `958d0b3`); **Iteration 8b Run-Verzeichnisstruktur als Nächstes**. Also **7/32 Hauptiterationen vollständig DONE**, 8/32 teilweise abgeschlossen.
+**Strukturstatus:** Phase A abgeschlossen (Iterationen 1–7); **8a DONE** (`958d0b3`); **8b.1 DONE und vom Nutzer getestet/gepusht** (`e8e904cc5e350e2edfc382230c4189d34a4aa003`); **8b.2 NEXT**, **8b.3 OPEN**. Damit **7/32 Hauptiterationen vollständig DONE**, Iteration 8 bleibt PARTIAL.
 **Vollständige Fortschrittstabelle:** [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
 **Fachlicher Bot-Status:** [STATUS.md](../STATUS.md). Maßgeblich bleiben das [Measurement-Ledger](../MEASUREMENT_LEDGER.md) und der [Phasenplan](../PHASENPLAN.md).
 
@@ -28,11 +28,14 @@ Wir bauen einen **vollwertigen professionellen Solana-/Marginfi-Liquidationsbot*
 | 5 | Qualifikationsdokumentation unter `docs/qualification/` | `a69af18` |
 | 6 | Fünf historische Audit-/Workorder-Dokumente unter `docs/development_history/` | `1b87387` |
 | 7 | Aktuelle fachliche `docs/STATUS.md`, korrigierte Navigations-READMEs | `8b5c984` |
-| **8a** | **Projekt-`.gitignore`: lokale Laufzeitdaten/Secrets schützen** | **`958d0b3`**, Teil von Iteration 8; **8b noch offen** |
+| **8a** | **Projekt-`.gitignore`: lokale Laufzeitdaten/Secrets schützen** | **DONE** `958d0b3` |
+| **8b.1** | **Validierter Opt-in Run-Store** mit Lock und Kollisionsschutz, bestehenden Legacy-Defaults und synthetischen Tests; [Run-Store-Dokumentation](run_storage.md) | **DONE** `e8e904c`, 11 Dateien, +409/−13 Zeilen |
+| **8b.2** | **Zukunftslayout und versionierte Identity-/Reader-/Writer-Migration** | **OPEN / NEXT**; gepinnte Dateien noch unverändert |
+| **8b.3** | **Standard-Store qualifiziert von Legacy auf runs umstellen** | **OPEN** |
 
 Die 32 Schritte mit den offenen Phasen B–F stehen vollständig in [restructure_32_step_plan.md](../architecture/restructure_32_step_plan.md).
 
-**Letzte erfolgreich ausgeführte Offline-Regressionsbasis:** 68 Python-Tests PASS; 375 Rust-Tests unter `crate_health` PASS (1 ignored); 377 Rust-Tests unter `crate_health,txv1` PASS (1 ignored); null Fehlschläge. Diese Ergebnisse belegen weder eine FE-01-Gesamtfreigabe noch aktuelle Mainnet-Providerkapazität. Qualifizierte vorherige Operational-Config-Baseline: `0782d8b` (368/370 Rust PASS, 65 Python PASS, beide Release-Builds PASS, Differential-Clippy 38→38). FE-01-WIP-Code `4c271cb` ist offline getestet, hat aber keine vollständige eigene Qualifikations-Evidence.
+**Letzte erfolgreich ausgeführte Offline-Regressionsbasis (8b.1, vom Nutzer nach Astra-Review getestet):** **83 Python-Tests PASS**, davon 15 neue Run-Store-Tests; **375 Rust-Tests** unter `crate_health` PASS (1 ignored); **377 Rust-Tests** unter `crate_health,txv1` PASS (1 ignored); beide Release-Builds PASS; Syntax-, Gitignore- und Pinned-Identity-Checks PASS; Clippy-Ausführung PASS. Astra meldet Differential-Clippy 38→38 und 5×12 erfolgreiche konkurrierende Allocations. Terminal-Nachweis `PROJECT0_8B1_PUSH_PASS`; Logs lokal unter `/tmp/project0-8b1-final.rmmPEa` (nicht im Git). Diese Ergebnisse belegen weder eine FE-01-Gesamtfreigabe noch aktuelle Mainnet-Providerkapazität. Qualifizierte vorherige Operational-Config-Baseline: `0782d8b` (368/370 Rust PASS, 65 Python PASS, beide Release-Builds PASS, Differential-Clippy 38→38). FE-01-WIP-Code `4c271cb` ist offline getestet, hat aber keine vollständige eigene Qualifikations-Evidence.
 
 ## 3. Der derzeitige fachliche Zustand — nicht als Strukturfortschritt behandeln
 
@@ -79,20 +82,21 @@ Sechs Marker sind **keine sechs selbstständigen Gewinne**. Reportfilter für Ar
 
 **Die Commit-Nachricht von `958d0b3` ist irreführend** (`preserve restructure roadmap and handoff`), weil jener Commit tatsächlich **nur `project_0/.gitignore`** enthält. Die Roadmap und dieser Handoff wurden deshalb erst **nachträglich** in separaten Dokumentations-Commits angelegt. Historie nicht nachträglich umschreiben.
 
-## 6. NÄCHSTE AUFGABE: Iteration 8b — Run-Ablage (NICHT ERLEDIGT)
+## 6. NÄCHSTE AUFGABE: Iteration 8b.2 — versionierte Zukunftslayout-/Verifier-Migration (OFFEN)
 
-**Ziel:** Den künftigen typisierten Pfad `project_0/data/runs/<run_id>/{manifest.json,config.json,capture,snapshots,verification,reports,logs}/` vorbereiten und Laufzeitverbraucher kontrolliert migrieren. **Kein pauschales Verschieben der bestehenden 75 GB.**
+**Ist:** Iteration 8b.1 wurde mit Commit [`e8e904c`](https://github.com/sawyerma/darkbot/commit/e8e904cc5e350e2edfc382230c4189d34a4aa003) auf `main` gesichert: `scripts/run_store.py`, `scripts/test_run_store.py`, drei angepasste Launcher und Dokumentation. `P0_RUN_STORE=runs` ist **Opt-in**, `legacy` weiterhin Default. Neue IDs werden lokal Root-übergreifend per `flock` geschützt, `data/runs/` ist ignoriert. Aktuelles Dateiformat bleibt erhalten; `--run <id>` findet die neuen Runs noch nicht, explizite Pfade funktionieren.
+
+**Ziel 8b.2:** Einen **versionierten und migrationsfähigen** Weg für `project_0/data/runs/<run_id>/{manifest.json,config.json,capture/,snapshots/,verification/,reports/,logs/}` ausarbeiten und schrittweise realisieren. **Keine bestehenden 75 GB Run-Rohdaten bewegen. Keine unversionierte Überschreibung von Verifier-/Report-Identitäten.**
 
 **Vorgeschriebene Reihenfolge:**
-1. Git `HEAD`/`origin/main`, Dirty Tree und geschützte untracked Dateien zuerst neu prüfen. Keine implizite Synchronisierung mit lokalen Dirty-Änderungen.
-2. Liste aller Default-/Override-Pfade (`P0_ECON_OUT_DIR`, `P0_MARKET_OUT_DIR`, `P0_RECORD_PATH`, `P0_SUMMARY_PATH`, `P0_MT0_PATH` usw.) aus Rust, Shell, Python, Tests und Manifests inventarisieren.
-3. Run-Identitäten, path precedence, `capture_run_id`, stabile Verifikations-/Report-IDs und unveränderliche Raw-Evidence im Sinne des Phasenplans berücksichtigen; kein stiller Bruch historischer Run-Replays.
-4. Falls künftige Runs zuerst nur über zusätzliche opt-in-Pfade unterstützt werden können, alten Default weiter kompatibel lassen; keine Live-Coverage oder Proofs aus Pfadänderungen ableiten.
-5. Für **neue lokale Runs** `/data/runs/` passend gegen versehentliches Git-Staging schützen, `docs/evidence/` weiterhin freigeben, nur synthetische Fixtures verwenden. Keine echten Runs starten, keine Daten löschen oder kopieren.
-6. Alte/neue Pfade und Report-Ausgaben per Offline-Tests prüfen, einschließlich CLI-Kompatibilität, Hash-/Ledger-/Evidence-Integrität und je nach Rust-Codeänderung vollständiger Rust-Testmatrizen, Release-Builds und Clippy-Differenz.
-7. **STOPP für unabhängige Abnahme**, kein eigenständiger Commit/Push und kein Beginn von 09.
+1. Zuerst den tatsächlich neuesten `main` und das lokale Staging prüfen. [Run-Store-Inventur](run_storage.md), PHASENPLAN, Measurement-Ledger, Manifest-/Resume-/Verification-/Report-Identitätsketten im Code lesen.
+2. **Vor jeder Änderung** eine prüfbare Gegenüberstellung der gepinnten `measurement_contract.py`, `audit_market_quick.py`, `market_report.py` und ihrer Einbindung in `verification_spec_id`, Checkpoints, Resume und Report-Datasets erstellen. Neu gepinnte Versionen erfordern eine **explizit versionierte** Schematransition; niemals den Identitätsalgorithmus historischer Artefakte rückwirkend ändern.
+3. Legacy-V1-Reader/-Resume und neue V2-Layouts müssen nebeneinander funktionieren, einschließlich exakter Run-ID-Suche und expliziter Pfade; `capture_run_id` muss stabil bleiben, Verification- und Report-IDs getrennt. Neue Artefakte sind atomar und kollisionssicher, bestehende Raw-Evidence unveränderlich.
+4. **Keine große Einmalmigration:** zuerst präzise Abhängigkeiten und konservative Teilpakete für 8b.2 festlegen. Nur rückwärtskompatible, getestete neue Writer-/Reader-Pfade opt-in aktivieren; eine Änderung gepinnter Dateien mit Re-Pinning erst nach eigenständiger geprüfter Entscheidung über Spec-Version, Beweis und Resume-Fallback.
+5. Testmatrix: synthetischer End-to-End-Run in Legacy und Zukunftslayout, Offline-Resume unter alter Spec-ID, Hash-/Evidence-Parität, 83+ Python-Tests, 375/377 Rust-Tests, beide Release-Builds, Differential-Clippy und CLI-Äquivalenz, sofern entsprechende Codepfade betroffen sind. Fehler müssen fail-closed bleiben.
+6. **Kein eigenständiger Commit/Push durch Astra/Fable**; nur die zum Teilauftrag gehörenden Pfade gezielt stagen und mit Bericht stoppen. Keine Mainnet-/LIVE-Aktion, kein Repo-weiter Cleanup und keine Iteration 8b.3 oder 09.
 
-**Danach:** 09 Cache, 10 Profile, 11 Beispiele, 12 Daten-/Exportpolitik; 13–20 Tests/Python; 21–25 Shell-Entry-Points; 26–29 Rust; 30–32 Abschluss. Details und exakte Statusspalten stehen in der [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
+**Danach:** 8b.3 Standard-Store und Regression, dann 09 Cache, 10 Profile, 11 Beispiele, 12 Daten-/Exportpolitik; 13–20 Tests/Python; 21–25 Shell-Entry-Points; 26–29 Rust; 30–32 Abschluss. Details und exakte Statusspalten stehen in der [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
 
 ## 7. Rollen, Sicherheitsgrenzen und Abnahme
 
@@ -125,4 +129,4 @@ Bei Rust-/Programmumzügen zusätzlich passende Release-Builds, gezielte CLI-/Fi
 
 ## 8. Neuen Chat exakt hier fortsetzen
 
-> Öffne das GitHub-Repository `sawyerma/darkbot`, Branch `main`. Lies **zuerst** `project_0/docs/operations/restructure_handoff.md`, danach `project_0/docs/architecture/restructure_32_step_plan.md`, dann `project_0/docs/STATUS.md`, die neuesten Ledger-Einträge und relevante Rust-/Python-Dateien. Das **Strukturprojekt** ist bei **Iteration 8b**: 1–7 DONE, 8a DONE und auf GitHub, 8b offen. Die **fachliche** FE-00–FE-07-Roadmap läuft unabhängig. Verifiziere Remote-HEAD und lokales Staging, beginne keine unbekannte Folgetätigkeit, keine LIVE-/Mainnet-Aktion. Nächste Fable-Aufgabe: kontrollierte Run-Ablage und Referenzinventur gemäß Abschnitt 6. Arbeite in genau einem abgenommenen Teilschritt und stoppe vor Commit/Push.
+> Öffne das GitHub-Repository `sawyerma/darkbot`, Branch `main`. Lies **zuerst** `project_0/docs/operations/restructure_handoff.md`, danach `project_0/docs/architecture/restructure_32_step_plan.md`, dann `project_0/docs/STATUS.md`, die neuesten Ledger-Einträge und relevante Rust-/Python-Dateien. Das **Strukturprojekt** ist bei **Iteration 8b.2**: 1–7 DONE, 8a DONE, 8b.1 DONE (`e8e904c`) und auf GitHub, 8b.2/8b.3 offen. Die **fachliche** FE-00–FE-07-Roadmap läuft unabhängig. Verifiziere Remote-HEAD und lokales Staging, beginne keine unbekannte Folgetätigkeit, keine LIVE-/Mainnet-Aktion. Nächste Astra-/Fable-Aufgabe: versionierte, Legacy-kompatible Run-Layout-Migration mit ausdrücklicher Prüfung der Hash-Pins und der historischen Resume-Identitäten gemäß Abschnitt 6. Arbeite in genau einem abgenommenen Teilschritt und stoppe vor Commit/Push.
