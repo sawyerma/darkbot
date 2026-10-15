@@ -2,7 +2,7 @@
 
 Public, secret-free examples. Nothing here is loaded automatically; copy a file, adjust it and pass it explicitly.
 Every example is parsed by the real parser in the test suite (`runtime_config.rs` test
-`config_examples_parse_with_the_real_parser` and `scripts/test_run_layout.py` `ConfigExamples`).
+`config_examples_parse_with_the_real_parser` and `tests/python/test_run_layout.py` `ConfigExamples`).
 
 | File | Use | Parser |
 |---|---|---|

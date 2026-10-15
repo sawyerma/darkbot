@@ -20,9 +20,9 @@ class Reports(unittest.TestCase):
     setUp=f.TempRunBase.setUp
     tearDown=f.TempRunBase.tearDown
     write=f.TempRunBase.write
-    def setup_    setup_events=f.setup_events
+    setup_events=f.setup_events
 
-our_classes_six_markers_four_related_no_double_count(self):
+    def test_four_classes_six_markers_four_related_no_double_count(self):
         result=self.setup_events();out,m=r.normalize(self.run,result)
         records=list(r.values(out/'all_records.jsonl'))
         self.assertEqual(sum(x['record_kind']=='LIQUIDATION' for x in records),4)

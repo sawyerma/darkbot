@@ -42,7 +42,7 @@ temporary files must not persist in the project tree.
 `project_0/.gitignore` ignores `/data/econ4h/`, `/data/market/`, `/data/shadow/`, `/data/c0/`, `/data/runs/`, `/data/cache/`,
 the local integration directory and `/env`; the repository root ignores `.env*` (except `.env.example`), keys, `*.log`, SQLite
 files and `target/`. Deliberately **not** ignored: `docs/evidence/`, `config/` (profiles, examples, public wallet identity),
-`exports/`, `data/.gitkeep`. Tests pin these boundaries (`scripts/test_run_store.py` `GitIgnore`).
+`exports/`, `data/.gitkeep`. Tests pin these boundaries (`tests/integration/test_run_store.py` `GitIgnore`).
 
 ## 4. Reproducibility and immutability rules
 

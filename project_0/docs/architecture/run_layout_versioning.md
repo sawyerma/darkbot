@@ -48,7 +48,7 @@ creates new identities exactly like a change to the readers.
 **V1 stays historically reproducible.** For V1 runs the re-pinned readers produce byte-identical capture evidence, legacy
 identity, window, report records and hourly snapshots compared with the archived readers of checkpoint
 `p0-before-claude-iter15-20261015` (`908b14c`); only versioned identities differ (test `ArchivedParity` in
-`scripts/test_run_layout.py`). Stored specs, results and datasets are validated against their own digests, never recomputed,
+`tests/regression/test_v1_archived_parity.py`). Stored specs, results and datasets are validated against their own digests, never recomputed,
 so all existing verification and report ids stay readable and traceable. Reproducing an archived id bit for bit needs the
 commit whose pinned file hashes equal the `decoder_pins` in its `spec.json`.
 
@@ -76,8 +76,9 @@ commit whose pinned file hashes equal the `decoder_pins` in its `spec.json`.
 
 ## 6. Tests
 
-`scripts/test_run_layout.py` (artifact table, store/layout rules, V2 skeleton, `config.json` assembly, detection and whitelist,
-identity versions, equal capture id and records in V1 and V2, archived resume detection, V1 parity with the archived readers,
-self-test without tests fails), `scripts/test_run_store.py` (launcher end-to-end in V1 and V2, V2 verify and report through
+`tests/python/test_run_layout.py` (artifact table, store/layout rules, V2 skeleton, `config.json` assembly, detection and whitelist,
+identity versions, equal capture id and records in V1 and V2, archived resume detection,
+self-test without tests fails), `tests/regression/test_v1_archived_parity.py` (V1 parity with the archived readers),
+`tests/integration/test_run_store.py` (launcher end-to-end in V1 and V2, V2 verify and report through
 `verify.sh` / `report.sh` by id), Rust `run_layout`, `measurement` (V1 and V2 manifest) and `econ_tests`
 (`runtime_worker_writes_layout_v2_capture_and_snapshots`).

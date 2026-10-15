@@ -17,6 +17,8 @@ import audit_market_quick as a
 
 from p0_market import START,END,KEY,TARGET,ACTOR,NAMES,payload,tx,row,FakeRPC,TempRunBase
 
+ROOT=p0_paths.PROJECT  # docs/evidence/AUDIT_20261005 is read in place, never copied
+
 
 class TempRun(TempRunBase,unittest.TestCase):
     def test_utc_bounds_ignore_last_received_slot(self):
@@ -228,6 +230,20 @@ class DecodeTests(unittest.TestCase):
         t=tx();t['meta']['err']={'InstructionError':[0,'bad']};r=a.detect(t,10);self.assertEqual(r['classification'],'FAILED_TRANSACTION');self.assertEqual(r['events'],[])
         t=tx();t['version']=2;self.assertEqual(a.detect(t,10)['classification'],'UNKNOWN')
         t=tx();t['meta']=None;self.assertEqual(a.detect(t,10)['classification'],'UNKNOWN')
+
+    def test_real_six_mainnet_receivership_fixtures(self):
+        fixtures=[]
+        for p in (ROOT/'docs/evidence/AUDIT_20261005').glob('*.json'):
+            v=json.loads(p.read_text())
+            if isinstance(v,dict):v=v.get('result',v)
+            if isinstance(v,dict) and 'transaction' in v:
+                fixtures.append((p,v))
+        self.assertEqual(len(fixtures),6)
+        for p,t in fixtures:
+            r=a.detect(t,t['slot'])
+            self.assertEqual(r['classification'],'CLASSIFIED',(p.name,r['unknown_reasons']))
+            self.assertEqual(r['program_events'].get('RECEIVERSHIP'),1,p.name)
+            self.assertEqual(r['signature'],p.stem)
 
     def test_completion_identity_and_caught_cpi_fail_closed(self):
         t=tx();t['transaction']['message']['instructions'][-1]['accounts'][0]=2

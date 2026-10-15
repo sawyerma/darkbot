@@ -272,7 +272,7 @@ project_0/
 ├── data/                             <- local/generated runtime datasets (runs/, cache/, legacy roots)
 ├── exports/                          <- generated exports / reports
 ├── src/                              <- application/control boundary, not Rust production core
-├── tests/                            <- non-Rust project-level test area
+├── tests/                            <- Python tests: python/, integration/, regression/, fixtures/ (tests/README.md)
 └── tools/                            <- reserved project-specific tooling area
 ```
 

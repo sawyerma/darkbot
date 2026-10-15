@@ -98,16 +98,16 @@ class TempRunBase:
 def setup_events(self):
     live=[];historical=[]
     for i,kind in enumerate(c.KINDS):
-        tx=tx('tx'+str(i),10+i,120+i,kind)
-        live.append({'source':'transactionSubscribe','signature':'tx'+str(i),'slot':10+i,'t_rx_ns':i+1,'observed_at_utc':a.iso_ns((120+i)*a.NS),'raw':tx})
-        d=a.detect(tx,10+i);d['block_time']=120+i;d['membership']='IN_WINDOW'
+        t=tx('tx'+str(i),10+i,120+i,kind)
+        live.append({'source':'transactionSubscribe','signature':'tx'+str(i),'slot':10+i,'t_rx_ns':i+1,'observed_at_utc':a.iso_ns((120+i)*a.NS),'raw':t})
+        d=a.detect(t,10+i);d['block_time']=120+i;d['membership']='IN_WINDOW'
         historical.append({'historical':d,'darkbot':{}})
     for i,name in enumerate(c.RELATED):
-        tx=tx('related'+str(i),30+i,140+i,'CLASSIC')
-        tx['transaction']['message']['instructions'][0]['data']=a.base58_encode(a.hashlib.sha256(('global:'+name).encode()).digest()[:8])
-        tx['meta']['logMessages']=[f'Program {a.PROGRAM} invoke [1]',f'Program {a.PROGRAM} success']
-        live.append({'source':'transactionSubscribe','signature':'related'+str(i),'slot':30+i,'raw':tx})
-        d=a.detect(tx,30+i);d['block_time']=140+i
+        t=tx('related'+str(i),30+i,140+i,'CLASSIC')
+        t['transaction']['message']['instructions'][0]['data']=a.base58_encode(a.hashlib.sha256(('global:'+name).encode()).digest()[:8])
+        t['meta']['logMessages']=[f'Program {a.PROGRAM} invoke [1]',f'Program {a.PROGRAM} success']
+        live.append({'source':'transactionSubscribe','signature':'related'+str(i),'slot':30+i,'raw':t})
+        d=a.detect(t,30+i);d['block_time']=140+i
         self.assertEqual(d['events'],[])
         self.assertEqual(d['instruction_evidence'][0]['related_type'],name)
         historical.append({'historical':d,'darkbot':{}})

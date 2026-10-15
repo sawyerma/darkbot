@@ -10,7 +10,7 @@ Repository paths are rooted at `project_0/`; the Rust workspace is `project_0/na
 | File | Role |
 |---|---|
 | [STATUS.md](STATUS.md) | Current status summary derived from ledger, plan, evidence and code. Never upgrades a gate. |
-| [operations/restructure_handoff.md](operations/restructure_handoff.md) | **Active repository-reform handoff**: 7/32 complete; iteration 8a Gitignore done; 8b next; tests and Git rules. |
+| [operations/restructure_handoff.md](operations/restructure_handoff.md) | **Active repository-reform handoff**: 1–7, 8a, 8b.1 done; 8b.2–15 implemented, PENDING_INDEPENDENT_REVIEW; tests and Git rules. |
 | [architecture/restructure_32_step_plan.md](architecture/restructure_32_step_plan.md) | **32-iteration structure roadmap**: A–F phases, milestones, all remaining tasks and target tree. |
 | [PHASENPLAN.md](PHASENPLAN.md) · [PHASENPLAN.json](PHASENPLAN.json) | Authoritative production plan; the JSON is a compact index, the Markdown is canonical. |
 | [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md) · [MEASUREMENT_LEDGER.json](MEASUREMENT_LEDGER.json) | Measured evidence and gate decisions, newest entries first; the JSON is a compact index. |

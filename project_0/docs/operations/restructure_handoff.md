@@ -1,7 +1,7 @@
 # Project_0 — aktiver Handoff für neue Chats
 
 **Aufnahme:** 2026-10-15. **Repository:** `sawyerma/darkbot`, Branch `main`.
-**Strukturstatus:** Phase A abgeschlossen (Iterationen 1–7); **8a DONE** (`958d0b3`); **8b.1 DONE und vom Nutzer getestet/gepusht** (`e8e904cc5e350e2edfc382230c4189d34a4aa003`); **8b.2 NEXT**, **8b.3 OPEN**. Damit **7/32 Hauptiterationen vollständig DONE**, Iteration 8 bleibt PARTIAL.
+**Strukturstatus:** Phase A abgeschlossen (1–7); 8a (`958d0b3`) und 8b.1 (`e8e904c`) DONE; Wallet-Lock-Fix `6ec4483`/`218710b`. **Iterationen 8b.2 bis 15 umgesetzt und offline getestet: PENDING_INDEPENDENT_REVIEW** (Zwischenstände vom Nutzer als `95697c8` gesichert, Rest gestaged). Streng gezählt bis zur Abnahme **7/32 DONE**. **Iteration 16 nicht begonnen.**
 **Vollständige Fortschrittstabelle:** [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
 **Fachlicher Bot-Status:** [STATUS.md](../STATUS.md). Maßgeblich bleiben das [Measurement-Ledger](../MEASUREMENT_LEDGER.md) und der [Phasenplan](../PHASENPLAN.md).
 
@@ -30,8 +30,11 @@ Wir bauen einen **vollwertigen professionellen Solana-/Marginfi-Liquidationsbot*
 | 7 | Aktuelle fachliche `docs/STATUS.md`, korrigierte Navigations-READMEs | `8b5c984` |
 | **8a** | **Projekt-`.gitignore`: lokale Laufzeitdaten/Secrets schützen** | **DONE** `958d0b3` |
 | **8b.1** | **Validierter Opt-in Run-Store** mit Lock und Kollisionsschutz, bestehenden Legacy-Defaults und synthetischen Tests; [Run-Store-Dokumentation](run_storage.md) | **DONE** `e8e904c`, 11 Dateien, +409/−13 Zeilen |
-| **8b.2** | **Zukunftslayout und versionierte Identity-/Reader-/Writer-Migration** | **OPEN / NEXT**; gepinnte Dateien noch unverändert |
-| **8b.3** | **Standard-Store qualifiziert von Legacy auf runs umstellen** | **OPEN** |
+| — | Wallet-Journal-Lock-Fix ([Befund](../development_history/wallet_lock_release_fix_20261015.md)) | `6ec4483`, `218710b` |
+| **8b.2** | Layout V2, versionierter Re-Pin Option A ([Entscheidung](../architecture/run_layout_versioning.md)) | **PENDING_INDEPENDENT_REVIEW** |
+| **8b.3** | `data/runs` + Layout V2 Standard für econ4h ([Run-Ablage](run_storage.md)) | **PENDING_INDEPENDENT_REVIEW** |
+| **9–12** | `data/cache/`, `config/profiles/`, `config/examples/`, [Daten-/Export-Policy](data_policy.md) | **PENDING_INDEPENDENT_REVIEW** |
+| **13–15** | `tests/{python,integration,regression,fixtures}/` ([Testkarte](../../tests/README.md)) | **PENDING_INDEPENDENT_REVIEW** |
 
 Die 32 Schritte mit den offenen Phasen B–F stehen vollständig in [restructure_32_step_plan.md](../architecture/restructure_32_step_plan.md).
 
@@ -82,21 +85,34 @@ Sechs Marker sind **keine sechs selbstständigen Gewinne**. Reportfilter für Ar
 
 **Die Commit-Nachricht von `958d0b3` ist irreführend** (`preserve restructure roadmap and handoff`), weil jener Commit tatsächlich **nur `project_0/.gitignore`** enthält. Die Roadmap und dieser Handoff wurden deshalb erst **nachträglich** in separaten Dokumentations-Commits angelegt. Historie nicht nachträglich umschreiben.
 
-## 6. NÄCHSTE AUFGABE: Iteration 8b.2 — versionierte Zukunftslayout-/Verifier-Migration (OFFEN)
+## 6. NÄCHSTE AUFGABE: unabhängige Abnahme von 8b.2–15, danach Iteration 16
 
-**Ist:** Iteration 8b.1 wurde mit Commit [`e8e904c`](https://github.com/sawyerma/darkbot/commit/e8e904cc5e350e2edfc382230c4189d34a4aa003) auf `main` gesichert: `scripts/run_store.py`, `scripts/test_run_store.py`, drei angepasste Launcher und Dokumentation. `P0_RUN_STORE=runs` ist **Opt-in**, `legacy` weiterhin Default. Neue IDs werden lokal Root-übergreifend per `flock` geschützt, `data/runs/` ist ignoriert. Aktuelles Dateiformat bleibt erhalten; `--run <id>` findet die neuen Runs noch nicht, explizite Pfade funktionieren.
+**Ist (PENDING_INDEPENDENT_REVIEW):** Layout V2 (`data/runs/<id>/{manifest.json,config.json,capture,snapshots,verification,reports,logs}`)
+wird von Rust (`run_layout.rs`), Launchern und den gepinnten Lesern gemeinsam benutzt; `run_store.py` ist neu gepinnt.
+Identitäten: Spec `C0-E1/VerificationSpec/3`, Checkpoint `C0-E1/INDEX/3` (`index_v3`), Dataset `C0-E1/NormalizedReport/3`;
+Record-/Snapshot-Format und Decoder-Version unverändert; V1-Ausgaben byte-identisch zu den archivierten Lesern (`908b14c`).
+Resume alter Versuche endet mit `RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION`. Standard: econ4h → `data/runs` V2,
+`P0_RUN_STORE=legacy` → `data/econ4h` V1, C0-MO → `data/market` V1. 9–12: `data/cache/`, typisierte Profile als einzige
+Quelle (`config/profiles/`, in Rust eingebettet), geprüfte Beispiele, Datenpolitik. 13–15: Tests unter `tests/`,
+Kompatibilitätswrapper `scripts/test_suite.py`, `verify.sh --self-test` unverändert 29 Tests.
 
-**Ziel 8b.2:** Einen **versionierten und migrationsfähigen** Weg für `project_0/data/runs/<run_id>/{manifest.json,config.json,capture/,snapshots/,verification/,reports/,logs/}` ausarbeiten und schrittweise realisieren. **Keine bestehenden 75 GB Run-Rohdaten bewegen. Keine unversionierte Überschreibung von Verifier-/Report-Identitäten.**
+**Lokale Offline-Ergebnisse 2026-10-15 (je einmal ausgeführt):** Python **102 PASS** (vorher 90; aus beliebigem
+Arbeitsverzeichnis und über den alten Discover-Befehl), `verify.sh --self-test` 29 PASS; Rust `crate_health` **382 PASS / 1 ignored**,
+`crate_health,txv1` **384 PASS / 1 ignored** (vorher 375/377: +2 Lock-, +5 Layout-/Profil-/Beispieltests); beide Release-Builds
+PASS; Differential-Clippy 38→38; alle geänderten Rust-Dateien rustfmt-sauber; Shell- und Python-Syntax PASS.
 
-**Vorgeschriebene Reihenfolge:**
-1. Zuerst den tatsächlich neuesten `main` und das lokale Staging prüfen. [Run-Store-Inventur](run_storage.md), PHASENPLAN, Measurement-Ledger, Manifest-/Resume-/Verification-/Report-Identitätsketten im Code lesen.
-2. **Vor jeder Änderung** eine prüfbare Gegenüberstellung der gepinnten `measurement_contract.py`, `audit_market_quick.py`, `market_report.py` und ihrer Einbindung in `verification_spec_id`, Checkpoints, Resume und Report-Datasets erstellen. Neu gepinnte Versionen erfordern eine **explizit versionierte** Schematransition; niemals den Identitätsalgorithmus historischer Artefakte rückwirkend ändern.
-3. Legacy-V1-Reader/-Resume und neue V2-Layouts müssen nebeneinander funktionieren, einschließlich exakter Run-ID-Suche und expliziter Pfade; `capture_run_id` muss stabil bleiben, Verification- und Report-IDs getrennt. Neue Artefakte sind atomar und kollisionssicher, bestehende Raw-Evidence unveränderlich.
-4. **Keine große Einmalmigration:** zuerst präzise Abhängigkeiten und konservative Teilpakete für 8b.2 festlegen. Nur rückwärtskompatible, getestete neue Writer-/Reader-Pfade opt-in aktivieren; eine Änderung gepinnter Dateien mit Re-Pinning erst nach eigenständiger geprüfter Entscheidung über Spec-Version, Beweis und Resume-Fallback.
-5. Testmatrix: synthetischer End-to-End-Run in Legacy und Zukunftslayout, Offline-Resume unter alter Spec-ID, Hash-/Evidence-Parität, 83+ Python-Tests, 375/377 Rust-Tests, beide Release-Builds, Differential-Clippy und CLI-Äquivalenz, sofern entsprechende Codepfade betroffen sind. Fehler müssen fail-closed bleiben.
-6. **Kein eigenständiger Commit/Push durch Astra/Fable**; nur die zum Teilauftrag gehörenden Pfade gezielt stagen und mit Bericht stoppen. Keine Mainnet-/LIVE-Aktion, kein Repo-weiter Cleanup und keine Iteration 8b.3 oder 09.
+**Abnahmeprüfungen:** Abschnitt 7 (Befehle) und der Abschlussbericht. Nicht ausgeführt: echte V2-Mainnet-Captures
+(keine Freigabe), `cargo fmt --check` für den ganzen Workspace (Altbestand, siehe Risiken).
 
-**Danach:** 8b.3 Standard-Store und Regression, dann 09 Cache, 10 Profile, 11 Beispiele, 12 Daten-/Exportpolitik; 13–20 Tests/Python; 21–25 Shell-Entry-Points; 26–29 Rust; 30–32 Abschluss. Details und exakte Statusspalten stehen in der [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
+**Offene Risiken:** (1) `cargo fmt --check` schlägt wegen ~500 Alt-Hunks in 42 unveränderten Dateien fehl, darunter das
+strict-gepinnte `market_truth.rs`; alle geänderten Rust-Dateien sind formatiert, ein eigener Formatierungs-Commit ist
+Nutzerentscheidung. (2) Neue Verifikationen erhalten neue IDs; unfertige alte Versuche sind nur mit der archivierten
+Implementierung fortsetzbar (lokal existiert keiner). (3) Python-Leser erwarten Release-Binaries unter `native/target/release/`.
+(4) Testdateien liegen nicht mehr unter `scripts/` und gehen daher nicht mehr in `source_sha256` neuer Run-Manifeste ein.
+(5) Systempython < 3.10 (`/usr/bin/python3` auf macOS) kann die Skripte wie bisher nicht ausführen.
+
+**Danach:** 16–20 Python-Operations, 21–25 Shell-Entry-Points, 26–29 Rust-Crates (Pfad `config/profiles` in
+`runtime_config.rs` mitziehen), 30–32 Abschluss. Details: [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
 
 ## 7. Rollen, Sicherheitsgrenzen und Abnahme
 
@@ -120,7 +136,8 @@ git diff --cached --check
 **Bestätigte Offline-Testkommandos:**
 
 ```bash
-python3 -m unittest discover -s project_0/scripts -p 'test_*.py'
+python3 -m unittest discover -s project_0/tests -t project_0
+project_0/scripts/verify.sh --self-test
 cargo test --manifest-path project_0/native/Cargo.toml --locked --offline --workspace --features crate_health
 cargo test --manifest-path project_0/native/Cargo.toml --locked --offline --workspace --features crate_health,txv1
 ```
@@ -129,4 +146,4 @@ Bei Rust-/Programmumzügen zusätzlich passende Release-Builds, gezielte CLI-/Fi
 
 ## 8. Neuen Chat exakt hier fortsetzen
 
-> Öffne das GitHub-Repository `sawyerma/darkbot`, Branch `main`. Lies **zuerst** `project_0/docs/operations/restructure_handoff.md`, danach `project_0/docs/architecture/restructure_32_step_plan.md`, dann `project_0/docs/STATUS.md`, die neuesten Ledger-Einträge und relevante Rust-/Python-Dateien. Das **Strukturprojekt** ist bei **Iteration 8b.2**: 1–7 DONE, 8a DONE, 8b.1 DONE (`e8e904c`) und auf GitHub, 8b.2/8b.3 offen. Die **fachliche** FE-00–FE-07-Roadmap läuft unabhängig. Verifiziere Remote-HEAD und lokales Staging, beginne keine unbekannte Folgetätigkeit, keine LIVE-/Mainnet-Aktion. Nächste Astra-/Fable-Aufgabe: versionierte, Legacy-kompatible Run-Layout-Migration mit ausdrücklicher Prüfung der Hash-Pins und der historischen Resume-Identitäten gemäß Abschnitt 6. Arbeite in genau einem abgenommenen Teilschritt und stoppe vor Commit/Push.
+> Öffne das GitHub-Repository `sawyerma/darkbot`, Branch `main`. Lies **zuerst** `project_0/docs/operations/restructure_handoff.md`, danach `project_0/docs/architecture/restructure_32_step_plan.md`, `project_0/docs/architecture/run_layout_versioning.md`, `project_0/docs/STATUS.md` und die neuesten Ledger-Einträge. Das **Strukturprojekt** hat 1–7, 8a, 8b.1 DONE; **8b.2–15 sind umgesetzt und PENDING_INDEPENDENT_REVIEW** (Abschnitt 6). Die **fachliche** FE-00–FE-07-Roadmap läuft unabhängig. Verifiziere Remote-HEAD und lokales Staging, beginne keine unbekannte Folgetätigkeit, keine LIVE-/Mainnet-Aktion. Nach der Abnahme folgt Iteration 16 (Python-CLI unter `operations/cli/`); stoppe vor Commit/Push.
