@@ -15,4 +15,5 @@ fi
 if [[ " ${*} " == *" --self-test "* ]]; then
   exec python3 "$DIR/audit_market_quick.py" "$@"
 fi
-exec python3 "$DIR/measurement_verify.py" "$@"
+# --run ID|PATH is located across all run roots and checked for layout V1 before the pinned readers run.
+exec python3 "$DIR/run_store.py" exec "$DIR/measurement_verify.py" "$@"

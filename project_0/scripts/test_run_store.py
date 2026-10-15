@@ -221,6 +221,137 @@ class Launchers(unittest.TestCase):
             self.assertEqual(subprocess.run(['bash','-n',str(SCRIPTS/name)]).returncode,0,name)
 
 
+def v2_run(root,name,layout=s.LAYOUT_V2):
+    run=root/name;run.mkdir(parents=True)
+    (run/'manifest.json').write_text(json.dumps({'layout':layout,'run_id':name}))
+    return run
+
+
+class Layout(unittest.TestCase):
+    def test_v1_without_marker_v2_only_with_marker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            p=Path(folder)
+            self.assertEqual(s.detect_layout(legacy_run(p,'legacy')),'v1')
+            empty=p/'empty';empty.mkdir();self.assertEqual(s.detect_layout(empty),'v1')
+            self.assertEqual(s.detect_layout(v2_run(p,'v2')),'v2')
+
+    def test_mixed_or_malformed_layouts_are_rejected_not_guessed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            p=Path(folder)
+            v2_run(p,'wrong_tag','Project0/RunLayout/9')
+            (p/'not_json').mkdir();(p/'not_json/manifest.json').write_text('{')
+            (p/'list').mkdir();(p/'list/manifest.json').write_text('[]')
+            (p/'dir_manifest/manifest.json').mkdir(parents=True)
+            for name in ('config.json','capture','snapshots','logs'):
+                run=legacy_run(p,'mixed_'+name.replace('.','_'))
+                (run/name).mkdir() if '.' not in name else (run/name).write_text('{}')
+            for run in sorted(x for x in p.iterdir()):
+                with self.subTest(run=run.name):
+                    with self.assertRaisesRegex(s.RunStoreError,'RUN_LAYOUT_INVALID'):s.detect_layout(run)
+
+
+class Locate(unittest.TestCase):
+    def test_exact_id_across_all_roots_and_explicit_paths(self):
+        with tempfile.TemporaryDirectory() as folder:
+            p=Path(folder)
+            for root,name in (('data/econ4h','e1'),('data/market','m1'),('data/runs','r1')):
+                run=legacy_run(p/root,name)
+                self.assertEqual(s.locate_run(name,project=p),run.resolve())
+                self.assertEqual(s.locate_run(str(run),project=p),run.resolve())
+            legacy_run(p/'data/econ4h','twice');legacy_run(p/'data/runs','twice')
+            for bad in ('twice','missing','../e1','a/b','',None):
+                with self.assertRaisesRegex(s.RunStoreError,'RUN_NOT_FOUND_OR_AMBIGUOUS'):s.locate_run(bad,project=p)
+            v2_run(p/'data/runs','new_layout')
+            with self.assertRaisesRegex(s.RunStoreError,'RUN_LAYOUT_UNSUPPORTED'):s.locate_run('new_layout',project=p)
+            (legacy_run(p/'data/runs','broken')/'logs').mkdir()
+            with self.assertRaisesRegex(s.RunStoreError,'RUN_LAYOUT_INVALID'):s.locate_run('broken',project=p)
+
+    def test_one_directory_reached_through_two_roots_is_not_ambiguous(self):
+        with tempfile.TemporaryDirectory() as folder:
+            p=Path(folder);run=legacy_run(p/'data/econ4h','same');(p/'data/runs').symlink_to(p/'data/econ4h')
+            self.assertEqual(s.locate_run('same',project=p),run.resolve())
+
+    def test_run_arguments_rewrite_only_the_run_option(self):
+        with tempfile.TemporaryDirectory() as folder:
+            p=Path(folder);run=legacy_run(p/'data/runs','r1').resolve()
+            self.assertEqual(s.run_arguments(['--run','r1','--mode','index'],project=p),['--run',str(run),'--mode','index'])
+            self.assertEqual(s.run_arguments(['--format','json','--run=r1'],project=p),['--format','json','--run='+str(run)])
+            self.assertEqual(s.run_arguments(['--run','missing','--help'],project=p),['--run','missing','--help'])
+            self.assertEqual(s.run_arguments(['--offline','--run'],project=p),['--offline','--run'])
+            with self.assertRaisesRegex(s.RunStoreError,'RUN_NOT_FOUND_OR_AMBIGUOUS'):s.run_arguments(['--run','missing'],project=p)
+
+
+class ReaderCli(unittest.TestCase):
+    """verify.sh / report.sh with byte-identical copies of the pinned readers in a temporary project."""
+    def project(self,tmp,fake=False):
+        project=tmp/'project_0';scripts=project/'scripts';scripts.mkdir(parents=True)
+        for name in ('verify.sh','report.sh','run_store.py'):shutil.copy2(SCRIPTS/name,scripts/name)
+        if fake:
+            for name in ('measurement_verify.py','market_report.py','audit_market_quick.py'):
+                (scripts/name).write_text('import json,sys\nprint(json.dumps(sys.argv[1:]))\n')
+        else:
+            for name in ('measurement_verify.py','market_report.py','audit_market_quick.py','measurement_contract.py','operational_config.py'):
+                shutil.copy2(SCRIPTS/name,scripts/name)
+            (project/'native').symlink_to(REPO/'project_0/native')
+        return project
+
+    def call(self,project,script,*args):
+        env={**clean_env(),'P0_ENV_FILE':str(project/'absent.env')}
+        return subprocess.run(['bash',str(project/'scripts'/script),*args],env=env,capture_output=True,text=True,timeout=120,cwd=tempfile.gettempdir())
+
+    def test_wrappers_hand_located_directories_to_the_readers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            project=self.project(Path(folder),fake=True);run=legacy_run(project/'data/runs','r1').resolve()
+            legacy_run(project/'data/econ4h','e1')
+            p=self.call(project,'report.sh','--run','r1','--format','json')
+            self.assertEqual((p.returncode,json.loads(p.stdout)),(0,['--run',str(run),'--format','json']))
+            p=self.call(project,'verify.sh','--run=e1','--offline')
+            self.assertEqual(json.loads(p.stdout),['--run='+str((project/'data/econ4h/e1').resolve()),'--offline'])
+            p=self.call(project,'verify.sh','--self-test')
+            self.assertEqual(json.loads(p.stdout),['--self-test'])
+            legacy_run(project/'data/market','r1')
+            p=self.call(project,'report.sh','--run','r1')
+            self.assertEqual(p.returncode,2);self.assertIn('RUN_NOT_FOUND_OR_AMBIGUOUS',p.stderr);self.assertEqual(p.stdout,'')
+
+    def test_verify_resume_and_report_by_id_keep_identities(self):
+        with tempfile.TemporaryDirectory() as folder:
+            project=self.project(Path(folder))
+            for name in ('measurement_contract.py','audit_market_quick.py','market_report.py'):
+                self.assertEqual(c.file_hash(project/'scripts'/name),c.file_hash(SCRIPTS/name))
+            run=project/'data/runs/run_v1';(run/'market').mkdir(parents=True)
+            (run/'market/summary.json').write_text(json.dumps({'observation_started_at':a.iso_ns(100*a.NS),'observation_ended_at':a.iso_ns(200*a.NS),
+                'configured_duration_seconds':100,'full_slot_reconciliation':{'market_slot_end':{'slot':11}}}))
+            for name in ('transactions.jsonl','coverage.jsonl'):(run/'market'/name).write_text('')
+            first=self.call(project,'verify.sh','--run','run_v1','--offline','--mode','off')
+            self.assertEqual(first.returncode,0,first.stderr);first=json.loads(first.stdout)
+            second=self.call(project,'verify.sh','--run',str(run),'--offline','--mode','off','--resume-verification')
+            self.assertEqual(second.returncode,0,second.stderr);second=json.loads(second.stdout)
+            with patch.dict(os.environ,clean_env(),clear=True):
+                expected=c.specification(run.resolve(),c.VerificationConfig(),c.preflight(run,c.VerificationConfig(),None,None)['provider_binding'])
+            self.assertEqual(first['capture_run_id'],second['capture_run_id'])
+            self.assertEqual(first['verification_spec_id'],second['verification_spec_id'])
+            self.assertEqual(first['verification_spec_id'],expected['verification_spec_id'])
+            self.assertNotEqual(first['verification_attempt_id'],second['verification_attempt_id'])
+            by_id=self.call(project,'report.sh','--run','run_v1','--verification-result',first['verification_result_id'],'--format','json')
+            by_path=self.call(project,'report.sh','--run',str(run),'--verification-result',first['verification_result_id'],'--format','json')
+            self.assertEqual((by_id.returncode,by_path.returncode),(0,0),by_id.stderr+by_path.stderr)
+            meta=[json.loads(x.stderr.strip().splitlines()[-1]) for x in (by_id,by_path)]
+            self.assertEqual(meta[0]['report_query_identity'],meta[1]['report_query_identity'])
+            self.assertEqual(meta[0]['capture_run_id'],first['capture_run_id'])
+            # Index checkpoint resume through the id lookup: same identity, honest INCOMPLETE without RPC.
+            index=[self.call(project,'verify.sh','--run','run_v1','--offline','--mode','index',*extra) for extra in ((),('--resume-verification',))]
+            results=[json.loads(x.stdout) for x in index]
+            self.assertEqual([x.returncode for x in index],[2,2])
+            self.assertEqual(results[0]['verification_spec_id'],results[1]['verification_spec_id'])
+            self.assertTrue(all(x['summary']['status']=='HISTORICAL_INCOMPLETE' and x['summary']['reason']=='RPC_ACCESS_MISSING' for x in results))
+            self.assertNotIn('RESUME_IDENTITY_MISMATCH',index[1].stdout+index[1].stderr)
+            v2=v2_run(project/'data/runs','run_v2');before=sorted(x.name for x in v2.iterdir())
+            for script in ('verify.sh','report.sh'):
+                p=self.call(project,script,'--run','run_v2','--offline')
+                self.assertEqual(p.returncode,2);self.assertIn('RUN_LAYOUT_UNSUPPORTED',p.stderr)
+            self.assertEqual(sorted(x.name for x in v2.iterdir()),before)
+
+
 class GitIgnore(unittest.TestCase):
     def test_runs_ignored_but_evidence_and_config_remain_eligible(self):
         if not shutil.which('git'):self.skipTest('git unavailable')

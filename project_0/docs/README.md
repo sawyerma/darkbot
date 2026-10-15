@@ -23,6 +23,7 @@ Repository paths are rooted at `project_0/`; the Rust workspace is `project_0/na
 |---|---|
 | [p0_reuse_matrix.md](architecture/p0_reuse_matrix.md) | P0 reference study and upstream reuse/merge decisions (eva01, marginfi-v2). |
 | [parallel_execution_plan.md](architecture/parallel_execution_plan.md) | Parallel execution design and MT0–MT10 sequence (baseline 2026-10-06). |
+| [run_layout_versioning.md](architecture/run_layout_versioning.md) | Run layout V1/V2, pinned reader identities, decision required before layout V2. |
 
 ### [operations/](operations/)
 
