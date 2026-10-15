@@ -151,15 +151,12 @@ export P0_MODE=econ4h
 export P0_LIVE_ENABLED=false
 export P0_SUBMISSION_ENABLED=false
 export P0_ECON_RUN_ID="${P0_ECON_RUN_ID:-econ4h_$(date -u +%Y%m%dT%H%M%SZ)}"
-export P0_ECON_OUT_DIR="${P0_ECON_OUT_DIR:-$PROJECT_DIR/data/econ4h}"
 export P0_MARKET_SOURCE="${P0_MARKET_SOURCE:-logs}"
-export P0_ECON_OUT_DIR="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$P0_ECON_OUT_DIR")"
-if [[ ! "$P0_ECON_RUN_ID" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-  echo "invalid econ run id" >&2; exit 2
-fi
-RUN_DIR="$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID"
-if [[ -e "$RUN_DIR" ]]; then echo "econ run directory already exists" >&2; exit 2; fi
-mkdir -p "$RUN_DIR"
+# Run storage contract: data/econ4h by default, data/runs with P0_RUN_STORE=runs.
+# The run id is validated and the run directory is created exactly once.
+P0_ECON_OUT_DIR="$(python3 "$SCRIPT_DIR/run_store.py" root econ4h "${P0_ECON_OUT_DIR:-}")" || exit 2
+export P0_ECON_OUT_DIR
+RUN_DIR="$(python3 "$SCRIPT_DIR/run_store.py" allocate "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID")" || exit 2
 if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
   python3 "$SCRIPT_DIR/measurement_cli.py" prepare "$RUN_DIR" "$MEASUREMENT_CONFIG_INPUT"
 fi

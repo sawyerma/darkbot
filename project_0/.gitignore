@@ -12,6 +12,8 @@
 /data/shadow/
 # c0_census.py --out default
 /data/c0/
+# New runs with P0_RUN_STORE=runs (scripts/run_store.py)
+/data/runs/
 
 # Local integration results kept outside docs/evidence/; never versioned.
 /evidence/C0_E1_local_integration_20261008/

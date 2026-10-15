@@ -28,7 +28,7 @@ begrenztes `getTransaction`-Enrichment der beobachteten Liquidationen (ein Fehle
 nie Summary und Report); (4) Summary. Die Market-Session sendet einen Transport-Heartbeat (WebSocket-Ping,
 `P0_MARKET_HEARTBEAT_SECS`, Default 30 s); `slotSubscribe` läuft nur als Slot-/Stream-Telemetrie mit.
 
-**Output** (`project_0/data/market/market_<UTC_RUN_ID>/`, nicht committen): `transactions.jsonl`,
+**Output** (`project_0/data/market/market_<UTC_RUN_ID>/`, mit `P0_RUN_STORE=runs` unter `project_0/data/runs/`; nicht committen): `transactions.jsonl`,
 `liquidations.jsonl`, `coverage.jsonl`, `summary.json`, `final_report.txt`.
 
 **Verdicts.** `MARKET_DATA_VALID` (vollständige Aufnahme **und** verifizierte Quelle; derzeit ist keine Quelle

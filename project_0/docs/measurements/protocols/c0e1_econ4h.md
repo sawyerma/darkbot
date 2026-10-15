@@ -18,7 +18,8 @@ P0_ECON_DURATION_SECS=600 P0_ECON_SNAPSHOT_SECS=150 project_0/scripts/run_econ4h
 Defaults: 14400 seconds, 3600-second snapshots, capital scenarios
 `200,500,1000,2500,5000,10000` USD. Exactly four equal intervals are required. Optional:
 `P0_ECON_CAPITAL_USD`, `P0_ECON_QUEUE_CAPACITY` (8192), `P0_ECON_RETENTION` (262144),
-`P0_ECON_DRAIN_SECS` (180), `P0_ECON_OUT_DIR`, `P0_ECON_RUN_ID`, `P0_PROVIDER_CLASS`.
+`P0_ECON_DRAIN_SECS` (180), `P0_ECON_OUT_DIR`, `P0_ECON_RUN_ID`, `P0_PROVIDER_CLASS`,
+`P0_RUN_STORE=runs` (run directory under `data/runs/`, see [run storage](../../operations/run_storage.md)).
 The market source defaults to `logs` in the script; a distinct `P0_MARKET_WS_URL` can supply
 an enhanced transaction stream while Shadow keeps its existing `P0_WS_URL`.
 

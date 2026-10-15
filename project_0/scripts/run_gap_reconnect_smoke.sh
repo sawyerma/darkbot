@@ -24,7 +24,10 @@ export P0_MARKET_SOURCE=logs
 export P0_ECON_DURATION_SECS="${P0_ECON_DURATION_SECS:-60}"
 export P0_ECON_DRAIN_SECS="${P0_ECON_DRAIN_SECS:-15}"
 export P0_ECON_RUN_ID="${P0_ECON_RUN_ID:-c0e1_gap_smoke_$(date -u +%Y%m%dT%H%M%SZ)}"
-export P0_ECON_OUT_DIR="${P0_ECON_OUT_DIR:-$ROOT/project_0/data/econ4h}"
+P0_ECON_OUT_DIR="$(python3 "$ROOT/project_0/scripts/run_store.py" root econ4h "${P0_ECON_OUT_DIR:-}")" || exit 2
+export P0_ECON_OUT_DIR
+# Reject an invalid or existing run id before the proxy connects upstream; run_econ4h.sh allocates it.
+python3 "$ROOT/project_0/scripts/run_store.py" check "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" >/dev/null || exit 2
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/p0-gap-proxy.XXXXXX")"
 export P0_GAP_PROXY_READY_FILE="$scratch/ready"
 proxy_pid=''

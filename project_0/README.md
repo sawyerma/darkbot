@@ -368,6 +368,9 @@ Use for generated/local runtime datasets, shadow output and temporary measuremen
 
 **Do not treat local `data/` files as durable evidence.**
 
+New runs go to `data/econ4h/` and `data/market/` by default, or to `data/runs/` with `P0_RUN_STORE=runs`;
+see [docs/operations/run_storage.md](docs/operations/run_storage.md). Run directories are git-ignored.
+
 When a run becomes a gate/decision input:
 
 ```text

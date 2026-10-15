@@ -52,10 +52,12 @@ export P0_MODE=market
 export P0_MARKET_DURATION_SECS="${P0_MARKET_DURATION_SECS:-14400}"
 export P0_MARKET_COMMITMENT="${P0_MARKET_COMMITMENT:-finalized}"
 export P0_MARKET_RUN_ID="${P0_MARKET_RUN_ID:-market_$(date -u +%Y%m%dT%H%M%SZ)}"
-export P0_MARKET_OUT_DIR="${P0_MARKET_OUT_DIR:-$PROJECT_DIR/data/market}"
+# Run storage contract: data/market by default, data/runs with P0_RUN_STORE=runs.
+P0_MARKET_OUT_DIR="$(python3 "$SCRIPT_DIR/run_store.py" root market "${P0_MARKET_OUT_DIR:-}")" || exit 2
+export P0_MARKET_OUT_DIR
 export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 
-mkdir -p "$P0_MARKET_OUT_DIR"
+python3 "$SCRIPT_DIR/run_store.py" allocate "$P0_MARKET_OUT_DIR" "$P0_MARKET_RUN_ID" >/dev/null || exit 2
 
 echo "Project_0 Unfiltered Live Market Observer"
 echo "  program=$P0_PROGRAM_ID"

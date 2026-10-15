@@ -29,6 +29,7 @@ Repository paths are rooted at `project_0/`; the Rust workspace is `project_0/na
 | File | Purpose |
 |---|---|
 | [operational_config.md](operations/operational_config.md) | Operational configuration: inspection commands, precedence, profiles, budgets, authorization limits. |
+| [run_storage.md](operations/run_storage.md) | Run storage contract: run roots, opt-in `data/runs/`, run id and collision rules, run path inventory. |
 
 ### [qualification/](qualification/)
 
