@@ -45,7 +45,7 @@ cargo test -p darkbot-bsc-geth-ipc --release --locked --offline
 cargo test -p darkbot-bsc-geth-ipc --locked --offline --test c15_hot0_alloc
 ```
 
-Exit: lifetime tests (the `compile_fail` doctests of `RecordGuardV2`), `v2::c15_tests`, `hot0::tests` and the allocation measurement pass in debug and release; the allocation test reports zero allocations on the HOT0 path and at least one per record on the owned control path.
+Exit: lifetime tests (the `compile_fail` doctests of `RecordGuardV2`), `protocol_v2::c15_tests`, `hot0::tests` and the allocation measurement pass in debug and release; the allocation test reports zero allocations on the HOT0 path and at least one per record on the owned control path.
 
 ## C1.6 — M4 development profile
 

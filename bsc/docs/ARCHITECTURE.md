@@ -12,7 +12,8 @@ bsc/
 │   └── crates/
 │       ├── trading/                 chain_state, venues/flap, economics, intent, transactions, signer, submission_policy
 │       ├── tx_encoding/             rlp
-│       ├── geth_ipc/                protocol_v1, v2 (Wire V2), ingress; nicht integriert: host, hot0, outbound
+│       ├── geth_ipc/                protocol_v1, protocol_v2/ (Wire V2: layout, checksum, error, mapping, lanes, records,
+│       │                            guards, arena, producer, consumer, lifecycle, peer_pool, role_lease), ingress, hot0, outbound, host
 │       ├── execution/               startup, submission (club48, blockrazor, local_geth, frame, transport, tls, response, send),
 │       │                            acceptance_guard, qualification_capture, bin/g07_mainnet_self_launch_buy/
 │       ├── journal/                 format, recorder, replay
@@ -33,7 +34,7 @@ Lokal und nie versioniert: `bsc/.env`, `bsc/secrets.env`, `bsc/.local/`, `bsc/da
 |---|---|---|---|---|
 | `trading` | `darkbot-bsc-trading` / `darkbot_bsc_trading` | Fachlogik: Chain-State, Venues, Quote (`economics::flap::native_curve20`), Economics, Intent, Transaktionen, Signer, Submission-Policy (`submission_policy`: Capabilities, Release-Profile, unveränderliche Pläne); keine externen Sends | `tx_encoding` | `darkbot-core` (`core/`, Modul `inclusion`, `tx`) |
 | `tx_encoding` | `darkbot-bsc-tx-encoding` | RLP-/binäre Kodierungsprimitive | — | `darkbot-wire` (`wire/`) |
-| `geth_ipc` | `darkbot-bsc-geth-ipc` | geth↔Rust Shared Memory: `protocol_v1` (Wire V1, Root-Re-Export), `v2` (Wire V2, Lanes, Lifecycle), `ingress` | — (Fixtures aus `trading` nur in Tests) | `darkbot-fastlane` (`fastlane/`) |
+| `geth_ipc` | `darkbot-bsc-geth-ipc` | geth↔Rust Shared Memory: `protocol_v1` (Wire V1, Root-Re-Export), `protocol_v2` (Wire V2; Kompatibilitätspfad `v2`), `ingress` (geth-Ingress-Records), `hot0` (geliehene Receive-Slots, C1.5), `outbound` (local-geth-Outbound-Evidence, C1.7), `host` (C1.6 Host-Profil/QoS) | `libc` (Fixtures aus `trading` nur in Tests) | `darkbot-fastlane` (`fastlane/`) |
 | `execution` | `darkbot-bsc-execution` | Startup, `submission` (Provider-Framing, TLS/Transport, Response, Versand; keine Handelsentscheidung); Feature `acceptance-guard` (v2-Guard), Feature `g07-mainnet` (Capture-Adapter + G0.7-Binary) | `trading`; optional `journal` | `darkbot-runner` (`runtime/`, Modul `inclusion`) |
 | `journal` | `darkbot-bsc-journal` | Journalformat, bounded Recorder, Replay | — | `darkbot-capture` (`capture/`) |
 | `qualification` | `darkbot-bsc-qualification` | read-only Probes, Messungen, Evidenz, Verdikt; Binaries `u5_tls_qualify`, `g06a_native_bnb_quote`, `g06a_self_launch_bundle`, `g08_mainnet_verify`, `g08_producer_timing` | `execution[acceptance-guard]`, `trading`, `journal` | `darkbot-qualify` (`qualify/`) |
@@ -44,7 +45,9 @@ Regeln:
 - Quote-Arithmetik hat genau einen Eigentümer (`trading`); das DRY-Quote-Binary ist byte-identisch zu den Gate-0-Ausgaben.
 - Die unabhängige EVM-Gegenprüfung bleibt eine separate Implementierung (`tools/g06a_*.cjs`, npm-Locks in `tools/evm-audit-tools/`, `tools/abi-tools/`; `npm ci`).
 - Unveränderte Identitäten: `TLS_TRANSPORT_IMPLEMENTATION = "darkbot-runner/tls-v1 …"` und `Q5A_TLS_EVIDENCE_PATH = "bsc/native/evidence/…"` sind Q5A-Qualifikationsidentitäten und tragen bewusst die alten Namen.
-- `geth_ipc/src/{host,hot0,outbound}.rs` und die Testziele `c15_hot0_alloc`, `c18_stress`, Beispiele `c16_host_profile`, `c19_consumer`, `c19b_capture` sind vorhandene, **nicht integrierte** C1-Vorarbeit (benötigen den Stash „local-before-p2p-fix-20261011“ `5753f70`); sie kompilieren nicht und sind keine Runtime-Leistung.
+- **Wire V2 ist ein einziges Rust-Modul** (`protocol_v2/mod.rs` setzt die Fachdateien per `include!` zusammen). Grund: Echte Untermodule landen in eigenen Codegen-Einheiten und änderten nachweislich die Release-Inline-Entscheidungen im Hot-Path (z. B. `RecordGuardV2::release`). Mit `include!` ist der Release-Maschinencode aller 98 Crate-Funktionen in den C1-Binaries identisch zur Einzeldatei (siehe EVIDENCE.md §7). Eine Aufteilung in echte Module ist eine spätere, latenz-qualifizierte Entscheidung.
+- C1.5–C1.8 (`hot0`, `outbound`, `host`, `BorrowedRecordV2`/`RecordGuardV2`/`LaneSetV2`) sind integriert, kompiliert und regressionsgeprüft — **nicht phasenqualifiziert** (C1-Abnahme gemäß Roadmap/Runbook steht aus).
+- `host` bleibt in `geth_ipc`: es nutzt `unsafe`-FFI (`sysctlbyname`, pthread-QoS) und `crc32c` aus Wire V2; `execution` und `qualification` verbieten `unsafe` (`#![forbid(unsafe_code)]`). Option für später: nur den Report-Teil nach `qualification` verlegen.
 
 ## Werkzeuge (`bsc/tools/`)
 

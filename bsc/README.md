@@ -1,6 +1,6 @@
 # BSC — Produktionsarchitektur, fachliche Benennung und Refactoring-Aufträge
 
-**Stand: 2026-10-15.** **R1–R8 wurde umgesetzt und als `c8362c6` nach `main` gepusht.** Der aktuelle GitHub-Iststand verwendet noch `bsc/native/` und die sechs alten kurzen Crate-Verzeichnisnamen. **R9–R13 (§8) ist im Arbeitsverzeichnis umgesetzt — bis auf die Zerlegung von `v2.rs` nach `protocol_v2/` (offen, siehe §9); Abnahme und Commit durch den Nutzer ausstehend.** Geprüfter Iststand: §9.
+**Stand: 2026-10-16.** **R1–R8 wurde umgesetzt und als `c8362c6` nach `main` gepusht.** Seit `1c99127` verwendet der Iststand `bsc/engine/` mit den sechs fachlich benannten Crates (`bsc/native/` enthält nur noch gebundene Evidence). **R9–R12 ist als `1c99127` committet. C1.5–C1.8 sind integriert und Wire V2 ist in `protocol_v2/` gegliedert (§10, im Arbeitsverzeichnis, Abnahme/Commit durch den Nutzer ausstehend).**
 
 > **CLAUDE CODE — ZUERST §8 LESEN.** §8 ist die verbindliche **neue** Zielarchitektur und Arbeitsanweisung. §§1–4, 6–7 dokumentieren die **abgeschlossene** Migration R1–R8 und sind kein Auftrag, diesen Umbau noch einmal auszuführen. Die Sicherheits- und Datenregeln aus §5 bleiben zwingend gültig. Der fachliche Phasenplan und die technischen Verträge bleiben maßgeblich; keine Umstrukturierung autorisiert LIVE oder eine value-bearing Transaktion. **Nur `bsc/` und bei nachgewiesenem Bedarf `prestudy/bsc/` ändern; `project_0/`, Frontend und andere Projekte niemals anfassen.**
 
@@ -385,3 +385,13 @@ prestudy/bsc/                   # historisch, kein Build-Member
 - `v2.rs → protocol_v2/`: nicht ausgeführt. Der Stash „local-before-p2p-fix-20261011“ (`5753f70`) ändert `v2.rs` um ca. 950 Zeilen und ist Voraussetzung für die committeten C1-Testziele; eine Zerlegung macht ihn mechanisch unanwendbar. Rust↔Go-Parität ist ohne Go-Toolchain nicht prüfbar.
 - Nicht ausgeführt, daher nicht PASS: Go-Overlay-Tests, Interop `c13_*`/`c14_*`, voller G0.6a-DRY, EVM-Crosscheck gegen RPC, jede G0.7-/G0.8-Ausführung gegen Mainnet.
 - Flaky: `geth_ipc` `v2::tests::role_leases_are_exclusive_per_role_and_coexist_across_roles`.
+
+## 10. C1-Integration und `protocol_v2` (2026-10-16, Ausgangscommit `1c99127`)
+
+Auf ausdrückliche Nutzeranweisung (Ausnahme von der Roadmap-Stop-Regel; **keine C1-Phasenabnahme**) wurde der C1-Rev2-Stand aus dem Stash `5753f70` dateiweise integriert und Wire V2 anschließend gegliedert. Details, Herkunft und Prüfprotokoll: [docs/EVIDENCE.md](docs/EVIDENCE.md) §7.
+
+- `geth_ipc`: `BorrowedRecordV2`, `RecordGuardV2`, `LaneSetV2`, `try_acquire`, `hot0`, `outbound`, `host` integriert; alle C1-Tests/-Beispiele kompilieren und bestehen (keine Ausblendung).
+- `protocol_v2/`: 13 Fachdateien (Layout, Prüfsummen, Fehler, Mapping, Lanes, Records, Guards, Arena, Producer, Consumer, Lifecycle, Peer-Pool, Role-Lease) als **ein** Modul (`include!`), weil echte Untermodule den Release-Hot-Path-Code änderten; mit `include!` ist der Maschinencode instruktionsidentisch (98/98 Funktionen).
+- Rust↔Go-Parität: Go 1.25.0 lokal, offline; Go-Race-Tests 86/0/5 SKIP; Interop c13/c14 PASS vor und nach der Gliederung.
+- Workspace-Regression ohne Filter: **479 PASS / 0 FAIL / 5 ignored**. Testbudget: 9 von 10.
+- Offen: C1-Phasenabnahme gemäß [BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md](docs/BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md); Entscheidung über den nun vollständig übernommenen Stash (nur `g07_testnet_birth_buy.rs`, heute Prestudie, nicht übernommen).

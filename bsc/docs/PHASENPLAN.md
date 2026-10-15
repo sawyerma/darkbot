@@ -28,3 +28,5 @@ Dieses Dokument ist der **Einstiegspunkt** in den fachlichen BSC-Phasenplan. Es 
 | C1 | `engine/crates/geth_ipc`, `geth/`, `native/evidence/c1/`, `tools/c1*`, `tools/c13*`, `tools/c14*`, `tools/c19*` |
 
 Crate-Namen in den Verträgen vor R10: `darkbot-core` = `darkbot-bsc-trading`, `darkbot-wire` = `darkbot-bsc-tx-encoding`, `darkbot-fastlane` = `darkbot-bsc-geth-ipc`, `darkbot-runner` = `darkbot-bsc-execution`, `darkbot-capture` = `darkbot-bsc-journal`, `darkbot-qualify` = `darkbot-bsc-qualification` (siehe [ARCHITECTURE.md](ARCHITECTURE.md)).
+
+Hinweis 2026-10-16: Die C1.5–C1.8-Integration erfolgte auf ausdrückliche Nutzeranweisung als dokumentierte Ausnahme von der Stop-Regel der Roadmap. Sie ist keine C1-Phasenabnahme; die Rangfolge G0.7/G0.8 vor weiterer C1/C2-Arbeit bleibt bestehen.

@@ -38,9 +38,9 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::RecordKind;
-use crate::v2::{
-    CLOCK_ID_MONOTONIC, ConsumerV2, DirectionV2, LaneClassV2, LaneConfigV2, LaneStatsV2,
-    OwnedRecordV2, V2Error, crc32c,
+use crate::protocol_v2::{
+    BorrowedRecordV2, CLOCK_ID_MONOTONIC, ConsumerV2, DirectionV2, LaneClassV2, LaneConfigV2,
+    LaneStatsV2, OwnedRecordV2, V2Error, crc32c,
 };
 
 /// Source of a record from an ETH `Transactions` packet.
@@ -161,30 +161,58 @@ pub fn ingress_aux(packet_decoded_ns: u64) -> [u8; 32] {
 
 /// Reads and checks the boundaries of an EARLY_TX_SEEN record.
 pub fn ingress_times(record: &OwnedRecordV2) -> Result<IngressTimesV2, IngressRecordError> {
-    if record.kind != RecordKind::EarlyTxSeen {
-        return Err(IngressRecordError::NotEarlyTxSeen(record.kind));
+    ingress_times_parts(
+        record.kind,
+        record.clock_id,
+        record.timestamp_ns,
+        &record.aux,
+    )
+}
+
+/// [`ingress_times`] for a record borrowed from its slot (C1.5).
+pub fn ingress_times_borrowed(
+    record: &BorrowedRecordV2<'_>,
+) -> Result<IngressTimesV2, IngressRecordError> {
+    ingress_times_parts(
+        record.kind,
+        record.clock_id,
+        record.timestamp_ns,
+        record.aux,
+    )
+}
+
+/// The boundary check on the record fields themselves. `aux` is the 32-byte
+/// aux field.
+pub fn ingress_times_parts(
+    kind: RecordKind,
+    clock_id: u32,
+    timestamp_ns: u64,
+    aux: &[u8],
+) -> Result<IngressTimesV2, IngressRecordError> {
+    if kind != RecordKind::EarlyTxSeen {
+        return Err(IngressRecordError::NotEarlyTxSeen(kind));
     }
-    if record.clock_id != CLOCK_ID_MONOTONIC {
-        return Err(IngressRecordError::ClockDomain(record.clock_id));
+    if clock_id != CLOCK_ID_MONOTONIC {
+        return Err(IngressRecordError::ClockDomain(clock_id));
     }
-    if record.aux[8..].iter().any(|byte| *byte != 0) {
+    if aux.len() != 32 || aux[8..].iter().any(|byte| *byte != 0) {
         return Err(IngressRecordError::ReservedAux);
     }
     let mut decoded = [0u8; 8];
-    decoded.copy_from_slice(&record.aux[..8]);
+    decoded.copy_from_slice(&aux[..8]);
     let packet_decoded_ns = u64::from_le_bytes(decoded);
     if packet_decoded_ns == 0 {
         return Err(IngressRecordError::MissingPacketDecoded);
     }
-    if packet_decoded_ns > record.timestamp_ns {
+    if packet_decoded_ns > timestamp_ns {
         return Err(IngressRecordError::DecodedAfterIngress {
             packet_decoded_ns,
-            ingress_ns: record.timestamp_ns,
+            ingress_ns: timestamp_ns,
         });
     }
     Ok(IngressTimesV2 {
         packet_decoded_ns,
-        ingress_ns: record.timestamp_ns,
+        ingress_ns: timestamp_ns,
     })
 }
 
@@ -703,7 +731,7 @@ impl IngressAuditV2 {
         if let Some(&(_, reason)) = invalid.iter().find(|(count, _)| *count > 0) {
             return InvalidEvidence(reason);
         }
-        if lane.state == crate::v2::LANE_STATE_QUARANTINED {
+        if lane.state == crate::protocol_v2::LANE_STATE_QUARANTINED {
             return InvalidEvidence("txpool lane quarantined");
         }
         if s.false_negatives > 0 {
@@ -730,7 +758,7 @@ impl IngressAuditV2 {
             return Incomplete("txpool producer window still open");
         }
         // The Txpool lane is a dedicated lane: BOUND for its whole life.
-        if lane.state != crate::v2::LANE_STATE_BOUND {
+        if lane.state != crate::protocol_v2::LANE_STATE_BOUND {
             return InvalidEvidence("txpool lane not bound");
         }
         if lane.read_sequence != lane.write_sequence {
@@ -749,7 +777,7 @@ impl IngressAuditV2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::{
+    use crate::protocol_v2::{
         ArenaV2, LANE_STATE_BOUND, LANE_STATE_CLOSING, ProducerV2, RecordV2, arena_path_v2,
     };
     use std::collections::HashMap;
@@ -1430,7 +1458,7 @@ mod tests {
         assert_defect(corrupt, |closed| closed.lane.corrupt_records = 1);
         let quarantined = AuditQualificationV2::InvalidEvidence("txpool lane quarantined");
         assert_defect(quarantined, |closed| {
-            closed.lane.state = crate::v2::LANE_STATE_QUARANTINED;
+            closed.lane.state = crate::protocol_v2::LANE_STATE_QUARANTINED;
         });
     }
 
@@ -1438,7 +1466,7 @@ mod tests {
     fn a_recorded_txpool_quarantine_reason_never_passes() {
         let expected = AuditQualificationV2::InvalidEvidence("txpool lane quarantine reason");
         assert_defect(expected, |closed| {
-            closed.lane.quarantine_reason = crate::v2::QUARANTINE_OPERATOR;
+            closed.lane.quarantine_reason = crate::protocol_v2::QUARANTINE_OPERATOR;
         });
     }
 
@@ -1452,7 +1480,7 @@ mod tests {
     fn a_sealed_txpool_lane_that_is_not_bound_never_passes() {
         let expected = AuditQualificationV2::InvalidEvidence("txpool lane not bound");
         assert_defect(expected, |closed| {
-            closed.lane.state = crate::v2::LANE_STATE_FREE;
+            closed.lane.state = crate::protocol_v2::LANE_STATE_FREE;
         });
         assert_defect(expected, |closed| closed.lane.state = LANE_STATE_CLOSING);
     }

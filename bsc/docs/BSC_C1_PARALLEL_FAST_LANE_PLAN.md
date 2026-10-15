@@ -1,6 +1,16 @@
 # DarkBot BSC — C1 Parallel Fast Lane / M4 Development Architecture
 
 **Status:** normative C1 implementation plan, 2026-10-06  
+
+**Integration checkpoint 2026-10-08 (REV2):** C1.5–C1.10 candidate is integrated
+in the project and compiled with local regression checks. This is not a new
+phase acceptance. Historical C1.1–C1.4a results remain recorded; changed
+interfaces need the reruns listed in the [qualification runbook](BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md).
+Acceptance order remains C1.5 → C1.6 → C1.7 → C1.8 → C1.9 → C1.9b → C1.10;
+C2 stays blocked until C1.10. See the [REV2 integration report](BSC_C1_REV2_INTEGRATION_REPORT_20261008.md).
+Actual successful acquisition remains **T0 → T_buy < 1,000,000 ns**, with the
+original producer evidence and full 15-second capture required by the masterplan.
+
 **Basis:** `main` source checkpoint `26725a8607435dd15c138231d9cfdd7d84d0f609`; pinned bsc-geth v1.7.8 at `cdb7548b5baacfdae92f9f63437d6456411665f3`.  
 **Governing documents:** `BSC_PRODUCTION_BUILD_MASTER_PLAN.md`, `BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`, `BSC_BIRTH_ENTRY_ARCHITECTURE.md`.  
 **Authorization:** C1 construction only. Production LIVE remains blocked.  
@@ -563,6 +573,10 @@ Test at least:
 Measure `T_packet_decoded → T_ingress → L1 → L2` and local-geth handoffs with compatible clocks and preserved raw samples.
 
 **Exit:** C1 latency report with max/tail/failure denominators and exact source/build/config hashes.
+The outbound evidence must be `production_devp2p_selected_peer_handoff`, traversing
+actual `Peer.SendRawTransaction → p2p.Send → devp2p/RLPx`, and preserve every
+worker's timestamp. `loopback_microbenchmark` and `regression_smoke` cannot
+qualify C1.9. C1.9b characterizes ingress, not this outbound boundary.
 
 ### C1.9b — hook/path early qualification
 
@@ -575,7 +589,8 @@ Use controlled Testnet launch/handoff evidence to measure selected hook/path lat
 Freeze:
 
 - geth base commit;
-- final patch hash;
+- exact final DarkBot commit and clean working-tree state;
+- final C1 patch hash or deterministic complete C1 source-tree hash, checked against HEAD;
 - final geth binary hash;
 - Wire V2 specification/hash;
 - Rust build hash;

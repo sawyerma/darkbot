@@ -20,7 +20,7 @@
 
 use std::fmt::Write as _;
 
-use crate::v2::crc32c;
+use crate::protocol_v2::crc32c;
 
 /// A value read from the host, or the reason it could not be read.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -46,7 +46,7 @@ go_phase() {
 
 rust_phase() {
   (cd "$ENGINE" && cargo test -p darkbot-bsc-geth-ipc --locked --offline -- \
-    --exact "v2::tests::$1" --ignored --nocapture --test-threads=1)
+    --exact "protocol_v2::tests::$1" --ignored --nocapture --test-threads=1)
 }
 
 run_phase() {

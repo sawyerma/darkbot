@@ -26,7 +26,7 @@ use darkbot_bsc_geth_ipc::outbound::{
     HandoffEvidence, OutboundStatus, chain_lane, decode_handoff, egress_lane, evidence_lane,
     publish_buy,
 };
-use darkbot_bsc_geth_ipc::v2::{
+use darkbot_bsc_geth_ipc::protocol_v2::{
     BorrowedRecordV2, DirectionV2, LaneClassV2, LaneConfigV2, LaneSetV2, ProducerV2, arena_path_v2,
 };
 use std::alloc::{GlobalAlloc, Layout, System};

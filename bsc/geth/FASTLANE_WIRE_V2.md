@@ -496,3 +496,69 @@ Wire V2 correctness alone does not prove:
 - provider ordering/inclusion;
 - `T0 → T_buy < 1 ms`;
 - LIVE authorization.
+
+## C1.5–C1.8: borrowed receive, Chain lane and local-geth outbound
+
+No offset, size or CRC domain changes. These sections add lanes of classes the layout already defines and fix the meaning of their record fields.
+
+### Lane plan
+
+| Lane | ID | Class | Direction | Capacity × stride | Only producer | Only consumer |
+|---|---|---|---|---|---|---|
+| Txpool | 1 | `TXPOOL_EVIDENCE` | geth → Rust | 4096 × 4096 | `txBroadcastLoop` | audit consumer |
+| Chain | 2 | `CHAIN_EVIDENCE` | geth → Rust | 1024 × 512 | chain-write path under `chainmu` | HOT0 |
+| Egress | 3 | `SIGNED_TRANSACTION_EGRESS` | Rust → geth | 256 × 4096 | HOT0 | outbound coordinator |
+| Peer n | 16+n | `PEER_INGRESS` | geth → Rust | 64 × 4096 | peer handler goroutine | HOT0 |
+| Coordinator evidence | 512 | `OUTBOUND_HANDOFF_EVIDENCE` | geth → Rust | 1024 × 512 | outbound coordinator | Rust |
+| Worker i evidence | 513+i | `OUTBOUND_HANDOFF_EVIDENCE` | geth → Rust | 1024 × 512 | outbound worker i | Rust |
+
+The Egress and evidence lanes exist only when `DARKBOT_FASTLANE_V2_OUTBOUND_WORKERS` is 1..16. Lanes are located by id; their order in the directory carries no meaning. Order across lanes is never derived from lane sequences; it is the records' timestamps and provenance.
+
+### Borrowed receive (C1.5)
+
+The consumer validates a record exactly as before and may then hold it in its slot. `read_sequence` advances with Release when the hold ends, not when validation ends. A producer never writes a slot while `write − read ≥ capacity`, so a held slot is not reused, and it is reusable immediately after the release. Before releasing, and after copying a payload out, the consumer confirms that `committed_sequence` still equals the validated value; the producer clears that field before it writes a slot, so a slot rewritten against the protocol is detected, the lane is quarantined (`CORRUPT_SEQUENCE`) and `read_sequence` does not advance.
+
+### Chain lane records
+
+| Kind | `hash` | `aux` | Payload |
+|---|---|---|---|
+| `CANONICAL_HEAD` (3) | block hash | parent hash | `number u64 LE \| tx_count u32 LE` (12 bytes) |
+| `REORG` (4) | new head hash | common ancestor hash | `old number u64 LE \| old hash \| new number u64 LE \| new hash \| common number u64 LE` (88 bytes) |
+| `GAP` (7) | zero | `aux[0..8]` = records lost before this point, u64 LE | empty |
+
+`timestamp_ns` is the publisher's `CLOCK_MONOTONIC` reading, `clock_id` 1. These are the field meanings the V1 ring carried. A `GAP` is published before the next record whenever chain evidence was lost: the lane was full, the clock failed, or a second concurrent publisher was detected. A consumer that sees a `GAP` holds incomplete chain evidence.
+
+### Egress record
+
+Kind `OUTBOUND_SIGNED_TX` (5): `hash` is the signed transaction hash, the payload the exact signed transaction bytes, `timestamp_ns` HOT0's clock reading taken immediately before the publish (the egress commit, `T_queue`), `source` `hot0-egress`. geth sends nothing unless the payload decodes to one transaction with exactly that hash.
+
+### Outbound evidence record
+
+Kind `OUTBOUND_PEER_HANDOFF` (6), `clock_id` 1, `source` `p2p-coord` or `p2p-worker`, `hash` the transaction hash, `peer` the target node id (zero when no peer is involved), empty payload.
+
+| Field | Meaning |
+|---|---|
+| `timestamp_ns` | worker: its clock when the peer send returned; coordinator: its clock when it observed the egress record |
+| `aux[0]` | status |
+| `aux[1]` | worker index; `0xff` on `DISPATCHED` and `INVALID_EGRESS` |
+| `aux[2]` | workers that had a peer when the BUY was dispatched |
+| `aux[3]` | workers the BUY was queued to (coordinator records) |
+| `aux[8..16]` | egress lane sequence, u64 LE |
+| `aux[16..24]` | coordinator observe time, u64 LE |
+| `aux[24..32]` | worker: time just before the peer send; coordinator: the egress record's `timestamp_ns` |
+
+| Status | Value | Published by | Meaning |
+|---|---|---|---|
+| `HANDED_OFF` | 1 | worker | the peer send returned without error |
+| `SEND_ERROR_UNKNOWN` | 2 | worker | the peer send returned an error; bytes may have left |
+| `NO_TARGET` | 3 | coordinator or worker | the slot had no peer; nothing sent |
+| `QUEUE_FULL` | 4 | coordinator | the worker was busy and its queue full; nothing sent through it |
+| `ALREADY_KNOWN` | 5 | worker | the peer already knew the transaction; nothing sent |
+| `INVALID_EGRESS` | 6 | coordinator | the egress record was not a signed transaction with the stated hash |
+| `DISPATCHED` | 7 | coordinator | one summary per BUY |
+
+Every dispatched BUY yields one `DISPATCHED` record and exactly one record per worker slot. First selected-peer handoff is the earliest `HANDED_OFF` `timestamp_ns` of a BUY; all selected-peer handoffs is the latest, defined only when every selected worker reported `HANDED_OFF`. A handoff is a returned local send. It is not remote receipt, inclusion, execution or a purchase.
+
+### Measurement probes
+
+The C1.4a and C1.9 harnesses write two clock readings and a marker into reserved slot-header bytes 160..183, in a disposable clone of the pinned geth only. Those bytes are outside the CRC domain and are zero in every production build.

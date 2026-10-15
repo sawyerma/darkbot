@@ -59,7 +59,7 @@ use crate::PEER_LEN;
 use crate::RecordKind;
 use crate::SOURCE_LEN;
 use crate::ingress::{IngressTimesV2, ingress_times_borrowed};
-use crate::v2::{
+use crate::protocol_v2::{
     BorrowedRecordV2, LANE_STATE_BOUND, LANE_STATE_CLOSING, LANE_STATE_FREE, LaneConfigV2,
     LaneSetV2, RecordGuardV2, V2Error,
 };
@@ -1001,7 +1001,7 @@ impl Hot0Core {
 mod tests {
     use super::*;
     use crate::ingress::{C14_FLAP_SCOPE, SOURCE_ETH_BROADCAST, decode_tx_target, ingress_aux};
-    use crate::v2::{
+    use crate::protocol_v2::{
         ArenaV2, CLOCK_ID_MONOTONIC, ConsumerV2, DirectionV2, LaneClassV2, ProducerV2, RecordV2,
         arena_path_v2,
     };

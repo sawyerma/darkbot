@@ -1,4 +1,4 @@
-use darkbot_bsc_geth_ipc::v2::{
+use darkbot_bsc_geth_ipc::protocol_v2::{
     CLOCK_ID_MONOTONIC, ConsumerV2, DirectionV2, LaneClassV2, LaneConfigV2, arena_path_v2,
 };
 use darkbot_bsc_geth_ipc::{HASH_LEN, RecordKind};

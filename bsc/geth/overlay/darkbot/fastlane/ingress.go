@@ -41,6 +41,11 @@ const (
 	envIngressV2Generation   = "DARKBOT_FASTLANE_V2_GENERATION"
 	envIngressV2MaxPeers     = "DARKBOT_FASTLANE_V2_MAX_PEERS"
 	envIngressV2ChurnReserve = "DARKBOT_FASTLANE_V2_CHURN_RESERVE"
+	envIngressV2Scope        = "DARKBOT_FASTLANE_V2_SCOPE"
+	envC19bAcceptTxsUnsynced = "DARKBOT_C19B_ACCEPT_TXS_UNSYNCED"
+
+	ingressScopeMainnet     = "mainnet"
+	ingressScopeC19bTestnet = "c19b-testnet"
 
 	// c14PeerLanePoolBound is the qualified upper bound of
 	// max_peers + churn_reserve for C1.4. Startup fails above it.
@@ -174,6 +179,66 @@ var c14FlapScopeV2 = mustPrefilterScopeV2(56,
 	},
 )
 
+// c19bTestnetFlapScopeV2 is qualification-only.
+// Production/default remains the frozen Chain-56 C1.4 scope.
+var c19bTestnetFlapScopeV2 = mustPrefilterScopeV2(97,
+	[]common.Address{{
+		0x5b, 0xea, 0xca, 0xf7, 0xab, 0xcb, 0xb3, 0xab, 0x28, 0x0e,
+		0x80, 0xd0, 0x07, 0xfd, 0x31, 0xfc, 0xe2, 0x65, 0x10, 0xe9,
+	}},
+	[]prefilterSelectorV2{
+		{Selector: [4]byte{0x8c, 0xb5, 0x77, 0x2c}, Role: prefilterRoleLaunch},
+	},
+)
+
+func ingressScopeFromEnvV2() (*prefilterScopeV2, error) {
+	switch value := strings.TrimSpace(os.Getenv(envIngressV2Scope)); value {
+	case "", ingressScopeMainnet:
+		return c14FlapScopeV2, nil
+	case ingressScopeC19bTestnet:
+		return c19bTestnetFlapScopeV2, nil
+	default:
+		return nil, fmt.Errorf(
+			"fastlane c1.4 invalid %s=%q",
+			envIngressV2Scope,
+			value,
+		)
+	}
+}
+
+// C19bUnsyncedAcceptTxsAllowed gates the qualification-only pre-sync
+// transaction acceptance override. Production/default behavior is unchanged.
+func C19bUnsyncedAcceptTxsAllowed(networkID uint64) (bool, error) {
+	arm := strings.TrimSpace(os.Getenv(envC19bAcceptTxsUnsynced))
+	if arm == "" {
+		return false, nil
+	}
+	if arm != "YES" {
+		return false, fmt.Errorf(
+			"fastlane c1.9b invalid %s=%q; expected unset or YES",
+			envC19bAcceptTxsUnsynced,
+			arm,
+		)
+	}
+
+	scope := strings.TrimSpace(os.Getenv(envIngressV2Scope))
+	if scope != ingressScopeC19bTestnet {
+		return false, fmt.Errorf(
+			"fastlane c1.9b %s=YES requires %s=%s",
+			envC19bAcceptTxsUnsynced,
+			envIngressV2Scope,
+			ingressScopeC19bTestnet,
+		)
+	}
+	if networkID != 97 {
+		return false, fmt.Errorf(
+			"fastlane c1.9b unsynced transaction acceptance requires network id 97, got %d",
+			networkID,
+		)
+	}
+	return true, nil
+}
+
 // match checks the destination first and the 4-byte selector second. It
 // serializes nothing.
 func (s *prefilterScopeV2) match(tx *types.Transaction) bool {
@@ -217,6 +282,9 @@ type ingressConfigV2 struct {
 	PeerLaneSlotStride   uint32
 	TxpoolLaneCapacity   uint32
 	TxpoolLaneSlotStride uint32
+	// OutboundWorkers is the number of C1.7 outbound peer workers; 0 leaves
+	// local-geth outbound off and its lanes out of the arena.
+	OutboundWorkers int
 }
 
 func defaultIngressConfigV2(dir string, generation uint64, maxPeers, churnReserve int) ingressConfigV2 {
@@ -243,13 +311,18 @@ func (c ingressConfigV2) validate() error {
 		return fmt.Errorf("fastlane c1.4 max_peers %d + churn_reserve %d exceeds the qualified lane-pool bound %d",
 			c.MaxPeers, c.ChurnReserve, c14PeerLanePoolBound)
 	}
+	if c.OutboundWorkers < 0 || c.OutboundWorkers > c17MaxOutboundWorkers {
+		return fmt.Errorf("fastlane c1.7 outbound workers %d outside 0..%d", c.OutboundWorkers, c17MaxOutboundWorkers)
+	}
 	return nil
 }
 
-// lanePlan: the dedicated Txpool lane, then one FREE lane per peer slot.
+// lanePlan: the dedicated Txpool lane, one FREE lane per peer slot, the
+// dedicated Chain lane (C1.5-C1.8) and, with outbound workers, the C1.7
+// egress and evidence lanes. Lanes are found by id; their order is free.
 func (c ingressConfigV2) lanePlan() []laneConfigV2 {
 	peerLanes := c.MaxPeers + c.ChurnReserve
-	lanes := make([]laneConfigV2, 0, peerLanes+1)
+	lanes := make([]laneConfigV2, 0, peerLanes+4+c.OutboundWorkers)
 	lanes = append(lanes, laneConfigV2{
 		ID:         c14TxpoolLaneID,
 		Direction:  v2GethToRust,
@@ -265,6 +338,16 @@ func (c ingressConfigV2) lanePlan() []laneConfigV2 {
 			Capacity:   c.PeerLaneCapacity,
 			SlotStride: c.PeerLaneSlotStride,
 		})
+	}
+	lanes = append(lanes, laneConfigV2{
+		ID:         c15ChainLaneID,
+		Direction:  v2GethToRust,
+		Class:      v2ChainEvidence,
+		Capacity:   c15ChainLaneCapacity,
+		SlotStride: c15ChainLaneSlotStride,
+	})
+	if c.OutboundWorkers > 0 {
+		lanes = append(lanes, outboundLanePlanV2(c.OutboundWorkers)...)
 	}
 	return lanes
 }
@@ -312,6 +395,11 @@ type ingressRuntimeV2 struct {
 	txpool *laneV2
 	scope  *prefilterScopeV2
 
+	// C1.5-C1.8: the Chain lane's producer, and the C1.7 outbound runtime
+	// (nil without outbound workers).
+	chain    *chainPublisherV2
+	outbound *outboundRuntimeV2
+
 	mu           sync.Mutex
 	pending      []peerLaneLeaseV2
 	live         map[*PeerIngressV2]struct{}
@@ -343,6 +431,13 @@ var (
 // anything is created, then starts the C1.3 geth runtime (geth-owner role
 // lease, O_EXCL arena of the generation, bounded pool).
 func startIngressRuntimeV2(cfg ingressConfigV2) (*ingressRuntimeV2, error) {
+	return startIngressRuntimeV2Scoped(cfg, c14FlapScopeV2)
+}
+
+func startIngressRuntimeV2Scoped(cfg ingressConfigV2, scope *prefilterScopeV2) (*ingressRuntimeV2, error) {
+	if scope == nil {
+		return nil, errors.New("fastlane c1.4 prefilter scope is nil")
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -363,13 +458,28 @@ func startIngressRuntimeV2(cfg ingressConfigV2) (*ingressRuntimeV2, error) {
 		rt.shutdown()
 		return nil, err
 	}
-	return &ingressRuntimeV2{
+	r := &ingressRuntimeV2{
 		config: cfg,
 		rt:     rt,
 		txpool: txpool,
-		scope:  c14FlapScopeV2,
+		scope:  scope,
 		live:   make(map[*PeerIngressV2]struct{}),
-	}, nil
+	}
+	chain, err := rt.arena.laneByID(c15ChainLaneID)
+	if err != nil {
+		rt.shutdown()
+		return nil, err
+	}
+	r.chain = &chainPublisherV2{lane: chain}
+	if cfg.OutboundWorkers > 0 {
+		outbound, err := newOutboundRuntimeV2(rt.arena, cfg.OutboundWorkers)
+		if err != nil {
+			rt.shutdown()
+			return nil, err
+		}
+		r.outbound = outbound
+	}
+	return r, nil
 }
 
 func (r *ingressRuntimeV2) install() error {
@@ -389,6 +499,10 @@ func (r *ingressRuntimeV2) shutdown() {
 	ingressRetiredV2.Lock()
 	ingressRetiredV2.list = append(ingressRetiredV2.list, r)
 	ingressRetiredV2.Unlock()
+	// The outbound goroutines end before the lanes are sealed.
+	if r.outbound != nil {
+		r.outbound.stopAndWait()
+	}
 	r.rt.shutdown()
 }
 
@@ -415,7 +529,19 @@ func InitIngressV2FromEnv() error {
 	if err != nil {
 		return err
 	}
-	r, err := startIngressRuntimeV2(defaultIngressConfigV2(dir, generation, int(maxPeers), int(churn)))
+	cfg := defaultIngressConfigV2(dir, generation, int(maxPeers), int(churn))
+	if strings.TrimSpace(os.Getenv(envOutboundV2Workers)) != "" {
+		workers, err := ingressEnvUint(envOutboundV2Workers, 8)
+		if err != nil {
+			return err
+		}
+		cfg.OutboundWorkers = int(workers)
+	}
+	scope, err := ingressScopeFromEnvV2()
+	if err != nil {
+		return err
+	}
+	r, err := startIngressRuntimeV2Scoped(cfg, scope)
 	if err != nil {
 		return err
 	}

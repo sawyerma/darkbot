@@ -26,7 +26,7 @@
 set -euo pipefail
 
 PIN="cdb7548b5baacfdae92f9f63437d6456411665f3"
-MARKER="DARKBOT_C1_FASTLANE_C1_4"
+MARKER="DARKBOT_C1_FASTLANE_C1_7"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENGINE="$ROOT/bsc/engine"
 OVERLAY="$ROOT/bsc/geth/overlay/darkbot/fastlane"
@@ -37,7 +37,7 @@ if [ "$head" != "$PIN" ]; then
   echo "C14_INTEROP_FAIL reason=geth-head $head != $PIN" >&2
   exit 1
 fi
-if [ "$(cat "$GETH/.darkbot-c1-fastlane-c14" 2>/dev/null)" != "$MARKER" ]; then
+if [ "$(cat "$GETH/.darkbot-c1-fastlane-c17" 2>/dev/null)" != "$MARKER" ]; then
   echo "C14_INTEROP_FAIL reason=c1.4-overlay-not-applied" >&2
   echo "run: python3 bsc/tools/c1_apply_geth_overlay.py $GETH" >&2
   exit 1

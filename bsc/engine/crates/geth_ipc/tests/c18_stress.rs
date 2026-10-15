@@ -14,7 +14,7 @@
 use darkbot_bsc_geth_ipc::RecordKind;
 use darkbot_bsc_geth_ipc::hot0::{Hot0Config, Hot0Decision, Hot0Outcome, Hot0Poller};
 use darkbot_bsc_geth_ipc::ingress::{SOURCE_ETH_BROADCAST, SOURCE_TXPOOL, ingress_aux};
-use darkbot_bsc_geth_ipc::v2::{
+use darkbot_bsc_geth_ipc::protocol_v2::{
     ArenaV2, CLOCK_ID_MONOTONIC, ConsumerV2, DIRECTORY_ENTRY_SIZE_V2, DirectionV2,
     LANE_HEADER_SIZE_V2, LANE_STATE_BOUND, LANE_STATE_FREE, LANE_STATE_QUARANTINED, LaneClassV2,
     LaneConfigV2, LaneSetV2, ProducerV2, RecordV2, SLOT_HEADER_SIZE_V2, SUPER_HEADER_SIZE_V2,

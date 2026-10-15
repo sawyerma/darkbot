@@ -16,7 +16,7 @@ use darkbot_bsc_geth_ipc::hot0::{
 use darkbot_bsc_geth_ipc::ingress::{
     C14_FLAP_SCOPE, SOURCE_ETH_BROADCAST, decode_tx_target, ingress_aux,
 };
-use darkbot_bsc_geth_ipc::v2::{
+use darkbot_bsc_geth_ipc::protocol_v2::{
     ArenaV2, BorrowedRecordV2, CLOCK_ID_MONOTONIC, ConsumerV2, DirectionV2, LaneClassV2,
     LaneConfigV2, ProducerV2, RecordV2, arena_path_v2,
 };

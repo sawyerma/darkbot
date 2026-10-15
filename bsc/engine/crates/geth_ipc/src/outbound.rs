@@ -24,7 +24,7 @@ use crate::HASH_LEN;
 use crate::PEER_LEN;
 use crate::RecordKind;
 use crate::hot0::{IntentSlot, IntentState};
-use crate::v2::{
+use crate::protocol_v2::{
     BorrowedRecordV2, CLOCK_ID_MONOTONIC, DirectionV2, LaneClassV2, LaneConfigV2, ProducerV2,
     RecordV2, V2Error,
 };
@@ -327,7 +327,7 @@ mod tests {
     use super::*;
     use crate::hot0::{Hot0Config, Hot0Decision, Hot0Outcome, Hot0Poller, IntentBuy};
     use crate::ingress::{SOURCE_ETH_BROADCAST, ingress_aux};
-    use crate::v2::{ArenaV2, ConsumerV2, arena_path_v2};
+    use crate::protocol_v2::{ArenaV2, ConsumerV2, arena_path_v2};
     use std::fs;
     use std::path::PathBuf;
 

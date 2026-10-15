@@ -21,7 +21,7 @@
 
 use darkbot_bsc_geth_ipc::RecordKind;
 use darkbot_bsc_geth_ipc::ingress::{C14LanePlan, ingress_times_borrowed};
-use darkbot_bsc_geth_ipc::v2::{
+use darkbot_bsc_geth_ipc::protocol_v2::{
     CLOCK_ID_MONOTONIC, LANE_STATE_CLOSING, LaneSetV2, RoleLeaseV2, RuntimeRoleV2, V2Error,
     arena_path_v2,
 };

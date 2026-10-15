@@ -697,6 +697,67 @@ func TestC14InitFromEnvAndPeerCapacity(t *testing.T) {
 	}
 }
 
+func TestC19bTestnetScopeIsExplicitAndFailClosed(t *testing.T) {
+	ShutdownIngressV2()
+	t.Cleanup(ShutdownIngressV2)
+
+	// No opt-in: production Mainnet scope remains unchanged.
+	t.Setenv(envIngressV2Scope, "")
+	scope, err := ingressScopeFromEnvV2()
+	if err != nil || scope != c14FlapScopeV2 {
+		t.Fatalf("default scope: scope=%p err=%v", scope, err)
+	}
+
+	mainnet := scope.evidence()
+	if mainnet.ChainID != 56 ||
+		len(mainnet.Addresses) != 1 ||
+		mainnet.Addresses[0] != "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0" {
+		t.Fatalf("default Mainnet scope changed: %+v", mainnet)
+	}
+
+	// Qualification requires explicit opt-in.
+	t.Setenv(envIngressV2Scope, ingressScopeC19bTestnet)
+	scope, err = ingressScopeFromEnvV2()
+	if err != nil || scope != c19bTestnetFlapScopeV2 {
+		t.Fatalf("C1.9b scope: scope=%p err=%v", scope, err)
+	}
+
+	testnet := scope.evidence()
+	if testnet.ChainID != 97 ||
+		len(testnet.Addresses) != 1 ||
+		testnet.Addresses[0] != "0x5beacaf7abcbb3ab280e80d007fd31fce26510e9" ||
+		strings.Join(testnet.Selectors, ",") != "0x8cb5772c:launch" {
+		t.Fatalf("C1.9b Testnet scope evidence: %+v", testnet)
+	}
+
+	// Prove env selection reaches the actual runtime.
+	t.Setenv(envIngressV2Dir, t.TempDir())
+	t.Setenv(envIngressV2Generation, "1909")
+	t.Setenv(envIngressV2MaxPeers, "2")
+	t.Setenv(envIngressV2ChurnReserve, "1")
+	t.Setenv(envIngressV2Scope, ingressScopeC19bTestnet)
+
+	if err := InitIngressV2FromEnv(); err != nil {
+		t.Fatalf("C1.9b runtime init: %v", err)
+	}
+
+	snapshot, ok := IngressV2Snapshot()
+	if !ok ||
+		snapshot.Scope.ChainID != 97 ||
+		len(snapshot.Scope.Addresses) != 1 ||
+		snapshot.Scope.Addresses[0] != "0x5beacaf7abcbb3ab280e80d007fd31fce26510e9" {
+		t.Fatalf("C1.9b runtime snapshot: %+v", snapshot)
+	}
+
+	ShutdownIngressV2()
+
+	// Unknown scope values fail closed.
+	t.Setenv(envIngressV2Scope, "invalid")
+	if _, err := ingressScopeFromEnvV2(); err == nil {
+		t.Fatal("invalid scope accepted")
+	}
+}
+
 func TestC14QueueFullAndOversizeAreVisible(t *testing.T) {
 	cfg := c14TestConfig(t, 1, 0, 4, 512)
 	r := c14Start(t, cfg)
@@ -1053,4 +1114,72 @@ func TestC14InteropGethPhase2(t *testing.T) {
 		"epoch_c=" + strconv.FormatUint(leaseC.Epoch, 10),
 	}, true)
 	fmt.Println("C14_INTEROP_GETH_PHASE2_OK")
+}
+
+func TestC19bUnsyncedAcceptTxsQualificationGate(t *testing.T) {
+	tests := []struct {
+		name      string
+		scope     string
+		arm       string
+		networkID uint64
+		want      bool
+		wantErr   bool
+	}{
+		{
+			name:      "production_default_does_not_override",
+			scope:     "",
+			arm:       "",
+			networkID: 56,
+		},
+		{
+			name:      "testnet_scope_without_arm_does_not_override",
+			scope:     ingressScopeC19bTestnet,
+			arm:       "",
+			networkID: 97,
+		},
+		{
+			name:      "explicit_testnet_qualification_is_allowed",
+			scope:     ingressScopeC19bTestnet,
+			arm:       "YES",
+			networkID: 97,
+			want:      true,
+		},
+		{
+			name:      "mainnet_scope_with_arm_fails_closed",
+			scope:     ingressScopeMainnet,
+			arm:       "YES",
+			networkID: 56,
+			wantErr:   true,
+		},
+		{
+			name:      "testnet_scope_on_wrong_network_fails_closed",
+			scope:     ingressScopeC19bTestnet,
+			arm:       "YES",
+			networkID: 56,
+			wantErr:   true,
+		},
+		{
+			name:      "invalid_arm_fails_closed",
+			scope:     ingressScopeC19bTestnet,
+			arm:       "yes",
+			networkID: 97,
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(envIngressV2Scope, tc.scope)
+			t.Setenv(envC19bAcceptTxsUnsynced, tc.arm)
+
+			got, err := C19bUnsyncedAcceptTxsAllowed(tc.networkID)
+
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error=%v wantErr=%v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Fatalf("allowed=%v want=%v", got, tc.want)
+			}
+		})
+	}
 }

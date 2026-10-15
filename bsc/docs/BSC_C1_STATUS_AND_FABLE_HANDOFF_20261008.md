@@ -1,11 +1,5 @@
 # DarkBot BSC — C1 Status + Fable Implementation Handoff (C1.5–C1.10)
 
-> ## **STOP — DO NOT CONTINUE C1.10/C2 BEFORE THE REAL MAINNET BUY**
->
-> The next product task is **G0.7 controlled value-bearing BSC Mainnet BUY**, followed immediately by **G0.8 actual token-acquisition / ordering / cost verification**.  
-> C1 work is preserved but **PAUSED before freeze**. Testnet BUYs, local Fast-Lane latency, builder ACKs and synthetic measurements do not replace the required real BUY.
-
-
 **Date:** 2026-10-08  
 **Status checkpoint before this documentation-only handoff:** `353c936bd973b032cc28d1ec6fa226acef50a3b9`  
 **Pinned bsc-geth:** `cdb7548b5baacfdae92f9f63437d6456411665f3` (bnb-chain/bsc v1.7.8)  
@@ -23,13 +17,7 @@ The following C1 gates are accepted and must be treated as frozen inputs unless 
 | C1.3 | PASS / COMPLETE | lifecycle accepted; acceptance commit `c804bf74bb6a868a8610b79a100e3729038ec82d` |
 | C1.4 | PASS / COMPLETE | geth ingress accepted; acceptance commit `cefd94659b7bc318ddd02a737b87f8be39e71857` |
 | C1.4a | PASS / COMPLETE | `GREEN_STRONG_HEADROOM`; evidence commit `353c936bd973b032cc28d1ec6fa226acef50a3b9` |
-| C1.5 | PASS / LOCAL QUALIFIED | Rust HOT0 / zero-copy qualification passed |
-| C1.6 | PASS / LOCAL QUALIFIED | M4 development profile qualification passed |
-| C1.7 | PASS / LOCAL QUALIFIED | local-geth outbound qualification passed |
-| C1.8 | PASS / LOCAL QUALIFIED | concurrency/state-safety qualification passed |
-| C1.9 | COMPLETE / INTEGRITY PASS / ELIGIBLE | production-devp2p native latency measurement accepted; final full-regression/source-build freeze bind still open |
-| C1.9b | PASS — CONTROLLED TESTNET HOOK/PATH ONLY | hardened ETH/68→geth→Fast-Lane→Rust controlled path 1/1 observed, 0 missed; Mainnet coverage not proven |
-| C1.10 | PAUSED BEFORE FREEZE | C1.10A final regression PASS with pinned-upstream baseline exception and C1.10B final C1.9 measurement PASS locally; freeze is deliberately deferred until G0.7/G0.8 real Mainnet BUY/acquisition evidence is completed |
+| C1.5–C1.10 | INTEGRATED / COMPILED / NOT YET QUALIFIED | REV2 fixes and local regression checks completed; ordered gate acceptance remains open |
 
 Authoritative C1.4a evidence:
 
@@ -53,101 +41,9 @@ Authoritative files:
 
 These C1.4a results are an ingress→Rust feasibility result only. They do not prove acquisition latency, Mainnet ingress coverage, provider ordering, inclusion quality, or LIVE readiness.
 
-
-### 1.1 Local qualification checkpoint — 2026-10-10
-
-The implementation handoff has now progressed through local C1.9b path qualification.
-
-C1.9b root cause and qualification boundary:
-
-- pinned bsc-geth drops inbound `Transactions` before the backend handler while `AcceptTxs()==false` during initial sync;
-- the earlier public Chapel launch and first controlled replay therefore produced zero C1.9b rows before the Fast-Lane hook;
-- the qualification-only override is now fail-closed and requires the exact triple:
-  - `DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet`;
-  - `DARKBOT_C19B_ACCEPT_TXS_UNSYNCED=YES`;
-  - `networkID == 97`;
-- unset arm preserves normal behavior; invalid arm/scope/network combinations return an error;
-- production/default scope remains unchanged.
-
-Fresh-pin and integration checks passed:
-
-```text
-generator Python compile                  PASS
-fresh pinned checkout                     PASS
-overlay generation                        PASS
-old scope-only bypass absent              PASS
-targeted C1.9b gate tests                 PASS
-affected geth tests                       PASS
-geth build                                PASS
-hardened runtime path                     PASS
-vendor byte equivalence for copied files  PASS
-vendor rebuild/retest                     PASS
-diff checks                               PASS
-```
-
-Controlled hardened runtime result:
-
-```text
-ETH/68 handshake                          PASS
-network                                   97
-launches                                  1
-observed                                  1
-missed                                    0
-capture rows                              1
-invalid_records                           0
-lane_faults                               0
-C1_9B_HARDENED_RUNTIME_PATH               PASS
-```
-
-This is not Mainnet coverage or acquisition proof. Preserve:
-
-```text
-T0_TO_T_BUY_LT_1MS = NOT_PROVEN
-MAINNET_INGRESS_COVERAGE = NOT_PROVEN
-PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED unless separately qualified
-LIVE = BLOCKED
-```
-
-The final C1.10 freeze is still blocked. Before C1.10, rerun the complete C1.5-C1.9/REV2 regression against the hardened integrated source and bind the final source/build/config/evidence identities.
-
-
-
-### 1.2 C1.10A pre-freeze regression checkpoint — 2026-10-10
-
-C1.10A is now active but incomplete.
-
-Passed on the hardened integrated candidate:
-
-```text
-Python qualification tooling                 PASS
-Rust fmt/clippy/debug/release                 PASS
-C14 Go/Rust interop                          PASS
-targeted geth tests                          PASS
-DarkBot fastlane -race                       PASS
-overlay/vendor ingress byte match            PASS
-```
-
-C14 initially stopped because the prepared overlay had one additional blank line compared with the verified vendor `ingress.go`. The diff was whitespace-only; after byte-syncing the overlay to the already verified vendor source, C14 passed.
-
-Race differential against clean pinned bsc-geth:
-
-```text
-eth/protocols/eth current                     FAIL under -race
-eth/protocols/eth clean pin                   FAIL under -race
-common race family                            CachingDB.NoTries / core/state/database.go:280
-
-eth current warnings                          55
-eth clean-pin warnings                        51
-eth current RC                                1
-eth clean-pin RC                              1
-common signatures                             core/blockchain.go, core/state/, core/rawdb/, triedb/
-classification                                PINNED_BASELINE_PRESENT
-```
-
-The warning counts are not identical. Do not upgrade this to an exact equivalence claim. The accepted conclusion is limited: the pinned upstream tree independently exhibits the race family; DarkBot Fast-Lane's targeted race suite passes; full pinned-geth race cleanliness is not claimed.
-
-Still open: full non-race `go test ./...`, final geth build, final source/build/config/evidence identity binding, final measurement binding, and fail-closed C1.10 freeze.
-
+REV2 implementation, executed commands, defects fixed and remaining gate work:
+[BSC_C1_REV2_INTEGRATION_REPORT_20261008.md](BSC_C1_REV2_INTEGRATION_REPORT_20261008.md).
+The short devp2p transport run is a regression smoke test, not C1.9 acceptance.
 
 ## 2. Fable assignment
 

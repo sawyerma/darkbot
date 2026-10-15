@@ -100,7 +100,7 @@ Reine Struktur- und Namensänderung; keine Änderung an Wire-/Signier-/BUY-Bytes
 | `capture/src/lib.rs` | `journal/src/{lib,format,recorder,replay}.rs` | alle 7 Codeblöcke wörtlich verschoben (Textnachweis); öffentliche API per Re-Export identisch |
 | `fastlane/src/lib.rs` (Wire V1) | `geth_ipc/src/protocol_v1.rs` + Root-Re-Export | Implementierung wörtlich verschoben; Pfade `darkbot_bsc_geth_ipc::Producer` usw. bleiben |
 | `runtime/src/bin/g07_mainnet_self_launch_buy.rs` | `execution/src/bin/g07_mainnet_self_launch_buy/{main,inputs,transactions,chain_reads,builder_submission}.rs` | 7/7 Blöcke wörtlich (einzige Änderung `pub(crate)` an verschobenen Funktionen); Binary-Name und Feature unverändert |
-| `fastlane/src/v2.rs` | **noch `geth_ipc/src/v2.rs`** | Zerlegung nach `protocol_v2/` offen (siehe README §7, Stash-Konflikt, Go-Parität ohne Go nicht prüfbar) |
+| `fastlane/src/v2.rs` | `geth_ipc/src/protocol_v2/` (nach C1-Integration, siehe §7) | — |
 | `tools/c1_freeze.py` Freeze-Scope | `bsc/engine`, `bsc/geth`, `bsc/tools`, `bsc/native` | stellt die ursprüngliche Abdeckung „alle Crates, Tools, Overlay, Build-Inputs“ wieder her (seit R7 lagen die Tools außerhalb) |
 
 ## 6. Prüfprotokoll R9–R13 (eigenes Budget, max. 10)
@@ -115,3 +115,36 @@ Reine Struktur- und Namensänderung; keine Änderung an Wire-/Signier-/BUY-Bytes
 Strukturchecks ohne Testlauf: `cargo metadata --locked`, `cargo check --locked --workspace` (alle kompilierbaren Ziele; nur die nicht integrierten C1-Ziele `c15_hot0_alloc`, `c18_stress`, `c16_host_profile`, `c19_consumer`, `c19b_capture` scheitern wie schon am HEAD), `cargo fmt --all -- --check`, `bash -n`, Python-Syntax.
 
 Nicht ausführbar hier: Go-Tests des Overlays (kein Go-Toolchain auf diesem Rechner) und damit Rust↔Go-Interop (`c13_*`, `c14_*`).
+
+## 7. C1-Integration und Wire-V2-Zerlegung (2026-10-16, Ausgangscommit `1c99127`)
+
+Ausdrückliche Nutzeranweisung; Ausnahme von der Roadmap-Stop-Regel; **keine C1-Phasenabnahme**.
+
+**Quelle:** lokaler Stash „local-before-p2p-fix-20261011“ (`5753f70`, Basis `227c4f3`), der getrackte Teil des C1-Rev2-Stands (Referenz: `bsc/native/evidence/c1/rev2-regression-20261008/`). Der Stash selbst wurde weder angewandt noch gelöscht; die Übernahme erfolgte dateiweise.
+
+| Datei (Stash-Pfad → heute) | Übernahme | Prüfung |
+|---|---|---|
+| `fastlane/src/v2.rs` → `geth_ipc/src/v2.rs` → `protocol_v2/` | heutige Datei war seit der Basis byte-identisch → Stash-Version unverändert übernommen | Rev2-Testanzahl erreicht |
+| `fastlane/src/ingress.rs` → `geth_ipc/src/ingress.rs` | 3-Wege-Merge (Basis/Stash auf neue Namen umgeschrieben), konfliktfrei | — |
+| `fastlane/src/lib.rs` | `pub mod host; pub mod hot0; pub mod outbound;` ergänzt | — |
+| `geth/overlay/darkbot/fastlane/{ingress.go,ingress_test.go}`, `geth/FASTLANE_WIRE_V2.md` | seit Basis unverändert → Stash-Version übernommen | Go-Tests, Interop |
+| `docs/BSC_C1_PARALLEL_FAST_LANE_PLAN.md`, `docs/BSC_C1_STATUS_AND_FABLE_HANDOFF_20261008.md` | seit Basis unverändert → Stash-Version übernommen | — |
+| `tools/c1_apply_geth_overlay.py` | 3-Wege-Merge, konfliktfrei | real ausgeführt: `C1_7_OUTBOUND_HOOKS_VERIFIED`, `C1_8_CHAIN_OWNERSHIP_VERIFIED` |
+| `tools/c14_ingress_interop.sh` | 3-Wege-Merge; ein Konflikt gelöst (Marker `C1_7` aus dem Stash, Pfade aus dem Iststand) | Interop PASS |
+| `gates/gate0/src/bin/g07_testnet_birth_buy.rs` | **nicht übernommen** (liegt historisch in `prestudy/`, unverändert) | — |
+
+Nachträglich korrigiert: drei Doctest-Beispiele nutzten noch den alten Crate-Namen (`compile_fail` wäre sonst aus falschem Grund „bestanden“).
+
+**Wire-V2-Zerlegung:** 153 Blöcke von `v2.rs` (4.509 Zeilen) wörtlich auf `protocol_v2/{layout,checksum,error,mapping,lanes,records,guards,arena,producer,consumer,lifecycle,peer_pool,role_lease}.rs` verteilt (151/151 Codeblöcke byte-exakt; einzig der Doctest-Pfad lautet `protocol_v2`), Tests in `protocol_v2/tests.rs` und `c15_tests.rs`. Die Fachdateien werden per `include!` zu **einem** Modul zusammengesetzt. Eine Variante mit echten Untermodulen (`pub(super)`) war funktional grün (Tests, Interop), änderte aber den Release-Maschinencode im Hot-Path (z. B. `RecordGuardV2::release` 104 → 126 Instruktionen, `validate_super`/`lane_corrupt` nicht mehr eingebettet) und wurde deshalb verworfen. Mit `include!`: **98/98 Crate-Funktionen in `c19_consumer`, `c14a_consumer`, `c16_host_profile`, `c19b_capture` instruktionsidentisch** (normalisierter Disassembly-Vergleich gegen einen Release-Build der Einzeldatei), Gesamtinstruktionszahlen gleich. Öffentliche API: 53 identische Elemente; Kompatibilitätspfad `darkbot_bsc_geth_ipc::v2`. Testpfade jetzt `protocol_v2::tests::…` (Harness `c13_lifecycle_interop.sh` und der Kindprozess-Test angepasst).
+
+| # | Inhalt | Ergebnis |
+|---|---|---|
+| C1-T1 | `cargo test -p darkbot-bsc-geth-ipc` nach Integration (alle Ziele + Doctests) | Lib 122/0/5, c15 1, c18 8, Doctests 1+2 (= Rev2-Referenz) |
+| C1-T2 | `go test -race ./darkbot/fastlane` (Go 1.25.0 lokal, offline, Overlay auf lokaler geth-Kopie am Pin `cdb7548b`) | 86 PASS, 0 FAIL, 5 SKIP (Interop-Phasen) |
+| C1-T3 / C1-T4 | `c13_lifecycle_interop.sh`, `c14_ingress_interop.sh` vor der Zerlegung | `C1_3_GO_RUST_LIFECYCLE_INTEROP_PASS`, `C1_4_GO_RUST_INGRESS_INTEROP_PASS` |
+| C1-T5 | geth_ipc nach Zerlegung (echte Module) | identisch zu C1-T1 |
+| C1-T6 / C1-T7 | Interop nach Zerlegung | beide PASS |
+| C1-T8 | geth_ipc nach finaler `include!`-Variante | identisch zu C1-T1 |
+| C1-T9 | `cargo test --workspace --no-fail-fast --features darkbot-bsc-execution/g07-mainnet` ohne Filter | **479 PASS, 0 FAIL, 5 ignored** |
+
+Strukturchecks: `cargo fmt --check` sauber; `cargo clippy -p darkbot-bsc-geth-ipc --all-targets -- -D warnings` sauber; Workspace-Clippy nur bekannte Stil-Warnungen im übernommenen G0.7/G0.8-Code. Nicht ausgeführt: Latenzmessungen auf geth-Ebene (`c14a_early_latency.sh`, `c19_native_latency.sh`) — durch die Codegen-Identität nicht erforderlich; C1-Phasenabnahme.
