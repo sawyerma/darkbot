@@ -119,6 +119,22 @@ export BSC_BUYER_ADDRESS="${BSC_BUYER_ADDRESS:-0x9c8a0Db41914beEE52Dd49790c4F087
 export DARKBOT_G06A_LAUNCHER_ADDRESS="$BSC_LAUNCHER_ADDRESS"
 export DARKBOT_G06A_BUYER_ADDRESS="$BSC_BUYER_ADDRESS"
 
+# Funding is evaluated for the exact signed parameters of the selected DRY
+# (the bytes G0.7 would sign). The approved v2 ceilings stay enforced: the
+# preflight refuses any value above them, and so does the compiled guard.
+dry_tx() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["transactions"][sys.argv[2]])' "$DRY" "$1"
+}
+for field in gas_price_wei launch_gas_limit buy_gas_limit launch_value_wei buy_value_wei; do
+  value="$(dry_tx "$field")"
+  [[ "$value" =~ ^[0-9]+$ ]] || die "selected DRY has no decimal transactions.$field"
+  var="DARKBOT_G06A_$(printf '%s' "$field" | tr '[:lower:]' '[:upper:]')"
+  export "$var=$value"
+done
+printf 'FUNDING_BASIS=EXACT_DRY_PARAMETERS gas_price_wei=%s launch_gas_limit=%s buy_gas_limit=%s launch_value_wei=%s buy_value_wei=%s\n' \
+  "$DARKBOT_G06A_GAS_PRICE_WEI" "$DARKBOT_G06A_LAUNCH_GAS_LIMIT" "$DARKBOT_G06A_BUY_GAS_LIMIT" \
+  "$DARKBOT_G06A_LAUNCH_VALUE_WEI" "$DARKBOT_G06A_BUY_VALUE_WEI"
+
 TMP_PREFLIGHT="$(mktemp -t darkbot-g07-prelive.XXXXXX.json)"
 trap 'rm -f "$TMP_PREFLIGHT"' EXIT
 node bsc/tools/g06a_preflight_readonly.cjs "$TMP_PREFLIGHT" >/dev/null
