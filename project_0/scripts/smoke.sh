@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Project_0 smoke entry point (structure iteration 22): controlled C0-E1 reconnect through a market-only loopback
-# proxy. No firewall changes. The former run_gap_reconnect_smoke.sh forwards here unchanged.
+# proxy. No firewall changes. Works from any working directory; repository paths are absolute.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${P0_ENV_FILE:-$ROOT/project_0/.env}"
@@ -39,8 +39,7 @@ cleanup() {
   if [[ -n "$proxy_pid" ]]; then kill "$proxy_pid" 2>/dev/null || true; wait "$proxy_pid" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
-cd "$ROOT"
-cargo build --locked --manifest-path project_0/native/Cargo.toml -p darkbot-solana --example p0-gap-ws-proxy > "$scratch/build.log" 2>&1
+cargo build --locked --manifest-path "$ROOT/project_0/native/Cargo.toml" -p darkbot-solana --example p0-gap-ws-proxy > "$scratch/build.log" 2>&1
 "${CARGO_TARGET_DIR:-$ROOT/project_0/native/target}/debug/examples/p0-gap-ws-proxy" > "$scratch/proxy.stdout" 2> "$scratch/proxy.log" &
 proxy_pid=$!
 for _ in {1..300}; do
@@ -60,7 +59,7 @@ if [[ "${P0_GAP_PROBE_ONLY:-false}" == true ]]; then
 fi
 # Environment was already sourced; preserve the proxy override in the inner launcher.
 status=0
-P0_ENV_FILE="$scratch/not-present.env" bash project_0/scripts/capture.sh econ4h-launcher || status=$?
+P0_ENV_FILE="$scratch/not-present.env" bash "$ROOT/project_0/scripts/capture.sh" econ4h-launcher || status=$?
 run="$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID"
 if [[ -d "$run" ]]; then
   # Layout V1 keeps the log at the run root, layout V2 under logs/ (run_store artifact gap_proxy_log).

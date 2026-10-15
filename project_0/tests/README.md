@@ -1,7 +1,10 @@
 # Project 0 Python tests
 
-Status: structure iterations 13–15 (`46be33c`); imports switched to the `operations` package in iterations 16–20. Offline only: temporary synthetic runs, fake RPC and fake
-binaries; no network, no mainnet, no signer. Rust tests stay inline in `native/crates/*/src` (`cargo test`).
+Status: structure iterations 13–15 (`46be33c`), `operations` package imports since 16–20 (`d234913`); 103 tests (mock-ban cleanup
+2026-10-15). Offline only: temporary synthetic runs and recorded historical data; no network, no mainnet, no signature.
+Launcher tests run the real `capture.sh`, real `cargo` and the real release `p0-longtail` against closed local ports
+(`127.0.0.1:1`) with a public-only key file; the binary fails closed at startup. Rust tests stay inline in
+`native/crates/*/src` (`cargo test`).
 
 ## Run
 
@@ -10,11 +13,20 @@ python3 -m unittest discover -s project_0/tests -t project_0          # full sui
 python3 -m unittest discover -s /abs/path/project_0/tests -t /abs/path/project_0   # from any working directory
 python3 -m unittest discover -s project_0/tests/python -t project_0   # one layer: python | integration | regression
 project_0/scripts/verify.sh --self-test                               # decoder unit tests (tests/python/test_audit_market_quick.py)
-python3 -m unittest discover -s project_0/scripts -p 'test_*.py'      # pre-reform command, kept by scripts/test_suite.py
 ```
 
 Integration tests need the release binaries `p0-measurement-plan`, `p0-econ-replay` and `p0-longtail` under
-`native/target/release/` (`cargo build --release --locked --workspace --features crate_health,txv1`).
+`native/target/release/` (`cargo build --release --locked --workspace --features crate_health,txv1`); without them the
+real-binary tests report `NOT_RUN` (skip). The launcher tests also need 8 GiB free (storage preflight of the real launcher).
+
+Remaining test doubles (kept on purpose; the code under test is always the production code):
+
+| Double | Where | Why it stays |
+|---|---|---|
+| `FakeRPC`, `opener=` transports | `fixtures/p0_market.py`, `test_audit_market_quick.py`, `test_operational_config.py`, `test_fe_preflight.py` | stand-in for the mainnet RPC (network input); retry, budget and allowlist logic of the real `RPC` class runs |
+| `patch.object(a.RPC,'call',side_effect=AssertionError)` | `test_measurement_contract.py`, `test_measurement_p6.py` | proves that no network call happens; not a replacement |
+| patched `operational_config.resolve`, `subprocess.run`, `probe` | `test_fe_preflight.py` | the real `p0-fe-qualify` needs mainnet RPC and measured provider evidence; only the Python dispatch contract is checked |
+| fault injection (`atomic_json`, `write_snapshots`, `disk_usage` = 0) | `test_audit_market_quick.py`, `test_market_report.py`, `test_measurement_contract.py` | interrupted writes and a full disk cannot be produced deterministically otherwise |
 
 ## Layout
 

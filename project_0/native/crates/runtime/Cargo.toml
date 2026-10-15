@@ -41,3 +41,5 @@ juplend-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.
 [[bin]]
 name = "p0-longtail"
 path = "src/main.rs"
+# Since FIX-78/FIX-79c the Shadow subscription and detection filters need the typed MarginfiAccount layout.
+required-features = ["crate_health"]

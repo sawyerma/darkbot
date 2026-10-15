@@ -1,7 +1,7 @@
 # Project_0 — aktiver Handoff für neue Chats
 
 **Aufnahme:** 2026-10-15. **Repository:** `sawyerma/darkbot`, Branch `main`.
-**Strukturstatus:** Phase A (1–7), 8a (`958d0b3`), 8b.1 (`e8e904c`), Wallet-Lock-Fix (`6ec4483`, `218710b`); **8b.2–15 umgesetzt und mit `46be33c` auf `main` gepusht** (Claudes Offline-Tests; keine unabhängige Abnahme behauptet). **16–29 im Arbeitsbaum umgesetzt und gezielt geprüft, nicht committed.** Offen: 30–32 (Bereinigung, Verweise, Gesamtqualifikation).
+**Strukturstatus:** 1–7, 8a `958d0b3`, 8b.1 `e8e904c`, Wallet-Lock-Fix `6ec4483`/`218710b`, **8b.2–15 `46be33c`, 16–29 `d234913`; 30–32 im Arbeitsbaum umgesetzt, gestaged und offline endqualifiziert** (keine unabhängige Abnahme behauptet). Die 32 Strukturschritte sind damit inhaltlich abgeschlossen; Commit/Push durch den Nutzer.
 **Vollständige Fortschrittstabelle:** [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
 **Fachlicher Bot-Status:** [STATUS.md](../STATUS.md). Maßgeblich bleiben das [Measurement-Ledger](../MEASUREMENT_LEDGER.md) und der [Phasenplan](../PHASENPLAN.md).
 
@@ -35,9 +35,10 @@ Wir bauen einen **vollwertigen professionellen Solana-/Marginfi-Liquidationsbot*
 | **8b.3** | `data/runs` + Layout V2 Standard für econ4h ([Run-Ablage](run_storage.md)) | `46be33c` |
 | **9–12** | `data/cache/`, `config/profiles/`, `config/examples/`, [Daten-/Export-Policy](data_policy.md) | `46be33c` |
 | **13–15** | `tests/{python,integration,regression,fixtures}/` ([Testkarte](../../tests/README.md)) | `46be33c` |
-| **16–20** | Python-Paket `operations/{cli,capture,verification,reporting,qualification}` | Arbeitsbaum |
-| **21–25** | `scripts/{capture,smoke,verify,report,preflight}.sh`, alte Namen als Weiterleitung | Arbeitsbaum |
-| **26–29** | Crates `common/`, `solana/`, `liquidation/`, `runtime/`; Test- und Hilfsmodule aus `main.rs`/`market_observer.rs` getrennt | Arbeitsbaum |
+| **16–20** | Python-Paket `operations/{cli,capture,verification,reporting,qualification}` | `d234913` |
+| **21–25** | `scripts/{capture,smoke,verify,report,preflight}.sh` (+ PHASENPLAN-`test.sh`) | `d234913` |
+| **26–29** | Crates `common/`, `solana/`, `liquidation/`, `runtime/`; Test- und Hilfsmodule aus `main.rs`/`market_observer.rs` getrennt | `d234913` |
+| **30–32** | Altlasten nach `delete/`, finale Referenzen, Endqualifikation | Arbeitsbaum, gestaged |
 
 Die 32 Schritte mit den offenen Phasen B–F stehen vollständig in [restructure_32_step_plan.md](../architecture/restructure_32_step_plan.md).
 
@@ -88,34 +89,40 @@ Sechs Marker sind **keine sechs selbstständigen Gewinne**. Reportfilter für Ar
 
 **Die Commit-Nachricht von `958d0b3` ist irreführend** (`preserve restructure roadmap and handoff`), weil jener Commit tatsächlich **nur `project_0/.gitignore`** enthält. Die Roadmap und dieser Handoff wurden deshalb erst **nachträglich** in separaten Dokumentations-Commits angelegt. Historie nicht nachträglich umschreiben.
 
-## 6. NÄCHSTE AUFGABE: Iterationen 30–32 (Bereinigung, Verweise, Gesamtqualifikation)
+## 6. Stand nach Iteration 32 und nächste Schritte
 
-**Stand 8b.2–15 (`46be33c`):** Layout V2 (`data/runs/<id>/{manifest.json,config.json,capture,snapshots,verification,reports,logs}`),
-versionierte Identitäten (Spec/3, INDEX/3 `index_v3`, Dataset NormalizedReport/3, `RESUME_REQUIRES_ARCHIVED_IMPLEMENTATION`),
-econ4h-Standard `data/runs` V2, `data/cache/`, typisierte Profile, geprüfte Beispiele, Datenpolitik, Tests unter `tests/`.
-Details: [Run-Layout-Versionierung](../architecture/run_layout_versioning.md), [Run-Ablage](run_storage.md), [Datenpolitik](data_policy.md).
+**Zielstruktur erreicht:** `operations/{cli,capture,verification,reporting,qualification}`, `scripts/{capture,smoke,verify,report,preflight,test}.sh`,
+`native/crates/{common,solana,liquidation,runtime}`, `tests/{python,integration,regression,fixtures}`, `config/{profiles,examples}`,
+`data/{runs,cache}` (Layout V2), `docs/`, `exports/`; entfernte Altlasten liegen wiederherstellbar in [`delete/`](../../delete/README.md).
+Details der Iterationen 30–32 und aller Beibehaltungsgründe: [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
 
-**Stand 16–29 (Arbeitsbaum):** Python unter `operations/` (Paket-Imports; alte `scripts/<modul>.py`-Aufrufe leiten weiter),
-Shell-Einstiegspunkte `capture.sh` (econ4h/econ4h-launcher/market/shadow), `smoke.sh`, `verify.sh`, `report.sh`, `preflight.sh`
-(alte Namen leiten weiter), Crates `native/crates/{common,solana,liquidation,runtime}` (Paketnamen unverändert), getrennte
-Test- und Hilfsmodule im Runtime-Crate. Die gepinnten Python-Dateien wurden für Imports und Pfade angepasst: neue
-Verifikationen erhalten neue IDs gegenüber `46be33c`, Identitätsversionen und Recordformat sind unverändert
-([Abschnitt 7](../architecture/run_layout_versioning.md)).
+**Endqualifikation 2026-10-15 (offline, je einmal):** Python 102 PASS / 0 SKIP, Self-Test 29 PASS, Rust `crate_health` 382 PASS / 1 ignored,
+`crate_health,txv1` 384 PASS / 1 ignored, beide Release-Builds PASS, Cargo-Metadaten PASS, Differential-Clippy 38→38, geänderte
+Rust-Dateien rustfmt-sauber, `--print-effective-config` aller vier Profile byte-identisch zum Stand vor Iteration 30.
+Nicht Bestandteil: reale Mainnet-Captures, bezahlte RPCs, Echtgeldtransaktionen, Lesen/Hashen der historischen Rohdaten.
 
-**Gezielte Prüfungen 16–29 (je einmal):** Python 102 PASS (aus beliebigem Arbeitsverzeichnis, über den alten Discover-Befehl
-und `verify.sh --self-test` 29); alle alten und neuen Einstiegspunkte `--help`/Syntax PASS; `cargo metadata --locked`, `cargo check`
-`crate_health,txv1` alle Targets PASS; Runtime-Crate-Tests `crate_health` und `crate_health,txv1` je 220 + 9 PASS (1 ignored);
-Testanzahl je Crate vor/nach identisch (common 26, solana 70, liquidation 61, runtime 230); Differential-Clippy 38→38 (alte
-Crate-Namen zugeordnet); neue/geänderte Rust-Dateien rustfmt-sauber; keine defekten relativen Markdown-Links. Vollständige
-Workspace-Matrizen und Release-Builds nicht erneut ausgeführt (gemäß Auftrag erst in Iteration 32).
+**Abschlussprüfung vor Modularisierung:** `capture.sh shadow` arbeitsverzeichnisunabhängig (Repository-`cd`, absolute Defaults,
+LIVE-Sperre), pfadwertige Einstellungen gegen das Aufruferverzeichnis aufgelöst (Signer-Prüfung und Runtime sehen dieselbe Datei),
+`smoke.sh` ohne `cd`, Feature-Vertrag `crate_health`; Regressionstest
+`tests/integration/test_run_store.py::Launchers::test_shadow_runs_the_real_binary_from_any_directory`.
 
-**Offene Risiken:** (1) `cargo fmt --check` scheitert an Alt-Hunks in unveränderten Dateien (u. a. strict-gepinntes
-`market_truth.rs`). (2) Der Binärbau ohne `crate_health` schlug schon auf `46be33c` fehl; alle Launcher nutzen `crate_health`.
-(3) Python-Leser erwarten Release-Binaries unter `native/target/release/`. (4) Kompatibilitäts-Weiterleitungen in `scripts/`
-sind in Schritt 30 per Verbrauchernachweis zu bewerten. (5) Systempython < 3.10 führt die Skripte wie bisher nicht aus.
+**Mock-Verbot-Bereinigung 2026-10-15 (gestaged, kein Commit):** entfernt `NoHealth`, `NoPlans` und die zwölf nie
+kompilierten `cfg(not(crate_health))`-Blöcke in `main.rs`. Die vier Launcher- und Reader-Tests mit Fake-`cargo`,
+Fake-Binary, Fake-Readern oder Disk-Mock laufen jetzt mit dem echten `capture.sh`, echtem `cargo`, dem echten
+`p0-longtail` (geschlossene lokale Ports, Schlüsseldatei nur mit dem öffentlichen Teil, fail-closed beim Start) und den
+echten Readern. Wiederherstellbar über `delete/mock_ban_20261015/`. `kamino-/drift-/juplend-mocks` bleiben: Das sind die
+Integrations-Kontolayouts des marginfi-v2-Programms (Kamino Reserve, Drift SpotMarket/User, JupLend Lending), keine
+Attrappen. Verbliebene Test-Doubles (RPC-Eingaben, Fault-Injection, Submission-Adapter, die nie senden) sind in
+`tests/README.md` begründet. Offline je einmal: Python 103 PASS / 0 SKIP, Self-Test 29 PASS, Rust `crate_health`
+382 PASS / 1 ignored, `crate_health,txv1` 384 PASS / 1 ignored, `cargo check` ohne Features PASS, beide Release-Builds
+PASS, Differential-Clippy 38→38, Build-Warnungen unverändert (9, strikt gepinnte Dateien), rustfmt der geänderten Dateien
+ohne neuen Hunk.
+Plan: [Runtime-Modularisierung](../architecture/runtime_modularization_plan.md) (nicht ausgeführt).
 
-**Danach:** 30 Altlasten/Wrapper bereinigen, 31 Verweise finalisieren, 32 Gesamtqualifikation
-([32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md)).
+**Offene Punkte:** (1) `delete/` nach Prüfung endgültig entfernen. (2) Optionaler eigener Formatierungs-Commit für Alt-Hunks
+(betrifft das strict-gepinnte `market_truth.rs` → neue Strict-Spec-IDs). (3) `p0-longtail` erfordert `crate_health` (Cargo
+`required-features`); die `cfg(not(crate_health))`-Zweige sind entfernt (Mock-Verbot-Bereinigung). (4) Gepinnte Dateien nur mit bewusster Identitätsänderung bearbeiten. (5) Fachlich gilt weiter
+`FIRST_REALIZED_PROFIT_NOT_PROVEN`; nächste Arbeiten folgen der FE-00–FE-07-Roadmap in PHASENPLAN/Ledger.
 
 ## 7. Rollen, Sicherheitsgrenzen und Abnahme
 
@@ -149,4 +156,4 @@ Bei Rust-/Programmumzügen zusätzlich passende Release-Builds, gezielte CLI-/Fi
 
 ## 8. Neuen Chat exakt hier fortsetzen
 
-> Öffne das GitHub-Repository `sawyerma/darkbot`, Branch `main`. Lies **zuerst** `project_0/docs/operations/restructure_handoff.md`, danach `project_0/docs/architecture/restructure_32_step_plan.md`, `project_0/README.md` (Zielbaum und Bereinigungsvertrag), `project_0/docs/architecture/run_layout_versioning.md` und `project_0/docs/STATUS.md`. Strukturprojekt: 1–15 auf `main` (`46be33c`), 16–29 laut Abschnitt 6 umgesetzt; als Nächstes Iterationen 30–32. Die **fachliche** FE-00–FE-07-Roadmap läuft unabhängig. Verifiziere Remote-HEAD und lokales Staging, keine LIVE-/Mainnet-Aktion, stoppe vor Commit/Push.
+> Öffne das GitHub-Repository `sawyerma/darkbot`, Branch `main`. Lies **zuerst** `project_0/docs/operations/restructure_handoff.md`, danach `project_0/README.md`, `project_0/docs/STATUS.md`, `project_0/docs/PHASENPLAN.md` und die neuesten Ledger-Einträge. Die 32-Schritte-Strukturreform ist umgesetzt (1–29 auf `main`, 30–32 laut Abschnitt 6). Die **fachliche** FE-00–FE-07-Roadmap ist der nächste Arbeitsstrang. Verifiziere Remote-HEAD und lokales Staging, keine LIVE-/Mainnet-Aktion ohne eigene Freigabe, stoppe vor Commit/Push.

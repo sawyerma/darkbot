@@ -27,7 +27,7 @@ temporary files must not persist in the project tree.
 
 | Writer | Output | Default |
 |---|---|---|
-| econ4h capture (`scripts/capture.sh`; wrappers `test.sh`, `run_econ4h.sh`) | run directory | `data/runs/<id>` layout V2; `P0_RUN_STORE=legacy` → `data/econ4h/<id>` |
+| econ4h capture (`scripts/capture.sh`, `scripts/test.sh`) | run directory | `data/runs/<id>` layout V2; `P0_RUN_STORE=legacy` → `data/econ4h/<id>` |
 | C0-MO (`scripts/capture.sh market`) | run directory | `data/market/<id>` layout V1 |
 | `scripts/smoke.sh` | run via `capture.sh econ4h-launcher`, proxy working data | run store as above; `data/cache/gap_proxy/` |
 | `verify.sh` / `operations/verification/measurement_verify.py` | verification artifacts | inside the run |

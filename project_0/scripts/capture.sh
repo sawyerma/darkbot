@@ -4,13 +4,23 @@
 #   capture.sh econ4h-launcher [--duration D | --measurement-config FILE]   econ4h capture only (former run_econ4h.sh)
 #   capture.sh market                                                 C0-MO unfiltered read-only market observer
 #   capture.sh shadow                                                 Mainnet Shadow, observe-only submission adapter
-# The former run_econ4h.sh, test.sh, run_market_observer.sh and run_shadow_mainnet.sh forward here unchanged.
+# scripts/test.sh (PHASENPLAN operator command) runs `capture.sh econ4h`. Every mode works from any working directory.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PROJECT_DIR/.." && pwd)"
 py() { PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m "$@"; }
+
+# Path-valued settings keep the caller's working directory as their base, also after `cd "$REPO_ROOT"`, so the signer
+# gate and the runtime always see the same files.
+absolute_paths() {
+  local v
+  for v in P0_KEYPAIR_PATH P0_OPERATIONAL_CONFIG_FILE P0_RECORD_PATH P0_SUMMARY_PATH P0_MT0_PATH \
+           P0_ECON_OUT_DIR P0_MARKET_OUT_DIR CARGO_TARGET_DIR; do
+    if [[ -n "${!v:-}" && "${!v}" != /* ]]; then export "$v=$PWD/${!v}"; fi
+  done
+}
 
 load_env() {
 # [SEC-02] Local secrets are loaded from project_0/.env when present.
@@ -131,6 +141,7 @@ fi
 
 econ4h_launcher() {
 load_env
+absolute_paths
 case "${P0_ECON_RUN_MODE:-auto}" in
   auto|full) ;;
   *) echo "P0_ECON_RUN_MODE quick is incompatible with a complete capture; unset it. Duration now starts after StreamReady." >&2; exit 2 ;;
@@ -228,8 +239,6 @@ export P0_MT0_PATH="$CAPTURE_DIR/mt0.jsonl"
 export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
-export P0_RECORD_PATH="${P0_RECORD_PATH:-project_0/data/shadow/opportunities.jsonl}"
-export P0_SUMMARY_PATH="${P0_SUMMARY_PATH:-project_0/data/shadow/daily_summary.jsonl}"
 export P0_JUPITER_MAX_ACCOUNTS="${P0_JUPITER_MAX_ACCOUNTS:-64}"
 export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 export P0_MAX_CONCURRENT="${P0_MAX_CONCURRENT:-1}"
@@ -277,6 +286,7 @@ exit "$status"
 
 market() {
 load_env
+absolute_paths
 # transactions = Helius transactionSubscribe (Developer+ plan), needs only the WebSocket.
 # logs         = standard logsSubscribe (all plans), additionally needs RPC for post-capture enrichment.
 export P0_MARKET_SOURCE="${P0_MARKET_SOURCE:-transactions}"
@@ -331,14 +341,20 @@ exec cargo run --release \
 
 shadow() {
 load_env
+absolute_paths
 require_signer
+case "${P0_LIVE_ENABLED:-false}:${P0_SUBMISSION_ENABLED:-false}" in
+  false:false|0:0|false:0|0:false) ;;
+  *) echo "shadow requires LIVE and submission disabled" >&2; exit 2 ;;
+esac
+export P0_LIVE_ENABLED=false P0_SUBMISSION_ENABLED=false
 export P0_PROGRAM_ID="${P0_PROGRAM_ID:-MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA}"
 export P0_MODE=shadow
 export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
-export P0_RECORD_PATH="${P0_RECORD_PATH:-project_0/data/shadow/opportunities.jsonl}"
-export P0_SUMMARY_PATH="${P0_SUMMARY_PATH:-project_0/data/shadow/daily_summary.jsonl}"
+export P0_RECORD_PATH="${P0_RECORD_PATH:-$PROJECT_DIR/data/shadow/opportunities.jsonl}"
+export P0_SUMMARY_PATH="${P0_SUMMARY_PATH:-$PROJECT_DIR/data/shadow/daily_summary.jsonl}"
 export P0_JUPITER_MAX_ACCOUNTS="${P0_JUPITER_MAX_ACCOUNTS:-64}"
 export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 export P0_MAX_CONCURRENT="${P0_MAX_CONCURRENT:-1}"
@@ -359,6 +375,7 @@ echo "  zero_prefund_shadow_probe=$P0_ZERO_PREFUND_SHADOW_PROBE"
 echo "  record=$P0_RECORD_PATH"
 echo "  summary=$P0_SUMMARY_PATH"
 
+cd "$REPO_ROOT"
 exec cargo run --release \
   --manifest-path project_0/native/Cargo.toml \
   --features "crate_health txv1" \

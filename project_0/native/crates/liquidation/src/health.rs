@@ -75,16 +75,6 @@ pub trait HealthEngine {
     fn premium_decay_per_second(&self, account: &Pubkey) -> Result<u128, HealthError>;
 }
 
-/// Ohne Feature: fail closed.
-pub struct NoHealth;
-
-impl HealthEngine for NoHealth {
-    fn health(&self, _: &Pubkey, _: i64, _: u64) -> Result<HealthView, HealthError> { Err(HealthError::Unavailable) }
-    fn observation_accounts(&self, _: &Pubkey) -> Result<Vec<Pubkey>, HealthError> { Err(HealthError::Unavailable) }
-    fn thresholds(&self, _: &Pubkey, _: i64, _: u64) -> Result<AccountThresholds, HealthError> { Err(HealthError::Unavailable) }
-    fn premium_decay_per_second(&self, _: &Pubkey) -> Result<u128, HealthError> { Err(HealthError::Unavailable) }
-}
-
 /// Zugriff auf den RAM-State (S2); der Runner implementiert das über `StateCore::get`.
 pub trait AccountSource {
     fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])>; // (owner, lamports, data)

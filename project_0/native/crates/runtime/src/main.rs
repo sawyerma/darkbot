@@ -1,8 +1,8 @@
 //! `p0-longtail`: Long-Tail-Runner. Konfiguration ausschließlich aus Env (kein Wert im Code):
 //!   P0_WS_URL, P0_RPC_URL, P0_PROGRAM_ID, P0_GROUP_ID (aus P1A-Manifest), P0_KEYPAIR_PATH,
 //!   P0_MODE=shadow|live|market (market = C0-MO read-only observer), P0_MIN_PROFIT, P0_MAX_*, P0_RECORD_PATH
-//! Ohne Health-Engine (Feature crate_health) läuft der Prozess im Shadow-Modus bis Detection
-//! und schreibt `Unavailable`-Records — damit ist die Kette messbar, bevor P3 angebunden ist.
+//! Build contract: the binary requires the feature `crate_health` (Cargo `required-features`); the Shadow
+//! WSS/RPC filters and the detection trigger use the typed MarginfiAccount layout since FIX-78/FIX-79c.
 //!
 //! Status: UNTESTED / VERIFY. Threads: Ingress (WSS) → bounded channel → State/Detection-Loop;
 //! Blockhash, Winner-Matcher und Submission-Reconciliation separat. Kein Remote-RPC im Entscheidungs-Loop.
@@ -26,8 +26,6 @@ use darkbot_project0::safety::{Allow, Limits, Safety};
 use darkbot_runner::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
 use darkbot_runner::pending::PendingSubmission;
 use darkbot_runner::pipeline::{pipeline_timing_snapshot, Mode, Pipeline};
-#[cfg(not(feature = "crate_health"))]
-use darkbot_runner::pipeline::{ReceivershipBuilder, ReceivershipPlan};
 use darkbot_runner::record::Decision;
 use darkbot_runner::remote_workers::{
     OraclePriceProjectionWork, ProjectionWork, ReconcileWork, RemoteWorkers, WinnerWatch,
@@ -213,8 +211,6 @@ fn run_shadow(
     #[cfg(feature = "crate_health")]
     let pre =
         snapshot::program_accounts_filtered(&dep_rpc, &program, bank_filters(&group), &clock)?;
-    #[cfg(not(feature = "crate_health"))]
-    let pre = snapshot::program_accounts(&dep_rpc, &program, &clock)?;
     let mut pre_state = StateCore::new(1);
     pre_state.install_snapshot(pre.slot, pre.accounts);
     let bank_keys: Vec<Pubkey> = pre_state
@@ -230,10 +226,6 @@ fn run_shadow(
                     .filter(|b| b.group == group)
                     .map(|_| *k);
             }
-            #[cfg(not(feature = "crate_health"))]
-            {
-                Some(*k)
-            }
         })
         .collect();
     #[cfg(feature = "crate_health")]
@@ -246,8 +238,6 @@ fn run_shadow(
         v.dedup();
         v
     };
-    #[cfg(not(feature = "crate_health"))]
-    let mut required_dependency_keys: Vec<Pubkey> = Vec::new();
 
     // ProgramData is required in every build: protocol upgrades are a lifecycle concern,
     // independent of whether crate_health is enabled.
@@ -260,8 +250,6 @@ fn run_shadow(
         .iter()
         .flat_map(|bk| ata_candidates_for_bank(&StateView(&pre_state), &program, bk, &liquidator))
         .collect();
-    #[cfg(not(feature = "crate_health"))]
-    let mut optional_dependency_keys: Vec<Pubkey> = Vec::new();
     #[cfg(feature = "crate_health")]
     optional_dependency_keys.extend(darkbot_runner::lookup_tables::published_keys(&group));
     optional_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
@@ -413,14 +401,6 @@ fn run_shadow(
         #[cfg(feature = "crate_health")]
         let b = snapshot::program_accounts_filtered(&rpc, &program, bank_filters(&group), &clock)
             .map_err(|e| format!("stage=bank_gpa {e}"))?;
-        #[cfg(not(feature = "crate_health"))]
-        let a = snapshot::program_accounts(&rpc, &program, &clock).map_err(|e| e.to_string())?;
-        #[cfg(not(feature = "crate_health"))]
-        let b = darkbot_solana::state::snapshot::Snapshot {
-            slot: a.slot,
-            accounts: Vec::new(),
-            missing: Vec::new(),
-        };
         let required = dep_for_fetch
             .lock()
             .map_err(|_| "dep lock".to_string())?
@@ -592,8 +572,6 @@ fn run_shadow(
         false,
     )
     .map_err(|e| format!("route provider: {e}"))?;
-    #[cfg(not(feature = "crate_health"))]
-    let builder = NoPlans;
     let resources = Resources {
         compute_unit_limit: config::parsed_or("P0_CU_LIMIT", 1_400_000)?,
         priority_micro_lamports_per_cu: config::parsed_or("P0_PRIORITY_MICRO", 0)?,
@@ -1857,8 +1835,6 @@ fn run_shadow(
         } else {
             consumer.pop_timeout(Duration::from_millis(250))
         };
-        #[cfg(not(feature = "crate_health"))]
-        let maybe_ev = consumer.pop_timeout(Duration::from_millis(250));
 
         mt0_owner.enter(darkbot_common::mt0::OwnerCat::IngressApply);
         if let Some(ev) = &maybe_ev {
@@ -1867,8 +1843,6 @@ fn run_shadow(
         }
         #[cfg(feature = "crate_health")]
         let mut detect;
-        #[cfg(not(feature = "crate_health"))]
-        let mut detect = None;
 
         if let Some(ev) = maybe_ev {
             #[cfg(feature = "crate_health")]
@@ -2719,7 +2693,7 @@ fn run_shadow(
                 clock.now_ns().saturating_sub(t_rx),
                 None,
             );
-            // Health über das Crate (Feature crate_health), sonst fail-closed NoHealth → Unavailable-Record.
+            // Health über das marginfi-Crate (Feature crate_health ist für dieses Binary Pflicht).
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -2961,16 +2935,12 @@ fn run_shadow(
                 .as_ref()
                 .map(|p| p.evaluation_time())
                 .unwrap_or((now, slot));
-            #[cfg(not(feature = "crate_health"))]
-            let (protocol_now, protocol_slot) = (now, slot);
 
             #[cfg(feature = "crate_health")]
             let engine = darkbot_project0::health::crate_impl::CrateHealth {
                 state: eval_state,
                 group,
             };
-            #[cfg(not(feature = "crate_health"))]
-            let engine = darkbot_project0::health::NoHealth;
             #[cfg(feature = "crate_health")]
             let inventory = |bank_key: &Pubkey| -> u64 {
                 let Some(bank) = bank_from_state(eval_state, &program, bank_key) else {

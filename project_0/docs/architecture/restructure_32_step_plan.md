@@ -1,7 +1,7 @@
 # Project_0 — 32-Iterationen-Strukturreform (verbindliches Fortschrittsregister)
 
 **Stand:** 2026-10-15. **Baseline:** `main` auf `958d0b3d862d964866fd2646cd53b44105263673` vor Anlage dieser Datei.
-**Reformstatus:** Phase A 7/7; 8a `958d0b3`, 8b.1 `e8e904c`, Wallet-Lock-Fix `6ec4483`/`218710b`; **Iterationen 8b.2–15 umgesetzt und mit `46be33c` auf `main` gepusht** (Claudes Offline-Tests; eine unabhängige Abnahme ist damit nicht behauptet). **Iterationen 16–29 im Arbeitsbaum umgesetzt und gezielt geprüft (nicht committed); 30–32 offen.** Die vollständige Gesamtqualifikation erfolgt in Iteration 32.
+**Reformstatus:** 1–7 Dokumentation; 8a `958d0b3`, 8b.1 `e8e904c`, Wallet-Lock-Fix `6ec4483`/`218710b`; **8b.2–15 `46be33c`; 16–29 `d234913`; 30–32 im Arbeitsbaum umgesetzt, gestaged und offline endqualifiziert** (Ergebnisse unten; eine unabhängige Abnahme ist damit nicht behauptet). Die Strukturreform ist kein Wirtschaftlichkeits-, FE- oder LIVE-Nachweis.
 **Aktueller Wiederaufnahme-Handoff:** [../operations/restructure_handoff.md](../operations/restructure_handoff.md).
 
 ## Ziel und Abgrenzung
@@ -29,25 +29,25 @@ Die Reihenfolge ist absichtlich kleinteilig: jeweils Inventur, genau ein Migrati
 | 13 | C: Python/Tests | `tests/python/` | **UMGESETZT** `46be33c` |
 | 14 | C | `tests/integration/` | **UMGESETZT** `46be33c` |
 | 15 | C | `tests/regression/` und `tests/fixtures/` | **UMGESETZT** `46be33c` |
-| 16 | C | Python-CLI-Komponenten unter `operations/cli/` | **UMGESETZT (Arbeitsbaum)** |
-| 17 | C | Capture-Programme unter `operations/capture/` | **UMGESETZT (Arbeitsbaum)** |
-| 18 | C | Verifikationsprogramme unter `operations/verification/` | **UMGESETZT (Arbeitsbaum)** |
-| 19 | C | Reporting unter `operations/reporting/` | **UMGESETZT (Arbeitsbaum)** |
-| 20 | C | Qualification/Preflight unter `operations/qualification/` | **UMGESETZT (Arbeitsbaum)** |
-| 21 | D: Shell/CLI | `scripts/capture.sh`, Kompatibilität zu bisherigen Aufrufen | **UMGESETZT (Arbeitsbaum)** |
-| 22 | D | `scripts/smoke.sh` | **UMGESETZT (Arbeitsbaum)** |
-| 23 | D | `scripts/verify.sh` | **UMGESETZT (Arbeitsbaum)** |
-| 24 | D | `scripts/report.sh` | **UMGESETZT (Arbeitsbaum)** |
-| 25 | D | `scripts/preflight.sh` | **UMGESETZT (Arbeitsbaum)** |
-| 26 | E: Rust | `native/crates/darkbot-common/` → `native/crates/common/` | **UMGESETZT (Arbeitsbaum)** |
-| 27 | E | `native/crates/darkbot-solana/` → `native/crates/solana/` | **UMGESETZT (Arbeitsbaum)** |
-| 28 | E | `native/crates/darkbot-project0/` → `native/crates/liquidation/` | **UMGESETZT (Arbeitsbaum)** |
-| 29 | E | `native/crates/darkbot-runner/` → `native/crates/runtime/`; große Module kontrolliert teilen | **UMGESETZT (Arbeitsbaum)** |
-| 30 | F: Abschluss | Nach Verbrauchernachweis ungenutzte Dateien/Ordner bereinigen | OPEN |
-| 31 | F | Alle README-/Navigations-/Kompatibilitätsverweise finalisieren | OPEN |
-| 32 | F | Gesamte Offline-/CLI-/Build-/Replay-Endqualifikation | OPEN |
+| 16 | C | Python-CLI-Komponenten unter `operations/cli/` | **UMGESETZT** `d234913` |
+| 17 | C | Capture-Programme unter `operations/capture/` | **UMGESETZT** `d234913` |
+| 18 | C | Verifikationsprogramme unter `operations/verification/` | **UMGESETZT** `d234913` |
+| 19 | C | Reporting unter `operations/reporting/` | **UMGESETZT** `d234913` |
+| 20 | C | Qualification/Preflight unter `operations/qualification/` | **UMGESETZT** `d234913` |
+| 21 | D: Shell/CLI | `scripts/capture.sh`, Kompatibilität zu bisherigen Aufrufen | **UMGESETZT** `d234913` |
+| 22 | D | `scripts/smoke.sh` | **UMGESETZT** `d234913` |
+| 23 | D | `scripts/verify.sh` | **UMGESETZT** `d234913` |
+| 24 | D | `scripts/report.sh` | **UMGESETZT** `d234913` |
+| 25 | D | `scripts/preflight.sh` | **UMGESETZT** `d234913` |
+| 26 | E: Rust | `native/crates/darkbot-common/` → `native/crates/common/` | **UMGESETZT** `d234913` |
+| 27 | E | `native/crates/darkbot-solana/` → `native/crates/solana/` | **UMGESETZT** `d234913` |
+| 28 | E | `native/crates/darkbot-project0/` → `native/crates/liquidation/` | **UMGESETZT** `d234913` |
+| 29 | E | `native/crates/darkbot-runner/` → `native/crates/runtime/`; große Module kontrolliert teilen | **UMGESETZT** `d234913` |
+| 30 | F: Abschluss | Nach Verbrauchernachweis ungenutzte Dateien/Ordner bereinigen | **UMGESETZT (Arbeitsbaum)**: Altlasten nach `delete/` |
+| 31 | F | Alle README-/Navigations-/Kompatibilitätsverweise finalisieren | **UMGESETZT (Arbeitsbaum)** |
+| 32 | F | Gesamte Offline-/CLI-/Build-/Replay-Endqualifikation | **PASS (Arbeitsbaum, offline)** |
 
-**Phasenbilanz:** A **7/7 DONE**; B **5/5** (`46be33c`); C **8/8** (13–15 `46be33c`, 16–20 Arbeitsbaum); D **5/5** (Arbeitsbaum); E **4/4** (Arbeitsbaum); F **0/3**.
+**Phasenbilanz:** A **7/7**; B **5/5** (`46be33c`); C **8/8** (13–15 `46be33c`, 16–20 `d234913`); D **5/5** (`d234913`); E **4/4** (`d234913`); F **3/3** (Arbeitsbaum, gestaged).
 
 ## Iteration 8 – Unteriterationen und nachgewiesener Stand (2026-10-15)
 
@@ -69,12 +69,24 @@ Die Reihenfolge ist absichtlich kleinteilig: jeweils Inventur, genau ein Migrati
 
 **Aktuelle fachliche Grenzen:** Neue econ4h-Runs entstehen in `data/runs/<id>` (Layout V2); historische Runs bleiben unverändert am alten Ort und lesbar. Neue Verifikationen erhalten neue, versionierte Spec-/Checkpoint-/Dataset-IDs; alte bleiben über ihre Digests prüfbar, ein Resume alter Versuche verlangt die archivierte Implementierung. Echte V2-Captures wurden **nicht** ausgeführt (keine Mainnet-Freigabe); V2 ist über Rust-Unit-Tests der Schreiber und synthetische Launcher-/Reader-End-to-End-Tests qualifiziert. Das Lock garantiert Cross-Root-Serialisierung nur auf dem lokalen unterstützten Dateisystem. Keine Mainnet-/LIVE-/Wirtschaftlichkeitsfreigabe.
 
-**Iterationen 16–29 (Arbeitsbaum, gezielt geprüft):**
+**Iterationen 16–29 (gepusht in `d234913`):**
 - **16–20** Python-Paket `operations/` (`cli/`, `capture/`, `verification/`, `reporting/`, `qualification/`) mit Paket-Imports; alle Module laufen als Datei, als Modul (`python3 -m operations...`) und über die alten `scripts/<modul>.py`-Aufrufe (dünne Weiterleitungen über `scripts/_compat.py`).
 - **21–25** Shell-Einstiegspunkte `scripts/capture.sh` (econ4h, econ4h-launcher, market, shadow; gemeinsamer Env- und Signer-Gate statt zweier identischer Kopien), `smoke.sh`, `verify.sh`, `report.sh`, `preflight.sh`; alte Namen leiten unverändert weiter.
 - **26–29** Crate-Ordner `common/`, `solana/`, `liquidation/`, `runtime/` (Cargo-Paketnamen unverändert); Tests aus `market_observer.rs` und `main.rs` in eigene Dateien, Shadow-Hilfsfunktionen aus `main.rs` in `runtime/src/longtail/{accounts,candidates}.rs`. Der 3 260-Zeilen-Rumpf `run_shadow` bleibt unverändert (keine Ausführungsänderung ohne Gesamtqualifikation).
 
-**Hinweise für 30–32:** Kompatibilitäts-Weiterleitungen in `scripts/` (alte Shell-Namen, `*.py`-Weiterleitungen, `test_suite.py`) per Verbrauchernachweis prüfen; `run_layout.rs` und `run_store.ARTIFACTS` müssen identisch bleiben (Tests pinnen beide); gepinnte Dateien (`run_store.py`, `measurement_contract.py`, `audit_market_quick.py`, `market_report.py`) erzeugen bei jeder Änderung neue Verifikationsidentitäten; Python-Leser erwarten Release-Binaries unter `native/target/release/`; der Binärbau ohne Feature `crate_health` schlug schon vor der Reform fehl (`bank_filters` u. a.), alle Launcher bauen mit `crate_health`; `cargo fmt --check` über den Workspace scheitert an Alt-Hunks (u. a. strict-gepinntes `market_truth.rs`).
+**Iterationen 30–32 (Arbeitsbaum, gestaged):**
+- **30 Altlasten:** nach [`delete/`](../../delete/README.md) verschoben (wiederherstellbar, nie ausgeführt): Shell-Weiterleitungen `run_econ4h.sh`, `run_market_observer.sh`, `run_shadow_mainnet.sh`, `run_gap_reconnect_smoke.sh`, `fe_readonly_preflight.sh`; zehn `scripts/<modul>.py`-Weiterleitungen mit `_compat.py`; `scripts/test_suite.py`; das unbenutzte Paketgerüst `src/darkbot/` und der leere Platzhalter `tools/`. Zusammengeführt: doppelte Anzeige-Defaults in `runtime_config.rs::json()` kommen jetzt aus `RuntimeConfig::default()` (Ausgabe aller vier Profile byte-identisch). Beibehalten mit Grund: `scripts/test.sh` (PHASENPLAN-CLI), `docs/OPERATIONAL_CONFIG.md` (von `PHASENPLAN.json` referenziert), tote Funktionen in den strict-gepinnten `market_gap.rs`/`market_reconcile.rs` und das davon gebundene `RpcFetcher::get_transaction` (Änderung würde Strict-Pins brechen), `p0-prewarm-atas` (FIX-104), `p0-probe-costs` (FIX-129), `p0-probe-v1` (V1-Wire-Probe-Evidence), `run_r126/r127_qualify.py` (Ledger-Qualifikationen), der 3 260-Zeilen-Rumpf `run_shadow` (keine fachliche Teilung ohne Verhaltensrisiko).
+- **31 Referenzen:** keine defekten relativen Markdown-Links (29 Dateien), keine alten Crate-Pfade oder entfernten Programmnamen in aktivem Code/aktiver Dokumentation, alle 17 `operations`-Module importierbar, alle Einstiegspunkte aus fremdem Arbeitsverzeichnis lauffähig, `scripts/` enthält genau `capture.sh`, `smoke.sh`, `verify.sh`, `report.sh`, `preflight.sh`, `test.sh` (durch Test gesichert).
+- **32 Endqualifikation (je einmal, offline):** Python 102 PASS / 0 SKIP, `verify.sh --self-test` 29 PASS, Rust `crate_health` 382 PASS / 1 ignored, `crate_health,txv1` 384 PASS / 1 ignored, beide Release-Builds PASS, `cargo metadata --locked` PASS, Differential-Clippy 38→38, alle 14 inhaltlich geänderten Rust-Dateien rustfmt-sauber (nur `main.rs` mit 4 Alt-Hunks wie zuvor).
+
+**Abschlussprüfung vor der Runtime-Modularisierung (Arbeitsbaum, 2026-10-15):** behoben und durch Tests belegt: `capture.sh shadow`
+lief nur aus dem Repository-Wurzelverzeichnis (relatives Cargo-Manifest und relative Default-Ausgaben, seit vor der Reform) — jetzt
+`cd` ins Repository, absolute Defaults, LIVE/Submission-Sperre wie econ4h; pfadwertige Einstellungen (Keypair, Config-Datei,
+Ausgabepfade, `CARGO_TARGET_DIR`) werden vor jedem `cd` gegen das Aufruferverzeichnis aufgelöst, sodass Signer-Prüfung und
+Runtime dieselbe Datei sehen; `smoke.sh` ohne `cd`-Abhängigkeit; `p0-longtail` deklariert `required-features = ["crate_health"]`.
+Plan der Modularisierung: [runtime_modularization_plan.md](runtime_modularization_plan.md).
+
+**Bekannte Restpunkte (nicht Teil der Strukturreform):** `cargo fmt --check` über den Workspace scheitert an Alt-Hunks unveränderter Dateien (u. a. strict-gepinntes `market_truth.rs`); `p0-longtail` erfordert das Feature `crate_health` (seit FIX-78/79c, jetzt als Cargo-`required-features` festgelegt; der Workspace baut ohne Feature); Python-Leser erwarten Release-Binaries unter `native/target/release/`; `delete/` nach Prüfung endgültig entfernen.
 
 ## Geplanter Zielbaum (nicht mit dem Ist-Zustand verwechseln)
 

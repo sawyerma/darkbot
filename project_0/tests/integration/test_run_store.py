@@ -141,8 +141,9 @@ class Launchers(unittest.TestCase):
         return {**clean_env(),'P0_ENV_FILE':str(tmp/'absent.env'),'P0_RPC_URL':'http://127.0.0.1:1','P0_WS_URL':'ws://127.0.0.1:1',
                 'P0_KEYPAIR_PATH':str(key),'P0_MAX_SLIPPAGE_BPS':'50','P0_MARKET_WS_URL':'ws://127.0.0.1:1'}
 
-    def run_script(self,name,env):
-        return subprocess.run(['bash',str(SCRIPTS/name)],env=env,capture_output=True,text=True,timeout=30,cwd=tempfile.gettempdir())
+    def run_script(self,command,env):
+        name,*args=command.split()
+        return subprocess.run(['bash',str(SCRIPTS/name),*args],env=env,capture_output=True,text=True,timeout=30,cwd=tempfile.gettempdir())
 
     def test_econ_launcher_fails_closed_before_build(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -152,89 +153,107 @@ class Launchers(unittest.TestCase):
                    ({'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'../escape'},'RUN_ID_INVALID')]
             for extra,code in cases:
                 with self.subTest(code=code):
-                    p=self.run_script('run_econ4h.sh',{**env,**extra})
+                    p=self.run_script('capture.sh econ4h-launcher',{**env,**extra})
                     self.assertEqual(p.returncode,2,p.stderr);self.assertIn(code,p.stderr);self.assertNotIn('C0-E1: build',p.stdout)
             self.assertFalse(out.exists());self.assertFalse((tmp/'escape').exists())
             (out/'taken').mkdir(parents=True);(out/'taken/keep.json').write_text('{}')
-            p=self.run_script('run_econ4h.sh',{**env,'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'taken'})
+            p=self.run_script('capture.sh econ4h-launcher',{**env,'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'taken'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr)
             self.assertEqual(sorted(x.name for x in (out/'taken').iterdir()),['keep.json'])
 
     def test_market_and_gap_launchers_resolve_through_the_same_contract(self):
         with tempfile.TemporaryDirectory() as folder:
             tmp=Path(folder);env=self.environment(tmp);out=tmp/'market'
-            p=self.run_script('run_market_observer.sh',{**env,'P0_RUN_STORE':'runs','P0_MARKET_OUT_DIR':str(out)})
+            p=self.run_script('capture.sh market',{**env,'P0_RUN_STORE':'runs','P0_MARKET_OUT_DIR':str(out)})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ROOT_CONFLICT',p.stderr);self.assertFalse(out.exists())
             (out/'m1').mkdir(parents=True)
-            p=self.run_script('run_market_observer.sh',{**env,'P0_MARKET_OUT_DIR':str(out),'P0_MARKET_RUN_ID':'m1'})
+            p=self.run_script('capture.sh market',{**env,'P0_MARKET_OUT_DIR':str(out),'P0_MARKET_RUN_ID':'m1'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr);self.assertNotIn('Unfiltered Live Market Observer',p.stdout)
-            p=self.run_script('run_gap_reconnect_smoke.sh',{**env,'P0_RUN_STORE':'bogus'})
+            p=self.run_script('smoke.sh',{**env,'P0_RUN_STORE':'bogus'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_STORE_INVALID',p.stderr)
             econ=tmp/'econ';(econ/'g1').mkdir(parents=True);(econ/'g1/keep.json').write_text('{}')
-            p=self.run_script('run_gap_reconnect_smoke.sh',{**env,'P0_ECON_OUT_DIR':str(econ),'P0_ECON_RUN_ID':'g1'})
+            p=self.run_script('smoke.sh',{**env,'P0_ECON_OUT_DIR':str(econ),'P0_ECON_RUN_ID':'g1'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr)
             self.assertNotIn('proxy',p.stdout+p.stderr);self.assertEqual([x.name for x in (econ/'g1').iterdir()],['keep.json'])
 
-    def test_launcher_end_to_end_legacy_and_runs_store_synthetic(self):
-        # Copy of the launcher in a temporary project, so the default roots are temporary too. The fake capture
-        # binary writes the files of run layout P0_RUN_LAYOUT with the literal paths of the Rust writers.
-        plan=REPO/'project_0/native/target/release/p0-measurement-plan'
-        if not plan.exists():self.skipTest('release p0-measurement-plan not built')
+    def real_project(self,tmp,operations=False):
+        """Temporary repository with the real launcher; native/ is the real workspace (symlink) and CARGO_TARGET_DIR the
+        real target, so real cargo reuses the release build. Runs land in this temporary project, never in data/."""
+        release=REPO/'project_0/native/target/release'
+        if not all((release/b).exists() for b in ('p0-longtail','p0-measurement-plan')):self.skipTest('NOT_RUN: release binaries not built')
+        repo=tmp/'repo';project=repo/'project_0';(project/'scripts').mkdir(parents=True);(project/'config').mkdir()
+        for name in ('capture.sh','verify.sh','report.sh'):shutil.copy2(SCRIPTS/name,project/'scripts'/name)
+        shutil.copy2(REPO/'project_0/config/wallet.public.env',project/'config/wallet.public.env')
+        (project/'native').symlink_to(REPO/'project_0/native')
+        if operations:shutil.copytree(p0_paths.OPERATIONS,project/'operations',ignore=shutil.ignore_patterns('__pycache__'))
+        git=['git','-C',str(repo),'-c','user.name=t','-c','user.email=t@invalid','-c','core.hooksPath=/dev/null','-c','commit.gpgsign=false']
+        subprocess.run(git+['init','-q'],check=True);subprocess.run(git+['commit','-q','--allow-empty','-m','fixture'],check=True)
+        return project
+
+    def real_env(self,tmp):
+        # Real cargo and the real p0-longtail; endpoints are closed local ports, so nothing leaves the machine and the
+        # binary fails closed at startup. The key file holds only the public half; the real signer refuses to sign.
+        return {**self.environment(tmp),'CARGO_TARGET_DIR':str(REPO/'project_0/native/target'),'TMPDIR':str(tmp/'tmpdir')}
+
+    def test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2(self):
         with tempfile.TemporaryDirectory() as folder:
-            tmp=Path(folder);project=tmp/'repo/project_0'
-            (project/'scripts').mkdir(parents=True);(project/'config').mkdir()
-            for name in ('capture.sh','run_econ4h.sh'):shutil.copy2(SCRIPTS/name,project/'scripts'/name)
-            shutil.copytree(p0_paths.OPERATIONS,project/'operations',ignore=shutil.ignore_patterns('__pycache__'))
-            shutil.copy2(REPO/'project_0/config/wallet.public.env',project/'config/wallet.public.env')
-            git=['git','-C',str(tmp/'repo'),'-c','user.name=t','-c','user.email=t@invalid','-c','core.hooksPath=/dev/null','-c','commit.gpgsign=false']
-            subprocess.run(git+['init','-q'],check=True);subprocess.run(git+['commit','-q','--allow-empty','-m','fixture'],check=True)
-            target=tmp/'target/release';target.mkdir(parents=True);(target/'p0-measurement-plan').symlink_to(plan.resolve())
-            capture=target/'p0-longtail'
-            capture.write_text('#!/usr/bin/env python3\nimport json,os,pathlib\n'
-                'run=pathlib.Path(os.environ["P0_ECON_OUT_DIR"])/os.environ["P0_ECON_RUN_ID"];v2=os.environ["P0_RUN_LAYOUT"]=="v2"\n'
-                'plan=json.load(open(os.environ["P0_MEASUREMENT_PLAN"]));cap=run/"capture" if v2 else run;snap=run/"snapshots" if v2 else run\n'
-                'm={"schema":"C0-E1/MeasurementManifest/3","layout":"Project0/RunLayout/2"} if v2 else {"schema":"C0-E1/MeasurementManifest/2"}\n'
-                'm.update(run_id=run.name,capture_run_id=run.name,plan=plan)\n'
-                '(run/("manifest.json" if v2 else "measurement_manifest.json")).write_text(json.dumps(m))\n'
-                '(cap/"market").mkdir(parents=True)\n'
-                'for n in ("transactions.jsonl","liquidations.jsonl","coverage.jsonl"):(cap/"market"/n).write_text("")\n'
-                '(cap/"market/summary.json").write_text(json.dumps({"capture_clock_complete":True}))\n'
-                '(cap/"measurement_phases.jsonl").write_text(json.dumps({"phase":"CAPTURE","details":{"capture_start_unix_ns":0,"capture_cutoff_unix_ns":plan["duration_seconds"]*10**9}})+"\\n")\n'
-                'for k in ("P0_RECORD_PATH","P0_SUMMARY_PATH","P0_MT0_PATH"):pathlib.Path(os.environ[k]).write_text("")\n'
-                'for n in ("hour_01.json","hour_02.json","hour_03.json","hour_04.json","economics_final.json"):(snap/n).write_text("{}")\n'
-                'print(os.environ["P0_ECON_OUT_DIR"]+"|"+run.name)\n')
-            capture.chmod(0o700)
-            mock=tmp/'mock';mock.mkdir();(mock/'cargo').write_text('#!/usr/bin/env bash\nexit 0\n');(mock/'cargo').chmod(0o700)
-            (mock/'sitecustomize.py').write_text('import shutil\nshutil.disk_usage = lambda path: (type("Disk", (), {"free": 2**50}))()\n')
-            staging=tmp/'tmpdir';staging.mkdir()
-            env={**self.environment(tmp),'CARGO_TARGET_DIR':str(target.parent),'PATH':str(mock)+os.pathsep+os.environ['PATH'],'PYTHONPATH':str(mock),'TMPDIR':str(staging)}
-            launch=lambda extra:subprocess.run(['bash',str(project/'scripts/run_econ4h.sh'),'--duration','61s'],env={**env,**extra},
-                                               capture_output=True,text=True,timeout=30,cwd=tmp)
+            tmp=Path(folder);project=self.real_project(tmp,operations=True);(tmp/'tmpdir').mkdir()
+            if shutil.disk_usage(tmp).free<8*2**30:self.skipTest('NOT_RUN: launcher storage preflight needs 8 GiB free')
+            env=self.real_env(tmp)
+            launch=lambda extra:subprocess.run(['bash',str(project/'scripts/capture.sh'),'econ4h-launcher','--duration','61s'],env={**env,**extra},
+                                               capture_output=True,text=True,timeout=600,cwd=tmp)
             for store,run_id,root,layout in (({'P0_RUN_STORE':'legacy'},'old_run','data/econ4h','v1'),({},'new_run','data/runs','v2')):
                 with self.subTest(layout=layout):
                     p=launch({**store,'P0_ECON_RUN_ID':run_id})
-                    self.assertEqual(p.returncode,0,p.stderr)
+                    self.assertEqual(p.returncode,2,p.stderr[-2000:])  # no network: the real binary fails closed at startup
                     run=project/root/run_id
-                    self.assertIn(f'{run.parent}|{run_id}',p.stdout)
                     self.assertEqual(s.detect_layout(run),layout);self.assertEqual(a.find_run(str(run)),run.resolve())
-                    manifest=json.loads(s.artifact(run,'manifest').read_text())
+                    manifest=json.loads(s.artifact(run,'manifest').read_text())  # written by the real Rust runtime
                     self.assertEqual(manifest['plan'],s.config_part(run,'measurement_plan'))
+                    self.assertEqual((manifest['capture_run_id'],manifest['live_enabled'],manifest['submission_enabled']),(run_id,False,False))
+                    self.assertEqual(manifest['schema'],'C0-E1/MeasurementManifest/3' if layout=='v2' else 'C0-E1/MeasurementManifest/2')
+                    phases=[json.loads(x)['phase'] for x in s.artifact(run,'phases').read_text().splitlines()]
+                    self.assertEqual(phases[0],'BOOTSTRAP')
                     for part in ('storage_preflight','candidate_manifest'):self.assertIsInstance(s.config_part(run,part),dict)
-                    for name in ('build_log','console_summary','runtime_log','opportunities','daily_summary','mt0','phases','economics_final'):
+                    for name in ('build_log','console_summary','runtime_log','shadow_evaluations','shadow_offsets'):
                         self.assertTrue(s.artifact(run,name).is_file(),name)
-                    self.assertEqual(c.finalize_capture(run)['capture_run_id'],run_id)
+                    self.assertIn('C0_E1_WARMUP_FAILED',s.artifact(run,'runtime_log').read_text())
+                    self.assertEqual(c.capture_identity(run)['capture_run_id'],run_id)
+                    p=subprocess.run(['bash',str(project/'scripts/verify.sh'),'--run',run_id,'--offline','--mode','off'],
+                                     env={**clean_env(),'P0_ENV_FILE':str(tmp/'absent.env')},capture_output=True,text=True,timeout=120,cwd=tmp)
+                    self.assertEqual(p.returncode,2);self.assertIn('CAPTURE_NOT_FINALIZED',p.stderr)  # real reader, incomplete capture
             new=project/'data/runs/new_run'
-            self.assertEqual(sorted(x.name for x in new.iterdir()),['capture','config.json','logs','manifest.json','snapshots','verification'])
+            self.assertTrue(set(x.name for x in new.iterdir())<=set(s.V2_ROOT))
             self.assertEqual(json.loads((new/'config.json').read_text())['schema'],s.RUN_CONFIG_SCHEMA)
-            self.assertEqual(list(staging.iterdir()),[])  # staging directory removed on exit
+            self.assertFalse(list((tmp/'tmpdir').glob('p0-run-config.*')))  # staging directory removed on exit
             self.assertFalse(any((project/'data/econ4h/old_run'/n).exists() for n in s.V2_ONLY))
             p=launch({'P0_RUN_STORE':'runs','P0_ECON_RUN_ID':'old_run'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr)
             self.assertFalse((project/'data/runs/old_run').exists())
 
+    def test_shadow_runs_the_real_binary_from_any_directory(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tmp=Path(folder);project=self.real_project(tmp);caller=tmp/'caller';caller.mkdir();(tmp/'tmpdir').mkdir()
+            env=self.real_env(tmp);shutil.copy2(env['P0_KEYPAIR_PATH'],caller/'key.json');(caller/'key.json').chmod(0o600)
+            env['P0_KEYPAIR_PATH']='key.json'  # relative to the caller: the signer gate and the runtime must use this same file
+            run=lambda extra:subprocess.run(['bash',str(project/'scripts/capture.sh'),'shadow'],env={**env,**extra},capture_output=True,text=True,timeout=600,cwd=caller)
+            p=run({'P0_RECORD_PATH':'out/opps.jsonl','P0_SUMMARY_PATH':'out/sum.jsonl','P0_MT0_PATH':'out/mt0.jsonl'})
+            out=p.stdout+p.stderr
+            self.assertEqual(p.returncode,2,out[-2000:]);self.assertIn('p0-longtail: ',p.stderr)  # real binary started from the repository
+            self.assertNotIn('could not find `Cargo.toml`',out);self.assertNotIn('missing required env',out)
+            record=Path(next(l.split('record=',1)[1] for l in p.stdout.splitlines() if 'record=' in l))
+            self.assertEqual(record.resolve(),(caller/'out/opps.jsonl').resolve());self.assertTrue((caller/'out').is_dir())
+            p=run({});self.assertEqual(p.returncode,2);self.assertIn('p0-longtail: ',p.stderr)
+            self.assertTrue((project/'data/shadow').is_dir())  # absolute default under the (temporary) project
+            self.assertEqual(sorted(x.name for x in caller.iterdir()),['key.json','out'])
+            for extra in ({'P0_LIVE_ENABLED':'true'},{'P0_SUBMISSION_ENABLED':'1'}):
+                p=run(extra);self.assertEqual(p.returncode,2);self.assertIn('shadow requires LIVE and submission disabled',p.stderr)
+                self.assertNotIn('p0-longtail: ',p.stderr)  # refused before cargo and the binary
+
     def test_changed_launchers_parse(self):
-        for name in ('capture.sh','smoke.sh','preflight.sh','verify.sh','report.sh','test.sh','run_econ4h.sh','run_market_observer.sh',
-                     'run_shadow_mainnet.sh','run_gap_reconnect_smoke.sh','fe_readonly_preflight.sh'):
+        self.assertEqual(sorted(p.name for p in SCRIPTS.iterdir() if p.is_file()),
+                         ['capture.sh','preflight.sh','report.sh','smoke.sh','test.sh','verify.sh'])
+        for name in ('capture.sh','smoke.sh','preflight.sh','verify.sh','report.sh','test.sh'):
             self.assertEqual(subprocess.run(['bash','-n',str(SCRIPTS/name)]).returncode,0,name)
 
 
@@ -298,15 +317,11 @@ class Locate(unittest.TestCase):
 
 class ReaderCli(unittest.TestCase):
     """verify.sh / report.sh with byte-identical copies of the pinned readers in a temporary project."""
-    def project(self,tmp,fake=False):
+    def project(self,tmp):
         project=tmp/'project_0';scripts=project/'scripts';scripts.mkdir(parents=True)
         for name in ('verify.sh','report.sh'):shutil.copy2(SCRIPTS/name,scripts/name)
         shutil.copytree(p0_paths.OPERATIONS,project/'operations',ignore=shutil.ignore_patterns('__pycache__'))
-        if fake:
-            for name in ('verification/measurement_verify.py','reporting/market_report.py','verification/audit_market_quick.py'):
-                (project/'operations'/name).write_text('import json,sys\nprint(json.dumps(sys.argv[1:]))\n')
-        else:
-            (project/'native').symlink_to(REPO/'project_0/native')
+        (project/'native').symlink_to(REPO/'project_0/native')
         return project
 
     def call(self,project,script,*args):
@@ -314,18 +329,21 @@ class ReaderCli(unittest.TestCase):
         return subprocess.run(['bash',str(project/'scripts'/script),*args],env=env,capture_output=True,text=True,timeout=120,cwd=tempfile.gettempdir())
 
     def test_wrappers_hand_located_directories_to_the_readers(self):
+        # Real verify.sh/report.sh and real readers on complete synthetic runs (deterministic local inputs).
         with tempfile.TemporaryDirectory() as folder:
-            project=self.project(Path(folder),fake=True);run=legacy_run(project/'data/runs','r1').resolve()
-            legacy_run(project/'data/econ4h','e1')
+            project=self.project(Path(folder))
+            r1=manifest_run(project/'data/runs','r1','v1','r1').resolve();e1=manifest_run(project/'data/econ4h','e1','v1','e1').resolve()
             p=self.call(project,'report.sh','--run','r1','--format','json')
-            self.assertEqual((p.returncode,json.loads(p.stdout)),(0,['--run',str(run),'--format','json']))
-            p=self.call(project,'verify.sh','--run=e1','--offline')
-            self.assertEqual(json.loads(p.stdout),['--run='+str((project/'data/econ4h/e1').resolve()),'--offline'])
-            p=self.call(project,'verify.sh','--self-test')
-            self.assertEqual(json.loads(p.stdout),['--self-test'])
-            legacy_run(project/'data/market','r1')
+            self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(len(json.loads(p.stdout)),1)
+            self.assertTrue(json.loads(p.stderr.strip().splitlines()[-1])['dataset'].startswith(str(r1/'reports')))
+            p=self.call(project,'verify.sh','--run=e1','--offline','--mode','off')
+            self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(json.loads(p.stdout)['capture_run_id'],'e1')
+            self.assertTrue((e1/'verification').is_dir());self.assertFalse((r1/'verification').exists())
+            manifest_run(project/'data/market','r1','v1','r1')
             p=self.call(project,'report.sh','--run','r1')
             self.assertEqual(p.returncode,2);self.assertIn('RUN_NOT_FOUND_OR_AMBIGUOUS',p.stderr);self.assertEqual(p.stdout,'')
+        p=subprocess.run(['bash',str(SCRIPTS/'verify.sh'),'--self-test'],env=clean_env(),capture_output=True,text=True,timeout=300,cwd=tempfile.gettempdir())
+        self.assertEqual(p.returncode,0,p.stderr[-2000:]);self.assertIn('Ran 29 tests',p.stderr)
 
     def test_verify_resume_and_report_by_id_keep_identities(self):
         with tempfile.TemporaryDirectory() as folder:

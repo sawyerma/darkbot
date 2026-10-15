@@ -2,20 +2,6 @@
 //! structure iteration 29). Private to the p0-longtail binary.
 use super::*;
 
-#[cfg(not(feature = "crate_health"))]
-pub(crate) struct NoPlans;
-#[cfg(not(feature = "crate_health"))]
-impl ReceivershipBuilder for NoPlans {
-    fn plans(
-        &self,
-        _: &solana_sdk::pubkey::Pubkey,
-        _: u64,
-        _: u64,
-    ) -> Result<Vec<ReceivershipPlan>, String> {
-        Err("unavailable: crate_health disabled".into())
-    }
-}
-
 #[cfg(feature = "crate_health")]
 pub(crate) fn bank_from_state<S: AccountSource + ?Sized>(
     state: &S,

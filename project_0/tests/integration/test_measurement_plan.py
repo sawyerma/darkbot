@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Offline P1 CLI/launcher regression. Uses a dummy signer and a fake capture binary.
-Run AFTER building release p0-measurement-plan; never contacts RPC or starts Shadow.
+"""Offline P1 CLI/launcher regression with the real release binaries, real cargo and the real launcher.
+Run AFTER building release p0-measurement-plan and p0-longtail. Endpoints are closed local ports and the key file holds only
+the public half, so the real capture fails closed at startup; nothing contacts RPC, signs or submits.
 """
 import sys
 from pathlib import Path
@@ -9,6 +10,7 @@ import p0_paths  # shared paths; puts project_0 on sys.path
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -55,30 +57,14 @@ class MeasurementCli(unittest.TestCase):
             self.assertEqual(p.returncode, expected)
 
     def test_launcher_uses_persisted_plan_and_no_total_capture_timebox(self):
+        release = ROOT / 'project_0/native/target/release'
+        if not all((release / b).exists() for b in ('p0-longtail', 'p0-measurement-plan')):
+            self.skipTest('NOT_RUN: release binaries not built')
         with tempfile.TemporaryDirectory(prefix='p0-p1-launcher-') as folder:
             tmp = Path(folder)
-            target = tmp / 'target/release'
-            target.mkdir(parents=True)
-            (target / 'p0-measurement-plan').symlink_to(PLAN.resolve())
-            capture = target / 'p0-longtail'
-            capture.write_text('#!/usr/bin/env bash\nset -eu\n'
-                               'cp "$P0_MEASUREMENT_PLAN" "$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID/consumed_plan.json"\n'
-                               'python3 - "$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID" "$P0_ECON_DURATION_SECS" <<\'MOCK\'\n'
-                               'import json,sys,pathlib,datetime\n'
-                               'r=pathlib.Path(sys.argv[1]); (r/"market").mkdir()\n'
-                               'n=int(sys.argv[2]); end=datetime.datetime.fromtimestamp(100+n,datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")\n'
-                               '(r/"market/summary.json").write_text(json.dumps({"observation_started_at":"1970-01-01T00:01:40Z","observation_ended_at":end,"configured_duration_seconds":n,"capture_clock_complete":True,"live_coverage_status":"LIVE_COVERAGE_COMPLETE"}))\n'
-                               'MOCK\n'
-                               'printf "%s:%s:%s" "$P0_ECON_DURATION_SECS" "$P0_LIVE_ENABLED" "$P0_SUBMISSION_ENABLED"\n')
-            capture.chmod(0o700)
-            mock = tmp / 'mock'
-            mock.mkdir()
-            cargo = mock / 'cargo'
-            cargo.write_text('#!/usr/bin/env bash\nexit 0\n')
-            cargo.chmod(0o700)
-            # Storage preflight is tested with ample mock disk; no data allocation.
-            (mock / 'sitecustomize.py').write_text('import shutil\nshutil.disk_usage = lambda path: (type("Disk", (), {"free": 2**50}))()\n')
-            # Public wallet configuration only. Dummy secret bytes are never used to sign.
+            if shutil.disk_usage(tmp).free < 8 * 2**30:
+                self.skipTest('NOT_RUN: launcher storage preflight needs 8 GiB free')
+            # Public wallet configuration only. The secret half is zero, so the real signer can never sign.
             public = subprocess.check_output(['bash', '-c', 'source "$1"; printf "%s" "$P0_EXPECTED_PUBKEY"', 'test', str(ROOT / 'project_0/config/wallet.public.env')], text=True)
             alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
             n = 0
@@ -90,23 +76,25 @@ class MeasurementCli(unittest.TestCase):
             env = {**clean_env(), 'P0_ENV_FILE': str(tmp / 'absent.env'),
                    'P0_RPC_URL': 'http://127.0.0.1:1', 'P0_WS_URL': 'ws://127.0.0.1:1',
                    'P0_KEYPAIR_PATH': str(key), 'P0_MAX_SLIPPAGE_BPS': '50',
-                   'P0_ECON_OUT_DIR': str(tmp / 'runs'),
-                   'CARGO_TARGET_DIR': str(target.parent), 'PATH': str(mock) + os.pathsep + os.environ['PATH'],
-                   'PYTHONPATH': str(mock)}
+                   'P0_ECON_OUT_DIR': str(tmp / 'runs'), 'CARGO_TARGET_DIR': str(ROOT / 'project_0/native/target')}
             for duration, seconds in [('10m', 600), ('61s', 61)]:
                 p = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', duration], cwd=tmp,
-                                   env={**env, 'P0_ECON_RUN_ID': duration}, capture_output=True, text=True, timeout=20)
-                self.assertEqual(p.returncode, 0, p.stderr)
-                self.assertIn(f'{seconds}:false:false', p.stdout)
+                                   env={**env, 'P0_ECON_RUN_ID': duration}, capture_output=True, text=True, timeout=600)
+                self.assertEqual(p.returncode, 2, p.stderr[-2000:])  # no network: the real capture fails closed at startup
+                self.assertIn(f'Capture: {seconds}s', p.stdout)
                 run = tmp / 'runs' / duration
                 plan = json.loads((run / 'measurement_plan.json').read_text())
-                self.assertEqual(plan, json.loads((run / 'consumed_plan.json').read_text()))
+                manifest = json.loads((run / 'measurement_manifest.json').read_text())  # written by the real p0-longtail
+                self.assertEqual(manifest['plan'], plan)  # the binary consumed exactly the persisted plan
+                self.assertEqual((manifest['live_enabled'], manifest['submission_enabled']), (False, False))
                 self.assertEqual(plan['duration_seconds'], seconds)
                 self.assertEqual(json.loads((run / 'storage_preflight.json').read_text())['duration_seconds'], seconds)
+                self.assertIn('C0_E1_WARMUP_FAILED', (run / 'runtime.log').read_text())
                 self.assertFalse((run / 'quick_timebox_report.json').exists())
-            rejected = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', '10m'], env={**env, 'P0_ECON_RUN_MODE': 'quick'}, capture_output=True)
+            rejected = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', '10m'], cwd=tmp,
+                                      env={**env, 'P0_ECON_RUN_MODE': 'quick', 'P0_ECON_RUN_ID': 'quick'}, capture_output=True, timeout=60)
             self.assertEqual(rejected.returncode, 2)
-
+            self.assertFalse((tmp / 'runs/quick').exists())
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

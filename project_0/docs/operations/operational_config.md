@@ -13,7 +13,7 @@ project_0/native/target/release/p0-longtail --help
 project_0/native/target/release/p0-longtail --profile smoke --print-effective-config
 project_0/native/target/release/p0-longtail --profile custom --rpc-rps 20 --rpc-burst 4 --rpc-concurrency 4 --duration 61s --print-effective-config
 project_0/scripts/capture.sh --profile custom --duration 61s --verify index --verify-rps 6 --print-effective-config
-python3 project_0/scripts/fe_readonly_preflight.py --profile smoke --print-effective-config
+project_0/scripts/preflight.sh --profile smoke --print-effective-config
 ```
 
 Inspection requires neither a signer nor endpoint credentials. The JSON includes

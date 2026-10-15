@@ -566,62 +566,46 @@ impl Resolved {
             }
             d["source"] = json!(self.sources.get(&f));
         }
-        for (name, kind, unit, default, allowed) in [
+        // Defaults come from RuntimeConfig::default(), the single source; only type metadata lives here.
+        for (name, kind, unit, allowed) in [
             (
                 "profile",
                 "enum",
                 "profile",
-                json!("standard"),
                 json!(["smoke", "standard", "performance", "custom"]),
             ),
             (
                 "rpc_endpoints",
                 "array<string>",
                 "priority ordered HTTP URLs",
-                json!([]),
                 json!(["http", "https"]),
             ),
             (
                 "wss_endpoints",
                 "array<string>",
                 "priority ordered WSS URLs",
-                json!([]),
                 json!(["ws", "wss"]),
             ),
-            (
-                "fallback",
-                "bool",
-                "enabled",
-                json!(false),
-                json!([true, false]),
-            ),
-            (
-                "adaptive",
-                "bool",
-                "enabled",
-                json!(true),
-                json!([true, false]),
-            ),
+            ("fallback", "bool", "enabled", json!([true, false])),
+            ("adaptive", "bool", "enabled", json!([true, false])),
             (
                 "duration",
                 "duration",
                 "s/m/h",
-                json!("4h"),
                 json!({"min_seconds":1,"max_seconds":u64::MAX/4/1_000_000_000}),
             ),
         ] {
-            parameters.push(json!({"name":name.replace('_',"-"),"field":name,"type":kind,"unit":unit,"default":default,"allowed":allowed,"active":values[name],"source":self.sources.get(name),"change":"restart_required"}));
+            parameters.push(json!({"name":name.replace('_',"-"),"field":name,"type":kind,"unit":unit,"default":defaults[name],"allowed":allowed,"active":values[name],"source":self.sources.get(name),"change":"restart_required"}));
         }
-        for (name, kind, default, allowed) in [
+        for (name, kind, allowed) in [
             (
                 "verification",
                 "enum",
-                json!("off"),
                 json!(["off", "index", "strict", "crosscheck"]),
             ),
-            ("diagnostics", "bool", json!(false), json!([true, false])),
+            ("diagnostics", "bool", json!([true, false])),
         ] {
-            parameters.push(json!({"name":name,"field":name,"type":kind,"unit":"mode","default":default,"allowed":allowed,"active":values[name],"source":self.sources.get(name).cloned().unwrap_or_else(||"profile".into()),"change":"restart_required"}));
+            parameters.push(json!({"name":name,"field":name,"type":kind,"unit":"mode","default":defaults[name],"allowed":allowed,"active":values[name],"source":self.sources.get(name).cloned().unwrap_or_else(||"profile".into()),"change":"restart_required"}));
         }
         json!({"schema":"Project0/OperationalConfig/1","values":values,"parameters":parameters,"sources":self.sources,"provider_capacity_qualified":false,"free_only":true,"live_authorized":false,"submission_authorized":false})
     }

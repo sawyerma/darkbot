@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Project_0 preflight entry point (structure iteration 25): read-only FE preflight and provider/config inspection.
-# No signer, submission or value transfer. The former fe_readonly_preflight.sh forwards here unchanged.
+# No signer, submission or value transfer. Works from any working directory.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${P0_ENV_FILE:-$DIR/../.env}"

@@ -5,10 +5,11 @@ edition = "2021"
 description = "DarkBot Project 0: protocol glue (P1/P3 via marginfi crate), state engine + indices + schedulers (P2), deterministic economics (P4A), receivership planner (P5), tagger (T)"
 license = "UNLICENSED"
 
-# UNTESTED / VERIFY.
-# `marginfi` (Apache-2.0) wird als Health-Engine eingebunden, sobald P0-01/P1A-01 den
-# deployed Tag bestätigt haben. Bis dahin ist das Feature `crate_health` aus und
-# `health::CrateHealth` ein dokumentierter Stub — keine eigene Health-Formel.
+# Feature `crate_health` bindet `marginfi` (Apache-2.0, Tag mrgn-0.1.11-rc1, Protokoll-Pin 33c67987) als einzige
+# Health-Engine ein (`health::crate_impl::CrateHealth`); keine eigene Health-Formel. kamino-/drift-/juplend-mocks sind
+# trotz des Namens die Integrations-Kontolayouts des marginfi-v2-Programms selbst (Kamino Reserve, Drift SpotMarket/User,
+# JupLend Lending), die für die Bewertung realer Integrationskonten benötigt werden. Ohne das Feature gibt es keine
+# Health-Engine; das Binary p0-longtail verlangt es (`required-features`).
 
 [features]
 default = []
