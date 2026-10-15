@@ -8,24 +8,24 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT"
 
 SECRETS="$ROOT/bsc/secrets.env"
-NATIVE="$ROOT/bsc/native"
+ENGINE="$ROOT/bsc/engine"
 
 die(){ printf 'STOP: %s\n' "$*" >&2; exit 1; }
 
 # Build in the single Cargo workspace (its rust-toolchain.toml applies there),
 # then run the binary from the repository root as `cargo run` did before: the
 # binaries resolve repository-relative contract paths.
-native_run() {
+engine_run() {
   local bin="$1"; shift
-  (cd "$NATIVE" && cargo build --quiet --locked -p darkbot-qualify --bin "$bin") || return 1
-  "$NATIVE/target/debug/$bin" "$@"
+  (cd "$ENGINE" && cargo build --quiet --locked -p darkbot-bsc-qualification --bin "$bin") || return 1
+  "$ENGINE/target/debug/$bin" "$@"
 }
 
 [[ -f "$SECRETS" ]] || die "missing bsc/secrets.env"
 git check-ignore -q bsc/secrets.env || die "bsc/secrets.env is not ignored"
 
 # This probe must remain non-live.
-grep -Fq 'pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";'   bsc/native/crates/runtime/src/acceptance_guard.rs || die "live guard is armed"
+grep -Fq 'pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";'   bsc/engine/crates/execution/src/acceptance_guard.rs || die "live guard is armed"
 
 set -a
 # shellcheck disable=SC1090
@@ -66,7 +66,7 @@ printf '\nBUY_VALUE_WEI | EXPECTED_OUTPUT | MIN_OUTPUT | LOCAL_QUOTE\n'
 for v in "${BUY_VALUES[@]}"; do
   export DARKBOT_G06A_BUY_VALUE_WEI="$v"
   q="$TMP/q_$v.json"
-  if native_run g06a_native_bnb_quote "$PREFLIGHT" > "$q" 2>"$TMP/q_$v.err"; then
+  if engine_run g06a_native_bnb_quote "$PREFLIGHT" > "$q" 2>"$TMP/q_$v.err"; then
     python3 - "$q" <<'PY'
 import json,sys
 v=json.load(open(sys.argv[1]))

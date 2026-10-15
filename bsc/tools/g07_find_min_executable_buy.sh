@@ -30,7 +30,7 @@ DARKBOT_G06A_GAS_PRICE_WEI="$(node -e '(async()=>{const fs=require("fs");const p
 export DARKBOT_G06A_GAS_PRICE_WEI
 
 grep -Fq 'pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";' \
-  bsc/native/crates/runtime/src/acceptance_guard.rs || {
+  bsc/engine/crates/execution/src/acceptance_guard.rs || {
     echo "STOP: guard is not UNARMED" >&2
     exit 1
   }

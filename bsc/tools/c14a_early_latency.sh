@@ -3,15 +3,15 @@ set -euo pipefail
 
 PIN="cdb7548b5baacfdae92f9f63437d6456411665f3"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-NATIVE="$ROOT/bsc/native"
+ENGINE="$ROOT/bsc/engine"
 SOURCE_GETH="$ROOT/bsc/vendor/bsc-geth"
-EVIDENCE="$NATIVE/evidence/c1"
+EVIDENCE="$ROOT/bsc/native/evidence/c1"
 DATE="$(date +%Y%m%d)"
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/darkbot-c14a.XXXXXX")"
 GETH="$RUN_DIR/bsc-geth"
 DATA="$RUN_DIR/run"
 GO_BIN="$RUN_DIR/c14a-go.test"
-RUST_BIN="$NATIVE/target/release/examples/c14a_consumer"
+RUST_BIN="$ENGINE/target/release/examples/c14a_consumer"
 GO_LOG="$EVIDENCE/c1-4a-early-latency-$DATE-go.log"
 RUST_LOG="$EVIDENCE/c1-4a-early-latency-$DATE-rust.log"
 RAW="$EVIDENCE/c1-4a-early-latency-$DATE.csv"
@@ -259,7 +259,7 @@ echo "=== C1.4a BUILD GO MEASUREMENT BINARY ==="
 (cd "$GETH" && go test -c -o "$GO_BIN" ./darkbot/fastlane)
 
 echo "=== C1.4a BUILD RUST RELEASE CONSUMER ==="
-(cd "$NATIVE" && cargo build -p darkbot-fastlane --release --example c14a_consumer --locked --offline)
+(cd "$ENGINE" && cargo build -p darkbot-bsc-geth-ipc --release --example c14a_consumer --locked --offline)
 
 echo "=== C1.4a START GO PRODUCERS ==="
 "$GO_BIN" -test.run '^TestC14AEarlyLatencyProducer$' -test.count=1 -test.v >"$GO_LOG" 2>&1 &

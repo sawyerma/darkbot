@@ -6,6 +6,8 @@ Ausgangscommit aller Umzüge: `7f3c08b` (HEAD vor R1). Jede Datei ist im Git-Ver
 
 ## 1. Umzugstabelle (Originalpfad → heutiger Ort)
 
+Die Spalte „Heutiger Ort“ gibt den Stand nach R8 (`c8362c6`) wieder. Die anschließende Umbenennung R9–R13 bildet §5 ab; z. B. `bsc/native/crates/runtime/…` liegt heute unter `bsc/engine/crates/execution/…`.
+
 | Originalpfad (bei `7f3c08b`) | Klasse | Heutiger Ort | Bindung / Prüfung |
 |---|---|---|---|
 | `bsc/gates/gate0/evidence/g01_mainnet_acceptance_proposal_v2.json` | ACTIVE | `bsc/config/g01_mainnet_acceptance_proposal_v2.json` | bytegleich, SHA-256 `026b534f4a2e6e76b6eb816a8de84ef71b508aa28b6e24c5c471e9ee6f0b19ff`; `V2_RELATIVE_PATH` umgestellt; Tests `runtime/tests/acceptance_guard.rs` |
@@ -76,3 +78,40 @@ Lokal, nicht versioniert (Sicherung unter `bsc/.local/backup/`):
 Nicht ausgeführt (benötigen Secrets und/oder Mainnet-RPC, daher **nicht** PASS): voller G0.6a-DRY-Lauf, EVM-Crosscheck gegen RPC-State, `g07_pre_live_readiness.sh`, G0.7-Ausführung, G0.8 gegen echte Blöcke.
 
 Bekannt und unverändert: Compiler-Warnung `last_block` in `qualify/src/bin/g08_mainnet_verify.rs` (aus Gate-0 übernommen); Masterplan-Link auf `production-plan-reference/debug_test.log` war schon vor R1 unauflösbar (Datei nie versioniert).
+
+## 5. R9–R13: Umbenennung und Modulgrenzen (Ausgangscommit `c8362c6`)
+
+Reine Struktur- und Namensänderung; keine Änderung an Wire-/Signier-/BUY-Bytes, Offsets, Memory-Order, Guards oder Admission. Historische Dokumente und Evidence nennen weiterhin die alten Namen.
+
+| Vorher (`c8362c6`) | Nachher | Prüfung |
+|---|---|---|
+| `bsc/native/{Cargo.toml,Cargo.lock,rust-toolchain.toml,.gitignore,crates/}` | `bsc/engine/…` | `cargo metadata --locked`; Lock: nur die 6 Mitgliedsnamen geändert, keine externe Abhängigkeit |
+| `bsc/native/geth/` | `bsc/geth/` | Pin-Datei ohne Pfade; Overlay-Pfad in `tools/c1_apply_geth_overlay.py`, `c14a_analyze.py`, `c19_analyze.py`, Interop-Skripten |
+| `bsc/native/evidence/` | **unverändert** | `Q5A_TLS_EVIDENCE_PATH` + SHA-256 (Generation 1) einkompiliert; Umzug wäre Q5A-Neuqualifikation (Konflikt nach README §8.3 gemeldet, nicht verdeckt) |
+| `crates/core` (`darkbot-core`) | `crates/trading` (`darkbot-bsc-trading`) | Imports `darkbot_core` → `darkbot_bsc_trading`; Features `test-support`, `runner-startup` unverändert |
+| `crates/wire` (`darkbot-wire`) | `crates/tx_encoding` (`darkbot-bsc-tx-encoding`) | — |
+| `crates/fastlane` (`darkbot-fastlane`) | `crates/geth_ipc` (`darkbot-bsc-geth-ipc`) | — |
+| `crates/runtime` (`darkbot-runner`) | `crates/execution` (`darkbot-bsc-execution`) | Features `acceptance-guard`, `g07-mainnet` unverändert; `TLS_TRANSPORT_IMPLEMENTATION` (Q5A-Identität) unverändert |
+| `crates/capture` (`darkbot-capture`) | `crates/journal` (`darkbot-bsc-journal`) | — |
+| `crates/qualify` (`darkbot-qualify`) | `crates/qualification` (`darkbot-bsc-qualification`) | `build.rs`-FROZEN-Pfade → `../trading/src`, `../tx_encoding/src`, `../execution/src` |
+| `core/src/inclusion/` | `trading/src/submission_policy/` | Modulpfade crate-genau ersetzt; Fixture-Ordner `fixtures/inclusion/` und `fixture_sha256` unverändert |
+| `runtime/src/inclusion/` | `execution/src/submission/` | dito |
+| `core/src/tx/` | `trading/src/transactions/` | dito |
+| `capture/src/lib.rs` | `journal/src/{lib,format,recorder,replay}.rs` | alle 7 Codeblöcke wörtlich verschoben (Textnachweis); öffentliche API per Re-Export identisch |
+| `fastlane/src/lib.rs` (Wire V1) | `geth_ipc/src/protocol_v1.rs` + Root-Re-Export | Implementierung wörtlich verschoben; Pfade `darkbot_bsc_geth_ipc::Producer` usw. bleiben |
+| `runtime/src/bin/g07_mainnet_self_launch_buy.rs` | `execution/src/bin/g07_mainnet_self_launch_buy/{main,inputs,transactions,chain_reads,builder_submission}.rs` | 7/7 Blöcke wörtlich (einzige Änderung `pub(crate)` an verschobenen Funktionen); Binary-Name und Feature unverändert |
+| `fastlane/src/v2.rs` | **noch `geth_ipc/src/v2.rs`** | Zerlegung nach `protocol_v2/` offen (siehe README §7, Stash-Konflikt, Go-Parität ohne Go nicht prüfbar) |
+| `tools/c1_freeze.py` Freeze-Scope | `bsc/engine`, `bsc/geth`, `bsc/tools`, `bsc/native` | stellt die ursprüngliche Abdeckung „alle Crates, Tools, Overlay, Build-Inputs“ wieder her (seit R7 lagen die Tools außerhalb) |
+
+## 6. Prüfprotokoll R9–R13 (eigenes Budget, max. 10)
+
+| # | Gruppe | Befehl (gekürzt) | Ergebnis |
+|---|---|---|---|
+| — | R9 | keine; Code am HEAD identisch zum R8-Stand (T6 426/0/5, T8 154/0) | — |
+| U1 | R10 | `cargo test --locked --offline --workspace --no-fail-fast --features darkbot-bsc-execution/g07-mainnet --lib --bins --test …` (alle getrackten kompilierbaren Ziele) | 426 PASS, 0 FAIL, 5 ignored |
+| U2 | R10 | `python3 -m unittest test_c1_qualification_tools` | 20/20 PASS |
+| U3 | R11 | wie U1 nach `submission_policy`/`submission`/`transactions`/Journal/Protocol-V1/G0.7-Gliederung | 426 PASS, 0 FAIL, 5 ignored |
+
+Strukturchecks ohne Testlauf: `cargo metadata --locked`, `cargo check --locked --workspace` (alle kompilierbaren Ziele; nur die nicht integrierten C1-Ziele `c15_hot0_alloc`, `c18_stress`, `c16_host_profile`, `c19_consumer`, `c19b_capture` scheitern wie schon am HEAD), `cargo fmt --all -- --check`, `bash -n`, Python-Syntax.
+
+Nicht ausführbar hier: Go-Tests des Overlays (kein Go-Toolchain auf diesem Rechner) und damit Rust↔Go-Interop (`c13_*`, `c14_*`).

@@ -10,7 +10,7 @@ cd "$ROOT"
 SECRETS="$ROOT/bsc/secrets.env"
 CONTRACT="$ROOT/bsc/config/g01_mainnet_acceptance_proposal_v2.json"
 BUILDER_POLICY="$ROOT/bsc/config/g06a_builder_floor_addendum_2026-10-11.json"
-GUARD="$ROOT/bsc/native/crates/runtime/src/acceptance_guard.rs"
+GUARD="$ROOT/bsc/engine/crates/execution/src/acceptance_guard.rs"
 
 die() {
   printf 'STOP: %s\n' "$*" >&2

@@ -11,14 +11,14 @@ A fresh current-source geth build was produced at `/tmp/darkbot-c1-rev2-geth-bin
 
 ## REV2-1 — bind every queued BUY to its selected peer
 
-[Outbound implementation](../native/geth/overlay/darkbot/fastlane/outbound.go):
+[Outbound implementation](../geth/overlay/darkbot/fastlane/outbound.go):
 dispatch takes one immutable target snapshot per worker, using a fixed-size
 stack array, and puts that exact target into the job. Selected-count, send and
 evidence use that snapshot. Reassignment never retargets an already queued BUY.
 Closed/failed sends remain `SEND_ERROR_UNKNOWN`. Queue-full evidence includes
 the bound target. Maintenance stays outside dispatch.
 
-[TestC17QueuedBuyKeepsDispatchTargetAfterReassignment](../native/geth/overlay/darkbot/fastlane/outbound_test.go)
+[TestC17QueuedBuyKeepsDispatchTargetAfterReassignment](../geth/overlay/darkbot/fastlane/outbound_test.go)
 queues for A while the worker is held, reassigns to C, then handles the old job
 and a later job separately. It checks both successful A and failed A, correct
 peer/hash/status evidence, and that only the later job reaches C. Existing
@@ -90,10 +90,10 @@ fixtures create no real acceptance records.
 
 ## Additional compiler/regression fixes
 
-- [C1.9b capture](../native/crates/fastlane/examples/c19b_capture.rs):
+- [C1.9b capture](../engine/crates/geth_ipc/examples/c19b_capture.rs):
   end the absent-guard borrow before acknowledging a drained lane. This fixes
   E0502 without weakening borrowed-slot lifetimes.
-- [C1.8 churn test](../native/crates/fastlane/tests/c18_stress.rs):
+- [C1.8 churn test](../engine/crates/geth_ipc/tests/c18_stress.rs):
   derive a guaranteed different negative-test owner. The original fixed `0xee`
   equals the real owner at cycle 237, incorrectly failing a correct release.
   All 300 churn cycles and the negative owner/epoch checks remain.

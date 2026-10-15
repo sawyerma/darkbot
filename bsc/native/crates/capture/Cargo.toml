@@ -1,9 +1,0 @@
-[package]
-name = "darkbot-capture"
-description = "DarkBot BSC bounded binary capture journal and deterministic replay foundation."
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-publish.workspace = true
-
-[dependencies]

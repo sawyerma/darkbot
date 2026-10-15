@@ -62,7 +62,7 @@ Gate 0 must have proven this for the promoted mode, or the production runtime mu
 Normative implementation:
 
 ```
-native/crates/core/src/venues/fourmeme.rs
+engine/crates/trading/src/venues/fourmeme.rs
 ```
 
 No second Python or fast-LIVE decoder.

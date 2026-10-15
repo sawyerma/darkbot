@@ -26,16 +26,16 @@ set -euo pipefail
 
 PIN="cdb7548b5baacfdae92f9f63437d6456411665f3"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-NATIVE="$ROOT/bsc/native"
+ENGINE="$ROOT/bsc/engine"
 SOURCE_GETH="$ROOT/bsc/vendor/bsc-geth"
-EVIDENCE="$NATIVE/evidence/c1"
+EVIDENCE="$ROOT/bsc/native/evidence/c1"
 STAMP="$(date +%Y%m%dT%H%M%S)"
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/darkbot-c19.XXXXXX")"
 GETH="$RUN_DIR/bsc-geth"
 DATA="$RUN_DIR/run"
 GO_BIN="$RUN_DIR/c19-go.test"
-RUST_BIN="$NATIVE/target/release/examples/c19_consumer"
-HOST_BIN="$NATIVE/target/release/examples/c16_host_profile"
+RUST_BIN="$ENGINE/target/release/examples/c19_consumer"
+HOST_BIN="$ENGINE/target/release/examples/c16_host_profile"
 PREFIX="$EVIDENCE/c1-9-native-latency-$STAMP"
 
 export DARKBOT_C19_PEERS="${DARKBOT_C19_PEERS:-4}"
@@ -420,7 +420,7 @@ fi
 (cd "$GETH" && go test -c -o "$GO_BIN" "$GO_PACKAGE")
 
 echo "=== C1.9 BUILD RUST RELEASE CONSUMER AND HOST PROFILE ==="
-(cd "$NATIVE" && cargo build -p darkbot-fastlane --release --locked --offline \
+(cd "$ENGINE" && cargo build -p darkbot-bsc-geth-ipc --release --locked --offline \
   --example c19_consumer --example c16_host_profile)
 
 echo "=== C1.9 HOST PROFILE ==="

@@ -10,7 +10,7 @@ cd "$ROOT"
 SECRETS="$ROOT/bsc/secrets.env"
 CONTRACT="$ROOT/bsc/config/g01_mainnet_acceptance_proposal_v2.json"
 BUILDER_POLICY="$ROOT/bsc/config/g06a_builder_floor_addendum_2026-10-11.json"
-NATIVE="$ROOT/bsc/native"
+ENGINE="$ROOT/bsc/engine"
 
 die() {
   printf 'STOP: %s\n' "$*" >&2
@@ -20,10 +20,10 @@ die() {
 # Build in the single Cargo workspace (its rust-toolchain.toml applies there),
 # then run the binary from the repository root as `cargo run` did before: the
 # binaries resolve repository-relative contract paths.
-native_run() {
+engine_run() {
   local bin="$1"; shift
-  (cd "$NATIVE" && cargo build --quiet --locked -p darkbot-qualify --bin "$bin") || return 1
-  "$NATIVE/target/debug/$bin" "$@"
+  (cd "$ENGINE" && cargo build --quiet --locked -p darkbot-bsc-qualification --bin "$bin") || return 1
+  "$ENGINE/target/debug/$bin" "$@"
 }
 
 json_get() {
@@ -45,7 +45,7 @@ PY
 [[ -f "$SECRETS" ]] || die "missing $SECRETS"
 git check-ignore -q bsc/secrets.env || die "bsc/secrets.env is not ignored by Git"
 grep -Fq 'pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";' \
-  bsc/native/crates/runtime/src/acceptance_guard.rs \
+  bsc/engine/crates/execution/src/acceptance_guard.rs \
   || die "Mainnet live guard is not UNARMED"
 
 python3 - "$CONTRACT" <<'PY'
@@ -112,7 +112,7 @@ export DARKBOT_G06A_MAX_BLOCK="$((DARKBOT_G06A_SEND_HEAD + 2))"
 printf 'PREFLIGHT=PASS  head=%s  launcher_nonce=%s  buyer_nonce=%s\n' "$DARKBOT_G06A_SEND_HEAD" "$DARKBOT_G06A_LAUNCHER_NONCE" "$DARKBOT_G06A_BUYER_NONCE"
 
 printf '\n=== 2/5 LOCAL CURVE-20 QUOTE ===\n'
-native_run g06a_native_bnb_quote "$PREFLIGHT" > "$QUOTE"
+engine_run g06a_native_bnb_quote "$PREFLIGHT" > "$QUOTE"
 export DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT="$(json_get "$QUOTE" expected_output)"
 [[ -n "$DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT" ]] || die "native quote did not produce expected_output"
 printf 'QUOTE=PASS  expected_output=%s\n' "$DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT"
@@ -149,7 +149,7 @@ print("EXACT_LOCAL_SIMULATION=PASS")
 PY
 
 printf '\n=== 5/5 DRY1-DRY4 -- ZERO LIVE EGRESS ===\n'
-native_run g06a_self_launch_bundle --verify-evidence "$LOCAL_SIM" | tee "$DRY"
+engine_run g06a_self_launch_bundle --verify-evidence "$LOCAL_SIM" | tee "$DRY"
 python3 - "$DRY" <<'PY'
 import json, sys
 v = json.load(open(sys.argv[1]))

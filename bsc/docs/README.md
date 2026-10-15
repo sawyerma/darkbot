@@ -19,10 +19,10 @@ Entry points: [PHASENPLAN.md](PHASENPLAN.md) (binding plan index), [STATUS.md](S
 
 ## Code and evidence
 
-- [Single Cargo workspace](../native/) — crates in [../native/crates/](../native/crates/)
-- [G0.7 binary and acceptance guard](../native/crates/runtime/src/)
-- [G0.6a DRY and G0.8 binaries](../native/crates/qualify/src/bin/)
-- [Pinned bsc-geth overlay](../native/geth/)
+- [Single Cargo workspace](../engine/) — crates in [../engine/crates/](../engine/crates/)
+- [G0.7 binary and acceptance guard](../engine/crates/execution/src/)
+- [G0.6a DRY and G0.8 binaries](../engine/crates/qualification/src/bin/)
+- [Pinned bsc-geth overlay](../geth/)
 - [Path-bound C1/Q5A evidence](../native/evidence/)
 - [Active contracts](../config/)
 - [Tools](../tools/)

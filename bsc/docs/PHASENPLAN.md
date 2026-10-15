@@ -19,10 +19,12 @@ Dieses Dokument ist der **Einstiegspunkt** in den fachlichen BSC-Phasenplan. Es 
 
 ## Wo die Phasen im Code leben
 
-| Phase | Code / Werkzeug (Stand nach R1–R8) |
+| Phase | Code / Werkzeug (Stand nach R9–R13) |
 |---|---|
-| G0.6a DRY | `native/crates/qualify/src/bin/g06a_native_bnb_quote.rs`, `g06a_self_launch_bundle.rs`; `tools/g06a_final_dry.sh`, `tools/g06a_*.cjs` |
-| G0.7 | `native/crates/runtime/src/bin/g07_mainnet_self_launch_buy.rs` (Feature `g07-mainnet`), Guard `native/crates/runtime/src/acceptance_guard.rs`, Vertrag `config/g01_mainnet_acceptance_proposal_v2.json`; `tools/g07_*.sh` |
-| G0.8 | `native/crates/qualify/src/bin/g08_mainnet_verify.rs`, `g08_producer_timing.rs` |
-| C0 | `native/crates/{core,wire,runtime,capture}` |
-| C1 | `native/crates/fastlane`, `native/geth/`, `tools/c1*`, `tools/c13*`, `tools/c14*`, `tools/c19*` |
+| G0.6a DRY | `engine/crates/qualification/src/bin/g06a_native_bnb_quote.rs`, `g06a_self_launch_bundle.rs`; `tools/g06a_final_dry.sh`, `tools/g06a_*.cjs` |
+| G0.7 | `engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/` (Feature `g07-mainnet`), Guard `engine/crates/execution/src/acceptance_guard.rs`, Vertrag `config/g01_mainnet_acceptance_proposal_v2.json`; `tools/g07_*.sh` |
+| G0.8 | `engine/crates/qualification/src/bin/g08_mainnet_verify.rs`, `g08_producer_timing.rs` |
+| C0 | `engine/crates/{trading,tx_encoding,execution,journal}` |
+| C1 | `engine/crates/geth_ipc`, `geth/`, `native/evidence/c1/`, `tools/c1*`, `tools/c13*`, `tools/c14*`, `tools/c19*` |
+
+Crate-Namen in den Verträgen vor R10: `darkbot-core` = `darkbot-bsc-trading`, `darkbot-wire` = `darkbot-bsc-tx-encoding`, `darkbot-fastlane` = `darkbot-bsc-geth-ipc`, `darkbot-runner` = `darkbot-bsc-execution`, `darkbot-capture` = `darkbot-bsc-journal`, `darkbot-qualify` = `darkbot-bsc-qualification` (siehe [ARCHITECTURE.md](ARCHITECTURE.md)).

@@ -60,7 +60,7 @@ def main() -> int:
 
     here = Path(__file__).resolve()
     darkbot_root = here.parents[2]
-    overlay = darkbot_root / "bsc/native/geth/overlay/darkbot/fastlane"
+    overlay = darkbot_root / "bsc/geth/overlay/darkbot/fastlane"
     destination = root / "darkbot/fastlane"
     destination.mkdir(parents=True, exist_ok=True)
     for source in overlay.glob("*.go"):

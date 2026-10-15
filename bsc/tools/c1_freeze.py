@@ -101,7 +101,7 @@ def source_binding(repo: Path) -> dict:
     if Path(root).resolve() != repo.resolve():
         raise ValueError("DarkBot root is not the Git repository root")
     status = git_output(repo, "status", "--porcelain=v1", "--untracked-files=all").decode()
-    entries = git_output(repo, "ls-tree", "-r", "-z", "HEAD", "--", "bsc/native").split(b"\0")
+    entries = git_output(repo, "ls-tree", "-r", "-z", "HEAD", "--", "bsc/engine", "bsc/geth", "bsc/tools", "bsc/native").split(b"\0")
     actual, committed = hashlib.sha256(), hashlib.sha256()
     count = 0
     for entry in entries:
@@ -122,7 +122,7 @@ def source_binding(repo: Path) -> dict:
     if count == 0:
         raise ValueError("final C1 source tree is empty or absent")
     return {"algorithm": "sha256(mode SP repo_path NUL sha256(file_bytes)), sorted git tree order",
-            "scope": "all tracked bsc/native files", "files": count,
+            "scope": "all tracked bsc/engine, bsc/geth, bsc/tools and bsc/native (evidence) files", "files": count,
             "sha256": actual.hexdigest(), "head_sha256": committed.hexdigest(),
             "working_tree": "clean" if not status else "dirty", "git_status": status}
 

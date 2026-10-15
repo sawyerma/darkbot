@@ -58,7 +58,7 @@ Gate-0 facts must be reconfirmed if contracts changed.
 Normative implementation:
 
 ```
-native/crates/core/src/venues/flap.rs
+engine/crates/trading/src/venues/flap.rs
 ```
 
 One production implementation only.

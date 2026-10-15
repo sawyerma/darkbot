@@ -258,13 +258,13 @@ def main() -> int:
             "pinned_geth_commit": command("git", "-C", str(geth), "rev-parse", "HEAD"),
             "go_test_binary_sha256": sha256_file(Path(args.go_bin)),
             "rust_test_binary_sha256": sha256_file(Path(args.rust_bin)),
-            "go_overlay_sources_sha256": sha256_overlay(repo / "bsc/native/geth/overlay/darkbot/fastlane"),
+            "go_overlay_sources_sha256": sha256_overlay(repo / "bsc/geth/overlay/darkbot/fastlane"),
             "measurement_geth_v2_sha256": sha256_file(geth / "darkbot/fastlane/v2.go"),
             "measurement_probe_sha256": sha256_file(geth / "darkbot/fastlane/c14a_probe.go"),
             "measurement_go_test_sha256": sha256_file(geth / "darkbot/fastlane/c14a_latency_test.go"),
-            "rust_v2_source_sha256": sha256_file(repo / "bsc/native/crates/fastlane/src/v2.rs"),
+            "rust_v2_source_sha256": sha256_file(repo / "bsc/engine/crates/geth_ipc/src/v2.rs"),
             "rust_consumer_source_sha256": sha256_file(
-                repo / "bsc/native/crates/fastlane/examples/c14a_consumer.rs"
+                repo / "bsc/engine/crates/geth_ipc/examples/c14a_consumer.rs"
             ),
             "harness_script_sha256": sha256_file(repo / "bsc/tools/c14a_early_latency.sh"),
             "analyzer_sha256": sha256_file(repo / "bsc/tools/c14a_analyze.py"),
@@ -280,7 +280,7 @@ def main() -> int:
         },
         "commands": [
             "go test -c -o <temporary-c14a-go.test> ./darkbot/fastlane",
-            "cargo build -p darkbot-fastlane --release --example c14a_consumer --locked --offline",
+            "cargo build -p darkbot-bsc-geth-ipc --release --example c14a_consumer --locked --offline",
             "bsc/tools/c14a_early_latency.sh",
         ],
         "non_claims": {

@@ -28,8 +28,8 @@ set -euo pipefail
 PIN="cdb7548b5baacfdae92f9f63437d6456411665f3"
 MARKER="DARKBOT_C1_FASTLANE_C1_4"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-NATIVE="$ROOT/bsc/native"
-OVERLAY="$NATIVE/geth/overlay/darkbot/fastlane"
+ENGINE="$ROOT/bsc/engine"
+OVERLAY="$ROOT/bsc/geth/overlay/darkbot/fastlane"
 GETH="${DARKBOT_BSC_GETH_DIR:-$ROOT/bsc/vendor/bsc-geth}"
 
 head="$(git -C "$GETH" rev-parse HEAD)"
@@ -61,7 +61,7 @@ go_phase() {
 }
 
 rust_phase() {
-  (cd "$NATIVE" && cargo test -p darkbot-fastlane --locked --offline -- \
+  (cd "$ENGINE" && cargo test -p darkbot-bsc-geth-ipc --locked --offline -- \
     --exact "ingress::tests::$1" --ignored --nocapture --test-threads=1)
 }
 

@@ -4,12 +4,12 @@ Stand: 2026-10-15, nach der Strukturreform R1–R8 (Ausgangscommit `7f3c08b`). F
 
 ## 1. Code (Repository-Struktur)
 
-- Ein einziger Cargo-Workspace: `bsc/native/` (Rust 1.93.1, `edition 2024`, `resolver 3`, ein `Cargo.lock`).
-- Crates: `core`, `wire`, `fastlane`, `runtime` (Paket `darkbot-runner`), `capture`, `qualify`. Paketnamen unverändert.
-- Der frühere zweite Workspace `bsc/gates/gate0` ist aufgelöst; aktive Teile sind in die Crates übernommen, der Rest liegt unverändert in `prestudy/bsc/` (kein Build-Member).
-- Offline-Regression nach R7 (`cargo test --locked --offline --workspace --no-fail-fast --features darkbot-runner/g07-mainnet`, getrackte Testziele): **426 PASS, 0 FAIL, 5 ignored**. C1-Tool-Unit-Tests (`tools/test_c1_qualification_tools.py`): PASS.
-- Bekannt: `fastlane` `v2::tests::role_leases_are_exclusive_per_role_and_coexist_across_roles` schlug in der Baseline vor jeder Änderung einmal fehl und bestand später unverändert → **flaky**, offen.
-- Nicht eingebundene, vorbereitete C1-Arbeit (untracked `fastlane/src/{host,hot0,outbound}.rs`, `fastlane/tests/c15_*`, `c18_*`, `fastlane/examples/c16_*`, `c19*`, Go-Overlay `chain_v2*`, `outbound*`, `qos*`) und Stash „local-before-p2p-fix-20261011“ (`5753f70`) sind erhalten, aber **nicht** Teil des geprüften Builds.
+- Ein einziger Rust-Cargo-Workspace: `bsc/engine/` (Rust 1.93.1, `edition 2024`, `resolver 3`, ein `Cargo.lock`). Go-geth-Overlay getrennt unter `bsc/geth/`.
+- Crates (R9–R13): `trading`, `tx_encoding`, `geth_ipc`, `execution`, `journal`, `qualification` mit Paketnamen `darkbot-bsc-*`; Zuordnung zu den früheren Namen in [ARCHITECTURE.md](ARCHITECTURE.md).
+- `bsc/native/` enthält nur noch `evidence/` (pfadgebundene Q5A-Identität, siehe [EVIDENCE.md](EVIDENCE.md) §5).
+- Offline-Regression R9–R13 (alle getrackten, kompilierbaren Testziele, `--features darkbot-bsc-execution/g07-mainnet`): **426 PASS, 0 FAIL, 5 ignored** — identisch zur R1–R8-Baseline. C1-Tool-Unit-Tests: 20/20 PASS. Prüfprotokoll: [EVIDENCE.md](EVIDENCE.md) §6.
+- Bekannt: `geth_ipc` `v2::tests::role_leases_are_exclusive_per_role_and_coexist_across_roles` ist **flaky** (einmal rot in der R1-Baseline).
+- Nicht integrierte C1-Vorarbeit ist getrackt, aber **nicht** im Build: `geth_ipc/src/{host,hot0,outbound}.rs`, Testziele `c15_hot0_alloc`, `c18_stress`, Beispiele `c16_host_profile`, `c19_consumer`, `c19b_capture` (kompilieren ohne den Stash „local-before-p2p-fix-20261011“ `5753f70` nicht), Go-Overlay `chain_v2*`, `outbound*`, `qos*`, `stress_test.go`.
 
 ## 2. Nachweise (fachlich)
 

@@ -1,6 +1,6 @@
 # BSC — Produktionsarchitektur, fachliche Benennung und Refactoring-Aufträge
 
-**Stand: 2026-10-15.** **R1–R8 wurde umgesetzt und als `c8362c6` nach `main` gepusht.** Der aktuelle GitHub-Iststand verwendet noch `bsc/native/` und die sechs alten kurzen Crate-Verzeichnisnamen. **Der nächste Auftrag ist R9–R13: fachliche Architektur, sprechende Namen und saubere Modulgrenzen nach §8. Dieser zweite Umbau ist NOCH NICHT ausgeführt oder abgenommen.**
+**Stand: 2026-10-15.** **R1–R8 wurde umgesetzt und als `c8362c6` nach `main` gepusht.** Der aktuelle GitHub-Iststand verwendet noch `bsc/native/` und die sechs alten kurzen Crate-Verzeichnisnamen. **R9–R13 (§8) ist im Arbeitsverzeichnis umgesetzt — bis auf die Zerlegung von `v2.rs` nach `protocol_v2/` (offen, siehe §9); Abnahme und Commit durch den Nutzer ausstehend.** Geprüfter Iststand: §9.
 
 > **CLAUDE CODE — ZUERST §8 LESEN.** §8 ist die verbindliche **neue** Zielarchitektur und Arbeitsanweisung. §§1–4, 6–7 dokumentieren die **abgeschlossene** Migration R1–R8 und sind kein Auftrag, diesen Umbau noch einmal auszuführen. Die Sicherheits- und Datenregeln aus §5 bleiben zwingend gültig. Der fachliche Phasenplan und die technischen Verträge bleiben maßgeblich; keine Umstrukturierung autorisiert LIVE oder eine value-bearing Transaktion. **Nur `bsc/` und bei nachgewiesenem Bedarf `prestudy/bsc/` ändern; `project_0/`, Frontend und andere Projekte niemals anfassen.**
 
@@ -344,3 +344,44 @@ Der Baum illustriert Zuständigkeiten, **nicht** die Pflicht, für jeden Eintrag
 - **Keine LIVE-/Mainnet-Freigabe:** Refactor ist keine Autorisierung von Funding, SEND, Wallet-/Builder-Kosten oder Handelsstrategie. Kein G0.7-Binary ausführen, solange nicht gesondert freigegeben.
 - **Projektgrenzen:** Ausschließlich `bsc/`, bei Bedarf `prestudy/bsc/`. `project_0/` ausdrücklich **nicht** ändern, verschieben, stagen, entstagen, committen oder sonst beeinflussen. Auch die bereits eventuell dort gestagten Änderungen unangetastet lassen. Keine generellen Git-Clean-/Reset-/Add-Befehle.
 - **Arbeitsweise:** Zuerst `git status -sb`, `git log -1`, dieses README und die fachlichen Verträge lesen. Bestehende lokale uncommitted Arbeit/Secrets/Stashes sichern, nicht einfach `git pull` über einen schmutzigen Baum. Arbeitsstand auf `c8362c6` oder neueren geprüften HEAD beziehen. R9–R13 nacheinander durchführen, am Ende ein **kompaktes, menschenlesbares** Ergebnis: echter Zielbaum, Alt→Neu-Matrix, Prüfergebnisse, klare Restmängel. Ohne eigene Nutzerfreigabe **kein Commit/Push**.
+
+## 9. Umsetzungsstand R9–R13 (2026-10-15, Ausgangscommit `c8362c6`)
+
+Vollständige Alt→Neu-Matrix und Prüfprotokoll: [docs/EVIDENCE.md](docs/EVIDENCE.md) §5–§6; Baum und Ownership: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+**Realer Baum**
+
+~~~~text
+bsc/
+├── engine/                     # einziger Rust-Workspace (Cargo.toml, Cargo.lock, rust-toolchain.toml 1.93.1)
+│   └── crates/
+│       ├── trading/            # darkbot-bsc-trading: chain_state, venues/flap, economics, intent, transactions, signer, submission_policy
+│       ├── tx_encoding/        # darkbot-bsc-tx-encoding: rlp
+│       ├── geth_ipc/           # darkbot-bsc-geth-ipc: protocol_v1, v2, ingress (+ nicht integriert: host, hot0, outbound)
+│       ├── execution/          # darkbot-bsc-execution: startup, submission/, acceptance_guard, qualification_capture, bin/g07_mainnet_self_launch_buy/
+│       ├── journal/            # darkbot-bsc-journal: format, recorder, replay
+│       └── qualification/      # darkbot-bsc-qualification: probe, measure, evidence, identity, stats, verdict, bin/
+├── geth/                       # Go-geth-Overlay, Pin, Wire-V1/V2-Spezifikationen
+├── native/evidence/            # gebundene Q5A-/C1-Nachweise (siehe unten)
+├── config/ · tools/ · docs/
+prestudy/bsc/                   # historisch, kein Build-Member
+~~~~
+
+**Ergebnis je Gruppe**
+
+| Gruppe | Ergebnis |
+|---|---|
+| R9 | Inventur, Entscheidungen, Testplan (max. 10). Befunde: C1-Testziele `c15_hot0_alloc`, `c18_stress`, Beispiele `c16_host_profile`, `c19_consumer`, `c19b_capture` kompilieren schon am HEAD nicht (brauchen Stash `5753f70`); kein Go-Toolchain auf diesem Rechner |
+| R10 | `native → engine`, sechs Crate-Ordner und Paketnamen `darkbot-bsc-*`, Imports, `native/geth → geth`, Tools/Skripte; Lock nur Mitgliedsnamen geändert. U1 **426/0/5**, U2 **20/20** |
+| R11 | `inclusion → submission_policy` (trading) / `submission` (execution), `tx → transactions`, Journal in `format`/`recorder`/`replay`, Wire V1 in `protocol_v1.rs` (Root-Re-Export), G0.7 in `main.rs` + `inputs`/`transactions`/`chain_reads`/`builder_submission`; alle Verschiebungen wörtlich (Textnachweis), normalisierter Diff ohne Codeänderung. U3 **426/0/5**. **Offen:** `v2.rs → protocol_v2/` |
+| R12 | Docs (`ARCHITECTURE`, `STATUS`, `PHASENPLAN`, `EVIDENCE`, Runbook, Reports) synchronisiert; Werkzeugnamen als stabile CLI erhalten; C1-Freeze-Scope wieder inkl. `bsc/tools`. U4 Offline-Toolkette **17/17**, U5 **20/20** |
+| R13 | `cargo metadata --locked`, `cargo check --workspace`, `cargo fmt --check` sauber, `cargo clippy` ohne Fehler (6 bekannte Stil-Warnungen im übernommenen G0.7/G0.8-Code); kein BSC-Eintrag im Git-Index; `project_0/` unberührt |
+
+**Testbilanz R9–R13:** 5 von 10 Läufen (U1–U5).
+
+**Gemeldete Konflikte / offene Punkte**
+
+- `bsc/native/evidence/` bleibt (Q5A-Pfad + SHA-256 einkompiliert; Umzug = Neuqualifikation). `bsc/evidence/` wurde daher **nicht** angelegt.
+- `v2.rs → protocol_v2/`: nicht ausgeführt. Der Stash „local-before-p2p-fix-20261011“ (`5753f70`) ändert `v2.rs` um ca. 950 Zeilen und ist Voraussetzung für die committeten C1-Testziele; eine Zerlegung macht ihn mechanisch unanwendbar. Rust↔Go-Parität ist ohne Go-Toolchain nicht prüfbar.
+- Nicht ausgeführt, daher nicht PASS: Go-Overlay-Tests, Interop `c13_*`/`c14_*`, voller G0.6a-DRY, EVM-Crosscheck gegen RPC, jede G0.7-/G0.8-Ausführung gegen Mainnet.
+- Flaky: `geth_ipc` `v2::tests::role_leases_are_exclusive_per_role_and_coexist_across_roles`.
