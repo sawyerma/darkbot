@@ -113,6 +113,13 @@ pub struct Journal {
     wallet: String,
     saved: Option<Saved>,
 }
+impl Drop for Journal {
+    /// The flock belongs to the open file description, which a concurrently spawned child
+    /// process shares until exec. Unlock explicitly so closing frees the wallet immediately.
+    fn drop(&mut self) {
+        let _ = self._lock.unlock();
+    }
+}
 fn err(s: &str) -> String {
     s.into()
 }
@@ -587,6 +594,26 @@ mod tests {
                 fs::remove_dir_all(dir).unwrap();
             }
         }
+    }
+    #[test]
+    fn dropped_journal_releases_wallet_while_lock_descriptor_is_shared() {
+        // A child process being spawned concurrently shares this file description until exec;
+        // try_clone() shares it the same way. Dropping the journal must still free the wallet.
+        let (dir, a, _, _) = setup();
+        let j = Journal::open(&dir, &a.wallet).unwrap();
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("WALLET_ALREADY_LOCKED")
+        );
+        let shared = j._lock.try_clone().unwrap();
+        drop(j);
+        let reopened = Journal::open(&dir, &a.wallet).unwrap();
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("WALLET_ALREADY_LOCKED")
+        );
+        drop((reopened, shared));
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn changed_signed_payload_order_path_and_signature_cannot_reach_adapter() {
