@@ -108,16 +108,18 @@ pub struct Receipt {
 }
 
 pub struct Journal {
-    _lock: File,
+    _lock: WalletLock,
     path: PathBuf,
     wallet: String,
     saved: Option<Saved>,
 }
-impl Drop for Journal {
+/// Exclusive wallet flock, released on every drop path including failed opens.
+struct WalletLock(File);
+impl Drop for WalletLock {
     /// The flock belongs to the open file description, which a concurrently spawned child
     /// process shares until exec. Unlock explicitly so closing frees the wallet immediately.
     fn drop(&mut self) {
-        let _ = self._lock.unlock();
+        let _ = self.0.unlock();
     }
 }
 fn err(s: &str) -> String {
@@ -147,6 +149,7 @@ impl Journal {
             .open(directory.join(format!("{wallet}.lock")))
             .map_err(|_| err("JOURNAL_LOCK_IO"))?;
         lock.try_lock().map_err(|_| err("WALLET_ALREADY_LOCKED"))?;
+        let lock = WalletLock(lock);
         let path = directory.join(format!("{wallet}.json"));
         if path.with_extension("pending").exists() {
             return Err(err("JOURNAL_INTERRUPTED_WRITE_HALT"));
@@ -605,7 +608,7 @@ mod tests {
             Journal::open(&dir, &a.wallet).err().as_deref(),
             Some("WALLET_ALREADY_LOCKED")
         );
-        let shared = j._lock.try_clone().unwrap();
+        let shared = j._lock.0.try_clone().unwrap();
         drop(j);
         let reopened = Journal::open(&dir, &a.wallet).unwrap();
         assert_eq!(
@@ -613,6 +616,38 @@ mod tests {
             Some("WALLET_ALREADY_LOCKED")
         );
         drop((reopened, shared));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn failed_open_releases_wallet_while_processes_are_spawned() {
+        // A failed open drops its lock without a Journal. Concurrent spawns share that file
+        // description until exec; the next open must still report the real halt reason.
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (dir, a, _, _) = setup();
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{}.pending", a.wallet)), b"").unwrap();
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let spawners: Vec<_> = (0..4)
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        let _ = std::process::Command::new("true").output();
+                    }
+                })
+            })
+            .collect();
+        let wrong = (0..2000)
+            .filter(|_| {
+                Journal::open(&dir, &a.wallet).err().as_deref()
+                    != Some("JOURNAL_INTERRUPTED_WRITE_HALT")
+            })
+            .count();
+        stop.store(true, Ordering::Relaxed);
+        for spawner in spawners {
+            spawner.join().unwrap();
+        }
+        assert_eq!(wrong, 0);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
