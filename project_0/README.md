@@ -2,7 +2,7 @@
 
 Solana / Marginfi Project 0 liquidation system.
 
-This README is the **navigation and file-placement contract** for `project_0/`.
+This README is the **navigation, target-architecture, cleanup and file-placement contract** for `project_0/`.
 It answers two questions:
 
 1. **Where is the authoritative information?**
@@ -22,7 +22,7 @@ The 2026-10-05 audit handoff is historical: [docs/development_history/audit_hand
 |---|---|
 | Current status, open gates and next steps | **[docs/STATUS.md](docs/STATUS.md)** |
 | Documentation navigation | [docs/README.md](docs/README.md) |
-| Structure reform handoff and 32-iteration tracker | **[docs/operations/restructure_handoff.md](docs/operations/restructure_handoff.md)** · [32-step plan](docs/architecture/restructure_32_step_plan.md) |
+| Structure reform handoff and 32-iteration tracker | **[docs/operations/restructure_handoff.md](docs/operations/restructure_handoff.md)** · [32-step plan](docs/architecture/restructure_32_step_plan.md) · **[Target structure and cleanup contract](#3-verbindliche-soll-struktur-nach-iteration-32-und-bereinigungspflichten)** |
 | Authoritative production roadmap / architecture | [docs/PHASENPLAN.md](docs/PHASENPLAN.md) |
 | Measurements, gates and historical decisions | [docs/MEASUREMENT_LEDGER.md](docs/MEASUREMENT_LEDGER.md) |
 | Development history (2026-10-05 audit handoff, audits, R127c/R127d changelogs and rollback) | [docs/development_history/](docs/development_history/) |
@@ -64,7 +64,154 @@ When resuming Project 0 after a break, audit, model switch or handoff, read in t
 
 ---
 
-## 3. Fixed directory structure
+## 3. Verbindliche SOLL-Struktur nach Iteration 32 und Bereinigungspflichten
+
+**SOLL, noch nicht vollständig umgesetzt.** Dies ist die verbindliche Zielordnung für die
+[32-Schritte-Strukturreform](docs/architecture/restructure_32_step_plan.md), **kein Nachweis über
+bereits fertiggestellte Dateien oder Tests**. Den tatsächlich erreichten Stand ausschließlich
+aus dem [aktiven Struktur-Handoff](docs/operations/restructure_handoff.md), der
+[Roadmap](docs/architecture/restructure_32_step_plan.md) und dem aktuellen Code ableiten.
+Die fachliche FE-00–FE-07-Roadmap ist davon unabhängig.
+
+### 3.1 Zielbaum (nach Schritt 32)
+
+~~~text
+project_0/
+├── README.md
+├── .gitignore
+├── .env.example
+├── config/
+│   ├── profiles/                       # typisierte geprüfte Runtime-Profile
+│   ├── examples/                       # öffentliche, secret-freie Beispiele
+│   └── wallet.public.env
+├── native/
+│   ├── Cargo.toml
+│   ├── Cargo.lock
+│   └── crates/
+│       ├── common/                      # ehemals darkbot-common
+│       ├── solana/                      # ehemals darkbot-solana
+│       ├── liquidation/                 # ehemals darkbot-project0
+│       └── runtime/                     # ehemals darkbot-runner
+├── operations/
+│   ├── cli/                             # Python-CLI, ein typisierter Steuerungsvertrag
+│   ├── capture/                         # Capture-/Beobachtungsprogramme
+│   ├── verification/                    # Chain-Abgleich, Verifikation, Resume
+│   ├── reporting/                       # Reporting und Exporte
+│   └── qualification/                   # Preflight und Qualifikationslogik
+├── scripts/
+│   ├── capture.sh                       # stabile Shell-Entrypoints / Kompatibilität
+│   ├── smoke.sh
+│   ├── verify.sh
+│   ├── report.sh
+│   └── preflight.sh
+├── tests/
+│   ├── python/
+│   ├── integration/
+│   ├── regression/
+│   └── fixtures/                        # kleine, synthetische, deterministische Testdaten
+├── docs/
+│   ├── README.md
+│   ├── STATUS.md
+│   ├── PHASENPLAN.md / PHASENPLAN.json
+│   ├── MEASUREMENT_LEDGER.md / MEASUREMENT_LEDGER.json
+│   ├── architecture/
+│   ├── operations/
+│   ├── qualification/
+│   ├── measurements/
+│   │   ├── protocols/
+│   │   └── historical_reports/
+│   ├── development_history/
+│   └── evidence/                         # qualifizierte historische Evidence: immutable
+├── data/
+│   ├── runs/<run_id>/
+│   │   ├── manifest.json
+│   │   ├── config.json
+│   │   ├── capture/
+│   │   ├── snapshots/
+│   │   ├── verification/
+│   │   ├── reports/
+│   │   └── logs/
+│   └── cache/                            # nur klar als rekonstruierbar bewertete Caches
+└── exports/                              # generierte, nicht-kanonische Exporte
+~~~
+
+**Präzisierungen:**
+- Der Baum zeigt *Verantwortungsbereiche und Zielpfade*, nicht sämtliche künftigen Dateien.
+  Rust-Crates behalten eigene `Cargo.toml` und `src/`; ein Ordnername ändert nicht automatisch
+  den Cargo-Paketnamen. Inhalte werden nach fachlicher Zuständigkeit aufgeteilt, nicht willkürlich.
+- `operations/` enthält Python-Implementierungen; `scripts/` stellt stabile,
+  getestete Shell-Einstiegspunkte und erforderliche Kompatibilitätswrapper bereit.
+  Kein zweiter Decoder, Verifier, Health-, Economics- oder Routing-Kern.
+- `data/runs/` ist das qualifizierte **Ziel**. Historische Layout-V1-Runs und gepinnte
+  Spec-/Report-/Resume-Identitäten müssen weiter eindeutig lesbar bleiben; Layout V2 benötigt
+  einen eigenen versionierten Vertrag. Der Default darf erst nach Schritt 8b.2/8b.3 umgestellt werden.
+- Vorhandene Sonderpfade wie `src/` und `tools/` werden in Schritt 30 per tatsächlichem
+  Verbrauchernachweis bewertet, **nicht allein deshalb gelöscht, weil sie in diesem
+  vereinfachten Zielbaum fehlen**. Das Frontend außerhalb von `project_0/` bleibt unangetastet.
+
+### 3.2 Verbindliche Altlasten-Bereinigung (Schritte 16–31, Schwerpunkt 30)
+
+**Ergebnisziel:** Eine wartbare, kohärente Codebasis, nicht nur verschobene Dateien.
+Jede der folgenden Klassen ist systematisch zu inventarisieren. Bei belegter Unnötigkeit
+bereinigen; sonst den Grund der Beibehaltung und den verbliebenen Eigentümer dokumentieren.
+
+| Prüfklasse | Verbindliche Entscheidung |
+|---|---|
+| Tote Module, Dateien, Funktionen und Ordner | Referenzen/Entrypoints/Tests nachweisen; nur unbenutzten Code entfernen |
+| Doppelte Implementierungen | Einen kanonischen Eigentümer festlegen; duplizierte Logik zusammenführen, Aufrufer umstellen |
+| Veraltete Python-/Rust-/Shell-Pfade | Alle Imports, Cargo-Pfade, Launcher, CLI-Aufrufe, Links und Testpfade aktualisieren |
+| Obsolete Wrapper, Aliase und Legacy-Entrypoints | Nur nach Consumer- und Kompatibilitätsnachweis entfernen; erforderliche Übergänge schmal halten |
+| Veraltete Config-Defaults und Beispiele | Einheitlichen typisierten Backend-Konfigurationsvertrag herstellen; doppelte Defaults entfernen |
+| Unbenutzte Dependencies, Features und Build-Skripte | Nur nach tatsächlicher Referenz-/Build-Prüfung entfernen; `Cargo.lock` konsistent halten |
+| Vermischte Verantwortlichkeiten / übergroße Module | An echten Fachgrenzen teilen; keine zweite Runtime und keine veränderte Execution-Semantik |
+| Cache-, Temp-, Export- und Testartefakte im falschen Verzeichnis | Erzeuger und Verbraucher auf den korrekten Zielpfad umstellen, Ignore-Grenzen prüfen |
+| Überholte README-, Handoff- und Codeverweise | Aktive Links und Startbefehle auf die kanonischen Dateien ausrichten; Historie erhalten |
+| Alte TODOs, Platzhalter und nicht mehr passende Kommentare | Tatsächlichen Umsetzungsstand prüfen; erledigte entfernen, offene Punkte ausdrücklich dokumentieren |
+
+**Nicht als Altlast löschen:** historische Rohdaten (insbesondere lokale Runs unter
+`data/econ4h/` und `data/market/`), qualifizierte `docs/evidence/`-Artefakte, Hashes,
+Verification-Spec-IDs, Checkpoints, Replay-/Resume-Nachweise, PHASENPLAN/Measurement-Ledger,
+notwendige Legacy-Leser oder Sicherheitsgates. Diese Daten und Semantiken sind bewusst
+rückwärtskompatibel zu halten; keine unaufgeforderte Migration der etwa 75 GB lokalen Rohdaten.
+
+### 3.3 Wann gilt eine Bereinigung als fertig?
+
+Für jede verschobene oder entfernte Datei und jeden zusammengeführten Codepfad muss
+der Arbeitsbericht nachweisen:
+
+1. **Vorher/Nachher-Zuordnung:** alter Pfad, neuer Pfad bzw. Löschgrund, kanonischer Eigentümer.
+2. **Vollständige Verbraucherprüfung:** Rust/Cargo, Python-Imports, Shell/CLI, Environment,
+   Config, Tests/Fixtures, Reports/Verifier, Dokumentationslinks und Frontend-Vertragsgrenze;
+   keine aktiven defekten Referenzen.
+3. **Verhaltensparität:** betroffene Einstiege, Flags, Ausgabeformate, Run-/Report-IDs,
+   Fehler- und Fail-Closed-Semantik bleiben erhalten oder eine ausdrücklich versionierte
+   Migration einschließlich Kompatibilität ist nachgewiesen.
+4. **Keine Doppelimplementierung:** Tests und Werkzeuge benutzen die produktive Fachlogik
+   statt eigene Health-/Liquidations-/Decoder-/Economics-Regeln.
+5. **Gezielte Funktionstests nach Änderungen; Abschlussqualifikation in Schritt 32:**
+   Python- und Rust-Regression, Offline-Builds, Shell/CLI, V1/V2-Resume/Reporting,
+   relevante Replay-Parität. Keine wiederholten Stresstestkampagnen ohne neuen Befund;
+   kein PASS für nicht ausgeführte Tests.
+6. **Saubere Git-Grenzen:** ausschließlich freigegebene `project_0/**`-Pfade, keine
+   Secrets, lokalen Rohdaten oder historischen Evidence committen; `bsc/**` bleibt unberührt.
+7. **Restliste statt Scheinsicherheit:** nicht nachweislich entbehrliche Altlasten
+   als `RETAINED` mit Grund und ggf. Folgeticket aufführen, nicht heimlich löschen.
+
+**Nicht zulässig:** `git clean`, Hard-Reset, pauschales Staging, stille Änderung gepinnter
+Verifikationslogik, LIVE-/Submission-Aktivierung oder fachliche Gewinnbehauptungen.
+`FREE_ONLY`, autorisierte Budget- und Sicherheitsgrenzen gelten weiter.
+
+**Meilensteine:** 8–15 = Runs, Daten, Config, Tests; 16–20 = Python-Operations;
+21–25 = Shell-Einstiegspunkte; 26–29 = Rust-Crates; **30 = endgültige
+Verbraucher- und Altlastenbereinigung; 31 = sämtliche Verweise; 32 = unabhängige
+Endqualifikation**. Eine saubere Ordnerstruktur allein ist noch keine vollständige
+Codequalitäts-, Performance- oder Economics-Freigabe.
+
+### 3.4 Aktueller Ist-Baum (während der Migration)
+
+Der folgende ältere Abschnitt dokumentiert die *derzeit noch real vorhandenen Pfade*
+und ist ausdrücklich **nicht** der fertige Soll-Baum. Solange Umzüge noch nicht
+qualifiziert sind, sind diese Pfade weiterhin gültig.
 
 ```text
 project_0/
@@ -438,7 +585,7 @@ Do not copy status into this README. Update the measurement ledger and `docs/STA
 The current ordered First-Profit path is FE-00 → FE-07 (`PHASENPLAN.json` → `current_prioritized_technical_path`).
 Status per ticket and the next technically necessary steps are in [docs/STATUS.md](docs/STATUS.md).
 
-Do not start another broad architecture rewrite unless new evidence requires it.
+The approved 32-step repository restructuring is already in progress. Do not start an unrelated architecture rewrite or alter production semantics without separate evidence and authorization.
 
 ---
 
@@ -448,7 +595,8 @@ Do not start another broad architecture rewrite unless new evidence requires it.
 |---|---|
 | Production Rust logic | `native/crates/<appropriate-crate>/src/` |
 | New executable/probe that belongs to Rust production workspace | appropriate crate `src/bin/` |
-| Operational/qualification script | `scripts/` |
+| Python operational/qualification implementation (target steps 16–20) | `operations/{cli,capture,verification,reporting,qualification}/` |
+| Shell entrypoint and required compatibility wrapper (target steps 21–25) | `scripts/` |
 | Current human-readable status / handoff | `docs/` |
 | Measured immutable evidence | `docs/evidence/` |
 | Audit-specific evidence corpus | `docs/evidence/AUDIT_<date>/` |
