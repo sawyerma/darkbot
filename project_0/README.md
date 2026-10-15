@@ -8,9 +8,11 @@ It answers two questions:
 1. **Where is the authoritative information?**
 2. **Where must new code, evidence, scripts and generated data be placed?**
 
-For the current engineering state and the exact next work order, start here:
+For the current engineering state and the next technically necessary steps, start here:
 
-> **[Current Audit Handoff — 2026-10-05](docs/development_history/audit_handoff_20261005.md)**
+> **[Current status — docs/STATUS.md](docs/STATUS.md)**
+
+The 2026-10-05 audit handoff is historical: [docs/development_history/audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md).
 
 ---
 
@@ -18,11 +20,11 @@ For the current engineering state and the exact next work order, start here:
 
 | Need | Canonical file / directory |
 |---|---|
-| Current status, blockers and exact next steps | **[docs/development_history/audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md)** |
+| Current status, open gates and next steps | **[docs/STATUS.md](docs/STATUS.md)** |
+| Documentation navigation | [docs/README.md](docs/README.md) |
 | Authoritative production roadmap / architecture | [docs/PHASENPLAN.md](docs/PHASENPLAN.md) |
 | Measurements, gates and historical decisions | [docs/MEASUREMENT_LEDGER.md](docs/MEASUREMENT_LEDGER.md) |
-| Current R127d implementation / rollback / audit correction | [docs/development_history/r127d_changelog_rollback.md](docs/development_history/r127d_changelog_rollback.md) |
-| Previous R127c batching change / rollback | [docs/development_history/r127c_changelog_rollback.md](docs/development_history/r127c_changelog_rollback.md) |
+| Development history (2026-10-05 audit handoff, audits, R127c/R127d changelogs and rollback) | [docs/development_history/](docs/development_history/) |
 | Complete Astra audit findings | [docs/evidence/AUDIT_20261005/AUDIT_FINDINGS.md](docs/evidence/AUDIT_20261005/AUDIT_FINDINGS.md) |
 | Exact audit commands and results | [docs/evidence/AUDIT_20261005/COMMANDS_AND_RESULTS.md](docs/evidence/AUDIT_20261005/COMMANDS_AND_RESULTS.md) |
 | Complete preserved Astra audit bundle | [docs/evidence/AUDIT_20261005/darkbot_audit_bundle_20261005.zip](docs/evidence/AUDIT_20261005/darkbot_audit_bundle_20261005.zip) |
@@ -46,18 +48,16 @@ When resuming Project 0 after a break, audit, model switch or handoff, read in t
 
 ```text
 1. project_0/README.md
-2. project_0/docs/development_history/audit_handoff_20261005.md
-3. project_0/docs/MEASUREMENT_LEDGER.md
-4. project_0/docs/PHASENPLAN.md
-5. project_0/docs/development_history/r127d_changelog_rollback.md
-6. project_0/docs/evidence/AUDIT_20261005/AUDIT_FINDINGS.md
-7. project_0/docs/evidence/AUDIT_20261005/COMMANDS_AND_RESULTS.md
-8. relevant production source under project_0/native/
-9. relevant qualification script under project_0/scripts/
-10. relevant immutable evidence under project_0/docs/evidence/
+2. project_0/docs/STATUS.md
+3. project_0/docs/MEASUREMENT_LEDGER.json, then the newest relevant MEASUREMENT_LEDGER.md entries
+4. project_0/docs/PHASENPLAN.json, then the relevant PHASENPLAN.md sections
+5. relevant immutable evidence under project_0/docs/evidence/
+6. relevant production source under project_0/native/
+7. relevant qualification script under project_0/scripts/
+8. historical context when needed: project_0/docs/development_history/ and project_0/docs/evidence/AUDIT_20261005/
 ```
 
-The current audit handoff overrides stale status prose in older documents, but **does not erase historical measurements**.
+`docs/STATUS.md` summarizes; the newest dated ledger entries and the code remain canonical. Historical documents and measurements are never erased.
 
 ---
 
@@ -69,7 +69,8 @@ project_0/
 ├── .env.example                     <- non-secret environment template only
 │
 ├── docs/                             <- human-readable Project 0 documentation
-│   ├── README.md
+│   ├── README.md                     <- documentation navigation
+│   ├── STATUS.md                     <- CURRENT STATUS + NEXT STEPS
 │   ├── PHASENPLAN.md                 <- authoritative production plan
 │   ├── MEASUREMENT_LEDGER.md         <- measurements / gates / decisions
 │   ├── architecture/                 <- upstream reuse decisions, parallel execution design
@@ -78,7 +79,7 @@ project_0/
 │   ├── measurements/
 │   │   ├── protocols/                <- P6-LT Shadow, C0-MO, C0-E1 econ4h protocols
 │   │   └── historical_reports/       <- FIX-129 cost, C0-E1 implementation/qualification reports
-│   ├── development_history/          <- audit handoff (CURRENT STATUS + NEXT WORK), audits, work order,
+│   ├── development_history/          <- 2026-10-05 audit handoff (historical), audits, work order,
 │   │                                    R127c/R127d changelogs and rollback
 │   └── evidence/                     <- IMMUTABLE versioned evidence
 │       ├── AUDIT_20261005/           <- complete Astra audit corpus
@@ -209,10 +210,9 @@ Directory: [docs/](docs/)
 
 | File | Purpose |
 |---|---|
-| **[audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md)** | Current state, open blockers, economic verdict, ordered next work. **Read first.** |
+| **[STATUS.md](docs/STATUS.md)** | Current code/qualification state, FE-00…FE-07, open gates, next steps, known contradictions. **Read first.** |
 | [PHASENPLAN.md](docs/PHASENPLAN.md) | Long-term production architecture, phases and constraints. |
 | [MEASUREMENT_LEDGER.md](docs/MEASUREMENT_LEDGER.md) | Historical measurements, PASS/FAIL/OPEN decisions and evidence references. |
-| [r127d_changelog_rollback.md](docs/development_history/r127d_changelog_rollback.md) | R127d implementation, measured queue PASS, rollback points and post-audit correctness reopening. |
 
 ### Architecture
 
@@ -264,11 +264,11 @@ Directory: [docs/development_history/](docs/development_history/)
 
 | File | Purpose |
 |---|---|
-| [audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md) | Post-audit handoff (2026-10-05, P6-MT override 2026-10-07); see "Current / authoritative". |
-| [r127d_changelog_rollback.md](docs/development_history/r127d_changelog_rollback.md) | R127d candidate cache / re-arm change, rollback and audit correction; see "Current / authoritative". |
+| [audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md) | **Historical** post-audit handoff (2026-10-05, P6-MT override 2026-10-07); superseded by [STATUS.md](docs/STATUS.md). |
+| [r127d_changelog_rollback.md](docs/development_history/r127d_changelog_rollback.md) | R127d candidate cache / re-arm change, measured queue PASS, rollback points and post-audit correctness reopening. |
 | [r127c_changelog_rollback.md](docs/development_history/r127c_changelog_rollback.md) | R127c batching implementation and rollback. |
 | [fable_audit_20261003.md](docs/development_history/fable_audit_20261003.md) | Earlier audit snapshot; historical, not current status. |
-| [fable_work_order.md](docs/development_history/fable_work_order.md) | Earlier work order; historical unless referenced by current handoff. |
+| [fable_work_order.md](docs/development_history/fable_work_order.md) | Earlier implementation work order (2026-09-30). |
 
 ---
 
@@ -417,48 +417,20 @@ Public addresses and non-secret configuration may be versioned when useful.
 
 ## 10. Current Project 0 status
 
-The current canonical status is maintained in:
+The current status is maintained in:
 
-> [docs/development_history/audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md)
+> [docs/STATUS.md](docs/STATUS.md)
 
-At the time this repository map was written:
-
-```text
-R127d queue/fanout performance:       PASS (measured)
-Candidate same-slot revision safety:  BLOCKED / reproduced counterexample
-Candidate repeat fairness:            BLOCKED / reproduced starvation
-Executable-floor economics:           UNPROVEN
-Winner parser fixture correctness:     UNPROVEN
-Drift refresh:                         OPEN / Custom(101)
-Historical real liquidation corpus:   6 cases preserved
-Historical prestate replay:            MISSING / NOT RUN
-First realized DarkBot net profit:     NOT PROVEN
-Controlled LIVE:                       BLOCKED
-Production LIVE:                       BLOCKED
-```
-
-Do not copy this status into new documents. Update the audit handoff and measurement ledger instead, and keep this section short.
+The 2026-10-05 status block that stood here remains in the git history (up to commit `1b87387`); the corresponding
+audit-era assessment is in [docs/development_history/audit_handoff_20261005.md](docs/development_history/audit_handoff_20261005.md).
+Do not copy status into this README. Update the measurement ledger and `docs/STATUS.md` instead.
 
 ---
 
 ## 11. Current implementation priority
 
-The current ordered First-Profit path is defined in the audit handoff. In abbreviated form:
-
-```text
-Candidate Cache revision correctness
--> repeat fairness / no starvation
--> R127 requalification
--> executable-floor economics
--> winner parser fixture proof
--> Drift qualification or explicit unsupported scope
--> historical prestate reconstruction
--> six-case production replay
--> short competitive Mainnet Shadow
--> controlled real liquidation
--> positive realized net P&L
--> only then Race / scale optimization
-```
+The current ordered First-Profit path is FE-00 → FE-07 (`PHASENPLAN.json` → `current_prioritized_technical_path`).
+Status per ticket and the next technically necessary steps are in [docs/STATUS.md](docs/STATUS.md).
 
 Do not start another broad architecture rewrite unless new evidence requires it.
 
@@ -521,21 +493,30 @@ Qualification:
 python3 project_0/scripts/run_r127_qualify.py ...
 ```
 
-Do not enable value-bearing LIVE solely because workspace tests are green. Follow the gates in the current audit handoff and measurement ledger.
+Do not enable value-bearing LIVE solely because workspace tests are green. Follow the gates in `docs/STATUS.md` and the measurement ledger.
 
 ---
 
 ## 14. Git / rollback anchors
 
-Important preserved branches:
+Project 0 tags (structure reform baselines):
 
 ```text
-archive/r127b-pre-batch-20261005
-archive/r127c-batch-partial-20261005
-archive/r127d-initial-64slot-20261005
-archive/r127d-1slot-prequal-20261005
-archive/r127d-pass-runtime-20261005
-archive/project0-audit-baseline-20261005
+project0-last-qualified-20261014     0782d8b  qualified operational baseline
+project0-last-unstructured-20261014  4c271cb  reform start; includes FE-01 WIP
+project0-runtime-config-preview-20261014  e01560f  runtime configuration preview
+```
+
+The `archive/*` branches named in the 2026-10-05 changelogs no longer exist locally or on `origin`
+(checked 2026-10-14). Their documented commits are still reachable from `main`:
+
+```text
+archive/r127b-pre-batch-20261005           bdcaa41c2c41eeefdacad08e7a8285a7f1921b79
+archive/r127c-batch-partial-20261005       dde69699a9943e376ca4343d454f8e3177ee9b36
+archive/r127d-pass-runtime-20261005        cf5085e796b4956fcf2376d08369b2b818dff39a
+archive/project0-audit-baseline-20261005   799048f8fa95df4c29f2aa6b35bcc3615405fe19 (audited runtime source)
+archive/r127d-initial-64slot-20261005      no commit SHA documented
+archive/r127d-1slot-prequal-20261005       no commit SHA documented
 ```
 
 Use the changelog/rollback documents before reverting runtime behavior:
@@ -564,7 +545,7 @@ Update this file whenever any of the following changes:
 - a canonical document changes role;
 - a production crate is added/removed;
 - evidence storage conventions change;
-- the canonical handoff file changes;
+- the role of `docs/STATUS.md` changes;
 - the primary build/qualification entry point changes.
 ```
 

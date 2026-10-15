@@ -1,3 +1,5 @@
+> **HISTORICAL — superseded.** This 2026-10-05 handoff (including its 2026-10-07 override) is no longer the current status or work order. Current status: [../STATUS.md](../STATUS.md). The original text below is unchanged.
+
 # Project 0 — Audit Handoff / Current State — 2026-10-05
 
 ## Purpose
