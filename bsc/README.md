@@ -1,11 +1,10 @@
-# BSC — schlanke Produktionsarchitektur und verbindlicher Umstrukturierungsplan
+# BSC — Produktionsarchitektur, fachliche Benennung und Refactoring-Aufträge
 
-**Status: STRUKTURREFORM R1–R8 UMGESETZT (2026-10-15) — ABNAHME UND COMMIT DURCH DEN NUTZER AUSSTEHEND.** Ist-Stand, Abweichungen und Prüfprotokoll: §7.  
-**Stand: 2026-10-15.** Maßgeblich sind der tatsächliche Git-Stand und die existierenden Nachweise, nicht diese Zielgrafik als vermeintlicher Ist-Zustand.
+**Stand: 2026-10-15.** **R1–R8 wurde umgesetzt und als `c8362c6` nach `main` gepusht.** Der aktuelle GitHub-Iststand verwendet noch `bsc/native/` und die sechs alten kurzen Crate-Verzeichnisnamen. **Der nächste Auftrag ist R9–R13: fachliche Architektur, sprechende Namen und saubere Modulgrenzen nach §8. Dieser zweite Umbau ist NOCH NICHT ausgeführt oder abgenommen.**
 
-> **Auftrag für Claude Code:** Das bestehende BSC-Projekt **vollständig und schrittweise** in eine schlanke, funktionsfähige Architektur umstrukturieren. Alles weiterhin Benötigte aus `bsc/gates/gate0/` und anderen Altpfaden übernehmen, alle Referenzen korrigieren, **jede umgebaute Gruppe sofort prüfen** und erst nach PASS mit der nächsten Gruppe fortfahren. Keine zweite aktive Gate0-Engine, keine bloße Ablage von altem Code an einer anderen Stelle. Historisches nach `prestudy/bsc/` **außerhalb des produktiven BSC-Projekts**. Kein Codeverlust, keine stillen Änderungen an Handelssemantik, Nachweisen, Sicherheitsgates oder Hot-Path.
+> **CLAUDE CODE — ZUERST §8 LESEN.** §8 ist die verbindliche **neue** Zielarchitektur und Arbeitsanweisung. §§1–4, 6–7 dokumentieren die **abgeschlossene** Migration R1–R8 und sind kein Auftrag, diesen Umbau noch einmal auszuführen. Die Sicherheits- und Datenregeln aus §5 bleiben zwingend gültig. Der fachliche Phasenplan und die technischen Verträge bleiben maßgeblich; keine Umstrukturierung autorisiert LIVE oder eine value-bearing Transaktion. **Nur `bsc/` und bei nachgewiesenem Bedarf `prestudy/bsc/` ändern; `project_0/`, Frontend und andere Projekte niemals anfassen.**
 
-## 1. Ziel und feste Architekturentscheidungen
+## 1. R1–R8: bisherige Architekturentscheidungen (abgeschlossen, historisch)
 
 1. **Genau ein produktiver Cargo-Workspace:** `bsc/native/Cargo.toml` mit `bsc/native/Cargo.lock` und `bsc/native/rust-toolchain.toml`. **Kein** zusätzliches Root-`Cargo.toml` in `bsc/`; das eigenständige `bsc/gates/gate0/Cargo.toml` und sein Lockfile entfallen **nach der qualifizierten Migration**.
 2. **Eine produktive Implementierung pro Verantwortung:** Fachliche Semantik in Core, Wire-Encoding in Wire, geth↔Rust-Hot-Path in Fastlane, Signierung/Transport/Dispatch im Runtime-Crate, Capture/Replay in Capture, unabhängige reine Qualifikation in Qualify. Bestehende Funktionen wiederverwenden; keine zweite BUY-, Quote-, Decoder- oder State-Engine erzeugen.
@@ -16,7 +15,7 @@
 7. **Bestehende Produktvorgaben bleiben maßgeblich:** Direkter On-Chain-BUY, kein Website-/WSS-/JSON-Zwang im zeitkritischen Hot-Path; erfolgreicher Token-Erwerb ist etwas anderes als Signatur, Submission, Builder-ACK oder lokaler Handoff. `T0 → T_buy < 1 ms` bleibt eine **nicht belegte Produktanforderung**. Die aktive BSC-Roadmap priorisiert G0.7/G0.8 vor weiterer Produktion/Optimierung. Dieser Strukturplan ist **keine Freigabe** für Mainnet-Sends, Funding oder LIVE.
 8. **Andere Projekte nicht verändern:** `project_0/`, `frontend/` und sonstige Bereiche bleiben in dieser Strukturreform unverändert. Eine bestehende reine Frontend-Verknüpfung wird geprüft, aber nicht neu konzipiert.
 
-## 2. Verbindlicher Zielbaum — nach vollständiger Migration
+## 2. R1–R8: damaliger Zielbaum (umgesetzt; für R9–R13 durch §8 abgelöst)
 
 ~~~~text
 DarkBot/
@@ -62,14 +61,14 @@ DarkBot/
 
 **Keine Platzhalter anlegen:** Falls `config/`, `tools/` oder ein Crate-Unterordner fachlich keine Inhalte benötigt, keine neue Unterstruktur erfinden. Lokale Laufzeitdaten können unter `bsc/data/` entstehen, gehören aber **nicht** als getrackter Baum in Git. Historische Evidence und Daten niemals versehentlich in lokale Build-/Testordner mischen.
 
-### Cargo-Vertrag — identische Platzierung wie Project_0
+### Bisheriger Cargo-Vertrag aus R1–R8 (nur Iststand bis zur R9–R13-Migration)
 
 - Cargo **immer vom Workspace-Root** starten: `cd bsc/native`. Dort wirkt auch `rust-toolchain.toml`; allein `--manifest-path` von einem anderen Arbeitsverzeichnis garantiert nicht dieselbe Rustup-Auswahl.
 - Die sechs existierenden Crates werden **als Verzeichnisse** von `darkbot-wire`, `darkbot-core`, `darkbot-fastlane`, `darkbot-runner`, `darkbot-capture` und `darkbot-qualify` auf die obigen kurzen Namen umgestellt. **Cargo-Paketnamen und Rust-Crate-Namen zunächst behalten**, damit kein vermeidbarer Import-/API-Bruch entsteht. Erst nach separater Begründung umbenennen.
 - `native/Cargo.toml`-`members`, sämtliche `path = ...`-Abhängigkeiten, Include-/Fixture-Pfade, Build-Skripte, Manifeste, CLI-Aufrufe und Dokumentenlinks vollständig aktualisieren.
 - Bestehende `edition = "2024"`, `resolver = "3"`, Rust-Pin `1.93.1` und bewährte Versions-Pins nicht beiläufig ändern. Genau **ein** produktives Lockfile; `--locked` als Normalfall. Keine willkürlichen Dependency-Upgrades oder ungeprüften Release-Profil-Tunings.
 
-## 3. Vor jeder Verschiebung: Datei- und Verbraucherentscheidung
+## 3. R1–R8: historische Datei- und Verbraucherentscheidung
 
 **Jede einzelne bisherige Datei erhält einen Eintrag in einer Migrationsmatrix** (temporär während des Umbaus, am Ende als kompakter Nachweis in der README oder `docs/EVIDENCE.md`):
 
@@ -107,7 +106,7 @@ Klassen:
 
 **Besonders kritisch:** `V2_RELATIVE_PATH` im Acceptance-Guard ist aktuell ein **exakt geprüfter** alter Pfad nach `bsc/gates/gate0/evidence/g01_mainnet_acceptance_proposal_v2.json`. Dieser Pfad, seine Tests sowie fest verdrahtete Shell-/Node-Referenzen müssen **zusammen** migriert werden. Die v2-Vertragsdatei selbst darf sich dabei nicht stillschweigend ändern. Bestehende Hashes in historischen Nachweisen unverändert lassen; neue Pfade separat nachvollziehbar indizieren. Falls eine Pfadidentität selbst Teil eines eingefrorenen Beweises ist, nicht behaupten, die bloße Pfadverschiebung sei beweisidentisch; benötigte neue Qualifikation ausdrücklich durchführen.
 
-## 4. Acht Migrationsgruppen — JEDE Gruppe separat prüfen
+## 4. R1–R8: abgeschlossene Migrationsgruppen (nicht erneut ausführen)
 
 **Regel:** Vor jeder Gruppe gezielt Verbraucher und alte/neu geplante Pfade inventarisieren. Dann ausschließlich die definierte Gruppe ändern, Referenzen **in derselben Gruppe** korrigieren, zielgerichtet testen, PASS/FAIL mit betroffenen Dateien dokumentieren. **Kein Weitermachen bei FAIL.** Keine parallele Bearbeitung derselben Cargo-/Guard-/Phasenplan-Dateien durch mehrere Agenten.
 
@@ -124,7 +123,7 @@ Klassen:
 
 **Reihenfolge bei echter Abhängigkeit anpassen, aber nie Prüfgrenzen überspringen.** R6 darf keine noch von R4/R5 benötigte Datei aus dem Zugriff reißen. Eine Hilfsfunktion darf provisorisch vorhanden sein, aber am Ende bleibt pro Semantik nur **ein produktiver Eigentümer**. Nicht jeder ursprüngliche Gate0-Binary wird als Produktionsbinary übernommen.
 
-### Prüfökonomie — verbindliches Limit: maximal 10 Testdurchläufe INSGESAMT
+### Historisches Testbudget R1–R8: höchstens 10 Durchläufe insgesamt
 
 - **Umbau → passende Prüfung → nächster Umbau → passende Prüfung.** Nach jeder Gruppe den veränderten Pfad durch Build, Syntax-/Referenzprüfung und – wenn ausführbarer Code betroffen ist – durch einen gezielten Funktionstest absichern. Bei FAIL ausschließlich die betroffene Gruppe korrigieren; niemals fehlerhaft weiterbauen.
 - **Harte Obergrenze: höchstens ZEHN (10) tatsächliche Testdurchläufe insgesamt für R1–R8**, nicht zehn volle Suiten plus beliebig viele Einzeltests. Jeder Aufruf von `cargo test`, `pytest`, `unittest`, einem Integrations-/Regressionstest oder einem ausführbaren Testharness zählt als **ein Testdurchlauf**, auch wenn intern viele Testfälle enthalten sind. Tests nach Möglichkeit pro Gruppe sinnvoll bündeln. Kompilierung (`cargo check`), Metadaten, `git diff --check`, `bash -n`, `node --check` und `cargo fmt --check` sind kurze Struktur-/Syntaxprüfungen, keine vollständigen Testdurchläufe; auch diese nicht unnötig wiederholen.
@@ -158,7 +157,7 @@ Bei echten Änderungen an einem Rust-Modul sind dessen eigene Tests zu verwenden
 - Die aktuelle fachliche Roadmap [BSC_DUAL_VENUE_ROADMAP.md](docs/BSC_DUAL_VENUE_ROADMAP.md), [GATE0_TESTPLAN_SHORT.md](docs/GATE0_TESTPLAN_SHORT.md), [BSC_PRODUCTION_BUILD_MASTER_PLAN.md](docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md) und technische Verträge bleiben **solange autoritativ**, bis die vollständige nachweisbare Übernahme in den neuen Phasenplan bestätigt ist. Eine kurze Zusammenfassung **ersetzt keinen** vollständigen verbindlichen Vertrag.
 - **Verbindliche Rangfolge:** Der bestehende fachliche BSC-Phasenplan und seine technischen Verträge sind die **inhaltliche Basis und fachliche Autorität**; diese README legt **ausschließlich** das neue Datei-/Cargo-/Test-Layout und den schrittweisen Umzug fest. Bei einem Konflikt darf Claude den Phasenplan weder abschwächen noch stillschweigend umdeuten; die betroffene Stelle mit Lösung dokumentieren. Die ausdrückliche Nutzeranweisung erlaubt jetzt den **reinen Strukturumbau R1–R8 als begrenzte Ausnahme von der bisherigen Arbeitsreihenfolge**, nicht aber vorgezogene C1/C2-Featurearbeit oder eine Änderung der fachlichen G0.7/G0.8-Anforderungen. Der Umbau ist keine LIVE-, Budget-, Mainnet- oder Wirtschaftsfreigabe.
 
-## 6. Abnahme: Wann gilt die Strukturreform als fertig?
+## 6. R1–R8: damalige Abnahmekriterien (für R9–R13 siehe §8)
 
 **Fertig nur, wenn alle Bedingungen erfüllt sind:**
 
@@ -170,13 +169,13 @@ Bei echten Änderungen an einem Rust-Modul sind dessen eigene Tests zu verwenden
 6. Produkt-Contracts, gebundene Beweise, Nicht-Send-Verhalten, Guards, Scope und Wirtschaftlichkeits-/Zeitdefinitionen sind erhalten; kein stiller LIVE-Statuswechsel.
 7. Jeder der acht Gruppen liegt ein verständlicher, kurzer Prüfbericht mit Ziel, Diff, Testergebnis und nächster Freigabe zugrunde. Am Ende ist die Gesamtprüfung grün.
 
-**Arbeitsbeginn für Claude:** Der Nutzer führt zuerst `git pull --ff-only origin main` aus (nur bei geeignetem Git-Status). Danach liest Claude dieses README, den verbindlichen fachlichen BSC-Phasenplan, den aktuellen HEAD, beide Cargo-Manifeste sowie die tatsächlichen Verbraucher von G0.7/G0.8. **R1 bis R8 in der beschriebenen Reihenfolge umsetzen, jeweils umbauen, Referenzen prüfen, höchstens einen gezielten Test pro Gruppe und erst bei PASS weiterarbeiten.** Maximal zehn Tests insgesamt. Kein selbstständiger Commit/Push, kein überflüssiges Testing und niemals eine value-bearing Transaktion.
+**Historische Anweisung R1–R8 (erledigt):** Die damalige sequenzielle Migration wurde durchgeführt; Arbeitsbeginn für den **neuen** Auftrag und seine gesonderten Abnahmekriterien stehen in §8. Kein automatischer Commit/Push, kein überflüssiges Testing und niemals eine value-bearing Transaktion.
 
 ## 7. Umsetzungsstand R1–R8 (2026-10-15)
 
 Ausgangscommit `7f3c08b`. Vollständige Migrationsmatrix, Originalpfade, Hash-Nachweise und Prüfprotokoll: [docs/EVIDENCE.md](docs/EVIDENCE.md). Einstieg: [docs/PHASENPLAN.md](docs/PHASENPLAN.md), [docs/STATUS.md](docs/STATUS.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-**Ist-Baum** (entspricht §2 bis auf die begründeten Abweichungen unten):
+**R1–R8-Ist-Baum am Commit `c8362c6`** (vor dem neuen Refactoring gemäß §8):
 
 ~~~~text
 bsc/
@@ -212,4 +211,136 @@ prestudy/bsc/{experiments,references,evidence}/   # historisch, kein Build-Membe
 
 **Nicht ausgeführt, daher nicht PASS:** voller G0.6a-DRY, EVM-Crosscheck gegen RPC, `g07_pre_live_readiness.sh`, jede G0.7-Ausführung, G0.8 gegen echte Blöcke. Vor einer Scharfschaltung ist ein neuer DRY-Lauf nötig (der DRY-Report enthält den neuen v2-Pfad).
 
-**Offen:** flaky `fastlane`-Test `role_leases_are_exclusive_per_role_and_coexist_across_roles` (einmal rot in der Baseline vor jeder Änderung); nicht eingebundene C1-Vorarbeit (untracked Fastlane-/Go-Dateien, Stash „local-before-p2p-fix-20261011“ `5753f70`) ist erhalten, muss nach dem Commit der Reform beim Einspielen auf die neuen Ordner (`crates/fastlane`, `tools/`) abgeglichen werden.
+**Offen im R1–R8-Prüfbericht:** flaky `fastlane`-Test `role_leases_are_exclusive_per_role_and_coexist_across_roles` (einmal rot in der Baseline); C1-Vorarbeit und der lokale Stash „local-before-p2p-fix-20261011“ (`5753f70`) erfordern gesonderte Bestandsprüfung. Im GitHub-Iststand `c8362c6` liegen `fastlane/src/{host,hot0,outbound}.rs` und entsprechende Go-Overlay-Dateien bereits im Repository, sind aber in `fastlane/src/lib.rs` nicht als Module eingebunden. **Vorhandensein bedeutet weder Kompilierung noch Integration oder Qualifikation.** Kein blindes `git stash pop`.
+
+## 8. NEUER AUFTRAG R9–R13 — lesbare BSC-Architektur nach EVA01
+
+**Gültigkeit:** Dieser Abschnitt ersetzt für alle folgenden **Struktur- und Benennungsarbeiten** den alten Zielbaum in §2. Er ersetzt **nicht** den fachlichen [BSC-Phasenplan](docs/PHASENPLAN.md), [BSC_DUAL_VENUE_ROADMAP.md](docs/BSC_DUAL_VENUE_ROADMAP.md), [Runtime-Vertrag](docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md), Acceptance-Guard, Sicherheitsregeln aus §5 oder Nachweise. **Die hier gezeichnete Struktur ist ein Ziel, nicht der derzeitige Git-Baum.** Nach erfolgreichem Umbau die README zum geprüften Iststand aktualisieren.
+
+### 8.1 Vorbild und Entwurfsprinzip
+
+Referenz: [0dotxyz/eva01](https://github.com/0dotxyz/eva01), insbesondere `src/main.rs`, `src/cache/` und `src/execution/{mod,executor,inventory}.rs`. Vorbild ist **fachliche Lesbarkeit**: `cache`, `geyser`, `execution`, `liquidator`, `rebalancer`, `config`, `cli`. **Nicht** übernehmen: Ein-Crate-Zwang, fremde Solana-Handelslogik, unscharfe Sammelnamen wie `utils`/`wrappers` oder für BSC unpassende Netzwerkpfade.
+
+**Entwurfsregeln:**
+1. **Kurz und eindeutig:** Verzeichnis/Modul nennt die wirkliche Verantwortung, nicht einen Meilenstein oder eine Marketing-Eigenschaft. `geth_ipc` statt `fastlane`, `journal` statt `capture`. Kein `manager`/`utils`/`common` als Universal-Sammelplatz.
+2. **Nur sechs Crates**, solange keine belegte neue Dependency-, ABI-, Sicherheits- oder Ownership-Grenze ein weiteres erfordert. Innerhalb der Crates nach Funktion gliedern, nicht je Phase ein Crate.
+3. **Keine Dekorationsordner:** Ein kleines eigenständiges Modul bleibt `name.rs`; ein Verzeichnis entsteht nur bei mehreren echten Teilverantwortungen. Keine leeren Platzhalter.
+4. **Ein Eigentümer je Funktion:** Domain/Trading trifft wirtschaftliche Entscheidungen, Execution versendet nur zulässige Pläne, IPC transportiert nur Records/Bytes, Qualification bewertet Nachweise ohne Kauf. Keine zweite Signierung, Quote, BUY- oder Release-Engine.
+5. **Berechtigte Versionsnamen erhalten:** `WireV1`/`WireV2` sind echte ABI-/Protokollversionen. `protocol_v1.rs` und `protocol_v2/` sind fachliche Namen, keine Löschung der Versionierung.
+6. **Keine Semantik- oder Latenzänderung:** Der neue Baum ist für Menschen besser lesbar, aber erzeugt keine gemessene Hot-Path-Verbesserung. Keine zusätzlichen WSS-/JSON-/RPC-Schritte in der kritischen Kette.
+
+### 8.2 Verbindliche Namenszuordnung (ALT → ZIEL)
+
+| Heute in `c8362c6` | Ziel | Eindeutige Verantwortung |
+|---|---|---|
+| `bsc/native/` | `bsc/engine/` | Einziger Rust-Cargo-Workspace |
+| `crates/core/` | `crates/trading/` | Chain-State, Venues, Economics, Intent, Transaktionen, Signer, Submission-Policy; reine Fachlogik, keine externen Sends |
+| `crates/wire/` | `crates/tx_encoding/` | Binäre TX-/RLP-Kodierungsprimitive, keine doppelte TX-Geschäftslogik |
+| `crates/fastlane/` | `crates/geth_ipc/` | geth↔Rust Shared Memory / mmap / SPSC / Peer-Lanes / geth-Outbound-Evidence |
+| `crates/runtime/` | `crates/execution/` | Startup, Transporte, Builder-Adapter und zulässiger Submission-/BUY-Dispatch |
+| `crates/capture/` | `crates/journal/` | Journalformat, begrenzte Aufzeichnung, Replay |
+| `crates/qualify/` | `crates/qualification/` | Read-only-Probes, Messungen, Evidenz, Abnahme-/Verdiktlogik |
+| `trading/src/inclusion/` (heute `core/src/inclusion/`) | `trading/src/submission_policy/` | Provider-Capabilities, Release-Profile, unveränderliche Submission-Pläne; **kein Transport** |
+| `execution/src/inclusion/` (heute `runtime/src/inclusion/`) | `execution/src/submission/` | Provider-Framing, TLS/Transport, Response, Versand; **keine Handelsentscheidung** |
+| `geth_ipc/src/v2.rs` (heute `fastlane/src/v2.rs`) | `geth_ipc/src/protocol_v2/` | Wire-V2-Layout und Peer-/Lane-Lifecycle in getrennten Modulen, Byte-Layout bleibt exakt gleich |
+| `geth_ipc/src/lib.rs`-V1-Implementierung | `geth_ipc/src/protocol_v1.rs` (+ ggf. `shared_memory/`) | V1-Protokoll unter sprechendem Namen; keine ungewollte API-/ABI-Abweichung |
+| `bsc/native/geth/` | `bsc/geth/` | Gepinnter Go-geth-Overlay und seine **weiterhin geltenden** Wire-Spezifikationen/Pin-Dateien |
+
+**Crate-Paketnamen:** Konsistentes Schema `darkbot-bsc-trading`, `darkbot-bsc-tx-encoding`, `darkbot-bsc-geth-ipc`, `darkbot-bsc-execution`, `darkbot-bsc-journal`, `darkbot-bsc-qualification` **als Ziel**, nicht vorschnell vor der Import-/Consumer-Inventur ändern. Die daraus resultierenden Rust-Importnamen und Cargo-Features samt `-p`-Aufrufen vollständig korrigieren. Bestehende CLI-Namen, die vertraglich durch Skripte/Nachweise gebraucht werden (`g07_mainnet_self_launch_buy`, `g08_mainnet_verify`, `g08_producer_timing`), zunächst stabil lassen; ggf. eigene dokumentierte spätere CLI-Migration. Fachbegriffe `economics`, `venues/flap`, `intent` beibehalten: `pricing` oder `launchpads` wären teils zu eng. `signer.rs` nur wenn nach Aufteilung wirklich eine Datei genügt.
+
+**Code-Namenskonvention:** Module/Pfade `snake_case`; Rust-Typen/Traits `UpperCamelCase`; Funktionen beschreibend `verb_object` (z. B. `verify_submission_plan`); Testnamen nennen überprüfte Bedingung (z. B. `rejects_stale_lane_epoch`). `G0.7`/`C1.7` sind **Nachweis-/Phasenkennungen**, keine fachlichen Modulverzeichnisse. Vorhandene öffentliche API-/ABI-/CLI-Namen nur mit vollständiger Verbraucheranalyse und nachgewiesener Kompatibilität ändern.
+
+### 8.3 Zielbaum R9–R13 (fachlich, keine Platzhalter-Vorgabe)
+
+```text
+DarkBot/
+├── bsc/
+│   ├── README.md
+│   ├── .gitignore
+│   ├── engine/                           # EINZIGER produktiver Rust-Workspace
+│   │   ├── Cargo.toml
+│   │   ├── Cargo.lock
+│   │   ├── rust-toolchain.toml
+│   │   └── crates/
+│   │       ├── trading/
+│   │       │   └── src/
+│   │       │       ├── lib.rs
+│   │       │       ├── chain_state/
+│   │       │       ├── venues/flap/
+│   │       │       ├── economics/
+│   │       │       ├── intent/
+│   │       │       ├── transactions/
+│   │       │       ├── signer.rs         # oder kleines Modul, wenn nötig
+│   │       │       └── submission_policy/
+│   │       ├── tx_encoding/
+│   │       │   └── src/{lib.rs,rlp.rs}
+│   │       ├── geth_ipc/
+│   │       │   └── src/
+│   │       │       ├── lib.rs
+│   │       │       ├── protocol_v1.rs
+│   │       │       ├── protocol_v2/      # Layout, Lanes, Lifecycle, Checksums
+│   │       │       ├── shared_memory/    # nur bei echter Untergliederung
+│   │       │       ├── ingress.rs
+│   │       │       ├── outbound.rs
+│   │       │       └── host.rs
+│   │       ├── execution/
+│   │       │   └── src/
+│   │       │       ├── lib.rs
+│   │       │       ├── startup.rs
+│   │       │       ├── submission/       # club48, blockrazor, local_geth,
+│   │       │       │                     # transport, TLS, framing, response, send
+│   │       │       ├── acceptance_guard.rs
+│   │       │       └── bin/              # G0.7: schmaler kontrollierter Einstieg
+│   │       ├── journal/
+│   │       │   └── src/{lib.rs,format.rs,recorder.rs,replay.rs}
+│   │       └── qualification/
+│   │           └── src/
+│   │               ├── lib.rs
+│   │               ├── probes/          # nur wenn mehrere Module
+│   │               ├── measurements/    # nur wenn mehrere Module
+│   │               ├── evidence/        # nur wenn mehrere Module
+│   │               ├── verdict.rs
+│   │               └── bin/             # G0.8, DRY, Producer-Timing
+│   ├── geth/                             # Go-Overlay, Pin, Wire-V1/V2-Spezifikationen
+│   │   ├── README.md
+│   │   └── overlay/
+│   ├── config/
+│   ├── tools/                            # fachlich sprechende CLI-/Prüfnamen
+│   ├── docs/
+│   └── evidence/                         # NUR wenn vertraglich freigegeben
+└── prestudy/bsc/                         # historisch, nie im Live-Build
+```
+
+Der Baum illustriert Zuständigkeiten, **nicht** die Pflicht, für jeden Eintrag sofort einen Ordner oder eine Datei anzulegen. `lib.rs`, `mod.rs`, Cargo-Manifeste und Tests müssen real korrekt verkabelt sein; Module dürfen nicht als unkompilierte Schattenimplementierung bestehen.
+
+**Getrennte Rust/Go-Platzierung:** `bsc/engine/` ist der Rust-Workspace; `bsc/geth/` der Go-geth-Overlay, kein zweiter Rust-Workspace. **Wichtige Ausnahme:** In R1–R8 wurde `bsc/native/evidence/` wegen `Q5A_TLS_EVIDENCE_PATH` und eingebundener SHA-256-Identität ausdrücklich nicht verschoben (§7). `bsc/evidence/` ist deshalb **nur ein bedingter Zielort**. **Kein** stillschweigendes Verschieben, Neueinbetten, Ändern des Qualifikationsstatus oder fälschliches Beibehalten der alten Freigabe. Erst gebundene Bytes, Pfade, Hashes, Consumer und die benötigte Requalifikation/Neubaseline klären. Bis dahin die betroffenen Evidence-Dateien unverändert bewahren; falls das einen restlichen `native/evidence`-Pfad oder einen Stopp der `native → engine`-Migration erzwingt, den Konflikt explizit melden statt mit Symlinks, neu erfundenen Hashes oder scheinbarer PASS-Meldung zu verdecken.
+
+### 8.4 Konkrete Ist-Code-Befunde: zuerst bearbeiten, nicht blind umbenennen
+
+1. `bsc/native/crates/fastlane/src/v2.rs` umfasst ca. **148 kB**; Protocol-Wire-Layout, Atomics/Shared-Memory und Peer-Lifecycle sind eng verbunden. Nach belegten Verantwortungen in `protocol_v2/` zerlegen. Byteoffsets, `#[repr]`, Alignment, SPSC-Sequenzierung, Speicherordnung, Struct-Größen, Record-Arten, CRC und Wire-Version unverändert. Rust↔Go ABI-/Fixture-/Offset-Parität beweisen.
+2. `fastlane/src/{host,hot0,outbound}.rs` sowie `geth/overlay/darkbot/fastlane/{chain_v2,outbound,qos}*.go` sind im aktuellen GitHub-Baum vorhanden; `fastlane/src/lib.rs` exportiert jedoch nur `ingress` und `v2`. **Datei im Repo ≠ im Cargo-Build integriert.** Nicht mit `pub mod` blind live schalten: Abhängigkeiten, API, Testfälle, fehlende C1-Abnahme und Stash `5753f70` gesondert inventarisieren. **HOT0:** geliehene Receive-Slots/IPC ins `geth_ipc`-Crate, Domain-Admit-/Launch-Entscheidungen ausschließlich nach `trading` bzw. der zulässigen `execution`-Orchestrierung; erst nach präziser Schnittstellenprüfung festlegen.
+3. `runtime/src/bin/g07_mainnet_self_launch_buy.rs` umfasst ca. **48 kB**. Kontrollierten Einstieg in `execution/src/bin/` erhalten; fachlich getrennte Komponenten nur bei echtem Nutzen auslagern, ohne zweite BUY-Logik, Freigabeumgehung, Timingänderung oder neue Sends. G0.7-Binary-Name und `g07-mainnet`-Feature zunächst erhalten.
+4. `capture/src/lib.rs` bündelt Journal, bounded Recorder und Replay. In `journal/src/{format,recorder,replay}.rs` zerlegen, soweit die interne Ownership sauber belegbar ist; auf unveränderte Journalbytes und Fehler-/Overflow-Semantik testen.
+5. `core/src/inclusion/` enthält Capability-/Release-/Plan-Semantik, `runtime/src/inclusion/` enthält reale Transport-/Submission-Adapter. Deshalb **zwei verschiedene Namen** `submission_policy` und `submission` – keine gemeinsame Riesenschicht.
+6. `bsc/tools/` enthält viele `g06a_*`-/`c19_*`-Namen. Ein konsistentes `action_object`-Schema für **aktive** Tools bestimmen; wenn Skripte, Evidence oder Betreiber diese als stabile CLI nutzen, bestehende Namen erhalten bis zur nachweisbaren Änderung sämtlicher Consumer. Phasen-IDs und Golden-Reportnamen nicht als wertloses Legacy löschen.
+
+### 8.5 Ausführung in fünf abgegrenzten Gruppen
+
+| Gruppe | Umsetzung | Exit-Kriterium |
+|---|---|---|
+| **R9 — Inventar und Architekturentscheidungen** | Aktuellen HEAD, lokalen Git-Status (inkl. Stash), aktive vs. nur vorhandene Module, Crate-Graph, Cargo Features, Rust/Go IPC-ABI, Imports, Testziele, `native/evidence`/Q5A-Pfad-Hashes, Werkzeuge, Konsumenten und historische Bindungen erfassen. Matrix `ALT → NEU → VERBRAUCHER → RISIKO → PRÜFUNG`. Noch keine Hot-Path-Verschiebung. | Für **jede** aktive Datei und öffentliche Schnittstelle ein neuer Besitzer; blockierende Q5A-/ABI-Fragen ausdrücklich geklärt oder gestoppt. Keine Vermischung mit Projekt_0. |
+| **R10 — Workspace, Crate- und Go-Pfade** | `native → engine`, die sechs Crate-Verzeichnisse und erforderliche Cargo-Paketnamen/Importe konsistent migrieren, `native/geth → geth` nur mit aktualisierter Go-/Tool-/Pin-Referenz. Evidence-Bindung gem. §8.3 unbedingt respektieren. | Genau ein Workspace, ein produktives Lockfile; alle Manifeste, Skripte/Imports, Go-Pins und referenzierten Pfade stimmen; `cargo metadata --locked`, `cargo check --locked --workspace`. |
+| **R11 — Fachliche Modulgrenzen** | `inclusion → submission_policy/submission`; Protocol V1/V2 fachlich strukturieren, `journal` gliedern, G0.7-Entrypoint entschlacken, HOT0/Ingress/Outbound nach überprüfter Ownership behandeln. Nie unqualifizierte C1-Module automatisch aktivieren. | Kein Doppel-Owner, keine zirkuläre Crate-Abhängigkeit, keine Änderung an Wire-/Signing-/BUY-Bytes, Offsets, Memory-Order, Guards, Admission oder Scheduling; relevante Rust-/Go-/Journal-Regressionen PASS. |
+| **R12 — Tools, API und Dokumentation** | Aktive Tool-Namen/CLI-Verbraucher und `docs/{ARCHITECTURE,STATUS,EVIDENCE,PHASENPLAN}.md` auf tatsächlichen Iststand synchronisieren; alte Phasenreferenzen als historische Quellen erhalten; keine generischen Platzhalter. | Jede fachliche Funktion aus dem Pfad erkennbar, alle aktiven Referenzen auflösbar, relevante read-only/DRY-/EVM-Tools reproduzierbar. |
+| **R13 — Abnahme/Freigabevorlage** | Endgültige Migrationstabelle, reale Verzeichnisstruktur und Testbilanz erstellen; Guards, Evidence, Script-Resolver, Build/Pins, Hot-Path, fehlende LIVE-Nachweise prüfen; explizite Nutzerprüfung **vor** Commit/Push. | Sechs klar benannte Crates und der getrennte Go-geth-Overlay; kein zweiter Codepfad; keine offenen stillen ABI-/Evidence-/Security-Drifts, keine Tests als PASS erfinden. |
+
+**Jede Gruppe erst abschließen, wenn ihre maßgeblichen Checks PASS sind.** Bei Problemen nur die betroffene Gruppe korrigieren, keinen blind vorbereiteten Stash einspielen, keine anderen Projekte anfassen. Die bereits dokumentierten **9/10 Testdurchläufe gehören ausschließlich zu R1–R8**; für R9–R13 einen **eigenen, maximal 10 Durchläufe umfassenden Testplan** vor der Umsetzung festlegen. Ein `cargo test`-/Integrations-/Regressionstest-Aufruf zählt als ein Durchlauf; `cargo check`, `cargo metadata`, `cargo fmt --check`, `bash -n`, `node --check` und Git-Diff-Prüfungen sind Struktur-/Syntaxchecks. Keine unnötigen Stresstests, keine LIVE-/Mainnet-Sends. Wenn eine erforderliche Paritätsprüfung innerhalb des Testlimits nicht belegt werden kann: **nicht als abgeschlossen erklären** und um weitere explizite Freigabe bitten.
+
+### 8.6 Abnahmeliste und Arbeitsanweisung für Claude
+
+- **Funktionsparität:** TX-/RLP-Bytes, Signer/Nonce/Gas/Slippage/Quote/Builder-Budget, Release-Plan/Provider-Capability, G0.7-Gate `FROZEN_APPROVED_V2_SHA256 = "UNARMED"`, `approved=false`, `execution_ready=false`, G0.8 read-only, G0.6a DRY und unabhängige EVM-Gegenprüfung unverändert.
+- **IPC-/Journal-Parität:** V1/V2-Wire-Formate, ABI/Go-Rust-Offsets, Atomics/Memory-Ordering, per-peer SPSC, Outbound-Evidence, bounded Recording/Replay, Crash-/Restart-/Quarantäne-Verhalten unverändert; nicht integrierte Module dürfen nicht als aktive Runtime-Leistung verkauft werden.
+- **Keine Performancebehauptung durch Refactoring:** Ziel `T0 → T_buy < 1 ms` bleibt unbewiesen, keine WSS/JSON im kritischen Hot-Path, Tokenkauf ≠ lokale Übergabe/ACK/Receipt/Inclusion.
+- **Keine LIVE-/Mainnet-Freigabe:** Refactor ist keine Autorisierung von Funding, SEND, Wallet-/Builder-Kosten oder Handelsstrategie. Kein G0.7-Binary ausführen, solange nicht gesondert freigegeben.
+- **Projektgrenzen:** Ausschließlich `bsc/`, bei Bedarf `prestudy/bsc/`. `project_0/` ausdrücklich **nicht** ändern, verschieben, stagen, entstagen, committen oder sonst beeinflussen. Auch die bereits eventuell dort gestagten Änderungen unangetastet lassen. Keine generellen Git-Clean-/Reset-/Add-Befehle.
+- **Arbeitsweise:** Zuerst `git status -sb`, `git log -1`, dieses README und die fachlichen Verträge lesen. Bestehende lokale uncommitted Arbeit/Secrets/Stashes sichern, nicht einfach `git pull` über einen schmutzigen Baum. Arbeitsstand auf `c8362c6` oder neueren geprüften HEAD beziehen. R9–R13 nacheinander durchführen, am Ende ein **kompaktes, menschenlesbares** Ergebnis: echter Zielbaum, Alt→Neu-Matrix, Prüfergebnisse, klare Restmängel. Ohne eigene Nutzerfreigabe **kein Commit/Push**.
