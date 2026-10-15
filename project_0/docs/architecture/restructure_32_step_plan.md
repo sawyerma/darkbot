@@ -1,7 +1,7 @@
 # Project_0 — 32-Iterationen-Strukturreform (verbindliches Fortschrittsregister)
 
 **Stand:** 2026-10-15. **Baseline:** `main` auf `958d0b3d862d964866fd2646cd53b44105263673` vor Anlage dieser Datei.
-**Reformstatus:** **Phase A 7/7 abgeschlossen; Iteration 8a (Gitignore-Schutz) auf main gesichert; Iteration 8b (Run-Struktur) offen.** Streng gezählt sind **7 von 32 Hauptiterationen vollständig abgeschlossen**, 8 ist teilweise bearbeitet.
+**Reformstatus:** **Phase A 7/7 abgeschlossen; Iteration 8a (`958d0b3`) und 8b.1 (`e8e904cc5e350e2edfc382230c4189d34a4aa003`) auf `main` gesichert. Iteration 8b.2 ist NÄCHSTER SCHRITT, 8b.3 noch offen.** Streng gezählt sind **7 von 32 Hauptiterationen vollständig abgeschlossen**; Iteration 8 bleibt PARTIAL, bis 8b.2 und 8b.3 qualifiziert sind.
 **Aktueller Wiederaufnahme-Handoff:** [../operations/restructure_handoff.md](../operations/restructure_handoff.md).
 
 ## Ziel und Abgrenzung
@@ -21,7 +21,7 @@ Die Reihenfolge ist absichtlich kleinteilig: jeweils Inventur, genau ein Migrati
 | 05 | A | Qualifikationsdokumentation unter `docs/qualification/` | **DONE** `a69af18` |
 | 06 | A | Historische Handoffs/Audits unter `docs/development_history/` | **DONE** `1b87387` |
 | 07 | A | Aktueller Status `docs/STATUS.md`, Dokumentationsnavigation, historischer Audit-Handoff | **DONE** `8b5c984` |
-| **08** | **B: Daten/Config** | **Run-Ablage `data/runs/<run_id>/`** inkl. Schutzprüfung vor jeder Migration | **PARTIAL:** 8a Gitignore-Sicherheit `958d0b3` **DONE**, **8b OPEN/NEXT** |
+| **08** | **B: Daten/Config** | **Run-Ablage `data/runs/<run_id>/`** inkl. Schutzprüfung vor jeder Migration | **PARTIAL:** **8a DONE** `958d0b3`; **8b.1 DONE** `e8e904c` (validierter Opt-in-Run-Store, Legacy-Defaults, 15 neue Tests); **8b.2 NEXT** (versionierte Layout-/Verifier-Migration), **8b.3 OPEN** (Defaults umstellen) |
 | 09 | B | `data/cache/` und temporäre Arbeitsdaten | OPEN |
 | 10 | B | `config/profiles/` für geprüfte, typisierte Laufzeitprofile | OPEN |
 | 11 | B | `config/examples/` für bereinigte Beispiele | OPEN |
@@ -47,7 +47,20 @@ Die Reihenfolge ist absichtlich kleinteilig: jeweils Inventur, genau ein Migrati
 | 31 | F | Alle README-/Navigations-/Kompatibilitätsverweise finalisieren | OPEN |
 | 32 | F | Gesamte Offline-/CLI-/Build-/Replay-Endqualifikation | OPEN |
 
-**Phasenbilanz:** A **7/7 DONE**; B **0/5 vollständig**, 8a als erster Teil erledigt; C **0/8**; D **0/5**; E **0/4**; F **0/3**.
+**Phasenbilanz:** A **7/7 DONE**; B **0/5 vollständig** (8a und 8b.1 DONE, 8b.2/8b.3 offen); C **0/8**; D **0/5**; E **0/4**; F **0/3**.
+
+## Iteration 8 – Unteriterationen und nachgewiesener Stand (2026-10-15)
+
+| Unteriter. | Inhalt | Abnahme / Git |
+|---|---|---|
+| **8a** | Laufzeitdaten- und Secret-Ignore-Regeln, ohne historische Evidence auszuschließen | **DONE** `958d0b3` |
+| **8b.1** | [Run-Store-Vertrag](../operations/run_storage.md) als Opt-in über `P0_RUN_STORE=runs`, zentrale Pfadvalidierung, `data/runs/` ignoriert, Cross-Root-Kollisionsschutz via lokalem `flock`, alte Standardpfade unverändert | **DONE** `e8e904cc5e350e2edfc382230c4189d34a4aa003`; eigenständiger Nutzer-Abnahmelauf `PROJECT0_8B1_PUSH_PASS` |
+| **8b.2** | Zukunftslayout und Reader/Writer-Migration unter **expliziter versionierter** Spec-/Checkpoint-/Report-Identitätsstrategie, Legacy-Reader-Kompatibilität | **OPEN / NEXT**; gepinnte `measurement_contract.py`, `audit_market_quick.py` und `market_report.py` in 8b.1 unverändert |
+| **8b.3** | Qualifizierter Wechsel des Standard-Stores auf `data/runs/` bei unveränderten historischen Läufen und CLI-Kompatibilität | **OPEN**; nicht vor 8b.2 |
+
+**8b.1-Tests (auf dem Mac durch Nutzer nach Astra-Review bestätigt):** Python **83/83 PASS** (davon 15 neue Run-Store-Tests), Rust `crate_health` **375 PASS / 1 ignored**, Rust `crate_health,txv1` **377 PASS / 1 ignored**, beide Release-Builds PASS, Clippy-Aufruf PASS, Git-/Syntax-/Pinned-Identity-Checks PASS. Astra meldete den Differential-Clippy-Vergleich **38→38** und den parallelen Kollisions-Stresstest 5×12 Prozesse; diese beiden Zusatzangaben stammen aus Astras Bericht. Testlog `/tmp/project0-8b1-final.rmmPEa` **nur lokal**, nicht im Git-Repository.
+
+**Aktuelle fachliche Grenzen:** `P0_RUN_STORE` bleibt standardmäßig `legacy`. Explizite Pfade zu `data/runs/<id>` funktionieren mit den vorhandenen Lesern; bloßes `--run <id>` sucht diesen Store **noch nicht**. Das aktuelle Run-Dateiformat wurde **nicht** umstrukturiert. Das Lock garantiert Cross-Root-Serialisierung nur auf dem lokalen unterstützten Dateisystem. Keine Mainnet-/LIVE-/Wirtschaftlichkeitsfreigabe.
 
 ## Geplanter Zielbaum (nicht mit dem Ist-Zustand verwechseln)
 
