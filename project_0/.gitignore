@@ -1,0 +1,20 @@
+# Project_0 local runtime data protection.
+# Narrow, path-anchored rules only. The repository-root .gitignore still applies
+# (.env, *.log, SQLite, **/target/, key and secret material) and is not repeated here.
+# Versioned evidence belongs in docs/evidence/ and is not affected by this file.
+
+# Run and capture output at the default locations used by the runtime and launchers.
+# econ.rs P0_ECON_OUT_DIR; run_econ4h.sh; run_gap_reconnect_smoke.sh
+/data/econ4h/
+# market_observer.rs P0_MARKET_OUT_DIR; run_market_observer.sh
+/data/market/
+# main.rs P0_RECORD_PATH, P0_SUMMARY_PATH, P0_MT0_PATH; run_shadow_mainnet.sh; run_econ4h.sh
+/data/shadow/
+# c0_census.py --out default
+/data/c0/
+
+# Local integration results kept outside docs/evidence/; never versioned.
+/evidence/C0_E1_local_integration_20261008/
+
+# Local shell environment file with private settings. The root rule env/ matches directories only.
+/env
