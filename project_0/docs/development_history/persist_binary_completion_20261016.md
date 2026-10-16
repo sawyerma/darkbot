@@ -1,6 +1,6 @@
 # Binary journal completion (PERSIST-01 to PERSIST-05), 2026-10-16
 
-Base: `bb26313` (binary journal WIP on `main`). Work tree, not committed. Contract: `docs/PHASENPLAN.md`, PERSIST-01 to
+Base: `bb26313` (binary journal WIP); **committed to `main` as `4a27a1c`**. Der folgende Bericht enthält die ursprüngliche lokale Arbeitsbeschreibung; Aussagen „uncommitted / not pushed“ am Dokumentende sind historisch, nicht der aktuelle Git-Status. Contract: `docs/PHASENPLAN.md`, PERSIST-01 to
 PERSIST-05. The existing `analytics/journal.rs` and `analytics/evidence.rs` were continued; no second journal
 implementation. Python never encodes or decodes the format: it calls `p0-journal`. Evidence:
 [PERSIST_BINARY_20261016](../evidence/PERSIST_BINARY_20261016/qualification.json).
