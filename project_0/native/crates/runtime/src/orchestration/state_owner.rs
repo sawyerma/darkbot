@@ -66,6 +66,7 @@ macro_rules! owner_log {
 
 mod accounts;
 mod candidates;
+mod census;
 use accounts::*;
 use candidates::*;
 
@@ -91,6 +92,8 @@ pub(super) struct ShadowOwner {
     // Read once at setup, never from the environment on the owner thread.
     eval_slippage_bps: u64,
     zero_prefund_enabled: bool,
+    /// [C0-02] Opt-in one-shot census at the first READY; taken when it runs.
+    c0_census: Option<census::CensusConfig>,
     required_dependency_keys: Vec<Pubkey>,
     mt0_reporter: darkbot_common::mt0::Reporter,
     optional_dependency_keys: Vec<Pubkey>,

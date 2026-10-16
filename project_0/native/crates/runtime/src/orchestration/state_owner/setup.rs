@@ -817,6 +817,7 @@ pub(super) fn prepare(
             .unwrap_or(false)
             || (mode == "shadow"
                 && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false).unwrap_or(false)),
+        c0_census: super::census::config()?,
         mode,
         required_dependency_keys,
         mt0_reporter,

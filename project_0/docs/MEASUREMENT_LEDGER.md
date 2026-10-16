@@ -5372,3 +5372,15 @@ Tests (targeted): `darkbot-project0` lib 65/65 PASS (`crate_health`); `darkbot-r
 Base `25eeea5`. [Manifest RC2 section](manifests/UPCOMING_0_1_12.md). Isolated scratch copy, productive 0.1.11 pin unchanged.
 
 `darkbot-project0` + `darkbot-runner` (all targets, `crate_health,txv1`) type-check against `mrgn-0.1.12-rc2` (`9fcb729`) after exactly 4 call-site argument additions (`premium_scratch`, `ignore_pt_emergency` ×3). Promotion tripwires fire against RC2 as designed (Bank 3904 ≠ 1856; 1864 B bank no longer decodes). RC2 IDL `marginfi.json` SHA-256 `b4f80a6c…72fb2`: 5 account and 8 receivership instruction discriminators equal `protocol.rs`; new tag/close liq-record instructions; `repay_all: Option<bool>`. Premium-aware Health/repay semantics recorded as promotion work. No Mainnet call.
+
+## 2026-10-16 — C0 market census: classifier implemented, gate NOT_PROVEN
+
+Base `581237e`. [C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md).
+
+- New `darkbot_project0::census` (typed, no JSON): healthy / premium_driven / race_now / long_tail (`t_profitable`, ≤1 h/24 h/7 d) / uneconomic / bad_debt / unsupported by reason (incl. `UnknownLayout` for 0.1.12-resized banks), with equity USD sums per class. Explicit cost model, no defaults.
+- Shadow hook: one census at the first READY with `P0_C0_CENSUS=1` and mandatory `P0_C0_REALIZABLE_BPS`, `P0_C0_FIXED_COST_USD_MICRO`, `P0_C0_MIN_PROFIT_USD_MICRO`; one `c0_census:` log line.
+- Existing evidence reused and labelled historical: C0-01 census (slot 452723812), group flags (slot 452727389), 4 h run rejection mix (24,569 opportunities, executable edge 0, market liquidations 0 / data incomplete).
+
+Tests: `census::tests` 2/2 PASS; `cargo check` runner `crate_health,txv1` all targets and featureless PASS. No Mainnet call.
+
+**Gate C0 NOT_PROVEN:** current census run needs Mainnet read-only permission and a measured cost model.

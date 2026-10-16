@@ -212,6 +212,9 @@ impl ShadowOwner {
                         "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={} threshold_trigger={}",
                         indexed_banks, indexed_accounts, unsupported_banks, self.threshold_bootstrap.len(), self.use_threshold_trigger
                     );
+                        if let Some(cfg) = self.c0_census.take() {
+                            self.run_c0_census(cfg);
+                        }
                         if !self.use_threshold_trigger {
                             // [R127c] eva01 parity: one full debtor scan at startup so an account
                             // already underwater before StreamReady cannot wait forever for a future

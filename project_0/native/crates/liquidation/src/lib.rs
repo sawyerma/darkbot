@@ -4,6 +4,7 @@
 //! - `index`: Reverse-Indices und Schwellen-Index (P2).
 //! - `schedule`: Premium- und Tag-Scheduler (P2, zeitgetriebene Trigger b/c).
 //! - `health`: Health-Engine-Contract; Implementierung = `marginfi`-Crate (P3, Feature `crate_health`).
+//! - `census`: C0 Account-Klassen (healthy/race/long-tail/premium/bad debt/unsupported) und Summen.
 //! - `economics`: deterministische Profit-Engine, Premium-Kurve, Failed-Cost-Matrix (P4A).
 //! - `prepared`: Prepared-Candidate-Cache mit Invalidation (P2-06/07).
 //! - `safety`: Controlled-LIVE Limits und Halts (P8-LT).
@@ -13,6 +14,7 @@
 //!
 //! Status: UNTESTED / VERIFY.
 
+pub mod census;
 pub mod economics;
 pub mod execution;
 pub mod funding;
