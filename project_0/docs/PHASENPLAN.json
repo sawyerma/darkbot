@@ -3,9 +3,9 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/PHASENPLAN.md",
-    "git_blob_sha": "af6ede3e5637277bc322ebe2664a64316791daff",
+    "git_blob_sha": "0ca7687652806f843af146d3433ee1ce75723af4",
     "as_of_code_commit": null,
-    "line_count": 5261,
+    "line_count": 5277,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014"
   },
@@ -297,9 +297,14 @@
       "line_start": 5247,
       "line_end": 5261,
       "heading": "Bindender Speichervertrag — Binärjournal (2026-10-16)"
+    },
+    "json_free_internal_20261016": {
+      "line_start": 5263,
+      "line_end": 5277,
+      "heading": "Bindender JSON-FREE-INTERNAL-Vertrag — gesamte produktive Project_0-Architektur (2026-10-16)"
     }
   },
-  "updates": "2026-10-16: binding binary primary journal section added; not a gate PASS. On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed.",
+  "updates": "2026-10-16: binding JSON-FREE-INTERNAL JFI-01–05 extension, productive internal typed/binary only; JSON solely mandatory external Solana JSON-RPC wire. Historical immutable evidence/document indices protected. Implementation OPEN. 2026-10-16: binding binary primary journal section added; not a gate PASS. On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed.",
   "operational_configuration": {
     "contract": "project_0/docs/OPERATIONAL_CONFIG.md",
     "implementation": "project_0/native/crates/darkbot-solana/src/runtime_config.rs",
@@ -317,7 +322,20 @@
     "json_sqlite_parallel_primary": "FORBIDDEN",
     "hot_path": "NO_JSON_NO_DB_NO_FILE_IO_NO_BLOCKING_WRITER",
     "financial_safety": "DURABLE_INTENT_BEFORE_SEND",
-    "historical_json": "PRESERVE_AND_EXPORT_OFFLINE_ONLY",
-    "reference": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md sections 10-11"
+    "historical_json": "PRESERVE_READ_ONLY_OFFLINE_COMPATIBILITY",
+    "reference": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md sections 10-11",
+    "internal_json": "FORBIDDEN_ALL_PRODUCTIVE_INTERNAL_LAYERS",
+    "external_json": "MANDATORY_SOLANA_JSON_RPC_WIRE_ONLY"
+  },
+  "internal_data_contract": {
+    "status": "BINDING_TARGET_NOT_QUALIFIED",
+    "runtime_internal": "NATIVE_TYPED_AND_BINARY_ONLY",
+    "json_allowed": "MANDATORY_EXTERNAL_SOLANA_JSON_RPC_WIRE_BOUNDARIES_ONLY",
+    "serde_json_value_inside_internal_runtime": "FORBIDDEN",
+    "primary_journal": "ONE_VERSIONED_BINARY_APPEND_ONLY_P0J",
+    "historical_json": "PRESERVE_READ_ONLY_OFFLINE_COMPATIBILITY",
+    "new_runtime_json_exports": "FORBIDDEN",
+    "phase_gate": "JFI_01_TO_05_OPEN",
+    "reference": "PHASENPLAN.md lines 5263-5277"
   }
 }
