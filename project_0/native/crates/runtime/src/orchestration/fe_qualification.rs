@@ -717,6 +717,14 @@ mod tests {
             w.append_value(kind::FE01_READ, &entry).unwrap();
         }
         w.sync().unwrap();
+        assert_eq!(
+            fe_replay::replay(&c, &binary, class).unwrap_err(),
+            "FE_REPLAY_INCOMPLETE"
+        );
+        let mut result = original.clone();
+        result["logical_reads"] = json!(calls);
+        w.append_value(kind::FE01_RESULT, &result).unwrap();
+        w.seal(true).unwrap();
         let from_journal = fe_replay::replay(&c, &binary, class).unwrap();
         for (key, value) in original.as_object().unwrap() {
             assert_eq!(&from_journal[key], value, "{key}");
@@ -726,24 +734,11 @@ mod tests {
             from_journal["replay"]["reads"].as_array().unwrap().len(),
             calls
         );
-        // An extra saved read, a second source or a foreign frame is refused, never merged.
-        w.append_value(kind::FE01_READ, &json!({})).unwrap();
-        w.sync().unwrap();
-        assert_eq!(
-            fe_replay::replay(&c, &binary, class).unwrap_err(),
-            "FE_REPLAY_UNUSED_READS"
-        );
+        // A second primary source is refused, never merged into the sealed archive.
         std::fs::write(binary.join("read_000001.json"), b"{}").unwrap();
         assert_eq!(
             fe_replay::replay(&c, &binary, class).unwrap_err(),
             "FE_REPLAY_AMBIGUOUS_SOURCE"
-        );
-        std::fs::remove_file(binary.join("read_000001.json")).unwrap();
-        w.append_value(kind::OWNER_RECORD, &json!({})).unwrap();
-        w.sync().unwrap();
-        assert_eq!(
-            fe_replay::replay(&c, &binary, class).unwrap_err(),
-            "FE_REPLAY_JOURNAL_KIND"
         );
         drop(w);
         std::fs::remove_dir_all(binary).unwrap();

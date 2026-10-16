@@ -1259,3 +1259,57 @@ mod tests {
         fs::remove_dir_all(path).unwrap();
     }
 }
+
+#[cfg(test)]
+mod sync_failure_tests {
+    use super::*;
+    #[test]
+    fn reservation_or_handoff_sync_failure_blocks_send_and_recovers_unknown() {
+        for during_handoff in [false, true] {
+            for error in [std::io::ErrorKind::Other, std::io::ErrorKind::StorageFull] {
+                let (dir, a, i, c) = super::tests::setup();
+                let mut j = Journal::open(&dir, &a.wallet).unwrap();
+                if during_handoff {
+                    j.reserve(a.clone(), i.clone(), &c).unwrap();
+                }
+                j.writer.test_fail_next_sync(error);
+                let sends = std::cell::Cell::new(0);
+                let result = if during_handoff {
+                    j.handoff(&i.signed_wire_sha256, &c, || {
+                        sends.set(sends.get() + 1);
+                        Ok(())
+                    })
+                } else {
+                    j.reserve(a.clone(), i.clone(), &c)
+                };
+                assert_eq!(result.unwrap_err(), "JOURNAL_FSYNC");
+                assert_eq!(sends.get(), 0);
+                assert!(j
+                    .handoff(&i.signed_wire_sha256, &c, || {
+                        sends.set(sends.get() + 1);
+                        Ok(())
+                    })
+                    .is_err());
+                assert_eq!(sends.get(), 0);
+                // Even if the OS retained the unacknowledged complete frame, restart is
+                // conservative: holds survive, the attempt becomes UNKNOWN, no new send.
+                drop(j);
+                let mut reopened = Journal::open(&dir, &a.wallet).unwrap();
+                assert_eq!(reopened.holds(), i.holds);
+                assert_eq!(
+                    reopened.saved.as_ref().unwrap().phase,
+                    Phase::HandoffUnknown
+                );
+                assert!(reopened
+                    .handoff(&i.signed_wire_sha256, &c, || {
+                        sends.set(sends.get() + 1);
+                        Ok(())
+                    })
+                    .is_err());
+                assert_eq!(sends.get(), 0);
+                drop(reopened);
+                fs::remove_dir_all(dir).unwrap();
+            }
+        }
+    }
+}

@@ -3,11 +3,13 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "b6ec1542cce15e05a9ce2b91f5433a7e73796975",
+    "git_blob_sha": "9c37218f8dff0bba5419bfabb398a67cead9d1f8",
     "as_of_code_commit": null,
-    "line_count": 5324,
+    "line_count": 5337,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
-    "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014"
+    "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014",
+    "local_followup_base_commit": "9047c7b45988b0c8798b710bb97c183d0a063c7f",
+    "local_followup_uncommitted": true
   },
   "companion_plan": "project_0/docs/PHASENPLAN.json",
   "read_first": "Use this JSON to locate current gates and targeted Markdown sections; do not reload the whole ledger.",
@@ -30,7 +32,7 @@
       },
       "FE-01": {
         "status": "OPEN",
-        "details": "Funding class provisionally selected; current on-chain ProgramData/source/target health and state parity NOT_RUN. Separate permission required for bounded Mainnet read-only check. On 4a27a1c offline replay and integration-account observation improved; TX V0 pinned, current cluster/ProgramData parity NOT_RUN."
+        "details": "Funding class provisionally selected; current on-chain ProgramData/source/target health and state parity NOT_RUN. Separate permission required for bounded Mainnet read-only check. On 4a27a1c offline replay and integration-account observation improved; TX V0 pinned, current cluster/ProgramData parity NOT_RUN. Local follow-up on 9047c7b: sealed/ordered/bounded replay and historical parity tested; current qualification still OPEN."
       },
       "FE-02": {
         "status": "OPEN",
@@ -97,12 +99,13 @@
       "status": "PARTIAL",
       "implementation_commit": "4a27a1c6ab4032b322d5d6be3eb0b10c0d9d0d91",
       "evidence": "project_0/docs/evidence/PERSIST_BINARY_20261016/qualification.json",
-      "PERSIST_01": "PARTIAL_STRICT_PINNED_JSONL_OPEN",
+      "PERSIST_01": "PARTIAL_STRICT_BATCH_BINARY_LOCAL_PASS",
       "PERSIST_02": "LOCAL_PASS_MAINNET_TAILS_NOT_MEASURED",
-      "PERSIST_03": "PARTIAL_LOCAL_FSYNC_FAULT_INJECTION_NOT_RUN",
+      "PERSIST_03": "PARTIAL_LOCAL_IO_BOUNDARY_FSYNC_FAULTS_PASS_PHYSICAL_FAULT_NOT_RUN",
       "PERSIST_04": "LOCAL_PASS",
       "PERSIST_05": "PARTIAL_MAINNET_NOT_MEASURED",
-      "realized_profit": "NOT_PROVEN"
+      "realized_profit": "NOT_PROVEN",
+      "local_followup_evidence": "project_0/docs/evidence/PERSIST_FOLLOWUP_20261016/qualification.json"
     }
   },
   "economic_evidence": {
@@ -209,7 +212,12 @@
       "line_start": 5306,
       "line_end": 5324,
       "heading": "2026-10-16 — PERSIST binary journal integration (4a27a1c): PARTIAL / no LIVE"
+    },
+    "persist_followup_20261016": {
+      "line_start": 5327,
+      "line_end": 5337,
+      "heading": "2026-10-16 — PERSIST strict binary / fsync errors / FE-01 replay follow-up (local)"
     }
   },
-  "updates": "2026-10-16: 4a27a1c PERSIST PARTIAL and source hash/ledger anchors updated. Existing economic gates unchanged. After any change to the canonical Markdown ledger, refresh this JSON's snapshot, statuses, anchors and source.git_blob_sha in the same logical delivery. Do not infer current statuses from older historical ledger entries. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed."
+  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed."
 }

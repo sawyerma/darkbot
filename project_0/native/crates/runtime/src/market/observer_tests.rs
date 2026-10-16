@@ -710,7 +710,7 @@ fn finalize_writes_summary_report_and_unenriched_rows() {
     fs::create_dir_all(&dir).unwrap();
     let p = program();
     let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
-    let mut sink = JsonlSink::create(&dir).unwrap();
+    let mut sink = JournalSink::create(&dir).unwrap();
     core.on_logs(
         &logs_event(
             "x",
@@ -762,7 +762,7 @@ fn finalize_writes_summary_report_and_unenriched_rows() {
         serde_json::from_str(&fs::read_to_string(dir.join("summary.json")).unwrap()).unwrap();
     assert_eq!(parsed["liquidation_events"].as_u64(), Some(1));
     assert!(dir.join("final_report.txt").exists());
-    assert!(JsonlSink::create(&dir).is_err()); // never overwrites a run directory
+    assert!(JournalSink::create(&dir).is_err()); // never overwrites a run directory
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -960,7 +960,7 @@ fn enrichment_init_failure_still_produces_summary_and_report() {
     fs::create_dir_all(&dir).unwrap();
     let p = program();
     let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
-    let mut sink = JsonlSink::create(&dir).unwrap();
+    let mut sink = JournalSink::create(&dir).unwrap();
     core.on_logs(
         &logs_event(
             "x",
@@ -1104,7 +1104,7 @@ fn logs_without_rpc_url_still_reaches_finalize_and_report() {
     .unwrap();
     assert_eq!(cfg.rpc_url, None);
     fs::create_dir_all(&cfg.run_dir).unwrap();
-    let mut sink = JsonlSink::create(&cfg.run_dir).unwrap();
+    let mut sink = JournalSink::create(&cfg.run_dir).unwrap();
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
     core.start_observation(0, 600_000_000_000);
     core.on_logs(
@@ -1702,7 +1702,17 @@ fn journal_sink_views_are_byte_identical_to_the_jsonl_sink() {
     }
     jsonl.flush().unwrap();
     let binding = journal.finish().unwrap().unwrap();
-    for (_, name) in MARKET_VIEWS {
+    for (stream, (_, name)) in MARKET_VIEWS.iter().enumerate() {
+        let expected = rows
+            .iter()
+            .filter(|(kind, _)| *kind == stream)
+            .map(|(_, row)| format!("{row}\n"))
+            .collect::<String>();
+        assert_eq!(
+            fs::read(legacy.join(name)).unwrap(),
+            expected.as_bytes(),
+            "legacy wire bytes: {name}"
+        );
         assert_eq!(
             fs::read(legacy.join(name)).unwrap(),
             fs::read(binary.join(name)).unwrap(),
@@ -1800,5 +1810,52 @@ fn journal_sink_finalize_binds_views_and_early_exit_still_renders_incomplete() {
     let mut reader = crate::analytics::journal::Reader::open(&early.join(MARKET_JOURNAL)).unwrap();
     while reader.next_frame().unwrap().is_some() {}
     assert!(reader.sealed && !reader.complete);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn strict_compat_sink_persists_binary_first_and_exports_at_batch_boundary() {
+    let dir = journal_test_dir("strict_binary");
+    let mut sink = JsonlSink::create(&dir).unwrap();
+    let tx = json!({"slot":10,"amount":i128::MIN,"raw":{"unicode":"雪","quoted":"\""}});
+    let coverage = json!({"status":"PRODUCED_FETCHED","slot":10,"blockhash":"anchor"});
+    sink.transaction(&tx).unwrap();
+    sink.coverage(&coverage).unwrap();
+    assert!(dir.join(MARKET_JOURNAL).exists());
+    for (_, name) in MARKET_VIEWS {
+        assert!(!dir.join(name).exists());
+    }
+    sink.flush().unwrap();
+    sink.flush().unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("transactions.jsonl")).unwrap(),
+        format!("{tx}\n")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("coverage.jsonl")).unwrap(),
+        format!("{coverage}\n")
+    );
+    let mut reader = crate::analytics::journal::Reader::open(&dir.join(MARKET_JOURNAL)).unwrap();
+    while reader.next_frame().unwrap().is_some() {}
+    assert!(reader.sealed && reader.complete);
+    // The pinned verifier finishes each batch once. Post-checkpoint additions must fail.
+    assert!(sink.transaction(&tx).is_err());
+    drop(sink);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn strict_compat_export_failure_stays_failed_on_retry() {
+    let dir = journal_test_dir("strict_export_failure");
+    let mut sink = JsonlSink::create(&dir).unwrap();
+    sink.coverage(&json!({"slot":10})).unwrap();
+    fs::write(dir.join("coverage.jsonl"), b"existing evidence").unwrap();
+    assert!(sink.flush().is_err());
+    assert!(sink.flush().is_err());
+    assert_eq!(
+        fs::read(dir.join("coverage.jsonl")).unwrap(),
+        b"existing evidence"
+    );
+    drop(sink);
     fs::remove_dir_all(dir).unwrap();
 }

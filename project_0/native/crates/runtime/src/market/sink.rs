@@ -18,51 +18,37 @@ pub trait MarketSink {
     }
 }
 
+/// Compatibility name used by the immutable strict verifier. Its only primary
+/// storage is JournalSink; flush is the pinned verifier's completed-batch boundary.
+/// The legacy three files are materialized once, after the journal is sealed.
 pub struct JsonlSink {
-    transactions: BufWriter<File>,
-    liquidations: BufWriter<File>,
-    coverage: BufWriter<File>,
+    inner: JournalSink,
+    exported: bool,
 }
-
-pub(super) fn create_new(path: &Path) -> Result<File, String> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| format!("cannot create {}: {e}", path.display()))
-}
-
-pub(super) fn write_line(w: &mut BufWriter<File>, row: &Value) -> std::io::Result<()> {
-    serde_json::to_writer(&mut *w, row).map_err(std::io::Error::other)?;
-    w.write_all(b"\n")
-}
-
 impl JsonlSink {
-    /// Never overwrites: every file is created with `create_new`.
     pub fn create(run_dir: &Path) -> Result<Self, String> {
         Ok(Self {
-            transactions: BufWriter::new(create_new(&run_dir.join("transactions.jsonl"))?),
-            liquidations: BufWriter::new(create_new(&run_dir.join("liquidations.jsonl"))?),
-            coverage: BufWriter::new(create_new(&run_dir.join("coverage.jsonl"))?),
+            inner: JournalSink::create(run_dir)?,
+            exported: false,
         })
     }
 }
-
 impl MarketSink for JsonlSink {
     fn transaction(&mut self, row: &Value) -> std::io::Result<()> {
-        write_line(&mut self.transactions, row)
+        self.inner.transaction(row)
     }
     fn liquidation(&mut self, row: &Value) -> std::io::Result<()> {
-        write_line(&mut self.liquidations, row)
+        self.inner.liquidation(row)
     }
     fn coverage(&mut self, row: &Value) -> std::io::Result<()> {
-        write_line(&mut self.coverage, row)?;
-        self.coverage.flush() // coverage events are rare and must survive a kill
+        self.inner.coverage(row)
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        self.transactions.flush()?;
-        self.liquidations.flush()?;
-        self.coverage.flush()
+        if !self.exported {
+            self.inner.seal_and_render(true)?;
+            self.exported = true;
+        }
+        Ok(())
     }
 }
 

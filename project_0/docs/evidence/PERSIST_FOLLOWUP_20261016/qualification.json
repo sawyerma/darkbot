@@ -1,0 +1,608 @@
+{
+  "schema": "Project0/PersistFollowupQualification/1",
+  "date": "2026-10-16",
+  "base_commit": "9047c7b45988b0c8798b710bb97c183d0a063c7f",
+  "delivery": "local uncommitted changes; no LIVE, Mainnet, commit or push",
+  "overall": "PARTIAL",
+  "FE_01": "OPEN",
+  "scope": "offline; CARGO_BUILD_JOBS=4, RUST_TEST_THREADS=4; sequential suites",
+  "commands": {
+    "default": {
+      "command": [
+        "cargo",
+        "check",
+        "--manifest-path",
+        "project_0/native/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--workspace"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 1.5388067499734461,
+      "log_sha256": "570f859610f2e059058891de5c0c2675daba04786ed784304d69e227c562d2f0",
+      "saved_log": "default.log"
+    },
+    "health": {
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "project_0/native/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--workspace",
+        "--features",
+        "crate_health"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 135.40970570896752,
+      "log_sha256": "f64c65cc1f4b7f146989df4a661a9435ebafb4578881b48d5d0266e5ae25daa5",
+      "tests": {
+        "passed": 421,
+        "failed": 0,
+        "ignored": 2
+      },
+      "saved_log": "health.log"
+    },
+    "txv1": {
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "project_0/native/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--workspace",
+        "--features",
+        "crate_health,txv1"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 145.54732395790052,
+      "log_sha256": "176fa3f2085bfa15fca4468c648aa7efef7da4d279f2b6b7985f43be2f68bae4",
+      "tests": {
+        "passed": 423,
+        "failed": 0,
+        "ignored": 2
+      },
+      "saved_log": "txv1.log"
+    },
+    "release-health": {
+      "command": [
+        "cargo",
+        "build",
+        "--manifest-path",
+        "project_0/native/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--workspace",
+        "--release",
+        "--features",
+        "crate_health"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 11.758074957993813,
+      "log_sha256": "96d71f6254a8f161ad7554cd982ddc40ef0c6d23025924f44455ffd46d94fd2e",
+      "saved_log": "release-health.log"
+    },
+    "release-txv1": {
+      "command": [
+        "cargo",
+        "build",
+        "--manifest-path",
+        "project_0/native/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--workspace",
+        "--release",
+        "--features",
+        "crate_health,txv1"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 11.85347637499217,
+      "log_sha256": "78525ab0cac80f459fe645fae6f33b61a6bdc2b45866091b6ba7e486332f9745",
+      "saved_log": "release-txv1.log"
+    },
+    "python": {
+      "command": [
+        "python3",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-v",
+        "-s",
+        "project_0/tests",
+        "-t",
+        "project_0"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 13.851307332981378,
+      "log_sha256": "a36c8caa85ee747361b708fae2380e7858295777e96a974a66645133eca43c95",
+      "saved_log": "python.log"
+    },
+    "selftest": {
+      "command": [
+        "bash",
+        "project_0/scripts/verify.sh",
+        "--self-test"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 0.17914229107555002,
+      "log_sha256": "b532c209099c482d0b151f7818121067ce0ae60a0f7bb4300f9e82fb1a2d8e68",
+      "saved_log": "selftest.log"
+    },
+    "clippy-health": {
+      "command": [
+        "cargo",
+        "clippy",
+        "--manifest-path",
+        "project_0/native/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--workspace",
+        "--all-targets",
+        "--features",
+        "crate_health",
+        "--message-format=json"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 3.048027875018306,
+      "log_sha256": "1715b64a7114e9258cc1ed1ba26b6d636e3953f028c4ea4593dba9082d68bde2",
+      "warning_messages": 72,
+      "unique_warning_keys": [
+        [
+          "crates/common/src/histogram.rs",
+          "clippy::manual_range_contains",
+          "manual `RangeInclusive::contains` implementation"
+        ],
+        [
+          "crates/liquidation/src/economics.rs",
+          "clippy::manual_div_ceil",
+          "manually reimplementing `div_ceil`"
+        ],
+        [
+          "crates/liquidation/src/economics.rs",
+          "clippy::manual_range_contains",
+          "manual `Range::contains` implementation"
+        ],
+        [
+          "crates/liquidation/src/economics.rs",
+          "clippy::manual_range_contains",
+          "manual `RangeInclusive::contains` implementation"
+        ],
+        [
+          "crates/liquidation/src/economics.rs",
+          "clippy::too_many_arguments",
+          "this function has too many arguments (9/7)"
+        ],
+        [
+          "crates/liquidation/src/execution.rs",
+          "clippy::ptr_arg",
+          "writing `&mut Vec` instead of `&mut [_]` involves a new object where a slice will do"
+        ],
+        [
+          "crates/liquidation/src/execution.rs",
+          "clippy::unnecessary_map_or",
+          "this `map_or` can be simplified"
+        ],
+        [
+          "crates/liquidation/src/protocol.rs",
+          "clippy::empty_line_after_doc_comments",
+          "empty line after doc comment"
+        ],
+        [
+          "crates/liquidation/src/schedule.rs",
+          "clippy::manual_div_ceil",
+          "manually reimplementing `div_ceil`"
+        ],
+        [
+          "crates/liquidation/src/sizing.rs",
+          "clippy::type_complexity",
+          "very complex type used. Consider factoring parts into `type` definitions"
+        ],
+        [
+          "crates/liquidation/src/sizing.rs",
+          "clippy::useless_conversion",
+          "explicit call to `.into_iter()` in function argument accepting `IntoIterator`"
+        ],
+        [
+          "crates/runtime/src/analytics/econ.rs",
+          "clippy::large_enum_variant",
+          "large size difference between variants"
+        ],
+        [
+          "crates/runtime/src/bin/p0-prewarm-atas.rs",
+          "clippy::manual_is_multiple_of",
+          "manual implementation of `.is_multiple_of()`"
+        ],
+        [
+          "crates/runtime/src/execution/builder.rs",
+          "clippy::get_first",
+          "accessing first element with `rewards.get(0)`"
+        ],
+        [
+          "crates/runtime/src/execution/builder.rs",
+          "clippy::map_clone",
+          "you are using an explicit closure for copying elements"
+        ],
+        [
+          "crates/runtime/src/execution/lookup_tables.rs",
+          "clippy::cloned_ref_to_slice_refs",
+          "this call to `clone` can be replaced with `std::slice::from_ref`"
+        ],
+        [
+          "crates/runtime/src/execution/pipeline.rs",
+          "clippy::unnecessary_map_or",
+          "this `map_or` can be simplified"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "enum `GapSlot` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "method `gap_recovery_phase` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "methods `gap_request` and `gap_slot` are never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "methods `recover_gaps`, `recover_block`, and `gap_recovery_phase` are never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "type alias `SlotFetcher` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_reconcile.rs",
+          "clippy::manual_is_multiple_of",
+          "manual implementation of `.is_multiple_of()`"
+        ],
+        [
+          "crates/runtime/src/market/../market_reconcile.rs",
+          "dead_code",
+          "function `prefetch_blocks` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_reconcile.rs",
+          "dead_code",
+          "function `read_ahead_block` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_reconcile.rs",
+          "dead_code",
+          "method `full_reconciliation_phase` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_verification.rs",
+          "clippy::nonminimal_bool",
+          "this boolean expression can be simplified"
+        ],
+        [
+          "crates/runtime/src/market/fetch.rs",
+          "dead_code",
+          "field `commitment` is never read"
+        ],
+        [
+          "crates/runtime/src/market/fetch.rs",
+          "dead_code",
+          "method `get_transaction` is never used"
+        ],
+        [
+          "crates/runtime/src/market/observer_tests.rs",
+          "clippy::type_complexity",
+          "very complex type used. Consider factoring parts into `type` definitions"
+        ],
+        [
+          "crates/runtime/src/orchestration/remote_workers.rs",
+          "clippy::type_complexity",
+          "very complex type used. Consider factoring parts into `type` definitions"
+        ],
+        [
+          "crates/runtime/src/orchestration/state_owner/candidates.rs",
+          "clippy::too_many_arguments",
+          "this function has too many arguments (9/7)"
+        ],
+        [
+          "crates/runtime/src/orchestration/state_owner/setup.rs",
+          "clippy::needless_return",
+          "unneeded `return` statement"
+        ],
+        [
+          "crates/solana/src/state/fork.rs",
+          "clippy::unnecessary_map_or",
+          "this `map_or` can be simplified"
+        ],
+        [
+          "crates/solana/src/state/recovery.rs",
+          "clippy::manual_is_multiple_of",
+          "manual implementation of `.is_multiple_of()`"
+        ],
+        [
+          "crates/solana/src/submit/rpc.rs",
+          "clippy::type_complexity",
+          "very complex type used. Consider factoring parts into `type` definitions"
+        ],
+        [
+          "crates/solana/src/tx/mod.rs",
+          "clippy::manual_div_ceil",
+          "manually reimplementing `div_ceil`"
+        ]
+      ]
+    },
+    "clippy-txv1": {
+      "command": [
+        "cargo",
+        "clippy",
+        "--manifest-path",
+        "project_0/native/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--workspace",
+        "--all-targets",
+        "--features",
+        "crate_health,txv1",
+        "--message-format=json"
+      ],
+      "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+      "exit_code": 0,
+      "seconds": 3.144985792110674,
+      "log_sha256": "39f382108c03b3b96a996f94cb12385df8ef7736cb590b98ea8d63b362d8f34b",
+      "warning_messages": 73,
+      "unique_warning_keys": [
+        [
+          "crates/common/src/histogram.rs",
+          "clippy::manual_range_contains",
+          "manual `RangeInclusive::contains` implementation"
+        ],
+        [
+          "crates/liquidation/src/economics.rs",
+          "clippy::manual_div_ceil",
+          "manually reimplementing `div_ceil`"
+        ],
+        [
+          "crates/liquidation/src/economics.rs",
+          "clippy::manual_range_contains",
+          "manual `Range::contains` implementation"
+        ],
+        [
+          "crates/liquidation/src/economics.rs",
+          "clippy::manual_range_contains",
+          "manual `RangeInclusive::contains` implementation"
+        ],
+        [
+          "crates/liquidation/src/economics.rs",
+          "clippy::too_many_arguments",
+          "this function has too many arguments (9/7)"
+        ],
+        [
+          "crates/liquidation/src/execution.rs",
+          "clippy::ptr_arg",
+          "writing `&mut Vec` instead of `&mut [_]` involves a new object where a slice will do"
+        ],
+        [
+          "crates/liquidation/src/execution.rs",
+          "clippy::unnecessary_map_or",
+          "this `map_or` can be simplified"
+        ],
+        [
+          "crates/liquidation/src/protocol.rs",
+          "clippy::empty_line_after_doc_comments",
+          "empty line after doc comment"
+        ],
+        [
+          "crates/liquidation/src/schedule.rs",
+          "clippy::manual_div_ceil",
+          "manually reimplementing `div_ceil`"
+        ],
+        [
+          "crates/liquidation/src/sizing.rs",
+          "clippy::type_complexity",
+          "very complex type used. Consider factoring parts into `type` definitions"
+        ],
+        [
+          "crates/liquidation/src/sizing.rs",
+          "clippy::useless_conversion",
+          "explicit call to `.into_iter()` in function argument accepting `IntoIterator`"
+        ],
+        [
+          "crates/runtime/src/analytics/econ.rs",
+          "clippy::large_enum_variant",
+          "large size difference between variants"
+        ],
+        [
+          "crates/runtime/src/bin/p0-prewarm-atas.rs",
+          "clippy::manual_is_multiple_of",
+          "manual implementation of `.is_multiple_of()`"
+        ],
+        [
+          "crates/runtime/src/execution/builder.rs",
+          "clippy::get_first",
+          "accessing first element with `rewards.get(0)`"
+        ],
+        [
+          "crates/runtime/src/execution/builder.rs",
+          "clippy::map_clone",
+          "you are using an explicit closure for copying elements"
+        ],
+        [
+          "crates/runtime/src/execution/lookup_tables.rs",
+          "clippy::cloned_ref_to_slice_refs",
+          "this call to `clone` can be replaced with `std::slice::from_ref`"
+        ],
+        [
+          "crates/runtime/src/execution/pipeline.rs",
+          "clippy::unnecessary_map_or",
+          "this `map_or` can be simplified"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "enum `GapSlot` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "method `gap_recovery_phase` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "methods `gap_request` and `gap_slot` are never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "methods `recover_gaps`, `recover_block`, and `gap_recovery_phase` are never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_gap.rs",
+          "dead_code",
+          "type alias `SlotFetcher` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_reconcile.rs",
+          "clippy::manual_is_multiple_of",
+          "manual implementation of `.is_multiple_of()`"
+        ],
+        [
+          "crates/runtime/src/market/../market_reconcile.rs",
+          "dead_code",
+          "function `prefetch_blocks` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_reconcile.rs",
+          "dead_code",
+          "function `read_ahead_block` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_reconcile.rs",
+          "dead_code",
+          "method `full_reconciliation_phase` is never used"
+        ],
+        [
+          "crates/runtime/src/market/../market_verification.rs",
+          "clippy::nonminimal_bool",
+          "this boolean expression can be simplified"
+        ],
+        [
+          "crates/runtime/src/market/fetch.rs",
+          "dead_code",
+          "field `commitment` is never read"
+        ],
+        [
+          "crates/runtime/src/market/fetch.rs",
+          "dead_code",
+          "method `get_transaction` is never used"
+        ],
+        [
+          "crates/runtime/src/market/observer_tests.rs",
+          "clippy::type_complexity",
+          "very complex type used. Consider factoring parts into `type` definitions"
+        ],
+        [
+          "crates/runtime/src/orchestration/remote_workers.rs",
+          "clippy::type_complexity",
+          "very complex type used. Consider factoring parts into `type` definitions"
+        ],
+        [
+          "crates/runtime/src/orchestration/state_owner/candidates.rs",
+          "clippy::too_many_arguments",
+          "this function has too many arguments (9/7)"
+        ],
+        [
+          "crates/runtime/src/orchestration/state_owner/setup.rs",
+          "clippy::needless_return",
+          "unneeded `return` statement"
+        ],
+        [
+          "crates/solana/src/state/fork.rs",
+          "clippy::unnecessary_map_or",
+          "this `map_or` can be simplified"
+        ],
+        [
+          "crates/solana/src/state/recovery.rs",
+          "clippy::manual_is_multiple_of",
+          "manual implementation of `.is_multiple_of()`"
+        ],
+        [
+          "crates/solana/src/submit/rpc.rs",
+          "clippy::type_complexity",
+          "very complex type used. Consider factoring parts into `type` definitions"
+        ],
+        [
+          "crates/solana/src/tx/mod.rs",
+          "clippy::field_reassign_with_default",
+          "field assignment outside of initializer for an instance created with Default::default()"
+        ],
+        [
+          "crates/solana/src/tx/mod.rs",
+          "clippy::manual_div_ceil",
+          "manually reimplementing `div_ceil`"
+        ]
+      ]
+    }
+  },
+  "code_sha256": {
+    "project_0/native/crates/runtime/src/analytics/journal.rs": "1a004fe3569bfe640e0c8fa386fc15253dafe2349ba61babf8e064c8def53a04",
+    "project_0/native/crates/runtime/src/analytics/journal_tests.rs": "a948679d61eb3440bdde5eb324fb5781a92164c3e571615e4422811fef319aba",
+    "project_0/native/crates/runtime/src/execution/one_shot.rs": "75730a84c83546b50ffa68b665e203e33e5c61ce36ff99850e67fb3e0217f75a",
+    "project_0/native/crates/runtime/src/market/observer.rs": "49ae397b1820703ff2b9bb1281302426f1febac0da5bdfc458f84267a1af88a6",
+    "project_0/native/crates/runtime/src/market/observer_tests.rs": "43c298893dac6e7cc661e0d487cdff24664d6ef37b56cfae5ba57c8340484337",
+    "project_0/native/crates/runtime/src/market/sink.rs": "024b1c68f94487febcdf954b4219da928157298e29f2b1fc419ee07ee25c44f8",
+    "project_0/native/crates/runtime/src/orchestration/fe_qualification.rs": "08d57349f8dc9351892f3562153de26cafaa29fe1ac8c2c2746872a8b5f2119b",
+    "project_0/native/crates/runtime/src/orchestration/fe_replay.rs": "39ceff4a9b0fbf87dff2b8440c528e083dcc97593bf0ddc10a09dd2517b341f9"
+  },
+  "unchanged_verifier_sources_sha256": {
+    "market_verification.rs": "fe27151da8a7d9ad97485c9bbec233c61757ba7d7e9ed55f914d5a860661f9a4",
+    "market_reconcile.rs": "4005543f4797bb0eb45c2ed1778d42f850c9d4a48dfb97bc1d3543a527214b7f",
+    "market_truth.rs": "1e7ff02c545ccb8278e88e0544830aae9a120ffa11b20233d00290e66c218096",
+    "market_gap.rs": "5021fc3caf7aff31e9b0019028b68b07e40c9ad4c3c478473f58aa9af722818e"
+  },
+  "fsync_faults": {
+    "status": "LOCAL_PASS",
+    "mechanism": "per-writer cfg(test) IO-boundary ErrorKind::Other and StorageFull; actual appended frames, normal sync poison/recovery path",
+    "cases": [
+      "reservation sync failure: no send",
+      "handoff sync failure: no send",
+      "retry blocked",
+      "reopen preserves holds and UNKNOWN",
+      "no durable acknowledgment or complete seal after failure"
+    ],
+    "physical_filesystem_fault": "NOT_RUN"
+  },
+  "strict_batch_primary": "market.p0j via existing JournalSink; JSONL generated only at terminal batch flush; pinned checkpoint/schema unchanged",
+  "FE_01_replay": "sealed COMPLETE ordered config/reads/result/manifest; exact read count; archive byte and read limits; corruption rejected; historical legacy parity retained",
+  "benchmark": "not rerun; prior PERSIST_BINARY_20261016 synthetic sample retained as historical, no new performance claim",
+  "mainnet_tails": "NOT_MEASURED",
+  "census_selftest": "PASS (python3 -B operations/capture/c0_census.py --selftest)",
+  "iteration_failures": [
+    "initial compilation: inherited File import restored without editing pinned verifier",
+    "first full health suite: three capture tests used retired JsonlSink; moved to actual production JournalSink, all original assertions retained; final suite passed"
+  ],
+  "differential_clippy": {
+    "reference": "prior recorded local followup-final-clippy-txv1.log; not a rebuilt HEAD checkout",
+    "reference_log_sha256": "8c2464ac0874592446ba3f335f47136182bc05acdd099e7eb91854c0e93d049f",
+    "before_unique": 38,
+    "after_unique": 38,
+    "added": [],
+    "removed": []
+  },
+  "post_test_cleanup": "Only unused std::io::Write import removed after full suites; final check, both release builds and Clippy all-targets repeated.",
+  "changed_rust_format": "PASS: rustfmt --check --edition 2021 --config skip_children=true on all eight changed Rust files"
+}

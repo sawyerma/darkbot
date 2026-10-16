@@ -281,3 +281,25 @@ fn persist05_local_writer_benchmark() {
         serde_json::Value::Object(results)
     );
 }
+
+#[test]
+fn fsync_error_never_returns_durable_ack_and_poisoning_is_sticky() {
+    for kind in [io::ErrorKind::Other, io::ErrorKind::StorageFull] {
+        let path = path();
+        let mut writer = Writer::create(&path).unwrap();
+        writer
+            .append_value(1, &serde_json::json!({"reservation":"RESERVED"}))
+            .unwrap();
+        writer.test_fail_next_sync(kind);
+        assert_eq!(writer.sync().unwrap_err().kind(), kind);
+        assert!(writer.sync().is_err());
+        assert!(writer.append_value(1, &Value::Null).is_err());
+        assert!(writer.seal(true).is_err());
+        let mut reader = Reader::open(&path).unwrap();
+        assert!(reader.next_frame().unwrap().is_some());
+        assert!(reader.next_frame().unwrap().is_none());
+        assert!(!reader.sealed && !reader.complete);
+        drop(writer);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+}

@@ -47,8 +47,7 @@ use darkbot_solana::ingress::{
 use serde_json::{json, Value};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};

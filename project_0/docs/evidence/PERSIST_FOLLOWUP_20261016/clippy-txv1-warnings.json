@@ -1,0 +1,192 @@
+[
+  [
+    "crates/common/src/histogram.rs",
+    "clippy::manual_range_contains",
+    "manual `RangeInclusive::contains` implementation"
+  ],
+  [
+    "crates/liquidation/src/economics.rs",
+    "clippy::manual_div_ceil",
+    "manually reimplementing `div_ceil`"
+  ],
+  [
+    "crates/liquidation/src/economics.rs",
+    "clippy::manual_range_contains",
+    "manual `Range::contains` implementation"
+  ],
+  [
+    "crates/liquidation/src/economics.rs",
+    "clippy::manual_range_contains",
+    "manual `RangeInclusive::contains` implementation"
+  ],
+  [
+    "crates/liquidation/src/economics.rs",
+    "clippy::too_many_arguments",
+    "this function has too many arguments (9/7)"
+  ],
+  [
+    "crates/liquidation/src/execution.rs",
+    "clippy::ptr_arg",
+    "writing `&mut Vec` instead of `&mut [_]` involves a new object where a slice will do"
+  ],
+  [
+    "crates/liquidation/src/execution.rs",
+    "clippy::unnecessary_map_or",
+    "this `map_or` can be simplified"
+  ],
+  [
+    "crates/liquidation/src/protocol.rs",
+    "clippy::empty_line_after_doc_comments",
+    "empty line after doc comment"
+  ],
+  [
+    "crates/liquidation/src/schedule.rs",
+    "clippy::manual_div_ceil",
+    "manually reimplementing `div_ceil`"
+  ],
+  [
+    "crates/liquidation/src/sizing.rs",
+    "clippy::type_complexity",
+    "very complex type used. Consider factoring parts into `type` definitions"
+  ],
+  [
+    "crates/liquidation/src/sizing.rs",
+    "clippy::useless_conversion",
+    "explicit call to `.into_iter()` in function argument accepting `IntoIterator`"
+  ],
+  [
+    "crates/runtime/src/analytics/econ.rs",
+    "clippy::large_enum_variant",
+    "large size difference between variants"
+  ],
+  [
+    "crates/runtime/src/bin/p0-prewarm-atas.rs",
+    "clippy::manual_is_multiple_of",
+    "manual implementation of `.is_multiple_of()`"
+  ],
+  [
+    "crates/runtime/src/execution/builder.rs",
+    "clippy::get_first",
+    "accessing first element with `rewards.get(0)`"
+  ],
+  [
+    "crates/runtime/src/execution/builder.rs",
+    "clippy::map_clone",
+    "you are using an explicit closure for copying elements"
+  ],
+  [
+    "crates/runtime/src/execution/lookup_tables.rs",
+    "clippy::cloned_ref_to_slice_refs",
+    "this call to `clone` can be replaced with `std::slice::from_ref`"
+  ],
+  [
+    "crates/runtime/src/execution/pipeline.rs",
+    "clippy::unnecessary_map_or",
+    "this `map_or` can be simplified"
+  ],
+  [
+    "crates/runtime/src/market/../market_gap.rs",
+    "dead_code",
+    "enum `GapSlot` is never used"
+  ],
+  [
+    "crates/runtime/src/market/../market_gap.rs",
+    "dead_code",
+    "method `gap_recovery_phase` is never used"
+  ],
+  [
+    "crates/runtime/src/market/../market_gap.rs",
+    "dead_code",
+    "methods `gap_request` and `gap_slot` are never used"
+  ],
+  [
+    "crates/runtime/src/market/../market_gap.rs",
+    "dead_code",
+    "methods `recover_gaps`, `recover_block`, and `gap_recovery_phase` are never used"
+  ],
+  [
+    "crates/runtime/src/market/../market_gap.rs",
+    "dead_code",
+    "type alias `SlotFetcher` is never used"
+  ],
+  [
+    "crates/runtime/src/market/../market_reconcile.rs",
+    "clippy::manual_is_multiple_of",
+    "manual implementation of `.is_multiple_of()`"
+  ],
+  [
+    "crates/runtime/src/market/../market_reconcile.rs",
+    "dead_code",
+    "function `prefetch_blocks` is never used"
+  ],
+  [
+    "crates/runtime/src/market/../market_reconcile.rs",
+    "dead_code",
+    "function `read_ahead_block` is never used"
+  ],
+  [
+    "crates/runtime/src/market/../market_reconcile.rs",
+    "dead_code",
+    "method `full_reconciliation_phase` is never used"
+  ],
+  [
+    "crates/runtime/src/market/../market_verification.rs",
+    "clippy::nonminimal_bool",
+    "this boolean expression can be simplified"
+  ],
+  [
+    "crates/runtime/src/market/fetch.rs",
+    "dead_code",
+    "field `commitment` is never read"
+  ],
+  [
+    "crates/runtime/src/market/fetch.rs",
+    "dead_code",
+    "method `get_transaction` is never used"
+  ],
+  [
+    "crates/runtime/src/market/observer_tests.rs",
+    "clippy::type_complexity",
+    "very complex type used. Consider factoring parts into `type` definitions"
+  ],
+  [
+    "crates/runtime/src/orchestration/remote_workers.rs",
+    "clippy::type_complexity",
+    "very complex type used. Consider factoring parts into `type` definitions"
+  ],
+  [
+    "crates/runtime/src/orchestration/state_owner/candidates.rs",
+    "clippy::too_many_arguments",
+    "this function has too many arguments (9/7)"
+  ],
+  [
+    "crates/runtime/src/orchestration/state_owner/setup.rs",
+    "clippy::needless_return",
+    "unneeded `return` statement"
+  ],
+  [
+    "crates/solana/src/state/fork.rs",
+    "clippy::unnecessary_map_or",
+    "this `map_or` can be simplified"
+  ],
+  [
+    "crates/solana/src/state/recovery.rs",
+    "clippy::manual_is_multiple_of",
+    "manual implementation of `.is_multiple_of()`"
+  ],
+  [
+    "crates/solana/src/submit/rpc.rs",
+    "clippy::type_complexity",
+    "very complex type used. Consider factoring parts into `type` definitions"
+  ],
+  [
+    "crates/solana/src/tx/mod.rs",
+    "clippy::field_reassign_with_default",
+    "field assignment outside of initializer for an instance created with Default::default()"
+  ],
+  [
+    "crates/solana/src/tx/mod.rs",
+    "clippy::manual_div_ceil",
+    "manually reimplementing `div_ceil`"
+  ]
+]

@@ -383,6 +383,8 @@ pub struct Writer {
     position: u64,
     sealed: bool,
     poisoned: bool,
+    #[cfg(test)]
+    next_sync_error: Option<io::ErrorKind>,
 }
 impl Writer {
     pub fn create(path: &Path) -> io::Result<Self> {
@@ -409,6 +411,8 @@ impl Writer {
             position: HEADER_LEN,
             sealed: false,
             poisoned: false,
+            #[cfg(test)]
+            next_sync_error: None,
         })
     }
     pub fn resume(path: &Path) -> io::Result<Self> {
@@ -426,11 +430,26 @@ impl Writer {
             position: reader.position,
             sealed: false,
             poisoned: false,
+            #[cfg(test)]
+            next_sync_error: None,
         })
     }
     #[cfg(test)]
     pub(crate) fn test_read_only(&mut self) {
         self.file = File::open(&self.path).unwrap();
+    }
+    /// Deterministic per-writer IO-boundary injection, absent from production builds.
+    /// The frame is really appended before sync fails; the normal poison/error path runs.
+    #[cfg(test)]
+    pub(crate) fn test_fail_next_sync(&mut self, kind: io::ErrorKind) {
+        self.next_sync_error = Some(kind);
+    }
+    fn sync_file(&mut self) -> io::Result<()> {
+        #[cfg(test)]
+        if let Some(kind) = self.next_sync_error.take() {
+            return Err(io::Error::new(kind, "injected fsync failure"));
+        }
+        self.file.sync_all()
     }
     pub fn next_seq(&self) -> u64 {
         self.next
@@ -514,7 +533,7 @@ impl Writer {
         if self.poisoned {
             return Err(bad("JOURNAL_BLOCKED"));
         }
-        if let Err(e) = self.file.sync_all() {
+        if let Err(e) = self.sync_file() {
             self.poisoned = true;
             return Err(e);
         }

@@ -14,39 +14,68 @@ pub const FE01_JOURNAL: &str = "fe01.p0j";
 /// Saved reads in order with their integrity record, from `fe01.p0j`; `None` for an
 /// observation saved before PERSIST-01 (`read_NNNNNN.json`). Both at once are refused.
 type SavedReads = Vec<(Value, Value)>;
-fn saved_reads(directory: &Path, limit: u64) -> Result<Option<SavedReads>, String> {
+fn saved_reads(directory: &Path, limit: u64, max_reads: u64) -> Result<Option<SavedReads>, String> {
     let path = directory.join(FE01_JOURNAL);
-    let legacy = fs::read_dir(directory)
-        .map(|entries| {
-            entries.filter_map(Result::ok).any(|e| {
-                e.file_name()
-                    .to_str()
-                    .is_some_and(|s| s.starts_with("read_") && s.ends_with(".json"))
-            })
-        })
-        .unwrap_or(false);
     match fs::symlink_metadata(&path) {
-        Err(_) => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("FE_REPLAY_IO".into()),
         Ok(meta) if meta.file_type().is_symlink() => return Err("FE_REPLAY_SYMLINK".into()),
-        Ok(_) if legacy => return Err("FE_REPLAY_AMBIGUOUS_SOURCE".into()),
+        Ok(meta) if !meta.is_file() => return Err("FE_REPLAY_JOURNAL".into()),
+        Ok(meta) if meta.len() > limit => return Err("FE_REPLAY_BYTE_LIMIT".into()),
         Ok(_) => {}
     }
+    let legacy = fs::read_dir(directory)
+        .map_err(|_| "FE_REPLAY_DIRECTORY")?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "FE_REPLAY_DIRECTORY")?
+        .iter()
+        .any(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|s| s.starts_with("read_") && s.ends_with(".json"))
+        });
+    if legacy {
+        return Err("FE_REPLAY_AMBIGUOUS_SOURCE".into());
+    }
     let mut reader = Reader::open(&path).map_err(|_| "FE_REPLAY_JOURNAL")?;
-    let (mut reads, mut total) = (Vec::new(), 0u64);
+    let (mut reads, mut total, mut configured, mut result) =
+        (Vec::new(), journal::HEADER_LEN, false, false);
     while let Some(frame) = reader.next_frame().map_err(|_| "FE_REPLAY_JOURNAL")? {
+        // Bound the entire archive, including configuration, result and manifest. Check
+        // both initial length and consumed bytes so concurrent growth cannot bypass it.
+        total = total
+            .checked_add(frame.bytes)
+            .filter(|n| *n <= limit)
+            .ok_or("FE_REPLAY_BYTE_LIMIT")?;
         match frame.kind {
-            kind::FE01_READ => {
-                total = total
-                    .checked_add(frame.bytes)
-                    .filter(|t| *t <= limit)
-                    .ok_or("FE_REPLAY_BYTE_LIMIT")?;
-                let integrity = json!({"journal_seq":frame.journal_seq,
-                    "frame_sha256":journal::hex(&frame.hash),"bytes":frame.bytes});
+            kind::FE01_CONFIG if !configured => {
+                configured = true;
+            }
+            kind::FE01_READ if configured && !result => {
+                if reads.len() as u64 >= max_reads {
+                    return Err("FE_REPLAY_CALL_LIMIT".into());
+                }
+                let integrity = json!({"journal_seq":frame.journal_seq,"frame_sha256":journal::hex(&frame.hash),"bytes":frame.bytes});
                 reads.push((frame.value, integrity));
             }
-            kind::FE01_CONFIG | kind::FE01_RESULT | MANIFEST => {}
+            kind::FE01_RESULT if configured && !result && !reads.is_empty() => {
+                if frame.value["status"] == "INCOMPLETE" {
+                    return Err("FE_REPLAY_INCOMPLETE".into());
+                }
+                if frame.value["logical_reads"].as_u64() != Some(reads.len() as u64) {
+                    return Err("FE_REPLAY_READ_COUNT".into());
+                }
+                result = true;
+            }
+            MANIFEST if result => {}
+            kind::FE01_CONFIG | kind::FE01_READ | kind::FE01_RESULT | MANIFEST => {
+                return Err("FE_REPLAY_JOURNAL_ORDER".into())
+            }
             _ => return Err("FE_REPLAY_JOURNAL_KIND".into()),
         }
+    }
+    if !reader.sealed || !reader.complete || !result {
+        return Err("FE_REPLAY_INCOMPLETE".into());
     }
     Ok(Some(reads))
 }
@@ -120,7 +149,11 @@ pub fn replay(
         .min(config.limits.max_total_mib)
         .checked_mul(1024 * 1024)
         .ok_or("FE_REPLAY_BYTE_LIMIT")?;
-    let saved = saved_reads(directory, limit)?;
+    let saved = saved_reads(
+        directory,
+        limit,
+        config.limits.fe_calls.min(config.limits.max_requests),
+    )?;
     let mut total = 0u64;
     let mut reads = Vec::new();
     let mut report = fe::collect(config, |keys, floor| {
@@ -235,5 +268,115 @@ mod tests {
             assert!(first_class(name).is_err());
         }
         assert!(include_str!("../../../../Cargo.lock").contains(fe::SOURCE_PIN));
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use crate::analytics::journal::Writer;
+    fn archive(events: &[(u16, Value)], seal: Option<bool>) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("p0-fe-archive-{}", Pubkey::new_unique()));
+        fs::create_dir(&dir).unwrap();
+        let mut w = Writer::create(&dir.join(FE01_JOURNAL)).unwrap();
+        for (k, v) in events {
+            w.append_value(*k, v).unwrap();
+        }
+        if let Some(complete) = seal {
+            w.seal(complete).unwrap();
+        } else {
+            w.sync().unwrap();
+        }
+        dir
+    }
+    fn events() -> Vec<(u16, Value)> {
+        vec![
+            (kind::FE01_CONFIG, json!({})),
+            (kind::FE01_READ, json!({"result":{}})),
+            (
+                kind::FE01_RESULT,
+                json!({"status":"OBSERVED","logical_reads":1}),
+            ),
+        ]
+    }
+    #[test]
+    fn fe_replay_requires_complete_ordered_archive_and_exact_read_count() {
+        let good = events();
+        let mut wrong_count = good.clone();
+        wrong_count[2].1["logical_reads"] = json!(2);
+        let mut failed = good.clone();
+        failed[2].1["status"] = json!("INCOMPLETE");
+        let cases = vec![
+            (good.clone(), None, "FE_REPLAY_INCOMPLETE"),
+            (good.clone(), Some(false), "FE_REPLAY_INCOMPLETE"),
+            (good[..2].to_vec(), None, "FE_REPLAY_INCOMPLETE"),
+            (good[..2].to_vec(), Some(true), "FE_REPLAY_JOURNAL_ORDER"),
+            (good[1..].to_vec(), Some(true), "FE_REPLAY_JOURNAL_ORDER"),
+            (
+                vec![good[0].clone(), good[0].clone()],
+                Some(true),
+                "FE_REPLAY_JOURNAL_ORDER",
+            ),
+            (
+                vec![good[0].clone(), good[2].clone()],
+                Some(true),
+                "FE_REPLAY_JOURNAL_ORDER",
+            ),
+            (
+                vec![
+                    good[0].clone(),
+                    good[1].clone(),
+                    good[2].clone(),
+                    good[1].clone(),
+                ],
+                Some(true),
+                "FE_REPLAY_JOURNAL_ORDER",
+            ),
+            (wrong_count, Some(true), "FE_REPLAY_READ_COUNT"),
+            (failed, Some(true), "FE_REPLAY_INCOMPLETE"),
+            (
+                vec![(kind::OWNER_RECORD, json!({}))],
+                Some(true),
+                "FE_REPLAY_JOURNAL_KIND",
+            ),
+        ];
+        for (events, seal, error) in cases {
+            let dir = archive(&events, seal);
+            assert_eq!(saved_reads(&dir, 1_000_000, 10).unwrap_err(), error);
+            fs::remove_dir_all(dir).unwrap();
+        }
+        let dir = archive(&good, Some(true));
+        assert_eq!(saved_reads(&dir, 1_000_000, 1).unwrap().unwrap().len(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn fe_replay_bounds_all_frames_and_reads_and_rejects_corruption() {
+        let mut e = events();
+        e[0].1 = json!({"padding":"x".repeat(8192)});
+        let dir = archive(&e, Some(true));
+        assert_eq!(
+            saved_reads(&dir, 4096, 10).unwrap_err(),
+            "FE_REPLAY_BYTE_LIMIT"
+        );
+        let path = dir.join(FE01_JOURNAL);
+        let size = fs::metadata(&path).unwrap().len();
+        assert!(saved_reads(&dir, size, 1).unwrap().is_some());
+        assert_eq!(
+            saved_reads(&dir, size, 0).unwrap_err(),
+            "FE_REPLAY_CALL_LIMIT"
+        );
+        assert_eq!(
+            saved_reads(&dir, size - 1, 10).unwrap_err(),
+            "FE_REPLAY_BYTE_LIMIT"
+        );
+        let mut bytes = fs::read(&path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 1;
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(
+            saved_reads(&dir, size, 10).unwrap_err(),
+            "FE_REPLAY_JOURNAL"
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -5322,3 +5322,16 @@ Source of truth for this dated delivery: GitHub `main` commit `4a27a1c6ab4032b32
 **Other gates unchanged:** FE-00 NO_ECONOMIC_GO; FE-02/03 OPEN; FE-05 NOT_RUN; FE-06 NOT_AUTHORIZED; FE-07 NOT_RUN; C0-E1 market master NOT_QUALIFIED; 72h Shadow NOT_STARTED. No Mainnet calls, no LIVE/submission or economic profit claims from this delivery.
 
 **Next targeted engineering:** Review whether pinned Strict JSONL is only immutable compatibility output or an active primary writer; if the latter, implement a separately reviewed re-pin/migration with stable/verifiable old identities. Exercise fsync fault injection using controlled I/O abstraction or a suitable test filesystem. Refresh documentation (this entry/JSON index/STATUS), then prioritize FE-01 current parity and FE-02 executable economics; preserve all authorization and provider gates.
+
+
+## 2026-10-16 — PERSIST strict binary / fsync errors / FE-01 replay follow-up (local)
+
+Base `9047c7b`; new uncommitted local work, not a rewrite of the preceding `4a27a1c` evidence. [Report](development_history/persist_followup_20261016.md), [qualification/logs](evidence/PERSIST_FOLLOWUP_20261016/qualification.json).
+
+Strict batch primary evidence now uses existing `JournalSink`/`market.p0j`; terminal flush derives byte-identical legacy views. Pinned verifier sources and historical contracts unchanged; new binary digests still flow through the existing spec identity mechanism. Deterministic test-only I/O-boundary fsync errors (Other/StorageFull) prove blocked SEND, sticky failure and UNKNOWN recovery with preserved holds. Physical filesystem/power-loss fault experiment NOT_RUN.
+
+FE-01 replay requires complete ordered sealed archives and exact read counts; all frame bytes and read limits bounded before accumulation. Missing seals/results, INCOMPLETE, reordered/corrupt archives and limit violations rejected. Historical replay parity retained, never current funding qualification.
+
+Final offline validation: Rust **421/423 PASS**, 0 FAIL, 2 pre-existing ignored each; both release builds and featureless check PASS; Python/verifier/census PASS; Clippy both configurations exit 0 (warning inventories attached). Initial import/test-fixture failures were corrected before these final results. Existing synthetic benchmark not rerun; Mainnet tails NOT_MEASURED.
+
+**Overall PERSIST PARTIAL; FE-01 OPEN; FE-04 PARTIAL_LOCAL.** Current source/state/funding proof, production pilot/accounting integration and real-load qualification remain open. No Mainnet/LIVE/submission, staging, commit or push; BSC unchanged. Next: authorized bounded FREE_ONLY current observation, then candidate-specific qualification; do not infer authorization from this local pass.

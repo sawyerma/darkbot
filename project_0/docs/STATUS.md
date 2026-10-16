@@ -4,6 +4,8 @@
 
 Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md), their JSON navigation indices, actual Rust code and [PERSIST evidence](evidence/PERSIST_BINARY_20261016/qualification.json). Previous October 14 code locations and test counts are historical; no gate is upgraded by this status page.
 
+**Local follow-up on `9047c7b` (uncommitted):** strict batches now use the binary sink; deterministic fsync error paths and bounded, sealed FE-01 replay pass offline. [Follow-up report](development_history/persist_followup_20261016.md), [evidence](evidence/PERSIST_FOLLOWUP_20261016/qualification.json). Overall PERSIST PARTIAL and FE-01 OPEN remain unchanged.
+
 ## 1. Bottom line
 
 | Scope | Verdict | Current evidence |
@@ -13,7 +15,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | FE-00 | **LOCAL_PASS; NO_ECONOMIC_GO** | Existing FE-00 ledger/evidence |
 | FE-01 | **OPEN** | Offline replay/integration-account observation improved at `4a27a1c`; current deployed ProgramData/state and funding-class parity NOT_RUN |
 | FE-02 / FE-03 | **OPEN** | No current profitable executable candidate / qualified targeted Shadow |
-| FE-04 | **PARTIAL_LOCAL** | Durable binary wallet transitions locally tested; production integration, exit/PnL and fsync fault injection remain OPEN |
+| FE-04 | **PARTIAL_LOCAL** | Durable binary wallet transitions locally tested; production integration and exit/PnL remain OPEN; deterministic fsync error paths pass locally |
 | FE-05 / FE-06 / FE-07 | **NOT_RUN / NOT_AUTHORIZED / NOT_RUN** | Separate provider/Mainnet/value-bearing permissions still required |
 | C0-E1 long-duration market master | **NOT_QUALIFIED** | Historical 4h/5h incomplete |
 | Binary journal PERSIST-01–05 | **PARTIAL overall, NOT QUALIFIED** | [Qualification](evidence/PERSIST_BINARY_20261016/qualification.json); see below |
@@ -28,11 +30,11 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | [Implementation report](development_history/persist_binary_completion_20261016.md) | Exact migration details and limits | Historical report written before commit; now checked in |
 | [Ledger dated PERSIST entry](MEASUREMENT_LEDGER.md) | Canonical PERSIST verdict and next gaps | Current |
 
-**PERSIST-01 PARTIAL:** new productive runtime writers largely binary; hash-pinned strict verifier batch sink `native/crates/runtime/src/market_verification.rs` still uses JSONL. Re-pin only after explicit reviewed identity/consumer migration; historical proof IDs are immutable.
+**PERSIST-01 PARTIAL:** runtime and strict batch primary records now use the existing binary journal; the unchanged pinned verifier consumes derived JSONL views at the batch boundary. Historical proof IDs remain immutable; new binary digests use the existing spec identity mechanism.
 
 **PERSIST-02 LOCAL_PASS:** typed bounded owner-to-recorder path and offline source guard; owner reaction latency under Mainnet load NOT_MEASURED.
 
-**PERSIST-03 PARTIAL_LOCAL:** FE-04 binary durability barrier/UNKNOWN replay tested; actual fsync fault injection and real pilot integration not qualified.
+**PERSIST-03 PARTIAL_LOCAL:** FE-04 binary durability barrier/UNKNOWN replay tested; deterministic I/O-boundary fsync errors pass locally. Physical filesystem faults and real pilot integration remain unqualified.
 
 **PERSIST-04 LOCAL_PASS:** existing historical JSON/JSONL and verifier contracts preserved; journal-derived JSON reports remain compatible exports, never a second canonical journal.
 
