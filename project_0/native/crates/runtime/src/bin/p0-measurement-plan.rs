@@ -18,8 +18,9 @@ fn main() {
         }
     }
 
-    let result =
-        darkbot_runner::measurement::MeasurementPlan::from_lookup(&|k| std::env::var(k).ok());
+    let result = darkbot_runner::analytics::measurement::MeasurementPlan::from_lookup(&|k| {
+        std::env::var(k).ok()
+    });
     match result {
         Ok(plan) => println!("{}", serde_json::to_string_pretty(&plan).unwrap()),
         Err(e) => {

@@ -13,29 +13,21 @@
 //!
 //! Status: UNTESTED / VERIFY.
 
-pub mod builder;
-pub mod fixture;
-pub mod pending;
-pub mod pipeline;
-pub mod record;
-pub mod remote_workers;
-#[cfg(feature = "crate_health")]
-pub mod route;
-pub mod shadow_ledger;
-pub mod winner;
-pub mod winner_tracker;
+pub mod analytics;
+pub mod execution;
+pub mod market;
+pub mod orchestration;
 
-pub mod lookup_tables;
-pub mod market_observer;
-
-pub mod econ;
-
-pub mod measurement;
-/// Run directory layout V1/V2 of econ4h captures; mirrors operations/capture/run_store.py.
+/// Shared persistent layout used by capture, verification and analytics.
 pub mod run_layout;
 
-/// FE-04 offline-qualified durable hold; normal LIVE entrypoint remains blocked.
-pub mod one_shot;
-
+// Preserve the published Rust API for binaries, pinned verifier sources and consumers.
+// Re-exports refer to the single implementation in its owning domain.
+pub use analytics::{econ, fixture, measurement, record, shadow_ledger};
 #[cfg(feature = "crate_health")]
-pub mod fe_qualification;
+pub use execution::route;
+pub use execution::{builder, lookup_tables, one_shot, pending, pipeline};
+pub use market::{observer as market_observer, winner};
+#[cfg(feature = "crate_health")]
+pub use orchestration::fe_qualification;
+pub use orchestration::{remote_workers, winner_tracker};

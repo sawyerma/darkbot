@@ -1,0 +1,58 @@
+[
+  {
+    "label": "runner_tests_corrected",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "-p",
+      "darkbot-runner",
+      "--features",
+      "crate_health txv1",
+      "--lib"
+    ],
+    "exit_code": 0,
+    "seconds": 22.23
+  },
+  {
+    "label": "format",
+    "argv": [
+      "rustfmt",
+      "--edition",
+      "2021",
+      "--config",
+      "skip_children=true",
+      "--check",
+      "project_0/native/crates/darkbot-solana/examples/p0-gap-ws-proxy.rs",
+      "project_0/native/crates/darkbot-runner/src/market_paths.rs",
+      "project_0/native/crates/darkbot-runner/src/market_reconcile.rs"
+    ],
+    "exit_code": 0,
+    "seconds": 0.02
+  },
+  {
+    "label": "shell_syntax",
+    "argv": [
+      "bash",
+      "-n",
+      "project_0/scripts/run_gap_reconnect_smoke.sh",
+      "project_0/scripts/run_econ4h.sh"
+    ],
+    "exit_code": 0,
+    "seconds": 0.0
+  },
+  {
+    "label": "diff_check",
+    "argv": [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "project_0"
+    ],
+    "exit_code": 0,
+    "seconds": 0.0
+  }
+]

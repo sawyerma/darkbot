@@ -237,10 +237,16 @@ class Launchers(unittest.TestCase):
             env=self.real_env(tmp);shutil.copy2(env['P0_KEYPAIR_PATH'],caller/'key.json');(caller/'key.json').chmod(0o600)
             env['P0_KEYPAIR_PATH']='key.json'  # relative to the caller: the signer gate and the runtime must use this same file
             run=lambda extra:subprocess.run(['bash',str(project/'scripts/capture.sh'),'shadow'],env={**env,**extra},capture_output=True,text=True,timeout=600,cwd=caller)
-            p=run({'P0_RECORD_PATH':'out/opps.jsonl','P0_SUMMARY_PATH':'out/sum.jsonl','P0_MT0_PATH':'out/mt0.jsonl'})
+            p=run({'P0_RECORD_PATH':'out/opps.jsonl','P0_SUMMARY_PATH':'out/sum.jsonl','P0_MT0_PATH':'out/mt0.jsonl',
+                   'P0_RPC_URL':'http://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET',
+                   'P0_WS_URL':'ws://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET'})
             out=p.stdout+p.stderr
             self.assertEqual(p.returncode,2,out[-2000:]);self.assertIn('p0-longtail: ',p.stderr)  # real binary started from the repository
             self.assertNotIn('could not find `Cargo.toml`',out);self.assertNotIn('missing required env',out)
+            for secret in ('private:','SECRET','PRIVATE_KEY'):
+                self.assertNotIn(secret,out)
+            self.assertIn('rpc_host=http://127.0.0.1',p.stdout)
+            self.assertIn('ws_host=ws://127.0.0.1',p.stdout)
             record=Path(next(l.split('record=',1)[1] for l in p.stdout.splitlines() if 'record=' in l))
             self.assertEqual(record.resolve(),(caller/'out/opps.jsonl').resolve());self.assertTrue((caller/'out').is_dir())
             p=run({});self.assertEqual(p.returncode,2);self.assertIn('p0-longtail: ',p.stderr)

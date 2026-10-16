@@ -22,6 +22,17 @@ absolute_paths() {
   done
 }
 
+# Emit only scheme/hostname; credentials may be in userinfo, path, query or fragment.
+endpoint_host() {
+  python3 -c 'import os,sys
+from urllib.parse import urlsplit
+try:
+    u=urlsplit(os.environ[sys.argv[1]])
+    print(u.scheme + "://" + u.hostname if u.scheme and u.hostname else "INVALID_ENDPOINT")
+except ValueError:
+    print("INVALID_ENDPOINT")' "$1"
+}
+
 load_env() {
 # [SEC-02] Local secrets are loaded from project_0/.env when present.
 # The file is git-ignored and must be owner-only. Callers may still export values
@@ -151,8 +162,11 @@ MEASUREMENT_CONFIG_INPUT=""
 if [[ "$#" != 0 ]]; then
   if [[ "$#" == 2 && "$1" == --measurement-config ]]; then
     MEASUREMENT_CONFIG_INPUT="$2"
-    export P0_MEASUREMENT_DURATION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config"]["run"]["duration"])' "$2")"
-    export P0_MARKET_SOURCE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config"]["run"]["capture_source"])' "$2")"
+    if [[ "$MEASUREMENT_CONFIG_INPUT" != /* ]]; then
+      MEASUREMENT_CONFIG_INPUT="$PWD/$MEASUREMENT_CONFIG_INPUT"
+    fi
+    export P0_MEASUREMENT_DURATION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config"]["run"]["duration"])' "$MEASUREMENT_CONFIG_INPUT")"
+    export P0_MARKET_SOURCE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config"]["run"]["capture_source"])' "$MEASUREMENT_CONFIG_INPUT")"
   elif [[ "$#" == 2 && "$1" == --duration ]]; then
     export P0_MEASUREMENT_DURATION="$2"
   else
@@ -367,8 +381,8 @@ mkdir -p "$(dirname "$P0_RECORD_PATH")" "$(dirname "$P0_SUMMARY_PATH")"
 echo "Project_0 Mainnet Shadow"
 echo "  program=$P0_PROGRAM_ID"
 echo "  group=$P0_GROUP_ID"
-echo "  rpc_host=$(printf '%s' "$P0_RPC_URL" | sed 's/?.*$//')"
-echo "  ws_host=$(printf '%s' "$P0_WS_URL" | sed 's/?.*$//')"
+echo "  rpc_host=$(endpoint_host P0_RPC_URL)"
+echo "  ws_host=$(endpoint_host P0_WS_URL)"
 echo "  mode=$P0_MODE"
 echo "  zero_prefund_qualified=$P0_ZERO_PREFUND_QUALIFIED"
 echo "  zero_prefund_shadow_probe=$P0_ZERO_PREFUND_SHADOW_PROBE"

@@ -1,0 +1,214 @@
+use crate::analytics::record::Decision;
+use crate::analytics::shadow_ledger::ShadowLedger;
+#[cfg(feature = "crate_health")]
+use crate::execution::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
+use crate::execution::pending::PendingSubmission;
+use crate::execution::pipeline::{pipeline_timing_snapshot, Mode, Pipeline};
+#[cfg(feature = "crate_health")]
+use crate::execution::route::JupiterV2RouteProvider;
+use crate::market::winner::{race_outcome, RaceOutcome};
+use crate::orchestration::remote_workers::{
+    OraclePriceProjectionWork, ProjectionWork, ReconcileWork, RemoteWorkers, WinnerWatch,
+};
+use crate::orchestration::winner_tracker::{
+    is_winner_relevant, WinnerDispatch, WinnerResolution, WinnerTracker, WinnerTrackerConfig,
+};
+use darkbot_common::channel::{bounded, ChannelError};
+use darkbot_common::config;
+use darkbot_common::lifecycle::Shutdown;
+use darkbot_common::timing::Clock;
+use darkbot_project0::economics::{FailedCostMatrix, Path};
+use darkbot_project0::execution::Freshness;
+#[cfg(feature = "crate_health")]
+use darkbot_project0::health::crate_impl::bank_observation_keys;
+use darkbot_project0::health::{AccountSource, HealthEngine, HealthError};
+#[cfg(feature = "crate_health")]
+use darkbot_project0::index::{ReverseIndex, ThresholdIndex};
+use darkbot_project0::planner::Allowlist;
+use darkbot_project0::protocol;
+use darkbot_project0::protocol::{classify as classify_account, AccountType}; // [FIX-47] Alias
+use darkbot_project0::safety::{Allow, Limits, Safety};
+use darkbot_solana::ingress::ws_rpc::{WsRpcConfig, WsRpcControlSource};
+use darkbot_solana::ingress::SlotWatch;
+use darkbot_solana::ingress::{IngressEvent, IngressHalt, IngressSource, SourceKind, Subscription};
+use darkbot_solana::state::blockhash::BlockhashCache;
+use darkbot_solana::state::recovery::{RecoveryDriver, SnapshotData};
+use darkbot_solana::state::snapshot;
+use darkbot_solana::state::StateCore;
+use darkbot_solana::submit::rpc::RpcSubmitter;
+use darkbot_solana::tx::{self, Resources, TxLimits};
+#[cfg(feature = "crate_health")]
+use marginfi_type_crate::{
+    constants::{ASSET_TAG_DEFAULT, ASSET_TAG_SOL},
+    types::{BalanceSide, Bank, BankOperationalState, MarginfiAccount},
+};
+#[cfg(feature = "crate_health")]
+use rayon::prelude::*;
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::{
+    account::Account,
+    hash::{hash, Hash},
+    pubkey::Pubkey,
+};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::str::FromStr;
+use std::time::Duration;
+
+mod accounts;
+mod candidates;
+use accounts::*;
+use candidates::*;
+
+use std::io::Write;
+mod detect;
+mod dispatch;
+mod events;
+mod ingress;
+mod lifecycle;
+mod remote_apply;
+mod setup;
+use ingress::IngressSessions;
+mod shutdown;
+mod sweep;
+mod telemetry;
+
+mod metrics;
+use metrics::OwnerMetrics;
+
+pub(super) struct ShadowOwner {
+    metrics: OwnerMetrics,
+    mode: String,
+    required_dependency_keys: Vec<Pubkey>,
+    _mt0_reporter: std::thread::JoinHandle<()>,
+    optional_dependency_keys: Vec<Pubkey>,
+    subscribed: HashSet<Pubkey>,
+    required_set: HashSet<Pubkey>,
+    optional_set: HashSet<Pubkey>,
+    prereq_allowed: Vec<Pubkey>,
+    min_profit: i128,
+    integration_probe_enabled: bool,
+    integration_probe_limit_per_kind: usize,
+    remote_worker_capacity: usize,
+    pending: Vec<ReconcileWork>,
+    projection_cache: HashMap<Pubkey, CachedProjection>,
+    projection_pending: HashSet<Pubkey>,
+    detect_queue: VecDeque<DetectWork>,
+    oracle_detect_order: VecDeque<Pubkey>,
+    oracle_detect_pending: HashMap<Pubkey, DetectWork>,
+    oracle_bank_projection_pending: HashMap<Pubkey, (u64, u64)>,
+    integration_probe_expected: HashSet<Pubkey>,
+    integration_probe_queue: VecDeque<(Pubkey, u64)>,
+    integration_probe_terminal: HashSet<Pubkey>,
+    threshold_fallback: HashSet<Pubkey>,
+    threshold_bootstrap: VecDeque<Pubkey>,
+    threshold_bootstrap_batch: usize,
+    use_threshold_trigger: bool,
+    sweep_batch_max_events: usize,
+    sweep_batch_max_age_ns: u64,
+    sweep_dirty_banks: HashMap<Pubkey, (u64, u64)>,
+    sweep_batch_events: usize,
+    sweep_batch_started_ns: Option<u64>,
+    candidate_recheck_slots: u64,
+    candidate_error_recheck_slots: u64,
+    candidate_repeat_soft_cap: usize,
+    candidate_cache: HashMap<Pubkey, CandidateCacheEntry>,
+    candidate_force_rearm: HashSet<Pubkey>,
+    candidate_input_epoch: u64,
+    bank_input_revision: HashMap<Pubkey, u64>,
+    ingress_burst_before_detect: usize,
+    ingress_since_detect: usize,
+    mt0_order_rx: VecDeque<u64>,
+    clock: Clock,
+    econ: Option<crate::analytics::econ::Handle>,
+    operational_start: u64,
+    operational_window: Option<crate::analytics::measurement::ReadyWindow>,
+    operational_failure: Option<&'static str>,
+    program: Pubkey,
+    group: Pubkey,
+    payer: solana_sdk::signature::Keypair,
+    liquidator: Pubkey,
+    shutdown: Shutdown,
+    halt: IngressHalt,
+    slot_watch: SlotWatch,
+    producer: darkbot_common::channel::Producer<IngressEvent>,
+    consumer: darkbot_common::channel::Consumer<IngressEvent>,
+    program_data: Pubkey,
+    program_data_baseline_hash: Hash,
+    sol_bank: Pubkey,
+    ingress_session: Shutdown,
+    st: StateCore,
+    drv: RecoveryDriver,
+    dep_shared: std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>,
+    opt_shared: std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>,
+    blockhash: BlockhashCache,
+    safety: Safety,
+    allowlist: Allowlist,
+    global_allowed: Vec<Pubkey>,
+    submitter: crate::execution::observe_only::ObserveOnly<RpcSubmitter>,
+    failed_costs: FailedCostMatrix,
+    routes: JupiterV2RouteProvider,
+    resources: Resources,
+    freshness: Freshness,
+    remote: RemoteWorkers,
+    integration_probe_projection_ready: usize,
+    integration_probe_projection_failed: usize,
+    integration_probe_projection_stale: usize,
+    integration_probe_completion_reported: bool,
+    ledger: ShadowLedger,
+    winner_tracker: WinnerTracker,
+    summaries: std::fs::File,
+    records: std::fs::File,
+    counts: [u64; 6],
+    last_reported_update_total: u64,
+    bootstrap_probe_done: bool,
+    program_upgrade_latched: bool,
+    reverse_index: ReverseIndex,
+    threshold_index: ThresholdIndex,
+    threshold_ready: bool,
+    mt0_owner: darkbot_common::mt0::OwnerTimer,
+}
+
+enum OwnerStep<T> {
+    Next(T),
+    Continue,
+}
+
+pub(super) fn run_shadow(
+    clock: Clock,
+    econ: Option<crate::analytics::econ::Handle>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (mut owner, mut fetch, ingress) = setup::prepare(clock, econ)?;
+    loop {
+        if !owner.lifecycle() {
+            break;
+        }
+        let worker_now_s = owner.remote_apply()?;
+        if let Some(h) = &owner.econ {
+            if h.admission_closed() {
+                owner.ingress_session.request();
+                if owner.winner_tracker.stats().len == 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+        }
+        owner.dispatch(worker_now_s)?;
+        owner.sweep();
+        let detect = match owner.events(&mut fetch, &ingress)? {
+            OwnerStep::Next(detect) => detect,
+            OwnerStep::Continue => continue,
+        };
+        if !owner.detect(detect)? {
+            continue;
+        }
+        owner.telemetry();
+    }
+    owner.finish()
+}
+
+#[cfg(test)]
+use super::startup::shadow_failure_code;
+#[cfg(test)]
+#[path = "state_owner/tests.rs"]
+mod integration_probe_tests;

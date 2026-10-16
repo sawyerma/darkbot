@@ -77,12 +77,24 @@ class MeasurementCli(unittest.TestCase):
                    'P0_RPC_URL': 'http://127.0.0.1:1', 'P0_WS_URL': 'ws://127.0.0.1:1',
                    'P0_KEYPAIR_PATH': str(key), 'P0_MAX_SLIPPAGE_BPS': '50',
                    'P0_ECON_OUT_DIR': str(tmp / 'runs'), 'CARGO_TARGET_DIR': str(ROOT / 'project_0/native/target')}
-            for duration, seconds in [('10m', 600), ('61s', 61)]:
-                p = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', duration], cwd=tmp,
-                                   env={**env, 'P0_ECON_RUN_ID': duration}, capture_output=True, text=True, timeout=600)
+            from dataclasses import asdict
+            from operations.cli import measurement_contract
+            for duration, seconds, relative in [('10m', 600, False), ('61s', 61, False), ('61s', 61, True)]:
+                run_id = 'relative_config' if relative else duration
+                command = [str(SCRIPTS / 'test.sh'), '--duration', duration]
+                if relative:
+                    args = measurement_contract.parser().parse_args(['--duration', duration])
+                    (tmp / 'relative.json').write_text(json.dumps({'config': asdict(measurement_contract.config(args))}))
+                    command = [str(SCRIPTS / 'capture.sh'), 'econ4h-launcher', '--measurement-config', 'relative.json']
+                p = subprocess.run(command, cwd=tmp,
+                                   env={**env, 'P0_ECON_RUN_ID': run_id}, capture_output=True, text=True, timeout=600)
+                if relative:
+                    self.assertIn('CAPTURE_NOT_FINALIZED', p.stderr)
+                    self.assertNotIn('No such file or directory', p.stderr)
+                    self.assertNotIn('Traceback', p.stderr)
                 self.assertEqual(p.returncode, 2, p.stderr[-2000:])  # no network: the real capture fails closed at startup
                 self.assertIn(f'Capture: {seconds}s', p.stdout)
-                run = tmp / 'runs' / duration
+                run = tmp / 'runs' / run_id
                 plan = json.loads((run / 'measurement_plan.json').read_text())
                 manifest = json.loads((run / 'measurement_manifest.json').read_text())  # written by the real p0-longtail
                 self.assertEqual(manifest['plan'], plan)  # the binary consumed exactly the persisted plan

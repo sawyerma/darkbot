@@ -53,3 +53,12 @@ Historical raw evidence (`docs/evidence/AUDIT_20261005`, `R122`/`R124` JSON) is 
 
 Commands recorded in `docs/evidence/` and the measurement ledger name the old paths; they document what was run at the time
 and are not rewritten.
+
+## Runtime-Zielstruktur 2026-10-16
+
+Rust-Tests liegen bei ihren Domains; die früheren Binary-Helper-Tests unter
+`native/crates/runtime/src/orchestration/state_owner/tests.rs` laufen jetzt in derselben Runtime-Bibliothek.
+Alle ursprünglichen Testnamen sind nach Modulpfad-Normalisierung erhalten (382/384 PASS, je 1 ignored).
+Der Market-Sicherheitsscan prüft die neue modulare Observer-Implementierung und den frühen Market-Dispatch.
+Echte Launcher-Tests decken zusätzlich relative `--measurement-config`-Pfade und URL-Credentials im Banner ab.
+[Struktur-, Paritäts- und Buildnachweis](../docs/architecture/runtime_modularization_20261016.md).

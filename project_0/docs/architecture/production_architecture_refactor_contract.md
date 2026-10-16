@@ -1,11 +1,13 @@
 # Project_0 – Verbindlicher Produktionsarchitektur- und Refactoring-Vertrag
 
 **Stand:** 2026-10-15  
-**Status:** TARGET / NOT IMPLEMENTED; does not grant implementation, Mainnet or LIVE acceptance.  
+**Status:** Struktur am 2026-10-16 lokal implementiert und offline qualifiziert; [Nachweis und bewusste Abweichungen](runtime_modularization_20261016.md). Keine Mainnet-/LIVE- oder wirtschaftliche Abnahme.
 **Scope:** exclusively `project_0/`. Other projects, especially `bsc/`, are out of scope.  
 **Authority:** [PHASENPLAN.md](../PHASENPLAN.md) v4.5.2; [PHASENPLAN.json](../PHASENPLAN.json); [MEASUREMENT_LEDGER.md](../MEASUREMENT_LEDGER.md), [MEASUREMENT_LEDGER.json](../MEASUREMENT_LEDGER.json), immutable [evidence](../evidence/). This contract adds a structure/migration layer. It neither shortens nor changes any authoritative product or safety gate.
 
-> **To the implementing AI:** Read this document in full, then the current README, status, plan/ledger and the real code. Verify the LOCAL staged iterations 30–32 and subsequent path/keypair/feature/mock cleanup **before** any new architecture refactor. Remote GitHub cannot see staged local edits. **Begin with A0 only, report findings and STOP.** Never silently change, unstage or overwrite the user's existing working tree. No commit, push or branch without separate user instruction.
+> **Aktueller Auftrag 2026-10-16:** Der Nutzer hat A0–A7 ausdrücklich freigegeben und die nachfolgend historisch dokumentierte A0-Stoppregel ersetzt. Der aktuelle Code-/Qualifikationsstand steht im [Abschlussnachweis](runtime_modularization_20261016.md).
+
+> **Historische Anweisung vom 2026-10-15:** Read this document in full, then the current README, status, plan/ledger and the real code. Verify the LOCAL staged iterations 30–32 and subsequent path/keypair/feature/mock cleanup **before** any new architecture refactor. Remote GitHub cannot see staged local edits. **Begin with A0 only, report findings and STOP.** Never silently change, unstage or overwrite the user's existing working tree. No commit, push or branch without separate user instruction.
 
 ## 1. Non-negotiable product and architecture rules
 

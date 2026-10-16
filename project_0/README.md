@@ -2,11 +2,11 @@
 
 **Ein produktives System für Marginfi-Liquidationen auf Solana.** Diese README ist der zentrale Einstieg für Menschen und ausführende KI-Agenten: tatsächliche Dateien, Zuständigkeiten, verbindliche Produktphasen, Architekturziel und sichere Arbeitsreihenfolge.
 
-**Stand dieser Dokumentation: 2026-10-15.** Im GitHub-Repository ist der unverändert produktive Rust-Workspace weiterhin `native/crates/{common,solana,liquidation,runtime}`. Die Strukturreform 1–29 liegt bis `d234913` auf GitHub; Iterationen 30–32 und nachträgliche Launcher-/Keypair-/Feature-/Testbereinigungen sind laut lokalem Handoff umgesetzt und gestaged, aber **nicht in GitHub sichtbar und nicht unabhängig abgenommen**. Die Umbenennung `native → engine` sowie die neue interne Runtime-Modularisierung sind **ZIELE**, keine bereits implementierten GitHub-Dateien.
+**Stand: 2026-10-16.** Der lokale Produktionscode verwendet `native/crates/{common,solana,liquidation,runtime}` und die implementierten Runtime-Domains `orchestration`, `execution`, `market`, `analytics`. [Tatsächlicher Baum, Migration und Offline-Qualifikation](docs/architecture/runtime_modularization_20261016.md). Die neue Modularisierung ist uncommitted; `native → engine` bleibt optional.
 
 **VERBINDLICHES NEUES DOKUMENT:** [Produktionsarchitektur und vollständiger Ausführungsauftrag](docs/architecture/production_architecture_refactor_contract.md). Der Produkt-[PHASENPLAN v4.5.2](docs/PHASENPLAN.md) und das [Measurement Ledger](docs/MEASUREMENT_LEDGER.md) bleiben fachlich autoritativ. Keine dieser Dokumentationsänderungen autorisiert LIVE, Submission, Paid-Provider oder Mainnet-Runs.
 
-Die ausführende KI beginnt mit **A0 (nur lokaler Bestands- und Sicherheitscheck)** und stoppt danach. Kein automatisches Überschreiben oder Auflösen des lokal gestagten Project_0-Standes durch `git pull`. `bsc/` ist explizit außerhalb dieses Auftrags.
+Der ausdrückliche Auftrag vom 2026-10-16 hat A0–A7 autorisiert und den früheren A0-Stopp ersetzt. Der [Abschlussnachweis](docs/architecture/runtime_modularization_20261016.md) beschreibt den tatsächlich qualifizierten lokalen Stand. Kein automatisches Überschreiben oder Auflösen des lokal gestagten Project_0-Standes durch `git pull`. `bsc/` ist explizit außerhalb dieses Auftrags.
 
 For the current engineering state and the next technically necessary steps, start here:
 
@@ -18,7 +18,7 @@ The 2026-10-05 audit handoff is historical: [docs/development_history/audit_hand
 
 ## Architektur- und Ausführungsentscheidung (verbindlich)
 
-Der langfristige Zielaufbau ist absichtlich **klein**: ein Rust-Workspace (optional nach qualifizierter Migration `engine/`), vier Crates `common`, `solana`, `liquidation`, `runtime`; keine zweite Race-/Shadow-/Live-Engine, keine neue Crate ohne nachgewiesenen Bedarf. `runtime` wird **nicht** zu `execution` umbenannt. Die Runtime erhält bei tatsächlicher Codeaufteilung die vier fachlichen Bereiche `orchestration`, `execution`, `market`, `analytics`.
+Der langfristige Zielaufbau ist absichtlich **klein**: ein Rust-Workspace (optional nach qualifizierter Migration `engine/`), vier Crates `common`, `solana`, `liquidation`, `runtime`; keine zweite Race-/Shadow-/Live-Engine, keine neue Crate ohne nachgewiesenen Bedarf. `runtime` wird **nicht** zu `execution` umbenannt. Die Runtime enthält die vier fachlichen Bereiche `orchestration`, `execution`, `market`, `analytics`.
 
 - **`solana/state`** ist der einzige kanonische Chain-/Fork-State. **`runtime/orchestration`** koordiniert Ereignisreihenfolge, Owner, Generationen, Recovery und Kandidaten, ohne einen zweiten State zu erzeugen.
 - **`solana/submit`** ist der Blockchain-Submission-Adapter; **`runtime/execution`** orchestriert zulässige Pläne, Build/Sign/Submit, persistente One-Shot-/Wallet-/Inventory-Holds, Reconciliation und tatsächliche Abrechnung.
@@ -368,17 +368,21 @@ Directory: [native/crates/runtime/](native/crates/runtime/)
 
 | Responsibility | File |
 |---|---|
-| main runtime / candidate cache / event loop | **[main.rs](native/crates/runtime/src/main.rs)** |
-| receivership builder integration | [builder.rs](native/crates/runtime/src/builder.rs) |
-| end-to-end pipeline helpers | [pipeline.rs](native/crates/runtime/src/pipeline.rs) |
-| pending candidate handling | [pending.rs](native/crates/runtime/src/pending.rs) |
-| Jupiter route integration | [route.rs](native/crates/runtime/src/route.rs) |
-| LUT handling | [lookup_tables.rs](native/crates/runtime/src/lookup_tables.rs) |
-| winner / competitor matching | [winner.rs](native/crates/runtime/src/winner.rs) |
-| shadow evidence record model | [record.rs](native/crates/runtime/src/record.rs) |
-| shadow ledger | [shadow_ledger.rs](native/crates/runtime/src/shadow_ledger.rs) |
-| fixture support | [fixture.rs](native/crates/runtime/src/fixture.rs) |
-| remote worker helpers | [remote_workers.rs](native/crates/runtime/src/remote_workers.rs) |
+| binary entrypoint | [main.rs](native/crates/runtime/src/main.rs) |
+| runtime owner / candidate cache / event loop | **[state_owner.rs](native/crates/runtime/src/orchestration/state_owner.rs)** |
+| startup / mode lifecycle | [startup.rs](native/crates/runtime/src/orchestration/startup.rs) |
+| read-only capture / decoding / verification | [market/](native/crates/runtime/src/market/) |
+| market economics / measurement / reports | [analytics/](native/crates/runtime/src/analytics/) |
+| receivership builder integration | [builder.rs](native/crates/runtime/src/execution/builder.rs) |
+| end-to-end pipeline helpers | [pipeline.rs](native/crates/runtime/src/execution/pipeline.rs) |
+| pending candidate handling | [pending.rs](native/crates/runtime/src/execution/pending.rs) |
+| Jupiter route integration | [route.rs](native/crates/runtime/src/execution/route.rs) |
+| LUT handling | [lookup_tables.rs](native/crates/runtime/src/execution/lookup_tables.rs) |
+| winner / competitor matching | [winner.rs](native/crates/runtime/src/market/winner.rs) |
+| shadow evidence record model | [record.rs](native/crates/runtime/src/analytics/record.rs) |
+| shadow ledger | [shadow_ledger.rs](native/crates/runtime/src/analytics/shadow_ledger.rs) |
+| fixture support | [fixture.rs](native/crates/runtime/src/analytics/fixture.rs) |
+| remote worker helpers | [remote_workers.rs](native/crates/runtime/src/orchestration/remote_workers.rs) |
 | runtime/probe binaries | [src/bin/](native/crates/runtime/src/bin/) |
 
 ---
@@ -531,7 +535,7 @@ Directory: [scripts/](scripts/)
 | [smoke.sh](scripts/smoke.sh) | Controlled gap/reconnect smoke through a market-only loopback proxy. |
 | [verify.sh](scripts/verify.sh) / [report.sh](scripts/report.sh) | Read-only historical verification and offline reports for a run id or path. |
 | [preflight.sh](scripts/preflight.sh) | Read-only FE preflight and effective-config inspection. |
-| Compatibility wrappers | `test.sh`, `run_econ4h.sh`, `run_market_observer.sh`, `run_shadow_mainnet.sh`, `run_gap_reconnect_smoke.sh`, `fe_readonly_preflight.sh` and the old `scripts/<module>.py` paths forward unchanged; `test_suite.py` keeps the old test discovery command. Review in step 30. |
+| [test.sh](scripts/test.sh) | Required PHASENPLAN entrypoint for typed capture. Obsolete forwarding scripts and Python wrappers are inactive in [delete/](delete/README.md); use the six active shell commands or `python3 -m operations.<area>.<module>`. |
 
 Python implementations live in [operations/](operations/): [c0_census.py](operations/capture/c0_census.py) (account census),
 [run_r126_qualify.py](operations/qualification/run_r126_qualify.py) and [run_r127_qualify.py](operations/qualification/run_r127_qualify.py)
@@ -626,7 +630,7 @@ Do not copy status into this README. Update the measurement ledger and `docs/STA
 The current ordered First-Profit path is FE-00 → FE-07 (`PHASENPLAN.json` → `current_prioritized_technical_path`).
 Status per ticket and the next technically necessary steps are in [docs/STATUS.md](docs/STATUS.md).
 
-The approved 32-step repository restructuring is already in progress. Do not start an unrelated architecture rewrite or alter production semantics without separate evidence and authorization.
+The 32-step restructuring baseline is saved in `c10df8b`; the following runtime-domain migration is implemented and offline-tested in the local working tree. Do not start an unrelated architecture rewrite or alter production semantics without separate evidence and authorization.
 
 ---
 

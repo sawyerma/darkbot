@@ -23,7 +23,8 @@ Repository paths are rooted at `project_0/`; the Rust workspace is `project_0/na
 |---|---|
 | [p0_reuse_matrix.md](architecture/p0_reuse_matrix.md) | P0 reference study and upstream reuse/merge decisions (eva01, marginfi-v2). |
 | [parallel_execution_plan.md](architecture/parallel_execution_plan.md) | Parallel execution design and MT0–MT10 sequence (baseline 2026-10-06). |
-| [runtime_modularization_plan.md](architecture/runtime_modularization_plan.md) | Plan (not executed) for splitting `run_shadow()` and `market_observer.rs` with behaviour-parity checks. |
+| [runtime_modularization_plan.md](architecture/runtime_modularization_plan.md) | Implemented runtime ownership map; links to the final migration and qualification report. |
+| [runtime_modularization_20261016.md](architecture/runtime_modularization_20261016.md) | Actual final project tree, full migration, tests, parity, preserved identities and remaining deviations. |
 | [run_layout_versioning.md](architecture/run_layout_versioning.md) | Run layout V1/V2, pinned files, versioned identities (Option A implemented) and resume rules. |
 
 ### [operations/](operations/)

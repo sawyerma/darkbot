@@ -1,0 +1,5 @@
+{
+  "proxy_exit": 2,
+  "readiness_file_created": false,
+  "diagnostic": "GAP_PROXY_FAILED IO kind=ConnectionRefused os_code=Some(61)\n"
+}

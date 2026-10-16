@@ -1,0 +1,35 @@
+[
+  {
+    "label": "proxy_tests",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "-p",
+      "darkbot-solana",
+      "--example",
+      "p0-gap-ws-proxy"
+    ],
+    "exit_code": 0,
+    "seconds": 1.36
+  },
+  {
+    "label": "runner_tests",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "-p",
+      "darkbot-runner",
+      "--features",
+      "crate_health txv1",
+      "--lib"
+    ],
+    "exit_code": 101,
+    "seconds": 18.65
+  }
+]

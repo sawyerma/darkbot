@@ -1,0 +1,208 @@
+{
+  "terminal_zip_sha256": "5092d9e699fefd5556e909f323c06a7729b272d5584d913b1eb4396f35859619",
+  "reported_workspace_tests": {
+    "crate_health": 300,
+    "crate_health_txv1": 302,
+    "failures": 0,
+    "ignored_each": 1
+  },
+  "raw_commands_exit_codes": "not captured in supplied terminal transcript; test summaries independently read, not rerun claims",
+  "format_diff_files": [
+    {
+      "path": "project_0/native/crates/darkbot-common/src/config.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-common/src/error.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-common/src/histogram.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-common/src/journal.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-common/src/lifecycle.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-common/src/timing.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/economics.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/execution.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/funding.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/health.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/index.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/integration.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/lib.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/planner.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/prepared.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/projection.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/protocol.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/receivership.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/safety.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/schedule.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-project0/src/sizing.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-runner/src/bin/p0-prewarm-atas.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-runner/src/bin/p0-probe-costs.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-runner/src/builder.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-runner/src/fixture.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-runner/src/lookup_tables.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-runner/src/route.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-runner/src/shadow_ledger.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-runner/src/winner_tracker.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/bin/p0-probe-v1.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/ingress/mod.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/ingress/ws_rpc.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/state/blockhash.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/state/mod.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/state/recovery.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/state/snapshot.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/submit/jito.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/submit/rpc.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    },
+    {
+      "path": "project_0/native/crates/darkbot-solana/src/tx/mod.rs",
+      "baseline_format_difference": true,
+      "baseline_rustfmt_exit": 0
+    }
+  ],
+  "global_fmt": "FAIL; baseline differences retained, not broadly reformatted"
+}

@@ -1,7 +1,7 @@
 # Project_0 — aktiver Handoff für neue Chats
 
-**Aufnahme:** 2026-10-15. **Repository:** `sawyerma/darkbot`, Branch `main`.
-**Strukturstatus:** 1–7, 8a `958d0b3`, 8b.1 `e8e904c`, Wallet-Lock-Fix `6ec4483`/`218710b`, **8b.2–15 `46be33c`, 16–29 `d234913`; 30–32 im Arbeitsbaum umgesetzt, gestaged und offline endqualifiziert** (keine unabhängige Abnahme behauptet). Die 32 Strukturschritte sind damit inhaltlich abgeschlossen; Commit/Push durch den Nutzer.
+**Aufnahme:** 2026-10-16. **Repository:** `sawyerma/darkbot`, Branch `main`.
+**Strukturstatus:** 1–7, 8a `958d0b3`, 8b.1 `e8e904c`, Wallet-Lock-Fix `6ec4483`/`218710b`, **8b.2–15 `46be33c`, 16–29 `d234913`; 30–32 im Arbeitsbaum umgesetzt, gestaged und offline endqualifiziert** (keine unabhängige Abnahme behauptet). Die 32 Strukturschritte sind in `c10df8b` gespeichert. Die anschließende [Zielstruktur-Modularisierung](../architecture/runtime_modularization_20261016.md) liegt zusätzlich offline-geprüft im Arbeitsbaum; Commit/Push durch den Nutzer.
 **Vollständige Fortschrittstabelle:** [32-Schritte-Roadmap](../architecture/restructure_32_step_plan.md).
 **Fachlicher Bot-Status:** [STATUS.md](../STATUS.md). Maßgeblich bleiben das [Measurement-Ledger](../MEASUREMENT_LEDGER.md) und der [Phasenplan](../PHASENPLAN.md).
 
@@ -117,7 +117,7 @@ Attrappen. Verbliebene Test-Doubles (RPC-Eingaben, Fault-Injection, Submission-A
 382 PASS / 1 ignored, `crate_health,txv1` 384 PASS / 1 ignored, `cargo check` ohne Features PASS, beide Release-Builds
 PASS, Differential-Clippy 38→38, Build-Warnungen unverändert (9, strikt gepinnte Dateien), rustfmt der geänderten Dateien
 ohne neuen Hunk.
-Plan: [Runtime-Modularisierung](../architecture/runtime_modularization_plan.md) (nicht ausgeführt).
+**Umgesetzt 2026-10-16:** [Runtime-Modularisierung und vollständiger Strukturabschluss](../architecture/runtime_modularization_20261016.md). Vier Domains, dünner Einstieg, getrennte Owner-Schritte und Market-Bausteine; 382/384 Rust PASS, 103 Python PASS, 29 Verifier PASS, beide Release-Builds PASS, keine neuen Clippy-Diagnosen. Die bisher gestagten 42 Dateien wurden parallel als `c10df8b` gespeichert; die neue Modularisierung bleibt uncommitted.
 
 **Offene Punkte:** (1) `delete/` nach Prüfung endgültig entfernen. (2) Optionaler eigener Formatierungs-Commit für Alt-Hunks
 (betrifft das strict-gepinnte `market_truth.rs` → neue Strict-Spec-IDs). (3) `p0-longtail` erfordert `crate_health` (Cargo

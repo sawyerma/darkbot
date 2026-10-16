@@ -162,3 +162,10 @@ Der Baum ist eine **Zielabsicht**. Neue Pfade dürfen bestehende Rust-/Python-/S
 - [evidence/](../evidence/) — historische unveränderliche Nachweise.
 
 **Nicht verwechseln:** 32 Strukturiterationen ≠ FE-00–FE-07 ≠ wirtschaftlicher GO ≠ LIVE- oder Mainnet-Autorisierung.
+
+## Produktions-Zielstruktur nach den 32 Schritten, 2026-10-16
+
+Die 42 zuvor gestagten Dateien sind durch einen parallelen Vorgang in `c10df8b` gesichert. Die ausdrücklich autorisierte
+interne Runtime-Modularisierung ist jetzt im Arbeitsbaum umgesetzt: [tatsächlicher Gesamtbaum, Migration und
+Endqualifikation](runtime_modularization_20261016.md). Die historischen Zwischenstände oben bleiben als solche lesbar.
+Vier Crates, eine Runtime, vier Domains; keine `native`-Umbenennung und keine zusätzlichen Produkt-/LIVE-Freigaben.

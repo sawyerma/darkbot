@@ -1,0 +1,7 @@
+{
+  "run": "project_0/data/econ4h/c0e1_gap_smoke_20261010T191151Z",
+  "verdict": "ABORTED_BY_USER",
+  "reason": "User requested stop of 600s smoke to conserve credits; no PASS claim",
+  "signal": "SIGTERM",
+  "at_utc": "2026-10-10T19:12:57.309779+00:00"
+}

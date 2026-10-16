@@ -1,0 +1,12 @@
+{
+  "head": "2c03b03ad166b0c92589da295c3ff5284a51e2db",
+  "source_sha256": {
+    "project_0/native/crates/darkbot-runner/src/main.rs": "791b0724f2ba5dab8ec23d1855ef7cd73756e22517e101b41ce805867617bdba",
+    "project_0/native/crates/darkbot-runner/src/market_paths.rs": "f2cbf49bca82f66873937bdbd6f3c7e95f527c443d0a4ef33a24c7e739b4eefe",
+    "project_0/native/crates/darkbot-runner/src/market_reconcile.rs": "de5c1377652fff391aec4c259b43019cc77111606f069e2126e7803bd52484c5",
+    "project_0/native/crates/darkbot-solana/examples/p0-gap-ws-proxy.rs": "a53a01e08fcae5bb58646fd66b93695c9bd93173fee575c592f7bd35200f3f49",
+    "project_0/scripts/run_gap_reconnect_smoke.sh": "3ea76b54faff3ca87aef65d43692a3463f2479a4615cb20d38c77435e841b082"
+  },
+  "scope": "local follow-up; no new commit yet",
+  "rust_functionality_after_full_matrix": "Only removal of unnecessary unwrap in test proxy, rechecked by2 proxy tests and both differential Clippy runs. Runner source unchanged. Smoke defaults changed to60/15/15 at explicit user request."
+}

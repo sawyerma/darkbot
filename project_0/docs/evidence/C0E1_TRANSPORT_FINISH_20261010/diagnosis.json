@@ -1,0 +1,50 @@
+{
+  "head_at_start": "2c03b03ad166b0c92589da295c3ff5284a51e2db",
+  "historical_proxy_io_root_cause": "UNKNOWN; historical log retained category only",
+  "direct_endpoint_selection": "HELIUS_API_KEY fallback; wss://mainnet.helius-rpc.com; auth omitted",
+  "direct_http_getSlot": {
+    "http_status": 200,
+    "finalized_slot": 455364730
+  },
+  "direct_websocket": {
+    "acks": 2,
+    "slot": 455364786,
+    "exit_code": 0
+  },
+  "proxy_probe": {
+    "command": "P0_GAP_PROBE_ONLY=true P0_GAP_INTERRUPT_AFTER_SECS=2 bash project_0/scripts/run_gap_reconnect_smoke.sh",
+    "exit_code": 0,
+    "upstream_connect_ms": 595,
+    "preflight_slot": 455365094,
+    "post_reconnect_slot": 455365112
+  },
+  "earlier_barrier_smoke": {
+    "run": "c0e1_gap_smoke_20261010T125859Z",
+    "slots_expected": 2767,
+    "slots_fetched": 216,
+    "slots_unresolved": 2551,
+    "transactions_scanned": 226991,
+    "error": "RPC_TIMEOUT",
+    "shadow_quiescent_at_ns": 782353391958,
+    "received_and_streamed_evaluations": 873696,
+    "snapshots": 4,
+    "queue_drops": 0,
+    "verdict": "INCOMPLETE"
+  },
+  "user_startup_smoke": {
+    "run": "c0e1_gap_smoke_20261010T131358Z",
+    "market_duration": 0,
+    "proxy_error": "IO",
+    "deployment_error": "DEPLOYMENT_RPC",
+    "barrier": "SHADOW_RPC_BARRIER_FAILED",
+    "barrier_interpretation": "consequence of early Shadow failure; not proof of worker deadlock",
+    "shadow_original_error": "UNKNOWN; prior owner discarded returned error",
+    "verdict": "INCOMPLETE"
+  },
+  "non_claims": [
+    "No 4h run",
+    "No realized PnL",
+    "No provider plan inferred",
+    "No historical network cause invented"
+  ]
+}

@@ -1,0 +1,113 @@
+[
+  {
+    "label": "build_health",
+    "argv": [
+      "cargo",
+      "build",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "--workspace",
+      "--features",
+      "crate_health"
+    ],
+    "exit_code": 0,
+    "seconds": 2.88
+  },
+  {
+    "label": "build_txv1",
+    "argv": [
+      "cargo",
+      "build",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "--workspace",
+      "--features",
+      "crate_health txv1"
+    ],
+    "exit_code": 0,
+    "seconds": 1.22
+  },
+  {
+    "label": "test_health",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "--workspace",
+      "--features",
+      "crate_health"
+    ],
+    "exit_code": 0,
+    "seconds": 24.62
+  },
+  {
+    "label": "test_txv1",
+    "argv": [
+      "cargo",
+      "test",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "--workspace",
+      "--features",
+      "crate_health txv1"
+    ],
+    "exit_code": 0,
+    "seconds": 29.87
+  },
+  {
+    "label": "clippy_health",
+    "argv": [
+      "cargo",
+      "clippy",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "--workspace",
+      "--all-targets",
+      "--features",
+      "crate_health",
+      "--message-format=json"
+    ],
+    "exit_code": 0,
+    "seconds": 4.7
+  },
+  {
+    "label": "clippy_txv1",
+    "argv": [
+      "cargo",
+      "clippy",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "--workspace",
+      "--all-targets",
+      "--features",
+      "crate_health txv1",
+      "--message-format=json"
+    ],
+    "exit_code": 0,
+    "seconds": 1.72
+  },
+  {
+    "label": "release",
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--manifest-path",
+      "project_0/native/Cargo.toml",
+      "--features",
+      "crate_health txv1",
+      "--bin",
+      "p0-longtail"
+    ],
+    "exit_code": 0,
+    "seconds": 0.34
+  }
+]

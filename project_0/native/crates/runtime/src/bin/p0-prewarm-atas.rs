@@ -1,13 +1,11 @@
 use darkbot_project0::protocol;
 use darkbot_solana::tx;
 use solana_client::rpc_client::RpcClient;
-use solana_client::rpc_config::{RpcSimulateTransactionConfig, RpcSimulateTransactionAccountsConfig};
-use solana_commitment_config::CommitmentConfig;
-use solana_sdk::{
-    pubkey::Pubkey,
-    signature::Signer,
-    transaction::Transaction,
+use solana_client::rpc_config::{
+    RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig,
 };
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::{pubkey::Pubkey, signature::Signer, transaction::Transaction};
 use spl_associated_token_account::{
     get_associated_token_address_with_program_id,
     instruction::create_associated_token_account_idempotent,
@@ -67,7 +65,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         let mint = Pubkey::from_str(&pair[0])?;
         let token_program = Pubkey::from_str(&pair[1])?;
         if token_program != token_v1 && token_program != token_2022 {
-            return Err(format!("unsupported token program for mint {}: {}", mint, token_program).into());
+            return Err(format!(
+                "unsupported token program for mint {}: {}",
+                mint, token_program
+            )
+            .into());
         }
 
         let ata = get_associated_token_address_with_program_id(&payer_pk, &mint, &token_program);
@@ -120,27 +122,19 @@ fn run() -> Result<(), Box<dyn Error>> {
     let instructions = missing
         .iter()
         .map(|(mint, token_program, _)| {
-            create_associated_token_account_idempotent(
-                &payer_pk,
-                &payer_pk,
-                mint,
-                token_program,
-            )
+            create_associated_token_account_idempotent(&payer_pk, &payer_pk, mint, token_program)
         })
         .collect::<Vec<_>>();
 
     let blockhash = rpc.get_latest_blockhash()?;
-    let transaction = Transaction::new_signed_with_payer(
-        &instructions,
-        Some(&payer_pk),
-        &[&payer],
-        blockhash,
-    );
+    let transaction =
+        Transaction::new_signed_with_payer(&instructions, Some(&payer_pk), &[&payer], blockhash);
 
     // [FIX-122] Measure the actual post-create rent for each ATA, including Token-2022
     // extensions, rather than guessing an account size. Verify the exact signed message.
     let fee_lamports = rpc.get_fee_for_message(&transaction.message)?;
-    let simulation = rpc.simulate_transaction_with_config(&transaction,
+    let simulation = rpc.simulate_transaction_with_config(
+        &transaction,
         RpcSimulateTransactionConfig {
             sig_verify: true,
             replace_recent_blockhash: false,
@@ -150,7 +144,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                 addresses: missing.iter().map(|(_, _, ata)| ata.to_string()).collect(),
             }),
             ..RpcSimulateTransactionConfig::default()
-        })?;
+        },
+    )?;
     if let Some(err) = simulation.value.err {
         return Err(format!(
             "prewarm simulation failed: {:?} logs={:?}",
@@ -163,37 +158,60 @@ fn run() -> Result<(), Box<dyn Error>> {
         simulation.value.units_consumed
     );
 
-    let post_accounts = simulation.value.accounts.ok_or("prewarm simulation omitted post accounts")?;
+    let post_accounts = simulation
+        .value
+        .accounts
+        .ok_or("prewarm simulation omitted post accounts")?;
     if post_accounts.len() != missing.len() {
         return Err("prewarm simulation account count mismatch".into());
     }
     let mut rent_lamports = 0u64;
     for ((mint, token_program, ata), ui) in missing.iter().zip(post_accounts) {
-        let account = ui.ok_or("prewarm simulation account missing")?
-            .decode::<solana_sdk::account::Account>().ok_or("prewarm account decode")?;
-        if account.owner != *token_program || account.data.len() < 64
+        let account = ui
+            .ok_or("prewarm simulation account missing")?
+            .decode::<solana_sdk::account::Account>()
+            .ok_or("prewarm account decode")?;
+        if account.owner != *token_program
+            || account.data.len() < 64
             || account.data[..32] != mint.to_bytes()
-            || account.data[32..64] != payer_pk.to_bytes() {
+            || account.data[32..64] != payer_pk.to_bytes()
+        {
             return Err("prewarm simulated ATA identity mismatch".into());
         }
-        rent_lamports = rent_lamports.checked_add(account.lamports).ok_or("rent overflow")?;
-        println!("PREWARM_RENT ata={} data_len={} lamports={}", ata, account.data.len(), account.lamports);
+        rent_lamports = rent_lamports
+            .checked_add(account.lamports)
+            .ok_or("rent overflow")?;
+        println!(
+            "PREWARM_RENT ata={} data_len={} lamports={}",
+            ata,
+            account.data.len(),
+            account.lamports
+        );
     }
-    let total = rent_lamports.checked_add(fee_lamports).ok_or("cost overflow")?;
-    let remaining = balance.checked_sub(total).ok_or("insufficient prewarm balance")?;
-    println!("PREWARM_COST rent_lamports={} fee_lamports={} total_lamports={} remaining_lamports={}",
-        rent_lamports, fee_lamports, total, remaining);
+    let total = rent_lamports
+        .checked_add(fee_lamports)
+        .ok_or("cost overflow")?;
+    let remaining = balance
+        .checked_sub(total)
+        .ok_or("insufficient prewarm balance")?;
+    println!(
+        "PREWARM_COST rent_lamports={} fee_lamports={} total_lamports={} remaining_lamports={}",
+        rent_lamports, fee_lamports, total, remaining
+    );
 
     #[cfg(feature = "crate_health")]
     {
         let program = Pubkey::from_str(&need("P0_PROGRAM_ID")?)?;
         let state = rpc.get_account(&protocol::fee_state_pda(&program))?;
         let need = 8 + std::mem::size_of::<marginfi_type_crate::types::FeeState>();
-        if state.owner != program || protocol::classify(&state.data) != protocol::AccountType::FeeState
-            || state.data.len() < need {
+        if state.owner != program
+            || protocol::classify(&state.data) != protocol::AccountType::FeeState
+            || state.data.len() < need
+        {
             return Err("invalid protocol FeeState".into());
         }
-        let fee: marginfi_type_crate::types::FeeState = bytemuck::pod_read_unaligned(&state.data[8..need]);
+        let fee: marginfi_type_crate::types::FeeState =
+            bytemuck::pod_read_unaligned(&state.data[8..need]);
         println!("PREWARM_PROTOCOL_RESERVE flat_fee_lamports={} remaining_after_prewarm={} covers_flat_fee={}",
             fee.liquidation_flat_sol_fee, remaining, remaining >= fee.liquidation_flat_sol_fee as u64);
     }
@@ -206,7 +224,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     // A real prerequisite send requires the explicitly approved total-cost ceiling.
     let approved_max = need("P0_PREWARM_MAX_LAMPORTS")?.parse::<u64>()?;
     if total > approved_max {
-        return Err(format!("prewarm cost {} exceeds approved ceiling {}", total, approved_max).into());
+        return Err(format!(
+            "prewarm cost {} exceeds approved ceiling {}",
+            total, approved_max
+        )
+        .into());
     }
     let signature = rpc.send_and_confirm_transaction(&transaction)?;
     println!("PREWARM_SENT signature={}", signature);

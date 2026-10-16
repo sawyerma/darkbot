@@ -1,7 +1,7 @@
 //! Read-only qualification entrypoint. Existing Budget/Health/Sizing, no signer.
 #[cfg(feature = "crate_health")]
 fn run() -> Result<(), String> {
-    use darkbot_runner::fe_qualification::{self as fe, ObservedState};
+    use darkbot_runner::orchestration::fe_qualification::{self as fe, ObservedState};
     use darkbot_solana::{provider, runtime_config::Resolved};
     use serde_json::{json, Value};
     use solana_client::rpc_request::RpcRequest;

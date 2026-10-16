@@ -1,0 +1,18 @@
+{
+  "baseline": "b7f5ed3850e0b1e412d39c673d89a8c8ffc3644a",
+  "baseline_warnings": 55,
+  "candidate_warnings": 56,
+  "candidate_only": 1,
+  "new": [
+    {
+      "key": [
+        [
+          "darkbot-solana/examples/p0-gap-ws-proxy.rs"
+        ],
+        "clippy::unnecessary_unwrap",
+        "called `unwrap` on `slot` after checking its variant with `is_some`"
+      ],
+      "count": 1
+    }
+  ]
+}

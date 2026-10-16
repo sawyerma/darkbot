@@ -1,0 +1,6 @@
+{
+  "run": "project_0/data/econ4h/c0e1_gap_smoke_20261010T191322Z",
+  "verdict": "INCOMPLETE_ABORTED_BUDGET",
+  "reason": "60s market capture finished; Shadow still in startup recovery with zero streamed evaluations. Stop prolonged post-capture wait under user credit/short-smoke priority. No PASS.",
+  "at_utc": "2026-10-10T19:16:20.613585+00:00"
+}
