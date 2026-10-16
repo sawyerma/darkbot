@@ -1,6 +1,6 @@
 # Project_0 — implementierte Zielstruktur, 2026-10-16
 
-Status: **lokal implementiert und offline qualifiziert**, uncommitted. Produkt- und Mainnet-Gates bleiben unverändert.
+Status: **historischer Abschlussbericht der Runtime-Refaktorierung**; der Code wurde mit `8bd462e` gepusht. Aussagen über „uncommitted“, lokale Stashes und damalige HEADs sind zeitgebundene Originalnotizen. **Aktuelle Weiterentwicklung:** binäre Persistenz `4a27a1c` (PARTIAL) mit [Implementierungsnachweis](../development_history/persist_binary_completion_20261016.md) und [aktuellem Status](../STATUS.md). Produkt- und Mainnet-Gates bleiben unverändert.
 Der ausdrückliche Implementierungsauftrag vom 2026-10-16 ersetzt die frühere Beschränkung auf A0.
 
 ## Tatsächliche Struktur
