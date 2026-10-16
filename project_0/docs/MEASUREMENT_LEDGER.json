@@ -3,9 +3,9 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "281d036c9211fbef5d0a8d4801fe35007d00739d",
+    "git_blob_sha": "72eaa396ae16a36f7dd9bca97ffed9fb6182da18",
     "as_of_code_commit": null,
-    "line_count": 5422,
+    "line_count": 5436,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014",
     "local_followup_base_commit": "9047c7b45988b0c8798b710bb97c183d0a063c7f",
@@ -126,7 +126,9 @@
       "status": "NOT_PROVEN_CURRENT_RUN_PERMISSION",
       "classifier": "LOCAL_PASS",
       "evidence": "project_0/docs/evidence/C0_MARKET_CENSUS.md",
-      "fixes": "C0-FIX-01..05 LOCAL_PASS"
+      "fixes": "C0-FIX-01..05 LOCAL_PASS",
+      "coverage": "IDENTITY_COVERAGE_LOCAL_PASS",
+      "evidence_format": "TYPED_P0J_ROWS_AND_RESULT"
     },
     "jfi": {
       "status": "OPEN",
@@ -292,7 +294,12 @@
       "line_start": 5414,
       "line_end": 5422,
       "heading": "2026-10-16 — Ticket 1: journal write admission against legacy rollback (LOCAL_PASS, JFI overall OPEN)"
+    },
+    "c0_ticket2_20261016": {
+      "line_start": 5424,
+      "line_end": 5436,
+      "heading": "2026-10-16 — Ticket 2: C0 census identity coverage and typed per-account evidence (LOCAL_PASS, C0 NOT_PROVEN)"
     }
   },
-  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission). 2026-10-16: P1B strict pinned Bank layout (fail-open prefix decode fixed), dual-size tests and promotion procedure recorded. 2026-10-16: P1B RC2 isolated probe build recorded (type-check PASS after 4 call-site changes; IDL discriminator parity). 2026-10-16: C0 census classifier and opt-in Shadow hook recorded; historical C0 evidence summarized; gate NOT_PROVEN. 2026-10-16: C0-FIX-01..05 recorded (sweep-fed bounded census worker, chain clock, no zero fallbacks, model classes). 2026-10-16: JFI-FIX-01/02 typed payload contract and owner evidence recorded; JFI overall OPEN. 2026-10-16: Ticket 1 journal write admission (no schema-1 rollback for typed kinds) recorded."
+  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission). 2026-10-16: P1B strict pinned Bank layout (fail-open prefix decode fixed), dual-size tests and promotion procedure recorded. 2026-10-16: P1B RC2 isolated probe build recorded (type-check PASS after 4 call-site changes; IDL discriminator parity). 2026-10-16: C0 census classifier and opt-in Shadow hook recorded; historical C0 evidence summarized; gate NOT_PROVEN. 2026-10-16: C0-FIX-01..05 recorded (sweep-fed bounded census worker, chain clock, no zero fallbacks, model classes). 2026-10-16: JFI-FIX-01/02 typed payload contract and owner evidence recorded; JFI overall OPEN. 2026-10-16: Ticket 1 journal write admission (no schema-1 rollback for typed kinds) recorded. 2026-10-16: Ticket 2 C0 identity coverage, typed per-account census journal, value-range handling recorded."
 }

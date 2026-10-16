@@ -571,6 +571,7 @@ pub(super) fn prepare(
     // Without P0_MT0_PATH the MT0 journal belongs to the same run as the opportunity journal
     // (`<record>.mt0.p0j`), so runs sharing one directory never collide.
     let mt0_default = journal_path.with_extension("mt0.p0j");
+    let census_journal = journal_path.clone();
     let evidence = OwnerEvidenceWriter::start(
         journal_path,
         recovery_path,
@@ -820,7 +821,7 @@ pub(super) fn prepare(
             .unwrap_or(false)
             || (mode == "shadow"
                 && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false).unwrap_or(false)),
-        c0_census: match super::census::config()? {
+        c0_census: match super::census::config(&census_journal, use_threshold_trigger)? {
             Some(c) => Some(super::census::spawn(c, shutdown.clone())?),
             None => None,
         },

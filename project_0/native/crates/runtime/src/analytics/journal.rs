@@ -60,6 +60,10 @@ pub mod kind {
     /// group indexer accounts of one context slot.
     pub const C0_CENSUS_ACCOUNT: u16 = 900;
     pub const C0_CENSUS_GROUP_ACCOUNT: u16 = 901;
+    /// C0 census (Shadow READY): one typed row per debtor of the group, then one result frame
+    /// binding clock, model, coverage and totals (`payload::C0CensusAccount/C0CensusResult`).
+    pub const C0_CENSUS_ROW: u16 = 902;
+    pub const C0_CENSUS_RESULT: u16 = 903;
     /// Kinds an explicit offline import may write; runtime and financial kinds never.
     pub const IMPORTABLE: &[u16] = &[C0_CENSUS_ACCOUNT, C0_CENSUS_GROUP_ACCOUNT];
     /// Owner events that could not reach the primary journal (recovery journal only).
@@ -87,6 +91,8 @@ pub mod kind {
         FE01_RESULT,
         C0_CENSUS_ACCOUNT,
         C0_CENSUS_GROUP_ACCOUNT,
+        C0_CENSUS_ROW,
+        C0_CENSUS_RESULT,
         OWNER_RECOVERY,
         super::MANIFEST,
     ];
@@ -101,6 +107,8 @@ pub mod source {
     pub const ECON: u32 = 6;
     pub const MEASUREMENT: u32 = 7;
     pub const C0_CENSUS: u32 = 8;
+    /// C0 census worker of the Shadow runtime (typed rows and result).
+    pub const C0_CENSUS_RUNTIME: u32 = 9;
 }
 fn bad(code: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, code)

@@ -10,7 +10,8 @@ impl ShadowOwner {
         #[cfg(feature = "crate_health")]
         if !self.use_threshold_trigger
             && self.st.run_state().is_tradable()
-            && !self.sweep_dirty_banks.is_empty()
+            && (!self.sweep_dirty_banks.is_empty()
+                || self.c0_census.as_ref().is_some_and(|c| c.armed.is_some()))
         {
             let batch_age_ns = self
                 .sweep_batch_started_ns
@@ -45,6 +46,15 @@ impl ShadowOwner {
                             .or_insert((t_rx_ns, event_slot, input_revision));
                     }
                 }
+                // [C0 Ticket 2] The armed census batch evaluates every debtor of the population
+                // exactly once, including debtors outside the dirty-bank fan-out (for example on
+                // an undecodable bank); the map deduplicates.
+                if let Some(population) = self.c0_census.as_ref().and_then(|c| c.armed.as_ref()) {
+                    let (t_rx_ns, slot) = (self.clock.now_ns(), self.slot_watch.get());
+                    for debtor in &population.debtors {
+                        account_work.entry(*debtor).or_insert((t_rx_ns, slot, 0));
+                    }
+                }
 
                 let unique = account_work.len();
                 self.metrics.sweep_account_refs =
@@ -68,8 +78,13 @@ impl ShadowOwner {
                 // account is an evaluation error, never a local-time or zero-time result.
                 let clock = chain_clock(&self.st);
                 let evaluation_slot = clock.map_or_else(|_| self.slot_watch.get(), |c| c.slot);
-                // [C0-FIX-01] The armed startup batch also yields one census row per account.
-                let census_batch = self.c0_census.as_ref().is_some_and(|c| c.armed.is_some());
+                // [C0-FIX-01] The armed startup batch also yields one census row per debtor.
+                let census_debtors = self
+                    .c0_census
+                    .as_ref()
+                    .and_then(|c| c.armed.as_ref())
+                    .map(|p| &p.debtors);
+                let census_batch = census_debtors.is_some();
                 let batch_started = std::time::Instant::now();
                 let program = self.program;
                 let view = StateView(&self.st);
@@ -77,7 +92,7 @@ impl ShadowOwner {
                 // CPU-only and independent per account. No RPC, no state mutation.
                 let (mut evaluated, census_rows): (
                     Vec<(Pubkey, u64, u64, u64, CandidateHealthState)>,
-                    Vec<Option<darkbot_project0::census::CensusRow>>,
+                    Vec<Option<super::census::CensusRowOf>>,
                 ) = account_work
                     .into_par_iter()
                     .map(|(account, (t_rx_ns, event_slot, input_revision))| {
@@ -98,7 +113,8 @@ impl ShadowOwner {
                             Ok(_) => CandidateHealthState::Liquidatable,
                             Err(_) => CandidateHealthState::Error,
                         };
-                        let row = census_batch.then(|| {
+                        let member = census_debtors.is_some_and(|d| d.contains(&account));
+                        let row = member.then(|| {
                             let facts = engine
                                 .observation_accounts(&account)
                                 .map_err(|e| e.to_string())
@@ -110,10 +126,14 @@ impl ShadowOwner {
                                         o.len(),
                                     )
                                 });
-                            darkbot_project0::census::CensusRow::new(
-                                health,
-                                engine.premium_decay_per_second(&account),
-                                facts,
+                            (
+                                account,
+                                view.0.get(&account).map(|r| r.slot),
+                                darkbot_project0::census::CensusRow::new(
+                                    health,
+                                    engine.premium_decay_per_second(&account),
+                                    facts,
+                                ),
                             )
                         });
                         ((account, t_rx_ns, event_slot, input_revision, status), row)

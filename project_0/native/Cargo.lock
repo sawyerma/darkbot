@@ -1041,6 +1041,7 @@ dependencies = [
  "kamino-mocks",
  "marginfi",
  "marginfi-type-crate",
+ "serde",
  "solana-sdk",
 ]
 

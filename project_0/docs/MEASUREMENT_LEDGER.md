@@ -5420,3 +5420,17 @@ Base `91380ad`.
 - Tests: native write / refused rollback / unregistered kind / wrong version; historical schema-1 frame of a migrated kind replays via `legacy_value` and is not decodable as typed; registry invariant (every kind typed xor migration path). Tests that need foreign frames on disk write them through test-only writers.
 
 Tests: journal+evidence 23/23, one_shot+fe_replay 26/26, full runner lib 273 PASS / 3 ignored after fixes; all-targets and featureless check PASS.
+
+## 2026-10-16 — Ticket 2: C0 census identity coverage and typed per-account evidence (LOCAL_PASS, C0 NOT_PROVEN)
+
+Base `f0da568`. [C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md).
+
+- Fixed: `expected = indexed_accounts` counted every group account (also without liabilities or active balances) while the sweep fan-out reached only accounts on decodable dirty banks — a count match could hide missing debtors or include non-debtors.
+- Population (debtors + undecodable group members) is collected in the existing reverse-index scan; the armed startup sweep evaluates each debtor exactly once (debtors outside the fan-out added); the worker proves identity coverage (missing / extra / duplicate pubkeys) and journals one typed row per account plus a typed result frame (`C0_CENSUS_ROW` 902, `C0_CENSUS_RESULT` 903, attempt journals never overwritten, sealed COMPLETE only without gap).
+- `census::usd_micro` returns `None` instead of saturating; unrepresentable values are `unsupported_ValueRange`.
+- C0 with threshold-trigger mode is refused at startup (`C0_CENSUS_REQUIRES_R127_SWEEP_MODE`); no second detection pass.
+- Local sizing: 82 782 synthetic rows → worker 232 ms incl. 30.6 MB typed journal and fsync; ≈ 17.2 MB row memory. Owner batch cost per run in `owner_batch_ms`; Mainnet NOT_MEASURED.
+
+Tests: project0 census 3/3, runner census 3/3, project0 lib 68/68, runner lib 274/274 (4 ignored). One fe_replay failure in the first full run came from temp directories left by an earlier failed run (deterministic `Pubkey::new_unique` names); removed, test passes.
+
+**C0 gate NOT_PROVEN** (no current Mainnet run; separate bounded read-only permission required).

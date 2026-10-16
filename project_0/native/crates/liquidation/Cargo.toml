@@ -21,6 +21,7 @@ darkbot-solana = { path = "../solana" }
 # BELEGT: marginfi-v2 Workspace pinnt solana-sdk =3.0.0, solana-client =3.1.12, anchor-lang 1.0.2
 solana-sdk = "=3.0.0"
 bytemuck = "1"
+serde = { version = "1", features = ["derive"] } # typed binary census payloads (JFI-01)
 fixed = { version = "=1.28.0", optional = true } # [FIX-59] exact protocol sizing math; matches marginfi lock
 anchor-lang = { version = "1.0.2", optional = true }
 

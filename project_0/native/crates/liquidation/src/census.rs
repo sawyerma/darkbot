@@ -14,10 +14,11 @@
 
 use crate::economics::{t_profitable, BPS, PREMIUM_MAX_BPS};
 use crate::health::{HealthError, HealthView};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Validated cost model; every field comes from configuration with stated provenance.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CensusModel {
     pub fee_state_max_bps: u64,
     pub realizable_bps: u64,
@@ -55,7 +56,7 @@ impl CensusModel {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Unsupported {
     UnknownLayout,
     Unsupported,
@@ -67,6 +68,10 @@ pub enum Unsupported {
     Premium,
     /// Account facts (banks, oracles, integrations, observation) could not be read.
     Facts,
+    /// A value is not representable as USD-micro (negative or beyond u64); never saturated.
+    ValueRange,
+    /// Group member whose account layout cannot be decoded by the pinned crate.
+    AccountLayout,
 }
 
 impl Unsupported {
@@ -84,7 +89,7 @@ impl Unsupported {
 
 /// Facts of one account read from the canonical state (C0-FIX-04). Protocol-version features the
 /// pinned program does not have are `None` (not applicable), never `false`/`0`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountFacts {
     pub active_banks: u8,
     pub liability_banks: u8,
@@ -104,7 +109,7 @@ pub struct AccountFacts {
 }
 
 /// One account's census input, evaluated against one state view and one clock.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CensusRow {
     pub health: Result<HealthView, Unsupported>,
     pub premium_decay_bits_per_s: Result<u128, Unsupported>,
@@ -125,7 +130,7 @@ impl CensusRow {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum C0Class {
     Healthy,
     /// Model: healthy now; projected borrow premium erodes maintenance health to zero after `eta_s`.
@@ -145,13 +150,13 @@ pub enum C0Class {
     Unsupported(Unsupported),
 }
 
-/// I80F48 bits (48 fraction bits, USD) → USD-micro, negative clamped to 0, saturating.
-pub fn usd_micro(bits: i128) -> u64 {
-    if bits <= 0 {
-        return 0;
+/// I80F48 bits (48 fraction bits, USD) → USD-micro. `None` for negative values or values beyond
+/// u64: such a value is unqualified, never saturated into a seemingly valid number.
+pub fn usd_micro(bits: i128) -> Option<u64> {
+    if bits < 0 {
+        return None;
     }
-    let micro = (bits as u128).saturating_mul(1_000_000) >> 48;
-    micro.min(u64::MAX as u128) as u64
+    u64::try_from((bits as u128).checked_mul(1_000_000)? >> 48).ok()
 }
 
 pub fn classify(row: &CensusRow, now_unix_s: u64, m: &CensusModel) -> C0Class {
@@ -166,6 +171,10 @@ pub fn classify(row: &CensusRow, now_unix_s: u64, m: &CensusModel) -> C0Class {
     if let Err(r) = row.facts {
         return C0Class::Unsupported(r);
     }
+    let (Some(assets), Some(repay)) = (usd_micro(h.equity_assets), usd_micro(h.equity_liabilities))
+    else {
+        return C0Class::Unsupported(Unsupported::ValueRange);
+    };
     if h.is_bad_debt {
         return C0Class::BadDebt;
     }
@@ -178,8 +187,6 @@ pub fn classify(row: &CensusRow, now_unix_s: u64, m: &CensusModel) -> C0Class {
         }
         return C0Class::Healthy;
     }
-    let assets = usd_micro(h.equity_assets);
-    let repay = usd_micro(h.equity_liabilities);
     if repay == 0 || assets <= repay {
         return C0Class::ModelUneconomic;
     }
@@ -209,7 +216,7 @@ pub fn classify(row: &CensusRow, now_unix_s: u64, m: &CensusModel) -> C0Class {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassTotals {
     pub accounts: u64,
     pub equity_assets_usd_micro: u128,
@@ -217,10 +224,10 @@ pub struct ClassTotals {
 }
 
 impl ClassTotals {
-    fn add(&mut self, h: &HealthView) {
+    fn add(&mut self, (assets, liabs): (u64, u64)) {
         self.accounts += 1;
-        self.equity_assets_usd_micro += usd_micro(h.equity_assets) as u128;
-        self.equity_liabs_usd_micro += usd_micro(h.equity_liabilities) as u128;
+        self.equity_assets_usd_micro += assets as u128;
+        self.equity_liabs_usd_micro += liabs as u128;
     }
 }
 
@@ -228,7 +235,7 @@ impl ClassTotals {
 /// ≤ 1 %, ≤ 5 %, ≤ 10 %, > 10 %, and accounts without maintenance liabilities.
 pub const DISTANCE_BUCKETS_BPS: [u64; 3] = [100, 500, 1_000];
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Census {
     pub healthy: ClassTotals,
     pub model_premium_driven: ClassTotals,
@@ -274,6 +281,14 @@ impl Census {
                 return;
             }
         };
+        // Values are checked once; an unrepresentable value is unqualified, never a class total.
+        let (Some(assets), Some(liabs)) =
+            (usd_micro(h.equity_assets), usd_micro(h.equity_liabilities))
+        else {
+            *self.unsupported.entry(Unsupported::ValueRange).or_default() += 1;
+            return;
+        };
+        let values = (assets, liabs);
         if facts.costly_positions.is_none() || facts.premium_active.is_none() {
             self.version_not_applicable += 1;
         }
@@ -282,7 +297,7 @@ impl Census {
             .max(facts.observation_accounts);
         let unhealthy = match class {
             C0Class::Healthy => {
-                self.healthy.add(&h);
+                self.healthy.add(values);
                 let bucket = if h.maint_liabs <= 0 {
                     4
                 } else {
@@ -297,19 +312,19 @@ impl Census {
                 false
             }
             C0Class::ModelPremiumDriven { .. } => {
-                self.model_premium_driven.add(&h);
+                self.model_premium_driven.add(values);
                 false
             }
             C0Class::BadDebt => {
-                self.bad_debt.add(&h);
+                self.bad_debt.add(values);
                 false
             }
             C0Class::ModelRaceNow => {
-                self.model_race_now.add(&h);
+                self.model_race_now.add(values);
                 true
             }
             C0Class::ModelLongTail { t_profitable } => {
-                self.model_long_tail.add(&h);
+                self.model_long_tail.add(values);
                 let wait = t_profitable.saturating_sub(now_unix_s);
                 for (i, limit) in [3_600u64, 86_400, 7 * 86_400].into_iter().enumerate() {
                     if wait <= limit {
@@ -319,7 +334,7 @@ impl Census {
                 true
             }
             C0Class::ModelUneconomic => {
-                self.model_uneconomic.add(&h);
+                self.model_uneconomic.add(values);
                 true
             }
             C0Class::Unsupported(_) => false,
@@ -567,6 +582,22 @@ mod tests {
             classify(&r, now, &m),
             C0Class::Unsupported(Unsupported::UnknownLayout)
         );
+        // Unrepresentable values are unqualified, never saturated into a valid-looking class.
+        for (assets, liabs) in [(i128::MAX, 100 * ONE_USD), (-ONE_USD, 100 * ONE_USD)] {
+            let mut r = row(200, 100, true);
+            let mut h = r.health.unwrap();
+            (h.equity_assets, h.equity_liabilities) = (assets, liabs);
+            r.health = Ok(h);
+            assert_eq!(
+                classify(&r, now, &m),
+                C0Class::Unsupported(Unsupported::ValueRange)
+            );
+            let mut census = Census::default();
+            census.add(&r, C0Class::ModelRaceNow, now, 64);
+            assert_eq!(census.unsupported[&Unsupported::ValueRange], 1);
+            assert_eq!(census.model_race_now.accounts, 0);
+        }
+        assert_eq!(usd_micro(ONE_USD), Some(1_000_000));
     }
 
     #[test]

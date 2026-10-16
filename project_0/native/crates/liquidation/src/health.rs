@@ -19,7 +19,7 @@
 use crate::index::Side;
 use solana_sdk::pubkey::Pubkey;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HealthView {
     /// Maintenance: assets − liabs (I80F48-Bits: i128 mit 48 Fraktionsbits).
     pub maintenance_health: i128,
@@ -54,24 +54,41 @@ impl std::fmt::Display for HealthError {
             HealthError::Stale(s) => write!(f, "health stale: {}", s),
             HealthError::Crate(s) => write!(f, "health crate: {}", s),
             HealthError::MissingAccount(k) => write!(f, "health missing account in state: {}", k),
-            HealthError::Unavailable => write!(f, "health engine unavailable (feature crate_health off)"),
+            HealthError::Unavailable => {
+                write!(f, "health engine unavailable (feature crate_health off)")
+            }
         }
     }
 }
 impl std::error::Error for HealthError {}
 
 pub trait HealthEngine {
-    fn health(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<HealthView, HealthError>;
+    fn health(
+        &self,
+        account: &Pubkey,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<HealthView, HealthError>;
     /// Protocol eligibility that must hold before receivership planning.
     ///
     /// Default keeps test/fake engines source-compatible. Production CrateHealth overrides this
     /// with the pinned marginfi circuit-breaker gate. [FIX-88]
-    fn receivership_eligibility(&self, _account: &Pubkey, _now_unix_s: i64, _slot: u64) -> Result<(), HealthError> {
+    fn receivership_eligibility(
+        &self,
+        _account: &Pubkey,
+        _now_unix_s: i64,
+        _slot: u64,
+    ) -> Result<(), HealthError> {
         Ok(())
     }
     /// Observation-Accounts in Programm-Reihenfolge (remaining_accounts für Start/End/Withdraw).
     fn observation_accounts(&self, account: &Pubkey) -> Result<Vec<Pubkey>, HealthError>;
-    fn thresholds(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<AccountThresholds, HealthError>;
+    fn thresholds(
+        &self,
+        account: &Pubkey,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<AccountThresholds, HealthError>;
     fn premium_decay_per_second(&self, account: &Pubkey) -> Result<u128, HealthError>;
 }
 
@@ -90,9 +107,7 @@ pub mod crate_impl {
         marginfi_account::{calc_value, get_health_components},
         price::{OraclePriceFeedAdapter, PriceAdapter},
     };
-    use marginfi_type_crate::constants::{
-        BANK_SAME_ASSET_EMODE_ELIGIBLE, CIRCUIT_BREAKER_ENABLED,
-    };
+    use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, CIRCUIT_BREAKER_ENABLED};
     use marginfi_type_crate::types::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, BalanceSide, Bank,
         BankOperationalState, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
@@ -114,34 +129,60 @@ pub mod crate_impl {
                 let onramp = if keys[3] != Pubkey::default() {
                     keys[3]
                 } else if bank.integration_acc_1 != Pubkey::default() {
-                    marginfi_type_crate::pdas::derive_staked_onramp_from_vote(bank.integration_acc_1)
+                    marginfi_type_crate::pdas::derive_staked_onramp_from_vote(
+                        bank.integration_acc_1,
+                    )
                 } else {
                     Pubkey::default()
                 };
                 vec![keys[0], keys[1], keys[2], onramp]
             }
-            O::PythLegacy | O::SwitchboardV2 | O::PythPushOracle | O::SwitchboardPull | O::Scope | O::PTFixed => vec![keys[0]],
-            O::KaminoPythPush | O::KaminoSwitchboardPull | O::DriftPythPull | O::DriftSwitchboardPull
-            | O::SolendPythPull | O::SolendSwitchboardPull | O::JuplendPythPull | O::JuplendSwitchboardPull => vec![keys[0], keys[1]],
+            O::PythLegacy
+            | O::SwitchboardV2
+            | O::PythPushOracle
+            | O::SwitchboardPull
+            | O::Scope
+            | O::PTFixed => vec![keys[0]],
+            O::KaminoPythPush
+            | O::KaminoSwitchboardPull
+            | O::DriftPythPull
+            | O::DriftSwitchboardPull
+            | O::SolendPythPull
+            | O::SolendSwitchboardPull
+            | O::JuplendPythPull
+            | O::JuplendSwitchboardPull => vec![keys[0], keys[1]],
             O::PythMSOL | O::PythLST | O::PTPyth => vec![keys[0], keys[1]],
-            O::KaminoMSOL | O::JuplendMSOL | O::KaminoLST | O::JuplendLST => vec![keys[0], keys[1], keys[2]],
+            O::KaminoMSOL | O::JuplendMSOL | O::KaminoLST | O::JuplendLST => {
+                vec![keys[0], keys[1], keys[2]]
+            }
             #[allow(unreachable_patterns)]
-            other => return Err(HealthError::Unsupported(format!("OracleSetup {:?} (0.1.12-Typ? → P1B)", other))),
+            other => {
+                return Err(HealthError::Unsupported(format!(
+                    "OracleSetup {:?} (0.1.12-Typ? → P1B)",
+                    other
+                )))
+            }
         };
         out.retain(|pk| *pk != Pubkey::default());
         Ok(out)
     }
 
-    pub struct CrateHealth<'s, S: AccountSource + ?Sized> { // [FIX-53] supports &dyn AccountSource
+    pub struct CrateHealth<'s, S: AccountSource + ?Sized> {
+        // [FIX-53] supports &dyn AccountSource
         pub state: &'s S,
         pub group: Pubkey,
     }
 
     fn load<T: bytemuck::Pod>(data: &[u8]) -> Result<&T, HealthError> {
-        let payload = data.get(8..).ok_or_else(|| HealthError::Crate("short account".into()))?;
+        let payload = data
+            .get(8..)
+            .ok_or_else(|| HealthError::Crate("short account".into()))?;
         let n = std::mem::size_of::<T>();
-        let slice = payload.get(..n).ok_or_else(|| HealthError::Crate(format!("payload {} < {}", payload.len(), n)))?;
-        bytemuck::try_from_bytes::<T>(slice).map_err(|e| HealthError::Crate(format!("pod cast: {:?}", e)))
+        let slice = payload
+            .get(..n)
+            .ok_or_else(|| HealthError::Crate(format!("payload {} < {}", payload.len(), n)))?;
+        bytemuck::try_from_bytes::<T>(slice)
+            .map_err(|e| HealthError::Crate(format!("pod cast: {:?}", e)))
     }
 
     /// [P1B-02] Strict Bank layout: a 0.1.12-resized bank is UNKNOWN_LAYOUT, never a prefix decode.
@@ -158,7 +199,13 @@ pub mod crate_impl {
         /// (mrgn-0.1.11-rc1): Banks absteigend nach Pubkey; je Bank `bank` + Keys aus
         /// `bank.config.oracle_keys` gemäß `OracleSetup`-Enum — keine eigene PDA-Ableitung, keine u8-Magie.
         pub fn observation(&self, acc: &MarginfiAccount) -> Result<Vec<Pubkey>, HealthError> {
-            let mut banks: Vec<Pubkey> = acc.lending_account.balances.iter().filter(|b| b.is_active()).map(|b| b.bank_pk).collect();
+            let mut banks: Vec<Pubkey> = acc
+                .lending_account
+                .balances
+                .iter()
+                .filter(|b| b.is_active())
+                .map(|b| b.bank_pk)
+                .collect();
             banks.sort_by(|a, b| b.cmp(a));
             let mut out = Vec::with_capacity(banks.len() * 4);
             for bk in banks {
@@ -170,15 +217,41 @@ pub mod crate_impl {
             Ok(out)
         }
 
-        fn components(&self, acc: &MarginfiAccount, group: &MarginfiGroup, obs: &[Pubkey], req: RequirementType, clock: &Clock) -> Result<(i128, i128), HealthError> {
+        fn components(
+            &self,
+            acc: &MarginfiAccount,
+            group: &MarginfiGroup,
+            obs: &[Pubkey],
+            req: RequirementType,
+            clock: &Clock,
+        ) -> Result<(i128, i128), HealthError> {
             let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(obs.len());
             for k in obs {
                 let (owner, lamports, data) = self.raw(k)?;
-                owned.push((*k, Account { lamports, data: data.to_vec(), owner, executable: false, rent_epoch: 0 }));
+                owned.push((
+                    *k,
+                    Account {
+                        lamports,
+                        data: data.to_vec(),
+                        owner,
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                ));
             }
-            let ais: Vec<_> = owned.iter_mut().map(|(k, a)| (&*k, a).into_account_info()).collect();
-            let (assets, liabs) = get_health_components(acc, group, &ais, req, &mut None, HealthPriceMode::Client(clock.clone()))
-                .map_err(|e| HealthError::Crate(e.to_string()))?;
+            let ais: Vec<_> = owned
+                .iter_mut()
+                .map(|(k, a)| (&*k, a).into_account_info())
+                .collect();
+            let (assets, liabs) = get_health_components(
+                acc,
+                group,
+                &ais,
+                req,
+                &mut None,
+                HealthPriceMode::Client(clock.clone()),
+            )
+            .map_err(|e| HealthError::Crate(e.to_string()))?;
             Ok((assets.to_bits(), liabs.to_bits()))
         }
 
@@ -198,7 +271,12 @@ pub mod crate_impl {
             let mut lowest_liab_weight: Option<I80F48> = None;
             let mut same_asset_valid = true;
 
-            for balance in acc.lending_account.balances.iter().filter(|b| b.is_active()) {
+            for balance in acc
+                .lending_account
+                .balances
+                .iter()
+                .filter(|b| b.is_active())
+            {
                 if balance.is_empty(BalanceSide::Liabilities) {
                     continue;
                 }
@@ -269,8 +347,7 @@ pub mod crate_impl {
                 }
             }
 
-            let mut reconciled =
-                reconcile_emode_configs(configs, RequirementType::Maintenance);
+            let mut reconciled = reconcile_emode_configs(configs, RequirementType::Maintenance);
             if same_asset_enabled && same_asset_valid {
                 if let (
                     Some(mint),
@@ -455,10 +532,17 @@ pub mod crate_impl {
             let mut derived_assets = I80F48::ZERO;
             let mut derived_liabs = I80F48::ZERO;
 
-            for balance in acc.lending_account.balances.iter().filter(|b| b.is_active()) {
+            for balance in acc
+                .lending_account
+                .balances
+                .iter()
+                .filter(|b| b.is_active())
+            {
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
                 let bank: &Bank = load_bank(bdata)?;
-                let Some(balance_side) = balance.get_side() else { continue };
+                let Some(balance_side) = balance.get_side() else {
+                    continue;
+                };
                 let (low, high) = self.bank_maintenance_prices(bank, &clock)?;
 
                 let (side, price, amount, weight) = match balance_side {
@@ -470,58 +554,57 @@ pub mod crate_impl {
                             Side::Asset,
                             low,
                             bank.get_asset_amount(balance.asset_shares.into())
-                                .map_err(|e| HealthError::Crate(format!("threshold asset amount: {e}")))?,
-                            bank.get_asset_weight(
-                                RequirementType::Maintenance,
-                                &reconciled,
-                            ),
+                                .map_err(|e| {
+                                    HealthError::Crate(format!("threshold asset amount: {e}"))
+                                })?,
+                            bank.get_asset_weight(RequirementType::Maintenance, &reconciled),
                         )
                     }
                     BalanceSide::Liabilities => (
                         Side::Liability,
                         high,
                         bank.get_liability_amount(balance.liability_shares.into())
-                            .map_err(|e| HealthError::Crate(format!("threshold liability amount: {e}")))?,
-                        bank.config.get_weight(
-                            RequirementType::Maintenance,
-                            BalanceSide::Liabilities,
-                        ),
+                            .map_err(|e| {
+                                HealthError::Crate(format!("threshold liability amount: {e}"))
+                            })?,
+                        bank.config
+                            .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities),
                     ),
                 };
                 if amount <= I80F48::ZERO || price <= I80F48::ZERO {
                     continue;
                 }
 
-                let contribution = calc_value(
-                    amount,
-                    price,
-                    bank.get_balance_decimals(),
-                    Some(weight),
-                )
-                .map_err(|e| HealthError::Crate(format!("threshold contribution: {e}")))?;
+                let contribution =
+                    calc_value(amount, price, bank.get_balance_decimals(), Some(weight))
+                        .map_err(|e| HealthError::Crate(format!("threshold contribution: {e}")))?;
 
                 match side {
                     Side::Asset => {
-                        derived_assets = derived_assets
-                            .checked_add(contribution)
-                            .ok_or_else(|| HealthError::Crate("threshold asset sum overflow".into()))?;
+                        derived_assets =
+                            derived_assets.checked_add(contribution).ok_or_else(|| {
+                                HealthError::Crate("threshold asset sum overflow".into())
+                            })?;
                         bank_sides.entry(balance.bank_pk).or_default().0 = true;
                     }
                     Side::Liability => {
-                        derived_liabs = derived_liabs
-                            .checked_add(contribution)
-                            .ok_or_else(|| HealthError::Crate("threshold liability sum overflow".into()))?;
+                        derived_liabs =
+                            derived_liabs.checked_add(contribution).ok_or_else(|| {
+                                HealthError::Crate("threshold liability sum overflow".into())
+                            })?;
                         bank_sides.entry(balance.bank_pk).or_default().1 = true;
                     }
                 }
 
-                let entry = positions.entry((balance.bank_pk, side)).or_insert(Position {
-                    bank: balance.bank_pk,
-                    side,
-                    current_price: price,
-                    components: Vec::new(),
-                    contribution: I80F48::ZERO,
-                });
+                let entry = positions
+                    .entry((balance.bank_pk, side))
+                    .or_insert(Position {
+                        bank: balance.bank_pk,
+                        side,
+                        current_price: price,
+                        components: Vec::new(),
+                        contribution: I80F48::ZERO,
+                    });
                 if entry.current_price != price {
                     return Err(HealthError::Crate(format!(
                         "threshold same-bank price mismatch bank={} side={:?}",
@@ -533,10 +616,13 @@ pub mod crate_impl {
                     weight,
                     decimals: bank.get_balance_decimals(),
                 });
-                entry.contribution = entry
-                    .contribution
-                    .checked_add(contribution)
-                    .ok_or_else(|| HealthError::Crate("threshold grouped contribution overflow".into()))?;
+                entry.contribution =
+                    entry
+                        .contribution
+                        .checked_add(contribution)
+                        .ok_or_else(|| {
+                            HealthError::Crate("threshold grouped contribution overflow".into())
+                        })?;
             }
 
             if let Some((bank, _)) = bank_sides.iter().find(|(_, (asset, liab))| *asset && *liab) {
@@ -664,7 +750,12 @@ pub mod crate_impl {
                 unix_timestamp: now_unix_s,
             };
 
-            for balance in acc.lending_account.balances.iter().filter(|b| b.is_active()) {
+            for balance in acc
+                .lending_account
+                .balances
+                .iter()
+                .filter(|b| b.is_active())
+            {
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
                 let bank: &Bank = load_bank(bdata)?;
 
@@ -732,16 +823,29 @@ pub mod crate_impl {
     }
 
     impl<'s, S: AccountSource + ?Sized> HealthEngine for CrateHealth<'s, S> {
-        fn health(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<HealthView, HealthError> {
+        fn health(
+            &self,
+            account: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<HealthView, HealthError> {
             let (_, _, adata) = self.raw(account)?;
             let acc: &MarginfiAccount = load(adata)?;
             let (_, _, gdata) = self.raw(&self.group)?;
             let group: &MarginfiGroup = load(gdata)?;
             let obs = self.observation(acc)?;
-            let clock = Clock { slot, epoch_start_timestamp: 0, epoch: 0, leader_schedule_epoch: 0, unix_timestamp: now_unix_s };
-            let (ma, ml) = self.components(acc, group, &obs, RequirementType::Maintenance, &clock)?;
+            let clock = Clock {
+                slot,
+                epoch_start_timestamp: 0,
+                epoch: 0,
+                leader_schedule_epoch: 0,
+                unix_timestamp: now_unix_s,
+            };
+            let (ma, ml) =
+                self.components(acc, group, &obs, RequirementType::Maintenance, &clock)?;
             let (ea, el) = self.components(acc, group, &obs, RequirementType::Equity, &clock)?;
-            let five_usd_bits: i128 = (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
+            let five_usd_bits: i128 =
+                (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
             Ok(HealthView {
                 maintenance_health: ma - ml,
                 maint_assets: ma,
@@ -754,7 +858,12 @@ pub mod crate_impl {
             })
         }
 
-        fn receivership_eligibility(&self, account: &Pubkey, now_unix_s: i64, slot: u64) -> Result<(), HealthError> {
+        fn receivership_eligibility(
+            &self,
+            account: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<(), HealthError> {
             self.receivership_cb_gate(account, now_unix_s, slot)
         }
 
@@ -792,7 +901,9 @@ mod bank_layout_tests {
     struct Source(HashMap<Pubkey, (Pubkey, Vec<u64>, usize)>);
     impl AccountSource for Source {
         fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
-            self.0.get(k).map(|(o, w, n)| (*o, 1, &bytemuck::cast_slice::<u64, u8>(w)[..*n]))
+            self.0
+                .get(k)
+                .map(|(o, w, n)| (*o, 1, &bytemuck::cast_slice::<u64, u8>(w)[..*n]))
         }
     }
     fn aligned(bytes: &[u8]) -> (Vec<u64>, usize) {
@@ -815,10 +926,18 @@ mod bank_layout_tests {
         let mut bdata = protocol::DISC_BANK.to_vec();
         bdata.resize(8 + protocol::BANK_PAYLOAD_LEN_0_1_12, 0);
         let (bw, bn) = aligned(&bdata);
-        let state = Source(HashMap::from([(account, (program, aw, an)), (bank, (program, bw, bn))]));
-        let engine = CrateHealth { state: &state, group: Pubkey::new_unique() };
+        let state = Source(HashMap::from([
+            (account, (program, aw, an)),
+            (bank, (program, bw, bn)),
+        ]));
+        let engine = CrateHealth {
+            state: &state,
+            group: Pubkey::new_unique(),
+        };
         match engine.observation_accounts(&account) {
-            Err(HealthError::Unsupported(e)) => assert!(e.starts_with("UNKNOWN_LAYOUT: bank layout 0.1.12")),
+            Err(HealthError::Unsupported(e)) => {
+                assert!(e.starts_with("UNKNOWN_LAYOUT: bank layout 0.1.12"))
+            }
             other => panic!("resized bank must fail closed, got {other:?}"),
         }
         assert!(super::dependency_keys(&state, &program, &[bank]).is_empty());
@@ -833,28 +952,35 @@ mod threshold_search_tests {
 
     struct EmptySource;
     impl AccountSource for EmptySource {
-        fn account(&self, _: &Pubkey) -> Option<(Pubkey, u64, &[u8])> { None }
+        fn account(&self, _: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+            None
+        }
     }
 
     #[test]
     fn first_true_boundary_finds_exact_integer_crossing() {
-        let _engine = CrateHealth { state: &EmptySource, group: Pubkey::new_unique() };
-        let got = CrateHealth::<EmptySource>::first_true_boundary(50, |x| Ok(x >= 73))
-            .unwrap();
+        let _engine = CrateHealth {
+            state: &EmptySource,
+            group: Pubkey::new_unique(),
+        };
+        let got = CrateHealth::<EmptySource>::first_true_boundary(50, |x| Ok(x >= 73)).unwrap();
         assert_eq!(got, Some(73));
     }
 
     #[test]
     fn first_true_boundary_expands_above_current() {
-        let got = CrateHealth::<EmptySource>::first_true_boundary(10, |x| Ok(x >= 10_000))
-            .unwrap();
+        let got = CrateHealth::<EmptySource>::first_true_boundary(10, |x| Ok(x >= 10_000)).unwrap();
         assert_eq!(got, Some(10_000));
     }
 
     #[test]
     fn first_true_boundary_propagates_fail_closed_error() {
         let got = CrateHealth::<EmptySource>::first_true_boundary(10, |x| {
-            if x >= 20 { Err(HealthError::Crate("boom".into())) } else { Ok(false) }
+            if x >= 20 {
+                Err(HealthError::Crate("boom".into()))
+            } else {
+                Ok(false)
+            }
         });
         assert!(got.is_err());
     }
@@ -864,17 +990,29 @@ mod threshold_search_tests {
 /// Mints, Extra-Keys) — damit Ingress/Snapshot sie **vor** der ersten Health-Berechnung halten.
 /// Kein RPC hier; nur Ableitung aus dem RAM-State.
 #[cfg(feature = "crate_health")]
-pub fn dependency_keys<S: AccountSource + ?Sized>(state: &S, program: &Pubkey, banks: &[Pubkey]) -> Vec<Pubkey> {
+pub fn dependency_keys<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    banks: &[Pubkey],
+) -> Vec<Pubkey> {
     use crate::protocol;
     let mut out: Vec<Pubkey> = Vec::new();
     for bk in banks {
-        let Some((owner, _, data)) = state.account(bk) else { continue };
-        if &owner != program || protocol::classify(data) != protocol::AccountType::Bank { continue; }
+        let Some((owner, _, data)) = state.account(bk) else {
+            continue;
+        };
+        if &owner != program || protocol::classify(data) != protocol::AccountType::Bank {
+            continue;
+        }
         // [P1B-02] Resized/unknown layouts get no dependencies; Health then fails closed.
-        let Ok(bank) = protocol::decode_bank(data) else { continue };
+        let Ok(bank) = protocol::decode_bank(data) else {
+            continue;
+        };
         out.push(bank.mint);
         // [FIX-27] dieselbe Quelle wie die Health-Observation (p0-cli-Semantik).
-        if let Ok(keys) = crate_impl::bank_observation_keys(bank) { out.extend(keys); }
+        if let Ok(keys) = crate_impl::bank_observation_keys(bank) {
+            out.extend(keys);
+        }
 
         // [FIX-109][R6] Integration state is part of canonical planning state, not an RPC
         // lookup performed later in the decision path. Keep all non-default integration accounts

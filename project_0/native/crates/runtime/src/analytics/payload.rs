@@ -71,6 +71,46 @@ impl Payload for OwnerDiagnostic {
     const KIND: u16 = journal::kind::OWNER_DIAGNOSTIC;
 }
 
+/// C0 census row: one debtor (or undecodable member) of the configured group, evaluated against
+/// one canonical state view and chain clock; `class` under the result frame's model.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct C0CensusAccount {
+    pub attempt: u32,
+    pub account: solana_sdk::pubkey::Pubkey,
+    pub group: solana_sdk::pubkey::Pubkey,
+    /// Slot of the account's canonical state record.
+    pub record_slot: Option<u64>,
+    pub row: darkbot_project0::census::CensusRow,
+    pub class: darkbot_project0::census::C0Class,
+}
+impl Payload for C0CensusAccount {
+    const KIND: u16 = journal::kind::C0_CENSUS_ROW;
+}
+
+/// C0 census result: clock, model, identity coverage and totals of one attempt.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct C0CensusResult {
+    pub attempt: u32,
+    pub group: solana_sdk::pubkey::Pubkey,
+    pub clock_slot: u64,
+    pub clock_unix_timestamp: i64,
+    pub clock_record_slot: u64,
+    pub model: darkbot_project0::census::CensusModel,
+    pub expected_accounts: u64,
+    pub rows: u64,
+    pub missing: u64,
+    pub extra: u64,
+    pub duplicates: u64,
+    pub complete: bool,
+    pub reason: Option<String>,
+    pub census: darkbot_project0::census::Census,
+    pub owner_batch_ms: u64,
+    pub worker_ms: u64,
+}
+impl Payload for C0CensusResult {
+    const KIND: u16 = journal::kind::C0_CENSUS_RESULT;
+}
+
 /// The registry: every typed kind and its payload type, listed once.
 macro_rules! typed_kinds {
     ($kind:expr, $schema:expr, $bytes:expr, $f:ident) => {{
@@ -85,6 +125,8 @@ macro_rules! typed_kinds {
             }
             k::OWNER_SUMMARY => $f::<super::shadow_ledger::DaySummary>($kind, $schema, $bytes),
             k::OWNER_RECOVERY => $f::<super::evidence::OwnerRecovery>($kind, $schema, $bytes),
+            k::C0_CENSUS_ROW => $f::<C0CensusAccount>($kind, $schema, $bytes),
+            k::C0_CENSUS_RESULT => $f::<C0CensusResult>($kind, $schema, $bytes),
             _ => Err(bad("PAYLOAD_KIND_UNTYPED")),
         }
     }};

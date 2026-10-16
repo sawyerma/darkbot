@@ -161,12 +161,54 @@ pub(crate) fn liability_account_in_group(data: &[u8], group: &Pubkey) -> bool {
         .unwrap_or(false)
 }
 
+/// [C0 Ticket 2] Census membership of one program account: a debtor of the group (decodable,
+/// in the group, at least one active liability), or a group member the pinned crate cannot
+/// decode (group read from the layout-stable prefix) — never silently dropped.
+#[cfg(feature = "crate_health")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CensusMember {
+    Debtor,
+    Undecodable,
+}
+
+#[cfg(feature = "crate_health")]
+pub(crate) fn census_member(data: &[u8], group: &Pubkey) -> Option<CensusMember> {
+    if classify_account(data) != AccountType::MarginfiAccount {
+        return None;
+    }
+    let need = 8 + std::mem::size_of::<MarginfiAccount>();
+    match data
+        .get(8..need)
+        .and_then(|b| bytemuck::try_from_bytes::<MarginfiAccount>(b).ok())
+    {
+        Some(account) => {
+            (account.group == *group
+                && account.lending_account.balances.iter().any(|b| {
+                    b.is_active() && matches!(b.get_side(), Some(BalanceSide::Liabilities))
+                }))
+            .then_some(CensusMember::Debtor)
+        }
+        // `group` is the first field of every MarginfiAccount layout.
+        None => (data.get(8..40) == Some(group.as_ref())).then_some(CensusMember::Undecodable),
+    }
+}
+
+/// Debtors and undecodable members of the group, collected in the reverse-index scan.
+#[cfg(feature = "crate_health")]
+#[derive(Debug, Default)]
+pub(crate) struct CensusPopulation {
+    pub debtors: std::collections::HashSet<Pubkey>,
+    pub undecodable: Vec<Pubkey>,
+}
+
 #[cfg(feature = "crate_health")]
 pub(crate) fn rebuild_reverse_index(
     st: &StateCore,
     program: &Pubkey,
     group: &Pubkey,
+    census: Option<&mut CensusPopulation>,
 ) -> (ReverseIndex, usize, usize, usize) {
+    let mut census = census;
     let view = StateView(st);
     let mut index = ReverseIndex::new();
     let mut bank_count = 0usize;
@@ -203,6 +245,15 @@ pub(crate) fn rebuild_reverse_index(
         if let Some(banks) = active_banks_in_group_account(&record.data, group) {
             index.set_account_banks(*pk, &banks);
             account_count += 1;
+        }
+        if let Some(population) = census.as_deref_mut() {
+            match census_member(&record.data, group) {
+                Some(CensusMember::Debtor) => {
+                    population.debtors.insert(*pk);
+                }
+                Some(CensusMember::Undecodable) => population.undecodable.push(*pk),
+                None => {}
+            }
         }
     }
 

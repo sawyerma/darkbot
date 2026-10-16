@@ -185,8 +185,19 @@ impl ShadowOwner {
 
                     #[cfg(feature = "crate_health")]
                     {
+                        // [C0 Ticket 2] The census population is collected in this same scan.
+                        let mut population = self
+                            .c0_census
+                            .as_ref()
+                            .is_some_and(|c| c.wants_population())
+                            .then(CensusPopulation::default);
                         let (rebuilt, indexed_banks, indexed_accounts, unsupported_banks) =
-                            rebuild_reverse_index(&self.st, &self.program, &self.group);
+                            rebuild_reverse_index(
+                                &self.st,
+                                &self.program,
+                                &self.group,
+                                population.as_mut(),
+                            );
                         self.reverse_index = rebuilt;
                         self.sweep_dirty_banks.clear();
                         self.sweep_batch_events = 0;
@@ -212,13 +223,21 @@ impl ShadowOwner {
                         "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={} threshold_trigger={}",
                         indexed_banks, indexed_accounts, unsupported_banks, self.threshold_bootstrap.len(), self.use_threshold_trigger
                     );
-                        // [C0-FIX-01] The census rides on the startup sweep batch below.
-                        if let Some(census) = self.c0_census.as_mut() {
-                            if self.use_threshold_trigger {
-                                owner_log!(self, "c0_census: INCOMPLETE reason=THRESHOLD_TRIGGER_MODE_HAS_NO_STARTUP_SWEEP");
-                            } else {
-                                census.arm(indexed_accounts);
-                            }
+                        // [C0-FIX-01] The census rides on the startup sweep batch below (setup
+                        // admits a census only in R127 sweep mode); force that batch.
+                        if let (Some(census), Some(population)) =
+                            (self.c0_census.as_mut(), population)
+                        {
+                            owner_log!(
+                                self,
+                                "c0_census: ARMED debtors={} undecodable_members={}",
+                                population.debtors.len(),
+                                population.undecodable.len()
+                            );
+                            census.arm(population);
+                            self.sweep_batch_events = self.sweep_batch_max_events;
+                            self.sweep_batch_started_ns
+                                .get_or_insert(self.clock.now_ns());
                         }
                         if !self.use_threshold_trigger {
                             // [R127c] eva01 parity: one full debtor scan at startup so an account

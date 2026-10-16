@@ -40,17 +40,31 @@ Per account (facts from canonical state, no RPC): active and liability banks, or
 e-mode banks, observation accounts (TX load; accounts above the `TxLimits` locked-account limit are counted), equity
 assets/liabilities. Costly positions and `PREMIUM_ACTIVE` do not exist in 0.1.11 and are counted as not applicable.
 
-How it runs (C0-FIX-01/03): no second scan. The R127 startup sweep, which already evaluates every debtor once in
-parallel, builds one row per account for the armed batch against one state view and the **Clock sysvar** of the
-canonical state (now a required dependency; every owner-side Health/threshold/projection/detect evaluation uses it,
-never local or zero time). The owner moves the rows into a single-slot bounded queue; a worker classifies and
-aggregates and returns one `c0_census: COMPLETE` line with slot, record slot, clock source, model, `owner_batch_ms` and
-`worker_ms`. Coverage gap, full queue, missing clock or FeeState error → `c0_census: INCOMPLETE reason=…`, retried at the
-next READY; only a complete census retires the request. Model inputs `P0_C0_REALIZABLE_BPS` (1..=10 000),
-`P0_C0_FIXED_COST_USD_MICRO` (> 0), `P0_C0_MIN_PROFIT_USD_MICRO` (≥ 0) are mandatory and validated at startup; values
-taken from historical fee evidence (R124/FIX129) must say so where the run is recorded.
+How it runs (C0-FIX-01/03, Ticket 2): no second scan. **Population** = every MarginfiAccount of the configured group with
+at least one active liability, plus every group member the pinned crate cannot decode (group read from the layout-stable
+prefix → row `unsupported_AccountLayout`); collected in the existing reverse-index scan at READY. The armed **R127 startup
+sweep** evaluates each debtor exactly once against one state view and the **Clock sysvar** of the canonical state (a
+required dependency; every owner-side Health/threshold/projection/detect evaluation uses it, never local or zero time);
+debtors outside the dirty-bank fan-out (e.g. only on an undecodable bank) are added to that batch. The owner moves rows
+and population into a single-slot bounded queue; the worker proves **identity coverage** (missing / extra / duplicate
+pubkeys, not counts), classifies, aggregates and writes `<record>.c0_census.attempt<N>.p0j`: one typed
+`C0_CENSUS_ROW` frame per account (pubkey, group, record slot, Health/facts/errors, class) and one typed
+`C0_CENSUS_RESULT` frame (clock slot / unix / record slot, model, expected, rows, missing, extra, duplicates, totals,
+owner and worker time), sealed COMPLETE only without gap. Every account-level number is reproducible from that journal;
+the `c0_census:` log line is only the human summary. Gap, full queue, missing clock or FeeState error → INCOMPLETE with
+reason, retried at the next READY. Values not representable as USD-micro are `unsupported_ValueRange`, never saturated.
+`P0_C0_CENSUS=1` with `P0_USE_THRESHOLD_TRIGGER=true` is refused at startup (the census needs the R127 sweep; no second
+detection pass). Model inputs `P0_C0_REALIZABLE_BPS` (1..=10 000), `P0_C0_FIXED_COST_USD_MICRO` (> 0),
+`P0_C0_MIN_PROFIT_USD_MICRO` (≥ 0) are mandatory and validated at startup; values taken from historical fee evidence
+(R124/FIX129) must say so where the run is recorded.
 
-Tests: `census::tests` 3/3, runner `census::tests` 2/2 (worker coverage gap, chain clock decoding), runner lib 270/270.
+Local sizing (release, synthetic rows, `c0_census_worker_cost_at_historical_population`): 82 782 rows → worker 232 ms
+including the typed journal (30.6 MB) and its fsync; row memory in the queue ≈ 17.2 MB. The owner-side cost of the census
+batch (facts per debtor in the parallel sweep) is reported per run as `owner_batch_ms`; Mainnet value NOT_MEASURED.
+
+Tests: project0 `census::tests` 3/3 (classes, value range, model validation, totals); runner `census::tests` 3/3
+(identity coverage incl. equal-count wrong identity and duplicates, typed journal round trip, membership, chain clock);
+project0 lib 68/68, runner lib 274/274 (4 ignored benchmarks).
 
 **Current run: NOT_RUN** (Mainnet read-only permission).
 
