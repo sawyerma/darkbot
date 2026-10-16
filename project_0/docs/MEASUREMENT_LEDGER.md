@@ -5398,3 +5398,15 @@ Base `50a2767`. [C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md).
 Tests: project0 `census::tests` 3/3; runner `census::tests` 2/2, full runner lib 270/270 (2 pre-existing ignored), `crate_health,txv1` and featureless check PASS. Owner cost of the census batch is reported per run (`owner_batch_ms`), not measured on Mainnet (NOT_MEASURED).
 
 Open, outside C0: `detect` builder uses `Pubkey::default()` when the FeeState read fails (P5); `remote_workers` reconcile TTL still uses wall time with `unwrap_or(0)` (P8). Gate C0 unchanged: NOT_PROVEN.
+
+## 2026-10-16 — JFI-FIX-01/02: typed journal payloads, owner evidence migrated (LOCAL_PASS, JFI overall OPEN)
+
+Code in `d3dabb3` (on top of `c3698bc`).
+
+- JFI-FIX-01: `analytics/payload.rs` — one `Payload` type per kind (bincode: LE, fixint incl. exact i128/u128, no trailing bytes, frame-size limit); frame `schema` = payload version (≥ 2), any other version, unregistered typed kind or truncation fails closed on read. `.p0j` header, sequence, CRC, hash chain and provenance unchanged. Manifest is typed. Schema 1 (value tree) stays readable only through `Frame::legacy_value` and is written only by `append_legacy` for kinds not migrated yet. `p0-journal frames` prints typed frames as text.
+- JFI-FIX-02: owner evidence (`OWNER_RECORD/OPPORTUNITY/RECONCILE/SUMMARY/DIAGNOSTIC/RECOVERY`) encoded directly from the native events on the writer thread; frame provenance from the typed event, no JSON lookup. Owner side unchanged (bounded queue, no I/O). Static strings stay borrowed (`Cow`); the internally tagged JSON `Winner` gets a native `RaceWinner` payload; `DaySummary.losses` is a `BTreeMap` (deterministic bytes). No reader consumed owner records as JSON (no render, no Python export).
+- Local writer-thread measurement (release, synthetic, 50 000 owner opportunity frames): JSON value path p50/p95/p99/max 9.5/12.7/16.3/361 µs, 1141 B/frame; typed 2.5/4.6/5.2/192 µs, 447 B/frame. Not a Mainnet measurement.
+
+Tests: runner analytics 75/75 (2 ignored benchmarks), typed fail-closed test, full runner lib 267/270 before the three legacy-reading evidence tests were moved to typed reads (all pass after). Featureless check PASS.
+
+**JFI overall OPEN.** Still schema 1 (`append_legacy`/`legacy_value`): FE-04 transitions and legacy import (JFI-FIX-06), market capture rows (JFI-FIX-03), C0-E1 econ kinds and their renders for the pinned Python verifier (JFI-FIX-05), measurement phases, MT0 snapshots, FE-01 reads/results, C0 census import; runtime JSON profiles and measurement plans (JFI-FIX-04); Jupiter REST (JFI-FIX-07, decision pending).

@@ -135,6 +135,8 @@ Raw run data lives only on the local machine (`project_0/data/`, not versioned).
 
 **C0 NOT_PROVEN (2026-10-16):** census rides on the R127 startup sweep with a bounded worker and the canonical Clock sysvar (C0-FIX-01..05 LOCAL_PASS); model classes only, executable economics stay with the pipeline; historical evidence only ([C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md)); current run needs Mainnet read-only permission.
 
+**JFI OPEN (2026-10-16):** typed `.p0j` payload contract and owner evidence migrated (JFI-FIX-01/02 LOCAL_PASS, owner opportunity writer p99 16.3 → 5.2 µs locally); FE-04, market capture, econ/verifier, measurement/MT0/FE-01/census kinds, runtime JSON config and the Jupiter REST boundary remain open.
+
 ## 8. Open development tasks
 
 - **FE-01 WIP:** record its qualification (tests, Clippy differential, format, evidence directory, ledger entry) before it is relied on.
