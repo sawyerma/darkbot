@@ -1,0 +1,2 @@
+# Hash-bound contracts (acceptance v2, builder policy, witness source, schemas): never rewrite bytes.
+*.json -text

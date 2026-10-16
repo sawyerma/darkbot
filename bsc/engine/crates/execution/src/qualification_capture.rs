@@ -3,8 +3,10 @@
 //! retired Gate-0 harness, which compiled the capture crate in by `#[path]`;
 //! it now uses the real `darkbot-bsc-journal` crate. Built only with the
 //! `g07-mainnet` feature; not part of the production runner.
-// Moved unchanged from Gate-0: two invariant expects (system clock, u32
-// field length) remain as they were qualified.
+// Moved unchanged from Gate-0: the invariant u32 field-length expect remains as
+// qualified. Since the G0.7 hardening the journal file is created with mode
+// 0600, the wall-clock stamp saturates instead of panicking (records are also
+// written after the release) and the writer reports what it has appended.
 #![allow(clippy::expect_used)]
 
 pub use darkbot_bsc_journal::{CaptureRecord, JournalManifest, JournalWriter, RecordKind};
@@ -14,7 +16,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread::{self, JoinHandle},
@@ -58,13 +60,15 @@ pub struct CaptureSession {
     writer: Option<JoinHandle<Result<JournalManifest, String>>>,
     clock: CaptureClock,
     failed: Arc<AtomicBool>,
+    /// Records the writer has appended to the file (write, not yet fsync).
+    appended: Arc<AtomicU64>,
 }
 
 fn unix_time_ns() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock before UNIX_EPOCH")
-        .as_nanos()
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 fn text_payload(event: &str, body: &str) -> Vec<u8> {
@@ -106,9 +110,12 @@ impl CaptureSession {
             return Err("capture identity fields must be non-empty".into());
         }
 
-        let file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        // The journal holds broadcastable signed bytes: owner read/write only.
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let file = options
             .open(path)
             .map_err(|e| format!("create-new capture {}: {e}", path.display()))?;
         file.sync_all()
@@ -120,6 +127,8 @@ impl CaptureSession {
 
         let failed = Arc::new(AtomicBool::new(false));
         let writer_failed = Arc::clone(&failed);
+        let appended = Arc::new(AtomicU64::new(0));
+        let writer_appended = Arc::clone(&appended);
         let (prearm_ack_tx, prearm_ack_rx) = mpsc::sync_channel::<Result<(), String>>(1);
         let writer = thread::Builder::new()
             .name("g07-capture-writer".into())
@@ -136,6 +145,7 @@ impl CaptureSession {
                                 }
                                 return Err(format!("capture append failed: {e}"));
                             }
+                            writer_appended.fetch_add(1, Ordering::Release);
                             if let Some(tx) = prearm_ack.take() {
                                 if let Err(e) = journal.flush() {
                                     writer_failed.store(true, Ordering::Release);
@@ -168,6 +178,7 @@ impl CaptureSession {
                 epoch: Instant::now(),
             },
             failed,
+            appended,
         };
 
         let body = format!(
@@ -197,6 +208,33 @@ impl CaptureSession {
 
     pub fn healthy(&self) -> bool {
         !self.failed.load(Ordering::Acquire)
+    }
+
+    /// Waits, bounded, until the writer has appended every record enqueued so
+    /// far (written to the file, no fsync): what is journaled before the
+    /// release is on file before any bundle byte leaves.
+    pub fn wait_appended(&self, timeout: Duration) -> Result<(), String> {
+        let Some(recorder) = self.recorder.as_ref() else {
+            return Err("capture recorder already closed".into());
+        };
+        let target = recorder.stats().enqueued;
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.failed.load(Ordering::Acquire) {
+                return Err("capture writer failed".into());
+            }
+            if self.appended.load(Ordering::Acquire) >= target {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "capture writer appended {} of {target} records within {} ms",
+                    self.appended.load(Ordering::Acquire),
+                    timeout.as_millis()
+                ));
+            }
+            thread::sleep(Duration::from_micros(100));
+        }
     }
 
     pub fn stats(&self) -> Option<RecorderStats> {
@@ -310,6 +348,13 @@ mod tests {
         session
             .record_text("TEST", clock.now_ns(), "value=1")
             .unwrap();
+        session.wait_appended(Duration::from_secs(2)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
         let summary = session.finish().unwrap();
         assert!(summary.complete_local_journal);
         assert_eq!(summary.records, 2);

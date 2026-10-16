@@ -1,0 +1,58 @@
+{
+  "budget": {
+    "v2_proposal_per_attempt_ceiling_wei": "10603270000000000",
+    "worst_case_reserved_wei": "481163500000000"
+  },
+  "bundle_projection": {
+    "blockrazor_payload_sha256": "f5c0a08127243688a09af1052f03ef356ff3354fea6dae165a2a82b41e3bc55a",
+    "fortyeightclub_noMerge": true,
+    "fortyeightclub_payload_sha256": "d6187eed8ebfc210e19a299a4459cb1772fa782500b4b84a2db8d3dadda180c2",
+    "fortyeightclub_positionFirst": true,
+    "identical_txs_across_builders": true,
+    "max_block": 127865762,
+    "order": [
+      "launch_A",
+      "buy_B"
+    ],
+    "send_head": 127865760
+  },
+  "contract": {
+    "approved": false,
+    "compiled_live_hash": "UNARMED",
+    "execution_ready": false,
+    "path": "bsc/config/g01_mainnet_acceptance_proposal_v2.json",
+    "sha256": "026b534f4a2e6e76b6eb816a8de84ef71b508aa28b6e24c5c471e9ee6f0b19ff"
+  },
+  "dry_pass": {
+    "DRY_1_bytes_and_signers": true,
+    "DRY_2_independent_local_simulation": true,
+    "DRY_3_gas_floor_and_budget": true,
+    "DRY_4_expiry_nonces_zero_egress": true,
+    "all": true,
+    "zero_egress_structural": true
+  },
+  "live_submission": "IMPOSSIBLE_FROM_G06A_DRY_BINARY",
+  "network_write_capability": "NONE_IN_THIS_BINARY",
+  "qualification_note": "eligible for DRY-1/DRY-4 qualification if all other predicates pass",
+  "status": "G0.6A_SELF_LAUNCH_BUNDLE_DRY",
+  "transactions": {
+    "buy_gas_limit": 3000000,
+    "buy_tx_hash": "0xb086f683550d1aa221db2add1aa1426444b7ef716de98594c40b9b6da765db32",
+    "buy_value_wei": "1000000000000",
+    "chain_id": 56,
+    "gas_price_wei": 50000000,
+    "launch_gas_limit": 6603270,
+    "launch_tx_hash": "0xdb468c01529ee4c9597eae056f420f0d4d6d0753a1f785f8dbb3163028be5146",
+    "launch_value_wei": "0",
+    "local_expected_output": "176693134169499757962",
+    "min_output": "174926202827804760382",
+    "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "token": "0xe51c4dEb1038AfcD95ef12d4a649CdBCF6FA7777"
+  },
+  "wallets": {
+    "buyer": "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE",
+    "distinct": true,
+    "launcher": "0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd",
+    "same_wallet_test_mode": false
+  }
+}

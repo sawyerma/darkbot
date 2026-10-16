@@ -1,0 +1,314 @@
+{
+  "schema": "darkbot.g07.builder-requirements-refresh.v1",
+  "refreshed_at_utc": "2026-10-16T01:35:35Z..2026-10-16T01:39:43Z (verifier); fetcher runs 2026-10-16T01:22:54Z..01:25:46Z",
+  "purpose": "Read-only refresh of the builder requirements before the G0.7 attempt; informational evidence, not bound by the runtime guard.",
+  "bound_policy_decision": {
+    "bound_builder_policy": "bsc/config/g06a_builder_floor_addendum_2026-10-11.json",
+    "bound_builder_policy_sha256": "ca76a93c432a9cee308b07e59170bac390e801caaa8e0697b0b31d405b9bcc87",
+    "decision": "Keep the 2026-10-11 addendum as the bound builder policy: the strictest explicit floor (50000000 wei) and the signed gas policy (50000000 wei) are unchanged, so the DRY-qualified bytes stay valid and no new DRY is required.",
+    "addendum_corrections_recorded_here": [
+      "48Club: an explicit 0.05 gwei (50000000 wei) bundle-average requirement is now documented on web3.48.club (auction-transaction-feed, backrun context); the addendum's explicit_minimum_documented=false is stale. Same value as the strictest floor.",
+      "BlockRazor: the addendum's rule text omits the per-transaction validator-minimum statement and the tip-in-numerator detail; both rules still allow equality at 0.05 gwei."
+    ]
+  },
+  "reference": "bsc/config/g06a_builder_floor_addendum_2026-10-11.json, plus the snapshots club48_builder_send_bundle.capability.json and blockrazor_builder_send_bundle.capability.json (2026-10-04)",
+  "verification_results": {
+    "a_blockrazor_floor_and_conflict": "CONFIRMED. The value is 0.05 gwei = 50000000 wei in all 4 sources. Two rules still exist side by side. (1) send-bundle.md: each transaction in the bundle must pay at least the BSC validator minimum, 'Currently at 0.05 gwei'. (2) The README FAQ and blockrazor.io/support/ (same text): the average gas price over the non-mempool transactions must be at least 0.05 gwei, with any builder tip added to the numerator and only non-mempool gasUsed in the denominator. The RPC page (eth_sendbundle.md) allows 0-gwei transactions, but the non-public-mempool average must be at least 0.05 gwei.",
+    "b_48club_absence_of_explicit_floor": "REFUTED at site level, so the fetcher's CHANGED is CONFIRMED. web3.48.club/docs/mev-builder/auction-transaction-feed, in its backrunTarget section, requires a bundle's average gas price to meet 'the 0.05 gwei requirement'. Public-pool transactions are excluded. The feed field extra_gas_fee is defined against the same 0.05 gwei requirement. The two pages the addendum cited (/builder including its JS chunk, and /bundle-status) still contain no gwei figure, which is CONFIRMED. The legacy GitBook copy, docs.48.club auction-transaction-feed.md, still says 1 gwei (lines 27, 44, 50). This page is stale. Whether the web3 text already existed on 2026-10-11 cannot be determined, because no history is published.",
+    "c_maxBlockNumber_type": "CONFIRMED: both builders expect an integer. 48Club GitBook lists uint64 and its JSON example is the bare integer 39177941. The 48Club web3 type is `number`, with no hex form documented. BlockRazor lists uint64, its example is the bare integer 39177941, and it rejects with -38000 when the value is smaller than the current block. The live code sends a JSON integer: engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/main.rs:347 `let max_block = send_head.checked_add(2)` is a u64 passed through serde_json at lines 358 and 370; frame.rs:326 uses put_u64. NEW CAVEAT: the 48Club web3 maxBlockNumber row also says 'Provide at least one valid expiry condition with `maxTimestamp`'. All official 48Club /builder code examples send only maxTimestamp (now+20s). Our 48Club body sends maxBlockNumber without maxTimestamp. GitBook documents maxBlockNumber alone, defaulting to current+100. Whether a maxBlockNumber-only bundle is accepted is ambiguous and cannot be resolved read-only.",
+    "d_gas_price_and_interval": "CONFIRMED. One eth_gasPrice call at 2026-10-16T01:38:19.652Z returned 0x2faf080 = 50000000 wei. Block interval is 450 ms nominal (details under chain).",
+    "e_github_blob_comparison": "CONFIRMED. The verifier fetched the files independently at HEAD 31f8f0b97de23a6df401dc70ae493b76f9b70c19 and at the pinned a0dc79d6901c50ebeb45887d829bf34527261adb, then ran git hash-object. send-bundle.md = db80a34f3e3a01ddb9b141c6cbee7a5b83efe90e, README.md = d7a847f74deae5738f20dc35d12a6febd9092918 and rpc/bsc/eth_sendbundle.md = 1e54a4433f4b0c90cb7e337bf3f1c350b7308ca0. They are identical at both commits and equal the pinned values. The compare API reports status=ahead, ahead_by=6, behind_by=0, 19 files changed, and none of them is under transaction-submission/block-builder/, transaction-submission/rpc/bsc/ or get-started/authentication.md. The commit b787040e 'tip remove' touched only Solana, Robinhood and pricing files."
+  },
+  "builders": {
+    "fortyeightclub": {
+      "endpoint_host": "puissant-builder.48.club (HTTPS https://puissant-builder.48.club/; WSS wss://puissant-builder.48.club/ with conditional access as a 48SP benefit). The live code constant CLUB48_HOST matches.",
+      "method": "eth_sendBundle",
+      "maxBlockNumber_type": "integer (GitBook uint64; web3 `number`; no hex documented). It is inclusive ('up to and including' on web3). The GitBook default is current+100; web3 states no default. No maximum window is documented anywhere.",
+      "auth_required": false,
+      "auth_note": "No API key or auth header is documented. The official examples send only Content-Type. 48spSign is optional and raises limits.",
+      "explicit_floor_wei": "50000000 (scoped)",
+      "explicit_floor_scope": "Stated only on the web3 auction-transaction-feed page, in the backrunTarget context, as a requirement on the bundle average over non-public-pool transactions. The legacy GitBook copy says 1 gwei (stale). The pages the addendum cited state no number.",
+      "floor_rule": "The bundle's average gas price over non-public-pool transactions must meet 0.05 gwei. A backrun target priced below 0.05 counts as non-public and is included in the average; a target above 0.05 is excluded. The GitBook FAQ says the average is checked, not one representative transaction, so 0-gas transactions are possible if the other transactions pay enough. A conflicting note on the web3 sendBundle page says gas price is checked on the first transaction (the sender). With every transaction at exactly 50000000, both readings are satisfied, at equality.",
+      "ranking_rule": "auctionPrice = 0.9 x sum of gas fees of the bundle transactions not in the public pool + BNB sent to the Builder Control EOA 0x4848489f0b2BEdd788c696e2D79b6b69D7484848 (the 10% discount reflects the BEP95 burn). The bundle-status priority is the included transactions' gas fees after adjustments plus direct transfers.",
+      "refresh_status": {
+        "addendum.verified": "REFRESHED_UNCHANGED (sources return 200)",
+        "addendum.explicit_minimum_documented=false": "CHANGED (web3 auction-transaction-feed states 0.05 gwei; the cited pages still state no number)",
+        "addendum.explicit_minimum_bundle_gas_price_wei=null": "CHANGED (candidate value 50000000, with the scope caveats above)",
+        "addendum.ranking_rule": "REFRESHED_UNCHANGED (bundle-status priority text confirmed); its 'no explicit floor found' sentence is superseded at site level",
+        "addendum.official_sources": "REFRESHED_UNCHANGED (both 200, no redirect, byte-identical to the fetcher)",
+        "addendum.policy 'do not label 1 gwei as 48Club minimum'": "REFRESHED_UNCHANGED (1 gwei appears only on the stale GitBook feed page, in a struck-through FAQ item, and as a code-example fallback `feeData.gasPrice ?? 1_000_000_000n`)",
+        "snapshot.method": "REFRESHED_UNCHANGED",
+        "snapshot.param.maxBlockNumber": "REFRESHED_UNCHANGED on GitBook; CHANGED on web3 (type `number`, inclusive, no default, maxTimestamp expiry wording)",
+        "snapshot.parameters_not_listed=[minTimestamp]": "CHANGED on web3 (minTimestamp now listed); unchanged on GitBook",
+        "snapshot.ranking": "REFRESHED_UNCHANGED",
+        "snapshot.fee_floor": "REFRESHED_UNCHANGED for the 3 snapshot pages; CHANGED site-wide (web3 feed page says 0.05 gwei)",
+        "snapshot.faq.gas_price (average checked)": "REFRESHED_UNCHANGED (FAQ .md line 68); the web3 first-transaction note conflicts with it",
+        "snapshot.faq.same_sender": "REFRESHED_UNCHANGED (FAQ lines 32-38)",
+        "snapshot.response": "REFRESHED_UNCHANGED (-38000 'bundle already exist' example)",
+        "snapshot.ordering_and_atomicity": "REFRESHED_UNCHANGED on GitBook; CHANGED on web3 (notes claim atomic execution and no public-mempool exposure)",
+        "fetcher_only_not_reverified": "troubleshooting error 4802 (0.05 vs 1 gwei), membership and SP thresholds, sendPrivateTransaction, rate-limit table, validators bidReward"
+      },
+      "sources": [
+        {
+          "url": "https://web3.48.club/docs/mev-builder/auction-transaction-feed",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:36Z",
+          "body_sha256": "d55dd1bb2afe5c854acfc7df5668c09464a4de23de3a1155e6be73e5300f2e57"
+        },
+        {
+          "url": "https://docs.48.club/puissant-builder/auction-transaction-feed.md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:37Z",
+          "body_sha256": "9863c0e87827647b57e66a97a4e33e0e533d20c0532f57ca5663fcf9dd67e4e7"
+        },
+        {
+          "url": "https://web3.48.club/docs/mev-builder/sendBundle",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:37Z",
+          "body_sha256": "33b2afbb8a394f255d66b60911d5befa6c816ae2993fb8f23c439d9a8cd3d090"
+        },
+        {
+          "url": "https://docs.48.club/puissant-builder/send-bundle.md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:38Z",
+          "body_sha256": "70ef9298affd1a748aaa00a9a9b5cbf87dab85c5c8c89d581e329057a9b7924a"
+        },
+        {
+          "url": "https://web3.48.club/docs/mev-builder/bundle-status",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:38Z",
+          "body_sha256": "d84e2e40bdc502d7e9f30d95980d70d407092d37f5f2b944514f6e0858fe8478"
+        },
+        {
+          "url": "https://web3.48.club/builder",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:38Z",
+          "body_sha256": "38394b939c1e5c0211668f3c9c9c5584a4928f0a828711d847daaa2528ce3ea4"
+        },
+        {
+          "url": "https://web3.48.club/_next/static/chunks/1fte238n3i9cn.js",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:37:09Z",
+          "body_sha256": "dd1794b69c8550125f91c624f9d83d8b20bdd2c6f8c1d087993ff730f523cafb"
+        },
+        {
+          "url": "https://docs.48.club/f.a.q..md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:39Z",
+          "body_sha256": "5df92dca42e0258a6d3277706900043f2eeed769510570f9803afcdbf65521cf"
+        }
+      ]
+    },
+    "blockrazor": {
+      "endpoint_host": "virginia.builder.blockrazor.io (the host in the documented curl example; matches the live constants BLOCKRAZOR_HOST and BLOCKRAZOR_DOCUMENTED_HOST). Regional and global hosts from endpoint.md are fetcher-only: blob 5c343d28, unchanged.",
+      "method": "eth_sendBundle",
+      "maxBlockNumber_type": "integer (uint64; example bare 39177941; no hex form). Default is current+100. Error -38000 when it is smaller than the current block; equality is not described as rejected.",
+      "auth_required": true,
+      "auth_note": "Header 'Authorization: <auth-token>' with the raw token and no Bearer prefix shown. The live code reads it from env DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION (not read by the verifier).",
+      "explicit_floor_wei": "50000000",
+      "floor_rule": "Statement A (send-bundle.md): each transaction's gas price must be at least the BSC validator minimum, currently 0.05 gwei. Statement B (README FAQ and support page): (sum over non-mempool tx of gasPrice x gasUsed + builder tip) / (sum over non-mempool tx of gasUsed) must be at least 0.05 gwei. The two statements remain unreconciled. Legacy transactions at exactly 50000000 with tip 0 satisfy both, at equality.",
+      "ranking_rule": "The builder favours bundles that transfer more BNB to the builder EOA 0x1266C6bE60392A8Ff346E8d5ECCd3E69dD9c5F20. No formula is published.",
+      "refresh_status": {
+        "addendum.verified": "REFRESHED_UNCHANGED",
+        "addendum.explicit_minimum_bundle_gas_price_wei=50000000": "REFRESHED_UNCHANGED",
+        "addendum.rule": "REFRESHED_UNCHANGED as text, but incomplete: it omits the tip-in-numerator detail and the per-transaction Statement A",
+        "addendum.source https://blockrazor.io/support/": "REFRESHED_UNCHANGED (200, byte-identical to both fetcher runs, sha 09c468f8...)",
+        "snapshot.parameters/formats/defaults/response/-38000 boundary": "REFRESHED_UNCHANGED",
+        "snapshot.fee_floor_statements + fee_floor_conflict": "REFRESHED_UNCHANGED",
+        "snapshot.transports.https Authorization": "REFRESHED_UNCHANGED",
+        "snapshot.upstream_files blobs": "REFRESHED_UNCHANGED (computed independently)",
+        "snapshot.upstream_commit a0dc79d": "CHANGED (HEAD is 31f8f0b9, 6 commits ahead; the pinned files are identical)",
+        "fetcher_only_not_reverified": "pricing.md changes, start-for-free and the support FAQ free-trial conflict, fast-submit, dedicate-connection, endpoint host list"
+      },
+      "sources": [
+        {
+          "url": "https://blockrazor.io/support/",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:35Z",
+          "body_sha256": "09c468f89382e998f582e5d3503fca7b78d81c626aa364e76f7a667f01b3d609"
+        },
+        {
+          "url": "https://api.github.com/repos/BlockRazorinc/blockrazor_docs_en/commits/HEAD",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:36Z",
+          "body_sha256": "9fdba8db981aac29e36bb44951dc4a0dee655e9793b57b5562d428d39416ae96"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/BlockRazorinc/blockrazor_docs_en/31f8f0b9.../transaction-submission/block-builder/send-bundle.md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:51Z",
+          "body_sha256": "a78d486f4ae9f0b9d1fa4c1bea3f8cb6bb70b2da9b68d8506073d06adba6e039"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/BlockRazorinc/blockrazor_docs_en/31f8f0b9.../transaction-submission/block-builder/README.md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:52Z",
+          "body_sha256": "2a9cac2f7b0e1103c42f29f9bdb2e047ac08607a75ee447540e8942fc470871b"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/BlockRazorinc/blockrazor_docs_en/31f8f0b9.../transaction-submission/rpc/bsc/eth_sendbundle.md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:52Z",
+          "body_sha256": "2f92d308c92a39cf04872ae022973b22de8df3773d05f8a9a6a3b177f3e9754c"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/BlockRazorinc/blockrazor_docs_en/a0dc79d6.../transaction-submission/block-builder/send-bundle.md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:52Z",
+          "body_sha256": "a78d486f4ae9f0b9d1fa4c1bea3f8cb6bb70b2da9b68d8506073d06adba6e039"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/BlockRazorinc/blockrazor_docs_en/a0dc79d6.../transaction-submission/block-builder/README.md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:53Z",
+          "body_sha256": "2a9cac2f7b0e1103c42f29f9bdb2e047ac08607a75ee447540e8942fc470871b"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/BlockRazorinc/blockrazor_docs_en/a0dc79d6.../transaction-submission/rpc/bsc/eth_sendbundle.md",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:53Z",
+          "body_sha256": "2f92d308c92a39cf04872ae022973b22de8df3773d05f8a9a6a3b177f3e9754c"
+        },
+        {
+          "url": "https://api.github.com/repos/BlockRazorinc/blockrazor_docs_en/compare/a0dc79d6901c50ebeb45887d829bf34527261adb...31f8f0b97de23a6df401dc70ae493b76f9b70c19",
+          "final_url": "same",
+          "http_status": 200,
+          "fetched_at_utc": "2026-10-16T01:35:54Z",
+          "body_sha256": "021fafc582db5d8481a4d32fc4761013e5cedac4e58025676511cb68238e599e"
+        }
+      ]
+    }
+  },
+  "chain": {
+    "chain_id": "0x38 (56). Verifier call 01:38:19.380Z, sha ce50ba55ecf1a9410c6f5503d09da66974203165305ff8f5a2b520f49a705c07",
+    "gas_price_wei_observations": [
+      {
+        "by": "verifier",
+        "at": "2026-10-16T01:38:19.652Z",
+        "wei": 50000000,
+        "body_sha256": "ad8da62f6c932af84e379a44f63899e919c07eab285f407aff0d45964aec4e1c"
+      },
+      {
+        "by": "rpc fetcher (6 samples, hash-verified saved bodies)",
+        "at": "2026-10-15T22:57:00Z x3 and 2026-10-16T01:24:21Z..01:24:32Z x3",
+        "wei": "50000000 in all 6"
+      }
+    ],
+    "gas_price_status_vs_addendum": "REFRESHED_UNCHANGED (50000000)",
+    "block_interval_ms": 450,
+    "block_interval_evidence": "Verifier headers: head 127891838 at 2026-10-16T01:38:19.650Z and head-200 127891638 at 01:36:49.650Z, so 90000 ms / 200 = 450.000. All 19 gaps in 20 consecutive full blocks were exactly 450 ms. The long run from 127008491 (2026-10-11T11:04:09.500Z) to 127891838 averages 450.616 ms. Timestamps are milliTimestamp = timestamp*1000 + last 2 bytes of mixHash (BEP-520), and the identity holds on all checked headers. The fetcher's observation that block 127008491 is at 11:04:09.500Z, not the given 11:04:07Z, is CONFIRMED. The head was 193 ms old when the verifier read it.",
+    "turn_length_observed": "8 blocks = 3.6 s. Verifier miner runs over 20 blocks: [5 partial, 8, 7 partial]; the fetcher saw 8s over 60 blocks. The BEP-619 text says 16 blocks / 7.2 s. The chain differs; no official source for 8 was found.",
+    "share_of_included_txs_at_or_below_0.05_gwei": {
+      "verifier_sample": "Blocks 127891819-127891838, 1530 txs (20 system). Non-system: 574/1510 = 38.01% at or below 0.05 gwei, made up of 445 (29.47%) at exactly 50000000 and 129 (8.54%) below; of those 129, 127 are at 0 and 2 are non-zero (min 4761904). Non-system non-zero: 447/1383 = 32.32%. baseFeePerGas = 0 in every block.",
+      "fetcher_sample_reproduced": "Blocks 127870297-127870356, non-system: 1290/3168 = 40.72% (970 = 30.62% at exactly 0.05; 320 = 10.10% below, of which 3 non-zero). Non-system non-zero: 973/2851 = 34.13%.",
+      "feeHistory_verifier": "Blocks 127891821-127891840: p1 = 0 in all 20; p5 = 50000000 in 17, 0 in 3; p25 between 50000000 and 50000111; p50 between 50000000 and 108634651.",
+      "interpretation": "Transactions at 0.05 gwei are included in every block, so the floor is a validator-policy level, not a consensus rule (0-price transactions also land). This says nothing about winning a contested 2-block bundle auction."
+    },
+    "official_sources": [
+      {
+        "url": "https://docs.bnbchain.org/bnb-smart-chain/overview/",
+        "final_url": "same",
+        "http_status": 200,
+        "fetched_at_utc": "2026-10-16T01:39:42Z",
+        "body_sha256": "32e637f9d4ca55d6c106f4d55d69d80bbc3dbc1f4fb0039895af02b53a7f368b",
+        "content": "States a network-wide 0.05 Gwei standard gas price and a block time of about 0.45 s"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/bnb-chain/BEPs/master/BEPs/BEP-619.md",
+        "final_url": "same",
+        "http_status": 200,
+        "fetched_at_utc": "2026-10-16T01:39:43Z",
+        "body_sha256": "02d9bd32b0c9b73978823d3ba50ae98e40b798a7804ac3bcf40aa96c9b52041c",
+        "content": "Interval goes from 0.75 s to 0.45 s; the text says 16 blocks per turn"
+      },
+      {
+        "note": "Fetcher-only, not re-fetched: the bnbchain.org weekly report (Sep 25-Oct 1, 2025), tech-roadmap-2026, the Fermi blog and docs, BEP-520 and the BEPs README. The saved bodies exist under scratchpad/data/g07chain_web/."
+      }
+    ],
+    "maxBlockNumber_head_plus_2": "The window is head+1 and head+2, about 900 ms after the head timestamp. After the head's age (68-424 ms in the fetcher's samples, 193 ms for the verifier), about 476-832 ms remain. The builder's sealing cutoff is undocumented."
+  },
+  "NOT_REFRESHED": [
+    "Whether either builder actually enforces or accepts a 0.05 gwei / tip-0 bundle (needs builder contact, which is forbidden)",
+    "Hidden or undocumented 48Club requirements; per-validator local minimum gas price settings",
+    "Whether the 48Club web3 0.05 gwei feed text existed on 2026-10-11 (no revision history published)",
+    "Whether 48Club accepts a bundle with only maxBlockNumber and no maxTimestamp (ambiguous web3 wording; all official examples use maxTimestamp)",
+    "Whether the 48Club floor applies to non-backrun bundles in the same way (stated only in the backrun context)",
+    "Auction competitiveness and inclusion probability at the lowest paying tier within head+2; the builders' sealing cutoff and latency",
+    "Validity and tier of the BlockRazor auth token; actual rate limits",
+    "Which validators or builders produce head+1 and head+2 at submission time",
+    "Fetcher-only items listed per builder and chain above (not independently re-fetched by the verifier)"
+  ],
+  "overall_conclusion": {
+    "verdict": "YES (conditional)",
+    "reasons": [
+      "Every refreshable explicit floor is 50000000 wei: BlockRazor per transaction, BlockRazor average with tip in the numerator, BlockRazor RPC average, the 48Club web3 average, and the BNB Chain standard gas price. Every one of these rules allows equality ('at least', 'not less than', 'meet').",
+      "The live G0.7 binary signs legacy transactions (sign_legacy) with one gas_price and direct_builder_tip_wei = 0. Each transaction's effective price is therefore exactly 50000000, which satisfies both the per-transaction and the average rules and both 48Club readings (average vs first transaction).",
+      "maxBlockNumber is serialized as a JSON integer, which matches the documented uint64/number type at both builders.",
+      "The public eth_gasPrice is still 50000000 and baseFee is 0."
+    ],
+    "caveats": [
+      "There is zero margin: the candidate sits exactly on the boundary for every rule.",
+      "The addendum's 48Club fields are stale. explicit_minimum_documented should become true, with 50000000 wei scoped to the web3 auction-feed (backrun) context. The legacy GitBook page says 1 gwei but is outdated.",
+      "The addendum's BlockRazor rule text omits the tip-in-numerator detail and the per-transaction statement.",
+      "48Club maxTimestamp wording ambiguity (not a fee issue).",
+      "0.05 gwei with tip 0 is the lowest-priority tier under both ranking rules, so inclusion within the roughly 900 ms window is not established. This matches the addendum's non_claims."
+    ]
+  },
+  "compliance_verdict": {
+    "summary": "No COMPLIANCE_VIOLATION under the stated trigger. No fetcher and not the verifier contacted any builder endpoint (puissant-builder.48.club, *.blockrazor.io builder hosts, rpc.blockrazor.builders, bsc.blockrazor.xyz), and nobody called a forbidden write or simulation method. Three deviations from the strict rules are recorded below.",
+    "club48_fetcher": "COMPLIANT. Logs (<local-scratch> and 48club_refresh/log.txt) show only GETs: 26 in this run and 36 in the prior attempt (24 to web3.48.club, 12 to docs.48.club). No JSON-RPC.",
+    "blockrazor_fetcher": "COMPLIANT_WITH_DEVIATIONS. (1) It used git ls-remote against github.com. With git 2.53 and protocol.version unset (v2), this issues GET /info/refs plus a read-only POST /git-upload-pack (ls-refs), which is outside 'ONLY HTTP GET'. (2) Its request inventory leaves out a prior interrupted attempt at 2026-10-15T22:57:02Z..22:59:38Z (scratchpad/br_data/requests.log): 22 GETs to blockrazor.io (1), www.blockrazor.io (1), docs.blockrazor.io (7), api.github.com (3) and raw.githubusercontent.com (10), plus 2 more git ls-remote runs (ls_remote_head.txt, ls_remote_symref.txt). No builder host appears.",
+    "rpc_fetcher": "COMPLIANT_WITH_DEVIATIONS. It made 79 JSON-RPC POSTs, all to bsc-dataseed.bnbchain.org and all allowed methods (eth_chainId 1, eth_gasPrice 6, eth_blockNumber 4, eth_getBlockByNumber 67, eth_feeHistory 1; verified from requests.jsonl), and 9 GETs to bnbchain.org, docs.bnbchain.org and raw.githubusercontent.com. Deviation: 3 WebSearch tool queries, which are not on the allowed list. Any search or fetch activity before the interruption was not logged and is unverifiable.",
+    "repo_integrity": "git status --porcelain matches the session-start snapshot (same 3 untracked paths). No repository file is newer than the fetchers' run start. The verifier wrote nothing in the repo.",
+    "secrets": "No fetcher log or script references bsc/secrets.env or bsc/.env. The verifier read neither."
+  },
+  "verifier_network_requests": {
+    "GET (19, all 200, 0 redirects)": [
+      "GET blockrazor.io /support/",
+      "GET api.github.com /repos/BlockRazorinc/blockrazor_docs_en/commits/HEAD",
+      "GET web3.48.club /docs/mev-builder/auction-transaction-feed",
+      "GET docs.48.club /puissant-builder/auction-transaction-feed.md",
+      "GET web3.48.club /docs/mev-builder/sendBundle",
+      "GET docs.48.club /puissant-builder/send-bundle.md",
+      "GET web3.48.club /docs/mev-builder/bundle-status",
+      "GET web3.48.club /builder",
+      "GET docs.48.club /f.a.q..md",
+      "GET raw.githubusercontent.com /BlockRazorinc/blockrazor_docs_en/31f8f0b97de23a6df401dc70ae493b76f9b70c19/transaction-submission/block-builder/send-bundle.md",
+      "GET raw.githubusercontent.com /BlockRazorinc/blockrazor_docs_en/31f8f0b97de23a6df401dc70ae493b76f9b70c19/transaction-submission/block-builder/README.md",
+      "GET raw.githubusercontent.com /BlockRazorinc/blockrazor_docs_en/31f8f0b97de23a6df401dc70ae493b76f9b70c19/transaction-submission/rpc/bsc/eth_sendbundle.md",
+      "GET raw.githubusercontent.com /BlockRazorinc/blockrazor_docs_en/a0dc79d6901c50ebeb45887d829bf34527261adb/transaction-submission/block-builder/send-bundle.md",
+      "GET raw.githubusercontent.com /BlockRazorinc/blockrazor_docs_en/a0dc79d6901c50ebeb45887d829bf34527261adb/transaction-submission/block-builder/README.md",
+      "GET raw.githubusercontent.com /BlockRazorinc/blockrazor_docs_en/a0dc79d6901c50ebeb45887d829bf34527261adb/transaction-submission/rpc/bsc/eth_sendbundle.md",
+      "GET api.github.com /repos/BlockRazorinc/blockrazor_docs_en/compare/a0dc79d6901c50ebeb45887d829bf34527261adb...31f8f0b97de23a6df401dc70ae493b76f9b70c19",
+      "GET web3.48.club /_next/static/chunks/1fte238n3i9cn.js",
+      "GET docs.bnbchain.org /bnb-smart-chain/overview/",
+      "GET raw.githubusercontent.com /bnb-chain/BEPs/master/BEPs/BEP-619.md"
+    ],
+    "JSON-RPC POST bsc-dataseed.bnbchain.org / (27, all 200, 2026-10-16T01:38:19.380Z..01:38:32.154Z)": "eth_chainId x1; eth_gasPrice x1; eth_blockNumber x1; eth_getBlockByNumber x23 (header-only for 0x79f797e, 0x79f78b6 and 0x791feeb; full transactions for 0x79f796b..0x79f797e); eth_feeHistory x1 (20, latest, [1,5,25,50]). Per-request params, timestamps and hashes are in <local-scratch>",
+    "not_used": "WebFetch, WebSearch, git, any builder host, any write or simulation method"
+  },
+  "review_corrections_2026-10-16": [
+    "The 'YES (conditional)' verdict answers only: do the signed 0.05 gwei / tip 0 parameters meet every refreshable documented fee floor. It does not claim builder acceptance, inclusion or competitiveness.",
+    "The head+2 analysis assumes the head is read immediately before release. The current G0.7 code computes maxBlockNumber from a head read at the start of its preflight (main.rs:185/347; preflight 2nd RPC), several seconds before release; at 450 ms blocks the bundle would very likely be expired on arrival. Open code decision, see bsc/docs/G07_ATTEMPT1_AUTHORIZATION_REVIEW.md.",
+    "48Club: the 0.05 gwei text was observed on 2026-10-16; whether it existed on 2026-10-11 is unknown; it is stated in the backrun (auction-transaction-feed) context and its applicability to non-backrun bundles is unverified. The legacy GitBook 1 gwei statement appears outdated (inference).",
+    "Compliance: activity before the usage-limit interruption was only partly logged; no builder host appears in any recorded log.",
+    "Raw fetched bodies were kept only in volatile local scratch; only their SHA-256 values are recorded here.",
+    "The frame.rs:326 citation refers to the production framing code, not to the G0.7 path (main.rs:358/370 serialize maxBlockNumber as a JSON integer)."
+  ]
+}

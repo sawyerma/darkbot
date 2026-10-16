@@ -1,0 +1,42 @@
+{
+  "schema": "darkbot.g06a.local-simulation.v1",
+  "backend": "@ethereumjs/evm + RPCStateManager 10.1.3",
+  "bsc_execution_profile": "chainId 56; EthereumJS Osaka EVM semantics; BSC Pasteur consensus/builder rules outside local EVM scope",
+  "state_source": {
+    "block_number": "127865760",
+    "block_hash": "0xb8f3cec4f6f874338f00ca12a8679df9eb1485ee6f3b8b3d2bb800f89cc4cb01",
+    "rpc_state_reads_only": true,
+    "valid_signed_tx_bytes_submitted": false
+  },
+  "launch_tx_hash": "0xdb468c01529ee4c9597eae056f420f0d4d6d0753a1f785f8dbb3163028be5146",
+  "buy_tx_hash": "0xb086f683550d1aa221db2add1aa1426444b7ef716de98594c40b9b6da765db32",
+  "token": "0xe51c4dEb1038AfcD95ef12d4a649CdBCF6FA7777",
+  "launcher": "0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd",
+  "buyer": "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE",
+  "launcher_pending_nonce": 0,
+  "buyer_pending_nonce": 0,
+  "launch_success": true,
+  "buy_success": true,
+  "simulated_received_amount": "176693134169499757962",
+  "simulated_buyer_balance_after": "176693134169499757962",
+  "local_expected_output_input": "176693134169499757962",
+  "min_output": "174926202827804760382",
+  "output_difference": "0",
+  "launch_execution_gas": "5224097",
+  "buy_execution_gas": "312274",
+  "launch_intrinsic_gas": "27128",
+  "buy_intrinsic_gas": "22380",
+  "launch_gas_used": 5251225,
+  "buy_gas_used": 334654,
+  "gas_accounting": "conservative upper bound = intrinsic + runCall executionGasUsed; refunds not subtracted",
+  "strictest_verified_builder_floor_wei": 50000000,
+  "builder_floor_evidence_sha256": "ca76a93c432a9cee308b07e59170bac390e801caaa8e0697b0b31d405b9bcc87",
+  "raw_signed_transactions_persisted": false,
+  "raw_bundle_persisted": false,
+  "limitations": [
+    "Local message/EVM semantics and conservative transaction gas upper bound, not BSC consensus validation",
+    "RPCStateManager performs read-only state/code/storage requests against the frozen parent block",
+    "Builder gas-floor evidence is a separately frozen input and is not established by this script",
+    "No signed transaction or bundle is submitted to any RPC or builder"
+  ]
+}

@@ -4,7 +4,9 @@
 //! It sends exactly one approved economic attempt: the byte-identical ordered
 //! [launch_A, buy_B] pair to 48Club and BlockRazor in parallel. There is no public
 //! mempool launch and no automatic retry. The compile-time v2 hash remains the
-//! execution authority.
+//! execution authority. Each attempt starts at most once (latch under
+//! bsc/.local/g07/), and the bundle expiry comes from the canonical head read
+//! immediately before the release.
 
 use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use alloy_sol_types::{SolCall, sol};
@@ -17,14 +19,14 @@ use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned, pki_typ
 use serde_json::{Value, json};
 use std::{
     env, fs,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     net::{TcpStream, ToSocketAddrs},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     str::FromStr,
-    sync::{Arc, Barrier},
+    sync::{Arc, Barrier, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 type Tls = StreamOwned<ClientConnection, TcpStream>;
@@ -35,6 +37,10 @@ const CLUB48_HOST: &str = "puissant-builder.48.club";
 const BLOCKRAZOR_HOST: &str = "virginia.builder.blockrazor.io";
 const HTTPS_PORT: u16 = 443;
 const CAPTURE_WINDOW_NS: u64 = 15_000_000_000;
+/// Longest idle time of a prewarmed builder connection before the release.
+const MAX_BUILDER_IDLE: Duration = Duration::from_secs(5);
+/// Longest wait for the journal writer to append the records of the release.
+const CAPTURE_APPEND_TIMEOUT: Duration = Duration::from_millis(50);
 const PRODUCER_WITNESS_SCHEMA_PATH: &str = "bsc/config/producer_execution_witness_v1.schema.json";
 
 sol! {
@@ -113,23 +119,39 @@ fn main() {
         Ok("YES"),
         "set DARKBOT_G07_MAINNET_SEND=YES only for the explicitly authorized G0.7 attempt"
     );
+    assert!(
+        env::var_os("DARKBOT_G07_CAPTURE_JOURNAL").is_none(),
+        "DARKBOT_G07_CAPTURE_JOURNAL is retired: the journal path is fixed at {ATTEMPT_STATE_ROOT}/<attempt_id>/{CAPTURE_JOURNAL_FILE}"
+    );
 
     let dry_path = req_env("DARKBOT_G07_DRY_EVIDENCE");
     let baseline_path = req_env("DARKBOT_G07_PREFLIGHT_EVIDENCE");
-    let capture_path = req_env("DARKBOT_G07_CAPTURE_JOURNAL");
     let attempt_id = req_env("DARKBOT_G07_ATTEMPT_ID");
     let clock_id = req_env("DARKBOT_G07_CLOCK_ID");
     let boot_id = req_env("DARKBOT_G07_BOOT_ID");
     let producer_witness_contract_path = req_env("DARKBOT_G07_PRODUCER_WITNESS_CONTRACT");
     let builder_policy_path = req_env("DARKBOT_G07_BUILDER_POLICY_EVIDENCE");
+    let evidence_path = req_env("DARKBOT_G07_EVIDENCE_PATH");
+    // Checked here, before the latch and the guard, not first at framing.
+    let blockrazor_auth = req_env("DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION");
+    assert!(
+        valid_header_value(&blockrazor_auth),
+        "invalid BlockRazor Authorization value"
+    );
+    let rpc_endpoint =
+        parse_rpc_endpoint(&req_env("BSC_MAINNET_RPC_HTTPS")).unwrap_or_else(|e| panic!("{e}"));
+    validate_attempt_id(&attempt_id).unwrap_or_else(|e| panic!("{e}"));
+    validate_new_file_target(&evidence_path)
+        .unwrap_or_else(|e| panic!("DARKBOT_G07_EVIDENCE_PATH: {e}"));
+    assert_repository_root();
     let (producer_witness_contract, producer_witness_contract_sha256) =
         validate_producer_witness_source(&producer_witness_contract_path, &attempt_id);
     let producer_witness_source =
         req_str(&producer_witness_contract, "/source_description").to_string();
     let producer_witness_source_ready = req_bool(&producer_witness_contract, "/source_ready");
 
-    let dry = load_json(&dry_path);
-    let baseline = load_json(&baseline_path);
+    let (dry, dry_bytes) = load_json(&dry_path);
+    let (baseline, baseline_bytes) = load_json(&baseline_path);
     assert_eq!(req_str(&dry, "/status"), "G0.6A_SELF_LAUNCH_BUNDLE_DRY");
     assert!(
         req_bool(&dry, "/dry_pass/all"),
@@ -182,8 +204,9 @@ fn main() {
         launch_value,
         buy_value,
     );
-    let (launcher_nonce, buyer_nonce, send_head) =
+    let (launcher_nonce, buyer_nonce, preflight_head) =
         validate_current_preflight(&baseline, &current, launcher, buyer, gas_price);
+    let preflight_head_hash = req_str(&current, "/latest_block_hash").to_string();
     let impl_addr = Address::from_str(req_str(&current, "/tax_v3_impl"))
         .expect("invalid current TAX_V3 implementation");
     let portal = Address::from_str(PORTAL).unwrap();
@@ -269,20 +292,67 @@ fn main() {
     let attempt_number = env_u64("DARKBOT_G07_ATTEMPT_NUMBER");
     let spent_budget_wei = env_u128("DARKBOT_G07_SPENT_BUDGET_WEI");
 
-    let dry_bytes = fs::read(&dry_path).expect("re-read DRY evidence");
-    let baseline_bytes = fs::read(&baseline_path).expect("re-read preflight baseline");
     let dry_evidence_sha256 = sha256_hex(&dry_bytes);
     let preflight_evidence_sha256 = sha256_hex(&baseline_bytes);
 
+    // The head poller of the release, exercised here read-only: an endpoint
+    // that cannot deliver the next block fresh enough stops the run before the
+    // attempt is latched.
+    let mut head_poller =
+        HeadPoller::connect(&rpc_endpoint).unwrap_or_else(|e| panic!("G0.7 head poller: {e}"));
+    let probe = head_poller
+        .next_head(HEAD_TRANSITION_TIMEOUT)
+        .unwrap_or_else(|e| panic!("G0.7 head probe: {e}"));
+    let probe_window = bundle_window(
+        preflight_head,
+        &preflight_head_hash,
+        &probe.head,
+        probe.local_unix_ms,
+        probe.excess_staleness_ms,
+    )
+    .unwrap_or_else(|e| panic!("G0.7 head probe: {e}"));
+
+    let attempt_dir = latch_attempt(
+        Path::new(ATTEMPT_STATE_ROOT),
+        &attempt_id,
+        &format!(
+            "attempt_id={attempt_id}\npid={}\nunix_time_ms={}\nlaunch_tx_hash={launch_hash}\nbuy_tx_hash={buy_hash}\n",
+            std::process::id(),
+            unix_time_ms()
+        ),
+    )
+    .unwrap_or_else(|e| panic!("G0.7 single-use latch: {e}"));
+    let mut evidence_file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&evidence_path)
+        .unwrap_or_else(|e| {
+            let released = release_unsent_attempt(&attempt_dir, None, "pre-egress");
+            panic!("create-new DARKBOT_G07_EVIDENCE_PATH {evidence_path}: {e}; {released}")
+        });
+    let capture_path = attempt_dir.join(CAPTURE_JOURNAL_FILE);
+
     let mut capture = CaptureSession::prearm(
-        Path::new(&capture_path),
+        &capture_path,
         &attempt_id,
         &clock_id,
         &boot_id,
         &producer_witness_source,
     )
-    .expect("G0.7 capture pre-arm failed");
+    .unwrap_or_else(|e| {
+        let released = release_unsent_attempt(
+            &attempt_dir,
+            Some((&evidence_path, &evidence_file)),
+            "pre-egress",
+        );
+        panic!("G0.7 capture pre-arm failed: {e}; {released}")
+    });
     let capture_clock = capture.clock();
+    let unsent = Unsent {
+        attempt_dir: &attempt_dir,
+        evidence_path: &evidence_path,
+        evidence_file: &evidence_file,
+    };
 
     let contract = match verify_live_authorization(
         Path::new(V2_RELATIVE_PATH),
@@ -314,6 +384,7 @@ fn main() {
             let now = capture_clock.now_ns();
             let _ = capture.record_text("AUTHORIZATION_REFUSED", now, &format!("reason={e}"));
             let _ = capture.finish();
+            eprintln!("{}", unsent.release("refused"));
             panic!("G0.7 live authorization refused: {e}");
         }
     };
@@ -328,23 +399,92 @@ fn main() {
         buy_hash,
         token
     );
-    capture
+    // Every stop from here to the release is pre-egress and releases the latch.
+    let bound = capture
         .record_text("ATTEMPT_BOUND", capture_clock.now_ns(), &evidence_binding)
-        .expect("capture ATTEMPT_BOUND failed before egress");
-    capture
-        .record_raw_tx(
-            "launch_A",
-            capture_clock.now_ns(),
-            &launch_hash,
-            &launch.raw,
-        )
-        .expect("capture raw launch failed before egress");
-    capture
-        .record_raw_tx("buy_B", capture_clock.now_ns(), &buy_hash, &buy.raw)
-        .expect("capture raw BUY failed before egress");
-    assert!(capture.healthy(), "capture became unhealthy before egress");
+        .and_then(|()| {
+            capture.record_raw_tx(
+                "launch_A",
+                capture_clock.now_ns(),
+                &launch_hash,
+                &launch.raw,
+            )
+        })
+        .and_then(|()| {
+            capture.record_raw_tx("buy_B", capture_clock.now_ns(), &buy_hash, &buy.raw)
+        });
+    if let Err(e) = bound {
+        pre_egress_abort(capture, &capture_clock, &unsent, "journal attempt", &e)
+    }
 
-    let max_block = send_head.checked_add(2).expect("max block overflow");
+    // The RPC connection is checked (and re-established if it closed during
+    // the guard phase) before the builder prewarm, so the builder connections
+    // only idle for the wait for the next block.
+    if let Err(e) = head_poller.latest() {
+        pre_egress_abort(capture, &capture_clock, &unsent, "head poller", &e)
+    }
+    // TLS/DNS/handshake all happen before the economic write boundary.
+    let mut club48_tls = match connect_tls(CLUB48_HOST) {
+        Ok(stream) => stream,
+        Err(e) => pre_egress_abort(
+            capture,
+            &capture_clock,
+            &unsent,
+            "48Club TLS prewarm",
+            &e,
+        ),
+    };
+    let mut blockrazor_tls = match connect_tls(BLOCKRAZOR_HOST) {
+        Ok(stream) => stream,
+        Err(e) => pre_egress_abort(
+            capture,
+            &capture_clock,
+            &unsent,
+            "BlockRazor TLS prewarm",
+            &e,
+        ),
+    };
+    let prewarmed_at = Instant::now();
+
+    if let Err(e) = capture.record_text(
+        "TRANSPORTS_PREWARMED",
+        capture_clock.now_ns(),
+        &format!("preflight_head={preflight_head}\npreflight_head_hash={preflight_head_hash}"),
+    ) {
+        pre_egress_abort(capture, &capture_clock, &unsent, "journal prewarm", &e)
+    }
+
+    // The send head is the next block, read as soon as the endpoint has it:
+    // the bundle expiry comes from it, not from the preflight head read seconds
+    // earlier.
+    let fresh = match head_poller.next_head(HEAD_TRANSITION_TIMEOUT) {
+        Ok(observation) => observation,
+        Err(e) => pre_egress_abort(
+            capture,
+            &capture_clock,
+            &unsent,
+            "send head read",
+            &e,
+        ),
+    };
+    let window = match bundle_window(
+        preflight_head,
+        &preflight_head_hash,
+        &fresh.head,
+        fresh.local_unix_ms,
+        fresh.excess_staleness_ms,
+    ) {
+        Ok(window) => window,
+        Err(e) => pre_egress_abort(
+            capture,
+            &capture_clock,
+            &unsent,
+            "send head window",
+            &e,
+        ),
+    };
+    let send_head = fresh.head.number;
+    let max_block = window.max_block;
     let launch_hex = format!("0x{}", hex::encode(&launch.raw));
     let buy_hex = format!("0x{}", hex::encode(&buy.raw));
     let request_id = buy_hash.clone();
@@ -356,6 +496,7 @@ fn main() {
         "params":[{
             "txs":[launch_hex.clone(), buy_hex.clone()],
             "maxBlockNumber":max_block,
+            "maxTimestamp":window.max_timestamp,
             "noMerge":true,
             "positionFirst":true
         }]
@@ -372,113 +513,151 @@ fn main() {
     })
     .to_string();
 
-    let blockrazor_auth = req_env("DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION");
     let club48_request = http_request(CLUB48_HOST, &club48_body, None);
     let blockrazor_request =
         http_request(BLOCKRAZOR_HOST, &blockrazor_body, Some(&blockrazor_auth));
-
-    for (provider, body, request_len) in [
-        (
-            "48Club/Puissant",
-            club48_body.as_str(),
-            club48_request.len(),
-        ),
-        (
-            "BlockRazor",
-            blockrazor_body.as_str(),
-            blockrazor_request.len(),
-        ),
-    ] {
-        capture
-            .record_text(
-                "SUBMISSION_PREPARED",
-                capture_clock.now_ns(),
-                &format!(
-                    "provider={provider}\nbody_sha256={}\nrequest_len={}\nauthorization_persisted=false\nbody={body}",
-                    sha256_hex(body.as_bytes()),
-                    request_len
-                ),
-            )
-            .expect("capture selected submission failed before egress");
-    }
-    assert!(
-        capture.healthy(),
-        "capture unhealthy after submission capture"
-    );
     drop(blockrazor_auth);
 
-    // TLS/DNS/handshake all happen before the economic write boundary.
-    let club48_tls = match connect_tls(CLUB48_HOST) {
-        Ok(stream) => stream,
-        Err(e) => {
-            let _ = capture.record_text(
-                "PRE_EGRESS_ABORT",
-                capture_clock.now_ns(),
-                &format!("provider=48Club/Puissant\nreason={e}"),
-            );
-            let _ = capture.finish();
-            panic!("48Club TLS prewarm failed; no valid bundle write attempted: {e}");
-        }
-    };
-    let blockrazor_tls = match connect_tls(BLOCKRAZOR_HOST) {
-        Ok(stream) => stream,
-        Err(e) => {
-            let _ = capture.record_text(
-                "PRE_EGRESS_ABORT",
-                capture_clock.now_ns(),
-                &format!("provider=BlockRazor\nreason={e}"),
-            );
-            let _ = capture.finish();
-            panic!("BlockRazor TLS prewarm failed; no valid bundle write attempted: {e}");
-        }
-    };
-
-    capture
+    let journaled = capture
         .record_text(
-            "TRANSPORTS_PREWARMED",
+            "FRESH_HEAD_BOUND",
             capture_clock.now_ns(),
-            &format!("send_head={send_head}\nmax_block={max_block}"),
+            &format!(
+                "send_head={send_head}\nsend_head_hash={}\nsend_head_milli_timestamp={}\nlocal_unix_ms={}\nhead_age_ms={}\nexcess_staleness_ms={}\nhead_read_ns={}\nmax_block={max_block}\nfortyeightclub_max_timestamp={}\npreflight_head={preflight_head}",
+                fresh.head.hash,
+                fresh.head.milli_timestamp,
+                fresh.local_unix_ms,
+                window.head_age_ms,
+                fresh.excess_staleness_ms,
+                fresh.read_ns,
+                window.max_timestamp
+            ),
         )
-        .expect("capture transport-prewarm event failed before egress");
-    assert!(
-        capture.healthy(),
-        "capture unhealthy immediately before egress"
-    );
+        .and_then(|()| {
+            [
+                (
+                    "48Club/Puissant",
+                    club48_body.as_str(),
+                    club48_request.len(),
+                ),
+                (
+                    "BlockRazor",
+                    blockrazor_body.as_str(),
+                    blockrazor_request.len(),
+                ),
+            ]
+            .into_iter()
+            .try_for_each(|(provider, body, request_len)| {
+                capture.record_text(
+                    "SUBMISSION_PREPARED",
+                    capture_clock.now_ns(),
+                    &format!(
+                        "provider={provider}\nbody_sha256={}\nrequest_len={}\nauthorization_persisted=false\nbody={body}",
+                        sha256_hex(body.as_bytes()),
+                        request_len
+                    ),
+                )
+            })
+        })
+        // The exact bodies are on file before any of their bytes leaves.
+        .and_then(|()| capture.wait_appended(CAPTURE_APPEND_TIMEOUT));
+    if let Err(e) = journaled {
+        pre_egress_abort(capture, &capture_clock, &unsent, "journal submission", &e)
+    }
+    if prewarmed_at.elapsed() > MAX_BUILDER_IDLE {
+        let idle = format!(
+            "builder connections idled {} ms (limit {} ms)",
+            prewarmed_at.elapsed().as_millis(),
+            MAX_BUILDER_IDLE.as_millis()
+        );
+        pre_egress_abort(capture, &capture_clock, &unsent, "builder idle", &idle)
+    }
+    // A builder that closed its idle connection would swallow the bundle unseen.
+    for (stage, stream) in [
+        ("48Club liveness", &mut club48_tls),
+        ("BlockRazor liveness", &mut blockrazor_tls),
+    ] {
+        if let Err(e) = transport_alive(stream) {
+            pre_egress_abort(capture, &capture_clock, &unsent, stage, &e)
+        }
+    }
 
+    // From the release on nothing may panic: the evidence of a value-bearing
+    // attempt must be written whatever happens. Each sender waits for a go
+    // signal before the barrier: if the other cannot be spawned, dropping the
+    // signal ends it without a write and the run stops before the release.
     let barrier = Arc::new(Barrier::new(3));
+    let mut release_marker = String::new();
     let mut release_before_ns = 0u64;
     let mut release_after_ns = 0u64;
-    let (club48_result, blockrazor_result) = thread::scope(|scope| {
+    let sent = thread::scope(|scope| {
+        let (go48, wait48) = mpsc::channel::<()>();
+        let (gobr, waitbr) = mpsc::channel::<()>();
         let b48 = Arc::clone(&barrier);
         let bbr = Arc::clone(&barrier);
         let c48_clock = capture_clock.clone();
         let br_clock = capture_clock.clone();
-        let h48 = scope.spawn(move || {
-            submit_provider(
-                "48Club/Puissant",
-                club48_tls,
-                club48_request,
-                b48,
-                c48_clock,
-            )
-        });
-        let hbr = scope.spawn(move || {
-            submit_provider(
-                "BlockRazor",
-                blockrazor_tls,
-                blockrazor_request,
-                bbr,
-                br_clock,
-            )
-        });
+        let h48 = thread::Builder::new()
+            .name("g07-send-48club".into())
+            .spawn_scoped(scope, move || {
+                wait48.recv().ok().map(|()| {
+                    submit_provider(
+                        "48Club/Puissant",
+                        club48_tls,
+                        club48_request,
+                        b48,
+                        c48_clock,
+                    )
+                })
+            });
+        let hbr = thread::Builder::new()
+            .name("g07-send-blockrazor".into())
+            .spawn_scoped(scope, move || {
+                waitbr.recv().ok().map(|()| {
+                    submit_provider(
+                        "BlockRazor",
+                        blockrazor_tls,
+                        blockrazor_request,
+                        bbr,
+                        br_clock,
+                    )
+                })
+            });
+        let (h48, hbr) = match (h48, hbr) {
+            (Ok(h48), Ok(hbr)) => (h48, hbr),
+            (h48, hbr) => {
+                drop((go48, gobr));
+                let reasons: Vec<String> = [h48.err(), hbr.err()]
+                    .into_iter()
+                    .flatten()
+                    .map(|e| e.to_string())
+                    .collect();
+                return Err(format!("send thread spawn failed: {}", reasons.join("; ")));
+            }
+        };
+        // Both receivers are blocked in recv (their first statement), so
+        // neither send can fail.
+        let _ = go48.send(());
+        let _ = gobr.send(());
         release_before_ns = capture_clock.now_ns();
         barrier.wait();
         release_after_ns = capture_clock.now_ns();
-        (
-            h48.join().expect("48Club send thread panicked"),
-            hbr.join().expect("BlockRazor send thread panicked"),
-        )
+        release_marker = mark_released(&attempt_dir, release_after_ns);
+        Ok((
+            h48.join()
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| panicked_provider_result("48Club/Puissant")),
+            hbr.join()
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| panicked_provider_result("BlockRazor")),
+        ))
     });
+    let (club48_result, blockrazor_result) = match sent {
+        Ok(results) => results,
+        Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, "send threads", &e),
+    };
 
     for result in [&club48_result, &blockrazor_result] {
         let body = format!(
@@ -498,6 +677,152 @@ fn main() {
         "BUNDLE_RELEASE_BRACKET",
         capture_clock.now_ns(),
         &format!("release_before_ns={release_before_ns}\nrelease_after_ns={release_after_ns}"),
+    );
+
+    let both_flushed =
+        club48_result.write_flushed_ns.is_some() && blockrazor_result.write_flushed_ns.is_some();
+    let any_possible_egress =
+        club48_result.bytes_may_have_left || blockrazor_result.bytes_may_have_left;
+    let flush_spread_ns = match (
+        club48_result.write_flushed_ns,
+        blockrazor_result.write_flushed_ns,
+    ) {
+        (Some(a), Some(b)) => Some(a.abs_diff(b)),
+        _ => None,
+    };
+
+    let mut evidence = json!({
+        "schema":"darkbot.g07.mainnet-self-launch-buy.v2",
+        "gate":"G0.7",
+        "attempt_id":attempt_id,
+        "classification":"PROVISIONAL_RELEASED__RECEIPT_WINDOW_OPEN__RECONCILE_G08__NO_AUTOMATIC_RETRY",
+        "chain_id":CHAIN_ID,
+        "portal":PORTAL,
+        "acceptance_contract":{
+            "path":V2_RELATIVE_PATH,
+            "sha256":contract.sha256
+        },
+        "evidence_inputs":{
+            "dry_path":dry_path,
+            "dry_sha256":dry_evidence_sha256,
+            "preflight_path":baseline_path,
+            "preflight_sha256":preflight_evidence_sha256,
+            "builder_policy_path":builder_policy_path,
+            "builder_policy_sha256":builder_policy_sha256,
+            "producer_witness_contract_path":producer_witness_contract_path,
+            "producer_witness_contract_sha256":producer_witness_contract_sha256
+        },
+        "attempt":{
+            "state_dir":attempt_dir.display().to_string(),
+            "single_use_latch":attempt_dir.join(ATTEMPT_LATCH_FILE).display().to_string(),
+            "release_marker":release_marker,
+            "number":attempt_number,
+            "spent_before_wei":spent_budget_wei.to_string(),
+            "reserved_worst_case_wei":reserved_attempt_wei.to_string()
+        },
+        "wallets":{
+            "launcher":launcher.to_string(),
+            "buyer":buyer.to_string(),
+            "distinct":true,
+            "launcher_nonce":launcher_nonce,
+            "buyer_nonce":buyer_nonce
+        },
+        "preflight":{
+            "latest_block_number":preflight_head,
+            "latest_block_hash":current["latest_block_hash"],
+            "portal_version":current["portal_version"],
+            "portal_implementation":current["portal_implementation"],
+            "tax_v3_impl":current["tax_v3_impl"],
+            "network_gas_price_wei":current["gas_price_wei"]
+        },
+        "transactions":{
+            "launch_tx_hash":launch_hash,
+            "buy_tx_hash":buy_hash,
+            "token":token.to_string(),
+            "token_code_before_empty":true,
+            "salt":salt.to_string(),
+            "launch_value_wei":launch_value.to_string(),
+            "buy_value_wei":buy_value.to_string(),
+            "gas_price_wei":gas_price,
+            "launch_gas_estimate":launch_estimate,
+            "launch_gas_limit":launch_gas_limit,
+            "buy_gas_limit":buy_gas_limit,
+            "local_expected_output":local_expected_output.to_string(),
+            "min_output":min_output.to_string(),
+            "slippage_bps":slippage_bps
+        },
+        "bundle":{
+            "tx_order":["launch_A","buy_B"],
+            "identical_raw_transactions_across_builders":true,
+            "send_head":send_head,
+            "max_block":max_block,
+            "fortyeightclub_maxTimestamp":window.max_timestamp,
+            "expiry_rule":format!("maxBlockNumber = send_head + {MAX_BLOCK_OFFSET} for both builders (the head+{MAX_BLOCK_OFFSET} bound); 48Club maxTimestamp = floor((send_head milliTimestamp + {MAX_BLOCK_OFFSET} * {BLOCK_INTERVAL_MS} ms) / 1000) + 1, the second after head+{MAX_BLOCK_OFFSET}'s nominal second: not a head+{MAX_BLOCK_OFFSET} bound by itself, it keeps a maxTimestamp-versus-current-time check from refusing the bundle while head+{MAX_BLOCK_OFFSET} is open"),
+            "send_head_source":{
+                "read":"first eth_getBlockByNumber(latest) showing a new block, polled over a pre-warmed keep-alive TLS connection after the builder TLS prewarm, immediately before the release",
+                "hash":fresh.head.hash,
+                "milli_timestamp":fresh.head.milli_timestamp,
+                "local_unix_ms_after_read":fresh.local_unix_ms,
+                "head_age_ms":window.head_age_ms,
+                "excess_staleness_ms":fresh.excess_staleness_ms,
+                "read_round_trip_ns":fresh.read_ns,
+                "max_head_age_ms":MAX_HEAD_AGE_MS,
+                "max_local_clock_lag_ms":MAX_LOCAL_CLOCK_LAG_MS,
+                "preflight_head":preflight_head,
+                "probe":{
+                    "head":probe.head.number,
+                    "head_age_ms":probe_window.head_age_ms,
+                    "excess_staleness_ms":probe.excess_staleness_ms,
+                    "read_round_trip_ns":probe.read_ns
+                }
+            },
+            "public_mempool_launch":false,
+            "automatic_retry":false,
+            "fortyeightclub_noMerge":true,
+            "fortyeightclub_positionFirst":true,
+            "blockrazor_noMerge":false,
+            "blockrazor_positionFirst":false
+        },
+        "local_send_boundaries":{
+            "clock_id":clock_id,
+            "boot_id":boot_id,
+            "release_before_ns":release_before_ns,
+            "release_after_ns":release_after_ns,
+            "fortyeightclub":provider_json(&club48_result),
+            "blockrazor":provider_json(&blockrazor_result),
+            "both_flush_completed":both_flushed,
+            "write_flush_boundary_spread_ns":flush_spread_ns,
+            "any_valid_bytes_may_have_left":any_possible_egress,
+            "not_t0_to_buy":true
+        },
+        "capture":{
+            "complete_local_journal":false,
+            "status":"RECEIPT_WINDOW_OPEN",
+            "journal_path":capture_path.display().to_string()
+        },
+        "capture_window":null,
+        "timing":{
+            "T0_to_T_buy":"UNKNOWN_PENDING_ORIGINAL_PRODUCER_WITNESS",
+            "producer_witness_source":producer_witness_source,
+            "producer_witness_source_ready":producer_witness_source_ready,
+            "rule":"Local send/receipt/block timestamps are not producer execution timestamps. G0.8 producer-timing evaluation requires the original producing execution attempt; source_ready=false does not block G0.7 acquisition qualification."
+        },
+        "next_required_gate":"G0.8",
+        "critical_rule":"DO NOT RETRY THIS ATTEMPT AUTOMATICALLY; reconcile canonical execution first."
+    });
+
+    // Provisional evidence right after the release, so a kill or a hang in the
+    // receipt window still leaves the attempt's evidence on file.
+    let provisional = write_evidence(&mut evidence_file, &evidence_text(&evidence));
+    let _ = capture.record_text(
+        "PROVISIONAL_EVIDENCE",
+        capture_clock.now_ns(),
+        &format!("path={evidence_path}\nwritten={:?}", provisional.as_ref().map_err(|e| e.to_string())),
+    );
+    let _ = writeln!(
+        std::io::stderr().lock(),
+        "G0.7: bundle released; provisional evidence {} at {evidence_path}; polling receipts for up to 30 s and keeping the journal open at least 15 s: do not interrupt",
+        if provisional.is_ok() { "written" } else { "NOT written" }
     );
 
     // Keep the local journal alive conservatively. This is NOT T0 timing authority.
@@ -534,7 +859,10 @@ fn main() {
         thread::sleep(Duration::from_millis(20));
     }
 
-    let post_window_head = rpc("eth_blockNumber", json!([])).ok().map(|v| hex_u64(&v));
+    let post_window_head = rpc("eth_blockNumber", json!([])).ok().and_then(|v| {
+        v.as_str()
+            .and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok())
+    });
     let _ = capture.record_text(
         "LOCAL_CAPTURE_WINDOW_CLOSED",
         capture_clock.now_ns(),
@@ -591,127 +919,116 @@ fn main() {
         }),
     };
 
-    let both_flushed =
-        club48_result.write_flushed_ns.is_some() && blockrazor_result.write_flushed_ns.is_some();
-    let any_possible_egress =
-        club48_result.bytes_may_have_left || blockrazor_result.bytes_may_have_left;
-    let flush_spread_ns = match (
-        club48_result.write_flushed_ns,
-        blockrazor_result.write_flushed_ns,
-    ) {
-        (Some(a), Some(b)) => Some(a.abs_diff(b)),
-        _ => None,
-    };
-
-    let evidence = json!({
-        "schema":"darkbot.g07.mainnet-self-launch-buy.v2",
-        "gate":"G0.7",
-        "attempt_id":attempt_id,
-        "classification": if capture_complete {
-            "SUBMITTED_OR_SUBMISSION_UNKNOWN__RUN_G08__NO_AUTOMATIC_RETRY"
+    if let Some(fields) = evidence.as_object_mut() {
+        fields.insert(
+            "classification".into(),
+            json!(if capture_complete {
+                "SUBMITTED_OR_SUBMISSION_UNKNOWN__RUN_G08__NO_AUTOMATIC_RETRY"
+            } else {
+                "STOP_CAPTURE_INCOMPLETE__RECONCILE_G08__NO_AUTOMATIC_RETRY"
+            }),
+        );
+        fields.insert("capture".into(), capture_json);
+        fields.insert(
+            "capture_window".into(),
+            json!({
+                "both_receipts_observed_ns":both_receipts_observed_ns,
+                "coverage_end_ns":coverage_end_ns,
+                "canonical_t0_plus_15s_reconciled_in_g08":true
+            }),
+        );
+    }
+    let pretty = evidence_text(&evidence);
+    // File first: stdout may be a closed pipe. Nothing here may panic.
+    let evidence_written = write_evidence(&mut evidence_file, &pretty).and_then(|()| {
+        if same_file(&evidence_path, &evidence_file) {
+            Ok(())
         } else {
-            "STOP_CAPTURE_INCOMPLETE__RECONCILE_G08__NO_AUTOMATIC_RETRY"
-        },
-        "chain_id":CHAIN_ID,
-        "portal":PORTAL,
-        "acceptance_contract":{
-            "path":V2_RELATIVE_PATH,
-            "sha256":contract.sha256
-        },
-        "evidence_inputs":{
-            "dry_path":dry_path,
-            "dry_sha256":dry_evidence_sha256,
-            "preflight_path":baseline_path,
-            "preflight_sha256":preflight_evidence_sha256,
-            "builder_policy_path":builder_policy_path,
-            "builder_policy_sha256":builder_policy_sha256,
-            "producer_witness_contract_path":producer_witness_contract_path,
-            "producer_witness_contract_sha256":producer_witness_contract_sha256
-        },
-        "attempt":{
-            "number":attempt_number,
-            "spent_before_wei":spent_budget_wei.to_string(),
-            "reserved_worst_case_wei":reserved_attempt_wei.to_string()
-        },
-        "wallets":{
-            "launcher":launcher.to_string(),
-            "buyer":buyer.to_string(),
-            "distinct":true,
-            "launcher_nonce":launcher_nonce,
-            "buyer_nonce":buyer_nonce
-        },
-        "preflight":{
-            "latest_block_number":send_head,
-            "latest_block_hash":current["latest_block_hash"],
-            "portal_version":current["portal_version"],
-            "portal_implementation":current["portal_implementation"],
-            "tax_v3_impl":current["tax_v3_impl"],
-            "network_gas_price_wei":current["gas_price_wei"]
-        },
-        "transactions":{
-            "launch_tx_hash":launch_hash,
-            "buy_tx_hash":buy_hash,
-            "token":token.to_string(),
-            "token_code_before_empty":true,
-            "salt":salt.to_string(),
-            "launch_value_wei":launch_value.to_string(),
-            "buy_value_wei":buy_value.to_string(),
-            "gas_price_wei":gas_price,
-            "launch_gas_estimate":launch_estimate,
-            "launch_gas_limit":launch_gas_limit,
-            "buy_gas_limit":buy_gas_limit,
-            "local_expected_output":local_expected_output.to_string(),
-            "min_output":min_output.to_string(),
-            "slippage_bps":slippage_bps
-        },
-        "bundle":{
-            "tx_order":["launch_A","buy_B"],
-            "identical_raw_transactions_across_builders":true,
-            "send_head":send_head,
-            "max_block":max_block,
-            "public_mempool_launch":false,
-            "automatic_retry":false,
-            "fortyeightclub_noMerge":true,
-            "fortyeightclub_positionFirst":true,
-            "blockrazor_noMerge":false,
-            "blockrazor_positionFirst":false
-        },
-        "local_send_boundaries":{
-            "clock_id":clock_id,
-            "boot_id":boot_id,
-            "release_before_ns":release_before_ns,
-            "release_after_ns":release_after_ns,
-            "fortyeightclub":provider_json(&club48_result),
-            "blockrazor":provider_json(&blockrazor_result),
-            "both_flush_completed":both_flushed,
-            "write_flush_boundary_spread_ns":flush_spread_ns,
-            "any_valid_bytes_may_have_left":any_possible_egress,
-            "not_t0_to_buy":true
-        },
-        "capture":capture_json,
-        "capture_window":{
-            "both_receipts_observed_ns":both_receipts_observed_ns,
-            "coverage_end_ns":coverage_end_ns,
-            "canonical_t0_plus_15s_reconciled_in_g08":true
-        },
-        "timing":{
-            "T0_to_T_buy":"UNKNOWN_PENDING_ORIGINAL_PRODUCER_WITNESS",
-            "producer_witness_source":producer_witness_source,
-            "producer_witness_source_ready":producer_witness_source_ready,
-            "rule":"Local send/receipt/block timestamps are not producer execution timestamps. G0.8 producer-timing evaluation requires the original producing execution attempt; source_ready=false does not block G0.7 acquisition qualification."
-        },
-        "next_required_gate":"G0.8",
-        "critical_rule":"DO NOT RETRY THIS ATTEMPT AUTOMATICALLY; reconcile canonical execution first."
-    });
-
-    let pretty = serde_json::to_string_pretty(&evidence).unwrap();
-    println!("{pretty}");
-    if let Ok(path) = env::var("DARKBOT_G07_EVIDENCE_PATH") {
-        if let Err(e) = fs::write(&path, format!("{pretty}\n")) {
-            eprintln!("WARNING: G0.7 evidence write failed: {path}: {e}");
+            Err(std::io::Error::other(
+                "the path no longer refers to this run's evidence file",
+            ))
         }
+    });
+    let _ = writeln!(std::io::stdout().lock(), "{pretty}");
+    if let Err(e) = evidence_written {
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "STOP: G0.7 evidence write failed: {evidence_path}: {e}; stdout holds the only copy; capture_complete={capture_complete}"
+        );
+        std::process::exit(3);
     }
     if !capture_complete {
         std::process::exit(2);
     }
+}
+
+fn evidence_text(evidence: &Value) -> String {
+    serde_json::to_string_pretty(evidence)
+        .unwrap_or_else(|e| format!("{{\"evidence_serialization_error\":\"{e}\"}}"))
+}
+
+/// (Re)writes this run's evidence file in place and fsyncs it. Never panics.
+fn write_evidence(file: &mut fs::File, pretty: &str) -> std::io::Result<()> {
+    file.set_len(0)?;
+    file.seek(SeekFrom::Start(0))?;
+    file.write_all(pretty.as_bytes())?;
+    file.write_all(b"\n")?;
+    file.sync_all()
+}
+
+/// Marks the attempt directory right after the release (off the critical
+/// path): its latch must never be released by hand. Never panics.
+fn mark_released(attempt_dir: &Path, release_after_ns: u64) -> String {
+    let path = attempt_dir.join("RELEASED");
+    let written = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .and_then(|mut f| {
+            f.write_all(
+                format!("bundle released; bytes may have left\nrelease_after_ns={release_after_ns}\n")
+                    .as_bytes(),
+            )
+        });
+    match written {
+        Ok(()) => path.display().to_string(),
+        Err(e) => format!("RELEASED marker failed: {}: {e}", path.display()),
+    }
+}
+
+/// What a stop before the release hands back: the attempt's latch directory
+/// and this run's evidence file.
+struct Unsent<'a> {
+    attempt_dir: &'a Path,
+    evidence_path: &'a str,
+    evidence_file: &'a fs::File,
+}
+
+impl Unsent<'_> {
+    fn release(&self, outcome: &str) -> String {
+        release_unsent_attempt(
+            self.attempt_dir,
+            Some((self.evidence_path, self.evidence_file)),
+            outcome,
+        )
+    }
+}
+
+/// Terminal stop after the guard but before any bundle byte was written: the
+/// journal is closed and the latch released (the attempt state is kept).
+fn pre_egress_abort(
+    mut capture: CaptureSession,
+    clock: &CaptureClock,
+    unsent: &Unsent,
+    stage: &str,
+    reason: &str,
+) -> ! {
+    let _ = capture.record_text(
+        "PRE_EGRESS_ABORT",
+        clock.now_ns(),
+        &format!("stage={stage}\nreason={reason}\nbundle_bytes_written=false"),
+    );
+    let _ = capture.finish();
+    let released = unsent.release("pre-egress");
+    panic!("G0.7 {stage} failed; no valid bundle write attempted: {reason}; {released}");
 }

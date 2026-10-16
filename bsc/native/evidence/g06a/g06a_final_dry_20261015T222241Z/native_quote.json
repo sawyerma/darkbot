@@ -1,0 +1,20 @@
+{
+  "authority": "Committed Mainnet preflight + exact Curve-20 fixed-point implementation; requires independent EVM cross-check before DRY-2 PASS",
+  "bonding_curve_tax_wei": "10000000000",
+  "buy_tax_bps": 100,
+  "buy_value_wei": "1000000000000",
+  "circulating_before": "0",
+  "combined_fee_wei": "20000000000",
+  "curve_id": 20,
+  "expected_output": "176693134169499757962",
+  "min_output": "174926202827804760382",
+  "net_reserve_input_wei": "980000000000",
+  "network_actions": "NONE",
+  "preflight_path": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/data/g06a_final_dry/g06a_final_dry_20261015T222241Z/preflight.json",
+  "protocol_fee_bps": 100,
+  "protocol_fee_wei": "10000000000",
+  "reserve_after_wei": "980000000000",
+  "schema": "darkbot.g06a.native-bnb-quote.v1",
+  "slippage_bps": 100,
+  "tax_on_bonding_curve_enabled": true
+}

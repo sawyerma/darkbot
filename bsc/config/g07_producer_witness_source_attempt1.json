@@ -1,0 +1,12 @@
+{
+  "schema": "darkbot.producer-witness-source.v1",
+  "attempt_id": "g07-mainnet-attempt-1-dry-20261015T222241Z",
+  "source_ready": false,
+  "original_successful_producer_execution_only": true,
+  "required_witness_schema": "bsc/config/producer_execution_witness_v1.schema.json",
+  "delivery_may_be_asynchronous": true,
+  "canonical_identity_binding_required": true,
+  "clock_and_uncertainty_metadata_required": true,
+  "source_description": "No original producer-execution witness source is available for G0.7 attempt g07-mainnet-attempt-1-dry-20261015T222241Z: there is no access to the block producer (validator or builder) that executes the [launch_A, buy_B] bundle, so producer-side T0/T_buy completion brackets, producer clock_id, boot identity and uncertainty metadata conforming to bsc/config/producer_execution_witness_v1.schema.json are not available for this attempt. T0_TO_BUY therefore remains UNKNOWN (UNKNOWN_PENDING_ORIGINAL_PRODUCER_WITNESS); the strict T0->T_buy < 1000000 ns timing gate cannot pass for this attempt (t0_exact=false); a timing PASS would require a newly instrumented attempt with an original producer witness. Canonical inclusion of the BUY at position N+1 directly after the launch at position N proves ordering and adjacency only and is not sub-millisecond timing evidence. Local send/flush brackets, builder responses, receipt observation times, block header timestamps and any retroactive re-execution or EVM trace are not producer execution timestamps. Acquisition and ordering are evaluated separately by G0.8.",
+  "operator_reference": "G0.7 attempt 1 (DARKBOT_G07_ATTEMPT_NUMBER=1) bound to DRY bsc/native/evidence/g06a/g06a_final_dry_20261015T222241Z; source_ready=false per operator instruction 2026-10-16 (no producer access). Informational schema pins, not code-verified: bsc/config/producer_witness_source_v1.schema.json sha256=dd29bb95c7f2374bc5856c3624e8572a87f3e6f1373765505f3a1ac576f24e34; bsc/config/producer_execution_witness_v1.schema.json sha256=8cd9bcac69a5ef300e11e39f1bd1c7140fd82763e4dacfde99d436db6577ee6f"
+}

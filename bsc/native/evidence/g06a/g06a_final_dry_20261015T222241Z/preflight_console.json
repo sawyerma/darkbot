@@ -1,0 +1,58 @@
+{
+  "schema": "darkbot.g06a.preflight-readonly.v2",
+  "chain_id": "56",
+  "latest_block_number": "127865760",
+  "latest_block_hash": "0xb8f3cec4f6f874338f00ca12a8679df9eb1485ee6f3b8b3d2bb800f89cc4cb01",
+  "portal": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+  "portal_code_bytes": 2882,
+  "portal_code_sha256": "1fc365bfda5c9694d38901227927872e610f84d9de9b4e360fea40578fb4bcc1",
+  "portal_version": "v5.24.0",
+  "portal_implementation": "0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20",
+  "portal_implementation_code_bytes": 20475,
+  "portal_implementation_code_sha256": "2ac893fca8dfa730d66cb4f0fc3e2c769f2ffdb4565e55903d9fa12e7cd7149f",
+  "tax_v3_impl": "0x024f18294970b5c76c0691b87f138a0317156422",
+  "tax_v3_impl_source": "frozen BSC-mainnet deployment evidence; runtime code existence rechecked here",
+  "tax_v3_impl_code_bytes": 19331,
+  "tax_v3_impl_code_sha256": "34000dd228055664fda2debd21b5fe5288b750ca3ce8fb4e6933e5c529586ef5",
+  "gas_price_wei": "50000000",
+  "native_quote_configuration": {
+    "enabled": "1",
+    "default_curve_id": "20",
+    "alternative_curve_id": "20",
+    "native_to_quote_swap_type": "0",
+    "dex_id": "0"
+  },
+  "protocol_fee_bps": {
+    "buy": "100",
+    "sell": "100"
+  },
+  "tax_on_bonding_curve_enabled": true,
+  "launcher_address": "0x3e7b487ae5e1c49ab1cf6222bdb5cf016e86aacd",
+  "launcher_pending_nonce": "0",
+  "launcher_balance_wei": "5000000000000000",
+  "buyer_address": "0x9c8a0db41914beee52dd49790c4f087e252743de",
+  "buyer_pending_nonce": "0",
+  "buyer_balance_wei": "5000000000000000",
+  "wallet_qualification": {
+    "addresses_bound": true,
+    "distinct": true,
+    "launcher_required_worst_case_wei": "330163500000000",
+    "buyer_required_worst_case_wei": "151000000000000",
+    "combined_attempt_reserve_wei": "481163500000000",
+    "proposal_max_attempt_reserve_wei": "10603270000000000",
+    "funding_profile": {
+      "gas_price_wei": "50000000",
+      "launch_gas_limit": "6603270",
+      "buy_gas_limit": "3000000",
+      "launch_value_wei": "0",
+      "buy_value_wei": "1000000000000"
+    },
+    "launcher_sufficient": true,
+    "buyer_sufficient": true,
+    "funding_pass": true
+  },
+  "network_actions": "READ_ONLY_RPC_ONLY",
+  "signed_tx_submitted": false,
+  "bundle_submitted": false,
+  "dependencies": "Node.js standard library only"
+}
