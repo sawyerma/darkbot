@@ -4,7 +4,7 @@
 use serde_json::{Map, Number, Value};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -14,11 +14,135 @@ pub const HEADER_LEN: u64 = 60;
 pub const MAX_FRAME: usize = 8 * 1024 * 1024;
 pub const MANIFEST: u16 = u16::MAX;
 const FIXED: usize = 120;
+
+/// Event kinds of the one journal contract. Every writer takes its kind from here, so a kind
+/// is never reused for a different payload. Unknown kinds are rejected by the typed readers.
+pub mod kind {
+    pub const OWNER_RECORD: u16 = 100;
+    pub const OWNER_OPPORTUNITY: u16 = 101;
+    pub const OWNER_RECONCILE: u16 = 102;
+    pub const OWNER_SUMMARY: u16 = 103;
+    /// Owner diagnostic line `{line}`; the writer thread also prints it to stderr afterwards.
+    pub const OWNER_DIAGNOSTIC: u16 = 104;
+    /// FE-04 single-flight automaton: one full state version per durable transition.
+    pub const FE04_TRANSITION: u16 = 200;
+    /// FE-04 import of a pre-binary JSON wallet journal; the JSON file itself stays unchanged.
+    pub const FE04_LEGACY_IMPORT: u16 = 201;
+    /// Market capture rows, exactly the legacy JSONL row values (`transactions.jsonl`,
+    /// `liquidations.jsonl`, `coverage.jsonl` are renders of these kinds).
+    pub const MARKET_TRANSACTION: u16 = 300;
+    pub const MARKET_LIQUIDATION: u16 = 301;
+    pub const MARKET_COVERAGE: u16 = 302;
+    /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
+    /// in-window frames is the bounded-memory index of the analytics worker.
+    pub const ECON_SHADOW_EVALUATION: u16 = 400;
+    /// C0-E1 snapshot `{index, finalizing, report}`; the last frame per index is `hour_0N.json`.
+    pub const ECON_SNAPSHOT: u16 = 410;
+    /// C0-E1 final report (`economics_final.json`).
+    pub const ECON_FINAL: u16 = 411;
+    /// One row of `opportunity_economics.jsonl`.
+    pub const ECON_OPPORTUNITY: u16 = 412;
+    /// One row of `canonical_market_shadow.jsonl`.
+    pub const ECON_CANONICAL: u16 = 413;
+    /// C0-E1 phase boundary `{phase, at_ns, unix_ns, details}` (supervisor, market, analytics).
+    pub const MEASUREMENT_PHASE: u16 = 500;
+    /// MT0 measurement snapshot (cumulative counters), off-owner reporter thread.
+    pub const MT0_SNAPSHOT: u16 = 600;
+    /// FE-01 read-only observation: effective configuration, each saved RPC read
+    /// `{method, params, result|error}` (fsynced before it is decoded), and the result.
+    pub const FE01_CONFIG: u16 = 700;
+    pub const FE01_READ: u16 = 701;
+    pub const FE01_RESULT: u16 = 702;
+    /// C0 account census rows (`c0_census.py` via `p0-journal import`): program accounts and
+    /// group indexer accounts of one context slot.
+    pub const C0_CENSUS_ACCOUNT: u16 = 900;
+    pub const C0_CENSUS_GROUP_ACCOUNT: u16 = 901;
+    /// Kinds an explicit offline import may write; runtime and financial kinds never.
+    pub const IMPORTABLE: &[u16] = &[C0_CENSUS_ACCOUNT, C0_CENSUS_GROUP_ACCOUNT];
+    /// Owner events that could not reach the primary journal (recovery journal only).
+    pub const OWNER_RECOVERY: u16 = 1000;
+    pub const ALL: &[u16] = &[
+        OWNER_RECORD,
+        OWNER_OPPORTUNITY,
+        OWNER_RECONCILE,
+        OWNER_SUMMARY,
+        OWNER_DIAGNOSTIC,
+        FE04_TRANSITION,
+        FE04_LEGACY_IMPORT,
+        MARKET_TRANSACTION,
+        MARKET_LIQUIDATION,
+        MARKET_COVERAGE,
+        ECON_SHADOW_EVALUATION,
+        ECON_SNAPSHOT,
+        ECON_FINAL,
+        ECON_OPPORTUNITY,
+        ECON_CANONICAL,
+        MEASUREMENT_PHASE,
+        MT0_SNAPSHOT,
+        FE01_CONFIG,
+        FE01_READ,
+        FE01_RESULT,
+        C0_CENSUS_ACCOUNT,
+        C0_CENSUS_GROUP_ACCOUNT,
+        OWNER_RECOVERY,
+        super::MANIFEST,
+    ];
+}
+/// Provenance sources of the one journal contract.
+pub mod source {
+    pub const OWNER: u32 = 1;
+    pub const FE04: u32 = 2;
+    pub const MARKET: u32 = 3;
+    pub const MT0: u32 = 4;
+    pub const FE01: u32 = 5;
+    pub const ECON: u32 = 6;
+    pub const MEASUREMENT: u32 = 7;
+    pub const C0_CENSUS: u32 = 8;
+}
 fn bad(code: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, code)
 }
+/// Directory to fsync after creating `path`; a bare file name lives in the working directory.
+fn parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+}
 pub fn binary_path(path: &Path) -> PathBuf {
     path.with_extension("p0j")
+}
+/// 16 fresh bytes from the operating system. A journal is never created without them.
+fn random16() -> io::Result<[u8; 16]> {
+    let mut bytes = [0u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+fn process_once(cell: &'static std::sync::OnceLock<[u8; 16]>) -> io::Result<[u8; 16]> {
+    if let Some(v) = cell.get() {
+        return Ok(*v);
+    }
+    let fresh = random16()?;
+    Ok(*cell.get_or_init(|| fresh))
+}
+/// Header identities: run = this process, session = this writer, boot = the operating
+/// system boot (Linux `boot_id`; elsewhere unknown, so a process-scoped random value).
+fn identities() -> io::Result<[[u8; 16]; 3]> {
+    static RUN: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::new();
+    static BOOT: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::new();
+    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .ok()
+        .and_then(|text| {
+            let hex: String = text.trim().chars().filter(|c| *c != '-').collect();
+            (hex.len() == 32)
+                .then(|| u128::from_str_radix(&hex, 16).ok())
+                .flatten()
+        })
+        .map(u128::to_be_bytes);
+    let boot = match boot {
+        Some(id) => id,
+        None => process_once(&BOOT)?,
+    };
+    Ok([process_once(&RUN)?, random16()?, boot])
 }
 fn sha(bytes: &[u8]) -> [u8; 32] {
     solana_sdk::hash::hash(bytes).to_bytes()
@@ -26,13 +150,30 @@ fn sha(bytes: &[u8]) -> [u8; 32] {
 pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+/// IEEE CRC32 (reflected, polynomial 0xedb88320), table driven; same values as bitwise.
+const CRC_TABLE: [u32; 256] = {
+    let mut table = [0u32; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut c = i as u32;
+        let mut k = 0;
+        while k < 8 {
+            c = if c & 1 != 0 {
+                0xedb88320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
+            k += 1;
+        }
+        table[i] = c;
+        i += 1;
+    }
+    table
+};
 fn crc(bytes: &[u8]) -> u32 {
     let mut crc = !0u32;
     for b in bytes {
-        crc ^= *b as u32;
-        for _ in 0..8 {
-            crc = (crc >> 1) ^ (0xedb88320u32 & 0u32.wrapping_sub(crc & 1));
-        }
+        crc = CRC_TABLE[((crc ^ *b as u32) & 0xff) as usize] ^ (crc >> 8);
     }
     !crc
 }
@@ -54,6 +195,14 @@ pub struct Frame {
     pub journal_seq: u64,
     pub provenance: Provenance,
     pub value: Value,
+    pub offset: u64,
+    pub bytes: u64,
+    pub hash: [u8; 32],
+}
+/// Position of a frame just appended (the payload stays with the caller, it is not copied).
+#[derive(Clone, Debug)]
+pub struct Appended {
+    pub journal_seq: u64,
     pub offset: u64,
     pub bytes: u64,
     pub hash: [u8; 32],
@@ -116,7 +265,10 @@ pub fn encode(value: &Value) -> io::Result<Vec<u8>> {
                         .map_err(|_| bad("PAYLOAD_LIMIT"))?
                         .to_le_bytes(),
                 );
-                for (k, v) in m {
+                // Canonical key order whatever the map implementation; decode requires it.
+                let mut entries: Vec<_> = m.iter().collect();
+                entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+                for (k, v) in entries {
                     sized(o, k.as_bytes())?;
                     node(v, o, depth + 1)?;
                 }
@@ -243,12 +395,12 @@ impl Writer {
         header.extend(VERSION.to_le_bytes());
         header.extend((HEADER_LEN as u16).to_le_bytes());
         // Independent run/session/boot identities. Source/fork UNKNOWN remain explicit.
-        for _ in 0..3 {
-            header.extend(&solana_sdk::pubkey::Pubkey::new_unique().to_bytes()[..16]);
+        for id in identities()? {
+            header.extend(id);
         }
         file.write_all(&header)?;
         file.sync_all()?;
-        File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()?;
+        File::open(parent(path))?.sync_all()?;
         Ok(Self {
             file,
             path: path.into(),
@@ -292,7 +444,7 @@ impl Writer {
         schema: u16,
         p: Provenance,
         value: &Value,
-    ) -> io::Result<Frame> {
+    ) -> io::Result<Appended> {
         if self.poisoned || self.sealed {
             return Err(bad("JOURNAL_BLOCKED"));
         }
@@ -300,42 +452,41 @@ impl Writer {
             return Err(bad("EVENT_SCHEMA_UNSUPPORTED"));
         }
         let payload = encode(value)?;
-        let mut body = Vec::new();
-        body.extend(kind.to_le_bytes());
-        body.extend(schema.to_le_bytes());
-        body.extend(self.next.to_le_bytes());
-        body.extend(p.source_seq.to_le_bytes());
-        body.extend(p.source.to_le_bytes());
+        // Length prefix first (filled in below), then the body; one buffer, no second copy.
+        let mut wire = Vec::with_capacity(4 + FIXED + payload.len() + 36);
+        wire.extend([0u8; 4]);
+        wire.extend(kind.to_le_bytes());
+        wire.extend(schema.to_le_bytes());
+        wire.extend(self.next.to_le_bytes());
+        wire.extend(p.source_seq.to_le_bytes());
+        wire.extend(p.source.to_le_bytes());
         let flags = (p.slot.is_some() as u32)
             | ((p.fork.is_some() as u32) << 1)
             | ((p.rx_ns.is_some() as u32) << 2)
             | ((p.unix_ns.is_some() as u32) << 3);
-        body.extend(flags.to_le_bytes());
-        body.extend(p.slot.unwrap_or(0).to_le_bytes());
-        body.extend(p.fork.unwrap_or([0; 32]));
-        body.extend(p.rx_ns.unwrap_or(0).to_le_bytes());
-        body.extend(p.unix_ns.unwrap_or(0).to_le_bytes());
-        body.extend(self.last);
-        body.extend((payload.len() as u32).to_le_bytes());
-        body.extend(payload);
-        body.extend(crc(&body).to_le_bytes());
-        let digest = sha(&body);
-        body.extend(digest);
-        if body.len() > MAX_FRAME {
+        wire.extend(flags.to_le_bytes());
+        wire.extend(p.slot.unwrap_or(0).to_le_bytes());
+        wire.extend(p.fork.unwrap_or([0; 32]));
+        wire.extend(p.rx_ns.unwrap_or(0).to_le_bytes());
+        wire.extend(p.unix_ns.unwrap_or(0).to_le_bytes());
+        wire.extend(self.last);
+        wire.extend((payload.len() as u32).to_le_bytes());
+        wire.extend(payload);
+        let checksum = crc(&wire[4..]);
+        wire.extend(checksum.to_le_bytes());
+        let digest = sha(&wire[4..]);
+        wire.extend(digest);
+        let body = wire.len() - 4;
+        if body > MAX_FRAME {
             return Err(bad("FRAME_LIMIT"));
         }
-        let mut wire = (body.len() as u32).to_le_bytes().to_vec();
-        wire.extend(body);
+        wire[..4].copy_from_slice(&(body as u32).to_le_bytes());
         if let Err(e) = self.file.write_all(&wire) {
             self.poisoned = true;
             return Err(e);
         }
-        let f = Frame {
-            kind,
-            schema,
+        let f = Appended {
             journal_seq: self.next,
-            provenance: p,
-            value: value.clone(),
             offset: self.position,
             bytes: wire.len() as u64,
             hash: digest,
@@ -348,7 +499,7 @@ impl Writer {
         self.last = digest;
         Ok(f)
     }
-    pub fn append_value(&mut self, kind: u16, value: &Value) -> io::Result<Frame> {
+    pub fn append_value(&mut self, kind: u16, value: &Value) -> io::Result<Appended> {
         self.append(
             kind,
             1,
@@ -412,6 +563,14 @@ impl Reader {
             complete: false,
             identities: header[12..60].try_into().unwrap(),
         })
+    }
+    /// Frames read so far (including a manifest frame).
+    pub fn frames(&self) -> u64 {
+        self.next
+    }
+    /// Chain head after the frames read so far: the header hash before the first frame.
+    pub fn root(&self) -> [u8; 32] {
+        self.last
     }
     pub fn next_frame(&mut self) -> io::Result<Option<Frame>> {
         let Some((f, previous)) = read_frame(&mut self.file, self.position)? else {
@@ -530,25 +689,88 @@ pub fn read_value(path: &Path) -> io::Result<Value> {
 }
 /// Explicit offline export. A fresh destination is mandatory; primary bytes are never changed.
 pub fn export(path: &Path, destination: &Path, kind: Option<u16>, single: bool) -> io::Result<()> {
-    let mut reader = Reader::open(path)?;
-    let mut out = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(destination)?;
-    let mut count = 0;
-    while let Some(f) = reader.next_frame()? {
-        if f.kind == MANIFEST || kind.is_some_and(|k| f.kind != k) {
-            continue;
-        }
-        if single && count > 0 {
-            return Err(bad("VALUE_COUNT"));
-        }
-        serde_json::to_writer(&mut out, &f.value).map_err(io::Error::other)?;
-        out.write_all(b"\n")?;
-        count += 1;
+    export_views(path, &[(kind, destination)], single).map(|_| ())
+}
+/// Explicit offline export of several views (JSONL, one value per line) in one verified
+/// pass. The views appear only complete and together: each is built beside its destination
+/// and linked into place without overwriting after the whole journal was read without
+/// error; a failed or damaged journal leaves no file behind. Returns the rows per view.
+pub fn export_views(
+    path: &Path,
+    views: &[(Option<u16>, &Path)],
+    single: bool,
+) -> io::Result<Vec<u64>> {
+    if views.iter().any(|(_, destination)| destination.exists()) {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "EXPORT_EXISTS",
+        ));
     }
-    out.sync_all()?;
-    Ok(())
+    let mut reader = Reader::open(path)?;
+    let token = hex(&random16()?);
+    let partials: Vec<PathBuf> = views
+        .iter()
+        .map(|(_, destination)| {
+            destination.with_file_name(format!(
+                ".{}.partial-{}-{token}",
+                destination
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("export"),
+                std::process::id()
+            ))
+        })
+        .collect();
+    let mut linked = Vec::new();
+    let written = (|| {
+        let mut outs = partials
+            .iter()
+            .map(|p| {
+                OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(p)
+                    .map(BufWriter::new)
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let mut rows = vec![0u64; views.len()];
+        while let Some(f) = reader.next_frame()? {
+            if f.kind == MANIFEST {
+                continue;
+            }
+            for (i, (kind, _)) in views.iter().enumerate() {
+                if kind.is_some_and(|k| f.kind != k) {
+                    continue;
+                }
+                if single && rows[i] > 0 {
+                    return Err(bad("VALUE_COUNT"));
+                }
+                serde_json::to_writer(&mut outs[i], &f.value).map_err(io::Error::other)?;
+                outs[i].write_all(b"\n")?;
+                rows[i] += 1;
+            }
+        }
+        for out in outs {
+            out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+        }
+        for (partial, (_, destination)) in partials.iter().zip(views) {
+            fs::hard_link(partial, destination)?;
+            linked.push(destination.to_path_buf());
+        }
+        for (_, destination) in views {
+            File::open(parent(destination))?.sync_all()?;
+        }
+        Ok(rows)
+    })();
+    for partial in &partials {
+        let _ = fs::remove_file(partial);
+    }
+    if written.is_err() {
+        for destination in &linked {
+            let _ = fs::remove_file(destination);
+        }
+    }
+    written
 }
 
 #[cfg(test)]

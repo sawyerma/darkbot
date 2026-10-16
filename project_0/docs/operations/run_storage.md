@@ -80,10 +80,10 @@ python3 project_0/operations/capture/run_store.py path <run_dir> economics_final
 
 | Component | Writes / reads | Default | Override |
 |---|---|---|---|
-| Rust econ4h runtime (`econ.rs`, `econ_canonical.rs`) | shadow evaluations/offsets (capture), hourly snapshots, final economics, opportunity economics, canonical join (snapshots) via `RunPaths` | `project_0/data/econ4h/<id>`, layout V1 when started without the launcher | `P0_ECON_OUT_DIR`, `P0_ECON_RUN_ID`, `P0_RUN_LAYOUT` |
-| Rust MeasurementPlan/manifest (`measurement.rs`) | manifest and phase journal by layout | — | `P0_MEASUREMENT_PLAN` (plan file) |
-| Rust C0-MO (`market_observer.rs`) | `transactions.jsonl`, `liquidations.jsonl`, `coverage.jsonl`, `summary.json`, `final_report.txt` | `project_0/data/market/<id>`; inside econ4h `<run>/market/` (V1) or `<run>/capture/market/` (V2) | `P0_MARKET_OUT_DIR`, `P0_MARKET_RUN_ID` |
-| Rust Shadow records (`main.rs`) | `opportunities.jsonl`, `daily_summary.jsonl`, `mt0.jsonl`, `operational_config_<ns>.json` | `project_0/data/shadow/`; econ4h: run directory (V1) or `capture/` (V2) | `P0_RECORD_PATH`, `P0_SUMMARY_PATH`, `P0_MT0_PATH` |
+| Rust econ4h runtime (`econ.rs`, `econ_canonical.rs`) | `shadow_evaluations.p0j` (capture); `economics_reports.p0j` plus its renders `hour_0N.json`, `economics_final.json`, `opportunity_economics.jsonl`, `canonical_market_shadow.jsonl` (snapshots) via `RunPaths` | `project_0/data/econ4h/<id>`, layout V1 when started without the launcher | `P0_ECON_OUT_DIR`, `P0_ECON_RUN_ID`, `P0_RUN_LAYOUT` |
+| Rust MeasurementPlan/manifest (`measurement.rs`) | manifest (JSON document) and `measurement_phases.p0j`; `measurement_phases.jsonl` is rendered when the run ends | — | `P0_MEASUREMENT_PLAN` (plan file) |
+| Rust C0-MO (`market/`) | `market.p0j`; renders `transactions.jsonl`, `liquidations.jsonl`, `coverage.jsonl`; `summary.json` (with `evidence_journal` binding), `final_report.txt` | `project_0/data/market/<id>`; inside econ4h `<run>/market/` (V1) or `<run>/capture/market/` (V2) | `P0_MARKET_OUT_DIR`, `P0_MARKET_RUN_ID` |
+| Rust Shadow owner (`orchestration/state_owner`) | `opportunities.p0j` (records, opportunities, reconcile rows, daily summary, owner diagnostics), `<record>.mt0.p0j`, `operational_config_<ns>.json` | `capture.sh shadow`: `project_0/data/shadow/shadow_<UTC>_<pid>/`; econ4h: run directory (V1) or `capture/` (V2) | `P0_RECORD_PATH`, `P0_MT0_PATH` (`P0_SUMMARY_PATH` is no longer read) |
 | `capture.sh` (econ4h-launcher) | allocates the run, selects the layout; logs, plan, storage preflight, candidate manifest; V2 assembles `config.json` from a temporary staging directory before the capture starts | via `run_store.py` | as above |
 | `smoke.sh` | delegates to `capture.sh econ4h-launcher`; adds `gap_proxy.log`; PASS checks read through `run_store` | via `run_store.py` | as above |
 | `capture.sh market` | allocates the C0-MO run (always V1) | via `run_store.py` | as above |
@@ -92,6 +92,48 @@ python3 project_0/operations/capture/run_store.py path <run_dir> economics_final
 | `operations/verification/measurement_verify.py` | `<run>/verification/<verification_spec_id>/` | `--run` | — |
 | `operations/verification/audit_market_quick.py` | `<run>/verification/index_v3/` | `--run` | `--output` (API) |
 | `operations/reporting/market_report.py` | `<run>/reports/` | `--run` | — |
-| `capture.sh shadow` | appends to `data/shadow/*.jsonl`; not a run directory | unchanged | as above |
-| `operations/capture/c0_census.py` | `data/c0/`; not a run directory | unchanged | `--out` |
-| `p0-fe-qualify` | separate new evidence directory | — | `--output` |
+| `capture.sh shadow` | one new directory per run under `data/shadow/`; journals are created exclusively, never appended across runs | as above | as above |
+| `operations/capture/c0_census.py` | `data/c0/`: census journals `accounts_slot<N>.p0j`, `group_accounts_slot<N>.p0j` (via `p0-journal import`) and the report JSON | unchanged | `--out` |
+| `p0-fe-qualify` | separate new evidence directory: `fe01.p0j` (config, every read, result), `operational_config.json`, `result.json` | — | `--output` |
+| FE-04 one-shot journal (`execution/one_shot.rs`) | `<wallet>.p0j` (single-flight automaton); a pre-binary `<wallet>.json` is read, bound by SHA-256 and never rewritten | caller's directory | — |
+
+## Binary journals (PERSIST-01 to PERSIST-04, 2026-10-16)
+
+New runtime events are written to the one binary journal contract (`native/crates/runtime/src/analytics/journal.rs`,
+magic `P0JRNL01`): little-endian frames with kind, schema, journal and source sequence, provenance (source, slot, fork,
+receive and wall-clock time, each explicitly UNKNOWN when absent), lossless integers up to i128/u128, CRC32, a SHA-256
+chain over all frames and a sealing manifest frame (`COMPLETE` or `INCOMPLETE`). Event kinds are listed in `journal::kind`.
+
+| Journal | Kinds | Written by | Legacy view (explicit export, rendered from the journal) |
+|---|---|---|---|
+| `opportunities.p0j` | 100–104 | Shadow owner evidence writer (off the owner thread) | — |
+| `<record>.mt0.p0j` or `capture/mt0.p0j` | 600 | MT0 reporter thread | — |
+| `shadow_evaluations.p0j` | 400 | econ analytics worker | — (replay reads the journal) |
+| `economics_reports.p0j` | 410–413 | econ analytics worker | `hour_0N.json`, `economics_final.json`, `opportunity_economics.jsonl`, `canonical_market_shadow.jsonl` |
+| `measurement_phases.p0j` | 500 | supervisor, market and analytics threads | `measurement_phases.jsonl` |
+| `market.p0j` | 300–302 | C0-MO capture thread | `transactions.jsonl`, `liquidations.jsonl`, `coverage.jsonl` |
+| `fe01.p0j` | 700–702 | `p0-fe-qualify --execute` | — (`--replay` reads the journal; old `read_NNNNNN.json` directories stay readable) |
+| `<wallet>.p0j` | 200–201 | FE-04 one-shot journal | — |
+| `accounts_slot<N>.p0j`, `group_accounts_slot<N>.p0j` | 900–901 | `c0_census.py` through `p0-journal import` | — |
+
+The views exist only because the hash-pinned readers (`measurement_contract.py`, `audit_market_quick.py`,
+`market_report.py`, `run_store.py`, the strict Rust verifier) read these paths; changing them would change bound
+verification and report identities. A view is created only when missing, never overwritten, and must equal its render
+byte for byte. `verify.sh` runs `p0-journal renders <run> --create` before the capture is hashed: missing views (for example
+after a killed capture) are rendered, a differing view fails closed with `JOURNAL_VIEWS_INVALID`. Runs without journals are
+left as they are.
+
+`native/target/release/p0-journal` (built by `capture.sh`):
+
+```bash
+p0-journal verify JOURNAL               # magic, version, every CRC, the chain and the manifest; prints status and root
+p0-journal frames JOURNAL               # every frame with kind and provenance as JSONL (explicit offline export)
+p0-journal export JOURNAL DEST [--kind N]
+p0-journal renders RUN [--create]       # check (and create missing) legacy views of a run
+p0-journal import KIND JOURNAL < rows.jsonl   # census kinds only
+```
+
+Still JSON by design (PERSIST-04, single documents or external contracts, not event streams): manifests, `config.json`,
+`summary.json`, `final_report.txt`, `operational_config*.json`, `result.json`, verification and report outputs of the
+pinned readers, and the strict verifier's batch files (`market_verification.rs` is hash-pinned; PARTIAL until a re-pin
+decision).

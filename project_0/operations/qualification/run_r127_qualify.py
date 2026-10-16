@@ -361,14 +361,12 @@ def main() -> int:
     out=project_dir/"data"/"shadow"; out.mkdir(parents=True, exist_ok=True)
     st=stamp(); prefix=out/f"r127_{st}"
     log=Path(f"{prefix}_terminal.log")
-    record=Path(f"{prefix}_opportunities.jsonl")
-    summary=Path(f"{prefix}_summary.jsonl")
+    record=Path(f"{prefix}_opportunities.p0j")  # binary record journal incl. daily summary
     report_json=Path(f"{prefix}_report.json")
     report_txt=Path(f"{prefix}_report.txt")
 
     env=os.environ.copy()
     env["P0_RECORD_PATH"]=str(record.relative_to(root))
-    env["P0_SUMMARY_PATH"]=str(summary.relative_to(root))
     env["P0_USE_THRESHOLD_TRIGGER"]="false"
 
     ready=threading.Event()
@@ -428,7 +426,6 @@ def main() -> int:
         "process_return_code":proc.poll(),
         "log_path":str(log.relative_to(root)),
         "record_path":str(record.relative_to(root)),
-        "summary_path":str(summary.relative_to(root)),
         "report_json_path":str(report_json.relative_to(root)),
         "report_txt_path":str(report_txt.relative_to(root)),
     }

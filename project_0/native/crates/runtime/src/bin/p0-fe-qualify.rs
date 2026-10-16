@@ -1,6 +1,7 @@
 //! Read-only qualification entrypoint. Existing Budget/Health/Sizing, no signer.
 #[cfg(feature = "crate_health")]
 fn run() -> Result<(), String> {
+    use darkbot_runner::analytics::journal::{self, kind, Provenance, Writer};
     use darkbot_runner::orchestration::fe_qualification::{self as fe, ObservedState};
     use darkbot_solana::{provider, runtime_config::Resolved};
     use serde_json::{json, Value};
@@ -97,6 +98,28 @@ fn run() -> Result<(), String> {
         .as_secs_f64();
     fe::validate_provider_evidence(&config, &url, &proof, now)?;
     fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
+    // PERSIST-01: configuration, every saved read and the result are frames of one binary
+    // journal; each frame is fsynced before the read is decoded or the next one is made.
+    let mut evidence =
+        Writer::create(&output.join(darkbot_runner::orchestration::fe_replay::FE01_JOURNAL))
+            .map_err(|_| "FE_EVIDENCE_IO")?;
+    fn record(journal: &mut Writer, kind: u16, v: &Value, slot: Option<u64>) -> Result<(), String> {
+        let provenance = Provenance {
+            source: journal::source::FE01,
+            source_seq: journal.next_seq(),
+            slot,
+            unix_ns: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .and_then(|d| u64::try_from(d.as_nanos()).ok()),
+            ..Default::default()
+        };
+        journal
+            .append(kind, 1, provenance, v)
+            .and_then(|_| journal.sync())
+            .map(|_| ())
+            .map_err(|_| "FE_EVIDENCE_JOURNAL".into())
+    }
     fn persist(path: &std::path::Path, v: &Value) -> Result<(), String> {
         let mut f = fs::OpenOptions::new()
             .write(true)
@@ -108,41 +131,46 @@ fn run() -> Result<(), String> {
             .and_then(|_| f.sync_all())
             .map_err(|_| "FE_EVIDENCE_SYNC".into())
     }
-    persist(
-        &output.join("operational_config.json"),
-        &json!({"requested":requested,"effective":resolved.json(),"qualification_sha256":fe::sha(&serde_json::to_vec(&proof).unwrap()),"execution":"READ_ONLY_NO_SIGNER"}),
-    )?;
+    let operational = json!({"requested":requested,"effective":resolved.json(),"qualification_sha256":fe::sha(&serde_json::to_vec(&proof).unwrap()),"execution":"READ_ONLY_NO_SIGNER"});
+    record(&mut evidence, kind::FE01_CONFIG, &operational, None)?;
+    persist(&output.join("operational_config.json"), &operational)?;
     resolved.activate()?;
     provider::enable_measurement_budget();
     let deadline = Instant::now() + Duration::from_secs(config.limits.fe_seconds);
     let mut calls = 0u64;
-    let mut read = |keys: &[Pubkey], floor: u64| -> Result<(u64, ObservedState), String> {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err("FE_TIME_BUDGET".into());
-        }
-        calls += 1;
-        let params = json!([keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}]);
-        let rpc = provider::rpc_client(
-            url.clone(),
-            remaining.min(Duration::from_millis(config.limits.rpc_timeout_ms)),
-            CommitmentConfig::finalized(),
-            provider::Workload::Bootstrap,
-        );
-        let response: Result<Value, _> = rpc.send(RpcRequest::GetMultipleAccounts, params.clone());
-        let entry = match &response {
-            Ok(v) => json!({"method":"getMultipleAccounts","params":params,"result":v}),
-            Err(_) => {
-                json!({"method":"getMultipleAccounts","params":params,"error":"RPC_FAILURE_REVIEW_PROVIDER_BUDGET"})
+    let mut result = {
+        let mut read = |keys: &[Pubkey], floor: u64| -> Result<(u64, ObservedState), String> {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("FE_TIME_BUDGET".into());
             }
+            calls += 1;
+            let params = json!([keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}]);
+            let rpc = provider::rpc_client(
+                url.clone(),
+                remaining.min(Duration::from_millis(config.limits.rpc_timeout_ms)),
+                CommitmentConfig::finalized(),
+                provider::Workload::Bootstrap,
+            );
+            let response: Result<Value, _> =
+                rpc.send(RpcRequest::GetMultipleAccounts, params.clone());
+            let entry = match &response {
+                Ok(v) => json!({"method":"getMultipleAccounts","params":params,"result":v}),
+                Err(_) => {
+                    json!({"method":"getMultipleAccounts","params":params,"error":"RPC_FAILURE_REVIEW_PROVIDER_BUDGET"})
+                }
+            };
+            let slot = entry
+                .pointer("/result/context/slot")
+                .and_then(Value::as_u64);
+            record(&mut evidence, kind::FE01_READ, &entry, slot)?;
+            if Instant::now() >= deadline {
+                return Err("FE_TIME_BUDGET".into());
+            }
+            fe::decode_batch(response.map_err(|_| "FE_RPC_FAILURE")?, keys, floor)
         };
-        persist(&output.join(format!("read_{calls:06}.json")), &entry)?;
-        if Instant::now() >= deadline {
-            return Err("FE_TIME_BUDGET".into());
-        }
-        fe::decode_batch(response.map_err(|_| "FE_RPC_FAILURE")?, keys, floor)
+        fe::collect(&config,&mut read).unwrap_or_else(|e|json!({"schema":"Project0/FE01FullObservation/1","status":"INCOMPLETE","reason":e,"source_parity":"UNKNOWN","fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}))
     };
-    let mut result=fe::collect(&config,&mut read).unwrap_or_else(|e|json!({"schema":"Project0/FE01FullObservation/1","status":"INCOMPLETE","reason":e,"source_parity":"UNKNOWN","fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}));
     if Instant::now() >= deadline {
         result["status"] = json!("INCOMPLETE");
         result["reason"] = json!("FE_TIME_BUDGET");
@@ -150,6 +178,10 @@ fn run() -> Result<(), String> {
     darkbot_runner::orchestration::fe_replay::bind_scope(&mut result, funding_class)?;
     result["logical_reads"] = json!(calls);
     result["provider_actual"] = provider::shared().snapshot();
+    record(&mut evidence, kind::FE01_RESULT, &result, None)?;
+    evidence
+        .seal(result["status"] != "INCOMPLETE")
+        .map_err(|_| "FE_EVIDENCE_JOURNAL")?;
     persist(&output.join("result.json"), &result)?;
     println!("{}", serde_json::to_string_pretty(&result).unwrap());
     if result["status"] == "INCOMPLETE" {

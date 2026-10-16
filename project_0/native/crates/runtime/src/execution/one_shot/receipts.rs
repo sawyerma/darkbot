@@ -1,6 +1,6 @@
 //! Finalized chain accounting through the existing RPC reconciliation transport.
 //! No prices, assumed zero balances, exit qualification or realized-PnL claims.
-use super::{err, Journal, Phase};
+use super::{err, Journal, Phase, Transition};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use solana_transaction_status::{
@@ -248,7 +248,7 @@ impl Journal {
                 Err(reason) => unknown.push(format!("{signature}:{reason}")),
             }
         }
-        self.persist(saved)?;
+        self.persist(saved, Transition::Observe)?;
         Ok(unknown)
     }
 }

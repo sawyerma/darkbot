@@ -4,16 +4,14 @@
 //!   so nothing grows with traffic (bounded by construction).
 //! - Recording costs a few relaxed atomic operations; no allocation, no I/O, no locks. Recording
 //!   never feeds back into any business decision.
-//! - File output happens only on the reporter thread (`spawn_reporter`), never on the owner.
+//! - Snapshots leave the process only through the reporter thread (`spawn_reporter`) and its
+//!   sink, never on the owner. The sink (the binary journal) lives in the runtime crate.
 //! - Metrics that the current architecture cannot measure correctly are reported as
 //!   `N/A:DEFER_TO_MT<n>`, never as invented zeros.
 
 use crate::lifecycle::Shutdown;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
-use std::sync::atomic::{fence, AtomicU64, Ordering, Ordering::Relaxed};
-use std::sync::OnceLock;
+use std::sync::atomic::{fence, AtomicBool, AtomicU64, Ordering, Ordering::Relaxed};
+use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -744,26 +742,66 @@ impl Default for OwnerTimer {
 // Reporter thread (only place with file I/O)
 // ------------------------------------------------------------------------------------------
 
-/// Samples the owner duty cycle every second (1-s windows) and appends a snapshot line to
-/// `path` every `interval`. Runs off the owner thread.
-pub fn spawn_reporter(
-    path: PathBuf,
-    interval: Duration,
-    shutdown: Shutdown,
-) -> std::io::Result<JoinHandle<()>> {
-    if let Some(dir) = path.parent() {
-        if !dir.as_os_str().is_empty() {
-            fs::create_dir_all(dir)?;
+/// Destination of the periodic snapshots (the runtime's binary journal). Called only on the
+/// reporter thread. `store` returns `false` when the snapshot was not stored.
+pub trait SnapshotSink: Send + 'static {
+    fn store(&mut self, unix_ns: u64, mono_ns: u64, snapshot: &str) -> bool;
+    /// Closes the sink after the final snapshot; `complete` is false once any snapshot was lost.
+    fn finish(&mut self, complete: bool) -> bool;
+}
+
+/// Handle of the reporter thread. `finish` stops it, stores one final snapshot and closes the
+/// sink; dropping the handle does the same, so the last interval is never silently lost.
+pub struct Reporter {
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<bool>>,
+}
+impl Reporter {
+    /// `true` only if every snapshot, including the final one, was stored and the sink closed.
+    pub fn finish(mut self) -> bool {
+        self.join()
+    }
+    fn join(&mut self) -> bool {
+        self.stop.store(true, Ordering::Release);
+        self.worker
+            .take()
+            .is_some_and(|worker| worker.join().unwrap_or(false))
+    }
+}
+impl Drop for Reporter {
+    fn drop(&mut self) {
+        if self.worker.is_some() && !self.join() {
+            eprintln!("mt0-reporter: MT0 evidence INCOMPLETE");
         }
     }
-    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-    std::thread::Builder::new()
+}
+
+/// Samples the owner duty cycle every second (1-s windows) and hands a snapshot to `sink`
+/// every `interval` and once more at the end. Runs off the owner thread.
+pub fn spawn_reporter(
+    interval: Duration,
+    shutdown: Shutdown,
+    mut sink: impl SnapshotSink,
+) -> std::io::Result<Reporter> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
+    let worker = std::thread::Builder::new()
         .name("mt0-reporter".into())
         .spawn(move || {
             let duty = Hist::new();
             let (mut last_busy, mut last_wait) = MT0.owner_totals_at(mono_ns());
             let mut last_write = Instant::now();
-            while !shutdown.is_requested() {
+            let mut complete = true;
+            let mut store = |sink: &mut dyn SnapshotSink, duty: &Hist| {
+                let unix = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                let now = mono_ns();
+                let line = MT0.snapshot_json(unix.as_secs(), now, &duty.snapshot());
+                let unix_ns = u64::try_from(unix.as_nanos()).unwrap_or(u64::MAX);
+                complete &= sink.store(unix_ns, now, &line);
+            };
+            while !shutdown.is_requested() && !stopped.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_secs(1));
                 let (busy, wait) = MT0.owner_totals_at(mono_ns());
                 let (db, dw) = (
@@ -776,17 +814,16 @@ pub fn spawn_reporter(
                 (last_busy, last_wait) = (busy, wait);
                 if last_write.elapsed() >= interval {
                     last_write = Instant::now();
-                    let unix_s = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let line = MT0.snapshot_json(unix_s, mono_ns(), &duty.snapshot());
-                    if writeln!(file, "{line}").and_then(|_| file.flush()).is_err() {
-                        eprintln!("mt0-reporter: write failed for {}", path.display());
-                    }
+                    store(&mut sink, &duty);
                 }
             }
-        })
+            store(&mut sink, &duty);
+            sink.finish(complete) && complete
+        })?;
+    Ok(Reporter {
+        stop,
+        worker: Some(worker),
+    })
 }
 
 #[cfg(test)]

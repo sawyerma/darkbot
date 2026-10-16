@@ -129,7 +129,7 @@ pub fn run_embedded(
     let process_started = unix_now_s();
     fs::create_dir_all(&cfg.run_dir)
         .map_err(|e| format!("create {}: {e}", cfg.run_dir.display()))?;
-    let mut sink = JsonlSink::create(&cfg.run_dir)?;
+    let mut sink = JournalSink::create(&cfg.run_dir)?;
     if econ.is_none() {
         print_banner(&cfg);
     }

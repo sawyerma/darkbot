@@ -2,7 +2,7 @@
 use darkbot_common::timing::Clock;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{fs, io::Write, path::Path};
+use std::{fs, path::Path};
 
 pub const SNAPSHOT_COUNT: usize = 4;
 pub const NS: u64 = 1_000_000_000;
@@ -305,31 +305,57 @@ fn number(
     }
     Ok(value)
 }
+/// Phase rows of all C0-E1 threads go through one lock; owner timeout and observer
+/// completion may race, and every row must be a whole, durable frame.
+static PHASE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Appends one phase row to `measurement_phases.p0j` and fsyncs it (PERSIST-01). The JSONL
+/// file the pinned readers consume is rendered from this journal by `finalize_phases`.
 pub fn journal(
     paths: &crate::run_layout::RunPaths,
     clock: Clock,
     phase: &str,
     details: Value,
 ) -> Result<(), String> {
-    // Owner timeout and observer completion may race. A JSONL row must stay whole.
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK
+    use super::journal::{self as binary, kind, source, Provenance, Writer};
+    let _guard = PHASE_LOCK
         .lock()
         .map_err(|_| "measurement journal lock poisoned")?;
-    let mut f = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(paths.phases())
-        .map_err(|e| e.to_string())?;
+    let path = binary::binary_path(&paths.phases());
+    let mut writer = if path.exists() {
+        Writer::resume(&path)
+    } else {
+        Writer::create(&path)
+    }
+    .map_err(|e| format!("PHASE_JOURNAL: {e}"))?;
     let now = clock.now_ns();
-    serde_json::to_writer(
-        &mut f,
-        &json!({"phase":phase,"at_ns":now,"unix_ns":clock.unix_ns(now),"details":details}),
-    )
-    .map_err(|e| e.to_string())?;
-    f.write_all(b"\n")
-        .and_then(|_| f.sync_data())
-        .map_err(|e| e.to_string())
+    let unix = clock.unix_ns(now);
+    let provenance = Provenance {
+        source: source::MEASUREMENT,
+        source_seq: writer.next_seq(),
+        rx_ns: Some(now),
+        unix_ns: u64::try_from(unix).ok(),
+        ..Default::default()
+    };
+    let row = json!({"phase":phase,"at_ns":now,"unix_ns":unix,"details":details});
+    writer
+        .append(kind::MEASUREMENT_PHASE, 1, provenance, &row)
+        .and_then(|_| writer.sync())
+        .map(|_| ())
+        .map_err(|e| format!("PHASE_JOURNAL: {e}"))
+}
+/// Seals the phase journal (COMPLETE only for a run that ended without error) and renders
+/// `measurement_phases.jsonl` as an explicit export. No phase can be added afterwards.
+pub fn finalize_phases(paths: &crate::run_layout::RunPaths, complete: bool) -> Result<(), String> {
+    use super::journal::{self as binary, kind, Writer};
+    let _guard = PHASE_LOCK
+        .lock()
+        .map_err(|_| "measurement journal lock poisoned")?;
+    let path = binary::binary_path(&paths.phases());
+    Writer::resume(&path)
+        .and_then(|mut writer| writer.seal(complete))
+        .map_err(|e| format!("PHASE_JOURNAL_SEAL: {e}"))?;
+    binary::export(&path, &paths.phases(), Some(kind::MEASUREMENT_PHASE), false)
+        .map_err(|e| format!("PHASE_RENDER: {e}"))
 }
 pub fn persist_manifest(
     paths: &crate::run_layout::RunPaths,
@@ -572,6 +598,17 @@ mod persistence_tests {
             let window = plan.capture_window(clock, 600 * NS).unwrap();
             journal(&paths, clock, "CAPTURE", window.clone()).unwrap();
             journal(&paths, clock, "DRAIN", json!({"stop_reason":"TIMER"})).unwrap();
+            // The pinned readers see the JSONL render only after the journal was sealed.
+            assert!(!root.join(phases_name).exists());
+            finalize_phases(&paths, true).unwrap();
+            assert!(journal(&paths, clock, "LATE", json!({})).is_err());
+            let mut sealed = crate::analytics::journal::Reader::open(
+                &crate::analytics::journal::binary_path(&root.join(phases_name)),
+            )
+            .unwrap();
+            while sealed.next_frame().unwrap().is_some() {}
+            assert!(sealed.sealed && sealed.complete);
+            assert!(finalize_phases(&paths, true).is_err()); // never a second render
             let rows: Vec<Value> = fs::read_to_string(root.join(phases_name))
                 .unwrap()
                 .lines()

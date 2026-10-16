@@ -1,0 +1,159 @@
+{
+  "base_commit": "bb263136eb25047bd6e2a98e7d7bf7768568f2d9",
+  "c0_census_selftest": "PASS",
+  "commands": {
+    "census_selftest": {
+      "exit": 0,
+      "seconds": 0
+    },
+    "check_nofeatures": {
+      "exit": 0,
+      "seconds": 19
+    },
+    "clippy": {
+      "exit": 0,
+      "note": "first final run hit stale clippy artifacts from a HEAD copy sharing the target dir (exit 101, unrelated to code); rerun after removing the copy: exit 0"
+    },
+    "metadata": {
+      "exit": 0,
+      "seconds": 0
+    },
+    "python": {
+      "exit": 0,
+      "seconds": 15
+    },
+    "release_health": {
+      "exit": 0,
+      "seconds": 12
+    },
+    "release_txv1": {
+      "exit": 0,
+      "seconds": 12
+    },
+    "selftest": {
+      "exit": 0,
+      "seconds": 0
+    },
+    "test_health": {
+      "exit": 0,
+      "seconds": 143
+    },
+    "test_txv1": {
+      "exit": 0,
+      "seconds": 169
+    }
+  },
+  "date": "2026-10-16",
+  "differential_clippy_vs_head": {
+    "added": [],
+    "command": "cargo clippy --workspace --all-targets --features crate_health,txv1 (HEAD from git archive, isolated target dir)",
+    "current_messages": 73,
+    "current_unique": 38,
+    "head_messages": 77,
+    "head_unique": 41,
+    "removed": [
+      [
+        "crates/runtime/src/analytics/evidence.rs",
+        "unused_imports",
+        "unused import: `self`"
+      ],
+      [
+        "crates/runtime/src/analytics/evidence.rs",
+        "unused_parens",
+        "unnecessary parentheses around match arm expression"
+      ],
+      [
+        "crates/runtime/src/analytics/journal.rs",
+        "unused_imports",
+        "unused import: `self`"
+      ]
+    ]
+  },
+  "local_writer_benchmark": {
+    "load": "local synthetic, representative payload shapes; NOT a mainnet capture",
+    "machine": "Apple M4 Max, APFS, release build",
+    "result": {
+      "durable_append_fsync": {
+        "frames": 500,
+        "ns": {
+          "max": 8170334,
+          "p50": 4231667,
+          "p95": 5235667,
+          "p99": 5308959
+        }
+      },
+      "market_row": {
+        "append_ns": {
+          "max": 3049875,
+          "p50": 14708,
+          "p95": 18625,
+          "p99": 24667
+        },
+        "frames": 100000,
+        "journal_bytes_per_frame": 3457,
+        "journal_to_jsonl_ratio": 1.077,
+        "jsonl_bytes_per_row": 3210,
+        "seal_fsync_ns": 5783916,
+        "verify_read_frames_per_s": 62803.0,
+        "write_frames_per_s": 65111.0,
+        "write_mib_per_s": 214.7
+      },
+      "mt0_snapshot": {
+        "append_ns": {
+          "max": 189000,
+          "p50": 11333,
+          "p95": 13791,
+          "p99": 15416
+        },
+        "frames": 20000,
+        "journal_bytes_per_frame": 1911,
+        "journal_to_jsonl_ratio": 2.541,
+        "jsonl_bytes_per_row": 752,
+        "seal_fsync_ns": 5619958,
+        "verify_read_frames_per_s": 51971.0,
+        "write_frames_per_s": 84760.0,
+        "write_mib_per_s": 154.5
+      },
+      "opportunity": {
+        "append_ns": {
+          "max": 527375,
+          "p50": 8417,
+          "p95": 11041,
+          "p99": 11792
+        },
+        "frames": 100000,
+        "journal_bytes_per_frame": 1461,
+        "journal_to_jsonl_ratio": 1.746,
+        "jsonl_bytes_per_row": 837,
+        "seal_fsync_ns": 5557584,
+        "verify_read_frames_per_s": 68191.0,
+        "write_frames_per_s": 111481.0,
+        "write_mib_per_s": 155.3
+      }
+    }
+  },
+  "python": {
+    "failed": 0,
+    "skipped": 0,
+    "tests": 107
+  },
+  "rust_tests": {
+    "crate_health": {
+      "failed": 0,
+      "ignored": 2,
+      "passed": 415
+    },
+    "crate_health,txv1": {
+      "failed": 0,
+      "ignored": 2,
+      "passed": 417
+    },
+    "ignored": [
+      "market::winner::tests::f8_probe_sdk_encoded_transaction_decoding (pre-existing)",
+      "analytics::journal::tests::persist05_local_writer_benchmark (measurement, run once in release, PASS)"
+    ]
+  },
+  "schema": "Project0/PersistBinaryQualification/1",
+  "scope": "offline, local; no network, no mainnet, no LIVE, no submission; parallelism CARGO_BUILD_JOBS=4, RUST_TEST_THREADS=4, sequential suites",
+  "verify_self_test": 29
+}

@@ -1,7 +1,8 @@
 # Project 0 Python tests
 
-Status: structure iterations 13–15 (`46be33c`), `operations` package imports since 16–20 (`d234913`); 103 tests (mock-ban cleanup
-2026-10-15). Offline only: temporary synthetic runs and recorded historical data; no network, no mainnet, no signature.
+Status: structure iterations 13–15 (`46be33c`), `operations` package imports since 16–20 (`d234913`); 107 tests (binary journal
+completion 2026-10-16). New runs keep their primary data in binary journals (`.p0j`); tests read them only through the
+real `p0-journal` tool, never by decoding the format in Python. Offline only: temporary synthetic runs and recorded historical data; no network, no mainnet, no signature.
 Launcher tests run the real `capture.sh`, real `cargo` and the real release `p0-longtail` against closed local ports
 (`127.0.0.1:1`) with a public-only key file; the binary fails closed at startup. Rust tests stay inline in
 `native/crates/*/src` (`cargo test`).

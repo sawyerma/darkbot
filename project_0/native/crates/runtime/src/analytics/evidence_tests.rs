@@ -273,6 +273,115 @@ fn owner_admission_has_no_json_or_direct_file_writes_and_all_exits_drain() {
     assert!(owner.contains("owner.evidence.check()?"));
 }
 
+/// PERSIST-02 over the whole owner loop: no JSON, file access, flush/fsync, environment read
+/// or direct stderr/stdout write. Diagnostics leave through the bounded evidence queue.
+/// Excluded: setup (before the loop), ingress (its own thread) and the test module.
+#[test]
+fn owner_thread_sources_have_no_json_io_env_or_blocking_logging() {
+    let owner = [
+        (
+            "state_owner.rs",
+            include_str!("../orchestration/state_owner.rs"),
+        ),
+        (
+            "accounts.rs",
+            include_str!("../orchestration/state_owner/accounts.rs"),
+        ),
+        (
+            "candidates.rs",
+            include_str!("../orchestration/state_owner/candidates.rs"),
+        ),
+        (
+            "detect.rs",
+            include_str!("../orchestration/state_owner/detect.rs"),
+        ),
+        (
+            "dispatch.rs",
+            include_str!("../orchestration/state_owner/dispatch.rs"),
+        ),
+        (
+            "events.rs",
+            include_str!("../orchestration/state_owner/events.rs"),
+        ),
+        (
+            "lifecycle.rs",
+            include_str!("../orchestration/state_owner/lifecycle.rs"),
+        ),
+        (
+            "metrics.rs",
+            include_str!("../orchestration/state_owner/metrics.rs"),
+        ),
+        (
+            "remote_apply.rs",
+            include_str!("../orchestration/state_owner/remote_apply.rs"),
+        ),
+        (
+            "shutdown.rs",
+            include_str!("../orchestration/state_owner/shutdown.rs"),
+        ),
+        (
+            "sweep.rs",
+            include_str!("../orchestration/state_owner/sweep.rs"),
+        ),
+        (
+            "telemetry.rs",
+            include_str!("../orchestration/state_owner/telemetry.rs"),
+        ),
+    ];
+    for (name, source) in owner {
+        for forbidden in [
+            "eprintln!",
+            "println!",
+            "writeln!",
+            "serde_json",
+            "std::fs",
+            "OpenOptions",
+            ".write_all(",
+            ".flush(",
+            ".sync_all(",
+            "env::var",
+            "config::parsed_or",
+            "config::require",
+        ] {
+            // accounts.rs builds the WSS subscription filters: an external JSON-RPC contract.
+            if name == "accounts.rs" && forbidden == "serde_json" {
+                continue;
+            }
+            assert!(!source.contains(forbidden), "{name}: {forbidden}");
+        }
+    }
+    // Code the owner calls during an evaluation or a state recovery.
+    for (name, source) in [
+        ("pipeline.rs", include_str!("../execution/pipeline.rs")),
+        ("builder.rs", include_str!("../execution/builder.rs")),
+        ("route.rs", include_str!("../execution/route.rs")),
+        (
+            "recovery.rs",
+            include_str!("../../../solana/src/state/recovery.rs"),
+        ),
+    ] {
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        for forbidden in ["eprintln!", "println!"] {
+            assert!(!production.contains(forbidden), "{name}: {forbidden}");
+        }
+    }
+}
+
+#[test]
+fn owner_diagnostics_are_journaled_before_they_are_printed() {
+    let dir = std::env::temp_dir().join(format!("p0-diag-{}", Pubkey::new_unique()));
+    std::fs::create_dir(&dir).unwrap();
+    let mut w =
+        OwnerEvidenceWriter::start(dir.join("events.p0j"), dir.join("recovery.p0j"), 4).unwrap();
+    w.diagnostic("oracle_trigger_stats: a=1".into()).unwrap();
+    w.finish(None).unwrap();
+    let mut reader = journal::Reader::open(&dir.join("events.p0j")).unwrap();
+    let frame = reader.next_frame().unwrap().unwrap();
+    assert_eq!(frame.kind, journal::kind::OWNER_DIAGNOSTIC);
+    assert_eq!(frame.value["line"], "oracle_trigger_stats: a=1");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes() {
     use crate::analytics::record::{Decision, TimingEvidence};

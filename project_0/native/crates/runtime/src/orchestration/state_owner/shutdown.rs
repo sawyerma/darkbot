@@ -10,16 +10,28 @@ impl ShadowOwner {
                     .load(std::sync::atomic::Ordering::Relaxed),
                 std::sync::atomic::Ordering::Relaxed,
             );
-            h.emit(crate::analytics::econ::Evidence::ShadowStats(serde_json::json!({
-            "winner_watch_current": ws.len, "winner_watch_max": ws.max, "winner_watch_overflow":ws.overflow,
-            "winner_watch_errors":ws.errors,"winner_watch_resolved":ws.resolved,"winner_watch_expired":ws.expired,
-            "winner_queue_full_backoffs":ws.queue_full_backoffs,
-            "ingress_overflow":self.consumer.stats().overflow,
-            "winner_pending_at_deadline":ws.len,
-            "shadow_state_ready_at_shutdown":self.st.run_state().is_tradable(),
-            "remote_winner_queue_depth":self.remote.winner_jobs.stats().sent.saturating_sub(self.remote.winner_jobs.stats().received),
-            "remote_projection_queue_depth":self.remote.projection_jobs.stats().sent.saturating_sub(self.remote.projection_jobs.stats().received),
-        })));
+            let winner_jobs = self.remote.winner_jobs.stats();
+            let projection_jobs = self.remote.projection_jobs.stats();
+            h.emit(crate::analytics::econ::Evidence::ShadowStats(
+                crate::analytics::econ::ShadowStats {
+                    winner_watch_current: ws.len as u64,
+                    winner_watch_max: ws.max as u64,
+                    winner_watch_overflow: ws.overflow,
+                    winner_watch_errors: ws.errors,
+                    winner_watch_resolved: ws.resolved,
+                    winner_watch_expired: ws.expired,
+                    winner_queue_full_backoffs: ws.queue_full_backoffs,
+                    ingress_overflow: self.consumer.stats().overflow,
+                    winner_pending_at_deadline: ws.len as u64,
+                    shadow_state_ready_at_shutdown: self.st.run_state().is_tradable(),
+                    remote_winner_queue_depth: winner_jobs
+                        .sent
+                        .saturating_sub(winner_jobs.received),
+                    remote_projection_queue_depth: projection_jobs
+                        .sent
+                        .saturating_sub(projection_jobs.received),
+                },
+            ));
             self.shutdown.request();
             self.ingress_session.request();
         }
@@ -37,9 +49,15 @@ impl ShadowOwner {
                     .shutdown_seconds,
             ))?;
         }
+        // Final MT0 snapshot, seal and join; a lost snapshot makes the run's evidence INCOMPLETE.
+        // It is reported last, so it never hides an evidence or operational failure.
+        let mt0_complete = self.mt0_reporter.finish();
         evidence_result?;
         if let Some(reason) = self.operational_failure.take() {
             return Err(reason.into());
+        }
+        if !mt0_complete {
+            return Err("MT0_EVIDENCE_INCOMPLETE".into());
         }
         Ok(())
     }

@@ -108,7 +108,7 @@ impl ShadowOwner {
                 if a.pubkey == self.program_data && hash(&a.data) != self.program_data_baseline_hash
                 {
                     if !self.program_upgrade_latched {
-                        eprintln!(
+                        owner_log!(self,
                         "PROGRAM_UPGRADE detected slot={} program_data={} — latched HALT until explicit P1B promotion",
                         a.slot, self.program_data
                     );
@@ -125,7 +125,7 @@ impl ShadowOwner {
                 };
                 self.counts[i] += 1;
             }
-            if let Some(o) = self.drv.on_event_cancellable(
+            let outcome = self.drv.on_event_cancellable(
                 &mut self.st,
                 ev,
                 fetch,
@@ -138,8 +138,21 @@ impl ShadowOwner {
                     self.shutdown.is_requested()
                         || self.econ.as_ref().is_some_and(|h| h.drain_expired())
                 },
-            ) {
-                eprintln!("recovery: {:?}, run_state={:?}", o, self.st.run_state());
+            );
+            let (lines, beyond) = self.drv.take_diagnostics();
+            for line in lines {
+                owner_log!(self, "{line}");
+            }
+            if beyond > 0 {
+                owner_log!(self, "[recovery] {beyond} further lines beyond the bound");
+            }
+            if let Some(o) = outcome {
+                owner_log!(
+                    self,
+                    "recovery: {:?}, run_state={:?}",
+                    o,
+                    self.st.run_state()
+                );
                 if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
                     self.halt.clear();
 
@@ -157,7 +170,8 @@ impl ShadowOwner {
                     if self.program_upgrade_latched {
                         self.st
                             .halt(darkbot_common::error::HaltReason::ProgramUpgrade);
-                        eprintln!(
+                        owner_log!(
+                            self,
                             "PROGRAM_UPGRADE HALT active program_data={} — no automatic resume",
                             self.program_data
                         );
@@ -189,7 +203,7 @@ impl ShadowOwner {
                         } else {
                             self.threshold_ready = true;
                         }
-                        eprintln!(
+                        owner_log!(self,
                         "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={} threshold_trigger={}",
                         indexed_banks, indexed_accounts, unsupported_banks, self.threshold_bootstrap.len(), self.use_threshold_trigger
                     );
@@ -225,7 +239,7 @@ impl ShadowOwner {
                                     .sweep_max_dirty_banks
                                     .max(self.sweep_dirty_banks.len());
                             }
-                            eprintln!(
+                            owner_log!(self,
                             "r127_health_sweep_ready: reverse_accounts={} startup_banks={} threshold_trigger=false",
                             indexed_accounts, startup_banks
                         );
@@ -259,7 +273,8 @@ impl ShadowOwner {
                                 break;
                             }
                         }
-                        eprintln!(
+                        owner_log!(
+                            self,
                             "bootstrap_probe: queued={} candidates from was_liquidatable",
                             queued
                         );
@@ -316,7 +331,7 @@ impl ShadowOwner {
                                 }
                             }
                         }
-                        eprintln!(
+                        owner_log!(self,
                         "bootstrap_probe_integrations: withdraw_kamino={} withdraw_drift={} withdraw_juplend={} pricing_kamino={} pricing_drift={} pricing_juplend={}",
                         kamino, drift, juplend, pricing_kamino, pricing_drift, pricing_juplend
                     );
@@ -420,7 +435,7 @@ impl ShadowOwner {
                                 v.dedup_by_key(|(pk, _)| *pk);
                             }
 
-                            eprintln!(
+                            owner_log!(self,
                             "integration_target_census: withdraw_kamino={} withdraw_drift={} withdraw_juplend={} pricing_kamino={} pricing_drift={} pricing_juplend={} scan_errors={}",
                             all_withdraw[0],
                             all_withdraw[1],
@@ -462,7 +477,7 @@ impl ShadowOwner {
                             self.integration_probe_projection_stale = 0;
                             self.integration_probe_completion_reported = false;
 
-                            eprintln!(
+                            owner_log!(self,
                             "integration_target_probe: queued_unique={} kamino_sample={} drift_sample={} juplend_sample={} limit_per_kind={}",
                             selected.len(),
                             queued_kamino,
@@ -511,9 +526,11 @@ impl ShadowOwner {
                                 Err(e) => {
                                     self.threshold_index.remove_account(&account_pk);
                                     self.threshold_fallback.insert(account_pk);
-                                    eprintln!(
+                                    owner_log!(
+                                        self,
                                         "threshold_account_fallback: account={} error={}",
-                                        account_pk, e
+                                        account_pk,
+                                        e
                                     );
                                 }
                             }
@@ -586,9 +603,11 @@ impl ShadowOwner {
                         }
                         Err(e) => {
                             self.reverse_index.set_bank_oracles(bank_pk, &[]);
-                            eprintln!(
+                            owner_log!(
+                                self,
                                 "reverse_index_bank_unsupported: bank={} error={}",
-                                bank_pk, e
+                                bank_pk,
+                                e
                             );
                         }
                     },
@@ -613,7 +632,7 @@ impl ShadowOwner {
                     .filter(|k| !self.subscribed.contains(k))
                     .collect();
                 if !new_required.is_empty() || !new_optional.is_empty() {
-                    eprintln!(
+                    owner_log!(self,
                     "dependency set changed: +{} required +{} optional → HALT, resubscribe; Recovery follows StreamReady",
                     new_required.len(),
                     new_optional.len()
@@ -740,7 +759,7 @@ impl ShadowOwner {
                                             self.oracle_bank_projection_pending.get_mut(&bank)
                                         {
                                             *existing = (t_rx_ns, event_slot);
-                                            eprintln!(
+                                            owner_log!(self,
                                         "oracle_bank_projection_coalesced: dependency={} bank={} error={}",
                                         dependency, bank, e
                                     );
@@ -778,7 +797,7 @@ impl ShadowOwner {
                                             Err(refresh_error) => {
                                                 self.metrics.oracle_price_fallbacks =
                                                     self.metrics.oracle_price_fallbacks.saturating_add(1);
-                                                eprintln!(
+                                                owner_log!(self,
                                                     "oracle_bank_projection_plan_fallback: dependency={} bank={} price_error={} refresh_error={}",
                                                     dependency, bank, e, refresh_error
                                                 );
@@ -827,7 +846,7 @@ impl ShadowOwner {
                                                         .metrics
                                                         .oracle_price_fallbacks
                                                         .saturating_add(1);
-                                                    eprintln!(
+                                                    owner_log!(self,
                                                 "oracle_bank_projection_build_fallback: dependency={} bank={} error={}",
                                                 dependency, bank, build_error
                                             );
@@ -842,7 +861,7 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                eprintln!(
+                                                owner_log!(self,
                                             "oracle_bank_projection_sign_fallback: dependency={} bank={} error={}",
                                             dependency, bank, sign_error
                                         );
@@ -868,7 +887,7 @@ impl ShadowOwner {
                                                         self.metrics
                                                             .oracle_bank_projection_submitted
                                                             .saturating_add(1);
-                                                    eprintln!(
+                                                    owner_log!(self,
                                                 "oracle_bank_projection_pending: dependency={} bank={} price_error={}",
                                                 dependency, bank, e
                                             );

@@ -95,7 +95,7 @@ use enrichment::full_account_keys;
 pub use enrichment::{enrich, verify_tx_identity, TokenDelta, TxEnrichment};
 #[path = "sink.rs"]
 mod sink;
-pub use sink::{JsonlSink, MarketSink};
+pub use sink::{JournalSink, JsonlSink, MarketSink, MARKET_JOURNAL, MARKET_VIEWS};
 
 #[path = "core.rs"]
 mod core;

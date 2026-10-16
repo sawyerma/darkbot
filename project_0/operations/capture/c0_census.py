@@ -3,7 +3,7 @@
 C0-01 / C0-02 (Teil 1): Project-0 Account-Census.
 
 Zieht alle Accounts des Project-0-Programms per getProgramAccounts (ein Call,
-Helius Free: gPA 5 req/s), schreibt sie als JSONL und erzeugt einen Typ-/Größen-
+Helius Free: gPA 5 req/s), schreibt sie als Binärjournal (p0-journal import, PERSIST-01) und erzeugt einen Typ-/Größen-
 Census über Anchor-Discriminators. Health-Klassifikation (C0-02 Teil 2) folgt,
 sobald das P1A-Manifest das MarginfiAccount-Layout des deployed Tags pinnt.
 
@@ -204,50 +204,66 @@ def census(accounts, context_slot, program_id, group_id, rpc_host, source_note):
     }
 
 
+# PERSIST-01: raw census rows are frames of the one binary journal contract. The rows are
+# handed to the Rust writer (`p0-journal import`); the format is never written from Python.
+C0_CENSUS_ACCOUNT = 900
+C0_CENSUS_GROUP_ACCOUNT = 901
+JOURNAL_TOOL = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                            "native", "target", "release", "p0-journal")
+
+
+def journal_import(kind, path, rows):
+    """Writes `rows` (dicts) as a new sealed journal; returns {journal, frames, root_sha256, status}."""
+    import subprocess
+
+    if not os.path.exists(JOURNAL_TOOL):
+        raise RuntimeError("p0-journal missing: cargo build --release --manifest-path project_0/native/Cargo.toml "
+                           "--features 'crate_health txv1' --bin p0-journal")
+    lines = "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows)
+    proc = subprocess.run([JOURNAL_TOOL, "import", str(kind), path], input=lines, capture_output=True,
+                          text=True, check=False)
+    if proc.returncode:
+        raise RuntimeError(f"census journal not written: {proc.stderr.strip()[-300:]}")
+    return json.loads(proc.stdout)
+
+
 def write_group_outputs(out_dir, accounts, slot):
-    path = os.path.join(out_dir, f"group_accounts_slot{slot}.jsonl")
-    h = hashlib.sha256()
-    with open(path, "w") as f:
-        for acc in accounts:
-            line = json.dumps(
-                {
-                    "pubkey": acc["pubkey"],
-                    "indexer_flags_b64": acc["account"]["data"][0],
-                    "space": acc["account"].get("space"),
-                    "slot": slot,
-                },
-                separators=(",", ":"),
-            )
-            f.write(line + "\n")
-            h.update(line.encode())
-    return path, h.hexdigest()
+    path = os.path.join(out_dir, f"group_accounts_slot{slot}.p0j")
+    rows = [
+        {
+            "pubkey": acc["pubkey"],
+            "indexer_flags_b64": acc["account"]["data"][0],
+            "space": acc["account"].get("space"),
+            "slot": slot,
+        }
+        for acc in accounts
+    ]
+    bound = journal_import(C0_CENSUS_GROUP_ACCOUNT, path, rows)
+    return path, bound["root_sha256"]
 
 
 def write_outputs(out_dir, accounts, report):
     os.makedirs(out_dir, exist_ok=True)
-    jsonl_path = os.path.join(out_dir, f"accounts_slot{report['context_slot']}.jsonl")
-    h = hashlib.sha256()
-    with open(jsonl_path, "w") as f:
-        for acc in accounts:
-            line = json.dumps(
-                {
-                    "pubkey": acc["pubkey"],
-                    "lamports": acc["account"]["lamports"],
-                    "owner": acc["account"]["owner"],
-                    "discriminator_b64": acc["account"]["data"][0],
-                    "space": acc["account"].get("space"),
-                    "slot": report["context_slot"],
-                },
-                separators=(",", ":"),
-            )
-            f.write(line + "\n")
-            h.update(line.encode())
-    report["raw_evidence_path"] = jsonl_path
-    report["raw_evidence_sha256"] = h.hexdigest()
+    journal_path = os.path.join(out_dir, f"accounts_slot{report['context_slot']}.p0j")
+    rows = [
+        {
+            "pubkey": acc["pubkey"],
+            "lamports": acc["account"]["lamports"],
+            "owner": acc["account"]["owner"],
+            "discriminator_b64": acc["account"]["data"][0],
+            "space": acc["account"].get("space"),
+            "slot": report["context_slot"],
+        }
+        for acc in accounts
+    ]
+    bound = journal_import(C0_CENSUS_ACCOUNT, journal_path, rows)
+    report["raw_evidence_path"] = journal_path
+    report["raw_evidence_frames"] = bound["frames"]
+    report["raw_evidence_root_sha256"] = bound["root_sha256"]
     report_path = os.path.join(out_dir, f"c0_census_slot{report['context_slot']}.json")
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
-    return jsonl_path, report_path
+    return journal_path, report_path
 
 
 def selftest():
@@ -273,8 +289,7 @@ def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         jl, rp = write_outputs(tmp, fixture, rep)
         assert os.path.getsize(jl) > 0 and os.path.getsize(rp) > 0
-        with open(jl) as f:
-            assert sum(1 for _ in f) == 2
+        assert rep["raw_evidence_frames"] == 2 and len(rep["raw_evidence_root_sha256"]) == 64
     print("selftest OK")
 
 
@@ -335,7 +350,7 @@ def main():
     jl, rp = write_outputs(args.out, accounts, report)
     gjl, gsha = write_group_outputs(args.out, group_accounts, group_slot)
     report["group_raw_evidence_path"] = gjl
-    report["group_raw_evidence_sha256"] = gsha
+    report["group_raw_evidence_root_sha256"] = gsha
     # Re-write report after adding group evidence path/hash.
     with open(rp, "w") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)

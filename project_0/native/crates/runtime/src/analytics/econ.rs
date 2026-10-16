@@ -1,5 +1,6 @@
 //! C0-E1: observation only. Both producers use one Clock; analytics never call RPC.
 //! Arrival-time hourly snapshots are provisional; final drain atomically reconciles them.
+use crate::analytics::journal::{self, kind, Provenance};
 use crate::analytics::measurement::{MeasurementPlan, SNAPSHOT_COUNT};
 use crate::analytics::record::{CandidateCostRecord, Decision, OpportunityRecord};
 use crate::market::winner::{Winner, WinnerIdentity};
@@ -10,7 +11,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -157,7 +158,24 @@ pub enum Evidence {
         before: crate::market_observer::MarketStats,
         after: Box<crate::market_observer::MarketStats>,
     },
-    ShadowStats(Value),
+    ShadowStats(ShadowStats),
+}
+/// Shadow owner counters at shutdown. Built on the owner thread without JSON (PERSIST-02);
+/// the analytics worker turns it into the `shadow_telemetry` value of its reports.
+#[derive(Clone, Debug, Serialize)]
+pub struct ShadowStats {
+    pub winner_watch_current: u64,
+    pub winner_watch_max: u64,
+    pub winner_watch_overflow: u64,
+    pub winner_watch_errors: u64,
+    pub winner_watch_resolved: u64,
+    pub winner_watch_expired: u64,
+    pub winner_queue_full_backoffs: u64,
+    pub ingress_overflow: u64,
+    pub winner_pending_at_deadline: u64,
+    pub shadow_state_ready_at_shutdown: bool,
+    pub remote_winner_queue_depth: u64,
+    pub remote_projection_queue_depth: u64,
 }
 #[derive(Default)]
 pub struct Shared {
@@ -542,8 +560,8 @@ struct RetainedShadow {
     sequence: u64,
     rec: OpportunityRecord,
 }
-const NO_PREVIOUS: u64 = u64::MAX;
-const JOURNAL_ENTRY_BYTES: u64 = 24;
+/// Name of the analytics report journal (snapshots, final report, derived rows).
+pub const REPORT_JOURNAL: &str = "economics_reports.p0j";
 
 struct Worker {
     h: Handle,
@@ -559,11 +577,15 @@ struct Worker {
     slots: BTreeMap<u64, u64>,
     // One best record per target/winner-slot or unresolved target/hour.
     shadow: BTreeMap<String, RetainedShadow>,
-    // One bounded head per target; all revision offsets live on disk (24 bytes/row).
+    // One bounded head per target: the offset of its newest in-window evaluation frame. Each
+    // frame names the previous one, so all revisions live on disk in the binary journal.
     shadow_heads: BTreeMap<String, u64>,
-    journal: BufWriter<File>,
-    journal_bytes: u64,
-    evaluation_bytes: u64,
+    // Every evaluation, in arrival order (`shadow_evaluations.p0j`), and a read handle for
+    // chain walks; frames are written unbuffered, so the reader sees every appended frame.
+    evaluations: journal::Writer,
+    evaluations_at: File,
+    // Snapshots, final report and derived rows; the legacy JSON files are renders of it.
+    reports: journal::Writer,
     shadow_evaluations_received: u64,
     shadow_evaluations_streamed: u64,
     shadow_evaluations_coalesced: u64,
@@ -576,7 +598,6 @@ struct Worker {
     shadow_stats: Value,
     final_technical: Option<Value>,
     evaluation_counts: [u64; SNAPSHOT_COUNT],
-    evaluations: BufWriter<File>,
     snapshots: usize,
 }
 impl Worker {
@@ -588,16 +609,12 @@ impl Worker {
         commit: String,
         min_sample: u64,
     ) -> Result<Self, String> {
-        let file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(h.cfg.paths().capture("shadow_evaluations.jsonl"))
-            .map_err(|e| e.to_string())?;
-        let journal = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(h.cfg.paths().capture("shadow_offsets.bin"))
-            .map_err(|e| e.to_string())?;
+        let paths = h.cfg.paths();
+        let evaluations_path = journal::binary_path(&paths.capture("shadow_evaluations.jsonl"));
+        let evaluations = journal::Writer::create(&evaluations_path).map_err(|e| e.to_string())?;
+        let evaluations_at = File::open(&evaluations_path).map_err(|e| e.to_string())?;
+        let reports =
+            journal::Writer::create(&paths.snapshot(REPORT_JOURNAL)).map_err(|e| e.to_string())?;
         Ok(Self {
             h,
             rx,
@@ -612,9 +629,9 @@ impl Worker {
             slots: BTreeMap::new(),
             shadow: BTreeMap::new(),
             shadow_heads: BTreeMap::new(),
-            journal: BufWriter::new(journal),
-            journal_bytes: 0,
-            evaluation_bytes: 0,
+            evaluations,
+            evaluations_at,
+            reports,
             shadow_evaluations_received: 0,
             shadow_evaluations_streamed: 0,
             shadow_evaluations_coalesced: 0,
@@ -627,7 +644,6 @@ impl Worker {
             shadow_stats: Value::Null,
             final_technical: None,
             evaluation_counts: [0; SNAPSHOT_COUNT],
-            evaluations: BufWriter::new(file),
             snapshots: 0,
         })
     }
@@ -679,38 +695,36 @@ impl Worker {
             }
             Evidence::Shadow(rec) => {
                 self.shadow_evaluations_received += 1;
-                let mut bytes = serde_json::to_vec(&rec).map_err(|e| e.to_string())?;
-                bytes.push(b'\n');
-                let offset = self.evaluation_bytes;
-                self.evaluations
-                    .write_all(&bytes)
+                let hour = rec.timing.t_rx_ns.and_then(|t| self.hour(t));
+                let full = self.shadow_heads.len() >= self.h.capacity()
+                    && !self.shadow_heads.contains_key(&rec.account);
+                let chained = hour.is_some() && !full;
+                // Every evaluation is streamed; only in-window ones join their target's chain.
+                let previous = chained
+                    .then(|| self.shadow_heads.get(&rec.account).copied())
+                    .flatten();
+                let value = json!({"previous_target_offset":previous,
+                    "record":serde_json::to_value(&*rec).map_err(|e| e.to_string())?});
+                let provenance = Provenance {
+                    source: journal::source::ECON,
+                    source_seq: self.shadow_evaluations_received,
+                    slot: rec.rx_slot,
+                    rx_ns: rec.timing.t_rx_ns,
+                    ..Default::default()
+                };
+                let frame = self
+                    .evaluations
+                    .append(kind::ECON_SHADOW_EVALUATION, 1, provenance, &value)
                     .map_err(|e| e.to_string())?;
-                self.evaluation_bytes += bytes.len() as u64;
                 self.shadow_evaluations_streamed += 1;
-                if let Some(hour) = rec.timing.t_rx_ns.and_then(|t| self.hour(t)) {
+                if let Some(hour) = hour {
                     self.evaluation_counts[hour] += 1;
-                    if self.shadow_heads.len() >= self.h.capacity()
-                        && !self.shadow_heads.contains_key(&rec.account)
-                    {
+                    if full {
                         self.shadow_semantic_evictions += 1;
                         self.over_limit();
                     } else {
-                        let previous = self
-                            .shadow_heads
-                            .get(&rec.account)
-                            .copied()
-                            .unwrap_or(NO_PREVIOUS);
-                        // LE u64: previous journal offset, raw byte offset, raw byte length.
-                        for value in [previous, offset, bytes.len() as u64] {
-                            self.journal
-                                .write_all(&value.to_le_bytes())
-                                .map_err(|e| e.to_string())?;
-                        }
-                        let sequence = self.journal_bytes / JOURNAL_ENTRY_BYTES;
-                        self.shadow_heads
-                            .insert(rec.account.clone(), self.journal_bytes);
-                        self.journal_bytes += JOURNAL_ENTRY_BYTES;
-                        self.retain_shadow(hour, sequence, *rec, true);
+                        self.shadow_heads.insert(rec.account.clone(), frame.offset);
+                        self.retain_shadow(hour, frame.journal_seq, *rec, true);
                     }
                 }
             }
@@ -765,7 +779,9 @@ impl Worker {
                 }
             }
             Evidence::MarketFinal(v) => self.market_final = Some(v),
-            Evidence::ShadowStats(v) => self.shadow_stats = v,
+            Evidence::ShadowStats(v) => {
+                self.shadow_stats = serde_json::to_value(v).map_err(|e| e.to_string())?
+            }
         }
         Ok(())
     }
@@ -869,57 +885,51 @@ impl Worker {
                 self.shadow_semantic_entries_max.max(self.shadow.len());
         }
     }
+    /// One hop of `target`'s evaluation chain: (arrival sequence, previous hop, record).
+    /// Every hop is a CRC32/SHA256-verified frame of this run's evaluation journal.
+    fn chain_frame(
+        &mut self,
+        target: &str,
+        at: u64,
+    ) -> Result<(u64, Option<u64>, OpportunityRecord), String> {
+        if at < journal::HEADER_LEN || at >= self.evaluations.position() {
+            return Err("invalid shadow journal offset".into());
+        }
+        let mut frame = journal::read_at(&mut self.evaluations_at, at)
+            .map_err(|e| format!("invalid shadow journal frame: {e}"))?;
+        if frame.kind != kind::ECON_SHADOW_EVALUATION {
+            return Err("invalid shadow journal frame kind".into());
+        }
+        let previous = match frame.value["previous_target_offset"].take() {
+            Value::Null => None,
+            v => Some(v.as_u64().ok_or("invalid shadow journal chain")?),
+        };
+        if previous.is_some_and(|p| p >= at) {
+            return Err("invalid shadow journal chain".into());
+        }
+        let rec: OpportunityRecord =
+            serde_json::from_value(frame.value["record"].take()).map_err(|e| e.to_string())?;
+        if rec.account != target {
+            return Err("shadow journal target mismatch".into());
+        }
+        Ok((frame.journal_seq, previous, rec))
+    }
     fn recorrelate_shadow(&mut self, target: &str) -> Result<(), String> {
-        let Some(mut cursor) = self.shadow_heads.get(target).copied() else {
+        let Some(head) = self.shadow_heads.get(target).copied() else {
             return Ok(());
         };
-        self.evaluations.flush().map_err(|e| e.to_string())?;
-        self.journal.flush().map_err(|e| e.to_string())?;
-        let mut journal = BufReader::new(
-            File::open(self.h.cfg.paths().capture("shadow_offsets.bin"))
-                .map_err(|e| e.to_string())?,
-        );
-        let mut raw = BufReader::new(
-            File::open(self.h.cfg.paths().capture("shadow_evaluations.jsonl"))
-                .map_err(|e| e.to_string())?,
-        );
         self.shadow.retain(|_, entry| entry.rec.account != target);
         // Stream only this target's chain, one record at a time. Replaying just the
         // old representative would lose opportunities when a winner splits a group.
-        while cursor != NO_PREVIOUS {
-            if cursor >= self.journal_bytes || cursor % JOURNAL_ENTRY_BYTES != 0 {
-                return Err("invalid shadow journal offset".into());
-            }
-            journal
-                .seek(SeekFrom::Start(cursor))
-                .map_err(|e| e.to_string())?;
-            let mut entry = [0u8; JOURNAL_ENTRY_BYTES as usize];
-            journal.read_exact(&mut entry).map_err(|e| e.to_string())?;
-            let previous = u64::from_le_bytes(entry[0..8].try_into().unwrap());
-            let offset = u64::from_le_bytes(entry[8..16].try_into().unwrap());
-            let length = u64::from_le_bytes(entry[16..24].try_into().unwrap());
-            if previous != NO_PREVIOUS && previous >= cursor {
-                return Err("invalid shadow journal chain".into());
-            }
-            if offset
-                .checked_add(length)
-                .is_none_or(|end| end > self.evaluation_bytes)
-            {
-                return Err("invalid shadow journal raw range".into());
-            }
-            raw.seek(SeekFrom::Start(offset))
-                .map_err(|e| e.to_string())?;
-            let rec: OpportunityRecord =
-                serde_json::from_reader((&mut raw).take(length)).map_err(|e| e.to_string())?;
-            if rec.account != target {
-                return Err("shadow journal target mismatch".into());
-            }
+        let mut cursor = Some(head);
+        while let Some(at) = cursor {
+            let (sequence, previous, rec) = self.chain_frame(target, at)?;
             let hour = rec
                 .timing
                 .t_rx_ns
                 .and_then(|t| self.hour(t))
                 .ok_or("shadow journal timestamp mismatch")?;
-            self.retain_shadow(hour, cursor / JOURNAL_ENTRY_BYTES, rec, false);
+            self.retain_shadow(hour, sequence, rec, false);
             cursor = previous;
         }
         Ok(())
@@ -1416,11 +1426,37 @@ impl Worker {
         report
     }
     fn write_snapshot(&mut self, index: usize, finalizing: bool) -> Result<(), String> {
-        let report = self.report(index, finalizing);
+        let value = json!({"index":index,"finalizing":finalizing,
+            "report":self.report(index, finalizing)});
         let name = format!("hour_{index:02}.json");
-        atomic_json(&self.h.cfg.paths().snapshot(&name), &report).inspect_err(|_| {
-            self.h.shared.writer_errors.fetch_add(1, Ordering::Relaxed);
-        })
+        // Journal frame first; `hour_0N.json` renders the newest frame of this index.
+        self.append_report(kind::ECON_SNAPSHOT, &value)
+            .and_then(|_| atomic_json(&self.h.cfg.paths().snapshot(&name), &value["report"]))
+            .inspect_err(|_| {
+                self.h.shared.writer_errors.fetch_add(1, Ordering::Relaxed);
+            })
+    }
+    fn append_report(&mut self, kind: u16, value: &Value) -> Result<(), String> {
+        let provenance = Provenance {
+            source: journal::source::ECON,
+            source_seq: self.reports.next_seq(),
+            unix_ns: u64::try_from(self.h.clock.unix_ns(self.h.clock.now_ns())).ok(),
+            ..Default::default()
+        };
+        self.reports
+            .append(kind, 1, provenance, value)
+            .map(|_| ())
+            .map_err(|e| format!("REPORT_JOURNAL: {e}"))
+    }
+    /// The legacy JSONL file of one report kind, rendered as an explicit export (no overwrite).
+    fn render_rows(&self, kind: u16, name: &str) -> Result<(), String> {
+        journal::export(
+            &self.reports.path,
+            &self.h.cfg.paths().snapshot(name),
+            Some(kind),
+            false,
+        )
+        .map_err(|e| format!("{name}: {e}"))
     }
     /// Human-readable authoritative MARKET conclusion next to the C0-E1 console
     /// summary. Read existing report data only; no RPC, scanner, or parallel ledger.
@@ -1521,8 +1557,11 @@ impl Worker {
                 break;
             }
         }
-        self.evaluations.flush().map_err(|e| e.to_string())?;
-        self.journal.flush().map_err(|e| e.to_string())?;
+        // The evaluation stream is complete only if no evidence was dropped before this worker.
+        let complete = self.h.shared.drops.load(Ordering::Relaxed) == 0;
+        self.evaluations
+            .seal(complete)
+            .map_err(|e| format!("SHADOW_JOURNAL_SEAL: {e}"))?;
         self.finalize_canonical()?;
         // Freeze one final telemetry snapshot, so hour 4 and final reconcile byte-for-byte.
         self.final_technical = Some(self.technical(true));
@@ -1531,17 +1570,23 @@ impl Worker {
             self.write_snapshot(i, true)?;
         }
         let final_report = self.report(SNAPSHOT_COUNT, true);
+        self.append_report(kind::ECON_FINAL, &final_report)?;
         atomic_json(
             &self.h.cfg.paths().snapshot("economics_final.json"),
             &final_report,
         )?;
-        let f = File::create(self.h.cfg.paths().snapshot("opportunity_economics.jsonl"))
-            .map_err(|e| e.to_string())?;
-        let mut out = BufWriter::new(f);
-        for (_, rec) in self.selected() {
-            line(&mut out, &self.opportunity(rec))?;
+        let rows: Vec<Value> = self
+            .selected()
+            .into_iter()
+            .map(|(_, rec)| self.opportunity(rec))
+            .collect();
+        for row in &rows {
+            self.append_report(kind::ECON_OPPORTUNITY, row)?;
         }
-        out.flush().map_err(|e| e.to_string())?;
+        self.render_rows(kind::ECON_OPPORTUNITY, "opportunity_economics.jsonl")?;
+        self.reports
+            .seal(true)
+            .map_err(|e| format!("REPORT_JOURNAL_SEAL: {e}"))?;
         println!("C0-E1 technical={} market={} sample={} liquidations={} gross={} matched={} executable={}\ncapital={}\nrace={}\nrequired_speedup_ms={}\nbottlenecks={}\nunknowns={}\nreports={}/hour_01..04.json, economics_final.json",
             final_report["technical_qualification"]["verdict"],final_report["market"]["cumulative"]["c0_mo_r6"]["verdict"],
             final_report["economic_sample_status"],final_report["market"]["cumulative"]["liquidation_events"],final_report["market"]["cumulative"]["gross_edge_usd"],

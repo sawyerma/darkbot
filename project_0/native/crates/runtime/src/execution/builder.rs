@@ -316,6 +316,29 @@ pub mod p0 {
         ) -> Result<Option<Route>, String>;
     }
 
+    const ROUTE_DIAGNOSTICS_MAX: usize = 64;
+    thread_local! {
+        /// Route-fit diagnostics of this thread, in memory only (PERSIST-02): the Shadow owner
+        /// forwards them through its evidence writer after each evaluation. Bounded; lines
+        /// beyond the bound are counted, never silently dropped.
+        static ROUTE_DIAGNOSTICS: std::cell::RefCell<(Vec<String>, u64)> =
+            const { std::cell::RefCell::new((Vec::new(), 0)) };
+    }
+    fn route_diagnostic(line: String) {
+        ROUTE_DIAGNOSTICS.with(|d| {
+            let mut d = d.borrow_mut();
+            if d.0.len() < ROUTE_DIAGNOSTICS_MAX {
+                d.0.push(line);
+            } else {
+                d.1 += 1;
+            }
+        });
+    }
+    /// Lines recorded on this thread since the last call, and how many exceeded the bound.
+    pub fn take_route_diagnostics() -> (Vec<String>, u64) {
+        ROUTE_DIAGNOSTICS.with(|d| std::mem::take(&mut *d.borrow_mut()))
+    }
+
     /// [FIX-123][R7/R6] Router caps are hints; only the complete compiled TX proves fit.
     /// Bound remote work to six requests. Every changed quote is revalidated and repriced.
     fn quote_fitting_route<T>(
@@ -352,8 +375,8 @@ pub mod p0 {
                         })
                         .collect::<std::collections::HashSet<_>>()
                         .len();
-                    eprintln!("route_budget: attempt={} max_accounts={} route_accounts={} alts={} rejected={}",
-                        attempt + 1, cap, route_accounts, route.lookup_tables.len(), error);
+                    route_diagnostic(format!("route_budget: attempt={} max_accounts={} route_accounts={} alts={} rejected={}",
+                        attempt + 1, cap, route_accounts, route.lookup_tables.len(), error));
                     rejected.push(format!("maxAccounts={cap}: {error}"));
                     if cap == 1 {
                         break;

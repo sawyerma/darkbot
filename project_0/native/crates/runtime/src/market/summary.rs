@@ -35,7 +35,10 @@ pub fn finalize(
     core.fail_truncated_pending("NOT_QUALIFIED");
     core.coverage(sink, "STOPPED", now_unix_s, None, detail)
         .map_err(|e| format!("coverage write: {e}"))?;
-    sink.flush().map_err(|e| format!("flush: {e}"))?;
+    // A journal-backed sink seals and renders its views here, before summary.json exists.
+    let binding = sink
+        .finish()
+        .map_err(|e| format!("evidence journal: {e}"))?;
     let mut summary = core.summary(ctx);
     if let Some(h) = &core.econ {
         summary["measurement_plan"] =
@@ -49,15 +52,21 @@ pub fn finalize(
             Value::Null
         };
     }
+    if let Some(binding) = &binding {
+        summary["evidence_journal"] = binding.clone();
+    }
     let summary_path = run_dir.join("summary.json");
     let pretty = serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?;
     fs::write(&summary_path, pretty).map_err(|e| format!("summary.json: {e}"))?;
-    let files = [
+    let mut files = vec![
         ("transactions_jsonl", run_dir.join("transactions.jsonl")),
         ("liquidations_jsonl", run_dir.join("liquidations.jsonl")),
         ("coverage_jsonl", run_dir.join("coverage.jsonl")),
         ("summary_json", summary_path.clone()),
     ];
+    if binding.is_some() {
+        files.insert(0, ("market_journal", run_dir.join(MARKET_JOURNAL)));
+    }
     let refs: Vec<(&str, &Path)> = files.iter().map(|(n, p)| (*n, p.as_path())).collect();
     let report = render_report(&summary, &refs);
     fs::write(run_dir.join("final_report.txt"), &report)

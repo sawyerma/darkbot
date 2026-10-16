@@ -24,10 +24,13 @@ see [run storage](../../operations/run_storage.md)).
 The market source defaults to `logs` in the script; a distinct `P0_MARKET_WS_URL` can supply
 an enhanced transaction stream while Shadow keeps its existing `P0_WS_URL`.
 
-Generated output (layout V2 path in parentheses; V1 keeps every file at the run root):
-`hour_01.json` through `hour_04.json`, `economics_final.json`, `opportunity_economics.jsonl` (`snapshots/`),
-`shadow_evaluations.jsonl` and MT0/runtime records (`capture/`), console and runtime logs (`logs/`), and the unchanged
-C0-MO evidence files under `market/` (`capture/market/`).
+Generated output (layout V2 path in parentheses; V1 keeps every file at the run root): the binary journals
+`economics_reports.p0j` with its renders `hour_01.json` through `hour_04.json`, `economics_final.json`,
+`opportunity_economics.jsonl` and `canonical_market_shadow.jsonl` (`snapshots/`); `shadow_evaluations.p0j`,
+`opportunities.p0j`, `mt0.p0j` and `measurement_phases.p0j` with its render `measurement_phases.jsonl` (`capture/`);
+console and runtime logs (`logs/`); and the C0-MO capture `market.p0j` with its renders `transactions.jsonl`,
+`liquidations.jsonl`, `coverage.jsonl` plus `summary.json` under `market/` (`capture/market/`). Runs before
+2026-10-16 keep their JSONL files and `shadow_offsets.bin`; see [run storage](../../operations/run_storage.md).
 These files are runtime data, not versioned evidence. The run stops automatically; bounded
 winner and market drain/enrichment can extend wall time beyond the observation duration.
 

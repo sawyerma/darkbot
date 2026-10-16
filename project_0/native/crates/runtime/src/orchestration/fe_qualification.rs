@@ -227,6 +227,11 @@ fn dependencies(
     }
     Ok(required)
 }
+/// FE-01 transaction version pin: what this bot builds, not what the cluster accepts. The
+/// liquidation path compiles v0 messages with address lookup tables; v1 exists only as a
+/// size/capability measurement that refuses to sign. Cluster support is not observed here.
+pub const TRANSACTION_VERSION_PIN: &str =
+    "BUILD_V0_WITH_ADDRESS_LOOKUP_TABLES; V1_CAPABILITY_MEASUREMENT_ONLY; CLUSTER_SUPPORT_UNKNOWN_NOT_OBSERVED";
 /// Each round refreshes the complete discovered scope. New balances/banks expand
 /// the next round; an inconsistent/moving snapshot never becomes qualified.
 pub fn collect<F>(config: &RuntimeConfig, mut read: F) -> Result<Value, String>
@@ -354,7 +359,7 @@ where
         }
         let accounts:Vec<_>=state.0.iter().map(|(key,a)|json!({"pubkey":key.to_string(),"owner":a.owner.to_string(),"lamports":a.lamports,"bytes":a.data.len(),"sha256":sha(&a.data)})).collect();
         return Ok(
-            json!({"schema":"Project0/FE01FullObservation/1","status":"STATE_SCOPE_OBSERVED_NOT_QUALIFIED","scope_closed":true,"rounds":round,"slot":clock.slot,"unix_timestamp":clock.unix_timestamp,"clock":"CHAIN_SYSVAR_SAME_CONTEXT","program_data":pd.to_string(),"program_data_sha256":baseline.1,"deployment_slot":baseline.0,"source_pin":SOURCE_PIN,"source_parity":"UNKNOWN","source_parity_reason":"CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF","accounts":accounts,"targets":rows,"fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}),
+            json!({"schema":"Project0/FE01FullObservation/1","status":"STATE_SCOPE_OBSERVED_NOT_QUALIFIED","scope_closed":true,"rounds":round,"slot":clock.slot,"unix_timestamp":clock.unix_timestamp,"clock":"CHAIN_SYSVAR_SAME_CONTEXT","program_data":pd.to_string(),"program_data_sha256":baseline.1,"deployment_slot":baseline.0,"source_pin":SOURCE_PIN,"source_parity":"UNKNOWN","source_parity_reason":"CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF","transaction_version":TRANSACTION_VERSION_PIN,"accounts":accounts,"targets":rows,"fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}),
         );
     }
     Err(last_reason.into())
@@ -539,6 +544,49 @@ mod tests {
         assert!(report["targets"][0]["net_edge_usd_micro"].is_null());
     }
     #[test]
+    fn integration_accounts_of_target_banks_are_observed_in_the_same_scope() {
+        let (c, mut all) = fixture();
+        let program = key(protocol::PROGRAM_ID_MAINNET).unwrap();
+        let bank_key = *all
+            .iter()
+            .find(|(_, a)| {
+                a.owner == program && protocol::classify(&a.data) == protocol::AccountType::Bank
+            })
+            .unwrap()
+            .0;
+        // The bank names one integration account (for example a Kamino reserve).
+        let reserve = Pubkey::new_unique();
+        let size = std::mem::size_of::<Bank>();
+        let mut bank: Bank = bytemuck::pod_read_unaligned(&all[&bank_key].data[8..8 + size]);
+        bank.integration_acc_1 = reserve;
+        all.insert(bank_key, wrapped(bank, protocol::DISC_BANK, program));
+        all.insert(
+            reserve,
+            Account {
+                owner: Pubkey::new_unique(),
+                lamports: 1,
+                data: vec![0; 64],
+                ..Account::default()
+            },
+        );
+        let mut seen = BTreeSet::new();
+        let report = collect(&c, |keys, _| {
+            seen.extend(keys.iter().copied());
+            Ok((100, batch(&all, keys)?))
+        })
+        .unwrap();
+        assert!(seen.contains(&reserve));
+        assert!(report["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["pubkey"] == reserve.to_string()));
+        assert_eq!(report["transaction_version"], TRANSACTION_VERSION_PIN);
+        // Without the integration account the scope never closes: fail closed, never skipped.
+        all.remove(&reserve);
+        assert!(collect(&c, |keys, _| Ok((100, batch(&all, keys)?))).is_err());
+    }
+    #[test]
     fn changed_deployment_and_missing_accounts_fail_closed() {
         let (c, all) = fixture();
         let mut calls = 0;
@@ -649,7 +697,56 @@ mod tests {
             assert_eq!(&replayed[key], value, "{key}");
         }
         assert_eq!(replayed["replay"]["freshness"], "HISTORICAL_NOT_CURRENT");
+        assert_eq!(replayed["replay"]["source"], "LEGACY_READ_FILES");
         assert_eq!(replayed["pilot_ready"], false);
+        // The same observation saved as the binary journal (PERSIST-01) replays identically.
+        use crate::analytics::journal::{kind, Writer};
+        let binary = dir.with_extension("journal");
+        std::fs::create_dir(&binary).unwrap();
+        let mut w = Writer::create(&binary.join(fe_replay::FE01_JOURNAL)).unwrap();
+        w.append_value(
+            kind::FE01_CONFIG,
+            &json!({"execution":"READ_ONLY_NO_SIGNER"}),
+        )
+        .unwrap();
+        for n in 1..=calls {
+            let entry: Value = serde_json::from_slice(
+                &std::fs::read(dir.join(format!("read_{n:06}.json"))).unwrap(),
+            )
+            .unwrap();
+            w.append_value(kind::FE01_READ, &entry).unwrap();
+        }
+        w.sync().unwrap();
+        let from_journal = fe_replay::replay(&c, &binary, class).unwrap();
+        for (key, value) in original.as_object().unwrap() {
+            assert_eq!(&from_journal[key], value, "{key}");
+        }
+        assert_eq!(from_journal["replay"]["source"], "BINARY_JOURNAL");
+        assert_eq!(
+            from_journal["replay"]["reads"].as_array().unwrap().len(),
+            calls
+        );
+        // An extra saved read, a second source or a foreign frame is refused, never merged.
+        w.append_value(kind::FE01_READ, &json!({})).unwrap();
+        w.sync().unwrap();
+        assert_eq!(
+            fe_replay::replay(&c, &binary, class).unwrap_err(),
+            "FE_REPLAY_UNUSED_READS"
+        );
+        std::fs::write(binary.join("read_000001.json"), b"{}").unwrap();
+        assert_eq!(
+            fe_replay::replay(&c, &binary, class).unwrap_err(),
+            "FE_REPLAY_AMBIGUOUS_SOURCE"
+        );
+        std::fs::remove_file(binary.join("read_000001.json")).unwrap();
+        w.append_value(kind::OWNER_RECORD, &json!({})).unwrap();
+        w.sync().unwrap();
+        assert_eq!(
+            fe_replay::replay(&c, &binary, class).unwrap_err(),
+            "FE_REPLAY_JOURNAL_KIND"
+        );
+        drop(w);
+        std::fs::remove_dir_all(binary).unwrap();
         c.limits.fe_calls = 1;
         assert_eq!(
             fe_replay::replay(&c, &dir, class).unwrap_err(),

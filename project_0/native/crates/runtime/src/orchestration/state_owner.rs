@@ -54,6 +54,16 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 use std::time::Duration;
 
+/// Owner-thread diagnostics (PERSIST-02): the line is formatted here but journaled and
+/// printed only by the evidence writer thread, so the owner never blocks on stderr. A full
+/// queue closes admission, which the owner loop checks on every iteration.
+macro_rules! owner_log {
+    ($owner:expr, $($arg:tt)*) => {{
+        let line = format!($($arg)*);
+        let _ = $owner.evidence.diagnostic(line);
+    }};
+}
+
 mod accounts;
 mod candidates;
 use accounts::*;
@@ -78,8 +88,11 @@ use metrics::OwnerMetrics;
 pub(super) struct ShadowOwner {
     metrics: OwnerMetrics,
     mode: String,
+    // Read once at setup, never from the environment on the owner thread.
+    eval_slippage_bps: u64,
+    zero_prefund_enabled: bool,
     required_dependency_keys: Vec<Pubkey>,
-    _mt0_reporter: std::thread::JoinHandle<()>,
+    mt0_reporter: darkbot_common::mt0::Reporter,
     optional_dependency_keys: Vec<Pubkey>,
     subscribed: HashSet<Pubkey>,
     required_set: HashSet<Pubkey>,

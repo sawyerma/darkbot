@@ -3,12 +3,12 @@
 pub mod receipts;
 pub mod transport;
 
+use crate::analytics::journal;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -109,9 +109,9 @@ pub struct Receipt {
 
 pub struct Journal {
     _lock: WalletLock,
-    path: PathBuf,
     wallet: String,
     saved: Option<Saved>,
+    writer: journal::Writer,
 }
 /// Exclusive wallet flock, released on every drop path including failed opens.
 struct WalletLock(File);
@@ -122,6 +122,41 @@ impl Drop for WalletLock {
         let _ = self.0.unlock();
     }
 }
+/// Durable transitions of the single-flight automaton (PERSIST-03). Every frame of the
+/// wallet journal carries the transition and the complete state version it produced.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum Transition {
+    Reserve,
+    Handoff,
+    ReopenUnknown,
+    Observe,
+    Finalize,
+}
+#[derive(Serialize)]
+struct VersionRef<'a> {
+    transition: Transition,
+    state: &'a Saved,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Version {
+    transition: Transition,
+    state: Saved,
+}
+#[derive(Serialize)]
+struct LegacyImportRef<'a> {
+    legacy_sha256: &'a str,
+    state: &'a Saved,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyImport {
+    legacy_sha256: String,
+    state: Saved,
+}
+/// A wallet journal holds a handful of state versions; anything larger is not ours.
+const MAX_JOURNAL_BYTES: u64 = 16 * 1024 * 1024;
+const LEGACY_MAX_BYTES: u64 = 256 * 1024;
 fn err(s: &str) -> String {
     s.into()
 }
@@ -133,6 +168,86 @@ fn hex(s: &str, n: usize) -> bool {
 }
 fn key(s: &str) -> bool {
     s.parse::<solana_sdk::pubkey::Pubkey>().is_ok()
+}
+/// Pre-binary wallet journal (`<wallet>.json`, digest-wrapped). Read only, never rewritten.
+fn read_legacy(path: &Path, wallet: &str) -> Result<(String, Saved), String> {
+    if fs::metadata(path).map_err(|_| err("JOURNAL_READ"))?.len() > LEGACY_MAX_BYTES {
+        return Err(err("JOURNAL_SIZE_LIMIT"));
+    }
+    let bytes = fs::read(path).map_err(|_| err("JOURNAL_READ"))?;
+    let wrapper: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| err("JOURNAL_CORRUPT"))?;
+    let data = serde_json::to_vec(&wrapper["record"]).map_err(|_| err("JOURNAL_CORRUPT"))?;
+    if wrapper["digest"] != digest(&data) {
+        return Err(err("JOURNAL_CORRUPT"));
+    }
+    let s: Saved =
+        serde_json::from_value(wrapper["record"].clone()).map_err(|_| err("JOURNAL_CORRUPT"))?;
+    if s.approval.wallet != wallet || s.intent.wallet != wallet {
+        return Err(err("JOURNAL_WALLET_MISMATCH"));
+    }
+    Ok((journal::hex(&solana_sdk::hash::hash(&bytes).to_bytes()), s))
+}
+/// Only the transitions the automaton itself performs are accepted on replay.
+fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool {
+    let same = |p: &Saved| p.approval == next.approval && p.intent == next.intent;
+    match (previous, transition) {
+        (None, Transition::Reserve) => {
+            next.phase == Phase::Reserved
+                && next.finalized.is_none()
+                && next.observations.is_empty()
+        }
+        (Some(p), Transition::Handoff | Transition::ReopenUnknown) => {
+            same(p)
+                && p.phase == Phase::Reserved
+                && next.phase == Phase::HandoffUnknown
+                && next.finalized.is_none()
+                && next.observations == p.observations
+        }
+        (Some(p), Transition::Observe) => {
+            same(p)
+                && p.phase == Phase::HandoffUnknown
+                && next.phase == Phase::HandoffUnknown
+                && next.finalized.is_none()
+        }
+        (Some(p), Transition::Finalize) => {
+            same(p)
+                && p.phase == Phase::HandoffUnknown
+                && next.phase == Phase::HaltFinalized
+                && next.finalized.is_some()
+                && next.observations == p.observations
+        }
+        _ => false,
+    }
+}
+/// Replays the wallet journal. Any damaged, truncated, foreign or illegal frame is a halt.
+fn replay(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), String> {
+    let mut reader = journal::Reader::open(path).map_err(|_| err("JOURNAL_CORRUPT"))?;
+    let (mut saved, mut imported) = (None::<Saved>, None);
+    while let Some(frame) = reader.next_frame().map_err(|_| err("JOURNAL_CORRUPT"))? {
+        let next = match frame.kind {
+            journal::kind::FE04_LEGACY_IMPORT if frame.journal_seq == 0 => {
+                let v: LegacyImport =
+                    serde_json::from_value(frame.value).map_err(|_| err("JOURNAL_CORRUPT"))?;
+                imported = Some(v.legacy_sha256);
+                v.state
+            }
+            journal::kind::FE04_TRANSITION => {
+                let v: Version =
+                    serde_json::from_value(frame.value).map_err(|_| err("JOURNAL_CORRUPT"))?;
+                if !legal(saved.as_ref(), v.transition, &v.state) {
+                    return Err(err("JOURNAL_TRANSITION_INVALID"));
+                }
+                v.state
+            }
+            _ => return Err(err("JOURNAL_CORRUPT")),
+        };
+        if next.approval.wallet != wallet || next.intent.wallet != wallet {
+            return Err(err("JOURNAL_WALLET_MISMATCH"));
+        }
+        saved = Some(next);
+    }
+    Ok((saved, imported))
 }
 
 impl Journal {
@@ -150,64 +265,87 @@ impl Journal {
             .map_err(|_| err("JOURNAL_LOCK_IO"))?;
         lock.try_lock().map_err(|_| err("WALLET_ALREADY_LOCKED"))?;
         let lock = WalletLock(lock);
-        let path = directory.join(format!("{wallet}.json"));
-        if path.with_extension("pending").exists() {
+        let legacy = directory.join(format!("{wallet}.json"));
+        // An interrupted pre-binary write blocks further actions; never silently truncate it.
+        if legacy.with_extension("pending").exists() {
             return Err(err("JOURNAL_INTERRUPTED_WRITE_HALT"));
         }
-        let saved = if path.exists() {
-            if fs::metadata(&path).map_err(|_| err("JOURNAL_READ"))?.len() > 256 * 1024 {
-                return Err(err("JOURNAL_SIZE_LIMIT"));
-            }
-            let bytes = fs::read(&path).map_err(|_| err("JOURNAL_READ"))?;
-            let wrapper: serde_json::Value =
-                serde_json::from_slice(&bytes).map_err(|_| err("JOURNAL_CORRUPT"))?;
-            let data =
-                serde_json::to_vec(&wrapper["record"]).map_err(|_| err("JOURNAL_CORRUPT"))?;
-            if wrapper["digest"] != digest(&data) {
-                return Err(err("JOURNAL_CORRUPT"));
-            }
-            let s: Saved = serde_json::from_value(wrapper["record"].clone())
-                .map_err(|_| err("JOURNAL_CORRUPT"))?;
-            if s.approval.wallet != wallet || s.intent.wallet != wallet {
-                return Err(err("JOURNAL_WALLET_MISMATCH"));
-            }
-            Some(s)
+        let legacy = if legacy.exists() {
+            Some(read_legacy(&legacy, wallet)?)
         } else {
             None
         };
-        let mut journal = Self {
+        let path = directory.join(format!("{wallet}.p0j"));
+        let (saved, writer) = if path.exists() {
+            if fs::metadata(&path).map_err(|_| err("JOURNAL_READ"))?.len() > MAX_JOURNAL_BYTES {
+                return Err(err("JOURNAL_SIZE_LIMIT"));
+            }
+            let (saved, imported) = replay(&path, wallet)?;
+            // The import binds the unchanged JSON bytes; a missing or edited JSON file is a halt.
+            match (&legacy, imported, &saved) {
+                (Some((sha, _)), Some(imported), _) if *sha == imported => {}
+                (None, None, _) | (Some(_), None, None) => {}
+                _ => return Err(err("JOURNAL_LEGACY_MISMATCH")),
+            }
+            let writer = journal::Writer::resume(&path).map_err(|_| err("JOURNAL_CORRUPT"))?;
+            (saved, writer)
+        } else {
+            (
+                None,
+                journal::Writer::create(&path).map_err(|_| err("JOURNAL_IO"))?,
+            )
+        };
+        let mut this = Self {
             _lock: lock,
-            path,
             wallet: wallet.into(),
             saved,
+            writer,
         };
-        if let Some(mut prior) = journal.saved.clone() {
-            if prior.phase == Phase::Reserved {
-                prior.phase = Phase::HandoffUnknown;
-                journal.persist(prior)?;
+        if this.saved.is_none() {
+            if let Some((legacy_sha256, state)) = legacy {
+                let value = serde_json::to_value(LegacyImportRef {
+                    legacy_sha256: &legacy_sha256,
+                    state: &state,
+                })
+                .map_err(|_| err("JOURNAL_ENCODE"))?;
+                this.append(journal::kind::FE04_LEGACY_IMPORT, &value)?;
+                this.saved = Some(state);
             }
         }
-        Ok(journal)
+        if let Some(mut prior) = this.saved.clone() {
+            if prior.phase == Phase::Reserved {
+                prior.phase = Phase::HandoffUnknown;
+                this.persist(prior, Transition::ReopenUnknown)?;
+            }
+        }
+        Ok(this)
     }
-    fn persist(&mut self, saved: Saved) -> Result<(), String> {
-        let record = serde_json::to_value(&saved).map_err(|_| err("JOURNAL_ENCODE"))?;
-        let bytes = serde_json::to_vec(&record).map_err(|_| err("JOURNAL_ENCODE"))?;
-        let wrapper = serde_json::json!({"record":record,"digest":digest(&bytes)});
-        let tmp = self.path.with_extension("pending");
-        // An interrupted write blocks further actions; never silently truncate it.
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&tmp)
-            .map_err(|_| err("JOURNAL_PENDING_OR_IO"))?;
-        serde_json::to_writer(&mut file, &wrapper).map_err(|_| err("JOURNAL_WRITE"))?;
-        file.flush()
-            .and_then(|_| file.sync_all())
-            .map_err(|_| err("JOURNAL_FSYNC"))?;
-        fs::rename(&tmp, &self.path).map_err(|_| err("JOURNAL_RENAME"))?;
-        File::open(self.path.parent().unwrap())
-            .and_then(|f| f.sync_all())
-            .map_err(|_| err("JOURNAL_DIR_FSYNC"))?;
+    /// Appends one frame and returns only after fsync confirmed exactly that frame.
+    fn append(&mut self, kind: u16, value: &serde_json::Value) -> Result<(), String> {
+        let provenance = journal::Provenance {
+            source: journal::source::FE04,
+            source_seq: self.writer.next_seq(),
+            ..Default::default()
+        };
+        let frame = self
+            .writer
+            .append(kind, 1, provenance, value)
+            .map_err(|_| err("JOURNAL_WRITE"))?;
+        let durable = self.writer.sync().map_err(|_| err("JOURNAL_FSYNC"))?;
+        if durable.journal_seq != frame.journal_seq || durable.hash != frame.hash {
+            return Err(err("JOURNAL_DURABILITY_UNCONFIRMED"));
+        }
+        Ok(())
+    }
+    /// The in-memory state advances only after the new version is durable. A failed write
+    /// poisons the writer, so every later transition (and thus every send) is refused.
+    fn persist(&mut self, saved: Saved, transition: Transition) -> Result<(), String> {
+        let value = serde_json::to_value(VersionRef {
+            transition,
+            state: &saved,
+        })
+        .map_err(|_| err("JOURNAL_ENCODE"))?;
+        self.append(journal::kind::FE04_TRANSITION, &value)?;
         self.saved = Some(saved);
         Ok(())
     }
@@ -219,13 +357,16 @@ impl Journal {
             return Err(err("JOURNAL_WALLET_MISMATCH"));
         }
         validate(&approval, &intent, now)?;
-        self.persist(Saved {
-            approval,
-            intent,
-            phase: Phase::Reserved,
-            finalized: None,
-            observations: BTreeMap::new(),
-        })
+        self.persist(
+            Saved {
+                approval,
+                intent,
+                phase: Phase::Reserved,
+                finalized: None,
+                observations: BTreeMap::new(),
+            },
+            Transition::Reserve,
+        )
     }
     /// The callback must be the existing adapter's single submit/submit_bundle
     /// invocation over exactly the bound bytes. No automatic retry is provided.
@@ -244,7 +385,7 @@ impl Journal {
         }
         validate(&s.approval, &s.intent, now)?;
         s.phase = Phase::HandoffUnknown;
-        self.persist(s)?; // durable BEFORE any possible acceptance; errors retain holds
+        self.persist(s, Transition::Handoff)?; // durable BEFORE any possible acceptance; errors retain holds
         send()
     }
     /// Reopening never authorizes a handoff, even after a pre-send crash.
@@ -272,7 +413,7 @@ impl Journal {
         }
         s.phase = Phase::HaltFinalized;
         s.finalized = Some(receipts);
-        self.persist(s)
+        self.persist(s, Transition::Finalize)
     }
     pub fn holds(&self) -> BTreeMap<String, u64> {
         self.saved
@@ -384,6 +525,7 @@ fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     pub(super) fn setup() -> (PathBuf, Approval, Intent, Current) {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -761,22 +903,41 @@ mod tests {
         assert!(p.simulate(&a).is_err());
         assert!(a.simulated.borrow().is_empty());
     }
+    /// A pre-binary `<wallet>.json` journal exactly as the former JSON writer stored it.
+    fn write_legacy(dir: &Path, saved: &Saved, without_observations: bool) -> PathBuf {
+        fs::create_dir_all(dir).unwrap();
+        let mut record = serde_json::to_value(saved).unwrap();
+        if without_observations {
+            record.as_object_mut().unwrap().remove("observations");
+        }
+        let wrapper = serde_json::json!({"record":record,"digest":digest(&serde_json::to_vec(&record).unwrap())});
+        let path = dir.join(format!("{}.json", saved.approval.wallet));
+        fs::write(&path, serde_json::to_vec(&wrapper).unwrap()).unwrap();
+        path
+    }
+    fn reserved(a: &Approval, i: &Intent) -> Saved {
+        Saved {
+            approval: a.clone(),
+            intent: i.clone(),
+            phase: Phase::Reserved,
+            finalized: None,
+            observations: BTreeMap::new(),
+        }
+    }
+    fn path_of(j: &Journal) -> PathBuf {
+        j.writer.path.clone()
+    }
+    fn kinds(path: &Path) -> Vec<u16> {
+        let mut r = journal::Reader::open(path).unwrap();
+        std::iter::from_fn(|| r.next_frame().unwrap())
+            .map(|f| f.kind)
+            .collect()
+    }
     #[test]
     fn legacy_journal_without_observations_reopens_with_hold() {
-        let (dir, a, i, c) = setup();
-        let mut journal = Journal::open(&dir, &a.wallet).unwrap();
-        journal.reserve(a.clone(), i.clone(), &c).unwrap();
-        let path = journal.path.clone();
-        drop(journal);
-        let mut wrapper: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        wrapper["record"]
-            .as_object_mut()
-            .unwrap()
-            .remove("observations");
-        wrapper["digest"] =
-            serde_json::json!(digest(&serde_json::to_vec(&wrapper["record"]).unwrap()));
-        fs::write(&path, serde_json::to_vec(&wrapper).unwrap()).unwrap();
+        let (dir, a, i, _) = setup();
+        let legacy = write_legacy(&dir, &reserved(&a, &i), true);
+        let bytes = fs::read(&legacy).unwrap();
         let reopened = Journal::open(&dir, &a.wallet).unwrap();
         assert_eq!(reopened.holds(), i.holds);
         assert!(reopened.saved.as_ref().unwrap().observations.is_empty());
@@ -784,7 +945,131 @@ mod tests {
             reopened.saved.as_ref().unwrap().phase,
             Phase::HandoffUnknown
         );
+        let binary = dir.join(format!("{}.p0j", a.wallet));
         drop(reopened);
+        // The JSON journal is historical evidence: never rewritten, its bytes are bound once.
+        assert_eq!(fs::read(&legacy).unwrap(), bytes);
+        assert_eq!(
+            kinds(&binary),
+            [
+                journal::kind::FE04_LEGACY_IMPORT,
+                journal::kind::FE04_TRANSITION
+            ]
+        );
+        assert_eq!(Journal::open(&dir, &a.wallet).unwrap().holds(), i.holds);
+        let mut edited = bytes.clone();
+        edited.push(b' ');
+        fs::write(&legacy, edited).unwrap();
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("JOURNAL_LEGACY_MISMATCH")
+        );
+        fs::remove_file(&legacy).unwrap();
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("JOURNAL_LEGACY_MISMATCH")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn damaged_truncated_foreign_or_illegal_binary_journal_is_a_halt() {
+        let (dir, a, i, c) = setup();
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        let file = path_of(&j);
+        drop(j);
+        let good = fs::read(&file).unwrap();
+        let n = good.len();
+        let mut flipped = good.clone();
+        flipped[n - 60] ^= 1;
+        let mut header = good.clone();
+        header[3] ^= 1;
+        for bytes in [
+            good[..n - 1].to_vec(),
+            good[..n - 40].to_vec(),
+            good[..30].to_vec(),
+            [good.clone(), vec![0x55]].concat(),
+            flipped,
+            header,
+        ] {
+            fs::write(&file, &bytes).unwrap();
+            assert_eq!(
+                Journal::open(&dir, &a.wallet).err().as_deref(),
+                Some("JOURNAL_CORRUPT")
+            );
+        }
+        // Frames the automaton never writes: a second reservation, a foreign kind, a seal.
+        let state = reserved(&a, &i);
+        let again = serde_json::to_value(VersionRef {
+            transition: Transition::Reserve,
+            state: &state,
+        })
+        .unwrap();
+        let illegal: [(u16, serde_json::Value, &str); 3] = [
+            (
+                journal::kind::FE04_TRANSITION,
+                again,
+                "JOURNAL_TRANSITION_INVALID",
+            ),
+            (
+                journal::kind::OWNER_RECORD,
+                serde_json::json!({}),
+                "JOURNAL_CORRUPT",
+            ),
+            (
+                journal::kind::FE04_LEGACY_IMPORT,
+                serde_json::json!({}),
+                "JOURNAL_CORRUPT",
+            ),
+        ];
+        for (kind, value, code) in illegal {
+            fs::write(&file, &good).unwrap();
+            let mut w = journal::Writer::resume(&file).unwrap();
+            w.append_value(kind, &value).unwrap();
+            w.sync().unwrap();
+            drop(w);
+            assert_eq!(Journal::open(&dir, &a.wallet).err().as_deref(), Some(code));
+        }
+        fs::write(&file, &good).unwrap();
+        journal::Writer::resume(&file).unwrap().seal(true).unwrap();
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("JOURNAL_CORRUPT")
+        );
+        // Undamaged bytes still reopen into UNKNOWN with the hold.
+        fs::write(&file, &good).unwrap();
+        let resumed = Journal::open(&dir, &a.wallet).unwrap();
+        assert_eq!(resumed.holds(), i.holds);
+        drop(resumed);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn journal_write_failure_blocks_send_and_keeps_the_hold() {
+        let (dir, a, i, c) = setup();
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        j.writer.test_read_only(); // stands for disk full / I/O error at the durability barrier
+        let sent = std::cell::Cell::new(0);
+        for _ in 0..2 {
+            assert!(j
+                .handoff(&i.signed_wire_sha256, &c, || {
+                    sent.set(sent.get() + 1);
+                    Ok(())
+                })
+                .is_err());
+        }
+        assert_eq!(sent.get(), 0);
+        assert_eq!(j.holds(), i.holds);
+        drop(j);
+        let mut resumed = Journal::open(&dir, &a.wallet).unwrap();
+        assert_eq!(resumed.holds(), i.holds);
+        assert_eq!(resumed.saved.as_ref().unwrap().phase, Phase::HandoffUnknown);
+        assert!(resumed
+            .handoff(&i.signed_wire_sha256, &c, || -> Result<(), String> {
+                panic!("MUST NOT SEND")
+            })
+            .is_err());
+        drop(resumed);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
@@ -964,7 +1249,7 @@ mod tests {
         let (path, a, i, c) = setup();
         let mut j = Journal::open(&path, &a.wallet).unwrap();
         j.reserve(a.clone(), i, &c).unwrap();
-        let file = j.path.clone();
+        let file = path_of(&j);
         drop(j);
         fs::write(&file, b"{}").unwrap();
         assert!(Journal::open(&path, &a.wallet).is_err());

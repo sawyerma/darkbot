@@ -1647,3 +1647,158 @@ fn six_real_audit_liquidations_aggregate_into_market_summary() {
     );
     assert!(sink.liq.iter().all(|r| r["enrichment_status"] == "PAYLOAD"));
 }
+
+fn journal_test_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "c0mo_{name}_{}_{}",
+        std::process::id(),
+        Pubkey::new_unique()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn journal_sink_views_are_byte_identical_to_the_jsonl_sink() {
+    let dir = journal_test_dir("journal_parity");
+    let (legacy, binary) = (dir.join("jsonl"), dir.join("journal"));
+    fs::create_dir_all(&legacy).unwrap();
+    fs::create_dir_all(&binary).unwrap();
+    let raw = json!({"value":{"logs":["Program log: \u{e9}\"q\"\n", "x"],"err":null},"meta":{"fee":5000}});
+    let rows = [
+        (
+            0,
+            json!({"slot":5,"t_rx_ns":7,"signature":"s1","raw":raw,"tx_version":null,"success":true}),
+        ),
+        (
+            1,
+            json!({"slot":5,"seized_equity_usd":12.25,"gross_edge_usd":0.30000000000000004,
+            "repaid_equity_usd":1e-7,"receiver_lamport_delta":i128::MAX.to_string(),"cu_limit":u64::MAX}),
+        ),
+        (
+            2,
+            json!({"event":"START","timestamp_utc":"2026-10-16T00:00:00Z","t_rx_ns":null,"counted":true}),
+        ),
+        (
+            0,
+            json!({"slot":6,"t_rx_ns":8,"signature":"s2","raw":{},"negative":-17,"big":i128::MIN}),
+        ),
+        (
+            2,
+            json!({"event":"MARKET_SLOT_BOUNDARY_EVIDENCE","event_extra":{"slot":6}}),
+        ),
+    ];
+    let mut jsonl = JsonlSink::create(&legacy).unwrap();
+    let mut journal = JournalSink::create(&binary).unwrap();
+    for (kind, row) in &rows {
+        for sink in [&mut jsonl as &mut dyn MarketSink, &mut journal] {
+            match kind {
+                0 => sink.transaction(row),
+                1 => sink.liquidation(row),
+                _ => sink.coverage(row),
+            }
+            .unwrap();
+        }
+    }
+    jsonl.flush().unwrap();
+    let binding = journal.finish().unwrap().unwrap();
+    for (_, name) in MARKET_VIEWS {
+        assert_eq!(
+            fs::read(legacy.join(name)).unwrap(),
+            fs::read(binary.join(name)).unwrap(),
+            "{name}"
+        );
+    }
+    assert_eq!(binding["status"], "COMPLETE");
+    assert_eq!(binding["event_frames"], 5);
+    assert_eq!(binding["views"]["transactions.jsonl"]["rows"], 2);
+    assert_eq!(binding["views"]["liquidations.jsonl"]["rows"], 1);
+    assert_eq!(binding["views"]["coverage.jsonl"]["rows"], 2);
+    let mut reader = crate::analytics::journal::Reader::open(&binary.join(MARKET_JOURNAL)).unwrap();
+    let first = reader.next_frame().unwrap().unwrap();
+    assert_eq!(
+        (first.provenance.slot, first.provenance.rx_ns),
+        (Some(5), Some(7))
+    );
+    while reader.next_frame().unwrap().is_some() {}
+    assert!(reader.sealed && reader.complete);
+    assert_eq!(
+        crate::analytics::journal::hex(&reader.root()),
+        binding["root_sha256"]
+    );
+    // One finish only; an existing journal or view is never overwritten.
+    assert!(journal.finish().is_err());
+    drop(journal);
+    assert!(JournalSink::create(&binary).is_err());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn journal_sink_finalize_binds_views_and_early_exit_still_renders_incomplete() {
+    let dir = journal_test_dir("journal_finalize");
+    let p = program();
+    let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
+    let mut sink = JournalSink::create(&dir).unwrap();
+    core.on_logs(
+        &logs_event(
+            "x",
+            9,
+            logs_with(
+                &p,
+                &[data_line(
+                    Pubkey::new_unique(),
+                    Pubkey::new_unique(),
+                    3.0,
+                    1.0,
+                    1,
+                )],
+            ),
+            None,
+            1,
+        ),
+        0,
+        &mut sink,
+    )
+    .unwrap();
+    core.stop_observation();
+    // During the capture only the journal exists; the views are rendered by finalize.
+    for (_, name) in MARKET_VIEWS {
+        assert!(!dir.join(name).exists(), "{name}");
+    }
+    let (summary, report) = finalize(
+        &mut core,
+        &mut sink,
+        &ctx(true, true, 600.0),
+        &dir,
+        0,
+        json!({"reason": "TIMER"}),
+    )
+    .unwrap();
+    let binding = &summary["evidence_journal"];
+    assert_eq!(binding["journal"], MARKET_JOURNAL);
+    assert_eq!(binding["status"], "COMPLETE");
+    assert_eq!(binding["views"]["transactions.jsonl"]["rows"], 1);
+    assert!(report.contains(MARKET_JOURNAL));
+    let on_disk: Value =
+        serde_json::from_slice(&fs::read(dir.join("summary.json")).unwrap()).unwrap();
+    assert_eq!(&on_disk["evidence_journal"], binding);
+    assert!(fs::read_to_string(dir.join("coverage.jsonl"))
+        .unwrap()
+        .contains("STOPPED"));
+    drop(sink);
+    // Early exit (for example a failed warmup): sealed INCOMPLETE, views still rendered.
+    let early = dir.join("early");
+    fs::create_dir_all(&early).unwrap();
+    {
+        let mut sink = JournalSink::create(&early).unwrap();
+        sink.coverage(&json!({"event":"SHADOW_WARMUP_FAILED","error":"X"}))
+            .unwrap();
+    }
+    assert!(fs::read_to_string(early.join("coverage.jsonl"))
+        .unwrap()
+        .contains("SHADOW_WARMUP_FAILED"));
+    let mut reader = crate::analytics::journal::Reader::open(&early.join(MARKET_JOURNAL)).unwrap();
+    while reader.next_frame().unwrap().is_some() {}
+    assert!(reader.sealed && !reader.complete);
+    fs::remove_dir_all(dir).unwrap();
+}

@@ -38,8 +38,22 @@ def archived_specs(run,spec):
     return found
 
 
+def journal_views(run):
+    """PERSIST-04: the JSONL/JSON views the pinned readers consume are explicit exports of the
+    run's binary journals. Before the capture is hashed, render missing views (for example after
+    a killed capture) and require every existing view to equal its render byte for byte.
+    Historical runs without journals are left exactly as they are."""
+    if not any(p.suffix=='.p0j' for p in run.rglob('*.p0j') if 'verification' not in p.relative_to(run).parts):return None
+    binary=run_store.PROJECT/'native/target/release/p0-journal'
+    if not binary.exists():raise c.ContractError('JOURNAL_TOOL_MISSING: build p0-journal (capture.sh builds it)')
+    p=subprocess.run([str(binary),'renders',str(run),'--create'],capture_output=True,text=True,timeout=3600)
+    if p.returncode:raise c.ContractError('JOURNAL_VIEWS_INVALID: '+(p.stderr.strip().splitlines() or ['?'])[-1][:500])
+    return json.loads(p.stdout)
+
+
 def verify(run,v,qualification=None,offline=False,resume=False):
-    run=Path(run).resolve();evidence=c.finalize_capture(run);c.check_capture(run,evidence,hashes=True)
+    run=Path(run).resolve();journal_views(run)
+    evidence=c.finalize_capture(run);c.check_capture(run,evidence,hashes=True)
     url=c.endpoint();pf=c.preflight(run,v,qualification,url)
     spec=c.specification(run,v,pf['provider_binding']);sid=spec['verification_spec_id']
     out=run/'verification'/sid

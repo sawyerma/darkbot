@@ -130,8 +130,6 @@ impl Worker {
     /// Replay each relevant target once, so old coalesced representatives cannot hide
     /// a pre-winner plan. Selection uses canonical chain episodes + exact plan identity.
     pub(super) fn finalize_canonical(&mut self) -> Result<(), String> {
-        self.evaluations.flush().map_err(|e| e.to_string())?;
-        self.journal.flush().map_err(|e| e.to_string())?;
         let mut grouped: BTreeMap<String, Vec<TruthEvent>> = BTreeMap::new();
         for event in &self.canonical_market {
             grouped
@@ -139,14 +137,6 @@ impl Worker {
                 .or_default()
                 .push(event.clone());
         }
-        let mut journal = BufReader::new(
-            File::open(self.h.cfg.paths().capture("shadow_offsets.bin"))
-                .map_err(|e| e.to_string())?,
-        );
-        let mut raw = BufReader::new(
-            File::open(self.h.cfg.paths().capture("shadow_evaluations.jsonl"))
-                .map_err(|e| e.to_string())?,
-        );
         let mut result = Vec::new();
         let deadline = std::time::Instant::now() + Duration::from_secs(7200);
         let mut replayed = 0u64;
@@ -167,43 +157,15 @@ impl Worker {
                     diagnostic: None,
                 })
                 .collect();
-            let mut cursor = self
-                .shadow_heads
-                .get(&target)
-                .copied()
-                .unwrap_or(NO_PREVIOUS);
-            while cursor != NO_PREVIOUS {
+            let mut cursor = self.shadow_heads.get(&target).copied();
+            while let Some(at) = cursor {
                 replayed += 1;
                 if replayed > self.shadow_evaluations_streamed
                     || std::time::Instant::now() > deadline
                 {
                     return Err("canonical replay budget".into());
                 }
-                if cursor >= self.journal_bytes || cursor % JOURNAL_ENTRY_BYTES != 0 {
-                    return Err("canonical journal offset".into());
-                }
-                journal
-                    .seek(SeekFrom::Start(cursor))
-                    .map_err(|e| e.to_string())?;
-                let mut b = [0u8; 24];
-                journal.read_exact(&mut b).map_err(|e| e.to_string())?;
-                let previous = u64::from_le_bytes(b[..8].try_into().unwrap());
-                let offset = u64::from_le_bytes(b[8..16].try_into().unwrap());
-                let len = u64::from_le_bytes(b[16..].try_into().unwrap());
-                if (previous != NO_PREVIOUS && previous >= cursor)
-                    || offset
-                        .checked_add(len)
-                        .is_none_or(|end| end > self.evaluation_bytes)
-                {
-                    return Err("canonical journal bounds".into());
-                }
-                raw.seek(SeekFrom::Start(offset))
-                    .map_err(|e| e.to_string())?;
-                let rec: OpportunityRecord =
-                    serde_json::from_reader((&mut raw).take(len)).map_err(|e| e.to_string())?;
-                if rec.account != target {
-                    return Err("canonical journal target".into());
-                }
+                let (_, previous, rec) = self.chain_frame(&target, at)?;
                 assign_record(&mut rows, &rec);
                 cursor = previous;
             }
@@ -216,16 +178,13 @@ impl Worker {
                 r.market.event_index,
             )
         });
-        let file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(self.h.cfg.paths().snapshot("canonical_market_shadow.jsonl"))
-            .map_err(|e| e.to_string())?;
-        let mut out = BufWriter::new(file);
         for row in &result {
-            line(&mut out, &joined_value(row))?;
+            self.append_report(journal::kind::ECON_CANONICAL, &joined_value(row))?;
         }
-        out.flush().map_err(|e| e.to_string())?;
+        self.render_rows(
+            journal::kind::ECON_CANONICAL,
+            "canonical_market_shadow.jsonl",
+        )?;
         self.canonical_joined = result;
         self.canonical_finalized = true;
         Ok(())
@@ -544,7 +503,6 @@ mod regression {
         let mut w = worker();
         let r = identified();
         w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
-        w.evaluations.flush().unwrap();
         let mut event = row(&r, 10, 0).market;
         event.block_time = Some(101);
         let input = w.h.cfg.run_dir.join("replay_market.jsonl");
@@ -598,6 +556,39 @@ mod regression {
             30
         )
         .is_err());
+        // Runs before PERSIST-01 keep their JSONL stream: same replay, byte-identical renders.
+        let legacy_dir = w.h.cfg.run_dir.join("legacy");
+        fs::create_dir(&legacy_dir).unwrap();
+        let legacy = legacy_dir.join("shadow_evaluations.jsonl");
+        fs::write(&legacy, format!("{}\n", serde_json::to_string(&r).unwrap())).unwrap();
+        let from_legacy = w.h.cfg.run_dir.join("offline_replay_legacy");
+        replay(&input, &legacy, &from_legacy, &plan, 100_000_000_000, 30).unwrap();
+        for name in ["canonical_market_shadow.jsonl", "economics_final.json"] {
+            assert_eq!(
+                fs::read(out.join(name)).unwrap(),
+                fs::read(from_legacy.join(name)).unwrap(),
+                "{name}"
+            );
+        }
+        // Both sources at once are ambiguous, never merged or guessed.
+        fs::copy(
+            journal::binary_path(&w.h.cfg.run_dir.join("shadow_evaluations.jsonl")),
+            journal::binary_path(&legacy),
+        )
+        .unwrap();
+        assert_eq!(
+            replay(
+                &input,
+                &legacy,
+                &w.h.cfg.run_dir.join("ambiguous"),
+                &plan,
+                100_000_000_000,
+                30
+            )
+            .err()
+            .as_deref(),
+            Some("AMBIGUOUS_SHADOW_SOURCE")
+        );
     }
     #[test]
     fn exact_identity_and_chain_episode_prevent_cross_event_allocation() {
@@ -823,11 +814,41 @@ pub(super) fn replay(
         });
     }
     // One bounded streaming pass. No RPC repricing/re-simulation and no synthetic
-    // evaluation when the original capture lost data.
-    if count > 0 && !shadow_path.exists() {
+    // evaluation when the original capture lost data. The evaluation stream is the binary
+    // journal (`shadow_evaluations.p0j`); runs before PERSIST-01 keep their JSONL file.
+    let binary = if shadow_path.extension().is_some_and(|e| e == "p0j") {
+        shadow_path.to_path_buf()
+    } else {
+        journal::binary_path(shadow_path)
+    };
+    let legacy = binary != shadow_path && shadow_path.exists();
+    if binary.exists() && legacy {
+        return Err("AMBIGUOUS_SHADOW_SOURCE".into());
+    }
+    let available = binary.exists() || legacy;
+    if count > 0 && !available {
         return Err("SHADOW_JOURNAL_MISSING".into());
     }
-    if count > 0 && shadow_path.exists() {
+    if count > 0 && binary.exists() {
+        let mut reader = journal::Reader::open(&binary).map_err(|_| "SHADOW_INPUT")?;
+        while let Some(mut frame) = reader.next_frame().map_err(|_| "SHADOW_READ")? {
+            if std::time::Instant::now() >= deadline {
+                return Err("REPLAY_TIME_BUDGET".into());
+            }
+            match frame.kind {
+                journal::kind::ECON_SHADOW_EVALUATION => {
+                    let rec: OpportunityRecord =
+                        serde_json::from_value(frame.value["record"].take())
+                            .map_err(|_| "SHADOW_DECODE")?;
+                    if let Some(rows) = grouped.get_mut(&rec.account) {
+                        assign_record(rows, &rec);
+                    }
+                }
+                journal::MANIFEST => {}
+                _ => return Err("SHADOW_DECODE".into()),
+            }
+        }
+    } else if count > 0 {
         let mut reader = BufReader::new(File::open(shadow_path).map_err(|_| "SHADOW_INPUT")?);
         loop {
             if std::time::Instant::now() >= deadline {
@@ -887,7 +908,7 @@ pub(super) fn replay(
             "start_unix_ns":start_ns,"cutoff_unix_ns":start_ns+plan.offset_ns(i),"plan":plan,
             "cumulative":summarize(&cumulative,plan.span_seconds(0,i),unassigned,true),
             "window_delta":summarize(&delta,plan.span_seconds(i-1,i),unassigned,true),
-            "raw_shadow_available":shadow_path.exists(),"live_enabled":false,"master_pass":false});
+            "raw_shadow_available":available,"live_enabled":false,"master_pass":false});
         atomic_json(&out.join(format!("hour_{i:02}.json")), &value)?;
         if i == SNAPSHOT_COUNT {
             atomic_json(&out.join("economics_final.json"), &value)?;

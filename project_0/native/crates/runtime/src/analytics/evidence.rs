@@ -179,14 +179,19 @@ pub enum OwnerEvidence {
     Opportunity(Box<OpportunityRecord>),
     Reconcile(ReconcileRecord),
     Summary(DaySummary),
+    /// A formatted owner diagnostic. The owner never writes stderr itself (PERSIST-02).
+    Diagnostic(String),
 }
 impl OwnerEvidence {
     fn encode(self) -> Result<(u16, Value), serde_json::Error> {
         match self {
-            Self::Record(v) => (Ok((100, v.value()))),
-            Self::Opportunity(v) => Ok((101, serde_json::to_value(v)?)),
-            Self::Reconcile(v) => Ok((102, serde_json::to_value(v)?)),
-            Self::Summary(v) => Ok((103, serde_json::to_value(v)?)),
+            Self::Record(v) => Ok((journal::kind::OWNER_RECORD, v.value())),
+            Self::Opportunity(v) => {
+                Ok((journal::kind::OWNER_OPPORTUNITY, serde_json::to_value(v)?))
+            }
+            Self::Reconcile(v) => Ok((journal::kind::OWNER_RECONCILE, serde_json::to_value(v)?)),
+            Self::Summary(v) => Ok((journal::kind::OWNER_SUMMARY, serde_json::to_value(v)?)),
+            Self::Diagnostic(line) => Ok((journal::kind::OWNER_DIAGNOSTIC, json!({"line": line}))),
         }
     }
 }
@@ -276,6 +281,11 @@ impl OwnerEvidenceWriter {
         self.refused = Some(failure.1);
         Err(failure.0.into())
     }
+    /// Owner diagnostics go through the same bounded queue; the writer journals the line and
+    /// only then prints it. A full queue closes admission like any other evidence.
+    pub fn diagnostic(&mut self, line: String) -> Result<(), EvidenceFailure> {
+        self.emit(OwnerEvidence::Diagnostic(line))
+    }
     pub fn finish(&mut self, summary: Option<DaySummary>) -> Result<(), EvidenceFailure> {
         let Some(worker) = self.worker.take() else {
             return self.check();
@@ -332,9 +342,19 @@ impl Sink {
                 return;
             }
         };
+        let console = (kind == journal::kind::OWNER_DIAGNOSTIC)
+            .then(|| value["line"].as_str().map(str::to_owned))
+            .flatten();
+        self.store(kind, value);
+        // The console copy of an owner diagnostic, printed here, after its frame.
+        if let Some(line) = console {
+            eprintln!("{line}");
+        }
+    }
+    fn store(&mut self, kind: u16, value: Value) {
         let offset = self.journal.position();
         let p = Provenance {
-            source: 1,
+            source: journal::source::OWNER,
             source_seq: self.journal.next_seq(),
             slot: value
                 .get("slot")
@@ -359,7 +379,9 @@ impl Sink {
         }
         if let Some(w) = &mut self.recovery_writer {
             let value = json!({"original_journal_offset":offset,"event_kind":kind,"event":value});
-            if w.append_value(1000, &value).is_err() {
+            if w.append_value(journal::kind::OWNER_RECOVERY, &value)
+                .is_err()
+            {
                 self.recovery_failed = true;
             }
         }

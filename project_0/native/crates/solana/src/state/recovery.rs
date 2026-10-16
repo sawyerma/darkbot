@@ -109,7 +109,13 @@ pub struct RecoveryDriver {
     root_catchup_timeout: Option<Duration>,
     // Production-only bounded adaptive extension; legacy fixed-timeout calls unchanged.
     root_progress_limits: Option<RootProgressLimits>,
+    // Progress lines, in memory only: the caller (the Shadow owner) forwards them through its
+    // non-blocking evidence writer, so recovery never writes stderr on the owner thread.
+    diagnostics: Vec<String>,
+    diagnostics_beyond: u64,
 }
+
+const DIAGNOSTICS_MAX: usize = 256;
 
 impl RecoveryDriver {
     pub fn new(max_attempts: u32) -> Self {
@@ -119,7 +125,26 @@ impl RecoveryDriver {
             reconcile_failures: 0,
             root_catchup_timeout: None,
             root_progress_limits: None,
+            diagnostics: Vec::new(),
+            diagnostics_beyond: 0,
         }
+    }
+
+    fn note(&mut self, line: String) {
+        if self.diagnostics.len() < DIAGNOSTICS_MAX {
+            self.diagnostics.push(line);
+        } else {
+            self.diagnostics_beyond += 1;
+        }
+    }
+
+    /// Progress lines since the last call, and how many exceeded the bound (counted, not lost
+    /// silently).
+    pub fn take_diagnostics(&mut self) -> (Vec<String>, u64) {
+        (
+            std::mem::take(&mut self.diagnostics),
+            std::mem::take(&mut self.diagnostics_beyond),
+        )
     }
 
     pub fn with_root_catchup(mut self, timeout: Duration) -> Self {
@@ -167,27 +192,27 @@ impl RecoveryDriver {
         'attempts: for attempt in 1..=self.max_attempts {
             check_cancelled!();
             self.attempts_total += 1;
-            eprintln!("[recovery] attempt={}/{} snapshot=A start", attempt, self.max_attempts);
+            self.note(format!("[recovery] attempt={}/{} snapshot=A start", attempt, self.max_attempts));
             let a = match fetch() {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!(
+                    self.note(format!(
                         "[recovery] attempt={}/{} snapshot=A error={}",
                         attempt,
                         self.max_attempts,
                         safe_recovery_error(&e)
-                    );
+                    ));
                     continue;
                 }
             };
-            eprintln!(
+            self.note(format!(
                 "[recovery] attempt={}/{} snapshot=A ok slot={} accounts={} missing_required={}",
                 attempt,
                 self.max_attempts,
                 a.slot,
                 a.accounts.len(),
                 a.missing_required.len()
-            );
+            ));
             if !a.missing_required.is_empty() {
                 // [FIX-37] fehlende required Accounts: kein READY, nächster Versuch.
                 st.halt(HaltReason::ReconcileFailure);
@@ -197,28 +222,28 @@ impl RecoveryDriver {
             check_cancelled!();
             st.install_snapshot(a.slot, a.accounts);
             drain(st); // Deltas, die während Fetch A ankamen
-            eprintln!("[recovery] attempt={}/{} snapshot=B start", attempt, self.max_attempts);
+            self.note(format!("[recovery] attempt={}/{} snapshot=B start", attempt, self.max_attempts));
             let b = match fetch() {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!(
+                    self.note(format!(
                         "[recovery] attempt={}/{} snapshot=B error={}",
                         attempt,
                         self.max_attempts,
                         safe_recovery_error(&e)
-                    );
+                    ));
                     st.halt(HaltReason::ReconcileFailure);
                     continue;
                 }
             };
-            eprintln!(
+            self.note(format!(
                 "[recovery] attempt={}/{} snapshot=B ok slot={} accounts={} missing_required={}",
                 attempt,
                 self.max_attempts,
                 b.slot,
                 b.accounts.len(),
                 b.missing_required.len()
-            );
+            ));
             check_cancelled!();
             drain(st); // Deltas, die während Fetch B ankamen (vor dem Vergleich)
             if !b.missing_required.is_empty() {
@@ -237,12 +262,12 @@ impl RecoveryDriver {
                 let started = Instant::now();
                 let mut progress = RootProgressWatchdog::new(st.root());
                 let mut extension_logged = false;
-                eprintln!(
+                self.note(format!(
                     "[recovery] attempt={}/{} root_catchup start target={} current={:?} soft_ms={} stall_ms={:?} hard_ms={:?}",
                     attempt, self.max_attempts, target_slot, st.root(), timeout.as_millis(),
                     self.root_progress_limits.map(|p| p.stall.as_millis()),
                     self.root_progress_limits.map(|p| p.hard.as_millis())
-                );
+                ));
                 loop {
                     check_cancelled!();
                     drain(st);
@@ -253,11 +278,11 @@ impl RecoveryDriver {
                     // The hard limit takes precedence even if a blocked drain returned
                     // with a new root. Never promote an expired recovery attempt.
                     if reason == Some("hard") {
-                        eprintln!(
+                        self.note(format!(
                             "[recovery] attempt={}/{} root_catchup timeout reason=hard target={} current={:?} elapsed_ms={} stalled_ms={}",
                             attempt, self.max_attempts, target_slot, root,
                             elapsed.as_millis(), elapsed.saturating_sub(progress.last_progress_elapsed).as_millis()
-                        );
+                        ));
                         st.halt(HaltReason::ReconcileFailure);
                         self.reconcile_failures += 1;
                         continue 'attempts;
@@ -266,29 +291,29 @@ impl RecoveryDriver {
                         // Flush all already-enqueued notifications before reconciliation;
                         // a gap during drain must still leave StateCore HALTED.
                         drain(st);
-                        eprintln!(
+                        self.note(format!(
                             "[recovery] attempt={}/{} root_catchup ok target={} root={} elapsed_ms={}",
                             attempt, self.max_attempts, target_slot,
                             st.root().unwrap_or(0), started.elapsed().as_millis()
-                        );
+                        ));
                         break;
                     }
                     if let Some(reason) = reason {
-                        eprintln!(
+                        self.note(format!(
                             "[recovery] attempt={}/{} root_catchup timeout reason={} target={} current={:?} elapsed_ms={} stalled_ms={}",
                             attempt, self.max_attempts, reason, target_slot, root,
                             elapsed.as_millis(), elapsed.saturating_sub(progress.last_progress_elapsed).as_millis()
-                        );
+                        ));
                         st.halt(HaltReason::ReconcileFailure);
                         self.reconcile_failures += 1;
                         continue 'attempts;
                     }
                     if self.root_progress_limits.is_some() && elapsed >= timeout && !extension_logged {
                         extension_logged = true;
-                        eprintln!(
+                        self.note(format!(
                             "[recovery] attempt={}/{} root_catchup extending target={} current={:?} elapsed_ms={}",
                             attempt, self.max_attempts, target_slot, root, elapsed.as_millis()
-                        );
+                        ));
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
@@ -297,22 +322,22 @@ impl RecoveryDriver {
             check_cancelled!();
             let rep = st.reconcile(b.slot, &b.accounts);
             if rep.is_clean() {
-                eprintln!(
+                self.note(format!(
                     "[recovery] attempt={}/{} reconcile=clean snapshot_slot={}",
                     attempt,
                     self.max_attempts,
                     b.slot
-                );
+                ));
                 if st.confirm_ready().is_tradable() {
                     return RecoveryOutcome::Ready;
                 }
             } else {
-                eprintln!(
+                self.note(format!(
                     "[recovery] attempt={}/{} reconcile=dirty report={:?}",
                     attempt,
                     self.max_attempts,
                     rep
-                );
+                ));
                 self.reconcile_failures += 1;
             }
             // Reconcile schmutzig: run_state ist Halted(ReconcileFailure); nächster Versuch

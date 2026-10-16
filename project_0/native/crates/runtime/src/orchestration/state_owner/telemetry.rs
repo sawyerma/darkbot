@@ -13,7 +13,8 @@ impl ShadowOwner {
             && update_total != self.last_reported_update_total
         {
             self.last_reported_update_total = update_total;
-            eprintln!(
+            owner_log!(
+                self,
                 "updates: accounts={} banks={} groups={} fee={} liqrec={} unknown={} channel={:?}",
                 self.counts[0],
                 self.counts[1],
@@ -25,14 +26,14 @@ impl ShadowOwner {
             );
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
-            eprintln!(
+            owner_log!(self,
                 "winner_watch_stats: len={} max={} observed={} deduped={} expired={} overflow={} dispatched={} queue_full_backoffs={} results={} stale_results={} errors={} resolved={} winner_requests=N/A winner_429=N/A",
                 ws.len, ws.max, ws.observed, ws.deduped, ws.expired, ws.overflow, ws.dispatched, ws.queue_full_backoffs, ws.results, ws.stale_results, ws.errors, ws.resolved
             );
             #[cfg(feature = "crate_health")]
             let pipeline_timing = pipeline_timing_snapshot();
             #[cfg(feature = "crate_health")]
-            eprintln!(
+            owner_log!(self,
                 "oracle_trigger_stats: threshold_ready={} tracked={} fallback={} bootstrap_remaining={} dependency_updates={} candidate_hits={} enqueued={} coalesced={} price_fallbacks={} pending={} max_pending={} detect_queue={} bank_projection_pending={} bank_projection_submitted={} bank_projection_ready={} bank_projection_failed={} bank_projection_stale={} ingress_backlog={} ingress_since_detect={} threshold_trigger={} sweep_checks={} sweep_healthy={} sweep_liquidatable={} sweep_errors={} sweep_batches={} sweep_dirty_banks={} sweep_account_refs={} sweep_unique_accounts={} sweep_forwarded={} sweep_max_unique_batch={} sweep_max_dirty_banks={} candidate_cache_entries={} candidate_cache_suppressed={} candidate_cache_softcap_suppressed={} candidate_cache_transition_forwards={} candidate_cache_revision_forwards={} candidate_pending_coalesced={} candidate_revision_coalesced={} candidate_physical_enqueues={} candidate_cache_periodic_forwards={} candidate_cache_forced_forwards={} candidate_repeat_wait_slots_max={} candidate_repeat_wait_slots_1={} candidate_repeat_wait_slots_2_3={} candidate_repeat_wait_slots_4_7={} candidate_repeat_wait_slots_8_15={} candidate_repeat_wait_slots_ge_16={} candidate_fairness_rotations={} candidate_periodic_due_but_deferred={} dependency_content_unchanged={} dependency_content_changed={} detect_health_calls={} detect_health_ns_total={} detect_health_ns_max={} detect_pipeline_calls={} detect_pipeline_ns_total={} detect_pipeline_ns_max={} pipeline_planning_calls={} pipeline_planning_ns_total={} pipeline_planning_ns_max={} pipeline_fee_calls={} pipeline_fee_ns_total={} pipeline_fee_ns_max={} pipeline_simulation_calls={} pipeline_simulation_ns_total={} pipeline_simulation_ns_max={} candidate_recheck_slots={} candidate_error_recheck_slots={} candidate_repeat_soft_cap={}",
                 self.threshold_ready,
                 self.threshold_index.tracked_accounts(),

@@ -558,6 +558,9 @@ pub(super) fn prepare(
         std::process::id(),
         clock.now_ns()
     ));
+    // Without P0_MT0_PATH the MT0 journal belongs to the same run as the opportunity journal
+    // (`<record>.mt0.p0j`), so runs sharing one directory never collide.
+    let mt0_default = journal_path.with_extension("mt0.p0j");
     let evidence = OwnerEvidenceWriter::start(
         journal_path,
         recovery_path,
@@ -735,13 +738,16 @@ pub(super) fn prepare(
     let ingress_since_detect: usize = 0;
     // [MT0] Measurement only: owner-section timing, queue-age tracking and an off-owner
     // reporter thread (the only place that writes MT0 evidence to disk).
-    let mt0_path =
-        config::parsed_or::<String>("P0_MT0_PATH", "project_0/data/shadow/mt0.jsonl".into())?;
+    let mt0_path = match config::parsed_or::<String>("P0_MT0_PATH", String::new())? {
+        path if path.is_empty() => mt0_default,
+        path => crate::analytics::journal::binary_path(std::path::Path::new(&path)),
+    };
+    std::fs::create_dir_all(mt0_path.parent().unwrap_or(std::path::Path::new(".")))?;
     let mt0_interval_secs: u64 = config::parsed_or("P0_MT0_INTERVAL_SECS", 10)?;
-    let _mt0_reporter = darkbot_common::mt0::spawn_reporter(
-        std::path::PathBuf::from(mt0_path),
+    let mt0_reporter = darkbot_common::mt0::spawn_reporter(
         Duration::from_secs(mt0_interval_secs.max(1)),
         shutdown.clone(),
+        crate::analytics::mt0_journal::Mt0Journal::create(&mt0_path)?,
     )?;
     let mt0_owner = darkbot_common::mt0::OwnerTimer::new();
     // [MT0] First-trigger receive time (`t_rx` of the enqueue that created the token) of every
@@ -797,9 +803,14 @@ pub(super) fn prepare(
             detect_pipeline_ns_total,
             detect_pipeline_ns_max,
         },
+        eval_slippage_bps: config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0).unwrap_or(0),
+        zero_prefund_enabled: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false)
+            .unwrap_or(false)
+            || (mode == "shadow"
+                && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false).unwrap_or(false)),
         mode,
         required_dependency_keys,
-        _mt0_reporter,
+        mt0_reporter,
         optional_dependency_keys,
         subscribed,
         required_set,

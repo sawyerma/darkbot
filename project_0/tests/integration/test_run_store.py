@@ -215,8 +215,22 @@ class Launchers(unittest.TestCase):
                     phases=[json.loads(x)['phase'] for x in s.artifact(run,'phases').read_text().splitlines()]
                     self.assertEqual(phases[0],'BOOTSTRAP')
                     for part in ('storage_preflight','candidate_manifest'):self.assertIsInstance(s.config_part(run,part),dict)
-                    for name in ('build_log','console_summary','runtime_log','shadow_evaluations','shadow_offsets'):
+                    for name in ('build_log','console_summary','runtime_log'):
                         self.assertTrue(s.artifact(run,name).is_file(),name)
+                    # PERSIST-01: binary journals are primary; the pinned readers' JSONL files are renders.
+                    evaluations=s.artifact(run,'shadow_evaluations').with_suffix('.p0j')
+                    self.assertTrue(evaluations.is_file())
+                    for name in ('shadow_evaluations','shadow_offsets'):self.assertFalse(s.artifact(run,name).exists(),name)
+                    tool=REPO/'project_0/native/target/release/p0-journal'
+                    # No evaluation was lost (stream COMPLETE); the run failed (phases INCOMPLETE); the
+                    # market capture ended early (INCOMPLETE). Every journal verifies end to end.
+                    for journal,status in ((evaluations,'COMPLETE'),(s.artifact(run,'phases').with_suffix('.p0j'),'INCOMPLETE'),
+                                           (s.artifact(run,'market')/'market.p0j','INCOMPLETE')):
+                        p=subprocess.run([str(tool),'verify',str(journal)],capture_output=True,text=True,timeout=60)
+                        self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(json.loads(p.stdout)['status'],status,journal)
+                    p=subprocess.run([str(tool),'renders',str(run)],capture_output=True,text=True,timeout=60)
+                    self.assertEqual(p.returncode,0,p.stderr)
+                    self.assertTrue(all(v['status'] in ('MATCHES','NO_FRAME') for v in json.loads(p.stdout)),p.stdout)
                     self.assertIn('C0_E1_WARMUP_FAILED',s.artifact(run,'runtime_log').read_text())
                     self.assertEqual(c.capture_identity(run)['capture_run_id'],run_id)
                     p=subprocess.run(['bash',str(project/'scripts/verify.sh'),'--run',run_id,'--offline','--mode','off'],

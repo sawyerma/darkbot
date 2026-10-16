@@ -255,7 +255,7 @@ impl ShadowOwner {
                 group: self.group,
                 sol_bank: self.sol_bank,
                 inventory: &inventory,
-                slippage_bps: config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0).unwrap_or(0),
+                slippage_bps: self.eval_slippage_bps,
             };
             #[cfg(feature = "crate_health")]
             let sizer_for_cost = darkbot_project0::sizing::ProtocolSizer {
@@ -292,11 +292,7 @@ impl ShadowOwner {
                 lamports_to_usd_micro: &lamports_to_usd_micro,
                 jito_tip_usd_micro: 0,
                 jito_tip_lamports: 0,
-                zero_prefund_qualified: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false)
-                    .unwrap_or(false)
-                    || (self.mode == "shadow"
-                        && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false)
-                            .unwrap_or(false)),
+                zero_prefund_qualified: self.zero_prefund_enabled,
                 path: Path::Rpc,
                 resources: self.resources,
                 limits: TxLimits::default(),
@@ -385,6 +381,19 @@ impl ShadowOwner {
                 self.st.run_state().is_tradable(),
             );
             rec.rx_slot = Some(slot); // trigger provenance differs from projected evaluation slot
+            #[cfg(feature = "crate_health")]
+            {
+                let (lines, beyond) = crate::execution::builder::p0::take_route_diagnostics();
+                for line in lines {
+                    owner_log!(self, "{line}");
+                }
+                if beyond > 0 {
+                    owner_log!(
+                        self,
+                        "route_budget: {beyond} further lines beyond the bound"
+                    );
+                }
+            }
             #[cfg(feature = "crate_health")]
             {
                 let elapsed = self.clock.now_ns().saturating_sub(pipeline_started_ns);

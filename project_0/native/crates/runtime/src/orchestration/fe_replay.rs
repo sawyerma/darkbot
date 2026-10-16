@@ -1,11 +1,55 @@
 //! Re-evaluate saved FE-01 observations using the same production collector.
 //! No RPC, signer or execution path is constructed by this module.
 use super::fe_qualification::{self as fe, ObservedState};
+use crate::analytics::journal::{self, kind, Reader, MANIFEST};
 use darkbot_project0::funding::FundingClass;
 use darkbot_solana::runtime_config::RuntimeConfig;
 use serde_json::{json, Value};
 use solana_sdk::pubkey::Pubkey;
 use std::{fs, io::Read, path::Path};
+
+/// Binary journal of one FE-01 observation (PERSIST-01) inside its output directory.
+pub const FE01_JOURNAL: &str = "fe01.p0j";
+
+/// Saved reads in order with their integrity record, from `fe01.p0j`; `None` for an
+/// observation saved before PERSIST-01 (`read_NNNNNN.json`). Both at once are refused.
+type SavedReads = Vec<(Value, Value)>;
+fn saved_reads(directory: &Path, limit: u64) -> Result<Option<SavedReads>, String> {
+    let path = directory.join(FE01_JOURNAL);
+    let legacy = fs::read_dir(directory)
+        .map(|entries| {
+            entries.filter_map(Result::ok).any(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|s| s.starts_with("read_") && s.ends_with(".json"))
+            })
+        })
+        .unwrap_or(false);
+    match fs::symlink_metadata(&path) {
+        Err(_) => return Ok(None),
+        Ok(meta) if meta.file_type().is_symlink() => return Err("FE_REPLAY_SYMLINK".into()),
+        Ok(_) if legacy => return Err("FE_REPLAY_AMBIGUOUS_SOURCE".into()),
+        Ok(_) => {}
+    }
+    let mut reader = Reader::open(&path).map_err(|_| "FE_REPLAY_JOURNAL")?;
+    let (mut reads, mut total) = (Vec::new(), 0u64);
+    while let Some(frame) = reader.next_frame().map_err(|_| "FE_REPLAY_JOURNAL")? {
+        match frame.kind {
+            kind::FE01_READ => {
+                total = total
+                    .checked_add(frame.bytes)
+                    .filter(|t| *t <= limit)
+                    .ok_or("FE_REPLAY_BYTE_LIMIT")?;
+                let integrity = json!({"journal_seq":frame.journal_seq,
+                    "frame_sha256":journal::hex(&frame.hash),"bytes":frame.bytes});
+                reads.push((frame.value, integrity));
+            }
+            kind::FE01_CONFIG | kind::FE01_RESULT | MANIFEST => {}
+            _ => return Err("FE_REPLAY_JOURNAL_KIND".into()),
+        }
+    }
+    Ok(Some(reads))
+}
 
 pub fn first_class(name: &str) -> Result<FundingClass, String> {
     match name {
@@ -28,6 +72,7 @@ pub fn bind_scope(report: &mut Value, class: FundingClass) -> Result<(), String>
         "CURRENT_CANDIDATE_STATE_FRESHNESS_NOT_QUALIFIED",
         funding_gap,
         "COMPLETE_CURRENT_TRANSACTION_SIMULATION_NOT_RUN",
+        "CURRENT_CLUSTER_TRANSACTION_VERSION_SUPPORT_NOT_OBSERVED",
         "ALL_COSTS_AND_REALIZABLE_EXIT_NOT_PROVEN"
     ]);
     report["fe01"] = json!("INCOMPLETE");
@@ -75,11 +120,19 @@ pub fn replay(
         .min(config.limits.max_total_mib)
         .checked_mul(1024 * 1024)
         .ok_or("FE_REPLAY_BYTE_LIMIT")?;
+    let saved = saved_reads(directory, limit)?;
     let mut total = 0u64;
     let mut reads = Vec::new();
     let mut report = fe::collect(config, |keys, floor| {
         if reads.len() as u64 >= config.limits.fe_calls.min(config.limits.max_requests) {
             return Err("FE_REPLAY_CALL_LIMIT".into());
+        }
+        if let Some(frames) = &saved {
+            let (entry, integrity) = frames.get(reads.len()).ok_or("FE_REPLAY_READ_MISSING")?;
+            let decoded = decode_saved(entry.clone(), keys, floor)?;
+            total += integrity["bytes"].as_u64().unwrap_or(0);
+            reads.push(integrity.clone());
+            return Ok(decoded);
         }
         let name = format!("read_{:06}.json", reads.len() + 1);
         let path = directory.join(&name);
@@ -108,20 +161,33 @@ pub fn replay(
         Ok(decoded)
     })?;
     // An extra saved read indicates a different/partial collection, not this replay.
-    let saved_count = fs::read_dir(directory)
-        .map_err(|_| "FE_REPLAY_DIRECTORY")?
-        .filter_map(Result::ok)
-        .filter(|e| {
-            e.file_name()
-                .to_str()
-                .is_some_and(|s| s.starts_with("read_") && s.ends_with(".json"))
-        })
-        .count();
+    let saved_count = match &saved {
+        Some(frames) => frames.len(),
+        None => fs::read_dir(directory)
+            .map_err(|_| "FE_REPLAY_DIRECTORY")?
+            .filter_map(Result::ok)
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|s| s.starts_with("read_") && s.ends_with(".json"))
+            })
+            .count(),
+    };
     if saved_count != reads.len() {
         return Err("FE_REPLAY_UNUSED_READS".into());
     }
     bind_scope(&mut report, class)?;
-    report["replay"] = json!({"mode":"OFFLINE_SAVED_OBSERVATIONS","reads":reads,"total_bytes":total,"freshness":"HISTORICAL_NOT_CURRENT","integrity":"SHA256_OF_CONSUMED_BYTES_NOT_EXTERNAL_ATTESTATION"});
+    let (source, integrity) = match saved {
+        Some(_) => (
+            "BINARY_JOURNAL",
+            "CRC32_AND_CHAINED_SHA256_FRAMES_NOT_EXTERNAL_ATTESTATION",
+        ),
+        None => (
+            "LEGACY_READ_FILES",
+            "SHA256_OF_CONSUMED_BYTES_NOT_EXTERNAL_ATTESTATION",
+        ),
+    };
+    report["replay"] = json!({"mode":"OFFLINE_SAVED_OBSERVATIONS","source":source,"reads":reads,"total_bytes":total,"freshness":"HISTORICAL_NOT_CURRENT","integrity":integrity});
     Ok(report)
 }
 

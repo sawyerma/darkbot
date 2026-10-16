@@ -16,7 +16,7 @@ py() { PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m "$@"; }
 # gate and the runtime always see the same files.
 absolute_paths() {
   local v
-  for v in P0_KEYPAIR_PATH P0_OPERATIONAL_CONFIG_FILE P0_RECORD_PATH P0_SUMMARY_PATH P0_MT0_PATH \
+  for v in P0_KEYPAIR_PATH P0_OPERATIONAL_CONFIG_FILE P0_RECORD_PATH P0_MT0_PATH \
            P0_ECON_OUT_DIR P0_MARKET_OUT_DIR CARGO_TARGET_DIR; do
     if [[ -n "${!v:-}" && "${!v}" != /* ]]; then export "$v=$PWD/${!v}"; fi
   done
@@ -212,7 +212,8 @@ fi
 cd "$REPO_ROOT"
 echo "C0-E1: build; capture starts after bootstrap and StreamReady; submission disabled"
 cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
-  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --bin p0-econ-replay 2>&1 | tee "$LOG_DIR/build.log" || {
+  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --bin p0-econ-replay \
+  --bin p0-journal 2>&1 | tee "$LOG_DIR/build.log" || {
   echo "Build failed: $LOG_DIR/build.log" >&2; exit 2;
 }
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
@@ -247,9 +248,9 @@ if free < required_gib * 2**30:
           'Free space without deleting preserved evidence, or set P0_ECON_OUT_DIR on another volume.', file=sys.stderr)
     raise SystemExit(2)
 STORAGE
-export P0_RECORD_PATH="$CAPTURE_DIR/opportunities.jsonl"
-export P0_SUMMARY_PATH="$CAPTURE_DIR/daily_summary.jsonl"
-export P0_MT0_PATH="$CAPTURE_DIR/mt0.jsonl"
+# Binary journals (PERSIST-01); the daily summary is a frame of the opportunity journal.
+export P0_RECORD_PATH="$CAPTURE_DIR/opportunities.p0j"
+export P0_MT0_PATH="$CAPTURE_DIR/mt0.p0j"
 export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
@@ -260,7 +261,7 @@ export P0_MAX_OUTSTANDING="${P0_MAX_OUTSTANDING:-1}"
 export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"
 export P0_DEADLINE_NS="${P0_DEADLINE_NS:-2000000000}"
 
-mkdir -p "$(dirname "$P0_RECORD_PATH")" "$(dirname "$P0_SUMMARY_PATH")"
+mkdir -p "$(dirname "$P0_RECORD_PATH")"
 
 # Bind local (possibly uncommitted) source and the actual executable to this run.
 # Do not record environment values, endpoints or signer paths.
@@ -367,8 +368,8 @@ export P0_MODE=shadow
 export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
-export P0_RECORD_PATH="${P0_RECORD_PATH:-$PROJECT_DIR/data/shadow/opportunities.jsonl}"
-export P0_SUMMARY_PATH="${P0_SUMMARY_PATH:-$PROJECT_DIR/data/shadow/daily_summary.jsonl}"
+# One directory per Shadow run: journals are created exclusively and never appended across runs.
+export P0_RECORD_PATH="${P0_RECORD_PATH:-$PROJECT_DIR/data/shadow/shadow_$(date -u +%Y%m%dT%H%M%SZ)_$$/opportunities.p0j}"
 export P0_JUPITER_MAX_ACCOUNTS="${P0_JUPITER_MAX_ACCOUNTS:-64}"
 export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 export P0_MAX_CONCURRENT="${P0_MAX_CONCURRENT:-1}"
@@ -376,7 +377,7 @@ export P0_MAX_OUTSTANDING="${P0_MAX_OUTSTANDING:-1}"
 export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"
 export P0_DEADLINE_NS="${P0_DEADLINE_NS:-2000000000}"
 
-mkdir -p "$(dirname "$P0_RECORD_PATH")" "$(dirname "$P0_SUMMARY_PATH")"
+mkdir -p "$(dirname "$P0_RECORD_PATH")"
 
 echo "Project_0 Mainnet Shadow"
 echo "  program=$P0_PROGRAM_ID"
@@ -387,7 +388,7 @@ echo "  mode=$P0_MODE"
 echo "  zero_prefund_qualified=$P0_ZERO_PREFUND_QUALIFIED"
 echo "  zero_prefund_shadow_probe=$P0_ZERO_PREFUND_SHADOW_PROBE"
 echo "  record=$P0_RECORD_PATH"
-echo "  summary=$P0_SUMMARY_PATH"
+echo "  journals=binary .p0j: record (opportunities, reconcile, daily summary) and <record>.mt0.p0j"
 
 cd "$REPO_ROOT"
 exec cargo run --release \

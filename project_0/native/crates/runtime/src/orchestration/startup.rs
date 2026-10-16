@@ -81,7 +81,6 @@ fn run_econ4h() -> Result<(), String> {
     darkbot_solana::provider::enable_measurement_budget();
     use crate::analytics::econ;
     use crate::market::observer as market_observer;
-    use std::sync::atomic::Ordering;
     let clock = Clock::new();
     let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
     let cfg = econ::EconConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
@@ -99,6 +98,25 @@ fn run_econ4h() -> Result<(), String> {
     market.run_dir = cfg.paths().market_dir();
     let timeout = cfg.plan.owner_budget_seconds();
     let (handle, analytics) = econ::spawn(cfg, clock, &market)?;
+    let paths = handle.cfg.paths();
+    // Every exit after BOOTSTRAP seals the phase journal and renders its JSONL view.
+    let result = supervise(handle, analytics, market, clock, timeout);
+    let rendered = crate::analytics::measurement::finalize_phases(&paths, result.is_ok());
+    if let Err(e) = &rendered {
+        eprintln!("C0_E1_PHASE_JOURNAL_INCOMPLETE {e}");
+    }
+    result.and(rendered)
+}
+
+fn supervise(
+    handle: crate::analytics::econ::Handle,
+    analytics: std::thread::JoinHandle<Result<(), String>>,
+    market: crate::market::observer::MarketConfig,
+    clock: Clock,
+    timeout: u64,
+) -> Result<(), String> {
+    use crate::market::observer as market_observer;
+    use std::sync::atomic::Ordering;
     let shadow_handle = handle.clone();
     let shadow = std::thread::Builder::new()
         .name("econ-shadow-owner".into())

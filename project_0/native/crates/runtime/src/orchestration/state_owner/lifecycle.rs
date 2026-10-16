@@ -96,16 +96,19 @@ impl ShadowOwner {
                     Err(e) => {
                         self.threshold_index.remove_account(&account);
                         self.threshold_fallback.insert(account);
-                        eprintln!(
+                        owner_log!(
+                            self,
                             "threshold_bootstrap_fallback: account={} error={}",
-                            account, e
+                            account,
+                            e
                         );
                     }
                 }
             }
             if self.threshold_bootstrap.is_empty() {
                 self.threshold_ready = true;
-                eprintln!(
+                owner_log!(
+                    self,
                     "threshold_index_ready: tracked={} fallback={}",
                     self.threshold_index.tracked_accounts(),
                     self.threshold_fallback.len()

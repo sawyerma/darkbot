@@ -85,38 +85,42 @@ impl ShadowOwner {
                 .accounts_for_bank(&bank)
                 .copied()
                 .collect();
-            let fallback_all = |reason: &str,
-                                oracle_price_fallbacks: &mut u64,
-                                oracle_candidate_hits: &mut u64,
-                                oracle_enqueued: &mut u64,
-                                oracle_coalesced: &mut u64,
-                                oracle_max_pending: &mut usize,
-                                oracle_detect_order: &mut VecDeque<Pubkey>,
-                                oracle_detect_pending: &mut HashMap<Pubkey, DetectWork>,
-                                mt0_order_rx: &mut VecDeque<u64>| {
-                *oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
-                let (t_rx_ns, event_slot) = latest.unwrap_or((self.clock.now_ns(), base_slot));
-                let mt0_len_before = oracle_detect_order.len(); // [MT0]
-                let count = enqueue_oracle_accounts(
-                    all_accounts.iter().copied(),
-                    t_rx_ns,
-                    event_slot,
-                    "oracle_threshold",
-                    oracle_detect_order,
-                    oracle_detect_pending,
-                    oracle_enqueued,
-                    oracle_coalesced,
-                    oracle_max_pending,
-                );
-                for _ in mt0_len_before..oracle_detect_order.len() {
-                    mt0_order_rx.push_back(t_rx_ns);
-                }
-                *oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
-                eprintln!(
-                    "oracle_bank_projection_fallback: bank={} reason={} accounts={}",
-                    bank, reason, count
-                );
-            };
+            let mut fallback_all =
+                |reason: &str,
+                 oracle_price_fallbacks: &mut u64,
+                 oracle_candidate_hits: &mut u64,
+                 oracle_enqueued: &mut u64,
+                 oracle_coalesced: &mut u64,
+                 oracle_max_pending: &mut usize,
+                 oracle_detect_order: &mut VecDeque<Pubkey>,
+                 oracle_detect_pending: &mut HashMap<Pubkey, DetectWork>,
+                 mt0_order_rx: &mut VecDeque<u64>| {
+                    *oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
+                    let (t_rx_ns, event_slot) = latest.unwrap_or((self.clock.now_ns(), base_slot));
+                    let mt0_len_before = oracle_detect_order.len(); // [MT0]
+                    let count = enqueue_oracle_accounts(
+                        all_accounts.iter().copied(),
+                        t_rx_ns,
+                        event_slot,
+                        "oracle_threshold",
+                        oracle_detect_order,
+                        oracle_detect_pending,
+                        oracle_enqueued,
+                        oracle_coalesced,
+                        oracle_max_pending,
+                    );
+                    for _ in mt0_len_before..oracle_detect_order.len() {
+                        mt0_order_rx.push_back(t_rx_ns);
+                    }
+                    *oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
+                    owner_log!(
+                        self,
+                        "oracle_bank_projection_fallback: bank={} reason={} accounts={}",
+                        bank,
+                        reason,
+                        count
+                    );
+                };
 
             match result {
                 Ok((projection_slot, projection_unix_s, accounts, _units)) => {
@@ -364,7 +368,8 @@ impl ShadowOwner {
                 && self.integration_probe_terminal.len() == self.integration_probe_expected.len()
             {
                 self.integration_probe_completion_reported = true;
-                eprintln!(
+                owner_log!(
+                    self,
                     "integration_target_projection_complete: total={} ready={} failed={} stale={}",
                     self.integration_probe_expected.len(),
                     self.integration_probe_projection_ready,

@@ -9,3 +9,9 @@ members = [
 
 # Weitere Crates werden erst aufgenommen, wenn ihr Ticket freigegeben ist:
 # crates/darkbot-capture   (S1/S4)
+
+# Dev/test builds only: the binary journal hashes every frame with SHA-256, and an
+# unoptimized `sha2` dominates journal-heavy tests (e.g. the million-frame retention test).
+# Release builds are already optimized; behavior and debug assertions are unchanged.
+[profile.dev.package.sha2]
+opt-level = 3

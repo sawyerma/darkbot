@@ -132,3 +132,152 @@ fn explicit_export_matches_legacy_jsonl_and_never_overwrites() {
     assert!(super::export(&path, &export, None, false).is_err());
     fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+#[test]
+fn header_identities_are_fresh_per_writer_and_shared_per_run_and_boot() {
+    let (a, b) = (path(), path());
+    let (wa, wb) = (Writer::create(&a).unwrap(), Writer::create(&b).unwrap());
+    let (ra, rb) = (Reader::open(&a).unwrap(), Reader::open(&b).unwrap());
+    assert_eq!(ra.identities[..16], rb.identities[..16]);
+    assert_ne!(ra.identities[16..32], rb.identities[16..32]);
+    assert_eq!(ra.identities[32..], rb.identities[32..]);
+    // Not a process-local counter: the first writer of every process would repeat it.
+    for id in ra.identities.chunks(16) {
+        assert!(id.iter().any(|b| *b != 0));
+        assert_ne!(
+            id,
+            &solana_sdk::pubkey::Pubkey::new_unique().to_bytes()[..16]
+        );
+    }
+    drop((wa, wb));
+    for p in [a, b] {
+        fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+}
+#[test]
+fn export_of_a_damaged_journal_leaves_no_partial_file() {
+    let path = path();
+    let export = path.with_extension("jsonl");
+    let mut w = Writer::create(&path).unwrap();
+    for n in 0..3 {
+        w.append_value(9, &serde_json::json!({"n":n})).unwrap();
+    }
+    w.sync().unwrap();
+    drop(w);
+    let mut bytes = fs::read(&path).unwrap();
+    bytes.truncate(bytes.len() - 1);
+    fs::write(&path, bytes).unwrap();
+    assert!(super::export(&path, &export, None, false).is_err());
+    let names: Vec<_> = fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names, ["events.p0j"]);
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+#[test]
+fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
+    let path = path();
+    let dir = path.parent().unwrap().to_path_buf();
+    let mut w = Writer::create(&path).unwrap();
+    w.append_value(9, &serde_json::json!({"a":1})).unwrap();
+    w.append_value(8, &serde_json::json!({"b":2})).unwrap();
+    w.seal(true).unwrap();
+    let (a, b) = (dir.join("a.jsonl"), dir.join("b.jsonl"));
+    fs::write(&b, "keep").unwrap();
+    assert!(super::export_views(&path, &[(Some(9), &a), (Some(8), &b)], false).is_err());
+    assert!(!a.exists());
+    assert_eq!(fs::read_to_string(&b).unwrap(), "keep");
+    fs::remove_file(&b).unwrap();
+    assert_eq!(
+        super::export_views(&path, &[(Some(9), &a), (Some(8), &b)], false).unwrap(),
+        [1, 1]
+    );
+    assert_eq!(fs::read_to_string(&a).unwrap(), "{\"a\":1}\n");
+    assert_eq!(fs::read_to_string(&b).unwrap(), "{\"b\":2}\n");
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 3);
+    fs::remove_dir_all(dir).unwrap();
+}
+/// PERSIST-05 (5): local writer throughput, append/fsync tails and storage against JSONL for
+/// representative payloads. Measurement only, run explicitly in release mode; a local
+/// synthetic load, not a mainnet capture under provider load.
+#[test]
+#[ignore]
+fn persist05_local_writer_benchmark() {
+    use std::time::Instant;
+    let logs: Vec<String> = (0..24)
+        .map(|i| {
+            format!(
+                "Program log: Instruction: LendingAccountLiquidate {i} {}",
+                "x".repeat(60)
+            )
+        })
+        .collect();
+    let market = serde_json::json!({"observed_at_utc":"2026-10-16T00:00:00.000000000Z","t_rx_ns":1234567890123u64,
+        "slot":371234567u64,"signature":"5".repeat(88),"tx_version":null,"success":true,"err":null,"source":"logsSubscribe",
+        "raw":{"context":{"slot":371234567u64},"value":{"signature":"5".repeat(88),"err":null,"logs":logs}}});
+    let opportunity = serde_json::json!({"account":"7".repeat(44),"trigger":"oracle_threshold","decision":"Skip",
+        "net_profit":-123456789i128,"economics_known":false,"rx_slot":371234567u64,"detect_slot":371234568u64,
+        "timing":{"t_rx_ns":1u64,"t_state_ns":2u64,"t_detect_ns":3u64,"t_ready_ns":null,"t_sign_ns":null,"t_handoff_ns":null},
+        "candidate_costs":(0..6).map(|i| serde_json::json!({"class":i,"fee":5000+i,"tip":0,"rent":2039280,"usd_micro":1234567})).collect::<Vec<_>>(),
+        "health":{"maint_health_bits":-170141183460469231731687303715884105728i128,"equity_assets_bits":12345678901234567890i128}});
+    let mt0 = serde_json::json!({"mt0_version":2,"unix_s":1,"remote":(0..8).map(|i| (format!("class_{i}"),
+        serde_json::json!({"requests":i,"ok":i,"latency_ns":{"count":i,"p50":1,"p95":2,"p99":3,"max":4}}))).collect::<serde_json::Map<_,_>>()});
+    let pct = |v: &mut Vec<u64>, q: f64| {
+        v.sort_unstable();
+        v[((v.len() as f64 - 1.0) * q).round() as usize]
+    };
+    let mut results = serde_json::Map::new();
+    for (name, value, frames) in [
+        ("market_row", &market, 100_000u64),
+        ("opportunity", &opportunity, 100_000),
+        ("mt0_snapshot", &mt0, 20_000),
+    ] {
+        let path = path();
+        let mut w = Writer::create(&path).unwrap();
+        let mut lat = Vec::with_capacity(frames as usize);
+        let started = Instant::now();
+        for _ in 0..frames {
+            let t = Instant::now();
+            w.append_value(9, value).unwrap();
+            lat.push(t.elapsed().as_nanos() as u64);
+        }
+        let write_s = started.elapsed().as_secs_f64();
+        let t = Instant::now();
+        w.seal(true).unwrap();
+        let seal_ns = t.elapsed().as_nanos() as u64;
+        let bytes = fs::metadata(&path).unwrap().len();
+        let jsonl = (serde_json::to_vec(value).unwrap().len() as u64 + 1) * frames;
+        let t = Instant::now();
+        let mut r = Reader::open(&path).unwrap();
+        let mut read = 0u64;
+        while r.next_frame().unwrap().is_some() {
+            read += 1;
+        }
+        let read_s = t.elapsed().as_secs_f64();
+        assert_eq!(read, frames + 1);
+        results.insert(name.into(), serde_json::json!({"frames":frames,
+            "append_ns":{"p50":pct(&mut lat,0.5),"p95":pct(&mut lat,0.95),"p99":pct(&mut lat,0.99),"max":pct(&mut lat,1.0)},
+            "write_frames_per_s":(frames as f64/write_s).round(),"write_mib_per_s":((bytes as f64/write_s)/1048576.0*10.0).round()/10.0,
+            "seal_fsync_ns":seal_ns,"verify_read_frames_per_s":(read as f64/read_s).round(),
+            "journal_bytes_per_frame":bytes/frames,"jsonl_bytes_per_row":jsonl/frames,
+            "journal_to_jsonl_ratio":((bytes as f64/jsonl as f64)*1000.0).round()/1000.0}));
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+    // Durable transitions (FE-04 automaton, phase rows): append + fsync per frame.
+    let path = path();
+    let mut w = Writer::create(&path).unwrap();
+    let mut lat = Vec::new();
+    for _ in 0..500 {
+        let t = Instant::now();
+        w.append_value(9, &opportunity).unwrap();
+        w.sync().unwrap();
+        lat.push(t.elapsed().as_nanos() as u64);
+    }
+    results.insert("durable_append_fsync".into(), serde_json::json!({"frames":500,
+        "ns":{"p50":pct(&mut lat,0.5),"p95":pct(&mut lat,0.95),"p99":pct(&mut lat,0.99),"max":pct(&mut lat,1.0)}}));
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    println!(
+        "PERSIST05_LOCAL_BENCHMARK {}",
+        serde_json::Value::Object(results)
+    );
+}

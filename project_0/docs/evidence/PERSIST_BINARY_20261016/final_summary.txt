@@ -1,0 +1,11 @@
+metadata exit=0 seconds=0
+check_nofeatures exit=0 seconds=19
+release_health exit=0 seconds=12
+release_txv1 exit=0 seconds=12
+test_health exit=0 seconds=143
+test_txv1 exit=0 seconds=169
+clippy exit=101 seconds=21
+python exit=0 seconds=15
+selftest exit=0 seconds=0
+census_selftest exit=0 seconds=0
+DONE

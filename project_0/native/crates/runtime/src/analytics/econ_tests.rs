@@ -742,10 +742,97 @@ fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
         .collect();
     names.sort();
     assert_eq!(names, ["capture", "snapshots"]);
+    // PERSIST-01: one binary evaluation stream, no JSONL stream and no separate offset index.
+    assert!(root.join("capture/shadow_evaluations.p0j").is_file());
     for name in ["shadow_evaluations.jsonl", "shadow_offsets.bin"] {
-        assert!(root.join("capture").join(name).is_file(), "{name}");
+        assert!(!root.join("capture").join(name).exists(), "{name}");
     }
-    assert!(root.join("snapshots/opportunity_economics.jsonl").is_file());
+    // Every legacy report file is a byte-exact render of the sealed report journal.
+    let snapshots = root.join("snapshots");
+    let mut reader = journal::Reader::open(&snapshots.join(REPORT_JOURNAL)).unwrap();
+    let (mut hours, mut last, mut opportunities) = (BTreeMap::new(), None, String::new());
+    while let Some(frame) = reader.next_frame().unwrap() {
+        match frame.kind {
+            kind::ECON_SNAPSHOT => {
+                let index = frame.value["index"].as_u64().unwrap();
+                hours.insert(index, frame.value["report"].clone());
+            }
+            kind::ECON_FINAL => last = Some(frame.value),
+            kind::ECON_OPPORTUNITY => {
+                opportunities.push_str(&format!("{}\n", frame.value));
+            }
+            kind::ECON_CANONICAL | journal::MANIFEST => {}
+            other => panic!("unexpected report kind {other}"),
+        }
+    }
+    assert!(reader.sealed && reader.complete);
+    let pretty = |v: &Value| format!("{}\n", serde_json::to_string_pretty(v).unwrap());
+    assert_eq!(hours.len(), 4);
+    for (index, report) in &hours {
+        let file = snapshots.join(format!("hour_{index:02}.json"));
+        assert_eq!(fs::read_to_string(file).unwrap(), pretty(report));
+    }
+    assert_eq!(
+        fs::read_to_string(snapshots.join("economics_final.json")).unwrap(),
+        pretty(&last.unwrap())
+    );
+    assert_eq!(
+        fs::read_to_string(snapshots.join("opportunity_economics.jsonl")).unwrap(),
+        opportunities
+    );
+}
+#[test]
+fn legacy_views_are_checked_and_missing_ones_rendered_from_the_journals() {
+    use crate::analytics::renders;
+    let root = four_snapshots_then_identical_final(crate::run_layout::RunLayout::V2);
+    // A worker-only run has no manifest.json, which `detect` needs to recognize layout V2.
+    assert_eq!(
+        renders::detect(&root).unwrap().layout,
+        crate::run_layout::RunLayout::V1
+    );
+    let paths = crate::run_layout::RunPaths::new(&root, crate::run_layout::RunLayout::V2);
+    let status = |create| -> BTreeMap<String, &'static str> {
+        renders::ensure(&paths, create)
+            .unwrap()
+            .into_iter()
+            .map(|(p, s)| (p.strip_prefix(&root).unwrap().display().to_string(), s))
+            .collect()
+    };
+    // Every report view the worker wrote equals its render; the phase journal of this
+    // worker-only run was never finalized, so its JSONL view is missing until created.
+    let before = status(false);
+    for name in [
+        "hour_01.json",
+        "hour_04.json",
+        "economics_final.json",
+        "opportunity_economics.jsonl",
+        "canonical_market_shadow.jsonl",
+    ] {
+        assert_eq!(
+            before.get(&format!("snapshots/{name}")).copied(),
+            Some("MATCHES"),
+            "{name} {before:?}"
+        );
+    }
+    assert_eq!(
+        before.get("capture/measurement_phases.jsonl").copied(),
+        Some("MISSING"),
+        "{before:?} {:?}",
+        fs::read_dir(root.join("capture"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(status(true)["capture/measurement_phases.jsonl"], "CREATED");
+    assert!(status(false).values().all(|s| *s == "MATCHES"));
+    // A changed view is never accepted and never overwritten.
+    let hour = root.join("snapshots/hour_02.json");
+    let mut bytes = fs::read(&hour).unwrap();
+    bytes.insert(1, b' ');
+    fs::write(&hour, &bytes).unwrap();
+    let err = renders::ensure(&paths, true).unwrap_err();
+    assert!(err.starts_with("RENDER_MISMATCH"), "{err}");
+    assert_eq!(fs::read(&hour).unwrap(), bytes);
 }
 fn four_snapshots_then_identical_final(layout: crate::run_layout::RunLayout) -> std::path::PathBuf {
     let mut w = worker_in(layout);
@@ -859,7 +946,6 @@ fn original_selection(w: &Worker, rows: &[(usize, OpportunityRecord)]) -> Value 
 
 #[test]
 fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
-    use std::io::BufRead;
     let mut w = worker();
     w.h.cfg.retention = 16;
     let mut r = rec();
@@ -882,14 +968,12 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
     assert_eq!(w.shadow_heads.len(), 4);
     assert_eq!(w.shadow_semantic_evictions, 0);
     assert_eq!(w.h.shared.retention_overflow.load(Ordering::Relaxed), 0);
-    w.evaluations.flush().unwrap();
-    let mut raw =
-        BufReader::new(File::open(w.h.cfg.run_dir.join("shadow_evaluations.jsonl")).unwrap());
-    let mut buf = String::new();
+    let path = journal::binary_path(&w.h.cfg.run_dir.join("shadow_evaluations.jsonl"));
+    let mut raw = journal::Reader::open(&path).unwrap();
     let mut count = 0;
-    while raw.read_line(&mut buf).unwrap() != 0 {
+    while let Some(frame) = raw.next_frame().unwrap() {
+        assert_eq!(frame.kind, kind::ECON_SHADOW_EVALUATION);
         count += 1;
-        buf.clear();
     }
     assert_eq!(count, 1_000_000);
     complete(&mut w);
@@ -991,13 +1075,12 @@ fn semantic_overflow_and_corrupt_journal_fail_closed() {
     assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
     let mut w = worker();
     w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
-    w.journal.flush().unwrap();
-    OpenOptions::new()
-        .write(true)
-        .open(w.h.cfg.run_dir.join("shadow_offsets.bin"))
-        .unwrap()
-        .set_len(0)
-        .unwrap();
+    // A damaged evaluation frame fails the chain walk closed; nothing is guessed.
+    let path = journal::binary_path(&w.h.cfg.run_dir.join("shadow_evaluations.jsonl"));
+    let mut bytes = fs::read(&path).unwrap();
+    let n = bytes.len();
+    bytes[n - 40] ^= 1;
+    fs::write(&path, bytes).unwrap();
     let (win, _) = pair(&r, 3, 40);
     assert!(w
         .accept(Evidence::Winner {

@@ -79,8 +79,35 @@ def parse_kv(match: re.Match[str]) -> dict[str, Any]:
     return out
 
 
+# Record kinds of the binary opportunity journal that formed the former opportunities.jsonl
+# (records, opportunities, reconcile rows); the daily summary (103) was a separate file.
+RECORD_KINDS = {100, 101, 102}
+
+
+def journal_frames(path: Path):
+    """Frames of a binary journal through the Rust reader (`p0-journal frames`); the format
+    is never decoded a second time here. Yields (kind, value)."""
+    project_dir = Path(__file__).resolve().parents[2]
+    binary = project_dir / "native" / "target" / "release" / "p0-journal"
+    if not binary.exists():
+        subprocess.run(
+            ["cargo", "build", "--release", "--locked", "--manifest-path",
+             str(project_dir / "native" / "Cargo.toml"), "--features", "crate_health txv1", "--bin", "p0-journal"],
+            check=True,
+        )
+    proc = subprocess.run([str(binary), "frames", str(path)], capture_output=True, text=True, check=False)
+    if proc.returncode:
+        raise RuntimeError(f"journal unreadable: {proc.stderr.strip()[-300:]}")
+    for line in proc.stdout.splitlines():
+        frame = json.loads(line)
+        yield frame["kind"], frame["value"]
+
+
 def count_jsonl(path: Path) -> dict[str, int]:
+    """Counts over the record journal `path` (binary, PERSIST-01). A missing journal stays
+    visible as `journal_present: false` instead of silently looking like an empty run."""
     counts = {
+        "journal_present": path.exists(),
         "lines": 0,
         "oracle_threshold_records": 0,
         "integration_projection_records": 0,
@@ -90,26 +117,23 @@ def count_jsonl(path: Path) -> dict[str, int]:
     }
     if not path.exists():
         return counts
-    with path.open("r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            counts["lines"] += 1
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if obj.get("trigger") == "oracle_threshold":
-                counts["oracle_threshold_records"] += 1
-            if obj.get("trigger") == "integration_projection":
-                counts["integration_projection_records"] += 1
-            projection = obj.get("projection")
-            if isinstance(projection, dict):
-                status = projection.get("status")
-                if status == "ready":
-                    counts["projection_ready"] += 1
-                elif status == "failed":
-                    counts["projection_failed"] += 1
-                elif status == "stale":
-                    counts["projection_stale"] += 1
+    for kind, obj in journal_frames(path):
+        if kind not in RECORD_KINDS or not isinstance(obj, dict):
+            continue
+        counts["lines"] += 1
+        if obj.get("trigger") == "oracle_threshold":
+            counts["oracle_threshold_records"] += 1
+        if obj.get("trigger") == "integration_projection":
+            counts["integration_projection_records"] += 1
+        projection = obj.get("projection")
+        if isinstance(projection, dict):
+            status = projection.get("status")
+            if status == "ready":
+                counts["projection_ready"] += 1
+            elif status == "failed":
+                counts["projection_failed"] += 1
+            elif status == "stale":
+                counts["projection_stale"] += 1
     return counts
 
 
@@ -376,14 +400,13 @@ def main() -> int:
     stamp = utc_stamp()
     prefix = shadow_dir / f"r126_{stamp}"
     log_path = Path(f"{prefix}_terminal.log")
-    record_path = Path(f"{prefix}_opportunities.jsonl")
-    summary_path = Path(f"{prefix}_summary.jsonl")
+    # Binary record journal; it also holds the daily summary (kind 103).
+    record_path = Path(f"{prefix}_opportunities.p0j")
     report_json_path = Path(f"{prefix}_report.json")
     report_txt_path = Path(f"{prefix}_report.txt")
 
     env = os.environ.copy()
     env["P0_RECORD_PATH"] = str(record_path.relative_to(repo_root))
-    env["P0_SUMMARY_PATH"] = str(summary_path.relative_to(repo_root))
     env["P0_THRESHOLD_BOOTSTRAP_BATCH"] = str(args.bootstrap_batch)
 
     command = [str(project_dir / "scripts" / "capture.sh"), "shadow"]
@@ -481,7 +504,6 @@ def main() -> int:
         "process_return_code": return_code,
         "log_path": str(log_path.relative_to(repo_root)),
         "record_path": str(record_path.relative_to(repo_root)),
-        "summary_path": str(summary_path.relative_to(repo_root)),
         "report_json_path": str(report_json_path.relative_to(repo_root)),
         "report_txt_path": str(report_txt_path.relative_to(repo_root)),
     }
