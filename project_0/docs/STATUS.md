@@ -38,6 +38,10 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 **PERSIST-05 PARTIAL:** local synthetic writer throughputs 65,111 market frames/s and 111,481 opportunity frames/s, p99 append 24.7/11.8 µs; journal size **1.077×/1.746× JSONL** respectively. FE-04 append+fsync p99 ~5.31 ms. No Mainnet stress/latency/volume qualification; no proven disk-saving or profitable-trade speedup.
 
+## Historical status matrix (snapshot 2026-10-14; superseded where inconsistent)
+
+The following capability and FE tables are retained as historical detail only; their outdated file paths, counts and WIP claims are not the current status. Current verdict is sections 1–2 above and the 2026-10-16 dated ledger entry. No historical content below grants LIVE authorization.
+
 ## 3. Status levels
 
 | Level | Meaning |
