@@ -1,33 +1,42 @@
 # Project 0 — Current status
 
-**Snapshot:** 2026-10-14 · repository `main` at `1b87387` · production code identical to `4c271cb`.
+**Snapshot:** 2026-10-16 · production implementation `4a27a1c6ab4032b322d5d6be3eb0b10c0d9d0d91` · document-only synchronization after implementation.
 
-This file is the entry point for the current state of Project 0. It is a **derived summary**:
-the canonical sources remain [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md) (newest dated entries),
-[PHASENPLAN.md](PHASENPLAN.md), their JSON indices and the immutable [evidence/](evidence/).
-On any conflict the newest dated ledger entry and the actual code win; this file never upgrades a gate.
-Every statement below names its source. Line numbers refer to the ledger/plan blobs at this snapshot.
+Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md), their JSON navigation indices, actual Rust code and [PERSIST evidence](evidence/PERSIST_BINARY_20261016/qualification.json). Previous October 14 code locations and test counts are historical; no gate is upgraded by this status page.
 
 ## 1. Bottom line
 
-| Item | Status | Source |
+| Scope | Verdict | Current evidence |
 |---|---|---|
-| First realized net profit | **NOT PROVEN** (`FIRST_REALIZED_PROFIT_NOT_PROVEN`) | `MEASUREMENT_LEDGER.json` → `current_status.overall` |
-| LIVE | **DISABLED** — `P0_MODE=live` is refused in code | `native/crates/runtime/src/main.rs:599-603`; ledger JSON `current_status.live` |
-| Value-bearing submission | **DISABLED** — econ4h wraps the submitter in `ObserveOnly` | `main.rs:1028`; ledger JSON `current_status.submission` |
-| Current positive executable candidate | **NOT ESTABLISHED** — FE-00 verdict `NO_ECONOMIC_GO` | ledger L5255-5263; `evidence/FE00_20261013/candidates.json` |
-| Provider capacity (FREE_ONLY) | **UNKNOWN** — not measured | `evidence/OPERATIONS_CONFIG_20261014/qualification.json` |
-| Complete market coverage (C0-E1 master) | **NOT QUALIFIED** | ledger JSON `current_status.c0_e1` |
+| First realized net profit | **NOT PROVEN** | `MEASUREMENT_LEDGER.json` overall |
+| LIVE / value-bearing submission | **DISABLED / NOT AUTHORIZED** | FE-06 remains locked |
+| FE-00 | **LOCAL_PASS; NO_ECONOMIC_GO** | Existing FE-00 ledger/evidence |
+| FE-01 | **OPEN** | Offline replay/integration-account observation improved at `4a27a1c`; current deployed ProgramData/state and funding-class parity NOT_RUN |
+| FE-02 / FE-03 | **OPEN** | No current profitable executable candidate / qualified targeted Shadow |
+| FE-04 | **PARTIAL_LOCAL** | Durable binary wallet transitions locally tested; production integration, exit/PnL and fsync fault injection remain OPEN |
+| FE-05 / FE-06 / FE-07 | **NOT_RUN / NOT_AUTHORIZED / NOT_RUN** | Separate provider/Mainnet/value-bearing permissions still required |
+| C0-E1 long-duration market master | **NOT_QUALIFIED** | Historical 4h/5h incomplete |
+| Binary journal PERSIST-01–05 | **PARTIAL overall, NOT QUALIFIED** | [Qualification](evidence/PERSIST_BINARY_20261016/qualification.json); see below |
 
-Offline test success is not evidence of profitability, provider capacity or LIVE readiness.
+## 2. Current code and evidence
 
-## 2. Code and qualification state
+| Code / evidence | Scope | Qualification |
+|---|---|---|
+| `8bd462e` | Runtime refactor: four crates; orchestration/execution/market/analytics domains | Local tests reported; no economic GO |
+| `bb26313` | Initial typed owner writer and binary journal WIP | Intermediate version; superseded by `4a27a1c` |
+| **`4a27a1c`** | Production binary journal integration, FE-04 transition journaling, capture/MT0/econ/census/FE-01 journal/replay, reader/export tooling | **PERSIST PARTIAL**, not Mainnet-qualified; Rust 415/417 PASS with 2 ignored each, Python 107 PASS, verifier 29 PASS per recorded local evidence. |
+| [Implementation report](development_history/persist_binary_completion_20261016.md) | Exact migration details and limits | Historical report written before commit; now checked in |
+| [Ledger dated PERSIST entry](MEASUREMENT_LEDGER.md) | Canonical PERSIST verdict and next gaps | Current |
 
-| Commit / tag | Content | Qualification | Source |
-|---|---|---|---|
-| `0782d8b` · tag `project0-last-qualified-20261014` | Configurable operational contract (profiles, budgets, endpoints) on top of FE-04 `cf540f4` | **LOCAL_PASS**: Rust 370 (`crate_health txv1`) / 368 (`crate_health`) PASS, 1 ignored each; Python 65 PASS; Clippy 38→38; both release builds PASS. Mainnet NOT_RUN | ledger L5294-5304; `evidence/OPERATIONS_CONFIG_20261014/qualification.json` |
-| `4c271cb` · tag `project0-last-unstructured-20261014` | **FE-01 work in progress** (+898 lines): `runtime/src/fe_qualification.rs`, `bin/p0-fe-qualify.rs`, `solana/src/runtime_config.rs`, `operations/qualification/fe_readonly_preflight.py` (+7 Rust, +3 Python tests) | **Offline tests green, qualification record missing.** User-reported offline baseline 2026-10-14: Python 68 PASS; Rust `crate_health` 375 PASS / 1 ignored; `crate_health txv1` 377 PASS / 1 ignored. No ledger entry, no evidence directory, no recorded Clippy/format differential | `git diff 0782d8b 4c271cb`; tag message "FE01 development WIP, qualification pending" |
-| `ae6f96d` … `1b87387` | Structure reform, documentation only | Code unchanged: `git diff 4c271cb HEAD` touches no file outside `docs/`, `README.md`, `gates/` | git history |
+**PERSIST-01 PARTIAL:** new productive runtime writers largely binary; hash-pinned strict verifier batch sink `native/crates/runtime/src/market_verification.rs` still uses JSONL. Re-pin only after explicit reviewed identity/consumer migration; historical proof IDs are immutable.
+
+**PERSIST-02 LOCAL_PASS:** typed bounded owner-to-recorder path and offline source guard; owner reaction latency under Mainnet load NOT_MEASURED.
+
+**PERSIST-03 PARTIAL_LOCAL:** FE-04 binary durability barrier/UNKNOWN replay tested; actual fsync fault injection and real pilot integration not qualified.
+
+**PERSIST-04 LOCAL_PASS:** existing historical JSON/JSONL and verifier contracts preserved; journal-derived JSON reports remain compatible exports, never a second canonical journal.
+
+**PERSIST-05 PARTIAL:** local synthetic writer throughputs 65,111 market frames/s and 111,481 opportunity frames/s, p99 append 24.7/11.8 µs; journal size **1.077×/1.746× JSONL** respectively. FE-04 append+fsync p99 ~5.31 ms. No Mainnet stress/latency/volume qualification; no proven disk-saving or profitable-trade speedup.
 
 ## 3. Status levels
 
