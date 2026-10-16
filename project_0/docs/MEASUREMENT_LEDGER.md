@@ -5366,3 +5366,9 @@ Base `52ad582`. [Manifest and promotion procedure](manifests/UPCOMING_0_1_12.md)
 Tests (targeted): `darkbot-project0` lib 65/65 PASS (`crate_health`); `darkbot-runner` builder/fixture/state_owner 21/21 PASS (`crate_health,txv1`); `cargo check` featureless project0 and runner `crate_health` PASS. No Mainnet call.
 
 **Gate P1B PARTIAL:** upgrade-safe (halt + no misread), but a trial build against the deployed 0.1.12 tag is NOT_RUN until that tag is released and deployed.
+
+## 2026-10-16 — P1B RC2 probe build: LOCAL_PASS, deployment BLOCKED
+
+Base `25eeea5`. [Manifest RC2 section](manifests/UPCOMING_0_1_12.md). Isolated scratch copy, productive 0.1.11 pin unchanged.
+
+`darkbot-project0` + `darkbot-runner` (all targets, `crate_health,txv1`) type-check against `mrgn-0.1.12-rc2` (`9fcb729`) after exactly 4 call-site argument additions (`premium_scratch`, `ignore_pt_emergency` ×3). Promotion tripwires fire against RC2 as designed (Bank 3904 ≠ 1856; 1864 B bank no longer decodes). RC2 IDL `marginfi.json` SHA-256 `b4f80a6c…72fb2`: 5 account and 8 receivership instruction discriminators equal `protocol.rs`; new tag/close liq-record instructions; `repay_all: Option<bool>`. Premium-aware Health/repay semantics recorded as promotion work. No Mainnet call.

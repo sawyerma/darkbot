@@ -131,7 +131,7 @@ Raw run data lives only on the local machine (`project_0/data/`, not versioned).
 
 **P1A BLOCKED (2026-10-16):** source-pinned freeze and startup upgrade pin done ([manifest](manifests/CURRENT_MAINNET.md)); confirming today's deployment needs one authorized read-only Mainnet read.
 
-**P1B PARTIAL (2026-10-16):** strict pinned Bank layout (a 0.1.12-resized bank is UNKNOWN_LAYOUT, no prefix decode), dual-size tests, promotion procedure ([manifest](manifests/UPCOMING_0_1_12.md)); trial build against the deployed 0.1.12 tag NOT_RUN.
+**P1B LOCAL_PASS, deployment BLOCKED (2026-10-16):** strict pinned Bank layout, dual-size tests, promotion procedure; RC2 probe type-checks after 4 call-site changes, IDL discriminators equal ([manifest](manifests/UPCOMING_0_1_12.md)). Which release runs on Mainnet: P1A read.
 
 ## 8. Open development tasks
 

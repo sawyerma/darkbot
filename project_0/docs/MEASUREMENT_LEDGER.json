@@ -3,9 +3,9 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "878c1b0a3d191acc735d35809407f34f6f5daf5a",
+    "git_blob_sha": "ffb7b2705b2490116a2fe09c91649cfd6dd1242e",
     "as_of_code_commit": null,
-    "line_count": 5368,
+    "line_count": 5374,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014",
     "local_followup_base_commit": "9047c7b45988b0c8798b710bb97c183d0a063c7f",
@@ -117,8 +117,9 @@
       "manifest": "project_0/docs/manifests/CURRENT_MAINNET.md"
     },
     "p1b": {
-      "status": "PARTIAL_UPGRADE_SAFE_TRIAL_BUILD_NOT_RUN",
+      "status": "LOCAL_PASS_DEPLOYMENT_BLOCKED",
       "tickets": "P1B-01..03 LOCAL_PASS",
+      "rc2_probe": "TYPECHECK_PASS_4_CALL_SITES",
       "manifest": "project_0/docs/manifests/UPCOMING_0_1_12.md"
     }
   },
@@ -246,7 +247,12 @@
       "line_start": 5358,
       "line_end": 5368,
       "heading": "2026-10-16 — P1B 0.1.12 freeze: tickets done, trial build against 0.1.12 NOT_RUN"
+    },
+    "p1b_rc2_probe_20261016": {
+      "line_start": 5370,
+      "line_end": 5374,
+      "heading": "2026-10-16 — P1B RC2 probe build: LOCAL_PASS, deployment BLOCKED"
     }
   },
-  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission). 2026-10-16: P1B strict pinned Bank layout (fail-open prefix decode fixed), dual-size tests and promotion procedure recorded."
+  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission). 2026-10-16: P1B strict pinned Bank layout (fail-open prefix decode fixed), dual-size tests and promotion procedure recorded. 2026-10-16: P1B RC2 isolated probe build recorded (type-check PASS after 4 call-site changes; IDL discriminator parity)."
 }

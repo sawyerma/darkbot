@@ -36,8 +36,29 @@ source checkout `0dotxyz/marginfi-v2` master `7d48d8a` (2026-10-02, program crat
 6. **Parity** — FE-01 observation against the new deployment; Health/sizing tests on the new crate.
 7. **P1B becomes P1A** — rewrite `CURRENT_MAINNET.md`; LIVE stays disabled until separately re-approved.
 
-## Gate P1B
+## RC2 probe (2026-10-16, isolated scratch copy; productive 0.1.11 pin unchanged)
 
-Tickets P1B-01..03 done. Upgrade safety: an upgrade halts and no 0.1.12 bank is misread by 0.1.11 code. Not yet shown: a
-trial build of DarkBot against the 0.1.12 crates (the promotion step 3/4 itself) — NOT_RUN; it needs the released tag that
-is actually deployed.
+Releases: `mrgn-0.1.12-rc1` (2026-09-29), `mrgn-0.1.12-rc2` (2026-10-10, commit `9fcb729ae3a6de67544fe6f8147da8d86bdf3692`).
+Mainnet deployment of either: not verified (P1A read BLOCKED).
+
+| Check | Result |
+|---|---|
+| `cargo check` of `darkbot-project0` + `darkbot-runner`, all targets, `crate_health,txv1`, all marginfi pins → `mrgn-0.1.12-rc2` | PASS after 4 call-site changes, nothing else |
+| API breaks | `get_health_components` + `premium_scratch: &mut Option<&mut PremiumScratch>` (`health.rs`); `OraclePriceFeedAdapter::try_from_bank` + `ignore_pt_emergency: bool` (`health.rs`, `sizing.rs`); `get_price_and_confidence_and_cache_of_type` + `ignore_pt_emergency: bool` (`health.rs`). Probe used `&mut None` / `false` |
+| Promotion tripwires against RC2 | fire as designed: `source_pin_parity_with_type_crate` (Bank 3904 ≠ 1856), `dual_size_bank_decoder_fails_closed` (1864 B no longer decodes), `resized_bank_fails_health_observation_closed` (0.1.11-only expectation) |
+| RC2 IDL `marginfi.json` (release asset, 581,271 B, SHA-256 `b4f80a6cecc7ad4828b0cd5f399b34dfd9fbada0fd866b46f3eb3a34cbc72fb2`, version 0.1.12, 124 instructions, 12 accounts) | the 5 account discriminators and all 8 receivership instruction discriminators equal `protocol.rs`; `init_liquidation_record` is named `marginfi_account_init_liq_record` (same bytes); new `marginfi_account_tag_liq_record` `[12,189,215,239,231,122,220,158]`, `marginfi_account_close_liq_record` |
+
+RC2 semantics the promotion must implement (from the 0.1.12 patch notes in the tag):
+
+- Health and liquidation checks add projected premium to liabilities (`premium_scratch`); off-chain Health must pass it.
+- `repay` pays premium before principal; `repay_all` (`Option<bool>` arg) pulls principal + premium → repay sizing and
+  wallet holds must include premium. Receivership/classic liquidation repayment reduces principal only.
+- Any TX touching an unresized bank fails; production banks are resized right after the upgrade (minutes of outage).
+- Borrow/end-flashloan with premium-bearing debt need every premium-relevant collateral oracle (`PremiumSnapshotUnavailable` 6615).
+- `marginfi_account_close` needs the trailing `rebalance_fee_pool` PDA (not used by receivership).
+
+## Gate P1B: LOCAL_PASS (upgrade-ready offline); deployment BLOCKED
+
+Tickets P1B-01..03 done; DarkBot type-checks against RC2 with a known 4-call migration; an upgrade halts and no 0.1.12
+bank is misread by 0.1.11 code. Open until promotion: the premium-aware semantics above (Health `premium_scratch`,
+repay/`repay_all` sizing) and which release is deployed on Mainnet (P1A read, permission).
