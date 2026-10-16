@@ -3,9 +3,9 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "245a2f647ae5885d75644dc74177752be754bbab",
+    "git_blob_sha": "8a678e62c554de60ae2c940cc9f5b3b9d473110a",
     "as_of_code_commit": null,
-    "line_count": 5343,
+    "line_count": 5356,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014",
     "local_followup_base_commit": "9047c7b45988b0c8798b710bb97c183d0a063c7f",
@@ -110,6 +110,11 @@
     "p0": {
       "status": "PASS",
       "evidence": "project_0/docs/evidence/P0_20261016/README.md"
+    },
+    "p1a": {
+      "status": "BLOCKED_CURRENT_MAINNET_READ_PERMISSION",
+      "source_side": "LOCAL_PASS",
+      "manifest": "project_0/docs/manifests/CURRENT_MAINNET.md"
     }
   },
   "economic_evidence": {
@@ -226,7 +231,12 @@
       "line_start": 5339,
       "line_end": 5343,
       "heading": "2026-10-16 — P0 reuse / license / routing / oracle / staging: PASS"
+    },
+    "p1a_freeze_20261016": {
+      "line_start": 5345,
+      "line_end": 5356,
+      "heading": "2026-10-16 — P1A current Mainnet freeze: source side PASS, gate BLOCKED (current read)"
     }
   },
-  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed."
+  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission)."
 }

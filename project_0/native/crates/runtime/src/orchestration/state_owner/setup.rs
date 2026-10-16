@@ -54,23 +54,30 @@ pub(super) fn prepare(
     // Program account. Pin its current content hash at startup and subscribe it as a required
     // dependency. Any later mismatch is a latched PROGRAM_UPGRADE halt; reconnect/recovery
     // must never auto-promote new protocol code.
-    let upgradeable_loader = Pubkey::from_str("BPFLoaderUpgradeab1e11111111111111111111111")?;
-    let program_data = Pubkey::find_program_address(&[program.as_ref()], &upgradeable_loader).0;
+    // [P1A-04] The baseline must also be the qualified, source-pinned deployment: an upgrade
+    // between qualification and startup latches the same HALT as one observed at runtime.
+    let program_data = darkbot_project0::protocol::program_data_address(&program);
     let program_data_account = dep_rpc
         .get_account_with_commitment(&program_data, CommitmentConfig::confirmed())?
         .value
         .ok_or_else(|| format!("PROGRAM_DATA_NOT_FOUND: {}", program_data))?;
-    if program_data_account.owner != upgradeable_loader {
-        return Err(format!(
-            "PROGRAM_DATA_OWNER_MISMATCH: {} owner={} expected={}",
-            program_data, program_data_account.owner, upgradeable_loader
-        )
-        .into());
-    }
-    let program_data_baseline_hash = hash(&program_data_account.data);
+    let deployment = darkbot_project0::protocol::decode_program_data(
+        &program_data,
+        &program_data_account.owner,
+        program_data_account.executable,
+        &program_data_account.data,
+    )
+    .map_err(|e| format!("PROGRAM_DATA_INVALID: {} {:?}", program_data, e))?;
+    let program_data_baseline_hash = deployment.hash;
+    let deployment_pin = darkbot_project0::protocol::deployment_pin(&program, &deployment);
     eprintln!(
-        "program_upgrade_watch: program={} program_data={} baseline_hash={}",
-        program, program_data, program_data_baseline_hash
+        "program_upgrade_watch: program={} program_data={} baseline_hash={} deployment_slot={} upgrade_authority={} pin={:?}",
+        program,
+        program_data,
+        program_data_baseline_hash,
+        deployment.deployment_slot,
+        deployment.upgrade_authority.map_or_else(|| "NONE".to_string(), |a| a.to_string()),
+        deployment_pin
     );
 
     // [FIX-98] A signed Shadow simulation uses the real fee payer. If that pubkey has never
@@ -570,7 +577,9 @@ pub(super) fn prepare(
     let counts = [0u64; 6];
     let last_reported_update_total = 0u64; // [FIX-81]
     let bootstrap_probe_done = false; // [FIX-84]
-    let program_upgrade_latched = false; // [FIX-131]
+                                      // [FIX-131][P1A-04]
+    let program_upgrade_latched =
+        deployment_pin != darkbot_project0::protocol::DeploymentPin::Reference;
     #[cfg(feature = "crate_health")]
     let reverse_index = ReverseIndex::new(); // [FIX-133a]
     #[cfg(feature = "crate_health")]

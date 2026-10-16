@@ -18,8 +18,8 @@ use std::{
     str::FromStr,
 };
 
-pub const SOURCE_PIN: &str = "33c67987a661f59c6683a65485ebb4f0ef030b77";
-pub const LOADER: &str = "BPFLoaderUpgradeab1e11111111111111111111111";
+pub const SOURCE_PIN: &str = protocol::SOURCE_COMMIT;
+pub const LOADER: &str = protocol::BPF_LOADER_UPGRADEABLE_ID;
 pub fn sha(bytes: &[u8]) -> String {
     solana_sdk::hash::hash(bytes)
         .to_bytes()
@@ -155,33 +155,16 @@ pub fn decode_batch(
 }
 fn program_data(state: &ObservedState, program: &Pubkey) -> Result<Pubkey, String> {
     let a = state.0.get(program).ok_or("FE_PROGRAM_MISSING")?;
-    if a.owner != key(LOADER)?
-        || !a.executable
-        || a.data.len() != 36
-        || a.data[..4] != 2u32.to_le_bytes()
-    {
-        return Err("FE_PROGRAM_LAYOUT".into());
-    }
-    let pd = Pubkey::new_from_array(a.data[4..36].try_into().unwrap());
-    if pd != Pubkey::find_program_address(&[program.as_ref()], &key(LOADER)?).0 {
-        return Err("FE_PROGRAMDATA_ADDRESS".into());
-    }
-    Ok(pd)
+    protocol::decode_program(program, &a.owner, a.executable, &a.data).map_err(|e| match e {
+        protocol::DeploymentError::Address => "FE_PROGRAMDATA_ADDRESS".into(),
+        _ => "FE_PROGRAM_LAYOUT".into(),
+    })
 }
 fn deployment(state: &ObservedState, pd: &Pubkey) -> Result<(u64, String), String> {
     let a = state.0.get(pd).ok_or("FE_PROGRAMDATA_MISSING")?;
-    if a.owner != key(LOADER)?
-        || a.executable
-        || a.data.len() < 45
-        || a.data[..4] != 3u32.to_le_bytes()
-        || a.data[12] > 1
-    {
-        return Err("FE_PROGRAMDATA_LAYOUT".into());
-    }
-    Ok((
-        u64::from_le_bytes(a.data[4..12].try_into().unwrap()),
-        sha(&a.data),
-    ))
+    let d = protocol::decode_program_data(pd, &a.owner, a.executable, &a.data)
+        .map_err(|_| "FE_PROGRAMDATA_LAYOUT")?;
+    Ok((d.deployment_slot, sha(&a.data)))
 }
 fn dependencies(
     state: &ObservedState,

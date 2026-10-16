@@ -3,9 +3,10 @@
 //! Shadow upgrade watch (c0e1_4h_20261008T222326Z/runtime.log). This is continuity
 //! evidence, NOT a reproducible-build bytecode/source-equivalence attestation.
 use super::*;
-const REFERENCE_HASH: &str = "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f";
-const PROGRAM: &str = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA";
-const LOADER: &str = "BPFLoaderUpgradeab1e11111111111111111111111";
+use darkbot_project0::protocol;
+const REFERENCE_HASH: &str = protocol::PROGRAM_DATA_REFERENCE_HASH;
+const PROGRAM: &str = protocol::PROGRAM_ID_MAINNET;
+const LOADER: &str = protocol::BPF_LOADER_UPGRADEABLE_ID;
 #[derive(Clone, Debug, serde::Serialize)]
 pub(super) struct Deployment {
     pub context_slot: u64,
@@ -31,7 +32,7 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
     }
     let url = url.ok_or("DEPLOYMENT_RPC_MISSING")?;
     let loader = Pubkey::from_str(LOADER).map_err(|_| "LOADER_ID")?;
-    let address = Pubkey::find_program_address(&[program.as_ref()], &loader).0;
+    let address = protocol::program_data_address(program);
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -83,14 +84,13 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(v["data"][0].as_str().ok_or("DEPLOYMENT_DATA")?)
         .map_err(|_| "DEPLOYMENT_BASE64")?;
-    if bytes.get(..4) != Some(&[3, 0, 0, 0]) {
-        return Err("DEPLOYMENT_LAYOUT");
-    }
+    let deployed = protocol::decode_program_data(&address, &loader, false, &bytes)
+        .map_err(|_| "DEPLOYMENT_LAYOUT")?;
     Ok(Deployment {
         context_slot: response["result"]["context"]["slot"]
             .as_u64()
             .ok_or("DEPLOYMENT_CONTEXT_SLOT")?,
-        hash: solana_sdk::hash::hash(&bytes).to_string(),
+        hash: deployed.hash.to_string(),
         program_data: address.to_string(),
     })
 }

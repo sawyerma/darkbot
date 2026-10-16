@@ -129,6 +129,8 @@ Raw run data lives only on the local machine (`project_0/data/`, not versioned).
 
 **P0 PASS (2026-10-16):** reuse, license, routing/cost, oracle and staging gates closed; see [evidence/P0_20261016](evidence/P0_20261016/README.md).
 
+**P1A BLOCKED (2026-10-16):** source-pinned freeze and startup upgrade pin done ([manifest](manifests/CURRENT_MAINNET.md)); confirming today's deployment needs one authorized read-only Mainnet read.
+
 ## 8. Open development tasks
 
 - **FE-01 WIP:** record its qualification (tests, Clippy differential, format, evidence directory, ledger entry) before it is relied on.

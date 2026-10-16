@@ -2,6 +2,7 @@
 //! gelesen in Sitzung 4. Mainnet-Program-ID aus `id-crate` (Feature mainnet-beta).
 //! On-chain ProgramData-Hash wird trotzdem in P1A-01 verifiziert (Upgrade-Watch).
 
+use solana_sdk::hash::{hash, Hash};
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
@@ -76,7 +77,11 @@ pub const LIQUIDITY_VAULT_AUTHORITY_SEED: &[u8] = b"liquidity_vault_auth";
 pub const FEE_STATE_SEED: &[u8] = b"feestate";
 
 pub fn liquidation_record_pda(program: &Pubkey, marginfi_account: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[LIQUIDATION_RECORD_SEED, marginfi_account.as_ref()], program).0
+    Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED, marginfi_account.as_ref()],
+        program,
+    )
+    .0
 }
 pub fn liquidity_vault_authority_pda(program: &Pubkey, bank: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[LIQUIDITY_VAULT_AUTHORITY_SEED, bank.as_ref()], program).0
@@ -109,10 +114,19 @@ pub const BANK_PAYLOAD_LEN_0_1_11: usize = 1856;
 pub const BANK_PAYLOAD_LEN_0_1_12: usize = 3904;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AccountType { MarginfiAccount, Bank, MarginfiGroup, FeeState, LiquidationRecord, Unknown }
+pub enum AccountType {
+    MarginfiAccount,
+    Bank,
+    MarginfiGroup,
+    FeeState,
+    LiquidationRecord,
+    Unknown,
+}
 
 pub fn classify(data: &[u8]) -> AccountType {
-    if data.len() < 8 { return AccountType::Unknown; }
+    if data.len() < 8 {
+        return AccountType::Unknown;
+    }
     let d: [u8; 8] = data[..8].try_into().unwrap();
     match d {
         DISC_MARGINFI_ACCOUNT => AccountType::MarginfiAccount,
@@ -135,6 +149,110 @@ pub fn bank_layout(raw_len: usize) -> Option<&'static str> {
 /// [FIX-27] Observation-Layout kommt ausschließlich aus `health::crate_impl::bank_observation_keys`
 /// (OracleSetup-Enum des Type-Crates) — keine numerische Rekonstruktion mehr.
 
+// ---- P1A-01/P1A-04: Loader-v3 deployment freeze and upgrade watch ----
+pub const BPF_LOADER_UPGRADEABLE_ID: &str = "BPFLoaderUpgradeab1e11111111111111111111111";
+/// Protocol source pin of the marginfi crates (`native/Cargo.toml`, `Cargo.lock`).
+pub const SOURCE_TAG: &str = "mrgn-0.1.11-rc1";
+pub const SOURCE_COMMIT: &str = "33c67987a661f59c6683a65485ebb4f0ef030b77";
+/// SHA-256 (base58) of the complete Mainnet ProgramData account recorded by the qualified 0.1.11
+/// Shadow upgrade watch (c0e1_4h_20261008T222326Z). Continuity evidence for the source pin, not a
+/// reproducible-build proof.
+pub const PROGRAM_DATA_REFERENCE_HASH: &str = "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f";
+/// `UpgradeableLoaderState::ProgramData` metadata: tag u32, slot u64, Option<Pubkey> (always 33 bytes).
+pub const PROGRAM_DATA_METADATA_LEN: usize = 45;
+const PROGRAM_ACCOUNT_LEN: usize = 36;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeploymentError {
+    Owner,
+    Layout,
+    Address,
+}
+
+/// Frozen deployment identity: everything a ProgramData change can alter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProgramDeployment {
+    pub program_data: Pubkey,
+    pub deployment_slot: u64,
+    pub upgrade_authority: Option<Pubkey>,
+    pub hash: Hash,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeploymentPin {
+    /// Exactly the qualified, source-pinned deployment.
+    Reference,
+    /// Different bytes than the qualified deployment: upgrade since qualification → EXECUTION HALT.
+    NotReference,
+    /// No qualified deployment exists for this program (staging/devnet/local) → EXECUTION HALT.
+    Unpinned,
+}
+
+pub fn program_data_address(program: &Pubkey) -> Pubkey {
+    let loader = Pubkey::from_str(BPF_LOADER_UPGRADEABLE_ID).expect("static");
+    Pubkey::find_program_address(&[program.as_ref()], &loader).0
+}
+
+/// `UpgradeableLoaderState::Program { programdata_address }` of an executable program account.
+pub fn decode_program(
+    program: &Pubkey,
+    owner: &Pubkey,
+    executable: bool,
+    data: &[u8],
+) -> Result<Pubkey, DeploymentError> {
+    if owner.to_string() != BPF_LOADER_UPGRADEABLE_ID || !executable {
+        return Err(DeploymentError::Owner);
+    }
+    if data.len() != PROGRAM_ACCOUNT_LEN || data[..4] != 2u32.to_le_bytes() {
+        return Err(DeploymentError::Layout);
+    }
+    let pd = Pubkey::new_from_array(data[4..36].try_into().expect("len"));
+    if pd != program_data_address(program) {
+        return Err(DeploymentError::Address);
+    }
+    Ok(pd)
+}
+
+/// `UpgradeableLoaderState::ProgramData { slot, upgrade_authority_address }` plus the hash of the
+/// complete account data (metadata and program bytes).
+pub fn decode_program_data(
+    program_data: &Pubkey,
+    owner: &Pubkey,
+    executable: bool,
+    data: &[u8],
+) -> Result<ProgramDeployment, DeploymentError> {
+    if owner.to_string() != BPF_LOADER_UPGRADEABLE_ID || executable {
+        return Err(DeploymentError::Owner);
+    }
+    if data.len() < PROGRAM_DATA_METADATA_LEN || data[..4] != 3u32.to_le_bytes() {
+        return Err(DeploymentError::Layout);
+    }
+    let upgrade_authority = match data[12] {
+        0 => None,
+        1 => Some(Pubkey::new_from_array(
+            data[13..45].try_into().expect("len"),
+        )),
+        _ => return Err(DeploymentError::Layout),
+    };
+    Ok(ProgramDeployment {
+        program_data: *program_data,
+        deployment_slot: u64::from_le_bytes(data[4..12].try_into().expect("len")),
+        upgrade_authority,
+        hash: hash(data),
+    })
+}
+
+/// Startup half of the upgrade watch: only the qualified Mainnet deployment may run unhalted.
+pub fn deployment_pin(program: &Pubkey, d: &ProgramDeployment) -> DeploymentPin {
+    if program.to_string() != PROGRAM_ID_MAINNET {
+        DeploymentPin::Unpinned
+    } else if d.hash.to_string() == PROGRAM_DATA_REFERENCE_HASH {
+        DeploymentPin::Reference
+    } else {
+        DeploymentPin::NotReference
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,7 +271,119 @@ mod tests {
     fn pdas_are_deterministic() {
         let p = Pubkey::from_str(PROGRAM_ID_MAINNET).unwrap();
         let a = Pubkey::new_unique();
-        assert_eq!(liquidation_record_pda(&p, &a), liquidation_record_pda(&p, &a));
+        assert_eq!(
+            liquidation_record_pda(&p, &a),
+            liquidation_record_pda(&p, &a)
+        );
         assert_ne!(fee_state_pda(&p), liquidity_vault_authority_pda(&p, &a));
+    }
+
+    #[test]
+    fn deployment_freeze_decodes_and_fails_closed() {
+        let program = Pubkey::from_str(PROGRAM_ID_MAINNET).unwrap();
+        let loader = Pubkey::from_str(BPF_LOADER_UPGRADEABLE_ID).unwrap();
+        let pd = program_data_address(&program);
+        let mut prog = 2u32.to_le_bytes().to_vec();
+        prog.extend_from_slice(pd.as_ref());
+        assert_eq!(decode_program(&program, &loader, true, &prog), Ok(pd));
+        assert_eq!(
+            decode_program(&program, &loader, false, &prog),
+            Err(DeploymentError::Owner)
+        );
+        assert_eq!(
+            decode_program(&program, &Pubkey::new_unique(), true, &prog),
+            Err(DeploymentError::Owner)
+        );
+        assert_eq!(
+            decode_program(&Pubkey::new_unique(), &loader, true, &prog),
+            Err(DeploymentError::Address)
+        );
+        assert_eq!(
+            decode_program(&program, &loader, true, &prog[..35]),
+            Err(DeploymentError::Layout)
+        );
+
+        let authority = Pubkey::new_unique();
+        let mut data = 3u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&123_456u64.to_le_bytes());
+        data.push(1);
+        data.extend_from_slice(authority.as_ref());
+        data.extend_from_slice(&[0xAB; 64]);
+        let d = decode_program_data(&pd, &loader, false, &data).unwrap();
+        assert_eq!(d.deployment_slot, 123_456);
+        assert_eq!(d.upgrade_authority, Some(authority));
+        assert_eq!(d.hash, hash(&data));
+        assert_eq!(deployment_pin(&program, &d), DeploymentPin::NotReference);
+        assert_eq!(
+            deployment_pin(&Pubkey::new_unique(), &d),
+            DeploymentPin::Unpinned
+        );
+        let reference = ProgramDeployment {
+            hash: Hash::from_str(PROGRAM_DATA_REFERENCE_HASH).unwrap(),
+            ..d
+        };
+        assert_eq!(
+            deployment_pin(&program, &reference),
+            DeploymentPin::Reference
+        );
+
+        // Immutable program: authority tag 0, the 32 reserved bytes stay in the metadata.
+        data[12] = 0;
+        assert_eq!(
+            decode_program_data(&pd, &loader, false, &data)
+                .unwrap()
+                .upgrade_authority,
+            None
+        );
+        data[12] = 2;
+        assert_eq!(
+            decode_program_data(&pd, &loader, false, &data),
+            Err(DeploymentError::Layout)
+        );
+        data[12] = 1;
+        data[0] = 2;
+        assert_eq!(
+            decode_program_data(&pd, &loader, false, &data),
+            Err(DeploymentError::Layout)
+        );
+        data[0] = 3;
+        assert_eq!(
+            decode_program_data(&pd, &loader, true, &data),
+            Err(DeploymentError::Owner)
+        );
+        assert_eq!(
+            decode_program_data(&pd, &loader, false, &data[..PROGRAM_DATA_METADATA_LEN - 1]),
+            Err(DeploymentError::Layout)
+        );
+    }
+
+    /// P1A-02: the hand-pinned constants equal the pinned type crate and lockfile.
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn source_pin_parity_with_type_crate() {
+        use marginfi_type_crate::constants::{discriminators as d, ix_discriminators as i};
+        use marginfi_type_crate::types::Bank;
+        assert_eq!(DISC_MARGINFI_ACCOUNT, d::ACCOUNT);
+        assert_eq!(DISC_BANK, d::BANK);
+        assert_eq!(DISC_MARGINFI_GROUP, d::GROUP);
+        assert_eq!(DISC_FEE_STATE, d::FEE_STATE);
+        assert_eq!(DISC_LIQUIDATION_RECORD, d::LIQUIDATION_RECORD);
+        assert_eq!(
+            RECEIVERSHIP_EXCLUSIVE_MARGINFI_IXS,
+            [
+                i::START_LIQUIDATION,
+                i::END_LIQUIDATION,
+                i::INIT_LIQUIDATION_RECORD,
+                i::LENDING_ACCOUNT_WITHDRAW,
+                i::LENDING_ACCOUNT_REPAY,
+                i::KAMINO_WITHDRAW,
+                i::DRIFT_WITHDRAW,
+                i::JUPLEND_WITHDRAW,
+            ]
+        );
+        assert_eq!(std::mem::size_of::<Bank>(), BANK_PAYLOAD_LEN_0_1_11);
+        assert_eq!(marginfi_type_crate::ID.to_string(), PROGRAM_ID_MAINNET);
+        let lock = include_str!("../../../Cargo.lock");
+        assert!(lock.contains(&format!("tag={SOURCE_TAG}#{SOURCE_COMMIT}")));
     }
 }

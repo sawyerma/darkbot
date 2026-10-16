@@ -5341,3 +5341,16 @@ Final offline validation: Rust **421/423 PASS**, 0 FAIL, 2 pre-existing ignored 
 Base `c476a37`. [Gate verdict and routing audit](evidence/P0_20261016/README.md), [reuse matrix](evidence/P0_20261016/REUSE_MATRIX.md), [license matrix](evidence/P0_20261016/LICENSE_MATRIX.md), [oracle model](evidence/P0_20261016/ORACLE_MODEL.md), [staging model](evidence/P0_20261016/STAGING_MODEL.md).
 
 All seven P0 gate items PASS; existing reuse decisions unchanged. All 669 third-party Rust packages permissive. `solana-dex-superagg` stays unlinked (returns finished transactions, no allowlist check); DarkBot keeps Jupiter `/swap/v2/build` (FREE_ONLY 1 RPS, not a hot-path stream); DFlow not allowlisted. Staging (`stag8s…`) needs a `staging` protocol build plus allowlist change, implemented with P5/P8. Provider items marked UNKNOWN are re-check items before enabling the respective path. No Mainnet, staging or provider API call; no code change.
+
+## 2026-10-16 — P1A current Mainnet freeze: source side PASS, gate BLOCKED (current read)
+
+Base `87da67d`. [Manifest](manifests/CURRENT_MAINNET.md).
+
+- P1A-01: typed Loader-v3 decoder in `protocol.rs` (`decode_program`, `decode_program_data`: deployment slot, upgrade authority, full-account hash); FE-01 observation, market deployment check and Shadow startup now share it. Current Mainnet value NOT_RUN (permission).
+- P1A-02: source pin `mrgn-0.1.11-rc1`/`33c67987`, program ID, account/instruction discriminators and Bank 1856 B tested against the type crate and `Cargo.lock`. Pin has no marginfi IDL; IDL hash NOT_RUN.
+- P1A-03: receivership/refresh allowlists source-pinned; instruction set tested against `ix_discriminators`.
+- P1A-04: upgrade watch closed at startup: a ProgramData other than the pinned reference `H57mqz…` (or an unpinned program) latches PROGRAM_UPGRADE HALT before detection; runtime latch unchanged.
+
+Tests (targeted): `darkbot-project0` protocol 4/4 PASS (`crate_health`); `darkbot-runner` fe_qualification 9/9 and market paths 2/2 PASS (`crate_health,txv1`). No Mainnet call, no LIVE.
+
+**Gate P1A BLOCKED:** one authorized finalized read of program + ProgramData is needed to confirm the deployment running today.
