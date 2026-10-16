@@ -1,11 +1,11 @@
 {
   "schema": "Project0/MeasurementLedgerContext/1",
-  "snapshot_date": "2026-10-14",
+  "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "aa1efc128c8cc4087adc25cc269b6abccda1ebc3",
+    "git_blob_sha": "b6ec1542cce15e05a9ce2b91f5433a7e73796975",
     "as_of_code_commit": null,
-    "line_count": 5304,
+    "line_count": 5324,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014"
   },
@@ -30,7 +30,7 @@
       },
       "FE-01": {
         "status": "OPEN",
-        "details": "Funding class provisionally selected; current on-chain ProgramData/source/target health and state parity NOT_RUN. Separate permission required for bounded Mainnet read-only check."
+        "details": "Funding class provisionally selected; current on-chain ProgramData/source/target health and state parity NOT_RUN. Separate permission required for bounded Mainnet read-only check. On 4a27a1c offline replay and integration-account observation improved; TX V0 pinned, current cluster/ProgramData parity NOT_RUN."
       },
       "FE-02": {
         "status": "OPEN",
@@ -46,7 +46,8 @@
         "evidence": "project_0/docs/evidence/FE04_RECEIPTS_20261013/README.md",
         "implemented": "Durable journal and immutable signed adapter binding; finalized RPC fee/SOL/raw-token parser; persisted partial member observations and legacy-journal recovery. All locally qualified.",
         "missing": "Terminal approval lifecycle; production-owned Intent/Current at actual pipeline boundary; qualified exit, full attempt/cumulative-loss and realized-PnL accounting.",
-        "previous_commit": "48db13c90a638e6034b7a8d39689a2c9368a2bd7"
+        "previous_commit": "48db13c90a638e6034b7a8d39689a2c9368a2bd7",
+        "details": "Durable binary wallet transitions/replay available locally at 4a27a1c; fsync fault injection and production pilot integration/exit/PnL still OPEN."
       },
       "FE-05": {
         "status": "NOT_RUN",
@@ -91,6 +92,17 @@
       "provider_capacity": "UNKNOWN",
       "mainnet": "NOT_RUN_PERMISSION_GATE",
       "implementation_preview": "e01560f7e37c5bbca39a0068e6887c576d797e73"
+    },
+    "binary_journal": {
+      "status": "PARTIAL",
+      "implementation_commit": "4a27a1c6ab4032b322d5d6be3eb0b10c0d9d0d91",
+      "evidence": "project_0/docs/evidence/PERSIST_BINARY_20261016/qualification.json",
+      "PERSIST_01": "PARTIAL_STRICT_PINNED_JSONL_OPEN",
+      "PERSIST_02": "LOCAL_PASS_MAINNET_TAILS_NOT_MEASURED",
+      "PERSIST_03": "PARTIAL_LOCAL_FSYNC_FAULT_INJECTION_NOT_RUN",
+      "PERSIST_04": "LOCAL_PASS",
+      "PERSIST_05": "PARTIAL_MAINNET_NOT_MEASURED",
+      "realized_profit": "NOT_PROVEN"
     }
   },
   "economic_evidence": {
@@ -192,7 +204,12 @@
       "line_start": 5294,
       "line_end": 5304,
       "heading": "2026-10-14 — Configurable operational contract / FE continuation (LOCAL PASS)"
+    },
+    "binary_persist_20261016": {
+      "line_start": 5306,
+      "line_end": 5324,
+      "heading": "2026-10-16 — PERSIST binary journal integration (4a27a1c): PARTIAL / no LIVE"
     }
   },
-  "updates": "After any change to the canonical Markdown ledger, refresh this JSON's snapshot, statuses, anchors and source.git_blob_sha in the same logical delivery. Do not infer current statuses from older historical ledger entries. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed."
+  "updates": "2026-10-16: 4a27a1c PERSIST PARTIAL and source hash/ledger anchors updated. Existing economic gates unchanged. After any change to the canonical Markdown ledger, refresh this JSON's snapshot, statuses, anchors and source.git_blob_sha in the same logical delivery. Do not infer current statuses from older historical ledger entries. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed."
 }
