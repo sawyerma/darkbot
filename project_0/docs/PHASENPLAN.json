@@ -1,11 +1,11 @@
 {
   "schema": "Project0/PhasePlanContext/1",
-  "snapshot_date": "2026-10-14",
+  "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/PHASENPLAN.md",
-    "git_blob_sha": "aaea022045f00644a773e225cb12d5ab4d0f3363",
+    "git_blob_sha": "af6ede3e5637277bc322ebe2664a64316791daff",
     "as_of_code_commit": null,
-    "line_count": 5243,
+    "line_count": 5261,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014"
   },
@@ -94,207 +94,212 @@
   ],
   "phase_section_index": {
     "profit_priority": {
-      "line_start": 259,
-      "line_end": 293,
+      "line_start": 261,
+      "line_end": 295,
       "heading": "0.6 FIRST REALIZED PROFIT PATH — höchste Umsetzungspriorität (binding 2026-10-13)"
     },
     "cost_policy": {
-      "line_start": 186,
-      "line_end": 231,
+      "line_start": 188,
+      "line_end": 233,
       "heading": "0.4 Kostenoptimierung ohne technische Verkrüppelung"
     },
     "speed_policy": {
-      "line_start": 232,
-      "line_end": 258,
+      "line_start": 234,
+      "line_end": 260,
       "heading": "0.5 Speed-Regel v4.3"
     },
     "fail_closed": {
-      "line_start": 473,
-      "line_end": 507,
+      "line_start": 475,
+      "line_end": 509,
       "heading": "1.6 Fail Closed"
     },
     "hotpath": {
-      "line_start": 508,
-      "line_end": 563,
+      "line_start": 510,
+      "line_end": 565,
       "heading": "1.7 Hotpath-Verbote"
     },
     "architecture": {
-      "line_start": 683,
-      "line_end": 765,
+      "line_start": 685,
+      "line_end": 767,
       "heading": "4. Finale Zielarchitektur"
     },
     "roadmap": {
-      "line_start": 916,
-      "line_end": 951,
+      "line_start": 918,
+      "line_end": 953,
       "heading": "7. Gesamtphasenplan — FIRST PROFIT vor Ausbau"
     },
     "P0": {
-      "line_start": 952,
-      "line_end": 1132,
+      "line_start": 954,
+      "line_end": 1134,
       "heading": "PHASE P0 — REFERENZ-, REUSE- UND LIZENZSTUDIE"
     },
     "P1A": {
-      "line_start": 1133,
-      "line_end": 1188,
+      "line_start": 1135,
+      "line_end": 1190,
       "heading": "PHASE P1A — CURRENT MAINNET FREEZE"
     },
     "P1B": {
-      "line_start": 1189,
-      "line_end": 1303,
+      "line_start": 1191,
+      "line_end": 1305,
       "heading": "PHASE P1B — UPCOMING 0.1.12 FREEZE"
     },
     "C0": {
-      "line_start": 1304,
-      "line_end": 1391,
+      "line_start": 1306,
+      "line_end": 1393,
       "heading": "PHASE C0 — MARKET- UND ACCOUNT-CENSUS"
     },
     "H0": {
-      "line_start": 1392,
-      "line_end": 1527,
+      "line_start": 1394,
+      "line_end": 1529,
       "heading": "TRACK H0 — HISTORICAL LIQUIDATION INTELLIGENCE"
     },
     "S0": {
-      "line_start": 1528,
-      "line_end": 1585,
+      "line_start": 1530,
+      "line_end": 1587,
       "heading": "PHASE S0 — FINAL NATIVE FOUNDATION"
     },
     "S1": {
-      "line_start": 1586,
-      "line_end": 1849,
+      "line_start": 1588,
+      "line_end": 1851,
       "heading": "PHASE S1 — FINAL SOLANA INGRESS"
     },
     "S1_RACE": {
-      "line_start": 1622,
-      "line_end": 1667,
+      "line_start": 1624,
+      "line_end": 1669,
       "heading": "S1.2 RACE PRIMARY — `BinaryGeyserSource`"
     },
     "S2": {
-      "line_start": 1850,
-      "line_end": 1924,
+      "line_start": 1852,
+      "line_end": 1926,
       "heading": "PHASE S2 — FINAL CANONICAL SOLANA STATE"
     },
     "S3": {
-      "line_start": 1925,
-      "line_end": 2070,
+      "line_start": 1927,
+      "line_end": 2072,
       "heading": "PHASE S3 — FINAL SOLANA EXECUTION CORE"
     },
     "S3_RACE": {
-      "line_start": 1975,
-      "line_end": 2013,
+      "line_start": 1977,
+      "line_end": 2015,
       "heading": "S3.R — RACE EXTENSIONS — Vorbereitungen parallel erlaubt; Race-Promotion nur nach `S1-RACE PASS`"
     },
     "S4": {
-      "line_start": 2071,
-      "line_end": 2117,
+      "line_start": 2073,
+      "line_end": 2119,
       "heading": "PHASE S4 — CORE PARITY + PERFORMANCE BASELINE"
     },
     "P2": {
-      "line_start": 2163,
-      "line_end": 2289,
+      "line_start": 2165,
+      "line_end": 2291,
       "heading": "PHASE P2 — FINAL PROJECT-0 STATE ENGINE"
     },
     "P3": {
-      "line_start": 2290,
-      "line_end": 2428,
+      "line_start": 2292,
+      "line_end": 2430,
       "heading": "PHASE P3 — FINAL PROJECT-0 HEALTH ENGINE"
     },
     "P4A": {
-      "line_start": 2429,
-      "line_end": 2581,
+      "line_start": 2431,
+      "line_end": 2583,
       "heading": "PHASE P4A — DETERMINISTIC PROFIT ENGINE"
     },
     "P4A_JIT": {
-      "line_start": 2570,
-      "line_end": 2575,
+      "line_start": 2572,
+      "line_end": 2577,
       "heading": "P4A v4.5.1 — verbindlicher JIT-ExactIn-Fundingpfad"
     },
     "P5": {
-      "line_start": 2582,
-      "line_end": 2754,
+      "line_start": 2584,
+      "line_end": 2756,
       "heading": "PHASE P5 — FINAL RECEIVERSHIP EXECUTION PLANNER"
     },
     "T": {
-      "line_start": 2755,
-      "line_end": 2805,
+      "line_start": 2757,
+      "line_end": 2807,
       "heading": "PHASE T — TAGGER"
     },
     "P6": {
-      "line_start": 2806,
-      "line_end": 3708,
+      "line_start": 2808,
+      "line_end": 3710,
       "heading": "PHASE P6 — FULL PRODUCTION SHADOW"
     },
     "P6_MT": {
-      "line_start": 2949,
-      "line_end": 3708,
+      "line_start": 2951,
+      "line_end": 3710,
       "heading": "P6-MT — BOUNDED PARALLEL RUNTIME / APPLE-M-SERIES"
     },
     "P7": {
-      "line_start": 3709,
-      "line_end": 3781,
+      "line_start": 3711,
+      "line_end": 3783,
       "heading": "PHASE P7 — COMPETITION + PROVIDER ECONOMICS"
     },
     "P4B": {
-      "line_start": 3782,
-      "line_end": 3822,
+      "line_start": 3784,
+      "line_end": 3824,
       "heading": "PHASE P4B — PROBABILISTIC PROFIT OPTIMIZER"
     },
     "P8": {
-      "line_start": 3823,
-      "line_end": 3903,
+      "line_start": 3825,
+      "line_end": 3905,
       "heading": "PHASE P8 — CONTROLLED LIVE"
     },
     "P8_RES": {
-      "line_start": 3852,
-      "line_end": 3857,
+      "line_start": 3854,
+      "line_end": 3859,
       "heading": "P8 v4.5.1 — Walletreservation und Inventory Target Policy"
     },
     "P9": {
-      "line_start": 3904,
-      "line_end": 3964,
+      "line_start": 3906,
+      "line_end": 3966,
       "heading": "PHASE P9 — PRODUCTION LIVE"
     },
     "K": {
-      "line_start": 3965,
-      "line_end": 4136,
+      "line_start": 3967,
+      "line_end": 4138,
       "heading": "PHASE K — MEASURED CONTINUOUS OPTIMIZATION"
     },
     "ticket_order": {
-      "line_start": 4137,
-      "line_end": 4326,
+      "line_start": 4139,
+      "line_end": 4328,
       "heading": "8. Verbindliche Ticket-Reihenfolge"
     },
     "first_profit_tickets": {
-      "line_start": 4139,
-      "line_end": 4153,
+      "line_start": 4141,
+      "line_end": 4155,
       "heading": "First-Profit-Tickets — höchste Produktpriorität (scope FE-00…FE-07)"
     },
     "release_train": {
-      "line_start": 4554,
-      "line_end": 4950,
+      "line_start": 4556,
+      "line_end": 4952,
       "heading": "13. Verbindlicher Start — FIRST PROFIT RELEASE TRAIN (13.10.2026)"
     },
     "race_binding": {
-      "line_start": 4574,
-      "line_end": 4603,
+      "line_start": 4576,
+      "line_end": 4605,
       "heading": "Parallel / danach — Race (vollständig verbindlich)"
     },
     "C0_E1": {
-      "line_start": 4604,
-      "line_end": 4804,
+      "line_start": 4606,
+      "line_end": 4806,
       "heading": "C0-E1 — 4H ECONOMIC / CAPITAL / COMPETITION / RACE ATTRIBUTION"
     },
     "C0_E1_MASTER": {
-      "line_start": 4997,
-      "line_end": 5234,
+      "line_start": 4999,
+      "line_end": 5236,
       "heading": "C0-E1 — ASTRA MASTER IMPLEMENTATION CONTRACT 2026-10-11"
     },
     "operational_configuration": {
-      "line_start": 5235,
-      "line_end": 5243,
+      "line_start": 5237,
+      "line_end": 5245,
       "heading": "Operational RPC/WSS/Mainnet configuration — binding extension 2026-10-14"
+    },
+    "binary_journal_20261016": {
+      "line_start": 5247,
+      "line_end": 5261,
+      "heading": "Bindender Speichervertrag — Binärjournal (2026-10-16)"
     }
   },
-  "updates": "On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed.",
+  "updates": "2026-10-16: binding binary primary journal section added; not a gate PASS. On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed.",
   "operational_configuration": {
     "contract": "project_0/docs/OPERATIONAL_CONFIG.md",
     "implementation": "project_0/native/crates/darkbot-solana/src/runtime_config.rs",
@@ -305,5 +310,14 @@
       "custom"
     ],
     "policy": "FREE_ONLY; throughput is not provider capacity or money authorization; FE00–FE07/Race/Jito/M4 remain binding"
+  },
+  "storage_architecture": {
+    "status": "BINDING_TARGET_NOT_QUALIFIED",
+    "primary": "ONE_VERSIONED_BINARY_APPEND_ONLY_JOURNAL",
+    "json_sqlite_parallel_primary": "FORBIDDEN",
+    "hot_path": "NO_JSON_NO_DB_NO_FILE_IO_NO_BLOCKING_WRITER",
+    "financial_safety": "DURABLE_INTENT_BEFORE_SEND",
+    "historical_json": "PRESERVE_AND_EXPORT_OFFLINE_ONLY",
+    "reference": "bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md sections 10-11"
   }
 }
