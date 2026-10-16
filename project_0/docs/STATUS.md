@@ -131,6 +131,8 @@ Raw run data lives only on the local machine (`project_0/data/`, not versioned).
 
 **P1A BLOCKED (2026-10-16):** source-pinned freeze and startup upgrade pin done ([manifest](manifests/CURRENT_MAINNET.md)); confirming today's deployment needs one authorized read-only Mainnet read.
 
+**P1B PARTIAL (2026-10-16):** strict pinned Bank layout (a 0.1.12-resized bank is UNKNOWN_LAYOUT, no prefix decode), dual-size tests, promotion procedure ([manifest](manifests/UPCOMING_0_1_12.md)); trial build against the deployed 0.1.12 tag NOT_RUN.
+
 ## 8. Open development tasks
 
 - **FE-01 WIP:** record its qualification (tests, Clippy differential, format, evidence directory, ledger entry) before it is relied on.

@@ -9,16 +9,10 @@ pub(crate) fn bank_from_state<S: AccountSource + ?Sized>(
     bank_key: &Pubkey,
 ) -> Option<Bank> {
     let (owner, _, data) = state.account(bank_key)?;
-    if owner != *program || classify_account(data) != AccountType::Bank {
+    if owner != *program {
         return None;
     }
-    let need = 8 + std::mem::size_of::<Bank>();
-    if data.len() < need {
-        return None;
-    }
-    bytemuck::try_from_bytes::<Bank>(&data[8..need])
-        .ok()
-        .copied()
+    darkbot_project0::protocol::decode_bank(data).ok().copied()
 }
 
 #[cfg(feature = "crate_health")]

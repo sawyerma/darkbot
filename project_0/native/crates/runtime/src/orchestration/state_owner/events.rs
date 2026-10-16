@@ -108,9 +108,14 @@ impl ShadowOwner {
                 if a.pubkey == self.program_data && hash(&a.data) != self.program_data_baseline_hash
                 {
                     if !self.program_upgrade_latched {
+                        // [P1A-04] Identify the new deployment for requalification; an
+                        // undecodable account is reported, never trusted.
+                        let new = darkbot_project0::protocol::decode_program_data(
+                            &a.pubkey, &a.owner, false, &a.data,
+                        );
                         owner_log!(self,
-                        "PROGRAM_UPGRADE detected slot={} program_data={} — latched HALT until explicit P1B promotion",
-                        a.slot, self.program_data
+                        "PROGRAM_UPGRADE detected slot={} program_data={} new_deployment={:?} — latched HALT until explicit P1B promotion",
+                        a.slot, self.program_data, new
                     );
                     }
                     self.program_upgrade_latched = true;

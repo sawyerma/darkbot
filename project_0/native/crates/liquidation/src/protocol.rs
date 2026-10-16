@@ -146,6 +146,53 @@ pub fn bank_layout(raw_len: usize) -> Option<&'static str> {
     }
 }
 
+/// P1B-02: why a Bank payload is not decodable by the pinned 0.1.11 crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BankLayoutError {
+    Discriminator,
+    /// A known layout of another program version than the pinned crate. Pinned 0.1.11 + resized
+    /// 0.1.12 bank: the first 1856 B are a byte-identical prefix, but the premium state behind it
+    /// is invisible to 0.1.11 types, so a prefix decode would silently drop premium debt from
+    /// Health. Pinned 0.1.12 + non-resized bank: the program fails every TX touching it.
+    OtherVersion(&'static str),
+    Length(usize),
+    Alignment,
+}
+
+impl std::fmt::Display for BankLayoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Discriminator => write!(f, "UNKNOWN_LAYOUT: not a Bank discriminator"),
+            Self::OtherVersion(v) => {
+                write!(
+                    f,
+                    "UNKNOWN_LAYOUT: bank layout {v} is not the pinned crate layout"
+                )
+            }
+            Self::Length(n) => write!(f, "UNKNOWN_LAYOUT: bank raw length {n}"),
+            Self::Alignment => write!(f, "UNKNOWN_LAYOUT: bank payload alignment"),
+        }
+    }
+}
+
+/// Strict Bank decode for the pinned crate: discriminator and exact raw length
+/// `8 + size_of::<Bank>()`. Promotion (P1B → P1A) is the crate bump; this check follows it.
+/// The owner check stays with the caller, which knows the configured program.
+#[cfg(feature = "crate_health")]
+pub fn decode_bank(data: &[u8]) -> Result<&marginfi_type_crate::types::Bank, BankLayoutError> {
+    use marginfi_type_crate::types::Bank;
+    if classify(data) != AccountType::Bank {
+        return Err(BankLayoutError::Discriminator);
+    }
+    if data.len() != 8 + std::mem::size_of::<Bank>() {
+        return Err(bank_layout(data.len()).map_or(
+            BankLayoutError::Length(data.len()),
+            BankLayoutError::OtherVersion,
+        ));
+    }
+    bytemuck::try_from_bytes(&data[8..]).map_err(|_| BankLayoutError::Alignment)
+}
+
 /// [FIX-27] Observation-Layout kommt ausschließlich aus `health::crate_impl::bank_observation_keys`
 /// (OracleSetup-Enum des Type-Crates) — keine numerische Rekonstruktion mehr.
 
@@ -354,6 +401,46 @@ mod tests {
         assert_eq!(
             decode_program_data(&pd, &loader, false, &data[..PROGRAM_DATA_METADATA_LEN - 1]),
             Err(DeploymentError::Layout)
+        );
+    }
+
+    /// P1B-02: only the pinned 0.1.11 size decodes; the 0.1.12 size is named, everything else unknown.
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn dual_size_bank_decoder_fails_closed() {
+        // u64 backing keeps the payload 8-byte aligned like real account data.
+        let raw = |payload: usize, out: &mut Vec<u64>| -> usize {
+            *out = vec![0u64; (8 + payload).div_ceil(8)];
+            bytemuck::cast_slice_mut::<u64, u8>(out)[..8].copy_from_slice(&DISC_BANK);
+            8 + payload
+        };
+        let mut buf = Vec::new();
+        let n = raw(BANK_PAYLOAD_LEN_0_1_11, &mut buf);
+        assert!(decode_bank(&bytemuck::cast_slice(&buf)[..n]).is_ok());
+        let n = raw(BANK_PAYLOAD_LEN_0_1_12, &mut buf);
+        assert_eq!(bank_layout(n), Some("0.1.12"));
+        assert_eq!(
+            decode_bank(&bytemuck::cast_slice(&buf)[..n]).err(),
+            Some(BankLayoutError::OtherVersion("0.1.12"))
+        );
+        for payload in [
+            0,
+            BANK_PAYLOAD_LEN_0_1_11 - 8,
+            BANK_PAYLOAD_LEN_0_1_11 + 8,
+            BANK_PAYLOAD_LEN_0_1_12 - 8,
+            BANK_PAYLOAD_LEN_0_1_12 + 8,
+        ] {
+            let n = raw(payload, &mut buf);
+            assert_eq!(
+                decode_bank(&bytemuck::cast_slice(&buf)[..n]).err(),
+                Some(BankLayoutError::Length(n))
+            );
+        }
+        let n = raw(BANK_PAYLOAD_LEN_0_1_11, &mut buf);
+        bytemuck::cast_slice_mut::<u64, u8>(&mut buf)[0] ^= 1;
+        assert_eq!(
+            decode_bank(&bytemuck::cast_slice(&buf)[..n]).err(),
+            Some(BankLayoutError::Discriminator)
         );
     }
 

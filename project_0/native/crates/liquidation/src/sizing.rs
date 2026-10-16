@@ -233,10 +233,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         if owner != self.program {
             return Err(format!("UNKNOWN_LAYOUT: bank {key} owner {owner}"));
         }
-        if protocol::classify(data) != protocol::AccountType::Bank {
-            return Err(format!("UNKNOWN_LAYOUT: {key} is not Bank"));
-        }
-        Ok(*load::<Bank>(data)?)
+        protocol::decode_bank(data).copied().map_err(|e| format!("{e}: {key}"))
     }
 
     fn fee_snapshot_and_rate(&self) -> Result<(FeeSnapshot, I80F48), String> {

@@ -5354,3 +5354,15 @@ Base `87da67d`. [Manifest](manifests/CURRENT_MAINNET.md).
 Tests (targeted): `darkbot-project0` protocol 4/4 PASS (`crate_health`); `darkbot-runner` fe_qualification 9/9 and market paths 2/2 PASS (`crate_health,txv1`). No Mainnet call, no LIVE.
 
 **Gate P1A BLOCKED:** one authorized finalized read of program + ProgramData is needed to confirm the deployment running today.
+
+## 2026-10-16 — P1B 0.1.12 freeze: tickets done, trial build against 0.1.12 NOT_RUN
+
+Base `52ad582`. [Manifest and promotion procedure](manifests/UPCOMING_0_1_12.md).
+
+- Fail-open fixed: Health observation, dependency discovery, sizing, receivership builder, Shadow bank helper and fixtures decoded any Bank of at least 1864 B by its first 1856 B. A 0.1.12-resized bank (3904 B, byte-identical prefix) would have been read without its premium state. All now use `protocol::decode_bank`: exact `8 + size_of::<Bank>()` of the pinned crate, otherwise `UNKNOWN_LAYOUT` (`OtherVersion`/`Length`/`Discriminator`).
+- P1A-04 follow-up: the runtime upgrade HALT now logs the decoded new deployment (slot, authority, hash).
+- P1B-02 tests: dual-size decoder and a Health-level resized-bank test. P1B-03: promotion procedure with test tripwires (source pin, bank size, reference hash).
+
+Tests (targeted): `darkbot-project0` lib 65/65 PASS (`crate_health`); `darkbot-runner` builder/fixture/state_owner 21/21 PASS (`crate_health,txv1`); `cargo check` featureless project0 and runner `crate_health` PASS. No Mainnet call.
+
+**Gate P1B PARTIAL:** upgrade-safe (halt + no misread), but a trial build against the deployed 0.1.12 tag is NOT_RUN until that tag is released and deployed.

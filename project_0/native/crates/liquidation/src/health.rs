@@ -144,6 +144,11 @@ pub mod crate_impl {
         bytemuck::try_from_bytes::<T>(slice).map_err(|e| HealthError::Crate(format!("pod cast: {:?}", e)))
     }
 
+    /// [P1B-02] Strict Bank layout: a 0.1.12-resized bank is UNKNOWN_LAYOUT, never a prefix decode.
+    fn load_bank(data: &[u8]) -> Result<&Bank, HealthError> {
+        crate::protocol::decode_bank(data).map_err(|e| HealthError::Unsupported(e.to_string()))
+    }
+
     impl<'s, S: AccountSource + ?Sized> CrateHealth<'s, S> {
         fn raw(&self, k: &Pubkey) -> Result<(Pubkey, u64, &'s [u8]), HealthError> {
             self.state.account(k).ok_or(HealthError::MissingAccount(*k))
@@ -158,7 +163,7 @@ pub mod crate_impl {
             let mut out = Vec::with_capacity(banks.len() * 4);
             for bk in banks {
                 let (_, _, data) = self.raw(&bk)?;
-                let bank: &Bank = load(data)?;
+                let bank: &Bank = load_bank(data)?;
                 out.push(bk);
                 out.extend(bank_observation_keys(bank)?);
             }
@@ -198,7 +203,7 @@ pub mod crate_impl {
                     continue;
                 }
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
-                let bank: &Bank = load(bdata)?;
+                let bank: &Bank = load_bank(bdata)?;
                 configs.push(bank.emode.emode_config);
 
                 if !same_asset_enabled || !same_asset_valid {
@@ -345,7 +350,7 @@ pub mod crate_impl {
             slot: u64,
         ) -> Result<(u128, u128), HealthError> {
             let (_, _, data) = self.raw(bank_key)?;
-            let bank: &Bank = load(data)?;
+            let bank: &Bank = load_bank(data)?;
             let clock = Clock {
                 slot,
                 epoch_start_timestamp: 0,
@@ -452,7 +457,7 @@ pub mod crate_impl {
 
             for balance in acc.lending_account.balances.iter().filter(|b| b.is_active()) {
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
-                let bank: &Bank = load(bdata)?;
+                let bank: &Bank = load_bank(bdata)?;
                 let Some(balance_side) = balance.get_side() else { continue };
                 let (low, high) = self.bank_maintenance_prices(bank, &clock)?;
 
@@ -661,7 +666,7 @@ pub mod crate_impl {
 
             for balance in acc.lending_account.balances.iter().filter(|b| b.is_active()) {
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
-                let bank: &Bank = load(bdata)?;
+                let bank: &Bank = load_bank(bdata)?;
 
                 if bank.is_cb_halted(now_unix_s)
                     || bank.config.operational_state == BankOperationalState::CircuitBroken
@@ -775,6 +780,52 @@ pub mod crate_impl {
 }
 
 #[cfg(all(test, feature = "crate_health"))]
+mod bank_layout_tests {
+    use super::crate_impl::CrateHealth;
+    use super::{AccountSource, HealthEngine, HealthError};
+    use crate::protocol;
+    use marginfi_type_crate::types::MarginfiAccount;
+    use solana_sdk::pubkey::Pubkey;
+    use std::collections::HashMap;
+
+    /// u64-backed accounts keep payloads 8-byte aligned like real account data.
+    struct Source(HashMap<Pubkey, (Pubkey, Vec<u64>, usize)>);
+    impl AccountSource for Source {
+        fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+            self.0.get(k).map(|(o, w, n)| (*o, 1, &bytemuck::cast_slice::<u64, u8>(w)[..*n]))
+        }
+    }
+    fn aligned(bytes: &[u8]) -> (Vec<u64>, usize) {
+        let mut w = vec![0u64; bytes.len().div_ceil(8)];
+        bytemuck::cast_slice_mut::<u64, u8>(&mut w)[..bytes.len()].copy_from_slice(bytes);
+        (w, bytes.len())
+    }
+
+    /// P1B-02: a 0.1.12-resized bank must not reach the 0.1.11 Health crate as a prefix decode.
+    #[test]
+    fn resized_bank_fails_health_observation_closed() {
+        let program = Pubkey::new_unique();
+        let (account, bank) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let mut acc: MarginfiAccount = bytemuck::Zeroable::zeroed();
+        acc.lending_account.balances[0].active = 1;
+        acc.lending_account.balances[0].bank_pk = bank;
+        let mut adata = protocol::DISC_MARGINFI_ACCOUNT.to_vec();
+        adata.extend_from_slice(bytemuck::bytes_of(&acc));
+        let (aw, an) = aligned(&adata);
+        let mut bdata = protocol::DISC_BANK.to_vec();
+        bdata.resize(8 + protocol::BANK_PAYLOAD_LEN_0_1_12, 0);
+        let (bw, bn) = aligned(&bdata);
+        let state = Source(HashMap::from([(account, (program, aw, an)), (bank, (program, bw, bn))]));
+        let engine = CrateHealth { state: &state, group: Pubkey::new_unique() };
+        match engine.observation_accounts(&account) {
+            Err(HealthError::Unsupported(e)) => assert!(e.starts_with("UNKNOWN_LAYOUT: bank layout 0.1.12")),
+            other => panic!("resized bank must fail closed, got {other:?}"),
+        }
+        assert!(super::dependency_keys(&state, &program, &[bank]).is_empty());
+    }
+}
+
+#[cfg(all(test, feature = "crate_health"))]
 mod threshold_search_tests {
     use super::crate_impl::CrateHealth;
     use super::{AccountSource, HealthError};
@@ -815,14 +866,12 @@ mod threshold_search_tests {
 #[cfg(feature = "crate_health")]
 pub fn dependency_keys<S: AccountSource + ?Sized>(state: &S, program: &Pubkey, banks: &[Pubkey]) -> Vec<Pubkey> {
     use crate::protocol;
-    use marginfi_type_crate::types::Bank;
     let mut out: Vec<Pubkey> = Vec::new();
     for bk in banks {
         let Some((owner, _, data)) = state.account(bk) else { continue };
         if &owner != program || protocol::classify(data) != protocol::AccountType::Bank { continue; }
-        let need = 8 + std::mem::size_of::<Bank>();
-        if data.len() < need { continue; }
-        let Ok(bank) = bytemuck::try_from_bytes::<Bank>(&data[8..need]) else { continue };
+        // [P1B-02] Resized/unknown layouts get no dependencies; Health then fails closed.
+        let Ok(bank) = protocol::decode_bank(data) else { continue };
         out.push(bank.mint);
         // [FIX-27] dieselbe Quelle wie die Health-Observation (p0-cli-Semantik).
         if let Ok(keys) = crate_impl::bank_observation_keys(bank) { out.extend(keys); }

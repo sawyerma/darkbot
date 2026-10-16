@@ -182,11 +182,7 @@ pub mod run {
         bank: &Pubkey,
     ) -> Result<(Pubkey, Pubkey, Pubkey), String> {
         let (_, _, data) = state.account(bank).ok_or("bank not in state")?;
-        let need = 8 + std::mem::size_of::<Bank>();
-        if data.len() < need {
-            return Err(format!("bank account too short: {} < {}", data.len(), need));
-        }
-        let b: &Bank = bytemuck::try_from_bytes(&data[8..need]).map_err(|e| format!("{e:?}"))?;
+        let b: &Bank = darkbot_project0::protocol::decode_bank(data).map_err(|e| e.to_string())?;
         let (mint_owner, _, _) = state.account(&b.mint).ok_or("mint not in state")?;
         Ok((b.liquidity_vault, b.mint, mint_owner))
     }

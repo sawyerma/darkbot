@@ -455,21 +455,8 @@ pub mod p0 {
             if owner != self.program {
                 return Err(format!("UNKNOWN_LAYOUT: bank owner {}", owner));
             }
-            if darkbot_project0::protocol::classify(data)
-                != darkbot_project0::protocol::AccountType::Bank
-            {
-                return Err("UNKNOWN_LAYOUT: not a Bank discriminator".into());
-            }
-            let need = 8 + std::mem::size_of::<Bank>();
-            if data.len() < need {
-                return Err(format!(
-                    "UNKNOWN_LAYOUT: bank len {} < {}",
-                    data.len(),
-                    need
-                ));
-            }
             let b: &Bank =
-                bytemuck::try_from_bytes(&data[8..need]).map_err(|e| format!("{:?}", e))?;
+                darkbot_project0::protocol::decode_bank(data).map_err(|e| e.to_string())?;
             let (mint_owner, _, _) = self.state.account(&b.mint).ok_or("mint not in state")?;
             Ok((b.liquidity_vault, b.mint, mint_owner))
         }
@@ -479,22 +466,9 @@ pub mod p0 {
             if owner != self.program {
                 return Err(format!("UNKNOWN_LAYOUT: bank owner {}", owner));
             }
-            if darkbot_project0::protocol::classify(data)
-                != darkbot_project0::protocol::AccountType::Bank
-            {
-                return Err("UNKNOWN_LAYOUT: not a Bank discriminator".into());
-            }
-            let need = 8 + std::mem::size_of::<Bank>();
-            if data.len() < need {
-                return Err(format!(
-                    "UNKNOWN_LAYOUT: bank len {} < {}",
-                    data.len(),
-                    need
-                ));
-            }
-            bytemuck::try_from_bytes::<Bank>(&data[8..need])
-                .map(|b| *b)
-                .map_err(|e| format!("{:?}", e))
+            darkbot_project0::protocol::decode_bank(data)
+                .copied()
+                .map_err(|e| e.to_string())
         }
 
         fn pod_after_disc<T: bytemuck::Pod>(&self, k: &Pubkey) -> Result<&T, String> {
