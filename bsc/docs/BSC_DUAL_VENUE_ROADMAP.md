@@ -1,7 +1,7 @@
 # DarkBot Solana + BSC Roadmap — Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-10-13
+Updated: 2026-10-16 (binary data-path invariant added; Gate-0 qualification freeze of 2026-10-13 preserved)
 
 ## **ABSOLUTE STOP RULE — REAL MAINNET BUY BEFORE ANY MORE C1/C2 WORK**
 
@@ -21,6 +21,33 @@ Updated: 2026-10-13
 > ```
 >
 > C1 engineering may remain preserved at its current qualified checkpoint, but it is **PAUSED** until the real BUY test is executed and evaluated.
+
+## BINDING DATA-PATH INVARIANT — BINARY HOT PATH / EXTERNAL PROTOCOL BOUNDARY (2026-10-16)
+
+**Normative scope:** BSC Gate-0-to-production architecture. This clarifies *where* JSON and network protocols are permitted; it does **not** authorize any live send, change the G0.6a frozen signed bytes, bypass the acceptance guard, reopen completed DRY evidence, or alter the mandatory G0.7 -> G0.8 -> PASS/ADAPT/STOP -> C1/C2 order. The sub-1-ms local reaction target and the separately witnessed T0 -> T_buy metric retain their existing definitions and acceptance gates.
+
+### Mandatory runtime separation
+
+| Boundary | Rule |
+| --- | --- |
+| Earliest peer/chain signal -> HOT0 -> classification/state -> quote/policy -> build/sign -> local dispatch/handoff | **Binary only internally:** borrowed/fixed-layout IPC records, typed native Rust state, direct ABI/RLP, preallocated buffers and bounded queues. No JSON parse/serialize, HTTP/JSON-RPC control lookup, WSS, child-process start, filesystem read/write/fsync, or synchronous report generation inside the measured decision/dispatch hot path. Do not move such work into an indirect helper called from it. |
+| Builder 48Club / BlockRazor | Their external wire API may require **HTTP(S) JSON-RPC**; this exception is unavoidable protocol framing, **not permission to construct/parse JSON dynamically inside the measured hot path**. Prepare exact request byte templates and TLS connections off-path; after the fresh-head gate, update only strictly required bounded fields in a preallocated buffer and transmit the already framed bytes. Response parsing, receipts and reports remain off-path. Preserve provider-specific expiry, authentication, byte correctness and replay restrictions. |
+| Pinned geth <-> Rust / signed BUY | Native P2P + binary IPC/egress and raw signed RLP; no WSS or JSON bridge as the primary production signal or BUY transport. |
+| Live capture / evidence | The canonical runtime event record is a **versioned binary append-only journal** (existing `engine/crates/journal` owner) with ordering, clocks, identity, completeness/drop/error counters and crash-recovery semantics. Bounded asynchronous persistence must not block decision/dispatch. A safety-required durable fence must be completed before the economic release or fail closed; never silently weaken evidence durability to claim lower latency. Journals containing signed, still-executable bytes remain private and untracked. |
+| Cold/control/offline | JSON is permitted for versioned contracts, frozen DRY/qualification inputs, read-only RPC/bootstrap, provider wire fixtures, G0.8 verification, audit exports and human-readable JSON/CSV reports. Reports are **derived** from the canonical records and must not become a conflicting runtime source of truth. Never reserialize or rewrite hash-bound DRY evidence to introduce a new format. |
+
+### Phase-accurate implementation (no new engine or refactor loop)
+
+1. **Now, G0.7/G0.8:** finish the controlled Mainnet BUY qualification and canonical acquisition/ordering/cost verification in the existing G0.7 binary and G0.8 tooling. Preserve the already qualified signed launch/BUY bytes, guard `UNARMED` until separate explicit approval, single-attempt discipline, frozen DRY SHA-256 bindings and G0.8 input compatibility. G0.7 is a deliberately isolated qualification harness, **not proof of a JSON-free production hot path**. Fix demonstrated safety/evidence and fresh-head/expiry defects with narrow tests; do not rewrite its functioning qualification pipeline merely to remove harmless cold-path JSON. Existing G0.7 JSON evidence must remain readable by G0.8 until a tested migration proves equivalent fields and recovery.
+2. **After G0.7/G0.8 verdict, C1.10 -> C2/C3 and venue phases:** implement the single production runtime and actual binary HOT0 -> state -> BUY -> qualified egress path. Prewarm RPC/HTTP(S)/TLS and serialize provider templates outside its measured boundary. Qualify any bounded dynamic patching independently (byte-exact requests, matching signature hashes, expiry/window and provider policy); do not introduce a second BUY/signing algorithm or use G0.7 as the permanent trading runner.
+3. **PAPER / final production hot-path requalification (I) before LIVE (J):** verify real-path allocation/blocking/format boundaries with instrumentation and measured worst-case latency, counters for dropped/late records, replay/crash tests and independent on-chain outcome checks. `PASS` requires evidence from the actual runtime, not from `c19_consumer` fixtures, JSON reports, FakeTransport, builder ACKs or local-only handoff.
+
+### Non-regression / acceptance checks
+
+- Prove by static call-graph review **and runtime measurement** that no JSON parser/serializer, WSS client, spawned `node`/`curl`, file access/fsync or synchronous reporting executes between the measured production ingress and outbound handoff. External builder JSON-RPC *wire bytes* are the only format exception; their building/variable-field patching must not depend on general JSON serialization at release time.
+- Record the timing boundaries separately: earliest observation, local receipt/decision, signature completion, egress handoff, provider write and actual on-chain acquisition. Never infer `T0 -> T_buy < 1 ms` from a receipt, block ordering or local timing without original producing-execution witness.
+- For any JSON-to-binary evidence transition, first prove byte/field parity, deterministic decoding, no lost raw signed TX references, correct crash recovery, full G0.8 compatibility, cryptographic identity and no degraded safety fences; then retire redundant runtime JSON writers. Preserve immutable historic evidence and avoid a broad pre-G0.7 refactor.
+- Never send real BNB, arm the compiled guard, modify approval state or loosen an economic bound on the strength of this section alone.
 
 ## G0.6a–G0.8 qualification update — binding 2026-10-13
 
@@ -513,6 +540,8 @@ Possible order:
 Do not prebuild all levels.
 
 ## 20. Architecture invariants
+
+This section additionally inherits the binding binary-hot-path / external-protocol boundary defined near the top of this roadmap (2026-10-16). The required builder JSON-RPC wire frame is an external protocol exception, not a general runtime JSON processing exception.
 
 Production remains:
 
