@@ -5335,3 +5335,9 @@ FE-01 replay requires complete ordered sealed archives and exact read counts; al
 Final offline validation: Rust **421/423 PASS**, 0 FAIL, 2 pre-existing ignored each; both release builds and featureless check PASS; Python/verifier/census PASS; Clippy both configurations exit 0 (warning inventories attached). Initial import/test-fixture failures were corrected before these final results. Existing synthetic benchmark not rerun; Mainnet tails NOT_MEASURED.
 
 **Overall PERSIST PARTIAL; FE-01 OPEN; FE-04 PARTIAL_LOCAL.** Current source/state/funding proof, production pilot/accounting integration and real-load qualification remain open. No Mainnet/LIVE/submission, staging, commit or push; BSC unchanged. Next: authorized bounded FREE_ONLY current observation, then candidate-specific qualification; do not infer authorization from this local pass.
+
+## 2026-10-16 — P0 reuse / license / routing / oracle / staging: PASS
+
+Base `c476a37`. [Gate verdict and routing audit](evidence/P0_20261016/README.md), [reuse matrix](evidence/P0_20261016/REUSE_MATRIX.md), [license matrix](evidence/P0_20261016/LICENSE_MATRIX.md), [oracle model](evidence/P0_20261016/ORACLE_MODEL.md), [staging model](evidence/P0_20261016/STAGING_MODEL.md).
+
+All seven P0 gate items PASS; existing reuse decisions unchanged. All 669 third-party Rust packages permissive. `solana-dex-superagg` stays unlinked (returns finished transactions, no allowlist check); DarkBot keeps Jupiter `/swap/v2/build` (FREE_ONLY 1 RPS, not a hot-path stream); DFlow not allowlisted. Staging (`stag8s…`) needs a `staging` protocol build plus allowlist change, implemented with P5/P8. Provider items marked UNKNOWN are re-check items before enabling the respective path. No Mainnet, staging or provider API call; no code change.

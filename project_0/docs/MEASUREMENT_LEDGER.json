@@ -3,9 +3,9 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "9c37218f8dff0bba5419bfabb398a67cead9d1f8",
+    "git_blob_sha": "245a2f647ae5885d75644dc74177752be754bbab",
     "as_of_code_commit": null,
-    "line_count": 5337,
+    "line_count": 5343,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014",
     "local_followup_base_commit": "9047c7b45988b0c8798b710bb97c183d0a063c7f",
@@ -106,6 +106,10 @@
       "PERSIST_05": "PARTIAL_MAINNET_NOT_MEASURED",
       "realized_profit": "NOT_PROVEN",
       "local_followup_evidence": "project_0/docs/evidence/PERSIST_FOLLOWUP_20261016/qualification.json"
+    },
+    "p0": {
+      "status": "PASS",
+      "evidence": "project_0/docs/evidence/P0_20261016/README.md"
     }
   },
   "economic_evidence": {
@@ -217,7 +221,12 @@
       "line_start": 5327,
       "line_end": 5337,
       "heading": "2026-10-16 — PERSIST strict binary / fsync errors / FE-01 replay follow-up (local)"
+    },
+    "p0_gate_20261016": {
+      "line_start": 5339,
+      "line_end": 5343,
+      "heading": "2026-10-16 — P0 reuse / license / routing / oracle / staging: PASS"
     }
   },
-  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed."
+  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed."
 }
