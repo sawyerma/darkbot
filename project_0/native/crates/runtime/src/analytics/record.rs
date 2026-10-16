@@ -234,3 +234,7 @@ mod tests {
         }
     }
 }
+
+impl super::payload::Payload for OpportunityRecord {
+    const KIND: u16 = super::journal::kind::OWNER_OPPORTUNITY;
+}

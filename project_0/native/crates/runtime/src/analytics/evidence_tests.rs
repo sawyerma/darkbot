@@ -16,6 +16,19 @@ fn event(reason: &str) -> OwnerEvidence {
         reason: reason.into(),
     })
 }
+/// Data frames of a journal (manifest excluded).
+fn frames(path: &std::path::Path) -> Vec<journal::Frame> {
+    let mut r = journal::Reader::open(path).unwrap();
+    std::iter::from_fn(|| r.next_frame().unwrap())
+        .filter(|f| f.kind != journal::MANIFEST)
+        .collect()
+}
+fn reason(event: RecordEvent) -> String {
+    match event {
+        RecordEvent::IntegrationSkip { reason, .. } => reason,
+        other => panic!("{other:?}"),
+    }
+}
 fn paused(dir: &std::path::Path, read_only: bool) -> (OwnerEvidenceWriter, Arc<Barrier>) {
     let mut journal = Writer::create(&dir.join("events.p0j")).unwrap();
     if read_only {
@@ -57,10 +70,14 @@ fn full_queue_retains_refused_record_drains_fifo_and_fails_closed() {
         w.finish(Some(DaySummary::default())).unwrap_err().0,
         "OWNER_EVIDENCE_OVERFLOW"
     );
-    let rows = journal::values(&dir.join("events.p0j")).unwrap();
+    let rows = frames(&dir.join("events.p0j"));
     assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0]["reason"], "first");
-    assert_eq!(rows[1]["reason"], "second");
+    assert_eq!(reason(rows[0].typed().unwrap()), "first");
+    assert_eq!(reason(rows[1].typed().unwrap()), "second");
+    assert_eq!(
+        rows[2].typed::<DaySummary>().unwrap(),
+        DaySummary::default()
+    );
     let mut reader = journal::Reader::open(&dir.join("events.p0j")).unwrap();
     while reader.next_frame().unwrap().is_some() {}
     assert!(reader.sealed);
@@ -79,11 +96,17 @@ fn real_write_failure_preserves_queue_refusal_and_final_summary_in_recovery() {
         w.finish(Some(DaySummary::default())).unwrap_err().0,
         "OWNER_EVIDENCE_WRITE_FAILED_RECOVERY_SAVED"
     );
-    let rows = journal::values(&dir.join("recovery.p0j")).unwrap();
+    let rows: Vec<OwnerRecovery> = frames(&dir.join("recovery.p0j"))
+        .iter()
+        .map(|f| f.typed().unwrap())
+        .collect();
     assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0]["event"]["reason"], "first");
-    assert_eq!(rows[1]["event"]["reason"], "second");
-    assert_eq!(rows[2]["event_kind"], 103);
+    let saved = |r: &OwnerRecovery| -> RecordEvent {
+        payload::decode(r.event_kind, r.event_schema, &r.event).unwrap()
+    };
+    assert_eq!(reason(saved(&rows[0])), "first");
+    assert_eq!(reason(saved(&rows[1])), "second");
+    assert_eq!(rows[2].event_kind, journal::kind::OWNER_SUMMARY);
     std::fs::remove_dir_all(dir).unwrap();
 }
 #[test]
@@ -95,7 +118,7 @@ fn early_error_drop_joins_writer_and_does_not_abandon_accepted_records() {
     assert!(sent.is_ok());
     drop(w);
     assert_eq!(
-        journal::values(&dir.join("events.p0j")).unwrap()[0]["reason"],
+        reason(frames(&dir.join("events.p0j"))[0].typed().unwrap()),
         "accepted"
     );
     std::fs::remove_dir_all(dir).unwrap();
@@ -117,41 +140,55 @@ fn recovery_destination_collision_is_not_overwritten_or_reported_as_success() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
-fn parity(event: RecordEvent, expected: Value) {
-    let (_, value) = OwnerEvidence::Record(event).encode().unwrap();
-    let bytes =
-        serde_json::to_vec(&journal::decode(&journal::encode(&value).unwrap()).unwrap()).unwrap();
-    assert_eq!(bytes, format!("{expected}").as_bytes());
+/// JFI-02: every owner record variant round-trips through its typed binary payload exactly,
+/// with the frame provenance taken from the event itself (no JSON lookup).
+fn parity(event: RecordEvent, slot: Option<u64>, rx_ns: Option<u64>) {
+    let e = OwnerEvidence::Record(event.clone()).encode().unwrap();
+    assert_eq!(
+        (e.kind, e.schema),
+        (journal::kind::OWNER_RECORD, payload::TYPED)
+    );
+    assert_eq!((e.slot, e.rx_ns), (slot, rx_ns));
+    let decoded: RecordEvent = payload::decode(e.kind, e.schema, &e.bytes).unwrap();
+    assert_eq!(decoded, event);
+    assert_eq!(payload::encode(&decoded).unwrap(), e.bytes);
+    assert!(payload::decode::<RecordEvent>(e.kind, e.schema + 1, &e.bytes).is_err());
+    assert!(
+        payload::decode::<RecordEvent>(e.kind, e.schema, &e.bytes[..e.bytes.len() - 1]).is_err()
+    );
 }
 #[test]
-fn legacy_jsonl_byte_parity_all_structured_record_variants() {
+fn typed_payload_round_trip_all_structured_record_variants() {
     let account = Pubkey::default();
     let text = "quoted \"reason\"\n\\雪";
     parity(
         RecordEvent::IntegrationPlan {
             account,
-            trigger: "account",
+            trigger: "account".into(),
             slot: 3,
             reason: text.into(),
         },
-        json!({"account":account.to_string(),"trigger":"account","slot":3,"decision":"Skip","loss":"IntegrationRefresh","reason":text}),
+        Some(3),
+        None,
     );
     parity(
         RecordEvent::IntegrationSkip {
             account,
             reason: text.into(),
         },
-        json!({"account":account.to_string(),"decision":"Skip","loss":"IntegrationRefresh","reason":text}),
+        None,
+        None,
     );
     parity(
         RecordEvent::IntegrationPending {
             account,
-            trigger: "bank",
+            trigger: "bank".into(),
             slot: 3,
-            integration_kinds: vec!["kamino"],
+            integration_kinds: vec!["kamino".into()],
             pricing_integration_kinds: vec![],
         },
-        json!({"account":account.to_string(),"trigger":"bank","slot":3,"decision":"Skip","loss":"IntegrationRefresh","reason":"integration projection pending","integration_kinds":["kamino"],"pricing_integration_kinds":[]}),
+        Some(3),
+        None,
     );
     parity(
         RecordEvent::ProjectionReady {
@@ -163,7 +200,8 @@ fn legacy_jsonl_byte_parity_all_structured_record_variants() {
             pricing_integration_kinds: vec![],
             simulated_cu: None,
         },
-        json!({"projection":{"account":account.to_string(),"base_slot":2,"projection_slot":3,"projection_unix_s":4,"status":"ready","integration_kinds":[],"pricing_integration_kinds":[],"simulated_cu":null}}),
+        None,
+        None,
     );
     parity(
         RecordEvent::ProjectionStale {
@@ -172,7 +210,8 @@ fn legacy_jsonl_byte_parity_all_structured_record_variants() {
             projection_slot: 3,
             canonical_matches: false,
         },
-        json!({"projection":{"account":account.to_string(),"base_slot":2,"projection_slot":3,"status":"stale","canonical_matches":false}}),
+        None,
+        None,
     );
     parity(
         RecordEvent::ProjectionFailed {
@@ -180,26 +219,27 @@ fn legacy_jsonl_byte_parity_all_structured_record_variants() {
             base_slot: 2,
             error: text.into(),
         },
-        json!({"projection":{"account":account.to_string(),"base_slot":2,"status":"failed","error":text}}),
+        None,
+        None,
     );
     let winner = Winner {
         slot: 3,
         identity: crate::market::winner::WinnerIdentity::SameSlotAmbiguous { candidates: vec![] },
     };
-    let expected = json!({"race":{"account":account.to_string(),"winner":winner,"our_sign_slot":null,"outcome":RaceOutcome::SameSlotUnknown,"expected_net":i128::MAX}});
     parity(
         RecordEvent::Race {
             account,
-            winner,
+            winner: (&winner).into(),
             our_sign_slot: None,
             outcome: RaceOutcome::SameSlotUnknown,
             expected_net: Some(i128::MAX),
         },
-        expected,
+        None,
+        None,
     );
 }
 #[test]
-fn health_full_i128_and_unknown_variants_keep_exact_wire_contract() {
+fn health_full_i128_and_unknown_variants_round_trip_exactly() {
     let account = Pubkey::default();
     for bits in [
         i128::MIN,
@@ -211,7 +251,7 @@ fn health_full_i128_and_unknown_variants_keep_exact_wire_contract() {
         parity(
             RecordEvent::Health {
                 account,
-                trigger: "bank",
+                trigger: "bank".into(),
                 t_rx_ns: 1,
                 slot: 2,
                 evaluation_slot: 3,
@@ -223,30 +263,26 @@ fn health_full_i128_and_unknown_variants_keep_exact_wire_contract() {
                     bad_debt: false,
                 },
             },
-            json!({"account":account.to_string(),"trigger":"bank","t_rx_ns":1,"slot":2,"evaluation_slot":3,"evaluation_unix_s":4,"liquidatable":true,"maint_health_bits":bits,"equity_assets_bits":bits,"bad_debt":false}),
+            Some(2),
+            Some(1),
         );
     }
-    for (result, field, value) in [
-        (HealthEvidence::Unavailable, "decision", "Unavailable"),
-        (
-            HealthEvidence::Error("bad \"oracle\"".into()),
-            "error",
-            "bad \"oracle\"",
-        ),
+    for result in [
+        HealthEvidence::Unavailable,
+        HealthEvidence::Error("bad \"oracle\"".into()),
     ] {
-        let mut expected = json!({"account":account.to_string(),"trigger":"bank","t_rx_ns":1,"slot":2,"evaluation_slot":3,"evaluation_unix_s":4});
-        expected[field] = json!(value);
         parity(
             RecordEvent::Health {
                 account,
-                trigger: "bank",
+                trigger: "bank".into(),
                 t_rx_ns: 1,
                 slot: 2,
                 evaluation_slot: 3,
                 evaluation_unix_s: 4,
                 result,
             },
-            expected,
+            Some(2),
+            Some(1),
         );
     }
 }
@@ -378,14 +414,14 @@ fn owner_diagnostics_are_journaled_before_they_are_printed() {
     let mut reader = journal::Reader::open(&dir.join("events.p0j")).unwrap();
     let frame = reader.next_frame().unwrap().unwrap();
     assert_eq!(frame.kind, journal::kind::OWNER_DIAGNOSTIC);
-    assert_eq!(frame.value["line"], "oracle_trigger_stats: a=1");
+    let line: OwnerDiagnostic = frame.typed().unwrap();
+    assert_eq!(line.line, "oracle_trigger_stats: a=1");
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes() {
+fn opportunity_fixture() -> OpportunityRecord {
     use crate::analytics::record::{Decision, TimingEvidence};
-    let record = OpportunityRecord {
+    OpportunityRecord {
         progress: Default::default(),
         market_plan_identity: None,
         timing: TimingEvidence {
@@ -423,10 +459,14 @@ fn ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes() {
         intervals_ns: vec![],
         reason: None,
         loss: None,
-    };
+    }
+}
+#[test]
+fn ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes() {
+    let record = opportunity_fixture();
     let reconciled = ReconcileRecord {
         signature: "signed".into(),
-        path: "RPC",
+        path: "RPC".into(),
         outcome: "UNKNOWN".into(),
         landed_slot: None,
         fee_lamports: None,
@@ -441,31 +481,74 @@ fn ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes() {
         expected_net_wins_sum: i128::MAX,
         ..DaySummary::default()
     };
-    let expected_records = format!(
-        "{}\n{}\n",
-        serde_json::to_string(&record).unwrap(),
-        serde_json::to_string(&reconciled).unwrap()
-    );
-    let expected_summary = format!("{}\n", serde_json::to_string(&summary).unwrap());
     let dir = directory();
     let path = dir.join("events.p0j");
     let mut writer = OwnerEvidenceWriter::start(path.clone(), dir.join("recovery.p0j"), 4).unwrap();
+    let record_bytes = payload::encode(&record).unwrap();
+    let reconciled_bytes = payload::encode(&reconciled).unwrap();
+    let summary_bytes = payload::encode(&summary).unwrap();
     writer
         .emit(OwnerEvidence::Opportunity(Box::new(record)))
         .unwrap();
     writer.emit(OwnerEvidence::Reconcile(reconciled)).unwrap();
-    writer.finish(Some(summary)).unwrap();
-    let values = journal::values(&path).unwrap();
-    // JSON object order is canonical in the binary codec; field values and nulls remain exact.
-    let expected: Vec<Value> = expected_records
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    assert_eq!(&values[..2], &expected);
-    assert_eq!(
-        values[2],
-        serde_json::from_str::<Value>(&expected_summary).unwrap()
-    );
+    writer.finish(Some(summary.clone())).unwrap();
+    // JFI-02: the frames carry the typed payloads byte for byte and decode back exactly.
+    let mut reader = journal::Reader::open(&path).unwrap();
+    let frames: Vec<_> = std::iter::from_fn(|| reader.next_frame().unwrap()).collect();
+    assert_eq!(frames[0].payload, record_bytes);
+    assert_eq!(frames[1].payload, reconciled_bytes);
+    assert_eq!(frames[2].payload, summary_bytes);
+    let opportunity: OpportunityRecord = frames[0].typed().unwrap();
+    assert_eq!(payload::encode(&opportunity).unwrap(), record_bytes);
+    let _: ReconcileRecord = frames[1].typed().unwrap();
+    assert_eq!(frames[2].typed::<DaySummary>().unwrap(), summary);
+    assert!(frames[0].legacy_value().is_err());
+    assert!(reader.complete);
     assert!(!dir.join("recovery.p0j").exists());
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// JFI-02 local measurement (`--ignored`): writer-thread cost per owner opportunity frame, the
+/// former JSON value path against the typed payload path. Synthetic, not a Mainnet measurement.
+#[test]
+#[ignore]
+fn jfi02_owner_opportunity_writer_cost_typed_vs_json_value() {
+    use std::time::Instant;
+    let record = opportunity_fixture();
+    let pct = |v: &mut Vec<u64>, q: f64| {
+        v.sort_unstable();
+        v[((v.len() as f64 - 1.0) * q).round() as usize]
+    };
+    for typed in [false, true] {
+        let dir = directory();
+        let path = dir.join("bench.p0j");
+        let mut w = Writer::create(&path).unwrap();
+        let mut lat = Vec::with_capacity(50_000);
+        for _ in 0..50_000 {
+            let t = Instant::now();
+            if typed {
+                w.append_typed(Provenance::default(), &record).unwrap();
+            } else {
+                let value = serde_json::to_value(&record).unwrap();
+                w.append_legacy(
+                    journal::kind::OWNER_OPPORTUNITY,
+                    Provenance::default(),
+                    &value,
+                )
+                .unwrap();
+            }
+            lat.push(t.elapsed().as_nanos() as u64);
+        }
+        w.seal(true).unwrap();
+        let bytes = std::fs::metadata(&path).unwrap().len() / 50_000;
+        println!(
+            "JFI02_OWNER_OPPORTUNITY path={} p50_ns={} p95_ns={} p99_ns={} max_ns={} bytes_per_frame={bytes}",
+            if typed { "typed" } else { "json_value" },
+            pct(&mut lat, 0.5),
+            pct(&mut lat, 0.95),
+            pct(&mut lat, 0.99),
+            pct(&mut lat, 1.0)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

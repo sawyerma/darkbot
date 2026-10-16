@@ -10,5 +10,6 @@ pub mod shadow_ledger;
 pub mod evidence;
 
 pub mod journal;
+pub mod payload;
 pub mod mt0_journal;
 pub mod renders;

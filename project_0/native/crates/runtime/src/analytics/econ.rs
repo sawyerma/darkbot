@@ -714,7 +714,7 @@ impl Worker {
                 };
                 let frame = self
                     .evaluations
-                    .append(kind::ECON_SHADOW_EVALUATION, 1, provenance, &value)
+                    .append_legacy(kind::ECON_SHADOW_EVALUATION, provenance, &value)
                     .map_err(|e| e.to_string())?;
                 self.shadow_evaluations_streamed += 1;
                 if let Some(hour) = hour {
@@ -895,12 +895,15 @@ impl Worker {
         if at < journal::HEADER_LEN || at >= self.evaluations.position() {
             return Err("invalid shadow journal offset".into());
         }
-        let mut frame = journal::read_at(&mut self.evaluations_at, at)
+        let frame = journal::read_at(&mut self.evaluations_at, at)
             .map_err(|e| format!("invalid shadow journal frame: {e}"))?;
         if frame.kind != kind::ECON_SHADOW_EVALUATION {
             return Err("invalid shadow journal frame kind".into());
         }
-        let previous = match frame.value["previous_target_offset"].take() {
+        let mut value = frame
+            .legacy_value()
+            .map_err(|e| format!("invalid shadow journal frame: {e}"))?;
+        let previous = match value["previous_target_offset"].take() {
             Value::Null => None,
             v => Some(v.as_u64().ok_or("invalid shadow journal chain")?),
         };
@@ -908,7 +911,7 @@ impl Worker {
             return Err("invalid shadow journal chain".into());
         }
         let rec: OpportunityRecord =
-            serde_json::from_value(frame.value["record"].take()).map_err(|e| e.to_string())?;
+            serde_json::from_value(value["record"].take()).map_err(|e| e.to_string())?;
         if rec.account != target {
             return Err("shadow journal target mismatch".into());
         }
@@ -1444,7 +1447,7 @@ impl Worker {
             ..Default::default()
         };
         self.reports
-            .append(kind, 1, provenance, value)
+            .append_legacy(kind, provenance, value)
             .map(|_| ())
             .map_err(|e| format!("REPORT_JOURNAL: {e}"))
     }

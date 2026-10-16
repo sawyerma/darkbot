@@ -227,14 +227,18 @@ fn replay(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), 
     while let Some(frame) = reader.next_frame().map_err(|_| err("JOURNAL_CORRUPT"))? {
         let next = match frame.kind {
             journal::kind::FE04_LEGACY_IMPORT if frame.journal_seq == 0 => {
-                let v: LegacyImport =
-                    serde_json::from_value(frame.value).map_err(|_| err("JOURNAL_CORRUPT"))?;
+                let v: LegacyImport = serde_json::from_value(
+                    frame.legacy_value().map_err(|_| err("JOURNAL_CORRUPT"))?,
+                )
+                .map_err(|_| err("JOURNAL_CORRUPT"))?;
                 imported = Some(v.legacy_sha256);
                 v.state
             }
             journal::kind::FE04_TRANSITION => {
-                let v: Version =
-                    serde_json::from_value(frame.value).map_err(|_| err("JOURNAL_CORRUPT"))?;
+                let v: Version = serde_json::from_value(
+                    frame.legacy_value().map_err(|_| err("JOURNAL_CORRUPT"))?,
+                )
+                .map_err(|_| err("JOURNAL_CORRUPT"))?;
                 if !legal(saved.as_ref(), v.transition, &v.state) {
                     return Err(err("JOURNAL_TRANSITION_INVALID"));
                 }
@@ -329,7 +333,7 @@ impl Journal {
         };
         let frame = self
             .writer
-            .append(kind, 1, provenance, value)
+            .append_legacy(kind, provenance, value)
             .map_err(|_| err("JOURNAL_WRITE"))?;
         let durable = self.writer.sync().map_err(|_| err("JOURNAL_FSYNC"))?;
         if durable.journal_seq != frame.journal_seq || durable.hash != frame.hash {

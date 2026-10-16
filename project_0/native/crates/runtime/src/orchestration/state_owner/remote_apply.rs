@@ -42,7 +42,7 @@ impl ShadowOwner {
                     }
                     let line = RecordEvent::Race {
                         account: w.account,
-                        winner: win,
+                        winner: (&win).into(),
                         our_sign_slot: w.sign_slot,
                         outcome: out,
                         expected_net: w.expected_net,
@@ -320,8 +320,14 @@ impl ShadowOwner {
                             base_slot: done.base_slot,
                             projection_slot,
                             projection_unix_s,
-                            integration_kinds,
-                            pricing_integration_kinds,
+                            integration_kinds: integration_kinds
+                                .into_iter()
+                                .map(Into::into)
+                                .collect(),
+                            pricing_integration_kinds: pricing_integration_kinds
+                                .into_iter()
+                                .map(Into::into)
+                                .collect(),
                             simulated_cu: units,
                         };
                         self.evidence.emit(OwnerEvidence::Record(line))?;

@@ -48,8 +48,9 @@ fn import(kind: u16, path: &Path) -> Result<(), String> {
                 slot: value.get("slot").and_then(serde_json::Value::as_u64),
                 ..Default::default()
             };
+            // Offline import of externally captured RPC rows stays a value-tree kind (open JFI item).
             writer
-                .append(kind, 1, provenance, &value)
+                .append_legacy(kind, provenance, &value)
                 .map_err(|e| e.to_string())?;
             rows += 1;
         }
@@ -69,9 +70,19 @@ fn frames(path: &Path) -> Result<(), String> {
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
     while let Some(f) = reader.next_frame().map_err(|e| e.to_string())? {
         let p = &f.provenance;
-        let row = serde_json::json!({"kind":f.kind,"journal_seq":f.journal_seq,"source":p.source,
-            "source_seq":p.source_seq,"slot":p.slot,"rx_ns":p.rx_ns,"unix_ns":p.unix_ns,"value":f.value});
-        writeln!(out, "{row}").map_err(|e| e.to_string())?;
+        // Typed frames as text; historical value-tree frames as their stored value.
+        let payload = if f.schema == 1 {
+            f.legacy_value().map(|v| v.to_string())
+        } else {
+            darkbot_runner::analytics::payload::describe(f.kind, f.schema, &f.payload)
+        }
+        .map_err(|e| e.to_string())?;
+        writeln!(
+            out,
+            "seq={} kind={} schema={} source={} source_seq={} slot={:?} rx_ns={:?} unix_ns={:?} payload={payload}",
+            f.journal_seq, f.kind, f.schema, p.source, p.source_seq, p.slot, p.rx_ns, p.unix_ns
+        )
+        .map_err(|e| e.to_string())?;
     }
     out.flush().map_err(|e| e.to_string())
 }

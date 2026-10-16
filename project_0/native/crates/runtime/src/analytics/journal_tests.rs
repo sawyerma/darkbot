@@ -26,7 +26,7 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
         unix_ns: None,
     };
     let f = w
-        .append(20, 1, p.clone(), &serde_json::json!({"amount":i128::MIN}))
+        .append_legacy(20, p.clone(), &serde_json::json!({"amount":i128::MIN}))
         .unwrap();
     let ack = w.sync().unwrap();
     assert_eq!(ack.journal_seq, 0);
@@ -35,7 +35,10 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
     let mut r = Reader::open(&path).unwrap();
     let read = r.next_frame().unwrap().unwrap();
     assert_eq!(read.provenance, p);
-    assert_eq!(read.value["amount"].to_string(), i128::MIN.to_string());
+    assert_eq!(
+        read.legacy_value().unwrap()["amount"].to_string(),
+        i128::MIN.to_string()
+    );
     r.next_frame().unwrap();
     assert!(r.next_frame().unwrap().is_none());
     assert!(r.complete);
@@ -302,4 +305,44 @@ fn fsync_error_never_returns_durable_ack_and_poisoning_is_sticky() {
         drop(writer);
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
+}
+
+/// JFI-01: typed frames are read only through their registered type and version.
+#[test]
+fn typed_frames_fail_closed_on_unknown_kind_version_or_truncation() {
+    use super::super::payload::{self, OwnerDiagnostic, TYPED};
+    let dir = std::env::temp_dir().join(format!("p0-typed-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir(&dir).unwrap();
+    let line = payload::encode(&OwnerDiagnostic { line: "x".into() }).unwrap();
+    for (name, kind, schema, bytes) in [
+        ("untyped", 20u16, TYPED, line.clone()),
+        ("version", kind::OWNER_DIAGNOSTIC, TYPED + 1, line.clone()),
+        (
+            "truncated",
+            kind::OWNER_DIAGNOSTIC,
+            TYPED,
+            line[..line.len() - 1].to_vec(),
+        ),
+    ] {
+        let path = dir.join(format!("{name}.p0j"));
+        let mut w = Writer::create(&path).unwrap();
+        w.append(kind, schema, Provenance::default(), &bytes)
+            .unwrap();
+        w.sync().unwrap();
+        let mut r = Reader::open(&path).unwrap();
+        assert!(r.next_frame().is_err(), "{name}");
+    }
+    // The valid typed frame and the typed manifest read back; the frame is not a value tree.
+    let path = dir.join("valid.p0j");
+    let mut w = Writer::create(&path).unwrap();
+    w.append_typed(Provenance::default(), &OwnerDiagnostic { line: "x".into() })
+        .unwrap();
+    w.seal(true).unwrap();
+    let mut r = Reader::open(&path).unwrap();
+    let f = r.next_frame().unwrap().unwrap();
+    assert_eq!(f.typed::<OwnerDiagnostic>().unwrap().line, "x");
+    assert!(f.legacy_value().is_err());
+    assert!(r.next_frame().unwrap().is_some() && r.sealed && r.complete);
+    fs::remove_dir_all(dir).unwrap();
 }

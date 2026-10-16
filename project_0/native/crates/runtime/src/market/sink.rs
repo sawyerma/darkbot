@@ -100,7 +100,7 @@ impl JournalSink {
             rx_ns: row.get("t_rx_ns").and_then(Value::as_u64),
             ..Default::default()
         };
-        self.writer.append(kind, 1, provenance, row)?;
+        self.writer.append_legacy(kind, provenance, row)?;
         self.rows += 1;
         Ok(())
     }

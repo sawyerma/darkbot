@@ -115,7 +115,7 @@ fn run() -> Result<(), String> {
             ..Default::default()
         };
         journal
-            .append(kind, 1, provenance, v)
+            .append_legacy(kind, provenance, v)
             .and_then(|_| journal.sync())
             .map(|_| ())
             .map_err(|_| "FE_EVIDENCE_JOURNAL".into())

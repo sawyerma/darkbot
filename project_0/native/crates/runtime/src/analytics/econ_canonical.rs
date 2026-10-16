@@ -837,9 +837,10 @@ pub(super) fn replay(
             }
             match frame.kind {
                 journal::kind::ECON_SHADOW_EVALUATION => {
-                    let rec: OpportunityRecord =
-                        serde_json::from_value(frame.value["record"].take())
-                            .map_err(|_| "SHADOW_DECODE")?;
+                    let rec: OpportunityRecord = serde_json::from_value(
+                        frame.legacy_value().map_err(|_| "SHADOW_DECODE")?["record"].take(),
+                    )
+                    .map_err(|_| "SHADOW_DECODE")?;
                     if let Some(rows) = grouped.get_mut(&rec.account) {
                         assign_record(rows, &rec);
                     }

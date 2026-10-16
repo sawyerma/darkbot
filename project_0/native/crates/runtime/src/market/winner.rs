@@ -470,7 +470,7 @@ pub fn find_winner(
     Ok(select_earliest(hits))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub enum RaceOutcome {
     /// Konservativ belegt: unser Signatur-Slot lag strikt vor dem Gewinner-Slot.
     ReadyBeforeWinner,

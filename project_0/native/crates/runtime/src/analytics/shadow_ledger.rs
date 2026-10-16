@@ -4,10 +4,10 @@
 
 use crate::analytics::record::{Decision, LossReason, OpportunityRecord};
 use darkbot_common::histogram::Histogram;
-use serde::Serialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
-#[derive(Default, Serialize, Clone)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct DaySummary {
     pub day_index: u64,
     pub account_updates: u64,
@@ -24,7 +24,8 @@ pub struct DaySummary {
     pub shadow_wins: u64,
     /// [FIX-45] gleicher Slot wie der Gewinner: kein Win, kein Verlust.
     pub same_slot_unknown: u64,
-    pub losses: HashMap<String, u64>,
+    /// Ordered, so the binary payload is deterministic.
+    pub losses: BTreeMap<String, u64>,
     pub expected_net_wins_sum: i128,
     pub expected_net_wins_count: u64,
     pub pnl_complete: bool,
@@ -184,4 +185,8 @@ mod tests {
             .expect("Tageswechsel liefert Zusammenfassung");
         assert_eq!(rolled.shadow_wins, 1);
     }
+}
+
+impl super::payload::Payload for DaySummary {
+    const KIND: u16 = super::journal::kind::OWNER_SUMMARY;
 }

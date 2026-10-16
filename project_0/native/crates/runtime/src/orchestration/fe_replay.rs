@@ -56,13 +56,14 @@ fn saved_reads(directory: &Path, limit: u64, max_reads: u64) -> Result<Option<Sa
                     return Err("FE_REPLAY_CALL_LIMIT".into());
                 }
                 let integrity = json!({"journal_seq":frame.journal_seq,"frame_sha256":journal::hex(&frame.hash),"bytes":frame.bytes});
-                reads.push((frame.value, integrity));
+                reads.push((frame.legacy_value().map_err(|e| e.to_string())?, integrity));
             }
             kind::FE01_RESULT if configured && !result && !reads.is_empty() => {
-                if frame.value["status"] == "INCOMPLETE" {
+                let value = frame.legacy_value().map_err(|e| e.to_string())?;
+                if value["status"] == "INCOMPLETE" {
                     return Err("FE_REPLAY_INCOMPLETE".into());
                 }
-                if frame.value["logical_reads"].as_u64() != Some(reads.len() as u64) {
+                if value["logical_reads"].as_u64() != Some(reads.len() as u64) {
                     return Err("FE_REPLAY_READ_COUNT".into());
                 }
                 result = true;

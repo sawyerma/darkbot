@@ -30,10 +30,10 @@ pub struct SubmittedTip {
     pub lamports: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct ReconcileRecord {
     pub signature: String,
-    pub path: &'static str,
+    pub path: std::borrow::Cow<'static, str>,
     pub outcome: String,
     pub landed_slot: Option<u64>,
     pub fee_lamports: Option<u64>,
@@ -138,7 +138,7 @@ pub fn try_reconcile(
     Some(ReconcileResult {
         record: ReconcileRecord {
             signature: p.signature.to_string(),
-            path: p.path.as_str(),
+            path: p.path.as_str().into(),
             outcome: outcome.into(),
             landed_slot: ev.landed_slot,
             fee_lamports: fee,
@@ -262,4 +262,8 @@ mod tests {
         assert_eq!(measured_attempt_costs(&p, &[e.clone(), t]), (None, None));
         assert_eq!(measured_attempt_costs(&p, &[e]), (None, None));
     }
+}
+
+impl crate::analytics::payload::Payload for ReconcileRecord {
+    const KIND: u16 = crate::analytics::journal::kind::OWNER_RECONCILE;
 }

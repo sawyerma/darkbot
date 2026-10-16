@@ -338,7 +338,7 @@ pub fn journal(
     };
     let row = json!({"phase":phase,"at_ns":now,"unix_ns":unix,"details":details});
     writer
-        .append(kind::MEASUREMENT_PHASE, 1, provenance, &row)
+        .append_legacy(kind::MEASUREMENT_PHASE, provenance, &row)
         .and_then(|_| writer.sync())
         .map(|_| ())
         .map_err(|e| format!("PHASE_JOURNAL: {e}"))

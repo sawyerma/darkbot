@@ -106,17 +106,19 @@ pub fn render(view: &View) -> io::Result<Option<Vec<u8>>> {
         if frame.kind == MANIFEST || frame.kind != view.kind {
             continue;
         }
+        // Views exist only for historical value-tree kinds (schema 1).
+        let value = frame.legacy_value()?;
         match view.shape {
             Shape::Lines => {
-                serde_json::to_writer(&mut out, &frame.value).map_err(io::Error::other)?;
+                serde_json::to_writer(&mut out, &value).map_err(io::Error::other)?;
                 out.push(b'\n');
             }
             Shape::Pretty => match view.index {
-                Some(index) if frame.value["index"].as_u64() == Some(index) => {
-                    newest = Some(frame.value["report"].clone())
+                Some(index) if value["index"].as_u64() == Some(index) => {
+                    newest = Some(value["report"].clone())
                 }
                 Some(_) => {}
-                None => newest = Some(frame.value),
+                None => newest = Some(value),
             },
         }
     }

@@ -1,6 +1,9 @@
 //! PERSIST-01: one binary append-only contract for runtime and durable financial events.
-//! LE integers, bounded frames, typed value payload, CRC32 + chained SHA256.
-//! JSON is supported only as an external value model / explicit offline export.
+//! LE integers, bounded frames, CRC32 + chained SHA256.
+//! JFI-01: frames of schema ≥ 2 carry typed native payloads (`payload::Payload`). Schema 1, the
+//! generic value tree, is historical: readable via `Frame::legacy_value` and still written only
+//! by kinds that have not been migrated yet (`append_legacy`).
+use super::payload::{self, Payload};
 use serde_json::{Map, Number, Value};
 use std::{
     fs::{self, File, OpenOptions},
@@ -194,7 +197,8 @@ pub struct Frame {
     pub schema: u16,
     pub journal_seq: u64,
     pub provenance: Provenance,
-    pub value: Value,
+    /// Raw payload bytes; decode with `typed` (schema ≥ 2) or `legacy_value` (schema 1).
+    pub payload: Vec<u8>,
     pub offset: u64,
     pub bytes: u64,
     pub hash: [u8; 32],
@@ -206,6 +210,18 @@ pub struct Appended {
     pub offset: u64,
     pub bytes: u64,
     pub hash: [u8; 32],
+}
+impl Frame {
+    pub fn typed<P: Payload>(&self) -> io::Result<P> {
+        payload::decode(self.kind, self.schema, &self.payload)
+    }
+    /// Historical schema-1 value tree: offline readers and not-yet-migrated kinds only.
+    pub fn legacy_value(&self) -> io::Result<Value> {
+        if self.schema != 1 {
+            return Err(bad("TYPED_FRAME_NOT_LEGACY"));
+        }
+        decode(&self.payload)
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Durable {
@@ -457,20 +473,35 @@ impl Writer {
     pub fn position(&self) -> u64 {
         self.position
     }
-    pub fn append(
+    pub fn append_typed<P: Payload>(&mut self, p: Provenance, value: &P) -> io::Result<Appended> {
+        let payload = payload::encode(value)?;
+        self.append(P::KIND, P::SCHEMA, p, &payload)
+    }
+    /// Historical value-tree frame (schema 1) for kinds not yet migrated to a payload type.
+    pub fn append_legacy(
+        &mut self,
+        kind: u16,
+        p: Provenance,
+        value: &Value,
+    ) -> io::Result<Appended> {
+        let payload = encode(value)?;
+        self.append(kind, 1, p, &payload)
+    }
+    /// Raw frame: `payload` comes from `payload::encode` (schema ≥ 2) or the legacy value
+    /// encoder (schema 1). Readers validate every frame against its registered type.
+    pub(crate) fn append(
         &mut self,
         kind: u16,
         schema: u16,
         p: Provenance,
-        value: &Value,
+        payload: &[u8],
     ) -> io::Result<Appended> {
         if self.poisoned || self.sealed {
             return Err(bad("JOURNAL_BLOCKED"));
         }
-        if kind == 0 || schema != 1 {
+        if kind == 0 || schema == 0 {
             return Err(bad("EVENT_SCHEMA_UNSUPPORTED"));
         }
-        let payload = encode(value)?;
         // Length prefix first (filled in below), then the body; one buffer, no second copy.
         let mut wire = Vec::with_capacity(4 + FIXED + payload.len() + 36);
         wire.extend([0u8; 4]);
@@ -519,9 +550,8 @@ impl Writer {
         Ok(f)
     }
     pub fn append_value(&mut self, kind: u16, value: &Value) -> io::Result<Appended> {
-        self.append(
+        self.append_legacy(
             kind,
-            1,
             Provenance {
                 source_seq: self.next,
                 ..Default::default()
@@ -544,8 +574,16 @@ impl Writer {
     }
     /// The manifest is itself a hash-chained binary frame, never a parallel JSON file.
     pub fn seal(&mut self, complete: bool) -> io::Result<Durable> {
-        let v = serde_json::json!({"frames":self.next,"root_sha256":hex(&self.last),"status":if complete{"COMPLETE"}else{"INCOMPLETE"}});
-        self.append_value(MANIFEST, &v)?;
+        let manifest = payload::Manifest {
+            frames: self.next,
+            root_sha256: self.last,
+            complete,
+        };
+        let p = Provenance {
+            source_seq: self.next,
+            ..Default::default()
+        };
+        self.append_typed(p, &manifest)?;
         let durable = self.sync()?;
         self.sealed = true;
         Ok(durable)
@@ -602,14 +640,25 @@ impl Reader {
             return Err(bad("JOURNAL_SEQUENCE_OR_CHAIN"));
         }
         if f.kind == MANIFEST {
-            if f.value["frames"] != self.next
-                || f.value["root_sha256"] != hex(&self.last)
-                || !matches!(f.value["status"].as_str(), Some("COMPLETE" | "INCOMPLETE"))
-            {
-                return Err(bad("MANIFEST_MISMATCH"));
-            }
+            let complete = if f.schema == 1 {
+                // Historical manifest (value tree).
+                let v = f.legacy_value()?;
+                if v["frames"] != self.next
+                    || v["root_sha256"] != hex(&self.last)
+                    || !matches!(v["status"].as_str(), Some("COMPLETE" | "INCOMPLETE"))
+                {
+                    return Err(bad("MANIFEST_MISMATCH"));
+                }
+                v["status"] == "COMPLETE"
+            } else {
+                let m: payload::Manifest = f.typed()?;
+                if m.frames != self.next || m.root_sha256 != self.last {
+                    return Err(bad("MANIFEST_MISMATCH"));
+                }
+                m.complete
+            };
             self.sealed = true;
-            self.complete = f.value["status"] == "COMPLETE";
+            self.complete = complete;
         }
         self.next += 1;
         self.last = f.hash;
@@ -641,7 +690,7 @@ fn read_frame(file: &mut File, offset: u64) -> io::Result<Option<(Frame, [u8; 32
     }
     let kind = u16::from_le_bytes(b[..2].try_into().unwrap());
     let schema = u16::from_le_bytes(b[2..4].try_into().unwrap());
-    if kind == 0 || schema != 1 {
+    if kind == 0 || schema == 0 {
         return Err(bad("EVENT_SCHEMA_UNSUPPORTED"));
     }
     let u64at = |i| u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
@@ -665,7 +714,15 @@ fn read_frame(file: &mut File, offset: u64) -> io::Result<Option<(Frame, [u8; 32
             rx_ns: (flags & 4 != 0).then(|| u64at(68)),
             unix_ns: (flags & 8 != 0).then(|| u64at(76)),
         },
-        value: decode(&b[120..end])?,
+        payload: {
+            let bytes = &b[120..end];
+            if schema == 1 {
+                decode(bytes)?;
+            } else {
+                payload::validate(kind, schema, bytes)?;
+            }
+            bytes.to_vec()
+        },
         offset,
         bytes: length as u64 + 4,
         hash: b[end + 4..].try_into().unwrap(),
@@ -683,7 +740,7 @@ pub fn values(path: &Path) -> io::Result<Vec<Value>> {
     let mut values = Vec::new();
     while let Some(f) = r.next_frame()? {
         if f.kind != MANIFEST {
-            values.push(f.value);
+            values.push(f.legacy_value()?);
         }
     }
     Ok(values)
@@ -764,7 +821,9 @@ pub fn export_views(
                 if single && rows[i] > 0 {
                     return Err(bad("VALUE_COUNT"));
                 }
-                serde_json::to_writer(&mut outs[i], &f.value).map_err(io::Error::other)?;
+                // Offline JSON export exists for historical value-tree frames only.
+                serde_json::to_writer(&mut outs[i], &f.legacy_value()?)
+                    .map_err(io::Error::other)?;
                 outs[i].write_all(b"\n")?;
                 rows[i] += 1;
             }

@@ -752,14 +752,15 @@ fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
     let mut reader = journal::Reader::open(&snapshots.join(REPORT_JOURNAL)).unwrap();
     let (mut hours, mut last, mut opportunities) = (BTreeMap::new(), None, String::new());
     while let Some(frame) = reader.next_frame().unwrap() {
+        let value = || frame.legacy_value().unwrap();
         match frame.kind {
             kind::ECON_SNAPSHOT => {
-                let index = frame.value["index"].as_u64().unwrap();
-                hours.insert(index, frame.value["report"].clone());
+                let v = value();
+                hours.insert(v["index"].as_u64().unwrap(), v["report"].clone());
             }
-            kind::ECON_FINAL => last = Some(frame.value),
+            kind::ECON_FINAL => last = Some(value()),
             kind::ECON_OPPORTUNITY => {
-                opportunities.push_str(&format!("{}\n", frame.value));
+                opportunities.push_str(&format!("{}\n", value()));
             }
             kind::ECON_CANONICAL | journal::MANIFEST => {}
             other => panic!("unexpected report kind {other}"),

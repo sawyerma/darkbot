@@ -31,7 +31,7 @@ impl SnapshotSink for Mt0Journal {
                 ..Default::default()
             };
             self.writer
-                .append(journal::kind::MT0_SNAPSHOT, 1, provenance, &value)
+                .append_legacy(journal::kind::MT0_SNAPSHOT, provenance, &value)
                 .is_ok()
         });
         self.lost |= !stored;
@@ -72,7 +72,7 @@ mod tests {
         let mut reader = journal::Reader::open(&path).unwrap();
         let first = reader.next_frame().unwrap().unwrap();
         assert_eq!(first.kind, journal::kind::MT0_SNAPSHOT);
-        assert_eq!(first.value["mt0_version"], 2);
+        assert_eq!(first.legacy_value().unwrap()["mt0_version"], 2);
         assert!(first.provenance.unix_ns.is_some() && first.provenance.rx_ns.is_some());
         assert_eq!(
             reader.next_frame().unwrap().unwrap().kind,

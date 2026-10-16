@@ -32,7 +32,7 @@ impl ShadowOwner {
                     Err(e) => {
                         let line = RecordEvent::IntegrationPlan {
                             account: acct,
-                            trigger,
+                            trigger: trigger.into(),
                             slot,
                             reason: format!("integration refresh plan: {e}"),
                         };
@@ -203,10 +203,16 @@ impl ShadowOwner {
                         self.evidence.emit(OwnerEvidence::Record(
                             RecordEvent::IntegrationPending {
                                 account: acct,
-                                trigger,
+                                trigger: trigger.into(),
                                 slot,
-                                integration_kinds,
-                                pricing_integration_kinds,
+                                integration_kinds: integration_kinds
+                                    .into_iter()
+                                    .map(Into::into)
+                                    .collect(),
+                                pricing_integration_kinds: pricing_integration_kinds
+                                    .into_iter()
+                                    .map(Into::into)
+                                    .collect(),
                             },
                         ))?;
                         return Ok(false);
@@ -347,7 +353,7 @@ impl ShadowOwner {
             self.evidence
                 .emit(OwnerEvidence::Record(RecordEvent::Health {
                     account: acct,
-                    trigger,
+                    trigger: trigger.into(),
                     t_rx_ns: t_rx,
                     slot,
                     evaluation_slot: protocol_slot,

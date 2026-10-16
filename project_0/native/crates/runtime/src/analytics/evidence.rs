@@ -1,11 +1,13 @@
 //! Typed owner evidence. Serialization and file IO run only on the writer thread.
 //! A full queue closes admission, retains the refused event, and drains in order.
 use super::journal::{self, Provenance, Writer};
+use super::payload::{self, OwnerDiagnostic, Payload};
 use super::{record::OpportunityRecord, shadow_ledger::DaySummary};
 use crate::execution::pending::ReconcileRecord;
-use crate::market::winner::{RaceOutcome, Winner};
-use serde_json::{json, Value};
+use crate::market::winner::{RaceOutcome, Winner, WinnerIdentity};
+use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
+use std::borrow::Cow;
 use std::{
     path::PathBuf,
     sync::{
@@ -19,6 +21,7 @@ use std::{
 /// is used during admission. This is a capacity bound, not a latency guarantee.
 pub const OWNER_EVIDENCE_CAPACITY: usize = 1024;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HealthEvidence {
     Known {
         liquidatable: bool,
@@ -30,10 +33,65 @@ pub enum HealthEvidence {
     Error(String),
 }
 
+/// Race winner as a native payload type (the JSON `Winner` is internally tagged for the
+/// pinned JSON readers and cannot be decoded from a binary frame).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RaceWinner {
+    pub slot: u64,
+    pub identity: RaceWinnerIdentity,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RaceWinnerIdentity {
+    Unique {
+        signature: String,
+        receiver: String,
+        tx_version: String,
+    },
+    /// (signature, receiver, tx_version, transaction_index) of every same-slot candidate.
+    SameSlotAmbiguous {
+        candidates: Vec<(String, String, String, Option<u64>)>,
+    },
+}
+impl From<&Winner> for RaceWinner {
+    fn from(w: &Winner) -> Self {
+        Self {
+            slot: w.slot,
+            identity: match &w.identity {
+                WinnerIdentity::Unique {
+                    signature,
+                    receiver,
+                    tx_version,
+                } => RaceWinnerIdentity::Unique {
+                    signature: signature.clone(),
+                    receiver: receiver.clone(),
+                    tx_version: tx_version.clone(),
+                },
+                WinnerIdentity::SameSlotAmbiguous { candidates } => {
+                    RaceWinnerIdentity::SameSlotAmbiguous {
+                        candidates: candidates
+                            .iter()
+                            .map(|c| {
+                                (
+                                    c.signature.clone(),
+                                    c.receiver.clone(),
+                                    c.tx_version.clone(),
+                                    c.transaction_index,
+                                )
+                            })
+                            .collect(),
+                    }
+                }
+            },
+        }
+    }
+}
+
+/// Owner record payload (`kind::OWNER_RECORD`). Static strings stay borrowed on the owner.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecordEvent {
     IntegrationPlan {
         account: Pubkey,
-        trigger: &'static str,
+        trigger: Cow<'static, str>,
         slot: u64,
         reason: String,
     },
@@ -43,14 +101,14 @@ pub enum RecordEvent {
     },
     IntegrationPending {
         account: Pubkey,
-        trigger: &'static str,
+        trigger: Cow<'static, str>,
         slot: u64,
-        integration_kinds: Vec<&'static str>,
-        pricing_integration_kinds: Vec<&'static str>,
+        integration_kinds: Vec<Cow<'static, str>>,
+        pricing_integration_kinds: Vec<Cow<'static, str>>,
     },
     Health {
         account: Pubkey,
-        trigger: &'static str,
+        trigger: Cow<'static, str>,
         t_rx_ns: u64,
         slot: u64,
         evaluation_slot: u64,
@@ -59,7 +117,7 @@ pub enum RecordEvent {
     },
     Race {
         account: Pubkey,
-        winner: Winner,
+        winner: RaceWinner,
         our_sign_slot: Option<u64>,
         outcome: RaceOutcome,
         expected_net: Option<i128>,
@@ -69,8 +127,8 @@ pub enum RecordEvent {
         base_slot: u64,
         projection_slot: u64,
         projection_unix_s: i64,
-        integration_kinds: Vec<&'static str>,
-        pricing_integration_kinds: Vec<&'static str>,
+        integration_kinds: Vec<Cow<'static, str>>,
+        pricing_integration_kinds: Vec<Cow<'static, str>>,
         simulated_cu: Option<u64>,
     },
     ProjectionStale {
@@ -85,93 +143,33 @@ pub enum RecordEvent {
         error: String,
     },
 }
+pub type OwnerRecord = RecordEvent;
+impl Payload for RecordEvent {
+    const KIND: u16 = journal::kind::OWNER_RECORD;
+}
 impl RecordEvent {
-    fn value(self) -> Value {
+    /// Frame provenance: the trigger slot and receive time where the event has them.
+    fn provenance(&self) -> (Option<u64>, Option<u64>) {
         match self {
-            Self::IntegrationPlan {
-                account,
-                trigger,
-                slot,
-                reason,
-            } => {
-                json!({"account":account.to_string(),"trigger":trigger,"slot":slot,"decision":"Skip","loss":"IntegrationRefresh","reason":reason})
+            Self::IntegrationPlan { slot, .. } | Self::IntegrationPending { slot, .. } => {
+                (Some(*slot), None)
             }
-            Self::IntegrationSkip { account, reason } => {
-                json!({"account":account.to_string(),"decision":"Skip","loss":"IntegrationRefresh","reason":reason})
-            }
-            Self::IntegrationPending {
-                account,
-                trigger,
-                slot,
-                integration_kinds,
-                pricing_integration_kinds,
-            } => {
-                json!({"account":account.to_string(),"trigger":trigger,"slot":slot,"decision":"Skip","loss":"IntegrationRefresh","integration_kinds":integration_kinds,"pricing_integration_kinds":pricing_integration_kinds,"reason":"integration projection pending"})
-            }
-            Self::Health {
-                account,
-                trigger,
-                t_rx_ns,
-                slot,
-                evaluation_slot,
-                evaluation_unix_s,
-                result,
-            } => {
-                let mut v = json!({"account":account.to_string(),"trigger":trigger,"t_rx_ns":t_rx_ns,"slot":slot,"evaluation_slot":evaluation_slot,"evaluation_unix_s":evaluation_unix_s});
-                match result {
-                    HealthEvidence::Known {
-                        liquidatable,
-                        maintenance_health,
-                        equity_assets,
-                        bad_debt,
-                    } => {
-                        v["liquidatable"] = json!(liquidatable);
-                        v["maint_health_bits"] = json!(maintenance_health);
-                        v["equity_assets_bits"] = json!(equity_assets);
-                        v["bad_debt"] = json!(bad_debt);
-                    }
-                    HealthEvidence::Unavailable => v["decision"] = json!("Unavailable"),
-                    HealthEvidence::Error(error) => v["error"] = json!(error),
-                }
-                v
-            }
-            Self::Race {
-                account,
-                winner,
-                our_sign_slot,
-                outcome,
-                expected_net,
-            } => {
-                json!({"race":{"account":account.to_string(),"winner":winner,"our_sign_slot":our_sign_slot,"outcome":outcome,"expected_net":expected_net}})
-            }
-            Self::ProjectionReady {
-                account,
-                base_slot,
-                projection_slot,
-                projection_unix_s,
-                integration_kinds,
-                pricing_integration_kinds,
-                simulated_cu,
-            } => {
-                json!({"projection":{"account":account.to_string(),"base_slot":base_slot,"projection_slot":projection_slot,"projection_unix_s":projection_unix_s,"status":"ready","integration_kinds":integration_kinds,"pricing_integration_kinds":pricing_integration_kinds,"simulated_cu":simulated_cu}})
-            }
-            Self::ProjectionStale {
-                account,
-                base_slot,
-                projection_slot,
-                canonical_matches,
-            } => {
-                json!({"projection":{"account":account.to_string(),"base_slot":base_slot,"projection_slot":projection_slot,"status":"stale","canonical_matches":canonical_matches}})
-            }
-            Self::ProjectionFailed {
-                account,
-                base_slot,
-                error,
-            } => {
-                json!({"projection":{"account":account.to_string(),"base_slot":base_slot,"status":"failed","error":error}})
-            }
+            Self::Health { slot, t_rx_ns, .. } => (Some(*slot), Some(*t_rx_ns)),
+            _ => (None, None),
         }
     }
+}
+
+/// A primary-journal write that failed, saved verbatim in the recovery journal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnerRecovery {
+    pub original_journal_offset: u64,
+    pub event_kind: u16,
+    pub event_schema: u16,
+    pub event: Vec<u8>,
+}
+impl Payload for OwnerRecovery {
+    const KIND: u16 = journal::kind::OWNER_RECOVERY;
 }
 
 pub enum OwnerEvidence {
@@ -182,16 +180,39 @@ pub enum OwnerEvidence {
     /// A formatted owner diagnostic. The owner never writes stderr itself (PERSIST-02).
     Diagnostic(String),
 }
+/// One encoded owner event: kind, payload version, bytes and frame provenance.
+struct Encoded {
+    kind: u16,
+    schema: u16,
+    bytes: Vec<u8>,
+    slot: Option<u64>,
+    rx_ns: Option<u64>,
+}
+impl Encoded {
+    fn of<P: Payload>(p: &P, slot: Option<u64>, rx_ns: Option<u64>) -> std::io::Result<Self> {
+        Ok(Self {
+            kind: P::KIND,
+            schema: P::SCHEMA,
+            bytes: payload::encode(p)?,
+            slot,
+            rx_ns,
+        })
+    }
+}
 impl OwnerEvidence {
-    fn encode(self) -> Result<(u16, Value), serde_json::Error> {
+    /// Typed binary encoding on the writer thread (JFI-02); no JSON in between.
+    fn encode(&self) -> std::io::Result<Encoded> {
         match self {
-            Self::Record(v) => Ok((journal::kind::OWNER_RECORD, v.value())),
-            Self::Opportunity(v) => {
-                Ok((journal::kind::OWNER_OPPORTUNITY, serde_json::to_value(v)?))
+            Self::Record(v) => {
+                let (slot, rx_ns) = v.provenance();
+                Encoded::of(v, slot, rx_ns)
             }
-            Self::Reconcile(v) => Ok((journal::kind::OWNER_RECONCILE, serde_json::to_value(v)?)),
-            Self::Summary(v) => Ok((journal::kind::OWNER_SUMMARY, serde_json::to_value(v)?)),
-            Self::Diagnostic(line) => Ok((journal::kind::OWNER_DIAGNOSTIC, json!({"line": line}))),
+            Self::Opportunity(v) => Encoded::of(v.as_ref(), v.rx_slot, v.timing.t_rx_ns),
+            Self::Reconcile(v) => Encoded::of(v, None, None),
+            Self::Summary(v) => Encoded::of(v, None, None),
+            Self::Diagnostic(line) => {
+                Encoded::of(&OwnerDiagnostic { line: line.clone() }, None, None)
+            }
         }
     }
 }
@@ -334,7 +355,7 @@ struct Sink {
 }
 impl Sink {
     fn write(&mut self, event: OwnerEvidence) {
-        let (kind, value) = match event.encode() {
+        let encoded = match event.encode() {
             Ok(v) => v,
             Err(_) => {
                 self.failed.store(true, Ordering::Release);
@@ -342,31 +363,22 @@ impl Sink {
                 return;
             }
         };
-        let console = (kind == journal::kind::OWNER_DIAGNOSTIC)
-            .then(|| value["line"].as_str().map(str::to_owned))
-            .flatten();
-        self.store(kind, value);
+        self.store(encoded);
         // The console copy of an owner diagnostic, printed here, after its frame.
-        if let Some(line) = console {
+        if let OwnerEvidence::Diagnostic(line) = event {
             eprintln!("{line}");
         }
     }
-    fn store(&mut self, kind: u16, value: Value) {
+    fn store(&mut self, e: Encoded) {
         let offset = self.journal.position();
         let p = Provenance {
             source: journal::source::OWNER,
             source_seq: self.journal.next_seq(),
-            slot: value
-                .get("slot")
-                .or_else(|| value.get("rx_slot"))
-                .and_then(Value::as_u64),
-            rx_ns: value
-                .get("t_rx_ns")
-                .or_else(|| value.pointer("/timing/t_rx_ns"))
-                .and_then(Value::as_u64),
+            slot: e.slot,
+            rx_ns: e.rx_ns,
             ..Default::default()
         };
-        if !self.io_failed && self.journal.append(kind, 1, p, &value).is_ok() {
+        if !self.io_failed && self.journal.append(e.kind, e.schema, p, &e.bytes).is_ok() {
             return;
         }
         self.io_failed = true;
@@ -378,10 +390,18 @@ impl Sink {
             }
         }
         if let Some(w) = &mut self.recovery_writer {
-            let value = json!({"original_journal_offset":offset,"event_kind":kind,"event":value});
-            if w.append_value(journal::kind::OWNER_RECOVERY, &value)
-                .is_err()
-            {
+            let saved = OwnerRecovery {
+                original_journal_offset: offset,
+                event_kind: e.kind,
+                event_schema: e.schema,
+                event: e.bytes,
+            };
+            let p = Provenance {
+                source: journal::source::OWNER,
+                source_seq: w.next_seq(),
+                ..Default::default()
+            };
+            if w.append_typed(p, &saved).is_err() {
                 self.recovery_failed = true;
             }
         }
