@@ -14,12 +14,13 @@ use std::process::Command;
 
 const G07: &str = env!("CARGO_BIN_EXE_g07_mainnet_self_launch_buy");
 const SOURCE: &str = include_str!("../src/bin/g07_mainnet_self_launch_buy/main.rs");
-const BIN_SOURCES: [&str; 5] = [
+const BIN_SOURCES: [&str; 6] = [
     SOURCE,
     include_str!("../src/bin/g07_mainnet_self_launch_buy/builder_submission.rs"),
     include_str!("../src/bin/g07_mainnet_self_launch_buy/chain_reads.rs"),
     include_str!("../src/bin/g07_mainnet_self_launch_buy/inputs.rs"),
     include_str!("../src/bin/g07_mainnet_self_launch_buy/transactions.rs"),
+    include_str!("../src/bin/g07_mainnet_self_launch_buy/shared.rs"),
 ];
 
 fn pos(needle: &str) -> usize {
@@ -61,7 +62,9 @@ fn any_other_authorization_value_is_refused() {
     assert!(out.stdout.is_empty());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("DARKBOT_G07_MAINNET_SEND=YES only for the explicitly authorized G0.7 attempt"),
+        err.contains(
+            "DARKBOT_G07_MAINNET_SEND=YES only for the explicitly authorized G0.7 attempt"
+        ),
         "{err}"
     );
 }
@@ -115,15 +118,20 @@ fn retired_free_journal_path_is_refused() {
 #[test]
 fn token_evidence_and_latch_precede_the_guard() {
     let token = pos("valid_header_value(&blockrazor_auth)");
-    let evidence_target = pos("validate_new_file_target(&evidence_path)");
+    let evidence_target = pos("validate_evidence_target(&evidence_path)");
     let probe = pos("let probe = head_poller");
     let latch = pos("let attempt_dir = latch_attempt(");
-    let evidence_file = pos("let mut evidence_file = ");
+    let evidence_file = pos("let evidence_out = owner_uid(&attempt_dir)");
     let prearm = pos("CaptureSession::prearm(");
     let guard = pos("let contract = match verify_live_authorization(");
     assert!(token < probe && evidence_target < probe);
     assert!(probe < latch && latch < evidence_file && evidence_file < prearm && prearm < guard);
-    assert_eq!(SOURCE.matches("req_env(\"DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION\")").count(), 1);
+    assert_eq!(
+        SOURCE
+            .matches("req_env(\"DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION\")")
+            .count(),
+        1
+    );
     assert!(SOURCE.contains("req_env(\"DARKBOT_G07_EVIDENCE_PATH\")"));
     assert!(!SOURCE.contains("env::var(\"DARKBOT_G07_EVIDENCE_PATH\")"));
     assert!(!SOURCE.contains("req_env(\"DARKBOT_G07_CAPTURE_JOURNAL\")"));
@@ -142,9 +150,9 @@ fn bundle_expiry_comes_from_the_next_block_read_after_the_transport_prewarm() {
     let blockrazor_tls = pos("match connect_tls(BLOCKRAZOR_HOST)");
     let read = pos("let fresh = match head_poller.next_head(HEAD_TRANSITION_TIMEOUT)");
     let window = pos("let window = match bundle_window(");
-    let first_body = pos("let club48_body = json!(");
+    let first_body = pos("let club48_body = club48_bundle_body(");
     let journaled = pos(".and_then(|()| capture.wait_appended(CAPTURE_APPEND_TIMEOUT))");
-    let idle = pos("if prewarmed_at.elapsed() > MAX_BUILDER_IDLE");
+    let idle = pos("if club48_ready_at.elapsed() > MAX_BUILDER_IDLE");
     let liveness = pos("transport_alive(stream)");
     let go = pos("let _ = gobr.send(());");
     let release = pos("barrier.wait();");
@@ -156,13 +164,31 @@ fn bundle_expiry_comes_from_the_next_block_read_after_the_transport_prewarm() {
     assert!(SOURCE[window..first_body].contains("&fresh.head,"));
     assert!(SOURCE[window..first_body].contains("fresh.excess_staleness_ms,"));
     assert!(!SOURCE.contains("send_head.checked_add"));
-    assert_eq!(SOURCE.matches("let max_block = window.max_block;").count(), 1);
-    // Both bodies carry exactly that maxBlockNumber; maxTimestamp only 48Club.
-    assert_eq!(SOURCE.matches("\"maxBlockNumber\"").count(), 2);
-    assert_eq!(SOURCE.matches("\"maxBlockNumber\":max_block").count(), 2);
-    assert_eq!(SOURCE.matches("\"maxTimestamp\"").count(), 1);
-    assert_eq!(SOURCE.matches("\"maxTimestamp\":window.max_timestamp").count(), 1);
-    assert!(pos("\"maxTimestamp\":") < pos("let blockrazor_body = json!("));
+    assert_eq!(
+        SOURCE.matches("let max_block = window.max_block;").count(),
+        1
+    );
+    // Both bodies come from the shared builders (the probe sends the same
+    // ones) with exactly that maxBlockNumber; maxTimestamp only for 48Club.
+    assert_eq!(
+        SOURCE
+            .matches("club48_bundle_body(&request_id, txs, max_block, window.max_timestamp)")
+            .count(),
+        1
+    );
+    assert_eq!(
+        SOURCE
+            .matches("blockrazor_bundle_body(&buy_hash, txs, max_block)")
+            .count(),
+        1
+    );
+    assert!(!SOURCE.contains("\"maxBlockNumber\""));
+    let club48 = function_body(BIN_SOURCES[1], "pub(crate) fn club48_bundle_body(");
+    let blockrazor = function_body(BIN_SOURCES[1], "pub(crate) fn blockrazor_bundle_body(");
+    assert!(club48.contains("\"maxBlockNumber\":max_block"));
+    assert!(club48.contains("\"maxTimestamp\":max_timestamp"));
+    assert!(blockrazor.contains("\"maxBlockNumber\":max_block"));
+    assert!(!blockrazor.contains("maxTimestamp"));
 }
 
 const PANICKING: [&str; 10] = [
@@ -185,6 +211,7 @@ fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
     let rest = &source[start..];
     let end = rest[1..]
         .find("\npub(crate) fn ")
+        .map(|i| i + 1)
         .or_else(|| rest.find("\n#[cfg(test)]"))
         .unwrap_or(rest.len());
     &rest[..end]
@@ -219,13 +246,57 @@ fn nothing_after_the_release_can_panic() {
     assert!(rpc.contains("\"--max-time\""));
     assert!(after.contains("panicked_provider_result(\"48Club/Puissant\")"));
     assert!(after.contains("panicked_provider_result(\"BlockRazor\")"));
-    // Provisional evidence before the receipt window; the final evidence file
-    // write before stdout; a failed write is a non-zero exit.
+    // Evidence right after the release (before the joins), after the send
+    // threads, and final; the final file write before stdout; a failed write
+    // is a non-zero exit. Evidence is only ever replaced atomically.
+    let at_release = pos("release_evidence = write_evidence(&evidence_out, &evidence);");
+    let marker = pos("release_marker = mark_released(&attempt_dir, release_after_ns);");
+    let joins = pos("h48.join()");
+    assert!(release < at_release && at_release < marker && marker < joins);
+    // Between the release and the joins nothing can leave the scope early,
+    // and the only pre-egress stop after the barrier text is the one for a
+    // failed spawn (the scope returns Err only before the barrier).
+    assert!(!SOURCE[release..joins].contains("return"));
+    assert!(!SOURCE[release..joins].contains(")?"));
+    assert_eq!(after.matches("pre_egress_abort(").count(), 1);
+    assert!(after.contains(
+        "Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, \"send threads\", &e)"
+    ));
+    let marker_fn =
+        &SOURCE[pos("fn mark_released(")..pos("/// What a stop before the release hands back")];
+    for forbidden in PANICKING {
+        assert!(
+            !marker_fn.contains(forbidden),
+            "{forbidden} in mark_released"
+        );
+    }
     assert!(pos("let provisional = write_evidence(") < pos("let receipt_poll_deadline"));
-    let file = after.find("write_evidence(&mut evidence_file, &pretty)").expect("final evidence");
+    let file = after
+        .find("let evidence_written = write_evidence(&evidence_out, &evidence);")
+        .expect("final evidence");
     let stdout = after.find("std::io::stdout()").expect("stdout copy");
     assert!(file < stdout);
     assert!(after.contains("std::process::exit(3)"));
+    for source in BIN_SOURCES {
+        assert!(!source.contains("set_len("), "evidence truncated in place");
+    }
+    // G0.7 never claims the canonical window reconciled; G0.8 does that.
+    assert!(SOURCE.contains("\"canonical_t0_plus_15s_reconciled_in_g08\":false"));
+    assert!(!SOURCE.contains("\"canonical_t0_plus_15s_reconciled_in_g08\":true"));
+}
+
+#[test]
+fn senders_wait_for_the_go_signal_and_the_barrier_before_writing() {
+    // Each spawned sender first receives its go signal, then submit_provider
+    // waits on the barrier before the first write.
+    assert!(pos("wait48.recv().ok().map(") < pos("submit_provider("));
+    let after_48 = pos("wait48.recv().ok().map(");
+    assert!(SOURCE[after_48..].contains("waitbr.recv().ok().map("));
+    let submit = function_body(BIN_SOURCES[1], "pub(crate) fn submit_provider(");
+    let wait = submit.find("barrier.wait();").expect("barrier");
+    let write = submit.find("write_all(&request)").expect("write");
+    assert!(wait < write);
+    assert_eq!(submit.matches("write_all(").count(), 1);
 }
 
 #[test]

@@ -329,7 +329,8 @@ pub(crate) struct HeadPoller {
 
 impl HeadPoller {
     pub(crate) fn connect(endpoint: &RpcEndpoint) -> Result<Self, String> {
-        let body = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",false]}"#;
+        let body =
+            r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",false]}"#;
         let host = if endpoint.port == HTTPS_PORT {
             endpoint.host.clone()
         } else {
@@ -425,10 +426,11 @@ impl HeadPoller {
     /// Waits for the next block: returns the first successful read whose head
     /// is newer than the first successful read of this wait, so the send head
     /// is about one poll (a round trip, at least 50 ms apart) older than this
-    /// endpoint's view. A failed read is polled through up to
-    /// MAX_CONSECUTIVE_POLL_ERRORS times in a row. The deadline is checked
-    /// between reads; one read is bounded by the connection timeouts, so the
-    /// wait can overrun it by one read (main bounds the builder idle time).
+    /// endpoint's view. The wait fails at the MAX_CONSECUTIVE_POLL_ERRORS-th
+    /// failed read in a row. The deadline is checked between reads; one read,
+    /// including a reconnect, is bounded only by the connection timeouts
+    /// (seconds), so the wait can overrun the deadline by that much; main
+    /// bounds the builder idle time separately.
     pub(crate) fn next_head(&mut self, timeout: Duration) -> Result<HeadObservation, String> {
         let deadline = Instant::now() + timeout;
         let mut current: Option<u64> = None;
@@ -575,7 +577,10 @@ mod tests {
         );
         let ep = parse_rpc_endpoint("HTTPS://node.example:8545").unwrap();
         assert_eq!((ep.port, ep.path.as_str()), (8545, "/"));
-        assert_eq!(parse_rpc_endpoint("https://n.example?k=v").unwrap().path, "/?k=v");
+        assert_eq!(
+            parse_rpc_endpoint("https://n.example?k=v").unwrap().path,
+            "/?k=v"
+        );
         for bad in [
             "http://node.example/",
             "https://user:pw@node.example/",
@@ -636,7 +641,10 @@ mod tests {
             let t = 1_000_000 + phase;
             let w = bundle_window(1, HASH, &head(2, t), t, 0).unwrap();
             for k in 0..=MAX_BLOCK_OFFSET {
-                assert!(w.max_timestamp > (t + k * BLOCK_INTERVAL_MS) / 1000, "{phase} {k}");
+                assert!(
+                    w.max_timestamp > (t + k * BLOCK_INTERVAL_MS) / 1000,
+                    "{phase} {k}"
+                );
             }
             assert!(w.max_timestamp * 1000 <= t + MAX_BLOCK_OFFSET * BLOCK_INTERVAL_MS + 1000);
         }

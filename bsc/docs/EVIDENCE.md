@@ -44,6 +44,7 @@ Lokal, nicht versioniert (Sicherung unter `bsc/.local/backup/`):
 | `bsc/gates/gate0/evidence/g06a_final_dry_*` (11 untracked DRY-Läufe) | `bsc/data/g06a_final_dry/` (Ausgabeort von `tools/g06a_final_dry.sh`, gelesen von `tools/g07_pre_live_readiness.sh`) |
 | `bsc/local_diagnostics/` | `bsc/data/local_diagnostics/` |
 | `bsc/gates/gate0/.env.save` | `bsc/.local/legacy-gate0.env.save` (Modus 600, Inhalt nicht gelesen) |
+| 23 redundante JSON-Dateien aus `bsc/data/` (13 leere Ausgaben, 10 `preflight_console.json` byte-gleich zum `preflight.json` daneben) | `bsc/data/_delete_candidates/` (2026-10-16 verschoben, nicht gelöscht; `MANIFEST.tsv` mit Pfad, SHA-256, Grund und Rückweg). Vorher geprüft: von keinem Code, Test oder Skript gelesen; Auswahl der Readiness unverändert (`20261015T222241Z`, Rückfall `20261011T110407Z`); Workspace-Tests vorher und nachher 476/476. |
 
 ## 2. Bewusst nicht verschoben (Pfadidentität)
 

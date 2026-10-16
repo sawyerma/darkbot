@@ -3,7 +3,9 @@
 //! attempt's local state (single-use latch, journal location, evidence file).
 
 use super::*;
+use std::cell::RefCell;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::Component;
 
 pub(crate) fn req_env(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("{name} is required"))
@@ -53,6 +55,9 @@ pub(crate) fn load_json(path: &str) -> (Value, Vec<u8>) {
 pub(crate) const ATTEMPT_STATE_ROOT: &str = "bsc/.local/g07";
 pub(crate) const ATTEMPT_LATCH_FILE: &str = "ATTEMPT_LATCH";
 pub(crate) const CAPTURE_JOURNAL_FILE: &str = "capture.journal";
+/// Written into the attempt directory right after the release: from then on
+/// the latch is never released.
+pub(crate) const RELEASED_MARKER_FILE: &str = "RELEASED";
 
 pub(crate) fn validate_attempt_id(attempt_id: &str) -> Result<(), String> {
     if attempt_id.is_empty()
@@ -94,34 +99,86 @@ pub(crate) fn assert_repository_root() {
     );
 }
 
-/// Single-use latch: atomically creates `<root>/<attempt_id>/` (0700) and the
-/// latch file in it (0600). A second start of the same attempt fails here,
-/// before the guard, whatever ATTEMPT_NUMBER and SPENT_BUDGET_WEI claim.
-pub(crate) fn latch_attempt(root: &Path, attempt_id: &str, latch_body: &str) -> Result<PathBuf, String> {
-    validate_attempt_id(attempt_id)?;
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(root)
-        .map_err(|e| format!("create {}: {e}", root.display()))?;
-    // A symlinked state directory could put the journal outside the ignored tree.
-    for dir in root.parent().into_iter().chain([root]) {
-        let real_dir = fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_dir());
-        if !real_dir {
-            return Err(format!("{} must be a real directory, not a symlink", dir.display()));
-        }
+/// Syncs a directory, making its entries (a created, renamed or removed file)
+/// durable.
+pub(crate) fn sync_dir(dir: &Path) -> Result<(), String> {
+    fs::File::open(dir)
+        .and_then(|d| d.sync_all())
+        .map_err(|e| format!("sync directory {}: {e}", dir.display()))
+}
+
+/// A directory fit for private attempt files: a real directory reached
+/// without any symlink or `..`, with no group or other permission bits (0700).
+pub(crate) fn check_private_dir(dir: &Path) -> Result<fs::Metadata, String> {
+    if dir.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(format!("{} must not contain '..'", dir.display()));
     }
-    let mode = fs::metadata(root)
-        .map_err(|e| format!("{}: {e}", root.display()))?
-        .permissions()
-        .mode();
+    let meta = fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if !meta.file_type().is_dir() {
+        return Err(format!(
+            "{} must be a real directory, not a symlink",
+            dir.display()
+        ));
+    }
+    let mode = meta.permissions().mode();
     if mode & 0o077 != 0 {
         return Err(format!(
             "{} must be private (mode 0700), found {:o}",
-            root.display(),
+            dir.display(),
             mode & 0o777
         ));
     }
+    let absolute: PathBuf = if dir.is_absolute() {
+        dir.to_path_buf()
+    } else {
+        env::current_dir()
+            .map_err(|e| format!("current directory: {e}"))?
+            .join(dir)
+    }
+    .components()
+    .filter(|c| !matches!(c, Component::CurDir))
+    .collect();
+    let canonical = fs::canonicalize(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if canonical != absolute {
+        return Err(format!(
+            "{} runs through a symlink (resolves to {})",
+            dir.display(),
+            canonical.display()
+        ));
+    }
+    Ok(meta)
+}
+
+pub(crate) fn owner_uid(path: &Path) -> Result<u32, String> {
+    fs::symlink_metadata(path)
+        .map(|m| m.uid())
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Single-use latch: atomically creates `<root>/<attempt_id>/` (0700) and the
+/// latch file in it (0600), both durable (file and directory entries synced).
+/// A second start of the same attempt fails here, before the guard, whatever
+/// ATTEMPT_NUMBER and SPENT_BUDGET_WEI claim.
+pub(crate) fn latch_attempt(
+    root: &Path,
+    attempt_id: &str,
+    latch_body: &str,
+) -> Result<PathBuf, String> {
+    validate_attempt_id(attempt_id)?;
+    // A symlinked or shared state directory could put the journal outside the
+    // private, ignored tree: the parent is checked before anything is created
+    // in it, the state root after.
+    let parent = root
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| format!("{} has no parent directory", root.display()))?;
+    check_private_dir(parent)?;
+    match fs::DirBuilder::new().mode(0o700).create(root) {
+        Ok(()) => sync_dir(parent)?,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(format!("create {}: {e}", root.display())),
+    }
+    check_private_dir(root)?;
     let dir = root.join(attempt_id);
     fs::DirBuilder::new()
         .mode(0o700)
@@ -133,6 +190,7 @@ pub(crate) fn latch_attempt(root: &Path, attempt_id: &str, latch_body: &str) -> 
             ),
             _ => format!("create {}: {e}", dir.display()),
         })?;
+    sync_dir(root)?;
     let latch_path = dir.join(ATTEMPT_LATCH_FILE);
     let mut latch = fs::OpenOptions::new()
         .write(true)
@@ -144,81 +202,222 @@ pub(crate) fn latch_attempt(root: &Path, attempt_id: &str, latch_body: &str) -> 
         .write_all(latch_body.as_bytes())
         .and_then(|()| latch.sync_all())
         .map_err(|e| format!("write {}: {e}", latch_path.display()))?;
+    sync_dir(&dir)?;
     Ok(dir)
 }
 
 /// Whether `path` (not following a symlink) is the very file `file` is open on.
-pub(crate) fn same_file(path: &str, file: &fs::File) -> bool {
+pub(crate) fn same_file(path: &Path, file: &fs::File) -> bool {
     match (fs::symlink_metadata(path), file.metadata()) {
         (Ok(at_path), Ok(open)) => at_path.dev() == open.dev() && at_path.ino() == open.ino(),
         _ => false,
     }
 }
 
-/// Releases the latch of a run that provably wrote no bundle byte (guard
-/// refusal or pre-egress stop): the attempt directory is renamed with its
-/// journal, never deleted, and this run's own evidence file is removed if it
-/// is still empty (`evidence` is the path and the handle this run created;
-/// `None` when it created none), so a corrected run can start without
-/// deleting anything by hand. Returns what happened, for the terminal message.
-pub(crate) fn release_unsent_attempt(
-    attempt_dir: &Path,
-    evidence: Option<(&str, &fs::File)>,
-    outcome: &str,
-) -> String {
-    let name = attempt_dir
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let stamp = unix_time_ms();
-    let released = (0u32..)
-        .map(|n| attempt_dir.with_file_name(format!("{name}.{outcome}-{stamp}-{n}")))
-        .find(|candidate| fs::symlink_metadata(candidate).is_err())
-        .unwrap_or_else(|| attempt_dir.with_file_name(format!("{name}.{outcome}-{stamp}")));
-    let latch = match fs::rename(attempt_dir, &released) {
-        Ok(()) => format!(
-            "nothing was sent; latch released, attempt state kept at {}",
-            released.display()
-        ),
-        Err(e) => format!(
-            "nothing was sent, but the latch could not be released ({e}); this run stopped before the release, so {} may be renamed by hand",
-            attempt_dir.display()
-        ),
-    };
-    let evidence = match evidence {
-        None => "this run created no evidence file".to_string(),
-        Some((path, file)) if !same_file(path, file) => {
-            format!("{path} is no longer this run's evidence file and was left alone")
-        }
-        Some((path, file)) => match file.metadata() {
-            Ok(m) if m.len() == 0 => match fs::remove_file(path) {
-                Ok(()) => format!("empty evidence file {path} removed"),
-                Err(e) => format!("empty evidence file {path} not removed: {e}"),
-            },
-            Ok(_) => format!("evidence file {path} is not empty and was left alone"),
-            Err(e) => format!("evidence file {path}: {e}"),
-        },
-    };
-    format!("{latch}; {evidence}")
+fn evidence_dir(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .to_path_buf()
 }
 
-/// The mandatory evidence file must not exist yet and its directory must;
-/// checked before anything is latched.
-pub(crate) fn validate_new_file_target(path: &str) -> Result<(), String> {
+/// The mandatory evidence file must not exist yet, have no `..`, and lie in
+/// a private directory (see check_private_dir); checked before anything is
+/// latched and again when it is created.
+pub(crate) fn validate_evidence_target(path: &str) -> Result<(), String> {
     let target = Path::new(path);
+    if path.is_empty() || target.file_name().is_none() {
+        return Err(format!("{path:?} is not a file path"));
+    }
+    if target
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        return Err(format!("{path} must not contain '..'"));
+    }
     match fs::symlink_metadata(target) {
         Ok(_) => return Err(format!("{path} already exists")),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("{path}: {e}")),
     }
-    let dir = target
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    if !dir.is_dir() {
-        return Err(format!("the directory of {path} does not exist"));
+    check_private_dir(&evidence_dir(target)).map(|_| ())
+}
+
+/// This run's evidence file: 0600 in a private directory owned by this user,
+/// never followed through a symlink, and only ever replaced atomically: a
+/// complete, fsynced private sibling is renamed over it and the directory is
+/// synced, so the path holds the previous or the new complete evidence, never
+/// a truncated one. A replacement refuses when the path no longer refers to
+/// this run's file.
+pub(crate) struct EvidenceFile {
+    path: PathBuf,
+    dir: PathBuf,
+    /// The file the path refers to: the empty placeholder, then each
+    /// replacement.
+    current: RefCell<fs::File>,
+}
+
+impl EvidenceFile {
+    pub(crate) fn create(path: &str, owner_uid: u32) -> Result<Self, String> {
+        validate_evidence_target(path)?;
+        let path = PathBuf::from(path);
+        let dir = evidence_dir(&path);
+        let meta = check_private_dir(&dir)?;
+        if meta.uid() != owner_uid {
+            return Err(format!("{} is not owned by this user", dir.display()));
+        }
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("create-new {}: {e}", path.display()))?;
+        sync_dir(&dir)?;
+        let evidence = Self {
+            path,
+            dir,
+            current: RefCell::new(file),
+        };
+        // Prove now, before the guard, that a replacement can be staged here
+        // (directory writable, staging name not too long).
+        let (trial, _) = evidence.stage(b"")?;
+        fs::remove_file(&trial).map_err(|e| format!("remove {}: {e}", trial.display()))?;
+        Ok(evidence)
     }
-    Ok(())
+
+    /// Writes `content` to a new private sibling and fsyncs it. The evidence
+    /// path is not touched; a crash here leaves the previous evidence intact.
+    pub(crate) fn stage(&self, content: &[u8]) -> Result<(PathBuf, fs::File), String> {
+        let name = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut staged = None;
+        for n in 0..1000u32 {
+            let tmp = self
+                .dir
+                .join(format!(".{name}.tmp-{}-{n}", std::process::id()));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)
+            {
+                Ok(file) => {
+                    staged = Some((tmp, file));
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => {
+                    return Err(format!(
+                        "create evidence staging file {}: {e}",
+                        tmp.display()
+                    ));
+                }
+            }
+        }
+        let (tmp, mut file) = staged.ok_or("no free evidence staging file name")?;
+        if let Err(e) = file.write_all(content).and_then(|()| file.sync_all()) {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!(
+                "write evidence staging file {}: {e}",
+                tmp.display()
+            ));
+        }
+        Ok((tmp, file))
+    }
+
+    /// Renames a staged file over the evidence path and syncs the directory.
+    /// When it cannot, the complete staged copy is kept and named in the error.
+    pub(crate) fn commit(&self, (tmp, file): (PathBuf, fs::File)) -> Result<(), String> {
+        if !same_file(&self.path, &self.current.borrow()) {
+            return Err(format!(
+                "{} no longer refers to this run's evidence file; not replaced, complete copy kept at {}",
+                self.path.display(),
+                tmp.display()
+            ));
+        }
+        if let Err(e) = fs::rename(&tmp, &self.path) {
+            return Err(format!(
+                "rename over {}: {e}; complete copy kept at {}",
+                self.path.display(),
+                tmp.display()
+            ));
+        }
+        *self.current.borrow_mut() = file;
+        sync_dir(&self.dir).map_err(|e| format!("evidence replaced but not yet durable: {e}"))
+    }
+
+    pub(crate) fn replace(&self, content: &[u8]) -> Result<(), String> {
+        self.commit(self.stage(content)?)
+    }
+
+    /// Removes the evidence file if it is still this run's empty placeholder.
+    fn remove_if_unwritten(&self) -> String {
+        let path = self.path.display();
+        if !same_file(&self.path, &self.current.borrow()) {
+            return format!("{path} is no longer this run's evidence file and was left alone");
+        }
+        match self.current.borrow().metadata() {
+            Ok(m) if m.len() == 0 => match fs::remove_file(&self.path) {
+                Ok(()) => {
+                    let _ = sync_dir(&self.dir);
+                    format!("empty evidence file {path} removed")
+                }
+                Err(e) => format!("empty evidence file {path} not removed: {e}"),
+            },
+            Ok(_) => format!("evidence file {path} is not empty and was left alone"),
+            Err(e) => format!("evidence file {path}: {e}"),
+        }
+    }
+}
+
+/// Releases the latch of a run that provably wrote no bundle byte (guard
+/// refusal or pre-egress stop): the attempt directory is renamed with its
+/// journal, never deleted, and this run's evidence placeholder is removed if
+/// still empty, so a corrected run can start without deleting anything by
+/// hand. Refuses once the RELEASED marker exists. Returns what happened.
+pub(crate) fn release_unsent_attempt(
+    attempt_dir: &Path,
+    evidence: Option<&EvidenceFile>,
+    outcome: &str,
+) -> String {
+    if fs::symlink_metadata(attempt_dir.join(RELEASED_MARKER_FILE)).is_ok() {
+        return format!(
+            "{} holds the RELEASED marker: the latch is never released",
+            attempt_dir.display()
+        );
+    }
+    let name = attempt_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let stamp = unix_time_ms();
+    let released = (0u32..1000)
+        .map(|n| attempt_dir.with_file_name(format!("{name}.{outcome}-{stamp}-{n}")))
+        .find(|candidate| fs::symlink_metadata(candidate).is_err())
+        .unwrap_or_else(|| attempt_dir.with_file_name(format!("{name}.{outcome}-{stamp}")));
+    let latch = match fs::rename(attempt_dir, &released) {
+        Ok(()) => {
+            if let Some(root) = attempt_dir.parent() {
+                let _ = sync_dir(root);
+            }
+            format!(
+                "nothing was sent; latch released, attempt state kept at {}",
+                released.display()
+            )
+        }
+        Err(e) => format!(
+            "nothing was sent, but the latch could not be released ({e}); this run stopped before the release, so {} may be renamed by hand",
+            attempt_dir.display()
+        ),
+    };
+    let evidence = evidence.map_or_else(
+        || "this run created no evidence file".to_string(),
+        EvidenceFile::remove_if_unwritten,
+    );
+    format!("{latch}; {evidence}")
 }
 
 pub(crate) fn req_str<'a>(v: &'a Value, ptr: &str) -> &'a str {
@@ -314,12 +513,28 @@ pub(crate) fn validate_builder_policy(path: &str, signed_gas_price: u64) -> (Val
 mod tests {
     use super::*;
 
+    /// A fresh private directory under the canonical temp dir (on macOS the
+    /// temp dir is reached through the /var -> /private/var symlink).
     fn scratch(tag: &str) -> PathBuf {
-        env::temp_dir().join(format!(
+        let base = fs::canonicalize(env::temp_dir()).unwrap();
+        let dir = base.join(format!(
             "darkbot-g07-{tag}-{}-{}",
             std::process::id(),
             unix_time_ms()
-        ))
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        dir
+    }
+
+    fn mode(p: &Path) -> u32 {
+        fs::symlink_metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    fn evidence_in(dir: &Path) -> (EvidenceFile, PathBuf) {
+        let path = dir.join("g07.json");
+        let evidence =
+            EvidenceFile::create(path.to_str().unwrap(), owner_uid(dir).unwrap()).unwrap();
+        (evidence, path)
     }
 
     #[test]
@@ -333,87 +548,202 @@ mod tests {
 
     #[test]
     fn latch_admits_one_start_per_attempt_with_private_modes() {
-        let root = scratch("latch");
+        let base = scratch("latch");
+        let root = base.join("g07");
         let dir = latch_attempt(&root, "attempt-1", "pid=1\n").unwrap();
-        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&root), 0o700);
         assert_eq!(mode(&dir), 0o700);
         assert_eq!(mode(&dir.join(ATTEMPT_LATCH_FILE)), 0o600);
-        assert_eq!(fs::read_to_string(dir.join(ATTEMPT_LATCH_FILE)).unwrap(), "pid=1\n");
+        assert_eq!(
+            fs::read_to_string(dir.join(ATTEMPT_LATCH_FILE)).unwrap(),
+            "pid=1\n"
+        );
         let again = latch_attempt(&root, "attempt-1", "pid=2\n").unwrap_err();
         assert!(again.contains("already started"), "{again}");
         assert!(latch_attempt(&root, "attempt-2", "pid=3\n").is_ok());
         assert!(latch_attempt(&root, "../escape", "pid=4\n").is_err());
-        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
-    fn latch_refuses_symlinked_or_shared_state_roots() {
+    fn private_dirs_refuse_symlinks_on_the_way_open_modes_and_dot_dot() {
         let base = scratch("roots");
-        fs::create_dir(&base).unwrap();
         let real = base.join("real");
-        fs::create_dir(&real).unwrap();
+        fs::DirBuilder::new().mode(0o700).create(&real).unwrap();
         let link = base.join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
+        // The directory itself a symlink.
         let e = latch_attempt(&link, "attempt-1", "").unwrap_err();
         assert!(e.contains("symlink"), "{e}");
+        // A symlink further up the path.
+        let below = link.join("g07");
+        let e = latch_attempt(&below, "attempt-1", "").unwrap_err();
+        assert!(e.contains("symlink"), "{e}");
+        assert!(!real.join("g07").exists(), "created through a symlink");
+        // Group/other permissions.
         let open = base.join("open");
         fs::create_dir(&open).unwrap();
         fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
         let e = latch_attempt(&open, "attempt-1", "").unwrap_err();
         assert!(e.contains("private"), "{e}");
         assert!(!open.join("attempt-1").exists());
+        assert!(check_private_dir(&real.join("..").join("real")).is_err());
+        assert!(check_private_dir(&real).is_ok());
+        // A real, private directory behind a symlinked ancestor.
+        let sub = real.join("sub");
+        fs::DirBuilder::new().mode(0o700).create(&sub).unwrap();
+        assert!(check_private_dir(&sub).is_ok());
+        let e = check_private_dir(&link.join("sub")).unwrap_err();
+        assert!(e.contains("symlink"), "{e}");
         fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
-    fn release_renames_the_latch_and_removes_only_this_runs_empty_evidence_file() {
-        let root = scratch("release");
-        let dir = latch_attempt(&root, "attempt-1", "").unwrap();
-        fs::write(dir.join(CAPTURE_JOURNAL_FILE), b"journal").unwrap();
-        let evidence = root.join("evidence.json");
-        let evidence_str = evidence.to_str().unwrap();
-        let own = fs::File::create(&evidence).unwrap();
-        let note = release_unsent_attempt(&dir, Some((evidence_str, &own)), "refused");
-        assert!(note.contains("latch released"), "{note}");
-        assert!(!dir.exists() && !evidence.exists());
-        let kept: Vec<_> = fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name()).collect();
-        assert_eq!(kept.len(), 1);
-        let kept = root.join(&kept[0]);
-        assert!(kept.to_string_lossy().contains("attempt-1.refused-"));
-        assert_eq!(fs::read(kept.join(CAPTURE_JOURNAL_FILE)).unwrap(), b"journal");
-
-        // The attempt can start again. A non-empty own file is kept.
-        let dir = latch_attempt(&root, "attempt-1", "").unwrap();
-        let mut own = fs::File::create(&evidence).unwrap();
-        own.write_all(b"{}").unwrap();
-        let note = release_unsent_attempt(&dir, Some((evidence_str, &own)), "pre-egress");
-        assert!(note.contains("is not empty and was left alone"), "{note}");
-        assert!(evidence.exists());
-
-        // An empty file at the path that is not this run's is never removed.
-        fs::remove_file(&evidence).unwrap();
-        let dir = latch_attempt(&root, "attempt-1", "").unwrap();
-        let foreign = fs::File::create(root.join("other.json")).unwrap();
-        fs::File::create(&evidence).unwrap();
-        let note = release_unsent_attempt(&dir, Some((evidence_str, &foreign)), "pre-egress");
-        assert!(note.contains("no longer this run's evidence file"), "{note}");
-        assert!(evidence.exists());
-        let note = release_unsent_attempt(&root.join("missing"), None, "pre-egress");
-        assert!(note.contains("could not be released") && note.contains("created no evidence file"), "{note}");
-        fs::remove_dir_all(&root).unwrap();
+    fn evidence_target_must_be_new_in_a_private_directory() {
+        let dir = scratch("target");
+        let target = dir.join("g07.json");
+        let target = target.to_str().unwrap();
+        assert!(validate_evidence_target(target).is_ok());
+        fs::write(target, b"x").unwrap();
+        assert!(validate_evidence_target(target).is_err());
+        let orphan = dir.join("missing").join("g07.json");
+        assert!(validate_evidence_target(orphan.to_str().unwrap()).is_err());
+        let open = dir.join("open");
+        fs::create_dir(&open).unwrap();
+        fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(validate_evidence_target(open.join("g07.json").to_str().unwrap()).is_err());
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&dir, &link).unwrap();
+        assert!(validate_evidence_target(link.join("g07.json").to_str().unwrap()).is_err());
+        let dangling = dir.join("dangling.json");
+        std::os::unix::fs::symlink(dir.join("nowhere"), &dangling).unwrap();
+        assert!(validate_evidence_target(dangling.to_str().unwrap()).is_err());
+        assert!(validate_evidence_target(&format!("{}/../g07.json", dir.display())).is_err());
+        assert!(validate_evidence_target("").is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn evidence_target_must_be_new_in_an_existing_directory() {
+    fn evidence_is_private_and_replaced_atomically_without_leftovers() {
         let dir = scratch("evidence");
-        fs::create_dir(&dir).unwrap();
-        let target = dir.join("g07.json");
-        let target = target.to_str().unwrap();
-        assert!(validate_new_file_target(target).is_ok());
-        fs::write(target, b"x").unwrap();
-        assert!(validate_new_file_target(target).is_err());
-        let orphan = dir.join("missing").join("g07.json");
-        assert!(validate_new_file_target(orphan.to_str().unwrap()).is_err());
+        let (evidence, path) = evidence_in(&dir);
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(fs::read(&path).unwrap(), b"");
+        evidence.replace(b"{\"v\":1}\n").unwrap();
+        evidence.replace(b"{\"v\":2}\n").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"v\":2}\n");
+        assert_eq!(mode(&path), 0o600);
+        let names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+        // A second run on the same path is refused.
+        assert!(EvidenceFile::create(path.to_str().unwrap(), owner_uid(&dir).unwrap()).is_err());
+        // A directory owned by someone else is refused, and nothing is created.
+        let other = dir.join("other.json");
+        let e = EvidenceFile::create(other.to_str().unwrap(), owner_uid(&dir).unwrap() + 1)
+            .err()
+            .unwrap();
+        assert!(e.contains("not owned"), "{e}");
+        assert!(!other.exists());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_crash_or_failed_write_never_destroys_the_previous_evidence() {
+        let dir = scratch("crash");
+        let (evidence, path) = evidence_in(&dir);
+        evidence.replace(b"{\"v\":1}\n").unwrap();
+        // Crash after staging, before the rename: the path still holds v1.
+        let staged = evidence.stage(b"{\"v\":2}\n").unwrap();
+        drop(staged);
+        assert_eq!(fs::read(&path).unwrap(), b"{\"v\":1}\n");
+        // The next write still succeeds and leaves complete content.
+        evidence.replace(b"{\"v\":3}\n").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"v\":3}\n");
+        // A write that cannot even stage (read-only directory) fails visibly
+        // and keeps v3.
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
+        let e = evidence.replace(b"{\"v\":4}\n").unwrap_err();
+        assert!(e.contains("staging"), "{e}");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"v\":3}\n");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_foreign_file_at_the_evidence_path_is_never_replaced_or_removed() {
+        let dir = scratch("foreign");
+        let (evidence, path) = evidence_in(&dir);
+        fs::remove_file(&path).unwrap();
+        fs::write(&path, b"foreign").unwrap();
+        let e = evidence.replace(b"{}\n").unwrap_err();
+        assert!(
+            e.contains("no longer refers") && e.contains("copy kept at"),
+            "{e}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"foreign");
+        assert!(evidence.remove_if_unwritten().contains("left alone"));
+        assert_eq!(fs::read(&path).unwrap(), b"foreign");
+        // The refused content survives as the named private copy.
+        let kept: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p != &path)
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(fs::read(&kept[0]).unwrap(), b"{}\n");
+        assert_eq!(mode(&kept[0]), 0o600);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn release_renames_the_latch_and_removes_only_this_runs_empty_placeholder() {
+        let base = scratch("release");
+        let root = base.join("g07");
+        let dir = latch_attempt(&root, "attempt-1", "").unwrap();
+        fs::write(dir.join(CAPTURE_JOURNAL_FILE), b"journal").unwrap();
+        let (evidence, path) = evidence_in(&base);
+        let note = release_unsent_attempt(&dir, Some(&evidence), "refused");
+        assert!(
+            note.contains("latch released") && note.contains("removed"),
+            "{note}"
+        );
+        assert!(!dir.exists() && !path.exists());
+        let kept: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(kept.len(), 1);
+        let kept = root.join(&kept[0]);
+        assert!(kept.to_string_lossy().contains("attempt-1.refused-"));
+        assert_eq!(
+            fs::read(kept.join(CAPTURE_JOURNAL_FILE)).unwrap(),
+            b"journal"
+        );
+
+        // The attempt can start again; written evidence is kept.
+        let dir = latch_attempt(&root, "attempt-1", "").unwrap();
+        let (evidence, path) = evidence_in(&base);
+        evidence.replace(b"{}\n").unwrap();
+        let note = release_unsent_attempt(&dir, Some(&evidence), "pre-egress");
+        assert!(note.contains("is not empty and was left alone"), "{note}");
+        assert!(path.exists());
+
+        // After the release marker the latch is never released.
+        let dir = latch_attempt(&root, "attempt-1", "").unwrap();
+        fs::write(dir.join(RELEASED_MARKER_FILE), b"released").unwrap();
+        let note = release_unsent_attempt(&dir, None, "pre-egress");
+        assert!(note.contains("never released"), "{note}");
+        assert!(dir.join(ATTEMPT_LATCH_FILE).exists());
+        assert!(latch_attempt(&root, "attempt-1", "").is_err());
+
+        let note = release_unsent_attempt(&root.join("missing"), None, "pre-egress");
+        assert!(
+            note.contains("could not be released") && note.contains("created no evidence file"),
+            "{note}"
+        );
+        fs::remove_dir_all(&base).unwrap();
     }
 }

@@ -51,3 +51,13 @@ required-features = ["g07-mainnet"]
 [[test]]
 name = "g07_no_send"
 required-features = ["g07-mainnet"]
+
+# G0.7 pre-arm checks 6 and 10: the builder probe with non-executable bundles.
+# A dry run by default; it sends only an approved plan (plan SHA-256), once.
+[[bin]]
+name = "g07_builder_probe"
+required-features = ["g07-mainnet"]
+
+[[test]]
+name = "g07_builder_probe"
+required-features = ["g07-mainnet"]

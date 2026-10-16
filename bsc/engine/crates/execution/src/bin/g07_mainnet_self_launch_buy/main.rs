@@ -8,109 +8,30 @@
 //! bsc/.local/g07/), and the bundle expiry comes from the canonical head read
 //! immediately before the release.
 
-use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
-use alloy_sol_types::{SolCall, sol};
 use darkbot_bsc_execution::{
-    acceptance_guard::{LiveGuardContext, V2_RELATIVE_PATH, sha256_hex, verify_live_authorization},
-    qualification_capture::{CaptureClock, CaptureSession},
+    acceptance_guard::{LiveGuardContext, verify_live_authorization},
+    qualification_capture::CaptureSession,
 };
-use k256::ecdsa::SigningKey;
-use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned, pki_types::ServerName};
-use serde_json::{Value, json};
-use std::{
-    env, fs,
-    io::{Read, Seek, SeekFrom, Write},
-    net::{TcpStream, ToSocketAddrs},
-    path::{Path, PathBuf},
-    process::Command,
-    str::FromStr,
-    sync::{Arc, Barrier, mpsc},
-    thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use std::os::unix::fs::OpenOptionsExt;
+use std::str::FromStr;
+use std::sync::mpsc;
 
-type Tls = StreamOwned<ClientConnection, TcpStream>;
-
-const CHAIN_ID: u64 = 56;
-const PORTAL: &str = "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0";
-const CLUB48_HOST: &str = "puissant-builder.48.club";
-const BLOCKRAZOR_HOST: &str = "virginia.builder.blockrazor.io";
-const HTTPS_PORT: u16 = 443;
 const CAPTURE_WINDOW_NS: u64 = 15_000_000_000;
 /// Longest idle time of a prewarmed builder connection before the release.
 const MAX_BUILDER_IDLE: Duration = Duration::from_secs(5);
 /// Longest wait for the journal writer to append the records of the release.
 const CAPTURE_APPEND_TIMEOUT: Duration = Duration::from_millis(50);
-const PRODUCER_WITNESS_SCHEMA_PATH: &str = "bsc/config/producer_execution_witness_v1.schema.json";
-
-sol! {
-    struct LaunchParams {
-        string name;
-        string symbol;
-        string uri;
-        uint8 dexThresh;
-        bytes32 salt;
-        uint8 migratorType;
-        address quoteToken;
-        uint256 quoteAmt;
-        address beneficiary;
-        bytes permit;
-        bytes32 extensionId;
-        bytes extensionData;
-        uint8 dexId;
-        uint8 lpFeeProfile;
-        uint16 buyTax;
-        uint16 sellTax;
-        uint64 taxDuration;
-        uint64 antiFarmerDuration;
-        uint16 mktBps;
-        uint16 deflationBps;
-        uint16 dividendBps;
-        uint16 lpBps;
-        uint256 minimumShareBalance;
-        address dividendToken;
-        address commissionReceiver;
-        uint8 tokenVersion;
-    }
-
-    function newTokenV6(LaunchParams params) external payable returns(address);
-
-    struct SwapParams {
-        address inputToken;
-        address outputToken;
-        uint256 inputAmount;
-        uint256 minOutputAmount;
-        bytes permit;
-    }
-
-    function swapExactInput(SwapParams params) external payable returns(uint256);
-}
-
-#[derive(Clone)]
-struct SignedLegacy {
-    raw: Vec<u8>,
-    hash: B256,
-}
-
-#[derive(Debug)]
-struct ProviderResult {
-    provider: &'static str,
-    write_started_ns: Option<u64>,
-    write_flushed_ns: Option<u64>,
-    bytes_may_have_left: bool,
-    http_status: Option<String>,
-    response_body: Option<String>,
-    error: Option<String>,
-}
 
 mod builder_submission;
 mod chain_reads;
 mod inputs;
+mod shared;
 mod transactions;
 
 use builder_submission::*;
 use chain_reads::*;
 use inputs::*;
+use shared::*;
 use transactions::*;
 
 fn main() {
@@ -141,7 +62,7 @@ fn main() {
     let rpc_endpoint =
         parse_rpc_endpoint(&req_env("BSC_MAINNET_RPC_HTTPS")).unwrap_or_else(|e| panic!("{e}"));
     validate_attempt_id(&attempt_id).unwrap_or_else(|e| panic!("{e}"));
-    validate_new_file_target(&evidence_path)
+    validate_evidence_target(&evidence_path)
         .unwrap_or_else(|e| panic!("DARKBOT_G07_EVIDENCE_PATH: {e}"));
     assert_repository_root();
     let (producer_witness_contract, producer_witness_contract_sha256) =
@@ -322,13 +243,11 @@ fn main() {
         ),
     )
     .unwrap_or_else(|e| panic!("G0.7 single-use latch: {e}"));
-    let mut evidence_file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&evidence_path)
+    let evidence_out = owner_uid(&attempt_dir)
+        .and_then(|uid| EvidenceFile::create(&evidence_path, uid))
         .unwrap_or_else(|e| {
             let released = release_unsent_attempt(&attempt_dir, None, "pre-egress");
-            panic!("create-new DARKBOT_G07_EVIDENCE_PATH {evidence_path}: {e}; {released}")
+            panic!("G0.7 evidence file DARKBOT_G07_EVIDENCE_PATH: {e}; {released}")
         });
     let capture_path = attempt_dir.join(CAPTURE_JOURNAL_FILE);
 
@@ -340,18 +259,13 @@ fn main() {
         &producer_witness_source,
     )
     .unwrap_or_else(|e| {
-        let released = release_unsent_attempt(
-            &attempt_dir,
-            Some((&evidence_path, &evidence_file)),
-            "pre-egress",
-        );
+        let released = release_unsent_attempt(&attempt_dir, Some(&evidence_out), "pre-egress");
         panic!("G0.7 capture pre-arm failed: {e}; {released}")
     });
     let capture_clock = capture.clock();
     let unsent = Unsent {
         attempt_dir: &attempt_dir,
-        evidence_path: &evidence_path,
-        evidence_file: &evidence_file,
+        evidence: &evidence_out,
     };
 
     let contract = match verify_live_authorization(
@@ -410,12 +324,88 @@ fn main() {
                 &launch.raw,
             )
         })
-        .and_then(|()| {
-            capture.record_raw_tx("buy_B", capture_clock.now_ns(), &buy_hash, &buy.raw)
-        });
+        .and_then(|()| capture.record_raw_tx("buy_B", capture_clock.now_ns(), &buy_hash, &buy.raw));
     if let Err(e) = bound {
         pre_egress_abort(capture, &capture_clock, &unsent, "journal attempt", &e)
     }
+
+    // The evidence of the attempt, completed and written atomically right
+    // after the release, after the send threads and after the receipt window.
+    // Built here, off the path between the send-head read and the release.
+    let mut evidence = json!({
+        "schema":"darkbot.g07.mainnet-self-launch-buy.v2",
+        "gate":"G0.7",
+        "attempt_id":attempt_id,
+        "classification":"PROVISIONAL_RELEASED__PROVIDER_RESULTS_PENDING__RECONCILE_G08__NO_AUTOMATIC_RETRY",
+        "chain_id":CHAIN_ID,
+        "portal":PORTAL,
+        "acceptance_contract":{
+            "path":V2_RELATIVE_PATH,
+            "sha256":contract.sha256
+        },
+        "evidence_inputs":{
+            "dry_path":dry_path,
+            "dry_sha256":dry_evidence_sha256,
+            "preflight_path":baseline_path,
+            "preflight_sha256":preflight_evidence_sha256,
+            "builder_policy_path":builder_policy_path,
+            "builder_policy_sha256":builder_policy_sha256,
+            "producer_witness_contract_path":producer_witness_contract_path,
+            "producer_witness_contract_sha256":producer_witness_contract_sha256
+        },
+        "attempt":{
+            "state_dir":attempt_dir.display().to_string(),
+            "single_use_latch":attempt_dir.join(ATTEMPT_LATCH_FILE).display().to_string(),
+            "number":attempt_number,
+            "spent_before_wei":spent_budget_wei.to_string(),
+            "reserved_worst_case_wei":reserved_attempt_wei.to_string()
+        },
+        "wallets":{
+            "launcher":launcher.to_string(),
+            "buyer":buyer.to_string(),
+            "distinct":true,
+            "launcher_nonce":launcher_nonce,
+            "buyer_nonce":buyer_nonce
+        },
+        "preflight":{
+            "latest_block_number":preflight_head,
+            "latest_block_hash":current["latest_block_hash"],
+            "portal_version":current["portal_version"],
+            "portal_implementation":current["portal_implementation"],
+            "tax_v3_impl":current["tax_v3_impl"],
+            "network_gas_price_wei":current["gas_price_wei"]
+        },
+        "transactions":{
+            "launch_tx_hash":launch_hash,
+            "buy_tx_hash":buy_hash,
+            "token":token.to_string(),
+            "token_code_before_empty":true,
+            "salt":salt.to_string(),
+            "launch_value_wei":launch_value.to_string(),
+            "buy_value_wei":buy_value.to_string(),
+            "gas_price_wei":gas_price,
+            "launch_gas_estimate":launch_estimate,
+            "launch_gas_limit":launch_gas_limit,
+            "buy_gas_limit":buy_gas_limit,
+            "local_expected_output":local_expected_output.to_string(),
+            "min_output":min_output.to_string(),
+            "slippage_bps":slippage_bps
+        },
+        "capture":{
+            "complete_local_journal":false,
+            "status":"PROVIDER_RESULTS_PENDING",
+            "journal_path":capture_path.display().to_string()
+        },
+        "capture_window":null,
+        "timing":{
+            "T0_to_T_buy":"UNKNOWN_PENDING_ORIGINAL_PRODUCER_WITNESS",
+            "producer_witness_source":producer_witness_source,
+            "producer_witness_source_ready":producer_witness_source_ready,
+            "rule":"Local send/receipt/block timestamps are not producer execution timestamps. G0.8 producer-timing evaluation requires the original producing execution attempt; source_ready=false does not block G0.7 acquisition qualification."
+        },
+        "next_required_gate":"G0.8",
+        "critical_rule":"DO NOT RETRY THIS ATTEMPT AUTOMATICALLY; reconcile canonical execution first."
+    });
 
     // The RPC connection is checked (and re-established if it closed during
     // the guard phase) before the builder prewarm, so the builder connections
@@ -426,14 +416,10 @@ fn main() {
     // TLS/DNS/handshake all happen before the economic write boundary.
     let mut club48_tls = match connect_tls(CLUB48_HOST) {
         Ok(stream) => stream,
-        Err(e) => pre_egress_abort(
-            capture,
-            &capture_clock,
-            &unsent,
-            "48Club TLS prewarm",
-            &e,
-        ),
+        Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, "48Club TLS prewarm", &e),
     };
+    // The 48Club connection is the older one: it bounds the idle time.
+    let club48_ready_at = Instant::now();
     let mut blockrazor_tls = match connect_tls(BLOCKRAZOR_HOST) {
         Ok(stream) => stream,
         Err(e) => pre_egress_abort(
@@ -444,7 +430,6 @@ fn main() {
             &e,
         ),
     };
-    let prewarmed_at = Instant::now();
 
     if let Err(e) = capture.record_text(
         "TRANSPORTS_PREWARMED",
@@ -459,13 +444,7 @@ fn main() {
     // earlier.
     let fresh = match head_poller.next_head(HEAD_TRANSITION_TIMEOUT) {
         Ok(observation) => observation,
-        Err(e) => pre_egress_abort(
-            capture,
-            &capture_clock,
-            &unsent,
-            "send head read",
-            &e,
-        ),
+        Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, "send head read", &e),
     };
     let window = match bundle_window(
         preflight_head,
@@ -475,13 +454,7 @@ fn main() {
         fresh.excess_staleness_ms,
     ) {
         Ok(window) => window,
-        Err(e) => pre_egress_abort(
-            capture,
-            &capture_clock,
-            &unsent,
-            "send head window",
-            &e,
-        ),
+        Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, "send head window", &e),
     };
     let send_head = fresh.head.number;
     let max_block = window.max_block;
@@ -489,29 +462,9 @@ fn main() {
     let buy_hex = format!("0x{}", hex::encode(&buy.raw));
     let request_id = buy_hash.clone();
 
-    let club48_body = json!({
-        "jsonrpc":"2.0",
-        "id":request_id.clone(),
-        "method":"eth_sendBundle",
-        "params":[{
-            "txs":[launch_hex.clone(), buy_hex.clone()],
-            "maxBlockNumber":max_block,
-            "maxTimestamp":window.max_timestamp,
-            "noMerge":true,
-            "positionFirst":true
-        }]
-    })
-    .to_string();
-    let blockrazor_body = json!({
-        "jsonrpc":"2.0",
-        "id":buy_hash.clone(),
-        "method":"eth_sendBundle",
-        "params":[{
-            "txs":[launch_hex, buy_hex],
-            "maxBlockNumber":max_block
-        }]
-    })
-    .to_string();
+    let txs = [launch_hex.as_str(), buy_hex.as_str()];
+    let club48_body = club48_bundle_body(&request_id, txs, max_block, window.max_timestamp);
+    let blockrazor_body = blockrazor_bundle_body(&buy_hash, txs, max_block);
 
     let club48_request = http_request(CLUB48_HOST, &club48_body, None);
     let blockrazor_request =
@@ -564,10 +517,10 @@ fn main() {
     if let Err(e) = journaled {
         pre_egress_abort(capture, &capture_clock, &unsent, "journal submission", &e)
     }
-    if prewarmed_at.elapsed() > MAX_BUILDER_IDLE {
+    if club48_ready_at.elapsed() > MAX_BUILDER_IDLE {
         let idle = format!(
             "builder connections idled {} ms (limit {} ms)",
-            prewarmed_at.elapsed().as_millis(),
+            club48_ready_at.elapsed().as_millis(),
             MAX_BUILDER_IDLE.as_millis()
         );
         pre_egress_abort(capture, &capture_clock, &unsent, "builder idle", &idle)
@@ -588,6 +541,7 @@ fn main() {
     // signal ends it without a write and the run stops before the release.
     let barrier = Arc::new(Barrier::new(3));
     let mut release_marker = String::new();
+    let mut release_evidence: Result<(), String> = Err("not written".into());
     let mut release_before_ns = 0u64;
     let mut release_after_ns = 0u64;
     let sent = thread::scope(|scope| {
@@ -635,13 +589,75 @@ fn main() {
                 return Err(format!("send thread spawn failed: {}", reasons.join("; ")));
             }
         };
-        // Both receivers are blocked in recv (their first statement), so
-        // neither send can fail.
-        let _ = go48.send(());
+        // Each receiver lives in its spawned closure until that closure has
+        // received, so neither send can fail; should the first fail anyway,
+        // nothing has been released.
+        if go48.send(()).is_err() {
+            drop(gobr);
+            return Err("48Club send thread ended before its go signal".to_string());
+        }
         let _ = gobr.send(());
         release_before_ns = capture_clock.now_ns();
         barrier.wait();
         release_after_ns = capture_clock.now_ns();
+        // Provisional evidence first, while the senders run (main is idle
+        // here), so a kill or hang before the builders answer still leaves it
+        // on file; then the RELEASED marker (the latch is already durable).
+        set_fields(
+            &mut evidence,
+            vec![
+                (
+                    "bundle",
+                    json!({
+                        "tx_order":["launch_A","buy_B"],
+                        "identical_raw_transactions_across_builders":true,
+                        "send_head":send_head,
+                        "max_block":max_block,
+                        "fortyeightclub_maxTimestamp":window.max_timestamp,
+                        "expiry_rule":format!("maxBlockNumber = send_head + {MAX_BLOCK_OFFSET} for both builders (the head+{MAX_BLOCK_OFFSET} bound); 48Club maxTimestamp = floor((send_head milliTimestamp + {MAX_BLOCK_OFFSET} * {BLOCK_INTERVAL_MS} ms) / 1000) + 1, the second after head+{MAX_BLOCK_OFFSET}'s nominal second: not a head+{MAX_BLOCK_OFFSET} bound by itself, it keeps a maxTimestamp-versus-current-time check from refusing the bundle while head+{MAX_BLOCK_OFFSET} is open"),
+                        "send_head_source":{
+                            "read":"first eth_getBlockByNumber(latest) showing a new block, polled over a pre-warmed keep-alive TLS connection after the builder TLS prewarm, immediately before the release",
+                            "hash":fresh.head.hash,
+                            "milli_timestamp":fresh.head.milli_timestamp,
+                            "local_unix_ms_after_read":fresh.local_unix_ms,
+                            "head_age_ms":window.head_age_ms,
+                            "excess_staleness_ms":fresh.excess_staleness_ms,
+                            "read_round_trip_ns":fresh.read_ns,
+                            "max_head_age_ms":MAX_HEAD_AGE_MS,
+                            "max_local_clock_lag_ms":MAX_LOCAL_CLOCK_LAG_MS,
+                            "preflight_head":preflight_head,
+                            "probe":{
+                                "head":probe.head.number,
+                                "head_age_ms":probe_window.head_age_ms,
+                                "excess_staleness_ms":probe.excess_staleness_ms,
+                                "read_round_trip_ns":probe.read_ns
+                            }
+                        },
+                        "public_mempool_launch":false,
+                        "automatic_retry":false,
+                        "fortyeightclub_noMerge":true,
+                        "fortyeightclub_positionFirst":true,
+                        "blockrazor_noMerge":false,
+                        "blockrazor_positionFirst":false
+                    }),
+                ),
+                (
+                    "local_send_boundaries",
+                    json!({
+                        "clock_id":clock_id,
+                        "boot_id":boot_id,
+                        "release_before_ns":release_before_ns,
+                        "release_after_ns":release_after_ns,
+                        "release_marker":"PENDING",
+                        "fortyeightclub":{"status":"PENDING"},
+                        "blockrazor":{"status":"PENDING"},
+                        "any_valid_bytes_may_have_left":true,
+                        "not_t0_to_buy":true
+                    }),
+                ),
+            ],
+        );
+        release_evidence = write_evidence(&evidence_out, &evidence);
         release_marker = mark_released(&attempt_dir, release_after_ns);
         Ok((
             h48.join()
@@ -691,138 +707,60 @@ fn main() {
         _ => None,
     };
 
-    let mut evidence = json!({
-        "schema":"darkbot.g07.mainnet-self-launch-buy.v2",
-        "gate":"G0.7",
-        "attempt_id":attempt_id,
-        "classification":"PROVISIONAL_RELEASED__RECEIPT_WINDOW_OPEN__RECONCILE_G08__NO_AUTOMATIC_RETRY",
-        "chain_id":CHAIN_ID,
-        "portal":PORTAL,
-        "acceptance_contract":{
-            "path":V2_RELATIVE_PATH,
-            "sha256":contract.sha256
-        },
-        "evidence_inputs":{
-            "dry_path":dry_path,
-            "dry_sha256":dry_evidence_sha256,
-            "preflight_path":baseline_path,
-            "preflight_sha256":preflight_evidence_sha256,
-            "builder_policy_path":builder_policy_path,
-            "builder_policy_sha256":builder_policy_sha256,
-            "producer_witness_contract_path":producer_witness_contract_path,
-            "producer_witness_contract_sha256":producer_witness_contract_sha256
-        },
-        "attempt":{
-            "state_dir":attempt_dir.display().to_string(),
-            "single_use_latch":attempt_dir.join(ATTEMPT_LATCH_FILE).display().to_string(),
-            "release_marker":release_marker,
-            "number":attempt_number,
-            "spent_before_wei":spent_budget_wei.to_string(),
-            "reserved_worst_case_wei":reserved_attempt_wei.to_string()
-        },
-        "wallets":{
-            "launcher":launcher.to_string(),
-            "buyer":buyer.to_string(),
-            "distinct":true,
-            "launcher_nonce":launcher_nonce,
-            "buyer_nonce":buyer_nonce
-        },
-        "preflight":{
-            "latest_block_number":preflight_head,
-            "latest_block_hash":current["latest_block_hash"],
-            "portal_version":current["portal_version"],
-            "portal_implementation":current["portal_implementation"],
-            "tax_v3_impl":current["tax_v3_impl"],
-            "network_gas_price_wei":current["gas_price_wei"]
-        },
-        "transactions":{
-            "launch_tx_hash":launch_hash,
-            "buy_tx_hash":buy_hash,
-            "token":token.to_string(),
-            "token_code_before_empty":true,
-            "salt":salt.to_string(),
-            "launch_value_wei":launch_value.to_string(),
-            "buy_value_wei":buy_value.to_string(),
-            "gas_price_wei":gas_price,
-            "launch_gas_estimate":launch_estimate,
-            "launch_gas_limit":launch_gas_limit,
-            "buy_gas_limit":buy_gas_limit,
-            "local_expected_output":local_expected_output.to_string(),
-            "min_output":min_output.to_string(),
-            "slippage_bps":slippage_bps
-        },
-        "bundle":{
-            "tx_order":["launch_A","buy_B"],
-            "identical_raw_transactions_across_builders":true,
-            "send_head":send_head,
-            "max_block":max_block,
-            "fortyeightclub_maxTimestamp":window.max_timestamp,
-            "expiry_rule":format!("maxBlockNumber = send_head + {MAX_BLOCK_OFFSET} for both builders (the head+{MAX_BLOCK_OFFSET} bound); 48Club maxTimestamp = floor((send_head milliTimestamp + {MAX_BLOCK_OFFSET} * {BLOCK_INTERVAL_MS} ms) / 1000) + 1, the second after head+{MAX_BLOCK_OFFSET}'s nominal second: not a head+{MAX_BLOCK_OFFSET} bound by itself, it keeps a maxTimestamp-versus-current-time check from refusing the bundle while head+{MAX_BLOCK_OFFSET} is open"),
-            "send_head_source":{
-                "read":"first eth_getBlockByNumber(latest) showing a new block, polled over a pre-warmed keep-alive TLS connection after the builder TLS prewarm, immediately before the release",
-                "hash":fresh.head.hash,
-                "milli_timestamp":fresh.head.milli_timestamp,
-                "local_unix_ms_after_read":fresh.local_unix_ms,
-                "head_age_ms":window.head_age_ms,
-                "excess_staleness_ms":fresh.excess_staleness_ms,
-                "read_round_trip_ns":fresh.read_ns,
-                "max_head_age_ms":MAX_HEAD_AGE_MS,
-                "max_local_clock_lag_ms":MAX_LOCAL_CLOCK_LAG_MS,
-                "preflight_head":preflight_head,
-                "probe":{
-                    "head":probe.head.number,
-                    "head_age_ms":probe_window.head_age_ms,
-                    "excess_staleness_ms":probe.excess_staleness_ms,
-                    "read_round_trip_ns":probe.read_ns
-                }
-            },
-            "public_mempool_launch":false,
-            "automatic_retry":false,
-            "fortyeightclub_noMerge":true,
-            "fortyeightclub_positionFirst":true,
-            "blockrazor_noMerge":false,
-            "blockrazor_positionFirst":false
-        },
-        "local_send_boundaries":{
-            "clock_id":clock_id,
-            "boot_id":boot_id,
-            "release_before_ns":release_before_ns,
-            "release_after_ns":release_after_ns,
-            "fortyeightclub":provider_json(&club48_result),
-            "blockrazor":provider_json(&blockrazor_result),
-            "both_flush_completed":both_flushed,
-            "write_flush_boundary_spread_ns":flush_spread_ns,
-            "any_valid_bytes_may_have_left":any_possible_egress,
-            "not_t0_to_buy":true
-        },
-        "capture":{
-            "complete_local_journal":false,
-            "status":"RECEIPT_WINDOW_OPEN",
-            "journal_path":capture_path.display().to_string()
-        },
-        "capture_window":null,
-        "timing":{
-            "T0_to_T_buy":"UNKNOWN_PENDING_ORIGINAL_PRODUCER_WITNESS",
-            "producer_witness_source":producer_witness_source,
-            "producer_witness_source_ready":producer_witness_source_ready,
-            "rule":"Local send/receipt/block timestamps are not producer execution timestamps. G0.8 producer-timing evaluation requires the original producing execution attempt; source_ready=false does not block G0.7 acquisition qualification."
-        },
-        "next_required_gate":"G0.8",
-        "critical_rule":"DO NOT RETRY THIS ATTEMPT AUTOMATICALLY; reconcile canonical execution first."
-    });
-
-    // Provisional evidence right after the release, so a kill or a hang in the
-    // receipt window still leaves the attempt's evidence on file.
-    let provisional = write_evidence(&mut evidence_file, &evidence_text(&evidence));
+    set_fields(
+        &mut evidence,
+        vec![
+            (
+                "classification",
+                json!(
+                    "PROVISIONAL_RELEASED__RECEIPT_WINDOW_OPEN__RECONCILE_G08__NO_AUTOMATIC_RETRY"
+                ),
+            ),
+            (
+                "capture",
+                json!({
+                    "complete_local_journal":false,
+                    "status":"RECEIPT_WINDOW_OPEN",
+                    "journal_path":capture_path.display().to_string()
+                }),
+            ),
+            (
+                "local_send_boundaries",
+                json!({
+                    "clock_id":clock_id,
+                    "boot_id":boot_id,
+                    "release_before_ns":release_before_ns,
+                    "release_after_ns":release_after_ns,
+                    "release_marker":release_marker,
+                    "fortyeightclub":provider_json(&club48_result),
+                    "blockrazor":provider_json(&blockrazor_result),
+                    "both_flush_completed":both_flushed,
+                    "write_flush_boundary_spread_ns":flush_spread_ns,
+                    "any_valid_bytes_may_have_left":any_possible_egress,
+                    "not_t0_to_buy":true
+                }),
+            ),
+        ],
+    );
+    // Provisional evidence with the provider results, so a kill or a hang in
+    // the receipt window still leaves it on file.
+    let provisional = write_evidence(&evidence_out, &evidence);
     let _ = capture.record_text(
         "PROVISIONAL_EVIDENCE",
         capture_clock.now_ns(),
-        &format!("path={evidence_path}\nwritten={:?}", provisional.as_ref().map_err(|e| e.to_string())),
+        &format!(
+            "path={evidence_path}\nat_release={release_evidence:?}\nafter_send_threads={provisional:?}"
+        ),
     );
+    let outcome = |written: &Result<(), String>| match written {
+        Ok(()) => "written".to_string(),
+        Err(e) => format!("NOT written ({e})"),
+    };
     let _ = writeln!(
         std::io::stderr().lock(),
-        "G0.7: bundle released; provisional evidence {} at {evidence_path}; polling receipts for up to 30 s and keeping the journal open at least 15 s: do not interrupt",
-        if provisional.is_ok() { "written" } else { "NOT written" }
+        "G0.7: bundle released; evidence at {evidence_path}: at the release {}, after the send threads {}; polling receipts for up to 30 s and keeping the journal open at least 15 s: do not interrupt",
+        outcome(&release_evidence),
+        outcome(&provisional)
     );
 
     // Keep the local journal alive conservatively. This is NOT T0 timing authority.
@@ -919,41 +857,38 @@ fn main() {
         }),
     };
 
-    if let Some(fields) = evidence.as_object_mut() {
-        fields.insert(
-            "classification".into(),
-            json!(if capture_complete {
-                "SUBMITTED_OR_SUBMISSION_UNKNOWN__RUN_G08__NO_AUTOMATIC_RETRY"
-            } else {
-                "STOP_CAPTURE_INCOMPLETE__RECONCILE_G08__NO_AUTOMATIC_RETRY"
-            }),
-        );
-        fields.insert("capture".into(), capture_json);
-        fields.insert(
-            "capture_window".into(),
-            json!({
-                "both_receipts_observed_ns":both_receipts_observed_ns,
-                "coverage_end_ns":coverage_end_ns,
-                "canonical_t0_plus_15s_reconciled_in_g08":true
-            }),
-        );
-    }
-    let pretty = evidence_text(&evidence);
-    // File first: stdout may be a closed pipe. Nothing here may panic.
-    let evidence_written = write_evidence(&mut evidence_file, &pretty).and_then(|()| {
-        if same_file(&evidence_path, &evidence_file) {
-            Ok(())
-        } else {
-            Err(std::io::Error::other(
-                "the path no longer refers to this run's evidence file",
-            ))
-        }
-    });
-    let _ = writeln!(std::io::stdout().lock(), "{pretty}");
+    set_fields(
+        &mut evidence,
+        vec![
+            (
+                "classification",
+                json!(if capture_complete {
+                    "SUBMITTED_OR_SUBMISSION_UNKNOWN__RUN_G08__NO_AUTOMATIC_RETRY"
+                } else {
+                    "STOP_CAPTURE_INCOMPLETE__RECONCILE_G08__NO_AUTOMATIC_RETRY"
+                }),
+            ),
+            ("capture", capture_json),
+            (
+                "capture_window",
+                json!({
+                    "both_receipts_observed_ns":both_receipts_observed_ns,
+                    "coverage_end_ns":coverage_end_ns,
+                    // G0.7 never reconciles the canonical window; G0.8 does.
+                    "canonical_t0_plus_15s_reconciled_in_g08":false,
+                    "canonical_t0_plus_15s_reconciliation":"PENDING_G08"
+                }),
+            ),
+        ],
+    );
+    // File first (atomic replacement): stdout may be a closed pipe. Nothing
+    // here may panic.
+    let evidence_written = write_evidence(&evidence_out, &evidence);
+    let _ = writeln!(std::io::stdout().lock(), "{}", evidence_text(&evidence));
     if let Err(e) = evidence_written {
         let _ = writeln!(
             std::io::stderr().lock(),
-            "STOP: G0.7 evidence write failed: {evidence_path}: {e}; stdout holds the only copy; capture_complete={capture_complete}"
+            "STOP: G0.7 evidence: {e} ({evidence_path}); stdout holds a copy; capture_complete={capture_complete}"
         );
         std::process::exit(3);
     }
@@ -967,29 +902,106 @@ fn evidence_text(evidence: &Value) -> String {
         .unwrap_or_else(|e| format!("{{\"evidence_serialization_error\":\"{e}\"}}"))
 }
 
-/// (Re)writes this run's evidence file in place and fsyncs it. Never panics.
-fn write_evidence(file: &mut fs::File, pretty: &str) -> std::io::Result<()> {
-    file.set_len(0)?;
-    file.seek(SeekFrom::Start(0))?;
-    file.write_all(pretty.as_bytes())?;
-    file.write_all(b"\n")?;
-    file.sync_all()
+fn set_fields(evidence: &mut Value, fields: Vec<(&str, Value)>) {
+    if let Some(map) = evidence.as_object_mut() {
+        for (key, value) in fields {
+            map.insert(key.to_string(), value);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum G08Field {
+    Text,
+    Integer,
+    Flag,
+    Decimal,
+}
+
+/// The G0.7 evidence fields G0.8 reads
+/// (crates/qualification/src/bin/g08_mainnet_verify.rs), with the type it
+/// requires; a test keeps this list equal to G0.8's reads.
+const G08_READS: [(&str, G08Field); 12] = [
+    ("/schema", G08Field::Text),
+    ("/chain_id", G08Field::Integer),
+    ("/portal", G08Field::Text),
+    ("/capture/complete_local_journal", G08Field::Flag),
+    ("/transactions/launch_tx_hash", G08Field::Text),
+    ("/transactions/buy_tx_hash", G08Field::Text),
+    ("/transactions/token", G08Field::Text),
+    ("/wallets/launcher", G08Field::Text),
+    ("/wallets/buyer", G08Field::Text),
+    ("/transactions/min_output", G08Field::Decimal),
+    ("/transactions/buy_value_wei", G08Field::Decimal),
+    ("/attempt_id", G08Field::Text),
+];
+
+/// Whether G0.8 can read this evidence: every field it reads present with
+/// the type it requires, and the schema, chain and portal it asserts.
+fn g08_readable(evidence: &Value) -> Result<(), String> {
+    for (pointer, kind) in G08_READS {
+        let value = evidence.pointer(pointer);
+        let ok = match kind {
+            G08Field::Text => value.is_some_and(Value::is_string),
+            G08Field::Integer => value.and_then(Value::as_u64).is_some(),
+            G08Field::Flag => value.is_some_and(Value::is_boolean),
+            G08Field::Decimal => value
+                .and_then(Value::as_str)
+                .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())),
+        };
+        if !ok {
+            return Err(format!("G0.8 field {pointer} missing or of the wrong type"));
+        }
+    }
+    let schema = evidence.pointer("/schema").and_then(Value::as_str);
+    let chain = evidence.pointer("/chain_id").and_then(Value::as_u64);
+    let portal = evidence
+        .pointer("/portal")
+        .and_then(Value::as_str)
+        .map(norm);
+    if schema != Some("darkbot.g07.mainnet-self-launch-buy.v2")
+        || chain != Some(CHAIN_ID)
+        || portal.as_deref() != Some(PORTAL)
+    {
+        return Err("G0.8 schema, chain or portal mismatch".into());
+    }
+    Ok(())
+}
+
+/// Atomically writes the evidence after checking that G0.8 can read it; an
+/// unreadable evidence is still written, and both failures stay visible.
+/// Never panics.
+fn write_evidence(out: &EvidenceFile, evidence: &Value) -> Result<(), String> {
+    let readable = g08_readable(evidence);
+    let written = out.replace(format!("{}\n", evidence_text(evidence)).as_bytes());
+    match (readable, written) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(r), Ok(())) => Err(format!("written, but not readable by G0.8: {r}")),
+        (Ok(()), Err(w)) => Err(w),
+        (Err(r), Err(w)) => Err(format!("{w}; not readable by G0.8 either: {r}")),
+    }
 }
 
 /// Marks the attempt directory right after the release (off the critical
 /// path): its latch must never be released by hand. Never panics.
 fn mark_released(attempt_dir: &Path, release_after_ns: u64) -> String {
-    let path = attempt_dir.join("RELEASED");
+    let path = attempt_dir.join(RELEASED_MARKER_FILE);
     let written = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
+        .mode(0o600)
         .open(&path)
         .and_then(|mut f| {
             f.write_all(
-                format!("bundle released; bytes may have left\nrelease_after_ns={release_after_ns}\n")
-                    .as_bytes(),
+                format!(
+                    "bundle released; bytes may have left\nrelease_after_ns={release_after_ns}\n"
+                )
+                .as_bytes(),
             )
-        });
+            .and_then(|()| f.sync_all())
+        })
+        .map_err(|e| e.to_string())
+        .and_then(|()| sync_dir(attempt_dir));
     match written {
         Ok(()) => path.display().to_string(),
         Err(e) => format!("RELEASED marker failed: {}: {e}", path.display()),
@@ -1000,17 +1012,12 @@ fn mark_released(attempt_dir: &Path, release_after_ns: u64) -> String {
 /// and this run's evidence file.
 struct Unsent<'a> {
     attempt_dir: &'a Path,
-    evidence_path: &'a str,
-    evidence_file: &'a fs::File,
+    evidence: &'a EvidenceFile,
 }
 
 impl Unsent<'_> {
     fn release(&self, outcome: &str) -> String {
-        release_unsent_attempt(
-            self.attempt_dir,
-            Some((self.evidence_path, self.evidence_file)),
-            outcome,
-        )
+        release_unsent_attempt(self.attempt_dir, Some(self.evidence), outcome)
     }
 }
 
@@ -1031,4 +1038,80 @@ fn pre_egress_abort(
     let _ = capture.finish();
     let released = unsent.release("pre-egress");
     panic!("G0.7 {stage} failed; no valid bundle write attempted: {reason}; {released}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const G08_SOURCE: &str =
+        include_str!("../../../../qualification/src/bin/g08_mainnet_verify.rs");
+
+    fn sample() -> Value {
+        json!({
+            "schema":"darkbot.g07.mainnet-self-launch-buy.v2",
+            "chain_id":CHAIN_ID,
+            "portal":PORTAL,
+            "attempt_id":"g07-test",
+            "capture":{"complete_local_journal":false},
+            "transactions":{
+                "launch_tx_hash":"0x01",
+                "buy_tx_hash":"0x02",
+                "token":"0xe51c4deb1038afcd95ef12d4a649cdbcf6fa7777",
+                "min_output":"1",
+                "buy_value_wei":"1000000000000"
+            },
+            "wallets":{
+                "launcher":"0x3e7b487ae5e1c49ab1cf6222bdb5cf016e86aacd",
+                "buyer":"0x9c8a0db41914beee52dd49790c4f087e252743de"
+            }
+        })
+    }
+
+    #[test]
+    fn the_checked_fields_are_exactly_what_g08_reads() {
+        let mut reads: Vec<&str> = G08_SOURCE
+            .split("(&g07, \"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .collect();
+        reads.sort_unstable();
+        reads.dedup();
+        let mut checked: Vec<&str> = G08_READS.iter().map(|(pointer, _)| *pointer).collect();
+        checked.sort_unstable();
+        assert_eq!(reads, checked);
+        // G0.8 reads the G0.7 evidence only through those calls.
+        assert!(!G08_SOURCE.contains("g07.pointer(") && !G08_SOURCE.contains("g07["));
+    }
+
+    #[test]
+    fn g08_readable_requires_every_read_field_with_its_type() {
+        assert!(g08_readable(&sample()).is_ok());
+        for (pointer, _) in G08_READS {
+            let mut broken = sample();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            let holder = if parent.is_empty() {
+                Some(&mut broken)
+            } else {
+                broken.pointer_mut(parent)
+            };
+            holder.unwrap().as_object_mut().unwrap().remove(key);
+            assert!(g08_readable(&broken).is_err(), "{pointer}");
+        }
+        for (pointer, wrong) in [
+            ("/chain_id", json!(97)),
+            ("/schema", json!("darkbot.g07.mainnet-self-launch-buy.v1")),
+            (
+                "/portal",
+                json!("0x0000000000000000000000000000000000000000"),
+            ),
+            ("/transactions/min_output", json!(1)),
+            ("/transactions/buy_value_wei", json!("1e12")),
+            ("/capture/complete_local_journal", json!("false")),
+        ] {
+            let mut broken = sample();
+            *broken.pointer_mut(pointer).unwrap() = wrong;
+            assert!(g08_readable(&broken).is_err(), "{pointer}");
+        }
+    }
 }

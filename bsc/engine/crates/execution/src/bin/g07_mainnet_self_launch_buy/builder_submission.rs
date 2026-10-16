@@ -35,6 +35,10 @@ pub(crate) fn connect_tls_port(host: &str, port: u16) -> Result<Tls, String> {
                 let mut conn = ClientConnection::new(Arc::new(config), server_name)
                     .map_err(|e| format!("TLS init {host}: {e}"))?;
                 match conn.complete_io(&mut tcp) {
+                    // complete_io can return after a stalled read mid-handshake.
+                    Ok(_) if conn.is_handshaking() => {
+                        failures.push(format!("{addr}: TLS handshake did not complete"));
+                    }
                     Ok(_) => return Ok(StreamOwned::new(conn, tcp)),
                     Err(e) => failures.push(format!("{addr}: TLS {e}")),
                 }
@@ -46,6 +50,44 @@ pub(crate) fn connect_tls_port(host: &str, port: u16) -> Result<Tls, String> {
         "cannot connect to {host}: {}",
         failures.join(" | ")
     ))
+}
+
+/// The 48Club `eth_sendBundle` body of a G0.7 bundle: integer expiry block
+/// and Unix-second expiry time, no merging, at the top of the block.
+pub(crate) fn club48_bundle_body(
+    request_id: &str,
+    txs: [&str; 2],
+    max_block: u64,
+    max_timestamp: u64,
+) -> String {
+    json!({
+        "jsonrpc":"2.0",
+        "id":request_id,
+        "method":"eth_sendBundle",
+        "params":[{
+            "txs":txs,
+            "maxBlockNumber":max_block,
+            "maxTimestamp":max_timestamp,
+            "noMerge":true,
+            "positionFirst":true
+        }]
+    })
+    .to_string()
+}
+
+/// The BlockRazor `eth_sendBundle` body of a G0.7 bundle: integer expiry
+/// block only.
+pub(crate) fn blockrazor_bundle_body(request_id: &str, txs: [&str; 2], max_block: u64) -> String {
+    json!({
+        "jsonrpc":"2.0",
+        "id":request_id,
+        "method":"eth_sendBundle",
+        "params":[{
+            "txs":txs,
+            "maxBlockNumber":max_block
+        }]
+    })
+    .to_string()
 }
 
 /// A non-empty HTTP header value without control characters. main checks the
@@ -184,6 +226,14 @@ pub(crate) fn read_http(stream: &mut Tls) -> Result<(String, String), String> {
 /// data before any request, which would later be read as the bundle response.
 /// Nothing is written.
 pub(crate) fn transport_alive(stream: &mut Tls) -> Result<(), String> {
+    if stream.conn.is_handshaking() {
+        return Err("TLS handshake not complete".into());
+    }
+    peer_state(stream)
+}
+
+/// The non-blocking read part of transport_alive.
+fn peer_state(stream: &mut Tls) -> Result<(), String> {
     stream
         .sock
         .set_nonblocking(true)
@@ -200,6 +250,7 @@ pub(crate) fn transport_alive(stream: &mut Tls) -> Result<(), String> {
                 Err(e) => break Err(format!("TLS error: {e}")),
             },
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => break Err(format!("socket error: {e}")),
         }
     };
@@ -291,6 +342,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bundle_bodies_are_the_documented_wire_format() {
+        assert_eq!(
+            club48_bundle_body("0xb2", ["0xaa", "0xbb"], 103, 1_002),
+            r#"{"id":"0xb2","jsonrpc":"2.0","method":"eth_sendBundle","params":[{"maxBlockNumber":103,"maxTimestamp":1002,"noMerge":true,"positionFirst":true,"txs":["0xaa","0xbb"]}]}"#
+        );
+        assert_eq!(
+            blockrazor_bundle_body("0xb2", ["0xaa", "0xbb"], 103),
+            r#"{"id":"0xb2","jsonrpc":"2.0","method":"eth_sendBundle","params":[{"maxBlockNumber":103,"txs":["0xaa","0xbb"]}]}"#
+        );
+    }
+
+    #[test]
     fn header_value_rejects_empty_and_control_characters() {
         assert!(valid_header_value("Bearer abc-123_XYZ"));
         assert!(!valid_header_value(""));
@@ -303,16 +366,24 @@ mod tests {
     fn http_parsing_waits_for_complete_bodies_and_never_panics_on_lengths() {
         let ok = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
         let r = parse_http_response(ok).unwrap().unwrap();
-        assert_eq!((r.status.as_str(), r.close, r.body.as_str()), ("HTTP/1.1 200 OK", true, "{}"));
+        assert_eq!(
+            (r.status.as_str(), r.close, r.body.as_str()),
+            ("HTTP/1.1 200 OK", true, "{}")
+        );
         let keep = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}";
         assert!(!parse_http_response(keep).unwrap().unwrap().close);
         assert!(parse_http_response(&ok[..ok.len() - 1]).unwrap().is_none());
-        assert!(parse_http_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2").unwrap().is_none());
+        assert!(
+            parse_http_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2")
+                .unwrap()
+                .is_none()
+        );
         let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n";
         assert_eq!(parse_http_response(chunked).unwrap().unwrap().body, "{}");
         let huge = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", usize::MAX);
         assert!(parse_http_response(huge.as_bytes()).is_err());
-        let huge_chunk = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nab";
+        let huge_chunk =
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nab";
         assert!(parse_http_response(huge_chunk).unwrap().is_none());
         assert!(decode_chunked_body(b"fffffffffffffffe\r\n").is_none());
         assert!(parse_http_response(&vec![b'x'; MAX_HTTP_RESPONSE_BYTES + 1]).is_err());
@@ -328,35 +399,59 @@ mod tests {
             ServerName::try_from("localhost".to_string()).unwrap(),
         )
         .unwrap();
-        StreamOwned::new(conn, TcpStream::connect(listener.local_addr().unwrap()).unwrap())
+        StreamOwned::new(
+            conn,
+            TcpStream::connect(listener.local_addr().unwrap()).unwrap(),
+        )
+    }
+
+    /// Polls peer_state until it fails (loopback delivery is fast but not
+    /// instant) and returns the error.
+    fn first_failure(stream: &mut Tls) -> String {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match peer_state(stream) {
+                Err(e) => return e,
+                Ok(()) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+                Ok(()) => panic!("peer state never observed"),
+            }
+        }
     }
 
     #[test]
-    fn liveness_refuses_closed_or_garbage_peers_and_restores_blocking_mode() {
+    fn liveness_refuses_unfinished_closed_or_garbage_peers_and_restores_blocking_mode() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
 
-        let mut silent = unhandshaked_client(&listener);
-        let (_silent_peer, _) = listener.accept().unwrap();
-        assert!(transport_alive(&mut silent).is_ok());
-        silent
-            .sock
-            .set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        let started = Instant::now();
-        assert!(silent.sock.read(&mut [0u8; 1]).is_err());
-        assert!(started.elapsed() >= Duration::from_millis(80), "socket left non-blocking");
+        let mut unfinished = unhandshaked_client(&listener);
+        let (_unfinished_peer, _) = listener.accept().unwrap();
+        let e = transport_alive(&mut unfinished).unwrap_err();
+        assert!(e.contains("handshake"), "{e}");
 
         let mut closed = unhandshaked_client(&listener);
         drop(listener.accept().unwrap());
-        thread::sleep(Duration::from_millis(50));
-        let e = transport_alive(&mut closed).unwrap_err();
+        let e = first_failure(&mut closed);
         assert!(e.contains("closed"), "{e}");
 
         let mut garbage = unhandshaked_client(&listener);
         let (mut garbage_peer, _) = listener.accept().unwrap();
-        garbage_peer.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").unwrap();
-        thread::sleep(Duration::from_millis(50));
-        let e = transport_alive(&mut garbage).unwrap_err();
+        garbage_peer
+            .write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+            .unwrap();
+        let e = first_failure(&mut garbage);
         assert!(e.contains("TLS"), "{e}");
+
+        let mut quiet = unhandshaked_client(&listener);
+        let (_quiet_peer, _) = listener.accept().unwrap();
+        assert!(peer_state(&mut quiet).is_ok());
+        quiet
+            .sock
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let started = Instant::now();
+        assert!(quiet.sock.read(&mut [0u8; 1]).is_err());
+        assert!(
+            started.elapsed() >= Duration::from_millis(80),
+            "socket left non-blocking"
+        );
     }
 }
