@@ -279,10 +279,19 @@ impl EvidenceFile {
             current: RefCell::new(file),
         };
         // Prove now, before the guard, that a replacement can be staged here
-        // (directory writable, staging name not too long).
-        let (trial, _) = evidence.stage(b"")?;
-        fs::remove_file(&trial).map_err(|e| format!("remove {}: {e}", trial.display()))?;
-        Ok(evidence)
+        // (directory writable, staging name not too long). If not, this run's
+        // own empty placeholder goes again, so no evidence file is left.
+        match evidence.stage(b"") {
+            Ok((trial, _)) => {
+                fs::remove_file(&trial).map_err(|e| format!("remove {}: {e}", trial.display()))?;
+                Ok(evidence)
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&evidence.path);
+                let _ = sync_dir(&evidence.dir);
+                Err(e)
+            }
+        }
     }
 
     /// Writes `content` to a new private sibling and fsyncs it. The evidence
@@ -647,6 +656,19 @@ mod tests {
             .unwrap();
         assert!(e.contains("not owned"), "{e}");
         assert!(!other.exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_evidence_name_that_cannot_be_staged_is_refused_without_leftovers() {
+        let dir = scratch("stagename");
+        // Fits as a file name (<= 255 bytes), but its staging sibling does not.
+        let path = dir.join("e".repeat(250));
+        let e = EvidenceFile::create(path.to_str().unwrap(), owner_uid(&dir).unwrap())
+            .err()
+            .unwrap();
+        assert!(e.contains("staging"), "{e}");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
         fs::remove_dir_all(&dir).unwrap();
     }
 

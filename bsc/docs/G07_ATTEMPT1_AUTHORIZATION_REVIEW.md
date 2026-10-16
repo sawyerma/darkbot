@@ -106,7 +106,7 @@ Stand: 2026-10-16, nach der G0.7-Härtung. **Nichts gesendet. Guard `FROZEN_APPR
      - Ein Kill in den wenigen Millisekunden zwischen Freigabe und erster Fassung hinterlässt einen leeren Platzhalter. Rekonstruktion dann aus Latch-Body und Journal.
      - Ein Send-Thread, dem nach erfolgreichem Start das Go-Signal nicht zugestellt werden kann, ließe den Prozess hängen. Laut Code ist das nicht erreichbar.
      - iCloud: Das Repo liegt nicht in der iCloud-Desktop-Kopie. Bitte trotzdem bestätigen, dass die Desktop-Synchronisierung aus ist.
-2. **Builder-Semantik (Pre-Arm-Checks 6 und 10).** Unqualifiziert sind:
+2. **Builder-Semantik (Pre-Arm-Checks 6 und 10).** Für die Einreichungs-Seite ist ein Probe mit nicht ausführbaren Bundles vorbereitet, aber nicht gesendet: [G07_BUILDER_PROBE_APPROVAL.md](G07_BUILDER_PROBE_APPROVAL.md), Plan-SHA-256 `15ee10f9…`. Unqualifiziert sind:
    - `noMerge`/`positionFirst`;
    - ob 48Club `maxTimestamp` zusammen mit `maxBlockNumber` akzeptiert und `maxBlockNumber` dann weiter erzwingt;
    - die Annahme eines Bundles mit 0,05 gwei und Tip 0.

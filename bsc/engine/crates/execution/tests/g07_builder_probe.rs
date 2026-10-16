@@ -9,6 +9,11 @@ use std::process::Command;
 const PROBE: &str = env!("CARGO_BIN_EXE_g07_builder_probe");
 const MAIN: &str = include_str!("../src/bin/g07_builder_probe/main.rs");
 const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
+/// The plan the user approves. It includes the SHA-256 of the probe's and
+/// the included G0.7 modules' sources, so any change to them, or to what a
+/// live run would send, changes this hash and needs a new approval. (Pinned
+/// here, not in plan.rs, which is itself part of that digest.)
+const PINNED_PLAN_SHA256: &str = "15ee10f9eb3131fb35803022cc768b4ed0380e9faec73f01a0cc866cb0f8ec06";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);
@@ -37,10 +42,12 @@ fn the_dry_run_needs_nothing_sends_nothing_and_is_deterministic() {
     );
     let stdout = String::from_utf8_lossy(&first.stdout).to_string();
     let sha = plan_sha(&stdout);
-    assert_eq!(sha.len(), 64);
+    assert_eq!(sha, PINNED_PLAN_SHA256);
     assert!(sha.bytes().all(|b| b.is_ascii_hexdigit()));
     assert!(stdout.contains("DRY RUN: nothing was sent and no connection was opened"));
-    assert_eq!(stdout.matches("\ncase").count(), 7);
+    assert_eq!(stdout.matches("\ncase").count(), 11);
+    // The dry run hands out no ready-made send command.
+    assert!(!stdout.contains("DARKBOT_G07_PROBE_APPROVED_PLAN_SHA256="));
     let second = run(&[("DARKBOT_G07_PROBE_SEND", "yes")]);
     assert!(second.status.success());
     assert_eq!(String::from_utf8_lossy(&second.stdout), stdout);
@@ -91,12 +98,19 @@ fn approval_precedes_every_read_latch_and_connection() {
     let dry_return = pos("        return;\n    }");
     let approval = pos("DARKBOT_G07_PROBE_APPROVED_PLAN_SHA256 does not match");
     let accounts = pos("rpc(\"eth_getBalance\"");
-    let latch = pos("let probe_dir = latch_attempt(");
     let poller = pos("HeadPoller::connect(&rpc_endpoint)");
+    let latch = pos("let probe_dir = latch_attempt(");
     let send = pos("connect_tls(host)");
     assert!(dry < dry_return && dry_return < approval && approval < accounts);
-    assert!(accounts < latch && latch < poller && poller < send);
+    assert!(accounts < poller && poller < latch && latch < send);
     assert_eq!(MAIN.matches("connect_tls(").count(), 1);
+    // Requests come only from the shared request function the worked
+    // examples use, and the connection is checked live right before the write.
+    assert!(!MAIN.contains("http_request("));
+    let build = pos("let built = case_request(n, case,");
+    let alive = pos("transport_alive(&mut stream)");
+    let write = pos(".write_all(&built.request)");
+    assert!(send < build && build < alive && alive < write);
     assert_eq!(MAIN.matches("rpc(").count(), 2);
 }
 
@@ -118,9 +132,15 @@ fn the_probe_never_touches_the_g07_wallets_or_signed_bytes() {
     }
     // The only signing call signs a throwaway key.
     assert!(!MAIN.contains("sign_legacy("));
+    assert_eq!(PLAN.matches("let signed = sign_legacy(").count(), 1);
     let signer = PLAN
-        .find("let key = throwaway_key(n);")
-        .expect("throwaway key");
+        .find("case_keys(case_index).map(|key| {")
+        .expect("throwaway keys");
     let sign = PLAN.find("let signed = sign_legacy(").expect("sign");
     assert!(signer < sign);
+    // case_keys yields throwaway keys only.
+    let keys = PLAN.find("pub(crate) fn case_keys(").expect("case_keys");
+    let keys_end = keys + PLAN[keys..].find("\n}\n").expect("end");
+    assert_eq!(PLAN[keys..keys_end].matches("throwaway_key(").count(), 2);
+    assert!(!PLAN[keys..keys_end].contains("from_slice("));
 }

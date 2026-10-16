@@ -35,8 +35,7 @@ use shared::*;
 use transactions::*;
 
 fn main() {
-    let txs = probe_txs();
-    let plan = plan_text(&txs);
+    let plan = plan_text();
     let plan_sha256 = sha256_hex(plan.as_bytes());
     let mut out = std::io::stdout().lock();
     let _ = write!(out, "{plan}");
@@ -45,7 +44,7 @@ fn main() {
     if env::var("DARKBOT_G07_PROBE_SEND").as_deref() != Ok("YES") {
         let _ = writeln!(
             out,
-            "DRY RUN: nothing was sent and no connection was opened. To send exactly this plan once: DARKBOT_G07_PROBE_SEND=YES DARKBOT_G07_PROBE_APPROVED_PLAN_SHA256={plan_sha256}"
+            "DRY RUN: nothing was sent and no connection was opened. A live run needs DARKBOT_G07_PROBE_SEND=YES and the user's approval of exactly this PLAN_SHA256."
         );
         return;
     }
@@ -68,8 +67,8 @@ fn main() {
 
     // Non-executability, read-only: the throwaway accounts hold nothing and
     // have sent nothing.
-    for tx in &txs {
-        let from = tx.from.to_string();
+    for account in throwaway_accounts() {
+        let from = account.to_string();
         let balance = rpc("eth_getBalance", json!([from, "latest"]))
             .unwrap_or_else(|e| panic!("balance of {from}: {e}; nothing sent"));
         let nonce = rpc("eth_getTransactionCount", json!([from, "pending"]))
@@ -79,6 +78,21 @@ fn main() {
             "throwaway account {from} is not empty (balance {balance}, pending nonce {nonce}); nothing sent"
         );
     }
+
+    // The head poller, exercised read-only before the plan is used up.
+    let mut head_poller = HeadPoller::connect(&rpc_endpoint)
+        .unwrap_or_else(|e| panic!("head poller: {e}; nothing sent"));
+    let probe = head_poller
+        .next_head(HEAD_TRANSITION_TIMEOUT)
+        .unwrap_or_else(|e| panic!("head probe: {e}; nothing sent"));
+    bundle_window(
+        probe.head.number,
+        &probe.head.hash,
+        &probe.head,
+        probe.local_unix_ms,
+        probe.excess_staleness_ms,
+    )
+    .unwrap_or_else(|e| panic!("head probe: {e}; nothing sent"));
 
     // Single use per approved plan, and the private place of its evidence.
     let latch_id = format!("builder-probe-{}", &plan_sha256[..12]);
@@ -95,20 +109,21 @@ fn main() {
     let evidence_path = probe_dir.join("probe.evidence.json");
     let evidence = owner_uid(&probe_dir)
         .and_then(|uid| EvidenceFile::create(&evidence_path.to_string_lossy(), uid))
-        .unwrap_or_else(|e| panic!("builder probe evidence: {e}; nothing sent"));
+        .unwrap_or_else(|e| {
+            let released = release_unsent_attempt(&probe_dir, None, "pre-egress");
+            panic!("builder probe evidence: {e}; nothing sent; {released}")
+        });
 
-    let mut head_poller = HeadPoller::connect(&rpc_endpoint)
-        .unwrap_or_else(|e| panic!("head poller: {e}; nothing sent"));
     let mut results = Vec::new();
     for (n, case) in CASES.iter().enumerate() {
         if n > 0 {
             thread::sleep(PROBE_SPACING);
         }
-        results.push(run_case(case, &txs, &mut head_poller, &token));
-        let report = report(&plan_sha256, &txs, &results);
+        results.push(run_case(n, case, &mut head_poller, &token));
+        let report = report(&plan_sha256, &results);
         let _ = evidence.replace(format!("{report}\n").as_bytes());
     }
-    let report = report(&plan_sha256, &txs, &results);
+    let report = report(&plan_sha256, &results);
     let written = evidence.replace(format!("{report}\n").as_bytes());
     let _ = writeln!(out, "{report}");
     let _ = writeln!(
@@ -125,35 +140,56 @@ fn main() {
     }
 }
 
-/// Sends one case on a fresh head over a new connection and records the
-/// answer. A stale head skips the case; nothing is retried.
-fn run_case(case: &Case, txs: &[ProbeTx; 2], poller: &mut HeadPoller, token: &str) -> Value {
-    let fresh = match poller.next_head(HEAD_TRANSITION_TIMEOUT) {
-        Ok(fresh) => fresh,
-        Err(e) => return json!({"case":case.id,"outcome":"SKIPPED_NO_FRESH_HEAD","reason":e}),
-    };
-    let window = match bundle_window(
-        fresh.head.number,
-        &fresh.head.hash,
-        &fresh.head,
-        fresh.local_unix_ms,
-        fresh.excess_staleness_ms,
-    ) {
-        Ok(window) => window,
-        Err(e) => return json!({"case":case.id,"outcome":"SKIPPED_STALE_HEAD","reason":e}),
-    };
-    let (max_block, max_timestamp) = expiry_values(case.expiry, &fresh.head, &window);
-    let body = case_body(case, txs, max_block, max_timestamp);
+/// Sends case `n`: a new connection first (as G0.7 prewarms), then a fresh
+/// head (up to PROBE_HEAD_ATTEMPTS new heads that pass the G0.7 gates, else
+/// the case is skipped), then the request from the shared request function
+/// over the still-live connection; the answer is recorded. Nothing is retried
+/// after a send.
+fn run_case(n: usize, case: &Case, poller: &mut HeadPoller, token: &str) -> Value {
     let host = case.builder.host();
-    let authorization = (case.builder == Builder::BlockRazor).then_some(token);
-    let request = http_request(host, &body, authorization);
-    let sent = connect_tls(host).and_then(|mut stream| {
-        stream
-            .write_all(&request)
-            .and_then(|()| stream.flush())
-            .map_err(|e| format!("write: {e}"))?;
-        read_http_response(&mut stream)
-    });
+    let before_connect_ms = unix_time_ms();
+    let mut stream = match connect_tls(host) {
+        Ok(stream) => stream,
+        Err(e) => return json!({"case":case.id,"outcome":"TRANSPORT_ERROR_NOT_SENT","reason":e}),
+    };
+    let connected_ms = unix_time_ms();
+    let mut refused = Vec::new();
+    let mut fresh_window = None;
+    for _ in 0..PROBE_HEAD_ATTEMPTS {
+        match poller.next_head(HEAD_TRANSITION_TIMEOUT) {
+            Ok(fresh) => match bundle_window(
+                fresh.head.number,
+                &fresh.head.hash,
+                &fresh.head,
+                fresh.local_unix_ms,
+                fresh.excess_staleness_ms,
+            ) {
+                Ok(window) => {
+                    fresh_window = Some((fresh, window));
+                    break;
+                }
+                Err(e) => refused.push(e),
+            },
+            Err(e) => refused.push(e),
+        }
+    }
+    let Some((fresh, window)) = fresh_window else {
+        return json!({"case":case.id,"outcome":"SKIPPED_NO_FRESH_HEAD","reasons":refused});
+    };
+    let built = case_request(n, case, &fresh.head, &window, token);
+    if let Err(e) = transport_alive(&mut stream) {
+        return json!({"case":case.id,"outcome":"TRANSPORT_ERROR_NOT_SENT","reason":e});
+    }
+    let mut written_ms = None;
+    let sent = stream
+        .write_all(&built.request)
+        .and_then(|()| stream.flush())
+        .map_err(|e| format!("write: {e}"))
+        .and_then(|()| {
+            written_ms = Some(unix_time_ms());
+            read_http_response(&mut stream)
+        });
+    let answered_ms = unix_time_ms();
     let (outcome, status, answer) = match &sent {
         Ok(r) => (
             classify(&r.status, &r.body),
@@ -164,17 +200,28 @@ fn run_case(case: &Case, txs: &[ProbeTx; 2], poller: &mut HeadPoller, token: &st
     };
     json!({
         "case":case.id,
-        "builder":host,
+        "builder":built.host,
         "question":case.question,
+        "gas_price_wei":case.gas_price,
+        "tx_hashes":[built.txs[0].signed.hash.to_string(), built.txs[1].signed.hash.to_string()],
         "send_head":fresh.head.number,
+        "send_head_hash":fresh.head.hash,
         "send_head_milli_timestamp":fresh.head.milli_timestamp,
+        "send_head_millisecond_phase":fresh.head.milli_timestamp % 1000,
+        "head_read_local_unix_ms":fresh.local_unix_ms,
         "head_age_ms":window.head_age_ms,
-        "max_block":max_block,
-        "max_timestamp":max_timestamp,
-        "body":body,
-        "body_sha256":sha256_hex(body.as_bytes()),
-        "request_len":request.len(),
+        "heads_refused_before":refused,
+        "max_block":built.max_block,
+        "max_timestamp":built.max_timestamp,
+        "body":built.body,
+        "body_sha256":sha256_hex(built.body.as_bytes()),
+        // The full request length would reveal the token's length.
+        "body_len":built.body.len(),
         "authorization_persisted":false,
+        "before_connect_unix_ms":before_connect_ms,
+        "connected_unix_ms":connected_ms,
+        "request_written_unix_ms":written_ms,
+        "answer_unix_ms":answered_ms,
         "http_status":status,
         "response_body":answer,
         "transport_error":sent.as_ref().err(),
@@ -182,15 +229,15 @@ fn run_case(case: &Case, txs: &[ProbeTx; 2], poller: &mut HeadPoller, token: &st
     })
 }
 
-fn report(plan_sha256: &str, txs: &[ProbeTx; 2], results: &[Value]) -> String {
+fn report(plan_sha256: &str, results: &[Value]) -> String {
+    let accounts = throwaway_accounts();
     serde_json::to_string_pretty(&json!({
         "schema":PROBE_SCHEMA,
         "plan_sha256":plan_sha256,
-        "throwaway_accounts":[txs[0].from.to_string(), txs[1].from.to_string()],
-        "tx_hashes":[txs[0].signed.hash.to_string(), txs[1].signed.hash.to_string()],
+        "throwaway_accounts":accounts.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
         "cases":results,
-        "scope":"submission-time acceptance only; building-time behavior and inclusion are not shown",
-        "outcome_classes":"ACCEPTED, FORMAT_REJECTED, EXPIRY_REJECTED, PRICE_REJECTED, EXECUTION_REJECTED, OTHER_REJECTED, HTTP_ERROR, UNPARSEABLE, TRANSPORT_ERROR, SKIPPED_*; the raw answer is the evidence"
+        "scope":"submission-time acceptance only; building-time behavior, inclusion and whether 0.05 gwei suffices are not shown",
+        "outcome_classes":"ACCEPTED, METHOD_REJECTED, FORMAT_REJECTED, EXECUTION_REJECTED, PRICE_REJECTED, EXPIRY_REJECTED, BUNDLE_REJECTED_UNSPECIFIED, OTHER_REJECTED, HTTP_ERROR, UNPARSEABLE, TRANSPORT_ERROR (after the write began), TRANSPORT_ERROR_NOT_SENT, SKIPPED_NO_FRESH_HEAD; the raw answer is the evidence"
     }))
     .unwrap_or_else(|e| format!("{{\"report_serialization_error\":\"{e}\"}}"))
 }
