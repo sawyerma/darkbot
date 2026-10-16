@@ -1,0 +1,557 @@
+project_0/
+├── .env.example
+├── .gitignore
+├── README.md
+├── config/
+│   ├── .gitkeep
+│   ├── examples/
+│   │   ├── README.md
+│   │   ├── operational_inherit_endpoints.json
+│   │   ├── operational_override.json
+│   │   └── provider_qualification.example.json
+│   ├── profiles/
+│   │   ├── custom.json
+│   │   ├── performance.json
+│   │   ├── smoke.json
+│   │   └── standard.json
+│   └── wallet.public.env
+├── data/
+│   └── .gitkeep
+├── delete/
+│   ├── README.md
+│   ├── mock_ban_20261015/
+│   │   └── removed_stubs_and_fake_tests.patch
+│   ├── scripts/
+│   │   ├── _compat.py
+│   │   ├── audit_market_quick.py
+│   │   ├── c0_census.py
+│   │   ├── fe_candidate_report.py
+│   │   ├── fe_readonly_preflight.py
+│   │   ├── fe_readonly_preflight.sh
+│   │   ├── market_report.py
+│   │   ├── measurement_cli.py
+│   │   ├── measurement_verify.py
+│   │   ├── run_econ4h.sh
+│   │   ├── run_gap_reconnect_smoke.sh
+│   │   ├── run_market_observer.sh
+│   │   ├── run_r126_qualify.py
+│   │   ├── run_r127_qualify.py
+│   │   ├── run_shadow_mainnet.sh
+│   │   ├── run_store.py
+│   │   └── test_suite.py
+│   ├── src/
+│   │   └── darkbot/
+│   │       ├── __init__.py
+│   │       └── project_0/
+│   │           └── __init__.py
+│   └── tools/
+│       └── .gitkeep
+├── docs/
+│   ├── MEASUREMENT_LEDGER.json
+│   ├── MEASUREMENT_LEDGER.md
+│   ├── OPERATIONAL_CONFIG.md
+│   ├── PHASENPLAN.json
+│   ├── PHASENPLAN.md
+│   ├── README.md
+│   ├── STATUS.md
+│   ├── architecture/
+│   │   ├── p0_reuse_matrix.md
+│   │   ├── parallel_execution_plan.md
+│   │   ├── production_architecture_refactor_contract.md
+│   │   ├── restructure_32_step_plan.md
+│   │   ├── run_layout_versioning.md
+│   │   ├── runtime_modularization_20261016.md
+│   │   └── runtime_modularization_plan.md
+│   ├── development_history/
+│   │   ├── audit_handoff_20261005.md
+│   │   ├── fable_audit_20261003.md
+│   │   ├── fable_work_order.md
+│   │   ├── r127c_changelog_rollback.md
+│   │   ├── r127d_changelog_rollback.md
+│   │   └── wallet_lock_release_fix_20261015.md
+│   ├── evidence/
+│   │   ├── AUDIT_20261005/
+│   │   │   ├── 2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf.json
+│   │   │   ├── 38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F.json
+│   │   │   ├── 3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB.json
+│   │   │   ├── 59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa.json
+│   │   │   ├── AUDIT_FINDINGS.md
+│   │   │   ├── BUNDLE_README.md
+│   │   │   ├── C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ.json
+│   │   │   ├── COMMANDS_AND_RESULTS.md
+│   │   │   ├── analyze_history.py
+│   │   │   ├── cache_counterexamples.py
+│   │   │   ├── cache_counterexamples.txt
+│   │   │   ├── collect_history.py
+│   │   │   ├── darkbot_audit_bundle_20261005.zip
+│   │   │   ├── drift_dispatch.json
+│   │   │   ├── gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB.json
+│   │   │   ├── history_analysis.json
+│   │   │   ├── history_summary.json
+│   │   │   ├── manifest.json
+│   │   │   ├── p0-audit-json.rs
+│   │   │   ├── probe_drift_dispatch.py
+│   │   │   ├── recent_liquidation_records.json
+│   │   │   ├── selected_signatures.json
+│   │   │   ├── signature_window.json
+│   │   │   ├── tests_health.txt
+│   │   │   ├── tests_txv1.txt
+│   │   │   ├── tracked_inventory.tsv
+│   │   │   └── winner_economics_repro.txt
+│   │   ├── C0E1_CANONICAL_CHECKPOINT_20261009/
+│   │   │   ├── clippy_crate_health.jsonl
+│   │   │   ├── clippy_crate_health_txv1.jsonl
+│   │   │   ├── differential_crate_health.json
+│   │   │   ├── differential_crate_health_txv1.json
+│   │   │   ├── mainnet_probe.json
+│   │   │   ├── results.json
+│   │   │   └── results.tsv
+│   │   ├── C0E1_CANONICAL_FINAL_20261010/
+│   │   │   ├── c0e1_gap_smoke_20261010T020556Z.json
+│   │   │   ├── c0e1_gap_smoke_20261010T021411Z.json
+│   │   │   ├── commands.json
+│   │   │   ├── differential_clippy.json
+│   │   │   ├── phase_barrier_fix/
+│   │   │   │   └── commands.json
+│   │   │   ├── rate_limit_fix/
+│   │   │   │   ├── commands.json
+│   │   │   │   ├── differential_clippy.json
+│   │   │   │   ├── format_commands.json
+│   │   │   │   └── storage_preflight_tests.json
+│   │   │   └── source_path_inventory.json
+│   │   ├── C0E1_GAP_MASTER_CHECKPOINT_20261009/
+│   │   │   ├── clippy-health-normalized.json
+│   │   │   ├── clippy-txv1-normalized.json
+│   │   │   └── results.json
+│   │   ├── C0E1_P1_20261011/
+│   │   │   ├── SHA256SUMS
+│   │   │   ├── cli.log
+│   │   │   ├── clippy.stderr
+│   │   │   ├── clippy_summary.json
+│   │   │   ├── focused.log
+│   │   │   ├── format.json
+│   │   │   ├── qualification.json
+│   │   │   ├── release.log
+│   │   │   ├── runner_health.log
+│   │   │   └── runner_txv1.log
+│   │   ├── C0E1_P2_20261012/
+│   │   │   ├── README.md
+│   │   │   ├── SHA256SUMS
+│   │   │   ├── check_changed_format.py
+│   │   │   ├── clippy.txt
+│   │   │   ├── clippy_final.txt
+│   │   │   ├── development_failures/
+│   │   │   │   ├── gap_counter_regression.txt
+│   │   │   │   ├── http_fixture_length.txt
+│   │   │   │   ├── legacy_slot_counter_regression.txt
+│   │   │   │   └── websocket_admission_regression.txt
+│   │   │   ├── format.txt
+│   │   │   ├── identity.json
+│   │   │   ├── market_final.txt
+│   │   │   ├── measurement_cli.txt
+│   │   │   ├── provider_final.txt
+│   │   │   ├── release_build.txt
+│   │   │   ├── release_build_final.txt
+│   │   │   ├── runner_binary_tests.txt
+│   │   │   ├── tests_crate_health.txt
+│   │   │   └── tests_crate_health_txv1.txt
+│   │   ├── C0E1_P3_20261011/
+│   │   │   ├── SHA256SUMS
+│   │   │   ├── cli-help.txt
+│   │   │   ├── cli-selftest.txt
+│   │   │   ├── historical-attempt.txt
+│   │   │   ├── historical-summary.json
+│   │   │   ├── offline-tests.txt
+│   │   │   ├── p1-integration-regression.txt
+│   │   │   ├── qualification.json
+│   │   │   └── resume-proof.json
+│   │   ├── C0E1_P3_MARKERS_20261013/
+│   │   │   ├── README.md
+│   │   │   └── unittest.log
+│   │   ├── C0E1_P4_20261013/
+│   │   │   ├── README.md
+│   │   │   ├── p4-index-regression.txt
+│   │   │   ├── p4-plan-regression.txt
+│   │   │   ├── p4-python-final.txt
+│   │   │   ├── p4-regression-final.txt
+│   │   │   ├── p4-regression.txt
+│   │   │   └── p4-release-final.txt
+│   │   ├── C0E1_P5_20261013/
+│   │   │   ├── README.md
+│   │   │   ├── check_changed_format.py
+│   │   │   ├── commands.txt
+│   │   │   ├── identity.json
+│   │   │   ├── python.txt
+│   │   │   ├── release.txt
+│   │   │   ├── rust-first-attempt-failed.txt
+│   │   │   └── rust.txt
+│   │   ├── C0E1_P6_20261013/
+│   │   │   ├── README.md
+│   │   │   ├── commands.txt
+│   │   │   ├── fixtures.txt
+│   │   │   ├── gates.json
+│   │   │   ├── identity.json
+│   │   │   ├── python.txt
+│   │   │   ├── release.txt
+│   │   │   ├── workspace-health.txt
+│   │   │   └── workspace-txv1.txt
+│   │   ├── C0E1_TRANSPORT_FINISH_20261010/
+│   │   │   ├── diagnosis.json
+│   │   │   ├── differential_corrected_health.json
+│   │   │   ├── differential_corrected_txv1.json
+│   │   │   ├── differential_health.json
+│   │   │   ├── differential_txv1.json
+│   │   │   ├── final_commands.json
+│   │   │   ├── final_source_identity.json
+│   │   │   ├── lint_correction_commands.json
+│   │   │   ├── lint_correction_v2_commands.json
+│   │   │   ├── smoke_60s_incomplete.json
+│   │   │   ├── smoke_aborted_by_user.json
+│   │   │   ├── targeted_commands.json
+│   │   │   ├── targeted_corrected_commands.json
+│   │   │   ├── unreachable_preflight.json
+│   │   │   └── user_terminal_assessment.json
+│   │   ├── C0MO_20261008/
+│   │   │   └── SMOKE_600S.md
+│   │   ├── FE00_20261013/
+│   │   │   ├── README.md
+│   │   │   ├── candidates.json
+│   │   │   ├── clippy-baseline.json
+│   │   │   ├── fe-base-clippy.stderr
+│   │   │   ├── fe00-build-health.txt
+│   │   │   ├── fe00-build-txv1.txt
+│   │   │   ├── fe00-python-qualified.txt
+│   │   │   ├── fe00-tests-health.txt
+│   │   │   └── fe00-tests-txv1.txt
+│   │   ├── FE04_BINDING_20261013/
+│   │   │   ├── README.md
+│   │   │   ├── build-health.txt
+│   │   │   ├── build-txv1.txt
+│   │   │   ├── clippy-differential.json
+│   │   │   ├── clippy.txt
+│   │   │   ├── commands.txt
+│   │   │   ├── python.txt
+│   │   │   ├── source-sha256.json
+│   │   │   ├── tests-health.txt
+│   │   │   └── tests-txv1.txt
+│   │   ├── FE04_LOCAL_20261013/
+│   │   │   ├── README.md
+│   │   │   ├── check_changed_format.py
+│   │   │   ├── clippy-differential.json
+│   │   │   ├── commands.txt
+│   │   │   ├── fe-final-python.txt
+│   │   │   ├── fe04-build-health.txt
+│   │   │   ├── fe04-build-txv1.txt
+│   │   │   ├── fe04-final-journal-health.txt
+│   │   │   ├── fe04-final-journal.txt
+│   │   │   ├── fe04-tests-health.txt
+│   │   │   ├── fe04-tests-txv1.txt
+│   │   │   ├── identity.json
+│   │   │   └── read_only_command.txt
+│   │   ├── FE04_RECEIPTS_20261013/
+│   │   │   ├── README.md
+│   │   │   ├── build-health.txt
+│   │   │   ├── build-txv1.txt
+│   │   │   ├── clippy-differential.json
+│   │   │   ├── clippy.txt
+│   │   │   ├── commands.txt
+│   │   │   ├── development-notes.txt
+│   │   │   ├── source-sha256.json
+│   │   │   ├── targeted.txt
+│   │   │   ├── tests-health.txt
+│   │   │   └── tests-txv1.txt
+│   │   ├── FIX129_fee_sources.json
+│   │   ├── OPERATIONS_CONFIG_20261014/
+│   │   │   ├── README.md
+│   │   │   ├── SHA256SUMS
+│   │   │   ├── clippy-diagnostics.json
+│   │   │   ├── clippy-differential.json
+│   │   │   ├── clippy.txt
+│   │   │   ├── commands.txt
+│   │   │   ├── development-notes.txt
+│   │   │   ├── endpoint-regression.txt
+│   │   │   ├── format.txt
+│   │   │   ├── health.txt
+│   │   │   ├── provider-final.txt
+│   │   │   ├── python.txt
+│   │   │   ├── qualification.json
+│   │   │   ├── release-health.txt
+│   │   │   ├── release-txv1.txt
+│   │   │   ├── source-sha256.json
+│   │   │   └── txv1.txt
+│   │   ├── P6MT_T1_R3_20261007/
+│   │   │   ├── CLIPPY_DIFFERENTIAL.txt
+│   │   │   ├── QUALIFICATION.md
+│   │   │   └── SOURCE_ZIP.sha256
+│   │   ├── R114_projection_clock.json
+│   │   ├── R116_integration_sweep.json
+│   │   ├── R117_paced_projection_sweep.json
+│   │   ├── R118_route_budget.json
+│   │   ├── R119_route_budget.json
+│   │   ├── R120_protocol_luts.json
+│   │   ├── R121_sizing_pairs.json
+│   │   ├── R122_juplend_complete.json
+│   │   ├── R124_rpc_economics.json
+│   │   ├── R125b_oracle_trigger_runtime.json
+│   │   ├── R126b_scheduler_fairness.json
+│   │   ├── R127_20261005T143113Z.json
+│   │   ├── R127c_20261005T161806Z.json
+│   │   ├── R127d_20261005T171043Z.json
+│   │   ├── RUNTIME_MODULARIZATION_20261016/
+│   │   │   ├── actual_project_tree.txt
+│   │   │   ├── changed_files.txt
+│   │   │   ├── final-clippy-health.json
+│   │   │   ├── final-clippy-txv1.json
+│   │   │   ├── final-default.json
+│   │   │   ├── final-default.log
+│   │   │   ├── final-health.json
+│   │   │   ├── final-health.log
+│   │   │   ├── final-python.json
+│   │   │   ├── final-python.log
+│   │   │   ├── final-release-health.json
+│   │   │   ├── final-release-health.log
+│   │   │   ├── final-release-txv1.json
+│   │   │   ├── final-release-txv1.log
+│   │   │   ├── final-selftest.json
+│   │   │   ├── final-selftest.log
+│   │   │   ├── final-txv1.json
+│   │   │   ├── final-txv1.log
+│   │   │   ├── function_parity.json
+│   │   │   ├── function_parity.py
+│   │   │   ├── git_status.txt
+│   │   │   ├── integrity_and_cli.json
+│   │   │   ├── migration.json
+│   │   │   ├── module_inventory.json
+│   │   │   ├── owner_step_parity.json
+│   │   │   ├── parity.py
+│   │   │   └── qualification.json
+│   │   ├── USDT_ATA_20261004.json
+│   │   └── V1_wire_probe_20261004.json
+│   ├── measurements/
+│   │   ├── historical_reports/
+│   │   │   ├── c0e1_implementation_report.md
+│   │   │   └── fix129_cost_qualification.md
+│   │   └── protocols/
+│   │       ├── c0e1_econ4h.md
+│   │       ├── c0mo_market_observer.md
+│   │       └── p6lt_shadow.md
+│   ├── operations/
+│   │   ├── data_policy.md
+│   │   ├── operational_config.md
+│   │   ├── restructure_handoff.md
+│   │   └── run_storage.md
+│   └── qualification/
+│       └── README.md
+├── exports/
+│   └── .gitkeep
+├── native/
+│   ├── Cargo.lock
+│   ├── Cargo.toml
+│   └── crates/
+│       ├── common/
+│       │   ├── Cargo.toml
+│       │   └── src/
+│       │       ├── channel.rs
+│       │       ├── config.rs
+│       │       ├── error.rs
+│       │       ├── histogram.rs
+│       │       ├── journal.rs
+│       │       ├── lib.rs
+│       │       ├── lifecycle.rs
+│       │       ├── mt0.rs
+│       │       └── timing.rs
+│       ├── liquidation/
+│       │   ├── Cargo.toml
+│       │   └── src/
+│       │       ├── economics.rs
+│       │       ├── execution.rs
+│       │       ├── funding.rs
+│       │       ├── health.rs
+│       │       ├── index.rs
+│       │       ├── integration.rs
+│       │       ├── lib.rs
+│       │       ├── planner.rs
+│       │       ├── prepared.rs
+│       │       ├── projection.rs
+│       │       ├── protocol.rs
+│       │       ├── receivership.rs
+│       │       ├── safety.rs
+│       │       ├── schedule.rs
+│       │       └── sizing.rs
+│       ├── runtime/
+│       │   ├── Cargo.toml
+│       │   └── src/
+│       │       ├── analytics/
+│       │       │   ├── econ.rs
+│       │       │   ├── econ_canonical.rs
+│       │       │   ├── econ_tests.rs
+│       │       │   ├── fixture.rs
+│       │       │   ├── market_report.rs
+│       │       │   ├── measurement.rs
+│       │       │   ├── mod.rs
+│       │       │   ├── record.rs
+│       │       │   └── shadow_ledger.rs
+│       │       ├── bin/
+│       │       │   ├── p0-econ-replay.rs
+│       │       │   ├── p0-fe-qualify.rs
+│       │       │   ├── p0-measurement-plan.rs
+│       │       │   ├── p0-prewarm-atas.rs
+│       │       │   ├── p0-probe-costs.rs
+│       │       │   └── p0-strict-verify.rs
+│       │       ├── execution/
+│       │       │   ├── builder.rs
+│       │       │   ├── lookup_tables.rs
+│       │       │   ├── mod.rs
+│       │       │   ├── observe_only.rs
+│       │       │   ├── one_shot/
+│       │       │   │   ├── receipts.rs
+│       │       │   │   └── transport.rs
+│       │       │   ├── one_shot.rs
+│       │       │   ├── pending.rs
+│       │       │   ├── pipeline.rs
+│       │       │   └── route.rs
+│       │       ├── lib.rs
+│       │       ├── main.rs
+│       │       ├── market/
+│       │       │   ├── capture.rs
+│       │       │   ├── configuration.rs
+│       │       │   ├── core.rs
+│       │       │   ├── decoding.rs
+│       │       │   ├── deployment.rs
+│       │       │   ├── enrichment.rs
+│       │       │   ├── fetch.rs
+│       │       │   ├── market_gap_tests.rs
+│       │       │   ├── market_reconcile_tests.rs
+│       │       │   ├── market_truth_tests.rs
+│       │       │   ├── mod.rs
+│       │       │   ├── observer.rs
+│       │       │   ├── observer_tests.rs
+│       │       │   ├── sink.rs
+│       │       │   ├── summary.rs
+│       │       │   ├── time.rs
+│       │       │   └── winner.rs
+│       │       ├── market_gap.rs
+│       │       ├── market_reconcile.rs
+│       │       ├── market_truth.rs
+│       │       ├── market_verification.rs
+│       │       ├── orchestration/
+│       │       │   ├── fe_qualification.rs
+│       │       │   ├── mod.rs
+│       │       │   ├── remote_workers.rs
+│       │       │   ├── startup.rs
+│       │       │   ├── state_owner/
+│       │       │   │   ├── accounts.rs
+│       │       │   │   ├── candidates.rs
+│       │       │   │   ├── detect.rs
+│       │       │   │   ├── dispatch.rs
+│       │       │   │   ├── events.rs
+│       │       │   │   ├── ingress.rs
+│       │       │   │   ├── lifecycle.rs
+│       │       │   │   ├── metrics.rs
+│       │       │   │   ├── remote_apply.rs
+│       │       │   │   ├── setup.rs
+│       │       │   │   ├── shutdown.rs
+│       │       │   │   ├── sweep.rs
+│       │       │   │   ├── telemetry.rs
+│       │       │   │   └── tests.rs
+│       │       │   ├── state_owner.rs
+│       │       │   └── winner_tracker.rs
+│       │       └── run_layout.rs
+│       └── solana/
+│           ├── Cargo.toml
+│           ├── examples/
+│           │   └── p0-gap-ws-proxy.rs
+│           └── src/
+│               ├── bin/
+│               │   └── p0-probe-v1.rs
+│               ├── ingress/
+│               │   ├── mod.rs
+│               │   ├── ws_rpc.rs
+│               │   └── ws_rpc_recovery_tests.rs
+│               ├── lib.rs
+│               ├── provider.rs
+│               ├── runtime_config.rs
+│               ├── state/
+│               │   ├── blockhash.rs
+│               │   ├── fork.rs
+│               │   ├── mod.rs
+│               │   ├── recovery.rs
+│               │   └── snapshot.rs
+│               ├── submit/
+│               │   ├── jito.rs
+│               │   ├── mod.rs
+│               │   └── rpc.rs
+│               └── tx/
+│                   └── mod.rs
+├── operations/
+│   ├── __init__.py
+│   ├── capture/
+│   │   ├── __init__.py
+│   │   ├── c0_census.py
+│   │   └── run_store.py
+│   ├── cli/
+│   │   ├── __init__.py
+│   │   ├── measurement_cli.py
+│   │   ├── measurement_contract.py
+│   │   └── operational_config.py
+│   ├── qualification/
+│   │   ├── __init__.py
+│   │   ├── fe_candidate_report.py
+│   │   ├── fe_readonly_preflight.py
+│   │   ├── run_r126_qualify.py
+│   │   └── run_r127_qualify.py
+│   ├── reporting/
+│   │   ├── __init__.py
+│   │   └── market_report.py
+│   └── verification/
+│       ├── __init__.py
+│       ├── audit_market_quick.py
+│       └── measurement_verify.py
+├── scripts/
+│   ├── capture.sh
+│   ├── preflight.sh
+│   ├── report.sh
+│   ├── smoke.sh
+│   ├── test.sh
+│   └── verify.sh
+└── tests/
+    ├── README.md
+    ├── __init__.py
+    ├── fixtures/
+    │   ├── p0_market.py
+    │   ├── p0_paths.py
+    │   └── p0_runs.py
+    ├── integration/
+    │   ├── __init__.py
+    │   ├── test_market_report.py
+    │   ├── test_measurement_p6.py
+    │   ├── test_measurement_plan.py
+    │   ├── test_operational_config.py
+    │   └── test_run_store.py
+    ├── python/
+    │   ├── __init__.py
+    │   ├── test_audit_market_quick.py
+    │   ├── test_fe_preflight.py
+    │   ├── test_measurement_contract.py
+    │   └── test_run_layout.py
+    └── regression/
+        ├── __init__.py
+        ├── test_fe_candidates.py
+        ├── test_historical_runs.py
+        └── test_v1_archived_parity.py
+
+Local ignored/generated paths (retained; contents not listed):
+.env
+env
+.DS_Store
+native/target/
+operations/**/__pycache__/
+tests/**/__pycache__/
+scripts/__pycache__/
+docs/.DS_Store
+data/
+  .gitkeep
+  econ4h/
+  market/
+evidence/
+  C0_E1_local_integration_20261008/

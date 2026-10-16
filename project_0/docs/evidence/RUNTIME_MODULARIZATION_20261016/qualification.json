@@ -1,0 +1,56 @@
+{
+  "health": {
+    "test_counts_before": [
+      382,
+      0,
+      1
+    ],
+    "test_counts_after": [
+      382,
+      0,
+      1
+    ],
+    "tests_preserved": true,
+    "missing_tests": [],
+    "new_tests": [],
+    "clippy_messages_before": 72,
+    "clippy_messages_after": 72,
+    "clippy_no_new_diagnostics": true
+  },
+  "txv1": {
+    "test_counts_before": [
+      384,
+      0,
+      1
+    ],
+    "test_counts_after": [
+      384,
+      0,
+      1
+    ],
+    "tests_preserved": true,
+    "missing_tests": [],
+    "new_tests": [],
+    "clippy_messages_before": 73,
+    "clippy_messages_after": 73,
+    "clippy_no_new_diagnostics": true
+  },
+  "binaries": {
+    "p0-econ-replay": {
+      "before": "60669c047183a718f52aa7ee751cbc321315da6b0819281c55cc66a71f2504d3",
+      "after": "5e3ee6799ffd7227ed08774480974006847bc75fdde1785b450ad28d3c60ea45"
+    },
+    "p0-longtail": {
+      "before": "ae93dd5938a17b3cf2ddfa0cc03880eadfc41ad0d9b3f16ccf4e37610cc0e518",
+      "after": "34502bb56df766bf37e1bc558e6fe17d6b24e4d398cad379b1ace612a3d5c6a3"
+    },
+    "p0-measurement-plan": {
+      "before": "724e5dc7e792e3f557ec1f4ed93a750b1b52023968156e2b9de844411beb0db7",
+      "after": "ee9a642fc6ee1aa666b9d86e97e20bdf1f5319b63ac7b82d38f40b5bcb1efb16"
+    },
+    "p0-strict-verify": {
+      "before": "0cf1e521dcf184f6690e7dcd79a687d7540fa7c27dc593d44c33db263ccb5b65",
+      "after": "a31723586911da280de292bb0f347c4aeb8dedac8ca9a0c7671f3eada89afd03"
+    }
+  }
+}

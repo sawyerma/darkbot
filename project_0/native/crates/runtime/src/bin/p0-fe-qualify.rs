@@ -18,16 +18,26 @@ fn run() -> Result<(), String> {
     let mut execute = false;
     let mut output = None;
     let mut qualification = None;
+    let mut replay = None;
+    let mut funding_class = "ZERO_PREFUND_SAME_TX".to_string();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--execute" => execute = true,
+            "--replay" => {
+                replay = Some(
+                    args.next()
+                        .map(PathBuf::from)
+                        .ok_or("FE_REPLAY_DIRECTORY_REQUIRED")?,
+                )
+            }
+            "--funding-class" => funding_class = args.next().ok_or("FE_FUNDING_CLASS_REQUIRED")?,
             "--output" => output = args.next().map(PathBuf::from),
             "--provider-qualification" => qualification = args.next().map(PathBuf::from),
             _ => operational.push(arg),
         }
     }
     if operational.iter().any(|s| s == "--help" || s == "-h") {
-        println!("p0-fe-qualify --execute --output NEW_DIRECTORY --provider-qualification FILE --fe-mode full [operational options]\n{}",Resolved::help());
+        println!("p0-fe-qualify (--execute --provider-qualification FILE | --replay SAVED_DIRECTORY) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [operational options]\n{}",Resolved::help());
         return Ok(());
     }
     let mut resolved = Resolved::parse(&operational, &|k| std::env::var(k).ok())?;
@@ -35,12 +45,34 @@ fn run() -> Result<(), String> {
         println!("{}", resolved.json());
         return Ok(());
     }
-    if !execute || resolved.config.fe_mode != "full" {
+    let funding_class = darkbot_runner::orchestration::fe_replay::first_class(&funding_class)?;
+    if execute == replay.is_some() {
+        return Err("FE_EXACTLY_ONE_OF_EXECUTE_OR_REPLAY".into());
+    }
+    if (!execute && replay.is_none()) || resolved.config.fe_mode != "full" {
         return Err("FE_FULL_REQUIRES_EXPLICIT_EXECUTE_AND_FULL_MODE".into());
     }
     let output = output.ok_or("FE_OUTPUT_REQUIRED")?;
     if output.exists() {
         return Err("FE_OUTPUT_EXISTS_PRESERVE_EVIDENCE".into());
+    }
+    if let Some(directory) = replay {
+        let report = darkbot_runner::orchestration::fe_replay::replay(
+            &resolved.config,
+            &directory,
+            funding_class,
+        )?;
+        fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
+        persist(
+            &output.join("operational_config.json"),
+            &json!({"requested":resolved.json(),"execution":"OFFLINE_REPLAY_NO_RPC_NO_SIGNER"}),
+        )?;
+        persist(&output.join("result.json"), &report)?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|_| "FE_EVIDENCE_JSON")?
+        );
+        return Ok(());
     }
     let url = resolved
         .config
@@ -115,6 +147,7 @@ fn run() -> Result<(), String> {
         result["status"] = json!("INCOMPLETE");
         result["reason"] = json!("FE_TIME_BUDGET");
     }
+    darkbot_runner::orchestration::fe_replay::bind_scope(&mut result, funding_class)?;
     result["logical_reads"] = json!(calls);
     result["provider_actual"] = provider::shared().snapshot();
     persist(&output.join("result.json"), &result)?;

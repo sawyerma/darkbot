@@ -1,0 +1,42 @@
+{
+  "lifecycle": {
+    "normalized_tokens_identical": true,
+    "before_tokens": 667,
+    "after_tokens": 667
+  },
+  "remote_apply": {
+    "normalized_tokens_identical": true,
+    "before_tokens": 2017,
+    "after_tokens": 2017
+  },
+  "dispatch": {
+    "normalized_tokens_identical": true,
+    "before_tokens": 127,
+    "after_tokens": 127
+  },
+  "sweep": {
+    "normalized_tokens_identical": true,
+    "before_tokens": 1982,
+    "after_tokens": 1982
+  },
+  "events": {
+    "normalized_tokens_identical": true,
+    "before_tokens": 5007,
+    "after_tokens": 5007
+  },
+  "detect": {
+    "normalized_tokens_identical": true,
+    "before_tokens": 2923,
+    "after_tokens": 2923
+  },
+  "telemetry": {
+    "normalized_tokens_identical": true,
+    "before_tokens": 408,
+    "after_tokens": 408
+  },
+  "application_literals": {
+    "identical": true,
+    "removed": {},
+    "added": {}
+  }
+}

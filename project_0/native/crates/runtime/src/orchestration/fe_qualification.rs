@@ -233,6 +233,23 @@ pub fn collect<F>(config: &RuntimeConfig, mut read: F) -> Result<Value, String>
 where
     F: FnMut(&[Pubkey], u64) -> Result<(u64, ObservedState), String>,
 {
+    if config.fe_targets.is_empty()
+        || config.limits.fe_batch_size == 0
+        || config.limits.fe_batch_size > 100
+        || config.limits.fe_snapshot_rounds == 0
+    {
+        return Err("FE_SCOPE_OR_BATCH_BUDGET_INVALID".into());
+    }
+    let mut read = |keys: &[Pubkey], floor: u64| -> Result<(u64, ObservedState), String> {
+        let (slot, state) = read(keys, floor)?;
+        if slot == 0 || slot < floor {
+            return Err("FE_CONTEXT_REGRESSION".into());
+        }
+        if state.0.len() != keys.len() || keys.iter().any(|k| !state.0.contains_key(k)) {
+            return Err("FE_BATCH_SCOPE_MISMATCH".into());
+        }
+        Ok((slot, state))
+    };
     let program = key(protocol::PROGRAM_ID_MAINNET)?;
     let group = key(&config.fe_group)?;
     let targets = config
@@ -240,11 +257,20 @@ where
         .iter()
         .map(|s| key(s))
         .collect::<Result<Vec<_>, _>>()?;
+    if group == Pubkey::default()
+        || targets.contains(&Pubkey::default())
+        || targets.iter().collect::<BTreeSet<_>>().len() != targets.len()
+    {
+        return Err("FE_TARGET_SCOPE_INVALID".into());
+    }
     let (mut floor, initial) = read(&[program], 0)?;
     let pd = program_data(&initial, &program)?;
     let (s, initial_pd) = read(&[pd], floor)?;
     floor = s;
     let baseline = deployment(&initial_pd, &pd)?;
+    if baseline.0 > floor {
+        return Err("FE_DEPLOYMENT_FROM_FUTURE".into());
+    }
     let clock_key = solana_sdk::sysvar::clock::id();
     let fee = protocol::fee_state_pda(&program);
     let mut keys: BTreeSet<_> = [program, pd, group, clock_key, fee]
@@ -282,7 +308,10 @@ where
             continue;
         }
         let clock_account = state.0.get(&clock_key).ok_or("FE_CLOCK_MISSING")?;
-        if clock_account.owner != solana_sdk::sysvar::id() || clock_account.data.len() != 40 {
+        if clock_account.owner != solana_sdk::sysvar::id()
+            || clock_account.executable
+            || clock_account.data.len() != 40
+        {
             return Err("FE_CLOCK_LAYOUT".into());
         }
         let clock: Clock =
@@ -576,5 +605,62 @@ mod tests {
         assert_eq!(state.0[&k].owner, owner);
         assert!(decode_batch(v, &[k], 13).is_err());
         assert!(decode_batch(json!({"value":[]}), &[], 0).is_err());
+    }
+    #[test]
+    fn invalid_scope_and_callback_context_fail_closed_before_qualification() {
+        let (c, all) = fixture();
+        let mut bad = c.clone();
+        bad.fe_targets.clear();
+        assert!(collect(&bad, |_, _| panic!("must not read")).is_err());
+        bad = c.clone();
+        bad.fe_targets.push(bad.fe_targets[0].clone());
+        assert!(collect(&bad, |_, _| panic!("must not read")).is_err());
+        bad = c.clone();
+        bad.limits.fe_batch_size = 0;
+        assert!(collect(&bad, |_, _| panic!("must not read")).is_err());
+        assert_eq!(
+            collect(&c, |keys, _| Ok((0, batch(&all, keys)?))).unwrap_err(),
+            "FE_CONTEXT_REGRESSION"
+        );
+        assert_eq!(
+            collect(&c, |_, _| Ok((100, ObservedState::default()))).unwrap_err(),
+            "FE_BATCH_SCOPE_MISMATCH"
+        );
+    }
+    #[test]
+    fn saved_full_observation_replays_identically_but_stays_historical_and_incomplete() {
+        use super::super::fe_replay;
+        let (mut c, all) = fixture();
+        c.limits.fe_calls = 100;
+        c.limits.max_requests = 100;
+        let dir = std::env::temp_dir().join(format!("p0-fe-replay-{}", Pubkey::new_unique()));
+        std::fs::create_dir(&dir).unwrap();
+        let mut calls = 0;
+        let original=collect(&c,|keys,floor| {
+            calls+=1;let state=batch(&all,keys)?;
+            let values:Vec<_>=keys.iter().map(|k| {let a=&state.0[k];json!({"owner":a.owner.to_string(),"lamports":a.lamports,"executable":a.executable,"data":[base64::engine::general_purpose::STANDARD.encode(&a.data),"base64"]})}).collect();
+            let entry=json!({"method":"getMultipleAccounts","params":[keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}],"result":{"context":{"slot":100},"value":values}});
+            std::fs::write(dir.join(format!("read_{calls:06}.json")),serde_json::to_vec(&entry).unwrap()).unwrap();
+            Ok((100,state))
+        }).unwrap();
+        let class = fe_replay::first_class("ZERO_PREFUND_SAME_TX").unwrap();
+        let replayed = fe_replay::replay(&c, &dir, class).unwrap();
+        for (key, value) in original.as_object().unwrap() {
+            assert_eq!(&replayed[key], value, "{key}");
+        }
+        assert_eq!(replayed["replay"]["freshness"], "HISTORICAL_NOT_CURRENT");
+        assert_eq!(replayed["pilot_ready"], false);
+        c.limits.fe_calls = 1;
+        assert_eq!(
+            fe_replay::replay(&c, &dir, class).unwrap_err(),
+            "FE_REPLAY_CALL_LIMIT"
+        );
+        c.limits.fe_calls = 100;
+        std::fs::write(dir.join("read_999999.json"), b"{}").unwrap();
+        assert_eq!(
+            fe_replay::replay(&c, &dir, class).unwrap_err(),
+            "FE_REPLAY_UNUSED_READS"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

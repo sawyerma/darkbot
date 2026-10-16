@@ -1,0 +1,18 @@
+{
+  "command": [
+    "cargo",
+    "build",
+    "--manifest-path",
+    "project_0/native/Cargo.toml",
+    "--locked",
+    "--offline",
+    "--workspace",
+    "--release",
+    "--features",
+    "crate_health,txv1"
+  ],
+  "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+  "exit_code": 0,
+  "seconds": 6.72468058404047,
+  "sha256": "6d77e2d3fada030c6c8bbd34c6207e0f8bbb8eb6ea669e4674b049c0317f9e96"
+}

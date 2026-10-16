@@ -1,0 +1,89 @@
+{
+  "before_functions": 705,
+  "after_functions": 715,
+  "identical_function_bodies": 702,
+  "changed_or_extracted_before": [
+    {
+      "function": "main",
+      "path": "project_0/native/crates/runtime/src/main.rs",
+      "body_sha256": "a0c7bcdcf1589fa2cb1cb1a8eb6ef39b9dc3346bc3de2852bb06cefba0e3e609"
+    },
+    {
+      "function": "run_shadow",
+      "path": "project_0/native/crates/runtime/src/main.rs",
+      "body_sha256": "72f9ad886f38850b4c3454fb200ae10dec00f9925fafe98bc28e6f35c6e73836"
+    },
+    {
+      "function": "market_mode_has_no_signing_simulation_or_submission_path",
+      "path": "project_0/native/crates/runtime/src/market_observer_tests.rs",
+      "body_sha256": "9cf15ebb746aa0b95daa56567d95d3f1011e7be6612a1397f79f7151b984b229"
+    }
+  ],
+  "new_or_changed_after": [
+    {
+      "function": "main",
+      "path": "project_0/native/crates/runtime/src/main.rs",
+      "body_sha256": "3e0f40caf5aef254dd163f6dabb80147bec670d2642fb0845ff8fbee5255554b"
+    },
+    {
+      "function": "run_shadow",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner.rs",
+      "body_sha256": "62124bae0f294e782437306cdc06d0b31044e2d2f2f30b5024b8c21e5ced9574"
+    },
+    {
+      "function": "market_mode_has_no_signing_simulation_or_submission_path",
+      "path": "project_0/native/crates/runtime/src/market/observer_tests.rs",
+      "body_sha256": "b8a3b96eb78297c2aadb5ac7716dead780f1f36eec59d6d39aa0df990b3acef2"
+    },
+    {
+      "function": "telemetry",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/telemetry.rs",
+      "body_sha256": "d259183a3718e1b7b84072599e60c311fb4c3dec66f25e22175f0bafed0a468b"
+    },
+    {
+      "function": "finish",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/shutdown.rs",
+      "body_sha256": "49386a5342a538e87c2c68444ba6544b98c73bc277950e0fb39c95a13c174110"
+    },
+    {
+      "function": "dispatch",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/dispatch.rs",
+      "body_sha256": "18ba1e32a17d8ce77fdcd53f017cd1ffb39fbb2303ae198299cb296cb90d41ec"
+    },
+    {
+      "function": "events",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/events.rs",
+      "body_sha256": "f9eadfdc8e1c65871c0d8f383f360e53dc8ee4b29bbb8438e06419fd696be56b"
+    },
+    {
+      "function": "spawn",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/ingress.rs",
+      "body_sha256": "079eae5afbbd611db7c8fef4dc8e30bfeb8521d4c819ae82a8bf9ae3d23a4945"
+    },
+    {
+      "function": "remote_apply",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/remote_apply.rs",
+      "body_sha256": "71da3a3fb5383aad5ff3456db40e8e6cb834dcdf58c1bebe80e4e066c28f205b"
+    },
+    {
+      "function": "detect",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/detect.rs",
+      "body_sha256": "12b8222b6120d24ac1a33cffd67504e09d07a75bf4a291726d1bd4e3e5c979ea"
+    },
+    {
+      "function": "lifecycle",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/lifecycle.rs",
+      "body_sha256": "b4ed695604c77fbcf2d722d2cab42581ab95501a5fff2b663a036d14226edf11"
+    },
+    {
+      "function": "sweep",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/sweep.rs",
+      "body_sha256": "28f685cc7522f975518fe08369e06759af91d8c8cc8d103dd719a01bb1774c94"
+    },
+    {
+      "function": "prepare",
+      "path": "project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs",
+      "body_sha256": "b826b3972cec224f666c26d9bc139a32a63176b1e59e21dd5de17507c5efaf9c"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "command": [
+    "cargo",
+    "clippy",
+    "--manifest-path",
+    "project_0/native/Cargo.toml",
+    "--locked",
+    "--offline",
+    "--workspace",
+    "--all-targets",
+    "--features",
+    "crate_health",
+    "--message-format=json"
+  ],
+  "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+  "exit_code": 0,
+  "seconds": 2.7342396249296144,
+  "sha256": "742e609aa666ec6e895c7e429004b4518886f4ed0a9ec2fcf4ef7012911be265"
+}

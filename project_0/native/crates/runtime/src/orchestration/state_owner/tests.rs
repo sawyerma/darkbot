@@ -395,3 +395,16 @@ fn only_one_target_is_dispatched_per_idle_turn() {
     assert_eq!(next_integration_probe(&mut queue, false, 200).unwrap().0, b);
     assert!(next_integration_probe(&mut queue, false, 201).is_none());
 }
+
+#[test]
+fn evidence_failures_remain_explicit_static_categories() {
+    use crate::analytics::evidence::EvidenceFailure;
+    for code in [
+        "OWNER_EVIDENCE_OVERFLOW",
+        "OWNER_EVIDENCE_WRITE_FAILED_RECOVERY_SAVED",
+        "OWNER_EVIDENCE_RECOVERY_FAILED",
+        "OWNER_EVIDENCE_SYNC_FAILED",
+    ] {
+        assert_eq!(shadow_failure_code(&EvidenceFailure(code)), code);
+    }
+}

@@ -59,7 +59,7 @@ mod candidates;
 use accounts::*;
 use candidates::*;
 
-use std::io::Write;
+use crate::analytics::evidence::{HealthEvidence, OwnerEvidence, OwnerEvidenceWriter, RecordEvent};
 mod detect;
 mod dispatch;
 mod events;
@@ -156,8 +156,7 @@ pub(super) struct ShadowOwner {
     integration_probe_completion_reported: bool,
     ledger: ShadowLedger,
     winner_tracker: WinnerTracker,
-    summaries: std::fs::File,
-    records: std::fs::File,
+    evidence: OwnerEvidenceWriter,
     counts: [u64; 6],
     last_reported_update_total: u64,
     bootstrap_probe_done: bool,
@@ -178,33 +177,43 @@ pub(super) fn run_shadow(
     econ: Option<crate::analytics::econ::Handle>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut owner, mut fetch, ingress) = setup::prepare(clock, econ)?;
-    loop {
-        if !owner.lifecycle() {
-            break;
-        }
-        let worker_now_s = owner.remote_apply()?;
-        if let Some(h) = &owner.econ {
-            if h.admission_closed() {
-                owner.ingress_session.request();
-                if owner.winner_tracker.stats().len == 0 {
-                    break;
+    let outcome = (|| -> Result<(), Box<dyn std::error::Error>> {
+        loop {
+            owner.evidence.check()?;
+            if !owner.lifecycle() {
+                break;
+            }
+            let worker_now_s = owner.remote_apply()?;
+            if let Some(h) = &owner.econ {
+                if h.admission_closed() {
+                    owner.ingress_session.request();
+                    if owner.winner_tracker.stats().len == 0 {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
                 }
-                std::thread::sleep(Duration::from_millis(10));
+            }
+            owner.dispatch(worker_now_s)?;
+            owner.sweep();
+            let detect = match owner.events(&mut fetch, &ingress)? {
+                OwnerStep::Next(detect) => detect,
+                OwnerStep::Continue => continue,
+            };
+            if !owner.detect(detect)? {
                 continue;
             }
+            owner.telemetry();
         }
-        owner.dispatch(worker_now_s)?;
-        owner.sweep();
-        let detect = match owner.events(&mut fetch, &ingress)? {
-            OwnerStep::Next(detect) => detect,
-            OwnerStep::Continue => continue,
-        };
-        if !owner.detect(detect)? {
-            continue;
-        }
-        owner.telemetry();
+        Ok(())
+    })();
+    if outcome.is_err() {
+        owner.shutdown.request();
+        owner.ingress_session.request();
     }
-    owner.finish()
+    // Every exit, including errors, joins and drains the evidence writer.
+    let finish = owner.finish();
+    finish.and(outcome)
 }
 
 #[cfg(test)]

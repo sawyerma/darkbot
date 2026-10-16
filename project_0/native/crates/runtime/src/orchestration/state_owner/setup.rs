@@ -534,28 +534,12 @@ pub(super) fn prepare(
         winner_watch_cfg.full_queue_backoff_s
     );
     let winner_tracker = WinnerTracker::new(winner_watch_cfg);
-    let summary_path = config::parsed_or::<String>(
-        "P0_SUMMARY_PATH",
-        "project_0/data/shadow/daily_summary.jsonl".into(),
-    )?;
-    let summaries = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&summary_path)?;
-    let _ = Path::Rpc;
     let record_path = config::parsed_or::<String>(
         "P0_RECORD_PATH",
-        "project_0/data/shadow/opportunities.jsonl".into(),
+        "project_0/data/shadow/opportunities.p0j".into(),
     )?;
-    std::fs::create_dir_all(
-        std::path::Path::new(&record_path)
-            .parent()
-            .unwrap_or(std::path::Path::new(".")),
-    )?;
-    let records = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&record_path)?;
+    let journal_path = crate::analytics::journal::binary_path(std::path::Path::new(&record_path));
+    std::fs::create_dir_all(journal_path.parent().unwrap_or(std::path::Path::new(".")))?;
     if let Some(report) = darkbot_solana::runtime_config::report() {
         let parent = std::path::Path::new(&record_path)
             .parent()
@@ -568,6 +552,17 @@ pub(super) fn prepare(
         serde_json::to_writer_pretty(&mut file, report)?;
         file.sync_all()?;
     }
+
+    let recovery_path = journal_path.with_extension(format!(
+        "recovery-{}-{}.p0j",
+        std::process::id(),
+        clock.now_ns()
+    ));
+    let evidence = OwnerEvidenceWriter::start(
+        journal_path,
+        recovery_path,
+        crate::analytics::evidence::OWNER_EVIDENCE_CAPACITY,
+    )?;
 
     let counts = [0u64; 6];
     let last_reported_update_total = 0u64; // [FIX-81]
@@ -881,8 +876,7 @@ pub(super) fn prepare(
         integration_probe_completion_reported,
         ledger,
         winner_tracker,
-        summaries,
-        records,
+        evidence,
         counts,
         last_reported_update_total,
         bootstrap_probe_done,

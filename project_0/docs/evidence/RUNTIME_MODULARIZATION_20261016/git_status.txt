@@ -1,0 +1,96 @@
+Snapshot UTC: 2026-10-16T12:02:25.247779+00:00
+HEAD: 795c1ef17e61c96594eb2107eae038a5ed0a7020
+
+Concurrent external staging/commits observed; no index changes or commits by this refactoring run.
+
+ M project_0/README.md
+ M project_0/docs/README.md
+ M project_0/docs/architecture/production_architecture_refactor_contract.md
+ M project_0/docs/architecture/restructure_32_step_plan.md
+ M project_0/docs/architecture/runtime_modularization_plan.md
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/diagnosis.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/differential_corrected_health.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/differential_corrected_txv1.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/differential_health.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/differential_txv1.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/final_commands.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/final_source_identity.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/lint_correction_commands.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/lint_correction_v2_commands.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/smoke_60s_incomplete.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/smoke_aborted_by_user.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/targeted_commands.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/targeted_corrected_commands.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/unreachable_preflight.json
+A  project_0/docs/evidence/C0E1_TRANSPORT_FINISH_20261010/user_terminal_assessment.json
+ M project_0/docs/operations/restructure_handoff.md
+R  project_0/native/crates/runtime/src/econ.rs -> project_0/native/crates/runtime/src/analytics/econ.rs
+R  project_0/native/crates/runtime/src/econ_canonical.rs -> project_0/native/crates/runtime/src/analytics/econ_canonical.rs
+R  project_0/native/crates/runtime/src/econ_tests.rs -> project_0/native/crates/runtime/src/analytics/econ_tests.rs
+R  project_0/native/crates/runtime/src/fixture.rs -> project_0/native/crates/runtime/src/analytics/fixture.rs
+A  project_0/native/crates/runtime/src/analytics/market_report.rs
+R  project_0/native/crates/runtime/src/measurement.rs -> project_0/native/crates/runtime/src/analytics/measurement.rs
+A  project_0/native/crates/runtime/src/analytics/mod.rs
+R  project_0/native/crates/runtime/src/record.rs -> project_0/native/crates/runtime/src/analytics/record.rs
+R  project_0/native/crates/runtime/src/shadow_ledger.rs -> project_0/native/crates/runtime/src/analytics/shadow_ledger.rs
+M  project_0/native/crates/runtime/src/bin/p0-fe-qualify.rs
+M  project_0/native/crates/runtime/src/bin/p0-measurement-plan.rs
+M  project_0/native/crates/runtime/src/bin/p0-prewarm-atas.rs
+M  project_0/native/crates/runtime/src/bin/p0-probe-costs.rs
+R  project_0/native/crates/runtime/src/builder.rs -> project_0/native/crates/runtime/src/execution/builder.rs
+R  project_0/native/crates/runtime/src/lookup_tables.rs -> project_0/native/crates/runtime/src/execution/lookup_tables.rs
+A  project_0/native/crates/runtime/src/execution/mod.rs
+A  project_0/native/crates/runtime/src/execution/observe_only.rs
+R  project_0/native/crates/runtime/src/one_shot.rs -> project_0/native/crates/runtime/src/execution/one_shot.rs
+R  project_0/native/crates/runtime/src/one_shot/receipts.rs -> project_0/native/crates/runtime/src/execution/one_shot/receipts.rs
+R  project_0/native/crates/runtime/src/one_shot/transport.rs -> project_0/native/crates/runtime/src/execution/one_shot/transport.rs
+R  project_0/native/crates/runtime/src/pending.rs -> project_0/native/crates/runtime/src/execution/pending.rs
+R  project_0/native/crates/runtime/src/pipeline.rs -> project_0/native/crates/runtime/src/execution/pipeline.rs
+R  project_0/native/crates/runtime/src/route.rs -> project_0/native/crates/runtime/src/execution/route.rs
+M  project_0/native/crates/runtime/src/lib.rs
+M  project_0/native/crates/runtime/src/main.rs
+A  project_0/native/crates/runtime/src/market/capture.rs
+A  project_0/native/crates/runtime/src/market/configuration.rs
+A  project_0/native/crates/runtime/src/market/core.rs
+A  project_0/native/crates/runtime/src/market/decoding.rs
+R  project_0/native/crates/runtime/src/market_paths.rs -> project_0/native/crates/runtime/src/market/deployment.rs
+A  project_0/native/crates/runtime/src/market/enrichment.rs
+A  project_0/native/crates/runtime/src/market/fetch.rs
+R  project_0/native/crates/runtime/src/market_gap_tests.rs -> project_0/native/crates/runtime/src/market/market_gap_tests.rs
+R  project_0/native/crates/runtime/src/market_reconcile_tests.rs -> project_0/native/crates/runtime/src/market/market_reconcile_tests.rs
+R  project_0/native/crates/runtime/src/market_truth_tests.rs -> project_0/native/crates/runtime/src/market/market_truth_tests.rs
+A  project_0/native/crates/runtime/src/market/mod.rs
+A  project_0/native/crates/runtime/src/market/observer.rs
+R  project_0/native/crates/runtime/src/market_observer_tests.rs -> project_0/native/crates/runtime/src/market/observer_tests.rs
+A  project_0/native/crates/runtime/src/market/sink.rs
+A  project_0/native/crates/runtime/src/market/summary.rs
+A  project_0/native/crates/runtime/src/market/time.rs
+R  project_0/native/crates/runtime/src/winner.rs -> project_0/native/crates/runtime/src/market/winner.rs
+D  project_0/native/crates/runtime/src/market_observer.rs
+R  project_0/native/crates/runtime/src/fe_qualification.rs -> project_0/native/crates/runtime/src/orchestration/fe_qualification.rs
+A  project_0/native/crates/runtime/src/orchestration/mod.rs
+R  project_0/native/crates/runtime/src/remote_workers.rs -> project_0/native/crates/runtime/src/orchestration/remote_workers.rs
+A  project_0/native/crates/runtime/src/orchestration/startup.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner.rs
+R  project_0/native/crates/runtime/src/longtail/accounts.rs -> project_0/native/crates/runtime/src/orchestration/state_owner/accounts.rs
+R  project_0/native/crates/runtime/src/longtail/candidates.rs -> project_0/native/crates/runtime/src/orchestration/state_owner/candidates.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/detect.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/dispatch.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/events.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/ingress.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/lifecycle.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/metrics.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/remote_apply.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/shutdown.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/sweep.rs
+A  project_0/native/crates/runtime/src/orchestration/state_owner/telemetry.rs
+R  project_0/native/crates/runtime/src/main_tests.rs -> project_0/native/crates/runtime/src/orchestration/state_owner/tests.rs
+R  project_0/native/crates/runtime/src/winner_tracker.rs -> project_0/native/crates/runtime/src/orchestration/winner_tracker.rs
+M  project_0/scripts/capture.sh
+ M project_0/tests/README.md
+M  project_0/tests/integration/test_measurement_plan.py
+M  project_0/tests/integration/test_run_store.py
+?? bsc/docs/G07_ATTEMPT1_ACCEPTANCE_V2_DRAFT.json
+?? project_0/docs/architecture/runtime_modularization_20261016.md
+?? project_0/docs/evidence/RUNTIME_MODULARIZATION_20261016/

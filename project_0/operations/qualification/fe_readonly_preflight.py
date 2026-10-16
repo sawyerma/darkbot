@@ -60,20 +60,25 @@ def probe(rpc,targets=TARGETS):
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--execute',action='store_true');p.add_argument('--output',type=Path,required=False)
     p.add_argument('--provider-qualification',type=Path)
+    p.add_argument('--replay',type=Path,help='offline saved FE-01 reads; no RPC')
+    p.add_argument('--funding-class',choices=('ZERO_PREFUND_SAME_TX','NO_SWAP_INVENTORY'),default='ZERO_PREFUND_SAME_TX')
     args,operational=p.parse_known_args(argv)
     if '--print-effective-config' in operational:
         with operational_config.resolve(operational) as (_,effective,__):print(json.dumps(effective,indent=2));return 0
     if args.output is None:p.error('--output required for execution')
-    if not args.execute:p.error('--execute only after explicit permission; operational limits are configurable through --profile/--config/CLI')
+    if args.execute == (args.replay is not None):p.error('choose exactly one: --execute after explicit permission, or --replay DIRECTORY offline')
     if args.output.exists():p.error('output exists; preserve prior evidence')
     defaults=[] if operational or any(os.environ.get(k) for k in ('P0_PROFILE','P0_OPERATIONAL_CONFIG_FILE','P0_FE_MODE')) else ['--profile','smoke']
     with operational_config.resolve(operational or defaults) as (config,effective,environment):
+        if args.replay is not None and config['fe_mode']!='full':p.error('--replay requires --fe-mode full')
         if config['fe_mode']=='full':
-            if args.provider_qualification is None:p.error('full requires --provider-qualification FILE (measured FREE_ONLY capacity)')
+            if args.replay is None and args.provider_qualification is None:p.error('full requires --provider-qualification FILE (measured FREE_ONLY capacity)')
             binary=Path(__file__).resolve().parents[2]/'native/target/release/p0-fe-qualify'
             if not binary.is_file():p.error('build release p0-fe-qualify with crate_health first')
+            mode_args=['--replay',str(args.replay)] if args.replay is not None else ['--execute','--provider-qualification',str(args.provider_qualification)]
+            command=[str(binary),*mode_args,'--output',str(args.output),'--funding-class',args.funding_class]
             try:
-                return subprocess.run([str(binary),'--execute','--output',str(args.output),'--provider-qualification',str(args.provider_qualification)],env=environment,timeout=config['limits']['fe_seconds']+config['limits']['shutdown_seconds']).returncode
+                return subprocess.run(command,env=environment,timeout=config['limits']['fe_seconds']+config['limits']['shutdown_seconds']).returncode
             except subprocess.TimeoutExpired:
                 print('FE_FULL_TIME_BUDGET; preserve partial evidence; no qualification');return 2
         return execute(args.output,config,effective,environment)

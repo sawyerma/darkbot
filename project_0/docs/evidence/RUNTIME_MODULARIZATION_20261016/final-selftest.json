@@ -1,0 +1,11 @@
+{
+  "command": [
+    "bash",
+    "project_0/scripts/verify.sh",
+    "--self-test"
+  ],
+  "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+  "exit_code": 0,
+  "seconds": 0.18360112502705306,
+  "sha256": "ef68b5159f7188886e81e3c9692070515ed9fea8ca93c35e14e2ced67a47e38c"
+}

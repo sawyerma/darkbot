@@ -32,15 +32,13 @@ impl ShadowOwner {
                 ) {
                     Ok(v) => v,
                     Err(e) => {
-                        let line = serde_json::json!({
-                            "account": acct.to_string(),
-                            "trigger": trigger,
-                            "slot": slot,
-                            "decision": "Skip",
-                            "loss": "IntegrationRefresh",
-                            "reason": format!("integration refresh plan: {e}")
-                        });
-                        let _ = writeln!(self.records, "{}", line);
+                        let line = RecordEvent::IntegrationPlan {
+                            account: acct,
+                            trigger,
+                            slot,
+                            reason: format!("integration refresh plan: {e}"),
+                        };
+                        self.evidence.emit(OwnerEvidence::Record(line))?;
                         return Ok(false);
                     }
                 };
@@ -49,16 +47,12 @@ impl ShadowOwner {
                     None
                 } else {
                     let Some(base_record) = self.st.get(&acct) else {
-                        let _ = writeln!(
-                            self.records,
-                            "{}",
-                            serde_json::json!({
-                                "account": acct.to_string(),
-                                "decision": "Skip",
-                                "loss": "IntegrationRefresh",
-                                "reason": "candidate account disappeared before projection"
-                            })
-                        );
+                        self.evidence.emit(OwnerEvidence::Record(
+                            RecordEvent::IntegrationSkip {
+                                account: acct,
+                                reason: "candidate account disappeared before projection".into(),
+                            },
+                        ))?;
                         return Ok(false);
                     };
                     let base_account_hash = hash(&base_record.data);
@@ -81,16 +75,12 @@ impl ShadowOwner {
                         ) {
                             Ok(p) => Some(p),
                             Err(e) => {
-                                let _ = writeln!(
-                                    self.records,
-                                    "{}",
-                                    serde_json::json!({
-                                        "account": acct.to_string(),
-                                        "decision": "Skip",
-                                        "loss": "IntegrationRefresh",
-                                        "reason": format!("projected state invalid: {e}")
-                                    })
-                                );
+                                self.evidence.emit(OwnerEvidence::Record(
+                                    RecordEvent::IntegrationSkip {
+                                        account: acct,
+                                        reason: format!("projected state invalid: {e}"),
+                                    },
+                                ))?;
                                 return Ok(false);
                             }
                         }
@@ -105,29 +95,23 @@ impl ShadowOwner {
                                 ) {
                                     Ok(v) if !v.is_empty() => v,
                                     Ok(_) => {
-                                        let _ = writeln!(
-                                            self.records,
-                                            "{}",
-                                            serde_json::json!({
-                                                "account": acct.to_string(),
-                                                "decision": "Skip",
-                                                "loss": "IntegrationRefresh",
-                                                "reason": "integration projection produced zero targets"
-                                            })
-                                        );
+                                        self.evidence.emit(OwnerEvidence::Record(
+                                            RecordEvent::IntegrationSkip {
+                                                account: acct,
+                                                reason:
+                                                    "integration projection produced zero targets"
+                                                        .into(),
+                                            },
+                                        ))?;
                                         return Ok(false);
                                     }
                                     Err(e) => {
-                                        let _ = writeln!(
-                                            self.records,
-                                            "{}",
-                                            serde_json::json!({
-                                                "account": acct.to_string(),
-                                                "decision": "Skip",
-                                                "loss": "IntegrationRefresh",
-                                                "reason": format!("projection targets: {e}")
-                                            })
-                                        );
+                                        self.evidence.emit(OwnerEvidence::Record(
+                                            RecordEvent::IntegrationSkip {
+                                                account: acct,
+                                                reason: format!("projection targets: {e}"),
+                                            },
+                                        ))?;
                                         return Ok(false);
                                     }
                                 };
@@ -135,16 +119,12 @@ impl ShadowOwner {
                             let Some(bh) =
                                 self.blockhash.fresh(self.clock.now_ns(), 30_000_000_000)
                             else {
-                                let _ = writeln!(
-                                    self.records,
-                                    "{}",
-                                    serde_json::json!({
-                                        "account": acct.to_string(),
-                                        "decision": "Skip",
-                                        "loss": "IntegrationRefresh",
-                                        "reason": "projection blockhash stale"
-                                    })
-                                );
+                                self.evidence.emit(OwnerEvidence::Record(
+                                    RecordEvent::IntegrationSkip {
+                                        account: acct,
+                                        reason: "projection blockhash stale".into(),
+                                    },
+                                ))?;
                                 return Ok(false);
                             };
 
@@ -159,30 +139,22 @@ impl ShadowOwner {
                                 match tx::build(&projection_plan, bh.hash, &TxLimits::default()) {
                                     Ok(v) => v,
                                     Err(e) => {
-                                        let _ = writeln!(
-                                            self.records,
-                                            "{}",
-                                            serde_json::json!({
-                                                "account": acct.to_string(),
-                                                "decision": "Skip",
-                                                "loss": "IntegrationRefresh",
-                                                "reason": format!("projection tx build: {e}")
-                                            })
-                                        );
+                                        self.evidence.emit(OwnerEvidence::Record(
+                                            RecordEvent::IntegrationSkip {
+                                                account: acct,
+                                                reason: format!("projection tx build: {e}"),
+                                            },
+                                        ))?;
                                         return Ok(false);
                                     }
                                 };
                             if let Err(e) = tx::sign(&mut built, &[&self.payer]) {
-                                let _ = writeln!(
-                                    self.records,
-                                    "{}",
-                                    serde_json::json!({
-                                        "account": acct.to_string(),
-                                        "decision": "Skip",
-                                        "loss": "IntegrationRefresh",
-                                        "reason": format!("projection tx sign: {e}")
-                                    })
-                                );
+                                self.evidence.emit(OwnerEvidence::Record(
+                                    RecordEvent::IntegrationSkip {
+                                        account: acct,
+                                        reason: format!("projection tx sign: {e}"),
+                                    },
+                                ))?;
                                 return Ok(false);
                             }
 
@@ -199,16 +171,12 @@ impl ShadowOwner {
                                     self.projection_pending.insert(acct);
                                 }
                                 Err(ChannelError::Full(_)) => {
-                                    let _ = writeln!(
-                                        self.records,
-                                        "{}",
-                                        serde_json::json!({
-                                            "account": acct.to_string(),
-                                            "decision": "Skip",
-                                            "loss": "IntegrationRefresh",
-                                            "reason": "projection worker queue full"
-                                        })
-                                    );
+                                    self.evidence.emit(OwnerEvidence::Record(
+                                        RecordEvent::IntegrationSkip {
+                                            account: acct,
+                                            reason: "projection worker queue full".into(),
+                                        },
+                                    ))?;
                                 }
                                 Err(ChannelError::Disconnected(_)) => {
                                     return Err("projection RPC worker disconnected".into());
@@ -234,20 +202,15 @@ impl ShadowOwner {
                             .into_iter()
                             .map(darkbot_project0::integration::kind_name)
                             .collect::<Vec<_>>();
-                        let _ = writeln!(
-                            self.records,
-                            "{}",
-                            serde_json::json!({
-                                "account": acct.to_string(),
-                                "trigger": trigger,
-                                "slot": slot,
-                                "decision": "Skip",
-                                "loss": "IntegrationRefresh",
-                                "integration_kinds": integration_kinds,
-                                "pricing_integration_kinds": pricing_integration_kinds,
-                                "reason": "integration projection pending"
-                            })
-                        );
+                        self.evidence.emit(OwnerEvidence::Record(
+                            RecordEvent::IntegrationPending {
+                                account: acct,
+                                trigger,
+                                slot,
+                                integration_kinds,
+                                pricing_integration_kinds,
+                            },
+                        ))?;
                         return Ok(false);
                     }
                 }
@@ -340,9 +303,7 @@ impl ShadowOwner {
             };
             let _ = &view;
             if let Some(day) = self.ledger.on_account_update(now) {
-                if let Ok(j) = serde_json::to_string(&day) {
-                    let _ = writeln!(self.summaries, "{}", j);
-                }
+                self.evidence.emit(OwnerEvidence::Summary(day))?;
             }
             #[cfg(feature = "crate_health")]
             let health_started_ns = self.clock.now_ns();
@@ -357,54 +318,38 @@ impl ShadowOwner {
                     self.metrics.detect_health_ns_total.saturating_add(elapsed);
                 self.metrics.detect_health_ns_max = self.metrics.detect_health_ns_max.max(elapsed);
             }
-            // [FIX-87] Health evidence as structured JSON. Do not hand-build JSON with format!:
-            // braces/escaping are error-prone and error strings may contain quotes.
-            let line = match &health_result {
+            // Typed snapshot only; the evidence writer owns all JSON encoding.
+            let health_evidence = match &health_result {
                 Ok(h) => {
                     self.ledger.on_health(h.liquidatable, false);
-                    serde_json::json!({
-                        "account": acct.to_string(),
-                        "trigger": trigger,
-                        "t_rx_ns": t_rx,
-                        "slot": slot,
-                        "evaluation_slot": protocol_slot,
-                        "evaluation_unix_s": protocol_now,
-                        "liquidatable": h.liquidatable,
-                        "maint_health_bits": h.maintenance_health,
-                        "equity_assets_bits": h.equity_assets,
-                        "bad_debt": h.is_bad_debt,
-                    })
-                    .to_string()
+                    HealthEvidence::Known {
+                        liquidatable: h.liquidatable,
+                        maintenance_health: h.maintenance_health,
+                        equity_assets: h.equity_assets,
+                        bad_debt: h.is_bad_debt,
+                    }
                 }
                 Err(HealthError::Unavailable) => {
                     self.ledger.on_health(false, false);
-                    serde_json::json!({
-                        "account": acct.to_string(),
-                        "trigger": trigger,
-                        "t_rx_ns": t_rx,
-                        "slot": slot,
-                        "evaluation_slot": protocol_slot,
-                        "evaluation_unix_s": protocol_now,
-                        "decision": "Unavailable",
-                    })
-                    .to_string()
+                    HealthEvidence::Unavailable
                 }
                 Err(e) => {
                     self.ledger
                         .on_health(false, matches!(e, HealthError::Unsupported(_)));
-                    serde_json::json!({
-                        "account": acct.to_string(),
-                        "trigger": trigger,
-                        "t_rx_ns": t_rx,
-                        "slot": slot,
-                        "evaluation_slot": protocol_slot,
-                        "evaluation_unix_s": protocol_now,
-                        "error": e.to_string(),
-                    })
-                    .to_string()
+                    HealthEvidence::Error(e.to_string())
                 }
             };
-            let _ = writeln!(self.records, "{}", line);
+            self.evidence
+                .emit(OwnerEvidence::Record(RecordEvent::Health {
+                    account: acct,
+                    trigger,
+                    t_rx_ns: t_rx,
+                    slot,
+                    evaluation_slot: protocol_slot,
+                    evaluation_unix_s: protocol_now,
+                    result: health_evidence,
+                }))?;
+            self.evidence.check()?;
             // [FIX-1] Pipeline (Shadow): Health → Pläne → Economics → Build → Sign → Send-Boundary.
             let mut pipe = Pipeline {
                 mode: Mode::Shadow,
@@ -474,9 +419,8 @@ impl ShadowOwner {
                     rec.clone(),
                 )));
             }
-            if let Ok(j) = serde_json::to_string(&rec) {
-                let _ = writeln!(self.records, "{}", j);
-            }
+            self.evidence
+                .emit(OwnerEvidence::Opportunity(Box::new(rec.clone())))?;
             // [M3] Ledger + [M2] Watchlist (nur Shadow-relevante Entscheidungen).
             let sim_ok = match rec.decision {
                 Decision::ShadowReady | Decision::ShadowTechnicalReady => Some(true),

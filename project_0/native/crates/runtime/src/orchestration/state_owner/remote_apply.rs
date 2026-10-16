@@ -41,16 +41,14 @@ impl ShadowOwner {
                         RaceOutcome::SameSlotUnknown => self.ledger.on_same_slot(),
                         RaceOutcome::Loss(l) => self.ledger.on_race(false, Some(l), None),
                     }
-                    let line = serde_json::json!({
-                        "race": {
-                            "account": w.account.to_string(),
-                            "winner": win,
-                            "our_sign_slot": w.sign_slot,
-                            "outcome": out,
-                            "expected_net": w.expected_net
-                        }
-                    });
-                    let _ = writeln!(self.records, "{}", line);
+                    let line = RecordEvent::Race {
+                        account: w.account,
+                        winner: win,
+                        our_sign_slot: w.sign_slot,
+                        outcome: out,
+                        expected_net: w.expected_net,
+                    };
+                    self.evidence.emit(OwnerEvidence::Record(line))?;
                 }
             }
         }
@@ -66,9 +64,7 @@ impl ShadowOwner {
                         work.submission.exposure,
                         0,
                     );
-                    if let Ok(j) = serde_json::to_string(&r.record) {
-                        let _ = writeln!(self.records, "{}", j);
-                    }
+                    self.evidence.emit(OwnerEvidence::Reconcile(r.record))?;
                 }
                 None => {
                     work.next_check_unix_s = worker_now_s.saturating_add(1);
@@ -316,34 +312,28 @@ impl ShadowOwner {
                             .collect::<Vec<_>>();
                             (withdraw, pricing)
                         };
-                        let line = serde_json::json!({
-                            "projection": {
-                                "account": done.account.to_string(),
-                                "base_slot": done.base_slot,
-                                "projection_slot": projection_slot,
-                                "projection_unix_s": projection_unix_s,
-                                "status": "ready",
-                                "integration_kinds": integration_kinds,
-                                "pricing_integration_kinds": pricing_integration_kinds,
-                                "simulated_cu": units
-                            }
-                        });
-                        let _ = writeln!(self.records, "{}", line);
+                        let line = RecordEvent::ProjectionReady {
+                            account: done.account,
+                            base_slot: done.base_slot,
+                            projection_slot,
+                            projection_unix_s,
+                            integration_kinds,
+                            pricing_integration_kinds,
+                            simulated_cu: units,
+                        };
+                        self.evidence.emit(OwnerEvidence::Record(line))?;
                     } else {
                         if targeted_probe_result {
                             targeted_status = Some("stale");
                         }
                         self.projection_cache.remove(&done.account);
-                        let line = serde_json::json!({
-                            "projection": {
-                                "account": done.account.to_string(),
-                                "base_slot": done.base_slot,
-                                "projection_slot": projection_slot,
-                                "status": "stale",
-                                "canonical_matches": canonical_matches
-                            }
-                        });
-                        let _ = writeln!(self.records, "{}", line);
+                        let line = RecordEvent::ProjectionStale {
+                            account: done.account,
+                            base_slot: done.base_slot,
+                            projection_slot,
+                            canonical_matches,
+                        };
+                        self.evidence.emit(OwnerEvidence::Record(line))?;
                     }
                 }
                 Err(error) => {
@@ -351,15 +341,12 @@ impl ShadowOwner {
                         targeted_status = Some("failed");
                     }
                     self.projection_cache.remove(&done.account);
-                    let line = serde_json::json!({
-                        "projection": {
-                            "account": done.account.to_string(),
-                            "base_slot": done.base_slot,
-                            "status": "failed",
-                            "error": error
-                        }
-                    });
-                    let _ = writeln!(self.records, "{}", line);
+                    let line = RecordEvent::ProjectionFailed {
+                        account: done.account,
+                        base_slot: done.base_slot,
+                        error,
+                    };
+                    self.evidence.emit(OwnerEvidence::Record(line))?;
                 }
             }
 

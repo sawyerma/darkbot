@@ -1,0 +1,18 @@
+{
+  "command": [
+    "python3",
+    "-B",
+    "-m",
+    "unittest",
+    "discover",
+    "-v",
+    "-s",
+    "project_0/tests",
+    "-t",
+    "project_0"
+  ],
+  "cwd": "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot",
+  "exit_code": 0,
+  "seconds": 12.122616458917037,
+  "sha256": "5a7b2660d63a7c628bbaef713b839ce851541aba54afa79c03ec08c3d9c0925f"
+}

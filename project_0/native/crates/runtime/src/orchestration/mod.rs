@@ -10,3 +10,6 @@ mod state_owner;
 pub mod winner_tracker;
 #[cfg(feature = "crate_health")]
 pub use startup::run;
+
+#[cfg(feature = "crate_health")]
+pub mod fe_replay;

@@ -1,0 +1,259 @@
+{
+  "schema": 1,
+  "runtime_paths": [
+    {
+      "old": "project_0/native/crates/runtime/src/builder.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/execution/builder.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/econ.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/analytics/econ.rs",
+        "project_0/native/crates/runtime/src/execution/observe_only.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/econ_canonical.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/analytics/econ_canonical.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/econ_tests.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/analytics/econ_tests.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/fe_qualification.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/orchestration/fe_qualification.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/fixture.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/analytics/fixture.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/longtail/accounts.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/orchestration/state_owner/accounts.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/longtail/candidates.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/orchestration/state_owner/candidates.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/lookup_tables.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/execution/lookup_tables.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/main_tests.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/orchestration/state_owner/tests.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_gap_tests.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market/market_gap_tests.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_observer.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market/capture.rs",
+        "project_0/native/crates/runtime/src/market/configuration.rs",
+        "project_0/native/crates/runtime/src/market/core.rs",
+        "project_0/native/crates/runtime/src/market/decoding.rs",
+        "project_0/native/crates/runtime/src/market/enrichment.rs",
+        "project_0/native/crates/runtime/src/market/fetch.rs",
+        "project_0/native/crates/runtime/src/market/observer.rs",
+        "project_0/native/crates/runtime/src/market/sink.rs",
+        "project_0/native/crates/runtime/src/market/summary.rs",
+        "project_0/native/crates/runtime/src/market/time.rs",
+        "project_0/native/crates/runtime/src/analytics/market_report.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_observer_tests.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market/observer_tests.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_paths.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market/deployment.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_reconcile_tests.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market/market_reconcile_tests.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_truth_tests.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market/market_truth_tests.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/measurement.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/analytics/measurement.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/one_shot.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/execution/one_shot.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/one_shot/receipts.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/execution/one_shot/receipts.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/one_shot/transport.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/execution/one_shot/transport.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/pending.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/execution/pending.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/pipeline.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/execution/pipeline.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/record.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/analytics/record.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/remote_workers.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/orchestration/remote_workers.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/route.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/execution/route.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/shadow_ledger.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/analytics/shadow_ledger.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/winner.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market/winner.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/winner_tracker.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/orchestration/winner_tracker.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/main.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/main.rs",
+        "project_0/native/crates/runtime/src/orchestration/startup.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/detect.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/dispatch.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/events.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/ingress.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/lifecycle.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/metrics.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/remote_apply.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/shutdown.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/sweep.rs",
+        "project_0/native/crates/runtime/src/orchestration/state_owner/telemetry.rs"
+      ]
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_gap.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market_gap.rs"
+      ],
+      "reason": "retained strict source identity pin, logically owned by market"
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_reconcile.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market_reconcile.rs"
+      ],
+      "reason": "retained strict source identity pin, logically owned by market"
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_truth.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market_truth.rs"
+      ],
+      "reason": "retained strict source identity pin, logically owned by market"
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/market_verification.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/market_verification.rs"
+      ],
+      "reason": "retained strict source identity pin, logically owned by market"
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/run_layout.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/run_layout.rs"
+      ],
+      "reason": "shared persistent layout/public crate facade"
+    },
+    {
+      "old": "project_0/native/crates/runtime/src/lib.rs",
+      "new": [
+        "project_0/native/crates/runtime/src/lib.rs"
+      ],
+      "reason": "shared persistent layout/public crate facade"
+    }
+  ],
+  "unchanged_projects": [
+    "native/crates/common",
+    "native/crates/solana",
+    "native/crates/liquidation"
+  ],
+  "unchanged_top_level": [
+    "operations",
+    "config",
+    "tests/fixtures",
+    "data",
+    "exports",
+    "delete"
+  ],
+  "source_root": "project_0/native/crates/runtime/src"
+}

@@ -29,11 +29,7 @@ impl ShadowOwner {
         }
         // [FIX-46] Letzten (Teil-)Tag beim regulären Shutdown schreiben, damit das Ledger vollständig ist.
         let final_summary = self.ledger.finish();
-        if let Ok(j) = serde_json::to_string(&final_summary) {
-            let _ = writeln!(self.summaries, "{}", j);
-        }
-        let _ = self.summaries.flush();
-        let _ = self.records.flush();
+        let evidence_result = self.evidence.finish(Some(final_summary));
         if self.econ.is_some() || self.operational_window.is_some() {
             self.remote.wait_stopped(Duration::from_secs(
                 darkbot_solana::runtime_config::active()
@@ -41,6 +37,7 @@ impl ShadowOwner {
                     .shutdown_seconds,
             ))?;
         }
+        evidence_result?;
         if let Some(reason) = self.operational_failure.take() {
             return Err(reason.into());
         }
