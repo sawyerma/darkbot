@@ -90,6 +90,57 @@ macro_rules! typed_kinds {
     }};
 }
 
+/// Payload version registered for a typed kind; `None` for kinds without a payload type.
+pub fn registered_schema(kind: u16) -> Option<u16> {
+    fn schema<P: Payload>(_: u16, _: u16, _: &[u8]) -> io::Result<u16> {
+        Ok(P::SCHEMA)
+    }
+    typed_kinds!(kind, 0, &[], schema).ok()
+}
+
+/// Temporary migration paths: kinds that still write the historical value tree (schema 1).
+/// Each entry is an open JFI item; a kind leaves this list when it gets a payload type, and
+/// no kind is ever added to it. Typed kinds and unregistered kinds can never write schema 1.
+pub const LEGACY_WRITABLE: &[u16] = {
+    use journal::kind as k;
+    &[
+        // JFI-FIX-06 (FE-04 financial journal)
+        k::FE04_TRANSITION,
+        k::FE04_LEGACY_IMPORT,
+        // JFI-FIX-03 (market capture)
+        k::MARKET_TRANSACTION,
+        k::MARKET_LIQUIDATION,
+        k::MARKET_COVERAGE,
+        // JFI-FIX-05 (economics, verifier, reporting)
+        k::ECON_SHADOW_EVALUATION,
+        k::ECON_SNAPSHOT,
+        k::ECON_FINAL,
+        k::ECON_OPPORTUNITY,
+        k::ECON_CANONICAL,
+        // remaining journal kinds (measurement, MT0, FE-01, C0 census import)
+        k::MEASUREMENT_PHASE,
+        k::MT0_SNAPSHOT,
+        k::FE01_CONFIG,
+        k::FE01_READ,
+        k::FE01_RESULT,
+        k::C0_CENSUS_ACCOUNT,
+        k::C0_CENSUS_GROUP_ACCOUNT,
+    ]
+};
+
+/// Write admission of the one journal contract (Ticket 1): a typed kind only in its registered
+/// version, schema 1 only for a registered migration path, everything else fails closed.
+pub fn check_write(kind: u16, schema: u16) -> io::Result<()> {
+    match (schema, registered_schema(kind)) {
+        (1, None) if LEGACY_WRITABLE.contains(&kind) => Ok(()),
+        (1, Some(_)) => Err(bad("LEGACY_WRITE_OF_TYPED_KIND")),
+        (1, None) => Err(bad("LEGACY_WRITE_UNREGISTERED_KIND")),
+        (s, Some(r)) if s == r => Ok(()),
+        (_, Some(_)) => Err(bad("PAYLOAD_SCHEMA")),
+        (_, None) => Err(bad("PAYLOAD_KIND_UNTYPED")),
+    }
+}
+
 /// Decodes a typed frame with the type registered for its kind. A typed frame of a kind
 /// without a registered type is rejected: every typed kind must be readable.
 pub fn validate(kind: u16, schema: u16, bytes: &[u8]) -> io::Result<()> {

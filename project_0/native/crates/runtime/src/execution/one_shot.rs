@@ -1029,7 +1029,8 @@ mod tests {
         for (kind, value, code) in illegal {
             fs::write(&file, &good).unwrap();
             let mut w = journal::Writer::resume(&file).unwrap();
-            w.append_value(kind, &value).unwrap();
+            // A foreign or illegal frame as found on disk; the writer itself refuses foreign kinds.
+            w.test_append_historical(kind, &value).unwrap();
             w.sync().unwrap();
             drop(w);
             assert_eq!(Journal::open(&dir, &a.wallet).err().as_deref(), Some(code));

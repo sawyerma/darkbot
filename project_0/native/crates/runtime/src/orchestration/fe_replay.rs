@@ -281,7 +281,12 @@ mod archive_tests {
         fs::create_dir(&dir).unwrap();
         let mut w = Writer::create(&dir.join(FE01_JOURNAL)).unwrap();
         for (k, v) in events {
-            w.append_value(*k, v).unwrap();
+            if crate::analytics::payload::LEGACY_WRITABLE.contains(k) {
+                w.append_value(*k, v).unwrap();
+            } else {
+                // A foreign frame as found on disk; the writer itself refuses foreign kinds.
+                w.test_append_historical(*k, v).unwrap();
+            }
         }
         if let Some(complete) = seal {
             w.seal(complete).unwrap();

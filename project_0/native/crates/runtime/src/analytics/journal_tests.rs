@@ -26,7 +26,11 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
         unix_ns: None,
     };
     let f = w
-        .append_legacy(20, p.clone(), &serde_json::json!({"amount":i128::MIN}))
+        .append_legacy(
+            kind::MEASUREMENT_PHASE,
+            p.clone(),
+            &serde_json::json!({"amount":i128::MIN}),
+        )
         .unwrap();
     let ack = w.sync().unwrap();
     assert_eq!(ack.journal_seq, 0);
@@ -49,7 +53,8 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
 fn unsupported_version_corruption_checksum_and_every_truncation_fail_closed() {
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(1, &serde_json::json!({"a":123})).unwrap();
+    w.append_value(kind::FE04_TRANSITION, &serde_json::json!({"a":123}))
+        .unwrap();
     w.seal(true).unwrap();
     drop(w);
     let good = fs::read(&path).unwrap();
@@ -81,14 +86,20 @@ fn unsupported_version_corruption_checksum_and_every_truncation_fail_closed() {
 fn restart_never_truncates_or_accepts_partial_tail() {
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(1, &serde_json::json!({"intent":"RESERVED"}))
-        .unwrap();
+    w.append_value(
+        kind::FE04_TRANSITION,
+        &serde_json::json!({"intent":"RESERVED"}),
+    )
+    .unwrap();
     w.sync().unwrap();
     drop(w);
     let mut w = Writer::resume(&path).unwrap();
     assert_eq!(w.next_seq(), 1);
-    w.append_value(1, &serde_json::json!({"intent":"UNKNOWN"}))
-        .unwrap();
+    w.append_value(
+        kind::FE04_TRANSITION,
+        &serde_json::json!({"intent":"UNKNOWN"}),
+    )
+    .unwrap();
     w.sync().unwrap();
     drop(w);
     OpenOptions::new()
@@ -114,7 +125,7 @@ fn malformed_length_payload_tags_and_depth_are_rejected() {
     assert!(encode(&v).is_err());
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(1, &Value::Null).unwrap();
+    w.append_value(kind::FE04_TRANSITION, &Value::Null).unwrap();
     drop(w);
     let mut f = OpenOptions::new().write(true).open(&path).unwrap();
     f.seek(SeekFrom::Start(HEADER_LEN)).unwrap();
@@ -128,7 +139,7 @@ fn explicit_export_matches_legacy_jsonl_and_never_overwrites() {
     let export = path.with_extension("jsonl");
     let value = serde_json::json!({"integer":i128::MIN,"unknown":null});
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(9, &value).unwrap();
+    w.append_value(kind::MEASUREMENT_PHASE, &value).unwrap();
     w.seal(true).unwrap();
     super::export(&path, &export, None, false).unwrap();
     assert_eq!(fs::read_to_string(&export).unwrap(), format!("{value}\n"));
@@ -162,7 +173,8 @@ fn export_of_a_damaged_journal_leaves_no_partial_file() {
     let export = path.with_extension("jsonl");
     let mut w = Writer::create(&path).unwrap();
     for n in 0..3 {
-        w.append_value(9, &serde_json::json!({"n":n})).unwrap();
+        w.append_value(kind::MEASUREMENT_PHASE, &serde_json::json!({"n":n}))
+            .unwrap();
     }
     w.sync().unwrap();
     drop(w);
@@ -182,17 +194,35 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     let path = path();
     let dir = path.parent().unwrap().to_path_buf();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(9, &serde_json::json!({"a":1})).unwrap();
-    w.append_value(8, &serde_json::json!({"b":2})).unwrap();
+    w.append_value(kind::MEASUREMENT_PHASE, &serde_json::json!({"a":1}))
+        .unwrap();
+    w.append_value(kind::MT0_SNAPSHOT, &serde_json::json!({"b":2}))
+        .unwrap();
     w.seal(true).unwrap();
     let (a, b) = (dir.join("a.jsonl"), dir.join("b.jsonl"));
     fs::write(&b, "keep").unwrap();
-    assert!(super::export_views(&path, &[(Some(9), &a), (Some(8), &b)], false).is_err());
+    assert!(super::export_views(
+        &path,
+        &[
+            (Some(kind::MEASUREMENT_PHASE), &a),
+            (Some(kind::MT0_SNAPSHOT), &b)
+        ],
+        false
+    )
+    .is_err());
     assert!(!a.exists());
     assert_eq!(fs::read_to_string(&b).unwrap(), "keep");
     fs::remove_file(&b).unwrap();
     assert_eq!(
-        super::export_views(&path, &[(Some(9), &a), (Some(8), &b)], false).unwrap(),
+        super::export_views(
+            &path,
+            &[
+                (Some(kind::MEASUREMENT_PHASE), &a),
+                (Some(kind::MT0_SNAPSHOT), &b)
+            ],
+            false
+        )
+        .unwrap(),
         [1, 1]
     );
     assert_eq!(fs::read_to_string(&a).unwrap(), "{\"a\":1}\n");
@@ -241,7 +271,7 @@ fn persist05_local_writer_benchmark() {
         let started = Instant::now();
         for _ in 0..frames {
             let t = Instant::now();
-            w.append_value(9, value).unwrap();
+            w.append_value(kind::MEASUREMENT_PHASE, value).unwrap();
             lat.push(t.elapsed().as_nanos() as u64);
         }
         let write_s = started.elapsed().as_secs_f64();
@@ -272,7 +302,8 @@ fn persist05_local_writer_benchmark() {
     let mut lat = Vec::new();
     for _ in 0..500 {
         let t = Instant::now();
-        w.append_value(9, &opportunity).unwrap();
+        w.append_value(kind::MEASUREMENT_PHASE, &opportunity)
+            .unwrap();
         w.sync().unwrap();
         lat.push(t.elapsed().as_nanos() as u64);
     }
@@ -291,12 +322,17 @@ fn fsync_error_never_returns_durable_ack_and_poisoning_is_sticky() {
         let path = path();
         let mut writer = Writer::create(&path).unwrap();
         writer
-            .append_value(1, &serde_json::json!({"reservation":"RESERVED"}))
+            .append_value(
+                kind::FE04_TRANSITION,
+                &serde_json::json!({"reservation":"RESERVED"}),
+            )
             .unwrap();
         writer.test_fail_next_sync(kind);
         assert_eq!(writer.sync().unwrap_err().kind(), kind);
         assert!(writer.sync().is_err());
-        assert!(writer.append_value(1, &Value::Null).is_err());
+        assert!(writer
+            .append_value(kind::FE04_TRANSITION, &Value::Null)
+            .is_err());
         assert!(writer.seal(true).is_err());
         let mut reader = Reader::open(&path).unwrap();
         assert!(reader.next_frame().unwrap().is_some());
@@ -327,8 +363,7 @@ fn typed_frames_fail_closed_on_unknown_kind_version_or_truncation() {
     ] {
         let path = dir.join(format!("{name}.p0j"));
         let mut w = Writer::create(&path).unwrap();
-        w.append(kind, schema, Provenance::default(), &bytes)
-            .unwrap();
+        w.test_append_raw(kind, schema, &bytes).unwrap();
         w.sync().unwrap();
         let mut r = Reader::open(&path).unwrap();
         assert!(r.next_frame().is_err(), "{name}");
@@ -345,4 +380,80 @@ fn typed_frames_fail_closed_on_unknown_kind_version_or_truncation() {
     assert!(f.legacy_value().is_err());
     assert!(r.next_frame().unwrap().is_some() && r.sealed && r.complete);
     fs::remove_dir_all(dir).unwrap();
+}
+
+/// Ticket 1: a typed kind is written only natively; schema 1 only on a registered migration path.
+#[test]
+fn write_admission_forbids_legacy_rollback_and_unregistered_kinds() {
+    use super::super::payload::{self, OwnerDiagnostic, LEGACY_WRITABLE, TYPED};
+    let path = path();
+    let mut w = Writer::create(&path).unwrap();
+    let diag = OwnerDiagnostic { line: "x".into() };
+    w.append_typed(Provenance::default(), &diag).unwrap();
+    let rollback = w.append_legacy(
+        kind::OWNER_DIAGNOSTIC,
+        Provenance::default(),
+        &serde_json::json!({"line":"x"}),
+    );
+    assert_eq!(
+        rollback.unwrap_err().to_string(),
+        "LEGACY_WRITE_OF_TYPED_KIND"
+    );
+    assert_eq!(
+        w.append_value(MANIFEST, &Value::Null)
+            .unwrap_err()
+            .to_string(),
+        "LEGACY_WRITE_OF_TYPED_KIND"
+    );
+    assert_eq!(
+        w.append_value(20, &Value::Null).unwrap_err().to_string(),
+        "LEGACY_WRITE_UNREGISTERED_KIND"
+    );
+    let bytes = payload::encode(&diag).unwrap();
+    for (k, schema, code) in [
+        (kind::OWNER_DIAGNOSTIC, TYPED + 1, "PAYLOAD_SCHEMA"),
+        (kind::MARKET_TRANSACTION, TYPED, "PAYLOAD_KIND_UNTYPED"),
+    ] {
+        let e = w
+            .append(k, schema, Provenance::default(), &bytes)
+            .unwrap_err();
+        assert_eq!(e.to_string(), code);
+    }
+    // A refused write leaves the journal usable: sequence and chain continue unchanged.
+    w.append_legacy(kind::MEASUREMENT_PHASE, Provenance::default(), &Value::Null)
+        .unwrap();
+    w.seal(true).unwrap();
+    let mut r = Reader::open(&path).unwrap();
+    let mut frames = 0;
+    while r.next_frame().unwrap().is_some() {
+        frames += 1;
+    }
+    assert_eq!((frames, r.complete), (3, true));
+    // Registry invariant: every journal kind is typed or a migration path, never both.
+    for k in kind::ALL {
+        let typed = payload::registered_schema(*k).is_some();
+        assert!(typed != LEGACY_WRITABLE.contains(k), "kind {k}");
+    }
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+/// Ticket 1: journals written before a kind was migrated replay through the offline reader.
+#[test]
+fn historical_schema_one_frames_of_migrated_kinds_stay_readable() {
+    let path = path();
+    let mut w = Writer::create(&path).unwrap();
+    let historical =
+        serde_json::json!({"account":"x","decision":"Skip","maint_health_bits":i128::MIN});
+    w.test_append_historical(kind::OWNER_RECORD, &historical)
+        .unwrap();
+    w.seal(true).unwrap();
+    let mut r = Reader::open(&path).unwrap();
+    let f = r.next_frame().unwrap().unwrap();
+    assert_eq!((f.kind, f.schema), (kind::OWNER_RECORD, 1));
+    assert_eq!(f.legacy_value().unwrap(), historical);
+    assert!(f
+        .typed::<crate::analytics::evidence::OwnerRecord>()
+        .is_err());
+    assert!(r.next_frame().unwrap().is_some() && r.complete);
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

@@ -5410,3 +5410,13 @@ Code in `d3dabb3` (on top of `c3698bc`).
 Tests: runner analytics 75/75 (2 ignored benchmarks), typed fail-closed test, full runner lib 267/270 before the three legacy-reading evidence tests were moved to typed reads (all pass after). Featureless check PASS.
 
 **JFI overall OPEN.** Still schema 1 (`append_legacy`/`legacy_value`): FE-04 transitions and legacy import (JFI-FIX-06), market capture rows (JFI-FIX-03), C0-E1 econ kinds and their renders for the pinned Python verifier (JFI-FIX-05), measurement phases, MT0 snapshots, FE-01 reads/results, C0 census import; runtime JSON profiles and measurement plans (JFI-FIX-04); Jupiter REST (JFI-FIX-07, decision pending).
+
+## 2026-10-16 — Ticket 1: journal write admission against legacy rollback (LOCAL_PASS, JFI overall OPEN)
+
+Base `91380ad`.
+
+- `payload.rs` holds the one registry: typed kind → payload type → schema version, plus `LEGACY_WRITABLE`, the explicit list of temporary migration paths (FE-04, market capture, econ, measurement, MT0, FE-01, C0 census import — each an open JFI item; kinds only leave it).
+- `Writer::append` admits a typed kind only in its registered version and schema 1 only on a migration path; a schema-1 write of a migrated kind (`LEGACY_WRITE_OF_TYPED_KIND`, incl. manifest), an unregistered kind or a wrong version fails closed and leaves the journal usable. Readers keep accepting historical schema-1 frames of every kind (offline compatibility); frame structure, CRC, hash chain, manifest and provenance unchanged.
+- Tests: native write / refused rollback / unregistered kind / wrong version; historical schema-1 frame of a migrated kind replays via `legacy_value` and is not decodable as typed; registry invariant (every kind typed xor migration path). Tests that need foreign frames on disk write them through test-only writers.
+
+Tests: journal+evidence 23/23, one_shot+fe_replay 26/26, full runner lib 273 PASS / 3 ignored after fixes; all-targets and featureless check PASS.

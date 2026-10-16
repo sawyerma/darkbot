@@ -496,11 +496,43 @@ impl Writer {
         p: Provenance,
         payload: &[u8],
     ) -> io::Result<Appended> {
-        if self.poisoned || self.sealed {
-            return Err(bad("JOURNAL_BLOCKED"));
-        }
         if kind == 0 || schema == 0 {
             return Err(bad("EVENT_SCHEMA_UNSUPPORTED"));
+        }
+        payload::check_write(kind, schema)?;
+        self.write_frame(kind, schema, p, payload)
+    }
+    /// A historical schema-1 frame of any kind, bypassing write admission: only for tests
+    /// that replay journals written before a kind was migrated.
+    #[cfg(test)]
+    pub(crate) fn test_append_historical(
+        &mut self,
+        kind: u16,
+        value: &Value,
+    ) -> io::Result<Appended> {
+        let payload = encode(value)?;
+        self.write_frame(kind, 1, Provenance::default(), &payload)
+    }
+    /// A frame bypassing write admission: only for tests proving that readers reject what the
+    /// writer would refuse.
+    #[cfg(test)]
+    pub(crate) fn test_append_raw(
+        &mut self,
+        kind: u16,
+        schema: u16,
+        payload: &[u8],
+    ) -> io::Result<Appended> {
+        self.write_frame(kind, schema, Provenance::default(), payload)
+    }
+    fn write_frame(
+        &mut self,
+        kind: u16,
+        schema: u16,
+        p: Provenance,
+        payload: &[u8],
+    ) -> io::Result<Appended> {
+        if self.poisoned || self.sealed {
+            return Err(bad("JOURNAL_BLOCKED"));
         }
         // Length prefix first (filled in below), then the body; one buffer, no second copy.
         let mut wire = Vec::with_capacity(4 + FIXED + payload.len() + 36);

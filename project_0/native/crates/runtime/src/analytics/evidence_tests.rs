@@ -530,12 +530,9 @@ fn jfi02_owner_opportunity_writer_cost_typed_vs_json_value() {
                 w.append_typed(Provenance::default(), &record).unwrap();
             } else {
                 let value = serde_json::to_value(&record).unwrap();
-                w.append_legacy(
-                    journal::kind::OWNER_OPPORTUNITY,
-                    Provenance::default(),
-                    &value,
-                )
-                .unwrap();
+                // The former value-tree path, as historical journals were written.
+                w.test_append_historical(journal::kind::OWNER_OPPORTUNITY, &value)
+                    .unwrap();
             }
             lat.push(t.elapsed().as_nanos() as u64);
         }
