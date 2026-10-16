@@ -5384,3 +5384,17 @@ Base `581237e`. [C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md).
 Tests: `census::tests` 2/2 PASS; `cargo check` runner `crate_health,txv1` all targets and featureless PASS. No Mainnet call.
 
 **Gate C0 NOT_PROVEN:** current census run needs Mainnet read-only permission and a measured cost model.
+
+## 2026-10-16 — C0-FIX-01..05: non-blocking census, chain clock, no zero fallbacks (LOCAL_PASS)
+
+Base `50a2767`. [C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md).
+
+- C0-FIX-01: the synchronous owner census is removed. The R127 startup sweep (already one parallel Health pass over all debtors) builds census rows for the armed batch; a single-slot bounded worker classifies/aggregates. No second scan, no state copy, no RPC. Coverage gap, full queue, clock or FeeState error → INCOMPLETE with reason, request kept for the next READY.
+- C0-FIX-02: premium decay, facts and Health errors are reasons (`Premium`, `Facts`, …), never zero.
+- C0-FIX-03: Clock sysvar added as required dependency; sweep, threshold set/bootstrap, oracle projection, detect and census evaluate at its slot/unix time. Missing clock → evaluation error / detect SKIP, never local or zero time. Bookkeeping wall time (`detect`, `remote_apply`) errors instead of `unwrap_or(0)`.
+- C0-FIX-04: per-account facts (banks, oracle setups, integrations, e-mode, observation/TX load, distance to threshold, value); 0.1.12-only facts are `None`.
+- C0-FIX-05: classes renamed `model_*`, output marked `classes=MODEL_NOT_EXECUTABLE`; model validated (realizable 1..=10 000 bps, cost > 0, profit floor ≥ 0, FeeState ≤ 100 %).
+
+Tests: project0 `census::tests` 3/3; runner `census::tests` 2/2, full runner lib 270/270 (2 pre-existing ignored), `crate_health,txv1` and featureless check PASS. Owner cost of the census batch is reported per run (`owner_batch_ms`), not measured on Mainnet (NOT_MEASURED).
+
+Open, outside C0: `detect` builder uses `Pubkey::default()` when the FeeState read fails (P5); `remote_workers` reconcile TTL still uses wall time with `unwrap_or(0)` (P8). Gate C0 unchanged: NOT_PROVEN.

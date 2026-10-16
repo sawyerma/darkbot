@@ -21,22 +21,36 @@ on-chain indexer flags: 61 `was_liquidatable`, 60 `was_underwater`, 5,114 ever l
 
 ## C0-02 — Health classification
 
-**Implemented (2026-10-16):** `darkbot_project0::census` classifies every liability account of the configured group with
-the pinned protocol Health into the PHASENPLAN classes and sums equity assets/liabilities per class:
+**Implemented (2026-10-16, revised by C0-FIX-01..05):** `darkbot_project0::census` classifies every liability account of
+the configured group with the pinned protocol Health. Race/long-tail/premium classes are **model classes**
+(`classes=MODEL_NOT_EXECUTABLE`): a stated potential model, never executable net edge — that stays with the existing
+CandidateInput/`economics::evaluate` pipeline the sweep already feeds.
 
 | Class | Rule |
 |---|---|
-| healthy | Health OK, not liquidatable |
-| premium_driven | healthy, but projected borrow premium erodes maintenance health (0 under 0.1.11: no borrow premium) |
-| race_now | liquidatable and net-positive now at the untagged premium (≤ max(FeeState fee, 5 %)) |
-| long_tail | liquidatable, not net-positive now, net-positive at `t_profitable` if tagged now (0.1.12 ramp; buckets ≤ 1 h / 24 h / 7 d) |
-| uneconomic | liquidatable, not net-positive at any premium up to the asset-surplus cap |
+| healthy | Health OK, not liquidatable; bucketed by distance to the liquidation threshold (maintenance headroom ≤ 1 / 5 / 10 / > 10 % of maintenance liabilities) |
+| model_premium_driven | healthy, projected borrow premium erodes maintenance health (none under 0.1.11: premium decay is `Ok(0)` there) |
+| model_race_now | liquidatable and model-net-positive now at the untagged premium (≤ max(FeeState fee, 5 %), capped by asset surplus) |
+| model_long_tail | liquidatable, not now, model-net-positive at `t_profitable` if tagged now (0.1.12 ramp; buckets ≤ 1 h / 24 h / 7 d) |
+| model_uneconomic | liquidatable, not model-net-positive at any premium up to the cap |
 | bad_debt | unweighted assets < liabilities (bankruptcy path) |
-| unsupported | Health fails closed, by reason: `UnknownLayout` (incl. 0.1.12-resized banks), `Unsupported` oracle/setup, `Stale`, `MissingAccount`, `Crate` |
+| unsupported | fail-closed with reason: `UnknownLayout` (incl. 0.1.12-resized banks), `Unsupported`, `Stale`, `MissingAccount`, `Crate`, `Premium` (decay not determinable — never 0), `Facts` (banks/oracles/integrations/observation not readable) |
 
-It runs once at the first Shadow READY when `P0_C0_CENSUS=1`; `P0_C0_REALIZABLE_BPS`, `P0_C0_FIXED_COST_USD_MICRO` and
-`P0_C0_MIN_PROFIT_USD_MICRO` are mandatory (no default cost model) and are logged with the result as one `c0_census:`
-line. Tests: `census::tests` 2/2 PASS.
+Per account (facts from canonical state, no RPC): active and liability banks, oracle setups, Kamino/Drift/JupLend,
+e-mode banks, observation accounts (TX load; accounts above the `TxLimits` locked-account limit are counted), equity
+assets/liabilities. Costly positions and `PREMIUM_ACTIVE` do not exist in 0.1.11 and are counted as not applicable.
+
+How it runs (C0-FIX-01/03): no second scan. The R127 startup sweep, which already evaluates every debtor once in
+parallel, builds one row per account for the armed batch against one state view and the **Clock sysvar** of the
+canonical state (now a required dependency; every owner-side Health/threshold/projection/detect evaluation uses it,
+never local or zero time). The owner moves the rows into a single-slot bounded queue; a worker classifies and
+aggregates and returns one `c0_census: COMPLETE` line with slot, record slot, clock source, model, `owner_batch_ms` and
+`worker_ms`. Coverage gap, full queue, missing clock or FeeState error → `c0_census: INCOMPLETE reason=…`, retried at the
+next READY; only a complete census retires the request. Model inputs `P0_C0_REALIZABLE_BPS` (1..=10 000),
+`P0_C0_FIXED_COST_USD_MICRO` (> 0), `P0_C0_MIN_PROFIT_USD_MICRO` (≥ 0) are mandatory and validated at startup; values
+taken from historical fee evidence (R124/FIX129) must say so where the run is recorded.
+
+Tests: `census::tests` 3/3, runner `census::tests` 2/2 (worker coverage gap, chain clock decoding), runner lib 270/270.
 
 **Current run: NOT_RUN** (Mainnet read-only permission).
 
@@ -59,8 +73,9 @@ Same 4 h run, 24,569 Shadow opportunities, all with unresolved economics; known 
 | StateRace | 2 |
 
 The market side observed 0 liquidations in 1,682 program transactions (81 truncated logs) → `MARKET_DATA_INCOMPLETE`,
-no winner, latency or competitor evidence. Distance to threshold, oracle/bank exposure, TX complexity and v0/v1 class per
-account are not measured as a census.
+no winner, latency or competitor evidence. Distance to threshold, oracle setups, integrations, e-mode and TX load
+(observation accounts vs. locked-account limit) per account are now census fields (C0-02); exact v0/v1 fit needs the
+built transaction and stays with the pipeline. Current values NOT_RUN.
 
 ## C0-04 — Long-tail / `t_profitable` (model only)
 

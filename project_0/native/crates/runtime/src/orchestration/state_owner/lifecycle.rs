@@ -74,11 +74,8 @@ impl ShadowOwner {
             && !self.threshold_ready
             && !self.threshold_bootstrap.is_empty()
         {
-            let now_s = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-            let slot = self.slot_watch.get();
+            // [C0-FIX-03] canonical chain clock, never local or zero time
+            let clock = chain_clock(&self.st);
             let view = StateView(&self.st);
             let engine = darkbot_project0::health::crate_impl::CrateHealth {
                 state: &view,
@@ -88,7 +85,10 @@ impl ShadowOwner {
                 let Some(account) = self.threshold_bootstrap.pop_front() else {
                     break;
                 };
-                match engine.thresholds(&account, now_s, slot) {
+                match clock
+                    .map_err(|e| darkbot_project0::health::HealthError::Stale(e.to_string()))
+                    .and_then(|c| engine.thresholds(&account, c.unix_timestamp, c.slot))
+                {
                     Ok(t) => {
                         self.threshold_index.set_account(account, &t.thresholds);
                         self.threshold_fallback.remove(&account);

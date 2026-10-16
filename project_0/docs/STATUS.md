@@ -133,7 +133,7 @@ Raw run data lives only on the local machine (`project_0/data/`, not versioned).
 
 **P1B LOCAL_PASS, deployment BLOCKED (2026-10-16):** strict pinned Bank layout, dual-size tests, promotion procedure; RC2 probe type-checks after 4 call-site changes, IDL discriminators equal ([manifest](manifests/UPCOMING_0_1_12.md)). Which release runs on Mainnet: P1A read.
 
-**C0 NOT_PROVEN (2026-10-16):** per-account census classifier and opt-in Shadow hook (`P0_C0_CENSUS=1`) implemented; historical evidence only ([C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md)); current run needs Mainnet read-only permission.
+**C0 NOT_PROVEN (2026-10-16):** census rides on the R127 startup sweep with a bounded worker and the canonical Clock sysvar (C0-FIX-01..05 LOCAL_PASS); model classes only, executable economics stay with the pipeline; historical evidence only ([C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md)); current run needs Mainnet read-only permission.
 
 ## 8. Open development tasks
 

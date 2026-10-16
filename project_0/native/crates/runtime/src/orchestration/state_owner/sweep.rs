@@ -64,32 +64,65 @@ impl ShadowOwner {
                     .health_sweep_checks
                     .saturating_add(unique as u64);
 
-                let now_s = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
-                let evaluation_slot = self.slot_watch.get();
+                // [C0-FIX-03] One canonical chain clock for the whole batch; without it every
+                // account is an evaluation error, never a local-time or zero-time result.
+                let clock = chain_clock(&self.st);
+                let evaluation_slot = clock.map_or_else(|_| self.slot_watch.get(), |c| c.slot);
+                // [C0-FIX-01] The armed startup batch also yields one census row per account.
+                let census_batch = self.c0_census.as_ref().is_some_and(|c| c.armed.is_some());
+                let batch_started = std::time::Instant::now();
+                let program = self.program;
                 let view = StateView(&self.st);
 
                 // CPU-only and independent per account. No RPC, no state mutation.
-                let mut evaluated: Vec<(Pubkey, u64, u64, u64, CandidateHealthState)> =
-                    account_work
-                        .into_par_iter()
-                        .map(|(account, (t_rx_ns, event_slot, input_revision))| {
-                            let engine = darkbot_project0::health::crate_impl::CrateHealth {
-                                state: &view,
-                                group: self.group,
-                            };
-                            darkbot_common::mt0::MT0
-                                .count_health(darkbot_common::mt0::HealthSite::Sweep); // [MT0]
-                            let status = match engine.health(&account, now_s, evaluation_slot) {
-                                Ok(h) if !h.liquidatable => CandidateHealthState::Healthy,
-                                Ok(_) => CandidateHealthState::Liquidatable,
-                                Err(_) => CandidateHealthState::Error,
-                            };
-                            (account, t_rx_ns, event_slot, input_revision, status)
-                        })
-                        .collect();
+                let (mut evaluated, census_rows): (
+                    Vec<(Pubkey, u64, u64, u64, CandidateHealthState)>,
+                    Vec<Option<darkbot_project0::census::CensusRow>>,
+                ) = account_work
+                    .into_par_iter()
+                    .map(|(account, (t_rx_ns, event_slot, input_revision))| {
+                        let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                            state: &view,
+                            group: self.group,
+                        };
+                        darkbot_common::mt0::MT0
+                            .count_health(darkbot_common::mt0::HealthSite::Sweep); // [MT0]
+                        let health = match &clock {
+                            Ok(c) => engine.health(&account, c.unix_timestamp, c.slot),
+                            Err(e) => {
+                                Err(darkbot_project0::health::HealthError::Stale(e.to_string()))
+                            }
+                        };
+                        let status = match &health {
+                            Ok(h) if !h.liquidatable => CandidateHealthState::Healthy,
+                            Ok(_) => CandidateHealthState::Liquidatable,
+                            Err(_) => CandidateHealthState::Error,
+                        };
+                        let row = census_batch.then(|| {
+                            let facts = engine
+                                .observation_accounts(&account)
+                                .map_err(|e| e.to_string())
+                                .and_then(|o| {
+                                    darkbot_project0::census::account_facts(
+                                        &view,
+                                        &program,
+                                        &account,
+                                        o.len(),
+                                    )
+                                });
+                            darkbot_project0::census::CensusRow::new(
+                                health,
+                                engine.premium_decay_per_second(&account),
+                                facts,
+                            )
+                        });
+                        ((account, t_rx_ns, event_slot, input_revision, status), row)
+                    })
+                    .unzip();
+                if census_batch {
+                    let rows = census_rows.into_iter().flatten().collect();
+                    self.submit_c0_census(clock, rows, batch_started.elapsed());
+                }
 
                 // [FIX-135] Preserve bounded repeat work but remove deterministic starvation:
                 // correctness work first; ordinary repeats oldest last-forwarded slot first;

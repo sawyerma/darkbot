@@ -246,3 +246,62 @@ pub(crate) fn liability_account_filters(group: &Pubkey) -> Vec<serde_json::Value
         serde_json::json!({"memcmp": {"offset": 8 + 2248, "bytes": "1"}}),
     ]
 }
+
+/// [C0-FIX-03] Canonical evaluation time: the Clock sysvar of the canonical state (a required
+/// dependency). Health, premium and `t_profitable` evaluate at its slot and unix timestamp; a
+/// missing, foreign or inconsistent clock is an error, never local or zero time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChainClock {
+    pub slot: u64,
+    pub unix_timestamp: i64,
+    /// Slot of the state record that carried this clock (provenance).
+    pub record_slot: u64,
+}
+
+impl ChainClock {
+    pub(crate) fn unix_s(&self) -> u64 {
+        self.unix_timestamp as u64
+    }
+}
+
+/// `solana_sdk::clock::Clock` bincode layout: slot, epoch_start_timestamp, epoch,
+/// leader_schedule_epoch, unix_timestamp (5 × 8 bytes).
+pub(crate) fn decode_clock(
+    owner: &Pubkey,
+    data: &[u8],
+    record_slot: u64,
+) -> Result<ChainClock, &'static str> {
+    if *owner != solana_sdk::sysvar::id() {
+        return Err("CHAIN_CLOCK_OWNER");
+    }
+    let data: &[u8; 40] = data.try_into().map_err(|_| "CHAIN_CLOCK_LAYOUT")?;
+    let slot = u64::from_le_bytes(data[0..8].try_into().expect("len"));
+    let unix_timestamp = i64::from_le_bytes(data[32..40].try_into().expect("len"));
+    if unix_timestamp <= 0 {
+        return Err("CHAIN_CLOCK_TIME");
+    }
+    if slot > record_slot {
+        return Err("CHAIN_CLOCK_SLOT_AHEAD_OF_RECORD");
+    }
+    Ok(ChainClock {
+        slot,
+        unix_timestamp,
+        record_slot,
+    })
+}
+
+pub(crate) fn chain_clock(state: &StateCore) -> Result<ChainClock, &'static str> {
+    let r = state
+        .get(&solana_sdk::sysvar::clock::id())
+        .ok_or("CHAIN_CLOCK_MISSING")?;
+    decode_clock(&r.owner, &r.data, r.slot)
+}
+
+/// Wall time for bookkeeping only (ledger days, TTLs, submission records), never for protocol
+/// evaluation. A host clock before the Unix epoch is an error, not time zero.
+pub(crate) fn wall_unix_s() -> Result<u64, &'static str> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .map_err(|_| "WALL_CLOCK_BEFORE_UNIX_EPOCH")
+}

@@ -212,8 +212,13 @@ impl ShadowOwner {
                         "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={} threshold_trigger={}",
                         indexed_banks, indexed_accounts, unsupported_banks, self.threshold_bootstrap.len(), self.use_threshold_trigger
                     );
-                        if let Some(cfg) = self.c0_census.take() {
-                            self.run_c0_census(cfg);
+                        // [C0-FIX-01] The census rides on the startup sweep batch below.
+                        if let Some(census) = self.c0_census.as_mut() {
+                            if self.use_threshold_trigger {
+                                owner_log!(self, "c0_census: INCOMPLETE reason=THRESHOLD_TRIGGER_MODE_HAS_NO_STARTUP_SWEEP");
+                            } else {
+                                census.arm(indexed_accounts);
+                            }
                         }
                         if !self.use_threshold_trigger {
                             // [R127c] eva01 parity: one full debtor scan at startup so an account
@@ -512,21 +517,20 @@ impl ShadowOwner {
                         if !self.use_threshold_trigger {
                             // R127 Long-Tail admission uses targeted exact-health sweeps.
                         } else {
-                            let now_s = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs() as i64)
-                                .unwrap_or(0);
-                            let slot = self
-                                .st
-                                .get(&account_pk)
-                                .map(|r| r.slot)
-                                .unwrap_or(self.slot_watch.get());
+                            // [C0-FIX-03] canonical chain clock, never local or zero time
+                            let clock = chain_clock(&self.st);
                             let view = StateView(&self.st);
                             let engine = darkbot_project0::health::crate_impl::CrateHealth {
                                 state: &view,
                                 group: self.group,
                             };
-                            match engine.thresholds(&account_pk, now_s, slot) {
+                            match clock
+                                .map_err(|e| {
+                                    darkbot_project0::health::HealthError::Stale(e.to_string())
+                                })
+                                .and_then(|c| {
+                                    engine.thresholds(&account_pk, c.unix_timestamp, c.slot)
+                                }) {
                                 Ok(t) => {
                                     self.threshold_index.set_account(account_pk, &t.thresholds);
                                     self.threshold_fallback.remove(&account_pk);
@@ -689,10 +693,8 @@ impl ShadowOwner {
                 if let Some((dependency, t_rx_ns, event_slot)) = dependency_update {
                     self.metrics.oracle_dependency_updates =
                         self.metrics.oracle_dependency_updates.saturating_add(1);
-                    let now_s = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0);
+                    // [C0-FIX-03] canonical chain clock, never local or zero time
+                    let clock = chain_clock(&self.st);
                     let view = StateView(&self.st);
                     let engine = darkbot_project0::health::crate_impl::CrateHealth {
                         state: &view,
@@ -743,7 +745,17 @@ impl ShadowOwner {
                                 .copied()
                                 .collect();
                             if self.threshold_ready {
-                                match engine.maintenance_risk_price_bits(&bank, now_s, event_slot) {
+                                match clock
+                                    .map_err(|e| {
+                                        darkbot_project0::health::HealthError::Stale(e.to_string())
+                                    })
+                                    .and_then(|c| {
+                                        engine.maintenance_risk_price_bits(
+                                            &bank,
+                                            c.unix_timestamp,
+                                            c.slot,
+                                        )
+                                    }) {
                                     Ok((asset_price, liability_price)) => {
                                         candidates.extend(self.threshold_index.candidates(
                                             &bank,

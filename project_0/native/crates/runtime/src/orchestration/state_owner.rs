@@ -93,7 +93,7 @@ pub(super) struct ShadowOwner {
     eval_slippage_bps: u64,
     zero_prefund_enabled: bool,
     /// [C0-02] Opt-in one-shot census at the first READY; taken when it runs.
-    c0_census: Option<census::CensusConfig>,
+    c0_census: Option<census::CensusRequest>,
     required_dependency_keys: Vec<Pubkey>,
     mt0_reporter: darkbot_common::mt0::Reporter,
     optional_dependency_keys: Vec<Pubkey>,

@@ -131,6 +131,9 @@ pub(super) fn prepare(
     // ProgramData is required in every build: protocol upgrades are a lifecycle concern,
     // independent of whether crate_health is enabled.
     required_dependency_keys.push(program_data);
+    // [C0-FIX-03] The Clock sysvar is canonical state: every protocol evaluation uses its
+    // slot/unix timestamp from the same state generation instead of local wall time.
+    required_dependency_keys.push(solana_sdk::sysvar::clock::id());
     required_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
     required_dependency_keys.dedup();
 
@@ -817,7 +820,10 @@ pub(super) fn prepare(
             .unwrap_or(false)
             || (mode == "shadow"
                 && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false).unwrap_or(false)),
-        c0_census: super::census::config()?,
+        c0_census: match super::census::config()? {
+            Some(c) => Some(super::census::spawn(c, shutdown.clone())?),
+            None => None,
+        },
         mode,
         required_dependency_keys,
         mt0_reporter,

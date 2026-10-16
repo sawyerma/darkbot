@@ -3,11 +3,10 @@ use super::*;
 
 impl ShadowOwner {
     pub(super) fn remote_apply(&mut self) -> Result<u64, Box<dyn std::error::Error>> {
+        #[cfg(feature = "crate_health")]
+        self.poll_c0_census();
         // [FIX-108][R4] Apply completed remote work on the state thread, but never perform RPC here.
-        let worker_now_s = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let worker_now_s = wall_unix_s()?;
 
         while let Some(done) = self.remote.winner_results.try_pop() {
             // [F1] Resolution, rescheduling and TTL expiry (Ok(None) and Err) live in the tracker.

@@ -14,10 +14,8 @@ impl ShadowOwner {
                 None,
             );
             // Health über das marginfi-Crate (Feature crate_health ist für dieses Binary Pflicht).
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+            // Bookkeeping time only; protocol evaluation uses the canonical chain clock below.
+            let now = wall_unix_s()?;
             let view = StateView(&self.st);
 
             // [FIX-111][R6] Integration refreshes are projected by an isolated RPC worker first.
@@ -225,10 +223,21 @@ impl ShadowOwner {
             // [FIX-119][R6] Use both coordinates of the exact simulation Clock for every
             // projected protocol calculation. The original slot remains trigger provenance.
             #[cfg(feature = "crate_health")]
-            let (protocol_now, protocol_slot) = projected_owned
-                .as_ref()
-                .map(|p| p.evaluation_time())
-                .unwrap_or((now, slot));
+            let (protocol_now, protocol_slot) =
+                match projected_owned.as_ref().map(|p| p.evaluation_time()) {
+                    Some(t) => t,
+                    // [C0-FIX-03] canonical chain clock; without it nothing is evaluated.
+                    None => match chain_clock(&self.st) {
+                        Ok(c) => (c.unix_s(), c.slot),
+                        Err(e) => {
+                            owner_log!(
+                                self,
+                                "detect: SKIP account={acct} trigger_slot={slot} reason={e}"
+                            );
+                            return Ok(false);
+                        }
+                    },
+                };
 
             #[cfg(feature = "crate_health")]
             let engine = darkbot_project0::health::crate_impl::CrateHealth {
