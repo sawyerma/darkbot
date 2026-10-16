@@ -1,0 +1,14 @@
+[package]
+name = "darkbot-bsc-record"
+description = "DarkBot BSC typed, versioned binary records (DBREC001): approval contracts, imported legacy inputs, qualification evidence and reports. JSON is never an internal format."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sha2 = { workspace = true }
+
+# Derived human-readable view of any known record (never a source of truth).
+[[bin]]
+name = "dbrec_show"

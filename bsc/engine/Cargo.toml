@@ -16,6 +16,8 @@ members = [
     "crates/execution",
     "crates/qualification",
     "crates/journal",
+    "crates/record",
+    "crates/legacy_import",
     "crates/geth_ipc",
 ]
 

@@ -12,7 +12,7 @@ Stand: 2026-10-16, nach der G0.7-Härtung. **Nichts gesendet. Guard `FROZEN_APPR
 | Builder-Policy (gebunden, unverändert) | `bsc/config/g06a_builder_floor_addendum_2026-10-11.json` | `ca76a93c432a9cee308b07e59170bac390e801caaa8e0697b0b31d405b9bcc87` |
 | Producer-Witness-Quellvertrag, `source_ready=false` (gebunden) | `bsc/config/g07_producer_witness_source_attempt1.json` | `78660c7da9fbb8a2140daf1bca4187881d71f55a914c9fcddfc0e47f287116c4` |
 | Builder-Refresh (informativ) | `bsc/native/evidence/g06a/builder_requirements_refresh_20261016T013943Z.json` | `ef4b72ffd26c07850fda15a8193a744abbd5e33015623a4c8d0818af740287b6` |
-| **Finaler v2-Entwurf (inaktiv, nicht committet)** | `bsc/docs/G07_ATTEMPT1_ACCEPTANCE_V2_DRAFT.json` | `902d4cb93c33fb91364da07fb08108b0f43f51ce8ef9e7388e9573571ce70cc2` |
+| **Finaler v2-Entwurf (inaktiv, nicht committet)** | `bsc/docs/G07_ATTEMPT1_ACCEPTANCE_V2_DRAFT.json` | `1b66718d476e938fc6c936cf3c0b4d49ebc59cc2765c043600130b05de8ccf42` |
 | G0.7-Härtung (Code) | `bsc/engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/`, `src/qualification_capture.rs`, Tests | committet in `dda7c9b`, `51e2a5e`, `9ab5fe6` |
 | Byte-Schutz | `bsc/config/.gitattributes`, `bsc/native/evidence/g06a/.gitattributes` | `-text` |
 
@@ -38,7 +38,7 @@ Stand: 2026-10-16, nach der G0.7-Härtung. **Nichts gesendet. Guard `FROZEN_APPR
 - **G0.6a-Final-DRY:** PASS (DRY1–DRY4, Null-Egress) bei Head 127865760, Nonces 0/0.
 - **Readiness 2026-10-16:** `PASS_READ_ONLY`, `FUNDING=PASS` gegen die exakten DRY-Parameter, keine Drift.
 - **Builder-Refresh (nur lesend):** Jeder auffrischbare explizite Floor liegt bei 50 000 000 wei. Blockzeit 450 ms (BEP-619). `maxBlockNumber` ist bei beiden Buildern ein Integer. Kein Builder-Endpunkt wurde kontaktiert.
-- **Guard-Replik mit dem neuen Entwurf `902d4cb9…`:**
+- **Guard-Replik mit dem neuen Entwurf `1b66718d…`:**
   - Mit Guard = Entwurfs-Hash bestehen alle Prüfungen.
   - Unter `UNARMED` wird abgelehnt, ebenso mit falscher DRY-Bindung, Versuch 2, 1 wei Vorverbrauch oder 1 wei zu hohem Gas.
 - **Signierte Bytes unverändert:**
@@ -106,12 +106,17 @@ Stand: 2026-10-16, nach der G0.7-Härtung. **Nichts gesendet. Guard `FROZEN_APPR
      - Ein Kill in den wenigen Millisekunden zwischen Freigabe und erster Fassung hinterlässt einen leeren Platzhalter. Rekonstruktion dann aus Latch-Body und Journal.
      - Ein Send-Thread, dem nach erfolgreichem Start das Go-Signal nicht zugestellt werden kann, ließe den Prozess hängen. Laut Code ist das nicht erreichbar.
      - iCloud: Das Repo liegt nicht in der iCloud-Desktop-Kopie. Bitte trotzdem bestätigen, dass die Desktop-Synchronisierung aus ist.
-2. **Builder-Semantik (Pre-Arm-Checks 6 und 10).** Für die Einreichungs-Seite ist ein Probe mit nicht ausführbaren Bundles vorbereitet, aber nicht gesendet: [G07_BUILDER_PROBE_APPROVAL.md](G07_BUILDER_PROBE_APPROVAL.md), Plan-SHA-256 `77957205…`. Unqualifiziert sind:
-   - `noMerge`/`positionFirst`;
-   - ob 48Club `maxTimestamp` zusammen mit `maxBlockNumber` akzeptiert und `maxBlockNumber` dann weiter erzwingt;
-   - die Annahme eines Bundles mit 0,05 gwei und Tip 0.
+2. **Builder-Semantik (Pre-Arm-Checks 6 und 10) — Probe gelaufen (2026-10-16, 18:34Z, Plan `77957205…`, Evidence `5636c463…`).** Ergebnis in [G07_BUILDER_PROBE_APPROVAL.md](G07_BUILDER_PROBE_APPROVAL.md) §9.
+   - **Bei Einreichung bestanden (beide Builder):** Methode, Format, Token; Ablaufwerte werden vor den Transaktionen geprüft, und die G0.7-Werte wurden angenommen.
+   - **BlockRazor:** Preisschranke genau 0,05 gwei; G0.7 besteht sie ohne Spielraum.
+   - **Check 10:** 48Club erkennt `noMerge`/`positionFirst` als typisierte Felder.
+   - **Noch UNQUALIFIED, deine Annahme nötig:**
+     - 48Club-Preis (keine Einreichungsprüfung beobachtbar);
+     - Wirkung von `noMerge`/`positionFirst`;
+     - Durchsetzung von `maxBlockNumber` neben `maxTimestamp` beim Blockbau;
+     - Annahme eines gültigen Bundles und Aufnahme.
 
-   Entweder erlaubst du ausdrücklich eine Probe mit nicht ausführbaren Fixtures bei den Buildern, oder du akzeptierst die Checks als UNQUALIFIED; eine Ablehnung wäre dann ADAPT. Alternative zu `+1`: `maxTimestamp` ohne +1, enger, aber mit dem oben genannten Ablehnungsrisiko.
+     Eine spätere Ablehnung durch einen Builder wäre ADAPT.
 3. **Restrisiken akzeptieren:**
    - null Spielraum (Gas = Floor = Netzpreis = Obergrenze);
    - niedrigster Prioritätsrang;

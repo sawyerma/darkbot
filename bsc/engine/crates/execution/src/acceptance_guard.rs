@@ -1,13 +1,23 @@
-use serde_json::Value;
-use sha2::{Digest, Sha256};
+use darkbot_bsc_record::schema::g07::contract;
+use darkbot_bsc_record::{Record, RecordError, decode, hex, sha256};
 use std::{fs, path::Path};
 
-pub const V2_RELATIVE_PATH: &str = "bsc/config/g01_mainnet_acceptance_proposal_v2.json";
+/// The binary acceptance contract of G0.7 attempt 1 (DBREC001). The JSON
+/// v1/v2 contracts and the JSON v2 draft are legacy and never authority.
+pub const V3_RELATIVE_PATH: &str = "bsc/config/g07_attempt1_acceptance_v3.dbrec";
 
-// Deliberately UNARMED. Only a dedicated post-DRY, explicitly approved commit may
-// replace this with the SHA-256 of the exact final v2 bytes. Environment variables
-// and CLI flags are never execution authority.
-pub const FROZEN_APPROVED_V2_SHA256: &str = "UNARMED";
+// Deliberately UNARMED. Only a dedicated, explicitly approved arming commit may
+// replace this with the SHA-256 of the exact final v3 record bytes. Environment
+// variables and CLI flags are never execution authority.
+pub const FROZEN_APPROVED_V3_SHA256: &str = "UNARMED";
+
+/// The hashes binding one input at runtime: the SHA-256 of the binary
+/// record file G0.7 read and the legacy SHA-256 that record carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputHashes {
+    pub record_sha256: String,
+    pub legacy_sha256: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct LiveGuardContext {
@@ -27,10 +37,10 @@ pub struct LiveGuardContext {
     pub dry_pass_all: bool,
     pub capture_prearmed: bool,
     pub producer_witness_contract_bound: bool,
-    pub dry_evidence_sha256: String,
-    pub preflight_evidence_sha256: String,
-    pub builder_policy_evidence_sha256: String,
-    pub producer_witness_source_contract_sha256: String,
+    pub dry_evidence: InputHashes,
+    pub preflight_evidence: InputHashes,
+    pub builder_policy_evidence: InputHashes,
+    pub producer_witness_source: InputHashes,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +48,7 @@ pub struct ContractSnapshot {
     pub sha256: String,
     pub approved: bool,
     pub execution_ready: bool,
+    pub attempt_id: String,
     pub launcher_address: String,
     pub buyer_address: String,
     pub chain_id: u64,
@@ -53,132 +64,100 @@ pub struct ContractSnapshot {
     pub max_direct_builder_tip_wei: u128,
     pub capture_required: bool,
     pub producer_witness_contract_required: bool,
-    pub dry_evidence_sha256: Option<String>,
-    pub preflight_evidence_sha256: Option<String>,
-    pub builder_policy_evidence_sha256: Option<String>,
-    pub producer_witness_source_contract_sha256: Option<String>,
+    pub dry_evidence: InputHashes,
+    pub preflight_evidence: InputHashes,
+    pub builder_policy_evidence: InputHashes,
+    pub producer_witness_source: InputHashes,
 }
 
 fn norm_addr(s: &str) -> String {
     s.trim().to_ascii_lowercase()
 }
 
-fn req_bool(v: &Value, ptr: &str) -> Result<bool, String> {
-    v.pointer(ptr)
-        .and_then(Value::as_bool)
-        .ok_or_else(|| format!("missing/bad bool at {ptr}"))
-}
-
-fn req_u64(v: &Value, ptr: &str) -> Result<u64, String> {
-    v.pointer(ptr)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("missing/bad u64 at {ptr}"))
-}
-
-fn req_string(v: &Value, ptr: &str) -> Result<String, String> {
-    v.pointer(ptr)
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| format!("missing/bad string at {ptr}"))
-}
-
-fn opt_string(v: &Value, ptr: &str) -> Option<String> {
-    v.pointer(ptr)
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn req_u128_string(v: &Value, ptr: &str) -> Result<u128, String> {
-    req_string(v, ptr)?
-        .parse::<u128>()
-        .map_err(|e| format!("bad u128 at {ptr}: {e}"))
-}
-
-fn req_u64_string(v: &Value, ptr: &str) -> Result<u64, String> {
-    req_string(v, ptr)?
-        .parse::<u64>()
-        .map_err(|e| format!("bad u64 at {ptr}: {e}"))
-}
-
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
+    hex(&sha256(bytes))
 }
 
-pub fn inspect_v2(path: &Path) -> Result<ContractSnapshot, String> {
-    if path != Path::new(V2_RELATIVE_PATH) {
-        return Err(format!(
-            "wrong acceptance contract path: expected exactly {V2_RELATIVE_PATH}, got {}",
-            path.display()
-        ));
+fn address(r: &Record, tag: u16) -> Result<String, RecordError> {
+    Ok(format!("0x{}", hex(&r.address(tag)?)))
+}
+
+fn word_hex(r: &Record, tag: u16) -> Result<String, RecordError> {
+    Ok(hex(&r.b256(tag)?))
+}
+
+/// A U256 field that must fit a u128 (every budget value does).
+fn u128_of(r: &Record, tag: u16) -> Result<u128, RecordError> {
+    let word = r.u256(tag)?;
+    if word[..16].iter().any(|b| *b != 0) {
+        return Err(RecordError(format!("acceptance contract tag {tag} exceeds u128")));
     }
+    let mut low = [0u8; 16];
+    low.copy_from_slice(&word[16..]);
+    Ok(u128::from_be_bytes(low))
+}
 
-    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let sha256 = sha256_hex(&bytes);
-    let v: Value =
-        serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))?;
-
-    if v.get("schema_version").and_then(Value::as_u64) != Some(2) {
-        return Err("acceptance contract schema_version must be 2".into());
-    }
-
-    Ok(ContractSnapshot {
-        sha256,
-        approved: req_bool(&v, "/authorization/approved")?,
-        execution_ready: req_bool(&v, "/authorization/execution_ready")?,
-        launcher_address: req_string(&v, "/authorization/launcher_address")?,
-        buyer_address: req_string(&v, "/authorization/buyer_address")?,
-        chain_id: req_u64(&v, "/scope/chain_id")?,
-        portal_address: req_string(&v, "/scope/portal_expected_from_current_evidence")?,
-        max_attempts: req_u64(&v, "/attempts/maximum")?,
-        max_buy_value_per_attempt: req_u128_string(
-            &v,
-            "/budget_wei_proposal/max_buy_value_per_attempt",
-        )?,
-        max_launch_value_per_attempt: req_u128_string(
-            &v,
-            "/budget_wei_proposal/max_launch_call_value_per_attempt",
-        )?,
-        max_launch_gas_limit: req_u64_string(&v, "/budget_wei_proposal/max_launch_gas_limit")?,
-        max_buy_gas_limit: req_u64_string(&v, "/budget_wei_proposal/max_buy_gas_limit")?,
-        max_gas_price_wei: req_u128_string(&v, "/budget_wei_proposal/max_gas_price_wei")?,
-        max_total_per_attempt: req_u128_string(&v, "/budget_wei_proposal/max_total_per_attempt")?,
-        absolute_budget_wei: req_u128_string(
-            &v,
-            "/budget_wei_proposal/absolute_max_total_all_four_attempts",
-        )?,
-        max_direct_builder_tip_wei: req_u128_string(
-            &v,
-            "/economics_validation/bid_policy/max_direct_builder_tip_wei",
-        )?,
-        // v2 predates the explicit machine-readable capture flags. Until the
-        // final arming revision adds them, the safe/default interpretation is
-        // that both are mandatory, matching the master-plan §§9/11 contract.
-        capture_required: v
-            .pointer("/retention_observability/pre_arm_bounded_capture_required")
-            .and_then(Value::as_bool)
-            .unwrap_or(true),
-        producer_witness_contract_required: v
-            .pointer("/retention_observability/producer_witness_contract_required_before_execution")
-            .and_then(Value::as_bool)
-            .unwrap_or(true),
-        dry_evidence_sha256: opt_string(&v, "/authorization/evidence_bindings/dry_evidence_sha256"),
-        preflight_evidence_sha256: opt_string(
-            &v,
-            "/authorization/evidence_bindings/preflight_evidence_sha256",
-        ),
-        builder_policy_evidence_sha256: opt_string(
-            &v,
-            "/authorization/evidence_bindings/builder_policy_evidence_sha256",
-        ),
-        producer_witness_source_contract_sha256: opt_string(
-            &v,
-            "/authorization/evidence_bindings/producer_witness_source_contract_sha256",
-        ),
+fn hashes(r: &Record, record: u16, legacy: u16) -> Result<InputHashes, RecordError> {
+    Ok(InputHashes {
+        record_sha256: word_hex(r, record)?,
+        legacy_sha256: word_hex(r, legacy)?,
     })
 }
 
-fn verify_bound_sha256(label: &str, frozen: Option<&str>, runtime: &str) -> Result<(), String> {
-    let frozen = frozen.ok_or_else(|| format!("v2 evidence binding missing: {label}"))?;
+fn snapshot(r: &Record, sha256: String) -> Result<ContractSnapshot, RecordError> {
+    Ok(ContractSnapshot {
+        sha256,
+        approved: r.bool(contract::APPROVED)?,
+        execution_ready: r.bool(contract::EXECUTION_READY)?,
+        attempt_id: r.text(contract::ATTEMPT_ID)?.to_string(),
+        launcher_address: address(r, contract::LAUNCHER)?,
+        buyer_address: address(r, contract::BUYER)?,
+        chain_id: r.u64(contract::CHAIN_ID)?,
+        portal_address: address(r, contract::PORTAL)?,
+        max_attempts: r.u64(contract::MAX_ATTEMPTS)?,
+        max_buy_value_per_attempt: u128_of(r, contract::MAX_BUY_VALUE)?,
+        max_launch_value_per_attempt: u128_of(r, contract::MAX_LAUNCH_VALUE)?,
+        max_launch_gas_limit: r.u64(contract::MAX_LAUNCH_GAS_LIMIT)?,
+        max_buy_gas_limit: r.u64(contract::MAX_BUY_GAS_LIMIT)?,
+        max_gas_price_wei: u128_of(r, contract::MAX_GAS_PRICE_WEI)?,
+        max_total_per_attempt: u128_of(r, contract::MAX_TOTAL_PER_ATTEMPT)?,
+        absolute_budget_wei: u128_of(r, contract::ABSOLUTE_BUDGET)?,
+        max_direct_builder_tip_wei: u128_of(r, contract::MAX_DIRECT_BUILDER_TIP_WEI)?,
+        capture_required: r.bool(contract::CAPTURE_REQUIRED)?,
+        producer_witness_contract_required: r.bool(contract::WITNESS_CONTRACT_REQUIRED)?,
+        dry_evidence: hashes(r, contract::DRY_RECORD_SHA256, contract::DRY_LEGACY_SHA256)?,
+        preflight_evidence: hashes(
+            r,
+            contract::PREFLIGHT_RECORD_SHA256,
+            contract::PREFLIGHT_LEGACY_SHA256,
+        )?,
+        builder_policy_evidence: hashes(
+            r,
+            contract::BUILDER_POLICY_RECORD_SHA256,
+            contract::BUILDER_POLICY_LEGACY_SHA256,
+        )?,
+        producer_witness_source: hashes(
+            r,
+            contract::WITNESS_SOURCE_RECORD_SHA256,
+            contract::WITNESS_SOURCE_LEGACY_SHA256,
+        )?,
+    })
+}
+
+pub fn inspect_v3(path: &Path) -> Result<ContractSnapshot, String> {
+    if path != Path::new(V3_RELATIVE_PATH) {
+        return Err(format!(
+            "wrong acceptance contract path: expected exactly {V3_RELATIVE_PATH}, got {}",
+            path.display()
+        ));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    decode(&contract::SCHEMA, &bytes)
+        .and_then(|r| snapshot(&r, sha256_hex(&bytes)))
+        .map_err(|e| format!("acceptance contract {}: {e}", path.display()))
+}
+
+fn verify_bound_sha256(label: &str, frozen: &str, runtime: &str) -> Result<(), String> {
     let valid = frozen.len() == 64
         && frozen.bytes().all(|b| b.is_ascii_hexdigit())
         && runtime.len() == 64
@@ -196,28 +175,41 @@ fn verify_bound_sha256(label: &str, frozen: Option<&str>, runtime: &str) -> Resu
     Ok(())
 }
 
+fn verify_input(label: &str, frozen: &InputHashes, runtime: &InputHashes) -> Result<(), String> {
+    verify_bound_sha256(
+        &format!("{label}_record_sha256"),
+        &frozen.record_sha256,
+        &runtime.record_sha256,
+    )?;
+    verify_bound_sha256(
+        &format!("{label}_legacy_sha256"),
+        &frozen.legacy_sha256,
+        &runtime.legacy_sha256,
+    )
+}
+
 pub fn verify_live_authorization(
     path: &Path,
     ctx: &LiveGuardContext,
 ) -> Result<ContractSnapshot, String> {
-    let snap = inspect_v2(path)?;
+    let snap = inspect_v3(path)?;
 
-    if FROZEN_APPROVED_V2_SHA256 == "UNARMED" {
+    if FROZEN_APPROVED_V3_SHA256 == "UNARMED" {
         return Err(
-            "live guard is deliberately UNARMED: no approved v2 SHA-256 is compiled in".into(),
+            "live guard is deliberately UNARMED: no approved v3 SHA-256 is compiled in".into(),
         );
     }
-    if snap.sha256 != FROZEN_APPROVED_V2_SHA256 {
+    if snap.sha256 != FROZEN_APPROVED_V3_SHA256 {
         return Err(format!(
-            "v2 SHA-256 mismatch: file={} frozen={}",
-            snap.sha256, FROZEN_APPROVED_V2_SHA256
+            "v3 SHA-256 mismatch: file={} frozen={}",
+            snap.sha256, FROZEN_APPROVED_V3_SHA256
         ));
     }
     if !snap.approved {
-        return Err("v2 authorization.approved is not true".into());
+        return Err("v3 authorization.approved is not true".into());
     }
     if !snap.execution_ready {
-        return Err("v2 authorization.execution_ready is not true".into());
+        return Err("v3 authorization.execution_ready is not true".into());
     }
     if !ctx.dry_pass_all {
         return Err("DRY-1..DRY-4 are not all PASS".into());
@@ -229,32 +221,28 @@ pub fn verify_live_authorization(
         return Err("producer-witness schema/source contract is not bound for this attempt; actual producer access may arrive asynchronously".into());
     }
 
-    verify_bound_sha256(
-        "dry_evidence_sha256",
-        snap.dry_evidence_sha256.as_deref(),
-        &ctx.dry_evidence_sha256,
+    verify_input("dry_evidence", &snap.dry_evidence, &ctx.dry_evidence)?;
+    verify_input(
+        "preflight_evidence",
+        &snap.preflight_evidence,
+        &ctx.preflight_evidence,
     )?;
-    verify_bound_sha256(
-        "preflight_evidence_sha256",
-        snap.preflight_evidence_sha256.as_deref(),
-        &ctx.preflight_evidence_sha256,
+    verify_input(
+        "builder_policy_evidence",
+        &snap.builder_policy_evidence,
+        &ctx.builder_policy_evidence,
     )?;
-    verify_bound_sha256(
-        "builder_policy_evidence_sha256",
-        snap.builder_policy_evidence_sha256.as_deref(),
-        &ctx.builder_policy_evidence_sha256,
-    )?;
-    verify_bound_sha256(
-        "producer_witness_source_contract_sha256",
-        snap.producer_witness_source_contract_sha256.as_deref(),
-        &ctx.producer_witness_source_contract_sha256,
+    verify_input(
+        "producer_witness_source",
+        &snap.producer_witness_source,
+        &ctx.producer_witness_source,
     )?;
 
     if norm_addr(&snap.launcher_address) != norm_addr(&ctx.launcher_address) {
-        return Err("runtime launcher does not equal frozen v2 launcher".into());
+        return Err("runtime launcher does not equal frozen v3 launcher".into());
     }
     if norm_addr(&snap.buyer_address) != norm_addr(&ctx.buyer_address) {
-        return Err("runtime buyer does not equal frozen v2 buyer".into());
+        return Err("runtime buyer does not equal frozen v3 buyer".into());
     }
     if norm_addr(&snap.launcher_address) == norm_addr(&snap.buyer_address) {
         return Err("launcher and buyer must be distinct".into());
@@ -334,9 +322,9 @@ mod tests {
     #[test]
     fn frozen_hash_is_unarmed_or_sha256() {
         assert!(
-            FROZEN_APPROVED_V2_SHA256 == "UNARMED"
-                || (FROZEN_APPROVED_V2_SHA256.len() == 64
-                    && FROZEN_APPROVED_V2_SHA256
+            FROZEN_APPROVED_V3_SHA256 == "UNARMED"
+                || (FROZEN_APPROVED_V3_SHA256.len() == 64
+                    && FROZEN_APPROVED_V3_SHA256
                         .bytes()
                         .all(|b| b.is_ascii_hexdigit()))
         );

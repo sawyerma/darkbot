@@ -1,6 +1,11 @@
 //! Read-only chain access: JSON-RPC reads, the current read-only preflight
 //! compared against the frozen DRY baseline, and the head poller whose read of
 //! the next block immediately before the release sets the bundle expiry.
+//!
+//! JSON exists here only on the RPC wire: requests are fixed templates of
+//! hex fields, and every response is decoded in this module into typed
+//! values (`rpc_quantity`, `rpc_data`, `rpc_receipt`, `parse_head`, the
+//! preflight record); no JSON value leaves it.
 
 use super::*;
 
@@ -35,12 +40,17 @@ pub(crate) fn child_command(program: &str) -> Command {
     cmd
 }
 
-/// Never panics and never hangs (curl connect 2 s, whole call 5 s): it also
-/// serves the receipt polling after the release.
-pub(crate) fn rpc(method: &str, params: Value) -> Result<Value, String> {
+/// The JSON-RPC wire boundary: posts one request (curl: connect 2 s, whole
+/// call 5 s) and returns its `result`. Never panics and never hangs: it also
+/// serves the receipt polling after the release. The wire value never
+/// leaves this module; the typed readers below decode it.
+fn rpc(method: &str, params: &str) -> Result<serde_json::Value, String> {
     let rpc = env::var("BSC_MAINNET_RPC_HTTPS")
         .map_err(|_| "BSC_MAINNET_RPC_HTTPS is required".to_string())?;
-    let body = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}).to_string();
+    let body = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":{},"params":{params}}}"#,
+        wire_string(method)
+    );
     // -q first: no .curlrc, whatever the environment.
     let out = child_command("curl")
         .args([
@@ -64,7 +74,7 @@ pub(crate) fn rpc(method: &str, params: Value) -> Result<Value, String> {
             String::from_utf8_lossy(&out.stderr)
         ));
     }
-    let v: Value = serde_json::from_slice(&out.stdout)
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
         .map_err(|e| format!("invalid JSON-RPC response for {method}: {e}"))?;
     if let Some(err) = v.get("error") {
         return Err(format!("JSON-RPC {method}: {err}"));
@@ -74,16 +84,147 @@ pub(crate) fn rpc(method: &str, params: Value) -> Result<Value, String> {
         .ok_or_else(|| format!("JSON-RPC {method}: missing result"))
 }
 
-pub(crate) fn hex_u64(v: &Value) -> u64 {
-    u64::from_str_radix(
-        v.as_str()
-            .expect("expected hex string")
-            .trim_start_matches("0x"),
-        16,
-    )
-    .expect("bad hex u64")
+fn wire_quantity(v: &serde_json::Value, what: &str) -> Result<U256, String> {
+    v.as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .and_then(|h| U256::from_str_radix(h, 16).ok())
+        .ok_or_else(|| format!("{what} is not a hex quantity"))
 }
 
+fn wire_data(v: &serde_json::Value, what: &str) -> Result<Vec<u8>, String> {
+    v.as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .and_then(|h| hex::decode(h).ok())
+        .ok_or_else(|| format!("{what} is not hex data"))
+}
+
+fn small(q: U256, what: &str) -> Result<u64, String> {
+    u64::try_from(q).map_err(|_| format!("{what} exceeds u64"))
+}
+
+/// A hex quantity result. Never panics.
+pub(crate) fn rpc_quantity(method: &str, params: &str) -> Result<U256, String> {
+    rpc(method, params).and_then(|v| wire_quantity(&v, method))
+}
+
+/// A hex quantity result that must fit a u64. Never panics.
+pub(crate) fn rpc_u64(method: &str, params: &str) -> Result<u64, String> {
+    rpc_quantity(method, params).and_then(|q| small(q, method))
+}
+
+/// A hex data result. Never panics.
+pub(crate) fn rpc_data(method: &str, params: &str) -> Result<Vec<u8>, String> {
+    rpc(method, params).and_then(|v| wire_data(&v, method))
+}
+
+/// What G0.7 records of an observed receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReceiptSeen {
+    pub(crate) status: u64,
+    pub(crate) block_number: u64,
+    pub(crate) transaction_index: u64,
+}
+
+/// The receipt of `hash`, `None` while there is none. Never panics.
+pub(crate) fn rpc_receipt(hash: &str) -> Result<Option<ReceiptSeen>, String> {
+    let v = rpc("eth_getTransactionReceipt", &format!("[{}]", wire_string(hash)))?;
+    if v.is_null() {
+        return Ok(None);
+    }
+    let field = |name: &str| {
+        v.get(name)
+            .ok_or_else(|| format!("receipt lacks {name}"))
+            .and_then(|x| wire_quantity(x, name))
+            .and_then(|q| small(q, name))
+    };
+    Ok(Some(ReceiptSeen {
+        status: field("status")?,
+        block_number: field("blockNumber")?,
+        transaction_index: field("transactionIndex")?,
+    }))
+}
+
+/// Number and hash of the latest block.
+fn latest_block() -> Result<(u64, [u8; 32]), String> {
+    let block = rpc("eth_getBlockByNumber", r#"["latest",false]"#)?;
+    let number = block
+        .get("number")
+        .ok_or("latest block lacks number")
+        .map_err(str::to_string)
+        .and_then(|n| wire_quantity(n, "latest block number"))
+        .and_then(|n| small(n, "latest block number"))?;
+    let hash = block
+        .get("hash")
+        .ok_or("latest block lacks hash")
+        .map_err(str::to_string)
+        .and_then(|h| wire_data(h, "latest block hash"))
+        .and_then(|h| <[u8; 32]>::try_from(h).map_err(|_| "latest block hash is not 32 bytes".into()))?;
+    Ok((number, hash))
+}
+
+const TAX_V3_IMPL_EXPECTED: &str = "0x024f18294970b5c76c0691b87f138a0317156422";
+// keccak256 selectors, independently frozen from the canonical signatures.
+const GET_QUOTE_CONFIG_SELECTOR: &str = "0x26ef20d5"; // getQuoteTokenConfiguration(address)
+const GET_FEE_RATE_SELECTOR: &str = "0x84e5eed0"; // getFeeRate()
+const TAX_ON_BC_SELECTOR: &str = "0x1d31e153"; // enableTaxOnBondingCurve()
+const VERSION_SELECTOR: &str = "0x54fd4d50"; // version()
+const EIP1967_IMPLEMENTATION_SLOT: &str =
+    "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+// The preflight's own ceilings (the frozen v2 values of the retired node
+// preflight); the guard enforces the approved contract separately.
+const MAX_LAUNCH_GAS_LIMIT: u64 = 6_603_270;
+const MAX_BUY_GAS_LIMIT: u64 = 3_000_000;
+const MAX_SIGNED_GAS_PRICE_WEI: u64 = 1_000_000_000;
+const MAX_BUY_VALUE_WEI: u64 = 1_000_000_000_000_000;
+const MAX_LAUNCH_VALUE_WEI: u128 = 0;
+const MAX_ATTEMPT_RESERVE_WEI: u128 = 10_603_270_000_000_000;
+
+/// The UTF-8 string an ABI-encoded `string` return value holds.
+pub(crate) fn decode_abi_string(raw: &[u8]) -> Result<String, String> {
+    let word = |at: usize| -> Result<usize, String> {
+        raw.get(at..at + 32)
+            .map(|w| U256::from_be_slice(w))
+            .and_then(|w| usize::try_from(w).ok())
+            .ok_or_else(|| "short or oversized ABI string".to_string())
+    };
+    let offset = word(0)?;
+    let len = word(offset)?;
+    let start = offset.checked_add(32).ok_or("bad ABI string offset")?;
+    let end = start.checked_add(len).ok_or("bad ABI string length")?;
+    let bytes = raw.get(start..end).ok_or("truncated ABI string")?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| "ABI string is not UTF-8".into())
+}
+
+/// The first `count` 32-byte words of an ABI return value.
+pub(crate) fn abi_words(raw: &[u8], count: usize) -> Result<Vec<U256>, String> {
+    if raw.len() < count * 32 {
+        return Err(format!("ABI result shorter than {count} words"));
+    }
+    Ok(raw.chunks(32).take(count).map(U256::from_be_slice).collect())
+}
+
+fn eth_call(to: &str, data: &str) -> Result<Vec<u8>, String> {
+    rpc_data(
+        "eth_call",
+        &format!(r#"[{{"to":{},"data":{}}},"latest"]"#, wire_string(to), wire_string(data)),
+    )
+}
+
+fn code_at(address: &str, what: &str) -> Result<Vec<u8>, String> {
+    let code = rpc_data(
+        "eth_getCode",
+        &format!(r#"[{},"latest"]"#, wire_string(address)),
+    )?;
+    if code.is_empty() {
+        return Err(format!("{what} has no code at latest"));
+    }
+    Ok(code)
+}
+
+/// The read-only Mainnet preflight (the port of the retired node preflight
+/// `bsc/tools/g06a_preflight_readonly.cjs`, field for field): deployment,
+/// launch economics and the funding of the exact signed parameters, as a
+/// preflight record comparable with the imported DRY baseline.
 pub(crate) fn run_current_preflight(
     launcher: Address,
     buyer: Address,
@@ -92,97 +233,174 @@ pub(crate) fn run_current_preflight(
     buy_gas_limit: u64,
     launch_value: u128,
     buy_value: u64,
-) -> Value {
-    let path = format!("/tmp/darkbot-g07-preflight-{}.json", std::process::id());
-    let out = child_command("node")
-        .arg("bsc/tools/g06a_preflight_readonly.cjs")
-        .arg(&path)
-        .env("BSC_MAINNET_RPC_HTTPS", req_env("BSC_MAINNET_RPC_HTTPS"))
-        .env("DARKBOT_G06A_LAUNCHER_ADDRESS", launcher.to_string())
-        .env("DARKBOT_G06A_BUYER_ADDRESS", buyer.to_string())
-        .env("DARKBOT_G06A_GAS_PRICE_WEI", gas_price.to_string())
-        .env(
-            "DARKBOT_G06A_LAUNCH_GAS_LIMIT",
-            launch_gas_limit.to_string(),
+) -> Result<Record, String> {
+    use darkbot_bsc_record::Value as V;
+    use schema::g06a::preflight as f;
+    if gas_price > MAX_SIGNED_GAS_PRICE_WEI
+        || launch_gas_limit > MAX_LAUNCH_GAS_LIMIT
+        || buy_gas_limit > MAX_BUY_GAS_LIMIT
+        || launch_value > MAX_LAUNCH_VALUE_WEI
+        || buy_value > MAX_BUY_VALUE_WEI
+    {
+        return Err("planned preflight parameters exceed the frozen v2 ceilings".into());
+    }
+    let chain = rpc_u64("eth_chainId", "[]")?;
+    if chain != CHAIN_ID {
+        return Err(format!("wrong chain: expected {CHAIN_ID}, got {chain}"));
+    }
+    let (block_number, block_hash) = latest_block()?;
+    let portal_code = code_at(PORTAL, "portal")?;
+    let impl_code = code_at(TAX_V3_IMPL_EXPECTED, "tax-v3 implementation")?;
+    let network_gas_price = rpc_quantity("eth_gasPrice", "[]")?;
+    let portal_version = decode_abi_string(&eth_call(PORTAL, VERSION_SELECTOR)?)?;
+    let slot = rpc_data(
+        "eth_getStorageAt",
+        &format!(
+            r#"[{},{},"latest"]"#,
+            wire_string(PORTAL),
+            wire_string(EIP1967_IMPLEMENTATION_SLOT)
+        ),
+    )?;
+    if slot.len() != 32 {
+        return Err("invalid EIP-1967 implementation slot".into());
+    }
+    let portal_impl = Address::from_slice(&slot[12..]);
+    if portal_impl == Address::ZERO {
+        return Err("portal implementation slot is zero".into());
+    }
+    let portal_impl_code = code_at(&portal_impl.to_string(), "portal implementation")?;
+    let quote = abi_words(
+        &eth_call(PORTAL, &format!("{GET_QUOTE_CONFIG_SELECTOR}{}", "0".repeat(64)))?,
+        5,
+    )?;
+    let fees = abi_words(&eth_call(PORTAL, GET_FEE_RATE_SELECTOR)?, 2)?;
+    let tax = abi_words(&eth_call(PORTAL, TAX_ON_BC_SELECTOR)?, 1)?;
+    if quote[0] != U256::from(1u64) {
+        return Err("native BNB quote token is not enabled".into());
+    }
+    if fees.iter().any(|bps| *bps >= U256::from(10_000u64)) {
+        return Err("invalid protocol fee bps".into());
+    }
+    let account = |who: Address| -> Result<(u64, U256), String> {
+        let wire = wire_string(&who.to_string());
+        Ok((
+            rpc_u64("eth_getTransactionCount", &format!(r#"[{wire},"pending"]"#))?,
+            rpc_quantity("eth_getBalance", &format!(r#"[{wire},"latest"]"#))?,
+        ))
+    };
+    let (launcher_nonce, launcher_balance) = account(launcher)?;
+    let (buyer_nonce, buyer_balance) = account(buyer)?;
+
+    let launcher_required = U256::from(launch_value)
+        + U256::from(launch_gas_limit) * U256::from(gas_price);
+    let buyer_required = U256::from(buy_value) + U256::from(buy_gas_limit) * U256::from(gas_price);
+    let word = |x: U256| V::U256(x.to_be_bytes());
+    let sha = |bytes: &[u8]| V::B256(darkbot_bsc_record::sha256(bytes));
+    let count = |bytes: &[u8]| u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    let mut d = Draft::new(&f::SCHEMA);
+    d.set(f::CHAIN_ID, chain)
+        .set(f::LATEST_BLOCK_NUMBER, block_number)
+        .set(f::LATEST_BLOCK_HASH, V::B256(block_hash))
+        .set(f::PORTAL, V::Address(Address::from_str(PORTAL).map_err(|e| e.to_string())?.into_array()))
+        .set(f::PORTAL_CODE_BYTES, count(&portal_code))
+        .set(f::PORTAL_CODE_SHA256, sha(&portal_code))
+        .set(f::PORTAL_VERSION, portal_version)
+        .set(f::PORTAL_IMPLEMENTATION, V::Address(portal_impl.into_array()))
+        .set(f::PORTAL_IMPLEMENTATION_CODE_BYTES, count(&portal_impl_code))
+        .set(f::PORTAL_IMPLEMENTATION_CODE_SHA256, sha(&portal_impl_code))
+        .set(
+            f::TAX_V3_IMPL,
+            V::Address(Address::from_str(TAX_V3_IMPL_EXPECTED).map_err(|e| e.to_string())?.into_array()),
         )
-        .env("DARKBOT_G06A_BUY_GAS_LIMIT", buy_gas_limit.to_string())
-        .env("DARKBOT_G06A_LAUNCH_VALUE_WEI", launch_value.to_string())
-        .env("DARKBOT_G06A_BUY_VALUE_WEI", buy_value.to_string())
-        .output()
-        .expect("failed to execute G0.6a readonly Mainnet preflight");
-    let _ = fs::remove_file(&path);
-    assert!(
-        out.status.success(),
-        "Mainnet readonly preflight failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).expect("readonly preflight emitted invalid JSON")
+        .set(f::TAX_V3_IMPL_CODE_BYTES, count(&impl_code))
+        .set(f::TAX_V3_IMPL_CODE_SHA256, sha(&impl_code))
+        .set(f::GAS_PRICE_WEI, word(network_gas_price))
+        .set(f::QUOTE_ENABLED, word(quote[0]))
+        .set(f::QUOTE_DEFAULT_CURVE_ID, word(quote[1]))
+        .set(f::QUOTE_ALTERNATIVE_CURVE_ID, word(quote[2]))
+        .set(f::QUOTE_NATIVE_TO_QUOTE_SWAP_TYPE, word(quote[3]))
+        .set(f::QUOTE_DEX_ID, word(quote[4]))
+        .set(f::FEE_BUY_BPS, word(fees[0]))
+        .set(f::FEE_SELL_BPS, word(fees[1]))
+        .set(f::TAX_ON_BONDING_CURVE_ENABLED, tax[0] != U256::ZERO)
+        .set(f::LAUNCHER_ADDRESS, V::Address(launcher.into_array()))
+        .set(f::LAUNCHER_PENDING_NONCE, launcher_nonce)
+        .set(f::LAUNCHER_BALANCE_WEI, word(launcher_balance))
+        .set(f::BUYER_ADDRESS, V::Address(buyer.into_array()))
+        .set(f::BUYER_PENDING_NONCE, buyer_nonce)
+        .set(f::BUYER_BALANCE_WEI, word(buyer_balance))
+        .set(f::ADDRESSES_BOUND, true)
+        .set(f::DISTINCT, launcher != buyer)
+        .set(f::LAUNCHER_REQUIRED_WEI, word(launcher_required))
+        .set(f::BUYER_REQUIRED_WEI, word(buyer_required))
+        .set(f::COMBINED_RESERVE_WEI, word(launcher_required + buyer_required))
+        .set(f::PROPOSAL_MAX_RESERVE_WEI, V::u128(MAX_ATTEMPT_RESERVE_WEI))
+        .set(f::PROFILE_GAS_PRICE_WEI, word(U256::from(gas_price)))
+        .set(f::PROFILE_LAUNCH_GAS_LIMIT, launch_gas_limit)
+        .set(f::PROFILE_BUY_GAS_LIMIT, buy_gas_limit)
+        .set(f::PROFILE_LAUNCH_VALUE_WEI, V::u128(launch_value))
+        .set(f::PROFILE_BUY_VALUE_WEI, word(U256::from(buy_value)))
+        .set(f::LAUNCHER_SUFFICIENT, launcher_balance >= launcher_required)
+        .set(f::BUYER_SUFFICIENT, buyer_balance >= buyer_required)
+        .set(
+            f::FUNDING_PASS,
+            launcher_balance >= launcher_required && buyer_balance >= buyer_required,
+        )
+        .set(f::NETWORK_ACTIONS, "READ_ONLY_RPC_ONLY")
+        .set(f::SIGNED_TX_SUBMITTED, false)
+        .set(f::BUNDLE_SUBMITTED, false);
+    let bytes = d.encode().map_err(|e| e.0)?;
+    darkbot_bsc_record::decode(&f::SCHEMA, &bytes).map_err(|e| e.0)
 }
 
-pub(crate) fn assert_same_preflight_field(baseline: &Value, current: &Value, ptr: &str) {
-    let a = baseline
-        .pointer(ptr)
-        .unwrap_or_else(|| panic!("baseline preflight missing {ptr}"));
-    let b = current
-        .pointer(ptr)
-        .unwrap_or_else(|| panic!("current preflight missing {ptr}"));
-    assert_eq!(a, b, "preflight deployment/economics drift at {ptr}");
+fn field_name(tag: u16) -> &'static str {
+    schema::g06a::preflight::SCHEMA
+        .field(tag)
+        .map_or("?", |f| f.name)
 }
 
 pub(crate) fn validate_current_preflight(
-    baseline: &Value,
-    current: &Value,
+    baseline: &Record,
+    current: &Record,
     launcher: Address,
     buyer: Address,
     signed_gas_price: u64,
 ) -> (u64, u64, u64) {
-    assert_eq!(
-        req_str(current, "/schema"),
-        "darkbot.g06a.preflight-readonly.v2"
-    );
-    assert_eq!(req_u64_string(current, "/chain_id"), CHAIN_ID);
-    assert_eq!(norm(req_str(current, "/portal")), norm(PORTAL));
-    assert_eq!(
-        norm(req_str(current, "/launcher_address")),
-        norm(&launcher.to_string())
-    );
-    assert_eq!(
-        norm(req_str(current, "/buyer_address")),
-        norm(&buyer.to_string())
-    );
-    assert!(req_bool(current, "/wallet_qualification/addresses_bound"));
-    assert!(req_bool(current, "/wallet_qualification/distinct"));
-    assert!(req_bool(current, "/wallet_qualification/funding_pass"));
+    use schema::g06a::preflight as f;
+    let address = |r: &Record, tag: u16| r.address(tag).map(Address::from).unwrap_or_else(|e| panic!("{e}"));
+    let flag = |tag: u16| current.bool(tag).unwrap_or_else(|e| panic!("{e}"));
+    let int = |tag: u16| current.u64(tag).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(int(f::CHAIN_ID), CHAIN_ID);
+    assert_eq!(address(current, f::PORTAL), Address::from_str(PORTAL).unwrap());
+    assert_eq!(address(current, f::LAUNCHER_ADDRESS), launcher);
+    assert_eq!(address(current, f::BUYER_ADDRESS), buyer);
+    assert!(flag(f::ADDRESSES_BOUND));
+    assert!(flag(f::DISTINCT));
+    assert!(flag(f::FUNDING_PASS));
 
-    for ptr in [
-        "/chain_id",
-        "/portal",
-        "/portal_code_sha256",
-        "/portal_version",
-        "/portal_implementation",
-        "/portal_implementation_code_sha256",
-        "/tax_v3_impl",
-        "/tax_v3_impl_code_sha256",
-        "/native_quote_configuration",
-        "/protocol_fee_bps",
-        "/tax_on_bonding_curve_enabled",
-    ] {
-        assert_same_preflight_field(baseline, current, ptr);
+    for tag in f::DRIFT_CHECKED {
+        let a = baseline
+            .get(tag)
+            .unwrap_or_else(|| panic!("baseline preflight missing {}", field_name(tag)));
+        let b = current
+            .get(tag)
+            .unwrap_or_else(|| panic!("current preflight missing {}", field_name(tag)));
+        assert_eq!(a, b, "preflight deployment/economics drift at {}", field_name(tag));
     }
 
-    let launcher_nonce = req_u64_string(current, "/launcher_pending_nonce");
-    let buyer_nonce = req_u64_string(current, "/buyer_pending_nonce");
-
-    let network_gas_price = req_u64_string(current, "/gas_price_wei");
+    let network_gas_price = current
+        .u256(f::GAS_PRICE_WEI)
+        .map(U256::from_be_bytes)
+        .unwrap_or_else(|e| panic!("{e}"));
     assert!(
-        network_gas_price <= signed_gas_price,
+        network_gas_price <= U256::from(signed_gas_price),
         "current network gas price {network_gas_price} exceeds signed gas price {signed_gas_price}"
     );
 
     (
-        launcher_nonce,
-        buyer_nonce,
-        req_u64_string(current, "/latest_block_number"),
+        int(f::LAUNCHER_PENDING_NONCE),
+        int(f::BUYER_PENDING_NONCE),
+        int(f::LATEST_BLOCK_NUMBER),
     )
 }
 
@@ -258,11 +476,11 @@ pub(crate) struct ChainHead {
 /// Parses an `eth_getBlockByNumber` result. The millisecond time is derived
 /// from `timestamp` and `mixHash` (BEP-520: the milliseconds sit in the low
 /// bytes of mixHash) and must equal `milliTimestamp` where the node reports it.
-pub(crate) fn parse_head(block: &Value) -> Result<ChainHead, String> {
+pub(crate) fn parse_head(block: &serde_json::Value) -> Result<ChainHead, String> {
     let text = |name: &str| {
         block
             .get(name)
-            .and_then(Value::as_str)
+            .and_then(serde_json::Value::as_str)
             .ok_or_else(|| format!("head block lacks {name}"))
     };
     let quantity = |name: &str| -> Result<u64, String> {
@@ -364,7 +582,7 @@ impl HeadPoller {
         Ok(())
     }
 
-    fn round_trip(&mut self) -> Result<String, String> {
+    fn round_trip(&mut self) -> Result<Vec<u8>, String> {
         if self.stream.is_none() {
             self.reconnect()?;
         }
@@ -403,8 +621,8 @@ impl HeadPoller {
         let read_ns = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         let mono_ms = i64::try_from(self.epoch.elapsed().as_millis()).unwrap_or(i64::MAX);
         let local_unix_ms = unix_time_ms();
-        let v: Value =
-            serde_json::from_str(&body).map_err(|e| format!("head response is not JSON: {e}"))?;
+        let v: serde_json::Value = serde_json::from_slice(&body)
+            .map_err(|e| format!("head response is not JSON: {e}"))?;
         if let Some(err) = v.get("error") {
             return Err(format!("head request JSON-RPC error: {err}"));
         }
@@ -548,7 +766,9 @@ mod tests {
 
     const HASH: &str = "0xb8f3cec4f6f874338f00ca12a8679df9eb1485ee6f3b8b3d2bb800f89cc4cb01";
 
-    fn block(number: u64, seconds: u64, millis: u16) -> Value {
+    use serde_json::json;
+
+    fn block(number: u64, seconds: u64, millis: u16) -> serde_json::Value {
         json!({
             "number": format!("0x{number:x}"),
             "hash": HASH,

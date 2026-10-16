@@ -694,6 +694,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
  "darkbot-bsc-journal",
+ "darkbot-bsc-record",
  "darkbot-bsc-trading",
  "hex",
  "k256",
@@ -715,6 +716,14 @@ name = "darkbot-bsc-journal"
 version = "0.1.0"
 
 [[package]]
+name = "darkbot-bsc-legacy-import"
+version = "0.1.0"
+dependencies = [
+ "darkbot-bsc-record",
+ "serde_json",
+]
+
+[[package]]
 name = "darkbot-bsc-qualification"
 version = "0.1.0"
 dependencies = [
@@ -728,6 +737,13 @@ dependencies = [
  "ring",
  "rustls",
  "serde_json",
+]
+
+[[package]]
+name = "darkbot-bsc-record"
+version = "0.1.0"
+dependencies = [
+ "sha2",
 ]
 
 [[package]]

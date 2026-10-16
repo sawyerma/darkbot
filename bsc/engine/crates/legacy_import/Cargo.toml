@@ -1,0 +1,15 @@
+[package]
+name = "darkbot-bsc-legacy-import"
+description = "Offline, audited import of the immutable hash-bound legacy JSON evidence of G0.7 into DBREC001 records. The only place in the workspace that reads legacy JSON; never part of a runtime path."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+darkbot-bsc-record = { path = "../record" }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "g07_legacy_import"
+path = "src/main.rs"

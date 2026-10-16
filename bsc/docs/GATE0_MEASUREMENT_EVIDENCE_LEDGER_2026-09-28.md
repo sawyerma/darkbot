@@ -3998,3 +3998,34 @@ LIVE                          = BLOCKED
 ```
 
 Unverändert gelassen: `ACCEPTANCE_MAP.json` (versionierter Vertrag; seine Zähler `323` und `next_step` sind älter als STATUS.md, werden aber nicht nachträglich umgeschrieben).
+
+---
+
+## 2026-10-16 — Builder-Probe für G0.7-Pre-Arm-Checks 6/10: Ergebnis
+
+Einmaliger, vom Nutzer freigegebener Lauf des Plans `77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5` (11 nicht ausführbare Bundles: Nonce 2^40, Wegwerf-Konten mit Guthaben 0; Freigabevorlage G07_BUILDER_PROBE_APPROVAL.md), 2026-10-16 18:34:11–18:34:49Z, Exit 0, Status `COMPLETE`. Evidence: `bsc/native/evidence/g06a/builder_probe_20261016T183411Z/probe.evidence.json`, SHA-256 `5636c463d6247b90d17d9bc977a6e50aae499434a17d241f16f05b87ba95cc7f`.
+
+| Fall | Antwort (roh, gekürzt) | Klasse | Lesart |
+|---|---|---|---|
+| 1 `48club-g07-shape` | `-32000 nonce too high … tx: 1099511627776 state: 0` | `EXECUTION_REJECTED` | Methode und Format geparst; da 48Club die Ablaufwerte vor den Transaktionen prüft (Fälle 4/5), haben die G0.7-Werte HEAD+2/MAXTS die Einreichungsprüfung bestanden |
+| 2 `48club-no-maxtimestamp` | `nonce too high` | `EXECUTION_REJECTED` | `maxTimestamp` ist bei Einreichung optional |
+| 3 `48club-maxtimestamp-minus-one` | `nonce too high` (Phase 950 ms) | `EXECUTION_REJECTED` | wie erwartet ohne Aussage (Phase ≥ 100 ms) |
+| 4 `48club-past-block` | `-38000 the maxBlockNumber should not be less than currentBlockNum` | `EXPIRY_REJECTED` | 48Club prüft `maxBlockNumber` bei Einreichung |
+| 5 `48club-past-timestamp` | `-38000 the maxTimestamp(1792175670) should not be less than currentBlockTimestamp(1792175672)` | `EXPIRY_REJECTED` | 48Club prüft `maxTimestamp ≥` aktuelle Blockzeit |
+| 6 `48club-underpriced-control` | `nonce too high` (1 wei) | `EXECUTION_REJECTED` | keine Preisschranke vor der Simulation; Preis UNQUALIFIED |
+| 7 `48club-nomerge-type-control` | `-32602 … cannot unmarshal string into Go struct field SendBundleArgs.noMerge of type bool` | `FORMAT_REJECTED` | Feld erkannt (typisiertes bool); Wirkung UNQUALIFIED |
+| 8 `48club-positionfirst-type-control` | `-32602 … SendBundleArgs.positionFirst of type bool` | `FORMAT_REJECTED` | Feld erkannt (typisiertes bool); Wirkung UNQUALIFIED |
+| 9 `blockrazor-g07-shape` | `-32000 nonce too high … tx: 1099511627776 state: 0` | `EXECUTION_REJECTED` | Methode, Format und Token angenommen; HEAD+2 hat die Einreichungsprüfung bestanden (Fall 10) |
+| 10 `blockrazor-past-block` | `-38000 the maxBlockNumber should be larger than currentBlockNum` | `EXPIRY_REJECTED` | BlockRazor prüft `maxBlockNumber > ` aktueller Block bei Einreichung |
+| 11 `blockrazor-underpriced-control` | `-38000 gasprice must be at least 0.05 gwei` | `PRICE_REJECTED` | Preisschranke vor der Simulation genau 0,05 gwei; G0.7 mit 0,05 gwei besteht sie (Fall 9), ohne Spielraum |
+
+```text
+CHECK_6_METHOD_FORMAT_EXPIRY_AT_SUBMISSION   = PASS (48Club, BlockRazor)
+BLOCKRAZOR_SUBMISSION_GAS_FLOOR             = 0.05 gwei exactly; G0.7 price passes (zero margin)
+48CLUB_SUBMISSION_PRICE_CHECK               = NOT OBSERVED -> price acceptance UNQUALIFIED
+CHECK_10_NOMERGE_POSITIONFIRST              = FIELDS RECOGNIZED (typed bool); effect UNQUALIFIED
+BUILDING_TIME_ENFORCEMENT / INCLUSION        = UNQUALIFIED (not observable with non-executable bundles)
+REAL_MAINNET_BUY                             = NOT_EXECUTED
+```
+
+Folgen: v2-Entwurf (inaktiv) auf `1b66718d476e938fc6c936cf3c0b4d49ebc59cc2765c043600130b05de8ccf42` fortgeschrieben (Checks 6/7/10); die verbleibenden UNQUALIFIED-Punkte brauchen die ausdrückliche Annahme des Nutzers vor einer Freigabe.

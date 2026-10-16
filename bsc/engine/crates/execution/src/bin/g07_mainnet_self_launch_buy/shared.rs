@@ -5,14 +5,14 @@
 pub(crate) use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 pub(crate) use alloy_sol_types::{SolCall, sol};
 pub(crate) use darkbot_bsc_execution::{
-    acceptance_guard::{V2_RELATIVE_PATH, sha256_hex},
+    acceptance_guard::{InputHashes, V3_RELATIVE_PATH, sha256_hex},
     qualification_capture::CaptureClock,
 };
+pub(crate) use darkbot_bsc_record::{Draft, Record, schema};
 pub(crate) use k256::ecdsa::SigningKey;
 pub(crate) use rustls::{
     ClientConfig, ClientConnection, RootCertStore, StreamOwned, pki_types::ServerName,
 };
-pub(crate) use serde_json::{Value, json};
 pub(crate) use std::{
     env, fs,
     io::{Read, Write},
@@ -83,13 +83,30 @@ pub(crate) struct SignedLegacy {
     pub(crate) hash: B256,
 }
 
+/// A builder's JSON-RPC answer, decoded at the transport boundary into
+/// typed values; the raw body is not kept, only its SHA-256 and length.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct BuilderAnswer {
+    pub(crate) status_line: String,
+    pub(crate) status_code: Option<u16>,
+    pub(crate) body_sha256: [u8; 32],
+    pub(crate) body_len: u64,
+    /// A 32-byte `result` (a bundle hash).
+    pub(crate) result_hash: Option<[u8; 32]>,
+    /// Any other `result`, as bounded text.
+    pub(crate) result_text: Option<String>,
+    pub(crate) error_code: Option<i64>,
+    pub(crate) error_message: Option<String>,
+    /// Why the body could not be decoded as a JSON-RPC response.
+    pub(crate) undecodable: Option<String>,
+}
+
 #[derive(Debug)]
 pub(crate) struct ProviderResult {
     pub(crate) provider: &'static str,
     pub(crate) write_started_ns: Option<u64>,
     pub(crate) write_flushed_ns: Option<u64>,
     pub(crate) bytes_may_have_left: bool,
-    pub(crate) http_status: Option<String>,
-    pub(crate) response_body: Option<String>,
+    pub(crate) answer: Option<BuilderAnswer>,
     pub(crate) error: Option<String>,
 }

@@ -1,6 +1,6 @@
 # G0.7 Builder-Probe — Freigabevorlage (Pre-Arm-Checks 6 und 10)
 
-Stand: 2026-10-16, nach der Korrektur der Evidence-Fehlerbehandlung. **Nichts gesendet.** Der Probe ist vorbereitet, in drei Runden adversariell geprüft und getestet, aber nur als Trockenlauf gelaufen: keine Verbindung, kein Secret gelesen, nichts geschrieben. Der frühere Plan `15ee10f9…` (Commit `9ab5fe6`) ist überholt und wird nicht mehr akzeptiert. Gesendet wird erst, wenn du genau diesen Plan freigibst:
+Stand: 2026-10-16. **Probe einmal gesendet (18:34Z) mit deiner Freigabe; Ergebnis in §9.** Vorher: Der Probe ist vorbereitet, in drei Runden adversariell geprüft und getestet, aber nur als Trockenlauf gelaufen: keine Verbindung, kein Secret gelesen, nichts geschrieben. Der frühere Plan `15ee10f9…` (Commit `9ab5fe6`) ist überholt und wird nicht mehr akzeptiert. Gesendet wird erst, wenn du genau diesen Plan freigibst:
 
 **Plan-SHA-256: `77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5`**
 
@@ -169,6 +169,41 @@ Live-Lauf: Nur die zwei benötigten Werte gelangen in den Probe, die Wallet-Schl
 - **Signierte Bytes:** `transactions.rs` byte-gleich zu `565d811`, G0.7-Signierpfad unverändert.
 - **Werkzeuge:** `cargo fmt`, `check` und `clippy` sauber (eine vorbestehende Warnung).
 - **Review:** drei adversarielle Runden. Kein Sicherheitsmangel gefunden. Alle Befunde zur Aussagekraft sind in diesem Plan behoben bzw. in §4 als Lese-Regel festgehalten.
+
+## 9. Ergebnis des Probe-Laufs (2026-10-16, 18:34:11–18:34:49Z)
+
+- **Lauf:** genau einmal, mit deiner Freigabe des Plans `77957205…`, nach dem Rezept aus §6.
+  - Vorprüfungen: Plan-Hash = freigegebener Hash, rustc 1.93.1, Uhr +31 ms ± 21 ms (NTP), keine Sperre vorhanden.
+  - Exit 0, Status `COMPLETE`, alle 11 Fälle gesendet.
+  - Ankunft 254–345 ms nach dem Head-Zeitstempel, Antworten nach 25 ms (48Club) bzw. 160–263 ms (BlockRazor).
+- **Evidence:** `bsc/.local/g07/builder-probe-77957205fd84/probe.evidence.json`, byte-gleich versioniert unter `bsc/native/evidence/g06a/builder_probe_20261016T183411Z/probe.evidence.json`, SHA-256 `5636c463d6247b90d17d9bc977a6e50aae499434a17d241f16f05b87ba95cc7f`. Sie enthält keinen Token und keine RPC-URL (geprüft).
+- **Lese-Regeln:** Alle Antworten sind HTTP 200 mit lesbarem JSON-RPC. Die Vergleichsfälle 1 und 9 sind geparst, damit sind alle Fälle auswertbar.
+
+| Fall | Antwort (roh, gekürzt) | Klasse | Lesart |
+|---|---|---|---|
+| 1 `48club-g07-shape` | `-32000 nonce too high … tx: 1099511627776 state: 0` | `EXECUTION_REJECTED` | Methode und Format geparst; da 48Club die Ablaufwerte vor den Transaktionen prüft (Fälle 4/5), haben die G0.7-Werte HEAD+2/MAXTS die Einreichungsprüfung bestanden |
+| 2 `48club-no-maxtimestamp` | `nonce too high` | `EXECUTION_REJECTED` | `maxTimestamp` ist bei Einreichung optional |
+| 3 `48club-maxtimestamp-minus-one` | `nonce too high` (Phase 950 ms) | `EXECUTION_REJECTED` | wie erwartet ohne Aussage (Phase ≥ 100 ms) |
+| 4 `48club-past-block` | `-38000 the maxBlockNumber should not be less than currentBlockNum` | `EXPIRY_REJECTED` | 48Club prüft `maxBlockNumber` bei Einreichung |
+| 5 `48club-past-timestamp` | `-38000 the maxTimestamp(1792175670) should not be less than currentBlockTimestamp(1792175672)` | `EXPIRY_REJECTED` | 48Club prüft `maxTimestamp ≥` aktuelle Blockzeit |
+| 6 `48club-underpriced-control` | `nonce too high` (1 wei) | `EXECUTION_REJECTED` | keine Preisschranke vor der Simulation; Preis UNQUALIFIED |
+| 7 `48club-nomerge-type-control` | `-32602 … cannot unmarshal string into Go struct field SendBundleArgs.noMerge of type bool` | `FORMAT_REJECTED` | Feld erkannt (typisiertes bool); Wirkung UNQUALIFIED |
+| 8 `48club-positionfirst-type-control` | `-32602 … SendBundleArgs.positionFirst of type bool` | `FORMAT_REJECTED` | Feld erkannt (typisiertes bool); Wirkung UNQUALIFIED |
+| 9 `blockrazor-g07-shape` | `-32000 nonce too high … tx: 1099511627776 state: 0` | `EXECUTION_REJECTED` | Methode, Format und Token angenommen; HEAD+2 hat die Einreichungsprüfung bestanden (Fall 10) |
+| 10 `blockrazor-past-block` | `-38000 the maxBlockNumber should be larger than currentBlockNum` | `EXPIRY_REJECTED` | BlockRazor prüft `maxBlockNumber > ` aktueller Block bei Einreichung |
+| 11 `blockrazor-underpriced-control` | `-38000 gasprice must be at least 0.05 gwei` | `PRICE_REJECTED` | Preisschranke vor der Simulation genau 0,05 gwei; G0.7 mit 0,05 gwei besteht sie (Fall 9), ohne Spielraum |
+
+**Ergebnis für die Pre-Arm-Checks:**
+
+- **Check 6 — bei Einreichung bestanden, beide Builder.** Methode, Format und Token werden angenommen. Beide prüfen die Ablaufwerte vor den Transaktionen und haben die G0.7-Werte angenommen. BlockRazors Preisschranke liegt genau bei 0,05 gwei, und G0.7 besteht sie.
+- **Check 6 — offen und UNQUALIFIED,** jeweils mit deiner ausdrücklichen Annahme vor der Freigabe:
+  - 48Club-Preis: keine Prüfung bei Einreichung beobachtbar;
+  - Durchsetzung von `maxBlockNumber` neben `maxTimestamp` beim Blockbau;
+  - Annahme eines gültigen Bundles und Aufnahme.
+- **Check 10 — PARTIAL.** 48Club erkennt `noMerge` und `positionFirst` als typisierte Felder; ihre Wirkung bleibt UNQUALIFIED.
+- **Bestätigt:** Ein Builder kann den Ablauf schon bei der Einreichung ablehnen. Der G0.7-Versuch hängt also auch an einer pünktlichen Ankunft; die G0.7-Frische-Schranken sind darauf ausgelegt.
+
+Im v2-Entwurf eingetragen (Pre-Arm-Checks 6, 7, 10, 48Club-Text, Send-Head-Regel); neuer Entwurfs-Hash `1b66718d476e938fc6c936cf3c0b4d49ebc59cc2765c043600130b05de8ccf42` (Guard-Replik bestanden, inaktiv).
 
 ## Anhang — der exakte Plan (Ausgabe des Trockenlaufs)
 

@@ -20,30 +20,41 @@ serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 darkbot-bsc-journal = { path = "../journal", optional = true }
+darkbot-bsc-record = { path = "../record", optional = true }
 alloy-sol-types = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
 
 [features]
 default = []
-# The frozen v2 acceptance guard of G0.7 (read-only, fail-closed, compiled
-# UNARMED). Its check interface is available to the qualification tools.
-acceptance-guard = ["dep:serde_json", "dep:sha2", "dep:hex"]
+# The binary v3 acceptance guard of G0.7 (read-only, fail-closed, compiled
+# UNARMED) and the contract it checks. Its check interface is available to
+# the qualification tools. No JSON: the contract is a DBREC001 record.
+acceptance-guard = ["dep:darkbot-bsc-record"]
 # The controlled G0.7 Mainnet self-launch + BUY path: guard, bounded capture
 # and the strictly separate g07 binary. Never enabled by the production build.
-g07-mainnet = ["acceptance-guard", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256"]
+# serde_json only decodes external JSON-RPC responses at the transport
+# boundary into typed values; nothing internal is JSON.
+g07-mainnet = ["acceptance-guard", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256"]
 
 [dev-dependencies]
 # The core's test helpers, for this crate's tests only.
 darkbot-bsc-trading = { path = "../trading", features = ["test-support"] }
 alloy-primitives = { workspace = true }
+darkbot-bsc-record = { path = "../record" }
 
 [[test]]
 name = "acceptance_guard"
 required-features = ["acceptance-guard"]
 
+# Writes the binary acceptance contract of G0.7 attempt 1 from its reviewed
+# source values (offline; run from the repository root).
+[[bin]]
+name = "g07_acceptance_contract"
+required-features = ["acceptance-guard"]
+
 # The controlled G0.7 Mainnet self-launch + BUY qualification binary. Strictly
 # separate from the production runner: built only with `g07-mainnet`, guarded
-# by the compiled-in (UNARMED) v2 acceptance hash. Run from the repository root.
+# by the compiled-in (UNARMED) v3 acceptance hash. Run from the repository root.
 [[bin]]
 name = "g07_mainnet_self_launch_buy"
 required-features = ["g07-mainnet"]

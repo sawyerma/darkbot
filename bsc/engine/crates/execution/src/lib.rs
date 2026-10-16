@@ -19,9 +19,12 @@
 pub mod startup;
 pub mod submission;
 
-/// G0.7 acceptance guard: the compiled-in, fail-closed check of the frozen
-/// v2 acceptance contract. Built only with the `acceptance-guard` feature;
-/// the production runner build does not contain it.
+/// G0.7 acceptance guard: the compiled-in, fail-closed check of the binary
+/// v3 acceptance contract, and that contract's reviewed values. Built only
+/// with the `acceptance-guard` feature; the production runner build does not
+/// contain them.
+#[cfg(feature = "acceptance-guard")]
+pub mod acceptance_contract;
 #[cfg(feature = "acceptance-guard")]
 pub mod acceptance_guard;
 

@@ -8,7 +8,7 @@
 use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use alloy_sol_types::{SolCall, sol};
 use darkbot_bsc_execution::acceptance_guard::{
-    FROZEN_APPROVED_V2_SHA256, V2_RELATIVE_PATH, inspect_v2, sha256_hex,
+    FROZEN_APPROVED_V3_SHA256, V3_RELATIVE_PATH, inspect_v3, sha256_hex,
 };
 use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
 use serde_json::{Value, json};
@@ -16,8 +16,8 @@ use std::{env, fs, path::Path, str::FromStr};
 
 const CHAIN_ID: u64 = 56;
 const PORTAL: &str = "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0";
-// The single v2 contract path is owned by the acceptance guard.
-const V2_PATH: &str = V2_RELATIVE_PATH;
+// The single (binary v3) contract path is owned by the acceptance guard.
+const CONTRACT_PATH: &str = V3_RELATIVE_PATH;
 const BUY_VALUE_WEI_DEFAULT: u64 = 1_000_000_000_000_000; // 0.001 BNB
 const SLIPPAGE_BPS: u64 = 100;
 
@@ -384,13 +384,12 @@ fn main() {
         "usage: g06a_self_launch_bundle [--verify-evidence <local_simulation.json>]"
     );
 
-    let contract = inspect_v2(Path::new(V2_PATH)).expect("v2 contract invalid");
-    assert!(
-        !contract.approved && !contract.execution_ready,
-        "DRY harness expects v2 to remain unapproved/unready"
-    );
+    // The DRY of attempt 1 is complete and frozen; this harness only runs
+    // while the guard is unarmed (the compiled hash, not the contract's
+    // approval flags, is the execution authority).
+    let contract = inspect_v3(Path::new(CONTRACT_PATH)).expect("v3 contract invalid");
     assert_eq!(
-        FROZEN_APPROVED_V2_SHA256, "UNARMED",
+        FROZEN_APPROVED_V3_SHA256, "UNARMED",
         "DRY harness must not run after source guard is armed"
     );
 
@@ -641,11 +640,11 @@ fn main() {
     println!("{}", serde_json::to_string_pretty(&json!({
         "status": "G0.6A_SELF_LAUNCH_BUNDLE_DRY",
         "contract": {
-            "path": V2_PATH,
+            "path": CONTRACT_PATH,
             "sha256": contract.sha256,
             "approved": contract.approved,
             "execution_ready": contract.execution_ready,
-            "compiled_live_hash": FROZEN_APPROVED_V2_SHA256
+            "compiled_live_hash": FROZEN_APPROVED_V3_SHA256
         },
         "wallets": {
             "launcher": launcher.to_string(),

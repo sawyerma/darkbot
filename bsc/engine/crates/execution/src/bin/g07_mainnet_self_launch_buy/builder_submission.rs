@@ -1,5 +1,10 @@
 //! G0.7-only builder submission: TLS connections to 48Club and BlockRazor,
 //! HTTP framing and response parsing. Reached only after the acceptance guard.
+//!
+//! The builders' JSON-RPC wire format is the only JSON here: request bodies
+//! are fixed byte templates with the variable fields patched in (no general
+//! JSON serialization), and a response is decoded at this boundary into a
+//! typed `BuilderAnswer` (`decode_builder_answer`), never kept as JSON.
 
 use super::*;
 
@@ -52,42 +57,49 @@ pub(crate) fn connect_tls_port(host: &str, port: u16) -> Result<Tls, String> {
     ))
 }
 
+/// A JSON wire string: quoted, with `"`, `\` and control characters
+/// escaped. The G0.7 fields are 0x-hex, which passes through unchanged.
+pub(crate) fn wire_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if u32::from(c) < 0x20 => out.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// The 48Club `eth_sendBundle` body of a G0.7 bundle: integer expiry block
-/// and Unix-second expiry time, no merging, at the top of the block.
+/// and Unix-second expiry time, no merging, at the top of the block. A
+/// fixed template (keys in the documented order) with the fields patched in.
 pub(crate) fn club48_bundle_body(
     request_id: &str,
     txs: [&str; 2],
     max_block: u64,
     max_timestamp: u64,
 ) -> String {
-    json!({
-        "jsonrpc":"2.0",
-        "id":request_id,
-        "method":"eth_sendBundle",
-        "params":[{
-            "txs":txs,
-            "maxBlockNumber":max_block,
-            "maxTimestamp":max_timestamp,
-            "noMerge":true,
-            "positionFirst":true
-        }]
-    })
-    .to_string()
+    format!(
+        r#"{{"id":{},"jsonrpc":"2.0","method":"eth_sendBundle","params":[{{"maxBlockNumber":{max_block},"maxTimestamp":{max_timestamp},"noMerge":true,"positionFirst":true,"txs":[{},{}]}}]}}"#,
+        wire_string(request_id),
+        wire_string(txs[0]),
+        wire_string(txs[1])
+    )
 }
 
 /// The BlockRazor `eth_sendBundle` body of a G0.7 bundle: integer expiry
 /// block only.
 pub(crate) fn blockrazor_bundle_body(request_id: &str, txs: [&str; 2], max_block: u64) -> String {
-    json!({
-        "jsonrpc":"2.0",
-        "id":request_id,
-        "method":"eth_sendBundle",
-        "params":[{
-            "txs":txs,
-            "maxBlockNumber":max_block
-        }]
-    })
-    .to_string()
+    format!(
+        r#"{{"id":{},"jsonrpc":"2.0","method":"eth_sendBundle","params":[{{"maxBlockNumber":{max_block},"txs":[{},{}]}}]}}"#,
+        wire_string(request_id),
+        wire_string(txs[0]),
+        wire_string(txs[1])
+    )
 }
 
 /// A non-empty HTTP header value without control characters. main checks the
@@ -150,7 +162,7 @@ pub(crate) struct HttpResponse {
     pub(crate) status: String,
     /// The server announced `Connection: close`.
     pub(crate) close: bool,
-    pub(crate) body: String,
+    pub(crate) body: Vec<u8>,
 }
 
 /// Parses one buffered HTTP/1.1 response: `Ok(None)` while incomplete. No
@@ -195,7 +207,7 @@ pub(crate) fn parse_http_response(buf: &[u8]) -> Result<Option<HttpResponse>, St
     Ok(Some(HttpResponse {
         status,
         close,
-        body: String::from_utf8_lossy(&body).to_string(),
+        body,
     }))
 }
 
@@ -216,8 +228,64 @@ pub(crate) fn read_http_response(stream: &mut Tls) -> Result<HttpResponse, Strin
     }
 }
 
-pub(crate) fn read_http(stream: &mut Tls) -> Result<(String, String), String> {
-    read_http_response(stream).map(|r| (r.status, r.body))
+/// At most `max` bytes of `text`, cut at a character boundary.
+pub(crate) fn bounded(text: &str, max: usize) -> String {
+    let mut end = text.len().min(max);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
+}
+
+/// Decodes a builder's HTTP answer at the transport boundary: the status
+/// code, a 32-byte `result` (bundle hash) or other result text, or the
+/// JSON-RPC error code and message. Never panics; an undecodable body is
+/// reported as such.
+pub(crate) fn decode_builder_answer(status_line: &str, body: &[u8]) -> BuilderAnswer {
+    let mut answer = BuilderAnswer {
+        status_line: bounded(status_line, 256),
+        status_code: status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse::<u16>().ok()),
+        body_sha256: darkbot_bsc_record::sha256(body),
+        body_len: u64::try_from(body.len()).unwrap_or(u64::MAX),
+        ..BuilderAnswer::default()
+    };
+    let parsed: Result<serde_json::Value, _> = serde_json::from_slice(body);
+    let Ok(serde_json::Value::Object(response)) = parsed else {
+        answer.undecodable = Some(bounded(
+            &format!("not a JSON-RPC object: {}", String::from_utf8_lossy(body)),
+            1024,
+        ));
+        return answer;
+    };
+    match response.get("result") {
+        Some(serde_json::Value::String(text)) => {
+            let word = text
+                .strip_prefix("0x")
+                .filter(|h| h.len() == 64)
+                .and_then(|h| hex::decode(h).ok())
+                .and_then(|b| <[u8; 32]>::try_from(b).ok());
+            match word {
+                Some(word) => answer.result_hash = Some(word),
+                None => answer.result_text = Some(bounded(text, 1024)),
+            }
+        }
+        Some(serde_json::Value::Null) | None => {}
+        Some(other) => answer.result_text = Some(bounded(&other.to_string(), 1024)),
+    }
+    if let Some(error) = response.get("error") {
+        answer.error_code = error.get("code").and_then(serde_json::Value::as_i64);
+        answer.error_message = Some(bounded(
+            &error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .map_or_else(|| error.to_string(), str::to_string),
+            1024,
+        ));
+    }
+    answer
 }
 
 /// Pre-egress liveness of a prewarmed builder connection: processes what the
@@ -276,20 +344,18 @@ pub(crate) fn submit_provider(
             write_started_ns: Some(write_started_ns),
             write_flushed_ns: None,
             bytes_may_have_left: true,
-            http_status: None,
-            response_body: None,
+            answer: None,
             error: Some(format!("write/flush failed: {e}")),
         },
         Ok(()) => {
             let write_flushed_ns = clock.now_ns();
-            match read_http(&mut stream) {
-                Ok((status, body)) => ProviderResult {
+            match read_http_response(&mut stream) {
+                Ok(response) => ProviderResult {
                     provider,
                     write_started_ns: Some(write_started_ns),
                     write_flushed_ns: Some(write_flushed_ns),
                     bytes_may_have_left: true,
-                    http_status: Some(status),
-                    response_body: Some(body),
+                    answer: Some(decode_builder_answer(&response.status, &response.body)),
                     error: None,
                 },
                 Err(e) => ProviderResult {
@@ -297,8 +363,7 @@ pub(crate) fn submit_provider(
                     write_started_ns: Some(write_started_ns),
                     write_flushed_ns: Some(write_flushed_ns),
                     bytes_may_have_left: true,
-                    http_status: None,
-                    response_body: None,
+                    answer: None,
                     error: Some(format!("request sent; response unavailable: {e}")),
                 },
             }
@@ -314,27 +379,33 @@ pub(crate) fn panicked_provider_result(provider: &'static str) -> ProviderResult
         write_started_ns: None,
         write_flushed_ns: None,
         bytes_may_have_left: true,
-        http_status: None,
-        response_body: None,
+        answer: None,
         error: Some("send thread panicked after the release; bytes may have left".into()),
     }
 }
 
-pub(crate) fn provider_json(r: &ProviderResult) -> Value {
-    let response_json = r
-        .response_body
-        .as_deref()
-        .and_then(|body| serde_json::from_str::<Value>(body).ok());
-    json!({
-        "provider": r.provider,
-        "write_started_ns": r.write_started_ns,
-        "write_flushed_ns": r.write_flushed_ns,
-        "bytes_may_have_left": r.bytes_may_have_left,
-        "http_status": r.http_status.as_deref(),
-        "response_json": response_json,
-        "response_raw_body": r.response_body.as_deref(),
-        "error": r.error.as_deref()
-    })
+/// The provider result as a nested evidence record. Never panics.
+pub(crate) fn provider_record(r: &ProviderResult) -> darkbot_bsc_record::Value {
+    use schema::g07::provider_result as p;
+    use darkbot_bsc_record::Value as V;
+    let mut d = Draft::new(&p::SCHEMA);
+    d.set(p::PROVIDER, r.provider)
+        .set_opt(p::WRITE_STARTED_NS, r.write_started_ns)
+        .set_opt(p::WRITE_FLUSHED_NS, r.write_flushed_ns)
+        .set(p::BYTES_MAY_HAVE_LEFT, r.bytes_may_have_left)
+        .set_opt(p::ERROR, r.error.as_deref().map(|e| bounded(e, 1024)));
+    if let Some(a) = &r.answer {
+        d.set(p::HTTP_STATUS_LINE, a.status_line.as_str())
+            .set_opt(p::HTTP_STATUS_CODE, a.status_code.map(u64::from))
+            .set(p::RESPONSE_SHA256, V::B256(a.body_sha256))
+            .set(p::RESPONSE_LEN, a.body_len)
+            .set_opt(p::RPC_RESULT_HASH, a.result_hash.map(V::B256))
+            .set_opt(p::RPC_RESULT_TEXT, a.result_text.clone())
+            .set_opt(p::RPC_ERROR_CODE, a.error_code)
+            .set_opt(p::RPC_ERROR_MESSAGE, a.error_message.clone())
+            .set_opt(p::RESPONSE_UNDECODABLE, a.undecodable.clone());
+    }
+    d.into_nested()
 }
 
 #[cfg(test)]
@@ -354,6 +425,30 @@ mod tests {
     }
 
     #[test]
+    fn builder_answers_are_decoded_into_typed_outcomes() {
+        let hash = format!("0x{}", "ab".repeat(32));
+        let body = format!(r#"{{"jsonrpc":"2.0","id":"0x1","result":"{hash}"}}"#);
+        let ok = decode_builder_answer("HTTP/1.1 200 OK", body.as_bytes());
+        assert_eq!(ok.status_code, Some(200));
+        assert_eq!(ok.result_hash, Some([0xab; 32]));
+        assert_eq!(ok.body_sha256, darkbot_bsc_record::sha256(body.as_bytes()));
+        assert!(ok.error_code.is_none() && ok.undecodable.is_none());
+        let err = decode_builder_answer(
+            "HTTP/1.1 200 OK",
+            br#"{"jsonrpc":"2.0","id":"0x1","error":{"code":-32000,"message":"nonce too high"}}"#,
+        );
+        assert_eq!(
+            (err.error_code, err.error_message.as_deref()),
+            (Some(-32000), Some("nonce too high"))
+        );
+        let garbage = decode_builder_answer("HTTP/1.1 502 Bad Gateway", b"<html>");
+        assert_eq!((garbage.status_code, garbage.body_len), (Some(502), 6));
+        assert!(garbage.undecodable.unwrap().contains("<html>"));
+        assert_eq!(wire_string("a\"b\\c\n"), r#""a\"b\\c\u000a""#);
+        assert_eq!(bounded("\u{e4}bc", 1), "");
+    }
+
+    #[test]
     fn header_value_rejects_empty_and_control_characters() {
         assert!(valid_header_value("Bearer abc-123_XYZ"));
         assert!(!valid_header_value(""));
@@ -367,8 +462,8 @@ mod tests {
         let ok = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
         let r = parse_http_response(ok).unwrap().unwrap();
         assert_eq!(
-            (r.status.as_str(), r.close, r.body.as_str()),
-            ("HTTP/1.1 200 OK", true, "{}")
+            (r.status.as_str(), r.close, r.body.as_slice()),
+            ("HTTP/1.1 200 OK", true, b"{}".as_slice())
         );
         let keep = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}";
         assert!(!parse_http_response(keep).unwrap().unwrap().close);
@@ -379,7 +474,7 @@ mod tests {
                 .is_none()
         );
         let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n";
-        assert_eq!(parse_http_response(chunked).unwrap().unwrap().body, "{}");
+        assert_eq!(parse_http_response(chunked).unwrap().unwrap().body, b"{}");
         let huge = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", usize::MAX);
         assert!(parse_http_response(huge.as_bytes()).is_err());
         let huge_chunk =
