@@ -3,7 +3,7 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/PHASENPLAN.md",
-    "git_blob_sha": "0ca7687652806f843af146d3433ee1ce75723af4",
+    "git_blob_sha": "7c3ae1fa0b642fb2e322b851e68f9ed013f73f24",
     "as_of_code_commit": null,
     "line_count": 5277,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
@@ -304,7 +304,7 @@
       "heading": "Bindender JSON-FREE-INTERNAL-Vertrag — gesamte produktive Project_0-Architektur (2026-10-16)"
     }
   },
-  "updates": "2026-10-16: binding JSON-FREE-INTERNAL JFI-01–05 extension, productive internal typed/binary only; JSON solely mandatory external Solana JSON-RPC wire. Historical immutable evidence/document indices protected. Implementation OPEN. 2026-10-16: binding binary primary journal section added; not a gate PASS. On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed.",
+  "updates": "2026-10-16: binding JSON-FREE-INTERNAL JFI-01–05 extension, productive internal typed/binary only; JSON solely mandatory external Solana JSON-RPC wire. Historical immutable evidence/document indices protected. Implementation OPEN. 2026-10-16: binding binary primary journal section added; not a gate PASS. On canonical PHASENPLAN.md changes, refresh this JSON, section line ranges and source.git_blob_sha in the same logical delivery. This JSON is an index and must never mark an unfinished Gate PASS. Operational configuration extension and local evidence added 2026-10-14; source hashes and section references refreshed. 2026-10-16: JFI-02 records the single additional external JSON wire exception for the existing Jupiter /swap/v2/build adapter (master order); internal JSON stays forbidden.",
   "operational_configuration": {
     "contract": "project_0/docs/OPERATIONAL_CONFIG.md",
     "implementation": "project_0/native/crates/darkbot-solana/src/runtime_config.rs",
@@ -330,12 +330,13 @@
   "internal_data_contract": {
     "status": "BINDING_TARGET_NOT_QUALIFIED",
     "runtime_internal": "NATIVE_TYPED_AND_BINARY_ONLY",
-    "json_allowed": "MANDATORY_EXTERNAL_SOLANA_JSON_RPC_WIRE_BOUNDARIES_ONLY",
+    "json_allowed": "MANDATORY_EXTERNAL_SOLANA_JSON_RPC_WIRE_BOUNDARIES_AND_THE_JUPITER_SWAP_V2_BUILD_ADAPTER_WIRE_ONLY",
     "serde_json_value_inside_internal_runtime": "FORBIDDEN",
     "primary_journal": "ONE_VERSIONED_BINARY_APPEND_ONLY_P0J",
     "historical_json": "PRESERVE_READ_ONLY_OFFLINE_COMPATIBILITY",
     "new_runtime_json_exports": "FORBIDDEN",
     "phase_gate": "JFI_01_TO_05_OPEN",
-    "reference": "PHASENPLAN.md lines 5263-5277"
+    "reference": "PHASENPLAN.md lines 5263-5277",
+    "jupiter_exception": "JFI-02: only route.rs /swap/v2/build HTTP wire encode/decode into concrete validated Rust types; no JSON behind the adapter; no other REST JSON APIs"
   }
 }
