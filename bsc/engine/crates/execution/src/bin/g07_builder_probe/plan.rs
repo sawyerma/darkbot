@@ -370,10 +370,12 @@ pub(crate) fn worked_example(case_index: usize, case: &Case) -> (CaseRequest, St
     (request, sha)
 }
 
-/// The source files a live run executes besides its dependencies: the probe
-/// and the G0.7 modules it includes. Their SHA-256s are part of the plan, so
-/// the approval binds this exact code.
-const PROBE_SOURCES: [(&str, &str); 7] = [
+/// The files the approval binds: the probe, the G0.7 modules it includes,
+/// the library guard module that supplies its hash function, the lock file
+/// (versions and checksums of every external crate) and the toolchain pin.
+/// Their SHA-256s are part of the plan, so the approval binds this exact code
+/// and dependency set.
+const PROBE_SOURCES: [(&str, &str); 10] = [
     ("g07_builder_probe/main.rs", include_str!("main.rs")),
     ("g07_builder_probe/plan.rs", include_str!("plan.rs")),
     (
@@ -395,6 +397,18 @@ const PROBE_SOURCES: [(&str, &str); 7] = [
     (
         "g07_mainnet_self_launch_buy/transactions.rs",
         include_str!("../g07_mainnet_self_launch_buy/transactions.rs"),
+    ),
+    (
+        "execution/src/acceptance_guard.rs",
+        include_str!("../../acceptance_guard.rs"),
+    ),
+    (
+        "engine/Cargo.lock",
+        include_str!("../../../../../Cargo.lock"),
+    ),
+    (
+        "engine/rust-toolchain.toml",
+        include_str!("../../../../../rust-toolchain.toml"),
     ),
 ];
 

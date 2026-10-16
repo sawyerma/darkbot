@@ -64,6 +64,8 @@ Updated: 2026-10-16 (binary data-path invariant added; Gate-0 qualification free
 | Dynamic gas | PARTIAL: current read-only candidate max(eth_gasPrice, verified applicable builder floor), subject to cap; not optimal bidding |
 | G0.7 actual Mainnet BUY and G0.8 acquisition/ordering | NOT EXECUTED / NOT AUTHORIZED |
 
+**Update 2026-10-16 (evidence, not a re-rating of the rows above):** the selected G0.7 attempt-1 candidate (BUY 0.000001 BNB, gas 0.05 gwei = current `eth_gasPrice` = verified builder floor, launch gas limit 6 603 270, BUY gas limit 3 000 000) passed the final DRY-1..4 on 2026-10-15 (`bsc/native/evidence/g06a/g06a_final_dry_20261015T222241Z/`, `dry_result.json` SHA-256 `0efe78a7…`), and read-only readiness reports `FUNDING=PASS` against these exact parameters. The 1-wei TECHNICAL_MINIMUM above stays unqualified; dynamic gas is frozen at the candidate for attempt 1 (no bid optimization). Details: ledger section "2026-10-16 — G0.7-Scope-Abgleich".
+
 One wei is the smallest positive native unit, **not a qualified final minimum** until a reproducible, complete launch-then-BUY test passes. Raw token output is not an economically meaningful quantity without independently verified token decimals and fees.
 
 ### G07 reproducibility and monotonicity gates
@@ -164,18 +166,18 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | A | **DONE / KEEP** | Existing Solana/Pump.fun + Phase-A multichain seam |
 | C-PY | **RETIRED** | Old Python BSC/EVM prototype retained only as engineering evidence |
 | G0.1 | **IN PROGRESS** | Freeze Flap + Four Classic + OpenFour Mainnet contracts, versions, launch/BUY semantics and live evidence |
-| G0.2 | **IN PROGRESS / FLAP PARTIAL** | CREATE2 PASS and conditional curve outputs exact; next: archive transaction-index witness for state provenance, router semantics, conversion/fees/tax/minOutput |
-| G0.3 | **BLOCKED BY G0.2** | Build minimal launch→BUY harness only after exact address/state precomputability boundary for PRIMARY_GATE0_SCOPE is proven |
-| G0.4 | **BLOCKED** | Start bounded pending/actionable coverage in parallel as soon as launch evidence is frozen |
-| G0.5 | **BLOCKED** | Benchmark/optimize complete local path through T_send after semantic BUY validity is proven |
-| G0.6 | **BLOCKED** | Race full ingress×inclusion combinations plus concurrent-launch/nonce correctness |
+| G0.2 | **PASS PER SCOPE / OTHER MODES OPEN** | `G0.2_FLAP_PASS` for the historical DOGE-quote mode (ledger); native-BNB self-launch fields covered by the 2026-10-02 Curve-20 crosscheck PASS and the 2026-10-15 final DRY; other Flap modes, Four Classic and OpenFour open |
+| G0.3 | **PASS PER SCOPE** | `G0.3_PASS_PINNED_OFFLINE_SCOPE` (historical case); exact launch→BUY semantics of the frozen G0.7 bytes by DRY-1/DRY-2 (2026-10-15); new wallets/amounts/paths need their own case |
+| G0.4 | **PARTIAL** | QuickNode source probe without a frozen-scope denominator; not required for the controlled self-launch; Mainnet ingress coverage NOT PROVEN for external launches |
+| G0.5 | **PASS FOR PRESIGNED SELF-LAUNCH / EXTERNAL ADAPT** | 2026-10-02: prepared self-launch local+transport p99 0.584 ms (48Club) / 0.527 ms (BlockRazor), 0/100 > 1 ms each; transport evidence only, not T_buy; external-launch decode/quote/sign path diagnostic p99 1.64/2.22 ms |
+| G0.6 | **G0.6a FINAL DRY PASS / MATRIX PARTIAL** | Final DRY PASS 2026-10-11 (1-gwei profile) and 2026-10-15 (attempt-1 candidate); builder semantics (pre-arm checks 6/10) UNQUALIFIED until the approved builder probe runs; full ingress×inclusion and concurrent-launch matrix for external launches still PARTIAL |
 | G0.7 | **NEXT / ONLY PRODUCT WORK** | Controlled minimal-value Mainnet BUY with value-bearing execution |
 | G0.8 | **IMMEDIATELY AFTER G0.7** | Prove actual token acquisition, ordering, competing external BUYs, costs and entry price |
 | G0.9 | **BLOCKED** | Classify external builder dependency: NONE / BENEFICIAL / REQUIRED / UNKNOWN |
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
-| C0 | **IN PROGRESS / FOUNDATION FROZEN** | Unit-6 startup authorization + recorder/replay foundation IMPLEMENTED_TESTED/FROZEN for foundation scope; full production qualification remains separate |
-| C1 | **PAUSED BEFORE FREEZE — DO NOT CONTINUE BEFORE G0.7/G0.8** | C1.5-C1.8 PASS; C1.9/C1.9b qualified; C1.10A final regression PASS with pinned-baseline exception and C1.10B final C1.9 measurement PASS locally; freeze deliberately deferred until the real Mainnet BUY/acquisition test is executed and evaluated |
+| C0 | **IN PROGRESS / FOUNDATION FROZEN** | Unit-6 startup authorization + recorder/replay foundation IMPLEMENTED_TESTED/FROZEN for foundation scope; carried unchanged through the R1–R13 restructure (2026-10-15/16, regression identical to baseline, STATUS.md); full production qualification remains separate |
+| C1 | **PAUSED BEFORE FREEZE — DO NOT CONTINUE BEFORE G0.7/G0.8** | C1.1–C1.8 PASS and C1.9/C1.9b qualified on the pre-restructure source (ledger); C1.10A checkpoint 2026-10-10: regression PASS with pinned-baseline race exception but `C1_10A_COMPLETE = NO` (full non-race suite, final build, identity binding, frozen-binary C1.9 measurement and freeze still open); no C1.10B acceptance record; after the R1–R13 restructure and C1.5–C1.8 re-integration (2026-10-16) the C1.9/C1.9b binding and the C1.10 freeze must be done on the new source; freeze deliberately deferred until the real Mainnet BUY/acquisition test is executed and evaluated |
 | C2 | **BLOCKED BY C1.10** | Production pending/canonical/reorg/nonce/replacement state |
 | C3 | **BLOCKED** | Production local build/sign/geth path benchmark; engineering proof only |
 | D | **BLOCKED** | Full production Flap Rust decoder |

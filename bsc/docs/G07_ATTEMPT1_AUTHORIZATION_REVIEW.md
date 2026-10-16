@@ -13,7 +13,7 @@ Stand: 2026-10-16, nach der G0.7-Härtung. **Nichts gesendet. Guard `FROZEN_APPR
 | Producer-Witness-Quellvertrag, `source_ready=false` (gebunden) | `bsc/config/g07_producer_witness_source_attempt1.json` | `78660c7da9fbb8a2140daf1bca4187881d71f55a914c9fcddfc0e47f287116c4` |
 | Builder-Refresh (informativ) | `bsc/native/evidence/g06a/builder_requirements_refresh_20261016T013943Z.json` | `ef4b72ffd26c07850fda15a8193a744abbd5e33015623a4c8d0818af740287b6` |
 | **Finaler v2-Entwurf (inaktiv, nicht committet)** | `bsc/docs/G07_ATTEMPT1_ACCEPTANCE_V2_DRAFT.json` | `902d4cb93c33fb91364da07fb08108b0f43f51ce8ef9e7388e9573571ce70cc2` |
-| G0.7-Härtung (Code) | `bsc/engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/`, `src/qualification_capture.rs`, Tests | Checkpoint `dda7c9b` + nicht committete Änderungen |
+| G0.7-Härtung (Code) | `bsc/engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/`, `src/qualification_capture.rs`, Tests | committet in `dda7c9b`, `51e2a5e`, `9ab5fe6` |
 | Byte-Schutz | `bsc/config/.gitattributes`, `bsc/native/evidence/g06a/.gitattributes` | `-text` |
 
 `attempt_id`: `g07-mainnet-attempt-1-dry-20261015T222241Z`.
@@ -61,7 +61,7 @@ Stand: 2026-10-16, nach der G0.7-Härtung. **Nichts gesendet. Guard `FROZEN_APPR
 
 ## 3. Offene Entscheidungen — vor einer Freigabe
 
-1. **G0.7-Härtung — umgesetzt** (Checkpoint `dda7c9b` plus nicht committete Änderungen).
+1. **G0.7-Härtung — umgesetzt** (committet in `dda7c9b`, `51e2a5e`, `9ab5fe6`; die Probe-Korrektur mit Plan `77957205…` ist noch nicht committet).
    - **Frischer Send-Head:**
      - Nach dem Builder-TLS-Prewarm wartet G0.7 auf den **nächsten Block**. Gepollt wird über eine vorgewärmte Keep-alive-RPC-Verbindung, höchstens 3 s, bis zu 3 Lesefehler in Folge werden toleriert.
      - `maxBlockNumber` = dieser Head + 2, für beide Builder.
@@ -106,7 +106,7 @@ Stand: 2026-10-16, nach der G0.7-Härtung. **Nichts gesendet. Guard `FROZEN_APPR
      - Ein Kill in den wenigen Millisekunden zwischen Freigabe und erster Fassung hinterlässt einen leeren Platzhalter. Rekonstruktion dann aus Latch-Body und Journal.
      - Ein Send-Thread, dem nach erfolgreichem Start das Go-Signal nicht zugestellt werden kann, ließe den Prozess hängen. Laut Code ist das nicht erreichbar.
      - iCloud: Das Repo liegt nicht in der iCloud-Desktop-Kopie. Bitte trotzdem bestätigen, dass die Desktop-Synchronisierung aus ist.
-2. **Builder-Semantik (Pre-Arm-Checks 6 und 10).** Für die Einreichungs-Seite ist ein Probe mit nicht ausführbaren Bundles vorbereitet, aber nicht gesendet: [G07_BUILDER_PROBE_APPROVAL.md](G07_BUILDER_PROBE_APPROVAL.md), Plan-SHA-256 `15ee10f9…`. Unqualifiziert sind:
+2. **Builder-Semantik (Pre-Arm-Checks 6 und 10).** Für die Einreichungs-Seite ist ein Probe mit nicht ausführbaren Bundles vorbereitet, aber nicht gesendet: [G07_BUILDER_PROBE_APPROVAL.md](G07_BUILDER_PROBE_APPROVAL.md), Plan-SHA-256 `77957205…`. Unqualifiziert sind:
    - `noMerge`/`positionFirst`;
    - ob 48Club `maxTimestamp` zusammen mit `maxBlockNumber` akzeptiert und `maxBlockNumber` dann weiter erzwingt;
    - die Annahme eines Bundles mit 0,05 gwei und Tip 0.

@@ -1,8 +1,8 @@
 # G0.7 Builder-Probe — Freigabevorlage (Pre-Arm-Checks 6 und 10)
 
-Stand: 2026-10-16. **Nichts gesendet.** Der Probe ist vorbereitet, in drei Runden adversariell geprüft und getestet, aber nur als Trockenlauf gelaufen: keine Verbindung, kein Secret gelesen, nichts geschrieben. Gesendet wird erst, wenn du genau diesen Plan freigibst:
+Stand: 2026-10-16, nach der Korrektur der Evidence-Fehlerbehandlung. **Nichts gesendet.** Der Probe ist vorbereitet, in drei Runden adversariell geprüft und getestet, aber nur als Trockenlauf gelaufen: keine Verbindung, kein Secret gelesen, nichts geschrieben. Der frühere Plan `15ee10f9…` (Commit `9ab5fe6`) ist überholt und wird nicht mehr akzeptiert. Gesendet wird erst, wenn du genau diesen Plan freigibst:
 
-**Plan-SHA-256: `15ee10f9eb3131fb35803022cc768b4ed0380e9faec73f01a0cc866cb0f8ec06`**
+**Plan-SHA-256: `77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5`**
 
 Guard bleibt `UNARMED`, der aktive v2-Vertrag ist unverändert (`026b534f…`). Der Probe berührt weder die G0.7-Wallets noch ihre Schlüssel noch die signierten DRY-Bytes noch die G0.7-Sperre.
 
@@ -47,11 +47,16 @@ Diese Punkte bleiben UNQUALIFIED und brauchen deine ausdrückliche Annahme.
   Mindestens 2 s Abstand; 11 Requests, je höchstens einmal, in fester Reihenfolge.
 - **Reihenfolge der Schritte:**
   - erst die Lese-Prüfungen (Konten leer, Head-Poller und ein Head lesend);
-  - dann die Einmal-Sperre `bsc/.local/g07/builder-probe-15ee10f9eb31/`;
+  - dann die Einmal-Sperre `bsc/.local/g07/builder-probe-77957205fd84/`;
   - dann die Requests.
 
   Derselbe Plan läuft nie zweimal.
-- **Evidence:** liegt privat in diesem Verzeichnis (`probe.evidence.json`, 0600, atomar ersetzt) und wird nach jedem Fall fortgeschrieben. Pro Fall stehen dort:
+- **Evidence:** liegt privat in diesem Verzeichnis (`probe.evidence.json`, 0600, atomar ersetzt).
+  - Vor dem ersten Request steht dort ein Bericht ohne Fälle; scheitert das, wird nichts gesendet und die Sperre freigegeben.
+  - Danach wird sie nach **jedem** Fall fortgeschrieben (Status `IN_PROGRESS`, am Ende `COMPLETE`).
+  - **Scheitert ein Schreiben nach einem Fall, stoppt der Probe sofort:** Kein weiterer Fall wird gesendet, der Bericht geht als `STOPPED_EVIDENCE_WRITE_FAILED` auf stdout, Exit 3. Die Sperre bleibt bestehen, weil schon ein Request hinausgegangen sein kann.
+
+  Pro Fall stehen dort:
   - Head, Head-Hash und Millisekunden-Phase;
   - die gesendeten Werte und der ganze Body mit seiner Länge;
   - die Zeitpunkte von Verbindung, Schreiben und Antwort;
@@ -61,11 +66,14 @@ Diese Punkte bleiben UNQUALIFIED und brauchen deine ausdrückliche Annahme.
 - **Was der Hash bindet:**
   - den Plantext: alle 22 Konten, alle rohen Transaktionen, Hosts, Bodies mit den Head-Platzhaltern, Reihenfolge, Anzahl, Abstand und die Frische-Regeln aus den echten Konstanten;
   - je Fall die exakten Request-Bytes für **einen** festen Test-Head (Phase 200 ms, Alter 100 ms), gebaut von der Request-Funktion des Live-Laufs;
-  - den **SHA-256 jeder Quelldatei**, die der Live-Lauf ausführt: `g07_builder_probe/{main.rs,plan.rs}` und die eingebundenen G0.7-Module `shared.rs`, `builder_submission.rs`, `chain_reads.rs`, `inputs.rs`, `transactions.rs`.
+  - den **SHA-256 jeder ausgeführten Quelldatei**: `g07_builder_probe/{main.rs,plan.rs}`, die eingebundenen G0.7-Module `shared.rs`, `builder_submission.rs`, `chain_reads.rs`, `inputs.rs`, `transactions.rs` und das Bibliotheksmodul `acceptance_guard.rs` (liefert die Hash-Funktion);
+  - den SHA-256 von **`Cargo.lock`**: Versionen und Prüfsummen jeder externen Bibliothek, die `cargo --locked` beim Bauen durchsetzt;
+  - den SHA-256 von **`rust-toolchain.toml`** (Compiler 1.93.1).
 
-  Jede Code-Änderung am Probe oder an diesen Modulen ändert damit den Hash. Deine Freigabe gilt genau diesem Code.
+  Jede Änderung an Probe, G0.7-Modulen, Abhängigkeiten oder Toolchain-Angabe ändert damit den Hash. Deine Freigabe gilt genau diesem Code und Abhängigkeitsstand.
 - **Was der Hash nicht bindet:**
-  - Abhängigkeiten und Toolchain (`Cargo.lock`, rustc 1.93.1 laut `bsc/engine/rust-toolchain.toml`), sowie die Bibliotheksteile von `darkbot-bsc-execution` (`sha256_hex`).
+  - den tatsächlich laufenden Compiler: Ohne rustup setzt niemand `rust-toolchain.toml` durch. Vor dem Bauen deshalb `rustc --version` prüfen; hier ist es Homebrew-rustc 1.93.1.
+  - weitere Workspace-Crates, die mitgelinkt, aber vom Probe nicht ausgeführt werden (z. B. `darkbot-bsc-trading`).
   - Fenster- und Ablaufcode jenseits des einen Test-Heads; weitere Phasen decken die Unit-Tests ab.
   - Sätze im Plantext wie „never recorded“ oder „else STOP“ beschreiben den Code; ihre Wahrheit sichern Review und Tests, der Quell-Hash verhindert, dass sie sich unbemerkt ändert.
 
@@ -110,14 +118,15 @@ Diese Punkte bleiben UNQUALIFIED und brauchen deine ausdrückliche Annahme.
 - **Kein Geld, kein G0.7-Zustand:** kein Geld, keine G0.7-Bytes, keine G0.7-Sperre (eigene Sperre `builder-probe-…`).
 - **Abbruch:**
   - Scheitert eine Lese-Prüfung (RPC, Konten, Head), bricht der Lauf **vor** der Sperre ab, und der Plan bleibt nutzbar.
-  - Scheitert das Anlegen der Evidence-Datei, gibt der Probe die Sperre wieder frei.
-  - Bricht er danach ab, ist der Plan verbraucht. Ein neuer Lauf braucht dann deine Entscheidung: Sperrverzeichnis umbenennen, oder ein geänderter Plan.
+  - Scheitert das Anlegen der Evidence-Datei oder ihr erstes Schreiben, gibt der Probe die Sperre wieder frei (noch nichts gesendet).
+  - Scheitert ein Schreiben nach einem gesendeten Fall, stoppt der Probe ohne weitere Requests und behält die Sperre.
+  - Jeder Abbruch nach dem ersten Request verbraucht den Plan. Ein neuer Lauf braucht dann deine Entscheidung: Sperrverzeichnis umbenennen, oder ein geänderter Plan.
 
 ## 6. Ausführen (nur nach deiner Freigabe)
 
 Aus dem Repo-Root, mit synchronisierter Uhr (NTP, z. B. `sntp time.apple.com`).
 
-Bauen (im Workspace, damit die festgelegte Toolchain gilt):
+Bauen (im Workspace; vorher `rustc --version` = 1.93.1 prüfen):
 
 ```bash
 (cd bsc/engine && cargo build --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_builder_probe)
@@ -132,7 +141,7 @@ bsc/engine/target/debug/g07_builder_probe
 Live-Lauf: Nur die zwei benötigten Werte gelangen in den Probe, die Wallet-Schlüssel aus `bsc/secrets.env` nie. Die Datei wird nur in einer Wegwerf-Subshell geladen; fehlt ein Wert, bricht die Subshell ab; der Probe startet mit `env -i` und genau diesen Variablen:
 
 ```bash
-( set -a; . bsc/secrets.env; set +a; : "${BSC_MAINNET_RPC_HTTPS:?missing}" "${DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION:?missing}"; exec env -i PATH="$PATH" BSC_MAINNET_RPC_HTTPS="$BSC_MAINNET_RPC_HTTPS" DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION="$DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION" DARKBOT_G07_PROBE_SEND=YES DARKBOT_G07_PROBE_APPROVED_PLAN_SHA256=15ee10f9eb3131fb35803022cc768b4ed0380e9faec73f01a0cc866cb0f8ec06 bsc/engine/target/debug/g07_builder_probe )
+( set -a; . bsc/secrets.env; set +a; : "${BSC_MAINNET_RPC_HTTPS:?missing}" "${DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION:?missing}"; exec env -i PATH="$PATH" BSC_MAINNET_RPC_HTTPS="$BSC_MAINNET_RPC_HTTPS" DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION="$DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION" DARKBOT_G07_PROBE_SEND=YES DARKBOT_G07_PROBE_APPROVED_PLAN_SHA256=77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5 bsc/engine/target/debug/g07_builder_probe )
 ```
 
 - Ohne `YES` oder mit einem anderen Hash wird nichts gesendet (getestet). Der Trockenlauf gibt absichtlich keinen fertigen Sendebefehl aus.
@@ -140,17 +149,20 @@ Live-Lauf: Nur die zwei benötigten Werte gelangen in den Probe, die Wallet-Schl
 
 ## 7. Danach
 
-- Ergebnis aus `bsc/.local/g07/builder-probe-15ee10f9eb31/probe.evidence.json` nach §4 lesen.
+- Ergebnis aus `bsc/.local/g07/builder-probe-77957205fd84/probe.evidence.json` nach §4 lesen.
 - Pre-Arm-Checks 6/10 im v2-Entwurf entsprechend setzen: PASS soweit prüfbar, ADAPT oder UNQUALIFIED mit deiner Annahme. Das ändert den Entwurfs-Hash.
 - **Preis:** Der Preis-Teil von Check 6 bleibt UNQUALIFIED. Eine Trennung in Fall 6/11 zeigt nur eine Schranke vor der Simulation. `PRICE_REJECTED` in Fall 1 oder 9 → ADAPT.
 - Bei einem `ADAPT` aus Fall 1 oder 9 wird G0.7 nicht scharfgeschaltet, bevor die Anpassung samt DRY-Folgen geklärt ist.
 
 ## 8. Code und Tests (Stand 2026-10-16, offline)
 
-- **Probe:** `bsc/engine/crates/execution/src/bin/g07_builder_probe/{main.rs,plan.rs}`, `tests/g07_builder_probe.rs`. Im Checkpoint `51e2a5e` liegt eine frühere Fassung; diese Revision ist nicht committet.
+- **Probe:** `bsc/engine/crates/execution/src/bin/g07_builder_probe/{main.rs,plan.rs}`, `tests/g07_builder_probe.rs`.
+  - Commit `9ab5fe6` enthält Plan `15ee10f9…`.
+  - Diese Revision ist **nicht committet**: Evidence-Stopp sowie Bindung von `Cargo.lock`, Toolchain und Guard-Modul.
 - **Probe-Tests:**
-  - Unit 24/24: eigene Konten und nicht ausführbare Transaktionen je Fall; G0.7-Form gleich den G0.7-Bodies; jede Variante ändert nur das Genannte; Plan deterministisch, mit Quell-Hashes und Beispielen; Klassifikation mit echten geth-Meldungen.
-  - Integration 4/4: Trockenlauf ohne Eingaben, deterministisch, mit **gepinntem Plan-Hash** und ohne Sendebefehl; Live ohne oder mit falschem Hash verweigert; Freigabe vor jedem Lesen, Sperren und Verbinden; Requests nur aus der gemeinsamen Funktion, Lebendigkeitsprüfung vor dem Schreiben; kein Zugriff auf G0.7-Schlüssel.
+  - Unit 26/26: eigene Konten und nicht ausführbare Transaktionen je Fall; G0.7-Form gleich den G0.7-Bodies; jede Variante ändert nur das Genannte; Plan deterministisch, mit Quell-Hashes und Beispielen; Klassifikation mit echten geth-Meldungen.
+    - Neu: Ein gescheitertes Schreiben stoppt vor dem nächsten Fall (für jede Position geprüft), und geschrieben wird direkt nach jedem Send.
+  - Integration 5/5. Neu: kein ignoriertes Evidence-Schreiben, ein Bericht vor dem ersten Send, keine Sperrfreigabe nach Beginn der Sendeschleife, Exit 3 beim Stopp. Außerdem: Trockenlauf ohne Eingaben, deterministisch, mit **gepinntem Plan-Hash** und ohne Sendebefehl; Live ohne oder mit falschem Hash verweigert; Freigabe vor jedem Lesen, Sperren und Verbinden; Requests nur aus der gemeinsamen Funktion, Lebendigkeitsprüfung vor dem Schreiben; kein Zugriff auf G0.7-Schlüssel.
 - **G0.7:**
   - Binary 20/20; neu: Ein nicht stagebarer Evidence-Name hinterlässt keinen Platzhalter. Das ist eine kleine Korrektur in `inputs.rs`, die auch G0.7 zugutekommt.
   - `g07_no_send` 10/10, `acceptance_guard` 6/6, Lib 21/21, G0.8-Kompatibilität 2/2.
@@ -169,7 +181,7 @@ Live-Lauf: Nur die zwei benötigten Werte gelangen in den Probe, die Wallet-Schl
 | `{MAXTS-1}` | eine Sekunde weniger |
 | `{HEAD_S-2}` | zwei Sekunden vor der Head-Sekunde |
 
-Alles andere wird byte-genau so gesendet. Die `example`-Zeilen zeigen die Werte und den Request-Hash für den festen Test-Head; die `source`-Zeilen die SHA-256 der ausgeführten Quelldateien.
+Alles andere wird byte-genau so gesendet. Die `example`-Zeilen zeigen die Werte und den Request-Hash für den festen Test-Head; die `source`-Zeilen die SHA-256 der ausgeführten Quelldateien, von `Cargo.lock` und der Toolchain-Angabe.
 
 ```text
 schema: darkbot.g07.builder-probe.v3
@@ -179,13 +191,16 @@ head: HEAD = a new block the G0.7 head poller sees right before the request; HEA
 framing: G0.7 http_request over G0.7 connect_tls; per case a new connection, opened before the wait for the head (as G0.7 prewarms) and checked live before the write; Authorization header for BlockRazor only, its value from DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION and never recorded; 11 requests in total, each sent at most once, in this order, at least 2 s apart; response read, no retry
 single_use: before the first request a live run latches bsc/.local/g07/builder-probe-<first 12 hex of this plan's SHA-256>/ (after its read-only checks); the same plan never runs twice
 worked_example: each case below is also built for HEAD=1000, HEAD_MS=5000200, local clock 5000300 ms by the same request function the live run uses (window, expiry, transactions, body, host, Authorization choice and framing; token replaced by REDACTED); request_sha256 is the SHA-256 of that full HTTP request
-source: g07_builder_probe/main.rs sha256=6d93ceefe7991c70423ab45e8ed47ecc9ec89df92758f596702b582ef0598459
-source: g07_builder_probe/plan.rs sha256=ca79845e4b076cb5750568af2b2098c52cab07818fb12ee8a1e69cd0c16dcf1e
+source: g07_builder_probe/main.rs sha256=e3e38403ebad995c0cbb1bc59c76580d8d7227115163d0c30ae692a6cdfd39a4
+source: g07_builder_probe/plan.rs sha256=8903ecedea5ec0f5fc6626a4f6b9bed70bd270655dc43d875a6c0adbbb68d81b
 source: g07_mainnet_self_launch_buy/shared.rs sha256=4ff97782646adc9a3f42960263806f777f7bc68377c374e1a17fa60987b80566
 source: g07_mainnet_self_launch_buy/builder_submission.rs sha256=4f009987c2e746dde86266add883df9351d46d3e984dd6b06b88e769a904a439
 source: g07_mainnet_self_launch_buy/chain_reads.rs sha256=94d07573f702afeecf0d9371110eec2d563bee535c1f043422fa99d006230ab4
 source: g07_mainnet_self_launch_buy/inputs.rs sha256=c3f33ece9ec70a8250a64c989ca8466322ffff912848938f1717162bee0cfaa7
 source: g07_mainnet_self_launch_buy/transactions.rs sha256=836b9784eac5bf6411de5318d7d72fa3df0216013075274a5d6b5b66348b3545
+source: execution/src/acceptance_guard.rs sha256=f83bc396761dce592b3ebbecf2d06f1edb70aa7d61ae74db1a6e407e8743e80f
+source: engine/Cargo.lock sha256=4cdac7fb9af11a90a26033a0d201e73ef6f12a99cd8ece9dc1c7699b92d647c4
+source: engine/rust-toolchain.toml sha256=dbf41e60591735dab692473c1d6faac53ed58f262ee4dfe261eebd2595bc7ce1
 case1 48club-g07-shape: POST https://puissant-builder.48.club/ authorization=none gas_price=50000000 | Does 48Club parse the exact G0.7 request (method, fields, integer maxBlockNumber, maxTimestamp, noMerge, positionFirst)?
   tx0: from=0x69a5f4187591f66c8874605692b911bb765bd1cf nonce=1099511627776 gas_price=50000000 hash=0x567254aa2af891f7b80975020dcce6be7a2fbf7ba1be32390e68116029e29c1b raw=0xf86a860100000000008402faf0808252089469a5f4187591f66c8874605692b911bb765bd1cf80808193a033a6291f4e2498b2a1bcd1293f166712cadd360c280809c3092c9f85ee1707c0a04c3b4ab40044025e01ad44784fa4b798fc74a9791514593f7d73a763b726f5d1
   tx1: from=0xeab8f9bd3479f9966f796fdc5b1811f60df64fec nonce=1099511627776 gas_price=50000000 hash=0xca876cf868c81ef0592c9cd9522237621ca1793e308d8f236e0a579033ea734a raw=0xf86a860100000000008402faf08082520894eab8f9bd3479f9966f796fdc5b1811f60df64fec80808193a01fca83edcb2c7d413c4e4a67d964649ea7524ea038368c79fea7c75fed805a9da039d8eecf2eddf9ae98e4201e3d0d0a4330141fa5469f9c6e76538cd4406369e4
@@ -241,5 +256,5 @@ case11 blockrazor-underpriced-control: POST https://virginia.builder.blockrazor.
   tx1: from=0xe1c0a238e874d7232780354edc70cc1eda5a00ec nonce=1099511627776 gas_price=1 hash=0x789d474cfa0729043cd1dbfd4e5e9266f49467a495708739282602f08c1ad2b1 raw=0xf866860100000000000182520894e1c0a238e874d7232780354edc70cc1eda5a00ec80808193a048ca5b6b83a47b111bb96039fcae9f346fcd7446a1d239cb4f07e23513e23ee7a01275f84ef9c8e65cb0e4c19886da7c487fa0f2f42f5d26382d0e96f6cdcbd625
   body={"id":"0x789d474cfa0729043cd1dbfd4e5e9266f49467a495708739282602f08c1ad2b1","jsonrpc":"2.0","method":"eth_sendBundle","params":[{"maxBlockNumber":{HEAD+2},"txs":["0xf866860100000000000182520894290f02267bcc77287e8913805d0fd57d64dc08fc80808194a0efb20ee14d5e70dcd2d389fd7e208ac4895c6caefeb3e6e26d2cb641c31c65c3a036c7ed168ce8bf0275661ad723ddda9ff7a5e08747f5b099e35ffd03193afc05","0xf866860100000000000182520894e1c0a238e874d7232780354edc70cc1eda5a00ec80808193a048ca5b6b83a47b111bb96039fcae9f346fcd7446a1d239cb4f07e23513e23ee7a01275f84ef9c8e65cb0e4c19886da7c487fa0f2f42f5d26382d0e96f6cdcbd625"]}]}
   example: maxBlockNumber=1002 maxTimestamp=none request_sha256=47041402f34f4820bd06f2e9b53a518d9ce32fbbd25a8586464778980ee6fd45
-PLAN_SHA256=15ee10f9eb3131fb35803022cc768b4ed0380e9faec73f01a0cc866cb0f8ec06
+PLAN_SHA256=77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5
 ```

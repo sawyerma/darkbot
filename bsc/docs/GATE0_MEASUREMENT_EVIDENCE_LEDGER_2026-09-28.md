@@ -10,7 +10,7 @@
 > **PRIMÄRES PROJEKTZIEL: `T0 → T_buy` = vom frühestmöglichen technisch gültigen BUY bis zur erfolgreichen on-chain BUY-Ausführung / Token-Akquisition. `T_send` ist nur ein Zwischenmesspunkt und niemals der Erfolgsnachweis für „gekauft“.**
 
 Status: **AUTHORITATIVE / HUMAN-READABLE MASTER RECORD**  
-Stand: **2026-10-10**
+Stand: **2026-10-16** (G0.7-Scope-Abgleich G0.1–G0.11 als Ergänzung am Ende; historische Abschnitte unverändert)
 Primärer Scope: **BSC / Flap / Portal v5.24.0 / newTokenV6 / TOKEN_TAXED_V3**
 
 > Diese Datei ist die eine zentrale menschlich lesbare Quelle für den aktuellen Gate-0-Stand.
@@ -109,11 +109,11 @@ Wichtig:
 | **G0.3** | Minimaler korrekter Direct-Portal Launch→BUY-Harness | **PASS für den eingefrorenen Offline-Scope — unmittelbarer Launch→Direct-BUY gültig; siehe Abschluss 2026-09-29** |
 | G0.4 | Pending/actionable Coverage und frühestes brauchbares Signal | **PARTIAL — QuickNode-Quellenprobe; noch kein Coverage-PASS** |
 | **G0.5** | vollständige vorbereitete Self-Launch-Hotpath-Latenz bis echtem `T_send` | **PASS — 48Club p99 0.584 ms, BlockRazor p99 0.527 ms, jeweils 0/100 >1 ms** |
-| **G0.6** | Ingress × Inclusion Dry-Qualifikation + Concurrency | **PARTIAL / SELF-LAUNCH DRY-3 POLICY READY; finale wallet-gebundene DRY-1..4 noch offen** |
-| **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT / ONLY PRODUCT WORK — realer value-bearing Mainnet-BUY; benötigt finalen wallet-gebundenen DRY-PASS, Funding und explizite v2-Autorisierung/Arming** |
+| **G0.6** | Ingress × Inclusion Dry-Qualifikation + Concurrency | **G0.6a-Final-DRY PASS für den G0.7-Minimal-Kandidaten (2026-10-15, DRY-1..4; zuvor 2026-10-11 PASS im 1-gwei-Profil); Builder-Semantik (Pre-Arm 6/10) UNQUALIFIED bis zur Probe; Ingress×Inclusion/Concurrency für externe Launches weiter PARTIAL** — siehe Abgleich 2026-10-16 |
+| **G0.7** | kontrollierter Minimalwert-Mainnet-BUY | **NEXT / ONLY PRODUCT WORK — nicht ausgeführt, nicht autorisiert; DRY-PASS, FUNDING=PASS und Härtung vorhanden; offen: Builder-Probe, finale v2-Freigabe, Scharfschalten** — siehe Abgleich 2026-10-16 |
 | **G0.8** | tatsächliche Acquisition + Ordering | **IMMEDIATELY AFTER G0.7 — Token-Balance-Delta, Receipt, Blockposition/Ordering, Kosten und externe BUYs auswerten** |
 | G0.9+ | Builder-/Feasibility-Folgeschritte | blockiert |
-| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **PAUSED BEFORE FREEZE — C1.10A final regression PASS with pinned-baseline exception; C1.10B final C1.9 qualification PASS locally; DO NOT continue C1.10 freeze until G0.7/G0.8 real Mainnet BUY/acquisition test is completed and evaluated** |
+| **C1** | Production bsc-geth Fast Lane / Wire V2 / Rust HOT0 / local-geth handoff | **PAUSED BEFORE FREEZE — C1.1–C1.8 PASS, C1.9/C1.9b qualifiziert (Stand vor der Umstrukturierung); C1.10A-Checkpoint 2026-10-10: Regression PASS mit Pinned-Baseline-Race-Ausnahme, aber `C1_10A_COMPLETE = NO` (6 Schritte offen); C1.10B ohne Abnahmeabschnitt; nach R1–R13 und C1-Reintegration (2026-10-16) C1.9/C1.9b-Bindung und C1.10-Freeze für den neuen Quellstand offen; DO NOT continue before G0.7/G0.8** — siehe Abgleich 2026-10-16 |
 
 **Es wird kein Gate übersprungen.**
 
@@ -3940,3 +3940,61 @@ MAINNET_INGRESS_COVERAGE = NOT_PROVEN
 PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED
 LIVE = BLOCKED
 ```
+
+---
+
+## 2026-10-16 — G0.7-Scope-Abgleich G0.1–G0.11 (Ergänzung; keine Neubewertung historischer Messungen)
+
+Zweck: die für den kontrollierten G0.7-Versuch 1 maßgeblichen Gate-0-Nachweise zusammenführen, fehlende Ledger-Einträge nachtragen und offene Punkte exakt benennen. Historische Abschnitte oben bleiben unverändert; frühere Scopes behalten ihre eigenen Urteile.
+
+### Scope von G0.7-Versuch 1
+
+Nativer BNB-Flap-Self-Launch: Portal `0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0` (v5.24.0, Implementation laut Preflight-Baseline), Launch `newTokenV6`, BUY `swapExactInput`, Quote = natives BNB, gebunden durch den finalen DRY `20261015T222241Z` und den inaktiven v2-Entwurf. Der formale `PRIMARY_GATE0_SCOPE` im Kopf dieses Ledgers nennt weiter den historischen Modus; ein PASS aus Versuch 1 gilt **nur** für diesen Self-Launch-Scope (GATE0_TESTPLAN_SHORT §G0.11: keine Übertragung auf andere Modi/Venues).
+
+### Nachgetragene Nachweise (bisher nicht im Ledger)
+
+| Datum | Nachweis | Ergebnis | Fundstelle |
+|---|---|---|---|
+| 2026-10-11 | G0.6 final DRY (1-gwei-/0,001-BNB-Profil), Lauf `g06a_final_dry_20261011T110407Z` | PASS | GATE0_TESTPLAN_SHORT.md „G0.6 final dry status — 2026-10-11: PASS“; Rohdaten lokal unter `bsc/data/g06a_final_dry/` |
+| 2026-10-15 | G0.6a-Final-DRY des Minimal-Kandidaten (Gas 0,05 gwei, BUY 0,000001 BNB, Head 127865760, Nonces 0/0), DRY-1..4, Null-Egress | PASS | `bsc/native/evidence/g06a/g06a_final_dry_20261015T222241Z/` (versioniert, `SHA256SUMS`); `dry_result.json` SHA-256 `0efe78a7faf1d817fae3cbfd8893f858a4386a4c2770755465508c668eeded6f`, `preflight.json` `3eb5563d9e0bfea9ce8cc4e3750e3152d81a1b7ea7eff91de78091087bf77e69` |
+| 2026-10-16 | Pre-Live-Readiness gegen die exakten DRY-Parameter | `PASS_READ_ONLY`, `FUNDING=PASS`, keine Drift | STATUS.md §2a |
+| 2026-10-16 | Builder-Anforderungen read-only aufgefrischt | alle auffrischbaren expliziten Floors 50 000 000 wei; Blockzeit 450 ms | `bsc/native/evidence/g06a/builder_requirements_refresh_20261016T013943Z.json` (`ef4b72ff…`) |
+| 2026-10-16 | G0.7-Härtung (frischer Send-Head, 48Club `maxTimestamp`, Einmal-Sperre, private atomare Evidence, Env-Isolation, keine Panics nach der Freigabe) | implementiert, offline getestet; signierte Bytes unverändert (`transactions.rs` byte-gleich zu `565d811`) | Commits `dda7c9b`, `51e2a5e`, `9ab5fe6`; G07_ATTEMPT1_AUTHORIZATION_REVIEW.md |
+| 2026-10-16 | Builder-Probe für Pre-Arm-Checks 6/10 (11 nicht ausführbare Fälle) | vorbereitet, **nicht gesendet**; Plan-SHA-256 `77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5` wartet auf Freigabe | G07_BUILDER_PROBE_APPROVAL.md |
+
+Bindungsprüfung 2026-10-16 (direkt): alle sechs DRY-Dateien = `SHA256SUMS`; Builder-Policy `ca76a93c…`, Witness-Quellvertrag `78660c7d…`, aktiver v2 `026b534f…` (unapproved, `attempts.maximum` 4 — **keine** Autorisierung), Entwurf `902d4cb9…` (`attempts.maximum` 1, inaktiv). Seit dem DRY keine signaturrelevante Code-Änderung; ein neuer DRY ist nicht nötig. Chain-seitige Eingaben (Nonces, Portal-Zustand, Gaspreis) prüft G0.7 zur Laufzeit erneut gegen die Baseline und die DRY-Hashes.
+
+### Status je Gate
+
+| Gate | G0.7-Self-Launch-Scope | Andere Scopes | Belege |
+|---|---|---|---|
+| G0.1 | Portal/Version/Implementation eingefroren. **Offen:** numerischer Akzeptanzvertrag = v2-Entwurf `902d4cb9…` (1 Versuch, Budget 481 163 500 000 000 wei) noch nicht freigegeben | OpenFour-Fixture und Modus-Freeze, Four-Classic-Modus-Freeze offen | Abschnitte 2026-10-02 (v2 als einzige Autorität), STATUS §2a, Review §1 |
+| G0.2 | Felder belegt: Native-Curve-20-Crosscheck PASS (Abschnitt 2026-10-02) plus finaler DRY (Token, Empfänger, BUY-Wert, `minOutput`, Nonces, Gas, Calldata; Invalidierung bei geändertem Nonce/State/Portal prüft G0.7 zur Laufzeit) | `G0.2_FLAP_PASS` gilt nur für den historischen DOGE-Modus; andere Modi offen | `G0.2_FLAP_PASS`-Abschnitt, Native-Crosscheck 2026-10-02, DRY 20261015 |
+| G0.3 | Exakte Launch→BUY-Semantik der eingefrorenen Bytes: DRY-1 (Bytes/Signer), DRY-2 (unabhängige EVM-Sequenz, Gas 5 251 225 / 334 654), positiver `minOutput` | `G0.3_PASS_PINNED_OFFLINE_SCOPE` historischer Fall; neue Wallets/Beträge/Pfade brauchen eigene Fälle | `G0.3_PASS…`-Abschnitt, DRY 20261015 |
+| G0.4 | Für einen Self-Launch nicht erforderlich (kein externes Signal zu erkennen; GATE0_TESTPLAN_SHORT: Self-Launch und externe Coverage getrennt) | **PARTIAL** — kein kanonischer Nenner, Mainnet-Ingress-Coverage NOT_PROVEN | `G0.4_PARTIAL_NO_FROZEN_SCOPE_DENOMINATOR` |
+| G0.5 | **PASS** für vorbereitete/presignierte Self-Launch-Transportgrenze (48Club p99 0,584 ms, BlockRazor p99 0,527 ms, je 0/100 > 1 ms). Rest: Das gehärtete Binary wartet vor der Freigabe auf den nächsten Block — eine bewusste Wartezeit, nicht neu vermessen | externe Launches: Decode/Quote/Sign-Pfad diagnostisch p99 1,64/2,22 ms (ADAPT); C1-Pfad nicht an Execution angebunden | Abschnitt 2026-10-02 (G0.5 PASS), STATUS §1 |
+| G0.6 / G0.6a | Final-DRY **PASS**; Bindungen intakt. **UNQUALIFIED:** Builder-Methode/Format/Ablauf/Preis bei Einreichung (Check 6) und `noMerge`/`positionFirst` (Check 10) bis zur Probe; Annahme gültiger Bundles, Ordering, Inclusion und ausreichender Gaspreis bleiben auch danach UNQUALIFIED | Ingress×Inclusion-Matrix und Concurrency nur synthetisch/historisch: PARTIAL | DRY 20261015, G07_BUILDER_PROBE_APPROVAL.md |
+| G0.7 | **NICHT AUSGEFÜHRT / NICHT AUTORISIERT.** Guard `UNARMED` | — | STATUS §3 |
+| G0.8 | Werkzeuge bauen, verweigern ohne Eingaben; G0.7-Evidence G0.8-lesbar (Kompatibilitätstest) | Testnet-Acquisition/Ordering bewiesen (2026-10-01) | `qualification/tests/g08_reads_g07_evidence.rs` |
+| G0.9–G0.11 | nach G0.8. **Bekannt:** Producer-Witness `source_ready=false` ⇒ `T0 → T_buy` bleibt UNKNOWN, das Timing-Kriterium kann in Versuch 1 nicht bestehen; G0.9 ohne P2P-Vergleich voraussichtlich UNKNOWN | — | Witness-Quellvertrag, Review §3 |
+
+### Offen bis zum Versuch (Reihenfolge)
+
+1. Builder-Probe: Freigabe genau des Plan-SHA-256 `77957205…` durch den Nutzer, ein Lauf, Auswertung nach G07_BUILDER_PROBE_APPROVAL.md §4.
+2. Pre-Arm-Checks 6/10 im v2-Entwurf nach dem Probe-Ergebnis setzen (neuer Entwurfs-Hash).
+3. Nutzerentscheidungen: finale Entwurfsbytes, Restrisiken (null Gas-Spielraum, ein nicht eingeschlossenes Bundle verbraucht den einzigen Versuch, Timing UNKNOWN), Budget und Wallet-Bestände.
+4. Builder-Refresh höchstens 24 h vor dem Scharfschalten erneuern (der Refresh vom 2026-10-16T01:39Z gilt bis 2026-10-17T01:39Z).
+5. Readiness unmittelbar vor dem Scharfschalten; NTP-Uhr.
+6. Scharfschalt-Commit nur mit ausdrücklicher Echtgeldfreigabe; genau ein Lauf; sofort G0.8; Entschärf-Commit.
+
+### Nicht behauptet
+
+```text
+T0_TO_T_BUY_LT_1MS            = NOT_PROVEN (source_ready=false)
+REAL_MAINNET_BUY              = NOT_EXECUTED
+BUILDER_ACCEPTANCE/ORDERING   = UNQUALIFIED
+MAINNET_INGRESS_COVERAGE      = NOT_PROVEN
+LIVE                          = BLOCKED
+```
+
+Unverändert gelassen: `ACCEPTANCE_MAP.json` (versionierter Vertrag; seine Zähler `323` und `next_step` sind älter als STATUS.md, werden aber nicht nachträglich umgeschrieben).

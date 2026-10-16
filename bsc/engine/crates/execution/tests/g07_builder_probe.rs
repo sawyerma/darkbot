@@ -13,7 +13,7 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// the included G0.7 modules' sources, so any change to them, or to what a
 /// live run would send, changes this hash and needs a new approval. (Pinned
 /// here, not in plan.rs, which is itself part of that digest.)
-const PINNED_PLAN_SHA256: &str = "15ee10f9eb3131fb35803022cc768b4ed0380e9faec73f01a0cc866cb0f8ec06";
+const PINNED_PLAN_SHA256: &str = "77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);
@@ -112,6 +112,26 @@ fn approval_precedes_every_read_latch_and_connection() {
     let write = pos(".write_all(&built.request)");
     assert!(send < build && build < alive && alive < write);
     assert_eq!(MAIN.matches("rpc(").count(), 2);
+}
+
+#[test]
+fn a_failed_evidence_write_stops_sending_and_keeps_the_latch() {
+    let pos = |needle: &str| {
+        MAIN.find(needle)
+            .unwrap_or_else(|| panic!("missing {needle:?}"))
+    };
+    // No evidence write is ignored.
+    assert!(!MAIN.contains("let _ = evidence.replace"));
+    assert!(!MAIN.contains("let _ = persist("));
+    // A report is on file before the first send, and the latch is released
+    // only before the send loop (nothing sent yet), never after it started.
+    let first_write = pos("if let Err(e) = persist(&[], \"IN_PROGRESS\")");
+    let loop_start = pos("let run = run_cases(");
+    assert!(first_write < loop_start);
+    assert_eq!(MAIN.matches("release_unsent_attempt(").count(), 2);
+    assert!(!MAIN[loop_start..].contains("release_unsent_attempt("));
+    assert!(MAIN[loop_start..].contains("STOPPED_EVIDENCE_WRITE_FAILED"));
+    assert_eq!(MAIN.matches("std::process::exit(3)").count(), 2);
 }
 
 #[test]

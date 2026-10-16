@@ -114,30 +114,72 @@ fn main() {
             panic!("builder probe evidence: {e}; nothing sent; {released}")
         });
 
-    let mut results = Vec::new();
-    for (n, case) in CASES.iter().enumerate() {
-        if n > 0 {
-            thread::sleep(PROBE_SPACING);
-        }
-        results.push(run_case(n, case, &mut head_poller, &token));
-        let report = report(&plan_sha256, &results);
-        let _ = evidence.replace(format!("{report}\n").as_bytes());
+    let persist = |results: &[Value], status: &str| {
+        evidence.replace(format!("{}\n", report(&plan_sha256, results, status)).as_bytes())
+    };
+    // The evidence file must take a report before anything is sent.
+    if let Err(e) = persist(&[], "IN_PROGRESS") {
+        let released = release_unsent_attempt(&probe_dir, Some(&evidence), "pre-egress");
+        panic!("builder probe evidence: {e}; nothing sent; {released}");
     }
-    let report = report(&plan_sha256, &results);
-    let written = evidence.replace(format!("{report}\n").as_bytes());
-    let _ = writeln!(out, "{report}");
-    let _ = writeln!(
-        out,
-        "PROBE_EVIDENCE={} ({})",
-        evidence_path.display(),
-        match &written {
-            Ok(()) => "written".to_string(),
-            Err(e) => format!("NOT written: {e}"),
-        }
+
+    let run = run_cases(
+        CASES.len(),
+        PROBE_SPACING,
+        |n| run_case(n, &CASES[n], &mut head_poller, &token),
+        |results| persist(results, "IN_PROGRESS"),
     );
-    if written.is_err() {
-        std::process::exit(3);
+    match run {
+        Ok(results) => {
+            let written = persist(&results, "COMPLETE");
+            let _ = writeln!(out, "{}", report(&plan_sha256, &results, "COMPLETE"));
+            let _ = writeln!(
+                out,
+                "PROBE_EVIDENCE={} ({})",
+                evidence_path.display(),
+                match &written {
+                    Ok(()) => "written".to_string(),
+                    Err(e) => format!("NOT written: {e}"),
+                }
+            );
+            if written.is_err() {
+                std::process::exit(3);
+            }
+        }
+        Err((results, e)) => {
+            // A request may have left: the latch is kept, nothing else is sent.
+            let stopped = "STOPPED_EVIDENCE_WRITE_FAILED";
+            let _ = writeln!(out, "{}", report(&plan_sha256, &results, stopped));
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "STOP: evidence write failed after case {} ({e}); the remaining cases were not sent; the latch stays; stdout holds the report",
+                results.len()
+            );
+            std::process::exit(3);
+        }
     }
+}
+
+/// Runs the cases in order and persists the evidence after each one. A
+/// failed write stops the run at once: no further case is sent, and the
+/// results so far come back with the error.
+fn run_cases(
+    count: usize,
+    spacing: Duration,
+    mut send: impl FnMut(usize) -> Value,
+    mut persist: impl FnMut(&[Value]) -> Result<(), String>,
+) -> Result<Vec<Value>, (Vec<Value>, String)> {
+    let mut results = Vec::with_capacity(count);
+    for n in 0..count {
+        if n > 0 {
+            thread::sleep(spacing);
+        }
+        results.push(send(n));
+        if let Err(e) = persist(&results) {
+            return Err((results, e));
+        }
+    }
+    Ok(results)
 }
 
 /// Sends case `n`: a new connection first (as G0.7 prewarms), then a fresh
@@ -229,15 +271,79 @@ fn run_case(n: usize, case: &Case, poller: &mut HeadPoller, token: &str) -> Valu
     })
 }
 
-fn report(plan_sha256: &str, results: &[Value]) -> String {
+fn report(plan_sha256: &str, results: &[Value], status: &str) -> String {
     let accounts = throwaway_accounts();
     serde_json::to_string_pretty(&json!({
         "schema":PROBE_SCHEMA,
         "plan_sha256":plan_sha256,
+        "status":status,
         "throwaway_accounts":accounts.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
         "cases":results,
         "scope":"submission-time acceptance only; building-time behavior, inclusion and whether 0.05 gwei suffices are not shown",
         "outcome_classes":"ACCEPTED, METHOD_REJECTED, FORMAT_REJECTED, EXECUTION_REJECTED, PRICE_REJECTED, EXPIRY_REJECTED, BUNDLE_REJECTED_UNSPECIFIED, OTHER_REJECTED, HTTP_ERROR, UNPARSEABLE, TRANSPORT_ERROR (after the write began), TRANSPORT_ERROR_NOT_SENT, SKIPPED_NO_FRESH_HEAD; the raw answer is the evidence"
     }))
     .unwrap_or_else(|e| format!("{{\"report_serialization_error\":\"{e}\"}}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_evidence_write_stops_the_run_before_the_next_case() {
+        for fail_after in 0..CASES.len() {
+            let mut sent = Vec::new();
+            let run = run_cases(
+                CASES.len(),
+                Duration::ZERO,
+                |n| {
+                    sent.push(n);
+                    json!({ "case": n })
+                },
+                |results| {
+                    if results.len() > fail_after {
+                        Err("disk full".to_string())
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            let (results, e) = run.unwrap_err();
+            assert_eq!(sent, (0..=fail_after).collect::<Vec<_>>());
+            assert_eq!(results.len(), fail_after + 1);
+            assert_eq!(e, "disk full");
+        }
+    }
+
+    #[test]
+    fn every_case_is_persisted_right_after_it_is_sent() {
+        let mut events = Vec::new();
+        let events_ref = std::cell::RefCell::new(&mut events);
+        let run = run_cases(
+            3,
+            Duration::ZERO,
+            |n| {
+                events_ref.borrow_mut().push(format!("send {n}"));
+                json!({ "case": n })
+            },
+            |results| {
+                events_ref
+                    .borrow_mut()
+                    .push(format!("persist {}", results.len()));
+                Ok(())
+            },
+        );
+        assert_eq!(run.unwrap().len(), 3);
+        assert_eq!(
+            events,
+            [
+                "send 0",
+                "persist 1",
+                "send 1",
+                "persist 2",
+                "send 2",
+                "persist 3"
+            ]
+        );
+    }
 }
