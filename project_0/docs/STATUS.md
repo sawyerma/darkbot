@@ -181,3 +181,88 @@ In parallel, user-owned: saved-data replay of `market5h_20261011T010758Z`, then 
 Update this file together with every new dated ledger gate entry: snapshot line, sections 1, 2, 4–7 and 10.
 Copy verdicts only from the ledger or evidence. Never mark a gate PASS here first, and never infer
 economic or LIVE readiness from offline tests.
+
+## 12. Gap and acceptance matrix — every binding ticket of PHASENPLAN §8 (as of `627c3fc`)
+
+Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** = targeted local tests/offline evidence · **PARTIAL** = some criteria evidenced · **CODE** = implementation present, acceptance not evidenced · **OPEN** = not implemented · **BLOCKED** / **NOT_RUN** = external prerequisite or permission missing · **DEFERRED_PRIORITY** = binding, ordered after the FE path per §8 (never cancelled). Ledger references are dated entries in `MEASUREMENT_LEDGER.md`. Update this table with every ticket.
+
+| Ticket | Code | Evidence | Status | Missing / next step |
+|---|---|---|---|---|
+| P0-01…07 | — | `evidence/P0_20261016/` | **PASS** | — |
+| P1A-01 current ProgramData | `protocol.rs` decoder, Shadow startup pin | ledger 2026-10-16 P1A | CODE · **BLOCKED** | finalized read of program + ProgramData (separate read-only permission) |
+| P1A-02 source/IDL manifest | `protocol.rs` parity tests | `manifests/CURRENT_MAINNET.md` | LOCAL_PASS | on-chain IDL hash NOT_RUN |
+| P1A-03 allowlists | `protocol.rs`, `planner.rs` | same | LOCAL_PASS | — |
+| P1A-04 upgrade watcher | `setup.rs`, `events.rs` | same | LOCAL_PASS | Mainnet behaviour NOT_RUN |
+| P1B-01…03 | `decode_bank`, tripwire tests | `manifests/UPCOMING_0_1_12.md` (RC2 probe) | LOCAL_PASS | deployed release unknown (P1A); promotion: `premium_scratch`, repay/`repay_all`, new layouts/oracles |
+| C0-01 account census | `c0_census.py` (+ import) | 2026-10-02 slot 452723812 | historical PASS · current NOT_RUN | current read (permission); census import still schema-1 (JFI) |
+| C0-02 health classification | `census.rs`, Shadow census worker | Ticket 2, C0-FIX-01…05 | LOCAL_PASS · current **NOT_RUN** | permitted Shadow start with measured cost model |
+| C0-03 race opportunity map | census facts (distance, oracles, integrations, TX load) | `evidence/C0_MARKET_CENSUS.md` | PARTIAL | exact v0/v1 fit per account needs built TX (pipeline); current data NOT_RUN |
+| C0-04 long-tail / `t_profitable` | `economics.rs`, census `model_long_tail` | same | LOCAL_PASS (model) | current data NOT_RUN; tagging only from 0.1.12 |
+| H0-01 historical extractor | `market/*`, `market_truth.rs`, gap/reconcile | C0-E1 runs (INCOMPLETE) | CODE | 30-day window over saved runs; JFI Ticket 3 (typed capture) first |
+| H0-02 winner matcher | `market/winner.rs`, `winner_tracker.rs` | 6/6 audit fixtures | LOCAL_PASS | historical window evaluation |
+| H0-03 execution classifier | `market_truth.rs` (four types / six markers) | C0E1-P3 evidence | PARTIAL | apply to H0 window |
+| H0-04 tag timeline after 0.1.12 | — | — | OPEN · BLOCKED | needs 0.1.12 deployed |
+| H0-05 competitor min-profit inference | — | — | OPEN | after H0-01…03 |
+| H0-06 report | — | — | OPEN | `evidence/H0_LIQUIDATIONS.md` |
+| S0-01 workspace | 4 crates | builds/tests per ledger | LOCAL_PASS | — |
+| S0-02 timing / S0-03 telemetry | `common/timing.rs`, `mt0.rs` | MT0 evidence | LOCAL_PASS | Mainnet tails NOT_MEASURED |
+| S0-04 bounded channels / lifecycle | `common/channel.rs`, `lifecycle.rs` | unit tests | LOCAL_PASS | — |
+| S0-05 journal / replay | `analytics/journal.rs`, `payload.rs` | PERSIST + JFI entries | PARTIAL | JFI migration of remaining kinds (Ticket 3, FIX-04…06) |
+| S1-01 IngressSource / native events | `solana/src/ingress` | bootstrap PASS 2026-10-02 | PARTIAL | market ingest still carries raw JSON values (Ticket 3) |
+| S1-02 BinaryGeyserSource | — (enum mention only) | — | OPEN · DEFERRED_PRIORITY | S1-RACE |
+| S1-03 WsRpcControlSource | `ws_rpc.rs` | Mainnet bootstrap/recovery PASS | PARTIAL | long-run continuity FAILED (4 h / 5 h gaps, 429) |
+| S1-04 snapshot + reconcile | `state/snapshot.rs`, `recovery.rs` | PASS in bootstrap/C0-E1 runs | PARTIAL | Long-Tail/Premium snapshot semantics for 0.1.12 |
+| S1-05 binary fast lane / queues | bounded channels | — | OPEN | qualified binary source (S1-RACE) |
+| S1-06 v1 fidelity | `txv1` feature, `p0-probe-v1` | `V1_wire_probe_20261004.json` | PARTIAL | v1 submission capability gate |
+| S1-07 reconnect / gap / reconcile | `ws_rpc.rs`, `market_gap.rs`, `market_reconcile.rs` | 60 s disconnect recovered | PARTIAL | 4 h unrecovered gap; 429 handling |
+| S1-08 Mainnet binary source + cost | — | — | NOT_RUN · DEFERRED_PRIORITY | — |
+| S2-01…04 canonical state, fork/root, bootstrap, recovery | `solana/src/state/*` | Mainnet PASS (bootstrap/recovery) | LOCAL_PASS · partial Mainnet | long-run qualification |
+| S2-05 blockhash / LUT / token metadata | `blockhash.rs`, `execution/lookup_tables.rs` | R120 protocol LUTs | PARTIAL | token metadata cache not separate |
+| S3-01 v0 builder | `solana/src/tx`, `execution/builder.rs` | simulation path proven (R97–R101) | PARTIAL | current candidate simulation (FE-02) |
+| S3-02 v1 builder | `txv1` | wire probe | PARTIAL | submission adapter capability |
+| S3-03 signer / serialization | `solana/src/tx` | tests | LOCAL_PASS | — |
+| S3-04 RpcSubmitter | `submit/rpc.rs` | mock/loopback | CODE | never submitted; LIVE disabled |
+| S3-05 JitoSubmitter core | `submit/jito.rs` | mock | CODE | Jito costs/lifecycle UNKNOWN (FIX-129) |
+| S3-06 landing reconciliation | `execution/pending.rs`, FE-04 receipts | FE-04 local | PARTIAL | finalized reconciliation in pilot |
+| S3-R00…R03 Jito access, gRPC, prewarm, race benchmark | ATA prewarm only | — | OPEN · DEFERRED_PRIORITY | after S1-RACE |
+| S4-01…04 parity corpus / decode / tx / performance | — | — | OPEN · DEFERRED_PRIORITY | — |
+| C0E1-P3-M06 … C0E1-P6-GATE | `market_*`, `analytics/*`, `p0-strict-verify` | `C0E1_P3…P6` evidence | LOCAL_PASS (offline) | 4 h master NOT_QUALIFIED; verifier/report JFI (Ticket 3 / FIX-05) |
+| P2-01 RAM model / P2-02 reverse indices | `state`, `liquidation/index.rs` | R127d Shadow | LOCAL_PASS | requalification after FIX-134/135 not recorded |
+| P2-03 threshold index | `index.rs` | — | CODE | not the default since R127 |
+| P2-04 premium scheduler / P2-05 tag scheduler | `schedule.rs` | unit tests | CODE | 0.1.12 semantics |
+| P2-06 prepared candidate / TX template cache | `prepared.rs` | — | PARTIAL | template cache not built |
+| P2-07 invalidation + prebuild benchmark | — | — | OPEN | — |
+| P3-01 crate integration / exact fallback | `health.rs` | R127d 12.4 M checks | LOCAL_PASS | — |
+| P3-02 premium health | — | RC2 API identified | OPEN | 0.1.12 promotion (`premium_scratch`) |
+| P3-03 receivership rule | `sizing.rs` | unit tests | PARTIAL | 0.1.12 health-drop / bad-debt rules |
+| P3-04 integration parity | `integration.rs` | R110–R122 | PARTIAL | Drift qualification OPEN since 2026-10-07 |
+| P3-05 parity corpus | — | — | OPEN | — |
+| P4A-01 realizable value | `economics.rs`, route floor | R124 historical | PARTIAL | current executable floor (FE-02) |
+| P4A-02 fee model | FIX-129, `MessageFeeQuote` | FIX129 doc | PARTIAL | Jito tip cost UNKNOWN |
+| P4A-03 failed-attempt matrix / P4A-04 `t_profitable` / P4A-06 ranking | `economics.rs` | unit tests | LOCAL_PASS | Mainnet calibration |
+| P4A-05 capital model | `funding.rs` | P6-MT T1 | LOCAL_PASS | — |
+| P4A-JIT-01/02 | `route.rs` (ExactIn build), `funding.rs` | P1-C PASS | PARTIAL | bounded shortfall solver vs. classes, current quotes |
+| P5-01 allowlist / P5-03 NO_SWAP | `planner.rs` | unit tests | LOCAL_PASS | — |
+| P5-02 refresh planner | `integration.rs` | R116–R122 | PARTIAL | Drift |
+| P5-04 local/precomputed route | — | — | OPEN | — |
+| P5-05 free route | Jupiter `/swap/v2/build` adapter | R118/R119 | PARTIAL | adapter typing per JFI-02 exception (FIX-07) |
+| P5-06 receivership builder / P5-07 prepared plan | `receivership.rs`, `builder.rs` | simulation path | PARTIAL | **fee-wallet fallback `Pubkey::default()` in `detect.rs` must block the candidate** |
+| P5-08 staging fixtures | — | `STAGING_MODEL.md` | OPEN | staging build + allowlist (permission for staging reads) |
+| P5-JIT-01 | `route.rs`, `builder.rs` | — | PARTIAL | — |
+| T-01…03 tag TX / state / economics | economics curve only | — | OPEN · BLOCKED | 0.1.12 deployment |
+| P6-01 E2E telemetry | MT0, owner journal | MT0 evidence | LOCAL_PASS | Mainnet tails NOT_MEASURED |
+| P6-02 race shadow | — | — | OPEN · DEFERRED_PRIORITY | S1-RACE |
+| P6-03 long-tail shadow | Shadow runtime | R127d before FIX-134/135 | PARTIAL | 72 h P6-LT NOT_RUN |
+| P6-04 winner comparison / P6-05 loss classifier | `winner.rs`, `LossReason` | local | LOCAL_PASS | Mainnet sample |
+| P7-01…06 | — | — | OPEN · DEFERRED_PRIORITY | after P6 evidence |
+| P4B-01…05 | — | — | OPEN · DEFERRED_PRIORITY | after P7 |
+| P8-01 safety gates / P8-02 limits | `safety.rs`, pipeline | unit tests | PARTIAL | full P8 before multi-LIVE |
+| P8-03 staging live / P8-04 controlled mainnet | LIVE refused in code | — | NOT_AUTHORIZED | separate approvals |
+| P8-05 reconciliation / P8-RES-01/02 | FE-04 `one_shot.rs` journal, holds, UNKNOWN | FE-04 local evidence | PARTIAL_LOCAL | global multi-mint reservation; **`remote_workers` reconcile wall time `unwrap_or(0)`**; FE-04 typed journal (FIX-06) before any financial handoff |
+| P8-INV-01 inventory / rebalance | — | — | OPEN | — |
+| P9-01…03 | — | — | OPEN | after pilot |
+| P9-04 protocol-upgrade watch | = P1A-04 | — | LOCAL_PASS | — |
+| K-01…06 | — | — | OPEN · DEFERRED_PRIORITY | — |
+| FE-00…07 | see §5 | — | FE-00 LOCAL_PASS · NO_ECONOMIC_GO; FE-01…07 OPEN/NOT_RUN/NOT_AUTHORIZED | FE path has priority when a qualified candidate exists (§0.6) |
+| PERSIST-01…05 | journal, renders, FE-04 | PERSIST entries | PARTIAL | Mainnet tails, physical fault test |
+| JFI-01…05 | typed payloads, write admission | JFI entries | OPEN | Ticket 3 (market capture, verifier), FIX-04 config, FIX-05 econ/report, FIX-06 FE-04, FIX-07 Jupiter adapter, measurement/MT0/FE-01/census kinds |
