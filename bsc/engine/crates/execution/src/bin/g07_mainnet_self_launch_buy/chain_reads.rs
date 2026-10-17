@@ -144,6 +144,53 @@ pub(crate) fn rpc_receipt(hash: &str) -> Result<Option<ReceiptSeen>, String> {
     }))
 }
 
+/// The code at `address` (latest). Never panics.
+pub(crate) fn rpc_code(address: Address) -> Result<Vec<u8>, String> {
+    rpc_data(
+        "eth_getCode",
+        &format!(r#"[{},"latest"]"#, wire_string(&address.to_string())),
+    )
+}
+
+/// The gas estimate of a call at latest. Never panics.
+pub(crate) fn rpc_estimate_gas(
+    from: Address,
+    to: Address,
+    value: U256,
+    data: &[u8],
+) -> Result<u64, String> {
+    rpc_u64(
+        "eth_estimateGas",
+        &format!(
+            r#"[{{"from":{},"to":{},"value":"0x{value:x}","data":"0x{}"}}]"#,
+            wire_string(&from.to_string()),
+            wire_string(&to.to_string()),
+            hex::encode(data)
+        ),
+    )
+}
+
+/// The latest block number. Never panics.
+pub(crate) fn rpc_block_number() -> Result<u64, String> {
+    rpc_u64("eth_blockNumber", "[]")
+}
+
+/// The balance of `who` at latest. Never panics.
+pub(crate) fn rpc_balance(who: Address) -> Result<U256, String> {
+    rpc_quantity(
+        "eth_getBalance",
+        &format!(r#"[{},"latest"]"#, wire_string(&who.to_string())),
+    )
+}
+
+/// The pending nonce of `who`. Never panics.
+pub(crate) fn rpc_pending_nonce(who: Address) -> Result<u64, String> {
+    rpc_u64(
+        "eth_getTransactionCount",
+        &format!(r#"[{},"pending"]"#, wire_string(&who.to_string())),
+    )
+}
+
 /// Number and hash of the latest block.
 fn latest_block() -> Result<(u64, [u8; 32]), String> {
     let block = rpc("eth_getBlockByNumber", r#"["latest",false]"#)?;
@@ -281,13 +328,8 @@ pub(crate) fn run_current_preflight(
     if fees.iter().any(|bps| *bps >= U256::from(10_000u64)) {
         return Err("invalid protocol fee bps".into());
     }
-    let account = |who: Address| -> Result<(u64, U256), String> {
-        let wire = wire_string(&who.to_string());
-        Ok((
-            rpc_u64("eth_getTransactionCount", &format!(r#"[{wire},"pending"]"#))?,
-            rpc_quantity("eth_getBalance", &format!(r#"[{wire},"latest"]"#))?,
-        ))
-    };
+    let account =
+        |who: Address| -> Result<(u64, U256), String> { Ok((rpc_pending_nonce(who)?, rpc_balance(who)?)) };
     let (launcher_nonce, launcher_balance) = account(launcher)?;
     let (buyer_nonce, buyer_balance) = account(buyer)?;
 

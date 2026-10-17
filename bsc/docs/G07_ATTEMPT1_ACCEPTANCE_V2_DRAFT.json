@@ -1,0 +1,220 @@
+{
+  "schema_version": 2,
+  "status": "APPROVED_SINGLE_ATTEMPT_G07_ATTEMPT_1",
+  "supersedes_for_self_launch_test": "g01_mainnet_acceptance_proposal_v1.json",
+  "purpose": "Controlled Mainnet self-launch ordered-bundle qualification with two independent wallets and parallel builder fan-out",
+  "authorization": {
+    "approved": true,
+    "execution_ready": true,
+    "approval_required_for": "Any value-bearing Mainnet bundle submission",
+    "note": "Final single-attempt authorization for G0.7 attempt g07-mainnet-attempt-1-dry-20261015T222241Z. Effective only after the user explicitly approves these exact bytes and a dedicated arming commit sets FROZEN_APPROVED_V2_SHA256 to their SHA-256 while this file sits at bsc/config/g01_mainnet_acceptance_proposal_v2.json. v1 remains historical.",
+    "launcher_address": "0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd",
+    "buyer_address": "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE",
+    "approved_contract_sha256": null,
+    "execution_authority": "Only this v2 file may authorize the self-launch Mainnet send path; v1 is forbidden as runtime authority",
+    "approval_scope": "Exactly one economic G0.7 attempt (attempt_number 1) of the exact DRY-qualified [launch_A, buy_B] bytes; no retry; no second attempt under this approval; a disarm commit (FROZEN back to UNARMED) is mandatory immediately after the release regardless of outcome",
+    "attempt_id": "g07-mainnet-attempt-1-dry-20261015T222241Z",
+    "evidence_bindings": {
+      "dry_evidence_sha256": "0efe78a7faf1d817fae3cbfd8893f858a4386a4c2770755465508c668eeded6f",
+      "preflight_evidence_sha256": "3eb5563d9e0bfea9ce8cc4e3750e3152d81a1b7ea7eff91de78091087bf77e69",
+      "builder_policy_evidence_sha256": "ca76a93c432a9cee308b07e59170bac390e801caaa8e0697b0b31d405b9bcc87",
+      "producer_witness_source_contract_sha256": "78660c7da9fbb8a2140daf1bca4187881d71f55a914c9fcddfc0e47f287116c4"
+    },
+    "evidence_paths": {
+      "dry_evidence": "bsc/native/evidence/g06a/g06a_final_dry_20261015T222241Z/dry_result.json",
+      "preflight_evidence": "bsc/native/evidence/g06a/g06a_final_dry_20261015T222241Z/preflight.json",
+      "builder_policy_evidence": "bsc/config/g06a_builder_floor_addendum_2026-10-11.json",
+      "producer_witness_source_contract": "bsc/config/g07_producer_witness_source_attempt1.json",
+      "builder_requirements_refresh": "bsc/native/evidence/g06a/builder_requirements_refresh_20261016T013943Z.json",
+      "builder_requirements_refresh_sha256": "ef4b72ffd26c07850fda15a8193a744abbd5e33015623a4c8d0818af740287b6",
+      "note": "Informational. The guard binds only the four evidence_bindings hashes; paths are passed at runtime by environment variable."
+    }
+  },
+  "scope": {
+    "chain_id": 56,
+    "venue": "Flap",
+    "launch": "newTokenV6",
+    "tokenVersion": 6,
+    "portal_expected_from_current_evidence": "0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0",
+    "portal_rule": "Reverify current Mainnet deployment/version/runtime code immediately before arming; mismatch is STOP",
+    "launch_mode": "controlled native-quote self-launch matching the intended harness, not the historical DOGE fixture",
+    "quoteToken": "0x0000000000000000000000000000000000000000",
+    "quoteAmt": "0",
+    "buy": "Direct Portal swapExactInput with native input and nonzero locally-derived minOutput",
+    "historical_g03_authority": "Historical DOGE/0.15-BNB G0.3 fixture is NOT authority for this native-quote self-launch; native mode requires its own dry semantic validation"
+  },
+  "wallet_separation": {
+    "launcher": "0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd",
+    "buyer": "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE",
+    "must_be_distinct_addresses": true,
+    "reason": "Launch/BUY ordering must be proven by bundle semantics, not by same-sender nonce ordering",
+    "secret_storage": "No private key or secret is written to evidence"
+  },
+  "attempts": {
+    "maximum": 1,
+    "economic_attempt_definition": "One self-launch plus one intended BUY. Parallel submission of byte-identical [launch_A,buy_B] bundle copies to multiple builders counts as ONE economic attempt.",
+    "builder_fanout": [
+      "48Club/Puissant",
+      "BlockRazor"
+    ],
+    "parallel": true,
+    "no_public_launch_broadcast": true,
+    "no_automatic_retry": true,
+    "no_parallel_fallback_buy_bundle_in_stage_1": true,
+    "selected_attempts_remain_in_denominator": true
+  },
+  "bundle_bytes": {
+    "tx_order": [
+      "raw_signed_launch_A",
+      "raw_signed_buy_B"
+    ],
+    "identical_raw_transactions_across_builders": true,
+    "reverting_transactions_allowed": false,
+    "max_block_window": "At most send_head+2 unless a stricter provider-specific bound is available; never use a long default such as +100",
+    "expiry_mismatch": "STOP if equivalent tight expiry cannot be expressed for every armed builder",
+    "fortyeightclub": {
+      "noMerge": true,
+      "positionFirst": true,
+      "rationale": "N+1 qualification must not accept late-arriving bundle placement at the block tail."
+    },
+    "send_head_rule": "send_head is the next block G0.7 observes, polled over a pre-warmed keep-alive RPC TLS connection after the builder TLS prewarm, immediately before the release (not the preflight head). maxBlockNumber = send_head + 2 for both builders: this is the head+2 bound. 48Club additionally gets maxTimestamp (Unix seconds) = floor((send_head milliTimestamp + 900 ms) / 1000) + 1, milliTimestamp per BEP-520: the second after head+2's nominal second, so a 'maxTimestamp must exceed the current block time / now' check cannot refuse the bundle while head+2 is open. A seconds value cannot express head+2 exactly; maxTimestamp alone would admit blocks stamped up to that second (about head+6 at the nominal cadence), so for 48Club the head+2 bound rests on maxBlockNumber being enforced (documented as an inclusive parameter and checked by 48Club at submission per the builder probe 2026-10-16; building-time enforcement unqualified, pre-arm check 6). G0.7 stops before any bundle write if send_head is below the preflight head, has the preflight height with another hash, is older than 450 ms by the local clock or, independent of the clock, at least 450 ms staler than the endpoint's freshest read, if the local clock lags the head timestamp by more than 150 ms, if no new block arrives within 3 s, if the builder connections idled longer than 5 s, if a builder closed its prewarmed connection or sent unsolicited data, or if the journal does not hold the exact request bodies within 50 ms."
+  },
+  "economics_validation": {
+    "min_output": {
+      "must_be_positive": true,
+      "source": "Exact controlled post-launch state from the chosen native launch parameters",
+      "independent_cross_check": "Local/offline independent sequential execution of exact launch_A then buy_B. Before authorization, exact valid Mainnet bytes MUST NOT be sent to external builder simulation endpoints.",
+      "slippage_max_bps": 100,
+      "historical_min_output_reuse_forbidden": true
+    },
+    "gas_floor": {
+      "policy": "Before signing, determine the current acceptance floor/ranking rules for every armed builder. Use the strictest requirement for the identical transaction bytes.",
+      "blockrazor_current_documented_reference": "0.05 gwei (50000000 wei), refreshed read-only 2026-10-16 against official BlockRazor docs (GitHub blobs unchanged since 2026-10-04): per-transaction validator minimum and non-mempool bundle average with builder tip in the numerator; both allow equality. See authorization.evidence_paths.builder_requirements_refresh.",
+      "fortyeightclub": "Do not reuse a stale universal 1-gwei assumption. Verify the current Puissant endpoint/validator acceptance and priority rule immediately before arming. Read-only refresh 2026-10-16: web3.48.club (auction-transaction-feed, backrun context; publication date unknown) states a 0.05 gwei bundle-average requirement; applicability to non-backrun bundles is unverified; the legacy GitBook page still shows 1 gwei (appears outdated). maxBlockNumber is an integer; the web3 sendBundle page also asks for a maxTimestamp expiry: G0.7 sends maxTimestamp (Unix seconds) = floor((send_head milliTimestamp + 900 ms) / 1000) + 1 next to maxBlockNumber = send_head + 2 (see bundle_bytes.send_head_rule). Builder probe 2026-10-16: 48Club parses the exact G0.7 request and checks maxBlockNumber and maxTimestamp at submission, but showed no gas-price check at submission, so acceptance of a 0.05 gwei / tip-0 bundle for inclusion stays unverified. Auction Feed/backrunTarget requirements remain a separate scope.",
+      "max_signed_gas_price_wei": "50000000",
+      "freshness_rule": "Re-run the read-only builder refresh no more than 24 hours before the arming commit; STOP if any explicit floor exceeds 50000000 wei or any rule changed.",
+      "bound_policy_superseded_fields": "In the bound addendum bsc/config/g06a_builder_floor_addendum_2026-10-11.json, fortyeightclub.explicit_minimum_documented=false and the BlockRazor rule text are superseded by the 2026-10-16 refresh (same 50000000 wei value); the addendum stays bound because its strictest floor and stage-1 policy are unchanged and the DRY binds it."
+    },
+    "bid_policy": {
+      "stage_1": "Bid through the signed transaction gas-price policy only; no separate automatic builder transfer/tip",
+      "max_direct_builder_tip_wei": "0",
+      "policy_change_requires_new_contract_version": true
+    }
+  },
+  "budget_wei_proposal": {
+    "max_buy_value_per_attempt": "1000000000000",
+    "max_launch_call_value_per_attempt": "0",
+    "max_launch_gas_limit": "6603270",
+    "max_buy_gas_limit": "3000000",
+    "max_gas_price_wei": "50000000",
+    "max_gas_cost_per_attempt": "480163500000000",
+    "max_total_per_attempt": "481163500000000",
+    "absolute_max_total_all_four_attempts": "481163500000000",
+    "note": "Final single-attempt budget for the exact DRY candidate: signed gas price 0.05 gwei, launch gas limit 6,603,270, BUY gas limit 3,000,000, launch value 0, BUY value 0.000001 BNB, builder tip 0. Worst-case gas reserve 0.0004801635 BNB; total worst-case reserve 0.0004811635 BNB (launcher 0.0003301635, buyer 0.000151). The launch gas cap is the measured Mainnet eth_estimateGas 5,502,725 with a 120% reserve = 6,603,270 (re-measured at block 127865760). Expected actual cost from the local simulation (gas used 5,251,225 + 334,654 at 0.05 gwei plus BUY value) is 0.00028029395 BNB; the ceilings are the worst-case reserve, not the expected charge. The key absolute_max_total_all_four_attempts is kept because the guard reads exactly this pointer; with attempts.maximum 1 it is the absolute single-attempt ceiling. Never increase these ceilings at runtime."
+  },
+  "pre_arm_checks": [
+    "Reverify current Flap Mainnet Portal/version/runtime code and selected native launch semantics",
+    "Validate exact native-mode launch->BUY transition independently; historical DOGE G0.3 fixture is insufficient",
+    "Resolve and freeze distinct launcher_A and buyer_B addresses and both pending nonces",
+    "Verify both wallets have sufficient balance under the proposed reserved worst-case budget without writing secrets to evidence",
+    "Compute positive minOutput locally from the exact self-launch parameters and cross-check with independent simulation",
+    "Validate exact signed raw launch and BUY transactions decode/recover to the intended sender, nonce, chain, portal, value, gas and calldata",
+    "Validate builder method/format/expiry semantics only with deliberately non-executable fixtures; exact valid Mainnet bytes remain local until authorization",
+    "Determine current builder gas-floor/ranking requirements; signed bytes must satisfy the strictest armed builder",
+    "Verify neither transaction is broadcast to the public mempool during dry qualification",
+    "Explicit user approval of this v2 scope and numeric absolute budget ceiling",
+    "Validate 48Club noMerge=true and positionFirst=true semantics using deliberately non-executable fixtures before arming."
+  ],
+  "success": {
+    "acquisition": "BUY receipt success plus positive intended-token balance delta at buyer_B with attributable economic debit/cost",
+    "ordering": "Launch and BUY are in the same canonical block; BUY transaction index equals launch transaction index + 1; zero successful external BUYs between",
+    "builder_evidence": "Record builder submission hash/status where exposed and identify block builder/validator where reliably attributable",
+    "timing": "N+1 is ordering evidence only. T_buy-T0 remains UNKNOWN unless an original producer witness conforming to producer_execution_witness_v1 exists; re-execution traces never qualify. For attempt 1 the producer witness source is not available (source_ready=false), so the timing gate cannot pass for this attempt."
+  },
+  "retention_observability": {
+    "record_send_head": true,
+    "record_inclusion_block": true,
+    "record_builder": true,
+    "record_validator": true,
+    "record_bundle_status": true,
+    "on_expiry_without_inclusion": [
+      "Verify launcher_A nonce unchanged",
+      "Verify buyer_B nonce unchanged",
+      "Verify neither transaction appeared canonically or in the public mempool where observable"
+    ],
+    "interpretation": "Inclusion one or two blocks after submission is evidence relevant to bundle carry/re-simulation, but provider retention semantics must not be assumed solely from one successful inclusion.",
+    "pre_arm_bounded_capture_required": true,
+    "producer_witness_contract_required_before_execution": true,
+    "g07_local_attempt_state": "G0.7 runs only from the main checkout and creates bsc/.local/g07/<attempt_id>/ (0700, git-ignored, no symlinks) with ATTEMPT_LATCH and capture.journal (0600) before the guard; a second start of the same attempt_id is refused while that directory exists. The journal holds broadcastable signed bytes: never commit or share it before both nonces are consumed on-chain. A run that provably wrote no bundle byte (guard refusal or pre-egress stop, journal AUTHORIZATION_REFUSED or PRE_EGRESS_ABORT) is not an economic attempt: G0.7 renames the directory to <attempt_id>.refused-<ms> or .pre-egress-<ms> (journal kept) and removes its own empty evidence file, so the same attempt can be started again by the user's explicit decision. Right after the release G0.7 writes RELEASED into the directory; from then on the latch is never released and the attempt is consumed whatever the outcome. DARKBOT_G07_EVIDENCE_PATH is mandatory, must not exist and must lie in a private directory (real directory, no symlink on the way, mode 0700, owned by the user, e.g. bsc/.local/g07/); the evidence file is 0600 and only ever replaced atomically (complete fsynced private sibling, rename, directory sync), never truncated in place: provisional right after the release, again after the send threads, final after the receipt window; each write is first checked against the fields G0.8 reads. G0.7 never marks the canonical [T0, T0+15 s] window as reconciled; that is G0.8's job."
+  },
+  "thresholds": {
+    "PASS": "Controlled self-launch attempt acquires the token and produces same-block adjacent [launch_A@N,buy_B@N+1] ordering with zero successful external BUYs between, no public leakage, no budget/scope violation and complete evidence",
+    "ADAPT": "Bundle valid but not adjacent/same-block, builder rejected/outbid/expired, dry simulation divergence, or incomplete attribution without a safety violation",
+    "STOP": "Any scope/version mismatch, non-distinct wallets, zero/unverified minOutput, fee/floor uncertainty at arming, budget violation, nonce conflict, unexpected public broadcast, first revert, unresolved sent transaction, unexpected duplicate economic execution, or inability to prove expiration/non-execution safely"
+  },
+  "coverage": {
+    "foreign_launch_coverage_requirement": "NOT_APPLICABLE_TO_SELF_LAUNCH_STAGE_1",
+    "note": "Coverage returns in the subsequent foreign-launch ingress qualification stage"
+  },
+  "send_guard": {
+    "fail_closed": true,
+    "required_checks": [
+      "Runtime file path is exactly bsc/config/g01_mainnet_acceptance_proposal_v2.json (relative to the repository root)",
+      "SHA-256 of exact v2 bytes equals the hash compiled/frozen into the armed harness",
+      "schema_version == 2",
+      "authorization.approved == true",
+      "authorization.execution_ready == true",
+      "authorization.launcher_address equals recovered launcher_A address",
+      "authorization.buyer_address equals recovered buyer_B address",
+      "launcher_A != buyer_B",
+      "authorization.approved_contract_sha256 is not used and stays null (no guard check): the hash binding is external via FROZEN_APPROVED_V2_SHA256 in the arming commit, because a file cannot contain its own SHA-256",
+      "spent_budget_wei + reserved_worst_case_attempt_wei <= absolute approved total budget",
+      "attempt number == 1 (single-attempt freeze) and does not exceed attempts.maximum",
+      "all Dry-PASS evidence predicates are true",
+      "The four authorization.evidence_bindings equal the SHA-256 of the DRY, preflight, builder-policy and producer-witness-source files passed at runtime"
+    ],
+    "forbidden_authorities": [
+      "g01_mainnet_acceptance_proposal_v1.json",
+      "environment variable alone",
+      "command-line flag alone"
+    ]
+  },
+  "dry_pass": {
+    "status": "PASS_BOUND_BY_EVIDENCE_BINDINGS",
+    "valid_mainnet_bytes_may_leave_machine": false,
+    "criteria": [
+      {
+        "id": "DRY-1-BYTES-AND-SIGNERS",
+        "pass": "Both builder payload constructors contain the exact same raw_signed_launch_A bytes followed by the exact same raw_signed_buy_B bytes; independent transaction decoding and signature recovery yield distinct frozen wallet A and wallet B addresses, correct ChainID 56, nonces, Portal, value, gas and calldata."
+      },
+      {
+        "id": "DRY-2-INDEPENDENT-LOCAL-SIMULATION",
+        "pass": "A local/offline independent sequential execution of launch_A followed by buy_B succeeds, produces the same token address and exact received token amount as the local economics calculation, and signed minOutput is >0 and <= independently simulated received amount. Historical DOGE fixture values are not reused as authority."
+      },
+      {
+        "id": "DRY-3-GAS-FLOOR-AND-BUDGET",
+        "pass": "Current acceptance/ranking gas-floor semantics for every armed builder are independently verified before signing; identical signed bytes satisfy the strictest verified requirement. Independent simulated gas for launch and BUY, multiplied by the signed gas price and combined with launch value, BUY value and any allowed builder cost, fits both the per-attempt reserve and absolute approved budget."
+      },
+      {
+        "id": "DRY-4-EXPIRY-NONCES-NO-EGRESS",
+        "pass": "Bundle expiry/maxBlock fields are within the approved tight window, launcher and buyer pending nonces match the signed transactions, and an egress guard proves zero bytes of the valid signed launch, valid signed BUY, or valid bundle payload were written to any socket/process/stdout/file intended for network transmission before authorization."
+      }
+    ],
+    "provider_prequalification": "Builder method/format/expiry behavior before authorization may only use deliberately non-executable fixtures. Exact valid Mainnet transaction/bundle bytes must not be sent to a remote simulation endpoint before authorization.",
+    "all_four_required": true,
+    "evidence_scope_note": "The bound DRY (2026-10-15T22:22:41Z, head 127865760) was evaluated against the proposal sha 026b534f...; its transaction hashes bind the exact signed bytes. Its bundle projection serialized BlockRazor maxBlockNumber as a hex string while live G0.7 sends a JSON integer (the documented format), and live G0.7 adds the 48Club maxTimestamp from the head read immediately before the release, so the DRY envelope hashes do not describe the live request bodies; only the transactions are bound."
+  },
+  "pre_arm_check_status": [
+    "0 PASS: preflight drift fields in the bound DRY preflight; read-only readiness PASS 2026-10-16; re-checked by G0.7 at runtime",
+    "1 PASS: DRY-2 independent EVM sequence (economics_crosscheck EVM_SEQUENCE_PASS) and exact local simulation",
+    "2 PASS: distinct DRY wallets; pending nonces 0/0 in the bound preflight and in readiness 2026-10-16",
+    "3 PASS: readiness FUNDING=PASS 2026-10-16 against the exact DRY parameters (launcher 0.0003301635, buyer 0.000151 BNB)",
+    "4 PASS: native quote equals the independent EVM output (176693134169499757962); minOutput positive",
+    "5 PASS: DRY-1 bytes and signers",
+    "6 PASS AT SUBMISSION, residuals UNQUALIFIED: builder probe 2026-10-16 (non-executable bundles; evidence bsc/native/evidence/g06a/builder_probe_20261016T183411Z/probe.evidence.json, SHA-256 5636c463d6247b90d17d9bc977a6e50aae499434a17d241f16f05b87ba95cc7f; plan 77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5): both builders parse the exact G0.7 method and format (48Club: integer maxBlockNumber, maxTimestamp, noMerge, positionFirst; BlockRazor: integer maxBlockNumber with Authorization) and reached transaction validation (nonce too high); both check expiry at submission before the transactions (48Club: maxBlockNumber >= current block and maxTimestamp >= current block timestamp; BlockRazor: maxBlockNumber > current block) and accepted the G0.7 values; BlockRazor refuses gas prices below exactly 0.05 gwei at submission and the G0.7 price passes; 48Club shows no gas-price check at submission (a 1-wei control reached the same nonce check). UNQUALIFIED and requiring explicit user acceptance before approval: 48Club acceptance of 0.05 gwei for inclusion, building-time enforcement of maxBlockNumber next to maxTimestamp, acceptance of a valid bundle and inclusion",
+    "7 PASS (zero margin): builder refresh 2026-10-16; every refreshable explicit floor is 50000000 wei = signed gas price; the builder probe 2026-10-16 confirmed BlockRazor's submission floor of exactly 0.05 gwei",
+    "8 PASS: DRY-4 zero egress; no signed bytes left the machine",
+    "9 PENDING: explicit user approval of these exact bytes, scope and budget",
+    "10 PARTIAL: builder probe 2026-10-16 (non-executable bundles; evidence bsc/native/evidence/g06a/builder_probe_20261016T183411Z/probe.evidence.json, SHA-256 5636c463d6247b90d17d9bc977a6e50aae499434a17d241f16f05b87ba95cc7f; plan 77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5): 48Club parses noMerge and positionFirst as typed bool fields (string values refused with -32602 naming SendBundleArgs.noMerge / SendBundleArgs.positionFirst); their effect at building time (no merging, top of block) is UNQUALIFIED and requires explicit user acceptance before approval"
+  ]
+}

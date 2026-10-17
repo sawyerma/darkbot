@@ -1,6 +1,8 @@
-//! Inputs of the controlled attempt: environment, frozen JSON evidence, the
-//! producer-witness source contract and the builder gas-floor policy, plus the
-//! attempt's local state (single-use latch, journal location, evidence file).
+//! Inputs of the controlled attempt: environment, the frozen DRY evidence,
+//! the producer-witness source contract and the builder gas-floor policy as
+//! binary DBREC001 records (the audited import of the legacy JSON, which
+//! G0.7 never reads), plus the attempt's local state (single-use latch,
+//! journal location, evidence file).
 
 use super::*;
 use std::cell::RefCell;
@@ -42,12 +44,30 @@ pub(crate) fn signer_address(key: &SigningKey) -> Address {
     Address::from_slice(&h.as_slice()[12..])
 }
 
-/// The parsed JSON and the exact bytes it was parsed from, so the evidence
-/// hash bound by the guard describes what was checked.
-pub(crate) fn load_json(path: &str) -> (Value, Vec<u8>) {
+/// A binary input record, decoded fail-closed against its schema, and its
+/// binding: the SHA-256 of the exact file bytes that were checked and the
+/// legacy SHA-256 the record carries from the audited import.
+pub(crate) fn load_record(
+    path: &str,
+    schema: &'static darkbot_bsc_record::Schema,
+) -> (Record, InputHashes) {
     let bytes = fs::read(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-    let value = serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("parse {path}: {e}"));
-    (value, bytes)
+    let record =
+        darkbot_bsc_record::decode(schema, &bytes).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let legacy = record
+        .b256(schema::IMPORT_LEGACY_SHA256)
+        .unwrap_or_else(|e| panic!("{path} is not an imported record: {e}"));
+    let hashes = InputHashes {
+        record_sha256: sha256_hex(&bytes),
+        legacy_sha256: darkbot_bsc_record::hex(&legacy),
+    };
+    (record, hashes)
+}
+
+/// The value of a record field read before the attempt is latched: a
+/// missing or mistyped field stops the run.
+pub(crate) fn field<T>(value: Result<T, darkbot_bsc_record::RecordError>) -> T {
+    value.unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Local state of each attempt: latch and capture journal. Git-ignored by
@@ -80,8 +100,8 @@ pub(crate) fn validate_attempt_id(attempt_id: &str) -> Result<(), String> {
 /// every run shares one latch directory (a linked worktree has its own).
 pub(crate) fn assert_repository_root() {
     assert!(
-        Path::new(V2_RELATIVE_PATH).is_file(),
-        "run G0.7 from the repository root: {V2_RELATIVE_PATH} not found"
+        Path::new(V3_RELATIVE_PATH).is_file(),
+        "run G0.7 from the repository root: {V3_RELATIVE_PATH} not found"
     );
     assert!(
         fs::symlink_metadata(".git").is_ok_and(|m| m.file_type().is_dir()),
@@ -429,93 +449,60 @@ pub(crate) fn release_unsent_attempt(
     format!("{latch}; {evidence}")
 }
 
-pub(crate) fn req_str<'a>(v: &'a Value, ptr: &str) -> &'a str {
-    v.pointer(ptr)
-        .and_then(Value::as_str)
-        .unwrap_or_else(|| panic!("missing/bad string at {ptr}"))
-}
-
-pub(crate) fn req_bool(v: &Value, ptr: &str) -> bool {
-    v.pointer(ptr)
-        .and_then(Value::as_bool)
-        .unwrap_or_else(|| panic!("missing/bad bool at {ptr}"))
-}
-
-pub(crate) fn req_u64(v: &Value, ptr: &str) -> u64 {
-    v.pointer(ptr)
-        .and_then(Value::as_u64)
-        .unwrap_or_else(|| panic!("missing/bad u64 at {ptr}"))
-}
-
-pub(crate) fn req_u64_string(v: &Value, ptr: &str) -> u64 {
-    req_str(v, ptr)
-        .parse::<u64>()
-        .unwrap_or_else(|_| panic!("bad decimal u64 at {ptr}"))
-}
-
-pub(crate) fn req_u128_string(v: &Value, ptr: &str) -> u128 {
-    req_str(v, ptr)
-        .parse::<u128>()
-        .unwrap_or_else(|_| panic!("bad decimal u128 at {ptr}"))
-}
-
-pub(crate) fn validate_producer_witness_source(path: &str, attempt_id: &str) -> (Value, String) {
-    let bytes = fs::read(path)
-        .unwrap_or_else(|e| panic!("read producer witness source contract {path}: {e}"));
-    let value: Value = serde_json::from_slice(&bytes)
-        .unwrap_or_else(|e| panic!("parse producer witness source contract {path}: {e}"));
+pub(crate) fn validate_producer_witness_source(
+    path: &str,
+    attempt_id: &str,
+) -> (Record, InputHashes) {
+    use schema::g07::witness_source as w;
+    let (r, hashes) = load_record(path, &w::SCHEMA);
     assert_eq!(
-        req_str(&value, "/schema"),
+        field(r.text(w::LEGACY_SCHEMA)),
         "darkbot.producer-witness-source.v1",
         "wrong producer witness source contract schema"
     );
     assert_eq!(
-        req_str(&value, "/attempt_id"),
+        field(r.text(w::ATTEMPT_ID)),
         attempt_id,
         "producer witness source contract belongs to another attempt"
     );
-    let _source_ready = req_bool(&value, "/source_ready");
-    assert!(req_bool(
-        &value,
-        "/original_successful_producer_execution_only"
-    ));
+    let _source_ready = field(r.bool(w::SOURCE_READY));
+    assert!(field(r.bool(w::ORIGINAL_EXECUTION_ONLY)));
     assert_eq!(
-        req_str(&value, "/required_witness_schema"),
+        field(r.text(w::REQUIRED_WITNESS_SCHEMA)),
         PRODUCER_WITNESS_SCHEMA_PATH
     );
-    assert!(req_bool(&value, "/delivery_may_be_asynchronous"));
-    assert!(req_bool(&value, "/canonical_identity_binding_required"));
-    assert!(req_bool(&value, "/clock_and_uncertainty_metadata_required"));
+    assert!(field(r.bool(w::DELIVERY_MAY_BE_ASYNCHRONOUS)));
+    assert!(field(r.bool(w::CANONICAL_IDENTITY_BINDING_REQUIRED)));
+    assert!(field(r.bool(w::CLOCK_METADATA_REQUIRED)));
     assert!(
-        !req_str(&value, "/source_description").trim().is_empty(),
+        !field(r.text(w::SOURCE_DESCRIPTION)).trim().is_empty(),
         "producer witness source description is empty"
     );
-    (value, sha256_hex(&bytes))
+    (r, hashes)
 }
 
-pub(crate) fn validate_builder_policy(path: &str, signed_gas_price: u64) -> (Value, String) {
-    let bytes =
-        fs::read(path).unwrap_or_else(|e| panic!("read builder policy evidence {path}: {e}"));
-    let value: Value = serde_json::from_slice(&bytes)
-        .unwrap_or_else(|e| panic!("parse builder policy evidence {path}: {e}"));
+pub(crate) fn validate_builder_policy(path: &str, signed_gas_price: u64) -> (Record, InputHashes) {
+    use schema::g06a::builder_policy as b;
+    let (r, hashes) = load_record(path, &b::SCHEMA);
     assert_eq!(
-        req_str(&value, "/schema"),
+        field(r.text(b::LEGACY_SCHEMA)),
         "darkbot.g06a.builder-floor-evidence-addendum.v2"
     );
-    assert!(req_bool(&value, "/dry3_ready"));
-    assert!(req_bool(&value, "/blockrazor/verified"));
-    assert!(req_bool(&value, "/fortyeightclub/verified"));
-    let strict_floor = req_u64_string(&value, "/strictest_explicit_verified_floor_wei");
-    let stage1_policy = req_u64_string(&value, "/stage1_signed_gas_price_policy_wei");
+    assert!(field(r.bool(b::DRY3_READY)));
+    assert!(field(r.bool(b::BLOCKRAZOR_VERIFIED)));
+    assert!(field(r.bool(b::FORTYEIGHTCLUB_VERIFIED)));
+    let strict_floor = U256::from_be_bytes(field(r.u256(b::STRICTEST_FLOOR_WEI)));
+    let stage1_policy = U256::from_be_bytes(field(r.u256(b::STAGE1_GAS_PRICE_WEI)));
     assert!(
-        signed_gas_price >= strict_floor,
+        U256::from(signed_gas_price) >= strict_floor,
         "signed gas price is below the frozen builder floor evidence"
     );
     assert_eq!(
-        signed_gas_price, stage1_policy,
+        U256::from(signed_gas_price),
+        stage1_policy,
         "signed gas price differs from the frozen Stage-1 builder policy"
     );
-    (value, sha256_hex(&bytes))
+    (r, hashes)
 }
 
 #[cfg(test)]
@@ -540,7 +527,7 @@ mod tests {
     }
 
     fn evidence_in(dir: &Path) -> (EvidenceFile, PathBuf) {
-        let path = dir.join("g07.json");
+        let path = dir.join("g07.dbrec");
         let evidence =
             EvidenceFile::create(path.to_str().unwrap(), owner_uid(dir).unwrap()).unwrap();
         (evidence, path)
@@ -610,24 +597,24 @@ mod tests {
     #[test]
     fn evidence_target_must_be_new_in_a_private_directory() {
         let dir = scratch("target");
-        let target = dir.join("g07.json");
+        let target = dir.join("g07.dbrec");
         let target = target.to_str().unwrap();
         assert!(validate_evidence_target(target).is_ok());
         fs::write(target, b"x").unwrap();
         assert!(validate_evidence_target(target).is_err());
-        let orphan = dir.join("missing").join("g07.json");
+        let orphan = dir.join("missing").join("g07.dbrec");
         assert!(validate_evidence_target(orphan.to_str().unwrap()).is_err());
         let open = dir.join("open");
         fs::create_dir(&open).unwrap();
         fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(validate_evidence_target(open.join("g07.json").to_str().unwrap()).is_err());
+        assert!(validate_evidence_target(open.join("g07.dbrec").to_str().unwrap()).is_err());
         let link = dir.join("link");
         std::os::unix::fs::symlink(&dir, &link).unwrap();
-        assert!(validate_evidence_target(link.join("g07.json").to_str().unwrap()).is_err());
-        let dangling = dir.join("dangling.json");
+        assert!(validate_evidence_target(link.join("g07.dbrec").to_str().unwrap()).is_err());
+        let dangling = dir.join("dangling.dbrec");
         std::os::unix::fs::symlink(dir.join("nowhere"), &dangling).unwrap();
         assert!(validate_evidence_target(dangling.to_str().unwrap()).is_err());
-        assert!(validate_evidence_target(&format!("{}/../g07.json", dir.display())).is_err());
+        assert!(validate_evidence_target(&format!("{}/../g07.dbrec", dir.display())).is_err());
         assert!(validate_evidence_target("").is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -650,7 +637,7 @@ mod tests {
         // A second run on the same path is refused.
         assert!(EvidenceFile::create(path.to_str().unwrap(), owner_uid(&dir).unwrap()).is_err());
         // A directory owned by someone else is refused, and nothing is created.
-        let other = dir.join("other.json");
+        let other = dir.join("other.dbrec");
         let e = EvidenceFile::create(other.to_str().unwrap(), owner_uid(&dir).unwrap() + 1)
             .err()
             .unwrap();

@@ -13,6 +13,8 @@ darkbot-bsc-execution = { path = "../execution", features = ["acceptance-guard"]
 # The quote arithmetic is the core's; the v2 check is the runner's guard.
 darkbot-bsc-trading = { path = "../trading" }
 darkbot-bsc-journal = { path = "../journal" }
+# G0.7 evidence, G0.8 results, witness and chain capture payloads (DBREC001).
+darkbot-bsc-record = { path = "../record" }
 alloy-primitives = { workspace = true }
 alloy-sol-types = { workspace = true }
 k256 = { workspace = true }

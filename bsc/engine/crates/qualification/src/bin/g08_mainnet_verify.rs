@@ -118,8 +118,8 @@ fn write_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
 //
 // The only place JSON exists in this binary. Request bodies are fixed
 // templates filled with hex quantities and data; every response is decoded
-// into the typed values below before it leaves this module, and no
-// serde_json type crosses its border.
+// into the typed values below before it leaves this module, and no JSON
+// type crosses its border (tests/g08_binary_records.rs checks the source).
 mod wire {
     use super::req_env;
     use alloy_primitives::{Address, B256, U256};
@@ -254,7 +254,8 @@ mod wire {
     }
 
     fn u64_of(v: &Json, what: &str) -> Result<u64, String> {
-        u64::from_str_radix(digits(v, what)?, 16).map_err(|_| format!("{what} is not a u64 quantity"))
+        u64::from_str_radix(digits(v, what)?, 16)
+            .map_err(|_| format!("{what} is not a u64 quantity"))
     }
 
     fn u256_of(v: &Json, what: &str) -> Result<U256, String> {
@@ -387,18 +388,27 @@ mod wire {
     }
 
     pub fn receipt(hash: B256) -> Result<Option<Receipt>, String> {
-        let v = call("eth_getTransactionReceipt", &format!("[{}]", data(hash.as_slice())))?;
+        let v = call(
+            "eth_getTransactionReceipt",
+            &format!("[{}]", data(hash.as_slice())),
+        )?;
         nullable(&v, receipt_of).map_err(|e| format!("receipt {hash}: {e}"))
     }
 
     pub fn transaction(hash: B256) -> Result<Option<Tx>, String> {
-        let v = call("eth_getTransactionByHash", &format!("[{}]", data(hash.as_slice())))?;
+        let v = call(
+            "eth_getTransactionByHash",
+            &format!("[{}]", data(hash.as_slice())),
+        )?;
         nullable(&v, tx_of).map_err(|e| format!("transaction {hash}: {e}"))
     }
 
     /// The block with its full transactions.
     pub fn block(number: u64) -> Result<Option<Block>, String> {
-        let v = call("eth_getBlockByNumber", &format!("[{},true]", quantity(number)))?;
+        let v = call(
+            "eth_getBlockByNumber",
+            &format!("[{},true]", quantity(number)),
+        )?;
         nullable(&v, block_of).map_err(|e| format!("block {number}: {e}"))
     }
 
@@ -449,7 +459,10 @@ mod wire {
 
         #[test]
         fn responses_decode_into_typed_values_or_fail() {
-            let ok = response("eth_chainId", br#"{"jsonrpc":"2.0","id":1,"result":"0x38"}"#);
+            let ok = response(
+                "eth_chainId",
+                br#"{"jsonrpc":"2.0","id":1,"result":"0x38"}"#,
+            );
             assert_eq!(u64_of(&ok.unwrap(), "chain"), Ok(56));
             let err = response(
                 "eth_call",
@@ -595,12 +608,8 @@ fn block_receipts(block: &Block) -> Result<Vec<Receipt>, String> {
 
     let mut receipts = Vec::with_capacity(block.transactions.len());
     for tx in &block.transactions {
-        let receipt = wire::receipt(tx.hash)?.ok_or_else(|| {
-            format!(
-                "receipt unresolved during canonical backfill: {}",
-                tx.hash
-            )
-        })?;
+        let receipt = wire::receipt(tx.hash)?
+            .ok_or_else(|| format!("receipt unresolved during canonical backfill: {}", tx.hash))?;
         receipts.push(receipt);
     }
     Ok(receipts)
@@ -617,8 +626,14 @@ fn block_draft(block: &Block) -> Draft {
         .set(chain_block::MINER, addr(block.miner))
         .set(chain_block::GAS_LIMIT, block.gas_limit)
         .set(chain_block::GAS_USED, block.gas_used)
-        .set_opt(chain_block::BASE_FEE_PER_GAS, block.base_fee_per_gas.map(wei))
-        .set(chain_block::TRANSACTION_COUNT, block.transactions.len() as u64);
+        .set_opt(
+            chain_block::BASE_FEE_PER_GAS,
+            block.base_fee_per_gas.map(wei),
+        )
+        .set(
+            chain_block::TRANSACTION_COUNT,
+            block.transactions.len() as u64,
+        );
     d
 }
 
@@ -707,8 +722,7 @@ fn capture_chain_window(
     let mut writer = JournalWriter::new(file);
     let mut sequence = 0u64;
 
-    let launch =
-        wire::block(launch_block)?.ok_or("launch block unavailable for chain capture")?;
+    let launch = wire::block(launch_block)?.ok_or("launch block unavailable for chain capture")?;
     let launch_timestamp = launch.timestamp;
     let horizon_timestamp = launch_timestamp.saturating_add(MARKET_WINDOW_SECS);
 
@@ -718,10 +732,16 @@ fn capture_chain_window(
         .set(chain_session::LAUNCH_TX_HASH, word(launch_hash))
         .set(chain_session::BUY_TX_HASH, word(buy_hash))
         .set(chain_session::LAUNCH_BLOCK, launch_block)
-        .set(chain_session::LAUNCH_BLOCK_TIMESTAMP_SECONDS, launch_timestamp)
+        .set(
+            chain_session::LAUNCH_BLOCK_TIMESTAMP_SECONDS,
+            launch_timestamp,
+        )
         .set(chain_session::WINDOW_SECONDS, MARKET_WINDOW_SECS)
         .set(chain_session::TIMESTAMP_SOURCE, BLOCK_TIMESTAMP_SOURCE)
-        .set(chain_session::TIMESTAMP_RESOLUTION_NS, BLOCK_TIMESTAMP_RESOLUTION_NS)
+        .set(
+            chain_session::TIMESTAMP_RESOLUTION_NS,
+            BLOCK_TIMESTAMP_RESOLUTION_NS,
+        )
         .set(chain_session::PRODUCER_EXECUTION_TIMING_AUTHORITY, false);
     append_record(
         &mut writer,
@@ -854,7 +874,10 @@ fn main() {
             .set(unresolved::ATTEMPT_ID, attempt_id.as_str())
             .set(unresolved::LAUNCH_TX, word(launch_hash))
             .set(unresolved::BUY_TX, word(buy_hash))
-            .set(unresolved::LAUNCH_RECEIPT_RESOLVED, launch_receipt.is_some())
+            .set(
+                unresolved::LAUNCH_RECEIPT_RESOLVED,
+                launch_receipt.is_some(),
+            )
             .set(unresolved::BUY_RECEIPT_RESOLVED, buy_receipt.is_some())
             .set(unresolved::AUTOMATIC_RETRY, false)
             .set(unresolved::T0_TO_BUY, "UNKNOWN");
@@ -909,7 +932,8 @@ fn main() {
     };
     let launch_canonical_hash = launch_canonical_block.hash;
     let buy_canonical_hash = buy_canonical_block.hash;
-    let canonical = launch_canonical_hash == launch_block_hash && buy_canonical_hash == buy_block_hash;
+    let canonical =
+        launch_canonical_hash == launch_block_hash && buy_canonical_hash == buy_block_hash;
     let launch_at_index = transaction_at_index(&launch_canonical_block, launch_index)
         .is_some_and(|tx| tx.hash == launch_hash);
     let buy_at_index =
@@ -1092,12 +1116,17 @@ fn main() {
 
     let bytes = r.encode().expect("encode G0.8 result record");
     let record = decode(&result::SCHEMA, &bytes).expect("decode G0.8 result record");
-    print!("{}", record.render());
-    if let Ok(path) = env::var("DARKBOT_G08_EVIDENCE_PATH") {
-        if let Err(e) = write_atomic(&path, &bytes) {
-            eprintln!("WARNING: G0.8 evidence write failed: {e}");
-        }
+    // A result that could not be written is no result: the view goes to
+    // stderr only, stdout carries the STOP line and no PASS.
+    if let Ok(path) = env::var("DARKBOT_G08_EVIDENCE_PATH")
+        && let Err(e) = write_atomic(&path, &bytes)
+    {
+        eprint!("{}", record.render());
+        eprintln!("G0.8 evidence write failed: {e}");
+        println!("G0_8_STOP_EVIDENCE_NOT_WRITTEN");
+        std::process::exit(2);
     }
+    print!("{}", record.render());
 
     match verdict {
         "PASS" => println!("G0_8_MAINNET_ACQUISITION_ORDERING_PASS"),
@@ -1163,7 +1192,10 @@ mod tests {
             receipt_gas_cost(&receipt(2, Some(5)), &signed),
             U256::from(10u64)
         );
-        assert_eq!(receipt_gas_cost(&receipt(2, None), &signed), U256::from(6u64));
+        assert_eq!(
+            receipt_gas_cost(&receipt(2, None), &signed),
+            U256::from(6u64)
+        );
     }
 
     #[test]
@@ -1224,7 +1256,10 @@ mod tests {
             t.address(chain_transaction::TO).unwrap(),
             PORTAL.into_array()
         );
-        assert_eq!(t.opt_u64(chain_transaction::TRANSACTION_INDEX).unwrap(), None);
+        assert_eq!(
+            t.opt_u64(chain_transaction::TRANSACTION_INDEX).unwrap(),
+            None
+        );
         let receipt = decode(&chain_receipt::SCHEMA, &receipt_draft(&r).encode().unwrap()).unwrap();
         let logs = receipt.nested_all(chain_receipt::LOGS).unwrap();
         assert_eq!(logs[0].bytes(chain_receipt::log::DATA).unwrap(), [1, 2, 3]);

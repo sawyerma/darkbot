@@ -3,8 +3,14 @@
 //! source; `g07_acceptance_contract` writes them to `V3_RELATIVE_PATH`, and
 //! the guard test checks that the committed file is exactly these bytes. It
 //! replaces the JSON v2 proposal and the JSON v2 draft, which stay legacy
-//! only. The file is inert until the user approves its exact bytes and a
-//! dedicated arming commit compiles their SHA-256 into the guard.
+//! only.
+//!
+//! The approval state is never inferred: the committed file is the
+//! `Proposed` variant (`approved=false`, `execution_ready=false`). The
+//! `Approved` variant differs only in those fields, its status and note; it
+//! is written only for the exact SHA-256 the user approved, and even then it
+//! arms nothing until a dedicated arming commit compiles that SHA-256 into
+//! the guard.
 
 use darkbot_bsc_record::schema::g07::contract;
 use darkbot_bsc_record::schema::{IMPORT_LEGACY_SHA256, g06a, g07};
@@ -88,9 +94,21 @@ fn criterion(id: &str, pass: &str) -> Value {
     c.into_nested()
 }
 
+/// Whether the contract bytes carry the user's real-money authorization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Authorization {
+    /// A proposal: no authorization exists; the guard refuses it.
+    Proposed,
+    /// The variant the user approves by its exact SHA-256.
+    Approved,
+}
+
 /// The exact bytes of the attempt-1 contract for these bindings
 /// (dry, preflight, builder policy, producer-witness source).
-pub fn attempt1_v3(bindings: &[InputBinding; 4]) -> Result<Vec<u8>, String> {
+pub fn attempt1_v3(
+    bindings: &[InputBinding; 4],
+    authorization: Authorization,
+) -> Result<Vec<u8>, String> {
     let mut d = Draft::new(&contract::SCHEMA);
     let [dry, preflight, policy, witness] = bindings;
     d.set(contract::DRY_RECORD_SHA256, Value::B256(dry.record_sha256))
@@ -117,13 +135,28 @@ pub fn attempt1_v3(bindings: &[InputBinding; 4]) -> Result<Vec<u8>, String> {
         tag("authorization.evidence_paths.note")?,
         "The guard binds the SHA-256 of the four binary input records and the legacy SHA-256 each record carries from the audited offline import (PARITY.md beside the records); G0.7 takes the record paths at runtime by environment variable and checks both bindings.",
     );
-    d.set(tag("status")?, "APPROVED_SINGLE_ATTEMPT_G07_ATTEMPT_1");
+    let approved = authorization == Authorization::Approved;
+    d.set(
+        tag("status")?,
+        if approved {
+            "APPROVED_SINGLE_ATTEMPT_G07_ATTEMPT_1"
+        } else {
+            "PROPOSED_NOT_AUTHORIZED"
+        },
+    );
     d.set(tag("supersedes")?, "bsc/config/g01_mainnet_acceptance_proposal_v2.json and docs/G07_ATTEMPT1_ACCEPTANCE_V2_DRAFT.json (JSON, legacy only; v1 historical)");
     d.set(tag("purpose")?, "Controlled Mainnet self-launch ordered-bundle qualification with two independent wallets and parallel builder fan-out");
-    d.set(tag("authorization.approved")?, true);
-    d.set(tag("authorization.execution_ready")?, true);
+    d.set(tag("authorization.approved")?, approved);
+    d.set(tag("authorization.execution_ready")?, approved);
     d.set(tag("authorization.approval_required_for")?, "Any value-bearing Mainnet bundle submission");
-    d.set(tag("authorization.note")?, "Final single-attempt authorization for G0.7 attempt g07-mainnet-attempt-1-dry-20261015T222241Z. Effective only after the user explicitly approves these exact bytes and a dedicated arming commit sets FROZEN_APPROVED_V3_SHA256 to their SHA-256 while this file sits at bsc/config/g07_attempt1_acceptance_v3.dbrec. The JSON v1/v2 contracts and the JSON v2 draft remain historical.");
+    d.set(
+        tag("authorization.note")?,
+        if approved {
+            "Final single-attempt authorization for G0.7 attempt g07-mainnet-attempt-1-dry-20261015T222241Z. Effective only after the user explicitly approves these exact bytes and a dedicated arming commit sets FROZEN_APPROVED_V3_SHA256 to their SHA-256 while this file sits at bsc/config/g07_attempt1_acceptance_v3.dbrec. The JSON v1/v2 contracts and the JSON v2 draft remain historical."
+        } else {
+            "PROPOSAL ONLY: no real-money authorization exists for G0.7 attempt g07-mainnet-attempt-1-dry-20261015T222241Z; the guard refuses this contract (approved=false, execution_ready=false). The approved variant differs only in status, note, approved and execution_ready; it is written only for the exact SHA-256 the user approves, and a dedicated arming commit must then compile that SHA-256 as FROZEN_APPROVED_V3_SHA256."
+        },
+    );
     d.set(tag("authorization.launcher_address")?, address("0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd")?);
     d.set(tag("authorization.buyer_address")?, address("0x9c8a0Db41914beEE52Dd49790c4F087E252743DE")?);
     d.set(tag("authorization.execution_authority")?, "Only this binary v3 contract may authorize the self-launch Mainnet send path; the JSON v1/v2 contracts and the JSON v2 draft are forbidden as runtime authority");

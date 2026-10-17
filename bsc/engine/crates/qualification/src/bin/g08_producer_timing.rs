@@ -3,14 +3,21 @@
 //! It accepts only timestamps from the original successful producing execution
 //! attempt. Receipt arrival, block timestamp, follower/archive replay and local
 //! builder-send timing are explicitly not accepted as producer timing authority.
+//!
+//! Inputs and output are binary records (DBREC001): the G0.8 result, the
+//! producer execution witness and the timing verdict. No JSON is read or
+//! written.
 
-use darkbot_bsc_execution::acceptance_guard::sha256_hex;
-use serde_json::{Value, json};
-use std::{env, fs};
+use darkbot_bsc_record::schema::g08::{producer_witness as w, result, timing_verdict as v};
+use darkbot_bsc_record::{Draft, Record, RecordError, Value, decode};
+use std::{
+    env,
+    fs::{self, File, OpenOptions},
+    io::Write,
+    path::Path,
+};
 
-const LIMIT_NS: u128 = 1_000_000;
-const WITNESS_SCHEMA: &str = "darkbot.producer-execution-witness.v1";
-const G08_SCHEMA: &str = "darkbot.g08.mainnet-acquisition-ordering.v2";
+const LIMIT_NS: u64 = 1_000_000;
 
 fn req_env(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("{name} is required"))
@@ -20,45 +27,50 @@ fn load_bytes(path: &str) -> Vec<u8> {
     fs::read(path).unwrap_or_else(|e| panic!("read {path}: {e}"))
 }
 
-fn parse_json(bytes: &[u8], path: &str) -> Value {
-    serde_json::from_slice(bytes).unwrap_or_else(|e| panic!("parse {path}: {e}"))
+/// A field of a decoded input; decoding already checked that every required
+/// field is present with its kind.
+fn field<T>(value: Result<T, RecordError>) -> T {
+    value.unwrap_or_else(|e| panic!("{e}"))
 }
 
-fn req_str<'a>(v: &'a Value, ptr: &str) -> &'a str {
-    v.pointer(ptr)
-        .and_then(Value::as_str)
-        .unwrap_or_else(|| panic!("missing/bad string at {ptr}"))
-}
-
-fn req_bool(v: &Value, ptr: &str) -> bool {
-    v.pointer(ptr)
-        .and_then(Value::as_bool)
-        .unwrap_or_else(|| panic!("missing/bad bool at {ptr}"))
-}
-
-fn req_u64(v: &Value, ptr: &str) -> u64 {
-    v.pointer(ptr)
-        .and_then(Value::as_u64)
-        .unwrap_or_else(|| panic!("missing/bad u64 at {ptr}"))
-}
-
-fn req_u128_string(v: &Value, ptr: &str) -> u128 {
-    req_str(v, ptr)
-        .parse::<u128>()
-        .unwrap_or_else(|_| panic!("bad decimal u128 at {ptr}"))
-}
-
-fn norm(s: &str) -> String {
-    s.trim().to_ascii_lowercase()
+/// Writes `bytes` to a staging file beside `path`, syncs it and renames it
+/// over `path`: a reader sees the previous file or the complete new one.
+fn write_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
+    let target = Path::new(path);
+    let name = target
+        .file_name()
+        .ok_or_else(|| format!("{path} names no file"))?;
+    let tmp = target.with_file_name(format!(
+        ".{}.tmp-{}",
+        name.to_string_lossy(),
+        std::process::id()
+    ));
+    let staged = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&tmp)
+        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+        .and_then(|()| fs::rename(&tmp, target));
+    if let Err(e) = staged {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("{path}: {e}"));
+    }
+    let dir = match target.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    File::open(dir)
+        .and_then(|d| d.sync_all())
+        .map_err(|e| format!("{path} replaced but not yet durable: {e}"))
 }
 
 fn timing_bounds(
-    t0_before: u128,
-    t0_after: u128,
-    tbuy_before: u128,
-    tbuy_after: u128,
-    remaining_uncertainty_ns: u128,
-) -> Result<(u128, u128, u128), &'static str> {
+    t0_before: u64,
+    t0_after: u64,
+    tbuy_before: u64,
+    tbuy_after: u64,
+    remaining_uncertainty_ns: u64,
+) -> Result<(u64, u64, u64), &'static str> {
     if t0_before > t0_after {
         return Err("T0 bracket inverted");
     }
@@ -80,105 +92,96 @@ fn timing_bounds(
     Ok((lower, bracket_upper, upper))
 }
 
+/// The encoded verdict and its decoded record, whose view carries the
+/// file hash.
+fn checked(draft: &Draft) -> (Vec<u8>, Record) {
+    let bytes = draft.encode().expect("encode timing verdict record");
+    let record = decode(draft.schema(), &bytes).expect("decode timing verdict record");
+    (bytes, record)
+}
+
 fn main() {
     let g08_path = req_env("DARKBOT_G08_EVIDENCE");
     let witness_path = req_env("DARKBOT_G08_PRODUCER_WITNESS");
     let g08_bytes = load_bytes(&g08_path);
     let witness_bytes = load_bytes(&witness_path);
-    let g08 = parse_json(&g08_bytes, &g08_path);
-    let witness = parse_json(&witness_bytes, &witness_path);
+    // The record types and versions replace the former schema-name and
+    // schema_version checks.
+    let g08 = decode(&result::SCHEMA, &g08_bytes)
+        .unwrap_or_else(|e| panic!("G0.8 result {g08_path}: {e}"));
+    let witness = decode(&w::SCHEMA, &witness_bytes)
+        .unwrap_or_else(|e| panic!("producer witness {witness_path}: {e}"));
 
-    assert_eq!(req_str(&g08, "/schema"), G08_SCHEMA);
-    assert_eq!(req_str(&witness, "/schema"), WITNESS_SCHEMA);
+    let attempt_id = field(g08.text(result::ATTEMPT_ID));
     assert_eq!(
-        witness.pointer("/schema_version").and_then(Value::as_u64),
-        Some(1),
-        "producer witness schema_version must be 1"
-    );
-
-    let attempt_id = req_str(&g08, "/attempt_id");
-    assert_eq!(
-        req_str(&witness, "/attempt_id"),
+        field(witness.text(w::ATTEMPT_ID)),
         attempt_id,
         "producer witness belongs to another G0.7/G0.8 attempt"
     );
     assert_eq!(
-        req_str(&g08, "/verdict"),
+        field(g08.text(result::VERDICT)),
         "PASS",
         "strict timing PASS is only evaluated after G0.8 acquisition/ordering PASS"
     );
-    assert!(req_bool(
-        &g08,
-        "/acquisition/positive_attributable_acquisition"
-    ));
-    assert!(req_bool(&g08, "/ordering/canonical"));
-    assert!(req_bool(&g08, "/ordering/same_block"));
-    assert!(req_bool(&g08, "/ordering/adjacent"));
+    assert!(field(g08.bool(result::POSITIVE_ATTRIBUTABLE_ACQUISITION)));
+    assert!(field(g08.bool(result::CANONICAL)));
+    assert!(field(g08.bool(result::SAME_BLOCK)));
+    assert!(field(g08.bool(result::ADJACENT)));
     assert_eq!(
-        g08.pointer("/ordering/successful_external_buys_between_count")
-            .and_then(Value::as_u64),
+        field(g08.opt_u64(result::EXTERNAL_BUYS_BETWEEN_COUNT)),
         Some(0)
     );
 
     assert_eq!(
-        norm(req_str(&witness, "/block_hash")),
-        norm(req_str(&g08, "/ordering/block_hash")),
+        field(witness.b256(w::BLOCK_HASH)),
+        field(g08.b256(result::BLOCK_HASH)),
         "producer witness block does not match canonical G0.8 block"
     );
     assert_eq!(
-        norm(req_str(&witness, "/launch_tx_hash")),
-        norm(req_str(&g08, "/transactions/launch_tx")),
+        field(witness.b256(w::LAUNCH_TX_HASH)),
+        field(g08.b256(result::LAUNCH_TX)),
         "producer witness launch hash mismatch"
     );
     assert_eq!(
-        norm(req_str(&witness, "/buy_tx_hash")),
-        norm(req_str(&g08, "/transactions/buy_tx")),
+        field(witness.b256(w::BUY_TX_HASH)),
+        field(g08.b256(result::BUY_TX)),
         "producer witness BUY hash mismatch"
     );
     assert_eq!(
-        req_u64(&witness, "/launch_tx_index"),
-        req_u64(&g08, "/ordering/launch_index"),
+        field(witness.u64(w::LAUNCH_TX_INDEX)),
+        field(g08.u64(result::LAUNCH_INDEX)),
         "producer witness launch index mismatch"
     );
     assert_eq!(
-        req_u64(&witness, "/buy_tx_index"),
-        req_u64(&g08, "/ordering/buy_index"),
+        field(witness.u64(w::BUY_TX_INDEX)),
+        field(g08.u64(result::BUY_INDEX)),
         "producer witness BUY index mismatch"
     );
-    assert_eq!(req_u64(&witness, "/launch_status"), 1);
-    assert_eq!(req_u64(&witness, "/buy_status"), 1);
-    assert_eq!(req_str(&witness, "/canonical_status"), "CANONICAL");
-    assert_eq!(req_str(&witness, "/reorg_status"), "NONE");
+    assert_eq!(field(witness.u64(w::LAUNCH_STATUS)), 1);
+    assert_eq!(field(witness.u64(w::BUY_STATUS)), 1);
+    assert_eq!(field(witness.text(w::CANONICAL_STATUS)), "CANONICAL");
+    assert_eq!(field(witness.text(w::REORG_STATUS)), "NONE");
 
-    let parent_hash = req_str(&witness, "/parent_hash");
+    // A 32-byte word by its kind: decoding refused any other length.
+    let _parent_hash = field(witness.b256(w::PARENT_HASH));
+    let acquisition_refs = field(witness.texts(w::ACQUISITION_EVIDENCE_REFS));
     assert!(
-        parent_hash.starts_with("0x") && parent_hash.len() == 66,
-        "producer witness parent_hash must be a 32-byte hash"
-    );
-    let acquisition_refs = witness
-        .pointer("/acquisition_evidence_refs")
-        .and_then(Value::as_array)
-        .expect("producer witness acquisition_evidence_refs must be an array");
-    assert!(
-        !acquisition_refs.is_empty()
-            && acquisition_refs
-                .iter()
-                .all(|v| v.as_str().is_some_and(|s| !s.is_empty())),
+        !acquisition_refs.is_empty() && acquisition_refs.iter().all(|s| !s.is_empty()),
         "producer witness acquisition_evidence_refs must contain at least one non-empty reference"
     );
 
-    let node_id = req_str(&witness, "/node_id");
-    let producer_boot_id = req_str(&witness, "/producer_boot_id");
-    let client_version = req_str(&witness, "/client_version");
-    let client_commit = req_str(&witness, "/client_commit");
-    let clock_id = req_str(&witness, "/clock_id");
-    let clock_source = req_str(&witness, "/clock_source");
-    let clock_raw_unit = req_str(&witness, "/clock_raw_unit");
-    let clock_raw_resolution = req_str(&witness, "/clock_raw_resolution");
-    let normalization_method = req_str(&witness, "/normalization_to_ns_method");
-    let execution_attempt_id = req_str(&witness, "/execution_attempt_id");
-    let t0_hook = req_str(&witness, "/semantic_hook_ids/T0");
-    let tbuy_hook = req_str(&witness, "/semantic_hook_ids/T_buy");
+    let node_id = field(witness.text(w::NODE_ID));
+    let producer_boot_id = field(witness.text(w::PRODUCER_BOOT_ID));
+    let client_version = field(witness.text(w::CLIENT_VERSION));
+    let client_commit = field(witness.text(w::CLIENT_COMMIT));
+    let clock_id = field(witness.text(w::CLOCK_ID));
+    let clock_source = field(witness.text(w::CLOCK_SOURCE));
+    let clock_raw_unit = field(witness.text(w::CLOCK_RAW_UNIT));
+    let clock_raw_resolution = field(witness.text(w::CLOCK_RAW_RESOLUTION));
+    let normalization_method = field(witness.text(w::NORMALIZATION_TO_NS_METHOD));
+    let execution_attempt_id = field(witness.text(w::EXECUTION_ATTEMPT_ID));
+    let t0_hook = field(witness.text(w::T0_HOOK));
+    let tbuy_hook = field(witness.text(w::T_BUY_HOOK));
     for (name, value) in [
         ("node_id", node_id),
         ("producer_boot_id", producer_boot_id),
@@ -196,43 +199,34 @@ fn main() {
         assert!(!value.trim().is_empty(), "producer witness {name} is empty");
     }
 
-    for ptr in [
-        "/original_raw_timestamps/T0_before",
-        "/original_raw_timestamps/T0_after",
-        "/original_raw_timestamps/T_buy_before",
-        "/original_raw_timestamps/T_buy_after",
+    let raw_t0_before = field(witness.text(w::RAW_T0_BEFORE));
+    let raw_t0_after = field(witness.text(w::RAW_T0_AFTER));
+    let raw_tbuy_before = field(witness.text(w::RAW_T_BUY_BEFORE));
+    let raw_tbuy_after = field(witness.text(w::RAW_T_BUY_AFTER));
+    for (name, value) in [
+        ("T0_before", raw_t0_before),
+        ("T0_after", raw_t0_after),
+        ("T_buy_before", raw_tbuy_before),
+        ("T_buy_after", raw_tbuy_after),
     ] {
         assert!(
-            !req_str(&witness, ptr).trim().is_empty(),
-            "empty raw producer timestamp at {ptr}"
+            !value.trim().is_empty(),
+            "empty raw producer timestamp at original_raw_timestamps.{name}"
         );
     }
-    let t0_before = req_u128_string(&witness, "/normalized_timestamps_ns/T0_before_ns");
-    let t0_after = req_u128_string(&witness, "/normalized_timestamps_ns/T0_after_ns");
-    let tbuy_before = req_u128_string(&witness, "/normalized_timestamps_ns/T_buy_before_ns");
-    let tbuy_after = req_u128_string(&witness, "/normalized_timestamps_ns/T_buy_after_ns");
-    let clock_resolution_ns = req_u128_string(&witness, "/clock_resolution_ns");
-    let hook_read_overhead_ns = req_u128_string(&witness, "/hook_read_overhead_ns");
-    let normalization_error_ns = req_u128_string(&witness, "/normalization_error_ns");
-    let remaining_uncertainty_ns =
-        req_u128_string(&witness, "/remaining_non_overlapping_uncertainty_ns");
+    let t0_before = field(witness.u64(w::T0_BEFORE_NS));
+    let t0_after = field(witness.u64(w::T0_AFTER_NS));
+    let tbuy_before = field(witness.u64(w::T_BUY_BEFORE_NS));
+    let tbuy_after = field(witness.u64(w::T_BUY_AFTER_NS));
+    let clock_resolution_ns = field(witness.u64(w::CLOCK_RESOLUTION_NS));
+    let hook_read_overhead_ns = field(witness.u64(w::HOOK_READ_OVERHEAD_NS));
+    let normalization_error_ns = field(witness.u64(w::NORMALIZATION_ERROR_NS));
+    let remaining_uncertainty_ns = field(witness.u64(w::REMAINING_UNCERTAINTY_NS));
     assert!(clock_resolution_ns > 0, "clock resolution must be positive");
-    assert!(req_bool(
-        &witness,
-        "/remaining_uncertainty_excludes_bracketed_uncertainty"
-    ));
-    assert!(req_bool(
-        &witness,
-        "/clock_resolution_accounted_in_brackets_or_remaining_uncertainty"
-    ));
-    assert!(req_bool(
-        &witness,
-        "/hook_overhead_accounted_in_brackets_or_remaining_uncertainty"
-    ));
-    assert!(req_bool(
-        &witness,
-        "/normalization_error_accounted_in_remaining_uncertainty"
-    ));
+    assert!(field(witness.bool(w::REMAINING_EXCLUDES_BRACKETED)));
+    assert!(field(witness.bool(w::CLOCK_RESOLUTION_ACCOUNTED)));
+    assert!(field(witness.bool(w::HOOK_OVERHEAD_ACCOUNTED)));
+    assert!(field(witness.bool(w::NORMALIZATION_ERROR_ACCOUNTED)));
 
     let (lower_bound_ns, bracket_upper_ns, upper_bound_ns) = timing_bounds(
         t0_before,
@@ -249,68 +243,73 @@ fn main() {
         "FAIL"
     };
 
-    let result = json!({
-        "schema":"darkbot.g08.producer-timing-verdict.v1",
-        "attempt_id":attempt_id,
-        "verdict":verdict,
-        "strict_limit_ns":LIMIT_NS.to_string(),
-        "producer_identity":{
-            "node_id":node_id,
-            "producer_boot_id":producer_boot_id,
-            "client_version":client_version,
-            "client_commit":client_commit,
-            "execution_attempt_id":execution_attempt_id
-        },
-        "clock":{
-            "clock_id":clock_id,
-            "clock_source":clock_source,
-            "raw_unit":clock_raw_unit,
-            "raw_resolution":clock_raw_resolution,
-            "normalization_to_ns_method":normalization_method,
-            "normalization_error_ns":normalization_error_ns.to_string(),
-            "clock_resolution_ns":clock_resolution_ns.to_string(),
-            "hook_read_overhead_ns":hook_read_overhead_ns.to_string(),
-            "remaining_non_overlapping_uncertainty_ns":remaining_uncertainty_ns.to_string()
-        },
-        "hooks":{
-            "T0":t0_hook,
-            "T_buy":tbuy_hook
-        },
-        "original_raw_timestamps":witness["original_raw_timestamps"].clone(),
-        "normalized_brackets_ns":{
-            "T0_before_ns":t0_before.to_string(),
-            "T0_after_ns":t0_after.to_string(),
-            "T_buy_before_ns":tbuy_before.to_string(),
-            "T_buy_after_ns":tbuy_after.to_string()
-        },
-        "derived":{
-            "lower_bound_ns":lower_bound_ns.to_string(),
-            "bracket_upper_ns":bracket_upper_ns.to_string(),
-            "conservative_upper_bound_ns":upper_bound_ns.to_string(),
-            "formula":"T_buy_after - T0_before + remaining_non_overlapping_uncertainty_ns",
-            "pass_rule":"conservative_upper_bound_ns < 1000000"
-        },
-        "evidence_hashes":{
-            "g08_sha256":sha256_hex(&g08_bytes),
-            "producer_witness_sha256":sha256_hex(&witness_bytes)
-        },
-        "authority":"ORIGINAL_SUCCESSFUL_PRODUCER_EXECUTION_ATTEMPT",
-        "explicitly_not_authority":[
-            "receipt first-seen time",
-            "block timestamp",
-            "builder ACK time",
-            "local T_send",
-            "follower/archive replay duration",
-            "OHLC/price interpolation"
-        ]
-    });
-
-    let pretty = serde_json::to_string_pretty(&result).unwrap();
-    println!("{pretty}");
-    if let Ok(path) = env::var("DARKBOT_G08_TIMING_EVIDENCE_PATH") {
-        fs::write(&path, format!("{pretty}\n"))
-            .unwrap_or_else(|e| panic!("write timing evidence {path}: {e}"));
+    let mut out = Draft::new(&v::SCHEMA);
+    out.set(v::ATTEMPT_ID, attempt_id)
+        .set(v::VERDICT, verdict)
+        .set(v::STRICT_LIMIT_NS, LIMIT_NS)
+        .set(v::NODE_ID, node_id)
+        .set(v::PRODUCER_BOOT_ID, producer_boot_id)
+        .set(v::CLIENT_VERSION, client_version)
+        .set(v::CLIENT_COMMIT, client_commit)
+        .set(v::EXECUTION_ATTEMPT_ID, execution_attempt_id)
+        .set(v::CLOCK_ID, clock_id)
+        .set(v::CLOCK_SOURCE, clock_source)
+        .set(v::RAW_UNIT, clock_raw_unit)
+        .set(v::RAW_RESOLUTION, clock_raw_resolution)
+        .set(v::NORMALIZATION_TO_NS_METHOD, normalization_method)
+        .set(v::NORMALIZATION_ERROR_NS, normalization_error_ns)
+        .set(v::CLOCK_RESOLUTION_NS, clock_resolution_ns)
+        .set(v::HOOK_READ_OVERHEAD_NS, hook_read_overhead_ns)
+        .set(v::REMAINING_UNCERTAINTY_NS, remaining_uncertainty_ns)
+        .set(v::T0_HOOK, t0_hook)
+        .set(v::T_BUY_HOOK, tbuy_hook)
+        .set(v::RAW_T0_BEFORE, raw_t0_before)
+        .set(v::RAW_T0_AFTER, raw_t0_after)
+        .set(v::RAW_T_BUY_BEFORE, raw_tbuy_before)
+        .set(v::RAW_T_BUY_AFTER, raw_tbuy_after)
+        .set(v::T0_BEFORE_NS, t0_before)
+        .set(v::T0_AFTER_NS, t0_after)
+        .set(v::T_BUY_BEFORE_NS, tbuy_before)
+        .set(v::T_BUY_AFTER_NS, tbuy_after)
+        .set(v::LOWER_BOUND_NS, lower_bound_ns)
+        .set(v::BRACKET_UPPER_NS, bracket_upper_ns)
+        .set(v::CONSERVATIVE_UPPER_BOUND_NS, upper_bound_ns)
+        .set(
+            v::FORMULA,
+            "T_buy_after - T0_before + remaining_non_overlapping_uncertainty_ns",
+        )
+        .set(v::PASS_RULE, "conservative_upper_bound_ns < 1000000")
+        // SHA-256 of the exact input files, as decoded.
+        .set(
+            v::G08_SHA256,
+            Value::B256(darkbot_bsc_record::sha256(&g08_bytes)),
+        )
+        .set(
+            v::PRODUCER_WITNESS_SHA256,
+            Value::B256(darkbot_bsc_record::sha256(&witness_bytes)),
+        )
+        .set(
+            v::AUTHORITY,
+            "ORIGINAL_SUCCESSFUL_PRODUCER_EXECUTION_ATTEMPT",
+        );
+    for not_authority in [
+        "receipt first-seen time",
+        "block timestamp",
+        "builder ACK time",
+        "local T_send",
+        "follower/archive replay duration",
+        "OHLC/price interpolation",
+    ] {
+        out.push(v::EXPLICITLY_NOT_AUTHORITY, not_authority);
     }
+
+    let (bytes, record) = checked(&out);
+    // Written before anything is printed: a verdict that could not be
+    // written never appears on stdout.
+    if let Ok(path) = env::var("DARKBOT_G08_TIMING_EVIDENCE_PATH") {
+        write_atomic(&path, &bytes).unwrap_or_else(|e| panic!("write timing evidence {e}"));
+    }
+    print!("{}", record.render());
     if verdict != "PASS" {
         std::process::exit(2);
     }
@@ -348,5 +347,10 @@ mod tests {
         let (_, bracket, upper) = timing_bounds(100, 120, 700, 800, 50).unwrap();
         assert_eq!(bracket, 700);
         assert_eq!(upper, 750);
+    }
+
+    #[test]
+    fn uncertainty_overflow_gives_no_verdict() {
+        assert!(timing_bounds(0, 0, 0, u64::MAX, 1).is_err());
     }
 }

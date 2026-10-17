@@ -731,6 +731,7 @@ dependencies = [
  "alloy-sol-types",
  "darkbot-bsc-execution",
  "darkbot-bsc-journal",
+ "darkbot-bsc-record",
  "darkbot-bsc-trading",
  "hex",
  "k256",

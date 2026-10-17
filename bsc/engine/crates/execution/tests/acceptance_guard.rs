@@ -6,7 +6,7 @@
 //! repository root without affecting other test binaries; all tests set the
 //! same directory.
 
-use darkbot_bsc_execution::acceptance_contract::{attempt1_bindings, attempt1_v3};
+use darkbot_bsc_execution::acceptance_contract::{Authorization, attempt1_bindings, attempt1_v3};
 use darkbot_bsc_execution::acceptance_guard::{
     FROZEN_APPROVED_V3_SHA256, InputHashes, LiveGuardContext, V3_RELATIVE_PATH, inspect_v3,
     sha256_hex, verify_live_authorization,
@@ -14,9 +14,13 @@ use darkbot_bsc_execution::acceptance_guard::{
 use darkbot_bsc_record::{decode, schema::g07::contract};
 use std::path::Path;
 
-/// SHA-256 of the committed binary v3 contract of attempt 1 (the candidate
-/// the user approves; changing any value changes this hash).
-const V3_CONTRACT_SHA256: &str = "19fb9b389a50e83fc0c250ee37123af0d42ed16b25b41ba2a111b41ff61a5d80";
+/// SHA-256 of the committed binary v3 contract of attempt 1: the proposal
+/// (approved=false, execution_ready=false); any changed value changes it.
+const V3_PROPOSAL_SHA256: &str = "3966b227bfa969b0e74ce5913aec4142778a4607c0cae42fa0981eb38b774f6a";
+/// SHA-256 of its approved variant: what the user approves, never written
+/// without that approval.
+const V3_APPROVED_VARIANT_SHA256: &str =
+    "19fb9b389a50e83fc0c250ee37123af0d42ed16b25b41ba2a111b41ff61a5d80";
 /// The JSON v2 proposal stays untouched as legacy evidence and is never read.
 const V2_LEGACY_PATH: &str = "bsc/config/g01_mainnet_acceptance_proposal_v2.json";
 const V2_LEGACY_SHA256: &str = "026b534f4a2e6e76b6eb816a8de84ef71b508aa28b6e24c5c471e9ee6f0b19ff";
@@ -68,10 +72,14 @@ fn v3_path_is_the_binary_config_contract() {
 fn committed_contract_is_reproduced_from_its_source_and_binds_the_import() {
     at_repo_root();
     let bindings = attempt1_bindings(Path::new(".")).unwrap();
-    let bytes = attempt1_v3(&bindings).unwrap();
+    let bytes = attempt1_v3(&bindings, Authorization::Proposed).unwrap();
     assert_eq!(std::fs::read(V3_RELATIVE_PATH).unwrap(), bytes);
+    let approved = attempt1_v3(&bindings, Authorization::Approved).unwrap();
+    assert_eq!(sha256_hex(&approved), V3_APPROVED_VARIANT_SHA256);
     let snap = inspect_v3(Path::new(V3_RELATIVE_PATH)).unwrap();
-    assert_eq!(snap.sha256, V3_CONTRACT_SHA256);
+    assert_eq!(snap.sha256, V3_PROPOSAL_SHA256);
+    // The committed contract carries no authorization.
+    assert!(!snap.approved && !snap.execution_ready);
     assert_eq!(snap.attempt_id, "g07-mainnet-attempt-1-dry-20261015T222241Z");
     assert_eq!(snap.max_attempts, 1);
     assert_eq!(snap.max_total_per_attempt, 481_163_500_000_000);
