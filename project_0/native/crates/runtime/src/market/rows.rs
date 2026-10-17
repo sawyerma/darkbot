@@ -300,34 +300,6 @@ pub enum MarketCoverage {
         t_rx_ns: u64,
         gap: gap::MarketGap,
     },
-    /// `full_window_proof`: the slot lies inside a completed full-slot reconciliation.
-    GapSlotResult {
-        gap_index: u64,
-        slot: u64,
-        error_code: Option<String>,
-        full_window_proof: bool,
-    },
-    GapSlotSkipped {
-        slot: u64,
-        successor_slot: u64,
-        parent_slot: u64,
-        successor_blockhash: String,
-    },
-    GapResult {
-        gap_index: u64,
-        recovered: bool,
-        gap: gap::MarketGap,
-    },
-    GapBlockFetched {
-        slot: u64,
-        blockhash: String,
-        parent_slot: u64,
-        transactions: u64,
-    },
-    GapRecoveryStarted {
-        observed_unix_s: u64,
-        observing: bool,
-    },
 }
 
 /// Transport and lifecycle events recorded through the observation window.
@@ -454,10 +426,7 @@ impl MarketCoverage {
             MarketCoverage::SlotBoundary { slot, .. }
             | MarketCoverage::SlotFailed { slot, .. }
             | MarketCoverage::SlotSkipped { slot, .. }
-            | MarketCoverage::SlotProduced { slot, .. }
-            | MarketCoverage::GapSlotResult { slot, .. }
-            | MarketCoverage::GapSlotSkipped { slot, .. }
-            | MarketCoverage::GapBlockFetched { slot, .. } => Some(*slot),
+            | MarketCoverage::SlotProduced { slot, .. } => Some(*slot),
             _ => None,
         }
     }
@@ -529,45 +498,6 @@ impl MarketCoverage {
                 gap,
             } => json!({"event": "GAP_BOUNDARY", "timestamp_utc": utc_iso(*observed_unix_s),
                 "t_rx_ns": t_rx_ns, "detail": gap}),
-            MarketCoverage::GapSlotResult {
-                gap_index,
-                slot,
-                error_code,
-                full_window_proof,
-            } => {
-                let mut row = json!({"event": "GAP_SLOT_RESULT", "gap_index": gap_index,
-                    "slot": slot, "error_code": error_code});
-                if *full_window_proof {
-                    row["proof"] = "FULL_FINALIZED_SLOT_RECONCILIATION".into();
-                }
-                row
-            }
-            MarketCoverage::GapSlotSkipped {
-                slot,
-                successor_slot,
-                parent_slot,
-                successor_blockhash,
-            } => json!({"event": "GAP_SLOT_SKIPPED_CONFIRMED", "slot": slot,
-                "proof": "finalized_successor_parent_link", "successor_slot": successor_slot,
-                "parent_slot": parent_slot, "successor_blockhash": successor_blockhash}),
-            MarketCoverage::GapResult {
-                gap_index,
-                recovered,
-                gap,
-            } => json!({"event": if *recovered { "GAP_RECOVERED" } else { "GAP_UNRECOVERED" },
-                "gap_index": gap_index, "detail": gap}),
-            MarketCoverage::GapBlockFetched {
-                slot,
-                blockhash,
-                parent_slot,
-                transactions,
-            } => json!({"event": "GAP_BLOCK_FETCHED", "slot": slot, "blockhash": blockhash,
-                "parent_slot": parent_slot, "transactions": transactions}),
-            MarketCoverage::GapRecoveryStarted {
-                observed_unix_s,
-                observing,
-            } => json!({"event": "GAP_RECOVERY_STARTED", "phase": "POST_CAPTURE_AFTER_DRAIN",
-                "timestamp_utc": utc_iso(*observed_unix_s), "observing": observing}),
         }
     }
 }

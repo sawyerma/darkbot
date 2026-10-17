@@ -92,7 +92,6 @@ fn run_econ4h() -> Result<(), String> {
     market.ready_timeout_secs = cfg.plan.budgets.stream_ready_seconds;
     market.drain_timeout_secs = cfg.plan.budgets.market_drain_seconds;
     market.enrich.phase_max_secs = cfg.plan.budgets.enrichment_seconds;
-    market.gap.phase_max_secs = cfg.plan.budgets.gap_seconds;
     market.reconcile.phase_max_secs = cfg.plan.budgets.strict_seconds;
     market.run_id = cfg.run_id.clone();
     market.run_dir = cfg.paths().market_dir();

@@ -38,6 +38,12 @@ pub mod kind {
     pub const MARKET_TRANSACTION: u16 = 300;
     pub const MARKET_LIQUIDATION: u16 = 301;
     pub const MARKET_COVERAGE: u16 = 302;
+    /// Strict verifier (A3): resolved slot scope, cached JSON-RPC exchange (wire text of the
+    /// external boundary), batch checkpoint and result — each a sealed single-value journal.
+    pub const STRICT_SCOPE: u16 = 310;
+    pub const STRICT_RPC_CACHE: u16 = 311;
+    pub const STRICT_CHECKPOINT: u16 = 312;
+    pub const STRICT_RESULT: u16 = 313;
     /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
     /// in-window frames is the bounded-memory index of the analytics worker.
     pub const ECON_SHADOW_EVALUATION: u16 = 400;
@@ -81,6 +87,10 @@ pub mod kind {
         MARKET_TRANSACTION,
         MARKET_LIQUIDATION,
         MARKET_COVERAGE,
+        STRICT_SCOPE,
+        STRICT_RPC_CACHE,
+        STRICT_CHECKPOINT,
+        STRICT_RESULT,
         ECON_SHADOW_EVALUATION,
         ECON_SNAPSHOT,
         ECON_FINAL,
@@ -111,6 +121,8 @@ pub mod source {
     pub const C0_CENSUS: u32 = 8;
     /// C0 census worker of the Shadow runtime (typed rows and result).
     pub const C0_CENSUS_RUNTIME: u32 = 9;
+    /// Post-capture strict verifier.
+    pub const STRICT: u32 = 10;
 }
 fn bad(code: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, code)
@@ -857,6 +869,74 @@ pub fn read_value(path: &Path) -> io::Result<Value> {
         Ok(rows.remove(0))
     } else {
         serde_json::from_reader(File::open(path)?).map_err(io::Error::other)
+    }
+}
+/// One typed value as a sealed single-frame journal. Immutable: an existing file must hold an
+/// equal value (accepted) or the write is a conflict; a new file appears atomically (built
+/// beside its destination, fsynced, hard-linked into place).
+pub fn write_typed_value<P: Payload + PartialEq>(
+    path: &Path,
+    source: u32,
+    value: &P,
+) -> io::Result<()> {
+    if path.exists() {
+        return if read_typed_value::<P>(path)? == *value {
+            Ok(())
+        } else {
+            Err(bad("IMMUTABLE_CONFLICT"))
+        };
+    }
+    let partial = path.with_file_name(format!(
+        ".{}.partial-{}-{}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("value"),
+        std::process::id(),
+        hex(&random16()?)
+    ));
+    let written = (|| {
+        let mut w = Writer::create(&partial)?;
+        w.append_typed(
+            Provenance {
+                source,
+                ..Default::default()
+            },
+            value,
+        )?;
+        w.seal(true)?;
+        fs::hard_link(&partial, path)?;
+        File::open(parent(path))?.sync_all()
+    })();
+    let _ = fs::remove_file(&partial);
+    written
+}
+/// The value of a sealed, complete single-frame journal of `P`'s kind.
+pub fn read_typed_value<P: Payload>(path: &Path) -> io::Result<P> {
+    let mut r = Reader::open(path)?;
+    let mut value = None;
+    while let Some(f) = r.next_frame()? {
+        if f.kind == MANIFEST {
+            continue;
+        }
+        if value.is_some() {
+            return Err(bad("VALUE_COUNT"));
+        }
+        value = Some(f.typed::<P>()?);
+    }
+    if !(r.sealed && r.complete) {
+        return Err(bad("VALUE_JOURNAL_INCOMPLETE"));
+    }
+    value.ok_or_else(|| bad("VALUE_COUNT"))
+}
+/// SHA-256 of a file's bytes, streamed.
+pub fn file_sha256(path: &Path) -> io::Result<[u8; 32]> {
+    let mut f = File::open(path)?;
+    let mut h = solana_sdk::hash::Hasher::default();
+    let mut b = vec![0u8; 1 << 16];
+    loop {
+        let n = f.read(&mut b)?;
+        if n == 0 {
+            return Ok(h.result().to_bytes());
+        }
+        h.hash(&b[..n]);
     }
 }
 /// Explicit offline export. A fresh destination is mandatory; primary bytes are never changed.

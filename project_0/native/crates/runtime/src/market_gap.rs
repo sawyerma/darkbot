@@ -1,4 +1,6 @@
-//! Bounded finalized-block recovery after capture and drain. Never a submission path.
+//! Transport gap bookkeeping of the live capture: outage intervals from GAP/RECONNECT/slot
+//! evidence, never repaired here. Finalized repair is the strict verifier's full-slot scan;
+//! `recover_transaction` admits a program transaction found there that was not seen live.
 use super::rows::{MarketCoverage, MarketTransaction, TxOrigin};
 use super::*;
 use crate::winner::resolve_account_keys;
@@ -6,56 +8,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug)]
 pub struct GapConfig {
+    /// Bounded number of retained outage intervals; more is GAP_STATE_CAPACITY (INCOMPLETE).
     pub max_gaps: usize,
-    pub max_slots: u64,
-    pub max_attempts: u32,
-    pub timeout_ms: u64,
-    pub retry_ms: u64,
-    pub phase_max_secs: u64,
-    pub max_transactions: u64,
 }
 impl Default for GapConfig {
     fn default() -> Self {
-        Self {
-            max_gaps: 32,
-            max_slots: 512,
-            max_attempts: 3,
-            timeout_ms: 10_000,
-            retry_ms: 250,
-            phase_max_secs: 180,
-            max_transactions: 2_000_000,
-        }
+        Self { max_gaps: 32 }
     }
 }
 impl GapConfig {
     pub fn from_lookup(get: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
-        let n = |key: &str, default: u64, max: u64| -> Result<u64, String> {
-            let value = match get(key) {
-                Some(v) => v.parse().map_err(|_| format!("invalid {key}"))?,
-                None => default,
-            };
-            if value == 0 || value > max {
-                return Err(format!("out of range {key}"));
-            }
-            Ok(value)
+        let max_gaps = match get("P0_MARKET_GAP_MAX_GAPS") {
+            Some(v) => v.parse().map_err(|_| "invalid P0_MARKET_GAP_MAX_GAPS")?,
+            None => Self::default().max_gaps as u64,
         };
-        let d = Self::default();
+        if max_gaps == 0 || max_gaps > 256 {
+            return Err("out of range P0_MARKET_GAP_MAX_GAPS".into());
+        }
         Ok(Self {
-            max_gaps: n("P0_MARKET_GAP_MAX_GAPS", d.max_gaps as u64, 256)? as usize,
-            max_slots: n("P0_MARKET_GAP_MAX_SLOTS", d.max_slots, 4096)?,
-            max_attempts: n("P0_MARKET_GAP_MAX_ATTEMPTS", u64::from(d.max_attempts), 10)? as u32,
-            timeout_ms: n("P0_MARKET_GAP_TIMEOUT_MS", d.timeout_ms, 60_000)?,
-            retry_ms: n("P0_MARKET_GAP_RETRY_MS", d.retry_ms, 10_000)?,
-            phase_max_secs: n(
-                "P0_MARKET_GAP_PHASE_MAX_SECS",
-                d.phase_max_secs,
-                u64::from(u32::MAX),
-            )?,
-            max_transactions: n(
-                "P0_MARKET_GAP_MAX_TRANSACTIONS",
-                d.max_transactions,
-                2_000_000,
-            )?,
+            max_gaps: max_gaps as usize,
         })
     }
 }
@@ -74,39 +45,15 @@ pub struct MarketGap {
     last_healthy_t_rx_ns: Option<u64>,
     reconnect_t_rx_ns: Option<u64>,
     reconnect_attempt: Option<u64>,
-    /// `PENDING`, `RECOVERED` or `UNRECOVERED`.
-    recovery_status: String,
-    error_code: Option<String>,
-    slots_checked: u64,
-    transactions_scanned: u64,
-    liquidation_events: u64,
 }
+/// Program transactions of the finalized full-slot scan that were not received live.
 #[derive(Default)]
 pub(super) struct GapStats {
-    pub gap_recovery_attempted: u64,
-    pub gap_recovered: u64,
-    pub gap_slots_requested: u64,
-    pub gap_slots_fetched: u64,
-    pub gap_slots_skipped_confirmed: u64,
-    pub gap_slots_failed: u64,
-    pub gap_transactions_scanned: u64,
     pub gap_transactions_deduplicated: u64,
     pub gap_transactions_recovered: u64,
     pub gap_liquidation_transactions: u64,
     pub gap_liquidation_events: u64,
 }
-
-pub(super) enum GapSlot {
-    Block(Value),
-    // A finalized successor's parent link proves there is no canonical block in
-    // the open interval. A null getBlock or error -32007 alone does NOT prove it.
-    Skipped {
-        successor: u64,
-        parent: u64,
-        blockhash: String,
-    },
-}
-type SlotFetcher<'a> = dyn FnMut(u64, Duration) -> Result<GapSlot, &'static str> + 'a;
 
 impl ObserverCore {
     pub(super) fn record_gap(&mut self, at: Option<u64>, now: u64, from_slot: Option<u64>) {
@@ -140,11 +87,6 @@ impl ObserverCore {
             last_healthy_t_rx_ns: self.last_slot_progress_ns,
             reconnect_t_rx_ns: None,
             reconnect_attempt: None,
-            recovery_status: "PENDING".into(),
-            error_code: None,
-            slots_checked: 0,
-            transactions_scanned: 0,
-            liquidation_events: 0,
         });
     }
     pub(super) fn record_gap_reconnect(&mut self, at: Option<u64>, attempt: Option<u64>) {
@@ -198,180 +140,6 @@ impl ObserverCore {
             previous_end = previous_end.max(stop);
         }
         Some(total)
-    }
-
-    /// This API refuses to invoke its fetcher until capture has stopped. Production
-    /// additionally invokes it only after a successful drain in finish_capture().
-    pub(super) fn recover_gaps(
-        &mut self,
-        fetch: &mut SlotFetcher<'_>,
-        sink: &mut dyn MarketSink,
-    ) -> std::io::Result<()> {
-        if self.observing {
-            return Err(std::io::Error::other("GAP_RECOVERY_DURING_CAPTURE"));
-        }
-        let deadline = Instant::now() + Duration::from_secs(self.gap_cfg.phase_max_secs);
-        for index in 0..self.gaps.len() {
-            if self.gaps[index].recovery_status == "RECOVERED" {
-                continue;
-            }
-            self.gap_stats.gap_recovery_attempted += 1;
-            let g = &self.gaps[index];
-            let range = match (g.from_slot, g.first_post_reconnect_slot) {
-                (None, _) => Err("FROM_SLOT_UNKNOWN"),
-                (_, None) => Err("POST_RECONNECT_SLOT_UNKNOWN"),
-                (Some(lo), Some(hi)) if hi < lo || hi - lo >= self.gap_cfg.max_slots => {
-                    Err("GAP_SLOT_BUDGET")
-                }
-                (Some(lo), Some(hi)) => Ok(lo..=hi),
-            };
-            let before_tx = self.gap_stats.gap_transactions_scanned;
-            let before_liq = self.gap_stats.gap_liquidation_events;
-            let mut failure = range.as_ref().err().copied();
-            if let Ok(range) = range {
-                self.gap_stats.gap_slots_requested += *range.end() - *range.start() + 1;
-                for slot in range {
-                    if self.reconciliation.complete
-                        && self
-                            .reconciliation
-                            .market_slot_start
-                            .as_ref()
-                            .is_some_and(|b| slot >= b.slot)
-                        && self
-                            .reconciliation
-                            .market_slot_end
-                            .as_ref()
-                            .is_some_and(|b| slot <= b.slot)
-                    {
-                        self.gaps[index].slots_checked += 1;
-                        sink.coverage(&MarketCoverage::GapSlotResult {
-                            gap_index: index as u64,
-                            slot,
-                            error_code: None,
-                            full_window_proof: true,
-                        })?;
-                        continue;
-                    }
-                    let mut result = Err("RECOVERY_BUDGET");
-                    for attempt in 0..self.gap_cfg.max_attempts {
-                        let remaining = deadline.saturating_duration_since(Instant::now());
-                        if remaining.is_zero() {
-                            result = Err("RECOVERY_BUDGET");
-                            break;
-                        }
-                        result = fetch(slot, remaining);
-                        if result.is_ok() {
-                            break;
-                        }
-                        if attempt + 1 < self.gap_cfg.max_attempts {
-                            std::thread::sleep(
-                                Duration::from_millis(self.gap_cfg.retry_ms)
-                                    .min(deadline.saturating_duration_since(Instant::now())),
-                            );
-                        }
-                    }
-                    if Instant::now() >= deadline {
-                        result = Err("RECOVERY_BUDGET");
-                    }
-                    let checked = match result {
-                        Ok(GapSlot::Block(block)) => {
-                            self.gap_stats.gap_slots_fetched += 1;
-                            self.recover_block(slot, block, deadline, sink)?
-                        }
-                        Ok(GapSlot::Skipped {
-                            successor,
-                            parent,
-                            blockhash,
-                        }) if parent < slot && slot < successor && !blockhash.is_empty() => {
-                            self.gap_stats.gap_slots_skipped_confirmed += 1;
-                            sink.coverage(&MarketCoverage::GapSlotSkipped {
-                                slot,
-                                successor_slot: successor,
-                                parent_slot: parent,
-                                successor_blockhash: blockhash,
-                            })?;
-                            Ok(())
-                        }
-                        Ok(GapSlot::Skipped { .. }) => Err("SKIP_PROOF_INVALID"),
-                        Err(code) => Err(code),
-                    };
-                    self.gaps[index].slots_checked += 1;
-                    sink.coverage(&MarketCoverage::GapSlotResult {
-                        gap_index: index as u64,
-                        slot,
-                        error_code: checked.as_ref().err().map(|c| (*c).to_owned()),
-                        full_window_proof: false,
-                    })?;
-                    if let Err(code) = checked {
-                        self.gap_stats.gap_slots_failed += 1;
-                        failure = Some(code);
-                        // The entire gap stays unqualified; do not burn its remaining RPC budget.
-                        break;
-                    }
-                }
-            }
-            let g = &mut self.gaps[index];
-            g.error_code = failure.map(str::to_owned);
-            g.recovery_status = if failure.is_none() {
-                "RECOVERED"
-            } else {
-                "UNRECOVERED"
-            }
-            .into();
-            g.transactions_scanned += self.gap_stats.gap_transactions_scanned - before_tx;
-            g.liquidation_events += self.gap_stats.gap_liquidation_events - before_liq;
-            if failure.is_none() {
-                self.gap_stats.gap_recovered += 1;
-            }
-            sink.coverage(&MarketCoverage::GapResult {
-                gap_index: index as u64,
-                recovered: failure.is_none(),
-                gap: g.clone(),
-            })?;
-        }
-        if self.coverage_complete() {
-            self.incomplete_reasons.remove("GAP");
-        }
-        Ok(())
-    }
-
-    fn recover_block(
-        &mut self,
-        slot: u64,
-        block: Value,
-        deadline: Instant,
-        sink: &mut dyn MarketSink,
-    ) -> std::io::Result<Result<(), &'static str>> {
-        // JFI-02: the getBlock answer is decoded once into the typed block model.
-        let typed = match darkbot_solana::chain::decode_block(&block, slot) {
-            Ok(b) if b.parent_slot < slot && !b.blockhash.is_empty() => b,
-            Ok(_) => return Ok(Err("BLOCK_HEADER_INVALID")),
-            Err(e) => return Ok(Err(e.0)),
-        };
-        let total = typed.transactions.len() as u64;
-        for (index, entry) in typed.transactions.iter().enumerate() {
-            if Instant::now() >= deadline {
-                return Ok(Err("RECOVERY_BUDGET"));
-            }
-            if self.gap_stats.gap_transactions_scanned >= self.gap_cfg.max_transactions {
-                return Ok(Err("GAP_TRANSACTION_BUDGET"));
-            }
-            self.gap_stats.gap_transactions_scanned += 1;
-            let tx = match entry {
-                Ok(tx) => tx,
-                Err(e) => return Ok(Err(e.0)),
-            };
-            if let Err(code) = self.recover_transaction(slot, index, tx, sink)? {
-                return Ok(Err(code));
-            }
-        }
-        sink.coverage(&MarketCoverage::GapBlockFetched {
-            slot,
-            blockhash: typed.blockhash.clone(),
-            parent_slot: typed.parent_slot,
-            transactions: total,
-        })?;
-        Ok(Ok(()))
     }
 
     pub(super) fn recover_transaction(
@@ -482,57 +250,10 @@ impl ObserverCore {
         }
         Ok(Ok(()))
     }
-
-    pub(super) fn gap_recovery_phase(
-        &mut self,
-        url: Option<&str>,
-        sink: &mut dyn MarketSink,
-    ) -> std::io::Result<()> {
-        if self.stats.gap_count == 0 {
-            return Ok(());
-        }
-        if self.observing {
-            return Err(std::io::Error::other("GAP_RECOVERY_DURING_CAPTURE"));
-        }
-        sink.coverage(&MarketCoverage::GapRecoveryStarted {
-            observed_unix_s: unix_now_s(),
-            observing: self.observing,
-        })?;
-        let before = self.stats.clone();
-        let cfg = self.gap_cfg;
-        let rpc = url.ok_or("RPC_URL_MISSING").and_then(|u| {
-            RpcFetcher::new(u.into(), cfg.timeout_ms, "finalized").map_err(|_| "RPC_INIT")
-        });
-        let result = self.recover_gaps(
-            &mut |slot, remaining| match &rpc {
-                Ok(rpc) => rpc.gap_slot(slot, remaining, cfg),
-                Err(code) => Err(*code),
-            },
-            sink,
-        );
-        if let (Some(h), Some((_, cutoff))) = (&self.econ, self.window) {
-            h.emit(crate::econ::Evidence::MarketCounters {
-                at_ns: cutoff,
-                before,
-                after: Box::new(self.stats.clone()),
-            });
-        }
-        result
-    }
 }
 
 impl RpcFetcher {
     /// Bounded JSON body and sanitized error codes; no provider text or endpoint escapes.
-    pub(super) fn gap_request(
-        &self,
-        method: &str,
-        params: Value,
-        deadline: Instant,
-        timeout_ms: u64,
-    ) -> Result<Value, &'static str> {
-        self.gap_request_metered(method, params, deadline, timeout_ms, 64 * 1024 * 1024)
-            .map(|(value, _bytes)| value)
-    }
     pub(super) fn gap_request_metered(
         &self,
         method: &str,
@@ -591,50 +312,5 @@ impl RpcFetcher {
             .filter(|v| !v.is_null())
             .map(|value| (value, length))
             .ok_or("RPC_MISSING_BLOCK")
-    }
-
-    fn gap_slot(
-        &self,
-        slot: u64,
-        remaining: Duration,
-        cfg: GapConfig,
-    ) -> Result<GapSlot, &'static str> {
-        let deadline = Instant::now() + remaining;
-        let config = json!({"encoding":"json", "transactionDetails":"full", "rewards":false,
-            "commitment":"finalized", "maxSupportedTransactionVersion":1});
-        match self.gap_request("getBlock", json!([slot, config]), deadline, cfg.timeout_ms) {
-            Ok(block) => Ok(GapSlot::Block(block)),
-            Err("SKIPPED_OR_LEDGER_MISSING") => {
-                // getBlocks is only a successor locator, never absence proof.
-                let end = slot.checked_add(cfg.max_slots).ok_or("SLOT_OVERFLOW")?;
-                let blocks = self.gap_request(
-                    "getBlocks",
-                    json!([slot + 1, end, {"commitment":"finalized"}]),
-                    deadline,
-                    cfg.timeout_ms,
-                )?;
-                let successor = blocks
-                    .as_array()
-                    .and_then(|a| a.first())
-                    .and_then(Value::as_u64)
-                    .filter(|s| *s > slot && *s <= end)
-                    .ok_or("SKIP_SUCCESSOR_UNAVAILABLE")?;
-                let header = self.gap_request("getBlock", json!([successor, {"transactionDetails":"none",
-                    "rewards":false, "commitment":"finalized", "maxSupportedTransactionVersion":1}]), deadline, cfg.timeout_ms)?;
-                // Shape-checked against the successor; the skip proof is the parent link below.
-                let header = darkbot_solana::chain::decode_block_header(&header, successor)
-                    .map_err(|_| "SKIP_HEADER_MISSING")?;
-                let parent = Some(header.parent_slot)
-                    .filter(|p| *p < slot)
-                    .ok_or("SKIP_PARENT_UNPROVEN")?;
-                let blockhash = header.blockhash;
-                Ok(GapSlot::Skipped {
-                    successor,
-                    parent,
-                    blockhash,
-                })
-            }
-            Err(code) => Err(code),
-        }
     }
 }

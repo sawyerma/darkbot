@@ -112,7 +112,9 @@ def verify(run,v,qualification=None,offline=False,resume=False):
                      'rps':v.rps,'offline':offline}
                 c.immutable(attemptdir/'job.json',job)
                 with (attemptdir/'worker_stderr.txt').open('x') as err:
-                    proc=subprocess.run([str(binary),str(attemptdir/'job.json')],capture_output=False,
+                    # The Rust verifier keeps native .p0j evidence; --compat additionally renders the
+                    # legacy checkpoint/views this transitional driver and the report read (until B7).
+                    proc=subprocess.run([str(binary),str(attemptdir/'job.json'),'--compat'],capture_output=False,
                         stdout=subprocess.PIPE,stderr=err,timeout=v.max_seconds+20,text=True)
                 if proc.returncode:raise audit.AuditError('STRICT_WORKER_FAILED')
                 summary=json.loads(proc.stdout)

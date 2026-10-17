@@ -302,6 +302,18 @@ pub fn memory_pressure_level() -> Option<i32> {
     None
 }
 
+/// Free bytes available to this user on the filesystem holding `path` (statvfs, no subprocess).
+pub fn free_disk_bytes(path: &std::path::Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    // SAFETY: statvfs fills the struct we own for a NUL-terminated path.
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    Some(st.f_bavail as u64 * st.f_frsize as u64)
+}
+
 /// Peak resident set size of this process (an upper bound of the current RSS).
 pub fn peak_rss_bytes() -> Option<u64> {
     // SAFETY: getrusage writes into the zeroed struct we own.
@@ -369,5 +381,7 @@ mod tests {
         let m = MemorySample::now();
         assert!(m.rss_bytes.is_some_and(|r| r > 0) && m.swap_used_bytes.is_some());
         assert!(m.rss_bytes <= m.peak_rss_bytes.map(|p| p + MIB));
+        assert!(free_disk_bytes(&std::env::temp_dir()).is_some_and(|f| f > 0));
+        assert!(free_disk_bytes(std::path::Path::new("/nonexistent/x")).is_none());
     }
 }

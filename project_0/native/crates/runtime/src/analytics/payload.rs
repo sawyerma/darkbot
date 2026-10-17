@@ -9,6 +9,7 @@
 //! written for a kind that has a payload type.
 use super::journal;
 use crate::market::observer::rows as market;
+use crate::market::observer::verification as strict;
 use bincode::Options;
 use serde::{de::DeserializeOwned, Serialize};
 use std::io;
@@ -138,6 +139,10 @@ macro_rules! typed_kinds {
             k::MARKET_TRANSACTION => $f::<market::MarketTransaction>($kind, $schema, $bytes),
             k::MARKET_LIQUIDATION => $f::<market::MarketLiquidation>($kind, $schema, $bytes),
             k::MARKET_COVERAGE => $f::<market::MarketCoverage>($kind, $schema, $bytes),
+            k::STRICT_SCOPE => $f::<strict::StrictScope>($kind, $schema, $bytes),
+            k::STRICT_RPC_CACHE => $f::<strict::RpcCacheEntry>($kind, $schema, $bytes),
+            k::STRICT_CHECKPOINT => $f::<strict::StrictCheckpoint>($kind, $schema, $bytes),
+            k::STRICT_RESULT => $f::<strict::StrictResult>($kind, $schema, $bytes),
             _ => Err(bad("PAYLOAD_KIND_UNTYPED")),
         }
     }};

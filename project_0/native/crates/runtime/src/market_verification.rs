@@ -1,12 +1,24 @@
 //! Post-capture strict verification. Reuses the canonical slot/parent/skip engine.
 //! Raw capture files are never opened for writing; only this specification's directory.
+//!
+//! Evidence is native (Ticket 3 A3): the resolved scope, every cached JSON-RPC exchange, the
+//! batch market journals, the batch checkpoints and the result are typed `.p0j` journals. JSON
+//! exists only as the wire text of the cached external JSON-RPC exchange (JFI-02 boundary) and
+//! in the explicit `--compat` render for the transitional pinned Python driver/report.
+//! The liquidation truth comes from the finalized blocks themselves (`reconcile_slots` →
+//! `truth::classify`), never from the market observer's rows.
 use super::reconcile::RequestPacer;
+use super::rows::{MarketCoverage, MarketLiquidation, ReconciliationRow};
 use super::*;
-use serde::Deserialize;
-use solana_sdk::hash::{hash, Hasher};
-use std::io::{BufRead, Read};
+use crate::analytics::journal::{self, kind, source};
+use crate::analytics::payload::Payload;
+use crate::storage::budget::{current_rss_bytes, free_disk_bytes, MIB};
+use crate::storage::writer::WriterConfig;
+use serde::{Deserialize, Serialize};
+use solana_sdk::hash::hash;
 
-#[derive(Deserialize)]
+/// The verification job (from the verification driver). Budgets are hard limits.
+#[derive(Clone, Deserialize)]
 pub struct Job {
     pub verification_spec_id: String,
     pub output: PathBuf,
@@ -23,46 +35,100 @@ pub struct Job {
     #[serde(default)]
     pub offline: bool,
 }
+
+/// Slots per batch (one checkpoint each).
+const BATCH_SLOTS: u64 = 32;
+/// Bounded read-ahead: produced slots fetched together, never more responses retained.
+const PREFETCH: usize = 8;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrictScope {
+    pub verification_spec_id: String,
+    pub start_ns: u64,
+    pub end_ns: u64,
+    pub lo: u64,
+    pub hi: u64,
+}
+impl Payload for StrictScope {
+    const KIND: u16 = kind::STRICT_SCOPE;
+}
+
+/// One cached JSON-RPC exchange: request and `result` as wire text of the external boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RpcCacheEntry {
+    pub method: String,
+    pub params: String,
+    pub result: Vec<u8>,
+    pub result_sha256: [u8; 32],
+}
+impl Payload for RpcCacheEntry {
+    const KIND: u16 = kind::STRICT_RPC_CACHE;
+}
+
+/// The sealed market journal of one batch.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchJournal {
+    pub directory: String,
+    pub file_sha256: [u8; 32],
+    pub frames: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StrictCheckpoint {
+    pub spec: String,
+    pub start: u64,
+    pub end: u64,
+    pub previous_anchor: Option<(u64, String)>,
+    pub anchor: Option<(u64, String)>,
+    pub journal: BatchJournal,
+    pub proof: ReconciliationRow,
+}
+impl Payload for StrictCheckpoint {
+    const KIND: u16 = kind::STRICT_CHECKPOINT;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StrictStatus {
+    CanonicalVerified,
+    HistoricalIncomplete,
+}
+impl StrictStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StrictStatus::CanonicalVerified => "CANONICAL_VERIFIED",
+            StrictStatus::HistoricalIncomplete => "HISTORICAL_INCOMPLETE",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchRef {
+    pub checkpoint: String,
+    pub sha256: [u8; 32],
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrictResult {
+    pub verification_spec_id: String,
+    pub status: StrictStatus,
+    pub reason: Option<String>,
+    pub scope: Option<StrictScope>,
+    pub batches: Vec<BatchRef>,
+    pub rpc_calls: u64,
+    pub successful_response_bytes: u64,
+    /// Always false: a strict verification alone is never the C0-E1 master gate.
+    pub c0_e1_master_pass: bool,
+}
+impl Payload for StrictResult {
+    const KIND: u16 = kind::STRICT_RESULT;
+}
+
+/// Identity of a wire request (method + params as JSON-RPC wire text).
 fn digest(v: &Value) -> String {
     hash(&serde_json::to_vec(v).unwrap()).to_string()
 }
-fn read(path: &Path) -> Result<Value, &'static str> {
-    if fs::metadata(path).map_err(|_| "CHECKPOINT_IO")?.len() > 128 * 1024 * 1024 {
-        return Err("CHECKPOINT_SIZE");
-    }
-    serde_json::from_reader(File::open(path).map_err(|_| "CHECKPOINT_IO")?)
-        .map_err(|_| "CHECKPOINT_CORRUPT")
-}
-fn immutable(path: &Path, value: &Value) -> Result<(), &'static str> {
-    if path.exists() {
-        return if read(path)? == *value {
-            Ok(())
-        } else {
-            Err("IMMUTABLE_CONFLICT")
-        };
-    }
-    let temp = path.with_extension(format!("tmp.{}", std::process::id()));
-    let mut f = File::create(&temp).map_err(|_| "EVIDENCE_IO")?;
-    serde_json::to_writer(&mut f, value).map_err(|_| "EVIDENCE_IO")?;
-    f.sync_all().map_err(|_| "EVIDENCE_IO")?;
-    fs::hard_link(&temp, path).map_err(|_| "EVIDENCE_IO")?;
-    fs::remove_file(temp).map_err(|_| "EVIDENCE_IO")?;
-    File::open(path.parent().unwrap())
-        .and_then(|d| d.sync_all())
-        .map_err(|_| "EVIDENCE_IO")
-}
-fn file_hash(path: &Path) -> Result<String, &'static str> {
-    let mut f = File::open(path).map_err(|_| "EVIDENCE_IO")?;
-    let mut h = Hasher::default();
-    let mut b = [0; 65536];
-    loop {
-        let n = f.read(&mut b).map_err(|_| "EVIDENCE_IO")?;
-        if n == 0 {
-            break;
-        }
-        h.hash(&b[..n]);
-    }
-    Ok(h.result().to_string())
+fn io_code(_: std::io::Error) -> &'static str {
+    "EVIDENCE_IO"
 }
 fn disk_bytes(dir: &Path) -> Result<u64, &'static str> {
     let mut total = 0;
@@ -77,6 +143,34 @@ fn disk_bytes(dir: &Path) -> Result<u64, &'static str> {
     }
     Ok(total)
 }
+fn file_len(path: &Path) -> u64 {
+    fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+/// Slots of the next read-ahead group for `slot`: produced slots from `slot` on, at most
+/// `limit`, without responses already held or cached. A retry of the same slot fetches it alone
+/// (no read-ahead expansion while the provider rejects requests).
+fn read_ahead_group(
+    slot: u64,
+    produced: &[u64],
+    held: &BTreeMap<u64, Result<Value, &'static str>>,
+    cached: &dyn Fn(u64) -> bool,
+    limit: usize,
+) -> Vec<u64> {
+    match produced.iter().position(|s| *s == slot) {
+        Some(i) => std::iter::once(slot)
+            .chain(
+                produced[i + 1..]
+                    .iter()
+                    .copied()
+                    .filter(|s| !held.contains_key(s) && !cached(*s)),
+            )
+            .take(limit)
+            .collect(),
+        None => vec![slot],
+    }
+}
+
 struct Client<'a> {
     job: &'a Job,
     rpc: Option<RpcFetcher>,
@@ -84,65 +178,71 @@ struct Client<'a> {
     pacer: RequestPacer,
     calls: u64,
     bytes: u64,
-    completed_batches: Vec<Value>,
+    disk: u64,
+    produced: Vec<u64>,
+    held: BTreeMap<u64, Result<Value, &'static str>>,
+    previous_block: Option<u64>,
+    completed_batches: Vec<BatchRef>,
 }
 impl Client<'_> {
+    /// Time, disk, RAM and free-space budgets (no subprocess; disk usage tracked incrementally).
     fn guard(&self) -> Result<(), &'static str> {
         if Instant::now() >= self.deadline {
             return Err("VERIFICATION_TIME_BUDGET");
         }
-        if disk_bytes(&self.job.output)? >= self.job.max_disk_bytes {
+        if self.disk >= self.job.max_disk_bytes {
             return Err("VERIFICATION_DISK_BUDGET");
         }
-        let rss = std::process::Command::new("ps")
-            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-            .output()
-            .map_err(|_| "RAM_PREFLIGHT_UNAVAILABLE")?;
-        let rss: u64 = String::from_utf8_lossy(&rss.stdout)
-            .trim()
-            .parse()
-            .map_err(|_| "RAM_PREFLIGHT_UNAVAILABLE")?;
-        // Reserve headroom for the capped response + serde expansion and decoder clones.
-        if rss.saturating_mul(1024).saturating_add(512 * 1024 * 1024) > self.job.max_ram_bytes {
+        let rss = current_rss_bytes().ok_or("RAM_PREFLIGHT_UNAVAILABLE")?;
+        // Headroom for the capped response, its decode and the read-ahead group.
+        if rss.saturating_add(512 * MIB) > self.job.max_ram_bytes {
             return Err("VERIFICATION_RAM_BUDGET");
         }
-        let df = std::process::Command::new("df")
-            .args(["-Pk"])
-            .arg(&self.job.output)
-            .output()
-            .map_err(|_| "DISK_PREFLIGHT_UNAVAILABLE")?;
-        let free: u64 = String::from_utf8_lossy(&df.stdout)
-            .lines()
-            .last()
-            .and_then(|s| s.split_whitespace().nth(3))
-            .and_then(|s| s.parse().ok())
-            .ok_or("DISK_PREFLIGHT_UNAVAILABLE")?;
-        if free.saturating_mul(1024) < self.job.min_free_bytes.saturating_add(64 * 1024 * 1024) {
+        let free = free_disk_bytes(&self.job.output).ok_or("DISK_PREFLIGHT_UNAVAILABLE")?;
+        if free < self.job.min_free_bytes.saturating_add(64 * MIB) {
             return Err("VERIFICATION_DISK_FREE");
         }
         Ok(())
     }
-    fn call(&mut self, method: &str, params: Value) -> Result<Value, &'static str> {
-        self.guard()?;
-        if !matches!(
-            method,
-            "getFirstAvailableBlock" | "getSlot" | "getBlocks" | "getBlock"
-        ) {
-            return Err("VERIFICATION_METHOD_FORBIDDEN");
-        }
-        let key = json!({"method":method,"params":params});
+    fn cache_path(&self, method: &str, params: &Value) -> (Value, PathBuf) {
+        let key = json!({"method": method, "params": params});
         let path = self
             .job
             .output
             .join("cache")
-            .join(format!("{}.json", digest(&key)));
-        if path.exists() {
-            let v = read(&path)?;
-            if v["request"] != key || v["digest"] != digest(&v["result"]) {
-                return Err("CACHE_CORRUPT");
-            }
-            return Ok(v["result"].clone());
+            .join(format!("{}.p0j", digest(&key)));
+        (key, path)
+    }
+    fn cached(&self, method: &str, params: &Value) -> Result<Option<Value>, &'static str> {
+        let (_, path) = self.cache_path(method, params);
+        if !path.exists() {
+            return Ok(None);
         }
+        let e: RpcCacheEntry = journal::read_typed_value(&path).map_err(|_| "CACHE_CORRUPT")?;
+        if e.method != method
+            || e.params != params.to_string()
+            || hash(&e.result).to_bytes() != e.result_sha256
+        {
+            return Err("CACHE_CORRUPT");
+        }
+        serde_json::from_slice(&e.result)
+            .map(Some)
+            .map_err(|_| "CACHE_CORRUPT")
+    }
+    fn store(&mut self, method: &str, params: &Value, v: &Value) -> Result<(), &'static str> {
+        let (_, path) = self.cache_path(method, params);
+        let result = serde_json::to_vec(v).map_err(|_| "EVIDENCE_IO")?;
+        let entry = RpcCacheEntry {
+            method: method.into(),
+            params: params.to_string(),
+            result_sha256: hash(&result).to_bytes(),
+            result,
+        };
+        journal::write_typed_value(&path, source::STRICT, &entry).map_err(io_code)?;
+        self.disk += file_len(&path);
+        Ok(())
+    }
+    fn network(&mut self, method: &str, params: &Value) -> Result<Value, &'static str> {
         if self.calls >= self.job.max_calls {
             return Err("VERIFICATION_CALL_BUDGET");
         }
@@ -154,15 +254,114 @@ impl Client<'_> {
         self.pacer.wait(self.deadline)?;
         self.calls += 1;
         // P2 admission, Retry-After/circuit and bounded body reader remain authoritative.
-        let (v, bytes) =
-            rpc.gap_request_metered(method, params, self.deadline, 10_000, remaining_bytes)?;
-        self.bytes += bytes;
-        immutable(
-            &path,
-            &json!({"request":key,"digest":digest(&v),"result":v}),
+        let (v, bytes) = rpc.gap_request_metered(
+            method,
+            params.clone(),
+            self.deadline,
+            10_000,
+            remaining_bytes,
         )?;
+        self.bytes += bytes;
+        self.store(method, params, &v)?;
         self.guard()?;
         Ok(v)
+    }
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, &'static str> {
+        self.guard()?;
+        if !matches!(
+            method,
+            "getFirstAvailableBlock" | "getSlot" | "getBlocks" | "getBlock"
+        ) {
+            return Err("VERIFICATION_METHOD_FORBIDDEN");
+        }
+        if method == "getBlock" {
+            return self.block(params);
+        }
+        let v = match self.cached(method, &params)? {
+            Some(v) => v,
+            None => self.network(method, &params)?,
+        };
+        if method == "getBlocks" {
+            self.produced = v
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_u64).collect())
+                .unwrap_or_default();
+        }
+        Ok(v)
+    }
+    /// `getBlock` with bounded read-ahead over the last produced-slot list. Validation and
+    /// ledger order stay strictly canonical in `reconcile_slots`; every response is cached.
+    fn block(&mut self, params: Value) -> Result<Value, &'static str> {
+        let slot = params[0].as_u64().ok_or("BLOCK_SLOT_INVALID")?;
+        let options = params[1].clone();
+        let retry = self.previous_block == Some(slot);
+        self.previous_block = Some(slot);
+        if retry {
+            self.held.remove(&slot);
+        } else if let Some(v) = self.held.remove(&slot) {
+            return v;
+        }
+        if let Some(v) = self.cached("getBlock", &params)? {
+            return Ok(v);
+        }
+        let group = if retry {
+            vec![slot]
+        } else {
+            let cached = |s: u64| self.cache_path("getBlock", &json!([s, options])).1.exists();
+            read_ahead_group(slot, &self.produced, &self.held, &cached, PREFETCH)
+        };
+        if group.len() <= 1 || self.rpc.is_none() {
+            return self.network("getBlock", &params);
+        }
+        self.prefetch(&group, &options)?;
+        self.held
+            .remove(&slot)
+            .unwrap_or(Err("PREFETCH_SLOT_MISSING"))
+    }
+    fn prefetch(&mut self, group: &[u64], options: &Value) -> Result<(), &'static str> {
+        let budget = self.job.max_calls.saturating_sub(self.calls) as usize;
+        let group = &group[..group.len().min(budget)];
+        if group.is_empty() {
+            return Err("VERIFICATION_CALL_BUDGET");
+        }
+        let remaining = self.job.max_bytes.saturating_sub(self.bytes);
+        if remaining == 0 {
+            return Err("VERIFICATION_NETWORK_BUDGET");
+        }
+        let rpc = self.rpc.as_ref().ok_or("OFFLINE_CACHE_MISS")?;
+        let (pacer, deadline) = (&self.pacer, self.deadline);
+        self.calls += group.len() as u64;
+        let fetched: Vec<(u64, Result<(Value, u64), &'static str>)> = std::thread::scope(|scope| {
+            let jobs: Vec<_> = group
+                .iter()
+                .map(|&s| {
+                    let params = json!([s, options]);
+                    (
+                        s,
+                        scope.spawn(move || {
+                            pacer.wait(deadline)?;
+                            rpc.gap_request_metered("getBlock", params, deadline, 10_000, remaining)
+                        }),
+                    )
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|(s, j)| (s, j.join().unwrap_or(Err("BLOCK_FETCH_WORKER_FAILED"))))
+                .collect()
+        });
+        // Accounted in slot order; responses beyond the byte budget are refused, not kept.
+        for (s, r) in fetched {
+            let r = match r {
+                Ok((v, bytes)) if self.bytes + bytes <= self.job.max_bytes => {
+                    self.bytes += bytes;
+                    self.store("getBlock", &json!([s, options]), &v).map(|_| v)
+                }
+                Ok(_) => Err("VERIFICATION_NETWORK_BUDGET"),
+                Err(e) => Err(e),
+            };
+            self.held.insert(s, r);
+        }
+        self.guard()
     }
     fn header_at_or_after(&mut self, slot: u64, tip: u64) -> Result<(u64, i64), &'static str> {
         let slots = self.call(
@@ -176,7 +375,9 @@ impl Client<'_> {
             .filter(|s| *s >= slot && *s <= tip)
             .ok_or("UTC_BOUNDARY_SLOT_UNAVAILABLE")?;
         let h = self.call("getBlock", json!([s,{"transactionDetails":"none","rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]))?;
-        Ok((s, h["blockTime"].as_i64().ok_or("UTC_BLOCK_TIME_UNKNOWN")?))
+        let header = darkbot_solana::chain::decode_block_header(&h, s)
+            .map_err(|_| "UTC_BLOCK_HEADER_INVALID")?;
+        Ok((s, header.block_time.ok_or("UTC_BLOCK_TIME_UNKNOWN")?))
     }
     fn resolve_window(&mut self) -> Result<(u64, u64), &'static str> {
         let first = self
@@ -226,9 +427,118 @@ impl Client<'_> {
     }
 }
 
+/// What the sealed market journal of one batch proves.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BatchFacts {
+    pub frames: u64,
+    pub file_sha256: [u8; 32],
+    /// Last produced-and-fetched block `(slot, blockhash)` (the next batch's parent anchor).
+    pub anchor: Option<(u64, String)>,
+    pub canonical: Vec<truth::TruthEvent>,
+    /// Produced-and-fetched slots with their scanned transaction count.
+    pub produced: Vec<(u64, u64)>,
+    pub skipped: Vec<u64>,
+    /// Program-relevant transactions `(signature, slot)` of the full-slot scan.
+    pub program_transactions: Vec<(String, u64)>,
+}
+
+/// Minimal native reader of one batch journal: verifies sequence, CRC, hash chain and seal and
+/// decodes every typed frame (a schema-1 or foreign frame fails the batch).
+pub fn read_batch(dir: &Path) -> Result<BatchFacts, &'static str> {
+    let path = dir.join(MARKET_JOURNAL);
+    let mut r = journal::Reader::open(&path).map_err(|_| "BATCH_JOURNAL_INVALID")?;
+    let mut f = BatchFacts::default();
+    while let Some(frame) = r.next_frame().map_err(|_| "BATCH_JOURNAL_INVALID")? {
+        match frame.kind {
+            journal::MANIFEST => continue,
+            kind::MARKET_COVERAGE => {
+                match frame
+                    .typed::<MarketCoverage>()
+                    .map_err(|_| "BATCH_FRAME_INVALID")?
+                {
+                    MarketCoverage::SlotProduced {
+                        slot,
+                        blockhash,
+                        transactions_scanned,
+                        ..
+                    } => {
+                        f.produced.push((slot, transactions_scanned));
+                        f.anchor = Some((slot, blockhash));
+                    }
+                    MarketCoverage::SlotSkipped { slot, .. } => f.skipped.push(slot),
+                    _ => {}
+                }
+            }
+            kind::MARKET_LIQUIDATION => {
+                if let MarketLiquidation::Canonical(e) = frame
+                    .typed::<MarketLiquidation>()
+                    .map_err(|_| "BATCH_FRAME_INVALID")?
+                {
+                    f.canonical.push(*e);
+                }
+            }
+            kind::MARKET_TRANSACTION => {
+                let row = frame
+                    .typed::<super::rows::MarketTransaction>()
+                    .map_err(|_| "BATCH_FRAME_INVALID")?;
+                if matches!(row.origin, super::rows::TxOrigin::FullSlot { .. }) {
+                    f.program_transactions.push((row.signature, row.slot));
+                }
+            }
+            _ => return Err("BATCH_FRAME_KIND"),
+        }
+        f.frames += 1;
+    }
+    if !(r.sealed && r.complete) {
+        return Err("BATCH_JOURNAL_INCOMPLETE");
+    }
+    f.file_sha256 = journal::file_sha256(&path).map_err(|_| "BATCH_JOURNAL_INVALID")?;
+    Ok(f)
+}
+
+fn checkpoint_name(start: u64, end: u64) -> String {
+    format!("batch_{start}_{end}.p0j")
+}
+
+/// A saved checkpoint must bind this spec, range and parent anchor, a complete proof and an
+/// unchanged, verifiable batch journal.
+fn verified_checkpoint(
+    output: &Path,
+    spec: &str,
+    start: u64,
+    end: u64,
+    anchor: &Option<(u64, String)>,
+) -> Result<Option<(StrictCheckpoint, BatchFacts)>, &'static str> {
+    let path = output.join(checkpoint_name(start, end));
+    if !path.exists() {
+        return Ok(None);
+    }
+    let c: StrictCheckpoint = journal::read_typed_value(&path).map_err(|_| "CHECKPOINT_CORRUPT")?;
+    if c.spec != spec
+        || c.start != start
+        || c.end != end
+        || c.previous_anchor != *anchor
+        || !c.proof.complete
+    {
+        return Err("CHECKPOINT_CORRUPT");
+    }
+    let d = &c.journal.directory;
+    if d.contains('/') || d.contains('\\') || !d.starts_with("batch_") {
+        return Err("CHECKPOINT_PATH");
+    }
+    let facts = read_batch(&output.join(d)).map_err(|_| "CHECKPOINT_EVIDENCE_CHANGED")?;
+    if facts.file_sha256 != c.journal.file_sha256
+        || facts.frames != c.journal.frames
+        || facts.anchor != c.anchor
+    {
+        return Err("CHECKPOINT_EVIDENCE_CHANGED");
+    }
+    Ok(Some((c, facts)))
+}
+
 /// Single job, no wallet or send methods. Each committed batch is immutable.
 /// A killed batch is replayed from verified cached RPC responses on resume.
-pub fn run(job: Job) -> Result<Value, String> {
+pub fn run(job: Job) -> Result<StrictResult, String> {
     if job.start_ns >= job.end_ns
         || job.max_calls == 0
         || job.max_seconds == 0
@@ -240,6 +550,7 @@ pub fn run(job: Job) -> Result<Value, String> {
     {
         return Err("VERIFICATION_CONFIG_INVALID".into());
     }
+    let program = Pubkey::from_str(&job.program).map_err(|_| "PROGRAM_INVALID")?;
     fs::create_dir_all(job.output.join("cache")).map_err(|_| "VERIFICATION_IO")?;
     let mut c = Client {
         rpc: if job.offline {
@@ -263,145 +574,147 @@ pub fn run(job: Job) -> Result<Value, String> {
         pacer: RequestPacer::new(job.rps),
         calls: 0,
         bytes: 0,
+        disk: disk_bytes(&job.output).map_err(|_| "RESOURCE_IO")?,
+        produced: Vec::new(),
+        held: BTreeMap::new(),
+        previous_block: None,
         completed_batches: Vec::new(),
         job: &job,
     };
-    let work = (|| -> Result<Value, &'static str> {
+    let mut scope_seen = None;
+    let work = (|| -> Result<(), &'static str> {
         c.guard()?;
-        let scope_path = job.output.join("scope.json");
+        let scope_path = job.output.join("scope.p0j");
         let scope = if scope_path.exists() {
-            read(&scope_path)?
+            journal::read_typed_value::<StrictScope>(&scope_path)
+                .map_err(|_| "CHECKPOINT_CORRUPT")?
         } else {
             let (lo, hi) = c.resolve_window()?;
-            let v = json!({"verification_spec_id":job.verification_spec_id,"start_ns":job.start_ns,"end_ns":job.end_ns,"lo":lo,"hi":hi});
-            immutable(&scope_path, &v)?;
-            v
+            let s = StrictScope {
+                verification_spec_id: job.verification_spec_id.clone(),
+                start_ns: job.start_ns,
+                end_ns: job.end_ns,
+                lo,
+                hi,
+            };
+            journal::write_typed_value(&scope_path, source::STRICT, &s).map_err(io_code)?;
+            c.disk += file_len(&scope_path);
+            s
         };
-        if scope["verification_spec_id"] != job.verification_spec_id
-            || scope["start_ns"] != job.start_ns
-            || scope["end_ns"] != job.end_ns
+        if scope.verification_spec_id != job.verification_spec_id
+            || scope.start_ns != job.start_ns
+            || scope.end_ns != job.end_ns
         {
             return Err("RESUME_SCOPE_MISMATCH");
         }
-        let mut next = scope["lo"].as_u64().ok_or("CHECKPOINT_CORRUPT")?;
-        let hi = scope["hi"]
-            .as_u64()
-            .filter(|v| *v >= next)
-            .ok_or("CHECKPOINT_CORRUPT")?;
+        if scope.hi < scope.lo {
+            return Err("CHECKPOINT_CORRUPT");
+        }
+        scope_seen = Some(scope.clone());
+        let mut next = scope.lo;
         let mut anchor: Option<(u64, String)> = None;
-        let mut batches = Vec::new();
         let mut first_time = None;
         let mut last_time = None;
-        while next <= hi {
+        while next <= scope.hi {
             c.guard()?;
-            let end = next.saturating_add(31).min(hi);
-            let checkpoint = job.output.join(format!("batch_{next}_{end}.json"));
-            let saved = if checkpoint.exists() {
-                read(&checkpoint)?
-            } else {
-                let stamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_err(|_| "CLOCK")?
-                    .as_nanos();
-                let dirname = format!("batch_{next}_{end}_{stamp}");
-                let dir = job.output.join(&dirname);
-                fs::create_dir(&dir).map_err(|_| "EVIDENCE_IO")?;
-                let mut sink = JsonlSink::create(&dir).map_err(|_| "EVIDENCE_IO")?;
-                let mut core = ObserverCore::new(
-                    Pubkey::from_str(&job.program).map_err(|_| "PROGRAM_INVALID")?,
-                    MarketSource::Transactions,
-                    EnrichConfig::DEFAULT,
-                );
-                core.reconcile_cfg.max_attempts = 1;
-                core.reconcile_cfg.phase_max_secs = c
-                    .deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_secs()
-                    .max(1);
-                let start = anchor.as_ref().map(|a| a.0).unwrap_or(next);
-                core.reconciliation.market_slot_start = Some(reconcile::SlotBoundary {
-                    slot: start,
-                    t_rx_ns: 0,
-                    observed_unix_s: 0,
-                    provenance: "UTC_BRACKET_RESUMABLE_STRICT",
-                });
-                core.reconciliation.market_slot_end = Some(reconcile::SlotBoundary {
-                    slot: end,
-                    t_rx_ns: 0,
-                    observed_unix_s: 0,
-                    provenance: "UTC_BRACKET_RESUMABLE_STRICT",
-                });
-                core.reconcile_slots(
-                    &mut |m, p, _| {
-                        let value = c.call(m, p.clone())?;
-                        if m == "getBlock" {
-                            if let Some((s, h)) = &anchor {
-                                if p[0] == *s && value["blockhash"] != *h {
-                                    return Err("BATCH_ANCHOR_MISMATCH");
+            let end = next.saturating_add(BATCH_SLOTS - 1).min(scope.hi);
+            let saved = match verified_checkpoint(
+                &job.output,
+                &job.verification_spec_id,
+                next,
+                end,
+                &anchor,
+            )? {
+                Some((saved, _)) => saved,
+                None => {
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(|_| "CLOCK")?
+                        .as_nanos();
+                    let dirname = format!("batch_{next}_{end}_{stamp}");
+                    let dir = job.output.join(&dirname);
+                    fs::create_dir(&dir).map_err(|_| "EVIDENCE_IO")?;
+                    let mut sink = JournalSink::create_with(&dir, WriterConfig::from_active())
+                        .map_err(|_| "EVIDENCE_IO")?;
+                    let mut core = ObserverCore::new(
+                        program,
+                        MarketSource::Transactions,
+                        EnrichConfig::DEFAULT,
+                    );
+                    core.reconcile_cfg.max_attempts = 1;
+                    core.reconcile_cfg.phase_max_secs = c
+                        .deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_secs()
+                        .max(1);
+                    let start = anchor.as_ref().map(|a| a.0).unwrap_or(next);
+                    for (side, slot) in [(0, start), (1, end)] {
+                        let b = reconcile::SlotBoundary {
+                            slot,
+                            t_rx_ns: 0,
+                            observed_unix_s: 0,
+                            provenance: "UTC_BRACKET_RESUMABLE_STRICT",
+                        };
+                        if side == 0 {
+                            core.reconciliation.market_slot_start = Some(b);
+                        } else {
+                            core.reconciliation.market_slot_end = Some(b);
+                        }
+                    }
+                    core.reconcile_slots(
+                        &mut |m, p, _| {
+                            let value = c.call(m, p.clone())?;
+                            if m == "getBlock" {
+                                if let Some((s, h)) = &anchor {
+                                    if p[0] == *s && value["blockhash"] != *h {
+                                        return Err("BATCH_ANCHOR_MISMATCH");
+                                    }
                                 }
                             }
-                        }
-                        Ok(value)
-                    },
-                    &mut sink,
-                )
-                .map_err(|_| "EVIDENCE_IO")?;
-                sink.flush().map_err(|_| "EVIDENCE_IO")?;
-                if !core.reconciliation.complete {
-                    return Err(core.reconciliation.error.unwrap_or("STRICT_INCOMPLETE"));
-                }
-                let mut last = anchor.clone();
-                for line in std::io::BufReader::new(
-                    File::open(dir.join("coverage.jsonl")).map_err(|_| "EVIDENCE_IO")?,
-                )
-                .lines()
-                {
-                    let row: Value = serde_json::from_str(&line.map_err(|_| "EVIDENCE_IO")?)
-                        .map_err(|_| "EVIDENCE_IO")?;
-                    if row["status"] == "PRODUCED_FETCHED" {
-                        last = Some((
-                            row["slot"].as_u64().ok_or("PROOF_SLOT")?,
-                            row["blockhash"].as_str().ok_or("PROOF_HASH")?.into(),
-                        ));
+                            Ok(value)
+                        },
+                        &mut sink,
+                    )
+                    .map_err(|_| "EVIDENCE_IO")?;
+                    sink.finish().map_err(|_| "EVIDENCE_IO")?;
+                    drop(sink);
+                    if !core.reconciliation.complete {
+                        return Err(core.reconciliation.error.unwrap_or("STRICT_INCOMPLETE"));
                     }
+                    let facts = read_batch(&dir)?;
+                    c.disk += file_len(&dir.join(MARKET_JOURNAL));
+                    let checkpoint = StrictCheckpoint {
+                        spec: job.verification_spec_id.clone(),
+                        start: next,
+                        end,
+                        previous_anchor: anchor.clone(),
+                        anchor: facts.anchor.clone().or_else(|| anchor.clone()),
+                        journal: BatchJournal {
+                            directory: dirname,
+                            file_sha256: facts.file_sha256,
+                            frames: facts.frames,
+                        },
+                        proof: (&core.reconciliation).into(),
+                    };
+                    let path = job.output.join(checkpoint_name(next, end));
+                    journal::write_typed_value(&path, source::STRICT, &checkpoint)
+                        .map_err(io_code)?;
+                    c.disk += file_len(&path);
+                    checkpoint
                 }
-                let mut files = serde_json::Map::new();
-                for name in ["transactions.jsonl", "liquidations.jsonl", "coverage.jsonl"] {
-                    File::open(dir.join(name))
-                        .and_then(|f| f.sync_all())
-                        .map_err(|_| "EVIDENCE_IO")?;
-                    files.insert(name.into(), json!(file_hash(&dir.join(name))?));
-                }
-                let v = json!({"spec":job.verification_spec_id,"start":next,"end":end,"previous_anchor":anchor,"anchor":last,
-                    "directory":dirname,"files":files,"proof":core.reconciliation});
-                immutable(&checkpoint, &v)?;
-                v
             };
-            if saved["spec"] != job.verification_spec_id
-                || saved["start"] != next
-                || saved["end"] != end
-                || saved["previous_anchor"] != json!(anchor)
-                || saved["proof"]["complete"] != true
-            {
-                return Err("CHECKPOINT_CORRUPT");
-            }
-            let dirname = saved["directory"]
-                .as_str()
-                .filter(|s| !s.contains('/') && !s.contains('\\') && s.starts_with("batch_"))
-                .ok_or("CHECKPOINT_PATH")?;
-            for name in ["transactions.jsonl", "liquidations.jsonl", "coverage.jsonl"] {
-                if saved["files"][name] != file_hash(&job.output.join(dirname).join(name))? {
-                    return Err("CHECKPOINT_EVIDENCE_CHANGED");
-                }
-            }
-            anchor = serde_json::from_value(saved["anchor"].clone())
-                .map_err(|_| "CHECKPOINT_CORRUPT")?;
+            anchor = saved.anchor.clone();
             if first_time.is_none() {
-                first_time = saved["proof"]["first_block_time"].as_i64();
+                first_time = saved.proof.first_block_time;
             }
-            last_time = saved["proof"]["last_block_time"].as_i64().or(last_time);
-            batches.push(json!({"checkpoint":checkpoint.file_name().unwrap().to_string_lossy(),"digest":digest(&saved)}));
-            c.completed_batches = batches.clone();
+            last_time = saved.proof.last_block_time.or(last_time);
+            let name = checkpoint_name(next, end);
+            let sha256 =
+                journal::file_sha256(&job.output.join(&name)).map_err(|_| "EVIDENCE_IO")?;
+            c.completed_batches.push(BatchRef {
+                checkpoint: name,
+                sha256,
+            });
             next = end.checked_add(1).ok_or("SLOT_OVERFLOW")?;
         }
         if !first_time.is_some_and(|v| (v as i128) * 1_000_000_000 < job.start_ns as i128)
@@ -409,20 +722,251 @@ pub fn run(job: Job) -> Result<Value, String> {
         {
             return Err("UTC_WINDOW_NOT_BRACKETED");
         }
-        Ok(
-            json!({"status":"CANONICAL_VERIFIED","scope":scope,"batches":batches,"canonical_verified":true}),
-        )
+        Ok(())
     })();
-    let mut result = work.unwrap_or_else(
-        |error| json!({"status":"HISTORICAL_INCOMPLETE","reason":error,"canonical_verified":false}),
-    );
-    result["batches"] = json!(c.completed_batches);
-    result["verification_spec_id"] = json!(job.verification_spec_id);
-    result["rpc_calls"] = json!(c.calls);
-    result["successful_response_bytes"] = json!(c.bytes);
-    result["network_bytes_on_failed_request"] = Value::Null;
-    result["c0_e1_master_pass"] = json!(false);
+    let result = StrictResult {
+        verification_spec_id: job.verification_spec_id.clone(),
+        status: if work.is_ok() {
+            StrictStatus::CanonicalVerified
+        } else {
+            StrictStatus::HistoricalIncomplete
+        },
+        reason: work.err().map(str::to_owned),
+        scope: scope_seen,
+        batches: std::mem::take(&mut c.completed_batches),
+        rpc_calls: c.calls,
+        successful_response_bytes: c.bytes,
+        c0_e1_master_pass: false,
+    };
+    // Every attempt's result is kept, content-addressed and immutable.
+    let bytes = crate::analytics::payload::encode(&result).map_err(|e| e.to_string())?;
+    let dir = job.output.join("results");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    journal::write_typed_value(
+        &dir.join(format!("{}.p0j", journal::hex(&hash(&bytes).to_bytes()))),
+        source::STRICT,
+        &result,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(result)
+}
+
+/// The verified strict evidence of an output directory, read natively (no JSON, no SQLite).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StrictReport {
+    pub scope: Option<StrictScope>,
+    pub batches_verified: u64,
+    /// First slot without a verified checkpoint, `None` when the whole scope is verified.
+    pub next_unverified_slot: Option<u64>,
+    pub reason: Option<&'static str>,
+    pub slots_expected: u64,
+    pub slots_fetched: u64,
+    pub slots_skipped_confirmed: u64,
+    pub transactions_scanned: u64,
+    pub marginfi_transactions: u64,
+    pub canonical: Vec<truth::TruthEvent>,
+}
+
+impl StrictReport {
+    pub fn complete(&self) -> bool {
+        self.scope.is_some() && self.next_unverified_slot.is_none() && self.reason.is_none()
+    }
+    pub fn by_type(&self) -> BTreeMap<truth::LiquidationType, u64> {
+        let mut m = BTreeMap::new();
+        for e in &self.canonical {
+            *m.entry(e.liquidation_type).or_insert(0) += 1;
+        }
+        m
+    }
+    /// Human-readable terminal summary.
+    pub fn terminal(&self) -> String {
+        let mut out = String::from("PROJECT 0 STRICT VERIFICATION (native evidence)\n");
+        match &self.scope {
+            None => out.push_str("scope=NOT_RESOLVED\n"),
+            Some(s) => out.push_str(&format!(
+                "spec={} window_ns=[{},{}) slots=[{},{}]\n",
+                s.verification_spec_id, s.start_ns, s.end_ns, s.lo, s.hi
+            )),
+        }
+        out.push_str(&format!(
+            "status={} batches_verified={} next_unverified_slot={} reason={}\n",
+            if self.complete() {
+                "CANONICAL_VERIFIED"
+            } else {
+                "HISTORICAL_INCOMPLETE"
+            },
+            self.batches_verified,
+            self.next_unverified_slot
+                .map_or("none".into(), |s| s.to_string()),
+            self.reason.unwrap_or("none")
+        ));
+        out.push_str(&format!(
+            "slots expected={} fetched={} skipped_confirmed={} transactions_scanned={} marginfi_transactions={}\n",
+            self.slots_expected, self.slots_fetched, self.slots_skipped_confirmed,
+            self.transactions_scanned, self.marginfi_transactions
+        ));
+        let by = self.by_type();
+        for t in [
+            truth::LiquidationType::Classic,
+            truth::LiquidationType::Receivership,
+            truth::LiquidationType::ForcedDeleverage,
+            truth::LiquidationType::BankruptcySettlement,
+        ] {
+            out.push_str(&format!(
+                "canonical {}={}\n",
+                t.as_str(),
+                by.get(&t).copied().unwrap_or(0)
+            ));
+        }
+        out.push_str("non_claims: strict proves finalized chain facts only; not DarkBot executability, not realized PnL, not the C0-E1 master gate\n");
+        out
+    }
+}
+
+/// Reads and verifies the native strict evidence of `output`: the scope, then every batch
+/// checkpoint in slot order with its parent anchor and batch journal. Stops at the first missing
+/// or invalid batch (reported, never skipped).
+pub fn read_report(output: &Path) -> StrictReport {
+    let mut r = StrictReport::default();
+    let scope = match journal::read_typed_value::<StrictScope>(&output.join("scope.p0j")) {
+        Ok(s) => s,
+        Err(_) => {
+            r.reason = Some("SCOPE_MISSING_OR_INVALID");
+            return r;
+        }
+    };
+    let mut next = scope.lo;
+    let mut anchor = None;
+    // Each batch re-fetches its parent anchor block as proof: count every slot, transaction
+    // and canonical event once, and only inside the scope.
+    let (mut slots, mut skipped) = (BTreeSet::new(), BTreeSet::new());
+    let (mut program, mut events) = (BTreeSet::new(), BTreeSet::new());
+    r.slots_expected = scope.hi - scope.lo + 1;
+    while next <= scope.hi {
+        let end = next.saturating_add(BATCH_SLOTS - 1).min(scope.hi);
+        match verified_checkpoint(output, &scope.verification_spec_id, next, end, &anchor) {
+            Ok(Some((c, facts))) => {
+                r.batches_verified += 1;
+                let inside = |s: &u64| (scope.lo..=scope.hi).contains(s);
+                for (slot, txs) in facts.produced.iter().filter(|(s, _)| inside(s)) {
+                    if slots.insert(*slot) {
+                        r.slots_fetched += 1;
+                        r.transactions_scanned += txs;
+                    }
+                }
+                for slot in facts.skipped.iter().filter(|s| inside(s)) {
+                    if skipped.insert(*slot) {
+                        r.slots_skipped_confirmed += 1;
+                    }
+                }
+                for key in facts
+                    .program_transactions
+                    .into_iter()
+                    .filter(|k| inside(&k.1))
+                {
+                    if program.insert(key) {
+                        r.marginfi_transactions += 1;
+                    }
+                }
+                for e in facts.canonical.into_iter().filter(|e| inside(&e.slot)) {
+                    if events.insert((e.signature.clone(), e.slot, e.event_index)) {
+                        r.canonical.push(e);
+                    }
+                }
+                anchor = c.anchor;
+            }
+            Ok(None) => {
+                r.next_unverified_slot = Some(next);
+                break;
+            }
+            Err(e) => {
+                r.next_unverified_slot = Some(next);
+                r.reason = Some(e);
+                break;
+            }
+        }
+        match end.checked_add(1) {
+            Some(n) => next = n,
+            None => break,
+        }
+    }
+    r.scope = Some(scope);
+    r
+}
+
+// ------------------------------------------------------------------------------------------
+// Transitional compatibility render (explicit `--compat` of the pinned Python driver/report;
+// removed together with that driver by the native report chain, B7). Never the primary record.
+// ------------------------------------------------------------------------------------------
+
+fn compat_immutable(path: &Path, value: &Value) -> Result<(), String> {
+    if path.exists() {
+        let old: Value = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+            .map_err(|_| "COMPAT_RENDER_CORRUPT".to_string())?;
+        return if old == *value {
+            Ok(())
+        } else {
+            Err("COMPAT_RENDER_CONFLICT".into())
+        };
+    }
+    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+    let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
+    serde_json::to_writer(&mut f, value).map_err(|e| e.to_string())?;
+    f.sync_all().map_err(|e| e.to_string())?;
+    fs::hard_link(&tmp, path).map_err(|e| e.to_string())?;
+    fs::remove_file(tmp).map_err(|e| e.to_string())
+}
+
+/// Legacy JSON checkpoint + batch views + summary for the pinned Python consumers, rendered
+/// from the verified native evidence. Existing renders must be identical.
+pub fn render_compat(job: &Job, result: &StrictResult) -> Result<Value, String> {
+    let file_hash = |p: &Path| -> Result<String, String> {
+        journal::file_sha256(p)
+            .map(|b| solana_sdk::hash::Hash::new_from_array(b).to_string())
+            .map_err(|e| e.to_string())
+    };
+    let mut batches = Vec::new();
+    for b in &result.batches {
+        let c: StrictCheckpoint = journal::read_typed_value(&job.output.join(&b.checkpoint))
+            .map_err(|e| e.to_string())?;
+        let dir = job.output.join(&c.journal.directory);
+        let missing: Vec<_> = MARKET_VIEWS
+            .iter()
+            .filter(|(_, n)| !dir.join(n).exists())
+            .map(|(k, n)| (Some(*k), dir.join(n)))
+            .collect();
+        if missing.len() == MARKET_VIEWS.len() {
+            let refs: Vec<(Option<u16>, &Path)> =
+                missing.iter().map(|(k, p)| (*k, p.as_path())).collect();
+            journal::export_views(&dir.join(MARKET_JOURNAL), &refs, false)
+                .map_err(|e| e.to_string())?;
+        } else if !missing.is_empty() {
+            return Err("COMPAT_VIEWS_PARTIAL".into());
+        }
+        let mut files = serde_json::Map::new();
+        for (_, name) in MARKET_VIEWS {
+            files.insert(name.into(), json!(file_hash(&dir.join(name))?));
+        }
+        let legacy = json!({"spec": c.spec, "start": c.start, "end": c.end,
+            "previous_anchor": c.previous_anchor, "anchor": c.anchor,
+            "directory": c.journal.directory, "files": files, "proof": c.proof});
+        let name = b.checkpoint.replace(".p0j", ".json");
+        compat_immutable(&job.output.join(&name), &legacy)?;
+        batches.push(json!({"checkpoint": name, "digest": digest(&legacy)}));
+    }
+    Ok(json!({
+        "status": result.status.as_str(),
+        "reason": result.reason,
+        "canonical_verified": result.status == StrictStatus::CanonicalVerified,
+        "scope": result.scope.as_ref().map(|s| json!({"verification_spec_id": s.verification_spec_id,
+            "start_ns": s.start_ns, "end_ns": s.end_ns, "lo": s.lo, "hi": s.hi})),
+        "batches": batches,
+        "verification_spec_id": result.verification_spec_id,
+        "rpc_calls": result.rpc_calls,
+        "successful_response_bytes": result.successful_response_bytes,
+        "network_bytes_on_failed_request": Value::Null,
+        "c0_e1_master_pass": false,
+    }))
 }
 
 #[cfg(test)]
@@ -443,7 +987,7 @@ mod tests {
             max_seconds: 60,
             max_bytes: 1024 * 1024,
             max_disk_bytes: 1024 * 1024 * 1024,
-            max_ram_bytes: 4 * 1024 * 1024 * 1024,
+            max_ram_bytes: 64 * 1024 * 1024 * 1024,
             min_free_bytes: 1024 * 1024,
             rps: 2,
             offline: true,
@@ -452,17 +996,30 @@ mod tests {
     fn cache(j: &Job, method: &str, params: Value, result: Value) {
         fs::create_dir_all(j.output.join("cache")).unwrap();
         let key = json!({"method":method,"params":params});
-        immutable(
-            &j.output
-                .join("cache")
-                .join(format!("{}.json", digest(&key))),
-            &json!({"request":key,"digest":digest(&result),"result":result}),
-        )
-        .unwrap();
+        let path = j.output.join("cache").join(format!("{}.p0j", digest(&key)));
+        let _ = fs::remove_file(&path);
+        let bytes = serde_json::to_vec(&result).unwrap();
+        let entry = RpcCacheEntry {
+            method: method.into(),
+            params: params.to_string(),
+            result_sha256: hash(&bytes).to_bytes(),
+            result: bytes,
+        };
+        journal::write_typed_value(&path, source::STRICT, &entry).unwrap();
     }
     fn fixture(j: &Job, stop: Option<u64>) {
         fs::create_dir_all(&j.output).unwrap();
-        immutable(&j.output.join("scope.json"),&json!({"verification_spec_id":"fixture","start_ns":j.start_ns,"end_ns":j.end_ns,"lo":10,"hi":80})).unwrap();
+        let scope = StrictScope {
+            verification_spec_id: "fixture".into(),
+            start_ns: j.start_ns,
+            end_ns: j.end_ns,
+            lo: 10,
+            hi: 80,
+        };
+        let path = j.output.join("scope.p0j");
+        if !path.exists() {
+            journal::write_typed_value(&path, source::STRICT, &scope).unwrap();
+        }
         cache(j, "getSlot", json!([{"commitment":"finalized"}]), json!(90));
         for lo in [10, 41, 73] {
             cache(
@@ -507,27 +1064,60 @@ mod tests {
             offline: true,
         }
     }
+    /// Interrupted batches resume identically from native checkpoints with parent/skip proofs;
+    /// the native reader reports the same verified scope; a corrupt checkpoint never passes.
     #[test]
     fn interrupted_batches_resume_identically_with_parent_skip_proofs() {
         let j = job();
         fixture(&j, Some(43));
         let first = run(reload(&j)).unwrap();
-        assert_eq!(first["status"], "HISTORICAL_INCOMPLETE");
-        let checkpoint = j.output.join("batch_10_41.json");
+        assert_eq!(first.status, StrictStatus::HistoricalIncomplete);
+        let checkpoint = j.output.join("batch_10_41.p0j");
         assert!(checkpoint.exists());
-        assert_eq!(first["batches"].as_array().unwrap().len(), 1);
-        let before = file_hash(&checkpoint).unwrap();
+        assert_eq!(first.batches.len(), 1);
+        let partial = read_report(&j.output);
+        assert_eq!(
+            (partial.batches_verified, partial.next_unverified_slot),
+            (1, Some(42))
+        );
+        let before = journal::file_sha256(&checkpoint).unwrap();
         fixture(&j, None);
         let resumed = run(reload(&j)).unwrap();
-        assert_eq!(resumed["status"], "CANONICAL_VERIFIED", "{resumed}");
-        assert_eq!(resumed["rpc_calls"], 0);
-        assert_eq!(file_hash(&checkpoint).unwrap(), before);
+        assert_eq!(
+            resumed.status,
+            StrictStatus::CanonicalVerified,
+            "{resumed:?}"
+        );
+        assert_eq!(resumed.rpc_calls, 0);
+        assert_eq!(journal::file_sha256(&checkpoint).unwrap(), before);
         let repeated = run(reload(&j)).unwrap();
         assert_eq!(resumed, repeated);
-        assert_eq!(resumed["batches"].as_array().unwrap().len(), 3);
-        fs::write(checkpoint, b"broken").unwrap();
+        assert_eq!(resumed.batches.len(), 3);
+        let report = read_report(&j.output);
+        assert!(report.complete(), "{report:?}");
+        assert_eq!(report.batches_verified, 3);
+        // 71 slots: 69 produced, 2 proven skipped (15 and 79).
+        assert_eq!(
+            (report.slots_fetched, report.slots_skipped_confirmed),
+            (69, 2)
+        );
+        assert!(report.terminal().contains("status=CANONICAL_VERIFIED"));
+        // No JSON evidence exists unless the compatibility render is requested.
+        assert!(fs::read_dir(&j.output).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".json")));
+        let compat = render_compat(&reload(&j), &resumed).unwrap();
+        assert_eq!(compat["status"], "CANONICAL_VERIFIED");
+        let legacy: Value =
+            serde_json::from_slice(&fs::read(j.output.join("batch_10_41.json")).unwrap()).unwrap();
+        assert_eq!(legacy["proof"]["complete"], true);
+        assert_eq!(render_compat(&reload(&j), &resumed).unwrap(), compat);
+        fs::write(&checkpoint, b"broken").unwrap();
         let bad = run(reload(&j)).unwrap();
-        assert_eq!(bad["reason"], "CHECKPOINT_CORRUPT");
+        assert_eq!(bad.reason.as_deref(), Some("CHECKPOINT_CORRUPT"));
+        assert_eq!(read_report(&j.output).reason, Some("CHECKPOINT_CORRUPT"));
         fs::remove_dir_all(j.output).unwrap();
     }
     #[test]
@@ -536,33 +1126,56 @@ mod tests {
         fixture(&j, None);
         j.max_disk_bytes = 1;
         assert_eq!(
-            run(reload(&j)).unwrap()["reason"],
-            "VERIFICATION_DISK_BUDGET"
+            run(reload(&j)).unwrap().reason.as_deref(),
+            Some("VERIFICATION_DISK_BUDGET")
         );
         j.max_disk_bytes = 1024 * 1024 * 1024;
         j.start_ns += 1;
-        assert_eq!(run(reload(&j)).unwrap()["reason"], "RESUME_SCOPE_MISMATCH");
+        assert_eq!(
+            run(reload(&j)).unwrap().reason.as_deref(),
+            Some("RESUME_SCOPE_MISMATCH")
+        );
         fs::remove_dir_all(j.output).unwrap();
     }
     #[test]
     fn wrong_parent_and_corrupt_cached_response_never_pass() {
         let j = job();
         fixture(&j, None);
-        let key = json!({"method":"getBlock","params":[42,{"encoding":"json","transactionDetails":"full","rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]});
-        let p = j
-            .output
-            .join("cache")
-            .join(format!("{}.json", digest(&key)));
-        let mut value = read(&p).unwrap();
-        value["result"]["parentSlot"] = json!(40);
-        fs::write(&p, serde_json::to_vec(&value).unwrap()).unwrap();
-        assert_eq!(run(reload(&j)).unwrap()["reason"], "CACHE_CORRUPT");
-        value["digest"] = json!(digest(&value["result"]));
-        fs::write(&p, serde_json::to_vec(&value).unwrap()).unwrap();
+        let params = json!([42,{"encoding":"json","transactionDetails":"full","rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]);
+        let key = json!({"method":"getBlock","params":params});
+        let p = j.output.join("cache").join(format!("{}.p0j", digest(&key)));
+        let mut e: RpcCacheEntry = journal::read_typed_value(&p).unwrap();
+        let mut v: Value = serde_json::from_slice(&e.result).unwrap();
+        v["parentSlot"] = json!(40);
+        e.result = serde_json::to_vec(&v).unwrap();
+        fs::remove_file(&p).unwrap();
+        journal::write_typed_value(&p, source::STRICT, &e).unwrap();
         assert_eq!(
-            run(reload(&j)).unwrap()["reason"],
-            "FINALIZED_PARENT_CHAIN_MISMATCH"
+            run(reload(&j)).unwrap().reason.as_deref(),
+            Some("CACHE_CORRUPT")
+        );
+        e.result_sha256 = hash(&e.result).to_bytes();
+        fs::remove_file(&p).unwrap();
+        journal::write_typed_value(&p, source::STRICT, &e).unwrap();
+        assert_eq!(
+            run(reload(&j)).unwrap().reason.as_deref(),
+            Some("FINALIZED_PARENT_CHAIN_MISMATCH")
         );
         fs::remove_dir_all(j.output).unwrap();
+    }
+    /// The bounded read-ahead takes at most `limit` produced slots without held or cached
+    /// responses; an unknown slot is fetched alone.
+    #[test]
+    fn read_ahead_group_is_bounded_and_skips_known_slots() {
+        let produced: Vec<u64> = (10..30).collect();
+        let mut held = BTreeMap::new();
+        held.insert(12, Ok(json!(12)));
+        let cached = |s: u64| s == 13;
+        assert_eq!(
+            read_ahead_group(10, &produced, &held, &cached, 8),
+            vec![10, 11, 14, 15, 16, 17, 18, 19]
+        );
+        assert_eq!(read_ahead_group(5, &produced, &held, &cached, 8), vec![5]);
+        assert_eq!(read_ahead_group(29, &produced, &held, &cached, 8), vec![29]);
     }
 }

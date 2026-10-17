@@ -296,3 +296,102 @@ fn full_slot_transient_rate_limit_retries_without_skipping_block() {
     assert_eq!(c.reconciliation.slots_fetched, 1);
     assert_eq!(c.reconciliation.slots_skipped_confirmed, 0);
 }
+
+fn reconcile_one_block(c: &mut ObserverCore, s: &mut VecSink, slot: u64, txs: Vec<Value>) {
+    c.reconcile_slots(
+        &mut |m, _, _| {
+            Ok(match m {
+                "getSlot" => json!(slot),
+                "getBlocks" => json!([slot]),
+                "getBlock" => canonical_block(slot, slot - 1, txs.clone()),
+                _ => panic!(),
+            })
+        },
+        s,
+    )
+    .unwrap();
+}
+fn with_inner(mut tx: Value) -> Value {
+    tx["meta"]["innerInstructions"] = json!([]);
+    tx
+}
+
+/// A program liquidation found only by the finalized scan is admitted as a backfill (no live
+/// timestamp); failed and non-liquidation program transactions create no market event.
+#[test]
+fn full_slot_backfill_rows_and_failed_or_plain_transactions_create_no_event() {
+    let (mut c, mut s) = canonical_core(10, 10);
+    let failed = with_inner(gap_liquidation("failed", 10, true));
+    let plain = with_inner(liq_tx_json("plain", 10, &[], false, false, vec![], false));
+    let liquidation = canonical_tx("found", 10);
+    reconcile_one_block(&mut c, &mut s, 10, vec![failed, plain, liquidation]);
+    assert!(c.reconciliation.complete, "{:?}", c.reconciliation.error);
+    assert_eq!(c.stats.liquidation_events, 1);
+    assert_eq!(
+        (c.stats.failed_transactions, c.stats.successful_transactions),
+        (1, 2)
+    );
+    assert_eq!(c.gap_stats.gap_transactions_recovered, 3);
+    let row = s
+        .liq
+        .iter()
+        .find(|v| v["source"] == "gap_backfill")
+        .unwrap();
+    assert_eq!(
+        (&row["t_rx_ns"], &row["observed_at_utc"]),
+        (&Value::Null, &Value::Null)
+    );
+    assert_eq!(row["live_timestamp_qualified"], false);
+    let tx =
+        s.tx.iter()
+            .find(|v| v["source"] == "gap_backfill" && v["signature"] == "found")
+            .unwrap();
+    assert_eq!(tx["transaction_index"], 2);
+}
+
+/// A receiver behind an address lookup table counts only with the loaded-address view; without
+/// it the block fails closed.
+#[test]
+fn full_slot_lookup_table_requires_loaded_addresses() {
+    for loaded in [true, false] {
+        let (mut c, mut s) = canonical_core(10, 10);
+        let (t, r) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let tx = with_inner(liq_tx_json(
+            "lut",
+            10,
+            &[(t, r)],
+            true,
+            loaded,
+            logs_with(&program(), &[data_line(t, r, 7.0, 2.0, 1)]),
+            false,
+        ));
+        reconcile_one_block(&mut c, &mut s, 10, vec![tx]);
+        assert_eq!(
+            c.reconciliation.complete, loaded,
+            "{:?}",
+            c.reconciliation.error
+        );
+        assert_eq!(c.stats.liquidation_events, u64::from(loaded));
+        if !loaded {
+            assert_eq!(c.reconciliation.error, Some("LOADED_ADDRESSES_MISSING"));
+        }
+    }
+}
+
+/// Truncated logs whose instruction liquidations differ from the logged events fail the block.
+#[test]
+fn full_slot_truncated_log_mismatch_fails_closed() {
+    let (mut c, mut s) = canonical_core(10, 10);
+    let tx = with_inner(liq_tx_json(
+        "bad",
+        10,
+        &[(Pubkey::new_unique(), Pubkey::new_unique())],
+        false,
+        false,
+        truncated_logs(&[]),
+        false,
+    ));
+    reconcile_one_block(&mut c, &mut s, 10, vec![tx]);
+    assert!(!c.reconciliation.complete);
+    assert_eq!(c.stats.liquidation_events, 0);
+}

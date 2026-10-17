@@ -264,8 +264,9 @@ impl ObserverCore {
     }
 
     pub fn coverage_complete(&self) -> bool {
-        self.gaps.len() as u64 == self.gap_stats.gap_recovered
-            && self.stats.gap_count == self.gaps.iter().map(|g| g.raw_failures).sum::<u64>()
+        // Transport gaps are never repaired in capture (finalized repair is the strict scan).
+        self.gaps.is_empty()
+            && self.stats.gap_count == 0
             && !self.incomplete_reasons.contains("GAP_STATE_CAPACITY")
             && self.stats.ingress_overflow_count == 0
             && self.stats.fatal_count == 0
@@ -1241,10 +1242,8 @@ impl ObserverCore {
             "top3_receiver_liquidation_share": ratio(top3_events as f64, total_events),
             "top3_receiver_gross_edge_share": ratio(top3_gross, total),
             "gap_count": s.gap_count,
-            "gap_recovery_attempted": self.gap_stats.gap_recovery_attempted,
-            "gap_recovered": self.gap_stats.gap_recovered,
-            "gap_unrecovered": (self.gaps.len() as u64).saturating_sub(self.gap_stats.gap_recovered),
             "gap_intervals": self.gaps.len(),
+            "gap_unrecovered": self.gaps.len(),
             "coverage_outage_seconds": outage.map(|ns| ns as f64/1e9),
             "transport_covered_seconds": outage.map(|ns| (cfg.actual_observation_seconds-ns as f64/1e9).max(0.0)),
             "transport_coverage_provenance":"LOCAL_SLOT_PROGRESS_AND_JOURNALED_OUTAGE_INTERVALS_NOT_SOURCE_COMPLETENESS",
@@ -1252,11 +1251,6 @@ impl ObserverCore {
             "gap_count_raw": s.gap_count,
             "gaps_merged": self.gaps.iter().map(|g| g.raw_failures.saturating_sub(1)).sum::<u64>(),
             "provider_budget": darkbot_solana::provider::shared().snapshot(),
-            "gap_slots_requested": self.gap_stats.gap_slots_requested,
-            "gap_slots_fetched": self.gap_stats.gap_slots_fetched,
-            "gap_slots_skipped_confirmed": self.gap_stats.gap_slots_skipped_confirmed,
-            "gap_slots_failed": self.gap_stats.gap_slots_failed,
-            "gap_transactions_scanned": self.gap_stats.gap_transactions_scanned,
             "gap_transactions_deduplicated": self.gap_stats.gap_transactions_deduplicated,
             "gap_transactions_recovered": self.gap_stats.gap_transactions_recovered,
             "gap_liquidation_transactions": self.gap_stats.gap_liquidation_transactions,

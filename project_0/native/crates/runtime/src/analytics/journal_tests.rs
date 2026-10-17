@@ -1,8 +1,14 @@
 use super::*;
 fn path() -> PathBuf {
+    // Unique across processes: `Pubkey::new_unique` restarts in every test binary run.
     let dir = std::env::temp_dir().join(format!(
-        "p0-journal-{}",
-        solana_sdk::pubkey::Pubkey::new_unique()
+        "p0-journal-{}-{}-{}",
+        solana_sdk::pubkey::Pubkey::new_unique(),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     fs::create_dir(&dir).unwrap();
     dir.join("events.p0j")
