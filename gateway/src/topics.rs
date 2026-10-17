@@ -33,29 +33,128 @@ impl TopicSpec {
     }
 }
 
-const fn s(id: TopicId, class: TopicClass, project: ProjectId, wire_name: &'static str, payload_type: &'static str) -> TopicSpec {
-    TopicSpec { id, class, project, wire_name, payload_type }
+const fn s(
+    id: TopicId,
+    class: TopicClass,
+    project: ProjectId,
+    wire_name: &'static str,
+    payload_type: &'static str,
+) -> TopicSpec {
+    TopicSpec {
+        id,
+        class,
+        project,
+        wire_name,
+        payload_type,
+    }
 }
 
 pub const TOPICS: &[TopicSpec] = &[
-    s(TopicId::OverviewAggregates, TopicClass::State, ProjectId::Unspecified, "overview.aggregates", "darkbot.control.v1.OverviewAggregates"),
-
-    s(TopicId::Project0Status, TopicClass::State, ProjectId::Project0, "project0.status", ""),
-    s(TopicId::Project0FinanceSummary, TopicClass::State, ProjectId::Project0, "project0.finance.summary", ""),
-    s(TopicId::Project0LiquidatorState, TopicClass::State, ProjectId::Project0, "project0.liquidator.state", ""),
-    s(TopicId::Project0CaptureState, TopicClass::State, ProjectId::Project0, "project0.capture.state", ""),
-    s(TopicId::Project0WalletsState, TopicClass::State, ProjectId::Project0, "project0.wallets.state", ""),
-    s(TopicId::Project0AnalyticsJobs, TopicClass::State, ProjectId::Project0, "project0.analytics.jobs", ""),
-    s(TopicId::Project0ExecutionEvents, TopicClass::Event, ProjectId::Project0, "project0.execution.events", ""),
-    s(TopicId::Project0CaptureEvents, TopicClass::Event, ProjectId::Project0, "project0.capture.events", ""),
-
-    s(TopicId::BscStatus, TopicClass::State, ProjectId::Bsc, "bsc.status", ""),
-    s(TopicId::BscLaunchState, TopicClass::State, ProjectId::Bsc, "bsc.launch.state", ""),
-    s(TopicId::BscMonitoringState, TopicClass::State, ProjectId::Bsc, "bsc.monitoring.state", ""),
-    s(TopicId::BscWalletsState, TopicClass::State, ProjectId::Bsc, "bsc.wallets.state", ""),
-    s(TopicId::BscExecutionEvents, TopicClass::Event, ProjectId::Bsc, "bsc.execution.events", ""),
-
-    s(TopicId::SolanaStatus, TopicClass::State, ProjectId::Solana, "solana.status", ""),
+    s(
+        TopicId::OverviewAggregates,
+        TopicClass::State,
+        ProjectId::Unspecified,
+        "overview.aggregates",
+        "darkbot.control.v1.OverviewAggregates",
+    ),
+    s(
+        TopicId::Project0Status,
+        TopicClass::State,
+        ProjectId::Project0,
+        "project0.status",
+        "",
+    ),
+    s(
+        TopicId::Project0FinanceSummary,
+        TopicClass::State,
+        ProjectId::Project0,
+        "project0.finance.summary",
+        "",
+    ),
+    s(
+        TopicId::Project0LiquidatorState,
+        TopicClass::State,
+        ProjectId::Project0,
+        "project0.liquidator.state",
+        "",
+    ),
+    s(
+        TopicId::Project0CaptureState,
+        TopicClass::State,
+        ProjectId::Project0,
+        "project0.capture.state",
+        "",
+    ),
+    s(
+        TopicId::Project0WalletsState,
+        TopicClass::State,
+        ProjectId::Project0,
+        "project0.wallets.state",
+        "",
+    ),
+    s(
+        TopicId::Project0AnalyticsJobs,
+        TopicClass::State,
+        ProjectId::Project0,
+        "project0.analytics.jobs",
+        "",
+    ),
+    s(
+        TopicId::Project0ExecutionEvents,
+        TopicClass::Event,
+        ProjectId::Project0,
+        "project0.execution.events",
+        "",
+    ),
+    s(
+        TopicId::Project0CaptureEvents,
+        TopicClass::Event,
+        ProjectId::Project0,
+        "project0.capture.events",
+        "",
+    ),
+    s(
+        TopicId::BscStatus,
+        TopicClass::State,
+        ProjectId::Bsc,
+        "bsc.status",
+        "",
+    ),
+    s(
+        TopicId::BscLaunchState,
+        TopicClass::State,
+        ProjectId::Bsc,
+        "bsc.launch.state",
+        "",
+    ),
+    s(
+        TopicId::BscMonitoringState,
+        TopicClass::State,
+        ProjectId::Bsc,
+        "bsc.monitoring.state",
+        "",
+    ),
+    s(
+        TopicId::BscWalletsState,
+        TopicClass::State,
+        ProjectId::Bsc,
+        "bsc.wallets.state",
+        "",
+    ),
+    s(
+        TopicId::BscExecutionEvents,
+        TopicClass::Event,
+        ProjectId::Bsc,
+        "bsc.execution.events",
+        "",
+    ),
+    s(
+        TopicId::SolanaStatus,
+        TopicClass::State,
+        ProjectId::Solana,
+        "solana.status",
+        "",
+    ),
 ];
 
 pub fn spec(id: TopicId) -> Option<&'static TopicSpec> {
@@ -90,6 +189,9 @@ mod tests {
             assert!(!t.wire_name.is_empty());
         }
         assert!(spec(TopicId::OverviewAggregates).unwrap().available());
-        assert!(!spec(TopicId::BscStatus).unwrap().available(), "BSC payload type only after F0-VAR");
+        assert!(
+            !spec(TopicId::BscStatus).unwrap().available(),
+            "BSC payload type only after F0-VAR"
+        );
     }
 }

@@ -81,7 +81,10 @@ impl StateHub {
                 (t.id, tx)
             })
             .collect();
-        Self { slots, max_state_bytes }
+        Self {
+            slots,
+            max_state_bytes,
+        }
     }
 
     pub fn spec(topic: TopicId) -> Option<&'static TopicSpec> {
@@ -99,7 +102,10 @@ impl StateHub {
             return Err(PublishError::Unavailable(u.topic));
         }
         if u.payload.len() > self.max_state_bytes {
-            return Err(PublishError::TooLarge { bytes: u.payload.len(), max: self.max_state_bytes });
+            return Err(PublishError::TooLarge {
+                bytes: u.payload.len(),
+                max: self.max_state_bytes,
+            });
         }
         let tx = self.slots.get(&u.topic).ok_or(PublishError::UnknownTopic)?;
 
@@ -193,10 +199,19 @@ mod tests {
         let hub = StateHub::new(1024);
         let t = TopicId::OverviewAggregates;
         assert_eq!(hub.publish(upd(t, 1, 5)).unwrap(), PublishOutcome::Applied);
-        assert_eq!(hub.publish(upd(t, 1, 4)).unwrap(), PublishOutcome::IgnoredOlderSeq);
-        assert_eq!(hub.publish(upd(t, 1, 5)).unwrap(), PublishOutcome::IgnoredDuplicate);
+        assert_eq!(
+            hub.publish(upd(t, 1, 4)).unwrap(),
+            PublishOutcome::IgnoredOlderSeq
+        );
+        assert_eq!(
+            hub.publish(upd(t, 1, 5)).unwrap(),
+            PublishOutcome::IgnoredDuplicate
+        );
         assert_eq!(hub.publish(upd(t, 1, 9)).unwrap(), PublishOutcome::Applied);
-        assert_eq!(hub.publish(upd(t, 0, 99)).unwrap(), PublishOutcome::IgnoredOlderGeneration);
+        assert_eq!(
+            hub.publish(upd(t, 0, 99)).unwrap(),
+            PublishOutcome::IgnoredOlderGeneration
+        );
         assert_eq!(hub.publish(upd(t, 2, 1)).unwrap(), PublishOutcome::Applied);
         let cur = hub.current(t).unwrap();
         assert_eq!((cur.generation, cur.seq), (2, 1));
@@ -213,7 +228,10 @@ mod tests {
         assert_eq!(cur.quality, StateQuality::SourceDetached);
         assert_eq!((cur.generation, cur.seq), (3, 7));
         // erneute Publikation derselben seq wird ignoriert; neue seq setzt Quality auf OK
-        assert_eq!(hub.publish(upd(t, 3, 7)).unwrap(), PublishOutcome::IgnoredDuplicate);
+        assert_eq!(
+            hub.publish(upd(t, 3, 7)).unwrap(),
+            PublishOutcome::IgnoredDuplicate
+        );
         assert_eq!(hub.publish(upd(t, 3, 8)).unwrap(), PublishOutcome::Applied);
         assert_eq!(hub.current(t).unwrap().quality, StateQuality::Ok);
     }
@@ -221,9 +239,15 @@ mod tests {
     #[test]
     fn rejects_unavailable_and_oversized() {
         let hub = StateHub::new(4);
-        assert!(matches!(hub.publish(upd(TopicId::BscStatus, 1, 1)), Err(PublishError::Unavailable(_))));
+        assert!(matches!(
+            hub.publish(upd(TopicId::BscStatus, 1, 1)),
+            Err(PublishError::Unavailable(_))
+        ));
         let mut big = upd(TopicId::OverviewAggregates, 1, 1);
         big.payload = Bytes::from(vec![0u8; 5]);
-        assert!(matches!(hub.publish(big), Err(PublishError::TooLarge { .. })));
+        assert!(matches!(
+            hub.publish(big),
+            Err(PublishError::TooLarge { .. })
+        ));
     }
 }

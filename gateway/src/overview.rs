@@ -11,7 +11,10 @@ use tracing::warn;
 use crate::config::GatewayConfig;
 use crate::engine::{SourceRegistry, SourceState};
 use crate::hub::{StateHub, StateUpdate};
-use crate::proto::{GlobalFinance, OverviewAggregates, ProjectId, ProjectSummary, Readiness, SourceState as WireSourceState, TopicId};
+use crate::proto::{
+    GlobalFinance, OverviewAggregates, ProjectId, ProjectSummary, Readiness,
+    SourceState as WireSourceState, TopicId,
+};
 
 const PROJECTS: &[(ProjectId, &str, &str)] = &[
     (ProjectId::Project0, "Project 0", "Solana / Marginfi"),
@@ -28,35 +31,46 @@ pub fn gateway_generation() -> std::io::Result<u64> {
     use std::path::PathBuf;
     let path = std::env::var_os("DARKBOT_GATEWAY_GENERATION_FILE")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join(".runtime/publisher_generation"));
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".runtime/publisher_generation")
+        });
     allocate_generation(&path)
 }
 
 fn allocate_generation(path: &std::path::Path) -> std::io::Result<u64> {
     use std::fs::{self, OpenOptions};
     use std::io::{self, Write};
-    let dir = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing parent"))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing parent"))?;
     fs::create_dir_all(dir)?;
     let lock_path = path.with_extension("lock");
-    let _lock = OpenOptions::new().write(true).create_new(true).open(&lock_path)?;
+    let _lock = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)?;
     struct LockGuard(std::path::PathBuf);
     impl Drop for LockGuard {
-        fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
     }
     let _guard = LockGuard(lock_path);
     let previous = match fs::read_to_string(path) {
-        Ok(s) => s.trim().parse::<u64>()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid persistent generation"))?,
+        Ok(s) => s.trim().parse::<u64>().map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "invalid persistent generation")
+        })?,
         Err(e) if e.kind() == io::ErrorKind::NotFound => 0,
         Err(e) => return Err(e),
     };
-    let wall = SystemTime::now().duration_since(UNIX_EPOCH)
+    let wall = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "clock before epoch"))?
         .as_nanos();
     let wall = u64::try_from(wall)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "epoch nanoseconds exceed u64"))?;
-    let next = previous.checked_add(1)
+    let next = previous
+        .checked_add(1)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "generation overflow"))?
         .max(wall);
     let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
@@ -70,7 +84,10 @@ fn allocate_generation(path: &std::path::Path) -> std::io::Result<u64> {
 }
 
 pub fn unix_ns_now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0)
 }
 
 fn wire_source(s: SourceState) -> WireSourceState {
@@ -87,7 +104,10 @@ pub fn build(registry: &SourceRegistry) -> OverviewAggregates {
     let mut connected = 0u32;
     for (id, label, domain) in PROJECTS {
         let st = registry.status(*id);
-        let source = st.as_ref().map(|s| s.state).unwrap_or(SourceState::NotConnected);
+        let source = st
+            .as_ref()
+            .map(|s| s.state)
+            .unwrap_or(SourceState::NotConnected);
         if source == SourceState::Connected {
             connected += 1;
         }
@@ -106,7 +126,9 @@ pub fn build(registry: &SourceRegistry) -> OverviewAggregates {
             rpc_latency: None,
             finance: None,
             source_timestamp_unix_ns: 0,
-            source_id: st.and_then(|s| s.source_id.map(|x| x.to_string())).unwrap_or_default(),
+            source_id: st
+                .and_then(|s| s.source_id.map(|x| x.to_string()))
+                .unwrap_or_default(),
         });
     }
     OverviewAggregates {

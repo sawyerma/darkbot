@@ -62,7 +62,10 @@ impl GatewayConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let bind: SocketAddr = env_or("DARKBOT_GATEWAY_BIND", "127.0.0.1:8787")
             .parse()
-            .map_err(|_| ConfigError::Invalid { key: "DARKBOT_GATEWAY_BIND", value: env_or("DARKBOT_GATEWAY_BIND", "") })?;
+            .map_err(|_| ConfigError::Invalid {
+                key: "DARKBOT_GATEWAY_BIND",
+                value: env_or("DARKBOT_GATEWAY_BIND", ""),
+            })?;
 
         let loopback = match bind.ip() {
             IpAddr::V4(v4) => v4.is_loopback(),
@@ -76,7 +79,9 @@ impl GatewayConfig {
         let default_hosts = format!("127.0.0.1:{port},localhost:{port}");
         let default_origins = format!("http://127.0.0.1:{port},http://localhost:{port}");
 
-        let static_dir = std::env::var("DARKBOT_GATEWAY_STATIC_DIR").ok().map(PathBuf::from);
+        let static_dir = std::env::var("DARKBOT_GATEWAY_STATIC_DIR")
+            .ok()
+            .map(PathBuf::from);
 
         Ok(Self {
             bind,
@@ -93,11 +98,15 @@ impl GatewayConfig {
     }
 
     pub fn origin_allowed(&self, origin: &str) -> bool {
-        self.allowed_origins.iter().any(|o| o.eq_ignore_ascii_case(origin))
+        self.allowed_origins
+            .iter()
+            .any(|o| o.eq_ignore_ascii_case(origin))
     }
 
     pub fn host_allowed(&self, host: &str) -> bool {
-        self.allowed_hosts.iter().any(|h| h.eq_ignore_ascii_case(host))
+        self.allowed_hosts
+            .iter()
+            .any(|h| h.eq_ignore_ascii_case(host))
     }
 }
 
@@ -106,12 +115,17 @@ fn env_or(key: &str, default: &str) -> String {
 }
 
 fn csv(s: &str) -> Vec<String> {
-    s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect()
+    s.split(',')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
 }
 
 fn parse_u64(key: &'static str, default: u64) -> Result<u64, ConfigError> {
     match std::env::var(key) {
-        Ok(v) => v.parse().map_err(|_| ConfigError::Invalid { key, value: v }),
+        Ok(v) => v
+            .parse()
+            .map_err(|_| ConfigError::Invalid { key, value: v }),
         Err(_) => Ok(default),
     }
 }

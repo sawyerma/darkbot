@@ -14,8 +14,8 @@ use tracing::{info, warn};
 
 use crate::config::GatewayConfig;
 use crate::hub::{PublishOutcome, StateHub, StateUpdate};
-use crate::topics;
 use crate::proto::ProjectId;
+use crate::topics;
 
 #[derive(Debug)]
 pub enum FeedMessage {
@@ -61,7 +61,14 @@ pub struct SourceStatus {
 
 impl SourceStatus {
     fn new(label: &'static str) -> Self {
-        Self { state: SourceState::NotConnected, label, source_id: None, last_message_at: None, attach_count: 0, detach_count: 0 }
+        Self {
+            state: SourceState::NotConnected,
+            label,
+            source_id: None,
+            last_message_at: None,
+            attach_count: 0,
+            detach_count: 0,
+        }
     }
 }
 
@@ -78,7 +85,10 @@ impl SourceRegistry {
         inner.insert(ProjectId::Bsc, SourceStatus::new("BSC"));
         inner.insert(ProjectId::Solana, SourceStatus::new("Solana"));
         let (version, _) = watch::channel(0);
-        Arc::new(Self { inner: RwLock::new(inner), version })
+        Arc::new(Self {
+            inner: RwLock::new(inner),
+            version,
+        })
     }
 
     pub fn snapshot(&self) -> Vec<(ProjectId, SourceStatus)> {
@@ -113,16 +123,26 @@ impl SourceRegistry {
 impl Default for SourceRegistry {
     fn default() -> Self {
         let (version, _) = watch::channel(0);
-        Self { inner: RwLock::new(HashMap::new()), version }
+        Self {
+            inner: RwLock::new(HashMap::new()),
+            version,
+        }
     }
 }
 
 /// Reject cross-project, gateway-owned and not-yet-registered projections.
 fn validate_feed_state(project: ProjectId, u: &StateUpdate) -> Result<(), FeedError> {
     let spec = topics::spec(u.topic).ok_or_else(|| FeedError::Mismatch("unknown topic".into()))?;
-    if project == ProjectId::Unspecified || spec.project != project ||
-       !spec.is_state() || !spec.available() || u.source_id.is_empty() {
-        return Err(FeedError::Mismatch(format!("feed not authorized for {:?}", u.topic)));
+    if project == ProjectId::Unspecified
+        || spec.project != project
+        || !spec.is_state()
+        || !spec.available()
+        || u.source_id.is_empty()
+    {
+        return Err(FeedError::Mismatch(format!(
+            "feed not authorized for {:?}",
+            u.topic
+        )));
     }
     Ok(())
 }
@@ -146,7 +166,11 @@ pub fn spawn_supervisor(
                 Err(e) => {
                     warn!(?project, error = %e, "engine feed attach failed");
                     registry.update(project, |s| {
-                        let next = if s.attach_count == 0 { SourceState::NotConnected } else { SourceState::Detached };
+                        let next = if s.attach_count == 0 {
+                            SourceState::NotConnected
+                        } else {
+                            SourceState::Detached
+                        };
                         let changed = s.state != next;
                         s.state = next;
                         changed
@@ -156,7 +180,10 @@ pub fn spawn_supervisor(
                 }
             };
 
-            info!(?project, "engine feed attached; waiting for validated state");
+            info!(
+                ?project,
+                "engine feed attached; waiting for validated state"
+            );
             registry.update(project, |s| {
                 // IPC attach by itself is not a qualified/connected projection.
                 s.attach_count += 1;
@@ -179,8 +206,8 @@ pub fn spawn_supervisor(
                         match hub.publish(u) {
                             Ok(PublishOutcome::Applied) => {
                                 registry.update(project, |s| {
-                                    let changed = s.state != SourceState::Connected ||
-                                        s.source_id.as_deref() != Some(&*sid);
+                                    let changed = s.state != SourceState::Connected
+                                        || s.source_id.as_deref() != Some(&*sid);
                                     s.state = SourceState::Connected;
                                     s.source_id = Some(sid.clone());
                                     s.last_message_at = Some(last_msg);
@@ -188,7 +215,11 @@ pub fn spawn_supervisor(
                                 });
                                 stale_marked = false;
                             }
-                            Ok(outcome) => tracing::trace!(?project, ?outcome, "ignored old state; liveness not promoted"),
+                            Ok(outcome) => tracing::trace!(
+                                ?project,
+                                ?outcome,
+                                "ignored old state; liveness not promoted"
+                            ),
                             Err(e) => {
                                 warn!(?project, error = %e, "state rejected; detaching");
                                 break;
@@ -210,7 +241,11 @@ pub fn spawn_supervisor(
                     Err(_elapsed) => {
                         let silence = last_msg.elapsed();
                         if silence >= detach_after {
-                            warn!(?project, ?silence, "engine feed silent beyond detach threshold");
+                            warn!(
+                                ?project,
+                                ?silence,
+                                "engine feed silent beyond detach threshold"
+                            );
                             break;
                         }
                         if !stale_marked {
@@ -221,7 +256,9 @@ pub fn spawn_supervisor(
                                 if s.state == SourceState::Connected {
                                     s.state = SourceState::Stale;
                                     true
-                                } else { false }
+                                } else {
+                                    false
+                                }
                             });
                         }
                     }
@@ -258,7 +295,12 @@ pub mod test_feed {
     impl ChannelFeed {
         pub fn new(project: ProjectId, label: &'static str) -> Arc<Self> {
             let (handed, _) = watch::channel(0);
-            Arc::new(Self { project, label, pending: Mutex::new(None), handed })
+            Arc::new(Self {
+                project,
+                label,
+                pending: Mutex::new(None),
+                handed,
+            })
         }
 
         /// Stellt eine neue "Engine-Verbindung" bereit; das zurückgegebene Sender-Ende
@@ -303,7 +345,10 @@ mod trust_boundary_tests {
     #[test]
     fn engine_feeds_cannot_spoof_gateway_or_cross_project_topics() {
         let state = |topic| StateUpdate {
-            topic, generation: 1, seq: 1, source_timestamp_unix_ns: 1,
+            topic,
+            generation: 1,
+            seq: 1,
+            source_timestamp_unix_ns: 1,
             source_id: Arc::from("feed"),
             payload: Bytes::from_static(b"payload"),
         };
