@@ -1,6 +1,21 @@
 # G0.7/G0.8: Binary migration (JSON ban, roadmap e19fdde)
 
-Status: 2026-10-16. **Plan only, nothing implemented yet.**
+Status: 2026-10-17. **Implementation exists; targeted completion in progress.**
+
+Verification baseline: `5946b4dca5aeffbb44bef91106c17c9784f66444`.
+
+| Package | Actual status | Evidence / remaining work |
+|---|---|---|
+| M1 | VERIFIED | `cargo test --locked -p darkbot-bsc-record`: 6 PASS. |
+| M2 | VERIFIED | `darkbot-bsc-legacy-import`: 3 PASS; `g07_legacy_import --check` reproduces the committed import byte-for-byte. |
+| M3 | VERIFIED | `acceptance_guard` integration: 7 PASS, including reproduced proposed contract, four input bindings and UNARMED rejection. |
+| M4 | OPEN | Binary BUY runner implemented; builder probe still uses internal JSON and fails the all-target build. |
+| M5 | IMPLEMENTED | Existing Rust preflight; final feature-build verification pending. |
+| M6 | OPEN | Binary readers/writers implemented; terminal persistence, acquisition attribution and complete ordering audit pending. |
+| M7 | OPEN | Active readiness still uses v2/JSON/Node; native replacement pending. |
+| M8 | OPEN | Initial feature-enabled all-target check failed in the probe; no final acceptance claimed. |
+
+The inventory and work-package design below describe the migration baseline, not a request to reimplement completed packages. Original evidence and frozen signed transactions remain unchanged.
 
 - Binding source: `BSC_DUAL_VENUE_ROADMAP.md`, the "BINDING DATA-PATH INVARIANT" section and "Now, G0.7/G0.8".
 - Unchanged throughout:
@@ -9,7 +24,7 @@ Status: 2026-10-16. **Plan only, nothing implemented yet.**
   - the BUY/signing algorithms;
   - all historical JSON files (immutable legacy evidence);
   - the guard (`UNARMED`).
-- Nothing is sent and nothing is committed.
+- Nothing is sent; verified phase completions are committed and pushed.
 
 ## 1. Inventory: internal JSON in the G0.7/G0.8 path
 
@@ -101,7 +116,7 @@ The encoding is deterministic, so the file SHA-256 is the binding hash. A `dbrec
 
 ## 5. After the migration (unchanged order)
 
-1. Economic approval of contract v3 (new binding, `attempts.maximum` 4, budget unchanged).
+1. Economic approval of contract v3 (new binding, `attempts.maximum` 1, budget unchanged).
 2. Builder refresh ≤ 24 h before arming.
 3. Arming commit by the user.
 4. Exactly one run.
