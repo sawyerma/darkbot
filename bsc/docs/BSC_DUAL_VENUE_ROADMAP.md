@@ -416,6 +416,15 @@ Canonical timing may be retained as diagnostic data, but **`EARLY_TX_SEEN - cano
 
 The useful pre-lead question is whether actionable evidence arrives before first executability often enough to support the Gate-0-proven path.
 
+### F storage/capture extension — binding ownership, not a new phase
+
+Phase F implements the production storage, bounded-resource and native offline-analysis contract in `BSC_PRODUCTION_BUILD_MASTER_PLAN.md` §11, subsection "Production storage, resource and offline-analysis contract". Preserve the existing `DBJNL001` journal and `DBREC001` standalone-record codecs, recorder/replay and the one Rust workspace; add only narrowly owned modules where missing. Never create a competing journal, trade/quote/strategy implementation, Rust workspace or JSON internal data path.
+
+- Preallocated/typed events -> bounded asynchronous recorder -> batch writer -> integrity-checked, segmented `DBJNL001` on SSD; `DBREC001` for typed configuration/run manifests and standalone evidence. No SSD/SQLite/JSON/conversion, child process, wait for the writer or sync logging on HOT0 -> outbound handoff. Required pre-egress financial durability fences remain intact and are never replaced by an asynchronous queue ACK.
+- Bound **total actual capture memory by bytes**, including payload ownership, queued items, batches and caches. Permit bounded adaptive growth, never unbounded RAM; preflight sustainable disk throughput/capacity and RAM headroom before an approved long run. A running capture must not silently lose records, claim COMPLETE with loss, or treat exhausting hardware as a successful run; persist explicit gaps/recovery status and retain diagnostics.
+- Build an optional, separately budgeted **offline SQLite index** only from verified sealed journal segments. It is rebuildable and nonauthoritative; raw events, canonical verification, economics and financial state stay in native Rust/binary evidence. Exact integer amounts must not be coerced to lossy SQL REAL.
+- Phase F retains its separately required continuous **30-minute** native binary coverage run and exact-core replay; per-attempt 15-second windows remain separate. 4h/24h/48h campaigns are scoped future operating qualifications with explicit CapacityPreflight, not new Gate-0 or universal Phase-F prerequisites. Final RAM/backpressure/replay/crash and true hot-path timing checks belong to Phase I. Document and qualify actual source/build/host evidence; no automatic PASS.
+
 STOP.
 
 ## 14. G — full economics
