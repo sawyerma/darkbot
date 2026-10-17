@@ -99,34 +99,26 @@ pub struct SlotUpdate {
     pub t_rx_ns: u64,
 }
 
-/// Transaktions-Beobachtung (Shadow/H0/Winner-Vergleich). Rohdaten bleiben JSON/Bytes,
-/// die Version wird in der Pflichtreihenfolge erkannt (siehe `detect_version_*`).
+/// Transaction notification (`transactionSubscribe`), decoded once at the JSON-RPC/WSS boundary
+/// (JFI-02). The envelope identity is always present; a payload that cannot be decoded keeps
+/// its reason (visible INCOMPLETE downstream) instead of becoming a generic JSON tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionObserved {
     pub signature: String,
     pub slot: u64,
     pub tx_index_in_slot: Option<u32>,
-    pub version: TxVersion,
-    pub err: Option<String>,
     pub source: SourceKind,
     pub t_rx_ns: u64,
-    /// [C0-MO] Complete provider payload of the notification (`result`), lossless.
-    /// Shadow/Live ignore it; the market observer uses it as primary raw evidence.
-    pub raw: serde_json::Value,
+    pub tx: Result<crate::chain::ChainTx, crate::chain::ChainError>,
 }
 
-/// [C0-MO] Standard `logsSubscribe` notification (signature, err, log messages). Unlike
-/// `TransactionObserved` it carries no message/meta; the version is therefore unknown.
+/// [C0-MO] `logsSubscribe` notification: signature, status and log lines only. It carries no
+/// message/meta; version, fees and balances are therefore unknown, never invented.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogsObserved {
-    pub signature: String,
-    pub slot: u64,
-    pub err: Option<String>,
-    pub logs: Vec<String>,
     pub source: SourceKind,
     pub t_rx_ns: u64,
-    /// Complete provider payload of the notification (`result`), lossless.
-    pub raw: serde_json::Value,
+    pub logs: crate::chain::ChainLogs,
 }
 
 /// Quellen-Gesundheit, periodisch vom Adapter emittiert (Ledger: stream health).
@@ -285,35 +277,6 @@ pub enum TxVersion {
     V1,
 }
 
-/// Erkennung auf einer JSON-RPC-Transaktion (`getTransaction`/`getBlock`, encoding json).
-/// VERIFY: Feldname des v1-Config-Objekts in der JSON-Darstellung (`transaction.message.config`
-/// laut Upgrade-Doku für gRPC; für JSON-RPC am realen Objekt prüfen).
-pub fn detect_version_json(tx: &serde_json::Value) -> TxVersion {
-    if tx
-        .pointer("/transaction/message/config")
-        .map(|c| !c.is_null())
-        .unwrap_or(false)
-    {
-        return TxVersion::V1;
-    }
-    match tx.get("version") {
-        Some(serde_json::Value::Number(n)) if n.as_u64() == Some(1) => TxVersion::V1,
-        Some(serde_json::Value::Number(n)) if n.as_u64() == Some(0) => TxVersion::V0,
-        Some(serde_json::Value::String(s)) if s == "legacy" => TxVersion::Legacy,
-        _ => {
-            if tx
-                .pointer("/transaction/message/addressTableLookups")
-                .map(|v| v.is_array())
-                .unwrap_or(false)
-            {
-                TxVersion::V0
-            } else {
-                TxVersion::Legacy
-            }
-        }
-    }
-}
-
 /// Erkennung auf serialisierten Bytes: erstes Byte der Message nach dem
 /// Signatur-Vektor. Prefix-Byte: 0x80 = v0, 0x81 = v1 (Solana Foundation),
 /// sonst legacy (Byte = num_required_signatures).
@@ -346,34 +309,6 @@ fn read_compact_u16(buf: &[u8]) -> Option<(u16, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn config_wins_over_version_field() {
-        let v =
-            json!({"version": 0, "transaction": {"message": {"config": {"computeUnitLimit": 1}}}});
-        assert_eq!(detect_version_json(&v), TxVersion::V1);
-    }
-
-    #[test]
-    fn version_field_and_legacy() {
-        assert_eq!(
-            detect_version_json(&json!({"version": 0, "transaction": {"message": {}}})),
-            TxVersion::V0
-        );
-        assert_eq!(
-            detect_version_json(&json!({"version": "legacy", "transaction": {"message": {}}})),
-            TxVersion::Legacy
-        );
-        assert_eq!(
-            detect_version_json(&json!({"transaction": {"message": {}}})),
-            TxVersion::Legacy
-        );
-        assert_eq!(
-            detect_version_json(&json!({"transaction": {"message": {"addressTableLookups": []}}})),
-            TxVersion::V0
-        );
-    }
 
     #[test]
     fn bytes_prefix() {

@@ -412,7 +412,7 @@ fn write_admission_forbids_legacy_rollback_and_unregistered_kinds() {
     let bytes = payload::encode(&diag).unwrap();
     for (k, schema, code) in [
         (kind::OWNER_DIAGNOSTIC, TYPED + 1, "PAYLOAD_SCHEMA"),
-        (kind::MARKET_TRANSACTION, TYPED, "PAYLOAD_KIND_UNTYPED"),
+        (kind::ECON_FINAL, TYPED, "PAYLOAD_KIND_UNTYPED"),
     ] {
         let e = w
             .append(k, schema, Provenance::default(), &bytes)

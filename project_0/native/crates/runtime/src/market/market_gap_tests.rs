@@ -183,7 +183,7 @@ fn duplicate_live_and_backfilled_signature_counted_once() {
     let (mut c, mut s) = gap_core(10, 10);
     let tx = gap_liquidation("sig", 10, false);
     c.start_observation(0, 100);
-    c.on_transaction(&as_observed(&tx, "sig", 10, false), 0, &mut s)
+    c.on_transaction(as_observed(&tx, "sig", 10, false), 0, &mut s)
         .unwrap();
     c.stop_observation();
     c.recover_gaps(&mut |slot, _| Ok(gap_block(slot, vec![tx.clone()])), &mut s)
@@ -499,7 +499,7 @@ fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
         drain_complete: true,
         write_error: None,
     };
-    let before = darkbot_solana::provider::shared().snapshot()["requests"].clone();
+    let before = darkbot_solana::provider::shared().snapshot().requests;
     let (summary, _, error) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
     assert!(error.is_none());
     assert_eq!(summary["market_capture_complete"], false);
@@ -509,7 +509,7 @@ fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
         "VERIFICATION_DEFERRED_AFTER_ABORT"
     );
     assert_eq!(
-        darkbot_solana::provider::shared().snapshot()["requests"],
+        darkbot_solana::provider::shared().snapshot().requests,
         before
     );
     fs::remove_dir_all(root).unwrap();
@@ -552,7 +552,7 @@ fn p4_timer_finalizes_locally_without_verification_rpc() {
         drain_complete: true,
         write_error: None,
     };
-    let before = darkbot_solana::provider::shared().snapshot()["requests"].clone();
+    let before = darkbot_solana::provider::shared().snapshot().requests;
     let (summary, _, error) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
     assert!(error.is_none());
     assert_eq!(summary["market_capture_complete"], false);
@@ -562,7 +562,7 @@ fn p4_timer_finalizes_locally_without_verification_rpc() {
         "VERIFICATION_NOT_RUN"
     );
     assert_eq!(
-        darkbot_solana::provider::shared().snapshot()["requests"],
+        darkbot_solana::provider::shared().snapshot().requests,
         before
     );
     fs::remove_dir_all(root).unwrap();

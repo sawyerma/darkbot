@@ -180,7 +180,7 @@ impl StateCore {
                 None // Shadow/H0-Evidence, kein State
             }
             IngressEvent::Logs(l) => {
-                self.highest_slot = self.highest_slot.max(l.slot);
+                self.highest_slot = self.highest_slot.max(l.logs.slot);
                 None // [C0-MO] Market evidence, kein State
             }
             IngressEvent::Health(_) | IngressEvent::Transport { .. } => None, // Telemetrie, kein State

@@ -1,4 +1,5 @@
 //! Read-only capture, drain and finalization lifecycle.
+use super::rows::{CaptureStart, MarketCoverage, WindowEvent};
 use super::*;
 
 // ------------------------------------------------------------------------------------------
@@ -104,9 +105,11 @@ pub fn finish_capture(
         &ctx,
         &cfg.run_dir,
         unix_now_s(),
-        json!({
-            "reason": outcome.stop_reason, "drain_complete": outcome.drain_complete, "write_error": write_error.clone(),
-        }),
+        WindowEvent::Stopped {
+            reason: outcome.stop_reason.into(),
+            drain_complete: outcome.drain_complete,
+            write_error: write_error.clone(),
+        },
     )?;
     Ok((summary, report, write_error))
 }
@@ -141,20 +144,22 @@ pub fn run_embedded(
             "C0_E1_WARMUP_WAIT timeout_s={}",
             h.cfg.plan.budgets.bootstrap_seconds
         );
-        sink.coverage(&json!({"event":"SHADOW_WARMUP_WAIT","timestamp_utc":utc_iso(unix_now_s())}))
-            .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
+        sink.coverage(&MarketCoverage::ShadowWarmupWait {
+            observed_unix_s: unix_now_s(),
+        })
+        .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
         if let Err(e) =
             h.wait_shadow_ready(Duration::from_secs(h.cfg.plan.budgets.bootstrap_seconds))
         {
-            let _ = sink.coverage(&json!({"event":"SHADOW_WARMUP_FAILED","error":e}));
+            let _ = sink.coverage(&MarketCoverage::ShadowWarmupFailed { error: e.clone() });
             let _ = sink.flush();
             eprintln!("C0_E1_WARMUP_FAILED code={e}");
             return Err(e);
         }
-        sink.coverage(
-            &json!({"event":"SHADOW_WARMUP_READY","at_ns":clock.now_ns(),
-            "timestamp_utc":utc_iso(unix_now_s())}),
-        )
+        sink.coverage(&MarketCoverage::ShadowWarmupReady {
+            at_ns: clock.now_ns(),
+            observed_unix_s: unix_now_s(),
+        })
         .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
         crate::analytics::measurement::journal(
             &h.cfg.paths(),
@@ -170,7 +175,21 @@ pub fn run_embedded(
     let halt = IngressHalt::new();
     let slots = SlotWatch::new();
     let session = Shutdown::new();
-    let src = WsRpcControlSource::new(market_ws_config(&cfg)?, clock);
+    let ws = market_ws_config(&cfg)?;
+    let start = CaptureStart {
+        source: cfg.source.as_str().into(),
+        commitment: cfg.commitment.into(),
+        program: cfg.program,
+        configured_duration_seconds: cfg.duration_secs,
+        ws_host: redact_url(&cfg.ws_url),
+        recovery_budget_ms: ws.recovery_budget.map(|d| d.as_millis() as u64),
+        recovery_attempts: ws.recovery_attempts,
+        idle_timeout_ms: ws.idle_timeout.as_millis() as u64,
+        healthy_reset_ms: darkbot_solana::ingress::ws_rpc::HEALTHY_RESET.as_millis() as u64,
+        readiness: "ALL_ACKS_AND_NEW_SLOT_PROGRESS".into(),
+        provider_budget: darkbot_solana::provider::shared().snapshot(),
+    };
+    let src = WsRpcControlSource::new(ws, clock);
     let session_for_thread = session.clone();
     let ingress = std::thread::Builder::new()
         .name("market-ingress-ws".into())
@@ -193,12 +212,12 @@ pub fn run_embedded(
     // WebSocket decoder. Canonical RPC happens only after Shadow is quiescent.
     let mut last_live_display = Instant::now() - Duration::from_secs(5);
     let mut checkpoint_index = 0usize;
-    core.coverage(&mut sink, "START", process_started, None, json!({
-        "source": cfg.source.as_str(), "commitment": cfg.commitment, "program": cfg.program.to_string(),
-        "configured_duration_seconds": cfg.duration_secs, "ws_host": redact_url(&cfg.ws_url),
-        "transport_policy":{"recovery_seconds":120,"maximum_failed_attempts":8,"slot_idle_seconds":60,"healthy_reset_seconds":10,"readiness":"ALL_ACKS_AND_NEW_SLOT_PROGRESS"},
-        "provider_budget":darkbot_solana::provider::shared().snapshot(),
-    }))
+    core.coverage(
+        &mut sink,
+        process_started,
+        None,
+        WindowEvent::Start(Box::new(start)),
+    )
     .map_err(|e| format!("market evidence write failed: {e}"))?;
 
     let started = Instant::now();
@@ -255,10 +274,9 @@ pub fn run_embedded(
         if ingress.is_finished() {
             if let Err(e) = core.coverage(
                 &mut sink,
-                "FATAL",
                 unix_now_s(),
                 Some(clock.now_ns()),
-                json!({"reason": "INGRESS_THREAD_ENDED"}),
+                WindowEvent::IngressThreadEnded,
             ) {
                 write_error = Some(e.to_string());
             }
@@ -288,9 +306,16 @@ pub fn run_embedded(
                     )?;
                     h.start(t_rx_ns, cutoff);
                 }
-                core.coverage(&mut sink, "STREAM_READY", now_s, Some(t_rx_ns), json!({
-                    "attempt": attempt, "observation_start_t_rx_ns": t_rx_ns, "observation_cutoff_t_rx_ns": cutoff,
-                }))
+                core.coverage(
+                    &mut sink,
+                    now_s,
+                    Some(t_rx_ns),
+                    WindowEvent::StreamReady {
+                        attempt,
+                        observation_start_t_rx_ns: t_rx_ns,
+                        observation_cutoff_t_rx_ns: cutoff,
+                    },
+                )
             }
             Some(ev) => {
                 let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
@@ -325,10 +350,12 @@ pub fn run_embedded(
             last_overflow = overflow;
             if let Err(e) = core.coverage(
                 &mut sink,
-                "INGRESS_OVERFLOW",
                 now_s,
                 None,
-                json!({"overflow_total": overflow}),
+                WindowEvent::IngressOverflow {
+                    overflow_total: overflow,
+                    drain: false,
+                },
             ) {
                 write_error = Some(e.to_string());
                 stop_reason = "WRITE_ERROR";
@@ -375,10 +402,11 @@ pub fn run_embedded(
     // ---- phase 2: STOP ingress + DRAIN (events with t_rx <= cutoff still count) ----
     let _ = core.coverage(
         &mut sink,
-        "STOP_REQUESTED",
         observation_end_s,
         None,
-        json!({"reason": stop_reason}),
+        WindowEvent::StopRequested {
+            reason: stop_reason.into(),
+        },
     );
     session.request();
     let mut drain_complete = false;
@@ -410,10 +438,12 @@ pub fn run_embedded(
             last_overflow = overflow;
             let _ = core.coverage(
                 &mut sink,
-                "INGRESS_OVERFLOW",
                 now_s,
                 None,
-                json!({"overflow_total": overflow, "phase": "drain"}),
+                WindowEvent::IngressOverflow {
+                    overflow_total: overflow,
+                    drain: true,
+                },
             );
         }
         if Instant::now() >= drain_deadline {
@@ -421,14 +451,15 @@ pub fn run_embedded(
         }
     }
     core.stop_observation();
+    let events_after_cutoff = core.stats.events_after_cutoff;
     let _ = core.coverage(
         &mut sink,
-        "DRAINED",
         unix_now_s(),
         None,
-        json!({
-            "drain_complete": drain_complete, "events_after_cutoff": core.stats.events_after_cutoff,
-        }),
+        WindowEvent::Drained {
+            drain_complete,
+            events_after_cutoff,
+        },
     );
 
     // A separate capture drain is insufficient: Shadow keeps winner RPCs alive
@@ -437,18 +468,15 @@ pub fn run_embedded(
         let barrier = h.wait_shadow_quiescent(Duration::from_secs(
             h.cfg.plan.budgets.shadow_drain_seconds + h.cfg.plan.budgets.quiescence_grace_seconds,
         ));
-        let event = if barrier.is_ok() {
-            "SHADOW_RPC_QUIESCENT"
-        } else {
-            "SHADOW_RPC_BARRIER_FAILED"
+        let at_ns = clock.now_ns();
+        let event = match &barrier {
+            Ok(_) => WindowEvent::ShadowRpcQuiescent { at_ns },
+            Err(e) => WindowEvent::ShadowRpcBarrierFailed {
+                at_ns,
+                error: e.clone(),
+            },
         };
-        if let Err(e) = core.coverage(
-            &mut sink,
-            event,
-            unix_now_s(),
-            None,
-            json!({"at_ns": clock.now_ns(), "error": barrier.as_ref().err()}),
-        ) {
+        if let Err(e) = core.coverage(&mut sink, unix_now_s(), None, event) {
             write_error = Some(e.to_string());
         }
         if let Err(e) = barrier {

@@ -208,7 +208,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | S0-02 timing / S0-03 telemetry | `common/timing.rs`, `mt0.rs` | MT0 evidence | LOCAL_PASS | Mainnet tails NOT_MEASURED |
 | S0-04 bounded channels / lifecycle | `common/channel.rs`, `lifecycle.rs` | unit tests | LOCAL_PASS | — |
 | S0-05 journal / replay | `analytics/journal.rs`, `payload.rs` | PERSIST + JFI entries | PARTIAL | JFI migration of remaining kinds (Ticket 3 A2, FIX-04…06); segments SK-07 |
-| S1-01 IngressSource / native events | `solana/src/ingress` | bootstrap PASS 2026-10-02; typed `ProgramFilter` `68fb932` | PARTIAL | `TransactionObserved.raw` / `LogsObserved.raw` still `serde_json::Value` (Ticket 3 A1) |
+| S1-01 IngressSource / native events | `solana/src/ingress` | bootstrap PASS 2026-10-02; typed `ProgramFilter` `68fb932`; raw-free events ledger 2026-10-17 (A1) | PARTIAL | native events LOCAL_PASS; Mainnet long-run qualification open (S1-03/S1-07) |
 | S1-02 BinaryGeyserSource | — (enum mention only) | — | OPEN · DEFERRED_PRIORITY | S1-RACE |
 | S1-03 WsRpcControlSource | `ws_rpc.rs` | Mainnet bootstrap/recovery PASS | PARTIAL | long-run continuity FAILED (4 h / 5 h gaps, 429) |
 | S1-04 snapshot + reconcile | `state/snapshot.rs`, `recovery.rs` | PASS in bootstrap/C0-E1 runs | PARTIAL | Long-Tail/Premium snapshot semantics for 0.1.12 |
@@ -226,7 +226,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | S3-06 landing reconciliation | `execution/pending.rs`, FE-04 receipts | FE-04 local | PARTIAL | finalized reconciliation in pilot |
 | S3-R00…R03 Jito access, gRPC, prewarm, race benchmark | ATA prewarm only | — | OPEN · DEFERRED_PRIORITY | after S1-RACE |
 | S4-01…04 parity corpus / decode / tx / performance | — | — | OPEN · DEFERRED_PRIORITY | — |
-| C0E1-P3-M06 … C0E1-P6-GATE | `market_*`, `analytics/*`, `p0-strict-verify` | `C0E1_P3…P6` evidence | LOCAL_PASS (offline) | 4 h master NOT_QUALIFIED; verifier/report JFI (Ticket 3 A3 / FIX-05); in-capture gap/reconcile phases unused since `2c62d13` (tests only) — reuse in the native verifier or remove (A3) |
+| C0E1-P3-M06 … C0E1-P6-GATE | `market_*`, `analytics/*`, `p0-strict-verify` | `C0E1_P3…P6` evidence | LOCAL_PASS (offline) | 4 h master NOT_QUALIFIED; verifier/report JFI (Ticket 3 A3 / FIX-05); in-capture gap/reconcile phases unused since `2c62d13` (tests only) — reuse in the native verifier or remove (A3); `scripts/smoke.sh` stale since `2c62d13` (NOT_RUN) |
 | P2-01 RAM model / P2-02 reverse indices | `state`, `liquidation/index.rs` | R127d Shadow | LOCAL_PASS | requalification after FIX-134/135 not recorded |
 | P2-03 threshold index | `index.rs` | — | CODE | not the default since R127 |
 | P2-04 premium scheduler / P2-05 tag scheduler | `schedule.rs` | unit tests | CODE | 0.1.12 semantics |
@@ -267,19 +267,19 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | PERSIST-01…05 | journal, renders, FE-04 | PERSIST entries | PARTIAL | Mainnet tails, physical fault test |
 | JFI-01…05 overall | typed payloads, write admission, `darkbot_solana::chain` | JFI entries | **OPEN** | rows below; JFI-FIX-01/02 + write admission LOCAL_PASS |
 | JFI Ticket 3 A0: chain model | `solana/src/chain.rs`: `ChainTx`/`ChainBlock`, `TxStatus` (`err:null`/error/absent = SUCCESS/FAILED/UNKNOWN), legacy/v0/v1, LUT, CPI + stack height, fees, CU, v1 `transactionConfig`, exact token units; winner `meta.err` fix; typed `getBlock` in gap/reconcile; `ProgramFilter`; binary-storable `ChainTx` | ledger 2026-10-17 (steps 1–2, step 3, filters/storable) | LOCAL_PASS | done — no rebuild without a concrete regression |
-| JFI Ticket 3 A1: raw-free ingress | `ingress/mod.rs`, `ws_rpc.rs` | — | OPEN | `TransactionObserved` as `ChainTx`, `LogsObserved` typed status/logs; JSON parsed only in the WSS adapter |
-| JFI Ticket 3 A2: native `MARKET_*` frames | `market/sink.rs` (`append_legacy`, `json!` rows) | — | OPEN | typed `MARKET_TRANSACTION`/`LIQUIDATION`/`COVERAGE` payloads + exhaustive coverage enum (~20 variants); drop from `LEGACY_WRITABLE`; no JSONL render at seal |
-| JFI Ticket 3 A3: native strict verifier / reports | `market_verification.rs` (JSONL batches, JSON checkpoints), `summary.rs` | — | OPEN | native batches/checkpoints/resume, typed job/spec/attempt/result IDs, native summary/report reader; historical JSONL render offline only |
-| JFI Ticket 3 A4: bundle parity | — | — | OPEN | historical v0/v1/legacy, absent `meta`/`err`, failed/truncated, CPI/LUT, 4 classes × 6 markers vs pinned Python verifier (unchanged); shared-decoder risk documented |
+| JFI Ticket 3 A1: raw-free ingress | `ingress/mod.rs`, `ws_rpc.rs`, `chain.rs` | ledger 2026-10-17 (A1/A2) | LOCAL_PASS | — (absent status now UNKNOWN, not success) |
+| JFI Ticket 3 A2: native `MARKET_*` frames | `market/rows.rs`, `sink.rs`, producers | ledger 2026-10-17 (A1/A2) | LOCAL_PASS | capture writes typed frames only; legacy views by explicit offline export |
+| JFI Ticket 3 A3: native strict verifier / reports | `market_verification.rs` (typed batch journal, but JSONL batch views + JSON checkpoints/cache/scope, anchor read from `coverage.jsonl`), `summary.json`, Python report chain | — | OPEN | native batches/checkpoints/resume, typed job/spec/attempt/result IDs, native summary/report reader (B7); remove dead in-capture gap phases |
+| JFI Ticket 3 A4: bundle parity | render parity in market tests; real-fixture re-encode | ledger 2026-10-17 (A1/A2) | PARTIAL | Python differential on historical runs NOT_RUN; shared-decoder boundary documented |
 | JFI-FIX-04 config / measurement plans | operational JSON config | — | OPEN | typed config contract |
 | JFI-FIX-05 econ / reports | `econ*.rs`, `market_report.py` (SQLite) | — | OPEN | native C0-E1 report chain (Phase B7) |
 | JFI-FIX-06 FE-04 journal | `one_shot.rs` | FE-04 local | OPEN | typed FE-04 kinds before any financial handoff |
 | JFI-FIX-07 Jupiter adapter | `/swap/v2/build` | wire exception in PHASENPLAN JFI-02 (`f0da568`) | OPEN | typed consumer behind the wire adapter |
 | JFI remaining kinds | `MEASUREMENT_PHASE`, `MT0_SNAPSHOT`, `FE01_*`, `ECON_*`, `C0_CENSUS_ACCOUNT/GROUP` import | `LEGACY_WRITABLE` list | OPEN | migrate each kind, then remove from `LEGACY_WRITABLE` |
-| SK-01 three layers, one truth | `.p0j` journal exists | PERSIST entries | PARTIAL | market capture still schema-1 JSON frames + JSONL views at seal (Ticket 3 A2/A3) |
+| SK-01 three layers, one truth | `.p0j` journal; typed market capture (A2) | PERSIST entries; ledger 2026-10-17 | PARTIAL | strict batch views/checkpoints and reports still JSON (A3/B7) |
 | SK-02 module structure | — | — | OPEN | `storage/` and `offline_analysis/` do not exist; create only files actually needed |
 | SK-03 hard RAM byte budget | bounded channels (count only) | — | OPEN | `StorageConfig` (`initial_mib`/`max_mib`/`system_reserve_mib`, queue/batch budgets) in the typed operational config; `MemoryBudget`/`BytePermit`; RSS/swap observation; EconWorker/winner/shadow collections byte-bounded |
-| SK-04 separate batch writer | `JournalSink` writes every frame unbuffered on the capture thread | `market/sink.rs` | OPEN | dedicated `MarketJournalWorker` behind the existing bounded channel; bounded batches; configurable sync points; FE-04/P8 durability unchanged |
+| SK-04 separate batch writer | `JournalSink` writes every typed frame unbuffered on the capture thread | `market/sink.rs` | OPEN | dedicated `MarketJournalWorker` behind the existing bounded channel; bounded batches; configurable sync points; FE-04/P8 durability unchanged |
 | SK-05 backpressure / 48 h availability | — | — | OPEN | stall handling within `max_mib`, INCOMPLETE/HALT instead of silent drop |
 | SK-06 CapacityPreflight | — | PERSIST-05 synthetic probe only (65,111 / 111,481 frames/s; 1.077× / 1.746× JSONL size) | OPEN · NOT_MEASURED | 4/24/48 h preflight from real rates; CAPACITY_UNVERIFIED otherwise |
 | SK-07 segmentation | one `market.p0j` per run | — | OPEN | hash/sequence-chained segments, rotation/seal/recovery, cross-segment reader |

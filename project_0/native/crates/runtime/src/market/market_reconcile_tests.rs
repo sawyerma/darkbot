@@ -165,7 +165,7 @@ fn full_slot_repeat_and_live_duplicate_do_not_double_count() {
     let (mut c, mut s) = canonical_core(10, 10);
     let tx = canonical_tx("live", 10);
     c.start_observation(0, 100);
-    c.on_transaction(&as_observed(&tx, "live", 10, false), 0, &mut s)
+    c.on_transaction(as_observed(&tx, "live", 10, false), 0, &mut s)
         .unwrap();
     c.stop_observation();
     c.reconcile_slots(
@@ -190,7 +190,7 @@ fn full_slot_live_duplicate_still_validates_instruction_event_parity() {
     let (mut c, mut s) = canonical_core(10, 10);
     let mut tx = canonical_tx("live", 10);
     c.start_observation(0, 100);
-    c.on_transaction(&as_observed(&tx, "live", 10, false), 0, &mut s)
+    c.on_transaction(as_observed(&tx, "live", 10, false), 0, &mut s)
         .unwrap();
     c.stop_observation();
     tx["meta"]["logMessages"] = json!([]);

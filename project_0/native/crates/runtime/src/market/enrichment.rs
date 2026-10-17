@@ -6,14 +6,14 @@ use darkbot_solana::chain::ChainMeta;
 // On-chain enrichment from a decoded transaction (`darkbot_solana::chain::ChainTx`)
 // ------------------------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenDelta {
     pub mint: String,
     pub native_delta: i128,
     pub decimals: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TxEnrichment {
     pub meta_available: bool,
     pub tx_version: Option<String>,

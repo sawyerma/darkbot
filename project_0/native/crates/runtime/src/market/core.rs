@@ -1,4 +1,7 @@
 //! Market observation state and event bookkeeping.
+use super::rows::{
+    MarketCoverage, MarketLiquidation, MarketTransaction, ReceiverRow, TxOrigin, WindowEvent,
+};
 use super::*;
 
 // ------------------------------------------------------------------------------------------
@@ -12,6 +15,8 @@ pub struct MarketStats {
     pub duplicate_transactions: u64,
     pub successful_transactions: u64,
     pub failed_transactions: u64,
+    /// Admitted transactions without a reliable status (absent/undecodable): never success.
+    pub unknown_status_transactions: u64,
     pub liquidation_transactions: u64,
     pub liquidation_events: u64,
     pub provisional_classic_events: u64,
@@ -156,6 +161,15 @@ pub struct ObserverCore {
     pub(super) gaps: Vec<gap::MarketGap>,
     pub(super) gap_stats: gap::GapStats,
     pub stats: MarketStats,
+}
+
+/// `Some(true)` success, `Some(false)` failed, `None` no reliable status.
+pub(super) fn status_class(status: &TxStatus) -> Option<bool> {
+    match status {
+        TxStatus::Success => Some(true),
+        TxStatus::Failed(_) => Some(false),
+        TxStatus::Unknown(_) => None,
+    }
 }
 
 /// Final verdict. `MARKET_DATA_VALID` needs a complete capture AND a verified source.
@@ -370,42 +384,40 @@ impl ObserverCore {
     pub fn coverage(
         &mut self,
         sink: &mut dyn MarketSink,
-        kind: &str,
         now_unix_s: u64,
         t_rx_ns: Option<u64>,
-        detail: Value,
+        event: WindowEvent,
     ) -> std::io::Result<()> {
         let counted = self.in_window(t_rx_ns);
         if counted {
-            match kind {
-                "GAP" => {
+            match &event {
+                WindowEvent::Gap { from_slot, .. } => {
                     self.stats.gap_count += 1;
-                    self.record_gap(t_rx_ns, now_unix_s, &detail);
+                    self.record_gap(t_rx_ns, now_unix_s, *from_slot);
                     self.mark_incomplete("GAP");
                 }
-                "RECONNECT" => {
+                WindowEvent::Reconnect { attempt } => {
                     self.stats.reconnect_count += 1;
-                    self.record_gap_reconnect(t_rx_ns, &detail);
+                    self.record_gap_reconnect(t_rx_ns, Some(u64::from(*attempt)));
                 }
-                "INGRESS_OVERFLOW" => {
+                WindowEvent::IngressOverflow { .. } => {
                     self.stats.ingress_overflow_count += 1;
                     self.mark_incomplete("INGRESS_OVERFLOW");
                 }
-                "FATAL" => {
+                WindowEvent::Fatal { .. } | WindowEvent::IngressThreadEnded => {
                     self.stats.fatal_count += 1;
                     self.mark_incomplete("FATAL");
                 }
                 _ => {}
             }
         }
-        sink.coverage(&json!({
-            "event": kind,
-            "timestamp_utc": utc_iso(now_unix_s),
-            "t_rx_ns": t_rx_ns,
-            "observing": self.observing,
-            "counted": counted,
-            "detail": detail,
-        }))
+        sink.coverage(&MarketCoverage::Window {
+            observed_unix_s: now_unix_s,
+            t_rx_ns,
+            observing: self.observing,
+            counted,
+            event,
+        })
     }
 
     /// Slot notifications are telemetry; their spacing documents stream liveness.
@@ -422,11 +434,12 @@ impl ObserverCore {
     }
 
     /// Dedupe + window + counters. `false` = not part of the measurement.
+    /// `success`: `Some(true)` success, `Some(false)` failed, `None` status UNKNOWN.
     pub(super) fn admit(
         &mut self,
         signature: &str,
         slot: u64,
-        success: bool,
+        success: Option<bool>,
         t_rx_ns: u64,
     ) -> bool {
         if !self.observing {
@@ -456,7 +469,12 @@ impl ObserverCore {
         self.admit_identity(signature, slot, success)
     }
 
-    pub(super) fn admit_identity(&mut self, signature: &str, slot: u64, success: bool) -> bool {
+    pub(super) fn admit_identity(
+        &mut self,
+        signature: &str,
+        slot: u64,
+        success: Option<bool>,
+    ) -> bool {
         if self
             .econ
             .as_ref()
@@ -477,10 +495,13 @@ impl ObserverCore {
             return false;
         }
         self.stats.unique_transactions += 1;
-        if success {
-            self.stats.successful_transactions += 1;
-        } else {
-            self.stats.failed_transactions += 1;
+        match success {
+            Some(true) => self.stats.successful_transactions += 1,
+            Some(false) => self.stats.failed_transactions += 1,
+            None => {
+                self.stats.unknown_status_transactions += 1;
+                self.mark_incomplete("TX_STATUS_UNKNOWN");
+            }
         }
         self.stats.first_observed_slot =
             Some(self.stats.first_observed_slot.map_or(slot, |s| s.min(slot)));
@@ -581,35 +602,14 @@ impl ObserverCore {
                     None => self.stats.tx_fee_unknown_transactions += 1,
                 }
             }
-            let token_deltas: Vec<Value> = e
-                .receiver_token_deltas
-                .iter()
-                .map(|d| json!({"mint": d.mint, "native_delta": d.native_delta.to_string(), "decimals": d.decimals}))
-                .collect();
-            sink.liquidation(&json!({
-                "observed_at_utc": t_rx_ns.map(|_| utc_iso(observed_unix_s)),
-                "t_rx_ns": t_rx_ns,
-                "source": if t_rx_ns.is_some() { "live" } else { "gap_backfill" },
-                "live_timestamp_qualified": t_rx_ns.is_some(),
-                "slot": slot,
-                "signature": signature,
-                "event_index": ev.event_index,
-                "tx_version": e.tx_version,
-                "target": ev.target.to_string(),
-                "receiver": ev.receiver.to_string(),
-                "seized_equity_usd": ev.seized_equity_usd,
-                "repaid_equity_usd": ev.repaid_equity_usd,
-                "gross_edge_usd": ev.gross_edge_usd(),
-                "protocol_flat_fee_lamports": ev.protocol_flat_fee_lamports,
-                "tx_fee_lamports": e.tx_fee_lamports,
-                "fee_payer": e.fee_payer,
-                "receiver_lamport_delta": e.receiver_lamport_delta.map(|d| d.to_string()),
-                "receiver_token_deltas": token_deltas,
-                "receiver_token_deltas_complete": e.token_deltas_complete,
-                "cu_limit": e.cu_limit,
-                "cu_price_micro_lamports": e.cu_price_micro_lamports,
-                "transaction_success": true,
-                "enrichment_status": enrichment_status,
+            sink.liquidation(&MarketLiquidation::Receiver(ReceiverRow {
+                signature: signature.to_owned(),
+                slot,
+                t_rx_ns,
+                observed_unix_s,
+                event: ev.clone(),
+                enrichment: e,
+                enrichment_status: enrichment_status.to_owned(),
             }))?;
         }
         Ok(())
@@ -627,11 +627,14 @@ impl ObserverCore {
         let result = match ev {
             IngressEvent::Health(h) => self.coverage(
                 sink,
-                "TRANSPORT_HEALTH",
                 now_unix_s,
                 Some(h.t_rx_ns),
-                json!({"connected":h.connected,"last_application_frame_age_ns":h.last_frame_age_ns,
-                    "application_frames":h.frames,"last_slot":h.last_slot}),
+                WindowEvent::TransportHealth {
+                    connected: h.connected,
+                    last_application_frame_age_ns: h.last_frame_age_ns,
+                    application_frames: h.frames,
+                    last_slot: h.last_slot,
+                },
             ),
             IngressEvent::Transport {
                 state,
@@ -652,17 +655,25 @@ impl ObserverCore {
                 if state == "INCOMPLETE_ABORT" {
                     self.mark_incomplete("WSS_RECOVERY_EXHAUSTED");
                 }
-                self.coverage(sink, "TRANSPORT_STATE", now_unix_s, Some(t_rx_ns),
-                    json!({"state":state,"code":code,"attempt":attempt,"last_valid_slot":last_slot}))
+                self.coverage(
+                    sink,
+                    now_unix_s,
+                    Some(t_rx_ns),
+                    WindowEvent::TransportState {
+                        state: state.into(),
+                        code: code.into(),
+                        attempt,
+                        last_valid_slot: last_slot,
+                    },
+                )
             }
             IngressEvent::Reconnected {
                 attempt, t_rx_ns, ..
             } => self.coverage(
                 sink,
-                "RECONNECT",
                 now_unix_s,
                 Some(t_rx_ns),
-                json!({"attempt": attempt}),
+                WindowEvent::Reconnect { attempt },
             ),
             IngressEvent::Gap {
                 from_slot,
@@ -671,25 +682,23 @@ impl ObserverCore {
                 ..
             } => self.coverage(
                 sink,
-                "GAP",
                 now_unix_s,
                 Some(t_rx_ns),
-                json!({"from_slot": from_slot, "to_slot": to_slot}),
+                WindowEvent::Gap { from_slot, to_slot },
             ),
             IngressEvent::Fatal {
                 detail, t_rx_ns, ..
             } => self.coverage(
                 sink,
-                "FATAL",
                 now_unix_s,
                 Some(t_rx_ns),
-                json!({"detail": detail}),
+                WindowEvent::Fatal { detail },
             ),
             IngressEvent::Transaction(t) if self.source == MarketSource::Transactions => {
-                self.on_transaction(&t, now_unix_s, sink)
+                self.on_transaction(t, now_unix_s, sink)
             }
             IngressEvent::Logs(l) if self.source == MarketSource::Logs => {
-                self.on_logs(&l, now_unix_s, sink)
+                self.on_logs(l, now_unix_s, sink)
             }
             IngressEvent::Slot(s) => {
                 let progress = self
@@ -723,60 +732,61 @@ impl ObserverCore {
         result
     }
 
-    /// `transactions` source: the full payload is the primary raw evidence; no RPC.
+    /// `transactions` source: the decoded payload is the primary evidence; no RPC. A payload
+    /// without a reliable status is recorded and counted UNKNOWN, never as success.
     pub fn on_transaction(
         &mut self,
-        t: &TransactionObserved,
+        t: TransactionObserved,
         now_unix_s: u64,
         sink: &mut dyn MarketSink,
     ) -> std::io::Result<()> {
-        let success = t.err.is_none();
+        let success = match &t.tx {
+            Ok(tx) => status_class(&tx.status()),
+            Err(_) => None,
+        };
         if !self.admit(&t.signature, t.slot, success, t.t_rx_ns) {
             return Ok(());
         }
-        sink.transaction(&json!({
-            "observed_at_utc": utc_iso(now_unix_s),
-            "t_rx_ns": t.t_rx_ns,
-            "slot": t.slot,
-            "signature": t.signature,
-            "tx_version": format!("{:?}", t.version),
-            "success": success,
-            "err": t.err,
-            "source": "transactionSubscribe",
-            "raw": t.raw,
-        }))?;
-        // One typed decode of the payload transaction (JFI-02 boundary); a decode failure stays
-        // visible as an incomplete reason instead of looking like a missing log.
-        let chain = t.raw.get("transaction").map(|v| {
-            darkbot_solana::chain::decode_entry(v, t.slot, t.tx_index_in_slot.map(u64::from), None)
-        });
-        if let Some(Err(e)) = &chain {
+        if let Err(e) = &t.tx {
             self.mark_incomplete(e.0);
         }
-        let tx = match &chain {
-            Some(Ok(c)) => Some(c),
-            _ => None,
+        let (signature, slot, t_rx_ns, tx_index) =
+            (t.signature, t.slot, t.t_rx_ns, t.tx_index_in_slot);
+        let row = MarketTransaction {
+            signature,
+            slot,
+            origin: TxOrigin::TransactionSubscribe {
+                observed_unix_s: now_unix_s,
+                t_rx_ns,
+                tx: t.tx.map_err(|e| e.0.to_owned()),
+            },
         };
-        let logs = tx
+        sink.transaction(&row)?;
+        let Some(success) = success else {
+            // Status UNKNOWN (reason recorded): its logged events are never counted.
+            return Ok(());
+        };
+        let tx = row.chain_tx();
+        let Some(logs) = tx
             .and_then(|c| c.meta.as_ref())
-            .and_then(|m| m.log_messages.clone());
-        let Some(logs) = logs else {
+            .and_then(|m| m.log_messages.as_ref())
+        else {
             if success {
                 self.stats.log_messages_missing += 1;
                 self.mark_incomplete("LOG_MESSAGES_MISSING");
             }
             return Ok(());
         };
-        let decoded = decode_receiver_events(&logs, &self.program);
+        let signature = row.signature.as_str();
+        let decoded = decode_receiver_events(logs, &self.program);
         self.absorb_decode(&decoded, success);
         if success && decoded.truncated {
             // [r6] the payload already carries the full transaction: qualify immediately, no RPC.
             let logged = self.note_truncated(&decoded);
-            let q = match &chain {
-                Some(Ok(decoded)) => {
-                    qualify_truncated(decoded, &t.signature, t.slot, &self.program, &logged)
+            let q = match tx {
+                Some(decoded) => {
+                    qualify_truncated(decoded, signature, slot, &self.program, &logged)
                 }
-                Some(Err(e)) => TruncationQualification::Unqualified(e.0),
                 None => TruncationQualification::Unqualified("TX_DECODE"),
             };
             self.apply_truncation(q);
@@ -784,13 +794,7 @@ impl ObserverCore {
         if !success || decoded.events.is_empty() {
             return Ok(());
         }
-        self.aggregate(
-            &t.signature,
-            t.slot,
-            Some(t.t_rx_ns),
-            t.tx_index_in_slot,
-            &decoded.events,
-        );
+        self.aggregate(signature, slot, Some(t_rx_ns), tx_index, &decoded.events);
         self.stats.enrichment_requested += 1;
         let meta_available = tx.is_some_and(|c| c.meta.is_some());
         let status = if meta_available {
@@ -802,9 +806,9 @@ impl ObserverCore {
         };
         self.write_liquidation_rows(
             sink,
-            &t.signature,
-            t.slot,
-            Some(t.t_rx_ns),
+            signature,
+            slot,
+            Some(t_rx_ns),
             now_unix_s,
             &decoded.events,
             tx,
@@ -815,37 +819,46 @@ impl ObserverCore {
     /// `logs` source: economics from logs immediately; enrichment deferred until after capture.
     pub fn on_logs(
         &mut self,
-        l: &LogsObserved,
+        l: LogsObserved,
         now_unix_s: u64,
         sink: &mut dyn MarketSink,
     ) -> std::io::Result<()> {
-        let success = l.err.is_none();
-        if !self.admit(&l.signature, l.slot, success, l.t_rx_ns) {
+        let success = status_class(&l.logs.status);
+        if !self.admit(&l.logs.signature, l.logs.slot, success, l.t_rx_ns) {
             return Ok(());
         }
-        sink.transaction(&json!({
-            "observed_at_utc": utc_iso(now_unix_s),
-            "t_rx_ns": l.t_rx_ns,
-            "slot": l.slot,
-            "signature": l.signature,
-            "tx_version": Value::Null,
-            "success": success,
-            "err": l.err,
-            "source": "logsSubscribe",
-            "raw": l.raw,
-        }))?;
+        let row = MarketTransaction {
+            signature: l.logs.signature.clone(),
+            slot: l.logs.slot,
+            origin: TxOrigin::LogsSubscribe {
+                observed_unix_s: now_unix_s,
+                t_rx_ns: l.t_rx_ns,
+                logs: l.logs,
+            },
+        };
+        sink.transaction(&row)?;
         // A timeboxed diagnostic can be terminated before graceful finalization.
         // Make each admitted live signature visible on disk immediately rather
         // than letting the final BufWriter batch disappear on SIGTERM.
         sink.flush()?;
-        if l.logs.is_empty() {
+        let Some(success) = success else {
+            // Status UNKNOWN (reason recorded): its logged events are never counted.
+            return Ok(());
+        };
+        let (signature, slot, t_rx_ns) = (row.signature.as_str(), row.slot, l.t_rx_ns);
+        let logs = row
+            .chain_logs()
+            .and_then(|c| c.logs.as_deref())
+            .unwrap_or_default();
+        if logs.is_empty() {
             if success {
                 self.stats.log_messages_missing += 1;
                 self.mark_incomplete("LOG_MESSAGES_MISSING");
             }
             return Ok(());
         }
-        let decoded = decode_receiver_events(&l.logs, &self.program);
+
+        let decoded = decode_receiver_events(logs, &self.program);
         self.absorb_decode(&decoded, success);
         if success {
             for ev in &decoded.additional_events {
@@ -863,7 +876,7 @@ impl ObserverCore {
                 }
                 eprintln!(
                     "[MARKET/LIQUIDATION] provisional=true type={} slot={} signature={} target={} actor={} gross_usd={}",
-                    ev.kind.as_str(), l.slot, l.signature, ev.target, ev.actor,
+                    ev.kind.as_str(), slot, signature, ev.target, ev.actor,
                     ev.gross_edge_usd.map(|v| format!("{v:.6}")).unwrap_or_else(|| "UNKNOWN".to_owned())
                 );
             }
@@ -875,8 +888,8 @@ impl ObserverCore {
                 self.apply_truncation(TruncationQualification::Unqualified("QUEUE_FULL"));
             } else {
                 self.truncated_pending.push_back(TruncatedPending {
-                    signature: l.signature.clone(),
-                    slot: l.slot,
+                    signature: signature.to_owned(),
+                    slot: slot,
                     logged,
                 });
             }
@@ -884,13 +897,13 @@ impl ObserverCore {
         if !success || decoded.events.is_empty() {
             return Ok(());
         }
-        self.aggregate(&l.signature, l.slot, Some(l.t_rx_ns), None, &decoded.events);
+        self.aggregate(signature, slot, Some(t_rx_ns), None, &decoded.events);
         // The accounting ledger remains deferred for exact post-capture enrichment.
         // The operator must still see every successfully decoded live liquidation NOW.
         for ev in &decoded.events {
             eprintln!(
                 "[MARKET/RECEIVERSHIP] provisional=true slot={} signature={} event={} target={} receiver={} gross_usd={:.6}",
-                l.slot, l.signature, ev.event_index, ev.target, ev.receiver, ev.gross_edge_usd()
+                slot, signature, ev.event_index, ev.target, ev.receiver, ev.gross_edge_usd()
             );
         }
         self.stats.enrichment_requested += 1;
@@ -899,9 +912,9 @@ impl ObserverCore {
             self.stats.enrichment_skipped_queue_full += 1;
             return self.write_liquidation_rows(
                 sink,
-                &l.signature,
-                l.slot,
-                Some(l.t_rx_ns),
+                signature,
+                slot,
+                Some(t_rx_ns),
                 now_unix_s,
                 &decoded.events,
                 None,
@@ -909,9 +922,9 @@ impl ObserverCore {
             );
         }
         self.deferred.push_back(DeferredLiquidation {
-            signature: l.signature.clone(),
-            slot: l.slot,
-            t_rx_ns: l.t_rx_ns,
+            signature: signature.to_owned(),
+            slot: slot,
+            t_rx_ns: t_rx_ns,
             observed_unix_s: now_unix_s,
             events: decoded.events,
         });
@@ -1001,10 +1014,9 @@ impl ObserverCore {
             Err(e) => {
                 self.coverage(
                     sink,
-                    "ENRICHMENT_INIT_FAILED",
                     now_unix_s,
                     None,
-                    json!({"error": e}),
+                    WindowEvent::EnrichmentInitFailed { error: e.clone() },
                 )?;
                 self.enrichment_init_error = Some(e);
                 self.write_deferred_unenriched(sink, "ENRICHMENT_INIT_FAILED")
@@ -1193,6 +1205,7 @@ impl ObserverCore {
             "duplicate_transactions": s.duplicate_transactions,
             "successful_transactions": s.successful_transactions,
             "failed_transactions": s.failed_transactions,
+            "unknown_status_transactions": s.unknown_status_transactions,
             "liquidation_transactions": s.liquidation_transactions,
             "liquidation_events": s.liquidation_events,
             "liquidations_per_hour": per_hour(total_events),

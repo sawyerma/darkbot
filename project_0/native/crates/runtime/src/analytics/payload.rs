@@ -8,6 +8,7 @@
 //! through `Frame::legacy_value` for offline readers and not-yet-migrated kinds, and is never
 //! written for a kind that has a payload type.
 use super::journal;
+use crate::market::observer::rows as market;
 use bincode::Options;
 use serde::{de::DeserializeOwned, Serialize};
 use std::io;
@@ -127,6 +128,9 @@ macro_rules! typed_kinds {
             k::OWNER_RECOVERY => $f::<super::evidence::OwnerRecovery>($kind, $schema, $bytes),
             k::C0_CENSUS_ROW => $f::<C0CensusAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_RESULT => $f::<C0CensusResult>($kind, $schema, $bytes),
+            k::MARKET_TRANSACTION => $f::<market::MarketTransaction>($kind, $schema, $bytes),
+            k::MARKET_LIQUIDATION => $f::<market::MarketLiquidation>($kind, $schema, $bytes),
+            k::MARKET_COVERAGE => $f::<market::MarketCoverage>($kind, $schema, $bytes),
             _ => Err(bad("PAYLOAD_KIND_UNTYPED")),
         }
     }};
@@ -149,10 +153,6 @@ pub const LEGACY_WRITABLE: &[u16] = {
         // JFI-FIX-06 (FE-04 financial journal)
         k::FE04_TRANSITION,
         k::FE04_LEGACY_IMPORT,
-        // JFI-FIX-03 (market capture)
-        k::MARKET_TRANSACTION,
-        k::MARKET_LIQUIDATION,
-        k::MARKET_COVERAGE,
         // JFI-FIX-05 (economics, verifier, reporting)
         k::ECON_SHADOW_EVALUATION,
         k::ECON_SNAPSHOT,
@@ -190,6 +190,15 @@ pub fn validate(kind: u16, schema: u16, bytes: &[u8]) -> io::Result<()> {
         decode::<P>(kind, schema, b).map(drop)
     }
     typed_kinds!(kind, schema, bytes, check)
+}
+
+/// The historical JSON row of a frame for explicit offline views: the value tree of a schema-1
+/// frame, or the legacy render of a typed market frame. Other typed kinds have no JSON view.
+pub fn legacy_view(frame: &journal::Frame) -> io::Result<serde_json::Value> {
+    if frame.schema == 1 {
+        return frame.legacy_value();
+    }
+    market::legacy_view(frame.kind, frame.schema, &frame.payload)
 }
 
 /// Human-readable text of a typed frame (offline inspection only).

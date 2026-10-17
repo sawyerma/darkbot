@@ -21,21 +21,21 @@ pub struct SummaryContext {
 
 pub use crate::analytics::market_report::render_report;
 
-/// Finalise: write any still-deferred liquidation, STOPPED, flush, `summary.json`, `final_report.txt`.
+/// Finalise: write any still-deferred liquidation, STOPPED, seal, `summary.json`, `final_report.txt`.
 pub fn finalize(
     core: &mut ObserverCore,
     sink: &mut dyn MarketSink,
     ctx: &SummaryContext,
     run_dir: &Path,
     now_unix_s: u64,
-    detail: Value,
+    stopped: super::rows::WindowEvent,
 ) -> Result<(Value, String), String> {
     core.write_deferred_unenriched(sink, "NOT_ENRICHED")
         .map_err(|e| format!("liquidations write: {e}"))?;
     core.fail_truncated_pending("NOT_QUALIFIED");
-    core.coverage(sink, "STOPPED", now_unix_s, None, detail)
+    core.coverage(sink, now_unix_s, None, stopped)
         .map_err(|e| format!("coverage write: {e}"))?;
-    // A journal-backed sink seals and renders its views here, before summary.json exists.
+    // A journal-backed sink seals here, before summary.json exists; no view is rendered.
     let binding = sink
         .finish()
         .map_err(|e| format!("evidence journal: {e}"))?;
@@ -53,17 +53,12 @@ pub fn finalize(
         };
     }
     if let Some(binding) = &binding {
-        summary["evidence_journal"] = binding.clone();
+        summary["evidence_journal"] = serde_json::to_value(binding).map_err(|e| e.to_string())?;
     }
     let summary_path = run_dir.join("summary.json");
     let pretty = serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?;
     fs::write(&summary_path, pretty).map_err(|e| format!("summary.json: {e}"))?;
-    let mut files = vec![
-        ("transactions_jsonl", run_dir.join("transactions.jsonl")),
-        ("liquidations_jsonl", run_dir.join("liquidations.jsonl")),
-        ("coverage_jsonl", run_dir.join("coverage.jsonl")),
-        ("summary_json", summary_path.clone()),
-    ];
+    let mut files = vec![("summary_json", summary_path.clone())];
     if binding.is_some() {
         files.insert(0, ("market_journal", run_dir.join(MARKET_JOURNAL)));
     }

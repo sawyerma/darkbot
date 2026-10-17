@@ -33,8 +33,10 @@ impl LiquidationType {
 
 /// Native protocol amounts of one event, exactly as logged (f64 in the event layout). The
 /// serialized keys are the report contract; `provenance`/`scope`/`units` state the limits.
+/// Text formats keep the historical untagged shape; the binary journal stores the variant tag
+/// (an untagged enum cannot be decoded from a non-self-describing format).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(remote = "Self")]
 pub enum NativeEvidence {
     Classic {
         provenance: String,
@@ -64,6 +66,35 @@ pub enum NativeEvidence {
     },
 }
 
+impl Serialize for NativeEvidence {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::Error;
+        if !s.is_human_readable() {
+            return NativeEvidence::serialize(self, s);
+        }
+        let tagged = NativeEvidence::serialize(self, serde_json::value::Serializer)
+            .map_err(S::Error::custom)?;
+        match tagged {
+            Value::Object(m) if m.len() == 1 => m.into_iter().next().unwrap().1.serialize(s),
+            _ => Err(S::Error::custom("NATIVE_EVIDENCE_SHAPE")),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for NativeEvidence {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        if !d.is_human_readable() {
+            return NativeEvidence::deserialize(d);
+        }
+        // Untagged: the first variant whose required fields are present, in declaration order.
+        let body = Value::deserialize(d)?;
+        ["Classic", "Bankruptcy", "Flows"]
+            .into_iter()
+            .find_map(|tag| NativeEvidence::deserialize(json!({ tag: body.clone() })).ok())
+            .ok_or_else(|| D::Error::custom("NATIVE_EVIDENCE_NO_VARIANT"))
+    }
+}
+
 /// A visible System transfer in the transaction (context only: never attributed as a cost).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VisiblePayment {
@@ -73,7 +104,7 @@ pub struct VisiblePayment {
     pub cost_attribution: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TruthEvent {
     pub signature: String,
     pub slot: u64,
@@ -100,12 +131,10 @@ pub struct TruthEvent {
     pub priority_fee_lamports: Option<u64>,
     pub winner_net_edge_usd: Option<f64>,
     pub winner_net_edge_complete: bool,
-    #[serde(skip_deserializing)]
-    pub economic_provenance: &'static str,
+    pub economic_provenance: String,
     pub block_time: Option<i64>,
     pub live_t_rx_ns: Option<u64>,
-    #[serde(skip_deserializing)]
-    pub discovery_source: &'static str,
+    pub discovery_source: String,
     pub permissionless_profit_opportunity: bool,
 }
 
@@ -575,8 +604,8 @@ pub(super) fn classify(
             winner_net_edge_usd:None,winner_net_edge_complete:false,
             economic_provenance:match ev.kind {LiquidationType::Classic=>"NATIVE_INSTRUCTION_AND_EVENT; SLOT_PRICE_AND_DECIMALS_UNKNOWN; LIABILITY_COST_INCLUDES_INSURANCE",
                 LiquidationType::Receivership|LiquidationType::ForcedDeleverage=>"CACHED_PROTOCOL_EQUITY_USD: SEIZED_MINUS_REPAID; SOL_USD_AND_EXTERNAL_COSTS_UNKNOWN",
-                LiquidationType::BankruptcySettlement=>"DEBT_SETTLEMENT; NOT_LIQUIDATOR_PROFIT"},block_time,live_t_rx_ns:live,
-            discovery_source:if live.is_some(){"BOTH"}else{"RECONCILIATION"},
+                LiquidationType::BankruptcySettlement=>"DEBT_SETTLEMENT; NOT_LIQUIDATOR_PROFIT"}.into(),block_time,live_t_rx_ns:live,
+            discovery_source:if live.is_some(){"BOTH"}else{"RECONCILIATION"}.into(),
             permissionless_profit_opportunity:matches!(ev.kind,LiquidationType::Classic|LiquidationType::Receivership)})
     }).collect()
 }

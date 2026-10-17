@@ -91,9 +91,13 @@ pub use decoding::{decode_receiver_events, LogDecode, ReceiverEvent};
 #[path = "enrichment.rs"]
 mod enrichment;
 pub use enrichment::{enrich, TokenDelta, TxEnrichment};
+#[path = "rows.rs"]
+pub mod rows;
 #[path = "sink.rs"]
 mod sink;
-pub use sink::{JournalSink, JsonlSink, MarketSink, MARKET_JOURNAL, MARKET_VIEWS};
+pub use sink::{
+    JournalSink, JsonlSink, MarketJournalBinding, MarketSink, MARKET_JOURNAL, MARKET_VIEWS,
+};
 
 #[path = "core.rs"]
 mod core;

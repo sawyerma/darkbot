@@ -1,5 +1,9 @@
 //! Canonical finalized block reconciliation, invoked only after capture and drain.
 //! Slot notifications define an explicit slot-complete window; they are NOT finality proof.
+use super::rows::{
+    MarketCoverage, MarketLiquidation, MarketTransaction, ReconciliationRow, SlotBoundaryRow,
+    TxOrigin,
+};
 use super::*;
 use crate::winner::{resolve_account_keys, ChainInstruction, ChainTx, TxStatus};
 use darkbot_solana::chain::TxWireVersion;
@@ -102,6 +106,37 @@ pub(super) struct Reconciliation {
     pub last_block_time: Option<i64>,
     pub error: Option<&'static str>,
 }
+impl From<&SlotBoundary> for SlotBoundaryRow {
+    fn from(b: &SlotBoundary) -> Self {
+        Self {
+            slot: b.slot,
+            t_rx_ns: b.t_rx_ns,
+            observed_unix_s: b.observed_unix_s,
+            provenance: b.provenance.into(),
+        }
+    }
+}
+impl From<&Reconciliation> for ReconciliationRow {
+    fn from(r: &Reconciliation) -> Self {
+        Self {
+            market_slot_start: r.market_slot_start.as_ref().map(Into::into),
+            market_slot_end: r.market_slot_end.as_ref().map(Into::into),
+            attempted: r.attempted,
+            complete: r.complete,
+            slots_expected: r.slots_expected,
+            slots_produced: r.slots_produced,
+            slots_skipped_confirmed: r.slots_skipped_confirmed,
+            slots_fetched: r.slots_fetched,
+            slots_failed: r.slots_failed,
+            slots_unresolved: r.slots_unresolved,
+            transactions_scanned: r.transactions_scanned,
+            marginfi_transactions: r.marginfi_transactions,
+            first_block_time: r.first_block_time,
+            last_block_time: r.last_block_time,
+            error: r.error.map(str::to_owned),
+        }
+    }
+}
 type ReconcileRpc<'a> = dyn FnMut(&str, Value, Duration) -> Result<Value, &'static str> + 'a;
 
 /// Validate ALL key/index views before deciding relevance, including inner instructions.
@@ -203,11 +238,13 @@ impl ObserverCore {
         {
             r.market_slot_end = Some(b);
         }
-        sink.coverage(&json!({"event":"MARKET_SLOT_BOUNDARY_EVIDENCE", "slot":slot,
-            "t_rx_ns":at,"timestamp_utc":utc_iso(now),"detail":{
-                "market_slot_start":r.market_slot_start,"market_slot_end":r.market_slot_end,
-                "window_semantics":"inclusive whole slots from first to highest in-window slot notification; partial temporal boundary slots included",
-                "finality_proven":false}}))
+        sink.coverage(&MarketCoverage::SlotBoundary {
+            slot,
+            t_rx_ns: at,
+            observed_unix_s: now,
+            start: r.market_slot_start.as_ref().map(Into::into),
+            end: r.market_slot_end.as_ref().map(Into::into),
+        })
     }
 
     pub(super) fn reconcile_slots(
@@ -258,9 +295,9 @@ impl ObserverCore {
         );
         self.reconciliation.complete =
             self.reconciliation.error.is_none() && self.reconciliation.slots_unresolved == 0;
-        sink.coverage(
-            &json!({"event":"FULL_SLOT_RECONCILIATION_FINAL", "detail":self.reconciliation}),
-        )?;
+        sink.coverage(&MarketCoverage::ReconciliationFinal(
+            (&self.reconciliation).into(),
+        ))?;
         Ok(())
     }
 
@@ -342,7 +379,10 @@ impl ObserverCore {
                 Ok(v) => v,
                 Err(e) => {
                     self.reconciliation.slots_failed += 1;
-                    sink.coverage(&json!({"event":"FULL_SLOT_RESULT","slot":slot,"status":"FAILED","error":e}))?;
+                    sink.coverage(&MarketCoverage::SlotFailed {
+                        slot,
+                        error: e.into(),
+                    })?;
                     return Ok(Err(e));
                 }
             };
@@ -366,8 +406,12 @@ impl ObserverCore {
                 if parent >= skipped {
                     return Ok(Err("SKIP_PARENT_UNPROVEN"));
                 }
-                sink.coverage(&json!({"event":"FULL_SLOT_RESULT","slot":skipped,"status":"SKIPPED_CONFIRMED",
-                    "successor_slot":slot,"parent_slot":parent,"successor_blockhash":hash,"proof":"FINALIZED_PARENT_LINK"}))?;
+                sink.coverage(&MarketCoverage::SlotSkipped {
+                    slot: skipped,
+                    successor_slot: slot,
+                    parent_slot: parent,
+                    successor_blockhash: hash.into(),
+                })?;
                 self.reconciliation.slots_skipped_confirmed += 1;
             }
             if slot > hi {
@@ -376,11 +420,8 @@ impl ObserverCore {
             }
             let typed =
                 require!(darkbot_solana::chain::decode_block(&block, slot).map_err(|e| e.0));
-            // Legacy row payloads until the typed market rows replace them (Ticket 3 step 4).
-            let txs = require!(block["transactions"]
-                .as_array()
-                .ok_or("BLOCK_TRANSACTIONS_MISSING"));
-            for (index, raw) in txs.iter().enumerate() {
+            let total = typed.transactions.len() as u64;
+            for (index, entry) in typed.transactions.into_iter().enumerate() {
                 if Instant::now() >= deadline {
                     return Ok(Err("RECONCILIATION_DEADLINE"));
                 }
@@ -388,28 +429,36 @@ impl ObserverCore {
                     return Ok(Err("RECONCILIATION_TRANSACTION_BUDGET"));
                 }
                 self.reconciliation.transactions_scanned += 1;
-                let mut raw = raw.clone();
-                let obj = require!(raw.as_object_mut().ok_or("TX_SHAPE"));
-                obj.insert("slot".into(), json!(slot));
-                obj.insert("transactionIndex".into(), json!(index));
-                let tx = require!(typed.transactions[index].as_ref().map_err(|e| e.0));
-                require!(validate_full_transaction(tx));
-                let keys = require!(resolve_account_keys(tx).map_err(|e| e.code()));
+                let tx = require!(entry.map_err(|e| e.0));
+                require!(validate_full_transaction(&tx));
+                let keys = require!(resolve_account_keys(&tx).map_err(|e| e.code()));
                 if keys.contains(&self.program) {
                     self.reconciliation.marginfi_transactions += 1;
+                    let signature = tx.signatures[0].clone();
                     // Persist full relevant TX before any liquidation/strategy decision.
-                    sink.transaction(&json!({"source":"full_slot_reconciliation","slot":slot,"transaction_index":index,
-                        "signature":tx.signatures[0],"blockhash":hash,"block_time":header.block_time,"raw":raw}))?;
-                    let signature = &tx.signatures[0];
+                    let row = MarketTransaction {
+                        signature: signature.clone(),
+                        slot,
+                        origin: TxOrigin::FullSlot {
+                            transaction_index: index as u64,
+                            blockhash: hash.to_owned(),
+                            block_time: header.block_time,
+                            tx,
+                        },
+                    };
+                    sink.transaction(&row)?;
+                    let tx = row
+                        .chain_tx()
+                        .expect("full-slot row carries its transaction");
                     let live = self
                         .truth
                         .live_receipts
-                        .get(signature)
+                        .get(&signature)
                         .filter(|(s, _)| *s == slot)
                         .map(|(_, t)| *t);
                     let events =
                         require!(truth::classify(tx, &self.program, header.block_time, live));
-                    if self.truth.signatures.contains(signature) {
+                    if self.truth.signatures.contains(&signature) {
                         self.truth.duplicate_transactions += 1;
                         return Ok(Err("DUPLICATE_CANONICAL_TRANSACTION"));
                     }
@@ -420,23 +469,29 @@ impl ObserverCore {
                         self.truth.retention_error = true;
                         return Ok(Err("CANONICAL_MARKET_RETENTION"));
                     }
-                    self.truth.signatures.insert(signature.clone());
+                    self.truth.signatures.insert(signature);
                     for event in events {
-                        sink.liquidation(
-                            &json!({"source":"canonical_market_truth","event":event}),
-                        )?;
+                        let row = MarketLiquidation::Canonical(Box::new(event));
+                        sink.liquidation(&row)?;
+                        let MarketLiquidation::Canonical(event) = row else {
+                            unreachable!("built as canonical above")
+                        };
                         if let Some(h) = &self.econ {
-                            h.emit(crate::econ::Evidence::CanonicalMarket(Box::new(
-                                event.clone(),
-                            )));
+                            h.emit(crate::econ::Evidence::CanonicalMarket(event.clone()));
                         }
-                        self.truth.events.push(event);
+                        self.truth.events.push(*event);
                     }
-                    require!(self.recover_transaction(slot, index, tx, &raw, sink)?);
+                    require!(self.recover_transaction(slot, index, tx, sink)?);
                 }
             }
-            sink.coverage(&json!({"event":"FULL_SLOT_RESULT","slot":slot,"status":"PRODUCED_FETCHED",
-                "blockhash":hash,"parent_slot":parent,"previous_blockhash":prev_hash,"block_time":header.block_time,"transactions_scanned":txs.len()}))?;
+            sink.coverage(&MarketCoverage::SlotProduced {
+                slot,
+                blockhash: hash.into(),
+                parent_slot: parent,
+                previous_blockhash: prev_hash.into(),
+                block_time: header.block_time,
+                transactions_scanned: total,
+            })?;
             self.reconciliation.slots_fetched += 1;
             // A progress unit is counted ONLY after the full block (including
             // relevant transactions and canonical evidence) has passed validation

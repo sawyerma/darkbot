@@ -177,7 +177,7 @@ fn run() -> Result<(), String> {
     }
     darkbot_runner::orchestration::fe_replay::bind_scope(&mut result, funding_class)?;
     result["logical_reads"] = json!(calls);
-    result["provider_actual"] = provider::shared().snapshot();
+    result["provider_actual"] = json!(provider::shared().snapshot());
     record(&mut evidence, kind::FE01_RESULT, &result, None)?;
     evidence
         .seal(result["status"] != "INCOMPLETE")

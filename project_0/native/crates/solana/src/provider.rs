@@ -305,10 +305,38 @@ impl Budget {
             s.successes = 0;
         }
     }
-    pub fn snapshot(&self) -> Value {
+    pub fn snapshot(&self) -> ProviderSnapshot {
         let s = self.state.lock().unwrap();
-        serde_json::json!({"scope":"PROCESS_SOLANA_PROVIDER_ACCOUNT","requests":s.requests,"http_429_count":s.rate_limits,"in_flight":s.active,"queued":s.queue.len(),"max_rps":self.limits.rpc_rps,"effective_rps":s.effective_rps,"max_concurrency":self.limits.rpc_concurrency,"burst":self.limits.rpc_burst,"bytes":s.bytes,"quota_qualified":false})
+        ProviderSnapshot {
+            scope: "PROCESS_SOLANA_PROVIDER_ACCOUNT".into(),
+            requests: s.requests,
+            http_429_count: u64::from(s.rate_limits),
+            in_flight: s.active as u64,
+            queued: s.queue.len() as u64,
+            max_rps: self.limits.rpc_rps,
+            effective_rps: s.effective_rps,
+            max_concurrency: self.limits.rpc_concurrency,
+            burst: self.limits.rpc_burst,
+            bytes: s.bytes,
+            quota_qualified: false,
+        }
     }
+}
+/// Process-wide provider account counters at one instant (typed; serialized only at the edge).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderSnapshot {
+    pub scope: String,
+    pub requests: u64,
+    pub http_429_count: u64,
+    pub in_flight: u64,
+    pub queued: u64,
+    pub max_rps: u64,
+    pub effective_rps: f64,
+    pub max_concurrency: u64,
+    pub burst: u64,
+    pub bytes: u64,
+    /// Provider quota is never qualified by these local counters.
+    pub quota_qualified: bool,
 }
 /// Meter blocking read paths chunk-by-chunk against the same process budget.
 pub fn read_body(

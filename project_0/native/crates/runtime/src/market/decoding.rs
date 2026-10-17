@@ -5,7 +5,7 @@ use super::*;
 // LiquidationReceiverEvent decoder (fail closed, program-attributed)
 // ------------------------------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReceiverEvent {
     pub event_index: u32,
     pub target: Pubkey,

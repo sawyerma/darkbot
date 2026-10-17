@@ -106,8 +106,8 @@ pub fn render(view: &View) -> io::Result<Option<Vec<u8>>> {
         if frame.kind == MANIFEST || frame.kind != view.kind {
             continue;
         }
-        // Views exist only for historical value-tree kinds (schema 1).
-        let value = frame.legacy_value()?;
+        // Historical value trees and typed market frames have views (explicit offline export).
+        let value = super::payload::legacy_view(&frame)?;
         match view.shape {
             Shape::Lines => {
                 serde_json::to_writer(&mut out, &value).map_err(io::Error::other)?;

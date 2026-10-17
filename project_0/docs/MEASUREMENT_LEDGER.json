@@ -3,9 +3,9 @@
   "snapshot_date": "2026-10-17",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "c46f1afa2e247210bc3cf4ac536169c5eb3152b4",
+    "git_blob_sha": "ce492e3511978928277abb8e593dbe1099e2939a",
     "as_of_code_commit": null,
-    "line_count": 5473,
+    "line_count": 5488,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014",
     "local_followup_base_commit": "9047c7b45988b0c8798b710bb97c183d0a063c7f",
@@ -143,7 +143,7 @@
         "econ/measurement/MT0/FE-01/census kinds"
       ],
       "write_admission": "LOCAL_PASS",
-      "ticket3": "A0 (STEP_1_3_AND_FILTERS) LOCAL_PASS; A1 raw-free ingress, A2 native MARKET_* frames, A3 native strict verifier/reports, A4 parity OPEN"
+      "ticket3": "A0 LOCAL_PASS; A1 raw-free ingress LOCAL_PASS; A2 typed MARKET_* frames LOCAL_PASS; A3 native strict verifier/reports OPEN; A4 parity PARTIAL (Python historical differential NOT_RUN)"
     },
     "gap_matrix": {
       "location": "project_0/docs/STATUS.md §12",
@@ -156,7 +156,7 @@
     },
     "storage_sk": {
       "spec": "PHASENPLAN SK-01..09 (0e5460c)",
-      "implementation": "SK-01 PARTIAL; SK-02..09 OPEN; SK-06 NOT_MEASURED; SK-08 DEFERRED_PRIORITY",
+      "implementation": "SK-01 PARTIAL (typed market capture); SK-02..09 OPEN; SK-06 NOT_MEASURED; SK-08 DEFERRED_PRIORITY",
       "pass": "NONE"
     }
   },
@@ -334,7 +334,12 @@
       "line_start": 5463,
       "line_end": 5473,
       "heading": "2026-10-17 — P5 fee wallet and P8 reconcile clock fail closed; STATUS §12 Ticket 3 / SK-01…09 corrected (LOCAL_PASS for the two fixes)"
+    },
+    "ticket3_a1_a2_20261017": {
+      "line_start": 5475,
+      "line_end": 5488,
+      "heading": "2026-10-17 — Ticket 3 A1/A2: raw-free ingress and typed MARKET_* frames (LOCAL_PASS; A3 OPEN, A4 PARTIAL)"
     }
   },
-  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission). 2026-10-16: P1B strict pinned Bank layout (fail-open prefix decode fixed), dual-size tests and promotion procedure recorded. 2026-10-16: P1B RC2 isolated probe build recorded (type-check PASS after 4 call-site changes; IDL discriminator parity). 2026-10-16: C0 census classifier and opt-in Shadow hook recorded; historical C0 evidence summarized; gate NOT_PROVEN. 2026-10-16: C0-FIX-01..05 recorded (sweep-fed bounded census worker, chain clock, no zero fallbacks, model classes). 2026-10-16: JFI-FIX-01/02 typed payload contract and owner evidence recorded; JFI overall OPEN. 2026-10-16: Ticket 1 journal write admission (no schema-1 rollback for typed kinds) recorded. 2026-10-16: Ticket 2 C0 identity coverage, typed per-account census journal, value-range handling recorded. 2026-10-16: STATUS §12 gap and acceptance matrix for every binding ticket added (no status raised without evidence). 2026-10-17: Ticket 3 steps 1-2 (typed chain model, winner meta.err fix, typed truth/enrichment) recorded. 2026-10-17: Ticket 3 step 3 (typed block envelopes in gap/reconcile) recorded. 2026-10-17: typed program filters and storable chain model recorded; remaining Ticket 3 scope listed. 2026-10-17: P5 fee-wallet and P8 reconcile-clock fail-closed fixes recorded; STATUS §12 Ticket 3 A0-A4 and SK-01..09 rows corrected/added."
+  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission). 2026-10-16: P1B strict pinned Bank layout (fail-open prefix decode fixed), dual-size tests and promotion procedure recorded. 2026-10-16: P1B RC2 isolated probe build recorded (type-check PASS after 4 call-site changes; IDL discriminator parity). 2026-10-16: C0 census classifier and opt-in Shadow hook recorded; historical C0 evidence summarized; gate NOT_PROVEN. 2026-10-16: C0-FIX-01..05 recorded (sweep-fed bounded census worker, chain clock, no zero fallbacks, model classes). 2026-10-16: JFI-FIX-01/02 typed payload contract and owner evidence recorded; JFI overall OPEN. 2026-10-16: Ticket 1 journal write admission (no schema-1 rollback for typed kinds) recorded. 2026-10-16: Ticket 2 C0 identity coverage, typed per-account census journal, value-range handling recorded. 2026-10-16: STATUS §12 gap and acceptance matrix for every binding ticket added (no status raised without evidence). 2026-10-17: Ticket 3 steps 1-2 (typed chain model, winner meta.err fix, typed truth/enrichment) recorded. 2026-10-17: Ticket 3 step 3 (typed block envelopes in gap/reconcile) recorded. 2026-10-17: typed program filters and storable chain model recorded; remaining Ticket 3 scope listed. 2026-10-17: P5 fee-wallet and P8 reconcile-clock fail-closed fixes recorded; STATUS §12 Ticket 3 A0-A4 and SK-01..09 rows corrected/added. 2026-10-17: Ticket 3 A1 raw-free ingress and A2 typed MARKET_* frames recorded (LOCAL_PASS); A3 OPEN, A4 PARTIAL."
 }

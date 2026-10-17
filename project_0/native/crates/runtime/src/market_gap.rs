@@ -1,7 +1,8 @@
 //! Bounded finalized-block recovery after capture and drain. Never a submission path.
+use super::rows::{MarketCoverage, MarketTransaction, TxOrigin};
 use super::*;
 use crate::winner::resolve_account_keys;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug)]
 pub struct GapConfig {
@@ -59,8 +60,8 @@ impl GapConfig {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct MarketGap {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MarketGap {
     from_slot: Option<u64>,
     pub(super) raw_failures: u64,
     last_failure_t_rx_ns: Option<u64>,
@@ -73,8 +74,9 @@ pub(super) struct MarketGap {
     last_healthy_t_rx_ns: Option<u64>,
     reconnect_t_rx_ns: Option<u64>,
     reconnect_attempt: Option<u64>,
-    recovery_status: &'static str,
-    error_code: Option<&'static str>,
+    /// `PENDING`, `RECOVERED` or `UNRECOVERED`.
+    recovery_status: String,
+    error_code: Option<String>,
     slots_checked: u64,
     transactions_scanned: u64,
     liquidation_events: u64,
@@ -107,7 +109,7 @@ pub(super) enum GapSlot {
 type SlotFetcher<'a> = dyn FnMut(u64, Duration) -> Result<GapSlot, &'static str> + 'a;
 
 impl ObserverCore {
-    pub(super) fn record_gap(&mut self, at: Option<u64>, now: u64, detail: &Value) {
+    pub(super) fn record_gap(&mut self, at: Option<u64>, now: u64, from_slot: Option<u64>) {
         if let Some(g) = self
             .gaps
             .last_mut()
@@ -126,7 +128,7 @@ impl ObserverCore {
             return;
         }
         self.gaps.push(MarketGap {
-            from_slot: detail["from_slot"].as_u64(),
+            from_slot,
             raw_failures: 1,
             last_failure_t_rx_ns: at,
             first_failure_unix_s: now,
@@ -138,20 +140,20 @@ impl ObserverCore {
             last_healthy_t_rx_ns: self.last_slot_progress_ns,
             reconnect_t_rx_ns: None,
             reconnect_attempt: None,
-            recovery_status: "PENDING",
+            recovery_status: "PENDING".into(),
             error_code: None,
             slots_checked: 0,
             transactions_scanned: 0,
             liquidation_events: 0,
         });
     }
-    pub(super) fn record_gap_reconnect(&mut self, at: Option<u64>, detail: &Value) {
+    pub(super) fn record_gap_reconnect(&mut self, at: Option<u64>, attempt: Option<u64>) {
         for g in &mut self.gaps {
             if g.first_post_reconnect_slot.is_none()
                 && at.zip(g.gap_t_rx_ns).is_some_and(|(a, b)| a >= b)
             {
                 g.reconnect_t_rx_ns = at;
-                g.reconnect_attempt = detail["attempt"].as_u64();
+                g.reconnect_attempt = attempt;
             }
         }
     }
@@ -173,10 +175,11 @@ impl ObserverCore {
                 g.first_post_reconnect_slot = Some(slot);
                 g.restored_unix_s = Some(now);
                 g.first_post_reconnect_t_rx_ns = Some(at);
-                sink.coverage(
-                    &json!({"event":"GAP_BOUNDARY", "timestamp_utc":utc_iso(now),
-                    "t_rx_ns":at, "detail":g}),
-                )?;
+                sink.coverage(&MarketCoverage::GapBoundary {
+                    observed_unix_s: now,
+                    t_rx_ns: at,
+                    gap: g.clone(),
+                })?;
             }
         }
         Ok(())
@@ -241,8 +244,12 @@ impl ObserverCore {
                             .is_some_and(|b| slot <= b.slot)
                     {
                         self.gaps[index].slots_checked += 1;
-                        sink.coverage(&json!({"event":"GAP_SLOT_RESULT", "gap_index":index,
-                            "slot":slot,"error_code":null,"proof":"FULL_FINALIZED_SLOT_RECONCILIATION"}))?;
+                        sink.coverage(&MarketCoverage::GapSlotResult {
+                            gap_index: index as u64,
+                            slot,
+                            error_code: None,
+                            full_window_proof: true,
+                        })?;
                         continue;
                     }
                     let mut result = Err("RECOVERY_BUDGET");
@@ -277,17 +284,24 @@ impl ObserverCore {
                             blockhash,
                         }) if parent < slot && slot < successor && !blockhash.is_empty() => {
                             self.gap_stats.gap_slots_skipped_confirmed += 1;
-                            sink.coverage(&json!({"event":"GAP_SLOT_SKIPPED_CONFIRMED", "slot":slot,
-                                "proof":"finalized_successor_parent_link", "successor_slot":successor,
-                                "parent_slot":parent, "successor_blockhash":blockhash}))?;
+                            sink.coverage(&MarketCoverage::GapSlotSkipped {
+                                slot,
+                                successor_slot: successor,
+                                parent_slot: parent,
+                                successor_blockhash: blockhash,
+                            })?;
                             Ok(())
                         }
                         Ok(GapSlot::Skipped { .. }) => Err("SKIP_PROOF_INVALID"),
                         Err(code) => Err(code),
                     };
                     self.gaps[index].slots_checked += 1;
-                    sink.coverage(&json!({"event":"GAP_SLOT_RESULT", "gap_index":index,
-                        "slot":slot, "error_code":checked.as_ref().err()}))?;
+                    sink.coverage(&MarketCoverage::GapSlotResult {
+                        gap_index: index as u64,
+                        slot,
+                        error_code: checked.as_ref().err().map(|c| (*c).to_owned()),
+                        full_window_proof: false,
+                    })?;
                     if let Err(code) = checked {
                         self.gap_stats.gap_slots_failed += 1;
                         failure = Some(code);
@@ -297,21 +311,23 @@ impl ObserverCore {
                 }
             }
             let g = &mut self.gaps[index];
-            g.error_code = failure;
+            g.error_code = failure.map(str::to_owned);
             g.recovery_status = if failure.is_none() {
                 "RECOVERED"
             } else {
                 "UNRECOVERED"
-            };
+            }
+            .into();
             g.transactions_scanned += self.gap_stats.gap_transactions_scanned - before_tx;
             g.liquidation_events += self.gap_stats.gap_liquidation_events - before_liq;
             if failure.is_none() {
                 self.gap_stats.gap_recovered += 1;
             }
-            sink.coverage(
-                &json!({"event":if failure.is_none() {"GAP_RECOVERED"} else {"GAP_UNRECOVERED"},
-                "gap_index":index, "detail":g}),
-            )?;
+            sink.coverage(&MarketCoverage::GapResult {
+                gap_index: index as u64,
+                recovered: failure.is_none(),
+                gap: g.clone(),
+            })?;
         }
         if self.coverage_complete() {
             self.incomplete_reasons.remove("GAP");
@@ -332,11 +348,8 @@ impl ObserverCore {
             Ok(_) => return Ok(Err("BLOCK_HEADER_INVALID")),
             Err(e) => return Ok(Err(e.0)),
         };
-        // Legacy row payloads until the typed market rows replace them (Ticket 3 step 4).
-        let Some(transactions) = block["transactions"].as_array() else {
-            return Ok(Err("BLOCK_TRANSACTIONS_MISSING"));
-        };
-        for (index, raw) in transactions.iter().enumerate() {
+        let total = typed.transactions.len() as u64;
+        for (index, entry) in typed.transactions.iter().enumerate() {
             if Instant::now() >= deadline {
                 return Ok(Err("RECOVERY_BUDGET"));
             }
@@ -344,22 +357,20 @@ impl ObserverCore {
                 return Ok(Err("GAP_TRANSACTION_BUDGET"));
             }
             self.gap_stats.gap_transactions_scanned += 1;
-            let mut raw = raw.clone();
-            let Some(obj) = raw.as_object_mut() else {
-                return Ok(Err("TX_SHAPE"));
-            };
-            obj.insert("slot".into(), json!(slot));
-            obj.insert("transactionIndex".into(), json!(index));
-            let tx = match &typed.transactions[index] {
+            let tx = match entry {
                 Ok(tx) => tx,
                 Err(e) => return Ok(Err(e.0)),
             };
-            if let Err(code) = self.recover_transaction(slot, index, tx, &raw, sink)? {
+            if let Err(code) = self.recover_transaction(slot, index, tx, sink)? {
                 return Ok(Err(code));
             }
         }
-        sink.coverage(&json!({"event":"GAP_BLOCK_FETCHED", "slot":slot,
-            "blockhash":typed.blockhash, "parent_slot":typed.parent_slot, "transactions":transactions.len()}))?;
+        sink.coverage(&MarketCoverage::GapBlockFetched {
+            slot,
+            blockhash: typed.blockhash.clone(),
+            parent_slot: typed.parent_slot,
+            transactions: total,
+        })?;
         Ok(Ok(()))
     }
 
@@ -368,7 +379,6 @@ impl ObserverCore {
         slot: u64,
         index: usize,
         tx: &ChainTx,
-        raw: &Value,
         sink: &mut dyn MarketSink,
     ) -> std::io::Result<Result<(), &'static str>> {
         // Validate all transactions, including those irrelevant to Marginfi: missing
@@ -429,15 +439,18 @@ impl ObserverCore {
             self.gap_stats.gap_transactions_deduplicated += 1;
             return Ok(Ok(()));
         }
-        if !self.admit_identity(signature, slot, success) {
+        if !self.admit_identity(signature, slot, Some(success)) {
             return Ok(Err("MARKET_RETENTION"));
         }
         self.gap_stats.gap_transactions_recovered += 1;
-        sink.transaction(
-            &json!({"source":"gap_backfill", "live_timestamp_qualified":false,
-            "t_rx_ns":null, "observed_at_utc":null, "slot":slot, "signature":signature,
-            "transaction_index":index, "success":success, "raw":raw}),
-        )?;
+        sink.transaction(&MarketTransaction {
+            signature: signature.to_owned(),
+            slot,
+            origin: TxOrigin::GapBackfill {
+                transaction_index: index as u64,
+                tx: tx.clone(),
+            },
+        })?;
         self.absorb_decode(&decoded, success);
         if success && decoded.truncated {
             let pairs = self.note_truncated(&decoded);
@@ -481,10 +494,10 @@ impl ObserverCore {
         if self.observing {
             return Err(std::io::Error::other("GAP_RECOVERY_DURING_CAPTURE"));
         }
-        sink.coverage(
-            &json!({"event":"GAP_RECOVERY_STARTED", "phase":"POST_CAPTURE_AFTER_DRAIN",
-            "timestamp_utc":utc_iso(unix_now_s()), "observing":self.observing}),
-        )?;
+        sink.coverage(&MarketCoverage::GapRecoveryStarted {
+            observed_unix_s: unix_now_s(),
+            observing: self.observing,
+        })?;
         let before = self.stats.clone();
         let cfg = self.gap_cfg;
         let rpc = url.ok_or("RPC_URL_MISSING").and_then(|u| {

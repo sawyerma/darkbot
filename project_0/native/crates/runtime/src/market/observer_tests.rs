@@ -3,7 +3,7 @@ include!("market_gap_tests.rs");
 include!("market_reconcile_tests.rs");
 include!("market_truth_tests.rs");
 use super::*;
-use darkbot_solana::ingress::{SlotStatus, SlotUpdate, SourceKind, TxVersion};
+use darkbot_solana::ingress::{SlotStatus, SlotUpdate, SourceKind};
 
 #[derive(Default)]
 struct VecSink {
@@ -12,17 +12,19 @@ struct VecSink {
     cov: Vec<Value>,
 }
 
+/// Stores the offline legacy render of every typed row: every assertion on a row field is a
+/// parity check of the typed capture against the historical JSONL contract.
 impl MarketSink for VecSink {
-    fn transaction(&mut self, row: &Value) -> std::io::Result<()> {
-        self.tx.push(row.clone());
+    fn transaction(&mut self, row: &super::rows::MarketTransaction) -> std::io::Result<()> {
+        self.tx.push(row.legacy_json());
         Ok(())
     }
-    fn liquidation(&mut self, row: &Value) -> std::io::Result<()> {
-        self.liq.push(row.clone());
+    fn liquidation(&mut self, row: &super::rows::MarketLiquidation) -> std::io::Result<()> {
+        self.liq.push(row.legacy_json());
         Ok(())
     }
-    fn coverage(&mut self, row: &Value) -> std::io::Result<()> {
-        self.cov.push(row.clone());
+    fn coverage(&mut self, row: &super::rows::MarketCoverage) -> std::io::Result<()> {
+        self.cov.push(row.legacy_json());
         Ok(())
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -71,19 +73,18 @@ fn tx_event(
     let meta_err = err
         .map(|_| json!({"InstructionError": [0, {"Custom": 1}]}))
         .unwrap_or(Value::Null);
+    let raw = json!({"signature": sig, "slot": slot, "transaction": {
+        "transaction": {"signatures": [sig], "message": {"accountKeys": [], "instructions": []}},
+        "meta": {"err": meta_err, "fee": 5000, "logMessages": logs,
+                 "preBalances": [], "postBalances": [], "preTokenBalances": [], "postTokenBalances": []},
+        "version": 0}});
     TransactionObserved {
         signature: sig.into(),
         slot,
         tx_index_in_slot: None,
-        version: TxVersion::V0,
-        err: err.map(str::to_string),
         source: SourceKind::WsRpcControl,
         t_rx_ns,
-        raw: json!({"signature": sig, "slot": slot, "transaction": {
-            "transaction": {"signatures": [sig], "message": {"accountKeys": [], "instructions": []}},
-            "meta": {"err": meta_err, "fee": 5000, "logMessages": logs,
-                     "preBalances": [], "postBalances": [], "preTokenBalances": [], "postTokenBalances": []},
-            "version": 0}}),
+        tx: darkbot_solana::chain::decode_notification(&raw),
     }
 }
 
@@ -94,14 +95,49 @@ fn logs_event(
     err: Option<&str>,
     t_rx_ns: u64,
 ) -> LogsObserved {
+    let status = match err {
+        Some(_) => darkbot_solana::chain::TxStatus::Failed(
+            solana_sdk::transaction::TransactionError::InstructionError(
+                0,
+                solana_sdk::instruction::InstructionError::Custom(1),
+            ),
+        ),
+        None => darkbot_solana::chain::TxStatus::Success,
+    };
     LogsObserved {
-        signature: sig.into(),
-        slot,
-        err: err.map(str::to_string),
-        logs: logs.clone(),
         source: SourceKind::WsRpcControl,
         t_rx_ns,
-        raw: json!({"context": {"slot": slot}, "value": {"signature": sig, "err": null, "logs": logs}}),
+        logs: darkbot_solana::chain::ChainLogs {
+            slot,
+            signature: sig.into(),
+            status,
+            logs: Some(logs),
+        },
+    }
+}
+
+/// The explicit offline export (`p0-journal renders`): legacy views of the sealed journal.
+fn render_views(dir: &Path) {
+    let views: Vec<(Option<u16>, PathBuf)> = MARKET_VIEWS
+        .iter()
+        .map(|(k, n)| (Some(*k), dir.join(n)))
+        .collect();
+    let refs: Vec<(Option<u16>, &Path)> = views.iter().map(|(k, p)| (*k, p.as_path())).collect();
+    crate::analytics::journal::export_views(&dir.join(MARKET_JOURNAL), &refs, false).unwrap();
+}
+
+fn gap_event() -> super::rows::WindowEvent {
+    super::rows::WindowEvent::Gap {
+        from_slot: None,
+        to_slot: None,
+    }
+}
+
+fn stopped(reason: &str) -> super::rows::WindowEvent {
+    super::rows::WindowEvent::Stopped {
+        reason: reason.into(),
+        drain_complete: true,
+        write_error: None,
     }
 }
 
@@ -203,7 +239,7 @@ fn failed_transaction_is_recorded_but_not_a_liquidation() {
     let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
     core.on_transaction(
-        &tx_event("f1", 10, &logs_with(&p, &[event_line()]), Some("Custom"), 1),
+        tx_event("f1", 10, &logs_with(&p, &[event_line()]), Some("Custom"), 1),
         0,
         &mut sink,
     )
@@ -221,14 +257,54 @@ fn failed_transaction_is_recorded_but_not_a_liquidation() {
     assert_eq!(core.stats.failed_tx_receiver_events_ignored, 1);
 }
 
+/// A1: a notification without `meta` (or with an undecodable payload) is recorded and counted
+/// UNKNOWN — never success, never a liquidation — and keeps the capture INCOMPLETE.
+#[test]
+fn notification_without_status_or_decodable_payload_is_unknown_not_success() {
+    let p = program();
+    let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+    let mut sink = VecSink::default();
+    let mut ev = tx_event("nometa", 10, &logs_with(&p, &[event_line()]), None, 1);
+    if let Ok(tx) = &mut ev.tx {
+        tx.meta = None;
+    }
+    core.on_transaction(ev, 0, &mut sink).unwrap();
+    let odd = TransactionObserved {
+        tx: Err(darkbot_solana::chain::ChainError("NOTIFICATION_DECODE")),
+        ..tx_event("odd", 11, &[], None, 2)
+    };
+    core.on_transaction(odd, 0, &mut sink).unwrap();
+    assert_eq!(
+        (
+            sink.tx[0]["success"].as_bool(),
+            sink.tx[1]["success"].as_bool()
+        ),
+        (Some(false), Some(false))
+    );
+    assert_eq!(sink.tx[1]["decode_error"], "NOTIFICATION_DECODE");
+    assert!(sink.liq.is_empty());
+    let s = &core.stats;
+    assert_eq!(
+        (
+            s.unknown_status_transactions,
+            s.successful_transactions,
+            s.liquidation_events
+        ),
+        (2, 0, 0)
+    );
+    let summary = core.summary(&ctx(true, true, 60.0));
+    let reasons = summary["incomplete_reasons"].to_string();
+    assert!(reasons.contains("TX_STATUS_UNKNOWN") && reasons.contains("NOTIFICATION_DECODE"));
+}
+
 #[test]
 fn duplicate_signature_counts_once() {
     let p = program();
     let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
     let ev = tx_event("dup", 10, &logs_with(&p, &[event_line()]), None, 1);
-    core.on_transaction(&ev, 0, &mut sink).unwrap();
-    core.on_transaction(&ev, 0, &mut sink).unwrap();
+    core.on_transaction(ev.clone(), 0, &mut sink).unwrap();
+    core.on_transaction(ev.clone(), 0, &mut sink).unwrap();
     let s = &core.stats;
     assert_eq!(
         (
@@ -250,7 +326,7 @@ fn two_events_in_one_transaction_keep_distinct_indices() {
     let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
     core.on_transaction(
-        &tx_event(
+        tx_event(
             "two",
             10,
             &logs_with(&p, &[event_line(), event_line()]),
@@ -360,19 +436,19 @@ fn cutoff_counts_queued_events_received_before_and_rejects_events_after() {
     core.start_observation(1_000, 2_000);
     // Timer has fired; these were still queued and are drained now.
     core.on_transaction(
-        &tx_event("A", 10, &logs_with(&p, &[event_line()]), None, 1_999),
+        tx_event("A", 10, &logs_with(&p, &[event_line()]), None, 1_999),
         0,
         &mut sink,
     )
     .unwrap();
     core.on_transaction(
-        &tx_event("A2", 10, &logs_with(&p, &[]), None, 2_000),
+        tx_event("A2", 10, &logs_with(&p, &[]), None, 2_000),
         0,
         &mut sink,
     )
     .unwrap();
     core.on_transaction(
-        &tx_event("B", 11, &logs_with(&p, &[event_line()]), None, 2_001),
+        tx_event("B", 11, &logs_with(&p, &[event_line()]), None, 2_001),
         0,
         &mut sink,
     )
@@ -386,10 +462,10 @@ fn cutoff_counts_queued_events_received_before_and_rejects_events_after() {
     );
     assert_eq!(core.stats.events_after_cutoff, 1);
     // Coverage events after the cutoff do not taint the window either.
-    core.coverage(&mut sink, "GAP", 0, Some(2_500), json!({}))
+    core.coverage(&mut sink, 0, Some(2_500), gap_event())
         .unwrap();
     assert!(core.coverage_complete());
-    core.coverage(&mut sink, "GAP", 0, Some(1_500), json!({}))
+    core.coverage(&mut sink, 0, Some(1_500), gap_event())
         .unwrap();
     assert!(!core.coverage_complete());
 }
@@ -398,8 +474,7 @@ fn cutoff_counts_queued_events_received_before_and_rejects_events_after() {
 fn gap_before_stream_ready_is_recorded_but_not_counted() {
     let mut core = ObserverCore::new(program(), MarketSource::Transactions, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
-    core.coverage(&mut sink, "GAP", 0, Some(5), json!({}))
-        .unwrap();
+    core.coverage(&mut sink, 0, Some(5), gap_event()).unwrap();
     assert!(core.coverage_complete());
     assert_eq!(sink.cov[0]["counted"], false);
 }
@@ -410,10 +485,12 @@ fn ingress_overflow_makes_data_incomplete() {
     let mut sink = VecSink::default();
     core.coverage(
         &mut sink,
-        "INGRESS_OVERFLOW",
         1,
         None,
-        json!({"overflow_total": 1}),
+        super::rows::WindowEvent::IngressOverflow {
+            overflow_total: 1,
+            drain: false,
+        },
     )
     .unwrap();
     let s = core.summary(&ctx(true, true, 60.0));
@@ -433,7 +510,7 @@ fn decoder_error_in_successful_transaction_blocks_valid() {
     short.extend_from_slice(&[0u8; 10]);
     let line = format!("{PROGRAM_DATA_PREFIX}{}", b64(&short));
     core.on_transaction(
-        &tx_event(
+        tx_event(
             "bad",
             10,
             &logs_with(&p, std::slice::from_ref(&line)),
@@ -451,7 +528,7 @@ fn decoder_error_in_successful_transaction_blocks_valid() {
     // The same corruption in a failed transaction is irrelevant for completeness.
     let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
     core.on_transaction(
-        &tx_event("badf", 10, &logs_with(&p, &[line]), Some("Custom"), 1),
+        tx_event("badf", 10, &logs_with(&p, &[line]), Some("Custom"), 1),
         0,
         &mut sink,
     )
@@ -534,7 +611,7 @@ fn events_before_observation_are_not_counted() {
     let mut core = ObserverCore::new(p, MarketSource::Transactions, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
     core.on_transaction(
-        &tx_event("early", 1, &logs_with(&p, &[]), None, 1),
+        tx_event("early", 1, &logs_with(&p, &[]), None, 1),
         0,
         &mut sink,
     )
@@ -574,13 +651,13 @@ fn logs_capture_never_fetches_and_enrichment_runs_after_capture() {
     let mut sink = VecSink::default();
     // CAPTURE: no fetch function exists on this path; gross edge counted immediately.
     core.on_logs(
-        &logs_event(fx.signature, fx.slot, real_logs, None, 1),
+        logs_event(fx.signature, fx.slot, real_logs, None, 1),
         0,
         &mut sink,
     )
     .unwrap();
     core.on_logs(
-        &logs_event("other", 7, logs_with(&p, &[event_line()]), None, 2),
+        logs_event("other", 7, logs_with(&p, &[event_line()]), None, 2),
         0,
         &mut sink,
     )
@@ -645,13 +722,13 @@ fn enrichment_budget_identity_and_queue_limits_are_explicit() {
     let mut core = open_core(MarketSource::Logs, cfg);
     let mut sink = VecSink::default();
     core.on_logs(
-        &logs_event("a", 5, logs_with(&p, &[event_line()]), None, 1),
+        logs_event("a", 5, logs_with(&p, &[event_line()]), None, 1),
         0,
         &mut sink,
     )
     .unwrap();
     core.on_logs(
-        &logs_event("b", 6, logs_with(&p, &[event_line()]), None, 2),
+        logs_event("b", 6, logs_with(&p, &[event_line()]), None, 2),
         0,
         &mut sink,
     )
@@ -680,7 +757,7 @@ fn enrichment_budget_identity_and_queue_limits_are_explicit() {
     );
     // phase budget exhausted
     core.on_logs(
-        &logs_event("c", 7, logs_with(&p, &[event_line()]), None, 3),
+        logs_event("c", 7, logs_with(&p, &[event_line()]), None, 3),
         0,
         &mut sink,
     )
@@ -719,7 +796,7 @@ fn finalize_writes_summary_report_and_unenriched_rows() {
     let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
     let mut sink = JournalSink::create(&dir).unwrap();
     core.on_logs(
-        &logs_event(
+        logs_event(
             "x",
             9,
             logs_with(
@@ -746,12 +823,13 @@ fn finalize_writes_summary_report_and_unenriched_rows() {
         &ctx(true, true, 600.0),
         &dir,
         0,
-        json!({"reason": "TIMER"}),
+        stopped("TIMER"),
     )
     .unwrap();
     assert_eq!(summary["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert_eq!(summary["commitment"].as_str(), Some("finalized"));
     assert!(report.contains("verdict=MARKET_DATA_INCOMPLETE"));
+    render_views(&dir);
     assert!(fs::read_to_string(dir.join("liquidations.jsonl"))
         .unwrap()
         .contains("NOT_ENRICHED"));
@@ -969,7 +1047,7 @@ fn enrichment_init_failure_still_produces_summary_and_report() {
     let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
     let mut sink = JournalSink::create(&dir).unwrap();
     core.on_logs(
-        &logs_event(
+        logs_event(
             "x",
             9,
             logs_with(
@@ -1004,7 +1082,7 @@ fn enrichment_init_failure_still_produces_summary_and_report() {
         &ctx(true, true, 600.0),
         &dir,
         0,
-        json!({"reason": "TIMER"}),
+        stopped("TIMER"),
     )
     .unwrap();
     assert_eq!(summary["liquidation_events"].as_u64(), Some(1));
@@ -1026,6 +1104,7 @@ fn enrichment_init_failure_still_produces_summary_and_report() {
     );
     assert!(dir.join("summary.json").exists() && dir.join("final_report.txt").exists());
     assert!(report.contains("enrichment_complete=false"));
+    render_views(&dir);
     assert!(fs::read_to_string(dir.join("liquidations.jsonl"))
         .unwrap()
         .contains("ENRICHMENT_INIT_FAILED"));
@@ -1115,7 +1194,7 @@ fn logs_without_rpc_url_still_reaches_finalize_and_report() {
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
     core.start_observation(0, 600_000_000_000);
     core.on_logs(
-        &logs_event(
+        logs_event(
             "x",
             9,
             logs_with(
@@ -1175,6 +1254,7 @@ fn logs_without_rpc_url_still_reaches_finalize_and_report() {
     assert_eq!(summary["unique_targets"].as_u64(), Some(1));
     assert!((summary["actual_observation_seconds"].as_f64().unwrap() - 600.0).abs() < 1e-9);
     assert!(report.contains("sample_status=INSUFFICIENT_SAMPLE"));
+    render_views(&cfg.run_dir);
     assert!(!fs::read_to_string(cfg.run_dir.join("coverage.jsonl"))
         .unwrap()
         .contains("ENRICHMENT_INIT_FAILED"));
@@ -1268,15 +1348,19 @@ fn liq_tx_json(
 fn as_observed(tx: &Value, sig: &str, slot: u64, failed: bool) -> TransactionObserved {
     let mut inner = tx.clone();
     inner.as_object_mut().unwrap().remove("slot");
+    if failed {
+        if let Some(meta) = inner.get_mut("meta").filter(|m| m.is_object()) {
+            meta["err"] = json!({"InstructionError": [0, {"Custom": 1}]});
+        }
+    }
+    let raw = json!({"signature": sig, "slot": slot, "transaction": inner});
     TransactionObserved {
         signature: sig.into(),
         slot,
         tx_index_in_slot: None,
-        version: TxVersion::V0,
-        err: if failed { Some("Custom".into()) } else { None },
         source: SourceKind::WsRpcControl,
         t_rx_ns: 1,
-        raw: json!({"signature": sig, "slot": slot, "transaction": inner}),
+        tx: darkbot_solana::chain::decode_notification(&raw),
     }
 }
 
@@ -1297,7 +1381,7 @@ fn observe_truncated(
     let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
     let tx = liq_tx_json("sigT", 50, ixs, lut, loaded, truncated_logs(events), false);
-    core.on_transaction(&as_observed(&tx, "sigT", 50, false), 0, &mut sink)
+    core.on_transaction(as_observed(&tx, "sigT", 50, false), 0, &mut sink)
         .unwrap();
     core
 }
@@ -1325,7 +1409,7 @@ fn truncated_logs_with_no_end_liquidation_can_be_qualified() {
     let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
     core.on_logs(
-        &logs_event("sigL", 51, truncated_logs(&[]), None, 1),
+        logs_event("sigL", 51, truncated_logs(&[]), None, 1),
         0,
         &mut sink,
     )
@@ -1438,13 +1522,13 @@ fn truncated_fetch_failure_or_wrong_transaction_fail_closed() {
     );
     let mut sink = VecSink::default();
     core.on_logs(
-        &logs_event("a", 1, truncated_logs(&[]), None, 1),
+        logs_event("a", 1, truncated_logs(&[]), None, 1),
         0,
         &mut sink,
     )
     .unwrap();
     core.on_logs(
-        &logs_event("b", 2, truncated_logs(&[]), None, 2),
+        logs_event("b", 2, truncated_logs(&[]), None, 2),
         0,
         &mut sink,
     )
@@ -1474,7 +1558,7 @@ fn truncated_fetch_failure_or_wrong_transaction_fail_closed() {
     // never qualified before finalize -> fail closed
     let mut late = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
     late.on_logs(
-        &logs_event("c", 3, truncated_logs(&[]), None, 3),
+        logs_event("c", 3, truncated_logs(&[]), None, 3),
         0,
         &mut sink,
     )
@@ -1497,7 +1581,7 @@ fn failed_transaction_does_not_create_liquidation() {
         truncated_logs(&[(t, r)]),
         true,
     );
-    core.on_transaction(&as_observed(&tx, "f", 9, true), 0, &mut sink)
+    core.on_transaction(as_observed(&tx, "f", 9, true), 0, &mut sink)
         .unwrap();
     assert_eq!(
         (core.stats.liquidation_events, core.stats.logs_truncated),
@@ -1514,7 +1598,7 @@ fn non_truncated_existing_behavior_unchanged() {
     let mut sink = VecSink::default();
     let logs = logs_with(&program(), &[data_line(t, r, 2.0, 1.0, 1)]);
     let tx = liq_tx_json("n", 7, &[(t, r)], false, false, logs, false);
-    core.on_transaction(&as_observed(&tx, "n", 7, false), 0, &mut sink)
+    core.on_transaction(as_observed(&tx, "n", 7, false), 0, &mut sink)
         .unwrap();
     assert_eq!(core.stats.liquidation_events, 1);
     assert_eq!(
@@ -1610,17 +1694,16 @@ fn six_real_audit_liquidations_aggregate_into_market_summary() {
     let mut sink = VecSink::default();
     for fx in fixtures() {
         let tx: Value = serde_json::from_str(fx.raw).unwrap();
+        let raw = json!({"signature": fx.signature, "slot": fx.slot, "transaction": tx});
         let ev = TransactionObserved {
             signature: fx.signature.into(),
             slot: fx.slot,
             tx_index_in_slot: None,
-            version: TxVersion::V0,
-            err: None,
             source: SourceKind::WsRpcControl,
             t_rx_ns: 1,
-            raw: json!({"signature": fx.signature, "slot": fx.slot, "transaction": tx}),
+            tx: darkbot_solana::chain::decode_notification(&raw),
         };
-        core.on_transaction(&ev, 0, &mut sink).unwrap();
+        core.on_transaction(ev, 0, &mut sink).unwrap();
     }
     let s = core.summary(&ctx(true, true, 3_600.0));
     assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
@@ -1675,98 +1758,100 @@ fn journal_test_dir(name: &str) -> PathBuf {
 }
 
 #[test]
-fn journal_sink_views_are_byte_identical_to_the_jsonl_sink() {
-    let dir = journal_test_dir("journal_parity");
-    let (legacy, binary) = (dir.join("jsonl"), dir.join("journal"));
-    fs::create_dir_all(&legacy).unwrap();
-    fs::create_dir_all(&binary).unwrap();
-    let raw = json!({"value":{"logs":["Program log: \u{e9}\"q\"\n", "x"],"err":null},"meta":{"fee":5000}});
-    let rows = [
-        (
-            0,
-            json!({"slot":5,"t_rx_ns":7,"signature":"s1","raw":raw,"tx_version":null,"success":true}),
-        ),
-        (
+fn typed_market_frames_render_offline_to_their_legacy_rows() {
+    use super::rows::*;
+    let dir = journal_test_dir("journal_typed");
+    let p = program();
+    let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+    let mut capture = VecSink::default();
+    let mut sink = JournalSink::create(&dir).unwrap();
+    let ev = tx_event("s1", 5, &logs_with(&p, &[event_line()]), None, 7);
+    core.on_transaction(ev.clone(), 0, &mut capture).unwrap();
+    let mut core2 = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+    core2.on_transaction(ev, 0, &mut sink).unwrap();
+    core2
+        .coverage(
+            &mut sink,
             1,
-            json!({"slot":5,"seized_equity_usd":12.25,"gross_edge_usd":0.30000000000000004,
-            "repaid_equity_usd":1e-7,"receiver_lamport_delta":i128::MAX.to_string(),"cu_limit":u64::MAX}),
-        ),
-        (
-            2,
-            json!({"event":"START","timestamp_utc":"2026-10-16T00:00:00Z","t_rx_ns":null,"counted":true}),
-        ),
-        (
-            0,
-            json!({"slot":6,"t_rx_ns":8,"signature":"s2","raw":{},"negative":-17,"big":i128::MIN}),
-        ),
-        (
-            2,
-            json!({"event":"MARKET_SLOT_BOUNDARY_EVIDENCE","event_extra":{"slot":6}}),
-        ),
-    ];
-    let mut jsonl = JsonlSink::create(&legacy).unwrap();
-    let mut journal = JournalSink::create(&binary).unwrap();
-    for (kind, row) in &rows {
-        for sink in [&mut jsonl as &mut dyn MarketSink, &mut journal] {
-            match kind {
-                0 => sink.transaction(row),
-                1 => sink.liquidation(row),
-                _ => sink.coverage(row),
-            }
-            .unwrap();
-        }
+            Some(8),
+            WindowEvent::Gap {
+                from_slot: Some(4),
+                to_slot: None,
+            },
+        )
+        .unwrap();
+    core.coverage(
+        &mut capture,
+        1,
+        Some(8),
+        WindowEvent::Gap {
+            from_slot: Some(4),
+            to_slot: None,
+        },
+    )
+    .unwrap();
+    let binding = sink.finish().unwrap().unwrap();
+    assert_eq!((binding.status, binding.event_frames), ("COMPLETE", 3));
+    // No view exists after capture; the explicit offline export renders the legacy rows.
+    for (_, name) in MARKET_VIEWS {
+        assert!(!dir.join(name).exists(), "{name}");
     }
-    jsonl.flush().unwrap();
-    let binding = journal.finish().unwrap().unwrap();
-    for (stream, (_, name)) in MARKET_VIEWS.iter().enumerate() {
-        let expected = rows
-            .iter()
-            .filter(|(kind, _)| *kind == stream)
-            .map(|(_, row)| format!("{row}\n"))
-            .collect::<String>();
+    let views: Vec<(Option<u16>, PathBuf)> = MARKET_VIEWS
+        .iter()
+        .map(|(k, n)| (Some(*k), dir.join(n)))
+        .collect();
+    let refs: Vec<(Option<u16>, &Path)> = views.iter().map(|(k, p)| (*k, p.as_path())).collect();
+    crate::analytics::journal::export_views(&dir.join(MARKET_JOURNAL), &refs, false).unwrap();
+    for (rows, (_, name)) in [&capture.tx, &capture.liq, &capture.cov]
+        .into_iter()
+        .zip(MARKET_VIEWS)
+    {
+        let expected: String = rows.iter().map(|r| format!("{r}\n")).collect();
         assert_eq!(
-            fs::read(legacy.join(name)).unwrap(),
-            expected.as_bytes(),
-            "legacy wire bytes: {name}"
-        );
-        assert_eq!(
-            fs::read(legacy.join(name)).unwrap(),
-            fs::read(binary.join(name)).unwrap(),
+            fs::read_to_string(dir.join(name)).unwrap(),
+            expected,
             "{name}"
         );
     }
-    assert_eq!(binding["status"], "COMPLETE");
-    assert_eq!(binding["event_frames"], 5);
-    assert_eq!(binding["views"]["transactions.jsonl"]["rows"], 2);
-    assert_eq!(binding["views"]["liquidations.jsonl"]["rows"], 1);
-    assert_eq!(binding["views"]["coverage.jsonl"]["rows"], 2);
-    let mut reader = crate::analytics::journal::Reader::open(&binary.join(MARKET_JOURNAL)).unwrap();
+    let mut reader = crate::analytics::journal::Reader::open(&dir.join(MARKET_JOURNAL)).unwrap();
     let first = reader.next_frame().unwrap().unwrap();
     assert_eq!(
-        (first.provenance.slot, first.provenance.rx_ns),
-        (Some(5), Some(7))
+        (first.schema, first.provenance.slot, first.provenance.rx_ns),
+        (2, Some(5), Some(7))
     );
+    let row: MarketTransaction = first.typed().unwrap();
+    assert!(row.chain_tx().is_some_and(|t| t.status().is_success()));
     while reader.next_frame().unwrap().is_some() {}
     assert!(reader.sealed && reader.complete);
     assert_eq!(
         crate::analytics::journal::hex(&reader.root()),
-        binding["root_sha256"]
+        binding.root_sha256
     );
-    // One finish only; an existing journal or view is never overwritten.
-    assert!(journal.finish().is_err());
-    drop(journal);
-    assert!(JournalSink::create(&binary).is_err());
+    // Schema-1 market rows are refused (no legacy rollback of a typed kind).
+    let mut w = crate::analytics::journal::Writer::create(&dir.join("legacy.p0j")).unwrap();
+    assert!(w
+        .append_legacy(
+            crate::analytics::journal::kind::MARKET_COVERAGE,
+            Default::default(),
+            &json!({"event": "GAP"})
+        )
+        .is_err());
+    // One finish only; an existing journal is never overwritten.
+    assert!(sink.finish().is_err());
+    drop(sink);
+    assert!(JournalSink::create(&dir).is_err());
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn journal_sink_finalize_binds_views_and_early_exit_still_renders_incomplete() {
+fn journal_sink_finalize_binds_the_journal_and_early_exit_seals_incomplete() {
+    use super::rows::*;
     let dir = journal_test_dir("journal_finalize");
     let p = program();
     let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
     let mut sink = JournalSink::create(&dir).unwrap();
     core.on_logs(
-        &logs_event(
+        logs_event(
             "x",
             9,
             logs_with(
@@ -1787,55 +1872,72 @@ fn journal_sink_finalize_binds_views_and_early_exit_still_renders_incomplete() {
     )
     .unwrap();
     core.stop_observation();
-    // During the capture only the journal exists; the views are rendered by finalize.
-    for (_, name) in MARKET_VIEWS {
-        assert!(!dir.join(name).exists(), "{name}");
-    }
     let (summary, report) = finalize(
         &mut core,
         &mut sink,
         &ctx(true, true, 600.0),
         &dir,
         0,
-        json!({"reason": "TIMER"}),
+        stopped("TIMER"),
     )
     .unwrap();
     let binding = &summary["evidence_journal"];
     assert_eq!(binding["journal"], MARKET_JOURNAL);
     assert_eq!(binding["status"], "COMPLETE");
-    assert_eq!(binding["views"]["transactions.jsonl"]["rows"], 1);
     assert!(report.contains(MARKET_JOURNAL));
     let on_disk: Value =
         serde_json::from_slice(&fs::read(dir.join("summary.json")).unwrap()).unwrap();
     assert_eq!(&on_disk["evidence_journal"], binding);
-    assert!(fs::read_to_string(dir.join("coverage.jsonl"))
-        .unwrap()
-        .contains("STOPPED"));
+    // Capture renders no view; the journal holds STOPPED as a typed coverage frame.
+    for (_, name) in MARKET_VIEWS {
+        assert!(!dir.join(name).exists(), "{name}");
+    }
+    let mut reader = crate::analytics::journal::Reader::open(&dir.join(MARKET_JOURNAL)).unwrap();
+    let mut stopped_seen = false;
+    while let Some(f) = reader.next_frame().unwrap() {
+        if f.kind == crate::analytics::journal::kind::MARKET_COVERAGE {
+            let row: MarketCoverage = f.typed().unwrap();
+            stopped_seen |= matches!(
+                row,
+                MarketCoverage::Window {
+                    event: WindowEvent::Stopped { .. },
+                    ..
+                }
+            );
+        }
+    }
+    assert!(stopped_seen);
     drop(sink);
-    // Early exit (for example a failed warmup): sealed INCOMPLETE, views still rendered.
+    // Early exit (for example a failed warmup): sealed INCOMPLETE.
     let early = dir.join("early");
     fs::create_dir_all(&early).unwrap();
     {
         let mut sink = JournalSink::create(&early).unwrap();
-        sink.coverage(&json!({"event":"SHADOW_WARMUP_FAILED","error":"X"}))
+        sink.coverage(&MarketCoverage::ShadowWarmupFailed { error: "X".into() })
             .unwrap();
     }
-    assert!(fs::read_to_string(early.join("coverage.jsonl"))
-        .unwrap()
-        .contains("SHADOW_WARMUP_FAILED"));
     let mut reader = crate::analytics::journal::Reader::open(&early.join(MARKET_JOURNAL)).unwrap();
     while reader.next_frame().unwrap().is_some() {}
     assert!(reader.sealed && !reader.complete);
     fs::remove_dir_all(dir).unwrap();
 }
 
+fn produced(slot: u64) -> super::rows::MarketCoverage {
+    super::rows::MarketCoverage::SlotProduced {
+        slot,
+        blockhash: "anchor".into(),
+        parent_slot: slot - 1,
+        previous_blockhash: "parent".into(),
+        block_time: Some(1),
+        transactions_scanned: 0,
+    }
+}
+
 #[test]
 fn strict_compat_sink_persists_binary_first_and_exports_at_batch_boundary() {
     let dir = journal_test_dir("strict_binary");
     let mut sink = JsonlSink::create(&dir).unwrap();
-    let tx = json!({"slot":10,"amount":i128::MIN,"raw":{"unicode":"雪","quoted":"\""}});
-    let coverage = json!({"status":"PRODUCED_FETCHED","slot":10,"blockhash":"anchor"});
-    sink.transaction(&tx).unwrap();
+    let coverage = produced(10);
     sink.coverage(&coverage).unwrap();
     assert!(dir.join(MARKET_JOURNAL).exists());
     for (_, name) in MARKET_VIEWS {
@@ -1844,18 +1946,24 @@ fn strict_compat_sink_persists_binary_first_and_exports_at_batch_boundary() {
     sink.flush().unwrap();
     sink.flush().unwrap();
     assert_eq!(
-        fs::read_to_string(dir.join("transactions.jsonl")).unwrap(),
-        format!("{tx}\n")
-    );
-    assert_eq!(
         fs::read_to_string(dir.join("coverage.jsonl")).unwrap(),
-        format!("{coverage}\n")
+        format!("{}\n", coverage.legacy_json())
+    );
+    let anchor: Value = serde_json::from_str(
+        fs::read_to_string(dir.join("coverage.jsonl"))
+            .unwrap()
+            .trim(),
+    )
+    .unwrap();
+    assert_eq!(
+        (anchor["status"].as_str(), anchor["blockhash"].as_str()),
+        (Some("PRODUCED_FETCHED"), Some("anchor"))
     );
     let mut reader = crate::analytics::journal::Reader::open(&dir.join(MARKET_JOURNAL)).unwrap();
     while reader.next_frame().unwrap().is_some() {}
     assert!(reader.sealed && reader.complete);
     // The pinned verifier finishes each batch once. Post-checkpoint additions must fail.
-    assert!(sink.transaction(&tx).is_err());
+    assert!(sink.coverage(&coverage).is_err());
     drop(sink);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1864,7 +1972,7 @@ fn strict_compat_sink_persists_binary_first_and_exports_at_batch_boundary() {
 fn strict_compat_export_failure_stays_failed_on_retry() {
     let dir = journal_test_dir("strict_export_failure");
     let mut sink = JsonlSink::create(&dir).unwrap();
-    sink.coverage(&json!({"slot":10})).unwrap();
+    sink.coverage(&produced(10)).unwrap();
     fs::write(dir.join("coverage.jsonl"), b"existing evidence").unwrap();
     assert!(sink.flush().is_err());
     assert!(sink.flush().is_err());

@@ -468,10 +468,10 @@ mod regression {
                 priority_fee_lamports: None,
                 winner_net_edge_usd: None,
                 winner_net_edge_complete: false,
-                economic_provenance: "FIXTURE",
+                economic_provenance: "FIXTURE".into(),
                 block_time: None,
                 live_t_rx_ns: Some(50),
-                discovery_source: "LIVE",
+                discovery_source: "LIVE".into(),
                 permissionless_profit_opportunity: true,
             },
             target_seen: false,
@@ -778,8 +778,8 @@ pub(super) fn replay(
             return Err("REPLAY_ROW_BUDGET".into());
         }
         let mut market: TruthEvent = serde_json::from_slice(&line).map_err(|_| "MARKET_DECODE")?;
-        market.discovery_source = "OFFLINE_FINALIZED_EVIDENCE";
-        market.economic_provenance = "PERSISTED_PROTOCOL_EVENT_AND_ACTUAL_TX_META";
+        market.discovery_source = "OFFLINE_FINALIZED_EVIDENCE".into();
+        market.economic_provenance = "PERSISTED_PROTOCOL_EVENT_AND_ACTUAL_TX_META".into();
         let key = (market.signature.clone(), market.slot, market.event_index);
         if !seen.insert(key) {
             return Err("DUPLICATE_MARKET_EVENT".into());

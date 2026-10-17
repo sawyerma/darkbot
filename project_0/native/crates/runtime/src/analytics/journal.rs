@@ -861,8 +861,8 @@ pub fn export_views(
                 if single && rows[i] > 0 {
                     return Err(bad("VALUE_COUNT"));
                 }
-                // Offline JSON export exists for historical value-tree frames only.
-                serde_json::to_writer(&mut outs[i], &f.legacy_value()?)
+                // Offline JSON export: value-tree frames and typed market frames only.
+                serde_json::to_writer(&mut outs[i], &payload::legacy_view(&f)?)
                     .map_err(io::Error::other)?;
                 outs[i].write_all(b"\n")?;
                 rows[i] += 1;

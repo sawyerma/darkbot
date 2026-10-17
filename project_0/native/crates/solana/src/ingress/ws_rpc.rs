@@ -28,6 +28,10 @@ use std::str::FromStr;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
+/// Continuous application slot progress after which a recovered stream counts as healthy again
+/// (the outage budget resets only then; one frame or a flapping connection never resets it).
+pub const HEALTHY_RESET: Duration = Duration::from_secs(10);
+
 #[derive(Clone, Debug)]
 pub struct WsRpcConfig {
     /// z. B. wss://<provider>/?api-key=... — nur Konfiguration, nie im Code.
@@ -309,8 +313,9 @@ pub(crate) fn parse_notification(
             })])
         }
         "transactionNotification" => {
-            // VERIFY: Helius-Format {result:{signature, slot, transaction:{transaction, meta, version}}}
-            let sig = result
+            // {result:{signature, slot, transaction:{transaction, meta, version}}}; the identity
+            // is required, the payload is decoded once into `ChainTx` (JFI-02).
+            let signature = result
                 .get("signature")
                 .and_then(|s| s.as_str())
                 .ok_or_else(|| IngressError::Protocol("signature missing".into()))?
@@ -319,58 +324,25 @@ pub(crate) fn parse_notification(
                 .get("slot")
                 .and_then(|s| s.as_u64())
                 .ok_or_else(|| IngressError::Protocol("slot missing".into()))?;
-            let tx = result.get("transaction").cloned().unwrap_or(Value::Null);
-            let version = super::detect_version_json(&tx);
-            let err = tx
-                .pointer("/meta/err")
-                .filter(|e| !e.is_null())
-                .map(|e| e.to_string());
             Ok(vec![IngressEvent::Transaction(
                 super::TransactionObserved {
-                    signature: sig,
+                    signature,
                     slot,
                     tx_index_in_slot: None,
-                    version,
-                    err,
                     source: SourceKind::WsRpcControl,
                     t_rx_ns,
-                    raw: result.clone(),
+                    tx: crate::chain::decode_notification(result),
                 },
             )])
         }
         "logsNotification" => {
             // [C0-MO] {result:{context:{slot}, value:{signature, err, logs}}}
-            let slot = result
-                .pointer("/context/slot")
-                .and_then(|s| s.as_u64())
-                .ok_or_else(|| IngressError::Protocol("context.slot missing".into()))?;
-            let value = result
-                .get("value")
-                .ok_or_else(|| IngressError::Protocol("value missing".into()))?;
-            let signature = value
-                .get("signature")
-                .and_then(|s| s.as_str())
-                .ok_or_else(|| IngressError::Protocol("signature missing".into()))?
-                .to_string();
-            let err = value
-                .get("err")
-                .filter(|e| !e.is_null())
-                .map(|e| e.to_string());
-            let logs = match value.get("logs") {
-                Some(Value::Array(items)) => items
-                    .iter()
-                    .filter_map(|l| l.as_str().map(str::to_string))
-                    .collect(),
-                _ => Vec::new(),
-            };
+            let logs = crate::chain::decode_logs_notification(result)
+                .map_err(|e| IngressError::Protocol(e.0.into()))?;
             Ok(vec![IngressEvent::Logs(super::LogsObserved {
-                signature,
-                slot,
-                err,
-                logs,
                 source: SourceKind::WsRpcControl,
                 t_rx_ns,
-                raw: result.clone(),
+                logs,
             })])
         }
         "rootNotification" => {
@@ -850,7 +822,7 @@ impl WsRpcControlSource {
                         );
                     }
                     // One frame / a flapping connection cannot reset the outage budget.
-                    if last_progress_at.duration_since(*since) >= Duration::from_secs(10) {
+                    if last_progress_at.duration_since(*since) >= HEALTHY_RESET {
                         *healthy = true;
                     }
                 }
@@ -1002,33 +974,64 @@ mod tests {
     }
 
     #[test]
-    fn c0mo_logs_and_transaction_notifications_keep_raw_payload() {
+    fn c0mo_logs_and_transaction_notifications_decode_at_the_wire() {
+        use crate::chain::TxStatus;
         let ids = HashMap::new();
         let logs = json!({"jsonrpc":"2.0","method":"logsNotification","params":{"subscription":7,
             "result":{"context":{"slot":42},"value":{"signature":"sigL","err":null,"logs":["Program x invoke [1]"]}}}});
         match parse_notification(&logs, &ids, 5).unwrap().pop().unwrap() {
             IngressEvent::Logs(l) => {
+                let l = l.logs;
                 assert_eq!(
-                    (l.signature.as_str(), l.slot, l.err.clone(), l.logs.len()),
-                    ("sigL", 42, None, 1)
+                    (l.signature.as_str(), l.slot, l.status),
+                    ("sigL", 42, TxStatus::Success)
                 );
-                assert_eq!(l.raw["value"]["signature"], "sigL");
+                assert_eq!(l.logs.map(|v| v.len()), Some(1));
             }
             other => panic!("expected Logs, got {other:?}"),
         }
         let failed = json!({"jsonrpc":"2.0","method":"logsNotification","params":{"subscription":7,
-            "result":{"context":{"slot":43},"value":{"signature":"sigF","err":{"InstructionError":[0,"Custom"]},"logs":null}}}});
+            "result":{"context":{"slot":43},"value":{"signature":"sigF","err":{"InstructionError":[0,{"Custom":1}]},"logs":null}}}});
         match parse_notification(&failed, &ids, 5).unwrap().pop().unwrap() {
-            IngressEvent::Logs(l) => assert!(l.err.is_some() && l.logs.is_empty()),
+            IngressEvent::Logs(l) => {
+                assert!(matches!(l.logs.status, TxStatus::Failed(_)) && l.logs.logs.is_none())
+            }
             other => panic!("expected Logs, got {other:?}"),
         }
+        // A missing status is UNKNOWN, never success; a non-string log line is a protocol error.
+        let absent = json!({"jsonrpc":"2.0","method":"logsNotification","params":{"subscription":7,
+            "result":{"context":{"slot":44},"value":{"signature":"sigA","logs":[]}}}});
+        match parse_notification(&absent, &ids, 5).unwrap().pop().unwrap() {
+            IngressEvent::Logs(l) => {
+                assert_eq!(l.logs.status, TxStatus::Unknown("TX_META_STATUS_MISSING"))
+            }
+            other => panic!("expected Logs, got {other:?}"),
+        }
+        let broken = json!({"jsonrpc":"2.0","method":"logsNotification","params":{"subscription":7,
+            "result":{"context":{"slot":44},"value":{"signature":"sigB","err":null,"logs":[1]}}}});
+        assert!(parse_notification(&broken, &ids, 5).is_err());
+        let sig = "1".repeat(64);
         let tx = json!({"jsonrpc":"2.0","method":"transactionNotification","params":{"subscription":8,
-            "result":{"signature":"sigT","slot":44,"transaction":{"transaction":{"signatures":["sigT"],"message":{"accountKeys":[],"instructions":[]}},
+            "result":{"signature":sig,"slot":44,"transaction":{"transaction":{"signatures":[sig],"message":{"accountKeys":[],"instructions":[]}},
             "meta":{"err":null,"fee":5000,"logMessages":["a"]},"version":0}}}});
         match parse_notification(&tx, &ids, 5).unwrap().pop().unwrap() {
             IngressEvent::Transaction(t) => {
-                assert_eq!(t.raw["transaction"]["meta"]["fee"], 5000);
-                assert_eq!(t.raw["transaction"]["meta"]["logMessages"][0], "a");
+                let decoded = t.tx.unwrap();
+                let meta = decoded.meta.unwrap();
+                assert_eq!(
+                    (meta.fee, meta.log_messages),
+                    (Some(5000), Some(vec!["a".into()]))
+                );
+            }
+            other => panic!("expected Transaction, got {other:?}"),
+        }
+        // An undecodable payload keeps its identity and reason (no reconnect loop, no tree).
+        let odd = json!({"jsonrpc":"2.0","method":"transactionNotification","params":{"subscription":8,
+            "result":{"signature":"sigT","slot":45,"transaction":{"transaction":{}}}}});
+        match parse_notification(&odd, &ids, 5).unwrap().pop().unwrap() {
+            IngressEvent::Transaction(t) => {
+                assert_eq!((t.signature.as_str(), t.slot), ("sigT", 45));
+                assert_eq!(t.tx, Err(crate::chain::ChainError("NOTIFICATION_DECODE")));
             }
             other => panic!("expected Transaction, got {other:?}"),
         }
