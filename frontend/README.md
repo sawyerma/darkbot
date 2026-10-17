@@ -15,6 +15,8 @@ The browser is not a second trading engine. Protocol decoding, health, economics
 
 ## Project_0 frontend implementation plan
 
+- [Accepted Graphite V5 UI & shared financial snapshot contract](docs/GRAPHITE_V5_UI_FINANCE_CONTRACT.md) — five-tab dark macOS-style layout, Overview/Wallets Total Capital and Realized Net PnL parity, latency/parallel execution owner map and gates.
+
 - [Wallets & Treasury: wallet dashboard, manual withdrawals and realized-profit auto-sweeps](docs/WALLETS_TREASURY.md) — FEUI-10A/B/C and safety/approval gates.
 
 - [Boot-Audit, free duration, run-until-stop, one-click backtest and optimization](docs/STARTUP_BACKTEST_OPTIMIZATION.md) – required extended launch/replay/optimizer design.
