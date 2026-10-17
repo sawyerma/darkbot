@@ -132,6 +132,16 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 - **Abnahme:** UI-Disconnect beeinflusst keinen Run; aus UI ist keine Geldtransaktion möglich; CI benötigt keine privaten Providerkeys.
 
 
+### FEUI-10 – Wallets & Treasury (neuer verbindlicher Produktbereich)
+
+Verbindlicher Detailvertrag: **[Wallets & Treasury](WALLETS_TREASURY.md)**. Wallets, Public Keys, SOL/SPL/Token-Balances, Geld-/Trading-Reservations, verifizierte Gebühren-/Profitwerte und Ziel-Adressen für Phantom-/MetaMask-Solana im gemeinsamen Dashboard anzeigen. Quelle: `project_0/config/wallet.public.env`, `execution/one_shot.rs` (WalletLock, Hold, HandoffUnknown), `receipts.rs` (finalized wallet deltas), `pending.rs`, `liquidation/funding.rs`, `analytics/journal.rs`. Das ist **nicht** schon ein Treasury-Sender.
+
+- **FEUI-10A READ_ONLY:** alle konfigurierten Wallets mit Projektdomäne/Chain/Mint/Tokenkonto/Balance/Spendable/Reservations, bekanntem finalized Netprofit und UNKNOWN getrennt. Walletsource/-Status nie als echter Kontostand interpretieren.
+- **FEUI-10B MANUAL:** separate Treasury-Preview/Intent/Signer-/Receiver-/Mint-/Fee-/Reserve-/Amount-Gates, ausdrücklich autorisierte manuelle SOL-/SPL-Transfers zu allowlist-basierten **Solana**-Empfangsadressen von Phantom oder MetaMask, finalisierte Receipts, crashsichere Holds/UNKNOWN/keine Duplikate.
+- **FEUI-10C AUTO:** frei einstellbarer Mindestbetrag `X` **neu realisierter, noch nicht abgeschöpfter** Profit, Überweisungsanteil/-Betrag, Fee-/Reserve-/Transfer-/Zeitraumgrenzen, Cooldown/Expiry, Empfänger-/Asset-/Chain-Allowlist, versionierte explizit freigegebene Standing-Policy und Kill Switch. Niemals komplette Wallet-Guthaben oder Shadow-Szenarien als auszahlbare Profite behandeln.
+- Eine MetaMask-`0x`-EVM-Adresse ist **kein** direktes Solana-Auszahlungsziel; kein automatisches Bridging ohne neuen gesonderten Sicherheitsvertrag. Wallet-Transfers sind **value-bearing** und bleiben bis nach FE-04/P8, abgeschlossener echter FE-07-PnL-Reconciliation und einer **gesonderten Treasury-Geldfreigabe** gesperrt. Sie blockieren **nicht** den nächsten 4h-Beobachtungstest.
+- **Abnahme W-G01…08** laut Walletvertrag: Public Identity, Profit/Balance/Spendable, Reservierungs-Atomizität, sichere Einmalüberweisung, idempotente Gewinnschwelle/Restart/UNKNOWN, UI, Geldberechtigung, JFI-/BSC-Isolation.
+
 ## 3. Erweiterter, verpflichtender Betriebs- und Analyseablauf v1.1
 
 Die ausführliche Spezifikation steht in [STARTUP_BACKTEST_OPTIMIZATION.md](STARTUP_BACKTEST_OPTIMIZATION.md). Die folgenden Gates sind **verbindliche Ergänzungen** zu FEUI-01/02/03/05/06/07/08/09 und dürfen nicht als gesonderte, nachrangige Fantasiephase behandelt werden:
