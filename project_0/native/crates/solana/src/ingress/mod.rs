@@ -17,11 +17,17 @@ pub struct SlotWatch {
 }
 
 impl SlotWatch {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     #[inline]
-    pub fn observe(&self, slot: u64) { self.slot.fetch_max(slot, Ordering::Relaxed); }
+    pub fn observe(&self, slot: u64) {
+        self.slot.fetch_max(slot, Ordering::Relaxed);
+    }
     #[inline]
-    pub fn get(&self) -> u64 { self.slot.load(Ordering::Relaxed) }
+    pub fn get(&self) -> u64 {
+        self.slot.load(Ordering::Relaxed)
+    }
 }
 
 /// Out-of-Band-Signal: Sink-Overflow oder Fatal, das **nicht** über den (vollen) Channel
@@ -32,11 +38,19 @@ pub struct IngressHalt {
 }
 
 impl IngressHalt {
-    pub fn new() -> Self { Self::default() }
-    pub fn raise(&self) { self.flag.store(true, Ordering::SeqCst); }
-    pub fn is_raised(&self) -> bool { self.flag.load(Ordering::SeqCst) }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn raise(&self) {
+        self.flag.store(true, Ordering::SeqCst);
+    }
+    pub fn is_raised(&self) -> bool {
+        self.flag.load(Ordering::SeqCst)
+    }
     /// Nur nach vollständiger Recovery zurücksetzen.
-    pub fn clear(&self) { self.flag.store(false, Ordering::SeqCst); }
+    pub fn clear(&self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
 }
 
 use darkbot_common::channel::Producer;
@@ -144,14 +158,31 @@ pub enum IngressEvent {
     },
     Slot(SlotUpdate),
     /// Neuer Root (Finalisierung) — Fork-Policy in S2.
-    Root { slot: u64, source: SourceKind, t_rx_ns: u64 },
+    Root {
+        slot: u64,
+        source: SourceKind,
+        t_rx_ns: u64,
+    },
     /// Verbindung neu aufgebaut. Für WSS ohne Replay bedeutet das: State muss
     /// per Snapshot reconciled werden, bevor wieder getradet wird.
-    Reconnected { source: SourceKind, attempt: u32, t_rx_ns: u64 },
+    Reconnected {
+        source: SourceKind,
+        attempt: u32,
+        t_rx_ns: u64,
+    },
     /// Lücke bekannt: `from_slot` = letzter vertrauenswürdiger Slot, `to_slot` = erster nach der Lücke.
-    Gap { source: SourceKind, from_slot: Option<u64>, to_slot: Option<u64>, t_rx_ns: u64 },
+    Gap {
+        source: SourceKind,
+        from_slot: Option<u64>,
+        to_slot: Option<u64>,
+        t_rx_ns: u64,
+    },
     /// Adapterfehler, der nicht selbst behoben wurde (fail closed beim Empfänger).
-    Fatal { source: SourceKind, detail: String, t_rx_ns: u64 },
+    Fatal {
+        source: SourceKind,
+        detail: String,
+        t_rx_ns: u64,
+    },
 }
 
 impl IngressEvent {
@@ -190,13 +221,33 @@ impl fmt::Display for IngressError {
 
 impl std::error::Error for IngressError {}
 
+/// `getProgramAccounts` / `programSubscribe` account filter. Typed everywhere; encoded to the
+/// Solana JSON-RPC filter shape only inside the wire adapters (JFI-02).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProgramFilter {
+    DataSize(u64),
+    Memcmp { offset: usize, bytes: Vec<u8> },
+}
+
+impl ProgramFilter {
+    /// Wire encoding (`{"dataSize": n}` / `{"memcmp": {"offset", "bytes": base58}}`).
+    pub(crate) fn wire(&self) -> serde_json::Value {
+        match self {
+            ProgramFilter::DataSize(n) => serde_json::json!({ "dataSize": n }),
+            ProgramFilter::Memcmp { offset, bytes } => serde_json::json!({
+                "memcmp": { "offset": offset, "bytes": bs58::encode(bytes).into_string() }
+            }),
+        }
+    }
+}
+
 /// Was ein Adapter abonniert. Provider-neutral.
 #[derive(Clone, Debug, Default)]
 pub struct Subscription {
     /// Ungefilterte Program-Subscriptions.
     pub programs: Vec<Pubkey>,
     /// Gefilterte programSubscribe-Subscriptions (Solana RPC filters). [FIX-79]
-    pub program_filters: Vec<(Pubkey, Vec<serde_json::Value>)>,
+    pub program_filters: Vec<(Pubkey, Vec<ProgramFilter>)>,
     /// Einzelne Accounts (Oracles, FeeState, LUTs …).
     pub accounts: Vec<Pubkey>,
     pub slots: bool,
@@ -210,7 +261,13 @@ pub struct Subscription {
 /// Contract für alle Ingress-Adapter. `run` blockiert bis Shutdown oder Fatal.
 pub trait IngressSource {
     fn kind(&self) -> SourceKind;
-    fn run(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt, slots: SlotWatch) -> Result<(), IngressError>;
+    fn run(
+        self,
+        sink: Producer<IngressEvent>,
+        shutdown: Shutdown,
+        halt: IngressHalt,
+        slots: SlotWatch,
+    ) -> Result<(), IngressError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,15 +350,25 @@ mod tests {
 
     #[test]
     fn config_wins_over_version_field() {
-        let v = json!({"version": 0, "transaction": {"message": {"config": {"computeUnitLimit": 1}}}});
+        let v =
+            json!({"version": 0, "transaction": {"message": {"config": {"computeUnitLimit": 1}}}});
         assert_eq!(detect_version_json(&v), TxVersion::V1);
     }
 
     #[test]
     fn version_field_and_legacy() {
-        assert_eq!(detect_version_json(&json!({"version": 0, "transaction": {"message": {}}})), TxVersion::V0);
-        assert_eq!(detect_version_json(&json!({"version": "legacy", "transaction": {"message": {}}})), TxVersion::Legacy);
-        assert_eq!(detect_version_json(&json!({"transaction": {"message": {}}})), TxVersion::Legacy);
+        assert_eq!(
+            detect_version_json(&json!({"version": 0, "transaction": {"message": {}}})),
+            TxVersion::V0
+        );
+        assert_eq!(
+            detect_version_json(&json!({"version": "legacy", "transaction": {"message": {}}})),
+            TxVersion::Legacy
+        );
+        assert_eq!(
+            detect_version_json(&json!({"transaction": {"message": {}}})),
+            TxVersion::Legacy
+        );
         assert_eq!(
             detect_version_json(&json!({"transaction": {"message": {"addressTableLookups": []}}})),
             TxVersion::V0
@@ -320,5 +387,36 @@ mod tests {
         b[65] = 0x01;
         assert_eq!(detect_version_bytes(&b), Some(TxVersion::Legacy));
         assert_eq!(detect_version_bytes(&[1u8]), None);
+    }
+}
+
+#[cfg(test)]
+mod program_filter_tests {
+    use super::ProgramFilter;
+
+    /// The typed filters encode exactly to the Solana JSON-RPC filter shape used before.
+    #[test]
+    fn program_filter_wire_encoding_is_the_rpc_filter_shape() {
+        let group = solana_sdk::pubkey::Pubkey::new_unique();
+        assert_eq!(
+            ProgramFilter::DataSize(2312).wire(),
+            serde_json::json!({"dataSize": 2312})
+        );
+        assert_eq!(
+            ProgramFilter::Memcmp {
+                offset: 41,
+                bytes: group.to_bytes().to_vec()
+            }
+            .wire(),
+            serde_json::json!({"memcmp": {"offset": 41, "bytes": group.to_string()}})
+        );
+        assert_eq!(
+            ProgramFilter::Memcmp {
+                offset: 2256,
+                bytes: vec![0]
+            }
+            .wire(),
+            serde_json::json!({"memcmp": {"offset": 2256, "bytes": "1"}})
+        );
     }
 }

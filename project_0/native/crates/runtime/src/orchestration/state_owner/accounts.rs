@@ -275,26 +275,35 @@ pub(crate) fn bootstrap_probe_candidate(data: &[u8], group: &Pubkey) -> bool {
 }
 
 #[cfg(feature = "crate_health")]
-pub(crate) fn bank_filters(group: &Pubkey) -> Vec<serde_json::Value> {
+pub(crate) fn bank_filters(group: &Pubkey) -> Vec<ProgramFilter> {
     vec![
         // [FIX-130] Do not pin Bank account size in RPC/WSS filters. 0.1.12 grows the
         // Bank payload from 1856 to 3904 bytes while preserving the legacy prefix.
         // Exact supported lengths remain enforced by protocol classification/decoding.
-        serde_json::json!({"memcmp": {
-            "offset": 0,
-            "bytes": bs58::encode(protocol::DISC_BANK).into_string()
-        }}),
-        serde_json::json!({"memcmp": {"offset": 41, "bytes": group.to_string()}}),
+        ProgramFilter::Memcmp {
+            offset: 0,
+            bytes: protocol::DISC_BANK.to_vec(),
+        },
+        ProgramFilter::Memcmp {
+            offset: 41,
+            bytes: group.to_bytes().to_vec(),
+        },
     ]
 }
 
 #[cfg(feature = "crate_health")]
-pub(crate) fn liability_account_filters(group: &Pubkey) -> Vec<serde_json::Value> {
+pub(crate) fn liability_account_filters(group: &Pubkey) -> Vec<ProgramFilter> {
     vec![
-        serde_json::json!({"dataSize": 8 + std::mem::size_of::<MarginfiAccount>()}),
-        serde_json::json!({"memcmp": {"offset": 8, "bytes": group.to_string()}}),
-        // IndexerFlags.is_lending_only == 0; one zero byte is base58 "1".
-        serde_json::json!({"memcmp": {"offset": 8 + 2248, "bytes": "1"}}),
+        ProgramFilter::DataSize((8 + std::mem::size_of::<MarginfiAccount>()) as u64),
+        ProgramFilter::Memcmp {
+            offset: 8,
+            bytes: group.to_bytes().to_vec(),
+        },
+        // IndexerFlags.is_lending_only == 0 (one zero byte).
+        ProgramFilter::Memcmp {
+            offset: 8 + 2248,
+            bytes: vec![0],
+        },
     ]
 }
 

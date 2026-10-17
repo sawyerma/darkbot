@@ -13,8 +13,8 @@
 //! Credit-Verbrauch der programSubscribe → Ledger S1-05).
 
 use super::{
-    AccountUpdate, IngressError, IngressEvent, IngressHalt, IngressSource, SlotStatus, SlotUpdate, SlotWatch, SourceKind,
-    Subscription,
+    AccountUpdate, IngressError, IngressEvent, IngressHalt, IngressSource, SlotStatus, SlotUpdate,
+    SlotWatch, SourceKind, Subscription,
 };
 use base64::Engine;
 use darkbot_common::channel::{ChannelError, Producer};
@@ -50,7 +50,11 @@ pub struct WsRpcConfig {
 /// Wait before the next frame read. `None` heartbeat: exactly the idle timeout (previous
 /// behaviour). With heartbeat: the shorter of the remaining idle budget (measured from the last
 /// APPLICATION frame) and the time to the next heartbeat.
-pub(crate) fn heartbeat_wait(idle_timeout: Duration, since_last_app_frame: Duration, until_heartbeat: Option<Duration>) -> Duration {
+pub(crate) fn heartbeat_wait(
+    idle_timeout: Duration,
+    since_last_app_frame: Duration,
+    until_heartbeat: Option<Duration>,
+) -> Duration {
     match until_heartbeat {
         None => idle_timeout.saturating_sub(since_last_app_frame),
         Some(until) => idle_timeout.saturating_sub(since_last_app_frame).min(until),
@@ -112,7 +116,8 @@ impl WsRpcControlSource {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SubKind { // [FIX-52] matches parse_notification visibility
+pub(crate) enum SubKind {
+    // [FIX-52] matches parse_notification visibility
     Program,
     Account,
     Slot,
@@ -136,6 +141,7 @@ fn build_subscribe_requests(sub: &Subscription, commitment: &str) -> Vec<(u64, S
         id += 1;
     }
     for (p, filters) in &sub.program_filters {
+        let filters: Vec<Value> = filters.iter().map(super::ProgramFilter::wire).collect();
         out.push((
             id,
             SubKind::Program,
@@ -154,11 +160,19 @@ fn build_subscribe_requests(sub: &Subscription, commitment: &str) -> Vec<(u64, S
         id += 1;
     }
     if sub.slots {
-        out.push((id, SubKind::Slot, json!({"jsonrpc":"2.0","id":id,"method":"slotSubscribe"})));
+        out.push((
+            id,
+            SubKind::Slot,
+            json!({"jsonrpc":"2.0","id":id,"method":"slotSubscribe"}),
+        ));
         id += 1;
     }
     if sub.roots {
-        out.push((id, SubKind::Root, json!({"jsonrpc":"2.0","id":id,"method":"rootSubscribe"})));
+        out.push((
+            id,
+            SubKind::Root,
+            json!({"jsonrpc":"2.0","id":id,"method":"rootSubscribe"}),
+        ));
         id += 1;
     }
     // VERIFY: `transactionSubscribe` ist eine Provider-Erweiterung (Helius Enhanced WSS, nicht Standard-RPC).
@@ -188,7 +202,12 @@ fn build_subscribe_requests(sub: &Subscription, commitment: &str) -> Vec<(u64, S
     out
 }
 
-fn parse_account_value(v: &Value, pubkey: Pubkey, slot: u64, t_rx_ns: u64) -> Result<AccountUpdate, IngressError> {
+fn parse_account_value(
+    v: &Value,
+    pubkey: Pubkey,
+    slot: u64,
+    t_rx_ns: u64,
+) -> Result<AccountUpdate, IngressError> {
     let acc = v;
     let lamports = acc
         .get("lamports")
@@ -198,7 +217,8 @@ fn parse_account_value(v: &Value, pubkey: Pubkey, slot: u64, t_rx_ns: u64) -> Re
         .get("owner")
         .and_then(|x| x.as_str())
         .ok_or_else(|| IngressError::Protocol("account.owner missing".into()))?;
-    let owner = Pubkey::from_str(owner_s).map_err(|e| IngressError::Protocol(format!("owner: {}", e)))?;
+    let owner =
+        Pubkey::from_str(owner_s).map_err(|e| IngressError::Protocol(format!("owner: {}", e)))?;
     let data_b64 = acc
         .get("data")
         .and_then(|d| d.get(0))
@@ -229,34 +249,56 @@ pub(crate) fn parse_notification(
         Some(m) => m,
         None => return Ok(Vec::new()), // Subscribe-Bestätigung o. ä.
     };
-    let params = msg.get("params").ok_or_else(|| IngressError::Protocol("params missing".into()))?;
+    let params = msg
+        .get("params")
+        .ok_or_else(|| IngressError::Protocol("params missing".into()))?;
     let sub_id = params.get("subscription").and_then(|s| s.as_u64());
-    let result = params.get("result").ok_or_else(|| IngressError::Protocol("result missing".into()))?;
+    let result = params
+        .get("result")
+        .ok_or_else(|| IngressError::Protocol("result missing".into()))?;
 
     match method {
         "programNotification" => {
-            let slot = result.pointer("/context/slot").and_then(|s| s.as_u64()).ok_or_else(|| IngressError::Protocol("context.slot missing".into()))?;
+            let slot = result
+                .pointer("/context/slot")
+                .and_then(|s| s.as_u64())
+                .ok_or_else(|| IngressError::Protocol("context.slot missing".into()))?;
             let pk_s = result
                 .pointer("/value/pubkey")
                 .and_then(|x| x.as_str())
                 .ok_or_else(|| IngressError::Protocol("value.pubkey missing".into()))?;
-            let pk = Pubkey::from_str(pk_s).map_err(|e| IngressError::Protocol(format!("pubkey: {}", e)))?;
+            let pk = Pubkey::from_str(pk_s)
+                .map_err(|e| IngressError::Protocol(format!("pubkey: {}", e)))?;
             let acc = result
                 .pointer("/value/account")
                 .ok_or_else(|| IngressError::Protocol("value.account missing".into()))?;
-            Ok(vec![IngressEvent::Account(parse_account_value(acc, pk, slot, t_rx_ns)?)])
+            Ok(vec![IngressEvent::Account(parse_account_value(
+                acc, pk, slot, t_rx_ns,
+            )?)])
         }
         "accountNotification" => {
-            let slot = result.pointer("/context/slot").and_then(|s| s.as_u64()).ok_or_else(|| IngressError::Protocol("context.slot missing".into()))?;
+            let slot = result
+                .pointer("/context/slot")
+                .and_then(|s| s.as_u64())
+                .ok_or_else(|| IngressError::Protocol("context.slot missing".into()))?;
             let pk = sub_id
                 .and_then(|id| sub_ids.get(&id))
                 .and_then(|(_, pk)| *pk)
-                .ok_or_else(|| IngressError::Protocol("accountNotification for unknown subscription".into()))?;
-            let acc = result.get("value").ok_or_else(|| IngressError::Protocol("value missing".into()))?;
-            Ok(vec![IngressEvent::Account(parse_account_value(acc, pk, slot, t_rx_ns)?)])
+                .ok_or_else(|| {
+                    IngressError::Protocol("accountNotification for unknown subscription".into())
+                })?;
+            let acc = result
+                .get("value")
+                .ok_or_else(|| IngressError::Protocol("value missing".into()))?;
+            Ok(vec![IngressEvent::Account(parse_account_value(
+                acc, pk, slot, t_rx_ns,
+            )?)])
         }
         "slotNotification" => {
-            let slot = result.get("slot").and_then(|s| s.as_u64()).ok_or_else(|| IngressError::Protocol("slot".into()))?;
+            let slot = result
+                .get("slot")
+                .and_then(|s| s.as_u64())
+                .ok_or_else(|| IngressError::Protocol("slot".into()))?;
             let parent = result.get("parent").and_then(|s| s.as_u64());
             Ok(vec![IngressEvent::Slot(SlotUpdate {
                 slot,
@@ -268,33 +310,78 @@ pub(crate) fn parse_notification(
         }
         "transactionNotification" => {
             // VERIFY: Helius-Format {result:{signature, slot, transaction:{transaction, meta, version}}}
-            let sig = result.get("signature").and_then(|s| s.as_str()).ok_or_else(|| IngressError::Protocol("signature missing".into()))?.to_string();
-            let slot = result.get("slot").and_then(|s| s.as_u64()).ok_or_else(|| IngressError::Protocol("slot missing".into()))?;
+            let sig = result
+                .get("signature")
+                .and_then(|s| s.as_str())
+                .ok_or_else(|| IngressError::Protocol("signature missing".into()))?
+                .to_string();
+            let slot = result
+                .get("slot")
+                .and_then(|s| s.as_u64())
+                .ok_or_else(|| IngressError::Protocol("slot missing".into()))?;
             let tx = result.get("transaction").cloned().unwrap_or(Value::Null);
             let version = super::detect_version_json(&tx);
-            let err = tx.pointer("/meta/err").filter(|e| !e.is_null()).map(|e| e.to_string());
-            Ok(vec![IngressEvent::Transaction(super::TransactionObserved {
-                signature: sig, slot, tx_index_in_slot: None, version, err, source: SourceKind::WsRpcControl, t_rx_ns,
-                raw: result.clone(),
-            })])
+            let err = tx
+                .pointer("/meta/err")
+                .filter(|e| !e.is_null())
+                .map(|e| e.to_string());
+            Ok(vec![IngressEvent::Transaction(
+                super::TransactionObserved {
+                    signature: sig,
+                    slot,
+                    tx_index_in_slot: None,
+                    version,
+                    err,
+                    source: SourceKind::WsRpcControl,
+                    t_rx_ns,
+                    raw: result.clone(),
+                },
+            )])
         }
         "logsNotification" => {
             // [C0-MO] {result:{context:{slot}, value:{signature, err, logs}}}
-            let slot = result.pointer("/context/slot").and_then(|s| s.as_u64()).ok_or_else(|| IngressError::Protocol("context.slot missing".into()))?;
-            let value = result.get("value").ok_or_else(|| IngressError::Protocol("value missing".into()))?;
-            let signature = value.get("signature").and_then(|s| s.as_str()).ok_or_else(|| IngressError::Protocol("signature missing".into()))?.to_string();
-            let err = value.get("err").filter(|e| !e.is_null()).map(|e| e.to_string());
+            let slot = result
+                .pointer("/context/slot")
+                .and_then(|s| s.as_u64())
+                .ok_or_else(|| IngressError::Protocol("context.slot missing".into()))?;
+            let value = result
+                .get("value")
+                .ok_or_else(|| IngressError::Protocol("value missing".into()))?;
+            let signature = value
+                .get("signature")
+                .and_then(|s| s.as_str())
+                .ok_or_else(|| IngressError::Protocol("signature missing".into()))?
+                .to_string();
+            let err = value
+                .get("err")
+                .filter(|e| !e.is_null())
+                .map(|e| e.to_string());
             let logs = match value.get("logs") {
-                Some(Value::Array(items)) => items.iter().filter_map(|l| l.as_str().map(str::to_string)).collect(),
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .filter_map(|l| l.as_str().map(str::to_string))
+                    .collect(),
                 _ => Vec::new(),
             };
             Ok(vec![IngressEvent::Logs(super::LogsObserved {
-                signature, slot, err, logs, source: SourceKind::WsRpcControl, t_rx_ns, raw: result.clone(),
+                signature,
+                slot,
+                err,
+                logs,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns,
+                raw: result.clone(),
             })])
         }
         "rootNotification" => {
-            let slot = result.as_u64().ok_or_else(|| IngressError::Protocol("root".into()))?;
-            Ok(vec![IngressEvent::Root { slot, source: SourceKind::WsRpcControl, t_rx_ns }])
+            let slot = result
+                .as_u64()
+                .ok_or_else(|| IngressError::Protocol("root".into()))?;
+            Ok(vec![IngressEvent::Root {
+                slot,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns,
+            }])
         }
         _ => Ok(Vec::new()),
     }
@@ -305,7 +392,13 @@ impl IngressSource for WsRpcControlSource {
         SourceKind::WsRpcControl
     }
 
-    fn run(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt, slots: SlotWatch) -> Result<(), IngressError> {
+    fn run(
+        self,
+        sink: Producer<IngressEvent>,
+        shutdown: Shutdown,
+        halt: IngressHalt,
+        slots: SlotWatch,
+    ) -> Result<(), IngressError> {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -315,7 +408,13 @@ impl IngressSource for WsRpcControlSource {
 }
 
 impl WsRpcControlSource {
-    async fn run_async(self, sink: Producer<IngressEvent>, shutdown: Shutdown, halt: IngressHalt, slots: SlotWatch) -> Result<(), IngressError> {
+    async fn run_async(
+        self,
+        sink: Producer<IngressEvent>,
+        shutdown: Shutdown,
+        halt: IngressHalt,
+        slots: SlotWatch,
+    ) -> Result<(), IngressError> {
         let mut attempt: u32 = 0;
         let mut failures: u32 = 0;
         let mut last_slot: Option<u64> = None;
@@ -563,7 +662,11 @@ impl WsRpcControlSource {
         let mut pending: HashMap<u64, (SubKind, Option<Pubkey>)> = HashMap::new();
         let mut acc_iter = self.cfg.subscription.accounts.iter();
         for (id, kind, req) in &requests {
-            let pk = if *kind == SubKind::Account { acc_iter.next().copied() } else { None };
+            let pk = if *kind == SubKind::Account {
+                acc_iter.next().copied()
+            } else {
+                None
+            };
             pending.insert(*id, (*kind, pk));
             let send_budget = deadline
                 .map(|d| d.saturating_duration_since(tokio::time::Instant::now()))
@@ -628,7 +731,7 @@ impl WsRpcControlSource {
                 continue; // woke up for the heartbeat, not because the stream went idle
             }
             let t_rx_ns = self.clock.now_ns(); // T_rx: vor Parse
-            // Health-Event alle 5 s (Ledger: stream health), unabhängig vom Frame-Inhalt.
+                                               // Health-Event alle 5 s (Ledger: stream health), unabhängig vom Frame-Inhalt.
             if t_rx_ns.saturating_sub(last_health_ns) >= 5_000_000_000 {
                 last_health_ns = t_rx_ns;
                 let _ = sink.try_push(IngressEvent::Health(super::SourceHealth {
@@ -685,7 +788,10 @@ impl WsRpcControlSource {
                 }
                 let acked = request_total.saturating_sub(pending.len());
                 if acked == request_total || acked == 1 || acked.is_multiple_of(100) {
-                    eprintln!("[ws_rpc] session attempt={} subscription ACKs={}/{}", attempt, acked, request_total);
+                    eprintln!(
+                        "[ws_rpc] session attempt={} subscription ACKs={}/{}",
+                        attempt, acked, request_total
+                    );
                 }
                 // [FIX-36] StreamReady-Barriere: alle Subscriptions bestätigt → genau ein `Reconnected`.
                 if !stream_ready && pending.is_empty() {
@@ -821,11 +927,18 @@ mod tests {
     fn c0mo_market_subscriptions_are_opt_in() {
         let p = Pubkey::new_unique();
         // Shadow-shaped subscription: no transaction/logs subscriptions (FIX-139 unchanged).
-        let shadow = Subscription { slots: true, roots: true, ..Subscription::default() };
+        let shadow = Subscription {
+            slots: true,
+            roots: true,
+            ..Subscription::default()
+        };
         assert!(build_subscribe_requests(&shadow, "confirmed")
             .iter()
             .all(|r| r.2["method"] != "logsSubscribe" && r.2["method"] != "transactionSubscribe"));
-        let market = Subscription { logs_mentioning: vec![p], ..Subscription::default() };
+        let market = Subscription {
+            logs_mentioning: vec![p],
+            ..Subscription::default()
+        };
         let reqs = build_subscribe_requests(&market, "confirmed");
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].1, SubKind::Logs);
@@ -844,9 +957,18 @@ mod tests {
             Duration::from_secs(1)
         );
         // With heartbeat: the shorter of remaining idle budget and time to the next ping.
-        assert_eq!(heartbeat_wait(idle, Duration::from_secs(10), Some(Duration::from_secs(5))), Duration::from_secs(5));
-        assert_eq!(heartbeat_wait(idle, Duration::from_secs(58), Some(Duration::from_secs(30))), Duration::from_secs(2));
-        assert_eq!(heartbeat_wait(idle, Duration::from_secs(70), Some(Duration::from_secs(30))), Duration::ZERO);
+        assert_eq!(
+            heartbeat_wait(idle, Duration::from_secs(10), Some(Duration::from_secs(5))),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            heartbeat_wait(idle, Duration::from_secs(58), Some(Duration::from_secs(30))),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            heartbeat_wait(idle, Duration::from_secs(70), Some(Duration::from_secs(30))),
+            Duration::ZERO
+        );
     }
 
     #[test]
@@ -861,13 +983,19 @@ mod tests {
     #[test]
     fn c0mo_transaction_subscription_requests_successful_and_failed() {
         let p = Pubkey::new_unique();
-        let sub = Subscription { transactions_mentioning: vec![p], ..Subscription::default() };
+        let sub = Subscription {
+            transactions_mentioning: vec![p],
+            ..Subscription::default()
+        };
         let reqs = build_subscribe_requests(&sub, "finalized");
         assert_eq!(reqs.len(), 1);
         let filter = &reqs[0].2["params"][0];
         assert_eq!(reqs[0].2["method"], "transactionSubscribe");
         assert_eq!(filter["accountInclude"][0], p.to_string());
-        assert!(filter.get("failed").is_none(), "failed filter would select one status class only");
+        assert!(
+            filter.get("failed").is_none(),
+            "failed filter would select one status class only"
+        );
         assert!(filter.get("vote").is_none());
         assert_eq!(reqs[0].2["params"][1]["commitment"], "finalized");
         assert_eq!(reqs[0].2["params"][1]["transactionDetails"], "full");
@@ -880,7 +1008,10 @@ mod tests {
             "result":{"context":{"slot":42},"value":{"signature":"sigL","err":null,"logs":["Program x invoke [1]"]}}}});
         match parse_notification(&logs, &ids, 5).unwrap().pop().unwrap() {
             IngressEvent::Logs(l) => {
-                assert_eq!((l.signature.as_str(), l.slot, l.err.clone(), l.logs.len()), ("sigL", 42, None, 1));
+                assert_eq!(
+                    (l.signature.as_str(), l.slot, l.err.clone(), l.logs.len()),
+                    ("sigL", 42, None, 1)
+                );
                 assert_eq!(l.raw["value"]["signature"], "sigL");
             }
             other => panic!("expected Logs, got {other:?}"),
@@ -932,7 +1063,14 @@ mod tests {
     fn parses_slot_and_root() {
         let slot = json!({"method":"slotNotification","params":{"subscription":1,"result":{"parent":9,"root":5,"slot":10}}});
         let ev = parse_notification(&slot, &HashMap::new(), 1).unwrap();
-        assert!(matches!(ev[0], IngressEvent::Slot(SlotUpdate { slot: 10, parent: Some(9), .. })));
+        assert!(matches!(
+            ev[0],
+            IngressEvent::Slot(SlotUpdate {
+                slot: 10,
+                parent: Some(9),
+                ..
+            })
+        ));
         let root = json!({"method":"rootNotification","params":{"subscription":2,"result":42}});
         let ev = parse_notification(&root, &HashMap::new(), 1).unwrap();
         assert!(matches!(ev[0], IngressEvent::Root { slot: 42, .. }));

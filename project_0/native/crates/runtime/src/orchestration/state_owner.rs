@@ -30,7 +30,9 @@ use darkbot_project0::protocol::{classify as classify_account, AccountType}; // 
 use darkbot_project0::safety::{Allow, Limits, Safety};
 use darkbot_solana::ingress::ws_rpc::{WsRpcConfig, WsRpcControlSource};
 use darkbot_solana::ingress::SlotWatch;
-use darkbot_solana::ingress::{IngressEvent, IngressHalt, IngressSource, SourceKind, Subscription};
+use darkbot_solana::ingress::{
+    IngressEvent, IngressHalt, IngressSource, ProgramFilter, SourceKind, Subscription,
+};
 use darkbot_solana::state::blockhash::BlockhashCache;
 use darkbot_solana::state::recovery::{RecoveryDriver, SnapshotData};
 use darkbot_solana::state::snapshot;

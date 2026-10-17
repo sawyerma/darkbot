@@ -8,10 +8,10 @@
 
 use crate::ingress::{AccountUpdate, SourceKind};
 use darkbot_common::timing::Clock;
+use solana_account_decoder::UiAccount;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_request::RpcRequest;
 use solana_client::rpc_response::{OptionalContext, RpcKeyedAccount};
-use solana_account_decoder::UiAccount;
 use solana_commitment_config::CommitmentConfig; // [FIX-13]
 use solana_sdk::pubkey::Pubkey;
 
@@ -36,7 +36,7 @@ pub struct Snapshot {
 fn decode_program_accounts(
     rpc: &RpcClient,
     program: &Pubkey,
-    filters: Option<Vec<serde_json::Value>>,
+    filters: Option<Vec<crate::ingress::ProgramFilter>>,
     clock: &Clock,
 ) -> Result<Snapshot, SnapshotError> {
     let mut cfg = serde_json::json!({
@@ -45,7 +45,10 @@ fn decode_program_accounts(
         "withContext": true
     });
     if let Some(filters) = filters {
-        cfg["filters"] = serde_json::Value::Array(filters);
+        cfg["filters"] = filters
+            .iter()
+            .map(crate::ingress::ProgramFilter::wire)
+            .collect();
     }
     let params = serde_json::json!([program.to_string(), cfg]);
     let resp: OptionalContext<Vec<RpcKeyedAccount>> = rpc
@@ -53,12 +56,19 @@ fn decode_program_accounts(
         .map_err(|e| SnapshotError(e.to_string()))?;
     let (slot, keyed) = match resp {
         OptionalContext::Context(r) => (r.context.slot, r.value),
-        OptionalContext::NoContext(_) => return Err(SnapshotError("getProgramAccounts returned no context slot".into())),
+        OptionalContext::NoContext(_) => {
+            return Err(SnapshotError(
+                "getProgramAccounts returned no context slot".into(),
+            ))
+        }
     };
     let t = clock.now_ns();
     let mut accounts = Vec::with_capacity(keyed.len());
     for k in keyed {
-        let pubkey = k.pubkey.parse::<Pubkey>().map_err(|e| SnapshotError(e.to_string()))?;
+        let pubkey = k
+            .pubkey
+            .parse::<Pubkey>()
+            .map_err(|e| SnapshotError(e.to_string()))?;
         let acc = UiAccount::decode::<solana_sdk::account::Account>(&k.account)
             .ok_or_else(|| SnapshotError(format!("undecodable account {}", k.pubkey)))?;
         accounts.push(AccountUpdate {
@@ -72,11 +82,19 @@ fn decode_program_accounts(
             t_rx_ns: t,
         });
     }
-    Ok(Snapshot { slot, accounts, missing: Vec::new() })
+    Ok(Snapshot {
+        slot,
+        accounts,
+        missing: Vec::new(),
+    })
 }
 
 /// Alle Accounts eines Programms. Nur noch für explizite Census-/Debug-Zwecke.
-pub fn program_accounts(rpc: &RpcClient, program: &Pubkey, clock: &Clock) -> Result<Snapshot, SnapshotError> {
+pub fn program_accounts(
+    rpc: &RpcClient,
+    program: &Pubkey,
+    clock: &Clock,
+) -> Result<Snapshot, SnapshotError> {
     decode_program_accounts(rpc, program, None, clock)
 }
 
@@ -84,7 +102,7 @@ pub fn program_accounts(rpc: &RpcClient, program: &Pubkey, clock: &Clock) -> Res
 pub fn program_accounts_filtered(
     rpc: &RpcClient,
     program: &Pubkey,
-    filters: Vec<serde_json::Value>,
+    filters: Vec<crate::ingress::ProgramFilter>,
     clock: &Clock,
 ) -> Result<Snapshot, SnapshotError> {
     decode_program_accounts(rpc, program, Some(filters), clock)
@@ -92,7 +110,11 @@ pub fn program_accounts_filtered(
 
 /// Einzelne Accounts (Oracles, FeeState, LUTs) in Batches ≤ 100. Jeder Account trägt
 /// den Context-Slot seines Batches; `Snapshot.slot` ist die untere Schranke (min).
-pub fn multiple_accounts(rpc: &RpcClient, keys: &[Pubkey], clock: &Clock) -> Result<Snapshot, SnapshotError> {
+pub fn multiple_accounts(
+    rpc: &RpcClient,
+    keys: &[Pubkey],
+    clock: &Clock,
+) -> Result<Snapshot, SnapshotError> {
     let mut accounts = Vec::with_capacity(keys.len());
     let mut missing: Vec<(Pubkey, u64)> = Vec::new();
     let mut slot_min = u64::MAX;
@@ -103,7 +125,10 @@ pub fn multiple_accounts(rpc: &RpcClient, keys: &[Pubkey], clock: &Clock) -> Res
         slot_min = slot_min.min(resp.context.slot);
         let t = clock.now_ns();
         for (k, acc) in chunk.iter().zip(resp.value.into_iter()) {
-            let Some(acc) = acc else { missing.push((*k, resp.context.slot)); continue; };
+            let Some(acc) = acc else {
+                missing.push((*k, resp.context.slot));
+                continue;
+            };
             {
                 accounts.push(AccountUpdate {
                     pubkey: *k,
@@ -118,7 +143,11 @@ pub fn multiple_accounts(rpc: &RpcClient, keys: &[Pubkey], clock: &Clock) -> Res
             }
         }
     }
-    Ok(Snapshot { slot: if slot_min == u64::MAX { 0 } else { slot_min }, accounts, missing })
+    Ok(Snapshot {
+        slot: if slot_min == u64::MAX { 0 } else { slot_min },
+        accounts,
+        missing,
+    })
 }
 
 #[cfg(test)]
@@ -131,30 +160,59 @@ mod compressed_snapshot_tests {
     #[test]
     fn compressed_gpa_preserves_all_bytes_owner_lamports_and_context() {
         let key = Pubkey::new_unique();
-        let account = Account { lamports: 987, data: (0..2304).map(|i|(i%251) as u8).collect(),
-            owner: Pubkey::new_unique(), executable: false, rent_epoch: 0 };
+        let account = Account {
+            lamports: 987,
+            data: (0..2304).map(|i| (i % 251) as u8).collect(),
+            owner: Pubkey::new_unique(),
+            executable: false,
+            rent_epoch: 0,
+        };
         let ui = encode_ui_account(&key, &account, UiAccountEncoding::Base64Zstd, None, None);
         let plain = encode_ui_account(&key, &account, UiAccountEncoding::Base64, None, None);
         let reply = serde_json::json!({"context":{"slot":123},"value":[{"pubkey":key.to_string(),"account":ui}]});
-        let rpc = RpcClient::new_mock_with_mocks("succeeds", HashMap::from([(RpcRequest::GetProgramAccounts,reply)]));
-        let snapshot = program_accounts_filtered(&rpc, &Pubkey::new_unique(),vec![],&Clock::new()).unwrap();
-        assert_eq!(snapshot.slot,123);
-        assert_eq!(snapshot.accounts.len(),1);
+        let rpc = RpcClient::new_mock_with_mocks(
+            "succeeds",
+            HashMap::from([(RpcRequest::GetProgramAccounts, reply)]),
+        );
+        let snapshot =
+            program_accounts_filtered(&rpc, &Pubkey::new_unique(), vec![], &Clock::new()).unwrap();
+        assert_eq!(snapshot.slot, 123);
+        assert_eq!(snapshot.accounts.len(), 1);
         let got = &snapshot.accounts[0];
-        assert_eq!(got.pubkey,key);assert_eq!(got.slot,123);
-        assert_eq!(got.owner,account.owner);assert_eq!(got.lamports,account.lamports);
-        assert_eq!(got.data,account.data);
+        assert_eq!(got.pubkey, key);
+        assert_eq!(got.slot, 123);
+        assert_eq!(got.owner, account.owner);
+        assert_eq!(got.lamports, account.lamports);
+        assert_eq!(got.data, account.data);
         assert_eq!(got.data, plain.decode::<Account>().unwrap().data);
     }
 
     #[test]
     fn corrupt_compressed_account_cannot_produce_partial_snapshot() {
-        let key=Pubkey::new_unique();
-        let account=Account {lamports:1,data:vec![7;2304],owner:Pubkey::new_unique(),executable:false,rent_epoch:0};
-        let mut ui=serde_json::to_value(encode_ui_account(&key,&account,UiAccountEncoding::Base64Zstd,None,None)).unwrap();
-        ui["data"]=serde_json::json!(["AAAA","base64+zstd"]);
-        let reply=serde_json::json!({"context":{"slot":123},"value":[{"pubkey":key.to_string(),"account":ui}]});
-        let rpc=RpcClient::new_mock_with_mocks("succeeds",HashMap::from([(RpcRequest::GetProgramAccounts,reply)]));
-        assert!(program_accounts_filtered(&rpc,&Pubkey::new_unique(),vec![],&Clock::new()).is_err());
+        let key = Pubkey::new_unique();
+        let account = Account {
+            lamports: 1,
+            data: vec![7; 2304],
+            owner: Pubkey::new_unique(),
+            executable: false,
+            rent_epoch: 0,
+        };
+        let mut ui = serde_json::to_value(encode_ui_account(
+            &key,
+            &account,
+            UiAccountEncoding::Base64Zstd,
+            None,
+            None,
+        ))
+        .unwrap();
+        ui["data"] = serde_json::json!(["AAAA", "base64+zstd"]);
+        let reply = serde_json::json!({"context":{"slot":123},"value":[{"pubkey":key.to_string(),"account":ui}]});
+        let rpc = RpcClient::new_mock_with_mocks(
+            "succeeds",
+            HashMap::from([(RpcRequest::GetProgramAccounts, reply)]),
+        );
+        assert!(
+            program_accounts_filtered(&rpc, &Pubkey::new_unique(), vec![], &Clock::new()).is_err()
+        );
     }
 }
