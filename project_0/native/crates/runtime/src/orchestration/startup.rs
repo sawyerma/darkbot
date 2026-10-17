@@ -228,10 +228,11 @@ fn supervise(
     crate::analytics::measurement::journal(
         &handle.cfg.paths(),
         clock,
-        "OWNERS_FINISHED",
-        serde_json::json!({"aborted":handle.shared.abort.load(Ordering::Acquire),
-            "shadow_failed":handle.shared.shadow_failed.load(Ordering::Acquire),
-            "market_failed":handle.shared.market_failed.load(Ordering::Acquire)}),
+        crate::analytics::measurement::Phase::OwnersFinished {
+            aborted: handle.shared.abort.load(Ordering::Acquire),
+            shadow_failed: handle.shared.shadow_failed.load(Ordering::Acquire),
+            market_failed: handle.shared.market_failed.load(Ordering::Acquire),
+        },
     )?;
     analytics
         .join()

@@ -5645,3 +5645,14 @@ Base `98cfcc8`.
 Tests: econ/journal/winner 104 (incl. the layout-V2 run whose report files must equal the renders of the sealed report journal byte for byte, and `typed_canonical_row_renders_identical_view`), Python launcher integration 26/26, Python unit suite PASS.
 
 Open in JFI-FIX-05: `ECON_SNAPSHOT`/`ECON_FINAL` report documents and the market summary values handed to the analytics worker are still JSON value trees; the native report chain (B7) follows.
+
+## 2026-10-17 — JFI-FIX-04 part 1: typed measurement phases; latent strict-fixture defect corrected (LOCAL_PASS)
+
+Base `78f5761`.
+
+- `MEASUREMENT_PHASE` frames are typed (`PhaseRecord { phase, at_ns, unix_ns }`, `Phase` = BOOTSTRAP, WAIT_STREAM_READY, CAPTURE(`CaptureWindow`), DRAIN, VERIFICATION, OWNERS_FINISHED, REPORTS_FINALIZED); no JSON value is built at the seven call sites. `measurement_phases.jsonl` for the pinned readers is the catalogued render (`PhaseRecord::legacy_json`), same keys and values; a schema-1 phase write is now a refused rollback. Codec tests that used the phase kind as a generic legacy kind use `FE01_READ`.
+- **Found and corrected (test fixture, not production):** `test_measurement_p6::test_strict_fixture_replay_and_nested_batch_integrity` wrote its strict batch event in the pinned Python decoder's shape; since Ticket 3 (`bb5a11a`) typed `TruthEvent` (list `visible_payments`, typed `native_evidence`, required provenance fields), `p0-econ-replay` refuses it (`MARKET_DECODE`). The earlier 13/13 record ran against a release binary older than that change. The fixture now writes the Rust `TruthEvent` render; identity still from the independent Python decode.
+
+Tests: measurement/journal/econ 80, Python launcher integration 26/26, full Python suite 107 PASS (1 skipped; release `p0-fe-qualify` built for the FE replay tests).
+
+Open in JFI-FIX-04: run manifest and operational-config report (JSON values written by the runtime for the pinned readers), measurement plan / candidate manifest handoffs, Python ↔ Rust CLI handoffs.

@@ -117,8 +117,19 @@ class Qualification(unittest.TestCase):
         spec=c.specification(self.run,c.VerificationConfig(mode='strict'),'offline-fixture');sid=spec['verification_spec_id']
         root=self.run/'verification'/sid;batchdir=root/'batch';batchdir.mkdir(parents=True);c.immutable(root/'spec.json',spec)
         tx=f.tx('strict-event',10,150,'CLASSIC');decoded=a.detect(tx,10);ev=decoded['events'][0]
-        event={**ev,'liquidation_type':'CLASSIC','transaction_index':0,'liquidator':ev['actor'],
-            'visible_payments':{},'winner_net_edge_complete':False,'block_time':150,'permissionless_profit_opportunity':True}
+        # The strict batch row is the Rust TruthEvent render (since Ticket 3 typed: visible_payments
+        # is a list, native_evidence a typed variant, provenance fields required); identity from the
+        # independent Python decode.
+        event={'signature':'strict-event','slot':10,'transaction_index':0,'event_index':ev['event_index'],
+            'liquidation_type':'CLASSIC','target':ev['target'],'liquidator':ev['actor'],'liquidator_marginfi_account':None,
+            'asset_bank':ev.get('asset_bank'),'liability_bank':ev.get('liability_bank'),'asset_mint':ev.get('asset_mint'),
+            'liability_mint':ev.get('liability_mint'),'seized_asset_native_exact':ev.get('seized_asset_native_exact'),
+            'native_evidence':None,'seized_value_usd':ev.get('seized_value_usd'),'repaid_value_usd':ev.get('repaid_value_usd'),
+            'gross_edge_usd':None,'protocol_fee_lamports':ev.get('protocol_fee_lamports'),'transaction_fee_lamports':None,
+            'fee_payer':None,'visible_payments':[],'incremental_rent_lamports':None,'priority_fee_lamports':None,
+            'winner_net_edge_usd':None,'winner_net_edge_complete':False,'economic_provenance':'FIXTURE_NO_PRICE',
+            'block_time':150,'live_t_rx_ns':None,'discovery_source':'full_slot_reconciliation',
+            'permissionless_profit_opportunity':True}
         (batchdir/'transactions.jsonl').write_text(json.dumps({'signature':'strict-event','slot':10,'block_time':150,'raw':tx})+'\n')
         (batchdir/'liquidations.jsonl').write_text(json.dumps({'source':'canonical_market_truth','event':event})+'\n')
         (batchdir/'coverage.jsonl').write_text('')

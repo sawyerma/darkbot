@@ -164,8 +164,9 @@ pub fn run_embedded(
         crate::analytics::measurement::journal(
             &h.cfg.paths(),
             clock,
-            "WAIT_STREAM_READY",
-            json!({"budget_seconds":h.cfg.plan.budgets.stream_ready_seconds}),
+            crate::analytics::measurement::Phase::WaitStreamReady {
+                budget_seconds: h.cfg.plan.budgets.stream_ready_seconds,
+            },
         )?;
         eprintln!("C0_E1_WARMUP_READY; starting market stream and measurement window");
     }
@@ -314,8 +315,7 @@ pub fn run_embedded(
                     crate::analytics::measurement::journal(
                         &h.cfg.paths(),
                         clock,
-                        "CAPTURE",
-                        evidence,
+                        crate::analytics::measurement::Phase::Capture(evidence),
                     )?;
                     h.start(t_rx_ns, cutoff);
                 }
@@ -393,12 +393,14 @@ pub fn run_embedded(
         crate::analytics::measurement::journal(
             &h.cfg.paths(),
             clock,
-            "DRAIN",
-            json!({
-            "stop_reason":stop_reason,"actual_capture_end_ns":capture_end_ns,
-            "actual_capture_elapsed_ns":window.map(|(start,cutoff)|capture_end_ns.min(cutoff).saturating_sub(start)),
-            "shadow_budget_seconds":h.cfg.plan.budgets.shadow_drain_seconds,
-            "market_budget_seconds":h.cfg.plan.budgets.market_drain_seconds}),
+            crate::analytics::measurement::Phase::Drain {
+                stop_reason: stop_reason.into(),
+                actual_capture_end_ns: capture_end_ns,
+                actual_capture_elapsed_ns: window
+                    .map(|(start, cutoff)| capture_end_ns.min(cutoff).saturating_sub(start)),
+                shadow_budget_seconds: h.cfg.plan.budgets.shadow_drain_seconds,
+                market_budget_seconds: h.cfg.plan.budgets.market_drain_seconds,
+            },
         )?;
     }
     if stop_reason != "TIMER" {
@@ -505,10 +507,12 @@ pub fn run_embedded(
         crate::analytics::measurement::journal(
             &h.cfg.paths(),
             clock,
-            "VERIFICATION",
-            json!({
-            "strict_seconds":h.cfg.plan.budgets.strict_seconds,"gap_seconds":h.cfg.plan.budgets.gap_seconds,
-            "enrichment_seconds":h.cfg.plan.budgets.enrichment_seconds,"shadow_quiescent":write_error.is_none()}),
+            crate::analytics::measurement::Phase::Verification {
+                strict_seconds: h.cfg.plan.budgets.strict_seconds,
+                gap_seconds: h.cfg.plan.budgets.gap_seconds,
+                enrichment_seconds: h.cfg.plan.budgets.enrichment_seconds,
+                shadow_quiescent: write_error.is_none(),
+            },
         )?;
     }
     // ---- phase 3 + summary + report: one shared production path ----

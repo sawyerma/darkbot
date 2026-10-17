@@ -44,10 +44,11 @@ pub fn finalize(
         summary["measurement_plan"] =
             serde_json::to_value(&h.cfg.plan).map_err(|e| e.to_string())?;
         summary["capture_window"] = if let Some(cutoff) = h.cutoff() {
-            h.cfg.plan.capture_window(
+            serde_json::to_value(h.cfg.plan.capture_window(
                 h.clock,
                 cutoff - h.cfg.plan.duration_seconds * crate::analytics::measurement::NS,
-            )?
+            )?)
+            .map_err(|e| e.to_string())?
         } else {
             Value::Null
         };

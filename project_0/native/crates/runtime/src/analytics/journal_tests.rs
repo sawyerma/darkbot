@@ -33,7 +33,7 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
     };
     let f = w
         .append_legacy(
-            kind::MEASUREMENT_PHASE,
+            kind::FE01_READ,
             p.clone(),
             &serde_json::json!({"amount":i128::MIN}),
         )
@@ -145,7 +145,7 @@ fn explicit_export_matches_legacy_jsonl_and_never_overwrites() {
     let export = path.with_extension("jsonl");
     let value = serde_json::json!({"integer":i128::MIN,"unknown":null});
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::MEASUREMENT_PHASE, &value).unwrap();
+    w.append_value(kind::FE01_READ, &value).unwrap();
     w.seal(true).unwrap();
     super::export(&path, &export, None, false).unwrap();
     assert_eq!(fs::read_to_string(&export).unwrap(), format!("{value}\n"));
@@ -179,7 +179,7 @@ fn export_of_a_damaged_journal_leaves_no_partial_file() {
     let export = path.with_extension("jsonl");
     let mut w = Writer::create(&path).unwrap();
     for n in 0..3 {
-        w.append_value(kind::MEASUREMENT_PHASE, &serde_json::json!({"n":n}))
+        w.append_value(kind::FE01_READ, &serde_json::json!({"n":n}))
             .unwrap();
     }
     w.sync().unwrap();
@@ -200,7 +200,7 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     let path = path();
     let dir = path.parent().unwrap().to_path_buf();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::MEASUREMENT_PHASE, &serde_json::json!({"a":1}))
+    w.append_value(kind::FE01_READ, &serde_json::json!({"a":1}))
         .unwrap();
     w.append_value(kind::MT0_SNAPSHOT, &serde_json::json!({"b":2}))
         .unwrap();
@@ -210,7 +210,7 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     assert!(super::export_views(
         &path,
         &[
-            (Some(kind::MEASUREMENT_PHASE), &a),
+            (Some(kind::FE01_READ), &a),
             (Some(kind::MT0_SNAPSHOT), &b)
         ],
         false
@@ -223,7 +223,7 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
         super::export_views(
             &path,
             &[
-                (Some(kind::MEASUREMENT_PHASE), &a),
+                (Some(kind::FE01_READ), &a),
                 (Some(kind::MT0_SNAPSHOT), &b)
             ],
             false
@@ -277,7 +277,7 @@ fn persist05_local_writer_benchmark() {
         let started = Instant::now();
         for _ in 0..frames {
             let t = Instant::now();
-            w.append_value(kind::MEASUREMENT_PHASE, value).unwrap();
+            w.append_value(kind::FE01_READ, value).unwrap();
             lat.push(t.elapsed().as_nanos() as u64);
         }
         let write_s = started.elapsed().as_secs_f64();
@@ -308,7 +308,7 @@ fn persist05_local_writer_benchmark() {
     let mut lat = Vec::new();
     for _ in 0..500 {
         let t = Instant::now();
-        w.append_value(kind::MEASUREMENT_PHASE, &opportunity)
+        w.append_value(kind::FE01_READ, &opportunity)
             .unwrap();
         w.sync().unwrap();
         lat.push(t.elapsed().as_nanos() as u64);
@@ -419,6 +419,8 @@ fn write_admission_forbids_legacy_rollback_and_unregistered_kinds() {
     for (k, schema, code) in [
         (kind::OWNER_DIAGNOSTIC, TYPED + 1, "PAYLOAD_SCHEMA"),
         (kind::ECON_FINAL, TYPED, "PAYLOAD_KIND_UNTYPED"),
+        // Migrated in JFI-04: a schema-1 phase frame is a refused rollback.
+        (kind::MEASUREMENT_PHASE, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
     ] {
         let e = w
             .append(k, schema, Provenance::default(), &bytes)
@@ -426,7 +428,7 @@ fn write_admission_forbids_legacy_rollback_and_unregistered_kinds() {
         assert_eq!(e.to_string(), code);
     }
     // A refused write leaves the journal usable: sequence and chain continue unchanged.
-    w.append_legacy(kind::MEASUREMENT_PHASE, Provenance::default(), &Value::Null)
+    w.append_legacy(kind::FE01_READ, Provenance::default(), &Value::Null)
         .unwrap();
     w.seal(true).unwrap();
     let mut r = Reader::open(&path).unwrap();

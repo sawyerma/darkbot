@@ -1494,7 +1494,7 @@ impl Worker {
         };
         let complete = finalizing && elapsed >= self.h.cfg.plan.seconds(index);
         let capture_window = if self.h.cutoff().is_some() {
-            self.h.cfg.plan.capture_window(self.h.clock, start).ok()
+            self.h.cfg.plan.capture_window(self.h.clock, start).ok().map(|w| json!(w))
         } else {
             None
         };
@@ -1766,9 +1766,14 @@ impl Worker {
         crate::analytics::measurement::journal(
             &self.h.cfg.paths(),
             self.h.clock,
-            "REPORTS_FINALIZED",
-            json!({"technical_qualification":final_report["technical_qualification"]["verdict"],
-                "snapshot_count":self.snapshots,"report":"economics_final.json"}),
+            crate::analytics::measurement::Phase::ReportsFinalized {
+                technical_qualification: final_report["technical_qualification"]["verdict"]
+                    .as_str()
+                    .unwrap_or("UNKNOWN")
+                    .to_string(),
+                snapshot_count: self.snapshots as u64,
+                report: "economics_final.json".into(),
+            },
         )?;
         if final_report["technical_qualification"]["verdict"] != "PASS" {
             return Err(

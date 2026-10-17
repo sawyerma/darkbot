@@ -268,14 +268,149 @@ impl MeasurementPlan {
             + b.enrichment_seconds
             + b.shutdown_grace_seconds
     }
-    pub fn capture_window(&self, clock: Clock, start: u64) -> Result<Value, String> {
+    pub fn capture_window(&self, clock: Clock, start: u64) -> Result<CaptureWindow, String> {
         let cutoff = self.cutoff(start)?;
-        Ok(json!({"capture_start_ns":start,"capture_cutoff_ns":cutoff,
-            "capture_start_unix_ns":clock.unix_ns(start),"capture_cutoff_unix_ns":clock.unix_ns(cutoff),
-            "capture_start_utc":utc_ns(clock.unix_ns(start)),
-            "capture_cutoff_utc":utc_ns(clock.unix_ns(cutoff)),
-            "snapshot_monotonic_ns":self.snapshot_offsets_ns.map(|n|start+n),
-            "provenance":"SHADOW_READY_THEN_MARKET_STREAM_READY; shared process Clock; UTC projected from fixed origin"}))
+        Ok(CaptureWindow {
+            capture_start_ns: start,
+            capture_cutoff_ns: cutoff,
+            capture_start_unix_ns: clock.unix_ns(start),
+            capture_cutoff_unix_ns: clock.unix_ns(cutoff),
+            capture_start_utc: utc_ns(clock.unix_ns(start)),
+            capture_cutoff_utc: utc_ns(clock.unix_ns(cutoff)),
+            snapshot_monotonic_ns: self.snapshot_offsets_ns.map(|n| start + n),
+            provenance: "SHADOW_READY_THEN_MARKET_STREAM_READY; shared process Clock; UTC projected from fixed origin".into(),
+        })
+    }
+}
+
+/// The measurement window as journaled at StreamReady (one shared process clock).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureWindow {
+    pub capture_start_ns: u64,
+    pub capture_cutoff_ns: u64,
+    pub capture_start_unix_ns: u128,
+    pub capture_cutoff_unix_ns: u128,
+    pub capture_start_utc: String,
+    pub capture_cutoff_utc: String,
+    pub snapshot_monotonic_ns: [u64; SNAPSHOT_COUNT],
+    pub provenance: String,
+}
+
+/// One lifecycle phase of an econ4h run (JFI-04: typed `MEASUREMENT_PHASE` frame).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Phase {
+    Bootstrap {
+        budget_seconds: u64,
+    },
+    WaitStreamReady {
+        budget_seconds: u64,
+    },
+    Capture(CaptureWindow),
+    Drain {
+        stop_reason: String,
+        actual_capture_end_ns: u64,
+        actual_capture_elapsed_ns: Option<u64>,
+        shadow_budget_seconds: u64,
+        market_budget_seconds: u64,
+    },
+    Verification {
+        strict_seconds: u64,
+        gap_seconds: u64,
+        enrichment_seconds: u64,
+        shadow_quiescent: bool,
+    },
+    OwnersFinished {
+        aborted: bool,
+        shadow_failed: bool,
+        market_failed: bool,
+    },
+    ReportsFinalized {
+        technical_qualification: String,
+        snapshot_count: u64,
+        report: String,
+    },
+}
+impl Phase {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Bootstrap { .. } => "BOOTSTRAP",
+            Self::WaitStreamReady { .. } => "WAIT_STREAM_READY",
+            Self::Capture(_) => "CAPTURE",
+            Self::Drain { .. } => "DRAIN",
+            Self::Verification { .. } => "VERIFICATION",
+            Self::OwnersFinished { .. } => "OWNERS_FINISHED",
+            Self::ReportsFinalized { .. } => "REPORTS_FINALIZED",
+        }
+    }
+}
+
+/// `MEASUREMENT_PHASE` frame: a phase with the shared clock's monotonic and UTC time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhaseRecord {
+    pub phase: Phase,
+    pub at_ns: u64,
+    pub unix_ns: u128,
+}
+impl super::payload::Payload for PhaseRecord {
+    const KIND: u16 = super::journal::kind::MEASUREMENT_PHASE;
+}
+impl PhaseRecord {
+    /// Historical `measurement_phases.jsonl` row (offline render for the pinned readers).
+    pub fn legacy_json(&self) -> Value {
+        let details = match &self.phase {
+            Phase::Bootstrap { budget_seconds } | Phase::WaitStreamReady { budget_seconds } => {
+                json!({ "budget_seconds": budget_seconds })
+            }
+            Phase::Capture(w) => json!(w),
+            Phase::Drain {
+                stop_reason,
+                actual_capture_end_ns,
+                actual_capture_elapsed_ns,
+                shadow_budget_seconds,
+                market_budget_seconds,
+            } => json!({
+                "stop_reason": stop_reason,
+                "actual_capture_end_ns": actual_capture_end_ns,
+                "actual_capture_elapsed_ns": actual_capture_elapsed_ns,
+                "shadow_budget_seconds": shadow_budget_seconds,
+                "market_budget_seconds": market_budget_seconds,
+            }),
+            Phase::Verification {
+                strict_seconds,
+                gap_seconds,
+                enrichment_seconds,
+                shadow_quiescent,
+            } => json!({
+                "strict_seconds": strict_seconds,
+                "gap_seconds": gap_seconds,
+                "enrichment_seconds": enrichment_seconds,
+                "shadow_quiescent": shadow_quiescent,
+            }),
+            Phase::OwnersFinished {
+                aborted,
+                shadow_failed,
+                market_failed,
+            } => json!({
+                "aborted": aborted,
+                "shadow_failed": shadow_failed,
+                "market_failed": market_failed,
+            }),
+            Phase::ReportsFinalized {
+                technical_qualification,
+                snapshot_count,
+                report,
+            } => json!({
+                "technical_qualification": technical_qualification,
+                "snapshot_count": snapshot_count,
+                "report": report,
+            }),
+        };
+        json!({
+            "phase": self.phase.name(),
+            "at_ns": self.at_ns,
+            "unix_ns": self.unix_ns,
+            "details": details,
+        })
     }
 }
 /// Preserve fractional snapshot boundaries in new UTC fields. Legacy second fields remain readable.
@@ -312,10 +447,9 @@ static PHASE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub fn journal(
     paths: &crate::run_layout::RunPaths,
     clock: Clock,
-    phase: &str,
-    details: Value,
+    phase: Phase,
 ) -> Result<(), String> {
-    use super::journal::{self as binary, kind, source, Provenance, Writer};
+    use super::journal::{self as binary, source, Provenance, Writer};
     let _guard = PHASE_LOCK
         .lock()
         .map_err(|_| "measurement journal lock poisoned")?;
@@ -335,9 +469,13 @@ pub fn journal(
         unix_ns: u64::try_from(unix).ok(),
         ..Default::default()
     };
-    let row = json!({"phase":phase,"at_ns":now,"unix_ns":unix,"details":details});
+    let row = PhaseRecord {
+        phase,
+        at_ns: now,
+        unix_ns: unix,
+    };
     writer
-        .append_legacy(kind::MEASUREMENT_PHASE, provenance, &row)
+        .append_typed(provenance, &row)
         .and_then(|_| writer.sync())
         .map(|_| ())
         .map_err(|e| format!("PHASE_JOURNAL: {e}"))
@@ -453,8 +591,9 @@ pub fn persist_manifest(
     journal(
         paths,
         clock,
-        "BOOTSTRAP",
-        json!({"budget_seconds":plan.budgets.bootstrap_seconds}),
+        Phase::Bootstrap {
+            budget_seconds: plan.budgets.bootstrap_seconds,
+        },
     )
 }
 
@@ -606,12 +745,19 @@ mod persistence_tests {
             assert!(persist_manifest(&paths, "test", "UNKNOWN", &plan, clock).is_err());
             assert_eq!(before, fs::read(root.join(manifest_name)).unwrap());
             let window = plan.capture_window(clock, 600 * NS).unwrap();
-            journal(&paths, clock, "CAPTURE", window.clone()).unwrap();
-            journal(&paths, clock, "DRAIN", json!({"stop_reason":"TIMER"})).unwrap();
+            journal(&paths, clock, Phase::Capture(window.clone())).unwrap();
+            let drain = Phase::Drain {
+                stop_reason: "TIMER".into(),
+                actual_capture_end_ns: 1,
+                actual_capture_elapsed_ns: None,
+                shadow_budget_seconds: 2,
+                market_budget_seconds: 3,
+            };
+            journal(&paths, clock, drain).unwrap();
             // The pinned readers see the JSONL render only after the journal was sealed.
             assert!(!root.join(phases_name).exists());
             finalize_phases(&paths, true).unwrap();
-            assert!(journal(&paths, clock, "LATE", json!({})).is_err());
+            assert!(journal(&paths, clock, Phase::Bootstrap { budget_seconds: 1 }).is_err());
             let mut sealed = crate::analytics::journal::Reader::open(
                 &crate::analytics::journal::binary_path(&root.join(phases_name)),
             )
@@ -625,7 +771,11 @@ mod persistence_tests {
                 .map(|s| serde_json::from_str(s).unwrap())
                 .collect();
             assert_eq!(rows.len(), 3);
-            assert_eq!(rows[1]["details"], window);
+            // The typed CAPTURE phase renders the same window object the JSON phase carried.
+            assert_eq!(rows[1]["details"], serde_json::to_value(&window).unwrap());
+            assert_eq!(rows[1]["phase"], "CAPTURE");
+            assert_eq!(rows[2]["details"]["stop_reason"], "TIMER");
+            assert!(rows[2]["details"]["actual_capture_elapsed_ns"].is_null());
             assert_eq!(rows[1]["details"]["capture_cutoff_ns"], 661 * NS);
             assert_eq!(
                 rows[1]["details"]["snapshot_monotonic_ns"][0],
