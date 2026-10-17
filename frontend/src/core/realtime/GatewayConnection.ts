@@ -110,6 +110,21 @@ export class GatewayConnection {
     this.bindVisibility();
     this.setStatus("CONNECTING");
 
+    void this.open();
+  }
+
+  private async open(): Promise<void> {
+    try {
+      const response = await fetch("/api/v1/session", { method: "GET", credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error(`SESSION_HTTP_${response.status}`);
+    } catch {
+      if (!this.manuallyClosed && this.info.status === "CONNECTING") {
+        this.setStatus("STALE", "SESSION_BOOTSTRAP_FAILED");
+        this.scheduleReconnect();
+      }
+      return;
+    }
+    if (this.manuallyClosed || this.info.status !== "CONNECTING") return;
     const ws = new WebSocket(resolveSameOriginUrl(this.path));
     ws.binaryType = "arraybuffer";
     this.ws = ws;
