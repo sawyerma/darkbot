@@ -110,7 +110,18 @@ Weitere echte `RuntimeConfig`-Felder: `profile` (smoke/standard/performance/cust
 | `analytics/econ_canonical.rs` | Market↔Shadow-Join, Capital, Competition, Race, Loss |
 | `operations/reporting/market_report.py` | `market_gross_edge_usd`, `executable_shadow_net_edge_usd`, `realized_pnl_usd`, `unknown_costs` – Legacy Consumer noch JFI/B7 offen |
 
-## 6. Noch NICHT umgesetzt / nicht nachgewiesen
+## 6. Erweiterung v1.1 – dynamische Dauer, Boot-Audit und Backtest (SOLL)
+
+Vollständiger verbindlicher Vertrag: [Boot, unbounded capture und Klick-Optimierung](STARTUP_BACKTEST_OPTIMIZATION.md).
+
+- **IST:** `MeasurementPlan::parse_duration` in `runtime/src/analytics/measurement.rs` und `runtime_config::duration_seconds` in `solana/src/runtime_config.rs` akzeptieren nur endliche Ganzzahlen mit `s/m/h`. `MeasurementPlan.duration_seconds:u64`, `SNAPSHOT_COUNT=4` und `snapshot_offsets_ns:[u64;4]` bilden endliche Messfenster. Kein tatsächliches Infinity im Code.
+- **SOLL:** `RunHorizon::{Fixed,UntilStopped}`; `s/m/h/d`-Frontend-Eingabe und variable endliche Dauer, Rolling-Segment-/Checkpoint-/Preflight für unbounded; `Duration` niemals durch MaxInt vortäuschen.
+- **IST:** `storage/preflight.rs::Request.duration_s:u64`, `CALIBRATION_MAX_S=600`, `CapacityReport.start_allowed`. **SOLL:** dynamischer Rolling-Runway und regelmäßiger Capacity-/Provider-Check.
+- **IST:** `market/configuration.rs::MarketSource::coverage_verified=false` für logs/transactions. **SOLL:** vor jedem Run signierter/gebundener Boot-Audit mit genesis/owner/ProgramData/Bank-/Oracle-/PDA-/ABI-/WSS-Fingerprints, tatsächlicher Provider-Erreichbarkeit, Ressourcen- und Sicherheitsgates; dynamische Adressen aus Parent-State ableiten statt hardcoden.
+- **IST:** `runtime/src/analytics/econ.rs::CAPITAL_USD` ist Default, `P0_ECON_CAPITAL_USD` akzeptiert bereits 1..32 positive u64-Werte. **SOLL:** freie kontrollierte Kapital-Szenarien, Offline-Backtest-/OptimizationJobs, serverseitige Replays und Baseline-Vergleiche.
+- Alle neuen Typen `RunHorizon`, `BootAudit`, `BacktestJob`, `OptimizationJob` sind bislang nur **SOLL**, keine neuen Source-of-Truth-Defaults.
+
+## 7. Noch NICHT umgesetzt / nicht nachgewiesen
 
 `p0ctl`-Binary, Project_0-HTTP-Control-Server, Run-DTOs/API-Endpunkte, Strategieoptimierer, `StrategyProfile`, `OptimizationJob`, `LossAttribution` und Frontend-Komponenten = **SOLL**.
 
