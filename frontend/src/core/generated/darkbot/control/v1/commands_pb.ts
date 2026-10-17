@@ -336,3 +336,4 @@ export enum CommandPhase {
  */
 export const CommandPhaseSchema: GenEnum<CommandPhase> = /*@__PURE__*/
   enumDesc(file_darkbot_control_v1_commands, 2);
+

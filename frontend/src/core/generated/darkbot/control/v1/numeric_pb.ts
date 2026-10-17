@@ -45,3 +45,4 @@ export type SignedDecimal = Message<"darkbot.control.v1.SignedDecimal"> & {
  */
 export const SignedDecimalSchema: GenMessage<SignedDecimal> = /*@__PURE__*/
   messageDesc(file_darkbot_control_v1_numeric, 1);
+
