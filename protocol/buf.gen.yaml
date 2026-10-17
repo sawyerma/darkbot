@@ -1,0 +1,20 @@
+# Remote-Plugin-Versionen sind Kandidaten, NICHT bereits lokal validiert.
+# F2: buf lint/generate + Rust/TS-Golden-Tests ausführen, danach Pin/Lock freigeben.
+version: v2
+managed:
+  enabled: true
+plugins:
+  # TypeScript (protobuf-es v2): int64/uint64 -> bigint, Schema-Objekte + create()/toBinary()/fromBinary()
+  - remote: buf.build/bufbuild/es:v2.2.3      # TO_PIN
+    out: ../frontend/src/core/generated
+    opt:
+      - target=ts
+      - import_extension=none
+  # Rust (prost): Ausgabe in ein eigenes Gateway-Crate. Pfad wird mit dem Gateway-Crate in F3 festgelegt.
+  - remote: buf.build/community/neoeinstein-prost:v0.4.0   # TO_PIN
+    out: gen/rust
+    opt:
+      - bytes=.
+      - compile_well_known_types
+inputs:
+  - directory: schemas

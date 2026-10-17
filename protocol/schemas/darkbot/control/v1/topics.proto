@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package darkbot.control.v1;
+
+// Projektdomänen sind strikt getrennte Owner. Ein TopicId gehört genau einem Projekt
+// (Ausnahme: OVERVIEW_AGGREGATES, Publisher ist das Gateway selbst).
+enum ProjectId {
+  PROJECT_ID_UNSPECIFIED = 0;
+  PROJECT_ID_PROJECT_0 = 1;
+  PROJECT_ID_BSC = 2;
+  PROJECT_ID_SOLANA = 3;
+}
+
+// STATE: vollständiger kleiner Topic-Wert, last-value-wins, Ordnung (generation, seq).
+// EVENT: durables Journal-Ereignis, Ordnung (journal_epoch, durable_cursor), at-least-once.
+enum TopicClass {
+  TOPIC_CLASS_UNSPECIFIED = 0;
+  TOPIC_CLASS_STATE = 1;
+  TOPIC_CLASS_EVENT = 2;
+}
+
+// Nummernräume: 1-9 global, 10-29 Project_0, 30-49 BSC, 50-69 Solana. Nie wiederverwenden.
+// Wire-Name und Klasse laut Phasenplan §5 / Wire V1.3 §6 stehen im Kommentar und
+// verbindlich in der TopicDescriptor-Tabelle, die das Gateway im Welcome liefert.
+enum TopicId {
+  TOPIC_ID_UNSPECIFIED = 0;
+
+  // overview.aggregates            STATE   Publisher: Gateway (eigene generation)
+  TOPIC_ID_OVERVIEW_AGGREGATES = 1;
+
+  // project0.status                STATE   enthält pending_commands[], recent_command_results[], config_version
+  TOPIC_ID_PROJECT0_STATUS = 10;
+  // project0.finance.summary       STATE   gleiche finance_snapshot_id wie wallets.state
+  TOPIC_ID_PROJECT0_FINANCE_SUMMARY = 11;
+  // project0.liquidator.state      STATE   profile_version; Draft != Running
+  TOPIC_ID_PROJECT0_LIQUIDATOR_STATE = 12;
+  // project0.capture.state         STATE
+  TOPIC_ID_PROJECT0_CAPTURE_STATE = 13;
+  // project0.wallets.state         STATE
+  TOPIC_ID_PROJECT0_WALLETS_STATE = 14;
+  // project0.analytics.jobs        STATE   Job-Status und Report-Referenzen; Reports per History-GET
+  TOPIC_ID_PROJECT0_ANALYTICS_JOBS = 15;
+  // project0.execution.events      EVENT
+  TOPIC_ID_PROJECT0_EXECUTION_EVENTS = 20;
+  // project0.capture.events        EVENT   ungefiltert
+  TOPIC_ID_PROJECT0_CAPTURE_EVENTS = 21;
+
+  // bsc.status                     STATE   config_version, Gate-Verdikte
+  TOPIC_ID_BSC_STATUS = 30;
+  // bsc.launch.state               STATE   plan_version
+  TOPIC_ID_BSC_LAUNCH_STATE = 31;
+  // bsc.monitoring.state           STATE
+  TOPIC_ID_BSC_MONITORING_STATE = 32;
+  // bsc.wallets.state              STATE
+  TOPIC_ID_BSC_WALLETS_STATE = 33;
+  // bsc.execution.events           EVENT
+  TOPIC_ID_BSC_EXECUTION_EVENTS = 40;
+
+  // solana.status                  STATE   erst mit qualifiziertem Adapter
+  TOPIC_ID_SOLANA_STATUS = 50;
+}
+
+// Statische Bindung Topic -> Payload-Typ. Das Gateway sendet die Tabelle im Welcome;
+// der Client vergleicht sie mit seiner Compile-Time-Tabelle (core/realtime/topicTable.ts).
+// Abweichung => SCHEMA_INVALID, Topic nicht abonnieren. Das ersetzt google.protobuf.Any.
+message TopicDescriptor {
+  TopicId topic = 1;
+  TopicClass class = 2;
+  ProjectId project = 3;
+  // z. B. "project0.wallets.state" (nur Anzeige/Logging, nie Routing-Schlüssel)
+  string wire_name = 4;
+  // Voll qualifizierter Proto-Messagename des Payloads, z. B. "darkbot.project0.v1.WalletsState".
+  // Leer, solange die Domänenprojektion (F0-VAR) nicht existiert => available = false.
+  string payload_type = 5;
+  // false => Subscribe wird mit TOPIC_UNAVAILABLE abgelehnt (kein Fake-Adapter).
+  bool available = 6;
+}

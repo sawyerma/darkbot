@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package darkbot.control.v1;
+
+import "darkbot/control/v1/topics.proto";
+
+// Commands laufen NICHT über den WebSocket (Wire V1.3 §7):
+//   POST /api/v1/command   Content-Type: application/x-protobuf   Body: CommandRequest
+//   Antwort                Content-Type: application/x-protobuf   Body: CommandResponse
+//   Header: X-CSRF-Token (aus auth-gebundenem Bootstrap), Session-Cookie HttpOnly/SameSite=Strict.
+// Das Gateway prüft Session/Origin/Host/CSRF und reicht den gebundenen Principal an die Engine;
+// NUR die Engine entscheidet fachliche Gates und persistiert Intent/Receipt.
+// ACCEPTED heißt "Intent durabel angenommen", nicht ausgeführt, nicht on-chain.
+// Fortschritt und Terminalstatus kommen über pending_commands[]/recent_command_results[]
+// in der projektspezifischen *.status-STATE-Projektion.
+
+// Native Compare-and-Swap-Vorbedingung. Die Werte kommen aus der zuletzt applizierten
+// STATE-Projektion (config_version / profile_version / plan_version), NIE aus WS seq.
+message ExpectedVersion {
+  oneof version {
+    uint64 config_version = 1;
+    uint64 profile_version = 2;
+    uint64 plan_version = 3;
+    uint64 wallet_policy_version = 4;
+  }
+}
+
+message CommandRequest {
+  ProjectId project = 1;
+  // Idempotency-Key, vom Client erzeugt (UUIDv4), pro Nutzeraktion genau einer.
+  // Gleicher Key + gleiche Payload => derselbe Intent; gleicher Key + andere Payload => REJECTED.
+  string request_id = 2;
+  // Domänenaktion, z. B. "project0.capture.start" – serverseitiger strikter
+  // Allowlist-Katalog nach F0-VAR; keine freie RPC-/Shell-/Signer-Durchleitung.
+  string action = 3;
+  // Zielressource (Bot-ID, Job-ID, Wallet-Alias). Leer, wenn die Aktion keine hat.
+  string resource_id = 4;
+  ExpectedVersion expected = 5;
+  // Serialisierte typisierte Parameter; Messagetyp ist durch action festgelegt.
+  bytes params = 6;
+  // Zeit der Nutzeraktion im Browser; nur Diagnose, keine fachliche Bedeutung.
+  int64 issued_at_unix_ns = 7;
+}
+
+enum CommandStatus {
+  COMMAND_STATUS_UNSPECIFIED = 0;
+  COMMAND_STATUS_ACCEPTED = 1;
+  COMMAND_STATUS_REJECTED = 2;
+  // Backend/Capability existiert nicht. Kein Button beweist Ausführbarkeit.
+  COMMAND_STATUS_NOT_IMPLEMENTED = 3;
+}
+
+enum CommandRejectReason {
+  COMMAND_REJECT_REASON_UNSPECIFIED = 0;
+  COMMAND_REJECT_REASON_IDEMPOTENCY_CONFLICT = 1;   // Key bekannt, Payload anders
+  COMMAND_REJECT_REASON_VERSION_CONFLICT = 2;       // CAS fehlgeschlagen
+  COMMAND_REJECT_REASON_GATE_BLOCKED = 3;           // fachliches Gate (FE-06, G0.7, Treasury) nicht freigegeben
+  COMMAND_REJECT_REASON_FORBIDDEN = 4;              // Principal/Projekt/Capability
+  COMMAND_REJECT_REASON_INVALID_PARAMS = 5;
+  COMMAND_REJECT_REASON_RESOURCE_UNKNOWN = 6;
+  COMMAND_REJECT_REASON_ENGINE_UNAVAILABLE = 7;
+}
+
+message CommandResponse {
+  CommandStatus status = 1;
+  // Von der Engine vergebene ID des durablen Intents. Nur bei ACCEPTED.
+  string command_id = 2;
+  // Echo des request_id für Korrelation bei verlorener/verzögerter Antwort.
+  string request_id = 3;
+  CommandRejectReason reject_reason = 4;
+  string detail = 5;
+  // Version der Ressource nach Annahme (für die nächste CAS). Nur bei ACCEPTED.
+  ExpectedVersion persisted = 6;
+}
+
+// Einmalige gezielte Nachfrage bei verlorenem ACK:
+//   GET /api/v1/command?project=<id>&request_id=<uuid>   -> CommandLookupResponse
+// Kein Polling. Wird nur ausgelöst, wenn pending_commands[]/recent_command_results[]
+// den request_id nach Reconnect nicht enthalten.
+enum CommandPhase {
+  COMMAND_PHASE_UNSPECIFIED = 0;
+  COMMAND_PHASE_PENDING = 1;
+  COMMAND_PHASE_COMPLETED = 2;
+  COMMAND_PHASE_FAILED = 3;
+  COMMAND_PHASE_UNKNOWN = 4;
+  COMMAND_PHASE_PENDING_RECONCILE = 5;
+}
+
+message CommandLookupResponse {
+  bool found = 1;
+  string command_id = 2;
+  // Dieselbe native Engine-Phase wie in pending_commands/recent_command_results.
+  CommandPhase phase = 3;
+  string detail = 4;
+}

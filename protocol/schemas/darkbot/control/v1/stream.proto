@@ -1,0 +1,296 @@
+syntax = "proto3";
+
+package darkbot.control.v1;
+
+import "darkbot/control/v1/topics.proto";
+
+// DarkBot Gateway Wire Protocol V1.3, Browser<->Gateway.
+// Exakt 4 Client- und 7 Server-Varianten. Kein StateDelta, StateDigest, Resume,
+// Reject, ResetRequired, CommandTerminal, kein ACK pro Datenframe.
+// Jede WebSocket-Binary-Message ist genau EIN serialisiertes ClientMessage bzw. ServerMessage.
+
+// ---------------------------------------------------------------- Handshake
+
+message ClientCapabilities {
+  // Höchste StateFull-Payloadgröße, die der Client puffern will (Startwert 256 KiB).
+  uint32 max_state_full_bytes = 1;
+  // Immer false in V1. StatePart ist reserviert und nicht implementiert.
+  bool accepts_state_part = 2;
+}
+
+message Hello {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  // Diagnose-Fingerprint der lokalen Schemas. Bei kompatiblem Minor-Upgrade darf
+  // ein anderer Hash allein NICHT zum Reject führen (README §3).
+  string schema_id = 3;
+  ClientCapabilities capabilities = 4;
+}
+
+message ServerLimits {
+  uint32 max_state_full_bytes = 1;        // Startkandidat 262144
+  uint32 heartbeat_interval_ms = 2;       // Startkandidat 15000
+  uint32 stale_after_missed_heartbeats = 3; // Startkandidat 2
+  uint32 unsubscribe_grace_ms = 4;        // Startkandidat 2000
+  uint32 max_catchup_retries = 5;         // Startkandidat 3
+}
+
+enum WelcomeStatus {
+  WELCOME_STATUS_UNSPECIFIED = 0;
+  WELCOME_STATUS_ACCEPTED = 1;
+  // Major inkompatibel: Client MUSS fail-closed bleiben, keine Topics, kein JSON-Fallback.
+  WELCOME_STATUS_REJECTED_MAJOR = 2;
+  WELCOME_STATUS_REJECTED_SCHEMA = 3; // wirklich inkompatibler Vertrag/Topic-Bindung, nicht nur neuer Minor-Hash
+  WELCOME_STATUS_REJECTED_AUTH = 4;
+}
+
+message Welcome {
+  WelcomeStatus status = 1;
+  uint32 protocol_major = 2;
+  uint32 protocol_minor = 3;
+  string schema_id = 4;
+  // Eindeutig pro Verbindung; nur für Logging/Diagnose, nie fachlicher Schlüssel.
+  string connection_id = 5;
+  int64 server_time_unix_ns = 6;
+  ServerLimits limits = 7;
+  // Topics, die DIESE Session abonnieren darf, inkl. Payload-Bindung.
+  repeated TopicDescriptor topics = 8;
+  // Nur bei REJECTED_*.
+  string reject_reason = 9;
+}
+
+// ---------------------------------------------------------------- Subscribe / Unsubscribe
+
+// Ordnungsschlüssel für EVENT-Topics. Niemals nackter Cursor ohne Epoche.
+message EventCursor {
+  // Engine-/Journal-eigene Epoche (Run-ID, Journaldatei, Rollover-Generation). Opak, gleichheitsgeprüft.
+  string journal_epoch = 1;
+  // Monoton steigende durable Position innerhalb der Epoche. Engine-definiert (F0-VAR: Typ je Backend prüfen).
+  uint64 durable_cursor = 2;
+}
+
+enum StartPolicy {
+  START_POLICY_UNSPECIFIED = 0;
+  // Kein Archiv: Gateway liest H, sendet CatchupComplete(COMPLETE, H, scope=LIVE_ONLY), dann nur > H.
+  START_POLICY_LIVE_FROM_BOUNDARY = 1;
+  // Begrenzter, autorisierter Archivstart (Gateway-/Engine-Policy), paginiert, dann Live.
+  START_POLICY_CATCHUP_FROM_AUTHORIZED_START = 2;
+}
+
+message Subscribe {
+  // Pro Verbindung monoton; korreliert ControlAck. Nie fachlich.
+  uint32 request_id = 1;
+  TopicId topic = 2;
+  // Nur EVENT. Bei STATE gesetzt => ControlAck(REJECTED, INVALID_CURSOR_FOR_STATE).
+  EventCursor cursor = 3;
+  // Nur EVENT ohne cursor. Fehlt beides => ControlAck(REJECTED, MISSING_START_POLICY).
+  StartPolicy start_policy = 4;
+}
+
+message Unsubscribe {
+  uint32 request_id = 1;
+  TopicId topic = 2;
+}
+
+message Pong {
+  uint64 heartbeat_id = 1;
+}
+
+enum AckStatus {
+  ACK_STATUS_UNSPECIFIED = 0;
+  ACK_STATUS_ACCEPTED = 1;
+  ACK_STATUS_REJECTED = 2;
+  // Nur EVENT: Cursor/Epoche im Source-Scope nicht resume-fähig. Client wählt neuen
+  // Subscribe (StartPolicy oder bewiesener Cursor) oder zeigt INCOMPLETE.
+  ACK_STATUS_RESET_REQUIRED = 3;
+}
+
+enum AckReason {
+  ACK_REASON_UNSPECIFIED = 0;
+  ACK_REASON_UNKNOWN_TOPIC = 1;
+  ACK_REASON_FORBIDDEN_TOPIC = 2;
+  ACK_REASON_TOPIC_UNAVAILABLE = 3;
+  ACK_REASON_INVALID_CURSOR_FOR_STATE = 4;
+  ACK_REASON_MISSING_START_POLICY = 5;
+  ACK_REASON_EPOCH_UNKNOWN = 6;
+  ACK_REASON_CURSOR_BEFORE_RETENTION = 7;
+  ACK_REASON_JOURNAL_ROLLOVER = 8;
+  ACK_REASON_ALREADY_SUBSCRIBED = 9;
+  ACK_REASON_NOT_SUBSCRIBED = 10;
+}
+
+message ControlAck {
+  uint32 request_id = 1;
+  TopicId topic = 2;
+  AckStatus status = 3;
+  AckReason reason = 4;
+  string detail = 5;
+}
+
+// ---------------------------------------------------------------- STATE
+
+enum StateQuality {
+  STATE_QUALITY_UNSPECIFIED = 0;
+  STATE_QUALITY_OK = 1;
+  // Publisher liefert, aber Source-Freshness laut Projektion abgelaufen.
+  STATE_QUALITY_STALE = 2;
+  // Gateway hat die Engine verloren. Wert ist letzter bekannter Stand, NICHT aktuell.
+  // Wird sofort an bestehende Subscriber gepusht; neue Subscriber bekommen ihn nie als OK.
+  STATE_QUALITY_SOURCE_DETACHED = 3;
+  // Publisher hat seit Gateway-Start noch nichts geliefert.
+  STATE_QUALITY_NOT_CONNECTED = 4;
+  STATE_QUALITY_UNKNOWN = 5;
+}
+
+// Client-Apply-Regel (Wire V1.3 §2):
+//   generation > applied.generation  => akzeptieren, last_applied_seq := seq
+//   ENGINE-INVARIANTE: generation ist pro Topic persistent streng monoton über Restarts.
+//   Gateway prüft Publisher-/Source-Identität; bei fehlender Persistenz F3 BLOCKED.
+//   Kein Wraparound oder blindes Akzeptieren fremder Generationen.
+//   generation == applied.generation => akzeptieren, wenn seq >= last_applied_seq
+//                                       ('>=' weil ein Quality-Overlay dieselbe (generation, seq) tragen darf)
+//   generation < applied.generation  => verwerfen
+//   Lücken in seq sind normal (Coalescing). Nie als Eventverlust deuten.
+message StateFull {
+  TopicId topic = 1;
+  uint64 generation = 2;
+  uint64 seq = 3;
+  // Zeitstempel der Projektion beim Publisher (nicht Gateway-Sendezeit).
+  int64 source_timestamp_unix_ns = 4;
+  StateQuality quality = 5;
+  // Publisher-Identität (Engine-Instanz/Boot-ID) für Reattach-Prüfung. Opak.
+  string source_id = 6;
+  // Serialisierte Domänenprojektion; Typ laut TopicDescriptor.payload_type.
+  // Größe <= ServerLimits.max_state_full_bytes, sonst Error(FRAME_TOO_LARGE) statt Frame.
+  bytes payload = 7;
+}
+
+// ---------------------------------------------------------------- EVENT
+
+// Ordering/Dedupe: (topic, source_id, cursor.journal_epoch, cursor.durable_cursor).
+// Eine Journalposition repräsentiert genau EIN Event. Andere event_id oder anderer
+// Payload unter demselben Cursor => PROOF_CONFLICT, niemals als zweites Event zählen.
+message Event {
+  TopicId topic = 1;
+  EventCursor cursor = 2;
+  // Fachliche Ereignis-ID (Signatur, Hash, Receipt-ID). Opak.
+  string event_id = 3;
+  // Run-/Journal-Quelle, zu der cursor gehört.
+  string source_id = 4;
+  // Zeitpunkt des durablen Commits in der Engine.
+  int64 committed_at_unix_ns = 5;
+  // Opake Evidenzreferenz (Journal-Record, Offset, Hash) für Provenienz in der UI.
+  string evidence_ref = 6;
+  // Serialisiertes Domänenereignis; Typ laut TopicDescriptor.payload_type.
+  bytes payload = 7;
+}
+
+enum CatchupQuality {
+  CATCHUP_QUALITY_UNSPECIFIED = 0;
+  // Alle Journal-Events (C,H_final] lückenlos abgedeckt; Auslieferung ist at-least-once
+  // und kann Replay-Duplikate enthalten (Client dedupliziert). Upstream durchgehend attached.
+  CATCHUP_QUALITY_COMPLETE = 1;
+  // Nachzug nicht beweisbar vollständig. UI bleibt INCOMPLETE, zeigt reason.
+  CATCHUP_QUALITY_INCOMPLETE = 2;
+}
+
+enum CatchupReason {
+  CATCHUP_REASON_UNSPECIFIED = 0;
+  CATCHUP_REASON_NONE = 1;
+  CATCHUP_REASON_SOURCE_INCOMPLETE = 2;
+  CATCHUP_REASON_CATCHUP_LIMIT = 3;
+  CATCHUP_REASON_EPOCH_ROLLOVER = 4;
+  CATCHUP_REASON_PRUNED = 5;
+  CATCHUP_REASON_UPSTREAM_DETACHED = 6;
+  CATCHUP_REASON_BUFFER_OVERFLOW = 7;
+}
+
+enum EvidenceScope {
+  EVIDENCE_SCOPE_UNSPECIFIED = 0;
+  EVIDENCE_SCOPE_LIVE_ONLY = 1;
+  EVIDENCE_SCOPE_ARCHIVE = 2;
+  EVIDENCE_SCOPE_ARCHIVE_PARTIAL = 3;
+}
+
+// Grenze Archiv -> Live. Wird VOR dem ersten Live-Event > through gesendet.
+message CatchupComplete {
+  TopicId topic = 1;
+  EventCursor through = 2;
+  CatchupQuality quality = 3;
+  CatchupReason reason = 4;
+  // Anzeige-Scope für den Eventfeed. Explizit typisiert statt freier String.
+  EvidenceScope evidence_scope = 5;
+  // Letzter bewiesener Cursor bei INCOMPLETE (für erneutes Subscribe).
+  EventCursor last_proven = 6;
+}
+
+// ---------------------------------------------------------------- Heartbeat / Error
+
+// Höchste (generation, seq), die an GENAU DIESEN Client bereits in den geordneten
+// Sendpfad übergeben wurde. Nicht Publisher-Head. Client vergleicht mit last_applied;
+// Abweichung => lokalen Apply-/Decode-Fehler diagnostizieren und Topic STALE setzen;
+// maximal begrenzte Recovery, kein heißer Resubscribe-Loop.
+message StateWatermark {
+  TopicId topic = 1;
+  uint64 generation = 2;
+  uint64 highest_seq_sent = 3;
+}
+
+message Heartbeat {
+  uint64 heartbeat_id = 1;
+  int64 server_time_unix_ns = 2;
+  repeated StateWatermark state_watermarks = 3;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  // fatal für die Verbindung
+  ERROR_CODE_PROTOCOL_VIOLATION = 1;
+  ERROR_CODE_AUTH_REQUIRED = 2;
+  ERROR_CODE_SESSION_EXPIRED = 3;
+  ERROR_CODE_INTERNAL = 4;
+  // fatal für das Topic, stabil (kein Re-Subscribe-Sturm)
+  ERROR_CODE_SCHEMA_INVALID = 10;
+  ERROR_CODE_FRAME_TOO_LARGE = 11;
+  ERROR_CODE_TOPIC_UNAVAILABLE = 12;
+  // retryable für das Topic (max. 3 Backoff+Jitter, dann INCOMPLETE/manuell)
+  ERROR_CODE_EVENT_OVERFLOW = 20;
+  ERROR_CODE_CATCHUP_LIMIT = 21;
+  ERROR_CODE_SOURCE_INCOMPLETE = 22;
+  ERROR_CODE_SOURCE_DETACHED = 23;
+}
+
+message Error {
+  // UNSPECIFIED => Verbindungsebene.
+  TopicId topic = 1;
+  optional uint32 request_id = 2;
+  ErrorCode code = 3;
+  bool retryable = 4;
+  string message = 5;
+}
+
+// ---------------------------------------------------------------- Envelopes
+
+message ClientMessage {
+  oneof msg {
+    Hello hello = 1;
+    Subscribe subscribe = 2;
+    Unsubscribe unsubscribe = 3;
+    Pong pong = 4;
+  }
+}
+
+message ServerMessage {
+  oneof msg {
+    Welcome welcome = 1;
+    ControlAck control_ack = 2;
+    StateFull state_full = 3;
+    Event event = 4;
+    CatchupComplete catchup_complete = 5;
+    Heartbeat heartbeat = 6;
+    Error error = 7;
+  }
+  // StatePart: reserviert, nicht implementiert (Wire V1.3 §1/§2).
+  reserved 8;
+  reserved "state_part";
+}

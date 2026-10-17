@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package darkbot.control.v1;
+
+// Exakte Numerik, Wire-Vertrag V1.3 §8. Gilt für ALLE darkbot.*-Pakete.
+//
+// Konvention pro Feldname (Suffix entscheidet Typ und Skala):
+//   *_lamports            uint64          Solana-Lamports. TS: bigint. Nie JS number.
+//   *_slot                uint64          Solana-Slot. TS: bigint.
+//   *_usd_micro           uint64          10^-6 USD, NUR nicht-negative Salden, die nachweislich in u64 liegen.
+//   *_usd_micro_signed    SignedDecimal   10^-6 USD vorzeichenbehaftet (Realized Net PnL, Rust i128).
+//   *_wei                 UnsignedDecimal EVM-Wei, u128/u256.
+//   *_bps                 uint32          Basispunkte (1 bps = 0,01 %).
+//   *_unix_ns             int64           UTC-Nanosekunden seit Epoch. TS: bigint.
+//   *_ms                  uint32          Dauer in Millisekunden.
+//   *_bytes               uint32/uint64   Bytegrößen.
+//
+// Decimal-String-Format (beide Messages):
+//   ASCII, nur Ziffern 0-9, SignedDecimal optional mit führendem '-'.
+//   Keine führenden Nullen außer bei "0", kein '+', kein Exponent, kein Dezimalpunkt, keine Leerzeichen.
+//   Ein Adapter/Decoder MUSS Strings, die das Format verletzen (auch "-0"), als SCHEMA_INVALID ablehnen.
+//   Protobuf erzwingt keine Regex und keinen u128/u256/i128-Bereich: Grenzen werden
+//   im typisierten Adapter pro konkretem Feld geprüft, nicht vom Generator.
+//   Niemals in JS Number wandeln. Rechnen nur in Rust; der Browser formatiert.
+
+message UnsignedDecimal {
+  string value = 1;
+}
+
+message SignedDecimal {
+  string value = 1;
+}
