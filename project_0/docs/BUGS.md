@@ -51,8 +51,9 @@
 | `N` neue Astra-Patch-Befunde | — | N1–N8; bei N2 tatsächlicher Clippy-FAIL erst ausführen |
 | `L` kleinere Befunde Review 1 | — | L1, L2, L4; L3 wurde nicht als Befund geliefert |
 | `B` finanzielle Pipeline-/State-Prüfung | — | B1–B9, mit **B8 als umstrittener Fixvorschlag**; zusätzliche konkrete kleine Befunde B10–B18 |
+| `C` Recovery/Owner/Settlement Review 3 | — | C1–C12 offen, C13 weiterer Reviewumfang; C1/C7 vor 4h, C3/C4/C5 vor P8. |
 | `X` verbindliche Quervertragslücken | — | X1 BOOT-12, X2 JFI-BOOT, X3 BOOT-01/02; verwandt mit N1–N8, keine doppelte Implementierung |
-| Weitere Reviewmodule | — | `events.rs`, `sweep.rs`, `detect.rs`, `receivership.rs`, `integration.rs`, `pending.rs`, Market-Observer/`econ.rs`/`chain.rs` und Python-Skripte noch nicht vollständig begutachtet |
+| Weitere Reviewmodule | — | Gesamtes `sweep.rs`, `winner_tracker.rs`, `integration.rs`/`projection.rs`/`index.rs`, `funding.rs`/`planner.rs`/`protocol.rs`, `census.rs`, Market-Observer/`econ*.rs`/`chain.rs`/`report.rs`/`measurement.rs` und Python-Skripte noch nicht vollständig begutachtet; C1–C12 im dritten Durchgang geprüft |
 
 Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review der eingecheckten Fixes und zielgerichteten Testangaben; **eine neue vollständige Workspace-Ausführung durch den Register-Autor wurde nicht vorgenommen**.
 
@@ -305,7 +306,99 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 ### B18 — doppelte Sign-Slot-Zuweisung / toter Pfadcode
 - [ ] **LOW · Code-Hygiene.** `runtime/src/execution/pipeline.rs`: `rec.sign_slot` doppelt, `let _ = Path::Rpc`/`SubmissionPath::Rpc`. Aufräumen nur, wenn T_sign-/Timeline-/Telemetry-Parität bleibt; keine Nebenänderung in FE-/Safety-Entscheidungen. Tests: Timeline-Sign-Slot. **Commit/Evidence:** —.
 
-## 7. X — explizite Phasenplan-Vertragslücken; mit N-Tickets koordinieren
+
+## 7. C — dritter Reviewdurchgang: Recovery, Reconciliation, Owner und Ingress
+
+**Prüfstand:** 2026-10-18, Code auf `main` `6d19e726a028aedd58346bcbaeea96904a7ec868`. Fables Review über `execution/pending.rs`, `liquidation/receivership.rs`, `state_owner/{detect,events,lifecycle}.rs`, `common/lifecycle.rs` und `orchestration/remote_workers.rs` wurde per GitHub-Codeeinsicht abgeglichen. Ergänzend wurden gezielt `state/recovery.rs`, `state/mod.rs`, `submit/rpc.rs` und `state_owner/ingress.rs` gelesen. **Keine Tests lokal ausgeführt; alle Tickets bleiben OPEN.** „Bestätigt“ heißt: der gemeldete Codepfad existiert; ein reproduzierter End-to-End-Langlauffehler ist erst nach Regressionstest bewiesen.
+
+### C1 — während Recovery verbrauchtes Reconnected führt nach Exhausted zum Dauerhalt
+- [ ] **HIGH · CODE_CONFIRMED / REGRESSION_NOT_RUN · G-A/G-C/G-D · S2-Recovery/P6-LT/C0-E1.**
+- **Pfade:** `runtime/src/orchestration/state_owner/events.rs::events` (`drv.on_event_cancellable` und `drain`), `solana/src/state/recovery.rs::recover_cancellable`, `solana/src/state/mod.rs::confirm_ready`, `common/src/lifecycle.rs::reconcile_ok`, `state_owner/ingress.rs`.
+- **Beobachtung:** Der Owner-Drain macht für **alle** Queue-Events nur `s.on_event(ev)`, nicht `drv.on_event_cancellable`. Ein `Reconnected` während Snapshot A/B oder Root-Catchup erhöht so zwar wieder den `FeedGap`-/HALT-Zustand, führt aber zu keinem späteren Recovery-Request. `reconcile_ok()` lässt `Halted` ausdrücklich nicht zu `Ready` werden. Nach letzter erfolgloser Iteration liefert der Driver `Exhausted`; `events.rs` behandelt nur `Ready` ausdrücklich, andere Outcomes werden lediglich protokolliert. Die WSS-Session kann inzwischen wieder gesund sein, ohne ein **neues** Reconnected zu senden. **Das Risiko eines stillen Dauerhalts ist codebelegt; eine reale 4h-Reproduktion liegt nicht vor.**
+- **Fixvertrag:** Recovery-Trigger/Streamgeneration in einem begrenzten, Owner-owned Pending-/Epoch-Zustand erhalten, statt sie in `drain` zu verschlucken. Bei `Exhausted` **niemals** automatisch `Ready` oder `halt.clear()`; einen kontrollierten Recovery-Neuanlauf nur bei belegbar neuer gesunder Session und mit hartem globalen Versuchs-/Zeitbudget. Falls zur Requalifikation ein WSS-Resubscribe notwendig ist: alte Session canceln **und geordnet joinen**, neue Generation eindeutiger Besitzer von ACK/Root/Ingress, doppelte Events/Forks deduplizieren. Bei weiterhin unqualifiziertem Stream kontrolliert `INCOMPLETE_ABORT/HALT` melden und Owner-Lauf beenden bzw. als nicht qualified markieren, nicht passiv bis zum 4h-Timeout weiterlaufen. Kein unbegrenzter Restart-Loop, keine Drop-/Queue-Verluste.
+- **Tests, vor Fix RED:** künstlicher `Reconnected` während des **dritten** Snapshot-/Root-Drains und anschließend keine externen Events; beweisen, dass der Trigger nicht verloren geht und eine neue Recovery nach streng begrenzten Regeln ausgeführt wird. Bei sauberer WSS-Generation + zweifachem Snapshot + Root-Barriere ⇒ erst dann `Ready`; bei dauerhaft fehlenden Root-/Program-/Accountbeweisen ⇒ terminaler `HALT/INCOMPLETE` innerhalb Budget. Zusätzlich `Gap/Fatal` in Drain, Upgrade-Latch, Shutdown, doppelte Reconnected, 429, Race zwischen alter/neuer Session, keine Submission während Recovery.
+- **Abnahme:** Kein stiller Endzustand durch geschlucktes Reconnected; kein Fail-open, keine unendlichen Resubscriptions; echte C0-E1-Liveness/GAP-Evidence bleibt bis Nutzerfreigabe `NOT_RUN`. **Commit/Evidence:** —.
+
+### C2 — mehrfacher Health-Aufruf pro Kandidat
+- [ ] **MEDIUM / PERFORMANCE · CODE_CONFIRMED · P6-LT/P6-MT · Cross-Ref B7/B6.**
+- **Pfade:** `runtime/src/orchestration/state_owner/detect.rs` (`engine.health`), `runtime/src/execution/pipeline.rs::evaluate` (`self.health.health`), `liquidation/src/sizing.rs::sizes` (`CrateHealth.health`), `liquidation/src/health.rs::components`.
+- **Beobachtung:** Detektor und Pipeline rechnen Health unabhängig, der Sizer erneut; `components` kopiert Observation-Daten für Maintenance und Equity. Mehrfacharbeit und potenziell verschiedene Momentaufnahmen bei nicht streng identischen Eval-Inputs. MT0 `DetectConsumer/Pipeline` und `detect_health_ns_*` vorhanden.
+- **Fixvertrag:** Zunächst die wirkliche Zahl/Last anhand MT0/Profiles belegen, dann eine konsistente, slot-/root-/timestamp-/revision-gebundene typisierte `HealthView` berechnen und nur bei identischer Stategeneration an Pipeline/Sizer weiterreichen; Ownership und Error-/UNKNOWN-Semantik der drei Aufrufpfade erhalten. Keine unvalidierte globale Cache-Nutzung, keine Preis-/EMODE-/Rundungsänderung.
+- **Tests:** Callcounter bei gleichem Kandidaten (vorher 3, nachher nur berechtigte Recomputes); Read-only Fixture für die vier fachlichen Liquidationsklassen, bitidentische Maintenance/Equity/Sizing/Simulation, Snapshotwechsel erzwingt Recompute, p50/p95/p99 und Alloc-Profile.
+- **Abnahme:** nachweisbar weniger CPU/Allokationen **bei gleicher** wirtschaftlicher/Health-Entscheidung. **Commit/Evidence:** —.
+
+### C3 — P8-Reconciliation besitzt keinen vollständigen Settlement-/PnL-/Freigabepfad
+- [ ] **CRITICAL vor P8-LIVE · CODE_CONFIRMED · G-E/G-F · FE-04/P8-05 · Cross-Ref B1/B3/B15.**
+- **Pfade:** `runtime/src/execution/pending.rs::try_reconcile`, `runtime/src/execution/pipeline.rs::reconcile_outcome`, `liquidation/src/safety.rs::record_outcome`, `runtime/src/orchestration/remote_workers.rs` und FE-04-Journal.
+- **Beobachtung:** `try_reconcile` setzt `realized_pnl: None` und `pnl_complete: false` für **jeden** Outcome, auch `LANDED_SUCCESS`. Der Record enthält `exposure_released: p.exposure`, aber das ist bei UNKNOWN **nur ein Vorschlag**, keine tatsächliche Kapitalfreigabe: `Safety::record_outcome` HALT(UnknownEconomics) und gibt vor der `None`-Rückkehr weder Kapital noch Inventar frei. Nach 90 s ohne vollständige Signatur-/Fee-Evidence erzeugt `try_reconcile` `UNRESOLVED` (keinen gesicherten Nicht-Landung-Nachweis). Das ist zunächst korrekt fail-closed, aber kein vollständiger Controlled-LIVE-Pfad.
+- **Fixvertrag:** Einziger durable FE-04-/P8-Ledger-Automat: Signaturen, Blockhash-/lastValidBlockHeight, finalized Receipt oder **strenger** Nonlanding-/Expiry-Proof, **alle** Bundle-/Tip-/Prerequisite-Transaktionen, Fees, Rent, Token-/Protocol-/Wallet-Deltas, realisierter Exit und konservativer `i128` Net PnL. Idempotente Settlement-Transitions, Auto-HALT bei UNKNOWN, globale Holds bis belastbarer Abschluss. Feld `exposure_released` erst als **tatsächlich gebucht** ausweisen oder eindeutig `requested_exposure_release` nennen.
+- **Tests:** mocked finalized landed-success/failure, never-landed mit Blockheight+historischer Abwesenheitsprüfung, MissingArchive/429 ⇒ UNKNOWN, teilweise bestätigtes Bundle, Gebühren ohne Token-Deltas, mehrfacher Replay und Restart, keine Doppelbuchung; `capital_in_use` sinkt erst nach dauerhaft verbuchtem, vollständig bewiesenem Outcome.
+- **Abnahme:** FE-04 und P8 teilen denselben Settlement-/Safety-Source-of-Truth; nicht `pnl_complete=false` als Abschluss verkaufen. **Commit/Evidence:** —.
+
+### C4 — P8-Landing-Reconcile benutzt confirmed statt finalized
+- [ ] **CRITICAL vor werttragender Reconciliation · CODE_CONFIRMED · G-E/G-F · P8/FE-04 · Cross-Ref C3.**
+- **Pfad:** `solana/src/submit/rpc.rs::reconcile` ruft `transaction_with_meta(..., CommitmentConfig::confirmed())` und nutzt Signaturstatus ohne zwingende finalized-Barriere; `pending.rs::try_reconcile` klassifiziert daraus `LANDED_SUCCESS/FAILED`.
+- **Risiko korrekt eingeordnet:** **Heute** führt C3 bei `realized_pnl=None` trotzdem zu HALT und hält Kapital zurück. **Sobald C3 geschlossen wird**, könnte der jetzige confirmed-Landing-Pfad vor finalisiertem Chainbeleg Holdings lösen oder Outcome/PnL buchen. FE-04 hat bereits den strengeren `finalized_transaction`-Einstieg; keine Abschwächung dieses Vertrags.
+- **Fixvertrag:** Kritische Finance-Settlement-Funktion verwendet ausschließlich finalisierte Receipt-/Meta-/Signature-/Token-/Rent-Nachweise mit Slot-/Fork-/Source-Konsistenz; `confirmed` darf als **vorläufige Telemetrie** ohne `capital_released`/PnL verwendet werden. Finalization-Reorg/Gap/Proof-unavailable ⇒ UNKNOWN/HALT. Keine bloße Ersetzung einer einzigen Konstante, wenn Status und Metadaten unterschiedliche Commitments/Slots besitzen.
+- **Tests:** confirmed→missing/reorg, confirmed-success→finalized-failure, finalized mit vollständigen Gebühren/Deltas, Status finalized aber Meta absent, Fork-Drift, Replay. **Abnahme:** kein Finance-Release/Outcome vor finalized-gebundenem vollständigen Settlement. **Commit/Evidence:** —.
+
+### C5 — finanzielle Reconciliation konkurriert im Winner-Workload-Budget
+- [ ] **MEDIUM vor P8-LIVE · CODE_CONFIRMED · G-E/G-F · P8/Provider.**
+- **Pfad:** `runtime/src/orchestration/remote_workers.rs::start` und `solana/src/provider.rs`.
+- **Ist:** `winner-rpc` und `reconcile-rpc` konstruieren beide Clients mit `Workload::Winner`; Providerlimiter mappt diese Klasse auf `analytics_rps` (Default 2/s) und gemeinsamen maximalen Provider-RPS-/FREE_ONLY-Vertrag.
+- **Soll-Fix:** Separater, klar priorisierter Reconcile-Workload **innerhalb** derselben globalen echten Providergrenze, mit Admission-/Deadline-/Burst-Fairness, ohne neues ungeprüftes Requestbudget oder unbegrenzte Retry-Pfade. Darf C3/C4 nicht vortäuschen. Bei Quota-Mangel: UNKNOWN und konservativer HALT; Winner-Analytics darf blockiert werden, Finance-Evidence nicht still degradiert.
+- **Tests:** 100 Winner-Jobs + eine Settlement-Aufgabe bei engem lokalem Fake-Quota, Reconcile-Vorrang, Provider Gesamt-RPS nie überschritten, 429/adaptive cooldown, Shutdown und no-spin.
+- **Abnahme:** priorisierbare sichere Reconciliation ohne FREE_ONLY-Aufweichung. **Commit/Evidence:** —.
+
+### C6 — WSS-Resubscribe verliert Session-JoinHandle
+- [ ] **MEDIUM / REVIEW_REQUIRED für Duplikatwirkung · G-A/G-C · S0/S2.**
+- **Pfade:** `runtime/src/orchestration/state_owner/events.rs` Dependency-Change-Resubscribe, `state_owner/ingress.rs::IngressSessions::spawn`.
+- **Ist:** `IngressSessions::spawn` startet den Thread, gibt aber nur `Shutdown` zurück; der Thread-JoinHandle wird verworfen. Events ruft `self.ingress_session.request()` und unmittelbar darauf `ingress.spawn` mit **derselben Producer-/IngressHalt-Instanz**. Kurz überlappende Event-Generationen sind möglich; „bis 100 ms“ ist **nicht als harte Laufzeitgrenze bewiesen**.
+- **Soll-Fix:** Cancel + geordneter Join (bounded mit nachgewiesener Cancellation) und eindeutige Sessiongeneration vor neuem Spawn; nachgewiesen kein alter Writer in neuer Generation, keine irrtümliche Clearing-/HALT-Bedingung durch alte Session. Shared `SlotWatch` und Root-Beweis bleiben kohärent. Kombiniert mit C1, **keine zweite Restart-Implementierung**.
+- **Tests:** Slow old session, Cancel während Blocked-Recv, Duplikate nach Restart, Old-Fatal nach New-Ready, mehrfaches Update, hard stop. **Commit/Evidence:** —.
+
+### C7 — Ingress Fatal kann den Owner passiv bis Laufzeitende halted lassen
+- [ ] **HIGH vor 4h · CODE_CONFIRMED / TERMINAL-BEHAVIOR-TEST_NOT_RUN · G-C/G-D.**
+- **Pfade:** `solana/src/ingress/ws_rpc.rs` emittiert `IngressEvent::Fatal("WSS_RECOVERY_EXHAUSTED")` und beendet Transport-Thread; `solana/src/state/recovery.rs::on_event_cancellable` startet Recovery ausschließlich für `Reconnected`; `runtime/src/orchestration/state_owner/events.rs` besitzt für `Fatal` keinen terminalen Branch; `state_owner/lifecycle.rs` bleibt bis Window-/globalem Stop aktiv.
+- **Soll-Fix:** Terminales Feed-Fatal an Owner-/Capture-Window-/Evidence-HALT propagieren, kontrolliert alle Worker/Writer/Segmente drain/seal, Run als `INCOMPLETE_ABORT` mit Ursache `WSS_RECOVERY_EXHAUSTED` beenden, nie `READY`/`PASS`. Bei echter Recovery noch verfügbare Quelle darf nur eine gesondert begrenzte, belegte neue Generation wieder starten; nicht still warten.
+- **Tests:** Fatal ohne Folgeevent, Fatal während A/B-Snapshot, Writer-Queue voll, atomarer Window-Abschluss, keine weitere Detection/Submission, Prozess beendet innerhalb Run-Deadline mit Nicht-0/INCOMPLETE. **Commit/Evidence:** —.
+
+### C8 — pro Kandidat kopierte Programm-Allowlisten
+- [ ] **LOW / PROFILE_REQUIRED · P6-MT/P6-LT.**
+- **Pfad:** `state_owner/detect.rs`: `global_allowed.clone()`, `prereq_allowed.clone()` pro `Pipeline`.
+- **Soll:** Borrowed immutable slices/Arc nur bei nachgewiesener Allokations- und Ownership-Parität; keine ungewollte Mutation während Kandidatenbewertung. Test: identical allow/deny and build under concurrent lookups; Profile vor/nach. **Commit/Evidence:** —.
+
+### C9 — Blockhash-Höchstalter dreifach hart kodiert
+- [ ] **LOW / CONFIG_CONSISTENCY · P6.**
+- **Pfad:** `state_owner/detect.rs` zweimal, `state_owner/events.rs` einmal `30_000_000_000` ns.
+- **Soll:** Eine einzige explizite, versionierte Deadline-/Freshness-Policy statt versteckter Zahlen; **keine Erweiterung** der Gültigkeit ohne Evidence/Autorisation. Test: gleiche Grenzwerte an allen drei Gates, 1 ns vor/nach Cutoff. **Commit/Evidence:** —.
+
+### C10 — ReserveStale wird via Fehlermeldungstext reklassifiziert
+- [ ] **MEDIUM / ERROR-ROBUSTNESS · P3/P5.**
+- **Pfad:** `state_owner/detect.rs`: `rec.reason.contains("ReserveStale")`.
+- **Soll:** Typisierte/enum Fehlerursache an Source-/Integration-Adapter erzeugen, ohne String-Contains auf wechselnden Provider-/Crate-Texten. Test: Fehler mit anderer Formulierung ⇒ gleicher `IntegrationRefresh`-LossReason; fremder Text „ReserveStale“ darf nicht falsch klassifizieren. **Commit/Evidence:** —.
+
+### C11 — Available Inventory in Detection ohne in-flight Holds
+- [ ] **HIGH vor P8-Multi-Asset/Parallel-LIVE · CODE_CONFIRMED / IMPACT_SCOPE_SINGLE_FLIGHT · Cross-Ref B15/B3.**
+- **Pfad:** `state_owner/detect.rs`: `inventory` schätzt ATA-Lamports allein aus RAM-State; Safety/FE-04 holds werden beim Angebot nicht abgezogen.
+- **Ist:** Bei aktuellem `max_outstanding_attempts=1` nicht automatisch schädlich, da finanzielle Single-Flight weiterhin separat durchsetzbar bleiben muss. Bei späterer paralleler Inventory-/Fundingplanung kann dasselbe Collateral für zwei Vorhaben reserviert werden.
+- **Soll:** konsistente, dauerhafte, walletweite verfügbare Menge = finalisierte/verifizierte Bestände minus **alle** offenen Reservierungen einschließlich UNKNOWN und konkurrierender Bots; dynamische Reconciliation. Ohne gültige State-/Hold-Provenienz ⇒ UNKNOWN/no-plan.
+- **Tests:** zwei konkurrierende Kandidaten, andere Bot-Owner, Crash/Restart, UNKNOWN, NO_SWAP-Collateral, intra-slot Deltas, Idempotency; Inventory nie doppelt ausgegeben. **Commit/Evidence:** —.
+
+### C12 — Reconcile-Timeout von 90 s ohne qualifizierte Chain-Abwesenheitsprüfung
+- [ ] **MEDIUM als Konfiguration; HIGH für Safety-Settlement · Cross-Ref C3/C4.**
+- **Pfad:** `state_owner/remote_workers.rs`: `try_reconcile(..., 90)`.
+- **Soll:** Explizite versionierte Deadline-/Provider-/Blockhash-Validity-Policy; bloßer Wallclock-Timeout ist niemals Beweis für `NotLanded`. Timeout führt UNKNOWN, bis finalized Nonlanding/lastValidBlockHeight mit ausreichend vollständiger History nachgewiesen wird.
+- **Tests:** 89/90/91 s und langsamer finalized Slot, RPC-429/GAP, nicht bestätigte Bundle-Signaturen, realer lastValidBlockHeight-Cutoff als synthetisches Fixture, kein falsches `EXPOSURE_RELEASED`. **Commit/Evidence:** —.
+
+### C13 — Modulprüfung bewusst unvollständig
+- [ ] **REVIEW_REQUIRED / NICHT ALS BEHOBEN MARKIEREN.**
+- **Bereits gezielt begutachtet:** `pending.rs`, `receivership.rs`, `detect.rs`, `events.rs`, `lifecycle.rs`, `remote_workers.rs` sowie für C1/C4 relevante `recovery.rs`, `rpc.rs` und `ingress.rs`-Teile. Fable meldete für `receivership.rs` (Anchor-Builder), `measured_attempt_costs`, `RunState` und RemoteWorker-Bounds keinen weiteren spezifischen Defekt; daraus folgt **keine Gesamtqualifikation**.
+- **Noch zu prüfen:** gesamtes `sweep.rs` (Rayon-Health im Owner), `winner_tracker.rs`, `integration.rs`/`projection.rs`/`index.rs`, `funding.rs`/`planner.rs`/`protocol.rs`, `census.rs`, Market-Observer/`econ*.rs`/`chain.rs`/`report.rs`/`measurement.rs`, volle `ingress.rs`-Start/Stop-Integration und Python-/Verifier-Skripte. Jede neue harte Regression ⇒ eigene stabile Ticket-ID, nicht C1 umdefinieren.
+- **Abnahme:** vollständiger File-/Owner-/Contract-Coverage-Bericht mit überprüften Versionen; Nicht-Befunde nicht als PASS des Gesamtsystems ausweisen.
+
+
+## 8. X — explizite Phasenplan-Vertragslücken; mit N-Tickets koordinieren
 
 ### X1 — BOOT-12 muss aktuelle Identitäten vor Runtime-Admission erneut prüfen
 - [ ] **CRITICAL · G-B.**
@@ -328,10 +421,10 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Tests:** korrupte Journalversion/Writer-Probe, Doppel-Owner, fehlende Binärdatei, Disk-/RAM-Untergrenze, Config-Drift; keine echte Netzwerkaktivität.
 - **Dedupe:** M1–M3/N1–N3/PERSIST/SK. **Commit/Evidence:** —.
 
-## 8. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
+## 9. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
 
 **Tranche A — laufende Härtung, ausschließlich Offline-Code und Tests:**
-1. N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar.
+1. **C1 und C7** (Recovery-Fatal/Exhaustion vor 4h), N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar.
 2. M1/M2 plus N4/N5/N6 zur Stabilität von Admission, Durability und Diagnose; keine neue Source-of-Truth.
 3. N7/N8 nach Mess-/Sicherheitsvertrag, L4 und kleine isolierte L1/L2; B2 soweit für richtige BOOT-/P1A-Scope-/Layoutprüfung erforderlich.
 4. Gesamte relevante Offline-Regression, Release-/Formatter-/Clippy-Nachweis, Redaction-Probes, Ledger-/STATUS-/4h-Readiness-Synchronisierung.
@@ -339,13 +432,13 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 
 **Tranche B — profitkritische Fertigstellung vor einer eventuell autorisierten FE-06:**
 1. B2, B4, B9 und ggf. L4 für die ausgewählte Fundingklasse; echte Candidate-/Source-/Oracle-/Rent-/Exit-Parität (FE-01/02).
-2. B6/B7 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
-3. **B1 + B3 + B15 + L1 + L2 verpflichtend** für finanzielle Single-Flight-/Wallet-/Limit-/Journal-/UNKNOWN-Gates (FE-04/P8). B10/B11/B12/B17 fachlich vor passendem Pilot prüfen; Ticket-Status bleibt sonst OPEN.
+2. B6/B7/C2/C8/C9 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
+3. **B1 + B3 + B15 + C3 + C4 + C5 + C11 + L1 + L2 verpflichtend** für finanzielle Single-Flight-/Wallet-/Limit-/Journal-/UNKNOWN-Gates (FE-04/P8). B10/B11/B12/B17 fachlich vor passendem Pilot prüfen; Ticket-Status bleibt sonst OPEN. C10/C12 werden im jeweiligen P8-/Error-Vertrag geschlossen.
 4. FE-05 ausschließlich read-only und nur autorisiert; FE-06 gesonderter individueller Geldbeschluss, ein Versuch dann HALT; FE-07 nur mit finalisiertem tatsächlich realisiertem Nettoledger.
 
 **Tranche C — separat beobachtete, nicht gestrichene Produktpflichten:** vollständiger C0-E1-Index/Crosscheck/Strict-Master, H0, Race/Binary-Geyser/Jito-Single/Bundle/gRPC, JIT-ExactIn, P6-MT/M4, P8-RES/Inventory/Rebalancing, K-Untersuchungen, P9 und Frontend bleiben gemäß §0.6/Phasenplan verbindlich. `NO_ECONOMIC_GO` stoppt nur nicht qualifiziertes LIVE, **nicht** die restliche Roadmap; kein Master-PASS oder erster Profit wird erfunden.
 
-## 9. Vorlage für jeden zukünftigen Befund und die Erledigung
+## 10. Vorlage für jeden zukünftigen Befund und die Erledigung
 
 ```text
 ### ID — kurzer reproduzierbarer Befund
@@ -362,9 +455,9 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 
 Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchstreichen, **Fix und Evidence behalten**. Keine Zusammenlegung unabhängiger Bugs ohne belegte gemeinsame Ursache; bei Doppelbelegen auf eine einzige Implementierung/Regression referenzieren.
 
-## 10. Aktuelle Abnahmeentscheidung
+## 11. Aktuelle Abnahmeentscheidung
 
-- **G-A:** **OPEN**. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
+- **G-A:** **OPEN**. C1/C7 sind zusätzlich als Owner-/Recovery-Gates erfasst. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
 - **G-B (Netzwerk-Audit):** **NOT_RUN / NICHT FREIGEGEBEN**. Das vorhandene BOOT-03–08-Modul ist Code, kein Network-READY; BOOT-12 und JFI offen.
 - **G-C (600s-Kalibrierung):** **NOT_RUN / NICHT FREIGEGEBEN**.
 - **G-D (4h):** **NOT_QUALIFIED / NICHT FREIGEGEBEN**. Historische 4h-/5h-Versuche bleiben INCOMPLETE.
