@@ -3,9 +3,9 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/MEASUREMENT_LEDGER.md",
-    "git_blob_sha": "9672a948931273110095cf872c988d77ffbcf29d",
+    "git_blob_sha": "9d9878f979ebf60f5660b4edf6109d6eabb32639",
     "as_of_code_commit": null,
-    "line_count": 5453,
+    "line_count": 5461,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014",
     "local_followup_base_commit": "9047c7b45988b0c8798b710bb97c183d0a063c7f",
@@ -143,7 +143,7 @@
         "econ/measurement/MT0/FE-01/census kinds"
       ],
       "write_admission": "LOCAL_PASS",
-      "ticket3": "STEP_1_3_LOCAL_PASS; ingress raw, typed sink rows, program_filters, verifier OPEN"
+      "ticket3": "STEP_1_3_AND_FILTERS_LOCAL_PASS; typed market rows + strict verifier batches + Rust verification parity + offline renders OPEN"
     },
     "gap_matrix": {
       "location": "project_0/docs/STATUS.md §12",
@@ -315,7 +315,12 @@
       "line_start": 5449,
       "line_end": 5453,
       "heading": "2026-10-17 — Ticket 3 step 3: typed block envelopes in gap and reconcile (LOCAL_PASS, Ticket 3 OPEN)"
+    },
+    "ticket3_filters_storable_20261017": {
+      "line_start": 5455,
+      "line_end": 5461,
+      "heading": "2026-10-17 — Ticket 3: typed program filters; storable chain model (LOCAL_PASS, Ticket 3 OPEN)"
     }
   },
-  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission). 2026-10-16: P1B strict pinned Bank layout (fail-open prefix decode fixed), dual-size tests and promotion procedure recorded. 2026-10-16: P1B RC2 isolated probe build recorded (type-check PASS after 4 call-site changes; IDL discriminator parity). 2026-10-16: C0 census classifier and opt-in Shadow hook recorded; historical C0 evidence summarized; gate NOT_PROVEN. 2026-10-16: C0-FIX-01..05 recorded (sweep-fed bounded census worker, chain clock, no zero fallbacks, model classes). 2026-10-16: JFI-FIX-01/02 typed payload contract and owner evidence recorded; JFI overall OPEN. 2026-10-16: Ticket 1 journal write admission (no schema-1 rollback for typed kinds) recorded. 2026-10-16: Ticket 2 C0 identity coverage, typed per-account census journal, value-range handling recorded. 2026-10-16: STATUS §12 gap and acceptance matrix for every binding ticket added (no status raised without evidence). 2026-10-17: Ticket 3 steps 1-2 (typed chain model, winner meta.err fix, typed truth/enrichment) recorded. 2026-10-17: Ticket 3 step 3 (typed block envelopes in gap/reconcile) recorded."
+  "updates": "2026-10-16: local follow-up on 9047c7b; strict binary adapter, deterministic sync error and FE-01 replay qualification added. Overall PERSIST PARTIAL and phase/authorization gates unchanged. Markdown hash and anchors refreshed. 2026-10-16: P0 gate PASS recorded (reuse/license/routing/oracle/staging); Markdown hash and anchors refreshed. 2026-10-16: P1A source-pinned freeze and startup upgrade pin recorded; current Mainnet read BLOCKED (permission). 2026-10-16: P1B strict pinned Bank layout (fail-open prefix decode fixed), dual-size tests and promotion procedure recorded. 2026-10-16: P1B RC2 isolated probe build recorded (type-check PASS after 4 call-site changes; IDL discriminator parity). 2026-10-16: C0 census classifier and opt-in Shadow hook recorded; historical C0 evidence summarized; gate NOT_PROVEN. 2026-10-16: C0-FIX-01..05 recorded (sweep-fed bounded census worker, chain clock, no zero fallbacks, model classes). 2026-10-16: JFI-FIX-01/02 typed payload contract and owner evidence recorded; JFI overall OPEN. 2026-10-16: Ticket 1 journal write admission (no schema-1 rollback for typed kinds) recorded. 2026-10-16: Ticket 2 C0 identity coverage, typed per-account census journal, value-range handling recorded. 2026-10-16: STATUS §12 gap and acceptance matrix for every binding ticket added (no status raised without evidence). 2026-10-17: Ticket 3 steps 1-2 (typed chain model, winner meta.err fix, typed truth/enrichment) recorded. 2026-10-17: Ticket 3 step 3 (typed block envelopes in gap/reconcile) recorded. 2026-10-17: typed program filters and storable chain model recorded; remaining Ticket 3 scope listed."
 }

@@ -5451,3 +5451,11 @@ Tests: chain 4/4 on real Mainnet v1/v0 fixtures (status table, LUTs, exact units
 Base `bb5a11a`. Gap recovery and full-slot reconciliation decode each `getBlock` answer once into `ChainBlock` (`decode_block`, new `decode_block_header` for header-only answers); header checks, validation, classification and recovery read the typed block and its entries (an undecodable entry fails the block closed with its reason). `validate_full_transaction` and `truth::classify` take `&ChainTx`. `previousBlockhash` is optional in the model and required, as before, only in the reconcile parent-chain proof. Reason codes unchanged. Legacy market rows still carry their raw payload until the typed rows (step 4) replace them — no evidence is dropped in between.
 
 Tests: market 113/113 (gap, reconcile, truth through decode-then-call helpers), chain 4/4, featureless check PASS.
+
+## 2026-10-17 — Ticket 3: typed program filters; storable chain model (LOCAL_PASS, Ticket 3 OPEN)
+
+Base `ae13ab2`. `68fb932`: `Subscription.program_filters` and `getProgramAccounts` filters are typed `ProgramFilter` (`dataSize` / `memcmp` bytes); filter JSON exists only in the WSS and snapshot adapters, byte-identical to before (test). Follow-up: `ChainTx` and its parts are binary-serializable for the typed market rows; `TxStatus` stores its UNKNOWN reasons only from the closed code set (forged codes fail to decode).
+
+Tests: solana lib 71/71 incl. filter wire parity and ChainTx bincode round trip; state_owner 13/13; featureless check PASS.
+
+**Remaining in Ticket 3 (scope confirmed):** typed `MARKET_TRANSACTION` / `MARKET_LIQUIDATION` / `MARKET_COVERAGE` rows with ingress payloads as `ChainTx` (no `raw`), ~20 coverage variants incl. gap records, slot boundaries, reconciliation summary and provider snapshot (still built with `json!`); the Rust strict verifier batches and checkpoints (JSONL/JSON today); `summary.json`/report; a versioned Rust verification with parity against the pinned Python verifier on historical runs; renders only offline for historical journals. New captures cannot be verified by the pinned Python pipeline once rows are typed, so rows, strict verifier and the new verification land together.

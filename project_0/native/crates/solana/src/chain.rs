@@ -23,7 +23,7 @@ impl std::fmt::Display for ChainError {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TxWireVersion {
     Legacy,
     Number(u8),
@@ -45,7 +45,47 @@ impl TxStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The closed set of UNKNOWN reasons; a stored status maps back onto it or fails to decode.
+const UNKNOWN_CODES: [&str; 3] = [
+    "TX_META_MISSING",
+    "TX_META_STATUS_MISSING",
+    "TX_ERROR_UNDECODABLE",
+];
+
+#[derive(serde::Serialize, serde::Deserialize)]
+enum TxStatusStored {
+    Success,
+    Failed(TransactionError),
+    Unknown(String),
+}
+
+impl serde::Serialize for TxStatus {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            TxStatus::Success => TxStatusStored::Success,
+            TxStatus::Failed(e) => TxStatusStored::Failed(e.clone()),
+            TxStatus::Unknown(code) => TxStatusStored::Unknown((*code).to_string()),
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TxStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match TxStatusStored::deserialize(d)? {
+            TxStatusStored::Success => TxStatus::Success,
+            TxStatusStored::Failed(e) => TxStatus::Failed(e),
+            TxStatusStored::Unknown(code) => TxStatus::Unknown(
+                UNKNOWN_CODES
+                    .into_iter()
+                    .find(|c| *c == code)
+                    .ok_or_else(|| serde::de::Error::custom("unknown TxStatus code"))?,
+            ),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChainInstruction {
     pub program_id_index: u8,
     pub accounts: Vec<u8>,
@@ -53,14 +93,14 @@ pub struct ChainInstruction {
     pub stack_height: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChainLookup {
     pub account_key: Pubkey,
     pub writable_indexes: Vec<u8>,
     pub readonly_indexes: Vec<u8>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChainMessage {
     /// `(num_required_signatures, num_readonly_signed, num_readonly_unsigned)`; `None` if absent.
     pub header: Option<(u8, u8, u8)>,
@@ -74,7 +114,7 @@ pub struct ChainMessage {
 }
 
 /// v1 message compute/priority configuration; each field `None` when not delivered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TransactionConfig {
     pub compute_unit_limit: Option<u32>,
     pub heap_size: Option<u32>,
@@ -82,13 +122,13 @@ pub struct TransactionConfig {
     pub priority_fee: Option<u64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InnerInstructions {
     pub index: u8,
     pub instructions: Vec<ChainInstruction>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenBalance {
     pub account_index: u8,
     pub mint: Pubkey,
@@ -99,7 +139,7 @@ pub struct TokenBalance {
     pub decimals: u8,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LoadedAddresses {
     pub writable: Vec<Pubkey>,
     pub readonly: Vec<Pubkey>,
@@ -107,7 +147,7 @@ pub struct LoadedAddresses {
 
 /// Transaction status metadata. Every optional field is `None` exactly when the provider did
 /// not deliver it; nothing is defaulted.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChainMeta {
     pub status: TxStatus,
     pub fee: Option<u64>,
@@ -122,7 +162,7 @@ pub struct ChainMeta {
     pub cost_units: Option<u64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChainTx {
     pub slot: u64,
     pub block_time: Option<i64>,
@@ -566,7 +606,7 @@ pub fn decode_notification(value: &serde_json::Value) -> Result<ChainTx, ChainEr
 
 /// Header of a `getBlock` answer (any `transactionDetails`), validated against `slot`:
 /// the parent must be older and the blockhash non-empty.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeader {
     pub blockhash: String,
     /// `None` when the provider omitted it; required only where the parent chain is proven.
@@ -776,5 +816,31 @@ mod tests {
             decode_notification(&wrong),
             Err(ChainError("NOTIFICATION_SIGNATURE_MISMATCH"))
         );
+    }
+}
+
+#[cfg(test)]
+mod stored_tests {
+    use super::*;
+
+    /// A typed transaction survives the binary journal encoding exactly, UNKNOWN codes included.
+    #[test]
+    fn chain_tx_round_trips_through_bincode() {
+        let raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../docs/evidence/AUDIT_20261005/3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB.json"
+        ))
+        .unwrap();
+        let mut tx = decode_transaction(&raw).unwrap();
+        for status in [
+            TxStatus::Success,
+            TxStatus::Failed(TransactionError::AccountInUse),
+            TxStatus::Unknown("TX_META_STATUS_MISSING"),
+        ] {
+            tx.meta.as_mut().unwrap().status = status;
+            let bytes = bincode::serialize(&tx).unwrap();
+            assert_eq!(bincode::deserialize::<ChainTx>(&bytes).unwrap(), tx);
+        }
+        let forged = bincode::serialize(&TxStatusStored::Unknown("NOT_A_CODE".into())).unwrap();
+        assert!(bincode::deserialize::<TxStatus>(&forged).is_err());
     }
 }
