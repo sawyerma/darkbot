@@ -916,7 +916,29 @@ pub mod probe {
     };
 }
 
+/// Derived native readiness report; never an execution authority.
+pub mod readiness {
+    use super::*;
+    pub const STATUS: u16 = 1;
+    pub const MODE: u16 = 2;
+    pub const OBSERVED_UNIX_MS: u16 = 3;
+    pub const LIVE_AUTHORIZED: u16 = 4;
+    pub const CONTRACT_SHA256: u16 = 5;
+    pub const CHECKS: u16 = 6;
+    pub mod check {
+        use super::*;
+        pub const NAME: u16 = 1; pub const STATUS: u16 = 2; pub const DETAIL: u16 = 3;
+        pub const SCHEMA: Schema = Schema { name: "darkbot.g07.readiness-check", record_type: 0, schema_version: 1,
+            fields: &[Field::req(NAME,"name",Text),Field::req(STATUS,"status",Text),Field::req(DETAIL,"detail",Text)] };
+    }
+    pub const SCHEMA: Schema = Schema { name: "darkbot.g07.readiness", record_type: 18, schema_version: 1,
+        fields: &[Field::req(STATUS,"status",Text),Field::req(MODE,"mode",Text),
+            Field::req(OBSERVED_UNIX_MS,"observed_unix_ms",U64),Field::req(LIVE_AUTHORIZED,"live_authorized",Bool),
+            Field::opt(CONTRACT_SHA256,"contract_sha256",Text),Field::nested(CHECKS,"checks",Presence::Repeated,&check::SCHEMA)] };
+}
+
 pub const ALL: &[&Schema] = &[
+    &readiness::SCHEMA,
     &probe::SCHEMA,
     &witness_source::SCHEMA,
     &contract::SCHEMA,

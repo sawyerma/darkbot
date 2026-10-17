@@ -72,3 +72,11 @@ required-features = ["g07-mainnet"]
 [[test]]
 name = "g07_builder_probe"
 required-features = ["g07-mainnet"]
+
+[[bin]]
+name = "g07_pre_live_readiness"
+required-features = ["g07-mainnet"]
+
+[[test]]
+name = "g07_readiness"
+required-features = ["g07-mainnet"]
