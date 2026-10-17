@@ -15,4 +15,4 @@ pub mod ws;
 pub const PROTOCOL_MAJOR: u32 = 1;
 pub const PROTOCOL_MINOR: u32 = 0;
 /// Muss mit frontend/src/core/realtime/schemaId.ts übereinstimmen (protocol/scripts/schema-id.sh).
-pub const SCHEMA_ID: &str = "TO_PIN";
+pub const SCHEMA_ID: &str = "4470271cbe2ba6095f09941aeb586dff660b01499f996ac4b0859752639abc18";
