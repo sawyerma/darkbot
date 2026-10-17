@@ -61,6 +61,7 @@ Bevor du die neue Dokumentation lokal übernimmst, prüfe `git status --short` u
 | Local/generated runtime data | [data/](data/) |
 | Qualification / gate documentation | [docs/qualification/](docs/qualification/) |
 | Project 0 frontend | [../frontend/src/features/project0/](../frontend/src/features/project0/) |
+| **Frontend control / phased implementation plan** | [FEUI-00…09](../frontend/docs/FRONTEND_PHASENPLAN.md), [verified code/variables](../frontend/docs/PROJECT_0_CODE_MAP.md), [proposed control/API contract](../frontend/docs/CONTROL_PROTOCOL.md). New APIs and `p0ctl` remain **SOLL** until tested. |
 
 ---
 
