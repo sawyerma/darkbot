@@ -146,3 +146,52 @@ Nothing was sent or signed, and the guard stays `UNARMED` (`FROZEN_APPROVED_V4_S
 - Probe dry-plan hash `a5ad014f9ffebd32b6c2cc7fc36fa054d9c7118fdb1e76b8f3c5ae1606fbd039` (unchanged by §8: the shared G0.7 modules are byte-identical to `c57262c`). No probe approval exists and none is requested.
 
 The run instructions of this section are superseded by §8.
+
+## 8. R0 coverage and Flap v5.25.0 requalification — current acceptance boundary
+
+### R0: complete historical upgrade evidence
+
+The read-only R0 scanner in `g06a_preflight_record.rs` and
+`g06a_preflight_record/coverage.rs` is the new coverage implementation.
+It verifies linked block headers, header hashes, logs blooms,
+receipt roots for relevant candidates, archive anchors, and the
+implementation slot before and after an observed upgrade.
+The expected upgrade is at block 128103397.
+
+Code implementation and a passing local build do not establish complete
+historical RPC coverage. The actual scan result and its sealed native
+evidence must be checked independently. Missing data or inconsistent
+proofs remain STOP, never PASS.
+
+### DRY-0 through DRY-4
+
+`g06a_final_dry.sh` uses native DBREC records, the R0 scan,
+the current preflight, the independently simulated transaction,
+the economics comparison, the builder-policy observation, and
+`g06a_requal_check`.
+
+`g06a_builder_policy_record` must obtain fresh source evidence
+from the official builder documentation. Updating an old date
+without renewed evidence is not qualification.
+
+The checker must reject unapproved differences in frozen signed
+transaction bytes, token, minimum output, economics or safety
+parameters. Differences permitted by its explicit comparison
+contract require corresponding native evidence.
+
+### Current verification status
+
+The BSC workspace build and workspace tests passed locally with
+the three new source files present on 2026-10-17.
+This confirms local compilation and regression tests only.
+
+The local directory
+`bsc/native/evidence/g06a/g06a_requal_dry_20261017T125545Z/`
+has not been independently reviewed for a final qualification verdict.
+It must not be presented as `FLAP_REQUALIFICATION=PASS` on the
+basis of build success alone.
+
+No new economic approval is implied. The v4 contract must be
+separately reviewed and explicitly approved. The live guard remains
+`FROZEN_APPROVED_V4_SHA256 = "UNARMED"`.
+No BUY, submission, or LIVE authorization is granted.
