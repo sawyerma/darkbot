@@ -66,6 +66,10 @@ pub mod kind {
     pub const MEASUREMENT_PHASE: u16 = 500;
     /// The run's measurement plan as handed from the plan compiler to the runtime (JFI-04).
     pub const MEASUREMENT_PLAN: u16 = 501;
+    /// Secret-free effective operational configuration (JFI-04).
+    pub const OPERATIONAL_CONFIG: u16 = 502;
+    /// Pre-capture run manifest; `manifest.json` is its render for the pinned run store.
+    pub const RUN_MANIFEST: u16 = 503;
     /// MT0 measurement snapshot (cumulative counters), off-owner reporter thread.
     pub const MT0_SNAPSHOT: u16 = 600;
     /// FE-01 read-only observation: effective configuration, each saved RPC read
@@ -111,6 +115,8 @@ pub mod kind {
         ECON_CANONICAL,
         MEASUREMENT_PHASE,
         MEASUREMENT_PLAN,
+        OPERATIONAL_CONFIG,
+        RUN_MANIFEST,
         MT0_SNAPSHOT,
         FE01_CONFIG,
         FE01_READ,

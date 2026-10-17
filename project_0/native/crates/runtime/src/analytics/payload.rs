@@ -60,6 +60,10 @@ pub fn decode<P: Payload>(kind: u16, schema: u16, bytes: &[u8]) -> io::Result<P>
         .map_err(|_| bad("PAYLOAD_DECODE"))
 }
 
+impl Payload for darkbot_solana::runtime_config::EffectiveConfig {
+    const KIND: u16 = journal::kind::OPERATIONAL_CONFIG;
+}
+
 /// The manifest: last frame of a sealed journal, binding frame count and chain root.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Manifest {
@@ -137,6 +141,10 @@ macro_rules! typed_kinds {
             k::MEASUREMENT_PLAN => {
                 $f::<super::measurement::MeasurementPlan>($kind, $schema, $bytes)
             }
+            k::OPERATIONAL_CONFIG => {
+                $f::<darkbot_solana::runtime_config::EffectiveConfig>($kind, $schema, $bytes)
+            }
+            k::RUN_MANIFEST => $f::<super::measurement::RunManifest>($kind, $schema, $bytes),
             k::ECON_OPPORTUNITY => $f::<super::econ::OpportunityRow>($kind, $schema, $bytes),
             k::OWNER_RECONCILE => {
                 $f::<crate::execution::pending::ReconcileRecord>($kind, $schema, $bytes)

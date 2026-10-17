@@ -5664,3 +5664,14 @@ Base `0772897`.
 - The plan compiler writes the plan as a typed single-value journal (`MEASUREMENT_PLAN` 501, `capture/measurement_plan.p0j`, immutable) and the launcher hands that journal to the runtime (`P0_MEASUREMENT_PLAN`); the runtime no longer parses a JSON plan on the launch path. The JSON on stdout stays the pinned run store's staged `measurement_plan` part (render of the same struct). A JSON plan file remains readable for historical/manual invocations.
 
 Tests: `measurement::typed_plan_journal_is_the_runtime_input` (typed load, conflicting legacy override refused, tampered journal refused), measurement/journal 37, Python launcher integration 26/26 (manifest plan equals the staged part).
+
+## 2026-10-17 — JFI-FIX-04 part 3: typed run manifest and effective-config record (LOCAL_PASS)
+
+Base `74f60cf`.
+
+- `RunManifest` (`RUN_MANIFEST` 503) is written first as an immutable typed journal (`capture/run_manifest.p0j`, inside the V2 names the pinned run store allows); `manifest.json` / `measurement_manifest.json` is its render (`RunManifest::legacy_json`, V1 without `layout`), still written at bootstrap because the pinned run store recognizes the layout by it.
+- The runtime keeps the effective operational configuration as a typed, secret-free record (`EffectiveConfig`, `OPERATIONAL_CONFIG` 502: values with endpoint counts only, the source of every value, fixed FREE_ONLY/no-authorization facts) instead of a JSON value. The manifest embeds it; the Shadow setup writes it as `operational_config_<ns>.p0j` instead of a JSON file (no reader used that file). Changed content: the manifest's `operational_config` object is now this record (no pinned reader parses it); `--print-effective-config` keeps its JSON output for the Python launcher (external CLI handoff, open with the launcher migration).
+
+Tests: measurement 9 (typed manifest journal equals the `manifest.json` render, no secret), measurement/econ/journal 81, solana lib 72, Python launcher integration 26/26 (pinned run store recognizes both layouts).
+
+Open in JFI-FIX-04: config resolution through a JSON value tree, the `--print-effective-config` handoff and the Python measurement-config/launcher JSON (until `p0ctl` replaces the Python launcher with parity).

@@ -292,6 +292,52 @@ impl MeasurementPlan {
     }
 }
 
+/// File name of the typed pre-capture manifest in the run's capture directory.
+pub const RUN_MANIFEST_JOURNAL: &str = "run_manifest.p0j";
+
+/// Pre-capture run manifest (JFI-04, `RUN_MANIFEST` frame): identity, plan, code and binary
+/// pins, secret-free operational configuration and the fixed observe-only facts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunManifest {
+    pub schema: String,
+    pub layout: Option<String>,
+    pub run_id: String,
+    pub capture_run_id: String,
+    pub plan: MeasurementPlan,
+    pub created_unix_ns: u128,
+    pub clock_origin_unix_ns: u128,
+    pub clock_definition: String,
+    pub head: String,
+    pub binary_sha256: String,
+    pub source_sha256: std::collections::BTreeMap<String, String>,
+    pub provider_class: String,
+    pub operational_config: Option<darkbot_solana::runtime_config::EffectiveConfig>,
+    pub risk_limits: std::collections::BTreeMap<String, Option<u64>>,
+    pub permitted_modes: Vec<String>,
+    pub live_enabled: bool,
+    pub submission_enabled: bool,
+    pub verification_mode: String,
+    pub capture_window: Option<CaptureWindow>,
+    pub protocol_pin: String,
+    pub phase_journal: String,
+    pub compatibility: String,
+}
+impl super::payload::Payload for RunManifest {
+    const KIND: u16 = super::journal::kind::RUN_MANIFEST;
+}
+impl RunManifest {
+    /// `manifest.json` / `measurement_manifest.json` render (V1 has no `layout` key).
+    pub fn legacy_json(&self) -> Value {
+        let mut v = serde_json::to_value(self).unwrap_or(Value::Null);
+        if self.layout.is_none() {
+            if let Some(m) = v.as_object_mut() {
+                m.remove("layout");
+            }
+        }
+        v
+    }
+}
+
 /// The measurement window as journaled at StreamReady (one shared process clock).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CaptureWindow {
@@ -558,7 +604,7 @@ pub fn persist_manifest(
             );
         }
     }
-    let mut risk = serde_json::Map::new();
+    let mut risk_limits = std::collections::BTreeMap::new();
     for key in [
         "P0_MAX_SLIPPAGE_BPS",
         "P0_MIN_PROFIT",
@@ -568,34 +614,72 @@ pub fn persist_manifest(
         "P0_DEADLINE_NS",
     ] {
         // Only numeric risk configuration. Never persist arbitrary environment contents.
-        risk.insert(
-            key.into(),
-            std::env::var(key)
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .map_or(Value::Null, |v| json!(v)),
+        risk_limits.insert(
+            key.to_string(),
+            std::env::var(key).ok().and_then(|s| s.parse::<u64>().ok()),
         );
     }
+    let v2 = paths.layout == crate::run_layout::RunLayout::V2;
+    let manifest = RunManifest {
+        // Layout V2 is a separately versioned manifest; V1 keeps its schema and keys.
+        schema: if v2 {
+            "C0-E1/MeasurementManifest/3"
+        } else {
+            "C0-E1/MeasurementManifest/2"
+        }
+        .into(),
+        layout: v2.then(|| paths.layout.tag().to_string()),
+        run_id: run_id.into(),
+        capture_run_id: run_id.into(),
+        plan: plan.clone(),
+        created_unix_ns: clock.unix_ns(clock.now_ns()),
+        clock_origin_unix_ns: clock.unix_ns(0),
+        clock_definition: "process monotonic ns; UTC = fixed origin + monotonic ns; capture boundaries journaled after StreamReady".into(),
+        head: head.trim().into(),
+        binary_sha256: sha(&fs::read(binary).map_err(|e| e.to_string())?),
+        source_sha256: sources,
+        provider_class: if provider_class
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
+        {
+            provider_class
+        } else {
+            "UNKNOWN"
+        }
+        .into(),
+        operational_config: darkbot_solana::runtime_config::effective().cloned(),
+        risk_limits,
+        permitted_modes: vec!["SHADOW_OBSERVE_ONLY".into()],
+        live_enabled: false,
+        submission_enabled: false,
+        verification_mode: "SEPARATE_POST_CAPTURE".into(),
+        capture_window: None,
+        protocol_pin: "33c67987a661f59c6683a65485ebb4f0ef030b77".into(),
+        phase_journal: if v2 {
+            "capture/measurement_phases.jsonl"
+        } else {
+            "measurement_phases.jsonl"
+        }
+        .into(),
+        compatibility: "hour_01..04 names retained; use plan offsets, not filename as hours".into(),
+    };
+    // JFI-04: the typed manifest is the record (written first, immutable); `manifest.json` is
+    // its render, written now because the pinned run store recognizes the layout by it.
+    if paths.manifest().exists() {
+        return Err("manifest exists".into());
+    }
+    super::journal::write_typed_value(
+        &paths.capture(RUN_MANIFEST_JOURNAL),
+        super::journal::source::MEASUREMENT,
+        &manifest,
+    )
+    .map_err(|e| format!("RUN_MANIFEST: {e}"))?;
     let mut f = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(paths.manifest())
         .map_err(|e| e.to_string())?;
-    let mut manifest = json!({"schema":"C0-E1/MeasurementManifest/2","run_id":run_id,"capture_run_id":run_id,
-        "plan":plan,"created_unix_ns":clock.unix_ns(clock.now_ns()),"clock_origin_unix_ns":clock.unix_ns(0),
-        "clock_definition":"process monotonic ns; UTC = fixed origin + monotonic ns; capture boundaries journaled after StreamReady",
-        "head":head.trim(),"binary_sha256":sha(&fs::read(binary).map_err(|e|e.to_string())?),"source_sha256":sources,
-        "provider_class":if provider_class.bytes().all(|c|c.is_ascii_alphanumeric() || b"_-".contains(&c)){provider_class}else{"UNKNOWN"},
-        "operational_config":darkbot_solana::runtime_config::report(),"risk_limits":risk,"permitted_modes":["SHADOW_OBSERVE_ONLY"],"live_enabled":false,"submission_enabled":false,
-        "verification_mode":"SEPARATE_POST_CAPTURE","capture_window":null,"protocol_pin":"33c67987a661f59c6683a65485ebb4f0ef030b77",
-        "phase_journal":"measurement_phases.jsonl","compatibility":"hour_01..04 names retained; use plan offsets, not filename as hours"});
-    if paths.layout == crate::run_layout::RunLayout::V2 {
-        // Layout V2 is a separately versioned manifest; V1 output stays byte-identical.
-        manifest["schema"] = json!("C0-E1/MeasurementManifest/3");
-        manifest["layout"] = json!(paths.layout.tag());
-        manifest["phase_journal"] = json!("capture/measurement_phases.jsonl");
-    }
-    serde_json::to_writer_pretty(&mut f, &manifest).map_err(|e| e.to_string())?;
+    serde_json::to_writer_pretty(&mut f, &manifest.legacy_json()).map_err(|e| e.to_string())?;
     f.sync_all().map_err(|e| e.to_string())?;
     journal(
         paths,
@@ -780,6 +864,12 @@ mod persistence_tests {
                 }
             }
             assert_eq!(manifest["provider_class"], "UNKNOWN");
+            // JFI-04: the typed manifest journal is the record; the JSON file is its render.
+            let typed: RunManifest =
+                crate::analytics::journal::read_typed_value(&paths.capture(RUN_MANIFEST_JOURNAL))
+                    .unwrap();
+            assert_eq!(typed.legacy_json(), manifest);
+            assert!(!String::from_utf8_lossy(&before).contains("secret"));
             assert_eq!(manifest["binary_sha256"].as_str().unwrap().len(), 64);
             assert!(!manifest["source_sha256"].as_object().unwrap().is_empty());
             assert!(persist_manifest(&paths, "test", "UNKNOWN", &plan, clock).is_err());

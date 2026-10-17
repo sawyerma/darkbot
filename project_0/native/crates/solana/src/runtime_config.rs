@@ -318,8 +318,14 @@ impl RuntimeConfig {
 /// offsets can represent. Open-ended horizons are not durations: `until-stopped`/`inf` are
 /// refused (`RunHorizon::UntilStopped` is FEUI follow-up scope), never mapped to a huge number.
 pub fn duration_seconds(s: &str) -> Result<u64, String> {
-    if matches!(s, "until-stopped" | "until_stopped" | "inf" | "infinite" | "unbounded") {
-        return Err("RUN_HORIZON_UNTIL_STOPPED_NOT_AVAILABLE: only fixed durations (s/m/h/d) are supported".into());
+    if matches!(
+        s,
+        "until-stopped" | "until_stopped" | "inf" | "infinite" | "unbounded"
+    ) {
+        return Err(
+            "RUN_HORIZON_UNTIL_STOPPED_NOT_AVAILABLE: only fixed durations (s/m/h/d) are supported"
+                .into(),
+        );
     }
     let at = s.len().checked_sub(1).ok_or("empty duration")?;
     let (n, u) = s.split_at_checked(at).ok_or("invalid duration")?;
@@ -547,11 +553,35 @@ impl Resolved {
         })
     }
     pub fn activate(self) -> Result<(), String> {
-        let report = self.json();
+        let effective = self.effective();
         install(self.config)?;
-        REPORT
-            .set(report)
+        EFFECTIVE
+            .set(effective)
             .map_err(|_| "runtime report already initialized".to_string())
+    }
+    /// Typed, secret-free record of this configuration (JFI-04).
+    pub fn effective(&self) -> EffectiveConfig {
+        let c = &self.config;
+        EffectiveConfig {
+            schema: "Project0/OperationalConfig/2".into(),
+            profile: c.profile.clone(),
+            limits: c.limits.clone(),
+            rpc_endpoint_count: c.rpc_endpoints.len() as u64,
+            wss_endpoint_count: c.wss_endpoints.len() as u64,
+            fallback: c.fallback,
+            adaptive: c.adaptive,
+            duration: c.duration.clone(),
+            verification: c.verification.clone(),
+            diagnostics: c.diagnostics,
+            fe_mode: c.fe_mode.clone(),
+            fe_targets: c.fe_targets.clone(),
+            fe_group: c.fe_group.clone(),
+            sources: self.sources.clone(),
+            provider_capacity_qualified: false,
+            free_only: true,
+            live_authorized: false,
+            submission_authorized: false,
+        }
     }
     pub fn json(&self) -> Value {
         let mut values = serde_json::to_value(&self.config).unwrap();
@@ -660,9 +690,35 @@ impl Resolved {
     }
 }
 static ACTIVE: OnceLock<RuntimeConfig> = OnceLock::new();
-static REPORT: OnceLock<Value> = OnceLock::new();
-pub fn report() -> Option<&'static Value> {
-    REPORT.get()
+static EFFECTIVE: OnceLock<EffectiveConfig> = OnceLock::new();
+/// The activated configuration's typed record (`None` when running on defaults).
+pub fn effective() -> Option<&'static EffectiveConfig> {
+    EFFECTIVE.get()
+}
+
+/// Secret-free effective operational configuration: resolved values (endpoint lists reduced to
+/// their counts), the source of every value, and the fixed authorization facts. Persisted as a
+/// typed journal record; never an authorization by itself.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EffectiveConfig {
+    pub schema: String,
+    pub profile: Profile,
+    pub limits: Limits,
+    pub rpc_endpoint_count: u64,
+    pub wss_endpoint_count: u64,
+    pub fallback: bool,
+    pub adaptive: bool,
+    pub duration: String,
+    pub verification: String,
+    pub diagnostics: bool,
+    pub fe_mode: String,
+    pub fe_targets: Vec<String>,
+    pub fe_group: String,
+    pub sources: BTreeMap<String, String>,
+    pub provider_capacity_qualified: bool,
+    pub free_only: bool,
+    pub live_authorized: bool,
+    pub submission_authorized: bool,
 }
 pub fn configured() -> bool {
     ACTIVE.get().is_some()

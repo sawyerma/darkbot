@@ -550,17 +550,17 @@ pub(super) fn prepare(
     )?;
     let journal_path = crate::analytics::journal::binary_path(std::path::Path::new(&record_path));
     std::fs::create_dir_all(journal_path.parent().unwrap_or(std::path::Path::new(".")))?;
-    if let Some(report) = darkbot_solana::runtime_config::report() {
+    if let Some(effective) = darkbot_solana::runtime_config::effective() {
+        // JFI-04: the effective configuration is kept as a typed, secret-free journal record.
         let parent = std::path::Path::new(&record_path)
             .parent()
             .unwrap_or(std::path::Path::new("."));
-        let name = format!("operational_config_{}.json", clock.unix_ns(clock.now_ns()));
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(parent.join(name))?;
-        serde_json::to_writer_pretty(&mut file, report)?;
-        file.sync_all()?;
+        let name = format!("operational_config_{}.p0j", clock.unix_ns(clock.now_ns()));
+        crate::analytics::journal::write_typed_value(
+            &parent.join(name),
+            crate::analytics::journal::source::OWNER,
+            effective,
+        )?;
     }
 
     let recovery_path = journal_path.with_extension(format!(
