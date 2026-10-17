@@ -12,7 +12,11 @@
     "budget": "bundlesize",
     "smoke": "playwright test tests/smoke.spec.ts --reporter=line",
     "lint:boundaries": "node scripts/check-boundaries.mjs",
-    "test:code-split": "playwright test -c playwright.codesplit.config.ts"
+    "test:code-split": "playwright test -c playwright.codesplit.config.ts",
+    "check:freeze": "node scripts/check-design-freeze.mjs",
+    "lint:css": "node scripts/check-graphite-css.mjs",
+    "visual": "playwright test -c playwright.visual.config.ts",
+    "visual:update": "playwright test -c playwright.visual.config.ts --update-snapshots"
   },
   "bundlesize": [
     {

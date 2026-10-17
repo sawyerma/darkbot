@@ -1,0 +1,7 @@
+# Frozen SHA-256 from GitHub branch frontend/f2-part2-review, 2026-10-17
+# Accepted original V7 HTML (local) SHA-256: 887aac385b04ca315615844399f42ff611b10de204a5cb9e3bc7ffb2c87eef36
+# Git HTML copy currently differs from accepted original. Visual F1 approval is BLOCKED
+# until the exact original reference and Playwright baseline are checked.
+965d18eab4daef4bbac5465677dab336b63d1cd676eccc3d99073c869750d4f5  src/features/project0/styles/graphite.css
+afdeb28fd467a565d231f17f23e51f07c55191bfbd91d750b503adbafd780ce9  src/features/project0/pages/WalletsPanel.tsx
+a1e3b27b5a3ed0a3821c75c0f1a7e9ae51f03025c16003c192a986b6e8498499  design/reference/project0_graphite_v7_fleet.html

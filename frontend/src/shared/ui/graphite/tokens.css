@@ -1,0 +1,92 @@
+/* Graphite V0 Design-Tokens.
+   Quelle: features/project0/styles/graphite.css (IST, Pixel-Freeze). Werte 1:1 übernommen,
+   keine Konsolidierung. graphite.css behält seine Literale bis zur Token-Migration mit
+   Pixeldiff 0 (F7). Neue Host-/BSC-/Overview-Oberflächen verwenden ausschließlich Tokens;
+   Stylelint/ESLint verbieten dort neue Hex-Werte. */
+
+:root {
+  /* Flächen */
+  --g-bg: #1b1b1b;
+  --g-panel: #303030;
+  --g-well: #262626;
+  --g-well-deep: #222222;        /* .p0-code */
+  --g-health: #292929;
+  --g-tab-selected: #1d1d1d;
+  --g-row-selected: #3c3c3c;
+
+  /* Linien */
+  --g-line: #464646;
+  --g-line-panel: #424242;
+  --g-line-row: #474747;
+  --g-line-input: #565656;
+  --g-line-badge: #595959;
+  --g-line-secondary: #626262;
+
+  /* Text */
+  --g-text: #f0f0f0;
+  --g-text-strong: #ffffff;
+  --g-text-input: #f4f4f4;
+  --g-text-label: #e2e2e2;
+  --g-text-badge: #dddddd;
+  --g-text-row: #eeeeee;
+  --g-muted: #b2b2b2;
+  --g-tab: #b8b8b8;
+  --g-subtab: #b5b5b5;
+  --g-pill: #cbcbcb;
+  --g-row-small: #aaaaaa;
+  --g-dim: #858585;
+  --g-footer: #888888;
+
+  /* Akzent (hell auf dunkel) */
+  --g-accent: #eaeaea;
+  --g-accent-text: #202020;
+  --g-accent-line: #ececec;
+  --g-focus: #eeeeee;
+  --g-shadow-panel: 0 10px 35px #0004;
+
+  /* Radien */
+  --g-r-shell: 16px;
+  --g-r-panel: 18px;
+  --g-r-tabs: 28px;
+  --g-r-tab: 24px;
+  --g-r-badge: 22px;
+  --g-r-pill: 22px;
+  --g-r-button: 18px;
+  --g-r-input: 9px;
+  --g-r-code: 9px;
+  --g-r-health: 10px;
+  --g-r-row: 8px;
+
+  /* Abstände und Maße */
+  --g-shell-pad: 18px 12px;
+  --g-panel-pad: 24px 26px;
+  --g-section-pad: 22px 0;
+  --g-gap-xs: 3px;
+  --g-gap-sm: 9px;
+  --g-gap-md: 12px;
+  --g-gap-lg: 16px;
+  --g-gap-xl: 23px;
+  --g-panel-max: 800px;
+  --g-fleet-aside: 230px;
+  --g-line-min-h: 34px;
+  --g-metric-min-h: 53px;
+  --g-input-min-h: 38px;
+  /* Breakpoint 650px: Custom Properties gelten nicht in @media, Wert ist hier nur dokumentiert. */
+
+  /* Typografie */
+  --g-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --g-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --g-fs-base: 14px;
+  --g-lh-base: 1.45;
+  --g-fs-h1: 20px;
+  --g-lh-h1: 1.25;
+  --g-fs-h2: 15px;
+  --g-fs-body: 13px;
+  --g-fs-small: 12px;
+  --g-fs-tiny: 11px;
+  --g-fs-micro: 10px;
+  --g-fs-metric: 21px;
+  --g-fw-bold: 700;
+  --g-fw-semibold: 650;
+  --g-fw-metric: 620;
+}
