@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
     "budget": "bundlesize",
-    "smoke": "playwright test tests/smoke.spec.ts --reporter=line"
+    "smoke": "playwright test tests/smoke.spec.ts --reporter=line",
+    "lint:boundaries": "node scripts/check-boundaries.mjs",
+    "test:code-split": "playwright test -c playwright.codesplit.config.ts"
   },
   "bundlesize": [
     {

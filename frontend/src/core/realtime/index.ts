@@ -10,3 +10,6 @@ export type { ConnectionInfo, ConnectionStatus, Limits } from "./GatewayConnecti
 export type { EventMeta, StateMeta, TopicStatus } from "./TopicState";
 export type { AcquireOptions, EventListener, StateListener } from "./TopicSubscriptions";
 export { TOPIC_TABLE, bindingOf, wireNameOf } from "./topicTable";
+
+export { ProjectId, TopicClass, TopicId } from "../generated/darkbot/control/v1/topics_pb";
+export { StartPolicy } from "../generated/darkbot/control/v1/stream_pb";
