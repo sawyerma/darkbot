@@ -54,6 +54,7 @@ async fn spawn(mut limits: Limits) -> TestServer {
         source_detach_after_ms: 2000,
         source_reattach_backoff_ms: 50,
         overview_interval_ms: 60000,
+        feeds: vec![],
     };
     let hub = Arc::new(StateHub::new(1024));
     let registry = SourceRegistry::new();
