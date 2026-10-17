@@ -1,9 +1,11 @@
-# DarkBot Frontend – Verbindlicher Phasenplan v1.1
+# DarkBot Frontend – Verbindlicher Phasenplan v1.2
 
 **Stand:** 2026-10-17. **Status:** SOLL / Implementierung offen. **Repo:** sawyerma/darkbot.
 **Verifizierte Code-Basis:** Project_0 `0e0544d`; danach ist eine ausschließlich BSC-bezogene Änderung `ee94150` auf main erschienen. Für die Umsetzung jeweils aktuellen HEAD prüfen.
 
 **Autorität:** [Project_0 PHASENPLAN](../../project_0/docs/PHASENPLAN.md), [STATUS](../../project_0/docs/STATUS.md), [MEASUREMENT_LEDGER](../../project_0/docs/MEASUREMENT_LEDGER.md). Dieser Frontend-Plan ergänzt FE-00…FE-07, C0-E1, PERSIST, JFI, SK-01…09 und alle FREE_ONLY-/LIVE-Gates; er ersetzt sie nicht.
+**Verbindliche visuelle und finanzielle V5-Referenz:** [GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAPHITE_V5_UI_FINANCE_CONTRACT.md) – vom Nutzer akzeptierte Graphite-V5-Oberfläche und gemeinsamer Portfolio-/Realized-PnL-Vertrag. **Keine andere V4-/Kachel-/Sidebar-Gestaltung umsetzen.**
+
 **Nachschlagewerke:** [verifizierte Variablen](PROJECT_0_CODE_MAP.md) · [geplanter Control-/API-Vertrag](CONTROL_PROTOCOL.md) · **[verbindliche Boot-/Unbounded-/Backtest-/Optimizer-Spezifikation](STARTUP_BACKTEST_OPTIMIZATION.md)**. Die v1.1-Erweiterung ersetzt feste Laufzeit-Presets durch einen typisierten, frei konfigurierbaren Horizont.
 
 ## 0. Zielarchitektur und Entscheidung
@@ -77,11 +79,13 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 - SK-07 hashverkettete `.p0j`-Segmente, Crash-/Truncation-/Reader-Recovery; SK-03 noch offene RAM-Collections in Econ-/Winner-Worker berücksichtigen.
 - **Abnahme:** 600s gezielter technischer Smoke, Fehlerfälle (Disk-full, 429, WSS-gap, Overload), Provider-/Kapazitätsbeweis; 4h erst nach Userfreigabe.
 
-### FEUI-03 – Echtes Project_0 Control Center
+### FEUI-03 – Graphite V5 Project 0 Control (fünf Reiter, kein zweites Dashboard)
 
 - **Freies Laufzeit-Eingabefeld mit Einheit** (`s/m/h/d`, später kompatibel erweitern) und separatem explizitem Modus **`Bis manuell gestoppt`**. `30s/60s/10m/1h/4h/24h/48h` nur vorbesetzende Shortcuts; `RunHorizon` als Backend-Owner, keine statisch unbegrenzte Scheinzahl. Bestehendes `MeasurementPlan::parse_duration` validiert nur endliche s/m/h-Dauern und wird versioniert migriert; UI darf nicht eigenständig Grenzen/Snapshot-Zeitpunkte berechnen.
 - Quelle `logs|transactions`, Verification `off|index|strict` (vorhandenes `crosscheck` sofern separat qualifiziert), Profile `smoke|standard|performance|custom`.
 - Sämtliche konfigurierbaren Rust-`Limits` anhand `runtime_config.rs::descriptors()` anzeigen: Einheit, Default, Min/Max, ENV/Quelle, `restart_required`. Keine kopierten Werte als UI-Defaults.
+- **V5-UI bindend:** neutrales Graphitgrau, eine zentrale Fläche, Pill-Navigation mit exakt `Overview / Liquidator / Capture / Analytics / Wallets`, schmale Trennlinien statt blauer Kacheln, keine zusätzliche Sidebar. `System Health` in der Kopfzeile als aufklappbarer Diagnostikbereich; englische Beschriftungen. Optische Referenz und Tokens siehe [GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAPHITE_V5_UI_FINANCE_CONTRACT.md).
+- **Overview-Pflichtfelder:** RPC-Latenz p95 (ms), Entscheidungs-Latenz p95 (ms), Stream-Freshness (ms), **Realized net PnL · USD**, **Total capital · USD** sowie Liquidator-/Capture-Status; `—` mit Quelle/Grund, wenn noch nicht nachgewiesen. Realized Net PnL und Total Capital sind dieselben Snapshotwerte wie unter Wallets, keine getrennten Frontend-Berechnungen.
 - Statusachsen: Run-ID, Walltime vs tatsächlich covered, READY/WSS/Slots, Gaps/429, Writer-Lag, RAM/SSD, Verifier-Cursor, Shadow-/Economics-UNKNOWN, Safety.
 - UI-Snapshot + begrenzte WS-Deltas; bei Sequence-Gap erneut REST-Snapshot laden, bis dahin `STALE` zeigen. Browser-Neustart darf keinen Run stoppen.
 - **Abnahme:** identische Werte/Fehler/Profil-Hash bei Terminal-/Browserstart, kein Doppelstart, kein Slow-Client-Effekt auf Engine.
@@ -102,13 +106,14 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 - LIVE/INDEX/STRICT/SHADOW_ONLY unterscheiden. Ein historisch vervollständigter Scan ersetzt nicht verlorenes originales `T_rx`.
 - **Abnahme:** Verify/Resume/Report-Nachweise, Hash-Mismatch/ältere Schemaversion fehlschlagen, keine „vollständig“-Anzeige bei nur vorläufigem Result.
 
-### FEUI-06 – Economics/Competition/Race/Verlustursachen
+### FEUI-06 – Economics/Competition/Race/Verlustursachen und native Latenz-Telemetrie
 
 - Existierende Rust-`liquidation/economics.rs`, `analytics/econ_canonical.rs`, `market/winner.rs`, `winner_tracker.rs` wiederverwenden.
 - `market_gross_edge_usd` ≠ `executable_shadow_net_edge_usd` ≠ `realized_pnl_usd`. On-chain Fees, Priority Fee, Tip, Rent, Swap/Exit/Restinventar und `unknown_costs` mit Provenienz.
 - Ursachen je Signature+Slot+Instruction/Event: Ingress, State-Staleness, Health, Funding, Routing/Exit, TX-Größe, Simulation, Fee-Budget, Race, Landing oder UNKNOWN. Pro Episode ein primärer Verlustgrund; Sekundärgründe getrennt, keine doppelte Verlust-/Fee-Zählung.
 - Kapitalbänder `200/500/1000/2500/5000/10000 USD`; gemessene Speedup-Sensitivität nur Szenario, kein bewiesener Winner.
-- **Abnahme:** exakte u64/u128/i128-/USD-micro-/bps-/ns-Einheiten, keine JS-Float-Entscheidung, keine Scheingenauigkeit bei nicht vorhandenem Edge.
+- Für RPC p50/p95/p99, RX→Decision p50/p95/p99, Stream Age sowie spätere Build/Sign/Submit-/Finalized-Latenz die *gemessenen* monotonen Zeitpunkte, Samples, Messfenster, Backend-Quantile und Status offenlegen. Vorhanden: `ingress::t_rx_ns`, `MarketStats.max_stream_silence_ms`, `StorageStatus.queue_bytes/lag_frames`, `econ.rs::Distribution`; vollständige rolling Live-Histogramme bleiben **SOLL**, keine Dummy-Latenzen. Quelle siehe [GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAPHITE_V5_UI_FINANCE_CONTRACT.md).
+- **Abnahme:** exakte u64/u128/i128-/USD-micro-/bps-/ns-Einheiten, keine JS-Float-Entscheidung, keine Scheingenauigkeit bei nicht vorhandenem Edge oder Latenz. p95 + Samplezahl + Fenster + Fehlerstatus nachvollziehbar.
 
 ### FEUI-07 – Profitability Lab V1: reproduzierbare Offline-Optimierung
 
@@ -136,7 +141,7 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 
 Verbindlicher Detailvertrag: **[Wallets & Treasury](WALLETS_TREASURY.md)**. Wallets, Public Keys, SOL/SPL/Token-Balances, Geld-/Trading-Reservations, verifizierte Gebühren-/Profitwerte und Ziel-Adressen für Phantom-/MetaMask-Solana im gemeinsamen Dashboard anzeigen. Quelle: `project_0/config/wallet.public.env`, `execution/one_shot.rs` (WalletLock, Hold, HandoffUnknown), `receipts.rs` (finalized wallet deltas), `pending.rs`, `liquidation/funding.rs`, `analytics/journal.rs`. Das ist **nicht** schon ein Treasury-Sender.
 
-- **FEUI-10A READ_ONLY:** alle konfigurierten Wallets mit Projektdomäne/Chain/Mint/Tokenkonto/Balance/Spendable/Reservations, bekanntem finalized Netprofit und UNKNOWN getrennt. Walletsource/-Status nie als echter Kontostand interpretieren.
+- **FEUI-10A READ_ONLY:** alle konfigurierten Wallets mit Projektdomäne/Chain/Mint/Tokenkonto/Balance/Spendable/Reservations, bekanntem finalized Netprofit und UNKNOWN getrennt. Walletsource/-Status nie als echten Kontostand interpretieren. Konsolidiertes versioniertes `PortfolioFinancialSnapshot` (SOLL) mit **Total capital, Available capital, Reserved capital, Realized net PnL, Withdrawable profit, Transferred to Treasury** in USD und per Asset; alle Werte zugleich in `Wallets` und die beiden Pflicht-KPIs `Total capital` + `Realized net PnL` auf `Overview` mit **derselben snapshot_id**. Portfolio-/PnL-Nachweis erst nach echter Wallet-/Price-/Liability-/FE-07-Reconciliation.
 - **FEUI-10B MANUAL:** separate Treasury-Preview/Intent/Signer-/Receiver-/Mint-/Fee-/Reserve-/Amount-Gates, ausdrücklich autorisierte manuelle SOL-/SPL-Transfers zu allowlist-basierten **Solana**-Empfangsadressen von Phantom oder MetaMask, finalisierte Receipts, crashsichere Holds/UNKNOWN/keine Duplikate.
 - **FEUI-10C AUTO:** frei einstellbarer Mindestbetrag `X` **neu realisierter, noch nicht abgeschöpfter** Profit, Überweisungsanteil/-Betrag, Fee-/Reserve-/Transfer-/Zeitraumgrenzen, Cooldown/Expiry, Empfänger-/Asset-/Chain-Allowlist, versionierte explizit freigegebene Standing-Policy und Kill Switch. Niemals komplette Wallet-Guthaben oder Shadow-Szenarien als auszahlbare Profite behandeln.
 - Eine MetaMask-`0x`-EVM-Adresse ist **kein** direktes Solana-Auszahlungsziel; kein automatisches Bridging ohne neuen gesonderten Sicherheitsvertrag. Wallet-Transfers sind **value-bearing** und bleiben bis nach FE-04/P8, abgeschlossener echter FE-07-PnL-Reconciliation und einer **gesonderten Treasury-Geldfreigabe** gesperrt. Sie blockieren **nicht** den nächsten 4h-Beobachtungstest.
@@ -152,6 +157,7 @@ Die ausführliche Spezifikation steht in [STARTUP_BACKTEST_OPTIMIZATION.md](STAR
 | **F-G11 UNBOUNDED** | Versioniertes `RunHorizon::Fixed` oder `UntilStopped`, rollierende Fenster, Journalsegmente, Retention/Storage/Provider-Watchdogs, graceful stop | 30s/custom 75m/custom 7d/unbounded, ns-Overflow verhindert, 4 Quartale für finite Bestandsläufe kompatibel |
 | **F-G12 ANALYSIS PIPELINE** | Paginierter Run-Browser; as-of historischen Replay auf gespeicherten Beweisen; Verify/Backtest/Report/Optimize als getrennte serverseitige Jobs, alle mit festen Daten-/Versionsidentitäten | Klickkette vollständig, idempotent, Close/Reopen des Browsers ohne Daten-/Jobverlust |
 | **F-G13 PROOF-/PNL DISPLAY** | Deckung und UNKNOWN getrennt von Gross-Edge, Shadow-Edge, Race-Sensitivität und **tatsächlich realisiertem** PnL; grafische Drilldowns auf signierte Evidence | Kein hypothetischer Gewinn in Realized-KPI, keine erfundene Win-Wahrscheinlichkeit |
+| **F-G15 GRAPHITE-V5 + FINANCE** | Verbindliche fünf englische Reiter/Graphit-Pill-UI, Health als Headerdetail; p95 samt Quelle, Snapshotidentität für `Overview` und `Wallets`; Portfolio-Nettovermögen/Working-Capital/Reservations/realized PnL/Sweeps fachlich separat | Visual-/Contracttests aus [V5-Vertrag](GRAPHITE_V5_UI_FINANCE_CONTRACT.md), kein falscher Echtgeld-/PNL-Wert |
 | **F-G14 OPTIMIZE** | Konfiguriertes Budget/Parameterraum, exakter Backend-Sweep, Time-Block-Holdout, Confidence/UNKNOWN, Baseline-Vergleich, profile candidate only | Derselbe Input → gleiches Ranking/Report-Hash, kein Lookahead, kein automatisches LIVE-Profil |
 
 **Wichtig:** Ein Boot-Audit stellt **Identität/Erreichbarkeit zum Prüfzeitpunkt** fest, nicht zukünftige Quotenfreiheit oder garantiert lückenlose WSS-Lieferung. Langläufe überwachen diese Eigenschaften erneut und wechseln bei kritischer Drift auf `DEGRADED`/Fail-Closed, ohne Daten zu verwerfen oder unbemerkt andere Gegenparteien anzusprechen. `UntilStopped` bedeutet **keine planmäßige Zeitabschaltung**, jedoch zwingend endliche RAM-/Storage-/Provider-Sicherheitsbudgets, Segmentrotation, automatische Kapazitätsprüfungen und transparenten Stop/Halt bei nicht behebbarem Fehler.
