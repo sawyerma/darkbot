@@ -8,7 +8,7 @@
 //! record (DBREC001) and a binary chain capture journal. JSON exists only on
 //! the JSON-RPC wire, inside [`wire`].
 
-use alloy_primitives::{Address, B256, U256, address};
+use alloy_primitives::{Address, B256, U256, address, keccak256};
 use alloy_sol_types::{SolCall, sol};
 use darkbot_bsc_journal::{CaptureRecord, JournalWriter, RecordKind};
 use darkbot_bsc_record::schema::g07::evidence;
@@ -112,6 +112,35 @@ fn write_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
     File::open(dir)
         .and_then(|d| d.sync_all())
         .map_err(|e| format!("{path} replaced but not yet durable: {e}"))
+}
+
+fn persist_result(path: &str, draft: &Draft) -> Result<darkbot_bsc_record::Record, String> {
+    let bytes = draft.encode().map_err(|e| e.to_string())?;
+    let record = decode(draft.schema(), &bytes).map_err(|e| e.to_string())?;
+    write_atomic(path, &bytes)?;
+    Ok(record)
+}
+
+fn unresolved_draft(
+    attempt: &str,
+    launch: B256,
+    buy: B256,
+    lr: bool,
+    br: bool,
+    reason: &str,
+) -> Draft {
+    let mut d = Draft::new(&unresolved::SCHEMA);
+    d.set(unresolved::GATE, "G0.8")
+        .set(unresolved::VERDICT, "UNRESOLVED")
+        .set(unresolved::REASON, reason)
+        .set(unresolved::ATTEMPT_ID, attempt)
+        .set(unresolved::LAUNCH_TX, word(launch))
+        .set(unresolved::BUY_TX, word(buy))
+        .set(unresolved::LAUNCH_RECEIPT_RESOLVED, lr)
+        .set(unresolved::BUY_RECEIPT_RESOLVED, br)
+        .set(unresolved::AUTOMATIC_RETRY, false)
+        .set(unresolved::T0_TO_BUY, "UNKNOWN");
+    d
 }
 
 // ---- JSON-RPC wire boundary --------------------------------------------
@@ -348,6 +377,28 @@ mod wire {
     }
 
     fn receipt_of(v: &Json) -> Result<Receipt, String> {
+        let mut indices = std::collections::BTreeSet::new();
+        for log in field(v, "logs")?
+            .as_array()
+            .ok_or("logs are not an array")?
+        {
+            for key in [
+                "blockHash",
+                "blockNumber",
+                "transactionHash",
+                "transactionIndex",
+            ] {
+                if field(log, key)? != field(v, key)? {
+                    return Err(format!("log {key} mismatch"));
+                }
+            }
+            if log.get("removed").and_then(Json::as_bool) != Some(false) {
+                return Err("removed or unqualified log".into());
+            }
+            if !indices.insert(req(log, "logIndex", u64_of)?) {
+                return Err("duplicate log index".into());
+            }
+        }
         let logs = field(v, "logs")?
             .as_array()
             .ok_or("receipt logs are not an array")?
@@ -483,7 +534,7 @@ mod wire {
         fn receipts_and_blocks_decode_with_optional_fields() {
             let h = |b: &str| format!("0x{}", b.repeat(32));
             let a = |b: &str| format!("0x{}", b.repeat(20));
-            let receipt: Json = serde_json::from_str(&format!(
+            let mut receipt: Json = serde_json::from_str(&format!(
                 r#"{{"blockNumber":"0x10","blockHash":"{}","transactionIndex":"0x1",
                 "transactionHash":"{}","from":"{}","to":null,"contractAddress":"{}",
                 "status":"0x1","gasUsed":"0x5208","cumulativeGasUsed":"0x5208",
@@ -497,7 +548,22 @@ mod wire {
                 h("cc")
             ))
             .unwrap();
+            for key in [
+                "blockNumber",
+                "blockHash",
+                "transactionIndex",
+                "transactionHash",
+            ] {
+                receipt["logs"][0][key] = receipt[key].clone();
+            }
+            receipt["logs"][0]["removed"] = Json::Bool(false);
             let r = receipt_of(&receipt).unwrap();
+            let mut wrong = receipt.clone();
+            wrong["logs"][0]["removed"] = Json::Bool(true);
+            assert!(receipt_of(&wrong).is_err());
+            wrong = receipt.clone();
+            wrong["logs"][0]["blockHash"] = Json::String(h("dd"));
+            assert!(receipt_of(&wrong).is_err());
             assert_eq!((r.block_number, r.transaction_index, r.status), (16, 1, 1));
             assert_eq!(r.to, None);
             assert_eq!(r.effective_gas_price, None);
@@ -563,6 +629,130 @@ fn receipt_gas_cost(receipt: &Receipt, tx: &Tx) -> U256 {
     U256::from(receipt.gas_used) * gas_price
 }
 
+#[derive(Debug)]
+struct BuyEvent {
+    token: Address,
+    buyer: Address,
+    amount: U256,
+    value: U256,
+    fee: U256,
+}
+
+// Frozen official IPortal ABI: seven non-indexed words. Applies to direct
+// and router-internal Portal calls alike; top-level tx.to is irrelevant.
+fn portal_buys(receipt: &Receipt) -> Result<Vec<BuyEvent>, String> {
+    let topic = keccak256("TokenBought(uint256,address,address,uint256,uint256,uint256,uint256)");
+    let mut events = Vec::new();
+    for log in &receipt.logs {
+        if log.address != PORTAL || log.topics.first() != Some(&topic) {
+            continue;
+        }
+        if log.topics.len() != 1 || log.data.len() != 224 {
+            return Err("malformed TokenBought".into());
+        }
+        if log.data[32..44]
+            .iter()
+            .chain(&log.data[64..76])
+            .any(|b| *b != 0)
+        {
+            return Err("noncanonical TokenBought address".into());
+        }
+        let amount = |n: usize| U256::from_be_slice(&log.data[n * 32..(n + 1) * 32]);
+        events.push(BuyEvent {
+            token: Address::from_slice(&log.data[44..64]),
+            buyer: Address::from_slice(&log.data[76..96]),
+            amount: amount(3),
+            value: amount(4),
+            fee: amount(5),
+        });
+    }
+    Ok(events)
+}
+
+fn attributable_acquisition(
+    receipt: &Receipt,
+    token: Address,
+    buyer: Address,
+    value: U256,
+    minimum: U256,
+) -> Result<(U256, U256), String> {
+    if receipt.status != 1 || receipt.from != buyer || receipt.to != Some(PORTAL) {
+        return Err("BUY receipt execution/sender/recipient mismatch".into());
+    }
+    let buys = portal_buys(receipt)?;
+    let matching: Vec<_> = buys
+        .iter()
+        .filter(|b| b.token == token && b.buyer == buyer)
+        .collect();
+    if matching.len() != 1 {
+        return Err("BUY needs exactly one attributable TokenBought".into());
+    }
+    let event = matching[0];
+    if event.value != value || event.fee > value {
+        return Err("BUY event economics mismatch".into());
+    }
+    let topic = keccak256("Transfer(address,address,uint256)");
+    let mut incoming = U256::ZERO;
+    let mut outgoing = U256::ZERO;
+    for log in &receipt.logs {
+        if log.address != token || log.topics.first() != Some(&topic) {
+            continue;
+        }
+        if log.topics.len() != 3
+            || log.data.len() != 32
+            || log.topics[1][..12]
+                .iter()
+                .chain(&log.topics[2][..12])
+                .any(|b| *b != 0)
+        {
+            return Err("malformed token Transfer".into());
+        }
+        let amount = U256::from_be_slice(&log.data);
+        if Address::from_slice(&log.topics[2][12..]) == buyer {
+            incoming = incoming.checked_add(amount).ok_or("transfer overflow")?;
+        }
+        if Address::from_slice(&log.topics[1][12..]) == buyer {
+            outgoing = outgoing.checked_add(amount).ok_or("transfer overflow")?;
+        }
+    }
+    let net = incoming
+        .checked_sub(outgoing)
+        .ok_or("negative BUY acquisition")?;
+    if net == U256::ZERO || net < minimum || net != event.amount {
+        return Err("BUY transfer net does not match event/minOutput".into());
+    }
+    Ok((net, event.fee))
+}
+
+fn validate_receipt_set(block: &Block, receipts: &[Receipt]) -> Result<(), String> {
+    if receipts.len() != block.transactions.len() {
+        return Err("incomplete receipt set".into());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut logs = std::collections::BTreeSet::new();
+    for r in receipts {
+        let tx =
+            transaction_at_index(block, r.transaction_index).ok_or("receipt index out of range")?;
+        if r.block_number != block.number
+            || r.block_hash != block.hash
+            || r.transaction_hash != tx.hash
+            || tx.transaction_index != Some(r.transaction_index)
+            || r.from != tx.from
+            || r.to != tx.to
+            || r.status > 1
+            || !seen.insert(r.transaction_hash)
+        {
+            return Err("receipt/transaction/canonical block identity mismatch".into());
+        }
+        for log in &r.logs {
+            if !logs.insert(log.log_index) {
+                return Err("duplicate block log index".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn successful_competing_buys_between(
     launch_block: u64,
     launch_index: u64,
@@ -574,27 +764,26 @@ fn successful_competing_buys_between(
         return None;
     }
     let mut hashes = Vec::new();
-    for block_number in launch_block..=buy_block {
-        let block = wire::block(block_number).ok()??;
-        for tx in &block.transactions {
-            let idx = tx.transaction_index.unwrap_or(0);
-            let after_launch = block_number > launch_block || idx > launch_index;
-            let before_buy = block_number < buy_block || idx < buy_index;
-            if !after_launch || !before_buy {
-                continue;
-            }
-            if tx.to != Some(PORTAL) {
-                continue;
-            }
-            let Ok(call) = swapExactInputCall::abi_decode_validate(&tx.input) else {
-                continue;
-            };
-            if call.params.outputToken != token {
-                continue;
-            }
-            let receipt = wire::receipt(tx.hash).ok()?;
-            if receipt.is_some_and(|r| r.status == 1) {
-                hashes.push(tx.hash);
+    let mut previous = None;
+    for number in launch_block..=buy_block {
+        let block = wire::block(number).ok()??;
+        if previous.is_some_and(|hash| block.parent_hash != hash) {
+            return None;
+        }
+        previous = Some(block.hash);
+        let receipts = block_receipts(&block).ok()?;
+        for r in receipts {
+            let after_launch = number > launch_block || r.transaction_index > launch_index;
+            let before_buy = number < buy_block || r.transaction_index < buy_index;
+            if after_launch
+                && before_buy
+                && r.status == 1
+                && portal_buys(&r)
+                    .ok()?
+                    .iter()
+                    .any(|b| b.token == token && b.amount > U256::ZERO)
+            {
+                hashes.push(r.transaction_hash);
             }
         }
     }
@@ -602,16 +791,16 @@ fn successful_competing_buys_between(
 }
 
 fn block_receipts(block: &Block) -> Result<Vec<Receipt>, String> {
-    if let Ok(Some(receipts)) = wire::block_receipts(block.number) {
-        return Ok(receipts);
-    }
-
-    let mut receipts = Vec::with_capacity(block.transactions.len());
-    for tx in &block.transactions {
-        let receipt = wire::receipt(tx.hash)?
-            .ok_or_else(|| format!("receipt unresolved during canonical backfill: {}", tx.hash))?;
-        receipts.push(receipt);
-    }
+    let receipts = if let Ok(Some(receipts)) = wire::block_receipts(block.number) {
+        receipts
+    } else {
+        let mut receipts = Vec::with_capacity(block.transactions.len());
+        for tx in &block.transactions {
+            receipts.push(wire::receipt(tx.hash)?.ok_or("receipt unresolved during backfill")?);
+        }
+        receipts
+    };
+    validate_receipt_set(block, &receipts)?;
     Ok(receipts)
 }
 
@@ -724,7 +913,11 @@ fn capture_chain_window(
 
     let launch = wire::block(launch_block)?.ok_or("launch block unavailable for chain capture")?;
     let launch_timestamp = launch.timestamp;
-    let horizon_timestamp = launch_timestamp.saturating_add(MARKET_WINDOW_SECS);
+    // Whole-second headers cannot locate T0 within that second. Include
+    // its upper edge plus 15 seconds, then one further boundary block.
+    let horizon_timestamp = launch_timestamp
+        .checked_add(MARKET_WINDOW_SECS + 1)
+        .ok_or("capture horizon overflow")?;
 
     let mut session = Draft::new(&chain_session::SCHEMA);
     session
@@ -755,7 +948,8 @@ fn capture_chain_window(
     let first_block = launch_block.saturating_sub(1);
     let mut number = first_block;
     let mut crossed_horizon = false;
-    let mut last_block = first_block;
+    let mut captured = Vec::new();
+    let last_block;
     loop {
         let mut waits = 0u16;
         let block = loop {
@@ -770,6 +964,17 @@ fn capture_chain_window(
             }
             thread::sleep(Duration::from_millis(200));
         };
+        if block.number != number
+            || captured
+                .last()
+                .is_some_and(|(_, hash)| *hash != block.parent_hash)
+        {
+            return Err("canonical chain discontinuity during capture".into());
+        }
+        if number == launch_block && block.hash != launch.hash {
+            return Err("launch reorg during capture".into());
+        }
+        captured.push((number, block.hash));
         let timestamp = block.timestamp;
         let timestamp_ns = timestamp.saturating_mul(1_000_000_000);
         // Header, then the transactions in index order, then the receipts.
@@ -803,9 +1008,8 @@ fn capture_chain_window(
             )
             .map_err(|e| format!("receipts {number}: {e}"))?;
         }
-        last_block = number;
-
         if crossed_horizon {
+            last_block = number;
             break;
         }
         if timestamp >= horizon_timestamp {
@@ -822,6 +1026,18 @@ fn capture_chain_window(
     file.sync_all()
         .map_err(|e| format!("chain capture sync: {e}"))?;
 
+    let parent = Path::new(path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    File::open(parent)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| e.to_string())?;
+    for (number, hash) in captured {
+        if wire::block(number)?.is_none_or(|b| b.hash != hash) {
+            return Err("reorg during canonical reconciliation".into());
+        }
+    }
     Ok(ChainCaptureSummary {
         path: path.to_string(),
         records: manifest.records,
@@ -860,29 +1076,33 @@ fn main() {
     assert_eq!(g07_chain_id, CHAIN_ID);
     assert_eq!(g07_portal, PORTAL);
 
+    let evidence_path = req_env("DARKBOT_G08_EVIDENCE_PATH");
+    let pending = unresolved_draft(
+        &attempt_id,
+        launch_hash,
+        buy_hash,
+        false,
+        false,
+        "RECONCILIATION_PENDING_OR_INTERRUPTED",
+    );
+    persist_result(&evidence_path, &pending).expect("durable UNRESOLVED evidence before RPC");
+
     let chain_id = wire::chain_id().expect("chain-id read failed");
     assert_eq!(chain_id, CHAIN_ID, "wrong RPC chain");
 
     let launch_receipt = wait_receipt(launch_hash);
     let buy_receipt = wait_receipt(buy_hash);
     if launch_receipt.is_none() || buy_receipt.is_none() {
-        let mut unresolved = Draft::new(&unresolved::SCHEMA);
-        unresolved
-            .set(unresolved::GATE, "G0.8")
-            .set(unresolved::VERDICT, "STOP")
-            .set(unresolved::REASON, "SENT_TRANSACTION_UNRESOLVED")
-            .set(unresolved::ATTEMPT_ID, attempt_id.as_str())
-            .set(unresolved::LAUNCH_TX, word(launch_hash))
-            .set(unresolved::BUY_TX, word(buy_hash))
-            .set(
-                unresolved::LAUNCH_RECEIPT_RESOLVED,
-                launch_receipt.is_some(),
-            )
-            .set(unresolved::BUY_RECEIPT_RESOLVED, buy_receipt.is_some())
-            .set(unresolved::AUTOMATIC_RETRY, false)
-            .set(unresolved::T0_TO_BUY, "UNKNOWN");
-        let bytes = unresolved.encode().expect("encode G0.8 unresolved record");
-        let record = decode(&unresolved::SCHEMA, &bytes).expect("decode G0.8 unresolved record");
+        let pending = unresolved_draft(
+            &attempt_id,
+            launch_hash,
+            buy_hash,
+            launch_receipt.is_some(),
+            buy_receipt.is_some(),
+            "SENT_TRANSACTION_UNRESOLVED",
+        );
+        let record =
+            persist_result(&evidence_path, &pending).expect("persist missing-receipt result");
         print!("{}", record.render());
         std::process::exit(2);
     }
@@ -932,12 +1152,12 @@ fn main() {
     };
     let launch_canonical_hash = launch_canonical_block.hash;
     let buy_canonical_hash = buy_canonical_block.hash;
-    let canonical =
+    let mut canonical =
         launch_canonical_hash == launch_block_hash && buy_canonical_hash == buy_block_hash;
     let launch_at_index = transaction_at_index(&launch_canonical_block, launch_index)
-        .is_some_and(|tx| tx.hash == launch_hash);
-    let buy_at_index =
-        transaction_at_index(&buy_canonical_block, buy_index).is_some_and(|tx| tx.hash == buy_hash);
+        .is_some_and(|tx| tx.hash == launch_hash && tx == &launch_tx);
+    let buy_at_index = transaction_at_index(&buy_canonical_block, buy_index)
+        .is_some_and(|tx| tx.hash == buy_hash && tx == &buy_tx);
 
     let prior_block = launch_block.saturating_sub(1);
     let token_absent_before = wire::code(token, prior_block)
@@ -951,10 +1171,18 @@ fn main() {
         Some(false) => Some(U256::ZERO),
         None => None,
     };
+    let acquisition = attributable_acquisition(
+        &buy_receipt,
+        token,
+        buyer,
+        expected_buy_value,
+        expected_min_output,
+    );
     let acquisition_evidence_complete = token_absent_before.is_some()
         && token_exists_after.is_some()
         && buyer_balance_after.is_some();
-    let acquisition_positive = token_absent_before == Some(true)
+    let acquisition_positive = acquisition.is_ok()
+        && token_absent_before == Some(true)
         && token_exists_after == Some(true)
         && buyer_balance_after
             .as_ref()
@@ -966,7 +1194,7 @@ fn main() {
 
     let launch_gas_cost = receipt_gas_cost(&launch_receipt, &launch_tx);
     let buy_gas_cost = receipt_gas_cost(&buy_receipt, &buy_tx);
-    let buyer_total_debit = expected_buy_value + buy_gas_cost;
+    let buyer_total_debit = buy_tx.value + buy_gas_cost;
     let experiment_total_cost = launch_gas_cost + buyer_total_debit;
 
     let chain_capture = capture_chain_window(
@@ -980,7 +1208,28 @@ fn main() {
         .as_ref()
         .is_ok_and(|capture| capture.leading_boundary_included && capture.boundary_block_included);
 
-    let hard_stop = launch_status != 1
+    // Revalidate receipts and blocks after the entire observation window.
+    canonical = canonical
+        && wire::block(launch_block)
+            .ok()
+            .flatten()
+            .is_some_and(|b| b.hash == launch_block_hash)
+        && wire::block(buy_block)
+            .ok()
+            .flatten()
+            .is_some_and(|b| b.hash == buy_block_hash)
+        && wire::receipt(launch_hash).ok().flatten().as_ref() == Some(&launch_receipt)
+        && wire::receipt(buy_hash).ok().flatten().as_ref() == Some(&buy_receipt);
+    let receipt_identity = launch_receipt.transaction_hash == launch_hash
+        && buy_receipt.transaction_hash == buy_hash
+        && launch_tx.hash == launch_hash
+        && buy_tx.hash == buy_hash
+        && launch_receipt.from == launcher
+        && launch_receipt.to == Some(PORTAL)
+        && buy_receipt.from == buyer
+        && buy_receipt.to == Some(PORTAL);
+    let hard_stop = !receipt_identity
+        || launch_status != 1
         || buy_status != 1
         || !launch_scope_ok
         || !buy_scope_ok
@@ -996,7 +1245,9 @@ fn main() {
         || competitor_count != Some(0)
         || !local_capture_complete
         || !chain_capture_complete;
-    let verdict = if hard_stop {
+    let verdict = if !canonical {
+        "UNRESOLVED"
+    } else if hard_stop {
         "STOP"
     } else if adapt {
         "ADAPT"
@@ -1071,7 +1322,7 @@ fn main() {
         .set(result::CHAIN_RECORD_TIMESTAMP_IS_PRODUCER_TIME, false)
         .set(
             result::COMPETITION_SCAN,
-            "Direct Portal swapExactInput is parsed online; full block/receipt/log material is retained for complete offline derivation. N/N+1 itself proves zero intervening transactions for PASS.",
+            "Complete canonical receipt sets; TokenBought events include router-internal Portal buys. Transfer net and event amount bind acquisition to the BUY receipt. Fees are included in BUY value, never added twice.",
         )
         .set(result::CURRENT_HEAD, head)
         .set(
@@ -1086,6 +1337,10 @@ fn main() {
         );
     for hash in competitor_hashes.iter().flatten() {
         r.push(result::EXTERNAL_BUYS_BETWEEN_HASHES, word(*hash));
+    }
+    if let Ok((amount, fee)) = acquisition {
+        r.set(result::BUY_RECEIPT_TOKEN_NET, wei(amount))
+            .set(result::BUY_EVENT_FEE_WEI, wei(fee));
     }
     match &chain_capture {
         Ok(c) => {
@@ -1114,18 +1369,14 @@ fn main() {
         }
     }
 
-    let bytes = r.encode().expect("encode G0.8 result record");
-    let record = decode(&result::SCHEMA, &bytes).expect("decode G0.8 result record");
-    // A result that could not be written is no result: the view goes to
-    // stderr only, stdout carries the STOP line and no PASS.
-    if let Ok(path) = env::var("DARKBOT_G08_EVIDENCE_PATH")
-        && let Err(e) = write_atomic(&path, &bytes)
-    {
-        eprint!("{}", record.render());
-        eprintln!("G0.8 evidence write failed: {e}");
-        println!("G0_8_STOP_EVIDENCE_NOT_WRITTEN");
-        std::process::exit(2);
-    }
+    let record = match persist_result(&evidence_path, &r) {
+        Ok(record) => record,
+        Err(e) => {
+            eprintln!("G0.8 evidence write failed: {e}");
+            println!("G0_8_STOP_EVIDENCE_NOT_WRITTEN");
+            std::process::exit(2);
+        }
+    };
     print!("{}", record.render());
 
     match verdict {
@@ -1138,6 +1389,184 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn buy_log(token: Address, buyer: Address, amount: u64, value: u64, fee: u64) -> wire::Log {
+        let mut data = Vec::new();
+        for word in [
+            U256::ZERO,
+            U256::from_be_slice(token.as_slice()),
+            U256::from_be_slice(buyer.as_slice()),
+            U256::from(amount),
+            U256::from(value),
+            U256::from(fee),
+            U256::ZERO,
+        ] {
+            data.extend_from_slice(&word.to_be_bytes::<32>());
+        }
+        wire::Log {
+            log_index: 0,
+            address: PORTAL,
+            topics: vec![keccak256(
+                "TokenBought(uint256,address,address,uint256,uint256,uint256,uint256)",
+            )],
+            data,
+        }
+    }
+
+    fn transfer_log(token: Address, buyer: Address, amount: u64) -> wire::Log {
+        wire::Log {
+            log_index: 1,
+            address: token,
+            topics: vec![
+                keccak256("Transfer(address,address,uint256)"),
+                B256::ZERO,
+                B256::from(U256::from_be_slice(buyer.as_slice()).to_be_bytes::<32>()),
+            ],
+            data: U256::from(amount).to_be_bytes::<32>().to_vec(),
+        }
+    }
+
+    #[test]
+    fn acquisition_requires_buy_event_and_net_transfer_to_exact_buyer() {
+        let token = Address::repeat_byte(3);
+        let buyer = Address::repeat_byte(4);
+        let mut r = receipt(2, Some(5));
+        r.from = buyer;
+        r.to = Some(PORTAL);
+        r.logs = vec![
+            buy_log(token, buyer, 20, 100, 1),
+            transfer_log(token, buyer, 20),
+        ];
+        assert_eq!(
+            attributable_acquisition(&r, token, buyer, U256::from(100), U256::from(19)).unwrap(),
+            (U256::from(20), U256::from(1))
+        );
+        for change in 0..6 {
+            let mut bad = r.clone();
+            match change {
+                0 => bad.status = 0,
+                1 => {
+                    bad.logs.pop();
+                }
+                2 => bad.logs[1].address = Address::ZERO,
+                3 => bad.logs[1].topics[2] = B256::ZERO,
+                4 => bad.logs.push(bad.logs[0].clone()),
+                _ => bad.logs[0].data.pop().map(|_| ()).unwrap(),
+            }
+            assert!(
+                attributable_acquisition(&bad, token, buyer, U256::from(100), U256::from(19))
+                    .is_err()
+            );
+        }
+        assert!(
+            attributable_acquisition(&r, token, buyer, U256::from(101), U256::from(19)).is_err()
+        );
+    }
+
+    #[test]
+    fn routed_portal_events_are_detected_without_top_level_portal_destination() {
+        let token = Address::repeat_byte(3);
+        let mut r = receipt(2, Some(5));
+        r.to = Some(Address::repeat_byte(9));
+        r.logs = vec![buy_log(token, Address::repeat_byte(4), 20, 100, 1)];
+        assert_eq!(portal_buys(&r).unwrap()[0].token, token);
+        r.logs[0].data.pop();
+        assert!(portal_buys(&r).is_err());
+    }
+
+    #[test]
+    fn receipt_set_requires_exact_canonical_membership_and_unique_logs() {
+        let mut t = tx(1, Some(3));
+        t.transaction_index = Some(0);
+        let block = Block {
+            number: 1,
+            hash: B256::ZERO,
+            parent_hash: B256::ZERO,
+            timestamp: 0,
+            milli_timestamp: None,
+            mix_hash: None,
+            miner: Address::ZERO,
+            gas_limit: 100,
+            gas_used: 2,
+            base_fee_per_gas: None,
+            transactions: vec![t.clone()],
+        };
+        let mut r = receipt(2, Some(3));
+        r.transaction_hash = t.hash;
+        r.to = t.to;
+        validate_receipt_set(&block, &[r.clone()]).unwrap();
+        assert!(validate_receipt_set(&block, &[]).is_err());
+        let mut wrong = r.clone();
+        wrong.block_hash = B256::repeat_byte(8);
+        assert!(validate_receipt_set(&block, &[wrong]).is_err());
+        let mut duplicate = block.clone();
+        duplicate.transactions.push(t);
+        assert!(validate_receipt_set(&duplicate, &[r.clone(), r]).is_err());
+    }
+
+    fn filled(schema: &'static darkbot_bsc_record::Schema) -> Draft {
+        use darkbot_bsc_record::{Kind, Presence};
+        let mut d = Draft::new(schema);
+        for f in schema
+            .fields
+            .iter()
+            .filter(|f| f.presence == Presence::Required)
+        {
+            d.set(
+                f.tag,
+                match f.kind {
+                    Kind::Bool => Value::Bool(false),
+                    Kind::U64 => Value::U64(0),
+                    Kind::I64 => Value::I64(0),
+                    Kind::U256 => Value::U256([0; 32]),
+                    Kind::B256 => Value::B256([0; 32]),
+                    Kind::Address => Value::Address([0; 20]),
+                    Kind::Text => Value::Text("offline".into()),
+                    Kind::Bytes => Value::Bytes(vec![]),
+                    Kind::Nested => filled(f.nested.unwrap()).into_nested(),
+                },
+            );
+        }
+        d
+    }
+
+    #[test]
+    fn every_terminal_verdict_is_durable_and_write_errors_fail_closed() {
+        let dir = env::temp_dir().join(format!("g08-verdicts-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("result.dbrec");
+        for verdict in ["PASS", "ADAPT", "STOP", "UNRESOLVED"] {
+            let mut d = filled(&result::SCHEMA);
+            d.set(result::VERDICT, verdict);
+            persist_result(path.to_str().unwrap(), &d).unwrap();
+            assert_eq!(
+                decode(&result::SCHEMA, &fs::read(&path).unwrap())
+                    .unwrap()
+                    .text(result::VERDICT)
+                    .unwrap(),
+                verdict
+            );
+            assert!(persist_result(dir.join("absent/result.dbrec").to_str().unwrap(), &d).is_err());
+            assert!(persist_result(dir.to_str().unwrap(), &d).is_err());
+        }
+        let d = unresolved_draft(
+            "test",
+            B256::ZERO,
+            B256::repeat_byte(1),
+            true,
+            false,
+            "SENT_TRANSACTION_UNRESOLVED",
+        );
+        persist_result(path.to_str().unwrap(), &d).unwrap();
+        assert_eq!(
+            decode(&unresolved::SCHEMA, &fs::read(&path).unwrap())
+                .unwrap()
+                .text(unresolved::VERDICT)
+                .unwrap(),
+            "UNRESOLVED"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     fn tx(hash: u8, gas_price: Option<u64>) -> Tx {
         Tx {

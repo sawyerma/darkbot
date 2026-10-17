@@ -210,6 +210,8 @@ pub mod result {
     pub const TOKEN_EXISTS_AT_BUY_BLOCK: u16 = 24;
     pub const BUYER_TOKEN_BALANCE_AT_BUY_BLOCK: u16 = 25;
     pub const POSITIVE_ATTRIBUTABLE_ACQUISITION: u16 = 26;
+    pub const BUY_RECEIPT_TOKEN_NET: u16 = 27;
+    pub const BUY_EVENT_FEE_WEI: u16 = 28;
     pub const BLOCK_HASH: u16 = 30;
     pub const LAUNCH_BLOCK_HASH: u16 = 31;
     pub const BUY_BLOCK_HASH: u16 = 32;
@@ -286,9 +288,9 @@ pub mod result {
     }
 
     pub const SCHEMA: Schema = Schema {
-        name: "darkbot.g08.mainnet-acquisition-ordering.v3",
+        name: "darkbot.g08.mainnet-acquisition-ordering.v4",
         record_type: 14,
-        schema_version: 3,
+        schema_version: 4,
         fields: &[
             Field::req(GATE, "gate", Text),
             Field::req(ATTEMPT_ID, "attempt_id", Text),
@@ -321,6 +323,8 @@ pub mod result {
                 "acquisition.positive_attributable_acquisition",
                 Bool,
             ),
+            Field::opt(BUY_RECEIPT_TOKEN_NET, "acquisition.buy_receipt_token_net", U256),
+            Field::opt(BUY_EVENT_FEE_WEI, "costs.buy_event_fee_included_in_value", U256),
             Field::req(BLOCK_HASH, "ordering.block_hash", B256),
             Field::req(LAUNCH_BLOCK_HASH, "ordering.launch_block_hash", B256),
             Field::req(BUY_BLOCK_HASH, "ordering.buy_block_hash", B256),
@@ -396,7 +400,7 @@ pub mod result {
 }
 
 /// What G0.8 prints when a sent transaction has no receipt within the
-/// polling bound. It stops there; nothing is written.
+/// polling bound. Persisted durably before exit; also used before RPC.
 pub mod unresolved {
     use super::*;
 

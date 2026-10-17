@@ -91,6 +91,7 @@ fn g08_stderr(tag: &str, contents: &[u8]) -> String {
         .env_clear()
         .env("DARKBOT_G08_G07_EVIDENCE", &path)
         .env("DARKBOT_G08_CHAIN_JOURNAL", dir.join("chain.journal"))
+        .env("DARKBOT_G08_EVIDENCE_PATH", dir.join("result.dbrec"))
         .output()
         .unwrap();
     // Nothing was captured: the journal is only created after the RPC reads.

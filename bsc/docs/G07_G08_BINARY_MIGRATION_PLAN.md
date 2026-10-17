@@ -11,7 +11,7 @@ Verification baseline: `5946b4dca5aeffbb44bef91106c17c9784f66444`.
 | M3 | VERIFIED | `acceptance_guard` integration: 7 PASS, including reproduced proposed contract, four input bindings and UNARMED rejection. |
 | M4 | VERIFIED | Native probe DBREC001; fixed wire fragments; typed response persistence. Execution lib 21, probe binary 28, BUY binary 22, guard 7, probe integration 5, no-send 10 PASS. |
 | M5 | VERIFIED | Existing Rust preflight builds with all required feature targets; no Node preflight. Full current network readiness is separate M7. |
-| M6 | OPEN | Binary readers/writers implemented; terminal persistence, acquisition attribution and complete ordering audit pending. |
+| M6 | VERIFIED | Mandatory durable result including missing receipts; receipt/event/transfer attribution; routed Portal events; canonical receipt-set and reorg checks. 23 focused tests PASS. |
 | M7 | OPEN | Active readiness still uses v2/JSON/Node; native replacement pending. |
 | M8 | OPEN | Initial feature-enabled all-target check failed in the probe; no final acceptance claimed. |
 
@@ -126,3 +126,9 @@ The encoding is deterministic, so the file SHA-256 is the binding hash. A `dbrec
 ### M4/M5 targeted completion — 2026-10-17
 
 Feature-enabled workspace/all-target `cargo check --locked` PASS. Offline targeted checks: 93 PASS total (counts above); loopback TLS test required sandbox exemption, no external builder probe. Stale JSON source assertions were updated to their binary equivalents. G0.7 encode failure now preserves previous durable binary evidence. `transactions.rs`, frozen inputs and historical probe evidence are unchanged. Probe dry-plan hash is now `daef6789e4b02307e1e7d6ab706f0316142025c6222e0bc0a2d92e2243f59808`; the old approval cannot authorize this changed generator. No new probe requested or performed. M6–M8 remain open.
+
+### M6 targeted completion — 2026-10-17
+
+Code baseline after M4/M5: `432218d`. G0.8 result schema v4 additionally records receipt-attributable net token acquisition and the fee already included in BUY value. The frozen official IPortal TokenBought ABI is reused. Canonical receipt success, sender/recipient, token, event amount/value and net Transfer acquisition must agree; balance alone is insufficient. Costs use actual transaction value plus effective receipt gas, with no second addition of the event fee. All intervening canonical receipts are scanned for Portal events, including router-internal buys, with exact block/transaction/receipt membership and unique log indices. Capture checks parent continuity, the launch block binding and every captured block hash again after closure. Whole-second timestamp uncertainty conservatively adds one second at the trailing edge and another boundary block; no producer-time claim.
+
+`DARKBOT_G08_EVIDENCE_PATH` is mandatory; durable UNRESOLVED is written before RPC, so interrupted/failed reconciliation cannot lose the attempt. Missing receipts persist UNRESOLVED; reorgs cannot PASS. Encoding/write/fsync errors cannot produce PASS. Qualification tests: verifier 12, timing 5, binary compatibility/negative witness 4, G0.7-reader compatibility 2: **23 PASS**. Synthetic cases establish offline failure behavior only. Original Mainnet producer witness, actual acquisition and live canonical capture remain NOT_EXECUTED.
