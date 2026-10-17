@@ -15,15 +15,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         let resolved =
             darkbot_solana::runtime_config::Resolved::parse(&args, &|k| std::env::var(k).ok())?;
+        // Legacy CLI contract of the pinned Python bridge (`operational_config.py`, PERSIST-04):
+        // private file plus the machine view on stdout. The native launcher never uses it.
         if let Some(path) = &resolved.export {
             resolved.export_private(path)?;
             println!("{}", serde_json::to_string_pretty(&resolved.json())?);
             return Ok(());
         }
         if resolved.print {
-            println!("{}", serde_json::to_string_pretty(&resolved.json())?);
+            print!("{}", resolved.text());
             return Ok(());
         }
+        let resolved = resolved.native_only()?;
         if resolved.config.verification != "off"
             && std::env::var_os("P0_MEASUREMENT_PLAN").is_none()
         {
@@ -205,7 +208,8 @@ fn supervise(
             }
             last_status = Some(status);
         }
-        if super::control::stop_requested() && !handle.shared.operator_stop.load(Ordering::Acquire) {
+        if super::control::stop_requested() && !handle.shared.operator_stop.load(Ordering::Acquire)
+        {
             handle.shared.operator_stop.store(true, Ordering::Release);
             handle.shared.abort.store(true, Ordering::Release);
             eprintln!("[C0_E1/STOP] operator stop requested: admission closed, capture drains, journals sealed, coverage INCOMPLETE (OPERATOR_STOP); live=false submission=false");

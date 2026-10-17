@@ -16,18 +16,20 @@ project_0/scripts/capture.sh --profile custom --duration 61s --verify index --ve
 project_0/scripts/preflight.sh --profile smoke --print-effective-config
 ```
 
-Inspection requires neither a signer nor endpoint credentials. The JSON includes
+Inspection requires neither a signer nor endpoint credentials. The text view lists
 name, type, unit, default, range, active value, source and restart requirement.
 Endpoint URLs are redacted; array position retains priority. Inspecting a profile
 never claims provider capacity, LIVE approval or submission approval.
 
-Precedence is **profile < environment < JSON file < CLI**. Unknown fields, invalid
+Precedence is **profile < environment < config file < CLI**. Unknown fields, invalid
 types, zero budgets, arithmetic overflow and inconsistent limits are errors.
 Use `--config FILE`, `P0_OPERATIONAL_CONFIG_FILE`, `P0_PROFILE`, or the environment
-aliases printed in the JSON schema. Config files may contain only overridden
-fields, e.g. `{"profile":"custom","duration":"61s","limits":{"rpc_rps":12}}`
+aliases printed by `--help`. Config files are native text (`key = value`, one per line, `#`
+comments, CLI names and values) and contain only overridden fields, e.g. `profile = custom`,
+`duration = 61s`, `rpc-rps = 12`; duplicate or unknown keys fail. JSON is accepted only as the
+private handoff of the pinned Python bridge `operational_config.py` (JFI-03 legacy edge)
 ([`config/examples/`](../../config/examples/) holds parser-validated examples).
-Empty endpoint arrays inherit local endpoints. The first explicit endpoint has
+Empty endpoint values inherit local endpoints. The first explicit endpoint has
 highest priority; fallbacks require `--fallback on` and explicit ordered URLs.
 Store secret-bearing config files outside Git with owner-only permissions.
 
@@ -39,7 +41,7 @@ uses the compiled Rust parser; it does not maintain a second set of profile defa
 ## Profiles and execution scope
 
 The four profiles are typed files in [`config/profiles/`](../../config/profiles/) (schema
-`Project0/RuntimeProfile/1`): the only source of their values. `runtime_config.rs` embeds them at
+`Project0/RuntimeProfile/2`, the same `key = value` text format): the only source of their values. `runtime_config.rs` embeds them at
 build time and validates them; a profile file may set only `duration`, known `limits` fields and the
 `workers` rule. Endpoints, modes, signer, LIVE or submission cannot be expressed, unknown keys fail.
 Profiles stay the lowest precedence layer; `--config FILE` remains the override file format.
@@ -49,7 +51,7 @@ Changing a profile file requires a rebuild; the binary hash recorded in run mani
   60s capture, 16 MiB response cap, 64 MiB process payload budget. FE observation
   retains its configurable initial 3 calls / 30s / 16 MiB envelope.
 - `standard`: conservative existing aggregate 5 RPS, burst 1, concurrency 2;
-  see effective JSON for all values.
+  see `--print-effective-config` for all values.
 - `performance`: uses available CPU parallelism for the existing Rayon pool;
   it does not invent higher qualified provider throughput.
 - `custom`: standard defaults plus explicit overrides. Rates above old 1/2/5-RPS

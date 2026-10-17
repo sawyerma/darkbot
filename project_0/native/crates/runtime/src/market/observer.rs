@@ -91,18 +91,18 @@ pub use decoding::{decode_receiver_events, LogDecode, LogEventRef, ReceiverEvent
 #[path = "enrichment.rs"]
 mod enrichment;
 pub use enrichment::{enrich, TokenDelta, TxEnrichment};
-#[path = "rows.rs"]
-pub mod rows;
+#[path = "markers.rs"]
+pub mod markers;
 #[path = "parity.rs"]
 pub mod parity;
 #[path = "related.rs"]
 pub mod related;
-#[path = "markers.rs"]
-pub mod markers;
-#[path = "strict_driver.rs"]
-pub mod strict_driver;
+#[path = "rows.rs"]
+pub mod rows;
 #[path = "sink.rs"]
 mod sink;
+#[path = "strict_driver.rs"]
+pub mod strict_driver;
 pub use sink::{
     JournalSink, JsonlSink, MarketJournalBinding, MarketSink, MARKET_JOURNAL, MARKET_VIEWS,
 };
@@ -118,7 +118,7 @@ pub use core::{
 mod summary;
 pub use summary::{
     finalize, render_report, DeploymentContinuity, MarketFinal, MarketSummary, ReceiverShare,
-    SummaryContext,
+    SummaryContext, MARKET_SUMMARY_JOURNAL,
 };
 
 #[path = "fetch.rs"]

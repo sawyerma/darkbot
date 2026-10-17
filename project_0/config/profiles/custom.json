@@ -1,5 +1,0 @@
-{
-  "schema": "Project0/RuntimeProfile/1",
-  "profile": "custom",
-  "description": "Standard limits as the base for explicit environment, --config or CLI overrides."
-}

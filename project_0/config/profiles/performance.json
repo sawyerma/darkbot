@@ -1,6 +1,0 @@
-{
-  "schema": "Project0/RuntimeProfile/1",
-  "profile": "performance",
-  "description": "Standard limits with one worker per available CPU (determined at start).",
-  "workers": "available_parallelism"
-}

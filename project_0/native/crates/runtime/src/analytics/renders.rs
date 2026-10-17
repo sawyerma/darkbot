@@ -1,6 +1,7 @@
-//! Legacy views of a run, rendered from its binary journals (PERSIST-04). The pinned readers
-//! keep reading these files; the journals stay primary. A view is created only if missing and
-//! never overwritten; an existing view must be byte-identical to its render.
+//! Legacy views of a run, rendered from its binary journals (PERSIST-04/JFI-03). Only the
+//! explicit offline export (`p0-journal renders RUN --create`) writes them, for the pinned
+//! readers; a run never does. A view is created only if missing and never overwritten; an
+//! existing view must be byte-identical to its render.
 use super::journal::{self, kind, MANIFEST};
 use crate::run_layout::{RunLayout, RunPaths};
 use std::io;
@@ -21,19 +22,50 @@ pub struct View {
     pub index: Option<u64>,
     pub output: PathBuf,
     pub shape: Shape,
+    /// Views assembled from several typed records instead of one frame kind.
+    pub special: Option<Special>,
+}
+/// Pre-capture configuration documents of the pinned run store, rendered from typed records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Special {
+    /// `config.json` of a layout-V2 run.
+    RunConfig,
+    /// One `<part>.json` of a layout-V1 run.
+    ConfigPart(&'static str),
 }
 
-/// Layout of an existing run, decided like the Python run store: V2 only with its manifest tag.
+/// Layout of an existing run: from its typed run manifest; historical runs without one are
+/// decided like the Python run store (V2 only with its `manifest.json` tag).
 pub fn detect(root: &Path) -> Result<RunPaths, String> {
+    use super::measurement::{RunManifest, RUN_MANIFEST_JOURNAL};
+    for layout in [RunLayout::V2, RunLayout::V1] {
+        let paths = RunPaths::new(root, layout);
+        let typed = paths.capture(RUN_MANIFEST_JOURNAL);
+        if typed.exists() {
+            let m: RunManifest = journal::read_typed_value(&typed)
+                .map_err(|e| format!("RUN_MANIFEST_INVALID: {e}"))?;
+            let expected = (layout == RunLayout::V2).then(|| layout.tag().to_string());
+            if m.layout != expected {
+                return Err("RUN_LAYOUT_INVALID".into());
+            }
+            return Ok(paths);
+        }
+    }
+    // Historical runs (before the typed manifest) are recognized like the pinned run store: V2
+    // only with the `layout` tag of their pinned `manifest.json` (read-only, JFI-03).
+    #[derive(serde::Deserialize)]
+    struct HistoricalManifest {
+        layout: Option<String>,
+    }
     let manifest = root.join("manifest.json");
     if !manifest.exists() {
         return Ok(RunPaths::new(root, RunLayout::V1));
     }
-    let value: serde_json::Value = serde_json::from_slice(
+    let historical: HistoricalManifest = serde_json::from_slice(
         &std::fs::read(&manifest).map_err(|e| format!("RUN_LAYOUT_INVALID: {e}"))?,
     )
     .map_err(|_| "RUN_LAYOUT_INVALID".to_string())?;
-    match value["layout"].as_str() {
+    match historical.layout.as_deref() {
         Some(tag) if tag == RunLayout::V2.tag() => Ok(RunPaths::new(root, RunLayout::V2)),
         _ => Err("RUN_LAYOUT_UNSUPPORTED".into()),
     }
@@ -41,18 +73,60 @@ pub fn detect(root: &Path) -> Result<RunPaths, String> {
 
 /// Every view the pinned readers consume, with the journal it is rendered from.
 pub fn views(paths: &RunPaths) -> Result<Vec<View>, String> {
-    let lines = |journal: &Path, kind, output: PathBuf| View {
+    use super::measurement::{PLAN_JOURNAL, RUN_MANIFEST_JOURNAL};
+    let view = |journal: &Path, kind, output: PathBuf, shape| View {
         journal: journal.to_path_buf(),
         kind,
         index: None,
         output,
-        shape: Shape::Lines,
+        shape,
+        special: None,
     };
-    let mut views = vec![lines(
-        &journal::binary_path(&paths.phases()),
-        kind::MEASUREMENT_PHASE,
-        paths.phases(),
-    )];
+    let lines = |journal: &Path, kind, output: PathBuf| view(journal, kind, output, Shape::Lines);
+    let mut views = vec![
+        view(
+            &paths.capture(RUN_MANIFEST_JOURNAL),
+            kind::RUN_MANIFEST,
+            paths.manifest(),
+            Shape::Pretty,
+        ),
+        lines(
+            &journal::binary_path(&paths.phases()),
+            kind::MEASUREMENT_PHASE,
+            paths.phases(),
+        ),
+    ];
+    let special = |journal: PathBuf, output: PathBuf, special| View {
+        journal,
+        kind: 0,
+        index: None,
+        output,
+        shape: Shape::Pretty,
+        special: Some(special),
+    };
+    match paths.layout {
+        RunLayout::V2 => views.push(special(
+            paths.capture(PLAN_JOURNAL),
+            paths.root.join("config.json"),
+            Special::RunConfig,
+        )),
+        RunLayout::V1 => {
+            for (part, journal) in [
+                ("measurement_plan", PLAN_JOURNAL),
+                (
+                    "storage_preflight",
+                    crate::storage::preflight::REPORT_JOURNAL,
+                ),
+                ("candidate_manifest", RUN_MANIFEST_JOURNAL),
+            ] {
+                views.push(special(
+                    paths.capture(journal),
+                    paths.root.join(format!("{part}.json")),
+                    Special::ConfigPart(part),
+                ));
+            }
+        }
+    }
     // econ4h runs keep the market capture in `market/`; standalone C0-MO runs at the root.
     let market = [paths.market_dir(), paths.root.clone()]
         .into_iter()
@@ -66,6 +140,12 @@ pub fn views(paths: &RunPaths) -> Result<Vec<View>, String> {
         for (kind, name) in crate::market::observer::MARKET_VIEWS {
             views.push(lines(&journal, kind, dir.join(name)));
         }
+        views.push(view(
+            &dir.join(crate::market::observer::MARKET_SUMMARY_JOURNAL),
+            kind::MARKET_SUMMARY,
+            dir.join("summary.json"),
+            Shape::Pretty,
+        ));
     }
     let reports = paths.snapshot(super::econ::REPORT_JOURNAL);
     views.push(lines(
@@ -85,6 +165,7 @@ pub fn views(paths: &RunPaths) -> Result<Vec<View>, String> {
             index: Some(index),
             output: paths.snapshot(&format!("hour_{index:02}.json")),
             shape: Shape::Pretty,
+            special: None,
         });
     }
     views.push(View {
@@ -93,12 +174,76 @@ pub fn views(paths: &RunPaths) -> Result<Vec<View>, String> {
         index: None,
         output: paths.snapshot("economics_final.json"),
         shape: Shape::Pretty,
+        special: None,
     });
     Ok(views)
 }
 
 /// Deterministic bytes of one view; `None` when a pretty view has no frame yet.
+/// `config.json` (V2) or one config part (V1) of the pinned run store, from typed records:
+/// the plan journal, the capacity report and the run manifest beside it. Parts the native
+/// launcher has no record for are `null` (optional in the run store contract).
+fn render_config(view: &View, special: Special) -> io::Result<Option<Vec<u8>>> {
+    use super::measurement::{MeasurementPlan, RunManifest, PLAN_JOURNAL, RUN_MANIFEST_JOURNAL};
+    let dir = view.journal.parent().unwrap_or(Path::new("."));
+    let plan = dir.join(PLAN_JOURNAL);
+    let capacity = dir.join(crate::storage::preflight::REPORT_JOURNAL);
+    let manifest = dir.join(RUN_MANIFEST_JOURNAL);
+    if !(plan.exists() && capacity.exists() && manifest.exists()) {
+        return Ok(None);
+    }
+    let value = |e: serde_json::Error| io::Error::other(e);
+    let m: RunManifest = journal::read_typed_value(&manifest)?;
+    let p: MeasurementPlan = journal::read_typed_value(&plan)?;
+    let mut parts = serde_json::Map::new();
+    parts.insert(
+        "measurement_plan".into(),
+        serde_json::to_value(&p).map_err(value)?,
+    );
+    parts.insert(
+        "storage_preflight".into(),
+        serde_json::to_value(storage_preflight_render(&capacity)?).map_err(value)?,
+    );
+    parts.insert(
+        "candidate_manifest".into(),
+        serde_json::json!({"head": m.head, "binary_sha256": m.binary_sha256,
+            "source_sha256": m.source_sha256, "live_enabled": m.live_enabled,
+            "submission_enabled": m.submission_enabled}),
+    );
+    let doc = match special {
+        Special::ConfigPart(part) => parts.remove(part).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "RUN_CONFIG_PART_UNKNOWN")
+        })?,
+        Special::RunConfig => {
+            let mut doc = serde_json::Map::new();
+            doc.insert("schema".into(), "Project0/RunConfig/1".into());
+            doc.insert("layout".into(), RunLayout::V2.tag().into());
+            doc.insert("run_id".into(), m.run_id.clone().into());
+            for part in [
+                "measurement_plan",
+                "measurement_config",
+                "operational_config",
+                "verification_preflight",
+                "storage_preflight",
+                "candidate_manifest",
+            ] {
+                doc.insert(
+                    part.into(),
+                    parts.remove(part).unwrap_or(serde_json::Value::Null),
+                );
+            }
+            serde_json::Value::Object(doc)
+        }
+    };
+    let mut text = serde_json::to_vec_pretty(&doc).map_err(value)?;
+    text.push(b'\n');
+    Ok(Some(text))
+}
+
 pub fn render(view: &View) -> io::Result<Option<Vec<u8>>> {
+    if let Some(special) = view.special {
+        return render_config(view, special);
+    }
     // SK-07: a segmented journal renders across its verified chain.
     let mut reader = crate::storage::segments::ChainReader::open(&view.journal)?;
     let mut out = Vec::new();
@@ -183,11 +328,11 @@ struct StoragePreflightView<'a> {
     required_bytes: Option<u64>,
 }
 
-/// Renders `output` from the sealed capacity report; an existing file must be byte-identical.
-pub fn storage_preflight_view(report: &Path, output: &Path) -> io::Result<&'static str> {
+/// The run store's `storage_preflight` document of a sealed capacity report.
+fn storage_preflight_render(report: &Path) -> io::Result<StoragePreflightView<'static>> {
     use crate::storage::preflight::CapacityReport;
     let r: CapacityReport = journal::read_typed_value(report)?;
-    let view = StoragePreflightView {
+    Ok(StoragePreflightView {
         schema: "Project0/StoragePreflightRender/1",
         native_report: crate::storage::preflight::REPORT_JOURNAL,
         native_report_sha256: journal::hex(&journal::file_sha256(report)?),
@@ -196,7 +341,12 @@ pub fn storage_preflight_view(report: &Path, output: &Path) -> io::Result<&'stat
         start_allowed: r.start_allowed,
         free_bytes: r.environment.free_disk_bytes,
         required_bytes: r.disk_need_bytes,
-    };
+    })
+}
+
+/// Renders `output` from the sealed capacity report; an existing file must be byte-identical.
+pub fn storage_preflight_view(report: &Path, output: &Path) -> io::Result<&'static str> {
+    let view = storage_preflight_render(report)?;
     let mut bytes = serde_json::to_vec_pretty(&view).map_err(io::Error::other)?;
     bytes.push(b'\n');
     if output.exists() {

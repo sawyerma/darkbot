@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Project_0 capture entry point (structure iteration 21). Read-only observation: LIVE and submission stay disabled.
-#   capture.sh [econ4h] --duration 10m|1h|5h|24h [typed options]   typed C0-E1 measurement; verification and report follow
-#   capture.sh econ4h-launcher [--duration D | --measurement-config FILE]   econ4h capture only (former run_econ4h.sh)
+#   capture.sh [econ4h] --duration 10m|1h|5h|24h [typed options]   typed C0-E1 measurement via `p0ctl run start`
+#   capture.sh econ4h-launcher --duration D [native options]           econ4h capture, native verify + report (p0ctl only)
 #   capture.sh market                                                 C0-MO unfiltered read-only market observer
 #   capture.sh shadow                                                 Mainnet Shadow, observe-only submission adapter
 # scripts/test.sh (PHASENPLAN operator command) runs `capture.sh econ4h`. Every mode works from any working directory.
@@ -151,6 +151,10 @@ fi
 }
 
 econ4h_launcher() {
+# Started only by `p0ctl run start` (boot audit, owner lock, operator Mainnet approval).
+if [[ -z "${P0_CTL_LAUNCH_RUN_ID:-}" ]]; then
+  echo "LAUNCHER_REQUIRES_P0CTL: econ4h-launcher is started only by p0ctl run start; use scripts/test.sh --duration D" >&2; exit 2
+fi
 load_env
 absolute_paths
 case "${P0_ECON_RUN_MODE:-auto}" in
@@ -158,21 +162,51 @@ case "${P0_ECON_RUN_MODE:-auto}" in
   *) echo "P0_ECON_RUN_MODE quick is incompatible with a complete capture; unset it. Duration now starts after StreamReady." >&2; exit 2 ;;
 esac
 
-MEASUREMENT_CONFIG_INPUT=""
-if [[ "$#" != 0 ]]; then
-  if [[ "$#" == 2 && "$1" == --measurement-config ]]; then
-    MEASUREMENT_CONFIG_INPUT="$2"
-    if [[ "$MEASUREMENT_CONFIG_INPUT" != /* ]]; then
-      MEASUREMENT_CONFIG_INPUT="$PWD/$MEASUREMENT_CONFIG_INPUT"
-    fi
-    export P0_MEASUREMENT_DURATION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config"]["run"]["duration"])' "$MEASUREMENT_CONFIG_INPUT")"
-    export P0_MARKET_SOURCE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config"]["run"]["capture_source"])' "$MEASUREMENT_CONFIG_INPUT")"
-  elif [[ "$#" == 2 && "$1" == --duration ]]; then
-    export P0_MEASUREMENT_DURATION="$2"
-  else
-    echo 'Usage: capture.sh econ4h-launcher [--duration 10m|1h|5h|24h | --measurement-config FILE]' >&2; exit 2
+# Native, typed launch arguments (JFI-04): no JSON configuration handoff.
+usage() {
+  echo 'Usage: capture.sh econ4h-launcher --duration 10m|1h|5h|24h [--capture-source logs|transactions]
+         [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N] [--verify-bytes N]
+         [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N] [--verify-max-pages N]
+         [--report-* VALUE ...] [--format table|csv] [-- OPERATIONAL_ARGS...]' >&2
+  exit 2
+}
+DURATION=""; CHAIN_VERIFY=off; CAPACITY_VERIFY=(); STRICT_VERIFY=(); REPORT_ARGS=(); RUNTIME_ARGS=()
+while [[ "$#" -gt 0 ]]; do
+  if [[ "$1" == -- ]]; then
+    shift
+    # A relative `--config FILE` keeps the caller's working directory as its base (as absolute_paths).
+    while [[ "$#" -gt 0 ]]; do
+      RUNTIME_ARGS+=("$1")
+      if [[ "$1" == --config && "$#" -ge 2 ]]; then
+        shift; if [[ "$1" == /* ]]; then RUNTIME_ARGS+=("$1"); else RUNTIME_ARGS+=("$PWD/$1"); fi
+      fi
+      shift
+    done
+    break
   fi
-fi
+  [[ "$#" -ge 2 ]] || usage  # every launch option takes one value
+  case "$1" in
+    --duration) [[ -z "$DURATION" ]] || usage; DURATION="$2" ;;
+    --capture-source) export P0_MARKET_SOURCE="$2" ;;
+    --chain-verify|--verify) CHAIN_VERIFY="$2" ;;
+    --verify-rps|--verify-calls|--verify-seconds|--verify-bytes|--verify-disk-bytes)
+      CAPACITY_VERIFY+=("$1" "$2"); STRICT_VERIFY+=("$1" "$2") ;;
+    --verify-max-pages) CAPACITY_VERIFY+=("$1" "$2") ;;
+    --verify-ram-bytes|--verify-min-free-bytes) STRICT_VERIFY+=("$1" "$2") ;;
+    --report-*|--format|--verification-result) REPORT_ARGS+=("$1" "$2") ;;
+    *) usage ;;
+  esac
+  shift 2
+done
+[[ -n "$DURATION" ]] || usage
+case "$CHAIN_VERIFY" in
+  off|strict) ;;
+  index|crosscheck)
+    echo "CHAIN_VERIFY_${CHAIN_VERIFY}_BLOCKED: the index/crosscheck verifier exists only as the pinned Python reader, which writes JSON evidence (JFI-03); capture with --chain-verify strict or off. Historical index verification stays an explicit offline run of scripts/verify.sh." >&2
+    exit 2 ;;
+  *) usage ;;
+esac
+export P0_MEASUREMENT_DURATION="$DURATION"
 
 require_signer
 export P0_PROGRAM_ID="${P0_PROGRAM_ID:-MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA}"
@@ -203,53 +237,35 @@ export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$(dirname "$P0_ECON_OUT_DIR")/.p0-run
 export P0_PROJECT_DIR="$PROJECT_DIR"
 RUN_DIR="$(py operations.capture.run_store allocate "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" "$P0_RUN_LAYOUT")" || exit 2
 if [[ "$P0_RUN_LAYOUT" == v2 ]]; then
-  # Pre-capture documents are staged and assembled into config.json before the capture starts.
-  CONFIG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/p0-run-config.XXXXXX")"
-  trap 'rm -rf "$CONFIG_DIR"' EXIT
   LOG_DIR="$RUN_DIR/logs"; CAPTURE_DIR="$RUN_DIR/capture"
 else
-  CONFIG_DIR="$RUN_DIR"; LOG_DIR="$RUN_DIR"; CAPTURE_DIR="$RUN_DIR"
-fi
-if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
-  py operations.cli.measurement_cli prepare "$RUN_DIR" "$MEASUREMENT_CONFIG_INPUT" "$CONFIG_DIR"
+  LOG_DIR="$RUN_DIR"; CAPTURE_DIR="$RUN_DIR"
 fi
 cd "$REPO_ROOT"
 echo "C0-E1: build; capture starts after bootstrap and StreamReady; submission disabled"
 cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
   --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --bin p0-econ-replay \
-  --bin p0-journal --bin p0-capacity 2>&1 | tee "$LOG_DIR/build.log" || {
+  --bin p0-journal --bin p0-capacity --bin p0ctl 2>&1 | tee "$LOG_DIR/build.log" || {
   echo "Build failed: $LOG_DIR/build.log" >&2; exit 2;
 }
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
-PLAN_BIN="$(dirname "$BIN")/p0-measurement-plan"
+BIN_DIR="$(dirname "$BIN")"
 # Plan is compiled exactly once. Every consumer loads this persisted typed plan.
 if [[ -n "${P0_MEASUREMENT_PLAN:-}" ]]; then
   echo "launcher creates its own plan; unset P0_MEASUREMENT_PLAN" >&2; exit 2
 fi
-# JFI-04: the runtime reads the typed plan journal; the JSON on stdout is the run store's staged part.
 mkdir -p "$CAPTURE_DIR"
-"$PLAN_BIN" --out "$CAPTURE_DIR/measurement_plan.p0j" > "$CONFIG_DIR/measurement_plan.json"
-export P0_MEASUREMENT_PLAN="$CAPTURE_DIR/measurement_plan.p0j"
-export P0_ECON_DURATION_SECS="$(python3 - "$CONFIG_DIR/measurement_plan.json" <<'PLAN'
-import json, sys
-print(json.load(open(sys.argv[1]))['duration_seconds'])
-PLAN
-)"
+# JFI-04: the runtime reads the typed plan journal; stdout is its duration in seconds (text).
+P0_ECON_DURATION_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$CAPTURE_DIR/measurement_plan.p0j")" || exit 2
+export P0_ECON_DURATION_SECS P0_MEASUREMENT_PLAN="$CAPTURE_DIR/measurement_plan.p0j"
 echo "Capture: ${P0_ECON_DURATION_SECS}s; separate bootstrap, drain and verification budgets in the measurement plan"
 # SK-06 capacity preflight (native): measured lane rates of the newest sealed earlier runs, a write
 # and sync probe on this volume, OS memory/CPU, operational budgets and the verifier budget of the
 # selected chain-verify mode. A capture longer than 600 s starts only when QUALIFIED; the native
-# report capture/capacity_preflight.p0j is the record, storage_preflight.json its configuration render.
-CAPACITY_ARGS=(--duration "$P0_ECON_DURATION_SECS" --out "$CAPTURE_DIR" --capture-source "$P0_MARKET_SOURCE"
-  --basis-root "$P0_ECON_OUT_DIR" --exclude-run "$RUN_DIR" --storage-preflight-render "$CONFIG_DIR/storage_preflight.json")
-if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
-  read -r -a VERIFY_ARGS <<< "$(python3 -c 'import json,sys
-v=json.load(open(sys.argv[1]))["config"]["verification"]
-print("--chain-verify",v["mode"],"--verify-rps",v["rps"],"--verify-calls",v["max_calls"],"--verify-seconds",v["max_seconds"],
-      "--verify-max-pages",v["max_pages"],"--verify-bytes",v["max_bytes"],"--verify-disk-bytes",v["max_disk_bytes"])' "$MEASUREMENT_CONFIG_INPUT")"
-  CAPACITY_ARGS+=("${VERIFY_ARGS[@]}")
-fi
-"$(dirname "$BIN")/p0-capacity" "${CAPACITY_ARGS[@]}" | tee "$LOG_DIR/capacity_preflight.txt" || {
+# report capture/capacity_preflight.p0j is the record.
+"$BIN_DIR/p0-capacity" --duration "$P0_ECON_DURATION_SECS" --out "$CAPTURE_DIR" --capture-source "$P0_MARKET_SOURCE" \
+  --basis-root "$P0_ECON_OUT_DIR" --exclude-run "$RUN_DIR" --chain-verify "$CHAIN_VERIFY" ${CAPACITY_VERIFY[@]+"${CAPACITY_VERIFY[@]}"} \
+  | tee "$LOG_DIR/capacity_preflight.txt" || {
   echo "Capacity preflight: start not allowed (report: $LOG_DIR/capacity_preflight.txt). Nothing was deleted." >&2; exit 2;
 }
 # Binary journals (PERSIST-01); the daily summary is a frame of the opportunity journal.
@@ -266,41 +282,41 @@ export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"
 export P0_DEADLINE_NS="${P0_DEADLINE_NS:-2000000000}"
 
 mkdir -p "$(dirname "$P0_RECORD_PATH")"
-
-# Bind local (possibly uncommitted) source and the actual executable to this run.
-# Do not record environment values, endpoints or signer paths.
-python3 - "$BIN" "$CONFIG_DIR" <<'MANIFEST'
-import hashlib, json, pathlib, subprocess, sys
-binary, run = map(pathlib.Path, sys.argv[1:])
-paths = subprocess.check_output(['git', 'ls-files', '-co', '--exclude-standard', '--',
-    'project_0/native', 'project_0/operations', 'project_0/scripts'], text=True).splitlines()
-source = {}
-for name in sorted(set(paths)):
-    p = pathlib.Path(name)
-    if p.is_file() and p.suffix in ('.rs', '.toml', '.lock', '.sh', '.py'):
-        source[name] = hashlib.sha256(p.read_bytes()).hexdigest()
-manifest = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
-    'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'source_sha256': source,
-    'live_enabled': False, 'submission_enabled': False}
-with (run / 'candidate_manifest.json').open('x') as f:
-    json.dump(manifest, f, indent=2)
-    f.write('\n')
-MANIFEST
-if [[ "$P0_RUN_LAYOUT" == v2 ]]; then
-  py operations.capture.run_store config "$RUN_DIR" "$CONFIG_DIR" >/dev/null || exit 2
-fi
+# The runtime binds code identity (head, binary and source hashes) in its typed run manifest.
 status=0
 # All durations follow the same capture lifecycle. Never timebox the entire
 # process by capture duration: bootstrap and verification have separate budgets.
-"$BIN" > "$LOG_DIR/console_summary.txt" 2> >(tee "$LOG_DIR/runtime.log" >&2) || status=$?
+"$BIN" ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} > "$LOG_DIR/console_summary.txt" 2> >(tee "$LOG_DIR/runtime.log" >&2) || status=$?
 wait # stderr tee must finish before immutable evidence hashing
 cat "$LOG_DIR/console_summary.txt"
-if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
-  # Actual process has drained/exited. Freeze raw evidence before historical RPC.
-  py operations.cli.measurement_cli finish "$RUN_DIR" "$MEASUREMENT_CONFIG_INPUT" || status=$?
+if [[ -f "$CAPTURE_DIR/run_manifest.p0j" ]]; then
+  # Post-capture, native and offline-first: strict verification (when selected) and the native
+  # report over the run's .p0j records. No JSON is written; legacy views stay an explicit export.
+  if [[ "$CHAIN_VERIFY" == strict ]]; then
+    "$BIN_DIR/p0-strict-verify" --run "$RUN_DIR" ${STRICT_VERIFY[@]+"${STRICT_VERIFY[@]}"} || status=2
+  fi
+  if [[ -f "$CAPTURE_DIR/market/market_completion.p0j" ]]; then
+    "$BIN_DIR/p0ctl" --project "$PROJECT_DIR" report --run "$RUN_DIR" ${REPORT_ARGS[@]+"${REPORT_ARGS[@]}"} \
+      > "$LOG_DIR/post_capture_report.txt" || status=2
+  fi
 fi
 echo "Reports and detailed logs: $RUN_DIR"
 exit "$status"
+}
+
+# Operator entry (`test.sh --duration D`): the native control plane validates the arguments, runs
+# the offline boot audit, owns the run (lock, stop) and starts econ4h-launcher. No Python launcher
+# and no JSON handoff (JFI-04).
+econ4h() {
+if [[ -n "${P0_CTL_LAUNCH_RUN_ID:-}" ]]; then
+  echo "RECURSIVE_LAUNCH: capture.sh econ4h inside the launcher of run $P0_CTL_LAUNCH_RUN_ID" >&2; exit 2
+fi
+absolute_paths
+# The build runs in the repository; p0ctl and its launcher keep the caller's working directory, the
+# base of relative paths such as `-- --config FILE`.
+(cd "$REPO_ROOT" && cargo build --release --locked --quiet --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
+  --features "crate_health txv1" --bin p0ctl >&2) || { echo "p0ctl build failed" >&2; exit 2; }
+exec "${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0ctl" --project "$PROJECT_DIR" run start "$@"
 }
 
 market() {
@@ -407,6 +423,6 @@ case "${1:-}" in
   econ4h-launcher) shift; econ4h_launcher "$@" ;;
   market) shift; market "$@" ;;
   shadow) shift; shadow "$@" ;;
-  econ4h) shift; py operations.cli.measurement_cli "$@" ;;
-  *) py operations.cli.measurement_cli "$@" ;;
+  econ4h) shift; econ4h "$@" ;;
+  *) econ4h "$@" ;;
 esac

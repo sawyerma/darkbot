@@ -13,13 +13,14 @@
 //! p0ctl [--project DIR] run stop
 //! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict [--resume-verification] …
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
+//! p0ctl [--project DIR] export  --run RUN_ID   (explicit offline legacy views for the pinned readers)
 //! ```
 //!
 //! `report` runs the native report (B7) for runs with native capture records (typed run
 //! manifest and market completion); index provenance, JSON output and historical runs use the
 //! pinned Python report.
 use darkbot_runner::analytics::journal;
-use darkbot_runner::analytics::report;
+use darkbot_runner::analytics::{renders, report};
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
 use darkbot_runner::storage::preflight;
@@ -105,9 +106,51 @@ fn preflight_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(report.start_allowed && audit.verdict != AuditVerdict::Blocked)
 }
 
+const RUN_START_USAGE: &str =
+    "p0ctl run start --duration 10m|1h|5h|24h [--mainnet-approved TOKEN] [--capture-source logs|transactions]
+    [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
+    [--verify-bytes N] [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N]
+    [--verify-max-pages N] [--report-* VALUE ...] [--format table|csv] [-- OPERATIONAL_ARGS...]
+Typed C0-E1 measurement: offline boot audit, owner lock, capture, then native strict
+verification (when selected) and the native report. LIVE and submission stay disabled.
+OFFLINE_READY_NETWORK_NOT_RUN is no Mainnet release: the capture reads Mainnet only with the
+operator's explicit approval of the audited state, `--mainnet-approved TOKEN` (token as
+`p0ctl doctor` prints it; it changes with every source, config or flag change).";
+
+/// Set by `run start` for its launcher child only: `run start` and `capture.sh econ4h` refuse to
+/// run inside a launcher, so `run start` -> `capture.sh econ4h-launcher` can never recurse.
+const LAUNCH_MARKER: &str = "P0_CTL_LAUNCH_RUN_ID";
+
 fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
-    if value(args, "--duration").is_none() {
-        return Err("--duration required".into());
+    if let Some(run) = std::env::var_os(LAUNCH_MARKER) {
+        return Err(format!(
+            "RECURSIVE_LAUNCH: run start inside the launcher of run {}",
+            run.to_string_lossy()
+        ));
+    }
+    let options = args.split(|a| a == "--").next().unwrap_or(&[]);
+    if options.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{RUN_START_USAGE}");
+        return Ok(true);
+    }
+    if options
+        .iter()
+        .filter(|a| *a == "--mainnet-approved")
+        .count()
+        > 1
+    {
+        return Err("exactly one --mainnet-approved".into());
+    }
+    match options.iter().filter(|a| *a == "--duration").count() {
+        1 => {}
+        0 => return Err(format!("--duration required\n{RUN_START_USAGE}")),
+        _ => return Err("exactly one --duration".into()),
+    }
+    let duration = value(options, "--duration").ok_or("--duration requires a value")?;
+    darkbot_solana::runtime_config::duration_seconds(&duration)
+        .map_err(|e| format!("--duration {duration}: {e}"))?;
+    if let Some(mode @ ("index" | "crosscheck")) = value(options, "--chain-verify").as_deref() {
+        return Err(format!("CHAIN_VERIFY_{mode}_BLOCKED: the index/crosscheck verifier exists only as the pinned Python reader, which writes JSON evidence (JFI-03); use --chain-verify strict or off"));
     }
     let lock = lock_path(project);
     if let OwnerState::Running { pid, run_id, .. } = control::owner_state(&lock)? {
@@ -120,6 +163,31 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     print!("{}", audit.terminal());
     if audit.verdict == AuditVerdict::Blocked {
         return Err("BOOT_AUDIT_BLOCKED".into());
+    }
+    // An offline-only verdict is no Mainnet release (network checks BOOT-03…08 NOT_RUN). The
+    // capture reads Mainnet, so it starts only with the operator's explicit approval of exactly
+    // this audited state.
+    let token = &audit.readiness_token[..16];
+    if audit.verdict != AuditVerdict::Ready {
+        if value(options, "--mainnet-approved").as_deref() != Some(token) {
+            return Err(format!(
+                "MAINNET_APPROVAL_REQUIRED: boot verdict {} is no Mainnet release (network checks NOT_RUN); nothing was started. Start only with the operator's explicit approval of this audited state: --mainnet-approved {token}",
+                audit.verdict.as_str()
+            ));
+        }
+        println!("[p0ctl] Mainnet read run approved by the operator for readiness token {token}; network checks stay NOT_RUN");
+    }
+    // The approval is p0ctl's own option; the launcher gets the remaining arguments.
+    let mut launcher_args = Vec::new();
+    let mut rest = args.iter();
+    let mut in_options = true;
+    while let Some(arg) = rest.next() {
+        if in_options && arg == "--mainnet-approved" {
+            rest.next();
+            continue;
+        }
+        in_options &= arg != "--";
+        launcher_args.push(arg.clone());
     }
     let run_id = std::env::var("P0_ECON_RUN_ID").unwrap_or_else(|_| {
         format!(
@@ -135,10 +203,12 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     // BOOT-12: the audited identity must still hold right before the start.
     boot_audit::recheck(&audit, project, flags)?;
     control::install_stop_handler()?;
-    let mut child = Command::new(project.join("scripts/test.sh"))
-        .args(args)
+    let mut child = Command::new(project.join("scripts/capture.sh"))
+        .arg("econ4h-launcher")
+        .args(&launcher_args)
         .env("P0_RUNTIME_LOCK", &lock)
         .env("P0_ECON_RUN_ID", &run_id)
+        .env(LAUNCH_MARKER, &run_id)
         .process_group(0)
         .spawn()
         .map_err(|e| format!("LAUNCH: {e}"))?;
@@ -372,6 +442,27 @@ fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Explicit offline export (JFI-03): the legacy views the pinned Python readers need, rendered
+/// from the journals of a run with native records (`manifest.json`, `config.json`, phase and
+/// market JSONL, `summary.json`, hourly/final economics). Existing views must match; nothing is
+/// overwritten. Runs without native records are left unchanged.
+fn export_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let wanted = value(args, "--run").ok_or("export --run ID|PATH required")?;
+    let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
+    if !(run.join("capture/run_manifest.p0j").is_file() || run.join("run_manifest.p0j").is_file()) {
+        println!(
+            "EXPORT_NOT_NEEDED: {} has no native run manifest",
+            run.display()
+        );
+        return Ok(true);
+    }
+    let paths = renders::detect(&run)?;
+    for (path, status) in renders::ensure(&paths, true)? {
+        println!("{status} {}", path.display());
+    }
+    Ok(true)
+}
+
 fn delegate(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
     let e = Command::new(project.join("scripts").join(script))
         .args(args)
@@ -399,7 +490,8 @@ fn main() -> ExitCode {
             (Some("run"), Some("stop")) => run_stop(&project),
             (Some("verify"), _) => delegate(&project, "verify.sh", &rest),
             (Some("report"), _) => report_cmd(&project, &rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report …".into()),
+            (Some("export"), _) => export_cmd(&project, &rest),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export …".into()),
         }
     });
     match result {

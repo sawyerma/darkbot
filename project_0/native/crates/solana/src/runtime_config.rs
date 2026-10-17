@@ -9,7 +9,18 @@ macro_rules! parameters {
         #[serde(deny_unknown_fields)]
         pub struct Limits { $(pub $name: u64,)* }
         impl Default for Limits { fn default() -> Self { Self { $($name: $default,)* } } }
-        pub fn descriptors() -> Vec<Value> { vec![$(json!({"name":stringify!($name).replace('_',"-"),"field":stringify!($name),"type":"u64","unit":$unit,"default":$default,"minimum":1,"maximum":if stringify!($name) == "fe_batch_size" { 100 } else { u32::MAX },"env":$env,"change":"restart_required"}),)*] }
+        /// Every numeric operational parameter, typed (the one schema of CLI, env, files, help).
+        pub const PARAMETERS: &[Parameter] = &[$(Parameter { field: stringify!($name), unit: $unit, default: $default, env: $env },)*];
+        impl Limits {
+            /// Value of a numeric parameter by field name.
+            pub fn get(&self, field: &str) -> Option<u64> {
+                match field { $(stringify!($name) => Some(self.$name),)* _ => None }
+            }
+            /// Sets a numeric parameter by field name; `false` for an unknown field.
+            pub fn set(&mut self, field: &str, value: u64) -> bool {
+                match field { $(stringify!($name) => { self.$name = value; true })* _ => false }
+            }
+        }
     }
 }
 parameters! {
@@ -81,6 +92,38 @@ parameters! {
     econ_segment_mib = 256, "MiB", "P0_ECON_SEGMENT_MIB";
     econ_retention_mib = 1024, "MiB", "P0_ECON_RETENTION_MIB";
 }
+/// Typed metadata of one numeric operational parameter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Parameter {
+    pub field: &'static str,
+    pub unit: &'static str,
+    pub default: u64,
+    pub env: &'static str,
+}
+impl Parameter {
+    /// CLI name (`--rpc-rps`).
+    pub fn name(&self) -> String {
+        self.field.replace('_', "-")
+    }
+    pub fn maximum(&self) -> u64 {
+        if self.field == "fe_batch_size" {
+            100
+        } else {
+            u64::from(u32::MAX)
+        }
+    }
+}
+/// Machine description of the numeric parameters (render of `PARAMETERS` for the pinned
+/// `--export-environment` contract).
+pub fn descriptors() -> Vec<Value> {
+    PARAMETERS
+        .iter()
+        .map(|p| {
+            json!({"name":p.name(),"field":p.field,"type":"u64","unit":p.unit,"default":p.default,
+                "minimum":1,"maximum":p.maximum(),"env":p.env,"change":"restart_required"})
+        })
+        .collect()
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Profile {
@@ -88,6 +131,25 @@ pub enum Profile {
     Standard,
     Performance,
     Custom,
+}
+impl Profile {
+    pub const ALL: [Profile; 4] = [
+        Profile::Smoke,
+        Profile::Standard,
+        Profile::Performance,
+        Profile::Custom,
+    ];
+    pub fn name(&self) -> &'static str {
+        match self {
+            Profile::Smoke => "smoke",
+            Profile::Standard => "standard",
+            Profile::Performance => "performance",
+            Profile::Custom => "custom",
+        }
+    }
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.name() == name)
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -126,60 +188,110 @@ impl Default for RuntimeConfig {
         }
     }
 }
-/// Typed profile overlay from `config/profiles/<profile>.json`, embedded at build time. Only
+/// `key = value` lines: the native operational config and profile text format (JFI-01/02: a
+/// config file is not a JSON interface). `#` starts a comment line; keys are CLI names
+/// (`rpc-rps`) or field names (`rpc_rps`); values are written exactly as on the CLI.
+fn parse_lines(text: &str) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("config line {}: expected key = value", n + 1))?;
+        let key = key.trim().replace('-', "_");
+        if key.is_empty()
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        {
+            return Err(format!("config line {}: invalid key", n + 1));
+        }
+        if !seen.insert(key.clone()) {
+            return Err(format!("duplicate config key {key}"));
+        }
+        out.push((key, value.trim().to_string()));
+    }
+    Ok(out)
+}
+fn number(key: &str, value: &str) -> Result<u64, String> {
+    value
+        .parse::<u64>()
+        .map_err(|_| format!("invalid --{}", key.replace('_', "-")))
+}
+
+/// Typed profile overlay from `config/profiles/<profile>.conf`, embedded at build time. Only
 /// limits, duration and the worker rule exist: endpoints, modes and approvals cannot be expressed.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug)]
 pub struct ProfileFile {
     pub schema: String,
     pub profile: Profile,
     pub description: String,
-    #[serde(default)]
     pub duration: Option<String>,
-    #[serde(default)]
     pub limits: BTreeMap<String, u64>,
-    #[serde(default)]
     pub workers: Option<WorkerRule>,
 }
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, PartialEq, Eq)]
 pub enum WorkerRule {
     AvailableParallelism,
 }
 pub const PROFILE_FILES: [(&str, &str); 4] = [
     (
         "smoke",
-        include_str!("../../../../config/profiles/smoke.json"),
+        include_str!("../../../../config/profiles/smoke.conf"),
     ),
     (
         "standard",
-        include_str!("../../../../config/profiles/standard.json"),
+        include_str!("../../../../config/profiles/standard.conf"),
     ),
     (
         "performance",
-        include_str!("../../../../config/profiles/performance.json"),
+        include_str!("../../../../config/profiles/performance.conf"),
     ),
     (
         "custom",
-        include_str!("../../../../config/profiles/custom.json"),
+        include_str!("../../../../config/profiles/custom.conf"),
     ),
 ];
 impl ProfileFile {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let file: Self = serde_json::from_str(text).map_err(|_| "invalid profile file")?;
-        let known = serde_json::to_value(Limits::default()).unwrap();
-        if file.schema != "Project0/RuntimeProfile/1"
-            || file.limits.keys().any(|k| known.get(k).is_none())
-        {
-            return Err("invalid profile file".into());
+        let bad = || "invalid profile file".to_string();
+        let (mut schema, mut profile, mut description) = (None, None, None);
+        let (mut duration, mut workers, mut limits) = (None, None, BTreeMap::new());
+        for (key, value) in parse_lines(text).map_err(|_| bad())? {
+            match key.as_str() {
+                "schema" => schema = Some(value),
+                "profile" => profile = Some(Profile::parse(&value).ok_or_else(bad)?),
+                "description" => description = Some(value),
+                "duration" => duration = Some(value),
+                "workers" if value == "available_parallelism" => {
+                    workers = Some(WorkerRule::AvailableParallelism)
+                }
+                field if Limits::default().get(field).is_some() => {
+                    limits.insert(field.to_string(), number(field, &value).map_err(|_| bad())?);
+                }
+                _ => return Err(bad()),
+            }
         }
-        Ok(file)
+        if schema.as_deref() != Some("Project0/RuntimeProfile/2") {
+            return Err(bad());
+        }
+        Ok(Self {
+            schema: schema.unwrap_or_default(),
+            profile: profile.ok_or_else(bad)?,
+            description: description.ok_or_else(bad)?,
+            duration,
+            limits,
+            workers,
+        })
     }
     fn load(profile: &Profile) -> Self {
-        let name = serde_json::to_value(profile).unwrap();
         let text = PROFILE_FILES
             .iter()
-            .find(|(n, _)| name == *n)
+            .find(|(n, _)| *n == profile.name())
             .map(|(_, t)| *t)
             .expect("every profile has a file");
         Self::parse(text).expect("embedded profile files are validated by tests")
@@ -192,6 +304,8 @@ pub struct Resolved {
     pub print: bool,
     pub help: bool,
     pub export: Option<std::path::PathBuf>,
+    /// The config file was the pinned bridge's private JSON handoff (JFI-03 legacy edge).
+    pub legacy_json_config: bool,
 }
 impl RuntimeConfig {
     fn profile(profile: Profile) -> Self {
@@ -203,11 +317,12 @@ impl RuntimeConfig {
         if let Some(duration) = file.duration {
             c.duration = duration;
         }
-        let mut limits = serde_json::to_value(&c.limits).unwrap();
         for (field, value) in file.limits {
-            limits[field] = json!(value);
+            assert!(
+                c.limits.set(&field, value),
+                "profile limits validated by tests"
+            );
         }
-        c.limits = serde_json::from_value(limits).expect("profile limits validated by tests");
         if file.workers == Some(WorkerRule::AvailableParallelism) {
             c.limits.workers = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
         }
@@ -223,18 +338,13 @@ impl RuntimeConfig {
             .or_else(|| env("P0_RPC_URL"))
     }
     pub fn validate(&self) -> Result<(), String> {
-        let limits = serde_json::to_value(&self.limits).map_err(|_| "CONFIG_ENCODE")?;
-        for d in descriptors() {
-            let f = d["field"].as_str().unwrap();
-            if limits[f]
-                .as_u64()
+        for p in PARAMETERS {
+            if self
+                .limits
+                .get(p.field)
                 .is_none_or(|n| n == 0 || n > u64::from(u32::MAX))
             {
-                return Err(format!(
-                    "invalid --{}: expected 1..={}",
-                    d["name"].as_str().unwrap(),
-                    u32::MAX
-                ));
+                return Err(format!("invalid --{}: expected 1..={}", p.name(), u32::MAX));
             }
         }
         if self.limits.rpc_backoff_ms > self.limits.rpc_backoff_max_ms
@@ -287,13 +397,12 @@ impl RuntimeConfig {
     /// Legacy consumers are populated once, before threads start. Finance/mode/
     /// signing variables are intentionally absent from this mapping.
     pub fn environment(&self) -> BTreeMap<String, String> {
-        let values = serde_json::to_value(&self.limits).unwrap();
-        let mut env: BTreeMap<_, _> = descriptors()
+        let mut env: BTreeMap<String, String> = PARAMETERS
             .iter()
-            .map(|d| {
+            .map(|p| {
                 (
-                    d["env"].as_str().unwrap().into(),
-                    values[d["field"].as_str().unwrap()].to_string(),
+                    p.env.to_string(),
+                    self.limits.get(p.field).unwrap_or(0).to_string(),
                 )
             })
             .collect();
@@ -348,8 +457,92 @@ pub fn duration_seconds(s: &str) -> Result<u64, String> {
     Ok(n)
 }
 fn profile(s: &str) -> Result<Profile, String> {
-    serde_json::from_value(json!(s))
-        .map_err(|_| "profile must be smoke|standard|performance|custom".into())
+    Profile::parse(s).ok_or_else(|| "profile must be smoke|standard|performance|custom".into())
+}
+
+/// An operational config file (`--config` / `P0_OPERATIONAL_CONFIG_FILE`): the external file
+/// format decoded straight into typed optional overrides. Unknown keys fail closed.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigFile {
+    profile: Option<String>,
+    limits: Option<BTreeMap<String, u64>>,
+    rpc_endpoints: Option<Vec<String>>,
+    wss_endpoints: Option<Vec<String>>,
+    fallback: Option<bool>,
+    adaptive: Option<bool>,
+    duration: Option<String>,
+    verification: Option<String>,
+    diagnostics: Option<bool>,
+    fe_mode: Option<String>,
+    fe_targets: Option<Vec<String>>,
+    fe_group: Option<String>,
+}
+impl ConfigFile {
+    /// A config file: the native text format, or (JFI-03 legacy edge) the private JSON handoff
+    /// the pinned Python bridge `operational_config.py` writes via `--export-environment` for
+    /// its offline tools. The native launcher never produces or passes a JSON config.
+    /// Returns the file and whether it was the legacy JSON handoff.
+    fn decode(bytes: &[u8]) -> Result<(Self, bool), String> {
+        if bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{') {
+            return Ok((Self::decode_legacy_json(bytes)?, true));
+        }
+        let text = std::str::from_utf8(bytes).map_err(|_| "config file is not text")?;
+        Ok((Self::decode_text(text)?, false))
+    }
+    fn decode_text(text: &str) -> Result<Self, String> {
+        let mut f = Self::default();
+        let on_off = |v: &str| match v {
+            "true" | "on" => Ok(true),
+            "false" | "off" => Ok(false),
+            _ => Err("expected on/off".to_string()),
+        };
+        let list = |v: &str| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect::<Vec<_>>()
+        };
+        for (key, value) in parse_lines(text)? {
+            match key.as_str() {
+                "profile" => f.profile = Some(value),
+                "duration" => f.duration = Some(value),
+                "verification" => f.verification = Some(value),
+                "fe_mode" => f.fe_mode = Some(value),
+                "fe_group" => f.fe_group = Some(value),
+                "fallback" => f.fallback = Some(on_off(&value)?),
+                "adaptive" => f.adaptive = Some(on_off(&value)?),
+                "diagnostics" => f.diagnostics = Some(on_off(&value)?),
+                "rpc_endpoints" => f.rpc_endpoints = Some(list(&value)),
+                "wss_endpoints" => f.wss_endpoints = Some(list(&value)),
+                "fe_targets" => f.fe_targets = Some(list(&value)),
+                field if Limits::default().get(field).is_some() => {
+                    f.limits
+                        .get_or_insert_with(BTreeMap::new)
+                        .insert(field.to_string(), number(field, &value)?);
+                }
+                other => return Err(format!("unknown config field {other}")),
+            }
+        }
+        Ok(f)
+    }
+    fn decode_legacy_json(bytes: &[u8]) -> Result<Self, String> {
+        serde_json::from_slice(bytes).map_err(|e| {
+            let text = e.to_string();
+            match text
+                .strip_prefix("unknown field `")
+                .and_then(|r| r.split('`').next())
+            {
+                Some(field) => format!("unknown config field {field}"),
+                None if e.is_syntax() || e.is_eof() => "invalid config JSON".into(),
+                None if text.starts_with("invalid type") && text.contains("expected struct") => {
+                    "config must be an object".into()
+                }
+                None => "configuration type mismatch".into(),
+            }
+        })
+    }
 }
 impl Resolved {
     /// Precedence: profile < environment < config file < CLI. Unknown keys fail.
@@ -389,7 +582,7 @@ impl Resolved {
                 }
             }
         }
-        let file = if let Some(path) = file {
+        let (file, legacy_json_config) = if let Some(path) = file {
             if std::fs::metadata(Path::new(&path))
                 .map_err(|_| "cannot stat config file")?
                 .len()
@@ -401,38 +594,28 @@ impl Resolved {
             if bytes.len() > 1024 * 1024 {
                 return Err("config file too large".into());
             }
-            let v: Value = serde_json::from_slice(&bytes).map_err(|_| "invalid config JSON")?;
-            if !v.is_object() {
-                return Err("config must be an object".into());
-            }
-            v
+            ConfigFile::decode(&bytes)?
         } else {
-            json!({})
+            (ConfigFile::default(), false)
         };
         if !cli.contains_key("profile") {
-            if let Some(p) = file.get("profile") {
-                profile_name = p.as_str().ok_or("invalid profile type")?.into();
+            if let Some(p) = &file.profile {
+                profile_name = p.clone();
             }
         }
-        let mut base = RuntimeConfig::profile(profile(&profile_name)?);
+        let mut c = RuntimeConfig::profile(profile(&profile_name)?);
         let fe_mode = cli
             .get("fe_mode")
             .cloned()
-            .or_else(|| {
-                file.get("fe_mode")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
+            .or_else(|| file.fe_mode.clone())
             .or_else(|| env("P0_FE_MODE"))
             .unwrap_or_else(|| "smoke".into());
-        base.fe_mode = fe_mode.clone();
+        c.fe_mode = fe_mode.clone();
         if fe_mode == "full" {
-            base.limits.fe_calls = 1000;
-            base.limits.fe_seconds = 300;
-            base.limits.fe_max_mib = 512;
+            c.limits.fe_calls = 1000;
+            c.limits.fe_seconds = 300;
+            c.limits.fe_max_mib = 512;
         }
-
-        let mut v = serde_json::to_value(base).unwrap();
         let mut sources = BTreeMap::new();
         for name in [
             "profile",
@@ -447,95 +630,118 @@ impl Resolved {
             "fe_targets",
             "fe_group",
         ] {
-            sources.insert(name.into(), format!("profile:{profile_name}"));
+            sources.insert(name.to_string(), format!("profile:{profile_name}"));
         }
         if env("P0_FE_MODE").is_some() {
             sources.insert("fe_mode".into(), "environment".into());
         }
-        for d in descriptors() {
-            let field = d["field"].as_str().unwrap();
-            sources.insert(field.into(), format!("profile:{profile_name}"));
-            if let Some(raw) = env(d["env"].as_str().unwrap()) {
-                v["limits"][field] = json!(raw
+        for p in PARAMETERS {
+            sources.insert(p.field.into(), format!("profile:{profile_name}"));
+            if let Some(raw) = env(p.env) {
+                let n = raw
                     .parse::<u64>()
-                    .map_err(|_| format!("invalid numeric environment field {field}"))?);
-                sources.insert(field.into(), "environment".into());
+                    .map_err(|_| format!("invalid numeric environment field {}", p.field))?;
+                c.limits.set(p.field, n);
+                sources.insert(p.field.into(), "environment".into());
             }
         }
         if let Some(group) = env("P0_FE_GROUP").or_else(|| env("P0_GROUP_ID")) {
-            v["fe_group"] = json!(group);
+            c.fe_group = group;
             sources.insert("fe_group".into(), "environment".into());
         }
         if let Some(targets) = env("P0_FE_TARGETS") {
-            v["fe_targets"] = json!(targets.split(',').collect::<Vec<_>>());
+            c.fe_targets = targets.split(',').map(String::from).collect();
             sources.insert("fe_targets".into(), "environment".into());
         }
-        for (f, e) in [
-            ("rpc_endpoints", "P0_RPC_URL"),
-            ("wss_endpoints", "P0_WS_URL"),
-        ] {
-            if let Some(url) = env(e) {
-                v[f] = json!([url]);
-                sources.insert(f.into(), "environment".into());
-            }
+        if let Some(url) = env("P0_RPC_URL") {
+            c.rpc_endpoints = vec![url];
+            sources.insert("rpc_endpoints".into(), "environment".into());
+        }
+        if let Some(url) = env("P0_WS_URL") {
+            c.wss_endpoints = vec![url];
+            sources.insert("wss_endpoints".into(), "environment".into());
         }
         if let Some(duration) = env("P0_MEASUREMENT_DURATION")
             .or_else(|| env("P0_ECON_DURATION_SECS").map(|v| format!("{v}s")))
         {
-            v["duration"] = json!(duration);
+            c.duration = duration;
             sources.insert("duration".into(), "environment".into());
         }
-        for (k, val) in file.as_object().unwrap() {
-            if k == "limits" {
-                for (f, value) in val.as_object().ok_or("limits must be object")? {
-                    if v["limits"].get(f).is_none() {
-                        return Err(format!("unknown config field {f}"));
-                    }
-                    v["limits"][f] = value.clone();
-                    sources.insert(f.clone(), "config_file".into());
+        // Config file over environment.
+        if let Some(limits) = file.limits {
+            for (f, value) in limits {
+                if !c.limits.set(&f, value) {
+                    return Err(format!("unknown config field {f}"));
                 }
-            } else {
-                // Empty endpoint arrays mean inherit local endpoints; private
-                // handoffs may be compiled before the launcher's owner-only env.
-                if matches!(k.as_str(), "rpc_endpoints" | "wss_endpoints")
-                    && val.as_array().is_some_and(|a| a.is_empty())
-                {
-                    continue;
-                }
-                if v.get(k).is_none() {
-                    return Err(format!("unknown config field {k}"));
-                }
-                v[k] = val.clone();
-                sources.insert(k.clone(), "config_file".into());
+                sources.insert(f, "config_file".into());
             }
         }
+        if let Some(p) = file.profile {
+            c.profile = profile(&p).map_err(|_| "configuration type mismatch")?;
+            sources.insert("profile".into(), "config_file".into());
+        }
+        // Empty endpoint arrays mean inherit local endpoints; private handoffs may be compiled
+        // before the launcher's owner-only env.
+        if let Some(v) = file.rpc_endpoints.filter(|v| !v.is_empty()) {
+            c.rpc_endpoints = v;
+            sources.insert("rpc_endpoints".into(), "config_file".into());
+        }
+        if let Some(v) = file.wss_endpoints.filter(|v| !v.is_empty()) {
+            c.wss_endpoints = v;
+            sources.insert("wss_endpoints".into(), "config_file".into());
+        }
+        macro_rules! file_field {
+            ($($f:ident),*) => {$(
+                if let Some(v) = file.$f {
+                    c.$f = v;
+                    sources.insert(stringify!($f).into(), "config_file".into());
+                }
+            )*};
+        }
+        file_field!(
+            fallback,
+            adaptive,
+            duration,
+            verification,
+            diagnostics,
+            fe_mode,
+            fe_targets,
+            fe_group
+        );
+        // CLI over everything.
         for (k, val) in cli {
-            if v["limits"].get(&k).is_some() {
-                v["limits"][&k] = json!(val
+            if Limits::default().get(&k).is_some() {
+                let n = val
                     .parse::<u64>()
-                    .map_err(|_| format!("invalid --{}", k.replace('_', "-")))?);
+                    .map_err(|_| format!("invalid --{}", k.replace('_', "-")))?;
+                c.limits.set(&k, n);
             } else {
+                let on_off = |v: &str| match v {
+                    "true" | "on" => Ok(true),
+                    "false" | "off" => Ok(false),
+                    _ => Err("expected on/off".to_string()),
+                };
+                let list = |v: &str| v.split(',').map(String::from).collect::<Vec<_>>();
                 match k.as_str() {
-                    "profile" | "duration" | "verification" | "fe_mode" | "fe_group" => {
-                        v[&k] = json!(val)
+                    "profile" => {
+                        c.profile = profile(&val).map_err(|_| "configuration type mismatch")?
                     }
-                    "rpc_endpoints" | "wss_endpoints" | "fe_targets" => {
-                        v[&k] = json!(val.split(',').collect::<Vec<_>>())
-                    }
-                    "fallback" | "adaptive" | "diagnostics" => {
-                        v[&k] = json!(match val.as_str() {
-                            "true" | "on" => true,
-                            "false" | "off" => false,
-                            _ => return Err("expected on/off".into()),
-                        })
-                    }
+                    "duration" => c.duration = val.clone(),
+                    "verification" => c.verification = val.clone(),
+                    "fe_mode" => c.fe_mode = val.clone(),
+                    "fe_group" => c.fe_group = val.clone(),
+                    "rpc_endpoints" => c.rpc_endpoints = list(&val),
+                    "wss_endpoints" => c.wss_endpoints = list(&val),
+                    "fe_targets" => c.fe_targets = list(&val),
+                    "fallback" => c.fallback = on_off(&val)?,
+                    "adaptive" => c.adaptive = on_off(&val)?,
+                    "diagnostics" => c.diagnostics = on_off(&val)?,
                     _ => return Err(format!("unknown --{}", k.replace('_', "-"))),
                 }
             }
             sources.insert(k, "cli".into());
         }
-        let config: RuntimeConfig =
-            serde_json::from_value(v).map_err(|_| "configuration type mismatch")?;
+        let config = c;
         config.validate()?;
         if fe_mode == "full" {
             for f in ["fe_calls", "fe_seconds", "fe_max_mib"] {
@@ -550,7 +756,16 @@ impl Resolved {
             print,
             help,
             export,
+            legacy_json_config,
         })
+    }
+    /// Productive native entry points (runtime start, launcher plan, native strict verification)
+    /// take only the native text config; the JSON handoff stays inside the pinned bridge.
+    pub fn native_only(self) -> Result<Self, String> {
+        if self.legacy_json_config {
+            return Err("CONFIG_JSON_REFUSED: native runs take the text config (key = value); a JSON config is only the private handoff of the pinned Python bridge (JFI-03)".into());
+        }
+        Ok(self)
     }
     pub fn activate(self) -> Result<(), String> {
         let effective = self.effective();
@@ -677,15 +892,72 @@ impl Resolved {
     }
     pub fn help() -> String {
         let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off --verification off|index|strict|crosscheck --print-effective-config\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
-        for d in descriptors() {
+        for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; 1..={}]\n",
-                d["name"].as_str().unwrap(),
-                d["unit"].as_str().unwrap(),
-                d["default"],
-                d["maximum"]
+                p.name(),
+                p.unit,
+                p.default,
+                p.maximum()
             );
         }
+        s
+    }
+    /// Redacted human-readable effective configuration (`--print-effective-config`): every
+    /// value with its source, type/unit, default and range; endpoints only as counts.
+    pub fn text(&self) -> String {
+        let e = self.effective();
+        let src = |f: &str| {
+            e.sources
+                .get(f)
+                .map_or("profile", String::as_str)
+                .to_string()
+        };
+        let mut s = String::from("Project_0 effective operational configuration (secret-free)\n");
+        s += &format!(
+            "profile = {} [source {}]\n",
+            e.profile.name(),
+            src("profile")
+        );
+        s += &format!(
+            "rpc-endpoints = {} configured (redacted) [source {}]\n",
+            e.rpc_endpoint_count,
+            src("rpc_endpoints")
+        );
+        s += &format!(
+            "wss-endpoints = {} configured (redacted) [source {}]\n",
+            e.wss_endpoint_count,
+            src("wss_endpoints")
+        );
+        for (name, value) in [
+            ("fallback", e.fallback.to_string()),
+            ("adaptive", e.adaptive.to_string()),
+            ("duration", e.duration.clone()),
+            ("verification", e.verification.clone()),
+            ("diagnostics", e.diagnostics.to_string()),
+            ("fe_mode", e.fe_mode.clone()),
+            ("fe_targets", e.fe_targets.join(",")),
+            ("fe_group", e.fe_group.clone()),
+        ] {
+            s += &format!(
+                "{} = {value} [source {}]\n",
+                name.replace('_', "-"),
+                src(name)
+            );
+        }
+        for p in PARAMETERS {
+            s += &format!(
+                "--{} = {} {} [default {}; 1..={}; env {}; source {}; restart required]\n",
+                p.name(),
+                e.limits.get(p.field).unwrap_or(0),
+                p.unit,
+                p.default,
+                p.maximum(),
+                p.env,
+                src(p.field)
+            );
+        }
+        s += "free_only=true provider_capacity_qualified=false live_authorized=false submission_authorized=false\n";
         s
     }
 }
@@ -812,17 +1084,24 @@ mod tests {
         );
         for (name, text) in PROFILE_FILES {
             let file = ProfileFile::parse(text).unwrap();
-            assert_eq!(serde_json::to_value(&file.profile).unwrap(), name);
+            assert_eq!(file.profile.name(), name);
             RuntimeConfig::profile(file.profile).validate().unwrap();
         }
+        let head = "schema = Project0/RuntimeProfile/2\nprofile = smoke\ndescription = x\n";
+        ProfileFile::parse(head).unwrap();
         for forbidden in [
-            r#"{"schema":"Project0/RuntimeProfile/1","profile":"smoke","description":"x","rpc_endpoints":["https://x"]}"#,
-            r#"{"schema":"Project0/RuntimeProfile/1","profile":"smoke","description":"x","live":true}"#,
-            r#"{"schema":"Project0/RuntimeProfile/1","profile":"smoke","description":"x","submission_enabled":true}"#,
-            r#"{"schema":"Project0/RuntimeProfile/1","profile":"smoke","description":"x","limits":{"min_profit":0}}"#,
-            r#"{"schema":"Project0/RuntimeProfile/2","profile":"smoke","description":"x"}"#,
+            format!("{head}rpc-endpoints = https://x"),
+            format!("{head}live = on"),
+            format!("{head}submission_enabled = true"),
+            format!("{head}min_profit = 0"),
+            format!("{head}rpc-rps = 1\nrpc_rps = 2"),
+            format!("{head}workers = all"),
+            head.replace("/2", "/1"),
+            head.replace("smoke", "live"),
+            // The former JSON profile format is no longer a profile source.
+            r#"{"schema":"Project0/RuntimeProfile/2","profile":"smoke","description":"x"}"#.into(),
         ] {
-            assert!(ProfileFile::parse(forbidden).is_err(), "{forbidden}");
+            assert!(ProfileFile::parse(&forbidden).is_err(), "{forbidden}");
         }
     }
     #[test]
@@ -832,7 +1111,7 @@ mod tests {
         for entry in std::fs::read_dir(&dir).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            if !(name.starts_with("operational_") && name.ends_with(".json")) {
+            if !(name.starts_with("operational_") && name.ends_with(".conf")) {
                 continue;
             }
             let env = |k: &str| (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string());
@@ -868,8 +1147,12 @@ mod tests {
     fn precedence_redaction_private_handoff_and_metadata() {
         let dir = std::env::temp_dir().join(format!("p0-runtime-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("input.json");
-        std::fs::write(&path,r#"{"profile":"smoke","limits":{"rpc_rps":7},"rpc_endpoints":["https://example.test/SECRET?key=PRIVATE"]}"#).unwrap();
+        let path = dir.join("input.conf");
+        std::fs::write(
+            &path,
+            "# override\nprofile = smoke\nrpc-rps = 7\nrpc-endpoints = https://example.test/SECRET?key=PRIVATE\n",
+        )
+        .unwrap();
         let r = Resolved::parse(
             &[
                 "--config".into(),
@@ -910,9 +1193,47 @@ mod tests {
                 0o600
             );
         }
+        // The private JSON handoff of the pinned bridge (JFI-03 legacy edge) reads back exactly.
         let reread = parse(&["--config", export.to_str().unwrap()]).unwrap();
         assert_eq!(r.config, reread.config);
+        // ... but productive native entry points refuse it; the text config passes.
+        assert!(reread
+            .native_only()
+            .unwrap_err()
+            .starts_with("CONFIG_JSON_REFUSED"));
+        assert!(r.native_only().is_ok());
+        for (text, err) in [
+            ("rpc-rps = 2\nrpc_rps = 3", "duplicate config key rpc_rps"),
+            ("live = on", "unknown config field live"),
+            ("rpc-rps = many", "invalid --rpc-rps"),
+            ("fallback = maybe", "expected on/off"),
+            ("rpc-rps 2", "config line 1: expected key = value"),
+        ] {
+            std::fs::write(&path, text).unwrap();
+            let got = parse(&["--config", path.to_str().unwrap()]).unwrap_err();
+            assert_eq!(got, err, "{text}");
+        }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    /// The terminal view is text: every parameter with its active value and source, endpoints
+    /// only as counts, no secret and no machine document.
+    #[test]
+    fn effective_config_text_is_redacted_and_complete() {
+        let r = parse(&[
+            "--rpc-endpoints",
+            "https://example.test/SECRET?key=PRIVATE",
+            "--rpc-rps",
+            "9",
+        ])
+        .unwrap();
+        let t = r.text();
+        assert!(!t.contains("SECRET") && !t.contains("PRIVATE") && !t.contains('{'));
+        assert!(t.contains("rpc-endpoints = 1 configured (redacted) [source cli]"));
+        assert!(t.contains("--rpc-rps = 9 requests/s [default 5; 1..=4294967295; env P0_RPC_RPS; source cli; restart required]"));
+        for p in PARAMETERS {
+            assert!(t.contains(&format!("--{} = ", p.name())), "{}", p.field);
+        }
+        assert!(t.contains("live_authorized=false submission_authorized=false"));
     }
     #[test]
     fn explicit_endpoint_beats_legacy_audit_alias() {

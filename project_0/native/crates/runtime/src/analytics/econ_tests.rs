@@ -179,6 +179,39 @@ pub(super) fn shadow_stats() -> ShadowStats {
         remote_projection_queue_depth: 0,
     }
 }
+/// Typed `ECON_SNAPSHOT` / `ECON_FINAL` frames of a report journal (the journal is the
+/// document; JSON views exist only after an explicit offline export).
+pub(super) fn report_frames(path: &Path) -> (Vec<SnapshotFrame>, Option<SnapshotReport>) {
+    let mut r = journal::Reader::open(path).unwrap();
+    let (mut snapshots, mut last) = (Vec::new(), None);
+    while let Ok(Some(f)) = r.next_frame() {
+        match f.kind {
+            kind::ECON_SNAPSHOT => snapshots.push(f.typed::<SnapshotFrame>().unwrap()),
+            kind::ECON_FINAL => last = Some(f.typed::<SnapshotReport>().unwrap()),
+            _ => {}
+        }
+    }
+    (snapshots, last)
+}
+/// No JSON/JSONL file anywhere under `dir` (JFI-03: a run writes no views).
+pub(super) fn assert_no_json(dir: &Path) {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("");
+                assert!(
+                    !matches!(ext, "json" | "jsonl"),
+                    "run wrote {}",
+                    p.display()
+                );
+            }
+        }
+    }
+}
 fn complete(w: &mut Worker) {
     w.h.shared.shadow_ready_ns.store(1, Ordering::Release);
     w.canonical_finalized = true;
@@ -522,22 +555,28 @@ fn four_boundaries_delta_cumulative_and_final_reconcile() {
     w.final_technical = Some(w.technical(true));
     for i in 1..=4 {
         w.write_snapshot(i, true).unwrap();
-        let v: Value = serde_json::from_slice(
-            &fs::read(w.h.cfg.run_dir.join(format!("hour_{i:02}.json"))).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(v["shadow"]["window_delta"]["evaluations"], 1);
-        assert_eq!(v["shadow"]["cumulative"]["evaluations"], i);
     }
-    let last: Value =
-        serde_json::from_slice(&fs::read(w.h.cfg.run_dir.join("hour_04.json")).unwrap()).unwrap();
+    let (frames, _) = report_frames(&w.reports.path);
+    assert_eq!(
+        frames
+            .iter()
+            .map(|f| (f.index, f.finalizing))
+            .collect::<Vec<_>>(),
+        [(1, true), (2, true), (3, true), (4, true)]
+    );
+    for f in &frames {
+        let v = view(&f.report);
+        assert_eq!(v["shadow"]["window_delta"]["evaluations"], 1);
+        assert_eq!(v["shadow"]["cumulative"]["evaluations"], f.index);
+    }
+    let last = view(&frames[3].report);
     assert_eq!(last, view(&w.report(4, true)));
     assert_eq!(last["live_ready"], false);
     assert_eq!(
         last["technical_qualification"]["source_coverage_verified"],
         false
     );
-    assert!(!w.h.cfg.run_dir.join("hour_05.json").exists());
+    assert_no_json(&w.h.cfg.run_dir);
 }
 #[test]
 fn atomic_writer_only_exposes_whole_json() {
@@ -798,42 +837,27 @@ fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
     for name in ["shadow_evaluations.jsonl", "shadow_offsets.bin"] {
         assert!(!root.join("capture").join(name).exists(), "{name}");
     }
-    // Every legacy report file is a byte-exact render of the sealed report journal.
-    let snapshots = root.join("snapshots");
-    let mut reader = journal::Reader::open(&snapshots.join(REPORT_JOURNAL)).unwrap();
-    let (mut hours, mut last, mut opportunities) = (BTreeMap::new(), None, String::new());
+    // The sealed report journal holds every document as a typed frame (schema 2) and the run
+    // wrote no JSON view (JFI-03).
+    let mut reader = journal::Reader::open(&root.join("snapshots").join(REPORT_JOURNAL)).unwrap();
+    let mut kinds = BTreeSet::new();
     while let Some(frame) = reader.next_frame().unwrap() {
-        let value = || crate::analytics::payload::legacy_view(&frame).unwrap();
-        match frame.kind {
-            kind::ECON_SNAPSHOT => {
-                let v = value();
-                hours.insert(v["index"].as_u64().unwrap(), v["report"].clone());
-            }
-            kind::ECON_FINAL => last = Some(value()),
-            kind::ECON_OPPORTUNITY => {
-                // Typed frame (JFI-FIX-05): its catalogued render must equal the file.
-                let v = crate::analytics::payload::legacy_view(&frame).unwrap();
-                opportunities.push_str(&format!("{v}\n"));
-            }
-            kind::ECON_CANONICAL | journal::MANIFEST => {}
-            other => panic!("unexpected report kind {other}"),
+        if frame.kind != journal::MANIFEST {
+            assert_eq!(frame.schema, 2, "kind {}", frame.kind);
+            kinds.insert(frame.kind);
         }
     }
     assert!(reader.sealed && reader.complete);
-    let pretty = |v: &Value| format!("{}\n", serde_json::to_string_pretty(v).unwrap());
-    assert_eq!(hours.len(), 4);
-    for (index, report) in &hours {
-        let file = snapshots.join(format!("hour_{index:02}.json"));
-        assert_eq!(fs::read_to_string(file).unwrap(), pretty(report));
-    }
+    // No canonical event in this worker-only run, hence no ECON_CANONICAL frame.
     assert_eq!(
-        fs::read_to_string(snapshots.join("economics_final.json")).unwrap(),
-        pretty(&last.unwrap())
+        kinds,
+        BTreeSet::from([
+            kind::ECON_SNAPSHOT,
+            kind::ECON_FINAL,
+            kind::ECON_OPPORTUNITY
+        ])
     );
-    assert_eq!(
-        fs::read_to_string(snapshots.join("opportunity_economics.jsonl")).unwrap(),
-        opportunities
-    );
+    assert_no_json(&root);
 }
 #[test]
 fn legacy_views_are_checked_and_missing_ones_rendered_from_the_journals() {
@@ -852,33 +876,36 @@ fn legacy_views_are_checked_and_missing_ones_rendered_from_the_journals() {
             .map(|(p, s)| (p.strip_prefix(&root).unwrap().display().to_string(), s))
             .collect()
     };
-    // Every report view the worker wrote equals its render; the phase journal of this
-    // worker-only run was never finalized, so its JSONL view is missing until created.
+    // The run wrote no view: every one is missing until the explicit export creates it, and
+    // each created view is the byte-exact render of its journal frame.
     let before = status(false);
     for name in [
-        "hour_01.json",
-        "hour_04.json",
-        "economics_final.json",
-        "opportunity_economics.jsonl",
-        "canonical_market_shadow.jsonl",
+        "snapshots/hour_01.json",
+        "snapshots/hour_04.json",
+        "snapshots/economics_final.json",
+        "snapshots/opportunity_economics.jsonl",
+        "snapshots/canonical_market_shadow.jsonl",
+        "capture/measurement_phases.jsonl",
     ] {
         assert_eq!(
-            before.get(&format!("snapshots/{name}")).copied(),
-            Some("MATCHES"),
+            before.get(name).copied(),
+            Some("MISSING"),
             "{name} {before:?}"
         );
     }
-    assert_eq!(
-        before.get("capture/measurement_phases.jsonl").copied(),
-        Some("MISSING"),
-        "{before:?} {:?}",
-        fs::read_dir(root.join("capture"))
-            .unwrap()
-            .map(|e| e.unwrap().file_name())
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(status(true)["capture/measurement_phases.jsonl"], "CREATED");
+    assert!(status(true).values().all(|s| *s == "CREATED"));
     assert!(status(false).values().all(|s| *s == "MATCHES"));
+    let (frames, last) = report_frames(&root.join("snapshots").join(REPORT_JOURNAL));
+    let pretty = |v: &Value| format!("{}\n", serde_json::to_string_pretty(v).unwrap());
+    let hour4 = frames.iter().rev().find(|f| f.index == 4).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("snapshots/hour_04.json")).unwrap(),
+        pretty(&view(&hour4.report))
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("snapshots/economics_final.json")).unwrap(),
+        pretty(&view(&last.unwrap()))
+    );
     // A changed view is never accepted and never overwritten.
     let hour = root.join("snapshots/hour_02.json");
     let mut bytes = fs::read(&hour).unwrap();
@@ -899,23 +926,22 @@ fn four_snapshots_then_identical_final(layout: crate::run_layout::RunLayout) -> 
     // Real automatic timer; no manually invoked snapshot writer in this integration test.
     // The worker polls periodically; a fixed 150 ms grace races its next poll
     // under parallel test load. Wait for the real automatic fourth snapshot.
+    let reports = paths.snapshot(REPORT_JOURNAL);
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while !paths.snapshot("hour_04.json").exists()
-        && !join.is_finished()
-        && std::time::Instant::now() < deadline
-    {
+    let fourth = || reports.exists() && report_frames(&reports).0.iter().any(|f| f.index == 4);
+    while !fourth() && !join.is_finished() && std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
     h.shared.finish.store(true, Ordering::Release);
     join.join().unwrap().unwrap();
-    let hour: Value =
-        serde_json::from_slice(&fs::read(paths.snapshot("hour_04.json")).unwrap()).unwrap();
-    let end: Value =
-        serde_json::from_slice(&fs::read(paths.snapshot("economics_final.json")).unwrap()).unwrap();
-    assert_eq!(hour, end);
+    // The final report is the newest snapshot of the last index; every boundary has a frame.
+    let (frames, end) = report_frames(&reports);
+    let hour = frames.iter().rev().find(|f| f.index == 4).unwrap();
+    assert_eq!(view(&hour.report), view(&end.unwrap()));
     for n in 1..=4 {
-        assert!(paths.snapshot(&format!("hour_{n:02}.json")).exists());
+        assert!(frames.iter().any(|f| f.index == n), "{n}");
     }
+    assert_no_json(&paths.root);
     paths.root
 }
 
@@ -1046,8 +1072,7 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
         assert_eq!(v["shadow"]["window_delta"]["evaluations"], 250_000);
         assert_eq!(v["shadow"]["cumulative"]["evaluations"], 250_000 * i);
     }
-    let last: Value =
-        serde_json::from_reader(File::open(w.h.cfg.run_dir.join("hour_04.json")).unwrap()).unwrap();
+    let last = view(&report_frames(&w.reports.path).0[3].report);
     assert_eq!(last, view(&w.report(4, true)));
     assert_eq!(last["technical_qualification"]["verdict"], "PASS");
     assert_eq!(last["technical_qualification"]["submissions"], 0);

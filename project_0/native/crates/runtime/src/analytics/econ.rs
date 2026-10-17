@@ -604,7 +604,8 @@ fn executable(rec: &OpportunityRecord) -> bool {
         && rec.timing.t_handoff_ns.is_none()
 }
 
-/// Atomic replacement is only used by the analytics worker, not producers.
+/// Only the offline replay (`p0-econ-replay`, input of the pinned `market_report.py`, JFI-03)
+/// writes JSON documents; the productive run writes typed journal frames only.
 pub fn atomic_json(path: &Path, value: &Value) -> Result<(), String> {
     let tmp = path.with_extension("json.tmp");
     let mut f = OpenOptions::new()
@@ -1753,14 +1754,11 @@ impl Worker {
             finalizing,
             report: self.report(index, finalizing),
         };
-        let name = format!("hour_{index:02}.json");
-        // Journal frame first; `hour_0N.json` renders the newest frame of this index.
-        self.append_typed_report(&frame)
-            .and_then(|_| render(&frame.report))
-            .and_then(|view| atomic_json(&self.h.cfg.paths().snapshot(&name), &view))
-            .inspect_err(|_| {
-                self.h.shared.writer_errors.fetch_add(1, Ordering::Relaxed);
-            })
+        // The journal frame is the snapshot; `hour_0N.json` exists only as an explicit offline
+        // render of the newest frame of this index (JFI-03).
+        self.append_typed_report(&frame).inspect_err(|_| {
+            self.h.shared.writer_errors.fetch_add(1, Ordering::Relaxed);
+        })
     }
     /// A typed report frame (JFI-FIX-05) with the same provenance as `append_report`.
     fn append_typed_report<P: crate::analytics::payload::Payload>(
@@ -1778,15 +1776,90 @@ impl Worker {
             .map(|_| ())
             .map_err(|e| format!("REPORT_JOURNAL: {e}"))
     }
-    /// The legacy JSONL file of one report kind, rendered as an explicit export (no overwrite).
-    fn render_rows(&self, kind: u16, name: &str) -> Result<(), String> {
-        journal::export(
-            &self.reports.path,
-            &self.h.cfg.paths().snapshot(name),
-            Some(kind),
-            false,
-        )
-        .map_err(|e| format!("{name}: {e}"))
+    /// Terminal text of the final report (typed values; the documents are journal frames).
+    fn terminal_summary(&self, r: &SnapshotReport) -> String {
+        let market = &r.market.cumulative;
+        let usd = |micro: i128| format!("{:.6}", micro as f64 / 1e6);
+        let dec = |v: Option<f64>| v.map_or_else(|| "UNKNOWN".to_string(), |n| format!("{n:.6}"));
+        let races = &r.competition.cumulative;
+        let speed = &r.race_timing.cumulative.required_speedup_to_winner_rx_ms;
+        let unknowns = &r.unknowns.cumulative;
+        let canonical = &r.canonical.cumulative;
+        let mut lines = vec![
+            format!(
+                "C0-E1 technical={} market={} sample={} liquidations={} gross_total_usd={} matched={} executable={} executable_net_usd={}",
+                r.technical_qualification.verdict,
+                market.c0_mo_r6.as_ref().map_or("UNKNOWN", |m| m.summary.verdict.as_str()),
+                r.economic_sample_status,
+                market.metrics.liquidation_events,
+                dec(market.metrics.gross_edge_usd.total),
+                r.matching.cumulative.market_with_shadow_match,
+                r.economics.cumulative.known_executable.count,
+                usd(r.economics.cumulative.known_executable.net_usd_micro),
+            ),
+            format!(
+                "capital: {}",
+                r.capital
+                    .cumulative
+                    .iter()
+                    .map(|b| format!(
+                        "{}usd fundable={} net_usd={:.6}",
+                        b.budget_usd, b.fundable_known_opportunities, b.known_executable_net_edge_usd
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+            format!(
+                "race: pre={} same={} post={} unresolved={}",
+                races.pre.count, races.same.count, races.post.count, races.unresolved.count
+            ),
+            format!(
+                "required_speedup_ms: count={} median={} p90={}",
+                speed.count_known,
+                dec(speed.median),
+                dec(speed.p90)
+            ),
+            format!(
+                "bottlenecks: {}",
+                r.bottlenecks.cumulative.ranking.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+            ),
+            format!(
+                "unknowns: economics={} winner_unresolved={} live_winner_missing={} submission_deadline={}",
+                unknowns.economics_unknown,
+                unknowns.winner_unresolved,
+                unknowns.live_winner_missing,
+                unknowns.true_competitor_submission_deadline
+            ),
+            format!(
+                "journal: {} (offline views: p0-journal renders RUN --create)",
+                self.reports.path.display()
+            ),
+        ];
+        let events = canonical
+            .market
+            .iter()
+            .map(|(k, g)| format!("{k}={}", g.events))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let losses = canonical
+            .loss_attribution
+            .iter()
+            .filter(|(_, b)| b.count > 0)
+            .map(|(k, b)| format!("{k}={}", b.count))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let fundable = canonical
+            .capital
+            .iter()
+            .map(|c| format!("{}usd={}", c.budget_usd, c.fundable))
+            .collect::<Vec<_>>()
+            .join(" ");
+        lines.push(format!(
+            "C0-E1 CANONICAL ALL-PATH events: {events}; fundable: {fundable}; losses: {}; completeness={}",
+            if losses.is_empty() { "none".to_string() } else { losses },
+            r.technical_qualification.verdict
+        ));
+        lines.join("\n")
     }
     /// Human-readable authoritative MARKET conclusion next to the C0-E1 console
     /// summary. Read existing report data only; no RPC, scanner, or parallel ledger.
@@ -1895,9 +1968,6 @@ impl Worker {
         }
         let final_report = self.report(SNAPSHOT_COUNT, true);
         self.append_typed_report(&final_report)?;
-        // The terminal lines below print parts of the rendered document.
-        let view = render(&final_report)?;
-        atomic_json(&self.h.cfg.paths().snapshot("economics_final.json"), &view)?;
         let rows: Vec<OpportunityRow> = self
             .selected()
             .into_iter()
@@ -1906,23 +1976,10 @@ impl Worker {
         for row in &rows {
             self.append_typed_report(row)?;
         }
-        self.render_rows(kind::ECON_OPPORTUNITY, "opportunity_economics.jsonl")?;
         self.reports
             .seal(true)
             .map_err(|e| format!("REPORT_JOURNAL_SEAL: {e}"))?;
-        println!("C0-E1 technical={} market={} sample={} liquidations={} gross={} matched={} executable={}\ncapital={}\nrace={}\nrequired_speedup_ms={}\nbottlenecks={}\nunknowns={}\nreports={}/hour_01..04.json, economics_final.json",
-            view["technical_qualification"]["verdict"],view["market"]["cumulative"]["c0_mo_r6"]["verdict"],
-            view["economic_sample_status"],view["market"]["cumulative"]["liquidation_events"],view["market"]["cumulative"]["gross_edge_usd"],
-            view["matching"]["cumulative"]["market_with_shadow_match"],view["economics"]["cumulative"]["known_executable"],
-            json!(view["capital"]["cumulative"].as_array().unwrap().iter().map(|b|json!({"usd":b["budget_usd"],"fundable":b["fundable_known_opportunities"],"net_usd":b["known_executable_net_edge_usd"]})).collect::<Vec<_>>()),view["competition"]["cumulative"],view["race_timing"]["cumulative"]["required_speedup_to_winner_rx_ms"],
-            json!(view["bottlenecks"]["cumulative"]["ranking"].as_array().unwrap().iter().take(3).collect::<Vec<_>>()),view["unknowns"]["cumulative"],self.h.cfg.run_dir.display());
-        println!(
-            "C0-E1 CANONICAL ALL-PATH market={} capital={} losses={} completeness={}",
-            view["canonical"]["cumulative"]["market"],
-            view["canonical"]["cumulative"]["capital"],
-            view["canonical"]["cumulative"]["loss_attribution"],
-            view["technical_qualification"]["verdict"]
-        );
+        println!("{}", self.terminal_summary(&final_report));
         println!("{}", Self::market_terminal_summary(&final_report));
         crate::analytics::measurement::journal(
             &self.h.cfg.paths(),

@@ -13,7 +13,7 @@ use crate::analytics::journal::{self, hex, kind, source};
 use crate::analytics::measurement::{Phase, PhaseRecord, RunManifest, NS, RUN_MANIFEST_JOURNAL};
 use crate::analytics::payload::{self, Payload};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -128,8 +128,13 @@ fn sha_file(path: &Path) -> Result<[u8; 32], String> {
     journal::file_sha256(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The run's capture-time files: everything except `verification/`, `reports/` and dotfiles.
+/// The run's capture-time files: everything except `verification/`, `reports/`, dotfiles and the
+/// legacy views the explicit offline export may add later (derived from the journals, JFI-03).
 fn capture_files(run: &Path) -> Result<BTreeMap<String, (u64, [u8; 32])>, String> {
+    let derived: BTreeSet<PathBuf> = crate::analytics::renders::detect(run)
+        .and_then(|paths| crate::analytics::renders::views(&paths))
+        .map(|views| views.into_iter().map(|v| v.output).collect())
+        .unwrap_or_default();
     let mut out = BTreeMap::new();
     let mut stack = vec![run.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -148,6 +153,7 @@ fn capture_files(run: &Path) -> Result<BTreeMap<String, (u64, [u8; 32])>, String
                 .map(|c| c.as_os_str().to_string_lossy().into_owned());
             if e.file_name().to_string_lossy().starts_with('.')
                 || matches!(first.as_deref(), Some("verification") | Some("reports"))
+                || derived.contains(&p)
             {
                 continue;
             }

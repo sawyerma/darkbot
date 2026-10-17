@@ -249,6 +249,10 @@ pub struct MarketFinal {
     pub evidence_journal: Option<MarketJournalBinding>,
 }
 
+impl crate::analytics::payload::Payload for MarketFinal {
+    const KIND: u16 = crate::analytics::journal::kind::MARKET_SUMMARY;
+}
+
 impl MarketFinal {
     /// A checkpoint summary (no plan, window or binding keys).
     pub fn checkpoint(summary: MarketSummary) -> Self {
@@ -294,7 +298,11 @@ impl<'de> Deserialize<'de> for MarketFinal {
     }
 }
 
-/// Finalise: write any still-deferred liquidation, STOPPED, seal, `summary.json`, `final_report.txt`.
+/// Single-value journal of the finished capture's typed market summary (`MARKET_SUMMARY`).
+pub const MARKET_SUMMARY_JOURNAL: &str = "market_summary.p0j";
+
+/// Finalise: write any still-deferred liquidation, STOPPED, seal, the typed market summary and
+/// `final_report.txt` (text). `summary.json` is an explicit offline render only (JFI-03).
 pub fn finalize(
     core: &mut ObserverCore,
     sink: &mut dyn MarketSink,
@@ -308,7 +316,7 @@ pub fn finalize(
     core.fail_truncated_pending("NOT_QUALIFIED");
     core.coverage(sink, now_unix_s, None, stopped)
         .map_err(|e| format!("coverage write: {e}"))?;
-    // A journal-backed sink seals here, before summary.json exists; no view is rendered.
+    // A journal-backed sink seals here; no view is rendered.
     let binding = sink
         .finish()
         .map_err(|e| format!("evidence journal: {e}"))?;
@@ -337,16 +345,19 @@ pub fn finalize(
         econ,
         evidence_journal: binding.clone(),
     };
-    let rendered = summary.legacy_json()?;
-    let summary_path = run_dir.join("summary.json");
-    let pretty = serde_json::to_string_pretty(&rendered).map_err(|e| e.to_string())?;
-    fs::write(&summary_path, pretty).map_err(|e| format!("summary.json: {e}"))?;
-    let mut files = vec![("summary_json", summary_path.clone())];
+    let summary_path = run_dir.join(MARKET_SUMMARY_JOURNAL);
+    crate::analytics::journal::write_typed_value(
+        &summary_path,
+        crate::analytics::journal::source::MARKET,
+        &summary,
+    )
+    .map_err(|e| format!("market summary: {e}"))?;
+    let mut files = vec![("market_summary_journal", summary_path.clone())];
     if binding.is_some() {
         files.insert(0, ("market_journal", run_dir.join(MARKET_JOURNAL)));
     }
     let refs: Vec<(&str, &Path)> = files.iter().map(|(n, p)| (*n, p.as_path())).collect();
-    let report = render_report(&rendered, &refs);
+    let report = render_report(&summary, &refs);
     fs::write(run_dir.join("final_report.txt"), &report)
         .map_err(|e| format!("final_report.txt: {e}"))?;
     Ok((summary, report))

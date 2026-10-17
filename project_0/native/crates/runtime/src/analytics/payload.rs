@@ -162,6 +162,7 @@ macro_rules! typed_kinds {
                 $f::<crate::market::observer::related::MarketRelated>($kind, $schema, $bytes)
             }
             k::MARKET_COMPLETION => $f::<market::MarketCompletion>($kind, $schema, $bytes),
+            k::MARKET_SUMMARY => $f::<crate::market::observer::MarketFinal>($kind, $schema, $bytes),
             k::REPORT_DATASET => $f::<super::report::DatasetRecord>($kind, $schema, $bytes),
             k::REPORT_QUERY => $f::<super::report::QueryRecord>($kind, $schema, $bytes),
             k::STRICT_SCOPE => $f::<strict::StrictScope>($kind, $schema, $bytes),
@@ -249,6 +250,18 @@ pub fn legacy_view(frame: &journal::Frame) -> io::Result<serde_json::Value> {
     if frame.kind == journal::kind::ECON_OPPORTUNITY {
         return decode::<super::econ::OpportunityRow>(frame.kind, frame.schema, &frame.payload)
             .map(|row| super::econ::opportunity_view(&row));
+    }
+    if frame.kind == journal::kind::RUN_MANIFEST {
+        return decode::<super::measurement::RunManifest>(frame.kind, frame.schema, &frame.payload)
+            .map(|m| m.legacy_json());
+    }
+    if frame.kind == journal::kind::MARKET_SUMMARY {
+        return decode::<crate::market::observer::MarketFinal>(
+            frame.kind,
+            frame.schema,
+            &frame.payload,
+        )
+        .and_then(|m| m.legacy_json().map_err(io::Error::other));
     }
     if frame.kind == journal::kind::ECON_SNAPSHOT {
         return decode::<super::econ::SnapshotFrame>(frame.kind, frame.schema, &frame.payload)

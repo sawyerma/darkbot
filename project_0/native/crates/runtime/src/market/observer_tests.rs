@@ -563,16 +563,19 @@ fn verdicts_by_source_and_without_liquidations() {
     );
     assert!(tx["gross_edge_median_usd"].is_null() && tx["top_receiver"].is_null());
     assert_eq!(tx["liquidations_per_hour"].as_f64(), Some(0.0));
-    let logs =
-        view(&open_core(MarketSource::Logs, EnrichConfig::DEFAULT).summary(&ctx(true, true, 14_400.0)));
+    let logs = view(
+        &open_core(MarketSource::Logs, EnrichConfig::DEFAULT).summary(&ctx(true, true, 14_400.0)),
+    );
     assert_eq!(logs["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert_eq!(logs["source_coverage_verified"].as_bool(), Some(false));
     assert!(logs["source_coverage_note"]
         .as_str()
         .unwrap()
         .contains("lookup table"));
-    let early = view(&open_core(MarketSource::Transactions, EnrichConfig::DEFAULT)
-        .summary(&ctx(true, false, 0.0)));
+    let early = view(
+        &open_core(MarketSource::Transactions, EnrichConfig::DEFAULT)
+            .summary(&ctx(true, false, 0.0)),
+    );
     assert!(early["liquidations_per_hour"].is_null());
     assert_eq!(early["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     let mut undrained = ctx(true, true, 14_400.0);
@@ -584,8 +587,10 @@ fn verdicts_by_source_and_without_liquidations() {
         .unwrap()
         .iter()
         .any(|r| r == "DRAIN_INCOMPLETE"));
-    let not_ready = view(&ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT)
-        .summary(&ctx(false, false, 0.0)));
+    let not_ready = view(
+        &ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT)
+            .summary(&ctx(false, false, 0.0)),
+    );
     assert_eq!(
         not_ready["verdict"].as_str(),
         Some("MARKET_OBSERVER_STREAM_NOT_READY")
@@ -858,9 +863,11 @@ fn finalize_writes_summary_report_and_unenriched_rows() {
     assert!(fs::read_to_string(dir.join("coverage.jsonl"))
         .unwrap()
         .contains("STOPPED"));
-    let parsed: Value =
-        serde_json::from_str(&fs::read_to_string(dir.join("summary.json")).unwrap()).unwrap();
-    assert_eq!(parsed["liquidation_events"].as_u64(), Some(1));
+    // The typed summary journal is the record; the run writes no summary.json (JFI-03).
+    let typed: MarketFinal =
+        crate::analytics::journal::read_typed_value(&dir.join(MARKET_SUMMARY_JOURNAL)).unwrap();
+    assert_eq!(view(&typed)["liquidation_events"].as_u64(), Some(1));
+    assert!(!dir.join("summary.json").exists());
     assert!(dir.join("final_report.txt").exists());
     assert!(JournalSink::create(&dir).is_err()); // never overwrites a run directory
     let _ = fs::remove_dir_all(&dir);
@@ -1118,7 +1125,8 @@ fn enrichment_init_failure_still_produces_summary_and_report() {
         summary["receivership_transport_capture_complete"].as_bool(),
         Some(true)
     );
-    assert!(dir.join("summary.json").exists() && dir.join("final_report.txt").exists());
+    assert!(dir.join(MARKET_SUMMARY_JOURNAL).exists() && dir.join("final_report.txt").exists());
+    assert!(!dir.join("summary.json").exists());
     assert!(report.contains("enrichment_complete=false"));
     render_views(&dir);
     assert!(fs::read_to_string(dir.join("liquidations.jsonl"))
@@ -1246,7 +1254,9 @@ fn logs_without_rpc_url_still_reaches_finalize_and_report() {
     let summary = view(&summary);
     assert_eq!(write_error, None);
     assert!(
-        cfg.run_dir.join("summary.json").exists() && cfg.run_dir.join("final_report.txt").exists()
+        cfg.run_dir.join(MARKET_SUMMARY_JOURNAL).exists()
+            && cfg.run_dir.join("final_report.txt").exists()
+            && !cfg.run_dir.join("summary.json").exists()
     );
     assert_eq!(summary["liquidation_events"].as_u64(), Some(1));
     assert!((summary["gross_edge_total_usd"].as_f64().unwrap() - 2.0).abs() < 1e-12);
@@ -1808,7 +1818,10 @@ fn typed_market_frames_render_offline_to_their_legacy_rows() {
     )
     .unwrap();
     let binding = sink.finish().unwrap().unwrap();
-    assert_eq!((binding.status.as_str(), binding.event_frames), ("COMPLETE", 3));
+    assert_eq!(
+        (binding.status.as_str(), binding.event_frames),
+        ("COMPLETE", 3)
+    );
     // No view exists after capture; the explicit offline export renders the legacy rows.
     for (_, name) in MARKET_VIEWS {
         assert!(!dir.join(name).exists(), "{name}");
@@ -1903,9 +1916,9 @@ fn journal_sink_finalize_binds_the_journal_and_early_exit_seals_incomplete() {
     assert_eq!(binding["journal"], MARKET_JOURNAL);
     assert_eq!(binding["status"], "COMPLETE");
     assert!(report.contains(MARKET_JOURNAL));
-    let on_disk: Value =
-        serde_json::from_slice(&fs::read(dir.join("summary.json")).unwrap()).unwrap();
-    assert_eq!(&on_disk["evidence_journal"], binding);
+    let on_disk: MarketFinal =
+        crate::analytics::journal::read_typed_value(&dir.join(MARKET_SUMMARY_JOURNAL)).unwrap();
+    assert_eq!(&view(&on_disk)["evidence_journal"], binding);
     // Capture renders no view; the journal holds STOPPED as a typed coverage frame.
     for (_, name) in MARKET_VIEWS {
         assert!(!dir.join(name).exists(), "{name}");

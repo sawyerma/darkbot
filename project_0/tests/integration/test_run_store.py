@@ -138,8 +138,9 @@ class Launchers(unittest.TestCase):
         alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';n=0
         for char in public:n=n*58+alphabet.index(char)
         key=tmp/'dummy.json';key.write_text(json.dumps([0]*32+list(n.to_bytes(32,'big'))));key.chmod(0o600)
+        # P0_CTL_LAUNCH_RUN_ID stands in for `p0ctl run start`, the only starter of econ4h-launcher.
         return {**clean_env(),'P0_ENV_FILE':str(tmp/'absent.env'),'P0_RPC_URL':'http://127.0.0.1:1','P0_WS_URL':'ws://127.0.0.1:1',
-                'P0_KEYPAIR_PATH':str(key),'P0_MAX_SLIPPAGE_BPS':'50','P0_MARKET_WS_URL':'ws://127.0.0.1:1'}
+                'P0_KEYPAIR_PATH':str(key),'P0_MAX_SLIPPAGE_BPS':'50','P0_MARKET_WS_URL':'ws://127.0.0.1:1','P0_CTL_LAUNCH_RUN_ID':'test'}
 
     def run_script(self,command,env):
         name,*args=command.split()
@@ -148,16 +149,19 @@ class Launchers(unittest.TestCase):
     def test_econ_launcher_fails_closed_before_build(self):
         with tempfile.TemporaryDirectory() as folder:
             tmp=Path(folder);env=self.environment(tmp);out=tmp/'out'
+            direct={k:v for k,v in env.items() if k!='P0_CTL_LAUNCH_RUN_ID'}
+            p=self.run_script('capture.sh econ4h-launcher --duration 61s',{**direct,'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'r0'})
+            self.assertEqual(p.returncode,2);self.assertIn('LAUNCHER_REQUIRES_P0CTL',p.stderr);self.assertFalse(out.exists())
             cases=[({'P0_RUN_STORE':'runs','P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'r1'},'RUN_ROOT_CONFLICT'),
                    ({'P0_RUN_STORE':'bogus','P0_ECON_RUN_ID':'r1'},'RUN_STORE_INVALID'),
                    ({'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'../escape'},'RUN_ID_INVALID')]
             for extra,code in cases:
                 with self.subTest(code=code):
-                    p=self.run_script('capture.sh econ4h-launcher',{**env,**extra})
+                    p=self.run_script('capture.sh econ4h-launcher --duration 61s',{**env,**extra})
                     self.assertEqual(p.returncode,2,p.stderr);self.assertIn(code,p.stderr);self.assertNotIn('C0-E1: build',p.stdout)
             self.assertFalse(out.exists());self.assertFalse((tmp/'escape').exists())
             (out/'taken').mkdir(parents=True);(out/'taken/keep.json').write_text('{}')
-            p=self.run_script('capture.sh econ4h-launcher',{**env,'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'taken'})
+            p=self.run_script('capture.sh econ4h-launcher --duration 61s',{**env,'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'taken'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr)
             self.assertEqual(sorted(x.name for x in (out/'taken').iterdir()),['keep.json'])
 
@@ -207,6 +211,12 @@ class Launchers(unittest.TestCase):
                     p=launch({**store,'P0_ECON_RUN_ID':run_id})
                     self.assertEqual(p.returncode,2,p.stderr[-2000:])  # no network: the real binary fails closed at startup
                     run=project/root/run_id
+                    # JFI-03/PERSIST-04: the productive run wrote no JSON/JSONL. The pinned readers below (V2 detection
+                    # via manifest.json included) read the views of the explicit offline export.
+                    self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json','.jsonl')],[])
+                    x=subprocess.run([str(REPO/'project_0/native/target/release/p0ctl'),'--project',str(project),'export','--run',str(run)],
+                                     capture_output=True,text=True,timeout=60)
+                    self.assertEqual(x.returncode,0,x.stderr)
                     self.assertEqual(s.detect_layout(run),layout);self.assertEqual(a.find_run(str(run)),run.resolve())
                     manifest=json.loads(s.artifact(run,'manifest').read_text())  # written by the real Rust runtime
                     self.assertEqual(manifest['plan'],s.config_part(run,'measurement_plan'))
@@ -228,8 +238,8 @@ class Launchers(unittest.TestCase):
                                            (s.artifact(run,'market')/'market.p0j','INCOMPLETE')):
                         p=subprocess.run([str(tool),'verify',str(journal)],capture_output=True,text=True,timeout=60)
                         self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(json.loads(p.stdout)['status'],status,journal)
-                    # Since A2 the capture writes no JSONL: market views are MISSING until rendered explicitly,
-                    # then they must be created once and match byte for byte (rendered across segment chains).
+                    # The capture writes no JSONL: views are MISSING until rendered explicitly, then they must be
+                    # created once and match byte for byte (rendered across segment chains).
                     p=subprocess.run([str(tool),'renders',str(run)],capture_output=True,text=True,timeout=60)
                     self.assertEqual(p.returncode,0,p.stderr)
                     self.assertTrue(all(v['status'] in ('MATCHES','NO_FRAME','MISSING') for v in json.loads(p.stdout)),p.stdout)
@@ -426,7 +436,7 @@ class GitIgnore(unittest.TestCase):
         self.assertTrue(ignored('project_0/data/runs/econ4h_x/manifest.json'))
         self.assertTrue(ignored('project_0/data/runs/econ4h_x/capture/transactions.jsonl'))
         self.assertTrue(ignored('project_0/data/cache/gap_proxy/g1.abc123/proxy.log'))
-        for path in ('project_0/docs/evidence/NEW_20261015/results.json','project_0/config/profiles/smoke.json',
+        for path in ('project_0/docs/evidence/NEW_20261015/results.json','project_0/config/profiles/smoke.conf',
                      'project_0/exports/report.json','project_0/data/.gitkeep'):
             self.assertFalse(ignored(path),path)
 

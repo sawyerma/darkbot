@@ -209,10 +209,7 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     fs::write(&b, "keep").unwrap();
     assert!(super::export_views(
         &path,
-        &[
-            (Some(kind::FE01_READ), &a),
-            (Some(kind::MT0_SNAPSHOT), &b)
-        ],
+        &[(Some(kind::FE01_READ), &a), (Some(kind::MT0_SNAPSHOT), &b)],
         false
     )
     .is_err());
@@ -222,10 +219,7 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     assert_eq!(
         super::export_views(
             &path,
-            &[
-                (Some(kind::FE01_READ), &a),
-                (Some(kind::MT0_SNAPSHOT), &b)
-            ],
+            &[(Some(kind::FE01_READ), &a), (Some(kind::MT0_SNAPSHOT), &b)],
             false
         )
         .unwrap(),
@@ -308,8 +302,7 @@ fn persist05_local_writer_benchmark() {
     let mut lat = Vec::new();
     for _ in 0..500 {
         let t = Instant::now();
-        w.append_value(kind::FE01_READ, &opportunity)
-            .unwrap();
+        w.append_value(kind::FE01_READ, &opportunity).unwrap();
         w.sync().unwrap();
         lat.push(t.elapsed().as_nanos() as u64);
     }

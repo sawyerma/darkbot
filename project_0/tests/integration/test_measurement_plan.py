@@ -56,9 +56,24 @@ class MeasurementCli(unittest.TestCase):
             p = subprocess.run([str(SCRIPTS / 'test.sh'), *args], env=clean_env(), capture_output=True)
             self.assertEqual(p.returncode, expected)
 
+    def test_launch_never_recurses(self):
+        # p0ctl marks its launcher child; inside it neither `p0ctl run start` nor `capture.sh econ4h` starts again.
+        marked = {**clean_env(), 'P0_CTL_LAUNCH_RUN_ID': 'outer'}
+        p = subprocess.run([str(SCRIPTS / 'capture.sh'), 'econ4h', '--duration', '61s'], env=marked, capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn('RECURSIVE_LAUNCH: capture.sh econ4h inside the launcher of run outer', p.stderr)
+        ctl = ROOT / 'project_0/native/target/release/p0ctl'
+        if not ctl.exists():
+            self.skipTest('NOT_RUN: release p0ctl not built')
+        p = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'run', 'start', '--duration', '61s'], env=marked,
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn('RECURSIVE_LAUNCH: run start inside the launcher of run outer', p.stderr)
+        self.assertNotIn('BOOT AUDIT', p.stdout)
+
     def test_launcher_uses_persisted_plan_and_no_total_capture_timebox(self):
         release = ROOT / 'project_0/native/target/release'
-        if not all((release / b).exists() for b in ('p0-longtail', 'p0-measurement-plan')):
+        if not all((release / b).exists() for b in ('p0-longtail', 'p0-measurement-plan', 'p0ctl')):
             self.skipTest('NOT_RUN: release binaries not built')
         with tempfile.TemporaryDirectory(prefix='p0-p1-launcher-') as folder:
             tmp = Path(folder)
@@ -77,42 +92,61 @@ class MeasurementCli(unittest.TestCase):
                    'P0_RPC_URL': 'http://127.0.0.1:1', 'P0_WS_URL': 'ws://127.0.0.1:1',
                    'P0_KEYPAIR_PATH': str(key), 'P0_MAX_SLIPPAGE_BPS': '50',
                    'P0_ECON_OUT_DIR': str(tmp / 'runs'), 'CARGO_TARGET_DIR': str(ROOT / 'project_0/native/target')}
-            from dataclasses import asdict
-            from operations.cli import measurement_contract
+            ctl = release / 'p0ctl'
+            # OFFLINE_READY_NETWORK_NOT_RUN is no Mainnet release: without the operator's approval of exactly the
+            # audited state nothing starts; the token is the one `p0ctl doctor` prints for this state.
+            doctor = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'doctor'], env=env, capture_output=True, text=True, timeout=60)
+            self.assertIn('verdict=OFFLINE_READY_NETWORK_NOT_RUN', doctor.stdout)
+            token = doctor.stdout.split('token=', 1)[1].split()[0]
+            for approval in ([], ['--mainnet-approved', '0' * 16], ['--mainnet-approved', token, '--mainnet-approved', token]):
+                p = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', '61s', *approval], cwd=tmp,
+                                   env={**env, 'P0_ECON_RUN_ID': 'unapproved'}, capture_output=True, text=True, timeout=120)
+                self.assertEqual(p.returncode, 2, p.stderr[-2000:])
+                self.assertIn('exactly one --mainnet-approved' if len(approval) > 2 else f'MAINNET_APPROVAL_REQUIRED: boot verdict OFFLINE_READY_NETWORK_NOT_RUN is no Mainnet release', p.stderr)
+                self.assertNotIn('[p0ctl] run unapproved started', p.stdout)
+                self.assertFalse((tmp / 'runs').exists())
+            approved = ['--mainnet-approved', token]
             for duration, seconds, relative in [('10m', 600, False), ('61s', 61, False), ('61s', 61, True)]:
                 run_id = 'relative_config' if relative else duration
-                command = [str(SCRIPTS / 'test.sh'), '--duration', duration]
+                command = [str(SCRIPTS / 'test.sh'), '--duration', duration, *approved]
                 if relative:
-                    args = measurement_contract.parser().parse_args(['--duration', duration])
-                    (tmp / 'relative.json').write_text(json.dumps({'config': asdict(measurement_contract.config(args))}))
-                    command = [str(SCRIPTS / 'capture.sh'), 'econ4h-launcher', '--measurement-config', 'relative.json']
+                    # Native text config, relative to the caller's directory (the launcher changes directory).
+                    (tmp / 'relative.conf').write_text('# operator override\nrpc-rps = 1\n')
+                    command += ['--', '--config', 'relative.conf']
                 p = subprocess.run(command, cwd=tmp,
                                    env={**env, 'P0_ECON_RUN_ID': run_id}, capture_output=True, text=True, timeout=600)
-                if relative:
-                    self.assertIn('CAPTURE_NOT_FINALIZED', p.stderr)
-                    self.assertNotIn('No such file or directory', p.stderr)
-                    self.assertNotIn('Traceback', p.stderr)
+                self.assertNotIn('No such file or directory', p.stderr)
+                self.assertNotIn('Traceback', p.stderr)
                 self.assertEqual(p.returncode, 2, p.stderr[-2000:])  # no network: the real capture fails closed at startup
+                self.assertIn(f'approved by the operator for readiness token {token}', p.stdout)
                 self.assertIn(f'Capture: {seconds}s', p.stdout)
                 run = tmp / 'runs' / run_id
+                # JFI-03/PERSIST-04: the productive run writes no JSON/JSONL; the legacy views exist only after the
+                # explicit offline export.
+                self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json', '.jsonl')], [])
+                export = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'export', '--run', str(run)],
+                                        capture_output=True, text=True, timeout=60)
+                self.assertEqual(export.returncode, 0, export.stderr)
                 plan = json.loads((run / 'measurement_plan.json').read_text())
-                manifest = json.loads((run / 'measurement_manifest.json').read_text())  # written by the real p0-longtail
+                manifest = json.loads((run / 'measurement_manifest.json').read_text())  # typed record of the real p0-longtail
+                if relative:
+                    operational = manifest['operational_config']
+                    self.assertEqual((operational['limits']['rpc_rps'], operational['sources']['rpc_rps']), (1, 'config_file'))
                 self.assertEqual(manifest['plan'], plan)  # the binary consumed exactly the persisted plan
                 self.assertEqual((manifest['live_enabled'], manifest['submission_enabled']), (False, False))
                 self.assertEqual(plan['duration_seconds'], seconds)
                 self.assertEqual(json.loads((run / 'storage_preflight.json').read_text())['duration_seconds'], seconds)
                 self.assertIn('C0_E1_WARMUP_FAILED', (run / 'runtime.log').read_text())
                 self.assertFalse((run / 'quick_timebox_report.json').exists())
-            rejected = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', '10m'], cwd=tmp,
+            rejected = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', '10m', *approved], cwd=tmp,
                                       env={**env, 'P0_ECON_RUN_MODE': 'quick', 'P0_ECON_RUN_ID': 'quick'}, capture_output=True, timeout=60)
             self.assertEqual(rejected.returncode, 2)
             self.assertFalse((tmp / 'runs/quick').exists())
             # p0ctl drives the same launcher: offline boot audit, run id and owner lock handed over,
             # child exit reported; the lock is released afterwards and records the last owner.
-            ctl = release / 'p0ctl'
             if ctl.exists():
                 lock = tmp / 'runtime.lock'
-                p = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'run', 'start', '--duration', '61s'], cwd=tmp,
+                p = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'run', 'start', '--duration', '61s', *approved], cwd=tmp,
                                    env={**env, 'P0_ECON_RUN_ID': 'p0ctl', 'P0_RUNTIME_LOCK': str(lock)},
                                    capture_output=True, text=True, timeout=600)
                 self.assertEqual(p.returncode, 2, p.stderr[-2000:])

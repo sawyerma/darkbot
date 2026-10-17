@@ -43,6 +43,9 @@ pub mod kind {
     /// Qualification axes of a finished market capture (`market_completion.p0j`, B7): the
     /// values `summary.json` reports, typed for the native report.
     pub const MARKET_COMPLETION: u16 = 304;
+    /// The finished capture's market summary (`market_summary.p0j`, JFI-FIX-05): typed record;
+    /// `summary.json` is its explicit offline render for the pinned readers.
+    pub const MARKET_SUMMARY: u16 = 305;
     /// Strict verifier (A3): resolved slot scope, cached JSON-RPC exchange (wire text of the
     /// external boundary), batch checkpoint and result — each a sealed single-value journal.
     pub const STRICT_SCOPE: u16 = 310;
@@ -113,6 +116,7 @@ pub mod kind {
         MARKET_COVERAGE,
         MARKET_RELATED,
         MARKET_COMPLETION,
+        MARKET_SUMMARY,
         STRICT_SCOPE,
         STRICT_RPC_CACHE,
         STRICT_CHECKPOINT,

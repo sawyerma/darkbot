@@ -1,5 +1,0 @@
-{
-  "schema": "Project0/RuntimeProfile/1",
-  "profile": "standard",
-  "description": "Default operating profile: every limit keeps its typed parameter default, duration 4h."
-}

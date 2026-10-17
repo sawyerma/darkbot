@@ -36,6 +36,7 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 
 | Unit | State | Commit | Evidence |
 |---|---|---|---|
+| D4d — JFI-FIX-04/05 rest: no productive JSON renders, native text config, p0ctl-only launch, recursion guard, operator Mainnet approval | LOCAL_PASS in scope; index/crosscheck verifier and pinned config bridge BLOCKED (re-pin) | (this unit) | ledger 2026-10-17 (JFI-FIX-04/05 rest) |
 | A — baseline/contradictions | done | — | this page |
 | Git isolation (after the 506c349 BSC incident) | Project_0 works in a separate worktree with its own index; guarded pathspec commits | — | memory rule; `dfc5e14` restore reported to the user |
 | D3c — B7 native report (`p0ctl report`), six native markers, `MARKET_COMPLETION`, runtime repo root fix | LOCAL_PASS in scope; index provenance pinned Python | (this unit) | ledger 2026-10-17 (B7) |

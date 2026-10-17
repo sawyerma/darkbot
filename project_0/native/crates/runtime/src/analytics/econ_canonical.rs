@@ -293,10 +293,6 @@ impl Worker {
         for row in &result {
             self.append_typed_report(row)?;
         }
-        self.render_rows(
-            journal::kind::ECON_CANONICAL,
-            "canonical_market_shadow.jsonl",
-        )?;
         self.canonical_joined = result;
         self.canonical_finalized = true;
         Ok(())
@@ -1093,12 +1089,14 @@ mod regression {
             view(&w.canonical_metrics(0, 4))["market"]["ALL"]["events"],
             4
         );
-        assert!(w
+        // The joined rows are typed report frames; no JSONL view is written by the run.
+        assert!(!w
             .h
             .cfg
             .run_dir
             .join("canonical_market_shadow.jsonl")
-            .is_file());
+            .exists());
+        assert_eq!(w.canonical_joined.len(), 4);
     }
 
     /// JFI-FIX-05 parity: the snapshot and final report documents of a rich analytics state

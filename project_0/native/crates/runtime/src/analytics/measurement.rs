@@ -294,6 +294,8 @@ impl MeasurementPlan {
 
 /// File name of the typed pre-capture manifest in the run's capture directory.
 pub const RUN_MANIFEST_JOURNAL: &str = "run_manifest.p0j";
+/// The launcher's typed plan journal next to the run manifest (`P0_MEASUREMENT_PLAN`).
+pub const PLAN_JOURNAL: &str = "measurement_plan.p0j";
 
 /// Pre-capture run manifest (JFI-04, `RUN_MANIFEST` frame): identity, plan, code and binary
 /// pins, secret-free operational configuration and the fixed observe-only facts.
@@ -535,19 +537,19 @@ pub fn journal(
         .map(|_| ())
         .map_err(|e| format!("PHASE_JOURNAL: {e}"))
 }
-/// Seals the phase journal (COMPLETE only for a run that ended without error) and renders
-/// `measurement_phases.jsonl` as an explicit export. No phase can be added afterwards.
+/// Seals the phase journal (COMPLETE only for a run that ended without error); no phase can be
+/// added afterwards. `measurement_phases.jsonl` exists only as an explicit offline export
+/// (`p0-journal renders RUN --create`), never as part of the run (JFI-03).
 pub fn finalize_phases(paths: &crate::run_layout::RunPaths, complete: bool) -> Result<(), String> {
-    use super::journal::{self as binary, kind, Writer};
+    use super::journal::{self as binary, Writer};
     let _guard = PHASE_LOCK
         .lock()
         .map_err(|_| "measurement journal lock poisoned")?;
     let path = binary::binary_path(&paths.phases());
     Writer::resume(&path)
         .and_then(|mut writer| writer.seal(complete))
-        .map_err(|e| format!("PHASE_JOURNAL_SEAL: {e}"))?;
-    binary::export(&path, &paths.phases(), Some(kind::MEASUREMENT_PHASE), false)
-        .map_err(|e| format!("PHASE_RENDER: {e}"))
+        .map(|_| ())
+        .map_err(|e| format!("PHASE_JOURNAL_SEAL: {e}"))
 }
 /// The repository the run's code identity is read from: the launcher's project directory
 /// (`P0_PROJECT_DIR`, the `project_0` directory) at run time, else the build's source tree. A
@@ -673,24 +675,14 @@ pub fn persist_manifest(
         .into(),
         compatibility: "hour_01..04 names retained; use plan offsets, not filename as hours".into(),
     };
-    // JFI-04: the typed manifest is the record (written first, immutable); `manifest.json` is
-    // its render, written now because the pinned run store recognizes the layout by it.
-    if paths.manifest().exists() {
+    // JFI-04: the typed manifest is the record (immutable). `manifest.json` /
+    // `measurement_manifest.json` are explicit offline renders for the pinned run store only.
+    let typed = paths.capture(RUN_MANIFEST_JOURNAL);
+    if typed.exists() || paths.manifest().exists() {
         return Err("manifest exists".into());
     }
-    super::journal::write_typed_value(
-        &paths.capture(RUN_MANIFEST_JOURNAL),
-        super::journal::source::MEASUREMENT,
-        &manifest,
-    )
-    .map_err(|e| format!("RUN_MANIFEST: {e}"))?;
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(paths.manifest())
-        .map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut f, &manifest.legacy_json()).map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())?;
+    super::journal::write_typed_value(&typed, super::journal::source::MEASUREMENT, &manifest)
+        .map_err(|e| format!("RUN_MANIFEST: {e}"))?;
     journal(
         paths,
         clock,
@@ -860,8 +852,18 @@ mod persistence_tests {
             let paths = RunPaths::new(&root, layout);
             paths.create().unwrap();
             persist_manifest(&paths, "test", "https://secret/?key=hidden", &plan, clock).unwrap();
-            let before = fs::read(root.join(manifest_name)).unwrap();
-            let manifest: Value = serde_json::from_slice(&before).unwrap();
+            // JFI-03: the run writes the typed manifest only; no JSON document. The layout (V2
+            // included) is recognized from that typed record alone, without `manifest.json`.
+            assert!(!root.join(manifest_name).exists());
+            assert_eq!(
+                crate::analytics::renders::detect(&root).unwrap().layout,
+                layout
+            );
+            let typed: RunManifest =
+                crate::analytics::journal::read_typed_value(&paths.capture(RUN_MANIFEST_JOURNAL))
+                    .unwrap();
+            let manifest = typed.legacy_json();
+            let before = serde_json::to_vec(&manifest).unwrap();
             assert_eq!(manifest["schema"], schema);
             assert_eq!(manifest["phase_journal"], phases_name);
             assert_eq!(manifest["capture_run_id"], "test");
@@ -874,16 +876,10 @@ mod persistence_tests {
                 }
             }
             assert_eq!(manifest["provider_class"], "UNKNOWN");
-            // JFI-04: the typed manifest journal is the record; the JSON file is its render.
-            let typed: RunManifest =
-                crate::analytics::journal::read_typed_value(&paths.capture(RUN_MANIFEST_JOURNAL))
-                    .unwrap();
-            assert_eq!(typed.legacy_json(), manifest);
             assert!(!String::from_utf8_lossy(&before).contains("secret"));
             assert_eq!(manifest["binary_sha256"].as_str().unwrap().len(), 64);
             assert!(!manifest["source_sha256"].as_object().unwrap().is_empty());
             assert!(persist_manifest(&paths, "test", "UNKNOWN", &plan, clock).is_err());
-            assert_eq!(before, fs::read(root.join(manifest_name)).unwrap());
             let window = plan.capture_window(clock, 600 * NS).unwrap();
             journal(&paths, clock, Phase::Capture(window.clone())).unwrap();
             let drain = Phase::Drain {
@@ -904,7 +900,13 @@ mod persistence_tests {
             .unwrap();
             while sealed.next_frame().unwrap().is_some() {}
             assert!(sealed.sealed && sealed.complete);
-            assert!(finalize_phases(&paths, true).is_err()); // never a second render
+            assert!(finalize_phases(&paths, true).is_err()); // sealed once
+            assert!(!root.join(phases_name).exists());
+            // The explicit offline export renders the manifest and the phase rows.
+            crate::analytics::renders::ensure(&paths, true).unwrap();
+            let exported: Value =
+                serde_json::from_slice(&fs::read(root.join(manifest_name)).unwrap()).unwrap();
+            assert_eq!(exported, manifest);
             let rows: Vec<Value> = fs::read_to_string(root.join(phases_name))
                 .unwrap()
                 .lines()
