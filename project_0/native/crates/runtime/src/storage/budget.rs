@@ -2,9 +2,9 @@
 //!
 //! Every queued frame reserves its bytes before admission and releases them when written. The
 //! admission limit starts at `initial` and grows only while a backlog needs it, never above
-//! `max`, and only while the process (peak RSS, a conservative bound of the current RSS) plus the
-//! growth stays below physical memory minus the configured system reserve. When the backlog is
-//! gone the limit returns to `initial`. A request that cannot be admitted within its wait fails:
+//! `max`, and only while the process (current RSS, else peak RSS) plus the growth stays below
+//! physical memory minus the configured system reserve and the OS reports no memory pressure.
+//! When the backlog is gone the limit returns to `initial`. A request that cannot be admitted within its wait fails:
 //! the caller records INCOMPLETE; nothing is dropped silently and `max` is never exceeded.
 //! A byte counter is not a whole-process RSS limit; RSS is observed and reported separately.
 use std::sync::{Arc, Condvar, Mutex};
@@ -59,8 +59,8 @@ impl Drop for BytePermit {
     fn drop(&mut self) {
         let mut s = self.budget.state.lock().unwrap_or_else(|p| p.into_inner());
         s.used = s.used.saturating_sub(self.bytes);
-        if s.used == 0 {
-            // Backlog gone: give unused capacity back.
+        if s.used <= self.budget.initial {
+            // Backlog gone (fixed reservations may remain): give unused capacity back.
             s.limit = self.budget.initial;
         }
         drop(s);
@@ -151,10 +151,14 @@ impl MemoryBudget {
         }
     }
 
-    /// Growth only while peak RSS + growth stays below physical memory minus the reserve.
-    /// Unknown physical memory or RSS permits no growth beyond `initial`.
+    /// Growth only while RSS + growth stays below physical memory minus the reserve and the OS
+    /// reports no memory pressure. Unknown physical memory or RSS permits no growth.
     fn headroom_allows(&self, growth: u64) -> bool {
-        match (self.0.physical, peak_rss_bytes()) {
+        let m = MemorySample::now();
+        if m.pressure_level.is_some_and(|l| l >= PRESSURE_WARN) {
+            return false;
+        }
+        match (self.0.physical, m.rss_bytes.or(m.peak_rss_bytes)) {
             (Some(physical), Some(rss)) => {
                 rss.saturating_add(growth) <= physical.saturating_sub(self.0.reserve)
             }
@@ -191,6 +195,111 @@ pub fn physical_memory_bytes() -> Option<u64> {
         )
     };
     (pages > 0 && size > 0).then(|| pages as u64 * size as u64)
+}
+
+/// macOS `kern.memorystatus_vm_pressure_level`: 1 normal, 2 warning, 4 critical.
+pub const PRESSURE_WARN: i32 = 2;
+
+/// Process memory and OS memory state at one instant; `None` where the OS does not report it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct MemorySample {
+    pub rss_bytes: Option<u64>,
+    pub peak_rss_bytes: Option<u64>,
+    pub swap_used_bytes: Option<u64>,
+    pub pressure_level: Option<i32>,
+}
+
+impl MemorySample {
+    pub fn now() -> Self {
+        Self {
+            rss_bytes: current_rss_bytes(),
+            peak_rss_bytes: peak_rss_bytes(),
+            swap_used_bytes: swap_used_bytes(),
+            pressure_level: memory_pressure_level(),
+        }
+    }
+    /// Worst of two samples (maximum memory, highest pressure).
+    pub fn worst(self, other: Self) -> Self {
+        let max = |a: Option<u64>, b: Option<u64>| a.max(b);
+        Self {
+            rss_bytes: max(self.rss_bytes, other.rss_bytes),
+            peak_rss_bytes: max(self.peak_rss_bytes, other.peak_rss_bytes),
+            swap_used_bytes: max(self.swap_used_bytes, other.swap_used_bytes),
+            pressure_level: self.pressure_level.max(other.pressure_level),
+        }
+    }
+}
+
+/// Current resident set size of this process.
+#[cfg(target_os = "macos")]
+pub fn current_rss_bytes() -> Option<u64> {
+    // SAFETY: task_info fills the struct we own; the count is its size in natural words.
+    let mut info: libc::mach_task_basic_info = unsafe { std::mem::zeroed() };
+    let mut count = libc::MACH_TASK_BASIC_INFO_COUNT;
+    #[allow(deprecated)]
+    let kr = unsafe {
+        libc::task_info(
+            libc::mach_task_self(),
+            libc::MACH_TASK_BASIC_INFO,
+            &mut info as *mut _ as libc::task_info_t,
+            &mut count,
+        )
+    };
+    (kr == libc::KERN_SUCCESS).then_some(info.resident_size)
+}
+#[cfg(not(target_os = "macos"))]
+pub fn current_rss_bytes() -> Option<u64> {
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+    // SAFETY: sysconf has no preconditions.
+    let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    (size > 0).then(|| pages * size as u64)
+}
+
+#[cfg(target_os = "macos")]
+fn sysctl<T: Copy>(name: &std::ffi::CStr) -> Option<T> {
+    let mut value: T = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<T>();
+    // SAFETY: the out buffer is a T we own and its length is passed.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            &mut value as *mut T as *mut libc::c_void,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (rc == 0 && len == std::mem::size_of::<T>()).then_some(value)
+}
+
+/// Swap in use system-wide.
+#[cfg(target_os = "macos")]
+pub fn swap_used_bytes() -> Option<u64> {
+    sysctl::<libc::xsw_usage>(c"vm.swapusage").map(|u| u.xsu_used)
+}
+#[cfg(not(target_os = "macos"))]
+pub fn swap_used_bytes() -> Option<u64> {
+    let info = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let kib = |key: &str| -> Option<u64> {
+        info.lines()
+            .find(|l| l.starts_with(key))?
+            .split_whitespace()
+            .nth(1)?
+            .parse()
+            .ok()
+    };
+    Some(kib("SwapTotal:")?.saturating_sub(kib("SwapFree:")?) * 1024)
+}
+
+/// OS memory pressure level (macOS); `None` elsewhere.
+#[cfg(target_os = "macos")]
+pub fn memory_pressure_level() -> Option<i32> {
+    sysctl::<libc::c_int>(c"kern.memorystatus_vm_pressure_level")
+}
+#[cfg(not(target_os = "macos"))]
+pub fn memory_pressure_level() -> Option<i32> {
+    None
 }
 
 /// Peak resident set size of this process (an upper bound of the current RSS).
@@ -257,5 +366,8 @@ mod tests {
         assert_eq!((s.used_bytes, s.limit_bytes), (0, 100));
         assert!(s.peak_bytes <= 300 && s.refused == 1 && s.waits >= 1);
         assert!(physical_memory_bytes().is_some() && peak_rss_bytes().is_some());
+        let m = MemorySample::now();
+        assert!(m.rss_bytes.is_some_and(|r| r > 0) && m.swap_used_bytes.is_some());
+        assert!(m.rss_bytes <= m.peak_rss_bytes.map(|p| p + MIB));
     }
 }

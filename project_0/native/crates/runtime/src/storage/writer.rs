@@ -1,13 +1,15 @@
 //! SK-04: the market journal's one ordered writer, off the capture thread.
 //!
-//! The capture thread encodes a typed row (no JSON), reserves its bytes in the `MemoryBudget`
-//! and hands the frame to a dedicated writer over the existing bounded channel; it never writes,
-//! flushes or syncs. The writer appends admitted frames in order in bounded batches (one
+//! The capture thread reserves the exact bytes of a typed row (payload and its frame copy in the
+//! batch buffer) in the `MemoryBudget` before encoding it (bincode, no JSON) and hands the frame
+//! to a dedicated writer over the existing bounded channel; it never writes, flushes or syncs.
+//! Queue slots and the batch vector are reserved once at start, so every capture-owned byte of
+//! this lane is inside the budget and `max` bounds it. The writer appends admitted frames in order in bounded batches (one
 //! sequential write per batch, `Writer::append_batch`) and syncs at the configured interval and at
 //! seal. OS-buffered frames are not crash-safe before a sync; an unsealed tail is INCOMPLETE.
 //! A writer failure is sticky: every later submit and the seal fail, the capture stops
 //! INCOMPLETE. Financial FE-04/P8 durability is a separate writer lane and is not relaxed here.
-use super::budget::{peak_rss_bytes, BudgetSnapshot, BytePermit, MemoryBudget, MIB};
+use super::budget::{BudgetSnapshot, BytePermit, MemoryBudget, MemorySample, MIB};
 use crate::analytics::journal::{self, Provenance};
 use crate::analytics::payload::{self, Payload};
 use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer};
@@ -28,6 +30,9 @@ pub struct WriterConfig {
     pub sync_interval: Duration,
     /// Longest wait of the capture thread for budget or queue space before INCOMPLETE.
     pub stall_budget: Duration,
+    /// Test-only I/O fault injection: the writer fails at this batch.
+    #[cfg(test)]
+    pub fail_at_batch: Option<u64>,
 }
 
 impl WriterConfig {
@@ -41,6 +46,8 @@ impl WriterConfig {
             flush_interval: Duration::from_millis(l.market_writer_flush_ms),
             sync_interval: Duration::from_millis(l.market_writer_sync_ms),
             stall_budget: Duration::from_millis(l.market_writer_stall_ms),
+            #[cfg(test)]
+            fail_at_batch: None,
         }
     }
 }
@@ -56,7 +63,10 @@ pub struct StorageMetrics {
     pub syncs: u64,
     pub max_sync_ns: u64,
     pub queue_full_waits: u64,
-    pub peak_rss_bytes: Option<u64>,
+    /// Bytes reserved once for queue slots and the batch vector.
+    pub fixed_reserved_bytes: u64,
+    /// Worst process/OS memory state sampled at each batch and at seal.
+    pub memory: MemorySample,
     pub budget: BudgetSnapshot,
 }
 
@@ -73,8 +83,11 @@ enum Msg {
     Seal(bool),
 }
 
-/// Per-frame bytes beyond the payload: frame header, chain hash, CRC, SHA and queue slot.
-const FRAME_OVERHEAD: u64 = 160 + std::mem::size_of::<Pending>() as u64;
+/// Reserved bytes of one frame: the encoded payload plus its copy in the batch buffer (payload
+/// and frame header/CRC/SHA). The queue slot itself is part of the fixed reservation.
+fn frame_bytes(payload_len: u64) -> u64 {
+    2 * payload_len + journal::FRAME_WIRE as u64
+}
 
 pub struct Sealed {
     pub durable: journal::Durable,
@@ -89,6 +102,8 @@ pub struct MarketJournalWorker {
     failure: Arc<Mutex<Option<String>>>,
     stall_budget: Duration,
     queue_full_waits: u64,
+    fixed: Option<BytePermit>,
+    fixed_bytes: u64,
     pub path: PathBuf,
 }
 
@@ -100,10 +115,19 @@ impl MarketJournalWorker {
         if cfg.batch_frames == 0 {
             return Err("MARKET_WRITER_BATCH_INVALID".into());
         }
+        // Queue slots (count-bounded channel) and the writer's batch vector are capture-owned
+        // memory: reserved once, inside the initial admission limit.
+        let slots = cfg.batch_frames * 4;
+        let fixed_bytes = ((slots + cfg.batch_frames) * std::mem::size_of::<Msg>()) as u64;
+        if fixed_bytes >= cfg.initial_bytes {
+            return Err("MARKET_WRITER_SLOTS_EXCEED_INITIAL_BUDGET".into());
+        }
+        let fixed = budget
+            .acquire(fixed_bytes, Duration::ZERO)
+            .map_err(str::to_string)?;
         let writer = journal::Writer::create(path)
             .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
-        // Queue slots are bounded twice: by count here and by bytes through the budget.
-        let (tx, rx) = bounded::<Msg>("market-journal-writer", cfg.batch_frames * 4);
+        let (tx, rx) = bounded::<Msg>("market-journal-writer", slots);
         let failure = Arc::new(Mutex::new(None));
         let (thread_failure, thread_budget) = (failure.clone(), budget.clone());
         let handle = std::thread::Builder::new()
@@ -124,6 +148,8 @@ impl MarketJournalWorker {
             failure,
             stall_budget: cfg.stall_budget,
             queue_full_waits: 0,
+            fixed: Some(fixed),
+            fixed_bytes,
             path: path.into(),
         })
     }
@@ -142,12 +168,14 @@ impl MarketJournalWorker {
         if let Some(e) = self.failed() {
             return Err(e);
         }
-        let bytes = payload::encode(row)?;
+        // Reserve first: the encoded payload is allocated only after admission.
+        let len = payload::encoded_len(row)?;
         let deadline = Instant::now() + self.stall_budget;
         let permit = self
             .budget
-            .acquire(bytes.len() as u64 + FRAME_OVERHEAD, self.stall_budget)
+            .acquire(frame_bytes(len), self.stall_budget)
             .map_err(io::Error::other)?;
+        let bytes = payload::encode(row)?;
         let mut msg = Msg::Frame(Pending {
             kind: P::KIND,
             schema: P::SCHEMA,
@@ -211,6 +239,9 @@ impl MarketJournalWorker {
             .join()
             .map_err(|_| io::Error::other("MARKET_WRITER_PANICKED"))??;
         sealed.metrics.queue_full_waits = self.queue_full_waits;
+        sealed.metrics.fixed_reserved_bytes = self.fixed_bytes;
+        // The writer has stopped: its slots are released before the final snapshot.
+        self.fixed = None;
         sealed.metrics.budget = self.budget.snapshot();
         Ok(sealed)
     }
@@ -254,6 +285,10 @@ fn write_loop(
         }
         let due = first_pending.is_some_and(|t| t.elapsed() >= cfg.flush_interval);
         if !batch.is_empty() && (batch.len() >= cfg.batch_frames || due || seal.is_some()) {
+            #[cfg(test)]
+            if cfg.fail_at_batch == Some(m.batches) {
+                return Err(io::Error::other("injected write failure"));
+            }
             let started = Instant::now();
             let n = writer.append_batch(
                 batch
@@ -265,6 +300,7 @@ fn write_loop(
             m.batches += 1;
             m.max_batch_frames = m.max_batch_frames.max(n);
             m.bytes_written = writer.position();
+            m.memory = m.memory.worst(MemorySample::now());
             // Written: release the reserved bytes of the whole batch.
             batch.clear();
             first_pending = None;
@@ -280,7 +316,7 @@ fn write_loop(
             let durable = writer.seal(complete)?;
             m.syncs += 1;
             m.bytes_written = writer.position();
-            m.peak_rss_bytes = peak_rss_bytes();
+            m.memory = m.memory.worst(MemorySample::now());
             m.budget = budget.snapshot();
             return Ok(Sealed {
                 durable,
@@ -294,7 +330,7 @@ fn write_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::market::observer::rows::{MarketCoverage, MarketTransaction};
+    use crate::market::observer::rows::MarketCoverage;
 
     fn cfg(max: u64) -> WriterConfig {
         WriterConfig {
@@ -305,6 +341,7 @@ mod tests {
             flush_interval: Duration::from_millis(5),
             sync_interval: Duration::from_millis(20),
             stall_budget: Duration::from_millis(50),
+            fail_at_batch: None,
         }
     }
 
@@ -367,36 +404,116 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
-    /// A row larger than the hard maximum is refused, never dropped silently; a dropped worker
-    /// seals INCOMPLETE; a write failure is sticky for every later submit.
+    fn fixed(c: &WriterConfig) -> u64 {
+        ((c.batch_frames * 5) * std::mem::size_of::<Msg>()) as u64
+    }
+
+    fn frames_in(path: &Path) -> (u64, bool, bool) {
+        let mut r = journal::Reader::open(path).unwrap();
+        let mut n = 0;
+        while let Ok(Some(f)) = r.next_frame() {
+            n += u64::from(f.kind == journal::kind::MARKET_COVERAGE);
+        }
+        (n, r.sealed, r.complete)
+    }
+
+    /// The payload is reserved before it is encoded: a row whose frame (payload + its batch copy)
+    /// exceeds `max` is refused without allocating; slots beyond `initial` refuse the start;
+    /// a dropped worker seals INCOMPLETE with every admitted frame.
     #[test]
-    fn worker_refuses_over_budget_and_failures_are_sticky() {
+    fn reservation_precedes_encoding_and_slots_are_budgeted() {
         let d = dir("budget");
-        let mut w = MarketJournalWorker::start(&d.join("a.p0j"), cfg(400)).unwrap();
-        let big = MarketTransaction {
-            signature: "s".repeat(1_000),
+        let mut c = cfg(0);
+        let f = fixed(&c);
+        c.initial_bytes = f;
+        c.max_bytes = f;
+        assert_eq!(
+            MarketJournalWorker::start(&d.join("x.p0j"), c)
+                .err()
+                .as_deref(),
+            Some("MARKET_WRITER_SLOTS_EXCEED_INITIAL_BUDGET")
+        );
+        c.initial_bytes = f + 2_000;
+        c.max_bytes = f + 2_000;
+        let mut w = MarketJournalWorker::start(&d.join("a.p0j"), c).unwrap();
+        let big = MarketCoverage::SlotFailed {
             slot: 1,
-            origin: crate::market::observer::rows::TxOrigin::TransactionSubscribe {
-                observed_unix_s: 0,
-                t_rx_ns: 0,
-                tx: Err("TX_DECODE".into()),
-            },
+            error: "e".repeat(1_000),
         };
+        let len = payload::encoded_len(&big).unwrap();
+        assert_eq!(len, payload::encode(&big).unwrap().len() as u64);
+        assert!(frame_bytes(len) > 2_000);
         let e = w.submit(Provenance::default(), &big).unwrap_err();
-        assert_eq!(e.to_string(), "BYTE_PERMIT_EXCEEDS_MAX");
+        assert_eq!(e.to_string(), "CAPTURE_MEMORY_BUDGET_EXHAUSTED");
         w.submit(Provenance::default(), &row(1)).unwrap();
         drop(w);
-        let mut r = journal::Reader::open(&d.join("a.p0j")).unwrap();
-        while r.next_frame().unwrap().is_some() {}
-        assert!(r.sealed && !r.complete);
-        // Sticky failure: once the writer thread failed, submit and seal report it.
-        let mut w = MarketJournalWorker::start(&d.join("b.p0j"), cfg(1 << 20)).unwrap();
-        *w.failure.lock().unwrap() = Some("MARKET_WRITER_FAILED: injected".into());
-        assert!(w
-            .submit(Provenance::default(), &row(2))
-            .unwrap_err()
-            .to_string()
-            .contains("injected"));
+        assert_eq!(frames_in(&d.join("a.p0j")), (1, true, false));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Overload while the writer holds a batch: admission stops at `max` (refused after the
+    /// stall budget, never dropped); every admitted frame reaches the journal at seal and the
+    /// budget is fully released.
+    #[test]
+    fn overload_refuses_at_max_and_keeps_every_admitted_frame() {
+        let d = dir("overload");
+        let mut c = cfg(0);
+        c.batch_frames = 64;
+        c.flush_interval = Duration::from_secs(30);
+        let one = frame_bytes(payload::encoded_len(&row(0)).unwrap());
+        c.initial_bytes = fixed(&c) + 3 * one;
+        c.max_bytes = c.initial_bytes;
+        let mut w = MarketJournalWorker::start(&d.join("o.p0j"), c).unwrap();
+        let mut admitted = 0;
+        let refusal = loop {
+            match w.submit(Provenance::default(), &row(admitted)) {
+                Ok(()) => admitted += 1,
+                Err(e) => break e.to_string(),
+            }
+            assert!(admitted <= 3, "admission beyond max");
+        };
+        assert_eq!(
+            (admitted, refusal.as_str()),
+            (3, "CAPTURE_MEMORY_BUDGET_EXHAUSTED")
+        );
+        let sealed = w.seal(false).unwrap();
+        assert_eq!(sealed.frames, 3);
+        let b = sealed.metrics.budget;
+        assert!(b.peak_bytes <= b.max_bytes && b.refused == 1);
+        assert_eq!(b.used_bytes, 0);
+        assert!(sealed.metrics.memory.rss_bytes.is_some());
+        assert_eq!(frames_in(&d.join("o.p0j")), (3, true, false));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// A write failure is sticky: later submits and the seal report it, and the journal keeps
+    /// the frames written before the failure, unsealed (INCOMPLETE for every reader).
+    #[test]
+    fn writer_failure_is_sticky_and_keeps_the_written_prefix() {
+        let d = dir("failure");
+        let mut c = cfg(1 << 20);
+        c.batch_frames = 1;
+        c.flush_interval = Duration::from_millis(1);
+        c.fail_at_batch = Some(2);
+        let path = d.join("f.p0j");
+        let mut w = MarketJournalWorker::start(&path, c).unwrap();
+        for i in 0..2 {
+            w.submit(Provenance::default(), &row(i)).unwrap();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // The third batch fails on the writer thread.
+        let _ = w.submit(Provenance::default(), &row(2));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let sticky = loop {
+            match w.submit(Provenance::default(), &row(9)) {
+                Err(e) => break e.to_string(),
+                Ok(()) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+                Ok(()) => panic!("failure not reported"),
+            }
+        };
+        assert!(sticky.contains("injected write failure"), "{sticky}");
+        assert!(w.seal(true).is_err());
+        assert_eq!(frames_in(&path), (2, false, false));
         std::fs::remove_dir_all(d).unwrap();
     }
 }

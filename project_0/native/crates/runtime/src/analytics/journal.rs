@@ -17,6 +17,8 @@ pub const HEADER_LEN: u64 = 60;
 pub const MAX_FRAME: usize = 8 * 1024 * 1024;
 pub const MANIFEST: u16 = u16::MAX;
 const FIXED: usize = 120;
+/// Bytes of one frame beyond its payload: length prefix, fixed header, CRC and SHA-256.
+pub const FRAME_WIRE: usize = 4 + FIXED + 36;
 
 /// Event kinds of the one journal contract. Every writer takes its kind from here, so a kind
 /// is never reused for a different payload. Unknown kinds are rejected by the typed readers.
@@ -553,14 +555,21 @@ impl Writer {
     /// SK-04: several admitted frames, chained in order, written with one sequential write.
     /// The frames get consecutive sequence numbers; a failed write poisons the writer (the
     /// unsealed tail is INCOMPLETE for every reader), so no partial batch is ever continued.
-    pub fn append_batch<'a>(
-        &mut self,
-        frames: impl IntoIterator<Item = (u16, u16, &'a Provenance, &'a [u8])>,
-    ) -> io::Result<u64> {
+    pub fn append_batch<'a, I>(&mut self, frames: I) -> io::Result<u64>
+    where
+        I: IntoIterator<Item = (u16, u16, &'a Provenance, &'a [u8])>,
+        I::IntoIter: Clone,
+    {
         if self.poisoned || self.sealed {
             return Err(bad("JOURNAL_BLOCKED"));
         }
-        let mut wire = Vec::new();
+        let frames = frames.into_iter();
+        // Exact capacity: the batch buffer never over-allocates beyond its frames.
+        let capacity: usize = frames
+            .clone()
+            .map(|(_, _, _, payload)| FRAME_WIRE + payload.len())
+            .sum();
+        let mut wire = Vec::with_capacity(capacity);
         let mut n = 0u64;
         for (kind, schema, p, payload) in frames {
             if kind == 0 || schema == 0 {

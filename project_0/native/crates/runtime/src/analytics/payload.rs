@@ -40,6 +40,13 @@ pub fn encode<P: Payload>(payload: &P) -> io::Result<Vec<u8>> {
         .map_err(|_| bad("PAYLOAD_ENCODE"))
 }
 
+/// Exact encoded size without allocating (reserve before encode).
+pub fn encoded_len<P: Payload>(payload: &P) -> io::Result<u64> {
+    options()
+        .serialized_size(payload)
+        .map_err(|_| bad("PAYLOAD_ENCODE"))
+}
+
 pub fn decode<P: Payload>(kind: u16, schema: u16, bytes: &[u8]) -> io::Result<P> {
     if kind != P::KIND {
         return Err(bad("PAYLOAD_KIND"));

@@ -5499,3 +5499,14 @@ Base `1dd7605`.
 - **Open:** SK-05 terminal backlog/exhaustion forecast and stall handling beyond the stall budget; SK-06 CapacityPreflight; SK-07 segmentation; SK-08 offline SQLite (deferred); bounded byte budgets for EconWorker/winner/shadow collections; real-load throughput/latency NOT_MEASURED.
 
 Tests: storage 3/3 (hard/adaptive budget incl. waiting admission and release, ordered batched writes + seal + verify, over-budget refusal, INCOMPLETE seal on drop, sticky failure); journal + market 127 (unchanged expectations, every market test now runs through the writer lane); solana lib 72/72; common 26/26; `cargo test --workspace --all-features --no-run` PASS.
+
+## 2026-10-17 — SK-03 completion: every capture-lane byte inside the budget; memory observation (LOCAL_PASS for the writer lane; SK-03 PARTIAL)
+
+Base `e7fe08d`.
+
+- `MarketJournalWorker::submit` reserves before it encodes: `payload::encoded_len` (bincode `serialized_size`, no allocation) sizes the frame; the permit covers the payload and its copy in the batch buffer (`2·len + FRAME_WIRE`); only then is the payload encoded. `Writer::append_batch` allocates its buffer with the exact capacity of its frames (no growth doubling). Queue slots and the writer's batch vector are reserved once at start (`fixed_reserved_bytes`; start refused when they do not fit `initial`). Nothing of this lane can exceed `max`.
+- Memory observation: current RSS (macOS `task_info`, Linux `statm`), peak RSS, system swap in use and the macOS memory-pressure level are sampled on the writer thread at every batch and at seal (`StorageMetrics.memory`, worst values). The admission limit grows only without memory pressure and only while current RSS + growth fits physical memory minus the reserve.
+- Hot path: the market capture runs on its own thread with its own WSS source (`orchestration/startup.rs` `econ-market`); writer backpressure can only hold that thread, whose ingress overflow is counted (`INGRESS_OVERFLOW`, INCOMPLETE). `econ::Handle::emit` is non-blocking (drops counted, economics incomplete). The trading owner never waits on the market writer.
+- Still open in SK-03: byte bounds for the EconWorker/winner/shadow retained collections (count-bounded today; done with the B1 typing, which gives them native sizes); real-load evidence NOT_MEASURED.
+
+Tests: storage 5/5 — budget hard/adaptive incl. memory sample; ordered batches + seal; reservation precedes encoding (refusal without allocation, slots exceeding `initial` refuse the start, INCOMPLETE seal with every admitted frame); overload refused at `max` after the stall budget while every admitted frame reaches the journal and the budget is fully released; injected write failure is sticky for submit and seal and leaves the written prefix unsealed (INCOMPLETE).
