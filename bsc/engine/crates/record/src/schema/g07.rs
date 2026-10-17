@@ -79,6 +79,13 @@ pub mod contract {
     pub const PREFLIGHT_RECORD_PATH: u16 = 121;
     pub const BUILDER_POLICY_RECORD_PATH: u16 = 122;
     pub const WITNESS_SOURCE_RECORD_PATH: u16 = 123;
+    pub const LOCAL_SIMULATION_RECORD_SHA256: u16 = 118;
+    pub const ECONOMICS_RECORD_SHA256: u16 = 119;
+    pub const LOCAL_SIMULATION_RECORD_PATH: u16 = 127;
+    pub const ECONOMICS_RECORD_PATH: u16 = 128;
+    pub const SUPERSEDES_CONTRACT_SHA256: u16 = 129;
+    pub const PORTAL_UPGRADE_RECORD_SHA256: u16 = 130;
+    pub const PORTAL_UPGRADE_RECORD_PATH: u16 = 131;
     pub const CHAIN_ID: u16 = 200;
     pub const PORTAL: u16 = 204;
     pub const MAX_ATTEMPTS: u16 = 400;
@@ -102,23 +109,198 @@ pub mod contract {
         fields: &[Field::req(1, "id", Text), Field::req(2, "pass", Text)],
     };
 
+    /// The fields of v3 and v4 around their evidence bindings (tags 110–131).
+    macro_rules! contract_fields {
+        ($($binding:expr),* $(,)?) => {
+            &[
+                Field::req(STATUS, "status", Text),
+                Field::req(11, "supersedes", Text),
+                Field::req(12, "purpose", Text),
+                Field::req(APPROVED, "authorization.approved", Bool),
+                Field::req(EXECUTION_READY, "authorization.execution_ready", Bool),
+                Field::req(102, "authorization.approval_required_for", Text),
+                Field::req(103, "authorization.note", Text),
+                Field::req(LAUNCHER, "authorization.launcher_address", Address),
+                Field::req(BUYER, "authorization.buyer_address", Address),
+                Field::req(106, "authorization.execution_authority", Text),
+                Field::req(107, "authorization.approval_scope", Text),
+                Field::req(ATTEMPT_ID, "authorization.attempt_id", Text),
+                $($binding,)*
+                Field::req(CHAIN_ID, "scope.chain_id", U64),
+                Field::req(201, "scope.venue", Text),
+                Field::req(202, "scope.launch", Text),
+                Field::req(203, "scope.tokenVersion", U64),
+                Field::req(
+                    PORTAL,
+                    "scope.portal_expected_from_current_evidence",
+                    Address,
+                ),
+                Field::req(205, "scope.portal_rule", Text),
+                Field::req(206, "scope.launch_mode", Text),
+                Field::req(207, "scope.quoteToken", Address),
+                Field::req(208, "scope.quoteAmt", U256),
+                Field::req(209, "scope.buy", Text),
+                Field::req(210, "scope.historical_g03_authority", Text),
+                Field::req(300, "wallet_separation.launcher", Address),
+                Field::req(301, "wallet_separation.buyer", Address),
+                Field::req(302, "wallet_separation.must_be_distinct_addresses", Bool),
+                Field::req(303, "wallet_separation.reason", Text),
+                Field::req(304, "wallet_separation.secret_storage", Text),
+                Field::req(MAX_ATTEMPTS, "attempts.maximum", U64),
+                Field::req(401, "attempts.economic_attempt_definition", Text),
+                Field::rep(402, "attempts.builder_fanout", Text),
+                Field::req(403, "attempts.parallel", Bool),
+                Field::req(404, "attempts.no_public_launch_broadcast", Bool),
+                Field::req(405, "attempts.no_automatic_retry", Bool),
+                Field::req(
+                    406,
+                    "attempts.no_parallel_fallback_buy_bundle_in_stage_1",
+                    Bool,
+                ),
+                Field::req(
+                    407,
+                    "attempts.selected_attempts_remain_in_denominator",
+                    Bool,
+                ),
+                Field::rep(500, "bundle_bytes.tx_order", Text),
+                Field::req(
+                    501,
+                    "bundle_bytes.identical_raw_transactions_across_builders",
+                    Bool,
+                ),
+                Field::req(502, "bundle_bytes.reverting_transactions_allowed", Bool),
+                Field::req(503, "bundle_bytes.max_block_window", Text),
+                Field::req(504, "bundle_bytes.expiry_mismatch", Text),
+                Field::req(505, "bundle_bytes.fortyeightclub.noMerge", Bool),
+                Field::req(506, "bundle_bytes.fortyeightclub.positionFirst", Bool),
+                Field::req(507, "bundle_bytes.fortyeightclub.rationale", Text),
+                Field::req(508, "bundle_bytes.send_head_rule", Text),
+                Field::req(
+                    600,
+                    "economics_validation.min_output.must_be_positive",
+                    Bool,
+                ),
+                Field::req(601, "economics_validation.min_output.source", Text),
+                Field::req(
+                    602,
+                    "economics_validation.min_output.independent_cross_check",
+                    Text,
+                ),
+                Field::req(
+                    MAX_SLIPPAGE_BPS,
+                    "economics_validation.min_output.slippage_max_bps",
+                    U64,
+                ),
+                Field::req(
+                    604,
+                    "economics_validation.min_output.historical_min_output_reuse_forbidden",
+                    Bool,
+                ),
+                Field::req(610, "economics_validation.gas_floor.policy", Text),
+                Field::req(
+                    611,
+                    "economics_validation.gas_floor.blockrazor_current_documented_reference",
+                    Text,
+                ),
+                Field::req(612, "economics_validation.gas_floor.fortyeightclub", Text),
+                Field::req(
+                    MAX_SIGNED_GAS_PRICE_WEI,
+                    "economics_validation.gas_floor.max_signed_gas_price_wei",
+                    U256,
+                ),
+                Field::req(614, "economics_validation.gas_floor.freshness_rule", Text),
+                Field::req(
+                    615,
+                    "economics_validation.gas_floor.bound_policy_superseded_fields",
+                    Text,
+                ),
+                Field::req(620, "economics_validation.bid_policy.stage_1", Text),
+                Field::req(
+                    MAX_DIRECT_BUILDER_TIP_WEI,
+                    "economics_validation.bid_policy.max_direct_builder_tip_wei",
+                    U256,
+                ),
+                Field::req(
+                    622,
+                    "economics_validation.bid_policy.policy_change_requires_new_contract_version",
+                    Bool,
+                ),
+                Field::req(MAX_BUY_VALUE, "budget_wei.max_buy_value_per_attempt", U256),
+                Field::req(
+                    MAX_LAUNCH_VALUE,
+                    "budget_wei.max_launch_call_value_per_attempt",
+                    U256,
+                ),
+                Field::req(MAX_LAUNCH_GAS_LIMIT, "budget_wei.max_launch_gas_limit", U64),
+                Field::req(MAX_BUY_GAS_LIMIT, "budget_wei.max_buy_gas_limit", U64),
+                Field::req(MAX_GAS_PRICE_WEI, "budget_wei.max_gas_price_wei", U256),
+                Field::req(705, "budget_wei.max_gas_cost_per_attempt", U256),
+                Field::req(
+                    MAX_TOTAL_PER_ATTEMPT,
+                    "budget_wei.max_total_per_attempt",
+                    U256,
+                ),
+                Field::req(
+                    ABSOLUTE_BUDGET,
+                    "budget_wei.absolute_max_total_all_attempts",
+                    U256,
+                ),
+                Field::req(708, "budget_wei.note", Text),
+                Field::rep(800, "pre_arm_checks", Text),
+                Field::req(900, "success.acquisition", Text),
+                Field::req(901, "success.ordering", Text),
+                Field::req(902, "success.builder_evidence", Text),
+                Field::req(903, "success.timing", Text),
+                Field::req(1000, "retention_observability.record_send_head", Bool),
+                Field::req(1001, "retention_observability.record_inclusion_block", Bool),
+                Field::req(1002, "retention_observability.record_builder", Bool),
+                Field::req(1003, "retention_observability.record_validator", Bool),
+                Field::req(1004, "retention_observability.record_bundle_status", Bool),
+                Field::rep(
+                    1005,
+                    "retention_observability.on_expiry_without_inclusion",
+                    Text,
+                ),
+                Field::req(1006, "retention_observability.interpretation", Text),
+                Field::req(
+                    CAPTURE_REQUIRED,
+                    "retention_observability.pre_arm_bounded_capture_required",
+                    Bool,
+                ),
+                Field::req(
+                    WITNESS_CONTRACT_REQUIRED,
+                    "retention_observability.producer_witness_contract_required_before_execution",
+                    Bool,
+                ),
+                Field::req(
+                    1009,
+                    "retention_observability.g07_local_attempt_state",
+                    Text,
+                ),
+                Field::req(1100, "thresholds.PASS", Text),
+                Field::req(1101, "thresholds.ADAPT", Text),
+                Field::req(1102, "thresholds.STOP", Text),
+                Field::req(1200, "coverage.foreign_launch_coverage_requirement", Text),
+                Field::req(1201, "coverage.note", Text),
+                Field::req(1300, "send_guard.fail_closed", Bool),
+                Field::rep(1301, "send_guard.required_checks", Text),
+                Field::rep(1302, "send_guard.forbidden_authorities", Text),
+                Field::req(1400, "dry_pass.status", Text),
+                Field::req(1401, "dry_pass.valid_mainnet_bytes_may_leave_machine", Bool),
+                Field::nested(1402, "dry_pass.criteria", Presence::Repeated, &CRITERION),
+                Field::req(1403, "dry_pass.provider_prequalification", Text),
+                Field::req(1404, "dry_pass.all_four_required", Bool),
+                Field::req(1405, "dry_pass.evidence_scope_note", Text),
+                Field::rep(1500, "pre_arm_check_status", Text),
+            ]
+        };
+    }
+
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.g07.acceptance-contract.v3",
         record_type: 1,
         schema_version: 3,
-        fields: &[
-            Field::req(STATUS, "status", Text),
-            Field::req(11, "supersedes", Text),
-            Field::req(12, "purpose", Text),
-            Field::req(APPROVED, "authorization.approved", Bool),
-            Field::req(EXECUTION_READY, "authorization.execution_ready", Bool),
-            Field::req(102, "authorization.approval_required_for", Text),
-            Field::req(103, "authorization.note", Text),
-            Field::req(LAUNCHER, "authorization.launcher_address", Address),
-            Field::req(BUYER, "authorization.buyer_address", Address),
-            Field::req(106, "authorization.execution_authority", Text),
-            Field::req(107, "authorization.approval_scope", Text),
-            Field::req(ATTEMPT_ID, "authorization.attempt_id", Text),
+        fields: contract_fields!(
             Field::req(
                 DRY_RECORD_SHA256,
                 "authorization.evidence_bindings.dry_record_sha256",
@@ -190,173 +372,125 @@ pub mod contract {
                 B256,
             ),
             Field::req(126, "authorization.evidence_paths.note", Text),
-            Field::req(CHAIN_ID, "scope.chain_id", U64),
-            Field::req(201, "scope.venue", Text),
-            Field::req(202, "scope.launch", Text),
-            Field::req(203, "scope.tokenVersion", U64),
+        ),
+    };
+
+    /// The contract of the requalified attempt 1 (Portal v5.25.0): the same
+    /// fields as v3, binding native DRY records (legacy hashes only where an
+    /// input is an audited import), the local simulation, the economics
+    /// cross-check, the Portal upgrade scan and the superseded v3 proposal.
+    pub const V4: Schema = Schema {
+        name: "darkbot.g07.acceptance-contract.v4",
+        record_type: 25,
+        schema_version: 4,
+        fields: contract_fields!(
             Field::req(
-                PORTAL,
-                "scope.portal_expected_from_current_evidence",
-                Address,
-            ),
-            Field::req(205, "scope.portal_rule", Text),
-            Field::req(206, "scope.launch_mode", Text),
-            Field::req(207, "scope.quoteToken", Address),
-            Field::req(208, "scope.quoteAmt", U256),
-            Field::req(209, "scope.buy", Text),
-            Field::req(210, "scope.historical_g03_authority", Text),
-            Field::req(300, "wallet_separation.launcher", Address),
-            Field::req(301, "wallet_separation.buyer", Address),
-            Field::req(302, "wallet_separation.must_be_distinct_addresses", Bool),
-            Field::req(303, "wallet_separation.reason", Text),
-            Field::req(304, "wallet_separation.secret_storage", Text),
-            Field::req(MAX_ATTEMPTS, "attempts.maximum", U64),
-            Field::req(401, "attempts.economic_attempt_definition", Text),
-            Field::rep(402, "attempts.builder_fanout", Text),
-            Field::req(403, "attempts.parallel", Bool),
-            Field::req(404, "attempts.no_public_launch_broadcast", Bool),
-            Field::req(405, "attempts.no_automatic_retry", Bool),
-            Field::req(
-                406,
-                "attempts.no_parallel_fallback_buy_bundle_in_stage_1",
-                Bool,
+                DRY_RECORD_SHA256,
+                "authorization.evidence_bindings.dry_record_sha256",
+                B256,
             ),
             Field::req(
-                407,
-                "attempts.selected_attempts_remain_in_denominator",
-                Bool,
+                PREFLIGHT_RECORD_SHA256,
+                "authorization.evidence_bindings.preflight_record_sha256",
+                B256,
             ),
-            Field::rep(500, "bundle_bytes.tx_order", Text),
             Field::req(
-                501,
-                "bundle_bytes.identical_raw_transactions_across_builders",
-                Bool,
+                BUILDER_POLICY_RECORD_SHA256,
+                "authorization.evidence_bindings.builder_policy_record_sha256",
+                B256,
             ),
-            Field::req(502, "bundle_bytes.reverting_transactions_allowed", Bool),
-            Field::req(503, "bundle_bytes.max_block_window", Text),
-            Field::req(504, "bundle_bytes.expiry_mismatch", Text),
-            Field::req(505, "bundle_bytes.fortyeightclub.noMerge", Bool),
-            Field::req(506, "bundle_bytes.fortyeightclub.positionFirst", Bool),
-            Field::req(507, "bundle_bytes.fortyeightclub.rationale", Text),
-            Field::req(508, "bundle_bytes.send_head_rule", Text),
             Field::req(
-                600,
-                "economics_validation.min_output.must_be_positive",
-                Bool,
+                WITNESS_SOURCE_RECORD_SHA256,
+                "authorization.evidence_bindings.producer_witness_source_record_sha256",
+                B256,
             ),
-            Field::req(601, "economics_validation.min_output.source", Text),
+            Field::opt(
+                DRY_LEGACY_SHA256,
+                "authorization.evidence_bindings.dry_legacy_sha256",
+                B256,
+            ),
+            Field::opt(
+                PREFLIGHT_LEGACY_SHA256,
+                "authorization.evidence_bindings.preflight_legacy_sha256",
+                B256,
+            ),
+            Field::opt(
+                BUILDER_POLICY_LEGACY_SHA256,
+                "authorization.evidence_bindings.builder_policy_legacy_sha256",
+                B256,
+            ),
+            Field::opt(
+                WITNESS_SOURCE_LEGACY_SHA256,
+                "authorization.evidence_bindings.producer_witness_source_legacy_sha256",
+                B256,
+            ),
             Field::req(
-                602,
-                "economics_validation.min_output.independent_cross_check",
+                LOCAL_SIMULATION_RECORD_SHA256,
+                "authorization.evidence_bindings.local_simulation_record_sha256",
+                B256,
+            ),
+            Field::req(
+                ECONOMICS_RECORD_SHA256,
+                "authorization.evidence_bindings.economics_record_sha256",
+                B256,
+            ),
+            Field::req(
+                DRY_RECORD_PATH,
+                "authorization.evidence_paths.dry_record",
                 Text,
             ),
             Field::req(
-                MAX_SLIPPAGE_BPS,
-                "economics_validation.min_output.slippage_max_bps",
-                U64,
-            ),
-            Field::req(
-                604,
-                "economics_validation.min_output.historical_min_output_reuse_forbidden",
-                Bool,
-            ),
-            Field::req(610, "economics_validation.gas_floor.policy", Text),
-            Field::req(
-                611,
-                "economics_validation.gas_floor.blockrazor_current_documented_reference",
+                PREFLIGHT_RECORD_PATH,
+                "authorization.evidence_paths.preflight_record",
                 Text,
             ),
-            Field::req(612, "economics_validation.gas_floor.fortyeightclub", Text),
             Field::req(
-                MAX_SIGNED_GAS_PRICE_WEI,
-                "economics_validation.gas_floor.max_signed_gas_price_wei",
-                U256,
-            ),
-            Field::req(614, "economics_validation.gas_floor.freshness_rule", Text),
-            Field::req(
-                615,
-                "economics_validation.gas_floor.bound_policy_superseded_fields",
+                BUILDER_POLICY_RECORD_PATH,
+                "authorization.evidence_paths.builder_policy_record",
                 Text,
             ),
-            Field::req(620, "economics_validation.bid_policy.stage_1", Text),
             Field::req(
-                MAX_DIRECT_BUILDER_TIP_WEI,
-                "economics_validation.bid_policy.max_direct_builder_tip_wei",
-                U256,
-            ),
-            Field::req(
-                622,
-                "economics_validation.bid_policy.policy_change_requires_new_contract_version",
-                Bool,
-            ),
-            Field::req(MAX_BUY_VALUE, "budget_wei.max_buy_value_per_attempt", U256),
-            Field::req(
-                MAX_LAUNCH_VALUE,
-                "budget_wei.max_launch_call_value_per_attempt",
-                U256,
-            ),
-            Field::req(MAX_LAUNCH_GAS_LIMIT, "budget_wei.max_launch_gas_limit", U64),
-            Field::req(MAX_BUY_GAS_LIMIT, "budget_wei.max_buy_gas_limit", U64),
-            Field::req(MAX_GAS_PRICE_WEI, "budget_wei.max_gas_price_wei", U256),
-            Field::req(705, "budget_wei.max_gas_cost_per_attempt", U256),
-            Field::req(
-                MAX_TOTAL_PER_ATTEMPT,
-                "budget_wei.max_total_per_attempt",
-                U256,
-            ),
-            Field::req(
-                ABSOLUTE_BUDGET,
-                "budget_wei.absolute_max_total_all_attempts",
-                U256,
-            ),
-            Field::req(708, "budget_wei.note", Text),
-            Field::rep(800, "pre_arm_checks", Text),
-            Field::req(900, "success.acquisition", Text),
-            Field::req(901, "success.ordering", Text),
-            Field::req(902, "success.builder_evidence", Text),
-            Field::req(903, "success.timing", Text),
-            Field::req(1000, "retention_observability.record_send_head", Bool),
-            Field::req(1001, "retention_observability.record_inclusion_block", Bool),
-            Field::req(1002, "retention_observability.record_builder", Bool),
-            Field::req(1003, "retention_observability.record_validator", Bool),
-            Field::req(1004, "retention_observability.record_bundle_status", Bool),
-            Field::rep(
-                1005,
-                "retention_observability.on_expiry_without_inclusion",
+                WITNESS_SOURCE_RECORD_PATH,
+                "authorization.evidence_paths.producer_witness_source_record",
                 Text,
             ),
-            Field::req(1006, "retention_observability.interpretation", Text),
-            Field::req(
-                CAPTURE_REQUIRED,
-                "retention_observability.pre_arm_bounded_capture_required",
-                Bool,
-            ),
-            Field::req(
-                WITNESS_CONTRACT_REQUIRED,
-                "retention_observability.producer_witness_contract_required_before_execution",
-                Bool,
-            ),
-            Field::req(
-                1009,
-                "retention_observability.g07_local_attempt_state",
+            Field::opt(
+                124,
+                "authorization.evidence_paths.builder_requirements_refresh",
                 Text,
             ),
-            Field::req(1100, "thresholds.PASS", Text),
-            Field::req(1101, "thresholds.ADAPT", Text),
-            Field::req(1102, "thresholds.STOP", Text),
-            Field::req(1200, "coverage.foreign_launch_coverage_requirement", Text),
-            Field::req(1201, "coverage.note", Text),
-            Field::req(1300, "send_guard.fail_closed", Bool),
-            Field::rep(1301, "send_guard.required_checks", Text),
-            Field::rep(1302, "send_guard.forbidden_authorities", Text),
-            Field::req(1400, "dry_pass.status", Text),
-            Field::req(1401, "dry_pass.valid_mainnet_bytes_may_leave_machine", Bool),
-            Field::nested(1402, "dry_pass.criteria", Presence::Repeated, &CRITERION),
-            Field::req(1403, "dry_pass.provider_prequalification", Text),
-            Field::req(1404, "dry_pass.all_four_required", Bool),
-            Field::req(1405, "dry_pass.evidence_scope_note", Text),
-            Field::rep(1500, "pre_arm_check_status", Text),
-        ],
+            Field::opt(
+                125,
+                "authorization.evidence_paths.builder_requirements_refresh_sha256",
+                B256,
+            ),
+            Field::req(126, "authorization.evidence_paths.note", Text,),
+            Field::req(
+                LOCAL_SIMULATION_RECORD_PATH,
+                "authorization.evidence_paths.local_simulation_record",
+                Text,
+            ),
+            Field::req(
+                ECONOMICS_RECORD_PATH,
+                "authorization.evidence_paths.economics_record",
+                Text,
+            ),
+            Field::req(
+                SUPERSEDES_CONTRACT_SHA256,
+                "authorization.supersedes_contract_sha256",
+                B256,
+            ),
+            Field::req(
+                PORTAL_UPGRADE_RECORD_SHA256,
+                "authorization.evidence_bindings.portal_upgrade_record_sha256",
+                B256,
+            ),
+            Field::req(
+                PORTAL_UPGRADE_RECORD_PATH,
+                "authorization.evidence_paths.portal_upgrade_record",
+                Text,
+            ),
+        ),
     };
 }
 
@@ -680,9 +814,9 @@ pub mod evidence {
     }
 
     pub const SCHEMA: Schema = Schema {
-        name: "darkbot.g07.mainnet-self-launch-buy.v3",
+        name: "darkbot.g07.mainnet-self-launch-buy.v4",
         record_type: 8,
-        schema_version: 3,
+        schema_version: 4,
         fields: &[
             Field::req(GATE, "gate", Text),
             Field::req(ATTEMPT_ID, "attempt_id", Text),
@@ -695,10 +829,10 @@ pub mod evidence {
             Field::req(CONTRACT_SHA256, "acceptance_contract.sha256", B256),
             Field::req(DRY_PATH, "evidence_inputs.dry_path", Text),
             Field::req(DRY_SHA256, "evidence_inputs.dry_sha256", B256),
-            Field::req(DRY_LEGACY_SHA256, "evidence_inputs.dry_legacy_sha256", B256),
+            Field::opt(DRY_LEGACY_SHA256, "evidence_inputs.dry_legacy_sha256", B256),
             Field::req(PREFLIGHT_PATH, "evidence_inputs.preflight_path", Text),
             Field::req(PREFLIGHT_SHA256, "evidence_inputs.preflight_sha256", B256),
-            Field::req(
+            Field::opt(
                 PREFLIGHT_LEGACY_SHA256,
                 "evidence_inputs.preflight_legacy_sha256",
                 B256,
@@ -713,7 +847,7 @@ pub mod evidence {
                 "evidence_inputs.builder_policy_sha256",
                 B256,
             ),
-            Field::req(
+            Field::opt(
                 BUILDER_POLICY_LEGACY_SHA256,
                 "evidence_inputs.builder_policy_legacy_sha256",
                 B256,
@@ -728,7 +862,7 @@ pub mod evidence {
                 "evidence_inputs.producer_witness_source_sha256",
                 B256,
             ),
-            Field::req(
+            Field::opt(
                 WITNESS_SOURCE_LEGACY_SHA256,
                 "evidence_inputs.producer_witness_source_legacy_sha256",
                 B256,
@@ -927,14 +1061,33 @@ pub mod readiness {
     pub const CHECKS: u16 = 6;
     pub mod check {
         use super::*;
-        pub const NAME: u16 = 1; pub const STATUS: u16 = 2; pub const DETAIL: u16 = 3;
-        pub const SCHEMA: Schema = Schema { name: "darkbot.g07.readiness-check", record_type: 0, schema_version: 1,
-            fields: &[Field::req(NAME,"name",Text),Field::req(STATUS,"status",Text),Field::req(DETAIL,"detail",Text)] };
+        pub const NAME: u16 = 1;
+        pub const STATUS: u16 = 2;
+        pub const DETAIL: u16 = 3;
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.g07.readiness-check",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(NAME, "name", Text),
+                Field::req(STATUS, "status", Text),
+                Field::req(DETAIL, "detail", Text),
+            ],
+        };
     }
-    pub const SCHEMA: Schema = Schema { name: "darkbot.g07.readiness", record_type: 18, schema_version: 1,
-        fields: &[Field::req(STATUS,"status",Text),Field::req(MODE,"mode",Text),
-            Field::req(OBSERVED_UNIX_MS,"observed_unix_ms",U64),Field::req(LIVE_AUTHORIZED,"live_authorized",Bool),
-            Field::opt(CONTRACT_SHA256,"contract_sha256",Text),Field::nested(CHECKS,"checks",Presence::Repeated,&check::SCHEMA)] };
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.g07.readiness",
+        record_type: 18,
+        schema_version: 1,
+        fields: &[
+            Field::req(STATUS, "status", Text),
+            Field::req(MODE, "mode", Text),
+            Field::req(OBSERVED_UNIX_MS, "observed_unix_ms", U64),
+            Field::req(LIVE_AUTHORIZED, "live_authorized", Bool),
+            Field::opt(CONTRACT_SHA256, "contract_sha256", Text),
+            Field::nested(CHECKS, "checks", Presence::Repeated, &check::SCHEMA),
+        ],
+    };
 }
 
 pub const ALL: &[&Schema] = &[
@@ -942,5 +1095,6 @@ pub const ALL: &[&Schema] = &[
     &probe::SCHEMA,
     &witness_source::SCHEMA,
     &contract::SCHEMA,
+    &contract::V4,
     &evidence::SCHEMA,
 ];

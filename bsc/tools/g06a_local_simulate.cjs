@@ -3,10 +3,11 @@
 // Network use is READ-ONLY state/header retrieval through RPCStateManager.
 // Valid signed Mainnet transaction bytes are created locally and NEVER submitted.
 // Output evidence contains hashes/amounts/gas only, never raw signed tx bytes.
+// The evidence is a binary DBREC001 record (./dbrec.cjs); stdout is a text
+// summary. No JSON is written.
 
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 
 // Reproducible npm toolsets next to this script (package.json + package-lock.json;
@@ -27,6 +28,7 @@ const {
 } = require(path.join(LEGACY_TOOLS, '@ethereumjs/util'));
 const { createLegacyTx } = require(path.join(LEGACY_TOOLS, '@ethereumjs/tx'));
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
+const dbrec = require('./dbrec.cjs');
 
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
@@ -39,9 +41,6 @@ function req(name) {
   return v;
 }
 function dec(name) { return BigInt(req(name)); }
-function clean(x) {
-  return JSON.parse(JSON.stringify(x, (_, v) => typeof v === 'bigint' ? v.toString() : v));
-}
 async function rpc(url, method, params = []) {
   const delaysMs = [0, 150, 500, 1200];
   let lastError;
@@ -154,7 +153,7 @@ function balanceOfCalldata(owner) {
 }
 async function main() {
   const outPath = process.argv[2];
-  if (!outPath) throw new Error('usage: node g06a_local_simulate.cjs <output-evidence.json>');
+  if (!outPath) throw new Error('usage: node g06a_local_simulate.cjs <local_simulation.dbrec>');
 
   const rpcUrl = req('BSC_MAINNET_RPC_HTTPS');
   const launcherWallet = new ethers.Wallet(req('DARKBOT_G06A_LAUNCHER_PRIVATE_KEY'));
@@ -315,39 +314,39 @@ async function main() {
     throw new Error('DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256 must be 64 hex chars');
   }
 
-  const evidence = {
+  const record = dbrec.encode('darkbot.g06a.local-simulation.v2', {
+    '_provenance.tool': 'bsc/tools/g06a_local_simulate.cjs',
+    '_provenance.observed_unix_ms': BigInt(Date.now()),
     schema: 'darkbot.g06a.local-simulation.v1',
     backend: '@ethereumjs/evm + RPCStateManager 10.1.3',
     bsc_execution_profile: 'chainId 56; EthereumJS Osaka EVM semantics; BSC Pasteur consensus/builder rules outside local EVM scope',
-    state_source: {
-      block_number: parentNumber,
-      block_hash: parent.hash,
-      rpc_state_reads_only: true,
-      valid_signed_tx_bytes_submitted: false,
-    },
+    'state_source.block_number': parentNumber,
+    'state_source.block_hash': parent.hash,
+    'state_source.rpc_state_reads_only': true,
+    'state_source.valid_signed_tx_bytes_submitted': false,
     launch_tx_hash: launchHash,
     buy_tx_hash: buyHash,
     token,
     launcher: launcherWallet.address,
     buyer: buyerWallet.address,
-    launcher_pending_nonce: Number(launcherPending),
-    buyer_pending_nonce: Number(buyerPending),
+    launcher_pending_nonce: launcherPending,
+    buyer_pending_nonce: buyerPending,
     launch_success: true,
     buy_success: true,
-    simulated_received_amount: returned.toString(),
-    simulated_buyer_balance_after: balance.toString(),
-    local_expected_output_input: localExpected.toString(),
-    min_output: minOutput.toString(),
+    simulated_received_amount: returned,
+    simulated_buyer_balance_after: balance,
+    local_expected_output_input: localExpected,
+    min_output: minOutput,
     output_difference: (returned - localExpected).toString(),
-    launch_execution_gas: launchRes.execResult.executionGasUsed.toString(),
-    buy_execution_gas: buyRes.execResult.executionGasUsed.toString(),
-    launch_intrinsic_gas: launchIntrinsic.toString(),
-    buy_intrinsic_gas: buyIntrinsic.toString(),
-    launch_gas_used: Number(launchGasUpper),
-    buy_gas_used: Number(buyGasUpper),
+    launch_execution_gas: launchRes.execResult.executionGasUsed,
+    buy_execution_gas: buyRes.execResult.executionGasUsed,
+    launch_intrinsic_gas: BigInt(launchIntrinsic),
+    buy_intrinsic_gas: BigInt(buyIntrinsic),
+    launch_gas_used: launchGasUpper,
+    buy_gas_used: buyGasUpper,
     gas_accounting: 'conservative upper bound = intrinsic + runCall executionGasUsed; refunds not subtracted',
-    strictest_verified_builder_floor_wei: Number(floorWei),
-    builder_floor_evidence_sha256: floorEvidenceSha.toLowerCase(),
+    strictest_verified_builder_floor_wei: floorWei,
+    builder_floor_evidence_sha256: '0x' + floorEvidenceSha.toLowerCase(),
     raw_signed_transactions_persisted: false,
     raw_bundle_persisted: false,
     limitations: [
@@ -355,24 +354,11 @@ async function main() {
       'RPCStateManager performs read-only state/code/storage requests against the frozen parent block',
       'Builder gas-floor evidence is a separately frozen input and is not established by this script',
       'No signed transaction or bundle is submitted to any RPC or builder'
-    ]
-  };
-
-  fs.writeFileSync(outPath, JSON.stringify(clean(evidence), null, 2) + '\n', { mode: 0o600 });
-  console.log(JSON.stringify(clean({
-    status: 'G0.6A_LOCAL_SIMULATION_EVIDENCE_WRITTEN',
-    output: outPath,
-    block: parentNumber,
-    launch_tx_hash: launchHash,
-    buy_tx_hash: buyHash,
-    token,
-    simulated_received_amount: returned,
-    local_expected_output: localExpected,
-    output_difference: returned - localExpected,
-    launch_gas_upper: launchGasUpper,
-    buy_gas_upper: buyGasUpper,
-    valid_signed_tx_bytes_submitted: false
-  }), null, 2));
+    ],
+  });
+  dbrec.writeNew(outPath, record);
+  const sha = require('crypto').createHash('sha256').update(record).digest('hex');
+  console.log(`LOCAL_SIMULATION=WRITTEN\nRECORD=${outPath}\nRECORD_SHA256=${sha}\nBLOCK=${parentNumber}\nLAUNCH_TX_HASH=${launchHash}\nBUY_TX_HASH=${buyHash}\nTOKEN=${token}\nSIMULATED_RECEIVED_AMOUNT=${returned}\nOUTPUT_DIFFERENCE=${returned - localExpected}\nLAUNCH_GAS_UPPER=${launchGasUpper}\nBUY_GAS_UPPER=${buyGasUpper}\nVALID_SIGNED_TX_BYTES_SUBMITTED=false`);
 }
 
 main().catch((e) => {

@@ -4,14 +4,25 @@
 //! Mainnet transaction bytes in memory, but it never writes them to a socket or
 //! external process. Before live execution a separate, explicitly armed binary/path
 //! must pass acceptance_guard::verify_live_authorization().
+//!
+//! It reads the binary local-simulation record and writes the binary DRY
+//! record (DBREC001, native schema with provenance); stdout is the record's
+//! derived view. No JSON: the builder envelopes are projected with the same
+//! fixed wire templates G0.7 sends, held in RAM only.
 
 use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use alloy_sol_types::{SolCall, sol};
 use darkbot_bsc_execution::acceptance_guard::{
-    FROZEN_APPROVED_V3_SHA256, V3_RELATIVE_PATH, inspect_v3, sha256_hex,
+    FROZEN_APPROVED_V4_SHA256, V3_RELATIVE_PATH, inspect_v3,
 };
+use darkbot_bsc_record::schema::{
+    PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL,
+    g06a::{dry, local_simulation as sim},
+};
+use darkbot_bsc_record::{Draft, Value, decode};
 use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
-use serde_json::{Value, json};
+use std::io::Write;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs, path::Path, str::FromStr};
 
 const CHAIN_ID: u64 = 56;
@@ -377,19 +388,60 @@ fn buy_calldata(token: Address, input: U256, minimum: U256) -> Vec<u8> {
     .abi_encode()
 }
 
+/// The BlockRazor `eth_sendBundle` body exactly as G0.7 frames it.
+fn blockrazor_body(request_id: &str, txs: [&str; 2], max_block: u64) -> String {
+    format!(
+        r#"{{"id":"{request_id}","jsonrpc":"2.0","method":"eth_sendBundle","params":[{{"maxBlockNumber":{max_block},"txs":["{}","{}"]}}]}}"#,
+        txs[0], txs[1]
+    )
+}
+
+/// The 48Club `eth_sendBundle` body exactly as G0.7 frames it. G0.7 sets
+/// maxTimestamp from the send head at the release; the DRY projection has
+/// no send head and uses 0, so its digest describes the template only.
+fn club48_body(request_id: &str, txs: [&str; 2], max_block: u64, max_timestamp: u64) -> String {
+    format!(
+        r#"{{"id":"{request_id}","jsonrpc":"2.0","method":"eth_sendBundle","params":[{{"maxBlockNumber":{max_block},"maxTimestamp":{max_timestamp},"noMerge":true,"positionFirst":true,"txs":["{}","{}"]}}]}}"#,
+        txs[0], txs[1]
+    )
+}
+
+fn is_wire_hex(text: &str) -> bool {
+    text.strip_prefix("0x")
+        .is_some_and(|h| !h.is_empty() && h.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+fn tag(name: &str) -> u16 {
+    dry::NATIVE
+        .fields
+        .iter()
+        .find(|f| f.name == name)
+        .map(|f| f.tag)
+        .unwrap_or_else(|| panic!("native DRY schema has no field {name}"))
+}
+
+fn word(x: U256) -> Value {
+    Value::U256(x.to_be_bytes())
+}
+
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    assert!(
-        args.len() == 1 || (args.len() == 3 && args[1] == "--verify-evidence"),
-        "usage: g06a_self_launch_bundle [--verify-evidence <local_simulation.json>]"
-    );
+    let args: Vec<String> = env::args().skip(1).collect();
+    let (evidence_path, out_path) = match args.as_slice() {
+        [flag, out] if flag == "--out" => (None, out.clone()),
+        [verify, evidence, flag, out] if verify == "--verify-evidence" && flag == "--out" => {
+            (Some(evidence.clone()), out.clone())
+        }
+        _ => panic!(
+            "usage: g06a_self_launch_bundle [--verify-evidence <local_simulation.dbrec>] --out <dry_result.dbrec>"
+        ),
+    };
 
     // The DRY of attempt 1 is complete and frozen; this harness only runs
     // while the guard is unarmed (the compiled hash, not the contract's
     // approval flags, is the execution authority).
     let contract = inspect_v3(Path::new(CONTRACT_PATH)).expect("v3 contract invalid");
     assert_eq!(
-        FROZEN_APPROVED_V3_SHA256, "UNARMED",
+        FROZEN_APPROVED_V4_SHA256, "UNARMED",
         "DRY harness must not run after source guard is armed"
     );
 
@@ -495,40 +547,23 @@ fn main() {
         "DRY-4 expiry must be within send_head..=send_head+2"
     );
 
-    // Exact same transaction bytes are projected into both builder envelopes.
-    // These strings remain in RAM only. This binary has no networking code.
+    // Exact same transaction bytes are projected into both builder envelopes,
+    // framed with G0.7's fixed templates. These strings remain in RAM only.
+    // This binary has no networking code.
     let launch_hex = format!("0x{}", hex::encode(&launch.raw));
     let buy_hex = format!("0x{}", hex::encode(&buy.raw));
-    let br = json!({
-        "jsonrpc":"2.0",
-        "id":1,
-        "method":"eth_sendBundle",
-        "params":[{
-            "txs":[launch_hex.clone(), buy_hex.clone()],
-            "maxBlockNumber": format!("0x{max_block:x}")
-        }]
-    });
-    let c48 = json!({
-        "jsonrpc":"2.0",
-        "id":1,
-        "method":"eth_sendBundle",
-        "params":[{
-            "txs":[launch_hex.clone(), buy_hex.clone()],
-            "maxBlockNumber": max_block,
-            "noMerge": true,
-            "positionFirst": true
-        }]
-    });
-
-    let br_txs = br.pointer("/params/0/txs").unwrap().as_array().unwrap();
-    let c48_txs = c48.pointer("/params/0/txs").unwrap().as_array().unwrap();
-    assert_eq!(br_txs, c48_txs, "DRY-1 builder transaction bytes differ");
-    assert_eq!(br_txs.len(), 2);
-    assert_eq!(br_txs[0].as_str().unwrap(), launch_hex);
-    assert_eq!(br_txs[1].as_str().unwrap(), buy_hex);
-
-    let br_digest = sha256_hex(serde_json::to_vec(&br).unwrap().as_slice());
-    let c48_digest = sha256_hex(serde_json::to_vec(&c48).unwrap().as_slice());
+    let request_id = buy.hash.to_string();
+    assert!(is_wire_hex(&launch_hex) && is_wire_hex(&buy_hex) && is_wire_hex(&request_id));
+    let txs = [launch_hex.as_str(), buy_hex.as_str()];
+    let br = blockrazor_body(&request_id, txs, max_block);
+    let c48 = club48_body(&request_id, txs, max_block, 0);
+    let tx_list = format!("\"txs\":[\"{launch_hex}\",\"{buy_hex}\"]");
+    assert!(
+        br.contains(&tx_list) && c48.contains(&tx_list),
+        "DRY-1 builder transaction bytes differ"
+    );
+    let br_digest = darkbot_bsc_record::sha256(br.as_bytes());
+    let c48_digest = darkbot_bsc_record::sha256(c48.as_bytes());
 
     let worst_case_gas = (launch_gas_limit as u128 + buy_gas_limit as u128)
         .checked_mul(gas_price as u128)
@@ -546,54 +581,69 @@ fn main() {
     let mut dry3 = false;
     let mut dry4_nonce = false;
 
-    if args.len() == 3 {
-        let evidence: Value = serde_json::from_slice(
-            &fs::read(&args[2]).expect("cannot read local simulation evidence"),
+    if let Some(path) = &evidence_path {
+        let evidence = decode(
+            &sim::NATIVE,
+            &fs::read(path).expect("cannot read local simulation record"),
         )
-        .expect("invalid local simulation evidence JSON");
+        .expect("invalid local simulation record");
+        let field = |name: &str| {
+            let tag = sim::NATIVE
+                .fields
+                .iter()
+                .find(|f| f.name == name)
+                .map(|f| f.tag)
+                .unwrap_or_else(|| panic!("local simulation schema has no field {name}"));
+            evidence
+                .get(tag)
+                .cloned()
+                .unwrap_or_else(|| panic!("local simulation lacks {name}"))
+        };
+        let u64_of = |name: &str| match field(name) {
+            Value::U64(n) => n,
+            other => panic!("{name} is {other:?}"),
+        };
 
         assert_eq!(
-            evidence["launch_tx_hash"]
-                .as_str()
-                .unwrap()
-                .to_ascii_lowercase(),
-            launch.hash.to_string().to_ascii_lowercase(),
+            field("launch_tx_hash"),
+            Value::B256(launch.hash.0),
             "DRY-2 evidence launch hash mismatch"
         );
         assert_eq!(
-            evidence["buy_tx_hash"]
-                .as_str()
-                .unwrap()
-                .to_ascii_lowercase(),
-            buy.hash.to_string().to_ascii_lowercase(),
+            field("buy_tx_hash"),
+            Value::B256(buy.hash.0),
             "DRY-2 evidence buy hash mismatch"
         );
         assert_eq!(
-            evidence["token"].as_str().unwrap().to_ascii_lowercase(),
-            token.to_string().to_ascii_lowercase(),
+            field("token"),
+            Value::Address(token.into_array()),
             "DRY-2 evidence token mismatch"
         );
 
-        let simulated_output =
-            U256::from_str(evidence["simulated_received_amount"].as_str().unwrap()).unwrap();
+        let simulated_output = match field("simulated_received_amount") {
+            Value::U256(w) => U256::from_be_bytes(w),
+            other => panic!("simulated_received_amount is {other:?}"),
+        };
         assert_eq!(
             simulated_output, local_expected_output,
             "DRY-2 independent simulated output != local calculation"
         );
         assert!(min_output <= simulated_output && min_output > U256::ZERO);
-        assert_eq!(evidence["launch_success"].as_bool(), Some(true));
-        assert_eq!(evidence["buy_success"].as_bool(), Some(true));
+        assert_eq!(field("launch_success"), Value::Bool(true));
+        assert_eq!(field("buy_success"), Value::Bool(true));
+        assert_eq!(field("output_difference"), Value::Text("0".into()));
         dry2 = true;
 
-        let launch_gas_used = evidence["launch_gas_used"].as_u64().unwrap();
-        let buy_gas_used = evidence["buy_gas_used"].as_u64().unwrap();
+        let launch_gas_used = u64_of("launch_gas_used");
+        let buy_gas_used = u64_of("buy_gas_used");
         assert!(launch_gas_used <= launch_gas_limit);
         assert!(buy_gas_used <= buy_gas_limit);
-        let strict_floor = evidence["strictest_verified_builder_floor_wei"]
-            .as_u64()
-            .unwrap();
+        let strict_floor = match field("strictest_verified_builder_floor_wei") {
+            Value::U256(w) => U256::from_be_bytes(w),
+            other => panic!("strictest_verified_builder_floor_wei is {other:?}"),
+        };
         assert!(
-            gas_price >= strict_floor,
+            U256::from(gas_price) >= strict_floor,
             "DRY-3 signed gas price below strictest verified builder floor"
         );
         let simulated_cost = launch_value
@@ -606,14 +656,14 @@ fn main() {
         dry3 = true;
 
         assert_eq!(
-            evidence["launcher_pending_nonce"].as_u64(),
-            Some(launcher_nonce),
+            u64_of("launcher_pending_nonce"),
+            launcher_nonce,
             "DRY-4 launcher nonce mismatch"
         );
         if wallets_distinct {
             assert_eq!(
-                evidence["buyer_pending_nonce"].as_u64(),
-                Some(buyer_nonce),
+                u64_of("buyer_pending_nonce"),
+                buyer_nonce,
                 "DRY-4 buyer nonce mismatch"
             );
             dry4_nonce = true;
@@ -622,8 +672,8 @@ fn main() {
             // The BUY is intentionally signed at N+1 and therefore cannot satisfy the two-wallet
             // DRY-4 contract. This mode is diagnostic only.
             assert_eq!(
-                evidence["buyer_pending_nonce"].as_u64(),
-                Some(launcher_nonce),
+                u64_of("buyer_pending_nonce"),
+                launcher_nonce,
                 "same-wallet pending nonce mismatch"
             );
             dry4_nonce = false;
@@ -637,67 +687,122 @@ fn main() {
     let dry4 = dry4_nonce && dry4_zero_egress;
     let all = dry1 && dry2 && dry3 && dry4;
 
-    println!("{}", serde_json::to_string_pretty(&json!({
-        "status": "G0.6A_SELF_LAUNCH_BUNDLE_DRY",
-        "contract": {
-            "path": CONTRACT_PATH,
-            "sha256": contract.sha256,
-            "approved": contract.approved,
-            "execution_ready": contract.execution_ready,
-            "compiled_live_hash": FROZEN_APPROVED_V3_SHA256
-        },
-        "wallets": {
-            "launcher": launcher.to_string(),
-            "buyer": buyer.to_string(),
-            "distinct": wallets_distinct,
-            "same_wallet_test_mode": allow_same_wallet_test && !wallets_distinct
-        },
-        "transactions": {
-            "chain_id": CHAIN_ID,
-            "portal": PORTAL,
-            "token": token.to_string(),
-            "launch_tx_hash": launch.hash.to_string(),
-            "buy_tx_hash": buy.hash.to_string(),
-            "min_output": min_output.to_string(),
-            "local_expected_output": local_expected_output.to_string(),
-            "gas_price_wei": gas_price,
-            "launch_gas_limit": launch_gas_limit,
-            "buy_gas_limit": buy_gas_limit,
-            "launch_value_wei": launch_value.to_string(),
-            "buy_value_wei": buy_value.to_string()
-        },
-        "bundle_projection": {
-            "order": ["launch_A","buy_B"],
-            "identical_txs_across_builders": true,
-            "blockrazor_payload_sha256": br_digest,
-            "fortyeightclub_payload_sha256": c48_digest,
-            "send_head": send_head,
-            "max_block": max_block,
-            "fortyeightclub_noMerge": true,
-            "fortyeightclub_positionFirst": true
-        },
-        "budget": {
-            "worst_case_reserved_wei": reserved.to_string(),
-            "v2_proposal_per_attempt_ceiling_wei": "10603270000000000"
-        },
-        "dry_pass": {
-            "DRY_1_bytes_and_signers": dry1,
-            "DRY_2_independent_local_simulation": dry2,
-            "DRY_3_gas_floor_and_budget": dry3,
-            "DRY_4_expiry_nonces_zero_egress": dry4,
-            "zero_egress_structural": dry4_zero_egress,
-            "all": all
-        },
-        "qualification_note": if wallets_distinct {
-            "eligible for DRY-1/DRY-4 qualification if all other predicates pass"
-        } else {
-            "SAME_WALLET_TEST_ONLY: construction/recovery diagnostics only; DRY-1 and DRY-4 intentionally cannot pass"
-        },
-        "network_write_capability": "NONE_IN_THIS_BINARY",
-        "live_submission": "IMPOSSIBLE_FROM_G06A_DRY_BINARY"
-    })).unwrap());
+    let observed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let mut d = Draft::new(&dry::NATIVE);
+    d.set(PROVENANCE_TOOL, "g06a_self_launch_bundle")
+        .set(PROVENANCE_OBSERVED_UNIX_MS, observed)
+        .set(dry::STATUS, "G0.6A_SELF_LAUNCH_BUNDLE_DRY")
+        .set(tag("contract.path"), CONTRACT_PATH)
+        .set(
+            tag("contract.sha256"),
+            Value::B256(B256::from_str(&contract.sha256).expect("contract sha").0),
+        )
+        .set(tag("contract.approved"), contract.approved)
+        .set(tag("contract.execution_ready"), contract.execution_ready)
+        .set(tag("contract.compiled_live_hash"), FROZEN_APPROVED_V4_SHA256)
+        .set(dry::LAUNCHER, Value::Address(launcher.into_array()))
+        .set(dry::BUYER, Value::Address(buyer.into_array()))
+        .set(dry::DISTINCT, wallets_distinct)
+        .set(
+            tag("wallets.same_wallet_test_mode"),
+            allow_same_wallet_test && !wallets_distinct,
+        )
+        .set(dry::CHAIN_ID, CHAIN_ID)
+        .set(dry::PORTAL, Value::Address(portal.into_array()))
+        .set(dry::TOKEN, Value::Address(token.into_array()))
+        .set(dry::LAUNCH_TX_HASH, Value::B256(launch.hash.0))
+        .set(dry::BUY_TX_HASH, Value::B256(buy.hash.0))
+        .set(dry::MIN_OUTPUT, word(min_output))
+        .set(dry::LOCAL_EXPECTED_OUTPUT, word(local_expected_output))
+        .set(dry::GAS_PRICE_WEI, gas_price)
+        .set(dry::LAUNCH_GAS_LIMIT, launch_gas_limit)
+        .set(dry::BUY_GAS_LIMIT, buy_gas_limit)
+        .set(dry::LAUNCH_VALUE_WEI, Value::u128(launch_value))
+        .set(dry::BUY_VALUE_WEI, Value::u128(u128::from(buy_value)))
+        .push(tag("bundle_projection.order"), "launch_A")
+        .push(tag("bundle_projection.order"), "buy_B")
+        .set(tag("bundle_projection.identical_txs_across_builders"), true)
+        .set(
+            tag("bundle_projection.blockrazor_payload_sha256"),
+            Value::B256(br_digest),
+        )
+        .set(
+            tag("bundle_projection.fortyeightclub_payload_sha256"),
+            Value::B256(c48_digest),
+        )
+        .set(tag("bundle_projection.send_head"), send_head)
+        .set(tag("bundle_projection.max_block"), max_block)
+        .set(tag("bundle_projection.fortyeightclub_noMerge"), true)
+        .set(tag("bundle_projection.fortyeightclub_positionFirst"), true)
+        .set(tag("budget.worst_case_reserved_wei"), Value::u128(reserved))
+        .set(
+            tag("budget.v2_proposal_per_attempt_ceiling_wei"),
+            Value::u128(10_603_270_000_000_000),
+        )
+        .set(dry::DRY_1, dry1)
+        .set(dry::DRY_2, dry2)
+        .set(dry::DRY_3, dry3)
+        .set(dry::DRY_4, dry4)
+        .set(dry::ZERO_EGRESS_STRUCTURAL, dry4_zero_egress)
+        .set(dry::DRY_ALL, all)
+        .set(
+            tag("qualification_note"),
+            if wallets_distinct {
+                "eligible for DRY-1/DRY-4 qualification if all other predicates pass"
+            } else {
+                "SAME_WALLET_TEST_ONLY: construction/recovery diagnostics only; DRY-1 and DRY-4 intentionally cannot pass"
+            },
+        )
+        .set(dry::NETWORK_WRITE_CAPABILITY, "NONE_IN_THIS_BINARY")
+        .set(tag("live_submission"), "IMPOSSIBLE_FROM_G06A_DRY_BINARY");
+    let record = d.encode().expect("encode DRY record");
+    let view = decode(&dry::NATIVE, &record)
+        .expect("decode DRY record")
+        .render();
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&out_path)
+        .expect("create-new DRY record");
+    file.write_all(&record)
+        .and_then(|()| file.sync_all())
+        .expect("write DRY record");
+    print!("{view}");
 
     if !all {
         std::process::exit(2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The projection bodies are byte-identical to G0.7's golden wire format
+    /// (crates/execution .../builder_submission.rs).
+    #[test]
+    fn projection_bodies_are_the_g07_wire_format() {
+        assert_eq!(
+            club48_body("0xb2", ["0xaa", "0xbb"], 103, 1_002),
+            r#"{"id":"0xb2","jsonrpc":"2.0","method":"eth_sendBundle","params":[{"maxBlockNumber":103,"maxTimestamp":1002,"noMerge":true,"positionFirst":true,"txs":["0xaa","0xbb"]}]}"#
+        );
+        assert_eq!(
+            blockrazor_body("0xb2", ["0xaa", "0xbb"], 103),
+            r#"{"id":"0xb2","jsonrpc":"2.0","method":"eth_sendBundle","params":[{"maxBlockNumber":103,"txs":["0xaa","0xbb"]}]}"#
+        );
+        assert!(
+            is_wire_hex("0x0a") && !is_wire_hex("0x") && !is_wire_hex("0xg1") && !is_wire_hex("aa")
+        );
+        // Every native DRY field the harness sets exists.
+        for name in [
+            "contract.path",
+            "bundle_projection.order",
+            "live_submission",
+        ] {
+            let _ = tag(name);
+        }
     }
 }

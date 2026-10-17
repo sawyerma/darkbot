@@ -12,3 +12,16 @@ sha2 = { workspace = true }
 # Derived human-readable view of any known record (never a source of truth).
 [[bin]]
 name = "dbrec_show"
+
+# The generated schema tables of the DRY's JavaScript tools.
+[[bin]]
+name = "dbrec_js_schemas"
+
+# Field-by-field comparison of two records (requalification DRY report).
+[[bin]]
+name = "dbrec_compare"
+
+# Derives a native record from an import or an earlier native record with
+# explicitly stated changes (e.g. the builder-policy refresh).
+[[bin]]
+name = "dbrec_derive"

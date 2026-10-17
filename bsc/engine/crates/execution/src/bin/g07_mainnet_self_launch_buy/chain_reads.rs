@@ -195,6 +195,64 @@ pub(crate) fn rpc_pending_nonce(who: Address) -> Result<u64, String> {
     )
 }
 
+/// One log of an `eth_getLogs` result, as a scan records it (used by the
+/// requalification preflight writer, not by the attempt itself).
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LogSeen {
+    pub(crate) block: u64,
+    pub(crate) transaction_hash: [u8; 32],
+    pub(crate) log_index: u64,
+    pub(crate) topics: Vec<[u8; 32]>,
+}
+
+#[allow(dead_code)]
+fn wire_word(v: &serde_json::Value, what: &str) -> Result<[u8; 32], String> {
+    wire_data(v, what)
+        .and_then(|b| <[u8; 32]>::try_from(b).map_err(|_| format!("{what} is not 32 bytes")))
+}
+
+/// The logs of `address` with first topic `topic0` in `from..=to`. Never
+/// panics.
+#[allow(dead_code)]
+pub(crate) fn rpc_logs(
+    address: Address,
+    topic0: [u8; 32],
+    from: u64,
+    to: u64,
+) -> Result<Vec<LogSeen>, String> {
+    let v = rpc(
+        "eth_getLogs",
+        &format!(
+            r#"[{{"address":{},"fromBlock":"0x{from:x}","toBlock":"0x{to:x}","topics":["0x{}"]}}]"#,
+            wire_string(&address.to_string()),
+            hex::encode(topic0)
+        ),
+    )?;
+    let logs = v.as_array().ok_or("eth_getLogs result is not a list")?;
+    logs.iter()
+        .map(|log| {
+            let field = |name: &str| log.get(name).ok_or_else(|| format!("log lacks {name}"));
+            let quantity = |name: &str| {
+                field(name)
+                    .and_then(|x| wire_quantity(x, name))
+                    .and_then(|x| small(x, name))
+            };
+            Ok(LogSeen {
+                block: quantity("blockNumber")?,
+                transaction_hash: wire_word(field("transactionHash")?, "transactionHash")?,
+                log_index: quantity("logIndex")?,
+                topics: field("topics")?
+                    .as_array()
+                    .ok_or("log topics are not a list")?
+                    .iter()
+                    .map(|t| wire_word(t, "topic"))
+                    .collect::<Result<_, _>>()?,
+            })
+        })
+        .collect()
+}
+
 /// Number and hash of the latest block.
 fn latest_block() -> Result<(u64, [u8; 32]), String> {
     let block = rpc("eth_getBlockByNumber", r#"["latest",false]"#)?;

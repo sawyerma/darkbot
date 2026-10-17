@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
+pub mod js;
 pub mod schema;
 
 pub const MAGIC: [u8; 8] = *b"DBREC001";
@@ -202,7 +203,10 @@ impl Schema {
             }
             previous = field.tag;
             if field.name.is_empty() || self.fields[..i].iter().any(|f| f.name == field.name) {
-                return fail(format!("{}: empty or duplicate name {}", self.name, field.name));
+                return fail(format!(
+                    "{}: empty or duplicate name {}",
+                    self.name, field.name
+                ));
             }
             if field.max_len as usize > MAX_RECORD_BYTES {
                 return fail(format!("{}: bound of {} too large", self.name, field.name));
@@ -348,6 +352,11 @@ impl Draft {
         self
     }
 
+    /// The values set for `tag` so far.
+    pub fn values(&self, tag: u16) -> &[Value] {
+        self.fields.get(&tag).map_or(&[], Vec::as_slice)
+    }
+
     /// This draft as the value of a nested field; checked against that
     /// field's schema when the enclosing record is encoded.
     pub fn into_nested(self) -> Value {
@@ -376,7 +385,10 @@ impl Draft {
         let checksum = Sha256::digest(&out);
         out.extend_from_slice(&checksum);
         if out.len() > MAX_RECORD_BYTES {
-            return fail(format!("{} exceeds {MAX_RECORD_BYTES} bytes", self.schema.name));
+            return fail(format!(
+                "{} exceeds {MAX_RECORD_BYTES} bytes",
+                self.schema.name
+            ));
         }
         Ok(out)
     }
@@ -458,7 +470,10 @@ fn encode_fields(
             Value::Text(t) => out.extend_from_slice(t.as_bytes()),
             Value::Nested(inner) => {
                 let Some(nested) = spec.nested else {
-                    return fail(format!("{}: {} has no nested schema", schema.name, spec.name));
+                    return fail(format!(
+                        "{}: {} has no nested schema",
+                        schema.name, spec.name
+                    ));
                 };
                 let count_at = out.len();
                 out.extend_from_slice(&[0; 4]);
@@ -586,7 +601,10 @@ fn decode_fields(
             },
             Kind::Nested => {
                 let Some(nested) = spec.nested else {
-                    return fail(format!("{}: {} has no nested schema", schema.name, spec.name));
+                    return fail(format!(
+                        "{}: {} has no nested schema",
+                        schema.name, spec.name
+                    ));
                 };
                 let mut inner = Cursor { buf: raw, pos: 0 };
                 let count = inner.u32()?;
@@ -701,7 +719,11 @@ impl Record {
         pick: impl Fn(&'r Value) -> Option<T>,
     ) -> Result<T, RecordError> {
         self.maybe(tag, want, pick)?.ok_or_else(|| {
-            RecordError(format!("{}: {} is missing", self.schema.name, self.name(tag)))
+            RecordError(format!(
+                "{}: {} is missing",
+                self.schema.name,
+                self.name(tag)
+            ))
         })
     }
 
@@ -852,7 +874,11 @@ impl Record {
     }
 
     fn missing(&self, tag: u16) -> RecordError {
-        RecordError(format!("{}: {} is missing", self.schema.name, self.name(tag)))
+        RecordError(format!(
+            "{}: {} is missing",
+            self.schema.name,
+            self.name(tag)
+        ))
     }
 
     /// The derived human-readable view: one `name = value` line per field.
@@ -892,6 +918,15 @@ fn render_fields(schema: &Schema, fields: &[(u16, Value)], prefix: &str, out: &m
                 let _ = writeln!(out, "{name} = {}", display(value));
             }
         }
+    }
+}
+
+/// A value as plain text for tools: like the derived view, but text
+/// unquoted.
+pub fn plain(value: &Value) -> String {
+    match value {
+        Value::Text(t) => t.clone(),
+        other => display(other),
     }
 }
 
@@ -1095,7 +1130,10 @@ mod tests {
         assert!(view.contains("amount = 1000000000000"), "{view}");
         assert!(view.contains("notes[1] = \"y\""), "{view}");
         assert!(view.contains("inner[0].count = 7"), "{view}");
-        assert!(view.contains(&format!("who = 0x{}", "11".repeat(20))), "{view}");
+        assert!(
+            view.contains(&format!("who = 0x{}", "11".repeat(20))),
+            "{view}"
+        );
     }
 
     #[test]
@@ -1192,7 +1230,10 @@ mod tests {
         };
         assert!(decode(&OUTER, &raw(&[&flag(1), &number, &amount])).is_ok());
         expect_err(&raw(&[&number, &flag(1), &amount]), "out of order");
-        expect_err(&raw(&[&flag(1), &flag(1), &number, &amount]), "out of order");
+        expect_err(
+            &raw(&[&flag(1), &flag(1), &number, &amount]),
+            "out of order",
+        );
         expect_err(&raw(&[&flag(1), &amount]), "number occurs 0 times");
     }
 

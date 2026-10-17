@@ -40,22 +40,34 @@ pub(crate) fn signer_address(key: &SigningKey) -> Address {
     Address::from_slice(&h.as_slice()[12..])
 }
 
-/// A binary input record, decoded fail-closed against its schema, and its
-/// binding: the SHA-256 of the exact file bytes that were checked and the
-/// legacy SHA-256 the record carries from the audited import.
+/// A binary input record, decoded fail-closed against one of the accepted
+/// schemas, and its binding: the SHA-256 of the exact file bytes that were
+/// checked and, for an audited import, the legacy SHA-256 it carries.
 pub(crate) fn load_record(
     path: &str,
-    schema: &'static darkbot_bsc_record::Schema,
+    accepted: &[&'static darkbot_bsc_record::Schema],
 ) -> (Record, InputHashes) {
     let bytes = fs::read(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-    let record =
-        darkbot_bsc_record::decode(schema, &bytes).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let legacy = record
-        .b256(schema::IMPORT_LEGACY_SHA256)
-        .unwrap_or_else(|e| panic!("{path} is not an imported record: {e}"));
+    let record = schema::decode_any(&bytes).unwrap_or_else(|e| panic!("{path}: {e}"));
+    assert!(
+        accepted.contains(&record.schema()),
+        "{path}: {} is not an accepted input here",
+        record.schema().name
+    );
+    let legacy = if record
+        .schema()
+        .field(schema::IMPORT_LEGACY_SHA256)
+        .is_some()
+    {
+        record
+            .opt_b256(schema::IMPORT_LEGACY_SHA256)
+            .unwrap_or_else(|e| panic!("{path}: {e}"))
+    } else {
+        None
+    };
     let hashes = InputHashes {
         record_sha256: sha256_hex(&bytes),
-        legacy_sha256: darkbot_bsc_record::hex(&legacy),
+        legacy_sha256: legacy.map(|w| darkbot_bsc_record::hex(&w)),
     };
     (record, hashes)
 }
@@ -96,8 +108,8 @@ pub(crate) fn validate_attempt_id(attempt_id: &str) -> Result<(), String> {
 /// every run shares one latch directory (a linked worktree has its own).
 pub(crate) fn assert_repository_root() {
     assert!(
-        Path::new(V3_RELATIVE_PATH).is_file(),
-        "run G0.7 from the repository root: {V3_RELATIVE_PATH} not found"
+        Path::new(V4_RELATIVE_PATH).is_file(),
+        "run G0.7 from the repository root: {V4_RELATIVE_PATH} not found"
     );
     assert!(
         fs::symlink_metadata(".git").is_ok_and(|m| m.file_type().is_dir()),
@@ -450,7 +462,7 @@ pub(crate) fn validate_producer_witness_source(
     attempt_id: &str,
 ) -> (Record, InputHashes) {
     use schema::g07::witness_source as w;
-    let (r, hashes) = load_record(path, &w::SCHEMA);
+    let (r, hashes) = load_record(path, &[&w::SCHEMA]);
     assert_eq!(
         field(r.text(w::LEGACY_SCHEMA)),
         "darkbot.producer-witness-source.v1",
@@ -479,7 +491,7 @@ pub(crate) fn validate_producer_witness_source(
 
 pub(crate) fn validate_builder_policy(path: &str, signed_gas_price: u64) -> (Record, InputHashes) {
     use schema::g06a::builder_policy as b;
-    let (r, hashes) = load_record(path, &b::SCHEMA);
+    let (r, hashes) = load_record(path, &[&b::NATIVE, &b::SCHEMA]);
     assert_eq!(
         field(r.text(b::LEGACY_SCHEMA)),
         "darkbot.g06a.builder-floor-evidence-addendum.v2"

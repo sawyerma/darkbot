@@ -12,6 +12,9 @@
 //   - BUY minOutput is deliberately 1, so the EVM determines the output.
 //   - Uses the actual deployed Portal/TAX_V3 code and storage through read-only RPC state.
 //
+// Records (no JSON): reads the binary preflight record and writes the
+// binary cross-check record (DBREC001, ./dbrec.cjs); stdout is a text summary.
+//
 // Safety:
 //   - No signing.
 //   - No transaction/bundle construction.
@@ -40,11 +43,13 @@ const {
   bytesToHex,
 } = require(path.join(LEGACY_TOOLS, '@ethereumjs/util'));
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
+const dbrec = require('./dbrec.cjs');
 
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
 const TAX_V3_IMPL = '0x024f18294970b5c76c0691b87f138a0317156422';
-const DEFAULT_PREFLIGHT_PATH = path.join(__dirname, '../config/g06a_preflight_readonly.json');
+const PREFLIGHT_SCHEMA = 'darkbot.g06a.preflight-readonly.v3';
+const OUTPUT_SCHEMA = 'darkbot.g06a.economics-evm-crosscheck.v2';
 
 const BUY_VALUE = BigInt(process.env.DARKBOT_G06A_BUY_VALUE_WEI || '1000000000000000');
 const LAUNCH_VALUE = 0n;
@@ -60,10 +65,6 @@ function req(name) {
   const v = process.env[name];
   if (!v) throw new Error(`${name} is required`);
   return v;
-}
-
-function clean(x) {
-  return JSON.parse(JSON.stringify(x, (_, v) => typeof v === 'bigint' ? v.toString() : v));
 }
 
 async function rpc(url, method, params = []) {
@@ -216,26 +217,28 @@ function revertHex(res) {
 
 async function main() {
   const rpcUrl = req('BSC_MAINNET_RPC_HTTPS');
-  const preflightPath = process.argv[2] ? path.resolve(process.argv[2]) : DEFAULT_PREFLIGHT_PATH;
-  const preflight = JSON.parse(fs.readFileSync(preflightPath));
+  const [preflightPath, outPath] = process.argv.slice(2);
+  if (!preflightPath || !outPath) {
+    throw new Error('usage: node g06a_economics_evm_crosscheck.cjs <preflight.dbrec> <economics_crosscheck.dbrec>');
+  }
+  const preflight = dbrec.decode(PREFLIGHT_SCHEMA, fs.readFileSync(preflightPath)).fields;
 
-  if (preflight.schema !== 'darkbot.g06a.preflight-readonly.v2') throw new Error('wrong preflight schema');
-  if (preflight.chain_id !== '56') throw new Error('preflight is not BSC Mainnet');
-  if (preflight.portal.toLowerCase() !== PORTAL) throw new Error('Portal mismatch');
-  if (preflight.tax_v3_impl.toLowerCase() !== TAX_V3_IMPL) throw new Error('TAX_V3 implementation mismatch');
-  if (preflight.native_quote_configuration.enabled !== '1') throw new Error('native BNB disabled');
-  if (preflight.native_quote_configuration.default_curve_id !== '20') throw new Error('default native curve is not 20');
-  if (preflight.native_quote_configuration.alternative_curve_id !== '20') throw new Error('alternative native curve is not 20');
-  if (preflight.native_quote_configuration.native_to_quote_swap_type !== '0') throw new Error('unexpected native swap type');
-  if (preflight.native_quote_configuration.dex_id !== '0') throw new Error('unexpected dex id');
-  if (preflight.protocol_fee_bps.buy !== '100') throw new Error('unexpected buy fee');
+  if (preflight.chain_id !== 56n) throw new Error('preflight is not BSC Mainnet');
+  if (preflight.portal !== PORTAL) throw new Error('Portal mismatch');
+  if (preflight.tax_v3_impl !== TAX_V3_IMPL) throw new Error('TAX_V3 implementation mismatch');
+  if (preflight['native_quote_configuration.enabled'] !== 1n) throw new Error('native BNB disabled');
+  if (preflight['native_quote_configuration.default_curve_id'] !== 20n) throw new Error('default native curve is not 20');
+  if (preflight['native_quote_configuration.alternative_curve_id'] !== 20n) throw new Error('alternative native curve is not 20');
+  if (preflight['native_quote_configuration.native_to_quote_swap_type'] !== 0n) throw new Error('unexpected native swap type');
+  if (preflight['native_quote_configuration.dex_id'] !== 0n) throw new Error('unexpected dex id');
+  if (preflight['protocol_fee_bps.buy'] !== 100n) throw new Error('unexpected buy fee');
   if (preflight.tax_on_bonding_curve_enabled !== true) throw new Error('bonding-curve tax disabled');
 
   const chain = BigInt(await rpc(rpcUrl, 'eth_chainId'));
   if (chain !== CHAIN_ID) throw new Error(`wrong chain: ${chain}`);
 
   // Freeze execution state to the exact block recorded by the committed preflight.
-  const parentNum = BigInt(preflight.latest_block_number);
+  const parentNum = preflight.latest_block_number;
   const parentTag = '0x' + parentNum.toString(16);
   const parent = await rpc(rpcUrl, 'eth_getBlockByNumber', [parentTag, false]);
   if (!parent) throw new Error('preflight parent block unavailable from RPC');
@@ -258,8 +261,8 @@ async function main() {
     }
     throw e;
   }
-  if (ethers.getBytes(portalCode).length !== preflight.portal_code_bytes) throw new Error('Portal code length mismatch');
-  if (ethers.getBytes(taxCode).length !== preflight.tax_v3_impl_code_bytes) throw new Error('TAX_V3 code length mismatch');
+  if (BigInt(ethers.getBytes(portalCode).length) !== preflight.portal_code_bytes) throw new Error('Portal code length mismatch');
+  if (BigInt(ethers.getBytes(taxCode).length) !== preflight.tax_v3_impl_code_bytes) throw new Error('TAX_V3 code length mismatch');
 
   const saltChoice = await chooseSalt(rpcUrl, parentTag);
   const launchData = launchCalldata(LAUNCHER, saltChoice.salt);
@@ -397,34 +400,33 @@ async function main() {
     throw new Error(`BUY return ${returned} != buyer token balance ${balance}`);
   }
 
-  console.log(JSON.stringify(clean({
+  if (rpcLaunchDecoded === null) throw new Error('MAINNET_ETH_CALL_LAUNCH_RETURNED_NOTHING');
+  const record = dbrec.encode(OUTPUT_SCHEMA, {
+    '_provenance.tool': 'bsc/tools/g06a_economics_evm_crosscheck.cjs',
+    '_provenance.observed_unix_ms': BigInt(Date.now()),
     schema: 'darkbot.g06a.economics-evm-crosscheck.v1',
     preflight_path: preflightPath,
     status: 'EVM_SEQUENCE_PASS',
-    state_source: {
-      block_number: parentNum,
-      block_hash: parent.hash,
-      rpc_state_reads_only: true,
-    },
+    'state_source.block_number': parentNum,
+    'state_source.block_hash': parent.hash,
+    'state_source.rpc_state_reads_only': true,
     mainnet_estimate_gas_launch_success: true,
     mainnet_launch_gas_estimate: rpcLaunchGasEstimate,
     mainnet_launch_gas_limit_120pct: rpcLaunchGasLimit,
     mainnet_eth_call_launch_success: true,
     mainnet_eth_call_launch_return: rpcLaunchReturn,
-    mainnet_eth_call_predicted_token_match: rpcLaunchDecoded === null
-      ? null
-      : rpcLaunchDecoded.toLowerCase() === saltChoice.token.toLowerCase(),
+    mainnet_eth_call_predicted_token_match: rpcLaunchDecoded.toLowerCase() === saltChoice.token.toLowerCase(),
     portal: PORTAL,
     tax_v3_impl: TAX_V3_IMPL,
     launcher: LAUNCHER,
     buyer: BUYER,
     local_only_funded_callers: true,
     salt: saltChoice.salt,
-    salt_counter: saltChoice.counter,
+    salt_counter: BigInt(saltChoice.counter),
     token: saltChoice.token,
     launch_value_wei: LAUNCH_VALUE,
     buy_value_wei: BUY_VALUE,
-    buy_min_output_used_for_execution: '1',
+    buy_min_output_used_for_execution: 1n,
     launch_success: true,
     buy_success: true,
     simulated_received_amount: returned,
@@ -441,8 +443,11 @@ async function main() {
       'Dummy caller balances exist only in the local StateManager overlay',
       'Account envelopes are reconstructed from eth_getBalance + eth_getTransactionCount + eth_getCode because the public BSC dataseed is incompatible with EthereumJS eth_getProof account loading; contract storage still comes block-exactly from eth_getStorageAt',
       'This probe proves economics/contract semantics only; wallet nonces, builder floors and signed bundle validity belong to later DRY checks'
-    ]
-  }), null, 2));
+    ],
+  });
+  dbrec.writeNew(outPath, record);
+  const sha = require('crypto').createHash('sha256').update(record).digest('hex');
+  console.log(`ECONOMICS_CROSSCHECK=EVM_SEQUENCE_PASS\nRECORD=${outPath}\nRECORD_SHA256=${sha}\nBLOCK=${parentNum}\nSALT=${saltChoice.salt}\nSALT_COUNTER=${saltChoice.counter}\nTOKEN=${saltChoice.token}\nSIMULATED_RECEIVED_AMOUNT=${returned}`);
 }
 
 main().catch((e) => {

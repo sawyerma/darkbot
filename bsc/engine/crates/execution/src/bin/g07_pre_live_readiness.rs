@@ -14,7 +14,9 @@ mod shared;
 mod transactions;
 use builder_submission::*;
 use chain_reads::*;
-use darkbot_bsc_execution::acceptance_guard::{FROZEN_APPROVED_V3_SHA256, inspect_v3};
+use darkbot_bsc_execution::acceptance_guard::{
+    FROZEN_APPROVED_V4_SHA256, V4_RELATIVE_PATH, inspect_v4,
+};
 use darkbot_bsc_record::{
     Value, decode,
     schema::g07::{contract as c, readiness as r},
@@ -63,37 +65,55 @@ fn deployment_drift(baseline: &Record, current: &Record) -> Vec<String> {
         .collect()
 }
 
+/// A bound input of the v4 contract: decoded against one of the accepted
+/// schemas, its record SHA-256 equal to the binding and, where the contract
+/// binds a legacy hash (an audited import), the carried legacy hash and the
+/// immutable source file equal to it; a natively bound input must not be an
+/// import.
 fn bound_input(
     contract: &Record,
     path_tag: u16,
     hash_tag: u16,
-    legacy_tag: u16,
-    schema: &'static darkbot_bsc_record::Schema,
+    legacy_tag: Option<u16>,
+    accepted: &[&'static darkbot_bsc_record::Schema],
 ) -> Result<Record, String> {
-    let path = contract.text(path_tag).map_err(|e| e.to_string())?;
-    let bytes = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-    let record = decode(schema, &bytes).map_err(|e| e.to_string())?;
-    if darkbot_bsc_record::sha256(&bytes) != contract.b256(hash_tag).map_err(|e| e.to_string())?
-        || record
-            .b256(schema::IMPORT_LEGACY_SHA256)
-            .map_err(|e| e.to_string())?
-            != contract.b256(legacy_tag).map_err(|e| e.to_string())?
-    {
-        return Err(format!("binary/legacy hash binding mismatch: {path}"));
+    let e = |x: darkbot_bsc_record::RecordError| x.to_string();
+    let path = contract.text(path_tag).map_err(e)?;
+    let bytes = fs::read(path).map_err(|x| format!("{path}: {x}"))?;
+    let record = schema::decode_any(&bytes).map_err(e)?;
+    if !accepted.contains(&record.schema()) {
+        return Err(format!(
+            "{path}: {} is not accepted here",
+            record.schema().name
+        ));
     }
-    // Hash the immutable source bytes, never parse legacy JSON.
-    let legacy = fs::read(
-        record
-            .text(schema::IMPORT_LEGACY_PATH)
-            .map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    if darkbot_bsc_record::sha256(&legacy)
-        != record
-            .b256(schema::IMPORT_LEGACY_SHA256)
-            .map_err(|e| e.to_string())?
+    if darkbot_bsc_record::sha256(&bytes) != contract.b256(hash_tag).map_err(e)? {
+        return Err(format!("record hash binding mismatch: {path}"));
+    }
+    let carried = if record
+        .schema()
+        .field(schema::IMPORT_LEGACY_SHA256)
+        .is_some()
     {
-        return Err(format!("historical source hash mismatch: {path}"));
+        record.opt_b256(schema::IMPORT_LEGACY_SHA256).map_err(e)?
+    } else {
+        None
+    };
+    let bound = match legacy_tag {
+        Some(tag) => contract.opt_b256(tag).map_err(e)?,
+        None => None,
+    };
+    match (bound, carried) {
+        (None, None) => {}
+        (Some(bound), Some(carried)) if bound == carried => {
+            // Hash the immutable source bytes, never parse legacy JSON.
+            let legacy = fs::read(record.text(schema::IMPORT_LEGACY_PATH).map_err(e)?)
+                .map_err(|x| x.to_string())?;
+            if darkbot_bsc_record::sha256(&legacy) != carried {
+                return Err(format!("historical source hash mismatch: {path}"));
+            }
+        }
+        _ => return Err(format!("legacy hash binding mismatch: {path}")),
     }
     Ok(record)
 }
@@ -137,62 +157,92 @@ fn freshness(observed: Option<u64>, now: u64) -> bool {
 }
 
 fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
-    use schema::g06a::{builder_policy as b, dry as d, preflight as f};
-    let snap = inspect_v3(Path::new(V3_RELATIVE_PATH))?;
-    if FROZEN_APPROVED_V3_SHA256 != "UNARMED"
+    use schema::g06a::{
+        builder_policy as b, dry as d, economics, local_simulation, portal_upgrade, preflight as f,
+    };
+    if !Path::new(V4_RELATIVE_PATH).is_file() {
+        check(
+            report,
+            "V4_CONTRACT",
+            "BLOCKED",
+            "No v4 contract yet: the v3 proposal is superseded by the Portal v5.25.0 drift; run the requalification DRY (tools/g06a_final_dry.sh), then write the v4 proposal",
+        );
+        return Err("requalification pending: no v4 contract".into());
+    }
+    let snap = inspect_v4(Path::new(V4_RELATIVE_PATH))?;
+    if FROZEN_APPROVED_V4_SHA256 != "UNARMED"
         || snap.approved
         || snap.execution_ready
         || snap.max_attempts != 1
     {
         return Err(
-            "readiness requires inactive v3 proposal, UNARMED and exactly one attempt".into(),
+            "readiness requires an inactive v4 proposal, UNARMED and exactly one attempt".into(),
         );
     }
     report.set(r::CONTRACT_SHA256, snap.sha256.as_str());
     check(
         report,
-        "V3_GUARD",
+        "V4_GUARD",
         "PASS",
         "UNARMED; approved=false; execution_ready=false; attempts.maximum=1",
     );
     let contract = decode(
-        &c::SCHEMA,
-        &fs::read(V3_RELATIVE_PATH).map_err(|e| e.to_string())?,
+        &c::V4,
+        &fs::read(V4_RELATIVE_PATH).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
     let dry = bound_input(
         &contract,
         c::DRY_RECORD_PATH,
         c::DRY_RECORD_SHA256,
-        c::DRY_LEGACY_SHA256,
-        &d::SCHEMA,
+        Some(c::DRY_LEGACY_SHA256),
+        &[&d::NATIVE],
     )?;
     let baseline = bound_input(
         &contract,
         c::PREFLIGHT_RECORD_PATH,
         c::PREFLIGHT_RECORD_SHA256,
-        c::PREFLIGHT_LEGACY_SHA256,
-        &f::SCHEMA,
+        Some(c::PREFLIGHT_LEGACY_SHA256),
+        &[&f::SCHEMA],
     )?;
     let policy = bound_input(
         &contract,
         c::BUILDER_POLICY_RECORD_PATH,
         c::BUILDER_POLICY_RECORD_SHA256,
-        c::BUILDER_POLICY_LEGACY_SHA256,
-        &b::SCHEMA,
+        Some(c::BUILDER_POLICY_LEGACY_SHA256),
+        &[&b::NATIVE, &b::SCHEMA],
     )?;
     let witness = bound_input(
         &contract,
         c::WITNESS_SOURCE_RECORD_PATH,
         c::WITNESS_SOURCE_RECORD_SHA256,
-        c::WITNESS_SOURCE_LEGACY_SHA256,
-        &schema::g07::witness_source::SCHEMA,
+        Some(c::WITNESS_SOURCE_LEGACY_SHA256),
+        &[&schema::g07::witness_source::SCHEMA],
     )?;
+    for (path, hash, accepted) in [
+        (
+            c::LOCAL_SIMULATION_RECORD_PATH,
+            c::LOCAL_SIMULATION_RECORD_SHA256,
+            &local_simulation::NATIVE,
+        ),
+        (
+            c::ECONOMICS_RECORD_PATH,
+            c::ECONOMICS_RECORD_SHA256,
+            &economics::NATIVE,
+        ),
+        (
+            c::PORTAL_UPGRADE_RECORD_PATH,
+            c::PORTAL_UPGRADE_RECORD_SHA256,
+            &portal_upgrade::SCHEMA,
+        ),
+    ] {
+        bound_input(&contract, path, hash, None, &[accepted])?;
+    }
     check(
         report,
-        "FOUR_INPUT_BINDINGS",
+        "V4_INPUT_BINDINGS",
         "PASS",
-        "All binary and historical source SHA-256 bindings match",
+        "Four G0.7 inputs plus local simulation, economics cross-check and Portal upgrade scan match their bound SHA-256 (legacy source hashes where an input is an import)",
     );
     for tag in [
         d::DRY_1,
@@ -210,7 +260,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         report,
         "DRY1_DRY4",
         "PASS",
-        "Frozen evidence verified; no DRY rerun",
+        "Requalification DRY records verified (bound by v4)",
     );
     let launcher = Address::from(field(dry.address(d::LAUNCHER)));
     let buyer = Address::from(field(dry.address(d::BUYER)));
@@ -223,7 +273,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
             .to_lowercase()
             != snap.portal_address
     {
-        return Err("DRY identity differs from v3".into());
+        return Err("DRY identity differs from v4".into());
     }
     let gas = field(dry.u64(d::GAS_PRICE_WEI));
     let lg = field(dry.u64(d::LAUNCH_GAS_LIMIT));
@@ -246,7 +296,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         || reserve > snap.max_total_per_attempt
         || reserve > snap.absolute_budget_wei
     {
-        return Err("exact DRY parameters exceed v3 budget".into());
+        return Err("exact DRY parameters exceed v4 budget".into());
     }
     let _ = validate_builder_policy(field(contract.text(c::BUILDER_POLICY_RECORD_PATH)), gas);
     let _ = validate_producer_witness_source(
@@ -305,7 +355,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         "FROZEN_PREFLIGHT",
         "PASS",
         &format!(
-            "Historical deployment, quote and funding checks; nonces {ln}/{bn}; not a current-chain attestation"
+            "Requalification baseline deployment, quote and funding checks; nonces {ln}/{bn}; not a current-chain attestation"
         ),
     );
     let now = unix_time_ms() / 1000;
@@ -467,7 +517,7 @@ fn main() {
     } else {
         print!("{}", record.render());
         println!(
-            "PRE_LIVE_READINESS=BLOCKED\nLIVE_GUARD={FROZEN_APPROVED_V3_SHA256}\nLIVE=BLOCKED"
+            "PRE_LIVE_READINESS=BLOCKED\nLIVE_GUARD={FROZEN_APPROVED_V4_SHA256}\nLIVE=BLOCKED"
         );
     }
     std::process::exit(2);

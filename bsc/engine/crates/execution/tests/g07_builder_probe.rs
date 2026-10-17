@@ -13,7 +13,7 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// the included G0.7 modules' sources, so any change to them, or to what a
 /// live run would send, changes this hash and needs a new approval. (Pinned
 /// here, not in plan.rs, which is itself part of that digest.)
-const PINNED_PLAN_SHA256: &str = "8e24138b354b40c2e6e9e3c98d35faea7849814db01c43e06fd3b94886177344";
+const PINNED_PLAN_SHA256: &str = "a5ad014f9ffebd32b6c2cc7fc36fa054d9c7118fdb1e76b8f3c5ae1606fbd039";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

@@ -1,8 +1,24 @@
-use std::{path::Path, process::Command};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use darkbot_bsc_execution::acceptance_contract::{
+    Authorization, WITNESS_SOURCE_RECORD, attempt1_v4, attempt1_v4_evidence,
+};
+use darkbot_bsc_execution::acceptance_guard::{V3_RELATIVE_PATH, V4_RELATIVE_PATH};
+use darkbot_bsc_record::schema::{
+    PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL, g06a, g07::contract as c,
+};
+use darkbot_bsc_record::{Draft, Schema, Value, decode};
+
 const BIN: &str = env!("CARGO_BIN_EXE_g07_pre_live_readiness");
-#[test]
-fn offline_readiness_uses_bound_binary_inputs_and_never_invokes_rpc() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+const FROZEN: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016";
+const REQUAL: &str = "bsc/native/evidence/g06a/requal_test";
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")
+}
+
+fn run(root: &Path, args: &[&str]) -> (Option<i32>, String) {
     let out = Command::new(BIN)
         .current_dir(root)
         .env_clear()
@@ -10,13 +26,144 @@ fn offline_readiness_uses_bound_binary_inputs_and_never_invokes_rpc() {
         .env("BSC_MAINNET_RPC_HTTPS", "https://127.0.0.1:1")
         .env("DARKBOT_G07_MAINNET_SEND", "YES")
         .env("DARKBOT_G07_PROBE_SEND", "YES")
+        .args(args)
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2));
-    let text = String::from_utf8(out.stdout).unwrap();
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+    )
+}
+
+/// A native record of `native` with a frozen import record's fields (same
+/// tags): offline stand-ins for a requalification DRY that exercise the v4
+/// wiring only and never qualify anything.
+fn native_copy(
+    root: &Path,
+    import: &str,
+    schema: &'static Schema,
+    native: &'static Schema,
+) -> Vec<u8> {
+    let bytes = std::fs::read(root.join(format!("{FROZEN}/{import}"))).unwrap();
+    let record = decode(schema, &bytes).unwrap();
+    let mut d = Draft::new(native);
+    for (tag, value) in record.fields() {
+        if *tag > 2 {
+            d.push(*tag, value.clone());
+        }
+    }
+    if native.field(PROVENANCE_TOOL).is_some() {
+        d.set(PROVENANCE_TOOL, "offline-test")
+            .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64);
+    }
+    d.encode().unwrap()
+}
+
+/// A temporary repository root with the committed inputs, their legacy
+/// sources, stand-in requalification records and a v4 proposal binding
+/// them; `edit` may alter the contract before it is written.
+fn v4_root(tag: &str, edit: impl FnOnce(&mut Draft)) -> PathBuf {
+    use g06a::{dry, economics, local_simulation, portal_upgrade as up, preflight};
+    let repo = repo_root();
+    let root = std::env::temp_dir().join(format!("darkbot-readiness-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let policy = format!("{FROZEN}/builder_policy.dbrec");
+    for path in [
+        WITNESS_SOURCE_RECORD,
+        V3_RELATIVE_PATH,
+        policy.as_str(),
+        "bsc/config/g07_producer_witness_source_attempt1.json",
+        "bsc/config/g06a_builder_floor_addendum_2026-10-11.json",
+    ] {
+        let to = root.join(path);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::copy(repo.join(path), to).unwrap();
+    }
+    let dir = root.join(REQUAL);
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, bytes: Vec<u8>| std::fs::write(dir.join(name), bytes).unwrap();
+    write(
+        "dry_result.dbrec",
+        native_copy(&repo, "dry_result.dbrec", &dry::SCHEMA, &dry::NATIVE),
+    );
+    write(
+        "preflight.dbrec",
+        native_copy(
+            &repo,
+            "preflight.dbrec",
+            &preflight::SCHEMA,
+            &preflight::SCHEMA,
+        ),
+    );
+    write(
+        "local_simulation.dbrec",
+        native_copy(
+            &repo,
+            "local_simulation.dbrec",
+            &local_simulation::SCHEMA,
+            &local_simulation::NATIVE,
+        ),
+    );
+    write(
+        "economics_crosscheck.dbrec",
+        native_copy(
+            &repo,
+            "economics_crosscheck.dbrec",
+            &economics::SCHEMA,
+            &economics::NATIVE,
+        ),
+    );
+    let implementation = decode(
+        &preflight::SCHEMA,
+        &std::fs::read(dir.join("preflight.dbrec")).unwrap(),
+    )
+    .unwrap()
+    .address(preflight::PORTAL_IMPLEMENTATION)
+    .unwrap();
+    let mut scan = Draft::new(&up::SCHEMA);
+    scan.set(PROVENANCE_TOOL, "offline-test")
+        .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+        .set(up::PROXY, Value::Address([0xe2; 20]))
+        .set(up::SCANNED_FROM_BLOCK, 1u64)
+        .set(up::SCANNED_TO_BLOCK, 2u64)
+        .set(up::CURRENT_IMPLEMENTATION, Value::Address(implementation))
+        .set(up::BASELINE_IMPLEMENTATION, Value::Address(implementation));
+    write("portal_upgrade.dbrec", scan.encode().unwrap());
+    let evidence = attempt1_v4_evidence(&root, REQUAL, &policy).unwrap();
+    let proposal = attempt1_v4(&evidence, Authorization::Proposed).unwrap();
+    let mut draft = Draft::new(&c::V4);
+    for (field, value) in decode(&c::V4, &proposal).unwrap().fields() {
+        draft.push(*field, value.clone());
+    }
+    edit(&mut draft);
+    std::fs::write(root.join(V4_RELATIVE_PATH), draft.encode().unwrap()).unwrap();
+    root
+}
+
+#[test]
+fn without_a_v4_contract_readiness_is_blocked_and_never_invokes_rpc() {
+    let (code, text) = run(&repo_root(), &[]);
+    assert_eq!(code, Some(2));
     for expected in [
         "OFFLINE_ZERO_EGRESS",
-        "FOUR_INPUT_BINDINGS",
+        "V4_CONTRACT",
+        "requalification pending",
+        "LIVE=BLOCKED",
+    ] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+    assert!(!text.contains("PRE_LIVE_READINESS=PASS"));
+}
+
+#[test]
+fn offline_readiness_evaluates_the_v4_bindings_without_rpc() {
+    let root = v4_root("offline", |_| {});
+    let (code, text) = run(&root, &[]);
+    assert_eq!(code, Some(2));
+    for expected in [
+        "OFFLINE_ZERO_EGRESS",
+        "V4_GUARD",
+        "V4_INPUT_BINDINGS",
         "DRY1_DRY4",
         "BUILDER_FRESHNESS",
         "CURRENT_DEPLOYMENTS_NONCES_FUNDING_GAS",
@@ -24,15 +171,13 @@ fn offline_readiness_uses_bound_binary_inputs_and_never_invokes_rpc() {
         "SIGNED_EGRESS",
         "LIVE=BLOCKED",
     ] {
-        assert!(
-            text.contains(expected),
-            "missing {expected}: {text}; {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        assert!(text.contains(expected), "missing {expected}: {text}");
     }
     assert!(!text.contains("VALIDATION"), "{text}");
     assert!(!text.contains("PRE_LIVE_READINESS=PASS"));
+    std::fs::remove_dir_all(root).unwrap();
 }
+
 #[test]
 fn unexpected_argument_refuses_before_reads_or_network() {
     let out = Command::new(BIN)
@@ -46,52 +191,35 @@ fn unexpected_argument_refuses_before_reads_or_network() {
 
 #[test]
 fn readiness_binary_is_decodable_and_has_no_execution_authority() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let out = Command::new(BIN)
-        .current_dir(root)
+        .current_dir(repo_root())
         .env_clear()
         .arg("--binary")
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    use darkbot_bsc_record::{decode, schema::g07::readiness as r};
+    use darkbot_bsc_record::schema::g07::readiness as r;
     let report = decode(&r::SCHEMA, &out.stdout).unwrap();
     assert!(!report.bool(r::LIVE_AUTHORIZED).unwrap());
     assert_eq!(report.text(r::MODE).unwrap(), "OFFLINE_ZERO_EGRESS");
 }
 
 #[test]
-fn inactive_guard_and_input_hashes_fail_closed() {
-    use darkbot_bsc_record::{Draft, Value, decode, schema::g07::contract as c};
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let rel = "bsc/config/g07_attempt1_acceptance_v3.dbrec";
-    let original = decode(&c::SCHEMA, &std::fs::read(root.join(rel)).unwrap()).unwrap();
+fn an_active_or_widened_v4_and_wrong_input_hashes_fail_closed() {
     for (tag, value) in [
         (c::APPROVED, Value::Bool(true)),
         (c::MAX_ATTEMPTS, Value::U64(2)),
         (c::DRY_RECORD_SHA256, Value::B256([0; 32])),
+        (c::LOCAL_SIMULATION_RECORD_SHA256, Value::B256([0; 32])),
+        (c::DRY_LEGACY_SHA256, Value::B256([1; 32])),
     ] {
-        let dir =
-            std::env::temp_dir().join(format!("readiness-negative-{}-{tag}", std::process::id()));
-        std::fs::create_dir_all(dir.join("bsc/config")).unwrap();
-        let mut draft = Draft::new(&c::SCHEMA);
-        for (field, value) in original.fields() {
-            draft.push(*field, value.clone());
-        }
-        // Absolute input path is only for this offline negative fixture.
-        let dry_path = original.text(c::DRY_RECORD_PATH).unwrap();
-        draft.set(c::DRY_RECORD_PATH, root.join(dry_path).to_str().unwrap());
-        draft.set(tag, value);
-        std::fs::write(dir.join(rel), draft.encode().unwrap()).unwrap();
-        let out = Command::new(BIN)
-            .current_dir(&dir)
-            .env_clear()
-            .output()
-            .unwrap();
-        assert_eq!(out.status.code(), Some(2));
-        let text = String::from_utf8(out.stdout).unwrap();
-        assert!(text.contains("VALIDATION"), "{text}");
-        assert!(!text.contains("FOUR_INPUT_BINDINGS"), "{text}");
-        std::fs::remove_dir_all(dir).unwrap();
+        let root = v4_root(&format!("negative-{tag}"), |d| {
+            d.set(tag, value.clone());
+        });
+        let (code, text) = run(&root, &[]);
+        assert_eq!(code, Some(2));
+        assert!(text.contains("VALIDATION"), "{tag}: {text}");
+        assert!(!text.contains("V4_INPUT_BINDINGS"), "{tag}: {text}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

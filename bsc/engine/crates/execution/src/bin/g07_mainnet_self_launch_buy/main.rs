@@ -73,16 +73,17 @@ fn main() {
     assert_repository_root();
     let (producer_witness_contract, producer_witness_hashes) =
         validate_producer_witness_source(&producer_witness_contract_path, &attempt_id);
-    let producer_witness_source = field(
-        producer_witness_contract.text(schema::g07::witness_source::SOURCE_DESCRIPTION),
-    )
-    .to_string();
+    let producer_witness_source =
+        field(producer_witness_contract.text(schema::g07::witness_source::SOURCE_DESCRIPTION))
+            .to_string();
     let producer_witness_source_ready =
         field(producer_witness_contract.bool(schema::g07::witness_source::SOURCE_READY));
 
     use schema::g06a::dry as d;
-    let (dry, dry_hashes) = load_record(&dry_path, &d::SCHEMA);
-    let (baseline, baseline_hashes) = load_record(&baseline_path, &schema::g06a::preflight::SCHEMA);
+    // The requalification DRY's native records (contract v4).
+    let (dry, dry_hashes) = load_record(&dry_path, &[&d::NATIVE]);
+    let (baseline, baseline_hashes) =
+        load_record(&baseline_path, &[&schema::g06a::preflight::SCHEMA]);
     assert_eq!(field(dry.text(d::STATUS)), "G0.6A_SELF_LAUNCH_BUNDLE_DRY");
     assert!(field(dry.bool(d::DRY_ALL)), "DRY-1..DRY-4 are not all PASS");
 
@@ -144,7 +145,10 @@ fn main() {
     let min_output =
         local_expected_output * U256::from(10_000u64 - slippage_bps) / U256::from(10_000u64);
     assert!(min_output > U256::ZERO);
-    assert_eq!(U256::from_be_bytes(field(dry.u256(d::MIN_OUTPUT))), min_output);
+    assert_eq!(
+        U256::from_be_bytes(field(dry.u256(d::MIN_OUTPUT))),
+        min_output
+    );
 
     let launch_data = launch_calldata(launcher, salt);
     let buy_data = buy_calldata(token, U256::from(buy_value), min_output);
@@ -180,10 +184,14 @@ fn main() {
     );
 
     let token_code_before = rpc_code(token).expect("token-code precheck failed");
-    assert!(token_code_before.is_empty(), "predicted token already exists");
+    assert!(
+        token_code_before.is_empty(),
+        "predicted token already exists"
+    );
 
-    let launch_estimate = rpc_estimate_gas(launcher, portal, U256::from(launch_value), &launch_data)
-        .expect("current launch gas estimate failed");
+    let launch_estimate =
+        rpc_estimate_gas(launcher, portal, U256::from(launch_value), &launch_data)
+            .expect("current launch gas estimate failed");
     assert!(
         launch_estimate <= launch_gas_limit,
         "current launch gas estimate exceeds signed DRY limit"
@@ -198,7 +206,6 @@ fn main() {
 
     let attempt_number = env_u64("DARKBOT_G07_ATTEMPT_NUMBER");
     let spent_budget_wei = env_u128("DARKBOT_G07_SPENT_BUDGET_WEI");
-
 
     // The head poller of the release, exercised here read-only: an endpoint
     // that cannot deliver the next block fresh enough stops the run before the
@@ -253,7 +260,7 @@ fn main() {
     };
 
     let contract = match verify_live_authorization(
-        Path::new(V3_RELATIVE_PATH),
+        Path::new(V4_RELATIVE_PATH),
         &LiveGuardContext {
             launcher_address: launcher.to_string(),
             buyer_address: buyer.to_string(),
@@ -291,13 +298,19 @@ fn main() {
         "contract_sha256={}\ndry_record_sha256={}\ndry_legacy_sha256={}\npreflight_record_sha256={}\npreflight_legacy_sha256={}\nbuilder_policy_record_sha256={}\nbuilder_policy_legacy_sha256={}\nproducer_witness_source_record_sha256={}\nproducer_witness_source_legacy_sha256={}\nlaunch_tx_hash={}\nbuy_tx_hash={}\ntoken={}",
         contract.sha256,
         dry_hashes.record_sha256,
-        dry_hashes.legacy_sha256,
+        dry_hashes.legacy_sha256.as_deref().unwrap_or("none"),
         baseline_hashes.record_sha256,
-        baseline_hashes.legacy_sha256,
+        baseline_hashes.legacy_sha256.as_deref().unwrap_or("none"),
         builder_policy_hashes.record_sha256,
-        builder_policy_hashes.legacy_sha256,
+        builder_policy_hashes
+            .legacy_sha256
+            .as_deref()
+            .unwrap_or("none"),
         producer_witness_hashes.record_sha256,
-        producer_witness_hashes.legacy_sha256,
+        producer_witness_hashes
+            .legacy_sha256
+            .as_deref()
+            .unwrap_or("none"),
         launch_hash,
         buy_hash,
         token
@@ -336,25 +349,28 @@ fn main() {
             evidence::CRITICAL_RULE,
             "DO NOT RETRY THIS ATTEMPT AUTOMATICALLY; reconcile canonical execution first.",
         )
-        .set(evidence::CONTRACT_PATH, V3_RELATIVE_PATH)
+        .set(evidence::CONTRACT_PATH, V4_RELATIVE_PATH)
         .set(evidence::CONTRACT_SHA256, word(&contract.sha256))
         .set(evidence::DRY_PATH, dry_path.as_str())
         .set(evidence::DRY_SHA256, word(&dry_hashes.record_sha256))
-        .set(evidence::DRY_LEGACY_SHA256, word(&dry_hashes.legacy_sha256))
+        .set_opt(evidence::DRY_LEGACY_SHA256, opt_word(&dry_hashes.legacy_sha256))
         .set(evidence::PREFLIGHT_PATH, baseline_path.as_str())
         .set(evidence::PREFLIGHT_SHA256, word(&baseline_hashes.record_sha256))
-        .set(evidence::PREFLIGHT_LEGACY_SHA256, word(&baseline_hashes.legacy_sha256))
+        .set_opt(
+            evidence::PREFLIGHT_LEGACY_SHA256,
+            opt_word(&baseline_hashes.legacy_sha256),
+        )
         .set(evidence::BUILDER_POLICY_PATH, builder_policy_path.as_str())
         .set(evidence::BUILDER_POLICY_SHA256, word(&builder_policy_hashes.record_sha256))
-        .set(
+        .set_opt(
             evidence::BUILDER_POLICY_LEGACY_SHA256,
-            word(&builder_policy_hashes.legacy_sha256),
+            opt_word(&builder_policy_hashes.legacy_sha256),
         )
         .set(evidence::WITNESS_SOURCE_PATH, producer_witness_contract_path.as_str())
         .set(evidence::WITNESS_SOURCE_SHA256, word(&producer_witness_hashes.record_sha256))
-        .set(
+        .set_opt(
             evidence::WITNESS_SOURCE_LEGACY_SHA256,
-            word(&producer_witness_hashes.legacy_sha256),
+            opt_word(&producer_witness_hashes.legacy_sha256),
         )
         .set(evidence::STATE_DIR, attempt_dir.display().to_string())
         .set(
@@ -648,19 +664,17 @@ fn main() {
                 .set(b::BLOCKRAZOR_BODY_SHA256, RecordValue::B256(blockrazor_body_sha256))
                 .set(b::BLOCKRAZOR_BODY_LEN, blockrazor_body.len() as u64);
         }
-        evidence
-            .set(evidence::BUNDLE, bundle.into_nested())
-            .set(
-                evidence::SEND,
-                send_boundaries(
-                    &clock_id,
-                    &boot_id,
-                    release_before_ns,
-                    release_after_ns,
-                    "PENDING",
-                    None,
-                ),
-            );
+        evidence.set(evidence::BUNDLE, bundle.into_nested()).set(
+            evidence::SEND,
+            send_boundaries(
+                &clock_id,
+                &boot_id,
+                release_before_ns,
+                release_after_ns,
+                "PENDING",
+                None,
+            ),
+        );
         release_evidence = write_evidence(&evidence_out, &evidence);
         release_marker = mark_released(&attempt_dir, release_after_ns);
         Ok((
@@ -690,7 +704,9 @@ fn main() {
             answer.map(|a| a.status_line.as_str()),
             answer.map(|a| darkbot_bsc_record::hex(&a.body_sha256)),
             answer.map(|a| a.body_len),
-            answer.and_then(|a| a.result_hash).map(|h| darkbot_bsc_record::hex(&h)),
+            answer
+                .and_then(|a| a.result_hash)
+                .map(|h| darkbot_bsc_record::hex(&h)),
             answer.and_then(|a| a.result_text.as_deref()),
             answer.and_then(|a| a.error_code),
             answer.and_then(|a| a.error_message.as_deref()),
@@ -834,13 +850,22 @@ fn main() {
                 "STOP_CAPTURE_INCOMPLETE__RECONCILE_G08__NO_AUTOMATIC_RETRY"
             },
         )
-        .set_opt(evidence::BOTH_RECEIPTS_OBSERVED_NS, both_receipts_observed_ns)
+        .set_opt(
+            evidence::BOTH_RECEIPTS_OBSERVED_NS,
+            both_receipts_observed_ns,
+        )
         .set(evidence::COVERAGE_END_NS, coverage_end_ns)
         // G0.7 never reconciles the canonical window; G0.8 does.
         .set(evidence::CANONICAL_WINDOW_RECONCILED_IN_G08, false)
         .set(evidence::CANONICAL_WINDOW_RECONCILIATION, "PENDING_G08")
-        .set(evidence::LAUNCH_RECEIPT_OBSERVED, launch_receipt_observer.is_some())
-        .set(evidence::BUY_RECEIPT_OBSERVED, buy_receipt_observer.is_some())
+        .set(
+            evidence::LAUNCH_RECEIPT_OBSERVED,
+            launch_receipt_observer.is_some(),
+        )
+        .set(
+            evidence::BUY_RECEIPT_OBSERVED,
+            buy_receipt_observer.is_some(),
+        )
         .set_opt(evidence::POST_WINDOW_HEAD, post_window_head);
     // File first (atomic replacement): stdout may be a closed pipe. Nothing
     // here may panic.
@@ -945,12 +970,14 @@ fn hex_word(text: &str) -> Option<[u8; 32]> {
 /// the schema G0.8 reads. An encode failure preserves the last durable
 /// binary record and reports the error. Never panics.
 fn write_evidence(out: &EvidenceFile, evidence: &Draft) -> Result<(), String> {
-    let encoded = evidence.encode().and_then(|bytes| {
-        darkbot_bsc_record::decode(&evidence::SCHEMA, &bytes).map(|_| bytes)
-    });
+    let encoded = evidence
+        .encode()
+        .and_then(|bytes| darkbot_bsc_record::decode(&evidence::SCHEMA, &bytes).map(|_| bytes));
     match encoded {
         Ok(bytes) => out.replace(&bytes),
-        Err(e) => Err(format!("not a record readable by G0.8; previous binary evidence preserved: {e}")),
+        Err(e) => Err(format!(
+            "not a record readable by G0.8; previous binary evidence preserved: {e}"
+        )),
     }
 }
 
@@ -1017,6 +1044,11 @@ fn word(sha256: &str) -> RecordValue {
     RecordValue::B256(hex_word(sha256).unwrap_or_else(|| panic!("not a SHA-256: {sha256}")))
 }
 
+/// An optional SHA-256 (a legacy hash exists only for an audited import).
+fn opt_word(sha256: &Option<String>) -> Option<RecordValue> {
+    sha256.as_deref().map(word)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1047,8 +1079,7 @@ mod tests {
     /// Every required field set (the nested preflight from the import).
     fn sample() -> Draft {
         let preflight =
-            darkbot_bsc_record::decode(&schema::g06a::preflight::SCHEMA, PREFLIGHT_RECORD)
-                .unwrap();
+            darkbot_bsc_record::decode(&schema::g06a::preflight::SCHEMA, PREFLIGHT_RECORD).unwrap();
         let mut d = Draft::new(&evidence::SCHEMA);
         for f in evidence::SCHEMA
             .fields
@@ -1132,14 +1163,16 @@ mod tests {
                 }),
             ),
         );
-        let record =
-            darkbot_bsc_record::decode(&evidence::SCHEMA, &d.encode().unwrap()).unwrap();
+        let record = darkbot_bsc_record::decode(&evidence::SCHEMA, &d.encode().unwrap()).unwrap();
         let send = record.nested(evidence::SEND).unwrap();
         let club48 = send.nested(evidence::send::FORTYEIGHTCLUB).unwrap();
         use schema::g07::provider_result as p;
         assert_eq!(club48.i64(p::RPC_ERROR_CODE).unwrap(), -32000);
         assert_eq!(club48.text(p::RPC_ERROR_MESSAGE).unwrap(), "nonce too high");
-        assert!(evidence_text(&d).contains("local_send_boundaries.fortyeightclub.http_status_code = 200"));
+        assert!(
+            evidence_text(&d)
+                .contains("local_send_boundaries.fortyeightclub.http_status_code = 200")
+        );
         for f in evidence::SCHEMA
             .fields
             .iter()
@@ -1166,5 +1199,4 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), written);
         fs::remove_dir_all(&dir).unwrap();
     }
-
 }

@@ -18,6 +18,10 @@ pub const IMPORT_LEGACY_SHA256: u16 = 1;
 pub const IMPORT_LEGACY_PATH: u16 = 2;
 /// Field names with this prefix are provenance, not legacy leaves.
 pub const IMPORT_PREFIX: &str = "_import.";
+/// Provenance of a native record (no legacy file): tags 3 and 4 of every
+/// native DRY schema.
+pub const PROVENANCE_TOOL: u16 = 3;
+pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = 4;
 
 /// Every schema, for the derived view and the uniqueness check.
 pub fn all() -> Vec<&'static Schema> {

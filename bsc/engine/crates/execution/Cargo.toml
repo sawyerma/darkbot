@@ -63,6 +63,12 @@ required-features = ["g07-mainnet"]
 name = "g07_no_send"
 required-features = ["g07-mainnet"]
 
+# Requalification DRY-0/R0: the current preflight and the Portal upgrade
+# scan as binary records (read-only RPC only).
+[[bin]]
+name = "g06a_preflight_record"
+required-features = ["g07-mainnet"]
+
 # G0.7 pre-arm checks 6 and 10: the builder probe with non-executable bundles.
 # A dry run by default; it sends only an approved plan (plan SHA-256), once.
 [[bin]]

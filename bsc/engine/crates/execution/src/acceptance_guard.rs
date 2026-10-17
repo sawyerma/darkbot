@@ -2,21 +2,27 @@ use darkbot_bsc_record::schema::g07::contract;
 use darkbot_bsc_record::{Record, RecordError, decode, hex, sha256};
 use std::{fs, path::Path};
 
-/// The binary acceptance contract of G0.7 attempt 1 (DBREC001). The JSON
-/// v1/v2 contracts and the JSON v2 draft are legacy and never authority.
+/// The v3 proposal of G0.7 attempt 1, bound to the Portal v5.24.0 DRY. It
+/// is superseded by v4 and can only be inspected, never authorize.
 pub const V3_RELATIVE_PATH: &str = "bsc/config/g07_attempt1_acceptance_v3.dbrec";
 
+/// The binary acceptance contract of the requalified G0.7 attempt 1
+/// (DBREC001, v4): the only possible execution authority. The v3 proposal,
+/// the JSON v1/v2 contracts and the JSON v2 draft never authorize.
+pub const V4_RELATIVE_PATH: &str = "bsc/config/g07_attempt1_acceptance_v4.dbrec";
+
 // Deliberately UNARMED. Only a dedicated, explicitly approved arming commit may
-// replace this with the SHA-256 of the exact final v3 record bytes. Environment
-// variables and CLI flags are never execution authority.
-pub const FROZEN_APPROVED_V3_SHA256: &str = "UNARMED";
+// replace this with the SHA-256 of the exact approved v4 record bytes.
+// Environment variables and CLI flags are never execution authority.
+pub const FROZEN_APPROVED_V4_SHA256: &str = "UNARMED";
 
 /// The hashes binding one input at runtime: the SHA-256 of the binary
-/// record file G0.7 read and the legacy SHA-256 that record carries.
+/// record file G0.7 read and, for an audited import, the legacy SHA-256
+/// that record carries (`None` for a native record).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputHashes {
     pub record_sha256: String,
-    pub legacy_sha256: String,
+    pub legacy_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +74,11 @@ pub struct ContractSnapshot {
     pub preflight_evidence: InputHashes,
     pub builder_policy_evidence: InputHashes,
     pub producer_witness_source: InputHashes,
+    /// v4 only: the further bound evidence.
+    pub local_simulation: Option<InputHashes>,
+    pub economics: Option<InputHashes>,
+    pub portal_upgrade_record_sha256: Option<String>,
+    pub supersedes_contract_sha256: Option<String>,
 }
 
 fn norm_addr(s: &str) -> String {
@@ -90,7 +101,9 @@ fn word_hex(r: &Record, tag: u16) -> Result<String, RecordError> {
 fn u128_of(r: &Record, tag: u16) -> Result<u128, RecordError> {
     let word = r.u256(tag)?;
     if word[..16].iter().any(|b| *b != 0) {
-        return Err(RecordError(format!("acceptance contract tag {tag} exceeds u128")));
+        return Err(RecordError(format!(
+            "acceptance contract tag {tag} exceeds u128"
+        )));
     }
     let mut low = [0u8; 16];
     low.copy_from_slice(&word[16..]);
@@ -100,12 +113,31 @@ fn u128_of(r: &Record, tag: u16) -> Result<u128, RecordError> {
 fn hashes(r: &Record, record: u16, legacy: u16) -> Result<InputHashes, RecordError> {
     Ok(InputHashes {
         record_sha256: word_hex(r, record)?,
-        legacy_sha256: word_hex(r, legacy)?,
+        legacy_sha256: r.opt_b256(legacy)?.map(|w| hex(&w)),
     })
+}
+
+fn opt_word_hex(r: &Record, tag: u16) -> Result<Option<String>, RecordError> {
+    if r.schema().field(tag).is_none() {
+        return Ok(None);
+    }
+    Ok(r.opt_b256(tag)?.map(|w| hex(&w)))
+}
+
+/// The further evidence a v4 contract binds (absent in v3).
+fn v4_hashes(r: &Record, record: u16) -> Result<Option<InputHashes>, RecordError> {
+    Ok(opt_word_hex(r, record)?.map(|record_sha256| InputHashes {
+        record_sha256,
+        legacy_sha256: None,
+    }))
 }
 
 fn snapshot(r: &Record, sha256: String) -> Result<ContractSnapshot, RecordError> {
     Ok(ContractSnapshot {
+        local_simulation: v4_hashes(r, contract::LOCAL_SIMULATION_RECORD_SHA256)?,
+        economics: v4_hashes(r, contract::ECONOMICS_RECORD_SHA256)?,
+        portal_upgrade_record_sha256: opt_word_hex(r, contract::PORTAL_UPGRADE_RECORD_SHA256)?,
+        supersedes_contract_sha256: opt_word_hex(r, contract::SUPERSEDES_CONTRACT_SHA256)?,
         sha256,
         approved: r.bool(contract::APPROVED)?,
         execution_ready: r.bool(contract::EXECUTION_READY)?,
@@ -144,6 +176,7 @@ fn snapshot(r: &Record, sha256: String) -> Result<ContractSnapshot, RecordError>
     })
 }
 
+/// The superseded v3 proposal, for inspection only.
 pub fn inspect_v3(path: &Path) -> Result<ContractSnapshot, String> {
     if path != Path::new(V3_RELATIVE_PATH) {
         return Err(format!(
@@ -155,6 +188,24 @@ pub fn inspect_v3(path: &Path) -> Result<ContractSnapshot, String> {
     decode(&contract::SCHEMA, &bytes)
         .and_then(|r| snapshot(&r, sha256_hex(&bytes)))
         .map_err(|e| format!("acceptance contract {}: {e}", path.display()))
+}
+
+/// A v4 contract from its exact bytes (fail-closed decode).
+pub fn parse_v4(bytes: &[u8]) -> Result<ContractSnapshot, String> {
+    decode(&contract::V4, bytes)
+        .and_then(|r| snapshot(&r, sha256_hex(bytes)))
+        .map_err(|e| format!("acceptance contract v4: {e}"))
+}
+
+pub fn inspect_v4(path: &Path) -> Result<ContractSnapshot, String> {
+    if path != Path::new(V4_RELATIVE_PATH) {
+        return Err(format!(
+            "wrong acceptance contract path: expected exactly {V4_RELATIVE_PATH}, got {}",
+            path.display()
+        ));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    parse_v4(&bytes)
 }
 
 fn verify_bound_sha256(label: &str, frozen: &str, runtime: &str) -> Result<(), String> {
@@ -181,35 +232,46 @@ fn verify_input(label: &str, frozen: &InputHashes, runtime: &InputHashes) -> Res
         &frozen.record_sha256,
         &runtime.record_sha256,
     )?;
-    verify_bound_sha256(
-        &format!("{label}_legacy_sha256"),
-        &frozen.legacy_sha256,
-        &runtime.legacy_sha256,
-    )
+    match (&frozen.legacy_sha256, &runtime.legacy_sha256) {
+        (None, None) => Ok(()),
+        (Some(frozen), Some(runtime)) => {
+            verify_bound_sha256(&format!("{label}_legacy_sha256"), frozen, runtime)
+        }
+        _ => Err(format!(
+            "evidence binding mismatch for {label}_legacy_sha256: one side is an import, the other native"
+        )),
+    }
 }
 
 pub fn verify_live_authorization(
     path: &Path,
     ctx: &LiveGuardContext,
 ) -> Result<ContractSnapshot, String> {
-    let snap = inspect_v3(path)?;
-
-    if FROZEN_APPROVED_V3_SHA256 == "UNARMED" {
+    if path != Path::new(V4_RELATIVE_PATH) {
+        return Err(format!(
+            "wrong acceptance contract path: expected exactly {V4_RELATIVE_PATH}, got {}",
+            path.display()
+        ));
+    }
+    // Refused before anything is read: no contract file can stand in for the
+    // compiled authority.
+    if FROZEN_APPROVED_V4_SHA256 == "UNARMED" {
         return Err(
-            "live guard is deliberately UNARMED: no approved v3 SHA-256 is compiled in".into(),
+            "live guard is deliberately UNARMED: no approved v4 SHA-256 is compiled in".into(),
         );
     }
-    if snap.sha256 != FROZEN_APPROVED_V3_SHA256 {
+    let snap = inspect_v4(path)?;
+    if snap.sha256 != FROZEN_APPROVED_V4_SHA256 {
         return Err(format!(
-            "v3 SHA-256 mismatch: file={} frozen={}",
-            snap.sha256, FROZEN_APPROVED_V3_SHA256
+            "v4 SHA-256 mismatch: file={} frozen={}",
+            snap.sha256, FROZEN_APPROVED_V4_SHA256
         ));
     }
     if !snap.approved {
-        return Err("v3 authorization.approved is not true".into());
+        return Err("v4 authorization.approved is not true".into());
     }
     if !snap.execution_ready {
-        return Err("v3 authorization.execution_ready is not true".into());
+        return Err("v4 authorization.execution_ready is not true".into());
     }
     if !ctx.dry_pass_all {
         return Err("DRY-1..DRY-4 are not all PASS".into());
@@ -239,10 +301,10 @@ pub fn verify_live_authorization(
     )?;
 
     if norm_addr(&snap.launcher_address) != norm_addr(&ctx.launcher_address) {
-        return Err("runtime launcher does not equal frozen v3 launcher".into());
+        return Err("runtime launcher does not equal frozen v4 launcher".into());
     }
     if norm_addr(&snap.buyer_address) != norm_addr(&ctx.buyer_address) {
-        return Err("runtime buyer does not equal frozen v3 buyer".into());
+        return Err("runtime buyer does not equal frozen v4 buyer".into());
     }
     if norm_addr(&snap.launcher_address) == norm_addr(&snap.buyer_address) {
         return Err("launcher and buyer must be distinct".into());
@@ -320,11 +382,38 @@ mod tests {
     }
 
     #[test]
+    fn legacy_hashes_bind_imports_and_native_inputs_alike() {
+        let h = |c: char| c.to_string().repeat(64);
+        let native = InputHashes {
+            record_sha256: h('a'),
+            legacy_sha256: None,
+        };
+        let import = InputHashes {
+            record_sha256: h('a'),
+            legacy_sha256: Some(h('b')),
+        };
+        assert!(verify_input("x", &native, &native).is_ok());
+        assert!(verify_input("x", &import, &import).is_ok());
+        assert!(verify_input("x", &native, &import).is_err());
+        assert!(verify_input("x", &import, &native).is_err());
+        let other = InputHashes {
+            record_sha256: h('c'),
+            legacy_sha256: None,
+        };
+        assert!(verify_input("x", &native, &other).is_err());
+        let wrong_legacy = InputHashes {
+            record_sha256: h('a'),
+            legacy_sha256: Some(h('d')),
+        };
+        assert!(verify_input("x", &import, &wrong_legacy).is_err());
+    }
+
+    #[test]
     fn frozen_hash_is_unarmed_or_sha256() {
         assert!(
-            FROZEN_APPROVED_V3_SHA256 == "UNARMED"
-                || (FROZEN_APPROVED_V3_SHA256.len() == 64
-                    && FROZEN_APPROVED_V3_SHA256
+            FROZEN_APPROVED_V4_SHA256 == "UNARMED"
+                || (FROZEN_APPROVED_V4_SHA256.len() == 64
+                    && FROZEN_APPROVED_V4_SHA256
                         .bytes()
                         .all(|b| b.is_ascii_hexdigit()))
         );
