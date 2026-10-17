@@ -8,6 +8,12 @@
 
 **Nachschlagewerke:** [verifizierte Variablen](PROJECT_0_CODE_MAP.md) · [geplanter Control-/API-Vertrag](CONTROL_PROTOCOL.md) · **[verbindliche Boot-/Unbounded-/Backtest-/Optimizer-Spezifikation](STARTUP_BACKTEST_OPTIMIZATION.md)**. Die v1.1-Erweiterung ersetzt feste Laufzeit-Presets durch einen typisierten, frei konfigurierbaren Horizont.
 
+## V0 Design- und Fleet-Spezifikation (2026-10-17)
+
+**Abgenommenes Design als V0 festgelegt:** [Graphite V0](V0_GRAPHITE_FLEET.md) und [implementierbarer React-/Backend-/Speicher-/Refresh-Phasenplan](V0_FLEET_IMPLEMENTATION_PLAN.md). Die frühere Ein-Bot-UX ist hiermit überholt. `Liquidator` verwaltet später N Bot-Instanzen mit **je eigenen** Strategy Profiles, Capital, MinNet, Fees, Concurrency und qualifizierten Liquidationsklassen. Gemeinsamer Ingress/State plus globaler Arbiter, atomare Wallet-Reservation und per-bot Attribution; Captures/Shadow parallel und unfiltered, Offline-Replay ressourcenisoliert. Keine UI-Budgetänderung überschreibt LIVE-/FE-06-/JFI-Gates.
+
+**Wallet-Lock:** Tabstruktur `Balances / Send / Auto-Sweep` und Reihenfolge aller KPI-Zeilen aus V0 sind fest. Bei Liquidator-/Capture-Änderungen **Wallets nicht neu gestalten**. `Overview` und `Wallets` sollen identische `PortfolioFinancialSnapshot`-Kennzahlen anzeigen. Echt persistiert werden Draft-/Profil- und Instanzdaten erst nach Rust-FLEET-03/05, nicht in React localStorage. Aktuell lediglich lokale zustandslose Frontend-Entwürfe.
+
 ## 0. Zielarchitektur und Entscheidung
 
 - **Ein Rust-Core.** `p0-longtail` bleibt die einzige fachliche Project_0-Runtime in den vorhandenen vier Crates `common, solana, liquidation, runtime`. State, Decoder, Health, Economics, Winner, Funding, Routing, Signing und Reconciliation niemals im Browser neu implementieren.

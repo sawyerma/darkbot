@@ -61,6 +61,7 @@ Bevor du die neue Dokumentation lokal übernimmst, prüfe `git status --short` u
 | Local/generated runtime data | [data/](data/) |
 | Qualification / gate documentation | [docs/qualification/](docs/qualification/) |
 | Project 0 frontend | [../frontend/src/features/project0/](../frontend/src/features/project0/) |
+| **Project 0 Frontend V0 Fleet: frozen design, source-bound React tree and implementation plan** | [V0 Graphite design](../frontend/docs/V0_GRAPHITE_FLEET.md), [Fleet source mapping / persistence / refresh](../frontend/docs/V0_FLEET_IMPLEMENTATION_PLAN.md). Multi-bot executable owner remains SOLL, no LIVE approval. |
 | **Accepted Graphite V5 UI & portfolio financial KPI contract** | [Graphite V5, latency, Total Capital and Realized Net PnL in Overview and Wallets](../frontend/docs/GRAPHITE_V5_UI_FINANCE_CONTRACT.md); DTOs are SOLL, not existing financial ledger. |
 | **Project0 wallet overview / profit treasury roadmap** | [Frontend Wallets & Treasury FEUI-10](../frontend/docs/WALLETS_TREASURY.md), public balances, manual and policy-bound auto-sweeps; no transfers authorized by these docs. |
 | **Project0 startup, unbounded run and backtest UX contract** | [Boot-/Address-Integrity/RunHorizon/Replay/Optimizer](../frontend/docs/STARTUP_BACKTEST_OPTIMIZATION.md); planned, not implemented; follows Project_0 FE/JFI/SK gates. |

@@ -15,6 +15,10 @@ The browser is not a second trading engine. Protocol decoding, health, economics
 
 ## Project_0 frontend implementation plan
 
+- **[Frozen V0 Graphite Fleet layout and React tree](docs/V0_GRAPHITE_FLEET.md)** — accepted five-tab graphite design; stable Wallets, multiple Liquidator drafts.
+- **[V0 Fleet implementation plan: code variables, persistence, refresh, React ownership](docs/V0_FLEET_IMPLEMENTATION_PLAN.md)** — exact current source mappings and missing backend contracts; no LIVE claims.
+
+
 - [Accepted Graphite V5 UI & shared financial snapshot contract](docs/GRAPHITE_V5_UI_FINANCE_CONTRACT.md) — five-tab dark macOS-style layout, Overview/Wallets Total Capital and Realized Net PnL parity, latency/parallel execution owner map and gates.
 
 - [Wallets & Treasury: wallet dashboard, manual withdrawals and realized-profit auto-sweeps](docs/WALLETS_TREASURY.md) — FEUI-10A/B/C and safety/approval gates.
