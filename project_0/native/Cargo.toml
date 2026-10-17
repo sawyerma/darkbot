@@ -5,6 +5,7 @@ members = [
     "crates/solana",
     "crates/liquidation",
     "crates/runtime",
+    "crates/reporter",
 ]
 
 # Weitere Crates werden erst aufgenommen, wenn ihr Ticket freigegeben ist:

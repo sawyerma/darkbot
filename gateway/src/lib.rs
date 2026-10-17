@@ -16,4 +16,4 @@ pub mod ws;
 pub const PROTOCOL_MAJOR: u32 = 1;
 pub const PROTOCOL_MINOR: u32 = 0;
 /// Muss mit frontend/src/core/realtime/schemaId.ts übereinstimmen (protocol/scripts/schema-id.sh).
-pub const SCHEMA_ID: &str = "170bc7d589d39b7d07c54ab29cde87b3242a6995af39310596a46a22fabcd0c0";
+pub const SCHEMA_ID: &str = include_str!("../../protocol/schema_id.txt");

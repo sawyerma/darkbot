@@ -17,5 +17,7 @@ for p in files:
     h.update(rel)
     h.update(len(data).to_bytes(8, "big"))
     h.update(data)
-print(h.hexdigest())
+fingerprint = h.hexdigest()
+(root.parent / "schema_id.txt").write_text(fingerprint, encoding="ascii")
+print(fingerprint)
 PY
