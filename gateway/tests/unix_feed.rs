@@ -79,7 +79,7 @@ async fn real_socket_publishes_project0_and_detaches_after_close() {
     let cached = hub.current(TopicId::Project0Status).unwrap();
     assert_eq!((cached.generation, cached.seq), (42, 1));
     assert_eq!(cached.payload.as_ref(), b"\x12\x03xyz");
-    assert_eq!(registry.status(ProjectId::Project0).unwrap().state, SourceState::Connected);
+    wait_until(|| registry.status(ProjectId::Project0).unwrap().state == SourceState::Connected).await;
     drop(stream);
     wait_until(|| hub.current(TopicId::Project0Status).unwrap().quality == StateQuality::SourceDetached).await;
     assert_eq!(registry.status(ProjectId::Project0).unwrap().state, SourceState::Detached);
