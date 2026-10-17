@@ -19,7 +19,7 @@ async fn spawn(mut limits:Limits)->TestServer{
  let cfg=GatewayConfig{bind:addr,static_dir:None,allowed_origins:vec![format!("http://{addr}")],allowed_hosts:vec![addr.to_string()],session_cookie:"darkbot_session".into(),limits,source_stale_after_ms:1000,source_detach_after_ms:2000,source_reattach_backoff_ms:50,overview_interval_ms:60000};
  let hub=Arc::new(StateHub::new(1024));let registry=SourceRegistry::new();
  let state=AppState::new(cfg,hub.clone(),registry);
- tokio::spawn(axum::serve(listener,http::router(state.clone())));
+ tokio::spawn(async move { axum::serve(listener, http::router(state.clone())).await.expect("test server"); });
  TestServer{addr,state,hub}
 }
 async fn try_connect(s:&TestServer,cookie:bool,origin:Option<&str>,host:Option<&str>)->Result<Ws,WsError>{
