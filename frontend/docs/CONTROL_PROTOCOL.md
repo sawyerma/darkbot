@@ -85,7 +85,17 @@ Readiness setzt **WSS-ACK und verwertbare Application-Frames/Slot-Fortschritte**
 - Kein generischer `sign`/`live`/`send`-Endpoint, kein Payment per Frontend. `P0_LIVE_ENABLED=false`, `P0_SUBMISSION_ENABLED=false` für die hier geplanten Observe-Runs. Separate FE-06-Berechtigung bleibt unverändert.
 - UI-Disconnect/Slow Client blockiert weder Ingress noch Journalwriter, keine unbounded Browser-Queues.
 
-## 7. Contract- und Negativtests
+## 7. Erweiterter Start-/Run-/Backtest-Vertrag v1.1
+
+Verbindlicher Detailvertrag: [STARTUP_BACKTEST_OPTIMIZATION.md](STARTUP_BACKTEST_OPTIMIZATION.md).
+
+- `RunHorizon` (SOLL) ist `Fixed{duration_seconds}` oder `UntilStopped{checkpoint_seconds,segment_policy,minimum_runway_seconds}`. Keine festverdrahteten 30s/1h/4h-Presets, sondern frei validierbare Dauer + gesondertes `Bis Stop`.
+- `BootAudit` (SOLL) vor jedem neuen Run: erwartete/observed Binary-/Config-/Genesis-/Program-/ProgramData-/Owner-/Bank-/Oracle-/PDA-/ABI-/Provider-/Storage-/Wallet-Public-Identitäten, Resultate `PASS/WARN/BLOCKED/UNKNOWN`, an Run-Konfiguration gebundener kurzer Readiness-Token, TOCTOU-Recheck. Ohne ausdrückliche Netzfreigabe nur offline Audit, **kein** NETWORK_READY.
+- Neue Endpunkte SOLL: `/api/v1/project0/boot-audits`, `/api/v1/project0/diagnostics`, `/api/v1/project0/runs/:runId/segments`, `/api/v1/project0/backtest-jobs`, `/api/v1/project0/profiles`. Keine vorhandenen Backendrouten.
+- `AnalyzeJob → BacktestJob → Report → OptimizationJob → StrategyProfileCandidate` als unabhängige idempotente, limitierte **serverseitige** Jobs auf immutable `.p0j`-Segmentroot-/Verification-IDs. Historischer Replay as-of ohne Zukunftsdaten; UNPROVEN/UNKNOWN nicht als profitable Echtgeld-Landung zählen. Kein `optimize`-Befehl darf eine Strategie live ändern.
+- Mainnet-Provider-/Boot-/4h-/Infinite-Freigabe, FREE_ONLY, JFI und FE-Sicherheit bleiben auch bei einem Klick wirksam.
+
+## 8. Contract- und Negativtests
 
 1. Gleiche Terminal-/Browser-Werte liefern identische effektive Backend-Config/ID/Default/Unit; unbekannte Versionsfelder fail-closed.
 2. Duration `30s/60s/10m/1h/4h/24h/48h` genau einmal in Rust validiert; kein zweiter UI-Deadline-Rechner.
