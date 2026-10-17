@@ -5525,3 +5525,13 @@ Base `8cf863b`.
 - **Open in A3:** native verification driver (typed spec/attempt/result, capture-evidence binding, job input) and the native report consumers (B7); `smoke.sh` still stale (NOT_RUN).
 
 Tests: verification 4/4 (resume from native checkpoints, native reader, compat render idempotent, corrupt checkpoint/cache, wrong parent, disk budget, scope change, bounded read-ahead); market 104/104 (1 ignored, unchanged); storage incl. `statvfs`; runner lib 272 + 1 in the full run — the one failure was a pre-existing temp-directory name collision in `journal_tests` (deterministic `Pubkey::new_unique`), made unique and rerun PASS (journal 13/13); Python `test_measurement_p6` + `test_measurement_contract` 13/13; `cargo test --workspace --all-features --no-run` PASS.
+
+## 2026-10-17 — Ticket 3 A4: historical differential against the pinned Python verifier (PARTIAL, `A4_HISTORICAL_SAMPLE_INCOMPLETE`)
+
+Base `c44ad93`. Evidence: [A4_PARITY_20261017](evidence/A4_PARITY_20261017/README.md).
+
+- Same historical provider bytes, two independent decoders: the pinned `audit_market_quick.py` (`detect`/`decode_logs`, imported unchanged by `operations/qualification/parity_differential.py`) against the Rust chain decode + `truth::classify` + receiver-log decoder (`p0-parity`, `market/parity.rs`). Sources: the 6 AUDIT_20261005 liquidation transactions and every historical run's raw `full_slot_reconciliation` block entries and `logsSubscribe` notifications. Read-only, no RPC, no new capture.
+- 2,869 compared (52 full transactions, 2,816 logs, 1 truncated historical line reported identically): **2,839 identical** in status, fee, version, fee payer, markers with positions, events (class, target, actor, index, exact atomic units) and classification. **30 differ only in priority fee** — all v1: Rust reads `transactionConfig.priorityFee`, the pinned Python reports UNKNOWN; in all 30 `meta.fee − priority = 5,000` (one signature fee), so the Rust value agrees with the chain's total fee. Python stays unchanged.
+- Not covered historically (unit/synthetic only, not counted): legacy transactions, absent `meta`/`err`, CLASSIC, FORCED_DELEVERAGE, BANKRUPTCY_SETTLEMENT, the markers `lending_account_liquidate`, `start_deleverage`, `end_deleverage`, `lending_pool_handle_bankruptcy`, CPI positions. Shared boundary: one provider; the Anchor discriminator names; new typed captures carry no provider JSON, so this parity is historical only.
+
+Tests: `parity::real_v1_receivership_line` 1/1; differential run as above (exit 1 because of the 30 documented priority-only differences).

@@ -93,6 +93,8 @@ mod enrichment;
 pub use enrichment::{enrich, TokenDelta, TxEnrichment};
 #[path = "rows.rs"]
 pub mod rows;
+#[path = "parity.rs"]
+pub mod parity;
 #[path = "sink.rs"]
 mod sink;
 pub use sink::{
