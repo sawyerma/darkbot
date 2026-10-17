@@ -52,8 +52,9 @@
 | `L` kleinere Befunde Review 1 | — | L1, L2, L4; L3 wurde nicht als Befund geliefert |
 | `B` finanzielle Pipeline-/State-Prüfung | — | B1–B9, mit **B8 als umstrittener Fixvorschlag**; zusätzliche konkrete kleine Befunde B10–B18 |
 | `C` Recovery/Owner/Settlement Review 3 | — | C1–C12 offen, C13 weiterer Reviewumfang; C1/C7 vor 4h, C3/C4/C5 vor P8. |
+| `D` Market-Evidence/Funding/Sweep Review 4 | — | D1–D13 offen; D1 vor 4h, D3 vor 4h-Stresstest, D4/D5/D8/D9 Capture-Härtung; D2 Effizienz, D10=C6, D11=B11. |
 | `X` verbindliche Quervertragslücken | — | X1 BOOT-12, X2 JFI-BOOT, X3 BOOT-01/02; verwandt mit N1–N8, keine doppelte Implementierung |
-| Weitere Reviewmodule | — | Gesamtes `sweep.rs`, `winner_tracker.rs`, `integration.rs`/`projection.rs`/`index.rs`, `funding.rs`/`planner.rs`/`protocol.rs`, `census.rs`, Market-Observer/`econ*.rs`/`chain.rs`/`report.rs`/`measurement.rs` und Python-Skripte noch nicht vollständig begutachtet; C1–C12 im dritten Durchgang geprüft |
+| Weitere Reviewmodule | — | `winner_tracker.rs`, `chain.rs`, `econ*.rs`, `measurement.rs`, `report.rs`, `index.rs`, `integration.rs`, `projection.rs`, `census.rs`, `planner.rs` und Python-Skripte noch nicht vollständig begutachtet; `sweep.rs`, `state_owner/ingress.rs`, `funding.rs`, `protocol.rs`, `market/{capture,sink,core}.rs` im vierten Durchgang gelesen (C-/D-Tickets bleiben offen) |
 
 Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review der eingecheckten Fixes und zielgerichteten Testangaben; **eine neue vollständige Workspace-Ausführung durch den Register-Autor wurde nicht vorgenommen**.
 
@@ -398,7 +399,118 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** vollständiger File-/Owner-/Contract-Coverage-Bericht mit überprüften Versionen; Nicht-Befunde nicht als PASS des Gesamtsystems ausweisen.
 
 
-## 8. X — explizite Phasenplan-Vertragslücken; mit N-Tickets koordinieren
+## 8. D — vierter Reviewdurchgang: Market-Evidence, Funding, Sweep und Ingress
+
+**Review-Stand:** 2026-10-18, betroffene Codepfade auf `main` bei `4e7f4a413faaa158bb1b91d4678a8de0312e0e5c` gelesen. Nachfolgender `main`-Commit `9b250dacc1e97f07e2fff56c8a48d53380528a1a` ändert nur Reporter-Quellen und -Tests, nicht die hier untersuchten Funktionen. Von Fable gelesen: `state_owner/sweep.rs`, `state_owner/ingress.rs`, `liquidation/{protocol,funding}.rs`, `market/{capture,sink,core}.rs`. Zusätzlich wurden `market/summary.rs`, `market/observer_tests.rs`, `execution/{builder,pipeline}.rs` für die betreffenden Pfade gegengeprüft. **Alle D-Tickets bleiben offen: keine neuen Fixes und keine lokal ausgeführten Regressionstests.** Verbindliche Fixvorgaben gelten vorbehaltlich fachlich identischer Paritätstests; keine Trading-/Safety-/Quota-Regel wird stillschweigend verändert.
+
+### D1 — geordneter Market-Capture-Abbruch versiegelt Journal fälschlich COMPLETE
+- [ ] **HIGH / EVIDENCE INTEGRITY · CODE_CONFIRMED · G-A/G-C/G-D · PERSIST/SK/C0-E1; VOR 4H.**
+- **Pfade:** `runtime/src/market/sink.rs::MarketSink::finish/JournalSink::finish`, `runtime/src/market/summary.rs::finalize`, `runtime/src/market/capture.rs::finish_capture/run`, `analytics/journal.rs::verify_chain`.
+- **Ist/Reproduktion:** `JournalSink::finish()` ruft unabhängig vom Outcome `seal(true)`. Bei `stop_reason` = `OPERATOR_STOP`, `STREAM_NOT_READY`, `INGRESS_THREAD_ENDED`, `C0_E1_ABORT` oder bei `drain_complete=false` schreibt `ObserverCore` zwar `INCOMPLETE`-Coverage und die Summary meldet Nichtvollständigkeit; der Writer erhält trotzdem `complete=true`. Dadurch `MarketJournalBinding.status=COMPLETE` und ein struktureller Verifier kann `verify_chain().complete=true` berichten. **Wichtig:** Manifest-COMPLETE bezeichnet einen korrekt abgeschlossenen Capture-Schreibstrom, nicht automatisch die nachgelagerte vollständige kanonische Markt-/Programmpfad-Verifikation. Beide Achsen müssen unabhängig fail-closed bleiben.
+- **Verbindlicher Fix:** `MarketSink::finish(&mut self, complete: bool)` beziehungsweise äquivalent explizite typisierte Completeness im gemeinsamen Finishing-Vertrag; `capture::finish_capture`/`summary::finalize` übergibt mindestens `stop_reason == "TIMER" && drain_complete && write_error.is_none()`. Ein persistenter `core.incomplete_reasons`-/Gap-/Ingress-Abort darf nie durch `seal(true)` zu einem behaupteten *vollständigen Capture* hochgestuft werden; Definition der einzelnen Vollständigkeitsachsen mit `C0E1_4H_READINESS.md` abstimmen. `JournalSink` versiegelt entsprechend; `JsonlSink`/Pinned-Offline-Export nur an seiner tatsächlichen Batch-Grenze abschließen (siehe D4), kein vorzeitiger Kompatibilitätsbruch. Schriftliche Summary-/Binding-/Manifest-/Verifier-Konsistenz.
+- **Regression RED→GREEN:** `capture_operator_stop_seals_incomplete` (real `finish_capture`, `verify_chain.complete=false`, Binding INCOMPLETE, Coverage INCOMPLETE); Matrix `STREAM_NOT_READY`, `INGRESS_THREAD_ENDED`, `C0_E1_ABORT`, `WRITE_ERROR`, `drain=false`, vollständiger TIMER+Drain; `Writer::seal(false)`/Manifest/Schema-Provenienz; nach `seal(false)` kein stilles `resume` als Complete, keine überschriebenen historischen Journale.
+- **Abnahme:** **Alle Abbruchpfade liefern dieselbe nachweisbare unvollständige Evidence-Semantik** in Journal, Binding, Summary und Report; keine falsche FULL_CAPTURE-/FULL_MARKET-Qualifikation; Tests/Commit-SHA/Evidence dokumentiert. **Commit/Evidence:** —.
+
+### D2 — NoSwapInventory und PreheldInventory erzeugen doppelte technische Arbeit
+- [ ] **MEDIUM / PERFORMANCE + PROVIDER QUOTA · CODE_CONFIRMED · G-A/G-E · FE-02/P5/P6.**
+- **Pfade:** `liquidation/src/funding.rs::is_feasible/feasible_classes/capital_required`, `runtime/src/execution/builder.rs::plans`, `runtime/src/execution/pipeline.rs::evaluate`.
+- **Ist:** `NoSwapInventory` und `PreheldInventory` prüfen beide `liability_inventory >= liability_needed`, binden denselben `liability_needed_value`-Betrag. `builder::plans` ruft für beide dieselbe `receivership(..., vec![], true)` auf und erzeugt V0-/NoSwap-Pläne. `pipeline::evaluate` baut die Varianten separat und kann beide über `fee_for_message` bepreisen. **Zwei identische RPC-Calls sind nur dann belegt, wenn beide Varianten den jeweiligen Fee-Branch tatsächlich erreichen; nicht jede Opportunity erzeugt zwangsläufig zwei Calls.**
+- **Verbindlicher Fix:** **Keine Fundingklasse aus dem Phasenplan streichen.** Zunächst volle semantische Gleichheit von TX-Bytes, LookupTables, Token-/ATA-/Inventar-Provenienz, Kosten, Plan-Identity und Safety-Holds nachweisen. Falls byte- und entscheidungsgleich: technische Build-/Sign-/Fee-Evidence pro deterministischem Message-/Fee-Cache-Key nur einmal erzeugen und an beide Attributions-/Fundingkandidaten anbinden. Falls Kapitalherkunft, Exit-/Inventorystrategie oder spätere Kosten abweichen, nicht blind deduplizieren. Kein Cross-Slot-/Cross-Blockhash-Reuse, kein Quote-Zero-Default.
+- **Tests RED→GREEN:** identische NoSwap/Preheld-Pläne → ein Build/Feecall, **beide** Fundinglabels/Reports bleiben vorhanden; abweichende Plan-/Fee-/Blockhash-/LUT-Inputs → getrennte Arbeit; Mock-RPC-Callcounter 5-rps-Policy unverändert; economics/safety parity und Funding-Class-Schema. 
+- **Abnahme:** doppeltes Remote-I/O nachweisbar reduziert, vollständige Entscheidungs- und Finanzattribution unverändert. **Commit/Evidence:** —.
+
+### D3 — Sweep-Fan-out ist accountseitig unbounded und blockiert Owner-Ingress
+- [ ] **HIGH / LIVELESSNESS + CAPTURE INTEGRITY · CODE_CONFIRMED · G-A/G-C/G-D · R127/S1-LT/P6-MT; STRESSTEST VOR 4H.**
+- **Pfade:** `runtime/src/orchestration/state_owner/sweep.rs::sweep`, `state_owner/events.rs` und Owner-Loop, `solana/src/runtime_config.rs`.
+- **Ist:** `sweep_batch_max_events` begrenzt geänderte Quell-Events, **nicht** die per Reverse-Index zugeordneten Debtor-Accounts. `account_work` wird komplett aufgebaut, anschließend ganz per `into_par_iter()` auf dem Owner evaluiert und sortiert; während des Blocks wird `consumer.pop` nicht bedient. Bei Default `workers=1` arbeitet Rayon faktisch seriell. Ein Bankupdate kann große C0-E1-/R127-Census-/Health-Fan-outs erzeugen; die genaue maximal erreichte Blockierungszeit ist ohne Lastmessung unbekannt.
+- **Verbindlicher Fix:** Vor der 4h-Bereitschaft synthetischer deterministischer Lasttest für größte erwartete Dirty-Bank-/Account-Menge (auch 1 Worker). Bei unzulässiger Owner-Stall/Overflow: stabile **gebundene** Account-Work-Queue mit fairen Chunks und wiederholter Ingress-Drain-Opportunity, Snapshot-/Root-/input_revision-/event_slot-Provenienz pro Work-Item, Dedup/Force-Rearm/faire Retryordnung. Keiner der sechs Instruktionsmarker und keiner der Debtor-/Census-Fälle darf still verloren gehen. No O(n²)-Kopie, kein unbounded Aufstauen oder willkürliches Dropping. Optional gesonderter CPU-Worker nur mit eindeutiger Ownership/Backpressure; keine parallelen mutable State-Zugriffe.
+- **Tests RED→GREEN:** 1/2/N Rayon-Worker, eine Bank mit 100/10.000/100.000 abhängigen Accounts, Dirty-Event mitten im Lauf, Root-/Oracle-Revision während Chunkgrenze, Shutdown, starvation/oldest-first, voller Queue-/RAM-Budget, Counterparität (unique/forwarded/healthy/liquidatable/pending/census), max Owner-blocking p95/p99 und kein unregistrierter Ingress-Overflow.
+- **Abnahme:** realistische Fan-outs unter begrenzter Owner-Blockdauer und ohne Vollständigkeitsverlust; erst echte Kalibrierung misst freie Kapazität. **Commit/Evidence:** —.
+
+### D4 — `on_logs` ruft `flush` pro TX auf und kann Kompatibilitätssink früh versiegeln
+- [ ] **MEDIUM / CAPTURE-FAILURE · CODE_CONFIRMED · G-A/G-C · JFI/PERSIST.**
+- **Pfade:** `runtime/src/market/core.rs::on_logs`, `runtime/src/market/sink.rs::JournalSink::flush/JsonlSink::flush`.
+- **Ist:** Nach jeder zugelassenen Logs-TX `sink.flush()?` mit veraltetem `BufWriter/SIGTERM`-Kommentar. `JournalSink::flush` ist ein No-op (eigener Writer batcht/synct); `JsonlSink::flush` führt einmal `inner.seal(true)` + Legacy-Export durch. Beim selben `on_logs`-Sink würden Folgeframes mit `MARKET_JOURNAL_ALREADY_FINISHED` abbrechen. Strict-Batch-`JsonlSink::flush` ist bewusst ein **Batchabschluss**, kein generischer TX-Flush.
+- **Verbindlicher Fix:** Unqualifizierten per-TX-`flush`-Aufruf und Kommentar aus `on_logs` entfernen; Writer-Lane darf weiter gemäß `WriterConfig` flush/sync machen; `JsonlSink` nur explizit an der Verifier-Batch-Grenze abschließen. Bei notwendigem Durability-Checkpoint separate native API statt `finish`-Semantik missbrauchen.
+- **Tests:** zwei/drei Logs-TX nacheinander mit `JsonlSink` → alle Rows vor explizitem Batch-Finish; `JournalSink` Batch-/Sync-Policy bleibt unverändert; Strict-Exporter paritätisch, kein JSON-Writer im produktiven Capture.
+- **Abnahme:** keine vorzeitige Versiegelung/Verlustfolge durch reguläre TX-Verarbeitung. **Commit/Evidence:** —.
+
+### D5 — unerreichbar angenommener Receivership-Decoderzweig kann Capture panicken
+- [ ] **MEDIUM / PANIC HARDENING · CODE_CONFIRMED, TRIGGER_NOT_PROVEN · G-A/G-C · C0-E1.**
+- **Pfad:** `runtime/src/market/core.rs::on_logs`, `decoded.additional_events`, `LiquidationType::Receivership`.
+- **Ist:** `unreachable!("original receiver decoder handles this type")` in von externen Chain-Logs abgeleitetem Decoderausgang. Ob der gepinnte Decoder diesen Enum-Fall derzeit tatsächlich in `additional_events` liefern kann, ist **noch nicht bewiesen**; ein unerwartetes Verhalten würde den Capture-Thread paniken lassen.
+- **Verbindlicher Fix:** Kein `unreachable!/panic!/unwrap` auf untrusted Decodevarianten. Explizit fehlerhaftes/inkonsistentes Decoderresultat zählen und als `UNKNOWN/INCOMPLETE` qualifizieren, keine Liquidation unterschlagen und keine falsche Duplikatzählung. Keine stille `continue`-Lösung, die den Pfad als vollständige Evidence erscheinen lässt.
+- **Tests:** direkt injizierter zusätzlicher Receivership-Event, gültige Classic/Deleverage/Bankruptcy, Doppeldekodierung, Truncation, fuzz-/property-Test aller Varianten; kein Panic, keine falsch vollständige Coverage.
+- **Abnahme:** Decoderfehler fail-closed in Evidence und Report, Capture bleibt kontrolliert. **Commit/Evidence:** —.
+
+### D6 — MarketStats pro Ingress-Event zweimal geklont und emittiert
+- [ ] **LOW / PERFORMANCE · CODE_CONFIRMED · G-C/G-D · MT0/Market-Observer.**
+- **Pfad:** `runtime/src/market/core.rs::on_ingress_event`.
+- **Ist:** Mit `econ` klont der Code `self.stats` vor dem Event und nachher erneut, erzeugt `Box<MarketStats>` und einen `MarketCounters`-Channel-Event auch bei unveränderten Countern (u. a. Slots). Slot-Evidence selbst muss weiterhin getrennt emittiert werden.
+- **Verbindlicher Fix:** Zuverlässige Differenz-/Delta-Erkennung mit stabiler Zeit-/Slot-Provenienz; nur bei Änderung der zu überwachenden Zähler Counter-Evidence erzeugen; notwendige Heartbeat-/Slot-/Cutoff-Evidence unverändert. Option: konkrete changed-bit/typed delta statt jedes Mal Vollkopie, soweit Analyzer-Vertrag es erlaubt.
+- **Tests:** unverändertes Event → keine Counter-Kopie/Emission; echte Änderung → exakt einmal, Index-/Ordering-/Timestamp-Parität, High-Rate-Slotstorm, keine Messlücke bei monotonen Countern; allokationsbezogenes Profil.
+- **Abnahme:** weniger Byte-/CPU-/Channel-Last ohne Verlust der qualifizierenden Evidence. **Commit/Evidence:** —.
+
+### D7 — String-basierte Market-Keys und Retention-Cap verursachen unnötigen Speicher-/Coverage-Druck
+- [ ] **MEDIUM / MEMORY + COVERAGE · CODE_CONFIRMED, CAP_EXHAUSTION_LASTTEST_NOT_RUN · G-C/G-D · SK-03/C0-E1.**
+- **Pfade:** `runtime/src/market/core.rs::ObserverCore` (`seen`, `liquidation_signatures`, `targets`, `receivers`, `admit`), `market/decoding.rs` und `market/configuration.rs`/Econ-Kapazität.
+- **Ist:** mehrere `HashSet/HashMap<String>`-Keys, Signaturen aus WSS/Logs oft im Stringformat; `admit()` und `admit_identity()` duplizieren Keys. Ohne Econ-Handle arbeitet Teile der Retention mit Fallback-Cap `100_000`, bei Überschreiten `C0_E1_MARKET_RETENTION_OVERFLOW`/Truth `retention_error`. Ob die Cap im konkreten 4h-Markt erreicht wird, ist zu **messen**, nicht zu behaupten. „Halber Speicher“ für typisierte Keys ist **ohne Messung keine gesicherte Zahl**.
+- **Verbindlicher Fix:** Quelle/Typen/Subscribers analysieren, native `Signature/Pubkey` nur dann in Hotpath übernehmen, wenn kein JFI-/kompatibles Wire-Schema verletzt wird; Bound/Dedupe/TTL für gesamten Beobachtungszeitraum beweisen. Nicht einfach Cap erhöhen oder alte Signaturen evicten, weil das Markt-Wahrheits-/Dedup-Claims entwertet. Bei Overflow `INCOMPLETE` bleiben, kein stiller Drop.
+- **Tests:** gleiche deduplizierte Signature aus zweierlei Quellen und Slots, mehr als 100k einzigartige TX, 4h-Projektionsprofil, p95 RAM/Bytes pro Key, Sort-/Hash-Parität, Cap-Gate, vollständige Receiver-/Target-Zähler.
+- **Abnahme:** memory-bounded mit expliziter Coverage-/Retention-Qualifikation, keinerlei fälschliche Vollständigkeit. **Commit/Evidence:** —.
+
+### D8 — Market-Capture-Thread wird nur bei bereits abgeschlossenem Lauf gejoint
+- [ ] **MEDIUM / SHUTDOWN LIFECYCLE · CODE_CONFIRMED · G-A/G-C; VOR LANGEN LÄUFEN.**
+- **Pfad:** `runtime/src/market/capture.rs::run`.
+- **Ist:** Nach `session.request()` und Drain erfolgt `if ingress.is_finished() { ingress.join() }`; wenn der Thread beim Rücksprung noch lebt, wird der JoinHandle verworfen. Consumer-Drop mag später beenden, belegt aber keinen geordneten Shutdown/keine aktuelle Threadquiescence.
+- **Verbindlicher Fix:** eigene Session-Cancellation und **nachweisbar bounded** Join-/Shutdown-Barriere mit dokumentiertem RPC/WSS-Timeout, rechtzeitige Abbruch- und Writer-Finalisierung. Da `std::thread::JoinHandle::join` selbst nicht timeout-fähig ist, keine irreführende `join_timeout`-Behauptung ohne entsprechende Architektur. Bei Überschreitung globalen Stop-/Drain-Budgets fail-closed `INCOMPLETE_ABORT`; niemals weiter laufenden Ingress als ruhend deklarieren.
+- **Tests:** langsam endender Ingress, blockiertes Receive, StreamReady nicht erreicht, OperatorStop, Writer-Drain und FullQueue; Threadzähler und keine Emission nach Return.
+- **Abnahme:** keine detached marktaktive Session nach kontrolliertem Capture-Abschluss. **Commit/Evidence:** —.
+
+### D9 — synchrones stderr auf Capture-Thread kann Ingress-Verarbeitung blockieren
+- [ ] **MEDIUM / BACKPRESSURE · CODE_CONFIRMED · G-A/G-C · Cross-Ref M2.**
+- **Pfade:** `runtime/src/market/capture.rs` (Status alle etwa 2 s), `runtime/src/market/core.rs::on_logs` (pro erkannter Liquidation).
+- **Ist:** Direktes `eprintln!` aus Capture-/Decode-Pfad kann bei vollem Pipe-/langsamen Dateisystem blockieren. Nur Shell-Umleitung auf Datei ist **kein vollständiger Beweis** für nichtblockierendes stderr.
+- **Verbindlicher Fix:** bounded/try-send Diagnostik entkoppeln, strukturiertes essentielles Capture-Journal unverändert vollständig, optionale Terminalausgabe darf begrenzt gedroppt/aggregiert werden (Counter). Shutdown darf keinen blockierten Konsolen-Join abwarten (M2).
+- **Tests:** blockierte stderr-Pipe, 1000 Liquiderfassungen, Writer-Backpressure, Terminal unavailable, kein erzwungener Ingress-HALT allein wegen optionaler Ausgabe, Summary/Counts identisch.
+- **Abnahme:** Terminal-Diagnostik ist kein unbounded Capture-Hotpath. **Commit/Evidence:** —.
+
+### D10 — verworfener JoinHandle beim StateOwner-Resubscribe
+- [ ] **MEDIUM / CONFIRMED DUPLICATE · Cross-Ref C6/C1/M3.**
+- **Pfad:** `runtime/src/orchestration/state_owner/ingress.rs::IngressSessions::spawn`.
+- **Ist:** `spawn()` startet `ingress-ws`, wirft den `JoinHandle` weg und gibt nur `Shutdown` zurück. Beim Dependency-Resubscribe können alte/neue Session den gleichen Producer/Halt kurz gleichzeitig nutzen. Damit ist der zentrale Codebeleg von C6 bestätigt.
+- **Verbindlicher Fix:** **C6 implementieren**, nicht zweiten Lifecycle-Mechanismus aufbauen; Session-Owner enthält Cancellation, Generation-ID, JoinHandle und geordneten vollständigen Shutdown. C1-/D8-Koordination ohne Session-Mischung.
+- **Tests:** C6-Negativmatrix zusätzlich verifizieren: alte Session endet vor neuer, Altevents nach Neustart verboten, gemeinsame Halt-Generation korrekt, Last-/Repeated Resubscribe, kein detached Ingress. 
+- **Abnahme:** ein implementierender Fix/Commit mit C6; beide Tickets erst nach demselben nachgewiesenen Test abschließen. **Commit/Evidence:** —.
+
+### D11 — Alignment des Bank-Decoders wird als UNKNOWN_LAYOUT fehlklassifiziert
+- [ ] **MEDIUM / VALIDATION ROBUSTNESS · CODE_CONFIRMED · P1B/FE-01 · Cross-Ref B2/B11 (nicht B10).**
+- **Pfad:** `liquidation/src/protocol.rs::decode_bank`.
+- **Ist:** Schon korrekt geprüfte Länge/Discriminator werden durch `bytemuck::try_from_bytes(&data[8..])` bei unaligned Input trotzdem abgewiesen und als `UNKNOWN_LAYOUT: bank payload alignment` gemeldet. Die interne Speicheradresse ist keine On-Chain-Formatänderung. Ein blindes `pod_read_unaligned` kann jedoch die API (`&Bank`) verändern; sämtliche Aufrufer/Lifetimes/Crate-Parität müssen berücksichtigt werden.
+- **Verbindlicher Fix:** Pinned-ABI-korrekter, alignment-unabhängiger, **strict length/discriminator/owner**-Decoder (owned POD-Read, falls möglich), ohne `0.1.12`-Prefix wieder einzuführen. Fehlerklassen für falschen Layouttyp und lokalen Buffer-Alignment-Fall trennen.
+- **Tests:** echte pinned Bank-Fixture 8/16-Byte-offset unterschiedlich, 0.1.12 resized, falsche Gesamtgröße/Owner/Disc, Nachkommabits identisch in Health/Sizer/Dependency-Index, Parser-Panicfrei.
+- **Abnahme:** gültige Bytes werden trotz unaligned Storage korrekt decodiert; unqualifizierte Versionen weiterhin UNKNOWN_LAYOUT. **Commit/Evidence:** —.
+
+### D12 — Sweep kopiert Fehler-/Erfolgszweige und berechnet Fairness mehrfach
+- [ ] **LOW / MAINTAINABILITY + HOTPATH · CODE_CONFIRMED · P6-MT, Cross-Ref D3.**
+- **Pfad:** `state_owner/sweep.rs`: `CandidateHealthState::Liquidatable/Error`, `candidate_fairness_key` in `any()` und in `sort_unstable_by_key()`.
+- **Ist:** zwei lange nahezu gleiche Update-/Rearm-Pfade, Fairness-Schlüssel mehrfach pro Kandidat. Risiken: spätere auseinanderlaufende Error-/Liquidatable-Logik, vermeidbare CPU. **Nicht** als bestehender falscher Forwardingentscheid nachgewiesen.
+- **Verbindlicher Fix:** zunächst Paritätstests über beide Pfade; gemeisame, rein funktionale Berechnung des Fairness-/Scheduling-Key pro Kandidat, danach optional Schrittausführung refaktorieren; kein stilles Zusammenlegen unterschiedlicher Retry-/Fault-Semantik. Vor-/Nach-Messung.
+- **Tests:** Healthy/Liquidatable/Error, forced rearms, prior forward slot, revisions, ties, saturation, startup census, identische Reihenfolge/Counts, keine Starvation.
+- **Abnahme:** weniger Duplikation/Schlüsselberechnung mit byte-/countergleichem Outcome. **Commit/Evidence:** —.
+
+### D13 — Rayon-Pool-Initialisierung über RAYON_NUM_THREADS möglicherweise zu spät
+- [ ] **MEDIUM / REVIEW_REQUIRED · G-A/G-C · P6-MT, Cross-Ref D3.**
+- **Pfad:** `runtime/src/orchestration/startup.rs::run` (`RAYON_NUM_THREADS` per Konfiguration), `state_owner/sweep.rs::into_par_iter`, mögliche frühere `rayon::ThreadPoolBuilder`-/Global-Pool-Nutzung.
+- **Ist:** `RAYON_NUM_THREADS` wirkt nur, solange der globale Pool nicht bereits von anderem Code initialisiert wurde. Die bloße Initialisierung von `provider::shared()` ist **kein belegter Rayon-Initialisierer**; möglicher Laufzeitkonflikt muss mit gezieltem Test/Instrumentation verifiziert werden.
+- **Verbindlicher Fix:** **ein** explizit früh initialisierter Pool oder ein gebundener eigener Pool passend zum bestehenden Owner-/Worker-Vertrag; keine konkurrierenden Pools/unkontrollierte Parallelisierung; Konfig-/FREE_ONLY-/Bounded-RAM-Regeln erhalten.
+- **Tests:** Prozessstart mit `workers=1/2/4`, vorherige bewusste Rayon-Initialisierung, tatsächliche Workerzählung und Threadnamen, deterministischer Lastoutput, Parallelitätsgrenze, Fehler bei widersprüchlicher Initialisierung statt stillem Ignorieren.
+- **Abnahme:** angeforderte Poolgröße wirksam und messbar, keine unqualifizierte zusätzliche Parallelität. **Commit/Evidence:** —.
+
+**Keine zusätzlichen D-Tickets für als sauber berichtete Grundlagen:** Pin-/Seed-/Discriminator-/Loader-v3-Funktionen in `protocol.rs`, allgemeine Funding-Klassenlogik außer D2 sowie Capture-Window-/Cutoff-/Drain-Grundlogik. Das schließt B2/D11-Decoderprovenienz, D1-Manifest-Wahrheit oder C1/C7-Ingressabschluss **nicht**.
+
+
+## 9. X — explizite Phasenplan-Vertragslücken; mit N-Tickets koordinieren
 
 ### X1 — BOOT-12 muss aktuelle Identitäten vor Runtime-Admission erneut prüfen
 - [ ] **CRITICAL · G-B.**
@@ -421,24 +533,24 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Tests:** korrupte Journalversion/Writer-Probe, Doppel-Owner, fehlende Binärdatei, Disk-/RAM-Untergrenze, Config-Drift; keine echte Netzwerkaktivität.
 - **Dedupe:** M1–M3/N1–N3/PERSIST/SK. **Commit/Evidence:** —.
 
-## 9. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
+## 10. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
 
 **Tranche A — laufende Härtung, ausschließlich Offline-Code und Tests:**
-1. **C1 und C7** (Recovery-Fatal/Exhaustion vor 4h), N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar.
-2. M1/M2 plus N4/N5/N6 zur Stabilität von Admission, Durability und Diagnose; keine neue Source-of-Truth.
+1. **C1/C7 + D1** (Recovery/Fatal, Manifest-Wahrheit vor 4h), N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar. **D4/D5/D8/D9** als gezielte Capture-Härtung integrieren.
+2. **D3-Stresstest vor 4h-Readiness**; bei unzulässiger Owner-Stall/Ingress-Overflow accountseitig gebundenes Chunking implementieren. M1/M2 plus N4/N5/N6 zur Stabilität von Admission, Durability und Diagnose; keine neue Source-of-Truth.
 3. N7/N8 nach Mess-/Sicherheitsvertrag, L4 und kleine isolierte L1/L2; B2 soweit für richtige BOOT-/P1A-Scope-/Layoutprüfung erforderlich.
 4. Gesamte relevante Offline-Regression, Release-/Formatter-/Clippy-Nachweis, Redaction-Probes, Ledger-/STATUS-/4h-Readiness-Synchronisierung.
 5. **Erst dann** getrennt autorisierter G-B-Audit; bei PASS gesondert G-C-Kalibrierung; G-D-vier-Stundenprüfung.
 
 **Tranche B — profitkritische Fertigstellung vor einer eventuell autorisierten FE-06:**
 1. B2, B4, B9 und ggf. L4 für die ausgewählte Fundingklasse; echte Candidate-/Source-/Oracle-/Rent-/Exit-Parität (FE-01/02).
-2. B6/B7/C2/C8/C9 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
+2. B6/B7/C2/C8/C9/D2/D6/D7/D12/D13 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
 3. **B1 + B3 + B15 + C3 + C4 + C5 + C11 + L1 + L2 verpflichtend** für finanzielle Single-Flight-/Wallet-/Limit-/Journal-/UNKNOWN-Gates (FE-04/P8). B10/B11/B12/B17 fachlich vor passendem Pilot prüfen; Ticket-Status bleibt sonst OPEN. C10/C12 werden im jeweiligen P8-/Error-Vertrag geschlossen.
 4. FE-05 ausschließlich read-only und nur autorisiert; FE-06 gesonderter individueller Geldbeschluss, ein Versuch dann HALT; FE-07 nur mit finalisiertem tatsächlich realisiertem Nettoledger.
 
 **Tranche C — separat beobachtete, nicht gestrichene Produktpflichten:** vollständiger C0-E1-Index/Crosscheck/Strict-Master, H0, Race/Binary-Geyser/Jito-Single/Bundle/gRPC, JIT-ExactIn, P6-MT/M4, P8-RES/Inventory/Rebalancing, K-Untersuchungen, P9 und Frontend bleiben gemäß §0.6/Phasenplan verbindlich. `NO_ECONOMIC_GO` stoppt nur nicht qualifiziertes LIVE, **nicht** die restliche Roadmap; kein Master-PASS oder erster Profit wird erfunden.
 
-## 10. Vorlage für jeden zukünftigen Befund und die Erledigung
+## 11. Vorlage für jeden zukünftigen Befund und die Erledigung
 
 ```text
 ### ID — kurzer reproduzierbarer Befund
@@ -455,12 +567,12 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 
 Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchstreichen, **Fix und Evidence behalten**. Keine Zusammenlegung unabhängiger Bugs ohne belegte gemeinsame Ursache; bei Doppelbelegen auf eine einzige Implementierung/Regression referenzieren.
 
-## 11. Aktuelle Abnahmeentscheidung
+## 12. Aktuelle Abnahmeentscheidung
 
-- **G-A:** **OPEN**. C1/C7 sind zusätzlich als Owner-/Recovery-Gates erfasst. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
+- **G-A:** **OPEN**. C1/C7 sowie D1/D4/D5/D8/D9 sind als Recovery-/Capture-/Evidence-Gates erfasst; D3-Lastqualifikation fehlt. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
 - **G-B (Netzwerk-Audit):** **NOT_RUN / NICHT FREIGEGEBEN**. Das vorhandene BOOT-03–08-Modul ist Code, kein Network-READY; BOOT-12 und JFI offen.
 - **G-C (600s-Kalibrierung):** **NOT_RUN / NICHT FREIGEGEBEN**.
-- **G-D (4h):** **NOT_QUALIFIED / NICHT FREIGEGEBEN**. Historische 4h-/5h-Versuche bleiben INCOMPLETE.
+- **G-D (4h):** **NOT_QUALIFIED / NICHT FREIGEGEBEN**. D1-Manifest-Fix und D3-Owner-Fanout-Stresstest fehlen. Historische 4h-/5h-Versuche bleiben INCOMPLETE.
 - **G-E (FE-01–05):** **PARTIAL/OPEN**, bisheriger FE-00-Befund `NO_ECONOMIC_GO`.
 - **G-F (FE-06/07):** **NOT_AUTHORIZED / NOT_RUN**, kein erster realisierter Gewinn belegt.
 
