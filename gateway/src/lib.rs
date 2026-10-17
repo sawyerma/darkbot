@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod engine;
+pub mod feeds;
 pub mod http;
 pub mod hub;
 pub mod overview;

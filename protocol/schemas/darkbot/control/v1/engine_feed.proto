@@ -1,0 +1,17 @@
+syntax = "proto3";
+package darkbot.control.v1;
+import "darkbot/control/v1/stream.proto";
+message EngineHello {
+  ProjectId project = 1;
+  string schema_id = 2;
+  string source_id = 3;
+  uint64 generation = 4;
+  repeated TopicId topics = 5;
+}
+message EngineFrame {
+  oneof msg {
+    EngineHello hello = 1;
+    StateFull state = 2;
+    Heartbeat heartbeat = 3;
+  }
+}

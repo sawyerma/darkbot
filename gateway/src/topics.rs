@@ -62,7 +62,7 @@ pub const TOPICS: &[TopicSpec] = &[
         TopicClass::State,
         ProjectId::Project0,
         "project0.status",
-        "",
+        "darkbot.project0.v1.StatusProjection",
     ),
     s(
         TopicId::Project0FinanceSummary,

@@ -4,12 +4,15 @@ use darkbot_gateway::{
     http::{self, AppState},
     hub::StateHub,
     overview,
+    feeds::UnixSocketFeed,
 };
 use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
-fn engine_feeds(_cfg: &GatewayConfig) -> Vec<Arc<dyn EngineFeed>> {
-    Vec::new()
+fn engine_feeds(cfg: &GatewayConfig) -> Vec<Arc<dyn EngineFeed>> {
+    std::env::var_os("DARKBOT_GATEWAY_PROJECT0_SOCKET").filter(|s| !s.is_empty())
+        .map(|path| vec![UnixSocketFeed::new(path.into(), cfg.limits.max_state_full_bytes as usize) as Arc<dyn EngineFeed>])
+        .unwrap_or_default()
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

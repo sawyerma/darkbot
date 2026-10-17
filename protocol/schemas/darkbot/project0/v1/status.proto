@@ -1,0 +1,13 @@
+syntax = "proto3";
+package darkbot.project0.v1;
+message StatusProjection {
+  string run_id = 1;
+  optional uint64 last_observed_slot = 2;
+  optional uint64 last_frame_age_ns = 3;
+  optional uint64 gap_count = 4;
+  optional uint64 reconnect_count = 5;
+  optional uint64 liquidation_events = 6;
+  optional uint64 queue_bytes = 7;
+  optional uint64 lag_frames = 8;
+  string market_verdict = 9;
+}
