@@ -13,9 +13,12 @@ export default defineConfig({
     react()
   ],
   server: {
-    host: "::",
+    host: "127.0.0.1",
     port: DEV_PORT,
     proxy: {
+      "/api/v1/session": { target: "http://127.0.0.1:8787", changeOrigin: true },
+      "/ws/v1/gateway": { target: "ws://127.0.0.1:8787", ws: true, changeOrigin: true },
+      "/healthz": { target: "http://127.0.0.1:8787", changeOrigin: true },
       '/api': {
         target: BACKEND_BASE,
         changeOrigin: true,
