@@ -64,6 +64,8 @@ pub mod kind {
     pub const ECON_CANONICAL: u16 = 413;
     /// C0-E1 phase boundary `{phase, at_ns, unix_ns, details}` (supervisor, market, analytics).
     pub const MEASUREMENT_PHASE: u16 = 500;
+    /// The run's measurement plan as handed from the plan compiler to the runtime (JFI-04).
+    pub const MEASUREMENT_PLAN: u16 = 501;
     /// MT0 measurement snapshot (cumulative counters), off-owner reporter thread.
     pub const MT0_SNAPSHOT: u16 = 600;
     /// FE-01 read-only observation: effective configuration, each saved RPC read
@@ -108,6 +110,7 @@ pub mod kind {
         ECON_OPPORTUNITY,
         ECON_CANONICAL,
         MEASUREMENT_PHASE,
+        MEASUREMENT_PLAN,
         MT0_SNAPSHOT,
         FE01_CONFIG,
         FE01_READ,

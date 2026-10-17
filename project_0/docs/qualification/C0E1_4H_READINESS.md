@@ -38,6 +38,7 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 |---|---|---|---|
 | A — baseline/contradictions | done | — | this page |
 | Git isolation (after the 506c349 BSC incident) | Project_0 works in a separate worktree with its own index; guarded pathspec commits | — | memory rule; `dfc5e14` restore reported to the user |
+| D4b — typed measurement-plan handoff | LOCAL_PASS | (this unit) | ledger 2026-10-17 (JFI-FIX-04 part 2) |
 | D4a — typed measurement phases; p6 fixture defect corrected | LOCAL_PASS | (this unit) | ledger 2026-10-17 (JFI-FIX-04 part 1) |
 | D3b — typed ECON_CANONICAL / ECON_OPPORTUNITY | LOCAL_PASS; snapshot/final documents open | (this unit) | ledger 2026-10-17 (JFI-FIX-05 part 2) |
 | C5 — one duration parser (s/m/h/d), `RunHorizon::Fixed` | LOCAL_PASS; `UntilStopped` FEUI follow-up | (this unit) | ledger 2026-10-17 (run horizon) |

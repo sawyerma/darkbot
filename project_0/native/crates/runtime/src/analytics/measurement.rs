@@ -51,6 +51,9 @@ impl Default for PhaseBudgets {
         }
     }
 }
+impl super::payload::Payload for MeasurementPlan {
+    const KIND: u16 = super::journal::kind::MEASUREMENT_PLAN;
+}
 impl MeasurementPlan {
     pub fn new(seconds: u64) -> Result<Self, String> {
         if !(1..=MAX_SECONDS).contains(&seconds) {
@@ -79,8 +82,14 @@ impl MeasurementPlan {
     }
     pub fn from_lookup(get: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
         if let Some(path) = get("P0_MEASUREMENT_PLAN") {
-            let plan: Self = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+            // JFI-04: the launcher hands over the typed plan journal; a JSON plan file is only
+            // read for historical/manual invocations.
+            let plan: Self = if path.ends_with(".p0j") {
+                super::journal::read_typed_value(Path::new(&path)).map_err(|e| e.to_string())?
+            } else {
+                serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?
+            };
             plan.validate()?;
             // A persisted plan is authoritative. Reject conflicting legacy overrides.
             plan.check_legacy(get)?;
@@ -668,6 +677,37 @@ mod tests {
         ] {
             assert!(MeasurementPlan::parse_duration(s).is_err(), "{s}");
         }
+    }
+    /// JFI-04: the launcher's typed plan journal is the runtime input; conflicting legacy
+    /// overrides are still refused, and a tampered journal fails closed.
+    #[test]
+    fn typed_plan_journal_is_the_runtime_input() {
+        let d = std::env::temp_dir().join(format!("p0_plan_{}_{}", std::process::id(), line!()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        let path = d.join("measurement_plan.p0j");
+        let plan = MeasurementPlan::new(4500).unwrap();
+        super::super::journal::write_typed_value(
+            &path,
+            super::super::journal::source::MEASUREMENT,
+            &plan,
+        )
+        .unwrap();
+        let p = path.to_string_lossy().into_owned();
+        let get = |k: &str| (k == "P0_MEASUREMENT_PLAN").then(|| p.clone());
+        assert_eq!(MeasurementPlan::from_lookup(&get).unwrap(), plan);
+        let conflict = |k: &str| match k {
+            "P0_MEASUREMENT_PLAN" => Some(p.clone()),
+            "P0_MEASUREMENT_DURATION" => Some("10m".into()),
+            _ => None,
+        };
+        assert!(MeasurementPlan::from_lookup(&conflict).is_err());
+        let mut bytes = fs::read(&path).unwrap();
+        let n = bytes.len();
+        bytes[n / 2] ^= 1;
+        fs::write(&path, bytes).unwrap();
+        assert!(MeasurementPlan::from_lookup(&get).is_err());
+        fs::remove_dir_all(d).unwrap();
     }
     #[test]
     fn bootstrap_does_not_consume_capture_budget() {

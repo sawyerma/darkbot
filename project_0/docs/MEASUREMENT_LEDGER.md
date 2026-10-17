@@ -5656,3 +5656,11 @@ Base `78f5761`.
 Tests: measurement/journal/econ 80, Python launcher integration 26/26, full Python suite 107 PASS (1 skipped; release `p0-fe-qualify` built for the FE replay tests).
 
 Open in JFI-FIX-04: run manifest and operational-config report (JSON values written by the runtime for the pinned readers), measurement plan / candidate manifest handoffs, Python ↔ Rust CLI handoffs.
+
+## 2026-10-17 — JFI-FIX-04 part 2: typed measurement-plan handoff (LOCAL_PASS)
+
+Base `0772897`.
+
+- The plan compiler writes the plan as a typed single-value journal (`MEASUREMENT_PLAN` 501, `capture/measurement_plan.p0j`, immutable) and the launcher hands that journal to the runtime (`P0_MEASUREMENT_PLAN`); the runtime no longer parses a JSON plan on the launch path. The JSON on stdout stays the pinned run store's staged `measurement_plan` part (render of the same struct). A JSON plan file remains readable for historical/manual invocations.
+
+Tests: `measurement::typed_plan_journal_is_the_runtime_input` (typed load, conflicting legacy override refused, tampered journal refused), measurement/journal 37, Python launcher integration 26/26 (manifest plan equals the staged part).

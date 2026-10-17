@@ -224,9 +224,11 @@ PLAN_BIN="$(dirname "$BIN")/p0-measurement-plan"
 if [[ -n "${P0_MEASUREMENT_PLAN:-}" ]]; then
   echo "launcher creates its own plan; unset P0_MEASUREMENT_PLAN" >&2; exit 2
 fi
-"$PLAN_BIN" > "$CONFIG_DIR/measurement_plan.json"
-export P0_MEASUREMENT_PLAN="$CONFIG_DIR/measurement_plan.json"
-export P0_ECON_DURATION_SECS="$(python3 - "$P0_MEASUREMENT_PLAN" <<'PLAN'
+# JFI-04: the runtime reads the typed plan journal; the JSON on stdout is the run store's staged part.
+mkdir -p "$CAPTURE_DIR"
+"$PLAN_BIN" --out "$CAPTURE_DIR/measurement_plan.p0j" > "$CONFIG_DIR/measurement_plan.json"
+export P0_MEASUREMENT_PLAN="$CAPTURE_DIR/measurement_plan.p0j"
+export P0_ECON_DURATION_SECS="$(python3 - "$CONFIG_DIR/measurement_plan.json" <<'PLAN'
 import json, sys
 print(json.load(open(sys.argv[1]))['duration_seconds'])
 PLAN

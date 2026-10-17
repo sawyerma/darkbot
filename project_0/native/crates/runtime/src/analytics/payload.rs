@@ -134,6 +134,9 @@ macro_rules! typed_kinds {
             }
             k::ECON_CANONICAL => $f::<super::econ::CanonicalJoin>($kind, $schema, $bytes),
             k::MEASUREMENT_PHASE => $f::<super::measurement::PhaseRecord>($kind, $schema, $bytes),
+            k::MEASUREMENT_PLAN => {
+                $f::<super::measurement::MeasurementPlan>($kind, $schema, $bytes)
+            }
             k::ECON_OPPORTUNITY => $f::<super::econ::OpportunityRow>($kind, $schema, $bytes),
             k::OWNER_RECONCILE => {
                 $f::<crate::execution::pending::ReconcileRecord>($kind, $schema, $bytes)
