@@ -210,6 +210,8 @@ pub struct Request {
     pub disk_reserve_bytes: u64,
     pub stall_budget_s: f64,
     pub safety_percent: u64,
+    /// SK-03: byte budget of the economics/winner/Shadow retained collections.
+    pub econ_retention_bytes: u64,
 }
 
 impl Request {
@@ -237,6 +239,7 @@ impl Request {
             disk_reserve_bytes: w.disk_reserve_bytes,
             stall_budget_s: w.stall_budget.as_secs_f64(),
             safety_percent: l.capacity_safety_percent,
+            econ_retention_bytes: l.econ_retention_mib * MIB,
         }
     }
 }
@@ -961,23 +964,35 @@ pub fn evaluate(
             )
         }
     }
-    // Economics/winner/Shadow collections: count-bounded only until their byte bounds exist.
+    // Economics/winner/Shadow collections: one hard byte budget (overflow → INCOMPLETE).
     check(
         "bounded_collections",
-        CapacityUnverified,
-        "econ/winner/Shadow retained collections are count-bounded, not byte-bounded (SK-03 open)"
-            .into(),
+        Qualified,
+        format!(
+            "econ/winner/Shadow retention ≤ {:.0} MiB (byte budget, overflow is INCOMPLETE); capture lane ≤ {:.0} MiB",
+            mib(req.econ_retention_bytes as f64),
+            mib(req.max_bytes as f64)
+        ),
     );
+    let bounded = req.max_bytes + req.econ_retention_bytes + req.system_reserve_bytes;
     match env.physical_bytes {
-        Some(p) if req.max_bytes + req.system_reserve_bytes <= p => check(
+        Some(p) if bounded <= p => check(
             "physical_memory",
             Qualified,
-            format!("{:.1} GiB physical ≥ max + system reserve", gib(p as f64)),
+            format!(
+                "{:.1} GiB physical ≥ capture max + econ retention + system reserve ({:.1} GiB)",
+                gib(p as f64),
+                gib(bounded as f64)
+            ),
         ),
         Some(p) => check(
             "physical_memory",
             Blocked,
-            format!("{:.1} GiB physical < max + system reserve", gib(p as f64)),
+            format!(
+                "{:.1} GiB physical < capture max + econ retention + system reserve ({:.1} GiB)",
+                gib(p as f64),
+                gib(bounded as f64)
+            ),
         ),
         None => check("physical_memory", Blocked, "physical memory unknown".into()),
     }
@@ -1111,6 +1126,7 @@ mod tests {
             disk_reserve_bytes: 2048 * MIB,
             stall_budget_s: 30.0,
             safety_percent: 50,
+            econ_retention_bytes: 1024 * MIB,
         }
     }
     fn env() -> Environment {

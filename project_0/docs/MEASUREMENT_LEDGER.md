@@ -5612,3 +5612,15 @@ Base `ca8fc19`. Evidence: [SK07_SEGMENTS_20261017](evidence/SK07_SEGMENTS_202610
 Tests: segments 2/2, lane rotation 1/1, storage/journal/market/verification 144, Python integration 26/26.
 
 Open: Shadow-evaluation lane segmentation (with its offset index, B1); real-load segment counts NOT_MEASURED.
+
+## 2026-10-17 — B1 part 1: typed and segmented Shadow-evaluation lane; byte-bounded econ retention (LOCAL_PASS in scope)
+
+Base `fe539dd`. Evidence: [B1_SHADOW_RETENTION_20261017](evidence/B1_SHADOW_RETENTION_20261017/README.md).
+
+- `ECON_SHADOW_EVALUATION` typed (`ShadowEvaluation`, schema 2, no JSON value), out of `LEGACY_WRITABLE`; historical schema-1 frames stay readable offline.
+- Shadow lane segmented (`econ_segment_mib`); chain references `EvalRef { segment, offset }`; global arrival sequence.
+- One byte budget for all retained analytics collections (`econ_retention_mib`, default 1024 MiB): reserve before retain, exact release, overflow = technical INCOMPLETE, never growth past the limit. Capacity preflight now counts it (bounded_collections QUALIFIED, physical memory incl. econ budget).
+
+Tests: econ 49 (incl. new byte-ledger test and 1M-evaluation stream over linked segments), segments/writer 3, journal/evidence 43, preflight 2, Python launcher integration 26/26.
+
+Open (JFI-FIX-05 rest, with B7): `ECON_SNAPSHOT/FINAL/OPPORTUNITY/CANONICAL` still schema-1 report values.

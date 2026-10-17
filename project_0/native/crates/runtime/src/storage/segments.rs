@@ -7,7 +7,8 @@
 //! sealed chain root (the hash of its manifest frame, which transitively covers every byte) plus
 //! the cumulative event count, all under one random set id. Sealed segments are never changed.
 //!
-//! `ChainReader` replays the whole chain in order and returns only event frames. It fails closed
+//! `ChainReader` replays the whole chain in order and returns only event frames (plus the last
+//! segment's manifest; continued segments' manifests are chain-internal). It fails closed
 //! on a missing successor, a broken or foreign link, an unsealed intermediate segment, corrupt
 //! frames (CRC, chain, sequence) and orphan segment files beyond the chain end. An unsealed last
 //! segment (crash/power loss) is reported as such (`sealed = false`): INCOMPLETE, never repaired.
@@ -148,6 +149,20 @@ impl SegmentedWriter {
         self.events_current += n;
         Ok(n)
     }
+    /// One typed event frame; returns the segment it landed in with its position there.
+    pub fn append_typed<P: Payload>(
+        &mut self,
+        p: Provenance,
+        value: &P,
+    ) -> io::Result<(u32, journal::Appended)> {
+        let appended = self.writer.append_typed(p, value)?;
+        self.events_current += 1;
+        Ok((self.index, appended))
+    }
+    /// Byte position in the current segment.
+    pub fn position(&self) -> u64 {
+        self.writer.position()
+    }
     pub fn sync(&mut self) -> io::Result<journal::Durable> {
         self.writer.sync()
     }
@@ -199,7 +214,7 @@ impl SegmentedWriter {
         self.index = next_index;
         Ok(())
     }
-    pub fn seal(mut self, complete: bool) -> io::Result<SealedSet> {
+    pub fn seal(&mut self, complete: bool) -> io::Result<SealedSet> {
         let durable = self.writer.seal(complete)?;
         Ok(SealedSet {
             durable,
@@ -262,7 +277,11 @@ impl ChainReader {
                     return Err(bad("SEGMENT_LINK_MISPLACED"))
                 }
                 Some(f) => {
-                    if self.next_file.is_some() && f.kind != journal::MANIFEST {
+                    if self.next_file.is_some() {
+                        if f.kind == journal::MANIFEST {
+                            // Manifest of a continued segment: chain-internal, verified by the link.
+                            continue;
+                        }
                         return Err(bad("SEGMENT_DATA_AFTER_NEXT"));
                     }
                     if f.kind != journal::MANIFEST {

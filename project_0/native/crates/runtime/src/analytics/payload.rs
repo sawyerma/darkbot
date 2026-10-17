@@ -129,6 +129,9 @@ macro_rules! typed_kinds {
             k::OWNER_DIAGNOSTIC => $f::<OwnerDiagnostic>($kind, $schema, $bytes),
             k::OWNER_RECORD => $f::<super::evidence::OwnerRecord>($kind, $schema, $bytes),
             k::OWNER_OPPORTUNITY => $f::<super::record::OpportunityRecord>($kind, $schema, $bytes),
+            k::ECON_SHADOW_EVALUATION => {
+                $f::<super::econ::ShadowEvaluation>($kind, $schema, $bytes)
+            }
             k::OWNER_RECONCILE => {
                 $f::<crate::execution::pending::ReconcileRecord>($kind, $schema, $bytes)
             }
@@ -174,7 +177,6 @@ pub const LEGACY_WRITABLE: &[u16] = {
         k::FE04_TRANSITION,
         k::FE04_LEGACY_IMPORT,
         // JFI-FIX-05 (economics, verifier, reporting)
-        k::ECON_SHADOW_EVALUATION,
         k::ECON_SNAPSHOT,
         k::ECON_FINAL,
         k::ECON_OPPORTUNITY,

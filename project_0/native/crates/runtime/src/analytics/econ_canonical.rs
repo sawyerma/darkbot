@@ -830,17 +830,27 @@ pub(super) fn replay(
         return Err("SHADOW_JOURNAL_MISSING".into());
     }
     if count > 0 && binary.exists() {
-        let mut reader = journal::Reader::open(&binary).map_err(|_| "SHADOW_INPUT")?;
+        // SK-07: the evaluation journal is replayed across its whole segment chain.
+        let mut reader =
+            crate::storage::segments::ChainReader::open(&binary).map_err(|_| "SHADOW_INPUT")?;
         while let Some(frame) = reader.next_frame().map_err(|_| "SHADOW_READ")? {
             if std::time::Instant::now() >= deadline {
                 return Err("REPLAY_TIME_BUDGET".into());
             }
             match frame.kind {
                 journal::kind::ECON_SHADOW_EVALUATION => {
-                    let rec: OpportunityRecord = serde_json::from_value(
-                        frame.legacy_value().map_err(|_| "SHADOW_DECODE")?["record"].take(),
-                    )
-                    .map_err(|_| "SHADOW_DECODE")?;
+                    // Typed frames (JFI-FIX-05); historical schema-1 value trees stay readable.
+                    let rec: OpportunityRecord = if frame.schema == 1 {
+                        serde_json::from_value(
+                            frame.legacy_value().map_err(|_| "SHADOW_DECODE")?["record"].take(),
+                        )
+                        .map_err(|_| "SHADOW_DECODE")?
+                    } else {
+                        frame
+                            .typed::<super::ShadowEvaluation>()
+                            .map_err(|_| "SHADOW_DECODE")?
+                            .record
+                    };
                     if let Some(rows) = grouped.get_mut(&rec.account) {
                         assign_record(rows, &rec);
                     }

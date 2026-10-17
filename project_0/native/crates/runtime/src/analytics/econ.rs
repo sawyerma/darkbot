@@ -7,7 +7,7 @@ use crate::market::winner::{Winner, WinnerIdentity};
 use crate::market_observer::{utc_compact, MarketConfig, ReceiverEvent};
 use darkbot_common::channel::{bounded, Consumer, Producer};
 use darkbot_common::timing::Clock;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
@@ -160,6 +160,24 @@ pub enum Evidence {
     },
     ShadowStats(ShadowStats),
 }
+/// Position of one evaluation frame in the segmented evaluation journal (SK-07).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct EvalRef {
+    pub segment: u32,
+    pub offset: u64,
+}
+
+/// `ECON_SHADOW_EVALUATION` frame (JFI-FIX-05, typed): one Shadow evaluation and the position
+/// of the previous in-window evaluation of the same target (its on-disk chain).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShadowEvaluation {
+    pub previous: Option<EvalRef>,
+    pub record: OpportunityRecord,
+}
+impl crate::analytics::payload::Payload for ShadowEvaluation {
+    const KIND: u16 = kind::ECON_SHADOW_EVALUATION;
+}
+
 /// Shadow owner counters at shutdown. Built on the owner thread without JSON (PERSIST-02);
 /// the analytics worker turns it into the `shadow_telemetry` value of its reports.
 #[derive(Clone, Debug, Serialize)]
@@ -561,6 +579,17 @@ struct RetainedShadow {
     hour: usize,
     sequence: u64,
     rec: OpportunityRecord,
+    /// Accounted retention bytes of this entry (released exactly on removal).
+    bytes: u64,
+}
+
+/// Fixed per-entry allowance for map nodes and allocations on top of the typed encoding.
+const RETAINED_OVERHEAD: u64 = 96;
+
+/// SK-03: accounted bytes of one retained entry — its typed (bincode) encoding plus the fixed
+/// node allowance. Deterministic, never zero, never an unbounded estimate.
+fn retained_size<T: Serialize + ?Sized>(v: &T) -> u64 {
+    bincode::serialized_size(v).unwrap_or(u64::MAX / 4) + RETAINED_OVERHEAD
 }
 /// Name of the analytics report journal (snapshots, final report, derived rows).
 pub const REPORT_JOURNAL: &str = "economics_reports.p0j";
@@ -581,11 +610,13 @@ struct Worker {
     shadow: BTreeMap<String, RetainedShadow>,
     // One bounded head per target: the offset of its newest in-window evaluation frame. Each
     // frame names the previous one, so all revisions live on disk in the binary journal.
-    shadow_heads: BTreeMap<String, u64>,
-    // Every evaluation, in arrival order (`shadow_evaluations.p0j`), and a read handle for
-    // chain walks; frames are written unbuffered, so the reader sees every appended frame.
-    evaluations: journal::Writer,
-    evaluations_at: File,
+    shadow_heads: BTreeMap<String, EvalRef>,
+    // Every evaluation, in arrival order (`shadow_evaluations.p0j` and its linked segments),
+    // and read handles per segment for chain walks; frames are written unbuffered, so the
+    // readers see every appended frame.
+    evaluations: crate::storage::segments::SegmentedWriter,
+    evaluations_first: std::path::PathBuf,
+    evaluations_at: BTreeMap<u32, File>,
     // Snapshots, final report and derived rows; the legacy JSON files are renders of it.
     reports: journal::Writer,
     shadow_evaluations_received: u64,
@@ -601,6 +632,12 @@ struct Worker {
     final_technical: Option<Value>,
     evaluation_counts: [u64; SNAPSHOT_COUNT],
     snapshots: usize,
+    /// SK-03: byte budget of every retained collection of this worker (market, canonical, slots,
+    /// Shadow heads and entries, winners, checkpoints). Admission beyond it is refused and
+    /// counted as retention overflow (technical INCOMPLETE); nothing grows past the limit.
+    retained_bytes: u64,
+    retained_bytes_peak: u64,
+    retention_byte_limit: u64,
 }
 impl Worker {
     fn new(
@@ -613,8 +650,13 @@ impl Worker {
     ) -> Result<Self, String> {
         let paths = h.cfg.paths();
         let evaluations_path = journal::binary_path(&paths.capture("shadow_evaluations.jsonl"));
-        let evaluations = journal::Writer::create(&evaluations_path).map_err(|e| e.to_string())?;
-        let evaluations_at = File::open(&evaluations_path).map_err(|e| e.to_string())?;
+        let segment_bytes = darkbot_solana::runtime_config::active()
+            .limits
+            .econ_segment_mib
+            * crate::storage::budget::MIB;
+        let evaluations =
+            crate::storage::segments::SegmentedWriter::create(&evaluations_path, segment_bytes)
+                .map_err(|e| e.to_string())?;
         let reports =
             journal::Writer::create(&paths.snapshot(REPORT_JOURNAL)).map_err(|e| e.to_string())?;
         Ok(Self {
@@ -632,7 +674,8 @@ impl Worker {
             shadow: BTreeMap::new(),
             shadow_heads: BTreeMap::new(),
             evaluations,
-            evaluations_at,
+            evaluations_first: evaluations_path,
+            evaluations_at: BTreeMap::new(),
             reports,
             shadow_evaluations_received: 0,
             shadow_evaluations_streamed: 0,
@@ -647,7 +690,30 @@ impl Worker {
             final_technical: None,
             evaluation_counts: [0; SNAPSHOT_COUNT],
             snapshots: 0,
+            retained_bytes: 0,
+            retained_bytes_peak: 0,
+            retention_byte_limit: darkbot_solana::runtime_config::active()
+                .limits
+                .econ_retention_mib
+                * crate::storage::budget::MIB,
         })
+    }
+    /// Reserves `bytes` of the retention budget, or records an overflow and refuses.
+    fn reserve(&mut self, bytes: u64) -> bool {
+        match self.retained_bytes.checked_add(bytes) {
+            Some(total) if total <= self.retention_byte_limit => {
+                self.retained_bytes = total;
+                self.retained_bytes_peak = self.retained_bytes_peak.max(total);
+                true
+            }
+            _ => {
+                self.over_limit();
+                false
+            }
+        }
+    }
+    fn release(&mut self, bytes: u64) {
+        self.retained_bytes = self.retained_bytes.saturating_sub(bytes);
     }
     fn hour(&self, ns: u64) -> Option<usize> {
         let start = self.h.shared.start_ns.load(Ordering::Acquire);
@@ -674,25 +740,24 @@ impl Worker {
                     .any(|e| e.signature == event.signature && e.event_index == event.event_index)
                 {
                     return Err("duplicate canonical event".into());
-                } else {
+                } else if self.reserve(retained_size(&*event)) {
                     self.canonical_market.push(*event);
                 }
             }
             Evidence::Market(e) => {
                 if self.market.len() >= self.h.capacity() {
                     self.over_limit();
-                } else {
+                } else if self.reserve(retained_size(&e)) {
                     self.market.push(e);
                 }
             }
             Evidence::Slot { slot, t_rx_ns } => {
-                if self.slots.len() >= self.h.capacity() && !self.slots.contains_key(&slot) {
+                if let Some(t) = self.slots.get_mut(&slot) {
+                    *t = (*t).min(t_rx_ns);
+                } else if self.slots.len() >= self.h.capacity() {
                     self.over_limit();
-                } else {
-                    self.slots
-                        .entry(slot)
-                        .and_modify(|t| *t = (*t).min(t_rx_ns))
-                        .or_insert(t_rx_ns);
+                } else if self.reserve(16 + RETAINED_OVERHEAD) {
+                    self.slots.insert(slot, t_rx_ns);
                 }
             }
             Evidence::Shadow(rec) => {
@@ -705,8 +770,10 @@ impl Worker {
                 let previous = chained
                     .then(|| self.shadow_heads.get(&rec.account).copied())
                     .flatten();
-                let value = json!({"previous_target_offset":previous,
-                    "record":serde_json::to_value(&*rec).map_err(|e| e.to_string())?});
+                let value = ShadowEvaluation {
+                    previous,
+                    record: (*rec).clone(),
+                };
                 let provenance = Provenance {
                     source: journal::source::ECON,
                     source_seq: self.shadow_evaluations_received,
@@ -714,19 +781,33 @@ impl Worker {
                     rx_ns: rec.timing.t_rx_ns,
                     ..Default::default()
                 };
-                let frame = self
+                let sequence = provenance.source_seq;
+                let (segment, frame) = self
                     .evaluations
-                    .append_legacy(kind::ECON_SHADOW_EVALUATION, provenance, &value)
+                    .append_typed(provenance, &value)
                     .map_err(|e| e.to_string())?;
+                self.evaluations
+                    .rotate_if_due()
+                    .map_err(|e| e.to_string())?;
+                let at = EvalRef {
+                    segment,
+                    offset: frame.offset,
+                };
                 self.shadow_evaluations_streamed += 1;
                 if let Some(hour) = hour {
                     self.evaluation_counts[hour] += 1;
                     if full {
                         self.shadow_semantic_evictions += 1;
                         self.over_limit();
+                    } else if self.shadow_heads.contains_key(&rec.account)
+                        || self.reserve(retained_size(rec.account.as_str()) + 12)
+                    {
+                        self.shadow_heads.insert(rec.account.clone(), at);
+                        self.retain_shadow(hour, sequence, *rec, true);
                     } else {
-                        self.shadow_heads.insert(rec.account.clone(), frame.offset);
-                        self.retain_shadow(hour, frame.journal_seq, *rec, true);
+                        // Head refused by the byte budget (overflow recorded): the evaluation
+                        // stays streamed on disk, it just cannot join a retained chain.
+                        self.shadow_semantic_evictions += 1;
                     }
                 }
             }
@@ -743,7 +824,7 @@ impl Worker {
                     let count: usize = self.winners.values().map(Vec::len).sum();
                     if count >= self.h.capacity() {
                         self.over_limit();
-                    } else {
+                    } else if self.reserve(retained_size(&winner) + target.len() as u64 + 8) {
                         self.winners
                             .entry(target.clone())
                             .or_default()
@@ -753,7 +834,13 @@ impl Worker {
                 }
             }
             Evidence::MarketCheckpoint { index, summary } => {
-                self.checkpoints.insert(index, summary);
+                let bytes = retained_size(&summary);
+                if let Some(old) = self.checkpoints.remove(&index) {
+                    self.release(retained_size(&old));
+                }
+                if self.reserve(bytes) {
+                    self.checkpoints.insert(index, summary);
+                }
             }
             Evidence::MarketCounters {
                 at_ns,
@@ -875,12 +962,21 @@ impl Worker {
             }
         };
         if replace {
+            let bytes = retained_size(&rec) + key.len() as u64;
+            let old = self.shadow.get(&key).map_or(0, |e| e.bytes);
+            if bytes > old && !self.reserve(bytes - old) {
+                // Byte budget exhausted (overflow recorded): keep the retained entry unchanged.
+                self.shadow_semantic_evictions += 1;
+                return;
+            }
+            self.release(old.saturating_sub(bytes));
             self.shadow.insert(
                 key,
                 RetainedShadow {
                     hour,
                     sequence,
                     rec,
+                    bytes,
                 },
             );
             self.shadow_semantic_entries_max =
@@ -888,41 +984,56 @@ impl Worker {
         }
     }
     /// One hop of `target`'s evaluation chain: (arrival sequence, previous hop, record).
-    /// Every hop is a CRC32/SHA256-verified frame of this run's evaluation journal.
+    /// Every hop is a CRC32/SHA256-verified typed frame of this run's evaluation journal; a hop
+    /// may live in an earlier segment, never in a later position.
     fn chain_frame(
         &mut self,
         target: &str,
-        at: u64,
-    ) -> Result<(u64, Option<u64>, OpportunityRecord), String> {
-        if at < journal::HEADER_LEN || at >= self.evaluations.position() {
+        at: EvalRef,
+    ) -> Result<(u64, Option<EvalRef>, OpportunityRecord), String> {
+        if at.offset < journal::HEADER_LEN
+            || at.segment == 0
+            || at.segment > self.evaluations.segments()
+        {
             return Err("invalid shadow journal offset".into());
         }
-        let frame = journal::read_at(&mut self.evaluations_at, at)
+        let file = match self.evaluations_at.entry(at.segment) {
+            std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::btree_map::Entry::Vacant(e) => e.insert(
+                File::open(crate::storage::segments::segment_path(
+                    &self.evaluations_first,
+                    at.segment,
+                ))
+                .map_err(|e| format!("invalid shadow journal segment: {e}"))?,
+            ),
+        };
+        let frame = journal::read_at(file, at.offset)
             .map_err(|e| format!("invalid shadow journal frame: {e}"))?;
         if frame.kind != kind::ECON_SHADOW_EVALUATION {
             return Err("invalid shadow journal frame kind".into());
         }
-        let mut value = frame
-            .legacy_value()
+        let value: ShadowEvaluation = frame
+            .typed()
             .map_err(|e| format!("invalid shadow journal frame: {e}"))?;
-        let previous = match value["previous_target_offset"].take() {
-            Value::Null => None,
-            v => Some(v.as_u64().ok_or("invalid shadow journal chain")?),
-        };
-        if previous.is_some_and(|p| p >= at) {
+        if value.previous.is_some_and(|p| p >= at) {
             return Err("invalid shadow journal chain".into());
         }
-        let rec: OpportunityRecord =
-            serde_json::from_value(value["record"].take()).map_err(|e| e.to_string())?;
-        if rec.account != target {
+        if value.record.account != target {
             return Err("shadow journal target mismatch".into());
         }
-        Ok((frame.journal_seq, previous, rec))
+        Ok((frame.provenance.source_seq, value.previous, value.record))
     }
     fn recorrelate_shadow(&mut self, target: &str) -> Result<(), String> {
         let Some(head) = self.shadow_heads.get(target).copied() else {
             return Ok(());
         };
+        let freed: u64 = self
+            .shadow
+            .values()
+            .filter(|entry| entry.rec.account == target)
+            .map(|entry| entry.bytes)
+            .sum();
+        self.release(freed);
         self.shadow.retain(|_, entry| entry.rec.account != target);
         // Stream only this target's chain, one record at a time. Replaying just the
         // old representative would lose opportunities when a winner splits a group.
@@ -1331,6 +1442,7 @@ impl Worker {
             "shadow_semantic_evictions":self.shadow_semantic_evictions,
             "shadow_journal_target_heads":self.shadow_heads.len(),
             "retention_capacity":self.h.cfg.retention,"retention_overflow":s.retention_overflow.load(Ordering::Relaxed),
+            "retention_bytes_current":self.retained_bytes,"retention_bytes_peak":self.retained_bytes_peak,"retention_byte_limit":self.retention_byte_limit,
             "shadow_ready_at_ns":s.shadow_ready_ns.load(Ordering::Acquire),"startup_excluded_from_measurement":startup_ok,"shadow_evaluations_in_window":measured_evaluations,
             "shadow_runtime_terminated_early":s.shadow_failed.load(Ordering::Relaxed),"shadow_runtime_finished":s.shadow_done.load(Ordering::Relaxed),
             "program_upgrade_halt":s.upgrade.load(Ordering::Relaxed),"submission_attempts_blocked":s.submission_attempts.load(Ordering::Relaxed),

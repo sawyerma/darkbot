@@ -78,6 +78,8 @@ parameters! {
     market_disk_reserve_mib = 2048, "MiB", "P0_MARKET_DISK_RESERVE_MIB";
     capacity_safety_percent = 50, "percent", "P0_CAPACITY_SAFETY_PERCENT";
     market_segment_mib = 256, "MiB", "P0_MARKET_SEGMENT_MIB";
+    econ_segment_mib = 256, "MiB", "P0_ECON_SEGMENT_MIB";
+    econ_retention_mib = 1024, "MiB", "P0_ECON_RETENTION_MIB";
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

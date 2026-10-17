@@ -970,13 +970,21 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
     assert_eq!(w.shadow_semantic_evictions, 0);
     assert_eq!(w.h.shared.retention_overflow.load(Ordering::Relaxed), 0);
     let path = journal::binary_path(&w.h.cfg.run_dir.join("shadow_evaluations.jsonl"));
-    let mut raw = journal::Reader::open(&path).unwrap();
+    // Typed frames across the linked segment chain (SK-07), every evaluation exactly once.
+    let mut raw = crate::storage::segments::ChainReader::open(&path).unwrap();
     let mut count = 0;
     while let Some(frame) = raw.next_frame().unwrap() {
-        assert_eq!(frame.kind, kind::ECON_SHADOW_EVALUATION);
+        if frame.kind == journal::MANIFEST {
+            continue;
+        }
+        assert_eq!(
+            (frame.kind, frame.schema),
+            (kind::ECON_SHADOW_EVALUATION, 2)
+        );
         count += 1;
     }
     assert_eq!(count, 1_000_000);
+    assert!(raw.segments() > 1, "segments {}", raw.segments());
     complete(&mut w);
     w.final_technical = Some(w.technical(true));
     for i in 1..=4 {
@@ -1209,4 +1217,70 @@ fn measurement_plan_report_and_attribution_agree_for_all_durations() {
             seconds as f64
         );
     }
+}
+
+/// Recomputed retention bytes of every accounted collection (the worker's ledger must equal it).
+fn accounted(w: &Worker) -> u64 {
+    w.shadow.values().map(|e| e.bytes).sum::<u64>()
+        + w.shadow_heads
+            .keys()
+            .map(|k| retained_size(k.as_str()) + 12)
+            .sum::<u64>()
+        + w.winners
+            .iter()
+            .flat_map(|(t, v)| {
+                v.iter()
+                    .map(move |(_, win)| retained_size(win) + t.len() as u64 + 8)
+            })
+            .sum::<u64>()
+        + w.market.iter().map(retained_size).sum::<u64>()
+        + w.canonical_market.iter().map(retained_size).sum::<u64>()
+        + w.slots.len() as u64 * (16 + RETAINED_OVERHEAD)
+        + w.checkpoints.values().map(retained_size).sum::<u64>()
+}
+
+/// SK-03: every retained collection of the worker is inside one byte budget. Typed entries get
+/// finite sizes; admission beyond the limit is refused and counted (technical INCOMPLETE),
+/// streaming to disk continues, and a winner recorrelation releases exactly what it removes.
+#[test]
+fn retention_is_byte_bounded_and_released_exactly() {
+    let mut w = worker();
+    let r = rec();
+    let (winner, market) = pair(&r, 3, 40);
+    for size in [
+        retained_size(&r),
+        retained_size(&winner),
+        retained_size(&market),
+    ] {
+        assert!(size > RETAINED_OVERHEAD && size < 64 * 1024, "{size}");
+    }
+    // Room for a few retained Shadow entries only.
+    w.retention_byte_limit = 4 * retained_size(&r);
+    let accounts: Vec<_> = (0..12).map(|_| Pubkey::new_unique().to_string()).collect();
+    let mut r = r;
+    for (n, account) in accounts.iter().enumerate() {
+        r.account.clone_from(account);
+        r.timing.t_rx_ns = Some(10 + n as u64);
+        w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
+        assert!(w.retained_bytes <= w.retention_byte_limit);
+    }
+    assert_eq!(
+        w.shadow_evaluations_streamed, 12,
+        "every evaluation still streamed"
+    );
+    assert!(w.h.shared.retention_overflow.load(Ordering::Relaxed) > 0);
+    assert!(w.shadow.len() < 12 && w.retained_bytes_peak <= w.retention_byte_limit);
+    // Recorrelation of a retained target releases its entries' bytes before replaying them.
+    let target = w.shadow.values().next().unwrap().rec.account.clone();
+    let before = w.retained_bytes;
+    w.retention_byte_limit = u64::MAX / 2;
+    let (win, _) = pair(&r, 3, 40);
+    w.accept(Evidence::Winner {
+        target,
+        rx_slot: 1,
+        winner: win.clone(),
+    })
+    .unwrap();
+    assert_ne!(w.retained_bytes, before);
+    assert_eq!(w.retained_bytes, accounted(&w), "ledger equals the recomputed sum");
 }
