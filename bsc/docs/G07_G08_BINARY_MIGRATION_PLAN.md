@@ -1,6 +1,6 @@
 # G0.7/G0.8: Binary migration (JSON ban, roadmap e19fdde)
 
-Status: 2026-10-17. **Implementation exists; targeted completion in progress.**
+Status: 2026-10-17. **M1–M8 IMPLEMENTED and VERIFIED (offline).** G0.7 and G0.8 NOT_EXECUTED; live readiness STOP (current Portal drift, see "M8 final acceptance").
 
 Verification baseline: `5946b4dca5aeffbb44bef91106c17c9784f66444`.
 
@@ -13,7 +13,7 @@ Verification baseline: `5946b4dca5aeffbb44bef91106c17c9784f66444`.
 | M5 | VERIFIED | Existing Rust preflight builds with all required feature targets; no Node preflight. Full current network readiness is separate M7. |
 | M6 | VERIFIED | Mandatory durable result including missing receipts; receipt/event/transfer attribution; routed Portal events; canonical receipt-set and reorg checks. 23 focused tests PASS. |
 | M7 | VERIFIED | Native binary readiness; existing Rust preflight reused; default zero-egress, explicit read-only RPC mode. 1 unit + 4 integration tests PASS. Current readiness BLOCKED. |
-| M8 | OPEN | Initial feature-enabled all-target check failed in the probe; no final acceptance claimed. |
+| M8 | VERIFIED | `cargo check --locked --workspace --all-targets --features darkbot-bsc-execution/g07-mainnet`: PASS, 0 warnings. 129 targeted tests PASS (see "M8 final acceptance"). Active internal JSON: none; JSON only in the RPC/builder wire-boundary functions. Signed-TX code and request golden bytes unchanged. |
 
 The inventory and work-package design below describe the migration baseline, not a request to reimplement completed packages. Original evidence and frozen signed transactions remain unchanged.
 
@@ -138,3 +138,23 @@ Code baseline after M4/M5: `432218d`. G0.8 result schema v4 additionally records
 `g07_pre_live_readiness` is the active Rust runner; the shell entry point only starts it with Cargo offline. The original shell is preserved byte-for-byte as `g07_pre_live_readiness_legacy_v2.sh` for historical reference. Default mode opens no connection, reads no secrets, signs nothing and creates no latch. `--binary` emits canonical DBREC001; ordinary stdout is its derived text view. `--current-rpc` explicitly invokes the existing Rust preflight and head-window checks, never builder submission. It was not used in this completion run.
 
 Five focused tests PASS: date/freshness boundary; zero-egress with unavailable PATH and poisoned send variables; unexpected arguments; binary report/no authority; inactive guard and hash-binding rejection. Static readiness verifies v3, four binary+historical hashes, DRY1–4, exact budgets/gas/slippage, frozen preflight and nonce baseline, and absence of attempt state. Current chain/deployments/funding/nonces/gas and head/clock are BLOCKED until fresh reads. Bound builder observation is 2026-10-11 (expired); original producer witness and builder inclusion semantics remain separate blockers. No synthetic result upgrades live readiness.
+
+### M8 final acceptance — 2026-10-17
+
+Code baseline `0e0544d` plus this acceptance commit (unused `inputs::norm` removed; readiness reports every drifted field and the reason of a failed validation). `inputs.rs` is part of the probe source digest, so the probe dry-plan hash is now `8e24138b354b40c2e6e9e3c98d35faea7849814db01c43e06fd3b94886177344` (request bytes unchanged; no probe approval exists for it and none is requested). Checks actually run:
+
+| # | Check | Result |
+|---|---|---|
+| 1 | `cargo check --locked --workspace --all-targets --features darkbot-bsc-execution/g07-mainnet` | PASS, 0 warnings |
+| 2 | Codec 6, legacy import 3 (+ `g07_legacy_import --check` byte-identical), guard 7, no-send 10, probe integration 5, probe binary 28, BUY binary 22, readiness 21 + 4 | 106 PASS |
+| 3 | G0.7→G0.8 binary compatibility incl. empty/truncated/wrong type/wrong version/flipped byte/foreign chain/foreign portal (`g08_reads_g07_evidence`) | 2 PASS |
+| 4 | G0.8→producer timing incl. foreign/legacy/swapped witness and result (`g08_binary_records`), timing unit tests | 4 + 5 PASS |
+| 5 | Signed TX and request bytes | `transactions.rs` byte-identical to `565d811`; `http_request` unchanged since `bdc5517`; bundle-body golden test PASS; runtime DRY hash equality (launch `0xdb468c01…`, BUY `0xb086f683…`) unchanged |
+| 6 | G0.8 persistence PASS/ADAPT/STOP/UNRESOLVED and simulated write errors (`every_terminal_verdict_is_durable_and_write_errors_fail_closed`), verifier unit tests | 12 PASS |
+| 7 | Static audit of active internal JSON (execution, record, G0.8 binaries, readiness, probe; non-test code) | JSON only in `chain_reads::rpc`/`parse_head`/head poller, `builder_submission::decode_builder_answer`, the probe response classifier and G0.8 `mod wire` |
+| 8 | Readiness zero egress and locked guard (`env -i`, no RPC variable) | `BLOCKED`, guard `UNARMED`, `approved=false`, 8 PASS / 6 BLOCKED checks |
+
+Total: 129 targeted tests PASS, 0 FAIL. Synthetic fixtures test offline failure behavior only; they are no Mainnet, inclusion or timing evidence.
+
+**Read-only current readiness (public RPC `bsc-dataseed.bnbchain.org`, no secrets, no signing, no builder):** `STOP`. The Flap Portal was upgraded after the frozen DRY: `portal_version` v5.24.0 → v5.25.0, `portal_implementation` `0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20` → `0xe13227370996f892a56d2ff4a30f6026887b48fb`, implementation code SHA-256 changed. Proxy code, TAX_V3 implementation, native quote configuration, protocol fees and tax flag are unchanged. Under the contract rule (mismatch is STOP) the bound DRY and its signed bytes are not valid for current Mainnet; G0.7 attempt 1 cannot be armed on them. Evidence (DBREC001 + derived views + SHA256SUMS): `bsc/native/evidence/g07/readiness_20261017T101215Z/`.
+

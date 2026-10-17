@@ -4029,3 +4029,10 @@ REAL_MAINNET_BUY                             = NOT_EXECUTED
 ```
 
 Folgen: v2-Entwurf (inaktiv) auf `1b66718d476e938fc6c936cf3c0b4d49ebc59cc2765c043600130b05de8ccf42` fortgeschrieben (Checks 6/7/10); die verbleibenden UNQUALIFIED-Punkte brauchen die ausdrückliche Annahme des Nutzers vor einer Freigabe.
+
+## 2026-10-17 — G0.7/G0.8-Binärmigration M8-Endabnahme und Read-only-Readiness (Ergänzung)
+
+- Binärmigration nach Roadmap-Commit `e19fdde`: M1–M8 offline IMPLEMENTED/VERIFIED (Details: `docs/G07_G08_BINARY_MIGRATION_PLAN.md`, Abschnitt „M8 final acceptance“). Workspace-Check mit G0.7-Features PASS (0 Warnungen); 129 gezielte Tests PASS. Aktive Autorität: binärer v3-Vorschlag `3966b227…6a`, Guard `UNARMED`. Historische JSON-Nachweise unverändert (u. a. Probe-Evidence `5636c463…`, DRY `0efe78a7…`).
+- **Read-only-Readiness 2026-10-17T10:12:15Z** (öffentlicher RPC, keine Secrets, keine Signatur, kein Builder): Offline-Modus BLOCKED (8 PASS / 6 BLOCKED); aktueller Modus **STOP wegen Deployment-Drift**: `portal_version` v5.24.0 → v5.25.0; `portal_implementation` `0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20` → `0xe13227370996f892a56d2ff4a30f6026887b48fb`; Implementation-Code-SHA-256 `2ac893fc…` → `42c91172…`. Unverändert: Proxy-Code, TAX_V3-Implementation, Native-Quote-Konfiguration, Fees, Tax-Flag. Evidence: `bsc/native/evidence/g07/readiness_20261017T101215Z/` (DBREC001, abgeleitete Ansichten, `SHA256SUMS`).
+- Folge: Der gebundene G0.6a-DRY (Head 127865760, Portal v5.24.0) und seine signierten Bytes sind für den aktuellen Mainnet nicht mehr qualifiziert; G0.7-Versuch 1 darf darauf nicht scharfgeschaltet werden. G0.7 und G0.8 NOT_EXECUTED; LIVE BLOCKED.
+

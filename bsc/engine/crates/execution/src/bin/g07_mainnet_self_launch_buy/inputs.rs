@@ -25,10 +25,6 @@ pub(crate) fn env_u128(name: &str) -> u128 {
         .unwrap_or_else(|_| panic!("{name} must be decimal u128"))
 }
 
-pub(crate) fn norm(s: &str) -> String {
-    s.trim().to_ascii_lowercase()
-}
-
 pub(crate) fn key_from_env(name: &str) -> SigningKey {
     let raw = req_env(name);
     let bytes = hex::decode(raw.trim().trim_start_matches("0x"))

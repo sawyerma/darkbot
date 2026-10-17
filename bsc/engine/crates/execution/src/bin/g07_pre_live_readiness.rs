@@ -31,6 +31,38 @@ fn check(report: &mut Draft, name: &str, status: &str, detail: &str) {
     report.push(r::CHECKS, row.into_nested());
 }
 
+/// A record value as text for a readiness detail.
+fn shown(value: Option<&Value>) -> String {
+    match value {
+        None => "absent".into(),
+        Some(Value::Text(t)) => t.clone(),
+        Some(Value::Bool(b)) => b.to_string(),
+        Some(Value::U64(n)) => n.to_string(),
+        Some(Value::U256(w)) => darkbot_bsc_record::u256_to_decimal(w),
+        Some(Value::Address(a)) => format!("0x{}", darkbot_bsc_record::hex(a)),
+        Some(Value::B256(w)) => format!("0x{}", darkbot_bsc_record::hex(w)),
+        Some(other) => format!("{other:?}"),
+    }
+}
+
+/// Every deployment/economics field of the current preflight that differs
+/// from the frozen DRY baseline, as `name: frozen -> current`.
+fn deployment_drift(baseline: &Record, current: &Record) -> Vec<String> {
+    use schema::g06a::preflight as f;
+    f::DRIFT_CHECKED
+        .iter()
+        .filter(|tag| baseline.get(**tag) != current.get(**tag))
+        .map(|tag| {
+            format!(
+                "{}: {} -> {}",
+                f::SCHEMA.field(*tag).map_or("?", |field| field.name),
+                shown(baseline.get(*tag)),
+                shown(current.get(*tag))
+            )
+        })
+        .collect()
+}
+
 fn bound_input(
     contract: &Record,
     path_tag: u16,
@@ -306,6 +338,20 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     );
     if current_rpc {
         let current = run_current_preflight(launcher, buyer, gas, lg, bg, lv, bv)?;
+        // All drifted fields at once (G0.7 itself stops at the first).
+        let drift = deployment_drift(&baseline, &current);
+        if !drift.is_empty() {
+            check(
+                report,
+                "CURRENT_DEPLOYMENT_DRIFT",
+                "STOP",
+                &format!(
+                    "Current Mainnet differs from the frozen DRY baseline; the bound DRY and signed bytes are not valid for it: {}",
+                    drift.join("; ")
+                ),
+            );
+            return Err("current deployment/economics drift from the frozen DRY baseline".into());
+        }
         let (ln, bn, head) = validate_current_preflight(&baseline, &current, launcher, buyer, gas);
         if ln != field(baseline.u64(f::LAUNCHER_PENDING_NONCE))
             || bn != field(baseline.u64(f::BUYER_PENDING_NONCE))
@@ -397,12 +443,19 @@ fn main() {
     match evaluated {
         Ok(Ok(())) => {}
         Ok(Err(e)) => check(&mut report, "VALIDATION", "BLOCKED", &e),
-        Err(_) => check(
-            &mut report,
-            "VALIDATION",
-            "BLOCKED",
-            "Native validation failed; no authority granted",
-        ),
+        Err(payload) => {
+            let reason = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown");
+            check(
+                &mut report,
+                "VALIDATION",
+                "BLOCKED",
+                &format!("Native validation failed ({reason}); no authority granted"),
+            )
+        }
     }
     let bytes = report.encode().expect("encode readiness");
     let record = decode(&r::SCHEMA, &bytes).expect("decode readiness");
@@ -423,6 +476,34 @@ fn main() {
 #[cfg(test)]
 mod readiness_tests {
     use super::*;
+
+    #[test]
+    fn every_drifted_deployment_field_is_reported_with_both_values() {
+        use schema::g06a::preflight as f;
+        let baseline = decode(
+            &f::SCHEMA,
+            include_bytes!(
+                "../../../../../native/evidence/g06a/g07_binary_import_20261016/preflight.dbrec"
+            ),
+        )
+        .unwrap();
+        assert!(deployment_drift(&baseline, &baseline).is_empty());
+        let mut changed = Draft::new(&f::SCHEMA);
+        for (tag, value) in baseline.fields() {
+            changed.push(*tag, value.clone());
+        }
+        changed
+            .set(f::PORTAL_VERSION, "v5.25.0")
+            .set(f::FEE_BUY_BPS, Value::u128(101));
+        let current = decode(&f::SCHEMA, &changed.encode().unwrap()).unwrap();
+        assert_eq!(
+            deployment_drift(&baseline, &current),
+            [
+                "portal_version: v5.24.0 -> v5.25.0",
+                "protocol_fee_bps.buy: 100 -> 101"
+            ]
+        );
+    }
     #[test]
     fn freshness_is_bounded_and_never_accepts_future_or_invalid_dates() {
         assert_eq!(observation_seconds("1970-01-01"), Some(0));

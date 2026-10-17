@@ -66,6 +66,8 @@ Updated: 2026-10-16 (binary data-path invariant added; Gate-0 qualification free
 
 **Update 2026-10-16 (evidence, not a re-rating of the rows above):** the selected G0.7 attempt-1 candidate (BUY 0.000001 BNB, gas 0.05 gwei = current `eth_gasPrice` = verified builder floor, launch gas limit 6 603 270, BUY gas limit 3 000 000) passed the final DRY-1..4 on 2026-10-15 (`bsc/native/evidence/g06a/g06a_final_dry_20261015T222241Z/`, `dry_result.json` SHA-256 `0efe78a7…`), and read-only readiness reports `FUNDING=PASS` against these exact parameters. The 1-wei TECHNICAL_MINIMUM above stays unqualified; dynamic gas is frozen at the candidate for attempt 1 (no bid optimization). Details: ledger section "2026-10-16 — G0.7-Scope-Abgleich".
 
+**Update 2026-10-17 (evidence, not a re-rating of the rows above):** the internal-JSON migration of G0.7/G0.8 (M1–M8) is implemented and verified offline; the binary v3 contract is an inactive proposal and the guard stays `UNARMED`. The read-only readiness of 2026-10-17 found the Flap Portal upgraded on Mainnet (`portal_version` v5.24.0 → v5.25.0, new implementation `0xe13227370996f892a56d2ff4a30f6026887b48fb`): per the scope rule (mismatch is STOP) the bound DRY and its signed bytes no longer qualify; G0.7 attempt 1 cannot be armed on them. Evidence: `bsc/native/evidence/g07/readiness_20261017T101215Z/`; ledger entry of 2026-10-17.
+
 One wei is the smallest positive native unit, **not a qualified final minimum** until a reproducible, complete launch-then-BUY test passes. Raw token output is not an economically meaningful quantity without independently verified token decimals and fees.
 
 ### G07 reproducibility and monotonicity gates
