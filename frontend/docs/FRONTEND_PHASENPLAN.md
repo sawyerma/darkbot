@@ -1,198 +1,212 @@
-# DarkBot Frontend – Verbindlicher Phasenplan v1.2
+# DarkBot Frontend – Master-Phasenplan V1.3
 
-**Stand:** 2026-10-17. **Status:** SOLL / Implementierung offen. **Repo:** sawyerma/darkbot.
-**Verifizierte Code-Basis:** Project_0 `0e0544d`; danach ist eine ausschließlich BSC-bezogene Änderung `ee94150` auf main erschienen. Für die Umsetzung jeweils aktuellen HEAD prüfen.
+**Status:** Verbindlicher SOLL-Architektur- und Implementierungsplan, Stand 2026-10-17. **Keine Aussage, dass Gateway, Commands, Protobuf und BSC-GUI bereits implementiert sind.** Fachliche Projektpläne bleiben unabhängig maßgebend. Dieser Master ersetzt die alten, sich überlappenden Frontend-Gesamtpläne.
 
-**Autorität:** [Project_0 PHASENPLAN](../../project_0/docs/PHASENPLAN.md), [STATUS](../../project_0/docs/STATUS.md), [MEASUREMENT_LEDGER](../../project_0/docs/MEASUREMENT_LEDGER.md). Dieser Frontend-Plan ergänzt FE-00…FE-07, C0-E1, PERSIST, JFI, SK-01…09 und alle FREE_ONLY-/LIVE-Gates; er ersetzt sie nicht.
-**Verbindliche visuelle und finanzielle V5-Referenz:** [GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAPHITE_V5_UI_FINANCE_CONTRACT.md) – vom Nutzer akzeptierte Graphite-V5-Oberfläche und gemeinsamer Portfolio-/Realized-PnL-Vertrag. **Keine andere V4-/Kachel-/Sidebar-Gestaltung umsetzen.**
+## 0. Eine Dokumentationsautorität
 
-**Nachschlagewerke:** [verifizierte Variablen](PROJECT_0_CODE_MAP.md) · [geplanter Control-/API-Vertrag](CONTROL_PROTOCOL.md) · **[verbindliche Boot-/Unbounded-/Backtest-/Optimizer-Spezifikation](STARTUP_BACKTEST_OPTIMIZATION.md)**. Die v1.1-Erweiterung ersetzt feste Laufzeit-Presets durch einen typisierten, frei konfigurierbaren Horizont.
+- **Dieses Dokument**: einzig aktiver Frontend-Phasenplan, Zuständigkeiten, React-Zielstruktur, F0–F8 und Abnahme.
+- [GATEWAY_WIRE_PROTOCOL_V1_3.md](GATEWAY_WIRE_PROTOCOL_V1_3.md): einzig aktiver Wire-Vertrag (Gateway↔Browser **und** Gateway↔Engine).
+- [GOVERNANCE_UND_SICHERHEIT.md](GOVERNANCE_UND_SICHERHEIT.md): fachliche Autorisierung, Freigaben und Trust-Grenzen.
+- [SOURCE_VARIABLE_MATRIX.md](SOURCE_VARIABLE_MATRIX.md): Source-basierte Project_0-/BSC-Feldinventur, **F0-VAR muss vor Adapterimplementierung abgeschlossen sein**.
+- [V0_GRAPHITE_FLEET.md](V0_GRAPHITE_FLEET.md): akzeptiertes V7→V0-Design, fünf Reiter, eingefrorene Wallets.
+- Weiterhin aktive Spezialanhänge: [GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAPHITE_V5_UI_FINANCE_CONTRACT.md) (Finanz-/UX-Details, nicht neueres Design), [STARTUP_BACKTEST_OPTIMIZATION.md](STARTUP_BACKTEST_OPTIMIZATION.md), [WALLETS_TREASURY.md](WALLETS_TREASURY.md), [PROJECT_0_CODE_MAP.md](PROJECT_0_CODE_MAP.md) (historischer Quellkatalog, nach HEAD zu prüfen).
+- **[delete/](delete/README.md)**: unveränderte alte Gesamt-/Wire-/Control-/Fleettexte sowie alter Master sind **archiviert und nicht mehr normativ**. Nicht erneut danach implementieren.
 
-## Gateway-/Datenvertrag – verpflichtend vor WebSocket-Implementierung (2026-10-17)
+Projekt-Fachautorität: [Project_0 PHASENPLAN](../../project_0/docs/PHASENPLAN.md), [STATUS](../../project_0/docs/STATUS.md), [Ledger](../../project_0/docs/MEASUREMENT_LEDGER.md); [BSC Roadmap](../../bsc/docs/BSC_DUAL_VENUE_ROADMAP.md), [Gate-0](../../bsc/docs/GATE0_TESTPLAN_SHORT.md), [BSC Masterplan](../../bsc/docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md), [BSC Status](../../bsc/docs/STATUS.md). Keine LIVE-Gates werden durch UI-Dokumente ersetzt.
 
-**[GATEWAY_STREAM_PROTOCOL_V1.md](GATEWAY_STREAM_PROTOCOL_V1.md)** ist die konkrete Datenfluss-Verfeinerung: route-basierte Topic-Subscriptions, Topic-Sequenzen und Resume, langlebige echte Ereignis-Evidence getrennt von flüchtigem State, eigener idempotenter autorisierter Command-Weg, Protobuf-Schema mit Codegen, pro Projekt isolierte Stores, App-Heartbeat/State-Hash, geteilte Graphite-Designtokens und deterministischer Offline-Replay ohne Fake-LIVE. Dies ersetzt im SOLL den alten globalen Snapshot und globalen Event-`seq`; die vorhandene TS-JSON-Realtime-Implementierung ist bis zur Migration nur IST. **Kein Polling**. Der Vertrag ändert keine P0-4h- oder BSC-G0.7-Priorität, keine freigegebenen LIVE-Aktionen.
-
-## DarkBot Gesamtfrontend – verbindliche Host-Architektur (2026-10-17)
-
-**Abgenommen:** [DARKBOT_GLOBAL_FRONTEND_ARCHITECTURE.md](DARKBOT_GLOBAL_FRONTEND_ARCHITECTURE.md) ist der verbindliche Hauptvertrag für **eine** React-App mit `DarkBot → /` (globale Übersicht aller Projekte), `/project-0` (unveränderte Project_0-Graphite-V0-UI), `/bsc` (eigene, später zu implementierende Graphite-BSC-UI) sowie vorhandener `/solana`-Route und zukünftiger Registrierung weiterer Projekte. Die globale Overview zeigt nur echte projektbezogene Prozess-/Run-/Health-/Latenz-/Finanzdaten; niemals erfundene Gewinne, vermischte Wallets, gemeinsame Signer oder einen generischen Echtgeld-Start-Knopf.
-
-**Priorität:** Project_0 zuerst nach bestehendem FE-00…FE-07-/C0-E1-Phasenplan als **ein** sauber qualifizierter Liquidator; späterer Multi-Bot-Schwarm ist ausdrücklich vorgemerkt, aber **kein** 4h-/First-Profit-Blocker. BSC folgt seinem eigenständigen Gate-0-/G0.7/G0.8-Phasenplan und erhält später ein eigenes Frontend ohne Codeänderungen an BSC durch diesen Designentscheid. Geteiltes Layout, geteilte Read-only-Projektstatusadapter, strikt getrennte wirtschaftliche Engine-Grenzen. Realer Release nur nach eigener Qualifikation.
-
-**IST-Hinweis:** `/bsc` ist derzeit eine Platzhalterseite; `/project-0` enthält inzwischen die React-V0-Gestaltung statt des historisch dokumentierten Platzhalters. Der bisherige Text unter „IST“ ist als Implementierungssnapshot der Planerstellung zu lesen.
-
-## V0 Design- und Fleet-Spezifikation (2026-10-17)
-
-**Abgenommenes Design als V0 festgelegt:** [Graphite V0](V0_GRAPHITE_FLEET.md) und [implementierbarer React-/Backend-/Speicher-/Refresh-Phasenplan](V0_FLEET_IMPLEMENTATION_PLAN.md). Die frühere Ein-Bot-UX ist hiermit überholt. `Liquidator` verwaltet später N Bot-Instanzen mit **je eigenen** Strategy Profiles, Capital, MinNet, Fees, Concurrency und qualifizierten Liquidationsklassen. Gemeinsamer Ingress/State plus globaler Arbiter, atomare Wallet-Reservation und per-bot Attribution; Captures/Shadow parallel und unfiltered, Offline-Replay ressourcenisoliert. Keine UI-Budgetänderung überschreibt LIVE-/FE-06-/JFI-Gates.
-
-**Wallet-Lock:** Tabstruktur `Balances / Send / Auto-Sweep` und Reihenfolge aller KPI-Zeilen aus V0 sind fest. Bei Liquidator-/Capture-Änderungen **Wallets nicht neu gestalten**. `Overview` und `Wallets` sollen identische `PortfolioFinancialSnapshot`-Kennzahlen anzeigen. Echt persistiert werden Draft-/Profil- und Instanzdaten erst nach Rust-FLEET-03/05, nicht in React localStorage. Aktuell lediglich lokale zustandslose Frontend-Entwürfe.
-
-## 0. Zielarchitektur und Entscheidung
-
-- **Ein Rust-Core.** `p0-longtail` bleibt die einzige fachliche Project_0-Runtime in den vorhandenen vier Crates `common, solana, liquidation, runtime`. State, Decoder, Health, Economics, Winner, Funding, Routing, Signing und Reconciliation niemals im Browser neu implementieren.
-- **Eine zentrale Steuerung.** Neues kleines `p0ctl` innerhalb der bestehenden `runtime`-Crate für `doctor/preflight/run start/status/stop/logs/verify/report`, später `optimize/profiles`. Terminal funktioniert unabhängig von React; optionaler lokaler `p0ctl serve`-Supervisor stellt dieselbe typisierte Control-Boundary bereit.
-- **Ein vorhandenes Frontend.** `frontend/src/features/project0/Project0Page.tsx` ist derzeit Platzhalter. Bestehendes React-/Vite-/Router-/API-/Realtime-Grundgerüst erweitern, kein zweites temporäres Frontend.
-- **Eine Evidence-Wahrheit.** Aktive Rohaufnahme ungefiltert in die versionierten binären `.p0j`-Journale. Nachgeschalteter Verifier, Replay, Renderer und Optimierer konsumieren dieselben versiegelten Daten. Intern ausschließlich native/typisierte/binäre Übergaben gemäß JFI; Browser-Wire-Format nicht als stillschweigende zusätzliche JSON-Ausnahme interpretieren.
-- **Keine Redis-Pflicht.** Solange ein lokaler Host mit einem kanonischen State Owner genügt, bestehende bounded Channels und Journale verwenden. Optionaler SQLite-Indexer SK-08 nur offline, nicht im aktiven Trading-/Capture-/Verifier-Pfad.
-- **Sicherheitsgrenzen.** Observe-only, FREE_ONLY und Live-/Submission-Sperren lassen sich durch GUI, Profile, API oder Optimierer niemals umgehen. Keine Mainnet-/Paid-/Echtgeldaktionen werden durch dieses Dokument autorisiert.
-
-### Was den ersten 4h-Test blockieren darf
-
-Die notwendige **Terminal-Control-/Lifecycle-Basis**, Kapazitäts-/Providerqualifikation, SK-07-Segmentierung, sechs Marker, Raw-Capture, JFI-/Verifier-/Recovery-Abnahme. **Nicht** erforderlich als Vorbedingung: fertiges React-Dashboard, ML, ein KI-Agent oder die optionale Offline-SQLite-Abfrage.
-
-## 1. Verbindliche Frontend-Struktur
-
-**IST:** `src/app/router.tsx` hat `/project-0`; `src/core/api/client.ts` bietet `apiGet<T>`; `src/core/realtime/RealtimeClient.ts` hat WS-Client/Sequence-Gap-Erkennung; `Project0Page.tsx` ist nur Platzhalter. `vite.config.ts` proxyt Entwicklungsanfragen auf `localhost:8100`, beweist aber keinen vorhandenen Backend-Control-Server.
-
-**SOLL – Dateien erst anlegen, wenn die entsprechende Phase implementiert wird:**
+## 1. Produkt, visuelle Referenz und Navigation
 
 ~~~text
-frontend/
-  docs/
-    FRONTEND_PHASENPLAN.md
-    PROJECT_0_CODE_MAP.md
-    CONTROL_PROTOCOL.md
-  src/
-    app/{router.tsx,providers.tsx}
-    core/api/{client.ts,endpoints.ts,project0.ts}
-    core/realtime/{RealtimeClient.ts,protocol.ts,...}
-    core/types/{system.ts,project0.ts}
-    features/project0/
-      Project0Page.tsx
-      pages/{ControlCenter,MarketExplorer,Economics,ProfitabilityLab,Profiles}.tsx
-      components/{RunStatus,PreflightPanel,StoragePanel,MarkerFilter,...}.tsx
-      hooks/{useRunSnapshot,useRunEvents,useReportQuery,...}.ts
-    features/{bsc,solana}/
-    shared/{layout,ui}/
-project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
+DarkBot – EINE React/Vite-App, EINE globale Navigation, EIN Graphite-Design
+├── /                  GLOBAL OVERVIEW / All Projects
+│   ├── Project 0      → /project-0
+│   ├── BSC            → /bsc
+│   ├── Solana         → /solana (bestehende Route erhalten)
+│   └── weitere Projekte später per Registry
+├── /project-0         Project 0 Control / Marginfi
+│   ├── Overview       echte Read-only Status- und Finance-Projektionen
+│   ├── Liquidator     EIN realer Liquidator zuerst, später Fleet
+│   ├── Capture        Rohaufnahme, Verification, Marker-Report-FILTER
+│   ├── Analytics      Reports/Replay/Backtest/Optimierung nach Gates
+│   └── Wallets        Balances | Send | Auto-Sweep – DESIGN FROZEN
+├── /bsc               BSC Birth Entry – eigene fünf Panels
+│   ├── Overview
+│   ├── Launch / BUY   BSC Gate 0 / G0.7, keine automatische Freigabe
+│   ├── Monitoring     Builder/Portal/Evidence/G0.8
+│   ├── Analytics
+│   └── Wallets        BSC-eigen, keine P0-Treasury
+└── /solana            separate bestehende Domäne
 ~~~
 
-## 2. Phasen und Tickets
+'DarkBot' im gemeinsamen Header führt nach '/'. Globale Overview ist **nicht** identisch mit der Overview in P0 oder BSC. Globalübersicht abonniert nur 'overview.aggregates', nie komplette Wallet- oder Botzustände. Weitere Projekte über statisch typisierte Registry; jeder neue Fachbereich bringt eigene Store-/Adapter-/Route- und Sicherheitsgrenzen mit. Kein zweites Frontend, keine Sidebar, kein globaler Signer oder Trading-Controller.
 
-**Statusdefinition:** `OPEN` fehlt; `CODE` existiert, nicht abgenommen; `LOCAL_PASS` Tests/Scope bestanden; `BLOCKED` externe Voraussetzung fehlt; `NOT_RUN` nicht ausgeführt; `QUALIFIED` alle vorgesehenen Evidence-Gates erfüllt.
+**Akzeptiertes Design:** Graphite-V7-HTML als Referenz, existierende Project_0 React-V0-Oberfläche; Farben '#1b1b1b' Hintergrund, '#303030' Hauptfläche, '#464646' Trennlinien, kompakte macOS-Typografie, zentrale ~800px-Fläche, dezente Pills, keine blauen Karten. Project_0 besitzt exakt 'Overview/Liquidator/Capture/Analytics/Wallets'. Unter Wallets exakt 'Balances/Send/Auto-Sweep'; Zeilenfolge **Total capital, Realized net PnL, On-chain balance, Available capital, Reserved capital, Withdrawable profit, Transferred to Treasury**. Kein Redesign bei BSC-Integration. Tokens mit visueller Regression extrahieren; Wallets Pixeldiff 0 bei identischen Fonts/Viewport.
 
-### FEUI-00 – Reale Basis/Parameterinventur
+## 2. Wirklicher IST-Stand, keine Phantomimplementierung
 
-- `origin/main`, lokale Änderungen, existierende TS-/Rust-/Python-/Shell-Dateien, aktuellen Project_0 STATUS und Gate-Zustände prüfen.
-- [CODE_MAP](PROJECT_0_CODE_MAP.md) mit echten Symbolen/Feldern/Defaults/Einheiten/CLI-Namen gegen Rust aktualisieren.
-- Frontend-`type-check`, `lint`, `build`, `smoke` und vorhandene Tests nur mit realen Voraussetzungen durchführen; keine grünen APIs erfinden.
-- **Abnahme:** vollständiges IST-/SOLL-Delta, exakter Source-Hash, belegte lokale Tests, keine pauschalen PASS-Behauptungen.
-
-### FEUI-01 – Zentrale `p0ctl`-Steuerung und Lifecycle (VOR 4h)
-
-- Bestehende `scripts/test.sh`, `capture.sh`, `verify.sh`, `report.sh`, `orchestration/startup.rs`, `runtime_config.rs`, `MeasurementPlan` wiederverwenden.
-- Neue `p0ctl`-Kommandos: `doctor`, `preflight`, `run start`, `run status`, `run stop`, `runs list`, `logs`, `verify`, `report`, später `optimize`.
-- Ein aktiver Run, einmaliges Run-ID-/Manifest-Commit vor Capture, exklusiver Writer-/Owner-Lock, PID und Startidentität, Kindprozess-Reaping, sicherer Shutdown mit Admission-Close, Drain, Sync, Seal, Exit-/Crash-Evidence.
-- **Zwingender Start-Audit vor jedem neuen externen Run:** Offline-Selftest plus ausdrücklich erlaubte read-only Chain-/Provider-Probes (Solana-Genesis-/RPC-/WSS-Identität, Marginfi-/Deployment-/ProgramData-Fingerprint sofern abrufbar, Bank-/Group-/Oracle-/Mint-/Owner-Beziehungen, Program-ID/Discriminator-/ABI-Pins, erreichbare Free-Provider und Quotas, Wallet-Public-Identity/Permissions, Host-Storage/Writer/Memory, Binär-/Konfigurations-Hashes). Erwartete Identitäten gegen aktuelle Quelle prüfen; Drift, fehlende/umgebogene Adresse und falscher Cluster führen zu `IDENTITY_MISMATCH/QUARANTINED/BLOCKED` statt stiller neuer Adresse. Keine selbsttätige Re-Pin-/Signer-/LIVE-Freigabe. Pro Check reale Quelle, Slot, Timestamp und Resultat journalen, periodisch erneut validieren. Details in [STARTUP_BACKTEST_OPTIMIZATION](STARTUP_BACKTEST_OPTIMIZATION.md).
-- WSS-ACK **und** verwertbaren Slot-/Appframe-Fortschritt als Readiness-Bedingung. Keinen zurückliegenden Live-Empfang durch historischen Replay „reparieren`.
-- `p0ctl` darf ohne GUI mehrere Stunden laufen; Browser-/HTTP-/WS-Abstürze beeinflussen weder Ingress noch Engine.
-- **Abnahme:** Doppelstart/Doppelwriter verweigert, Stop idempotent, SIGINT/SIGTERM/Crash/Restart fail-closed, exakt eine effektive Runtime-Konfiguration, kein LIVE per Control.
-
-### FEUI-02 – Capacity-/Provider-Preflight, Storage und 4h-Gate (VOR 4h)
-
-- Bestehende `storage/preflight.rs` / `p0-capacity.rs` (WIP) in den Launcher integrieren und alte pauschale Python-60GiB-Heuristik ablösen.
-- `StorageStatus`, `StorageMetrics`, `CapacityReport`: gemessene durchschnittliche/Burst-Raten, nachhaltige Writer-Leistung, SSD Reserve, RAM/Swap/RSS, Queue, Stall, CPU und geschätzte Erschöpfungszeit.
-- **Freie Laufzeit:** `RunHorizon::Fixed(duration_seconds)` für beliebige positiv validierte Sekunden-/Minuten-/Stunden-/Tagesdauern und `RunHorizon::UntilStopped` ohne künstliches Enddatum. Die bisherigen 30s/60s/10m/1h/4h/24h/48h sind ausschließlich UI-Schnellwahlen; der native `MeasurementPlan` hat bislang **nur** endliche s/m/h-Dauern. Infinite darf **nicht** als `u64::MAX`-Sekunden oder Platzhalter-48h implementiert werden. Details/Gates in [STARTUP_BACKTEST_OPTIMIZATION](STARTUP_BACKTEST_OPTIMIZATION.md).
-- 30s/60s/10m-Kalibrierung von beliebigen längeren Fixed-/UntilStopped-Läufen trennen. Fehlende Basis: `CAPACITY_UNVERIFIED` statt stilles Startsollen. Für `UntilStopped` Start nur bei qualifizierter rollierender Mindest-Runway und laufendem Auto-Recheck; kein unbegrenztes SSD-/Provider-/RAM-Versprechen.
-- Provider-Status/quotas/HTTP429, `getBlock`-Archiv, Slot-/LUT-Coverage, WSS-Liveness und Strict-Call-/Walltimebudget vor Start prüfen.
-- SK-07 hashverkettete `.p0j`-Segmente, Crash-/Truncation-/Reader-Recovery; SK-03 noch offene RAM-Collections in Econ-/Winner-Worker berücksichtigen.
-- **Abnahme:** 600s gezielter technischer Smoke, Fehlerfälle (Disk-full, 429, WSS-gap, Overload), Provider-/Kapazitätsbeweis; 4h erst nach Userfreigabe.
-
-### FEUI-03 – Graphite V5 Project 0 Control (fünf Reiter, kein zweites Dashboard)
-
-- **Freies Laufzeit-Eingabefeld mit Einheit** (`s/m/h/d`, später kompatibel erweitern) und separatem explizitem Modus **`Bis manuell gestoppt`**. `30s/60s/10m/1h/4h/24h/48h` nur vorbesetzende Shortcuts; `RunHorizon` als Backend-Owner, keine statisch unbegrenzte Scheinzahl. Bestehendes `MeasurementPlan::parse_duration` validiert nur endliche s/m/h-Dauern und wird versioniert migriert; UI darf nicht eigenständig Grenzen/Snapshot-Zeitpunkte berechnen.
-- Quelle `logs|transactions`, Verification `off|index|strict` (vorhandenes `crosscheck` sofern separat qualifiziert), Profile `smoke|standard|performance|custom`.
-- Sämtliche konfigurierbaren Rust-`Limits` anhand `runtime_config.rs::descriptors()` anzeigen: Einheit, Default, Min/Max, ENV/Quelle, `restart_required`. Keine kopierten Werte als UI-Defaults.
-- **V5-UI bindend:** neutrales Graphitgrau, eine zentrale Fläche, Pill-Navigation mit exakt `Overview / Liquidator / Capture / Analytics / Wallets`, schmale Trennlinien statt blauer Kacheln, keine zusätzliche Sidebar. `System Health` in der Kopfzeile als aufklappbarer Diagnostikbereich; englische Beschriftungen. Optische Referenz und Tokens siehe [GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAPHITE_V5_UI_FINANCE_CONTRACT.md).
-- **Overview-Pflichtfelder:** RPC-Latenz p95 (ms), Entscheidungs-Latenz p95 (ms), Stream-Freshness (ms), **Realized net PnL · USD**, **Total capital · USD** sowie Liquidator-/Capture-Status; `—` mit Quelle/Grund, wenn noch nicht nachgewiesen. Realized Net PnL und Total Capital sind dieselben Snapshotwerte wie unter Wallets, keine getrennten Frontend-Berechnungen.
-- Statusachsen: Run-ID, Walltime vs tatsächlich covered, READY/WSS/Slots, Gaps/429, Writer-Lag, RAM/SSD, Verifier-Cursor, Shadow-/Economics-UNKNOWN, Safety.
-- UI-Snapshot + begrenzte WS-Deltas; bei Sequence-Gap erneut REST-Snapshot laden, bis dahin `STALE` zeigen. Browser-Neustart darf keinen Run stoppen.
-- **Abnahme:** identische Werte/Fehler/Profil-Hash bei Terminal-/Browserstart, kein Doppelstart, kein Slow-Client-Effekt auf Engine.
-
-### FEUI-04 – Vollständige 6-Marker-/4-Klassen-Auswertung und Raw Explorer
-
-- Die **sechs** tatsächlichen Marginfi-Instruktionsmarker `lending_account_liquidate`, `start_liquidation`, `end_liquidation`, `start_deleverage`, `end_deleverage`, `lending_pool_handle_bankruptcy` einzeln/alle/keine im **Report** schaltbar machen.
-- Die **vier** fachlichen Klassen `CLASSIC`, `RECEIVERSHIP`, `FORCED_DELEVERAGE`, `BANKRUPTCY_SETTLEMENT` getrennt auswählbar; Start-/Endpaarung ohne Doppelerfolg.
-- Die vier verwandten, **nicht als Liquidation zählenden** Instruktionen `drift_claim_bad_debt`, `purge_deleverage_balance`, `marginfi_account_keeper_close_order`, `marginfi_account_init_liq_record` separat.
-- Reale Flags `--report-types`, `--report-markers`, `--report-related-events/types`, `--report-view`, `--report-provenance`, `--report-from/to`, `--report-min-net-usd`, `--report-winners/competition/economics`. Alle sind Ansicht, **nicht** Capture/Verifier/Trading-Filter.
-- Aus `.p0j` paginierte RawRecord-Details: Signature, Slot, T_rx, TX-Status SUCCESS/FAILED/UNKNOWN, Top-level/CPI-Position, LUT, Blocktime, Fee/Token-Deltas, Actor, Marker/Pairing, Source/Proof, Event-/Journal-Hash. Keine unbounded Browserdaten.
-- **Abnahme:** Rust-/Python-A4-Parität im belegten Scope, 6 Marker einzeln, 4 Klassen/4 Related, failed/truncated/Legacy/v0/v1/CPI, identischer Raw-Hash trotz jeder Filterkombination. Fehlende historische Rohbeispiele ausdrücklich BLOCKED.
-
-### FEUI-05 – Run-Historie, Verifikation und Provenienz
-
-- Unveränderte `capture_run_id`, stabile `verification_spec_id`, pro Versuch neue `verification_attempt_id`, unveränderliche finale `verification_result_id`, gebundene `report_query_identity`.
-- `off` = NOT_RUN; `index` maximal INDEX_VERIFIED; `strict` nur bei vollständigem finalized Proof CANONICAL_VERIFIED; 429/Pruning = HISTORICAL_INCOMPLETE mit Resume-Cursor.
-- LIVE/INDEX/STRICT/SHADOW_ONLY unterscheiden. Ein historisch vervollständigter Scan ersetzt nicht verlorenes originales `T_rx`.
-- **Abnahme:** Verify/Resume/Report-Nachweise, Hash-Mismatch/ältere Schemaversion fehlschlagen, keine „vollständig“-Anzeige bei nur vorläufigem Result.
-
-### FEUI-06 – Economics/Competition/Race/Verlustursachen und native Latenz-Telemetrie
-
-- Existierende Rust-`liquidation/economics.rs`, `analytics/econ_canonical.rs`, `market/winner.rs`, `winner_tracker.rs` wiederverwenden.
-- `market_gross_edge_usd` ≠ `executable_shadow_net_edge_usd` ≠ `realized_pnl_usd`. On-chain Fees, Priority Fee, Tip, Rent, Swap/Exit/Restinventar und `unknown_costs` mit Provenienz.
-- Ursachen je Signature+Slot+Instruction/Event: Ingress, State-Staleness, Health, Funding, Routing/Exit, TX-Größe, Simulation, Fee-Budget, Race, Landing oder UNKNOWN. Pro Episode ein primärer Verlustgrund; Sekundärgründe getrennt, keine doppelte Verlust-/Fee-Zählung.
-- Kapitalbänder `200/500/1000/2500/5000/10000 USD`; gemessene Speedup-Sensitivität nur Szenario, kein bewiesener Winner.
-- Für RPC p50/p95/p99, RX→Decision p50/p95/p99, Stream Age sowie spätere Build/Sign/Submit-/Finalized-Latenz die *gemessenen* monotonen Zeitpunkte, Samples, Messfenster, Backend-Quantile und Status offenlegen. Vorhanden: `ingress::t_rx_ns`, `MarketStats.max_stream_silence_ms`, `StorageStatus.queue_bytes/lag_frames`, `econ.rs::Distribution`; vollständige rolling Live-Histogramme bleiben **SOLL**, keine Dummy-Latenzen. Quelle siehe [GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAPHITE_V5_UI_FINANCE_CONTRACT.md).
-- **Abnahme:** exakte u64/u128/i128-/USD-micro-/bps-/ns-Einheiten, keine JS-Float-Entscheidung, keine Scheingenauigkeit bei nicht vorhandenem Edge oder Latenz. p95 + Samplezahl + Fenster + Fehlerstatus nachvollziehbar.
-
-### FEUI-07 – Profitability Lab V1: reproduzierbare Offline-Optimierung
-
-- **Ein-Klick-Kette:** `Capture-Run auswählen → Evidence-Qualität anzeigen → Check/Verify → Backtest (zeitkonsistenter Replay) → automatisch Report → Optimieren → Baseline/Kandidat vergleichen → versioniertes Offline-Profil exportieren`. Auf abgeschlossenen `Run`s oder unveränderlichen **versiegelten Segment-Snapshots** eines laufenden `UntilStopped`-Runs; keine erneute Raw-Aufnahme nötig, kein Browser-Compute. Detailvertrag [STARTUP_BACKTEST_OPTIMIZATION](STARTUP_BACKTEST_OPTIMIZATION.md).
-- Ausschließlich mit versiegelten realen `.p0j`-Runs und bestehender Rust-Economics: deterministische Parameter-Sweeps für Kapital, Mindest-Nettoedge, Funding, Route/Exit, Gebühren/Tip, Candidate-Admission und Timing-Sensitivität.
-- Baseline und Kandidat auf identischem historischem Datensatz/Code-/Decoder-/Protokoll-/Profil-Hash vergleichen, UNKNOWN statt erfundener Gegenfakten.
-- Zeitblock-/Cluster-Bootstrap, Walk-forward und separater Holdout; mögliche Marktregime, Unsicherheitsintervalle, Nicht-Realisierbares und `INSUFFICIENT_SAMPLE` anzeigen. Eine einzelne 4h-Probe garantiert keine Profitsteigerung.
-- **Abnahme:** bitidentisches Replay bei gleichen Inputs; keine zukünftigen Quotes/Slotfacts in historischen Entscheidungen, keine Änderung laufender Strategieparameter.
-
-### FEUI-08 – Strategy Profiles und adaptive Optimierung (nach FEUI-07)
-
-- Versionierte Profile und explizit gebundene Replay-/Holdout-Evidence, Cost-/Provider-/Risk-Limits; Approval und atomische Profilaktivierung nach getrennten Gates.
-- Erst mit echten ausreichend gelabelten Landing-/Winner-Daten: logistische Kalibrierung, Gradient Boosting, Quantile, Bayesian Optimization, Drift/Change-Point. Least Squares nur für sinnvolle Teil-Baselines. KI/LLM erklärt Befunde, entscheidet nicht selbst über Geld.
-- **Abnahme:** schlechte Out-of-sample-/UNKNOWN-Gates verwerfen Parameter; kein stilles LIVE- oder Paid-Schalten aus dem Optimierer.
-
-### FEUI-09 – Security, Contracttests, CI/Deployment
-
-- Control-API lokal/Loopback, Auth, Origin/CSRF/WS-Upgrades, rate-limits, idempotente Start-/Stop-Jobs, Projekttrennung, keine Keys/Signaturdaten in Vite/HTML/Logs, keine Shell-Interpolation.
-- Echte Contract-Parität Frontend↔Rust↔CLI, Build/Typecheck/Lint/Playwright, Crash/Reconnect/slow-client, JFI-konforme interne Protokolle, Sicherheits- und Failure-Tests.
-- Optional macOS `launchd`, aber kein zusätzlicher Redis- oder dauerhafter Paid-Dienst notwendig.
-- **Abnahme:** UI-Disconnect beeinflusst keinen Run; aus UI ist keine Geldtransaktion möglich; CI benötigt keine privaten Providerkeys.
-
-
-### FEUI-10 – Wallets & Treasury (neuer verbindlicher Produktbereich)
-
-Verbindlicher Detailvertrag: **[Wallets & Treasury](WALLETS_TREASURY.md)**. Wallets, Public Keys, SOL/SPL/Token-Balances, Geld-/Trading-Reservations, verifizierte Gebühren-/Profitwerte und Ziel-Adressen für Phantom-/MetaMask-Solana im gemeinsamen Dashboard anzeigen. Quelle: `project_0/config/wallet.public.env`, `execution/one_shot.rs` (WalletLock, Hold, HandoffUnknown), `receipts.rs` (finalized wallet deltas), `pending.rs`, `liquidation/funding.rs`, `analytics/journal.rs`. Das ist **nicht** schon ein Treasury-Sender.
-
-- **FEUI-10A READ_ONLY:** alle konfigurierten Wallets mit Projektdomäne/Chain/Mint/Tokenkonto/Balance/Spendable/Reservations, bekanntem finalized Netprofit und UNKNOWN getrennt. Walletsource/-Status nie als echten Kontostand interpretieren. Konsolidiertes versioniertes `PortfolioFinancialSnapshot` (SOLL) mit **Total capital, Available capital, Reserved capital, Realized net PnL, Withdrawable profit, Transferred to Treasury** in USD und per Asset; alle Werte zugleich in `Wallets` und die beiden Pflicht-KPIs `Total capital` + `Realized net PnL` auf `Overview` mit **derselben snapshot_id**. Portfolio-/PnL-Nachweis erst nach echter Wallet-/Price-/Liability-/FE-07-Reconciliation.
-- **FEUI-10B MANUAL:** separate Treasury-Preview/Intent/Signer-/Receiver-/Mint-/Fee-/Reserve-/Amount-Gates, ausdrücklich autorisierte manuelle SOL-/SPL-Transfers zu allowlist-basierten **Solana**-Empfangsadressen von Phantom oder MetaMask, finalisierte Receipts, crashsichere Holds/UNKNOWN/keine Duplikate.
-- **FEUI-10C AUTO:** frei einstellbarer Mindestbetrag `X` **neu realisierter, noch nicht abgeschöpfter** Profit, Überweisungsanteil/-Betrag, Fee-/Reserve-/Transfer-/Zeitraumgrenzen, Cooldown/Expiry, Empfänger-/Asset-/Chain-Allowlist, versionierte explizit freigegebene Standing-Policy und Kill Switch. Niemals komplette Wallet-Guthaben oder Shadow-Szenarien als auszahlbare Profite behandeln.
-- Eine MetaMask-`0x`-EVM-Adresse ist **kein** direktes Solana-Auszahlungsziel; kein automatisches Bridging ohne neuen gesonderten Sicherheitsvertrag. Wallet-Transfers sind **value-bearing** und bleiben bis nach FE-04/P8, abgeschlossener echter FE-07-PnL-Reconciliation und einer **gesonderten Treasury-Geldfreigabe** gesperrt. Sie blockieren **nicht** den nächsten 4h-Beobachtungstest.
-- **Abnahme W-G01…08** laut Walletvertrag: Public Identity, Profit/Balance/Spendable, Reservierungs-Atomizität, sichere Einmalüberweisung, idempotente Gewinnschwelle/Restart/UNKNOWN, UI, Geldberechtigung, JFI-/BSC-Isolation.
-
-## 3. Erweiterter, verpflichtender Betriebs- und Analyseablauf v1.1
-
-Die ausführliche Spezifikation steht in [STARTUP_BACKTEST_OPTIMIZATION.md](STARTUP_BACKTEST_OPTIMIZATION.md). Die folgenden Gates sind **verbindliche Ergänzungen** zu FEUI-01/02/03/05/06/07/08/09 und dürfen nicht als gesonderte, nachrangige Fantasiephase behandelt werden:
-
-| Gate | Implementierungspflicht | Positive Abnahme |
+| Existierende Datei | IST | Für produktive UI fehlt |
 |---|---|---|
-| **F-G10 BOOT INTEGRITY** | Vor jedem Capture alle kritischen Build-/Chain-/Program-/Bank-/Oracle-/Provider-/Host-/Safety-Abhängigkeiten mit erwarteter Identität prüfen; Hardfail bei Mismatch, Unknown für unprüfbare optionale Checks | Reproduzierbare Audit-Evidence, kein Start trotz Address-/Bytecode-/ProgramData-Drift |
-| **F-G11 UNBOUNDED** | Versioniertes `RunHorizon::Fixed` oder `UntilStopped`, rollierende Fenster, Journalsegmente, Retention/Storage/Provider-Watchdogs, graceful stop | 30s/custom 75m/custom 7d/unbounded, ns-Overflow verhindert, 4 Quartale für finite Bestandsläufe kompatibel |
-| **F-G12 ANALYSIS PIPELINE** | Paginierter Run-Browser; as-of historischen Replay auf gespeicherten Beweisen; Verify/Backtest/Report/Optimize als getrennte serverseitige Jobs, alle mit festen Daten-/Versionsidentitäten | Klickkette vollständig, idempotent, Close/Reopen des Browsers ohne Daten-/Jobverlust |
-| **F-G13 PROOF-/PNL DISPLAY** | Deckung und UNKNOWN getrennt von Gross-Edge, Shadow-Edge, Race-Sensitivität und **tatsächlich realisiertem** PnL; grafische Drilldowns auf signierte Evidence | Kein hypothetischer Gewinn in Realized-KPI, keine erfundene Win-Wahrscheinlichkeit |
-| **F-G15 GRAPHITE-V5 + FINANCE** | Verbindliche fünf englische Reiter/Graphit-Pill-UI, Health als Headerdetail; p95 samt Quelle, Snapshotidentität für `Overview` und `Wallets`; Portfolio-Nettovermögen/Working-Capital/Reservations/realized PnL/Sweeps fachlich separat | Visual-/Contracttests aus [V5-Vertrag](GRAPHITE_V5_UI_FINANCE_CONTRACT.md), kein falscher Echtgeld-/PNL-Wert |
-| **F-G14 OPTIMIZE** | Konfiguriertes Budget/Parameterraum, exakter Backend-Sweep, Time-Block-Holdout, Confidence/UNKNOWN, Baseline-Vergleich, profile candidate only | Derselbe Input → gleiches Ranking/Report-Hash, kein Lookahead, kein automatisches LIVE-Profil |
+| 'src/app/router.tsx' | '/', '/bsc', '/project-0', '/solana' | typisierte Registry/Lazy |
+| 'src/shared/layout/{AppLayout,Navigation}.tsx' | gemeinsame Header/Links | graphitisches Hostdesign, Registry-nav |
+| 'src/features/overview/OverviewPage.tsx' | statische Projektkarten, WS-Status | echte Overview-Aggregate |
+| 'src/features/project0/Project0Page.tsx' und fünf Panel-Komponenten | Graphite V0 in React | echte Backend-Snapshots/qualifizierte Commands |
+| 'src/features/project0/hooks/useFleetDrafts.ts' | **nur ungespeicherte In-Memory-Drafts** | persistente Profile/echte Botinstanzen |
+| 'src/features/bsc/BscPage.tsx' | Platzhalter | BSC-Fachoberfläche |
+| 'src/features/solana/SolanaPage.tsx' | bestehende Route | nur projektgebundene spätere Integration |
+| 'src/core/realtime/RealtimeClient.ts' | alter JSON-WebSocket mit globaler seq | Topics/Protobuf/Zwei-Hop-Liveness/Journal-Cursor |
+| 'src/core/realtime/protocol.ts' | Legacy-Envelope | F7 löschen/re-export aus Codegen |
+| 'src/core/api/client.ts' | JSON GET-Client | typed Proto-Read/Command; F7 Legacy ausmustern |
+| 'src/app/providers.tsx' | Theme und TanStack Query | Zustand-Livestores, Feature-Boundaries |
+| Gateway/Proto/Engine-Adapter | **nicht implementiert/nicht nachgewiesen** | F2–F7 |
 
-**Wichtig:** Ein Boot-Audit stellt **Identität/Erreichbarkeit zum Prüfzeitpunkt** fest, nicht zukünftige Quotenfreiheit oder garantiert lückenlose WSS-Lieferung. Langläufe überwachen diese Eigenschaften erneut und wechseln bei kritischer Drift auf `DEGRADED`/Fail-Closed, ohne Daten zu verwerfen oder unbemerkt andere Gegenparteien anzusprechen. `UntilStopped` bedeutet **keine planmäßige Zeitabschaltung**, jedoch zwingend endliche RAM-/Storage-/Provider-Sicherheitsbudgets, Segmentrotation, automatische Kapazitätsprüfungen und transparenten Stop/Halt bei nicht behebbarem Fehler.
+**Projektstand aus Status-Evidence:** Project_0 C0-E1 4h NOT_QUALIFIED, PERSIST PARTIAL, FE-00 LOCAL_PASS aber NO_ECONOMIC_GO, FE-06 NOT_AUTHORIZED, FE-07 NOT_RUN, positiver eigener finalisierter Net PnL NOT_PROVEN. BSC G0.7/G0.8 NOT_EXECUTED, Portal-v5.25-Drift requalifizieren, aktiver V4-Guard UNARMED. Kein Frontend-Commit ändert diese Urteile.
 
-## 4. Umsetzungsgates und Reihenfolge
+## 3. Verbindlicher React-/Repo-Zielbaum – IST/SOLL
 
-| Priorität | Tickets | Blockiert nächsten 4h? |
+~~~text
+protocol/ [SOLL]
+  schemas/darkbot/control/v1/*.proto        ONE wire envelope/control/commands
+  schemas/darkbot/project0/v1/*.proto       typed P0 projections
+  schemas/darkbot/bsc/v1/*.proto            typed BSC projections
+  codegen/toolchain config, README, Golden-Tests
+
+frontend/src/
+  app/
+    App.tsx,router.tsx,providers.tsx        [IST]
+    projectRegistry.ts                     [SOLL] statisch typisierte Module
+  core/
+    generated/                             [SOLL] ONLY generated Proto-Types
+    realtime/
+      RealtimeClient.ts                    [IST→SOLL] 1 Socket, Protobuf
+      TopicSubscriptions.ts                [SOLL] refcount, grace
+      TopicState.ts                        [SOLL] quality + cursor
+      protocol.ts                          [IST→F7 DELETE/REEXPORT]
+    api/
+      client.ts                            [IST→F7 DELETE] legacy JSON
+      commandClient.ts                     [SOLL] action-only POST
+      historyClient.ts                     [SOLL] paginierte read-only Reports
+    projects/readSummary.ts                [SOLL] shared read-only summary
+  shared/
+    layout/AppLayout.tsx,Navigation.tsx     [IST]
+    ui/graphite/tokens.css                 [SOLL] design freeze
+    ui/{Tabs,Rows,Notice,...}.tsx          [SOLL] fachfreie Präsentation
+  features/
+    overview/OverviewPage.tsx              [IST→SOLL] echte Aggregate
+    overview/overviewStore.ts              [SOLL] eigenes Zustand-Store
+    project0/Project0Page.tsx              [IST] V0 beibehalten
+    project0/pages/{Overview,Liquidator,Capture,Analytics,Wallets}Panel.tsx [IST]
+    project0/hooks/useFleetDrafts.ts       [IST] drafts ONLY
+    project0/store/project0Store.ts        [SOLL] Zustand mit Selektoren
+    project0/api/project0Adapter.ts        [SOLL] Proto→P0-Domain
+    project0/styles/graphite.css           [IST] visuell frozen
+    bsc/BscPage.tsx                        [IST] placeholder
+    bsc/pages/{Overview,LaunchBuy,Monitoring,Analytics,Wallets}Panel.tsx [SOLL]
+    bsc/store/bscStore.ts                  [SOLL] separater Zustand-Store
+    bsc/api/bscAdapter.ts                  [SOLL] Proto→BSC-Domain
+    solana/SolanaPage.tsx                  [IST] erhalten
+~~~
+
+**Mechanische Grenzen:** ESLint-boundaries verbieten 'features/bsc' ↔ 'features/project0'-Imports. Generierte Protobuf-Fachtypen dürfen nur von schmalen Domain-Adaptern eingelesen werden (Transport-Codec ausgenommen). CI muss gegen Importverletzungen fehlschlagen. Zustand mit stabilen Selektoren: nur betroffene React-Komponenten rendern. Keine Mega-Context-Subscription, kein Quervermischen der Engines. History/Reports in paginierten TanStack-Query-Reads, nicht im Live-Store. BigInt nur exakt und nie direkt in JSON.stringify-Query-Keys. Je Projekt Lazy Loading und Error Boundary.
+
+## 4. Realtime-/Command-Mechanik (nur ein kanonisches Wire-Dokument)
+
+~~~text
+P0 Engine (.p0j)  ─┐
+BSC Engine (DBREC) ├─ authenticated source feed + own cursor/liveness ─┐
+Solana later        ┘                                                  ▼
+                                                       Control Gateway
+                                               STATE latest full value/topic
+                                               client latest value/topic
+                                               EVENT journal catch-up BOTH hops
+                                               overview read-only aggregate
+                                               same-origin browser session
+                                                           │
+                                             ONE binary/protobuf WebSocket
+                                                           ▼
+                                             React separate Zustand stores
+
+User click → same-origin HTTPS Proto POST → Gateway auth proxy → ENGINE auth + CAS
+            → persisted intent/receipt → status pending/recent push to UI
+~~~
+
+**STATE:** immer kompletter kleiner Topiczustand, kein Delta/Ring/State-Hash. Publisher '(generation,seq)'; neue Generation **akzeptieren** und seq zurücksetzen, abgelöste Generationen nicht erneut anwenden. Gateway-Engine-Disconnect => 'SOURCE_DETACHED' an alte **und neue** Subscribers, alter Cache darf nicht OK heißen. Gateway hält genau einen Latest-Value-Cache pro Topic + einen Latest-Slot pro Client/Topic; kein blockierendes WS-ACK pro Datenframe.
+
+**EVENT:** nur '(journal_epoch,durable_cursor)' (mit Source/Run). Engine bestätigt Durable-Commit vor Push; at-least-once und Client-Dedupe. **Zwei Catch-up-Barrieren:** Client↔Gateway und Gateway↔Engine jeweils zuerst Feed/Puffer anhängen, dann High-Watermark aus Engine lesen, Archiv '(C,H]' paginiert nachziehen, Puffer deduplizieren, 'CatchupComplete(COMPLETE)' erst bei ununterbrochenem Upstream bis Freigabe; sonst INCOMPLETE. Upstream-Cursor ist unabhängig vom Browser-Cursor. Overflow/Catch-up-Limit → expliziter Fehler, max. drei Backoff-Retries mit Cap, dann manuell.
+
+**WS-Nachrichten exakt 11:** Client 'Hello,Subscribe,Unsubscribe,Pong', Server 'Welcome,ControlAck,StateFull,Event,CatchupComplete,Heartbeat,Error'. 'Subscribe' mit optionalem **Paar** '(journal_epoch,durable_cursor)' (nur EVENT), 'StatePart' reserviert ohne Implementierung. Kein Resume-Sonderframe, kein STATE-Patch, kein Hash, keine pro-Frame-ACK. Heartbeat vom Server; Wasserzeichen pro Client für **tatsächlich versendete** STATE-Seq. Bad Proto => stabiler Error, nicht Re-Subscribe-Sturm. Max STATE ~256KiB als noch zu messender Grenzwert.
+
+**Commands:** eigene typisierte HTTPS-POSTs, kein Event-Side-Effect; engine-eigene 'profile_version/config_version' im STATE für CAS, nie WS-Seq. 'pending_commands[]' und bounded 'recent_command_results[]' in der Statusprojektion; ACK 'ACCEPTED' ≠ durchgeführt; verlorene Antwort über State bzw. einmaligen GET auf Command-ID prüfen. Engine persistiert Idempotenz nach Intent-/Receipt-Retention. Keine automatischen Geld-Retries. Produktion SPA vom selben Gateway-Origin; HttpOnly/SameSite Strict Secure Cookie (bei HTTPS), Host-/Origin-Allowlist, CSRF für POST, CSP, autentisiertes Engine-IPC; Engine prüft Fachgates.
+
+**Kein Browser-Polling.** Subscriptions folgen Route/aktivem Panel (kurze unsubscribe grace). Global '/' nur 'overview.aggregates'; Project0 Overview 'project0.status + project0.finance.summary'; Wallets eigenes 'project0.wallets.state'; BSC eigene Themen. Große Reports nur auf explizite Nutzeraktion paginiert holen. Simulation/Replay sichtbar 'OFFLINE/REPLAY'; nicht als Gewinn zählen.
+
+## 5. Pflicht-Themen und Fachprojektionen
+
+| Topic | Klasse | Abonnent; Auszug |
 |---|---|---|
-| 1 | FEUI-00 / schlankes FEUI-01 | JA – sicherer CLI-Lifecycle |
-| 2 | FEUI-02 + **nur Backendteil FEUI-04** + SK-/JFI-/Verifier-Gates | JA – sechs Marker, Binär-Raw, Capacity und Provider |
-| 3 | Qualifizierter kurzer Smoke, gesondert freigegebener 4h-Run | JA – echte Coverage und Proof, nicht UI |
-| 4 | FEUI-03/04/05 React-Anbindung | NEIN – parallel/anschließend |
-| 5 | FEUI-06/07 Profitability Lab | NEIN – offline auf bereits gespeicherten Daten |
-| 6 | FEUI-08/09 finale Produkt-/Optimizer-Gates | NEIN für 4h; vor späterer adaptiver Betriebsfreigabe JA |
+| 'overview.aggregates' | STATE | global '/', echte Projektzahl/Bots/Jobs/health/qualifizierte Summen |
+| 'project0.status' | STATE | P0 Overview, command pending/results + config_version |
+| 'project0.finance.summary' | STATE | Overview; gleiche Backend finance_snapshot_id wie Wallets |
+| 'project0.liquidator.state' | STATE | Liquidator; ONE runtime bot first, profile_version, Draft != Running |
+| 'project0.capture.state' | STATE | Capture; Provider/Storage/Gaps |
+| 'project0.wallets.state' | STATE | Wallets; Balances/Available/Reserved/Withdrawable |
+| 'project0.execution.events' | EVENT | echte persistierte P0-Receipt-/Execution-Events |
+| 'project0.capture.events' | EVENT | echte Journal-Events, Rohaufnahme ungefiltert |
+| 'project0.analytics.jobs' | STATE | Job-Status, Report-Referenzen; History GET |
+| 'bsc.status' | STATE | G0.6a/G0.7/G0.8, Portal-/Builder-Drift, config_version |
+| 'bsc.launch.state' | STATE | Launch/BUY, plan_version und fachlich gesperrte Actions |
+| 'bsc.monitoring.state' | STATE | Witness/Evidence/Chain-Reconcile |
+| 'bsc.wallets.state' | STATE | BSC-eigene Wallets, kein P0-Treasury |
+| 'bsc.execution.events' | EVENT | BSC Journal-/DBREC-Evidence; Epoch+Cursor |
+| 'solana.status' | STATE | späterer eigenständiger Adapter |
 
-**Abnahmekriterien:** (1) single Owner und idempotenter Stop; (2) gleiche CLI-/UI-Parameter/Units/Defaults; (3) sechs Marker + vier Klassen + vier Related, Hash-invariante Filter; (4) SK-06/07 + unfiltered Journal und Provider/Strict; (5) STATUS/UNKNOWN/Provenienz korrekt; (6) exakte Backend-Economics; (7) Offline-Holdout ohne Zukunftsinformation; (8) keine LIVE-/Paid-/Submission-Umgehung; (9) reproduzierbare Tests und Ledger.
+## 6. F0-VAR: Vor der Umsetzung vollständige P0- UND BSC-Variablenextraktion
 
-## 5. Claude-Ausführungsregel
+Die erste **belegte** Extraktion steht in [SOURCE_VARIABLE_MATRIX.md](SOURCE_VARIABLE_MATRIX.md), aber **vollständiger Census gegen aktuellen HEAD ist ein F0-Hard-Gate**. Für jedes Frontend-Feld: 'project/feature/source_path/symbol/type/unit/scale/default_min_max/validator/config_or_read/owner/sensitivity/provenance/quality/source_sha/required_gate/topic_or_command/test'. Feld ohne Owner/Unit oder mit ungeklärtem Gate => 'BLOCKED / SOLL_MISSING' und keine freie TS-Berechnung.
 
-Vor jeder Phase aktuellen HEAD, `STATUS.md`, `PHASENPLAN.md`, `MEASUREMENT_LEDGER.md`, die vier Frontend-Dokumente einschließlich `STARTUP_BACKTEST_OPTIMIZATION.md` und die tatsächlichen Dateien lesen. Nur getestete vollständig abgeschlossene Tickets als LOCAL_PASS markieren. Nie eine neue Klasse/Variable/REST-Route als bereits implementiert behandeln, solange sie nur im SOLL-Plan steht. Kein Code unter `bsc/` oder fremden Projektteilen ändern. Keine unautorisierten mehrstündigen Mainnet-/Paid-/LIVE-/Submission-Aktionen. FE-First-Profit-Priorität bleibt separat bindend.
+- **Project_0:** Native 'RuntimeConfig/Resolved::descriptors()', MeasurementPlan, Flags 'duration,capture-source,chain-verify,report-markers/report-types', alle sechs Marginfi-Marker/vier Klassen/vier Related, MarketStats, StorageStatus/CapacityReport, Journal-Provenance, Receipts/Funding/Economics, Wallet Public Identity und nicht vorhandene Portfolio-Snapshot-Grenze. Capture unfiltered; Marker **nur** Report-Filter. Die zwei Realtime Finance-KPIs stammen **später** aus einem finalisierten Backend-Snapshot; PnL nicht aus Shadow oder historischem Winner.
+- **BSC:** 'LiveGuardContext,ContractSnapshot', V4-'UNARMED'-Guard, DRY-/Preflight-/Builder-/Portal-Provenienz, 'g07_mainnet_self_launch_buy' Runner-ENV, G0.8 Canonical-/Receipt-/Fee-Felder und Chainjournal; V4 signierte Limits sind primär immutable Evidence **keine** frei editierbaren Sliders. Key- und Builder-Autorisierungs-Geheimnisse sowie credentialed RPC-URLs niemals ans UI übertragen.
+- **Source-Klassifizierung:** 'IST_INTERNAL' ≠ 'EXPOSED_TO_GATEWAY' ≠ 'QUALIFIED' ≠ 'AUTHORIZED'. Backend-Steuerparameter nur durch Engine-DTOs mit 'config_version'; echte Defaults nur aus Rust-Descriptors, nie kopiert. Kontostände nur mit Chain-/Price-/Finality-Provenienz. Wei/u128/u256 als dezimaler String; lamports/slots und positive passende USD-micro als uint64/BigInt; vorzeichenbehafteter oder größerer USD-micro/PnL als signierter Decimal-String.
+
+**Definition F0-VAR DONE:** Inventar UI↔Source bis auf einzelne offene SOLL-Felder komplett; Jede REST/Topic-Projektion hat Owner und Quality; jedes Control eine explizite fachliche CAS-Version, Idempotenz und Gate. Alle Quellfelder erneut gegen Source-HEAD/aktuelles Schema geprüft und diffbar abgenommen. Noch nicht im Backend verfügbare Felder sind separat als **SOLL_TICKET** dokumentiert, kein Fake-Adapter.
+
+## 7. Vollständige Fach-UI (ohne übergriffige Engine)
+
+**Globale Overview:** tatsächliche aktive Bots/Jobs/Captures, Gate-/Health-/Sourcezustand pro Domain, Samplefenster bei Latency, finalisierte Finance je Domain. Gesamtprofit/Capital **nur** bei kompatibler Bewertung, Finality und ohne wallet double count; sonst 'Aggregate unavailable'. Keine 0 für Unknown.
+
+**Project_0:** Overview 'RPC p95, decision p95, stream freshness, Total capital, Realized net PnL' mit gemeinsamer Finance-ID; Liquidator Einzelliquidator + nicht persistente Botdrafts; Capture frei einstellbare Dauer nach Backend-Gate, 'UntilStopped' erst wenn nativ implementiert, 'logs|transactions', Verify 'off/index/strict/crosscheck', alle sechs Marker **nur** Bericht. Analytics immutable Reports/Verifier/Competition/Race, Offline-Backtest/Optimize mit echten versiegelten Runs. Wallets Freeze, Send/Auto-Sweep UI erst nach besonderem Treasury-Gate ausführbar. Keine JavaScript-Economics oder Keys.
+
+**BSC:** Overview G0.6a/G0.7/G0.8/Portal-/Builder-Version/Preflight und Source Witness; Launch/BUY read-only freigegebene Plan-/Budgetwerte und Gate-Verditcts (keine UI-Aktivierung); Monitoring BSC Eventjournal, receipts, chain inclusion, canonical ordering/acquisition/fees; Analytics nur echte Ergebnisse; Wallets BNB/Token und eigene Chain-/Wallet-Gates. BSC 'g07' seit Portal-Drift neu zu qualifizieren, Frontend ersetzt das nicht.
+
+**Bot-Schwarm:** F8 später: N versionierte Strategieprofile innerhalb **P0**, gemeinsamer kanonischer StateOwner/Ingress, globaler nativer P0 Execution-Arbiter mit atomarer Wallet-Reservation; keine N vollständigen RPC-Scanner. Gleiche Schnittstellen heute vorbereiten, Scheduler/Arbiter **nicht** vor erstem realisierten Einzelbot entwickeln.
+
+## 8. Frontend-Arbeitspakete mit Definition of Done (F5 in F3 enthalten)
+
+| Phase | Arbeit | Abnahme/Test |
+|---|---|---|
+| **F0 – Konsolidierung und F0-VAR-Census** | 1 Master, 1 Wire, 1 Governance, alte Texte nach 'delete/', echte P0-/BSC-Felder aus Rust + CLI extrahieren, Type/Unit/Owner/Gate/source sha beweisen; Ist/Soll aktualisieren | Quelleninventar je geplantem UI-Feld; keine Secrets; fehlende Engine-Projektion ausdrücklich BLOCKED |
+| **F1 – Design-Freeze** | Graphite-Tokens, bestehende 5 P0-Tab-Screenshots und Wallet-Baseline, Host Navigation/Registry/Lazy/Error Boundary, Boundary-Lint | P0 Wallets Pixeldiff 0, Cross-Import CI-Fail, kein P0-Layout-Bruch |
+| **F2 – Protobuf-/Handshake-Spike** | schema family/prost/protobuf-es, Hello/Welcome/Subscribe, Full-State/Event, Major/Minor, Golden Bytes, Units/BigInt | Uint64::MAX + negative i128 + wei decimal, Schema-Evolution, incompatible-major fail-closed |
+| **F3 – Read-only Live UI** | same-origin Gateway, authenticated Engine-STATE feed mit Liveness, latest STATE pro Topic/Client, Heartbeat, Zustand stores/selector, Overview aggregate, P0 & BSC read-only status | Engine-Kill SOURCE_DETACHED auch für NEUEN Subscriber, neues generation/seq akzeptiert, route-scoped subscriptions, keine Polling-GETs |
+| **F4 – EVENT-Reconciliation** | Gateway-upstream durable cursor + Browser barrier, journal catch-up, epoch-bound cursors, CatchupComplete, Replay/overflow/backoff, echte Archive | Engine während Catch-up kill, Event nach restart, COMPLETE nur nach Journal-Nachzug; bounded RAM, sonst INCOMPLETE |
+| **F6 – Commands & Security** | POST/proto, auth/session/Origin/Host/CSRF/CSP/IPC, native CAS-Versionen, idempotente Commands, pending/recent status, lost ACK | duplicate same key one intent; key+new payload rejected; keine LIVE/Gate-Umgehung |
+| **F7 – Fachintegration & Migration** | echte P0 Capture/Verifier/Finance/Analytics/Wallets, BSC Launch/Monitoring/Wallets, paginierte History, Legacy-JSON-WS und JSON-read-client nach Parität entfernen | TS typecheck/lint/build; Rust/TS contract, Playwright E2E/Visual, keine duplicate Decoder/Routes, Source-Proof |
+| **F8 – Fleet später** | P0 Profiles+Arbiter+Bot-Attribution/Optimizer | **DEFERRED** nach qualifiziertem einzelnen P0-Liquidator und neuer Freigabe |
+
+**FEUI-Anforderungszuordnung** (keine zusätzliche konkurrierende Phasenfolge): FEUI-00→F0; FEUI-01/02→P0 native Gates und später F3/F6/F7; FEUI-03→F1/F3; FEUI-04/05/06/07→F7 nach nativen Evidence-/Econ-Gates; FEUI-08→F8; FEUI-09→Querschnitt F1–F7; FEUI-10A→F7 read-only; FEUI-10B/C→separate Treasury-Freigabe, nicht automatisch F7. BootAudit/UntilStopped/SegmentReplay/Optimization-Details ausschließlich in den Fachanhängen.
+
+**Projektpriorität:** Project_0 EINZEL-LIQUIDATOR-FIRST, 4h/C0-E1/PERSIST/FE-00…07 bleiben eigene Projektgates. BSC G0.7/G0.8 eigene Reihenfolge. Frontend-Aufgaben dürfen diese nicht blockieren.
+
+## 9. Verbindliche Test- und Dokumentationsgates
+
+1. Source-Feld-Vertrag: Source-SHA, Type/Scale/Gate/owner; unbekannte UI-Werte bleiben '—/UNKNOWN'.
+2. Graphite: fünf P0-Tabs, Wallets Pixeldiff 0 (festgelegte Browser-/Fontbasis), Keyboard/Responsive/A11y.
+3. Wire: Rust/TS Golden, compatible minor + incompatible major, Decimal exakt ohne JS Float.
+4. STATE: Server-/Engine-Neustart, SOURCE_DETACHED auch neuer Subscriber, neues publisher generation akzeptiert, Latest-Client-Slot, No-Poll.
+5. EVENT: deterministische zwei Hop-Barrieren bei GAP, Restart und Archive, Cursor Dedupe, Quality INCOMPLETE, Retrycap und Overflow.
+6. Safety: SameOrigin/Cookie/Origin/Host/CSRF/IPC, native CAS/Idempotenz, Pending+Recent ohne optionale Eventsub.
+7. React: Selector render profiliert, nur benötigte Topics, BSC-Chunk nicht auf /project-0, Fehlergrenzen.
+8. Backend/Evidence: keine unechten Profite oder Live-Aktionen durch UI/Offline-Replay; Projektledger bleibt Owner.
+9. CI/Evidence: exakter Git-SHA, Tests mit Exitcode + Fixture-/Screenshot-SHA; PASS nur nach realem Lauf, FAIL/NOT_RUN ausgewiesen.
+10. Performance: STATE-Frame zunächst <=256 KiB, ~15s heartbeat, ~2s grace, max 3 Retry als **Messhypothese**. Publisher-p95/Engine-Channel-Füllstand bei Slow Client messen, Abnahme-SLO **vor** Implementierungs-PASS festschreiben.
+
+**Umsetzungshygiene:** F-Arbeitspaket erst erledigt, wenn Implementierung + Tests + Source-/Protocol-Identity + offene Risiken dokumentiert. Kein neuer paralleler 'FINAL_PLAN.md'. Jede echte Designänderung zuerst hier bzw. im ausschließlich zuständigen Wire-/Governance-Vertrag, dann Migration.
