@@ -95,6 +95,10 @@ Verbindlicher Detailvertrag: [STARTUP_BACKTEST_OPTIMIZATION.md](STARTUP_BACKTEST
 - `AnalyzeJob → BacktestJob → Report → OptimizationJob → StrategyProfileCandidate` als unabhängige idempotente, limitierte **serverseitige** Jobs auf immutable `.p0j`-Segmentroot-/Verification-IDs. Historischer Replay as-of ohne Zukunftsdaten; UNPROVEN/UNKNOWN nicht als profitable Echtgeld-Landung zählen. Kein `optimize`-Befehl darf eine Strategie live ändern.
 - Mainnet-Provider-/Boot-/4h-/Infinite-Freigabe, FREE_ONLY, JFI und FE-Sicherheit bleiben auch bei einem Klick wirksam.
 
+### Wallet-/Treasury-Control-Vertrag FEUI-10
+
+Siehe **[Wallets & Treasury](WALLETS_TREASURY.md)**. Ein Backend-Treasurybereich ist SOLL: `WalletPortfolioSnapshot`, `TreasuryDestination`, `TreasuryAvailability`, `TreasurySweepPolicy`, `SweepIntent`, `SweepReceipt`; getrennte read-only Wallet-/History-API und mutierende **separat autorisierte** Preview-/Transfer-/Policy-API. Wallets müssen im Dashboard sichtbar werden, aber **kein** generisches Geldsenden ohne Approval, Wallet-/Mint-/Source-/Chain-Bindung, atomare P8-Reservation, durable `.p0j`-Intents und finalized Receipts. Auto-Auszahlungen sind nur aus **neu realisiertem, noch nicht ausgezahltem Profit** unter freier `X`-Schwelle, Fee-/Reserve-/Volumen-/Zeitraum-Limits und expliziter zeitlich begrenzter Standing-Authorization zulässig. Solana-Phantom-/MetaMask-Zielpubkeys von EVM-`0x`-Adressen unterscheiden; Brücken nicht automatisch implementieren. CURRENT: `FE-06 NOT_AUTHORIZED`, `FE-07 NOT_RUN`, Treasury-Sender nicht vorhanden.
+
 ## 8. Contract- und Negativtests
 
 1. Gleiche Terminal-/Browser-Werte liefern identische effektive Backend-Config/ID/Default/Unit; unbekannte Versionsfelder fail-closed.
