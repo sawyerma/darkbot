@@ -132,6 +132,8 @@ macro_rules! typed_kinds {
             k::ECON_SHADOW_EVALUATION => {
                 $f::<super::econ::ShadowEvaluation>($kind, $schema, $bytes)
             }
+            k::ECON_CANONICAL => $f::<super::econ::CanonicalJoin>($kind, $schema, $bytes),
+            k::ECON_OPPORTUNITY => $f::<super::econ::OpportunityRow>($kind, $schema, $bytes),
             k::OWNER_RECONCILE => {
                 $f::<crate::execution::pending::ReconcileRecord>($kind, $schema, $bytes)
             }
@@ -179,8 +181,6 @@ pub const LEGACY_WRITABLE: &[u16] = {
         // JFI-FIX-05 (economics, verifier, reporting)
         k::ECON_SNAPSHOT,
         k::ECON_FINAL,
-        k::ECON_OPPORTUNITY,
-        k::ECON_CANONICAL,
         // remaining journal kinds (measurement, MT0, FE-01, C0 census import)
         k::MEASUREMENT_PHASE,
         k::MT0_SNAPSHOT,
@@ -219,6 +219,14 @@ pub fn validate(kind: u16, schema: u16, bytes: &[u8]) -> io::Result<()> {
 pub fn legacy_view(frame: &journal::Frame) -> io::Result<serde_json::Value> {
     if frame.schema == 1 {
         return frame.legacy_value();
+    }
+    if frame.kind == journal::kind::ECON_OPPORTUNITY {
+        return decode::<super::econ::OpportunityRow>(frame.kind, frame.schema, &frame.payload)
+            .map(|row| super::econ::opportunity_view(&row));
+    }
+    if frame.kind == journal::kind::ECON_CANONICAL {
+        return decode::<super::econ::CanonicalJoin>(frame.kind, frame.schema, &frame.payload)
+            .map(|row| super::econ::canonical_legacy_view(&row));
     }
     market::legacy_view(frame.kind, frame.schema, &frame.payload)
 }

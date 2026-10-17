@@ -5633,3 +5633,15 @@ Base `615e792`.
 - `RunHorizon::Fixed { duration_seconds }` is the plan's typed horizon. `until-stopped`/`inf`/`unbounded` are refused with `RUN_HORIZON_UNTIL_STOPPED_NOT_AVAILABLE` — no `u64::MAX` or placeholder duration. `UntilStopped` (rolling windows, re-preflight, segment policy) remains FEUI follow-up scope.
 
 Tests: measurement 8 (incl. `2d`, `75m`, refusals), solana lib 72, release duration matrix `test_measurement_plan` 4/4 (`2d` = 172,800 s; `inf`, `until-stopped`, `0d` refused).
+
+## 2026-10-17 — JFI-FIX-05 part 2: typed `ECON_CANONICAL` and `ECON_OPPORTUNITY` rows (LOCAL_PASS)
+
+Base `98cfcc8`.
+
+- `ECON_CANONICAL` stores the canonical join (`Joined`) as a typed payload; the join identity status decodes only into its closed set of six values (anything else is refused). `ECON_OPPORTUNITY` stores the typed inputs of an opportunity row (`OpportunityRow`: record, winner, market event, winner-slot receipt, capital scenarios). Both left `LEGACY_WRITABLE`; no JSON value is built to write them.
+- Their historical JSONL rows (`canonical_market_shadow.jsonl`, `opportunity_economics.jsonl`) are catalogued renders computed by the same functions the run used (`canonical_legacy_view`, `opportunity_view`), so the pinned readers see byte-identical rows.
+- `Winner`/`WinnerIdentity`, `MarketEvent` are binary-storable: text formats keep the internally tagged winner shape, the binary journal stores the externally tagged form.
+
+Tests: econ/journal/winner 104 (incl. the layout-V2 run whose report files must equal the renders of the sealed report journal byte for byte, and `typed_canonical_row_renders_identical_view`), Python launcher integration 26/26, Python unit suite PASS.
+
+Open in JFI-FIX-05: `ECON_SNAPSHOT`/`ECON_FINAL` report documents and the market summary values handed to the analytics worker are still JSON value trees; the native report chain (B7) follows.

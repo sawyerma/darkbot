@@ -19,6 +19,7 @@ use std::time::Duration;
 
 #[path = "econ_canonical.rs"]
 mod canonical;
+pub use canonical::{canonical_legacy_view, Joined as CanonicalJoin};
 
 pub const CAPITAL_USD: [u64; 6] = [200, 500, 1000, 2500, 5000, 10000];
 pub const SPEEDUP_MS: [u64; 9] = [1, 5, 10, 25, 50, 100, 200, 500, 1000];
@@ -119,13 +120,13 @@ impl EconConfig {
 // Published API retained; the adapter is owned and compiled once by execution.
 pub use crate::execution::observe_only::ObserveOnly;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MarketEvidenceSource {
     Live,
     GapBackfill,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MarketEvent {
     pub signature: String,
     pub slot: u64,
@@ -524,6 +525,58 @@ impl RacePool {
         }
     }
 }
+/// `ECON_OPPORTUNITY` frame (JFI-FIX-05, typed): the inputs of one opportunity row.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OpportunityRow {
+    pub rec: OpportunityRecord,
+    pub winner: Option<Winner>,
+    pub market: Option<MarketEvent>,
+    /// First local receipt of the winner slot.
+    pub slot_seen: Option<u64>,
+    /// Capital scenarios of the run (USD).
+    pub capital: Vec<u64>,
+}
+impl crate::analytics::payload::Payload for OpportunityRow {
+    const KIND: u16 = kind::ECON_OPPORTUNITY;
+}
+
+/// Historical `opportunity_economics.jsonl` row of an opportunity (same function live and
+/// offline, so the render of a typed frame is the row the run produced).
+pub fn opportunity_view(row: &OpportunityRow) -> Value {
+    let rec = &row.rec;
+    let (w, m) = (row.winner.as_ref(), row.market.as_ref());
+    let r = race(rec, w, m, row.slot_seen);
+    let strong = r.live_timestamp_qualified
+        || (m.is_some()
+            && !r.identity_mismatch
+            && matches!(w.map(|w| &w.identity), Some(WinnerIdentity::Unique { .. })));
+    let cost = rec.selected_costs.as_ref();
+    let member: Vec<u64> = row
+        .capital
+        .iter()
+        .copied()
+        .filter(|usd| {
+            executable(rec)
+                && cost
+                    .and_then(CandidateCostRecord::total_budget)
+                    .is_some_and(|b| b <= usd * 1_000_000)
+        })
+        .collect();
+    json!({"target":rec.account,"winner":w,"market":if strong {m} else {None},"strong_join":strong,
+        "our":rec,"race":r,"required_working_capital_usd_micro":cost.and_then(|c|c.required_working_capital_usd_micro),
+        "required_working_capital_usd":cost.and_then(|c|c.required_working_capital_usd_micro).map(|v|v as f64/1e6),
+        "required_fee_tip_reserve_usd":cost.and_then(CandidateCostRecord::fee_tip_reserve).map(|v|v as f64/1e6),
+        "required_total_budget_usd_lower_bound":cost.and_then(CandidateCostRecord::total_budget).map(|v|v as f64/1e6),
+        "required_fee_tip_reserve_usd_micro":cost.and_then(CandidateCostRecord::fee_tip_reserve),
+        "required_total_budget_usd_lower_bound_micro":cost.and_then(CandidateCostRecord::total_budget),
+        "capital_bucket_membership_usd":member,"true_competitor_submission_deadline":"UNKNOWN",
+        "stage_intervals_ns":stage_intervals(rec),
+        "stage_latency_budget_sufficient_if_fully_removed":stage_intervals(rec).into_iter().map(|(k,v)|(k,
+            v.zip(r.required_speedup_to_winner_rx_ns).map(|(stage,speed)|speed>0 && speed<=stage))).collect::<BTreeMap<_,_>>(),
+        "t_winner_rx_ns":if r.live_timestamp_qualified {m.and_then(|m|m.t_rx_ns)}else{None},
+        "t_winner_slot_first_seen_ns":if r.live_timestamp_qualified {row.slot_seen}else{None}})
+}
+
 #[derive(Default, Serialize)]
 struct Bottleneck {
     opportunity_count: u64,
@@ -897,41 +950,17 @@ impl Worker {
             .find(|m| &m.signature == signature && m.event.target.to_string() == rec.account)
             .or_else(|| self.market.iter().find(|m| &m.signature == signature))
     }
-    fn opportunity(&self, rec: &OpportunityRecord) -> Value {
+    /// The typed `ECON_OPPORTUNITY` row of one selected record (its inputs; the JSONL view is
+    /// `opportunity_view`).
+    fn opportunity(&self, rec: &OpportunityRecord) -> OpportunityRow {
         let w = self.winner_for(rec);
-        let m = self.market_for(rec, w);
-        let r = race(rec, w, m, w.and_then(|w| self.slots.get(&w.slot).copied()));
-        let strong = r.live_timestamp_qualified
-            || (m.is_some()
-                && !r.identity_mismatch
-                && matches!(w.map(|w| &w.identity), Some(WinnerIdentity::Unique { .. })));
-        let cost = rec.selected_costs.as_ref();
-        let member: Vec<u64> = self
-            .h
-            .cfg
-            .capital
-            .iter()
-            .copied()
-            .filter(|usd| {
-                executable(rec)
-                    && cost
-                        .and_then(CandidateCostRecord::total_budget)
-                        .is_some_and(|b| b <= usd * 1_000_000)
-            })
-            .collect();
-        json!({"target":rec.account,"winner":w,"market":if strong {m} else {None},"strong_join":strong,
-            "our":rec,"race":r,"required_working_capital_usd_micro":cost.and_then(|c|c.required_working_capital_usd_micro),
-            "required_working_capital_usd":cost.and_then(|c|c.required_working_capital_usd_micro).map(|v|v as f64/1e6),
-            "required_fee_tip_reserve_usd":cost.and_then(CandidateCostRecord::fee_tip_reserve).map(|v|v as f64/1e6),
-            "required_total_budget_usd_lower_bound":cost.and_then(CandidateCostRecord::total_budget).map(|v|v as f64/1e6),
-            "required_fee_tip_reserve_usd_micro":cost.and_then(CandidateCostRecord::fee_tip_reserve),
-            "required_total_budget_usd_lower_bound_micro":cost.and_then(CandidateCostRecord::total_budget),
-            "capital_bucket_membership_usd":member,"true_competitor_submission_deadline":"UNKNOWN",
-            "stage_intervals_ns":stage_intervals(rec),
-            "stage_latency_budget_sufficient_if_fully_removed":stage_intervals(rec).into_iter().map(|(k,v)|(k,
-                v.zip(r.required_speedup_to_winner_rx_ns).map(|(stage,speed)|speed>0 && speed<=stage))).collect::<BTreeMap<_,_>>(),
-            "t_winner_rx_ns":if r.live_timestamp_qualified {m.and_then(|m|m.t_rx_ns)}else{None},
-            "t_winner_slot_first_seen_ns":if r.live_timestamp_qualified {w.and_then(|w|self.slots.get(&w.slot).copied())}else{None}})
+        OpportunityRow {
+            rec: rec.clone(),
+            winner: w.cloned(),
+            market: self.market_for(rec, w).cloned(),
+            slot_seen: w.and_then(|w| self.slots.get(&w.slot).copied()),
+            capital: self.h.cfg.capital.clone(),
+        }
     }
     fn retain_shadow(&mut self, hour: usize, sequence: u64, rec: OpportunityRecord, count: bool) {
         let key = match self.winner_for(&rec) {
@@ -1565,6 +1594,22 @@ impl Worker {
             .map(|_| ())
             .map_err(|e| format!("REPORT_JOURNAL: {e}"))
     }
+    /// A typed report frame (JFI-FIX-05) with the same provenance as `append_report`.
+    fn append_typed_report<P: crate::analytics::payload::Payload>(
+        &mut self,
+        value: &P,
+    ) -> Result<(), String> {
+        let provenance = Provenance {
+            source: journal::source::ECON,
+            source_seq: self.reports.next_seq(),
+            unix_ns: u64::try_from(self.h.clock.unix_ns(self.h.clock.now_ns())).ok(),
+            ..Default::default()
+        };
+        self.reports
+            .append_typed(provenance, value)
+            .map(|_| ())
+            .map_err(|e| format!("REPORT_JOURNAL: {e}"))
+    }
     /// The legacy JSONL file of one report kind, rendered as an explicit export (no overwrite).
     fn render_rows(&self, kind: u16, name: &str) -> Result<(), String> {
         journal::export(
@@ -1692,13 +1737,13 @@ impl Worker {
             &self.h.cfg.paths().snapshot("economics_final.json"),
             &final_report,
         )?;
-        let rows: Vec<Value> = self
+        let rows: Vec<OpportunityRow> = self
             .selected()
             .into_iter()
             .map(|(_, rec)| self.opportunity(rec))
             .collect();
         for row in &rows {
-            self.append_report(kind::ECON_OPPORTUNITY, row)?;
+            self.append_typed_report(row)?;
         }
         self.render_rows(kind::ECON_OPPORTUNITY, "opportunity_economics.jsonl")?;
         self.reports

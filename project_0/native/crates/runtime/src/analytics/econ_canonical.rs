@@ -4,8 +4,10 @@ use super::*;
 use crate::analytics::record::LossReason;
 use crate::market_observer::truth::TruthEvent;
 
-#[derive(Clone, Serialize)]
-pub(super) struct Joined {
+/// One canonical market event joined with the Shadow evidence for it; also the typed
+/// `ECON_CANONICAL` payload (JFI-FIX-05). Its JSONL view is rendered by `joined_value`.
+#[derive(Clone, Debug, Serialize)]
+pub struct Joined {
     pub market: TruthEvent,
     pub target_seen: bool,
     pub target_seen_without_slot: bool,
@@ -16,6 +18,57 @@ pub(super) struct Joined {
     pub identity_status: &'static str,
     pub our: Option<OpportunityRecord>,
     pub diagnostic: Option<OpportunityRecord>,
+}
+impl crate::analytics::payload::Payload for Joined {
+    const KIND: u16 = journal::kind::ECON_CANONICAL;
+}
+/// The closed set of join identity outcomes; anything else fails to decode.
+const IDENTITY_STATUS: [&str; 6] = [
+    "NO_MATCH",
+    "AMBIGUOUS_SAME_SLOT_EVENTS",
+    "TYPE_TARGET_BANK_PAIR_CANONICAL_EVENT",
+    "PLAN_IDENTITY_UNKNOWN",
+    "MARKET_BANK_PAIR_UNKNOWN",
+    "PLAN_TYPE_OR_BANK_PAIR_MISMATCH",
+];
+/// Wire form of `Joined` (owned status string, mapped back onto the closed set).
+#[derive(Deserialize)]
+struct JoinedWire {
+    market: TruthEvent,
+    target_seen: bool,
+    target_seen_without_slot: bool,
+    health_liquidatable: Option<bool>,
+    candidates_created: Option<bool>,
+    plan_validated: Option<bool>,
+    built: Option<bool>,
+    identity_status: String,
+    our: Option<OpportunityRecord>,
+    diagnostic: Option<OpportunityRecord>,
+}
+impl<'de> Deserialize<'de> for Joined {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let w = JoinedWire::deserialize(d)?;
+        let identity_status = IDENTITY_STATUS
+            .into_iter()
+            .find(|k| *k == w.identity_status)
+            .ok_or_else(|| serde::de::Error::custom("IDENTITY_STATUS_UNKNOWN"))?;
+        Ok(Self {
+            market: w.market,
+            target_seen: w.target_seen,
+            target_seen_without_slot: w.target_seen_without_slot,
+            health_liquidatable: w.health_liquidatable,
+            candidates_created: w.candidates_created,
+            plan_validated: w.plan_validated,
+            built: w.built,
+            identity_status,
+            our: w.our,
+            diagnostic: w.diagnostic,
+        })
+    }
+}
+/// Historical `canonical_market_shadow.jsonl` row of a typed `ECON_CANONICAL` frame.
+pub fn canonical_legacy_view(row: &Joined) -> Value {
+    joined_value(row)
 }
 fn any_evidence(old: Option<bool>, new: Option<bool>) -> Option<bool> {
     match (old, new) {
@@ -179,7 +232,7 @@ impl Worker {
             )
         });
         for row in &result {
-            self.append_report(journal::kind::ECON_CANONICAL, &joined_value(row))?;
+            self.append_typed_report(row)?;
         }
         self.render_rows(
             journal::kind::ECON_CANONICAL,
@@ -440,6 +493,22 @@ mod regression {
     use super::*;
     use crate::analytics::record::MarketPlanIdentity;
     use crate::market_observer::truth::LiquidationType;
+    /// JFI-FIX-05: a typed `ECON_CANONICAL` frame round-trips losslessly and renders the
+    /// identical historical JSONL row; an identity status outside the closed set is refused.
+    #[test]
+    fn typed_canonical_row_renders_identical_view() {
+        use crate::analytics::payload::{self, Payload};
+        let mut j = row(&rec(), 7, 2);
+        j.our = Some(rec());
+        j.identity_status = "TYPE_TARGET_BANK_PAIR_CANONICAL_EVENT";
+        let bytes = payload::encode(&j).unwrap();
+        let back: Joined = payload::decode(Joined::KIND, Joined::SCHEMA, &bytes).unwrap();
+        assert_eq!(canonical_legacy_view(&back), canonical_legacy_view(&j));
+        assert_eq!(back.identity_status, j.identity_status);
+        let mut text = serde_json::to_value(&j).unwrap();
+        text["identity_status"] = "FORGED".into();
+        assert!(serde_json::from_value::<Joined>(text).is_err());
+    }
     fn row(r: &OpportunityRecord, slot: u64, index: u32) -> Joined {
         Joined {
             market: TruthEvent {

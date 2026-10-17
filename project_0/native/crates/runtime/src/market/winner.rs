@@ -30,14 +30,16 @@ use std::str::FromStr;
 
 /// Earliest successful `end_liquidation` landing for an account.
 /// The slot is a proven fact; the identity is only asserted when it is unique in that slot.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct Winner {
     pub slot: u64,
     pub identity: WinnerIdentity,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+/// Text formats keep the historical internally tagged shape (`{"kind": "UNIQUE", …}`); the
+/// binary journal stores the externally tagged form (bincode cannot decode internal tags).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(remote = "Self")]
 pub enum WinnerIdentity {
     /// Exactly one successful end_liquidation for the account in the earliest slot.
     Unique {
@@ -53,7 +55,69 @@ pub enum WinnerIdentity {
     SameSlotAmbiguous { candidates: Vec<SameSlotCandidate> },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+enum TaggedIdentity {
+    Unique {
+        signature: String,
+        receiver: String,
+        tx_version: String,
+    },
+    SameSlotAmbiguous {
+        candidates: Vec<SameSlotCandidate>,
+    },
+}
+impl From<TaggedIdentity> for WinnerIdentity {
+    fn from(t: TaggedIdentity) -> Self {
+        match t {
+            TaggedIdentity::Unique {
+                signature,
+                receiver,
+                tx_version,
+            } => Self::Unique {
+                signature,
+                receiver,
+                tx_version,
+            },
+            TaggedIdentity::SameSlotAmbiguous { candidates } => {
+                Self::SameSlotAmbiguous { candidates }
+            }
+        }
+    }
+}
+impl Serialize for WinnerIdentity {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if !s.is_human_readable() {
+            return WinnerIdentity::serialize(self, s);
+        }
+        match self.clone() {
+            Self::Unique {
+                signature,
+                receiver,
+                tx_version,
+            } => TaggedIdentity::Unique {
+                signature,
+                receiver,
+                tx_version,
+            },
+            Self::SameSlotAmbiguous { candidates } => {
+                TaggedIdentity::SameSlotAmbiguous { candidates }
+            }
+        }
+        .serialize(s)
+    }
+}
+impl<'de> serde::Deserialize<'de> for WinnerIdentity {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        if d.is_human_readable() {
+            TaggedIdentity::deserialize(d).map(Self::from)
+        } else {
+            WinnerIdentity::deserialize(d)
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct SameSlotCandidate {
     pub signature: String,
     pub receiver: String,

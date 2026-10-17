@@ -760,7 +760,9 @@ fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
             }
             kind::ECON_FINAL => last = Some(value()),
             kind::ECON_OPPORTUNITY => {
-                opportunities.push_str(&format!("{}\n", value()));
+                // Typed frame (JFI-FIX-05): its catalogued render must equal the file.
+                let v = crate::analytics::payload::legacy_view(&frame).unwrap();
+                opportunities.push_str(&format!("{v}\n"));
             }
             kind::ECON_CANONICAL | journal::MANIFEST => {}
             other => panic!("unexpected report kind {other}"),
@@ -907,7 +909,7 @@ fn backfill_preserves_chain_race_but_never_live_rx_or_speedup() {
     })
     .unwrap();
     w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
-    let output = w.opportunity(&r);
+    let output = opportunity_view(&w.opportunity(&r));
     assert_eq!(output["strong_join"], true);
     assert_eq!(output["t_winner_rx_ns"], Value::Null);
     assert_eq!(w.metrics(0, 3)["market"]["liquidation_events"], 0);
@@ -1282,5 +1284,9 @@ fn retention_is_byte_bounded_and_released_exactly() {
     })
     .unwrap();
     assert_ne!(w.retained_bytes, before);
-    assert_eq!(w.retained_bytes, accounted(&w), "ledger equals the recomputed sum");
+    assert_eq!(
+        w.retained_bytes,
+        accounted(&w),
+        "ledger equals the recomputed sum"
+    );
 }
