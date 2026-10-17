@@ -1,56 +1,105 @@
 #!/usr/bin/env python3
 """Ticket 3 A4 offline differential: the pinned Python verifier decoder against the Rust decode.
 
-Both sides read the same historical provider bytes (read-only): `getTransaction` results and the
-raw `full_slot_reconciliation` / `logsSubscribe` payloads of historical market runs. The Python
-side imports `operations.verification.audit_market_quick` unchanged and uses its `detect` and
-`decode_logs`; the Rust side is `p0-parity`. Lines are compared field by field. Offline
-qualification only; no RPC, no production path, nothing is written into runs.
+Both sides read the same provider bytes (read-only): historical `getTransaction` results, the raw
+`full_slot_reconciliation` / `logsSubscribe` payloads of historical market runs, and documented
+mutations of real historical transactions (missing meta/err, failed, undecodable error,
+truncated/missing logs, missing loaded addresses or inner instructions). The Python side imports
+`operations.verification.audit_market_quick` unchanged and decodes independently with its
+`detect` and `decode_logs`; the Rust side is `p0-parity`. Lines keep execution/log order.
+Every compared field must agree; a difference is accepted only by an explicit rule below (each
+rule states why); anything else fails. All differences are printed, none is capped.
+Offline qualification only: no RPC, no production path, nothing is written into runs.
 
-usage: parity_differential.py RUST_BINARY tx FILE... -- rows FILE...
+usage: parity_differential.py RUST_BINARY tx FILE... [-- rows FILE...] [-- mut FILE...]
 """
+import copy
 import json
 import subprocess
 import sys
+import tempfile
+from collections import Counter
 from pathlib import Path
 
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from operations.verification import audit_market_quick as a
 
+MUTATIONS = {
+    'meta_missing': lambda t: t.pop('meta'),
+    'err_missing': lambda t: t['meta'].pop('err'),
+    'failed': lambda t: t['meta'].__setitem__('err', {'InstructionError': [0, {'Custom': 1}]}),
+    'err_undecodable': lambda t: t['meta'].__setitem__('err', {'FutureVariant': {'x': 1}}),
+    'logs_truncated': lambda t: t['meta']['logMessages'].append('Log truncated'),
+    'logs_missing': lambda t: t['meta'].pop('logMessages'),
+    'loaded_missing': lambda t: t['meta'].pop('loadedAddresses'),
+    'inner_missing': lambda t: t['meta'].pop('innerInstructions'),
+}
+
 
 def opt(v):
     return '-' if v is None else str(v)
 
 
+def ordered(items):
+    seen, out = set(), []
+    for i in items:
+        if i not in seen:
+            seen.add(i)
+            out.append(i)
+    return out
+
+
 def tx_line(raw, slot):
     r = a.detect(raw, slot)
     status = 'UNKNOWN' if r['success'] is None else ('SUCCESS' if r['success'] else 'FAILED')
-    markers = sorted(f"{i['marker']}@{i['position'][0]}.{opt(i['position'][1])}"
-                     for i in r.get('instruction_evidence', []) if i.get('marker'))
-    events = sorted(f"{e['type']}:{e['target']}:{e['actor']}:{e['event_index']}:{e.get('seized_asset_native_exact') or '-'}"
-                    for e in r['events'])
+    markers = [f"{i['marker']}@{i['position'][0]}.{opt(i['position'][1])}"
+               for i in r.get('instruction_evidence', []) if i.get('marker')]
+    events = [f"{e['type']}:{e['target']}:{e['actor']}:{e['event_index']}:{e.get('seized_asset_native_exact') or '-'}"
+              for e in r['events']]
+    sigs = (raw.get('transaction') or {}).get('signatures')
     return (f"TX {r['signature']} {slot} status={status} fee={opt(r.get('fee_lamports'))} "
             f"priority={opt(r.get('priority_fee_lamports'))} version={opt(r.get('version'))} "
-            f"payer={opt(r.get('fee_payer'))} markers={','.join(markers)} events={';'.join(events)} "
-            f"class={r['classification']}")
+            f"payer={opt(r.get('fee_payer'))} sigs={len(sigs) if isinstance(sigs, list) else '-'} "
+            f"markers={','.join(markers)} events={';'.join(events)} class={r['classification']} "
+            f"reasons={','.join(ordered(r['unknown_reasons']))}")
 
 
 def logs_line(raw, signature, slot):
     v = raw.get('value') or {}
     status = 'UNKNOWN' if 'err' not in v else ('SUCCESS' if v['err'] is None else 'FAILED')
     events, errors = a.decode_logs(v.get('logs') or [])
-    ev = sorted(f"{e['type']}:{e['target']}:{e['actor']}" for e in events)
+    # Same grouping as the Rust line: receivership events, then the other classes, each in log
+    # order (a stable partition, not a sort).
+    ev = [e for e in events if e['type'] == 'RECEIVERSHIP'] + [e for e in events if e['type'] != 'RECEIVERSHIP']
     truncated = 'true' if 'LOGS_TRUNCATED' in errors else 'false'
-    return f"LOGS {signature} {slot} status={status} truncated={truncated} events={';'.join(ev)}"
+    return (f"LOGS {signature} {slot} status={status} truncated={truncated} "
+            f"events={';'.join(e['type'] + ':' + e['target'] + ':' + e['actor'] for e in ev)} "
+            f"reasons={','.join(ordered(errors))}")
 
 
-def python_lines(tx_files, row_files):
+def mutate(files, out):
+    made = []
+    for f in files:
+        base = json.loads(Path(f).read_text())
+        for name, change in MUTATIONS.items():
+            t = copy.deepcopy(base)
+            try:
+                change(t)
+            except (KeyError, AttributeError):
+                continue  # the field does not exist in this transaction
+            p = Path(out) / f"{Path(f).stem}.{name}.json"
+            p.write_text(json.dumps(t))
+            made.append((str(p), f"{Path(f).stem[:12]}…/{name}"))
+    return made
+
+
+def python_side(tx, rows):
     out = []
-    for f in tx_files:
+    for f, _ in tx:
         raw = json.loads(Path(f).read_text())
         out.append(tx_line(raw, raw.get('slot')))
-    for f in row_files:
+    for f in rows:
         for line in Path(f).read_text().splitlines():
             try:
                 row = json.loads(line)
@@ -65,10 +114,45 @@ def python_lines(tx_files, row_files):
     return out
 
 
-def fields(line):
-    head, *rest = line.split(' ', 3)
-    tokens = line.split(' ')
-    return tokens[:3], dict(t.split('=', 1) for t in tokens[3:] if '=' in t)
+def parse(line):
+    t = line.split(' ')
+    return t[:3], dict(x.split('=', 1) for x in t[3:] if '=' in x)
+
+
+def num(v):
+    return int(v) if v not in (None, '-', '') else None
+
+
+def explain(diff, r, p):
+    """Accepted differences; each names the reason and requires everything else to agree.
+    E1 applies per field (it can combine with one other rule); the others need an exact match."""
+    d, notes = set(diff), []
+    rr = r.get('reasons', '').split(',')
+    if ('priority' in d and p.get('priority') == '-' and r.get('version') == '1'
+            and None not in (num(r.get('priority')), num(r.get('fee')), num(r.get('sigs')))
+            and num(r['fee']) == num(r['priority']) + 5000 * num(r['sigs'])):
+        d.discard('priority')
+        notes.append('E1_PINNED_PYTHON_V1_PRIORITY_UNKNOWN (Rust = v1 transactionConfig = meta.fee - signature fees)')
+    unknown_both = (r.get('status') == p.get('status') == 'UNKNOWN' and r.get('class') == p.get('class') == 'UNKNOWN'
+                    and not r.get('events') and not p.get('events'))
+    if not d:
+        pass
+    elif (r.get('status') == 'UNKNOWN' and 'TX_ERROR_UNDECODABLE' in rr and p.get('status') == 'FAILED'
+            and not r.get('events') and not p.get('events') and d <= {'status', 'class'}):
+        notes.append('E2_UNDECODABLE_ERROR_IS_UNKNOWN_BY_CONTRACT (never success on either side)')
+    elif (r.get('class') == 'UNKNOWN' and 'INNER_INSTRUCTIONS_UNAVAILABLE' in rr
+            and p.get('class') == 'CLASSIFIED' and d <= {'class', 'events'}):
+        notes.append('E3_RUST_FAILS_CLOSED_WITHOUT_INNER_INSTRUCTIONS (CPI coverage unprovable)')
+    elif (p.get('class') == 'UNKNOWN' and 'LOGS_TRUNCATED' in p.get('reasons', '').split(',')
+            and r.get('class') == 'CLASSIFIED' and d == {'class'}):
+        notes.append('E4_TRUNCATED_LOGS_QUALIFIED_BY_INSTRUCTIONS (identical events; r6 instruction parity)')
+    elif (unknown_both and ('TX_META_MISSING' in rr or 'TX_META_STATUS_MISSING' in rr)
+            and d <= {'fee', 'priority', 'payer', 'markers', 'version'}
+            and all(p.get(k) in ('-', '') for k in d)):
+        notes.append('E5_STATUS_UNKNOWN_WITH_MESSAGE_FACTS (Python stops before meta/message facts; status, class and events agree)')
+    else:
+        return None
+    return ' + '.join(notes)
 
 
 def main(argv):
@@ -76,34 +160,51 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     binary, rest = argv[0], argv[1:]
-    split = rest.index('--') if '--' in rest else len(rest)
-    tx_files, row_files = rest[1:split], rest[split + 2:] if split < len(rest) else []
-    rust = subprocess.run([binary, 'tx', *tx_files], capture_output=True, text=True, check=True).stdout.splitlines()
-    if row_files:
-        rust += subprocess.run([binary, 'rows', *row_files], capture_output=True, text=True, check=True).stdout.splitlines()
-    py = python_lines(tx_files, row_files)
+    sections, current = {'tx': [], 'rows': [], 'mut': []}, None
+    for x in rest:
+        if x in sections:
+            current = x
+        elif x != '--':
+            sections[current].append(x)
+    with tempfile.TemporaryDirectory(prefix='p0-parity-') as tmp:
+        tx = [(f, Path(f).stem[:12] + '…') for f in sections['tx']] + mutate(sections['mut'], tmp)
+        rust = subprocess.run([binary, 'tx', *[f for f, _ in tx]], capture_output=True, text=True, check=True).stdout.splitlines()
+        if sections['rows']:
+            rust += subprocess.run([binary, 'rows', *sections['rows']], capture_output=True, text=True, check=True).stdout.splitlines()
+        py = python_side(tx, sections['rows'])
+    labels = [l for _, l in tx] + ['rows'] * (len(py) - len(tx))
     if len(rust) != len(py):
         print(f'LINE_COUNT_MISMATCH rust={len(rust)} python={len(py)}')
         return 1
-    by_field, mismatches, kinds = {}, [], {}
-    for r, p in zip(rust, py):
-        (rk, pk) = (r.split(' ')[0], p.split(' ')[0])
-        kinds[rk] = kinds.get(rk, 0) + 1
-        (rid, rf), (pid, pf) = fields(r), fields(p)
-        diff = sorted(k for k in set(rf) | set(pf) if rf.get(k) != pf.get(k))
+    kinds, explained, unexplained, by_field = Counter(), Counter(), [], Counter()
+    for label, r_line, p_line in zip(labels, rust, py):
+        kinds[r_line.split(' ')[0]] += 1
+        (rid, r), (pid, p) = parse(r_line), parse(p_line)
+        diff = sorted(k for k in set(r) | set(p) if k != 'reasons' and r.get(k) != p.get(k))
         if rid != pid:
             diff.insert(0, 'identity')
+        if not diff:
+            continue
         for k in diff:
-            by_field[k] = by_field.get(k, 0) + 1
-        if diff:
-            mismatches.append((diff, r, p))
-    print(f'compared={len(rust)} kinds={kinds} matched={len(rust) - len(mismatches)} mismatched={len(mismatches)}')
-    print('mismatches_by_field=' + ','.join(f'{k}:{v}' for k, v in sorted(by_field.items())))
-    for diff, r, p in mismatches[:60]:
-        print('DIFF ' + ','.join(diff))
-        print('  rust   ' + r)
-        print('  python ' + p)
-    return 0 if not mismatches else 1
+            by_field[k] += 1
+        why = explain(diff, r, p) if rid == pid else None
+        if why:
+            explained[why] += 1
+            print(f'EXPLAINED {label} {",".join(diff)} :: {why}')
+        else:
+            unexplained.append((label, diff, r_line, p_line))
+        print('  rust   ' + r_line)
+        print('  python ' + p_line)
+    print(f'compared={len(rust)} kinds={dict(kinds)} identical={len(rust) - sum(explained.values()) - len(unexplained)} '
+          f'explained={sum(explained.values())} unexplained={len(unexplained)}')
+    print('differences_by_field=' + ','.join(f'{k}:{v}' for k, v in sorted(by_field.items())))
+    for why, n in sorted(explained.items()):
+        print(f'rule {n:5d} {why}')
+    for label, diff, r_line, p_line in unexplained:
+        print(f'UNEXPLAINED {label} {",".join(diff)}')
+        print('  rust   ' + r_line)
+        print('  python ' + p_line)
+    return 0 if not unexplained else 1
 
 
 if __name__ == '__main__':

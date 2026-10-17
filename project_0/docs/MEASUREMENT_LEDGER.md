@@ -5535,3 +5535,15 @@ Base `c44ad93`. Evidence: [A4_PARITY_20261017](evidence/A4_PARITY_20261017/READM
 - Not covered historically (unit/synthetic only, not counted): legacy transactions, absent `meta`/`err`, CLASSIC, FORCED_DELEVERAGE, BANKRUPTCY_SETTLEMENT, the markers `lending_account_liquidate`, `start_deleverage`, `end_deleverage`, `lending_pool_handle_bankruptcy`, CPI positions. Shared boundary: one provider; the Anchor discriminator names; new typed captures carry no provider JSON, so this parity is historical only.
 
 Tests: `parity::real_v1_receivership_line` 1/1; differential run as above (exit 1 because of the 30 documented priority-only differences).
+
+## 2026-10-17 — Ticket 3 A4 completed in scope: order-preserving differential, pinned discriminators, mutation vectors (LOCAL_PASS in scope; class coverage BLOCKED)
+
+Base `25a4dff`. Evidence: [A4_PARITY_20261017](evidence/A4_PARITY_20261017/README.md) (replaces the first run's report).
+
+- Markers compared in execution order with top-level/CPI positions and events in log order (no sorting); signature count and both sides' reason codes on every line; undecodable inputs keep an aligned line with their reason.
+- All six discriminators bound to pinned sources: Anchor rule of the pinned entrypoints and, for the four start/end markers incl. `start_deleverage`, `marginfi_type_crate::constants::ix_discriminators` (pin `33c67987`).
+- 48 mutations of the six real transactions (missing meta/err, failed, undecodable error, truncated/missing logs, missing loaded addresses/inner instructions), generated from the raw bytes.
+- 2,917 compared: 2,848 identical, 69 explained by five explicit rules (E1 v1 priority = meta.fee − signature fees; E2 undecodable error UNKNOWN by contract vs FAILED; E3 Rust fail-closed without inner instructions; E4 truncated logs with identical events; E5 missing meta/err with equal status/class/events), **0 unexplained**; full report kept, nothing capped.
+- BLOCKED: `A4_NO_HISTORICAL_RAW_SAMPLE_CLASSIC_DELEVERAGE_BANKRUPTCY_CPI` — no offline raw payload of those classes, the four other markers in transactions, CPI positions or legacy; needs a separately permitted archive read of known signatures.
+
+Tests: `parity::real_v1_receivership_line`, `parity::marker_discriminators_match_pinned_sources` 2/2 (`crate_health`); differential exit 0.

@@ -4,7 +4,7 @@
 //! `p0-parity tx FILE...`    `getTransaction` results (e.g. docs/evidence/AUDIT_20261005/*.json)
 //! `p0-parity rows FILE...`  historical market `transactions.jsonl`: `full_slot_reconciliation`
 //!                           block entries and `logsSubscribe` notifications (raw provider bytes)
-use darkbot_runner::market_observer::parity::{logs_line, transaction_line};
+use darkbot_runner::market_observer::parity::{decode_error_line, logs_line, transaction_line};
 use solana_sdk::pubkey::Pubkey;
 use std::io::BufRead;
 use std::str::FromStr;
@@ -21,7 +21,14 @@ fn main() {
                             .map_err(|e| format!("{f}: {e}"))?;
                     match darkbot_solana::chain::decode_transaction(&raw) {
                         Ok(tx) => println!("{}", transaction_line(&tx, &program)),
-                        Err(e) => println!("DECODE_ERROR {f} {}", e.0),
+                        Err(e) => println!(
+                            "{}",
+                            decode_error_line(
+                                raw["transaction"]["signatures"][0].as_str().unwrap_or("-"),
+                                raw["slot"].as_u64().unwrap_or(0),
+                                e.0
+                            )
+                        ),
                     }
                 }
                 Ok(())
@@ -47,13 +54,20 @@ fn main() {
                                     None,
                                 ) {
                                     Ok(tx) => println!("{}", transaction_line(&tx, &program)),
-                                    Err(e) => println!("DECODE_ERROR {} {}", row["signature"], e.0),
+                                    Err(e) => println!(
+                                        "{}",
+                                        decode_error_line(row["signature"].as_str().unwrap_or("-"), slot, e.0)
+                                    ),
                                 }
                             }
                             Some("logsSubscribe") => {
                                 match darkbot_solana::chain::decode_logs_notification(&row["raw"]) {
                                     Ok(l) => println!("{}", logs_line(&l, &program)),
-                                    Err(e) => println!("DECODE_ERROR {} {}", row["signature"], e.0),
+                                    Err(e) => println!(
+                                        "LOGS {} {slot} status=UNKNOWN truncated=- events= reasons={}",
+                                        row["signature"].as_str().unwrap_or("-"),
+                                        e.0
+                                    ),
                                 }
                             }
                             _ => {}
