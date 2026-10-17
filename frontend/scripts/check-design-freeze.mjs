@@ -13,7 +13,7 @@ if (entries.length !== 3) throw Error("Freeze manifest must contain exactly 3 fi
 let failures = 0;
 const seen = new Set();
 for (const entry of entries) {
-  const match = /^([a-f0-9]{64})  (.+)$/.exec(entry);
+  const match = /^([a-f0-9]{64}) {2}(.+)$/.exec(entry);
   if (!match) throw Error("Invalid manifest line: " + entry);
   const [, expected, relative] = match;
   if (seen.has(relative)) throw Error("Duplicate freeze path: " + relative);
