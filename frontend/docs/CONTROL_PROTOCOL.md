@@ -33,6 +33,7 @@ p0ctl optimize --run RUN_ID --profile-space offline  # erst FEUI-07
 | DTO | Felder und Invarianten |
 |---|---|
 | `ControlCapabilities` | `schema_version,source_sha,binary_hash,provider_qualification,features,parameter_descriptors` – tatsächliche Rust-Descriptors ausgeben; UI-Defaults nicht kopieren |
+| `PortfolioFinancialSnapshot` (SOLL) | `snapshot_id,as_of_slot,as_of_unix_ns,price_sources,valuation_status,pnl_status,portfolio_total_capital_usd_micro,portfolio_available_capital_usd_micro,portfolio_reserved_capital_usd_micro,realized_net_pnl_usd_micro,withdrawable_profit_usd_micro,transferred_to_treasury_usd_micro,wallet_asset_balances` – gemeinsamer **read-only** Snapshot für Overview/Liquidator/Wallets, kein sendbarer Geldbetrag | 
 | `EffectiveRunConfig` | `profile,duration_seconds,capture_source,verification_mode,limits,sources,restart_required,config_hash` – `Resolved::parse` und `MeasurementPlan` autoritativ |
 | `PreflightResult` | `duration_s,capacity_verdict,checks,rate_basis,verify_budget,provider_verdict,start_allowed,reasons` – vorhandenes `CapacityReport` wiederverwenden |
 | `RunIdentity` | `capture_run_id,manifest_digest,source_sha,binary_sha,plan_version,start_utc` – vor dem Capture vergeben, niemals neu berechnen beim Report |
@@ -94,6 +95,10 @@ Verbindlicher Detailvertrag: [STARTUP_BACKTEST_OPTIMIZATION.md](STARTUP_BACKTEST
 - Neue Endpunkte SOLL: `/api/v1/project0/boot-audits`, `/api/v1/project0/diagnostics`, `/api/v1/project0/runs/:runId/segments`, `/api/v1/project0/backtest-jobs`, `/api/v1/project0/profiles`. Keine vorhandenen Backendrouten.
 - `AnalyzeJob → BacktestJob → Report → OptimizationJob → StrategyProfileCandidate` als unabhängige idempotente, limitierte **serverseitige** Jobs auf immutable `.p0j`-Segmentroot-/Verification-IDs. Historischer Replay as-of ohne Zukunftsdaten; UNPROVEN/UNKNOWN nicht als profitable Echtgeld-Landung zählen. Kein `optimize`-Befehl darf eine Strategie live ändern.
 - Mainnet-Provider-/Boot-/4h-/Infinite-Freigabe, FREE_ONLY, JFI und FE-Sicherheit bleiben auch bei einem Klick wirksam.
+
+### Graphite-V5-/Portfolio-API-Zusatzvertrag
+
+[GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAPHITE_V5_UI_FINANCE_CONTRACT.md) spezifiziert die akzeptierte fünfteilige englische Graphite-Oberfläche und die gemeinsame Finanz-KPI-Source. **Neue Route SOLL:** `GET /api/v1/project0/portfolio` oder ein entsprechend versionierter `/wallets/summary`-Snapshot-Adapter (endgültiger Pfad durch Implementierung fixieren), **nicht** unabhängige Echtzeit-Calculators in beiden Tabs. Gleiche `snapshot_id`/same as-of-Pricing/Finality für `Realized net PnL · USD` und `Total capital · USD` in Overview und Wallets; `UNKNOWN` bei FE-07-/Oracle-/Wallet-/Liability-Lücken. Backend-eigene quantile LatencySeries (RPC, RX→Decision, Stream Age, spätere Submission) mit sample_count/window. Keine Value-Bearing-Freigabe durch read-only Portfolio-DTO.
 
 ### Wallet-/Treasury-Control-Vertrag FEUI-10
 
