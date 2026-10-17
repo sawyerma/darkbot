@@ -13,6 +13,14 @@ Single React frontend for all DarkBot backend domains.
 
 The browser is not a second trading engine. Protocol decoding, health, economics, signing and execution stay in the backend. REST supplies snapshots; WebSocket supplies deltas/events.
 
+## Project_0 frontend implementation plan
+
+- [Frontend Phasenplan FEUI-00…09](docs/FRONTEND_PHASENPLAN.md) – phases for p0ctl, Control Center, six liquidation markers, raw market explorer, Profitability Lab and acceptance gates.
+- [Project_0 code and variable map](docs/PROJECT_0_CODE_MAP.md) – verified Rust/Python/TS source symbols, CLI flags, environment variables, defaults, journal and economics fields.
+- [Project 0 Control protocol](docs/CONTROL_PROTOCOL.md) – proposed lifecycle, typed DTOs, control API, security and CLI/GUI parity tests.
+
+These are **SOLL** architecture and implementation contracts, not evidence that `p0ctl`, the control API or the optimizer is already implemented. Authoritative project gates remain [Project_0 PHASENPLAN](../project_0/docs/PHASENPLAN.md) and [STATUS](../project_0/docs/STATUS.md).
+
 ## Development
 
 ```bash
