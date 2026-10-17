@@ -1,10 +1,10 @@
-# DarkBot Frontend – Verbindlicher Phasenplan v1.0
+# DarkBot Frontend – Verbindlicher Phasenplan v1.1
 
 **Stand:** 2026-10-17. **Status:** SOLL / Implementierung offen. **Repo:** sawyerma/darkbot.
 **Verifizierte Code-Basis:** Project_0 `0e0544d`; danach ist eine ausschließlich BSC-bezogene Änderung `ee94150` auf main erschienen. Für die Umsetzung jeweils aktuellen HEAD prüfen.
 
 **Autorität:** [Project_0 PHASENPLAN](../../project_0/docs/PHASENPLAN.md), [STATUS](../../project_0/docs/STATUS.md), [MEASUREMENT_LEDGER](../../project_0/docs/MEASUREMENT_LEDGER.md). Dieser Frontend-Plan ergänzt FE-00…FE-07, C0-E1, PERSIST, JFI, SK-01…09 und alle FREE_ONLY-/LIVE-Gates; er ersetzt sie nicht.
-**Nachschlagewerke:** [verifizierte Variablen](PROJECT_0_CODE_MAP.md) · [geplanter Control-/API-Vertrag](CONTROL_PROTOCOL.md).
+**Nachschlagewerke:** [verifizierte Variablen](PROJECT_0_CODE_MAP.md) · [geplanter Control-/API-Vertrag](CONTROL_PROTOCOL.md) · **[verbindliche Boot-/Unbounded-/Backtest-/Optimizer-Spezifikation](STARTUP_BACKTEST_OPTIMIZATION.md)**. Die v1.1-Erweiterung ersetzt feste Laufzeit-Presets durch einen typisierten, frei konfigurierbaren Horizont.
 
 ## 0. Zielarchitektur und Entscheidung
 
@@ -62,7 +62,8 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 - Bestehende `scripts/test.sh`, `capture.sh`, `verify.sh`, `report.sh`, `orchestration/startup.rs`, `runtime_config.rs`, `MeasurementPlan` wiederverwenden.
 - Neue `p0ctl`-Kommandos: `doctor`, `preflight`, `run start`, `run status`, `run stop`, `runs list`, `logs`, `verify`, `report`, später `optimize`.
 - Ein aktiver Run, einmaliges Run-ID-/Manifest-Commit vor Capture, exklusiver Writer-/Owner-Lock, PID und Startidentität, Kindprozess-Reaping, sicherer Shutdown mit Admission-Close, Drain, Sync, Seal, Exit-/Crash-Evidence.
-- WSS-ACK **und** verwertbaren Slot-/Appframe-Fortschritt als Readiness-Bedingung. Keinen zurückliegenden Live-Empfang durch historischen Replay „reparieren“.
+- **Zwingender Start-Audit vor jedem neuen externen Run:** Offline-Selftest plus ausdrücklich erlaubte read-only Chain-/Provider-Probes (Solana-Genesis-/RPC-/WSS-Identität, Marginfi-/Deployment-/ProgramData-Fingerprint sofern abrufbar, Bank-/Group-/Oracle-/Mint-/Owner-Beziehungen, Program-ID/Discriminator-/ABI-Pins, erreichbare Free-Provider und Quotas, Wallet-Public-Identity/Permissions, Host-Storage/Writer/Memory, Binär-/Konfigurations-Hashes). Erwartete Identitäten gegen aktuelle Quelle prüfen; Drift, fehlende/umgebogene Adresse und falscher Cluster führen zu `IDENTITY_MISMATCH/QUARANTINED/BLOCKED` statt stiller neuer Adresse. Keine selbsttätige Re-Pin-/Signer-/LIVE-Freigabe. Pro Check reale Quelle, Slot, Timestamp und Resultat journalen, periodisch erneut validieren. Details in [STARTUP_BACKTEST_OPTIMIZATION](STARTUP_BACKTEST_OPTIMIZATION.md).
+- WSS-ACK **und** verwertbaren Slot-/Appframe-Fortschritt als Readiness-Bedingung. Keinen zurückliegenden Live-Empfang durch historischen Replay „reparieren`.
 - `p0ctl` darf ohne GUI mehrere Stunden laufen; Browser-/HTTP-/WS-Abstürze beeinflussen weder Ingress noch Engine.
 - **Abnahme:** Doppelstart/Doppelwriter verweigert, Stop idempotent, SIGINT/SIGTERM/Crash/Restart fail-closed, exakt eine effektive Runtime-Konfiguration, kein LIVE per Control.
 
@@ -70,14 +71,15 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 
 - Bestehende `storage/preflight.rs` / `p0-capacity.rs` (WIP) in den Launcher integrieren und alte pauschale Python-60GiB-Heuristik ablösen.
 - `StorageStatus`, `StorageMetrics`, `CapacityReport`: gemessene durchschnittliche/Burst-Raten, nachhaltige Writer-Leistung, SSD Reserve, RAM/Swap/RSS, Queue, Stall, CPU und geschätzte Erschöpfungszeit.
-- 30s/60s/10m-Kalibrierung von längeren 1h/4h/24h/48h-Profilen trennen. Fehlende Basis: `CAPACITY_UNVERIFIED` statt stilles Startsollen.
+- **Freie Laufzeit:** `RunHorizon::Fixed(duration_seconds)` für beliebige positiv validierte Sekunden-/Minuten-/Stunden-/Tagesdauern und `RunHorizon::UntilStopped` ohne künstliches Enddatum. Die bisherigen 30s/60s/10m/1h/4h/24h/48h sind ausschließlich UI-Schnellwahlen; der native `MeasurementPlan` hat bislang **nur** endliche s/m/h-Dauern. Infinite darf **nicht** als `u64::MAX`-Sekunden oder Platzhalter-48h implementiert werden. Details/Gates in [STARTUP_BACKTEST_OPTIMIZATION](STARTUP_BACKTEST_OPTIMIZATION.md).
+- 30s/60s/10m-Kalibrierung von beliebigen längeren Fixed-/UntilStopped-Läufen trennen. Fehlende Basis: `CAPACITY_UNVERIFIED` statt stilles Startsollen. Für `UntilStopped` Start nur bei qualifizierter rollierender Mindest-Runway und laufendem Auto-Recheck; kein unbegrenztes SSD-/Provider-/RAM-Versprechen.
 - Provider-Status/quotas/HTTP429, `getBlock`-Archiv, Slot-/LUT-Coverage, WSS-Liveness und Strict-Call-/Walltimebudget vor Start prüfen.
 - SK-07 hashverkettete `.p0j`-Segmente, Crash-/Truncation-/Reader-Recovery; SK-03 noch offene RAM-Collections in Econ-/Winner-Worker berücksichtigen.
 - **Abnahme:** 600s gezielter technischer Smoke, Fehlerfälle (Disk-full, 429, WSS-gap, Overload), Provider-/Kapazitätsbeweis; 4h erst nach Userfreigabe.
 
 ### FEUI-03 – Echtes Project_0 Control Center
 
-- Bedienung für `30s, 60s, 10m, 1h, 4h, 24h, 48h` via **einem** `MeasurementPlan::parse_duration`. Keine eigenen Snapshot- oder Timebox-Rechnungen im React.
+- **Freies Laufzeit-Eingabefeld mit Einheit** (`s/m/h/d`, später kompatibel erweitern) und separatem explizitem Modus **`Bis manuell gestoppt`**. `30s/60s/10m/1h/4h/24h/48h` nur vorbesetzende Shortcuts; `RunHorizon` als Backend-Owner, keine statisch unbegrenzte Scheinzahl. Bestehendes `MeasurementPlan::parse_duration` validiert nur endliche s/m/h-Dauern und wird versioniert migriert; UI darf nicht eigenständig Grenzen/Snapshot-Zeitpunkte berechnen.
 - Quelle `logs|transactions`, Verification `off|index|strict` (vorhandenes `crosscheck` sofern separat qualifiziert), Profile `smoke|standard|performance|custom`.
 - Sämtliche konfigurierbaren Rust-`Limits` anhand `runtime_config.rs::descriptors()` anzeigen: Einheit, Default, Min/Max, ENV/Quelle, `restart_required`. Keine kopierten Werte als UI-Defaults.
 - Statusachsen: Run-ID, Walltime vs tatsächlich covered, READY/WSS/Slots, Gaps/429, Writer-Lag, RAM/SSD, Verifier-Cursor, Shadow-/Economics-UNKNOWN, Safety.
@@ -110,6 +112,7 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 
 ### FEUI-07 – Profitability Lab V1: reproduzierbare Offline-Optimierung
 
+- **Ein-Klick-Kette:** `Capture-Run auswählen → Evidence-Qualität anzeigen → Check/Verify → Backtest (zeitkonsistenter Replay) → automatisch Report → Optimieren → Baseline/Kandidat vergleichen → versioniertes Offline-Profil exportieren`. Auf abgeschlossenen `Run`s oder unveränderlichen **versiegelten Segment-Snapshots** eines laufenden `UntilStopped`-Runs; keine erneute Raw-Aufnahme nötig, kein Browser-Compute. Detailvertrag [STARTUP_BACKTEST_OPTIMIZATION](STARTUP_BACKTEST_OPTIMIZATION.md).
 - Ausschließlich mit versiegelten realen `.p0j`-Runs und bestehender Rust-Economics: deterministische Parameter-Sweeps für Kapital, Mindest-Nettoedge, Funding, Route/Exit, Gebühren/Tip, Candidate-Admission und Timing-Sensitivität.
 - Baseline und Kandidat auf identischem historischem Datensatz/Code-/Decoder-/Protokoll-/Profil-Hash vergleichen, UNKNOWN statt erfundener Gegenfakten.
 - Zeitblock-/Cluster-Bootstrap, Walk-forward und separater Holdout; mögliche Marktregime, Unsicherheitsintervalle, Nicht-Realisierbares und `INSUFFICIENT_SAMPLE` anzeigen. Eine einzelne 4h-Probe garantiert keine Profitsteigerung.
@@ -128,7 +131,22 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 - Optional macOS `launchd`, aber kein zusätzlicher Redis- oder dauerhafter Paid-Dienst notwendig.
 - **Abnahme:** UI-Disconnect beeinflusst keinen Run; aus UI ist keine Geldtransaktion möglich; CI benötigt keine privaten Providerkeys.
 
-## 3. Umsetzungsgates und Reihenfolge
+
+## 3. Erweiterter, verpflichtender Betriebs- und Analyseablauf v1.1
+
+Die ausführliche Spezifikation steht in [STARTUP_BACKTEST_OPTIMIZATION.md](STARTUP_BACKTEST_OPTIMIZATION.md). Die folgenden Gates sind **verbindliche Ergänzungen** zu FEUI-01/02/03/05/06/07/08/09 und dürfen nicht als gesonderte, nachrangige Fantasiephase behandelt werden:
+
+| Gate | Implementierungspflicht | Positive Abnahme |
+|---|---|---|
+| **F-G10 BOOT INTEGRITY** | Vor jedem Capture alle kritischen Build-/Chain-/Program-/Bank-/Oracle-/Provider-/Host-/Safety-Abhängigkeiten mit erwarteter Identität prüfen; Hardfail bei Mismatch, Unknown für unprüfbare optionale Checks | Reproduzierbare Audit-Evidence, kein Start trotz Address-/Bytecode-/ProgramData-Drift |
+| **F-G11 UNBOUNDED** | Versioniertes `RunHorizon::Fixed` oder `UntilStopped`, rollierende Fenster, Journalsegmente, Retention/Storage/Provider-Watchdogs, graceful stop | 30s/custom 75m/custom 7d/unbounded, ns-Overflow verhindert, 4 Quartale für finite Bestandsläufe kompatibel |
+| **F-G12 ANALYSIS PIPELINE** | Paginierter Run-Browser; as-of historischen Replay auf gespeicherten Beweisen; Verify/Backtest/Report/Optimize als getrennte serverseitige Jobs, alle mit festen Daten-/Versionsidentitäten | Klickkette vollständig, idempotent, Close/Reopen des Browsers ohne Daten-/Jobverlust |
+| **F-G13 PROOF-/PNL DISPLAY** | Deckung und UNKNOWN getrennt von Gross-Edge, Shadow-Edge, Race-Sensitivität und **tatsächlich realisiertem** PnL; grafische Drilldowns auf signierte Evidence | Kein hypothetischer Gewinn in Realized-KPI, keine erfundene Win-Wahrscheinlichkeit |
+| **F-G14 OPTIMIZE** | Konfiguriertes Budget/Parameterraum, exakter Backend-Sweep, Time-Block-Holdout, Confidence/UNKNOWN, Baseline-Vergleich, profile candidate only | Derselbe Input → gleiches Ranking/Report-Hash, kein Lookahead, kein automatisches LIVE-Profil |
+
+**Wichtig:** Ein Boot-Audit stellt **Identität/Erreichbarkeit zum Prüfzeitpunkt** fest, nicht zukünftige Quotenfreiheit oder garantiert lückenlose WSS-Lieferung. Langläufe überwachen diese Eigenschaften erneut und wechseln bei kritischer Drift auf `DEGRADED`/Fail-Closed, ohne Daten zu verwerfen oder unbemerkt andere Gegenparteien anzusprechen. `UntilStopped` bedeutet **keine planmäßige Zeitabschaltung**, jedoch zwingend endliche RAM-/Storage-/Provider-Sicherheitsbudgets, Segmentrotation, automatische Kapazitätsprüfungen und transparenten Stop/Halt bei nicht behebbarem Fehler.
+
+## 4. Umsetzungsgates und Reihenfolge
 
 | Priorität | Tickets | Blockiert nächsten 4h? |
 |---|---|---|
@@ -141,6 +159,6 @@ project_0/native/crates/runtime/src/bin/p0ctl.rs    # NEU, keine zweite Engine
 
 **Abnahmekriterien:** (1) single Owner und idempotenter Stop; (2) gleiche CLI-/UI-Parameter/Units/Defaults; (3) sechs Marker + vier Klassen + vier Related, Hash-invariante Filter; (4) SK-06/07 + unfiltered Journal und Provider/Strict; (5) STATUS/UNKNOWN/Provenienz korrekt; (6) exakte Backend-Economics; (7) Offline-Holdout ohne Zukunftsinformation; (8) keine LIVE-/Paid-/Submission-Umgehung; (9) reproduzierbare Tests und Ledger.
 
-## 4. Claude-Ausführungsregel
+## 5. Claude-Ausführungsregel
 
-Vor jeder Phase aktuellen HEAD, `STATUS.md`, `PHASENPLAN.md`, `MEASUREMENT_LEDGER.md`, diese drei Frontend-Dokumente und die tatsächlichen Dateien lesen. Nur getestete vollständig abgeschlossene Tickets als LOCAL_PASS markieren. Nie eine neue Klasse/Variable/REST-Route als bereits implementiert behandeln, solange sie nur im SOLL-Plan steht. Kein Code unter `bsc/` oder fremden Projektteilen ändern. Keine unautorisierten mehrstündigen Mainnet-/Paid-/LIVE-/Submission-Aktionen. FE-First-Profit-Priorität bleibt separat bindend.
+Vor jeder Phase aktuellen HEAD, `STATUS.md`, `PHASENPLAN.md`, `MEASUREMENT_LEDGER.md`, die vier Frontend-Dokumente einschließlich `STARTUP_BACKTEST_OPTIMIZATION.md` und die tatsächlichen Dateien lesen. Nur getestete vollständig abgeschlossene Tickets als LOCAL_PASS markieren. Nie eine neue Klasse/Variable/REST-Route als bereits implementiert behandeln, solange sie nur im SOLL-Plan steht. Kein Code unter `bsc/` oder fremden Projektteilen ändern. Keine unautorisierten mehrstündigen Mainnet-/Paid-/LIVE-/Submission-Aktionen. FE-First-Profit-Priorität bleibt separat bindend.
