@@ -16,6 +16,10 @@ fn directory(name: &str) -> PathBuf {
     std::fs::create_dir(&path).unwrap();
     path
 }
+fn sock(tag: &str) -> PathBuf {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    PathBuf::from(format!("/tmp/p0r-{}-{tag}-{:x}.sock", std::process::id(), stamp & 0xffff_ffff))
+}
 fn next(stream: &mut UnixStream) -> EngineFrame {
     let mut prefix = [0; 4];
     stream.read_exact(&mut prefix).unwrap();
@@ -40,7 +44,7 @@ fn expect_state(stream: &mut UnixStream) -> darkbot_p0_reporter::proto::control:
 fn handshake_state_heartbeat_permissions_and_reconnect_seq() {
     let dir = directory("wire");
     let tap = StatusTap::new();
-    let mut cfg = ReporterConfig::new(dir.join("project0.sock"), dir.join("generation"), "run-TEST_ONLY".into());
+    let mut cfg = ReporterConfig::new(sock("wire"), dir.join("generation"), "run-TEST_ONLY".into());
     cfg.heartbeat = Duration::from_millis(150);
     let handle = start(cfg.clone(), tap.clone()).unwrap();
     assert_eq!(std::fs::metadata(&cfg.socket_path).unwrap().permissions().mode() & 0o777, 0o600);
@@ -87,7 +91,7 @@ fn handshake_state_heartbeat_permissions_and_reconnect_seq() {
 fn slow_and_disconnected_client_do_not_block_capture_publisher() {
     let dir = directory("nonblocking");
     let tap = StatusTap::new();
-    let mut cfg = ReporterConfig::new(dir.join("project0.sock"), dir.join("generation"), "run-TEST_ONLY".into());
+    let mut cfg = ReporterConfig::new(sock("slow"), dir.join("generation"), "run-TEST_ONLY".into());
     cfg.heartbeat = Duration::from_millis(100);
     cfg.write_timeout = Duration::from_millis(200);
     let handle = start(cfg.clone(), tap.clone()).unwrap();

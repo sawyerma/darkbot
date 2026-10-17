@@ -89,6 +89,11 @@ pub fn heartbeat_frame(id: u64) -> Vec<u8> {
     frame(engine_frame::Msg::Heartbeat(Heartbeat { heartbeat_id: id, server_time_unix_ns: now_ns(), state_watermarks: vec![] }))
 }
 pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, String> {
+    use std::os::unix::ffi::OsStrExt;
+    let n = cfg.socket_path.as_os_str().as_bytes().len();
+    if n >= 100 {
+        return Err(format!("reporter socket path too long ({n} bytes, macOS limit ~104): {}", cfg.socket_path.display()));
+    }
     let lock_path = cfg.generation_file.with_extension("generation.lock");
     let lock = OpenOptions::new().write(true).create_new(true).open(&lock_path)
         .map_err(|e| format!("reporter generation already owned or inaccessible: {e}"))?;
