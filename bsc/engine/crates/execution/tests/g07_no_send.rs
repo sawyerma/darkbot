@@ -185,9 +185,9 @@ fn bundle_expiry_comes_from_the_next_block_read_after_the_transport_prewarm() {
     assert!(!SOURCE.contains("\"maxBlockNumber\""));
     let club48 = function_body(BIN_SOURCES[1], "pub(crate) fn club48_bundle_body(");
     let blockrazor = function_body(BIN_SOURCES[1], "pub(crate) fn blockrazor_bundle_body(");
-    assert!(club48.contains("\"maxBlockNumber\":max_block"));
-    assert!(club48.contains("\"maxTimestamp\":max_timestamp"));
-    assert!(blockrazor.contains("\"maxBlockNumber\":max_block"));
+    assert!(club48.contains("\"maxBlockNumber\":{max_block}"));
+    assert!(club48.contains("\"maxTimestamp\":{max_timestamp}"));
+    assert!(blockrazor.contains("\"maxBlockNumber\":{max_block}"));
     assert!(!blockrazor.contains("maxTimestamp"));
 }
 
@@ -232,14 +232,14 @@ fn nothing_after_the_release_can_panic() {
         "pub(crate) fn parse_http_response(",
         "pub(crate) fn decode_chunked_body(",
         "pub(crate) fn panicked_provider_result(",
-        "pub(crate) fn provider_json(",
+        "pub(crate) fn provider_record(",
     ] {
         let body = function_body(builder, signature);
         for forbidden in PANICKING {
             assert!(!body.contains(forbidden), "{forbidden} in {signature}");
         }
     }
-    let rpc = function_body(BIN_SOURCES[2], "pub(crate) fn rpc(");
+    let rpc = function_body(BIN_SOURCES[2], "fn rpc(");
     for forbidden in PANICKING {
         assert!(!rpc.contains(forbidden), "{forbidden} in rpc");
     }
@@ -281,8 +281,8 @@ fn nothing_after_the_release_can_panic() {
         assert!(!source.contains("set_len("), "evidence truncated in place");
     }
     // G0.7 never claims the canonical window reconciled; G0.8 does that.
-    assert!(SOURCE.contains("\"canonical_t0_plus_15s_reconciled_in_g08\":false"));
-    assert!(!SOURCE.contains("\"canonical_t0_plus_15s_reconciled_in_g08\":true"));
+    assert!(SOURCE.contains("evidence::CANONICAL_WINDOW_RECONCILED_IN_G08, false"));
+    assert!(!SOURCE.contains("evidence::CANONICAL_WINDOW_RECONCILED_IN_G08, true"));
 }
 
 #[test]
@@ -314,5 +314,5 @@ fn child_processes_are_spawned_only_with_a_cleared_environment() {
     let clear = chain_reads.find("cmd.env_clear();").expect("env_clear");
     assert!(helper < spawn && spawn < clear);
     assert!(chain_reads.contains("child_command(\"curl\")"));
-    assert!(chain_reads.contains("child_command(\"node\")"));
+    assert!(!chain_reads.contains("child_command(\"node\")"));
 }

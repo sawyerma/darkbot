@@ -942,23 +942,15 @@ fn hex_word(text: &str) -> Option<[u8; 32]> {
 }
 
 /// Atomically writes the evidence record after checking that it decodes as
-/// the schema G0.8 reads. Should it not encode, its debug view is written
-/// instead, so nothing is lost, and the failure stays visible. Never panics.
+/// the schema G0.8 reads. An encode failure preserves the last durable
+/// binary record and reports the error. Never panics.
 fn write_evidence(out: &EvidenceFile, evidence: &Draft) -> Result<(), String> {
     let encoded = evidence.encode().and_then(|bytes| {
         darkbot_bsc_record::decode(&evidence::SCHEMA, &bytes).map(|_| bytes)
     });
     match encoded {
         Ok(bytes) => out.replace(&bytes),
-        Err(e) => {
-            let fallback = format!("EVIDENCE_NOT_ENCODABLE: {e}\n{evidence:?}\n");
-            match out.replace(fallback.as_bytes()) {
-                Ok(()) => Err(format!(
-                    "written as text, not as a record readable by G0.8: {e}"
-                )),
-                Err(w) => Err(format!("{w}; not encodable either: {e}")),
-            }
-        }
+        Err(e) => Err(format!("not a record readable by G0.8; previous binary evidence preserved: {e}")),
     }
 }
 
@@ -1160,7 +1152,7 @@ mod tests {
     }
 
     #[test]
-    fn evidence_is_written_as_a_record_or_visibly_as_text() {
+    fn evidence_encode_failure_preserves_the_last_binary_record() {
         let dir = private_dir("write");
         let path = dir.join("g07.dbrec");
         let out = EvidenceFile::create(path.to_str().unwrap(), owner_uid(&dir).unwrap()).unwrap();
@@ -1171,7 +1163,7 @@ mod tests {
         broken.clear(evidence::TOKEN);
         let e = write_evidence(&out, &broken).unwrap_err();
         assert!(e.contains("not a record readable by G0.8"), "{e}");
-        assert!(fs::read_to_string(&path).unwrap().starts_with("EVIDENCE_NOT_ENCODABLE"));
+        assert_eq!(fs::read(&path).unwrap(), written);
         fs::remove_dir_all(&dir).unwrap();
     }
 

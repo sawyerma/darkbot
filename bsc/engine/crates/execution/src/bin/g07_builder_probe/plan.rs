@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const PROBE_SCHEMA: &str = "darkbot.g07.builder-probe.v3";
+pub(crate) const PROBE_SCHEMA: &str = "darkbot.g07.builder-probe.v4";
 /// The G0.7 candidate's signed gas price (the documented builder floor).
 pub(crate) const PROBE_GAS_PRICE_WEI: u64 = 50_000_000;
 /// The price controls: far below any builder floor.
@@ -277,16 +277,20 @@ pub(crate) fn case_body(
     if max_timestamp.is_some() && case.string_field.is_none() {
         return body;
     }
-    let mut body: Value = serde_json::from_str(&body).expect("G0.7 body is JSON");
-    if let Some(params) = body.pointer_mut("/params/0").and_then(Value::as_object_mut) {
-        if max_timestamp.is_none() {
-            params.remove("maxTimestamp");
-        }
-        if let Some(field) = case.string_field {
-            params.insert(field.to_string(), json!("true"));
-        }
+    // Apply only fixed, known wire fragments; no general JSON serializer.
+    let mut body = body;
+    if max_timestamp.is_none() {
+        body = body.replacen("\"maxTimestamp\":0,", "", 1);
     }
-    body.to_string()
+    if let Some(field) = case.string_field {
+        assert!(matches!(field, "noMerge" | "positionFirst"));
+        body = body.replacen(
+            &format!("\"{field}\":true"),
+            &format!("\"{field}\":\"true\""),
+            1,
+        );
+    }
+    body
 }
 
 const BLOCK_SENTINEL: u64 = 7_777_777_771;
@@ -489,6 +493,7 @@ pub(crate) fn plan_text() -> String {
 /// answer about the zero balance ("insufficient funds for gas * price") or
 /// the nonce is not read as a price or expiry answer.
 pub(crate) fn classify(http_status: &str, body: &str) -> &'static str {
+    use serde_json::Value; // External response decoding boundary only.
     let code = http_status.split_whitespace().nth(1).unwrap_or("");
     if !code.starts_with('2') {
         return "HTTP_ERROR";
@@ -510,7 +515,7 @@ pub(crate) fn classify(http_status: &str, body: &str) -> &'static str {
         _ => format!(
             "{} {}",
             err.get("message").and_then(Value::as_str).unwrap_or(""),
-            err.get("data").map(Value::to_string).unwrap_or_default()
+            err.get("data").and_then(Value::as_str).unwrap_or_default()
         )
         .to_ascii_lowercase(),
     };
@@ -565,6 +570,7 @@ pub(crate) fn classify(http_status: &str, body: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{Value, json};
 
     fn head(number: u64, milli_timestamp: u64) -> ChainHead {
         ChainHead {

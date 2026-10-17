@@ -8,6 +8,7 @@
 //! preflight record); no JSON value leaves it.
 
 use super::*;
+use std::str::FromStr;
 
 /// BSC block interval (BEP-619).
 pub(crate) const BLOCK_INTERVAL_MS: u64 = 450;
@@ -127,7 +128,10 @@ pub(crate) struct ReceiptSeen {
 
 /// The receipt of `hash`, `None` while there is none. Never panics.
 pub(crate) fn rpc_receipt(hash: &str) -> Result<Option<ReceiptSeen>, String> {
-    let v = rpc("eth_getTransactionReceipt", &format!("[{}]", wire_string(hash)))?;
+    let v = rpc(
+        "eth_getTransactionReceipt",
+        &format!("[{}]", wire_string(hash)),
+    )?;
     if v.is_null() {
         return Ok(None);
     }
@@ -205,7 +209,9 @@ fn latest_block() -> Result<(u64, [u8; 32]), String> {
         .ok_or("latest block lacks hash")
         .map_err(str::to_string)
         .and_then(|h| wire_data(h, "latest block hash"))
-        .and_then(|h| <[u8; 32]>::try_from(h).map_err(|_| "latest block hash is not 32 bytes".into()))?;
+        .and_then(|h| {
+            <[u8; 32]>::try_from(h).map_err(|_| "latest block hash is not 32 bytes".into())
+        })?;
     Ok((number, hash))
 }
 
@@ -247,13 +253,21 @@ pub(crate) fn abi_words(raw: &[u8], count: usize) -> Result<Vec<U256>, String> {
     if raw.len() < count * 32 {
         return Err(format!("ABI result shorter than {count} words"));
     }
-    Ok(raw.chunks(32).take(count).map(U256::from_be_slice).collect())
+    Ok(raw
+        .chunks(32)
+        .take(count)
+        .map(U256::from_be_slice)
+        .collect())
 }
 
 fn eth_call(to: &str, data: &str) -> Result<Vec<u8>, String> {
     rpc_data(
         "eth_call",
-        &format!(r#"[{{"to":{},"data":{}}},"latest"]"#, wire_string(to), wire_string(data)),
+        &format!(
+            r#"[{{"to":{},"data":{}}},"latest"]"#,
+            wire_string(to),
+            wire_string(data)
+        ),
     )
 }
 
@@ -317,7 +331,10 @@ pub(crate) fn run_current_preflight(
     }
     let portal_impl_code = code_at(&portal_impl.to_string(), "portal implementation")?;
     let quote = abi_words(
-        &eth_call(PORTAL, &format!("{GET_QUOTE_CONFIG_SELECTOR}{}", "0".repeat(64)))?,
+        &eth_call(
+            PORTAL,
+            &format!("{GET_QUOTE_CONFIG_SELECTOR}{}", "0".repeat(64)),
+        )?,
         5,
     )?;
     let fees = abi_words(&eth_call(PORTAL, GET_FEE_RATE_SELECTOR)?, 2)?;
@@ -328,13 +345,14 @@ pub(crate) fn run_current_preflight(
     if fees.iter().any(|bps| *bps >= U256::from(10_000u64)) {
         return Err("invalid protocol fee bps".into());
     }
-    let account =
-        |who: Address| -> Result<(u64, U256), String> { Ok((rpc_pending_nonce(who)?, rpc_balance(who)?)) };
+    let account = |who: Address| -> Result<(u64, U256), String> {
+        Ok((rpc_pending_nonce(who)?, rpc_balance(who)?))
+    };
     let (launcher_nonce, launcher_balance) = account(launcher)?;
     let (buyer_nonce, buyer_balance) = account(buyer)?;
 
-    let launcher_required = U256::from(launch_value)
-        + U256::from(launch_gas_limit) * U256::from(gas_price);
+    let launcher_required =
+        U256::from(launch_value) + U256::from(launch_gas_limit) * U256::from(gas_price);
     let buyer_required = U256::from(buy_value) + U256::from(buy_gas_limit) * U256::from(gas_price);
     let word = |x: U256| V::U256(x.to_be_bytes());
     let sha = |bytes: &[u8]| V::B256(darkbot_bsc_record::sha256(bytes));
@@ -343,16 +361,33 @@ pub(crate) fn run_current_preflight(
     d.set(f::CHAIN_ID, chain)
         .set(f::LATEST_BLOCK_NUMBER, block_number)
         .set(f::LATEST_BLOCK_HASH, V::B256(block_hash))
-        .set(f::PORTAL, V::Address(Address::from_str(PORTAL).map_err(|e| e.to_string())?.into_array()))
+        .set(
+            f::PORTAL,
+            V::Address(
+                Address::from_str(PORTAL)
+                    .map_err(|e| e.to_string())?
+                    .into_array(),
+            ),
+        )
         .set(f::PORTAL_CODE_BYTES, count(&portal_code))
         .set(f::PORTAL_CODE_SHA256, sha(&portal_code))
         .set(f::PORTAL_VERSION, portal_version)
-        .set(f::PORTAL_IMPLEMENTATION, V::Address(portal_impl.into_array()))
-        .set(f::PORTAL_IMPLEMENTATION_CODE_BYTES, count(&portal_impl_code))
+        .set(
+            f::PORTAL_IMPLEMENTATION,
+            V::Address(portal_impl.into_array()),
+        )
+        .set(
+            f::PORTAL_IMPLEMENTATION_CODE_BYTES,
+            count(&portal_impl_code),
+        )
         .set(f::PORTAL_IMPLEMENTATION_CODE_SHA256, sha(&portal_impl_code))
         .set(
             f::TAX_V3_IMPL,
-            V::Address(Address::from_str(TAX_V3_IMPL_EXPECTED).map_err(|e| e.to_string())?.into_array()),
+            V::Address(
+                Address::from_str(TAX_V3_IMPL_EXPECTED)
+                    .map_err(|e| e.to_string())?
+                    .into_array(),
+            ),
         )
         .set(f::TAX_V3_IMPL_CODE_BYTES, count(&impl_code))
         .set(f::TAX_V3_IMPL_CODE_SHA256, sha(&impl_code))
@@ -375,14 +410,23 @@ pub(crate) fn run_current_preflight(
         .set(f::DISTINCT, launcher != buyer)
         .set(f::LAUNCHER_REQUIRED_WEI, word(launcher_required))
         .set(f::BUYER_REQUIRED_WEI, word(buyer_required))
-        .set(f::COMBINED_RESERVE_WEI, word(launcher_required + buyer_required))
-        .set(f::PROPOSAL_MAX_RESERVE_WEI, V::u128(MAX_ATTEMPT_RESERVE_WEI))
+        .set(
+            f::COMBINED_RESERVE_WEI,
+            word(launcher_required + buyer_required),
+        )
+        .set(
+            f::PROPOSAL_MAX_RESERVE_WEI,
+            V::u128(MAX_ATTEMPT_RESERVE_WEI),
+        )
         .set(f::PROFILE_GAS_PRICE_WEI, word(U256::from(gas_price)))
         .set(f::PROFILE_LAUNCH_GAS_LIMIT, launch_gas_limit)
         .set(f::PROFILE_BUY_GAS_LIMIT, buy_gas_limit)
         .set(f::PROFILE_LAUNCH_VALUE_WEI, V::u128(launch_value))
         .set(f::PROFILE_BUY_VALUE_WEI, word(U256::from(buy_value)))
-        .set(f::LAUNCHER_SUFFICIENT, launcher_balance >= launcher_required)
+        .set(
+            f::LAUNCHER_SUFFICIENT,
+            launcher_balance >= launcher_required,
+        )
         .set(f::BUYER_SUFFICIENT, buyer_balance >= buyer_required)
         .set(
             f::FUNDING_PASS,
@@ -409,11 +453,18 @@ pub(crate) fn validate_current_preflight(
     signed_gas_price: u64,
 ) -> (u64, u64, u64) {
     use schema::g06a::preflight as f;
-    let address = |r: &Record, tag: u16| r.address(tag).map(Address::from).unwrap_or_else(|e| panic!("{e}"));
+    let address = |r: &Record, tag: u16| {
+        r.address(tag)
+            .map(Address::from)
+            .unwrap_or_else(|e| panic!("{e}"))
+    };
     let flag = |tag: u16| current.bool(tag).unwrap_or_else(|e| panic!("{e}"));
     let int = |tag: u16| current.u64(tag).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(int(f::CHAIN_ID), CHAIN_ID);
-    assert_eq!(address(current, f::PORTAL), Address::from_str(PORTAL).unwrap());
+    assert_eq!(
+        address(current, f::PORTAL),
+        Address::from_str(PORTAL).unwrap()
+    );
     assert_eq!(address(current, f::LAUNCHER_ADDRESS), launcher);
     assert_eq!(address(current, f::BUYER_ADDRESS), buyer);
     assert!(flag(f::ADDRESSES_BOUND));
@@ -427,7 +478,12 @@ pub(crate) fn validate_current_preflight(
         let b = current
             .get(tag)
             .unwrap_or_else(|| panic!("current preflight missing {}", field_name(tag)));
-        assert_eq!(a, b, "preflight deployment/economics drift at {}", field_name(tag));
+        assert_eq!(
+            a,
+            b,
+            "preflight deployment/economics drift at {}",
+            field_name(tag)
+        );
     }
 
     let network_gas_price = current
@@ -663,8 +719,8 @@ impl HeadPoller {
         let read_ns = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         let mono_ms = i64::try_from(self.epoch.elapsed().as_millis()).unwrap_or(i64::MAX);
         let local_unix_ms = unix_time_ms();
-        let v: serde_json::Value = serde_json::from_slice(&body)
-            .map_err(|e| format!("head response is not JSON: {e}"))?;
+        let v: serde_json::Value =
+            serde_json::from_slice(&body).map_err(|e| format!("head response is not JSON: {e}"))?;
         if let Some(err) = v.get("error") {
             return Err(format!("head request JSON-RPC error: {err}"));
         }

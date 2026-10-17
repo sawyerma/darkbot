@@ -254,13 +254,12 @@ pub(crate) fn decode_builder_answer(status_line: &str, body: &[u8]) -> BuilderAn
     };
     let parsed: Result<serde_json::Value, _> = serde_json::from_slice(body);
     let Ok(serde_json::Value::Object(response)) = parsed else {
-        answer.undecodable = Some(bounded(
-            &format!("not a JSON-RPC object: {}", String::from_utf8_lossy(body)),
-            1024,
-        ));
+        answer.undecodable = Some("not a JSON-RPC object".into());
         return answer;
     };
-    match response.get("result") {
+    let result = response.get("result");
+    let result = result.and_then(|v| v.get("bundleHash").or(Some(v)));
+    match result {
         Some(serde_json::Value::String(text)) => {
             let word = text
                 .strip_prefix("0x")
@@ -273,15 +272,17 @@ pub(crate) fn decode_builder_answer(status_line: &str, body: &[u8]) -> BuilderAn
             }
         }
         Some(serde_json::Value::Null) | None => {}
-        Some(other) => answer.result_text = Some(bounded(&other.to_string(), 1024)),
+        Some(_) => answer.undecodable = Some("unsupported RPC result type".into()),
     }
-    if let Some(error) = response.get("error") {
+    if let Some(error) = response.get("error").filter(|e| !e.is_null()) {
         answer.error_code = error.get("code").and_then(serde_json::Value::as_i64);
         answer.error_message = Some(bounded(
             &error
                 .get("message")
                 .and_then(serde_json::Value::as_str)
-                .map_or_else(|| error.to_string(), str::to_string),
+                .or_else(|| error.as_str())
+                .unwrap_or("unrecognized RPC error")
+                .to_string(),
             1024,
         ));
     }
@@ -386,8 +387,8 @@ pub(crate) fn panicked_provider_result(provider: &'static str) -> ProviderResult
 
 /// The provider result as a nested evidence record. Never panics.
 pub(crate) fn provider_record(r: &ProviderResult) -> darkbot_bsc_record::Value {
-    use schema::g07::provider_result as p;
     use darkbot_bsc_record::Value as V;
+    use schema::g07::provider_result as p;
     let mut d = Draft::new(&p::SCHEMA);
     d.set(p::PROVIDER, r.provider)
         .set_opt(p::WRITE_STARTED_NS, r.write_started_ns)
@@ -443,7 +444,8 @@ mod tests {
         );
         let garbage = decode_builder_answer("HTTP/1.1 502 Bad Gateway", b"<html>");
         assert_eq!((garbage.status_code, garbage.body_len), (Some(502), 6));
-        assert!(garbage.undecodable.unwrap().contains("<html>"));
+        assert_eq!(garbage.undecodable.as_deref(), Some("not a JSON-RPC object"));
+        assert_eq!(garbage.body_sha256, darkbot_bsc_record::sha256(b"<html>"));
         assert_eq!(wire_string("a\"b\\c\n"), r#""a\"b\\c\u000a""#);
         assert_eq!(bounded("\u{e4}bc", 1), "");
     }

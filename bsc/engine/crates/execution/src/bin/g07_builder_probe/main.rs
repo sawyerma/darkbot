@@ -29,6 +29,7 @@ mod plan;
 
 use builder_submission::*;
 use chain_reads::*;
+use darkbot_bsc_record::{Value as BinaryValue, schema::g07::probe};
 use inputs::*;
 use plan::*;
 use shared::*;
@@ -69,13 +70,13 @@ fn main() {
     // have sent nothing.
     for account in throwaway_accounts() {
         let from = account.to_string();
-        let balance = rpc("eth_getBalance", json!([from, "latest"]))
-            .unwrap_or_else(|e| panic!("balance of {from}: {e}; nothing sent"));
-        let nonce = rpc("eth_getTransactionCount", json!([from, "pending"]))
+        let balance =
+            rpc_balance(account).unwrap_or_else(|e| panic!("balance of {from}: {e}; nothing sent"));
+        let nonce = rpc_pending_nonce(account)
             .unwrap_or_else(|e| panic!("nonce of {from}: {e}; nothing sent"));
         assert!(
-            balance.as_str() == Some("0x0") && nonce.as_str() == Some("0x0"),
-            "throwaway account {from} is not empty (balance {balance}, pending nonce {nonce}); nothing sent"
+            balance == U256::ZERO && nonce == 0,
+            "throwaway account {from} is not empty; nothing sent"
         );
     }
 
@@ -106,7 +107,7 @@ fn main() {
         ),
     )
     .unwrap_or_else(|e| panic!("builder probe latch: {e}; nothing sent"));
-    let evidence_path = probe_dir.join("probe.evidence.json");
+    let evidence_path = probe_dir.join("probe.evidence.dbrec");
     let evidence = owner_uid(&probe_dir)
         .and_then(|uid| EvidenceFile::create(&evidence_path.to_string_lossy(), uid))
         .unwrap_or_else(|e| {
@@ -114,8 +115,8 @@ fn main() {
             panic!("builder probe evidence: {e}; nothing sent; {released}")
         });
 
-    let persist = |results: &[Value], status: &str| {
-        evidence.replace(format!("{}\n", report(&plan_sha256, results, status)).as_bytes())
+    let persist = |results: &[Draft], status: &str| {
+        report(&plan_sha256, results, status).and_then(|bytes| evidence.replace(&bytes))
     };
     // The evidence file must take a report before anything is sent.
     if let Err(e) = persist(&[], "IN_PROGRESS") {
@@ -132,7 +133,7 @@ fn main() {
     match run {
         Ok(results) => {
             let written = persist(&results, "COMPLETE");
-            let _ = writeln!(out, "{}", report(&plan_sha256, &results, "COMPLETE"));
+            let _ = writeln!(out, "{}", report_view(&plan_sha256, &results, "COMPLETE"));
             let _ = writeln!(
                 out,
                 "PROBE_EVIDENCE={} ({})",
@@ -149,7 +150,7 @@ fn main() {
         Err((results, e)) => {
             // A request may have left: the latch is kept, nothing else is sent.
             let stopped = "STOPPED_EVIDENCE_WRITE_FAILED";
-            let _ = writeln!(out, "{}", report(&plan_sha256, &results, stopped));
+            let _ = writeln!(out, "{}", report_view(&plan_sha256, &results, stopped));
             let _ = writeln!(
                 std::io::stderr().lock(),
                 "STOP: evidence write failed after case {} ({e}); the remaining cases were not sent; the latch stays; stdout holds the report",
@@ -166,9 +167,9 @@ fn main() {
 fn run_cases(
     count: usize,
     spacing: Duration,
-    mut send: impl FnMut(usize) -> Value,
-    mut persist: impl FnMut(&[Value]) -> Result<(), String>,
-) -> Result<Vec<Value>, (Vec<Value>, String)> {
+    mut send: impl FnMut(usize) -> Draft,
+    mut persist: impl FnMut(&[Draft]) -> Result<(), String>,
+) -> Result<Vec<Draft>, (Vec<Draft>, String)> {
     let mut results = Vec::with_capacity(count);
     for n in 0..count {
         if n > 0 {
@@ -187,12 +188,12 @@ fn run_cases(
 /// the case is skipped), then the request from the shared request function
 /// over the still-live connection; the answer is recorded. Nothing is retried
 /// after a send.
-fn run_case(n: usize, case: &Case, poller: &mut HeadPoller, token: &str) -> Value {
+fn run_case(n: usize, case: &Case, poller: &mut HeadPoller, token: &str) -> Draft {
     let host = case.builder.host();
     let before_connect_ms = unix_time_ms();
     let mut stream = match connect_tls(host) {
         Ok(stream) => stream,
-        Err(e) => return json!({"case":case.id,"outcome":"TRANSPORT_ERROR_NOT_SENT","reason":e}),
+        Err(e) => return case_failure(case, "TRANSPORT_ERROR_NOT_SENT", &e),
     };
     let connected_ms = unix_time_ms();
     let mut refused = Vec::new();
@@ -216,11 +217,11 @@ fn run_case(n: usize, case: &Case, poller: &mut HeadPoller, token: &str) -> Valu
         }
     }
     let Some((fresh, window)) = fresh_window else {
-        return json!({"case":case.id,"outcome":"SKIPPED_NO_FRESH_HEAD","reasons":refused});
+        return case_failure(case, "SKIPPED_NO_FRESH_HEAD", &refused.join("; "));
     };
     let built = case_request(n, case, &fresh.head, &window, token);
     if let Err(e) = transport_alive(&mut stream) {
-        return json!({"case":case.id,"outcome":"TRANSPORT_ERROR_NOT_SENT","reason":e});
+        return case_failure(case, "TRANSPORT_ERROR_NOT_SENT", &e);
     }
     let mut written_ms = None;
     let sent = stream
@@ -232,62 +233,107 @@ fn run_case(n: usize, case: &Case, poller: &mut HeadPoller, token: &str) -> Valu
             read_http_response(&mut stream)
         });
     let answered_ms = unix_time_ms();
-    let (outcome, status, answer) = match &sent {
-        Ok(r) => (
-            classify(&r.status, &r.body),
-            Some(r.status.as_str()),
-            Some(r.body.as_str()),
-        ),
-        Err(_) => ("TRANSPORT_ERROR", None, None),
+    let outcome = match &sent {
+        Ok(r) => classify(&r.status, &String::from_utf8_lossy(&r.body)),
+        Err(_) => "TRANSPORT_ERROR",
     };
-    json!({
-        "case":case.id,
-        "builder":built.host,
-        "question":case.question,
-        "gas_price_wei":case.gas_price,
-        "tx_hashes":[built.txs[0].signed.hash.to_string(), built.txs[1].signed.hash.to_string()],
-        "send_head":fresh.head.number,
-        "send_head_hash":fresh.head.hash,
-        "send_head_milli_timestamp":fresh.head.milli_timestamp,
-        "send_head_millisecond_phase":fresh.head.milli_timestamp % 1000,
-        "head_read_local_unix_ms":fresh.local_unix_ms,
-        "head_age_ms":window.head_age_ms,
-        "heads_refused_before":refused,
-        "max_block":built.max_block,
-        "max_timestamp":built.max_timestamp,
-        "body":built.body,
-        "body_sha256":sha256_hex(built.body.as_bytes()),
-        // The full request length would reveal the token's length.
-        "body_len":built.body.len(),
-        "authorization_persisted":false,
-        "before_connect_unix_ms":before_connect_ms,
-        "connected_unix_ms":connected_ms,
-        "request_written_unix_ms":written_ms,
-        "answer_unix_ms":answered_ms,
-        "http_status":status,
-        "response_body":answer,
-        "transport_error":sent.as_ref().err(),
-        "outcome":outcome
-    })
+    let provider = ProviderResult {
+        provider: host,
+        write_started_ns: None,
+        write_flushed_ns: None,
+        bytes_may_have_left: true,
+        answer: sent
+            .as_ref()
+            .ok()
+            .map(|r| decode_builder_answer(&r.status, &r.body)),
+        error: sent.as_ref().err().cloned(),
+    };
+    use probe::case as c;
+    let mut d = Draft::new(&c::SCHEMA);
+    d.set(c::CASE, case.id)
+        .set(c::OUTCOME, outcome)
+        .set(c::BUILDER, built.host)
+        .set(c::QUESTION, case.question)
+        .set(c::GAS_PRICE, case.gas_price)
+        .set(c::SEND_HEAD, fresh.head.number)
+        .set(c::SEND_HEAD_HASH, fresh.head.hash.as_str())
+        .set(c::SEND_HEAD_MS, fresh.head.milli_timestamp)
+        .set(c::HEAD_READ_MS, fresh.local_unix_ms)
+        .set(c::HEAD_AGE_MS, window.head_age_ms)
+        .set(c::MAX_BLOCK, built.max_block)
+        .set_opt(c::MAX_TIMESTAMP, built.max_timestamp)
+        .set(
+            c::BODY_SHA256,
+            BinaryValue::B256(darkbot_bsc_record::sha256(built.body.as_bytes())),
+        )
+        .set(c::BODY_LEN, built.body.len() as u64)
+        .set(c::BEFORE_CONNECT_MS, before_connect_ms)
+        .set(c::CONNECTED_MS, connected_ms)
+        .set_opt(c::WRITTEN_MS, written_ms)
+        .set(c::ANSWER_MS, answered_ms)
+        .set(c::PROVIDER_RESULT, provider_record(&provider));
+    for tx in &built.txs {
+        d.push(c::TX_HASH, BinaryValue::B256(tx.signed.hash.0));
+    }
+    for reason in refused {
+        d.push(c::REFUSED, reason);
+    }
+    d
 }
 
-fn report(plan_sha256: &str, results: &[Value], status: &str) -> String {
-    let accounts = throwaway_accounts();
-    serde_json::to_string_pretty(&json!({
-        "schema":PROBE_SCHEMA,
-        "plan_sha256":plan_sha256,
-        "status":status,
-        "throwaway_accounts":accounts.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
-        "cases":results,
-        "scope":"submission-time acceptance only; building-time behavior, inclusion and whether 0.05 gwei suffices are not shown",
-        "outcome_classes":"ACCEPTED, METHOD_REJECTED, FORMAT_REJECTED, EXECUTION_REJECTED, PRICE_REJECTED, EXPIRY_REJECTED, BUNDLE_REJECTED_UNSPECIFIED, OTHER_REJECTED, HTTP_ERROR, UNPARSEABLE, TRANSPORT_ERROR (after the write began), TRANSPORT_ERROR_NOT_SENT, SKIPPED_NO_FRESH_HEAD; the raw answer is the evidence"
-    }))
-    .unwrap_or_else(|e| format!("{{\"report_serialization_error\":\"{e}\"}}"))
+fn case_failure(case: &Case, outcome: &str, reason: &str) -> Draft {
+    let mut d = Draft::new(&probe::case::SCHEMA);
+    d.set(probe::case::CASE, case.id)
+        .set(probe::case::OUTCOME, outcome)
+        .set(probe::case::REASON, reason);
+    d
+}
+
+fn report(plan_sha256: &str, results: &[Draft], status: &str) -> Result<Vec<u8>, String> {
+    let hash: [u8; 32] = hex::decode(plan_sha256)
+        .map_err(|e| e.to_string())?
+        .try_into()
+        .map_err(|_| "invalid plan hash")?;
+    let mut d = Draft::new(&probe::SCHEMA);
+    d.set(probe::PLAN_SHA256, BinaryValue::B256(hash)).set(probe::STATUS, status)
+        .set(probe::SCOPE, "submission-time acceptance only; building-time behavior, inclusion and whether 0.05 gwei suffices are not shown");
+    for account in throwaway_accounts() {
+        d.push(probe::ACCOUNTS, BinaryValue::Address(account.into_array()));
+    }
+    for result in results {
+        d.push(probe::CASES, result.clone().into_nested());
+    }
+    d.encode().map_err(|e| e.to_string())
+}
+
+fn report_view(hash: &str, results: &[Draft], status: &str) -> String {
+    report(hash, results, status)
+        .and_then(|b| darkbot_bsc_record::decode(&probe::SCHEMA, &b).map_err(|e| e.to_string()))
+        .map(|r| r.render())
+        .unwrap_or_else(|e| format!("REPORT_ERROR={e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binary_report_round_trip_and_integrity() {
+        let cases = vec![case_failure(&CASES[0], "NOT_SENT_TEST", "offline")];
+        let bytes = report(&"ab".repeat(32), &cases, "IN_PROGRESS").unwrap();
+        let decoded = darkbot_bsc_record::decode(&probe::SCHEMA, &bytes).unwrap();
+        assert_eq!(decoded.nested_all(probe::CASES).unwrap().len(), 1);
+        assert_eq!(decoded.text(probe::STATUS).unwrap(), "IN_PROGRESS");
+        assert_eq!(
+            bytes,
+            report(&"ab".repeat(32), &cases, "IN_PROGRESS").unwrap()
+        );
+        assert!(darkbot_bsc_record::decode(&probe::SCHEMA, &bytes[..bytes.len() - 1]).is_err());
+        let mut corrupt = bytes.clone();
+        corrupt[25] ^= 1;
+        assert!(darkbot_bsc_record::decode(&probe::SCHEMA, &corrupt).is_err());
+        assert!(!decoded.render().contains("response_body"));
+    }
 
     #[test]
     fn a_failed_evidence_write_stops_the_run_before_the_next_case() {
@@ -298,7 +344,7 @@ mod tests {
                 Duration::ZERO,
                 |n| {
                     sent.push(n);
-                    json!({ "case": n })
+                    case_failure(&CASES[n], "NOT_SENT_TEST", "offline fixture")
                 },
                 |results| {
                     if results.len() > fail_after {
@@ -324,7 +370,7 @@ mod tests {
             Duration::ZERO,
             |n| {
                 events_ref.borrow_mut().push(format!("send {n}"));
-                json!({ "case": n })
+                case_failure(&CASES[n], "NOT_SENT_TEST", "offline fixture")
             },
             |results| {
                 events_ref

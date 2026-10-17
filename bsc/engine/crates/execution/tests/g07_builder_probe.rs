@@ -13,7 +13,7 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// the included G0.7 modules' sources, so any change to them, or to what a
 /// live run would send, changes this hash and needs a new approval. (Pinned
 /// here, not in plan.rs, which is itself part of that digest.)
-const PINNED_PLAN_SHA256: &str = "77957205fd844dea51d4eb97a4b12c345978952fafc91c95cefec75d28f9abf5";
+const PINNED_PLAN_SHA256: &str = "daef6789e4b02307e1e7d6ab706f0316142025c6222e0bc0a2d92e2243f59808";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);
@@ -97,7 +97,7 @@ fn approval_precedes_every_read_latch_and_connection() {
     let dry = pos("if env::var(\"DARKBOT_G07_PROBE_SEND\").as_deref() != Ok(\"YES\")");
     let dry_return = pos("        return;\n    }");
     let approval = pos("DARKBOT_G07_PROBE_APPROVED_PLAN_SHA256 does not match");
-    let accounts = pos("rpc(\"eth_getBalance\"");
+    let accounts = pos("rpc_balance(account)");
     let poller = pos("HeadPoller::connect(&rpc_endpoint)");
     let latch = pos("let probe_dir = latch_attempt(");
     let send = pos("connect_tls(host)");
@@ -111,7 +111,8 @@ fn approval_precedes_every_read_latch_and_connection() {
     let alive = pos("transport_alive(&mut stream)");
     let write = pos(".write_all(&built.request)");
     assert!(send < build && build < alive && alive < write);
-    assert_eq!(MAIN.matches("rpc(").count(), 2);
+    assert_eq!(MAIN.matches("rpc_balance(").count(), 1);
+    assert_eq!(MAIN.matches("rpc_pending_nonce(").count(), 1);
 }
 
 #[test]
