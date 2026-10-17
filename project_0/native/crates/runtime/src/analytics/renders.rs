@@ -1,7 +1,7 @@
 //! Legacy views of a run, rendered from its binary journals (PERSIST-04). The pinned readers
 //! keep reading these files; the journals stay primary. A view is created only if missing and
 //! never overwritten; an existing view must be byte-identical to its render.
-use super::journal::{self, kind, Reader, MANIFEST};
+use super::journal::{self, kind, MANIFEST};
 use crate::run_layout::{RunLayout, RunPaths};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -99,7 +99,8 @@ pub fn views(paths: &RunPaths) -> Result<Vec<View>, String> {
 
 /// Deterministic bytes of one view; `None` when a pretty view has no frame yet.
 pub fn render(view: &View) -> io::Result<Option<Vec<u8>>> {
-    let mut reader = Reader::open(&view.journal)?;
+    // SK-07: a segmented journal renders across its verified chain.
+    let mut reader = crate::storage::segments::ChainReader::open(&view.journal)?;
     let mut out = Vec::new();
     let mut newest = None;
     while let Some(frame) = reader.next_frame()? {

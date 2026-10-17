@@ -9,19 +9,29 @@ use darkbot_runner::analytics::journal::{self, Reader, MANIFEST};
 use darkbot_runner::analytics::renders;
 use std::{collections::BTreeMap, path::Path};
 fn verify(path: &Path) -> Result<serde_json::Value, String> {
-    let mut reader = Reader::open(path).map_err(|e| e.to_string())?;
+    // SK-07: the chain is verified first (links, successors, orphans); then every segment's
+    // frames are counted. A single-segment journal is a chain of one.
+    let chain = darkbot_runner::storage::segments::verify_chain(path)?;
     let mut kinds = BTreeMap::<u16, u64>::new();
-    while let Some(frame) = reader.next_frame().map_err(|e| e.to_string())? {
-        *kinds.entry(frame.kind).or_default() += 1;
-        if frame.kind != MANIFEST && !journal::kind::ALL.contains(&frame.kind) {
-            return Err("EVENT_KIND_UNKNOWN".into());
+    let (mut frames, mut root) = (0u64, [0u8; 32]);
+    for index in 1..=chain.segments {
+        let segment = darkbot_runner::storage::segments::segment_path(path, index);
+        let mut reader = Reader::open(&segment).map_err(|e| e.to_string())?;
+        while let Some(frame) = reader.next_frame().map_err(|e| e.to_string())? {
+            *kinds.entry(frame.kind).or_default() += 1;
+            if frame.kind != MANIFEST && !journal::kind::ALL.contains(&frame.kind) {
+                return Err("EVENT_KIND_UNKNOWN".into());
+            }
         }
+        frames += reader.frames();
+        root = reader.root();
     }
     Ok(serde_json::json!({
-        "frames": reader.frames(),
-        "root_sha256": journal::hex(&reader.root()),
-        "sealed": reader.sealed,
-        "status": if !reader.sealed { "OPEN" } else if reader.complete { "COMPLETE" } else { "INCOMPLETE" },
+        "frames": frames,
+        "segments": chain.segments,
+        "root_sha256": journal::hex(&root),
+        "sealed": chain.sealed,
+        "status": if !chain.sealed { "OPEN" } else if chain.complete { "COMPLETE" } else { "INCOMPLETE" },
         "kinds": kinds.into_iter().map(|(k, n)| (k.to_string(), serde_json::Value::from(n))).collect::<serde_json::Map<_, _>>(),
     }))
 }
@@ -66,7 +76,8 @@ fn import(kind: u16, path: &Path) -> Result<(), String> {
 }
 fn frames(path: &Path) -> Result<(), String> {
     use std::io::Write;
-    let mut reader = Reader::open(path).map_err(|e| e.to_string())?;
+    let mut reader =
+        darkbot_runner::storage::segments::ChainReader::open(path).map_err(|e| e.to_string())?;
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
     while let Some(f) = reader.next_frame().map_err(|e| e.to_string())? {
         let p = &f.provenance;

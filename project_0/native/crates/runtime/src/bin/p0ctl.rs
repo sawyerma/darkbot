@@ -209,7 +209,7 @@ fn log_tail(path: &Path) -> Vec<String> {
 }
 
 fn journal_line(path: &Path) -> String {
-    let Ok(mut r) = journal::Reader::open(path) else {
+    let Ok(mut r) = darkbot_runner::storage::segments::ChainReader::open(path) else {
         return format!("{}: unreadable", path.display());
     };
     let (mut frames, mut last_rx, mut by_kind) = (0u64, None, std::collections::BTreeMap::new());
@@ -232,8 +232,9 @@ fn journal_line(path: &Path) -> String {
         }
     }
     format!(
-        "{} frames={frames} kinds={by_kind:?} sealed={} complete={} last_rx_ns={} ({tail})",
+        "{} segments={} frames={frames} kinds={by_kind:?} sealed={} complete={} last_rx_ns={} ({tail})",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
+        r.segments(),
         r.sealed,
         r.complete,
         last_rx.map_or("-".into(), |v: u64| v.to_string())

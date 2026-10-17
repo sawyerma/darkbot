@@ -48,6 +48,9 @@ pub mod kind {
     pub const STRICT_RESULT: u16 = 313;
     /// SK-06 capacity preflight report (single-value journal before a capture).
     pub const CAPACITY_PREFLIGHT: u16 = 320;
+    /// SK-07 segment chain control frames (first frame of a continuation / last before seal).
+    pub const SEGMENT_LINK: u16 = 330;
+    pub const SEGMENT_NEXT: u16 = 331;
     /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
     /// in-window frames is the bounded-memory index of the analytics worker.
     pub const ECON_SHADOW_EVALUATION: u16 = 400;
@@ -97,6 +100,8 @@ pub mod kind {
         STRICT_CHECKPOINT,
         STRICT_RESULT,
         CAPACITY_PREFLIGHT,
+        SEGMENT_LINK,
+        SEGMENT_NEXT,
         ECON_SHADOW_EVALUATION,
         ECON_SNAPSHOT,
         ECON_FINAL,
@@ -966,7 +971,8 @@ pub fn export_views(
             "EXPORT_EXISTS",
         ));
     }
-    let mut reader = Reader::open(path)?;
+    // SK-07: a segmented journal is exported across its whole verified chain.
+    let mut reader = crate::storage::segments::ChainReader::open(path)?;
     let token = hex(&random16()?);
     let partials: Vec<PathBuf> = views
         .iter()

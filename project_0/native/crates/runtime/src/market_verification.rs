@@ -449,7 +449,11 @@ pub struct BatchFacts {
 /// decodes every typed frame (a schema-1 or foreign frame fails the batch).
 pub fn read_batch(dir: &Path) -> Result<BatchFacts, &'static str> {
     let path = dir.join(MARKET_JOURNAL);
-    let mut r = journal::Reader::open(&path).map_err(|_| "BATCH_JOURNAL_INVALID")?;
+    if crate::storage::segments::segment_path(&path, 2).exists() {
+        return Err("BATCH_JOURNAL_SEGMENTED");
+    }
+    let mut r =
+        crate::storage::segments::ChainReader::open(&path).map_err(|_| "BATCH_JOURNAL_INVALID")?;
     let mut f = BatchFacts::default();
     while let Some(frame) = r.next_frame().map_err(|_| "BATCH_JOURNAL_INVALID")? {
         match frame.kind {
@@ -642,8 +646,15 @@ pub fn run(job: Job) -> Result<StrictResult, String> {
                     let dirname = format!("batch_{next}_{end}_{stamp}");
                     let dir = job.output.join(&dirname);
                     fs::create_dir(&dir).map_err(|_| "EVIDENCE_IO")?;
-                    let mut sink = JournalSink::create_with(&dir, WriterConfig::from_active())
-                        .map_err(|_| "EVIDENCE_IO")?;
+                    // One file per batch: the checkpoint binds the batch journal by its file hash.
+                    let mut sink = JournalSink::create_with(
+                        &dir,
+                        WriterConfig {
+                            segment_bytes: 0,
+                            ..WriterConfig::from_active()
+                        },
+                    )
+                    .map_err(|_| "EVIDENCE_IO")?;
                     let mut core = ObserverCore::new(
                         program,
                         MarketSource::Transactions,

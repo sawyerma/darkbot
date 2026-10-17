@@ -149,6 +149,8 @@ macro_rules! typed_kinds {
             k::CAPACITY_PREFLIGHT => {
                 $f::<crate::storage::preflight::CapacityReport>($kind, $schema, $bytes)
             }
+            k::SEGMENT_LINK => $f::<crate::storage::segments::SegmentLink>($kind, $schema, $bytes),
+            k::SEGMENT_NEXT => $f::<crate::storage::segments::SegmentNext>($kind, $schema, $bytes),
             _ => Err(bad("PAYLOAD_KIND_UNTYPED")),
         }
     }};

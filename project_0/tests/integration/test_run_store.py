@@ -228,8 +228,15 @@ class Launchers(unittest.TestCase):
                                            (s.artifact(run,'market')/'market.p0j','INCOMPLETE')):
                         p=subprocess.run([str(tool),'verify',str(journal)],capture_output=True,text=True,timeout=60)
                         self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(json.loads(p.stdout)['status'],status,journal)
+                    # Since A2 the capture writes no JSONL: market views are MISSING until rendered explicitly,
+                    # then they must be created once and match byte for byte (rendered across segment chains).
                     p=subprocess.run([str(tool),'renders',str(run)],capture_output=True,text=True,timeout=60)
                     self.assertEqual(p.returncode,0,p.stderr)
+                    self.assertTrue(all(v['status'] in ('MATCHES','NO_FRAME','MISSING') for v in json.loads(p.stdout)),p.stdout)
+                    p=subprocess.run([str(tool),'renders',str(run),'--create'],capture_output=True,text=True,timeout=60)
+                    self.assertEqual(p.returncode,0,p.stderr)
+                    self.assertTrue(all(v['status'] in ('CREATED','MATCHES','NO_FRAME') for v in json.loads(p.stdout)),p.stdout)
+                    p=subprocess.run([str(tool),'renders',str(run)],capture_output=True,text=True,timeout=60)
                     self.assertTrue(all(v['status'] in ('MATCHES','NO_FRAME') for v in json.loads(p.stdout)),p.stdout)
                     self.assertIn('C0_E1_WARMUP_FAILED',s.artifact(run,'runtime_log').read_text())
                     self.assertEqual(c.capture_identity(run)['capture_run_id'],run_id)

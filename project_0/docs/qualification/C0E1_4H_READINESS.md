@@ -38,6 +38,7 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 |---|---|---|---|
 | A — baseline/contradictions | done | — | this page |
 | Git isolation (after the 506c349 BSC incident) | Project_0 works in a separate worktree with its own index; guarded pathspec commits | — | memory rule; `dfc5e14` restore reported to the user |
+| D1 — SK-07 segments + chain reader (market lane) | LOCAL_PASS in scope; Shadow lane open (B1) | (this unit) | [SK07_SEGMENTS_20261017](../evidence/SK07_SEGMENTS_20261017/README.md) |
 | C3/C4 — `p0ctl`, owner lock, operator stop, offline boot audit | LOCAL_PASS in scope; network boot NOT_RUN | (this unit) | [CONTROL_BOOT_20261017](../evidence/CONTROL_BOOT_20261017/README.md) |
 | C2 — RELATED_NON_LIQUIDATION native rows | LOCAL_PASS in scope; historical positives BLOCKED | (this unit) | [A4_RELATED_20261017](../evidence/A4_RELATED_20261017/README.md) |
 | B — SK-06 CapacityPreflight, launcher-integrated | LOCAL_PASS in scope; real basis NOT_MEASURED, provider NOT_RUN | (this unit) | [SK06_CAPACITY_20261017](../evidence/SK06_CAPACITY_20261017/README.md) |

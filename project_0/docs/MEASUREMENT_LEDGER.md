@@ -5599,3 +5599,16 @@ Base `84a0cdb`. Evidence: [CONTROL_BOOT_20261017](evidence/CONTROL_BOOT_20261017
 Tests: control 1/1, boot audit 1/1, market 104 (+related) unchanged, launcher integration 4/4 incl. `p0ctl run start`; offline control evidence recorded.
 
 Open: network boot audit (BOOT-03…08, needs permission), typed RunStatus/control DTO and browser API (frontend scope), `runs list`/`logs --follow`, `UntilStopped`.
+
+## 2026-10-17 — SK-07: hash- and sequence-linked journal segments, chain reader (LOCAL_PASS in scope for the market lane)
+
+Base `ca8fc19`. Evidence: [SK07_SEGMENTS_20261017](evidence/SK07_SEGMENTS_20261017/README.md).
+
+- `storage/segments.rs`: rotation between batches at `market_segment_mib` (default 256 MiB) into linked complete journals of the one contract (`SEGMENT_NEXT` 331 / `SEGMENT_LINK` 330: predecessor name, frame count, sealed root, cumulative events, set id). No codec or format change; sealed segments never change.
+- `ChainReader`: cross-segment replay; missing/foreign/corrupt/unsealed-intermediate/orphan segments fail closed with reason; an unsealed last segment (crash) replays its prefix and stays INCOMPLETE.
+- Market writer lane, renders/export, capacity basis, `p0ctl`, `p0-journal verify/frames` read chains; strict batch journals stay single files (bound by file hash).
+- Corrected the stale `test_run_store` render expectation (capture writes no JSONL since A2).
+
+Tests: segments 2/2, lane rotation 1/1, storage/journal/market/verification 144, Python integration 26/26.
+
+Open: Shadow-evaluation lane segmentation (with its offset index, B1); real-load segment counts NOT_MEASURED.

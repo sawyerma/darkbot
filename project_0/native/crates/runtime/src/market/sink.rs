@@ -150,7 +150,7 @@ impl JournalSink {
             .ok_or_else(|| std::io::Error::other("MARKET_JOURNAL_ALREADY_FINISHED"))?;
         let sealed = writer.seal(complete)?;
         Ok(MarketJournalBinding {
-            schema: "Project0/MarketJournalBinding/3",
+            schema: "Project0/MarketJournalBinding/4",
             journal: MARKET_JOURNAL,
             event_frames: self.rows,
             root_sha256: journal::hex(&sealed.durable.hash),

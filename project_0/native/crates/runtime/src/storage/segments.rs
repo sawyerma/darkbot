@@ -1,0 +1,493 @@
+//! SK-07: segmented journals of the one `.p0j` contract (no second codec, no format change).
+//!
+//! A long journal is a chain of complete journals: the first segment keeps the base name
+//! (`market.p0j`), every following one is `market.000002.p0j`, `market.000003.p0j`, … Before a
+//! segment is sealed it gets a typed `SEGMENT_NEXT` frame naming its successor; the successor's
+//! first frame is a typed `SEGMENT_LINK` binding the predecessor's file name, frame count and
+//! sealed chain root (the hash of its manifest frame, which transitively covers every byte) plus
+//! the cumulative event count, all under one random set id. Sealed segments are never changed.
+//!
+//! `ChainReader` replays the whole chain in order and returns only event frames. It fails closed
+//! on a missing successor, a broken or foreign link, an unsealed intermediate segment, corrupt
+//! frames (CRC, chain, sequence) and orphan segment files beyond the chain end. An unsealed last
+//! segment (crash/power loss) is reported as such (`sealed = false`): INCOMPLETE, never repaired.
+//! A reader that does not know segments stops at the first segment's control frame or kind
+//! filter; every market reader of this crate goes through the chain reader.
+use crate::analytics::journal::{self, kind, Frame, Provenance, Writer};
+use crate::analytics::payload::Payload;
+use serde::{Deserialize, Serialize};
+use std::io;
+use std::path::{Path, PathBuf};
+
+fn bad(code: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, code)
+}
+
+/// The sealed predecessor as its successor binds it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SegmentRef {
+    pub file: String,
+    pub index: u32,
+    /// Frames of the segment including its control frames and manifest.
+    pub frames: u64,
+    /// Chain head after the manifest frame.
+    pub root_sha256: [u8; 32],
+    /// Event frames in all segments up to and including this one.
+    pub events_through: u64,
+}
+
+/// First frame of every segment after the first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SegmentLink {
+    pub set_id: [u8; 16],
+    pub index: u32,
+    pub previous: SegmentRef,
+}
+impl Payload for SegmentLink {
+    const KIND: u16 = kind::SEGMENT_LINK;
+}
+
+/// Last event-position frame of a segment that continues.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SegmentNext {
+    pub set_id: [u8; 16],
+    pub index: u32,
+    pub next_file: String,
+}
+impl Payload for SegmentNext {
+    const KIND: u16 = kind::SEGMENT_NEXT;
+}
+
+/// Path of segment `index` (1-based) of the chain starting at `first`.
+pub fn segment_path(first: &Path, index: u32) -> PathBuf {
+    if index <= 1 {
+        return first.to_path_buf();
+    }
+    let stem = first
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("journal");
+    first.with_file_name(format!("{stem}.{index:06}.p0j"))
+}
+
+/// Whether `path` names a continuation segment (`stem.NNNNNN.p0j`), not a chain head.
+pub fn is_continuation(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.rsplit_once('.'))
+        .is_some_and(|(_, n)| n.len() == 6 && n.bytes().all(|b| b.is_ascii_digit()))
+        && path.extension().and_then(|x| x.to_str()) == Some("p0j")
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn random16() -> io::Result<[u8; 16]> {
+    use std::io::Read;
+    let mut b = [0u8; 16];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
+    Ok(b)
+}
+
+/// Result of sealing a segmented journal.
+#[derive(Clone, Debug)]
+pub struct SealedSet {
+    pub durable: journal::Durable,
+    pub segments: u32,
+    pub last_file: PathBuf,
+    pub bytes: u64,
+}
+
+/// One logical journal written as rotating segments.
+pub struct SegmentedWriter {
+    first: PathBuf,
+    writer: Writer,
+    index: u32,
+    set_id: [u8; 16],
+    /// Event frames in the current segment and in all sealed ones.
+    events_current: u64,
+    events_sealed: u64,
+    sealed_bytes: u64,
+    max_segment_bytes: u64,
+}
+
+impl SegmentedWriter {
+    /// Creates the first segment (never overwrites). `max_segment_bytes == 0` disables rotation.
+    pub fn create(first: &Path, max_segment_bytes: u64) -> io::Result<Self> {
+        Ok(Self {
+            first: first.into(),
+            writer: Writer::create(first)?,
+            index: 1,
+            set_id: random16()?,
+            events_current: 0,
+            events_sealed: 0,
+            sealed_bytes: 0,
+            max_segment_bytes,
+        })
+    }
+    pub fn segments(&self) -> u32 {
+        self.index
+    }
+    /// Bytes of all segments written so far.
+    pub fn bytes(&self) -> u64 {
+        self.sealed_bytes + self.writer.position()
+    }
+    pub fn current_path(&self) -> &Path {
+        &self.writer.path
+    }
+    pub fn append_batch<'a, I>(&mut self, frames: I) -> io::Result<u64>
+    where
+        I: IntoIterator<Item = (u16, u16, &'a Provenance, &'a [u8])>,
+        I::IntoIter: Clone,
+    {
+        let n = self.writer.append_batch(frames)?;
+        self.events_current += n;
+        Ok(n)
+    }
+    pub fn sync(&mut self) -> io::Result<journal::Durable> {
+        self.writer.sync()
+    }
+    /// Rotates when the current segment reached the size limit (between batches only).
+    pub fn rotate_if_due(&mut self) -> io::Result<bool> {
+        if self.max_segment_bytes == 0 || self.writer.position() < self.max_segment_bytes {
+            return Ok(false);
+        }
+        self.rotate()?;
+        Ok(true)
+    }
+    fn rotate(&mut self) -> io::Result<()> {
+        let next_index = self.index + 1;
+        let next_path = segment_path(&self.first, next_index);
+        let control = Provenance {
+            source: journal::source::STORAGE,
+            ..Default::default()
+        };
+        self.writer.append_typed(
+            control.clone(),
+            &SegmentNext {
+                set_id: self.set_id,
+                index: self.index,
+                next_file: file_name(&next_path),
+            },
+        )?;
+        let durable = self.writer.seal(true)?;
+        let previous = SegmentRef {
+            file: file_name(&self.writer.path),
+            index: self.index,
+            frames: durable.journal_seq + 1,
+            root_sha256: durable.hash,
+            events_through: self.events_sealed + self.events_current,
+        };
+        let mut next = Writer::create(&next_path)?;
+        next.append_typed(
+            control,
+            &SegmentLink {
+                set_id: self.set_id,
+                index: next_index,
+                previous,
+            },
+        )?;
+        next.sync()?;
+        self.sealed_bytes += self.writer.position();
+        self.events_sealed += self.events_current;
+        self.events_current = 0;
+        self.writer = next;
+        self.index = next_index;
+        Ok(())
+    }
+    pub fn seal(mut self, complete: bool) -> io::Result<SealedSet> {
+        let durable = self.writer.seal(complete)?;
+        Ok(SealedSet {
+            durable,
+            segments: self.index,
+            last_file: self.writer.path.clone(),
+            bytes: self.sealed_bytes + self.writer.position(),
+        })
+    }
+}
+
+/// Replays a segment chain in order, returning only event frames (see module docs).
+pub struct ChainReader {
+    first: PathBuf,
+    reader: journal::Reader,
+    index: u32,
+    set_id: Option<[u8; 16]>,
+    next_file: Option<String>,
+    events: u64,
+    /// Seal state of the last segment read (meaningful after `next_frame` returned `None`).
+    pub sealed: bool,
+    pub complete: bool,
+}
+
+impl ChainReader {
+    pub fn open(first: &Path) -> io::Result<Self> {
+        Ok(Self {
+            first: first.into(),
+            reader: journal::Reader::open(first)?,
+            index: 1,
+            set_id: None,
+            next_file: None,
+            events: 0,
+            sealed: false,
+            complete: false,
+        })
+    }
+    /// Segments opened so far.
+    pub fn segments(&self) -> u32 {
+        self.index
+    }
+    /// Event frames returned so far.
+    pub fn events(&self) -> u64 {
+        self.events
+    }
+    pub fn next_frame(&mut self) -> io::Result<Option<Frame>> {
+        loop {
+            match self.reader.next_frame()? {
+                Some(f) if f.kind == kind::SEGMENT_NEXT => {
+                    let n: SegmentNext = f.typed()?;
+                    if n.index != self.index || self.set_id.is_some_and(|s| s != n.set_id) {
+                        return Err(bad("SEGMENT_NEXT_MISMATCH"));
+                    }
+                    if n.next_file != file_name(&segment_path(&self.first, self.index + 1)) {
+                        return Err(bad("SEGMENT_NEXT_NAME"));
+                    }
+                    self.set_id = Some(n.set_id);
+                    self.next_file = Some(n.next_file);
+                }
+                Some(f) if f.kind == kind::SEGMENT_LINK => {
+                    return Err(bad("SEGMENT_LINK_MISPLACED"))
+                }
+                Some(f) => {
+                    if self.next_file.is_some() && f.kind != journal::MANIFEST {
+                        return Err(bad("SEGMENT_DATA_AFTER_NEXT"));
+                    }
+                    if f.kind != journal::MANIFEST {
+                        self.events += 1;
+                    }
+                    return Ok(Some(f));
+                }
+                None => {
+                    self.sealed = self.reader.sealed;
+                    self.complete = self.reader.complete;
+                    let Some(next_file) = self.next_file.take() else {
+                        self.check_no_orphans()?;
+                        return Ok(None);
+                    };
+                    if !self.reader.sealed {
+                        return Err(bad("SEGMENT_INTERMEDIATE_UNSEALED"));
+                    }
+                    let previous = SegmentRef {
+                        file: file_name(&segment_path(&self.first, self.index)),
+                        index: self.index,
+                        frames: self.reader.frames(),
+                        root_sha256: self.reader.root(),
+                        events_through: self.events,
+                    };
+                    let path = self.first.with_file_name(&next_file);
+                    if !path.exists() {
+                        return Err(bad("SEGMENT_SUCCESSOR_MISSING"));
+                    }
+                    let mut next = journal::Reader::open(&path)?;
+                    let link = match next.next_frame()? {
+                        Some(f) if f.kind == kind::SEGMENT_LINK => f.typed::<SegmentLink>()?,
+                        _ => return Err(bad("SEGMENT_LINK_MISSING")),
+                    };
+                    if link.index != self.index + 1
+                        || Some(link.set_id) != self.set_id
+                        || link.previous != previous
+                    {
+                        return Err(bad("SEGMENT_LINK_MISMATCH"));
+                    }
+                    self.reader = next;
+                    self.index += 1;
+                    self.sealed = false;
+                    self.complete = false;
+                }
+            }
+        }
+    }
+    /// A continuation file beyond the chain end means a lost link: fail closed.
+    fn check_no_orphans(&self) -> io::Result<()> {
+        if segment_path(&self.first, self.index + 1).exists() {
+            return Err(bad("SEGMENT_ORPHAN"));
+        }
+        Ok(())
+    }
+}
+
+/// Verification of a whole chain (for `p0-journal`, reports and tests).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChainSummary {
+    pub segments: u32,
+    pub events: u64,
+    pub sealed: bool,
+    pub complete: bool,
+}
+
+pub fn verify_chain(first: &Path) -> Result<ChainSummary, String> {
+    let mut r = ChainReader::open(first).map_err(|e| format!("{}: {e}", first.display()))?;
+    loop {
+        match r.next_frame() {
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(e) => return Err(format!("segment {}: {e}", r.segments())),
+        }
+    }
+    Ok(ChainSummary {
+        segments: r.segments(),
+        events: r.events(),
+        sealed: r.sealed,
+        complete: r.complete,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analytics::payload;
+    use crate::market::observer::rows::MarketCoverage;
+
+    fn dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "p0_seg_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+    fn rows(n: u64) -> Vec<(Provenance, Vec<u8>)> {
+        (0..n)
+            .map(|i| {
+                let p = Provenance {
+                    source_seq: i,
+                    rx_ns: Some(i),
+                    ..Default::default()
+                };
+                let row = MarketCoverage::SlotFailed {
+                    slot: i,
+                    error: "x".repeat(200),
+                };
+                (p, payload::encode(&row).unwrap())
+            })
+            .collect()
+    }
+    fn write(path: &Path, max: u64, rows: &[(Provenance, Vec<u8>)], seal: bool) -> u32 {
+        let mut w = SegmentedWriter::create(path, max).unwrap();
+        for chunk in rows.chunks(4) {
+            w.append_batch(chunk.iter().map(|(p, b)| {
+                (
+                    MarketCoverage::KIND,
+                    MarketCoverage::SCHEMA,
+                    p,
+                    b.as_slice(),
+                )
+            }))
+            .unwrap();
+            w.rotate_if_due().unwrap();
+        }
+        let n = w.segments();
+        if seal {
+            w.seal(true).unwrap();
+        } else {
+            std::mem::forget(w); // crash: last segment never sealed
+        }
+        n
+    }
+    fn replay(path: &Path) -> io::Result<Vec<(u64, Vec<u8>)>> {
+        let mut r = ChainReader::open(path)?;
+        let mut out = Vec::new();
+        while let Some(f) = r.next_frame()? {
+            if f.kind != journal::MANIFEST {
+                out.push((f.provenance.source_seq, f.payload));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The segmented chain replays exactly the frames of an unsegmented journal (order, payload,
+    /// provenance), files keep their names, and the summary counts segments and events.
+    #[test]
+    fn segmented_replay_equals_single_journal() {
+        let d = dir("replay");
+        let r = rows(40);
+        let single = d.join("single.p0j");
+        assert_eq!(write(&single, 0, &r, true), 1);
+        let chained = d.join("market.p0j");
+        let n = write(&chained, 4096, &r, true);
+        assert!(n >= 3, "{n} segments");
+        assert!(segment_path(&chained, 2).exists() && is_continuation(&segment_path(&chained, 2)));
+        assert!(!is_continuation(&chained));
+        assert_eq!(replay(&single).unwrap(), replay(&chained).unwrap());
+        let s = verify_chain(&chained).unwrap();
+        assert_eq!(
+            (s.segments, s.events, s.sealed, s.complete),
+            (n, 40, true, true)
+        );
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Crash in the last segment is INCOMPLETE; a missing, corrupt or swapped intermediate
+    /// segment and an orphan beyond the chain end fail closed with their reason.
+    #[test]
+    fn crash_missing_corrupt_and_orphan_segments_fail_closed() {
+        let d = dir("faults");
+        let r = rows(40);
+        let crashed = d.join("c/market.p0j");
+        std::fs::create_dir_all(crashed.parent().unwrap()).unwrap();
+        write(&crashed, 4096, &r, false);
+        let s = verify_chain(&crashed).unwrap();
+        assert!(!s.sealed && s.events == 40, "{s:?}");
+
+        let base = d.join("base");
+        std::fs::create_dir_all(&base).unwrap();
+        let first = base.join("market.p0j");
+        let n = write(&first, 4096, &r, true);
+        let case = |name: &str, f: &dyn Fn(&Path)| {
+            let c = d.join(name);
+            std::fs::create_dir_all(&c).unwrap();
+            for i in 1..=n {
+                std::fs::copy(
+                    segment_path(&first, i),
+                    segment_path(&c.join("market.p0j"), i),
+                )
+                .unwrap();
+            }
+            f(&c.join("market.p0j"));
+            verify_chain(&c.join("market.p0j")).unwrap_err()
+        };
+        assert!(
+            case("missing", &|p| std::fs::remove_file(segment_path(p, 2))
+                .unwrap())
+            .contains("SEGMENT_SUCCESSOR_MISSING")
+        );
+        assert!(case("corrupt", &|p| {
+            let s = segment_path(p, 2);
+            let mut b = std::fs::read(&s).unwrap();
+            let at = b.len() / 2;
+            b[at] ^= 0xff;
+            std::fs::write(&s, b).unwrap();
+        })
+        .starts_with("segment 2"));
+        assert!(case("swapped", &|p| {
+            // A foreign segment 2 (other set) in place of the real one.
+            let other = d.join("other/market.p0j");
+            std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+            write(&other, 4096, &rows(40), true);
+            std::fs::copy(segment_path(&other, 2), segment_path(p, 2)).unwrap();
+        })
+        .contains("SEGMENT_LINK_MISMATCH"));
+        assert!(case("orphan", &|p| {
+            std::fs::copy(segment_path(p, 2), segment_path(p, n + 1)).unwrap();
+        })
+        .contains("SEGMENT_ORPHAN"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+}

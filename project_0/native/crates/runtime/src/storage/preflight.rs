@@ -339,6 +339,7 @@ fn run_journals(root: &Path) -> Vec<PathBuf> {
                 }
             } else if p.extension().and_then(|x| x.to_str()) == Some("p0j")
                 && name != REPORT_JOURNAL
+                && !super::segments::is_continuation(&p)
             {
                 out.push(p);
             }
@@ -363,7 +364,8 @@ struct JournalScan {
 }
 
 fn scan(path: &Path) -> Result<JournalScan, String> {
-    let mut r = journal::Reader::open(path).map_err(|e| format!("UNREADABLE: {e}"))?;
+    // SK-07: a lane journal is its whole segment chain.
+    let mut r = super::segments::ChainReader::open(path).map_err(|e| format!("UNREADABLE: {e}"))?;
     let mut s = JournalScan {
         frames: 0,
         bytes: 0,

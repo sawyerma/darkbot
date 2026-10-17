@@ -40,6 +40,8 @@ pub struct WriterConfig {
     pub stall_budget: Duration,
     /// Free disk space that must remain on the journal's filesystem.
     pub disk_reserve_bytes: u64,
+    /// SK-07: segment size; the journal rotates to a linked successor at this size (0 = never).
+    pub segment_bytes: u64,
     /// Test-only I/O fault injection: the writer fails at this batch.
     #[cfg(test)]
     pub fail_at_batch: Option<u64>,
@@ -57,6 +59,7 @@ impl WriterConfig {
             sync_interval: Duration::from_millis(l.market_writer_sync_ms),
             stall_budget: Duration::from_millis(l.market_writer_stall_ms),
             disk_reserve_bytes: l.market_disk_reserve_mib * MIB,
+            segment_bytes: l.market_segment_mib * MIB,
             #[cfg(test)]
             fail_at_batch: None,
         }
@@ -159,6 +162,8 @@ pub struct StorageMetrics {
     /// Highest rates seen by `status()` (bytes/s, rounded).
     pub max_ingress_bytes_per_s: u64,
     pub max_write_bytes_per_s: u64,
+    /// SK-07: segments of the journal (1 = never rotated).
+    pub segments: u32,
 }
 
 struct Pending {
@@ -221,7 +226,7 @@ impl MarketJournalWorker {
         let fixed = budget
             .acquire(fixed_bytes, Duration::ZERO)
             .map_err(str::to_string)?;
-        let writer = journal::Writer::create(path)
+        let writer = super::segments::SegmentedWriter::create(path, cfg.segment_bytes)
             .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
         let (tx, rx) = bounded::<Msg>("market-journal-writer", slots);
         let failure = Arc::new(Mutex::new(None));
@@ -420,7 +425,7 @@ impl Drop for MarketJournalWorker {
 }
 
 fn write_loop(
-    mut writer: journal::Writer,
+    mut writer: super::segments::SegmentedWriter,
     rx: &Consumer<Msg>,
     cfg: WriterConfig,
     budget: &MemoryBudget,
@@ -478,7 +483,7 @@ fn write_loop(
             if batch.len() > cfg.batch_frames {
                 m.backlog_batches += 1;
             }
-            let before = writer.position();
+            let before = writer.bytes();
             let started = Instant::now();
             let n = writer.append_batch(
                 batch
@@ -489,15 +494,21 @@ fn write_loop(
             m.frames += n;
             m.batches += 1;
             m.max_batch_frames = m.max_batch_frames.max(n);
-            m.bytes_written = writer.position();
+            m.bytes_written = writer.bytes();
             counters
                 .written_bytes
-                .fetch_add(writer.position() - before, Ordering::Relaxed);
+                .fetch_add(writer.bytes() - before, Ordering::Relaxed);
             counters.written_frames.fetch_add(n, Ordering::Relaxed);
             m.memory = m.memory.worst(MemorySample::now());
             // Written: release the reserved bytes of the whole batch.
             batch.clear();
             first_pending = None;
+            // SK-07: rotate between batches only (the successor is linked and synced).
+            if writer.rotate_if_due()? {
+                m.syncs += 2;
+                last_sync = Instant::now();
+            }
+            m.segments = writer.segments();
         }
         if seal.is_none() && last_sync.elapsed() >= cfg.sync_interval && !sync_due && m.frames > 0 {
             m.deferred_syncs += 1;
@@ -510,9 +521,11 @@ fn write_loop(
             last_sync = Instant::now();
         }
         if let Some(complete) = seal {
-            let durable = writer.seal(complete)?;
+            m.segments = writer.segments();
+            let set = writer.seal(complete)?;
+            let durable = set.durable;
             m.syncs += 1;
-            m.bytes_written = writer.position();
+            m.bytes_written = set.bytes;
             m.memory = m.memory.worst(MemorySample::now());
             m.budget = budget.snapshot();
             return Ok(Sealed {
@@ -539,6 +552,7 @@ mod tests {
             sync_interval: Duration::from_millis(20),
             stall_budget: Duration::from_millis(50),
             disk_reserve_bytes: 0,
+            segment_bytes: 0,
             fail_at_batch: None,
         }
     }
@@ -760,6 +774,45 @@ mod tests {
         assert!(s.terminal().starts_with("[MARKET/STORAGE] queue="));
         assert!(w.seal(true).is_err());
         assert_eq!(frames_in(&path), (0, false, false));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// SK-07: the lane rotates into linked segments between batches; the chain replays every
+    /// admitted frame once and in order, and the seal reports the segment count.
+    #[test]
+    fn lane_rotates_segments_and_chain_replays_every_frame() {
+        let d = dir("segments");
+        let mut c = cfg(64 * MIB);
+        c.segment_bytes = 2048;
+        let path = d.join("market.p0j");
+        let mut w = MarketJournalWorker::start(&path, c).unwrap();
+        for i in 0..200u64 {
+            let p = Provenance {
+                source_seq: i,
+                ..Default::default()
+            };
+            w.submit(p, &row(i)).unwrap();
+        }
+        let sealed = w.seal(true).unwrap();
+        let chain = super::super::segments::verify_chain(&path).unwrap();
+        assert!(chain.segments > 2, "{chain:?}");
+        assert_eq!(
+            (
+                chain.events,
+                chain.sealed,
+                chain.complete,
+                sealed.metrics.segments
+            ),
+            (200, true, true, chain.segments)
+        );
+        let mut r = super::super::segments::ChainReader::open(&path).unwrap();
+        let mut seqs = Vec::new();
+        while let Some(f) = r.next_frame().unwrap() {
+            if f.kind != journal::MANIFEST {
+                seqs.push(f.provenance.source_seq);
+            }
+        }
+        assert_eq!(seqs, (0..200).collect::<Vec<_>>());
         std::fs::remove_dir_all(d).unwrap();
     }
 }
