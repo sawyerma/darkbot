@@ -9,9 +9,9 @@
 //!
 //! `ChainReader` replays the whole chain in order and returns only event frames (plus the last
 //! segment's manifest; continued segments' manifests are chain-internal). It fails closed
-//! on a missing successor, a broken or foreign link, an unsealed intermediate segment, corrupt
+//! on an interior missing successor, a broken or foreign link, an unsealed intermediate segment, corrupt
 //! frames (CRC, chain, sequence) and orphan segment files beyond the chain end. An unsealed last
-//! segment (crash/power loss) is reported as such (`sealed = false`): INCOMPLETE, never repaired.
+//! segment or physically torn tail (crash/power loss) is reported as such (`sealed = false`): INCOMPLETE, never repaired.
 //! A reader that does not know segments stops at the first segment's control frame or kind
 //! filter; every market reader of this crate goes through the chain reader.
 use crate::analytics::journal::{self, kind, Frame, Provenance, Writer};
@@ -228,6 +228,7 @@ impl SegmentedWriter {
 /// Replays a segment chain in order, returning only event frames (see module docs).
 pub struct ChainReader {
     first: PathBuf,
+    ended: bool,
     reader: journal::Reader,
     index: u32,
     set_id: Option<[u8; 16]>,
@@ -242,7 +243,8 @@ impl ChainReader {
     pub fn open(first: &Path) -> io::Result<Self> {
         Ok(Self {
             first: first.into(),
-            reader: journal::Reader::open(first)?,
+            ended: false,
+            reader: journal::Reader::open_capture(first)?,
             index: 1,
             set_id: None,
             next_file: None,
@@ -260,6 +262,9 @@ impl ChainReader {
         self.events
     }
     pub fn next_frame(&mut self) -> io::Result<Option<Frame>> {
+        if self.ended {
+            return Ok(None);
+        }
         loop {
             match self.reader.next_frame()? {
                 Some(f) if f.kind == kind::SEGMENT_NEXT => {
@@ -294,9 +299,26 @@ impl ChainReader {
                     self.complete = self.reader.complete;
                     let Some(next_file) = self.next_file.take() else {
                         self.check_no_orphans()?;
+                        self.ended = true;
                         return Ok(None);
                     };
-                    if !self.reader.sealed {
+                    let path = self.first.with_file_name(&next_file);
+                    match std::fs::symlink_metadata(&path) {
+                        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                            self.check_no_orphans()
+                                .map_err(|_| bad("SEGMENT_SUCCESSOR_MISSING"))?;
+                            self.sealed = false;
+                            self.complete = false;
+                            self.ended = true;
+                            return Ok(None);
+                        }
+                        Err(e) => return Err(e),
+                        Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() => {
+                            return Err(bad("SEGMENT_NOT_REGULAR"))
+                        }
+                        Ok(_) => {}
+                    }
+                    if !self.reader.sealed || !self.reader.complete {
                         return Err(bad("SEGMENT_INTERMEDIATE_UNSEALED"));
                     }
                     let previous = SegmentRef {
@@ -306,11 +328,7 @@ impl ChainReader {
                         root_sha256: self.reader.root(),
                         events_through: self.events,
                     };
-                    let path = self.first.with_file_name(&next_file);
-                    if !path.exists() {
-                        return Err(bad("SEGMENT_SUCCESSOR_MISSING"));
-                    }
-                    let mut next = journal::Reader::open(&path)?;
+                    let mut next = journal::Reader::open_capture(&path)?;
                     let link = match next.next_frame()? {
                         Some(f) if f.kind == kind::SEGMENT_LINK => f.typed::<SegmentLink>()?,
                         _ => return Err(bad("SEGMENT_LINK_MISSING")),
@@ -331,8 +349,30 @@ impl ChainReader {
     }
     /// A continuation file beyond the chain end means a lost link: fail closed.
     fn check_no_orphans(&self) -> io::Result<()> {
-        if segment_path(&self.first, self.index + 1).exists() {
-            return Err(bad("SEGMENT_ORPHAN"));
+        let stem = self
+            .first
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| bad("SEGMENT_NAME"))?;
+        for entry in std::fs::read_dir(
+            self.first
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new(".")),
+        )? {
+            let name = entry?.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if let Some(n) = name
+                .strip_prefix(&format!("{stem}."))
+                .and_then(|n| n.strip_suffix(".p0j"))
+            {
+                if n.len() == 6
+                    && n.bytes().all(|b| b.is_ascii_digit())
+                    && n.parse::<u32>().unwrap_or(0) > self.index
+                {
+                    return Err(bad("SEGMENT_ORPHAN"));
+                }
+            }
         }
         Ok(())
     }
@@ -508,5 +548,103 @@ mod tests {
         })
         .contains("SEGMENT_ORPHAN"));
         std::fs::remove_dir_all(d).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod torn_tail_tests {
+    use super::*;
+    use crate::market::observer::rows::MarketCoverage;
+    fn temp() -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "p0_torn_{}",
+            solana_sdk::pubkey::Pubkey::new_unique()
+        ));
+        std::fs::create_dir(&d).unwrap();
+        d
+    }
+    #[test]
+    fn capture_torn_tail_is_incomplete_but_wallet_and_resume_stay_strict() {
+        let d = temp();
+        let p = d.join("market.p0j");
+        let mut w = Writer::create(&p).unwrap();
+        w.append_typed(
+            Provenance::default(),
+            &MarketCoverage::SlotFailed {
+                slot: 1,
+                error: "x".into(),
+            },
+        )
+        .unwrap();
+        let prefix = w.position();
+        w.append_typed(
+            Provenance::default(),
+            &MarketCoverage::SlotFailed {
+                slot: 2,
+                error: "y".into(),
+            },
+        )
+        .unwrap();
+        w.sync().unwrap();
+        drop(w);
+        let full = std::fs::read(&p).unwrap();
+        for len in prefix + 1..full.len() as u64 {
+            std::fs::write(&p, &full[..len as usize]).unwrap();
+            let before = std::fs::read(&p).unwrap();
+            let s = verify_chain(&p).unwrap();
+            assert_eq!(s.events, 1);
+            assert!(!s.complete && !s.sealed);
+            let mut strict = journal::Reader::open(&p).unwrap();
+            assert!(strict.next_frame().unwrap().is_some());
+            assert!(strict.next_frame().is_err());
+            assert!(Writer::resume(&p).is_err());
+            assert_eq!(before, std::fs::read(&p).unwrap());
+        }
+        let mut corrupt = full.clone();
+        corrupt[prefix as usize + 10] ^= 1;
+        std::fs::write(&p, corrupt).unwrap();
+        assert!(verify_chain(&p).unwrap_err().contains("FRAME_CRC"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn interrupted_rotate_missing_final_successor_is_incomplete_and_orphan_holes_fail() {
+        for sealed in [false, true] {
+            let d = temp();
+            let p = d.join("market.p0j");
+            let mut w = Writer::create(&p).unwrap();
+            w.append_typed(
+                Provenance::default(),
+                &MarketCoverage::SlotFailed {
+                    slot: 1,
+                    error: "x".into(),
+                },
+            )
+            .unwrap();
+            w.append_typed(
+                Provenance::default(),
+                &SegmentNext {
+                    set_id: [1; 16],
+                    index: 1,
+                    next_file: "market.000002.p0j".into(),
+                },
+            )
+            .unwrap();
+            if sealed {
+                w.seal(true).unwrap();
+            } else {
+                w.sync().unwrap();
+            }
+            drop(w);
+            let mut r = ChainReader::open(&p).unwrap();
+            while r.next_frame().unwrap().is_some() {}
+            assert!(!r.complete && !r.sealed);
+            assert!(r.next_frame().unwrap().is_none());
+            assert!(!r.complete && !r.sealed);
+            std::fs::write(segment_path(&p, 9), b"orphan").unwrap();
+            assert!(verify_chain(&p)
+                .unwrap_err()
+                .contains("SEGMENT_SUCCESSOR_MISSING"));
+            std::fs::remove_dir_all(d).unwrap();
+        }
     }
 }

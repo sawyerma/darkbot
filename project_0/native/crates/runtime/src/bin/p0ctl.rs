@@ -5,7 +5,7 @@
 //! never starts a second runtime. Observe-only: LIVE and submission stay disabled.
 //!
 //! ```text
-//! p0ctl [--project DIR] doctor [--scope offline]
+//! p0ctl [--project DIR] doctor [--scope offline|network] [--network-approved TOKEN --genesis-hash HASH --provider-evidence FILE --output FILE --capture-source logs|transactions] [-- OPERATIONAL_ARGS]
 //! p0ctl [--project DIR] preflight --duration D [--capture-source logs|transactions]
 //!       [--chain-verify off|index|strict|crosscheck] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
 //! p0ctl [--project DIR] run start --duration D [test.sh options…]
@@ -56,10 +56,23 @@ fn doctor(project: &Path, args: &[String]) -> Result<bool, String> {
     match value(args, "--scope").as_deref() {
         None | Some("offline") => {}
         Some("network") => {
-            return Err("DOCTOR_NETWORK_NOT_AVAILABLE: network checks (BOOT-03…08) need explicit Mainnet read permission and are not run by this build".into())
+            #[cfg(feature = "crate_health")]
+            {
+                return darkbot_runner::orchestration::boot_network::execute(project, args);
+            }
+            #[cfg(not(feature = "crate_health"))]
+            {
+                return Err("BOOT_NETWORK_REQUIRES_CRATE_HEALTH".into());
+            }
         }
         Some(s) => return Err(format!("SCOPE_INVALID: {s}")),
     }
+    darkbot_solana::runtime_config::Resolved::parse(
+        args.split(|a| a == "--").nth(1).unwrap_or(&[]),
+        &|k| std::env::var(k).ok(),
+    )?
+    .native_only()?
+    .activate()?;
     let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
     print!("{}", audit.terminal());
     Ok(audit.verdict != AuditVerdict::Blocked)
@@ -107,15 +120,14 @@ fn preflight_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const RUN_START_USAGE: &str =
-    "p0ctl run start --duration 10m|1h|5h|24h [--mainnet-approved TOKEN] [--capture-source logs|transactions]
+    "p0ctl run start --duration 10m|1h|5h|24h [--network-audit FILE --mainnet-approved TOKEN] [--capture-source logs|transactions]
     [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
     [--verify-bytes N] [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N]
     [--verify-max-pages N] [--report-* VALUE ...] [--format table|csv] [-- OPERATIONAL_ARGS...]
 Typed C0-E1 measurement: offline boot audit, owner lock, capture, then native strict
 verification (when selected) and the native report. LIVE and submission stay disabled.
-OFFLINE_READY_NETWORK_NOT_RUN is no Mainnet release: the capture reads Mainnet only with the
-operator's explicit approval of the audited state, `--mainnet-approved TOKEN` (token as
-`p0ctl doctor` prints it; it changes with every source, config or flag change).";
+OFFLINE_READY_NETWORK_NOT_RUN is no Mainnet release. A sealed, fresh READY network audit
+and the operator's explicit --mainnet-approved TOKEN for it are required.";
 
 /// Set by `run start` for its launcher child only: `run start` and `capture.sh econ4h` refuse to
 /// run inside a launcher, so `run start` -> `capture.sh econ4h-launcher` can never recurse.
@@ -158,6 +170,11 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
             "RUNTIME_OWNER_LOCKED pid={pid} run_id={run_id}: stop it first (p0ctl run stop)"
         ));
     }
+    let mut operational = args.split(|a| a == "--").nth(1).unwrap_or(&[]).to_vec();
+    operational.extend(["--duration".into(), duration.clone()]);
+    darkbot_solana::runtime_config::Resolved::parse(&operational, &|k| std::env::var(k).ok())?
+        .native_only()?
+        .activate()?;
     let flags = SafetyFlags::from_env();
     let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
     print!("{}", audit.terminal());
@@ -167,22 +184,34 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     // An offline-only verdict is no Mainnet release (network checks BOOT-03…08 NOT_RUN). The
     // capture reads Mainnet, so it starts only with the operator's explicit approval of exactly
     // this audited state.
-    let token = &audit.readiness_token[..16];
-    if audit.verdict != AuditVerdict::Ready {
-        if value(options, "--mainnet-approved").as_deref() != Some(token) {
-            return Err(format!(
-                "MAINNET_APPROVAL_REQUIRED: boot verdict {} is no Mainnet release (network checks NOT_RUN); nothing was started. Start only with the operator's explicit approval of this audited state: --mainnet-approved {token}",
-                audit.verdict.as_str()
-            ));
-        }
-        println!("[p0ctl] Mainnet read run approved by the operator for readiness token {token}; network checks stay NOT_RUN");
+    let network_path = value(options, "--network-audit")
+        .ok_or("BOOT_NETWORK_AUDIT_REQUIRED: offline approval cannot qualify network readiness")?;
+    let network: boot_audit::NetworkAudit = journal::read_typed_value(Path::new(&network_path))
+        .map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
+    let binary = boot_audit::binary_identity()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "BOOT_CLOCK")?
+        .as_secs();
+    network.validate_start(
+        &audit.identity,
+        &binary,
+        now,
+        &value(options, "--capture-source").unwrap_or_else(|| "logs".into()),
+    )?;
+    let token = &network.audit.readiness_token[..16];
+    if value(options, "--mainnet-approved").as_deref() != Some(token) {
+        return Err(
+            "MAINNET_APPROVAL_REQUIRED: explicit approval of the network readiness token required"
+                .into(),
+        );
     }
     // The approval is p0ctl's own option; the launcher gets the remaining arguments.
     let mut launcher_args = Vec::new();
     let mut rest = args.iter();
     let mut in_options = true;
     while let Some(arg) = rest.next() {
-        if in_options && arg == "--mainnet-approved" {
+        if in_options && matches!(arg.as_str(), "--mainnet-approved" | "--network-audit") {
             rest.next();
             continue;
         }
@@ -202,6 +231,15 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     });
     // BOOT-12: the audited identity must still hold right before the start.
     boot_audit::recheck(&audit, project, flags)?;
+    network.validate_start(
+        &boot_audit::identity(project, flags)?,
+        &binary,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "BOOT_CLOCK")?
+            .as_secs(),
+        &value(options, "--capture-source").unwrap_or_else(|| "logs".into()),
+    )?;
     control::install_stop_handler()?;
     let mut child = Command::new(project.join("scripts/capture.sh"))
         .arg("econ4h-launcher")

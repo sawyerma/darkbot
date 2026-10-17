@@ -653,6 +653,7 @@ impl WsRpcControlSource {
                 .map_err(|e| IngressError::Connect(e.to_string()))?;
         }
         let mut sub_ids: HashMap<u64, (SubKind, Option<Pubkey>)> = HashMap::new();
+        let ack_deadline = tokio::time::Instant::now() + self.cfg.idle_timeout;
         let mut stream_ready = false; // [FIX-36]
         let mut frames: u64 = 0;
         let mut last_frame_ns: Option<u64> = None;
@@ -670,10 +671,16 @@ impl WsRpcControlSource {
                 return Ok(());
             }
             let now = tokio::time::Instant::now();
+            if !stream_ready && now >= ack_deadline {
+                return Err(IngressError::Connect("WSS_ACK_TIMEOUT".into()));
+            }
             if !*healthy && deadline.is_some_and(|d| now >= d) {
                 return Err(IngressError::Connect("WSS_RECOVERY_BUDGET".into()));
             }
-            if self.cfg.subscription.slots && last_progress_at.elapsed() >= self.cfg.idle_timeout {
+            if stream_ready
+                && self.cfg.subscription.slots
+                && last_progress_at.elapsed() >= self.cfg.idle_timeout
+            {
                 return Err(IngressError::Connect("WSS_SLOT_PROGRESS_TIMEOUT".into()));
             }
             // [C0-MO] Transport heartbeat (only when configured). A failed send is a connection
@@ -768,6 +775,8 @@ impl WsRpcControlSource {
                 // [FIX-36] StreamReady-Barriere: alle Subscriptions bestätigt → genau ein `Reconnected`.
                 if !stream_ready && pending.is_empty() {
                     stream_ready = true;
+                    last_progress_at = tokio::time::Instant::now();
+                    last_app_frame_at = last_progress_at;
                     self.transport(sink, "READY", "SUBSCRIPTIONS_ACKED", attempt, *last_slot);
                     eprintln!("[ws_rpc] session attempt={} StreamReady", attempt);
                     if self.cfg.recovery_budget.is_none() {
@@ -1084,4 +1093,65 @@ mod tests {
         let msg = json!({"method":"accountNotification","params":{"subscription":3,"result":{"context":{"slot":1},"value":{"lamports":1,"owner":Pubkey::new_unique().to_string(),"data":["","base64"]}}}});
         assert!(parse_notification(&msg, &HashMap::new(), 1).is_err());
     }
+}
+
+/// One bounded read-only liveness observation through the production ingress, no new feed.
+/// All subscriptions must ACK; two increasing slots and source application data are required.
+pub fn audit_liveness(
+    url: String,
+    program: Pubkey,
+    transactions: bool,
+    budget: Duration,
+) -> Result<(u64, u64), &'static str> {
+    use super::{IngressEvent, IngressHalt, IngressSource, SlotWatch};
+    let sub = Subscription {
+        slots: true,
+        logs_mentioning: if transactions { vec![] } else { vec![program] },
+        transactions_mentioning: if transactions { vec![program] } else { vec![] },
+        ..Default::default()
+    };
+    let mut cfg = WsRpcConfig::new(url, sub);
+    cfg.idle_timeout = budget;
+    cfg.recovery_budget = Some(budget);
+    cfg.recovery_attempts = 1;
+    cfg.heartbeat_interval = Some(Duration::from_secs(1));
+    let (tx, rx) = darkbot_common::channel::bounded("boot-wss", 256);
+    let stop = darkbot_common::lifecycle::Shutdown::new();
+    let worker_stop = stop.clone();
+    let halt = IngressHalt::new();
+    let worker_halt = halt.clone();
+    let source = WsRpcControlSource::new(cfg, Clock::new());
+    let thread =
+        std::thread::spawn(move || source.run(tx, worker_stop, worker_halt, SlotWatch::new()));
+    let end = std::time::Instant::now() + budget;
+    let (mut ack, mut first, mut last, mut data) = (false, None, None, false);
+    while std::time::Instant::now() < end && !halt.is_raised() {
+        while let Some(event) = rx.try_pop() {
+            match event {
+                IngressEvent::Transport { state: "READY", .. } => ack = true,
+                IngressEvent::Slot(s) if ack => {
+                    first.get_or_insert(s.slot);
+                    last = Some(s.slot);
+                }
+                IngressEvent::Logs(_) | IngressEvent::Transaction(_) if ack => data = true,
+                IngressEvent::Gap { .. } | IngressEvent::Fatal { .. } => halt.raise(),
+                _ => {}
+            }
+        }
+        if ack && data && first.zip(last).is_some_and(|(a, b)| b > a) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    stop.request();
+    let ended = thread.join();
+    if ended.is_err() || halt.is_raised() {
+        return Err("BOOT_WSS_FAILED");
+    }
+    if ack && data {
+        if let Some((a, b)) = first.zip(last).filter(|(a, b)| b > a) {
+            return Ok((a, b));
+        }
+    }
+    Err("BOOT_WSS_LIVENESS_UNPROVEN")
 }

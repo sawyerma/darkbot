@@ -88,6 +88,7 @@ pub mod kind {
     pub const MT0_SNAPSHOT: u16 = 600;
     /// FE-01 read-only observation: effective configuration, each saved RPC read
     /// `{method, params, result|error}` (fsynced before it is decoded), and the result.
+    pub const BOOT_NETWORK: u16 = 710;
     pub const FE01_CONFIG: u16 = 700;
     pub const FE01_READ: u16 = 701;
     pub const FE01_RESULT: u16 = 702;
@@ -139,6 +140,7 @@ pub mod kind {
         OPERATIONAL_CONFIG,
         RUN_MANIFEST,
         MT0_SNAPSHOT,
+        BOOT_NETWORK,
         FE01_CONFIG,
         FE01_READ,
         FE01_RESULT,
@@ -744,6 +746,8 @@ impl Writer {
 }
 
 pub struct Reader {
+    capture_tail: bool,
+    pub tail_truncated: bool,
     file: File,
     next: u64,
     last: [u8; 32],
@@ -753,6 +757,16 @@ pub struct Reader {
     pub identities: [u8; 48],
 }
 impl Reader {
+    /// Capture-only prefix salvage. Financial journals and Writer::resume use strict open.
+    pub fn open_capture(path: &Path) -> io::Result<Self> {
+        let meta = fs::symlink_metadata(path)?;
+        if !meta.is_file() || meta.file_type().is_symlink() {
+            return Err(bad("CAPTURE_NOT_REGULAR"));
+        }
+        let mut r = Self::open(path)?;
+        r.capture_tail = true;
+        Ok(r)
+    }
     pub fn open(path: &Path) -> io::Result<Self> {
         let mut file = File::open(path)?;
         let mut header = [0u8; HEADER_LEN as usize];
@@ -765,6 +779,8 @@ impl Reader {
             return Err(bad("JOURNAL_VERSION_OR_MAGIC"));
         }
         Ok(Self {
+            capture_tail: false,
+            tail_truncated: false,
             file,
             next: 0,
             last: sha(&header),
@@ -783,7 +799,22 @@ impl Reader {
         self.last
     }
     pub fn next_frame(&mut self) -> io::Result<Option<Frame>> {
-        let Some((f, previous)) = read_frame(&mut self.file, self.position)? else {
+        if self.tail_truncated {
+            return Ok(None);
+        }
+        let frame = match read_frame(&mut self.file, self.position) {
+            Err(e)
+                if self.capture_tail
+                    && !self.sealed
+                    && e.kind() == io::ErrorKind::UnexpectedEof =>
+            {
+                self.tail_truncated = true;
+                self.complete = false;
+                return Ok(None);
+            }
+            other => other?,
+        };
+        let Some((f, previous)) = frame else {
             return Ok(None);
         };
         if self.sealed {
@@ -823,17 +854,26 @@ fn read_frame(file: &mut File, offset: u64) -> io::Result<Option<(Frame, [u8; 32
     let mut length = [0; 4];
     match file.read(&mut length[..1])? {
         0 => return Ok(None),
-        _ => file
-            .read_exact(&mut length[1..])
-            .map_err(|_| bad("FRAME_TRUNCATED"))?,
+        _ => file.read_exact(&mut length[1..]).map_err(|e| {
+            if e.kind() == io::ErrorKind::UnexpectedEof {
+                io::Error::new(io::ErrorKind::UnexpectedEof, "FRAME_TRUNCATED")
+            } else {
+                e
+            }
+        })?,
     };
     let length = u32::from_le_bytes(length) as usize;
     if !(FIXED + 36..=MAX_FRAME).contains(&length) {
         return Err(bad("FRAME_LENGTH"));
     }
     let mut b = vec![0; length];
-    file.read_exact(&mut b)
-        .map_err(|_| bad("FRAME_TRUNCATED"))?;
+    file.read_exact(&mut b).map_err(|e| {
+        if e.kind() == io::ErrorKind::UnexpectedEof {
+            io::Error::new(io::ErrorKind::UnexpectedEof, "FRAME_TRUNCATED")
+        } else {
+            e
+        }
+    })?;
     let end = length - 36;
     if crc(&b[..end]) != u32::from_le_bytes(b[end..end + 4].try_into().unwrap()) {
         return Err(bad("FRAME_CRC"));

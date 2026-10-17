@@ -102,19 +102,19 @@ class MeasurementCli(unittest.TestCase):
                 p = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', '61s', *approval], cwd=tmp,
                                    env={**env, 'P0_ECON_RUN_ID': 'unapproved'}, capture_output=True, text=True, timeout=120)
                 self.assertEqual(p.returncode, 2, p.stderr[-2000:])
-                self.assertIn('exactly one --mainnet-approved' if len(approval) > 2 else f'MAINNET_APPROVAL_REQUIRED: boot verdict OFFLINE_READY_NETWORK_NOT_RUN is no Mainnet release', p.stderr)
+                self.assertIn('exactly one --mainnet-approved' if len(approval) > 2 else 'BOOT_NETWORK_AUDIT_REQUIRED', p.stderr)
                 self.assertNotIn('[p0ctl] run unapproved started', p.stdout)
                 self.assertFalse((tmp / 'runs').exists())
             approved = ['--mainnet-approved', token]
             for duration, seconds, relative in [('10m', 600, False), ('61s', 61, False), ('61s', 61, True)]:
                 run_id = 'relative_config' if relative else duration
-                command = [str(SCRIPTS / 'test.sh'), '--duration', duration, *approved]
+                command = [str(SCRIPTS / 'capture.sh'), 'econ4h-launcher', '--duration', duration]
                 if relative:
                     # Native text config, relative to the caller's directory (the launcher changes directory).
                     (tmp / 'relative.conf').write_text('# operator override\nrpc-rps = 1\n')
                     command += ['--', '--config', 'relative.conf']
                 p = subprocess.run(command, cwd=tmp,
-                                   env={**env, 'P0_ECON_RUN_ID': run_id}, capture_output=True, text=True, timeout=600)
+                                   env={**env, 'P0_ECON_RUN_ID': run_id, 'P0_CTL_LAUNCH_RUN_ID': run_id}, capture_output=True, text=True, timeout=600)
                 self.assertNotIn('No such file or directory', p.stderr)
                 self.assertNotIn('Traceback', p.stderr)
                 self.assertEqual(p.returncode, 2, p.stderr[-2000:])  # no network: the real capture fails closed at startup
@@ -142,8 +142,7 @@ class MeasurementCli(unittest.TestCase):
                                       env={**env, 'P0_ECON_RUN_MODE': 'quick', 'P0_ECON_RUN_ID': 'quick'}, capture_output=True, timeout=60)
             self.assertEqual(rejected.returncode, 2)
             self.assertFalse((tmp / 'runs/quick').exists())
-            # p0ctl drives the same launcher: offline boot audit, run id and owner lock handed over,
-            # child exit reported; the lock is released afterwards and records the last owner.
+            # Offline approval alone may no longer start a network run; no runtime owner is created.
             if ctl.exists():
                 lock = tmp / 'runtime.lock'
                 p = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'run', 'start', '--duration', '61s', *approved], cwd=tmp,
@@ -151,11 +150,9 @@ class MeasurementCli(unittest.TestCase):
                                    capture_output=True, text=True, timeout=600)
                 self.assertEqual(p.returncode, 2, p.stderr[-2000:])
                 self.assertIn('PROJECT 0 BOOT AUDIT scope=offline', p.stdout)
-                self.assertIn('[p0ctl] run p0ctl started', p.stdout)
-                self.assertIn('[p0ctl] run p0ctl ended', p.stdout)
-                # Explicit P0_ECON_OUT_DIR keeps layout V1: the native capacity report sits at the run root.
-                self.assertTrue((tmp / 'runs/p0ctl/capacity_preflight.p0j').exists(), p.stdout[-3000:])
-                self.assertIn('run_id=p0ctl', lock.read_text())
+                self.assertIn('BOOT_NETWORK_AUDIT_REQUIRED', p.stderr)
+                self.assertNotIn('[p0ctl] run p0ctl started', p.stdout)
+                self.assertFalse((tmp / 'runs/p0ctl').exists())
                 status = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'run', 'stop'], env={**env, 'P0_RUNTIME_LOCK': str(lock)},
                                         capture_output=True, text=True, timeout=60)
                 self.assertEqual((status.returncode, status.stdout.strip()), (0, 'NOT_RUNNING: nothing to stop'))

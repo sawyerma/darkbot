@@ -2,12 +2,17 @@
 //!
 //! Status: UNTESTED / VERIFY (solana-client Signaturen; getTransaction-Meta-Felder).
 
-use super::{LandingEvidence, LandingOutcome, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError};
-use solana_client::rpc_config::{RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig};
+use super::{
+    LandingEvidence, LandingOutcome, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck,
+    SubmitError,
+};
+use solana_account_decoder::UiAccountEncoding;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{RpcSendTransactionConfig, RpcTransactionConfig};
+use solana_client::rpc_config::{
+    RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig,
+};
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel}; // [FIX-13]
-use solana_account_decoder::UiAccountEncoding;
 use solana_sdk::account::Account;
 use solana_sdk::clock::Clock as SolanaClock;
 use solana_sdk::pubkey::Pubkey;
@@ -16,14 +21,49 @@ use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status::UiTransactionEncoding;
 use std::str::FromStr;
 
-fn safe_rpc_error(e: &solana_client::client_error::ClientError) -> String {
-    use solana_client::client_error::ClientErrorKind as K;
+/// Never render remote text, nested errors, URLs or simulation logs at an error boundary.
+pub fn safe_rpc_error(e: &solana_client::client_error::ClientError) -> String {
+    use solana_client::{client_error::ClientErrorKind as K, rpc_request::RpcError};
     match e.kind() {
-        K::RpcError(rpc) => format!("RPC response error: {rpc}"),
-        K::SerdeJson(err) => format!("RPC decode error: {err}"),
-        K::SigningError(err) => format!("RPC signing error: {err}"),
-        K::TransactionError(err) => format!("RPC transaction error: {err:?}"),
-        _ => "RPC transport error".into(),
+        K::RpcError(RpcError::RpcResponseError { code, .. }) => format!("RPC_RESPONSE code={code}"),
+        K::RpcError(_) => "RPC_REQUEST_ERROR".into(),
+        K::SerdeJson(_) => "RPC_DECODE_ERROR".into(),
+        K::SigningError(_) => "RPC_SIGNING_ERROR".into(),
+        K::TransactionError(_) => "RPC_TRANSACTION_ERROR".into(),
+        K::Reqwest(e) => safe_http_error(e).into(),
+        K::Io(_) => "RPC_IO_ERROR".into(),
+        _ => "RPC_TRANSPORT_ERROR".into(),
+    }
+}
+pub(super) fn safe_http_error(e: &reqwest::Error) -> &'static str {
+    if e.is_timeout() {
+        "RPC_TIMEOUT"
+    } else if e.is_connect() {
+        "RPC_CONNECT"
+    } else if e.is_decode() {
+        "RPC_DECODE_ERROR"
+    } else {
+        "RPC_HTTP_OR_TRANSPORT"
+    }
+}
+pub(super) fn safe_remote_error(v: &serde_json::Value) -> String {
+    match v.get("code").and_then(|v| v.as_i64()) {
+        Some(code) => format!("RPC_RESPONSE code={code}"),
+        None => "RPC_REMOTE_ERROR".into(),
+    }
+}
+fn submission_error(e: &solana_client::client_error::ClientError) -> SubmitError {
+    use solana_client::{client_error::ClientErrorKind as K, rpc_request::RpcError};
+    // Only structured definitive rejections may release admission. Decode failures,
+    // local transport/budget strings and unknown remote codes cannot prove non-submission.
+    match e.kind() {
+        K::RpcError(RpcError::RpcResponseError {
+            code: -32002 | -32600 | -32602,
+            ..
+        })
+        | K::SigningError(_)
+        | K::TransactionError(_) => SubmitError::Rejected(safe_rpc_error(e)),
+        _ => SubmitError::Transport(safe_rpc_error(e)),
     }
 }
 
@@ -51,7 +91,6 @@ impl RpcSubmitter {
     pub fn client(&self) -> &RpcClient {
         &self.rpc
     }
-
 
     /// [FIX-111][R6] Simulate the exact signed transaction and return selected post-execution
     /// accounts. This is the authoritative projection primitive for integration refreshes:
@@ -96,14 +135,13 @@ impl RpcSubmitter {
             .map_err(|e| SubmitError::Transport(safe_rpc_error(&e)))?;
         if let Some(err) = response.value.err {
             return Err(SubmitError::Rejected(format!(
-                "projection simulation failed: {:?} logs={:?}",
-                err, response.value.logs
+                "projection simulation failed: {:?}",
+                err
             )));
         }
-        let returned = response
-            .value
-            .accounts
-            .ok_or_else(|| SubmitError::Rejected("projection simulation returned no accounts".into()))?;
+        let returned = response.value.accounts.ok_or_else(|| {
+            SubmitError::Rejected("projection simulation returned no accounts".into())
+        })?;
         if returned.len() != requested.len() {
             return Err(SubmitError::Rejected(format!(
                 "projection account count mismatch: requested={} returned={}",
@@ -116,7 +154,9 @@ impl RpcSubmitter {
         let mut simulation_clock: Option<SolanaClock> = None;
         for (key, ui) in requested.iter().copied().zip(returned.into_iter()) {
             let ui = ui.ok_or_else(|| {
-                SubmitError::Rejected(format!("projection account missing after simulation: {key}"))
+                SubmitError::Rejected(format!(
+                    "projection account missing after simulation: {key}"
+                ))
             })?;
             let account = ui.decode::<Account>().ok_or_else(|| {
                 SubmitError::Rejected(format!("projection account decode failed: {key}"))
@@ -161,17 +201,28 @@ impl SubmissionAdapter for RpcSubmitter {
             Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
             Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
         };
-        darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::FeeRpc, mt0_start.elapsed(), mt0_outcome);
+        darkbot_common::mt0::MT0.record_remote(
+            darkbot_common::mt0::RemoteClass::FeeRpc,
+            mt0_start.elapsed(),
+            mt0_outcome,
+        );
         let response = sent.ok()?;
-        Some(super::MessageFeeQuote { message_hash:tx.message.hash().to_string(),
-            context_slot:response.context.slot, lamports:response.value? })
+        Some(super::MessageFeeQuote {
+            message_hash: tx.message.hash().to_string(),
+            context_slot: response.context.slot,
+            lamports: response.value?,
+        })
     }
 
     fn path(&self) -> SubmissionPath {
         SubmissionPath::Rpc
     }
 
-    fn submit(&self, tx: &VersionedTransaction, t_handoff_ns: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit(
+        &self,
+        tx: &VersionedTransaction,
+        t_handoff_ns: u64,
+    ) -> Result<SubmitAck, SubmitError> {
         let cfg = RpcSendTransactionConfig {
             skip_preflight: self.skip_preflight,
             preflight_commitment: Some(CommitmentLevel::Confirmed),
@@ -179,21 +230,29 @@ impl SubmissionAdapter for RpcSubmitter {
             max_retries: self.max_retries,
             min_context_slot: None,
         };
-        let len = super::serialize_tx(tx).map(|b| b.len()).map_err(|e| SubmitError::Serialize(e.to_string()))?;
+        let len = super::serialize_tx(tx)
+            .map(|b| b.len())
+            .map_err(|e| SubmitError::Serialize(e.to_string()))?;
         // [FIX-31] Eindeutige RPC-Ablehnung → Rejected (Kapital frei). Unklar nach dem Senden (Timeout,
         // Verbindungsabbruch, HTTP) → Transport (Ambiguous → Reconciliation). VERIFY Variantennamen 3.1.12.
-        let sig = self.rpc.send_transaction_with_config(tx, cfg).map_err(|e| {
-            use solana_client::client_error::ClientErrorKind as K;
-            match e.kind() {
-                K::RpcError(_) | K::SerdeJson(_) | K::SigningError(_) | K::TransactionError(_) => SubmitError::Rejected(e.to_string()),
-                _ => SubmitError::Transport(e.to_string()),
-            }
-        })?;
-        Ok(SubmitAck { path: SubmissionPath::Rpc, signature: sig, signatures: vec![sig], submission_id: None, t_handoff_ns, serialized_len: len })
+        let sig = self
+            .rpc
+            .send_transaction_with_config(tx, cfg)
+            .map_err(|e| submission_error(&e))?;
+        Ok(SubmitAck {
+            path: SubmissionPath::Rpc,
+            signature: sig,
+            signatures: vec![sig],
+            submission_id: None,
+            t_handoff_ns,
+            serialized_len: len,
+        })
     }
 
     /// [FIX-38] RPC akzeptiert v1 (Solana Foundation, base64 >1232 B) — VERIFY per Capability-Gate S3-02.
-    fn supports_tx_version(&self, _v: crate::tx::BuildVersion) -> bool { true }
+    fn supports_tx_version(&self, _v: crate::tx::BuildVersion) -> bool {
+        true
+    }
 
     /// [FIX-6] Simulation derselben signierten TX; kein Rebuild zwischen Simulation und Send.
     fn simulate(&self, tx: &VersionedTransaction) -> SimResult {
@@ -212,13 +271,19 @@ impl SubmissionAdapter for RpcSubmitter {
             Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
             Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
         };
-        darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Simulation, mt0_start.elapsed(), mt0_outcome);
+        darkbot_common::mt0::MT0.record_remote(
+            darkbot_common::mt0::RemoteClass::Simulation,
+            mt0_start.elapsed(),
+            mt0_outcome,
+        );
         match simulated {
             Ok(r) => match r.value.err {
-                None => SimResult::Ok { units_consumed: r.value.units_consumed },
-                Some(e) => SimResult::Failed(format!("{:?} logs={:?}", e, r.value.logs)),
+                None => SimResult::Ok {
+                    units_consumed: r.value.units_consumed,
+                },
+                Some(e) => SimResult::Failed(format!("RPC_SIMULATION_FAILED {e:?}")),
             },
-            Err(e) => SimResult::Unavailable(e.to_string()),
+            Err(e) => SimResult::Unavailable(safe_rpc_error(&e)),
         }
     }
 }
@@ -260,7 +325,12 @@ pub fn finalized_transaction(
 
 /// Landing-Reconciliation: getSignatureStatuses → getTransaction (json, maxSupportedTransactionVersion=1).
 /// `tx_index_in_slot` bleibt None (nur über getBlock ermittelbar; P6/H0).
-pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns: u64) -> Result<LandingEvidence, SubmitError> {
+pub fn reconcile(
+    rpc: &RpcClient,
+    path: SubmissionPath,
+    sig: &Signature,
+    now_ns: u64,
+) -> Result<LandingEvidence, SubmitError> {
     // [MT0] every network request of the reconcile path is counted individually.
     let mt0_start = std::time::Instant::now();
     let statuses = rpc.get_signature_statuses_with_history(&[*sig]);
@@ -268,8 +338,12 @@ pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns:
         Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
         Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
     };
-    darkbot_common::mt0::MT0.record_remote(darkbot_common::mt0::RemoteClass::Reconcile, mt0_start.elapsed(), mt0_outcome);
-    let statuses = statuses.map_err(|e| SubmitError::Transport(e.to_string()))?;
+    darkbot_common::mt0::MT0.record_remote(
+        darkbot_common::mt0::RemoteClass::Reconcile,
+        mt0_start.elapsed(),
+        mt0_outcome,
+    );
+    let statuses = statuses.map_err(|e| SubmitError::Transport(safe_rpc_error(&e)))?;
     let status = match statuses.value.into_iter().next().flatten() {
         None => {
             return Ok(LandingEvidence {
@@ -293,7 +367,9 @@ pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns:
             let meta = t.transaction.meta;
             // VERIFY: Feldnamen `fee` und `compute_units_consumed` (OptionSerializer) in solana-transaction-status 3.x
             let fee = meta.as_ref().map(|m| m.fee);
-            let cu = meta.as_ref().and_then(|m| Option::<u64>::from(m.compute_units_consumed.clone()));
+            let cu = meta
+                .as_ref()
+                .and_then(|m| Option::<u64>::from(m.compute_units_consumed.clone()));
             (fee, cu)
         }
         Err(_) => (None, None),
@@ -301,13 +377,54 @@ pub fn reconcile(rpc: &RpcClient, path: SubmissionPath, sig: &Signature, now_ns:
     Ok(LandingEvidence {
         path,
         signature: *sig,
-        outcome: if status.err.is_some() { LandingOutcome::LandedFailed } else { LandingOutcome::LandedSuccess },
+        outcome: if status.err.is_some() {
+            LandingOutcome::LandedFailed
+        } else {
+            LandingOutcome::LandedSuccess
+        },
         landed_slot: Some(status.slot),
         tx_index_in_slot: None,
-        confirmation: status.confirmation_status.as_ref().map(|c| format!("{:?}", c)),
+        confirmation: status
+            .confirmation_status
+            .as_ref()
+            .map(|c| format!("{:?}", c)),
         fee_lamports: fee,
         compute_units_consumed: cu,
         error: status.err.as_ref().map(|e| format!("{:?}", e)),
         t_observed_landed_ns: Some(now_ns),
     })
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::*;
+    #[test]
+    fn remote_and_transport_errors_never_render_secrets_or_release_ambiguous_sends() {
+        use solana_client::rpc_request::{RpcError, RpcResponseErrorData};
+        let secret = "https://private.invalid/path?api-key=SECRET";
+        for code in [-32002, -32602, -32005] {
+            let e: solana_client::client_error::ClientError = RpcError::RpcResponseError {
+                code,
+                message: secret.into(),
+                data: RpcResponseErrorData::Empty,
+            }
+            .into();
+            let rendered = format!("{:?}", submission_error(&e));
+            assert!(!rendered.contains("SECRET") && !rendered.contains("private.invalid"));
+            assert_eq!(
+                matches!(submission_error(&e), SubmitError::Rejected(_)),
+                code != -32005
+            );
+        }
+        let e: solana_client::client_error::ClientError =
+            RpcError::RpcRequestError(secret.into()).into();
+        assert!(matches!(submission_error(&e), SubmitError::Transport(_)));
+        let error = reqwest::blocking::Client::new()
+            .get("http://127.0.0.1:0/private?api-key=SECRET")
+            .send()
+            .unwrap_err();
+        let e: solana_client::client_error::ClientError = error.into();
+        assert!(!safe_rpc_error(&e).contains("SECRET"));
+        assert!(matches!(submission_error(&e), SubmitError::Transport(_)));
+    }
 }

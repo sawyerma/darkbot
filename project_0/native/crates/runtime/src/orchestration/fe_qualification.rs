@@ -93,7 +93,7 @@ impl AccountSource for ObservedState {
 fn key(s: &str) -> Result<Pubkey, String> {
     Pubkey::from_str(s).map_err(|_| "FE_PUBKEY_INVALID".into())
 }
-fn typed<T: bytemuck::Pod>(
+pub(crate) fn typed<T: bytemuck::Pod>(
     state: &ObservedState,
     k: &Pubkey,
     program: &Pubkey,
@@ -217,7 +217,22 @@ pub const TRANSACTION_VERSION_PIN: &str =
     "BUILD_V0_WITH_ADDRESS_LOOKUP_TABLES; V1_CAPABILITY_MEASUREMENT_ONLY; CLUSTER_SUPPORT_UNKNOWN_NOT_OBSERVED";
 /// Each round refreshes the complete discovered scope. New balances/banks expand
 /// the next round; an inconsistent/moving snapshot never becomes qualified.
-pub fn collect<F>(config: &RuntimeConfig, mut read: F) -> Result<Value, String>
+pub struct CollectedScope {
+    pub state: ObservedState,
+    pub clock: Clock,
+    pub program: Pubkey,
+    pub group: Pubkey,
+    pub targets: Vec<Pubkey>,
+    pub pd: Pubkey,
+    pub deployment: (u64, String),
+    pub round: u64,
+}
+/// The same canonical scope collector, reusable by boot without constructing JSON reports.
+pub fn collect_scope<F>(
+    config: &RuntimeConfig,
+    mut read: F,
+    boot: bool,
+) -> Result<CollectedScope, String>
 where
     F: FnMut(&[Pubkey], u64) -> Result<(u64, ObservedState), String>,
 {
@@ -285,7 +300,17 @@ where
         }
         let _: MarginfiGroup = typed(&state, &group, &program, protocol::DISC_MARGINFI_GROUP)?;
         let _: FeeState = typed(&state, &fee, &program, protocol::DISC_FEE_STATE)?;
-        let required = dependencies(&state, &program, &group, &targets)?;
+        let mut required = dependencies(&state, &program, &group, &targets)?;
+        if boot {
+            for a in state.0.values() {
+                if a.owner == program && a.data.get(..8) == Some(protocol::DISC_BANK.as_slice()) {
+                    let bank: Bank = bytemuck::try_pod_read_unaligned(&a.data[8..])
+                        .map_err(|_| "FE_BANK_LAYOUT")?;
+                    required.insert(bank.mint);
+                }
+            }
+        }
+
         if !required.is_subset(&keys) {
             keys.extend(required);
             last_reason = "FE_SCOPE_NOT_CLOSED";
@@ -308,48 +333,72 @@ where
             last_reason = "FE_CLOCK_CONTEXT_MISMATCH";
             continue;
         }
-        let health = CrateHealth {
-            state: &state,
-            group,
-        };
-        let sizer = ProtocolSizer {
-            state: &state,
+        return Ok(CollectedScope {
+            state,
+            clock,
             program,
             group,
-            headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
-        };
-        let mut rows = Vec::new();
-        for target in &targets {
-            let h = health.health(target, clock.unix_timestamp, clock.slot);
-            let eligibility =
-                health.receivership_eligibility(target, clock.unix_timestamp, clock.slot);
-            let mut row = json!({"account":target.to_string(),"health":"UNKNOWN","liquidatable":null,"receivership_eligibility":eligibility.as_ref().map(|_|"PASS").unwrap_or("FAIL"),"eligibility_reason":eligibility.err().map(|e|e.to_string()),"funding":"UNKNOWN","net_edge_usd_micro":null,"simulation":"NOT_RUN","collateral_exit":"UNKNOWN","source_parity":"UNKNOWN"});
-            match h {
-                Ok(h) => {
-                    row["health"] = json!("EVALUATED_WITH_PINNED_CORE");
-                    row["liquidatable"] = json!(h.liquidatable);
-                    row["maintenance_health_bits"] = json!(h.maintenance_health.to_string());
-                    if h.liquidatable && row["receivership_eligibility"] == "PASS" {
-                        match sizer.sizes(target,clock.unix_timestamp,clock.slot){
-                            Ok(sizes)=>row["protocol_sizes"]=json!(sizes.into_iter().map(|s|json!({"asset_bank":s.asset_bank.to_string(),"liability_bank":s.liab_bank.to_string(),"withdraw_native":s.withdraw_amount,"repay_native":s.repay_amount,"repay_all":s.repay_all,"flat_sol_fee_lamports":s.flat_sol_fee_lamports,"executable_value":"UNKNOWN"})).collect::<Vec<_>>()),
-                            Err(e)=>row["sizing_error"]=json!(e),
-                        }
-                    }
-                }
-                Err(e) => row["health_error"] = json!(e.to_string()),
-            }
-            rows.push(row);
-        }
-        let accounts:Vec<_>=state.0.iter().map(|(key,a)|json!({"pubkey":key.to_string(),"owner":a.owner.to_string(),"lamports":a.lamports,"bytes":a.data.len(),"sha256":sha(&a.data)})).collect();
-        return Ok(
-            json!({"schema":"Project0/FE01FullObservation/1","status":"STATE_SCOPE_OBSERVED_NOT_QUALIFIED","scope_closed":true,"rounds":round,"slot":clock.slot,"unix_timestamp":clock.unix_timestamp,"clock":"CHAIN_SYSVAR_SAME_CONTEXT","program_data":pd.to_string(),"program_data_sha256":baseline.1,"deployment_slot":baseline.0,"source_pin":SOURCE_PIN,"source_parity":"UNKNOWN","source_parity_reason":"CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF","transaction_version":TRANSACTION_VERSION_PIN,"accounts":accounts,"targets":rows,"fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}),
-        );
+            targets,
+            pd,
+            deployment: baseline,
+            round,
+        });
     }
     Err(last_reason.into())
 }
+pub fn collect<F>(config: &RuntimeConfig, read: F) -> Result<Value, String>
+where
+    F: FnMut(&[Pubkey], u64) -> Result<(u64, ObservedState), String>,
+{
+    let CollectedScope {
+        state,
+        clock,
+        program,
+        group,
+        targets,
+        pd,
+        deployment: baseline,
+        round,
+    } = collect_scope(config, read, false)?;
+    let health = CrateHealth {
+        state: &state,
+        group,
+    };
+    let sizer = ProtocolSizer {
+        state: &state,
+        program,
+        group,
+        headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
+    };
+    let mut rows = Vec::new();
+    for target in &targets {
+        let h = health.health(target, clock.unix_timestamp, clock.slot);
+        let eligibility = health.receivership_eligibility(target, clock.unix_timestamp, clock.slot);
+        let mut row = json!({"account":target.to_string(),"health":"UNKNOWN","liquidatable":null,"receivership_eligibility":eligibility.as_ref().map(|_|"PASS").unwrap_or("FAIL"),"eligibility_reason":eligibility.err().map(|e|e.to_string()),"funding":"UNKNOWN","net_edge_usd_micro":null,"simulation":"NOT_RUN","collateral_exit":"UNKNOWN","source_parity":"UNKNOWN"});
+        match h {
+            Ok(h) => {
+                row["health"] = json!("EVALUATED_WITH_PINNED_CORE");
+                row["liquidatable"] = json!(h.liquidatable);
+                row["maintenance_health_bits"] = json!(h.maintenance_health.to_string());
+                if h.liquidatable && row["receivership_eligibility"] == "PASS" {
+                    match sizer.sizes(target,clock.unix_timestamp,clock.slot){
+                            Ok(sizes)=>row["protocol_sizes"]=json!(sizes.into_iter().map(|s|json!({"asset_bank":s.asset_bank.to_string(),"liability_bank":s.liab_bank.to_string(),"withdraw_native":s.withdraw_amount,"repay_native":s.repay_amount,"repay_all":s.repay_all,"flat_sol_fee_lamports":s.flat_sol_fee_lamports,"executable_value":"UNKNOWN"})).collect::<Vec<_>>()),
+                            Err(e)=>row["sizing_error"]=json!(e),
+                        }
+                }
+            }
+            Err(e) => row["health_error"] = json!(e.to_string()),
+        }
+        rows.push(row);
+    }
+    let accounts:Vec<_>=state.0.iter().map(|(key,a)|json!({"pubkey":key.to_string(),"owner":a.owner.to_string(),"lamports":a.lamports,"bytes":a.data.len(),"sha256":sha(&a.data)})).collect();
+    return Ok(
+        json!({"schema":"Project0/FE01FullObservation/1","status":"STATE_SCOPE_OBSERVED_NOT_QUALIFIED","scope_closed":true,"rounds":round,"slot":clock.slot,"unix_timestamp":clock.unix_timestamp,"clock":"CHAIN_SYSVAR_SAME_CONTEXT","program_data":pd.to_string(),"program_data_sha256":baseline.1,"deployment_slot":baseline.0,"source_pin":SOURCE_PIN,"source_parity":"UNKNOWN","source_parity_reason":"CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF","transaction_version":TRANSACTION_VERSION_PIN,"accounts":accounts,"targets":rows,"fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}),
+    );
+}
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use bytemuck::Zeroable;
     #[test]
@@ -402,7 +451,7 @@ mod tests {
             ..Account::default()
         }
     }
-    fn fixture() -> (RuntimeConfig, BTreeMap<Pubkey, Account>) {
+    pub(crate) fn fixture() -> (RuntimeConfig, BTreeMap<Pubkey, Account>) {
         let c = RuntimeConfig {
             fe_mode: "full".into(),
             ..RuntimeConfig::default()

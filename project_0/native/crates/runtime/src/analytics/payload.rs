@@ -129,6 +129,9 @@ macro_rules! typed_kinds {
     ($kind:expr, $schema:expr, $bytes:expr, $f:ident) => {{
         use journal::kind as k;
         match $kind {
+            k::BOOT_NETWORK => {
+                $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
+            }
             journal::MANIFEST => $f::<Manifest>($kind, $schema, $bytes),
             k::OWNER_DIAGNOSTIC => $f::<OwnerDiagnostic>($kind, $schema, $bytes),
             k::OWNER_RECORD => $f::<super::evidence::OwnerRecord>($kind, $schema, $bytes),

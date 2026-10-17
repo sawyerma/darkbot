@@ -13,7 +13,7 @@ use std::{
     collections::VecDeque,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex, OnceLock,
+        Arc, Condvar, Mutex, MutexGuard, OnceLock,
     },
     time::{Duration, Instant, SystemTime},
 };
@@ -41,6 +41,7 @@ impl Workload {
     }
 }
 struct State {
+    failed: bool,
     queue: VecDeque<(u64, Workload)>,
     next_ticket: u64,
     active: usize,
@@ -74,16 +75,28 @@ pub struct SocketPermit {
 }
 impl Drop for SocketPermit {
     fn drop(&mut self) {
-        let mut s = self.budget.state.lock().unwrap();
-        s.sockets -= 1;
-        s.subscriptions -= self.subscriptions;
+        let mut s = self.budget.lock_state();
+        match (
+            s.sockets.checked_sub(1),
+            s.subscriptions.checked_sub(self.subscriptions),
+        ) {
+            (Some(a), Some(b)) => {
+                s.sockets = a;
+                s.subscriptions = b;
+            }
+            _ => s.failed = true,
+        }
         self.budget.changed.notify_all();
     }
 }
 impl Drop for Permit {
     fn drop(&mut self) {
-        let mut s = self.budget.state.lock().unwrap();
-        s.active -= 1;
+        let mut s = self.budget.lock_state();
+        if let Some(n) = s.active.checked_sub(1) {
+            s.active = n;
+        } else {
+            s.failed = true;
+        }
         self.budget.changed.notify_all();
     }
 }
@@ -93,6 +106,28 @@ impl Default for Budget {
     }
 }
 impl Budget {
+    fn lock_state(&self) -> MutexGuard<'_, State> {
+        match self.state.lock() {
+            Ok(s) => s,
+            Err(p) => {
+                let mut s = p.into_inner();
+                s.failed = true;
+                self.changed.notify_all();
+                s
+            }
+        }
+    }
+    /// Configuration changes cannot silently keep a default budget or reset consumed quota.
+    fn check_configuration(&self, c: &crate::runtime_config::RuntimeConfig) {
+        if self.limits != c.limits
+            || self.rpc_endpoints != c.rpc_endpoints
+            || self.adaptive != c.adaptive
+            || self.fallback != c.fallback
+        {
+            self.lock_state().failed = true;
+            self.changed.notify_all();
+        }
+    }
     pub fn configured(config: &crate::runtime_config::RuntimeConfig) -> Self {
         let now = Instant::now();
         Self {
@@ -101,6 +136,7 @@ impl Budget {
             fallback: config.fallback,
             rpc_endpoints: config.rpc_endpoints.clone(),
             state: Mutex::new(State {
+                failed: false,
                 queue: VecDeque::new(),
                 next_ticket: 0,
                 active: 0,
@@ -123,14 +159,19 @@ impl Budget {
 }
 pub fn shared() -> Arc<Budget> {
     static B: OnceLock<Arc<Budget>> = OnceLock::new();
-    B.get_or_init(|| Arc::new(Budget::default())).clone()
+    let b = B.get_or_init(|| Arc::new(Budget::default())).clone();
+    b.check_configuration(crate::runtime_config::active());
+    b
 }
 impl Budget {
     pub fn acquire_socket(
         self: &Arc<Self>,
         subscriptions: u64,
     ) -> Result<SocketPermit, &'static str> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.lock_state();
+        if s.failed {
+            return Err("PROVIDER_BUDGET_POISONED");
+        }
         if s.sockets >= self.limits.wss_connections {
             return Err("WSS_CONNECTION_LIMIT");
         }
@@ -162,7 +203,10 @@ impl Budget {
         deadline: Instant,
         shutdown: Option<&darkbot_common::lifecycle::Shutdown>,
     ) -> Result<Permit, &'static str> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.lock_state();
+        if s.failed {
+            return Err("PROVIDER_BUDGET_POISONED");
+        }
         if s.retry_after_overflow {
             return Err("RPC_RATE_LIMIT");
         }
@@ -173,6 +217,11 @@ impl Budget {
         s.next_ticket += 1;
         s.queue.push_back((ticket, work));
         loop {
+            if s.failed {
+                s.queue.retain(|(t, _)| *t != ticket);
+                self.changed.notify_all();
+                return Err("PROVIDER_BUDGET_POISONED");
+            }
             let now = Instant::now();
             let elapsed = now.saturating_duration_since(s.refill_at).as_secs_f64();
             s.tokens = (s.tokens + elapsed * s.effective_rps).min(self.limits.rpc_burst as f64);
@@ -251,11 +300,19 @@ impl Budget {
             let wait = deadline
                 .saturating_duration_since(now)
                 .min(Duration::from_millis(50));
-            s = self.changed.wait_timeout(s, wait).unwrap().0;
+            s = match self.changed.wait_timeout(s, wait) {
+                Ok((s, _)) => s,
+                Err(p) => {
+                    let (mut s, _) = p.into_inner();
+                    s.failed = true;
+                    self.changed.notify_all();
+                    s
+                }
+            };
         }
     }
     pub fn rate_limited(&self, retry: Duration) {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.lock_state();
         s.rate_limits = s.rate_limits.saturating_add(1);
         if self.adaptive {
             s.effective_rps = (s.effective_rps / 2.0).max(1.0);
@@ -278,7 +335,10 @@ impl Budget {
         self.changed.notify_all();
     }
     pub fn account_bytes(&self, bytes: usize) -> Result<(), &'static str> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.lock_state();
+        if s.failed {
+            return Err("PROVIDER_BUDGET_POISONED");
+        }
         s.bytes = s.bytes.checked_add(bytes as u64).ok_or("RPC_BYTE_BUDGET")?;
         if s.bytes > self.limits.max_total_mib * 1024 * 1024 {
             return Err("RPC_BYTE_BUDGET");
@@ -286,7 +346,7 @@ impl Budget {
         Ok(())
     }
     pub fn degraded(&self) {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.lock_state();
         if self.adaptive {
             s.effective_rps = (s.effective_rps / 2.0).max(1.0);
             s.tokens = s.tokens.min(1.0);
@@ -298,7 +358,7 @@ impl Budget {
         self.changed.notify_all();
     }
     pub fn succeeded(&self) {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.lock_state();
         s.successes = s.successes.saturating_add(1);
         if self.adaptive && s.successes >= 8 {
             s.effective_rps = (s.effective_rps + 1.0).min(self.limits.rpc_rps as f64);
@@ -306,7 +366,7 @@ impl Budget {
         }
     }
     pub fn snapshot(&self) -> ProviderSnapshot {
-        let s = self.state.lock().unwrap();
+        let s = self.lock_state();
         ProviderSnapshot {
             scope: "PROCESS_SOLANA_PROVIDER_ACCOUNT".into(),
             requests: s.requests,
@@ -455,7 +515,8 @@ struct CallTimer<'a> {
 }
 impl Drop for CallTimer<'_> {
     fn drop(&mut self) {
-        self.stats.lock().unwrap().elapsed_time += self.started.elapsed();
+        let mut s = self.stats.lock().unwrap_or_else(|p| p.into_inner());
+        s.elapsed_time = s.elapsed_time.saturating_add(self.started.elapsed());
     }
 }
 fn rpc_error(code: &'static str) -> solana_client::client_error::ClientError {
@@ -493,7 +554,10 @@ impl RpcSender for BudgetedSender {
             if remaining.is_zero() {
                 return Err(rpc_error("RPC_REQUEST_BUDGET"));
             }
-            self.stats.lock().unwrap().request_count += 1;
+            self.stats
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .request_count += 1;
             let body = request.build_request_json(1, params.clone());
             self.budget
                 .account_bytes(
@@ -609,7 +673,7 @@ impl RpcSender for BudgetedSender {
         Err(rpc_error("RPC_RETRY_EXHAUSTED"))
     }
     fn get_transport_stats(&self) -> RpcTransportStats {
-        self.stats.lock().unwrap().clone()
+        self.stats.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
     fn url(&self) -> String {
         self.url.clone()
@@ -900,5 +964,93 @@ mod http_tests {
         ));
         assert!(!err.to_string().contains("PRIVATE"));
         t.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod poison_tests {
+    use super::*;
+    #[test]
+    fn poisoned_permits_drop_during_unwind_without_second_panic_and_block_admission() {
+        let b = Arc::new(Budget::default());
+        let p = b
+            .acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(1))
+            .unwrap();
+        let w = b.acquire_socket(1).unwrap();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _lock = b.state.lock().unwrap();
+            panic!("injected")
+        }));
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _p = p;
+            let _w = w;
+            panic!("unwind with permits")
+        }));
+        assert!(failed.is_err());
+        assert_eq!(b.snapshot().in_flight, 0);
+        assert!(matches!(
+            b.acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(1)),
+            Err("PROVIDER_BUDGET_POISONED")
+        ));
+        assert!(matches!(
+            b.acquire_socket(1),
+            Err("PROVIDER_BUDGET_POISONED")
+        ));
+        assert_eq!(b.account_bytes(1), Err("PROVIDER_BUDGET_POISONED"));
+    }
+    #[test]
+    fn poisoned_waiter_and_metrics_are_controlled() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.rpc_concurrency = 1;
+        let b = Arc::new(Budget::configured(&c));
+        let p = b
+            .acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(1))
+            .unwrap();
+        let other = b.clone();
+        let t = std::thread::spawn(move || {
+            other
+                .acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(2))
+                .err()
+        });
+        while b.snapshot().queued == 0 {
+            std::thread::yield_now();
+        }
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _s = b.state.lock().unwrap();
+            panic!("injected")
+        }));
+        b.changed.notify_all();
+        assert_eq!(t.join().unwrap(), Some("PROVIDER_BUDGET_POISONED"));
+        drop(p);
+        assert_eq!(b.snapshot().queued, 0);
+        let stats = Mutex::new(RpcTransportStats::default());
+        let _ = std::panic::catch_unwind(|| {
+            let _s = stats.lock().unwrap();
+            panic!("injected")
+        });
+        assert!(std::panic::catch_unwind(|| {
+            let _timer = CallTimer {
+                stats: &stats,
+                started: Instant::now(),
+            };
+            panic!("unwind");
+        })
+        .is_err());
+    }
+}
+
+#[cfg(test)]
+mod configuration_tests {
+    use super::*;
+    #[test]
+    fn early_default_budget_cannot_authorize_a_later_profile() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        let b = Arc::new(Budget::configured(&c));
+        c.limits.rpc_rps += 1;
+        b.check_configuration(&c);
+        assert!(matches!(
+            b.acquire(Workload::Bootstrap, Instant::now() + Duration::from_secs(1)),
+            Err("PROVIDER_BUDGET_POISONED")
+        ));
     }
 }

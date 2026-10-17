@@ -262,3 +262,74 @@ async fn p2_shutdown_cancels_admission_wait_without_background_runtime_hang() {
         .unwrap()
         .is_ok());
 }
+
+#[tokio::test]
+async fn boot_delayed_ack_starts_a_fresh_slot_progress_deadline() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut src = p2_source(
+        format!("ws://{}", listener.local_addr().unwrap()),
+        Duration::from_secs(2),
+    );
+    src.cfg.idle_timeout = Duration::from_millis(300);
+    src.cfg.heartbeat_interval = None;
+    let stop = Shutdown::new();
+    let server_stop = stop.clone();
+    let server = tokio::spawn(async move {
+        let (s, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        p2_ack(&mut ws).await;
+        tokio::time::sleep(Duration::from_millis(180)).await;
+        ws.send(p2_slot(10)).await.unwrap();
+        ws.send(p2_slot(11)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        server_stop.request();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    });
+    let (tx, rx) = darkbot_common::channel::bounded("boot-ack", 100);
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        src.run_async(tx, stop, IngressHalt::new(), SlotWatch::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    server.await.unwrap();
+    let mut slots = 0;
+    while let Some(e) = rx.try_pop() {
+        assert!(!matches!(
+            e,
+            IngressEvent::Gap { .. } | IngressEvent::Fatal { .. }
+        ));
+        if matches!(e, IngressEvent::Slot(_)) {
+            slots += 1;
+        }
+    }
+    assert_eq!(slots, 2);
+}
+#[test]
+fn boot_network_probe_uses_real_ingress_ack_source_data_and_slot_progress() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async move{
+        let listener=tokio::net::TcpListener::from_std(listener).unwrap();let(s,_)=listener.accept().await.unwrap();let mut ws=tokio_tungstenite::accept_async(s).await.unwrap();let(mut slot_id,mut log_id)=(0,0);
+        for _ in 0..2{let request:Value=serde_json::from_str(ws.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();let id=request["id"].as_u64().unwrap();if request["method"]=="slotSubscribe"{slot_id=id;}else{log_id=id;}ws.send(Message::Text(json!({"jsonrpc":"2.0","id":id,"result":id}).to_string())).await.unwrap();}
+        for slot in [100,101]{ws.send(Message::Text(json!({"jsonrpc":"2.0","method":"slotNotification","params":{"subscription":slot_id,"result":{"slot":slot,"parent":slot-1,"root":slot-2}}}).to_string())).await.unwrap();}
+        ws.send(Message::Text(json!({"jsonrpc":"2.0","method":"logsNotification","params":{"subscription":log_id,"result":{"context":{"slot":101},"value":{"signature":solana_sdk::signature::Signature::default().to_string(),"err":null,"logs":["Program log: fixture"]}}}}).to_string())).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    })
+    });
+    assert_eq!(
+        audit_liveness(
+            format!("ws://{addr}"),
+            Pubkey::new_unique(),
+            false,
+            Duration::from_secs(2)
+        )
+        .unwrap(),
+        (100, 101)
+    );
+    server.join().unwrap();
+}

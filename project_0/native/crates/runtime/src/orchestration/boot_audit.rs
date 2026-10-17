@@ -704,3 +704,96 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 }
+
+/// Network evidence uses the same canonical typed journal, never a JSON primary file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountProof {
+    pub address: String,
+    pub owner: String,
+    pub data_sha256: String,
+    pub bytes: u64,
+    pub executable: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkAudit {
+    pub audit: BootAudit,
+    pub observed_at: u64,
+    pub expires_at: u64,
+    pub slot: u64,
+    pub genesis: String,
+    pub rpc_binding: String,
+    pub wss_binding: String,
+    pub binary_sha256: String,
+    pub provider_proof_sha256: String,
+    pub capture_source: String,
+    pub accounts: Vec<AccountProof>,
+    pub state_hash: String,
+}
+impl payload::Payload for NetworkAudit {
+    const KIND: u16 = journal::kind::BOOT_NETWORK;
+}
+impl NetworkAudit {
+    pub fn validate_start(
+        &self,
+        current: &AuditedIdentity,
+        binary: &str,
+        now: u64,
+        source: &str,
+    ) -> Result<(), String> {
+        if self.audit.verdict != AuditVerdict::Ready
+            || self.audit.scope != "network"
+            || self.audit.checks.iter().any(|c| {
+                c.critical && !matches!(c.state, CheckState::Pass | CheckState::NotApplicable)
+            })
+        {
+            return Err("BOOT_NETWORK_NOT_READY".into());
+        }
+        for id in [
+            "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08",
+        ] {
+            if self
+                .audit
+                .checks
+                .iter()
+                .filter(|c| c.id == id && c.critical && c.state == CheckState::Pass)
+                .count()
+                != 1
+            {
+                return Err("BOOT_NETWORK_CHECK_MISSING".into());
+            }
+        }
+        if now < self.observed_at
+            || now >= self.expires_at
+            || self.expires_at.saturating_sub(self.observed_at) > 60
+        {
+            return Err("BOOT_NETWORK_EXPIRED".into());
+        }
+        if current != &self.audit.identity
+            || binary != self.binary_sha256
+            || source != self.capture_source
+        {
+            return Err("BOOT_NETWORK_TOCTOU".into());
+        }
+        let mut copy = self.clone();
+        copy.audit.readiness_token.clear();
+        let actual = sha(&bincode::serialize(&copy).map_err(|_| "BOOT_TOKEN")?);
+        if actual != self.audit.readiness_token {
+            return Err("BOOT_NETWORK_TOKEN".into());
+        }
+        Ok(())
+    }
+}
+
+/// Bind both the control executable and the actual runtime it admits.
+pub fn binary_identity() -> Result<String, String> {
+    let ctl = std::env::current_exe().map_err(|_| "BOOT_BINARY")?;
+    let runtime = ctl.parent().ok_or("BOOT_BINARY")?.join("p0-longtail");
+    let mut digests = Vec::new();
+    for p in [ctl, runtime] {
+        digests.extend(
+            solana_sdk::hash::hash(&std::fs::read(p).map_err(|_| "BOOT_RUNTIME_BINARY_MISSING")?)
+                .to_bytes(),
+        );
+    }
+    Ok(sha(&digests))
+}

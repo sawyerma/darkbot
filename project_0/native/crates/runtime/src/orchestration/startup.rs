@@ -75,7 +75,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 // Keep the first Shadow failure diagnosable without exposing provider URLs,
 // response payloads or wallet paths from library Display implementations.
-pub(super) fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'static str {
+pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'static str {
     use solana_client::client_error::{ClientError, ClientErrorKind};
     if let Some(e) = error.downcast_ref::<crate::analytics::evidence::EvidenceFailure>() {
         return e.0;
