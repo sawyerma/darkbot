@@ -133,6 +133,10 @@ impl JournalSink {
         self.rows += 1;
         Ok(())
     }
+    /// SK-05 live lane state for the terminal (`None` once sealed).
+    pub fn storage_status(&mut self) -> Option<crate::storage::writer::StorageStatus> {
+        self.writer.as_mut().map(|w| w.status())
+    }
     fn seal(&mut self, complete: bool) -> std::io::Result<MarketJournalBinding> {
         let writer = self
             .writer

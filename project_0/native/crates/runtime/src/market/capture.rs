@@ -344,6 +344,10 @@ pub fn run_embedded(
                 core.stats.gap_count,
                 core.stats.decoder_error_count
             );
+            // SK-05: queue, rates, lag and exhaustion forecasts of the writer lane.
+            if let Some(status) = sink.storage_status() {
+                eprintln!("{}", status.terminal());
+            }
         }
         let overflow = consumer.stats().overflow;
         if overflow > last_overflow {

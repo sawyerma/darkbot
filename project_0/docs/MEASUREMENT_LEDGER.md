@@ -5547,3 +5547,15 @@ Base `25a4dff`. Evidence: [A4_PARITY_20261017](evidence/A4_PARITY_20261017/READM
 - BLOCKED: `A4_NO_HISTORICAL_RAW_SAMPLE_CLASSIC_DELEVERAGE_BANKRUPTCY_CPI` — no offline raw payload of those classes, the four other markers in transactions, CPI positions or legacy; needs a separately permitted archive read of known signatures.
 
 Tests: `parity::real_v1_receivership_line`, `parity::marker_discriminators_match_pinned_sources` 2/2 (`crate_health`); differential exit 0.
+
+## 2026-10-17 — SK-05: writer backpressure monitoring, bounded adaptive control, disk reserve (LOCAL_PASS in scope; SK-05 PARTIAL)
+
+Base `ef60a4e`.
+
+- `MarketJournalWorker::status()` (via `JournalSink::storage_status`) reports queue bytes (current/peak), admission limit and hard max, free budget, ingress vs. write bytes/s since the last sample, lag (admitted − written frames), seconds to budget exhaustion at the current rates, disk free space, the disk reserve and seconds until it is reached. The capture prints it every 2 s as `[MARKET/STORAGE] …`; the sealed `StorageMetrics` keep the highest rates, the minimum disk free space, backlog batches and deferred syncs.
+- Adaptive control only within reserved capacity: with a queue depth of at least two batches the writer collects up to 4× the configured batch (the larger batch vector is part of the fixed reservation) and defers the periodic sync while the backlog lasts, at most to twice the sync interval (bounded unsynced tail). Never above `max`, never a drop.
+- Disk reserve (`market_disk_reserve_mib`, default 2048, operational config): checked before every batch; below it the lane fails sticky (`DISK_RESERVE_EXHAUSTED`) and the capture stops INCOMPLETE before the filesystem is full.
+- Fixed a race: a failing writer closed its channel before recording the reason, so a concurrent submit could report `MARKET_WRITER_GONE` instead of the cause; the receiver now outlives the failure record.
+- Open in SK-05: forecasts under real load NOT_MEASURED; pausing optional offline indexers (none exist yet, SK-08).
+
+Tests: storage 7/7 (adaptive decision bounds, disk reserve fail-closed with status/lag, plus the SK-03/04 set); market 104 + parity 2 unchanged; solana lib 72/72.

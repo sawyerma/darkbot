@@ -9,12 +9,20 @@
 //! seal. OS-buffered frames are not crash-safe before a sync; an unsealed tail is INCOMPLETE.
 //! A writer failure is sticky: every later submit and the seal fail, the capture stops
 //! INCOMPLETE. Financial FE-04/P8 durability is a separate writer lane and is not relaxed here.
-use super::budget::{BudgetSnapshot, BytePermit, MemoryBudget, MemorySample, MIB};
+//!
+//! SK-05: under backlog the writer adapts only within its reserved capacity (batches up to
+//! `ADAPTIVE_BATCH`× the configured size, the periodic sync deferred at most to twice its
+//! interval); it never grows beyond `max` and never drops. Before every batch the free disk space
+//! is checked against the configured reserve: falling below it fails the lane (INCOMPLETE)
+//! before the filesystem is full. `status()` reports queue bytes, rates, lag and exhaustion
+//! forecasts for the terminal.
+use super::budget::{free_disk_bytes, BudgetSnapshot, BytePermit, MemoryBudget, MemorySample, MIB};
 use crate::analytics::journal::{self, Provenance};
 use crate::analytics::payload::{self, Payload};
 use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -30,6 +38,8 @@ pub struct WriterConfig {
     pub sync_interval: Duration,
     /// Longest wait of the capture thread for budget or queue space before INCOMPLETE.
     pub stall_budget: Duration,
+    /// Free disk space that must remain on the journal's filesystem.
+    pub disk_reserve_bytes: u64,
     /// Test-only I/O fault injection: the writer fails at this batch.
     #[cfg(test)]
     pub fail_at_batch: Option<u64>,
@@ -46,9 +56,83 @@ impl WriterConfig {
             flush_interval: Duration::from_millis(l.market_writer_flush_ms),
             sync_interval: Duration::from_millis(l.market_writer_sync_ms),
             stall_budget: Duration::from_millis(l.market_writer_stall_ms),
+            disk_reserve_bytes: l.market_disk_reserve_mib * MIB,
             #[cfg(test)]
             fail_at_batch: None,
         }
+    }
+}
+
+/// Largest adaptive batch, in multiples of the configured batch size (reserved at start).
+const ADAPTIVE_BATCH: usize = 4;
+
+/// SK-05 control decision: under backlog (queue depth of at least two batches) write larger
+/// batches, up to `ADAPTIVE_BATCH`× the configured size, and defer the periodic sync while the
+/// backlog lasts, but never beyond twice its interval (a bounded unsynced tail).
+fn adapt(
+    queue_depth: u64,
+    batch_frames: usize,
+    since_sync: Duration,
+    sync_interval: Duration,
+) -> (usize, bool) {
+    let backlog = queue_depth >= 2 * batch_frames as u64;
+    let limit = if backlog {
+        (batch_frames * ADAPTIVE_BATCH).min(batch_frames + queue_depth as usize)
+    } else {
+        batch_frames
+    };
+    let sync_due = since_sync >= sync_interval && (!backlog || since_sync >= 2 * sync_interval);
+    (limit, sync_due)
+}
+
+/// Counters shared by the capture thread (admission) and the writer thread (writes).
+#[derive(Default)]
+struct LaneCounters {
+    admitted_bytes: AtomicU64,
+    admitted_frames: AtomicU64,
+    written_bytes: AtomicU64,
+    written_frames: AtomicU64,
+}
+
+/// Live state of the writer lane (SK-05), sampled by the capture thread for the terminal.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub struct StorageStatus {
+    pub queue_bytes: u64,
+    pub queue_peak_bytes: u64,
+    pub admission_limit_bytes: u64,
+    pub max_bytes: u64,
+    pub free_budget_bytes: u64,
+    pub ingress_bytes_per_s: f64,
+    pub write_bytes_per_s: f64,
+    /// Admitted but not yet written frames.
+    pub lag_frames: u64,
+    /// Seconds until the byte budget is exhausted at the current rates (`None`: not draining
+    /// slower than arriving).
+    pub budget_exhaustion_s: Option<f64>,
+    pub disk_free_bytes: Option<u64>,
+    pub disk_reserve_bytes: u64,
+    /// Seconds until the disk reserve is reached at the current write rate.
+    pub disk_exhaustion_s: Option<f64>,
+}
+
+impl StorageStatus {
+    pub fn terminal(&self) -> String {
+        let mib = |b: u64| b as f64 / MIB as f64;
+        let eta = |s: Option<f64>| s.map_or("none".into(), |s| format!("{s:.0}s"));
+        format!(
+            "[MARKET/STORAGE] queue={:.1}/{:.1}MiB (max {:.1}) peak={:.1}MiB ingress={:.1}KiB/s write={:.1}KiB/s lag={} budget_exhaustion={} disk_free={} disk_exhaustion={}",
+            mib(self.queue_bytes),
+            mib(self.admission_limit_bytes),
+            mib(self.max_bytes),
+            mib(self.queue_peak_bytes),
+            self.ingress_bytes_per_s / 1024.0,
+            self.write_bytes_per_s / 1024.0,
+            self.lag_frames,
+            eta(self.budget_exhaustion_s),
+            self.disk_free_bytes
+                .map_or("unknown".into(), |b| format!("{:.1}GiB", b as f64 / (1024.0 * MIB as f64))),
+            eta(self.disk_exhaustion_s),
+        )
     }
 }
 
@@ -68,6 +152,13 @@ pub struct StorageMetrics {
     /// Worst process/OS memory state sampled at each batch and at seal.
     pub memory: MemorySample,
     pub budget: BudgetSnapshot,
+    /// SK-05: batches written larger than configured (backlog) and syncs deferred by backlog.
+    pub backlog_batches: u64,
+    pub deferred_syncs: u64,
+    pub min_disk_free_bytes: Option<u64>,
+    /// Highest rates seen by `status()` (bytes/s, rounded).
+    pub max_ingress_bytes_per_s: u64,
+    pub max_write_bytes_per_s: u64,
 }
 
 struct Pending {
@@ -104,6 +195,10 @@ pub struct MarketJournalWorker {
     queue_full_waits: u64,
     fixed: Option<BytePermit>,
     fixed_bytes: u64,
+    counters: Arc<LaneCounters>,
+    last_sample: Option<(Instant, u64, u64)>,
+    max_rates: (f64, f64),
+    disk_reserve_bytes: u64,
     pub path: PathBuf,
 }
 
@@ -118,7 +213,8 @@ impl MarketJournalWorker {
         // Queue slots (count-bounded channel) and the writer's batch vector are capture-owned
         // memory: reserved once, inside the initial admission limit.
         let slots = cfg.batch_frames * 4;
-        let fixed_bytes = ((slots + cfg.batch_frames) * std::mem::size_of::<Msg>()) as u64;
+        let batch_capacity = cfg.batch_frames * ADAPTIVE_BATCH;
+        let fixed_bytes = ((slots + batch_capacity) * std::mem::size_of::<Msg>()) as u64;
         if fixed_bytes >= cfg.initial_bytes {
             return Err("MARKET_WRITER_SLOTS_EXCEED_INITIAL_BUDGET".into());
         }
@@ -129,15 +225,21 @@ impl MarketJournalWorker {
             .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
         let (tx, rx) = bounded::<Msg>("market-journal-writer", slots);
         let failure = Arc::new(Mutex::new(None));
+        let counters = Arc::new(LaneCounters::default());
         let (thread_failure, thread_budget) = (failure.clone(), budget.clone());
+        let thread_counters = counters.clone();
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let handle = std::thread::Builder::new()
             .name("market-journal-writer".into())
             .spawn(move || {
-                let result = write_loop(writer, rx, cfg, &thread_budget);
+                // The receiver outlives the failure record: a submit never sees a closed lane
+                // without its reason.
+                let result = write_loop(writer, &rx, cfg, &thread_budget, &thread_counters, &dir);
                 if let Err(e) = &result {
                     *thread_failure.lock().unwrap_or_else(|p| p.into_inner()) =
                         Some(format!("MARKET_WRITER_FAILED: {e}"));
                 }
+                drop(rx);
                 result
             })
             .map_err(|e| format!("spawn market journal writer: {e}"))?;
@@ -150,8 +252,56 @@ impl MarketJournalWorker {
             queue_full_waits: 0,
             fixed: Some(fixed),
             fixed_bytes,
+            counters,
+            last_sample: None,
+            max_rates: (0.0, 0.0),
+            disk_reserve_bytes: cfg.disk_reserve_bytes,
             path: path.into(),
         })
+    }
+
+    /// Live lane state; rates are measured since the previous call (the capture loop calls it
+    /// at its display cadence).
+    pub fn status(&mut self) -> StorageStatus {
+        let b = self.budget.snapshot();
+        let now = Instant::now();
+        let admitted = self.counters.admitted_bytes.load(Ordering::Relaxed);
+        let written = self.counters.written_bytes.load(Ordering::Relaxed);
+        let (ingress, write) = match self.last_sample {
+            Some((t, a, w)) if now > t => {
+                let dt = (now - t).as_secs_f64();
+                (
+                    admitted.saturating_sub(a) as f64 / dt,
+                    written.saturating_sub(w) as f64 / dt,
+                )
+            }
+            _ => (0.0, 0.0),
+        };
+        self.last_sample = Some((now, admitted, written));
+        self.max_rates = (self.max_rates.0.max(ingress), self.max_rates.1.max(write));
+        let queue = b.used_bytes.saturating_sub(self.fixed_bytes);
+        let free_budget = b.max_bytes.saturating_sub(b.used_bytes);
+        let disk = self.path.parent().and_then(free_disk_bytes);
+        StorageStatus {
+            queue_bytes: queue,
+            queue_peak_bytes: b.peak_bytes.saturating_sub(self.fixed_bytes),
+            admission_limit_bytes: b.limit_bytes,
+            max_bytes: b.max_bytes,
+            free_budget_bytes: free_budget,
+            ingress_bytes_per_s: ingress,
+            write_bytes_per_s: write,
+            lag_frames: self
+                .counters
+                .admitted_frames
+                .load(Ordering::Relaxed)
+                .saturating_sub(self.counters.written_frames.load(Ordering::Relaxed)),
+            budget_exhaustion_s: (ingress > write).then(|| free_budget as f64 / (ingress - write)),
+            disk_free_bytes: disk,
+            disk_reserve_bytes: self.disk_reserve_bytes,
+            disk_exhaustion_s: disk
+                .filter(|_| write > 0.0)
+                .map(|free| free.saturating_sub(self.disk_reserve_bytes) as f64 / write),
+        }
     }
 
     fn failed(&self) -> Option<io::Error> {
@@ -176,6 +326,7 @@ impl MarketJournalWorker {
             .acquire(frame_bytes(len), self.stall_budget)
             .map_err(io::Error::other)?;
         let bytes = payload::encode(row)?;
+        let wire = bytes.len() as u64 + journal::FRAME_WIRE as u64;
         let mut msg = Msg::Frame(Pending {
             kind: P::KIND,
             schema: P::SCHEMA,
@@ -189,7 +340,15 @@ impl MarketJournalWorker {
             .ok_or_else(|| io::Error::other("MARKET_JOURNAL_ALREADY_FINISHED"))?;
         loop {
             match tx.try_push(msg) {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    self.counters
+                        .admitted_bytes
+                        .fetch_add(wire, Ordering::Relaxed);
+                    self.counters
+                        .admitted_frames
+                        .fetch_add(1, Ordering::Relaxed);
+                    return Ok(());
+                }
                 Err(ChannelError::Disconnected(_)) => {
                     return Err(self
                         .failed()
@@ -240,6 +399,8 @@ impl MarketJournalWorker {
             .map_err(|_| io::Error::other("MARKET_WRITER_PANICKED"))??;
         sealed.metrics.queue_full_waits = self.queue_full_waits;
         sealed.metrics.fixed_reserved_bytes = self.fixed_bytes;
+        sealed.metrics.max_ingress_bytes_per_s = self.max_rates.0.round() as u64;
+        sealed.metrics.max_write_bytes_per_s = self.max_rates.1.round() as u64;
         // The writer has stopped: its slots are released before the final snapshot.
         self.fixed = None;
         sealed.metrics.budget = self.budget.snapshot();
@@ -260,12 +421,14 @@ impl Drop for MarketJournalWorker {
 
 fn write_loop(
     mut writer: journal::Writer,
-    rx: Consumer<Msg>,
+    rx: &Consumer<Msg>,
     cfg: WriterConfig,
     budget: &MemoryBudget,
+    counters: &LaneCounters,
+    dir: &Path,
 ) -> io::Result<Sealed> {
     let mut m = StorageMetrics::default();
-    let mut batch: Vec<Pending> = Vec::with_capacity(cfg.batch_frames);
+    let mut batch: Vec<Pending> = Vec::with_capacity(cfg.batch_frames * ADAPTIVE_BATCH);
     let mut first_pending: Option<Instant> = None;
     let mut last_sync = Instant::now();
     let mut seal = None;
@@ -283,12 +446,39 @@ fn write_loop(
             // Closed without a seal request: the owner vanished; seal INCOMPLETE.
             Err(()) => seal = Some(false),
         }
+        let depth = {
+            let s = rx.stats();
+            s.sent.saturating_sub(s.received)
+        };
+        let (batch_limit, sync_due) = adapt(
+            depth,
+            cfg.batch_frames,
+            last_sync.elapsed(),
+            cfg.sync_interval,
+        );
         let due = first_pending.is_some_and(|t| t.elapsed() >= cfg.flush_interval);
+        // Under backlog keep collecting from the queue up to the adaptive batch size.
+        if depth > 0 && batch.len() < batch_limit && seal.is_none() {
+            continue;
+        }
         if !batch.is_empty() && (batch.len() >= cfg.batch_frames || due || seal.is_some()) {
             #[cfg(test)]
             if cfg.fail_at_batch == Some(m.batches) {
                 return Err(io::Error::other("injected write failure"));
             }
+            // Fail before the filesystem fills: the reserve is never written into.
+            let free = free_disk_bytes(dir);
+            m.min_disk_free_bytes = match (m.min_disk_free_bytes, free) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            if free.is_some_and(|f| f < cfg.disk_reserve_bytes) {
+                return Err(io::Error::other("DISK_RESERVE_EXHAUSTED"));
+            }
+            if batch.len() > cfg.batch_frames {
+                m.backlog_batches += 1;
+            }
+            let before = writer.position();
             let started = Instant::now();
             let n = writer.append_batch(
                 batch
@@ -300,12 +490,19 @@ fn write_loop(
             m.batches += 1;
             m.max_batch_frames = m.max_batch_frames.max(n);
             m.bytes_written = writer.position();
+            counters
+                .written_bytes
+                .fetch_add(writer.position() - before, Ordering::Relaxed);
+            counters.written_frames.fetch_add(n, Ordering::Relaxed);
             m.memory = m.memory.worst(MemorySample::now());
             // Written: release the reserved bytes of the whole batch.
             batch.clear();
             first_pending = None;
         }
-        if seal.is_none() && last_sync.elapsed() >= cfg.sync_interval && m.frames > 0 {
+        if seal.is_none() && last_sync.elapsed() >= cfg.sync_interval && !sync_due && m.frames > 0 {
+            m.deferred_syncs += 1;
+        }
+        if seal.is_none() && sync_due && m.frames > 0 {
             let started = Instant::now();
             writer.sync()?;
             m.syncs += 1;
@@ -341,6 +538,7 @@ mod tests {
             flush_interval: Duration::from_millis(5),
             sync_interval: Duration::from_millis(20),
             stall_budget: Duration::from_millis(50),
+            disk_reserve_bytes: 0,
             fail_at_batch: None,
         }
     }
@@ -405,7 +603,7 @@ mod tests {
     }
 
     fn fixed(c: &WriterConfig) -> u64 {
-        ((c.batch_frames * 5) * std::mem::size_of::<Msg>()) as u64
+        ((c.batch_frames * (4 + ADAPTIVE_BATCH)) * std::mem::size_of::<Msg>()) as u64
     }
 
     fn frames_in(path: &Path) -> (u64, bool, bool) {
@@ -514,6 +712,54 @@ mod tests {
         assert!(sticky.contains("injected write failure"), "{sticky}");
         assert!(w.seal(true).is_err());
         assert_eq!(frames_in(&path), (2, false, false));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// SK-05: larger batches and a deferred sync only under backlog, bounded by the reserved
+    /// batch capacity and twice the sync interval.
+    #[test]
+    fn adaptive_control_stays_within_reserved_bounds() {
+        let ms = Duration::from_millis;
+        assert_eq!(adapt(0, 8, ms(5), ms(10)), (8, false));
+        assert_eq!(adapt(3, 8, ms(10), ms(10)), (8, true));
+        assert_eq!(adapt(16, 8, ms(10), ms(10)), (24, false));
+        assert_eq!(adapt(16, 8, ms(19), ms(10)).1, false);
+        assert_eq!(adapt(16, 8, ms(20), ms(10)).1, true);
+        assert_eq!(adapt(1_000, 8, ms(0), ms(10)).0, 8 * ADAPTIVE_BATCH);
+        assert_eq!(adapt(17, 8, ms(0), ms(10)).0, 25);
+    }
+
+    /// The disk reserve is checked before every batch: below it the lane fails sticky
+    /// (INCOMPLETE) without writing; the status reports queue, lag and disk state.
+    #[test]
+    fn disk_reserve_fails_closed_and_status_reports_the_lane() {
+        let d = dir("disk");
+        let mut c = cfg(1 << 20);
+        c.disk_reserve_bytes = u64::MAX / 2;
+        c.batch_frames = 1;
+        c.flush_interval = Duration::from_millis(1);
+        let path = d.join("d.p0j");
+        let mut w = MarketJournalWorker::start(&path, c).unwrap();
+        let first = w.status();
+        assert_eq!((first.lag_frames, first.queue_bytes), (0, 0));
+        assert!(first
+            .disk_free_bytes
+            .is_some_and(|f| f < first.disk_reserve_bytes));
+        w.submit(Provenance::default(), &row(1)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let err = loop {
+            match w.submit(Provenance::default(), &row(2)) {
+                Err(e) => break e.to_string(),
+                Ok(()) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+                Ok(()) => panic!("reserve not enforced"),
+            }
+        };
+        assert!(err.contains("DISK_RESERVE_EXHAUSTED"), "{err}");
+        let s = w.status();
+        assert!(s.lag_frames >= 1, "{s:?}");
+        assert!(s.terminal().starts_with("[MARKET/STORAGE] queue="));
+        assert!(w.seal(true).is_err());
+        assert_eq!(frames_in(&path), (0, false, false));
         std::fs::remove_dir_all(d).unwrap();
     }
 }
