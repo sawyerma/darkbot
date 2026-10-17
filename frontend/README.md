@@ -2,6 +2,10 @@
 
 Single React frontend for all DarkBot backend domains.
 
+## Gesamtarchitektur
+
+- **[DarkBot Global Frontend Architecture](docs/DARKBOT_GLOBAL_FRONTEND_ARCHITECTURE.md)** — verbindlicher gemeinsamer DarkBot-Host mit globaler Overview, eigenständigen Project_0-/BSC-Projektoberflächen, späteren Projektmodulen und isolierten Backend-/Wallet-/LIVE-Gates. Design: Graphite V0. **Dokumentiert, nicht bereits in alle Domains implementiert.**
+
 ## Ownership
 
 - `features/bsc/` — BSC Birth Entry / Gate0 UI.

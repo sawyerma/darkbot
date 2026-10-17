@@ -8,6 +8,14 @@
 
 **Nachschlagewerke:** [verifizierte Variablen](PROJECT_0_CODE_MAP.md) · [geplanter Control-/API-Vertrag](CONTROL_PROTOCOL.md) · **[verbindliche Boot-/Unbounded-/Backtest-/Optimizer-Spezifikation](STARTUP_BACKTEST_OPTIMIZATION.md)**. Die v1.1-Erweiterung ersetzt feste Laufzeit-Presets durch einen typisierten, frei konfigurierbaren Horizont.
 
+## DarkBot Gesamtfrontend – verbindliche Host-Architektur (2026-10-17)
+
+**Abgenommen:** [DARKBOT_GLOBAL_FRONTEND_ARCHITECTURE.md](DARKBOT_GLOBAL_FRONTEND_ARCHITECTURE.md) ist der verbindliche Hauptvertrag für **eine** React-App mit `DarkBot → /` (globale Übersicht aller Projekte), `/project-0` (unveränderte Project_0-Graphite-V0-UI), `/bsc` (eigene, später zu implementierende Graphite-BSC-UI) sowie vorhandener `/solana`-Route und zukünftiger Registrierung weiterer Projekte. Die globale Overview zeigt nur echte projektbezogene Prozess-/Run-/Health-/Latenz-/Finanzdaten; niemals erfundene Gewinne, vermischte Wallets, gemeinsame Signer oder einen generischen Echtgeld-Start-Knopf.
+
+**Priorität:** Project_0 zuerst nach bestehendem FE-00…FE-07-/C0-E1-Phasenplan als **ein** sauber qualifizierter Liquidator; späterer Multi-Bot-Schwarm ist ausdrücklich vorgemerkt, aber **kein** 4h-/First-Profit-Blocker. BSC folgt seinem eigenständigen Gate-0-/G0.7/G0.8-Phasenplan und erhält später ein eigenes Frontend ohne Codeänderungen an BSC durch diesen Designentscheid. Geteiltes Layout, geteilte Read-only-Projektstatusadapter, strikt getrennte wirtschaftliche Engine-Grenzen. Realer Release nur nach eigener Qualifikation.
+
+**IST-Hinweis:** `/bsc` ist derzeit eine Platzhalterseite; `/project-0` enthält inzwischen die React-V0-Gestaltung statt des historisch dokumentierten Platzhalters. Der bisherige Text unter „IST“ ist als Implementierungssnapshot der Planerstellung zu lesen.
+
 ## V0 Design- und Fleet-Spezifikation (2026-10-17)
 
 **Abgenommenes Design als V0 festgelegt:** [Graphite V0](V0_GRAPHITE_FLEET.md) und [implementierbarer React-/Backend-/Speicher-/Refresh-Phasenplan](V0_FLEET_IMPLEMENTATION_PLAN.md). Die frühere Ein-Bot-UX ist hiermit überholt. `Liquidator` verwaltet später N Bot-Instanzen mit **je eigenen** Strategy Profiles, Capital, MinNet, Fees, Concurrency und qualifizierten Liquidationsklassen. Gemeinsamer Ingress/State plus globaler Arbiter, atomare Wallet-Reservation und per-bot Attribution; Captures/Shadow parallel und unfiltered, Offline-Replay ressourcenisoliert. Keine UI-Budgetänderung überschreibt LIVE-/FE-06-/JFI-Gates.
