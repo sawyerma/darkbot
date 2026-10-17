@@ -120,6 +120,9 @@ impl<T> Consumer<T> {
 
     /// Like `pop_timeout`, but `Err(())` once every producer is gone and the queue is empty,
     /// so a consumer thread can tell a quiet channel from a closed one.
+    // Public API compatibility: Err(()) is the established disconnected sentinel.
+    // Changing it would force unrelated consumers to migrate during reporter qualification.
+    #[allow(clippy::result_unit_err)]
     pub fn pop_timeout_or_closed(&self, timeout: Duration) -> Result<Option<T>, ()> {
         match self.rx.recv_timeout(timeout) {
             Ok(v) => {
