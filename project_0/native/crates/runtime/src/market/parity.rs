@@ -77,6 +77,16 @@ pub fn transaction_line(tx: &ChainTx, program: &Pubkey) -> String {
             }
         }
     }
+    // RELATED_NON_LIQUIDATION instructions with position and pinned roles (UNKNOWN when the
+    // decode fails closed).
+    let related = match super::related::decode(tx, program, tx.slot, None) {
+        Ok(rows) => rows
+            .iter()
+            .map(|r| format!("{}:{}:{}", r.position(), opt(r.target), opt(r.actor)))
+            .collect::<Vec<_>>()
+            .join(","),
+        Err(_) => "UNKNOWN".to_string(),
+    };
     let (events, class) = match (
         &tx.status(),
         truth::classify(tx, program, tx.block_time, None),
@@ -106,7 +116,7 @@ pub fn transaction_line(tx: &ChainTx, program: &Pubkey) -> String {
         }
     };
     format!(
-        "TX {} {} status={status} fee={} priority={} version={version} payer={} sigs={} markers={} events={} class={class} reasons={}",
+        "TX {} {} status={status} fee={} priority={} version={version} payer={} sigs={} markers={} related={} events={} class={class} reasons={}",
         tx.signature().unwrap_or("-"),
         tx.slot,
         opt(tx.meta.as_ref().and_then(|m| m.fee)),
@@ -114,6 +124,7 @@ pub fn transaction_line(tx: &ChainTx, program: &Pubkey) -> String {
         opt(keys.as_ref().and_then(|k| k.first())),
         tx.signatures.len(),
         marks.join(","),
+        related,
         events.join(";"),
         reasons.join(",")
     )

@@ -55,13 +55,15 @@ def tx_line(raw, slot):
     status = 'UNKNOWN' if r['success'] is None else ('SUCCESS' if r['success'] else 'FAILED')
     markers = [f"{i['marker']}@{i['position'][0]}.{opt(i['position'][1])}"
                for i in r.get('instruction_evidence', []) if i.get('marker')]
+    related = [f"{i['related_type']}@{i['position'][0]}.{opt(i['position'][1])}:{opt(i.get('target'))}:{opt(i.get('actor'))}"
+               for i in r.get('instruction_evidence', []) if i.get('related_type')]
     events = [f"{e['type']}:{e['target']}:{e['actor']}:{e['event_index']}:{e.get('seized_asset_native_exact') or '-'}"
               for e in r['events']]
     sigs = (raw.get('transaction') or {}).get('signatures')
     return (f"TX {r['signature']} {slot} status={status} fee={opt(r.get('fee_lamports'))} "
             f"priority={opt(r.get('priority_fee_lamports'))} version={opt(r.get('version'))} "
             f"payer={opt(r.get('fee_payer'))} sigs={len(sigs) if isinstance(sigs, list) else '-'} "
-            f"markers={','.join(markers)} events={';'.join(events)} class={r['classification']} "
+            f"markers={','.join(markers)} related={','.join(related)} events={';'.join(events)} class={r['classification']} "
             f"reasons={','.join(ordered(r['unknown_reasons']))}")
 
 
@@ -141,15 +143,20 @@ def explain(diff, r, p):
             and not r.get('events') and not p.get('events') and d <= {'status', 'class'}):
         notes.append('E2_UNDECODABLE_ERROR_IS_UNKNOWN_BY_CONTRACT (never success on either side)')
     elif (r.get('class') == 'UNKNOWN' and 'INNER_INSTRUCTIONS_UNAVAILABLE' in rr
-            and p.get('class') == 'CLASSIFIED' and d <= {'class', 'events'}):
+            and p.get('class') == 'CLASSIFIED' and d <= {'class', 'events', 'related'}
+            and ('related' not in d or r.get('related') == 'UNKNOWN')):
         notes.append('E3_RUST_FAILS_CLOSED_WITHOUT_INNER_INSTRUCTIONS (CPI coverage unprovable)')
     elif (p.get('class') == 'UNKNOWN' and 'LOGS_TRUNCATED' in p.get('reasons', '').split(',')
             and r.get('class') == 'CLASSIFIED' and d == {'class'}):
         notes.append('E4_TRUNCATED_LOGS_QUALIFIED_BY_INSTRUCTIONS (identical events; r6 instruction parity)')
     elif (unknown_both and ('TX_META_MISSING' in rr or 'TX_META_STATUS_MISSING' in rr)
-            and d <= {'fee', 'priority', 'payer', 'markers', 'version'}
+            and d <= {'fee', 'priority', 'payer', 'markers', 'version', 'related'}
             and all(p.get(k) in ('-', '') for k in d)):
         notes.append('E5_STATUS_UNKNOWN_WITH_MESSAGE_FACTS (Python stops before meta/message facts; status, class and events agree)')
+    elif (d == {'related'} and r.get('related') == 'UNKNOWN' and p.get('related') == ''
+            and r.get('class') == p.get('class') == 'UNKNOWN' and not r.get('events') and not p.get('events')
+            and not r.get('markers') and not p.get('markers') and 'LOADED_ADDRESSES_MISSING' in rr):
+        notes.append('E6_RELATED_UNKNOWN_WITHOUT_ACCOUNT_KEYS (Rust cannot prove absence; Python stops before instruction evidence)')
     else:
         return None
     return ' + '.join(notes)

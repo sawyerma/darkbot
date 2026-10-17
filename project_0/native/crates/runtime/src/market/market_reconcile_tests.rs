@@ -395,3 +395,52 @@ fn full_slot_truncated_log_mismatch_fails_closed() {
     assert!(!c.reconciliation.complete);
     assert_eq!(c.stats.liquidation_events, 0);
 }
+
+/// RELATED_NON_LIQUIDATION instructions of the finalized scan are recorded with position and
+/// status (also inside a failed transaction and as CPI), but never become liquidation events.
+#[test]
+fn full_slot_related_instructions_are_recorded_but_never_liquidations() {
+    use super::related::{RelatedKind, RelatedStatus};
+    let (mut c, mut s) = canonical_core(10, 10);
+    let data = |k: RelatedKind| bs58::encode(k.discriminator()).into_string();
+    let mut failed = with_inner(gap_liquidation("failed", 10, true));
+    failed["transaction"]["message"]["instructions"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"programIdIndex": 1, "accounts": [2, 6], "data": data(RelatedKind::InitLiqRecord)}));
+    let mut found = canonical_tx("found", 10);
+    found["meta"]["innerInstructions"] = json!([{"index": 0, "instructions": [
+        {"programIdIndex": 1, "accounts": [2, 3, 4], "data": data(RelatedKind::KeeperCloseOrder), "stackHeight": 2}
+    ]}]);
+    reconcile_one_block(&mut c, &mut s, 10, vec![failed, found]);
+    assert!(c.reconciliation.complete, "{:?}", c.reconciliation.error);
+    assert_eq!(c.stats.liquidation_events, 1);
+    assert_eq!(
+        s.liq
+            .iter()
+            .filter(|v| v["source"] == "canonical_market_truth")
+            .count(),
+        1
+    );
+    let rows: Vec<_> = s
+        .rel
+        .iter()
+        .map(|r| (r.position(), r.status.clone(), r.transaction_index))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                "marginfi_account_init_liq_record@1.-".to_string(),
+                RelatedStatus::Failed,
+                Some(0)
+            ),
+            (
+                "marginfi_account_keeper_close_order@0.0".to_string(),
+                RelatedStatus::Success,
+                Some(1)
+            ),
+        ]
+    );
+    assert_eq!(s.rel[1].stack_height, Some(2));
+}

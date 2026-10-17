@@ -37,4 +37,6 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 | Unit | State | Commit | Evidence |
 |---|---|---|---|
 | A — baseline/contradictions | done | — | this page |
+| Git isolation (after the 506c349 BSC incident) | Project_0 works in a separate worktree with its own index; guarded pathspec commits | — | memory rule; `dfc5e14` restore reported to the user |
+| C2 — RELATED_NON_LIQUIDATION native rows | LOCAL_PASS in scope; historical positives BLOCKED | (this unit) | [A4_RELATED_20261017](../evidence/A4_RELATED_20261017/README.md) |
 | B — SK-06 CapacityPreflight, launcher-integrated | LOCAL_PASS in scope; real basis NOT_MEASURED, provider NOT_RUN | (this unit) | [SK06_CAPACITY_20261017](../evidence/SK06_CAPACITY_20261017/README.md) |

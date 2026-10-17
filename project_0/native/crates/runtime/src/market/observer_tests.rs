@@ -10,6 +10,7 @@ struct VecSink {
     tx: Vec<Value>,
     liq: Vec<Value>,
     cov: Vec<Value>,
+    rel: Vec<related::MarketRelated>,
 }
 
 /// Stores the offline legacy render of every typed row: every assertion on a row field is a
@@ -25,6 +26,10 @@ impl MarketSink for VecSink {
     }
     fn coverage(&mut self, row: &super::rows::MarketCoverage) -> std::io::Result<()> {
         self.cov.push(row.legacy_json());
+        Ok(())
+    }
+    fn related(&mut self, row: &related::MarketRelated) -> std::io::Result<()> {
+        self.rel.push(row.clone());
         Ok(())
     }
     fn flush(&mut self) -> std::io::Result<()> {

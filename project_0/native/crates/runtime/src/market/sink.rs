@@ -1,4 +1,5 @@
 //! Append-only raw market evidence writers.
+use super::related::MarketRelated;
 use super::rows::{MarketCoverage, MarketLiquidation, MarketTransaction};
 use super::*;
 use crate::analytics::journal;
@@ -13,6 +14,8 @@ pub trait MarketSink {
     fn transaction(&mut self, row: &MarketTransaction) -> std::io::Result<()>;
     fn liquidation(&mut self, row: &MarketLiquidation) -> std::io::Result<()>;
     fn coverage(&mut self, row: &MarketCoverage) -> std::io::Result<()>;
+    /// A RELATED_NON_LIQUIDATION instruction (report evidence only).
+    fn related(&mut self, row: &MarketRelated) -> std::io::Result<()>;
     fn flush(&mut self) -> std::io::Result<()>;
     /// Called once by `finalize` after the last row. A journal-backed sink seals its journal
     /// and returns the binding recorded in the summary.
@@ -55,6 +58,9 @@ impl MarketSink for JsonlSink {
     }
     fn liquidation(&mut self, row: &MarketLiquidation) -> std::io::Result<()> {
         self.inner.liquidation(row)
+    }
+    fn related(&mut self, row: &MarketRelated) -> std::io::Result<()> {
+        self.inner.related(row)
     }
     fn coverage(&mut self, row: &MarketCoverage) -> std::io::Result<()> {
         self.inner.coverage(row)
@@ -163,6 +169,9 @@ impl MarketSink for JournalSink {
     }
     fn coverage(&mut self, row: &MarketCoverage) -> std::io::Result<()> {
         self.append(row, row.slot(), row.t_rx_ns())
+    }
+    fn related(&mut self, row: &MarketRelated) -> std::io::Result<()> {
+        self.append(row, Some(row.slot), None)
     }
     /// The writer lane flushes on its batch/interval bounds and syncs on its interval; durability
     /// of the whole journal is the sync at seal (OS-buffered frames are not crash-safe before).

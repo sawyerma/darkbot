@@ -458,6 +458,14 @@ impl ObserverCore {
                         .map(|(_, t)| *t);
                     let events =
                         require!(truth::classify(tx, &self.program, header.block_time, live));
+                    // RELATED_NON_LIQUIDATION instructions of every program transaction
+                    // (success, failed): report evidence only, never classified or joined.
+                    let related = require!(super::related::decode(
+                        tx,
+                        &self.program,
+                        slot,
+                        Some(index as u64)
+                    ));
                     if self.truth.signatures.contains(&signature) {
                         self.truth.duplicate_transactions += 1;
                         return Ok(Err("DUPLICATE_CANONICAL_TRANSACTION"));
@@ -480,6 +488,9 @@ impl ObserverCore {
                             h.emit(crate::econ::Evidence::CanonicalMarket(event.clone()));
                         }
                         self.truth.events.push(*event);
+                    }
+                    for row in &related {
+                        sink.related(row)?;
                     }
                     require!(self.recover_transaction(slot, index, tx, sink)?);
                 }

@@ -5575,3 +5575,14 @@ Tests: `storage::preflight` 2/2 (mode sizing and blocks; basis from a real run d
 Identity note: `market_verification.rs` (only `BATCH_SLOTS` made public) is a strict decoder pin, so strict `verification_spec_id`s of new verifications change; no local strict verification is in progress.
 
 Open: the real basis (calibration capture, needs explicit Mainnet permission); BOOT-04 provider evidence (C4); byte-bounded econ collections (SK-03/B1); removing the `storage_preflight.json` render needs a run-store re-pin decision (JFI-FIX-04).
+
+## 2026-10-17 — Ticket 3 A4 rest: RELATED_NON_LIQUIDATION as native typed rows (LOCAL_PASS in scope; historical positives BLOCKED)
+
+Base `2db6121` (isolated Project_0 worktree). Evidence: [A4_RELATED_20261017](evidence/A4_RELATED_20261017/README.md).
+
+- `market/related.rs` decodes the four L.5 instructions by pinned discriminator with exact position (outer, CPI, stack height), transaction status and pinned account roles; new journal kind `MARKET_RELATED` (303).
+- The strict full-slot scan records them for every program transaction (success and failed); the native batch reader and strict report count them once per signature/position and separately from the four classes. Never classified, joined, priced or counted as winner/profit. Live `logs` capture cannot observe instructions: live related coverage UNKNOWN.
+- A4 differential extended with a `related` field on both sides: 2,917 sources, 0 unexplained (rule E6 for key-less mutations). No historical full transaction contains a related instruction: `A4_NO_HISTORICAL_RAW_SAMPLE_RELATED` BLOCKED.
+- Identity note: `market_reconcile.rs`/`market_verification.rs` are strict decoder pins; new strict `verification_spec_id`s change.
+
+Tests: related 2/2, reconcile related 1/1, market + journal 135 (2 ignored), parity/verification 8, differential exit 0.

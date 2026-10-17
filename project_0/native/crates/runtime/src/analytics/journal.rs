@@ -38,6 +38,8 @@ pub mod kind {
     pub const MARKET_TRANSACTION: u16 = 300;
     pub const MARKET_LIQUIDATION: u16 = 301;
     pub const MARKET_COVERAGE: u16 = 302;
+    /// RELATED_NON_LIQUIDATION instruction (PHASENPLAN L.5): never a liquidation or profit.
+    pub const MARKET_RELATED: u16 = 303;
     /// Strict verifier (A3): resolved slot scope, cached JSON-RPC exchange (wire text of the
     /// external boundary), batch checkpoint and result — each a sealed single-value journal.
     pub const STRICT_SCOPE: u16 = 310;
@@ -89,6 +91,7 @@ pub mod kind {
         MARKET_TRANSACTION,
         MARKET_LIQUIDATION,
         MARKET_COVERAGE,
+        MARKET_RELATED,
         STRICT_SCOPE,
         STRICT_RPC_CACHE,
         STRICT_CHECKPOINT,

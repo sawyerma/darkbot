@@ -441,6 +441,8 @@ pub struct BatchFacts {
     pub skipped: Vec<u64>,
     /// Program-relevant transactions `(signature, slot)` of the full-slot scan.
     pub program_transactions: Vec<(String, u64)>,
+    /// RELATED_NON_LIQUIDATION instructions (never liquidations).
+    pub related: Vec<super::related::MarketRelated>,
 }
 
 /// Minimal native reader of one batch journal: verifies sequence, CRC, hash chain and seal and
@@ -486,6 +488,11 @@ pub fn read_batch(dir: &Path) -> Result<BatchFacts, &'static str> {
                     f.program_transactions.push((row.signature, row.slot));
                 }
             }
+            kind::MARKET_RELATED => f.related.push(
+                frame
+                    .typed::<super::related::MarketRelated>()
+                    .map_err(|_| "BATCH_FRAME_INVALID")?,
+            ),
             _ => return Err("BATCH_FRAME_KIND"),
         }
         f.frames += 1;
@@ -766,6 +773,8 @@ pub struct StrictReport {
     pub transactions_scanned: u64,
     pub marginfi_transactions: u64,
     pub canonical: Vec<truth::TruthEvent>,
+    /// RELATED_NON_LIQUIDATION instructions, once per signature and position.
+    pub related: Vec<super::related::MarketRelated>,
 }
 
 impl StrictReport {
@@ -819,6 +828,21 @@ impl StrictReport {
                 by.get(&t).copied().unwrap_or(0)
             ));
         }
+        for k in super::related::RelatedKind::ALL {
+            let of = |status: &str| {
+                self.related
+                    .iter()
+                    .filter(|x| x.kind == k && x.status.as_str() == status)
+                    .count()
+            };
+            out.push_str(&format!(
+                "related_non_liquidation {} success={} failed={} unknown={}\n",
+                k.name(),
+                of("SUCCESS"),
+                of("FAILED"),
+                of("UNKNOWN")
+            ));
+        }
         out.push_str("non_claims: strict proves finalized chain facts only; not DarkBot executability, not realized PnL, not the C0-E1 master gate\n");
         out
     }
@@ -841,7 +865,8 @@ pub fn read_report(output: &Path) -> StrictReport {
     // Each batch re-fetches its parent anchor block as proof: count every slot, transaction
     // and canonical event once, and only inside the scope.
     let (mut slots, mut skipped) = (BTreeSet::new(), BTreeSet::new());
-    let (mut program, mut events) = (BTreeSet::new(), BTreeSet::new());
+    let (mut program, mut events, mut related) =
+        (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
     r.slots_expected = scope.hi - scope.lo + 1;
     while next <= scope.hi {
         let end = next.saturating_add(BATCH_SLOTS - 1).min(scope.hi);
@@ -872,6 +897,11 @@ pub fn read_report(output: &Path) -> StrictReport {
                 for e in facts.canonical.into_iter().filter(|e| inside(&e.slot)) {
                     if events.insert((e.signature.clone(), e.slot, e.event_index)) {
                         r.canonical.push(e);
+                    }
+                }
+                for x in facts.related.into_iter().filter(|x| inside(&x.slot)) {
+                    if related.insert((x.signature.clone(), x.position())) {
+                        r.related.push(x);
                     }
                 }
                 anchor = c.anchor;
