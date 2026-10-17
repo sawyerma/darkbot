@@ -106,7 +106,13 @@ fn slow_and_disconnected_client_do_not_block_capture_publisher() {
     for n in 0..1000 {
         tap.publish_market(MarketSnapshot { gap_count: n, ..Default::default() });
     }
-    assert!(handle.counters.connections.load(Ordering::Relaxed) >= 1);
+    // connect() completes before the nonblocking server thread necessarily accepts.
+    // Give the accept loop a bounded chance to report the connection.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while handle.counters.connections.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(handle.counters.connections.load(Ordering::Relaxed) >= 1, "reporter did not accept the connection");
     handle.stop();
     std::fs::remove_dir_all(dir).unwrap();
 }
