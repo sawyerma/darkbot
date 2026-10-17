@@ -5624,3 +5624,12 @@ Base `fe539dd`. Evidence: [B1_SHADOW_RETENTION_20261017](evidence/B1_SHADOW_RETE
 Tests: econ 49 (incl. new byte-ledger test and 1M-evaluation stream over linked segments), segments/writer 3, journal/evidence 43, preflight 2, Python launcher integration 26/26.
 
 Open (JFI-FIX-05 rest, with B7): `ECON_SNAPSHOT/FINAL/OPPORTUNITY/CANONICAL` still schema-1 report values.
+
+## 2026-10-17 — One duration parser (s/m/h/d), typed `RunHorizon::Fixed`, open-ended horizons refused (LOCAL_PASS)
+
+Base `615e792`.
+
+- `runtime_config::duration_seconds` is the only duration parser (operational config, `MeasurementPlan::parse_duration`, `p0ctl`): positive integer with `s`, `m`, `h` or `d`, bounded by exact nanosecond quarter offsets; the second parser in `measurement.rs` is removed. The four snapshot offsets stay derived from the one `MeasurementPlan` (unchanged arithmetic, existing plans byte-compatible).
+- `RunHorizon::Fixed { duration_seconds }` is the plan's typed horizon. `until-stopped`/`inf`/`unbounded` are refused with `RUN_HORIZON_UNTIL_STOPPED_NOT_AVAILABLE` — no `u64::MAX` or placeholder duration. `UntilStopped` (rolling windows, re-preflight, segment policy) remains FEUI follow-up scope.
+
+Tests: measurement 8 (incl. `2d`, `75m`, refusals), solana lib 72, release duration matrix `test_measurement_plan` 4/4 (`2d` = 172,800 s; `inf`, `until-stopped`, `0d` refused).

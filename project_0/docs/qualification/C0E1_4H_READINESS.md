@@ -38,6 +38,7 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 |---|---|---|---|
 | A — baseline/contradictions | done | — | this page |
 | Git isolation (after the 506c349 BSC incident) | Project_0 works in a separate worktree with its own index; guarded pathspec commits | — | memory rule; `dfc5e14` restore reported to the user |
+| C5 — one duration parser (s/m/h/d), `RunHorizon::Fixed` | LOCAL_PASS; `UntilStopped` FEUI follow-up | (this unit) | ledger 2026-10-17 (run horizon) |
 | D3a — B1 part 1: typed+segmented Shadow lane, byte-bounded econ retention | LOCAL_PASS in scope | (this unit) | [B1_SHADOW_RETENTION_20261017](../evidence/B1_SHADOW_RETENTION_20261017/README.md) |
 | D1 — SK-07 segments + chain reader (market lane) | LOCAL_PASS in scope; Shadow lane open (B1) | (this unit) | [SK07_SEGMENTS_20261017](../evidence/SK07_SEGMENTS_20261017/README.md) |
 | C3/C4 — `p0ctl`, owner lock, operator stop, offline boot audit | LOCAL_PASS in scope; network boot NOT_RUN | (this unit) | [CONTROL_BOOT_20261017](../evidence/CONTROL_BOOT_20261017/README.md) |

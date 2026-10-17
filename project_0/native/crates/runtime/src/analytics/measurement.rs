@@ -5,6 +5,14 @@ use serde_json::{json, Value};
 use std::{fs, path::Path};
 
 pub const SNAPSHOT_COUNT: usize = 4;
+
+/// Run horizon (frontend STARTUP §3). Only `Fixed` exists: an open-ended capture
+/// (`UntilStopped` with rolling windows, re-preflight and segment policy) is FEUI follow-up
+/// scope and is refused by the parser instead of being emulated by a huge duration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunHorizon {
+    Fixed { duration_seconds: u64 },
+}
 pub const NS: u64 = 1_000_000_000;
 pub const MAX_SECONDS: u64 = u64::MAX / NS / SNAPSHOT_COUNT as u64;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,26 +65,17 @@ impl MeasurementPlan {
             budgets: PhaseBudgets::default(),
         })
     }
+    /// Delegates to the one duration parser (`runtime_config::duration_seconds`, s/m/h/d) and
+    /// checks the plan bounds.
     pub fn parse_duration(s: &str) -> Result<u64, String> {
-        let at = s.len().checked_sub(1).ok_or("empty duration")?;
-        let (digits, unit) = s
-            .split_at_checked(at)
-            .ok_or("duration needs an ASCII suffix")?;
-        let scale = match unit {
-            "s" => 1,
-            "m" => 60,
-            "h" => 3600,
-            _ => return Err("duration needs s, m or h suffix".into()),
-        };
-        if digits.is_empty() || !digits.bytes().all(|v| v.is_ascii_digit()) {
-            return Err("duration must be an unsigned integer with s/m/h suffix".into());
-        }
-        let seconds = digits
-            .parse::<u64>()
-            .ok()
-            .and_then(|n| n.checked_mul(scale))
-            .ok_or("duration overflow")?;
+        let seconds = darkbot_solana::runtime_config::duration_seconds(s)?;
         Self::new(seconds).map(|p| p.duration_seconds)
+    }
+    /// Typed run horizon of this plan (always fixed: finite measurement windows only).
+    pub fn horizon(&self) -> RunHorizon {
+        RunHorizon::Fixed {
+            duration_seconds: self.duration_seconds,
+        }
     }
     pub fn from_lookup(get: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
         if let Some(path) = get("P0_MEASUREMENT_PLAN") {
@@ -473,8 +472,16 @@ mod tests {
             ("86401s", 86401),
             ("61s", 61),
             ("1s", 1),
+            ("2d", 172800),
+            ("75m", 4500),
         ] {
             let p = MeasurementPlan::new(MeasurementPlan::parse_duration(s).unwrap()).unwrap();
+            assert_eq!(
+                p.horizon(),
+                RunHorizon::Fixed {
+                    duration_seconds: n
+                }
+            );
             assert_eq!(p.duration_seconds, n);
             assert_eq!(p.offset_ns(SNAPSHOT_COUNT), n * NS);
             for i in 1..=SNAPSHOT_COUNT {
@@ -512,7 +519,10 @@ mod tests {
             "+1h",
             "1.5h",
             "1",
-            "1d",
+            "1w",
+            "0d",
+            "inf",
+            "until-stopped",
             "é",
             "1🦀",
             "999999999999999999999999h",

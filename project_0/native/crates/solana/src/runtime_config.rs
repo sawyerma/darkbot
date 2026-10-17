@@ -313,14 +313,22 @@ impl RuntimeConfig {
         env
     }
 }
+/// The one duration parser of Project_0 (operational config, MeasurementPlan, `p0ctl`):
+/// a positive integer with `s`, `m`, `h` or `d`, at most what four exact nanosecond snapshot
+/// offsets can represent. Open-ended horizons are not durations: `until-stopped`/`inf` are
+/// refused (`RunHorizon::UntilStopped` is FEUI follow-up scope), never mapped to a huge number.
 pub fn duration_seconds(s: &str) -> Result<u64, String> {
+    if matches!(s, "until-stopped" | "until_stopped" | "inf" | "infinite" | "unbounded") {
+        return Err("RUN_HORIZON_UNTIL_STOPPED_NOT_AVAILABLE: only fixed durations (s/m/h/d) are supported".into());
+    }
     let at = s.len().checked_sub(1).ok_or("empty duration")?;
     let (n, u) = s.split_at_checked(at).ok_or("invalid duration")?;
     let scale = match u {
         "s" => 1,
         "m" => 60,
         "h" => 3600,
-        _ => return Err("duration requires s/m/h".into()),
+        "d" => 86400,
+        _ => return Err("duration requires s/m/h/d".into()),
     };
     if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
         return Err("duration must be an unsigned integer".into());
