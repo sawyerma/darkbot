@@ -56,6 +56,7 @@ export default function OverviewPage() {
         </div>
       </Section>
 
+      <div className="g-columns">
       <Section title="Global finance">
         {fresh && global?.available ? (
           <>
@@ -73,6 +74,8 @@ export default function OverviewPage() {
         <Line label="Projects connected" value={!fresh || connected === null ? DASH : String(connected)} />
         <Line label="Computed" value={fresh ? formatAge(Date.now(), computedAt) : DASH} />
       </Section>
+
+      </div>
 
       <Notice>
         Values appear only from qualified backend sources. Unknown is shown as {DASH}, never as zero. Readiness is not a LIVE authorization.

@@ -1,11 +1,12 @@
 import { Outlet } from "react-router-dom";
 import { Navigation } from "./Navigation";
+import "./layout.css";
 
 export function AppLayout() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="app-shell">
       <Navigation />
-      <main className="mx-auto max-w-7xl px-4 py-6"><Outlet /></main>
+      <main className="app-main"><Outlet /></main>
     </div>
   );
 }

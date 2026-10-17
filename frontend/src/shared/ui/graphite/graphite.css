@@ -3,7 +3,9 @@
 .g-shell {
   background: var(--g-bg);
   color: var(--g-text);
-  border-radius: var(--g-r-shell);
+  border-radius: 0;
+  min-height: 100%;
+  width: 100%;
   padding: var(--g-shell-pad);
   font-family: var(--g-font);
   font-size: var(--g-fs-base);
@@ -13,8 +15,9 @@
 .g-shell * { box-sizing: border-box; }
 
 .g-panel {
-  max-width: var(--g-panel-max);
-  margin: auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   border: 1px solid var(--g-line-panel);
   border-radius: var(--g-r-panel);
   padding: var(--g-panel-pad);
@@ -83,3 +86,9 @@ button.g-badge { cursor: pointer; }
   .g-metric:nth-child(2) { border: 0; }
   .g-tabs button { min-width: 94px; }
 }
+
+/* Full-width dashboard grids; narrow windows remain fluid. */
+.g-metrics { grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); }
+.g-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 0 32px; }
+.g-line, .g-right { min-width: 0; }
+.g-right { overflow-wrap: anywhere; }
