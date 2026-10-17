@@ -1,0 +1,31 @@
+.ov-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--g-gap-md);
+}
+
+.ov-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--g-line);
+  border-radius: var(--g-r-health);
+  padding: 14px;
+  background: var(--g-health);
+}
+.ov-card:hover { background: var(--g-row-selected); }
+.ov-card h3 { margin: 0; font-size: var(--g-fs-body); font-weight: var(--g-fw-semibold); }
+.ov-card > p { margin: 4px 0 10px; font-size: var(--g-fs-small); color: var(--g-muted); }
+
+.ov-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; font-size: var(--g-fs-small); }
+.ov-facts dt { color: var(--g-dim); }
+.ov-facts dd { margin: 0; text-align: right; color: var(--g-text); }
+
+.ov-warn { margin: 10px 0 0; font-size: var(--g-fs-tiny); color: var(--g-muted); }
+
+@media (max-width: 650px) {
+  .ov-cards { grid-template-columns: 1fr; }
+}

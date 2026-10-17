@@ -22,7 +22,7 @@ const b = (
 ): TopicBinding => ({ topic, wireName, cls, project, payloadType, available: payloadType !== "" });
 
 export const TOPIC_TABLE: readonly TopicBinding[] = [
-  b(TopicId.OVERVIEW_AGGREGATES, "overview.aggregates", TopicClass.STATE, ProjectId.UNSPECIFIED),
+  b(TopicId.OVERVIEW_AGGREGATES, "overview.aggregates", TopicClass.STATE, ProjectId.UNSPECIFIED, "darkbot.control.v1.OverviewAggregates"),
 
   b(TopicId.PROJECT0_STATUS, "project0.status", TopicClass.STATE, ProjectId.PROJECT_0),
   b(TopicId.PROJECT0_FINANCE_SUMMARY, "project0.finance.summary", TopicClass.STATE, ProjectId.PROJECT_0),
