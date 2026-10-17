@@ -18,6 +18,12 @@ fn canonical_tx(sig: &str, slot: u64) -> Value {
     tx["meta"]["innerInstructions"] = json!([]);
     tx
 }
+/// Production order: typed decode at the wire boundary, then full validation.
+fn validate_raw(raw: &Value) -> Result<(), &'static str> {
+    let tx = darkbot_solana::chain::decode_transaction(raw).map_err(|e| e.0)?;
+    reconcile::validate_full_transaction(&tx)
+}
+
 #[test]
 fn full_slot_every_produced_block_and_transaction_are_scanned() {
     let (mut c, mut s) = canonical_core(10, 12);
@@ -219,7 +225,7 @@ fn full_transaction_rejects_unsupported_version_and_bad_inner_index() {
         if case == 2 {
             tx["meta"]["innerInstructions"] = json!([{"index":999,"instructions":[]}]);
         }
-        assert!(reconcile::validate_full_transaction(&tx).is_err());
+        assert!(validate_raw(&tx).is_err());
     }
 }
 #[test]
@@ -229,11 +235,11 @@ fn full_transaction_checks_loaded_address_counts_even_when_present() {
     tx["transaction"]["message"]["addressTableLookups"] = json!([{"accountKey":Pubkey::new_unique().to_string(),"writableIndexes":[0],"readonlyIndexes":[]}]);
     tx["meta"]["loadedAddresses"] = json!({"writable":[],"readonly":[]});
     assert!(matches!(
-        reconcile::validate_full_transaction(&tx),
+        validate_raw(&tx),
         Err("LOADED_ADDRESS_COUNT_MISMATCH")
     ));
     tx["meta"]["loadedAddresses"]["writable"] = json!([Pubkey::new_unique().to_string()]);
-    assert!(reconcile::validate_full_transaction(&tx).is_ok());
+    assert!(validate_raw(&tx).is_ok());
 }
 #[test]
 fn full_slot_budget_and_large_range_are_bounded() {

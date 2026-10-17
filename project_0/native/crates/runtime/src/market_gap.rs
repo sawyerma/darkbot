@@ -326,11 +326,13 @@ impl ObserverCore {
         deadline: Instant,
         sink: &mut dyn MarketSink,
     ) -> std::io::Result<Result<(), &'static str>> {
-        if block["parentSlot"].as_u64().is_none_or(|p| p >= slot)
-            || block["blockhash"].as_str().is_none_or(str::is_empty)
-        {
-            return Ok(Err("BLOCK_HEADER_INVALID"));
-        }
+        // JFI-02: the getBlock answer is decoded once into the typed block model.
+        let typed = match darkbot_solana::chain::decode_block(&block, slot) {
+            Ok(b) if b.parent_slot < slot && !b.blockhash.is_empty() => b,
+            Ok(_) => return Ok(Err("BLOCK_HEADER_INVALID")),
+            Err(e) => return Ok(Err(e.0)),
+        };
+        // Legacy row payloads until the typed market rows replace them (Ticket 3 step 4).
         let Some(transactions) = block["transactions"].as_array() else {
             return Ok(Err("BLOCK_TRANSACTIONS_MISSING"));
         };
@@ -348,12 +350,16 @@ impl ObserverCore {
             };
             obj.insert("slot".into(), json!(slot));
             obj.insert("transactionIndex".into(), json!(index));
-            if let Err(code) = self.recover_transaction(slot, index, &raw, sink)? {
+            let tx = match &typed.transactions[index] {
+                Ok(tx) => tx,
+                Err(e) => return Ok(Err(e.0)),
+            };
+            if let Err(code) = self.recover_transaction(slot, index, tx, &raw, sink)? {
                 return Ok(Err(code));
             }
         }
         sink.coverage(&json!({"event":"GAP_BLOCK_FETCHED", "slot":slot,
-            "blockhash":block["blockhash"], "parent_slot":block["parentSlot"], "transactions":transactions.len()}))?;
+            "blockhash":typed.blockhash, "parent_slot":typed.parent_slot, "transactions":transactions.len()}))?;
         Ok(Ok(()))
     }
 
@@ -361,15 +367,15 @@ impl ObserverCore {
         &mut self,
         slot: u64,
         index: usize,
+        tx: &ChainTx,
         raw: &Value,
         sink: &mut dyn MarketSink,
     ) -> std::io::Result<Result<(), &'static str>> {
         // Validate all transactions, including those irrelevant to Marginfi: missing
         // loaded addresses must never turn an unknown relevance decision into false.
-        let tx = match darkbot_solana::chain::decode_entry(raw, slot, Some(index as u64), None) {
-            Ok(v) => v,
-            Err(e) => return Ok(Err(e.0)),
-        };
+        if tx.slot != slot || tx.transaction_index != Some(index as u64) {
+            return Ok(Err("TX_IDENTITY"));
+        }
         if !matches!(
             tx.version,
             Some(darkbot_solana::chain::TxWireVersion::Legacy)
@@ -388,10 +394,10 @@ impl ObserverCore {
         let Some(signature) = tx.signature() else {
             return Ok(Err("TX_SIGNATURE_MISSING"));
         };
-        if check_transaction_identity(&tx, signature, slot).is_err() {
+        if check_transaction_identity(tx, signature, slot).is_err() {
             return Ok(Err("TX_IDENTITY"));
         }
-        let keys = match resolve_account_keys(&tx) {
+        let keys = match resolve_account_keys(tx) {
             Ok(k) => k,
             Err(e) => return Ok(Err(e.code())),
         };
@@ -411,7 +417,7 @@ impl ObserverCore {
                 .iter()
                 .map(|e| (e.target, e.receiver))
                 .collect();
-            match qualify_truncated(&tx, signature, slot, &self.program, &pairs) {
+            match qualify_truncated(tx, signature, slot, &self.program, &pairs) {
                 TruncationQualification::Qualified { .. } => {}
                 TruncationQualification::Mismatch { .. } => {
                     return Ok(Err("LIQUIDATION_INSTRUCTION_LOG_MISMATCH"))
@@ -435,7 +441,7 @@ impl ObserverCore {
         self.absorb_decode(&decoded, success);
         if success && decoded.truncated {
             let pairs = self.note_truncated(&decoded);
-            let q = qualify_truncated(&tx, signature, slot, &self.program, &pairs);
+            let q = qualify_truncated(tx, signature, slot, &self.program, &pairs);
             self.apply_truncation(q);
         }
         if success && !decoded.events.is_empty() {
@@ -457,7 +463,7 @@ impl ObserverCore {
                 None,
                 unix_now_s(),
                 &decoded.events,
-                Some(&tx),
+                Some(tx),
                 "GAP_BLOCK_PAYLOAD",
             )?;
         }
@@ -602,15 +608,13 @@ impl RpcFetcher {
                     .ok_or("SKIP_SUCCESSOR_UNAVAILABLE")?;
                 let header = self.gap_request("getBlock", json!([successor, {"transactionDetails":"none",
                     "rewards":false, "commitment":"finalized", "maxSupportedTransactionVersion":1}]), deadline, cfg.timeout_ms)?;
-                let parent = header["parentSlot"]
-                    .as_u64()
+                // Shape-checked against the successor; the skip proof is the parent link below.
+                let header = darkbot_solana::chain::decode_block_header(&header, successor)
+                    .map_err(|_| "SKIP_HEADER_MISSING")?;
+                let parent = Some(header.parent_slot)
                     .filter(|p| *p < slot)
                     .ok_or("SKIP_PARENT_UNPROVEN")?;
-                let blockhash = header["blockhash"]
-                    .as_str()
-                    .filter(|h| !h.is_empty())
-                    .ok_or("SKIP_HEADER_MISSING")?
-                    .to_owned();
+                let blockhash = header.blockhash;
                 Ok(GapSlot::Skipped {
                     successor,
                     parent,

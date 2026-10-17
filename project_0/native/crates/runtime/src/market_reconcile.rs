@@ -106,8 +106,7 @@ type ReconcileRpc<'a> = dyn FnMut(&str, Value, Duration) -> Result<Value, &'stat
 
 /// Validate ALL key/index views before deciding relevance, including inner instructions.
 /// Legacy/v0 and the JSON v1 account/instruction view are covered by real F8 fixtures.
-pub(super) fn validate_full_transaction(raw: &Value) -> Result<ChainTx, &'static str> {
-    let tx = darkbot_solana::chain::decode_transaction(raw).map_err(|e| e.0)?;
+pub(super) fn validate_full_transaction(tx: &ChainTx) -> Result<(), &'static str> {
     if !matches!(
         tx.version,
         Some(TxWireVersion::Legacy) | Some(TxWireVersion::Number(0 | 1))
@@ -120,8 +119,8 @@ pub(super) fn validate_full_transaction(raw: &Value) -> Result<ChainTx, &'static
         TxStatus::Unknown(code) => return Err(code),
     }
     let signature = tx.signature().ok_or("TX_SIGNATURE_MISSING")?;
-    check_transaction_identity(&tx, signature, tx.slot).map_err(|_| "TX_IDENTITY")?;
-    let keys = resolve_account_keys(&tx).map_err(|e| e.code())?;
+    check_transaction_identity(tx, signature, tx.slot).map_err(|_| "TX_IDENTITY")?;
+    let keys = resolve_account_keys(tx).map_err(|e| e.code())?;
     // A present but empty loadedAddresses object must not disguise an unresolved LUT.
     // (Lookup keys and u8 indexes are validated by the typed wire decode.)
     if let Some(lookups) = tx
@@ -173,7 +172,7 @@ pub(super) fn validate_full_transaction(raw: &Value) -> Result<ChainTx, &'static
             valid_ix(ix)?;
         }
     }
-    Ok(tx)
+    Ok(())
 }
 
 impl ObserverCore {
@@ -347,16 +346,13 @@ impl ObserverCore {
                     return Ok(Err(e));
                 }
             };
-            let parent = require!(block["parentSlot"]
-                .as_u64()
-                .filter(|p| *p < slot)
-                .ok_or("BLOCK_HEADER_INVALID"));
-            let hash = require!(block["blockhash"]
-                .as_str()
-                .filter(|h| !h.is_empty())
-                .ok_or("BLOCK_HEADER_INVALID"));
-            let prev_hash = require!(block["previousBlockhash"]
-                .as_str()
+            // JFI-02: the getBlock answer is decoded once into the typed block model.
+            let header =
+                require!(darkbot_solana::chain::decode_block_header(&block, slot).map_err(|e| e.0));
+            let (parent, hash) = (header.parent_slot, header.blockhash.as_str());
+            let prev_hash = require!(header
+                .previous_blockhash
+                .as_deref()
                 .filter(|h| !h.is_empty())
                 .ok_or("BLOCK_HEADER_INVALID"));
             if let Some((p, h)) = &previous_block {
@@ -378,6 +374,9 @@ impl ObserverCore {
                 next = hi.saturating_add(1);
                 break;
             }
+            let typed =
+                require!(darkbot_solana::chain::decode_block(&block, slot).map_err(|e| e.0));
+            // Legacy row payloads until the typed market rows replace them (Ticket 3 step 4).
             let txs = require!(block["transactions"]
                 .as_array()
                 .ok_or("BLOCK_TRANSACTIONS_MISSING"));
@@ -393,13 +392,14 @@ impl ObserverCore {
                 let obj = require!(raw.as_object_mut().ok_or("TX_SHAPE"));
                 obj.insert("slot".into(), json!(slot));
                 obj.insert("transactionIndex".into(), json!(index));
-                let tx = require!(validate_full_transaction(&raw));
-                let keys = require!(resolve_account_keys(&tx).map_err(|e| e.code()));
+                let tx = require!(typed.transactions[index].as_ref().map_err(|e| e.0));
+                require!(validate_full_transaction(tx));
+                let keys = require!(resolve_account_keys(tx).map_err(|e| e.code()));
                 if keys.contains(&self.program) {
                     self.reconciliation.marginfi_transactions += 1;
                     // Persist full relevant TX before any liquidation/strategy decision.
                     sink.transaction(&json!({"source":"full_slot_reconciliation","slot":slot,"transaction_index":index,
-                        "signature":tx.signatures[0],"blockhash":hash,"block_time":block["blockTime"],"raw":raw}))?;
+                        "signature":tx.signatures[0],"blockhash":hash,"block_time":header.block_time,"raw":raw}))?;
                     let signature = &tx.signatures[0];
                     let live = self
                         .truth
@@ -407,12 +407,8 @@ impl ObserverCore {
                         .get(signature)
                         .filter(|(s, _)| *s == slot)
                         .map(|(_, t)| *t);
-                    let events = require!(truth::classify(
-                        &raw,
-                        &self.program,
-                        block["blockTime"].as_i64(),
-                        live
-                    ));
+                    let events =
+                        require!(truth::classify(tx, &self.program, header.block_time, live));
                     if self.truth.signatures.contains(signature) {
                         self.truth.duplicate_transactions += 1;
                         return Ok(Err("DUPLICATE_CANONICAL_TRANSACTION"));
@@ -436,11 +432,11 @@ impl ObserverCore {
                         }
                         self.truth.events.push(event);
                     }
-                    require!(self.recover_transaction(slot, index, &raw, sink)?);
+                    require!(self.recover_transaction(slot, index, tx, &raw, sink)?);
                 }
             }
             sink.coverage(&json!({"event":"FULL_SLOT_RESULT","slot":slot,"status":"PRODUCED_FETCHED",
-                "blockhash":hash,"parent_slot":parent,"previous_blockhash":prev_hash,"block_time":block["blockTime"],"transactions_scanned":txs.len()}))?;
+                "blockhash":hash,"parent_slot":parent,"previous_blockhash":prev_hash,"block_time":header.block_time,"transactions_scanned":txs.len()}))?;
             self.reconciliation.slots_fetched += 1;
             // A progress unit is counted ONLY after the full block (including
             // relevant transactions and canonical evidence) has passed validation
@@ -460,7 +456,7 @@ impl ObserverCore {
                     self.truth.events.len()
                 );
             }
-            let time = block["blockTime"].as_i64();
+            let time = header.block_time;
             if self.reconciliation.slots_fetched == 1 {
                 self.reconciliation.first_block_time = time;
             }

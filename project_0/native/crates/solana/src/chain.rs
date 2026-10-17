@@ -180,7 +180,8 @@ impl ChainTx {
 pub struct ChainBlock {
     pub slot: u64,
     pub blockhash: String,
-    pub previous_blockhash: String,
+    /// `None` when the provider omitted it; required only where the parent chain is proven.
+    pub previous_blockhash: Option<String>,
     pub parent_slot: u64,
     pub block_time: Option<i64>,
     pub block_height: Option<u64>,
@@ -355,7 +356,8 @@ struct WireTx {
 #[serde(rename_all = "camelCase")]
 struct WireBlock {
     blockhash: String,
-    previous_blockhash: String,
+    #[serde(default)]
+    previous_blockhash: Option<String>,
     parent_slot: u64,
     #[serde(default)]
     block_time: Option<i64>,
@@ -560,6 +562,35 @@ pub fn decode_notification(value: &serde_json::Value) -> Result<ChainTx, ChainEr
         return Err(ChainError("NOTIFICATION_SIGNATURE_MISMATCH"));
     }
     Ok(decoded)
+}
+
+/// Header of a `getBlock` answer (any `transactionDetails`), validated against `slot`:
+/// the parent must be older and the blockhash non-empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockHeader {
+    pub blockhash: String,
+    /// `None` when the provider omitted it; required only where the parent chain is proven.
+    pub previous_blockhash: Option<String>,
+    pub parent_slot: u64,
+    pub block_time: Option<i64>,
+    pub block_height: Option<u64>,
+}
+
+pub fn decode_block_header(
+    value: &serde_json::Value,
+    slot: u64,
+) -> Result<BlockHeader, ChainError> {
+    let w = WireBlock::deserialize(value).map_err(|_| ChainError("BLOCK_HEADER_INVALID"))?;
+    if w.parent_slot >= slot || w.blockhash.is_empty() {
+        return Err(ChainError("BLOCK_HEADER_INVALID"));
+    }
+    Ok(BlockHeader {
+        blockhash: w.blockhash,
+        previous_blockhash: w.previous_blockhash,
+        parent_slot: w.parent_slot,
+        block_time: w.block_time,
+        block_height: w.block_height,
+    })
 }
 
 /// `getBlock` result (`encoding = "json"`, `transactionDetails = "full"`) of `slot`. Each entry

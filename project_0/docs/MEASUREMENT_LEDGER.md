@@ -5445,3 +5445,9 @@ Base `3ef129c`.
 - Still JSON in Ticket 3 scope: ingress `raw` payloads, market sink rows, block envelopes in gap/reconcile fetch, `Subscription.program_filters`, verifier/report renders.
 
 Tests: chain 4/4 on real Mainnet v1/v0 fixtures (status table, LUTs, exact units, block entries); winner 33/33 incl. new absent-`err` regression; market 113/113; runner lib 274/274 (4 ignored); solana lib 70/70; featureless check PASS. `market_truth.rs` was not rustfmt-clean before; part of its diff is formatting only.
+
+## 2026-10-17 — Ticket 3 step 3: typed block envelopes in gap and reconcile (LOCAL_PASS, Ticket 3 OPEN)
+
+Base `bb5a11a`. Gap recovery and full-slot reconciliation decode each `getBlock` answer once into `ChainBlock` (`decode_block`, new `decode_block_header` for header-only answers); header checks, validation, classification and recovery read the typed block and its entries (an undecodable entry fails the block closed with its reason). `validate_full_transaction` and `truth::classify` take `&ChainTx`. `previousBlockhash` is optional in the model and required, as before, only in the reconcile parent-chain proof. Reason codes unchanged. Legacy market rows still carry their raw payload until the typed rows (step 4) replace them — no evidence is dropped in between.
+
+Tests: market 113/113 (gap, reconcile, truth through decode-then-call helpers), chain 4/4, featureless check PASS.

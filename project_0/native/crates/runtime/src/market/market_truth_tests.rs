@@ -37,10 +37,20 @@ fn sha256_fixture_discriminator(name: &str) -> [u8; 8] {
         _ => panic!("unknown fixture"),
     }
 }
+/// Production order: decode the RPC transaction at the wire boundary, then classify it.
+fn classify_raw(
+    raw: &Value,
+    block_time: Option<i64>,
+    live: Option<u64>,
+) -> Result<Vec<truth::TruthEvent>, &'static str> {
+    let tx = darkbot_solana::chain::decode_transaction(raw).map_err(|e| e.0)?;
+    truth::classify(&tx, &program(), block_time, live)
+}
+
 #[test]
 fn truth_classic_decodes_native_amount_and_liability_deposit_cost() {
     let tx = classic_truth_fixture();
-    let events = truth::classify(&tx, &program(), Some(1234), None).unwrap();
+    let events = classify_raw(&tx, Some(1234), None).unwrap();
     assert_eq!(events.len(), 1);
     let e = &events[0];
     assert_eq!(e.liquidation_type, truth::LiquidationType::Classic);
@@ -66,16 +76,12 @@ fn truth_classic_decodes_native_amount_and_liability_deposit_cost() {
 fn truth_classic_failed_normal_and_mismatched_events() {
     let mut tx = classic_truth_fixture();
     tx["meta"]["err"] = json!({"InstructionError":[0,{"Custom":1}]});
-    assert!(truth::classify(&tx, &program(), None, None)
-        .unwrap()
-        .is_empty());
+    assert!(classify_raw(&tx, None, None).unwrap().is_empty());
     tx["meta"]["err"] = Value::Null;
     tx["meta"]["logMessages"] = json!([]);
-    assert!(truth::classify(&tx, &program(), None, None).is_err());
+    assert!(classify_raw(&tx, None, None).is_err());
     tx["transaction"]["message"]["instructions"] = json!([]);
-    assert!(truth::classify(&tx, &program(), None, None)
-        .unwrap()
-        .is_empty());
+    assert!(classify_raw(&tx, None, None).unwrap().is_empty());
 }
 #[test]
 fn truth_classic_loaded_program_and_cpi_are_resolved() {
@@ -87,18 +93,12 @@ fn truth_classic_loaded_program_and_cpi_are_resolved() {
         .pop();
     tx["transaction"]["message"]["addressTableLookups"] = json!([{"accountKey":Pubkey::new_unique().to_string(),"writableIndexes":[],"readonlyIndexes":[0]}]);
     tx["meta"]["loadedAddresses"] = json!({"writable":[],"readonly":[program().to_string()]});
-    assert_eq!(
-        truth::classify(&tx, &program(), None, None).unwrap().len(),
-        1
-    );
+    assert_eq!(classify_raw(&tx, None, None).unwrap().len(), 1);
     let ix = tx["transaction"]["message"]["instructions"][0].clone();
     tx["transaction"]["message"]["instructions"] =
         json!([{"programIdIndex":0,"accounts":[],"data":""}]);
     tx["meta"]["innerInstructions"] = json!([{"index":0,"instructions":[ix]}]);
-    assert_eq!(
-        truth::classify(&tx, &program(), None, None).unwrap().len(),
-        1
-    );
+    assert_eq!(classify_raw(&tx, None, None).unwrap().len(), 1);
 }
 #[test]
 fn truth_multiple_classic_events_in_one_transaction_are_not_collapsed() {
@@ -113,7 +113,7 @@ fn truth_multiple_classic_events_in_one_transaction_are_not_collapsed() {
         .as_array_mut()
         .unwrap()
         .extend(lines);
-    let events = truth::classify(&tx, &program(), None, Some(42)).unwrap();
+    let events = classify_raw(&tx, None, Some(42)).unwrap();
     assert_eq!(events.len(), 2);
     assert_ne!(events[0].event_index, events[1].event_index);
     assert_eq!(events[0].discovery_source, "BOTH");
@@ -123,7 +123,7 @@ fn truth_receivership_reuses_six_real_f8_fixtures() {
     for fx in fixtures() {
         let mut tx: Value = serde_json::from_str(fx.raw).unwrap();
         tx["transactionIndex"] = json!(0);
-        let events = truth::classify(&tx, &program(), None, None).unwrap();
+        let events = classify_raw(&tx, None, None).unwrap();
         assert_eq!(events.len(), 1, "{}", fx.signature);
         assert_eq!(
             events[0].liquidation_type,
@@ -150,7 +150,7 @@ fn truth_priority_uses_requested_limit_not_consumed_units() {
         tx["transaction"]["message"]["instructions"].as_array_mut().unwrap().push(json!({"programIdIndex":index,"accounts":[],"data":bs58::encode(data).into_string()}));
     }
     tx["meta"]["computeUnitsConsumed"] = json!(100);
-    let events = truth::classify(&tx, &program(), None, None).unwrap();
+    let events = classify_raw(&tx, None, None).unwrap();
     assert_eq!(events[0].priority_fee_lamports, Some(1001));
     assert_eq!(events[0].transaction_fee_lamports, Some(7345));
 }
@@ -202,14 +202,9 @@ fn administrative_truth_fixture(bankruptcy: bool) -> Value {
 #[test]
 fn truth_deleverage_and_bankruptcy_are_separate_from_permissionless_profit() {
     for bankruptcy in [false, true] {
-        let e = truth::classify(
-            &administrative_truth_fixture(bankruptcy),
-            &program(),
-            None,
-            None,
-        )
-        .unwrap()
-        .remove(0);
+        let e = classify_raw(&administrative_truth_fixture(bankruptcy), None, None)
+            .unwrap()
+            .remove(0);
         assert!(!e.permissionless_profit_opportunity);
         if bankruptcy {
             assert_eq!(
@@ -239,7 +234,7 @@ fn truth_foreign_emitter_and_failed_cpi_never_produce_liquidation() {
             .unwrap()
             .replace(&program().to_string(), &Pubkey::new_unique().to_string()))
         .collect::<Vec<_>>());
-    assert!(truth::classify(&tx, &program(), None, None).is_err());
+    assert!(classify_raw(&tx, None, None).is_err());
     let mut logs = logs;
     *logs.last_mut().unwrap() = json!(format!(
         "Program {} failed: custom program error",
@@ -247,7 +242,7 @@ fn truth_foreign_emitter_and_failed_cpi_never_produce_liquidation() {
     ));
     tx["meta"]["logMessages"] = json!(logs);
     assert!(matches!(
-        truth::classify(&tx, &program(), None, None),
+        classify_raw(&tx, None, None),
         Err("RELEVANT_CPI_FAILED")
     ));
 }
@@ -259,15 +254,11 @@ fn truth_aggregate_all_types_preserves_known_and_unknown() {
         administrative_truth_fixture(false),
         administrative_truth_fixture(true),
     ] {
-        ledger
-            .events
-            .extend(truth::classify(&tx, &program(), None, None).unwrap());
+        ledger.events.extend(classify_raw(&tx, None, None).unwrap());
     }
     let mut rx = canonical_tx("rx", 10);
     rx["transactionIndex"] = json!(0);
-    ledger
-        .events
-        .extend(truth::classify(&rx, &program(), None, None).unwrap());
+    ledger.events.extend(classify_raw(&rx, None, None).unwrap());
     let s = ledger.summary(Some(3600.));
     assert_eq!(s["groups"]["ALL"]["liquidation_events"], 4);
     assert_eq!(s["groups"]["ALL"]["gross_edge_usd"]["count_known"], 2);
@@ -319,7 +310,7 @@ fn truth_mixed_real_receiver_and_source_classic_preserves_event_order() {
         .unwrap()
         .extend(classic["meta"]["logMessages"].as_array().unwrap().clone());
     real["transactionIndex"] = json!(0);
-    let events = truth::classify(&real, &program(), None, None).unwrap();
+    let events = classify_raw(&real, None, None).unwrap();
     assert_eq!(events.len(), 2);
     assert_eq!(
         events[0].liquidation_type,
@@ -354,7 +345,7 @@ fn live_nonreceiver_events_reuse_existing_canonical_decoder() {
         assert!(observed.events.is_empty());
         assert_eq!(observed.additional_events.len(), 1);
         assert_eq!(observed.additional_events[0].kind, kind);
-        let canonical = truth::classify(&tx, &program(), None, None).unwrap();
+        let canonical = classify_raw(&tx, None, None).unwrap();
         assert_eq!(
             observed.additional_events[0].gross_edge_usd,
             canonical[0].gross_edge_usd

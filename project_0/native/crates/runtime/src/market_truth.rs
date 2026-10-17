@@ -418,12 +418,12 @@ fn instructions(tx: &ChainTx, program: &Pubkey) -> Result<Vec<InstructionEvidenc
 /// Decode every audited completion path. Receivership is decoded and qualified by
 /// the original decoder + F8 implementation rather than a second interpretation.
 pub(super) fn classify(
-    raw: &Value,
+    tx: &ChainTx,
     program: &Pubkey,
     block_time: Option<i64>,
     live: Option<u64>,
 ) -> Result<Vec<TruthEvent>, &'static str> {
-    let tx = reconcile::validate_full_transaction(raw)?;
+    reconcile::validate_full_transaction(tx)?;
     match tx.status() {
         TxStatus::Success => {}
         TxStatus::Failed(_) => return Ok(vec![]),
@@ -450,7 +450,7 @@ pub(super) fn classify(
         }
         TruncationQualification::Unqualified(code) => return Err(code),
     }
-    let mut ixs = instructions(&tx, program)?;
+    let mut ixs = instructions(tx, program)?;
     if receiver.truncated && !ixs.is_empty() {
         // F8 proves only top-level receivership. A truncated CPI parent could
         // conceal rollback of Classic/settlement logs even if the outer TX succeeds.
@@ -558,7 +558,7 @@ pub(super) fn classify(
     // Stable index in typed event order, never a signature-only identity. Receiver
     // indices remain in their original relative order (existing F8 semantics).
     let fee = tx.meta.as_ref().and_then(|m| m.fee);
-    let enrichment = enrich(&tx, program);
+    let enrichment = enrich(tx, program);
     let priority = enrichment.priority_fee_lamports;
     decoded.sort_by_key(|(position, _, _)| *position);
     decoded.into_iter().enumerate().map(|(index,(_,ev,amount))| {
@@ -571,7 +571,7 @@ pub(super) fn classify(
             asset_mint:ev.asset_mint,liability_mint:ev.liability_mint,seized_asset_native_exact:amount.map(|n|n.to_string()),
             native_evidence:ev.native,seized_value_usd:ev.seized,repaid_value_usd:ev.repaid,gross_edge_usd:edge,
             protocol_fee_lamports:ev.flat_fee,transaction_fee_lamports:fee,priority_fee_lamports:priority,
-            fee_payer:enrichment.fee_payer.clone(),visible_payments:visible_payments(&tx),incremental_rent_lamports:None,
+            fee_payer:enrichment.fee_payer.clone(),visible_payments:visible_payments(tx),incremental_rent_lamports:None,
             winner_net_edge_usd:None,winner_net_edge_complete:false,
             economic_provenance:match ev.kind {LiquidationType::Classic=>"NATIVE_INSTRUCTION_AND_EVENT; SLOT_PRICE_AND_DECIMALS_UNKNOWN; LIABILITY_COST_INCLUDES_INSURANCE",
                 LiquidationType::Receivership|LiquidationType::ForcedDeleverage=>"CACHED_PROTOCOL_EQUITY_USD: SEIZED_MINUS_REPAID; SOL_USD_AND_EXTERNAL_COSTS_UNKNOWN",
