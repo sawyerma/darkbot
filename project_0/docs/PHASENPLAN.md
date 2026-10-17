@@ -5260,6 +5260,64 @@ Local regression/build/format/differential-Clippy evidence and synchronized Mark
 
 **Unveränderte Gates:** FREE_ONLY, LIVE und Submission gesperrt, kein Mainnet-/Echtgeldlauf ohne separate Freigabe; alle FE-00–FE-07-, Markt- und Chain-Abnahmen gelten weiter. BSC nicht verändern. Diese verbindliche Norm ersetzt frühere Empfehlungen eines SQLite-/JSONL-/Binär-Mischbetriebs für neue primäre Project_0-Runtime-Daten.
 
+### Verbindliche Speicher-/RAM-/Offline-Analysearchitektur (2026-10-17) – Konkretisierung PERSIST-01–05 / JFI-01–05
+
+**VERBINDLICHER ZIELVERTRAG, NICHT BEREITS IMPLEMENTIERT ODER QUALIFIZIERT.** Diese Ergänzung präzisiert den vorhandenen PERSIST-/JFI-Vertrag für Market-Capture, Shadow, Long-Tail, Economics, FE-04/P8 sowie 4h-, 24h- und 48h-Läufe. Keine neue Hauptphase, keine zweite Runtime/Trading-/Economics-Engine, keine globalen Refactorings. Historische Evidence und alle bisherigen FE-, C0-E1-, LIVE-, FREE_ONLY-, Permission- und Safety-Gates bleiben unverändert.
+
+**SK-01 – Drei Ebenen, eine einzige Datenwahrheit.** (A) Externer Solana-Wire-Rand → native Rust ChainTx/ChainBlock → State/Health/Trading/Shadow im RAM ohne I/O-Wait. (B) Typisierte, ownership-sichere, nach Anzahl **und Bytes** begrenzte Übergabe → dedizierter MarketJournalWorker → sequenzielle begrenzte Batches → **kanonische versionierte binäre .p0j-Journalsegmente** mit vollständigen Chain-Fakten, Provenienz, Sequenzen, CRC, Hash-Verkettung, Manifest und Replay. (C) **Optionaler, separater Offline-Rust-Indexer** erzeugt ausschließlich aus verifizierten, versiegelten .p0j-Segmenten einen jederzeit rekonstruierbaren SQLite-Analysecache für historische Suche. .p0j ist die einzige autoritative Markt- und Finanz-Evidence; SQLite, Aggregate und Reports sind Derivate, keine zweite Quelle von Wahrheit. Keine neuen produktiven JSON/JSONL/CSV/SQLite/Parquet-Primärwriter, keine interne JSON-Zwischenpipeline.
+
+**SK-02 – Zuständigkeiten und Projektstruktur (Rust-Module, structs/enums; traits nur bei echtem Bedarf).** Vier vorhandene Crates bleiben; bestehende Implementierungen nicht duplizieren. Zielstruktur, Dateien mit NEU nur bei tatsächlicher Notwendigkeit anlegen:
+
+~~~text
+project_0/native/crates/
+  common/src/
+    channel.rs                 BESTAND: bounded Channel / Overflow
+    config.rs                  BESTAND: typisierte Config-Primitiven
+  solana/src/
+    chain.rs                   BESTAND: native Chain-/Wire-Typen
+    runtime_config.rs          BESTAND
+  runtime/src/
+    analytics/
+      journal.rs               BESTAND: EINZIGER kanonischer Frame-Codec/Reader/Writer
+      payload.rs               BESTAND: versionierte native Payloads
+      evidence.rs              BESTAND: Owner-Evidence und Recovery
+      econ.rs                  BESTAND: fachliche Economics / Aggregationen
+    market/
+      sink.rs                  ANPASSEN: typed MarketSink ohne synchrone SSD-Writes
+      capture.rs               ANPASSEN: bestehender Capture-Lifecycle
+    storage/                   NEU: nur Orchestrierung des bestehenden Journalcodecs
+      mod.rs
+      config.rs                StorageConfig
+      budget.rs                MemoryBudget / BytePermit
+      writer.rs                MarketJournalWorker
+      segments.rs              SegmentManager
+      preflight.rs             CapacityPreflight
+      metrics.rs               StorageMetrics
+    offline_analysis/          NEU, optionales Offline-Cargo-Feature
+      mod.rs
+      schema.rs
+      indexer.rs               AnalysisIndexBuilder
+      queries.rs               AnalysisQueries
+    bin/p0-analyze.rs          NEU: eigener Offline-CLI-Einstieg
+~~~
+
+Ownership: darkbot-common besitzt Channel-/Config-Primitiven, darkbot-solana die Chain-Typen, analytics den einzigen Journalcodec und die Economics, market nur Beobachtung/Klassifikation, storage Writer-Orchestrierung/Budgets/Segmente/Preflight, offline_analysis nur Indizes und Abfragen. MarketJournalWorker klassifiziert **keine** Liquidationen; SegmentManager berechnet keine Economics; SQLite-Indexer und Query-Schicht führen **keine** unabhängige Winner-/Economics-/Protokollfachlogik aus. Keine zirkulären Abhängigkeiten. Vorhandenen bounded sync_channel weiterverwenden; kein zusätzlicher komplexer Lock-free-Ringbuffer ohne belegten Engpass.
+
+**SK-03 – Einstellbares, hart begrenztes RAM-Bytebudget.** Der bestehende operative Config-/CLI-Vertrag erhält explizite validierte Felder für initial_mib, max_mib, system_reserve_mib, Queue-, Batch-, Writer-/Indexpuffer-Budgets und Dauer. **Keine verstreuten fixen RAM-Hardcodes.** initial_mib ist die anfängliche Zulassungsgrenze, keine Pflicht-Vorallokation; max_mib ist die **niemals überschreitbare Capture-Zulassungsgrenze**. MemoryBudget/BytePermit reserviert vor der Queueaufnahme Bytes für Event, tatsächliche dynamische Kapazität/Overhead und zusätzliche vom Capture verwaltete Writer-/Serialisierungs-/Indexpuffer; Freigabe erfolgt automatisch. Zusätzlich Prozess-RSS, Allocator-/OS-Druck, macOS-Swap und System-/Trading-Reserve beobachten: ein Byte-Zähler allein garantiert **keine** absolute Gesamtprozess-RSS-Grenze. Adaptive Puffer/Batches wachsen nur innerhalb freier Budgets und geben unbenutzte Kapazitäten zurück. Keine RAM-Collections proportional zur Messdauer, keine unbounded Queues und kein Swap als Ersatz für die Kapazitätsplanung. Verifier und SQLite-Offline-Indexierung haben getrennte harte RAM-/Diskbudgets und keine bevorzugte Trading-Ressourcenfreigabe.
+
+**SK-04 – Separater Batch-Writer und Haltbarkeit.** Trading-Owner und zeitkritischer Ingress warten niemals auf Market-Dateischreiben, Flush/fsync, SQL, JSON-Encode oder Recorder-RPC. Native Market-Events gehen an einen dedizierten Writer; dort bounded Batching, deterministische Frames, effiziente sequenzielle Writes und konfigurierbare Sync-/Checkpoint-Grenzen. Kein Sync pro Markttransaktion, sofern nicht ein ausdrücklich strengerer Durability-Vertrag gilt. OS-gepufferte Daten sind vor bestätigtem Sync **nicht** crashsicher; unsichere Tailbereiche und fehlgeschlagene Writes als INCOMPLETE erfassen. Finanzielle FE-04-/P8-Intent-/Reservation-Versionen bleiben vor SEND zwingend nachweislich durable; keine Lockerung dieser Safety-Barriere durch Market-Batching. Roh-Capture und finanzieller Journalpfad dürfen getrennte Writer-Lanes besitzen, verwenden aber denselben kanonischen Journalvertrag.
+
+**SK-05 – Rückstau und 48h-Verfügbarkeit.** Ein kurzer SSD-Stall führt nicht allein zum sofortigen Abbruch: freie RAM-Reserve innerhalb max_mib nutzen, Batchgrößen begrenzt anpassen, Offline-Analyse pausieren, Roh-Capture priorisieren, Engpass/Restpuffer und prognostizierte Erschöpfungszeit im Terminal melden. **Vor dem Langlauf** anhand realer Datenraten/Peaks und nachhaltiger Writer-Leistung dimensionieren, damit vermeidbare Abbrüche ausgeschlossen werden. Eine physikalisch dauerhaft zu langsame/ausgefallene SSD kann bei hartem RAM-Maximum nicht beliebig verlustfrei überbrückt werden; daher keine unhaltbare 48h-Garantie: Bei nachgewiesen unrettbarer Vollständigkeitsverletzung INCOMPLETE/finanzielle Admission HALT statt Silent Drop, unechtem COMPLETE oder heimlichem unbounded Wachstum. Keine automatische Erhöhung über Nutzer-Maximum.
+
+**SK-06 – CapacityPreflight und laufende adaptive Kontrolle.** Vor 4h-/24h-/48h-Capture bei entsprechender Langlauf-Freigabe: geplante Dauer; belegte durchschnittliche und Burst-Bytes/s; erwartete Journalbytes samt Frame-/Sync-/Segment-Overhead und SSD-Sicherheitsreserve; nachhaltige Writer-Rate und tolerierbare Stallzeiten; Peak-/Capture-RAM einschließlich Betriebssystem- und Trading-Reserve; CPU, Provider-/Archivbudget und **separater** späterer SQLite-Platzbedarf. Fehlende reale Grundlage offen NOT_MEASURED/CAPACITY_UNVERIFIED, keine erfundenen Benchmarks. Bei nicht qualifizierter Kapazität keinen langen Capture automatisch starten. Während des Laufs Datenrate, Queue-Bytes/-Lag, RAM, SSD-Freiraum, Writer-Throughput und Restzeit begrenzt fortschreiben; dynamisch innerhalb der freigegebenen Konfiguration reagieren. 48 Stunden erfordern bei ausreichender permanenter Writer-Rate nicht 48-fachen RAM, wohl aber passende SSD-Kapazität und Reserve. Keine ungebremsten IO-Nebenjobs.
+
+**SK-07 – Segmentierung, Lesbarkeit und schnellere Langzeitauswertung.** Ein Run kann mehrere versionierte .p0j-Segmente desselben vorhandenen Journalvertrags enthalten. Eindeutige Run-/Segmentidentität, fortlaufende Sequenzen, Vorgänger-/Root-Hashes, Zeit-/Slot-/Fork-Provenienz, Sync-/Seal-Status und Run-Manifest verbinden sie prüfbar. Historische/versiegelte Segmente niemals verändern. Crash/Truncation als INCOMPLETE nachweisen, Reader/Replay und Index-Rebuild müssen segmentübergreifend funktionieren. Bestehende Stunden-/Viertelstundenaggregate native/typisiert wiederverwenden; gezielte historische Abfragen dürfen Zeit-/Slot-/Offset-Indizes verwenden. Ein anderer Decoder-/Economics-Versionstand benötigt gegebenenfalls erneute Ableitung; keine stillschweigende Wiederverwendung fachlich veralteter Aggregate. Der aktive C0-E1-Rust-Verifier bleibt unabhängig von der Bot-Marktklassifikation.
+
+**SK-08 – SQLite nur als ausdrückliche enge Offline-Analyseausnahme.** Die bisherigen PERSIST-/JFI-Verbote zusätzlicher **produktiver** SQLite-/JSON-/JSONL-Pfade bleiben unverändert. **Zulässig ist ausschließlich ein optionaler, nichtautoritativer, separat ausführbarer SQLite-Cache nach dem Capture**; Aufbau aus bereits validierten/versiegelten .p0j-Segmenten über einen eigenen Rust-CLI-Einstieg und ein separates Cargo-Feature. Indexiert werden nur notwendige Suchinformationen (z. B. Run/Segment, Signatur, Slot, T_rx, Eventart, Account, Liquidationsklasse, Winner, Segment-Byteoffset) sowie bereits fachlich berechnete Stunden-/Kapital-/Economics-/Coverage-Aggregate. Keine zweite vollständige Roh-TX-Kopie, kein SQL im Trading-, Ingress-, Recorder-, finanziellen, aktiven Chain-Verifier- oder produktiven C0-E1-Reportpfad. Index-Identität bindet capture_run_id, .p0j-Hash/Schema, fachliche Decoder-/Economics-Version und Indexschema; beschädigte/fremde Caches werden verworfen und neu aus .p0j aufgebaut. SQLite-Transaktionen/WAL/Checkpoints und RAM-/Disk-Limits begrenzen; kein unbegrenztes WAL. Exakte i128/u128-Fakten verlustfrei speichern, niemals durch REAL/double ersetzen. SQLite ist **kein** zusätzlicher operativer Eventbus oder Store und darf nie als alleiniges Winner-, Fee-, Reconcile-, Coverage- oder Verifier-Evidence gelten. Neue produktive Reports und Strict-Verifier bleiben direkt nativ auf .p0j und sind ohne SQLite vollständig funktionsfähig. Diese ausdrücklich begrenzte Offline-Derivat-Ausnahme konkretisiert PERSIST-04/JFI-03; **keine** weitere Ausnahme für internes JSON oder produktives SQL.
+
+**SK-09 – Einordnung, Umsetzung und Abnahme.** Keine weitere Planungsphase: (1) laufendes Ticket 3 mit nativen MARKET_TRANSACTION/MARKET_LIQUIDATION/MARKET_COVERAGE-Payloads und historischer Reader-/Verifier-Parität fertigstellen; (2) vorhandenen MarketSink an dedizierten Batch-Writer anbinden; (3) StorageConfig/MemoryBudget/BytePermit/StorageMetrics implementieren; (4) kanonische Segmente und CapacityPreflight ergänzen; (5) native Economics-/Report-Consumers fertig qualifizieren; (6) optional **nachrangig** Offline-SQLite-Indexer/CLI; (7) gezielte PERSIST-/JFI-Negativ-/Paritätstests (Overflow, Disk-full, Sync-Fehler, Crash, Replay, Index-Rebuild, bitgenaue Zahlen), keine unnötigen Testschleifen. STATUS.md §12 und MEASUREMENT_LEDGER.md mit tatsächlichem CODE/LOCAL_PASS/OPEN/BLOCKED fortschreiben. 600-s-/4h-Abnahmen und First-Realized-Profit-Priorität gemäß §0.6 nicht durch optionales SQLite blockieren; 24h-/48h-Mainnet-Läufe bleiben jeweils genehmigungspflichtig; bsc/ unberührt.
+
+
 ### Bindender JSON-FREE-INTERNAL-Vertrag — gesamte produktive Project_0-Architektur (2026-10-16)
 
 **VERBINDLICHE VERSCHÄRFUNG, AB SOFORT ZIELARCHITEKTUR; IMPLEMENTIERUNG NOCH NICHT QUALIFIZIERT.** Gilt übergreifend für P0/P1/C0/H0, S0–S4, P2–P9, T, C0-MO/C0-E1, FE-00–FE-07, P6-MT, P8-RES/INV, Race, K und spätere Frontend-Anbindung. Diese spätere, ausdrückliche Regel hat bei JSON-Widersprüchen Vorrang vor §1.7, dem bisherigen PERSIST-01–05-Text, den älteren CLI-/Evidence-Beispielen und historischen Architektur-Snapshots. Der übrige Phasenplan und alle Gate-/LIVE-/Kosten- und Produktverpflichtungen bleiben verbindlich. Kein Architektur-Neustart, keine zweite Codebasis.
