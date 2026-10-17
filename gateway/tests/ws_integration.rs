@@ -63,7 +63,7 @@ fn update(g:u64,s:u64)->StateUpdate{StateUpdate{topic:TopicId::OverviewAggregate
 #[tokio::test]async fn cookie_origin_host_guards(){
  let s=spawn(Limits::default()).await;
  for (cookie,origin,host,expected) in [(false,None,None,401),(true,Some("http://evil.example"),None,403),(true,None,Some("evil.example"),403)]{
- let err=try_connect(&s,cookie,origin,host).await.err().expect("must reject");
+ let err=try_connect(&s,cookie,origin,host).await.expect_err("must reject");
  match err{WsError::Http(res)=>assert_eq!(res.status().as_u16(),expected),other=>panic!("{other:?}")}
  }
 }
