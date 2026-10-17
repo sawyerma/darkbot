@@ -21,8 +21,8 @@ Dieses Dokument ist der **Einstiegspunkt** in den fachlichen BSC-Phasenplan. Es 
 
 | Phase | Code / Werkzeug (Stand nach R9–R13) |
 |---|---|
-| G0.6a DRY | `engine/crates/qualification/src/bin/g06a_native_bnb_quote.rs`, `g06a_self_launch_bundle.rs`; `tools/g06a_final_dry.sh`, `tools/g06a_*.cjs` |
-| G0.7 | `engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/` (Feature `g07-mainnet`), Guard `engine/crates/execution/src/acceptance_guard.rs`, Vertrag `config/g01_mainnet_acceptance_proposal_v2.json`; `tools/g07_*.sh` |
+| G0.6a DRY / Requalifikation | `engine/crates/qualification/src/bin/g06a_native_bnb_quote.rs`, `g06a_self_launch_bundle.rs`, `g06a_builder_policy_record.rs`, `g06a_requal_check.rs`; `engine/crates/execution/src/bin/g06a_preflight_record.rs` (R0/DRY-0); `tools/g06a_final_dry.sh`, `tools/g06a_*.cjs`; Plan [G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md](G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md) |
+| G0.7 | `engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/` (Feature `g07-mainnet`), Guard `engine/crates/execution/src/acceptance_guard.rs`; einzige Vertragsautorität `config/g07_attempt1_acceptance_v4.dbrec` (wird aus dem Requalifikations-DRY erzeugt; `FROZEN_APPROVED_V4_SHA256 = "UNARMED"`). v3 (`config/g07_attempt1_acceptance_v3.dbrec`) und der JSON-v2-Vertrag sind **nur Historie, keine aktive Autorität**; `tools/g07_*.sh` |
 | G0.8 | `engine/crates/qualification/src/bin/g08_mainnet_verify.rs`, `g08_producer_timing.rs` |
 | C0 | `engine/crates/{trading,tx_encoding,execution,journal}` |
 | C1 | `engine/crates/geth_ipc`, `geth/`, `native/evidence/c1/`, `tools/c1*`, `tools/c13*`, `tools/c14*`, `tools/c19*` |

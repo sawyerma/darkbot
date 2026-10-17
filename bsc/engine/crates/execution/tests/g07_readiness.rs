@@ -127,7 +127,16 @@ fn v4_root(tag: &str, edit: impl FnOnce(&mut Draft)) -> PathBuf {
         .set(up::SCANNED_FROM_BLOCK, 1u64)
         .set(up::SCANNED_TO_BLOCK, 2u64)
         .set(up::CURRENT_IMPLEMENTATION, Value::Address(implementation))
-        .set(up::BASELINE_IMPLEMENTATION, Value::Address(implementation));
+        .set(up::BASELINE_IMPLEMENTATION, Value::Address(implementation))
+        .set(up::COVERAGE_METHOD, up::METHOD)
+        .set(up::CHAIN_SOURCE, "offline-test")
+        .set(up::ARCHIVE_SOURCE, "offline-test")
+        .set(up::HEADERS_VERIFIED, 2u64)
+        .set(up::BLOOM_CANDIDATE_BLOCKS, 0u64)
+        .set(up::CURRENT_IMPLEMENTATION_CODE_SHA256, Value::B256([0x42; 32]))
+        .set(up::CURRENT_IMPLEMENTATION_CODE_BYTES, 1u64)
+        .set(up::FIRST_PARENT_HASH, Value::B256([1; 32]))
+        .set(up::LAST_BLOCK_HASH, Value::B256([2; 32]));
     write("portal_upgrade.dbrec", scan.encode().unwrap());
     let evidence = attempt1_v4_evidence(&root, REQUAL, &policy).unwrap();
     let proposal = attempt1_v4(&evidence, Authorization::Proposed).unwrap();

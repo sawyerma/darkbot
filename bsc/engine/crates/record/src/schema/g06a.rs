@@ -473,8 +473,9 @@ pub mod economics {
     };
 }
 
-/// The frozen 2026-10-11 builder gas-floor policy
-/// (`g06a_builder_floor_addendum_2026-10-11.json`).
+/// The builder gas-floor policy: the frozen 2026-10-11 import
+/// (`g06a_builder_floor_addendum_2026-10-11.json`) and its native
+/// re-determination.
 pub mod builder_policy {
     use super::*;
 
@@ -486,10 +487,12 @@ pub mod builder_policy {
     pub const STRICTEST_FLOOR_WEI: u16 = 40;
     pub const STAGE1_GAS_PRICE_WEI: u16 = 42;
     pub const DRY3_READY: u16 = 44;
+    pub const SOURCES: u16 = 60;
 
-    /// The fields of both variants after their provenance (tags 1–4).
+    /// The fields of both variants after their provenance (tags 1–4), then
+    /// a variant's own fields.
     macro_rules! fields {
-        ($($head:expr),* $(,)?) => {
+        ($($head:expr),* $(,)? $(; $($tail:expr),* $(,)?)?) => {
             &[
                 $($head,)*
                 Field::req(LEGACY_SCHEMA, "schema", Text),
@@ -519,7 +522,34 @@ pub mod builder_policy {
                 Field::req(52, "minimum_spend_probe.selected_signed_gas_price_wei", U256),
                 Field::req(53, "minimum_spend_probe.selected_buy_value_wei", U256),
                 Field::req(54, "minimum_spend_probe.rationale", Text),
+                $($($tail,)*)?
             ]
+        };
+    }
+
+    /// One official documentation page as the refresh fetched it.
+    pub mod source {
+        use super::*;
+
+        pub const URL: u16 = 1;
+        pub const HTTP_STATUS: u16 = 2;
+        pub const FETCHED_UNIX_MS: u16 = 3;
+        pub const BODY_SHA256: u16 = 4;
+        pub const BODY_BYTES: u16 = 5;
+        pub const FINDING: u16 = 6;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.g06a.builder-floor-policy.source",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(URL, "url", Text),
+                Field::req(HTTP_STATUS, "http_status", U64),
+                Field::req(FETCHED_UNIX_MS, "fetched_unix_ms", U64),
+                Field::req(BODY_SHA256, "body_sha256", B256),
+                Field::req(BODY_BYTES, "body_bytes", U64),
+                Field::req(FINDING, "finding", Text),
+            ],
         };
     }
 
@@ -533,19 +563,23 @@ pub mod builder_policy {
         ),
     };
 
-    /// The same fields as the native output of a requalification DRY run,
-    /// with provenance instead of a legacy file.
+    /// The same fields, re-determined by `g06a_builder_policy_record` from
+    /// the official documentation pages it fetched (`sources`: what each
+    /// page said, when, and the SHA-256 of the body it read), with
+    /// provenance instead of a legacy file. Its freshness is the fetch time
+    /// of its oldest source, never a typed-in date.
     pub const NATIVE: Schema = Schema {
         name: "darkbot.g06a.builder-floor-policy.v2",
         record_type: 22,
-        schema_version: 1,
+        schema_version: 2,
         fields: fields!(
             Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
             Field::req(
                 PROVENANCE_OBSERVED_UNIX_MS,
                 "_provenance.observed_unix_ms",
                 U64
-            ),
+            );
+            Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
         ),
     };
 }
@@ -608,8 +642,17 @@ pub mod quote {
     };
 }
 
-/// Step R0 of a requalification: the proxy's `Upgraded(address)` events
-/// since the frozen DRY head, read-only, and the implementation now active.
+/// Step R0 of a requalification: every `Upgraded(address)` event of the
+/// Portal proxy since the frozen DRY head, with complete coverage that needs
+/// no `eth_getLogs`: every header of the range is hash-verified
+/// (keccak256(rlp(header)) equals its hash) and linked by its parent hash
+/// from `first_parent_hash` to `last_block_hash`; its `logsBloom` proves the
+/// absence of the event (a bloom has no false negatives), and every block
+/// whose bloom could hold it is read in full (`eth_getBlockReceipts`) and its
+/// receipts verified against the header's `receiptsRoot`. Each event is
+/// further bound by the implementation slot before and after it on an
+/// archive endpoint; the record carries the implementation now active and
+/// its code hash.
 pub mod portal_upgrade {
     use super::*;
 
@@ -619,45 +662,159 @@ pub mod portal_upgrade {
     pub const UPGRADES: u16 = 13;
     pub const CURRENT_IMPLEMENTATION: u16 = 14;
     pub const BASELINE_IMPLEMENTATION: u16 = 15;
+    pub const COVERAGE_METHOD: u16 = 16;
+    pub const CHAIN_SOURCE: u16 = 17;
+    pub const ARCHIVE_SOURCE: u16 = 18;
+    pub const HEADERS_VERIFIED: u16 = 19;
+    pub const BLOOM_CANDIDATE_BLOCKS: u16 = 20;
+    pub const CURRENT_IMPLEMENTATION_CODE_SHA256: u16 = 21;
+    pub const CURRENT_IMPLEMENTATION_CODE_BYTES: u16 = 22;
+    pub const FIRST_PARENT_HASH: u16 = 23;
+    pub const LAST_BLOCK_HASH: u16 = 24;
+
+    /// The only coverage method the requalification accepts.
+    pub const METHOD: &str = "header-hash-chain+logs-bloom+receipts-root";
 
     pub mod upgrade {
         use super::*;
 
         pub const BLOCK: u16 = 1;
-        pub const TRANSACTION_HASH: u16 = 2;
-        pub const LOG_INDEX: u16 = 3;
-        pub const IMPLEMENTATION: u16 = 4;
+        pub const BLOCK_HASH: u16 = 2;
+        pub const TRANSACTION_HASH: u16 = 3;
+        pub const LOG_INDEX: u16 = 4;
+        pub const IMPLEMENTATION: u16 = 5;
+        pub const RECEIPT_STATUS: u16 = 6;
+        pub const SLOT_BEFORE: u16 = 7;
+        pub const SLOT_AFTER: u16 = 8;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.g07.portal-upgrade-scan.upgrade",
             record_type: 0,
-            schema_version: 1,
+            schema_version: 2,
             fields: &[
                 Field::req(BLOCK, "block", U64),
+                Field::req(BLOCK_HASH, "block_hash", B256),
                 Field::req(TRANSACTION_HASH, "transaction_hash", B256),
                 Field::req(LOG_INDEX, "log_index", U64),
                 Field::req(IMPLEMENTATION, "implementation", Address),
+                Field::req(RECEIPT_STATUS, "receipt_status", U64),
+                Field::req(SLOT_BEFORE, "implementation_slot_before", Address),
+                Field::req(SLOT_AFTER, "implementation_slot_after", Address),
             ],
         };
     }
 
     pub const SCHEMA: Schema = Schema {
-        name: "darkbot.g07.portal-upgrade-scan.v1",
+        name: "darkbot.g07.portal-upgrade-scan.v2",
         record_type: 24,
-        schema_version: 1,
+        schema_version: 2,
         fields: &[
             Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
-            Field::req(
-                PROVENANCE_OBSERVED_UNIX_MS,
-                "_provenance.observed_unix_ms",
-                U64,
-            ),
+            Field::req(PROVENANCE_OBSERVED_UNIX_MS, "_provenance.observed_unix_ms", U64),
             Field::req(PROXY, "proxy", Address),
             Field::req(SCANNED_FROM_BLOCK, "scanned_from_block", U64),
             Field::req(SCANNED_TO_BLOCK, "scanned_to_block", U64),
             Field::nested(UPGRADES, "upgrades", Presence::Repeated, &upgrade::SCHEMA),
             Field::req(CURRENT_IMPLEMENTATION, "current_implementation", Address),
             Field::req(BASELINE_IMPLEMENTATION, "baseline_implementation", Address),
+            Field::req(COVERAGE_METHOD, "coverage_method", Text),
+            Field::req(CHAIN_SOURCE, "chain_source", Text),
+            Field::req(ARCHIVE_SOURCE, "archive_source", Text),
+            Field::req(HEADERS_VERIFIED, "headers_verified", U64),
+            Field::req(BLOOM_CANDIDATE_BLOCKS, "bloom_candidate_blocks", U64),
+            Field::req(
+                CURRENT_IMPLEMENTATION_CODE_SHA256,
+                "current_implementation_code_sha256",
+                B256,
+            ),
+            Field::req(
+                CURRENT_IMPLEMENTATION_CODE_BYTES,
+                "current_implementation_code_bytes",
+                U64,
+            ),
+            Field::req(FIRST_PARENT_HASH, "first_parent_hash", B256),
+            Field::req(LAST_BLOCK_HASH, "last_block_hash", B256),
+        ],
+    };
+}
+
+/// The typed acceptance of a requalification DRY run against the frozen
+/// DRY (`g06a_requal_check`): every check with its outcome, the records it
+/// evaluated and the verdict `FLAP_REQUALIFICATION` (PASS or STOP).
+pub mod requalification {
+    use super::*;
+
+    pub const VERDICT: u16 = 10;
+    pub const REQUAL_DIR: u16 = 11;
+    pub const FROZEN_DIR: u16 = 12;
+    pub const CHECKS: u16 = 13;
+    pub const RECORDS: u16 = 14;
+    pub const UPGRADE_BLOCK: u16 = 15;
+    pub const UPGRADE_TRANSACTION: u16 = 16;
+    pub const OLD_IMPLEMENTATION: u16 = 17;
+    pub const NEW_IMPLEMENTATION: u16 = 18;
+    pub const NEW_IMPLEMENTATION_CODE_SHA256: u16 = 19;
+    pub const PORTAL_VERSION: u16 = 20;
+    pub const LAUNCH_TX_HASH: u16 = 21;
+    pub const BUY_TX_HASH: u16 = 22;
+
+    pub mod check {
+        use super::*;
+
+        pub const NAME: u16 = 1;
+        pub const STATUS: u16 = 2;
+        pub const DETAIL: u16 = 3;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.g06a.requalification.check",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(NAME, "name", Text),
+                Field::req(STATUS, "status", Text),
+                Field::req(DETAIL, "detail", Text),
+            ],
+        };
+    }
+
+    pub mod bound {
+        use super::*;
+
+        pub const NAME: u16 = 1;
+        pub const SHA256: u16 = 2;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.g06a.requalification.record",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[Field::req(NAME, "name", Text), Field::req(SHA256, "sha256", B256)],
+        };
+    }
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.g06a.requalification-status.v1",
+        record_type: 26,
+        schema_version: 1,
+        fields: &[
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(PROVENANCE_OBSERVED_UNIX_MS, "_provenance.observed_unix_ms", U64),
+            Field::req(VERDICT, "flap_requalification", Text),
+            Field::req(REQUAL_DIR, "requal_dir", Text),
+            Field::req(FROZEN_DIR, "frozen_dir", Text),
+            Field::nested(CHECKS, "checks", Presence::Repeated, &check::SCHEMA),
+            Field::nested(RECORDS, "records", Presence::Repeated, &bound::SCHEMA),
+            Field::opt(UPGRADE_BLOCK, "upgrade.block", U64),
+            Field::opt(UPGRADE_TRANSACTION, "upgrade.transaction_hash", B256),
+            Field::opt(OLD_IMPLEMENTATION, "upgrade.old_implementation", Address),
+            Field::opt(NEW_IMPLEMENTATION, "upgrade.new_implementation", Address),
+            Field::opt(
+                NEW_IMPLEMENTATION_CODE_SHA256,
+                "upgrade.new_implementation_code_sha256",
+                B256,
+            ),
+            Field::opt(PORTAL_VERSION, "portal_version", Text),
+            Field::opt(LAUNCH_TX_HASH, "transactions.launch_tx_hash", B256),
+            Field::opt(BUY_TX_HASH, "transactions.buy_tx_hash", B256),
         ],
     };
 }
@@ -674,4 +831,5 @@ pub const ALL: &[&Schema] = &[
     &builder_policy::NATIVE,
     &quote::SCHEMA,
     &portal_upgrade::SCHEMA,
+    &requalification::SCHEMA,
 ];

@@ -14,7 +14,7 @@ Method: public BSC RPC `bsc-dataseed.bnbchain.org`, heads ~128 153 600. JSON-RPC
 |---|---|
 | Proxy `0xe2ce…9de0` | Code unchanged (`1fc365bf…`, 2 882 bytes). |
 | Implementation | `0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20` (v5.24.0, `2ac893fc…`, 20 475 bytes, solc 0.8.26 with metadata) → `0xe13227370996f892a56d2ff4a30f6026887b48fb` (v5.25.0, `42c91172…`, 20 347 bytes, built without CBOR metadata). |
-| Upgrade block / transaction | Not determined: public RPCs refuse `eth_getLogs` over this range, and BscScan blocks automated access. The upgrade lies after the DRY head 127 865 760 (2026-10-15 22:22Z). |
+| Upgrade block / transaction | Determined in R0 (§8): block 128 103 397 (`0x8d0c79ab…badb`), transaction `0x5a4faae5…3d4a`, log index 235, receipt status 1. At the time of this analysis public RPCs refused `eth_getLogs` over the range and BscScan blocked automated access. |
 | Selectors (dispatcher) | 100 → 99. All six G0.7 functions unchanged: `newTokenV6` `8cb5772c`, `swapExactInput` `ef7ec2e7`, `getQuoteTokenConfiguration` `26ef20d5`, `getFeeRate` `84e5eed0`, `enableTaxOnBondingCurve` `1d31e153`, `version` `54fd4d50`. Removed: `recoverStuckTaxProcessorToTaxToken(address,address)` `5fbbeee7`, `auditorRunIdempotent()` `b2299337`. Added: `40c9450e` (unknown). |
 | Bytecode | Opcode similarity 0.983 (70 changed runs, 316 opcodes). The version string and nine embedded addresses (immutables) changed. All nine are redeployed helper contracts: one is code-identical, the others differ slightly. The TAX_V3 implementation `0x024f18294970b5c76c0691b87f138a0317156422` is used unchanged. |
 | Read state | Native quote configuration, protocol fees, tax flag, proxy code and TAX_V3 implementation are equal to the DRY baseline (readiness drift comparison). |
@@ -45,13 +45,13 @@ Basis: the frozen candidate unchanged — same wallets, salt, values, gas, `minO
 
 | Step | What runs | Binary output (DBREC001, no JSON file) | Acceptance |
 |---|---|---|---|
-| R0 | Upgrade evidence: `eth_getLogs` for `Upgraded(address)` on the proxy through the operator RPC (read-only). | Recorded in the new preflight baseline record (block, transaction, old/new implementation). | Exactly one upgrade v5.24.0→v5.25.0 since the DRY head. |
+| R0 | Upgrade evidence without `eth_getLogs` (§8): every header since the DRY head hash-verified and parent-linked, logs blooms, receipts of every bloom candidate verified against `receiptsRoot`; both chain ends anchored on an archive endpoint, implementation slot before/after each event (read-only, free public endpoints). | `portal_upgrade_scan.dbrec` (R0) and `portal_upgrade.dbrec` (closed at the DRY-0 block), type 24 v2. | Exactly one upgrade v5.24.0→v5.25.0 since the DRY head; coverage complete from the frozen block hash to the preflight block hash. |
 | DRY-0 baseline | Current read-only preflight through the existing Rust preflight (`run_current_preflight`). | `preflight.dbrec` (preflight schema, native, without `_import.*`). | Equal to the v5.24.0 baseline except the three drift fields; nonces 0/0; funding PASS. |
 | DRY-1 bytes and signers | `g06a_self_launch_bundle`: sign locally with the key environment variables (subshell, `env -i`, no output of secret values). | `dry_result.dbrec` (native DRY schema). | Launch/BUY hashes equal `0xdb468c01…` / `0xb086f683…`; signers equal the wallets. |
 | DRY-2 independent simulation | The existing EthereumJS simulation (`g06a_local_simulate`, `g06a_economics_evm_crosscheck`) against current state, with the exact signed bytes, locally (state via RPC reads, calldata never on the network). | `local_simulation.dbrec`, `economics_crosscheck.dbrec`. | Launch and BUY successful; output = `176693134169499757962`; `output_difference = 0`; token = `0xe51c…7777`. |
-| DRY-3 gas floor and budget | Read-only builder refresh (documentation, ≤ 24 h before arming) plus floor/budget comparison. | `builder_policy.dbrec` (native, new observation date). | Explicit floors ≤ 50 000 000 wei; budget unchanged (481 163 500 000 000 wei). |
+| DRY-3 gas floor and budget | Builder requirements re-determined from the official documentation pages (`g06a_builder_policy_record`, read-only) plus floor/budget comparison. | `builder_policy.dbrec` (native, type 22 v2, with each fetched source: URL, fetch time, HTTP status, body SHA-256, finding). | Floor read from BlockRazor's rule sentence = 50 000 000 wei; no explicit 48Club minimum; budget unchanged (481 163 500 000 000 wei). Any other finding is a STOP. |
 | DRY-4 expiry, nonces, zero egress | Existing structural zero-egress proof and expiry projection. | Fields in `dry_result.dbrec`. | Zero egress; nonces 0/0. |
-| Comparison | Field-by-field comparison new DRY ↔ frozen DRY (offline). | Markdown view (derived). | Only head, time and the three implementation fields differ; signed hashes identical. |
+| Comparison | Field-by-field reports new DRY ↔ frozen DRY (`dbrec_compare`, derived Markdown) and the typed verdict `g06a_requal_check` (offline). | `requalification_status.dbrec` (type 26) plus derived views. | Every field equal except an explicit allow-list per record (head, block hash, implementation and code, gas price, balances, measured gas, projection, contract path/hash, builder evidence hash); signed hashes, token, salt, `minOutput`, economics and safety parameters identical. Anything else is `FLAP_REQUALIFICATION=STOP`. |
 
 ## 3. Binary output of the DRY toolchain (gap and decision)
 
@@ -128,9 +128,9 @@ Nothing was sent or signed, and the guard stays `UNARMED` (`FROZEN_APPROVED_V4_S
 | JS DBREC codec | `tools/dbrec.cjs`: canonical encoder and strict decoder. Schema tables are generated from the Rust schemas (`tools/dbrec_schemas.generated.cjs`, `dbrec_js_schemas`), and the record crate test fails if they are stale. |
 | EthereumJS tools | `g06a_economics_evm_crosscheck.cjs` reads `preflight.dbrec` and writes `economics_crosscheck.dbrec`. `g06a_local_simulate.cjs` writes `local_simulation.dbrec`. The simulation logic is unchanged, and JSON appears only in `rpc()` (wire). |
 | Rust DRY binaries | `g06a_native_bnb_quote` (preflight record → quote record). `g06a_self_launch_bundle` reads the simulation record and writes the native DRY record; its bundle projection uses G0.7's fixed wire templates (golden test). |
-| DRY-0/R0 | `g06a_preflight_record`: current preflight through the existing Rust preflight, plus the `Upgraded(address)` scan through a typed `eth_getLogs` reader in `chain_reads.rs`. |
-| Script | `tools/g06a_final_dry.sh` is binary-only and checks via `dbrec_show --get`. It enforces: exactly one Portal upgrade; the frozen salt; identical launch/BUY hashes, token and `minOutput`; comparison reports `COMPARISON_*.md` against the frozen DRY (`dbrec_compare`). The old JSON chain is kept as `g06a_final_dry_legacy_v2.sh`. |
-| Builder refresh | `dbrec_derive <builder_policy> darkbot.g06a.builder-floor-policy.v2 <out> --set observed_date=… …`: native record with every change stated explicitly. |
+| DRY-0/R0 | `g06a_preflight_record`: current preflight through the existing Rust preflight; R0 coverage in its own read-only module (`g06a_preflight_record/coverage.rs`: header hash = keccak256(rlp(header)), parent links, bloom test, receipts trie root, typed JSON-RPC wire boundary). `chain_reads.rs` of G0.7 is byte-identical to `c57262c`. |
+| Script | `tools/g06a_final_dry.sh` is binary-only: R0 coverage, DRY-0, quote, cross-check and simulation (state of the preflight block via the archive endpoint), builder re-determination, DRY-1..4, comparison reports (`dbrec_compare` exit 2 = STOP) and the typed verdict `g06a_requal_check` (no `|| true` on any verdict). The old JSON chain is kept as `g06a_final_dry_legacy_v2.sh`. |
+| Builder refresh | `g06a_builder_policy_record <frozen_policy> <out>`: fetches the official pages, reads the floor from BlockRazor's rule sentence, checks the 48Club pages for any documented requirement, STOP on any change; nothing recalculated. `dbrec_derive` (free editing of `observed_date`) is retired. Readiness `BUILDER_FRESHNESS` uses the fetch time of the oldest source; an import is always `BLOCKED`. |
 | Contract v4 | `record/src/schema/g07.rs` (`contract::V4`, type 25; field list shared with v3, v3 byte-identical). It binds the four G0.7 inputs (legacy hash only for imports), the local simulation, the economics cross-check, the R0 scan and the superseded v3 proposal. Generator: `g07_acceptance_contract <requal_dir> <builder_policy> [--check \| --approved-sha \| --write-approved]`; `--check-v3` reproduces v3. |
 | Guard | Only `V4_RELATIVE_PATH` authorizes. `UNARMED` is refused before any read. Legacy hashes are optional per input; a mismatch between import and native is refused. |
 | G0.7 | Native DRY and preflight records (`d::NATIVE`); builder policy native or import; witness source import. Evidence schema v4 (legacy hashes optional). `transactions.rs` is byte-identical to `565d811`; `builder_submission.rs` is unchanged. |
@@ -141,22 +141,8 @@ Nothing was sent or signed, and the guard stays `UNARMED` (`FROZEN_APPROVED_V4_S
 - 179 tests PASS:
   - execution lib 22, preflight writer 19, probe binary 28, BUY binary 22, readiness binary 21, guard 8, probe integration 5, no-send 10, readiness integration 5;
   - DRY bundle 1, G0.8 verifier 12, timing 5, G0.8 binary 4, G0.7→G0.8 2, JS↔Rust parity 3;
-  - codec 7, `dbrec_derive` 2, legacy import 3.
+  - codec 7, `dbrec_derive` 2 (retired since, §8), legacy import 3.
 - Stand-in records derived from the frozen data test only the v4 wiring. They are not requalification evidence.
-- Probe dry-plan hash now `a5ad014f9ffebd32b6c2cc7fc36fa054d9c7118fdb1e76b8f3c5ae1606fbd039` (shared modules changed, request code unchanged). No probe approval exists and none is requested.
+- Probe dry-plan hash `a5ad014f9ffebd32b6c2cc7fc36fa054d9c7118fdb1e76b8f3c5ae1606fbd039` (unchanged by §8: the shared G0.7 modules are byte-identical to `c57262c`). No probe approval exists and none is requested.
 
-**Next step, the user's (DRY-1 signs locally, sends nothing):** with `bsc/secrets.env`, which holds the keys and an operator RPC with `eth_getLogs` over the range since block 127 865 760:
-
-```bash
-bsc/tools/g06a_final_dry.sh
-```
-
-Then:
-1. Review the comparison reports.
-2. Builder refresh (≤ 24 h before arming) with `dbrec_derive`.
-3. Write the v4 proposal and show the approved variant's hash.
-4. Readiness `--current-rpc`.
-5. Economic approval of the exact v4 hash.
-6. Arming commit (user).
-7. Exactly one G0.7 run, then G0.8.
-
+The run instructions of this section are superseded by §8.

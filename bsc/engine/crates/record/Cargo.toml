@@ -20,8 +20,3 @@ name = "dbrec_js_schemas"
 # Field-by-field comparison of two records (requalification DRY report).
 [[bin]]
 name = "dbrec_compare"
-
-# Derives a native record from an import or an earlier native record with
-# explicitly stated changes (e.g. the builder-policy refresh).
-[[bin]]
-name = "dbrec_derive"

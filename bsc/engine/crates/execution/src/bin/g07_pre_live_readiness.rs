@@ -118,40 +118,7 @@ fn bound_input(
     Ok(record)
 }
 
-// A date-only observation can guarantee freshness only from its earliest
-// possible time (00:00 UTC). Never extend it using today's file mtime.
-fn observation_seconds(date: &str) -> Option<u64> {
-    let parts: Vec<_> = date.split('-').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let year: u64 = parts[0].parse().ok()?;
-    let month: usize = parts[1].parse().ok()?;
-    let day: u64 = parts[2].parse().ok()?;
-    if !(1970..=9999).contains(&year) || !(1..=12).contains(&month) {
-        return None;
-    }
-    let leap = |y: u64| y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let months = [
-        31,
-        if leap(year) { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if day == 0 || day > months[month - 1] {
-        return None;
-    }
-    let days: u64 = (1970..year).map(|y| if leap(y) { 366 } else { 365 }).sum();
-    Some((days + months[..month - 1].iter().sum::<u64>() + day - 1) * 86400)
-}
+// Freshness is measured from a fetch time, never from a date or a file mtime.
 fn freshness(observed: Option<u64>, now: u64) -> bool {
     observed.is_some_and(|t| now.checked_sub(t).is_some_and(|age| age <= 86400))
 }
@@ -360,15 +327,32 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     );
     let now = unix_time_ms() / 1000;
     let date = field(policy.text(b::OBSERVED_DATE));
+    // Only a native re-determination carries fetched sources; its freshness
+    // is the fetch time of its oldest source. An import's date is history.
+    let fetched = if policy.schema() == &b::NATIVE {
+        field(policy.nested_all(b::SOURCES))
+            .iter()
+            .map(|s| field(s.u64(b::source::FETCHED_UNIX_MS)) / 1000)
+            .min()
+    } else {
+        None
+    };
     check(
         report,
         "BUILDER_FRESHNESS",
-        if freshness(observation_seconds(date), now) {
+        if freshness(fetched, now) {
             "PASS"
         } else {
             "BLOCKED"
         },
-        &format!("Bound observation {date}; requires current evidence <=24h before arming"),
+        &match fetched {
+            Some(t) => format!(
+                "Bound re-determination {date}, oldest source fetched at unix {t}; requires sources <=24h old before arming"
+            ),
+            None => format!(
+                "Bound policy {date} has no fetched sources (historical import); requires a re-determination <=24h before arming"
+            ),
+        },
     );
     check(
         report,
@@ -555,9 +539,7 @@ mod readiness_tests {
         );
     }
     #[test]
-    fn freshness_is_bounded_and_never_accepts_future_or_invalid_dates() {
-        assert_eq!(observation_seconds("1970-01-01"), Some(0));
-        assert_eq!(observation_seconds("2024-02-30"), None);
+    fn freshness_is_bounded_and_never_accepts_future_or_missing_fetch_times() {
         assert!(freshness(Some(10), 86410));
         assert!(!freshness(Some(10), 86411));
         assert!(!freshness(Some(11), 10));
