@@ -5459,3 +5459,15 @@ Base `ae13ab2`. `68fb932`: `Subscription.program_filters` and `getProgramAccount
 Tests: solana lib 71/71 incl. filter wire parity and ChainTx bincode round trip; state_owner 13/13; featureless check PASS.
 
 **Remaining in Ticket 3 (scope confirmed):** typed `MARKET_TRANSACTION` / `MARKET_LIQUIDATION` / `MARKET_COVERAGE` rows with ingress payloads as `ChainTx` (no `raw`), ~20 coverage variants incl. gap records, slot boundaries, reconciliation summary and provider snapshot (still built with `json!`); the Rust strict verifier batches and checkpoints (JSONL/JSON today); `summary.json`/report; a versioned Rust verification with parity against the pinned Python verifier on historical runs; renders only offline for historical journals. New captures cannot be verified by the pinned Python pipeline once rows are typed, so rows, strict verifier and the new verification land together.
+
+## 2026-10-17 — P5 fee wallet and P8 reconcile clock fail closed; STATUS §12 Ticket 3 / SK-01…09 corrected (LOCAL_PASS for the two fixes)
+
+Base `d72e180` (latest project_0 code `12523e5`; `8f3280e`/`d72e180` are BSC-only).
+
+- **P5 (confirmed defect, fixed):** `detect.rs` replaced an unreadable FeeState with `Pubkey::default()` as the EndLiquidation fee receiver. `P0ReceivershipBuilder.global_fee_wallet` is now the FeeState read result; `plans()` and the receivership build fail with `FEE_STATE_UNAVAILABLE:<reason>` before sizing/routing. The pipeline records such a rejection as `Decision::Unavailable` / `LossReason::Unknown` — never a judged skip, never an executable candidate or positive net edge with an unknown mandatory fee. Full P5 acceptance remains OPEN.
+- **P8 (confirmed defect, fixed):** the reconcile worker passed epoch 0 to `try_reconcile` when the wall clock was unreadable. The worker now reports `WALL_CLOCK_BEFORE_UNIX_EPOCH` instead of running; the owner keeps the submission pending (exposure stays held) and stops with `RECONCILE_CLOCK_UNAVAILABLE` (HALT). Full P8 acceptance remains OPEN.
+- Removed dead winner code left from the typed chain model (`parse_key`, `InvalidInstructionData`).
+- STATUS §12: snapshot 2026-10-17; Ticket 3 A0 (chain model, `meta.err`, v0/v1/LUT/CPI, typed `getBlock`, `ProgramFilter`, storable `ChainTx`) LOCAL_PASS per the three dated entries above — no rebuild; A1 raw-free ingress, A2 native `MARKET_*` frames, A3 native strict verifier/reports, A4 parity listed OPEN; JFI-FIX-04…07 and remaining kinds as separate rows; SK-01 PARTIAL, SK-02…09 OPEN (SK-06 NOT_MEASURED, SK-08 DEFERRED_PRIORITY). Facts behind SK-04: `JournalSink` writes each frame unbuffered on the capture thread via `append_legacy` and renders the three JSONL views at every seal.
+- Found, not changed: the in-capture gap/reconcile phases (`gap_recovery_phase`, `full_reconciliation_phase`) have no production caller since `2c62d13` (capture/verification split); decision in Ticket 3 A3.
+
+Tests: `p5_unreadable_fee_state_blocks_instead_of_default_receiver`, `p5_fee_state_unavailable_is_unknown_not_a_routing_loss`, `p8_unreadable_wall_clock_is_an_error_not_epoch_zero` PASS; winner 33/33 (1 ignored, unchanged).

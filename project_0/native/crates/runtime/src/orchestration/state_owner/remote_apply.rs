@@ -55,7 +55,12 @@ impl ShadowOwner {
         while let Some(done) = self.remote.reconcile_results.try_pop() {
             let mut work = done.work;
             match done.result {
-                Some(r) => {
+                Err(e) => {
+                    // [P8] Keep the unresolved submission (exposure stays held) and halt.
+                    self.pending.push(work);
+                    return Err(format!("RECONCILE_CLOCK_UNAVAILABLE:{e}").into());
+                }
+                Ok(Some(r)) => {
                     self.safety.record_outcome(
                         worker_now_s,
                         r.landed_success,
@@ -65,7 +70,7 @@ impl ShadowOwner {
                     );
                     self.evidence.emit(OwnerEvidence::Reconcile(r.record))?;
                 }
-                None => {
+                Ok(None) => {
                     work.next_check_unix_s = worker_now_s.saturating_add(1);
                     self.pending.push(work);
                 }

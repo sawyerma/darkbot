@@ -328,28 +328,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 return rec.with_timeline(&tl);
             }
             Err(e) => {
-                rec.decision = if e.contains("unavailable") {
-                    Decision::Unavailable
-                } else {
-                    Decision::Skip
-                };
-                rec.loss = Some(if e.starts_with("SIZING:UNSUPPORTED_INTEGRATION") {
-                    LossReason::UnsupportedIntegration
-                } else if e.starts_with("SIZING:") {
-                    LossReason::Sizing
-                } else if e.starts_with("ATA:") {
-                    LossReason::MissingAta
-                } else if e.starts_with("FUNDING:") {
-                    LossReason::Funding
-                } else if e.contains("ReserveStale")
-                    || e.contains("DriftSpotMarketStale")
-                    || e.contains("JuplendLendingStale")
-                    || e.contains("SolendReserveStale")
-                {
-                    LossReason::IntegrationRefresh
-                } else {
-                    LossReason::Routing
-                });
+                let (decision, loss) = classify_plan_error(&e);
+                rec.decision = decision;
+                rec.loss = Some(loss);
                 rec.reason = Some(e);
                 return rec.with_timeline(&tl);
             }
@@ -876,6 +857,52 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             exposure_released,
             inventory_delta,
         );
+    }
+}
+
+/// Decision and loss attribution for a rejected plan. [P5] An unreadable FeeState is UNKNOWN
+/// (unavailable), never a routing loss or a skip that looks like a judged candidate.
+fn classify_plan_error(e: &str) -> (Decision, LossReason) {
+    let fee_state_unknown = e.starts_with(crate::execution::builder::FEE_STATE_UNAVAILABLE);
+    let decision = if e.contains("unavailable") || fee_state_unknown {
+        Decision::Unavailable
+    } else {
+        Decision::Skip
+    };
+    let loss = if fee_state_unknown {
+        LossReason::Unknown
+    } else if e.starts_with("SIZING:UNSUPPORTED_INTEGRATION") {
+        LossReason::UnsupportedIntegration
+    } else if e.starts_with("SIZING:") {
+        LossReason::Sizing
+    } else if e.starts_with("ATA:") {
+        LossReason::MissingAta
+    } else if e.starts_with("FUNDING:") {
+        LossReason::Funding
+    } else if e.contains("ReserveStale")
+        || e.contains("DriftSpotMarketStale")
+        || e.contains("JuplendLendingStale")
+        || e.contains("SolendReserveStale")
+    {
+        LossReason::IntegrationRefresh
+    } else {
+        LossReason::Routing
+    };
+    (decision, loss)
+}
+
+#[cfg(test)]
+mod plan_error_tests {
+    use super::*;
+
+    #[test]
+    fn p5_fee_state_unavailable_is_unknown_not_a_routing_loss() {
+        let (d, l) = classify_plan_error("FEE_STATE_UNAVAILABLE:FeeState account missing");
+        assert!(matches!(d, Decision::Unavailable));
+        assert!(matches!(l, LossReason::Unknown));
+        let (d, l) = classify_plan_error("SIZING:NO_LIABILITY");
+        assert!(matches!(d, Decision::Skip));
+        assert!(matches!(l, LossReason::Sizing));
     }
 }
 

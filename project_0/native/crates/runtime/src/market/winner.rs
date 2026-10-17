@@ -90,7 +90,6 @@ pub(crate) enum WinnerParseError {
     EndLiquidationLayout {
         accounts: usize,
     },
-    InvalidInstructionData,
 }
 
 impl WinnerParseError {
@@ -102,7 +101,6 @@ impl WinnerParseError {
             WinnerParseError::LoadedAddressesMissing => "LOADED_ADDRESSES_MISSING",
             WinnerParseError::IndexOutOfRange { .. } => "INDEX_OUT_OF_RANGE",
             WinnerParseError::EndLiquidationLayout { .. } => "END_LIQUIDATION_LAYOUT",
-            WinnerParseError::InvalidInstructionData => "INVALID_INSTRUCTION_DATA",
         }
     }
 }
@@ -124,15 +122,8 @@ impl std::fmt::Display for WinnerParseError {
             WinnerParseError::EndLiquidationLayout { accounts } => {
                 write!(f, "WINNER_END_LIQUIDATION_LAYOUT: accounts={accounts}")
             }
-            WinnerParseError::InvalidInstructionData => {
-                write!(f, "WINNER_INVALID_INSTRUCTION_DATA")
-            }
         }
     }
-}
-
-fn parse_key(raw: &str) -> Result<Pubkey, WinnerParseError> {
-    Pubkey::from_str(raw).map_err(|_| WinnerParseError::InvalidKey(raw.to_string()))
 }
 
 fn key_at(keys: &[Pubkey], index: u64) -> Result<Pubkey, WinnerParseError> {

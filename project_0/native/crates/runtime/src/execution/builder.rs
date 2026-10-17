@@ -7,6 +7,9 @@
 //!
 //! Nur mit Feature `crate_health`. Status: UNTESTED / VERIFY.
 
+/// [P5] Plan rejection code when the FeeState (fee receiver) could not be read: UNKNOWN.
+pub const FEE_STATE_UNAVAILABLE: &str = "FEE_STATE_UNAVAILABLE";
+
 #[cfg(feature = "crate_health")]
 pub mod p0 {
     use crate::execution::pipeline::{ReceivershipBuilder, ReceivershipPlan};
@@ -404,7 +407,8 @@ pub mod p0 {
         pub program: Pubkey,
         pub group: Pubkey,
         pub liquidator: Pubkey,
-        pub global_fee_wallet: Pubkey,
+        /// [P5] FeeState read result; an unreadable FeeState blocks every plan.
+        pub global_fee_wallet: Result<Pubkey, String>,
         pub sizing: &'a Z,
         pub routes: &'a R,
         /// Inventar je Liability-Bank (Token-Basis), aus P8-Reconciliation gepflegt.
@@ -431,6 +435,13 @@ pub mod p0 {
             active_banks.retain(|k| *k != liability_bank);
         }
         active_banks
+    }
+
+    /// [P5] The EndLiquidation fee receiver comes only from a successfully read FeeState; a
+    /// default key would build a transaction with an invalid fee recipient.
+    fn required_fee_wallet(fee: &Result<Pubkey, String>) -> Result<&Pubkey, String> {
+        fee.as_ref()
+            .map_err(|e| format!("{}:{e}", super::FEE_STATE_UNAVAILABLE))
     }
 
     fn liquidation_record_init_decision(linked: Pubkey, expected: Pubkey) -> Result<bool, String> {
@@ -857,7 +868,7 @@ pub mod p0 {
                 group: &self.group,
                 marginfi_account: account,
                 liquidator: &self.liquidator,
-                global_fee_wallet: &self.global_fee_wallet,
+                global_fee_wallet: required_fee_wallet(&self.global_fee_wallet)?,
                 start_observation,
                 end_banks,
                 init_record,
@@ -909,6 +920,7 @@ pub mod p0 {
             now_unix_s: u64,
             slot: u64,
         ) -> Result<Vec<ReceivershipPlan>, String> {
+            required_fee_wallet(&self.global_fee_wallet)?;
             let sizings = self.sizing.sizes(account, now_unix_s, slot)?;
             if sizings.is_empty() {
                 return Err(format!("SIZING:{}", self.sizing.no_size_reason(account)?));
@@ -1242,6 +1254,14 @@ pub mod p0 {
     #[cfg(test)]
     mod fix100_tests {
         use super::*;
+
+        #[test]
+        fn p5_unreadable_fee_state_blocks_instead_of_default_receiver() {
+            let err = required_fee_wallet(&Err("FeeState account missing".into())).unwrap_err();
+            assert_eq!(err, "FEE_STATE_UNAVAILABLE:FeeState account missing");
+            let wallet = Pubkey::new_unique();
+            assert_eq!(required_fee_wallet(&Ok(wallet)), Ok(&wallet));
+        }
 
         fn floor_route(quoted_out: u64, floor: Option<u64>) -> Route {
             Route {

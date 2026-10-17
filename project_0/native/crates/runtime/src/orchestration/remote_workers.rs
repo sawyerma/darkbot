@@ -42,7 +42,17 @@ pub struct ReconcileWork {
 
 pub struct ReconcileResultMessage {
     pub work: ReconcileWork,
-    pub result: Option<ReconcileResult>,
+    /// `Err` = the reconcile could not run (wall clock unreadable); never a fabricated time.
+    pub result: Result<Option<ReconcileResult>, &'static str>,
+}
+
+/// [P8] Reconcile timeouts are measured against the real wall clock. An unreadable clock is an
+/// error for the owner (financial HALT), never epoch 0 handed to `try_reconcile`.
+fn reconcile_at(
+    now_unix_s: Result<u64, &'static str>,
+    run: impl FnOnce(u64) -> Option<ReconcileResult>,
+) -> Result<Option<ReconcileResult>, &'static str> {
+    now_unix_s.map(run)
 }
 
 pub struct ProjectionWork {
@@ -209,9 +219,10 @@ impl RemoteWorkers {
                         let now_s = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .map(|d| d.as_secs())
-                            .unwrap_or(0);
-                        let result =
-                            try_reconcile(&rpc, None, &work.submission, now_s, clock.now_ns(), 90);
+                            .map_err(|_| "WALL_CLOCK_BEFORE_UNIX_EPOCH");
+                        let result = reconcile_at(now_s, |now_s| {
+                            try_reconcile(&rpc, None, &work.submission, now_s, clock.now_ns(), 90)
+                        });
                         if !push_result(
                             &reconcile_done_tx,
                             ReconcileResultMessage { work, result },
@@ -373,5 +384,23 @@ mod tests {
         };
         assert_eq!(w.next_check_unix_s, 65);
         assert!(w.shadow_ready);
+    }
+
+    #[test]
+    fn p8_unreadable_wall_clock_is_an_error_not_epoch_zero() {
+        let mut called = false;
+        let r = super::reconcile_at(Err("WALL_CLOCK_BEFORE_UNIX_EPOCH"), |_| {
+            called = true;
+            None
+        });
+        assert_eq!(r.err(), Some("WALL_CLOCK_BEFORE_UNIX_EPOCH"));
+        assert!(!called, "try_reconcile must not run with a fabricated time");
+        let mut seen = None;
+        assert!(super::reconcile_at(Ok(1_700_000_000), |t| {
+            seen = Some(t);
+            None
+        })
+        .is_ok_and(|r| r.is_none()));
+        assert_eq!(seen, Some(1_700_000_000));
     }
 }

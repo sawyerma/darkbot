@@ -831,7 +831,7 @@ pub(super) fn replay(
     }
     if count > 0 && binary.exists() {
         let mut reader = journal::Reader::open(&binary).map_err(|_| "SHADOW_INPUT")?;
-        while let Some(mut frame) = reader.next_frame().map_err(|_| "SHADOW_READ")? {
+        while let Some(frame) = reader.next_frame().map_err(|_| "SHADOW_READ")? {
             if std::time::Instant::now() >= deadline {
                 return Err("REPLAY_TIME_BUDGET".into());
             }

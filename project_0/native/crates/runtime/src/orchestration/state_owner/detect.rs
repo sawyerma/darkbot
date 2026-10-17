@@ -296,10 +296,7 @@ impl ShadowOwner {
                 program: self.program,
                 group: self.group,
                 liquidator: self.liquidator,
-                global_fee_wallet: match sizer_for_cost.fee_snapshot() {
-                    Ok(f) => f.global_fee_wallet,
-                    Err(_) => Pubkey::default(),
-                },
+                global_fee_wallet: sizer_for_cost.fee_snapshot().map(|f| f.global_fee_wallet),
                 sizing: &sizing,
                 routes: &self.routes,
                 inventory: &inventory,
