@@ -15,6 +15,7 @@ The browser is not a second trading engine. Protocol decoding, health, economics
 
 ## Project_0 frontend implementation plan
 
+- [Boot-Audit, free duration, run-until-stop, one-click backtest and optimization](docs/STARTUP_BACKTEST_OPTIMIZATION.md) – required extended launch/replay/optimizer design.
 - [Frontend Phasenplan FEUI-00…09](docs/FRONTEND_PHASENPLAN.md) – phases for p0ctl, Control Center, six liquidation markers, raw market explorer, Profitability Lab and acceptance gates.
 - [Project_0 code and variable map](docs/PROJECT_0_CODE_MAP.md) – verified Rust/Python/TS source symbols, CLI flags, environment variables, defaults, journal and economics fields.
 - [Project 0 Control protocol](docs/CONTROL_PROTOCOL.md) – proposed lifecycle, typed DTOs, control API, security and CLI/GUI parity tests.
