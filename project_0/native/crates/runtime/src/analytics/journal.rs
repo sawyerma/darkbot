@@ -44,6 +44,8 @@ pub mod kind {
     pub const STRICT_RPC_CACHE: u16 = 311;
     pub const STRICT_CHECKPOINT: u16 = 312;
     pub const STRICT_RESULT: u16 = 313;
+    /// SK-06 capacity preflight report (single-value journal before a capture).
+    pub const CAPACITY_PREFLIGHT: u16 = 320;
     /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
     /// in-window frames is the bounded-memory index of the analytics worker.
     pub const ECON_SHADOW_EVALUATION: u16 = 400;
@@ -91,6 +93,7 @@ pub mod kind {
         STRICT_RPC_CACHE,
         STRICT_CHECKPOINT,
         STRICT_RESULT,
+        CAPACITY_PREFLIGHT,
         ECON_SHADOW_EVALUATION,
         ECON_SNAPSHOT,
         ECON_FINAL,
@@ -123,6 +126,8 @@ pub mod source {
     pub const C0_CENSUS_RUNTIME: u32 = 9;
     /// Post-capture strict verifier.
     pub const STRICT: u32 = 10;
+    /// Storage lane: capacity preflight.
+    pub const STORAGE: u32 = 11;
 }
 fn bad(code: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, code)

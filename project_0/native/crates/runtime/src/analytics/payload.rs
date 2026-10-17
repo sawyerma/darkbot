@@ -143,6 +143,9 @@ macro_rules! typed_kinds {
             k::STRICT_RPC_CACHE => $f::<strict::RpcCacheEntry>($kind, $schema, $bytes),
             k::STRICT_CHECKPOINT => $f::<strict::StrictCheckpoint>($kind, $schema, $bytes),
             k::STRICT_RESULT => $f::<strict::StrictResult>($kind, $schema, $bytes),
+            k::CAPACITY_PREFLIGHT => {
+                $f::<crate::storage::preflight::CapacityReport>($kind, $schema, $bytes)
+            }
             _ => Err(bad("PAYLOAD_KIND_UNTYPED")),
         }
     }};

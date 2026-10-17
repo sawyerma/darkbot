@@ -76,6 +76,7 @@ parameters! {
     market_writer_sync_ms = 60000, "ms", "P0_MARKET_WRITER_SYNC_MS";
     market_writer_stall_ms = 30000, "ms", "P0_MARKET_WRITER_STALL_MS";
     market_disk_reserve_mib = 2048, "MiB", "P0_MARKET_DISK_RESERVE_MIB";
+    capacity_safety_percent = 50, "percent", "P0_CAPACITY_SAFETY_PERCENT";
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
