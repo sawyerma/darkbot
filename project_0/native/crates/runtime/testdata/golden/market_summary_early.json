@@ -1,0 +1,350 @@
+{
+  "actual_observation_seconds": 1.5,
+  "base64_error_count": 0,
+  "canonical_market_truth": {
+    "duplicate_transactions": 0,
+    "full_master_economics_and_shadow_join_qualified": false,
+    "groups": {
+      "ALL": {
+        "events_per_chain_hour": 1800.0,
+        "gross_edge_usd": {
+          "average": 3.5,
+          "count_known": 1,
+          "count_unknown": 0,
+          "known_total": 3.5,
+          "max": 3.5,
+          "median": 3.5,
+          "min": 3.5,
+          "p90": 3.5,
+          "p99": 3.5
+        },
+        "liquidation_events": 1,
+        "liquidation_transactions": 1,
+        "liquidators": {
+          "k7FaK87WHGVXzkaoHb7CdVPgkKDQhZ29VLDeBVbDfYn": [
+            1,
+            3.5
+          ]
+        },
+        "live_and_reconciled_events": 0,
+        "reconciliation_only_events": 1,
+        "winner_net_edge_usd": {
+          "count_known": 0,
+          "count_unknown": 1,
+          "known_total": null
+        }
+      },
+      "BANKRUPTCY_SETTLEMENT": {
+        "events_per_chain_hour": 0.0,
+        "gross_edge_usd": {
+          "average": null,
+          "count_known": 0,
+          "count_unknown": 0,
+          "known_total": null,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p90": null,
+          "p99": null
+        },
+        "liquidation_events": 0,
+        "liquidation_transactions": 0,
+        "liquidators": {},
+        "live_and_reconciled_events": 0,
+        "reconciliation_only_events": 0,
+        "winner_net_edge_usd": {
+          "count_known": 0,
+          "count_unknown": 0,
+          "known_total": null
+        }
+      },
+      "CLASSIC": {
+        "events_per_chain_hour": 0.0,
+        "gross_edge_usd": {
+          "average": null,
+          "count_known": 0,
+          "count_unknown": 0,
+          "known_total": null,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p90": null,
+          "p99": null
+        },
+        "liquidation_events": 0,
+        "liquidation_transactions": 0,
+        "liquidators": {},
+        "live_and_reconciled_events": 0,
+        "reconciliation_only_events": 0,
+        "winner_net_edge_usd": {
+          "count_known": 0,
+          "count_unknown": 0,
+          "known_total": null
+        }
+      },
+      "FORCED_DELEVERAGE": {
+        "events_per_chain_hour": 0.0,
+        "gross_edge_usd": {
+          "average": null,
+          "count_known": 0,
+          "count_unknown": 0,
+          "known_total": null,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p90": null,
+          "p99": null
+        },
+        "liquidation_events": 0,
+        "liquidation_transactions": 0,
+        "liquidators": {},
+        "live_and_reconciled_events": 0,
+        "reconciliation_only_events": 0,
+        "winner_net_edge_usd": {
+          "count_known": 0,
+          "count_unknown": 0,
+          "known_total": null
+        }
+      },
+      "RECEIVERSHIP": {
+        "events_per_chain_hour": 1800.0,
+        "gross_edge_usd": {
+          "average": 3.5,
+          "count_known": 1,
+          "count_unknown": 0,
+          "known_total": 3.5,
+          "max": 3.5,
+          "median": 3.5,
+          "min": 3.5,
+          "p90": 3.5,
+          "p99": 3.5
+        },
+        "liquidation_events": 1,
+        "liquidation_transactions": 1,
+        "liquidators": {
+          "k7FaK87WHGVXzkaoHb7CdVPgkKDQhZ29VLDeBVbDfYn": [
+            1,
+            3.5
+          ]
+        },
+        "live_and_reconciled_events": 0,
+        "reconciliation_only_events": 1,
+        "winner_net_edge_usd": {
+          "count_known": 0,
+          "count_unknown": 1,
+          "known_total": null
+        }
+      }
+    },
+    "retention_error": false,
+    "scope": "FINALIZED_CANONICAL_SLOT_WINDOW; includes administrative debt settlement as a separate class",
+    "transaction_fee_semantics": "meta.fee includes priority; repeated on events as transaction context, never summed per event"
+  },
+  "capture_clock_complete": false,
+  "commitment": "finalized",
+  "completeness_authority": "FULL_FINALIZED_SLOT_RECONCILIATION_AND_PATH_QUALIFICATION",
+  "configured_duration_seconds": 14400.0,
+  "coverage_complete": false,
+  "coverage_outage_seconds": 8e-9,
+  "decode_complete": false,
+  "decoder_error_count": 0,
+  "decoder_errors_successful_tx": 0,
+  "deployment_continuity": {
+    "after": {
+      "context_slot": 12,
+      "hash": "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f",
+      "program_data": "fixture"
+    },
+    "before": {
+      "context_slot": 9,
+      "hash": "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f",
+      "program_data": "fixture"
+    },
+    "bytecode_source_equivalence": "NOT_ATTESTED; pinned source is contract authority; hash continuity against existing upgrade-watch reference",
+    "error": null,
+    "source_pin": "33c67987a661f59c6683a65485ebb4f0ef030b77"
+  },
+  "drain_complete": true,
+  "duplicate_transactions": 1,
+  "enrichment_available": false,
+  "enrichment_complete": false,
+  "enrichment_failed": 0,
+  "enrichment_init_error": null,
+  "enrichment_requested": 4,
+  "enrichment_skipped_queue_full": 0,
+  "enrichment_succeeded": 1,
+  "events_after_cutoff": 0,
+  "events_outside_observation": 0,
+  "failed_transactions": 1,
+  "failed_tx_receiver_events_ignored": 1,
+  "fatal_count": 0,
+  "fee_totals_complete": false,
+  "first_observed_slot": 10,
+  "foreign_program_events": 0,
+  "full_slot_reconciliation": {
+    "attempted": true,
+    "complete": true,
+    "error": null,
+    "first_block_time": 1010,
+    "last_block_time": 1012,
+    "marginfi_transactions": 1,
+    "market_slot_end": {
+      "observed_unix_s": 0,
+      "provenance": "IN_WINDOW_SLOT_SUBSCRIBE_PROCESSED",
+      "slot": 12,
+      "t_rx_ns": 18
+    },
+    "market_slot_start": {
+      "observed_unix_s": 0,
+      "provenance": "IN_WINDOW_SLOT_SUBSCRIBE_PROCESSED",
+      "slot": 10,
+      "t_rx_ns": 10
+    },
+    "slots_expected": 3,
+    "slots_failed": 0,
+    "slots_fetched": 3,
+    "slots_produced": 3,
+    "slots_skipped_confirmed": 0,
+    "slots_unresolved": 0,
+    "transactions_scanned": 1
+  },
+  "full_slot_reconciliation_complete": true,
+  "gap_count": 1,
+  "gap_count_raw": 1,
+  "gap_intervals": 1,
+  "gap_liquidation_events": 1,
+  "gap_liquidation_transactions": 1,
+  "gap_transactions_deduplicated": 0,
+  "gap_transactions_recovered": 1,
+  "gap_unrecovered": 1,
+  "gaps": [
+    {
+      "first_failure_unix_s": 0,
+      "first_post_reconnect_slot": 12,
+      "first_post_reconnect_t_rx_ns": 18,
+      "from_slot": 11,
+      "gap_t_rx_ns": 16,
+      "last_failure_t_rx_ns": 16,
+      "last_failure_unix_s": 0,
+      "last_healthy_t_rx_ns": 10,
+      "raw_failures": 1,
+      "reconnect_attempt": 2,
+      "reconnect_t_rx_ns": 17,
+      "restored_unix_s": 0
+    }
+  ],
+  "gaps_merged": 0,
+  "gross_edge_avg_usd": 3.4,
+  "gross_edge_max_usd": 5.5,
+  "gross_edge_median_usd": 3.5,
+  "gross_edge_min_usd": 1.0,
+  "gross_edge_p90_usd": 5.5,
+  "gross_edge_p99_usd": 5.5,
+  "gross_edge_per_hour_usd": 40800.0,
+  "gross_edge_per_liquidation_usd": 3.4,
+  "gross_edge_total_usd": 17.0,
+  "incomplete_reasons": [
+    "GAP"
+  ],
+  "ingress_overflow_count": 0,
+  "last_live_slot_age_s": 1.499999982,
+  "last_observed_slot": 11,
+  "liquidation_count_scope": "RECEIVERSHIP_ONLY_NOT_TOTAL_MARGINFI_MARKET",
+  "liquidation_events": 5,
+  "liquidation_path_coverage_complete": true,
+  "liquidation_transactions": 4,
+  "liquidations_per_hour": 12000.0,
+  "live_coverage_status": "LIVE_COVERAGE_INCOMPLETE",
+  "live_source_coverage_verified": false,
+  "log_messages_missing": 0,
+  "logs_truncated": 1,
+  "logs_truncated_liquidation_mismatch": 0,
+  "logs_truncated_qualified": 0,
+  "logs_truncated_total": 1,
+  "logs_truncated_unqualified": 0,
+  "market_capture_complete": false,
+  "max_stream_silence_ms": 0,
+  "non_claims": [
+    "market gross edge only (seized - repaid, USD, protocol valuation)",
+    "not DarkBot executable edge (P1-C/F1/F8)",
+    "not DarkBot capture rate",
+    "not DarkBot realized PnL (P8)",
+    "no per-day/month/year extrapolation from a single run"
+  ],
+  "observation_ended_at": null,
+  "observation_started_at": null,
+  "process_started_at": "",
+  "program": "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA",
+  "protocol_flat_fee_total_lamports": 8,
+  "provider_budget": "MASKED",
+  "quantile_method": "nearest-rank: value at index ceil(q*n)-1 of the ascending sort (median = lower median)",
+  "receivers": [
+    {
+      "gross_edge_share": 0.6176470588235294,
+      "gross_edge_total_usd": 10.5,
+      "liquidation_events": 2,
+      "liquidation_share": 0.4,
+      "receiver": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR"
+    },
+    {
+      "gross_edge_share": 0.20588235294117646,
+      "gross_edge_total_usd": 3.5,
+      "liquidation_events": 1,
+      "liquidation_share": 0.2,
+      "receiver": "k7FaK87WHGVXzkaoHb7CdVPgkKDQhZ29VLDeBVbDfYn"
+    },
+    {
+      "gross_edge_share": 0.11764705882352941,
+      "gross_edge_total_usd": 2.0,
+      "liquidation_events": 1,
+      "liquidation_share": 0.2,
+      "receiver": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY"
+    },
+    {
+      "gross_edge_share": 0.058823529411764705,
+      "gross_edge_total_usd": 1.0,
+      "liquidation_events": 1,
+      "liquidation_share": 0.2,
+      "receiver": "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN"
+    }
+  ],
+  "receivership_transport_capture_complete": false,
+  "reconnect_attempts": 0,
+  "reconnect_count": 1,
+  "reconnect_successful": 0,
+  "rpc_fallback_count": 0,
+  "run_id": "market_test",
+  "sample_min_liquidation_events": 0,
+  "sample_status": "SAMPLE_SUFFICIENT",
+  "slot_notifications": 2,
+  "source": "logs",
+  "source_coverage_note": "Finalized full-slot scan is authoritative; live WSS source completeness remains separately unverified",
+  "source_coverage_verified": true,
+  "stream_ready_at": null,
+  "successful_transactions": 4,
+  "title": "PROJECT 0 MARKET OBSERVER — FINAL",
+  "top3_receiver_gross_edge_share": 0.9411764705882353,
+  "top3_receiver_liquidation_share": 0.8,
+  "top_receiver": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+  "top_receiver_gross_edge_share": 0.6176470588235294,
+  "top_receiver_liquidation_share": 0.4,
+  "transactions_received": 6,
+  "transport_coverage_provenance": "LOCAL_SLOT_PROGRESS_AND_JOURNALED_OUTAGE_INTERVALS_NOT_SOURCE_COMPLETENESS",
+  "transport_covered_seconds": 1.499999992,
+  "transport_incomplete_reasons": [
+    "GAP"
+  ],
+  "transport_issues_are_telemetry": true,
+  "truncated_instruction_end_liquidations": 0,
+  "truncated_log_end_liquidations": 1,
+  "truncated_unqualified_reasons": {},
+  "tx_fee_total_lamports": 5000,
+  "tx_fee_unknown_transactions": 0,
+  "unique_receivers": 4,
+  "unique_targets": 5,
+  "unique_transactions": 5,
+  "unknown_status_transactions": 0,
+  "verdict": "MARKET_OBSERVER_STREAM_NOT_READY",
+  "verification_status": "CANONICAL_VERIFIED",
+  "wss_http_429_count": 0
+}

@@ -60,7 +60,7 @@ pub fn finish_capture(
     core: &mut ObserverCore,
     sink: &mut dyn MarketSink,
     outcome: CaptureOutcome,
-) -> Result<(Value, String, Option<String>), String> {
+) -> Result<(MarketFinal, String, Option<String>), String> {
     let write_error = outcome.write_error;
     // Outage abort is not a request for a lengthy repair scan. Preserve evidence
     // for explicit resumable verification; stop capture/Shadow first.
@@ -531,7 +531,9 @@ pub fn run_embedded(
         let _ = ingress.join();
     }
     if let Some(h) = &econ {
-        h.emit(crate::analytics::econ::Evidence::MarketFinal(summary));
+        h.emit(crate::analytics::econ::Evidence::MarketFinal(Box::new(
+            summary,
+        )));
     } else {
         print!("{report}");
     }

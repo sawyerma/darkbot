@@ -655,8 +655,51 @@ pub(super) struct TruthLedger {
     pub retention_error: bool,
     pub live_receipts: HashMap<String, (u64, u64)>,
 }
+/// Known gross edge of one class (USD, protocol valuation).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TruthGross {
+    pub count_known: u64,
+    pub count_unknown: u64,
+    pub known_total: Option<f64>,
+    pub average: Option<f64>,
+    pub median: Option<f64>,
+    pub p90: Option<f64>,
+    pub p99: Option<f64>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+}
+/// Winner net edge: never known from chain facts alone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TruthWinnerNet {
+    pub count_known: u64,
+    pub count_unknown: u64,
+    pub known_total: Option<f64>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TruthGroup {
+    pub liquidation_transactions: u64,
+    pub liquidation_events: u64,
+    pub events_per_chain_hour: Option<f64>,
+    pub gross_edge_usd: TruthGross,
+    pub winner_net_edge_usd: TruthWinnerNet,
+    /// Liquidator → `(events, known gross edge USD)`.
+    pub liquidators: BTreeMap<String, (u64, f64)>,
+    pub live_and_reconciled_events: u64,
+    pub reconciliation_only_events: u64,
+}
+/// `canonical_market_truth` of the market summary (typed, JFI-FIX-05).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TruthSummary {
+    pub groups: BTreeMap<String, TruthGroup>,
+    pub duplicate_transactions: u64,
+    pub retention_error: bool,
+    pub scope: String,
+    pub transaction_fee_semantics: String,
+    pub full_master_economics_and_shadow_join_qualified: bool,
+}
+
 impl TruthLedger {
-    pub fn summary(&self, chain_seconds: Option<f64>) -> Value {
+    pub fn summary(&self, chain_seconds: Option<f64>) -> TruthSummary {
         let groups = [
             ("ALL", None),
             ("CLASSIC", Some(LiquidationType::Classic)),
@@ -667,7 +710,7 @@ impl TruthLedger {
                 Some(LiquidationType::BankruptcySettlement),
             ),
         ];
-        let mut out = serde_json::Map::new();
+        let mut out = BTreeMap::new();
         for (label, kind) in groups {
             let events: Vec<_> = self
                 .events
@@ -680,9 +723,9 @@ impl TruthLedger {
                 .filter_map(|e| e.gross_edge_usd)
                 .collect::<Vec<_>>();
             gross.sort_by(f64::total_cmp);
-            let mut actors: BTreeMap<&str, (u64, f64)> = BTreeMap::new();
+            let mut actors: BTreeMap<String, (u64, f64)> = BTreeMap::new();
             for e in &events {
-                let a = actors.entry(&e.liquidator).or_default();
+                let a = actors.entry(e.liquidator.clone()).or_default();
                 a.0 += 1;
                 if let Some(edge) = e.gross_edge_usd {
                     a.1 += edge;
@@ -693,18 +736,49 @@ impl TruthLedger {
             } else {
                 Some(gross.iter().sum::<f64>())
             };
-            out.insert(label.into(),json!({"liquidation_transactions":txs.len(),"liquidation_events":events.len(),
-                "events_per_chain_hour":chain_seconds.filter(|s|*s>0.).map(|s|events.len() as f64*3600./s),
-                "gross_edge_usd":{"count_known":gross.len(),"count_unknown":events.len()-gross.len(),"known_total":total,
-                    "average":total.map(|t|t/gross.len() as f64),"median":quantile_nearest_rank(&gross,0.5),"p90":quantile_nearest_rank(&gross,0.9),
-                    "p99":quantile_nearest_rank(&gross,0.99),"min":gross.first(),"max":gross.last()},
-                "winner_net_edge_usd":{"count_known":0,"count_unknown":events.len(),"known_total":null},
-                "liquidators":actors,"live_and_reconciled_events":events.iter().filter(|e|e.live_t_rx_ns.is_some()).count(),
-                "reconciliation_only_events":events.iter().filter(|e|e.live_t_rx_ns.is_none()).count()}));
+            out.insert(
+                label.to_string(),
+                TruthGroup {
+                    liquidation_transactions: txs.len() as u64,
+                    liquidation_events: events.len() as u64,
+                    events_per_chain_hour: chain_seconds
+                        .filter(|s| *s > 0.)
+                        .map(|s| events.len() as f64 * 3600. / s),
+                    gross_edge_usd: TruthGross {
+                        count_known: gross.len() as u64,
+                        count_unknown: (events.len() - gross.len()) as u64,
+                        known_total: total,
+                        average: total.map(|t| t / gross.len() as f64),
+                        median: quantile_nearest_rank(&gross, 0.5),
+                        p90: quantile_nearest_rank(&gross, 0.9),
+                        p99: quantile_nearest_rank(&gross, 0.99),
+                        min: gross.first().copied(),
+                        max: gross.last().copied(),
+                    },
+                    winner_net_edge_usd: TruthWinnerNet {
+                        count_known: 0,
+                        count_unknown: events.len() as u64,
+                        known_total: None,
+                    },
+                    liquidators: actors,
+                    live_and_reconciled_events: events
+                        .iter()
+                        .filter(|e| e.live_t_rx_ns.is_some())
+                        .count() as u64,
+                    reconciliation_only_events: events
+                        .iter()
+                        .filter(|e| e.live_t_rx_ns.is_none())
+                        .count() as u64,
+                },
+            );
         }
-        json!({"groups":out,"duplicate_transactions":self.duplicate_transactions,"retention_error":self.retention_error,
-            "scope":"FINALIZED_CANONICAL_SLOT_WINDOW; includes administrative debt settlement as a separate class",
-            "transaction_fee_semantics":"meta.fee includes priority; repeated on events as transaction context, never summed per event",
-            "full_master_economics_and_shadow_join_qualified":false})
+        TruthSummary {
+            groups: out,
+            duplicate_transactions: self.duplicate_transactions,
+            retention_error: self.retention_error,
+            scope: "FINALIZED_CANONICAL_SLOT_WINDOW; includes administrative debt settlement as a separate class".into(),
+            transaction_fee_semantics: "meta.fee includes priority; repeated on events as transaction context, never summed per event".into(),
+            full_master_economics_and_shadow_join_qualified: false,
+        }
     }
 }

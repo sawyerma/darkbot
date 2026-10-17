@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 pub const MIB: u64 = 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BudgetSnapshot {
     pub initial_bytes: u64,
     pub max_bytes: u64,
@@ -201,7 +201,7 @@ pub fn physical_memory_bytes() -> Option<u64> {
 pub const PRESSURE_WARN: i32 = 2;
 
 /// Process memory and OS memory state at one instant; `None` where the OS does not report it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MemorySample {
     pub rss_bytes: Option<u64>,
     pub peak_rss_bytes: Option<u64>,

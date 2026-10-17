@@ -418,9 +418,11 @@ fn write_admission_forbids_legacy_rollback_and_unregistered_kinds() {
     let bytes = payload::encode(&diag).unwrap();
     for (k, schema, code) in [
         (kind::OWNER_DIAGNOSTIC, TYPED + 1, "PAYLOAD_SCHEMA"),
-        (kind::ECON_FINAL, TYPED, "PAYLOAD_KIND_UNTYPED"),
-        // Migrated in JFI-04: a schema-1 phase frame is a refused rollback.
+        (kind::MT0_SNAPSHOT, TYPED, "PAYLOAD_KIND_UNTYPED"),
+        // Migrated (JFI-04 / JFI-FIX-05): a schema-1 frame of these kinds is a refused rollback.
         (kind::MEASUREMENT_PHASE, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
+        (kind::ECON_SNAPSHOT, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
+        (kind::ECON_FINAL, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
     ] {
         let e = w
             .append(k, schema, Provenance::default(), &bytes)

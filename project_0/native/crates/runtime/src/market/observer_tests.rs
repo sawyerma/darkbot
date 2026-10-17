@@ -3,6 +3,7 @@ include!("market_gap_tests.rs");
 include!("market_reconcile_tests.rs");
 include!("market_truth_tests.rs");
 include!("report_tests.rs");
+include!("summary_golden_tests.rs");
 use super::*;
 use darkbot_solana::ingress::{SlotStatus, SlotUpdate, SourceKind};
 
@@ -36,6 +37,11 @@ impl MarketSink for VecSink {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+/// Render of a typed document (assertions read the historical keys).
+fn view<T: serde::Serialize>(doc: &T) -> Value {
+    serde_json::to_value(doc).unwrap()
 }
 
 fn program() -> Pubkey {
@@ -298,7 +304,7 @@ fn notification_without_status_or_decodable_payload_is_unknown_not_success() {
         ),
         (2, 0, 0)
     );
-    let summary = core.summary(&ctx(true, true, 60.0));
+    let summary = view(&core.summary(&ctx(true, true, 60.0)));
     let reasons = summary["incomplete_reasons"].to_string();
     assert!(reasons.contains("TX_STATUS_UNKNOWN") && reasons.contains("NOTIFICATION_DECODE"));
 }
@@ -499,7 +505,7 @@ fn ingress_overflow_makes_data_incomplete() {
         },
     )
     .unwrap();
-    let s = core.summary(&ctx(true, true, 60.0));
+    let s = view(&core.summary(&ctx(true, true, 60.0)));
     assert_eq!(
         (s["coverage_complete"].as_bool(), s["verdict"].as_str()),
         (Some(false), Some("MARKET_DATA_INCOMPLETE"))
@@ -528,7 +534,7 @@ fn decoder_error_in_successful_transaction_blocks_valid() {
     )
     .unwrap();
     assert!(!core.decode_complete());
-    let s = core.summary(&ctx(true, true, 3_600.0));
+    let s = view(&core.summary(&ctx(true, true, 3_600.0)));
     assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert_eq!(s["decoder_errors_successful_tx"].as_u64(), Some(1));
     // The same corruption in a failed transaction is irrelevant for completeness.
@@ -545,8 +551,10 @@ fn decoder_error_in_successful_transaction_blocks_valid() {
 // [R2-7] logs source can never claim unqualified MARKET_DATA_VALID.
 #[test]
 fn verdicts_by_source_and_without_liquidations() {
-    let tx = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT)
-        .summary(&ctx(true, true, 14_400.0));
+    let tx = view(
+        &open_core(MarketSource::Transactions, EnrichConfig::DEFAULT)
+            .summary(&ctx(true, true, 14_400.0)),
+    );
     assert_eq!(tx["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert_eq!(tx["source_coverage_verified"].as_bool(), Some(false));
     assert_eq!(
@@ -556,28 +564,28 @@ fn verdicts_by_source_and_without_liquidations() {
     assert!(tx["gross_edge_median_usd"].is_null() && tx["top_receiver"].is_null());
     assert_eq!(tx["liquidations_per_hour"].as_f64(), Some(0.0));
     let logs =
-        open_core(MarketSource::Logs, EnrichConfig::DEFAULT).summary(&ctx(true, true, 14_400.0));
+        view(&open_core(MarketSource::Logs, EnrichConfig::DEFAULT).summary(&ctx(true, true, 14_400.0)));
     assert_eq!(logs["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert_eq!(logs["source_coverage_verified"].as_bool(), Some(false));
     assert!(logs["source_coverage_note"]
         .as_str()
         .unwrap()
         .contains("lookup table"));
-    let early = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT)
-        .summary(&ctx(true, false, 0.0));
+    let early = view(&open_core(MarketSource::Transactions, EnrichConfig::DEFAULT)
+        .summary(&ctx(true, false, 0.0)));
     assert!(early["liquidations_per_hour"].is_null());
     assert_eq!(early["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     let mut undrained = ctx(true, true, 14_400.0);
     undrained.drain_complete = false;
-    let s = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT).summary(&undrained);
+    let s = view(&open_core(MarketSource::Transactions, EnrichConfig::DEFAULT).summary(&undrained));
     assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert!(s["incomplete_reasons"]
         .as_array()
         .unwrap()
         .iter()
         .any(|r| r == "DRAIN_INCOMPLETE"));
-    let not_ready = ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT)
-        .summary(&ctx(false, false, 0.0));
+    let not_ready = view(&ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT)
+        .summary(&ctx(false, false, 0.0)));
     assert_eq!(
         not_ready["verdict"].as_str(),
         Some("MARKET_OBSERVER_STREAM_NOT_READY")
@@ -692,7 +700,7 @@ fn logs_capture_never_fetches_and_enrichment_runs_after_capture() {
     assert_eq!(sink.liq[0]["enrichment_status"], "RPC_GET_TRANSACTION");
     assert_eq!(sink.liq[0]["tx_fee_lamports"].as_u64(), Some(fx.fee));
     assert_eq!(sink.liq[1]["enrichment_status"], "UNRESOLVED");
-    let s = core.summary(&ctx(true, true, 3_600.0));
+    let s = view(&core.summary(&ctx(true, true, 3_600.0)));
     assert_eq!(
         (
             s["enrichment_requested"].as_u64(),
@@ -832,6 +840,7 @@ fn finalize_writes_summary_report_and_unenriched_rows() {
         stopped("TIMER"),
     )
     .unwrap();
+    let summary = view(&summary);
     assert_eq!(summary["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert_eq!(summary["commitment"].as_str(), Some("finalized"));
     assert!(report.contains("verdict=MARKET_DATA_INCOMPLETE"));
@@ -991,7 +1000,7 @@ fn market_mode_has_no_signing_simulation_or_submission_path() {
 fn unverified_sources_never_yield_market_data_valid() {
     for source in [MarketSource::Transactions, MarketSource::Logs] {
         assert!(!source.coverage_verified());
-        let s = open_core(source, EnrichConfig::DEFAULT).summary(&ctx(true, true, 14_400.0));
+        let s = view(&open_core(source, EnrichConfig::DEFAULT).summary(&ctx(true, true, 14_400.0)));
         assert_eq!(
             s["receivership_transport_capture_complete"].as_bool(),
             Some(true)
@@ -1091,6 +1100,7 @@ fn enrichment_init_failure_still_produces_summary_and_report() {
         stopped("TIMER"),
     )
     .unwrap();
+    let summary = view(&summary);
     assert_eq!(summary["liquidation_events"].as_u64(), Some(1));
     assert!((summary["gross_edge_total_usd"].as_f64().unwrap() - 2.0).abs() < 1e-12);
     assert_eq!(
@@ -1233,6 +1243,7 @@ fn logs_without_rpc_url_still_reaches_finalize_and_report() {
     };
     let (summary, report, write_error) =
         finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
+    let summary = view(&summary);
     assert_eq!(write_error, None);
     assert!(
         cfg.run_dir.join("summary.json").exists() && cfg.run_dir.join("final_report.txt").exists()
@@ -1404,7 +1415,7 @@ fn truncated_logs_with_no_end_liquidation_can_be_qualified() {
         (1, 1, 0)
     );
     assert!(core.decode_complete());
-    let s = core.summary(&ctx(true, true, 600.0));
+    let s = view(&core.summary(&ctx(true, true, 600.0)));
     assert_eq!(
         s["receivership_transport_capture_complete"].as_bool(),
         Some(true)
@@ -1459,7 +1470,7 @@ fn truncated_logs_missing_liquidation_event_fail_closed() {
     let core = observe_truncated(&[(t, r)], &[], false, false);
     assert_eq!(core.stats.logs_truncated_liquidation_mismatch, 1);
     assert!(!core.decode_complete());
-    let s = core.summary(&ctx(true, true, 600.0));
+    let s = view(&core.summary(&ctx(true, true, 600.0)));
     assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert!(s["incomplete_reasons"]
         .as_array()
@@ -1505,7 +1516,7 @@ fn truncated_missing_loaded_addresses_fail_closed() {
     let core = observe_truncated(&[(t, r)], &[(t, r)], true, false);
     assert_eq!(core.stats.logs_truncated_unqualified, 1);
     assert!(!core.decode_complete());
-    let s = core.summary(&ctx(true, true, 600.0));
+    let s = view(&core.summary(&ctx(true, true, 600.0)));
     assert_eq!(
         s["truncated_unqualified_reasons"]["LOADED_ADDRESSES_MISSING"].as_u64(),
         Some(1)
@@ -1552,7 +1563,7 @@ fn truncated_fetch_failure_or_wrong_transaction_fail_closed() {
         &mut || true,
     );
     assert_eq!(core.stats.logs_truncated_unqualified, 2);
-    let s = core.summary(&ctx(true, true, 600.0));
+    let s = view(&core.summary(&ctx(true, true, 600.0)));
     assert_eq!(
         s["truncated_unqualified_reasons"]["FETCH_FAILED"].as_u64(),
         Some(1)
@@ -1616,7 +1627,7 @@ fn non_truncated_existing_behavior_unchanged() {
         (0, 0, 0)
     );
     assert!(core.decode_complete());
-    let s = core.summary(&ctx(true, true, 600.0));
+    let s = view(&core.summary(&ctx(true, true, 600.0)));
     assert_eq!(
         s["receivership_transport_capture_complete"].as_bool(),
         Some(true)
@@ -1711,7 +1722,7 @@ fn six_real_audit_liquidations_aggregate_into_market_summary() {
         };
         core.on_transaction(ev, 0, &mut sink).unwrap();
     }
-    let s = core.summary(&ctx(true, true, 3_600.0));
+    let s = view(&core.summary(&ctx(true, true, 3_600.0)));
     assert_eq!(s["verdict"].as_str(), Some("MARKET_DATA_INCOMPLETE"));
     assert_eq!(
         s["receivership_transport_capture_complete"].as_bool(),
@@ -1797,7 +1808,7 @@ fn typed_market_frames_render_offline_to_their_legacy_rows() {
     )
     .unwrap();
     let binding = sink.finish().unwrap().unwrap();
-    assert_eq!((binding.status, binding.event_frames), ("COMPLETE", 3));
+    assert_eq!((binding.status.as_str(), binding.event_frames), ("COMPLETE", 3));
     // No view exists after capture; the explicit offline export renders the legacy rows.
     for (_, name) in MARKET_VIEWS {
         assert!(!dir.join(name).exists(), "{name}");
@@ -1887,6 +1898,7 @@ fn journal_sink_finalize_binds_the_journal_and_early_exit_seals_incomplete() {
         stopped("TIMER"),
     )
     .unwrap();
+    let summary = view(&summary);
     let binding = &summary["evidence_journal"];
     assert_eq!(binding["journal"], MARKET_JOURNAL);
     assert_eq!(binding["status"], "COMPLETE");

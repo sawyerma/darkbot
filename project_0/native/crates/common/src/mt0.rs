@@ -526,132 +526,276 @@ impl Registry {
         }
     }
 
-    /// One JSON object (no external dependency); `duty` = per-second owner duty-cycle permille.
-    pub fn snapshot_json(&self, unix_s: u64, now_ns: u64, duty: &HistSnapshot) -> String {
-        let mut o = String::with_capacity(8_192);
-        o.push_str(&format!("{{\"mt0_version\":2,\"unix_s\":{unix_s}"));
+    /// The registry at one instant as a typed value (`duty` = per-second owner duty-cycle
+    /// permille). Consumers keep it typed; `Snapshot::json` is its text form.
+    pub fn snapshot(&self, unix_s: u64, now_ns: u64, duty: &HistSnapshot) -> Snapshot {
         // owner (totals include the section in progress)
         let (busy, wait) = self.owner_totals_at(now_ns);
-        o.push_str(",\"owner_busy_ns\":{");
-        o.push_str(
-            &OWNER_CATS
+        let known = self.backlog_age_known.load(Relaxed) == 1;
+        Snapshot {
+            unix_s,
+            owner_busy_ns: OWNER_CATS
                 .iter()
-                .map(|c| format!("\"{}\":{}", c.name(), self.owner_ns(*c)))
+                .map(|c| (c.name(), self.owner_ns(*c)))
+                .collect(),
+            owner_busy_total_ns: busy,
+            owner_wait_total_ns: wait,
+            owner_duty_cycle_total: Ratio {
+                num: busy,
+                den: busy.saturating_add(wait),
+            },
+            owner_duty_cycle_permille_1s: *duty,
+            queue_wait_latest_ns: TRIGGER_CLASSES
+                .iter()
+                .map(|c| (c.name(), self.queue_wait_latest[c.idx()].snapshot()))
+                .collect(),
+            queue_wait_first_ns: TRIGGER_CLASSES
+                .iter()
+                .map(|c| (c.name(), self.queue_wait_first[c.idx()].snapshot()))
+                .collect(),
+            ingress_queue_wait_ns: self.ingress_queue_wait.snapshot(),
+            pending_current: self.pending_current.load(Relaxed),
+            pending_max: self.pending_max.load(Relaxed),
+            backlog_age_ns: known.then(|| self.backlog_age_ns.load(Relaxed)),
+            backlog_age_max_ns: known.then(|| self.backlog_age_max_ns.load(Relaxed)),
+            remote: REMOTE_CLASSES
+                .iter()
+                .map(|c| RemoteSnapshot {
+                    class: c.name(),
+                    provider: c.provider(),
+                    requests: self.remote_requests(*c),
+                    ok: self.remote_count(*c, RemoteOutcome::Ok),
+                    rate_limited_429: self.remote_count(*c, RemoteOutcome::RateLimited),
+                    timeout: self.remote_count(*c, RemoteOutcome::Timeout),
+                    error: self.remote_count(*c, RemoteOutcome::Error),
+                    unclassified: self.remote_count(*c, RemoteOutcome::Unclassified),
+                    slow_ge_500ms: self.remote_slow[c.idx()].load(Relaxed),
+                    latency_ns: self.remote_latency[c.idx()].snapshot(),
+                })
+                .collect(),
+            health_calls_sweep: self.health_calls(HealthSite::Sweep),
+            health_calls_detect_consumer: self.health_calls(HealthSite::DetectConsumer),
+            health_calls_pipeline: self.health_calls(HealthSite::Pipeline),
+            health_calls_per_pipeline_evaluation: Ratio {
+                num: self
+                    .health_calls(HealthSite::DetectConsumer)
+                    .saturating_add(self.health_calls(HealthSite::Pipeline)),
+                den: self.get(Counter::PipelineEvaluations),
+            },
+            counters: COUNTER_LIST
+                .iter()
+                .map(|(c, name)| (*name, self.get(*c)))
+                .collect(),
+            jupiter_requests_per_routed_evaluation: Ratio {
+                num: self.get(Counter::JupiterRequestsRouted),
+                den: self.get(Counter::RoutedEvaluations),
+            },
+            route_requotes: self
+                .get(Counter::RouteFitAttempts)
+                .saturating_sub(self.get(Counter::RouteFitCalls)),
+            fee_rpc_requests: self.remote_requests(RemoteClass::FeeRpc),
+            simulation_requests: self.remote_requests(RemoteClass::Simulation),
+            projection_requests: self.remote_requests(RemoteClass::IntegrationProjection)
+                + self.remote_requests(RemoteClass::OracleProjection),
+            winner_requests: self.remote_requests(RemoteClass::Winner),
+            reconcile_requests: self.remote_requests(RemoteClass::Reconcile),
+        }
+    }
+
+    /// One JSON object (no external dependency): the text form of `snapshot`.
+    pub fn snapshot_json(&self, unix_s: u64, now_ns: u64, duty: &HistSnapshot) -> String {
+        self.snapshot(unix_s, now_ns, duty).json()
+    }
+}
+
+/// `num / den` measured exactly; `None` (JSON `null`) when the denominator is zero.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Ratio {
+    pub num: u64,
+    pub den: u64,
+}
+impl Ratio {
+    pub fn value(&self) -> Option<f64> {
+        (self.den != 0).then(|| self.num as f64 / self.den as f64)
+    }
+    /// Fixed six-decimal text (the snapshot's ratio format), `null` without a denominator.
+    pub fn text(&self) -> String {
+        ratio_json(self.num, self.den)
+    }
+}
+
+/// Requests of one remote class.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteSnapshot {
+    pub class: &'static str,
+    pub provider: &'static str,
+    pub requests: u64,
+    pub ok: u64,
+    pub rate_limited_429: u64,
+    pub timeout: u64,
+    pub error: u64,
+    pub unclassified: u64,
+    pub slow_ge_500ms: u64,
+    pub latency_ns: HistSnapshot,
+}
+
+/// Measurements deferred to later milestones (fixed text in every snapshot).
+pub const NOT_MEASURED: [(&str, &str); 6] = [
+    (
+        "remote_retry_sleep_ns",
+        "N/A:DEFER_TO_MT1 (Solana client retries 429 internally; see slow_ge_500ms)",
+    ),
+    (
+        "owner_wakeup_latency_ns",
+        "N/A:DEFER_TO_MT2 (polling owner, no inbox; see ingress_queue_wait_ns)",
+    ),
+    ("prepare_calls", "N/A:DEFER_TO_MT2"),
+    ("prepare_health_calls", "N/A:DEFER_TO_MT2"),
+    ("prepare_ns", "N/A:DEFER_TO_MT2"),
+    (
+        "health_calls_per_candidate_revision",
+        "N/A:DEFER_TO_MT5 (no revision ids; see health_calls_per_pipeline_evaluation)",
+    ),
+];
+
+/// One MT0 registry snapshot (`mt0_version` 2), typed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub unix_s: u64,
+    pub owner_busy_ns: Vec<(&'static str, u64)>,
+    pub owner_busy_total_ns: u64,
+    pub owner_wait_total_ns: u64,
+    pub owner_duty_cycle_total: Ratio,
+    pub owner_duty_cycle_permille_1s: HistSnapshot,
+    pub queue_wait_latest_ns: Vec<(&'static str, HistSnapshot)>,
+    pub queue_wait_first_ns: Vec<(&'static str, HistSnapshot)>,
+    pub ingress_queue_wait_ns: HistSnapshot,
+    pub pending_current: u64,
+    pub pending_max: u64,
+    pub backlog_age_ns: Option<u64>,
+    pub backlog_age_max_ns: Option<u64>,
+    pub remote: Vec<RemoteSnapshot>,
+    pub health_calls_sweep: u64,
+    pub health_calls_detect_consumer: u64,
+    pub health_calls_pipeline: u64,
+    pub health_calls_per_pipeline_evaluation: Ratio,
+    pub counters: Vec<(&'static str, u64)>,
+    pub jupiter_requests_per_routed_evaluation: Ratio,
+    pub route_requotes: u64,
+    pub fee_rpc_requests: u64,
+    pub simulation_requests: u64,
+    pub projection_requests: u64,
+    pub winner_requests: u64,
+    pub reconcile_requests: u64,
+}
+
+impl Snapshot {
+    /// The historical one-object text (key order and number formats unchanged).
+    pub fn json(&self) -> String {
+        let map = |items: &[(&str, String)]| {
+            items
+                .iter()
+                .map(|(k, v)| format!("\"{k}\":{v}"))
                 .collect::<Vec<_>>()
-                .join(","),
-        );
+                .join(",")
+        };
+        let hists = |items: &[(&'static str, HistSnapshot)]| {
+            map(&items
+                .iter()
+                .map(|(k, h)| (*k, hist_json(h)))
+                .collect::<Vec<_>>())
+        };
+        let mut o = String::with_capacity(8_192);
+        o.push_str(&format!("{{\"mt0_version\":2,\"unix_s\":{}", self.unix_s));
         o.push_str(&format!(
-            "}},\"owner_busy_total_ns\":{busy},\"owner_wait_total_ns\":{wait}"
+            ",\"owner_busy_ns\":{{{}}}",
+            map(&self
+                .owner_busy_ns
+                .iter()
+                .map(|(k, n)| (*k, n.to_string()))
+                .collect::<Vec<_>>())
+        ));
+        o.push_str(&format!(
+            ",\"owner_busy_total_ns\":{},\"owner_wait_total_ns\":{}",
+            self.owner_busy_total_ns, self.owner_wait_total_ns
         ));
         o.push_str(&format!(
             ",\"owner_duty_cycle_total\":{}",
-            ratio_json(busy, busy.saturating_add(wait))
+            self.owner_duty_cycle_total.text()
         ));
         o.push_str(&format!(
             ",\"owner_duty_cycle_permille_1s\":{}",
-            hist_json(duty)
+            hist_json(&self.owner_duty_cycle_permille_1s)
         ));
-        // queues
-        o.push_str(",\"queue_wait_latest_ns\":{");
-        o.push_str(
-            &TRIGGER_CLASSES
-                .iter()
-                .map(|c| {
-                    format!(
-                        "\"{}\":{}",
-                        c.name(),
-                        hist_json(&self.queue_wait_latest[c.idx()].snapshot())
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(","),
-        );
-        o.push_str("},\"queue_wait_first_ns\":{");
-        o.push_str(
-            &TRIGGER_CLASSES
-                .iter()
-                .map(|c| {
-                    format!(
-                        "\"{}\":{}",
-                        c.name(),
-                        hist_json(&self.queue_wait_first[c.idx()].snapshot())
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(","),
-        );
         o.push_str(&format!(
-            "}},\"ingress_queue_wait_ns\":{}",
-            hist_json(&self.ingress_queue_wait.snapshot())
+            ",\"queue_wait_latest_ns\":{{{}}},\"queue_wait_first_ns\":{{{}}}",
+            hists(&self.queue_wait_latest_ns),
+            hists(&self.queue_wait_first_ns)
+        ));
+        o.push_str(&format!(
+            ",\"ingress_queue_wait_ns\":{}",
+            hist_json(&self.ingress_queue_wait_ns)
         ));
         o.push_str(&format!(
             ",\"pending_current\":{},\"pending_max\":{},\"backlog_age_ns\":{},\"backlog_age_max_ns\":{}",
-            self.pending_current.load(Relaxed),
-            self.pending_max.load(Relaxed),
-            if self.backlog_age_known.load(Relaxed) == 1 { self.backlog_age_ns.load(Relaxed).to_string() } else { "null".into() },
-            if self.backlog_age_known.load(Relaxed) == 1 { self.backlog_age_max_ns.load(Relaxed).to_string() } else { "null".into() },
+            self.pending_current,
+            self.pending_max,
+            opt_json(self.backlog_age_ns),
+            opt_json(self.backlog_age_max_ns),
         ));
-        // remote
         o.push_str(",\"remote\":{");
         o.push_str(
-            &REMOTE_CLASSES
+            &self
+                .remote
                 .iter()
-                .map(|c| {
+                .map(|r| {
                     format!(
                         "\"{}\":{{\"provider\":\"{}\",\"requests\":{},\"ok\":{},\"rate_limited_429\":{},\"timeout\":{},\"error\":{},\"unclassified\":{},\"slow_ge_500ms\":{},\"latency_ns\":{}}}",
-                        c.name(),
-                        c.provider(),
-                        self.remote_requests(*c),
-                        self.remote_count(*c, RemoteOutcome::Ok),
-                        self.remote_count(*c, RemoteOutcome::RateLimited),
-                        self.remote_count(*c, RemoteOutcome::Timeout),
-                        self.remote_count(*c, RemoteOutcome::Error),
-                        self.remote_count(*c, RemoteOutcome::Unclassified),
-                        self.remote_slow[c.idx()].load(Relaxed),
-                        hist_json(&self.remote_latency[c.idx()].snapshot()),
+                        r.class,
+                        r.provider,
+                        r.requests,
+                        r.ok,
+                        r.rate_limited_429,
+                        r.timeout,
+                        r.error,
+                        r.unclassified,
+                        r.slow_ge_500ms,
+                        hist_json(&r.latency_ns),
                     )
                 })
                 .collect::<Vec<_>>()
                 .join(","),
         );
         o.push('}');
-        // health
-        let h_sweep = self.health_calls(HealthSite::Sweep);
-        let h_detect = self.health_calls(HealthSite::DetectConsumer);
-        let h_pipe = self.health_calls(HealthSite::Pipeline);
-        let evals = self.get(Counter::PipelineEvaluations);
         o.push_str(&format!(
-            ",\"health_calls\":{{\"sweep\":{h_sweep},\"detect_consumer\":{h_detect},\"pipeline\":{h_pipe}}},\"health_calls_per_pipeline_evaluation\":{}",
-            ratio_json(h_detect.saturating_add(h_pipe), evals)
+            ",\"health_calls\":{{\"sweep\":{},\"detect_consumer\":{},\"pipeline\":{}}},\"health_calls_per_pipeline_evaluation\":{}",
+            self.health_calls_sweep,
+            self.health_calls_detect_consumer,
+            self.health_calls_pipeline,
+            self.health_calls_per_pipeline_evaluation.text()
         ));
-        // counters
-        for (c, name) in COUNTER_LIST {
-            o.push_str(&format!(",\"{name}\":{}", self.get(c)));
+        for (name, n) in &self.counters {
+            o.push_str(&format!(",\"{name}\":{n}"));
         }
         o.push_str(&format!(
             ",\"jupiter_requests_per_routed_evaluation\":{},\"route_requotes\":{}",
-            ratio_json(
-                self.get(Counter::JupiterRequestsRouted),
-                self.get(Counter::RoutedEvaluations)
-            ),
-            self.get(Counter::RouteFitAttempts)
-                .saturating_sub(self.get(Counter::RouteFitCalls)),
+            self.jupiter_requests_per_routed_evaluation.text(),
+            self.route_requotes,
         ));
         o.push_str(&format!(
             ",\"fee_rpc_requests\":{},\"simulation_requests\":{},\"projection_requests\":{},\"winner_requests\":{},\"reconcile_requests\":{}",
-            self.remote_requests(RemoteClass::FeeRpc),
-            self.remote_requests(RemoteClass::Simulation),
-            self.remote_requests(RemoteClass::IntegrationProjection) + self.remote_requests(RemoteClass::OracleProjection),
-            self.remote_requests(RemoteClass::Winner),
-            self.remote_requests(RemoteClass::Reconcile),
+            self.fee_rpc_requests,
+            self.simulation_requests,
+            self.projection_requests,
+            self.winner_requests,
+            self.reconcile_requests,
         ));
-        o.push_str(concat!(
-            ",\"not_measured\":{",
-            "\"remote_retry_sleep_ns\":\"N/A:DEFER_TO_MT1 (Solana client retries 429 internally; see slow_ge_500ms)\",",
-            "\"owner_wakeup_latency_ns\":\"N/A:DEFER_TO_MT2 (polling owner, no inbox; see ingress_queue_wait_ns)\",",
-            "\"prepare_calls\":\"N/A:DEFER_TO_MT2\",\"prepare_health_calls\":\"N/A:DEFER_TO_MT2\",\"prepare_ns\":\"N/A:DEFER_TO_MT2\",",
-            "\"health_calls_per_candidate_revision\":\"N/A:DEFER_TO_MT5 (no revision ids; see health_calls_per_pipeline_evaluation)\"",
-            "}}"
+        o.push_str(&format!(
+            ",\"not_measured\":{{{}}}}}",
+            map(&NOT_MEASURED
+                .iter()
+                .map(|(k, v)| (*k, format!("\"{v}\"")))
+                .collect::<Vec<_>>())
         ));
         o
     }

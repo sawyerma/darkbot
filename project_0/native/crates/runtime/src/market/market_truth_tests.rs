@@ -259,7 +259,7 @@ fn truth_aggregate_all_types_preserves_known_and_unknown() {
     let mut rx = canonical_tx("rx", 10);
     rx["transactionIndex"] = json!(0);
     ledger.events.extend(classify_raw(&rx, None, None).unwrap());
-    let s = ledger.summary(Some(3600.));
+    let s = view(&ledger.summary(Some(3600.)));
     assert_eq!(s["groups"]["ALL"]["liquidation_events"], 4);
     assert_eq!(s["groups"]["ALL"]["gross_edge_usd"]["count_known"], 2);
     assert_eq!(s["groups"]["ALL"]["gross_edge_usd"]["count_unknown"], 2);

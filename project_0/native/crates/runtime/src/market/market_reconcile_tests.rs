@@ -58,7 +58,7 @@ fn full_slot_every_produced_block_and_transaction_are_scanned() {
         .any(|v| v["source"] == "full_slot_reconciliation"));
     // Slot proof alone cannot qualify the as-yet incomplete path audit/decoders.
     assert_eq!(
-        c.summary(&ctx(true, true, 4.0))["market_capture_complete"],
+        view(&c.summary(&ctx(true, true, 4.0)))["market_capture_complete"],
         false
     );
 }

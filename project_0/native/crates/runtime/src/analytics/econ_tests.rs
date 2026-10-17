@@ -139,14 +139,58 @@ fn worker_in(layout: crate::run_layout::RunLayout) -> Worker {
     )
     .unwrap()
 }
+/// Render of a typed report document (assertions read the historical keys).
+pub(super) fn view<T: Serialize>(doc: &T) -> Value {
+    serde_json::to_value(doc).unwrap()
+}
+/// The summary of an empty finished capture (a real market observer summary).
+pub(super) fn market_summary(secs: f64) -> crate::market_observer::MarketSummary {
+    use crate::market_observer::{EnrichConfig, MarketSource, ObserverCore, SummaryContext};
+    let program = darkbot_project0::protocol::PROGRAM_ID_MAINNET
+        .parse()
+        .unwrap();
+    let mut core = ObserverCore::new(program, MarketSource::Logs, EnrichConfig::DEFAULT);
+    core.start_observation(0, u64::MAX);
+    core.summary(&SummaryContext {
+        run_id: "test".into(),
+        commitment: "finalized".into(),
+        stream_ready: true,
+        full_duration_observed: true,
+        drain_complete: true,
+        actual_observation_seconds: secs,
+        configured_duration_seconds: secs,
+        min_sample_liquidations: 1,
+        ..Default::default()
+    })
+}
+pub(super) fn shadow_stats() -> ShadowStats {
+    ShadowStats {
+        winner_watch_current: 0,
+        winner_watch_max: 0,
+        winner_watch_overflow: 0,
+        winner_watch_errors: 0,
+        winner_watch_resolved: 0,
+        winner_watch_expired: 0,
+        winner_queue_full_backoffs: 0,
+        ingress_overflow: 0,
+        winner_pending_at_deadline: 0,
+        shadow_state_ready_at_shutdown: true,
+        remote_winner_queue_depth: 0,
+        remote_projection_queue_depth: 0,
+    }
+}
 fn complete(w: &mut Worker) {
     w.h.shared.shadow_ready_ns.store(1, Ordering::Release);
     w.canonical_finalized = true;
     w.snapshots = SNAPSHOT_COUNT;
-    w.market_final = Some(
-        json!({"actual_observation_seconds":4.0,"market_capture_complete":true,"drain_complete":true,"decode_complete":true,"source_coverage_verified":false,"verdict":"MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED"}),
-    );
-    w.shadow_stats = json!({"ingress_overflow":0,"winner_watch_overflow":0,"shadow_state_ready_at_shutdown":true});
+    let mut summary = market_summary(4.0);
+    summary.market_capture_complete = true;
+    summary.drain_complete = true;
+    summary.decode_complete = true;
+    summary.source_coverage_verified = false;
+    summary.verdict = "MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED".into();
+    w.market_final = Some(crate::market_observer::MarketFinal::checkpoint(summary));
+    w.shadow_stats = Some(shadow_stats());
     w.h.shared.shadow_done.store(true, Ordering::Relaxed);
     w.h.shared.market_done.store(true, Ordering::Relaxed);
 }
@@ -339,7 +383,7 @@ fn strong_join_unmatched_diagnostics_and_speedup_math() {
     w.accept(Evidence::Market(m)).unwrap();
     w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
     assert_eq!(
-        w.metrics(0, 4)["matching"]["market_without_shadow_match"],
+        view(&w.metrics(0, 4))["matching"]["market_without_shadow_match"],
         1
     );
     w.accept(Evidence::Winner {
@@ -348,7 +392,7 @@ fn strong_join_unmatched_diagnostics_and_speedup_math() {
         winner: win,
     })
     .unwrap();
-    let v = w.metrics(0, 4);
+    let v = view(&w.metrics(0, 4));
     assert_eq!(v["matching"]["market_with_shadow_match"], 1);
     let s = &v["race_timing"]["observed_speedup_sensitivity"];
     assert_eq!(s[3]["winner_rx_boundary"]["count"], 0);
@@ -357,7 +401,10 @@ fn strong_join_unmatched_diagnostics_and_speedup_math() {
     // A repeated evaluation may never multiply one actual winner's edge.
     r.timing.t_rx_ns = Some(1_000_000_100);
     w.accept(Evidence::Shadow(Box::new(r))).unwrap();
-    assert_eq!(w.metrics(0, 4)["economics"]["known_executable"]["count"], 1);
+    assert_eq!(
+        view(&w.metrics(0, 4))["economics"]["known_executable"]["count"],
+        1
+    );
 }
 #[test]
 fn winner_without_live_observation_is_visible_and_not_race_qualified() {
@@ -371,7 +418,7 @@ fn winner_without_live_observation_is_visible_and_not_race_qualified() {
     })
     .unwrap();
     w.accept(Evidence::Shadow(Box::new(r))).unwrap();
-    let v = w.metrics(0, 4);
+    let v = view(&w.metrics(0, 4));
     assert_eq!(v["matching"]["winner_live_observation_missing"], 1);
     assert_eq!(v["competition"]["unresolved"]["count"], 1);
 }
@@ -384,7 +431,7 @@ fn simulation_bottleneck_and_unknown_edge_not_fabricated() {
     r.net_profit = None;
     r.loss = Some(LossReason::Build);
     w.accept(Evidence::Shadow(Box::new(r))).unwrap();
-    let v = w.metrics(0, 4);
+    let v = view(&w.metrics(0, 4));
     assert_eq!(
         v["bottlenecks"]["by_reason"]["Simulation"]["opportunity_count"],
         1
@@ -425,7 +472,7 @@ fn bounded_queue_and_retention_overflow_fail_qualification() {
     let mut w = worker();
     complete(&mut w);
     w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
-    assert_eq!(w.technical(true)["verdict"], "PASS");
+    assert_eq!(view(&w.technical(true))["verdict"], "PASS");
     for _ in 0..65 {
         w.h.emit(Evidence::Slot {
             slot: 1,
@@ -433,7 +480,7 @@ fn bounded_queue_and_retention_overflow_fail_qualification() {
         });
     }
     assert_eq!(w.h.shared.drops.load(Ordering::Relaxed), 1);
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
     let mut w = worker();
     complete(&mut w);
     w.h.cfg.retention = 1;
@@ -441,23 +488,27 @@ fn bounded_queue_and_retention_overflow_fail_qualification() {
         w.accept(Evidence::Slot { slot, t_rx_ns: 1 }).unwrap();
     }
     assert_eq!(w.slots.len(), 1);
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
 }
 #[test]
 fn early_end_missing_snapshot_upgrade_and_writer_failures_are_incomplete() {
     let mut w = worker();
     complete(&mut w);
     w.snapshots = 3;
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
     w.snapshots = SNAPSHOT_COUNT;
-    w.market_final.as_mut().unwrap()["actual_observation_seconds"] = json!(3.0);
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    w.market_final
+        .as_mut()
+        .unwrap()
+        .summary
+        .actual_observation_seconds = 3.0;
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
     complete(&mut w);
     w.h.shared.upgrade.store(true, Ordering::Relaxed);
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
     w.h.shared.upgrade.store(false, Ordering::Relaxed);
     w.h.shared.writer_errors.store(1, Ordering::Relaxed);
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
 }
 #[test]
 fn four_boundaries_delta_cumulative_and_final_reconcile() {
@@ -480,7 +531,7 @@ fn four_boundaries_delta_cumulative_and_final_reconcile() {
     }
     let last: Value =
         serde_json::from_slice(&fs::read(w.h.cfg.run_dir.join("hour_04.json")).unwrap()).unwrap();
-    assert_eq!(last, w.report(4, true));
+    assert_eq!(last, view(&w.report(4, true)));
     assert_eq!(last["live_ready"], false);
     assert_eq!(
         last["technical_qualification"]["source_coverage_verified"],
@@ -518,11 +569,11 @@ fn counters_use_event_receive_hour_even_if_processed_after_boundary() {
     })
     .unwrap();
     assert_eq!(
-        w.metrics(0, 1)["market"]["capture_counters"]["unique_transactions"],
+        view(&w.metrics(0, 1))["market"]["capture_counters"]["unique_transactions"],
         1
     );
     assert_eq!(
-        w.metrics(1, 2)["market"]["capture_counters"]["unique_transactions"],
+        view(&w.metrics(1, 2))["market"]["capture_counters"]["unique_transactions"],
         0
     );
 }
@@ -752,7 +803,7 @@ fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
     let mut reader = journal::Reader::open(&snapshots.join(REPORT_JOURNAL)).unwrap();
     let (mut hours, mut last, mut opportunities) = (BTreeMap::new(), None, String::new());
     while let Some(frame) = reader.next_frame().unwrap() {
-        let value = || frame.legacy_value().unwrap();
+        let value = || crate::analytics::payload::legacy_view(&frame).unwrap();
         match frame.kind {
             kind::ECON_SNAPSHOT => {
                 let v = value();
@@ -912,10 +963,10 @@ fn backfill_preserves_chain_race_but_never_live_rx_or_speedup() {
     let output = opportunity_view(&w.opportunity(&r));
     assert_eq!(output["strong_join"], true);
     assert_eq!(output["t_winner_rx_ns"], Value::Null);
-    assert_eq!(w.metrics(0, 3)["market"]["liquidation_events"], 0);
-    assert_eq!(w.metrics(3, 4)["market"]["liquidation_events"], 1);
+    assert_eq!(view(&w.metrics(0, 3))["market"]["liquidation_events"], 0);
+    assert_eq!(view(&w.metrics(3, 4))["market"]["liquidation_events"], 1);
     assert_eq!(
-        w.metrics(0, 4)["matching"]["winner_live_observation_matched"],
+        view(&w.metrics(0, 4))["matching"]["winner_live_observation_matched"],
         0
     );
 }
@@ -991,13 +1042,13 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
     w.final_technical = Some(w.technical(true));
     for i in 1..=4 {
         w.write_snapshot(i, true).unwrap();
-        let v = w.report(i, true);
+        let v = view(&w.report(i, true));
         assert_eq!(v["shadow"]["window_delta"]["evaluations"], 250_000);
         assert_eq!(v["shadow"]["cumulative"]["evaluations"], 250_000 * i);
     }
     let last: Value =
         serde_json::from_reader(File::open(w.h.cfg.run_dir.join("hour_04.json")).unwrap()).unwrap();
-    assert_eq!(last, w.report(4, true));
+    assert_eq!(last, view(&w.report(4, true)));
     assert_eq!(last["technical_qualification"]["verdict"], "PASS");
     assert_eq!(last["technical_qualification"]["submissions"], 0);
     println!("RETENTION_STRESS received=1000000 streamed=1000000 coalesced=999984 semantic_max=16 target_heads=4 overflow=0 evictions=0 raw_rows=1000000");
@@ -1083,7 +1134,7 @@ fn semantic_overflow_and_corrupt_journal_fail_closed() {
     assert_eq!(w.shadow_semantic_evictions, 1);
     assert_eq!(w.h.shared.retention_overflow.load(Ordering::Relaxed), 1);
     assert_eq!(w.shadow_evaluations_streamed, 11);
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
     let mut w = worker();
     w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
     // A damaged evaluation frame fails the chain walk closed; nothing is guessed.
@@ -1180,11 +1231,11 @@ fn startup_barrier_never_starts_clock_on_timeout_or_failed_shadow() {
 fn empty_measurement_or_recovery_after_start_cannot_pass() {
     let mut w = worker();
     complete(&mut w);
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
     w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
-    assert_eq!(w.technical(true)["verdict"], "PASS");
+    assert_eq!(view(&w.technical(true))["verdict"], "PASS");
     w.h.shared.shadow_ready_ns.store(2, Ordering::Release); // capture started at1
-    assert_eq!(w.technical(true)["verdict"], "INCOMPLETE");
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
 }
 
 #[test]
@@ -1196,14 +1247,18 @@ fn measurement_plan_report_and_attribution_agree_for_all_durations() {
         let cutoff = w.h.cfg.plan.cutoff(start).unwrap();
         w.h.start(start, cutoff);
         complete(&mut w);
-        w.market_final.as_mut().unwrap()["actual_observation_seconds"] = json!(seconds as f64);
+        w.market_final
+            .as_mut()
+            .unwrap()
+            .summary
+            .actual_observation_seconds = seconds as f64;
         for i in 1..=SNAPSHOT_COUNT {
             let end = start + w.h.cfg.plan.offset_ns(i);
             assert_eq!(w.hour(end), Some(i - 1));
             if i < SNAPSHOT_COUNT {
                 assert_eq!(w.hour(end + 1), Some(i));
             }
-            let report = w.report(i, true);
+            let report = view(&w.report(i, true));
             assert_eq!(
                 report["window"]["through_offset_ns"],
                 w.h.cfg.plan.offset_ns(i)
@@ -1215,7 +1270,7 @@ fn measurement_plan_report_and_attribution_agree_for_all_durations() {
         }
         assert_eq!(w.hour(cutoff + 1), None);
         assert_eq!(
-            w.report(SNAPSHOT_COUNT, true)["identity"]["actual_elapsed_seconds"],
+            view(&w.report(SNAPSHOT_COUNT, true))["identity"]["actual_elapsed_seconds"],
             seconds as f64
         );
     }

@@ -7,8 +7,8 @@ use darkbot_project0::protocol;
 const REFERENCE_HASH: &str = protocol::PROGRAM_DATA_REFERENCE_HASH;
 const PROGRAM: &str = protocol::PROGRAM_ID_MAINNET;
 const LOADER: &str = protocol::BPF_LOADER_UPGRADEABLE_ID;
-#[derive(Clone, Debug, serde::Serialize)]
-pub(super) struct Deployment {
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Deployment {
     pub context_slot: u64,
     pub hash: String,
     pub program_data: String,

@@ -19,10 +19,13 @@ use std::time::Duration;
 
 #[path = "econ_canonical.rs"]
 mod canonical;
+#[path = "econ_docs.rs"]
+mod docs;
 pub use canonical::{
-    canonical_legacy_view, join as canonical_join, joined_facts, record_digest, JoinOutcome,
-    Joined as CanonicalJoin, JoinedFacts,
+    canonical_legacy_view, join as canonical_join, joined_facts, record_digest, CanonicalSummary,
+    JoinOutcome, Joined as CanonicalJoin, JoinedFacts,
 };
+pub use docs::*;
 
 pub const CAPITAL_USD: [u64; 6] = [200, 500, 1000, 2500, 5000, 10000];
 pub const SPEEDUP_MS: [u64; 9] = [1, 5, 10, 25, 50, 100, 200, 500, 1000];
@@ -154,9 +157,9 @@ pub enum Evidence {
     },
     MarketCheckpoint {
         index: usize,
-        summary: Value,
+        summary: crate::market_observer::MarketSummary,
     },
-    MarketFinal(Value),
+    MarketFinal(Box<crate::market_observer::MarketFinal>),
     MarketCounters {
         at_ns: u64,
         before: crate::market_observer::MarketStats,
@@ -184,7 +187,7 @@ impl crate::analytics::payload::Payload for ShadowEvaluation {
 
 /// Shadow owner counters at shutdown. Built on the owner thread without JSON (PERSIST-02);
 /// the analytics worker turns it into the `shadow_telemetry` value of its reports.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShadowStats {
     pub winner_watch_current: u64,
     pub winner_watch_max: u64,
@@ -357,7 +360,7 @@ pub fn spawn(
     Ok((handle, worker))
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Distribution {
     pub count_known: usize,
     pub total: Option<f64>,
@@ -500,7 +503,7 @@ pub fn race(
         required_speedup_to_winner_slot_seen_ms: speed(slot_margin).map(|v| v as f64 / 1e6),
     }
 }
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeCount {
     pub count: u64,
     pub net_usd_micro: i128,
@@ -511,7 +514,7 @@ impl EdgeCount {
         self.net_usd_micro += net;
     }
 }
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RacePool {
     pub pre: EdgeCount,
     pub same: EdgeCount,
@@ -580,14 +583,6 @@ pub fn opportunity_view(row: &OpportunityRow) -> Value {
         "t_winner_slot_first_seen_ns":if r.live_timestamp_qualified {row.slot_seen}else{None}})
 }
 
-#[derive(Default, Serialize)]
-struct Bottleneck {
-    opportunity_count: u64,
-    market_matched_count: u64,
-    known_candidate_net_edge_usd_micro: i128,
-    matched_market_gross_edge_usd: Option<f64>,
-    percentage_of_known_rejected_executable_edge: Option<f64>,
-}
 fn bottleneck(rec: &OpportunityRecord) -> String {
     if matches!(
         rec.decision,
@@ -682,10 +677,10 @@ struct Worker {
     shadow_semantic_evictions: u64,
     market_counters: [BTreeMap<String, u64>; SNAPSHOT_COUNT],
     winners: BTreeMap<String, Vec<(u64, Winner)>>,
-    checkpoints: BTreeMap<usize, Value>,
-    market_final: Option<Value>,
-    shadow_stats: Value,
-    final_technical: Option<Value>,
+    checkpoints: BTreeMap<usize, crate::market_observer::MarketSummary>,
+    market_final: Option<crate::market_observer::MarketFinal>,
+    shadow_stats: Option<ShadowStats>,
+    final_technical: Option<Technical>,
     evaluation_counts: [u64; SNAPSHOT_COUNT],
     snapshots: usize,
     /// SK-03: byte budget of every retained collection of this worker (market, canonical, slots,
@@ -742,7 +737,7 @@ impl Worker {
             winners: BTreeMap::new(),
             checkpoints: BTreeMap::new(),
             market_final: None,
-            shadow_stats: Value::Null,
+            shadow_stats: None,
             final_technical: None,
             evaluation_counts: [0; SNAPSHOT_COUNT],
             snapshots: 0,
@@ -904,29 +899,22 @@ impl Worker {
                 after,
             } => {
                 if let Some(hour) = self.hour(at_ns) {
-                    let a = serde_json::to_value(after).map_err(|e| e.to_string())?;
-                    let b = serde_json::to_value(before).map_err(|e| e.to_string())?;
-                    for (key, value) in a.as_object().unwrap() {
-                        if let Some(n) = value.as_u64() {
-                            if key == "first_observed_slot" {
-                                self.market_counters[hour].entry(key.clone()).or_insert(n);
-                            } else if key == "last_observed_slot" || key == "max_stream_silence_ms"
-                            {
-                                let old =
-                                    self.market_counters[hour].entry(key.clone()).or_default();
-                                *old = (*old).max(n);
-                            } else {
-                                *self.market_counters[hour].entry(key.clone()).or_default() +=
-                                    n.saturating_sub(b[key].as_u64().unwrap_or(0));
-                            }
+                    let b: BTreeMap<&str, u64> = before.counters().into_iter().collect();
+                    for (key, n) in after.counters() {
+                        if key == "first_observed_slot" {
+                            self.market_counters[hour].entry(key.into()).or_insert(n);
+                        } else if key == "last_observed_slot" || key == "max_stream_silence_ms" {
+                            let old = self.market_counters[hour].entry(key.into()).or_default();
+                            *old = (*old).max(n);
+                        } else {
+                            *self.market_counters[hour].entry(key.into()).or_default() +=
+                                n.saturating_sub(b.get(key).copied().unwrap_or(0));
                         }
                     }
                 }
             }
-            Evidence::MarketFinal(v) => self.market_final = Some(v),
-            Evidence::ShadowStats(v) => {
-                self.shadow_stats = serde_json::to_value(v).map_err(|e| e.to_string())?
-            }
+            Evidence::MarketFinal(v) => self.market_final = Some(*v),
+            Evidence::ShadowStats(v) => self.shadow_stats = Some(v),
         }
         Ok(())
     }
@@ -1100,7 +1088,7 @@ impl Worker {
             })
             .collect()
     }
-    fn metrics(&self, from: usize, through: usize) -> Value {
+    fn metrics(&self, from: usize, through: usize) -> Metrics {
         let seconds = self.h.cfg.plan.span_seconds(from, through);
         let markets: Vec<_> = self
             .market
@@ -1117,12 +1105,10 @@ impl Worker {
             .map(|(_, r)| r)
             .collect();
         let mut capture_counters: BTreeMap<String, u64> =
-            serde_json::to_value(crate::market_observer::MarketStats::default())
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .iter()
-                .filter_map(|(k, v)| v.as_u64().map(|n| (k.clone(), n)))
+            crate::market_observer::MarketStats::default()
+                .counters()
+                .into_iter()
+                .map(|(k, n)| (k.to_string(), n))
                 .collect();
         for counts in &self.market_counters[from..through] {
             for (key, n) in counts {
@@ -1380,59 +1366,142 @@ impl Worker {
         stage_rank.sort_by(|a, b| b.1.total_cmp(a.1).then(a.0.cmp(b.0)));
         let distributions = |m: BTreeMap<&'static str, Vec<f64>>| {
             m.into_iter()
-                .map(|(k, v)| (k, distribution(v)))
+                .map(|(k, v)| (k.to_string(), distribution(v)))
                 .collect::<BTreeMap<_, _>>()
         };
-        let sens:Vec<_>=SPEEDUP_MS.iter().zip(sensitivity).map(|(ms,(rx,slot))|json!({"speedup_ms":ms,"winner_rx_boundary":rx,"winner_slot_first_seen_boundary":slot})).collect();
-        json!({
-            "market": {"capture_counters":capture_counters,"liquidation_events":markets.len(),"gross_edge_usd":gross,"gross_edge_per_hour_usd":total_gross*3600.0/seconds,
-                "repaid_equity_usd":repaid,"seized_equity_usd":seized,"gross_roi":roi,"unique_receivers":ranking.len(),
-                "top_receiver":top.map(|r|&r.0),"top_receiver_liquidation_share":top.and_then(|r|share(r.1.0 as f64,markets.len() as f64)),
-                "top_receiver_gross_edge_share":top.and_then(|r|share(r.1.1,total_gross)),
-                "top3_liquidation_share":share(ranking.iter().take(3).map(|r|r.1.0).sum::<usize>() as f64,markets.len() as f64),
-                "top3_gross_edge_share":share(by_gross.iter().take(3).sum(),total_gross),
-                "ranked_receivers":ranking.iter().take(20).map(|(id,(count,gross))|json!({"receiver":id,"count":count,"gross_edge_usd":gross})).collect::<Vec<_>>()},
-            "shadow":{"evaluations":self.evaluation_counts[from..through].iter().sum::<u64>(),"opportunities":rows.len(),"known_executable":known,
-                "stage_intervals_ns":distributions(stage_all)},
-            "matching":{"market_liquidations_total":markets.len(),"market_with_shadow_match":market_matched.len(),
-                "market_without_shadow_match":markets.len().saturating_sub(market_matched.len()),"shadow_winner_resolved":resolved,"shadow_winner_unresolved":unresolved,
-                "winner_live_observation_matched":live_matched,"winner_live_observation_missing":missing,"winner_identity_mismatch":mismatch,"same_slot_ambiguous":ambiguous},
-            "economics":{"known_executable":known,"known_executable_net_edge_per_hour_usd":known.net_usd_micro as f64/1e6*3600.0/seconds,
-                "economics_unknown_count":economics_unknown,"realized_pnl":null},
-            "capital":capital.into_iter().map(|b|b.report(seconds)).collect::<Vec<_>>(),
-            "competition":races,
-            "race_timing":{"race_classes":races,"margin_to_winner_rx_ns":distribution(margins.clone()),"margin_to_winner_rx_ms":distribution(margins.into_iter().map(|v|v/1e6).collect()),
-                "margin_to_winner_slot_seen_ns":distribution(slot_margins.clone()),"margin_to_winner_slot_seen_ms":distribution(slot_margins.into_iter().map(|v|v/1e6).collect()),
-                "required_speedup_to_winner_rx_ns":distribution(speeds.clone()),"required_speedup_to_winner_rx_ms":distribution(speeds.into_iter().map(|v|v/1e6).collect()),
-                "required_speedup_to_winner_slot_seen_ns":distribution(slot_speeds.clone()),"required_speedup_to_winner_slot_seen_ms":distribution(slot_speeds.into_iter().map(|v|v/1e6).collect()),
-                "observed_speedup_sensitivity":sens,"late_stage_intervals_ns":distributions(stage_late),
-                "late_stage_net_edge_weighted_ns_micro_usd":stage_weighted,"stage_latency_budget_sufficient_if_fully_removed":stage_sufficient,
-                "largest_measured_late_stage":stage_rank.first().map(|(k,_)|**k),"stage_removal_is_mathematical_ceiling_only":true},
-            "bottlenecks":{"by_reason":bottlenecks,"ranking":bottleneck_rank.iter().map(|(k,_)|*k).collect::<Vec<_>>(),
-                "known_rejected_candidate_edge_pool_usd_micro":blocked,"denominator_note":"positive known candidate edge; simulation failures are not executable claims"},
-            "unknowns":{"economics_unknown":economics_unknown,"winner_unresolved":unresolved,"live_winner_missing":missing,"true_competitor_submission_deadline":"UNKNOWN"}
-        })
+        let ms = |v: &[f64]| distribution(v.iter().map(|x| x / 1e6).collect());
+        let observed_speedup_sensitivity = SPEEDUP_MS
+            .iter()
+            .zip(sensitivity)
+            .map(|(ms, (rx, slot))| Sensitivity {
+                speedup_ms: *ms,
+                winner_rx_boundary: rx,
+                winner_slot_first_seen_boundary: slot,
+            })
+            .collect();
+        let largest_measured_late_stage = stage_rank.first().map(|(k, _)| k.to_string());
+        let ranking_names: Vec<String> =
+            bottleneck_rank.iter().map(|(k, _)| (*k).clone()).collect();
+        let market_count = markets.len() as u64;
+        let top_receiver_liquidation_share =
+            top.and_then(|r| share(r.1 .0 as f64, markets.len() as f64));
+        let top_receiver_gross_edge_share = top.and_then(|r| share(r.1 .1, total_gross));
+        Metrics {
+            market: MarketMetrics {
+                capture_counters,
+                liquidation_events: market_count,
+                gross_edge_usd: gross,
+                gross_edge_per_hour_usd: total_gross * 3600.0 / seconds,
+                repaid_equity_usd: repaid,
+                seized_equity_usd: seized,
+                gross_roi: roi,
+                unique_receivers: ranking.len() as u64,
+                top_receiver: top.map(|r| r.0.clone()),
+                top_receiver_liquidation_share,
+                top_receiver_gross_edge_share,
+                top3_liquidation_share: share(
+                    ranking.iter().take(3).map(|r| r.1 .0).sum::<usize>() as f64,
+                    markets.len() as f64,
+                ),
+                top3_gross_edge_share: share(by_gross.iter().take(3).sum(), total_gross),
+                ranked_receivers: ranking
+                    .iter()
+                    .take(20)
+                    .map(|(id, (count, gross))| RankedReceiver {
+                        receiver: id.clone(),
+                        count: *count as u64,
+                        gross_edge_usd: *gross,
+                    })
+                    .collect(),
+            },
+            shadow: ShadowMetrics {
+                evaluations: self.evaluation_counts[from..through].iter().sum::<u64>(),
+                opportunities: rows.len() as u64,
+                known_executable: known.clone(),
+                stage_intervals_ns: distributions(stage_all),
+            },
+            matching: Matching {
+                market_liquidations_total: market_count,
+                market_with_shadow_match: market_matched.len() as u64,
+                market_without_shadow_match: markets.len().saturating_sub(market_matched.len())
+                    as u64,
+                shadow_winner_resolved: resolved,
+                shadow_winner_unresolved: unresolved,
+                winner_live_observation_matched: live_matched,
+                winner_live_observation_missing: missing,
+                winner_identity_mismatch: mismatch,
+                same_slot_ambiguous: ambiguous,
+            },
+            economics: EconomicsMetrics {
+                known_executable_net_edge_per_hour_usd: known.net_usd_micro as f64 / 1e6 * 3600.0
+                    / seconds,
+                known_executable: known,
+                economics_unknown_count: economics_unknown,
+                realized_pnl: None,
+            },
+            capital: capital.into_iter().map(|b| b.report(seconds)).collect(),
+            competition: races.clone(),
+            race_timing: RaceTiming {
+                race_classes: races,
+                margin_to_winner_rx_ns: distribution(margins.clone()),
+                margin_to_winner_rx_ms: ms(&margins),
+                margin_to_winner_slot_seen_ns: distribution(slot_margins.clone()),
+                margin_to_winner_slot_seen_ms: ms(&slot_margins),
+                required_speedup_to_winner_rx_ns: distribution(speeds.clone()),
+                required_speedup_to_winner_rx_ms: ms(&speeds),
+                required_speedup_to_winner_slot_seen_ns: distribution(slot_speeds.clone()),
+                required_speedup_to_winner_slot_seen_ms: ms(&slot_speeds),
+                observed_speedup_sensitivity,
+                late_stage_intervals_ns: distributions(stage_late),
+                late_stage_net_edge_weighted_ns_micro_usd: stage_weighted
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), *v))
+                    .collect(),
+                stage_latency_budget_sufficient_if_fully_removed: stage_sufficient
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+                largest_measured_late_stage,
+                stage_removal_is_mathematical_ceiling_only: true,
+            },
+            bottlenecks: Bottlenecks {
+                by_reason: bottlenecks,
+                ranking: ranking_names,
+                known_rejected_candidate_edge_pool_usd_micro: blocked,
+                denominator_note:
+                    "positive known candidate edge; simulation failures are not executable claims"
+                        .into(),
+            },
+            unknowns: Unknowns {
+                economics_unknown,
+                winner_unresolved: unresolved,
+                live_winner_missing: missing,
+                true_competitor_submission_deadline: "UNKNOWN".into(),
+            },
+        }
     }
-    fn technical(&self, finalizing: bool) -> Value {
+    fn technical(&self, finalizing: bool) -> Technical {
         if finalizing {
-            if let Some(v) = &self.final_technical {
-                return v.clone();
+            if let Some(t) = &self.final_technical {
+                return t.clone();
             }
         }
         let s = &self.h.shared;
         let market_ok = self
             .market_final
             .as_ref()
-            .is_some_and(|v| v["market_capture_complete"] == true && v["drain_complete"] == true);
+            .is_some_and(|m| m.summary.market_capture_complete && m.summary.drain_complete);
         let writer_ok = s.writer_errors.load(Ordering::Relaxed) == 0;
         let duration_ok = self
             .market_final
             .as_ref()
-            .and_then(|v| v["actual_observation_seconds"].as_f64())
+            .map(|m| m.summary.actual_observation_seconds)
             == Some(self.h.cfg.plan.duration_seconds as f64);
-        let shadow_ok = self.shadow_stats["ingress_overflow"].as_u64() == Some(0)
-            && self.shadow_stats["winner_watch_overflow"].as_u64() == Some(0)
-            && self.shadow_stats["shadow_state_ready_at_shutdown"] == true;
+        let shadow_ok = self.shadow_stats.as_ref().is_some_and(|s| {
+            s.ingress_overflow == 0
+                && s.winner_watch_overflow == 0
+                && s.shadow_state_ready_at_shutdown
+        });
         let ready_ns = s.shadow_ready_ns.load(Ordering::Acquire);
         let start_ns = s.start_ns.load(Ordering::Acquire);
         let startup_ok = ready_ns > 0 && ready_ns <= start_ns;
@@ -1456,32 +1525,65 @@ impl Worker {
             && s.market_done.load(Ordering::Relaxed)
             && !s.upgrade.load(Ordering::Relaxed)
             && s.submission_attempts.load(Ordering::Relaxed) == 0;
-        let mt0 = darkbot_common::mt0::MT0.snapshot_json(
+        let mt0 = darkbot_common::mt0::MT0.snapshot(
             (self.h.clock.unix_ns(self.h.clock.now_ns()) / 1_000_000_000) as u64,
             darkbot_common::mt0::mono_ns(),
             &Default::default(),
         );
-        json!({"verdict":if pass {"PASS"}else if finalizing {"INCOMPLETE"}else{"IN_PROGRESS"},
-            "requested_duration_seconds":self.h.cfg.plan.duration_seconds,"actual_duration_seconds":self.market_final.as_ref().map(|v|&v["actual_observation_seconds"]),
-            "clean_automatic_shutdown":finalizing && !s.abort.load(Ordering::Relaxed),"market_capture_complete":market_ok,
-            "four_snapshots_present":self.snapshots==SNAPSHOT_COUNT,"snapshot_write_success":self.snapshots,"snapshot_write_failures":s.writer_errors.load(Ordering::Relaxed),
-            "analytics_queue_capacity":self.h.cfg.queue_capacity,"analytics_queue_max_depth":s.max_depth.load(Ordering::Relaxed),"analytics_queue_drops":s.drops.load(Ordering::Relaxed),
-            "shadow_evaluations_received":self.shadow_evaluations_received,
-            "shadow_evaluations_streamed":self.shadow_evaluations_streamed,
-            "shadow_evaluations_coalesced":self.shadow_evaluations_coalesced,
-            "shadow_semantic_entries_current":self.shadow.len(),
-            "shadow_semantic_entries_max":self.shadow_semantic_entries_max,
-            "shadow_semantic_evictions":self.shadow_semantic_evictions,
-            "shadow_journal_target_heads":self.shadow_heads.len(),
-            "retention_capacity":self.h.cfg.retention,"retention_overflow":s.retention_overflow.load(Ordering::Relaxed),
-            "retention_bytes_current":self.retained_bytes,"retention_bytes_peak":self.retained_bytes_peak,"retention_byte_limit":self.retention_byte_limit,
-            "shadow_ready_at_ns":s.shadow_ready_ns.load(Ordering::Acquire),"startup_excluded_from_measurement":startup_ok,"shadow_evaluations_in_window":measured_evaluations,
-            "shadow_runtime_terminated_early":s.shadow_failed.load(Ordering::Relaxed),"shadow_runtime_finished":s.shadow_done.load(Ordering::Relaxed),
-            "program_upgrade_halt":s.upgrade.load(Ordering::Relaxed),"submission_attempts_blocked":s.submission_attempts.load(Ordering::Relaxed),
-            "submissions":0,"live_ready":false,"source_coverage_verified":self.market_final.as_ref().is_some_and(|m|m["source_coverage_verified"]==true),"final_reconciliation_complete":finalizing && self.canonical_finalized,
-            "shadow_telemetry":self.shadow_stats,"remote_and_backlog_telemetry":serde_json::from_str::<Value>(&mt0).ok()})
+        let load = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        Technical {
+            verdict: if pass {
+                "PASS"
+            } else if finalizing {
+                "INCOMPLETE"
+            } else {
+                "IN_PROGRESS"
+            }
+            .into(),
+            requested_duration_seconds: self.h.cfg.plan.duration_seconds,
+            actual_duration_seconds: self
+                .market_final
+                .as_ref()
+                .map(|m| m.summary.actual_observation_seconds),
+            clean_automatic_shutdown: finalizing && !s.abort.load(Ordering::Relaxed),
+            market_capture_complete: market_ok,
+            four_snapshots_present: self.snapshots == SNAPSHOT_COUNT,
+            snapshot_write_success: self.snapshots as u64,
+            snapshot_write_failures: load(&s.writer_errors),
+            analytics_queue_capacity: self.h.cfg.queue_capacity as u64,
+            analytics_queue_max_depth: load(&s.max_depth),
+            analytics_queue_drops: load(&s.drops),
+            shadow_evaluations_received: self.shadow_evaluations_received,
+            shadow_evaluations_streamed: self.shadow_evaluations_streamed,
+            shadow_evaluations_coalesced: self.shadow_evaluations_coalesced,
+            shadow_semantic_entries_current: self.shadow.len() as u64,
+            shadow_semantic_entries_max: self.shadow_semantic_entries_max as u64,
+            shadow_semantic_evictions: self.shadow_semantic_evictions,
+            shadow_journal_target_heads: self.shadow_heads.len() as u64,
+            retention_capacity: self.h.cfg.retention as u64,
+            retention_overflow: load(&s.retention_overflow),
+            retention_bytes_current: self.retained_bytes,
+            retention_bytes_peak: self.retained_bytes_peak,
+            retention_byte_limit: self.retention_byte_limit,
+            shadow_ready_at_ns: s.shadow_ready_ns.load(Ordering::Acquire),
+            startup_excluded_from_measurement: startup_ok,
+            shadow_evaluations_in_window: measured_evaluations,
+            shadow_runtime_terminated_early: s.shadow_failed.load(Ordering::Relaxed),
+            shadow_runtime_finished: s.shadow_done.load(Ordering::Relaxed),
+            program_upgrade_halt: s.upgrade.load(Ordering::Relaxed),
+            submission_attempts_blocked: load(&s.submission_attempts),
+            submissions: 0,
+            live_ready: false,
+            source_coverage_verified: self
+                .market_final
+                .as_ref()
+                .is_some_and(|m| m.summary.source_coverage_verified),
+            final_reconciliation_complete: finalizing && self.canonical_finalized,
+            shadow_telemetry: self.shadow_stats.clone(),
+            remote_and_backlog_telemetry: Some((&mt0).into()),
+        }
     }
-    fn report(&self, index: usize, finalizing: bool) -> Value {
+    fn report(&self, index: usize, finalizing: bool) -> SnapshotReport {
         let cumulative = self.metrics(0, index);
         let delta = self.metrics(index - 1, index);
         let start = self.h.shared.start_ns.load(Ordering::Acquire);
@@ -1489,7 +1591,7 @@ impl Worker {
         let elapsed = if finalizing {
             self.market_final
                 .as_ref()
-                .and_then(|v| v["actual_observation_seconds"].as_f64())
+                .map(|m| m.summary.actual_observation_seconds)
                 .unwrap_or(0.0)
                 .min(self.h.cfg.plan.seconds(index))
         } else {
@@ -1497,105 +1599,168 @@ impl Worker {
         };
         let complete = finalizing && elapsed >= self.h.cfg.plan.seconds(index);
         let capture_window = if self.h.cutoff().is_some() {
-            self.h.cfg.plan.capture_window(self.h.clock, start).ok().map(|w| json!(w))
+            self.h.cfg.plan.capture_window(self.h.clock, start).ok()
         } else {
             None
         };
-        let mut report = json!({"measurement_plan":self.h.cfg.plan,"capture_window":capture_window,"identity":{"schema_version":"C0-E1/1","run_id":self.h.cfg.run_id,"source_commit":self.commit,
-            "marginfi_pin":"33c67987a661f59c6683a65485ebb4f0ef030b77","mode":"econ4h","market_source":self.source,"provider_class":self.h.cfg.provider_class,
-            "commitment":self.commitment,"started_at_utc":crate::analytics::measurement::utc_ns(self.h.clock.unix_ns(start)),
-            "ended_at_utc":crate::analytics::measurement::utc_ns(self.h.clock.unix_ns(end)),"actual_elapsed_seconds":elapsed,
-            "snapshot_index":index,"measurement_plan":self.h.cfg.plan,"snapshot_interval_seconds":self.h.cfg.plan.span_seconds(index-1,index),"complete":complete,"live_enabled":false},
-            "window":{"from_offset_ns":self.h.cfg.plan.offset_ns(index-1),"through_offset_ns":self.h.cfg.plan.offset_ns(index),"from_seconds":self.h.cfg.plan.seconds(index-1),"through_seconds":self.h.cfg.plan.seconds(index),
-                "provisional":!finalizing,"reconciled_after_drain":finalizing,"join_assignment":"matched event receive hour; unmatched candidate trigger hour",
-                "coalescing":"earliest executable sign per target/winner; unresolved per target/hour; all input evaluations streamed to disk; bounded semantic representatives; disk-indexed late-winner recorrelation",
-                "backfill_hour_assignment":"final resolution window (hour 4), not a live receive time"},
-            "technical_qualification":self.technical(finalizing),"non_claims":NON_CLAIMS,
-            "economic_sample_status":if cumulative["market"]["liquidation_events"].as_u64().unwrap_or(0)>=self.min_sample {"SAMPLE_SUFFICIENT"}else{"INSUFFICIENT_SAMPLE"},
-            "market_edge_status":if cumulative["market"]["liquidation_events"].as_u64().unwrap_or(0)>0 {"OBSERVED"}else{"NO_OBSERVED_LIQUIDATIONS"},
-            "executable_edge_status":if cumulative["economics"]["known_executable"]["count"].as_u64().unwrap_or(0)>0 {"KNOWN_SHADOW_EDGE"}else{"NOT_PROVEN"},
-            "competition_evidence_status":if cumulative["matching"]["winner_live_observation_matched"].as_u64().unwrap_or(0)>0 {"MATCHED_EVIDENCE"}else{"INSUFFICIENT_EVIDENCE"},
-            "live_ready":false});
-        for key in [
-            "market",
-            "shadow",
-            "matching",
-            "economics",
-            "capital",
-            "competition",
-            "race_timing",
-            "bottlenecks",
-            "unknowns",
-        ] {
-            report[key] = json!({"window_delta":delta[key],"cumulative":cumulative[key]});
-        }
-        report["market"]["scope"] = json!("LEGACY_RECEIVERSHIP_ANALYTICS; not total Marginfi market; canonical is the authoritative all-path market/economics join");
-        report["canonical_market_truth"] = self
-            .market_final
-            .as_ref()
-            .map(|v| {
-                json!({"full_window_summary": v["canonical_market_truth"],
-                "reconciliation": v["full_slot_reconciliation"],
-                "hourly_attribution_qualified": self.canonical_finalized, "market_shadow_join_qualified": self.canonical_finalized})
-            })
-            .unwrap_or(Value::Null);
-        report["canonical"] = json!({"window_delta":self.canonical_metrics(index-1,index),
-            "cumulative":self.canonical_metrics(0,index)});
-        report["authoritative_analytics"] = json!(
-            "canonical; other top-level analytics retain legacy receiver scope for compatibility"
-        );
-        let canonical_count = report["canonical"]["cumulative"]["market"]["ALL"]["events"]
-            .as_u64()
-            .unwrap_or(0);
-        report["economic_sample_status"] = json!(if canonical_count >= self.min_sample {
-            "SAMPLE_SUFFICIENT"
-        } else {
-            "INSUFFICIENT_SAMPLE"
-        });
-        report["market_edge_status"] = json!(if canonical_count > 0 {
-            "OBSERVED"
-        } else {
-            "NO_OBSERVED_LIQUIDATIONS"
-        });
         let r6 = if index == SNAPSHOT_COUNT && finalizing {
-            self.market_final.as_ref()
+            self.market_final.clone()
         } else {
-            self.checkpoints.get(&index)
+            self.checkpoints
+                .get(&index)
+                .cloned()
+                .map(crate::market_observer::MarketFinal::checkpoint)
         };
-        report["market"]["cumulative"]["c0_mo_r6"] = r6.cloned().unwrap_or(Value::Null);
-        report["market"]["window_delta"]["c0_mo_counter_delta"] =
-            counter_delta(r6, self.checkpoints.get(&(index - 1)));
-        report["market"]["cumulative"]["c0_mo_checkpoint_qualification"] =
-            json!(if index == SNAPSHOT_COUNT && finalizing {
-                "FINAL_AFTER_ENRICHMENT"
+        let counter_delta = counter_delta(
+            r6.as_ref().map(|m| &m.summary),
+            self.checkpoints.get(&(index - 1)),
+        );
+        let canonical = Section {
+            window_delta: self.canonical_metrics(index - 1, index),
+            cumulative: self.canonical_metrics(0, index),
+        };
+        let canonical_count = canonical
+            .cumulative
+            .market
+            .get("ALL")
+            .map_or(0, |g| g.events);
+        let executable_edge_status = if cumulative.economics.known_executable.count > 0 {
+            "KNOWN_SHADOW_EDGE"
+        } else {
+            "NOT_PROVEN"
+        };
+        let competition_evidence_status = if cumulative.matching.winner_live_observation_matched > 0
+        {
+            "MATCHED_EVIDENCE"
+        } else {
+            "INSUFFICIENT_EVIDENCE"
+        };
+        let (d, c) = (delta, cumulative);
+        SnapshotReport {
+            measurement_plan: self.h.cfg.plan.clone(),
+            capture_window,
+            identity: Identity {
+                schema_version: "C0-E1/1".into(),
+                run_id: self.h.cfg.run_id.clone(),
+                source_commit: self.commit.clone(),
+                marginfi_pin: "33c67987a661f59c6683a65485ebb4f0ef030b77".into(),
+                mode: "econ4h".into(),
+                market_source: self.source.clone(),
+                provider_class: self.h.cfg.provider_class.clone(),
+                commitment: self.commitment.clone(),
+                started_at_utc: crate::analytics::measurement::utc_ns(self.h.clock.unix_ns(start)),
+                ended_at_utc: crate::analytics::measurement::utc_ns(self.h.clock.unix_ns(end)),
+                actual_elapsed_seconds: elapsed,
+                snapshot_index: index as u64,
+                measurement_plan: self.h.cfg.plan.clone(),
+                snapshot_interval_seconds: self.h.cfg.plan.span_seconds(index - 1, index),
+                complete,
+                live_enabled: false,
+            },
+            window: Window {
+                from_offset_ns: self.h.cfg.plan.offset_ns(index - 1),
+                through_offset_ns: self.h.cfg.plan.offset_ns(index),
+                from_seconds: self.h.cfg.plan.seconds(index - 1),
+                through_seconds: self.h.cfg.plan.seconds(index),
+                provisional: !finalizing,
+                reconciled_after_drain: finalizing,
+                join_assignment: "matched event receive hour; unmatched candidate trigger hour".into(),
+                coalescing: "earliest executable sign per target/winner; unresolved per target/hour; all input evaluations streamed to disk; bounded semantic representatives; disk-indexed late-winner recorrelation".into(),
+                backfill_hour_assignment: "final resolution window (hour 4), not a live receive time".into(),
+            },
+            technical_qualification: self.technical(finalizing),
+            non_claims: NON_CLAIMS.iter().map(|s| s.to_string()).collect(),
+            economic_sample_status: if canonical_count >= self.min_sample {
+                "SAMPLE_SUFFICIENT"
             } else {
-                "CAPTURE_CHECKPOINT_ENRICHMENT_PENDING"
-            });
-        report["market"]["window_delta"]["counter_attribution"] = json!("capture-boundary checkpoints; post-capture RPC/truncation qualification charged to final resolution window");
-        report
+                "INSUFFICIENT_SAMPLE"
+            }
+            .into(),
+            market_edge_status: if canonical_count > 0 {
+                "OBSERVED"
+            } else {
+                "NO_OBSERVED_LIQUIDATIONS"
+            }
+            .into(),
+            executable_edge_status: executable_edge_status.into(),
+            competition_evidence_status: competition_evidence_status.into(),
+            live_ready: false,
+            market: MarketSection {
+                scope: "LEGACY_RECEIVERSHIP_ANALYTICS; not total Marginfi market; canonical is the authoritative all-path market/economics join".into(),
+                window_delta: MarketDelta {
+                    metrics: d.market,
+                    c0_mo_counter_delta: counter_delta,
+                    counter_attribution: "capture-boundary checkpoints; post-capture RPC/truncation qualification charged to final resolution window".into(),
+                },
+                cumulative: MarketCumulative {
+                    metrics: c.market,
+                    c0_mo_r6: r6,
+                    c0_mo_checkpoint_qualification: if index == SNAPSHOT_COUNT && finalizing {
+                        "FINAL_AFTER_ENRICHMENT"
+                    } else {
+                        "CAPTURE_CHECKPOINT_ENRICHMENT_PENDING"
+                    }
+                    .into(),
+                },
+            },
+            shadow: Section {
+                window_delta: d.shadow,
+                cumulative: c.shadow,
+            },
+            matching: Section {
+                window_delta: d.matching,
+                cumulative: c.matching,
+            },
+            economics: Section {
+                window_delta: d.economics,
+                cumulative: c.economics,
+            },
+            capital: Section {
+                window_delta: d.capital,
+                cumulative: c.capital,
+            },
+            competition: Section {
+                window_delta: d.competition,
+                cumulative: c.competition,
+            },
+            race_timing: Section {
+                window_delta: d.race_timing,
+                cumulative: c.race_timing,
+            },
+            bottlenecks: Section {
+                window_delta: d.bottlenecks,
+                cumulative: c.bottlenecks,
+            },
+            unknowns: Section {
+                window_delta: d.unknowns,
+                cumulative: c.unknowns,
+            },
+            canonical_market_truth: self.market_final.as_ref().map(|m| CanonicalTruthRef {
+                full_window_summary: m.summary.canonical_market_truth.clone(),
+                reconciliation: m.summary.full_slot_reconciliation.clone(),
+                hourly_attribution_qualified: self.canonical_finalized,
+                market_shadow_join_qualified: self.canonical_finalized,
+            }),
+            canonical,
+            authoritative_analytics:
+                "canonical; other top-level analytics retain legacy receiver scope for compatibility"
+                    .into(),
+        }
     }
     fn write_snapshot(&mut self, index: usize, finalizing: bool) -> Result<(), String> {
-        let value = json!({"index":index,"finalizing":finalizing,
-            "report":self.report(index, finalizing)});
+        let frame = SnapshotFrame {
+            index: index as u64,
+            finalizing,
+            report: self.report(index, finalizing),
+        };
         let name = format!("hour_{index:02}.json");
         // Journal frame first; `hour_0N.json` renders the newest frame of this index.
-        self.append_report(kind::ECON_SNAPSHOT, &value)
-            .and_then(|_| atomic_json(&self.h.cfg.paths().snapshot(&name), &value["report"]))
+        self.append_typed_report(&frame)
+            .and_then(|_| render(&frame.report))
+            .and_then(|view| atomic_json(&self.h.cfg.paths().snapshot(&name), &view))
             .inspect_err(|_| {
                 self.h.shared.writer_errors.fetch_add(1, Ordering::Relaxed);
             })
-    }
-    fn append_report(&mut self, kind: u16, value: &Value) -> Result<(), String> {
-        let provenance = Provenance {
-            source: journal::source::ECON,
-            source_seq: self.reports.next_seq(),
-            unix_ns: u64::try_from(self.h.clock.unix_ns(self.h.clock.now_ns())).ok(),
-            ..Default::default()
-        };
-        self.reports
-            .append_legacy(kind, provenance, value)
-            .map(|_| ())
-            .map_err(|e| format!("REPORT_JOURNAL: {e}"))
     }
     /// A typed report frame (JFI-FIX-05) with the same provenance as `append_report`.
     fn append_typed_report<P: crate::analytics::payload::Payload>(
@@ -1625,50 +1790,37 @@ impl Worker {
     }
     /// Human-readable authoritative MARKET conclusion next to the C0-E1 console
     /// summary. Read existing report data only; no RPC, scanner, or parallel ledger.
-    fn market_terminal_summary(report: &Value) -> String {
-        let final_market = &report["market"]["cumulative"]["c0_mo_r6"];
-        let scan = &final_market["full_slot_reconciliation"];
-        let all_paths = &report["canonical"]["cumulative"]["market"];
-        let count = |v: &Value| {
-            v.as_u64()
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| "UNKNOWN".into())
-        };
-        let gross = |v: &Value| {
-            let known = &v["gross_edge_usd"];
-            if known["count_known"].as_u64().unwrap_or(0) == 0 {
-                "UNKNOWN".to_string()
-            } else {
-                known["distribution"]["total"]
-                    .as_f64()
-                    .map(|n| format!("{n:.6}"))
-                    .unwrap_or_else(|| "UNKNOWN".into())
-            }
-        };
-        let canonical_complete = scan["complete"].as_bool() == Some(true)
-            && final_market["full_slot_reconciliation_complete"].as_bool() == Some(true);
+    fn market_terminal_summary(report: &SnapshotReport) -> String {
+        let final_market = report
+            .market
+            .cumulative
+            .c0_mo_r6
+            .as_ref()
+            .map(|m| &m.summary);
+        let scan = final_market.map(|m| &m.full_slot_reconciliation);
+        let count = |v: Option<u64>| v.map_or_else(|| "UNKNOWN".into(), |n| n.to_string());
+        let canonical_complete = scan.is_some_and(|s| s.complete)
+            && final_market.is_some_and(|m| m.full_slot_reconciliation_complete);
         let mut lines = vec![
             "================ MARKET FINAL (canonical all-path) ================".to_string(),
             format!(
                 "status={} canonical_complete={} sample={}",
-                final_market["verdict"].as_str().unwrap_or("UNKNOWN"),
+                final_market.map_or("UNKNOWN", |m| m.verdict.as_str()),
                 canonical_complete,
-                report["economic_sample_status"]
-                    .as_str()
-                    .unwrap_or("UNKNOWN")
+                report.economic_sample_status
             ),
             format!(
                 "capture: received={} success={} failed={}",
-                count(&final_market["unique_transactions"]),
-                count(&final_market["successful_transactions"]),
-                count(&final_market["failed_transactions"])
+                count(final_market.map(|m| m.unique_transactions)),
+                count(final_market.map(|m| m.successful_transactions)),
+                count(final_market.map(|m| m.failed_transactions))
             ),
             format!(
                 "finalized_slots: expected={} fetched={} skipped_confirmed={} failed={}",
-                count(&scan["slots_expected"]),
-                count(&scan["slots_fetched"]),
-                count(&scan["slots_skipped_confirmed"]),
-                count(&scan["slots_failed"])
+                count(scan.map(|s| s.slots_expected)),
+                count(scan.map(|s| s.slots_fetched)),
+                count(scan.map(|s| s.slots_skipped_confirmed)),
+                count(scan.map(|s| s.slots_failed))
             ),
         ];
         for key in [
@@ -1678,13 +1830,20 @@ impl Worker {
             "FORCED_DELEVERAGE",
             "BANKRUPTCY_SETTLEMENT",
         ] {
-            let v = &all_paths[key];
+            let g = report.canonical.cumulative.market.get(key);
+            let gross = g.map(|g| &g.gross_edge_usd);
             lines.push(format!(
                 "{key}: events={} gross_known_usd={} gross_known_events={} gross_unknown_events={}",
-                count(&v["events"]),
-                gross(v),
-                count(&v["gross_edge_usd"]["count_known"]),
-                count(&v["gross_edge_usd"]["count_unknown"])
+                count(g.map(|g| g.events)),
+                match gross {
+                    Some(v) if v.count_known > 0 => v
+                        .distribution
+                        .total
+                        .map_or_else(|| "UNKNOWN".into(), |n| format!("{n:.6}")),
+                    _ => "UNKNOWN".to_string(),
+                },
+                count(gross.map(|v| v.count_known)),
+                count(gross.map(|v| v.count_unknown))
             ));
         }
         lines.push(
@@ -1735,11 +1894,10 @@ impl Worker {
             self.write_snapshot(i, true)?;
         }
         let final_report = self.report(SNAPSHOT_COUNT, true);
-        self.append_report(kind::ECON_FINAL, &final_report)?;
-        atomic_json(
-            &self.h.cfg.paths().snapshot("economics_final.json"),
-            &final_report,
-        )?;
+        self.append_typed_report(&final_report)?;
+        // The terminal lines below print parts of the rendered document.
+        let view = render(&final_report)?;
+        atomic_json(&self.h.cfg.paths().snapshot("economics_final.json"), &view)?;
         let rows: Vec<OpportunityRow> = self
             .selected()
             .into_iter()
@@ -1753,32 +1911,29 @@ impl Worker {
             .seal(true)
             .map_err(|e| format!("REPORT_JOURNAL_SEAL: {e}"))?;
         println!("C0-E1 technical={} market={} sample={} liquidations={} gross={} matched={} executable={}\ncapital={}\nrace={}\nrequired_speedup_ms={}\nbottlenecks={}\nunknowns={}\nreports={}/hour_01..04.json, economics_final.json",
-            final_report["technical_qualification"]["verdict"],final_report["market"]["cumulative"]["c0_mo_r6"]["verdict"],
-            final_report["economic_sample_status"],final_report["market"]["cumulative"]["liquidation_events"],final_report["market"]["cumulative"]["gross_edge_usd"],
-            final_report["matching"]["cumulative"]["market_with_shadow_match"],final_report["economics"]["cumulative"]["known_executable"],
-            json!(final_report["capital"]["cumulative"].as_array().unwrap().iter().map(|b|json!({"usd":b["budget_usd"],"fundable":b["fundable_known_opportunities"],"net_usd":b["known_executable_net_edge_usd"]})).collect::<Vec<_>>()),final_report["competition"]["cumulative"],final_report["race_timing"]["cumulative"]["required_speedup_to_winner_rx_ms"],
-            json!(final_report["bottlenecks"]["cumulative"]["ranking"].as_array().unwrap().iter().take(3).collect::<Vec<_>>()),final_report["unknowns"]["cumulative"],self.h.cfg.run_dir.display());
+            view["technical_qualification"]["verdict"],view["market"]["cumulative"]["c0_mo_r6"]["verdict"],
+            view["economic_sample_status"],view["market"]["cumulative"]["liquidation_events"],view["market"]["cumulative"]["gross_edge_usd"],
+            view["matching"]["cumulative"]["market_with_shadow_match"],view["economics"]["cumulative"]["known_executable"],
+            json!(view["capital"]["cumulative"].as_array().unwrap().iter().map(|b|json!({"usd":b["budget_usd"],"fundable":b["fundable_known_opportunities"],"net_usd":b["known_executable_net_edge_usd"]})).collect::<Vec<_>>()),view["competition"]["cumulative"],view["race_timing"]["cumulative"]["required_speedup_to_winner_rx_ms"],
+            json!(view["bottlenecks"]["cumulative"]["ranking"].as_array().unwrap().iter().take(3).collect::<Vec<_>>()),view["unknowns"]["cumulative"],self.h.cfg.run_dir.display());
         println!(
             "C0-E1 CANONICAL ALL-PATH market={} capital={} losses={} completeness={}",
-            final_report["canonical"]["cumulative"]["market"],
-            final_report["canonical"]["cumulative"]["capital"],
-            final_report["canonical"]["cumulative"]["loss_attribution"],
-            final_report["technical_qualification"]["verdict"]
+            view["canonical"]["cumulative"]["market"],
+            view["canonical"]["cumulative"]["capital"],
+            view["canonical"]["cumulative"]["loss_attribution"],
+            view["technical_qualification"]["verdict"]
         );
         println!("{}", Self::market_terminal_summary(&final_report));
         crate::analytics::measurement::journal(
             &self.h.cfg.paths(),
             self.h.clock,
             crate::analytics::measurement::Phase::ReportsFinalized {
-                technical_qualification: final_report["technical_qualification"]["verdict"]
-                    .as_str()
-                    .unwrap_or("UNKNOWN")
-                    .to_string(),
+                technical_qualification: final_report.technical_qualification.verdict.clone(),
                 snapshot_count: self.snapshots as u64,
                 report: "economics_final.json".into(),
             },
         )?;
-        if final_report["technical_qualification"]["verdict"] != "PASS" {
+        if final_report.technical_qualification.verdict != "PASS" {
             return Err(
                 "C0-E1 technical qualification incomplete; see economics_final.json".into(),
             );
@@ -1798,28 +1953,26 @@ pub fn stage_intervals(rec: &OpportunityRecord) -> BTreeMap<&'static str, Option
         ("rx_to_sign", sub(t.t_rx_ns, t.t_sign_ns)),
     ])
 }
-fn counter_delta(current: Option<&Value>, prev: Option<&Value>) -> Value {
-    let Some(c) = current.and_then(Value::as_object) else {
-        return Value::Null;
-    };
-    let mut out = serde_json::Map::new();
-    for (k, v) in c {
-        if let Some(n) = v.as_u64() {
-            if k.ends_with("count")
-                || k.contains("transactions")
-                || k.contains("truncated")
-                || k == "liquidation_events"
-                || k.starts_with("enrichment_")
-                || k == "events_after_cutoff"
-            {
-                out.insert(
-                    k.clone(),
-                    json!(n.saturating_sub(prev.and_then(|p| p[k].as_u64()).unwrap_or(0))),
-                );
-            }
-        }
-    }
-    Value::Object(out)
+/// Capture-counter delta between two market summaries (`c0_mo_counter_delta`).
+fn counter_delta(
+    current: Option<&crate::market_observer::MarketSummary>,
+    prev: Option<&crate::market_observer::MarketSummary>,
+) -> Option<BTreeMap<String, u64>> {
+    let c = current?;
+    let p: BTreeMap<&str, u64> = prev
+        .map(|p| p.delta_counters().into_iter().collect())
+        .unwrap_or_default();
+    Some(
+        c.delta_counters()
+            .into_iter()
+            .map(|(k, n)| {
+                (
+                    k.to_string(),
+                    n.saturating_sub(p.get(k).copied().unwrap_or(0)),
+                )
+            })
+            .collect(),
+    )
 }
 struct Capital {
     usd: u64,
@@ -1882,13 +2035,24 @@ impl Capital {
             );
         }
     }
-    fn report(self, seconds: f64) -> Value {
-        json!({"budget_usd":self.usd,"market_matched_executable_opportunities":self.matched,"fundable_known_opportunities":self.fundable.count,
-            "known_executable_net_edge_usd_micro":self.fundable.net_usd_micro,"known_executable_net_edge_usd":self.fundable.net_usd_micro as f64/1e6,
-            "known_executable_net_edge_per_hour_usd":self.fundable.net_usd_micro as f64/1e6*3600.0/seconds,
-            "race_classes":self.races,"capital_unknown_count":self.capital_unknown,"economics_unknown_count":self.economics_unknown,
-            "required_working_capital_usd":distribution(self.working),"profit_per_capital_bps":distribution(self.ppc),
-            "profit_per_capital_zero_denominator_count":self.ppc_zero_denominator,"concurrent_capital_allocation_proven":false})
+    fn report(self, seconds: f64) -> CapitalReport {
+        CapitalReport {
+            budget_usd: self.usd,
+            market_matched_executable_opportunities: self.matched,
+            fundable_known_opportunities: self.fundable.count,
+            known_executable_net_edge_usd_micro: self.fundable.net_usd_micro,
+            known_executable_net_edge_usd: self.fundable.net_usd_micro as f64 / 1e6,
+            known_executable_net_edge_per_hour_usd: self.fundable.net_usd_micro as f64 / 1e6
+                * 3600.0
+                / seconds,
+            race_classes: self.races,
+            capital_unknown_count: self.capital_unknown,
+            economics_unknown_count: self.economics_unknown,
+            required_working_capital_usd: distribution(self.working),
+            profit_per_capital_bps: distribution(self.ppc),
+            profit_per_capital_zero_denominator_count: self.ppc_zero_denominator,
+            concurrent_capital_allocation_proven: false,
+        }
     }
 }
 

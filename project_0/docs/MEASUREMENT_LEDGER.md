@@ -5696,3 +5696,15 @@ Base `4390f01`.
 Tests: `report_e2e::native_report_binds_sources_and_filters_only_the_view` (V2 run, live journal, offline strict from cached finalized blocks, CANONICAL_VERIFIED; raw capture/verifier hashes and dataset digest invariant under queries; entity once in `all`; marker hiding keeps the class; related separate; Shadow-only separate; table = CSV cells; explicit older result → PROVISIONAL; changed capture fails closed), `report_e2e::report_arguments_follow_the_contract_and_refuse_json_and_index`, `markers::tests` 2; runner lib 259 (default) and 296 (`crate_health`); Python integration run_store/measurement_plan/market_report/p6 43/43 (twice, second without rebuild).
 
 Open: native index provenance (no native index verifier), JFI-FIX-04/05 rests (config JSON tree, ECON_SNAPSHOT/FINAL, market summary values), network BOOT-03..05, Mainnet calibration/smoke (permission required).
+
+## 2026-10-17 — JFI-FIX-05 rest: typed economics snapshots/final report and market summary (LOCAL_PASS)
+
+Base `58ffb00`.
+
+- `ECON_SNAPSHOT` (`SnapshotFrame`) and `ECON_FINAL` (`SnapshotReport`) are typed (`analytics/econ_docs.rs`, schema 2); both left `LEGACY_WRITABLE` (schema-1 writes are a refused rollback). `hour_0N.json` / `economics_final.json` are their renders. Metrics, technical qualification, capital, race timing, bottlenecks, canonical summary (`CanonicalSummary`) and MT0 telemetry are typed values.
+- The market summary handed to the analytics worker is typed (`MarketSummary`, `MarketFinal`, `TruthSummary`); `summary.json` / `final_report.txt` are renders. Capture counters and checkpoint deltas use typed counter lists (`MarketStats::counters`, `MarketSummary::delta_counters`) instead of JSON key scans. MT0 has a typed `Snapshot`; its text is unchanged (verified against the previous builder).
+- Parity: golden renders recorded with the previous code (`testdata/golden/`): the market summary is identical; the economics documents are identical except `retention_bytes_current/peak` (retained checkpoints are now accounted in their typed encoding, SK-03).
+
+Tests: golden `market_summary_render_matches_golden`, `report_documents_match_golden`; runner lib 258 (default) / 298 (`crate_health`); common 26; Python integration run_store/measurement_plan/market_report/p6 43/43.
+
+Open: JFI-FIX-04 config JSON tree and Python launcher handoffs, MT0_SNAPSHOT/FE01 legacy kinds, terminal text still printed from the render.

@@ -2,7 +2,7 @@
 #[test]
 fn transport_completeness_is_not_full_market_truth_under_master_contract() {
     let (c, _) = gap_core_clean(10, 10);
-    let v = c.summary(&ctx(true, true, 4.0));
+    let v = view(&c.summary(&ctx(true, true, 4.0)));
     assert_eq!(v["receivership_transport_capture_complete"], true);
     assert_eq!(v["market_capture_complete"], false);
     assert_eq!(v["full_slot_reconciliation_complete"], false);
@@ -87,12 +87,12 @@ fn gap_then_reconnect_then_slot_closes_range() {
     gap_slot_frame(&mut core, &mut sink, 11, 11); // no ACK: cannot close
     gap_reconnect(&mut core, &mut sink, 20);
     assert_eq!(
-        core.summary(&ctx(true, true, 1.0))["gaps"][0]["first_post_reconnect_slot"],
+        view(&core.summary(&ctx(true, true, 1.0)))["gaps"][0]["first_post_reconnect_slot"],
         Value::Null
     );
     assert!(!core.coverage_complete());
     gap_slot_frame(&mut core, &mut sink, 12, 30);
-    let g = &core.summary(&ctx(true, true, 1.0))["gaps"][0];
+    let g = &view(&core.summary(&ctx(true, true, 1.0)))["gaps"][0];
     assert_eq!(g["first_post_reconnect_slot"], 12);
     assert_eq!(g["first_post_reconnect_t_rx_ns"], 30);
     assert_eq!(g["reconnect_attempt"], 2);
@@ -144,14 +144,14 @@ fn complete_canonical_window_is_authority_despite_transport_gap_telemetry() {
     after.context_slot = 12;
     c.deployment_before = Some(before);
     c.deployment_after = Some(after);
-    let v = c.summary(&ctx(true, true, 4.0));
+    let v = view(&c.summary(&ctx(true, true, 4.0)));
     assert_eq!(v["market_capture_complete"], true);
     assert_eq!(v["coverage_complete"], false);
     assert_eq!(v["liquidation_path_coverage_complete"], true);
     assert_eq!(v["source_coverage_verified"], true);
     c.reconciliation.complete = false;
     assert_eq!(
-        c.summary(&ctx(true, true, 4.0))["market_capture_complete"],
+        view(&c.summary(&ctx(true, true, 4.0)))["market_capture_complete"],
         false
     );
 }
@@ -167,7 +167,7 @@ fn p2_527_failures_coalesce_without_losing_raw_evidence_or_claiming_recovery() {
     }
     assert_eq!(c.gaps.len(), 1);
     assert_eq!(s.cov.iter().filter(|v| v["event"] == "GAP").count(), 527);
-    let v = c.summary(&ctx(true, false, 4.0));
+    let v = view(&c.summary(&ctx(true, false, 4.0)));
     assert_eq!(v["gap_count_raw"], 527);
     assert_eq!(v["gaps_merged"], 526);
     assert_eq!(v["gap_unrecovered"], 1);
@@ -177,7 +177,7 @@ fn p2_527_failures_coalesce_without_losing_raw_evidence_or_claiming_recovery() {
     c.stop_observation();
     // Restored transport is still a gap: only the strict finalized scan can prove the interval.
     assert!(!c.coverage_complete());
-    assert_eq!(c.summary(&ctx(true, false, 4.0))["gap_unrecovered"], 1);
+    assert_eq!(view(&c.summary(&ctx(true, false, 4.0)))["gap_unrecovered"], 1);
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn p2_failure_after_ack_invalidates_pending_restoration() {
     gap_reconnect(&mut c, &mut s, 20);
     gap_open(&mut c, &mut s, Some(10), 21);
     gap_slot_frame(&mut c, &mut s, 12, 30);
-    let v = c.summary(&ctx(true, false, 4.0));
+    let v = view(&c.summary(&ctx(true, false, 4.0)));
     assert_eq!(v["gaps"][0]["from_slot"], Value::Null);
     assert_eq!(v["gaps"][0]["first_post_reconnect_slot"], Value::Null);
     assert_eq!(v["gaps"][0]["raw_failures"], 2);
@@ -233,6 +233,7 @@ fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
     };
     let before = darkbot_solana::provider::shared().snapshot().requests;
     let (summary, _, error) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
+    let summary = view(&summary);
     assert!(error.is_none());
     assert_eq!(summary["market_capture_complete"], false);
     assert_eq!(summary["actual_observation_seconds"], 120.0);
@@ -286,6 +287,7 @@ fn p4_timer_finalizes_locally_without_verification_rpc() {
     };
     let before = darkbot_solana::provider::shared().snapshot().requests;
     let (summary, _, error) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
+    let summary = view(&summary);
     assert!(error.is_none());
     assert_eq!(summary["market_capture_complete"], false);
     assert_eq!(summary["actual_observation_seconds"], 18_000.0);

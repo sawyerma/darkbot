@@ -6,6 +6,8 @@ pub mod market_report;
 pub mod measurement;
 pub mod record;
 pub mod report;
+#[cfg(test)]
+pub mod golden;
 pub mod shadow_ledger;
 
 pub mod evidence;

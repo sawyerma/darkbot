@@ -25,14 +25,14 @@ pub trait MarketSink {
 }
 
 /// Seal result of a market journal: what the summary binds.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MarketJournalBinding {
-    pub schema: &'static str,
-    pub journal: &'static str,
+    pub schema: String,
+    pub journal: String,
     pub event_frames: u64,
     pub root_sha256: String,
-    pub status: &'static str,
-    pub views_are: &'static str,
+    pub status: String,
+    pub views_are: String,
     /// SK-03/SK-04: measured writer lane and capture byte budget of this journal.
     pub storage: StorageMetrics,
 }
@@ -150,12 +150,13 @@ impl JournalSink {
             .ok_or_else(|| std::io::Error::other("MARKET_JOURNAL_ALREADY_FINISHED"))?;
         let sealed = writer.seal(complete)?;
         Ok(MarketJournalBinding {
-            schema: "Project0/MarketJournalBinding/4",
-            journal: MARKET_JOURNAL,
+            schema: "Project0/MarketJournalBinding/4".into(),
+            journal: MARKET_JOURNAL.into(),
             event_frames: self.rows,
             root_sha256: journal::hex(&sealed.durable.hash),
-            status: if complete { "COMPLETE" } else { "INCOMPLETE" },
-            views_are: "typed journal frames; legacy JSONL views only by explicit offline export",
+            status: if complete { "COMPLETE" } else { "INCOMPLETE" }.into(),
+            views_are: "typed journal frames; legacy JSONL views only by explicit offline export"
+                .into(),
             storage: sealed.metrics,
         })
     }

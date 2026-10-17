@@ -140,7 +140,7 @@ impl StorageStatus {
 }
 
 /// Measured writer and budget behaviour of one journal (reported with the seal).
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StorageMetrics {
     pub frames: u64,
     pub batches: u64,

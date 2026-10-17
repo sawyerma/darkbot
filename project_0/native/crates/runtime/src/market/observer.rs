@@ -116,7 +116,10 @@ pub use core::{
 
 #[path = "summary.rs"]
 mod summary;
-pub use summary::{finalize, render_report, SummaryContext};
+pub use summary::{
+    finalize, render_report, DeploymentContinuity, MarketFinal, MarketSummary, ReceiverShare,
+    SummaryContext,
+};
 
 #[path = "fetch.rs"]
 mod fetch;

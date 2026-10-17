@@ -61,6 +61,105 @@ pub struct MarketStats {
     pub last_observed_slot: Option<u64>,
 }
 
+impl MarketStats {
+    /// Every counter by name, plus the observed slot range once known: the capture counters
+    /// of the analytics reports (typed, no JSON round trip).
+    pub fn counters(&self) -> Vec<(&'static str, u64)> {
+        let mut v = vec![
+            ("transactions_received", self.transactions_received),
+            ("unique_transactions", self.unique_transactions),
+            ("duplicate_transactions", self.duplicate_transactions),
+            ("successful_transactions", self.successful_transactions),
+            ("failed_transactions", self.failed_transactions),
+            (
+                "unknown_status_transactions",
+                self.unknown_status_transactions,
+            ),
+            ("liquidation_transactions", self.liquidation_transactions),
+            ("liquidation_events", self.liquidation_events),
+            (
+                "provisional_classic_events",
+                self.provisional_classic_events,
+            ),
+            (
+                "provisional_deleverage_events",
+                self.provisional_deleverage_events,
+            ),
+            (
+                "provisional_bankruptcy_events",
+                self.provisional_bankruptcy_events,
+            ),
+            (
+                "failed_tx_receiver_events_ignored",
+                self.failed_tx_receiver_events_ignored,
+            ),
+            ("foreign_program_events", self.foreign_program_events),
+            ("decoder_error_count", self.decoder_error_count),
+            (
+                "decoder_errors_successful_tx",
+                self.decoder_errors_successful_tx,
+            ),
+            ("base64_error_count", self.base64_error_count),
+            ("logs_truncated", self.logs_truncated),
+            ("logs_truncated_qualified", self.logs_truncated_qualified),
+            (
+                "logs_truncated_unqualified",
+                self.logs_truncated_unqualified,
+            ),
+            (
+                "logs_truncated_liquidation_mismatch",
+                self.logs_truncated_liquidation_mismatch,
+            ),
+            (
+                "truncated_instruction_end_liquidations",
+                self.truncated_instruction_end_liquidations,
+            ),
+            (
+                "truncated_log_end_liquidations",
+                self.truncated_log_end_liquidations,
+            ),
+            ("log_messages_missing", self.log_messages_missing),
+            ("gap_count", self.gap_count),
+            ("reconnect_count", self.reconnect_count),
+            (
+                "transport_reconnect_attempts",
+                self.transport_reconnect_attempts,
+            ),
+            ("transport_recovered", self.transport_recovered),
+            ("transport_http_429", self.transport_http_429),
+            ("ingress_overflow_count", self.ingress_overflow_count),
+            ("fatal_count", self.fatal_count),
+            ("rpc_fallback_count", self.rpc_fallback_count),
+            ("enrichment_requested", self.enrichment_requested),
+            ("enrichment_succeeded", self.enrichment_succeeded),
+            ("enrichment_failed", self.enrichment_failed),
+            (
+                "enrichment_skipped_queue_full",
+                self.enrichment_skipped_queue_full,
+            ),
+            (
+                "protocol_flat_fee_total_lamports",
+                self.protocol_flat_fee_total_lamports,
+            ),
+            ("tx_fee_total_lamports", self.tx_fee_total_lamports),
+            (
+                "tx_fee_unknown_transactions",
+                self.tx_fee_unknown_transactions,
+            ),
+            (
+                "events_outside_observation",
+                self.events_outside_observation,
+            ),
+            ("events_after_cutoff", self.events_after_cutoff),
+            ("slot_notifications", self.slot_notifications),
+            ("max_stream_silence_ms", self.max_stream_silence_ms),
+        ];
+        v.extend(self.first_observed_slot.map(|s| ("first_observed_slot", s)));
+        v.extend(self.last_observed_slot.map(|s| ("last_observed_slot", s)));
+        v
+    }
+}
+
 /// [r6] A successful transaction with truncated logs awaiting instruction-based qualification.
 pub(super) struct TruncatedPending {
     pub(super) signature: String,
@@ -1137,7 +1236,7 @@ impl ObserverCore {
         }
     }
 
-    pub fn summary(&self, cfg: &SummaryContext) -> Value {
+    pub fn summary(&self, cfg: &SummaryContext) -> super::summary::MarketSummary {
         let s = &self.stats;
         let observed_end = self.window.map(|(start, cutoff)| {
             start
@@ -1186,141 +1285,181 @@ impl ObserverCore {
         } else {
             "SAMPLE_SUFFICIENT"
         };
-        let receivers: Vec<Value> = ranking
+        let receivers = ranking
             .iter()
-            .map(|r| {
-                json!({
-                    "receiver": r.receiver,
-                    "liquidation_events": r.liquidation_events,
-                    "gross_edge_total_usd": r.gross_edge_total_usd,
-                    "liquidation_share": ratio(r.liquidation_events as f64, total_events),
-                    "gross_edge_share": ratio(r.gross_edge_total_usd, total),
-                })
+            .map(|r| super::summary::ReceiverShare {
+                receiver: r.receiver.clone(),
+                liquidation_events: r.liquidation_events,
+                gross_edge_total_usd: r.gross_edge_total_usd,
+                liquidation_share: ratio(r.liquidation_events as f64, total_events),
+                gross_edge_share: ratio(r.gross_edge_total_usd, total),
             })
             .collect();
-        json!({
-            "title": "PROJECT 0 MARKET OBSERVER — FINAL",
-            "run_id": cfg.run_id,
-            "source": self.source.as_str(),
-            "commitment": cfg.commitment,
-            "program": self.program.to_string(),
-            "process_started_at": cfg.process_started_at,
-            "stream_ready_at": cfg.stream_ready_at,
-            "observation_started_at": cfg.observation_started_at,
-            "observation_ended_at": cfg.observation_ended_at,
-            "configured_duration_seconds": cfg.configured_duration_seconds,
-            "actual_observation_seconds": cfg.actual_observation_seconds,
-            "verdict": verdict,
-            "market_capture_complete": market_capture_complete,
-            "receivership_transport_capture_complete": receivership_transport_capture_complete,
-            "full_slot_reconciliation_complete": full_slot_reconciliation_complete,
-            "full_slot_reconciliation": self.reconciliation,
-            "canonical_market_truth": self.truth.summary(self.reconciliation.first_block_time.zip(self.reconciliation.last_block_time).map(|(a,b)|(b-a) as f64)),
-            "liquidation_path_coverage_complete": liquidation_path_coverage_complete,
-            "liquidation_count_scope": "RECEIVERSHIP_ONLY_NOT_TOTAL_MARGINFI_MARKET",
-            "live_source_coverage_verified": self.source.coverage_verified(),
-            "deployment_continuity":{"before":self.deployment_before,"after":self.deployment_after,"error":self.deployment_error,"source_pin":"33c67987a661f59c6683a65485ebb4f0ef030b77","bytecode_source_equivalence":"NOT_ATTESTED; pinned source is contract authority; hash continuity against existing upgrade-watch reference"},
-            "completeness_authority":"FULL_FINALIZED_SLOT_RECONCILIATION_AND_PATH_QUALIFICATION",
-            "transport_issues_are_telemetry":true,
-            "transport_incomplete_reasons":self.incomplete_reasons,
-            "coverage_complete": coverage_complete,
-            "decode_complete": decode_complete,
-            "drain_complete": cfg.drain_complete,
-            "live_coverage_status": completion.live_coverage_status(),
-            "capture_clock_complete": completion.capture_clock_complete(),
-            "verification_status": if full_slot_reconciliation_complete { "CANONICAL_VERIFIED" } else if self.reconciliation.attempted { "HISTORICAL_INCOMPLETE" } else { "NOT_RUN" },
-            "source_coverage_verified": source_coverage_verified,
-            "source_coverage_note": if source_coverage_verified {"Finalized full-slot scan is authoritative; live WSS source completeness remains separately unverified"} else {self.source.coverage_note()},
-            "incomplete_reasons": reasons,
-            "first_observed_slot": s.first_observed_slot,
-            "last_observed_slot": s.last_observed_slot,
-            "transactions_received": s.transactions_received,
-            "unique_transactions": s.unique_transactions,
-            "duplicate_transactions": s.duplicate_transactions,
-            "successful_transactions": s.successful_transactions,
-            "failed_transactions": s.failed_transactions,
-            "unknown_status_transactions": s.unknown_status_transactions,
-            "liquidation_transactions": s.liquidation_transactions,
-            "liquidation_events": s.liquidation_events,
-            "liquidations_per_hour": per_hour(total_events),
-            "gross_edge_total_usd": total,
-            "gross_edge_per_hour_usd": per_hour(total),
-            "gross_edge_avg_usd": avg,
-            "gross_edge_per_liquidation_usd": avg,
-            "sample_status": sample_status,
-            "sample_min_liquidation_events": cfg.min_sample_liquidations,
-            "unique_targets": self.targets.len(),
-            "enrichment_available": cfg.enrichment_available,
-            "gross_edge_median_usd": quantile_nearest_rank(&sorted, 0.5),
-            "gross_edge_p90_usd": quantile_nearest_rank(&sorted, 0.9),
-            "gross_edge_p99_usd": quantile_nearest_rank(&sorted, 0.99),
-            "gross_edge_max_usd": sorted.last().copied(),
-            "gross_edge_min_usd": sorted.first().copied(),
-            "quantile_method": QUANTILE_METHOD,
-            "protocol_flat_fee_total_lamports": s.protocol_flat_fee_total_lamports,
-            "tx_fee_total_lamports": s.tx_fee_total_lamports,
-            "tx_fee_unknown_transactions": s.tx_fee_unknown_transactions,
-            "fee_totals_complete": enrichment_complete && s.tx_fee_unknown_transactions == 0,
-            "enrichment_complete": enrichment_complete,
-            "enrichment_requested": s.enrichment_requested,
-            "enrichment_succeeded": s.enrichment_succeeded,
-            "enrichment_failed": s.enrichment_failed,
-            "enrichment_skipped_queue_full": s.enrichment_skipped_queue_full,
-            "enrichment_init_error": self.enrichment_init_error,
-            "rpc_fallback_count": s.rpc_fallback_count,
-            "unique_receivers": ranking.len(),
-            "top_receiver": top.map(|r| r.receiver.clone()),
-            "top_receiver_liquidation_share": top.and_then(|r| ratio(r.liquidation_events as f64, total_events)),
-            "top_receiver_gross_edge_share": top.and_then(|r| ratio(r.gross_edge_total_usd, total)),
-            "top3_receiver_liquidation_share": ratio(top3_events as f64, total_events),
-            "top3_receiver_gross_edge_share": ratio(top3_gross, total),
-            "gap_count": s.gap_count,
-            "gap_intervals": self.gaps.len(),
-            "gap_unrecovered": self.gaps.len(),
-            "coverage_outage_seconds": outage.map(|ns| ns as f64/1e9),
-            "transport_covered_seconds": outage.map(|ns| (cfg.actual_observation_seconds-ns as f64/1e9).max(0.0)),
-            "transport_coverage_provenance":"LOCAL_SLOT_PROGRESS_AND_JOURNALED_OUTAGE_INTERVALS_NOT_SOURCE_COMPLETENESS",
-            "last_live_slot_age_s": observed_end.zip(self.last_slot_progress_ns).map(|(end,last)| end.saturating_sub(last) as f64/1e9),
-            "gap_count_raw": s.gap_count,
-            "gaps_merged": self.gaps.iter().map(|g| g.raw_failures.saturating_sub(1)).sum::<u64>(),
-            "provider_budget": darkbot_solana::provider::shared().snapshot(),
-            "gap_transactions_deduplicated": self.gap_stats.gap_transactions_deduplicated,
-            "gap_transactions_recovered": self.gap_stats.gap_transactions_recovered,
-            "gap_liquidation_transactions": self.gap_stats.gap_liquidation_transactions,
-            "gap_liquidation_events": self.gap_stats.gap_liquidation_events,
-            "gaps": self.gaps,
-            "reconnect_count": s.reconnect_count,
-            "reconnect_attempts": s.transport_reconnect_attempts,
-            "reconnect_successful": s.transport_recovered,
-            "wss_http_429_count": s.transport_http_429,
-            "ingress_overflow_count": s.ingress_overflow_count,
-            "fatal_count": s.fatal_count,
-            "decoder_error_count": s.decoder_error_count,
-            "decoder_errors_successful_tx": s.decoder_errors_successful_tx,
-            "base64_error_count": s.base64_error_count,
-            "foreign_program_events": s.foreign_program_events,
-            "failed_tx_receiver_events_ignored": s.failed_tx_receiver_events_ignored,
-            "logs_truncated": s.logs_truncated,
-            "logs_truncated_total": s.logs_truncated,
-            "logs_truncated_qualified": s.logs_truncated_qualified,
-            "logs_truncated_unqualified": s.logs_truncated_unqualified,
-            "logs_truncated_liquidation_mismatch": s.logs_truncated_liquidation_mismatch,
-            "truncated_instruction_end_liquidations": s.truncated_instruction_end_liquidations,
-            "truncated_log_end_liquidations": s.truncated_log_end_liquidations,
-            "truncated_unqualified_reasons": self.truncated_unqualified_reasons,
-            "log_messages_missing": s.log_messages_missing,
-            "events_outside_observation": s.events_outside_observation,
-            "events_after_cutoff": s.events_after_cutoff,
-            "slot_notifications": s.slot_notifications,
-            "max_stream_silence_ms": s.max_stream_silence_ms,
-            "receivers": receivers,
-            "non_claims": [
+        let owned = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        super::summary::MarketSummary {
+            title: "PROJECT 0 MARKET OBSERVER — FINAL".into(),
+            run_id: cfg.run_id.clone(),
+            source: self.source.as_str().into(),
+            commitment: cfg.commitment.clone(),
+            program: self.program.to_string(),
+            process_started_at: cfg.process_started_at.clone(),
+            stream_ready_at: cfg.stream_ready_at.clone(),
+            observation_started_at: cfg.observation_started_at.clone(),
+            observation_ended_at: cfg.observation_ended_at.clone(),
+            configured_duration_seconds: cfg.configured_duration_seconds,
+            actual_observation_seconds: cfg.actual_observation_seconds,
+            verdict: verdict.into(),
+            market_capture_complete,
+            receivership_transport_capture_complete,
+            full_slot_reconciliation_complete,
+            full_slot_reconciliation: (&self.reconciliation).into(),
+            canonical_market_truth: self.truth.summary(
+                self.reconciliation
+                    .first_block_time
+                    .zip(self.reconciliation.last_block_time)
+                    .map(|(a, b)| (b - a) as f64),
+            ),
+            liquidation_path_coverage_complete,
+            liquidation_count_scope: "RECEIVERSHIP_ONLY_NOT_TOTAL_MARGINFI_MARKET".into(),
+            live_source_coverage_verified: self.source.coverage_verified(),
+            deployment_continuity: super::summary::DeploymentContinuity {
+                before: self.deployment_before.clone(),
+                after: self.deployment_after.clone(),
+                error: self.deployment_error.map(String::from),
+                source_pin: "33c67987a661f59c6683a65485ebb4f0ef030b77".into(),
+                bytecode_source_equivalence: "NOT_ATTESTED; pinned source is contract authority; hash continuity against existing upgrade-watch reference".into(),
+            },
+            completeness_authority: "FULL_FINALIZED_SLOT_RECONCILIATION_AND_PATH_QUALIFICATION"
+                .into(),
+            transport_issues_are_telemetry: true,
+            transport_incomplete_reasons: self
+                .incomplete_reasons
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            coverage_complete,
+            decode_complete,
+            drain_complete: cfg.drain_complete,
+            live_coverage_status: completion.live_coverage_status().into(),
+            capture_clock_complete: completion.capture_clock_complete(),
+            verification_status: if full_slot_reconciliation_complete {
+                "CANONICAL_VERIFIED"
+            } else if self.reconciliation.attempted {
+                "HISTORICAL_INCOMPLETE"
+            } else {
+                "NOT_RUN"
+            }
+            .into(),
+            source_coverage_verified,
+            source_coverage_note: if source_coverage_verified {
+                "Finalized full-slot scan is authoritative; live WSS source completeness remains separately unverified"
+            } else {
+                self.source.coverage_note()
+            }
+            .into(),
+            incomplete_reasons: reasons.clone(),
+            first_observed_slot: s.first_observed_slot,
+            last_observed_slot: s.last_observed_slot,
+            transactions_received: s.transactions_received,
+            unique_transactions: s.unique_transactions,
+            duplicate_transactions: s.duplicate_transactions,
+            successful_transactions: s.successful_transactions,
+            failed_transactions: s.failed_transactions,
+            unknown_status_transactions: s.unknown_status_transactions,
+            liquidation_transactions: s.liquidation_transactions,
+            liquidation_events: s.liquidation_events,
+            liquidations_per_hour: per_hour(total_events),
+            gross_edge_total_usd: total,
+            gross_edge_per_hour_usd: per_hour(total),
+            gross_edge_avg_usd: avg,
+            gross_edge_per_liquidation_usd: avg,
+            sample_status: sample_status.into(),
+            sample_min_liquidation_events: cfg.min_sample_liquidations,
+            unique_targets: self.targets.len() as u64,
+            enrichment_available: cfg.enrichment_available,
+            gross_edge_median_usd: quantile_nearest_rank(&sorted, 0.5),
+            gross_edge_p90_usd: quantile_nearest_rank(&sorted, 0.9),
+            gross_edge_p99_usd: quantile_nearest_rank(&sorted, 0.99),
+            gross_edge_max_usd: sorted.last().copied(),
+            gross_edge_min_usd: sorted.first().copied(),
+            quantile_method: QUANTILE_METHOD.into(),
+            protocol_flat_fee_total_lamports: s.protocol_flat_fee_total_lamports,
+            tx_fee_total_lamports: s.tx_fee_total_lamports,
+            tx_fee_unknown_transactions: s.tx_fee_unknown_transactions,
+            fee_totals_complete: enrichment_complete && s.tx_fee_unknown_transactions == 0,
+            enrichment_complete,
+            enrichment_requested: s.enrichment_requested,
+            enrichment_succeeded: s.enrichment_succeeded,
+            enrichment_failed: s.enrichment_failed,
+            enrichment_skipped_queue_full: s.enrichment_skipped_queue_full,
+            enrichment_init_error: self.enrichment_init_error.clone(),
+            rpc_fallback_count: s.rpc_fallback_count,
+            unique_receivers: ranking.len() as u64,
+            top_receiver: top.map(|r| r.receiver.clone()),
+            top_receiver_liquidation_share: top
+                .and_then(|r| ratio(r.liquidation_events as f64, total_events)),
+            top_receiver_gross_edge_share: top.and_then(|r| ratio(r.gross_edge_total_usd, total)),
+            top3_receiver_liquidation_share: ratio(top3_events as f64, total_events),
+            top3_receiver_gross_edge_share: ratio(top3_gross, total),
+            gap_count: s.gap_count,
+            gap_intervals: self.gaps.len() as u64,
+            gap_unrecovered: self.gaps.len() as u64,
+            coverage_outage_seconds: outage.map(|ns| ns as f64 / 1e9),
+            transport_covered_seconds: outage
+                .map(|ns| (cfg.actual_observation_seconds - ns as f64 / 1e9).max(0.0)),
+            transport_coverage_provenance:
+                "LOCAL_SLOT_PROGRESS_AND_JOURNALED_OUTAGE_INTERVALS_NOT_SOURCE_COMPLETENESS".into(),
+            last_live_slot_age_s: observed_end
+                .zip(self.last_slot_progress_ns)
+                .map(|(end, last)| end.saturating_sub(last) as f64 / 1e9),
+            gap_count_raw: s.gap_count,
+            gaps_merged: self
+                .gaps
+                .iter()
+                .map(|g| g.raw_failures.saturating_sub(1))
+                .sum::<u64>(),
+            provider_budget: darkbot_solana::provider::shared().snapshot(),
+            gap_transactions_deduplicated: self.gap_stats.gap_transactions_deduplicated,
+            gap_transactions_recovered: self.gap_stats.gap_transactions_recovered,
+            gap_liquidation_transactions: self.gap_stats.gap_liquidation_transactions,
+            gap_liquidation_events: self.gap_stats.gap_liquidation_events,
+            gaps: self.gaps.clone(),
+            reconnect_count: s.reconnect_count,
+            reconnect_attempts: s.transport_reconnect_attempts,
+            reconnect_successful: s.transport_recovered,
+            wss_http_429_count: s.transport_http_429,
+            ingress_overflow_count: s.ingress_overflow_count,
+            fatal_count: s.fatal_count,
+            decoder_error_count: s.decoder_error_count,
+            decoder_errors_successful_tx: s.decoder_errors_successful_tx,
+            base64_error_count: s.base64_error_count,
+            foreign_program_events: s.foreign_program_events,
+            failed_tx_receiver_events_ignored: s.failed_tx_receiver_events_ignored,
+            logs_truncated: s.logs_truncated,
+            logs_truncated_total: s.logs_truncated,
+            logs_truncated_qualified: s.logs_truncated_qualified,
+            logs_truncated_unqualified: s.logs_truncated_unqualified,
+            logs_truncated_liquidation_mismatch: s.logs_truncated_liquidation_mismatch,
+            truncated_instruction_end_liquidations: s.truncated_instruction_end_liquidations,
+            truncated_log_end_liquidations: s.truncated_log_end_liquidations,
+            truncated_unqualified_reasons: self
+                .truncated_unqualified_reasons
+                .iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect(),
+            log_messages_missing: s.log_messages_missing,
+            events_outside_observation: s.events_outside_observation,
+            events_after_cutoff: s.events_after_cutoff,
+            slot_notifications: s.slot_notifications,
+            max_stream_silence_ms: s.max_stream_silence_ms,
+            receivers,
+            non_claims: owned(&[
                 "market gross edge only (seized - repaid, USD, protocol valuation)",
                 "not DarkBot executable edge (P1-C/F1/F8)",
                 "not DarkBot capture rate",
                 "not DarkBot realized PnL (P8)",
                 "no per-day/month/year extrapolation from a single run",
-            ],
-        })
+            ]),
+        }
     }
 }

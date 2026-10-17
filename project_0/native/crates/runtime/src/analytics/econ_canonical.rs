@@ -301,7 +301,7 @@ impl Worker {
         self.canonical_finalized = true;
         Ok(())
     }
-    pub(super) fn canonical_metrics(&self, from: usize, through: usize) -> Value {
+    pub(super) fn canonical_metrics(&self, from: usize, through: usize) -> CanonicalSummary {
         let start = self
             .h
             .clock
@@ -389,12 +389,131 @@ fn assign_record(rows: &mut [Joined], rec: &OpportunityRecord) {
     }
 }
 
-fn values(rows: &[&Joined], f: impl Fn(&TruthEvent) -> Option<f64>) -> Value {
-    let known: Vec<_> = rows.iter().filter_map(|r| f(&r.market)).collect();
-    json!({"count_known":known.len(),"count_unknown":rows.len()-known.len(),"distribution":distribution(known)})
+/// Known values of one field over a group of events.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Values {
+    pub count_known: u64,
+    pub count_unknown: u64,
+    pub distribution: Distribution,
 }
-fn summarize(rows: &[&Joined], seconds: f64, unassigned: usize, finalized: bool) -> Value {
-    let mut market = serde_json::Map::new();
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CanonicalGroup {
+    pub events: u64,
+    pub transactions: u64,
+    pub events_per_hour: Option<f64>,
+    pub seized_usd: Values,
+    pub repaid_usd: Values,
+    pub gross_edge_usd: Values,
+    pub winner_net_edge_usd: Values,
+    pub native_amounts: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CanonicalMatching {
+    pub events: u64,
+    pub target_seen: u64,
+    pub exact_plan_match: u64,
+    pub target_seen_without_slot: u64,
+    pub identity_unresolved: u64,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NetworkFees {
+    pub transactions: u64,
+    pub known_transactions: u64,
+    pub unknown_transactions: u64,
+    pub known_total_lamports: Option<u64>,
+    pub priority_included_in_meta_fee: bool,
+    pub unknown_never_zero: bool,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CanonicalCapital {
+    pub budget_usd: u64,
+    pub market_opportunities: u64,
+    pub shadow_detected: u64,
+    pub executable: u64,
+    pub fundable: u64,
+    pub known_profitable: u64,
+    pub unknown_economics: u64,
+    pub known_net_edge_usd: Distribution,
+    pub lost_only_because_capital: u64,
+    pub lost_edge_only_because_capital_usd: Distribution,
+    pub only_capital_semantics: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LossBucket {
+    pub count: u64,
+    pub known_market_gross_edge_usd: Values,
+    pub known_our_executable_net_edge_usd: Distribution,
+    pub our_edge_unknown_count: u64,
+    pub interpretation: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StageBucket {
+    pub events: u64,
+    pub known_market_gross_edge_usd: Values,
+    pub claim: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RaceBucket {
+    pub count: u64,
+    pub known_net_edge_usd: Distribution,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpeedupBucket {
+    pub ms: u64,
+    pub local_boundaries_crossed: u64,
+    pub claim: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TopShare {
+    pub top: u64,
+    pub event_share: Option<f64>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CanonicalCompetition {
+    /// `(liquidator, events, known gross edge distribution)`, most events first.
+    pub liquidators: Vec<(String, u64, Distribution)>,
+    pub top_shares: Vec<TopShare>,
+}
+/// The canonical (all-path, finalized) market/Shadow analytics of one window.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CanonicalSummary {
+    pub finalized: bool,
+    pub market: BTreeMap<String, CanonicalGroup>,
+    pub authoritative_scope: String,
+    pub market_window_hour_assignment: String,
+    pub hour_unassigned_events_full_window: u64,
+    pub unassigned_included_in_final_total: bool,
+    pub matching: CanonicalMatching,
+    pub network_fees: NetworkFees,
+    pub capital: Vec<CanonicalCapital>,
+    pub loss_attribution: BTreeMap<String, LossBucket>,
+    pub largest_measured_stage: BTreeMap<String, StageBucket>,
+    pub race: BTreeMap<String, RaceBucket>,
+    pub matched_stage_ms: BTreeMap<String, Distribution>,
+    pub local_margin_ms: Distribution,
+    pub required_local_speedup_ms: Distribution,
+    pub speedup_sensitivity: Vec<SpeedupBucket>,
+    pub competition: CanonicalCompetition,
+    pub true_competitor_submission_deadline: String,
+    pub live_ready: bool,
+}
+
+fn values(rows: &[&Joined], f: impl Fn(&TruthEvent) -> Option<f64>) -> Values {
+    let known: Vec<_> = rows.iter().filter_map(|r| f(&r.market)).collect();
+    Values {
+        count_known: known.len() as u64,
+        count_unknown: (rows.len() - known.len()) as u64,
+        distribution: distribution(known),
+    }
+}
+
+fn summarize(
+    rows: &[&Joined],
+    seconds: f64,
+    unassigned: usize,
+    finalized: bool,
+) -> CanonicalSummary {
+    let mut market = BTreeMap::new();
     let mut fees = BTreeMap::new();
     for row in rows {
         fees.entry(&row.market.signature)
@@ -413,10 +532,23 @@ fn summarize(rows: &[&Joined], seconds: f64, unassigned: usize, finalized: bool)
             .filter(|r| kind == "ALL" || r.market.liquidation_type.as_str() == kind)
             .collect();
         let tx: BTreeSet<_> = group.iter().map(|r| &r.market.signature).collect();
-        market.insert(kind.into(),json!({"events":group.len(),"transactions":tx.len(),"events_per_hour":if seconds>0.{Some(group.len() as f64*3600./seconds)}else{None},
-            "seized_usd":values(&group,|e|e.seized_value_usd),"repaid_usd":values(&group,|e|e.repaid_value_usd),
-            "gross_edge_usd":values(&group,|e|e.gross_edge_usd),"winner_net_edge_usd":values(&group,|e|e.winner_net_edge_usd),
-            "native_amounts":"canonical_market_shadow.jsonl join.market; per mint/venue units, never summed across denominations"}));
+        market.insert(
+            kind.to_string(),
+            CanonicalGroup {
+                events: group.len() as u64,
+                transactions: tx.len() as u64,
+                events_per_hour: if seconds > 0. {
+                    Some(group.len() as f64 * 3600. / seconds)
+                } else {
+                    None
+                },
+                seized_usd: values(&group, |e| e.seized_value_usd),
+                repaid_usd: values(&group, |e| e.repaid_value_usd),
+                gross_edge_usd: values(&group, |e| e.gross_edge_usd),
+                winner_net_edge_usd: values(&group, |e| e.winner_net_edge_usd),
+                native_amounts: "canonical_market_shadow.jsonl join.market; per mint/venue units, never summed across denominations".into(),
+            },
+        );
     }
     let tradable: Vec<_> = rows
         .iter()
@@ -441,10 +573,19 @@ fn summarize(rows: &[&Joined], seconds: f64, unassigned: usize, finalized: bool)
                 }
             }
         }
-        json!({"budget_usd":budget,"market_opportunities":tradable.len(),"shadow_detected":detected,"executable":exec,
-            "fundable":funded,"known_profitable":nets.len(),"unknown_economics":unknown,"known_net_edge_usd":distribution(nets),
-            "lost_only_because_capital":blocked,"lost_edge_only_because_capital_usd":distribution(lost),
-            "only_capital_semantics":"otherwise signed/simulated, positive known net, PRE winner slot; still not guaranteed capture"})
+        CanonicalCapital {
+            budget_usd: *budget,
+            market_opportunities: tradable.len() as u64,
+            shadow_detected: detected as u64,
+            executable: exec as u64,
+            fundable: funded,
+            known_profitable: nets.len() as u64,
+            unknown_economics: unknown,
+            known_net_edge_usd: distribution(nets),
+            lost_only_because_capital: blocked,
+            lost_edge_only_because_capital_usd: distribution(lost),
+            only_capital_semantics: "otherwise signed/simulated, positive known net, PRE winner slot; still not guaranteed capture".into(),
+        }
     }).collect();
     let mut reasons: BTreeMap<&str, Vec<&Joined>> = [
         "NOT_DETECTED",
@@ -499,13 +640,44 @@ fn summarize(rows: &[&Joined], seconds: f64, unassigned: usize, finalized: bool)
             }
         }
     }
-    let loss_dollars:BTreeMap<_,_>=reasons.into_iter().map(|(reason,group)| {
-        let ours:Vec<_>=group.iter().filter_map(|r|r.our.as_ref().filter(|r|technical(r)).and_then(|r|net(Some(r)))).collect();
-        (reason,json!({"count":group.len(),"known_market_gross_edge_usd":values(&group,|e|e.gross_edge_usd),
-            "known_our_executable_net_edge_usd":distribution(ours.clone()),"our_edge_unknown_count":group.len()-ours.len(),
-            "interpretation":"opportunity attribution; not realized monetary loss"}))
-    }).collect();
-    let race:BTreeMap<_,_>=race.into_iter().map(|(k,v)|(k,json!({"count":v.len(),"known_net_edge_usd":distribution(v.iter().filter_map(|r|net(r.our.as_ref())).collect())}))).collect();
+    let loss_dollars: BTreeMap<_, _> = reasons
+        .into_iter()
+        .map(|(reason, group)| {
+            let ours: Vec<_> = group
+                .iter()
+                .filter_map(|r| {
+                    r.our
+                        .as_ref()
+                        .filter(|r| technical(r))
+                        .and_then(|r| net(Some(r)))
+                })
+                .collect();
+            (
+                reason.to_string(),
+                LossBucket {
+                    count: group.len() as u64,
+                    known_market_gross_edge_usd: values(&group, |e| e.gross_edge_usd),
+                    our_edge_unknown_count: (group.len() - ours.len()) as u64,
+                    known_our_executable_net_edge_usd: distribution(ours),
+                    interpretation: "opportunity attribution; not realized monetary loss".into(),
+                },
+            )
+        })
+        .collect();
+    let race: BTreeMap<String, RaceBucket> = race
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                k.to_string(),
+                RaceBucket {
+                    count: v.len() as u64,
+                    known_net_edge_usd: distribution(
+                        v.iter().filter_map(|r| net(r.our.as_ref())).collect(),
+                    ),
+                },
+            )
+        })
+        .collect();
     let mut actors: BTreeMap<&str, (u64, Vec<f64>)> = BTreeMap::new();
     for row in &tradable {
         let a = actors.entry(&row.market.liquidator).or_default();
@@ -516,31 +688,97 @@ fn summarize(rows: &[&Joined], seconds: f64, unassigned: usize, finalized: bool)
     }
     let mut actors: Vec<_> = actors
         .into_iter()
-        .map(|(id, (count, edges))| (id, count, distribution(edges)))
+        .map(|(id, (count, edges))| (id.to_string(), count, distribution(edges)))
         .collect();
-    actors.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-    json!({"finalized":finalized,"market":market,"authoritative_scope":"FINALIZED_ALL_PATH_MARKET_JOIN; production selected_costs only","market_window_hour_assignment":"blockTime against shared-clock UTC capture boundaries; boundary/out-of-window or unknown timestamps reported separately",
-        "hour_unassigned_events_full_window":unassigned,"unassigned_included_in_final_total":true,
-        "matching":{"events":rows.len(),"target_seen":rows.iter().filter(|r|r.target_seen).count(),"exact_plan_match":rows.iter().filter(|r|r.our.is_some()).count(),
-            "target_seen_without_slot":rows.iter().filter(|r|r.target_seen_without_slot).count(),
-            "identity_unresolved":rows.iter().filter(|r|r.target_seen && r.our.is_none()).count()},
-        "network_fees":{"transactions":fees.len(),"known_transactions":fees.values().filter(|v|v.is_some()).count(),"unknown_transactions":fees.values().filter(|v|v.is_none()).count(),
-            "known_total_lamports":fees.values().copied().flatten().try_fold(None,|sum:Option<u64>,n|Some(Some(sum.unwrap_or(0).checked_add(n)?))).flatten(),
-            "priority_included_in_meta_fee":true,"unknown_never_zero":true},
-        "capital":capital,"loss_attribution":loss_dollars,
-        "largest_measured_stage":bottlenecks.into_iter().map(|(k,rows)|(k,json!({"events":rows.len(),"known_market_gross_edge_usd":values(&rows,|e|e.gross_edge_usd),"claim":"correlation with largest measured nonoverlapping stage; not proof of causal loss"}))).collect::<BTreeMap<_,_>>(),"race":race,"matched_stage_ms":stages.into_iter().map(|(k,v)|(k,distribution(v))).collect::<BTreeMap<_,_>>(),
-        "local_margin_ms":distribution(margins),"required_local_speedup_ms":distribution(speed.clone()),
-        "speedup_sensitivity":SPEEDUP_MS.iter().map(|ms|json!({"ms":ms,"local_boundaries_crossed":speed.iter().filter(|s|**s<=*ms as f64).count(),"claim":"COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS"})).collect::<Vec<_>>(),
-        "competition":{"liquidators":actors,"top_shares": ([1,3,5].iter().map(|n|json!({"top":n,"event_share":if tradable.is_empty(){None}else{Some(actors.iter().take(*n).map(|a|a.1).sum::<u64>() as f64/tradable.len() as f64)}})).collect::<Vec<_>>())},
-        "true_competitor_submission_deadline":"UNKNOWN","live_ready":false})
+    actors.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let event_share = |n: usize| {
+        (!tradable.is_empty())
+            .then(|| actors.iter().take(n).map(|a| a.1).sum::<u64>() as f64 / tradable.len() as f64)
+    };
+    let top_shares = [1, 3, 5]
+        .iter()
+        .map(|n| TopShare {
+            top: *n as u64,
+            event_share: event_share(*n),
+        })
+        .collect();
+    CanonicalSummary {
+        finalized,
+        market,
+        authoritative_scope: "FINALIZED_ALL_PATH_MARKET_JOIN; production selected_costs only".into(),
+        market_window_hour_assignment: "blockTime against shared-clock UTC capture boundaries; boundary/out-of-window or unknown timestamps reported separately".into(),
+        hour_unassigned_events_full_window: unassigned as u64,
+        unassigned_included_in_final_total: true,
+        matching: CanonicalMatching {
+            events: rows.len() as u64,
+            target_seen: rows.iter().filter(|r| r.target_seen).count() as u64,
+            exact_plan_match: rows.iter().filter(|r| r.our.is_some()).count() as u64,
+            target_seen_without_slot: rows.iter().filter(|r| r.target_seen_without_slot).count()
+                as u64,
+            identity_unresolved: rows
+                .iter()
+                .filter(|r| r.target_seen && r.our.is_none())
+                .count() as u64,
+        },
+        network_fees: NetworkFees {
+            transactions: fees.len() as u64,
+            known_transactions: fees.values().filter(|v| v.is_some()).count() as u64,
+            unknown_transactions: fees.values().filter(|v| v.is_none()).count() as u64,
+            known_total_lamports: fees
+                .values()
+                .copied()
+                .flatten()
+                .try_fold(None, |sum: Option<u64>, n| Some(Some(sum.unwrap_or(0).checked_add(n)?)))
+                .flatten(),
+            priority_included_in_meta_fee: true,
+            unknown_never_zero: true,
+        },
+        capital,
+        loss_attribution: loss_dollars,
+        largest_measured_stage: bottlenecks
+            .into_iter()
+            .map(|(k, rows)| {
+                (
+                    k.to_string(),
+                    StageBucket {
+                        events: rows.len() as u64,
+                        known_market_gross_edge_usd: values(&rows, |e| e.gross_edge_usd),
+                        claim: "correlation with largest measured nonoverlapping stage; not proof of causal loss".into(),
+                    },
+                )
+            })
+            .collect(),
+        race,
+        matched_stage_ms: stages
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), distribution(v)))
+            .collect(),
+        local_margin_ms: distribution(margins),
+        required_local_speedup_ms: distribution(speed.clone()),
+        speedup_sensitivity: SPEEDUP_MS
+            .iter()
+            .map(|ms| SpeedupBucket {
+                ms: *ms,
+                local_boundaries_crossed: speed.iter().filter(|s| **s <= *ms as f64).count() as u64,
+                claim: "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS".into(),
+            })
+            .collect(),
+        competition: CanonicalCompetition {
+            liquidators: actors,
+            top_shares,
+        },
+        true_competitor_submission_deadline: "UNKNOWN".into(),
+        live_ready: false,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::tests::view;
     use super::*;
     #[test]
     fn missing_values_have_no_zero_total() {
-        let s = summarize(&[], 3600., 0, true);
+        let s = view(&summarize(&[], 3600., 0, true));
         assert!(s["network_fees"]["known_total_lamports"].is_null());
         assert_eq!(s["capital"].as_array().unwrap().len(), 6);
     }
@@ -548,7 +786,7 @@ mod tests {
 
 #[cfg(test)]
 mod regression {
-    use super::super::tests::{costs, rec, worker};
+    use super::super::tests::{costs, rec, view, worker};
     use super::*;
     use crate::analytics::record::MarketPlanIdentity;
     use crate::market_observer::truth::LiquidationType;
@@ -756,7 +994,7 @@ mod regression {
         let r = rec();
         let mut rows = vec![row(&r, 10, 0)];
         assign_record(&mut rows, &r);
-        let s = summarize(&[&rows[0]], 3600., 0, true);
+        let s = view(&summarize(&[&rows[0]], 3600., 0, true));
         assert_eq!(s["matching"]["exact_plan_match"], 0);
         assert_eq!(s["capital"][0]["unknown_economics"], 1);
         assert!(s["capital"][0]["known_net_edge_usd"]["total"].is_null());
@@ -779,14 +1017,14 @@ mod regression {
         r.selected_costs = Some(costs(200_000_000));
         let mut rows = vec![row(&r, 10, 0)];
         assign_record(&mut rows, &r);
-        let s = summarize(&[&rows[0]], 3600., 0, true);
+        let s = view(&summarize(&[&rows[0]], 3600., 0, true));
         assert_eq!(s["capital"][0]["fundable"], 0); // fee reserve makes exactly $200 insufficient
         assert_eq!(s["capital"][0]["lost_only_because_capital"], 1);
         assert_eq!(s["capital"][1]["fundable"], 1);
         assert_eq!(s["capital"][1]["known_profitable"], 1);
         rows[0].market.permissionless_profit_opportunity = false;
         rows[0].market.liquidation_type = LiquidationType::ForcedDeleverage;
-        let s = summarize(&[&rows[0]], 3600., 0, true);
+        let s = view(&summarize(&[&rows[0]], 3600., 0, true));
         assert_eq!(s["market"]["ALL"]["events"], 1);
         assert_eq!(s["capital"][0]["market_opportunities"], 0);
     }
@@ -796,7 +1034,7 @@ mod regression {
         let a = row(&r, 10, 0);
         let mut b = row(&r, 10, 1);
         b.market.gross_edge_usd = None;
-        let s = summarize(&[&a, &b], 3600., 0, true);
+        let s = view(&summarize(&[&a, &b], 3600., 0, true));
         assert_eq!(s["network_fees"]["transactions"], 1);
         assert_eq!(s["network_fees"]["known_total_lamports"], 7000);
         assert_eq!(s["loss_attribution"]["NOT_DETECTED"]["count"], 2);
@@ -845,19 +1083,255 @@ mod regression {
         );
         let sum: u64 = (1..=4)
             .map(|i| {
-                w.canonical_metrics(i - 1, i)["market"]["ALL"]["events"]
+                view(&w.canonical_metrics(i - 1, i))["market"]["ALL"]["events"]
                     .as_u64()
                     .unwrap()
             })
             .sum();
         assert_eq!(sum, 4);
-        assert_eq!(w.canonical_metrics(0, 4)["market"]["ALL"]["events"], 4);
+        assert_eq!(
+            view(&w.canonical_metrics(0, 4))["market"]["ALL"]["events"],
+            4
+        );
         assert!(w
             .h
             .cfg
             .run_dir
             .join("canonical_market_shadow.jsonl")
             .is_file());
+    }
+
+    /// JFI-FIX-05 parity: the snapshot and final report documents of a rich analytics state
+    /// (live and backfilled markets, unique and ambiguous winners, executable, simulation-failed,
+    /// economics-unknown and routing-loss evaluations, capture counters, canonical join, real
+    /// market summaries) render exactly as recorded. Fixed keys only.
+    #[test]
+    fn report_documents_match_golden() {
+        use crate::market::winner::SameSlotCandidate;
+        use crate::market_observer::{
+            EnrichConfig, MarketSource, MarketStats, ObserverCore, SummaryContext,
+        };
+        use solana_sdk::pubkey::Pubkey;
+        use std::str::FromStr;
+        let mut w = worker();
+        let key = |n: u8| Pubkey::new_from_array([n; 32]);
+        let program = Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET).unwrap();
+        let summary = |secs: f64, done: bool| {
+            let mut core = ObserverCore::new(program, MarketSource::Logs, EnrichConfig::DEFAULT);
+            core.start_observation(0, u64::MAX);
+            core.summary(&SummaryContext {
+                run_id: "golden".into(),
+                commitment: "finalized".into(),
+                stream_ready: true,
+                full_duration_observed: done,
+                drain_complete: done,
+                actual_observation_seconds: secs,
+                configured_duration_seconds: 4.0,
+                min_sample_liquidations: 1,
+                ..Default::default()
+            })
+        };
+        const S: u64 = 1_000_000_000;
+        let mk = |n: u8, hour: u64| {
+            let mut r = identified();
+            r.account = key(n).to_string();
+            r.timing.t_rx_ns = Some(hour * S + 10 + u64::from(n));
+            r.timing.t_sign_ns = Some(hour * S + 40 + u64::from(n));
+            r.rx_slot = Some(10 + hour);
+            r.detect_slot = Some(10 + hour);
+            r.sign_slot = Some(10 + hour);
+            r
+        };
+        let market = |r: &OpportunityRecord, slot, rx, source, receiver: u8| MarketEvent {
+            signature: format!("win-{slot}-{receiver}"),
+            slot,
+            t_rx_ns: rx,
+            source,
+            transaction_index: Some(3),
+            event: ReceiverEvent {
+                event_index: 0,
+                target: r.account.parse().unwrap(),
+                receiver: key(receiver),
+                seized_equity_usd: 105.0 + f64::from(receiver),
+                repaid_equity_usd: 100.0,
+                protocol_flat_fee_lamports: 5000,
+            },
+        };
+        let unique = |slot, receiver: u8| Winner {
+            slot,
+            identity: WinnerIdentity::Unique {
+                signature: format!("win-{slot}-{receiver}"),
+                receiver: key(receiver).to_string(),
+                tx_version: "0".into(),
+            },
+        };
+        // A: executable, unique live winner in a later slot.
+        let a = mk(1, 0);
+        w.accept(Evidence::Market(market(
+            &a,
+            12,
+            Some(25),
+            MarketEvidenceSource::Live,
+            101,
+        )))
+        .unwrap();
+        w.accept(Evidence::Slot {
+            slot: 12,
+            t_rx_ns: 24,
+        })
+        .unwrap();
+        w.accept(Evidence::Shadow(Box::new(a.clone()))).unwrap();
+        w.accept(Evidence::Winner {
+            target: a.account.clone(),
+            rx_slot: 10,
+            winner: unique(12, 101),
+        })
+        .unwrap();
+        // B: executable, winner in its own sign slot (same slot, order unknown).
+        let b = mk(2, 1);
+        w.accept(Evidence::Market(market(
+            &b,
+            11,
+            Some(S + 20),
+            MarketEvidenceSource::Live,
+            102,
+        )))
+        .unwrap();
+        w.accept(Evidence::Shadow(Box::new(b.clone()))).unwrap();
+        w.accept(Evidence::Winner {
+            target: b.account.clone(),
+            rx_slot: 11,
+            winner: unique(11, 102),
+        })
+        .unwrap();
+        // C: simulation failed; D: economics unknown; E: routing loss.
+        let mut c = mk(3, 1);
+        c.decision = Decision::ShadowSimFailed;
+        c.simulation_result = Some("FAIL".into());
+        w.accept(Evidence::Shadow(Box::new(c))).unwrap();
+        let mut d = mk(4, 2);
+        d.economics_known = false;
+        d.net_profit = None;
+        d.selected_costs = None;
+        d.decision = Decision::ShadowTechnicalReady;
+        w.accept(Evidence::Shadow(Box::new(d))).unwrap();
+        let mut e = mk(5, 2);
+        e.decision = Decision::Skip;
+        e.loss = Some(LossReason::Routing);
+        e.timing.t_sign_ns = None;
+        w.accept(Evidence::Shadow(Box::new(e))).unwrap();
+        // F: executable without winner; G: same-slot ambiguous winner; H: backfilled market.
+        let f = mk(6, 3);
+        w.accept(Evidence::Shadow(Box::new(f.clone()))).unwrap();
+        let g = mk(7, 3);
+        w.accept(Evidence::Shadow(Box::new(g.clone()))).unwrap();
+        w.accept(Evidence::Winner {
+            target: g.account.clone(),
+            rx_slot: 13,
+            winner: Winner {
+                slot: 13,
+                identity: WinnerIdentity::SameSlotAmbiguous {
+                    candidates: vec![SameSlotCandidate {
+                        signature: "amb".into(),
+                        receiver: key(107).to_string(),
+                        tx_version: "0".into(),
+                        transaction_index: Some(1),
+                    }],
+                },
+            },
+        })
+        .unwrap();
+        let h = mk(8, 3);
+        w.accept(Evidence::Market(market(
+            &h,
+            13,
+            None,
+            MarketEvidenceSource::GapBackfill,
+            108,
+        )))
+        .unwrap();
+        // Capture counters, Shadow owner counters, market summaries.
+        w.accept(Evidence::MarketCounters {
+            at_ns: S / 2,
+            before: MarketStats::default(),
+            after: Box::new(MarketStats {
+                transactions_received: 5,
+                unique_transactions: 4,
+                duplicate_transactions: 1,
+                liquidation_events: 2,
+                first_observed_slot: Some(10),
+                last_observed_slot: Some(12),
+                max_stream_silence_ms: 70,
+                ..Default::default()
+            }),
+        })
+        .unwrap();
+        w.accept(Evidence::ShadowStats(ShadowStats {
+            winner_watch_current: 0,
+            winner_watch_max: 3,
+            winner_watch_overflow: 0,
+            winner_watch_errors: 0,
+            winner_watch_resolved: 3,
+            winner_watch_expired: 1,
+            winner_queue_full_backoffs: 0,
+            ingress_overflow: 0,
+            winner_pending_at_deadline: 0,
+            shadow_state_ready_at_shutdown: true,
+            remote_winner_queue_depth: 0,
+            remote_projection_queue_depth: 0,
+        }))
+        .unwrap();
+        for index in 1..=3 {
+            w.accept(Evidence::MarketCheckpoint {
+                index,
+                summary: summary(index as f64, false),
+            })
+            .unwrap();
+        }
+        let last = crate::market_observer::MarketFinal {
+            summary: summary(4.0, true),
+            econ: Some((w.h.cfg.plan.clone(), None)),
+            evidence_journal: None,
+        };
+        w.accept(Evidence::MarketFinal(Box::new(last))).unwrap();
+        // Canonical: one exact-identity event per quarter (A's target), one admin settlement.
+        let start = (w.h.clock.unix_ns(1) / 1_000_000_000) as i64 + 1;
+        for i in 0..3u64 {
+            let mut ev = row(&a, 10 + i, 0).market;
+            ev.signature = format!("canon-{i}");
+            ev.block_time = Some(start + i as i64);
+            w.canonical_market.push(ev);
+        }
+        let mut admin = row(&f, 13, 1).market;
+        admin.signature = "canon-admin".into();
+        admin.liquidation_type = LiquidationType::BankruptcySettlement;
+        admin.permissionless_profit_opportunity = false;
+        admin.block_time = Some(start + 3);
+        w.canonical_market.push(admin);
+        w.h.shared.shadow_ready_ns.store(1, Ordering::Release);
+        w.h.shared.shadow_done.store(true, Ordering::Relaxed);
+        w.h.shared.market_done.store(true, Ordering::Relaxed);
+        w.snapshots = SNAPSHOT_COUNT;
+        // Quarter 2 while capturing (checkpoint delta 2-1, live telemetry) and the final report
+        // (market final summary, canonical join, frozen telemetry).
+        let provisional = view(&w.report(2, false));
+        w.finalize_canonical().unwrap();
+        w.final_technical = Some(w.technical(true));
+        let doc =
+            json!({"provisional_2": provisional, "final": view(&w.report(SNAPSHOT_COUNT, true))});
+        crate::analytics::golden::check(
+            "econ_reports",
+            &doc,
+            &[
+                "run_id",
+                "started_at_utc",
+                "ended_at_utc",
+                "capture_window",
+                "actual_elapsed_seconds",
+                "remote_and_backlog_telemetry",
+                "provider_budget",
+            ],
+        );
     }
 }
 
