@@ -47,6 +47,7 @@ pub struct GatewayConfig {
     pub source_detach_after_ms: u64,
     pub source_reattach_backoff_ms: u64,
     pub overview_interval_ms: u64,
+    pub feeds: Vec<FeedSpec>,
 }
 
 #[derive(Debug, Error)]
@@ -94,6 +95,7 @@ impl GatewayConfig {
             source_detach_after_ms: parse_u64("DARKBOT_GATEWAY_SOURCE_DETACH_MS", 30_000)?,
             source_reattach_backoff_ms: parse_u64("DARKBOT_GATEWAY_SOURCE_BACKOFF_MS", 2_000)?,
             overview_interval_ms: parse_u64("DARKBOT_GATEWAY_OVERVIEW_INTERVAL_MS", 5_000)?,
+            feeds: parse_feeds(&env_or("DARKBOT_GATEWAY_FEEDS", ""))?,
         })
     }
 
@@ -128,4 +130,32 @@ fn parse_u64(key: &'static str, default: u64) -> Result<u64, ConfigError> {
             .map_err(|_| ConfigError::Invalid { key, value: v }),
         Err(_) => Ok(default),
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct FeedSpec {
+    pub project: crate::proto::ProjectId,
+    pub label: &'static str,
+    pub socket: PathBuf,
+}
+pub fn parse_feeds(input: &str) -> Result<Vec<FeedSpec>, ConfigError> {
+    use crate::proto::ProjectId;
+    let mut out: Vec<FeedSpec> = Vec::new();
+    for entry in input.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let (name, path) = entry.split_once('=').ok_or_else(|| ConfigError::Invalid {
+            key: "DARKBOT_GATEWAY_FEEDS", value: entry.into()
+        })?;
+        let (project, label) = match name.trim() {
+            "project0" => (ProjectId::Project0, "Project 0"),
+            "bsc" => (ProjectId::Bsc, "BSC"),
+            "solana" => (ProjectId::Solana, "Solana"),
+            _ => return Err(ConfigError::Invalid {key:"DARKBOT_GATEWAY_FEEDS", value:entry.into()}),
+        };
+        if path.trim().is_empty() || !path.trim().starts_with('/')
+            || out.iter().any(|f| f.project == project) {
+            return Err(ConfigError::Invalid {key:"DARKBOT_GATEWAY_FEEDS", value:entry.into()});
+        }
+        out.push(FeedSpec { project, label, socket: PathBuf::from(path.trim()) });
+    }
+    Ok(out)
 }

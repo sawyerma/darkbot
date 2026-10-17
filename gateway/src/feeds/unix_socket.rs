@@ -7,19 +7,19 @@ use crate::{engine::{EngineFeed, FeedError, FeedMessage}, hub::StateUpdate,
  proto::{engine_frame, EngineFrame, EngineHello, ProjectId, StateQuality, TopicId},
  topics, SCHEMA_ID};
 
-pub struct UnixSocketFeed { path: PathBuf, max_frame: usize }
+pub struct UnixSocketFeed { project: ProjectId, label: &'static str, path: PathBuf, max_frame: usize }
 impl UnixSocketFeed {
- pub fn new(path: PathBuf, max: usize) -> Arc<Self> {
-  Arc::new(Self {path, max_frame: max.saturating_add(4096)})
+ pub fn new(project: ProjectId, label: &'static str, path: PathBuf, max: usize) -> Arc<Self> {
+  Arc::new(Self {project, label, path, max_frame: max.saturating_add(4096)})
  }
  fn validate(&self, h: &EngineHello) -> Result<HashSet<TopicId>, FeedError> {
-  if h.project != ProjectId::Project0 as i32 || h.schema_id != SCHEMA_ID || h.source_id.is_empty() || h.generation == 0 {
+  if h.project != self.project as i32 || h.schema_id != SCHEMA_ID || h.source_id.is_empty() || h.generation == 0 {
    return Err(FeedError::Mismatch("invalid project0 hello identity or schema".into()));
   }
   let mut ids = HashSet::new();
   for raw in &h.topics {
    let spec = topics::spec_from_wire(*raw).ok_or_else(|| FeedError::Mismatch("unknown topic".into()))?;
-   if spec.project != ProjectId::Project0 || !spec.available() || !spec.is_state() || !ids.insert(spec.id) {
+   if spec.project != self.project || !spec.available() || !spec.is_state() || !ids.insert(spec.id) {
     return Err(FeedError::Mismatch("unauthorized, unavailable or duplicate topic".into()));
    }
   }
@@ -43,8 +43,8 @@ async fn next(s: &mut UnixStream, max: usize) -> Result<Option<EngineFrame>, Str
 }
 #[async_trait]
 impl EngineFeed for UnixSocketFeed {
- fn project(&self) -> ProjectId { ProjectId::Project0 }
- fn label(&self) -> &'static str { "Project 0" }
+ fn project(&self) -> ProjectId { self.project }
+ fn label(&self) -> &'static str { self.label }
  async fn attach(&self) -> Result<mpsc::Receiver<FeedMessage>, FeedError> {
   let mut stream = UnixStream::connect(&self.path).await.map_err(|e| FeedError::Unreachable(e.to_string()))?;
   let first = tokio::time::timeout(Duration::from_secs(5), next(&mut stream, self.max_frame))
