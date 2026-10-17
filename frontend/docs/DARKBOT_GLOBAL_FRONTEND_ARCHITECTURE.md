@@ -119,6 +119,10 @@ frontend/src/
 
 **Keine zweite Frontend-/Backend-Engine:** Gemeinsam sind ausschließlich Layout, Anzeige-Primitives, Statusadapterschnittstellen und Transport. Programmlogik/State, RPC-Pools, Wallets, Journal, Sicherheitsgate, Kapitalreservierungen und Transaktionssendung bleiben **in ihrem jeweiligen Projekt**; keine gemeinsame generische „Trade Engine“ im Browser.
 
+## Gateway-Protokoll v1 – verbindliche Präzisierung (2026-10-17)
+
+**[GATEWAY_STREAM_PROTOCOL_V1.md](GATEWAY_STREAM_PROTOCOL_V1.md)** ist für Transport/Resync/Commands der neuere und spezifischere Vertrag. Die unten historisch formulierte Idee eines einzigen globalen Snapshots/einer globalen Sequenz wird **ersetzt** durch route-spezifische Topics, je Topic Generation und Sequenz, Replay-Ring und Resume, Snapshot nur beim Erstbezug/Ringverlust. Kritische Events: projektspezifisch **durabel vor Push**, at-least-once Replay/Dedupe, bei nicht rekonstruiertem Verlust `INCOMPLETE`; State: revisioniertes, bounded Coalescing. Kein UI-Polling. Binär mit gemeinsamem Protobuf-Schema und Rust/TS-Codegen **SOLL**, kein ungetestetes eigenes Format. Commands laufen getrennt vom Stream mit idempotentem ACK und bestätigtem Lifecycle. Diese Präzisierung ist **dokumentiert, nicht implementiert** und erweitert keine LIVE-Freigabe.
+
 ## 6. Aktualisierung und Speichern
 
 **Heute:** `apiGet<T>` und ein WS-Client existieren. Die Projektkarten in `OverviewPage` sind statisch, P0-Bot-Entwürfe liegen nur im React-Arbeitsspeicher. **Nichts davon beweist einen aktiven Bot oder dauerhafte Profilpersistenz**.

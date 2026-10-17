@@ -2,6 +2,10 @@
 
 Single React frontend for all DarkBot backend domains.
 
+## Gateway-Protokoll und Push-Refresh
+
+- **[Gateway Stream Protocol v1](docs/GATEWAY_STREAM_PROTOCOL_V1.md)** — verbindlicher SOLL-Vertrag für Topics, per-Topic Resume, durable Ereignisse, State-Coalescing, getrennte Commands, Protobuf-Codegen, Heartbeat, Stores und Replay. **Noch keine Backend-Implementierung.**
+
 ## Gesamtarchitektur
 
 - **[DarkBot Global Frontend Architecture](docs/DARKBOT_GLOBAL_FRONTEND_ARCHITECTURE.md)** — verbindlicher gemeinsamer DarkBot-Host mit globaler Overview, eigenständigen Project_0-/BSC-Projektoberflächen, späteren Projektmodulen und isolierten Backend-/Wallet-/LIVE-Gates. Design: Graphite V0. **Dokumentiert, nicht bereits in alle Domains implementiert.**

@@ -8,6 +8,10 @@
 
 **Nachschlagewerke:** [verifizierte Variablen](PROJECT_0_CODE_MAP.md) · [geplanter Control-/API-Vertrag](CONTROL_PROTOCOL.md) · **[verbindliche Boot-/Unbounded-/Backtest-/Optimizer-Spezifikation](STARTUP_BACKTEST_OPTIMIZATION.md)**. Die v1.1-Erweiterung ersetzt feste Laufzeit-Presets durch einen typisierten, frei konfigurierbaren Horizont.
 
+## Gateway-/Datenvertrag – verpflichtend vor WebSocket-Implementierung (2026-10-17)
+
+**[GATEWAY_STREAM_PROTOCOL_V1.md](GATEWAY_STREAM_PROTOCOL_V1.md)** ist die konkrete Datenfluss-Verfeinerung: route-basierte Topic-Subscriptions, Topic-Sequenzen und Resume, langlebige echte Ereignis-Evidence getrennt von flüchtigem State, eigener idempotenter autorisierter Command-Weg, Protobuf-Schema mit Codegen, pro Projekt isolierte Stores, App-Heartbeat/State-Hash, geteilte Graphite-Designtokens und deterministischer Offline-Replay ohne Fake-LIVE. Dies ersetzt im SOLL den alten globalen Snapshot und globalen Event-`seq`; die vorhandene TS-JSON-Realtime-Implementierung ist bis zur Migration nur IST. **Kein Polling**. Der Vertrag ändert keine P0-4h- oder BSC-G0.7-Priorität, keine freigegebenen LIVE-Aktionen.
+
 ## DarkBot Gesamtfrontend – verbindliche Host-Architektur (2026-10-17)
 
 **Abgenommen:** [DARKBOT_GLOBAL_FRONTEND_ARCHITECTURE.md](DARKBOT_GLOBAL_FRONTEND_ARCHITECTURE.md) ist der verbindliche Hauptvertrag für **eine** React-App mit `DarkBot → /` (globale Übersicht aller Projekte), `/project-0` (unveränderte Project_0-Graphite-V0-UI), `/bsc` (eigene, später zu implementierende Graphite-BSC-UI) sowie vorhandener `/solana`-Route und zukünftiger Registrierung weiterer Projekte. Die globale Overview zeigt nur echte projektbezogene Prozess-/Run-/Health-/Latenz-/Finanzdaten; niemals erfundene Gewinne, vermischte Wallets, gemeinsame Signer oder einen generischen Echtgeld-Start-Knopf.

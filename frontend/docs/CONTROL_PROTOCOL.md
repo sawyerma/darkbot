@@ -68,6 +68,10 @@ p0ctl optimize --run RUN_ID --profile-space offline  # erst FEUI-07
 
 **Browser-Wire & JFI-Gate:** Browser-Transport typisiert/versioniert; bevorzugt binär, wenn erforderlich. Bestehende JSON-Browseransicht ist keine stillschweigende zusätzliche erlaubte Runtime-JSON-Schnittstelle neben Solana JSON-RPC und dem explizit gepinnten Jupiter-Build-Rand. Jede Ausnahme bedarf eines bewussten Vertragsabgleichs; keine internen `serde_json::Value` oder produktiven JSONL-Consumer.
 
+## 4a. Verbindliche Gateway-Transportpräzisierung (2026-10-17)
+
+**[GATEWAY_STREAM_PROTOCOL_V1.md](GATEWAY_STREAM_PROTOCOL_V1.md)** ist der spezifische neuere Vertrag für Topic-Subscriptions, pro-Topic Generation/Sequenz, Resume samt durablem Event-Catch-up, STATE/EVENT-Backpressure, Protobuf Rust/TS-Codegen, App-Heartbeat/Digest und separat autorisierte Commands. Die frühere pauschale Regel `Sequence-Gap → immer vollständiger globaler REST-Snapshot` und der alte einzelne `RealtimeEnvelope.seq` sind **nur IST/Altvertrag**. In der späteren Implementierung ist erst Resume pro Topic, dann gezielter Topic-Snapshot bei State-Lücke oder beweisbarer Event-Nachzug aus dem Backend erforderlich. Keine unqualifizierte LIVE- oder Wallet-Action.
+
 ## 5. Lifecycle, Readiness, Verifikation
 
 **State machine SOLL:** `STOPPED → PREFLIGHT → BOOTSTRAP → STREAM_READY → CAPTURE → QUIESCE → DRAIN → JOURNAL_SEALED → VERIFY → REPORT → COMPLETE` mit `DEGRADED`, `RECOVERING`, `ABORTED_INCOMPLETE`, `FAILED`, `BLOCKED`.
