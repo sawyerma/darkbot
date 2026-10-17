@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package darkbot.control.v1;
+
+import "darkbot/control/v1/numeric.proto";
+import "darkbot/control/v1/topics.proto";
+
+// Payload von TOPIC_ID_OVERVIEW_AGGREGATES (STATE). Publisher ist das Gateway selbst.
+// Reine Read-Zusammenfassung pro Projekt (Phasenplan §9.1). Keine Wallet-Details, keine
+// Bot-Zustände, keine Commands. Werte nur, wenn die Projektquelle sie belegt; sonst fehlen
+// sie (optional) und die UI zeigt "—".
+
+enum SourceState {
+  SOURCE_STATE_UNSPECIFIED = 0;
+  SOURCE_STATE_NOT_CONNECTED = 1;   // Gateway hat die Engine seit Start nie gesehen
+  SOURCE_STATE_CONNECTED = 2;
+  SOURCE_STATE_STALE = 3;           // Engine liefert, aber Freshness abgelaufen
+  SOURCE_STATE_DETACHED = 4;        // Engine war da und ist weg
+}
+
+// Runtime-Readiness ist keine LIVE-Freigabe. READY heißt: Engine läuft und ist erreichbar.
+enum Readiness {
+  READINESS_UNSPECIFIED = 0;
+  READINESS_UNKNOWN = 1;
+  READINESS_BLOCKED = 2;
+  READINESS_READY = 3;
+}
+
+enum FinanceQuality {
+  FINANCE_QUALITY_UNSPECIFIED = 0;
+  FINANCE_QUALITY_UNKNOWN = 1;      // keine qualifizierte Quelle
+  FINANCE_QUALITY_PARTIAL = 2;      // Quelle vorhanden, nicht finalisiert
+  FINANCE_QUALITY_FINALIZED = 3;    // finalisierter Backend-Snapshot
+}
+
+message LatencySample {
+  optional uint32 p95_ms = 1;
+  uint32 window_s = 2;
+  uint32 samples = 3;
+}
+
+message FinanceSummary {
+  // Identität des Backend-Snapshots; gleiche ID wie in project0.finance.summary / wallets.state.
+  string finance_snapshot_id = 1;
+  FinanceQuality quality = 2;
+  // Vorzeichenbehaftet (Rust i128). Fehlt, wenn quality != FINALIZED.
+  SignedDecimal realized_net_pnl_usd_micro_signed = 3;
+  optional uint64 total_capital_usd_micro = 4;
+  int64 as_of_unix_ns = 5;
+}
+
+message ProjectSummary {
+  ProjectId project = 1;
+  string label = 2;                  // "Project 0"
+  string domain = 3;                 // "Solana / Marginfi"
+  SourceState source = 4;
+  Readiness readiness = 5;
+  // Nur Anzeige. Autorität bleibt die Engine; das Gateway setzt den Wert nie selbst auf true.
+  // Presence distinguishes unknown from explicit false; no UI authority is implied.
+  optional bool live_authorized = 6;
+  optional uint32 active_bots = 7;
+  optional uint32 active_jobs = 8;
+  optional uint32 active_captures = 9;
+  repeated string warnings = 10;
+  LatencySample rpc_latency = 11;
+  FinanceSummary finance = 12;
+  int64 source_timestamp_unix_ns = 13;
+  string source_id = 14;
+}
+
+message GlobalFinance {
+  // Nur true bei gleicher Bewertung, Finality, Zeitbasis und ohne Wallet-Doppelzählung.
+  bool available = 1;
+  string unavailable_reason = 2;
+  SignedDecimal net_pnl_usd_micro_signed = 3;
+  optional uint64 total_capital_usd_micro = 4;
+}
+
+message OverviewAggregates {
+  repeated ProjectSummary projects = 1;
+  GlobalFinance global = 2;
+  uint32 projects_connected = 3;
+  int64 computed_at_unix_ns = 4;
+}

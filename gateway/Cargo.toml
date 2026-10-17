@@ -1,0 +1,44 @@
+[package]
+name = "darkbot-gateway"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+publish = false
+description = "DarkBot Control Gateway – dünner Read-/Command-Transport, keine Engine"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "darkbot-gateway"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws", "http1", "tokio"] }
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "set-header", "trace"] }
+http = "1"
+bytes = "1"
+prost = "0.13"
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1"
+parking_lot = "0.12"
+rand = "0.8"
+async-trait = "0.1"
+base64 = "0.22"
+
+[build-dependencies]
+prost-build = "0.13"
+protox = "0.7"
+
+[dev-dependencies]
+tokio-tungstenite = "0.23"
+futures-util = "0.3"
+
+[features]
+# In-Prozess-Feed ausschließlich für Tests. Nie in Produktion aktivieren.
+test-feed = []
