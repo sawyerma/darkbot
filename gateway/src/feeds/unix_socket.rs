@@ -14,7 +14,7 @@ impl UnixSocketFeed {
  }
  fn validate(&self, h: &EngineHello) -> Result<HashSet<TopicId>, FeedError> {
   if h.project != self.project as i32 || h.schema_id != SCHEMA_ID || h.source_id.is_empty() || h.generation == 0 {
-   return Err(FeedError::Mismatch("invalid project0 hello identity or schema".into()));
+   return Err(FeedError::Mismatch("engine hello project, identity, generation or schema mismatch".into()));
   }
   let mut ids = HashSet::new();
   for raw in &h.topics {
@@ -55,13 +55,16 @@ impl EngineFeed for UnixSocketFeed {
   let source: Arc<str> = Arc::from(hello.source_id);
   let generation = hello.generation;
   let max = self.max_frame;
-  let (tx, rx) = mpsc::channel(1);
+  let (tx, rx) = mpsc::channel(16);
   tokio::spawn(async move {
    loop {
     match next(&mut stream, max).await {
      Ok(Some(EngineFrame {msg:Some(engine_frame::Msg::State(s))})) => {
-      let topic = match TopicId::try_from(s.topic) {Ok(v) if allowed.contains(&v) => v, _ => break};
-      if s.source_id != source.as_ref() || s.generation != generation || s.seq == 0 || s.quality != StateQuality::Ok as i32 {break;}
+      let topic = match TopicId::try_from(s.topic) {Ok(v) if allowed.contains(&v) => v, _ => {warn!(topic=s.topic, "engine state topic not announced in hello");break;}};
+      if s.source_id != source.as_ref() || s.generation != generation || s.seq == 0 || s.quality != StateQuality::Ok as i32 {
+       warn!(topic=s.topic, received_source=%s.source_id, expected_source=%source, received_generation=s.generation, expected_generation=generation, seq=s.seq, quality=s.quality, "engine state rejected: envelope mismatch");
+       break;
+      }
       let u = StateUpdate {topic, generation, seq:s.seq, source_timestamp_unix_ns:s.source_timestamp_unix_ns,
        source_id:source.clone(), payload:s.payload};
       if tx.send(FeedMessage::State(u)).await.is_err() {break;}
@@ -70,8 +73,8 @@ impl EngineFeed for UnixSocketFeed {
       if tx.send(FeedMessage::Heartbeat).await.is_err() {break;}
      }
      Ok(None) => break,
-     Ok(_) => {warn!("invalid project0 IPC message");break;},
-     Err(e) => {warn!(error=%e,"project0 feed disconnected");break;}
+     Ok(_) => {warn!("invalid engine IPC message");break;},
+     Err(e) => {warn!(error=%e,"engine feed disconnected");break;}
     }
    }
   });

@@ -9,5 +9,7 @@ message StatusProjection {
   optional uint64 liquidation_events = 6;
   optional uint64 queue_bytes = 7;
   optional uint64 lag_frames = 8;
+  // MARKET_OBSERVER_STREAM_NOT_READY | MARKET_DATA_INCOMPLETE |
+  // MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED | MARKET_DATA_VALID
   string market_verdict = 9;
 }

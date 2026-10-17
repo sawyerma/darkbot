@@ -1,6 +1,7 @@
 syntax = "proto3";
 package darkbot.control.v1;
 import "darkbot/control/v1/stream.proto";
+import "darkbot/control/v1/topics.proto";
 message EngineHello {
   ProjectId project = 1;
   string schema_id = 2;
@@ -8,6 +9,8 @@ message EngineHello {
   uint64 generation = 4;
   repeated TopicId topics = 5;
 }
+// Engine StateFull must carry the Hello source_id and EXACT generation, seq > 0.
+// Engine reports StateQuality OK; Gateway owns STALE/DETACHED overlays.
 message EngineFrame {
   oneof msg {
     EngineHello hello = 1;
