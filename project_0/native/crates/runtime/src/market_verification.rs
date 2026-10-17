@@ -37,7 +37,8 @@ pub struct Job {
 }
 
 /// Slots per batch (one checkpoint each).
-const BATCH_SLOTS: u64 = 32;
+/// Slots per strict batch (also sizes the verifier budget in the capacity preflight).
+pub const BATCH_SLOTS: u64 = 32;
 /// Bounded read-ahead: produced slots fetched together, never more responses retained.
 const PREFETCH: usize = 8;
 

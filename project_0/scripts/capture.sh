@@ -213,7 +213,7 @@ cd "$REPO_ROOT"
 echo "C0-E1: build; capture starts after bootstrap and StreamReady; submission disabled"
 cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
   --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --bin p0-econ-replay \
-  --bin p0-journal 2>&1 | tee "$LOG_DIR/build.log" || {
+  --bin p0-journal --bin p0-capacity 2>&1 | tee "$LOG_DIR/build.log" || {
   echo "Build failed: $LOG_DIR/build.log" >&2; exit 2;
 }
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
@@ -230,24 +230,22 @@ print(json.load(open(sys.argv[1]))['duration_seconds'])
 PLAN
 )"
 echo "Capture: ${P0_ECON_DURATION_SECS}s; separate bootstrap, drain and verification budgets in the measurement plan"
-# The preserved 2026-10-08 four-hour evidence occupies ~43 GiB. Budget60GiB
-# for a new four-hour run; this is a storage guard, not an output-size guarantee.
-python3 - "$RUN_DIR" "$P0_ECON_DURATION_SECS" "$CONFIG_DIR" <<'STORAGE'
-import json, math, pathlib, shutil, sys
-run = pathlib.Path(sys.argv[1])
-duration = int(sys.argv[2])
-required_gib = max(8, math.ceil(60 * duration / 14400))
-free = shutil.disk_usage(run).free
-with (pathlib.Path(sys.argv[3]) / 'storage_preflight.json').open('x') as f:
-    json.dump({'free_bytes': free, 'required_bytes': required_gib * 2**30,
-               'duration_seconds': duration, 'passed': free >= required_gib * 2**30,
-               'basis': 'preserved four-hour evidence ~43GiB; conservative60GiB allocation'}, f, indent=2)
-    f.write('\n')
-if free < required_gib * 2**30:
-    print(f'Insufficient output storage: {free / 2**30:.1f} GiB free; require {required_gib} GiB. '
-          'Free space without deleting preserved evidence, or set P0_ECON_OUT_DIR on another volume.', file=sys.stderr)
-    raise SystemExit(2)
-STORAGE
+# SK-06 capacity preflight (native): measured lane rates of the newest sealed earlier runs, a write
+# and sync probe on this volume, OS memory/CPU, operational budgets and the verifier budget of the
+# selected chain-verify mode. A capture longer than 600 s starts only when QUALIFIED; the native
+# report capture/capacity_preflight.p0j is the record, storage_preflight.json its configuration render.
+CAPACITY_ARGS=(--duration "$P0_ECON_DURATION_SECS" --out "$CAPTURE_DIR" --capture-source "$P0_MARKET_SOURCE"
+  --basis-root "$P0_ECON_OUT_DIR" --exclude-run "$RUN_DIR" --storage-preflight-render "$CONFIG_DIR/storage_preflight.json")
+if [[ -n "$MEASUREMENT_CONFIG_INPUT" ]]; then
+  read -r -a VERIFY_ARGS <<< "$(python3 -c 'import json,sys
+v=json.load(open(sys.argv[1]))["config"]["verification"]
+print("--chain-verify",v["mode"],"--verify-rps",v["rps"],"--verify-calls",v["max_calls"],"--verify-seconds",v["max_seconds"],
+      "--verify-max-pages",v["max_pages"],"--verify-bytes",v["max_bytes"],"--verify-disk-bytes",v["max_disk_bytes"])' "$MEASUREMENT_CONFIG_INPUT")"
+  CAPACITY_ARGS+=("${VERIFY_ARGS[@]}")
+fi
+"$(dirname "$BIN")/p0-capacity" "${CAPACITY_ARGS[@]}" | tee "$LOG_DIR/capacity_preflight.txt" || {
+  echo "Capacity preflight: start not allowed (report: $LOG_DIR/capacity_preflight.txt). Nothing was deleted." >&2; exit 2;
+}
 # Binary journals (PERSIST-01); the daily summary is a frame of the opportunity journal.
 export P0_RECORD_PATH="$CAPTURE_DIR/opportunities.p0j"
 export P0_MT0_PATH="$CAPTURE_DIR/mt0.p0j"

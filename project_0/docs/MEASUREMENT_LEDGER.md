@@ -5559,3 +5559,19 @@ Base `ef60a4e`.
 - Open in SK-05: forecasts under real load NOT_MEASURED; pausing optional offline indexers (none exist yet, SK-08).
 
 Tests: storage 7/7 (adaptive decision bounds, disk reserve fail-closed with status/lag, plus the SK-03/04 set); market 104 + parity 2 unchanged; solana lib 72/72.
+
+## 2026-10-17 — SK-06: CapacityPreflight completed and wired into the launcher (LOCAL_PASS in scope; real basis NOT_MEASURED)
+
+Base `e000ecb` (completes WIP `0e0544d`). Evidence: [SK06_CAPACITY_20261017](evidence/SK06_CAPACITY_20261017/README.md). Readiness tracker: [C0E1_4H_READINESS](qualification/C0E1_4H_READINESS.md).
+
+- **Basis from every lane:** the newest ≤ 3 sealed complete runs of the requested capture source; all capture-time journals (market, Shadow evaluations, economics reports, owner evidence, MT0, phases) count, but only frames in the format the current binary writes (`payload::check_write`); crashed, incomplete, foreign-format, other-source and too-short runs are skipped with their reason. Program-transaction and slot rates come from the market journal.
+- **Mode-dependent verifier sizing:** `off` NOT_APPLICABLE (never blocked by a strict budget); `index`/`crosscheck` from the measured transaction rate (signatures, pages, calls, walltime); `strict` from the measured slot rate plus per-slot calls/bytes of earlier kept strict results. A too-small budget is BLOCKED with the flags to raise or `--chain-verify off` + later resume; a 4 h strict run with 2,000 calls is never strict-qualified. Provider quota for verification stays with the existing verification preflight.
+- **Added checks:** sync cost from the write probe vs. the stall budget, swap vs. system reserve, econ/winner/Shadow collections (UNVERIFIED while only count-bounded, SK-03), capture provider NOT_RUN (BOOT-04 needs permission). Disk need includes the verifier disk only when a mode is selected.
+- **Launcher:** `capture.sh` runs `p0-capacity` (built with the other release binaries) instead of the Python 60 GiB heuristic, with the run's verification budget; refusal stops before any capture. Native record `capture/capacity_preflight.p0j` (immutable); `storage_preflight.json` is a catalogued render of it for the pinned run store (`renders::storage_preflight_view`), replacing the WIP `--compat-json` writer that used `json!` (JFI-01).
+- **On this host:** no sealed `.p0j` run exists → every capture > 600 s is refused (CAPACITY_UNVERIFIED), 600 s calibration allowed; measured write 101.7–106.3 MiB/s, sync max 5.2–5.7 ms.
+
+Tests: `storage::preflight` 2/2 (mode sizing and blocks; basis from a real run directory incl. skip reasons, probe, immutable report, render CREATED/MATCHES/mismatch); launcher integration `test_measurement_plan` 4/4 with release binaries; clippy without findings in the changed files.
+
+Identity note: `market_verification.rs` (only `BATCH_SLOTS` made public) is a strict decoder pin, so strict `verification_spec_id`s of new verifications change; no local strict verification is in progress.
+
+Open: the real basis (calibration capture, needs explicit Mainnet permission); BOOT-04 provider evidence (C4); byte-bounded econ collections (SK-03/B1); removing the `storage_preflight.json` render needs a run-store re-pin decision (JFI-FIX-04).

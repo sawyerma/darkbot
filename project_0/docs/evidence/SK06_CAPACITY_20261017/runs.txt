@@ -1,0 +1,106 @@
+$ p0-capacity --duration 14400 --chain-verify off --basis-root data/runs --out <scratch> --probe-mib 64
+PROJECT 0 CAPACITY PREFLIGHT duration=14400s source=logs chain_verify=off verdict=CAPACITY_UNVERIFIED start_allowed=false
+  basis: 0 run(s), 0s, 0 skipped
+  data_rate            CAPACITY_UNVERIFIED  no sealed earlier run of source logs in the current journal format (0 candidate(s) skipped); run a calibration capture first
+  disk                 CAPACITY_UNVERIFIED  87.9 GiB free; need unknown without a data-rate basis
+  write_rate           CAPACITY_UNVERIFIED  101.2 MiB/s sustained (measured); data rate unknown
+  sync_latency         QUALIFIED            76 sync(s): mean 4.96 ms, max 8.62 ms vs stall budget 30s
+  ram_backlog          CAPACITY_UNVERIFIED  max 512 MiB; market burst unmeasured
+  bounded_collections  CAPACITY_UNVERIFIED  econ/winner/Shadow retained collections are count-bounded, not byte-bounded (SK-03 open)
+  physical_memory      QUALIFIED            128.0 GiB physical ≥ max + system reserve
+  memory_pressure      QUALIFIED            level 1
+  swap                 QUALIFIED            2.31 GiB in use ≤ system reserve
+  cpu                  QUALIFIED            load 4.50 on 16 cores
+  verification         NOT_APPLICABLE       chain verification off: verification NOT_RUN by choice, no chain proof for this run
+  provider             NOT_RUN              capture provider capacity (WSS liveness, 429, FREE_ONLY quota, archive) not probed: BOOT-04 network audit needs explicit permission
+  START BLOCKED: resolve the checks above or run a calibration capture (≤ 600 s, explicit Mainnet permission)
+exit=2
+
+$ p0-capacity --duration 14400 --chain-verify index --basis-root data/runs --out <scratch> --probe-mib 64
+PROJECT 0 CAPACITY PREFLIGHT duration=14400s source=logs chain_verify=index verdict=CAPACITY_UNVERIFIED start_allowed=false
+  basis: 0 run(s), 0s, 0 skipped
+  data_rate            CAPACITY_UNVERIFIED  no sealed earlier run of source logs in the current journal format (0 candidate(s) skipped); run a calibration capture first
+  disk                 CAPACITY_UNVERIFIED  87.9 GiB free; need unknown without a data-rate basis
+  write_rate           CAPACITY_UNVERIFIED  108.6 MiB/s sustained (measured); data rate unknown
+  sync_latency         QUALIFIED            76 sync(s): mean 4.57 ms, max 5.48 ms vs stall budget 30s
+  ram_backlog          CAPACITY_UNVERIFIED  max 512 MiB; market burst unmeasured
+  bounded_collections  CAPACITY_UNVERIFIED  econ/winner/Shadow retained collections are count-bounded, not byte-bounded (SK-03 open)
+  physical_memory      QUALIFIED            128.0 GiB physical ≥ max + system reserve
+  memory_pressure      QUALIFIED            level 1
+  swap                 QUALIFIED            2.31 GiB in use ≤ system reserve
+  cpu                  QUALIFIED            load 4.50 on 16 cores
+  verification         CAPACITY_UNVERIFIED  index sizing needs the measured program transaction rate (no basis)
+  provider             NOT_RUN              capture provider capacity (WSS liveness, 429, FREE_ONLY quota, archive) not probed: BOOT-04 network audit needs explicit permission
+  START BLOCKED: resolve the checks above or run a calibration capture (≤ 600 s, explicit Mainnet permission)
+exit=2
+
+$ p0-capacity --duration 14400 --chain-verify strict --basis-root data/runs --out <scratch> --probe-mib 64
+PROJECT 0 CAPACITY PREFLIGHT duration=14400s source=logs chain_verify=strict verdict=CAPACITY_UNVERIFIED start_allowed=false
+  basis: 0 run(s), 0s, 0 skipped
+  data_rate            CAPACITY_UNVERIFIED  no sealed earlier run of source logs in the current journal format (0 candidate(s) skipped); run a calibration capture first
+  disk                 CAPACITY_UNVERIFIED  87.9 GiB free; need unknown without a data-rate basis
+  write_rate           CAPACITY_UNVERIFIED  108.3 MiB/s sustained (measured); data rate unknown
+  sync_latency         QUALIFIED            76 sync(s): mean 4.60 ms, max 5.51 ms vs stall budget 30s
+  ram_backlog          CAPACITY_UNVERIFIED  max 512 MiB; market burst unmeasured
+  bounded_collections  CAPACITY_UNVERIFIED  econ/winner/Shadow retained collections are count-bounded, not byte-bounded (SK-03 open)
+  physical_memory      QUALIFIED            128.0 GiB physical ≥ max + system reserve
+  memory_pressure      QUALIFIED            level 1
+  swap                 QUALIFIED            2.31 GiB in use ≤ system reserve
+  cpu                  QUALIFIED            load 4.50 on 16 cores
+  verification         CAPACITY_UNVERIFIED  strict sizing needs the measured slot rate (no basis); context only: ~36000 slots at a nominal 400 ms vs 2000 configured calls — never strict-qualified without measurement
+  provider             NOT_RUN              capture provider capacity (WSS liveness, 429, FREE_ONLY quota, archive) not probed: BOOT-04 network audit needs explicit permission
+  START BLOCKED: resolve the checks above or run a calibration capture (≤ 600 s, explicit Mainnet permission)
+exit=2
+
+$ p0-capacity --duration 600 --chain-verify off --basis-root data/runs --out <scratch> --probe-mib 64
+PROJECT 0 CAPACITY PREFLIGHT duration=600s source=logs chain_verify=off verdict=CAPACITY_UNVERIFIED start_allowed=true
+  basis: 0 run(s), 0s, 0 skipped
+  data_rate            CAPACITY_UNVERIFIED  no sealed earlier run of source logs in the current journal format (0 candidate(s) skipped); run a calibration capture first
+  disk                 CAPACITY_UNVERIFIED  87.9 GiB free; need unknown without a data-rate basis
+  write_rate           CAPACITY_UNVERIFIED  110.1 MiB/s sustained (measured); data rate unknown
+  sync_latency         QUALIFIED            76 sync(s): mean 4.52 ms, max 5.25 ms vs stall budget 30s
+  ram_backlog          CAPACITY_UNVERIFIED  max 512 MiB; market burst unmeasured
+  bounded_collections  CAPACITY_UNVERIFIED  econ/winner/Shadow retained collections are count-bounded, not byte-bounded (SK-03 open)
+  physical_memory      QUALIFIED            128.0 GiB physical ≥ max + system reserve
+  memory_pressure      QUALIFIED            level 1
+  swap                 QUALIFIED            2.31 GiB in use ≤ system reserve
+  cpu                  QUALIFIED            load 4.38 on 16 cores
+  verification         NOT_APPLICABLE       chain verification off: verification NOT_RUN by choice, no chain proof for this run
+  provider             NOT_RUN              capture provider capacity (WSS liveness, 429, FREE_ONLY quota, archive) not probed: BOOT-04 network audit needs explicit permission
+  CALIBRATION CAPTURE: start allowed without a qualified basis (≤ 600 s); its sealed journals become the basis
+exit=0
+
+$ p0-capacity --duration 14400 --chain-verify off --basis-root data/econ4h --out <scratch> --probe-mib 64
+PROJECT 0 CAPACITY PREFLIGHT duration=14400s source=logs chain_verify=off verdict=CAPACITY_UNVERIFIED start_allowed=false
+  basis: 0 run(s), 0s, 22 skipped
+    skipped data/econ4h/market5h_20261011T010758Z: NO_JOURNAL
+    skipped data/econ4h/market10m_20261011T003528Z: NO_JOURNAL
+    skipped data/econ4h/market10m_20261011T003358Z: NO_JOURNAL
+    skipped data/econ4h/market10m_20261011T000202Z: NO_JOURNAL
+    skipped data/econ4h/live12s_20261010T232513Z: NO_JOURNAL
+    skipped data/econ4h/live12s_20261010T230146Z: NO_JOURNAL
+    skipped data/econ4h/econ30m_20261010T220741Z: NO_JOURNAL
+    skipped data/econ4h/econ4h_20261010T204530Z: NO_JOURNAL
+    skipped data/econ4h/econ4h_20261010T202213Z: NO_JOURNAL
+    skipped data/econ4h/econ4h_20261010T201246Z: NO_JOURNAL
+    skipped data/econ4h/c0e1_gap_smoke_20261010T195016Z: NO_JOURNAL
+    skipped data/econ4h/c0e1_gap_smoke_20261010T191322Z: NO_JOURNAL
+    skipped data/econ4h/c0e1_gap_smoke_20261010T191151Z: NO_JOURNAL
+    skipped data/econ4h/c0e1_gap_smoke_20261010T125859Z: NO_JOURNAL
+    skipped data/econ4h/c0e1_gap_smoke_20261010T131358Z: NO_JOURNAL
+    skipped data/econ4h/c0e1_gap_smoke_20261010T124148Z: NO_JOURNAL
+  data_rate            CAPACITY_UNVERIFIED  no sealed earlier run of source logs in the current journal format (22 candidate(s) skipped); run a calibration capture first
+  disk                 CAPACITY_UNVERIFIED  87.9 GiB free; need unknown without a data-rate basis
+  write_rate           CAPACITY_UNVERIFIED  107.3 MiB/s sustained (measured); data rate unknown
+  sync_latency         QUALIFIED            76 sync(s): mean 4.58 ms, max 5.50 ms vs stall budget 30s
+  ram_backlog          CAPACITY_UNVERIFIED  max 512 MiB; market burst unmeasured
+  bounded_collections  CAPACITY_UNVERIFIED  econ/winner/Shadow retained collections are count-bounded, not byte-bounded (SK-03 open)
+  physical_memory      QUALIFIED            128.0 GiB physical ≥ max + system reserve
+  memory_pressure      QUALIFIED            level 1
+  swap                 QUALIFIED            2.31 GiB in use ≤ system reserve
+  cpu                  QUALIFIED            load 4.38 on 16 cores
+  verification         NOT_APPLICABLE       chain verification off: verification NOT_RUN by choice, no chain proof for this run
+  provider             NOT_RUN              capture provider capacity (WSS liveness, 429, FREE_ONLY quota, archive) not probed: BOOT-04 network audit needs explicit permission
+  START BLOCKED: resolve the checks above or run a calibration capture (≤ 600 s, explicit Mainnet permission)
+exit=2
+

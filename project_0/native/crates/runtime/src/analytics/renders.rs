@@ -167,6 +167,51 @@ pub fn ensure(paths: &RunPaths, create: bool) -> Result<Vec<(PathBuf, &'static s
     Ok(outcome)
 }
 
+/// `storage_preflight.json`: the run-configuration part the pinned run store requires
+/// (`CONFIG_REQUIRED`), derived from the native capacity report, which stays the record
+/// (JFI-FIX-04 transitional render; removed when the run store is re-pinned).
+#[derive(serde::Serialize)]
+struct StoragePreflightView<'a> {
+    schema: &'static str,
+    native_report: &'a str,
+    native_report_sha256: String,
+    duration_seconds: u64,
+    verdict: &'static str,
+    start_allowed: bool,
+    free_bytes: Option<u64>,
+    required_bytes: Option<u64>,
+}
+
+/// Renders `output` from the sealed capacity report; an existing file must be byte-identical.
+pub fn storage_preflight_view(report: &Path, output: &Path) -> io::Result<&'static str> {
+    use crate::storage::preflight::CapacityReport;
+    let r: CapacityReport = journal::read_typed_value(report)?;
+    let view = StoragePreflightView {
+        schema: "Project0/StoragePreflightRender/1",
+        native_report: crate::storage::preflight::REPORT_JOURNAL,
+        native_report_sha256: journal::hex(&journal::file_sha256(report)?),
+        duration_seconds: r.request.duration_s,
+        verdict: r.verdict.as_str(),
+        start_allowed: r.start_allowed,
+        free_bytes: r.environment.free_disk_bytes,
+        required_bytes: r.disk_need_bytes,
+    };
+    let mut bytes = serde_json::to_vec_pretty(&view).map_err(io::Error::other)?;
+    bytes.push(b'\n');
+    if output.exists() {
+        return if std::fs::read(output)? == bytes {
+            Ok("MATCHES")
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "RENDER_MISMATCH",
+            ))
+        };
+    }
+    write_new(output, &bytes)?;
+    Ok("CREATED")
+}
+
 /// Fresh file only, complete or absent: written beside the target and linked into place.
 fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write;
