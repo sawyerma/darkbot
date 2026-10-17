@@ -118,6 +118,19 @@ impl<T> Consumer<T> {
         }
     }
 
+    /// Like `pop_timeout`, but `Err(())` once every producer is gone and the queue is empty,
+    /// so a consumer thread can tell a quiet channel from a closed one.
+    pub fn pop_timeout_or_closed(&self, timeout: Duration) -> Result<Option<T>, ()> {
+        match self.rx.recv_timeout(timeout) {
+            Ok(v) => {
+                self.counters.received.fetch_add(1, Ordering::Relaxed);
+                Ok(Some(v))
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(()),
+        }
+    }
+
     pub fn stats(&self) -> ChannelStats {
         stats(self.name, self.capacity, &self.counters)
     }

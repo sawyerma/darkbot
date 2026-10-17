@@ -2,6 +2,7 @@
 use super::rows::{MarketCoverage, MarketLiquidation, MarketTransaction};
 use super::*;
 use crate::analytics::journal;
+use crate::storage::writer::{MarketJournalWorker, StorageMetrics, WriterConfig};
 
 // ------------------------------------------------------------------------------------------
 // Output sink
@@ -29,6 +30,8 @@ pub struct MarketJournalBinding {
     pub root_sha256: String,
     pub status: &'static str,
     pub views_are: &'static str,
+    /// SK-03/SK-04: measured writer lane and capture byte budget of this journal.
+    pub storage: StorageMetrics,
 }
 
 /// Batch sink of the strict verifier: the batch journal plus the three legacy views the pinned
@@ -65,7 +68,7 @@ impl MarketSink for JsonlSink {
                 .collect();
             let refs: Vec<(Option<u16>, &Path)> =
                 views.iter().map(|(k, p)| (*k, p.as_path())).collect();
-            journal::export_views(&self.inner.writer.path, &refs, false)?;
+            journal::export_views(&self.inner.run_dir.join(MARKET_JOURNAL), &refs, false)?;
             self.exported = true;
         }
         Ok(())
@@ -81,32 +84,33 @@ pub const MARKET_VIEWS: [(u16, &str); 3] = [
     (journal::kind::MARKET_COVERAGE, "coverage.jsonl"),
 ];
 
-/// Production market sink: every row is one typed frame of `market.p0j`, written unbuffered on
-/// the capture thread (SK-04 batch writer OPEN). No view is rendered during or after capture;
-/// `p0-journal renders` exports them explicitly offline.
+/// Production market sink: every row is one typed frame of `market.p0j`. The capture thread
+/// only encodes and admits rows within the byte budget; the dedicated writer lane writes them
+/// (SK-03/SK-04). No view is rendered during or after capture; `p0-journal renders` exports
+/// them explicitly offline.
 pub struct JournalSink {
-    writer: journal::Writer,
+    writer: Option<MarketJournalWorker>,
     run_dir: PathBuf,
     rows: u64,
-    finished: bool,
 }
 impl JournalSink {
-    /// Never overwrites: neither the journal nor any of its views may exist yet.
+    /// Never overwrites: neither the journal nor any of its views may exist yet. Budgets and
+    /// batching come from the active operational configuration.
     pub fn create(run_dir: &Path) -> Result<Self, String> {
+        Self::create_with(run_dir, WriterConfig::from_active())
+    }
+    pub fn create_with(run_dir: &Path, cfg: WriterConfig) -> Result<Self, String> {
         for (_, name) in MARKET_VIEWS {
             let view = run_dir.join(name);
             if view.exists() {
                 return Err(format!("cannot create {}: exists", view.display()));
             }
         }
-        let path = run_dir.join(MARKET_JOURNAL);
-        let writer = journal::Writer::create(&path)
-            .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
+        let writer = MarketJournalWorker::start(&run_dir.join(MARKET_JOURNAL), cfg)?;
         Ok(Self {
-            writer,
+            writer: Some(writer),
             run_dir: run_dir.into(),
             rows: 0,
-            finished: false,
         })
     }
     fn append<P: crate::analytics::payload::Payload>(
@@ -122,20 +126,27 @@ impl JournalSink {
             rx_ns,
             ..Default::default()
         };
-        self.writer.append_typed(provenance, row)?;
+        self.writer
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("MARKET_JOURNAL_ALREADY_FINISHED"))?
+            .submit(provenance, row)?;
         self.rows += 1;
         Ok(())
     }
     fn seal(&mut self, complete: bool) -> std::io::Result<MarketJournalBinding> {
-        self.finished = true;
-        let durable = self.writer.seal(complete)?;
+        let writer = self
+            .writer
+            .take()
+            .ok_or_else(|| std::io::Error::other("MARKET_JOURNAL_ALREADY_FINISHED"))?;
+        let sealed = writer.seal(complete)?;
         Ok(MarketJournalBinding {
-            schema: "Project0/MarketJournalBinding/2",
+            schema: "Project0/MarketJournalBinding/3",
             journal: MARKET_JOURNAL,
             event_frames: self.rows,
-            root_sha256: journal::hex(&durable.hash),
+            root_sha256: journal::hex(&sealed.durable.hash),
             status: if complete { "COMPLETE" } else { "INCOMPLETE" },
             views_are: "typed journal frames; legacy JSONL views only by explicit offline export",
+            storage: sealed.metrics,
         })
     }
 }
@@ -149,25 +160,13 @@ impl MarketSink for JournalSink {
     fn coverage(&mut self, row: &MarketCoverage) -> std::io::Result<()> {
         self.append(row, row.slot(), row.t_rx_ns())
     }
-    /// Frames are written unbuffered, so every row already left the process; durability is
-    /// the fsync at seal.
+    /// The writer lane flushes on its batch/interval bounds and syncs on its interval; durability
+    /// of the whole journal is the sync at seal (OS-buffered frames are not crash-safe before).
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
     fn finish(&mut self) -> std::io::Result<Option<MarketJournalBinding>> {
-        if self.finished {
-            return Err(std::io::Error::other("MARKET_JOURNAL_ALREADY_FINISHED"));
-        }
         self.seal(true).map(Some)
     }
 }
-impl Drop for JournalSink {
-    /// An early exit (warmup failure, error path) still seals the journal INCOMPLETE.
-    fn drop(&mut self) {
-        if !self.finished {
-            if let Err(e) = self.seal(false) {
-                eprintln!("MARKET_JOURNAL_INCOMPLETE {e}");
-            }
-        }
-    }
-}
+// An early exit (warmup failure, error path) drops the worker, which seals INCOMPLETE.

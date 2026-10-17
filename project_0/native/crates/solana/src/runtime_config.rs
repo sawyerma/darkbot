@@ -68,6 +68,13 @@ parameters! {
     fe_calls = 3, "requests", "P0_FE_CALLS";
     fe_seconds = 30, "s", "P0_FE_SECONDS";
     fe_max_mib = 16, "MiB", "P0_FE_MAX_MIB";
+    market_capture_initial_mib = 64, "MiB", "P0_MARKET_CAPTURE_INITIAL_MIB";
+    market_capture_max_mib = 512, "MiB", "P0_MARKET_CAPTURE_MAX_MIB";
+    system_reserve_mib = 4096, "MiB", "P0_SYSTEM_RESERVE_MIB";
+    market_writer_batch_frames = 512, "frames", "P0_MARKET_WRITER_BATCH_FRAMES";
+    market_writer_flush_ms = 1000, "ms", "P0_MARKET_WRITER_FLUSH_MS";
+    market_writer_sync_ms = 60000, "ms", "P0_MARKET_WRITER_SYNC_MS";
+    market_writer_stall_ms = 30000, "ms", "P0_MARKET_WRITER_STALL_MS";
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

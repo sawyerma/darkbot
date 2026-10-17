@@ -1059,6 +1059,7 @@ dependencies = [
  "drift-mocks",
  "juplend-mocks",
  "kamino-mocks",
+ "libc",
  "marginfi-type-crate",
  "rayon",
  "reqwest",

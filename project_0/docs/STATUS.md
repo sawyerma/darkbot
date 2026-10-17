@@ -277,10 +277,10 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | JFI-FIX-07 Jupiter adapter | `/swap/v2/build` | wire exception in PHASENPLAN JFI-02 (`f0da568`) | OPEN | typed consumer behind the wire adapter |
 | JFI remaining kinds | `MEASUREMENT_PHASE`, `MT0_SNAPSHOT`, `FE01_*`, `ECON_*`, `C0_CENSUS_ACCOUNT/GROUP` import | `LEGACY_WRITABLE` list | OPEN | migrate each kind, then remove from `LEGACY_WRITABLE` |
 | SK-01 three layers, one truth | `.p0j` journal; typed market capture (A2) | PERSIST entries; ledger 2026-10-17 | PARTIAL | strict batch views/checkpoints and reports still JSON (A3/B7) |
-| SK-02 module structure | — | — | OPEN | `storage/` and `offline_analysis/` do not exist; create only files actually needed |
-| SK-03 hard RAM byte budget | bounded channels (count only) | — | OPEN | `StorageConfig` (`initial_mib`/`max_mib`/`system_reserve_mib`, queue/batch budgets) in the typed operational config; `MemoryBudget`/`BytePermit`; RSS/swap observation; EconWorker/winner/shadow collections byte-bounded |
-| SK-04 separate batch writer | `JournalSink` writes every typed frame unbuffered on the capture thread | `market/sink.rs` | OPEN | dedicated `MarketJournalWorker` behind the existing bounded channel; bounded batches; configurable sync points; FE-04/P8 durability unchanged |
-| SK-05 backpressure / 48 h availability | — | — | OPEN | stall handling within `max_mib`, INCOMPLETE/HALT instead of silent drop |
+| SK-02 module structure | `storage/{budget,writer}.rs` | ledger 2026-10-17 (SK-03/04) | PARTIAL | `segments`/`preflight` when SK-06/07 are built; `offline_analysis/` with SK-08 only |
+| SK-03 hard RAM byte budget | `storage/budget.rs`, operational config `market_capture_*`, `system_reserve_mib` | ledger 2026-10-17 (SK-03/04) | PARTIAL · LOCAL_PASS (capture queue) | EconWorker/winner/shadow collections byte-bounded; swap/pressure observation; real-load evidence NOT_MEASURED |
+| SK-04 separate batch writer | `storage/writer.rs` `MarketJournalWorker`, `Writer::append_batch` | ledger 2026-10-17 (SK-03/04) | LOCAL_PASS | crash/power-loss tail and real-load throughput NOT_MEASURED |
+| SK-05 backpressure / 48 h availability | admission waits ≤ stall budget, then INCOMPLETE (never a silent drop) | ledger 2026-10-17 (SK-03/04) | PARTIAL | terminal backlog/exhaustion forecast; optional-indexer pause |
 | SK-06 CapacityPreflight | — | PERSIST-05 synthetic probe only (65,111 / 111,481 frames/s; 1.077× / 1.746× JSONL size) | OPEN · NOT_MEASURED | 4/24/48 h preflight from real rates; CAPACITY_UNVERIFIED otherwise |
 | SK-07 segmentation | one `market.p0j` per run | — | OPEN | hash/sequence-chained segments, rotation/seal/recovery, cross-segment reader |
 | SK-08 optional SQLite offline cache | — | — | OPEN · DEFERRED_PRIORITY | after Ticket 3, native C0-E1 and first profit; never on the capture/financial/strict path |

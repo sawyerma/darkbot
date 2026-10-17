@@ -21,6 +21,8 @@ solana-message = "=3.0.1"       # [FIX-13][FIX-39][FIX-49]
 solana-commitment-config = "=3.1.1"
 solana-transaction-status = "=3.1.12"
 bs58 = "0.5"
+# SK-03: physical memory and peak RSS for the capture byte budget (sysconf/getrusage).
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 # [FIX-120] Protocol Health uses I80F48 bits (i128). json! must preserve the entire
 # integer range rather than panic beyond u64/i64 or round through floating point.

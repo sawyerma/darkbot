@@ -20,6 +20,7 @@ pub mod orchestration;
 
 /// Shared persistent layout used by capture, verification and analytics.
 pub mod run_layout;
+pub mod storage;
 
 // Preserve the published Rust API for binaries, pinned verifier sources and consumers.
 // Re-exports refer to the single implementation in its owning domain.

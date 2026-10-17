@@ -635,13 +635,13 @@ mod tests {
             Workload::Winner,
         ]
         .map(|w| b.acquire(w, deadline).unwrap());
-        assert_eq!(b.snapshot()["in_flight"], 4);
+        assert_eq!(b.snapshot().in_flight, 4);
         drop(permits);
         assert!(matches!(
             b.acquire(Workload::History, deadline),
             Err("RPC_CALL_BUDGET")
         ));
-        assert_eq!(b.snapshot()["queued"], 0);
+        assert_eq!(b.snapshot().queued, 0);
         let b = Arc::new(Budget::configured(&c));
         assert_eq!(
             b.account_bytes((c.limits.max_total_mib * 1024 * 1024 + 1) as usize),
@@ -651,7 +651,7 @@ mod tests {
             b.acquire(Workload::History, deadline),
             Err("RPC_BYTE_BUDGET")
         ));
-        assert_eq!(b.snapshot()["requests"], 0);
+        assert_eq!(b.snapshot().requests, 0);
     }
     #[test]
     fn adaptive_recovery_is_bounded_and_keeps_provider_unknown() {
@@ -659,15 +659,15 @@ mod tests {
         c.limits.rpc_rps = 20;
         let b = Budget::configured(&c);
         b.rate_limited(Duration::ZERO);
-        assert_eq!(b.snapshot()["effective_rps"], 10.0);
+        assert_eq!(b.snapshot().effective_rps, 10.0);
         for _ in 0..800 {
             b.succeeded();
         }
-        assert_eq!(b.snapshot()["effective_rps"], 20.0);
-        assert_eq!(b.snapshot()["quota_qualified"], false);
+        assert_eq!(b.snapshot().effective_rps, 20.0);
+        assert_eq!(b.snapshot().quota_qualified, false);
         b.degraded();
-        assert_eq!(b.snapshot()["effective_rps"], 10.0);
-        assert_eq!(b.snapshot()["http_429_count"], 1);
+        assert_eq!(b.snapshot().effective_rps, 10.0);
+        assert_eq!(b.snapshot().http_429_count, 1);
     }
     #[test]
     fn socket_capacity_is_local_bounded_and_released() {
@@ -690,7 +690,7 @@ mod tests {
             read_body(std::io::Cursor::new(b"12345"), 4, &b),
             Err("RPC_BODY_LIMIT")
         );
-        assert_eq!(b.snapshot()["bytes"], 5);
+        assert_eq!(b.snapshot().bytes, 5);
         let mut c = crate::runtime_config::RuntimeConfig::default();
         c.limits.max_total_mib = 1;
         let b = Budget::configured(&c);
@@ -698,7 +698,7 @@ mod tests {
             read_body(std::io::repeat(0), 2 * 1024 * 1024, &b),
             Err("RPC_BYTE_BUDGET")
         );
-        assert!(b.snapshot()["bytes"].as_u64().unwrap() <= 1024 * 1024 + 8192);
+        assert!(b.snapshot().bytes <= 1024 * 1024 + 8192);
     }
     #[test]
     fn queue_backpressure_does_not_allocate_more_tickets() {
@@ -714,7 +714,7 @@ mod tests {
             b.acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(1)),
             Err("RPC_ADMISSION_QUEUE_FULL")
         ));
-        assert_eq!(b.snapshot()["queued"], 1);
+        assert_eq!(b.snapshot().queued, 1);
     }
     #[test]
     fn retry_after_seconds_dates_and_invalid_are_safe() {
@@ -743,8 +743,8 @@ mod tests {
                 Err("RPC_RATE_LIMIT")
             ));
         }
-        assert_eq!(b.snapshot()["requests"], 0);
-        assert_eq!(b.snapshot()["queued"], 0);
+        assert_eq!(b.snapshot().requests, 0);
+        assert_eq!(b.snapshot().queued, 0);
     }
     #[test]
     fn aggregate_concurrency_is_bounded_and_cancelled_tickets_do_not_block() {
@@ -755,7 +755,7 @@ mod tests {
         let second = b
             .acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(2))
             .unwrap();
-        assert_eq!(b.snapshot()["in_flight"], 2);
+        assert_eq!(b.snapshot().in_flight, 2);
         assert!(b
             .acquire(Workload::Winner, Instant::now() + Duration::from_millis(50))
             .is_err());
@@ -764,7 +764,7 @@ mod tests {
         let _next = b
             .acquire(Workload::History, Instant::now() + Duration::from_secs(2))
             .unwrap();
-        assert_eq!(b.snapshot()["queued"], 0);
+        assert_eq!(b.snapshot().queued, 0);
     }
 }
 
@@ -837,7 +837,7 @@ mod http_tests {
                 .unwrap(),
             42
         );
-        assert_eq!(s.budget.snapshot()["requests"], 2);
+        assert_eq!(s.budget.snapshot().requests, 2);
         a.join().unwrap();
         b.join().unwrap();
         let (url, t) = server(
@@ -851,7 +851,7 @@ mod http_tests {
             .send(RpcRequest::SendTransaction, serde_json::json!([]))
             .await
             .is_err());
-        assert_eq!(s.budget.snapshot()["requests"], 1);
+        assert_eq!(s.budget.snapshot().requests, 1);
         t.join().unwrap();
     }
     #[tokio::test]

@@ -542,50 +542,97 @@ impl Writer {
         if self.poisoned || self.sealed {
             return Err(bad("JOURNAL_BLOCKED"));
         }
-        // Length prefix first (filled in below), then the body; one buffer, no second copy.
         let mut wire = Vec::with_capacity(4 + FIXED + payload.len() + 36);
-        wire.extend([0u8; 4]);
-        wire.extend(kind.to_le_bytes());
-        wire.extend(schema.to_le_bytes());
-        wire.extend(self.next.to_le_bytes());
-        wire.extend(p.source_seq.to_le_bytes());
-        wire.extend(p.source.to_le_bytes());
-        let flags = (p.slot.is_some() as u32)
-            | ((p.fork.is_some() as u32) << 1)
-            | ((p.rx_ns.is_some() as u32) << 2)
-            | ((p.unix_ns.is_some() as u32) << 3);
-        wire.extend(flags.to_le_bytes());
-        wire.extend(p.slot.unwrap_or(0).to_le_bytes());
-        wire.extend(p.fork.unwrap_or([0; 32]));
-        wire.extend(p.rx_ns.unwrap_or(0).to_le_bytes());
-        wire.extend(p.unix_ns.unwrap_or(0).to_le_bytes());
-        wire.extend(self.last);
-        wire.extend((payload.len() as u32).to_le_bytes());
-        wire.extend(payload);
-        let checksum = crc(&wire[4..]);
-        wire.extend(checksum.to_le_bytes());
-        let digest = sha(&wire[4..]);
-        wire.extend(digest);
-        let body = wire.len() - 4;
-        if body > MAX_FRAME {
-            return Err(bad("FRAME_LIMIT"));
-        }
-        wire[..4].copy_from_slice(&(body as u32).to_le_bytes());
+        let f = self.encode_frame(kind, schema, &p, payload, &mut wire)?;
         if let Err(e) = self.file.write_all(&wire) {
             self.poisoned = true;
             return Err(e);
         }
+        Ok(f)
+    }
+    /// SK-04: several admitted frames, chained in order, written with one sequential write.
+    /// The frames get consecutive sequence numbers; a failed write poisons the writer (the
+    /// unsealed tail is INCOMPLETE for every reader), so no partial batch is ever continued.
+    pub fn append_batch<'a>(
+        &mut self,
+        frames: impl IntoIterator<Item = (u16, u16, &'a Provenance, &'a [u8])>,
+    ) -> io::Result<u64> {
+        if self.poisoned || self.sealed {
+            return Err(bad("JOURNAL_BLOCKED"));
+        }
+        let mut wire = Vec::new();
+        let mut n = 0u64;
+        for (kind, schema, p, payload) in frames {
+            if kind == 0 || schema == 0 {
+                self.poisoned = true;
+                return Err(bad("EVENT_SCHEMA_UNSUPPORTED"));
+            }
+            if let Err(e) = payload::check_write(kind, schema)
+                .and_then(|_| self.encode_frame(kind, schema, p, payload, &mut wire))
+            {
+                // The chain state may already include earlier frames of this batch.
+                self.poisoned = true;
+                return Err(e);
+            }
+            n += 1;
+        }
+        if let Err(e) = self.file.write_all(&wire) {
+            self.poisoned = true;
+            return Err(e);
+        }
+        Ok(n)
+    }
+    /// Appends one encoded frame to `out` and advances sequence, position and chain head.
+    fn encode_frame(
+        &mut self,
+        kind: u16,
+        schema: u16,
+        p: &Provenance,
+        payload: &[u8],
+        out: &mut Vec<u8>,
+    ) -> io::Result<Appended> {
+        let start = out.len();
+        // Length prefix first (filled in below), then the body; one buffer, no second copy.
+        out.extend([0u8; 4]);
+        out.extend(kind.to_le_bytes());
+        out.extend(schema.to_le_bytes());
+        out.extend(self.next.to_le_bytes());
+        out.extend(p.source_seq.to_le_bytes());
+        out.extend(p.source.to_le_bytes());
+        let flags = (p.slot.is_some() as u32)
+            | ((p.fork.is_some() as u32) << 1)
+            | ((p.rx_ns.is_some() as u32) << 2)
+            | ((p.unix_ns.is_some() as u32) << 3);
+        out.extend(flags.to_le_bytes());
+        out.extend(p.slot.unwrap_or(0).to_le_bytes());
+        out.extend(p.fork.unwrap_or([0; 32]));
+        out.extend(p.rx_ns.unwrap_or(0).to_le_bytes());
+        out.extend(p.unix_ns.unwrap_or(0).to_le_bytes());
+        out.extend(self.last);
+        out.extend((payload.len() as u32).to_le_bytes());
+        out.extend(payload);
+        let checksum = crc(&out[start + 4..]);
+        out.extend(checksum.to_le_bytes());
+        let digest = sha(&out[start + 4..]);
+        out.extend(digest);
+        let body = out.len() - start - 4;
+        if body > MAX_FRAME {
+            out.truncate(start);
+            return Err(bad("FRAME_LIMIT"));
+        }
+        out[start..start + 4].copy_from_slice(&(body as u32).to_le_bytes());
+        let bytes = (out.len() - start) as u64;
         let f = Appended {
             journal_seq: self.next,
             offset: self.position,
-            bytes: wire.len() as u64,
+            bytes,
             hash: digest,
         };
         self.next = self
             .next
             .checked_add(1)
             .ok_or_else(|| bad("SEQUENCE_EXHAUSTED"))?;
-        self.position += wire.len() as u64;
+        self.position += bytes;
         self.last = digest;
         Ok(f)
     }
