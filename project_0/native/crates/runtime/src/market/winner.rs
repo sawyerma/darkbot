@@ -20,7 +20,7 @@
 //! and fail-closed typed errors instead of silent skips.
 use crate::analytics::record::LossReason;
 use darkbot_project0::protocol::ix::END_LIQUIDATION;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use solana_client::rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient};
 use solana_client::rpc_request::RpcRequest;
 use solana_commitment_config::CommitmentConfig;
@@ -67,59 +67,8 @@ const PAGE: usize = 100;
 const END_LIQ_IDX_MARGINFI_ACCOUNT: usize = 0;
 const END_LIQ_IDX_RECEIVER: usize = 3;
 
-/// Minimal typed view of RPC `getTransaction` with `encoding = "json"`.
-/// Deliberately no `flatten` / `untagged` (see module docs).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RpcTransaction {
-    pub slot: u64,
-    /// Provider-supplied position in the block, if any. Evidence only (see `WinnerIdentity`).
-    #[serde(default)]
-    pub transaction_index: Option<u64>,
-    pub transaction: RpcTransactionBody,
-    pub meta: Option<RpcTransactionMeta>,
-    #[serde(default)]
-    pub version: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RpcTransactionBody {
-    pub signatures: Vec<String>,
-    pub message: RpcMessage,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RpcMessage {
-    pub account_keys: Vec<String>,
-    pub instructions: Vec<RpcInstruction>,
-    #[serde(default)]
-    pub address_table_lookups: Option<Vec<serde_json::Value>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RpcInstruction {
-    pub program_id_index: u64,
-    pub accounts: Vec<u64>,
-    pub data: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RpcTransactionMeta {
-    #[serde(default)]
-    pub err: Option<serde_json::Value>,
-    #[serde(default)]
-    pub loaded_addresses: Option<RpcLoadedAddresses>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct RpcLoadedAddresses {
-    pub writable: Vec<String>,
-    pub readonly: Vec<String>,
-}
+/// The one typed transaction model (JFI-02 wire boundary in `darkbot_solana::chain`).
+pub(crate) use darkbot_solana::chain::{ChainInstruction, ChainTx, TxStatus};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EndLiquidationHit {
@@ -130,11 +79,17 @@ pub(crate) struct EndLiquidationHit {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum WinnerParseError {
-    MetaMissing,
+    /// No reliable status (absent `meta`/`err`, undecodable error): never a winner, never "no winner".
+    StatusUnknown(&'static str),
     InvalidKey(String),
     LoadedAddressesMissing,
-    IndexOutOfRange { index: u64, keys: usize },
-    EndLiquidationLayout { accounts: usize },
+    IndexOutOfRange {
+        index: u64,
+        keys: usize,
+    },
+    EndLiquidationLayout {
+        accounts: usize,
+    },
     InvalidInstructionData,
 }
 
@@ -142,7 +97,7 @@ impl WinnerParseError {
     /// Stable, bounded reason code (no keys or indices) for telemetry.
     pub(crate) fn code(&self) -> &'static str {
         match self {
-            WinnerParseError::MetaMissing => "META_MISSING",
+            WinnerParseError::StatusUnknown(code) => code,
             WinnerParseError::InvalidKey(_) => "INVALID_KEY",
             WinnerParseError::LoadedAddressesMissing => "LOADED_ADDRESSES_MISSING",
             WinnerParseError::IndexOutOfRange { .. } => "INDEX_OUT_OF_RANGE",
@@ -155,7 +110,7 @@ impl WinnerParseError {
 impl std::fmt::Display for WinnerParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WinnerParseError::MetaMissing => write!(f, "WINNER_META_MISSING"),
+            WinnerParseError::StatusUnknown(code) => write!(f, "WINNER_STATUS_UNKNOWN:{code}"),
             WinnerParseError::InvalidKey(k) => write!(f, "WINNER_INVALID_KEY:{k}"),
             WinnerParseError::LoadedAddressesMissing => {
                 write!(
@@ -190,53 +145,28 @@ fn key_at(keys: &[Pubkey], index: u64) -> Result<Pubkey, WinnerParseError> {
         })
 }
 
-fn version_label(v: Option<&serde_json::Value>) -> String {
-    match v {
-        Some(serde_json::Value::String(s)) => s.clone(),
-        Some(serde_json::Value::Number(n)) => format!("v{n}"),
-        _ => "unknown".to_string(),
-    }
-}
-
 /// [C0-MO r6] Shared F8 instruction truth, part 1: every account key in v0 index order
 /// (static keys + meta.loadedAddresses.writable + meta.loadedAddresses.readonly).
 /// Lookups without loaded addresses cannot be resolved and fail closed.
-pub(crate) fn resolve_account_keys(tx: &RpcTransaction) -> Result<Vec<Pubkey>, WinnerParseError> {
-    let message = &tx.transaction.message;
-    let mut keys = Vec::with_capacity(message.account_keys.len());
-    for k in &message.account_keys {
-        keys.push(parse_key(k)?);
-    }
-    let has_lookups = message
-        .address_table_lookups
-        .as_ref()
-        .is_some_and(|l| !l.is_empty());
-    match tx.meta.as_ref().and_then(|m| m.loaded_addresses.as_ref()) {
-        Some(loaded) => {
-            for k in loaded.writable.iter().chain(loaded.readonly.iter()) {
-                keys.push(parse_key(k)?);
-            }
-        }
-        None if has_lookups => return Err(WinnerParseError::LoadedAddressesMissing),
-        None => {}
-    }
-    Ok(keys)
+pub(crate) fn resolve_account_keys(tx: &ChainTx) -> Result<Vec<Pubkey>, WinnerParseError> {
+    tx.account_keys().map_err(|e| match e.0 {
+        "LOADED_ADDRESSES_MISSING" => WinnerParseError::LoadedAddressesMissing,
+        _ => WinnerParseError::InvalidKey(e.0.to_string()),
+    })
 }
 
 /// [C0-MO r6] Shared F8 instruction truth, part 2: `(target_index, receiver_index)` of a
 /// top-level marginfi `end_liquidation` instruction (discriminator + account layout 0/3), else
 /// `None`. Malformed program index, data or layout fail closed.
 pub(crate) fn end_liquidation_indices(
-    ix: &RpcInstruction,
+    ix: &ChainInstruction,
     keys: &[Pubkey],
     program: &Pubkey,
 ) -> Result<Option<(u64, u64)>, WinnerParseError> {
-    if key_at(keys, ix.program_id_index)? != *program {
+    if key_at(keys, u64::from(ix.program_id_index))? != *program {
         return Ok(None);
     }
-    let data = bs58::decode(&ix.data)
-        .into_vec()
-        .map_err(|_| WinnerParseError::InvalidInstructionData)?;
+    let data = &ix.data;
     if data.len() < 8 || data[..8] != END_LIQUIDATION {
         return Ok(None);
     }
@@ -248,18 +178,18 @@ pub(crate) fn end_liquidation_indices(
             accounts: ix.accounts.len(),
         });
     };
-    Ok(Some((target_idx, receiver_idx)))
+    Ok(Some((u64::from(target_idx), u64::from(receiver_idx))))
 }
 
 /// [C0-MO r6] Every top-level marginfi `end_liquidation` of a transaction as `(target, receiver)`,
 /// in instruction order. Same truth as the winner parser; any parse uncertainty fails closed.
 pub(crate) fn end_liquidation_instructions(
-    tx: &RpcTransaction,
+    tx: &ChainTx,
     program: &Pubkey,
 ) -> Result<Vec<(Pubkey, Pubkey)>, WinnerParseError> {
     let keys = resolve_account_keys(tx)?;
     let mut out = Vec::new();
-    for ix in &tx.transaction.message.instructions {
+    for ix in &tx.message.instructions {
         if let Some((target_idx, receiver_idx)) = end_liquidation_indices(ix, &keys, program)? {
             out.push((key_at(&keys, target_idx)?, key_at(&keys, receiver_idx)?));
         }
@@ -270,16 +200,18 @@ pub(crate) fn end_liquidation_instructions(
 /// Successful top-level marginfi `end_liquidation` for exactly `account`?
 /// Account indices resolve against static keys + loaded writable + loaded readonly (v0 order).
 pub(crate) fn end_liquidation_hit(
-    tx: &RpcTransaction,
+    tx: &ChainTx,
     program: &Pubkey,
     account: &Pubkey,
 ) -> Result<Option<EndLiquidationHit>, WinnerParseError> {
-    let meta = tx.meta.as_ref().ok_or(WinnerParseError::MetaMissing)?;
-    if meta.err.is_some() {
-        return Ok(None); // [FIX-44] failed transactions never win
+    match tx.status() {
+        TxStatus::Success => {}
+        TxStatus::Failed(_) => return Ok(None), // [FIX-44] failed transactions never win
+        // A missing or undecodable status never makes a winner and never proves "no winner".
+        TxStatus::Unknown(code) => return Err(WinnerParseError::StatusUnknown(code)),
     }
     let keys = resolve_account_keys(tx)?;
-    for ix in &tx.transaction.message.instructions {
+    for ix in &tx.message.instructions {
         let Some((target_idx, receiver_idx)) = end_liquidation_indices(ix, &keys, program)? else {
             continue;
         };
@@ -288,7 +220,7 @@ pub(crate) fn end_liquidation_hit(
         }
         return Ok(Some(EndLiquidationHit {
             receiver: key_at(&keys, receiver_idx)?,
-            tx_version: version_label(tx.version.as_ref()),
+            tx_version: tx.version_label(),
             transaction_index: tx.transaction_index,
         }));
     }
@@ -334,11 +266,11 @@ pub(crate) fn select_earliest(hits: Vec<(u64, String, EndLiquidationHit)>) -> Op
 /// The fetched transaction must be exactly the one requested: first signature (transaction id)
 /// and slot must match what `getSignaturesForAddress` reported. Otherwise fail closed.
 pub(crate) fn check_transaction_identity(
-    tx: &RpcTransaction,
+    tx: &ChainTx,
     signature: &str,
     slot: u64,
 ) -> Result<(), String> {
-    match tx.transaction.signatures.first() {
+    match tx.signatures.first() {
         Some(first) if first == signature => {}
         Some(first) => {
             return Err(format!(
@@ -360,7 +292,7 @@ pub(crate) fn check_transaction_identity(
     Ok(())
 }
 
-fn fetch_transaction(rpc: &RpcClient, signature: &str) -> Result<RpcTransaction, String> {
+fn fetch_transaction(rpc: &RpcClient, signature: &str) -> Result<ChainTx, String> {
     Signature::from_str(signature).map_err(|e| format!("signature {signature}: {e:?}"))?;
     let mt0_start = std::time::Instant::now(); // [MT0]
     let value: Result<serde_json::Value, String> = rpc
@@ -385,7 +317,8 @@ fn fetch_transaction(rpc: &RpcClient, signature: &str) -> Result<RpcTransaction,
     if value.is_null() {
         return Err(format!("transaction {signature} not found"));
     }
-    serde_json::from_value(value).map_err(|e| format!("transaction {signature} decode: {e}"))
+    darkbot_solana::chain::decode_transaction(&value)
+        .map_err(|e| format!("transaction {signature} decode: {e}"))
 }
 
 /// Früheste **erfolgreiche** `end_liquidation` auf `account` mit Slot ≥ `since_slot`.
@@ -575,6 +508,9 @@ mod tests {
         v.iter().map(|k| k.to_string()).collect()
     }
 
+    /// A well-formed signature (all-zero bytes); the typed model rejects malformed ones.
+    const SIG: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+
     #[allow(clippy::too_many_arguments)]
     fn tx(
         slot: u64,
@@ -585,7 +521,7 @@ mod tests {
         lookups: bool,
         ixs: serde_json::Value,
         err: serde_json::Value,
-    ) -> RpcTransaction {
+    ) -> ChainTx {
         let lookups_v = if lookups {
             json!([{"accountKey": Pubkey::new_unique().to_string(), "writableIndexes": [0], "readonlyIndexes": []}])
         } else {
@@ -596,7 +532,7 @@ mod tests {
             "blockTime": 1_700_000_000,
             "version": version,
             "transaction": {
-                "signatures": ["sig"],
+                "signatures": [SIG],
                 "message": {
                     "accountKeys": keys(static_keys),
                     "header": {"numRequiredSignatures": 1, "numReadonlySignedAccounts": 0, "numReadonlyUnsignedAccounts": 1},
@@ -614,7 +550,7 @@ mod tests {
                 "loadedAddresses": {"writable": keys(loaded_w), "readonly": keys(loaded_r)}
             }
         });
-        serde_json::from_value(v).expect("fixture decodes into typed view")
+        darkbot_solana::chain::decode_transaction(&v).expect("fixture decodes into typed view")
     }
 
     /// Static layout: [payer, target, record, group, receiver, fee_state, fee_wallet, system, program]
@@ -855,7 +791,30 @@ mod tests {
         t.meta = None;
         assert_eq!(
             end_liquidation_hit(&t, &f.program, &f.target),
-            Err(WinnerParseError::MetaMissing)
+            Err(WinnerParseError::StatusUnknown("TX_META_MISSING"))
+        );
+        // A successful-looking end_liquidation without `meta.err` is never a winner (and never
+        // "no winner"): the raw RPC payload without `err` decodes to an UNKNOWN status.
+        let mut raw = serde_json::json!({
+            "slot": 100, "version": "legacy",
+            "transaction": {"signatures": [SIG], "message": {
+                "accountKeys": keys(&legacy_keys(&f)), "instructions": end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7])}},
+            "meta": {"err": null, "fee": 5000}
+        });
+        let hit = end_liquidation_hit(
+            &darkbot_solana::chain::decode_transaction(&raw).unwrap(),
+            &f.program,
+            &f.target,
+        );
+        assert!(matches!(hit, Ok(Some(_))), "{hit:?}");
+        raw["meta"].as_object_mut().unwrap().remove("err");
+        assert_eq!(
+            end_liquidation_hit(
+                &darkbot_solana::chain::decode_transaction(&raw).unwrap(),
+                &f.program,
+                &f.target
+            ),
+            Err(WinnerParseError::StatusUnknown("TX_META_STATUS_MISSING"))
         );
         // v0 lookups without loadedAddresses
         let mut t = tx(
@@ -922,12 +881,9 @@ mod tests {
             (include_str!("../../../../../docs/evidence/AUDIT_20261005/gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB.json"), "gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB", 451643526, "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8", "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn"),
         ];
         for (raw, signature, slot, target, receiver) in cases {
-            let tx: RpcTransaction =
-                serde_json::from_str(raw).expect("audit fixture decodes into typed view");
-            assert_eq!(
-                tx.transaction.signatures.first().map(String::as_str),
-                Some(signature)
-            );
+            let tx = darkbot_solana::chain::decode_transaction(&serde_json::from_str(raw).unwrap())
+                .expect("audit fixture decodes into typed view");
+            assert_eq!(tx.signatures.first().map(String::as_str), Some(signature));
             assert_eq!(tx.slot, slot);
             assert_eq!(check_transaction_identity(&tx, signature, slot), Ok(()));
             let target = Pubkey::from_str(target).unwrap();
@@ -978,7 +934,8 @@ mod tests {
                 "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn",
             ),
         ] {
-            let tx: RpcTransaction = serde_json::from_str(raw).unwrap();
+            let tx =
+                darkbot_solana::chain::decode_transaction(&serde_json::from_str(raw).unwrap()).unwrap();
             let ixs = end_liquidation_instructions(&tx, &program).unwrap();
             assert_eq!(
                 ixs,
@@ -1000,11 +957,11 @@ mod tests {
             end_liq_ix(8, &[1, 2, 3, 4, 5, 6, 7]),
             json!(null),
         );
-        assert_eq!(check_transaction_identity(&t, "sig", 100), Ok(()));
+        assert_eq!(check_transaction_identity(&t, SIG, 100), Ok(()));
         assert!(check_transaction_identity(&t, "other", 100).is_err());
-        assert!(check_transaction_identity(&t, "sig", 101).is_err());
-        t.transaction.signatures.clear();
-        assert!(check_transaction_identity(&t, "sig", 100).is_err());
+        assert!(check_transaction_identity(&t, SIG, 101).is_err());
+        t.signatures.clear();
+        assert!(check_transaction_identity(&t, SIG, 100).is_err());
     }
 
     /// Diagnostic only (run with `--ignored`): does the pinned SDK type decode the RPC shape in

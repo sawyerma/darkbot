@@ -199,7 +199,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | C0-03 race opportunity map | census facts (distance, oracles, integrations, TX load) | `evidence/C0_MARKET_CENSUS.md` | PARTIAL | exact v0/v1 fit per account needs built TX (pipeline); current data NOT_RUN |
 | C0-04 long-tail / `t_profitable` | `economics.rs`, census `model_long_tail` | same | LOCAL_PASS (model) | current data NOT_RUN; tagging only from 0.1.12 |
 | H0-01 historical extractor | `market/*`, `market_truth.rs`, gap/reconcile | C0-E1 runs (INCOMPLETE) | CODE | 30-day window over saved runs; JFI Ticket 3 (typed capture) first |
-| H0-02 winner matcher | `market/winner.rs`, `winner_tracker.rs` | 6/6 audit fixtures | LOCAL_PASS | historical window evaluation |
+| H0-02 winner matcher | `market/winner.rs`, `winner_tracker.rs` | 6/6 audit fixtures; absent-`meta.err` fix 2026-10-17 | LOCAL_PASS | historical window evaluation |
 | H0-03 execution classifier | `market_truth.rs` (four types / six markers) | C0E1-P3 evidence | PARTIAL | apply to H0 window |
 | H0-04 tag timeline after 0.1.12 | — | — | OPEN · BLOCKED | needs 0.1.12 deployed |
 | H0-05 competitor min-profit inference | — | — | OPEN | after H0-01…03 |
@@ -265,4 +265,4 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | K-01…06 | — | — | OPEN · DEFERRED_PRIORITY | — |
 | FE-00…07 | see §5 | — | FE-00 LOCAL_PASS · NO_ECONOMIC_GO; FE-01…07 OPEN/NOT_RUN/NOT_AUTHORIZED | FE path has priority when a qualified candidate exists (§0.6) |
 | PERSIST-01…05 | journal, renders, FE-04 | PERSIST entries | PARTIAL | Mainnet tails, physical fault test |
-| JFI-01…05 | typed payloads, write admission | JFI entries | OPEN | Ticket 3 (market capture, verifier), FIX-04 config, FIX-05 econ/report, FIX-06 FE-04, FIX-07 Jupiter adapter, measurement/MT0/FE-01/census kinds |
+| JFI-01…05 | typed payloads, write admission, `darkbot_solana::chain` model | JFI entries, Ticket 3 step 1–2 | OPEN | Ticket 3 remaining: ingress raw, typed `MARKET_*` rows, block envelopes, `program_filters`, verifier parity, offline-only renders; FIX-04 config, FIX-05 econ/report, FIX-06 FE-04, FIX-07 Jupiter adapter, measurement/MT0/FE-01/census kinds |

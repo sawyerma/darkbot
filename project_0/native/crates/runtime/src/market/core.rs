@@ -78,26 +78,21 @@ pub enum TruncationQualification {
 /// [r6] Pure qualification of a fetched/payload transaction (typed F8 view) against the logged
 /// receiver events. No second decoder: `end_liquidation_instructions` is the winner-parser truth.
 pub fn qualify_truncated(
-    tx_json: Value,
+    tx: &ChainTx,
     signature: &str,
     slot: u64,
     program: &Pubkey,
     logged: &[(Pubkey, Pubkey)],
 ) -> TruncationQualification {
-    let tx: RpcTransaction = match serde_json::from_value(tx_json) {
-        Ok(t) => t,
-        Err(_) => return TruncationQualification::Unqualified("TX_DECODE"),
-    };
-    if check_transaction_identity(&tx, signature, slot).is_err() {
+    if check_transaction_identity(tx, signature, slot).is_err() {
         return TruncationQualification::Unqualified("IDENTITY_MISMATCH");
     }
-    let Some(meta) = tx.meta.as_ref() else {
-        return TruncationQualification::Unqualified("META_MISSING");
-    };
-    if meta.err.is_some() {
-        return TruncationQualification::Unqualified("TX_FAILED_ON_CHAIN");
+    match tx.status() {
+        TxStatus::Success => {}
+        TxStatus::Failed(_) => return TruncationQualification::Unqualified("TX_FAILED_ON_CHAIN"),
+        TxStatus::Unknown(code) => return TruncationQualification::Unqualified(code),
     }
-    match end_liquidation_instructions(&tx, program) {
+    match end_liquidation_instructions(tx, program) {
         Err(e) => TruncationQualification::Unqualified(e.code()),
         Ok(mut instruction) => {
             let mut logged = logged.to_vec();
@@ -331,7 +326,12 @@ impl ObserverCore {
                 }
                 self.stats.rpc_fallback_count += 1;
                 if let Ok(Some(tx)) = fetch(&p.signature) {
-                    q = qualify_truncated(tx, &p.signature, p.slot, &self.program, &p.logged);
+                    q = match darkbot_solana::chain::decode_transaction(&tx) {
+                        Ok(tx) => {
+                            qualify_truncated(&tx, &p.signature, p.slot, &self.program, &p.logged)
+                        }
+                        Err(e) => TruncationQualification::Unqualified(e.0),
+                    };
                     break;
                 }
                 if attempt < max_attempts {
@@ -568,7 +568,7 @@ impl ObserverCore {
         t_rx_ns: Option<u64>,
         observed_unix_s: u64,
         events: &[ReceiverEvent],
-        tx: Option<&Value>,
+        tx: Option<&ChainTx>,
         enrichment_status: &str,
     ) -> std::io::Result<()> {
         let mut fee_counted = false;
@@ -745,15 +745,21 @@ impl ObserverCore {
             "source": "transactionSubscribe",
             "raw": t.raw,
         }))?;
-        let tx = t.raw.get("transaction");
-        let logs: Option<Vec<String>> = tx
-            .and_then(|x| x.pointer("/meta/logMessages"))
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|l| l.as_str().map(str::to_string))
-                    .collect()
-            });
+        // One typed decode of the payload transaction (JFI-02 boundary); a decode failure stays
+        // visible as an incomplete reason instead of looking like a missing log.
+        let chain = t.raw.get("transaction").map(|v| {
+            darkbot_solana::chain::decode_entry(v, t.slot, t.tx_index_in_slot.map(u64::from), None)
+        });
+        if let Some(Err(e)) = &chain {
+            self.mark_incomplete(e.0);
+        }
+        let tx = match &chain {
+            Some(Ok(c)) => Some(c),
+            _ => None,
+        };
+        let logs = tx
+            .and_then(|c| c.meta.as_ref())
+            .and_then(|m| m.log_messages.clone());
         let Some(logs) = logs else {
             if success {
                 self.stats.log_messages_missing += 1;
@@ -766,19 +772,12 @@ impl ObserverCore {
         if success && decoded.truncated {
             // [r6] the payload already carries the full transaction: qualify immediately, no RPC.
             let logged = self.note_truncated(&decoded);
-            let q = match tx {
-                Some(Value::Object(obj)) => {
-                    let mut with_slot = obj.clone();
-                    with_slot.insert("slot".to_string(), json!(t.slot));
-                    qualify_truncated(
-                        Value::Object(with_slot),
-                        &t.signature,
-                        t.slot,
-                        &self.program,
-                        &logged,
-                    )
+            let q = match &chain {
+                Some(Ok(decoded)) => {
+                    qualify_truncated(decoded, &t.signature, t.slot, &self.program, &logged)
                 }
-                _ => TruncationQualification::Unqualified("TX_DECODE"),
+                Some(Err(e)) => TruncationQualification::Unqualified(e.0),
+                None => TruncationQualification::Unqualified("TX_DECODE"),
             };
             self.apply_truncation(q);
         }
@@ -793,7 +792,7 @@ impl ObserverCore {
             &decoded.events,
         );
         self.stats.enrichment_requested += 1;
-        let meta_available = tx.and_then(|x| x.get("meta")).is_some_and(Value::is_object);
+        let meta_available = tx.is_some_and(|c| c.meta.is_some());
         let status = if meta_available {
             self.stats.enrichment_succeeded += 1;
             "PAYLOAD"
@@ -933,7 +932,7 @@ impl ObserverCore {
         let max_attempts = self.enrich_cfg.max_attempts;
         while let Some(p) = self.deferred.pop_front() {
             let mut status = "UNRESOLVED";
-            let mut resolved: Option<Value> = None;
+            let mut resolved: Option<ChainTx> = None;
             for attempt in 1..=max_attempts {
                 if !budget_left() {
                     status = "SKIPPED_PHASE_TIMEOUT";
@@ -941,10 +940,12 @@ impl ObserverCore {
                 }
                 self.stats.rpc_fallback_count += 1;
                 if let Ok(Some(tx)) = fetch(&p.signature) {
-                    if verify_tx_identity(&tx, &p.signature, p.slot).is_ok() {
-                        resolved = Some(tx);
-                    } else {
-                        status = "IDENTITY_MISMATCH";
+                    match darkbot_solana::chain::decode_transaction(&tx) {
+                        Ok(tx) if check_transaction_identity(&tx, &p.signature, p.slot).is_ok() => {
+                            resolved = Some(tx)
+                        }
+                        Ok(_) => status = "IDENTITY_MISMATCH",
+                        Err(e) => status = e.0,
                     }
                     break;
                 }

@@ -12,6 +12,7 @@
 //!
 //! Status: UNTESTED / VERIFY — geschrieben ohne Compiler und ohne Netzwerk.
 
+pub mod chain;
 pub mod ingress;
 pub mod provider;
 pub mod runtime_config;

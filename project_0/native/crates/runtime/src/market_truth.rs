@@ -2,7 +2,7 @@
 //! Layout authority: marginfi-v2 33c67987a661f59c6683a65485ebb4f0ef030b77,
 //! events.rs and liquidate.rs/liquidate_end.rs/handle_bankruptcy.rs.
 use super::*;
-use crate::winner::{resolve_account_keys, RpcInstruction};
+use crate::winner::{resolve_account_keys, ChainInstruction, ChainTx, TxStatus};
 use serde::{Deserialize, Serialize};
 
 const CLASSIC_IX: [u8; 8] = [214, 169, 151, 213, 251, 167, 86, 219];
@@ -31,6 +31,48 @@ impl LiquidationType {
     }
 }
 
+/// Native protocol amounts of one event, exactly as logged (f64 in the event layout). The
+/// serialized keys are the report contract; `provenance`/`scope`/`units` state the limits.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NativeEvidence {
+    Classic {
+        provenance: String,
+        pre_balances: [f64; 5],
+        post_balances: [f64; 5],
+        pre_health: f64,
+        post_health: f64,
+        liquidator_liability_cost_native_f64: f64,
+        target_debt_reduction_native_f64: f64,
+        insurance_component_native_f64: f64,
+        asset_decimals: Option<u8>,
+        liability_decimals: Option<u8>,
+        historical_asset_price: Option<f64>,
+        historical_liability_price: Option<f64>,
+    },
+    Bankruptcy {
+        provenance: String,
+        bad_debt_native_f64: f64,
+        covered_native_f64: f64,
+        socialized_native_f64: f64,
+        liability_decimals: Option<u8>,
+    },
+    Flows {
+        scope: String,
+        flows: Vec<NativeFlow>,
+        units: String,
+    },
+}
+
+/// A visible System transfer in the transaction (context only: never attributed as a cost).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisiblePayment {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub lamports: u64,
+    pub cost_attribution: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TruthEvent {
     pub signature: String,
@@ -46,14 +88,14 @@ pub struct TruthEvent {
     pub asset_mint: Option<String>,
     pub liability_mint: Option<String>,
     pub seized_asset_native_exact: Option<String>,
-    pub native_evidence: Value,
+    pub native_evidence: Option<NativeEvidence>,
     pub seized_value_usd: Option<f64>,
     pub repaid_value_usd: Option<f64>,
     pub gross_edge_usd: Option<f64>,
     pub protocol_fee_lamports: Option<u64>,
     pub transaction_fee_lamports: Option<u64>,
     pub fee_payer: Option<String>,
-    pub visible_payments: Value,
+    pub visible_payments: Option<Vec<VisiblePayment>>,
     pub incremental_rent_lamports: Option<u64>,
     pub priority_fee_lamports: Option<u64>,
     pub winner_net_edge_usd: Option<f64>,
@@ -116,7 +158,7 @@ struct Decoded {
     liability_bank: Option<String>,
     asset_mint: Option<String>,
     liability_mint: Option<String>,
-    native: Value,
+    native: Option<NativeEvidence>,
     seized: Option<f64>,
     repaid: Option<f64>,
     flat_fee: Option<u64>,
@@ -124,13 +166,13 @@ struct Decoded {
 
 /// Native event units are deliberately preserved: e.g. Kamino logs collateral
 /// units while JupLend logs underlying. Never convert these using today's decimals.
-#[derive(Clone, Serialize)]
-struct NativeFlow {
-    kind: &'static str,
-    target: String,
-    bank: String,
-    mint: String,
-    amount: String,
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeFlow {
+    pub kind: String,
+    pub target: String,
+    pub bank: String,
+    pub mint: String,
+    pub amount: String,
 }
 fn native_flow(bytes: &[u8]) -> Result<Option<NativeFlow>, &'static str> {
     let kind = match bytes.get(..8) {
@@ -151,7 +193,7 @@ fn native_flow(bytes: &[u8]) -> Result<Option<NativeFlow>, &'static str> {
         return Err("NATIVE_FLOW_LAYOUT");
     }
     Ok(Some(NativeFlow {
-        kind,
+        kind: kind.into(),
         target,
         bank,
         mint,
@@ -172,7 +214,7 @@ fn decode_payload(bytes: &[u8]) -> Result<Option<Decoded>, &'static str> {
         liability_bank: None,
         asset_mint: None,
         liability_mint: None,
-        native: Value::Null,
+        native: None,
         seized: None,
         repaid: None,
         flat_fee: None,
@@ -204,11 +246,21 @@ fn decode_payload(bytes: &[u8]) -> Result<Option<Decoded>, &'static str> {
         if !assumed.is_finite() || !target_repaid.is_finite() {
             return Err("ECONOMIC_OVERFLOW");
         }
-        e.native = json!({"provenance":"LendingAccountLiquidateEvent f64 native balances; NOT exact integers",
-            "pre_balances":pre,"post_balances":post,"pre_health":pre_health,"post_health":post_health,
-            "liquidator_liability_cost_native_f64":assumed,"target_debt_reduction_native_f64":target_repaid,
-            "insurance_component_native_f64":assumed-target_repaid,"asset_decimals":null,"liability_decimals":null,
-            "historical_asset_price":null,"historical_liability_price":null});
+        e.native = Some(NativeEvidence::Classic {
+            provenance: "LendingAccountLiquidateEvent f64 native balances; NOT exact integers"
+                .into(),
+            pre_balances: pre,
+            post_balances: post,
+            pre_health,
+            post_health,
+            liquidator_liability_cost_native_f64: assumed,
+            target_debt_reduction_native_f64: target_repaid,
+            insurance_component_native_f64: assumed - target_repaid,
+            asset_decimals: None,
+            liability_decimals: None,
+            historical_asset_price: None,
+            historical_liability_price: None,
+        });
     } else if discriminator == DELEVERAGE_EVENT {
         e.kind = LiquidationType::ForcedDeleverage;
         e.target = c.key()?;
@@ -223,9 +275,15 @@ fn decode_payload(bytes: &[u8]) -> Result<Option<Decoded>, &'static str> {
         e.target = account;
         e.liability_bank = Some(c.key()?);
         e.liability_mint = Some(c.key()?);
-        e.native = json!({"provenance":"LendingPoolBankHandleBankruptcyEvent f64 native amounts; NOT liquidator profit",
-            "bad_debt_native_f64":c.number()?,"covered_native_f64":c.number()?,"socialized_native_f64":c.number()?,
-            "liability_decimals":null});
+        e.native = Some(NativeEvidence::Bankruptcy {
+            provenance:
+                "LendingPoolBankHandleBankruptcyEvent f64 native amounts; NOT liquidator profit"
+                    .into(),
+            bad_debt_native_f64: c.number()?,
+            covered_native_f64: c.number()?,
+            socialized_native_f64: c.number()?,
+            liability_decimals: None,
+        });
     } else {
         return Ok(None);
     }
@@ -255,7 +313,10 @@ pub(super) fn provisional_event(bytes: &[u8]) -> Result<Option<ProvisionalLogEve
         return Ok(None);
     }
     let event = decode_payload(bytes)?.ok_or("PROVISIONAL_KNOWN_EVENT_UNDECODED")?;
-    let gross_edge_usd = event.seized.zip(event.repaid).map(|(seized, repaid)| seized - repaid);
+    let gross_edge_usd = event
+        .seized
+        .zip(event.repaid)
+        .map(|(seized, repaid)| seized - repaid);
     if gross_edge_usd.is_some_and(|value| !value.is_finite()) {
         return Err("PROVISIONAL_NONFINITE_EDGE");
     }
@@ -277,52 +338,29 @@ struct InstructionEvidence {
     liquidator_account: Option<String>,
     asset_amount: Option<u64>,
 }
-fn instructions(
-    raw: &Value,
-    tx: &RpcTransaction,
-    program: &Pubkey,
-) -> Result<Vec<InstructionEvidence>, &'static str> {
+fn instructions(tx: &ChainTx, program: &Pubkey) -> Result<Vec<InstructionEvidence>, &'static str> {
     let keys = resolve_account_keys(tx).map_err(|e| e.code())?;
-    let mut all: Vec<(bool, RpcInstruction)> = Vec::new();
+    let mut all: Vec<(bool, &ChainInstruction)> = Vec::new();
     // Interleave each outer instruction with its CPI group in execution order.
     // Otherwise equal target/bank pairs in nested and later outer liquidations
     // could receive each other's exact instruction amount.
-    let inner = raw["meta"]["innerInstructions"]
-        .as_array()
+    let inner = tx
+        .meta
+        .as_ref()
+        .and_then(|m| m.inner_instructions.as_ref())
         .ok_or("INNER_INSTRUCTIONS_UNAVAILABLE")?;
-    for (index, ix) in raw["transaction"]["message"]["instructions"]
-        .as_array()
-        .ok_or("INSTRUCTIONS_MISSING")?
-        .iter()
-        .enumerate()
-    {
-        all.push((
-            false,
-            serde_json::from_value(ix.clone()).map_err(|_| "INSTRUCTION_DECODE")?,
-        ));
-        if let Some(group) = inner
-            .iter()
-            .find(|g| g["index"].as_u64() == Some(index as u64))
-        {
-            for ix in group["instructions"]
-                .as_array()
-                .ok_or("INNER_INSTRUCTION_DECODE")?
-            {
-                all.push((
-                    true,
-                    serde_json::from_value(ix.clone()).map_err(|_| "INNER_INSTRUCTION_DECODE")?,
-                ));
-            }
+    for (index, ix) in tx.message.instructions.iter().enumerate() {
+        all.push((false, ix));
+        if let Some(group) = inner.iter().find(|g| usize::from(g.index) == index) {
+            all.extend(group.instructions.iter().map(|ix| (true, ix)));
         }
     }
     let mut out = Vec::new();
     for (inner, ix) in all {
-        if keys.get(ix.program_id_index as usize) != Some(program) {
+        if keys.get(usize::from(ix.program_id_index)) != Some(program) {
             continue;
         }
-        let b = bs58::decode(ix.data)
-            .into_vec()
-            .map_err(|_| "INSTRUCTION_DATA_INVALID")?;
+        let b = &ix.data;
         let Some(d) = b.get(..8) else {
             return Err("MARGINFI_INSTRUCTION_DISCRIMINATOR");
         };
@@ -330,9 +368,11 @@ fn instructions(
             return Err("UNAUDITED_MARGINFI_INSTRUCTION");
         }
         let key = |i: usize| -> Result<String, &'static str> {
-            keys.get(*ix.accounts.get(i).ok_or("LIQUIDATION_ACCOUNT_LAYOUT")? as usize)
-                .map(ToString::to_string)
-                .ok_or("LIQUIDATION_ACCOUNT_INDEX")
+            keys.get(usize::from(
+                *ix.accounts.get(i).ok_or("LIQUIDATION_ACCOUNT_LAYOUT")?,
+            ))
+            .map(ToString::to_string)
+            .ok_or("LIQUIDATION_ACCOUNT_INDEX")
         };
         if d == CLASSIC_IX {
             if b.len() != 18 {
@@ -384,15 +424,16 @@ pub(super) fn classify(
     live: Option<u64>,
 ) -> Result<Vec<TruthEvent>, &'static str> {
     let tx = reconcile::validate_full_transaction(raw)?;
-    if !raw["meta"]["err"].is_null() {
-        return Ok(vec![]);
+    match tx.status() {
+        TxStatus::Success => {}
+        TxStatus::Failed(_) => return Ok(vec![]),
+        TxStatus::Unknown(code) => return Err(code),
     }
-    let logs: Vec<String> = raw["meta"]["logMessages"]
-        .as_array()
-        .ok_or("LOG_MESSAGES_MISSING")?
-        .iter()
-        .map(|v| v.as_str().map(str::to_owned).ok_or("LOG_MESSAGE_INVALID"))
-        .collect::<Result<_, _>>()?;
+    let logs: Vec<String> = tx
+        .meta
+        .as_ref()
+        .and_then(|m| m.log_messages.clone())
+        .ok_or("LOG_MESSAGES_MISSING")?;
     let receiver = decode_receiver_events(&logs, program);
     if receiver.decoder_errors != 0 {
         return Err("RECEIVER_DECODER_ERROR");
@@ -402,20 +443,14 @@ pub(super) fn classify(
         .iter()
         .map(|e| (e.target, e.receiver))
         .collect::<Vec<_>>();
-    match qualify_truncated(
-        raw.clone(),
-        &tx.transaction.signatures[0],
-        tx.slot,
-        program,
-        &pairs,
-    ) {
+    match qualify_truncated(&tx, &tx.signatures[0], tx.slot, program, &pairs) {
         TruncationQualification::Qualified { .. } => {}
         TruncationQualification::Mismatch { .. } => {
             return Err("RECEIVER_INSTRUCTION_EVENT_MISMATCH")
         }
         TruncationQualification::Unqualified(code) => return Err(code),
     }
-    let mut ixs = instructions(raw, &tx, program)?;
+    let mut ixs = instructions(&tx, program)?;
     if receiver.truncated && !ixs.is_empty() {
         // F8 proves only top-level receivership. A truncated CPI parent could
         // conceal rollback of Classic/settlement logs even if the outer TX succeeds.
@@ -503,12 +538,16 @@ pub(super) fn classify(
                 target: ev.target.to_string(),
                 actor: ev.receiver.to_string(),
                 liquidator_account: None,
-                asset_bank: asset.as_ref().map(|p|p.0.clone()),
-                liability_bank: liability.as_ref().map(|p|p.0.clone()),
-                asset_mint: asset.map(|p|p.1),
-                liability_mint: liability.map(|p|p.1),
-                native: json!({"scope":"TRANSACTION_TARGET_FLOWS; not per-event allocation", "flows":native,
-                    "units":"pinned protocol event amount (venue-dependent); no guessed decimals"}),
+                asset_bank: asset.as_ref().map(|p| p.0.clone()),
+                liability_bank: liability.as_ref().map(|p| p.0.clone()),
+                asset_mint: asset.map(|p| p.1),
+                liability_mint: liability.map(|p| p.1),
+                native: Some(NativeEvidence::Flows {
+                    scope: "TRANSACTION_TARGET_FLOWS; not per-event allocation".into(),
+                    flows: native,
+                    units: "pinned protocol event amount (venue-dependent); no guessed decimals"
+                        .into(),
+                }),
                 seized: Some(ev.seized_equity_usd),
                 repaid: Some(ev.repaid_equity_usd),
                 flat_fee: Some(u64::from(ev.protocol_flat_fee_lamports)),
@@ -518,26 +557,21 @@ pub(super) fn classify(
     }
     // Stable index in typed event order, never a signature-only identity. Receiver
     // indices remain in their original relative order (existing F8 semantics).
-    let fee = raw["meta"]["fee"].as_u64();
-    let enrichment = enrich(raw, program);
-    let priority = enrichment
-        .cu_limit
-        .zip(enrichment.cu_price_micro_lamports)
-        .and_then(|(limit, price)| {
-            u64::try_from((u128::from(limit) * u128::from(price)).div_ceil(1_000_000)).ok()
-        });
+    let fee = tx.meta.as_ref().and_then(|m| m.fee);
+    let enrichment = enrich(&tx, program);
+    let priority = enrichment.priority_fee_lamports;
     decoded.sort_by_key(|(position, _, _)| *position);
     decoded.into_iter().enumerate().map(|(index,(_,ev,amount))| {
         let edge=ev.seized.zip(ev.repaid).map(|(s,r)|s-r);
         if edge.is_some_and(|n|!n.is_finite()) {return Err("ECONOMIC_OVERFLOW");}
-        Ok(TruthEvent{signature:tx.transaction.signatures[0].clone(),slot:tx.slot,
-            transaction_index:u32::try_from(raw["transactionIndex"].as_u64().ok_or("TRANSACTION_INDEX_MISSING")?).map_err(|_|"TRANSACTION_INDEX_OVERFLOW")?,
+        Ok(TruthEvent{signature:tx.signatures[0].clone(),slot:tx.slot,
+            transaction_index:u32::try_from(tx.transaction_index.ok_or("TRANSACTION_INDEX_MISSING")?).map_err(|_|"TRANSACTION_INDEX_OVERFLOW")?,
             event_index:index as u32,liquidation_type:ev.kind,target:ev.target,liquidator:ev.actor,
             liquidator_marginfi_account:ev.liquidator_account,asset_bank:ev.asset_bank,liability_bank:ev.liability_bank,
             asset_mint:ev.asset_mint,liability_mint:ev.liability_mint,seized_asset_native_exact:amount.map(|n|n.to_string()),
             native_evidence:ev.native,seized_value_usd:ev.seized,repaid_value_usd:ev.repaid,gross_edge_usd:edge,
             protocol_fee_lamports:ev.flat_fee,transaction_fee_lamports:fee,priority_fee_lamports:priority,
-            fee_payer:enrichment.fee_payer.clone(),visible_payments:visible_payments(raw),incremental_rent_lamports:None,
+            fee_payer:enrichment.fee_payer.clone(),visible_payments:visible_payments(&tx),incremental_rent_lamports:None,
             winner_net_edge_usd:None,winner_net_edge_complete:false,
             economic_provenance:match ev.kind {LiquidationType::Classic=>"NATIVE_INSTRUCTION_AND_EVENT; SLOT_PRICE_AND_DECIMALS_UNKNOWN; LIABILITY_COST_INCLUDES_INSURANCE",
                 LiquidationType::Receivership|LiquidationType::ForcedDeleverage=>"CACHED_PROTOCOL_EQUITY_USD: SEIZED_MINUS_REPAID; SOL_USD_AND_EXTERNAL_COSTS_UNKNOWN",
@@ -547,54 +581,41 @@ pub(super) fn classify(
     }).collect()
 }
 
-fn visible_payments(raw: &Value) -> Value {
+fn visible_payments(tx: &ChainTx) -> Option<Vec<VisiblePayment>> {
     // Transaction context only: a visible transfer is not necessarily a tip or
     // an incremental cost to the liquidator. Do not subtract it without attribution.
-    let Some(keys) = full_account_keys(&raw["transaction"]["message"], raw.get("meta")) else {
-        return Value::Null;
-    };
-    let mut out = Vec::new();
-    let mut scan = |ix: &Value| {
-        let Some(p) = ix["programIdIndex"]
-            .as_u64()
-            .and_then(|i| keys.get(i as usize))
-        else {
-            return;
-        };
-        if p != "11111111111111111111111111111111" {
-            return;
-        }
-        let Some(b) = ix["data"]
-            .as_str()
-            .and_then(|s| bs58::decode(s).into_vec().ok())
-        else {
-            return;
-        };
-        if b.len() != 12 || b[..4] != [2, 0, 0, 0] {
-            return;
-        }
-        let at = |i| {
-            ix["accounts"][i]
-                .as_u64()
-                .and_then(|i| keys.get(i as usize))
-        };
-        out.push(json!({"from":at(0),"to":at(1),"lamports":u64::from_le_bytes(b[4..12].try_into().unwrap()),"cost_attribution":"UNKNOWN"}));
-    };
-    if let Some(ixs) = raw["transaction"]["message"]["instructions"].as_array() {
-        for ix in ixs {
-            scan(ix);
-        }
-    }
-    if let Some(groups) = raw["meta"]["innerInstructions"].as_array() {
-        for g in groups {
-            if let Some(ixs) = g["instructions"].as_array() {
-                for ix in ixs {
-                    scan(ix);
+    let keys = tx.account_keys().ok()?;
+    let system = Pubkey::default();
+    let inner = tx
+        .meta
+        .as_ref()
+        .and_then(|m| m.inner_instructions.as_ref())
+        .into_iter()
+        .flatten()
+        .flat_map(|g| &g.instructions);
+    Some(
+        tx.message
+            .instructions
+            .iter()
+            .chain(inner)
+            .filter(|ix| keys.get(usize::from(ix.program_id_index)) == Some(&system))
+            .filter(|ix| ix.data.len() == 12 && ix.data[..4] == [2, 0, 0, 0])
+            .map(|ix| {
+                let at = |i: usize| {
+                    ix.accounts
+                        .get(i)
+                        .and_then(|a| keys.get(usize::from(*a)))
+                        .map(ToString::to_string)
+                };
+                VisiblePayment {
+                    from: at(0),
+                    to: at(1),
+                    lamports: u64::from_le_bytes(ix.data[4..12].try_into().expect("len")),
+                    cost_attribution: "UNKNOWN".into(),
                 }
-            }
-        }
-    }
-    json!(out)
+            })
+            .collect(),
+    )
 }
 
 #[derive(Default)]

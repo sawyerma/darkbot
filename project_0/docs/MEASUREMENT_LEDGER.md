@@ -5434,3 +5434,14 @@ Base `f0da568`. [C0_MARKET_CENSUS](evidence/C0_MARKET_CENSUS.md).
 Tests: project0 census 3/3, runner census 3/3, project0 lib 68/68, runner lib 274/274 (4 ignored). One fe_replay failure in the first full run came from temp directories left by an earlier failed run (deterministic `Pubkey::new_unique` names); removed, test passes.
 
 **C0 gate NOT_PROVEN** (no current Mainnet run; separate bounded read-only permission required).
+
+## 2026-10-17 — Ticket 3 step 1–2: one typed chain transaction model; winner `meta.err` fix (LOCAL_PASS, Ticket 3 OPEN)
+
+Base `3ef129c`.
+
+- New `darkbot_solana::chain` (JFI-02 wire boundary): `ChainTx` / `ChainBlock` from `getTransaction`, `getBlock` entries and `transactionNotification`; JSON only in private wire structs. Keys as `Pubkey`, instruction data decoded, LUTs + loaded addresses, inner instructions with stack height, logs, fee, SOL and token balances (exact atomic `u64`), compute units, `costUnits`, v1 `transactionConfig`. Status keeps `err: null` = success, error = failed, absent `err` / absent `meta` / undecodable error = UNKNOWN (never success). Block entries keep their index; undecodable entries stay visible errors.
+- The former half-typed `RpcTransaction` in `winner.rs` is replaced (no second model). **Fixed:** `#[serde(default)] err: Option<Value>` made an absent `err` look successful and could produce a winner; `end_liquidation_hit` now returns `StatusUnknown`.
+- `qualify_truncated`, gap recovery, `validate_full_transaction`, `market_truth` (CPI walk, logs, status, fee, index, native evidence, visible payments) and enrichment read `ChainTx`. `TruthEvent.native_evidence` / `visible_payments` are typed (report keys unchanged). Enrichment now reads v1 compute limit and priority fee from `transactionConfig` (solana-message 4.4.1: priority fee in lamports) — previously `None` for v1; verified on the real v1 audit fixtures (fee 19 000 = 5 000 + 14 000).
+- Still JSON in Ticket 3 scope: ingress `raw` payloads, market sink rows, block envelopes in gap/reconcile fetch, `Subscription.program_filters`, verifier/report renders.
+
+Tests: chain 4/4 on real Mainnet v1/v0 fixtures (status table, LUTs, exact units, block entries); winner 33/33 incl. new absent-`err` regression; market 113/113; runner lib 274/274 (4 ignored); solana lib 70/70; featureless check PASS. `market_truth.rs` was not rustfmt-clean before; part of its diff is formatting only.

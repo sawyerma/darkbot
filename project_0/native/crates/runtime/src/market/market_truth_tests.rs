@@ -45,12 +45,16 @@ fn truth_classic_decodes_native_amount_and_liability_deposit_cost() {
     let e = &events[0];
     assert_eq!(e.liquidation_type, truth::LiquidationType::Classic);
     assert_eq!(e.seized_asset_native_exact.as_deref(), Some("100"));
-    assert_eq!(
-        e.native_evidence["liquidator_liability_cost_native_f64"],
-        100.
-    );
-    assert_eq!(e.native_evidence["target_debt_reduction_native_f64"], 90.);
-    assert_eq!(e.native_evidence["insurance_component_native_f64"], 10.);
+    let Some(truth::NativeEvidence::Classic {
+        liquidator_liability_cost_native_f64: cost,
+        target_debt_reduction_native_f64: reduction,
+        insurance_component_native_f64: insurance,
+        ..
+    }) = &e.native_evidence
+    else {
+        panic!("classic native evidence expected: {:?}", e.native_evidence)
+    };
+    assert_eq!((*cost, *reduction, *insurance), (100., 90., 10.));
     assert_eq!(e.gross_edge_usd, None); // no historical price, no current-price substitute
     assert_eq!(e.transaction_fee_lamports, Some(7345));
     assert_eq!(e.winner_net_edge_usd, None);
@@ -61,7 +65,7 @@ fn truth_classic_decodes_native_amount_and_liability_deposit_cost() {
 #[test]
 fn truth_classic_failed_normal_and_mismatched_events() {
     let mut tx = classic_truth_fixture();
-    tx["meta"]["err"] = json!({"InstructionError":[0,"Custom"]});
+    tx["meta"]["err"] = json!({"InstructionError":[0,{"Custom":1}]});
     assert!(truth::classify(&tx, &program(), None, None)
         .unwrap()
         .is_empty());
@@ -212,7 +216,10 @@ fn truth_deleverage_and_bankruptcy_are_separate_from_permissionless_profit() {
                 e.liquidation_type,
                 truth::LiquidationType::BankruptcySettlement
             );
-            assert_eq!(e.native_evidence["bad_debt_native_f64"], 100.);
+            assert!(matches!(
+                e.native_evidence,
+                Some(truth::NativeEvidence::Bankruptcy { bad_debt_native_f64, .. }) if bad_debt_native_f64 == 100.
+            ));
             assert_eq!(e.gross_edge_usd, None);
         } else {
             assert_eq!(e.liquidation_type, truth::LiquidationType::ForcedDeleverage);
@@ -283,12 +290,18 @@ fn truth_mixed_real_receiver_and_source_classic_preserves_event_order() {
     let fx = &fixtures()[0];
     let mut real: Value = serde_json::from_str(fx.raw).unwrap();
     let classic = classic_truth_fixture();
-    let keys = full_account_keys(&real["transaction"]["message"], real.get("meta")).unwrap();
-    let mut combined = keys;
+    let keys_of = |v: &Value| -> Vec<String> {
+        darkbot_solana::chain::decode_entry(v, v["slot"].as_u64().unwrap_or(0), None, None)
+            .unwrap()
+            .account_keys()
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    };
+    let mut combined = keys_of(&real);
     let base = combined.len() as u64;
-    combined.extend(
-        full_account_keys(&classic["transaction"]["message"], classic.get("meta")).unwrap(),
-    );
+    combined.extend(keys_of(&classic));
     let mut ix = classic["transaction"]["message"]["instructions"][0].clone();
     ix["programIdIndex"] = json!(ix["programIdIndex"].as_u64().unwrap() + base);
     for a in ix["accounts"].as_array_mut().unwrap() {

@@ -1099,6 +1099,7 @@ dependencies = [
  "solana-short-vec",
  "solana-system-interface 2.0.0",
  "solana-transaction-status",
+ "solana-transaction-status-client-types",
  "time",
  "tokio",
  "tokio-tungstenite 0.24.0",

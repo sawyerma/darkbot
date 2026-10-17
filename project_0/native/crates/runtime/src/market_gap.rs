@@ -366,19 +366,26 @@ impl ObserverCore {
     ) -> std::io::Result<Result<(), &'static str>> {
         // Validate all transactions, including those irrelevant to Marginfi: missing
         // loaded addresses must never turn an unknown relevance decision into false.
-        if !matches!(raw["version"].as_str(), Some("legacy"))
-            && !matches!(raw["version"].as_u64(), Some(0 | 1))
-        {
+        let tx = match darkbot_solana::chain::decode_entry(raw, slot, Some(index as u64), None) {
+            Ok(v) => v,
+            Err(e) => return Ok(Err(e.0)),
+        };
+        if !matches!(
+            tx.version,
+            Some(darkbot_solana::chain::TxWireVersion::Legacy)
+                | Some(darkbot_solana::chain::TxWireVersion::Number(0 | 1))
+        ) {
             return Ok(Err("TX_VERSION_UNSUPPORTED_OR_MISSING"));
         }
-        if raw["meta"].get("err").is_none() {
-            return Ok(Err("TX_META_STATUS_MISSING"));
-        }
-        let tx: RpcTransaction = match serde_json::from_value(raw.clone()) {
-            Ok(v) => v,
-            Err(_) => return Ok(Err("TX_DECODE")),
+        let success = match tx.status() {
+            darkbot_solana::chain::TxStatus::Success => true,
+            darkbot_solana::chain::TxStatus::Failed(_) => false,
+            darkbot_solana::chain::TxStatus::Unknown("TX_META_MISSING") => {
+                return Ok(Err("TX_META_STATUS_MISSING"))
+            }
+            darkbot_solana::chain::TxStatus::Unknown(code) => return Ok(Err(code)),
         };
-        let Some(signature) = tx.transaction.signatures.first() else {
+        let Some(signature) = tx.signature() else {
             return Ok(Err("TX_SIGNATURE_MISSING"));
         };
         if check_transaction_identity(&tx, signature, slot).is_err() {
@@ -391,11 +398,7 @@ impl ObserverCore {
         if !keys.contains(&self.program) {
             return Ok(Ok(()));
         }
-        let success = raw["meta"]["err"].is_null();
-        let logs: Option<Vec<String>> = raw["meta"]["logMessages"]
-            .as_array()
-            .and_then(|a| a.iter().map(|v| v.as_str().map(str::to_owned)).collect());
-        let Some(logs) = logs else {
+        let Some(logs) = tx.meta.as_ref().and_then(|m| m.log_messages.clone()) else {
             return Ok(Err("LOG_MESSAGES_MISSING"));
         };
         let decoded = decode_receiver_events(&logs, &self.program);
@@ -408,7 +411,7 @@ impl ObserverCore {
                 .iter()
                 .map(|e| (e.target, e.receiver))
                 .collect();
-            match qualify_truncated(raw.clone(), signature, slot, &self.program, &pairs) {
+            match qualify_truncated(&tx, signature, slot, &self.program, &pairs) {
                 TruncationQualification::Qualified { .. } => {}
                 TruncationQualification::Mismatch { .. } => {
                     return Ok(Err("LIQUIDATION_INSTRUCTION_LOG_MISMATCH"))
@@ -432,7 +435,7 @@ impl ObserverCore {
         self.absorb_decode(&decoded, success);
         if success && decoded.truncated {
             let pairs = self.note_truncated(&decoded);
-            let q = qualify_truncated(raw.clone(), signature, slot, &self.program, &pairs);
+            let q = qualify_truncated(&tx, signature, slot, &self.program, &pairs);
             self.apply_truncation(q);
         }
         if success && !decoded.events.is_empty() {
@@ -454,7 +457,7 @@ impl ObserverCore {
                 None,
                 unix_now_s(),
                 &decoded.events,
-                Some(raw),
+                Some(&tx),
                 "GAP_BLOCK_PAYLOAD",
             )?;
         }

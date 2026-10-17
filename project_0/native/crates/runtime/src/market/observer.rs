@@ -33,7 +33,7 @@
 //! This measures MARKET EDGE only. It is not DarkBot executable edge, capture rate or PnL.
 
 use crate::market::winner::{
-    check_transaction_identity, end_liquidation_instructions, RpcTransaction,
+    check_transaction_identity, end_liquidation_instructions, ChainTx, TxStatus,
 };
 use base64::Engine as _;
 use darkbot_common::channel::bounded;
@@ -90,8 +90,7 @@ pub use decoding::{decode_receiver_events, LogDecode, ReceiverEvent};
 
 #[path = "enrichment.rs"]
 mod enrichment;
-use enrichment::full_account_keys;
-pub use enrichment::{enrich, verify_tx_identity, TokenDelta, TxEnrichment};
+pub use enrichment::{enrich, TokenDelta, TxEnrichment};
 #[path = "sink.rs"]
 mod sink;
 pub use sink::{JournalSink, JsonlSink, MarketSink, MARKET_JOURNAL, MARKET_VIEWS};

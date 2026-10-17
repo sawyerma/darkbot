@@ -1,8 +1,9 @@
 //! Historical transaction enrichment and identity checks.
 use super::*;
+use darkbot_solana::chain::ChainMeta;
 
 // ------------------------------------------------------------------------------------------
-// On-chain enrichment from a full transaction object ({transaction, meta, version})
+// On-chain enrichment from a decoded transaction (`darkbot_solana::chain::ChainTx`)
 // ------------------------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -23,95 +24,50 @@ pub struct TxEnrichment {
     pub token_deltas_complete: bool,
     pub cu_limit: Option<u32>,
     pub cu_price_micro_lamports: Option<u64>,
+    /// Total priority fee in lamports (v1 config, or legacy/v0 limit × price).
+    pub priority_fee_lamports: Option<u64>,
 }
 
-pub(super) fn version_label(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => format!("v{n}"),
-        _ => "unknown".to_string(),
-    }
-}
-
-pub(super) fn key_str(v: &Value) -> Option<String> {
-    v.as_str()
-        .map(str::to_string)
-        .or_else(|| v.get("pubkey").and_then(Value::as_str).map(str::to_string))
-}
-
-/// static accountKeys + meta.loadedAddresses.writable + meta.loadedAddresses.readonly.
-/// `None` if lookups exist but loaded addresses are missing (indices would be ambiguous).
-pub(super) fn full_account_keys(message: &Value, meta: Option<&Value>) -> Option<Vec<String>> {
-    let statics = message.get("accountKeys")?.as_array()?;
-    let mut keys = Vec::with_capacity(statics.len());
-    for k in statics {
-        keys.push(key_str(k)?);
-    }
-    let has_lookups = message
-        .get("addressTableLookups")
-        .and_then(Value::as_array)
-        .is_some_and(|l| !l.is_empty());
-    match meta
-        .and_then(|m| m.get("loadedAddresses"))
-        .filter(|l| l.is_object())
-    {
-        Some(loaded) => {
-            for part in ["writable", "readonly"] {
-                if let Some(arr) = loaded.get(part).and_then(Value::as_array) {
-                    for k in arr {
-                        keys.push(key_str(k)?);
-                    }
-                }
-            }
-        }
-        None if has_lookups => return None,
-        None => {}
-    }
-    Some(keys)
-}
-
-pub(super) fn lamport_delta(keys: &[String], meta: &Value, receiver: &str) -> Option<i128> {
+/// Unique position of `receiver` among the resolved account keys; ambiguity is never guessed.
+fn receiver_position(keys: &[Pubkey], receiver: &Pubkey) -> Option<usize> {
     let mut positions = keys
         .iter()
         .enumerate()
-        .filter(|(_, k)| k.as_str() == receiver)
+        .filter(|(_, k)| *k == receiver)
         .map(|(i, _)| i);
     let i = positions.next()?;
-    if positions.next().is_some() {
-        return None; // not unique -> do not guess
-    }
-    let pre = meta.get("preBalances")?.as_array()?.get(i)?.as_u64()?;
-    let post = meta.get("postBalances")?.as_array()?.get(i)?.as_u64()?;
+    positions.next().is_none().then_some(i)
+}
+
+pub(super) fn lamport_delta(keys: &[Pubkey], meta: &ChainMeta, receiver: &Pubkey) -> Option<i128> {
+    let i = receiver_position(keys, receiver)?;
+    let pre = *meta.pre_balances.as_ref()?.get(i)?;
+    let post = *meta.post_balances.as_ref()?.get(i)?;
     Some(i128::from(post) - i128::from(pre))
 }
 
-pub(super) fn token_deltas(meta: &Value, receiver: &str) -> (Vec<TokenDelta>, bool) {
+/// Net token change per mint for token accounts owned by `receiver` (exact atomic units).
+/// Incomplete when either balance list is missing.
+pub(super) fn token_deltas(meta: &ChainMeta, receiver: &Pubkey) -> (Vec<TokenDelta>, bool) {
     let mut acc: BTreeMap<String, (i128, Option<u64>)> = BTreeMap::new();
     let mut complete = true;
-    for (field, sign) in [("preTokenBalances", -1i128), ("postTokenBalances", 1i128)] {
-        let Some(arr) = meta.get(field).and_then(Value::as_array) else {
+    for (list, sign) in [
+        (&meta.pre_token_balances, -1i128),
+        (&meta.post_token_balances, 1i128),
+    ] {
+        let Some(list) = list else {
             complete = false;
             continue;
         };
-        for b in arr {
-            if b.get("owner").and_then(Value::as_str) != Some(receiver) {
+        for b in list {
+            // Unchanged semantics: balances not owned by the receiver (incl. no owner) are skipped.
+            if b.owner != Some(*receiver) {
                 continue;
             }
-            let mint = b.get("mint").and_then(Value::as_str);
-            let amount = b
-                .pointer("/uiTokenAmount/amount")
-                .and_then(Value::as_str)
-                .and_then(|a| a.parse::<i128>().ok());
-            let (Some(mint), Some(amount)) = (mint, amount) else {
-                complete = false;
-                continue;
-            };
-            let decimals = b.pointer("/uiTokenAmount/decimals").and_then(Value::as_u64);
-            let entry = acc.entry(mint.to_string()).or_insert((0, decimals));
-            entry.0 += sign * amount;
-            if entry.1.is_none() {
-                entry.1 = decimals;
-            }
+            let entry = acc
+                .entry(b.mint.to_string())
+                .or_insert((0, Some(u64::from(b.decimals))));
+            entry.0 += sign * i128::from(b.amount);
         }
     }
     let deltas = acc
@@ -125,32 +81,24 @@ pub(super) fn token_deltas(meta: &Value, receiver: &str) -> (Vec<TokenDelta>, bo
     (deltas, complete)
 }
 
-/// Legacy/v0 ComputeBudget instructions: 2 = SetComputeUnitLimit(u32), 3 = SetComputeUnitPrice(u64).
-/// v1 transactions carry compute budget in their transaction config, not as instructions -> None.
-pub(super) fn compute_budget(message: &Value, keys: &[String]) -> (Option<u32>, Option<u64>) {
+/// Compute limit, CU price and total priority fee. Legacy/v0: ComputeBudget instructions
+/// 2 = SetComputeUnitLimit(u32), 3 = SetComputeUnitPrice(u64 micro-lamports), priority fee
+/// = ceil(limit × price / 1e6). v1: `transactionConfig` (`computeUnitLimit`, `priorityFee` in
+/// lamports, solana-message 4.4.1 `v1::TransactionConfig`).
+pub(super) fn compute_budget(
+    tx: &ChainTx,
+    keys: &[Pubkey],
+) -> (Option<u32>, Option<u64>, Option<u64>) {
+    if let Some(c) = tx.message.transaction_config {
+        return (c.compute_unit_limit, None, c.priority_fee);
+    }
+    let program = Pubkey::from_str(COMPUTE_BUDGET_PROGRAM).expect("static");
     let (mut limit, mut price) = (None, None);
-    let Some(ixs) = message.get("instructions").and_then(Value::as_array) else {
-        return (None, None);
-    };
-    for ix in ixs {
-        let Some(pi) = ix.get("programIdIndex").and_then(Value::as_u64) else {
-            continue;
-        };
-        let is_cb = usize::try_from(pi)
-            .ok()
-            .and_then(|i| keys.get(i))
-            .map(String::as_str)
-            == Some(COMPUTE_BUDGET_PROGRAM);
-        if !is_cb {
+    for ix in &tx.message.instructions {
+        if keys.get(usize::from(ix.program_id_index)) != Some(&program) {
             continue;
         }
-        let Some(data) = ix
-            .get("data")
-            .and_then(Value::as_str)
-            .and_then(|d| bs58::decode(d).into_vec().ok())
-        else {
-            continue;
-        };
+        let data = &ix.data;
         match data.first() {
             Some(2) if data.len() >= 5 => {
                 limit = Some(u32::from_le_bytes([data[1], data[2], data[3], data[4]]))
@@ -163,56 +111,40 @@ pub(super) fn compute_budget(message: &Value, keys: &[String]) -> (Option<u32>, 
             _ => {}
         }
     }
-    (limit, price)
+    let priority = limit
+        .zip(price)
+        .and_then(|(l, p)| u64::try_from((u128::from(l) * u128::from(p)).div_ceil(1_000_000)).ok());
+    (limit, price, priority)
 }
 
-/// Enrich one receiver from a full transaction object (`{transaction:{signatures,message}, meta, version}`,
-/// i.e. `getTransaction` result or Helius `transactionNotification.result.transaction`).
-pub fn enrich(tx: &Value, receiver: &Pubkey) -> TxEnrichment {
-    let meta = tx.get("meta").filter(|m| m.is_object());
-    let message = tx.pointer("/transaction/message").filter(|m| m.is_object());
-    let receiver_s = receiver.to_string();
-    let keys = message.and_then(|m| full_account_keys(m, meta));
+/// Enrich one receiver from a decoded transaction (`getTransaction`, block entry or
+/// `transactionNotification`).
+pub fn enrich(tx: &ChainTx, receiver: &Pubkey) -> TxEnrichment {
+    let keys = tx.account_keys().ok();
     let mut e = TxEnrichment {
-        meta_available: meta.is_some(),
-        tx_version: tx.get("version").map(version_label),
-        fee_payer: keys.as_ref().and_then(|k| k.first().cloned()),
+        meta_available: tx.meta.is_some(),
+        tx_version: tx.version.map(|_| tx.version_label()),
+        fee_payer: keys
+            .as_ref()
+            .and_then(|k| k.first())
+            .map(ToString::to_string),
         ..TxEnrichment::default()
     };
-    if let Some(m) = meta {
-        e.tx_fee_lamports = m.get("fee").and_then(Value::as_u64);
+    if let Some(m) = &tx.meta {
+        e.tx_fee_lamports = m.fee;
         if let Some(k) = &keys {
-            e.receiver_lamport_delta = lamport_delta(k, m, &receiver_s);
+            e.receiver_lamport_delta = lamport_delta(k, m, receiver);
         }
-        let (deltas, complete) = token_deltas(m, &receiver_s);
+        let (deltas, complete) = token_deltas(m, receiver);
         e.receiver_token_deltas = deltas;
         e.token_deltas_complete = complete;
     }
-    if let (Some(msg), Some(k)) = (message, &keys) {
-        let (limit, price) = compute_budget(msg, k);
-        e.cu_limit = limit;
-        e.cu_price_micro_lamports = price;
+    if let Some(k) = &keys {
+        (
+            e.cu_limit,
+            e.cu_price_micro_lamports,
+            e.priority_fee_lamports,
+        ) = compute_budget(tx, k);
     }
     e
-}
-
-/// The fetched transaction must be exactly the observed one (first signature and slot).
-pub fn verify_tx_identity(tx: &Value, signature: &str, slot: u64) -> Result<(), String> {
-    match tx
-        .pointer("/transaction/signatures/0")
-        .and_then(Value::as_str)
-    {
-        Some(s) if s == signature => {}
-        Some(s) => {
-            return Err(format!(
-                "signature mismatch requested={signature} returned={s}"
-            ))
-        }
-        None => return Err("signature missing".into()),
-    }
-    match tx.get("slot").and_then(Value::as_u64) {
-        Some(s) if s == slot => Ok(()),
-        Some(s) => Err(format!("slot mismatch observed={slot} returned={s}")),
-        None => Err("slot missing".into()),
-    }
 }

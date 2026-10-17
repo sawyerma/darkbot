@@ -67,8 +67,9 @@ fn tx_event(
     err: Option<&str>,
     t_rx_ns: u64,
 ) -> TransactionObserved {
+    // Real RPC form of a failed instruction (the test label `err` only marks failure).
     let meta_err = err
-        .map(|e| json!({"InstructionError": [0, e]}))
+        .map(|_| json!({"InstructionError": [0, {"Custom": 1}]}))
         .unwrap_or(Value::Null);
     TransactionObserved {
         signature: sig.into(),
@@ -294,8 +295,14 @@ fn v0_loaded_addresses_resolve_receiver_and_lookups_without_loaded_are_unknown()
     );
     let limit = bs58::encode([2u8, 0x40, 0x42, 0x0f, 0x00]).into_string();
     let price = bs58::encode([3u8, 7, 0, 0, 0, 0, 0, 0, 0]).into_string();
+    let (m1, m2) = (
+        Pubkey::new_unique().to_string(),
+        Pubkey::new_unique().to_string(),
+    );
     let tx = json!({"version": 0,
-        "transaction": {"signatures": ["s"], "message": {
+        "transaction": {"signatures": [solana_sdk::signature::Signature::default().to_string()], "message": {
+            "header": {"numRequiredSignatures": 1, "numReadonlySignedAccounts": 0, "numReadonlyUnsignedAccounts": 1},
+            "recentBlockhash": Pubkey::new_unique().to_string(),
             "accountKeys": [payer.to_string(), cb],
             "addressTableLookups": [{"accountKey": Pubkey::new_unique().to_string(), "writableIndexes": [0], "readonlyIndexes": []}],
             "instructions": [{"programIdIndex": 1, "accounts": [], "data": limit},
@@ -303,10 +310,11 @@ fn v0_loaded_addresses_resolve_receiver_and_lookups_without_loaded_are_unknown()
         "meta": {"err": null, "fee": 12_000,
             "loadedAddresses": {"writable": [receiver.to_string()], "readonly": [Pubkey::new_unique().to_string()]},
             "preBalances": [10, 1, 100, 5], "postBalances": [9, 1, 150, 5],
-            "preTokenBalances": [{"accountIndex": 3, "mint": "M1", "owner": receiver.to_string(), "uiTokenAmount": {"amount": "10", "decimals": 6}}],
-            "postTokenBalances": [{"accountIndex": 3, "mint": "M1", "owner": receiver.to_string(), "uiTokenAmount": {"amount": "35", "decimals": 6}},
-                                  {"accountIndex": 4, "mint": "M2", "owner": receiver.to_string(), "uiTokenAmount": {"amount": "4", "decimals": 9}}]}});
-    let e = enrich(&tx, &receiver);
+            "preTokenBalances": [{"accountIndex": 3, "mint": m1, "owner": receiver.to_string(), "uiTokenAmount": {"amount": "10", "decimals": 6}}],
+            "postTokenBalances": [{"accountIndex": 3, "mint": m1, "owner": receiver.to_string(), "uiTokenAmount": {"amount": "35", "decimals": 6}},
+                                  {"accountIndex": 4, "mint": m2, "owner": receiver.to_string(), "uiTokenAmount": {"amount": "4", "decimals": 9}}]}});
+    let decode = |v: &Value| darkbot_solana::chain::decode_entry(v, 1, None, None).unwrap();
+    let e = enrich(&decode(&tx), &receiver);
     assert_eq!(e.receiver_lamport_delta, Some(50));
     assert_eq!(
         (e.tx_fee_lamports, e.fee_payer.as_deref()),
@@ -316,27 +324,27 @@ fn v0_loaded_addresses_resolve_receiver_and_lookups_without_loaded_are_unknown()
         (e.cu_limit, e.cu_price_micro_lamports),
         (Some(1_000_000), Some(7))
     );
-    assert_eq!(
-        e.receiver_token_deltas,
-        vec![
-            TokenDelta {
-                mint: "M1".into(),
-                native_delta: 25,
-                decimals: Some(6)
-            },
-            TokenDelta {
-                mint: "M2".into(),
-                native_delta: 4,
-                decimals: Some(9)
-            },
-        ]
-    );
+    // Per-mint deltas come out ordered by mint (BTreeMap), so order the expectation the same way.
+    let mut want = vec![
+        TokenDelta {
+            mint: m1.clone(),
+            native_delta: 25,
+            decimals: Some(6),
+        },
+        TokenDelta {
+            mint: m2.clone(),
+            native_delta: 4,
+            decimals: Some(9),
+        },
+    ];
+    want.sort_by(|a, b| a.mint.cmp(&b.mint));
+    assert_eq!(e.receiver_token_deltas, want);
     let mut no_loaded = tx.clone();
     no_loaded["meta"]
         .as_object_mut()
         .unwrap()
         .remove("loadedAddresses");
-    let e = enrich(&no_loaded, &receiver);
+    let e = enrich(&decode(&no_loaded), &receiver);
     assert_eq!(
         (e.receiver_lamport_delta, e.fee_payer.clone()),
         (None, None)
@@ -658,9 +666,8 @@ fn enrichment_budget_identity_and_queue_limits_are_explicit() {
         &mut sink,
         &mut |_s: &str| {
             calls += 1;
-            Ok(Some(
-                json!({"slot": 5, "transaction": {"signatures": ["zzz"]}}),
-            ))
+            Ok(Some(json!({"slot": 5, "version": 0, "meta": {"err": null},
+                "transaction": {"signatures": ["zzz"], "message": {"accountKeys": [], "instructions": []}}})))
         },
         &mut |_d: Duration| {},
         &mut || true,
@@ -1243,7 +1250,7 @@ fn liq_tx_json(
         json!([])
     };
     let err = if failed {
-        json!({"InstructionError": [0, "Custom"]})
+        json!({"InstructionError": [0, {"Custom": 1}]})
     } else {
         Value::Null
     };
@@ -1543,12 +1550,12 @@ struct Fx {
 
 fn fixtures() -> Vec<Fx> {
     vec![
-        Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf.json"), signature: "2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf", slot: 451703584, gross: 0.186822, receiver: "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn", target: "3GqwCURBtJZfdQxMSyZ1VyWNSB5WXovg7Q8Q46HY7ihx", fee: 19000, cu_limit: None, lamport_delta: -1019000, token_mints: 2 },
-        Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F.json"), signature: "38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F", slot: 451704201, gross: 0.531769, receiver: "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn", target: "AzQVTAtLxdaQUJzh7xZ7rj956tkeVNk4D4iuK5EVkxDi", fee: 19000, cu_limit: None, lamport_delta: -1019000, token_mints: 2 },
+        Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf.json"), signature: "2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf", slot: 451703584, gross: 0.186822, receiver: "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn", target: "3GqwCURBtJZfdQxMSyZ1VyWNSB5WXovg7Q8Q46HY7ihx", fee: 19000, cu_limit: Some(1400000), lamport_delta: -1019000, token_mints: 2 },
+        Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F.json"), signature: "38ZXvW6P5sGZmdzj4QbUPSdQnCnJEBHoXTh4vvvfitFPNDHRsgPjELCnFxxCfW2wygE8J6k2Yv8RJJXPUVchBm7F", slot: 451704201, gross: 0.531769, receiver: "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn", target: "AzQVTAtLxdaQUJzh7xZ7rj956tkeVNk4D4iuK5EVkxDi", fee: 19000, cu_limit: Some(1400000), lamport_delta: -1019000, token_mints: 2 },
         Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB.json"), signature: "3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB", slot: 451657746, gross: 0.18595, receiver: "TraceR2t18nnwkXgHoB54iPD5N4x2EJZC1uS55ggsH8", target: "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8", fee: 5000, cu_limit: Some(598236), lamport_delta: -1005000, token_mints: 2 },
         Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa.json"), signature: "59Qt6h1iPnEgfaDaEi5Y5jVvqHJCs4gzwvHqWW37wVJMHyThYjM6zsS8AmE9bvoxqdUj8AMnNbBuKHQtXysdnwNa", slot: 453063240, gross: 0.060183, receiver: "qbvAGHo9JpVRsuRem8rBCzLJJNV6ZDNv63qYHkcmNCV", target: "HMjc1LecbCMUqYG3x36gaCzxG5AJ7gJPkPB85fx1pPKK", fee: 5000, cu_limit: Some(1400000), lamport_delta: -1005000, token_mints: 2 },
         Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ.json"), signature: "C6JnpzGrv53y9dEExtpDYkzTbexLEu7oikPRNx8sCqf85Jvobc7UBpsaDSgGHzEgeB88HkVFqMkCkvs1ZqVWRwZ", slot: 451635082, gross: 0.2098, receiver: "TraceR2t18nnwkXgHoB54iPD5N4x2EJZC1uS55ggsH8", target: "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8", fee: 5000, cu_limit: Some(779995), lamport_delta: -1005000, token_mints: 2 },
-        Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB.json"), signature: "gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB", slot: 451643526, gross: 0.1742, receiver: "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn", target: "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8", fee: 19000, cu_limit: None, lamport_delta: -1019000, token_mints: 2 },
+        Fx { raw: include_str!("../../../../../docs/evidence/AUDIT_20261005/gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB.json"), signature: "gLVXyfVZmizZqpF9752x3uhgJixW5Jqrp3Agjhhr6cNUnU5aQDBAxQ1CF9RWSpy2oB2K9EAroFJaGPTkz5vkUzB", slot: 451643526, gross: 0.1742, receiver: "D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn", target: "6mzmLGPk7CeGCM7dRH8ZZpHsSzfy6aAYf47nbH8HuYy8", fee: 19000, cu_limit: Some(1400000), lamport_delta: -1019000, token_mints: 2 },
     ]
 }
 
@@ -1576,15 +1583,24 @@ fn six_real_audit_liquidations_decode_enrich_and_verify_identity() {
         assert_eq!(e.receiver.to_string(), fx.receiver);
         assert_eq!(e.target.to_string(), fx.target);
         assert_eq!(e.protocol_flat_fee_lamports, 1_000_000);
-        let en = enrich(&tx, &e.receiver);
+        let chain = darkbot_solana::chain::decode_transaction(&tx).unwrap();
+        let en = enrich(&chain, &e.receiver);
         assert_eq!(en.tx_fee_lamports, Some(fx.fee));
         assert_eq!(en.fee_payer.as_deref(), Some(fx.receiver));
         assert_eq!(en.cu_limit, fx.cu_limit);
+        // v1: `transactionConfig.priorityFee` is lamports; fee = 5000 base + priority.
+        if chain.message.transaction_config.is_some() {
+            assert_eq!(en.priority_fee_lamports, Some(14_000));
+            assert_eq!(fx.fee, 5_000 + 14_000);
+        }
         assert_eq!(en.receiver_lamport_delta, Some(fx.lamport_delta));
         assert_eq!(en.receiver_token_deltas.len(), fx.token_mints);
         assert!(en.token_deltas_complete);
-        assert_eq!(verify_tx_identity(&tx, fx.signature, fx.slot), Ok(()));
-        assert!(verify_tx_identity(&tx, fx.signature, fx.slot + 1).is_err());
+        assert_eq!(
+            check_transaction_identity(&chain, fx.signature, fx.slot),
+            Ok(())
+        );
+        assert!(check_transaction_identity(&chain, fx.signature, fx.slot + 1).is_err());
     }
 }
 

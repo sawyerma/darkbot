@@ -1,7 +1,8 @@
 //! Canonical finalized block reconciliation, invoked only after capture and drain.
 //! Slot notifications define an explicit slot-complete window; they are NOT finality proof.
 use super::*;
-use crate::winner::{resolve_account_keys, RpcInstruction};
+use crate::winner::{resolve_account_keys, ChainInstruction, ChainTx, TxStatus};
+use darkbot_solana::chain::TxWireVersion;
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug)]
@@ -105,75 +106,71 @@ type ReconcileRpc<'a> = dyn FnMut(&str, Value, Duration) -> Result<Value, &'stat
 
 /// Validate ALL key/index views before deciding relevance, including inner instructions.
 /// Legacy/v0 and the JSON v1 account/instruction view are covered by real F8 fixtures.
-pub(super) fn validate_full_transaction(raw: &Value) -> Result<RpcTransaction, &'static str> {
-    if raw["version"] != "legacy" && !matches!(raw["version"].as_u64(), Some(0 | 1)) {
+pub(super) fn validate_full_transaction(raw: &Value) -> Result<ChainTx, &'static str> {
+    let tx = darkbot_solana::chain::decode_transaction(raw).map_err(|e| e.0)?;
+    if !matches!(
+        tx.version,
+        Some(TxWireVersion::Legacy) | Some(TxWireVersion::Number(0 | 1))
+    ) {
         return Err("TX_VERSION_UNSUPPORTED_OR_MISSING");
     }
-    if raw["meta"].get("err").is_none() {
-        return Err("TX_META_STATUS_MISSING");
+    match tx.status() {
+        TxStatus::Success | TxStatus::Failed(_) => {}
+        TxStatus::Unknown("TX_META_MISSING") => return Err("TX_META_STATUS_MISSING"),
+        TxStatus::Unknown(code) => return Err(code),
     }
-    let tx: RpcTransaction = serde_json::from_value(raw.clone()).map_err(|_| "TX_DECODE")?;
-    let signature = tx
-        .transaction
-        .signatures
-        .first()
-        .ok_or("TX_SIGNATURE_MISSING")?;
+    let signature = tx.signature().ok_or("TX_SIGNATURE_MISSING")?;
     check_transaction_identity(&tx, signature, tx.slot).map_err(|_| "TX_IDENTITY")?;
     let keys = resolve_account_keys(&tx).map_err(|e| e.code())?;
     // A present but empty loadedAddresses object must not disguise an unresolved LUT.
-    if let Some(lookups) = &tx.transaction.message.address_table_lookups {
-        let mut wanted = [0usize; 2];
-        for l in lookups {
-            Pubkey::from_str(l["accountKey"].as_str().ok_or("LUT_KEY")?).map_err(|_| "LUT_KEY")?;
-            for (i, field) in ["writableIndexes", "readonlyIndexes"].iter().enumerate() {
-                let a = l[*field].as_array().ok_or("LUT_INDEX_VIEW")?;
-                if a.iter().any(|v| v.as_u64().is_none_or(|n| n > 255)) {
-                    return Err("LUT_INDEX_VIEW");
-                }
-                wanted[i] += a.len();
-            }
-        }
-        if !lookups.is_empty() {
-            let loaded = tx
-                .meta
-                .as_ref()
-                .and_then(|m| m.loaded_addresses.as_ref())
-                .ok_or("LOADED_ADDRESSES_MISSING")?;
-            if wanted != [loaded.writable.len(), loaded.readonly.len()] {
-                return Err("LOADED_ADDRESS_COUNT_MISMATCH");
-            }
+    // (Lookup keys and u8 indexes are validated by the typed wire decode.)
+    if let Some(lookups) = tx
+        .message
+        .address_table_lookups
+        .as_ref()
+        .filter(|l| !l.is_empty())
+    {
+        let wanted = lookups.iter().fold([0usize; 2], |w, l| {
+            [
+                w[0] + l.writable_indexes.len(),
+                w[1] + l.readonly_indexes.len(),
+            ]
+        });
+        let loaded = tx
+            .meta
+            .as_ref()
+            .and_then(|m| m.loaded_addresses.as_ref())
+            .ok_or("LOADED_ADDRESSES_MISSING")?;
+        if wanted != [loaded.writable.len(), loaded.readonly.len()] {
+            return Err("LOADED_ADDRESS_COUNT_MISMATCH");
         }
     }
-    let valid_ix = |ix: &RpcInstruction| -> Result<(), &'static str> {
-        if ix.program_id_index >= keys.len() as u64
-            || ix.accounts.iter().any(|i| *i >= keys.len() as u64)
+    let valid_ix = |ix: &ChainInstruction| -> Result<(), &'static str> {
+        if usize::from(ix.program_id_index) >= keys.len()
+            || ix.accounts.iter().any(|i| usize::from(*i) >= keys.len())
         {
             return Err("INSTRUCTION_INDEX_OUT_OF_RANGE");
         }
-        bs58::decode(&ix.data)
-            .into_vec()
-            .map_err(|_| "INSTRUCTION_DATA_INVALID")?;
         Ok(())
     };
-    for ix in &tx.transaction.message.instructions {
+    for ix in &tx.message.instructions {
         valid_ix(ix)?;
     }
-    // null means recording was unavailable. Even an otherwise irrelevant transaction
+    // None means recording was unavailable. Even an otherwise irrelevant transaction
     // cannot establish complete CPI coverage in that case.
-    let inner = raw["meta"]["innerInstructions"]
-        .as_array()
+    let inner = tx
+        .meta
+        .as_ref()
+        .and_then(|m| m.inner_instructions.as_ref())
         .ok_or("INNER_INSTRUCTIONS_UNAVAILABLE")?;
     let mut indices = HashSet::new();
     for group in inner {
-        let index = group["index"].as_u64().ok_or("INNER_INDEX")?;
-        if index >= tx.transaction.message.instructions.len() as u64 || !indices.insert(index) {
+        if usize::from(group.index) >= tx.message.instructions.len() || !indices.insert(group.index)
+        {
             return Err("INNER_INDEX");
         }
-        for ix in group["instructions"]
-            .as_array()
-            .ok_or("INNER_INSTRUCTIONS_SHAPE")?
-        {
-            valid_ix(&serde_json::from_value(ix.clone()).map_err(|_| "INNER_INSTRUCTION_DECODE")?)?;
+        for ix in &group.instructions {
+            valid_ix(ix)?;
         }
     }
     Ok(tx)
@@ -402,8 +399,8 @@ impl ObserverCore {
                     self.reconciliation.marginfi_transactions += 1;
                     // Persist full relevant TX before any liquidation/strategy decision.
                     sink.transaction(&json!({"source":"full_slot_reconciliation","slot":slot,"transaction_index":index,
-                        "signature":tx.transaction.signatures[0],"blockhash":hash,"block_time":block["blockTime"],"raw":raw}))?;
-                    let signature = &tx.transaction.signatures[0];
+                        "signature":tx.signatures[0],"blockhash":hash,"block_time":block["blockTime"],"raw":raw}))?;
+                    let signature = &tx.signatures[0];
                     let live = self
                         .truth
                         .live_receipts
