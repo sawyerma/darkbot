@@ -5675,3 +5675,12 @@ Base `74f60cf`.
 Tests: measurement 9 (typed manifest journal equals the `manifest.json` render, no secret), measurement/econ/journal 81, solana lib 72, Python launcher integration 26/26 (pinned run store recognizes both layouts).
 
 Open in JFI-FIX-04: config resolution through a JSON value tree, the `--print-effective-config` handoff and the Python measurement-config/launcher JSON (until `p0ctl` replaces the Python launcher with parity).
+
+## 2026-10-17 — Ticket 3 A3 rest: native strict verification driver with typed identities (LOCAL_PASS in scope)
+
+Base `79b5568`.
+
+- `market/strict_driver.rs`, `p0-strict-verify --run RUN [--resume-verification] [--offline] [--verify-* N]`: for layout-V2 runs the driver reads the typed run manifest and the typed CAPTURE phase (exactly one; window must equal the plan duration), fixes the capture evidence once (`CAPTURE_EVIDENCE` 315: every capture-time file with size and SHA-256, `verification/` and `reports/` excluded) and re-checks it on every attempt and after the attempt, derives the stable `verification_spec_id` (`STRICT_SPEC` 314: capture id, manifest hash, window, mode, program, verifier binary as decoder pin, protocol pin, journal version, FREE_ONLY policy and the endpoint's SHA-256 — never the endpoint — and budgets), takes an exclusive writer lock, records each attempt's start and end separately (`STRICT_ATTEMPT` 316) and binds the strict engine's content-addressed result as `verification_result_id`. No JSON job file; existing strict engine, checkpoints and resume unchanged.
+- L.3 invariants: the spec id never contains attempts, checkpoints or result digests; resume requires the identical spec (`RESUME_IDENTITY_MISMATCH` otherwise) and refuses a second fresh run (`SPEC_EXISTS_USE_RESUME_VERIFICATION`); a changed capture is refused (`CAPTURE_EVIDENCE_CHANGED`). Historical/V1 runs keep the Python driver (`NATIVE_MANIFEST_MISSING`), whose identities and the pinned report stay unchanged; native results are consumed by the native report (B7).
+
+Tests: `strict_driver::spec_identity_is_stable_and_bound_to_its_inputs`, `strict_driver::driver_records_identities_and_refuses_changed_capture` (offline end to end on a V2 run with a real manifest and CAPTURE phase), verification/journal 36.

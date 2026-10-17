@@ -46,6 +46,10 @@ pub mod kind {
     pub const STRICT_RPC_CACHE: u16 = 311;
     pub const STRICT_CHECKPOINT: u16 = 312;
     pub const STRICT_RESULT: u16 = 313;
+    /// A3 native driver: stable spec, immutable capture evidence, attempt start/end records.
+    pub const STRICT_SPEC: u16 = 314;
+    pub const CAPTURE_EVIDENCE: u16 = 315;
+    pub const STRICT_ATTEMPT: u16 = 316;
     /// SK-06 capacity preflight report (single-value journal before a capture).
     pub const CAPACITY_PREFLIGHT: u16 = 320;
     /// SK-07 segment chain control frames (first frame of a continuation / last before seal).
@@ -105,6 +109,9 @@ pub mod kind {
         STRICT_RPC_CACHE,
         STRICT_CHECKPOINT,
         STRICT_RESULT,
+        STRICT_SPEC,
+        CAPTURE_EVIDENCE,
+        STRICT_ATTEMPT,
         CAPACITY_PREFLIGHT,
         SEGMENT_LINK,
         SEGMENT_NEXT,

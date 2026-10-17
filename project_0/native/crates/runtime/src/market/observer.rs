@@ -97,6 +97,8 @@ pub mod rows;
 pub mod parity;
 #[path = "related.rs"]
 pub mod related;
+#[path = "strict_driver.rs"]
+pub mod strict_driver;
 #[path = "sink.rs"]
 mod sink;
 pub use sink::{
