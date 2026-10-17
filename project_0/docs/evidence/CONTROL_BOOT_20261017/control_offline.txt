@@ -1,0 +1,69 @@
+$ offline control test (unreachable localhost endpoints, no Mainnet)
+## second owner while the first runs
+second_exit=2
+RUNTIME_OWNER_LOCKED: another runtime owns <tmp>/ctl/.p0-runtime.lock 
+## p0ctl run status
+runtime: RUNNING pid=<pid> run_id=stoptest mode=market started_unix_s=<t>
+run stoptest: directory not found (or ambiguous) under ["data/runs", "data/econ4h", "data/market"]
+## p0ctl run stop (twice: idempotent)
+STOP_REQUESTED run_id=stoptest pid=<pid>: admission closed, capture drains, journals are sealed, coverage is recorded INCOMPLETE (OPERATOR_STOP) (repeat is harmless)
+stop_exit=0
+owner_exit=2
+NOT_RUNNING: nothing to stop
+stop_again_exit=0
+## after stop
+runtime: NOT_RUNNING (last owner: pid=<pid> run_id=stoptest mode=market started_unix_s=<t>)
+run <tmp>/market/stoptest: <tmp>/market/stoptest
+  market journal: market.p0j frames=10 kinds={302: 10} sealed=true complete=true last_rx_ns=<ns> (complete)
+  post-capture result: not yet written
+journal: stoptest/market.p0j
+{"frames":11,"kinds":{"302":10,"65535":1},"root_sha256":"06296142e11aa9de4faff2c2102f2003602efead2822cea4bba91d7572d781f6","sealed":true,"status":"COMPLETE"}
+frames mentioning OPERATOR_STOP: 2
+p0-longtail: MARKET_CAPTURE_INCOMPLETE: OPERATOR_STOP
+
+$ p0ctl doctor
+PROJECT 0 BOOT AUDIT scope=offline verdict=OFFLINE_READY_NETWORK_NOT_RUN token=aa0863bdd602bcb6
+  BOOT-01  source_identity            PASS           HEAD 84a0cdba655f
+  BOOT-01  journal_codec_registry     PASS           journal v1, every kind typed xor migration path: true
+  BOOT-01  discriminators             PASS           six markers and four related instructions match the pinned Anchor rule
+  BOOT-02  runtime_owner              PASS           no live runtime owner
+  BOOT-02  journal_seal_state         PASS           no unsealed journal in the newest runs
+  BOOT-02  memory_reserve             PASS           131072 MiB physical
+  BOOT-02  disk_reserve               PASS           84599 MiB free > reserve (sizing: capacity preflight)
+  BOOT-02  clock                      PASS           unix 1792250475; monotonic clock is the process Clock
+  BOOT-03  cluster                    NOT_RUN        NOT_RUN offline: getGenesisHash/getVersion/slot of the configured cluster
+  BOOT-04  wss_provider               NOT_RUN        NOT_RUN offline: WSS connect, ACK, slot liveness, 429, FREE_ONLY quota, archive
+  BOOT-05  program_identity           NOT_RUN        NOT_RUN offline: program owner/executable, ProgramData slot/authority/hash vs pin
+  BOOT-06  protocol_state             NOT_RUN        NOT_RUN offline: group/bank/mint/oracle relations at one slot
+  BOOT-07  dynamic_addresses          NOT_RUN        NOT_RUN offline: PDAs and dynamic accounts derived from parent state
+  BOOT-08  oracles                    NOT_RUN        NOT_RUN offline: oracle identity, age, confidence
+  BOOT-09  observe_only               PASS           P0_LIVE_ENABLED=false P0_SUBMISSION_ENABLED=false
+  BOOT-09  wallet_public_identity     PASS           public key GqRxBgvH94QKFJQVyDv82fK6jxaKrcyjyjSPkN7ue3zd (no private key read)
+  BOOT-10  measurement_scope          PASS           six markers, four classes, four related instructions registered; source coverage stays PROVISIONAL (coverage_verified=false)
+  BOOT-11  execution_readiness        NOT_APPLICABLE observe-only run: no signer, route or submission check
+  BOOT-12  readiness_binding          PASS           start recomputes the token and refuses on drift
+  network checks NOT_RUN: run `p0ctl doctor --scope network` only with explicit Mainnet read permission
+exit=0
+
+$ p0ctl doctor --scope network
+p0ctl: DOCTOR_NETWORK_NOT_AVAILABLE: network checks (BOOT-03…08) need explicit Mainnet read permission and are not run by this build
+exit=2
+
+$ p0ctl preflight --duration 4h --chain-verify strict
+PROJECT 0 CAPACITY PREFLIGHT duration=14400s source=logs chain_verify=strict verdict=CAPACITY_UNVERIFIED start_allowed=false
+  basis: 0 run(s), 0s, 0 skipped
+  data_rate            CAPACITY_UNVERIFIED  no sealed earlier run of source logs in the current journal format (0 candidate(s) skipped); run a calibration capture first
+  disk                 CAPACITY_UNVERIFIED  82.6 GiB free; need unknown without a data-rate basis
+  write_rate           CAPACITY_UNVERIFIED  38.3 MiB/s sustained (measured); data rate unknown
+  sync_latency         QUALIFIED            76 sync(s): mean 4.82 ms, max 5.40 ms vs stall budget 30s
+  ram_backlog          CAPACITY_UNVERIFIED  max 512 MiB; market burst unmeasured
+  bounded_collections  CAPACITY_UNVERIFIED  econ/winner/Shadow retained collections are count-bounded, not byte-bounded (SK-03 open)
+  physical_memory      QUALIFIED            128.0 GiB physical ≥ max + system reserve
+  memory_pressure      QUALIFIED            level 1
+  swap                 QUALIFIED            2.10 GiB in use ≤ system reserve
+  cpu                  QUALIFIED            load 4.34 on 16 cores
+  verification         CAPACITY_UNVERIFIED  strict sizing needs the measured slot rate (no basis); context only: ~36000 slots at a nominal 400 ms vs 2000 configured calls — never strict-qualified without measurement
+  provider             NOT_RUN              capture provider capacity (WSS liveness, 429, FREE_ONLY quota, archive) not probed: BOOT-04 network audit needs explicit permission
+  START BLOCKED: resolve the checks above or run a calibration capture (≤ 600 s, explicit Mainnet permission)
+boot audit: OFFLINE_READY_NETWORK_NOT_RUN (details: p0ctl doctor)
+exit=2

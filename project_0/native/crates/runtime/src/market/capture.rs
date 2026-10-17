@@ -236,7 +236,20 @@ pub fn run_embedded(
             .as_ref()
             .is_some_and(|h| h.shared.abort.load(std::sync::atomic::Ordering::Acquire))
         {
-            stop_reason = "C0_E1_ABORT";
+            let operator = econ.as_ref().is_some_and(|h| {
+                h.shared
+                    .operator_stop
+                    .load(std::sync::atomic::Ordering::Acquire)
+            });
+            stop_reason = if operator {
+                "OPERATOR_STOP"
+            } else {
+                "C0_E1_ABORT"
+            };
+            break;
+        }
+        if econ.is_none() && crate::orchestration::control::stop_requested() {
+            stop_reason = "OPERATOR_STOP";
             break;
         }
         if let (Some(h), Some((start, cutoff))) = (&econ, window) {
@@ -517,6 +530,10 @@ pub fn run_embedded(
         h.emit(crate::analytics::econ::Evidence::MarketFinal(summary));
     } else {
         print!("{report}");
+    }
+    if stop_reason == "OPERATOR_STOP" {
+        // Requested stop (also before StreamReady): sealed INCOMPLETE, not a provider failure.
+        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
     }
     if window.is_none() {
         let hint = if cfg.source == MarketSource::Transactions {

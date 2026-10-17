@@ -14,6 +14,8 @@
 /data/c0/
 # Default run store for new econ4h runs, layout V2 (operations/capture/run_store.py)
 /data/runs/
+# Runtime-owner lock: orchestration/control.rs (P0_RUNTIME_LOCK default), scripts/capture.sh, p0ctl
+/data/.p0-runtime.lock
 # Reconstructible caches and working data (docs/operations/data_policy.md); scripts/smoke.sh
 /data/cache/
 

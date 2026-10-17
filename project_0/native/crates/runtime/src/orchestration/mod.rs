@@ -2,6 +2,8 @@
 
 #[cfg(feature = "crate_health")]
 pub mod fe_qualification;
+pub mod boot_audit;
+pub mod control;
 pub mod remote_workers;
 #[cfg(feature = "crate_health")]
 mod startup;

@@ -34,6 +34,7 @@ Repository paths are rooted at `project_0/`; the Rust workspace is `project_0/na
 | [operational_config.md](operations/operational_config.md) | Operational configuration: inspection commands, precedence, profiles, budgets, authorization limits. |
 | [data_policy.md](operations/data_policy.md) | Data, cache and export classes, writers, ignore boundaries, retention and deletion limits. |
 | [run_storage.md](operations/run_storage.md) | Run storage contract: `data/runs/` default (layout V2), legacy roots, run id and collision rules, run path inventory. |
+| [run_control.md](operations/run_control.md) | Terminal control `p0ctl` (doctor, preflight, run start/status/stop, verify, report), runtime-owner lock and ordered operator stop. |
 
 ### [qualification/](qualification/)
 

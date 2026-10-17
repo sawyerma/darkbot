@@ -107,6 +107,24 @@ class MeasurementCli(unittest.TestCase):
                                       env={**env, 'P0_ECON_RUN_MODE': 'quick', 'P0_ECON_RUN_ID': 'quick'}, capture_output=True, timeout=60)
             self.assertEqual(rejected.returncode, 2)
             self.assertFalse((tmp / 'runs/quick').exists())
+            # p0ctl drives the same launcher: offline boot audit, run id and owner lock handed over,
+            # child exit reported; the lock is released afterwards and records the last owner.
+            ctl = release / 'p0ctl'
+            if ctl.exists():
+                lock = tmp / 'runtime.lock'
+                p = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'run', 'start', '--duration', '61s'], cwd=tmp,
+                                   env={**env, 'P0_ECON_RUN_ID': 'p0ctl', 'P0_RUNTIME_LOCK': str(lock)},
+                                   capture_output=True, text=True, timeout=600)
+                self.assertEqual(p.returncode, 2, p.stderr[-2000:])
+                self.assertIn('PROJECT 0 BOOT AUDIT scope=offline', p.stdout)
+                self.assertIn('[p0ctl] run p0ctl started', p.stdout)
+                self.assertIn('[p0ctl] run p0ctl ended', p.stdout)
+                # Explicit P0_ECON_OUT_DIR keeps layout V1: the native capacity report sits at the run root.
+                self.assertTrue((tmp / 'runs/p0ctl/capacity_preflight.p0j').exists(), p.stdout[-3000:])
+                self.assertIn('run_id=p0ctl', lock.read_text())
+                status = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'run', 'stop'], env={**env, 'P0_RUNTIME_LOCK': str(lock)},
+                                        capture_output=True, text=True, timeout=60)
+                self.assertEqual((status.returncode, status.stdout.strip()), (0, 'NOT_RUNNING: nothing to stop'))
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

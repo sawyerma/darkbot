@@ -5586,3 +5586,16 @@ Base `2db6121` (isolated Project_0 worktree). Evidence: [A4_RELATED_20261017](ev
 - Identity note: `market_reconcile.rs`/`market_verification.rs` are strict decoder pins; new strict `verification_spec_id`s change.
 
 Tests: related 2/2, reconcile related 1/1, market + journal 135 (2 ignored), parity/verification 8, differential exit 0.
+
+## 2026-10-17 — Terminal control `p0ctl`, runtime-owner lock, ordered operator stop and offline boot audit (LOCAL_PASS in scope; network boot checks NOT_RUN)
+
+Base `84a0cdb`. Evidence: [CONTROL_BOOT_20261017](evidence/CONTROL_BOOT_20261017/README.md); guide [operations/run_control.md](operations/run_control.md).
+
+- Runtime-owner lock in `p0-longtail` (`P0_RUNTIME_LOCK`, exported by every launcher mode): double start / second writer refused before any stream, journal or RPC.
+- Operator stop (SIGTERM/SIGINT, `p0ctl run stop`, Ctrl-C under `p0ctl run start`) reuses the existing ordered abort: admission closed, drain, journals sealed, coverage INCOMPLETE `OPERATOR_STOP`; idempotent. **Fixed:** a stop before StreamReady was reported as `STREAM_NOT_READY`.
+- Offline boot audit BOOT-01…12 with readiness token and TOCTOU recheck at start; network checks BOOT-03…08 NOT_RUN (permission required), never PASS.
+- `p0ctl doctor | preflight | run start | run status | run stop | verify | report` — control only; existing scripts stay usable.
+
+Tests: control 1/1, boot audit 1/1, market 104 (+related) unchanged, launcher integration 4/4 incl. `p0ctl run start`; offline control evidence recorded.
+
+Open: network boot audit (BOOT-03…08, needs permission), typed RunStatus/control DTO and browser API (frontend scope), `runs list`/`logs --follow`, `UntilStopped`.

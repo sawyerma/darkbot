@@ -197,6 +197,8 @@ export P0_MARKET_SOURCE="${P0_MARKET_SOURCE:-logs}"
 P0_RUN_LAYOUT="$(py operations.capture.run_store layout econ4h "${P0_ECON_OUT_DIR:-}")" || exit 2
 P0_ECON_OUT_DIR="$(py operations.capture.run_store root econ4h "${P0_ECON_OUT_DIR:-}")" || exit 2
 export P0_ECON_OUT_DIR P0_RUN_LAYOUT
+# FEUI-01: one runtime owner per data store (p0-longtail refuses a second owner); p0ctl uses the same file.
+export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$(dirname "$P0_ECON_OUT_DIR")/.p0-runtime.lock}"
 RUN_DIR="$(py operations.capture.run_store allocate "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" "$P0_RUN_LAYOUT")" || exit 2
 if [[ "$P0_RUN_LAYOUT" == v2 ]]; then
   # Pre-capture documents are staged and assembled into config.json before the capture starts.
@@ -333,6 +335,7 @@ export P0_MARKET_RUN_ID="${P0_MARKET_RUN_ID:-market_$(date -u +%Y%m%dT%H%M%SZ)}"
 # Standalone C0-MO has no pre-capture manifest, so it always writes layout V1.
 P0_MARKET_OUT_DIR="$(py operations.capture.run_store root market "${P0_MARKET_OUT_DIR:-}")" || exit 2
 export P0_MARKET_OUT_DIR
+export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$(dirname "$P0_MARKET_OUT_DIR")/.p0-runtime.lock}"
 export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 
 py operations.capture.run_store allocate "$P0_MARKET_OUT_DIR" "$P0_MARKET_RUN_ID" >/dev/null || exit 2
@@ -376,6 +379,7 @@ export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"
 export P0_DEADLINE_NS="${P0_DEADLINE_NS:-2000000000}"
 
 mkdir -p "$(dirname "$P0_RECORD_PATH")"
+export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$PROJECT_DIR/data/.p0-runtime.lock}"
 
 echo "Project_0 Mainnet Shadow"
 echo "  program=$P0_PROGRAM_ID"

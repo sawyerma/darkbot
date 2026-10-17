@@ -1,0 +1,219 @@
+//! FEUI-01 control boundary of the one runtime (`p0-longtail`).
+//!
+//! * Runtime-owner lock: an exclusive `flock` on `P0_RUNTIME_LOCK` held for the whole process,
+//!   with PID, run id and mode written into the file. A second owner (double start, second
+//!   journal writer) is refused before any stream, journal or RPC exists; the kernel releases the
+//!   lock on every exit, so a crash never leaves a live lock behind.
+//! * Operator stop: SIGTERM/SIGINT only set a flag. The existing lifecycle polls it and stops
+//!   through its ordered abort path (admission closed, drain, journals sealed INCOMPLETE, phase
+//!   journal finalized, stop reason `OPERATOR_STOP`) — never a kill, never a second runtime.
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::fd::AsRawFd;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_stop_signal(_: libc::c_int) {
+    // Async-signal-safe: one atomic store.
+    STOP.store(true, Ordering::SeqCst);
+}
+
+/// Installs the stop handler for SIGTERM and SIGINT (idempotent).
+pub fn install_stop_handler() -> Result<(), String> {
+    for sig in [libc::SIGTERM, libc::SIGINT] {
+        // SAFETY: the handler only performs an atomic store; `sa` is fully initialized.
+        let rc = unsafe {
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_sigaction = on_stop_signal as extern "C" fn(libc::c_int) as usize;
+            libc::sigemptyset(&mut sa.sa_mask);
+            libc::sigaction(sig, &sa, std::ptr::null_mut())
+        };
+        if rc != 0 {
+            return Err(format!(
+                "STOP_HANDLER_INSTALL: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether an operator stop was requested (signal or `request_stop`).
+pub fn stop_requested() -> bool {
+    STOP.load(Ordering::SeqCst)
+}
+
+/// Same effect as a stop signal (tests and in-process callers).
+pub fn request_stop() {
+    STOP.store(true, Ordering::SeqCst);
+}
+
+/// Default lock path of a project directory (`project_0/data/.p0-runtime.lock`).
+pub fn default_lock_path(project: &Path) -> PathBuf {
+    project.join("data").join(".p0-runtime.lock")
+}
+
+/// Held exclusive runtime-owner lock (released when dropped or at process exit).
+#[derive(Debug)]
+pub struct OwnerLock {
+    _file: File,
+    pub path: PathBuf,
+}
+
+fn try_lock(file: &File) -> std::io::Result<bool> {
+    // SAFETY: flock on an owned, open file descriptor.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(true);
+    }
+    let e = std::io::Error::last_os_error();
+    if e.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        Ok(false)
+    } else {
+        Err(e)
+    }
+}
+
+fn open(path: &Path) -> std::io::Result<File> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+}
+
+/// Acquires the runtime-owner lock or refuses with the current holder.
+pub fn acquire_owner(path: &Path, run_id: &str, mode: &str) -> Result<OwnerLock, String> {
+    let mut file =
+        open(path).map_err(|e| format!("RUNTIME_OWNER_LOCK_IO {}: {e}", path.display()))?;
+    match try_lock(&file) {
+        Ok(true) => {}
+        Ok(false) => {
+            let mut held = String::new();
+            let _ = file.read_to_string(&mut held);
+            return Err(format!(
+                "RUNTIME_OWNER_LOCKED: another runtime owns {} ({})",
+                path.display(),
+                held.trim()
+            ));
+        }
+        Err(e) => return Err(format!("RUNTIME_OWNER_LOCK_IO {}: {e}", path.display())),
+    }
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let line = format!(
+        "pid={} run_id={} mode={} started_unix_s={}\n",
+        std::process::id(),
+        run_id,
+        mode,
+        started
+    );
+    (|| {
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(line.as_bytes())?;
+        file.sync_all()
+    })()
+    .map_err(|e| format!("RUNTIME_OWNER_LOCK_IO {}: {e}", path.display()))?;
+    Ok(OwnerLock {
+        _file: file,
+        path: path.into(),
+    })
+}
+
+/// Holder of a runtime-owner lock as seen from another process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OwnerState {
+    Running {
+        pid: u32,
+        run_id: String,
+        mode: String,
+        started_unix_s: u64,
+    },
+    /// No live owner; `last` is the record of the previous owner, if any.
+    NotRunning { last: Option<String> },
+}
+
+fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.split_whitespace()
+        .find_map(|kv| kv.strip_prefix(key)?.strip_prefix('='))
+}
+
+/// Reads the lock without taking it over: a lock that can be taken has no live owner.
+pub fn owner_state(path: &Path) -> Result<OwnerState, String> {
+    if !path.exists() {
+        return Ok(OwnerState::NotRunning { last: None });
+    }
+    let mut file = open(path).map_err(|e| format!("RUNTIME_OWNER_LOCK_IO: {e}"))?;
+    let mut held = String::new();
+    file.read_to_string(&mut held)
+        .map_err(|e| format!("RUNTIME_OWNER_LOCK_IO: {e}"))?;
+    let held = held.trim().to_string();
+    match try_lock(&file).map_err(|e| format!("RUNTIME_OWNER_LOCK_IO: {e}"))? {
+        // Taken just to probe; released when `file` drops at the end of this function.
+        true => Ok(OwnerState::NotRunning {
+            last: (!held.is_empty()).then_some(held),
+        }),
+        false => Ok(OwnerState::Running {
+            pid: field(&held, "pid")
+                .and_then(|v| v.parse().ok())
+                .ok_or("RUNTIME_OWNER_RECORD_INVALID")?,
+            run_id: field(&held, "run_id").unwrap_or("").into(),
+            mode: field(&held, "mode").unwrap_or("").into(),
+            started_unix_s: field(&held, "started_unix_s")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A second owner is refused while the first holds the lock, the state is readable from
+    /// outside, and the lock is free again once the holder is gone.
+    #[test]
+    fn owner_lock_refuses_second_owner_and_reports_holder() {
+        let d = std::env::temp_dir().join(format!("p0_ctl_{}_{}", std::process::id(), line!()));
+        let _ = std::fs::remove_dir_all(&d);
+        let path = d.join("data/.p0-runtime.lock");
+        assert_eq!(
+            owner_state(&path).unwrap(),
+            OwnerState::NotRunning { last: None }
+        );
+        let held = acquire_owner(&path, "run_a", "econ4h").unwrap();
+        // flock is per open file description: a second open in this process is refused too.
+        let err = acquire_owner(&path, "run_b", "econ4h").unwrap_err();
+        assert!(
+            err.starts_with("RUNTIME_OWNER_LOCKED") && err.contains("run_id=run_a"),
+            "{err}"
+        );
+        match owner_state(&path).unwrap() {
+            OwnerState::Running {
+                pid, run_id, mode, ..
+            } => {
+                assert_eq!(
+                    (pid, run_id.as_str(), mode.as_str()),
+                    (std::process::id(), "run_a", "econ4h")
+                )
+            }
+            other => panic!("{other:?}"),
+        }
+        drop(held);
+        match owner_state(&path).unwrap() {
+            OwnerState::NotRunning { last: Some(l) } => assert!(l.contains("run_id=run_a")),
+            other => panic!("{other:?}"),
+        }
+        let again = acquire_owner(&path, "run_c", "market").unwrap();
+        drop(again);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+}

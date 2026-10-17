@@ -182,6 +182,8 @@ pub struct Shared {
     pub start_ns: AtomicU64,
     pub cutoff_ns: AtomicU64,
     pub abort: AtomicBool,
+    /// Set with `abort` when the operator requested the stop (SIGTERM/SIGINT, `p0ctl run stop`).
+    pub operator_stop: AtomicBool,
     pub drops: AtomicU64,
     pub max_depth: AtomicU64,
     pub retention_overflow: AtomicU64,

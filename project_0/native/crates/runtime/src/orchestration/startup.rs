@@ -37,13 +37,34 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         resolved.activate()?;
         darkbot_solana::provider::enable_measurement_budget();
     }
+    // FEUI-01: one runtime owner per project (launchers set P0_RUNTIME_LOCK) and an ordered
+    // operator stop for the observation modes that poll it (econ4h, market). Shadow keeps the
+    // default signal behaviour because it has no stop poll.
+    let mode = config::require("P0_MODE")?;
+    let _owner = match std::env::var_os("P0_RUNTIME_LOCK") {
+        Some(path) => {
+            let run_id = ["P0_ECON_RUN_ID", "P0_MARKET_RUN_ID"]
+                .iter()
+                .find_map(|k| std::env::var(k).ok())
+                .unwrap_or_else(|| "-".into());
+            Some(super::control::acquire_owner(
+                std::path::Path::new(&path),
+                &run_id,
+                &mode,
+            )?)
+        }
+        None => None,
+    };
+    if mode == "market" || mode == "econ4h" {
+        super::control::install_stop_handler()?;
+    }
     // [C0-MO] Market mode branches off before any trading-stack initialisation: no RPC URL,
     // keypair, signer, health engine, planner, simulation or submission is constructed.
-    if config::require("P0_MODE")? == "market" {
+    if mode == "market" {
         crate::run_layout::RunLayout::standalone_market(&|k| std::env::var(k).ok())?;
         return crate::market_observer::run_from_env().map_err(|e| e.into());
     }
-    if config::require("P0_MODE")? == "econ4h" {
+    if mode == "econ4h" {
         return run_econ4h().map_err(|e| e.into());
     }
     run_shadow(Clock::new(), None)
@@ -183,6 +204,11 @@ fn supervise(
                 );
             }
             last_status = Some(status);
+        }
+        if super::control::stop_requested() && !handle.shared.operator_stop.load(Ordering::Acquire) {
+            handle.shared.operator_stop.store(true, Ordering::Release);
+            handle.shared.abort.store(true, Ordering::Release);
+            eprintln!("[C0_E1/STOP] operator stop requested: admission closed, capture drains, journals sealed, coverage INCOMPLETE (OPERATOR_STOP); live=false submission=false");
         }
         if analytics.is_finished() || std::time::Instant::now() >= deadline {
             handle.shared.abort.store(true, Ordering::Release);
