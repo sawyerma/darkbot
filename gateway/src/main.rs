@@ -1,18 +1,26 @@
 use darkbot_gateway::{
     config::GatewayConfig,
     engine::{EngineFeed, SourceRegistry},
+    feeds::UnixSocketFeed,
     http::{self, AppState},
     hub::StateHub,
     overview,
-    feeds::UnixSocketFeed,
 };
 use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 fn engine_feeds(cfg: &GatewayConfig) -> Vec<Arc<dyn EngineFeed>> {
-    cfg.feeds.iter().map(|f| UnixSocketFeed::new(
-        f.project, f.label, f.socket.clone(), cfg.limits.max_state_full_bytes as usize
-    ) as Arc<dyn EngineFeed>).collect()
+    cfg.feeds
+        .iter()
+        .map(|f| {
+            UnixSocketFeed::new(
+                f.project,
+                f.label,
+                f.socket.clone(),
+                cfg.limits.max_state_full_bytes as usize,
+            ) as Arc<dyn EngineFeed>
+        })
+        .collect()
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

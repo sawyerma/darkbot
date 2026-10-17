@@ -143,19 +143,34 @@ pub fn parse_feeds(input: &str) -> Result<Vec<FeedSpec>, ConfigError> {
     let mut out: Vec<FeedSpec> = Vec::new();
     for entry in input.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         let (name, path) = entry.split_once('=').ok_or_else(|| ConfigError::Invalid {
-            key: "DARKBOT_GATEWAY_FEEDS", value: entry.into()
+            key: "DARKBOT_GATEWAY_FEEDS",
+            value: entry.into(),
         })?;
         let (project, label) = match name.trim() {
             "project0" => (ProjectId::Project0, "Project 0"),
             "bsc" => (ProjectId::Bsc, "BSC"),
             "solana" => (ProjectId::Solana, "Solana"),
-            _ => return Err(ConfigError::Invalid {key:"DARKBOT_GATEWAY_FEEDS", value:entry.into()}),
+            _ => {
+                return Err(ConfigError::Invalid {
+                    key: "DARKBOT_GATEWAY_FEEDS",
+                    value: entry.into(),
+                })
+            }
         };
-        if path.trim().is_empty() || !path.trim().starts_with('/')
-            || out.iter().any(|f| f.project == project) {
-            return Err(ConfigError::Invalid {key:"DARKBOT_GATEWAY_FEEDS", value:entry.into()});
+        if path.trim().is_empty()
+            || !path.trim().starts_with('/')
+            || out.iter().any(|f| f.project == project)
+        {
+            return Err(ConfigError::Invalid {
+                key: "DARKBOT_GATEWAY_FEEDS",
+                value: entry.into(),
+            });
         }
-        out.push(FeedSpec { project, label, socket: PathBuf::from(path.trim()) });
+        out.push(FeedSpec {
+            project,
+            label,
+            socket: PathBuf::from(path.trim()),
+        });
     }
     Ok(out)
 }
