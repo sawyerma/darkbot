@@ -1067,6 +1067,76 @@ impl ObserverCore {
         v
     }
 
+    /// Qualification axes of the finished capture (`MARKET_COMPLETION`); the summary reports
+    /// exactly these values.
+    pub fn completion(&self, cfg: &SummaryContext) -> super::rows::MarketCompletion {
+        let coverage_complete = self.coverage_complete();
+        let decode_complete = self.decode_complete();
+        let receivership_transport_capture_complete = coverage_complete
+            && decode_complete
+            && cfg.full_duration_observed
+            && cfg.drain_complete;
+        // Master contract: transport completeness is no longer whole-market proof.
+        // Until the full-slot/all-liquidation-path engine is qualified, fail closed.
+        let full_slot_reconciliation_complete = self.reconciliation.complete;
+        let liquidation_path_coverage_complete = paths::verified(
+            self.deployment_before.as_ref(),
+            self.deployment_after.as_ref(),
+            self.reconciliation.market_slot_end.as_ref().map(|b| b.slot),
+        );
+        let market_capture_complete = cfg.stream_ready
+            && cfg.full_duration_observed
+            && cfg.drain_complete
+            && full_slot_reconciliation_complete
+            && !self.truth.retention_error
+            && liquidation_path_coverage_complete;
+        let source_coverage_verified =
+            full_slot_reconciliation_complete && liquidation_path_coverage_complete;
+        let mut reasons: Vec<&str> = self.incomplete_reasons.iter().copied().collect();
+        if !full_slot_reconciliation_complete {
+            reasons.push(
+                self.reconciliation
+                    .error
+                    .unwrap_or("FULL_SLOT_RECONCILIATION_PENDING"),
+            );
+        }
+        if !liquidation_path_coverage_complete {
+            reasons.push(
+                self.deployment_error
+                    .unwrap_or("AUDITED_DEPLOYMENT_CONTINUITY_UNPROVEN"),
+            );
+        }
+        if cfg.stream_ready
+            && !cfg.full_duration_observed
+            && !reasons.contains(&"OBSERVATION_ENDED_EARLY")
+        {
+            reasons.push("OBSERVATION_ENDED_EARLY");
+        }
+        if cfg.stream_ready && !cfg.drain_complete && !reasons.contains(&"DRAIN_INCOMPLETE") {
+            reasons.push("DRAIN_INCOMPLETE");
+        }
+        let verdict = market_verdict(
+            cfg.stream_ready,
+            market_capture_complete,
+            source_coverage_verified,
+        );
+        super::rows::MarketCompletion {
+            run_id: cfg.run_id.clone(),
+            verdict: verdict.into(),
+            stream_ready: cfg.stream_ready,
+            full_duration_observed: cfg.full_duration_observed,
+            drain_complete: cfg.drain_complete,
+            coverage_complete,
+            decode_complete,
+            receivership_transport_capture_complete,
+            full_slot_reconciliation_complete,
+            liquidation_path_coverage_complete,
+            market_capture_complete,
+            source_coverage_verified,
+            incomplete_reasons: reasons.into_iter().map(String::from).collect(),
+        }
+    }
+
     pub fn summary(&self, cfg: &SummaryContext) -> Value {
         let s = &self.stats;
         let observed_end = self.window.map(|(start, cutoff)| {
@@ -1096,57 +1166,20 @@ impl ObserverCore {
             .take(3)
             .map(|r| r.gross_edge_total_usd)
             .sum();
-        let coverage_complete = self.coverage_complete();
-        let decode_complete = self.decode_complete();
-        let receivership_transport_capture_complete = coverage_complete
-            && decode_complete
-            && cfg.full_duration_observed
-            && cfg.drain_complete;
-        // Master contract: transport completeness is no longer whole-market proof.
-        // Until the full-slot/all-liquidation-path engine is qualified, fail closed.
-        let full_slot_reconciliation_complete = self.reconciliation.complete;
-        let liquidation_path_coverage_complete = paths::verified(
-            self.deployment_before.as_ref(),
-            self.deployment_after.as_ref(),
-            self.reconciliation.market_slot_end.as_ref().map(|b| b.slot),
-        );
-        let market_capture_complete = cfg.stream_ready
-            && cfg.full_duration_observed
-            && cfg.drain_complete
-            && full_slot_reconciliation_complete
-            && !self.truth.retention_error
-            && liquidation_path_coverage_complete;
-        let source_coverage_verified =
-            full_slot_reconciliation_complete && liquidation_path_coverage_complete;
-        let enrichment_complete = self.enrichment_complete();
-        let mut reasons: Vec<&str> = self.incomplete_reasons.iter().copied().collect();
-        if !full_slot_reconciliation_complete {
-            reasons.push(
-                self.reconciliation
-                    .error
-                    .unwrap_or("FULL_SLOT_RECONCILIATION_PENDING"),
-            );
-        }
-        if !liquidation_path_coverage_complete {
-            reasons.push(
-                self.deployment_error
-                    .unwrap_or("AUDITED_DEPLOYMENT_CONTINUITY_UNPROVEN"),
-            );
-        }
-        if cfg.stream_ready
-            && !cfg.full_duration_observed
-            && !reasons.contains(&"OBSERVATION_ENDED_EARLY")
-        {
-            reasons.push("OBSERVATION_ENDED_EARLY");
-        }
-        if cfg.stream_ready && !cfg.drain_complete && !reasons.contains(&"DRAIN_INCOMPLETE") {
-            reasons.push("DRAIN_INCOMPLETE");
-        }
-        let verdict = market_verdict(
-            cfg.stream_ready,
+        let completion = self.completion(cfg);
+        let super::rows::MarketCompletion {
+            coverage_complete,
+            decode_complete,
+            receivership_transport_capture_complete,
+            full_slot_reconciliation_complete,
+            liquidation_path_coverage_complete,
             market_capture_complete,
             source_coverage_verified,
-        );
+            ..
+        } = completion;
+        let reasons = &completion.incomplete_reasons;
+        let verdict = completion.verdict.as_str();
+        let enrichment_complete = self.enrichment_complete();
         let avg = if n > 0 { Some(total / n as f64) } else { None };
         let sample_status = if s.liquidation_events < cfg.min_sample_liquidations {
             "INSUFFICIENT_SAMPLE"
@@ -1193,8 +1226,8 @@ impl ObserverCore {
             "coverage_complete": coverage_complete,
             "decode_complete": decode_complete,
             "drain_complete": cfg.drain_complete,
-            "live_coverage_status": if receivership_transport_capture_complete { "LIVE_COVERAGE_COMPLETE" } else { "LIVE_COVERAGE_INCOMPLETE" },
-            "capture_clock_complete": cfg.stream_ready && cfg.full_duration_observed,
+            "live_coverage_status": completion.live_coverage_status(),
+            "capture_clock_complete": completion.capture_clock_complete(),
             "verification_status": if full_slot_reconciliation_complete { "CANONICAL_VERIFIED" } else if self.reconciliation.attempted { "HISTORICAL_INCOMPLETE" } else { "NOT_RUN" },
             "source_coverage_verified": source_coverage_verified,
             "source_coverage_note": if source_coverage_verified {"Finalized full-slot scan is authoritative; live WSS source completeness remains separately unverified"} else {self.source.coverage_note()},

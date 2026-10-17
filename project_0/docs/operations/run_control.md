@@ -13,7 +13,8 @@ cargo build --release --locked --manifest-path project_0/native/Cargo.toml --fea
 | `p0ctl run start --duration D [test.sh options …]` | Offline boot audit (refuses on BLOCKED), refuses a live runtime owner, assigns the run id (`P0_ECON_RUN_ID`, else `econ4h_<UTC>`), re-checks the audited identity right before the start (BOOT-12 TOCTOU) and runs `scripts/test.sh` in its own process group. Ctrl-C forwards an ordered stop. |
 | `p0ctl run status [--run ID|PATH]` | Runtime owner (pid, run id, mode) from the lock, the run's capacity verdict, market journal frames/seal state and the last status lines of its runtime log. |
 | `p0ctl run stop` | Sends SIGTERM to the live lock holder only: admission closes, the capture drains, journals are sealed, coverage is recorded INCOMPLETE with reason `OPERATOR_STOP`. Repeating it, or stopping when nothing runs, is harmless (`NOT_RUNNING`). |
-| `p0ctl verify …`, `p0ctl report …` | `scripts/verify.sh`, `scripts/report.sh` with the same arguments. |
+| `p0ctl verify …` | `scripts/verify.sh` with the same arguments. |
+| `p0ctl report --run RUN [--report-* …] [--verification-result ID] [--format table\|csv]` | Native report (`analytics/report.rs`) for runs with `capture/run_manifest.p0j` and `capture/market/market_completion.p0j`; `--report-provenance index`, `--format json` and historical runs go to `scripts/report.sh` (pinned). Writes only `reports/native/` (dataset and query identity). |
 
 **Runtime owner lock.** `p0-longtail` takes an exclusive lock on `P0_RUNTIME_LOCK` (launchers: `<run store parent>/.p0-runtime.lock`, i.e. `project_0/data/.p0-runtime.lock` by default) before any stream, journal or RPC exists, and refuses a second owner (`RUNTIME_OWNER_LOCKED`). The kernel releases it on every exit. Only the observation modes (`econ4h`, `market`) install the ordered stop; Shadow keeps the default signal behaviour.
 

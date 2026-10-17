@@ -711,7 +711,11 @@ mod tests {
         let mut w = MarketJournalWorker::start(&path, c).unwrap();
         for i in 0..2 {
             w.submit(Provenance::default(), &row(i)).unwrap();
-            std::thread::sleep(Duration::from_millis(20));
+            // One batch per frame: wait until the writer drained it (not a fixed sleep).
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while w.status().lag_frames > 0 && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
         // The third batch fails on the writer thread.
         let _ = w.submit(Provenance::default(), &row(2));
@@ -784,6 +788,8 @@ mod tests {
         let d = dir("segments");
         let mut c = cfg(64 * MIB);
         c.segment_bytes = 2048;
+        // Every rotation seals and syncs a segment; not a stall test (parallel test load).
+        c.stall_budget = Duration::from_secs(10);
         let path = d.join("market.p0j");
         let mut w = MarketJournalWorker::start(&path, c).unwrap();
         for i in 0..200u64 {

@@ -199,6 +199,8 @@ P0_ECON_OUT_DIR="$(py operations.capture.run_store root econ4h "${P0_ECON_OUT_DI
 export P0_ECON_OUT_DIR P0_RUN_LAYOUT
 # FEUI-01: one runtime owner per data store (p0-longtail refuses a second owner); p0ctl uses the same file.
 export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$(dirname "$P0_ECON_OUT_DIR")/.p0-runtime.lock}"
+# The run's code identity (head, source hashes) is read from this checkout, not the build path.
+export P0_PROJECT_DIR="$PROJECT_DIR"
 RUN_DIR="$(py operations.capture.run_store allocate "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" "$P0_RUN_LAYOUT")" || exit 2
 if [[ "$P0_RUN_LAYOUT" == v2 ]]; then
   # Pre-capture documents are staged and assembled into config.json before the capture starts.

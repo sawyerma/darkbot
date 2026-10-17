@@ -549,6 +549,15 @@ pub fn finalize_phases(paths: &crate::run_layout::RunPaths, complete: bool) -> R
     binary::export(&path, &paths.phases(), Some(kind::MEASUREMENT_PHASE), false)
         .map_err(|e| format!("PHASE_RENDER: {e}"))
 }
+/// The repository the run's code identity is read from: the launcher's project directory
+/// (`P0_PROJECT_DIR`, the `project_0` directory) at run time, else the build's source tree. A
+/// binary reused from another checkout never reads a stale or missing compile-time path.
+pub fn repo_root() -> std::path::PathBuf {
+    std::env::var_os("P0_PROJECT_DIR")
+        .map(|p| std::path::PathBuf::from(p).join(".."))
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
+}
+
 pub fn persist_manifest(
     paths: &crate::run_layout::RunPaths,
     run_id: &str,
@@ -556,7 +565,7 @@ pub fn persist_manifest(
     plan: &MeasurementPlan,
     clock: Clock,
 ) -> Result<(), String> {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let repo = repo_root();
     let binary = std::env::current_exe().map_err(|e| e.to_string())?;
     let sha = |bytes: &[u8]| {
         solana_sdk::hash::hash(bytes)
@@ -570,7 +579,7 @@ pub fn persist_manifest(
             .args(args)
             .current_dir(&repo)
             .output()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("RUN_MANIFEST_GIT {}: {e}", repo.display()))?;
         if !out.status.success() {
             return Err("manifest git identity unavailable".into());
         }
@@ -600,7 +609,7 @@ pub fn persist_manifest(
         {
             sources.insert(
                 name.to_string(),
-                sha(&fs::read(p).map_err(|e| e.to_string())?),
+                sha(&fs::read(&p).map_err(|e| format!("RUN_MANIFEST_SOURCE {name}: {e}"))?),
             );
         }
     }
@@ -636,7 +645,8 @@ pub fn persist_manifest(
         clock_origin_unix_ns: clock.unix_ns(0),
         clock_definition: "process monotonic ns; UTC = fixed origin + monotonic ns; capture boundaries journaled after StreamReady".into(),
         head: head.trim().into(),
-        binary_sha256: sha(&fs::read(binary).map_err(|e| e.to_string())?),
+        binary_sha256: sha(&fs::read(&binary)
+            .map_err(|e| format!("RUN_MANIFEST_BINARY {}: {e}", binary.display()))?),
         source_sha256: sources,
         provider_class: if provider_class
             .bytes()

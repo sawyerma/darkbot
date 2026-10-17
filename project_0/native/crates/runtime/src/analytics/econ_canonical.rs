@@ -70,6 +70,65 @@ impl<'de> Deserialize<'de> for Joined {
 pub fn canonical_legacy_view(row: &Joined) -> Value {
     joined_value(row)
 }
+
+/// Typed derived columns of one joined row (native report, B7): the same selector, race,
+/// loss and economics functions as the `canonical_market_shadow.jsonl` render. Hypothetical
+/// Shadow evidence only — never a chain fact, winner or realized PnL.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JoinedFacts {
+    pub identity_status: String,
+    pub race_class: String,
+    pub local_observed_race_margin_ns: Option<i128>,
+    pub loss_reason: String,
+    pub loss_provenance: String,
+    pub signed: Option<bool>,
+    pub simulation_result: Option<String>,
+    pub economics_known: Option<bool>,
+    /// Executable Shadow net edge: exact plan identity, technical PASS, signed, not handed off
+    /// and known economics only; otherwise UNKNOWN.
+    pub executable_net_usd_micro: Option<i128>,
+    pub required_working_capital_usd_micro: Option<u64>,
+    pub required_total_budget_usd_micro: Option<u64>,
+    /// `sha256(bincode(record))` of the exact-match evaluation (`our`).
+    pub record_digest: Option<[u8; 32]>,
+}
+
+/// Content digest of one Shadow evaluation (identity across joins and opportunity rows).
+pub fn record_digest(rec: &OpportunityRecord) -> Option<[u8; 32]> {
+    crate::analytics::payload::encode(rec)
+        .ok()
+        .map(|b| solana_sdk::hash::hash(&b).to_bytes())
+}
+
+pub fn joined_facts(row: &Joined) -> JoinedFacts {
+    let our = row.our.as_ref();
+    let costs = our.and_then(|r| r.selected_costs.as_ref());
+    JoinedFacts {
+        identity_status: row.identity_status.into(),
+        race_class: race_class(row).into(),
+        local_observed_race_margin_ns: margin(row),
+        loss_reason: loss(row).into(),
+        loss_provenance: if row.our.is_some() {
+            "EXACT_PLAN_MATCH"
+        } else if row.diagnostic.is_some() {
+            "TARGET_EPISODE_DIAGNOSTIC; executable identity unproven"
+        } else {
+            "NO_TARGET_EPISODE_RECORD"
+        }
+        .into(),
+        signed: our.map(|r| r.timing.t_sign_ns.is_some()),
+        simulation_result: our.and_then(|r| r.simulation_result.clone()),
+        economics_known: our.map(|r| r.economics_known),
+        executable_net_usd_micro: our
+            .filter(|r| technical(r) && r.economics_known)
+            .and(costs)
+            .and_then(|c| c.net_profit_usd_micro),
+        required_working_capital_usd_micro: costs
+            .and_then(|c| c.required_working_capital_usd_micro),
+        required_total_budget_usd_micro: costs.and_then(CandidateCostRecord::total_budget),
+        record_digest: our.and_then(record_digest),
+    }
+}
 fn any_evidence(old: Option<bool>, new: Option<bool>) -> Option<bool> {
     match (old, new) {
         (Some(a), Some(b)) => Some(a || b),
@@ -811,51 +870,34 @@ fn joined_value(row: &Joined) -> Value {
                     "loss_provenance":if row.our.is_some(){"EXACT_PLAN_MATCH"}else if row.diagnostic.is_some(){"TARGET_EPISODE_DIAGNOSTIC; executable identity unproven"}else{"NO_TARGET_EPISODE_RECORD"}})
 }
 
-/// Offline replay uses the identical production episode/plan selector and
-/// economics/attribution functions. It cannot call a provider or submit a TX.
-pub(super) fn replay(
-    market_path: &Path,
+/// Result of the canonical join over finalized events.
+pub struct JoinOutcome {
+    /// One row per event, in chain order.
+    pub rows: Vec<Joined>,
+    /// Whether an evaluation journal existed (absence with events present is an error).
+    pub shadow_available: bool,
+}
+
+/// The production episode/plan selector over finalized events and the run's evaluation stream:
+/// the binary journal (`shadow_evaluations.p0j` and its linked segments) or, for runs before
+/// PERSIST-01, their JSONL file. One bounded streaming pass; no RPC repricing/re-simulation and
+/// no synthetic evaluation when the original capture lost data. Used by the offline replay and
+/// the native report (B7).
+pub fn join(
+    events: Vec<TruthEvent>,
     shadow_path: &Path,
-    out: &Path,
-    plan: &MeasurementPlan,
-    start_ns: u64,
-    max_seconds: u64,
-) -> Result<(), String> {
+    deadline: std::time::Instant,
+) -> Result<JoinOutcome, String> {
     use std::io::BufRead;
-    plan.validate()?;
-    if max_seconds == 0 || max_seconds > 7200 {
-        return Err("REPLAY_TIME_BUDGET".into());
-    }
-    let deadline = std::time::Instant::now() + Duration::from_secs(max_seconds);
     let mut grouped: BTreeMap<String, Vec<Joined>> = BTreeMap::new();
     let mut seen = BTreeSet::new();
-    let mut reader = BufReader::new(File::open(market_path).map_err(|_| "MARKET_INPUT")?);
-    let mut count = 0usize;
-    loop {
-        if std::time::Instant::now() >= deadline {
-            return Err("REPLAY_TIME_BUDGET".into());
-        }
-        let mut line = Vec::new();
-        let len = (&mut reader)
-            .take(16 * 1024 * 1024 + 1)
-            .read_until(b'\n', &mut line)
-            .map_err(|_| "MARKET_READ")?;
-        if len == 0 {
-            break;
-        }
-        if len > 16 * 1024 * 1024 || line.last() != Some(&b'\n') {
-            return Err("REPLAY_ROW_BUDGET".into());
-        }
-        let mut market: TruthEvent = serde_json::from_slice(&line).map_err(|_| "MARKET_DECODE")?;
-        market.discovery_source = "OFFLINE_FINALIZED_EVIDENCE".into();
-        market.economic_provenance = "PERSISTED_PROTOCOL_EVENT_AND_ACTUAL_TX_META".into();
-        let key = (market.signature.clone(), market.slot, market.event_index);
-        if !seen.insert(key) {
+    let count = events.len();
+    if count > 100_000 {
+        return Err("REPLAY_MARKET_CAPACITY".into());
+    }
+    for market in events {
+        if !seen.insert((market.signature.clone(), market.slot, market.event_index)) {
             return Err("DUPLICATE_MARKET_EVENT".into());
-        }
-        count += 1;
-        if count > 100_000 {
-            return Err("REPLAY_MARKET_CAPACITY".into());
         }
         grouped
             .entry(market.target.clone())
@@ -882,9 +924,6 @@ pub(super) fn replay(
             )
         });
     }
-    // One bounded streaming pass. No RPC repricing/re-simulation and no synthetic
-    // evaluation when the original capture lost data. The evaluation stream is the binary
-    // journal (`shadow_evaluations.p0j`); runs before PERSIST-01 keep their JSONL file.
     let binary = if shadow_path.extension().is_some_and(|e| e == "p0j") {
         shadow_path.to_path_buf()
     } else {
@@ -952,7 +991,6 @@ pub(super) fn replay(
             }
         }
     }
-    fs::create_dir_all(out).map_err(|_| "REPLAY_OUTPUT")?;
     let mut rows: Vec<_> = grouped.into_values().flatten().collect();
     rows.sort_by_key(|r| {
         (
@@ -961,6 +999,58 @@ pub(super) fn replay(
             r.market.event_index,
         )
     });
+    Ok(JoinOutcome {
+        rows,
+        shadow_available: available,
+    })
+}
+
+/// Offline replay uses the identical production episode/plan selector and
+/// economics/attribution functions. It cannot call a provider or submit a TX.
+pub(super) fn replay(
+    market_path: &Path,
+    shadow_path: &Path,
+    out: &Path,
+    plan: &MeasurementPlan,
+    start_ns: u64,
+    max_seconds: u64,
+) -> Result<(), String> {
+    use std::io::BufRead;
+    plan.validate()?;
+    if max_seconds == 0 || max_seconds > 7200 {
+        return Err("REPLAY_TIME_BUDGET".into());
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(max_seconds);
+    let mut events = Vec::new();
+    let mut reader = BufReader::new(File::open(market_path).map_err(|_| "MARKET_INPUT")?);
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err("REPLAY_TIME_BUDGET".into());
+        }
+        let mut line = Vec::new();
+        let len = (&mut reader)
+            .take(16 * 1024 * 1024 + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|_| "MARKET_READ")?;
+        if len == 0 {
+            break;
+        }
+        if len > 16 * 1024 * 1024 || line.last() != Some(&b'\n') {
+            return Err("REPLAY_ROW_BUDGET".into());
+        }
+        let mut market: TruthEvent = serde_json::from_slice(&line).map_err(|_| "MARKET_DECODE")?;
+        market.discovery_source = "OFFLINE_FINALIZED_EVIDENCE".into();
+        market.economic_provenance = "PERSISTED_PROTOCOL_EVENT_AND_ACTUAL_TX_META".into();
+        events.push(market);
+        if events.len() > 100_000 {
+            return Err("REPLAY_MARKET_CAPACITY".into());
+        }
+    }
+    let JoinOutcome {
+        rows,
+        shadow_available: available,
+    } = join(events, shadow_path, deadline)?;
+    fs::create_dir_all(out).map_err(|_| "REPLAY_OUTPUT")?;
     let file = OpenOptions::new()
         .create_new(true)
         .write(true)

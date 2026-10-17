@@ -19,7 +19,7 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 |---|---|---|---|
 | Six markers / four classes | PHASENPLAN L.1, task §3 | `market_truth.rs` classifies CLASSIC/RECEIVERSHIP/FORCED_DELEVERAGE/BANKRUPTCY_SETTLEMENT; six discriminators bound to pin `33c67987`; A4 differential 2,917 sources, 0 unexplained ([A4_PARITY](../evidence/A4_PARITY_20261017/README.md)) | historical raw sample for CLASSIC, deleverage, bankruptcy, CPI positions, legacy: **BLOCKED** (archive read needs permission) — C1 keeps it documented |
 | Four RELATED instructions | L.5, task §3 | pinned Python index verifier only | **C2**: native typed related rows in capture + strict verifier, never liquidation/profit |
-| Report filters / ReportQuery | L.3/L.5, task §4 | `measurement_contract.py` (pinned) parses every flag; `market_report.py` (pinned, legacy consumer) | **D3 (B7)**: native ReportQuery over `.p0j`, filter invariance of raw hashes |
+| Report filters / ReportQuery | L.3/L.5, task §4 | `measurement_contract.py` (pinned) parses every flag; `market_report.py` (pinned, legacy consumer) | B7 LOCAL_PASS: `analytics/report.rs` via `p0ctl report` (raw-hash invariance, `report_query_identity`, entity once, Shadow/related separate); index provenance stays pinned Python |
 | Terminal control `p0ctl` | FEUI-01, CONTROL_PROTOCOL §2 | none; scripts `test.sh/capture.sh/verify.sh/report.sh` | **C3**: thin Rust `p0ctl` (doctor, preflight, run start/status/stop, verify, report) over the existing runtime and scripts; run lock, idempotent stop |
 | SK-06 CapacityPreflight | SK-06, task §5 | WIP `preflight.rs`/`p0-capacity` (`0e0544d`), strict budget not mode-dependent, no provider/econ checks; `capture.sh` still Python 60 GiB heuristic | **B** |
 | Boot audit | BOOT-01…12, task §7 | pieces only (startup protocol pin, FE-01 qualify tool, discriminator tests); no typed audit | **C4**: typed offline boot audit + bound token; network checks NOT_RUN without permission |
@@ -38,6 +38,7 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 |---|---|---|---|
 | A — baseline/contradictions | done | — | this page |
 | Git isolation (after the 506c349 BSC incident) | Project_0 works in a separate worktree with its own index; guarded pathspec commits | — | memory rule; `dfc5e14` restore reported to the user |
+| D3c — B7 native report (`p0ctl report`), six native markers, `MARKET_COMPLETION`, runtime repo root fix | LOCAL_PASS in scope; index provenance pinned Python | (this unit) | ledger 2026-10-17 (B7) |
 | D2 — A3 native strict driver (typed identities) | LOCAL_PASS in scope | (this unit) | ledger 2026-10-17 (A3 rest) |
 | D4c — typed run manifest + effective-config record | LOCAL_PASS | (this unit) | ledger 2026-10-17 (JFI-FIX-04 part 3) |
 | D4b — typed measurement-plan handoff | LOCAL_PASS | (this unit) | ledger 2026-10-17 (JFI-FIX-04 part 2) |

@@ -207,17 +207,30 @@ fn lock(dir: &Path) -> Result<File, String> {
     Ok(f)
 }
 
-/// Runs (or resumes) one strict verification of a V2 run and records spec, attempt and result.
-pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
-    let run = req.run.canonicalize().map_err(|e| format!("RUN: {e}"))?;
+/// A V2 run's capture identity as every post-capture consumer (strict driver, native report)
+/// binds it: typed manifest, the unique CAPTURE window and the immutable capture evidence.
+#[derive(Debug)]
+pub struct CaptureBinding {
+    pub run: PathBuf,
+    pub manifest: RunManifest,
+    pub manifest_path: PathBuf,
+    /// Unix ns, half-open.
+    pub window: (u64, u64),
+    pub evidence: CaptureEvidence,
+    pub evidence_digest: String,
+}
+
+/// Two-stage capture finalize: the capture evidence is fixed by the first consumer and every
+/// later one re-checks it (`CAPTURE_EVIDENCE_CHANGED`).
+pub fn bind_capture(run: &Path) -> Result<CaptureBinding, String> {
+    let run = run.canonicalize().map_err(|e| format!("RUN: {e}"))?;
     let manifest_path = run.join("capture").join(RUN_MANIFEST_JOURNAL);
     let manifest: RunManifest = journal::read_typed_value(&manifest_path)
         .map_err(|_| "NATIVE_MANIFEST_MISSING: use the Python driver for historical runs")?;
     if manifest.layout.as_deref() != Some(crate::run_layout::RunLayout::V2.tag()) {
         return Err("NATIVE_DRIVER_REQUIRES_LAYOUT_V2".into());
     }
-    let (start, end) = capture_window(&run, &manifest)?;
-    // Two-stage capture finalize: the evidence is fixed once and every later attempt re-checks it.
+    let window = capture_window(&run, &manifest)?;
     let native = run.join("verification/native");
     std::fs::create_dir_all(&native).map_err(|e| e.to_string())?;
     let evidence = CaptureEvidence {
@@ -236,6 +249,36 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
             .map_err(|e| format!("CAPTURE_EVIDENCE: {e}"))?;
     }
     let evidence_digest = evidence.digest()?;
+    Ok(CaptureBinding {
+        run,
+        manifest,
+        manifest_path,
+        window,
+        evidence,
+        evidence_digest,
+    })
+}
+
+impl CaptureBinding {
+    /// The capture must not have changed while it was consumed.
+    pub fn recheck(&self, code: &str) -> Result<(), String> {
+        if capture_files(&self.run)? != self.evidence.files {
+            return Err(code.into());
+        }
+        Ok(())
+    }
+}
+
+/// Runs (or resumes) one strict verification of a V2 run and records spec, attempt and result.
+pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
+    let CaptureBinding {
+        run,
+        manifest,
+        manifest_path,
+        window: (start, end),
+        evidence,
+        evidence_digest,
+    } = bind_capture(&req.run)?;
     let binary = std::env::current_exe().map_err(|e| e.to_string())?;
     let provider = if req.offline {
         None

@@ -39,6 +39,13 @@ pub fn finalize(
     let binding = sink
         .finish()
         .map_err(|e| format!("evidence journal: {e}"))?;
+    // Typed qualification axes first (B7: the native report never reads summary.json).
+    crate::analytics::journal::write_typed_value(
+        &run_dir.join(super::rows::MARKET_COMPLETION_JOURNAL),
+        crate::analytics::journal::source::MARKET,
+        &core.completion(ctx),
+    )
+    .map_err(|e| format!("market completion: {e}"))?;
     let mut summary = core.summary(ctx);
     if let Some(h) = &core.econ {
         summary["measurement_plan"] =

@@ -19,7 +19,10 @@ use std::time::Duration;
 
 #[path = "econ_canonical.rs"]
 mod canonical;
-pub use canonical::{canonical_legacy_view, Joined as CanonicalJoin};
+pub use canonical::{
+    canonical_legacy_view, join as canonical_join, joined_facts, record_digest, JoinOutcome,
+    Joined as CanonicalJoin, JoinedFacts,
+};
 
 pub const CAPITAL_USD: [u64; 6] = [200, 500, 1000, 2500, 5000, 10000];
 pub const SPEEDUP_MS: [u64; 9] = [1, 5, 10, 25, 50, 100, 200, 500, 1000];
@@ -345,7 +348,7 @@ pub fn spawn(
     let commitment = market.commitment.to_string();
     let min_sample = market.min_sample_liquidations;
     // Startup provenance only, never executed per opportunity.
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let repo = crate::analytics::measurement::repo_root();
     let commit = source_commit(&repo);
     let worker = std::thread::Builder::new()
         .name("econ-analytics".into())

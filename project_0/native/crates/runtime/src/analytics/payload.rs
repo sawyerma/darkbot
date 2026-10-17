@@ -159,6 +159,9 @@ macro_rules! typed_kinds {
             k::MARKET_RELATED => {
                 $f::<crate::market::observer::related::MarketRelated>($kind, $schema, $bytes)
             }
+            k::MARKET_COMPLETION => $f::<market::MarketCompletion>($kind, $schema, $bytes),
+            k::REPORT_DATASET => $f::<super::report::DatasetRecord>($kind, $schema, $bytes),
+            k::REPORT_QUERY => $f::<super::report::QueryRecord>($kind, $schema, $bytes),
             k::STRICT_SCOPE => $f::<strict::StrictScope>($kind, $schema, $bytes),
             k::STRICT_RPC_CACHE => $f::<strict::RpcCacheEntry>($kind, $schema, $bytes),
             k::STRICT_CHECKPOINT => $f::<strict::StrictCheckpoint>($kind, $schema, $bytes),

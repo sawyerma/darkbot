@@ -86,7 +86,7 @@ use time::unix_now_s;
 pub use time::{utc_compact, utc_iso};
 #[path = "decoding.rs"]
 mod decoding;
-pub use decoding::{decode_receiver_events, LogDecode, ReceiverEvent};
+pub use decoding::{decode_receiver_events, LogDecode, LogEventRef, ReceiverEvent};
 
 #[path = "enrichment.rs"]
 mod enrichment;
@@ -97,6 +97,8 @@ pub mod rows;
 pub mod parity;
 #[path = "related.rs"]
 pub mod related;
+#[path = "markers.rs"]
+pub mod markers;
 #[path = "strict_driver.rs"]
 pub mod strict_driver;
 #[path = "sink.rs"]

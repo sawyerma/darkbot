@@ -35,6 +35,16 @@ pub struct LogDecode {
     pub base64_errors: u64,
     /// The runtime truncated the log; later events may be missing.
     pub truncated: bool,
+    /// Every decoded event in log order: its position is the canonical classifier's
+    /// `event_index` (report entity identity across live and strict evidence).
+    pub sequence: Vec<LogEventRef>,
+}
+
+/// One decoded event of `LogDecode`: index into `events` or `additional_events`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogEventRef {
+    Receiver(usize),
+    Additional(usize),
 }
 
 pub(super) enum Payload {
@@ -105,7 +115,11 @@ pub fn decode_receiver_events(logs: &[String], program: &Pubkey) -> LogDecode {
                 Payload::NotReceiverEvent if program_executing => {
                     // Reuse the existing canonical event decoder: no second RPC scanner.
                     match truth::provisional_event(&bytes) {
-                        Ok(Some(ev)) => out.additional_events.push(ev),
+                        Ok(Some(ev)) => {
+                            out.sequence
+                                .push(LogEventRef::Additional(out.additional_events.len()));
+                            out.additional_events.push(ev);
+                        }
                         Ok(None) => {}
                         Err(_) => out.decoder_errors += 1,
                     }
@@ -125,6 +139,7 @@ pub fn decode_receiver_events(logs: &[String], program: &Pubkey) -> LogDecode {
                         continue;
                     }
                     let event_index = out.events.len() as u32;
+                    out.sequence.push(LogEventRef::Receiver(out.events.len()));
                     out.events.push(ReceiverEvent {
                         event_index,
                         target,

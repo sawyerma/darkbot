@@ -159,6 +159,48 @@ fn legacy_version_label(tx: &ChainTx) -> &'static str {
 }
 
 // ------------------------------------------------------------------------------------------
+// MARKET_COMPLETION
+// ------------------------------------------------------------------------------------------
+
+/// Single-value journal next to the sealed market journal (`MARKET_COMPLETION`).
+pub const MARKET_COMPLETION_JOURNAL: &str = "market_completion.p0j";
+
+/// Qualification axes of a finished capture, computed once by the observer core; `summary.json`
+/// reports the same values. The native report reads this record, never the JSON summary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketCompletion {
+    pub run_id: String,
+    pub verdict: String,
+    pub stream_ready: bool,
+    pub full_duration_observed: bool,
+    pub drain_complete: bool,
+    pub coverage_complete: bool,
+    pub decode_complete: bool,
+    pub receivership_transport_capture_complete: bool,
+    pub full_slot_reconciliation_complete: bool,
+    pub liquidation_path_coverage_complete: bool,
+    pub market_capture_complete: bool,
+    pub source_coverage_verified: bool,
+    pub incomplete_reasons: Vec<String>,
+}
+impl Payload for MarketCompletion {
+    const KIND: u16 = journal::kind::MARKET_COMPLETION;
+}
+impl MarketCompletion {
+    /// A live capture that was cut short stays incomplete, whatever is verified later.
+    pub fn live_coverage_status(&self) -> &'static str {
+        if self.receivership_transport_capture_complete {
+            "LIVE_COVERAGE_COMPLETE"
+        } else {
+            "LIVE_COVERAGE_INCOMPLETE"
+        }
+    }
+    pub fn capture_clock_complete(&self) -> bool {
+        self.stream_ready && self.full_duration_observed
+    }
+}
+
+// ------------------------------------------------------------------------------------------
 // MARKET_LIQUIDATION
 // ------------------------------------------------------------------------------------------
 

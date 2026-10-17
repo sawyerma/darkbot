@@ -443,11 +443,17 @@ pub struct BatchFacts {
     pub program_transactions: Vec<(String, u64)>,
     /// RELATED_NON_LIQUIDATION instructions (never liquidations).
     pub related: Vec<super::related::MarketRelated>,
+    /// The full-slot program transactions themselves; only kept on request (report reader).
+    pub transactions: Vec<super::rows::MarketTransaction>,
 }
 
 /// Minimal native reader of one batch journal: verifies sequence, CRC, hash chain and seal and
 /// decodes every typed frame (a schema-1 or foreign frame fails the batch).
 pub fn read_batch(dir: &Path) -> Result<BatchFacts, &'static str> {
+    read_batch_kept(dir, false)
+}
+
+fn read_batch_kept(dir: &Path, keep_transactions: bool) -> Result<BatchFacts, &'static str> {
     let path = dir.join(MARKET_JOURNAL);
     if crate::storage::segments::segment_path(&path, 2).exists() {
         return Err("BATCH_JOURNAL_SEGMENTED");
@@ -489,7 +495,11 @@ pub fn read_batch(dir: &Path) -> Result<BatchFacts, &'static str> {
                     .typed::<super::rows::MarketTransaction>()
                     .map_err(|_| "BATCH_FRAME_INVALID")?;
                 if matches!(row.origin, super::rows::TxOrigin::FullSlot { .. }) {
-                    f.program_transactions.push((row.signature, row.slot));
+                    f.program_transactions
+                        .push((row.signature.clone(), row.slot));
+                    if keep_transactions {
+                        f.transactions.push(row);
+                    }
                 }
             }
             kind::MARKET_RELATED => f.related.push(
@@ -520,6 +530,7 @@ fn verified_checkpoint(
     start: u64,
     end: u64,
     anchor: &Option<(u64, String)>,
+    keep_transactions: bool,
 ) -> Result<Option<(StrictCheckpoint, BatchFacts)>, &'static str> {
     let path = output.join(checkpoint_name(start, end));
     if !path.exists() {
@@ -538,7 +549,8 @@ fn verified_checkpoint(
     if d.contains('/') || d.contains('\\') || !d.starts_with("batch_") {
         return Err("CHECKPOINT_PATH");
     }
-    let facts = read_batch(&output.join(d)).map_err(|_| "CHECKPOINT_EVIDENCE_CHANGED")?;
+    let facts = read_batch_kept(&output.join(d), keep_transactions)
+        .map_err(|_| "CHECKPOINT_EVIDENCE_CHANGED")?;
     if facts.file_sha256 != c.journal.file_sha256
         || facts.frames != c.journal.frames
         || facts.anchor != c.anchor
@@ -636,6 +648,7 @@ pub fn run(job: Job) -> Result<StrictResult, String> {
                 next,
                 end,
                 &anchor,
+                false,
             )? {
                 Some((saved, _)) => saved,
                 None => {
@@ -863,6 +876,23 @@ impl StrictReport {
 /// checkpoint in slot order with its parent anchor and batch journal. Stops at the first missing
 /// or invalid batch (reported, never skipped).
 pub fn read_report(output: &Path) -> StrictReport {
+    read_report_inner(output, None)
+}
+
+/// `read_report` that also hands each full-slot program transaction of every verified batch to
+/// `visit` (inside the scope, once per signature and slot, in slot order) after its checkpoint
+/// and batch journal verified; nothing of a rejected batch is ever visited.
+pub fn read_report_with(
+    output: &Path,
+    visit: &mut dyn FnMut(&super::rows::MarketTransaction),
+) -> StrictReport {
+    read_report_inner(output, Some(visit))
+}
+
+fn read_report_inner(
+    output: &Path,
+    mut visit: Option<&mut dyn FnMut(&super::rows::MarketTransaction)>,
+) -> StrictReport {
     let mut r = StrictReport::default();
     let scope = match journal::read_typed_value::<StrictScope>(&output.join("scope.p0j")) {
         Ok(s) => s,
@@ -878,10 +908,18 @@ pub fn read_report(output: &Path) -> StrictReport {
     let (mut slots, mut skipped) = (BTreeSet::new(), BTreeSet::new());
     let (mut program, mut events, mut related) =
         (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+    let mut visited = BTreeSet::new();
     r.slots_expected = scope.hi - scope.lo + 1;
     while next <= scope.hi {
         let end = next.saturating_add(BATCH_SLOTS - 1).min(scope.hi);
-        match verified_checkpoint(output, &scope.verification_spec_id, next, end, &anchor) {
+        match verified_checkpoint(
+            output,
+            &scope.verification_spec_id,
+            next,
+            end,
+            &anchor,
+            visit.is_some(),
+        ) {
             Ok(Some((c, facts))) => {
                 r.batches_verified += 1;
                 let inside = |s: &u64| (scope.lo..=scope.hi).contains(s);
@@ -903,6 +941,13 @@ pub fn read_report(output: &Path) -> StrictReport {
                 {
                     if program.insert(key) {
                         r.marginfi_transactions += 1;
+                    }
+                }
+                if let Some(visit) = visit.as_mut() {
+                    for tx in facts.transactions.iter().filter(|t| inside(&t.slot)) {
+                        if visited.insert((tx.signature.clone(), tx.slot)) {
+                            visit(tx);
+                        }
                     }
                 }
                 for e in facts.canonical.into_iter().filter(|e| inside(&e.slot)) {

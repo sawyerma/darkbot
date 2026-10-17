@@ -2,6 +2,7 @@
 include!("market_gap_tests.rs");
 include!("market_reconcile_tests.rs");
 include!("market_truth_tests.rs");
+include!("report_tests.rs");
 use super::*;
 use darkbot_solana::ingress::{SlotStatus, SlotUpdate, SourceKind};
 

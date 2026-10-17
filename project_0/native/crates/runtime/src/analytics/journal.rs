@@ -40,6 +40,9 @@ pub mod kind {
     pub const MARKET_COVERAGE: u16 = 302;
     /// RELATED_NON_LIQUIDATION instruction (PHASENPLAN L.5): never a liquidation or profit.
     pub const MARKET_RELATED: u16 = 303;
+    /// Qualification axes of a finished market capture (`market_completion.p0j`, B7): the
+    /// values `summary.json` reports, typed for the native report.
+    pub const MARKET_COMPLETION: u16 = 304;
     /// Strict verifier (A3): resolved slot scope, cached JSON-RPC exchange (wire text of the
     /// external boundary), batch checkpoint and result — each a sealed single-value journal.
     pub const STRICT_SCOPE: u16 = 310;
@@ -55,6 +58,10 @@ pub mod kind {
     /// SK-07 segment chain control frames (first frame of a continuation / last before seal).
     pub const SEGMENT_LINK: u16 = 330;
     pub const SEGMENT_NEXT: u16 = 331;
+    /// Native C0-E1 report (B7): normalized dataset identity and one reproducible query
+    /// (`report_query_identity`), each a sealed single-value journal under `reports/native/`.
+    pub const REPORT_DATASET: u16 = 340;
+    pub const REPORT_QUERY: u16 = 341;
     /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
     /// in-window frames is the bounded-memory index of the analytics worker.
     pub const ECON_SHADOW_EVALUATION: u16 = 400;
@@ -105,6 +112,7 @@ pub mod kind {
         MARKET_LIQUIDATION,
         MARKET_COVERAGE,
         MARKET_RELATED,
+        MARKET_COMPLETION,
         STRICT_SCOPE,
         STRICT_RPC_CACHE,
         STRICT_CHECKPOINT,
@@ -115,6 +123,8 @@ pub mod kind {
         CAPACITY_PREFLIGHT,
         SEGMENT_LINK,
         SEGMENT_NEXT,
+        REPORT_DATASET,
+        REPORT_QUERY,
         ECON_SHADOW_EVALUATION,
         ECON_SNAPSHOT,
         ECON_FINAL,
@@ -152,6 +162,8 @@ pub mod source {
     pub const STRICT: u32 = 10;
     /// Storage lane: capacity preflight.
     pub const STORAGE: u32 = 11;
+    /// Native C0-E1 report (B7).
+    pub const REPORT: u32 = 12;
 }
 fn bad(code: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, code)

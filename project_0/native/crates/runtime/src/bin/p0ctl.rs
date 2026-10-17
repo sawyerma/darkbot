@@ -12,9 +12,14 @@
 //! p0ctl [--project DIR] run status [--run RUN_ID]
 //! p0ctl [--project DIR] run stop
 //! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict [--resume-verification] …
-//! p0ctl [--project DIR] report  --run RUN_ID [--report-* …]
+//! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
 //! ```
+//!
+//! `report` runs the native report (B7) for runs with native capture records (typed run
+//! manifest and market completion); index provenance, JSON output and historical runs use the
+//! pinned Python report.
 use darkbot_runner::analytics::journal;
+use darkbot_runner::analytics::report;
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
 use darkbot_runner::storage::preflight;
@@ -343,6 +348,30 @@ fn run_stop(project: &Path) -> Result<bool, String> {
     }
 }
 
+fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let native = value(args, "--run")
+        .and_then(|r| find_run(project, &r))
+        .filter(|run| {
+            run.join("capture/run_manifest.p0j").is_file()
+                && run.join("capture/market/market_completion.p0j").is_file()
+        });
+    let pinned_only = value(args, "--report-provenance").as_deref() == Some("index")
+        || value(args, "--format").as_deref() == Some("json");
+    let Some(run) = native.filter(|_| !pinned_only) else {
+        return delegate(project, "report.sh", args);
+    };
+    let inv = report::parse_args(args)?;
+    let out = report::report(&run, &inv.options, &inv.query)?;
+    match inv.query.format {
+        report::Format::Table => print!("{}\n{}", out.meta, out.data),
+        report::Format::Csv => {
+            eprint!("{}", out.meta);
+            print!("{}", out.data);
+        }
+    }
+    Ok(true)
+}
+
 fn delegate(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
     let e = Command::new(project.join("scripts").join(script))
         .args(args)
@@ -369,7 +398,7 @@ fn main() -> ExitCode {
             (Some("run"), Some("status")) => run_status(&project, &rest[1..]),
             (Some("run"), Some("stop")) => run_stop(&project),
             (Some("verify"), _) => delegate(&project, "verify.sh", &rest),
-            (Some("report"), _) => delegate(&project, "report.sh", &rest),
+            (Some("report"), _) => report_cmd(&project, &rest),
             _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report …".into()),
         }
     });
