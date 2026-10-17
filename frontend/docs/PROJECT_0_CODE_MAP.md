@@ -1,6 +1,6 @@
 # Project_0 – geprüfte Code- und Variablenmatrix für das Frontend
 
-Stand: 2026-10-17. Quellenbasis Project_0 `0e0544d`; bei Umsetzung aktuellen HEAD prüfen. **IST** = Symbol existiert, nicht zwingend QUALIFIED. **SOLL** = im [Frontend-Plan](FRONTEND_PHASENPLAN.md) vorgesehen. [Control-Protokoll](CONTROL_PROTOCOL.md).
+Stand: 2026-10-17. Historische Quellenbasis Project_0 `0e0544d`; **heutige React-V0-Oberfläche existiert bereits**. Vor Implementierung aktuellen HEAD und [SOURCE_VARIABLE_MATRIX](SOURCE_VARIABLE_MATRIX.md) prüfen. **IST** = Symbol existiert, nicht zwingend QUALIFIED. **SOLL** = im [Frontend-Plan](FRONTEND_PHASENPLAN.md) vorgesehen. [Control-Protokoll](GATEWAY_WIRE_PROTOCOL_V1_3.md).
 
 ## 1. Frontend IST: bereits vorhandener Code
 

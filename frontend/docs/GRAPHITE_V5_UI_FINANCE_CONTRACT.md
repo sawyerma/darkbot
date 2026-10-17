@@ -2,7 +2,7 @@
 
 **Status: binding SOLL design and acceptance contract; not an implemented API or validated portfolio ledger.**
 **Version:** UI-V5.1, 2026-10-17. **Scope:** existing `frontend/` and Project_0 Rust runtime; no second engine/frontend.
-**Authority:** [FRONTEND_PHASENPLAN.md](FRONTEND_PHASENPLAN.md), [PROJECT_0_CODE_MAP.md](PROJECT_0_CODE_MAP.md), [CONTROL_PROTOCOL.md](CONTROL_PROTOCOL.md), [WALLETS_TREASURY.md](WALLETS_TREASURY.md), [Project_0 STATUS](../../project_0/docs/STATUS.md) and [PHASENPLAN](../../project_0/docs/PHASENPLAN.md).
+**Authority:** [FRONTEND_PHASENPLAN.md](FRONTEND_PHASENPLAN.md), [PROJECT_0_CODE_MAP.md](PROJECT_0_CODE_MAP.md), [CONTROL_PROTOCOL.md](GATEWAY_WIRE_PROTOCOL_V1_3.md), [WALLETS_TREASURY.md](WALLETS_TREASURY.md), [Project_0 STATUS](../../project_0/docs/STATUS.md) and [PHASENPLAN](../../project_0/docs/PHASENPLAN.md).
 
 ## 1. Accepted visual reference: Graphite V5 (not V4)
 

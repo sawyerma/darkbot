@@ -1,6 +1,6 @@
 # Project_0 – Boot-Audit, frei wählbare Aufnahme, Backtest und Optimierung
 
-**Verbindlicher SOLL-Vertrag v1.0 (2026-10-17).** Ergänzt [Frontend Phasenplan v1.1](FRONTEND_PHASENPLAN.md), [reale Code-/Variablenmatrix](PROJECT_0_CODE_MAP.md) und [Control-Protokoll](CONTROL_PROTOCOL.md). Die angeführten neuen Typen/Kommandos sind **nicht implementiert**. Projektweite Autorität: [PHASENPLAN](../../project_0/docs/PHASENPLAN.md), [STATUS](../../project_0/docs/STATUS.md), [MEASUREMENT_LEDGER](../../project_0/docs/MEASUREMENT_LEDGER.md). FREE_ONLY, JFI, PERSIST, FE und LIVE-Sperren bleiben unverändert.
+**Verbindlicher SOLL-Vertrag v1.0 (2026-10-17).** Ergänzt [Frontend Master-Phasenplan V1.3](FRONTEND_PHASENPLAN.md), [reale Code-/Variablenmatrix](PROJECT_0_CODE_MAP.md) und [Control-Protokoll](GATEWAY_WIRE_PROTOCOL_V1_3.md). Die angeführten neuen Typen/Kommandos sind **nicht implementiert**. Projektweite Autorität: [PHASENPLAN](../../project_0/docs/PHASENPLAN.md), [STATUS](../../project_0/docs/STATUS.md), [MEASUREMENT_LEDGER](../../project_0/docs/MEASUREMENT_LEDGER.md). FREE_ONLY, JFI, PERSIST, FE und LIVE-Sperren bleiben unverändert.
 
 ## 1. End-to-End-Produktablauf
 

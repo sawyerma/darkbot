@@ -1,6 +1,6 @@
 # Wallets & Treasury – Project_0 / DarkBot Frontend (FEUI-10)
 
-**Verbindlicher SOLL-Vertrag, 2026-10-17.** Modul wurde fachlich geplant, ist **nicht** als Wallet-/Treasury-Auszahlungsengine implementiert. Ergänzt [FRONTEND_PHASENPLAN](FRONTEND_PHASENPLAN.md), [PROJECT_0_CODE_MAP](PROJECT_0_CODE_MAP.md), [CONTROL_PROTOCOL](CONTROL_PROTOCOL.md) und [STARTUP_BACKTEST_OPTIMIZATION](STARTUP_BACKTEST_OPTIMIZATION.md). Fachliche LIVE-/Wallet-/P8-/FE-04/FE-06/FE-07-/JFI-Verträge aus [Project_0 PHASENPLAN](../../project_0/docs/PHASENPLAN.md) behalten Vorrang. **Dieses Dokument ist keine Autorisierung, Geld zu senden.**
+**Verbindlicher SOLL-Vertrag, 2026-10-17.** Modul wurde fachlich geplant, ist **nicht** als Wallet-/Treasury-Auszahlungsengine implementiert. Ergänzt [FRONTEND_PHASENPLAN](FRONTEND_PHASENPLAN.md), [PROJECT_0_CODE_MAP](PROJECT_0_CODE_MAP.md), [CONTROL_PROTOCOL](GATEWAY_WIRE_PROTOCOL_V1_3.md) und [STARTUP_BACKTEST_OPTIMIZATION](STARTUP_BACKTEST_OPTIMIZATION.md). Fachliche LIVE-/Wallet-/P8-/FE-04/FE-06/FE-07-/JFI-Verträge aus [Project_0 PHASENPLAN](../../project_0/docs/PHASENPLAN.md) behalten Vorrang. **Dieses Dokument ist keine Autorisierung, Geld zu senden.**
 
 ## 1. Produktziele / Wallet-Ansicht
 
