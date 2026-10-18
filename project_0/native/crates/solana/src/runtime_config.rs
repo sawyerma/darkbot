@@ -51,6 +51,7 @@ parameters! {
     wss_reconnect_max_ms = 30000, "ms", "P0_WSS_RECONNECT_MAX_MS";
     wss_attempts = 8, "attempts", "P0_WSS_ATTEMPTS";
     wss_recovery_ms = 120000, "ms", "P0_WSS_RECOVERY_MS";
+    wss_ack_ms_per_subscription = 5, "ms", "P0_WSS_ACK_MS_PER_SUBSCRIPTION";
     workers = 1, "threads", "RAYON_NUM_THREADS";
     ingress_queue = 65536, "events", "P0_INGRESS_BUFFER";
     worker_queue = 256, "jobs", "P0_REMOTE_WORKER_BUFFER";
@@ -98,8 +99,8 @@ parameters! {
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
 /// payload schema with it. 1: up to `econ_retention_mib`; 2: `boot_calls`, `boot_seconds` (N1);
-/// 3: `owner_evidence_sync_ms` (M2).
-pub const LIMITS_REVISION: u16 = 3;
+/// 3: `owner_evidence_sync_ms` (M2); 4: `wss_ack_ms_per_subscription` (N8).
+pub const LIMITS_REVISION: u16 = 4;
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
@@ -1263,9 +1264,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                3,
-                70,
-                "H2FzHMPcLAEUfRPiAsTPx3fgyaHnvEBq43TN3cDnjDvf".to_string()
+                4,
+                71,
+                "DqejpTXkqa3XVHsi21nU5HupQt2Ghuko261jNk4oRYoz".to_string()
             )
         );
     }

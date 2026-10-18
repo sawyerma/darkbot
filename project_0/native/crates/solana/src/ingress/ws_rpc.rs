@@ -49,6 +49,22 @@ pub struct WsRpcConfig {
     /// Fixed outage budget, independent of capture duration (C0-E1 opt-in).
     pub recovery_budget: Option<Duration>,
     pub recovery_attempts: u32,
+    /// N8: ACK allowance per subscription on top of the idle timeout.
+    pub ack_per_subscription: Duration,
+}
+
+/// N8: how long all subscription ACKs may take: the idle timeout plus a configured allowance per
+/// subscription, never beyond what is left of the hard recovery budget.
+pub(crate) fn ack_window(
+    idle_timeout: Duration,
+    subscriptions: usize,
+    per_subscription: Duration,
+    recovery_left: Option<Duration>,
+) -> Duration {
+    let window = idle_timeout.saturating_add(
+        per_subscription.saturating_mul(u32::try_from(subscriptions).unwrap_or(u32::MAX)),
+    );
+    recovery_left.map_or(window, |left| window.min(left))
 }
 
 /// Wait before the next frame read. `None` heartbeat: exactly the idle timeout (previous
@@ -83,6 +99,7 @@ impl WsRpcConfig {
             heartbeat_interval: None,
             recovery_budget: None,
             recovery_attempts: 8,
+            ack_per_subscription: Duration::from_millis(5),
         };
         if crate::runtime_config::configured() {
             let p = &crate::runtime_config::active().limits;
@@ -91,6 +108,7 @@ impl WsRpcConfig {
             config.idle_timeout = Duration::from_millis(p.wss_idle_timeout_ms);
             config.recovery_budget = Some(Duration::from_millis(p.wss_recovery_ms));
             config.recovery_attempts = p.wss_attempts as u32;
+            config.ack_per_subscription = Duration::from_millis(p.wss_ack_ms_per_subscription);
         }
         config
     }
@@ -653,7 +671,14 @@ impl WsRpcControlSource {
                 .map_err(|e| IngressError::Connect(e.to_string()))?;
         }
         let mut sub_ids: HashMap<u64, (SubKind, Option<Pubkey>)> = HashMap::new();
-        let ack_deadline = tokio::time::Instant::now() + self.cfg.idle_timeout;
+        let ack_started = tokio::time::Instant::now();
+        let ack_deadline = ack_started
+            + ack_window(
+                self.cfg.idle_timeout,
+                request_total,
+                self.cfg.ack_per_subscription,
+                deadline.map(|d| d.saturating_duration_since(ack_started)),
+            );
         let mut stream_ready = false; // [FIX-36]
         let mut frames: u64 = 0;
         let mut last_frame_ns: Option<u64> = None;
@@ -778,7 +803,12 @@ impl WsRpcControlSource {
                     last_progress_at = tokio::time::Instant::now();
                     last_app_frame_at = last_progress_at;
                     self.transport(sink, "READY", "SUBSCRIPTIONS_ACKED", attempt, *last_slot);
-                    eprintln!("[ws_rpc] session attempt={} StreamReady", attempt);
+                    eprintln!(
+                        "[ws_rpc] session attempt={} StreamReady; ACK phase {} ms for {} subscriptions",
+                        attempt,
+                        ack_started.elapsed().as_millis(),
+                        request_total
+                    );
                     if self.cfg.recovery_budget.is_none() {
                         self.ready(sink, halt, attempt, t_rx_ns)?;
                     }
@@ -1149,6 +1179,29 @@ mod tests {
         assert!(matches!(ev[0], IngressEvent::Root { slot: 42, .. }));
     }
 
+    /// N8: the ACK window grows with the subscriptions but never past the recovery budget.
+    #[test]
+    fn ack_window_scales_with_subscriptions_within_recovery_budget() {
+        let idle = Duration::from_secs(60);
+        let per = Duration::from_millis(5);
+        assert_eq!(ack_window(idle, 0, per, None), idle);
+        assert_eq!(
+            ack_window(idle, 10_000, per, None),
+            idle + Duration::from_secs(50)
+        );
+        assert_eq!(
+            ack_window(idle, 10_000, per, Some(Duration::from_secs(90))),
+            Duration::from_secs(90)
+        );
+        assert_eq!(
+            ack_window(idle, 3, per, Some(Duration::ZERO)),
+            Duration::ZERO
+        );
+        assert_eq!(
+            ack_window(idle, usize::MAX, Duration::from_secs(u64::MAX / 2), None),
+            Duration::MAX
+        );
+    }
     #[test]
     fn account_notification_needs_known_subscription() {
         let msg = json!({"method":"accountNotification","params":{"subscription":3,"result":{"context":{"slot":1},"value":{"lamports":1,"owner":Pubkey::new_unique().to_string(),"data":["","base64"]}}}});
