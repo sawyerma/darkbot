@@ -42,6 +42,13 @@ impl ShadowOwner {
         // [FIX-46] Letzten (Teil-)Tag beim regulären Shutdown schreiben, damit das Ledger vollständig ist.
         let final_summary = self.ledger.finish();
         let evidence_result = self.evidence.finish(Some(final_summary));
+        // M3: the blockhash refresh ends on the general shutdown in every mode (also Shadow
+        // without econ and after a HALT). The join is bounded by its 250 ms wait steps and the
+        // 30 s RPC timeout of a refresh in flight.
+        self.shutdown.request();
+        if let Some(h) = self.blockhash_thread.take() {
+            let _ = h.join();
+        }
         if self.econ.is_some() || self.operational_window.is_some() {
             self.remote.wait_stopped(Duration::from_secs(
                 darkbot_solana::runtime_config::active()

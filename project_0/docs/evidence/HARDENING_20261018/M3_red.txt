@@ -1,0 +1,48 @@
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+warning: field `blockhash_thread` is never read
+   --> crates/runtime/src/orchestration/state_owner.rs:163:5
+    |
+ 91 | pub(super) struct ShadowOwner {
+    |                   ----------- field in this struct
+...
+163 |     blockhash_thread: Option<std::thread::JoinHandle<()>>,
+    |     ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `darkbot-runner` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.81s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_runner-dd12e19c670d97b3)
+
+running 3 tests
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed ... FAILED
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops ... FAILED
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ ... FAILED
+
+failures:
+
+---- orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed stdout ----
+
+thread 'orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed' (30127081) panicked at crates/runtime/src/orchestration/state_owner/setup.rs:1001:14:
+refresh loop ignored closed admission: Timeout
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops stdout ----
+
+thread 'orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops' (30127080) panicked at crates/runtime/src/orchestration/state_owner/setup.rs:1013:14:
+refresh loop ignored shutdown after the refresh in flight: Timeout
+
+---- orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ stdout ----
+
+thread 'orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ' (30127095) panicked at crates/runtime/src/orchestration/state_owner/setup.rs:992:14:
+refresh loop ignored shutdown: Timeout
+
+
+failures:
+    orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops
+    orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed
+    orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 319 filtered out; finished in 2.02s
+
+error: test failed, to rerun pass `-p darkbot-runner --lib`

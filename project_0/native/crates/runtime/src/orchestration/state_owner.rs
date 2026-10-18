@@ -159,6 +159,8 @@ pub(super) struct ShadowOwner {
     dep_shared: std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>,
     opt_shared: std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>,
     blockhash: BlockhashCache,
+    /// Refresh thread of `blockhash`; joined in `finish` after the shutdown request (M3).
+    blockhash_thread: Option<std::thread::JoinHandle<()>>,
     safety: Safety,
     allowlist: Allowlist,
     global_allowed: Vec<Pubkey>,

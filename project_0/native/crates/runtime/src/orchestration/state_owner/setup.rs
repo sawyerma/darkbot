@@ -335,44 +335,20 @@ pub(super) fn prepare(
     let bh_cache = blockhash.clone();
     let bh_clock = clock;
     let bh_econ = econ.clone();
-    std::thread::Builder::new()
-        .name("blockhash".into())
-        .spawn(move || {
-            let mut degraded = false;
-            loop {
-                if bh_econ.as_ref().is_some_and(|h| h.admission_closed()) {
-                    break;
-                }
-                let mt0_start = std::time::Instant::now(); // [MT0]
-                let refreshed = bh_cache.refresh(&bh_rpc, bh_clock.now_ns());
-                let mt0_outcome = match &refreshed {
-                    Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
-                    Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
-                };
-                darkbot_common::mt0::MT0.record_remote(
-                    darkbot_common::mt0::RemoteClass::Blockhash,
-                    mt0_start.elapsed(),
-                    mt0_outcome,
-                );
-                match refreshed {
-                    Ok(_) => {
-                        if degraded {
-                            eprintln!("blockhash refresh: recovered");
-                            degraded = false;
-                        }
-                    }
-                    Err(e) => {
-                        if !degraded {
-                            // [FIX-82] Never print provider URLs/API keys embedded in transport errors.
-                            let safe = e.split(" for url ").next().unwrap_or("rpc transport error");
-                            eprintln!("blockhash refresh: {}", safe);
-                            degraded = true;
-                        }
-                    }
-                }
-                std::thread::sleep(Duration::from_secs(10));
-            }
-        })?;
+    let bh_shutdown = shutdown.clone();
+    let blockhash_thread =
+        std::thread::Builder::new()
+            .name("blockhash".into())
+            .spawn(move || {
+                let admission_closed =
+                    move || bh_econ.as_ref().is_some_and(|h| h.admission_closed());
+                run_blockhash_refresh(
+                    &bh_shutdown,
+                    &admission_closed,
+                    || bh_cache.refresh(&bh_rpc, bh_clock.now_ns()).map(|_| ()),
+                    Duration::from_secs(10),
+                )
+            })?;
     let limits = Limits {
         max_total_capital: config::parsed_or("P0_MAX_TOTAL_CAPITAL", 0)?,
         max_outstanding_inventory: config::parsed_or("P0_MAX_INVENTORY", 0)?,
@@ -889,6 +865,7 @@ pub(super) fn prepare(
         dep_shared,
         opt_shared,
         blockhash,
+        blockhash_thread: Some(blockhash_thread),
         safety,
         allowlist,
         global_allowed,
@@ -915,4 +892,132 @@ pub(super) fn prepare(
         mt0_owner,
     };
     Ok((owner, fetch, ingress))
+}
+
+/// Blockhash refresh loop of the Shadow owner (M3). Shutdown and closed admission are checked
+/// before every refresh and at least every 250 ms of the wait, so no refresh starts after either;
+/// a refresh already in flight is bounded by its RPC timeout (30 s).
+pub(super) fn run_blockhash_refresh(
+    shutdown: &Shutdown,
+    admission_closed: &dyn Fn() -> bool,
+    mut refresh: impl FnMut() -> Result<(), String>,
+    interval: Duration,
+) {
+    const STEP: Duration = Duration::from_millis(250);
+    let stop = || shutdown.is_requested() || admission_closed();
+    let mut degraded = false;
+    while !stop() {
+        let mt0_start = std::time::Instant::now(); // [MT0]
+        let refreshed = refresh();
+        let mt0_outcome = match &refreshed {
+            Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
+            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+        };
+        darkbot_common::mt0::MT0.record_remote(
+            darkbot_common::mt0::RemoteClass::Blockhash,
+            mt0_start.elapsed(),
+            mt0_outcome,
+        );
+        match refreshed {
+            Ok(_) => {
+                if degraded {
+                    eprintln!("blockhash refresh: recovered");
+                    degraded = false;
+                }
+            }
+            Err(e) => {
+                if !degraded {
+                    // [FIX-82] Never print provider URLs/API keys embedded in transport errors.
+                    let safe = e.split(" for url ").next().unwrap_or("rpc transport error");
+                    eprintln!("blockhash refresh: {}", safe);
+                    degraded = true;
+                }
+            }
+        }
+        let waiting = std::time::Instant::now();
+        while !stop() {
+            let left = interval.saturating_sub(waiting.elapsed());
+            if left.is_zero() {
+                break;
+            }
+            std::thread::sleep(left.min(STEP));
+        }
+    }
+}
+
+#[cfg(test)]
+mod blockhash_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicU64, Ordering::SeqCst},
+        mpsc, Arc,
+    };
+    use std::time::Instant;
+    /// Runs the loop on its own thread; `done` fires when it returns.
+    fn start(
+        shutdown: &Shutdown,
+        closed_from_check: Option<u64>,
+        refresh_ms: u64,
+    ) -> (Arc<AtomicU64>, mpsc::Receiver<()>) {
+        let calls = Arc::new(AtomicU64::new(0));
+        let (done, rx) = mpsc::channel();
+        let (s, c) = (shutdown.clone(), calls.clone());
+        std::thread::spawn(move || {
+            let checks = AtomicU64::new(0);
+            let closed =
+                move || closed_from_check.is_some_and(|n| checks.fetch_add(1, SeqCst) >= n);
+            run_blockhash_refresh(
+                &s,
+                &closed,
+                || {
+                    c.fetch_add(1, SeqCst);
+                    std::thread::sleep(Duration::from_millis(refresh_ms));
+                    Ok(())
+                },
+                Duration::from_secs(10),
+            );
+            let _ = done.send(());
+        });
+        (calls, rx)
+    }
+    fn first_refresh(calls: &AtomicU64) {
+        let t0 = Instant::now();
+        while calls.load(SeqCst) == 0 {
+            assert!(t0.elapsed() < Duration::from_secs(5), "no first refresh");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    /// M3: without an econ handle only the general shutdown ends the loop; it is honoured
+    /// during the 10 s wait, not after it.
+    #[test]
+    fn blockhash_refresh_stops_on_shutdown_without_econ() {
+        let shutdown = Shutdown::new();
+        let (calls, done) = start(&shutdown, None, 0);
+        first_refresh(&calls);
+        shutdown.request();
+        done.recv_timeout(Duration::from_secs(1))
+            .expect("refresh loop ignored shutdown");
+        assert_eq!(calls.load(SeqCst), 1);
+    }
+    #[test]
+    fn blockhash_refresh_stops_on_admission_closed() {
+        let shutdown = Shutdown::new();
+        // The first check (before the first refresh) is open, every later one closed.
+        let (calls, done) = start(&shutdown, Some(1), 0);
+        done.recv_timeout(Duration::from_secs(1))
+            .expect("refresh loop ignored closed admission");
+        assert_eq!(calls.load(SeqCst), 1);
+        assert!(!shutdown.is_requested());
+    }
+    /// A refresh in flight finishes (bounded by its RPC timeout), then no further refresh.
+    #[test]
+    fn blockhash_refresh_in_flight_finishes_then_stops() {
+        let shutdown = Shutdown::new();
+        let (calls, done) = start(&shutdown, None, 300);
+        first_refresh(&calls);
+        shutdown.request();
+        done.recv_timeout(Duration::from_secs(2))
+            .expect("refresh loop ignored shutdown after the refresh in flight");
+        assert_eq!(calls.load(SeqCst), 1);
+    }
 }

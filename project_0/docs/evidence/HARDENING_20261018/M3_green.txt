@@ -1,0 +1,25 @@
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.57s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_runner-dd12e19c670d97b3)
+
+running 17 tests
+test orchestration::state_owner::census::tests::c0_census_worker_cost_at_historical_population ... ignored
+test orchestration::state_owner::census::tests::census_membership_counts_debtors_and_undecodable_members_only ... ok
+test orchestration::state_owner::census::tests::chain_clock_rejects_foreign_short_zero_and_future_clocks ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+test orchestration::state_owner::census::tests::census_proves_identity_coverage_and_journals_typed_rows ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_repeat_admission_remains_bounded ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token ... ok
+test orchestration::state_owner::integration_probe_tests::evidence_failures_remain_explicit_static_categories ... ok
+test orchestration::state_owner::integration_probe_tests::only_one_target_is_dispatched_per_idle_turn ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_returns_latest_coalesced_work_once ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_skips_stale_order_entries ... ok
+test orchestration::state_owner::integration_probe_tests::shadow_error_category_never_formats_secret_payload ... ok
+test orchestration::state_owner::integration_probe_tests::target_waits_unsigned_until_worker_is_idle ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops ... ok
+
+test result: ok. 16 passed; 0 failed; 1 ignored; 0 measured; 305 filtered out; finished in 0.36s
+
