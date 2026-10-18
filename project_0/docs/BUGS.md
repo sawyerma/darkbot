@@ -55,7 +55,7 @@
 | `D` Market-Evidence/Funding/Sweep Review 4 | — | D1–D13 offen; D1 vor 4h, D3 vor 4h-Stresstest, D4/D5/D8/D9 Capture-Härtung; D2 Effizienz, D10=C6, D11=B11. |
 | `E` Decoder/Planner/BOOT/Projection Review 5 | — | E1–E12 offen; E13 weitere Reviewabdeckung. E1+B2/D11 vor P1B/FE-01; E2 vor FE-04/06; E4/E5/E6 vor BOOT-/4h-Readiness; E9 vor Integrationsevaluation. |
 | `F` zusätzliche Diagnose-/Vertragsbefunde | — | F1 Simulationslogs, F2 FE04-JFI, F3 Jito Slot, F4 WSS Delivery, F5 optionale Hygiene. |
-| `R` 4h-Regression der Härtung (Review 6) | — | R1–R4 plus R10/R11 vor den jeweiligen G-B/G-C/G-D-Gates abklären; R2 potentieller Evidence-Falsch-PASS; R5–R9 LOW/PROFILE/CLEANUP. R1 umfasst auch Shadow-C6-Budget, R6 den Ingress-Abschluss-Logger. |
+| `R` 4h-Regression der Härtung (Review 6) | — | R1–R4 plus R10/R11 vor den jeweiligen G-B/G-C/G-D-Gates abklären; R2 potentieller Evidence-Falsch-PASS; R5–R9 LOW/PROFILE/CLEANUP. **Neu Review 8: R12/R13 Retention + Strict-Scan Kapazität, R14/R15 Auswertungsparität vor aussagekräftiger FE-00-Interpretation; R18/R19 Frontend-Datenanbindung; R16/R17/R20–R26 nach Mess-/Scope-Priorität.** R1 umfasst auch Shadow-C6-Budget, R6 den Ingress-Abschluss-Logger. |
 | `X` verbindliche Quervertragslücken | — | X1 BOOT-12, X2 JFI-BOOT, X3 BOOT-01/02; verwandt mit N1–N8, keine doppelte Implementierung |
 | Weitere Reviewmodule | — | `market/winner.rs`, `chain.rs`, `econ*.rs`, `measurement.rs`, `report.rs`, `census.rs`, `lookup_tables.rs`, `market_*`-Verifier, `strict_driver.rs`, `markers.rs`, `related.rs`, `rows.rs`, Tools/Bins und Python-Skripte noch nicht vollständig begutachtet; fünf Durchgänge zu Owner/Storage/Market/Protocol/Planner/Projection/Index/Integration/Winner-Tracker protokolliert |
 
@@ -777,6 +777,8 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 4. Gesamte relevante Offline-Regression, Release-/Formatter-/Clippy-Nachweis, Redaction-Probes, Ledger-/STATUS-/4h-Readiness-Synchronisierung.
 5. **Erst dann** getrennt autorisierter G-B-Audit; bei PASS gesondert G-C-Kalibrierung; G-D-vier-Stundenprüfung.
 
+**Review 8 / 4h-Economics und Reporter (18.10.2026):** Vor G-C/G-D und der FE-00-Auswertung erst R12 (historische Retention-Zahlen), R14/R15 (Commitment-Metriken und Live-/Offline-Parität), R13 (Strict-Scan-Budget mit 600-s-Kalibrierung und konservativer Hochrechnung) nachweisen. R18/R19 sind relevant, bevor ein laufender 4h-Run über Frontend/Gateway als aussagekräftig dargestellt wird; sie ersetzen keine 4h-Backend-Admission. R16/R17 sowie R20–R25 bleiben vollständig erfasst, aber ihre Gatewirkung ist differenziert. R26 ist ein noch ausstehender Quellen-/Wahrheitsreview, kein bestätigter Fehler. Kein neues RUN-/LIVE-GO aus dieser Dokumentation.
+
 **AUFTRAG 2 – Design-/Finanz-Gates vor Pilot, vor FE-06 und vor P8-LIVE:**
 1. **B2/E1/D11, E2, E9, F1**, B4, B9 und ggf. L4 für die ausgewählte Fundingklasse; echte Candidate-/Source-/Oracle-/Rent-/Exit-/Plan-Instruktions-Parität (FE-01/02/04).
 2. B6/B7/C2/C8/C9/D2/D6/D7/D12/E10/E11/E12 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
@@ -906,8 +908,117 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 
 **Priorität 2 — verbleibende harte 4h-Gates:** **R2** Fake-Ingress-Panic **vor** `finish_capture/Journal-Seal` erkennen und Evidence INCOMPLETE halten; **R3** Recovery→full index rebuild→100k Sweep + volle/teilvolle Queue (1 und 2 Worker, wiederholte Reconnects) p95/p99/Overflow verifizieren; **C1 Test 7** echtes offline aufbaubares Owner-E2E; **R4/X1/X3** dynamische BOOT-Budgets/Identitäts- und Crashmatrix offline – Netzwerkaudit bleibt nicht autorisiert. Nur bei gemessener Überschreitung bounded Chunking mit Vollständigkeitsinvarianten implementieren. D3/C6/D10/B5 nicht wieder ohne Reproduktion anfassen.
 
+**Neu Review 8 – ECON/STRICT/REPORTER:** Beziehe zusätzlich die Tickets **R12–R26 aus §17** in den bestehenden Auftrag ein. Erste Offline-Arbeiten sind die historischen 4h-/5h-Retention-Zähler (R12), die nachweisbare Finality-/Bootstrap-Report-Parität (R14/R15) und die Vorbereitung einer budgetierten 600-s-Strict-Kalibrierung (R13). **Keinen** selbstständigen Netzwerk-Audit oder 600-s-/4h-Lauf starten: G-B/G-C/G-D brauchen weiterhin separate Freigabe. Reporter-Anbindung R18/R19 vor tatsächlich angezeigtem Econ4h-Frontend; R20–R23 nicht als vorzeitige 4h-Backend-Blocker deklarieren. Bei R26 als Nächstes ¤market_truth.rs¤ lesen und Source-Truth/Nicht-Relevanz belegen; erst bei echtem Defekt neue ID. Bereits laufende R1–R11/C1-Gates nicht überspringen.
+
 **Priorität 3 — isolierte Niedrig-Risiko-Pfade:** **R6** optionales `eprintln!("ingress ended: {}", e)` auf bounded `console::line` und sichere Fehlerklasse umstellen (zusammen mit Evidence-Drop), ohne den echten Error/HALT zu unterdrücken; **R5** defensives `Instant::checked_add`; **R7–R9** erst bei belegtem Profilgewinn, Durability/Admission/Batch-Semantik unverändert. **F5** Jito-VERIFY ohne erfundene Produktivqualifikation dokumentieren. **F6:** die drei Reporter-Dateien aus `311f9a4` **nicht** formatieren; dem Autor überlassen.
 
 **Abnahme pro Ticket:** stabiler Bug-ID-Eintrag; ursprünglicher RED-Test oder belegtes `NO_BUG_VERIFIED`, GREEN inklusive Panic-/Overflow-/Fake-WSS-Negativmatrix, getestete Features, `cargo fmt --check`, Clippy `-D warnings`, Workspace-Rust-/erforderliche Python-Tests, Release-Build auf einer identischen SHA. Evidence in `project_0/docs/evidence/HARDENING_20261018/` (testiger Output mit Exitcode, SHA und Limitierung), `BUGS.md` Haken nur bei tatsächlich bestandener Abnahme, `STATUS.md`-Gates bleiben separat NOT_RUN/BLOCKED. Für Formatierungsausnahme F6 explizit EXIT 1 plus **genau** diese drei Dateien dokumentieren; nicht grün behaupten. Bei R10/R11 keine riskanten Änderungen ohne reproduzierbare Notwendigkeit.
 
 **Übergabe:** geänderte Pfade, pro Ticket RED/GREEN, Commit-SHAs, PASS/NOT_RUN, tatsächlich getestete Commits, offene Risiken und eindeutige Empfehlung zum **nächsten offline** Gate. Auf `main` nur Fast-Forward-Push. Nach jedem Push lokal/remote Status verifizieren.
+
+## 17. R — Review 8: 4h-Economics, Strict-Reconciliation und Frontend-Reporter
+
+**Review-Quelle:** Fables SHA-gebundener Lesedurchgang auf `e9872cb`: `econ.rs`, `econ_canonical.rs`, `measurement.rs`, `startup.rs` (Econ4h-Supervisor), `market/core.rs`, `market/configuration.rs`, `market/winner.rs`, `market_reconcile.rs`, `status_tap.rs`, Reporter `lib.rs`/Composition Root sowie `status.proto` und Gateway-Wire-Vertrag. Am 18.10.2026 sind relevante Codepfade zusätzlich auf GitHub-`main` `1973b97ee5c66ff7e3897433a77aa1a26fc69be3` anhand festgepinnter Dateien stichprobenartig nachgelesen worden. **Keine neuen Rust-/Python-Tests, alten 4h-Evidence-Läufe oder Netzwerkzugriffe in dieser Nachprüfung ausgeführt.** SOURCE_CONFIRMED bedeutet überprüfter Codepfad, **nicht** bewiesener reproduzierter Betriebsfehler oder Gate-PASS. Bei Änderungen seit `e9872cb` vor Fix/Schließung immer auf dem dann aktuellen SHA neu verifizieren. Cross-References verhindern doppelte Implementierungen mit bestehenden FE-/C0-/JFI-/Frontend-Gates.
+
+### R12 — K1: ECON-Retention kann den gesamten Vierstundenlauf INCOMPLETE machen
+- [ ] **HIGH / G-C/G-D KAPAZITÄTSGATE · CODE_CONFIRMED / AUSLÖSER NOT_MEASURED · Cross-Ref C0-E1, PERSIST/SK, R13.**
+- **Ist:** `analytics/econ.rs::Config::from_lookup`: `P0_ECON_RETENTION` default **262.144**, zulässig höchstens **2.000.000**, mit separater Bytegrenze `econ_retention_mib`. Reviewer nennt drei Verbraucher des Limits: Live-Capture `seen`, `truth.live_receipts`, `truth.signatures` im Strict-Scan. Einmalige relevante Marginfi-Transaktionen können auch fehlgeschlagene fremde Versuche enthalten; nicht nur Liquidationsereignisse zählen. Rein rechnerisch entspricht 262.144/14.400 s ≈ **18,2 eindeutigen Transaktionen/s**, sofern die jeweilige Datenstruktur diesen Cap eins-zu-eins belegt. `C0_E1_MARKET_RETENTION_OVERFLOW` / `CANONICAL_MARKET_RETENTION` führen konservativ zu INCOMPLETE; eine reale Auslösung ist **nicht** belegt.
+- **Soll:** Aus vorhandenen 4h-/5h-Läufen read-only `unique_transactions`, `marginfi_transactions`, Peaks, Retention-/Byte-Maximum, Frame-/Truth-Kardinalitäten und C0-E1-Evidence mit Run-ID ermitteln. Mehrfachzähler, Signaturen und RAM-Budget sauber differenzieren. Nur bei begründetem Bedarf `P0_ECON_RETENTION` innerhalb harter Limits **und** `econ_retention_mib` / Diskreserve / Admission konsistent dimensionieren; keine pauschale Hochsetzung.
+- **Tests:** 262.144/262.145 Grenzfall (Fake-TX inkl. gescheiterter relevanter TX), identische Signatur mehrfach, Strict-vs-Live-Retention, Bytebudget knapp, großer gültiger Upper-Bound, UNKNOWN/HALT statt stiller Verdrängung; 600-s-Kalibrierung als separater freizugebender Schritt.
+- **Abnahme:** dokumentierte historische Zahlen und begründete 4h-Kapazitätsreserve; Overflow bleibt fail-closed. **Code-Commit/Evidence:** —.
+
+### R13 — K2: Strict-getBlock-Full-Scan und globaler Validierungsfail können 4h-PASS verhindern
+- [ ] **HIGH / G-C KALIBRIERUNG / G-D STRICT COMPLETENESS · CODE_CONFIRMED, REAL THROUGHPUT NOT_MEASURED · Cross-Ref market_reconcile, strict_driver, PERSIST/SK/JFI.**
+- **Ist:** `market_reconcile.rs`: `getBlocks` über das Fenster, `getBlock` mit `transactionDetails:"full"` je produzierten Slot, komplette Transaktionsdecode und `validate_full_transaction` auch bevor Marginfi-Relevanz entschieden wird. Fehler `INNER_INSTRUCTIONS_UNAVAILABLE`/`LOADED_ADDRESSES_MISSING`/ungültige Indices ⇒ gesamter Strict-Scan fail-closed. `max_slots` default/harter Config-Max **100.000**; der 4h-Window-Umfang liegt grob bei 36.000 Slots (abhängig von tatsächlicher Produktion/Finality). **Nur als Untergrenze bei 5 req/s und 36.000 Blöcken:** 7.200 s = 2 h, ohne Block-/Header-/Retry-Overhead; freie Providerquota und Datenrate nicht nachgewiesen. JSON-Blöcke können viel RAM/Netz belegen, zweistellige GB sind Reviewer-Szenario, **keine Messung**.
+- **Soll:** G-C-600s-Probe mit Messung `produced_blocks/s`, Header/JSON compressed/uncompressed bytes/block, Memory peak, validate-errors nach Klasse, 429-Rate, backoff, effective provider RPS, disk occupancy, P50/P95/P99 und projected strict seconds für 4h; Quote auch gegen FE/RPC-Sharing und FREE_ONLY prüfen. Full-chain/inner/ALT-Validierung NICHT aufweichen, um scheinbare PASS-Rate zu erhöhen. Bei echter Grenzüberschreitung bounded read-/scan-Optimierung nur mit gleicher kanonischer Completeness, typed model, Resume/Checkpoint und JFI.
+- **Tests:** Offline getBlock-Fixtures mit Vote-/Legacy-/v0/v1-/ALT-/inner-Fehlern, große Blöcke, 429, Deadline, Budget Exhaustion, 100.000/100.001 Slots, erzeugte vs. fehlende Slots, strict restart/resume, max RAM/Disk/Calls. Keine Mainnet-Aufrufe ohne eigene Freigabe.
+- **Abnahme:** replizierbare strikt-konservative Durchsatzhochrechnung + realistische Guardrails; unqualifizierbare TX bleiben UNKNOWN/INCOMPLETE. **Code-Commit/Evidence:** —.
+
+### R14 — E-A: Winner-Speedup über finalized Log-RX um Finality-Delay verzerrt
+- [ ] **HIGH / FE-00 ANALYTIK-VALIDITÄT vor 4h-Auswertung · SOURCE_CONFIRMED, MAGNITUDE_NOT_MEASURED · Cross-Ref R13/C0-E1/FE-00.**
+- **Ist:** `market/configuration.rs` default `P0_MARKET_COMMITMENT=finalized`; `analytics/econ.rs::race` berechnet `margin_to_winner_rx` und `required_speedup_to_winner_rx` aus lokalem Sign-Zeitstempel vs. Empfang der Live-Winner-Logs. Bei finalisierten Logs ist RX die **Finality-/Provider-bedingte Beobachtung**, nicht die konkurrierende Submission/Landung. Reviewer schätzt ca. 32 Slots / rund 13 s Bias; das ist **keine in diesem Review gemessene Konstante**. Kanonisch auch `local_margin_ms`, `required_local_speedup_ms`, `speedup_sensitivity` betroffen. Slot-Race-Klassen `PreWinnerSlotProven/SameSlotUnknown/PostWinnerSlotProvenLate` hängen nicht von dieser Wandzeitdifferenz ab.
+- **Soll:** `margin_to_winner_slot_seen` / `required_speedup_to_winner_slot_seen` als klar qualifizierte Beobachtungsalternativen abgleichen; jede RX-Kennzahl sichtbar mit `commitment=finalized/confirmed`, Quelle und zeitlicher Definition versehen, niemals „echte Konkurrenz-Submission-Deadline“ behaupten. Option `confirmed` nur unter Source-/Capture-/Gap-Vertrag, kein Default-Flip ohne Test. Finalisierte kanonische Wahrheit/Identity bleibt separat.
+- **Tests:** gleiche Winner-Identity mit identischen Slots aber künstlichem Delay 0/1/13 s in finalisierten Logs; Speedup-Anzeige darf den Delay nicht als Wettbewerbsvorsprung werten. `confirmed`-Fixture, SlotSeen-Missing, Uhrendomain, no winner, never fake negative speedup, Report-Parität.
+- **Abnahme:** Zeitmargen und FE-00-Wettbewerbsschlussfolgerungen lassen sich aus Replay reproduzieren, keinerlei durch Finality geschönte Edge. **Code-Commit/Evidence:** —.
+
+### R15 — E-B: Bootstrap-Probes Live-vs-Offline-Join unterschiedliche Auswahl
+- [ ] **MEDIUM / FE-00 BERICHTSPARITÄT vor 4h-Auswertung · SOURCE_CONFIRMED, REPRO_NOT_RUN · Cross-Ref PERSIST/JFI/C0-E1.**
+- **Ist:** `analytics/econ.rs::Worker` hängt Evaluations-Frames immer an, verlinkt den pro-Target-`shadow_heads`-Chain aber **nur bei `hour.is_some()`** (in-window). `econ_canonical.rs::finalize_canonical` replayt diese Chain; Legacy/Offline-`join()` kann bei Scan über alle Frame-Records frühere Bootstrap-Probes berücksichtigen. Startup-Bedingung `ready <= capture_start` macht Pre-Window-Probes erwartbar. Reviewer berichtet dadurch Live-`NOT_DETECTED` vs. Offline-`target_seen` für Targets ausschließlich aus Bootstrap.
+- **Soll:** verbindliche, identische Window-/Bootstrap-Zuordnungsregel für kanonischen Live- und Offline-/Reporter-Pfad; Pre-Window-Probes fachlich korrekt getrennt berichten, nicht rückwirkend als gemessene 4h-Detektion deklarieren. Änderungen dürfen keine echte In-Window-Evaluation unterschlagen.
+- **Tests:** ein Target nur vor Fenster, eines vor+innerhalb, nur nach Cutoff, mehrfache Winner, same-slot Ambiguity; native Report, Live-Finalisierung, Offline-Replay müssen pro Klasse denselben `target_seen`/`NOT_DETECTED`-Status belegen. Run-/Schema-Provenienz unverändert.
+- **Abnahme:** vollständige Replay-Parität mit festgeschriebener Fensterregel. **Code-Commit/Evidence:** —.
+
+### R16 — E-C: kanonischer Kapitalreport ignoriert konfiguriertes Kapitalraster
+- [ ] **LOW / REPORT-CONFIG PARITÄT · CODE_CONFIRMED · Cross-Ref FE-00/P6/C0-E1.**
+- **Ist:** `econ.rs::Config` liest `P0_ECON_CAPITAL_USD`, während `econ_canonical.rs::summarize` aktuell direkt `CAPITAL_USD` = [200,500,1000,2500,5000,10000] verwendet; Legacy-Pfad nutzt `cfg.capital`. Bei benutzerdefiniertem Raster weichen beide Reports ab.
+- **Soll:** kanonische Zusammenfassung erhält das validierte Konfigurationsraster ausdrücklich, Schema/Provenienz eindeutig; keine still geänderten Funding-Simulationen.
+- **Tests:** Default/Custom/invalid Capital, Live-/Offline-Paarvergleich, fundable/blocked/unknown identisch. **Commit/Evidence:** —.
+
+### R17 — E-D: `first_observed_slot` in späteren Stundenfenstern kann globalen ersten Slot wiederholen
+- [ ] **LOW / HOURLY-METRICS · CODE_CONFIRMED · Cross-Ref C0-E1/FE-00.**
+- **Ist:** `analytics/econ.rs` übernimmt bei `Evidence::MarketCounters` den `first_observed_slot` per `or_insert(n)`, während `MarketStats` einen globalen Minimumslot ausgibt. Stunde 2–4 können deshalb Slot 1 des ganzen Runs melden statt des stündlichen Minimums.
+- **Soll:** pro Fenster ein tatsächliches Slot-Minimum aus im Fenster beobachteten Slot-Ereignissen oder einer eindeutig deklarierten neuen Stundenmetrik führen; aus bloßem Counterdelta ohne Slot-Identität ist ein Minimum **nicht** sicher rekonstruierbar. Keine Schätzung aus `last_observed_slot`.
+- **Tests:** 4 Stunden, Lücken/Reconnect, fehlende Slots, Root-Reorg/Gaps, Hours mit 0 Frames; globale und stündliche Grenzen getrennt. **Commit/Evidence:** —.
+
+### R18 — F-A: Econ4h-Produktivlauf ohne Reporter-StatusTap-Verbindung
+- [ ] **MEDIUM / FRONTEND-VISIBILITY GATE · SOURCE_CONFIRMED, E2E_NOT_RUN · Cross-Ref F6/FEUI/F3-Gateway.**
+- **Ist (Reviewer-Stand `e9872cb`):** `run_econ4h` verwendet `run_embedded(market, clock, Some(handle))`, damit `status_tap=None`; Reporter-Publikation nur bei Market-only `run_embedded_with(...status_tap)`. Der neuere `market/capture.rs` besitzt bereits beide APIs, aber der tatsächliche Econ4h-Composition-Root ist im Rahmen dieser Nachprüfung noch nicht Ende-zu-Ende instrumentiert getestet. Kein StatusTap ⇒ kein `project0.status`-Stream des 4h-Produkts.
+- **Soll:** opt-in read-only Reporter-Anbindung über klaren Owner/Lifecycle bei Econ4h und Shadow, ohne Blockierung des Writer-/Owner-Hotpaths; dieselben Run-/Generation-/Topic-/Quality-Identitäten und Journal-Source-of-Truth. Ein Frontend-Snapshot ist niemals ein 4h-PASS-Beleg.
+- **Tests:** Fake-4h-Econ startet Reporter und sendet Status; Reporter aus ⇒ Capture unverändert; Gateway-E2E, Reset, Crash, send-queue overload, 4h-Stopp, keine Secrets, keine Socket-Neuarchitektur ohne Quelle.
+- **Abnahme:** P0-Econ4h sichtbar, Status/Schadensfall konsistent, keine negative Hotpath-Wirkung. **Commit/Evidence:** —.
+
+### R19 — F-B: Transport-`last_frame_age_ns` wird als veralteter Snapshot erneut ausgesendet
+- [ ] **MEDIUM / FRONTEND-FEED-HEALTH · CODE_CONFIRMED, FAILURE_FIXTURE_NOT_RUN · Cross-Ref R18/FEUI.**
+- **Ist:** `status_tap.rs::TransportSnapshot` speichert relativen `last_frame_age_ns`, `reporter/lib.rs::projection` gibt diesen gespeicherten Wert wieder; `state_frame` versieht die gesamte State-Nachricht mit neuem `source_timestamp_unix_ns=now_ns()`. Bei anderen State-Updates oder Heartbeats kann das relative Frame-Alter fälschlich als frisch erscheinen, obwohl seit dem letzten Transport-Health-Sample der Feed tot ist.
+- **Soll:** zuverlässigen absoluten letzten-Frame-Epochzeitpunkt bzw. monotone Zeitdomäne mit expliziter Sender-Uhrbindung publizieren und Alter bei Darstellung als `now - last_frame_time` berechnen; für Backward-Compatibility neue Wire-/Schema-Version und UNKNOWN bei fehlendem Timepoint. Heartbeat-Publikation darf Feed-Liveness nicht vortäuschen.
+- **Tests:** eingefrorener Transport + steigender Sender-Timestamp, Replay, Reconnect, Clock-Skew, None/0/unknown, Gateway-/Frontend-Verbraucher; nach 10s Tod muss Alter ≈ 10s steigen oder UNKNOWN werden.
+- **Abnahme:** UI zeigt Tote-Feed-Alter korrekt und unterscheidet `transport_alive` von `publisher_alive`. **Commit/Evidence:** —.
+
+### R20 — F-C: Status-/Shadow-Felder fehlen im Wire-Schema; nur 1 von 8 Topics
+- [ ] **LOW / FRONTEND SCOPE-GATE · SOURCE_CONFIRMED, SPEZIFIKATION VORHANDEN · Cross-Ref FEUI/F3-Gateway.**
+- **Ist:** `StatusTap::MarketSnapshot` enthält `observing` und `stream_ready`, Transport enthält `connected`/`last_slot`; Reporter-`projection` publiziert davon nur einen Teil. Shadow Ready/HALT/Recovery/Candidate-/Detection-Status fehlt; `hello_frame` annonciert derzeit nur `TopicId::Project0Status`, während der Review einen acht-Topic-Gateway-Vertrag beschreibt. **Keine Behauptung**, dass die übrigen sieben Topics bereits produktiv gefordert sind, bevor Gateway-/Frontend-Vertrag nachgelesen ist.
+- **Soll:** Topic-/Feld-Matrix aus gepinntem Proto/Wire-Vertrag mit Version/Owner/Quality erstellen, vorhandene Felder nur semantisch korrekt übernehmen und fehlende Topics gemäß F0–F7-Plan priorisieren; keine Phantom-Stati, kein Polling des Trading-Owners.
+- **Tests:** Schema-/Proto-Kompatibilität, Snapshot/Delta/Heartbeat, Ready vs Blocked vs Detached, Shadow-Lifecycle, Gateway-Reconnect, Anfangszustand leer.
+- **Abnahme:** belegte Wire-Parität je vereinbartem Topic; offene Scope-Themen bleiben eigene Frontend-Gates. **Commit/Evidence:** —.
+
+### R21 — F-D: Reporter-Heartbeat ignoriert konfigurierte Periode
+- [ ] **LOW / CONFIG-EFFECTIVENESS · CODE_CONFIRMED · Cross-Ref R20/F3-Gateway.**
+- **Ist:** `reporter/lib.rs::run_session` wartet mit `reader.wait_changed(cfg.heartbeat.min(Duration::from_millis(500)))`, also effektiv maximal 500 ms statt des aus `P0_REPORT_HEARTBEAT_MS` geparsten Intervalls. Ob jede Wait-Iteration tatsächlich einen Wire-Heartbeat sendet, im Test qualifizieren; die Konfiguration verliert jedenfalls ihre beabsichtigte Taktwirkung.
+- **Soll:** Heartbeat-Deadline und LatestValue-State-Änderungen getrennt behandeln, konfigurierten Intervall innerhalb Wire-/Gateway-Liveness-Budgets einhalten, keine busy loop und keine Rückstau-/Sleep-Schleife bei fehlendem Client.
+- **Tests:** Fake-Clock 500/5.000/15.000 ms, bursts vs idle, Backpressure und Disconnection; Anzahl gesendeter Heartbeats und Zeitabstände prüfen. **Commit/Evidence:** —.
+
+### R22 — F-E: stale Reporter-Socket/Lock nach Crash verhindert Neustart
+- [ ] **MEDIUM / RESTARTABILITY · CODE_CONFIRMED, CRASH_REPRO_NOT_RUN · Cross-Ref R18/FEUI.**
+- **Ist:** `reporter/lib.rs::bind` erzeugt einen Lock mit `create_new(true)` und bindet UNIX-Socket ohne Recovery vorhandener verwaister Socket-/Lock-Artefakte; `Drop` entfernt sie nur bei geordnetem Ende. Nach Crash/kill -9 können verwaiste Pfade einen Neustart blockieren.
+- **Soll:** exklusive, prozessgebundene Ownership (z. B. Advisory `flock`), sichere Live-Server-Probe vor Entfernen nur **eigener** stale Socket-Datei, generation-gebundene Umstellung; niemals fremdes lebendes Socket löschen oder zweiter Writer werden. Permission- und symlink-sichere Pfadidentität. Kein Force-Unlink ohne belegte Inaktivität.
+- **Tests:** Crash/restart, aktiver fremder Owner, races zwischen 2 Starts, stale lock+socket, symlink attack, falsche Permission, Gateways während Rebind, idempotentes geordnetes Stop.
+- **Abnahme:** geordneter und Crash-Neustart ohne Duplikat-Reporter, keine Daten-/Client-Übernahme. **Commit/Evidence:** —.
+
+### R23 — F-F: Reporter-Diagnose, Single-Client und leere Heartbeat-Watermarks
+- [ ] **LOW / OBSERVABILITY-CONTRACT · SOURCE_CONFIRMED, GATEWAY_EXPECTATION_NOT_VERIFIED · Cross-Ref D9/R6/R20.**
+- **Ist:** `reporter/lib.rs` loggt Fehler per `eprintln!` im Reporter-/Session-Kontext, `Heartbeat.state_watermarks` wird als leeres Array erzeugt, Session-Loop nimmt einen Reader/Client je Verbindung an. Welche Watermarks und parallele Leser erforderlich sind, hängt vom tatsächlichen Gateway-Wire-Vertrag ab.
+- **Soll:** Reporter-Lifecycle darf Engine nicht durch blockiertes stderr beeinträchtigen; optional safe bounded Diagnose. Tatsächliche Gateway-Semantik von Heartbeat, Cursor und LatestValue-State verifizieren, dann minimalen Vertrag mit deterministischer Sequence/Generation implementieren. Kein ungeprüfter Multi-Client-Broadcast im Hotpath.
+- **Tests:** blockierte stderr, Verbindung stirbt, erneutes Accept, langsamer Client, Heartbeat-Watermark nach N STATE Updates, Gateway reconnect, Queue-Überlast.
+- **Abnahme:** nachweislich vertragskonformes Status-Streaming ohne Engine-Abhängigkeit. **Commit/Evidence:** —.
+
+### R24 — Market-only ohne Econ: `seen`-Population über lange Captures nicht explizit begrenzt
+- [ ] **LOW / LONG-RUN MEMORY PROFILE · Cross-Ref R12/M1/PERSIST.**
+- **Ist:** `market/core.rs::ObserverCore` hält `seen: HashSet<String>`; Reviewer meldet im Market-only-Pfad ohne Econ keine vergleichbare Kapazitätsgrenze. Für normale 4h-Econ-Runs ist der bounded-Kapazitätsvertrag R12 relevant, für unabhängige Tagesläufe kann der Market-only-Status ohne Cap anwachsen. Reviewer-Schätzung „~100 MB/Tag“ ist nicht gemessen.
+- **Soll:** Memory-Profil und Relevance-/Dedupe-Invariante bei 4h/24h Market-only vergleichen; bounded Strategie nur wenn tatsächlicher Growth belegt und Verlustfreiheit der Dedupe-/Truth-Zählung sichergestellt ist. Keine stille LRU-Verdrängung eindeutiger TX.
+- **Tests:** 1M eindeutige Signaturen im Fake, Duplikate, Memory-Budget/Overflow, Market-only vs Econ, Report-Parität.
+- **Abnahme:** ausdrücklich geklärter RAM-Vertrag je Modus, keine Überlaufverschleierung. **Commit/Evidence:** —.
+
+### R25 — Analytics-Supervisor: ungeordneter Abort verliert letzten Journalabschluss
+- [ ] **LOW / FAILURE-EVIDENCE CONTRACT · BEHAVIOR_TO_VERIFY · Cross-Ref H1/D1/R2/R22/PERSIST.**
+- **Ist:** Reviewer sieht `startup.rs::supervise` mit hartem Prozessende bei Analytics-Panic/Deadline und potentiell noch laufenden Market-/Shadow-Threads. Ein unvollständiger Journal-Tail wird durch H1 fail-closed erkannt; die Evidence ist dann ggf. unvollständig, aber kein falscher PASS. Ob dieselbe Gefahr auf dem aktuellen Launchpfad noch besteht, beim Implementieren erneut lesen.
+- **Soll:** begrenztes koordiniertes Stop-/Quiescence-/Incomplete-Abschlussprotokoll **nur sofern** der Abortpfad dafür beweisbar Zeit und Owner-Kontrolle besitzt; bei harter Deadline niemals eine falsche COMPLETE-Versiegelung oder Endloswarten einführen. Bereits persistierte Frames nicht löschen.
+- **Tests:** Analytics-Panic, Deadline, Full Writer-Queue, Shadow-RPC in flight, Market-Drain Timeout, Re-Read über JournalVerifier, kein falscher READY/PASS.
+- **Abnahme:** definierter Fail-closed-Status mit maximal möglicher konsistenter Evidence. **Commit/Evidence:** —.
+
+### R26 — Folgereview: tatsächliche kanonische Market-Wahrheit noch nicht vollständig gegengelesen
+- [ ] **REVIEW_REQUIRED / NICHT AUTOMATISCHES BUG- ODER 4h-BLOCKER-URTEIL · Cross-Ref R13–R15/C0-E1/FE-00/FE-03.**
+- **Ungelesene Quellen im Review `e9872cb`:** `market_truth.rs`, `market_verification.rs`, `market/strict_driver.rs`, `market_gap.rs`, `analytics/report.rs`, `analytics/census.rs` (Pfade je tatsächlichem Repo bestimmen) und die vollständige Gateway-Seite. Ein Teil davon wurde für R13 nur punktuell nachgelesen, nicht im Umfang eines Vertragsaudits.
+- **Auftrag:** als Erstes `market_truth.rs` mit den gepinnten Classic/Receivership/Forced-Deleverage/Bankruptcy-Discriminatoren und tatsächlichen Top-Level-/CPI-/ALT-/LoadedAddress-Pfaden analysieren: Welche Chain-Events zählen kanonisch, welche sind nur provisional, wie wird Finality/InnerInstruction/Receiver-Identität nachgewiesen? Anschließend StrictDriver-/Verifier-/Gap-/Report-/Census- und Gateway-Vertragsmatrix mit RED-Fixtures. Zusätzliche echte Bugs erst nach Quellbeweis unter neuer ID anlegen; nicht aus ungelesenem Umfang einen Defekt erfinden.
+- **Abnahme:** nachprüfbarer Source-/Acceptance-Report mit offenen Coverage-Lücken; keine neue Selbstfreigabe von G-B/G-C/G-D. **Commit/Evidence:** —.
+
+**Review-8-Priorität (keine Roadmap-Neudefinition):** (1) R12 historische Zahlen offline lesen, (2) R14/R15 analytische Parität und gültige FE-00-Messgrößen klären, (3) R13 als 600-s-Kalibrierungsumfang planen und erst nach getrennter Freigabe messen, (4) R18/R19 vor echter Econ4h-Frontend-Anzeige, (5) R16/R17/R20–R25 nach Gate-/Profilinglage, (6) R26 Quellenreview, Beginn `market_truth.rs`. Der bisherige §16 bleibt verbindlich, inklusive FREE_ONLY, G-B/G-C/G-D-Halten, C1/R1–R11 und F6-Fremddateien. Jede erledigte ID braucht neuen, getesteten Commit mit Exit-Codes/Evidence; sonst `- [ ]` beibehalten.
