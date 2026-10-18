@@ -380,7 +380,7 @@ pub fn run_embedded_with(
         if last_live_display.elapsed() >= Duration::from_secs(2) {
             last_live_display = Instant::now();
             let gross: f64 = core.edges.iter().sum();
-            eprintln!(
+            crate::console::line(format!(
                 "[MARKET/LIVE] phase={} tx={} success={} provisional_classic={} provisional_receivership={} provisional_deleverage={} provisional_bankruptcy={} receiver_gross_usd={:.6} gaps={} decoder_errors={} canonical_status=POST_CAPTURE_ONLY",
                 if window.is_some() { "CAPTURE" } else { "WAITING_FOR_MARKET_STREAM" },
                 core.stats.unique_transactions,
@@ -392,13 +392,13 @@ pub fn run_embedded_with(
                 gross,
                 core.stats.gap_count,
                 core.stats.decoder_error_count
-            );
+            ));
             // SK-05: queue, rates, lag and exhaustion forecasts of the writer lane.
             if let Some(status) = sink.storage_status() {
                 if let Some(tap) = &status_tap {
                     tap.publish_storage((&status).into());
                 }
-                eprintln!("{}", status.terminal());
+                crate::console::line(status.terminal());
             }
         }
         let overflow = consumer.stats().overflow;

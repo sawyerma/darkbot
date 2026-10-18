@@ -557,6 +557,11 @@ pub(super) fn prepare(
         journal_path,
         recovery_path,
         crate::analytics::evidence::OWNER_EVIDENCE_CAPACITY,
+        Duration::from_millis(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .owner_evidence_sync_ms,
+        ),
     )?;
 
     let counts = [0u64; 6];

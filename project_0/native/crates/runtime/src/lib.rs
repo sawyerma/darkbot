@@ -14,6 +14,7 @@
 //! Status: UNTESTED / VERIFY.
 
 pub mod analytics;
+pub mod console;
 pub mod execution;
 pub mod market;
 pub mod orchestration;

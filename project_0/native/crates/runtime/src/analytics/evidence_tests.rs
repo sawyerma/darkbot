@@ -41,9 +41,19 @@ fn paused(dir: &std::path::Path, read_only: bool) -> (OwnerEvidenceWriter, Arc<B
     let signal = failed.clone();
     let gate = Arc::new(Barrier::new(2));
     let worker_gate = gate.clone();
+    let syncs = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let counted = syncs.clone();
     let worker = std::thread::spawn(move || {
         worker_gate.wait();
-        run_writer(journal, recovery, signal, rx, terminal_rx)
+        run_writer(
+            journal,
+            recovery,
+            signal,
+            rx,
+            terminal_rx,
+            std::time::Duration::from_secs(60),
+            counted,
+        )
     });
     (
         OwnerEvidenceWriter {
@@ -53,6 +63,7 @@ fn paused(dir: &std::path::Path, read_only: bool) -> (OwnerEvidenceWriter, Arc<B
             failed,
             refused: None,
             admission_error: None,
+            syncs,
         },
         gate,
     )
@@ -407,8 +418,13 @@ fn owner_thread_sources_have_no_json_io_env_or_blocking_logging() {
 fn owner_diagnostics_are_journaled_before_they_are_printed() {
     let dir = std::env::temp_dir().join(format!("p0-diag-{}", Pubkey::new_unique()));
     std::fs::create_dir(&dir).unwrap();
-    let mut w =
-        OwnerEvidenceWriter::start(dir.join("events.p0j"), dir.join("recovery.p0j"), 4).unwrap();
+    let mut w = OwnerEvidenceWriter::start(
+        dir.join("events.p0j"),
+        dir.join("recovery.p0j"),
+        4,
+        std::time::Duration::from_secs(60),
+    )
+    .unwrap();
     w.diagnostic("oracle_trigger_stats: a=1".into()).unwrap();
     w.finish(None).unwrap();
     let mut reader = journal::Reader::open(&dir.join("events.p0j")).unwrap();
@@ -483,7 +499,13 @@ fn ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes() {
     };
     let dir = directory();
     let path = dir.join("events.p0j");
-    let mut writer = OwnerEvidenceWriter::start(path.clone(), dir.join("recovery.p0j"), 4).unwrap();
+    let mut writer = OwnerEvidenceWriter::start(
+        path.clone(),
+        dir.join("recovery.p0j"),
+        4,
+        std::time::Duration::from_secs(60),
+    )
+    .unwrap();
     let record_bytes = payload::encode(&record).unwrap();
     let reconciled_bytes = payload::encode(&reconciled).unwrap();
     let summary_bytes = payload::encode(&summary).unwrap();
@@ -548,4 +570,54 @@ fn jfi02_owner_opportunity_writer_cost_typed_vs_json_value() {
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
+}
+
+/// M2: the owner journal is synced on the interval also without new events.
+#[test]
+fn owner_evidence_syncs_periodically() {
+    let dir = std::env::temp_dir().join(format!("p0-sync-{}", Pubkey::new_unique()));
+    std::fs::create_dir(&dir).unwrap();
+    let mut w = OwnerEvidenceWriter::start(
+        dir.join("events.p0j"),
+        dir.join("recovery.p0j"),
+        4,
+        std::time::Duration::from_millis(20),
+    )
+    .unwrap();
+    let t0 = std::time::Instant::now();
+    while w.syncs() < 3 {
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(5),
+            "{}",
+            w.syncs()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    w.finish(None).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// M2: a failed periodic sync is a sticky writer failure (HALT), like a failed append.
+#[test]
+fn owner_evidence_sync_failure_is_sticky() {
+    let dir = std::env::temp_dir().join(format!("p0-syncfail-{}", Pubkey::new_unique()));
+    std::fs::create_dir(&dir).unwrap();
+    let mut journal = journal::Writer::create(&dir.join("events.p0j")).unwrap();
+    journal.test_fail_next_sync(std::io::ErrorKind::Other);
+    let mut w = OwnerEvidenceWriter::start_with(
+        journal,
+        dir.join("recovery.p0j"),
+        4,
+        std::time::Duration::from_millis(20),
+    )
+    .unwrap();
+    let t0 = std::time::Instant::now();
+    while w.check().is_ok() {
+        assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(w.check().unwrap_err().0, "OWNER_EVIDENCE_WRITER_FAILED");
+    assert!(w.diagnostic("after".into()).is_err());
+    assert!(w.finish(None).is_err());
+    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -1011,11 +1011,11 @@ impl ObserverCore {
         if success {
             for ev in &decoded.additional_events {
                 self.count_provisional(ev.kind);
-                eprintln!(
+                crate::console::line(format!(
                     "[MARKET/LIQUIDATION] provisional=true type={} slot={} signature={} target={} actor={} gross_usd={}",
                     ev.kind.as_str(), slot, signature, ev.target, ev.actor,
                     ev.gross_edge_usd.map(|v| format!("{v:.6}")).unwrap_or_else(|| "UNKNOWN".to_owned())
-                );
+                ));
             }
         }
         if success && decoded.truncated {
@@ -1038,10 +1038,10 @@ impl ObserverCore {
         // The accounting ledger remains deferred for exact post-capture enrichment.
         // The operator must still see every successfully decoded live liquidation NOW.
         for ev in &decoded.events {
-            eprintln!(
+            crate::console::line(format!(
                 "[MARKET/RECEIVERSHIP] provisional=true slot={} signature={} event={} target={} receiver={} gross_usd={:.6}",
                 slot, signature, ev.event_index, ev.target, ev.receiver, ev.gross_edge_usd()
-            );
+            ));
         }
         self.stats.enrichment_requested += 1;
         if self.deferred.len() >= self.enrich_cfg.max_pending {

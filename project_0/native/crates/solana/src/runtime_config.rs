@@ -87,6 +87,7 @@ parameters! {
     market_writer_batch_frames = 512, "frames", "P0_MARKET_WRITER_BATCH_FRAMES";
     market_writer_flush_ms = 1000, "ms", "P0_MARKET_WRITER_FLUSH_MS";
     market_writer_sync_ms = 60000, "ms", "P0_MARKET_WRITER_SYNC_MS";
+    owner_evidence_sync_ms = 60000, "ms", "P0_OWNER_EVIDENCE_SYNC_MS";
     market_writer_stall_ms = 30000, "ms", "P0_MARKET_WRITER_STALL_MS";
     market_disk_reserve_mib = 2048, "MiB", "P0_MARKET_DISK_RESERVE_MIB";
     capacity_safety_percent = 50, "percent", "P0_CAPACITY_SAFETY_PERCENT";
@@ -96,8 +97,9 @@ parameters! {
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
-/// payload schema with it. 1: up to `econ_retention_mib`; 2: `boot_calls`, `boot_seconds` (N1).
-pub const LIMITS_REVISION: u16 = 2;
+/// payload schema with it. 1: up to `econ_retention_mib`; 2: `boot_calls`, `boot_seconds` (N1);
+/// 3: `owner_evidence_sync_ms` (M2).
+pub const LIMITS_REVISION: u16 = 3;
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
@@ -1261,9 +1263,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                2,
-                69,
-                "8h4JTS2LL6xuexnZLA5oxpvfpkVyxuDJ96ytPtk1wVy6".to_string()
+                3,
+                70,
+                "H2FzHMPcLAEUfRPiAsTPx3fgyaHnvEBq43TN3cDnjDvf".to_string()
             )
         );
     }

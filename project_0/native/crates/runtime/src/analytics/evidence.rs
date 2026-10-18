@@ -11,10 +11,11 @@ use std::borrow::Cow;
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc, Arc,
     },
     thread::JoinHandle,
+    time::{Duration, Instant},
 };
 
 /// Fixed bound, plus one refused event and one terminal summary. No blocking send
@@ -243,23 +244,50 @@ pub struct OwnerEvidenceWriter {
     failed: Arc<AtomicBool>,
     refused: Option<OwnerEvidence>,
     admission_error: Option<&'static str>,
+    syncs: Arc<AtomicU64>,
 }
 impl OwnerEvidenceWriter {
-    pub fn start(path: PathBuf, recovery: PathBuf, capacity: usize) -> std::io::Result<Self> {
+    /// `sync_interval` (M2): the journal is synced at least this often, also without new events,
+    /// so a power loss loses at most one interval of owner evidence.
+    pub fn start(
+        path: PathBuf,
+        recovery: PathBuf,
+        capacity: usize,
+        sync_interval: Duration,
+    ) -> std::io::Result<Self> {
+        Self::start_with(Writer::create(&path)?, recovery, capacity, sync_interval)
+    }
+    pub(crate) fn start_with(
+        journal: Writer,
+        recovery: PathBuf,
+        capacity: usize,
+        sync_interval: Duration,
+    ) -> std::io::Result<Self> {
         if capacity == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "zero evidence capacity",
             ));
         }
-        let journal = Writer::create(&path)?;
         let (tx, rx) = mpsc::sync_channel(capacity);
         let (terminal, terminal_rx) = mpsc::channel();
         let failed = Arc::new(AtomicBool::new(false));
         let signal = failed.clone();
+        let syncs = Arc::new(AtomicU64::new(0));
+        let counted = syncs.clone();
         let worker = std::thread::Builder::new()
             .name("p0-owner-evidence".into())
-            .spawn(move || run_writer(journal, recovery, signal, rx, terminal_rx))?;
+            .spawn(move || {
+                run_writer(
+                    journal,
+                    recovery,
+                    signal,
+                    rx,
+                    terminal_rx,
+                    sync_interval,
+                    counted,
+                )
+            })?;
         Ok(Self {
             tx: Some(tx),
             terminal: Some(terminal),
@@ -267,7 +295,12 @@ impl OwnerEvidenceWriter {
             failed,
             refused: None,
             admission_error: None,
+            syncs,
         })
+    }
+    /// Periodic journal syncs completed so far (M2).
+    pub fn syncs(&self) -> u64 {
+        self.syncs.load(Ordering::Acquire)
     }
     pub fn check(&self) -> Result<(), EvidenceFailure> {
         if let Some(e) = self.admission_error {
@@ -352,8 +385,30 @@ struct Sink {
     failed: Arc<AtomicBool>,
     io_failed: bool,
     recovery_failed: bool,
+    syncs: Arc<AtomicU64>,
+    max_sync_ns: u64,
 }
 impl Sink {
+    /// M2: periodic durability point. A failed sync is a sticky writer failure like a failed
+    /// append (the journal is blocked; later frames go to the recovery journal).
+    fn sync(&mut self) {
+        if self.io_failed {
+            return;
+        }
+        let started = Instant::now();
+        match self.journal.sync() {
+            Ok(_) => {
+                self.syncs.fetch_add(1, Ordering::Release);
+                self.max_sync_ns = self
+                    .max_sync_ns
+                    .max(started.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+            }
+            Err(_) => {
+                self.io_failed = true;
+                self.failed.store(true, Ordering::Release);
+            }
+        }
+    }
     fn write(&mut self, event: OwnerEvidence) {
         let encoded = match event.encode() {
             Ok(v) => v,
@@ -364,9 +419,10 @@ impl Sink {
             }
         };
         self.store(encoded);
-        // The console copy of an owner diagnostic, printed here, after its frame.
+        // The console copy of an owner diagnostic, after its frame; non-blocking (M2): a blocked
+        // stderr drops console lines, never evidence.
         if let OwnerEvidence::Diagnostic(line) = event {
-            eprintln!("{line}");
+            crate::console::line(line);
         }
     }
     fn store(&mut self, e: Encoded) {
@@ -430,6 +486,8 @@ fn run_writer(
     signal: Arc<AtomicBool>,
     rx: mpsc::Receiver<OwnerEvidence>,
     terminal_rx: mpsc::Receiver<Terminal>,
+    sync_interval: Duration,
+    syncs: Arc<AtomicU64>,
 ) -> Result<(), &'static str> {
     let mut sink = Sink {
         journal,
@@ -438,9 +496,20 @@ fn run_writer(
         failed: signal,
         io_failed: false,
         recovery_failed: false,
+        syncs,
+        max_sync_ns: 0,
     };
-    for event in rx {
-        sink.write(event);
+    let mut next_sync = Instant::now() + sync_interval;
+    loop {
+        match rx.recv_timeout(next_sync.saturating_duration_since(Instant::now())) {
+            Ok(event) => sink.write(event),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        if Instant::now() >= next_sync {
+            sink.sync();
+            next_sync = Instant::now() + sync_interval;
+        }
     }
     let mut incomplete = true;
     if let Ok(end) = terminal_rx.recv() {
@@ -452,6 +521,12 @@ fn run_writer(
             sink.write(OwnerEvidence::Summary(day));
         }
     }
+    crate::console::line(format!(
+        "[owner-evidence] periodic_syncs={} max_sync_ms={} console_dropped={}",
+        sink.syncs.load(Ordering::Acquire),
+        sink.max_sync_ns / 1_000_000,
+        crate::console::dropped()
+    ));
     sink.finish(incomplete)
 }
 #[cfg(test)]
