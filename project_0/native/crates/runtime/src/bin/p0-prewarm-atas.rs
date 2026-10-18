@@ -203,15 +203,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     {
         let program = Pubkey::from_str(&need("P0_PROGRAM_ID")?)?;
         let state = rpc.get_account(&protocol::fee_state_pda(&program))?;
-        let need = 8 + std::mem::size_of::<marginfi_type_crate::types::FeeState>();
-        if state.owner != program
-            || protocol::classify(&state.data) != protocol::AccountType::FeeState
-            || state.data.len() < need
-        {
+        if state.owner != program {
             return Err("invalid protocol FeeState".into());
         }
-        let fee: marginfi_type_crate::types::FeeState =
-            bytemuck::pod_read_unaligned(&state.data[8..need]);
+        // B2: strict pinned layout, never a prefix decode.
+        let fee = protocol::decode_fee_state(&state.data)
+            .map_err(|e| format!("invalid protocol FeeState: {e}"))?;
         println!("PREWARM_PROTOCOL_RESERVE flat_fee_lamports={} remaining_after_prewarm={} covers_flat_fee={}",
             fee.liquidation_flat_sol_fee, remaining, remaining >= fee.liquidation_flat_sol_fee as u64);
     }

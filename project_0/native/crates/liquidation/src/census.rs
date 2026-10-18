@@ -428,11 +428,9 @@ pub fn account_facts<S: crate::health::AccountSource + ?Sized>(
     if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
         return Err("C0_FACTS_NOT_MARGINFI_ACCOUNT".into());
     }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    let acc: &MarginfiAccount = data
-        .get(8..need)
-        .and_then(|b| bytemuck::try_from_bytes(b).ok())
-        .ok_or("C0_FACTS_ACCOUNT_LAYOUT")?;
+    // B2: strict pinned layout, never a prefix decode.
+    let acc = protocol::decode_marginfi_account(data).map_err(|_| "C0_FACTS_ACCOUNT_LAYOUT")?;
+    let acc: &MarginfiAccount = &acc;
     let mut f = AccountFacts {
         active_banks: 0,
         liability_banks: 0,

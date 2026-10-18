@@ -12,7 +12,9 @@ pub(crate) fn bank_from_state<S: AccountSource + ?Sized>(
     if owner != *program {
         return None;
     }
-    darkbot_project0::protocol::decode_bank(data).ok().copied()
+    darkbot_project0::protocol::decode_bank(data)
+        .ok()
+        .map(std::borrow::Cow::into_owned)
 }
 
 #[cfg(feature = "crate_health")]
@@ -105,28 +107,16 @@ pub(crate) fn find_supported_cost_bank_by_mint<S: AccountSource + ?Sized>(
 
 #[cfg(feature = "crate_health")]
 pub(crate) fn marginfi_account_in_group(data: &[u8], group: &Pubkey) -> bool {
-    if classify_account(data) != AccountType::MarginfiAccount {
-        return false;
-    }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    if data.len() < need {
-        return false;
-    }
-    bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
+    // B2: strict pinned layout; an unknown or resized account is no group member.
+    darkbot_project0::protocol::decode_marginfi_account(data)
         .map(|a| a.group == *group)
         .unwrap_or(false)
 }
 
 #[cfg(feature = "crate_health")]
 pub(crate) fn active_banks_in_group_account(data: &[u8], group: &Pubkey) -> Option<Vec<Pubkey>> {
-    if classify_account(data) != AccountType::MarginfiAccount {
-        return None;
-    }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    if data.len() < need {
-        return None;
-    }
-    let account = bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need]).ok()?;
+    // B2: strict pinned layout, never a prefix decode.
+    let account = darkbot_project0::protocol::decode_marginfi_account(data).ok()?;
     if account.group != *group {
         return None;
     }
@@ -144,14 +134,8 @@ pub(crate) fn active_banks_in_group_account(data: &[u8], group: &Pubkey) -> Opti
 
 #[cfg(feature = "crate_health")]
 pub(crate) fn liability_account_in_group(data: &[u8], group: &Pubkey) -> bool {
-    if classify_account(data) != AccountType::MarginfiAccount {
-        return false;
-    }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    if data.len() < need {
-        return false;
-    }
-    bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
+    // B2: strict pinned layout, never a prefix decode.
+    darkbot_project0::protocol::decode_marginfi_account(data)
         .map(|account| {
             account.group == *group
                 && account.lending_account.balances.iter().any(|b| {
@@ -176,11 +160,8 @@ pub(crate) fn census_member(data: &[u8], group: &Pubkey) -> Option<CensusMember>
     if classify_account(data) != AccountType::MarginfiAccount {
         return None;
     }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    match data
-        .get(8..need)
-        .and_then(|b| bytemuck::try_from_bytes::<MarginfiAccount>(b).ok())
-    {
+    // B2: only the exact pinned layout decodes; a resized account is an undecodable member.
+    match darkbot_project0::protocol::decode_marginfi_account(data).ok() {
         Some(account) => {
             (account.group == *group
                 && account.lending_account.balances.iter().any(|b| {
@@ -262,14 +243,8 @@ pub(crate) fn rebuild_reverse_index(
 
 #[cfg(feature = "crate_health")]
 pub(crate) fn bootstrap_probe_candidate(data: &[u8], group: &Pubkey) -> bool {
-    if classify_account(data) != AccountType::MarginfiAccount {
-        return false;
-    }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    if data.len() < need {
-        return false;
-    }
-    bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
+    // B2: strict pinned layout, never a prefix decode.
+    darkbot_project0::protocol::decode_marginfi_account(data)
         .map(|a| a.group == *group && a.indexer_flags.was_liquidatable == 1)
         .unwrap_or(false)
 }

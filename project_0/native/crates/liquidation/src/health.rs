@@ -173,20 +173,18 @@ pub mod crate_impl {
         pub group: Pubkey,
     }
 
-    fn load<T: bytemuck::Pod>(data: &[u8]) -> Result<&T, HealthError> {
-        let payload = data
-            .get(8..)
-            .ok_or_else(|| HealthError::Crate("short account".into()))?;
-        let n = std::mem::size_of::<T>();
-        let slice = payload
-            .get(..n)
-            .ok_or_else(|| HealthError::Crate(format!("payload {} < {}", payload.len(), n)))?;
-        bytemuck::try_from_bytes::<T>(slice)
-            .map_err(|e| HealthError::Crate(format!("pod cast: {:?}", e)))
+    /// B2: strict pinned decoders (discriminator, exact length, alignment-independent); an
+    /// unknown or resized layout is UNKNOWN_LAYOUT, never a prefix decode.
+    fn load_account(data: &[u8]) -> Result<std::borrow::Cow<'_, MarginfiAccount>, HealthError> {
+        crate::protocol::decode_marginfi_account(data)
+            .map_err(|e| HealthError::Unsupported(e.to_string()))
+    }
+    fn load_group(data: &[u8]) -> Result<std::borrow::Cow<'_, MarginfiGroup>, HealthError> {
+        crate::protocol::decode_group(data).map_err(|e| HealthError::Unsupported(e.to_string()))
     }
 
     /// [P1B-02] Strict Bank layout: a 0.1.12-resized bank is UNKNOWN_LAYOUT, never a prefix decode.
-    fn load_bank(data: &[u8]) -> Result<&Bank, HealthError> {
+    fn load_bank(data: &[u8]) -> Result<std::borrow::Cow<'_, Bank>, HealthError> {
         crate::protocol::decode_bank(data).map_err(|e| HealthError::Unsupported(e.to_string()))
     }
 
@@ -210,7 +208,8 @@ pub mod crate_impl {
             let mut out = Vec::with_capacity(banks.len() * 4);
             for bk in banks {
                 let (_, _, data) = self.raw(&bk)?;
-                let bank: &Bank = load_bank(data)?;
+                let bank = load_bank(data)?;
+                let bank: &Bank = &bank;
                 out.push(bk);
                 out.extend(bank_observation_keys(bank)?);
             }
@@ -281,7 +280,8 @@ pub mod crate_impl {
                     continue;
                 }
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
-                let bank: &Bank = load_bank(bdata)?;
+                let bank = load_bank(bdata)?;
+                let bank: &Bank = &bank;
                 configs.push(bank.emode.emode_config);
 
                 if !same_asset_enabled || !same_asset_valid {
@@ -427,7 +427,8 @@ pub mod crate_impl {
             slot: u64,
         ) -> Result<(u128, u128), HealthError> {
             let (_, _, data) = self.raw(bank_key)?;
-            let bank: &Bank = load_bank(data)?;
+            let bank = load_bank(data)?;
+            let bank: &Bank = &bank;
             let clock = Clock {
                 slot,
                 epoch_start_timestamp: 0,
@@ -492,9 +493,11 @@ pub mod crate_impl {
             slot: u64,
         ) -> Result<AccountThresholds, HealthError> {
             let (_, _, adata) = self.raw(account)?;
-            let acc: &MarginfiAccount = load(adata)?;
+            let acc = load_account(adata)?;
+            let acc: &MarginfiAccount = &acc;
             let (_, _, gdata) = self.raw(&self.group)?;
-            let group: &MarginfiGroup = load(gdata)?;
+            let group = load_group(gdata)?;
+            let group: &MarginfiGroup = &group;
             let clock = Clock {
                 slot,
                 epoch_start_timestamp: 0,
@@ -539,7 +542,8 @@ pub mod crate_impl {
                 .filter(|b| b.is_active())
             {
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
-                let bank: &Bank = load_bank(bdata)?;
+                let bank = load_bank(bdata)?;
+                let bank: &Bank = &bank;
                 let Some(balance_side) = balance.get_side() else {
                     continue;
                 };
@@ -741,7 +745,8 @@ pub mod crate_impl {
             slot: u64,
         ) -> Result<(), HealthError> {
             let (_, _, adata) = self.raw(account)?;
-            let acc: &MarginfiAccount = load(adata)?;
+            let acc = load_account(adata)?;
+            let acc: &MarginfiAccount = &acc;
             let clock = Clock {
                 slot,
                 epoch_start_timestamp: 0,
@@ -757,7 +762,8 @@ pub mod crate_impl {
                 .filter(|b| b.is_active())
             {
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
-                let bank: &Bank = load_bank(bdata)?;
+                let bank = load_bank(bdata)?;
+                let bank: &Bank = &bank;
 
                 if bank.is_cb_halted(now_unix_s)
                     || bank.config.operational_state == BankOperationalState::CircuitBroken
@@ -830,9 +836,11 @@ pub mod crate_impl {
             slot: u64,
         ) -> Result<HealthView, HealthError> {
             let (_, _, adata) = self.raw(account)?;
-            let acc: &MarginfiAccount = load(adata)?;
+            let acc = load_account(adata)?;
+            let acc: &MarginfiAccount = &acc;
             let (_, _, gdata) = self.raw(&self.group)?;
-            let group: &MarginfiGroup = load(gdata)?;
+            let group = load_group(gdata)?;
+            let group: &MarginfiGroup = &group;
             let obs = self.observation(acc)?;
             let clock = Clock {
                 slot,
@@ -869,7 +877,8 @@ pub mod crate_impl {
 
         fn observation_accounts(&self, account: &Pubkey) -> Result<Vec<Pubkey>, HealthError> {
             let (_, _, adata) = self.raw(account)?;
-            self.observation(load::<MarginfiAccount>(adata)?)
+            let acc = load_account(adata)?;
+            self.observation(&acc)
         }
 
         fn thresholds(
@@ -1010,7 +1019,7 @@ pub fn dependency_keys<S: AccountSource + ?Sized>(
         };
         out.push(bank.mint);
         // [FIX-27] dieselbe Quelle wie die Health-Observation (p0-cli-Semantik).
-        if let Ok(keys) = crate_impl::bank_observation_keys(bank) {
+        if let Ok(keys) = crate_impl::bank_observation_keys(&bank) {
             out.extend(keys);
         }
 

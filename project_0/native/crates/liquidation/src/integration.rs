@@ -211,6 +211,9 @@ fn raw<'a, S: AccountSource + ?Sized>(
         .ok_or_else(|| format!("INTEGRATION_MISSING_ACCOUNT:{key}"))
 }
 
+/// External integration accounts (Kamino/Drift/JupLend mock layouts) only. E1: never for
+/// Marginfi `Bank`/`MarginfiAccount`/`MarginfiGroup`/`FeeState`; those use the strict pinned
+/// decoders of `protocol`.
 fn pod_after_disc<'a, T: bytemuck::Pod, S: AccountSource + ?Sized>(
     state: &'a S,
     key: &Pubkey,
@@ -421,16 +424,10 @@ pub fn kinds_for_account<S: AccountSource + ?Sized>(
     if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
         return Err("INTEGRATION_KIND_NOT_MARGINFI_ACCOUNT".into());
     }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    if data.len() < need {
-        return Err(format!(
-            "INTEGRATION_KIND_ACCOUNT_SHORT:{}<{}",
-            data.len(),
-            need
-        ));
-    }
-    let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
-        .map_err(|e| format!("INTEGRATION_KIND_ACCOUNT_CAST:{e:?}"))?;
+    // B2: strict pinned layout (discriminator, exact length), never a prefix decode.
+    let account = protocol::decode_marginfi_account(data)
+        .map_err(|e| format!("INTEGRATION_KIND_ACCOUNT_LAYOUT:{e}"))?;
+    let account: &MarginfiAccount = &account;
 
     let mut kamino = false;
     let mut drift = false;
@@ -445,7 +442,9 @@ pub fn kinds_for_account<S: AccountSource + ?Sized>(
         if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
             return Err(format!("INTEGRATION_KIND_INVALID_BANK:{}", bal.bank_pk));
         }
-        let bank: &Bank = pod_after_disc(state, &bal.bank_pk)?;
+        let bank = protocol::decode_bank(bank_data)
+            .map_err(|e| format!("INTEGRATION_BANK_LAYOUT:{}:{e}", bal.bank_pk))?;
+        let bank: &Bank = &bank;
         match kind(bank) {
             Some(IntegrationKind::Kamino) => kamino = true,
             Some(IntegrationKind::Drift) => drift = true,
@@ -484,16 +483,10 @@ pub fn pricing_kinds_for_account<S: AccountSource + ?Sized>(
     if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
         return Err("PRICING_KIND_NOT_MARGINFI_ACCOUNT".into());
     }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    if data.len() < need {
-        return Err(format!(
-            "PRICING_KIND_ACCOUNT_SHORT:{}<{}",
-            data.len(),
-            need
-        ));
-    }
-    let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
-        .map_err(|e| format!("PRICING_KIND_ACCOUNT_CAST:{e:?}"))?;
+    // B2: strict pinned layout (discriminator, exact length), never a prefix decode.
+    let account = protocol::decode_marginfi_account(data)
+        .map_err(|e| format!("PRICING_KIND_ACCOUNT_LAYOUT:{e}"))?;
+    let account: &MarginfiAccount = &account;
 
     let mut kamino = false;
     let mut drift = false;
@@ -508,7 +501,9 @@ pub fn pricing_kinds_for_account<S: AccountSource + ?Sized>(
         if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
             return Err(format!("PRICING_KIND_INVALID_BANK:{}", bal.bank_pk));
         }
-        let bank: &Bank = pod_after_disc(state, &bal.bank_pk)?;
+        let bank = protocol::decode_bank(bank_data)
+            .map_err(|e| format!("INTEGRATION_BANK_LAYOUT:{}:{e}", bal.bank_pk))?;
+        let bank: &Bank = &bank;
         match pricing_kind(bank) {
             Some(IntegrationKind::Kamino) => kamino = true,
             Some(IntegrationKind::Drift) => drift = true,
@@ -543,16 +538,10 @@ pub fn refresh_plan_for_account<S: AccountSource + ?Sized>(
     if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
         return Err("INTEGRATION_REFRESH_NOT_MARGINFI_ACCOUNT".into());
     }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    if data.len() < need {
-        return Err(format!(
-            "INTEGRATION_MARGINFI_ACCOUNT_SHORT:{}<{}",
-            data.len(),
-            need
-        ));
-    }
-    let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
-        .map_err(|e| format!("INTEGRATION_MARGINFI_ACCOUNT_CAST:{e:?}"))?;
+    // B2: strict pinned layout (discriminator, exact length), never a prefix decode.
+    let account = protocol::decode_marginfi_account(data)
+        .map_err(|e| format!("INTEGRATION_MARGINFI_ACCOUNT_LAYOUT:{e}"))?;
+    let account: &MarginfiAccount = &account;
 
     let mut bank_keys: Vec<Pubkey> = account
         .lending_account
@@ -570,7 +559,9 @@ pub fn refresh_plan_for_account<S: AccountSource + ?Sized>(
         if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
             return Err(format!("INTEGRATION_REFRESH_INVALID_BANK:{bank_key}"));
         }
-        let bank: &Bank = pod_after_disc(state, &bank_key)?;
+        let bank = protocol::decode_bank(bank_data)
+            .map_err(|e| format!("INTEGRATION_BANK_LAYOUT:{bank_key}:{e}"))?;
+        let bank: &Bank = &bank;
         out.extend(refresh_plan_for_bank(state, bank)?);
     }
 
@@ -622,16 +613,9 @@ pub fn projection_targets_for_account<S: AccountSource + ?Sized>(
     if owner != *program || protocol::classify(data) != protocol::AccountType::MarginfiAccount {
         return Err("PROJECTION_NOT_MARGINFI_ACCOUNT".into());
     }
-    let need = 8 + std::mem::size_of::<MarginfiAccount>();
-    if data.len() < need {
-        return Err(format!(
-            "PROJECTION_MARGINFI_ACCOUNT_SHORT:{}<{}",
-            data.len(),
-            need
-        ));
-    }
-    bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
-        .map_err(|e| format!("PROJECTION_MARGINFI_ACCOUNT_CAST:{e:?}"))?;
+    // B2: strict pinned layout (discriminator, exact length), never a prefix decode.
+    protocol::decode_marginfi_account(data)
+        .map_err(|e| format!("PROJECTION_MARGINFI_ACCOUNT_LAYOUT:{e}"))?;
 
     let out = crate::projection::projection_targets(refreshes);
     if out.is_empty() {
@@ -782,5 +766,150 @@ mod tests {
         );
         assert_eq!(vec![39, 166, 139, 243, 158, 165, 155, 225].len(), 8);
         assert_eq!(vec![24, 225, 53, 189, 72, 212, 225, 178].len(), 8);
+    }
+
+    /// B2/E1: every Marginfi decoder on the integration, health and sizing paths accepts only the
+    /// exact pinned layout: a resized (0.1.12) bank, a longer or shorter account, group or fee
+    /// state and a foreign discriminator are UNKNOWN_LAYOUT, never a prefix decode.
+    #[test]
+    fn marginfi_layouts_are_exact_on_every_decoder_path() {
+        use crate::health::{crate_impl::CrateHealth, HealthEngine, HealthError};
+        use bytemuck::Zeroable;
+        use marginfi_type_crate::types::{FeeState, MarginfiGroup};
+        use std::collections::HashMap;
+        struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+        impl AccountSource for Source {
+            fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.0.get(key).map(|(o, d)| (*o, 1, d.as_slice()))
+            }
+        }
+        // Raw account bytes: discriminator, pinned payload, then `extra` bytes added or removed.
+        fn raw<T: bytemuck::Pod>(disc: [u8; 8], v: &T, extra: isize) -> Vec<u8> {
+            let mut d = [disc.as_slice(), bytemuck::bytes_of(v)].concat();
+            let n = (d.len() as isize + extra) as usize;
+            d.resize(n, 0);
+            d
+        }
+        let program = Pubkey::from_str(protocol::PROGRAM_ID_MAINNET).unwrap();
+        let (group, bank_key, account_key) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let mut bank = Bank::zeroed();
+        bank.group = group;
+        let mut account = MarginfiAccount::zeroed();
+        account.group = group;
+        account.lending_account.balances[0].active = 1;
+        account.lending_account.balances[0].bank_pk = bank_key;
+        let state = |account_extra: isize, bank_bytes: Vec<u8>, group_extra: isize, fee_extra| {
+            let mut m = HashMap::new();
+            m.insert(
+                account_key,
+                (
+                    program,
+                    raw(protocol::DISC_MARGINFI_ACCOUNT, &account, account_extra),
+                ),
+            );
+            m.insert(bank_key, (program, bank_bytes));
+            m.insert(
+                group,
+                (
+                    program,
+                    raw(
+                        protocol::DISC_MARGINFI_GROUP,
+                        &MarginfiGroup::zeroed(),
+                        group_extra,
+                    ),
+                ),
+            );
+            m.insert(
+                protocol::fee_state_pda(&program),
+                (
+                    program,
+                    raw(protocol::DISC_FEE_STATE, &FeeState::zeroed(), fee_extra),
+                ),
+            );
+            Source(m)
+        };
+        let exact_bank = raw(protocol::DISC_BANK, &bank, 0);
+        let resized_bank = raw(
+            protocol::DISC_BANK,
+            &bank,
+            (protocol::BANK_PAYLOAD_LEN_0_1_12 - protocol::BANK_PAYLOAD_LEN_0_1_11) as isize,
+        );
+        let paths = |s: &Source| -> [Result<(), String>; 3] {
+            [
+                kinds_for_account(s, &program, &account_key).map(drop),
+                pricing_kinds_for_account(s, &program, &account_key).map(drop),
+                refresh_plan_for_account(s, &program, &account_key).map(drop),
+            ]
+        };
+        // The exact pinned layouts decode on every path.
+        for r in paths(&state(0, exact_bank.clone(), 0, 0)) {
+            assert_eq!(r, Ok(()));
+        }
+        // Longer or shorter accounts and resized or longer banks are refused on every path.
+        for (account_extra, bank_bytes) in [
+            (1, exact_bank.clone()),
+            (8, exact_bank.clone()),
+            (-2, exact_bank.clone()),
+            (0, resized_bank.clone()),
+            (0, raw(protocol::DISC_BANK, &bank, 1)),
+        ] {
+            for r in paths(&state(account_extra, bank_bytes.clone(), 0, 0)) {
+                let e = r.unwrap_err();
+                assert!(e.contains("UNKNOWN_LAYOUT"), "{account_extra}: {e}");
+            }
+        }
+        let e = kinds_for_account(
+            &state(0, resized_bank.clone(), 0, 0),
+            &program,
+            &account_key,
+        )
+        .unwrap_err();
+        assert!(
+            e.starts_with("INTEGRATION_BANK_LAYOUT") && e.contains("0.1.12"),
+            "{e}"
+        );
+        // A foreign discriminator is refused before any layout read.
+        let mut foreign = state(0, exact_bank.clone(), 0, 0);
+        foreign.0.get_mut(&account_key).unwrap().1[0] ^= 1;
+        assert!(kinds_for_account(&foreign, &program, &account_key).is_err());
+        assert!(crate::protocol::decode_marginfi_account(&foreign.0[&account_key].1).is_err());
+
+        // Health: account and group follow the same exact contract (UNKNOWN_LAYOUT = Unsupported).
+        let health = |s: &Source| CrateHealth { state: s, group }.health(&account_key, 1, 1);
+        assert!(!matches!(
+            health(&state(0, exact_bank.clone(), 0, 0)),
+            Err(HealthError::Unsupported(_))
+        ));
+        for s in [
+            state(8, exact_bank.clone(), 0, 0),
+            state(0, exact_bank.clone(), 8, 0),
+            state(0, resized_bank.clone(), 0, 0),
+        ] {
+            assert!(
+                matches!(health(&s), Err(HealthError::Unsupported(ref e)) if e.contains("UNKNOWN_LAYOUT")),
+                "{:?}",
+                health(&s)
+            );
+        }
+        // Sizing: the protocol FeeState is exact as well.
+        let sizer = |s: &Source| {
+            crate::sizing::ProtocolSizer {
+                state: s,
+                program,
+                group,
+                headroom_bps: 10_000,
+            }
+            .fee_snapshot()
+            .map(drop)
+        };
+        assert_eq!(sizer(&state(0, exact_bank.clone(), 0, 0)), Ok(()));
+        for fee_extra in [8, -1] {
+            let e = sizer(&state(0, exact_bank.clone(), 0, fee_extra)).unwrap_err();
+            assert!(e.contains("UNKNOWN_LAYOUT"), "{e}");
+        }
     }
 }

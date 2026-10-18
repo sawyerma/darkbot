@@ -12,7 +12,6 @@ pub mod run {
     use darkbot_project0::protocol;
     use darkbot_project0::receivership::{builders, ReceivershipParams};
     use darkbot_solana::tx::{self, BuildVersion, Resources, TxLimits, TxPlan};
-    use marginfi_type_crate::types::Bank;
     use serde_json::Value;
     use solana_client::rpc_client::RpcClient;
     use solana_message::AddressLookupTableAccount; /* [FIX-13] */
@@ -182,7 +181,7 @@ pub mod run {
         bank: &Pubkey,
     ) -> Result<(Pubkey, Pubkey, Pubkey), String> {
         let (_, _, data) = state.account(bank).ok_or("bank not in state")?;
-        let b: &Bank = darkbot_project0::protocol::decode_bank(data).map_err(|e| e.to_string())?;
+        let b = darkbot_project0::protocol::decode_bank(data).map_err(|e| e.to_string())?;
         let (mint_owner, _, _) = state.account(&b.mint).ok_or("mint not in state")?;
         Ok((b.liquidity_vault, b.mint, mint_owner))
     }

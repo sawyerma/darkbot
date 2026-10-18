@@ -159,7 +159,6 @@ pub enum BankLayoutError {
     /// Health. Pinned 0.1.12 + non-resized bank: the program fails every TX touching it.
     OtherVersion(&'static str),
     Length(usize),
-    Alignment,
 }
 
 impl std::fmt::Display for BankLayoutError {
@@ -173,7 +172,6 @@ impl std::fmt::Display for BankLayoutError {
                 )
             }
             Self::Length(n) => write!(f, "UNKNOWN_LAYOUT: bank raw length {n}"),
-            Self::Alignment => write!(f, "UNKNOWN_LAYOUT: bank payload alignment"),
         }
     }
 }
@@ -181,8 +179,11 @@ impl std::fmt::Display for BankLayoutError {
 /// Strict Bank decode for the pinned crate: discriminator and exact raw length
 /// `8 + size_of::<Bank>()`. Promotion (P1B → P1A) is the crate bump; this check follows it.
 /// The owner check stays with the caller, which knows the configured program.
+/// D11: decodes independent of the buffer's alignment (see `pod_exact`).
 #[cfg(feature = "crate_health")]
-pub fn decode_bank(data: &[u8]) -> Result<&marginfi_type_crate::types::Bank, BankLayoutError> {
+pub fn decode_bank(
+    data: &[u8],
+) -> Result<std::borrow::Cow<'_, marginfi_type_crate::types::Bank>, BankLayoutError> {
     use marginfi_type_crate::types::Bank;
     if classify(data) != AccountType::Bank {
         return Err(BankLayoutError::Discriminator);
@@ -193,7 +194,89 @@ pub fn decode_bank(data: &[u8]) -> Result<&marginfi_type_crate::types::Bank, Ban
             BankLayoutError::OtherVersion,
         ));
     }
-    bytemuck::try_from_bytes(&data[8..]).map_err(|_| BankLayoutError::Alignment)
+    Ok(pod_exact(&data[8..]))
+}
+
+/// D11: a pinned type from an exactly length-checked payload, independent of where the buffer
+/// happens to lie in memory: borrowed when aligned, otherwise an owned copy. Alignment is a
+/// property of the local buffer, never of the on-chain layout, so it is never a decode error.
+#[cfg(feature = "crate_health")]
+fn pod_exact<T: bytemuck::Pod>(payload: &[u8]) -> std::borrow::Cow<'_, T> {
+    match bytemuck::try_from_bytes(payload) {
+        Ok(t) => std::borrow::Cow::Borrowed(t),
+        Err(_) => std::borrow::Cow::Owned(bytemuck::pod_read_unaligned(payload)),
+    }
+}
+
+/// B2: why a MarginfiAccount, MarginfiGroup or FeeState is not decodable by the pinned crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutError {
+    Discriminator(&'static str),
+    Length {
+        kind: &'static str,
+        found: usize,
+        expected: usize,
+    },
+}
+
+impl std::fmt::Display for LayoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Discriminator(kind) => write!(f, "UNKNOWN_LAYOUT: not a {kind} discriminator"),
+            Self::Length {
+                kind,
+                found,
+                expected,
+            } => write!(
+                f,
+                "UNKNOWN_LAYOUT: {kind} raw length {found} is not the pinned {expected}"
+            ),
+        }
+    }
+}
+
+/// B2: discriminator and exact raw length `8 + size_of::<T>()` of the pinned crate; a longer
+/// (resized/upgraded) or shorter account is UNKNOWN_LAYOUT, never a prefix decode. The owner
+/// check stays with the caller, which knows the configured program.
+#[cfg(feature = "crate_health")]
+fn decode_exact<'a, T: bytemuck::Pod>(
+    data: &'a [u8],
+    disc: [u8; 8],
+    kind: &'static str,
+) -> Result<std::borrow::Cow<'a, T>, LayoutError> {
+    if data.get(..8) != Some(disc.as_slice()) {
+        return Err(LayoutError::Discriminator(kind));
+    }
+    let expected = 8 + std::mem::size_of::<T>();
+    if data.len() != expected {
+        return Err(LayoutError::Length {
+            kind,
+            found: data.len(),
+            expected,
+        });
+    }
+    Ok(pod_exact(&data[8..]))
+}
+
+#[cfg(feature = "crate_health")]
+pub fn decode_marginfi_account(
+    data: &[u8],
+) -> Result<std::borrow::Cow<'_, marginfi_type_crate::types::MarginfiAccount>, LayoutError> {
+    decode_exact(data, DISC_MARGINFI_ACCOUNT, "MarginfiAccount")
+}
+
+#[cfg(feature = "crate_health")]
+pub fn decode_group(
+    data: &[u8],
+) -> Result<std::borrow::Cow<'_, marginfi_type_crate::types::MarginfiGroup>, LayoutError> {
+    decode_exact(data, DISC_MARGINFI_GROUP, "MarginfiGroup")
+}
+
+#[cfg(feature = "crate_health")]
+pub fn decode_fee_state(
+    data: &[u8],
+) -> Result<std::borrow::Cow<'_, marginfi_type_crate::types::FeeState>, LayoutError> {
+    decode_exact(data, DISC_FEE_STATE, "FeeState")
 }
 
 // [FIX-27] Observation-Layout kommt ausschließlich aus `health::crate_impl::bank_observation_keys`
@@ -445,6 +528,87 @@ mod tests {
             decode_bank(&bytemuck::cast_slice(&buf)[..n]).err(),
             Some(BankLayoutError::Discriminator)
         );
+    }
+
+    /// D11: a buffer's place in memory is not a layout: every pinned decoder yields the same
+    /// value from an unaligned copy (owned) as from an aligned one (borrowed); length and
+    /// discriminator stay exact.
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn pinned_decoders_are_alignment_independent() {
+        use bytemuck::Zeroable;
+        use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, MarginfiGroup};
+        let mut bank = Bank::zeroed();
+        bank.group = Pubkey::new_unique();
+        bank.mint_decimals = 9;
+        let mut account = MarginfiAccount::zeroed();
+        account.group = bank.group;
+        account.lending_account.balances[0].active = 1;
+        let mut group = MarginfiGroup::zeroed();
+        group.admin = Pubkey::new_unique();
+        let mut fee = FeeState::zeroed();
+        fee.global_fee_wallet = Pubkey::new_unique();
+        let bytes = |disc: [u8; 8], payload: &[u8]| [disc.as_slice(), payload].concat();
+        // u64 backing, so offset 0 is 8-byte aligned and offsets 1..8 are not.
+        let at = |raw: &[u8], offset: usize| -> (Vec<u64>, usize) {
+            let mut buf = vec![0u64; (raw.len() + offset).div_ceil(8) + 1];
+            bytemuck::cast_slice_mut::<u64, u8>(&mut buf)[offset..offset + raw.len()]
+                .copy_from_slice(raw);
+            (buf, offset)
+        };
+        let raws = [
+            bytes(DISC_BANK, bytemuck::bytes_of(&bank)),
+            bytes(DISC_MARGINFI_ACCOUNT, bytemuck::bytes_of(&account)),
+            bytes(DISC_MARGINFI_GROUP, bytemuck::bytes_of(&group)),
+            bytes(DISC_FEE_STATE, bytemuck::bytes_of(&fee)),
+        ];
+        for offset in 0..8 {
+            let views: Vec<(Vec<u64>, usize)> = raws.iter().map(|r| at(r, offset)).collect();
+            let slice = |i: usize| {
+                let (buf, o) = &views[i];
+                &bytemuck::cast_slice::<u64, u8>(buf)[*o..*o + raws[i].len()]
+            };
+            let b = decode_bank(slice(0)).unwrap();
+            assert_eq!(
+                (b.group, b.mint_decimals),
+                (bank.group, 9),
+                "offset {offset}"
+            );
+            let a = decode_marginfi_account(slice(1)).unwrap();
+            assert_eq!(a.group, account.group);
+            assert_eq!(decode_group(slice(2)).unwrap().admin, group.admin);
+            assert_eq!(
+                decode_fee_state(slice(3)).unwrap().global_fee_wallet,
+                fee.global_fee_wallet
+            );
+        }
+        // Exactness is unchanged: one byte more or less and a foreign discriminator fail.
+        for (raw, kind) in raws[1..]
+            .iter()
+            .zip(["MarginfiAccount", "MarginfiGroup", "FeeState"])
+        {
+            let decode = |d: &[u8]| -> Result<(), LayoutError> {
+                match kind {
+                    "MarginfiAccount" => decode_marginfi_account(d).map(drop),
+                    "MarginfiGroup" => decode_group(d).map(drop),
+                    _ => decode_fee_state(d).map(drop),
+                }
+            };
+            let mut longer = raw.clone();
+            longer.push(0);
+            assert_eq!(
+                decode(&longer),
+                Err(LayoutError::Length {
+                    kind,
+                    found: raw.len() + 1,
+                    expected: raw.len()
+                })
+            );
+            assert!(decode(&raw[..raw.len() - 1]).is_err());
+            let mut foreign = raw.clone();
+            foreign[0] ^= 1;
+            assert_eq!(decode(&foreign), Err(LayoutError::Discriminator(kind)));
+        }
     }
 
     /// P1A-02: the hand-pinned constants equal the pinned type crate and lockfile.

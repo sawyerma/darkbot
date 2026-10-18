@@ -20,8 +20,8 @@ use marginfi_type_crate::constants::{
     ZERO_AMOUNT_THRESHOLD,
 };
 use marginfi_type_crate::types::{
-    reconcile_emode_configs, BalanceSide, Bank, BankOperationalState, EmodeConfig, FeeState,
-    MarginfiAccount, OraclePriceType, PriceBias, RequirementType,
+    reconcile_emode_configs, BalanceSide, Bank, BankOperationalState, EmodeConfig, MarginfiAccount,
+    OraclePriceType, PriceBias, RequirementType,
 };
 use solana_sdk::account::Account;
 use solana_sdk::account_info::IntoAccountInfo;
@@ -93,13 +93,9 @@ struct Position {
     maintenance_unweighted_value: I80F48,
 }
 
-fn load<T: bytemuck::Pod>(data: &[u8]) -> Result<&T, String> {
-    let payload = data.get(8..).ok_or_else(|| "short account".to_string())?;
-    let n = std::mem::size_of::<T>();
-    let slice = payload
-        .get(..n)
-        .ok_or_else(|| format!("payload {} < {}", payload.len(), n))?;
-    bytemuck::try_from_bytes::<T>(slice).map_err(|e| format!("pod cast: {e:?}"))
+/// B2: strict pinned MarginfiAccount (discriminator, exact length), never a prefix decode.
+fn load_account(data: &[u8]) -> Result<std::borrow::Cow<'_, MarginfiAccount>, String> {
+    protocol::decode_marginfi_account(data).map_err(|e| e.to_string())
 }
 
 /// EndLiquidation caps premium; it does not require taking the maximum. If the
@@ -269,7 +265,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             return Err(format!("UNKNOWN_LAYOUT: bank {key} owner {owner}"));
         }
         protocol::decode_bank(data)
-            .copied()
+            .map(std::borrow::Cow::into_owned)
             .map_err(|e| format!("{e}: {key}"))
     }
 
@@ -279,7 +275,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         if owner != self.program || protocol::classify(data) != protocol::AccountType::FeeState {
             return Err("UNKNOWN_LAYOUT: invalid FeeState".into());
         }
-        let fee = load::<FeeState>(data)?;
+        let fee = protocol::decode_fee_state(data).map_err(|e| e.to_string())?;
         let f: I80F48 = fee.liquidation_max_fee.into();
         Ok((
             FeeSnapshot {
@@ -338,7 +334,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         if protocol::classify(data) != protocol::AccountType::MarginfiAccount {
             return Ok("NOT_MARGINFI_ACCOUNT".into());
         }
-        let account = load::<MarginfiAccount>(data)?;
+        let account = load_account(data)?;
+        let account: &MarginfiAccount = &account;
         let mut assets = 0usize;
         let mut liabs = 0usize;
         let mut supported_assets = 0usize;
@@ -573,7 +570,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         if protocol::classify(data) != protocol::AccountType::MarginfiAccount {
             return Err("not a MarginfiAccount".into());
         }
-        let account = load::<MarginfiAccount>(data)?;
+        let account = load_account(data)?;
+        let account: &MarginfiAccount = &account;
         let health = CrateHealth {
             state: self.state,
             group: self.group,

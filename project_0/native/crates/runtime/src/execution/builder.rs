@@ -20,7 +20,7 @@ pub mod p0 {
     use darkbot_project0::planner::{RouteKind, Step};
     use darkbot_project0::receivership::{builders, ReceivershipParams};
     use darkbot_solana::tx::{self, BuildError, BuildVersion, Resources, TxLimits, TxPlan};
-    use marginfi_type_crate::types::{Bank, MarginfiAccount};
+    use marginfi_type_crate::types::Bank;
     use solana_message::AddressLookupTableAccount; /* [FIX-13] */
     use solana_sdk::hash::Hash;
     use solana_sdk::instruction::{AccountMeta, Instruction};
@@ -466,8 +466,7 @@ pub mod p0 {
             if owner != self.program {
                 return Err(format!("UNKNOWN_LAYOUT: bank owner {}", owner));
             }
-            let b: &Bank =
-                darkbot_project0::protocol::decode_bank(data).map_err(|e| e.to_string())?;
+            let b = darkbot_project0::protocol::decode_bank(data).map_err(|e| e.to_string())?;
             let (mint_owner, _, _) = self.state.account(&b.mint).ok_or("mint not in state")?;
             Ok((b.liquidity_vault, b.mint, mint_owner))
         }
@@ -478,10 +477,11 @@ pub mod p0 {
                 return Err(format!("UNKNOWN_LAYOUT: bank owner {}", owner));
             }
             darkbot_project0::protocol::decode_bank(data)
-                .copied()
+                .map(std::borrow::Cow::into_owned)
                 .map_err(|e| e.to_string())
         }
 
+        /// External integration accounts only (E1): never for Marginfi Bank/Account/Group/FeeState.
         fn pod_after_disc<T: bytemuck::Pod>(&self, k: &Pubkey) -> Result<&T, String> {
             let (_, _, data) = self
                 .state
@@ -513,21 +513,9 @@ pub mod p0 {
             if owner != self.program {
                 return Err(format!("UNKNOWN_LAYOUT: marginfi account owner {}", owner));
             }
-            if darkbot_project0::protocol::classify(data)
-                != darkbot_project0::protocol::AccountType::MarginfiAccount
-            {
-                return Err("UNKNOWN_LAYOUT: not a MarginfiAccount discriminator".into());
-            }
-            let need = 8 + std::mem::size_of::<MarginfiAccount>();
-            if data.len() < need {
-                return Err(format!(
-                    "UNKNOWN_LAYOUT: marginfi account len {} < {}",
-                    data.len(),
-                    need
-                ));
-            }
-            let a: &MarginfiAccount =
-                bytemuck::try_from_bytes(&data[8..need]).map_err(|e| format!("{:?}", e))?;
+            // B2: strict pinned layout (discriminator, exact length), never a prefix decode.
+            let a = darkbot_project0::protocol::decode_marginfi_account(data)
+                .map_err(|e| e.to_string())?;
             let expected =
                 darkbot_project0::protocol::liquidation_record_pda(&self.program, account);
             liquidation_record_init_decision(a.liquidation_record, expected)
@@ -550,16 +538,9 @@ pub mod p0 {
                     "UNKNOWN_LAYOUT: invalid MarginfiAccount for observation layout".into(),
                 );
             }
-            let need = 8 + std::mem::size_of::<MarginfiAccount>();
-            if data.len() < need {
-                return Err(format!(
-                    "UNKNOWN_LAYOUT: marginfi account len {} < {}",
-                    data.len(),
-                    need
-                ));
-            }
-            let a: &MarginfiAccount =
-                bytemuck::try_from_bytes(&data[8..need]).map_err(|e| format!("{:?}", e))?;
+            // B2: strict pinned layout, never a prefix decode.
+            let a = darkbot_project0::protocol::decode_marginfi_account(data)
+                .map_err(|e| e.to_string())?;
             let mut banks: Vec<Pubkey> = a
                 .lending_account
                 .balances
