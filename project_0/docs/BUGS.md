@@ -866,11 +866,11 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 - **Abnahme:** keine stillschweigende Schwächung von M1 oder Memory-Safety bei Performancegewinn. **Commit/Evidence:** —.
 
 ### R9 — Capture-Flush-Tick ist für JournalSink derzeit No-op
-- [ ] **LOW / CLEANUP · CODE_CONFIRMED, keine Datenlücke · Cross-Ref D4/M2.**
+- [x] **LOW · LOCAL_PASS · `2b7c5f2` · Cross-Ref D4/M2.** ~~Tick ruft ein `Ok(())`-No-op.~~
 - **Ist:** `market/capture.rs` ruft bei `last_flush.elapsed() >= 5s` `sink.flush()`, jedoch ist `JournalSink::flush` ein No-op; tatsächliche Writer-Durability wird über die eigene Journal-Writer-Lane garantiert. Der Tick beeinflusst damit nur den Fehlerbehandlungspfad, nicht die persistierte Bytefolge.
 - **Soll:** Tick entfernen oder als tatsächliche Metrik/Writer-Statuskontrolle bewusst qualifizieren; `MarketSink`-Vertrag und den expliziten `JsonlSink`-Batchabschluss nicht verwechseln. Keine Änderung der Write-/Seal-/Drop-Semantik.
 - **Tests:** produktiver Capture-Journal-Stream über mehrere Tickintervalle, keine Truncation, WriterSync/Failure, Jsonl Strict-Batch, Report-Parität.
-- **Abnahme:** redundanter Code entfernt oder sinnvoll verwendet; kein Verhalten/Safety regressiert. **Commit/Evidence:** —.
+- **Abnahme:** redundanter Code entfernt oder sinnvoll verwendet; kein Verhalten/Safety regressiert. **Commit/Evidence:** `2b7c5f2`, „sinnvoll verwendet“: Der 5-s-Tick blieb, `JournalSink::flush` liefert jetzt den sticky Fehler der Writer-Lane (`MarketJournalWorker::check`) — ein im Hintergrund gescheiterter Write/Sync wird so auch ohne neue Zeile binnen eines Ticks `WRITE_ERROR` statt erst beim nächsten Frame. `flush` flusht/versiegelt/beendet weiterhin nichts; JsonlSink-Batchgrenze, Write-/Seal-/Drop-Semantik unverändert. RED vor dem Fix: derselbe Test sah 5 s lang keinen Fehler. Test `journal_sink_flush_reports_a_failed_writer_without_a_new_row`; `market::`, `storage::`, `market_verification` 143 PASS, Clippy `-D warnings` (`evidence/HARDENING_20261018/R9_tests.txt`).
 
 ### R10 — angeforderter WSS-Stop darf keinen falschen Econ-Abort auslösen
 - [x] **NO_BUG_VERIFIED · LOCAL_PASS · `648e031` · Cross-Ref C6/D10/C7/R1.**
