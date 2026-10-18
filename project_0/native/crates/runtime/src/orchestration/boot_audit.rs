@@ -196,6 +196,8 @@ pub struct OfflineInputs {
     pub run_roots: Vec<PathBuf>,
     /// E4/E6: root the next run is written to (`Err` = not resolvable, the launcher refuses too).
     pub run_output_root: Result<PathBuf, String>,
+    /// X3: identity of the control and runtime executables (`binary_identity`).
+    pub binary: Result<String, String>,
     pub wallet_public_env: PathBuf,
     pub max_capture_bytes: u64,
     pub system_reserve_bytes: u64,
@@ -216,6 +218,7 @@ impl OfflineInputs {
                 .map(|r| project.join(r))
                 .collect(),
             run_output_root: econ_run_root(project, &|k| std::env::var(k).ok()),
+            binary: binary_identity(),
             wallet_public_env: project.join("config/wallet.public.env"),
             max_capture_bytes: w.max_bytes,
             system_reserve_bytes: w.system_reserve_bytes,
@@ -438,6 +441,25 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
         "pinned source 33c67987",
         "six markers and four related instructions match the pinned Anchor rule".into(),
     );
+    // X3: the executables a start would admit (control + runtime), present and hashed.
+    match &inputs.binary {
+        Ok(digest) => add(
+            "BOOT-01",
+            "runtime_binary",
+            true,
+            Pass,
+            "p0ctl + p0-longtail",
+            format!("sha256 {}", &digest[..digest.len().min(12)]),
+        ),
+        Err(e) => add(
+            "BOOT-01",
+            "runtime_binary",
+            true,
+            Blocked,
+            "p0ctl + p0-longtail",
+            e.clone(),
+        ),
+    }
     // BOOT-02 host / processes
     match control::owner_state(&inputs.runtime_lock) {
         Ok(control::OwnerState::NotRunning { .. }) => add(
@@ -800,6 +822,7 @@ mod tests {
             runtime_lock: d.join("data/.p0-runtime.lock"),
             run_roots: vec![d.join("data/runs")],
             run_output_root: Ok(d.join("data/runs")),
+            binary: Ok("fixture-binary-digest".into()),
             wallet_public_env: d.join("config/wallet.public.env"),
             max_capture_bytes: 512 * MIB,
             system_reserve_bytes: 1024 * MIB,
@@ -989,6 +1012,126 @@ mod tests {
         assert_eq!(b.verdict, AuditVerdict::Blocked);
         std::fs::remove_dir_all(&d).unwrap();
         std::fs::remove_dir_all(&elsewhere).unwrap();
+    }
+
+    /// X3: the offline BOOT-01/02 matrix. Each local fault yields exactly its check state and the
+    /// verdict follows the criticality; the six network checks stay NOT_RUN offline and an
+    /// offline-only audit is never READY.
+    #[test]
+    fn boot_01_02_offline_matrix() {
+        let d = temp(line!());
+        std::fs::create_dir_all(d.join("data/runs/r1")).unwrap();
+        std::fs::create_dir_all(d.join("config")).unwrap();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .arg("-C")
+                .arg(&d)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success())
+        };
+        git(&["init", "-q"]);
+        std::fs::write(d.join(".gitignore"), b"data/\n").unwrap();
+        git(&[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "t",
+        ]);
+        let state = |a: &BootAudit, name: &str| {
+            a.checks
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("{name} missing"))
+                .state
+        };
+        let not_run = |a: &BootAudit| {
+            a.checks
+                .iter()
+                .filter(|c| c.state == CheckState::NotRun)
+                .count()
+        };
+        // Healthy local host: offline-ready, network NOT_RUN, never READY.
+        let ok = offline(&inputs(&d)).unwrap();
+        for name in [
+            "journal_codec_registry",
+            "discriminators",
+            "runtime_binary",
+            "runtime_owner",
+            "journal_seal_state",
+            "disk_reserve",
+            "journal_writer_probe",
+            "clock",
+        ] {
+            assert_eq!(
+                state(&ok, name),
+                CheckState::Pass,
+                "{name}: {}",
+                ok.terminal()
+            );
+        }
+        assert_eq!(
+            (ok.verdict, not_run(&ok)),
+            (AuditVerdict::OfflineReadyNetworkNotRun, 6)
+        );
+        // Missing runtime executable: BOOT-01 blocks.
+        let mut i = inputs(&d);
+        i.binary = Err("BOOT_RUNTIME_BINARY_MISSING".into());
+        let a = offline(&i).unwrap();
+        assert_eq!(
+            (state(&a, "runtime_binary"), a.verdict),
+            (CheckState::Blocked, AuditVerdict::Blocked)
+        );
+        assert_eq!(
+            binary_identity().err().as_deref(),
+            Some("BOOT_RUNTIME_BINARY_MISSING"),
+            "the test executable has no p0-longtail next to it"
+        );
+        // A corrupt journal of an earlier run (foreign version/magic): crash evidence, WARN.
+        std::fs::write(d.join("data/runs/r1/market.p0j"), [b'x'; 200]).unwrap();
+        let a = offline(&inputs(&d)).unwrap();
+        assert_eq!(state(&a, "journal_seal_state"), CheckState::Warn);
+        assert_eq!(a.verdict, AuditVerdict::OfflineReadyNetworkNotRun);
+        std::fs::remove_file(d.join("data/runs/r1/market.p0j")).unwrap();
+        // A live runtime owner blocks.
+        let lock =
+            control::acquire_owner(&d.join("data/.p0-runtime.lock"), "r2", "econ4h").unwrap();
+        let a = offline(&inputs(&d)).unwrap();
+        assert_eq!(
+            (state(&a, "runtime_owner"), a.verdict),
+            (CheckState::Blocked, AuditVerdict::Blocked)
+        );
+        drop(lock);
+        // Disk reserve beyond the free bytes of the run volume blocks.
+        let mut i = inputs(&d);
+        i.disk_reserve_bytes = u64::MAX;
+        let a = offline(&i).unwrap();
+        assert_eq!(
+            (state(&a, "disk_reserve"), a.verdict),
+            (CheckState::Blocked, AuditVerdict::Blocked)
+        );
+        // Capture maximum plus system reserve beyond physical memory blocks (or is UNKNOWN).
+        let mut i = inputs(&d);
+        i.max_capture_bytes = u64::MAX / 2;
+        i.system_reserve_bytes = u64::MAX / 2;
+        let a = offline(&i).unwrap();
+        assert!(matches!(
+            state(&a, "memory_reserve"),
+            CheckState::Blocked | CheckState::Unknown
+        ));
+        assert_eq!(a.verdict, AuditVerdict::Blocked);
+        // Enabled LIVE flags block (observe-only scope).
+        let mut i = inputs(&d);
+        i.flags.live_enabled = true;
+        assert_eq!(offline(&i).unwrap().verdict, AuditVerdict::Blocked);
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     /// R4: the doctor reports the BOOT read budget against the minimum and the worst case of the

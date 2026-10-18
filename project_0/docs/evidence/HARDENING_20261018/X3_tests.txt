@@ -1,0 +1,26 @@
+# X3 offline BOOT-01/02 matrix (+ runtime_binary check); tested tree: 82f5cd2 + X3 diff (CARGO_BUILD_JOBS=2); no network
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 boot_
+
+running 15 tests
+test orchestration::boot_audit::tests::boot_read_budget_is_reported_against_the_worst_case ... ok
+test orchestration::boot_audit::tests::offline_audit_blocks_and_binds_identity ... ok
+test orchestration::boot_audit::tests::run_volume_resolves_like_the_launcher ... ok
+test orchestration::boot_audit::tests::boot_01_02_offline_matrix ... ok
+test orchestration::boot_audit::tests::writer_probe_passes_and_fails_closed ... ok
+test orchestration::boot_network::tests::boot_state_uses_pinned_decoders_dynamic_pda_and_oracle_gates ... ok
+test orchestration::boot_network::tests::cluster_pin_and_slot_contradictions_block_without_followup_reads ... ok
+test orchestration::boot_network::tests::dynamic_boot_scope_is_bounded_and_blocks_at_the_budget ... ok
+test orchestration::boot_network::tests::native_network_record_and_start_token_reject_expiry_drift_and_tampering ... ok
+test orchestration::boot_network::tests::network_fixture_never_promotes_unpinned_deployment_or_unknown_oracle ... ok
+test orchestration::boot_audit::tests::seal_screening_is_bounded_and_structural_only ... ok
+test orchestration::boot_network::tests::network_reads_counts_only_boot_budget ... ok
+test orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum ... ok
+test orchestration::boot_network::tests::spec_rejects_genesis_that_differs_from_the_pin ... ok
+test orchestration::boot_network::tests::network_reads_decode_at_the_wire_edge ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 347 filtered out; finished in 0.70s
+
+exit=0
+$ cargo clippy -p darkbot-runner --all-targets --all-features -- -D warnings
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+exit=0
