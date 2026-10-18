@@ -1,0 +1,122 @@
+# R10/R11/R6/R1 (Review 7, BUGS §16 priority 1); tested tree: 48f216a + diff (CARGO_BUILD_JOBS=2); loopback sockets only, no Mainnet
+$ cargo test -p darkbot-solana --lib -- --test-threads=1 --nocapture requested_stop_is_ok_without_fatal
+
+running 1 test
+test ingress::ws_rpc::tests::requested_stop_is_ok_without_fatal_in_every_session_phase ... [ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connected; subscriptions=1 (programs=0 filtered_programs=0 accounts=0 slots=1 roots=0 tx=0)
+R10_STOP_LATENCY phase=before_start ms=3
+R10_STOP_LATENCY phase=reconnect_backoff ms=104
+R10_STOP_LATENCY phase=ws_handshake ms=101
+R10_STOP_LATENCY phase=subscription_ack_wait ms=3
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=2 connecting
+[ws_rpc] state=DEGRADED attempt=2 code=WSS_SESSION_FAILED
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 4.97s
+
+exit=0
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=1 --nocapture requested_ingress_stop retired_generation_controls shadow_session_stop_and_join ingress_end_and_evidence ingress_session_stop_and_join_is_bounded no_duplicate_generation
+
+running 6 tests
+test orchestration::state_owner::integration_probe_tests::ingress_end_and_evidence_drop_never_write_stderr_directly ... ok
+test orchestration::state_owner::integration_probe_tests::ingress_session_stop_and_join_is_bounded ... ok
+test orchestration::state_owner::integration_probe_tests::no_duplicate_generation_or_old_session_readiness ... ok
+test orchestration::state_owner::integration_probe_tests::requested_ingress_stop_never_aborts_the_measurement ... [ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=2 connecting
+[ws_rpc] state=DEGRADED attempt=2 code=WSS_SESSION_FAILED
+ingress ended: WSS_RECOVERY_EXHAUSTED
+ok
+test orchestration::state_owner::integration_probe_tests::retired_generation_controls_are_classified_by_provenance ... ok
+test orchestration::state_owner::integration_probe_tests::shadow_session_stop_and_join_is_far_below_the_shutdown_budget ... [ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+R1_SHADOW_STOP_JOIN round=0 phase=reconnect_backoff ms=99
+[ws_rpc] session attempt=1 connecting
+R1_SHADOW_STOP_JOIN round=0 phase=ws_handshake ms=101
+[ws_rpc] session attempt=1 connecting
+R1_SHADOW_STOP_JOIN round=0 phase=wss_admission_or_later ms=12
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+R1_SHADOW_STOP_JOIN round=1 phase=reconnect_backoff ms=112
+[ws_rpc] session attempt=1 connecting
+R1_SHADOW_STOP_JOIN round=1 phase=ws_handshake ms=10
+[ws_rpc] session attempt=1 connecting
+R1_SHADOW_STOP_JOIN round=1 phase=wss_admission_or_later ms=113
+ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 346 filtered out; finished in 8.18s
+
+exit=0
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 state_owner:: console:: analytics::evidence::
+
+running 43 tests
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+test analytics::evidence::tests::early_error_drop_joins_writer_and_does_not_abandon_accepted_records ... ok
+test analytics::evidence::tests::health_full_i128_and_unknown_variants_round_trip_exactly ... ok
+test analytics::evidence::tests::jfi02_owner_opportunity_writer_cost_typed_vs_json_value ... ignored
+test analytics::evidence::tests::full_queue_retains_refused_record_drains_fifo_and_fails_closed ... ok
+test analytics::evidence::tests::owner_admission_has_no_json_or_direct_file_writes_and_all_exits_drain ... ok
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+oracle_trigger_stats: a=1
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+test analytics::evidence::tests::ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes ... ok
+test analytics::evidence::tests::owner_diagnostics_are_journaled_before_they_are_printed ... ok
+after
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+test analytics::evidence::tests::owner_evidence_sync_failure_is_sticky ... ok
+test analytics::evidence::tests::owner_thread_sources_have_no_json_io_env_or_blocking_logging ... ok
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+test analytics::evidence::tests::real_write_failure_preserves_queue_refusal_and_final_summary_in_recovery ... ok
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+test analytics::evidence::tests::recovery_destination_collision_is_not_overwritten_or_reported_as_success ... ok
+test analytics::evidence::tests::typed_payload_round_trip_all_structured_record_variants ... ok
+test console::tests::blocked_console_never_blocks_the_caller ... ok
+test orchestration::state_owner::census::tests::c0_census_worker_cost_at_historical_population ... ignored
+test orchestration::state_owner::census::tests::census_membership_counts_debtors_and_undecodable_members_only ... ok
+test orchestration::state_owner::census::tests::census_proves_identity_coverage_and_journals_typed_rows ... ok
+test orchestration::state_owner::census::tests::chain_clock_rejects_foreign_short_zero_and_future_clocks ... ok
+test orchestration::state_owner::integration_probe_tests::blockhash_freshness_is_one_policy ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+[owner-evidence] periodic_syncs=3 max_sync_ms=3 console_dropped=0
+test analytics::evidence::tests::owner_evidence_syncs_periodically ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token ... ok
+test orchestration::state_owner::integration_probe_tests::evidence_failures_remain_explicit_static_categories ... ok
+test orchestration::state_owner::integration_probe_tests::failure_report_shows_classified_details_only ... ok
+test orchestration::state_owner::integration_probe_tests::ingress_end_and_evidence_drop_never_write_stderr_directly ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_repeat_admission_remains_bounded ... ok
+test orchestration::state_owner::integration_probe_tests::no_duplicate_generation_or_old_session_readiness ... ok
+test orchestration::state_owner::integration_probe_tests::only_one_target_is_dispatched_per_idle_turn ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_returns_latest_coalesced_work_once ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_skips_stale_order_entries ... ok
+test orchestration::state_owner::integration_probe_tests::owner_terminal_codes_are_reported_verbatim ... ok
+test orchestration::state_owner::integration_probe_tests::ingress_session_stop_and_join_is_bounded ... ok
+test orchestration::state_owner::integration_probe_tests::retired_generation_controls_are_classified_by_provenance ... ok
+test orchestration::state_owner::integration_probe_tests::shadow_error_category_never_formats_secret_payload ... ok
+ingress ended: WSS_RECOVERY_EXHAUSTED
+test orchestration::state_owner::integration_probe_tests::requested_ingress_stop_never_aborts_the_measurement ... ok
+test orchestration::state_owner::integration_probe_tests::sweep_fanout_owner_block_is_measured ... ignored
+test orchestration::state_owner::integration_probe_tests::target_waits_unsigned_until_worker_is_idle ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ ... ok
+test orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin ... ok
+test orchestration::state_owner::setup::cluster_tests::zero_prefund_flags_parse_strictly_and_never_enable_implicitly ... ok
+test orchestration::state_owner::integration_probe_tests::shadow_session_stop_and_join_is_far_below_the_shutdown_budget ... ok
+
+test result: ok. 40 passed; 0 failed; 3 ignored; 0 measured; 309 filtered out; finished in 6.28s
+
+exit=0
+$ cargo clippy -p darkbot-solana -p darkbot-runner --all-targets --all-features -- -D warnings
+    Checking darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
+    Checking darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+exit=0

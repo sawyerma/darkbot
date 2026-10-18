@@ -761,3 +761,318 @@ fn blockhash_freshness_is_one_policy() {
         assert!(source.contains("BLOCKHASH_MAX_AGE_NS"), "{name}");
     }
 }
+
+/// R10: a requested stop of the real WSS source never marks the measurement failed or aborted;
+/// a real recovery exhaustion (no stop) sets both. Runs the production thread body
+/// `run_ingress` with the econ status flags; loopback only, never Mainnet.
+#[test]
+fn requested_ingress_stop_never_aborts_the_measurement() {
+    use darkbot_solana::ingress::ws_rpc::{WsRpcConfig, WsRpcControlSource};
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+    let closed_port = || {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("ws://{}", l.local_addr().unwrap());
+        drop(l);
+        url
+    };
+    let source = |backoff: Duration, attempts: u32, budget: Duration| {
+        let mut cfg = WsRpcConfig::new(
+            closed_port(),
+            Subscription {
+                slots: true,
+                ..Default::default()
+            },
+        );
+        cfg.reconnect_initial = backoff;
+        cfg.reconnect_max = backoff;
+        cfg.recovery_budget = Some(budget);
+        cfg.recovery_attempts = attempts;
+        WsRpcControlSource::new(cfg, Clock::new())
+    };
+    let run = |src: WsRpcControlSource, stop_after: Option<Duration>| {
+        let shared = Arc::new(crate::analytics::econ::Shared::default());
+        let (tx, rx) = bounded::<IngressEvent>("r10", 1024);
+        let stop = Shutdown::new();
+        let (sd, flags) = (stop.clone(), Some(shared.clone()));
+        let t = std::thread::spawn(move || {
+            ingress::run_ingress(src, tx, sd, IngressHalt::new(), SlotWatch::new(), flags)
+        });
+        if let Some(d) = stop_after {
+            std::thread::sleep(d);
+            stop.request();
+        }
+        let started = std::time::Instant::now();
+        while !t.is_finished() {
+            assert!(
+                started.elapsed() < Duration::from_secs(15),
+                "ingress thread not ending"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        t.join().unwrap();
+        drop(rx);
+        (
+            shared.shadow_failed.load(Ordering::Acquire),
+            shared.abort.load(Ordering::Acquire),
+        )
+    };
+    // Requested stop during the reconnect backoff: no failure, no abort.
+    let stopped = run(
+        source(Duration::from_secs(20), 8, Duration::from_secs(120)),
+        Some(Duration::from_millis(300)),
+    );
+    assert_eq!(stopped, (false, false));
+    // Real recovery exhaustion without a stop: failed and aborted.
+    let exhausted = run(
+        source(Duration::from_millis(1), 2, Duration::from_secs(5)),
+        None,
+    );
+    assert_eq!(exhausted, (true, true));
+}
+
+/// R6: the ingress thread and the evidence writer's Drop report through the bounded console,
+/// never a blocking `eprintln!` (console non-blocking: `blocked_console_never_blocks_the_caller`).
+#[test]
+fn ingress_end_and_evidence_drop_never_write_stderr_directly() {
+    for (name, source) in [
+        ("state_owner/ingress.rs", include_str!("ingress.rs")),
+        (
+            "analytics/evidence.rs Drop",
+            include_str!("../../analytics/evidence.rs")
+                .split("impl Drop for OwnerEvidenceWriter")
+                .nth(1)
+                .unwrap()
+                .split("\nstruct Sink")
+                .next()
+                .unwrap(),
+        ),
+    ] {
+        assert!(!source.contains("eprintln!"), "{name}");
+    }
+}
+
+/// R11: events of a retired generation at the resubscribe boundary. Its StreamReady is a
+/// dropped control signal (counted); its Gap keeps the state gap open; its Fatal is a real
+/// terminal cause and stays terminal — a requested stop never emits Fatal
+/// (`requested_stop_is_ok_without_fatal_in_every_session_phase`), so a retired Fatal is always a
+/// recovery exhaustion that happened before the stop, and its thread has aborted the run
+/// (`requested_ingress_stop_never_aborts_the_measurement`). No path promotes to Ready early.
+#[test]
+fn retired_generation_controls_are_classified_by_provenance() {
+    use darkbot_solana::ingress::AccountUpdate;
+    use darkbot_solana::state::recovery::RecoveryOutcome;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    let pk = Pubkey::new_unique();
+    let account = |slot: u64| {
+        IngressEvent::Account(AccountUpdate {
+            pubkey: pk,
+            owner: Pubkey::new_from_array([0xA5; 32]),
+            lamports: 1,
+            data: vec![1],
+            slot,
+            write_version: None,
+            source: SourceKind::Snapshot,
+            t_rx_ns: 0,
+        })
+    };
+    let reconnected = || IngressEvent::Reconnected {
+        source: SourceKind::WsRpcControl,
+        attempt: 1,
+        t_rx_ns: 0,
+    };
+    let gap = || IngressEvent::Gap {
+        source: SourceKind::WsRpcControl,
+        from_slot: Some(11),
+        to_slot: None,
+        t_rx_ns: 0,
+    };
+    let fatal = || IngressEvent::Fatal {
+        source: SourceKind::WsRpcControl,
+        detail: "WSS_RECOVERY_EXHAUSTED".into(),
+        t_rx_ns: 0,
+    };
+    let mut fetch = || {
+        Ok(SnapshotData {
+            slot: 10,
+            accounts: vec![match account(10) {
+                IngressEvent::Account(a) => a,
+                _ => unreachable!(),
+            }],
+            missing_required: vec![],
+        })
+    };
+    // Ready generation 1, then the owner's resubscribe retires it (HALT, join, retire, gap).
+    let scenario = |retired: Vec<IngressEvent>,
+                    fresh: Vec<IngressEvent>,
+                    fetch: &mut dyn FnMut() -> Result<SnapshotData, String>| {
+        let mut st = StateCore::new(10);
+        let mut drv = RecoveryDriver::new(3);
+        assert_eq!(
+            drv.on_event(&mut st, reconnected(), fetch, &mut |_| {}),
+            Some(RecoveryOutcome::Ready)
+        );
+        st.halt(darkbot_common::error::HaltReason::StateGap);
+        let queue = RefCell::new(VecDeque::from(retired));
+        let mut retire = RetiredEvents::default();
+        retire.retire(queue.borrow().len() as u64);
+        st.on_event(gap());
+        queue.borrow_mut().extend(fresh);
+        let mut outcomes = Vec::new();
+        loop {
+            let Some(ev) = queue.borrow_mut().pop_front() else {
+                break;
+            };
+            let Some(ev) = retire.admit(ev) else {
+                continue;
+            };
+            if let Some(o) = drv.on_event(&mut st, ev, fetch, &mut |s: &mut StateCore| {
+                while let Some(ev) = queue.borrow_mut().pop_front() {
+                    s.on_event(ev);
+                }
+            }) {
+                outcomes.push(o);
+            }
+            if st.fatal_detail().is_some() {
+                break; // the owner ends the run here (OwnerTerminal)
+            }
+        }
+        (
+            outcomes,
+            retire.stream_ready_dropped,
+            st.run_state().is_tradable(),
+        )
+    };
+
+    // Ordered resubscribe: retired Account, StreamReady and Gap; only the new StreamReady
+    // recovers, after a full A/B recovery.
+    let (outcomes, dropped, ready) = scenario(
+        vec![account(11), reconnected(), gap()],
+        vec![reconnected()],
+        &mut fetch,
+    );
+    assert_eq!(outcomes, vec![RecoveryOutcome::Ready]);
+    assert_eq!((dropped, ready), (1, true));
+
+    // Before the new StreamReady: a retired Gap alone never yields Ready.
+    let (outcomes, dropped, ready) =
+        scenario(vec![account(11), reconnected(), gap()], vec![], &mut fetch);
+    assert!(outcomes.is_empty());
+    assert_eq!((dropped, ready), (1, false));
+
+    // A retired Fatal (old session exhausted before the stop) is terminal: no recovery, no
+    // Ready, even though the new generation's StreamReady follows.
+    let (outcomes, dropped, ready) = scenario(
+        vec![account(11), reconnected(), fatal()],
+        vec![reconnected()],
+        &mut fetch,
+    );
+    assert_eq!(
+        outcomes,
+        vec![RecoveryOutcome::Fatal {
+            code: "WSS_RECOVERY_EXHAUSTED"
+        }]
+    );
+    assert_eq!((dropped, ready), (1, false));
+
+    // A Fatal of the new generation before its StreamReady is terminal as well (C7).
+    let (outcomes, _, ready) =
+        scenario(vec![account(11)], vec![fatal(), reconnected()], &mut fetch);
+    assert_eq!(
+        outcomes,
+        vec![RecoveryOutcome::Fatal {
+            code: "WSS_RECOVERY_EXHAUSTED"
+        }]
+    );
+    assert!(!ready);
+}
+
+/// R1 (Shadow side, C6): `IngressSession::stop_and_join` ends a real WSS session far below the
+/// shutdown budget (default 180 s) in the reachable blocking phases — reconnect backoff, a
+/// hanging WebSocket handshake and the wait for WSS admission in the shared provider budget —
+/// twice in a row like two resubscribes, without failure flags.
+/// A session that does not end is reported at its budget (`ingress_session_stop_and_join_is_bounded`).
+#[test]
+fn shadow_session_stop_and_join_is_far_below_the_shutdown_budget() {
+    use darkbot_solana::ingress::ws_rpc::{WsRpcConfig, WsRpcControlSource};
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+    let budget = Duration::from_secs(
+        darkbot_solana::runtime_config::RuntimeConfig::default()
+            .limits
+            .shutdown_seconds,
+    );
+    assert_eq!(budget, Duration::from_secs(180));
+    let hang = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let hang_url = format!("ws://{}", hang.local_addr().unwrap());
+    // Holds every accepted connection without answering the handshake; bounded lifetime.
+    hang.set_nonblocking(true).unwrap();
+    let holder = std::thread::spawn(move || {
+        let mut kept = Vec::new();
+        let until = std::time::Instant::now() + Duration::from_secs(6);
+        while std::time::Instant::now() < until {
+            match hang.accept() {
+                Ok((s, _)) => kept.push(s),
+                Err(_) => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        kept.len()
+    });
+    let closed = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("ws://{}", l.local_addr().unwrap());
+        drop(l);
+        url
+    };
+    let mut generation = 0;
+    for round in 0..2 {
+        for (phase, url, admission) in [
+            ("reconnect_backoff", &closed, false),
+            ("ws_handshake", &hang_url, false),
+            ("wss_admission_or_later", &hang_url, true),
+        ] {
+            let mut cfg = WsRpcConfig::new(
+                url.clone(),
+                Subscription {
+                    slots: true,
+                    ..Default::default()
+                },
+            );
+            cfg.idle_timeout = Duration::from_secs(30);
+            cfg.reconnect_initial = Duration::from_secs(20);
+            cfg.reconnect_max = Duration::from_secs(20);
+            // Without a recovery budget the session skips the provider admission.
+            cfg.recovery_budget = admission.then(|| Duration::from_secs(120));
+            let src = WsRpcControlSource::new(cfg, Clock::new());
+            let shared = Arc::new(crate::analytics::econ::Shared::default());
+            let (tx, rx) = bounded::<IngressEvent>("r1", 1024);
+            let stop = Shutdown::new();
+            let (sd, flags) = (stop.clone(), Some(shared.clone()));
+            let thread = std::thread::spawn(move || {
+                ingress::run_ingress(src, tx, sd, IngressHalt::new(), SlotWatch::new(), flags)
+            });
+            generation += 1;
+            let mut session = IngressSession::new(stop, thread, generation);
+            std::thread::sleep(Duration::from_millis(200));
+            let started = std::time::Instant::now();
+            assert!(session.stop_and_join(budget), "{phase} round {round}");
+            let joined = started.elapsed();
+            println!(
+                "R1_SHADOW_STOP_JOIN round={round} phase={phase} ms={}",
+                joined.as_millis()
+            );
+            assert!(joined < Duration::from_secs(2), "{phase}: {joined:?}");
+            assert!(
+                !shared.shadow_failed.load(Ordering::Acquire)
+                    && !shared.abort.load(Ordering::Acquire),
+                "{phase}: a requested stop is no failure"
+            );
+            drop(rx);
+        }
+    }
+    assert!(
+        holder.join().unwrap() >= 2,
+        "both handshake rounds reached the listener"
+    );
+}

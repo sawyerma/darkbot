@@ -992,6 +992,7 @@ pub fn audit_liveness(
 mod tests {
     use super::*;
     include!("ws_rpc_recovery_tests.rs");
+    include!("ws_rpc_stop_tests.rs");
 
     /// F4: wire-observed slot progress follows delivery. An event refused by a full queue moves
     /// neither `last_slot` (the Gap origin) nor the shared SlotWatch; the halt is raised.

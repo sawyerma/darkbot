@@ -103,24 +103,51 @@ impl IngressSessions {
             ));
         }
         let src = WsRpcControlSource::new(ws_config, self.clock);
-        let failure_handle = self.econ.clone();
+        let failure = self.econ.as_ref().map(|h| h.shared.clone());
         let sd = session.clone();
         let sw = self.slot_watch.clone();
         let thread = std::thread::Builder::new()
             .name("ingress-ws".into())
-            .spawn(move || {
-                if let Err(e) = src.run(producer, sd, halt, sw) {
-                    eprintln!("ingress ended: {}", e);
-                    if let Some(h) = failure_handle {
-                        h.shared
-                            .shadow_failed
-                            .store(true, std::sync::atomic::Ordering::Release);
-                        h.shared
-                            .abort
-                            .store(true, std::sync::atomic::Ordering::Release);
-                    }
-                }
-            })?;
+            .spawn(move || run_ingress(src, producer, sd, halt, sw, failure))?;
         Ok(IngressSession::new(session, thread, generation))
+    }
+}
+
+/// The ingress thread. R10: only a source that ends with an error — a real recovery
+/// exhaustion or another unexpected failure — marks the measurement failed and aborts it; a
+/// requested stop ends the WSS source with `Ok` (no Fatal, no abort). R6: the end is reported
+/// as a fixed class through the bounded console, never a blocking stderr write.
+pub(super) fn run_ingress<S: IngressSource>(
+    src: S,
+    producer: darkbot_common::channel::Producer<IngressEvent>,
+    shutdown: Shutdown,
+    halt: IngressHalt,
+    slots: SlotWatch,
+    failure: Option<std::sync::Arc<crate::analytics::econ::Shared>>,
+) {
+    if let Err(e) = src.run(producer, shutdown, halt, slots) {
+        crate::console::line(format!("ingress ended: {}", ingress_error_class(&e)));
+        if let Some(shared) = failure {
+            shared
+                .shadow_failed
+                .store(true, std::sync::atomic::Ordering::Release);
+            shared
+                .abort
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
+/// A secret-free class of an ingress error: the fixed code of a connect error, else the kind.
+fn ingress_error_class(e: &darkbot_solana::ingress::IngressError) -> String {
+    use darkbot_solana::ingress::IngressError as E;
+    let code = |s: &str| {
+        (!s.is_empty() && s.bytes().all(|b| b.is_ascii_uppercase() || b == b'_'))
+            .then(|| s.to_string())
+    };
+    match e {
+        E::Connect(s) => code(s).unwrap_or_else(|| "INGRESS_CONNECT_ERROR".into()),
+        E::Protocol(s) => code(s).unwrap_or_else(|| "INGRESS_PROTOCOL_ERROR".into()),
+        E::Config(_) => "INGRESS_CONFIG_ERROR".into(),
     }
 }

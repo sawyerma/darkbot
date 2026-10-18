@@ -372,7 +372,8 @@ impl Drop for OwnerEvidenceWriter {
     fn drop(&mut self) {
         if self.worker.is_some() {
             if let Err(e) = self.finish(None) {
-                eprintln!("{e}");
+                // R6: optional diagnostics only; the failure itself stays sticky in the writer.
+                crate::console::line(e.to_string());
             }
         }
     }
