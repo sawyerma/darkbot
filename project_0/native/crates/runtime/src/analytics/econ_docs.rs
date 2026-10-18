@@ -573,9 +573,77 @@ pub struct SnapshotReport {
     pub canonical_market_truth: Option<CanonicalTruthRef>,
     pub canonical: Section<CanonicalSummary>,
     pub authoritative_analytics: String,
+    /// A2: race figures (winner-slot margin as the main figure, rx margin status).
+    pub race_margins: Section<RaceMargins>,
+}
+/// Layout of schema 2 (before A2): no `race_margins` section.
+#[derive(Deserialize)]
+pub(super) struct SnapshotReportV2 {
+    measurement_plan: MeasurementPlan,
+    capture_window: Option<CaptureWindow>,
+    identity: Identity,
+    window: Window,
+    technical_qualification: Technical,
+    non_claims: Vec<String>,
+    economic_sample_status: String,
+    market_edge_status: String,
+    executable_edge_status: String,
+    competition_evidence_status: String,
+    live_ready: bool,
+    market: MarketSection,
+    shadow: Section<ShadowMetrics>,
+    matching: Section<Matching>,
+    economics: Section<EconomicsMetrics>,
+    capital: Section<Vec<CapitalReport>>,
+    competition: Section<RacePool>,
+    race_timing: Section<RaceTiming>,
+    bottlenecks: Section<Bottlenecks>,
+    unknowns: Section<Unknowns>,
+    canonical_market_truth: Option<CanonicalTruthRef>,
+    canonical: Section<CanonicalSummary>,
+    authoritative_analytics: String,
+}
+impl From<SnapshotReportV2> for SnapshotReport {
+    fn from(v: SnapshotReportV2) -> Self {
+        Self {
+            measurement_plan: v.measurement_plan,
+            capture_window: v.capture_window,
+            identity: v.identity,
+            window: v.window,
+            technical_qualification: v.technical_qualification,
+            non_claims: v.non_claims,
+            economic_sample_status: v.economic_sample_status,
+            market_edge_status: v.market_edge_status,
+            executable_edge_status: v.executable_edge_status,
+            competition_evidence_status: v.competition_evidence_status,
+            live_ready: v.live_ready,
+            market: v.market,
+            shadow: v.shadow,
+            matching: v.matching,
+            economics: v.economics,
+            capital: v.capital,
+            competition: v.competition,
+            race_timing: v.race_timing,
+            bottlenecks: v.bottlenecks,
+            unknowns: v.unknowns,
+            canonical_market_truth: v.canonical_market_truth,
+            canonical: v.canonical,
+            authoritative_analytics: v.authoritative_analytics,
+            race_margins: Section {
+                window_delta: RaceMargins::earlier_schema(),
+                cumulative: RaceMargins::earlier_schema(),
+            },
+        }
+    }
 }
 impl crate::analytics::payload::Payload for SnapshotReport {
     const KIND: u16 = kind::ECON_FINAL;
+    const SCHEMA: u16 = 3;
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        (schema == crate::analytics::payload::TYPED).then(|| {
+            crate::analytics::payload::decode_wire::<SnapshotReportV2>(bytes).map(Self::from)
+        })
+    }
 }
 
 /// `ECON_SNAPSHOT` frame: the report of one boundary (the newest frame per index is the view).
@@ -585,8 +653,25 @@ pub struct SnapshotFrame {
     pub finalizing: bool,
     pub report: SnapshotReport,
 }
+/// Layout of schema 2 (before A2).
+#[derive(Deserialize)]
+struct SnapshotFrameV2 {
+    index: u64,
+    finalizing: bool,
+    report: SnapshotReportV2,
+}
 impl crate::analytics::payload::Payload for SnapshotFrame {
     const KIND: u16 = kind::ECON_SNAPSHOT;
+    const SCHEMA: u16 = 3;
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        (schema == crate::analytics::payload::TYPED).then(|| {
+            crate::analytics::payload::decode_wire::<SnapshotFrameV2>(bytes).map(|v| Self {
+                index: v.index,
+                finalizing: v.finalizing,
+                report: v.report.into(),
+            })
+        })
+    }
 }
 
 /// Render of a typed report document (`hour_0N.json`, `economics_final.json`).

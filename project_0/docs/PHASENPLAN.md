@@ -4701,6 +4701,7 @@ Die Reports müssen ohne Upload der Rohdaten mindestens enthalten:
 9. lokale Winner-Race-Margins in ns/ms;
 10. `required_speedup` für verlorene, qualifizierte Opportunities;
 11. Speedup-Sensitivity bei 1/5/10/25/50/100/200/500/1000 ms;
+    (A2, 18.10.2026: Hauptkennzahl für 9–11 ist die Marge zum ersten lokalen Empfang des Gewinner-Slots; Margen gegen den Live-Empfang des Gewinners nur bei `confirmed`, bei `finalized` None mit Grund.)
 12. Stage-Latenzen Rx→Detect / Detect→Ready / Ready→Sign / Rx→Sign;
 13. Bottleneck-Ranking nach bekannt blockierter Net Edge;
 14. alle UNKNOWN-Zähler und Non-Claims.

@@ -614,16 +614,16 @@
         },
         "live_ready": false,
         "local_margin_ms": {
-          "average": 9e-6,
-          "count_known": 1,
-          "max": 9e-6,
-          "median": 9e-6,
-          "min": 9e-6,
-          "p10": 9e-6,
-          "p50": 9e-6,
-          "p90": 9e-6,
-          "p99": 9e-6,
-          "total": 9e-6
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "loss_attribution": {
           "BANKRUPTCY": {
@@ -4319,101 +4319,188 @@
       "No daily/monthly/yearly extrapolation from one run",
       "Source coverage remains unverified; capital scenarios are per-opportunity, not concurrent portfolio returns"
     ],
+    "race_margins": {
+      "cumulative": {
+        "canonical_slot_margin_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "canonical_slot_speedup_sensitivity": [
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 1
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 5
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 10
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 25
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 50
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 100
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 200
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 500
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 1000
+          }
+        ],
+        "market_commitment": "finalized",
+        "required_canonical_slot_speedup_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "winner_rx_margin_status": "NOT_COMPUTED: market commitment finalized; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure",
+        "winner_slot_margin_status": "COMPUTED"
+      },
+      "window_delta": {
+        "canonical_slot_margin_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "canonical_slot_speedup_sensitivity": [
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 1
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 5
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 10
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 25
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 50
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 100
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 200
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 500
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 1000
+          }
+        ],
+        "market_commitment": "finalized",
+        "required_canonical_slot_speedup_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "winner_rx_margin_status": "NOT_COMPUTED: market commitment finalized; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure",
+        "winner_slot_margin_status": "COMPUTED"
+      }
+    },
     "race_timing": {
       "cumulative": {
-        "largest_measured_late_stage": "ready_to_sign",
-        "late_stage_intervals_ns": {
-          "detect_to_ready": {
-            "average": 10.0,
-            "count_known": 2,
-            "max": 10.0,
-            "median": 10.0,
-            "min": 10.0,
-            "p10": 10.0,
-            "p50": 10.0,
-            "p90": 10.0,
-            "p99": 10.0,
-            "total": 20.0
-          },
-          "ready_to_sign": {
-            "average": 500000011.5,
-            "count_known": 2,
-            "max": 1000000012.0,
-            "median": 11.0,
-            "min": 11.0,
-            "p10": 11.0,
-            "p50": 11.0,
-            "p90": 1000000012.0,
-            "p99": 1000000012.0,
-            "total": 1000000023.0
-          },
-          "rx_to_detect": {
-            "average": 9.0,
-            "count_known": 1,
-            "max": 9.0,
-            "median": 9.0,
-            "min": 9.0,
-            "p10": 9.0,
-            "p50": 9.0,
-            "p90": 9.0,
-            "p99": 9.0,
-            "total": 9.0
-          },
-          "rx_to_sign": {
-            "average": 30.0,
-            "count_known": 2,
-            "max": 30.0,
-            "median": 30.0,
-            "min": 30.0,
-            "p10": 30.0,
-            "p50": 30.0,
-            "p90": 30.0,
-            "p99": 30.0,
-            "total": 60.0
-          },
-          "rx_to_state": {
-            "average": 4.0,
-            "count_known": 1,
-            "max": 4.0,
-            "median": 4.0,
-            "min": 4.0,
-            "p10": 4.0,
-            "p50": 4.0,
-            "p90": 4.0,
-            "p99": 4.0,
-            "total": 4.0
-          }
-        },
-        "late_stage_net_edge_weighted_ns_micro_usd": {
-          "detect_to_ready": 3999990000.0,
-          "ready_to_sign": 1.9999950459998848e+17,
-          "rx_to_detect": 1799995500.0,
-          "rx_to_sign": 11999970000.0,
-          "rx_to_state": 799998000.0
-        },
+        "largest_measured_late_stage": null,
+        "late_stage_intervals_ns": {},
+        "late_stage_net_edge_weighted_ns_micro_usd": {},
         "margin_to_winner_rx_ms": {
-          "average": -0.000019,
-          "count_known": 2,
-          "max": -0.000016,
-          "median": -0.000022,
-          "min": -0.000022,
-          "p10": -0.000022,
-          "p50": -0.000022,
-          "p90": -0.000016,
-          "p99": -0.000016,
-          "total": -0.000038
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "margin_to_winner_rx_ns": {
-          "average": -19.0,
-          "count_known": 2,
-          "max": -16.0,
-          "median": -22.0,
-          "min": -22.0,
-          "p10": -22.0,
-          "p50": -22.0,
-          "p90": -16.0,
-          "p99": -16.0,
-          "total": -38.0
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "margin_to_winner_slot_seen_ms": {
           "average": -0.000017,
@@ -4443,8 +4530,8 @@
           {
             "speedup_ms": 1,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4454,8 +4541,8 @@
           {
             "speedup_ms": 5,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4465,8 +4552,8 @@
           {
             "speedup_ms": 10,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4476,8 +4563,8 @@
           {
             "speedup_ms": 25,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4487,8 +4574,8 @@
           {
             "speedup_ms": 50,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4498,8 +4585,8 @@
           {
             "speedup_ms": 100,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4509,8 +4596,8 @@
           {
             "speedup_ms": 200,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4520,8 +4607,8 @@
           {
             "speedup_ms": 500,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4531,8 +4618,8 @@
           {
             "speedup_ms": 1000,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -4559,28 +4646,28 @@
           }
         },
         "required_speedup_to_winner_rx_ms": {
-          "average": 0.000019,
-          "count_known": 2,
-          "max": 0.000022,
-          "median": 0.000016,
-          "min": 0.000016,
-          "p10": 0.000016,
-          "p50": 0.000016,
-          "p90": 0.000022,
-          "p99": 0.000022,
-          "total": 0.000038
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "required_speedup_to_winner_rx_ns": {
-          "average": 19.0,
-          "count_known": 2,
-          "max": 22.0,
-          "median": 16.0,
-          "min": 16.0,
-          "p10": 16.0,
-          "p50": 16.0,
-          "p90": 22.0,
-          "p99": 22.0,
-          "total": 38.0
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "required_speedup_to_winner_slot_seen_ms": {
           "average": 0.000017,
@@ -4606,16 +4693,7 @@
           "p99": 17.0,
           "total": 17.0
         },
-        "stage_latency_budget_sufficient_if_fully_removed": {
-          "ready_to_sign": {
-            "count": 1,
-            "net_usd_micro": 199999500
-          },
-          "rx_to_sign": {
-            "count": 2,
-            "net_usd_micro": 399999000
-          }
-        },
+        "stage_latency_budget_sufficient_if_fully_removed": {},
         "stage_removal_is_mathematical_ceiling_only": true
       },
       "window_delta": {
@@ -9168,101 +9246,188 @@
       "No daily/monthly/yearly extrapolation from one run",
       "Source coverage remains unverified; capital scenarios are per-opportunity, not concurrent portfolio returns"
     ],
+    "race_margins": {
+      "cumulative": {
+        "canonical_slot_margin_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "canonical_slot_speedup_sensitivity": [
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 1
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 5
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 10
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 25
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 50
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 100
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 200
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 500
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 1000
+          }
+        ],
+        "market_commitment": "finalized",
+        "required_canonical_slot_speedup_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "winner_rx_margin_status": "NOT_COMPUTED: market commitment finalized; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure",
+        "winner_slot_margin_status": "COMPUTED"
+      },
+      "window_delta": {
+        "canonical_slot_margin_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "canonical_slot_speedup_sensitivity": [
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 1
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 5
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 10
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 25
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 50
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 100
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 200
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 500
+          },
+          {
+            "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
+            "local_boundaries_crossed": 0,
+            "ms": 1000
+          }
+        ],
+        "market_commitment": "finalized",
+        "required_canonical_slot_speedup_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "winner_rx_margin_status": "NOT_COMPUTED: market commitment finalized; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure",
+        "winner_slot_margin_status": "COMPUTED"
+      }
+    },
     "race_timing": {
       "cumulative": {
-        "largest_measured_late_stage": "ready_to_sign",
-        "late_stage_intervals_ns": {
-          "detect_to_ready": {
-            "average": 10.0,
-            "count_known": 2,
-            "max": 10.0,
-            "median": 10.0,
-            "min": 10.0,
-            "p10": 10.0,
-            "p50": 10.0,
-            "p90": 10.0,
-            "p99": 10.0,
-            "total": 20.0
-          },
-          "ready_to_sign": {
-            "average": 500000011.5,
-            "count_known": 2,
-            "max": 1000000012.0,
-            "median": 11.0,
-            "min": 11.0,
-            "p10": 11.0,
-            "p50": 11.0,
-            "p90": 1000000012.0,
-            "p99": 1000000012.0,
-            "total": 1000000023.0
-          },
-          "rx_to_detect": {
-            "average": 9.0,
-            "count_known": 1,
-            "max": 9.0,
-            "median": 9.0,
-            "min": 9.0,
-            "p10": 9.0,
-            "p50": 9.0,
-            "p90": 9.0,
-            "p99": 9.0,
-            "total": 9.0
-          },
-          "rx_to_sign": {
-            "average": 30.0,
-            "count_known": 2,
-            "max": 30.0,
-            "median": 30.0,
-            "min": 30.0,
-            "p10": 30.0,
-            "p50": 30.0,
-            "p90": 30.0,
-            "p99": 30.0,
-            "total": 60.0
-          },
-          "rx_to_state": {
-            "average": 4.0,
-            "count_known": 1,
-            "max": 4.0,
-            "median": 4.0,
-            "min": 4.0,
-            "p10": 4.0,
-            "p50": 4.0,
-            "p90": 4.0,
-            "p99": 4.0,
-            "total": 4.0
-          }
-        },
-        "late_stage_net_edge_weighted_ns_micro_usd": {
-          "detect_to_ready": 3999990000.0,
-          "ready_to_sign": 1.9999950459998848e+17,
-          "rx_to_detect": 1799995500.0,
-          "rx_to_sign": 11999970000.0,
-          "rx_to_state": 799998000.0
-        },
+        "largest_measured_late_stage": null,
+        "late_stage_intervals_ns": {},
+        "late_stage_net_edge_weighted_ns_micro_usd": {},
         "margin_to_winner_rx_ms": {
-          "average": -0.000019,
-          "count_known": 2,
-          "max": -0.000016,
-          "median": -0.000022,
-          "min": -0.000022,
-          "p10": -0.000022,
-          "p50": -0.000022,
-          "p90": -0.000016,
-          "p99": -0.000016,
-          "total": -0.000038
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "margin_to_winner_rx_ns": {
-          "average": -19.0,
-          "count_known": 2,
-          "max": -16.0,
-          "median": -22.0,
-          "min": -22.0,
-          "p10": -22.0,
-          "p50": -22.0,
-          "p90": -16.0,
-          "p99": -16.0,
-          "total": -38.0
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "margin_to_winner_slot_seen_ms": {
           "average": -0.000017,
@@ -9292,8 +9457,8 @@
           {
             "speedup_ms": 1,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9303,8 +9468,8 @@
           {
             "speedup_ms": 5,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9314,8 +9479,8 @@
           {
             "speedup_ms": 10,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9325,8 +9490,8 @@
           {
             "speedup_ms": 25,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9336,8 +9501,8 @@
           {
             "speedup_ms": 50,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9347,8 +9512,8 @@
           {
             "speedup_ms": 100,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9358,8 +9523,8 @@
           {
             "speedup_ms": 200,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9369,8 +9534,8 @@
           {
             "speedup_ms": 500,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9380,8 +9545,8 @@
           {
             "speedup_ms": 1000,
             "winner_rx_boundary": {
-              "count": 2,
-              "net_usd_micro": 399999000
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 1,
@@ -9408,28 +9573,28 @@
           }
         },
         "required_speedup_to_winner_rx_ms": {
-          "average": 0.000019,
-          "count_known": 2,
-          "max": 0.000022,
-          "median": 0.000016,
-          "min": 0.000016,
-          "p10": 0.000016,
-          "p50": 0.000016,
-          "p90": 0.000022,
-          "p99": 0.000022,
-          "total": 0.000038
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "required_speedup_to_winner_rx_ns": {
-          "average": 19.0,
-          "count_known": 2,
-          "max": 22.0,
-          "median": 16.0,
-          "min": 16.0,
-          "p10": 16.0,
-          "p50": 16.0,
-          "p90": 22.0,
-          "p99": 22.0,
-          "total": 38.0
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "required_speedup_to_winner_slot_seen_ms": {
           "average": 0.000017,
@@ -9455,86 +9620,36 @@
           "p99": 17.0,
           "total": 17.0
         },
-        "stage_latency_budget_sufficient_if_fully_removed": {
-          "ready_to_sign": {
-            "count": 1,
-            "net_usd_micro": 199999500
-          },
-          "rx_to_sign": {
-            "count": 2,
-            "net_usd_micro": 399999000
-          }
-        },
+        "stage_latency_budget_sufficient_if_fully_removed": {},
         "stage_removal_is_mathematical_ceiling_only": true
       },
       "window_delta": {
-        "largest_measured_late_stage": "ready_to_sign",
-        "late_stage_intervals_ns": {
-          "detect_to_ready": {
-            "average": 10.0,
-            "count_known": 1,
-            "max": 10.0,
-            "median": 10.0,
-            "min": 10.0,
-            "p10": 10.0,
-            "p50": 10.0,
-            "p90": 10.0,
-            "p99": 10.0,
-            "total": 10.0
-          },
-          "ready_to_sign": {
-            "average": 1000000012.0,
-            "count_known": 1,
-            "max": 1000000012.0,
-            "median": 1000000012.0,
-            "min": 1000000012.0,
-            "p10": 1000000012.0,
-            "p50": 1000000012.0,
-            "p90": 1000000012.0,
-            "p99": 1000000012.0,
-            "total": 1000000012.0
-          },
-          "rx_to_sign": {
-            "average": 30.0,
-            "count_known": 1,
-            "max": 30.0,
-            "median": 30.0,
-            "min": 30.0,
-            "p10": 30.0,
-            "p50": 30.0,
-            "p90": 30.0,
-            "p99": 30.0,
-            "total": 30.0
-          }
-        },
-        "late_stage_net_edge_weighted_ns_micro_usd": {
-          "detect_to_ready": 1999995000.0,
-          "ready_to_sign": 1.99999502399994e+17,
-          "rx_to_sign": 5999985000.0
-        },
+        "largest_measured_late_stage": null,
+        "late_stage_intervals_ns": {},
+        "late_stage_net_edge_weighted_ns_micro_usd": {},
         "margin_to_winner_rx_ms": {
-          "average": -0.000022,
-          "count_known": 1,
-          "max": -0.000022,
-          "median": -0.000022,
-          "min": -0.000022,
-          "p10": -0.000022,
-          "p50": -0.000022,
-          "p90": -0.000022,
-          "p99": -0.000022,
-          "total": -0.000022
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "margin_to_winner_rx_ns": {
-          "average": -22.0,
-          "count_known": 1,
-          "max": -22.0,
-          "median": -22.0,
-          "min": -22.0,
-          "p10": -22.0,
-          "p50": -22.0,
-          "p90": -22.0,
-          "p99": -22.0,
-          "total": -22.0
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "margin_to_winner_slot_seen_ms": {
           "average": null,
@@ -9564,8 +9679,8 @@
           {
             "speedup_ms": 1,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9575,8 +9690,8 @@
           {
             "speedup_ms": 5,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9586,8 +9701,8 @@
           {
             "speedup_ms": 10,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9597,8 +9712,8 @@
           {
             "speedup_ms": 25,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9608,8 +9723,8 @@
           {
             "speedup_ms": 50,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9619,8 +9734,8 @@
           {
             "speedup_ms": 100,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9630,8 +9745,8 @@
           {
             "speedup_ms": 200,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9641,8 +9756,8 @@
           {
             "speedup_ms": 500,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9652,8 +9767,8 @@
           {
             "speedup_ms": 1000,
             "winner_rx_boundary": {
-              "count": 1,
-              "net_usd_micro": 199999500
+              "count": 0,
+              "net_usd_micro": 0
             },
             "winner_slot_first_seen_boundary": {
               "count": 0,
@@ -9680,28 +9795,28 @@
           }
         },
         "required_speedup_to_winner_rx_ms": {
-          "average": 0.000022,
-          "count_known": 1,
-          "max": 0.000022,
-          "median": 0.000022,
-          "min": 0.000022,
-          "p10": 0.000022,
-          "p50": 0.000022,
-          "p90": 0.000022,
-          "p99": 0.000022,
-          "total": 0.000022
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "required_speedup_to_winner_rx_ns": {
-          "average": 22.0,
-          "count_known": 1,
-          "max": 22.0,
-          "median": 22.0,
-          "min": 22.0,
-          "p10": 22.0,
-          "p50": 22.0,
-          "p90": 22.0,
-          "p99": 22.0,
-          "total": 22.0
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
         },
         "required_speedup_to_winner_slot_seen_ms": {
           "average": null,
@@ -9727,16 +9842,7 @@
           "p99": null,
           "total": null
         },
-        "stage_latency_budget_sufficient_if_fully_removed": {
-          "ready_to_sign": {
-            "count": 1,
-            "net_usd_micro": 199999500
-          },
-          "rx_to_sign": {
-            "count": 1,
-            "net_usd_micro": 199999500
-          }
-        },
+        "stage_latency_budget_sufficient_if_fully_removed": {},
         "stage_removal_is_mathematical_ceiling_only": true
       }
     },

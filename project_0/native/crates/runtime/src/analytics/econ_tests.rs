@@ -336,7 +336,7 @@ fn unique_winner_slot_classes_and_signed_margins() {
         (2, RaceClass::PostWinnerSlotProvenLate),
     ] {
         let (w, m) = pair(&r, slot, 50);
-        let out = race(&r, Some(&w), Some(&m), Some(30));
+        let out = race(&r, Some(&w), Some(&m), Some(30), true);
         assert_eq!(out.class, class);
         assert!(out.live_timestamp_qualified);
         assert_eq!(out.margin_to_winner_rx_ns, Some(10));
@@ -357,7 +357,7 @@ fn identity_mismatch_never_yields_timing() {
             2 => m.event.target = Pubkey::new_unique(),
             _ => m.event.receiver = Pubkey::new_unique(),
         }
-        let out = race(&r, Some(&w), Some(&m), Some(10));
+        let out = race(&r, Some(&w), Some(&m), Some(10), true);
         assert_eq!(out.class, RaceClass::LiveTimestampUnqualified);
         assert!(out.identity_mismatch);
         assert_eq!(out.margin_to_winner_rx_ns, None);
@@ -368,11 +368,11 @@ fn absent_sign_winner_market_and_ambiguous_identity_fail_closed() {
     let mut r = rec();
     let (w, m) = pair(&r, 4, 50);
     assert_eq!(
-        race(&r, None, None, None).class,
+        race(&r, None, None, None, true).class,
         RaceClass::WinnerUnresolved
     );
     assert_eq!(
-        race(&r, Some(&w), None, None).class,
+        race(&r, Some(&w), None, None, true).class,
         RaceClass::MarketMatchMissing
     );
     let amb = Winner {
@@ -387,11 +387,14 @@ fn absent_sign_winner_market_and_ambiguous_identity_fail_closed() {
         },
     };
     assert_eq!(
-        race(&r, Some(&amb), Some(&m), None).class,
+        race(&r, Some(&amb), Some(&m), None, true).class,
         RaceClass::WinnerIdentityAmbiguous
     );
     r.timing.t_sign_ns = None;
-    assert_eq!(race(&r, Some(&w), Some(&m), None).class, RaceClass::NoSign);
+    assert_eq!(
+        race(&r, Some(&w), Some(&m), None, true).class,
+        RaceClass::NoSign
+    );
 }
 #[test]
 fn small_sample_percentiles_and_missing_intervals() {
@@ -409,6 +412,8 @@ fn small_sample_percentiles_and_missing_intervals() {
 #[test]
 fn strong_join_unmatched_diagnostics_and_speedup_math() {
     let mut w = worker();
+    // The winner rx margin is a race observation only under `confirmed` (A2).
+    w.commitment = "confirmed".into();
     let mut r = rec();
     r.timing.t_sign_ns = Some(50_000_040);
     r.sign_slot = Some(4);
@@ -837,13 +842,18 @@ fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
     for name in ["shadow_evaluations.jsonl", "shadow_offsets.bin"] {
         assert!(!root.join("capture").join(name).exists(), "{name}");
     }
-    // The sealed report journal holds every document as a typed frame (schema 2) and the run
-    // wrote no JSON view (JFI-03).
+    // The sealed report journal holds every document as a typed frame of its kind's current
+    // version and the run wrote no JSON view (JFI-03).
     let mut reader = journal::Reader::open(&root.join("snapshots").join(REPORT_JOURNAL)).unwrap();
     let mut kinds = BTreeSet::new();
     while let Some(frame) = reader.next_frame().unwrap() {
         if frame.kind != journal::MANIFEST {
-            assert_eq!(frame.schema, 2, "kind {}", frame.kind);
+            assert_eq!(
+                Some(frame.schema),
+                crate::analytics::payload::registered_schema(frame.kind),
+                "kind {}",
+                frame.kind
+            );
             kinds.insert(frame.kind);
         }
     }
@@ -969,7 +979,7 @@ fn backfill_preserves_chain_race_but_never_live_rx_or_speedup() {
     ] {
         let mut r = r.clone();
         r.sign_slot = Some(slot);
-        let race = race(&r, Some(&win), Some(&market), Some(100));
+        let race = race(&r, Some(&win), Some(&market), Some(100), true);
         assert_eq!(race.class, expected);
         assert!(!race.live_timestamp_qualified);
         assert_eq!(race.margin_to_winner_rx_ns, None);
@@ -1369,4 +1379,76 @@ fn retention_is_byte_bounded_and_released_exactly() {
         accounted(&w),
         "ledger equals the recomputed sum"
     );
+}
+
+/// A2: under `finalized` (or an unknown commitment) the winner's live receipt is its finalized
+/// notification: no rx margin or rx speedup, the slot margin stays; under `confirmed` both. The
+/// typed opportunity row renders the same rule offline.
+#[test]
+fn a2_rx_margins_only_for_a_confirmed_receipt() {
+    let r = rec();
+    let (w, m) = pair(&r, 4, 50);
+    for (commitment, valid) in [
+        ("confirmed", true),
+        ("finalized", false),
+        ("UNKNOWN", false),
+    ] {
+        assert_eq!(rx_margin_valid(commitment), valid);
+        let out = race(&r, Some(&w), Some(&m), Some(30), valid);
+        assert!(out.live_timestamp_qualified);
+        assert_eq!(
+            out.margin_to_winner_rx_ns,
+            valid.then_some(10),
+            "{commitment}"
+        );
+        assert_eq!(out.required_speedup_to_winner_rx_ns, valid.then_some(0));
+        assert_eq!(out.margin_to_winner_slot_seen_ns, Some(-10));
+        let row = OpportunityRow {
+            rec: r.clone(),
+            winner: Some(w.clone()),
+            market: Some(m.clone()),
+            slot_seen: Some(30),
+            capital: vec![],
+            market_commitment: commitment.into(),
+        };
+        let v = opportunity_view(&row);
+        assert_eq!(v["race"]["margin_to_winner_rx_ns"].is_null(), !valid);
+        assert_eq!(v["race"]["margin_to_winner_slot_seen_ns"], -10);
+        assert_eq!(rx_margin_status(commitment).starts_with("COMPUTED"), valid);
+    }
+    // Hourly report: a finalized run has no rx distribution or rx sensitivity, the slot ones stay.
+    for (commitment, valid) in [("finalized", false), ("confirmed", true)] {
+        let mut wk = worker();
+        wk.commitment = commitment.into();
+        let mut r = rec();
+        r.timing.t_sign_ns = Some(50_000_040);
+        r.sign_slot = Some(4);
+        let (win, m) = pair(&r, 3, 40);
+        wk.accept(Evidence::Market(m)).unwrap();
+        wk.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
+        wk.accept(Evidence::Winner {
+            target: r.account.clone(),
+            rx_slot: 1,
+            winner: win,
+        })
+        .unwrap();
+        wk.accept(Evidence::Slot {
+            slot: 3,
+            t_rx_ns: 30,
+        })
+        .unwrap();
+        let v = view(&wk.metrics(0, 4));
+        let t = &v["race_timing"];
+        assert_eq!(t["margin_to_winner_rx_ns"]["count_known"], u64::from(valid));
+        assert_eq!(t["margin_to_winner_slot_seen_ns"]["count_known"], 1);
+        assert_eq!(
+            t["observed_speedup_sensitivity"][4]["winner_rx_boundary"]["count"],
+            u64::from(valid)
+        );
+        // Slot margin 30 - 50_000_040: just over 50 ms, inside the 100 ms boundary.
+        assert_eq!(
+            t["observed_speedup_sensitivity"][5]["winner_slot_first_seen_boundary"]["count"],
+            1
+        );
+    }
 }

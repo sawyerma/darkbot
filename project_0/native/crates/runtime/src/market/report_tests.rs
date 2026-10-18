@@ -199,6 +199,7 @@ mod report_e2e {
                 market: None,
                 slot_seen: None,
                 capital: vec![],
+                market_commitment: "finalized".into(),
             }],
         );
 

@@ -21,6 +21,11 @@ pub trait Payload: Serialize + DeserializeOwned {
     const KIND: u16;
     /// Payload version within the kind; bumped on every incompatible layout change.
     const SCHEMA: u16 = TYPED;
+    /// A frame of an earlier version of this kind, so historical evidence stays readable after a
+    /// layout change (`None`: that version is not readable). Writers only ever write `SCHEMA`.
+    fn decode_earlier(_schema: u16, _bytes: &[u8]) -> Option<io::Result<Self>> {
+        None
+    }
 }
 
 fn options() -> impl Options {
@@ -53,11 +58,24 @@ pub fn decode<P: Payload>(kind: u16, schema: u16, bytes: &[u8]) -> io::Result<P>
         return Err(bad("PAYLOAD_KIND"));
     }
     if schema != P::SCHEMA {
-        return Err(bad("PAYLOAD_SCHEMA"));
+        return P::decode_earlier(schema, bytes).unwrap_or_else(|| Err(bad("PAYLOAD_SCHEMA")));
     }
+    decode_wire(bytes)
+}
+
+/// The payload encoding of any wire type, also an earlier layout of a kind.
+pub fn decode_wire<T: DeserializeOwned>(bytes: &[u8]) -> io::Result<T> {
     options()
         .deserialize(bytes)
         .map_err(|_| bad("PAYLOAD_DECODE"))
+}
+
+/// Test fixture: the bytes of an earlier layout, as its writer produced them.
+#[cfg(test)]
+pub(crate) fn encode_wire<T: Serialize>(value: &T) -> io::Result<Vec<u8>> {
+    options()
+        .serialize(value)
+        .map_err(|_| bad("PAYLOAD_ENCODE"))
 }
 
 impl Payload for darkbot_solana::runtime_config::EffectiveConfig {

@@ -19,8 +19,8 @@
 //! * Output is text: table or CSV with identical cells. JSON output is refused (JFI-01/03 take
 //!   precedence over the older `--format json` example of L.5).
 use super::econ::{
-    canonical_join, joined_facts, record_digest, CanonicalJoin, JoinedFacts, OpportunityRow,
-    REPORT_JOURNAL as ECON_REPORT_JOURNAL,
+    canonical_join, joined_facts, record_digest, CanonicalJoin, JoinContext, JoinedFacts,
+    OpportunityRow, REPORT_JOURNAL as ECON_REPORT_JOURNAL,
 };
 use super::journal::{self, kind};
 use super::measurement::utc_ns;
@@ -28,7 +28,8 @@ use super::payload::Payload;
 use crate::market::observer::markers::{self, Marker, MarkerHit, Pair, Position};
 use crate::market::observer::related::{self, MarketRelated, RelatedKind};
 use crate::market::observer::rows::{
-    MarketCompletion, MarketTransaction, TxOrigin, MARKET_COMPLETION_JOURNAL,
+    MarketCompletion, MarketCoverage, MarketTransaction, TxOrigin, WindowEvent,
+    MARKET_COMPLETION_JOURNAL,
 };
 use crate::market::observer::strict_driver::{self, CaptureBinding, NATIVE_PREFIX};
 use crate::market::observer::truth::{LiquidationType, TruthEvent};
@@ -45,7 +46,7 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 /// Record, dataset and renderer format (part of every dataset and query identity).
-pub const RENDERER: &str = "Project0/NativeReport/1";
+pub const RENDERER: &str = "Project0/NativeReport/2";
 /// Output directory of the native report inside a run.
 pub const REPORT_DIR: &str = "reports/native";
 const NS: i128 = 1_000_000_000;
@@ -639,6 +640,36 @@ type ShadowOnly = (
     Option<u64>,
 );
 
+/// A2: inputs of the canonical race margins from the market journal: the capture's commitment
+/// (its start record) and the first in-window local receipt of each slot (its `SlotBoundary`
+/// rows, the same receipts the live analytics keep).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct RaceInputs {
+    pub market_commitment: Option<String>,
+    pub slot_first_seen: BTreeMap<u64, u64>,
+}
+impl RaceInputs {
+    /// Notes one typed coverage frame; `true` when it added a slot.
+    pub(crate) fn note(&mut self, frame: &journal::Frame) -> Result<bool, String> {
+        match frame.typed().map_err(|_| "LIVE_FRAME_INVALID")? {
+            MarketCoverage::SlotBoundary { slot, t_rx_ns, .. } => {
+                let new = !self.slot_first_seen.contains_key(&slot);
+                let first = self.slot_first_seen.entry(slot).or_insert(t_rx_ns);
+                *first = (*first).min(t_rx_ns);
+                Ok(new)
+            }
+            MarketCoverage::Window {
+                event: WindowEvent::Start(start),
+                ..
+            } => {
+                self.market_commitment = Some(start.commitment.clone());
+                Ok(false)
+            }
+            _ => Ok(false),
+        }
+    }
+}
+
 struct Builder {
     program: Pubkey,
     clock_origin_unix_ns: u128,
@@ -649,6 +680,7 @@ struct Builder {
     attached: BTreeSet<[u8; 32]>,
     /// Marker hits and pairs of strict transactions (attached to their canonical events).
     strict_markers: BTreeMap<(String, u64), (Vec<MarkerHit>, Vec<Pair>)>,
+    race: RaceInputs,
     bytes: u64,
     max_bytes: u64,
     deadline: Instant,
@@ -1269,8 +1301,14 @@ fn load_live(b: &mut Builder, market: &Path) -> Result<(), String> {
                     )?,
                 }
             }
-            // Receiver rows are derived from the same logs; coverage and related rows of the
-            // capture are not needed: the report decodes the transactions themselves.
+            // A2: of the coverage only the capture's commitment and its slot receipts.
+            kind::MARKET_COVERAGE if frame.schema != 1 => {
+                if b.race.note(&frame)? {
+                    b.charge(16)?;
+                }
+            }
+            // Receiver rows are derived from the same logs; related rows of the capture are not
+            // needed: the report decodes the transactions themselves.
             kind::MARKET_LIQUIDATION | kind::MARKET_COVERAGE | kind::MARKET_RELATED => {}
             k => return Err(format!("LIVE_FRAME_KIND {k}")),
         }
@@ -1357,6 +1395,7 @@ fn load_opportunities(b: &mut Builder, reports: &Path) -> Result<(), String> {
                 identity_status: "NO_CHAIN_ENTITY".into(),
                 race_class: "UNRESOLVED".into(),
                 local_observed_race_margin_ns: None,
+                local_slot_race_margin_ns: None,
                 loss_reason: "UNKNOWN".into(),
                 loss_provenance: "SHADOW_ONLY".into(),
                 signed: Some(rec.timing.t_sign_ns.is_some()),
@@ -1411,6 +1450,7 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
         shadow_only: BTreeMap::new(),
         attached: BTreeSet::new(),
         strict_markers: BTreeMap::new(),
+        race: RaceInputs::default(),
         bytes: 0,
         max_bytes: opts.max_ram_bytes,
         deadline,
@@ -1432,7 +1472,22 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
                 .collect();
             let n = window.len();
             let shadow = capture.run.join("capture/shadow_evaluations.p0j");
-            match canonical_join(window, &shadow, deadline) {
+            let commitment = b
+                .race
+                .market_commitment
+                .clone()
+                .unwrap_or_else(|| "UNKNOWN".into());
+            let slots = std::mem::take(&mut b.race.slot_first_seen);
+            let joined = canonical_join(
+                window,
+                &shadow,
+                deadline,
+                &JoinContext {
+                    market_commitment: &commitment,
+                    slot_first_seen: Some(&slots),
+                },
+            );
+            match joined {
                 Ok(j) => {
                     for row in &j.rows {
                         b.shadow_link(row, ShadowOrigin::StrictReplay)?;

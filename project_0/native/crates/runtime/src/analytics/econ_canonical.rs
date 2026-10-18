@@ -18,9 +18,35 @@ pub struct Joined {
     pub identity_status: &'static str,
     pub our: Option<OpportunityRecord>,
     pub diagnostic: Option<OpportunityRecord>,
+    /// A2: commitment of the market capture (decides whether the live-receipt margin is valid).
+    pub market_commitment: String,
+    /// A2: first in-window local receipt of the winner slot (the capture's `SlotBoundary` row).
+    pub winner_slot_first_seen_ns: Option<u64>,
 }
 impl crate::analytics::payload::Payload for Joined {
     const KIND: u16 = journal::kind::ECON_CANONICAL;
+    const SCHEMA: u16 = 3;
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        (schema == crate::analytics::payload::TYPED).then(|| {
+            let v: JoinedWireV2 = crate::analytics::payload::decode_wire(bytes)?;
+            JoinedWire {
+                market: v.market,
+                target_seen: v.target_seen,
+                target_seen_without_slot: v.target_seen_without_slot,
+                health_liquidatable: v.health_liquidatable,
+                candidates_created: v.candidates_created,
+                plan_validated: v.plan_validated,
+                built: v.built,
+                identity_status: v.identity_status,
+                our: v.our,
+                diagnostic: v.diagnostic,
+                market_commitment: "UNKNOWN".into(),
+                winner_slot_first_seen_ns: None,
+            }
+            .into_joined()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })
+    }
 }
 /// The closed set of join identity outcomes; anything else fails to decode.
 const IDENTITY_STATUS: [&str; 6] = [
@@ -44,26 +70,50 @@ struct JoinedWire {
     identity_status: String,
     our: Option<OpportunityRecord>,
     diagnostic: Option<OpportunityRecord>,
+    market_commitment: String,
+    winner_slot_first_seen_ns: Option<u64>,
+}
+/// Layout of schema 2 (before A2): no commitment, no winner-slot receipt.
+#[derive(Deserialize)]
+struct JoinedWireV2 {
+    market: TruthEvent,
+    target_seen: bool,
+    target_seen_without_slot: bool,
+    health_liquidatable: Option<bool>,
+    candidates_created: Option<bool>,
+    plan_validated: Option<bool>,
+    built: Option<bool>,
+    identity_status: String,
+    our: Option<OpportunityRecord>,
+    diagnostic: Option<OpportunityRecord>,
+}
+impl JoinedWire {
+    fn into_joined(self) -> Result<Joined, &'static str> {
+        let identity_status = IDENTITY_STATUS
+            .into_iter()
+            .find(|k| *k == self.identity_status)
+            .ok_or("IDENTITY_STATUS_UNKNOWN")?;
+        Ok(Joined {
+            market: self.market,
+            target_seen: self.target_seen,
+            target_seen_without_slot: self.target_seen_without_slot,
+            health_liquidatable: self.health_liquidatable,
+            candidates_created: self.candidates_created,
+            plan_validated: self.plan_validated,
+            built: self.built,
+            identity_status,
+            our: self.our,
+            diagnostic: self.diagnostic,
+            market_commitment: self.market_commitment,
+            winner_slot_first_seen_ns: self.winner_slot_first_seen_ns,
+        })
+    }
 }
 impl<'de> Deserialize<'de> for Joined {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let w = JoinedWire::deserialize(d)?;
-        let identity_status = IDENTITY_STATUS
-            .into_iter()
-            .find(|k| *k == w.identity_status)
-            .ok_or_else(|| serde::de::Error::custom("IDENTITY_STATUS_UNKNOWN"))?;
-        Ok(Self {
-            market: w.market,
-            target_seen: w.target_seen,
-            target_seen_without_slot: w.target_seen_without_slot,
-            health_liquidatable: w.health_liquidatable,
-            candidates_created: w.candidates_created,
-            plan_validated: w.plan_validated,
-            built: w.built,
-            identity_status,
-            our: w.our,
-            diagnostic: w.diagnostic,
-        })
+        JoinedWire::deserialize(d)?
+            .into_joined()
+            .map_err(serde::de::Error::custom)
     }
 }
 /// Historical `canonical_market_shadow.jsonl` row of a typed `ECON_CANONICAL` frame.
@@ -79,6 +129,8 @@ pub struct JoinedFacts {
     pub identity_status: String,
     pub race_class: String,
     pub local_observed_race_margin_ns: Option<i128>,
+    /// A2: margin to the first local receipt of the winner slot.
+    pub local_slot_race_margin_ns: Option<i128>,
     pub loss_reason: String,
     pub loss_provenance: String,
     pub signed: Option<bool>,
@@ -107,6 +159,7 @@ pub fn joined_facts(row: &Joined) -> JoinedFacts {
         identity_status: row.identity_status.into(),
         race_class: race_class(row).into(),
         local_observed_race_margin_ns: margin(row),
+        local_slot_race_margin_ns: slot_margin(row),
         loss_reason: loss(row).into(),
         loss_provenance: if row.our.is_some() {
             "EXACT_PLAN_MATCH"
@@ -185,8 +238,20 @@ fn race_class(row: &Joined) -> &'static str {
         None => "UNRESOLVED",
     }
 }
+/// Margin to the winner's live receipt; A2: only where that receipt is a race observation.
 fn margin(row: &Joined) -> Option<i128> {
+    if !rx_margin_valid(&row.market_commitment) {
+        return None;
+    }
     Some(i128::from(row.market.live_t_rx_ns?) - i128::from(row.our.as_ref()?.timing.t_sign_ns?))
+}
+/// A2: margin to the first local receipt of the winner slot (positive: signed before it). The
+/// same function live and offline; only the receipt map differs in origin (Worker / journal).
+fn slot_margin(row: &Joined) -> Option<i128> {
+    Some(
+        i128::from(row.winner_slot_first_seen_ns?)
+            - i128::from(row.our.as_ref()?.timing.t_sign_ns?),
+    )
 }
 fn loss(row: &Joined) -> &'static str {
     if !row.market.permissionless_profit_opportunity {
@@ -257,6 +322,7 @@ impl Worker {
             let mut rows: Vec<_> = events
                 .into_iter()
                 .map(|market| Joined {
+                    winner_slot_first_seen_ns: self.slots.get(&market.slot).copied(),
                     market,
                     target_seen: false,
                     target_seen_without_slot: false,
@@ -267,6 +333,7 @@ impl Worker {
                     identity_status: "NO_MATCH",
                     our: None,
                     diagnostic: None,
+                    market_commitment: self.commitment.clone(),
                 })
                 .collect();
             let mut cursor = self.shadow_heads.get(&target).copied();
@@ -297,7 +364,8 @@ impl Worker {
         self.canonical_finalized = true;
         Ok(())
     }
-    pub(super) fn canonical_metrics(&self, from: usize, through: usize) -> CanonicalSummary {
+    /// The canonical rows of a window and the count of rows without an hour.
+    fn canonical_rows(&self, from: usize, through: usize) -> (Vec<&Joined>, usize) {
         let start = self
             .h
             .clock
@@ -321,8 +389,17 @@ impl Worker {
             .iter()
             .filter(|r| hour(r).is_none())
             .count();
+        (rows, unassigned)
+    }
+    pub(super) fn canonical_metrics(&self, from: usize, through: usize) -> CanonicalSummary {
+        let (rows, unassigned) = self.canonical_rows(from, through);
         let seconds = self.h.cfg.plan.span_seconds(from, through);
         summarize(&rows, seconds, unassigned, self.canonical_finalized)
+    }
+    /// A2: race figures of the same canonical rows (live slot receipts of this run).
+    pub(super) fn race_margin_metrics(&self, from: usize, through: usize) -> RaceMargins {
+        let (rows, _) = self.canonical_rows(from, through);
+        race_margins(&rows, &self.commitment, true)
     }
 }
 
@@ -382,6 +459,63 @@ fn assign_record(rows: &mut [Joined], rec: &OpportunityRecord) {
                 "PLAN_TYPE_OR_BANK_PAIR_MISMATCH"
             };
         }
+    }
+}
+
+/// A2: the race figures of a window. Main figure: the canonical margin to the first local
+/// receipt of the winner slot. Margins against the winner's live receipt (`canonical.local_*`,
+/// `race_timing.*_rx_*`) exist only under `confirmed`; otherwise their status says why not.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RaceMargins {
+    pub market_commitment: String,
+    pub winner_rx_margin_status: String,
+    pub winner_slot_margin_status: String,
+    pub canonical_slot_margin_ms: Distribution,
+    pub required_canonical_slot_speedup_ms: Distribution,
+    pub canonical_slot_speedup_sensitivity: Vec<SpeedupBucket>,
+}
+impl RaceMargins {
+    /// A report written before A2 (no race figures recorded).
+    pub fn earlier_schema() -> Self {
+        race_margins(&[], "UNKNOWN", false)
+    }
+}
+
+/// A2: the race figures over canonical rows (live and offline the same function).
+pub fn race_margins(rows: &[&Joined], market_commitment: &str, slot_receipts: bool) -> RaceMargins {
+    let mut margins = Vec::new();
+    let mut speed = Vec::new();
+    for row in rows
+        .iter()
+        .filter(|r| r.market.permissionless_profit_opportunity)
+    {
+        if let Some(n) = slot_margin(row) {
+            margins.push(n as f64 / 1e6);
+            if n < 0 {
+                speed.push((-n) as f64 / 1e6);
+            }
+        }
+    }
+    RaceMargins {
+        market_commitment: market_commitment.into(),
+        winner_rx_margin_status: rx_margin_status(market_commitment),
+        winner_slot_margin_status: if slot_receipts {
+            "COMPUTED"
+        } else {
+            "NOT_AVAILABLE: the input has no first local slot receipts (SlotBoundary rows of the market journal)"
+        }
+        .into(),
+        canonical_slot_margin_ms: distribution(margins),
+        required_canonical_slot_speedup_ms: distribution(speed.clone()),
+        canonical_slot_speedup_sensitivity: SPEEDUP_MS
+            .iter()
+            .map(|ms| SpeedupBucket {
+                ms: *ms,
+                local_boundaries_crossed: speed.iter().filter(|s| **s <= *ms as f64).count() as u64,
+                claim: "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)"
+                    .into(),
+            })
+            .collect(),
     }
 }
 
@@ -786,6 +920,7 @@ mod regression {
     use super::*;
     use crate::analytics::record::MarketPlanIdentity;
     use crate::market_observer::truth::LiquidationType;
+    include!("econ_a2_tests.rs");
     /// JFI-FIX-05: a typed `ECON_CANONICAL` frame round-trips losslessly and renders the
     /// identical historical JSONL row; an identity status outside the closed set is refused.
     #[test]
@@ -845,6 +980,8 @@ mod regression {
             identity_status: "NO_MATCH",
             our: None,
             diagnostic: None,
+            market_commitment: "confirmed".into(),
+            winner_slot_first_seen_ns: None,
         }
     }
     fn identified() -> OpportunityRecord {
@@ -1334,7 +1471,7 @@ mod regression {
 }
 
 fn joined_value(row: &Joined) -> Value {
-    json!({"join":row,"race_class":race_class(row),"local_observed_race_margin_ns":margin(row),"loss_reason":loss(row),
+    json!({"join":row,"race_class":race_class(row),"local_observed_race_margin_ns":margin(row),"local_slot_race_margin_ns":slot_margin(row),"loss_reason":loss(row),
                     "signed":row.our.as_ref().map(|r|r.timing.t_sign_ns.is_some()),
                     "simulation_result":row.our.as_ref().and_then(|r|r.simulation_result.as_deref()),
                     "economic_net_usd":net(row.our.as_ref()),"economics_known":row.our.as_ref().map(|r|r.economics_known),
@@ -1355,10 +1492,18 @@ pub struct JoinOutcome {
 /// PERSIST-01, their JSONL file. One bounded streaming pass; no RPC repricing/re-simulation and
 /// no synthetic evaluation when the original capture lost data. Used by the offline replay and
 /// the native report (B7).
+/// A2: run context of the offline join: the market commitment (capture start record) and the
+/// first in-window receipt per slot (`SlotBoundary` rows of the market journal), if read.
+pub struct JoinContext<'a> {
+    pub market_commitment: &'a str,
+    pub slot_first_seen: Option<&'a BTreeMap<u64, u64>>,
+}
+
 pub fn join(
     events: Vec<TruthEvent>,
     shadow_path: &Path,
     deadline: std::time::Instant,
+    ctx: &JoinContext,
 ) -> Result<JoinOutcome, String> {
     use std::io::BufRead;
     let mut grouped: BTreeMap<String, Vec<Joined>> = BTreeMap::new();
@@ -1375,6 +1520,9 @@ pub fn join(
             .entry(market.target.clone())
             .or_default()
             .push(Joined {
+                winner_slot_first_seen_ns: ctx
+                    .slot_first_seen
+                    .and_then(|m| m.get(&market.slot).copied()),
                 market,
                 target_seen: false,
                 target_seen_without_slot: false,
@@ -1385,6 +1533,7 @@ pub fn join(
                 identity_status: "NO_MATCH",
                 our: None,
                 diagnostic: None,
+                market_commitment: ctx.market_commitment.into(),
             });
     }
     for rows in grouped.values_mut() {
@@ -1521,7 +1670,16 @@ pub(super) fn replay(
     let JoinOutcome {
         rows,
         shadow_available: available,
-    } = join(events, shadow_path, deadline)?;
+    } = join(
+        events,
+        shadow_path,
+        deadline,
+        // An explicit event file has neither a capture start record nor slot receipts.
+        &JoinContext {
+            market_commitment: "UNKNOWN",
+            slot_first_seen: None,
+        },
+    )?;
     fs::create_dir_all(out).map_err(|_| "REPLAY_OUTPUT")?;
     let file = OpenOptions::new()
         .create_new(true)
@@ -1550,6 +1708,7 @@ pub(super) fn replay(
             "start_unix_ns":start_ns,"cutoff_unix_ns":start_ns+plan.offset_ns(i),"plan":plan,
             "cumulative":summarize(&cumulative,plan.span_seconds(0,i),unassigned,true),
             "window_delta":summarize(&delta,plan.span_seconds(i-1,i),unassigned,true),
+            "race_margins":race_margins(&cumulative,"UNKNOWN",false),
             "raw_shadow_available":available,"live_enabled":false,"master_pass":false});
         atomic_json(&out.join(format!("hour_{i:02}.json")), &value)?;
         if i == SNAPSHOT_COUNT {

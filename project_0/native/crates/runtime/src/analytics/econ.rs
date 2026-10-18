@@ -22,8 +22,8 @@ mod canonical;
 #[path = "econ_docs.rs"]
 mod docs;
 pub use canonical::{
-    canonical_legacy_view, join as canonical_join, joined_facts, record_digest, CanonicalSummary,
-    JoinOutcome, Joined as CanonicalJoin, JoinedFacts,
+    canonical_legacy_view, join as canonical_join, joined_facts, race_margins, record_digest,
+    CanonicalSummary, JoinContext, JoinOutcome, Joined as CanonicalJoin, JoinedFacts, RaceMargins,
 };
 pub use docs::*;
 
@@ -418,11 +418,28 @@ pub struct Race {
     pub required_speedup_to_winner_rx_ms: Option<f64>,
     pub required_speedup_to_winner_slot_seen_ms: Option<f64>,
 }
+/// A2: the winner's live receipt is a race observation only under `confirmed`. Under
+/// `finalized` (and an unknown commitment) it is the finalized notification, roughly a
+/// finalization later than the winner slot, so every margin against it would be too optimistic.
+pub fn rx_margin_valid(market_commitment: &str) -> bool {
+    market_commitment == "confirmed"
+}
+
+/// Report status of the margins against the winner's live receipt.
+pub fn rx_margin_status(market_commitment: &str) -> String {
+    if rx_margin_valid(market_commitment) {
+        "COMPUTED".into()
+    } else {
+        format!("NOT_COMPUTED: market commitment {market_commitment}; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure")
+    }
+}
+
 pub fn race(
     rec: &OpportunityRecord,
     winner: Option<&Winner>,
     market: Option<&MarketEvent>,
     slot_seen: Option<u64>,
+    rx_valid: bool,
 ) -> Race {
     let chain = match (rec.sign_slot, rec.timing.t_sign_ns, winner) {
         (None, _, _) | (_, None, _) => RaceClass::NoSign,
@@ -480,7 +497,7 @@ pub fn race(
     } else {
         chain.clone()
     };
-    let rx_margin = qualified
+    let rx_margin = (qualified && rx_valid)
         .then(|| market.unwrap().t_rx_ns.unwrap() as i128 - rec.timing.t_sign_ns.unwrap() as i128);
     let slot_margin = if qualified {
         slot_seen.map(|s| s as i128 - rec.timing.t_sign_ns.unwrap() as i128)
@@ -541,9 +558,33 @@ pub struct OpportunityRow {
     pub slot_seen: Option<u64>,
     /// Capital scenarios of the run (USD).
     pub capital: Vec<u64>,
+    /// A2: commitment of the market capture (decides whether the winner rx margin is valid).
+    pub market_commitment: String,
+}
+/// Layout of schema 2 (before A2): no market commitment.
+#[derive(Deserialize)]
+struct OpportunityRowV2 {
+    rec: OpportunityRecord,
+    winner: Option<Winner>,
+    market: Option<MarketEvent>,
+    slot_seen: Option<u64>,
+    capital: Vec<u64>,
 }
 impl crate::analytics::payload::Payload for OpportunityRow {
     const KIND: u16 = kind::ECON_OPPORTUNITY;
+    const SCHEMA: u16 = 3;
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        (schema == crate::analytics::payload::TYPED).then(|| {
+            crate::analytics::payload::decode_wire::<OpportunityRowV2>(bytes).map(|v| Self {
+                rec: v.rec,
+                winner: v.winner,
+                market: v.market,
+                slot_seen: v.slot_seen,
+                capital: v.capital,
+                market_commitment: "UNKNOWN".into(),
+            })
+        })
+    }
 }
 
 /// Historical `opportunity_economics.jsonl` row of an opportunity (same function live and
@@ -551,7 +592,13 @@ impl crate::analytics::payload::Payload for OpportunityRow {
 pub fn opportunity_view(row: &OpportunityRow) -> Value {
     let rec = &row.rec;
     let (w, m) = (row.winner.as_ref(), row.market.as_ref());
-    let r = race(rec, w, m, row.slot_seen);
+    let r = race(
+        rec,
+        w,
+        m,
+        row.slot_seen,
+        rx_margin_valid(&row.market_commitment),
+    );
     let strong = r.live_timestamp_qualified
         || (m.is_some()
             && !r.identity_mismatch
@@ -767,6 +814,13 @@ impl Worker {
     fn release(&mut self, bytes: u64) {
         self.retained_bytes = self.retained_bytes.saturating_sub(bytes);
     }
+    /// Inside the capture window `[start, cutoff]` (the market core's `in_window`).
+    fn in_window(&self, ns: u64) -> bool {
+        let start = self.h.shared.start_ns.load(Ordering::Acquire);
+        self.h
+            .cutoff()
+            .is_some_and(|cutoff| ns >= start && ns <= cutoff)
+    }
     fn hour(&self, ns: u64) -> Option<usize> {
         let start = self.h.shared.start_ns.load(Ordering::Acquire);
         let cutoff = self.h.cutoff()?;
@@ -803,6 +857,9 @@ impl Worker {
                     self.market.push(e);
                 }
             }
+            // A2: only in-window receipts, exactly the `SlotBoundary` rows the capture journals,
+            // so the live and the offline winner-slot margin read the same first receipt.
+            Evidence::Slot { t_rx_ns, .. } if !self.in_window(t_rx_ns) => {}
             Evidence::Slot { slot, t_rx_ns } => {
                 if let Some(t) = self.slots.get_mut(&slot) {
                     *t = (*t).min(t_rx_ns);
@@ -953,6 +1010,7 @@ impl Worker {
             market: self.market_for(rec, w).cloned(),
             slot_seen: w.and_then(|w| self.slots.get(&w.slot).copied()),
             capital: self.h.cfg.capital.clone(),
+            market_commitment: self.commitment.clone(),
         }
     }
     fn retain_shadow(&mut self, hour: usize, sequence: u64, rec: OpportunityRecord, count: bool) {
@@ -1213,7 +1271,13 @@ impl Worker {
         for rec in &rows {
             let w = self.winner_for(rec);
             let m = self.market_for(rec, w);
-            let r = race(rec, w, m, w.and_then(|w| self.slots.get(&w.slot).copied()));
+            let r = race(
+                rec,
+                w,
+                m,
+                w.and_then(|w| self.slots.get(&w.slot).copied()),
+                rx_margin_valid(&self.commitment),
+            );
             let strong = m.is_some()
                 && !r.identity_mismatch
                 && matches!(w.map(|w| &w.identity), Some(WinnerIdentity::Unique { .. }));
@@ -1747,6 +1811,10 @@ impl Worker {
             authoritative_analytics:
                 "canonical; other top-level analytics retain legacy receiver scope for compatibility"
                     .into(),
+            race_margins: Section {
+                window_delta: self.race_margin_metrics(index - 1, index),
+                cumulative: self.race_margin_metrics(0, index),
+            },
         }
     }
     fn write_snapshot(&mut self, index: usize, finalizing: bool) -> Result<(), String> {
@@ -1784,6 +1852,7 @@ impl Worker {
         let dec = |v: Option<f64>| v.map_or_else(|| "UNKNOWN".to_string(), |n| format!("{n:.6}"));
         let races = &r.competition.cumulative;
         let speed = &r.race_timing.cumulative.required_speedup_to_winner_rx_ms;
+        let margins = &r.race_margins.cumulative;
         let unknowns = &r.unknowns.cumulative;
         let canonical = &r.canonical.cumulative;
         let mut lines = vec![
@@ -1814,12 +1883,33 @@ impl Worker {
                 "race: pre={} same={} post={} unresolved={}",
                 races.pre.count, races.same.count, races.post.count, races.unresolved.count
             ),
+            // A2: the main race figure is the canonical margin to the first local receipt of the
+            // winner slot; the winner rx margin exists only under `confirmed`.
             format!(
-                "required_speedup_ms: count={} median={} p90={}",
-                speed.count_known,
-                dec(speed.median),
-                dec(speed.p90)
+                "race_margin_to_winner_slot_ms (canonical, first local slot receipt): count={} median={} p90={} required_speedup_median={} status={}",
+                margins.canonical_slot_margin_ms.count_known,
+                dec(margins.canonical_slot_margin_ms.median),
+                dec(margins.canonical_slot_margin_ms.p90),
+                dec(margins.required_canonical_slot_speedup_ms.median),
+                margins
+                    .winner_slot_margin_status
+                    .split(':')
+                    .next()
+                    .unwrap_or("UNKNOWN")
             ),
+            if rx_margin_valid(&margins.market_commitment) {
+                format!(
+                    "winner_rx_required_speedup_ms: count={} median={} p90={}",
+                    speed.count_known,
+                    dec(speed.median),
+                    dec(speed.p90)
+                )
+            } else {
+                format!(
+                    "winner_rx_required_speedup_ms: NOT_COMPUTED (market commitment {})",
+                    margins.market_commitment
+                )
+            },
             format!(
                 "bottlenecks: {}",
                 r.bottlenecks.cumulative.ranking.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
