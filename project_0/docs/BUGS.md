@@ -119,12 +119,12 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** beweisbare Durability-Grenze, keine stille Evidence-Drops, terminierbarer Abschluss. **Commit/Evidence:** —.
 
 ### M3 — Blockhash-Refresh-Thread ignoriert allgemeines Shutdown
-- [ ] **OPEN · G-A/G-C · S0-Lifecycle/P6.**
+- [x] **LOCAL_PASS · G-A/G-C · S0-Lifecycle/P6.**
 - **Pfad:** `runtime/src/orchestration/state_owner/setup.rs`: `thread::Builder::new().name("blockhash")`; Owner-/Shutdown-Struktur `state_owner.rs` und `state_owner/shutdown.rs`.
 - **Ist:** Schleife prüft nur `bh_econ.admission_closed()`, schläft 10 s und verwirft den JoinHandle. Ohne Econ-Handle läuft sie bis Prozessende weiter und kann weitere RPC-Reads anstoßen.
 - **Soll-Fix:** Shutdown + AdmissionClosed vor jedem Refresh und während der Sleep-Phase prüfen, Handle eindeutig im Owner halten und am geordneten Shutdown joinen. Netzwerk-RPC darf einen Shutdown nicht unbegrenzt überziehen; per-call-Timeout und Joindeadline als reale Grenzen dokumentieren.
 - **Tests:** Shutdown ohne Econ-Handle, AdmissionClosed, Request-in-flight + Timeout, wiederholtes Start/Stop ohne verwaiste Threads/RPC nach Stop; negative Cancellation.
-- **Abnahme:** keine Refresh-Reads nach Shutdown, kein detached Owner-Thread. **Commit/Evidence:** —.
+- **Abnahme:** keine Refresh-Reads nach Shutdown, kein detached Owner-Thread. **Commit/Evidence:** `dc175d2` (`run_blockhash_refresh`, Join in `finish`); Tests `blockhash_refresh_stops_on_shutdown_without_econ`, `…_stops_on_admission_closed`, `…_in_flight_finishes_then_stops` Exit 0. Rest außerhalb M3: `ingress-ws`/`c0-census` werden per Shutdown beendet, aber nicht gejoint; Remote-Worker nur mit Econ/Window gejoint.
 
 ### M4 — WebSocket ACK und Slot-Progress getrennt
 - [x] ~~Ein einziger Timer vermischte ACK und fehlenden Slotfortschritt.~~
@@ -141,28 +141,28 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 ## 4. N — neue Befunde aus der Astra-Patchprüfung
 
 ### N1 — BOOT-RPC-Budget ist mit Standardprofil unmöglich
-- [ ] **CRITICAL · OPEN · G-A/G-B · BOOT-03/04.**
+- [x] **CRITICAL · LOCAL_PASS · G-A/G-B · BOOT-03/04.**
 - **Pfad:** `runtime/src/orchestration/boot_network.rs`: `NetworkReads::new/rpc/cluster`; `solana/src/runtime_config.rs`.
 - **Reproduktion:** `fe_mode=smoke` setzt `fe_calls=3`, `fe_seconds=30`. `NetworkReads` verwendet `limit=fe_calls.min(max_requests)`; `cluster` braucht bereits fünf RPC-Reads. Vierter Call ergibt `BOOT_RPC_BUDGET`. Existing Fixtures umgehen das echte Budgetobjekt.
 - **Soll-Fix:** Eigenes *explizites* BOOT-Call- und Zeitbudget, getrennt von FE-01-Limits und gebunden an globales Providerbudget und FREE_ONLY. Verbindliches Minimum aus tatsächlichen Cluster-, Programm-/ProgramData-, Scope-Batch- und Oracle-Aufrufen **berechnen, nicht bloß `5+fe_snapshot_rounds` behaupten**. Bei unzureichendem Budget vor Netzwerkzugriff `BOOT_BUDGET_TOO_SMALL`; keine heimliche Quoten-/RPS-Erhöhung.
 - **Tests:** Default-Profil plus berechnete Pflicht-Reads, `NetworkReads` mit lokalem HTTP-Stub (nicht nur `Fixture`), Boundary `minimum-1/minimum`, zusätzliche dynamische Scope-Runde, MaxRequests und Deadline, fe_calls-Unabhängigkeit. **Keine echten RPCs.**
-- **Abnahme:** Defaults scheitern nicht zwangsläufig bereits beim vierten Cluster-Read; real nicht hinreichendes Budget blockiert **vor** Start. **Commit/Evidence:** —.
+- **Abnahme:** Defaults scheitern nicht zwangsläufig bereits beim vierten Cluster-Read; real nicht hinreichendes Budget blockiert **vor** Start. **Commit/Evidence:** `342ab2b` (`boot_calls`/`boot_seconds`, `required_reads` aus Cluster-/Programm-/Scope-Pfaden, `BOOT_BUDGET_TOO_SMALL` vor Netzwerkzugriff; `LIMITS_REVISION` 2 → Payload-Schema 3 für `OPERATIONAL_CONFIG`/`RUN_MANIFEST`); Tests `network_reads_refuses_budget_below_minimum`, `network_reads_counts_only_boot_budget` (lokaler HTTP-Stub), `required_scope_reads_match_the_collector`, `limits_layout_is_pinned_to_its_revision` Exit 0.
 
 ### N2 — Formatter/Clippy/Build der Astra-Änderungen nicht nachgewiesen
-- [ ] **HIGH · OPEN (konkreter Clippy-Fehler bis Ausführung nicht bewiesen) · G-A.**
+- [x] **HIGH · LOCAL_PASS · G-A.**
 - **Pfad:** `runtime/src/orchestration/fe_qualification.rs::collect` (finales `return Ok(...)`), `boot_network.rs::run` (Format), gesamter geänderter Workspace.
 - **Soll-Fix:** `cargo fmt` auf tatsächlicher Workspace-Wurzel, finales unnötiges `return` ggf. entfernen; anschließend Clippy mit aktivem Feature-Scope und `-D warnings`, Testmatrix/Release-Build. Keine globalen `#[allow]` zur Kosmetik und keine fremden Module massenhaft formatieren.
 - **Tests:** tatsächliche Tool-Ausgaben und Exit-Codes, beide produktiven Featureprofile; Fehler separat mit Dateien/SHA dokumentieren.
-- **Abnahme:** formatiert, Clippy/test/release erfolgreich auf exakt getesteter SHA. **Commit/Evidence:** —.
+- **Abnahme:** formatiert, Clippy/test/release erfolgreich auf exakt getesteter SHA. **Commit/Evidence:** `9ce7aa0` (Clippy `-D warnings` workspaceweit, verhaltensgleich; abgelehnter cmp_owned-Autofix im Strict-Cache), `2c9957c` (rustfmt), `e55a5c7` (Export eines abgeschnittenen Journals wieder fail-closed, H1-Regression). Nachweise `evidence/HARDENING_20261018/after_N2_{fmt_check,clippy,test,build_release}.txt` auf `512bb13`, alle Exit 0.
 - **Triage 18.10.2026:** Nur das ¤return Ok(json!(..))¤ am Ende von ¤fe_qualification::collect¤ ist source-belegt. ¤needless_return¤ könnte Clippy ¤-D warnings¤ auslösen, **keine** Toolausgabe liegt vor. Vermuteter ¤rustfmt¤-Fehler im ¤boot_network¤-Makro/Einzeiler zurückgenommen bis ¤cargo fmt --check¤.
 
 ### N3 — rein nullgefülltes Capture-Dateiende nicht als INCOMPLETE erkannt
-- [ ] **HIGH · OPEN · G-A/G-D · PERSIST-05/SK-07.**
+- [x] **HIGH · LOCAL_PASS · G-A/G-D · PERSIST-05/SK-07.**
 - **Pfad:** `runtime/src/analytics/journal.rs::read_frame`, `Reader::next_frame`, `storage/segments.rs`, FE-04-Finanzjournal.
 - **Ist:** Vier Nullbytes als Frame-Länge führen zu `FRAME_LENGTH`, nicht zu toleriertem `UnexpectedEof`.
 - **Soll-Fix:** Ausschließlich **vollständig nachweisbare Null-Suffix-Bytes an einer erlaubten letzten, unversiegelten Capture-Framegrenze** als Torn Tail klassifizieren, Status `INCOMPLETE`. Keine Nullstrecke innerhalb eines korrupten Frames, kein `DATA_AFTER_MANIFEST` oder fremdes/sealed Segment erlauben. Suffix-Prüfung bounded/streaming, ohne O(file_size)-RAM.
 - **Tests:** 1/3/4/5/4096/70000 Nullbytes nach gültigen Frames, Fremdbyte am Ende, Nullen mitten im Frame, nach Seal, Segmentrotation, `Reader::open`/`Writer::resume`/`one_shot::Journal` weiterhin strikt; Bytes bleiben unverändert.
-- **Abnahme:** nur echter zulässiger Capture-Tail `INCOMPLETE`; beschädigte finanzielle Evidence weiter HALT. **Commit/Evidence:** —.
+- **Abnahme:** nur echter zulässiger Capture-Tail `INCOMPLETE`; beschädigte finanzielle Evidence weiter HALT. **Commit/Evidence:** `c5e6543` (`read_frame`: Länge 0 nur bei Nullen bis EOF → `UnexpectedEof`/INCOMPLETE, 64-KiB-Blöcke); Tests `capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse`, `zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate`, `zero_bytes_inside_the_stream_stay_hard_errors`, `wallet_journal_with_zero_tail_is_a_halt` Exit 0.
 
 ### N4 — Drift fälschlich als Mutex-Poison gemeldet
 - [ ] **MEDIUM · OPEN · G-A.**
@@ -667,14 +667,14 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Ist:** `NetworkAudit::validate_start` bindet TTL, lokale Config/Binary/Hash/Token; `p0ctl run start` holt **keine** frischen On-chain-Programm-/Oracle-/Genesisbeweise am tatsächlichen Admission-Punkt. Einzelne Runtime-ProgramData-Rechecks sind noch kein vollständiger BOOT-12-Vertrag.
 - **Soll:** *vor Admission* validierte aktuelle Genesis/Cluster-, Program-/ProgramData-/Version-, kontextkonsistente Bank-/Oracle-Beziehungen (frisch/identitätsgebunden) gegen den ursprünglichen Token/Spec; TOCTOU führt `BLOCKED`, keine automatische Re-Pin-/Paid-Fallback-Logik. Keine rückwirkende Akzeptanz eines geänderten Programms. Die genaue Reihenfolge mit BOOT-01/02 und Service-Owner-Locks belegen.
 - **Tests offline:** geänderte Genesis, ProgramData-Hash, Upgrade-Slot, Oracle/Bank/Config/Binary, abgelaufener Token, schlagartig geänderter Provider. Netzwerkprüfung **NOT_RUN** bis separate Freigabe.
-- **Dedupe:** N1/N6/N7/B2; nur **ein** identitätsgebundener Startvertrag. **Commit/Evidence:** —.
+- **Dedupe:** N1/N6/N7/B2; nur **ein** identitätsgebundener Startvertrag. **Commit/Evidence:** Teil: `028c662` Genesis-Pin `GENESIS_HASH_MAINNET` vor ProgramData-Read/Admission (`BOOT_CLUSTER_MISMATCH`) und `--genesis-hash` = Pin (`BOOT_GENESIS_PIN_MISMATCH`); Tests `cluster_check_accepts_only_the_mainnet_genesis_pin`, `spec_rejects_genesis_that_differs_from_the_pin` Exit 0. Reale Prüfung NOT_RUN; frische Oracle-/State-Identitäten bei Admission offen.
 
 ### X2 — JFI-01/02-Verstoß im neuen BOOT-/Provider-Evidence-Pfad
-- [ ] **HIGH · G-A/G-B.**
+- [x] **HIGH · G-A/G-B.**
 - **Ist:** `boot_network.rs` hat `Reads::rpc(...)->serde_json::Value` bis in `cluster` und Scope-Prüflogik, außerdem Produktiv-Import einer JSON-Provider-Evidence-Datei. Das überschreitet die explizite Solana-Wire-Ausnahme.
 - **Soll:** RPC-Responses **unmittelbar im Wire-Adapter** auf native, validierte DTOs abbilden; `Reads` mit typisierten `genesis/version/health/slot/multiple_accounts`; historische JSON-Proofimporte ausschließlich isoliert offline. Neuer produktiver Provider-/Network-Audit-Proof als versioniertes typisiertes `.p0j` im **bestehenden** Journalvertrag, ohne neue parallele Evidenz-Datenbank. FREE_ONLY-Provenienz und tatsächlich beobachtete Quoten separat qualifizieren.
 - **Tests:** typed Roundtrip, invalid Owner/Layout/Slot, JSON-Leak-Scan außerhalb Wire/Legacy-Leser, Schema/Version/Corruption/Truncation, historischer Reader bleibt byteidentisch.
-- **Dedupe:** N1 und PERSIST/JFI-FIX-04–07; keine neue Umsetzungsphase. **Commit/Evidence:** —.
+- **Dedupe:** N1 und PERSIST/JFI-FIX-04–07; keine neue Umsetzungsphase. **Commit/Evidence:** `2599f01` (typisierter `Reads`, JSON nur in `NetworkReads`-Wire-Kante; `PROVIDER_EVIDENCE` Kind 711 über `p0-journal import-provider-evidence`); Tests `provider_evidence_round_trips_as_typed_journal`, `network_reads_decode_at_the_wire_edge`, BOOT-Fixture-Tests Exit 0.
 
 ### X3 — BOOT-01/02 nicht nur als Offline-Token qualifizieren
 - [ ] **HIGH · G-A/G-B.**
