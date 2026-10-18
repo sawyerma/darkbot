@@ -131,6 +131,9 @@ macro_rules! typed_kinds {
     ($kind:expr, $schema:expr, $bytes:expr, $f:ident) => {{
         use journal::kind as k;
         match $kind {
+            k::PROVIDER_EVIDENCE => $f::<crate::orchestration::fe_qualification::ProviderEvidence>(
+                $kind, $schema, $bytes,
+            ),
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }

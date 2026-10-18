@@ -27,13 +27,106 @@ pub fn sha(bytes: &[u8]) -> String {
         .map(|b| format!("{b:02x}"))
         .collect()
 }
-/// Validate the existing measured FREE_ONLY evidence contract for every usable
-/// endpoint. A bundle uses `providers: [proof, ...]`; a single proof stays valid.
-/// This checks supplied evidence, not the provider's current quota availability.
+/// One measured FREE_ONLY provider qualification: the fields the capacity check reads.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderProof {
+    pub policy: String,
+    pub passed: bool,
+    pub provider_binding: String,
+    pub measured_at_unix_s: f64,
+    /// `null` in a not-passing measurement; validation requires 64 hex digits.
+    pub evidence_sha256: Option<String>,
+    pub allowed_rps: f64,
+    pub available_calls: u64,
+}
+/// Provider evidence (`PROVIDER_EVIDENCE`, X2): one proof per usable RPC endpoint, the WSS and
+/// archive qualification, and the hash of the measured JSON it was imported from.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderEvidence {
+    pub providers: Vec<ProviderProof>,
+    pub wss_provider_binding: Option<String>,
+    pub wss_free_only: bool,
+    pub archive_qualified: bool,
+    pub source_sha256: String,
+}
+impl crate::analytics::payload::Payload for ProviderEvidence {
+    const KIND: u16 = crate::analytics::journal::kind::PROVIDER_EVIDENCE;
+}
+impl ProviderEvidence {
+    /// Explicit offline import of the measured JSON format: one proof, or `providers: [...]`,
+    /// each optionally with `wss_provider_binding`, `wss_free_only`, `archive_qualified`. Unknown
+    /// fields and mixed shapes are refused. Productive paths read only the typed record.
+    pub fn from_measured_json(bytes: &[u8]) -> Result<Self, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Measured {
+            providers: Option<Vec<ProviderProof>>,
+            policy: Option<String>,
+            passed: Option<bool>,
+            provider_binding: Option<String>,
+            measured_at_unix_s: Option<f64>,
+            evidence_sha256: Option<String>,
+            allowed_rps: Option<f64>,
+            available_calls: Option<u64>,
+            #[serde(default)]
+            wss_provider_binding: Option<String>,
+            #[serde(default)]
+            wss_free_only: bool,
+            #[serde(default)]
+            archive_qualified: bool,
+        }
+        let m: Measured = serde_json::from_slice(bytes).map_err(|_| "PROVIDER_EVIDENCE_FORMAT")?;
+        let single = (
+            m.policy,
+            m.passed,
+            m.provider_binding,
+            m.measured_at_unix_s,
+            m.allowed_rps,
+            m.available_calls,
+        );
+        let providers = match (m.providers, single) {
+            (Some(p), (None, None, None, None, None, None))
+                if !p.is_empty() && m.evidence_sha256.is_none() =>
+            {
+                p
+            }
+            (
+                None,
+                (
+                    Some(policy),
+                    Some(passed),
+                    Some(provider_binding),
+                    Some(measured_at_unix_s),
+                    Some(allowed_rps),
+                    Some(available_calls),
+                ),
+            ) => vec![ProviderProof {
+                policy,
+                passed,
+                provider_binding,
+                measured_at_unix_s,
+                evidence_sha256: m.evidence_sha256,
+                allowed_rps,
+                available_calls,
+            }],
+            _ => return Err("PROVIDER_EVIDENCE_FORMAT".into()),
+        };
+        Ok(Self {
+            providers,
+            wss_provider_binding: m.wss_provider_binding,
+            wss_free_only: m.wss_free_only,
+            archive_qualified: m.archive_qualified,
+            source_sha256: sha(bytes),
+        })
+    }
+}
+/// Validate the measured FREE_ONLY evidence for every usable endpoint (a proof per endpoint
+/// binding). This checks supplied evidence, not the provider's current quota availability.
 pub fn validate_provider_evidence(
     config: &RuntimeConfig,
     primary: &str,
-    proof: &Value,
+    proof: &ProviderEvidence,
     now: f64,
 ) -> Result<(), String> {
     let endpoints: BTreeSet<&str> = std::iter::once(primary)
@@ -47,34 +140,27 @@ pub fn validate_provider_evidence(
         .collect();
     for endpoint in endpoints {
         let binding = sha(endpoint.as_bytes());
-        let p = if let Some(providers) = proof.get("providers").and_then(Value::as_array) {
-            providers
-                .iter()
-                .find(|p| p["provider_binding"] == binding)
-                .ok_or("FE_PROVIDER_EVIDENCE_MISSING")?
-        } else {
-            proof
-        };
-        let measured = p["measured_at_unix_s"]
-            .as_f64()
-            .ok_or("FE_PROVIDER_QUALIFICATION_TIME")?;
+        let p = proof
+            .providers
+            .iter()
+            .find(|p| p.provider_binding == binding)
+            .ok_or("FE_PROVIDER_EVIDENCE_MISSING")?;
+        let measured = p.measured_at_unix_s;
+        let min_rps = config.limits.rpc_rps.min(config.limits.bootstrap_rps) as f64;
         if !now.is_finite()
             || now < 0.0
+            || !measured.is_finite()
             || measured < 0.0
             || measured > now
             || now - measured > config.limits.fe_qualification_age_seconds as f64
-            || p["policy"] != "FREE_ONLY"
-            || p["passed"] != true
-            || p["provider_binding"] != binding
-            || p["evidence_sha256"]
-                .as_str()
+            || p.policy != "FREE_ONLY"
+            || !p.passed
+            || p.evidence_sha256
+                .as_deref()
                 .is_none_or(|s| s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()))
-            || p["allowed_rps"]
-                .as_f64()
-                .is_none_or(|n| n < config.limits.rpc_rps.min(config.limits.bootstrap_rps) as f64)
-            || p["available_calls"]
-                .as_u64()
-                .is_none_or(|n| n < config.limits.max_requests.min(config.limits.fe_calls))
+            || p.allowed_rps.is_nan()
+            || p.allowed_rps < min_rps
+            || p.available_calls < config.limits.max_requests.min(config.limits.fe_calls)
         {
             return Err("FREE_ONLY_PROVIDER_CAPACITY_UNQUALIFIED".into());
         }
@@ -417,24 +503,41 @@ pub(crate) mod tests {
     fn provider_evidence_requires_fresh_free_capacity_for_every_fallback() {
         let mut c = RuntimeConfig::default();
         let primary = "http://primary.invalid";
-        let proof = |url: &str| {
-            json!({"policy":"FREE_ONLY","passed":true,
-            "provider_binding":sha(url.as_bytes()),"measured_at_unix_s":1000,
-            "evidence_sha256":sha(b"fixture"),"allowed_rps":5,"available_calls":3})
+        let proof = |url: &str| ProviderProof {
+            policy: "FREE_ONLY".into(),
+            passed: true,
+            provider_binding: sha(url.as_bytes()),
+            measured_at_unix_s: 1000.0,
+            evidence_sha256: Some(sha(b"fixture")),
+            allowed_rps: 5.0,
+            available_calls: 3,
         };
-        let p = proof(primary);
+        let evidence = |providers: Vec<ProviderProof>| ProviderEvidence {
+            providers,
+            wss_provider_binding: None,
+            wss_free_only: false,
+            archive_qualified: false,
+            source_sha256: sha(b"measured"),
+        };
+        let p = evidence(vec![proof(primary)]);
         assert!(validate_provider_evidence(&c, primary, &p, 1001.0).is_ok());
-        for (field, value) in [
-            ("policy", json!("PAID")),
-            ("passed", json!(false)),
-            ("allowed_rps", json!(0)),
-            ("available_calls", json!(2)),
-            ("evidence_sha256", json!("missing")),
-            ("provider_binding", json!("wrong")),
-            ("measured_at_unix_s", json!(1002)),
-        ] {
+        type Mutation = (&'static str, fn(&mut ProviderProof));
+        let mutations: [Mutation; 9] = [
+            ("policy", |p| p.policy = "PAID".into()),
+            ("passed", |p| p.passed = false),
+            ("allowed_rps", |p| p.allowed_rps = 0.0),
+            ("allowed_rps NaN", |p| p.allowed_rps = f64::NAN),
+            ("available_calls", |p| p.available_calls = 2),
+            ("evidence_sha256", |p| {
+                p.evidence_sha256 = Some("missing".into())
+            }),
+            ("evidence_sha256 null", |p| p.evidence_sha256 = None),
+            ("provider_binding", |p| p.provider_binding = "wrong".into()),
+            ("measured_at_unix_s", |p| p.measured_at_unix_s = 1002.0),
+        ];
+        for (field, mutate) in mutations {
             let mut invalid = p.clone();
-            invalid[field] = value;
+            mutate(&mut invalid.providers[0]);
             assert!(
                 validate_provider_evidence(&c, primary, &invalid, 1001.0).is_err(),
                 "{field}"
@@ -450,10 +553,71 @@ pub(crate) mod tests {
         c.rpc_endpoints = vec![primary.into(), "http://backup.invalid".into()];
         c.fallback = true;
         assert!(validate_provider_evidence(&c, primary, &p, 1001.0).is_err());
-        let proofs = json!({"providers":[p,proof("http://backup.invalid")]});
+        let proofs = evidence(vec![proof(primary), proof("http://backup.invalid")]);
         assert!(validate_provider_evidence(&c, primary, &proofs, 1001.0).is_ok());
         c.fallback = false;
         assert!(validate_provider_evidence(&c, primary, &p, 1001.0).is_ok());
+    }
+    /// X2: the measured JSON is imported once, offline, into the typed record; the record round
+    /// trips through the journal and fails closed on schema, corruption and truncation.
+    #[test]
+    fn provider_evidence_round_trips_as_typed_journal() {
+        use crate::analytics::{journal, payload::Payload};
+        let example = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../config/examples/provider_qualification.example.json"),
+        )
+        .unwrap();
+        let single = ProviderEvidence::from_measured_json(&example).unwrap();
+        assert_eq!(single.providers.len(), 1);
+        assert!(!single.providers[0].passed && !single.wss_free_only);
+        assert_eq!(single.source_sha256, sha(&example));
+        let bundle = br#"{"providers":[{"policy":"FREE_ONLY","passed":true,"provider_binding":"b","measured_at_unix_s":1,"evidence_sha256":"e","allowed_rps":5,"available_calls":3}],"wss_provider_binding":"w","wss_free_only":true,"archive_qualified":false}"#;
+        let typed = ProviderEvidence::from_measured_json(bundle).unwrap();
+        assert_eq!(typed.wss_provider_binding.as_deref(), Some("w"));
+        for bad in [
+            br#"{"providers":[],"wss_free_only":true}"#.as_slice(),
+            br#"{"policy":"FREE_ONLY","passed":true}"#,
+            br#"{"providers":[{"policy":"FREE_ONLY","passed":true,"provider_binding":"b","measured_at_unix_s":1,"evidence_sha256":"e","allowed_rps":5,"available_calls":3,"extra":1}]}"#,
+            br#"{"unknown":1}"#,
+            b"[]",
+        ] {
+            assert_eq!(
+                ProviderEvidence::from_measured_json(bad).unwrap_err(),
+                "PROVIDER_EVIDENCE_FORMAT"
+            );
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "p0_provider_evidence_{}_{}",
+            std::process::id(),
+            Pubkey::new_unique()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("provider.p0j");
+        let mut w = journal::Writer::create(&path).unwrap();
+        w.append_typed(journal::Provenance::default(), &typed)
+            .unwrap();
+        w.seal(true).unwrap();
+        assert_eq!(
+            journal::read_typed_value::<ProviderEvidence>(&path).unwrap(),
+            typed
+        );
+        let bytes = crate::analytics::payload::encode(&typed).unwrap();
+        assert!(crate::analytics::payload::decode::<ProviderEvidence>(
+            ProviderEvidence::KIND,
+            ProviderEvidence::SCHEMA + 1,
+            &bytes
+        )
+        .is_err());
+        let good = std::fs::read(&path).unwrap();
+        let mut flipped = good.clone();
+        let at = good.len() / 2;
+        flipped[at] ^= 1;
+        for damaged in [flipped, good[..good.len() - 1].to_vec()] {
+            std::fs::write(&path, damaged).unwrap();
+            assert!(journal::read_typed_value::<ProviderEvidence>(&path).is_err());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
     /// The required read count is the collector's own: one round over the initial scope in
     /// single-key batches reads exactly that many accounts; a further round over the discovered

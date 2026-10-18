@@ -89,6 +89,9 @@ pub mod kind {
     /// FE-01 read-only observation: effective configuration, each saved RPC read
     /// `{method, params, result|error}` (fsynced before it is decoded), and the result.
     pub const BOOT_NETWORK: u16 = 710;
+    /// Measured FREE_ONLY provider evidence read by the network boot audit, imported offline
+    /// from the measured JSON (`p0-journal import-provider-evidence`).
+    pub const PROVIDER_EVIDENCE: u16 = 711;
     pub const FE01_CONFIG: u16 = 700;
     pub const FE01_READ: u16 = 701;
     pub const FE01_RESULT: u16 = 702;
@@ -141,6 +144,7 @@ pub mod kind {
         RUN_MANIFEST,
         MT0_SNAPSHOT,
         BOOT_NETWORK,
+        PROVIDER_EVIDENCE,
         FE01_CONFIG,
         FE01_READ,
         FE01_RESULT,

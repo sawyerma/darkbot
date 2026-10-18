@@ -12,7 +12,6 @@ use darkbot_project0::{
 };
 use darkbot_solana::{provider, runtime_config::RuntimeConfig};
 use marginfi_type_crate::types::{Bank, MarginfiAccount};
-use serde_json::{json, Value};
 use solana_client::rpc_request::RpcRequest;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{hash::Hash, pubkey::Pubkey};
@@ -67,9 +66,19 @@ impl Spec {
         Ok(())
     }
 }
-/// Narrow transport interface: no signer/submission operation exists. Fixtures use the same collector.
+/// Narrow, typed transport interface (X2): no signer/submission operation exists and no JSON
+/// value leaves the wire adapter. Fixtures use the same collector.
 pub trait Reads {
-    fn rpc(&mut self, request: RpcRequest, params: Value) -> Result<Value, String>;
+    fn genesis_hash(&mut self) -> Result<String, String>;
+    /// `solana-core` version string.
+    fn version(&mut self) -> Result<String, String>;
+    fn health_ok(&mut self) -> Result<bool, String>;
+    fn slot(&mut self, finalized: bool) -> Result<u64, String>;
+    fn multiple_accounts(
+        &mut self,
+        keys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> Result<(u64, fe::ObservedState), String>;
     fn wss(&mut self, program: Pubkey, transactions: bool) -> Result<(u64, u64), String>;
 }
 pub struct NetworkReads {
@@ -140,8 +149,14 @@ impl NetworkReads {
         }
     }
 }
-impl Reads for NetworkReads {
-    fn rpc(&mut self, request: RpcRequest, params: Value) -> Result<Value, String> {
+impl NetworkReads {
+    /// The Solana JSON-RPC wire edge (JFI-02): method filter, call and time budget; every
+    /// response is decoded into native values by the typed `Reads` methods right here.
+    fn send(
+        &mut self,
+        request: RpcRequest,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         if !matches!(
             request,
             RpcRequest::GetGenesisHash
@@ -171,6 +186,50 @@ impl Reads for NetworkReads {
         }
         Ok(value)
     }
+}
+impl Reads for NetworkReads {
+    fn genesis_hash(&mut self) -> Result<String, String> {
+        let v = self.send(RpcRequest::GetGenesisHash, serde_json::json!([]))?;
+        v.as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "BOOT_GENESIS_UNKNOWN".into())
+    }
+    fn version(&mut self) -> Result<String, String> {
+        let v = self.send(RpcRequest::GetVersion, serde_json::json!([]))?;
+        v["solana-core"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "BOOT_CLUSTER_VERSION_UNKNOWN".into())
+    }
+    fn health_ok(&mut self) -> Result<bool, String> {
+        Ok(self
+            .send(RpcRequest::GetHealth, serde_json::json!([]))?
+            .as_str()
+            == Some("ok"))
+    }
+    fn slot(&mut self, finalized: bool) -> Result<u64, String> {
+        let commitment = if finalized { "finalized" } else { "confirmed" };
+        self.send(
+            RpcRequest::GetSlot,
+            serde_json::json!([{ "commitment": commitment }]),
+        )?
+        .as_u64()
+        .ok_or_else(|| "BOOT_SLOT_UNKNOWN".into())
+    }
+    fn multiple_accounts(
+        &mut self,
+        keys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> Result<(u64, fe::ObservedState), String> {
+        let response = self.send(
+            RpcRequest::GetMultipleAccounts,
+            serde_json::json!([
+                keys.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                {"encoding": "base64", "commitment": "finalized", "minContextSlot": min_context_slot}
+            ]),
+        )?;
+        fe::decode_batch(response, keys, min_context_slot)
+    }
     fn wss(&mut self, program: Pubkey, transactions: bool) -> Result<(u64, u64), String> {
         let remaining = self
             .end
@@ -189,30 +248,25 @@ impl Reads for NetworkReads {
     }
 }
 fn cluster(io: &mut impl Reads, spec: &Spec) -> Result<(u64, u64), String> {
-    if io.rpc(RpcRequest::GetGenesisHash, json!([]))?.as_str() != Some(&spec.genesis) {
+    if io.genesis_hash()? != spec.genesis {
         return Err("BOOT_CLUSTER_MISMATCH".into());
     }
-    let version = io.rpc(RpcRequest::GetVersion, json!([]))?;
-    if version["solana-core"].as_str().is_none_or(|s| {
-        s.is_empty()
-            || s.len() > 64
-            || !s
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b".-+".contains(&b))
-    }) {
+    let version = io.version()?;
+    if version.is_empty()
+        || version.len() > 64
+        || !version
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".-+".contains(&b))
+    {
         return Err("BOOT_CLUSTER_VERSION_UNKNOWN".into());
     }
-    if io.rpc(RpcRequest::GetHealth, json!([]))?.as_str() != Some("ok") {
+    if !io.health_ok()? {
         return Err("BOOT_CLUSTER_UNHEALTHY".into());
     }
-    let finalized = io
-        .rpc(RpcRequest::GetSlot, json!([{"commitment":"finalized"}]))?
-        .as_u64()
+    let finalized = Some(io.slot(true)?)
         .filter(|s| *s > 0)
         .ok_or("BOOT_SLOT_UNKNOWN")?;
-    let current = io
-        .rpc(RpcRequest::GetSlot, json!([{"commitment":"confirmed"}]))?
-        .as_u64()
+    let current = Some(io.slot(false)?)
         .filter(|s| *s >= finalized)
         .ok_or("BOOT_SLOT_CONTRADICTION")?;
     if current - finalized > 150 {
@@ -377,10 +431,7 @@ fn run(
     if cluster_ok {
         let scope = fe::collect_scope(
             c,
-            |keys, floor| {
-                let response=io.rpc(RpcRequest::GetMultipleAccounts,json!([keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor.max(slot)}]))?;
-                fe::decode_batch(response, keys, floor.max(slot))
-            },
+            |keys, floor| io.multiple_accounts(keys, floor.max(slot)),
             true,
         );
         match scope {
@@ -527,35 +578,44 @@ pub fn execute(project: &Path, args: &[String]) -> Result<bool, String> {
         ttl_seconds: 60,
     };
     spec.validate()?;
-    let proof = val("--provider-evidence").ok_or("BOOT_PROVIDER_EVIDENCE_REQUIRED")?;
-    let mut data = Vec::new();
-    use std::io::Read;
-    std::fs::File::open(proof)
-        .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?
-        .take(65537)
-        .read_to_end(&mut data)
-        .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?;
-    if data.len() > 65536 {
-        return Err("BOOT_PROVIDER_EVIDENCE_LIMIT".into());
+    // X2: the typed PROVIDER_EVIDENCE record of the explicit offline import
+    // (`p0-journal import-provider-evidence`); its bytes are bound into the audit record.
+    let proof_path = val("--provider-evidence").ok_or("BOOT_PROVIDER_EVIDENCE_REQUIRED")?;
+    let read_bounded = || -> Result<Vec<u8>, String> {
+        let mut data = Vec::new();
+        use std::io::Read;
+        std::fs::File::open(&proof_path)
+            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?
+            .take(65537)
+            .read_to_end(&mut data)
+            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?;
+        if data.len() > 65536 {
+            return Err("BOOT_PROVIDER_EVIDENCE_LIMIT".into());
+        }
+        Ok(data)
+    };
+    let data = read_bounded()?;
+    let proof: fe::ProviderEvidence = journal::read_typed_value(Path::new(&proof_path))
+        .map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT")?;
+    if read_bounded()? != data {
+        return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
     }
-    let proof: Value =
-        serde_json::from_slice(&data).map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT")?;
     fe::validate_provider_evidence(
         c,
         c.rpc_endpoints.first().ok_or("BOOT_RPC_REQUIRED")?,
         &proof,
         now() as f64,
     )?;
-    if proof["wss_provider_binding"].as_str()
+    if proof.wss_provider_binding.as_deref()
         != c.wss_endpoints
             .first()
             .map(|s| hash(s.as_bytes()))
             .as_deref()
-        || proof["wss_free_only"] != true
+        || !proof.wss_free_only
     {
         return Err("BOOT_WSS_FREE_ONLY_UNQUALIFIED".into());
     }
-    if c.verification != "off" && proof["archive_qualified"] != true {
+    if c.verification != "off" && !proof.archive_qualified {
         return Err("BOOT_ARCHIVE_UNQUALIFIED".into());
     }
     let output = val("--output").ok_or("BOOT_OUTPUT_REQUIRED")?;
@@ -582,7 +642,7 @@ pub fn execute(project: &Path, args: &[String]) -> Result<bool, String> {
 mod tests {
     use super::super::boot_audit::{AccountProof, AuditedIdentity};
     use super::*;
-    use base64::Engine;
+    use serde_json::{json, Value};
     use solana_sdk::account::Account;
     use std::collections::BTreeMap;
     struct Fixture {
@@ -593,26 +653,41 @@ mod tests {
         wrong_slot: bool,
     }
     impl Reads for Fixture {
-        fn rpc(&mut self, r: RpcRequest, p: Value) -> Result<Value, String> {
+        fn genesis_hash(&mut self) -> Result<String, String> {
             self.reads += 1;
-            Ok(match r {
-                RpcRequest::GetGenesisHash => json!(self.genesis),
-                RpcRequest::GetVersion => json!({"solana-core":"3.1.12"}),
-                RpcRequest::GetHealth => json!("ok"),
-                RpcRequest::GetSlot => {
-                    json!(if self.wrong_slot && p[0]["commitment"] == "confirmed" {
-                        99
-                    } else {
-                        100
-                    })
-                }
-                RpcRequest::GetMultipleAccounts => {
-                    json!({"context":{"slot":100},"value":p[0].as_array().unwrap().iter().map(|key|{
-          self.all.get(&Pubkey::from_str(key.as_str().unwrap()).unwrap()).map(|a|json!({"owner":a.owner.to_string(),"lamports":a.lamports,"executable":a.executable,"data":[base64::engine::general_purpose::STANDARD.encode(&a.data),"base64"]})).unwrap_or(Value::Null)
-       }).collect::<Vec<_>>()})
-                }
-                _ => panic!("non-read operation"),
+            Ok(self.genesis.clone())
+        }
+        fn version(&mut self) -> Result<String, String> {
+            self.reads += 1;
+            Ok("3.1.12".into())
+        }
+        fn health_ok(&mut self) -> Result<bool, String> {
+            self.reads += 1;
+            Ok(true)
+        }
+        fn slot(&mut self, finalized: bool) -> Result<u64, String> {
+            self.reads += 1;
+            Ok(if self.wrong_slot && !finalized {
+                99
+            } else {
+                100
             })
+        }
+        fn multiple_accounts(
+            &mut self,
+            keys: &[Pubkey],
+            _: u64,
+        ) -> Result<(u64, fe::ObservedState), String> {
+            self.reads += 1;
+            let mut state = fe::ObservedState::default();
+            for k in keys {
+                let a = self
+                    .all
+                    .get(k)
+                    .ok_or_else(|| format!("FE_ACCOUNT_MISSING:{k}"))?;
+                state.0.insert(*k, a.clone());
+            }
+            Ok((100, state))
         }
         fn wss(&mut self, _: Pubkey, _: bool) -> Result<(u64, u64), String> {
             if self.wss {
@@ -812,14 +887,11 @@ mod tests {
             seconds,
         );
         for _ in 0..need {
-            assert_eq!(io.rpc(RpcRequest::GetSlot, json!([])).unwrap(), json!(100));
+            assert_eq!(io.slot(true).unwrap(), 100);
         }
+        assert_eq!(io.slot(true).unwrap_err(), "BOOT_RPC_BUDGET");
         assert_eq!(
-            io.rpc(RpcRequest::GetSlot, json!([])).unwrap_err(),
-            "BOOT_RPC_BUDGET"
-        );
-        assert_eq!(
-            io.rpc(RpcRequest::SendTransaction, json!([])).unwrap_err(),
+            io.send(RpcRequest::SendTransaction, json!([])).unwrap_err(),
             "BOOT_METHOD_REFUSED"
         );
         // An expired deadline refuses before any request.
@@ -830,13 +902,46 @@ mod tests {
             limit,
             0,
         );
-        assert_eq!(
-            late.rpc(RpcRequest::GetSlot, json!([])).unwrap_err(),
-            "BOOT_RPC_BUDGET"
-        );
+        assert_eq!(late.slot(true).unwrap_err(), "BOOT_RPC_BUDGET");
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
         server.join().unwrap();
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), need);
+    }
+    /// X2: responses are decoded into native values at the wire edge; malformed ones fail there.
+    #[test]
+    fn network_reads_decode_at_the_wire_edge() {
+        let key = Pubkey::new_unique();
+        let decode = |result: Value| {
+            let (url, _, stop, server) = rpc_stub(result);
+            let mut io = NetworkReads::open(
+                url,
+                "wss://unused.invalid".into(),
+                Duration::from_secs(2),
+                5,
+                30,
+            );
+            let out = (
+                io.slot(true),
+                io.multiple_accounts(&[key], 100),
+                io.genesis_hash(),
+            );
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            server.join().unwrap();
+            out
+        };
+        let (slot, accounts, genesis) = decode(json!("not-a-number"));
+        assert_eq!(slot.unwrap_err(), "BOOT_SLOT_UNKNOWN");
+        assert!(accounts.is_err());
+        assert_eq!(genesis.unwrap(), "not-a-number");
+        let (_, regressed, _) = decode(json!({"context":{"slot":50},"value":[null]}));
+        assert_eq!(regressed.err().unwrap(), "FE_CONTEXT_REGRESSION");
+        let (_, owner, _) = decode(json!({"context":{"slot":100},"value":[
+            {"owner":"bad","lamports":1,"executable":false,"data":["","base64"]}
+        ]}));
+        assert_eq!(owner.err().unwrap(), "FE_PUBKEY_INVALID");
+        let (_, missing, genesis) = decode(json!({"context":{"slot":100},"value":[null]}));
+        assert!(missing.err().unwrap().starts_with("FE_ACCOUNT_MISSING"));
+        assert_eq!(genesis.unwrap_err(), "BOOT_GENESIS_UNKNOWN");
     }
     #[test]
     fn cluster_pin_and_slot_contradictions_block_without_followup_reads() {

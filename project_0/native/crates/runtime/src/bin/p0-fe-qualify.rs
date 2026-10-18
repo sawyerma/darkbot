@@ -87,7 +87,8 @@ fn run() -> Result<(), String> {
     l.wss_message_mib = l.wss_message_mib.min(l.max_total_mib);
     let config = resolved.config.clone();
     // Existing FREE_ONLY qualification shape; a configured URL is not capacity evidence.
-    let proof: Value = serde_json::from_slice(
+    // Decoded at the file edge into the typed evidence (X2); no value tree is passed on.
+    let proof = fe::ProviderEvidence::from_measured_json(
         &fs::read(qualification.ok_or("FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED")?)
             .map_err(|_| "FE_QUALIFICATION_IO")?,
     )
@@ -131,7 +132,7 @@ fn run() -> Result<(), String> {
             .and_then(|_| f.sync_all())
             .map_err(|_| "FE_EVIDENCE_SYNC".into())
     }
-    let operational = json!({"requested":requested,"effective":resolved.json(),"qualification_sha256":fe::sha(&serde_json::to_vec(&proof).unwrap()),"execution":"READ_ONLY_NO_SIGNER"});
+    let operational = json!({"requested":requested,"effective":resolved.json(),"qualification_sha256":proof.source_sha256,"execution":"READ_ONLY_NO_SIGNER"});
     record(&mut evidence, kind::FE01_CONFIG, &operational, None)?;
     persist(&output.join("operational_config.json"), &operational)?;
     resolved.activate()?;

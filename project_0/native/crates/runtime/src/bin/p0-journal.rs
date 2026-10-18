@@ -3,6 +3,8 @@
 //! `export` writes an explicit JSONL export to a fresh destination, never over existing bytes;
 //! `frames JOURNAL` prints every frame (kind, sequence, provenance, value) as JSONL to stdout;
 //! `import KIND JOURNAL` writes JSONL from stdin into a new journal (census kinds only);
+//! `import-provider-evidence JSON JOURNAL` turns a measured provider evidence JSON into the typed
+//! `PROVIDER_EVIDENCE` record the network boot audit reads (X2);
 //! `renders RUN [--create]` checks every legacy view of a run byte for byte against its journal
 //! and, with `--create`, renders the missing ones (for example after a killed capture).
 use darkbot_runner::analytics::journal::{self, Reader, MANIFEST};
@@ -74,6 +76,29 @@ fn import(kind: u16, path: &Path) -> Result<(), String> {
     );
     Ok(())
 }
+/// Explicit offline import of measured provider evidence (X2): the JSON is decoded once into the
+/// typed record; the boot audit reads only that record and binds its bytes.
+fn import_provider_evidence(json: &Path, out: &Path) -> Result<(), String> {
+    use darkbot_runner::orchestration::fe_qualification::ProviderEvidence;
+    if std::fs::metadata(json).map_err(|e| e.to_string())?.len() > 65536 {
+        return Err("PROVIDER_EVIDENCE_LIMIT".into());
+    }
+    let evidence =
+        ProviderEvidence::from_measured_json(&std::fs::read(json).map_err(|e| e.to_string())?)?;
+    let mut writer = journal::Writer::create(out).map_err(|e| e.to_string())?;
+    writer
+        .append_typed(journal::Provenance::default(), &evidence)
+        .map_err(|e| e.to_string())?;
+    let durable = writer.seal(true).map_err(|e| e.to_string())?;
+    println!(
+        "PROVIDER_EVIDENCE {} providers={} source_sha256={} root_sha256={}",
+        out.display(),
+        evidence.providers.len(),
+        evidence.source_sha256,
+        journal::hex(&durable.hash)
+    );
+    Ok(())
+}
 fn frames(path: &Path) -> Result<(), String> {
     use std::io::Write;
     let mut reader =
@@ -133,12 +158,15 @@ fn main() {
             .parse()
             .map_err(|_| "KIND_INVALID".to_string())
             .and_then(|k| import(k, Path::new(path))),
+        ["import-provider-evidence", json, out] => {
+            import_provider_evidence(Path::new(json), Path::new(out))
+        }
         ["renders", run] => views(Path::new(run), false),
         ["renders", run, "--create"] => views(Path::new(run), true),
         _ => Err(
             "usage: p0-journal verify JOURNAL | p0-journal export JOURNAL DESTINATION \
                   [--kind N] | p0-journal frames JOURNAL | p0-journal import KIND JOURNAL | \
-                  p0-journal renders RUN [--create]"
+                  p0-journal import-provider-evidence JSON JOURNAL | p0-journal renders RUN [--create]"
                 .into(),
         ),
     };
