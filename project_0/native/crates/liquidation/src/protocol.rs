@@ -8,6 +8,9 @@ use std::str::FromStr;
 
 // ---- Programme (id-crate / constants.rs / type-crate pdas.rs) ----
 pub const PROGRAM_ID_MAINNET: &str = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA";
+/// BOOT-12 cluster pin: genesis hash of Solana mainnet-beta (the public, documented value). Not
+/// re-read from a live endpoint for this pin: Mainnet reads need separate permission (NOT_RUN).
+pub const GENESIS_HASH_MAINNET: &str = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 pub const PROGRAM_ID_STAGING: &str = "stag8sTKds2h4KzjUw3zKTsxbqvT4XKHdaR9X9E6Rct"; // VERIFY: Feature-Zuordnung "staging" in id-crate
 pub const KAMINO_PROGRAM_ID: &str = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD";
 pub const DRIFT_PROGRAM_ID: &str = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH";

@@ -56,6 +56,11 @@ pub(super) fn prepare(
     // must never auto-promote new protocol code.
     // [P1A-04] The baseline must also be the qualified, source-pinned deployment: an upgrade
     // between qualification and startup latches the same HALT as one observed at runtime.
+    // BOOT-12: cluster identity first (genesis pin), then the program identity below (ProgramData
+    // against the qualified deployment pin, latched PROGRAM_UPGRADE), both before admission.
+    let genesis = dep_rpc.get_genesis_hash()?;
+    check_cluster(&genesis)?;
+    eprintln!("cluster: genesis={genesis}");
     let program_data = darkbot_project0::protocol::program_data_address(&program);
     let program_data_account = dep_rpc
         .get_account_with_commitment(&program_data, CommitmentConfig::confirmed())?
@@ -894,6 +899,16 @@ pub(super) fn prepare(
     Ok((owner, fetch, ingress))
 }
 
+/// BOOT-12 (cluster identity) before any subscription or further read: the endpoint must serve
+/// the pinned Mainnet genesis. Devnet, a fork or a wrong provider stop with the code only (no URL).
+pub(super) fn check_cluster(observed: &solana_sdk::hash::Hash) -> Result<(), &'static str> {
+    if observed.to_string() == darkbot_project0::protocol::GENESIS_HASH_MAINNET {
+        Ok(())
+    } else {
+        Err("BOOT_CLUSTER_MISMATCH")
+    }
+}
+
 /// Blockhash refresh loop of the Shadow owner (M3). Shutdown and closed admission are checked
 /// before every refresh and at least every 250 ms of the wait, so no refresh starts after either;
 /// a refresh already in flight is bounded by its RPC timeout (30 s).
@@ -941,6 +956,25 @@ pub(super) fn run_blockhash_refresh(
                 break;
             }
             std::thread::sleep(left.min(STEP));
+        }
+    }
+}
+
+#[cfg(test)]
+mod cluster_tests {
+    use super::*;
+    use std::str::FromStr;
+    #[test]
+    fn cluster_check_accepts_only_the_mainnet_genesis_pin() {
+        let pin =
+            solana_sdk::hash::Hash::from_str(darkbot_project0::protocol::GENESIS_HASH_MAINNET)
+                .unwrap();
+        assert_eq!(check_cluster(&pin), Ok(()));
+        for other in [
+            solana_sdk::hash::Hash::new_unique(),
+            solana_sdk::hash::Hash::default(),
+        ] {
+            assert_eq!(check_cluster(&other), Err("BOOT_CLUSTER_MISMATCH"));
         }
     }
 }

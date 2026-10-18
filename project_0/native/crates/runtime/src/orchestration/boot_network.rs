@@ -57,6 +57,10 @@ pub struct Spec {
 impl Spec {
     pub fn validate(&self) -> Result<(), String> {
         Hash::from_str(&self.genesis).map_err(|_| "BOOT_GENESIS_PIN_REQUIRED")?;
+        // BOOT-12: operator input and the checked-in pin are independent sources and must agree.
+        if self.genesis != protocol::GENESIS_HASH_MAINNET {
+            return Err("BOOT_GENESIS_PIN_MISMATCH".into());
+        }
         if self.ttl_seconds == 0 || self.ttl_seconds > 60 {
             return Err("BOOT_TOKEN_TTL".into());
         }
@@ -637,10 +641,25 @@ mod tests {
     }
     fn spec() -> Spec {
         Spec {
-            genesis: Hash::new_unique().to_string(),
+            genesis: protocol::GENESIS_HASH_MAINNET.into(),
             transactions: false,
             ttl_seconds: 60,
         }
+    }
+    /// BOOT-12: the operator's `--genesis-hash` and the checked-in pin are two independent
+    /// sources; the audit runs only when they agree.
+    #[test]
+    fn spec_rejects_genesis_that_differs_from_the_pin() {
+        assert_eq!(spec().validate(), Ok(()));
+        for genesis in [Hash::new_unique().to_string(), Hash::default().to_string()] {
+            let s = Spec { genesis, ..spec() };
+            assert_eq!(s.validate().unwrap_err(), "BOOT_GENESIS_PIN_MISMATCH");
+        }
+        let s = Spec {
+            genesis: "not-a-hash".into(),
+            ..spec()
+        };
+        assert_eq!(s.validate().unwrap_err(), "BOOT_GENESIS_PIN_REQUIRED");
     }
     fn state() -> (RuntimeConfig, fe::CollectedScope) {
         let (c, mut all) = fe::tests::fixture();

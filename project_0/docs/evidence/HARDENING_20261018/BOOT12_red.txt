@@ -1,0 +1,38 @@
+   Compiling darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.62s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_runner-dd12e19c670d97b3)
+
+running 8 tests
+test orchestration::boot_network::tests::cluster_pin_and_slot_contradictions_block_without_followup_reads ... ok
+test orchestration::boot_network::tests::boot_state_uses_pinned_decoders_dynamic_pda_and_oracle_gates ... ok
+test orchestration::boot_network::tests::network_fixture_never_promotes_unpinned_deployment_or_unknown_oracle ... ok
+test orchestration::boot_network::tests::native_network_record_and_start_token_reject_expiry_drift_and_tampering ... ok
+test orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum ... ok
+test orchestration::boot_network::tests::spec_rejects_genesis_that_differs_from_the_pin ... FAILED
+test orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin ... FAILED
+test orchestration::boot_network::tests::network_reads_counts_only_boot_budget ... ok
+
+failures:
+
+---- orchestration::boot_network::tests::spec_rejects_genesis_that_differs_from_the_pin stdout ----
+
+thread 'orchestration::boot_network::tests::spec_rejects_genesis_that_differs_from_the_pin' (30131964) panicked at crates/runtime/src/orchestration/boot_network.rs:652:37:
+called `Result::unwrap_err()` on an `Ok` value: ()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin stdout ----
+
+thread 'orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin' (30131965) panicked at crates/runtime/src/orchestration/state_owner/setup.rs:968:13:
+assertion `left == right` failed
+  left: Ok(())
+ right: Err("BOOT_CLUSTER_MISMATCH")
+
+
+failures:
+    orchestration::boot_network::tests::spec_rejects_genesis_that_differs_from_the_pin
+    orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin
+
+test result: FAILED. 6 passed; 2 failed; 0 ignored; 0 measured; 316 filtered out; finished in 0.11s
+
+error: test failed, to rerun pass `-p darkbot-runner --lib`

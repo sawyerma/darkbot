@@ -1,0 +1,33 @@
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.74s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_runner-dd12e19c670d97b3)
+
+running 25 tests
+test orchestration::boot_network::tests::cluster_pin_and_slot_contradictions_block_without_followup_reads ... ok
+test orchestration::boot_network::tests::boot_state_uses_pinned_decoders_dynamic_pda_and_oracle_gates ... ok
+test orchestration::boot_network::tests::network_fixture_never_promotes_unpinned_deployment_or_unknown_oracle ... ok
+test orchestration::boot_network::tests::native_network_record_and_start_token_reject_expiry_drift_and_tampering ... ok
+test orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum ... ok
+test orchestration::boot_network::tests::spec_rejects_genesis_that_differs_from_the_pin ... ok
+test orchestration::state_owner::census::tests::c0_census_worker_cost_at_historical_population ... ignored
+test orchestration::state_owner::census::tests::census_membership_counts_debtors_and_undecodable_members_only ... ok
+test orchestration::state_owner::census::tests::census_proves_identity_coverage_and_journals_typed_rows ... ok
+test orchestration::state_owner::census::tests::chain_clock_rejects_foreign_short_zero_and_future_clocks ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_repeat_admission_remains_bounded ... ok
+test orchestration::boot_network::tests::network_reads_counts_only_boot_budget ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token ... ok
+test orchestration::state_owner::integration_probe_tests::evidence_failures_remain_explicit_static_categories ... ok
+test orchestration::state_owner::integration_probe_tests::only_one_target_is_dispatched_per_idle_turn ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_returns_latest_coalesced_work_once ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_skips_stale_order_entries ... ok
+test orchestration::state_owner::integration_probe_tests::shadow_error_category_never_formats_secret_payload ... ok
+test orchestration::state_owner::integration_probe_tests::target_waits_unsigned_until_worker_is_idle ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ ... ok
+test orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops ... ok
+
+test result: ok. 24 passed; 0 failed; 1 ignored; 0 measured; 299 filtered out; finished in 0.42s
+
