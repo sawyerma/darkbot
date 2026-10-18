@@ -96,6 +96,9 @@ pub struct StateCore {
     reconnects_applied: u64,
     /// C7: first terminal ingress `Fatal` detail; sticky, the state never leaves HALT for it.
     fatal_detail: Option<String>,
+    /// C1: a `Gap` arrived after the last `Reconnected` (StreamReady): the stream has no valid
+    /// generation until the next `Reconnected`, so no recovery may become Ready.
+    gap_open: bool,
 }
 
 impl StateCore {
@@ -113,7 +116,12 @@ impl StateCore {
             forks: fork::ForkTracker::new(),
             reconnects_applied: 0,
             fatal_detail: None,
+            gap_open: false,
         }
+    }
+    /// A `Gap` since the last `Reconnected` (C1).
+    pub fn gap_open(&self) -> bool {
+        self.gap_open
     }
     /// `Reconnected` events applied so far (C1).
     pub fn reconnects_applied(&self) -> u64 {
@@ -211,11 +219,13 @@ impl StateCore {
                 None
             }
             IngressEvent::Gap { .. } => {
+                self.gap_open = true;
                 self.halt(HaltReason::FeedGap);
                 None
             }
             IngressEvent::Reconnected { .. } => {
                 self.reconnects_applied = self.reconnects_applied.saturating_add(1);
+                self.gap_open = false;
                 self.halt(HaltReason::FeedGap);
                 None
             }

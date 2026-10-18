@@ -223,7 +223,10 @@ impl RecoveryDriver {
         // C1: a Reconnected applied during the final attempt is a new stream generation whose
         // recovery would otherwise be lost: exactly one further complete cycle on the same
         // session, never more (a reconnect in that cycle grants nothing further).
-        if matches!(outcome, RecoveryOutcome::Exhausted { .. }) && self.reconnect_in_final_attempt {
+        if matches!(outcome, RecoveryOutcome::Exhausted { .. })
+            && self.reconnect_in_final_attempt
+            && !st.gap_open()
+        {
             self.note("[recovery] reconnected during the final attempt: one further cycle".into());
             return Some(self.recover_cancellable(st, fetch, drain, cancelled));
         }
@@ -416,7 +419,13 @@ impl RecoveryDriver {
                     "[recovery] attempt={}/{} reconcile=clean snapshot_slot={}",
                     attempt, self.max_attempts, b.slot
                 ));
-                if st.confirm_ready().is_tradable() {
+                // C1: a Gap after the last StreamReady leaves no valid stream generation.
+                if st.gap_open() {
+                    self.note(format!(
+                        "[recovery] attempt={}/{} gap after the last StreamReady: not ready",
+                        attempt, self.max_attempts
+                    ));
+                } else if st.confirm_ready().is_tradable() {
                     return RecoveryOutcome::Ready;
                 }
             } else {
@@ -821,6 +830,63 @@ mod tests {
         assert!(!state.run_state().is_tradable());
     }
 
+    fn gap() -> IngressEvent {
+        IngressEvent::Gap {
+            source: SourceKind::WsRpcControl,
+            from_slot: Some(9),
+            to_slot: None,
+            t_rx_ns: 0,
+        }
+    }
+    /// C1 test 4: control events count in FIFO order. Reconnect -> Gap leaves no valid
+    /// StreamReady: no attempt may become Ready and no extra cycle is granted.
+    #[test]
+    fn gap_after_reconnected_invalidates_ready() {
+        use std::cell::Cell;
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, 0, &calls);
+        let drains = Cell::new(0);
+        let mut drain = |st: &mut StateCore| {
+            drains.set(drains.get() + 1);
+            if drains.get() == 1 {
+                st.on_event(reconnected());
+                st.on_event(gap());
+            }
+        };
+        let out =
+            driver
+                .on_event_cancellable(&mut state, reconnected(), &mut fetch, &mut drain, &|| false);
+        assert_eq!(out, Some(RecoveryOutcome::Exhausted { attempts: 3 }));
+        assert_eq!(driver.attempts_total, 3);
+        assert!(!state.run_state().is_tradable());
+    }
+    /// C1 test 4: Gap -> Reconnect in the final attempt: the later StreamReady counts and the
+    /// extra cycle recovers.
+    #[test]
+    fn gap_then_reconnected_can_recover() {
+        use std::cell::Cell;
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, 2, &calls);
+        let drains = Cell::new(0);
+        let mut drain = |st: &mut StateCore| {
+            drains.set(drains.get() + 1);
+            if drains.get() == 2 {
+                st.on_event(gap());
+                st.on_event(reconnected());
+            }
+        };
+        let out =
+            driver
+                .on_event_cancellable(&mut state, reconnected(), &mut fetch, &mut drain, &|| false);
+        assert_eq!(out, Some(RecoveryOutcome::Ready));
+        assert_eq!(driver.attempts_total, 4);
+    }
     fn fatal(detail: &str) -> IngressEvent {
         IngressEvent::Fatal {
             source: SourceKind::WsRpcControl,
