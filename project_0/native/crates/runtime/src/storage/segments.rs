@@ -261,6 +261,10 @@ impl ChainReader {
     pub fn events(&self) -> u64 {
         self.events
     }
+    /// The last segment ended in a torn (partially written) frame: frames were lost.
+    pub fn tail_truncated(&self) -> bool {
+        self.reader.tail_truncated
+    }
     pub fn next_frame(&mut self) -> io::Result<Option<Frame>> {
         if self.ended {
             return Ok(None);

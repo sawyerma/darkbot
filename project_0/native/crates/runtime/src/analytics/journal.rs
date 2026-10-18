@@ -1090,6 +1090,11 @@ pub fn export_views(
                 rows[i] += 1;
             }
         }
+        // A torn tail lost frames: no view may present the prefix as the journal (H1 keeps such
+        // a capture readable and INCOMPLETE for verification, not exportable).
+        if reader.tail_truncated() {
+            return Err(bad("EXPORT_TORN_TAIL"));
+        }
         for out in outs {
             out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
         }
