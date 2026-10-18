@@ -189,6 +189,10 @@ pub(super) struct ShadowOwner {
     mt0_owner: darkbot_common::mt0::OwnerTimer,
 }
 
+/// C9: the one blockhash freshness bound of the Shadow owner (detection gates and the pipeline's
+/// build limit); a change needs evidence, never a silent widening at one gate.
+const BLOCKHASH_MAX_AGE_NS: u64 = 30_000_000_000;
+
 enum OwnerStep<T> {
     Next(T),
     Continue,

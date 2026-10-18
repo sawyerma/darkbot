@@ -733,3 +733,31 @@ fn sweep_fanout_owner_block_is_measured() {
         }
     }
 }
+
+/// C9: one blockhash freshness bound at every owner gate; inclusive at the cutoff, stale 1 ns
+/// after it, and no gate keeps its own literal.
+#[test]
+fn blockhash_freshness_is_one_policy() {
+    let cache = BlockhashCache::new();
+    cache.set(darkbot_solana::state::blockhash::CachedBlockhash {
+        hash: solana_sdk::hash::Hash::default(),
+        last_valid_block_height: 1,
+        refreshed_ns: 1_000,
+    });
+    assert!(cache
+        .fresh(1_000 + BLOCKHASH_MAX_AGE_NS, BLOCKHASH_MAX_AGE_NS)
+        .is_some());
+    assert!(cache
+        .fresh(1_000 + BLOCKHASH_MAX_AGE_NS + 1, BLOCKHASH_MAX_AGE_NS)
+        .is_none());
+    for (name, source) in [
+        ("detect.rs", include_str!("detect.rs")),
+        ("events.rs", include_str!("events.rs")),
+    ] {
+        assert!(
+            !source.contains("30_000_000_000"),
+            "{name} keeps its own bound"
+        );
+        assert!(source.contains("BLOCKHASH_MAX_AGE_NS"), "{name}");
+    }
+}

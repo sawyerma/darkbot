@@ -929,7 +929,7 @@ impl ShadowOwner {
                                             }
                                             let Some(bh) = self
                                                 .blockhash
-                                                .fresh(self.clock.now_ns(), 30_000_000_000)
+                                                .fresh(self.clock.now_ns(), BLOCKHASH_MAX_AGE_NS)
                                             else {
                                                 self.metrics.oracle_price_fallbacks = self
                                                     .metrics

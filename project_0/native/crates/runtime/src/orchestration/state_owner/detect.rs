@@ -114,8 +114,9 @@ impl ShadowOwner {
                                     }
                                 };
 
-                            let Some(bh) =
-                                self.blockhash.fresh(self.clock.now_ns(), 30_000_000_000)
+                            let Some(bh) = self
+                                .blockhash
+                                .fresh(self.clock.now_ns(), BLOCKHASH_MAX_AGE_NS)
                             else {
                                 self.evidence.emit(OwnerEvidence::Record(
                                     RecordEvent::IntegrationSkip {
@@ -373,7 +374,7 @@ impl ShadowOwner {
                 limits: TxLimits::default(),
                 resources: self.resources,
                 min_profit: self.min_profit,
-                blockhash_max_age_ns: 30_000_000_000,
+                blockhash_max_age_ns: BLOCKHASH_MAX_AGE_NS,
                 p7_passed: false,
                 freshness: self.freshness,
                 tip_account: None,
