@@ -28,6 +28,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | `bb26313` | Initial typed owner writer and binary journal WIP | Intermediate version; superseded by `4a27a1c` |
 | **`4a27a1c`** | Production binary journal integration, FE-04 transition journaling, capture/MT0/econ/census/FE-01 journal/replay, reader/export tooling | **PERSIST PARTIAL**, not Mainnet-qualified; Rust 415/417 PASS with 2 ignored each, Python 107 PASS, verifier 29 PASS per recorded local evidence. |
 | [Implementation report](development_history/persist_binary_completion_20261016.md) | Exact migration details and limits | Historical report written before commit; now checked in |
+| **`d8cc32a`** (2026-10-18) | [BUGS.md](BUGS.md) hardening: C6/D10 + C1 tests 4/6, E4/E5/E6 (BOOT-02 writer probe, bounded seal screening, run volume), D3 (sweep owner-block metric + offline stress), B2/E1/D11/B11 (exact pinned Marginfi decoders), E3/E11 (refresh discriminators from pinned IDLs), F4, E10, C9, F3; earlier the same day H/M/N/L, D1/D4/D5/D8/D9, B5, B13, C7, X2 | **LOCAL_PASS per ticket** (offline tests, `docs/evidence/HARDENING_20261018/`). Gate 2 on `8eccd8f`: clippy `--all-targets --all-features -D warnings`, `test --all-features` (541 ok) and release build exit 0; `fmt --check` exit 1 only for three foreign reporter files of `311f9a4` (BUGS F6). **No** Mainnet read, network qualification (G-B), calibration or LIVE release. |
 | [Ledger dated PERSIST entry](MEASUREMENT_LEDGER.md) | Canonical PERSIST verdict and next gaps | Current |
 
 **PERSIST-01 PARTIAL:** runtime and strict batch primary records now use the existing binary journal; the unchanged pinned verifier consumes derived JSONL views at the batch boundary. Historical proof IDs remain immutable; new binary digests use the existing spec identity mechanism.
@@ -101,6 +102,7 @@ Acceptance criteria: `PHASENPLAN.json` → `first_profit_tickets`. Status: `MEAS
 - Separate Shadow WSS disconnect/readiness smoke — required by the 2026-10-10 gate, not recorded (L181).
 - Dedicated R127 admission Shadow requalification after FIX-134/135 — not recorded.
 - 72 h P6-LT Shadow — not started ([measurements/protocols/p6lt_shadow.md](measurements/protocols/p6lt_shadow.md)).
+- BUGS.md items still open before 4h readiness (2026-10-18): C1 test 7 (owner end-to-end fixture), X1 rest (fresh oracle/state identities at admission), X3 rest (BOOT-01/02 matrix), F6 (foreign reporter formatting); real-load sweep owner-block p95/p99 (`sweep_timing` line) and Mainnet MarginfiGroup/FeeState lengths (B2) — NOT_MEASURED until an authorized G-B/G-C run.
 
 **Safety gates in force (unchanged):**
 
