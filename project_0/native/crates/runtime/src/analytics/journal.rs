@@ -187,8 +187,9 @@ fn parent(path: &Path) -> &Path {
 pub fn binary_path(path: &Path) -> PathBuf {
     path.with_extension("p0j")
 }
-/// 16 fresh bytes from the operating system. A journal is never created without them.
-fn random16() -> io::Result<[u8; 16]> {
+/// 16 fresh bytes from the operating system. A journal is never created without them; the
+/// segment chain uses the same source for its set id (F5: one implementation).
+pub(crate) fn random16() -> io::Result<[u8; 16]> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")?.read_exact(&mut bytes)?;
     Ok(bytes)

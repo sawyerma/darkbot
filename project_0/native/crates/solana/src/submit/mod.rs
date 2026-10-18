@@ -5,7 +5,9 @@
 //!   Kosten bleiben `None`, nie 0.
 //! - Kein Provider-Name in Businesslogik; nur URLs in der Konfiguration.
 //!
-//! Status: UNTESTED / VERIFY (RpcClient-/Jito-API, JSON-Felder von getTransaction).
+//! Status (F5): offline-tested parts only — see `rpc.rs` and `jito.rs`. The real RpcClient/Jito
+//! responses and the `getTransaction` JSON fields are VERIFY: never exercised against a Mainnet
+//! endpoint (FE-05/06, P8 NOT_RUN).
 
 pub mod jito;
 pub mod rpc;

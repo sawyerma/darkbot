@@ -1,0 +1,34 @@
+# F5 status comments + one random16; tested tree: af58a14 + F5 diff (CARGO_BUILD_JOBS=2)
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 storage::segments analytics::journal
+
+running 21 tests
+test analytics::journal::tests::export_of_a_damaged_journal_leaves_no_partial_file ... ok
+test analytics::journal::tests::explicit_export_matches_legacy_jsonl_and_never_overwrites ... ok
+test analytics::journal::tests::fsync_error_never_returns_durable_ack_and_poisoning_is_sticky ... ok
+test analytics::journal::tests::header_identities_are_fresh_per_writer_and_shared_per_run_and_boot ... ok
+test analytics::journal::tests::lossless_integer_decimal_and_nested_value_roundtrip ... ok
+test analytics::journal::tests::historical_schema_one_frames_of_migrated_kinds_stay_readable ... ok
+test analytics::journal::tests::malformed_length_payload_tags_and_depth_are_rejected ... ok
+test analytics::journal::tests::ordered_frames_preserve_provenance_manifest_and_durable_boundary ... ok
+test analytics::journal::tests::persist05_local_writer_benchmark ... ignored
+test analytics::journal::tests::restart_never_truncates_or_accepts_partial_tail ... ok
+test analytics::journal::tests::multi_view_export_is_all_or_nothing_and_never_overwrites ... ok
+test analytics::journal::tests::typed_frames_fail_closed_on_unknown_kind_version_or_truncation ... ok
+test analytics::journal::tests::write_admission_forbids_legacy_rollback_and_unregistered_kinds ... ok
+test storage::segments::tests::crash_missing_corrupt_and_orphan_segments_fail_closed ... ok
+test storage::segments::tests::segmented_replay_equals_single_journal ... ok
+test storage::segments::tests::zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate ... ok
+test analytics::journal::tests::unsupported_version_corruption_checksum_and_every_truncation_fail_closed ... ok
+test storage::segments::torn_tail_tests::capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse ... ok
+test storage::segments::torn_tail_tests::interrupted_rotate_missing_final_successor_is_incomplete_and_orphan_holes_fail ... ok
+test storage::segments::torn_tail_tests::zero_bytes_inside_the_stream_stay_hard_errors ... ok
+test storage::segments::torn_tail_tests::capture_torn_tail_is_incomplete_but_wallet_and_resume_stay_strict ... ok
+
+test result: ok. 20 passed; 0 failed; 1 ignored; 0 measured; 342 filtered out; finished in 0.87s
+
+exit=0
+$ cargo clippy -p darkbot-runner -p darkbot-solana --all-targets --all-features -- -D warnings
+    Checking darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
+    Checking darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+exit=0

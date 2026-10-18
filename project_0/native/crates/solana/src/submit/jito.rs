@@ -8,7 +8,11 @@
 //! Tip = SystemProgram-Transfer an einen Tip-Account innerhalb der (letzten) TX.
 //! Bundle max. 5 TXs, atomar, sequenziell im selben Slot. Bundle-ID ≠ landed.
 //!
-//! Status: UNTESTED / VERIFY.
+//! Status (F5): offline-tested — fee-payer signatures checked before any HTTP request
+//! (`unsigned_bundle_is_rejected_without_network`), endpoint-free errors
+//! (`jito_transport_and_simulation_do_not_expose_endpoint`), inflight-status parsing
+//! (`inflight_landed_needs_a_real_slot`). VERIFY, NOT_RUN: the block-engine API and response
+//! formats against the real endpoint (FE-06/P8 not authorized).
 
 use super::{SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError};
 use serde_json::{json, Value};

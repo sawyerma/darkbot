@@ -87,13 +87,6 @@ fn file_name(path: &Path) -> String {
         .to_string()
 }
 
-fn random16() -> io::Result<[u8; 16]> {
-    use std::io::Read;
-    let mut b = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
-    Ok(b)
-}
-
 /// Result of sealing a segmented journal.
 #[derive(Clone, Debug)]
 pub struct SealedSet {
@@ -123,7 +116,7 @@ impl SegmentedWriter {
             first: first.into(),
             writer: Writer::create(first)?,
             index: 1,
-            set_id: random16()?,
+            set_id: journal::random16()?,
             events_current: 0,
             events_sealed: 0,
             sealed_bytes: 0,

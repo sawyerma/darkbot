@@ -9,8 +9,11 @@
 //!   Slot-Provenienz und der Empfänger hält fail-closed an.
 //! - Kein Provider im Code; nur `ws_url`.
 //!
-//! Status: UNTESTED / VERIFY (tokio-tungstenite API, Helius-WSS-Verhalten,
-//! Credit-Verbrauch der programSubscribe → Ledger S1-05).
+//! Status (F5): loopback-tested against fake WebSocket servers — ACK/StreamReady barrier,
+//! ping/pong, 429/Retry-After, reconnect and recovery budget, stop in every session phase,
+//! queue overflow (`ws_rpc_recovery_tests.rs`, `ws_rpc_stop_tests.rs`, unit tests here).
+//! VERIFY, NOT_RUN: real provider (Helius) WSS behaviour and the programSubscribe credit cost
+//! (Ledger S1-05).
 
 use super::{
     AccountUpdate, IngressError, IngressEvent, IngressHalt, IngressSource, SlotStatus, SlotUpdate,

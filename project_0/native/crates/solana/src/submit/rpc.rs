@@ -1,6 +1,8 @@
 //! S3-05: RPC-Submission + S3-06: Landing-Reconciliation über RPC.
 //!
-//! Status: UNTESTED / VERIFY (solana-client Signaturen; getTransaction-Meta-Felder).
+//! Status (F5): offline-tested — secret-free remote/transport error classes and no release of an
+//! ambiguous send (`remote_and_transport_errors_never_render_secrets_or_release_ambiguous_sends`).
+//! VERIFY, NOT_RUN: real solana-client responses and the `getTransaction` meta fields.
 
 use super::{
     LandingEvidence, LandingOutcome, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck,
