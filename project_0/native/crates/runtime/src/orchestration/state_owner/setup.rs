@@ -365,6 +365,8 @@ pub(super) fn prepare(
         max_slippage_bps: config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0)?,
         max_outstanding_attempts: config::parsed_or("P0_MAX_OUTSTANDING", 1)?,
     };
+    // L4: one strict parse; the evaluation uses exactly the configured safety value.
+    let eval_slippage_bps = limits.max_slippage_bps;
     let mut allow = Allow::default();
     allow.execution_classes.insert("longtail");
     let safety = Safety::new(limits, allow, false);
@@ -802,11 +804,8 @@ pub(super) fn prepare(
             detect_pipeline_ns_total,
             detect_pipeline_ns_max,
         },
-        eval_slippage_bps: config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0).unwrap_or(0),
-        zero_prefund_enabled: config::parsed_or("P0_ZERO_PREFUND_QUALIFIED", false)
-            .unwrap_or(false)
-            || (mode == "shadow"
-                && config::parsed_or("P0_ZERO_PREFUND_SHADOW_PROBE", false).unwrap_or(false)),
+        eval_slippage_bps,
+        zero_prefund_enabled: zero_prefund_enabled(&mode, &|k| std::env::var(k).ok())?,
         c0_census: match super::census::config(&census_journal, use_threshold_trigger)? {
             Some(c) => Some(super::census::spawn(c, shutdown.clone())?),
             None => None,
@@ -904,6 +903,26 @@ pub(super) fn prepare(
     Ok((owner, fetch, ingress))
 }
 
+/// L4: both zero-prefund flags are parsed strictly (an invalid value is a start error, never a
+/// silent `false`; no short circuit hides one); the Shadow probe applies only in Shadow mode.
+pub(super) fn zero_prefund_enabled(
+    mode: &str,
+    get: &dyn Fn(&str) -> Option<String>,
+) -> Result<bool, config::ConfigError> {
+    let flag = |key: &str| match get(key) {
+        Some(v) if !v.trim().is_empty() => {
+            v.parse::<bool>().map_err(|_| config::ConfigError::Invalid {
+                key: key.into(),
+                value: v,
+            })
+        }
+        _ => Ok(false),
+    };
+    let qualified = flag("P0_ZERO_PREFUND_QUALIFIED")?;
+    let probe = flag("P0_ZERO_PREFUND_SHADOW_PROBE")?;
+    Ok(qualified || (mode == "shadow" && probe))
+}
+
 /// BOOT-12 (cluster identity) before any subscription or further read: the endpoint must serve
 /// the pinned Mainnet genesis. Devnet, a fork or a wrong provider stop with the code only (no URL).
 pub(super) fn check_cluster(observed: &solana_sdk::hash::Hash) -> Result<(), &'static str> {
@@ -968,6 +987,32 @@ pub(super) fn run_blockhash_refresh(
 #[cfg(test)]
 mod cluster_tests {
     use super::*;
+    #[test]
+    fn zero_prefund_flags_parse_strictly_and_never_enable_implicitly() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        assert!(!zero_prefund_enabled("shadow", &env(&[])).unwrap());
+        let q = env(&[("P0_ZERO_PREFUND_QUALIFIED", "true")]);
+        assert!(zero_prefund_enabled("econ4h", &q).unwrap());
+        let probe = env(&[("P0_ZERO_PREFUND_SHADOW_PROBE", "true")]);
+        assert!(zero_prefund_enabled("shadow", &probe).unwrap());
+        assert!(!zero_prefund_enabled("econ4h", &probe).unwrap());
+        for bad in [
+            env(&[("P0_ZERO_PREFUND_QUALIFIED", "yes")]),
+            env(&[
+                ("P0_ZERO_PREFUND_QUALIFIED", "true"),
+                ("P0_ZERO_PREFUND_SHADOW_PROBE", "1"),
+            ]),
+        ] {
+            assert!(zero_prefund_enabled("shadow", &bad).is_err());
+        }
+    }
     use std::str::FromStr;
     #[test]
     fn cluster_check_accepts_only_the_mainnet_genesis_pin() {

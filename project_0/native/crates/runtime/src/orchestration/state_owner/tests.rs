@@ -13,6 +13,48 @@ fn owner_terminal_codes_are_reported_verbatim() {
     }
 }
 
+/// N5: classified errors carry a secret-free detail; everything else stays a category.
+#[test]
+fn failure_report_shows_classified_details_only() {
+    use super::super::startup::{failure_report, OperationalConfigError};
+    use darkbot_common::config::ConfigError;
+    let secret = "https://x.invalid/?api-key=SECRET";
+    let client = solana_client::client_error::ClientError::from(
+        solana_client::client_error::ClientErrorKind::Custom(secret.into()),
+    );
+    assert_eq!(failure_report(&client), "RPC_OTHER");
+    assert_eq!(
+        failure_report(&ConfigError::Missing("P0_WS_URL".into())),
+        "CONFIG_MISSING P0_WS_URL"
+    );
+    let invalid = ConfigError::Invalid {
+        key: "P0_RPC_URL".into(),
+        value: secret.into(),
+    };
+    assert_eq!(failure_report(&invalid), "CONFIG_INVALID P0_RPC_URL");
+    let unclassified: Box<dyn std::error::Error> = secret.into();
+    assert_eq!(
+        failure_report(unclassified.as_ref()),
+        "SHADOW_RUNTIME_ERROR"
+    );
+    // Operational-config rejections are local texts without endpoint values.
+    let rejected = darkbot_solana::runtime_config::Resolved::parse(
+        &["--rpc-endpoints".into(), "file:///tmp/SECRET".into()],
+        &|_| None,
+    )
+    .err()
+    .unwrap();
+    let report = failure_report(&OperationalConfigError(rejected));
+    assert!(
+        report.starts_with("OPERATIONAL_CONFIG: ") && !report.contains("SECRET"),
+        "{report}"
+    );
+    assert_eq!(
+        failure_report(&super::OwnerTerminal("STATE_RECOVERY_EXHAUSTED")),
+        "STATE_RECOVERY_EXHAUSTED"
+    );
+}
+
 #[test]
 fn shadow_error_category_never_formats_secret_payload() {
     let e = solana_client::client_error::ClientError::from(

@@ -3,6 +3,35 @@ use super::state_owner::run_shadow;
 use darkbot_common::{config, timing::Clock};
 use std::time::Duration;
 
+/// Operational-configuration rejection from `runtime_config`: fixed local texts that never
+/// contain endpoint values or keys, so the start report may show them (N5).
+#[derive(Debug)]
+pub(crate) struct OperationalConfigError(pub String);
+impl std::fmt::Display for OperationalConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for OperationalConfigError {}
+
+/// N5: the one-line start failure report. Only classified errors carry detail: configuration
+/// keys (never their values), operational-config rejections, owner/evidence codes; transport,
+/// RPC and IO errors keep their category; every other error is the generic category, its
+/// `Display` is never printed (it may carry URLs, keys, paths or bodies).
+pub fn failure_report(error: &(dyn std::error::Error + 'static)) -> String {
+    use darkbot_common::config::ConfigError;
+    if let Some(e) = error.downcast_ref::<ConfigError>() {
+        return match e {
+            ConfigError::Missing(key) => format!("CONFIG_MISSING {key}"),
+            ConfigError::Invalid { key, .. } => format!("CONFIG_INVALID {key}"),
+        };
+    }
+    if let Some(e) = error.downcast_ref::<OperationalConfigError>() {
+        return format!("OPERATIONAL_CONFIG: {e}");
+    }
+    shadow_failure_code(error).to_string()
+}
+
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|s| s == "--help" || s == "-h") {
@@ -14,7 +43,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         || std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
     {
         let resolved =
-            darkbot_solana::runtime_config::Resolved::parse(&args, &|k| std::env::var(k).ok())?;
+            darkbot_solana::runtime_config::Resolved::parse(&args, &|k| std::env::var(k).ok())
+                .map_err(OperationalConfigError)?;
         // Legacy CLI contract of the pinned Python bridge (`operational_config.py`, PERSIST-04):
         // private file plus the machine view on stdout. The native launcher never uses it.
         if let Some(path) = &resolved.export {
@@ -26,7 +56,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             print!("{}", resolved.text());
             return Ok(());
         }
-        let resolved = resolved.native_only()?;
+        let resolved = resolved.native_only().map_err(OperationalConfigError)?;
         if resolved.config.verification != "off"
             && std::env::var_os("P0_MEASUREMENT_PLAN").is_none()
         {
@@ -148,9 +178,9 @@ fn supervise(
         .name("econ-shadow-owner".into())
         .spawn(move || {
             let result = run_shadow(clock, Some(shadow_handle.clone())).map_err(|e| {
-                let code = shadow_failure_code(e.as_ref());
-                eprintln!("C0_E1_SHADOW_FAILED category={code}");
-                code.to_string()
+                let report = failure_report(e.as_ref());
+                eprintln!("C0_E1_SHADOW_FAILED category={report}");
+                report
             });
             if result.is_err() || !shadow_handle.admission_closed() {
                 shadow_handle

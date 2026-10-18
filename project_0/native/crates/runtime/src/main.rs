@@ -3,7 +3,7 @@ fn main() {
     if let Err(e) = darkbot_runner::orchestration::run() {
         eprintln!(
             "p0-longtail: {}",
-            darkbot_runner::orchestration::shadow_failure_code(e.as_ref())
+            darkbot_runner::orchestration::failure_report(e.as_ref())
         );
         std::process::exit(2);
     }

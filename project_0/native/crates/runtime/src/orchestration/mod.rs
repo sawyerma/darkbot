@@ -11,7 +11,7 @@ mod startup;
 mod state_owner;
 pub mod winner_tracker;
 #[cfg(feature = "crate_health")]
-pub use startup::{run, shadow_failure_code};
+pub use startup::{failure_report, run, shadow_failure_code};
 
 #[cfg(feature = "crate_health")]
 pub mod fe_replay;
