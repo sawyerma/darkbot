@@ -1,16 +1,16 @@
 command: cargo clippy --all-targets --all-features -- -D warnings
 environment: CARGO_BUILD_JOBS=2 (machine load limit); cwd project_0/native (virtual workspace: common, solana, liquidation, runtime, reporter)
-tested_head: 8eb7c89d3f860505c9bc9f5097ef0993ccaba4ae
+tested_head: 512bb13c224aa01ae5bdb944f3c7e302d2ebe385
 worktree:  M Cargo.lock (Cargo.lock regenerated locally: committed lock lacks the reporter crate's dependencies; not part of any commit)
 toolchain: rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew); cargo 1.93.1 (Homebrew)
-started_utc: 2026-10-18T06:50:51Z
+started_utc: 2026-10-18T06:53:40Z
 ----- output -----
     Checking darkbot-common v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/common)
    Compiling darkbot-p0-reporter v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter)
     Checking darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
     Checking darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
     Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.57s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.91s
 ----- end -----
-finished_utc: 2026-10-18T06:51:00Z
+finished_utc: 2026-10-18T06:53:46Z
 exit_code: 0

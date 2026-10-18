@@ -1,16 +1,16 @@
 command: cargo test --all-features -- --test-threads=2
 environment: CARGO_BUILD_JOBS=2 (machine load limit); cwd project_0/native (virtual workspace: common, solana, liquidation, runtime, reporter)
-tested_head: 8eb7c89d3f860505c9bc9f5097ef0993ccaba4ae
+tested_head: 512bb13c224aa01ae5bdb944f3c7e302d2ebe385
 worktree:  M Cargo.lock (Cargo.lock regenerated locally: committed lock lacks the reporter crate's dependencies; not part of any commit)
 toolchain: rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew); cargo 1.93.1 (Homebrew)
-started_utc: 2026-10-18T06:51:00Z
+started_utc: 2026-10-18T06:53:46Z
 ----- output -----
    Compiling darkbot-common v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/common)
    Compiling darkbot-p0-reporter v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter)
    Compiling darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
    Compiling darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
    Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.36s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.25s
      Running unittests src/lib.rs (target/debug/deps/darkbot_common-690cd69b3a497c94)
 
 running 26 tests
@@ -62,7 +62,7 @@ test env_config_defaults_off_and_validates_enabled ... ok
 test projected_fields_are_optional_and_not_fabricated ... ok
 test generation_advances_and_rejects_corruption ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
 
      Running tests/socket.rs (target/debug/deps/socket-ac4c2488fcf526fb)
 
@@ -70,7 +70,7 @@ running 2 tests
 test slow_and_disconnected_client_do_not_block_capture_publisher ... ok
 test handshake_state_heartbeat_permissions_and_reconnect_seq ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
 
      Running unittests src/lib.rs (target/debug/deps/darkbot_project0-2305a449af77ba30)
 
@@ -102,8 +102,8 @@ test health::threshold_search_tests::first_true_boundary_finds_exact_integer_cro
 test health::threshold_search_tests::first_true_boundary_propagates_fail_closed_error ... ok
 test index::tests::reverse_index_fanout_and_replacement ... ok
 test index::tests::threshold_crossings_only_wake_newly_endangered_accounts ... ok
-test integration::tests::pinned_refresh_discriminators_match_expected ... ok
 test index::tests::threshold_lookup_both_sides ... ok
+test integration::tests::pinned_refresh_discriminators_match_expected ... ok
 test planner::tests::bundle_rules ... ok
 test planner::tests::end_must_be_last_without_exception ... ok
 test planner::tests::no_swap_plan_rejects_swap_and_requires_repay ... ok
@@ -121,8 +121,8 @@ test protocol::tests::dual_size_bank_decoder_fails_closed ... ok
 test protocol::tests::pdas_are_deterministic ... ok
 test protocol::tests::deployment_freeze_decodes_and_fails_closed ... ok
 test protocol::tests::source_pin_parity_with_type_crate ... ok
-test receivership::builders::repay_all_tests::partial_repay_does_not_append_health_observation ... ok
 test receivership::builders::repay_all_tests::classic_withdraw_does_not_append_mint ... ok
+test receivership::builders::repay_all_tests::partial_repay_does_not_append_health_observation ... ok
 test receivership::builders::repay_all_tests::repay_all_carries_observation_accounts ... ok
 test receivership::builders::repay_all_tests::token_2022_repay_includes_mint_before_repay_all_observation ... ok
 test safety::tests::limits_and_halts ... ok
@@ -144,7 +144,7 @@ test sizing::tests::repay_all_matches_protocol_opposite_dust_boundary ... ok
 test sizing::tests::repay_all_never_clamps_a_target_above_full_transfer ... ok
 test sizing::tests::rounded_health_keeps_normal_boundary_and_closeout_exception ... ok
 
-test result: ok. 68 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 68 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
      Running unittests src/lib.rs (target/debug/deps/darkbot_runner-3d92f2a51c9ea4a1)
 
@@ -465,7 +465,7 @@ test storage::writer::tests::worker_writes_ordered_batches_and_seals ... ok
 test storage::writer::tests::writer_failure_is_sticky_and_keeps_the_written_prefix ... ok
 test analytics::econ::tests::million_revisions_stream_every_row_with_bounded_semantic_retention ... ok
 
-test result: ok. 311 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 35.36s
+test result: ok. 311 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 35.39s
 
      Running unittests src/bin/p0-capacity.rs (target/debug/deps/p0_capacity-cd8574b7ce80e232)
 
@@ -620,7 +620,7 @@ test tx::tests::v1_priority_fee_rounds_up_to_total_lamports ... ok
 test tx::tests::v1_wire_signature_and_exact_size_boundary ... ok
 test ingress::ws_rpc::tests::p2_disconnect_recovers_only_after_new_acked_slot_progress_and_shutdown_is_prompt ... ok
 
-test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.56s
+test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.59s
 
      Running unittests src/bin/p0-probe-v1.rs (target/debug/deps/p0_probe_v1-8e91383fcd1b3056)
 
@@ -659,5 +659,5 @@ running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 ----- end -----
-finished_utc: 2026-10-18T06:51:59Z
+finished_utc: 2026-10-18T06:54:37Z
 exit_code: 0
