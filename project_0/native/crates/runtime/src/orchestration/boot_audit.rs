@@ -194,6 +194,8 @@ pub struct OfflineInputs {
     pub runtime_lock: PathBuf,
     /// Run roots scanned for unsealed journals of earlier runs.
     pub run_roots: Vec<PathBuf>,
+    /// E4/E6: root the next run is written to (`Err` = not resolvable, the launcher refuses too).
+    pub run_output_root: Result<PathBuf, String>,
     pub wallet_public_env: PathBuf,
     pub max_capture_bytes: u64,
     pub system_reserve_bytes: u64,
@@ -213,6 +215,7 @@ impl OfflineInputs {
                 .iter()
                 .map(|r| project.join(r))
                 .collect(),
+            run_output_root: econ_run_root(project, &|k| std::env::var(k).ok()),
             wallet_public_env: project.join("config/wallet.public.env"),
             max_capture_bytes: w.max_bytes,
             system_reserve_bytes: w.system_reserve_bytes,
@@ -222,9 +225,122 @@ impl OfflineInputs {
     }
 }
 
-/// Unsealed journals (crash or still written) among the newest runs of each root.
-fn unsealed_journals(roots: &[PathBuf]) -> Vec<PathBuf> {
+/// E6: root the next econ4h run is written to, resolved like the launcher's pinned
+/// `operations/capture/run_store.resolve_store` (not changed here): an explicit
+/// `P0_ECON_OUT_DIR` (`~/` expanded, relative to the working directory), else `data/econ4h` for
+/// `P0_RUN_STORE=legacy` and `data/runs` otherwise; any other store value is refused.
+pub fn econ_run_root(
+    project: &Path,
+    get: &dyn Fn(&str) -> Option<String>,
+) -> Result<PathBuf, String> {
+    let store = get("P0_RUN_STORE").filter(|v| !v.is_empty());
+    let default = match store.as_deref() {
+        None | Some("runs") => project.join("data/runs"),
+        Some("legacy") => project.join("data/econ4h"),
+        Some(_) => return Err("RUN_STORE_INVALID".into()),
+    };
+    let Some(explicit) = get("P0_ECON_OUT_DIR").filter(|v| !v.is_empty()) else {
+        return Ok(default);
+    };
+    let explicit = match (explicit.strip_prefix("~/"), get("HOME")) {
+        (Some(rest), Some(home)) => Path::new(&home).join(rest),
+        _ => PathBuf::from(explicit),
+    };
+    if explicit.is_absolute() {
+        Ok(explicit)
+    } else {
+        std::env::current_dir()
+            .map(|d| d.join(explicit))
+            .map_err(|_| "RUN_ROOT_CWD".into())
+    }
+}
+
+/// E6: the directory whose volume holds `root`: its nearest existing ancestor (a missing run
+/// directory is created below it), canonicalized so a symlink names its real target.
+fn volume_dir(root: &Path) -> Option<PathBuf> {
+    root.ancestors().find(|a| a.exists())?.canonicalize().ok()
+}
+
+/// E4: active write probe on the run volume: a uniquely named probe journal is created, written,
+/// synced, sealed, read back with the strict reader and removed again. It proves that this
+/// volume accepts and syncs a journal now, not that the whole run will fit (capacity preflight).
+fn writer_probe(dir: &Path) -> Result<String, String> {
+    writer_probe_with(dir, &|_| {})
+}
+
+fn writer_probe_with(dir: &Path, fault: &dyn Fn(&mut journal::Writer)) -> Result<String, String> {
+    let started = std::time::Instant::now();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!(
+        ".p0-boot-probe-{}-{unique}.p0j",
+        std::process::id()
+    ));
+    let lines = ["BOOT_WRITER_PROBE frame=0", "BOOT_WRITER_PROBE frame=1"];
+    let io = |step: &str, e: std::io::Error| format!("WRITER_PROBE_{step} {:?}", e.kind());
+    let result = (|| -> Result<(), String> {
+        let mut w = journal::Writer::create(&path).map_err(|e| io("CREATE", e))?;
+        fault(&mut w);
+        for (i, line) in lines.iter().enumerate() {
+            let p = journal::Provenance {
+                source_seq: i as u64,
+                ..Default::default()
+            };
+            w.append_typed(
+                p,
+                &payload::OwnerDiagnostic {
+                    line: (*line).into(),
+                },
+            )
+            .map_err(|e| io("WRITE", e))?;
+        }
+        w.sync().map_err(|e| io("SYNC", e))?;
+        w.seal(true).map_err(|e| io("SEAL", e))?;
+        drop(w);
+        let mut r = journal::Reader::open(&path).map_err(|e| io("READBACK", e))?;
+        let mut read = Vec::new();
+        while let Some(f) = r.next_frame().map_err(|e| io("READBACK", e))? {
+            if f.kind != journal::MANIFEST {
+                let d: payload::OwnerDiagnostic = f.typed().map_err(|e| io("READBACK", e))?;
+                read.push(d.line);
+            }
+        }
+        if r.sealed && r.complete && read == lines {
+            Ok(())
+        } else {
+            Err("WRITER_PROBE_READBACK_MISMATCH".into())
+        }
+    })();
+    let removed = !path.exists()
+        || (std::fs::remove_file(&path).is_ok()
+            && std::fs::File::open(dir).and_then(|d| d.sync_all()).is_ok());
+    let leftover = if removed {
+        String::new()
+    } else {
+        format!("; probe file left: {}", path.display())
+    };
+    match result {
+        Ok(()) if removed => Ok(format!(
+            "create/write/sync/seal/readback/remove in {} ms on {}",
+            started.elapsed().as_millis(),
+            dir.display()
+        )),
+        Ok(()) => Err(format!("WRITER_PROBE_REMOVE{leftover}")),
+        Err(e) => Err(format!("{e}{leftover}")),
+    }
+}
+
+/// E5: journals screened per audit at most; beyond it the doctor reports the cap, never a PASS.
+const SEAL_SCREEN_MAX_FILES: usize = 4096;
+
+/// Not sealed journals (crash or still written) among the newest runs of each root, from the
+/// bounded structural screening (`journal::screen_seal`), plus whether the file cap was reached.
+fn unsealed_journals(roots: &[PathBuf]) -> (Vec<(PathBuf, journal::SealScreen)>, usize, bool) {
     let mut out = Vec::new();
+    let mut screened = 0usize;
+    let mut capped = false;
     for root in roots {
         for run in crate::storage::preflight::discover_runs(root, None)
             .into_iter()
@@ -239,20 +355,22 @@ fn unsealed_journals(roots: &[PathBuf]) -> Vec<PathBuf> {
                     } else if p.extension().and_then(|x| x.to_str()) == Some("p0j")
                         && !e.file_name().to_string_lossy().starts_with('.')
                     {
-                        let sealed = journal::Reader::open(&p).ok().map(|mut r| {
-                            while let Ok(Some(_)) = r.next_frame() {}
-                            r.sealed
-                        });
-                        if sealed != Some(true) {
-                            out.push(p);
+                        if screened == SEAL_SCREEN_MAX_FILES {
+                            capped = true;
+                            continue;
+                        }
+                        screened += 1;
+                        let screen = journal::screen_seal(&p);
+                        if !matches!(screen, journal::SealScreen::Sealed { .. }) {
+                            out.push((p, screen));
                         }
                     }
                 }
             }
         }
     }
-    out.sort();
-    out
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    (out, screened, capped)
 }
 
 /// Offline audit; every network-scope check is NOT_RUN.
@@ -340,21 +458,29 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
         ),
         Err(e) => add("BOOT-02", "runtime_owner", true, Unknown, "runtime lock", e),
     }
-    let unsealed = unsealed_journals(&inputs.run_roots);
+    let (unsealed, screened, capped) = unsealed_journals(&inputs.run_roots);
     add(
         "BOOT-02",
         "journal_seal_state",
         false,
-        if unsealed.is_empty() { Pass } else { Warn },
-        "newest runs per root",
-        if unsealed.is_empty() {
-            "no unsealed journal in the newest runs".into()
+        if unsealed.is_empty() && !capped {
+            Pass
         } else {
-            format!(
-                "{} unsealed journal(s) (crash evidence, kept unchanged), e.g. {}",
+            Warn
+        },
+        "newest runs per root, structural seal screening (no chain verification)",
+        match unsealed.first() {
+            None if capped => format!(
+                "{screened} journals screened, all sealed; cap {SEAL_SCREEN_MAX_FILES} reached, further journals not screened"
+            ),
+            None => format!("{screened} journals screened, all sealed"),
+            Some((path, screen)) => format!(
+                "{} of {screened} journals not sealed (crash evidence, kept unchanged){}, e.g. {} ({:?})",
                 unsealed.len(),
-                unsealed[0].display()
-            )
+                if capped { "; screening cap reached" } else { "" },
+                path.display(),
+                screen
+            ),
         },
     );
     match physical_memory_bytes() {
@@ -383,38 +509,77 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
             "physical memory unknown".into(),
         ),
     }
-    let data = inputs.project.join("data");
-    match free_disk_bytes(if data.exists() {
-        &data
-    } else {
-        &inputs.project
-    }) {
-        Some(f) if f > inputs.disk_reserve_bytes => add(
+    // E6: reserve and E4 write probe on the volume of the run root actually written to.
+    let volume = match &inputs.run_output_root {
+        Ok(root) => {
+            volume_dir(root).ok_or_else(|| format!("no existing ancestor of {}", root.display()))
+        }
+        Err(e) => Err(e.clone()),
+    };
+    match volume.as_ref().map(|v| (v, free_disk_bytes(v))) {
+        Ok((v, Some(f))) if f > inputs.disk_reserve_bytes => add(
             "BOOT-02",
             "disk_reserve",
             true,
             Pass,
-            "OS",
+            "OS statvfs, run volume",
             format!(
-                "{} MiB free > reserve (sizing: capacity preflight)",
-                f / MIB
+                "{} MiB free > reserve on {} (sizing: capacity preflight)",
+                f / MIB,
+                v.display()
             ),
         ),
-        Some(f) => add(
+        Ok((v, Some(f))) => add(
             "BOOT-02",
             "disk_reserve",
             true,
             Blocked,
-            "OS",
-            format!("{} MiB free ≤ disk reserve", f / MIB),
+            "OS statvfs, run volume",
+            format!("{} MiB free ≤ disk reserve on {}", f / MIB, v.display()),
         ),
-        None => add(
+        Ok((v, None)) => add(
             "BOOT-02",
             "disk_reserve",
             true,
             Unknown,
-            "OS",
-            "free disk unknown".into(),
+            "OS statvfs, run volume",
+            format!("free disk unknown on {}", v.display()),
+        ),
+        Err(e) => add(
+            "BOOT-02",
+            "disk_reserve",
+            true,
+            Unknown,
+            "run root",
+            format!("run volume unresolved: {e}"),
+        ),
+    }
+    match &volume {
+        Ok(v) => match writer_probe(v) {
+            Ok(reason) => add(
+                "BOOT-02",
+                "journal_writer_probe",
+                true,
+                Pass,
+                "journal::Writer/Reader",
+                reason,
+            ),
+            Err(reason) => add(
+                "BOOT-02",
+                "journal_writer_probe",
+                true,
+                Blocked,
+                "journal::Writer/Reader",
+                reason,
+            ),
+        },
+        Err(e) => add(
+            "BOOT-02",
+            "journal_writer_probe",
+            true,
+            Unknown,
+            "run root",
+            format!("run volume unresolved: {e}"),
         ),
     }
     let wall = std::time::SystemTime::now()
@@ -603,6 +768,7 @@ mod tests {
             project: d.into(),
             runtime_lock: d.join("data/.p0-runtime.lock"),
             run_roots: vec![d.join("data/runs")],
+            run_output_root: Ok(d.join("data/runs")),
             wallet_public_env: d.join("config/wallet.public.env"),
             max_capture_bytes: 512 * MIB,
             system_reserve_bytes: 1024 * MIB,
@@ -702,6 +868,245 @@ mod tests {
             Err("BOOT_TOCTOU_DRIFT: source".into())
         );
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    fn temp(tag: u32) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("p0_boot_{}_{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+    fn probe_files(dir: &Path) -> usize {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".p0-boot-probe-")
+            })
+            .count()
+    }
+
+    /// E6: the run root is resolved like the launcher's run store, and the reserve is measured
+    /// on the volume of that root (nearest existing ancestor, symlink resolved), not on data/.
+    #[test]
+    fn run_volume_resolves_like_the_launcher() {
+        let project = Path::new("/p0");
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        assert_eq!(
+            econ_run_root(project, &env(&[])),
+            Ok(project.join("data/runs"))
+        );
+        assert_eq!(
+            econ_run_root(project, &env(&[("P0_RUN_STORE", "legacy")])),
+            Ok(project.join("data/econ4h"))
+        );
+        assert_eq!(
+            econ_run_root(
+                project,
+                &env(&[("P0_RUN_STORE", "runs"), ("P0_ECON_OUT_DIR", "")])
+            ),
+            Ok(project.join("data/runs"))
+        );
+        assert!(econ_run_root(project, &env(&[("P0_RUN_STORE", "x")])).is_err());
+        assert_eq!(
+            econ_run_root(project, &env(&[("P0_ECON_OUT_DIR", "/vol/runs")])),
+            Ok(PathBuf::from("/vol/runs"))
+        );
+        assert_eq!(
+            econ_run_root(
+                project,
+                &env(&[("P0_ECON_OUT_DIR", "~/r"), ("HOME", "/home/u")])
+            ),
+            Ok(PathBuf::from("/home/u/r"))
+        );
+
+        let d = temp(line!());
+        let elsewhere = temp(line!());
+        std::os::unix::fs::symlink(&elsewhere, d.join("link")).unwrap();
+        // Missing run directory: its nearest existing ancestor, through the symlink.
+        assert_eq!(
+            volume_dir(&d.join("link/not/yet")),
+            Some(elsewhere.canonicalize().unwrap())
+        );
+        let mut i = inputs(&d);
+        i.run_output_root = Ok(d.join("link/runs"));
+        let a = offline(&i).unwrap();
+        let disk = a.checks.iter().find(|c| c.name == "disk_reserve").unwrap();
+        assert_eq!(disk.state, CheckState::Pass, "{}", a.terminal());
+        assert!(
+            disk.reason
+                .contains(&elsewhere.canonicalize().unwrap().display().to_string()),
+            "{}",
+            disk.reason
+        );
+        // An unresolvable run root is no PASS: both run-volume checks are UNKNOWN and block.
+        i.run_output_root = Err("RUN_STORE_INVALID".into());
+        let b = offline(&i).unwrap();
+        for name in ["disk_reserve", "journal_writer_probe"] {
+            let c = b.checks.iter().find(|c| c.name == name).unwrap();
+            assert_eq!(c.state, CheckState::Unknown, "{name}");
+        }
+        assert_eq!(b.verdict, AuditVerdict::Blocked);
+        std::fs::remove_dir_all(&d).unwrap();
+        std::fs::remove_dir_all(&elsewhere).unwrap();
+    }
+
+    /// E4: the write probe creates, writes, syncs, seals, reads back and removes a journal on the
+    /// run volume; a read-only volume or a failing sync blocks, and no probe file stays behind.
+    #[test]
+    fn writer_probe_passes_and_fails_closed() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = temp(line!());
+        let ok = writer_probe(&d).unwrap();
+        assert!(ok.contains("readback"), "{ok}");
+        assert_eq!(probe_files(&d), 0);
+
+        let synced = writer_probe_with(&d, &|w| w.test_fail_next_sync(std::io::ErrorKind::Other));
+        assert!(
+            synced
+                .as_ref()
+                .is_err_and(|e| e.starts_with("WRITER_PROBE_SYNC")),
+            "{synced:?}"
+        );
+        assert_eq!(probe_files(&d), 0, "a failed probe is removed as well");
+
+        let ro = d.join("ro");
+        std::fs::create_dir(&ro).unwrap();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let denied = writer_probe(&ro);
+        assert!(
+            denied
+                .as_ref()
+                .is_err_and(|e| e.starts_with("WRITER_PROBE_CREATE")),
+            "{denied:?}"
+        );
+        // In the audit a read-only run volume blocks the start.
+        let mut i = inputs(&d);
+        i.run_output_root = Ok(ro.join("runs"));
+        let a = offline(&i).unwrap();
+        let probe = a
+            .checks
+            .iter()
+            .find(|c| c.name == "journal_writer_probe")
+            .unwrap();
+        assert_eq!(probe.state, CheckState::Blocked, "{}", a.terminal());
+        assert_eq!(a.verdict, AuditVerdict::Blocked);
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// E5: the doctor's seal screening reads the header and a bounded tail only. It recognizes
+    /// sealed/unsealed/torn/zero-filled/foreign files; it is no chain verification — a
+    /// manipulated middle frame is found by the full reader, not by the screening.
+    #[test]
+    fn seal_screening_is_bounded_and_structural_only() {
+        use journal::{screen_seal, SealScreen};
+        let d = temp(line!());
+        let line = |n: usize| payload::OwnerDiagnostic {
+            line: "x".repeat(n),
+        };
+        let write = |name: &str, frames: usize, size: usize, seal: Option<bool>| {
+            let path = d.join(name);
+            let mut w = journal::Writer::create(&path).unwrap();
+            for i in 0..frames {
+                let p = journal::Provenance {
+                    source_seq: i as u64,
+                    ..Default::default()
+                };
+                w.append_typed(p, &line(size)).unwrap();
+            }
+            w.sync().unwrap();
+            if let Some(complete) = seal {
+                w.seal(complete).unwrap();
+            }
+            path
+        };
+        let sealed = write("sealed.p0j", 3, 10, Some(true));
+        assert_eq!(screen_seal(&sealed), SealScreen::Sealed { complete: true });
+        let incomplete = write("incomplete.p0j", 3, 10, Some(false));
+        assert_eq!(
+            screen_seal(&incomplete),
+            SealScreen::Sealed { complete: false }
+        );
+        assert_eq!(
+            screen_seal(&write("open.p0j", 3, 10, None)),
+            SealScreen::Unsealed
+        );
+        assert_eq!(
+            screen_seal(&write("empty.p0j", 0, 0, None)),
+            SealScreen::Unsealed
+        );
+        // Large journal (frames far beyond the window): still decided from its tail.
+        let large = write("large.p0j", 64, 60 * 1024, Some(true));
+        assert!(std::fs::metadata(&large).unwrap().len() > 30 * journal::SEAL_SCREEN_TAIL);
+        assert_eq!(screen_seal(&large), SealScreen::Sealed { complete: true });
+        // A last regular frame longer than the window is never taken for a seal.
+        let long_tail = write("long_tail.p0j", 1, 100 * 1024, None);
+        assert_eq!(
+            screen_seal(&long_tail),
+            SealScreen::Undecodable("TAIL_UNDECODABLE")
+        );
+        // Torn manifest and zero-filled tail.
+        let torn = write("torn.p0j", 3, 10, Some(true));
+        let len = std::fs::metadata(&torn).unwrap().len();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&torn)
+            .unwrap()
+            .set_len(len - 7)
+            .unwrap();
+        assert_eq!(
+            screen_seal(&torn),
+            SealScreen::Undecodable("TAIL_UNDECODABLE")
+        );
+        let zeros = write("zeros.p0j", 3, 10, None);
+        let mut z = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&zeros)
+            .unwrap();
+        std::io::Write::write_all(&mut z, &[0u8; 4096]).unwrap();
+        assert_eq!(
+            screen_seal(&zeros),
+            SealScreen::Undecodable("TAIL_UNDECODABLE")
+        );
+        std::fs::write(d.join("foreign.p0j"), [b'x'; 200]).unwrap();
+        assert_eq!(
+            screen_seal(&d.join("foreign.p0j")),
+            SealScreen::Undecodable("JOURNAL_VERSION_OR_MAGIC")
+        );
+        std::fs::write(d.join("short.p0j"), b"P0J").unwrap();
+        assert_eq!(
+            screen_seal(&d.join("short.p0j")),
+            SealScreen::Undecodable("HEADER_TRUNCATED")
+        );
+        // Manipulated middle frame: the screening still sees the intact manifest (structural
+        // only); the full reader refuses the chain.
+        let mut bytes = std::fs::read(&sealed).unwrap();
+        let first_payload = journal::HEADER_LEN as usize + 4 + 120;
+        bytes[first_payload] ^= 0xFF;
+        std::fs::write(&sealed, &bytes).unwrap();
+        assert_eq!(screen_seal(&sealed), SealScreen::Sealed { complete: true });
+        let mut r = journal::Reader::open(&sealed).unwrap();
+        let full = loop {
+            match r.next_frame() {
+                Ok(Some(_)) => continue,
+                other => break other,
+            }
+        };
+        assert!(
+            full.is_err(),
+            "the full reader detects the manipulated frame"
+        );
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }
 

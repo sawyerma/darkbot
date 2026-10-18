@@ -1,0 +1,43 @@
+# E4/E5/E6 regression; tested tree: d68a3b3 + E4/E5/E6 diff (CARGO_BUILD_JOBS=2)
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 boot_
+
+running 12 tests
+test orchestration::boot_audit::tests::run_volume_resolves_like_the_launcher ... ok
+test orchestration::boot_audit::tests::offline_audit_blocks_and_binds_identity ... ok
+test orchestration::boot_audit::tests::writer_probe_passes_and_fails_closed ... ok
+test orchestration::boot_network::tests::boot_state_uses_pinned_decoders_dynamic_pda_and_oracle_gates ... ok
+test orchestration::boot_network::tests::cluster_pin_and_slot_contradictions_block_without_followup_reads ... ok
+test orchestration::boot_network::tests::native_network_record_and_start_token_reject_expiry_drift_and_tampering ... ok
+test orchestration::boot_network::tests::network_fixture_never_promotes_unpinned_deployment_or_unknown_oracle ... ok
+test orchestration::boot_audit::tests::seal_screening_is_bounded_and_structural_only ... ok
+test orchestration::boot_network::tests::network_reads_counts_only_boot_budget ... ok
+test orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum ... ok
+test orchestration::boot_network::tests::spec_rejects_genesis_that_differs_from_the_pin ... ok
+test orchestration::boot_network::tests::network_reads_decode_at_the_wire_edge ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 334 filtered out; finished in 0.50s
+
+exit=0
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 analytics::journal::
+
+running 14 tests
+test analytics::journal::tests::export_of_a_damaged_journal_leaves_no_partial_file ... ok
+test analytics::journal::tests::explicit_export_matches_legacy_jsonl_and_never_overwrites ... ok
+test analytics::journal::tests::fsync_error_never_returns_durable_ack_and_poisoning_is_sticky ... ok
+test analytics::journal::tests::header_identities_are_fresh_per_writer_and_shared_per_run_and_boot ... ok
+test analytics::journal::tests::lossless_integer_decimal_and_nested_value_roundtrip ... ok
+test analytics::journal::tests::historical_schema_one_frames_of_migrated_kinds_stay_readable ... ok
+test analytics::journal::tests::malformed_length_payload_tags_and_depth_are_rejected ... ok
+test analytics::journal::tests::ordered_frames_preserve_provenance_manifest_and_durable_boundary ... ok
+test analytics::journal::tests::persist05_local_writer_benchmark ... ignored
+test analytics::journal::tests::multi_view_export_is_all_or_nothing_and_never_overwrites ... ok
+test analytics::journal::tests::restart_never_truncates_or_accepts_partial_tail ... ok
+test analytics::journal::tests::typed_frames_fail_closed_on_unknown_kind_version_or_truncation ... ok
+test analytics::journal::tests::write_admission_forbids_legacy_rollback_and_unregistered_kinds ... ok
+test analytics::journal::tests::unsupported_version_corruption_checksum_and_every_truncation_fail_closed ... ok
+
+test result: ok. 13 passed; 0 failed; 1 ignored; 0 measured; 332 filtered out; finished in 0.27s
+
+exit=0
+$ cargo check -p darkbot-runner --features crate_health --bins --tests
+exit=0

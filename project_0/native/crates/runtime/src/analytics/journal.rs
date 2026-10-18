@@ -858,7 +858,7 @@ impl Reader {
 /// frame length is a torn tail (`UnexpectedEof`, which only an unsealed capture tolerates) only
 /// if every byte up to EOF is zero, checked in bounded 64 KiB blocks; any other byte keeps the
 /// hard `FRAME_LENGTH` error. Strict readers propagate either error.
-fn zero_filled_tail(file: &mut File) -> io::Result<Option<(Frame, [u8; 32])>> {
+fn zero_filled_tail<R: Read>(file: &mut R) -> io::Result<Option<(Frame, [u8; 32])>> {
     let mut block = vec![0u8; 64 * 1024];
     loop {
         let n = file.read(&mut block)?;
@@ -873,7 +873,7 @@ fn zero_filled_tail(file: &mut File) -> io::Result<Option<(Frame, [u8; 32])>> {
         }
     }
 }
-fn read_frame(file: &mut File, offset: u64) -> io::Result<Option<(Frame, [u8; 32])>> {
+fn read_frame<R: Read>(file: &mut R, offset: u64) -> io::Result<Option<(Frame, [u8; 32])>> {
     let mut length = [0; 4];
     match file.read(&mut length[..1])? {
         0 => return Ok(None),
@@ -947,6 +947,90 @@ fn read_frame(file: &mut File, offset: u64) -> io::Result<Option<(Frame, [u8; 32
         hash: b[end + 4..].try_into().unwrap(),
     };
     Ok(Some((f, b[84..116].try_into().unwrap())))
+}
+/// E5: result of the bounded structural screening of a journal's end (`screen_seal`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SealScreen {
+    /// The last frame is a CRC/SHA-valid manifest whose frame count and root match its own
+    /// sequence and predecessor hash. Frames before it are not read: no chain verification.
+    Sealed { complete: bool },
+    /// The last frame is a regular frame, or the journal has no frame yet.
+    Unsealed,
+    /// No decodable last frame (torn, zero-filled, oversized or corrupt tail), an inconsistent
+    /// manifest, or an unreadable header/file; the code names the class.
+    Undecodable(&'static str),
+}
+/// Bytes at the end of a journal searched for its last frame; a manifest frame has a few hundred.
+pub const SEAL_SCREEN_TAIL: u64 = 64 * 1024;
+/// E5: seal state from the header and at most `SEAL_SCREEN_TAIL` trailing bytes, independent of
+/// the journal size. A journal whose last frame is longer than the window reads as
+/// `Undecodable("TAIL_UNDECODABLE")`, never as sealed; a sealed journal always ends with its
+/// small manifest. The full chain check stays with `Reader`/the strict verifier.
+pub fn screen_seal(path: &Path) -> SealScreen {
+    use SealScreen::*;
+    let Ok(mut file) = File::open(path) else {
+        return Undecodable("OPEN");
+    };
+    let mut header = [0u8; HEADER_LEN as usize];
+    if file.read_exact(&mut header).is_err() {
+        return Undecodable("HEADER_TRUNCATED");
+    }
+    if &header[..8] != MAGIC
+        || u16::from_le_bytes(header[8..10].try_into().unwrap()) != VERSION
+        || u16::from_le_bytes(header[10..12].try_into().unwrap()) as u64 != HEADER_LEN
+    {
+        return Undecodable("JOURNAL_VERSION_OR_MAGIC");
+    }
+    let Ok(len) = file.metadata().map(|m| m.len()) else {
+        return Undecodable("METADATA");
+    };
+    if len == HEADER_LEN {
+        return Unsealed;
+    }
+    let start = len.saturating_sub(SEAL_SCREEN_TAIL).max(HEADER_LEN);
+    let mut tail = vec![0u8; (len - start) as usize];
+    if file.seek(SeekFrom::Start(start)).is_err() || file.read_exact(&mut tail).is_err() {
+        return Undecodable("TAIL_READ");
+    }
+    // The last frame starts where its length prefix covers exactly the rest of the file; a
+    // coincidental match fails the frame's own CRC/SHA-256.
+    let Some(last_start) = tail.len().checked_sub(FRAME_WIRE) else {
+        return Undecodable("TAIL_UNDECODABLE");
+    };
+    for o in (0..=last_start).rev() {
+        let length = u32::from_le_bytes(tail[o..o + 4].try_into().unwrap()) as usize;
+        if length + 4 != tail.len() - o {
+            continue;
+        }
+        let Ok(Some((f, previous))) = read_frame(&mut &tail[o..], start + o as u64) else {
+            continue;
+        };
+        if f.kind != MANIFEST {
+            return Unsealed;
+        }
+        let complete = if f.schema == 1 {
+            match f.legacy_value() {
+                Ok(v)
+                    if v["frames"] == f.journal_seq
+                        && v["root_sha256"] == hex(&previous)
+                        && matches!(v["status"].as_str(), Some("COMPLETE" | "INCOMPLETE")) =>
+                {
+                    Some(v["status"] == "COMPLETE")
+                }
+                _ => None,
+            }
+        } else {
+            match f.typed::<payload::Manifest>() {
+                Ok(m) if m.frames == f.journal_seq && m.root_sha256 == previous => Some(m.complete),
+                _ => None,
+            }
+        };
+        return match complete {
+            Some(complete) => Sealed { complete },
+            None => Undecodable("MANIFEST_MISMATCH"),
+        };
+    }
+    Undecodable("TAIL_UNDECODABLE")
 }
 pub fn read_at(file: &mut File, offset: u64) -> io::Result<Frame> {
     file.seek(SeekFrom::Start(offset))?;
