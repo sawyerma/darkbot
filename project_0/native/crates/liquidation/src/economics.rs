@@ -123,7 +123,8 @@ pub fn t_profitable(now_unix_s: u64, tagged_at: Option<u64>, inputs: &ProfitInpu
     if p_needed <= BPS as u128 {
         return Some(now_unix_s); // schon ohne Prämie profitabel (realizable > repay) – sofort
     }
-    let needed_bps = (p_needed - BPS as u128) as u64;
+    // B5: a need beyond u64 bps is unreachable, never wrapped into a small premium.
+    let needed_bps = u64::try_from(p_needed - BPS as u128).ok()?;
     let cap = premium_cap_bps.min(PREMIUM_MAX_BPS);
     if needed_bps > cap {
         return None;
@@ -476,6 +477,15 @@ mod tests {
         );
         assert_eq!(
             t_profitable(t0, None, &inputs(0, false, 10_000, 1, 1, 0, i128::MAX)),
+            None
+        );
+        // A need beyond u64 bps must not wrap into a small, reachable premium (review B5 rest).
+        assert_eq!(
+            t_profitable(
+                t0,
+                Some(t0),
+                &inputs(0, false, 10_000, 1, 10_000, 0, 1_844_674_407_370_956)
+            ),
             None
         );
     }
