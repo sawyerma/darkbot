@@ -38,10 +38,16 @@ pub struct AccountThresholds {
     pub thresholds: Vec<(Pubkey, Side, u128)>,
 }
 
+/// C10: stable marker of a stale integration reserve in string errors (sizing/plans), set only
+/// by the typed check of the pinned error code (`crate_impl::integration_stale`).
+pub const INTEGRATION_STALE: &str = "INTEGRATION_STALE:";
+
 #[derive(Debug)]
 pub enum HealthError {
     Unsupported(String),
     Stale(String),
+    /// C10: the pinned program reports a stale integration reserve (refresh prerequisite).
+    IntegrationStale(String),
     Crate(String),
     MissingAccount(Pubkey),
     Unavailable,
@@ -52,6 +58,9 @@ impl std::fmt::Display for HealthError {
         match self {
             HealthError::Unsupported(s) => write!(f, "health unsupported (fail closed): {}", s),
             HealthError::Stale(s) => write!(f, "health stale: {}", s),
+            HealthError::IntegrationStale(s) => {
+                write!(f, "health integration reserve stale: {}", s)
+            }
             HealthError::Crate(s) => write!(f, "health crate: {}", s),
             HealthError::MissingAccount(k) => write!(f, "health missing account in state: {}", k),
             HealthError::Unavailable => {
@@ -101,6 +110,35 @@ pub trait AccountSource {
 pub mod crate_impl {
     use super::*;
     use crate::protocol; // [FIX-50] used by closeout threshold below
+
+    /// C10: the pinned program's error codes of a stale integration reserve (Kamino, Solend,
+    /// Drift, JupLend), classified by code, never by message text.
+    pub fn integration_stale(e: &anchor_lang::error::Error) -> bool {
+        use marginfi::errors::MarginfiError as M;
+        let code = match e {
+            anchor_lang::error::Error::AnchorError(a) => a.error_code_number,
+            anchor_lang::error::Error::ProgramError(p) => match p.program_error {
+                anchor_lang::prelude::ProgramError::Custom(n) => n,
+                _ => return false,
+            },
+        };
+        matches!(
+            M::from(code),
+            M::ReserveStale
+                | M::SolendReserveStale
+                | M::DriftSpotMarketStale
+                | M::JuplendLendingStale
+        )
+    }
+
+    /// C10: a crate error as sizing string; a stale integration reserve carries the stable marker.
+    pub fn crate_error_text(context: &str, e: &anchor_lang::error::Error) -> String {
+        if integration_stale(e) {
+            format!("{}{context}: {e}", super::INTEGRATION_STALE)
+        } else {
+            format!("{context}: {e}")
+        }
+    }
     use fixed::types::I80F48;
     use marginfi::state::{
         bank::BankImpl,
@@ -250,7 +288,13 @@ pub mod crate_impl {
                 &mut None,
                 HealthPriceMode::Client(clock.clone()),
             )
-            .map_err(|e| HealthError::Crate(e.to_string()))?;
+            .map_err(|e| {
+                if integration_stale(&e) {
+                    HealthError::IntegrationStale(e.to_string())
+                } else {
+                    HealthError::Crate(e.to_string())
+                }
+            })?;
             Ok((assets.to_bits(), liabs.to_bits()))
         }
 
@@ -1039,4 +1083,40 @@ pub fn dependency_keys<S: AccountSource + ?Sized>(
     out.sort_unstable_by_key(|k| k.to_bytes());
     out.dedup();
     out
+}
+
+#[cfg(all(test, feature = "crate_health"))]
+mod c10_tests {
+    use super::crate_impl::{crate_error_text, integration_stale};
+    use super::INTEGRATION_STALE;
+    use marginfi::errors::MarginfiError as M;
+
+    /// C10: the stale integration reserves of the pinned program are recognized by error code,
+    /// as Anchor error or as custom program error, never by message text.
+    #[test]
+    fn integration_stale_is_classified_by_the_pinned_error_code() {
+        for m in [
+            M::ReserveStale,
+            M::SolendReserveStale,
+            M::DriftSpotMarketStale,
+            M::JuplendLendingStale,
+        ] {
+            let code = anchor_lang::error::Error::from(m).to_string();
+            assert!(
+                integration_stale(&anchor_lang::error::Error::from(m)),
+                "{code}"
+            );
+        }
+        for m in [M::RiskEngineInitRejected, M::PythPushStalePrice] {
+            assert!(!integration_stale(&anchor_lang::error::Error::from(m)));
+        }
+        let custom =
+            anchor_lang::error::Error::from(anchor_lang::prelude::ProgramError::Custom(6206));
+        assert!(integration_stale(&custom));
+        let other =
+            anchor_lang::error::Error::from(anchor_lang::prelude::ProgramError::Custom(6207));
+        assert!(!integration_stale(&other));
+        assert!(crate_error_text("oracle adapter", &custom).starts_with(INTEGRATION_STALE));
+        assert!(!crate_error_text("oracle adapter", &other).starts_with(INTEGRATION_STALE));
+    }
 }

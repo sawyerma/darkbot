@@ -433,15 +433,8 @@ impl ShadowOwner {
                     rec.reason = Some("bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity".into());
                 }
             }
-            if rec
-                .reason
-                .as_deref()
-                .map(|s| s.contains("ReserveStale"))
-                .unwrap_or(false)
-            {
-                rec.loss = Some(crate::analytics::record::LossReason::IntegrationRefresh);
-                rec.reason = Some("integration reserve stale: required reserve refresh prerequisite missing before exact sizing".into());
-            }
+            // C10: a stale integration reserve is classified at its source (pinned error code ⇒
+            // HealthError::IntegrationStale / INTEGRATION_STALE marker), never from text here.
             if let Some(h) = &self.econ {
                 h.emit(crate::analytics::econ::Evidence::Shadow(Box::new(
                     rec.clone(),

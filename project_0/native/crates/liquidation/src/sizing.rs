@@ -5,7 +5,7 @@
 //! amount through an executable route.
 
 use crate::health::{
-    crate_impl::{bank_observation_keys, CrateHealth},
+    crate_impl::{bank_observation_keys, crate_error_text, CrateHealth},
     AccountSource, HealthEngine, HealthError,
 };
 use crate::protocol;
@@ -458,28 +458,28 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             .map(|(key, account)| (&*key, account).into_account_info())
             .collect();
         let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
-            .map_err(|e| format!("oracle adapter: {e}"))?;
+            .map_err(|e| crate_error_text("oracle adapter", &e))?;
         let equity = feed
             .get_price_of_type(
                 OraclePriceType::TimeWeighted,
                 None,
                 bank.config.oracle_max_confidence,
             )
-            .map_err(|e| format!("equity price: {e}"))?;
+            .map_err(|e| crate_error_text("equity price", &e))?;
         let maint_asset = feed
             .get_price_of_type(
                 OraclePriceType::RealTime,
                 Some(PriceBias::Low),
                 bank.config.oracle_max_confidence,
             )
-            .map_err(|e| format!("maintenance asset price: {e}"))?;
+            .map_err(|e| crate_error_text("maintenance asset price", &e))?;
         let maint_liab = feed
             .get_price_of_type(
                 OraclePriceType::RealTime,
                 Some(PriceBias::High),
                 bank.config.oracle_max_confidence,
             )
-            .map_err(|e| format!("maintenance liability price: {e}"))?;
+            .map_err(|e| crate_error_text("maintenance liability price", &e))?;
         Ok(Prices {
             equity,
             maint_asset,

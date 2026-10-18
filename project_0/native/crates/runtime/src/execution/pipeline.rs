@@ -295,6 +295,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 rec.reason = Some("health engine unavailable".into());
                 return rec.with_timeline(&tl);
             }
+            Err(e @ HealthError::IntegrationStale(_)) => {
+                rec.loss = Some(LossReason::IntegrationRefresh);
+                rec.reason = Some(e.to_string());
+                return rec.with_timeline(&tl);
+            }
             Err(e) => {
                 rec.loss = Some(LossReason::Health);
                 rec.reason = Some(e.to_string());
@@ -935,11 +940,8 @@ fn classify_plan_error(e: &str) -> (Decision, LossReason) {
         LossReason::MissingAta
     } else if e.starts_with("FUNDING:") {
         LossReason::Funding
-    } else if e.contains("ReserveStale")
-        || e.contains("DriftSpotMarketStale")
-        || e.contains("JuplendLendingStale")
-        || e.contains("SolendReserveStale")
-    {
+    } else if e.starts_with(darkbot_project0::health::INTEGRATION_STALE) {
+        // C10: set only by the typed error-code check, never inferred from message text.
         LossReason::IntegrationRefresh
     } else {
         LossReason::Routing
@@ -950,6 +952,31 @@ fn classify_plan_error(e: &str) -> (Decision, LossReason) {
 #[cfg(test)]
 mod plan_error_tests {
     use super::*;
+
+    /// C10: a stale integration reserve is recognized only by the marker the typed error-code
+    /// check sets, whatever the wording behind it; a foreign text naming "ReserveStale" is no
+    /// such classification.
+    #[test]
+    fn c10_integration_stale_is_typed_not_text() {
+        for marked in [
+            "INTEGRATION_STALE:oracle adapter: Kamino reserve not refreshed in this slot",
+            "INTEGRATION_STALE:equity price: AnchorError code 6504",
+        ] {
+            assert!(matches!(
+                classify_plan_error(marked).1,
+                LossReason::IntegrationRefresh
+            ));
+        }
+        for foreign in [
+            "route provider: ReserveStale upstream",
+            "SolendReserveStale mentioned by a quote API",
+        ] {
+            assert!(matches!(
+                classify_plan_error(foreign).1,
+                LossReason::Routing
+            ));
+        }
+    }
 
     #[test]
     fn p5_fee_state_unavailable_is_unknown_not_a_routing_loss() {

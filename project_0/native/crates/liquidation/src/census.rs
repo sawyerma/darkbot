@@ -79,7 +79,7 @@ impl Unsupported {
         match e {
             HealthError::Unsupported(s) if s.contains("UNKNOWN_LAYOUT") => Self::UnknownLayout,
             HealthError::Unsupported(_) => Self::Unsupported,
-            HealthError::Stale(_) => Self::Stale,
+            HealthError::Stale(_) | HealthError::IntegrationStale(_) => Self::Stale,
             HealthError::MissingAccount(_) => Self::MissingAccount,
             HealthError::Crate(_) => Self::Crate,
             HealthError::Unavailable => Self::Unavailable,
