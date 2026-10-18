@@ -22,7 +22,7 @@ impl ForkTracker {
 
     pub fn on_slot(&mut self, slot: u64, parent: Option<u64>) {
         if let Some(p) = parent {
-            if self.root.map_or(true, |r| slot >= r) {
+            if self.root.is_none_or(|r| slot >= r) {
                 self.parent.insert(slot, p);
             }
         }

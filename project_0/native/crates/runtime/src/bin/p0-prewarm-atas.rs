@@ -47,7 +47,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     let args: Vec<String> = env::args().skip(1).collect();
-    if args.is_empty() || args.len() % 2 != 0 {
+    if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(
             "usage: p0-prewarm-atas <mint> <token_program> [<mint> <token_program> ...]".into(),
         );

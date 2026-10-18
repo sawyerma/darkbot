@@ -411,7 +411,7 @@ mod tests {
         let mut n = 0u8;
         let mut fetch = move || {
             n += 1;
-            let missing = if n % 2 == 0 { vec![(Pubkey::new_unique(), 10)] } else { vec![] };
+            let missing = if n.is_multiple_of(2) { vec![(Pubkey::new_unique(), 10)] } else { vec![] };
             Ok(SnapshotData { slot: 10, accounts: vec![upd(pk, 10, 1)], missing_required: missing })
         };
         let mut drain = |_st: &mut StateCore| {};

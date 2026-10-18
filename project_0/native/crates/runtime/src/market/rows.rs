@@ -207,7 +207,7 @@ impl MarketCompletion {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MarketLiquidation {
     /// A receivership event decoded by the market observer, with its enrichment.
-    Receiver(ReceiverRow),
+    Receiver(Box<ReceiverRow>),
     /// An event of the independent finalized full-slot classification.
     Canonical(Box<truth::TruthEvent>),
 }

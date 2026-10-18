@@ -404,9 +404,9 @@ where
         rows.push(row);
     }
     let accounts:Vec<_>=state.0.iter().map(|(key,a)|json!({"pubkey":key.to_string(),"owner":a.owner.to_string(),"lamports":a.lamports,"bytes":a.data.len(),"sha256":sha(&a.data)})).collect();
-    return Ok(
+    Ok(
         json!({"schema":"Project0/FE01FullObservation/1","status":"STATE_SCOPE_OBSERVED_NOT_QUALIFIED","scope_closed":true,"rounds":round,"slot":clock.slot,"unix_timestamp":clock.unix_timestamp,"clock":"CHAIN_SYSVAR_SAME_CONTEXT","program_data":pd.to_string(),"program_data_sha256":baseline.1,"deployment_slot":baseline.0,"source_pin":SOURCE_PIN,"source_parity":"UNKNOWN","source_parity_reason":"CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF","transaction_version":TRANSACTION_VERSION_PIN,"accounts":accounts,"targets":rows,"fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}),
-    );
+    )
 }
 
 #[cfg(test)]
@@ -462,7 +462,7 @@ pub(crate) mod tests {
     fn required_scope_reads_match_the_collector() {
         let (mut c, all) = fixture();
         c.limits.fe_batch_size = 1;
-        let mut count = |c: &RuntimeConfig| {
+        let count = |c: &RuntimeConfig| {
             let mut reads = 0u64;
             let result = collect_scope(
                 c,

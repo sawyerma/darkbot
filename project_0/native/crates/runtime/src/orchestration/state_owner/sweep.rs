@@ -90,8 +90,9 @@ impl ShadowOwner {
                 let view = StateView(&self.st);
 
                 // CPU-only and independent per account. No RPC, no state mutation.
+                type Evaluated = Vec<(Pubkey, u64, u64, u64, CandidateHealthState)>;
                 let (mut evaluated, census_rows): (
-                    Vec<(Pubkey, u64, u64, u64, CandidateHealthState)>,
+                    Evaluated,
                     Vec<Option<super::census::CensusRowOf>>,
                 ) = account_work
                     .into_par_iter()
@@ -304,9 +305,7 @@ impl ShadowOwner {
                                 let mt0_len_before = self.oracle_detect_order.len(); // [MT0]
                                 let queue_admission = enqueue_or_coalesce_candidate(
                                     account,
-                                    t_rx_ns,
-                                    event_slot,
-                                    "oracle_health_ready",
+                                    (t_rx_ns, event_slot, "oracle_health_ready"),
                                     &mut self.oracle_detect_order,
                                     &mut self.oracle_detect_pending,
                                     &mut self.metrics.oracle_enqueued,
@@ -463,9 +462,7 @@ impl ShadowOwner {
                                 let mt0_len_before = self.oracle_detect_order.len(); // [MT0]
                                 let queue_admission = enqueue_or_coalesce_candidate(
                                     account,
-                                    t_rx_ns,
-                                    event_slot,
-                                    "oracle_health_error",
+                                    (t_rx_ns, event_slot, "oracle_health_error"),
                                     &mut self.oracle_detect_order,
                                     &mut self.oracle_detect_pending,
                                     &mut self.metrics.oracle_enqueued,

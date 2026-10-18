@@ -61,25 +61,36 @@ pub fn time_for_premium(
     let span = PREMIUM_MAX_BPS - base;
     // elapsed = ceil((needed-base) * RAMP / span)
     let num = (needed - base) as u128 * PREMIUM_RAMP_S as u128;
-    let elapsed = ((num + span as u128 - 1) / span as u128) as u64;
+    let elapsed = num.div_ceil(span as u128) as u64;
     Some(tagged_at + PREMIUM_GRACE_S + elapsed)
+}
+
+/// Kandidatenwerte des [`t_profitable`]-Solvers (unveränderte Bedeutung der früheren Einzelparameter).
+#[derive(Clone, Copy, Debug)]
+pub struct ProfitInputs {
+    pub fee_state_max_bps: u64,
+    pub growth_blocked: bool,
+    pub premium_cap_bps: u64,
+    pub repay_value: u64,
+    pub realizable_bps: u64,
+    pub fixed_costs: u64,
+    pub min_profit: i128,
 }
 
 /// `t_profitable`-Solver (Stufe-1-Kern): frühestes t mit net(t) > min_profit, wobei
 /// gross_realizable(t) = repay_value × (BPS + premium_cap(t)) / BPS × realizable_bps / BPS.
 /// `premium_cap_bps` deckelt die Kurve durch die Receivership-Health-Regel (P3).
 /// Rückgabe None, wenn selbst bei der Kappe kein Profit entsteht → Kandidat verwerfen.
-pub fn t_profitable(
-    now_unix_s: u64,
-    tagged_at: Option<u64>,
-    fee_state_max_bps: u64,
-    growth_blocked: bool,
-    premium_cap_bps: u64,
-    repay_value: u64,
-    realizable_bps: u64,
-    fixed_costs: u64,
-    min_profit: i128,
-) -> Option<u64> {
+pub fn t_profitable(now_unix_s: u64, tagged_at: Option<u64>, inputs: &ProfitInputs) -> Option<u64> {
+    let ProfitInputs {
+        fee_state_max_bps,
+        growth_blocked,
+        premium_cap_bps,
+        repay_value,
+        realizable_bps,
+        fixed_costs,
+        min_profit,
+    } = *inputs;
     // net(p) = repay × (BPS + p)/BPS × r/BPS − repay − costs  >  min
     // ⇔ p > ((min + costs + repay) × BPS² / (repay × r)) − BPS
     if repay_value == 0 || realizable_bps == 0 {
@@ -302,7 +313,7 @@ mod tests {
         let t0 = 5_000;
         let t = time_for_premium(t0, 0, 2_000, false).unwrap(); // 20 %
         let p = premium_bps(t, Some(t0), 0, false);
-        assert!(p >= 2_000 && p < 2_010, "{}", p);
+        assert!((2_000..2_010).contains(&p), "{}", p);
         assert!(premium_bps(t - 1, Some(t0), 0, false) < 2_000);
         assert_eq!(time_for_premium(t0, 0, 400, false), Some(t0), "unter Basis sofort");
         assert_eq!(time_for_premium(t0, 0, 3_000, true), None, "blockiert: nie");
@@ -315,20 +326,32 @@ mod tests {
         assert_eq!(max_seizable_for_repay(10_000, 0, true), u128::MAX, "Closeout < 5 USD");
     }
 
+    fn inputs(fee: u64, blocked: bool, cap: u64, repay: u64, real: u64, costs: u64, min: i128) -> ProfitInputs {
+        ProfitInputs {
+            fee_state_max_bps: fee,
+            growth_blocked: blocked,
+            premium_cap_bps: cap,
+            repay_value: repay,
+            realizable_bps: real,
+            fixed_costs: costs,
+            min_profit: min,
+        }
+    }
+
     #[test]
     fn t_profitable_solver() {
         let t0 = 10_000;
         // repay 1000, realisierbar 97 %, Kosten 20, min 0: braucht p mit 1000*(1+p)*0.97 > 1020 → p > 5,15 % → ~516 bps
-        let t = t_profitable(t0, Some(t0), 0, false, 10_000, 1_000, 9_700, 20, 0).unwrap();
+        let t = t_profitable(t0, Some(t0), &inputs(0, false, 10_000, 1_000, 9_700, 20, 0)).unwrap();
         let p = premium_bps(t, Some(t0), 0, false);
-        assert!(p >= 516 && p <= 530, "p={}", p);
+        assert!((516..=530).contains(&p), "p={}", p);
         assert!(t > t0 + PREMIUM_GRACE_S, "liegt nach der Grace-Stunde");
         // Kappe durch Receivership-Regel unter Bedarf → None
-        assert_eq!(t_profitable(t0, Some(t0), 0, false, 500, 1_000, 9_700, 20, 0), None);
+        assert_eq!(t_profitable(t0, Some(t0), &inputs(0, false, 500, 1_000, 9_700, 20, 0)), None);
         // nicht getaggt, Basis reicht nicht → None
-        assert_eq!(t_profitable(t0, None, 0, false, 10_000, 1_000, 9_700, 20, 0), None);
+        assert_eq!(t_profitable(t0, None, &inputs(0, false, 10_000, 1_000, 9_700, 20, 0)), None);
         // sofort profitabel
-        assert_eq!(t_profitable(t0, None, 0, false, 10_000, 1_000, 10_000, 0, 0), Some(t0));
+        assert_eq!(t_profitable(t0, None, &inputs(0, false, 10_000, 1_000, 10_000, 0, 0)), Some(t0));
     }
 
     #[test]

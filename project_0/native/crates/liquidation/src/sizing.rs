@@ -223,6 +223,9 @@ fn supported_liability_bank(bank: &Bank) -> bool {
     supported_generic_bank(bank)
 }
 
+/// Asset positions, liability positions and the liabilities' emode configs of one account.
+type Positions = (Vec<Position>, Vec<Position>, Vec<EmodeConfig>);
+
 impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
     fn raw(&self, key: &Pubkey) -> Result<(Pubkey, u64, &'a [u8]), String> {
         self.state.account(key).ok_or_else(|| format!("missing state account {key}"))
@@ -426,7 +429,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         &self,
         account: &MarginfiAccount,
         clock: &Clock,
-    ) -> Result<(Vec<Position>, Vec<Position>, Vec<EmodeConfig>), String> {
+    ) -> Result<Positions, String> {
         let mut assets = Vec::new();
         let mut liabs = Vec::new();
         let mut liability_emodes = Vec::new();
@@ -528,7 +531,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             unix_timestamp: now_unix_s,
         };
         let (assets, liabs, emodes) = self.positions(account, &clock)?;
-        let reconciled = reconcile_emode_configs(emodes.into_iter(), RequirementType::Maintenance);
+        let reconciled = reconcile_emode_configs(emodes, RequirementType::Maintenance);
         let headroom = I80F48::from_num(self.headroom_bps)
             .checked_div(I80F48::from_num(BPS))
             .ok_or_else(|| "headroom division".to_string())?;

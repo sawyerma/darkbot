@@ -209,9 +209,9 @@ mod tests {
         assert_eq!(h.count(), 1000);
         assert_eq!(h.max(), Some(1000));
         let p50 = h.percentile(0.5).unwrap();
-        assert!(p50 >= 500 && p50 <= 575, "p50={} (Bucket-Fehler ≤ 12,5 %)", p50);
+        assert!((500..=575).contains(&p50), "p50={} (Bucket-Fehler ≤ 12,5 %)", p50);
         let p99 = h.percentile(0.99).unwrap();
-        assert!(p99 >= 990 && p99 <= 1000, "p99={}", p99);
+        assert!((990..=1000).contains(&p99), "p99={}", p99);
         assert_eq!(h.percentile(1.0), Some(1000));
     }
 

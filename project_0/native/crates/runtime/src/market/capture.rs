@@ -292,7 +292,7 @@ pub fn run_embedded_with(
                 });
                 h.emit(crate::analytics::econ::Evidence::MarketCheckpoint {
                     index: checkpoint_index,
-                    summary,
+                    summary: Box::new(summary),
                 });
             }
         }

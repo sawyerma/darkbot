@@ -741,8 +741,8 @@ mod tests {
         assert_eq!(adapt(0, 8, ms(5), ms(10)), (8, false));
         assert_eq!(adapt(3, 8, ms(10), ms(10)), (8, true));
         assert_eq!(adapt(16, 8, ms(10), ms(10)), (24, false));
-        assert_eq!(adapt(16, 8, ms(19), ms(10)).1, false);
-        assert_eq!(adapt(16, 8, ms(20), ms(10)).1, true);
+        assert!(!adapt(16, 8, ms(19), ms(10)).1);
+        assert!(adapt(16, 8, ms(20), ms(10)).1);
         assert_eq!(adapt(1_000, 8, ms(0), ms(10)).0, 8 * ADAPTIVE_BATCH);
         assert_eq!(adapt(17, 8, ms(0), ms(10)).0, 25);
     }

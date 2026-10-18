@@ -136,7 +136,8 @@ pub struct SourceHealth {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IngressEvent {
     Account(AccountUpdate),
-    Transaction(TransactionObserved),
+    /// Boxed: the observed transaction is several times larger than every other event.
+    Transaction(Box<TransactionObserved>),
     /// [C0-MO] `logsSubscribe` notification.
     Logs(LogsObserved),
     Health(SourceHealth),

@@ -141,9 +141,7 @@ pub(crate) enum CandidateQueueAdmission {
 #[cfg(feature = "crate_health")]
 pub(crate) fn enqueue_or_coalesce_candidate(
     account: Pubkey,
-    t_rx_ns: u64,
-    event_slot: u64,
-    trigger: &'static str,
+    (t_rx_ns, event_slot, trigger): (u64, u64, &'static str),
     order: &mut VecDeque<Pubkey>,
     pending: &mut HashMap<Pubkey, DetectWork>,
     enqueued: &mut u64,
@@ -170,9 +168,7 @@ pub(crate) fn enqueue_or_coalesce_candidate(
 #[cfg(feature = "crate_health")]
 pub(crate) fn enqueue_oracle_accounts(
     accounts: impl IntoIterator<Item = Pubkey>,
-    t_rx_ns: u64,
-    event_slot: u64,
-    trigger: &'static str,
+    (t_rx_ns, event_slot, trigger): (u64, u64, &'static str),
     order: &mut VecDeque<Pubkey>,
     pending: &mut HashMap<Pubkey, DetectWork>,
     enqueued: &mut u64,

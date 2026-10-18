@@ -118,7 +118,7 @@ pub fn premium_boundary_unix_s(
     if per_second_decay == 0 {
         return None;
     }
-    let secs = (health_value as u128 + per_second_decay - 1) / per_second_decay; // ceil
+    let secs = (health_value as u128).div_ceil(per_second_decay); // ceil
     Some(now_unix_s.saturating_add(secs.min(u64::MAX as u128) as u64))
 }
 

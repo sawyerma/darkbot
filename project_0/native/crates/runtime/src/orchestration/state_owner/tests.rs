@@ -39,9 +39,7 @@ fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() 
     assert_eq!(
         enqueue_or_coalesce_candidate(
             account,
-            100,
-            7,
-            "oracle_health_ready",
+            (100, 7, "oracle_health_ready"),
             &mut order,
             &mut pending,
             &mut enqueued,
@@ -53,9 +51,7 @@ fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() 
     assert_eq!(
         enqueue_or_coalesce_candidate(
             account,
-            200,
-            7,
-            "oracle_health_ready",
+            (200, 7, "oracle_health_ready"),
             &mut order,
             &mut pending,
             &mut enqueued,
@@ -67,9 +63,7 @@ fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() 
     assert_eq!(
         enqueue_or_coalesce_candidate(
             account,
-            300,
-            8,
-            "oracle_health_error",
+            (300, 8, "oracle_health_error"),
             &mut order,
             &mut pending,
             &mut enqueued,

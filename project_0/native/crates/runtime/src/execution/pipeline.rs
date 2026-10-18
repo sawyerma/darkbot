@@ -540,7 +540,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     if net > 0 && net <= self.min_profit {
                         threshold_hits += 1;
                     }
-                    if rec.net_profit.map_or(true, |current| net > current) {
+                    if rec.net_profit.is_none_or(|current| net > current) {
                         rec.net_profit = Some(net);
                         rec.market_plan_identity = plan.market_identity.clone();
                         rec.selected_costs = Some(cost_record);
@@ -558,7 +558,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
 
             if actionable {
-                let replace = best_actionable.as_ref().map_or(true, |(_, _, current, _)| {
+                let replace = best_actionable.as_ref().is_none_or(|(_, _, current, _)| {
                     economics::compare_evaluations(eval, *current).is_gt()
                 });
                 if replace {
@@ -572,7 +572,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 );
                 let replace = best_probe
                     .as_ref()
-                    .map_or(true, |(cur_plan, cur_built, _, _)| {
+                    .is_none_or(|(cur_plan, cur_built, _, _)| {
                         candidate_key
                             < (
                                 cur_built.serialized_len,

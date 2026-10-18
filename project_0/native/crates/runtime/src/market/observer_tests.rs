@@ -1325,7 +1325,8 @@ fn liq_tx_json(
     }
     let mut statics: Vec<String> = vec![Pubkey::new_unique().to_string(), program().to_string()];
     let mut loaded_w: Vec<String> = Vec::new();
-    let mut layouts: Vec<(usize, usize, usize, Result<usize, usize>, usize)> = Vec::new();
+    type Layout = (usize, usize, usize, Result<usize, usize>, usize);
+    let mut layouts: Vec<Layout> = Vec::new();
     for (t, r) in ixs {
         let ti = push(&mut statics, t.to_string());
         let rec = push(&mut statics, Pubkey::new_unique().to_string());

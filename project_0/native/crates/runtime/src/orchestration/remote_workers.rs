@@ -11,7 +11,7 @@ use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
 use darkbot_solana::submit::rpc::RpcSubmitter;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::{account::Account, hash::Hash, transaction::VersionedTransaction};
+use solana_sdk::{hash::Hash, transaction::VersionedTransaction};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
@@ -69,7 +69,7 @@ pub struct ProjectionResultMessage {
     pub base_slot: u64,
     pub base_account_hash: Hash,
     pub t_rx_ns: u64,
-    pub result: Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), String>,
+    pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, String>,
 }
 
 /// [R126] One integration-Bank refresh projection is enough to obtain a fresh pricing state
@@ -87,7 +87,7 @@ pub struct OraclePriceProjectionResultMessage {
     pub bank: Pubkey,
     pub base_slot: u64,
     pub base_bank_hash: Hash,
-    pub result: Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), String>,
+    pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, String>,
 }
 
 pub struct RemoteWorkers {

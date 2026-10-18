@@ -208,6 +208,10 @@ impl OpportunityRecord {
     }
 }
 
+impl super::payload::Payload for OpportunityRecord {
+    const KIND: u16 = super::journal::kind::OWNER_OPPORTUNITY;
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -233,8 +237,4 @@ mod tests {
             assert_eq!(row["maint_health_bits"].to_string(), bits.to_string());
         }
     }
-}
-
-impl super::payload::Payload for OpportunityRecord {
-    const KIND: u16 = super::journal::kind::OWNER_OPPORTUNITY;
 }

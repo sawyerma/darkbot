@@ -111,9 +111,9 @@ pub(super) fn prepare(
             #[cfg(feature = "crate_health")]
             {
                 let view = StateView(&pre_state);
-                return bank_from_state(&view, &program, k)
+                bank_from_state(&view, &program, k)
                     .filter(|b| b.group == group)
-                    .map(|_| *k);
+                    .map(|_| *k)
             }
         })
         .collect();

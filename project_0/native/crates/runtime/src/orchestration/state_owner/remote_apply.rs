@@ -104,9 +104,7 @@ impl ShadowOwner {
                     let mt0_len_before = oracle_detect_order.len(); // [MT0]
                     let count = enqueue_oracle_accounts(
                         all_accounts.iter().copied(),
-                        t_rx_ns,
-                        event_slot,
-                        "oracle_threshold",
+                        (t_rx_ns, event_slot, "oracle_threshold"),
                         oracle_detect_order,
                         oracle_detect_pending,
                         oracle_enqueued,
@@ -189,9 +187,7 @@ impl ShadowOwner {
                                     let mt0_len_before = self.oracle_detect_order.len(); // [MT0]
                                     let count = enqueue_oracle_accounts(
                                         candidates,
-                                        t_rx_ns,
-                                        event_slot,
-                                        "oracle_threshold",
+                                        (t_rx_ns, event_slot, "oracle_threshold"),
                                         &mut self.oracle_detect_order,
                                         &mut self.oracle_detect_pending,
                                         &mut self.metrics.oracle_enqueued,

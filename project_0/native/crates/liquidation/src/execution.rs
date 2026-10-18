@@ -48,7 +48,7 @@ pub fn select_route(quotes: &[RouteQuote], min_out: u64) -> Option<RouteQuote> {
 }
 
 /// Dynamische Priority-Fee: Perzentil über jüngste beobachtete Fees (µLamports/CU), gedeckelt.
-pub fn priority_fee_percentile(samples: &mut Vec<u64>, p: f64, cap: u64) -> Option<u64> {
+pub fn priority_fee_percentile(samples: &mut [u64], p: f64, cap: u64) -> Option<u64> {
     if samples.is_empty() {
         return None;
     }
@@ -102,7 +102,7 @@ pub struct TargetBackoff {
 
 impl TargetBackoff {
     pub fn allowed(&self, account: &Pubkey, now: u64) -> bool {
-        self.targets.get(account).map_or(true, |t| now >= t.next_allowed)
+        self.targets.get(account).is_none_or(|t| now >= t.next_allowed)
     }
     /// Fehlschlag: 2^n × base, gedeckelt. Rückgabe `false`, wenn das Ziel nach `max_failures` fallengelassen wird.
     pub fn record_failure(&mut self, account: Pubkey, now: u64, policy: &ExecPolicy) -> bool {
@@ -199,7 +199,7 @@ mod tests {
         let mut s = vec![5, 1, 9, 3, 7];
         assert_eq!(priority_fee_percentile(&mut s, 0.5, 100), Some(5));
         assert_eq!(priority_fee_percentile(&mut s, 1.0, 8), Some(8), "Cap");
-        assert_eq!(priority_fee_percentile(&mut vec![], 0.5, 8), None);
+        assert_eq!(priority_fee_percentile(&mut [], 0.5, 8), None);
     }
 
     #[test]

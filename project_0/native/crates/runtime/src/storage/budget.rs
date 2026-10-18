@@ -311,7 +311,7 @@ pub fn free_disk_bytes(path: &std::path::Path) -> Option<u64> {
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
         return None;
     }
-    Some(st.f_bavail as u64 * st.f_frsize as u64)
+    Some(st.f_bavail as u64 * st.f_frsize)
 }
 
 /// Peak resident set size of this process (an upper bound of the current RSS).

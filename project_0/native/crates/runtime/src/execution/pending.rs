@@ -159,6 +159,10 @@ pub fn try_reconcile(
     })
 }
 
+impl crate::analytics::payload::Payload for ReconcileRecord {
+    const KIND: u16 = crate::analytics::journal::kind::OWNER_RECONCILE;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,8 +266,4 @@ mod tests {
         assert_eq!(measured_attempt_costs(&p, &[e.clone(), t]), (None, None));
         assert_eq!(measured_attempt_costs(&p, &[e]), (None, None));
     }
-}
-
-impl crate::analytics::payload::Payload for ReconcileRecord {
-    const KIND: u16 = crate::analytics::journal::kind::OWNER_RECONCILE;
 }

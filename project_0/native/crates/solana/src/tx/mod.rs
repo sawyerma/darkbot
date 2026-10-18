@@ -56,7 +56,7 @@ pub struct Resources {
 impl Resources {
     /// v1-Priority-Fee ist ein Gesamtbetrag: rate × CU-Limit / 1e6 (Solana Foundation).
     pub fn priority_total_lamports(&self) -> u64 {
-        ((self.priority_micro_lamports_per_cu as u128 * self.compute_unit_limit as u128 + 999_999) / 1_000_000u128) as u64
+        (self.priority_micro_lamports_per_cu as u128 * self.compute_unit_limit as u128).div_ceil(1_000_000) as u64
     }
 }
 
@@ -355,7 +355,7 @@ mod tests {
         assert!(signature.verify(payer.pubkey().as_ref(), &wire[..measurement.message_bytes]));
         let mut tampered = wire[..measurement.message_bytes].to_vec(); tampered[0] = 0x80;
         assert!(!signature.verify(payer.pubkey().as_ref(), &tampered));
-        let mut limits = TxLimits::default(); limits.max_bytes_v1 = wire.len();
+        let mut limits = TxLimits { max_bytes_v1: wire.len(), ..Default::default() };
         assert!(signed_v1_wire(&plan, hash, &limits, &[&payer]).is_ok());
         limits.max_bytes_v1 -= 1;
         assert!(matches!(signed_v1_wire(&plan, hash, &limits, &[&payer]), Err(BuildError::TooLarge { .. })));

@@ -157,12 +157,12 @@ pub enum Evidence {
     },
     MarketCheckpoint {
         index: usize,
-        summary: crate::market_observer::MarketSummary,
+        summary: Box<crate::market_observer::MarketSummary>,
     },
     MarketFinal(Box<crate::market_observer::MarketFinal>),
     MarketCounters {
         at_ns: u64,
-        before: crate::market_observer::MarketStats,
+        before: Box<crate::market_observer::MarketStats>,
         after: Box<crate::market_observer::MarketStats>,
     },
     ShadowStats(ShadowStats),
@@ -886,6 +886,7 @@ impl Worker {
                 }
             }
             Evidence::MarketCheckpoint { index, summary } => {
+                let summary = *summary;
                 let bytes = retained_size(&summary);
                 if let Some(old) = self.checkpoints.remove(&index) {
                     self.release(retained_size(&old));

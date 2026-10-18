@@ -1251,7 +1251,7 @@ mod regression {
         // Capture counters, Shadow owner counters, market summaries.
         w.accept(Evidence::MarketCounters {
             at_ns: S / 2,
-            before: MarketStats::default(),
+            before: Box::default(),
             after: Box::new(MarketStats {
                 transactions_received: 5,
                 unique_transactions: 4,
@@ -1282,7 +1282,7 @@ mod regression {
         for index in 1..=3 {
             w.accept(Evidence::MarketCheckpoint {
                 index,
-                summary: summary(index as f64, false),
+                summary: Box::new(summary(index as f64, false)),
             })
             .unwrap();
         }

@@ -472,7 +472,7 @@ pub(super) fn classify(
         .iter()
         .map(|e| (e.target, e.receiver))
         .collect::<Vec<_>>();
-    match qualify_truncated(&tx, &tx.signatures[0], tx.slot, program, &pairs) {
+    match qualify_truncated(tx, &tx.signatures[0], tx.slot, program, &pairs) {
         TruncationQualification::Qualified { .. } => {}
         TruncationQualification::Mismatch { .. } => {
             return Err("RECEIVER_INSTRUCTION_EVENT_MISMATCH")

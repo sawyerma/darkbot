@@ -603,7 +603,7 @@ fn counters_use_event_receive_hour_even_if_processed_after_boundary() {
     b.unique_transactions = 1;
     w.accept(Evidence::MarketCounters {
         at_ns: 100,
-        before: a,
+        before: Box::new(a),
         after: Box::new(b),
     })
     .unwrap();

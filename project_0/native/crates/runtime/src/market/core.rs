@@ -722,7 +722,7 @@ impl ObserverCore {
                     None => self.stats.tx_fee_unknown_transactions += 1,
                 }
             }
-            sink.liquidation(&MarketLiquidation::Receiver(ReceiverRow {
+            sink.liquidation(&MarketLiquidation::Receiver(Box::new(ReceiverRow {
                 signature: signature.to_owned(),
                 slot,
                 t_rx_ns,
@@ -730,7 +730,7 @@ impl ObserverCore {
                 event: ev.clone(),
                 enrichment: e,
                 enrichment_status: enrichment_status.to_owned(),
-            }))?;
+            })))?;
         }
         Ok(())
     }
@@ -822,7 +822,7 @@ impl ObserverCore {
                 WindowEvent::Fatal { detail },
             ),
             IngressEvent::Transaction(t) if self.source == MarketSource::Transactions => {
-                self.on_transaction(t, now_unix_s, sink)
+                self.on_transaction(*t, now_unix_s, sink)
             }
             IngressEvent::Logs(l) if self.source == MarketSource::Logs => {
                 self.on_logs(l, now_unix_s, sink)
@@ -852,7 +852,7 @@ impl ObserverCore {
         if let (Some(h), Some(before)) = (&self.econ, before) {
             h.emit(crate::analytics::econ::Evidence::MarketCounters {
                 at_ns: at,
-                before,
+                before: Box::new(before),
                 after: Box::new(self.stats.clone()),
             });
         }
@@ -1016,7 +1016,7 @@ impl ObserverCore {
             } else {
                 self.truncated_pending.push_back(TruncatedPending {
                     signature: signature.to_owned(),
-                    slot: slot,
+                    slot,
                     logged,
                 });
             }
@@ -1050,8 +1050,8 @@ impl ObserverCore {
         }
         self.deferred.push_back(DeferredLiquidation {
             signature: signature.to_owned(),
-            slot: slot,
-            t_rx_ns: t_rx_ns,
+            slot,
+            t_rx_ns,
             observed_unix_s: now_unix_s,
             events: decoded.events,
         });

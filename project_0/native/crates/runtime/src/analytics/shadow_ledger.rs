@@ -163,6 +163,10 @@ impl ShadowLedger {
     }
 }
 
+impl super::payload::Payload for DaySummary {
+    const KIND: u16 = super::journal::kind::OWNER_SUMMARY;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,8 +189,4 @@ mod tests {
             .expect("Tageswechsel liefert Zusammenfassung");
         assert_eq!(rolled.shadow_wins, 1);
     }
-}
-
-impl super::payload::Payload for DaySummary {
-    const KIND: u16 = super::journal::kind::OWNER_SUMMARY;
 }

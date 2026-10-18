@@ -12,7 +12,7 @@
 //! Long-tail assumes tagging now (0.1.12 premium ramp); under the 0.1.11 program it is potential.
 //! Every failed input is a visible reason, never a zero. [C0-FIX-02]
 
-use crate::economics::{t_profitable, BPS, PREMIUM_MAX_BPS};
+use crate::economics::{t_profitable, ProfitInputs, BPS, PREMIUM_MAX_BPS};
 use crate::health::{HealthError, HealthView};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -193,19 +193,16 @@ pub fn classify(row: &CensusRow, now_unix_s: u64, m: &CensusModel) -> C0Class {
     // Premium cannot exceed the asset surplus when all liabilities are repaid.
     let cap = ((assets - repay) as u128 * BPS as u128 / repay as u128).min(PREMIUM_MAX_BPS as u128)
         as u64;
-    let profitable = |tagged_at| {
-        t_profitable(
-            now_unix_s,
-            tagged_at,
-            m.fee_state_max_bps,
-            false,
-            cap,
-            repay,
-            m.realizable_bps,
-            m.fixed_cost_usd_micro,
-            m.min_profit_usd_micro,
-        )
+    let inputs = ProfitInputs {
+        fee_state_max_bps: m.fee_state_max_bps,
+        growth_blocked: false,
+        premium_cap_bps: cap,
+        repay_value: repay,
+        realizable_bps: m.realizable_bps,
+        fixed_costs: m.fixed_cost_usd_micro,
+        min_profit: m.min_profit_usd_micro,
     };
+    let profitable = |tagged_at| t_profitable(now_unix_s, tagged_at, &inputs);
     // The premium is an upper bound: any level up to min(base, cap) may be taken now.
     if profitable(None).is_some() {
         return C0Class::ModelRaceNow;

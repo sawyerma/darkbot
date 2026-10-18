@@ -220,8 +220,10 @@ impl Client<'_> {
             return Ok(None);
         }
         let e: RpcCacheEntry = journal::read_typed_value(&path).map_err(|_| "CACHE_CORRUPT")?;
+        // The entry stores the params' JSON text; compare against the same rendering.
+        let rendered = params.to_string();
         if e.method != method
-            || e.params != params.to_string()
+            || e.params != rendered
             || hash(&e.result).to_bytes() != e.result_sha256
         {
             return Err("CACHE_CORRUPT");
@@ -332,7 +334,8 @@ impl Client<'_> {
         let rpc = self.rpc.as_ref().ok_or("OFFLINE_CACHE_MISS")?;
         let (pacer, deadline) = (&self.pacer, self.deadline);
         self.calls += group.len() as u64;
-        let fetched: Vec<(u64, Result<(Value, u64), &'static str>)> = std::thread::scope(|scope| {
+        type Fetched = Vec<(u64, Result<(Value, u64), &'static str>)>;
+        let fetched: Fetched = std::thread::scope(|scope| {
             let jobs: Vec<_> = group
                 .iter()
                 .map(|&s| {
@@ -749,8 +752,8 @@ pub fn run(job: Job) -> Result<StrictResult, String> {
             });
             next = end.checked_add(1).ok_or("SLOT_OVERFLOW")?;
         }
-        if !first_time.is_some_and(|v| (v as i128) * 1_000_000_000 < job.start_ns as i128)
-            || !last_time.is_some_and(|v| (v as i128) * 1_000_000_000 >= job.end_ns as i128)
+        if first_time.is_none_or(|v| (v as i128) * 1_000_000_000 >= job.start_ns as i128)
+            || last_time.is_none_or(|v| (v as i128) * 1_000_000_000 < job.end_ns as i128)
         {
             return Err("UTC_WINDOW_NOT_BRACKETED");
         }

@@ -134,7 +134,7 @@ mod tests {
         let table = decode(Pubkey::new_unique(), owner, &data, 101).unwrap();
         let mut conflicting = table.clone();
         conflicting.addresses.reverse();
-        let tables = merge(&[table.clone()], &[conflicting]);
+        let tables = merge(std::slice::from_ref(&table), &[conflicting]);
         assert_eq!(tables.len(), 1);
         assert_eq!(tables[0].addresses, table.addresses);
         let mut plan = TxPlan {

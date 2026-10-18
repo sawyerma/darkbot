@@ -728,7 +728,7 @@ mod tests {
             b.succeeded();
         }
         assert_eq!(b.snapshot().effective_rps, 20.0);
-        assert_eq!(b.snapshot().quota_qualified, false);
+        assert!(!b.snapshot().quota_qualified);
         b.degraded();
         assert_eq!(b.snapshot().effective_rps, 10.0);
         assert_eq!(b.snapshot().http_429_count, 1);

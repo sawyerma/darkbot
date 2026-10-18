@@ -677,7 +677,7 @@ pub mod p0 {
                         return Err(format!("DRIFT_TOO_MANY_REWARD_MARKETS:{}", rewards.len()));
                     }
 
-                    let r1 = rewards.get(0).copied();
+                    let r1 = rewards.first().copied();
                     let r2 = rewards.get(1).copied();
                     builders::drift_withdraw_from_bank(
                         &self.program,

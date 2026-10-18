@@ -193,8 +193,8 @@ pub fn decode_bank(data: &[u8]) -> Result<&marginfi_type_crate::types::Bank, Ban
     bytemuck::try_from_bytes(&data[8..]).map_err(|_| BankLayoutError::Alignment)
 }
 
-/// [FIX-27] Observation-Layout kommt ausschließlich aus `health::crate_impl::bank_observation_keys`
-/// (OracleSetup-Enum des Type-Crates) — keine numerische Rekonstruktion mehr.
+// [FIX-27] Observation-Layout kommt ausschließlich aus `health::crate_impl::bank_observation_keys`
+// (OracleSetup-Enum des Type-Crates) — keine numerische Rekonstruktion mehr.
 
 // ---- P1A-01/P1A-04: Loader-v3 deployment freeze and upgrade watch ----
 pub const BPF_LOADER_UPGRADEABLE_ID: &str = "BPFLoaderUpgradeab1e11111111111111111111111";

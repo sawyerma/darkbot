@@ -509,7 +509,7 @@ impl ObserverCore {
             // and its coverage row was accepted by the sink.
             // Do not repeat unchanged Shadow status during slow post-capture RPC.
             if self.reconciliation.slots_fetched == 1
-                || self.reconciliation.slots_fetched % 50 == 0
+                || self.reconciliation.slots_fetched.is_multiple_of(50)
                 || self.reconciliation.slots_fetched == self.reconciliation.slots_produced
             {
                 eprintln!(

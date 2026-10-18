@@ -74,6 +74,9 @@ pub struct RpcSubmitter {
     pub max_retries: Option<usize>,
 }
 
+/// `(Clock slot, Clock unix timestamp, selected post accounts, units consumed)` of a projection simulation.
+pub type PostAccountsSimulation = (u64, i64, Vec<(Pubkey, Account)>, Option<u64>);
+
 impl RpcSubmitter {
     pub fn new(url: String, skip_preflight: bool) -> Self {
         RpcSubmitter {
@@ -100,7 +103,7 @@ impl RpcSubmitter {
         &self,
         tx: &VersionedTransaction,
         addresses: &[Pubkey],
-    ) -> Result<(u64, i64, Vec<(Pubkey, Account)>, Option<u64>), SubmitError> {
+    ) -> Result<PostAccountsSimulation, SubmitError> {
         if addresses.is_empty() {
             return Err(SubmitError::Rejected(
                 "projection simulation requested zero post accounts".into(),

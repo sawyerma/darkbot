@@ -324,7 +324,7 @@ pub(crate) fn parse_notification(
                 .get("slot")
                 .and_then(|s| s.as_u64())
                 .ok_or_else(|| IngressError::Protocol("slot missing".into()))?;
-            Ok(vec![IngressEvent::Transaction(
+            Ok(vec![IngressEvent::Transaction(Box::new(
                 super::TransactionObserved {
                     signature,
                     slot,
@@ -333,7 +333,7 @@ pub(crate) fn parse_notification(
                     t_rx_ns,
                     tx: crate::chain::decode_notification(result),
                 },
-            )])
+            ))])
         }
         "logsNotification" => {
             // [C0-MO] {result:{context:{slot}, value:{signature, err, logs}}}
@@ -877,6 +877,67 @@ fn reconnect_delay(initial: Duration, maximum: Duration, failures: u32, seed: u6
         .min(maximum)
 }
 
+/// One bounded read-only liveness observation through the production ingress, no new feed.
+/// All subscriptions must ACK; two increasing slots and source application data are required.
+pub fn audit_liveness(
+    url: String,
+    program: Pubkey,
+    transactions: bool,
+    budget: Duration,
+) -> Result<(u64, u64), &'static str> {
+    use super::{IngressEvent, IngressHalt, IngressSource, SlotWatch};
+    let sub = Subscription {
+        slots: true,
+        logs_mentioning: if transactions { vec![] } else { vec![program] },
+        transactions_mentioning: if transactions { vec![program] } else { vec![] },
+        ..Default::default()
+    };
+    let mut cfg = WsRpcConfig::new(url, sub);
+    cfg.idle_timeout = budget;
+    cfg.recovery_budget = Some(budget);
+    cfg.recovery_attempts = 1;
+    cfg.heartbeat_interval = Some(Duration::from_secs(1));
+    let (tx, rx) = darkbot_common::channel::bounded("boot-wss", 256);
+    let stop = darkbot_common::lifecycle::Shutdown::new();
+    let worker_stop = stop.clone();
+    let halt = IngressHalt::new();
+    let worker_halt = halt.clone();
+    let source = WsRpcControlSource::new(cfg, Clock::new());
+    let thread =
+        std::thread::spawn(move || source.run(tx, worker_stop, worker_halt, SlotWatch::new()));
+    let end = std::time::Instant::now() + budget;
+    let (mut ack, mut first, mut last, mut data) = (false, None, None, false);
+    while std::time::Instant::now() < end && !halt.is_raised() {
+        while let Some(event) = rx.try_pop() {
+            match event {
+                IngressEvent::Transport { state: "READY", .. } => ack = true,
+                IngressEvent::Slot(s) if ack => {
+                    first.get_or_insert(s.slot);
+                    last = Some(s.slot);
+                }
+                IngressEvent::Logs(_) | IngressEvent::Transaction(_) if ack => data = true,
+                IngressEvent::Gap { .. } | IngressEvent::Fatal { .. } => halt.raise(),
+                _ => {}
+            }
+        }
+        if ack && data && first.zip(last).is_some_and(|(a, b)| b > a) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    stop.request();
+    let ended = thread.join();
+    if ended.is_err() || halt.is_raised() {
+        return Err("BOOT_WSS_FAILED");
+    }
+    if ack && data {
+        if let Some((a, b)) = first.zip(last).filter(|(a, b)| b > a) {
+            return Ok((a, b));
+        }
+    }
+    Err("BOOT_WSS_LIVENESS_UNPROVEN")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1093,65 +1154,4 @@ mod tests {
         let msg = json!({"method":"accountNotification","params":{"subscription":3,"result":{"context":{"slot":1},"value":{"lamports":1,"owner":Pubkey::new_unique().to_string(),"data":["","base64"]}}}});
         assert!(parse_notification(&msg, &HashMap::new(), 1).is_err());
     }
-}
-
-/// One bounded read-only liveness observation through the production ingress, no new feed.
-/// All subscriptions must ACK; two increasing slots and source application data are required.
-pub fn audit_liveness(
-    url: String,
-    program: Pubkey,
-    transactions: bool,
-    budget: Duration,
-) -> Result<(u64, u64), &'static str> {
-    use super::{IngressEvent, IngressHalt, IngressSource, SlotWatch};
-    let sub = Subscription {
-        slots: true,
-        logs_mentioning: if transactions { vec![] } else { vec![program] },
-        transactions_mentioning: if transactions { vec![program] } else { vec![] },
-        ..Default::default()
-    };
-    let mut cfg = WsRpcConfig::new(url, sub);
-    cfg.idle_timeout = budget;
-    cfg.recovery_budget = Some(budget);
-    cfg.recovery_attempts = 1;
-    cfg.heartbeat_interval = Some(Duration::from_secs(1));
-    let (tx, rx) = darkbot_common::channel::bounded("boot-wss", 256);
-    let stop = darkbot_common::lifecycle::Shutdown::new();
-    let worker_stop = stop.clone();
-    let halt = IngressHalt::new();
-    let worker_halt = halt.clone();
-    let source = WsRpcControlSource::new(cfg, Clock::new());
-    let thread =
-        std::thread::spawn(move || source.run(tx, worker_stop, worker_halt, SlotWatch::new()));
-    let end = std::time::Instant::now() + budget;
-    let (mut ack, mut first, mut last, mut data) = (false, None, None, false);
-    while std::time::Instant::now() < end && !halt.is_raised() {
-        while let Some(event) = rx.try_pop() {
-            match event {
-                IngressEvent::Transport { state: "READY", .. } => ack = true,
-                IngressEvent::Slot(s) if ack => {
-                    first.get_or_insert(s.slot);
-                    last = Some(s.slot);
-                }
-                IngressEvent::Logs(_) | IngressEvent::Transaction(_) if ack => data = true,
-                IngressEvent::Gap { .. } | IngressEvent::Fatal { .. } => halt.raise(),
-                _ => {}
-            }
-        }
-        if ack && data && first.zip(last).is_some_and(|(a, b)| b > a) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    stop.request();
-    let ended = thread.join();
-    if ended.is_err() || halt.is_raised() {
-        return Err("BOOT_WSS_FAILED");
-    }
-    if ack && data {
-        if let Some((a, b)) = first.zip(last).filter(|(a, b)| b > a) {
-            return Ok((a, b));
-        }
-    }
-    Err("BOOT_WSS_LIVENESS_UNPROVEN")
 }
