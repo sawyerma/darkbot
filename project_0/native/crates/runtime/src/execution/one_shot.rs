@@ -107,11 +107,14 @@ pub struct Receipt {
     pub exit_complete: bool,
 }
 
+/// Fields drop in declaration order (L1): the journal writer is closed before the wallet lock
+/// is released, so a next owner never opens the journal while this one still holds its file.
 pub struct Journal {
-    _lock: WalletLock,
     wallet: String,
     saved: Option<Saved>,
     writer: journal::Writer,
+    /// Last field: released after the journal file is closed.
+    _lock: WalletLock,
 }
 /// Exclusive wallet flock, released on every drop path including failed opens.
 struct WalletLock(File);
@@ -300,10 +303,10 @@ impl Journal {
             )
         };
         let mut this = Self {
-            _lock: lock,
             wallet: wallet.into(),
             saved,
             writer,
+            _lock: lock,
         };
         if this.saved.is_none() {
             if let Some((legacy_sha256, state)) = legacy {
@@ -743,6 +746,30 @@ mod tests {
                 fs::remove_dir_all(dir).unwrap();
             }
         }
+    }
+    /// L1: an owner taking the wallet while the previous one drops sees the complete durable
+    /// journal (the writer closes before the lock is released), never a half-closed one.
+    #[test]
+    fn next_owner_never_opens_a_journal_still_held_by_its_writer() {
+        let (dir, a, i, c) = setup();
+        for _ in 0..20 {
+            let mut j = Journal::open(&dir, &a.wallet).unwrap();
+            if j.holds().is_empty() {
+                j.reserve(a.clone(), i.clone(), &c).unwrap();
+            }
+            let wallet = a.wallet.clone();
+            let d = dir.clone();
+            let contender = std::thread::spawn(move || loop {
+                match Journal::open(&d, &wallet) {
+                    Ok(next) => return next.holds(),
+                    Err(e) if e == "WALLET_ALREADY_LOCKED" => std::thread::yield_now(),
+                    Err(e) => panic!("{e}"),
+                }
+            });
+            drop(j);
+            assert_eq!(contender.join().unwrap(), i.holds);
+        }
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn dropped_journal_releases_wallet_while_lock_descriptor_is_shared() {
