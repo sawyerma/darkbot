@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-darkbot-runner = { path = "../runtime" }
+darkbot-runner = { path = "../runtime", features = ["crate_health"] }
 prost = "0.13"
 bytes = "1"
 
