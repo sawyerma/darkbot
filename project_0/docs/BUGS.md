@@ -605,12 +605,12 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** das Gate entscheidet ausschließlich auf tatsächlichem Build-/Sign-/Submit-Payload; keine zweite manuell zusammengesetzte „immer gültige“ Schrittfolge. **Commit/Evidence:** —.
 
 ### E3 — Drift-/JupLend-Refresh-Discriminatoren nicht bytegenau getestet
-- [ ] **MEDIUM / PROTOCOL-PARITY · CODE_CONFIRMED · G-A/G-E · P1A/P1B/FE-01.**
+- [x] **MEDIUM · LOCAL_PASS · G-A/G-E · P1A/P1B/FE-01.** ~~Drift-/JupLend-Discriminatoren werden nur auf Länge 8 geprüft.~~
 - **Pfad:** `liquidation/src/integration.rs::{drift_refresh,juplend_refresh,tests::pinned_refresh_discriminators_match_expected}`.
 - **Ist:** Die fest kodierten Drift- und JupLend-Discriminatoren werden im Test **nur auf Länge acht** geprüft. Kamino wird per `global:refresh_reserve/refresh_obligation`-Hash gegen feste Bytes getestet. Drift-/JupLend-Fehlbytes könnten daher den Test bestehen und erst als fehlgeschlagene Simulation/IntegrationRefresh auffallen. Die jeweiligen Fremdprotokolle müssen **nicht** denselben Hash-Präfixalgorithmus wie Anchor-Kamino verwenden.
 - **Soll-Fix:** Fest kodierte Discriminatoren gegen **gepinnten echten Instruction-Source/IDL/Mock-Crate** byteweise testen; nur bei belegtem Hash-Algorithmus berechnen, sonst geprüfte Konstanten exakt vergleichen und Source-Commit referenzieren. Live-Refresh-Build und Builder-/Instruction-Provenienz in denselben Test einbeziehen; bei P1B-Upgrade Fingerprint/Pin prüfen.
 - **Tests:** exakte erwartete acht Bytes pro Protokoll und Instruktionsart, mutiertes Byte muss FAIL erzeugen, inkompatible Deployment-/IDL-Version ⇒ fail-closed, kein bloßer `len()==8`-Test.
-- **Abnahme:** signierbarer Refresh ist durch Source/Fixture begründet, nicht durch eine 8-Byte-Länge. **Commit/Evidence:** —.
+- **Abnahme:** signierbarer Refresh ist durch Source/Fixture begründet, nicht durch eine 8-Byte-Länge. **Commit/Evidence:** `1a25c5f` (gemeinsam mit E11): alle vier Refresh-Discriminatoren (Kamino `refresh_reserve`/`refresh_obligation`, Drift `update_spot_market_cumulative_interest`, JupLend `update_rate`) stammen aus den IDLs des gepinnten marginfi-Quell-Commits `33c67987` (`idls/{kamino_lending,drift,juplend_earn}.json`, über `declare_program!` der gepinnten Mock-Crates als `anchor_lang::Discriminator`-Konstanten); Bytes unverändert, gleich IDL-Array und Anchor-Regel (Algorithmus damit belegt). Tests `pinned_refresh_discriminators_match_expected` (exakte IDL-Bytes, gekipptes Byte ⇒ FAIL) und `refresh_builders_emit_the_pinned_idl_instructions` (Live-Builder Drift/JupLend: Programm, Daten, Account-Reihenfolge und Writable-Flags wie IDL) Exit 0 (`evidence/HARDENING_20261018/after_E3_E11_tests.txt`). **Grenze:** Parität zur *deployten* Mainnet-Version der Fremdprogramme NOT_RUN (BOOT/FE-01).
 
 ### E4 — BOOT-02 hat keinen aktiven Journal-Writer-Probe
 - [x] **HIGH · LOCAL_PASS · G-A/G-B · BOOT-02/PERSIST/SK; Cross-Ref X3/M2.** ~~BOOT-02 prüft nur freie Bytes, schreibt nichts.~~
@@ -671,7 +671,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** bounded Index-Speicher ohne Routing-/Fanout-Verhaltensänderung. **Commit/Evidence:** —.
 
 ### E11 — Kamino-Discriminator wird pro Refresh-Aufruf neu gehasht
-- [ ] **LOW / HOTPATH-ALLOCATION · CODE_CONFIRMED · P6-MT.**
+- [x] **LOW · LOCAL_PASS · P6-MT.** ~~`ix_discriminator(...)` hasht pro Plan.~~ Geschlossen mit E3 in `1a25c5f`: gepinnte IDL-Konstanten statt Laufzeit-Hash, bitidentische Instruktionsdaten (Tests siehe E3). Allokations-/Timing-Profil nicht gemessen (nicht nötig: kein Hash mehr).
 - **Pfad:** `liquidation/src/integration.rs::{ix_discriminator,kamino_refreshes}`.
 - **Ist:** `ix_discriminator("refresh_reserve"/"refresh_obligation")` erzeugt zur Laufzeit Hash + `Vec<u8>` bei jedem Plan. Ob dies gegenüber Reserve-Decode/RPC relevant ist, ist zu profilieren.
 - **Soll-Fix:** bereits byteweise getestete, gepinnte 8-Byte-Konstanten anstelle wiederholtem dynamischem Hash, sofern Quell-/IDL-Parität sichergestellt ist; keine ungetesteten Fremdprotokolldiscriminatoren aus Kamino-Hash ableiten.
