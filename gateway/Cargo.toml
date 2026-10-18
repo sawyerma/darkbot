@@ -36,8 +36,6 @@ prost-build = "0.13"
 protox = "0.7"
 
 [dev-dependencies]
-darkbot-p0-reporter = { path = "../project_0/native/crates/reporter" }
-darkbot-runner = { path = "../project_0/native/crates/runtime", features = ["crate_health"] }
 tokio-tungstenite = "0.23"
 futures-util = "0.3"
 
