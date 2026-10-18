@@ -1,0 +1,39 @@
+command: cargo build --release --all-features
+environment: CARGO_BUILD_JOBS=2 (machine load limit); cwd project_0/native (virtual workspace: common, solana, liquidation, runtime, reporter)
+tested_head: 8eb7c89d3f860505c9bc9f5097ef0993ccaba4ae
+worktree:  M Cargo.lock (Cargo.lock regenerated locally: committed lock lacks the reporter crate's dependencies; not part of any commit)
+toolchain: rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew); cargo 1.93.1 (Homebrew)
+started_utc: 2026-10-18T06:51:59Z
+----- output -----
+   Compiling regex-syntax v0.8.11
+   Compiling bytes v1.12.1
+   Compiling prost v0.13.5
+   Compiling prost-types v0.13.5
+   Compiling regex-automata v0.4.18
+   Compiling pbjson-build v0.7.0
+   Compiling darkbot-common v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/common)
+   Compiling regex v1.13.1
+   Compiling darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
+   Compiling prost-build v0.13.5
+   Compiling switchboard-protos v0.2.6
+   Compiling switchboard-on-demand v0.12.1 (https://github.com/switchboard-xyz/switchboard-sdk?rev=f75b1ef63e10eda35d046b1838810ec2935d7f39#f75b1ef6)
+   Compiling marginfi v0.1.11 (https://github.com/0dotxyz/marginfi-v2?tag=mrgn-0.1.11-rc1#33c67987)
+   Compiling lazy_static v1.5.1
+   Compiling beef v0.5.2
+   Compiling fnv v1.0.7
+   Compiling logos-codegen v0.14.4
+   Compiling logos-derive v0.14.4
+   Compiling miette-derive v7.6.0
+   Compiling unicode-width v0.1.14
+   Compiling miette v7.6.0
+   Compiling logos v0.14.4
+   Compiling protox-parse v0.7.0
+   Compiling prost-reflect v0.14.7
+   Compiling protox v0.7.2
+   Compiling darkbot-p0-reporter v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter)
+   Compiling darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+    Finished `release` profile [optimized] target(s) in 54.31s
+----- end -----
+finished_utc: 2026-10-18T06:52:53Z
+exit_code: 0

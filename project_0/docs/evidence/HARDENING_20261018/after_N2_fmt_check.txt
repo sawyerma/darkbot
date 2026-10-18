@@ -1,0 +1,10 @@
+command: cargo fmt --check
+environment: CARGO_BUILD_JOBS=2 (machine load limit); cwd project_0/native (virtual workspace: common, solana, liquidation, runtime, reporter)
+tested_head: 8eb7c89d3f860505c9bc9f5097ef0993ccaba4ae
+worktree:  M Cargo.lock (Cargo.lock regenerated locally: committed lock lacks the reporter crate's dependencies; not part of any commit)
+toolchain: rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew); cargo 1.93.1 (Homebrew)
+started_utc: 2026-10-18T06:50:51Z
+----- output -----
+----- end -----
+finished_utc: 2026-10-18T06:50:51Z
+exit_code: 0
