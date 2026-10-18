@@ -97,10 +97,35 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         crate::run_layout::RunLayout::standalone_market(&|k| std::env::var(k).ok())?;
         return crate::market_observer::run_from_env().map_err(|e| e.into());
     }
+    // X1: a start by `p0ctl run start` (or with a record) is bound to its approved network
+    // audit before any thread starts or anything is read from the network; a missing, expired,
+    // foreign or drifted record refuses the start. The owner binds the audited accounts to its
+    // own bootstrap state at the first Ready, before admission.
+    let admission = super::boot_audit::admission_record(
+        &|k| std::env::var(k).ok(),
+        std::env::var_os("P0_CTL_LAUNCH_RUN_ID").is_some(),
+        &|| {
+            let project = std::env::var("P0_PROJECT_DIR")
+                .map_err(|_| "BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".to_string())?;
+            super::boot_audit::launched_identity(
+                std::path::Path::new(&project),
+                super::boot_audit::SafetyFlags::from_env(),
+                &args,
+                &|k| std::env::var(k).ok(),
+            )
+        },
+        &super::boot_audit::runtime_binary_identity,
+    )
+    .map_err(|e| {
+        eprintln!("BOOT admission refused: {e}");
+        Box::new(super::state_owner::OwnerTerminal(
+            super::boot_audit::admission_code(&e),
+        ))
+    })?;
     if mode == "econ4h" {
-        return run_econ4h().map_err(|e| e.into());
+        return run_econ4h(admission).map_err(|e| e.into());
     }
-    run_shadow(Clock::new(), None)
+    run_shadow(Clock::new(), None, admission)
 }
 
 /// The Shadow owner of an econ run has ended. An owner error (e.g. an `OwnerTerminal` such as
@@ -150,7 +175,7 @@ pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'stati
     }
 }
 
-fn run_econ4h() -> Result<(), String> {
+fn run_econ4h(admission: Option<super::boot_audit::NetworkAudit>) -> Result<(), String> {
     darkbot_solana::provider::enable_measurement_budget();
     use crate::analytics::econ;
     use crate::market::observer as market_observer;
@@ -172,7 +197,7 @@ fn run_econ4h() -> Result<(), String> {
     let (handle, analytics) = econ::spawn(cfg, clock, &market)?;
     let paths = handle.cfg.paths();
     // Every exit after BOOTSTRAP seals the phase journal and renders its JSONL view.
-    let result = supervise(handle, analytics, market, clock, timeout);
+    let result = supervise(handle, analytics, market, clock, timeout, admission);
     let rendered = crate::analytics::measurement::finalize_phases(&paths, result.is_ok());
     if let Err(e) = &rendered {
         eprintln!("C0_E1_PHASE_JOURNAL_INCOMPLETE {e}");
@@ -186,6 +211,7 @@ fn supervise(
     market: crate::market::observer::MarketConfig,
     clock: Clock,
     timeout: u64,
+    admission: Option<super::boot_audit::NetworkAudit>,
 ) -> Result<(), String> {
     use crate::market::observer as market_observer;
     use std::sync::atomic::Ordering;
@@ -193,7 +219,7 @@ fn supervise(
     let shadow = std::thread::Builder::new()
         .name("econ-shadow-owner".into())
         .spawn(move || {
-            let result = run_shadow(clock, Some(shadow_handle.clone())).map_err(|e| {
+            let result = run_shadow(clock, Some(shadow_handle.clone()), admission).map_err(|e| {
                 let report = failure_report(e.as_ref());
                 eprintln!("C0_E1_SHADOW_FAILED category={report}");
                 report

@@ -10,6 +10,14 @@ fn owner_terminal_codes_are_reported_verbatim() {
         "INGRESS_FATAL",
         "INGRESS_SESSION_NOT_QUIESCENT",
         "INGRESS_NOT_QUIESCENT",
+        "BOOT_IDENTITY_DRIFT",
+        "BOOT_NETWORK_AUDIT_MISSING",
+        "BOOT_NETWORK_EVIDENCE_INVALID",
+        "BOOT_NETWORK_EXPIRED",
+        "BOOT_NETWORK_TOKEN",
+        "BOOT_NETWORK_NOT_READY",
+        "BOOT_NETWORK_CHECK_MISSING",
+        "BOOT_ADMISSION_REFUSED",
     ] {
         assert_eq!(shadow_failure_code(&super::OwnerTerminal(code)), code);
     }

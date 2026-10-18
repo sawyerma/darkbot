@@ -6,6 +6,7 @@ type Prepared<F> = Result<(ShadowOwner, F, IngressSessions), Box<dyn std::error:
 pub(super) fn prepare(
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,
+    admission: Option<crate::orchestration::boot_audit::NetworkAudit>,
 ) -> Prepared<impl FnMut() -> Result<SnapshotData, String>> {
     let operational_start = clock.now_ns();
     let operational_window = if econ.is_none() && darkbot_solana::runtime_config::configured() {
@@ -18,6 +19,10 @@ pub(super) fn prepare(
         None
     };
     let operational_failure = None;
+    let admission = admission.map(Box::new);
+    if admission.is_some() {
+        eprintln!("admission: approved network audit verified; identities bind at the first Ready");
+    }
     let ws_url = config::require("P0_WS_URL")?;
     let ws_url_for_spawn = ws_url.clone();
     let rpc_url = config::require("P0_RPC_URL")?;
@@ -870,6 +875,8 @@ pub(super) fn prepare(
         consumer,
         program_data,
         program_data_baseline_hash,
+        program_data_executable: program_data_account.executable,
+        admission,
         sol_bank,
         ingress_session,
         retired_events: Default::default(),

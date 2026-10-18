@@ -123,6 +123,8 @@ fn fixture(tag: &str) -> Fixture {
         consumer,
         program_data,
         program_data_baseline_hash: hash(&program_data_account.data),
+        program_data_executable: false,
+        admission: None,
         sol_bank: Pubkey::new_unique(),
         ingress_session: IngressSession::new(Shutdown::new(), std::thread::spawn(|| {}), 1),
         retired_events: Default::default(),
@@ -363,5 +365,61 @@ fn owner_error_aborts_the_econ_run() {
             (aborted, aborted, true),
             "failed={failed} admission_closed={admission_closed}"
         );
+    }
+}
+
+/// X1 at admission: a start by p0ctl binds the approved network audit to the state the owner read
+/// itself at the first Ready, before the ingress halt clears. A matching record admits; a drifted
+/// ProgramData or a missing required dependency ends the run with BOOT_IDENTITY_DRIFT, the halt
+/// stays raised and nothing is re-pinned or retried.
+#[test]
+fn owner_binds_the_approved_audit_before_admission() {
+    use crate::orchestration::boot_audit::{network_record_fixture, proof_of};
+    let program_data = |f: &Fixture, data: &[u8]| {
+        proof_of(
+            &f.program_data_account.pubkey,
+            &f.program_data_account.owner,
+            data,
+            false,
+        )
+    };
+    for case in ["bound", "program_data", "missing"] {
+        let mut f = fixture(&format!("x1_{case}"));
+        let required = Pubkey::new_unique();
+        let mut accounts = vec![program_data(
+            &f,
+            if case == "program_data" {
+                &[8; 64]
+            } else {
+                &[7; 64]
+            },
+        )];
+        if case == "missing" {
+            f.owner.required_dependency_keys = vec![required];
+            accounts.push(proof_of(&required, &f.owner.program, &[1; 32], false));
+        }
+        f.owner.admission = Some(Box::new(network_record_fixture(accounts)));
+        f.owner.halt.raise();
+        let good = snapshot(&f, false);
+        let mut fetch = || {
+            Ok(SnapshotData {
+                slot: good.slot,
+                accounts: good.accounts.clone(),
+                missing_required: vec![],
+            })
+        };
+        f.producer.try_push(reconnected()).unwrap();
+        let result = drive(&mut f, &mut fetch);
+        if case == "bound" {
+            assert_eq!(result, Ok(()));
+            assert!(f.owner.st.run_state().is_tradable() && !f.owner.halt.is_raised());
+        } else {
+            assert_eq!(result, Err("BOOT_IDENTITY_DRIFT"), "{case}");
+            assert!(f.owner.halt.is_raised(), "{case}: no admission");
+        }
+        assert!(f.owner.admission.is_none(), "bound exactly once");
+        let dir = f.dir.clone();
+        f.owner.finish().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

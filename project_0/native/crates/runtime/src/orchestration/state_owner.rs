@@ -152,6 +152,11 @@ pub(super) struct ShadowOwner {
     consumer: darkbot_common::channel::Consumer<IngressEvent>,
     program_data: Pubkey,
     program_data_baseline_hash: Hash,
+    /// X1: `executable` of the ProgramData account as read at startup.
+    program_data_executable: bool,
+    /// X1: the approved network audit of a `p0ctl` start, bound at the first Ready (admission)
+    /// and then dropped; `None` on the legacy local Shadow path.
+    admission: Option<Box<super::boot_audit::NetworkAudit>>,
     sol_bank: Pubkey,
     ingress_session: IngressSession,
     /// C6/D10: queued events of replaced (joined) session generations.
@@ -212,8 +217,9 @@ impl std::error::Error for OwnerTerminal {}
 pub(super) fn run_shadow(
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,
+    admission: Option<super::boot_audit::NetworkAudit>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (mut owner, mut fetch, ingress) = setup::prepare(clock, econ)?;
+    let (mut owner, mut fetch, ingress) = setup::prepare(clock, econ, admission)?;
     let outcome = (|| -> Result<(), Box<dyn std::error::Error>> {
         loop {
             owner.evidence.check()?;

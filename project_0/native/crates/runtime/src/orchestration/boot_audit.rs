@@ -168,8 +168,16 @@ impl SafetyFlags {
 
 /// Identities of this project and process now.
 pub fn identity(project: &Path, flags: SafetyFlags) -> Result<AuditedIdentity, String> {
-    let config = bincode::serialize(darkbot_solana::runtime_config::active())
-        .map_err(|e| format!("RUNTIME_CONFIG_DIGEST: {e}"))?;
+    identity_with(project, flags, darkbot_solana::runtime_config::active())
+}
+
+/// Identities of this project with an explicit operational config.
+pub fn identity_with(
+    project: &Path,
+    flags: SafetyFlags,
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+) -> Result<AuditedIdentity, String> {
+    let config = bincode::serialize(config).map_err(|e| format!("RUNTIME_CONFIG_DIGEST: {e}"))?;
     Ok(AuditedIdentity {
         source_head: git(project, &["rev-parse", "HEAD"])
             .map(|b| String::from_utf8_lossy(&b).trim().to_string()),
@@ -180,6 +188,35 @@ pub fn identity(project: &Path, flags: SafetyFlags) -> Result<AuditedIdentity, S
         live_enabled: flags.live_enabled,
         submission_enabled: flags.submission_enabled,
     })
+}
+
+/// The operational config of a `p0ctl run start`: its operational arguments (after `--`) plus the
+/// run duration as CLI value. One rule for p0ctl and for the runtime it launches (X1), which
+/// re-resolves it from its own arguments and environment.
+pub fn start_config(
+    operational: &[String],
+    duration: &str,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<darkbot_solana::runtime_config::Resolved, String> {
+    let mut args = operational.to_vec();
+    args.extend(["--duration".into(), duration.into()]);
+    darkbot_solana::runtime_config::Resolved::parse(&args, env)?.native_only()
+}
+
+/// X1: the identity of a runtime launched by `p0ctl run start` (`args` = its operational
+/// arguments, `P0_MEASUREMENT_DURATION` = the launcher's `--duration`), compared with the
+/// approved network audit before admission.
+pub fn launched_identity(
+    project: &Path,
+    flags: SafetyFlags,
+    args: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<AuditedIdentity, String> {
+    let duration = env("P0_MEASUREMENT_DURATION")
+        .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION")?;
+    let resolved = start_config(args, &duration, env)
+        .map_err(|e| format!("BOOT_IDENTITY_DRIFT: runtime_config ({e})"))?;
+    identity_with(project, flags, &resolved.config)
 }
 
 pub fn token(identity: &AuditedIdentity) -> Result<String, String> {
@@ -1344,6 +1381,25 @@ impl NetworkAudit {
         now: u64,
         source: &str,
     ) -> Result<(), String> {
+        self.verify_record()?;
+        if now < self.observed_at
+            || now >= self.expires_at
+            || self.expires_at.saturating_sub(self.observed_at) > 60
+        {
+            return Err("BOOT_NETWORK_EXPIRED".into());
+        }
+        if current != &self.audit.identity
+            || binary != self.binary_sha256
+            || source != self.capture_source
+        {
+            return Err("BOOT_NETWORK_TOCTOU".into());
+        }
+        Ok(())
+    }
+
+    /// The record itself: a READY network audit with every network check PASS whose readiness
+    /// token still covers its content (no tampering).
+    fn verify_record(&self) -> Result<(), String> {
         if self.audit.verdict != AuditVerdict::Ready
             || self.audit.scope != "network"
             || self.audit.checks.iter().any(|c| {
@@ -1366,18 +1422,6 @@ impl NetworkAudit {
                 return Err("BOOT_NETWORK_CHECK_MISSING".into());
             }
         }
-        if now < self.observed_at
-            || now >= self.expires_at
-            || self.expires_at.saturating_sub(self.observed_at) > 60
-        {
-            return Err("BOOT_NETWORK_EXPIRED".into());
-        }
-        if current != &self.audit.identity
-            || binary != self.binary_sha256
-            || source != self.capture_source
-        {
-            return Err("BOOT_NETWORK_TOCTOU".into());
-        }
         let mut copy = self.clone();
         copy.audit.readiness_token.clear();
         let actual = sha(&bincode::serialize(&copy).map_err(|_| "BOOT_TOKEN")?);
@@ -1386,12 +1430,199 @@ impl NetworkAudit {
         }
         Ok(())
     }
+
+    /// X1: the runtime started by `p0ctl run start` binds itself to the approved record before
+    /// admission, without any network read. The wall clock is not re-checked here (build,
+    /// preflight and StreamReady lie between approval and bootstrap); instead the approval
+    /// itself must have happened inside the record's TTL, for exactly this record (operator
+    /// token prefix), by this code, config, safety flags, executables, capture source and the
+    /// pinned genesis.
+    pub fn validate_admission(
+        &self,
+        approved_at: u64,
+        approved_token: &str,
+        current: &AuditedIdentity,
+        binary: &str,
+        source: &str,
+    ) -> Result<(), String> {
+        self.verify_record()?;
+        if approved_token.len() != 16 || !self.audit.readiness_token.starts_with(approved_token) {
+            return Err("BOOT_NETWORK_TOKEN".into());
+        }
+        if approved_at < self.observed_at
+            || approved_at >= self.expires_at
+            || self.expires_at.saturating_sub(self.observed_at) > 60
+        {
+            return Err("BOOT_NETWORK_EXPIRED".into());
+        }
+        let (a, b) = (&self.audit.identity, current);
+        let mut drift = Vec::new();
+        if a.source_head != b.source_head || a.source_dirty_sha256 != b.source_dirty_sha256 {
+            drift.push("source");
+        }
+        if a.runtime_config_sha256 != b.runtime_config_sha256 {
+            drift.push("runtime_config");
+        }
+        if a.live_enabled != b.live_enabled || a.submission_enabled != b.submission_enabled {
+            drift.push("safety_flags");
+        }
+        if a.journal_version != b.journal_version
+            || a.discriminator_table_sha256 != b.discriminator_table_sha256
+        {
+            drift.push("schema");
+        }
+        if binary != self.binary_sha256 {
+            drift.push("binary");
+        }
+        if source != self.capture_source {
+            drift.push("capture_source");
+        }
+        if self.genesis != darkbot_project0::protocol::GENESIS_HASH_MAINNET {
+            drift.push("genesis");
+        }
+        if drift.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("BOOT_IDENTITY_DRIFT: {}", drift.join(",")))
+        }
+    }
+
+    /// X1: binds the audited accounts to the state the runtime itself read at bootstrap (no
+    /// extra read). Bound and required: ProgramData (owner, length, data hash, executable from
+    /// the startup read), every account the runtime lists as required dependency (group, fee
+    /// state, clock, oracles, mints, integration accounts) and every audited bank — a missing
+    /// one or a different owner/length is drift. Data other than ProgramData legitimately changes
+    /// within the TTL and is not compared. The program account is always outside the runtime's
+    /// scope; other audited accounts outside it (liquidity vaults, targets without liabilities)
+    /// are bound when present and otherwise reported as outside the runtime scope, never as a
+    /// pass of their identity.
+    pub fn bind_state(
+        &self,
+        program: &solana_sdk::pubkey::Pubkey,
+        program_data: &solana_sdk::pubkey::Pubkey,
+        program_data_executable: bool,
+        required: &std::collections::HashSet<solana_sdk::pubkey::Pubkey>,
+        state: &dyn darkbot_project0::health::AccountSource,
+    ) -> Result<IdentityBinding, String> {
+        use std::str::FromStr;
+        let bank_bytes = (8 + darkbot_project0::protocol::BANK_PAYLOAD_LEN_0_1_11) as u64;
+        let mut binding = IdentityBinding::default();
+        let mut drift = Vec::new();
+        for proof in &self.accounts {
+            let key = solana_sdk::pubkey::Pubkey::from_str(&proof.address)
+                .map_err(|_| "BOOT_IDENTITY_RECORD_INVALID".to_string())?;
+            // The executable program account is never part of the runtime's state.
+            if key == *program {
+                binding.outside_scope.push(proof.address.clone());
+                continue;
+            }
+            let bank = proof.owner == program.to_string() && proof.bytes == bank_bytes;
+            let in_scope = key == *program_data || required.contains(&key) || bank;
+            match state.account(&key) {
+                None if in_scope => drift.push(format!("{key}:missing")),
+                None => binding.outside_scope.push(proof.address.clone()),
+                Some((owner, _, data)) => {
+                    if owner.to_string() != proof.owner {
+                        drift.push(format!("{key}:owner"));
+                    } else if data.len() as u64 != proof.bytes {
+                        drift.push(format!("{key}:length"));
+                    } else if key == *program_data
+                        && (sha(data) != proof.data_sha256
+                            || proof.executable != program_data_executable)
+                    {
+                        drift.push(format!("{key}:program_data"));
+                    } else if key != *program_data && proof.executable {
+                        drift.push(format!("{key}:executable"));
+                    } else {
+                        binding.bound += 1;
+                    }
+                }
+            }
+        }
+        if drift.is_empty() {
+            Ok(binding)
+        } else {
+            drift.sort();
+            Err(format!("BOOT_IDENTITY_DRIFT: {}", drift.join(",")))
+        }
+    }
+}
+
+/// Result of [`NetworkAudit::bind_state`]: accounts bound and audited accounts outside the
+/// runtime's scope (reported, never counted as bound).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct IdentityBinding {
+    pub bound: usize,
+    pub outside_scope: Vec<String>,
+}
+
+/// The fixed code of an admission refusal (X1), for the owner's terminal report.
+pub fn admission_code(e: &str) -> &'static str {
+    for code in [
+        "BOOT_IDENTITY_DRIFT",
+        "BOOT_NETWORK_AUDIT_MISSING",
+        "BOOT_NETWORK_EVIDENCE_INVALID",
+        "BOOT_NETWORK_EXPIRED",
+        "BOOT_NETWORK_TOKEN",
+        "BOOT_NETWORK_NOT_READY",
+        "BOOT_NETWORK_CHECK_MISSING",
+    ] {
+        if e.starts_with(code) {
+            return code;
+        }
+    }
+    "BOOT_ADMISSION_REFUSED"
+}
+
+/// X1: what `p0ctl run start` hands the runtime it launches (environment of the launcher).
+pub const ENV_NETWORK_AUDIT: &str = "P0_NETWORK_AUDIT";
+pub const ENV_NETWORK_AUDIT_TOKEN: &str = "P0_NETWORK_AUDIT_TOKEN";
+pub const ENV_NETWORK_AUDIT_APPROVED_AT: &str = "P0_NETWORK_AUDIT_APPROVED_AT";
+
+/// X1: the network audit a runtime start is bound to. A start by `p0ctl` (`launched` = the
+/// launch marker is set) or with a record path must carry record, token and approval time and
+/// pass [`NetworkAudit::validate_admission`]; anything missing or invalid refuses the start
+/// before any network read. Without both, the legacy local Shadow path is unchanged (`None`).
+pub fn admission_record(
+    get: &dyn Fn(&str) -> Option<String>,
+    launched: bool,
+    current: &dyn Fn() -> Result<AuditedIdentity, String>,
+    binary: &dyn Fn() -> Result<String, String>,
+) -> Result<Option<NetworkAudit>, String> {
+    let path = get(ENV_NETWORK_AUDIT).filter(|v| !v.is_empty());
+    if !launched && path.is_none() {
+        return Ok(None);
+    }
+    let missing = || "BOOT_NETWORK_AUDIT_MISSING".to_string();
+    let path = path.ok_or_else(missing)?;
+    let token = get(ENV_NETWORK_AUDIT_TOKEN).ok_or_else(missing)?;
+    let approved_at = get(ENV_NETWORK_AUDIT_APPROVED_AT)
+        .and_then(|v| v.parse::<u64>().ok())
+        .ok_or_else(missing)?;
+    let record: NetworkAudit =
+        journal::read_typed_value(Path::new(&path)).map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
+    let source = get("P0_MARKET_SOURCE").unwrap_or_else(|| "logs".into());
+    record.validate_admission(approved_at, &token, &current()?, &binary()?, &source)?;
+    Ok(Some(record))
 }
 
 /// Bind both the control executable and the actual runtime it admits.
 pub fn binary_identity() -> Result<String, String> {
     let ctl = std::env::current_exe().map_err(|_| "BOOT_BINARY")?;
     let runtime = ctl.parent().ok_or("BOOT_BINARY")?.join("p0-longtail");
+    binary_identity_of(&ctl, &runtime)
+}
+
+/// The same identity seen from the runtime (X1): `p0ctl` next to the running executable.
+pub fn runtime_binary_identity() -> Result<String, String> {
+    let runtime = std::env::current_exe().map_err(|_| "BOOT_BINARY")?;
+    let ctl = runtime.parent().ok_or("BOOT_BINARY")?.join("p0ctl");
+    binary_identity_of(&ctl, &runtime)
+}
+
+/// Digest over the control and the runtime executable, in that order.
+pub fn binary_identity_of(ctl: &Path, runtime: &Path) -> Result<String, String> {
+    let (ctl, runtime) = (ctl.to_path_buf(), runtime.to_path_buf());
     let mut digests = Vec::new();
     for p in [ctl, runtime] {
         digests.extend(
@@ -1401,3 +1632,84 @@ pub fn binary_identity() -> Result<String, String> {
     }
     Ok(sha(&digests))
 }
+
+/// X1 test fixture: a READY network record (BOOT-03..08 PASS, pinned genesis, binary "binary",
+/// capture source "logs", 60 s TTL from 1000) over `accounts`, sealed by its readiness token.
+#[cfg(test)]
+pub(crate) fn network_record_fixture(accounts: Vec<AccountProof>) -> NetworkAudit {
+    let check = |id: &str| BootCheck {
+        id: id.into(),
+        name: "fixture".into(),
+        critical: true,
+        state: CheckState::Pass,
+        expected: None,
+        observed: None,
+        source: "fixture".into(),
+        reason: "fixture".into(),
+    };
+    let mut n = NetworkAudit {
+        audit: BootAudit {
+            scope: "network".into(),
+            checks: [
+                "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08",
+            ]
+            .iter()
+            .map(|id| check(id))
+            .collect(),
+            identity: AuditedIdentity {
+                source_head: Some("head".into()),
+                source_dirty_sha256: Some("dirty".into()),
+                runtime_config_sha256: "config".into(),
+                journal_version: journal::VERSION,
+                discriminator_table_sha256: "table".into(),
+                live_enabled: false,
+                submission_enabled: false,
+            },
+            verdict: AuditVerdict::Ready,
+            readiness_token: String::new(),
+        },
+        observed_at: 1000,
+        expires_at: 1060,
+        slot: 100,
+        genesis: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
+        rpc_binding: "rpc".into(),
+        wss_binding: "wss".into(),
+        binary_sha256: "binary".into(),
+        provider_proof_sha256: "proof".into(),
+        capture_source: "logs".into(),
+        accounts,
+        state_hash: "state".into(),
+    };
+    n.reseal();
+    n
+}
+
+/// X1 test fixture: the proof of one account as the network audit records it.
+#[cfg(test)]
+pub(crate) fn proof_of(
+    key: &solana_sdk::pubkey::Pubkey,
+    owner: &solana_sdk::pubkey::Pubkey,
+    data: &[u8],
+    executable: bool,
+) -> AccountProof {
+    AccountProof {
+        address: key.to_string(),
+        owner: owner.to_string(),
+        data_sha256: sha(data),
+        bytes: data.len() as u64,
+        executable,
+    }
+}
+
+#[cfg(test)]
+impl NetworkAudit {
+    /// Recomputes the readiness token after a fixture edit (a consistent, re-signed record).
+    pub(crate) fn reseal(&mut self) {
+        self.audit.readiness_token.clear();
+        self.audit.readiness_token = sha(&bincode::serialize(self).unwrap());
+    }
+}
+
+#[cfg(test)]
+#[path = "boot_audit_x1_tests.rs"]
+mod x1_tests;

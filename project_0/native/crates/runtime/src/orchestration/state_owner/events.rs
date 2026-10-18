@@ -189,6 +189,30 @@ impl ShadowOwner {
                     return Err(Box::new(OwnerTerminal(code)));
                 }
                 if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
+                    // X1: the first Ready is the admission. The audited identities bind to the
+                    // state the runtime read itself, before the halt clears or anything runs.
+                    if let Some(audit) = self.admission.take() {
+                        let required: HashSet<Pubkey> =
+                            self.required_dependency_keys.iter().copied().collect();
+                        match audit.bind_state(
+                            &self.program,
+                            &self.program_data,
+                            self.program_data_executable,
+                            &required,
+                            &StateView(&self.st),
+                        ) {
+                            Ok(b) => owner_log!(
+                                self,
+                                "BOOT_IDENTITY_BOUND bound={} outside_runtime_scope={}",
+                                b.bound,
+                                b.outside_scope.len()
+                            ),
+                            Err(e) => {
+                                owner_log!(self, "{e}: ending the run before admission");
+                                return Err(Box::new(OwnerTerminal("BOOT_IDENTITY_DRIFT")));
+                            }
+                        }
+                    }
                     self.halt.clear();
 
                     // A program upgrade can race startup/recovery before its WSS notification is

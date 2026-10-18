@@ -170,11 +170,13 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
             "RUNTIME_OWNER_LOCKED pid={pid} run_id={run_id}: stop it first (p0ctl run stop)"
         ));
     }
-    let mut operational = args.split(|a| a == "--").nth(1).unwrap_or(&[]).to_vec();
-    operational.extend(["--duration".into(), duration.clone()]);
-    darkbot_solana::runtime_config::Resolved::parse(&operational, &|k| std::env::var(k).ok())?
-        .native_only()?
-        .activate()?;
+    // X1: the same rule the launched runtime re-resolves its config with before admission.
+    boot_audit::start_config(
+        args.split(|a| a == "--").nth(1).unwrap_or(&[]),
+        &duration,
+        &|k| std::env::var(k).ok(),
+    )?
+    .activate()?;
     let flags = SafetyFlags::from_env();
     let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
     print!("{}", audit.terminal());
@@ -231,15 +233,19 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     });
     // BOOT-12: the audited identity must still hold right before the start.
     boot_audit::recheck(&audit, project, flags)?;
+    let approved_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "BOOT_CLOCK")?
+        .as_secs();
     network.validate_start(
         &boot_audit::identity(project, flags)?,
         &binary,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| "BOOT_CLOCK")?
-            .as_secs(),
+        approved_at,
         &value(options, "--capture-source").unwrap_or_else(|| "logs".into()),
     )?;
+    // X1: the runtime binds itself to exactly this approved record before admission.
+    let network_record =
+        std::fs::canonicalize(&network_path).map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
     control::install_stop_handler()?;
     let mut child = Command::new(project.join("scripts/capture.sh"))
         .arg("econ4h-launcher")
@@ -247,6 +253,12 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         .env("P0_RUNTIME_LOCK", &lock)
         .env("P0_ECON_RUN_ID", &run_id)
         .env(LAUNCH_MARKER, &run_id)
+        .env(boot_audit::ENV_NETWORK_AUDIT, &network_record)
+        .env(boot_audit::ENV_NETWORK_AUDIT_TOKEN, token)
+        .env(
+            boot_audit::ENV_NETWORK_AUDIT_APPROVED_AT,
+            approved_at.to_string(),
+        )
         .process_group(0)
         .spawn()
         .map_err(|e| format!("LAUNCH: {e}"))?;
