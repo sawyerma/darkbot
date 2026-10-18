@@ -19,50 +19,64 @@ pub const PREMIUM_GRACE_S: u64 = 3_600; // 1 h
 /// VERIFY gegen `liquidate_start.rs` (Bezugspunkt der Woche: Tagging vs. Ende der Grace-Stunde).
 pub const PREMIUM_RAMP_S: u64 = 7 * 24 * 3_600 - PREMIUM_GRACE_S;
 
+/// B5: `FeeState.liquidation_max_fee` über 100 % ist kein gültiger Quellzustand. Jede Prämien-
+/// und Seize-Rechnung damit ist UNKNOWN (`None`), nie still auf 100 % normalisiert.
+pub fn fee_state_valid(fee_state_max_bps: u64) -> bool {
+    fee_state_max_bps <= BPS
+}
+
 /// Maximale Prämie zum Zeitpunkt `now` für einen Account, der bei `tagged_at` getaggt wurde.
 /// `fee_state_max_bps` = FeeState.liquidation_max_fee (P1A). Nicht getaggt (None) → Basis.
-/// `growth_blocked` = Bad Debt oder EMODE_BOOSTED → Basis.
+/// `growth_blocked` = Bad Debt oder EMODE_BOOSTED → Basis. `None` bei ungültigem FeeState (B5).
 pub fn premium_bps(
     now_unix_s: u64,
     tagged_at: Option<u64>,
     fee_state_max_bps: u64,
     growth_blocked: bool,
-) -> u64 {
+) -> Option<u64> {
+    if !fee_state_valid(fee_state_max_bps) {
+        return None;
+    }
     let base = fee_state_max_bps.max(PREMIUM_BASE_BPS);
-    let Some(t0) = tagged_at else { return base };
+    let Some(t0) = tagged_at else {
+        return Some(base);
+    };
     if growth_blocked || now_unix_s <= t0.saturating_add(PREMIUM_GRACE_S) {
-        return base;
+        return Some(base);
     }
     let elapsed = now_unix_s - t0 - PREMIUM_GRACE_S;
     if elapsed >= PREMIUM_RAMP_S {
-        return PREMIUM_MAX_BPS;
+        return Some(PREMIUM_MAX_BPS);
     }
-    // linear von base auf 100 %
+    // linear von base auf 100 % (base ≤ 100 % durch fee_state_valid)
     let span = PREMIUM_MAX_BPS - base;
-    base + (span as u128 * elapsed as u128 / PREMIUM_RAMP_S as u128) as u64
+    Some(base + (span as u128 * elapsed as u128 / PREMIUM_RAMP_S as u128) as u64)
 }
 
 /// Frühester Zeitpunkt, an dem premium_bps ≥ `needed_bps` (für den Tag-Scheduler).
-/// None, wenn nie erreichbar (Wachstum blockiert und Basis reicht nicht).
+/// None, wenn nie erreichbar (Wachstum blockiert und Basis reicht nicht, Bedarf über 100 %,
+/// Zeitüberlauf) oder der FeeState ungültig ist (B5).
 pub fn time_for_premium(
     tagged_at: u64,
     fee_state_max_bps: u64,
     needed_bps: u64,
     growth_blocked: bool,
 ) -> Option<u64> {
+    if !fee_state_valid(fee_state_max_bps) {
+        return None;
+    }
     let base = fee_state_max_bps.max(PREMIUM_BASE_BPS);
     if needed_bps <= base {
         return Some(tagged_at);
     }
-    if growth_blocked {
+    if growth_blocked || needed_bps > PREMIUM_MAX_BPS {
         return None;
     }
-    let needed = needed_bps.min(PREMIUM_MAX_BPS);
+    // base < needed ≤ 100 %: span > 0. elapsed = ceil((needed-base) * RAMP / span)
     let span = PREMIUM_MAX_BPS - base;
-    // elapsed = ceil((needed-base) * RAMP / span)
-    let num = (needed - base) as u128 * PREMIUM_RAMP_S as u128;
+    let num = (needed_bps - base) as u128 * PREMIUM_RAMP_S as u128;
     let elapsed = num.div_ceil(span as u128) as u64;
-    Some(tagged_at + PREMIUM_GRACE_S + elapsed)
+    tagged_at.checked_add(PREMIUM_GRACE_S)?.checked_add(elapsed)
 }
 
 /// Kandidatenwerte des [`t_profitable`]-Solvers (unveränderte Bedeutung der früheren Einzelparameter).
@@ -93,14 +107,19 @@ pub fn t_profitable(now_unix_s: u64, tagged_at: Option<u64>, inputs: &ProfitInpu
     } = *inputs;
     // net(p) = repay × (BPS + p)/BPS × r/BPS − repay − costs  >  min
     // ⇔ p > ((min + costs + repay) × BPS² / (repay × r)) − BPS
-    if repay_value == 0 || realizable_bps == 0 {
+    if repay_value == 0 || realizable_bps == 0 || !fee_state_valid(fee_state_max_bps) {
         return None;
     }
-    let num = (min_profit + fixed_costs as i128 + repay_value as i128) as u128
-        * (BPS as u128)
-        * (BPS as u128);
+    // B5: checked; a non-positive requirement (negative min_profit) is met by any premium.
+    let required = min_profit
+        .checked_add(fixed_costs as i128)?
+        .checked_add(repay_value as i128)?;
+    if required <= 0 {
+        return Some(now_unix_s);
+    }
+    let num = (required as u128).checked_mul(BPS as u128 * BPS as u128)?;
     let den = repay_value as u128 * realizable_bps as u128;
-    let p_needed = (num + den) / den; // ceil + 1 für striktes ">"
+    let p_needed = num.checked_add(den)? / den; // ceil + 1 für striktes ">"
     if p_needed <= BPS as u128 {
         return Some(now_unix_s); // schon ohne Prämie profitabel (realizable > repay) – sofort
     }
@@ -126,13 +145,21 @@ pub fn t_profitable(now_unix_s: u64, tagged_at: Option<u64>, inputs: &ProfitInpu
 /// Seize-Grenze aus `liquidate_end.rs` (BELEGT, 0.1.11): in **Equity-(EMA-)Werten**
 /// `seized ≤ repaid × (1 + max(FeeState.liquidation_max_fee, 0.05))`; außerdem Post-Health
 /// (Maintenance, Cached) ≥ Pre-Health. Bei Equity-Assets < 5 USD entfällt die Grenze (Closeout).
-/// Rückgabe: maximal beschlagnahmbarer Equity-Wert für einen gegebenen Repay-Wert (gleiche Einheit).
-pub fn max_seizable_for_repay(repaid_equity: u128, fee_state_max_bps: u64, closeout: bool) -> u128 {
+/// Rückgabe: maximal beschlagnahmbarer Equity-Wert für einen gegebenen Repay-Wert (gleiche Einheit);
+/// `None` bei ungültigem FeeState oder Überlauf (B5).
+pub fn max_seizable_for_repay(
+    repaid_equity: u128,
+    fee_state_max_bps: u64,
+    closeout: bool,
+) -> Option<u128> {
+    if !fee_state_valid(fee_state_max_bps) {
+        return None;
+    }
     if closeout {
-        return u128::MAX;
+        return Some(u128::MAX);
     }
     let fee = fee_state_max_bps.max(crate::protocol::LIQUIDATION_BONUS_FEE_MINIMUM_BPS) as u128;
-    repaid_equity * (BPS as u128 + fee) / BPS as u128
+    Some(repaid_equity.checked_mul(BPS as u128 + fee)? / BPS as u128)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -348,19 +375,19 @@ mod tests {
     #[test]
     fn premium_curve_matches_release_notes() {
         let t0 = 1_000_000;
-        assert_eq!(premium_bps(t0, Some(t0), 0, false), 500, "Basis 5 %");
+        assert_eq!(premium_bps(t0, Some(t0), 0, false), Some(500), "Basis 5 %");
         assert_eq!(
             premium_bps(t0, Some(t0), 800, false),
-            800,
+            Some(800),
             "FeeState-Max gewinnt"
         );
         assert_eq!(
             premium_bps(t0 + 3_599, Some(t0), 0, false),
-            500,
+            Some(500),
             "Grace-Stunde"
         );
         let half = t0 + PREMIUM_GRACE_S + PREMIUM_RAMP_S / 2;
-        let p = premium_bps(half, Some(t0), 0, false);
+        let p = premium_bps(half, Some(t0), 0, false).unwrap();
         assert!(
             (5_249..=5_251).contains(&p),
             "Mitte der Rampe ≈ 52,5 %: {}",
@@ -368,25 +395,25 @@ mod tests {
         );
         assert_eq!(
             premium_bps(t0 + 7 * 24 * 3_600, Some(t0), 0, false),
-            10_000,
+            Some(10_000),
             "100 % genau 7 d nach Tagging"
         );
-        assert!(premium_bps(t0 + 7 * 24 * 3_600 - 1, Some(t0), 0, false) < 10_000);
+        assert!(premium_bps(t0 + 7 * 24 * 3_600 - 1, Some(t0), 0, false).unwrap() < 10_000);
         assert_eq!(
             premium_bps(t0 + 10 * PREMIUM_RAMP_S, Some(t0), 0, true),
-            500,
+            Some(500),
             "Bad Debt/EMODE: kein Wachstum"
         );
-        assert_eq!(premium_bps(t0, None, 0, false), 500, "nicht getaggt");
+        assert_eq!(premium_bps(t0, None, 0, false), Some(500), "nicht getaggt");
     }
 
     #[test]
     fn time_for_premium_inverts_curve() {
         let t0 = 5_000;
         let t = time_for_premium(t0, 0, 2_000, false).unwrap(); // 20 %
-        let p = premium_bps(t, Some(t0), 0, false);
+        let p = premium_bps(t, Some(t0), 0, false).unwrap();
         assert!((2_000..2_010).contains(&p), "{}", p);
-        assert!(premium_bps(t - 1, Some(t0), 0, false) < 2_000);
+        assert!(premium_bps(t - 1, Some(t0), 0, false).unwrap() < 2_000);
         assert_eq!(
             time_for_premium(t0, 0, 400, false),
             Some(t0),
@@ -395,21 +422,79 @@ mod tests {
         assert_eq!(time_for_premium(t0, 0, 3_000, true), None, "blockiert: nie");
     }
 
+    /// B5: FeeState above 100 %, zero span, time overflow, negative MinProfit and multiplication
+    /// overflow never panic or wrap; invalid inputs are UNKNOWN (None), valid ones keep their
+    /// values.
+    #[test]
+    fn invalid_fee_state_and_extreme_inputs_fail_closed_without_panic() {
+        let t0 = 1_000_000;
+        let late = t0 + PREMIUM_GRACE_S + PREMIUM_RAMP_S / 2;
+        for fee in [0u64, 500, 9_999, 10_000] {
+            assert!(premium_bps(late, Some(t0), fee, false).unwrap() <= PREMIUM_MAX_BPS);
+            assert!(max_seizable_for_repay(10_000, fee, false).is_some());
+        }
+        assert_eq!(premium_bps(late, Some(t0), 10_000, false), Some(10_000));
+        // 100 % already at base: any need above it is unreachable, not a division by zero.
+        assert_eq!(time_for_premium(t0, 10_000, 10_000, false), Some(t0));
+        assert_eq!(time_for_premium(t0, 10_000, 20_000, false), None);
+        assert_eq!(time_for_premium(t0, 0, 10_001, false), None);
+        for fee in [10_001u64, u64::MAX] {
+            for now in [t0, late] {
+                assert_eq!(premium_bps(now, Some(t0), fee, false), None, "{fee}");
+                assert_eq!(premium_bps(now, None, fee, true), None, "{fee}");
+            }
+            assert_eq!(time_for_premium(t0, fee, 20_000, false), None);
+            assert_eq!(max_seizable_for_repay(10_000, fee, false), None);
+            assert_eq!(
+                t_profitable(
+                    t0,
+                    Some(t0),
+                    &inputs(fee, false, 10_000, 1_000, 9_700, 20, 0)
+                ),
+                None
+            );
+        }
+        // Time overflow near u64::MAX and seize overflow near u128::MAX are UNKNOWN.
+        assert_eq!(time_for_premium(u64::MAX - 10, 0, 2_000, false), None);
+        assert_eq!(max_seizable_for_repay(u128::MAX, 0, false), None);
+        // Negative MinProfit: requirement met by any premium, no u128 wrap.
+        assert_eq!(
+            t_profitable(
+                t0,
+                None,
+                &inputs(0, false, 10_000, 1_000, 9_700, 20, -10_000)
+            ),
+            Some(t0)
+        );
+        assert_eq!(
+            t_profitable(
+                t0,
+                None,
+                &inputs(0, false, 10_000, 1_000, 9_700, 20, i128::MIN)
+            ),
+            Some(t0)
+        );
+        assert_eq!(
+            t_profitable(t0, None, &inputs(0, false, 10_000, 1, 1, 0, i128::MAX)),
+            None
+        );
+    }
+
     #[test]
     fn seize_bound_from_source() {
         assert_eq!(
             max_seizable_for_repay(10_000, 0, false),
-            10_500,
+            Some(10_500),
             "Minimum 5 %"
         );
         assert_eq!(
             max_seizable_for_repay(10_000, 800, false),
-            10_800,
+            Some(10_800),
             "FeeState 8 % gewinnt"
         );
         assert_eq!(
             max_seizable_for_repay(10_000, 0, true),
-            u128::MAX,
+            Some(u128::MAX),
             "Closeout < 5 USD"
         );
     }
@@ -439,7 +524,7 @@ mod tests {
         let t0 = 10_000;
         // repay 1000, realisierbar 97 %, Kosten 20, min 0: braucht p mit 1000*(1+p)*0.97 > 1020 → p > 5,15 % → ~516 bps
         let t = t_profitable(t0, Some(t0), &inputs(0, false, 10_000, 1_000, 9_700, 20, 0)).unwrap();
-        let p = premium_bps(t, Some(t0), 0, false);
+        let p = premium_bps(t, Some(t0), 0, false).unwrap();
         assert!((516..=530).contains(&p), "p={}", p);
         assert!(t > t0 + PREMIUM_GRACE_S, "liegt nach der Grace-Stunde");
         // Kappe durch Receivership-Regel unter Bedarf → None
