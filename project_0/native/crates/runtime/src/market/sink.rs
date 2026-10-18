@@ -18,8 +18,9 @@ pub trait MarketSink {
     fn related(&mut self, row: &MarketRelated) -> std::io::Result<()>;
     fn flush(&mut self) -> std::io::Result<()>;
     /// Called once by `finalize` after the last row. A journal-backed sink seals its journal
-    /// and returns the binding recorded in the summary.
-    fn finish(&mut self) -> std::io::Result<Option<MarketJournalBinding>> {
+    /// (COMPLETE only if `complete`, D1) and returns the binding recorded in the summary.
+    fn finish(&mut self, complete: bool) -> std::io::Result<Option<MarketJournalBinding>> {
+        let _ = complete;
         self.flush().map(|_| None)
     }
 }
@@ -179,8 +180,8 @@ impl MarketSink for JournalSink {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
-    fn finish(&mut self) -> std::io::Result<Option<MarketJournalBinding>> {
-        self.seal(true).map(Some)
+    fn finish(&mut self, complete: bool) -> std::io::Result<Option<MarketJournalBinding>> {
+        self.seal(complete).map(Some)
     }
 }
 // An early exit (warmup failure, error path) drops the worker, which seals INCOMPLETE.

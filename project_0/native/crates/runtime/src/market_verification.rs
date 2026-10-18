@@ -711,7 +711,9 @@ pub fn run(job: Job) -> Result<StrictResult, String> {
                         &mut sink,
                     )
                     .map_err(|_| "EVIDENCE_IO")?;
-                    sink.finish().map_err(|_| "EVIDENCE_IO")?;
+                    // D1: a batch is sealed COMPLETE only with a complete reconciliation.
+                    sink.finish(core.reconciliation.complete)
+                        .map_err(|_| "EVIDENCE_IO")?;
                     drop(sink);
                     if !core.reconciliation.complete {
                         return Err(core.reconciliation.error.unwrap_or("STRICT_INCOMPLETE"));

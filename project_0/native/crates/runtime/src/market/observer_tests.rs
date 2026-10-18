@@ -1818,7 +1818,7 @@ fn typed_market_frames_render_offline_to_their_legacy_rows() {
         },
     )
     .unwrap();
-    let binding = sink.finish().unwrap().unwrap();
+    let binding = sink.finish(true).unwrap().unwrap();
     assert_eq!(
         (binding.status.as_str(), binding.event_frames),
         ("COMPLETE", 3)
@@ -1868,10 +1868,78 @@ fn typed_market_frames_render_offline_to_their_legacy_rows() {
         )
         .is_err());
     // One finish only; an existing journal is never overwritten.
-    assert!(sink.finish().is_err());
+    assert!(sink.finish(true).is_err());
     drop(sink);
     assert!(JournalSink::create(&dir).is_err());
     fs::remove_dir_all(dir).unwrap();
+}
+
+/// D1: an ordered capture end seals the market journal COMPLETE only after a full TIMER window
+/// with a completed drain, no write error and no persistent incomplete reason; every abort path
+/// seals INCOMPLETE in journal, binding and verifier alike.
+#[test]
+fn capture_operator_stop_seals_incomplete() {
+    let root = std::env::temp_dir().join(format!(
+        "c0mo_d1_{}_{}",
+        std::process::id(),
+        utc_compact(unix_now_s())
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let root_s = root.to_string_lossy().to_string();
+    let cases: [(&str, &'static str, bool, Option<&str>, bool); 7] = [
+        ("timer", "TIMER", true, None, true),
+        ("operator", "OPERATOR_STOP", true, None, false),
+        ("not_ready", "STREAM_NOT_READY", true, None, false),
+        ("ingress", "INGRESS_THREAD_ENDED", true, None, false),
+        ("abort", "C0_E1_ABORT", true, None, false),
+        ("write", "TIMER", true, Some("WRITE_FAILED"), false),
+        ("drain", "TIMER", false, None, false),
+    ];
+    for (run, stop, drain, write_error, complete) in cases {
+        let cfg = MarketConfig::from_lookup(
+            &env_of(&[
+                ("P0_WS_URL", "wss://h"),
+                (
+                    "P0_PROGRAM_ID",
+                    darkbot_project0::protocol::PROGRAM_ID_MAINNET,
+                ),
+                ("P0_MARKET_SOURCE", "logs"),
+                ("P0_MARKET_OUT_DIR", root_s.as_str()),
+                ("P0_MARKET_RUN_ID", run),
+            ]),
+            0,
+        )
+        .unwrap();
+        fs::create_dir_all(&cfg.run_dir).unwrap();
+        let mut sink = JournalSink::create(&cfg.run_dir).unwrap();
+        let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
+        let ready = stop != "STREAM_NOT_READY";
+        if ready {
+            core.start_observation(0, 600_000_000_000);
+            core.stop_observation();
+        }
+        let outcome = CaptureOutcome {
+            process_started_unix_s: 0,
+            ready_unix_s: ready.then_some(0),
+            window: ready.then_some((0, 600_000_000_000)),
+            capture_end_ns: if stop == "TIMER" { 600_000_000_000 } else { 1 },
+            observation_end_unix_s: 600,
+            stop_reason: stop,
+            drain_complete: drain,
+            write_error: write_error.map(String::from),
+        };
+        let (summary, _, _) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
+        let status = if complete { "COMPLETE" } else { "INCOMPLETE" };
+        assert_eq!(
+            view(&summary)["evidence_journal"]["status"],
+            status,
+            "{run}"
+        );
+        let chain =
+            crate::storage::segments::verify_chain(&cfg.run_dir.join(MARKET_JOURNAL)).unwrap();
+        assert_eq!((chain.sealed, chain.complete), (true, complete), "{run}");
+    }
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]

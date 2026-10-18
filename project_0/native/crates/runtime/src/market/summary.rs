@@ -314,11 +314,24 @@ pub fn finalize(
     core.write_deferred_unenriched(sink, "NOT_ENRICHED")
         .map_err(|e| format!("liquidations write: {e}"))?;
     core.fail_truncated_pending("NOT_QUALIFIED");
+    let write_ok = matches!(
+        &stopped,
+        super::rows::WindowEvent::Stopped {
+            write_error: None,
+            ..
+        }
+    );
     core.coverage(sink, now_unix_s, None, stopped)
         .map_err(|e| format!("coverage write: {e}"))?;
+    // D1: the capture stream is complete only after the full TIMER window with a completed drain,
+    // no write error and no persistent incomplete reason (gap, overflow, fatal, abort, ...).
+    let complete = ctx.full_duration_observed
+        && ctx.drain_complete
+        && write_ok
+        && core.incomplete_reasons.is_empty();
     // A journal-backed sink seals here; no view is rendered.
     let binding = sink
-        .finish()
+        .finish(complete)
         .map_err(|e| format!("evidence journal: {e}"))?;
     // Typed qualification axes first (B7: the native report never reads summary.json).
     crate::analytics::journal::write_typed_value(
