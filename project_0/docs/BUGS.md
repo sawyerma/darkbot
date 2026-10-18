@@ -166,7 +166,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Pfad:** `runtime/src/orchestration/fe_qualification.rs::collect` (finales `return Ok(...)`), `boot_network.rs::run` (Format), gesamter geänderter Workspace.
 - **Soll-Fix:** `cargo fmt` auf tatsächlicher Workspace-Wurzel, finales unnötiges `return` ggf. entfernen; anschließend Clippy mit aktivem Feature-Scope und `-D warnings`, Testmatrix/Release-Build. Keine globalen `#[allow]` zur Kosmetik und keine fremden Module massenhaft formatieren.
 - **Tests:** tatsächliche Tool-Ausgaben und Exit-Codes, beide produktiven Featureprofile; Fehler separat mit Dateien/SHA dokumentieren.
-- **Abnahme:** formatiert, Clippy/test/release erfolgreich auf exakt getesteter SHA. **Commit/Evidence:** `9ce7aa0` (Clippy `-D warnings` workspaceweit, verhaltensgleich; abgelehnter cmp_owned-Autofix im Strict-Cache), `2c9957c` (rustfmt), `e55a5c7` (Export eines abgeschnittenen Journals wieder fail-closed, H1-Regression). Nachweise `evidence/HARDENING_20261018/after_N2_{fmt_check,clippy,test,build_release}.txt` auf `512bb13`, alle Exit 0.
+- **Abnahme:** formatiert, Clippy/test/release erfolgreich auf exakt getesteter SHA. **Commit/Evidence:** `9ce7aa0` (Clippy `-D warnings` workspaceweit, verhaltensgleich; abgelehnter cmp_owned-Autofix im Strict-Cache), `2c9957c` (rustfmt), `e55a5c7` (Export eines abgeschnittenen Journals wieder fail-closed, H1-Regression). Nachweise `evidence/HARDENING_20261018/after_N2_{fmt_check,clippy,test,build_release}.txt` auf `512bb13`, alle Exit 0. Gate auf `d5128ac` (nach N1–N8, M1–M3, D1/D4/D5/D8/D9, B5, B13, C1-Teil, C7, L1/L2/L4, X2): `evidence/HARDENING_20261018/gate_{fmt_check,clippy,test,build_release}.txt` alle Exit 0; Python-Suite 108 (1 übersprungen) nach Entfernen einer veralteten `e42162e`-Assertion grün.
 - **Triage 18.10.2026:** Nur das `return Ok(json!(..))` am Ende von `fe_qualification::collect` ist source-belegt. `needless_return` könnte Clippy `-D warnings` auslösen, **keine** Toolausgabe liegt vor. Vermuteter `rustfmt`-Fehler im `boot_network`-Makro/Einzeiler zurückgenommen bis `cargo fmt --check`.
 
 ### N3 — rein nullgefülltes Capture-Dateiende nicht als INCOMPLETE erkannt
@@ -241,7 +241,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 
 
 ### L4 — falsch konfigurierte Zero-Prefund-Flags fallen auf `false` zurück
-- [x] **MEDIUM · OPEN · FE-01/P5.**
+- [x] **MEDIUM · LOCAL_PASS · FE-01/P5.**
 - **Pfad:** `runtime/src/orchestration/state_owner/setup.rs`: `P0_ZERO_PREFUND_QUALIFIED`, `P0_ZERO_PREFUND_SHADOW_PROBE`.
 - **Soll:** Parsefehler explizit als Config-Fehler blockieren, statt `unwrap_or(false)`; korrektes Defaultverhalten nur bei **fehlendem**, nicht malformed Wert.
 - **Tests:** missing/true/false/ungültig, kein implizites Einschalten von LIVE. **Commit/Evidence:** `c83bd46` (Slippage aus `limits.max_slippage_bps`, Zero-Prefund-Flags strikt vorab geparst, Probe nur im Shadow-Modus); Test `zero_prefund_flags_parse_strictly_and_never_enable_implicitly` Exit 0.

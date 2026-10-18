@@ -1,0 +1,15 @@
+command: cargo build --release --all-features
+environment: CARGO_BUILD_JOBS=2 (machine load limit); cwd project_0/native (virtual workspace: common, solana, liquidation, runtime, reporter)
+tested_head: d5128acba40a81a32fd010fc235565afd330f0cd
+worktree: (clean worktree expected)
+toolchain: rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew); cargo 1.93.1 (Homebrew)
+started_utc: 2026-10-18T07:37:47Z
+----- output -----
+   Compiling darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
+   Compiling darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+   Compiling darkbot-p0-reporter v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter)
+    Finished `release` profile [optimized] target(s) in 38.10s
+----- end -----
+finished_utc: 2026-10-18T07:38:25Z
+exit_code: 0
