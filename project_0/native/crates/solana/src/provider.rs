@@ -42,6 +42,8 @@ impl Workload {
 }
 struct State {
     failed: bool,
+    /// N4: the active configuration differs from the one this budget was built for (sticky).
+    drift: bool,
     queue: VecDeque<(u64, Workload)>,
     next_ticket: u64,
     active: usize,
@@ -117,16 +119,31 @@ impl Budget {
             }
         }
     }
-    /// Configuration changes cannot silently keep a default budget or reset consumed quota.
+    /// Configuration changes cannot silently keep a default budget or reset consumed quota. N4: a
+    /// drift is its own sticky halt (`PROVIDER_BUDGET_CONFIG_DRIFT`), reported once with the first
+    /// differing field (endpoints only as counts), and never reinitializes the budget.
     fn check_configuration(&self, c: &crate::runtime_config::RuntimeConfig) {
-        if self.limits != c.limits
-            || self.rpc_endpoints != c.rpc_endpoints
-            || self.adaptive != c.adaptive
-            || self.fallback != c.fallback
-        {
-            self.lock_state().failed = true;
-            self.changed.notify_all();
+        let differing = crate::runtime_config::PARAMETERS
+            .iter()
+            .find(|p| self.limits.get(p.field) != c.limits.get(p.field))
+            .map(|p| p.field)
+            .or((self.rpc_endpoints != c.rpc_endpoints).then_some("rpc_endpoints"))
+            .or((self.adaptive != c.adaptive).then_some("adaptive"))
+            .or((self.fallback != c.fallback).then_some("fallback"));
+        let Some(field) = differing else {
+            return;
+        };
+        let mut s = self.lock_state();
+        if !s.drift {
+            s.drift = true;
+            eprintln!(
+                "PROVIDER_BUDGET_CONFIG_DRIFT field={field} rpc_endpoints={}->{}",
+                self.rpc_endpoints.len(),
+                c.rpc_endpoints.len()
+            );
         }
+        drop(s);
+        self.changed.notify_all();
     }
     pub fn configured(config: &crate::runtime_config::RuntimeConfig) -> Self {
         let now = Instant::now();
@@ -137,6 +154,7 @@ impl Budget {
             rpc_endpoints: config.rpc_endpoints.clone(),
             state: Mutex::new(State {
                 failed: false,
+                drift: false,
                 queue: VecDeque::new(),
                 next_ticket: 0,
                 active: 0,
@@ -157,6 +175,16 @@ impl Budget {
         }
     }
 }
+/// The sticky halt of a budget: configuration drift (N4) or a poisoned/unwound state (H3).
+fn halted(s: &State) -> Option<&'static str> {
+    if s.drift {
+        Some("PROVIDER_BUDGET_CONFIG_DRIFT")
+    } else if s.failed {
+        Some("PROVIDER_BUDGET_POISONED")
+    } else {
+        None
+    }
+}
 pub fn shared() -> Arc<Budget> {
     static B: OnceLock<Arc<Budget>> = OnceLock::new();
     let b = B.get_or_init(|| Arc::new(Budget::default())).clone();
@@ -169,8 +197,8 @@ impl Budget {
         subscriptions: u64,
     ) -> Result<SocketPermit, &'static str> {
         let mut s = self.lock_state();
-        if s.failed {
-            return Err("PROVIDER_BUDGET_POISONED");
+        if let Some(code) = halted(&s) {
+            return Err(code);
         }
         if s.sockets >= self.limits.wss_connections {
             return Err("WSS_CONNECTION_LIMIT");
@@ -204,8 +232,8 @@ impl Budget {
         shutdown: Option<&darkbot_common::lifecycle::Shutdown>,
     ) -> Result<Permit, &'static str> {
         let mut s = self.lock_state();
-        if s.failed {
-            return Err("PROVIDER_BUDGET_POISONED");
+        if let Some(code) = halted(&s) {
+            return Err(code);
         }
         if s.retry_after_overflow {
             return Err("RPC_RATE_LIMIT");
@@ -217,10 +245,10 @@ impl Budget {
         s.next_ticket += 1;
         s.queue.push_back((ticket, work));
         loop {
-            if s.failed {
+            if let Some(code) = halted(&s) {
                 s.queue.retain(|(t, _)| *t != ticket);
                 self.changed.notify_all();
-                return Err("PROVIDER_BUDGET_POISONED");
+                return Err(code);
             }
             let now = Instant::now();
             let elapsed = now.saturating_duration_since(s.refill_at).as_secs_f64();
@@ -336,8 +364,8 @@ impl Budget {
     }
     pub fn account_bytes(&self, bytes: usize) -> Result<(), &'static str> {
         let mut s = self.lock_state();
-        if s.failed {
-            return Err("PROVIDER_BUDGET_POISONED");
+        if let Some(code) = halted(&s) {
+            return Err(code);
         }
         s.bytes = s.bytes.checked_add(bytes as u64).ok_or("RPC_BYTE_BUDGET")?;
         if s.bytes > self.limits.max_total_mib * 1024 * 1024 {
@@ -1048,9 +1076,26 @@ mod configuration_tests {
         let b = Arc::new(Budget::configured(&c));
         c.limits.rpc_rps += 1;
         b.check_configuration(&c);
+        // N4: a drift has its own sticky code on every entry; it is not a poisoned mutex.
         assert!(matches!(
             b.acquire(Workload::Bootstrap, Instant::now() + Duration::from_secs(1)),
-            Err("PROVIDER_BUDGET_POISONED")
+            Err("PROVIDER_BUDGET_CONFIG_DRIFT")
         ));
+        assert!(matches!(
+            b.acquire_socket(1),
+            Err("PROVIDER_BUDGET_CONFIG_DRIFT")
+        ));
+        assert_eq!(b.account_bytes(1), Err("PROVIDER_BUDGET_CONFIG_DRIFT"));
+        // Reverting the configuration does not reinitialize the budget.
+        c.limits.rpc_rps -= 1;
+        b.check_configuration(&c);
+        assert_eq!(b.account_bytes(1), Err("PROVIDER_BUDGET_CONFIG_DRIFT"));
+        // Endpoint drift: same code; the configured budget stays poison-free.
+        let mut e = crate::runtime_config::RuntimeConfig::default();
+        let b = Arc::new(Budget::configured(&e));
+        e.rpc_endpoints = vec!["https://x.invalid/?api-key=SECRET".into()];
+        b.check_configuration(&e);
+        assert_eq!(b.account_bytes(1), Err("PROVIDER_BUDGET_CONFIG_DRIFT"));
+        assert!(!b.lock_state().failed);
     }
 }

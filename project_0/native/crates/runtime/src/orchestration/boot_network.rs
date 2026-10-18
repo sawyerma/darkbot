@@ -82,8 +82,9 @@ pub trait Reads {
     fn wss(&mut self, program: Pubkey, transactions: bool) -> Result<(u64, u64), String>;
 }
 pub struct NetworkReads {
-    rpc_url: String,
-    timeout: Duration,
+    /// N6: one client per audit instance (one transport runtime, same provider budget).
+    rpc: solana_client::rpc_client::RpcClient,
+    call_timeout: Duration,
     wss: String,
     end: Instant,
     calls: u64,
@@ -139,11 +140,21 @@ impl NetworkReads {
         ))
     }
     fn open(rpc_url: String, wss: String, timeout: Duration, limit: u64, seconds: u64) -> Self {
+        let budget = Duration::from_secs(seconds);
+        // N6: the cached client's per-call timeout is bounded (a quarter of the audit budget, at
+        // least 1 s), and a call starts only while that much time remains, so no call can end
+        // after the absolute deadline.
+        let call_timeout = timeout.min(budget / 4).max(Duration::from_secs(1));
         Self {
-            rpc_url,
-            timeout,
+            rpc: provider::rpc_client(
+                rpc_url,
+                call_timeout,
+                CommitmentConfig::finalized(),
+                provider::Workload::Bootstrap,
+            ),
+            call_timeout,
             wss,
-            end: Instant::now() + Duration::from_secs(seconds),
+            end: Instant::now() + budget,
             calls: 0,
             limit,
         }
@@ -167,18 +178,15 @@ impl NetworkReads {
         ) {
             return Err("BOOT_METHOD_REFUSED".into());
         }
-        if Instant::now() >= self.end || self.calls >= self.limit {
+        if self.end.saturating_duration_since(Instant::now()) < self.call_timeout {
+            return Err("BOOT_TIME_BUDGET".into());
+        }
+        if self.calls >= self.limit {
             return Err("BOOT_RPC_BUDGET".into());
         }
         self.calls += 1;
-        let rpc = provider::rpc_client(
-            self.rpc_url.clone(),
-            self.timeout
-                .min(self.end.saturating_duration_since(Instant::now())),
-            CommitmentConfig::finalized(),
-            provider::Workload::Bootstrap,
-        );
-        let value = rpc
+        let value = self
+            .rpc
             .send(request, params)
             .map_err(|e| darkbot_solana::submit::rpc::safe_rpc_error(&e))?;
         if Instant::now() >= self.end {
@@ -896,16 +904,27 @@ mod tests {
         );
         // An expired deadline refuses before any request.
         let mut late = NetworkReads::open(
-            url,
+            url.clone(),
             "wss://unused.invalid".into(),
             Duration::from_secs(2),
             limit,
             0,
         );
-        assert_eq!(late.slot(true).unwrap_err(), "BOOT_RPC_BUDGET");
+        // N6: no call starts unless its full timeout still fits before the deadline.
+        assert_eq!(late.slot(true).unwrap_err(), "BOOT_TIME_BUDGET");
+        let mut tight = NetworkReads::open(
+            url.clone(),
+            "wss://unused.invalid".into(),
+            Duration::from_secs(30),
+            limit,
+            4,
+        );
+        assert_eq!(tight.call_timeout, Duration::from_secs(1));
+        assert_eq!(tight.slot(true).unwrap(), 100);
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
         server.join().unwrap();
-        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), need);
+        // `need` budgeted reads plus the one of the tight-deadline instance.
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), need + 1);
     }
     /// X2: responses are decoded into native values at the wire edge; malformed ones fail there.
     #[test]
