@@ -112,12 +112,12 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** keine langsamen Syscalls unter `state`-Lock; deterministische Limits unverändert. **Commit/Evidence:** —.
 
 ### M2 — Owner-Evidence-Durability und blockierendes stderr
-- [ ] **OPEN · G-A/G-D · PERSIST-02/05/SK-04.**
+- [x] **LOCAL_PASS · G-A/G-D · PERSIST-02/05/SK-04.**
 - **Pfad:** `runtime/src/analytics/evidence.rs`: `Sink::store`, `Sink::write`, `run_writer`, `OwnerEvidenceWriter::finish`.
 - **Ist:** Owner-Evidence wird regulär beim `seal` synchronisiert, nicht nach belegtem periodischem Intervall; synchrones `eprintln!` auf dem Writer kann bei stderr-Backpressure den Writer verzögern. **Achtung:** separater MarketJournalWorker in `storage/writer.rs` hat bereits einen Sync-Intervallvertrag; hier nicht doppelt implementieren.
 - **Soll-Fix:** bounded, fehlersicherer periodischer Sync für Owner-Evidence mit festgelegter und dokumentierter Verlustobergrenze. Diagnostikausgabe entkoppeln, aber niemals durch `join` eines blockierten Konsolenthreads einen Shutdown-Deadlock erzeugen. Journal-Evidence darf nicht still verlorengehen; eine volle Journal-Queue bleibt korrekt fail-closed. Diagnostikverluste gesondert zählen.
 - **Tests:** Sync-Deadline auch ohne neue Events, injizierter Sync-Fehler führt sticky HALT, blockiertes Terminal verursacht weder Writer-/Shutdown-Deadlock noch unbegrenzte Queue, EOF/Shutdown/Seal/Evidence-Recovery. Nicht behaupten, ein hart blockierter OS-stderr könne immer sofort beendet werden, ohne die tatsächliche Architektur zu beweisen.
-- **Abnahme:** beweisbare Durability-Grenze, keine stille Evidence-Drops, terminierbarer Abschluss. **Commit/Evidence:** —.
+- **Abnahme:** beweisbare Durability-Grenze, keine stille Evidence-Drops, terminierbarer Abschluss. **Commit/Evidence:** `d41b70f` (periodischer Sync `owner_evidence_sync_ms`, Sync-Fehler sticky; Diagnose-Kopien über `console::line`, kein Join eines Konsolen-Threads; `LIMITS_REVISION` 3); Tests `owner_evidence_syncs_periodically`, `owner_evidence_sync_failure_is_sticky` Exit 0.
 
 ### M3 — Blockhash-Refresh-Thread ignoriert allgemeines Shutdown
 - [x] **LOCAL_PASS · G-A/G-C · S0-Lifecycle/P6.**
@@ -493,21 +493,21 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Triage 18.10.2026:** `SOURCE_CONFIRMED, IMPACT_UNMEASURED`. Unbounded Account-Fanout/Owner-Hold ist Fakt, Queue-Overflow und verletzte 4h-SLO sind noch Hypothesen. Synthetischen Stress **vor** 4h ausführen; Chunking bei tatsächlich über Budget liegendem Owner-Stall.
 
 ### D4 — `on_logs` ruft `flush` pro TX auf und kann Kompatibilitätssink früh versiegeln
-- [ ] **MEDIUM / CAPTURE-FAILURE · CODE_CONFIRMED · G-A/G-C · JFI/PERSIST.**
+- [x] **MEDIUM / CAPTURE-FAILURE · CODE_CONFIRMED · G-A/G-C · JFI/PERSIST.**
 - **Pfade:** `runtime/src/market/core.rs::on_logs`, `runtime/src/market/sink.rs::JournalSink::flush/JsonlSink::flush`.
 - **Ist:** Nach jeder zugelassenen Logs-TX `sink.flush()?` mit veraltetem `BufWriter/SIGTERM`-Kommentar. `JournalSink::flush` ist ein No-op (eigener Writer batcht/synct); `JsonlSink::flush` führt einmal `inner.seal(true)` + Legacy-Export durch. Beim selben `on_logs`-Sink würden Folgeframes mit `MARKET_JOURNAL_ALREADY_FINISHED` abbrechen. Strict-Batch-`JsonlSink::flush` ist bewusst ein **Batchabschluss**, kein generischer TX-Flush.
 - **Verbindlicher Fix:** Unqualifizierten per-TX-`flush`-Aufruf und Kommentar aus `on_logs` entfernen; Writer-Lane darf weiter gemäß `WriterConfig` flush/sync machen; `JsonlSink` nur explizit an der Verifier-Batch-Grenze abschließen. Bei notwendigem Durability-Checkpoint separate native API statt `finish`-Semantik missbrauchen.
 - **Tests:** zwei/drei Logs-TX nacheinander mit `JsonlSink` → alle Rows vor explizitem Batch-Finish; `JournalSink` Batch-/Sync-Policy bleibt unverändert; Strict-Exporter paritätisch, kein JSON-Writer im produktiven Capture.
-- **Abnahme:** keine vorzeitige Versiegelung/Verlustfolge durch reguläre TX-Verarbeitung. **Commit/Evidence:** —.
+- **Abnahme:** keine vorzeitige Versiegelung/Verlustfolge durch reguläre TX-Verarbeitung. **Commit/Evidence:** `c256e9d` (kein per-TX-`flush` in `on_logs`); Test `logs_never_finish_a_batch_sink_per_transaction` Exit 0.
 - **Triage 18.10.2026:** `LATENT_ONLY after strict-driver inspection`. `strict_driver.rs` nutzt `market_verification::run` → `JournalSink`, genau wie produktiver `capture.rs`. `JsonlSink` ist in den gelesenen Pfaden nur als Kompatibilitäts-/Testtyp sichtbar. Die Fehlkombination ist möglich, aber **kein** nachgewiesener 4h-Capture-Fehler. Gate von pauschal „vor 4h“ auf defensive API-Härtung nach produktiver D1-Gatekorrektur herabstufen.
 
 ### D5 — unerreichbar angenommener Receivership-Decoderzweig kann Capture panicken
-- [ ] **MEDIUM / PANIC HARDENING · CODE_CONFIRMED, TRIGGER_NOT_PROVEN · G-A/G-C · C0-E1.**
+- [x] **MEDIUM / PANIC HARDENING · CODE_CONFIRMED, TRIGGER_NOT_PROVEN · G-A/G-C · C0-E1.**
 - **Pfad:** `runtime/src/market/core.rs::on_logs`, `decoded.additional_events`, `LiquidationType::Receivership`.
 - **Ist:** `unreachable!("original receiver decoder handles this type")` in von externen Chain-Logs abgeleitetem Decoderausgang. Ob der gepinnte Decoder diesen Enum-Fall derzeit tatsächlich in `additional_events` liefern kann, ist **noch nicht bewiesen**; ein unerwartetes Verhalten würde den Capture-Thread paniken lassen.
 - **Verbindlicher Fix:** Kein `unreachable!/panic!/unwrap` auf untrusted Decodevarianten. Explizit fehlerhaftes/inkonsistentes Decoderresultat zählen und als `UNKNOWN/INCOMPLETE` qualifizieren, keine Liquidation unterschlagen und keine falsche Duplikatzählung. Keine stille `continue`-Lösung, die den Pfad als vollständige Evidence erscheinen lässt.
 - **Tests:** direkt injizierter zusätzlicher Receivership-Event, gültige Classic/Deleverage/Bankruptcy, Doppeldekodierung, Truncation, fuzz-/property-Test aller Varianten; kein Panic, keine falsch vollständige Coverage.
-- **Abnahme:** Decoderfehler fail-closed in Evidence und Report, Capture bleibt kontrolliert. **Commit/Evidence:** —.
+- **Abnahme:** Decoderfehler fail-closed in Evidence und Report, Capture bleibt kontrolliert. **Commit/Evidence:** `c256e9d` (`count_provisional`: Receivership in `additional_events` → Decoderfehler, INCOMPLETE, kein Panic); Test `unexpected_receivership_in_additional_events_is_a_decoder_error` Exit 0.
 - **Triage 18.10.2026:** `CURRENTLY UNREACHABLE / DEFENSIVE_ONLY`. `market/decoding.rs` führt Receiver-Payloads separat in `events`. `market_truth.rs::provisional_event` akzeptiert nur `CLASSIC_EVENT`, `DELEVERAGE_EVENT`, `BANKRUPTCY_EVENT`; daraus kann `additional_events` aktuell kein Receivership enthalten. Existierendes `unreachable!` für künftige Decoderänderungen ersetzen/auf Enum-Typvertrag testen, aber keinen gegenwärtigen Crash behaupten.
 
 ### D6 — MarketStats pro Ingress-Event zweimal geklont und emittiert
@@ -527,20 +527,20 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** memory-bounded mit expliziter Coverage-/Retention-Qualifikation, keinerlei fälschliche Vollständigkeit. **Commit/Evidence:** —.
 
 ### D8 — Market-Capture-Thread wird nur bei bereits abgeschlossenem Lauf gejoint
-- [ ] **MEDIUM / SHUTDOWN LIFECYCLE · CODE_CONFIRMED · G-A/G-C; VOR LANGEN LÄUFEN.**
+- [x] **MEDIUM / SHUTDOWN LIFECYCLE · CODE_CONFIRMED · G-A/G-C; VOR LANGEN LÄUFEN.**
 - **Pfad:** `runtime/src/market/capture.rs::run`.
 - **Ist:** Nach `session.request()` und Drain erfolgt `if ingress.is_finished() { ingress.join() }`; wenn der Thread beim Rücksprung noch lebt, wird der JoinHandle verworfen. Consumer-Drop mag später beenden, belegt aber keinen geordneten Shutdown/keine aktuelle Threadquiescence.
 - **Verbindlicher Fix:** eigene Session-Cancellation und **nachweisbar bounded** Join-/Shutdown-Barriere mit dokumentiertem RPC/WSS-Timeout, rechtzeitige Abbruch- und Writer-Finalisierung. Da `std::thread::JoinHandle::join` selbst nicht timeout-fähig ist, keine irreführende `join_timeout`-Behauptung ohne entsprechende Architektur. Bei Überschreitung globalen Stop-/Drain-Budgets fail-closed `INCOMPLETE_ABORT`; niemals weiter laufenden Ingress als ruhend deklarieren.
 - **Tests:** langsam endender Ingress, blockiertes Receive, StreamReady nicht erreicht, OperatorStop, Writer-Drain und FullQueue; Threadzähler und keine Emission nach Return.
-- **Abnahme:** keine detached marktaktive Session nach kontrolliertem Capture-Abschluss. **Commit/Evidence:** —.
+- **Abnahme:** keine detached marktaktive Session nach kontrolliertem Capture-Abschluss. **Commit/Evidence:** `c256e9d` (`quiesce`: Ingress-Thread im Drain-Budget gepollt und gejoint, sonst `INGRESS_NOT_QUIESCENT` nach der Summary); Test `ingress_is_joined_or_reported_not_quiescent` Exit 0.
 
 ### D9 — synchrones stderr auf Capture-Thread kann Ingress-Verarbeitung blockieren
-- [ ] **MEDIUM / BACKPRESSURE · CODE_CONFIRMED · G-A/G-C · Cross-Ref M2.**
+- [x] **MEDIUM / BACKPRESSURE · CODE_CONFIRMED · G-A/G-C · Cross-Ref M2.**
 - **Pfade:** `runtime/src/market/capture.rs` (Status alle etwa 2 s), `runtime/src/market/core.rs::on_logs` (pro erkannter Liquidation).
 - **Ist:** Direktes `eprintln!` aus Capture-/Decode-Pfad kann bei vollem Pipe-/langsamen Dateisystem blockieren. Nur Shell-Umleitung auf Datei ist **kein vollständiger Beweis** für nichtblockierendes stderr.
 - **Verbindlicher Fix:** bounded/try-send Diagnostik entkoppeln, strukturiertes essentielles Capture-Journal unverändert vollständig, optionale Terminalausgabe darf begrenzt gedroppt/aggregiert werden (Counter). Shutdown darf keinen blockierten Konsolen-Join abwarten (M2).
 - **Tests:** blockierte stderr-Pipe, 1000 Liquiderfassungen, Writer-Backpressure, Terminal unavailable, kein erzwungener Ingress-HALT allein wegen optionaler Ausgabe, Summary/Counts identisch.
-- **Abnahme:** Terminal-Diagnostik ist kein unbounded Capture-Hotpath. **Commit/Evidence:** —.
+- **Abnahme:** Terminal-Diagnostik ist kein unbounded Capture-Hotpath. **Commit/Evidence:** `d41b70f` (`console::line`: begrenzte `try_send`-Konsole, detached Thread, Drop-Zähler; Capture-Status und Liquidationszeilen); Test `blocked_console_never_blocks_the_caller` Exit 0.
 
 ### D10 — verworfener JoinHandle beim StateOwner-Resubscribe
 - [ ] **MEDIUM / CONFIRMED DUPLICATE · Cross-Ref C6/C1/M3.**
