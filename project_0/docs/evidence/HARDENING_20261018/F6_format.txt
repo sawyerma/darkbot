@@ -1,0 +1,54 @@
+# F6 rustfmt of the four foreign reporter files (user approval 2026-10-18 lifts the earlier 'leave them alone'); tested tree: e9872cb + F6 diff (CARGO_BUILD_JOBS=2)
+# non-whitespace token changes (whitespace-stripped diff): p0_market_capture_reported.rs match arm wrapped in a block ({ ... }); p0_reporter_fixture.rs import order (Arc) + 4 trailing commas; env_file.rs 1 trailing comma + ';' after continue; tests/config.rs closure body block + 2 trailing commas. No semantic change.
+$ cargo fmt --all --check
+exit=0
+$ cargo test -p darkbot-p0-reporter -- --test-threads=2
+
+running 2 tests
+test env_file::tests::no_secret_in_errors ... ok
+test env_file::tests::parse_basic ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+test missing_program ... ok
+test logs_helius ... ok
+test missing_source ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+test env_config_defaults_off_and_validates_enabled ... ok
+test projected_fields_are_optional_and_not_fabricated ... ok
+test generation_advances_and_rejects_corruption ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 2 tests
+test slow_and_disconnected_client_do_not_block_capture_publisher ... ok
+test handshake_state_heartbeat_permissions_and_reconnect_seq ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+exit=0
+$ cargo clippy -p darkbot-p0-reporter --all-targets --all-features -- -D warnings
+    Checking switchboard-on-demand v0.12.1 (https://github.com/switchboard-xyz/switchboard-sdk?rev=f75b1ef63e10eda35d046b1838810ec2935d7f39#f75b1ef6)
+    Checking darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
+    Checking marginfi v0.1.11 (https://github.com/0dotxyz/marginfi-v2?tag=mrgn-0.1.11-rc1#33c67987)
+    Checking darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+    Checking darkbot-p0-reporter v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter)
+exit=0
