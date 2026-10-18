@@ -1,0 +1,33 @@
+# R5 unrepresentable waits; tested tree: 41329b8 + R5 diff (CARGO_BUILD_JOBS=2)
+# RED (before the fix, same test): storage::budget::tests::unrepresentable_wait_is_refused_without_panic panicked at library/std/src/time.rs:430:33: overflow when adding duration to instant
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 storage::
+
+running 21 tests
+test storage::budget::tests::byte_budget_is_hard_adaptive_and_releases ... ok
+test storage::budget::tests::headroom_decision_is_pure ... ok
+test storage::budget::tests::unrepresentable_wait_is_refused_without_panic ... ok
+test storage::budget::tests::acquire_samples_memory_at_most_once_per_interval ... ok
+test storage::preflight::tests::verdicts_follow_measured_inputs_and_mode ... ok
+test storage::segments::tests::crash_missing_corrupt_and_orphan_segments_fail_closed ... ok
+test storage::segments::tests::segmented_replay_equals_single_journal ... ok
+test storage::preflight::tests::basis_and_write_probe_are_measured ... ok
+test storage::segments::tests::zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate ... ok
+test storage::segments::torn_tail_tests::capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse ... ok
+test storage::segments::torn_tail_tests::interrupted_rotate_missing_final_successor_is_incomplete_and_orphan_holes_fail ... ok
+test storage::segments::torn_tail_tests::zero_bytes_inside_the_stream_stay_hard_errors ... ok
+test storage::writer::tests::adaptive_control_stays_within_reserved_bounds ... ok
+test storage::writer::tests::disk_reserve_fails_closed_and_status_reports_the_lane ... ok
+test storage::segments::torn_tail_tests::capture_torn_tail_is_incomplete_but_wallet_and_resume_stay_strict ... ok
+test storage::writer::tests::overload_refuses_at_max_and_keeps_every_admitted_frame ... ok
+test storage::writer::tests::lane_rotates_segments_and_chain_replays_every_frame ... ok
+test storage::writer::tests::unrepresentable_stall_budget_is_an_error_not_a_panic ... ok
+test storage::writer::tests::reservation_precedes_encoding_and_slots_are_budgeted ... ok
+test storage::writer::tests::worker_writes_ordered_batches_and_seals ... ok
+test storage::writer::tests::writer_failure_is_sticky_and_keeps_the_written_prefix ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 340 filtered out; finished in 1.08s
+
+exit=0
+$ cargo clippy -p darkbot-runner --all-targets --all-features -- -D warnings
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+exit=0

@@ -120,7 +120,12 @@ impl MemoryBudget {
             return Err("BYTE_PERMIT_EXCEEDS_MAX");
         }
         let started = Instant::now();
-        let deadline = started + wait;
+        // R5: a wait beyond what an Instant can represent is a parameter error, never a panic
+        // or an unbounded wait.
+        let Some(deadline) = started.checked_add(wait) else {
+            s.refused += 1;
+            return Err("CAPTURE_MEMORY_WAIT_INVALID");
+        };
         let mut waited = false;
         let mut sample: Option<(Instant, MemorySample)> = None;
         loop {
@@ -382,6 +387,28 @@ mod tests {
             ..Default::default()
         };
         assert!(headroom_allows(&peak_only, Some(100), 0, 90));
+    }
+    /// R5: a wait that is not representable as an `Instant` (e.g. `Duration::MAX` from an
+    /// unbounded setting) is a parameter error, never a panic and never an infinite wait; normal
+    /// waits keep their contract.
+    #[test]
+    fn unrepresentable_wait_is_refused_without_panic() {
+        let budget = MemoryBudget::with_physical(100, 100, 0, None).unwrap();
+        assert_eq!(
+            budget.acquire(10, Duration::MAX).err(),
+            Some("CAPTURE_MEMORY_WAIT_INVALID")
+        );
+        let held = budget.acquire(100, Duration::ZERO).unwrap();
+        assert_eq!(
+            budget.acquire(1, Duration::MAX).err(),
+            Some("CAPTURE_MEMORY_WAIT_INVALID")
+        );
+        assert_eq!(
+            budget.acquire(1, Duration::from_millis(5)).err(),
+            Some("CAPTURE_MEMORY_BUDGET_EXHAUSTED")
+        );
+        drop(held);
+        assert!(budget.acquire(100, Duration::from_secs(3_600)).is_ok());
     }
     /// M1: a waiting acquire that needs growth samples the OS at most once per interval, however
     /// often releases wake it.

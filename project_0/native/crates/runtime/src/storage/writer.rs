@@ -325,7 +325,10 @@ impl MarketJournalWorker {
         }
         // Reserve first: the encoded payload is allocated only after admission.
         let len = payload::encoded_len(row)?;
-        let deadline = Instant::now() + self.stall_budget;
+        // R5: an unrepresentable stall budget is refused as an error, never a panic.
+        let deadline = Instant::now()
+            .checked_add(self.stall_budget)
+            .ok_or_else(|| io::Error::other("MARKET_WRITER_STALL_INVALID"))?;
         let permit = self
             .budget
             .acquire(frame_bytes(len), self.stall_budget)
@@ -575,6 +578,20 @@ mod tests {
             slot: i,
             error: "X".into(),
         }
+    }
+
+    /// R5: an unrepresentable stall budget (e.g. from an unbounded `P0_MARKET_WRITER_STALL_MS`)
+    /// refuses the frame as an error instead of panicking the capture; the journal stays readable.
+    #[test]
+    fn unrepresentable_stall_budget_is_an_error_not_a_panic() {
+        let d = dir("stall_max");
+        let mut c = cfg(1 << 20);
+        c.stall_budget = Duration::MAX;
+        let mut w = MarketJournalWorker::start(&d.join("a.p0j"), c).unwrap();
+        let e = w.submit(Provenance::default(), &row(1)).unwrap_err();
+        assert_eq!(e.to_string(), "MARKET_WRITER_STALL_INVALID");
+        drop(w);
+        std::fs::remove_dir_all(d).unwrap();
     }
 
     /// Frames are written in order and in batches by the writer thread; the sealed journal
