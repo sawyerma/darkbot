@@ -8,17 +8,36 @@ fn r10_run(
     cfg: WsRpcConfig,
     stop_after: Option<Duration>,
 ) -> (Result<(), IngressError>, Duration, Vec<IngressEvent>) {
+    let started = std::time::Instant::now();
+    match stop_after {
+        None => r10_run_until(cfg, None),
+        Some(d) => r10_run_until(cfg, Some(&move || started.elapsed() >= d)),
+    }
+}
+
+/// As [`r10_run`], with the stop requested once `stop_when` holds (bounded wait).
+fn r10_run_until(
+    cfg: WsRpcConfig,
+    stop_when: Option<&dyn Fn() -> bool>,
+) -> (Result<(), IngressError>, Duration, Vec<IngressEvent>) {
     let (tx, rx) = darkbot_common::channel::bounded("r10", 1024);
     let stop = Shutdown::new();
-    if stop_after.is_none() {
+    if stop_when.is_none() {
         stop.request();
     }
     let mut src = WsRpcControlSource::new(cfg, Clock::new());
     src.provider_budget = std::sync::Arc::new(crate::provider::Budget::default());
     let sd = stop.clone();
     let thread = std::thread::spawn(move || src.run(tx, sd, IngressHalt::new(), SlotWatch::new()));
-    if let Some(d) = stop_after {
-        std::thread::sleep(d);
+    if let Some(when) = stop_when {
+        let waiting = std::time::Instant::now();
+        while !when() {
+            assert!(
+                waiting.elapsed() < Duration::from_secs(30),
+                "stop condition not reached within 30 s"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
     let requested = std::time::Instant::now();
     stop.request();
@@ -164,4 +183,138 @@ fn requested_stop_is_ok_without_fatal_in_every_session_phase() {
     assert!(ev.iter().any(
         |e| matches!(e, IngressEvent::Fatal { detail, .. } if detail == "WSS_RECOVERY_EXHAUSTED")
     ));
+}
+
+/// R1 rest: a requested stop stays bounded, `Ok` and without `Fatal` when the peer stops reading
+/// (the source's own writes stall: Pong replies to a Ping flood fill the socket buffers, so it no
+/// longer reads either) and while a TLS handshake stalls (the peer reads the ClientHello of the
+/// production rustls connector and never answers). Loopback only, never Mainnet. An established
+/// TLS session cannot be built offline (the connector trusts only the webpki roots); no stop path
+/// awaits a WebSocket close or TLS shutdown — the session future is dropped.
+#[test]
+fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let mut latencies = Vec::new();
+
+    // Peer that acknowledges the subscription, then floods Pings and never reads again.
+    let stalled = Arc::new(AtomicBool::new(false));
+    let release = Shutdown::new();
+    let (addr_tx, addr_rx) = std::sync::mpsc::channel();
+    let (flag, hold) = (stalled.clone(), release.clone());
+    let server = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let socket = tokio::net::TcpSocket::new_v4().unwrap();
+            // Small buffers of the accepted socket: the client's writes stall quickly.
+            socket.set_recv_buffer_size(4096).unwrap();
+            socket.set_send_buffer_size(4096).unwrap();
+            socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let listener = socket.listen(4).unwrap();
+            addr_tx.send(listener.local_addr().unwrap()).unwrap();
+            let limit = Duration::from_secs(20);
+            let (s, _) = tokio::time::timeout(limit, listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+            let request = tokio::time::timeout(limit, ws.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let id = serde_json::from_str::<Value>(request.to_text().unwrap()).unwrap()["id"].clone();
+            ws.send(Message::Text(
+                json!({"jsonrpc": "2.0", "result": 7, "id": id}).to_string(),
+            ))
+            .await
+            .unwrap();
+            let until = tokio::time::Instant::now() + limit;
+            while tokio::time::Instant::now() < until {
+                let ping = ws.send(Message::Ping(vec![0x5A; 125]));
+                match tokio::time::timeout(Duration::from_millis(500), ping).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => break,
+                    // Our own send stalled: the client no longer reads.
+                    Err(_) => {
+                        flag.store(true, Ordering::Release);
+                        break;
+                    }
+                }
+            }
+            // Keep the stalled connection open until the test is done with it.
+            while !hold.is_requested() && tokio::time::Instant::now() < until {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+    });
+    let addr = addr_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let ready = stalled.clone();
+    let (r, ended, ev) = r10_run_until(
+        r10_cfg(format!("ws://{addr}")),
+        Some(&move || ready.load(Ordering::Acquire)),
+    );
+    release.request();
+    server.join().unwrap();
+    assert!(stalled.load(Ordering::Acquire), "the peer's writes stalled");
+    assert!(r.is_ok() && r10_fatals(&ev) == 0, "peer stops reading: {r:?}");
+    assert!(
+        ev.iter().any(|e| matches!(e, IngressEvent::Reconnected { .. })),
+        "the stream was ready before the peer stopped reading"
+    );
+    assert!(
+        !ev.iter().any(|e| matches!(e, IngressEvent::Gap { .. })),
+        "the stop hit the stalled session, not a reconnect"
+    );
+    latencies.push(("peer_stops_reading", ended));
+
+    // TLS handshake that stalls after the ClientHello.
+    let tls = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("wss://{}", tls.local_addr().unwrap());
+    let hello = Arc::new(AtomicBool::new(false));
+    let (seen, hold) = (hello.clone(), Shutdown::new());
+    let held = hold.clone();
+    let peer = std::thread::spawn(move || {
+        use std::io::Read;
+        tls.set_nonblocking(true).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(20);
+        let mut conn = loop {
+            match tls.accept() {
+                Ok((c, _)) => break c,
+                Err(_) if std::time::Instant::now() < until => {
+                    std::thread::sleep(Duration::from_millis(2))
+                }
+                Err(e) => panic!("no TLS client: {e}"),
+            }
+        };
+        conn.set_nonblocking(false).unwrap();
+        conn.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let mut first = [0u8; 1];
+        // 0x16: a TLS handshake record (the ClientHello).
+        if conn.read_exact(&mut first).is_ok() && first[0] == 0x16 {
+            seen.store(true, Ordering::Release);
+        }
+        while !held.is_requested() && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(conn);
+    });
+    let seen = hello.clone();
+    let (r, ended, ev) = r10_run_until(
+        r10_cfg(url),
+        Some(&move || seen.load(Ordering::Acquire)),
+    );
+    hold.request();
+    peer.join().unwrap();
+    assert!(hello.load(Ordering::Acquire), "the ClientHello reached the peer");
+    assert!(r.is_ok() && r10_fatals(&ev) == 0, "TLS stall: {r:?}");
+    latencies.push(("tls_handshake_stall", ended));
+
+    for (phase, ended) in &latencies {
+        println!("R1_STOP_LATENCY phase={phase} ms={}", ended.as_millis());
+        assert!(*ended < Duration::from_secs(2), "{phase}: {ended:?}");
+    }
 }

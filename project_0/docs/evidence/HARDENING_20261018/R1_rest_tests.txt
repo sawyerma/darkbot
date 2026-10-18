@@ -1,0 +1,199 @@
+# R1 rest: requested stop while the peer stops reading (blocked Pong send) and during a stalled TLS handshake
+# Tested tree: e9167a8 + R1 test diff (CARGO_BUILD_JOBS=2); loopback only, no network; cargo fmt --all --check exit 0; clippy -p darkbot-solana --all-targets --all-features -D warnings exit 0
+# Mutation check (stop arm of run_async's select! replaced by a pending future, then restored):
+#   R1_STOP_LATENCY phase=peer_stops_reading ms=4498
+#   thread 'ingress::ws_rpc::tests::requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls' (31167745) panicked at crates/solana/src/ingress/ws_rpc_stop_tests.rs:318:9:
+#   test ingress::ws_rpc::tests::requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls ... FAILED
+#   test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 92 filtered out; finished in 15.07s
+#   -> without the stop arm the stop waits out the 5 s Pong send timeout (4498 ms): the test hits the blocked send
+# Not buildable offline: an established TLS session (the production connector trusts only the webpki roots);
+#   no stop path awaits a WebSocket close or TLS shutdown (no close()/shutdown() in ws_rpc.rs; the session future is dropped)
+$ cargo test -p darkbot-solana --lib -- requested_stop --test-threads=2 --nocapture
+
+running 2 tests
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connected; subscriptions=1 (programs=0 filtered_programs=0 accounts=0 slots=1 roots=0 tx=0)
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=1 subscription ACKs=1/1
+[ws_rpc] session attempt=1 StreamReady; ACK phase 0 ms for 1 subscriptions
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connecting
+R1_STOP_LATENCY phase=peer_stops_reading ms=80
+R1_STOP_LATENCY phase=tls_handshake_stall ms=97
+test ingress::ws_rpc::tests::requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls ... ok
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connected; subscriptions=1 (programs=0 filtered_programs=0 accounts=0 slots=1 roots=0 tx=0)
+R10_STOP_LATENCY phase=before_start ms=2
+R10_STOP_LATENCY phase=reconnect_backoff ms=4
+R10_STOP_LATENCY phase=ws_handshake ms=7
+R10_STOP_LATENCY phase=subscription_ack_wait ms=7
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=2 connecting
+[ws_rpc] state=DEGRADED attempt=2 code=WSS_SESSION_FAILED
+test ingress::ws_rpc::tests::requested_stop_is_ok_without_fatal_in_every_session_phase ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 4.85s
+
+exit=0
+$ cargo test -p darkbot-solana --lib -- requested_stop --test-threads=2 --nocapture
+
+running 2 tests
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connected; subscriptions=1 (programs=0 filtered_programs=0 accounts=0 slots=1 roots=0 tx=0)
+[ws_rpc] session attempt=1 subscription ACKs=1/1
+[ws_rpc] session attempt=1 StreamReady; ACK phase 0 ms for 1 subscriptions
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connecting
+R1_STOP_LATENCY phase=peer_stops_reading ms=91
+R1_STOP_LATENCY phase=tls_handshake_stall ms=98
+test ingress::ws_rpc::tests::requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls ... ok
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connected; subscriptions=1 (programs=0 filtered_programs=0 accounts=0 slots=1 roots=0 tx=0)
+R10_STOP_LATENCY phase=before_start ms=2
+R10_STOP_LATENCY phase=reconnect_backoff ms=7
+R10_STOP_LATENCY phase=ws_handshake ms=7
+R10_STOP_LATENCY phase=subscription_ack_wait ms=5
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=2 connecting
+[ws_rpc] state=DEGRADED attempt=2 code=WSS_SESSION_FAILED
+test ingress::ws_rpc::tests::requested_stop_is_ok_without_fatal_in_every_session_phase ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 4.83s
+
+exit=0
+$ cargo test -p darkbot-solana --lib -- requested_stop --test-threads=2 --nocapture
+
+running 2 tests
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connected; subscriptions=1 (programs=0 filtered_programs=0 accounts=0 slots=1 roots=0 tx=0)
+[ws_rpc] session attempt=1 subscription ACKs=1/1
+[ws_rpc] session attempt=1 StreamReady; ACK phase 0 ms for 1 subscriptions
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connecting
+R1_STOP_LATENCY phase=peer_stops_reading ms=89
+R1_STOP_LATENCY phase=tls_handshake_stall ms=100
+test ingress::ws_rpc::tests::requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls ... ok
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] session attempt=1 connected; subscriptions=1 (programs=0 filtered_programs=0 accounts=0 slots=1 roots=0 tx=0)
+R10_STOP_LATENCY phase=before_start ms=2
+R10_STOP_LATENCY phase=reconnect_backoff ms=8
+R10_STOP_LATENCY phase=ws_handshake ms=4
+R10_STOP_LATENCY phase=subscription_ack_wait ms=7
+[ws_rpc] session attempt=1 connecting
+[ws_rpc] state=DEGRADED attempt=1 code=WSS_SESSION_FAILED
+[ws_rpc] session attempt=2 connecting
+[ws_rpc] state=DEGRADED attempt=2 code=WSS_SESSION_FAILED
+test ingress::ws_rpc::tests::requested_stop_is_ok_without_fatal_in_every_session_phase ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 4.86s
+
+exit=0
+$ cargo test -p darkbot-solana --all-features -- --test-threads=2
+
+running 95 tests
+test chain::stored_tests::chain_tx_round_trips_through_bincode ... ok
+test chain::tests::real_v1_and_v0_lookup_transactions_decode_losslessly ... ok
+test chain::tests::block_entries_keep_index_and_visible_decode_errors ... ok
+test chain::tests::unresolvable_or_unknown_structures_fail_closed ... ok
+test chain::wire_render_tests::logs_notification_status_and_render ... ok
+test chain::tests::status_keeps_null_error_absent_and_undecodable_apart ... ok
+test ingress::program_filter_tests::program_filter_wire_encoding_is_the_rpc_filter_shape ... ok
+test ingress::tests::bytes_prefix ... ok
+test ingress::ws_rpc::tests::account_notification_needs_known_subscription ... ok
+test ingress::ws_rpc::tests::ack_window_scales_with_subscriptions_within_recovery_budget ... ok
+test chain::wire_render_tests::re_encoded_real_transactions_round_trip_and_match_the_wire ... ok
+test ingress::ws_rpc::tests::boot_network_probe_uses_real_ingress_ack_source_data_and_slot_progress ... ok
+test ingress::ws_rpc::tests::c0mo_logs_and_transaction_notifications_decode_at_the_wire ... ok
+test ingress::ws_rpc::tests::c0mo_market_subscriptions_are_opt_in ... ok
+test ingress::ws_rpc::tests::c0mo_transaction_subscription_requests_successful_and_failed ... ok
+test ingress::ws_rpc::tests::p2_429_retry_after_exhausts_budget_without_spam_or_secret_leak ... ok
+test ingress::ws_rpc::tests::p2_acks_and_ping_pong_do_not_start_capture ... ok
+test ingress::ws_rpc::tests::boot_delayed_ack_starts_a_fresh_slot_progress_deadline ... ok
+test ingress::ws_rpc::tests::p2_shutdown_cancels_admission_wait_without_background_runtime_hang ... ok
+test ingress::ws_rpc::tests::p2_stale_slot_frames_do_not_keep_capture_alive ... ok
+test ingress::ws_rpc::tests::parses_program_notification ... ok
+test ingress::ws_rpc::tests::parses_slot_and_root ... ok
+test ingress::ws_rpc::tests::requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls ... ok
+test ingress::ws_rpc::tests::p2_disconnect_recovers_only_after_new_acked_slot_progress_and_shutdown_is_prompt ... ok
+test ingress::ws_rpc::tests::shadow_config_keeps_heartbeat_disabled_and_wait_unchanged ... ok
+test ingress::ws_rpc::tests::slot_progress_follows_queue_delivery ... ok
+test ingress::ws_rpc::tests::subscribe_requests_cover_all_kinds ... ok
+test ingress::ws_rpc::tests::transport_ping_pong_never_counts_as_stream_activity ... ok
+test provider::configuration_tests::early_default_budget_cannot_authorize_a_later_profile ... ok
+test provider::http_tests::actual_http_429_blocks_other_workload_and_does_not_leak_body ... ok
+test provider::http_tests::explicit_read_fallback_shares_budget_and_send_is_never_retried ... ok
+test provider::http_tests::sdk_preserves_success_response_and_structured_simulation_failure ... ok
+test provider::poison_tests::poisoned_permits_drop_during_unwind_without_second_panic_and_block_admission ... ok
+test provider::poison_tests::poisoned_waiter_and_metrics_are_controlled ... ok
+test provider::tests::adaptive_recovery_is_bounded_and_keeps_provider_unknown ... ok
+test provider::tests::aggregate_concurrency_is_bounded_and_cancelled_tickets_do_not_block ... ok
+test provider::tests::blocking_body_read_is_metered_and_bounded_before_json_decode ... ok
+test provider::tests::configured_capacity_and_exhaustion_release_all_tickets ... ok
+test provider::tests::queue_backpressure_does_not_allocate_more_tickets ... ok
+test provider::tests::retry_after_seconds_dates_and_invalid_are_safe ... ok
+test provider::tests::shared_429_circuit_prevents_requests_across_workloads ... ok
+test provider::tests::socket_capacity_is_local_bounded_and_released ... ok
+test runtime_config::tests::config_examples_parse_with_the_real_parser ... ok
+test runtime_config::tests::effective_config_text_is_redacted_and_complete ... ok
+test runtime_config::tests::explicit_endpoint_beats_legacy_audit_alias ... ok
+test runtime_config::tests::full_mode_has_its_own_defaults_and_shared_explicit_budgets ... ok
+test runtime_config::tests::limits_layout_is_pinned_to_its_revision ... ok
+test runtime_config::tests::numeric_schema_covers_every_environment_consumer ... ok
+test runtime_config::tests::precedence_redaction_private_handoff_and_metadata ... ok
+test runtime_config::tests::profile_files_are_the_only_profile_source_and_cannot_authorize ... ok
+test runtime_config::tests::profiles_and_overrides_are_ceilings_not_authorization ... ok
+test runtime_config::tests::rejects_invalid_types_unknown_financial_keys_and_resource_ranges ... ok
+test state::blockhash::tests::staleness ... ok
+test state::fork::tests::detects_orphaned_branch ... ok
+test state::fork::tests::root_backwards_is_ignored ... ok
+test state::recovery::tests::adaptive_recovery_requires_real_root_before_ready ... ok
+test state::recovery::tests::adaptive_root_progress_extends_soft_budget_but_stalls_and_hard_caps ... ok
+test state::recovery::tests::cancellation_after_snapshot_a_does_not_fetch_b ... ok
+test state::recovery::tests::cancellation_during_root_catchup_never_confirms_ready_or_retries ... ok
+test state::recovery::tests::dirty_reconcile_stays_halted ... ok
+test state::recovery::tests::fatal_during_snapshot_or_root_drain_is_terminal ... ok
+test state::recovery::tests::gap_after_reconnected_invalidates_ready ... ok
+test state::recovery::tests::gap_then_reconnected_can_recover ... ok
+test state::recovery::tests::gap_to_ready_full_loop ... ok
+test state::recovery::tests::legacy_fixed_budget_and_adaptive_soft_boundary_are_fail_closed ... ok
+test state::recovery::tests::missing_required_dependency_blocks_ready ... ok
+test state::recovery::tests::reconnected_in_third_drain_retries_without_external_event ... ok
+test state::recovery::tests::recovery_exhausted_without_fresh_trigger_aborts ... ok
+test state::recovery::tests::repeated_reconnected_cannot_extend_budget ... ok
+test state::recovery::tests::snapshot_b_missing_required_blocks_ready ... ok
+test state::snapshot::compressed_snapshot_tests::compressed_gpa_preserves_all_bytes_owner_lamports_and_context ... ok
+test state::snapshot::compressed_snapshot_tests::corrupt_compressed_account_cannot_produce_partial_snapshot ... ok
+test state::tests::bootstrap_buffers_then_applies_only_newer_than_snapshot ... ok
+test state::tests::gap_halts_and_reconcile_recovers ... ok
+test state::tests::ordering_rules ... ok
+test state::tests::reconcile_mismatch_halts ... ok
+test state::tests::reconcile_mixed_slot_batches_detects_stale_local ... ok
+test state::tests::reconcile_owner_mismatch_halts ... ok
+test state::tests::root_policy_rejects_below_root ... ok
+test state::tests::slot_events_track_highest ... ok
+test submit::jito::secret_tests::inflight_landed_needs_a_real_slot ... ok
+test submit::jito::secret_tests::jito_transport_and_simulation_do_not_expose_endpoint ... ok
+test submit::jito::secret_tests::unsigned_bundle_is_rejected_without_network ... ok
+test submit::rpc::secret_tests::remote_and_transport_errors_never_render_secrets_or_release_ambiguous_sends ... ok
+test submit::tests::path_names_match_ledger ... ok
+test tx::tests::locked_accounts_are_deduplicated ... ok
+test tx::tests::priority_fee_uses_requested_limit_not_simulated_consumption ... ok
+test tx::tests::too_many_accounts_is_rejected_before_compile ... ok
+test tx::tests::v1_effective_list_has_no_compute_budget_instructions ... ok
+test tx::tests::v1_is_unavailable_without_feature ... ok
+test tx::tests::v1_measure_uses_canonical_message_size ... ok
+test tx::tests::v1_priority_fee_is_total_lamports ... ok
+test tx::tests::v1_priority_fee_rounds_up_to_total_lamports ... ok
+test tx::tests::v1_wire_signature_and_exact_size_boundary ... ok
+test ingress::ws_rpc::tests::requested_stop_is_ok_without_fatal_in_every_session_phase ... ok
+
+test result: ok. 95 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.40s
+
+exit=0
