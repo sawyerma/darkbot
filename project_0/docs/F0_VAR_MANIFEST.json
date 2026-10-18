@@ -1,0 +1,20 @@
+{
+  "schema": "F0_VAR_STATIC_CENSUS_V1",
+  "source_head": "ed8ae23848de051732e2c21d13f3e5dbd5664a7d",
+  "file_count": 244,
+  "frontend_files": 37,
+  "p0_rust_files": 162,
+  "proto_files": 7,
+  "type_declarations": 615,
+  "field_declarations": 3279,
+  "gui_entries": 177,
+  "environment_references": 443,
+  "push_anchors": 47,
+  "limitations": [
+    "Lexical source census, not a Rust AST or verified field-to-topic mapping.",
+    "Macro-generated and complex multiline fields can be missed.",
+    "Dynamically constructed env names and JSX expressions need manual review.",
+    "Source existence does not prove runtime availability or valid financial data.",
+    "Never use this list as LIVE or money-transfer authorization."
+  ]
+}

@@ -1,0 +1,48 @@
+file	line	source_excerpt
+frontend/src/app/RouteTopics.tsx	6	gateway.connect(); // idempotent; BLOCKED bleibt BLOCKED
+frontend/src/core/realtime/TopicSubscriptions.ts	49	"if (info.status !== ""OPEN"") this.onConnectionDown();"
+frontend/src/core/realtime/TopicSubscriptions.ts	190	private onConnectionDown(): void {
+frontend/src/core/realtime/index.ts	5	// aufgebaut; F3 ruft gateway.connect() in app/providers.tsx auf, wenn das Gateway existiert.
+frontend/src/features/overview/api/overviewAdapter.ts	114	topics.onState(TopicId.OVERVIEW_AGGREGATES, (bytes: Uint8Array, meta: StateMeta) => {
+frontend/src/features/project0/api/project0Adapter.ts	25	useProject0Store.getState().setStatusTopic(status, reason),
+frontend/src/features/project0/api/project0Adapter.ts	27	topics.onState(TopicId.PROJECT0_STATUS, (bytes: Uint8Array, meta: StateMeta) => {
+frontend/src/features/project0/api/project0Adapter.ts	29	useProject0Store.getState().applyStatus(toStatusView(fromBinary(StatusProjectionSchema, bytes)), meta);
+frontend/src/features/project0/store/project0Store.ts	12	applyStatus: (projection: Project0StatusView, meta: StateMeta) => void;
+frontend/src/features/project0/store/project0Store.ts	13	setStatusTopic: (topicStatus: TopicStatus, reason: string) => void;
+frontend/src/features/project0/store/project0Store.ts	17	applyStatus: (projection, meta) => set((s) => ({ status: { ...s.status, projection, meta } })),
+frontend/src/features/project0/store/project0Store.ts	18	setStatusTopic: (topicStatus, reason) => set((s) => ({ status: { ...s.status, topicStatus, reason } })),
+project_0/native/crates/reporter/src/bin/p0_market_capture_reported.rs	3	use darkbot_runner::market::observer::{run_from_env, run_from_env_with};
+project_0/native/crates/reporter/src/bin/p0_market_capture_reported.rs	41	let result = run_from_env_with(Some(tap), |run_id, _| {
+project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	29	tap.publish_transport(TransportSnapshot {
+project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	34	tap.publish_market(MarketSnapshot {
+project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	43	tap.publish_storage(StorageSnapshot {
+project_0/native/crates/reporter/tests/socket.rs	82	tap.publish_market(MarketSnapshot {
+project_0/native/crates/reporter/tests/socket.rs	125	tap.publish_market(MarketSnapshot {
+project_0/native/crates/reporter/tests/socket.rs	137	tap.publish_market(MarketSnapshot {
+project_0/native/crates/runtime/src/analytics/econ_a2_tests.rs	45	core.on_ingress_event(ev, 0, &mut sink).unwrap();
+project_0/native/crates/runtime/src/bin/p0ctl.rs	277	if control::stop_requested() && !forwarded {
+project_0/native/crates/runtime/src/market/capture.rs	113	if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
+project_0/native/crates/runtime/src/market/capture.rs	120	if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
+project_0/native/crates/runtime/src/market/capture.rs	214	run_from_env_with(None, |_, _| Ok(()))
+project_0/native/crates/runtime/src/market/capture.rs	216	pub fn run_from_env_with(
+project_0/native/crates/runtime/src/market/capture.rs	369	if econ.is_none() && crate::orchestration::control::stop_requested() {
+project_0/native/crates/runtime/src/market/capture.rs	452	core.on_ingress_event(ev, event_unix_s, &mut sink)
+project_0/native/crates/runtime/src/market/capture.rs	480	tap.publish_storage((&status).into());
+project_0/native/crates/runtime/src/market/core.rs	362	tap.publish_market(crate::status_tap::MarketSnapshot {
+project_0/native/crates/runtime/src/market/core.rs	545	pub(super) fn on_slot_frame(&mut self, t_rx_ns: u64) {
+project_0/native/crates/runtime/src/market/core.rs	760	pub fn on_ingress_event(
+project_0/native/crates/runtime/src/market/core.rs	771	tap.publish_transport(crate::status_tap::TransportSnapshot {
+project_0/native/crates/runtime/src/market/core.rs	870	self.on_slot_frame(s.t_rx_ns);
+project_0/native/crates/runtime/src/market/market_gap_tests.rs	13	core.on_ingress_event(
+project_0/native/crates/runtime/src/market/market_gap_tests.rs	26	core.on_ingress_event(
+project_0/native/crates/runtime/src/market/market_gap_tests.rs	38	core.on_ingress_event(
+project_0/native/crates/runtime/src/market/observer.rs	133	finish_capture, run, run_embedded, run_embedded_with, run_from_env, run_from_env_with,
+project_0/native/crates/runtime/src/market/observer_tests.rs	616	core.on_ingress_event(slot(t), 0, &mut sink).unwrap();
+project_0/native/crates/runtime/src/orchestration/control.rs	44	pub fn stop_requested() -> bool {
+project_0/native/crates/runtime/src/orchestration/startup.rs	326	if super::control::stop_requested() && !handle.shared.operator_stop.load(Ordering::Acquire)
+project_0/native/crates/runtime/src/status_tap.rs	67	pub fn publish_market(&self, s: MarketSnapshot) {
+project_0/native/crates/runtime/src/status_tap.rs	70	pub fn publish_transport(&self, s: TransportSnapshot) {
+project_0/native/crates/runtime/src/status_tap.rs	73	pub fn publish_storage(&self, s: StorageSnapshot) {
+project_0/native/crates/runtime/src/status_tap.rs	113	tap.publish_market(MarketSnapshot {
+project_0/native/crates/runtime/src/status_tap.rs	127	tap.publish_market(MarketSnapshot::default());
+project_0/operations/f0_var_inventory.py	26	"ANCHOR_RE = re.compile(r""\b(?:publish_(?:market|storage|transport)|on_ingress_event|on_slot_frame|stop_requested|onConnectionDown|run_from_env_with|topics\.onState|topics\.onEvent|gateway\.connect|applyStatus|setStatusTopic)\b"")"
