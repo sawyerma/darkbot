@@ -104,7 +104,7 @@ Acceptance criteria: `PHASENPLAN.json` → `first_profit_tickets`. Status: `MEAS
 - Separate Shadow WSS disconnect/readiness smoke — required by the 2026-10-10 gate, not recorded (L181).
 - Dedicated R127 admission Shadow requalification after FIX-134/135 — not recorded.
 - 72 h P6-LT Shadow — not started ([measurements/protocols/p6lt_shadow.md](measurements/protocols/p6lt_shadow.md)).
-- BUGS.md items still open before 4h readiness (as of `1d9c6ed`, 2026-10-18): R1 rest (ping/pong send, TLS teardown, end-to-end capture drain); X1 real network case (approved record against Mainnet state) NOT_RUN; real-load sweep owner-block p95/p99 (`sweep_timing` line), real ingress peak rate (R3) and Mainnet MarginfiGroup/FeeState lengths (B2) — NOT_MEASURED until an authorized G-B/G-C run.
+- BUGS.md items still open before 4h readiness (as of `1d9c6ed`, 2026-10-18): R1 rest (consumer buffer full/half-full, end-to-end capture drain; blocked ping/pong send and TLS handshake stall covered by `1ac2630`); X1 real network case (approved record against Mainnet state) NOT_RUN; real-load sweep owner-block p95/p99 (`sweep_timing` line), real ingress peak rate (R3) and Mainnet MarginfiGroup/FeeState lengths (B2) — NOT_MEASURED until an authorized G-B/G-C run.
 
 **Safety gates in force (unchanged):**
 
