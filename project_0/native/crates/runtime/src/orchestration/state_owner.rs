@@ -192,6 +192,17 @@ enum OwnerStep<T> {
     Continue,
 }
 
+/// Terminal end of the Shadow owner with a fixed, secret-free code (C1/C7): the run stops in
+/// order and is INCOMPLETE; never a passive HALT until the window ends.
+#[derive(Debug)]
+pub(crate) struct OwnerTerminal(pub &'static str);
+impl std::fmt::Display for OwnerTerminal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for OwnerTerminal {}
+
 pub(super) fn run_shadow(
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,

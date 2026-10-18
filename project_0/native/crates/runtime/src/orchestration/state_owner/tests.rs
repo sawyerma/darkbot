@@ -1,6 +1,18 @@
 //! Integration-probe and Shadow helper tests of the p0-longtail binary (split from main.rs, structure iteration 29).
 use super::*;
 
+/// C1/C7: the owner's terminal codes reach the start diagnostics verbatim (fixed codes only).
+#[test]
+fn owner_terminal_codes_are_reported_verbatim() {
+    for code in [
+        "STATE_RECOVERY_EXHAUSTED",
+        "WSS_RECOVERY_EXHAUSTED",
+        "INGRESS_FATAL",
+    ] {
+        assert_eq!(shadow_failure_code(&super::OwnerTerminal(code)), code);
+    }
+}
+
 #[test]
 fn shadow_error_category_never_formats_secret_payload() {
     let e = solana_client::client_error::ClientError::from(

@@ -91,6 +91,11 @@ pub struct StateCore {
     /// Gesetzt durch einen sauberen `reconcile()` nach dem letzten `install_snapshot()`.
     /// `confirm_ready()` ohne dieses Flag ist ein No-op (Safety-Gate).
     reconciled_clean: bool,
+    /// C1: applied `Reconnected` events (stream generations); recovery compares it per attempt,
+    /// so a reconnect drained while recovering is never swallowed.
+    reconnects_applied: u64,
+    /// C7: first terminal ingress `Fatal` detail; sticky, the state never leaves HALT for it.
+    fatal_detail: Option<String>,
 }
 
 impl StateCore {
@@ -106,7 +111,17 @@ impl StateCore {
             counters: StateCounters::default(),
             reconciled_clean: false,
             forks: fork::ForkTracker::new(),
+            reconnects_applied: 0,
+            fatal_detail: None,
         }
+    }
+    /// `Reconnected` events applied so far (C1).
+    pub fn reconnects_applied(&self) -> u64 {
+        self.reconnects_applied
+    }
+    /// Detail of the first ingress `Fatal` applied, if any (C7).
+    pub fn fatal_detail(&self) -> Option<&str> {
+        self.fatal_detail.as_deref()
     }
 
     /// Accounts, deren letzter Write auf einem verwaisten Fork lag, sind keine Wahrheit mehr:
@@ -195,11 +210,17 @@ impl StateCore {
                 }
                 None
             }
-            IngressEvent::Gap { .. } | IngressEvent::Reconnected { .. } => {
+            IngressEvent::Gap { .. } => {
                 self.halt(HaltReason::FeedGap);
                 None
             }
-            IngressEvent::Fatal { .. } => {
+            IngressEvent::Reconnected { .. } => {
+                self.reconnects_applied = self.reconnects_applied.saturating_add(1);
+                self.halt(HaltReason::FeedGap);
+                None
+            }
+            IngressEvent::Fatal { detail, .. } => {
+                self.fatal_detail.get_or_insert(detail);
                 self.halt(HaltReason::FeedGap);
                 None
             }

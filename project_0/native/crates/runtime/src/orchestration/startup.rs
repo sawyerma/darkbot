@@ -80,6 +80,9 @@ pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'stati
     if let Some(e) = error.downcast_ref::<crate::analytics::evidence::EvidenceFailure>() {
         return e.0;
     }
+    if let Some(e) = error.downcast_ref::<super::state_owner::OwnerTerminal>() {
+        return e.0;
+    }
     if let Some(e) = error.downcast_ref::<ClientError>() {
         return match e.kind() {
             ClientErrorKind::Reqwest(e) if e.is_timeout() => "RPC_TIMEOUT",

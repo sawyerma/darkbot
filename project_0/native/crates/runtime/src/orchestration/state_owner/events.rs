@@ -158,6 +158,22 @@ impl ShadowOwner {
                     o,
                     self.st.run_state()
                 );
+                // C1/C7: no fresh stream generation after the bounded cycles, or a terminal feed
+                // failure, ends the run in order as INCOMPLETE instead of a passive HALT.
+                let terminal = match o {
+                    darkbot_solana::state::recovery::RecoveryOutcome::Exhausted { .. } => {
+                        Some("STATE_RECOVERY_EXHAUSTED")
+                    }
+                    darkbot_solana::state::recovery::RecoveryOutcome::Fatal { code } => Some(code),
+                    _ => None,
+                };
+                if let Some(code) = terminal {
+                    owner_log!(
+                        self,
+                        "{code}: ending the run INCOMPLETE (no detection, no submission)"
+                    );
+                    return Err(Box::new(OwnerTerminal(code)));
+                }
                 if matches!(o, darkbot_solana::state::recovery::RecoveryOutcome::Ready) {
                     self.halt.clear();
 

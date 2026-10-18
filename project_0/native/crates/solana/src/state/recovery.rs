@@ -50,10 +50,26 @@ pub enum RecoveryOutcome {
     Ready,
     /// Owner stopped or measurement aborted; never promotes a partial recovery.
     Cancelled,
-    /// Nach allen Versuchen nicht sauber; State bleibt HALTED.
+    /// Nach allen Versuchen nicht sauber; State bleibt HALTED. The owner treats it as terminal
+    /// (C1): it is returned only without a fresh reconnect of the final attempt, or after the
+    /// single extra cycle such a reconnect grants.
     Exhausted {
         attempts: u32,
     },
+    /// C7: terminal ingress failure, as a fixed code (`WSS_RECOVERY_EXHAUSTED` or
+    /// `INGRESS_FATAL`, never the adapter's free text); never recovered here.
+    Fatal {
+        code: &'static str,
+    },
+}
+
+/// Fixed code of an ingress `Fatal` detail (C7).
+pub fn fatal_code(detail: &str) -> &'static str {
+    if detail == "WSS_RECOVERY_EXHAUSTED" {
+        "WSS_RECOVERY_EXHAUSTED"
+    } else {
+        "INGRESS_FATAL"
+    }
 }
 
 // A root-only progress watchdog. Time values are elapsed from a single Instant,
@@ -122,6 +138,8 @@ pub struct RecoveryDriver {
     // non-blocking evidence writer, so recovery never writes stderr on the owner thread.
     diagnostics: Vec<String>,
     diagnostics_beyond: u64,
+    /// C1: the last `recover_cancellable` saw a `Reconnected` applied during its final attempt.
+    reconnect_in_final_attempt: bool,
 }
 
 const DIAGNOSTICS_MAX: usize = 256;
@@ -136,6 +154,7 @@ impl RecoveryDriver {
             root_progress_limits: None,
             diagnostics: Vec::new(),
             diagnostics_beyond: 0,
+            reconnect_in_final_attempt: false,
         }
     }
 
@@ -192,11 +211,23 @@ impl RecoveryDriver {
     ) -> Option<RecoveryOutcome> {
         let trigger = matches!(ev, IngressEvent::Reconnected { .. });
         st.on_event(ev);
-        if trigger {
-            Some(self.recover_cancellable(st, fetch, drain, cancelled))
-        } else {
-            None
+        if let Some(detail) = st.fatal_detail() {
+            return Some(RecoveryOutcome::Fatal {
+                code: fatal_code(detail),
+            });
         }
+        if !trigger {
+            return None;
+        }
+        let outcome = self.recover_cancellable(st, fetch, drain, cancelled);
+        // C1: a Reconnected applied during the final attempt is a new stream generation whose
+        // recovery would otherwise be lost: exactly one further complete cycle on the same
+        // session, never more (a reconnect in that cycle grants nothing further).
+        if matches!(outcome, RecoveryOutcome::Exhausted { .. }) && self.reconnect_in_final_attempt {
+            self.note("[recovery] reconnected during the final attempt: one further cycle".into());
+            return Some(self.recover_cancellable(st, fetch, drain, cancelled));
+        }
+        Some(outcome)
     }
 
     /// Bootstrap und Recovery sind derselbe Pfad.
@@ -224,8 +255,22 @@ impl RecoveryDriver {
                 }
             };
         }
+        // C7: a Fatal drained while recovering ends the recovery at once.
+        macro_rules! drain {
+            () => {
+                drain(st);
+                if let Some(detail) = st.fatal_detail() {
+                    return RecoveryOutcome::Fatal {
+                        code: fatal_code(detail),
+                    };
+                }
+            };
+        }
+        self.reconnect_in_final_attempt = false;
+        let mut reconnects_at_attempt = st.reconnects_applied();
         'attempts: for attempt in 1..=self.max_attempts {
             check_cancelled!();
+            reconnects_at_attempt = st.reconnects_applied();
             self.attempts_total += 1;
             self.note(format!(
                 "[recovery] attempt={}/{} snapshot=A start",
@@ -259,7 +304,7 @@ impl RecoveryDriver {
             }
             check_cancelled!();
             st.install_snapshot(a.slot, a.accounts);
-            drain(st); // Deltas, die während Fetch A ankamen
+            drain!(); // Deltas, die während Fetch A ankamen
             self.note(format!(
                 "[recovery] attempt={}/{} snapshot=B start",
                 attempt, self.max_attempts
@@ -286,7 +331,7 @@ impl RecoveryDriver {
                 b.missing_required.len()
             ));
             check_cancelled!();
-            drain(st); // Deltas, die während Fetch B ankamen (vor dem Vergleich)
+            drain!(); // Deltas, die während Fetch B ankamen (vor dem Vergleich)
             if !b.missing_required.is_empty() {
                 // [FIX-41] Snapshot B ohne required Dependency → kein Vergleich möglich → nicht sauber.
                 st.halt(HaltReason::ReconcileFailure);
@@ -311,7 +356,7 @@ impl RecoveryDriver {
                 ));
                 loop {
                     check_cancelled!();
-                    drain(st);
+                    drain!();
                     let elapsed = started.elapsed();
                     let root = st.root();
                     progress.observe_root(root, elapsed);
@@ -332,7 +377,7 @@ impl RecoveryDriver {
                     if root.is_some_and(|r| r >= target_slot) {
                         // Flush all already-enqueued notifications before reconciliation;
                         // a gap during drain must still leave StateCore HALTED.
-                        drain(st);
+                        drain!();
                         self.note(format!(
                             "[recovery] attempt={}/{} root_catchup ok target={} root={} elapsed_ms={}",
                             attempt, self.max_attempts, target_slot,
@@ -386,6 +431,9 @@ impl RecoveryDriver {
             let _ = attempt;
         }
         debug_assert!(!st.run_state().is_tradable());
+        // Signals queued after the last drain of the final attempt still count (C1/C7).
+        drain!();
+        self.reconnect_in_final_attempt = st.reconnects_applied() > reconnects_at_attempt;
         RecoveryOutcome::Exhausted {
             attempts: self.max_attempts,
         }
@@ -659,6 +707,183 @@ mod tests {
         assert_eq!(calls.get(), 2);
         assert!(!state.run_state().is_tradable());
         assert_eq!(driver.attempts_total, 1);
+    }
+
+    fn reconnected() -> IngressEvent {
+        IngressEvent::Reconnected {
+            source: SourceKind::WsRpcControl,
+            attempt: 1,
+            t_rx_ns: 0,
+        }
+    }
+    /// Snapshots of one stable account; the first `missing` fetches miss a required account.
+    fn snapshots(
+        pk: Pubkey,
+        missing: u32,
+        calls: &std::cell::Cell<u32>,
+    ) -> impl FnMut() -> Result<SnapshotData, String> + '_ {
+        move || {
+            calls.set(calls.get() + 1);
+            Ok(SnapshotData {
+                slot: 10,
+                accounts: vec![upd(pk, 10, 1)],
+                missing_required: if calls.get() <= missing {
+                    vec![(pk, 10)]
+                } else {
+                    vec![]
+                },
+            })
+        }
+    }
+    /// C1: a Reconnected drained during the final attempt is a recovery request on the same
+    /// healthy session: one further complete A/B cycle reaches Ready without an external event.
+    #[test]
+    fn reconnected_in_third_drain_retries_without_external_event() {
+        use std::cell::Cell;
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, 2, &calls);
+        let drains = Cell::new(0);
+        let mut drain = |st: &mut StateCore| {
+            drains.set(drains.get() + 1);
+            // Attempts 1 and 2 fail at snapshot A (no drain); the 2nd drain is after B of attempt 3.
+            if drains.get() == 2 {
+                st.on_event(reconnected());
+            }
+        };
+        let out =
+            driver
+                .on_event_cancellable(&mut state, reconnected(), &mut fetch, &mut drain, &|| false);
+        assert_eq!(out, Some(RecoveryOutcome::Ready));
+        assert!(state.run_state().is_tradable());
+        assert_eq!(
+            driver.attempts_total, 4,
+            "3 attempts plus 1 of the extra cycle"
+        );
+    }
+    /// C1: dirty attempts without a fresh trigger end Exhausted after exactly one cycle.
+    #[test]
+    fn recovery_exhausted_without_fresh_trigger_aborts() {
+        use std::cell::Cell;
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, u32::MAX, &calls);
+        let out = driver.on_event_cancellable(
+            &mut state,
+            reconnected(),
+            &mut fetch,
+            &mut |_| {},
+            &|| false,
+        );
+        assert_eq!(out, Some(RecoveryOutcome::Exhausted { attempts: 3 }));
+        assert_eq!((driver.attempts_total, calls.get()), (3, 3));
+        assert!(!state.run_state().is_tradable());
+        // A Gap (not a Reconnected) in the final attempt grants no further cycle either.
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, 0, &calls);
+        let mut drain = |st: &mut StateCore| {
+            st.on_event(IngressEvent::Gap {
+                source: SourceKind::WsRpcControl,
+                from_slot: Some(9),
+                to_slot: None,
+                t_rx_ns: 0,
+            });
+        };
+        let out =
+            driver
+                .on_event_cancellable(&mut state, reconnected(), &mut fetch, &mut drain, &|| false);
+        assert_eq!(out, Some(RecoveryOutcome::Exhausted { attempts: 3 }));
+        assert_eq!(driver.attempts_total, 3);
+    }
+    /// C1: flapping Reconnected cannot extend the budget beyond two cycles (six attempts).
+    #[test]
+    fn repeated_reconnected_cannot_extend_budget() {
+        use std::cell::Cell;
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, 0, &calls);
+        let mut drain = |st: &mut StateCore| {
+            st.on_event(reconnected());
+        };
+        let out =
+            driver
+                .on_event_cancellable(&mut state, reconnected(), &mut fetch, &mut drain, &|| false);
+        assert_eq!(out, Some(RecoveryOutcome::Exhausted { attempts: 3 }));
+        assert_eq!(driver.attempts_total, 6);
+        assert!(!state.run_state().is_tradable());
+    }
+
+    fn fatal(detail: &str) -> IngressEvent {
+        IngressEvent::Fatal {
+            source: SourceKind::WsRpcControl,
+            detail: detail.into(),
+            t_rx_ns: 0,
+        }
+    }
+    /// C7: a Fatal drained during a recovery ends it at once (no snapshot B, no Ready); a Fatal
+    /// as the event itself is terminal without any recovery read.
+    #[test]
+    fn fatal_during_snapshot_or_root_drain_is_terminal() {
+        use std::cell::Cell;
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, 0, &calls);
+        let mut drain = |st: &mut StateCore| {
+            st.on_event(fatal("WSS_RECOVERY_EXHAUSTED"));
+        };
+        let out =
+            driver
+                .on_event_cancellable(&mut state, reconnected(), &mut fetch, &mut drain, &|| false);
+        assert_eq!(
+            out,
+            Some(RecoveryOutcome::Fatal {
+                code: "WSS_RECOVERY_EXHAUSTED"
+            })
+        );
+        assert_eq!(calls.get(), 1, "snapshot A only");
+        assert!(!state.run_state().is_tradable());
+        let mut state = StateCore::new(10);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, 0, &calls);
+        let out = driver.on_event_cancellable(
+            &mut state,
+            fatal("socket closed https://x/?api-key=SECRET"),
+            &mut fetch,
+            &mut |_| {},
+            &|| false,
+        );
+        assert_eq!(
+            out,
+            Some(RecoveryOutcome::Fatal {
+                code: "INGRESS_FATAL"
+            })
+        );
+        assert_eq!(calls.get(), 0);
+        // A later Reconnected cannot recover a fatal stream.
+        let out = driver.on_event_cancellable(
+            &mut state,
+            reconnected(),
+            &mut fetch,
+            &mut |_| {},
+            &|| false,
+        );
+        assert_eq!(
+            out,
+            Some(RecoveryOutcome::Fatal {
+                code: "INGRESS_FATAL"
+            })
+        );
+        assert!(!state.run_state().is_tradable());
     }
 
     #[test]
