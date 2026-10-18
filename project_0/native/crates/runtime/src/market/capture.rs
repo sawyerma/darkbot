@@ -59,8 +59,8 @@ pub struct CaptureOutcome {
 /// Returns `(summary, report, write_error)`.
 /// Waits up to `budget` for a stopped ingress thread and joins it (D8). `join` itself cannot
 /// time out, so the thread is polled first; one still running is `INGRESS_NOT_QUIESCENT`.
-pub(super) fn quiesce(
-    ingress: std::thread::JoinHandle<()>,
+pub(super) fn quiesce<T>(
+    ingress: std::thread::JoinHandle<T>,
     budget: Duration,
 ) -> Result<(), String> {
     let deadline = Instant::now() + budget;
@@ -72,7 +72,83 @@ pub(super) fn quiesce(
     }
     ingress
         .join()
+        .map(drop)
         .map_err(|_| "INGRESS_THREAD_PANIC".to_string())
+}
+
+/// The market ingress thread's result: `Err` holds a fixed, secret-free error class.
+pub(super) type IngressThread = std::thread::JoinHandle<Result<(), &'static str>>;
+
+/// R2: how a finished ingress thread ended. A requested stop ends the WSS source with `Ok`; an
+/// error return or a panic is never a clean end of the stream.
+fn ingress_end(ingress: IngressThread) -> Result<(), &'static str> {
+    match ingress.join() {
+        Ok(result) => result,
+        Err(_) => Err("INGRESS_THREAD_PANIC"),
+    }
+}
+
+/// Phase 2 of a capture: drain the queue after the stop request until the ingress thread has
+/// ended (or the deadline passes). R2: a finished thread is joined here, before the journal is
+/// sealed, so a panic or an error return marks the capture INCOMPLETE instead of counting as a
+/// complete drain. Returns `(drain_complete, write_error, ingress_end_error)`; `ingress` is
+/// `None` afterwards if the thread was joined.
+pub(super) fn drain_after_stop(
+    consumer: &darkbot_common::channel::Consumer<IngressEvent>,
+    ingress: &mut Option<IngressThread>,
+    core: &mut ObserverCore,
+    sink: &mut dyn MarketSink,
+    clock: Clock,
+    deadline: Instant,
+    last_overflow: &mut u64,
+) -> (bool, Option<String>, Option<&'static str>) {
+    let mut write_error: Option<String> = None;
+    let mut drain_complete = false;
+    let mut end_error = None;
+    while write_error.is_none() {
+        let now_s = unix_now_s();
+        match consumer.pop_timeout(Duration::from_millis(100)) {
+            Some(ev) => {
+                let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
+                if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
+                    write_error = Some(e.to_string());
+                }
+            }
+            None if ingress.as_ref().is_none_or(|t| t.is_finished()) => {
+                while let Some(ev) = consumer.try_pop() {
+                    let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
+                    if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
+                        write_error = Some(e.to_string());
+                        break;
+                    }
+                }
+                if let Some(Err(code)) = ingress.take().map(ingress_end) {
+                    core.mark_incomplete(code);
+                    end_error = Some(code);
+                }
+                drain_complete = write_error.is_none() && end_error.is_none();
+                break;
+            }
+            None => {}
+        }
+        let overflow = consumer.stats().overflow;
+        if overflow > *last_overflow {
+            *last_overflow = overflow;
+            let _ = core.coverage(
+                sink,
+                now_s,
+                None,
+                WindowEvent::IngressOverflow {
+                    overflow_total: overflow,
+                    drain: true,
+                },
+            );
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+    }
+    (drain_complete, write_error, end_error)
 }
 
 pub fn finish_capture(
@@ -227,14 +303,19 @@ pub fn run_embedded_with(
     };
     let src = WsRpcControlSource::new(ws, clock);
     let session_for_thread = session.clone();
-    let ingress = std::thread::Builder::new()
+    let ingress: IngressThread = std::thread::Builder::new()
         .name("market-ingress-ws".into())
         .spawn(move || {
-            if let Err(e) = src.run(producer, session_for_thread, halt, slots) {
-                eprintln!("market ingress ended: {e}");
-            }
+            src.run(producer, session_for_thread, halt, slots)
+                .map_err(|e| {
+                    let class = market_ingress_error_class(&e);
+                    // R6: bounded console, fixed class (never a provider text or URL).
+                    crate::console::line(format!("market ingress ended: {class}"));
+                    class
+                })
         })
         .map_err(|e| format!("spawn ingress: {e}"))?;
+    let mut ingress = Some(ingress);
 
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
     match deployment_before {
@@ -321,7 +402,7 @@ pub fn run_embedded_with(
         if window.is_some_and(|(_, cutoff)| clock.now_ns() >= cutoff) {
             break;
         }
-        if ingress.is_finished() {
+        if ingress.as_ref().is_some_and(|t| t.is_finished()) {
             if let Err(e) = core.coverage(
                 &mut sink,
                 unix_now_s(),
@@ -467,46 +548,22 @@ pub fn run_embedded_with(
         },
     );
     session.request();
-    let mut drain_complete = false;
     let drain_deadline = Instant::now() + Duration::from_secs(cfg.drain_timeout_secs);
-    while write_error.is_none() {
-        let now_s = unix_now_s();
-        match consumer.pop_timeout(Duration::from_millis(100)) {
-            Some(ev) => {
-                let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
-                if let Err(e) = core.on_ingress_event(ev, event_unix_s, &mut sink) {
-                    write_error = Some(e.to_string());
-                }
-            }
-            None if ingress.is_finished() => {
-                while let Some(ev) = consumer.try_pop() {
-                    let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
-                    if let Err(e) = core.on_ingress_event(ev, event_unix_s, &mut sink) {
-                        write_error = Some(e.to_string());
-                        break;
-                    }
-                }
-                drain_complete = write_error.is_none();
-                break;
-            }
-            None => {}
-        }
-        let overflow = consumer.stats().overflow;
-        if overflow > last_overflow {
-            last_overflow = overflow;
-            let _ = core.coverage(
-                &mut sink,
-                now_s,
-                None,
-                WindowEvent::IngressOverflow {
-                    overflow_total: overflow,
-                    drain: true,
-                },
-            );
-        }
-        if Instant::now() >= drain_deadline {
-            break;
-        }
+    let (drain_complete, drain_write_error, ingress_end_error) = if write_error.is_none() {
+        drain_after_stop(
+            &consumer,
+            &mut ingress,
+            &mut core,
+            &mut sink,
+            clock,
+            drain_deadline,
+            &mut last_overflow,
+        )
+    } else {
+        (false, None, None)
+    };
+    if drain_write_error.is_some() {
+        write_error = drain_write_error;
     }
     core.stop_observation();
     let events_after_cutoff = core.stats.events_after_cutoff;
@@ -569,7 +626,10 @@ pub fn run_embedded_with(
     // D8: the session was asked to stop; its thread is joined within the drain budget. One still
     // alive afterwards is reported, never declared quiescent (the journal is INCOMPLETE then,
     // since its drain did not complete).
-    let quiescent = quiesce(ingress, Duration::from_secs(cfg.drain_timeout_secs));
+    let quiescent = match ingress.take() {
+        Some(thread) => quiesce(thread, Duration::from_secs(cfg.drain_timeout_secs)),
+        None => Ok(()),
+    };
     if let Some(h) = &econ {
         h.emit(crate::analytics::econ::Evidence::MarketFinal(Box::new(
             summary,
@@ -599,5 +659,19 @@ pub fn run_embedded_with(
     if stop_reason != "TIMER" {
         return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
     }
+    if let Some(code) = ingress_end_error {
+        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {code}"));
+    }
     Ok(())
+}
+
+/// A fixed, secret-free class of a market ingress error (R2/R6).
+fn market_ingress_error_class(e: &darkbot_solana::ingress::IngressError) -> &'static str {
+    use darkbot_solana::ingress::IngressError as E;
+    match e {
+        E::Connect(c) if c == "WSS_RECOVERY_EXHAUSTED" => "WSS_RECOVERY_EXHAUSTED",
+        E::Connect(_) => "INGRESS_CONNECT_ERROR",
+        E::Protocol(_) => "INGRESS_PROTOCOL_ERROR",
+        E::Config(_) => "INGRESS_CONFIG_ERROR",
+    }
 }
