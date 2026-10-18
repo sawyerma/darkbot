@@ -79,6 +79,10 @@ impl ReverseIndex {
             for b in old {
                 if let Some(set) = self.bank_to_accounts.get_mut(&b) {
                     set.remove(&account);
+                    // E10: a bank without accounts leaves no empty set behind.
+                    if set.is_empty() {
+                        self.bank_to_accounts.remove(&b);
+                    }
                 }
             }
         }
@@ -269,6 +273,43 @@ impl ThresholdIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// E10: moving and removing accounts leaves no empty bank entry; lookups are unchanged.
+    #[test]
+    fn emptied_bank_entries_are_removed() {
+        let mut idx = ReverseIndex::new();
+        let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let (x, y, z) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        idx.set_account_banks(a, &[x, y]);
+        idx.set_account_banks(b, &[y]);
+        idx.set_account_banks(a, &[z]); // move: x empties, y keeps b
+        assert_eq!(idx.bank_to_accounts.len(), 2);
+        assert_eq!(idx.accounts_for_bank(&x).count(), 0);
+        assert_eq!(
+            idx.accounts_for_bank(&y).copied().collect::<Vec<_>>(),
+            vec![b]
+        );
+        assert_eq!(
+            idx.accounts_for_bank(&z).copied().collect::<Vec<_>>(),
+            vec![a]
+        );
+        idx.remove_account(&b);
+        idx.remove_account(&a);
+        assert!(idx.bank_to_accounts.is_empty() && idx.account_to_banks.is_empty());
+        // Long alternation does not grow the map.
+        for i in 0..1_000 {
+            let bank = Pubkey::new_unique();
+            idx.set_account_banks(a, &[bank]);
+            if i % 2 == 0 {
+                idx.remove_account(&a);
+            }
+        }
+        assert!(idx.bank_to_accounts.len() <= 1);
+    }
 
     #[test]
     fn reverse_index_fanout_and_replacement() {

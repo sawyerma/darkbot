@@ -1,0 +1,61 @@
+# E10/C9/F3 regression; tested tree: 52e20c2 + E10/C9/F3 diff (CARGO_BUILD_JOBS=2)
+$ cargo test -p darkbot-project0 --features crate_health --lib -- --test-threads=2 index::
+
+running 4 tests
+test index::tests::reverse_index_fanout_and_replacement ... ok
+test index::tests::threshold_crossings_only_wake_newly_endangered_accounts ... ok
+test index::tests::threshold_lookup_both_sides ... ok
+test index::tests::emptied_bank_entries_are_removed ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 69 filtered out; finished in 0.01s
+
+exit=0
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 state_owner::
+
+running 25 tests
+test orchestration::state_owner::census::tests::c0_census_worker_cost_at_historical_population ... ignored
+test orchestration::state_owner::census::tests::census_membership_counts_debtors_and_undecodable_members_only ... ok
+test orchestration::state_owner::census::tests::chain_clock_rejects_foreign_short_zero_and_future_clocks ... ok
+test orchestration::state_owner::integration_probe_tests::blockhash_freshness_is_one_policy ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_repeat_admission_remains_bounded ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token ... ok
+test orchestration::state_owner::integration_probe_tests::evidence_failures_remain_explicit_static_categories ... ok
+test orchestration::state_owner::integration_probe_tests::failure_report_shows_classified_details_only ... ok
+test orchestration::state_owner::census::tests::census_proves_identity_coverage_and_journals_typed_rows ... ok
+test orchestration::state_owner::integration_probe_tests::no_duplicate_generation_or_old_session_readiness ... ok
+test orchestration::state_owner::integration_probe_tests::only_one_target_is_dispatched_per_idle_turn ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_returns_latest_coalesced_work_once ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_skips_stale_order_entries ... ok
+test orchestration::state_owner::integration_probe_tests::owner_terminal_codes_are_reported_verbatim ... ok
+test orchestration::state_owner::integration_probe_tests::shadow_error_category_never_formats_secret_payload ... ok
+test orchestration::state_owner::integration_probe_tests::sweep_fanout_owner_block_is_measured ... ignored
+test orchestration::state_owner::integration_probe_tests::target_waits_unsigned_until_worker_is_idle ... ok
+test orchestration::state_owner::integration_probe_tests::ingress_session_stop_and_join_is_bounded ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops ... ok
+test orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin ... ok
+test orchestration::state_owner::setup::cluster_tests::zero_prefund_flags_parse_strictly_and_never_enable_implicitly ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ ... ok
+
+test result: ok. 23 passed; 0 failed; 2 ignored; 0 measured; 323 filtered out; finished in 0.41s
+
+exit=0
+$ cargo test -p darkbot-solana --lib -- --test-threads=2 submit::
+
+running 5 tests
+test submit::jito::secret_tests::inflight_landed_needs_a_real_slot ... ok
+test submit::jito::secret_tests::unsigned_bundle_is_rejected_without_network ... ok
+test submit::rpc::secret_tests::remote_and_transport_errors_never_render_secrets_or_release_ambiguous_sends ... ok
+test submit::tests::path_names_match_ledger ... ok
+test submit::jito::secret_tests::jito_transport_and_simulation_do_not_expose_endpoint ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 86 filtered out; finished in 0.00s
+
+exit=0
+$ cargo clippy -p darkbot-project0 -p darkbot-solana -p darkbot-runner --all-targets --all-features -- -D warnings
+    Checking darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
+    Checking darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+exit=0
