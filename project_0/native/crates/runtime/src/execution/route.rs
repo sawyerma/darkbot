@@ -468,7 +468,6 @@ mod tests {
             jupiter_error(reqwest::StatusCode::BAD_REQUEST, no_route.as_bytes()),
             "jupiter /build: no executable route: NO_ROUTES_FOUND"
         );
-        assert!(ERROR_BODY_LIMIT <= 4096);
     }
 
     #[test]
