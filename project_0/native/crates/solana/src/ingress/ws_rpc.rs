@@ -865,31 +865,51 @@ impl WsRpcControlSource {
                         *healthy = true;
                     }
                 }
-                if let IngressEvent::Slot(s) = &ev {
-                    *last_slot = Some(last_slot.map_or(s.slot, |p| p.max(s.slot)));
-                    slots.observe(s.slot); // [FIX-40]
-                }
-                if let IngressEvent::Account(a) = &ev {
-                    *last_slot = Some(last_slot.map_or(a.slot, |l| l.max(a.slot)));
-                    slots.observe(a.slot); // [FIX-40]
-                }
-                match sink.try_push(ev) {
-                    Ok(()) => {}
-                    Err(ChannelError::Full(_)) => {
-                        // Kein stiller Drop: Out-of-Band-Halt (garantiert sichtbar) + Gap-Versuch.
-                        halt.raise();
-                        let _ = sink.try_push(IngressEvent::Gap {
-                            source: SourceKind::WsRpcControl,
-                            from_slot: *last_slot,
-                            to_slot: None,
-                            t_rx_ns,
-                        });
-                        return Err(IngressError::Protocol("sink overflow".into()));
-                    }
-                    Err(ChannelError::Disconnected(_)) => return Ok(()),
+                if !deliver(sink, halt, slots, last_slot, ev, t_rx_ns)? {
+                    return Ok(());
                 }
             }
         }
+    }
+}
+
+/// Hands one event to the owner queue. F4: the wire-observed slot (`last_slot`, the shared
+/// `SlotWatch` [FIX-40]) advances only for events actually delivered, so a Gap after a full
+/// queue starts at the last delivered slot, never at a dropped frame. `Ok(false)`: the owner is
+/// gone (session ends normally).
+fn deliver(
+    sink: &Producer<IngressEvent>,
+    halt: &IngressHalt,
+    slots: &SlotWatch,
+    last_slot: &mut Option<u64>,
+    ev: IngressEvent,
+    t_rx_ns: u64,
+) -> Result<bool, IngressError> {
+    let slot = match &ev {
+        IngressEvent::Slot(s) => Some(s.slot),
+        IngressEvent::Account(a) => Some(a.slot),
+        _ => None,
+    };
+    match sink.try_push(ev) {
+        Ok(()) => {
+            if let Some(slot) = slot {
+                *last_slot = Some(last_slot.map_or(slot, |p| p.max(slot)));
+                slots.observe(slot);
+            }
+            Ok(true)
+        }
+        Err(ChannelError::Full(_)) => {
+            // Kein stiller Drop: Out-of-Band-Halt (garantiert sichtbar) + Gap-Versuch.
+            halt.raise();
+            let _ = sink.try_push(IngressEvent::Gap {
+                source: SourceKind::WsRpcControl,
+                from_slot: *last_slot,
+                to_slot: None,
+                t_rx_ns,
+            });
+            Err(IngressError::Protocol("sink overflow".into()))
+        }
+        Err(ChannelError::Disconnected(_)) => Ok(false),
     }
 }
 
@@ -972,6 +992,50 @@ pub fn audit_liveness(
 mod tests {
     use super::*;
     include!("ws_rpc_recovery_tests.rs");
+
+    /// F4: wire-observed slot progress follows delivery. An event refused by a full queue moves
+    /// neither `last_slot` (the Gap origin) nor the shared SlotWatch; the halt is raised.
+    #[test]
+    fn slot_progress_follows_queue_delivery() {
+        let slot = |n: u64| {
+            IngressEvent::Slot(SlotUpdate {
+                slot: n,
+                parent: Some(n - 1),
+                status: SlotStatus::Processed,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns: 0,
+            })
+        };
+        let account = |n: u64| {
+            IngressEvent::Account(AccountUpdate {
+                pubkey: Pubkey::new_unique(),
+                owner: Pubkey::new_unique(),
+                lamports: 1,
+                data: vec![],
+                slot: n,
+                write_version: None,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns: 0,
+            })
+        };
+        let (tx, rx) = darkbot_common::channel::bounded("f4", 2);
+        let (halt, slots) = (IngressHalt::new(), SlotWatch::new());
+        let mut last = None;
+        assert!(deliver(&tx, &halt, &slots, &mut last, slot(10), 0).unwrap());
+        assert!(deliver(&tx, &halt, &slots, &mut last, account(12), 0).unwrap());
+        assert_eq!((last, slots.get()), (Some(12), 12));
+        // Queue full: slot 20 is refused and never becomes the Gap origin or the slot clock.
+        assert!(deliver(&tx, &halt, &slots, &mut last, slot(20), 0).is_err());
+        assert!(halt.is_raised());
+        assert_eq!((last, slots.get()), (Some(12), 12));
+        assert!(matches!(rx.try_pop(), Some(IngressEvent::Slot(s)) if s.slot == 10));
+        assert!(matches!(rx.try_pop(), Some(IngressEvent::Account(a)) if a.slot == 12));
+        assert!(rx.try_pop().is_none(), "neither slot 20 nor a Gap fit");
+        // A consumer that is gone ends the session without advancing the slot either.
+        drop(rx);
+        assert!(!deliver(&tx, &halt, &slots, &mut last, slot(30), 0).unwrap());
+        assert_eq!((last, slots.get()), (Some(12), 12));
+    }
 
     #[test]
     fn subscribe_requests_cover_all_kinds() {

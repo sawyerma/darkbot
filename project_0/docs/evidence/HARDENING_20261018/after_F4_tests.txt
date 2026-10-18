@@ -1,0 +1,30 @@
+# F4 regression; tested tree: bfdc556 + F4 diff (CARGO_BUILD_JOBS=2)
+$ cargo test -p darkbot-solana --lib -- --test-threads=2 ingress::
+
+running 20 tests
+test ingress::tests::bytes_prefix ... ok
+test ingress::program_filter_tests::program_filter_wire_encoding_is_the_rpc_filter_shape ... ok
+test ingress::ws_rpc::tests::ack_window_scales_with_subscriptions_within_recovery_budget ... ok
+test ingress::ws_rpc::tests::account_notification_needs_known_subscription ... ok
+test ingress::ws_rpc::tests::boot_network_probe_uses_real_ingress_ack_source_data_and_slot_progress ... ok
+test ingress::ws_rpc::tests::c0mo_logs_and_transaction_notifications_decode_at_the_wire ... ok
+test ingress::ws_rpc::tests::c0mo_market_subscriptions_are_opt_in ... ok
+test ingress::ws_rpc::tests::c0mo_transaction_subscription_requests_successful_and_failed ... ok
+test ingress::ws_rpc::tests::p2_429_retry_after_exhausts_budget_without_spam_or_secret_leak ... ok
+test ingress::ws_rpc::tests::p2_acks_and_ping_pong_do_not_start_capture ... ok
+test ingress::ws_rpc::tests::boot_delayed_ack_starts_a_fresh_slot_progress_deadline ... ok
+test ingress::ws_rpc::tests::p2_shutdown_cancels_admission_wait_without_background_runtime_hang ... ok
+test ingress::ws_rpc::tests::p2_stale_slot_frames_do_not_keep_capture_alive ... ok
+test ingress::ws_rpc::tests::parses_program_notification ... ok
+test ingress::ws_rpc::tests::parses_slot_and_root ... ok
+test ingress::ws_rpc::tests::shadow_config_keeps_heartbeat_disabled_and_wait_unchanged ... ok
+test ingress::ws_rpc::tests::slot_progress_follows_queue_delivery ... ok
+test ingress::ws_rpc::tests::subscribe_requests_cover_all_kinds ... ok
+test ingress::ws_rpc::tests::transport_ping_pong_never_counts_as_stream_activity ... ok
+test ingress::ws_rpc::tests::p2_disconnect_recovers_only_after_new_acked_slot_progress_and_shutdown_is_prompt ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 70 filtered out; finished in 1.55s
+
+exit=0
+$ cargo clippy -p darkbot-solana --all-targets --all-features -- -D warnings
+exit=0
