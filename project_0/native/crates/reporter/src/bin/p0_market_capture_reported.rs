@@ -1,6 +1,6 @@
 //! Composition root: the engine never depends on the reporter crate.
 use darkbot_p0_reporter::{config_from_env, start, ReporterHandle};
-use darkbot_runner::market::{run_from_env, run_from_env_with};
+use darkbot_runner::market::observer::{run_from_env, run_from_env_with};
 use darkbot_runner::status_tap::StatusTap;
 use std::{process::ExitCode, sync::atomic::Ordering};
 fn main() -> ExitCode {
