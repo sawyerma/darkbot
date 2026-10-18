@@ -4,6 +4,11 @@ use darkbot_runner::market::observer::{run_from_env, run_from_env_with};
 use darkbot_runner::status_tap::StatusTap;
 use std::{process::ExitCode, sync::atomic::Ordering};
 fn main() -> ExitCode {
+    // Reporter composition root: allow SIGTERM/SIGINT to drain and seal market journals.
+    if let Err(e) = darkbot_runner::orchestration::control::install_stop_handler() {
+        eprintln!("[P0/STOP] {e}");
+        return ExitCode::FAILURE;
+    }
     if let Some(spec) = std::env::var("P0_ENV_FILE")
         .ok()
         .filter(|v| !v.trim().is_empty())

@@ -160,11 +160,20 @@ pub fn spawn_supervisor(
 
     tokio::spawn(async move {
         let project = feed.project();
+        let mut attach_failures: u32 = 0;
         loop {
             let mut rx = match feed.attach().await {
-                Ok(rx) => rx,
+                Ok(rx) => {
+                    attach_failures = 0;
+                    rx
+                },
                 Err(e) => {
-                    warn!(?project, error = %e, "engine feed attach failed");
+                    attach_failures = attach_failures.saturating_add(1);
+                    if attach_failures == 1 || attach_failures % 60 == 0 {
+                        warn!(?project, attach_failures, error = %e, "engine feed attach failed");
+                    } else {
+                        tracing::debug!(?project, attach_failures, error = %e, "engine feed attach failed");
+                    }
                     registry.update(project, |s| {
                         let next = if s.attach_count == 0 {
                             SourceState::NotConnected
@@ -175,7 +184,7 @@ pub fn spawn_supervisor(
                         s.state = next;
                         changed
                     });
-                    tokio::time::sleep(backoff).await;
+                    tokio::time::sleep((backoff * attach_failures.min(5)).min(Duration::from_secs(10))).await;
                     continue;
                 }
             };
