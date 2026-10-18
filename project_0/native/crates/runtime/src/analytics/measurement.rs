@@ -326,6 +326,8 @@ pub struct RunManifest {
 }
 impl super::payload::Payload for RunManifest {
     const KIND: u16 = super::journal::kind::RUN_MANIFEST;
+    /// Embeds `Limits` (operational config): follows its layout revision (revision 1 = schema 2).
+    const SCHEMA: u16 = darkbot_solana::runtime_config::LIMITS_REVISION + 1;
 }
 impl RunManifest {
     /// `manifest.json` / `measurement_manifest.json` render (V1 has no `layout` key).

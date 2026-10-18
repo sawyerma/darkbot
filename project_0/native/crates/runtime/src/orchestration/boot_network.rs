@@ -76,11 +76,39 @@ pub struct NetworkReads {
     calls: u64,
     limit: u64,
 }
+/// RPC reads of `cluster`: genesis hash, version, health, finalized and confirmed slot.
+pub const CLUSTER_READS: u64 = 5;
+/// Required BOOT read budget (N1), derived from the read paths the audit runs: [`CLUSTER_READS`]
+/// plus `fe::required_scope_reads` (program and ProgramData, then every configured round over
+/// the initial scope). Necessary, not sufficient: dependencies discovered on chain add batches
+/// known only at run time; they stay bounded by the hard limit (an exhausted budget blocks the
+/// audit, it never passes).
+pub fn required_reads(c: &RuntimeConfig) -> Result<u64, String> {
+    Ok(CLUSTER_READS + fe::required_scope_reads(c)?)
+}
+/// The audit's own call and time budget `(calls, seconds)` (N1): `boot_calls` capped by the
+/// global `max_requests`, and `boot_seconds`; independent of the FE-01 observation limits. A
+/// budget below [`required_reads`] is refused before any network access.
+fn boot_budget(c: &RuntimeConfig) -> Result<(u64, u64), String> {
+    let calls = c.limits.boot_calls.min(c.limits.max_requests);
+    if calls < required_reads(c)? {
+        return Err("BOOT_BUDGET_TOO_SMALL".into());
+    }
+    let seconds = c.limits.boot_seconds;
+    if seconds == 0 || seconds > 300 {
+        return Err("BOOT_TIME_BUDGET".into());
+    }
+    Ok((calls, seconds))
+}
 impl NetworkReads {
     pub fn new(c: &RuntimeConfig) -> Result<Self, String> {
         if !darkbot_solana::runtime_config::configured() || !provider::enabled() {
             return Err("BOOT_PROVIDER_NOT_INITIALIZED".into());
         }
+        Self::from_config(c)
+    }
+    /// Endpoint scope and budget checks; nothing is contacted.
+    fn from_config(c: &RuntimeConfig) -> Result<Self, String> {
         if c.fallback || c.rpc_endpoints.len() != 1 || c.wss_endpoints.len() != 1 {
             return Err("BOOT_PROVIDER_SCOPE_REQUIRES_SINGLE_RPC_WSS".into());
         }
@@ -88,18 +116,24 @@ impl NetworkReads {
         {
             return Err("BOOT_TLS_REQUIRED".into());
         }
-        let seconds = c.limits.fe_seconds.min(300);
-        if seconds == 0 {
-            return Err("BOOT_TIME_BUDGET".into());
-        }
-        Ok(Self {
-            rpc_url: c.rpc_endpoints[0].clone(),
-            timeout: Duration::from_millis(c.limits.rpc_timeout_ms),
-            wss: c.wss_endpoints[0].clone(),
+        let (limit, seconds) = boot_budget(c)?;
+        Ok(Self::open(
+            c.rpc_endpoints[0].clone(),
+            c.wss_endpoints[0].clone(),
+            Duration::from_millis(c.limits.rpc_timeout_ms),
+            limit,
+            seconds,
+        ))
+    }
+    fn open(rpc_url: String, wss: String, timeout: Duration, limit: u64, seconds: u64) -> Self {
+        Self {
+            rpc_url,
+            timeout,
+            wss,
             end: Instant::now() + Duration::from_secs(seconds),
             calls: 0,
-            limit: c.limits.fe_calls.min(c.limits.max_requests),
-        })
+            limit,
+        }
     }
 }
 impl Reads for NetworkReads {
@@ -641,6 +675,149 @@ mod tests {
         )
         .unwrap();
         (c, scope)
+    }
+    /// Local JSON-RPC stub (no network): answers every request with `result` and counts them.
+    fn rpc_stub(
+        result: Value,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::atomic::AtomicU64>,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        std::thread::JoinHandle<()>,
+    ) {
+        use std::io::{Read, Write};
+        use std::sync::atomic::Ordering::SeqCst;
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (n, halt) = (count.clone(), stop.clone());
+        let t = std::thread::spawn(move || {
+            while !halt.load(SeqCst) {
+                let Ok((mut c, _)) = socket.accept() else {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                c.set_nonblocking(false).unwrap();
+                c.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                let (mut data, mut b) = (Vec::new(), [0u8; 4096]);
+                let body = loop {
+                    let Ok(k) = c.read(&mut b) else { break None };
+                    if k == 0 {
+                        break None;
+                    }
+                    data.extend_from_slice(&b[..k]);
+                    let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let len = String::from_utf8_lossy(&data[..end])
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if data.len() >= end + 4 + len {
+                        break Some(data[end + 4..end + 4 + len].to_vec());
+                    }
+                };
+                let Some(body) = body else { continue };
+                let id =
+                    serde_json::from_slice::<Value>(&body).map_or(json!(1), |v| v["id"].clone());
+                n.fetch_add(1, SeqCst);
+                let reply = json!({"jsonrpc":"2.0","id":id,"result":result}).to_string();
+                let _ = c.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                        reply.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        (url, count, stop, t)
+    }
+    fn endpoints(c: &mut RuntimeConfig) {
+        c.rpc_endpoints = vec!["https://rpc.invalid".into()];
+        c.wss_endpoints = vec!["wss://rpc.invalid".into()];
+    }
+    /// N1: the audit has its own budget, derived from the reads it runs and checked before any
+    /// network access; the FE-01 observation limits do not shape it.
+    #[test]
+    fn network_reads_refuses_budget_below_minimum() {
+        let mut c = RuntimeConfig::default();
+        endpoints(&mut c);
+        // Cluster reads, program + ProgramData, every round over program/ProgramData/group/
+        // clock/fee state and the two default targets (7 keys, one batch of 100).
+        let need = required_reads(&c).unwrap();
+        assert_eq!(need, CLUSTER_READS + 2 + c.limits.fe_snapshot_rounds);
+        let refused = |c: &RuntimeConfig| NetworkReads::from_config(c).err();
+        c.limits.boot_calls = need - 1;
+        assert_eq!(refused(&c).as_deref(), Some("BOOT_BUDGET_TOO_SMALL"));
+        c.limits.boot_calls = need;
+        assert_eq!(refused(&c), None);
+        // The global request ceiling still caps the audit.
+        c.limits.max_requests = need - 1;
+        assert_eq!(refused(&c).as_deref(), Some("BOOT_BUDGET_TOO_SMALL"));
+        c.limits.max_requests = RuntimeConfig::default().limits.max_requests;
+        // Smaller batches need more reads per round: the requirement follows the scope.
+        c.limits.fe_batch_size = 2;
+        assert_eq!(
+            required_reads(&c).unwrap(),
+            CLUSTER_READS + 2 + c.limits.fe_snapshot_rounds * 4
+        );
+        assert_eq!(refused(&c).as_deref(), Some("BOOT_BUDGET_TOO_SMALL"));
+        // The default profile (FE smoke: 3 calls, 30 s) covers the audit.
+        let mut d = RuntimeConfig::default();
+        endpoints(&mut d);
+        assert_eq!((d.fe_mode.as_str(), d.limits.fe_calls), ("smoke", 3));
+        assert_eq!(refused(&d), None);
+    }
+    #[test]
+    fn network_reads_counts_only_boot_budget() {
+        let mut c = RuntimeConfig::default();
+        c.limits.fe_calls = 1;
+        c.limits.fe_seconds = 1;
+        let need = required_reads(&c).unwrap();
+        c.limits.boot_calls = need;
+        let (limit, seconds) = boot_budget(&c).unwrap();
+        assert_eq!((limit, seconds), (need, c.limits.boot_seconds));
+        let (url, count, stop, server) = rpc_stub(json!(100));
+        let mut io = NetworkReads::open(
+            url.clone(),
+            "wss://unused.invalid".into(),
+            Duration::from_secs(2),
+            limit,
+            seconds,
+        );
+        for _ in 0..need {
+            assert_eq!(io.rpc(RpcRequest::GetSlot, json!([])).unwrap(), json!(100));
+        }
+        assert_eq!(
+            io.rpc(RpcRequest::GetSlot, json!([])).unwrap_err(),
+            "BOOT_RPC_BUDGET"
+        );
+        assert_eq!(
+            io.rpc(RpcRequest::SendTransaction, json!([])).unwrap_err(),
+            "BOOT_METHOD_REFUSED"
+        );
+        // An expired deadline refuses before any request.
+        let mut late = NetworkReads::open(
+            url,
+            "wss://unused.invalid".into(),
+            Duration::from_secs(2),
+            limit,
+            0,
+        );
+        assert_eq!(
+            late.rpc(RpcRequest::GetSlot, json!([])).unwrap_err(),
+            "BOOT_RPC_BUDGET"
+        );
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        server.join().unwrap();
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), need);
     }
     #[test]
     fn cluster_pin_and_slot_contradictions_block_without_followup_reads() {

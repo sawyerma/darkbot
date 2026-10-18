@@ -62,6 +62,8 @@ pub fn decode<P: Payload>(kind: u16, schema: u16, bytes: &[u8]) -> io::Result<P>
 
 impl Payload for darkbot_solana::runtime_config::EffectiveConfig {
     const KIND: u16 = journal::kind::OPERATIONAL_CONFIG;
+    /// Embeds `Limits`: follows its layout revision (revision 1 = schema 2).
+    const SCHEMA: u16 = darkbot_solana::runtime_config::LIMITS_REVISION + 1;
 }
 
 /// The manifest: last frame of a sealed journal, binding frame count and chain root.

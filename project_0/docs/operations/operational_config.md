@@ -105,6 +105,16 @@ A future authorized FE observation can pass `--profile`, `--fe-calls`,
 performs the three existing dependent program/ProgramData/target reads; larger
 budgets do not manufacture additional evidence or a profitability claim.
 
+The network boot audit (`p0ctl doctor --scope network`, BOOT-03…08) has its own budget,
+used exclusively by that audit; it changes no capacity or quota assumption:
+
+| Parameter | Unit | Default | Meaning |
+|---|---|---|---|
+| `--boot-calls` / `P0_BOOT_CALLS` | requests | 64 | RPC reads of one audit, capped by `--max-requests`. Refused before any request (`BOOT_BUDGET_TOO_SMALL`) below the reads the audit runs: 5 cluster reads, program and ProgramData, and every `--fe-snapshot-rounds` round over the initial scope (program, ProgramData, group, clock, fee state, targets) in `--fe-batch-size` batches (15 with defaults). Dependencies discovered on chain add batches; an exhausted budget blocks the audit, never passes it. |
+| `--boot-seconds` / `P0_BOOT_SECONDS` | s | 120 | Wall-clock budget of one audit, at most 300. |
+
+The FE-01 observation limits (`--fe-calls`, `--fe-seconds`) do not apply to the boot audit.
+
 No Mainnet observation, new capture, user-owned 5h replay, provider purchase,
 signing/submission or LIVE execution is authorized by these examples or profiles.
 FREE_ONLY remains mandatory; endpoint registration is not proof of free access.

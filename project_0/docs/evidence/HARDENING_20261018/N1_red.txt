@@ -1,0 +1,47 @@
+   Compiling darkbot-solana v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/solana)
+   Compiling darkbot-project0 v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/liquidation)
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+warning: variable does not need to be mutable
+   --> crates/runtime/src/orchestration/fe_qualification.rs:468:13
+    |
+468 |         let mut count = |c: &RuntimeConfig| {
+    |             ----^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `darkbot-runner` (lib test) generated 1 warning (run `cargo fix --lib -p darkbot-runner --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.75s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_runner-dd12e19c670d97b3)
+
+running 3 tests
+test orchestration::boot_network::tests::network_reads_counts_only_boot_budget ... FAILED
+test orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum ... FAILED
+test orchestration::fe_qualification::tests::required_scope_reads_match_the_collector ... ok
+
+failures:
+
+---- orchestration::boot_network::tests::network_reads_counts_only_boot_budget stdout ----
+
+thread 'orchestration::boot_network::tests::network_reads_counts_only_boot_budget' (30033837) panicked at crates/runtime/src/orchestration/boot_network.rs:779:9:
+assertion `left == right` failed
+  left: (1, 1)
+ right: (15, 120)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum stdout ----
+
+thread 'orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum' (30033838) panicked at crates/runtime/src/orchestration/boot_network.rs:751:9:
+assertion `left == right` failed
+  left: None
+ right: Some("BOOT_BUDGET_TOO_SMALL")
+
+
+failures:
+    orchestration::boot_network::tests::network_reads_counts_only_boot_budget
+    orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 312 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p darkbot-runner --lib`

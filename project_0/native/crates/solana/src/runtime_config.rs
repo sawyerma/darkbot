@@ -79,6 +79,8 @@ parameters! {
     fe_calls = 3, "requests", "P0_FE_CALLS";
     fe_seconds = 30, "s", "P0_FE_SECONDS";
     fe_max_mib = 16, "MiB", "P0_FE_MAX_MIB";
+    boot_calls = 64, "requests", "P0_BOOT_CALLS";
+    boot_seconds = 120, "s", "P0_BOOT_SECONDS";
     market_capture_initial_mib = 64, "MiB", "P0_MARKET_CAPTURE_INITIAL_MIB";
     market_capture_max_mib = 512, "MiB", "P0_MARKET_CAPTURE_MAX_MIB";
     system_reserve_mib = 4096, "MiB", "P0_SYSTEM_RESERVE_MIB";
@@ -92,6 +94,10 @@ parameters! {
     econ_segment_mib = 256, "MiB", "P0_ECON_SEGMENT_MIB";
     econ_retention_mib = 1024, "MiB", "P0_ECON_RETENTION_MIB";
 }
+/// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
+/// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
+/// payload schema with it. 1: up to `econ_retention_mib`; 2: `boot_calls`, `boot_seconds` (N1).
+pub const LIMITS_REVISION: u16 = 2;
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
@@ -351,6 +357,9 @@ impl RuntimeConfig {
             || self.limits.wss_reconnect_ms > self.limits.wss_reconnect_max_ms
         {
             return Err("backoff initial exceeds maximum".into());
+        }
+        if self.limits.boot_seconds > 300 {
+            return Err("boot-seconds exceeds 300".into());
         }
         if self.limits.max_response_mib > self.limits.max_total_mib
             || self.limits.wss_message_mib > self.limits.max_total_mib
@@ -1139,6 +1148,7 @@ mod tests {
             vec!["--rpc-backoff-ms", "100", "--rpc-backoff-max-ms", "1"],
             vec!["--verification", "unchecked"],
             vec!["--rpc-endpoints", "file:///tmp/no"],
+            vec!["--boot-seconds", "301"],
         ] {
             assert!(parse(&args).is_err(), "{args:?}");
         }
@@ -1234,6 +1244,28 @@ mod tests {
             assert!(t.contains(&format!("--{} = ", p.name())), "{}", p.field);
         }
         assert!(t.contains("live_authorized=false submission_authorized=false"));
+    }
+    /// Every record that embeds `Limits` changes its binary layout with the field list: a new
+    /// parameter must bump `LIMITS_REVISION` (and with it the payload schemas) and update this pin.
+    #[test]
+    fn limits_layout_is_pinned_to_its_revision() {
+        let names = PARAMETERS
+            .iter()
+            .map(|p| p.field)
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            (
+                LIMITS_REVISION,
+                PARAMETERS.len(),
+                solana_sdk::hash::hash(names.as_bytes()).to_string()
+            ),
+            (
+                2,
+                69,
+                "8h4JTS2LL6xuexnZLA5oxpvfpkVyxuDJ96ytPtk1wVy6".to_string()
+            )
+        );
     }
     #[test]
     fn explicit_endpoint_beats_legacy_audit_alias() {

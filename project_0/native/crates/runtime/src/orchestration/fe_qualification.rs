@@ -227,6 +227,19 @@ pub struct CollectedScope {
     pub deployment: (u64, String),
     pub round: u64,
 }
+/// Keys every scope round reads besides the targets: program, ProgramData, group, clock, fee state.
+const FIXED_SCOPE_KEYS: u64 = 5;
+/// Account reads [`collect_scope`] needs to run every configured round: the program and
+/// ProgramData reads, then each round over at least the initial scope ([`FIXED_SCOPE_KEYS`] plus
+/// the targets) in `fe_batch_size` batches. Dependencies discovered on chain only add batches.
+pub fn required_scope_reads(config: &RuntimeConfig) -> Result<u64, String> {
+    let batch = config.limits.fe_batch_size;
+    if batch == 0 || config.fe_targets.is_empty() {
+        return Err("FE_SCOPE_OR_BATCH_BUDGET_INVALID".into());
+    }
+    let initial = FIXED_SCOPE_KEYS + config.fe_targets.len() as u64;
+    Ok(2 + config.limits.fe_snapshot_rounds * initial.div_ceil(batch))
+}
 /// The same canonical scope collector, reusable by boot without constructing JSON reports.
 pub fn collect_scope<F>(
     config: &RuntimeConfig,
@@ -276,10 +289,9 @@ where
     }
     let clock_key = solana_sdk::sysvar::clock::id();
     let fee = protocol::fee_state_pda(&program);
-    let mut keys: BTreeSet<_> = [program, pd, group, clock_key, fee]
-        .into_iter()
-        .chain(targets.iter().copied())
-        .collect();
+    let fixed = [program, pd, group, clock_key, fee];
+    debug_assert_eq!(fixed.len() as u64, FIXED_SCOPE_KEYS);
+    let mut keys: BTreeSet<_> = fixed.into_iter().chain(targets.iter().copied()).collect();
     let mut last_reason = "FE_SCOPE_NOT_CLOSED";
     for round in 1..=config.limits.fe_snapshot_rounds {
         let mut state = ObservedState::default();
@@ -442,6 +454,39 @@ pub(crate) mod tests {
         assert!(validate_provider_evidence(&c, primary, &proofs, 1001.0).is_ok());
         c.fallback = false;
         assert!(validate_provider_evidence(&c, primary, &p, 1001.0).is_ok());
+    }
+    /// The required read count is the collector's own: one round over the initial scope in
+    /// single-key batches reads exactly that many accounts; a further round over the discovered
+    /// dependencies reads more (dynamic, bounded by the caller's hard limit).
+    #[test]
+    fn required_scope_reads_match_the_collector() {
+        let (mut c, all) = fixture();
+        c.limits.fe_batch_size = 1;
+        let mut count = |c: &RuntimeConfig| {
+            let mut reads = 0u64;
+            let result = collect_scope(
+                c,
+                |keys, _| {
+                    reads += 1;
+                    Ok((
+                        100,
+                        ObservedState(keys.iter().map(|k| (*k, all[k].clone())).collect()),
+                    ))
+                },
+                true,
+            );
+            (reads, result.err())
+        };
+        c.limits.fe_snapshot_rounds = 1;
+        let (reads, err) = count(&c);
+        assert_eq!(err.as_deref(), Some("FE_SCOPE_NOT_CLOSED"));
+        assert_eq!(reads, required_scope_reads(&c).unwrap());
+        assert_eq!(reads, 2 + FIXED_SCOPE_KEYS + c.fe_targets.len() as u64);
+        c.limits.fe_snapshot_rounds = 2;
+        let (reads, _) = count(&c);
+        assert!(reads > required_scope_reads(&c).unwrap(), "{reads}");
+        c.limits.fe_batch_size = 0;
+        assert!(required_scope_reads(&c).is_err());
     }
     fn wrapped<T: bytemuck::Pod>(v: T, disc: [u8; 8], owner: Pubkey) -> Account {
         Account {
