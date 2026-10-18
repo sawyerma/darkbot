@@ -55,6 +55,7 @@
 | `D` Market-Evidence/Funding/Sweep Review 4 | — | D1–D13 offen; D1 vor 4h, D3 vor 4h-Stresstest, D4/D5/D8/D9 Capture-Härtung; D2 Effizienz, D10=C6, D11=B11. |
 | `E` Decoder/Planner/BOOT/Projection Review 5 | — | E1–E12 offen; E13 weitere Reviewabdeckung. E1+B2/D11 vor P1B/FE-01; E2 vor FE-04/06; E4/E5/E6 vor BOOT-/4h-Readiness; E9 vor Integrationsevaluation. |
 | `F` zusätzliche Diagnose-/Vertragsbefunde | — | F1 Simulationslogs, F2 FE04-JFI, F3 Jito Slot, F4 WSS Delivery, F5 optionale Hygiene. |
+| `R` 4h-Regression der Härtung (Review 6) | — | R1–R4 vor G-B/G-C/G-D abklären; R2 potentieller Evidence-Falsch-PASS; R5–R9 LOW/PROFILE/CLEANUP. |
 | `X` verbindliche Quervertragslücken | — | X1 BOOT-12, X2 JFI-BOOT, X3 BOOT-01/02; verwandt mit N1–N8, keine doppelte Implementierung |
 | Weitere Reviewmodule | — | `market/winner.rs`, `chain.rs`, `econ*.rs`, `measurement.rs`, `report.rs`, `census.rs`, `lookup_tables.rs`, `market_*`-Verifier, `strict_driver.rs`, `markers.rs`, `related.rs`, `rows.rs`, Tools/Bins und Python-Skripte noch nicht vollständig begutachtet; fünf Durchgänge zu Owner/Storage/Market/Protocol/Planner/Projection/Index/Integration/Winner-Tracker protokolliert |
 
@@ -756,6 +757,9 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 ## 12. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
 
 **AUFTRAG 1 – verbindliche Codehärtung und Evidence-Wahrheit vor 4h (Offline-Code, keine Mainnet-Läufe):**
+
+**Nachprüfung 18.10.2026 / zusätzliche 4h-Regressionen:** R1 (WSS Shutdown→Drain innerhalb 120s), **R2 (Panic vor COMPLETE-Manifest erkennen)**, **R3 (Recovery-Ready→FullSweep inklusive Ingress-Backpressure)** und R4 (dynamische BOOT-Budgets offline; Live-Netzaudit bleibt gesperrt) zu den vorhandenen Gates aufnehmen. R5–R9 sind LOW/PROFILE/CLEANUP ohne automatische 4h-Sperre. F5 umfasst Jito-VERIFY-Kommentare, F6 fremder Reporter-FMT-Befund. 
+
 1. **C1/C7 + D1 + E4/E5/E6** (Recovery/Fatal, Market-Manifest, BOOT-Writer/Doctor/Run-Volume vor 4h), N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar. **D8/D9** als gezielte Capture-Härtung integrieren. **D4/D5 nur defensiv/nicht blockierend** nach den neuen Decoder-/Strict-Pfad-Erkenntnissen.
 2. **D3-Stresstest vor 4h-Readiness**; bei **gemessener** unzulässiger Owner-Stall/Ingress-Overflow accountseitig gebundenes Chunking implementieren. Kein unbewiesener Architekturumbau. M1/M2 plus N4/N5/N6 zur Stabilität von Admission, Durability und Diagnose; keine neue Source-of-Truth.
 3. N7/N8 nach Mess-/Sicherheitsvertrag, L4 und kleine isolierte L1/L2/L3; M5 nur profilieren; **B2/E1/D11** mit einheitlichem striktem Bank-Decoder für BOOT-/P1A-/P1B-Scopes; **E3** bytegenaue gepinnte Fremdinstruktionsdiscriminatoren.
@@ -797,3 +801,72 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 - **G-F (FE-06/07):** **NOT_AUTHORIZED / NOT_RUN**, kein erster realisierter Gewinn belegt.
 
 **Pflegepflicht:** Jeder künftig gefundene Fehler kommt **zuerst mit stabiler ID in diese Datei** und bleibt bis zur nachgewiesenen Abnahme sichtbar; neue Bugs erzeugen keine stillschweigend neue Phase und keine automatische Verschiebung der bindenden FE-First-Profit-Priorität.
+
+
+## 15. R — sechste Review-Nachprüfung: 4h-Capture-Härtung gegen neueren Main-Stand
+
+**Quelle:** Fables Nachprüfung der zehn Hotpath-/Härtungsdateien auf `84ebd225`, am 2026-10-18 gegen `a7ca11914ea38c706f66717ebe7baf68094b1e5a` und ergänzend `market/configuration.rs`, `solana/ingress/ws_rpc.rs`, `state_owner/sweep.rs` verifiziert. **Codeeinsicht, keine neuen Tests ausgeführt.** Alle R1–R9 bleiben OPEN, bis Tests und – wo nötig – Implementierung mit SHA nachgewiesen sind. Ein bestätigter Source-Pfad ist nicht automatisch eine beobachtete 4h-Fehlfunktion. **Keine ungefragten Mainnet-/LIVE-Aktionen.**
+
+### R1 — Market-Capture-Drain hängt an Quiescence der WSS-Session
+- [ ] **MEDIUM / OFFLINE NEGATIVE TEST REQUIRED vor G-C/G-D · Cross-Ref D1/D8/C6/C7.**
+- **Ist:** `market/capture.rs` markiert `drain_complete=true` nur, wenn `ingress.is_finished()` und die letzten Queue-Frames fehlerfrei abgearbeitet sind; andernfalls führt der Deadline-Ablauf zu `drain_complete=false` und korrekter, aber eventuell vermeidbarer `INCOMPLETE`-Versiegelung. `market/configuration.rs::DEFAULT_DRAIN_TIMEOUT_SECS=120`. In `ws_rpc.rs` gibt es `tokio::select!` mit `wait_shutdown` (100-ms-Poll), bounded Ping/Pong-Sends (5 s), Frame-Wait ≤250 ms und unterbrechbaren Reconnect-Backoff. Der von Fable befürchtete Regelfall „5 s Send ⇒ 4h immer INCOMPLETE“ ist **nicht belegt**; der bestehende 120-s-Default ist bereits länger als die genannten Einzeltimeouts. TLS-/Runtime-Abbau und tatsächliche Quiescence unter Fehlern sind noch nicht End-to-End getestet.
+- **Soll:** Kein blindes Verlängern auf unbegrenzte Drain-Zeit. Deadline aus nachgewiesenem maximalem Shutdown-/Drain-Pfad und tatsächlicher Queue-Last ableiten; reale `thread_terminated`-, `frames_delivered`-, `drain_complete`- und `journal_complete`-Begriffe klar trennen. Wenn Deadline bei noch lebendem Thread erreicht wird: Incomplete erhalten, niemals fail-open. Fast-Shutdown ohne Eventverlust soll bei 120 s erfolgreich bleiben.
+- **Tests:** Offline Fake-WSS: Shutdown während Backoff, zwischen Connect/ACK, während Ping-/Pong-Send, idle Read, langsamer TLS-Abbau; volles/halbvolles Consumer-Buffer, physisches 120-s-Deadline-/konfiguriertes kürzeres Testbudget, keine Live-Reads. Bei nachgewiesener Überschreitung minimal bounded konfigurieren/refaktorieren; Exit und Manifest-/Coverage-Konsistenz gegen D1 prüfen.
+- **Abnahme:** kein vermeidbares INCOMPLETE bei nachweislich leerem und beendetem Stream; jedes echte Timeout bleibt INCOMPLETE. **Commit/Evidence:** —.
+
+### R2 — Ingress-Panic wird erst nach Capture-Journal-Seal geprüft
+- [ ] **MEDIUM / EVIDENCE INTEGRITY · CODE_CONFIRMED, PANIС-REPRO NOT_RUN · Cross-Ref D1/D8.**
+- **Ist:** `capture.rs` wertet in der Drain-Schleife `None if ingress.is_finished()` als `drain_complete` aus, verarbeitet letzte Events, führt **danach** `finish_capture()` (Manifest/Binding/Reports) aus und ruft erst anschließend `quiesce(ingress, ...)` auf. Ein bereits panikbedingt terminierter Ingress-Thread kann daher vorher als sauber drain-complete gelten und ein `COMPLETE`-Manifest erzeugen, obwohl `quiesce` später `INGRESS_THREAD_PANIC` meldet. Ein solches Rennen muss in einem deterministischen Fake nachgewiesen werden; die Code-Reihenfolge selbst ist eindeutig.
+- **Soll:** Join-Ergebnis **vor** finalem `finish_capture/JournalSink::finish` für die Vollständigkeitsentscheidung berücksichtigen, jedenfalls bei bereits `is_finished()`; geordnetes erfolgreiches Threadende vs. Panic unterscheiden. `drain_complete` niemals aus `is_finished()` allein; bereits empfangene Events vollständig verarbeiten und kein Frame wegen vorgezogenem Join verlieren. Die endgültige Fehlerklasse `Panic/Incomplete` ist in Manifest, Binding, Coverage und Resultat konsistent.
+- **Tests RED→GREEN:** erfolgreich beendeter Fake-Ingress mit 0/N ausstehenden Frames ⇒ COMPLETE nur bei TIMER und gültigem Drain; Fake-Ingress mit sofortiger Panic nach letztem Event ⇒ `verify_chain().complete=false`, `MarketJournalBinding.status=INCOMPLETE`, Ergebnis `INGRESS_THREAD_PANIC`; Panic während Drain, Deadline/Backpressure, Fehler im Writer und Doppelabschlüsse.
+- **Abnahme:** niemals COMPLETE bei panischem Ingress; geordneter Fall paritätisch. **Commit/Evidence:** —.
+
+### R3 — jeder Recovery-Ready löst im Sweep-Modus erneuten globalen Bank-/Debtor-Sweep aus
+- [ ] **HIGH / MEASUREMENT-GATE vor 4h · CODE_CONFIRMED, OVERFLOW_NOT_REPRODUCED · Cross-Ref D3/C1/B6/C7.**
+- **Ist:** `state_owner/events.rs` verarbeitet jedes erfolgreiche `RecoveryOutcome::Ready` mit ReverseIndex-Rebuild, löscht Dirty-/Candidate-Cache und setzt bei `!self.use_threshold_trigger` sämtliche Gruppenbanken in `sweep_dirty_banks`; `sweep_batch_events=sweep_batch_max_events` erzwingt unmittelbar den ganzen Sweep. `state_owner/sweep.rs` expandiert über `accounts_for_bank` und arbeitet `account_work.into_par_iter()` vollständig auf dem Owner ab. Bei wiederholten WSS-Reconnects läuft derselbe komplette Debtor-Scan mehrfach. D3 maß 100k Fixed-Oracle-Kandidaten synthetisch 135 ms (1 Worker) bzw. ~71 ms (2 Worker), R127 historisch bis 78.488 Accounts/Batch, aber **nicht** den kombinierten Reconnect→Rebuild→Ingress-Fill→Sweep→nächste Gap-Zyklus.
+- **Soll:** Reproduzierbarer Test dieses echten Zustandsübergangs gegen Queuegröße/Rate und Fairness-Latenz; die komplette Population nach Recovery **nicht** als vermeintlich redundant streichen (bereits unterwasser befindliche Debtors und Census-Vollständigkeit). Nur wenn der gemessene Owner-Block Queue-/Liveness-Budget überschreitet: accountseitig bounded Chunks/Owner-Yields mit revisions- und root-konsistenter vollständiger Abarbeitung, ohne Eventverlust, Vergessen von Debtors oder unbounded RAM.
+- **Tests:** 1 Worker, historische Max-Batch- und 100k-Debtor-Fixture, zwei bis vier Reconnects in kurzem Abstand, Ingress simuliert verschiedene Eventraten (inklusive gemessener Peak), 65.536-Queue, Root/Gap/ProgramUpgrade während Rebuild und Sweep; überprüfte Input-Generation, vollständige Health-/Census-Counter, kein unbemerkter Overflow, Sweep p95/p99 und Owner-HALT/INCOMPLETE korrekt.
+- **Abnahme:** Verbindliche Rate-vs-Owner-Block-Reserve gemessen und dokumentiert; bei Überschreitung Fix RED→GREEN. D3 bleibt für den **isolierten** Sweep-Fix LOCAL_PASS, R3 ist die ausstehende zusammengesetzte Recovery-Abnahme. **Commit/Evidence:** —.
+
+### R4 — dynamische BOOT-Abhängigkeiten können das rechnerische Mindestbudget überschreiten
+- [ ] **MEDIUM / G-B CONTRACT_OPEN · CODE_CONFIRMED, NETWORK_NOT_RUN · Cross-Ref N1/X1/X3.**
+- **Ist:** `boot_network.rs::required_reads` = `CLUSTER_READS + fe::required_scope_reads`. Der Kommentar nennt das **necessary, not sufficient**, weil BOOT-08 zusätzliche Oracle-/Dependency-Batches erst aus realen Accountdaten erkennt. `NetworkReads` stoppt korrekt mit `BOOT_RPC_BUDGET` beim Limit. N1 hat den alten Smoke-Defaultbug behoben, nicht die Bedarfsprognose bei wechselnder dynamischer Population.
+- **Soll:** In Offline-Fixtures einen dynamischen Scope mit mehr Required Accounts/Oracle-Batches bilden; dadurch den tatsächlichen Worst-Case-/Budgetreservevertrag (unter `max_requests`, FREE_ONLY und Provider-RPS) dokumentieren und vor dem **separat autorisierten** ersten Netzwerk-Audit explizit qualifizieren. `required + 2×fe_snapshot_rounds` ist nur Fables Vorschlag, kein garantiert ausreichender Wert. Nie automatisch Limits überziehen oder zusätzlichen Mainnet-Traffic starten.
+- **Tests:** `minimum`, `minimum+reserve`, dynamisches Wachstum bis Provider-Cap, Budget-Exhaustion ⇒ BLOCKED ohne Retry-Sturm, verschiedene Daten-/Oracle-Layouts, aktive FREE_ONLY-Configdrift, Zeitbudget und 429.
+- **Abnahme:** Budgetgrenzen nachvollziehbar, sowohl legitime dynamische Reads als auch Fail-closed-Abbruch reproduziert. **Commit/Evidence:** —.
+
+### R5 — potentieller Instant-Overflow bei exzessiver Speicher-Wartezeit
+- [ ] **LOW / DEFENSIVE INPUT BOUNDS · SOURCE_CONFIRMED, REPRO_NOT_RUN · Cross-Ref M1.**
+- **Ist:** `storage/budget.rs::MemoryBudget::acquire` enthält `let deadline = started + wait;`. Ein extrem großer `Duration`-Wert kann bei Instant-Addition panicken, falls ein Aufrufer ihn tatsächlich zulässt. Für reguläre Capture-Werte ist das kein nachgewiesener Fehler.
+- **Soll/Tests:** Bounded Wait-Contract und `Instant::checked_add` mit explizit konservativem `Err` (oder dokumentiertem gekapptem Wait), keinesfalls infinite wait. Test `Duration::MAX`, `ZERO`, reale Limits, Hold-/Release- und Mutex-Parität.
+- **Abnahme:** keine Panic durch Warteparameter, keine längeren unqualifizierten Admission-Wartezeiten. **Commit/Evidence:** —.
+
+### R6 — Evidence-Drop meldet Fehler direkt über blockierendes stderr
+- [ ] **LOW / DEFENSIVE SHUTDOWN · CODE_CONFIRMED, TRIGGER_NOT_RUN · Cross-Ref M2/D9.**
+- **Ist:** `analytics/evidence.rs::impl Drop for OwnerEvidenceWriter` ruft bei offenem Worker `finish(None)` und bei Fehler `eprintln!("{e}")`. Reguläre Writer- und Capture-Logs nutzen inzwischen `console::line`. Der `Drop`-Pfad ist selten, kann mit blockierter stderr-Pipe aber weiter verzögern.
+- **Soll/Tests:** sichere nonblocking `console::line` nur für optionale Drop-Diagnostik, eigentliche persistente Evidence-Fehler weiter sticky und im Rückgabepfad. Offline WriterDrop mit fehlerhaftem Finish und blockierter stderr; kein Deadlock, Incomplete bei Fehler bleibt sichtbar.
+- **Abnahme:** auch im Drop-Pfad kein ungeordnetes unbounded stderr-Warten. **Commit/Evidence:** —.
+
+### R7 — Owner-Evidence-Sync läuft periodisch ohne neue Frames
+- [ ] **LOW / PROFILE_REQUIRED · OPTIMIZATION, KEIN DURABILITY-BUG · Cross-Ref M2.**
+- **Ist:** `analytics/evidence.rs::run_writer` ruft bei abgelaufenem Intervall immer `Sink::sync()`, auch wenn seit dem letzten Sync kein weiterer Frame geschrieben wurde. Das erhält korrekt den periodischen Durability-Vertrag, kann aber unnötige fsync-Systemcalls verursachen.
+- **Soll:** nur bei tatsächlichem IO-Profilgewinn optional einen last-synced-Position-/Dirty-Zustand einführen; bei jedem neu geschriebenen Frame und bei Finish/Seal gelten mindestens die bestehenden Sync-/Fsync-/StickyFailure-Barrieren. Nicht durch bloßes „kein neuer Frame“ echte Daten ungesynct lassen.
+- **Tests:** Sync ohne Events, danach erster/neuer Frame, Race zwischen Deadline und Writer, ErrorInjection, Shutdown/Seal, maximale Durability-Lücke.
+- **Abnahme:** keine Sync-Regressionsverschlechterung; reduzierte Fsync-Last nur bei Messbeleg. **Commit/Evidence:** —.
+
+### R8 — Headroom-Sampling wiederholt sich auf neuem Acquire; Hysterese ungeprüft
+- [ ] **LOW / PROFILE_REQUIRED · Cross-Ref M1/PERSIST.**
+- **Ist:** M1 cached `MemorySample` höchstens 100 ms **innerhalb eines einzelnen** `MemoryBudget::acquire`. `BytePermit::drop` setzt bei `used <= initial` das Limit sofort auf `initial` zurück. Bei fortlaufenden neuen Frames mit Grenzüberschreitung können daher neue Syscalls anfallen; wie oft das reale 4h-Lastprofil betrifft, ist ungemessen.
+- **Soll:** unter synthetischer Grenzlast messen. Shared Cache/Hysterese nur mit geprüftem Freshness-Maximum und fail-closed Pressure-Policy; besonders keine Verwendung eines alten positiven Headroom-Samples als freie unbeschränkte zusätzliche Reservierung. Fables Schwelle `initial/2` ist nur Optimierungsoption, kein Freigabekriterium.
+- **Tests:** oszillierende Used-Bytes, 1/2/N Concurrent-Acquires, MemoryPressure/Unknown, MaxBytes, stale sample und abrupter Druck; Peak-RAM, Syscallzählung und Admission-Parität.
+- **Abnahme:** keine stillschweigende Schwächung von M1 oder Memory-Safety bei Performancegewinn. **Commit/Evidence:** —.
+
+### R9 — Capture-Flush-Tick ist für JournalSink derzeit No-op
+- [ ] **LOW / CLEANUP · CODE_CONFIRMED, keine Datenlücke · Cross-Ref D4/M2.**
+- **Ist:** `market/capture.rs` ruft bei `last_flush.elapsed() >= 5s` `sink.flush()`, jedoch ist `JournalSink::flush` ein No-op; tatsächliche Writer-Durability wird über die eigene Journal-Writer-Lane garantiert. Der Tick beeinflusst damit nur den Fehlerbehandlungspfad, nicht die persistierte Bytefolge.
+- **Soll:** Tick entfernen oder als tatsächliche Metrik/Writer-Statuskontrolle bewusst qualifizieren; `MarketSink`-Vertrag und den expliziten `JsonlSink`-Batchabschluss nicht verwechseln. Keine Änderung der Write-/Seal-/Drop-Semantik.
+- **Tests:** produktiver Capture-Journal-Stream über mehrere Tickintervalle, keine Truncation, WriterSync/Failure, Jsonl Strict-Batch, Report-Parität.
+- **Abnahme:** redundanter Code entfernt oder sinnvoll verwendet; kein Verhalten/Safety regressiert. **Commit/Evidence:** —.
+
+**Bereits belegte Korrekturen aus Fables Review (NICHT erneut offenlegen):** B5 (`economics.rs::t_profitable` verwendet aktuell `u64::try_from(...).ok()?` und enthält negative Tests), D1 (`MarketSink::finish(complete)` + `JsonlSink::finish`-Override), D8 (`capture::quiesce` statt discarded JoinHandle), M1 (OS-Sample außerhalb Mutex), M2 (bounded periodic sync und optional `console::line`), D9 (asynchrone Konsolenausgabe), C6/D10 (WSS Generation/Join), N1 (separates BOOT-Budget). **Die bestehenden `- [x]` bleiben, neue Regression-Lücken tragen eigene IDs.** F5 deckt Jito-`UNTESTED/VERIFY`-Kommentare bereits ab: weiterhin offen, nicht doppelt als R10 anlegen. F6 Reporter-Formatierung nur durch den zuständigen Autor.
+
