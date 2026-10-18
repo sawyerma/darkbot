@@ -436,7 +436,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Soll:** Borrowed immutable slices/Arc nur bei nachgewiesener Allokations- und Ownership-Parität; keine ungewollte Mutation während Kandidatenbewertung. Test: identical allow/deny and build under concurrent lookups; Profile vor/nach. **Commit/Evidence:** —.
 
 ### C9 — Blockhash-Höchstalter dreifach hart kodiert
-- [ ] **LOW / CONFIG_CONSISTENCY · P6.**
+- [x] **LOW · LOCAL_PASS · P6.** ~~dreimal `30_000_000_000` ns.~~ `0ff6704`: eine Konstante `BLOCKHASH_MAX_AGE_NS` (Wert unverändert 30 s, keine Erweiterung) an beiden Detection-Gates und im Pipeline-Build-Limit. Test `blockhash_freshness_is_one_policy` (am Cutoff gültig, 1 ns danach stale, kein Gate mit eigenem Literal) Exit 0. Versionierte Konfigurationsgröße statt Konstante: nicht umgesetzt (keine neue Config ohne Freigabe).
 - **Pfad:** `state_owner/detect.rs` zweimal, `state_owner/events.rs` einmal `30_000_000_000` ns.
 - **Soll:** Eine einzige explizite, versionierte Deadline-/Freshness-Policy statt versteckter Zahlen; **keine Erweiterung** der Gültigkeit ohne Evidence/Autorisation. Test: gleiche Grenzwerte an allen drei Gates, 1 ns vor/nach Cutoff. **Commit/Evidence:** —.
 
@@ -663,7 +663,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Triage 18.10.2026:** `LATENT/RECORD-PROVENANCE, DESIGN_GATE`. Basisaccount-Hash+Slot validieren Dependency-/Oracle-Revisionen nicht. Eine spätere Simulation kann Stale/Drift erkennen, ist aber **kein** Beweis für ein korrektes `evaluation_slot` oder Ranking. Vor FE-Integrationsfreigabe Snapshotprovenienz testen; keine Aussage über erlittene Fehltrades.
 
 ### E10 — ReverseIndex lässt leere bank_to_accounts-Einträge zurück
-- [ ] **LOW / MEMORY-HYGIENE · CODE_CONFIRMED · P2/S1-LT.**
+- [x] **LOW · LOCAL_PASS · P2/S1-LT.** ~~geleerte Bank-Sets bleiben als Keys stehen.~~ `6d03b18`: geleerte Sets werden entfernt; kein Verbraucher zählt Bank-Einträge. Test `emptied_bank_entries_are_removed` (Move, Remove, 1000 Wechsel ohne Wachstum, Lookup-Parität) Exit 0.
 - **Pfad:** `liquidation/src/index.rs::ReverseIndex::set_account_banks/remove_account`.
 - **Ist:** Wenn ein Account aus einer Bank-Set-Zuordnung entfernt wird, wird das `HashSet` leer, aber der HashMap-Key der Bank nicht gelöscht. Viele ehemalige Banks können Speicher-/Indexgröße aufblasen; funktionale Fehlweiterleitung ist **nicht** belegt.
 - **Soll-Fix:** Nach Entfernen nur vollständig leere Reverse-Sets löschen; dabei Borrowing/Iterator-Lifetimes korrekt halten, keine aktive Referenz verlieren.
@@ -708,14 +708,14 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Tests:** historische Frames, Legacy-Import, Binary Roundtrip, truncated/CRC/UnknownKind, Crash/Replay, no-double-send, WalletLock und Sync-Failure. **Commit/Evidence:** —.
 
 ### F3 — Jito landed_slot=0 als Ersatz für Unknown
-- [ ] **LOW / CODE_CONFIRMED · P8.**
+- [x] **LOW · LOCAL_PASS · P8.** ~~`inflight_status` benutzt für `landed_slot` `unwrap_or(0)`.~~ Kern bereits in `47ebbc6` (L2) behoben: Landed ohne Slot ⇒ Pending. Rest `c85bb17`: auch ein gemeldeter Slot 0 (Genesis) ist keine Landung; Parsing als `inflight_entry_status` testbar. Test `inflight_landed_needs_a_real_slot` (fehlend/null/0/String/negativ ⇒ Pending, 321 ⇒ Landed, Failed, NotFound) Exit 0 (`evidence/HARDENING_20261018/after_E10_C9_F3_tests.txt`). Finalisierte Ledger-Beweise bleiben unabhängig davon Pflicht (C3/C4).
 - **Ist:** `submit/jito.rs::inflight_status` benutzt für `landed_slot` `unwrap_or(0)`.
-- **Soll:** `Option<slot>` oder unqualifizierter LandedStatus; finalisierte Ledgerbeweise bleiben erforderlich. Missing/null/0/realer Slot testen. **Commit/Evidence:** —.
+- **Soll:** `Option<slot>` oder unqualifizierter LandedStatus; finalisierte Ledgerbeweise bleiben erforderlich. Missing/null/0/realer Slot testen. **Commit/Evidence:** siehe oben (`47ebbc6`, `c85bb17`).
 
 ### F4 — WSS-Slotfortschritt vor Queue-Zustellung
-- [ ] **MEDIUM / CODE_CONFIRMED · S2/C0-E1.**
+- [x] **MEDIUM · LOCAL_PASS · S2/C0-E1.** ~~`last_slot`/`slots.observe()` vor `sink.try_push(ev)`.~~
 - **Ist:** `ws_rpc.rs` aktualisiert `last_slot` und `slots.observe()` vor `sink.try_push(ev)`; nach Queue-Full beschreibt Gap.from_slot womöglich nie zugestellte Daten. HALT ist korrekt.
-- **Soll:** Wire-observed und tatsächlich Owner-delivered getrennt führen; Gap vom letzten belegten zugestellten Slot; kein falscher Root/Ready-Fortschritt. Queue-Full/Slot/Account/Reconnect mit bounded Fake-Ingress testen. **Commit/Evidence:** —.
+- **Soll:** Wire-observed und tatsächlich Owner-delivered getrennt führen; Gap vom letzten belegten zugestellten Slot; kein falscher Root/Ready-Fortschritt. Queue-Full/Slot/Account/Reconnect mit bounded Fake-Ingress testen. **Commit/Evidence:** `52e20c2`: `deliver()` schreibt `last_slot` (Gap-Ursprung, auch für das Session-Fehler-Gap) und den geteilten `SlotWatch` erst nach erfolgreicher Zustellung fort; Queue-Full bleibt HALT + Gap-Versuch (fail-closed), getrennter Owner beendet die Session. Test `slot_progress_follows_queue_delivery` (Queue-Kapazität 2: abgewiesener Slot 20 bewegt weder `last_slot` noch `SlotWatch`, Halt gesetzt; Disconnect) Exit 0; `solana ingress::` 20 PASS, Clippy `-D warnings` (`evidence/HARDENING_20261018/after_F4_tests.txt`). Session-Ready-Fortschritt (`progress_slot`) ist session-lokal und endet mit dem Overflow-Fehler; Reconnect-Pfad mit echtem WSS NOT_RUN.
 
 ### F5 — RNG-/UNTESTED-Hygiene
 - [ ] **LOW / REVIEW_REQUIRED.**
