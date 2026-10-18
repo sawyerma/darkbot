@@ -59,6 +59,23 @@
 
 Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review der eingecheckten Fixes und zielgerichteten Testangaben; **eine neue vollständige Workspace-Ausführung durch den Register-Autor wurde nicht vorgenommen**.
 
+### Triage-Nachprüfung vom 18.10.2026 – Status statt pauschaler Bugbehauptungen
+
+**Quellstand bei dieser Nachprüfung:** GitHub-`main` `c2200b96b9bb5445354736108c4f08a7a9179eb1`. Fables zweite Klassifikation wurde gegen die hier angegebenen Source-Pfade geprüft. Diese Einordnung ersetzt **nicht** die im Einzelticket erforderlichen Red-/Green-Regressionen oder eine tatsächliche Workspace-Ausführung. Kategorien: **CODE_CONFIRMED** (Source-Invariante beweisbar), **DESIGN_GATE** (heute nicht aktiv, aber zwingend vor Freigabe), **LATENT/PROFILE** (nur bedingt auslösbar), **WITHDRAWN/NO_BUG** (kein identifizierter Defekt nach Quellenprüfung). Rein betriebliche Verbesserungen sind **nicht** mit unmittelbar erlebten Ausfällen gleichzusetzen.
+
+| Kategorie | IDs und verbindliche Wirkung |
+|---|---|
+| **CODE_CONFIRMED – vor 4h angehen** | N1 (Smoke-Default-Budget), N3 (Nulltail), C1 (verschluckter Reconnect), M3 (detached Blockhash), M1 (langsames RAM-Sampling unter Mutex), M2 (kein periodischer Owner-Evidence-Sync, stderr am Writer), D1 (falsches Manifest-COMPLETE). **D3**: unbounded Sweep-Fanout ist nachgewiesen; ob er die Ingress-SLO überschreitet, muss der Offline-Stresstest zeigen. |
+| **CODE_CONFIRMED – Ausführungsnachweis ausstehend** | N2: finales unnötiges `return Ok(json!(..))` in `fe_qualification::collect` vorhanden, der tatsächliche `cargo clippy -D warnings`-Exit aber unbekannt. Rustfmt-Unstimmigkeit in `boot_network.rs` **nicht** nachgewiesen; nur `cargo fmt --check` entscheidet. D2: beide Inventar-Fundingklassen generieren im Builder denselben technischen Pfad; doppelte Fees nur, wenn beide den entsprechenden RPC-Branch passieren. B9: V1-Plan trotz `V1Unavailable`. N4: Drift als `PROVIDER_BUDGET_POISONED`; N5: zu grobe aber secret-sichere Fehlerklasse; N6: ein Client je BOOT-Read; N7: 60-s-Token TTL (Safety richtig, Bedienbarkeit), N8: ACK-Deadline unabhängig vom Subscribe-Umfang. Nicht alle sind Laufzeit-Crashes. |
+| **DESIGN_GATE – vor P1B/FE/P8** | B1 (Live ohne FE-04-Durable-Admission; aktuell bewusst gesperrt), B2/E1 (Prefix-Decoder bei unbekannten/verlängerten Bank-/Accountlayouts), B3 (Safety nur RAM), B4 (Rent Unknown für Init), B6 (Sync-I/O im Owner), B7/C2 (mehrfache Health), C3/C4 (P8 ohne vollständige Realized-PnL-Buchung; vorläufiger `confirmed`-Pfad), E2 (Planner prüft selbst erzeugte Steps statt tatsächlicher Ixs). Vorhandene Fail-closed-Sperren **nicht** als heutigen Echtgeldverlust darstellen. |
+| **LATENT / Messung vor Umbau** | B5: Arithmetik-Risiko bei hohem Fee-State-BPS bestätigt, typischer Input nicht als Auslöser belegt; wegen untrusted Chain-Input trotzdem günstige Bounds-/Panik-Härtung. B8: BelowRoot-Verwerfungsregel; keinen bestätigten finality-falschen Reorder und **keinen** automatischen Apply unterhalb Root. L2: Index-Panic nur bei unterlanger Signaturliste (One-Shot-Typgate schützt übliche Route). D4: `on_logs()` enthält per-TX-`sink.flush()`, `JsonlSink::flush()` versiegelt; produktiver Capture und Strict-Verifier benutzen **JournalSink**; bedingter API-Bug, kein bestätigter 4h-Ausfall. E9: Projection-Cache nur Candidate-Hash/Slot; gemischte Dependency-Revisionen möglich, noch kein reproduzierter Fehl-Trade; Simulation ersetzt keine konsistente Bewertung. E7: kurze Lock-Probe-Konkurrenz vorhanden, praktische Bedeutung begrenzt. |
+| **Nach neuem Decoder-/Verifier-Read** | D5: `decoding.rs::decode_receiver_events` leitet zusätzliche Events nur über `truth::provisional_event` ein. Diese Funktion akzeptiert **ausschließlich** Classic/ForcedDeleverage/Bankruptcy-Discriminatoren; der `unreachable!(Receivership)`-Branch in `core::on_logs` ist im **aktuell gepinnten Decoder logisch unerreichbar**. Kein reproduzierter Defekt. Als defensive Future-Upgrade-Härtung behalten. D4: `strict_driver::drive` ruft den nativen `market_verification::run` auf, der `JournalSink::create_with` verwendet; `JsonlSink` wird in den gelesenen Produktivpfaden nicht verwendet. |
+| **WITHDRAWN / keine Implementierung nur auf Verdacht** | D13: keine belegte falsche Rayon-Poolgröße; `startup::run` setzt auf dem üblichen CLI-Profilweg die Environment-Config vor `run_shadow`. Ohne belegte vorzeitige Initialisierung keine Pool-Neuarchitektur. E8: fehlendes `SA_RESTART` ist für sich **kein** Fehler; Signal-/EINTR-Semantik nicht ohne Regression ändern. `arbitrary_precision`/`deny_unknown_fields`-Rundreiseverdacht ausdrücklich verworfen; keine neue ID. M5 WSS-Parser-Allocation nur Messoption, kein belegter Bug. |
+| **Nur echte Ausführung entscheidet** | `cargo fmt --check`, Clippy mit tatsächlich benutzter Feature-Matrix, vollständige Rust-/Python-Testmatrix, Release-Build, synthetischer D3-/B6-/B7-Lasttest, Writer-/C1-/D1-Negativtests; keine davon wurde durch dieses Dokument ausgeführt. |
+
+**Konsequenz:** Falschpositive und latente Risiken **nicht löschen**, sondern im Ursprungsticket als `WITHDRAWN`/`DEFENSIVE_ONLY`/`PROFILE_REQUIRED` markieren. Die Checkliste bedeutet weiterhin *Fix und Test-Evidence stehen aus*; ein zurückgezogener Implementierungsauftrag ist **kein** offener 4h-Blocker. Ein `- [x]` wird nicht vergeben, solange weder Fix noch formelle begründete No-Bug-Abnahme dokumentiert sind. Keine automatische Änderung der Finanz-/Mainnet-Freigaben.
+
+
 ## 2. H — hohe Ausgangsbefunde: lokal behoben, Regression sichtbar behalten
 
 ### H1 — Torn Capture Tail / Segment-Recovery
@@ -137,6 +154,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Soll-Fix:** `cargo fmt` auf tatsächlicher Workspace-Wurzel, finales unnötiges `return` ggf. entfernen; anschließend Clippy mit aktivem Feature-Scope und `-D warnings`, Testmatrix/Release-Build. Keine globalen `#[allow]` zur Kosmetik und keine fremden Module massenhaft formatieren.
 - **Tests:** tatsächliche Tool-Ausgaben und Exit-Codes, beide produktiven Featureprofile; Fehler separat mit Dateien/SHA dokumentieren.
 - **Abnahme:** formatiert, Clippy/test/release erfolgreich auf exakt getesteter SHA. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** Nur das ¤return Ok(json!(..))¤ am Ende von ¤fe_qualification::collect¤ ist source-belegt. ¤needless_return¤ könnte Clippy ¤-D warnings¤ auslösen, **keine** Toolausgabe liegt vor. Vermuteter ¤rustfmt¤-Fehler im ¤boot_network¤-Makro/Einzeiler zurückgenommen bis ¤cargo fmt --check¤.
 
 ### N3 — rein nullgefülltes Capture-Dateiende nicht als INCOMPLETE erkannt
 - [ ] **HIGH · OPEN · G-A/G-D · PERSIST-05/SK-07.**
@@ -177,6 +195,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Soll-Fix:** sichere kombinierte `doctor + run start`-Bedienung erwägen, **ohne** TTL/Safety still auf 300 s zu erhöhen. Jede etwaige Änderung der TTL bedarf gesonderter Freigabe; BOOT-12 muss ohnehin aktuelle Identitäten prüfen.
 - **Tests:** Token gültig/abgelaufen, Konfig-/Binär-/Programmdrift und doppelte Startversuche.
 - **Abnahme:** bedienbarer Workflow **ohne** längeres unsicheres Vertrauen in einen alten Token. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤DESIGN/USABILITY¤, kein fehlerhafter TTL-Safety-Check. Keine TTL-Aufweitung als vermeintlichen Bugfix autorisieren; kombinierte Doctor-Start-Bedienung nur separat testen.
 
 ### N8 — WSS-ACK-Deadline ignoriert Subscription-Anzahl
 - [ ] **MEDIUM · OPEN · G-C/G-D.**
@@ -247,6 +266,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Soll-Fix:** Source-konforme Validierung `fee_state_max_bps <= 10_000` vor Fachberechnung; bei invalider FeeState **UNKNOWN/Unsupported und Fail-Closed**, nicht still „100 %“ als gültig normalisieren, sofern Source das nicht belegt. Sichere Grenzen/checked-Arithmetik für Division, Zeitaddition und Signed→Unsigned.
 - **Tests:** 0/500/9999/10000/10001/u64::MAX; vor/nach Grace, growth_blocked, denominator=0, negative MinProfit, Debug/Release-Gleichheit, P1A-Fixture-Parität.
 - **Abnahme:** keine Panik, kein Wrap, keine unverdiente positive Economics. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤LATENT INPUT¤: invalides ¤fee_state_max_bps¤ am/über der 10_000-BPS-Grenze als Negativtest; Trigger auf aktueller Chain **nicht** belegt. Trotzdem checked arithmetic/fail-closed zwingend, bevor untrusted State mit diesem Pfad verarbeitet wird.
 
 ### B6 — synchrones Fee-/Simulation-/Jupiter-I/O im Owner
 - [ ] **HIGH RISK · G-C/G-D/P6-LT; PERFORMANCE + RELIABILITY.**
@@ -272,6 +292,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Soll:** Fall mit konkretem Slot-/Root-/Account-Reordering reproduzieren; unterscheiden, ob Root-Barriere korrekt oder der Snapshot unvollständig war. Bei belegbarer State-Lücke Reconcile/Quarantine mit Provenienz und Counter-/Telemetrieanstieg. Root-Invariante bleibt strikt.
 - **Tests:** zwei Forks, Root roll-forward, verspätete confirmed Accounts, fehlende Account-Snapshot-Batches, validiertes Replay, kein stale overwrite, kein falsches READY.
 - **Abnahme:** sicherer State gegen Root/Finality; erst nach Beleg ein Codefix. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤TELEMETRY_ONLY / NO AUTOMATIC BELOW-ROOT APPLY¤. Kein belegter praktischer Provider-Reordering-Fall mit falscher finalisierter Entscheidung. Bis Repro/Root-Audit keine StateCore-Barriere ändern; nicht als 4h-Blocker zählen.
 
 ### B9 — nicht ausführbare V1-Pläne werden generiert
 - [ ] **MEDIUM · P5/FE-02 · G-E.**
@@ -280,6 +301,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Soll:** V1-Plan nur bei **tatsächlich qualifizierter** Build-/Sign-/Simulate-/Submit-Capability generieren, nicht allein aufgrund aktivierter Featureflag oder eines erfolgreichen Wire-Probes. V0 nicht als unqualifizierten Ersatz promoten.
 - **Tests:** Capability false/true mit realem Stub, no-V1 bei unavailable, kein Übergehen von V1-Safety-Gate.
 - **Abnahme:** nur real baubare Planversionen in Kandidatenliste, beide Pfade bleiben phasentreu. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤CODE_CONFIRMED NOISE¤: V1-Plan ohne V1-Buildfähigkeit kostet Arbeit/erzeugt Ablehnungsrecords, impliziert **keinen** ungeprüften V1-Submit; fixen bei P5/FE-02, nicht als 4h-Blocking einstufen.
 
 ### B10 — Keypair-Fehlerpfad und Secret-Zeroization
 - [ ] **MEDIUM · G-A vor FE-06.** `solana/src/tx/mod.rs::load_keypair_json`: keine Wallet-Pfade/Secret-Bytes in `Display/Debug`, sensible Zwischenpuffer soweit Rust-/SDK-seitig praktisch möglich sicher droppen/zeroizen; keine unbegründete Garantie über sämtliche Speicher-Kopien. Tests: falscher Pfad, defekter JSON-Inhalt, Secret-Sentinel, Lock-/Test-Fixtures. **Commit/Evidence:** —.
@@ -339,6 +361,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Fixvertrag:** Zunächst die wirkliche Zahl/Last anhand MT0/Profiles belegen, dann eine konsistente, slot-/root-/timestamp-/revision-gebundene typisierte `HealthView` berechnen und nur bei identischer Stategeneration an Pipeline/Sizer weiterreichen; Ownership und Error-/UNKNOWN-Semantik der drei Aufrufpfade erhalten. Keine unvalidierte globale Cache-Nutzung, keine Preis-/EMODE-/Rundungsänderung.
 - **Tests:** Callcounter bei gleichem Kandidaten (vorher 3, nachher nur berechtigte Recomputes); Read-only Fixture für die vier fachlichen Liquidationsklassen, bitidentische Maintenance/Equity/Sizing/Simulation, Snapshotwechsel erzwingt Recompute, p50/p95/p99 und Alloc-Profile.
 - **Abnahme:** nachweisbar weniger CPU/Allokationen **bei gleicher** wirtschaftlicher/Health-Entscheidung. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤PROFILE_REQUIRED¤. Dreifacher Health-Aufruf per Source bewiesen; Timing-/Allokationseffekt erst durch MT0 messen, keine unqualifizierte Änderung an Health-/Oracle-Snapshotsemantik.
 
 ### C3 — P8-Reconciliation besitzt keinen vollständigen Settlement-/PnL-/Freigabepfad
 - [ ] **CRITICAL vor P8-LIVE · CODE_CONFIRMED · G-E/G-F · FE-04/P8-05 · Cross-Ref B1/B3/B15.**
@@ -347,6 +370,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Fixvertrag:** Einziger durable FE-04-/P8-Ledger-Automat: Signaturen, Blockhash-/lastValidBlockHeight, finalized Receipt oder **strenger** Nonlanding-/Expiry-Proof, **alle** Bundle-/Tip-/Prerequisite-Transaktionen, Fees, Rent, Token-/Protocol-/Wallet-Deltas, realisierter Exit und konservativer `i128` Net PnL. Idempotente Settlement-Transitions, Auto-HALT bei UNKNOWN, globale Holds bis belastbarer Abschluss. Feld `exposure_released` erst als **tatsächlich gebucht** ausweisen oder eindeutig `requested_exposure_release` nennen.
 - **Tests:** mocked finalized landed-success/failure, never-landed mit Blockheight+historischer Abwesenheitsprüfung, MissingArchive/429 ⇒ UNKNOWN, teilweise bestätigtes Bundle, Gebühren ohne Token-Deltas, mehrfacher Replay und Restart, keine Doppelbuchung; `capital_in_use` sinkt erst nach dauerhaft verbuchtem, vollständig bewiesenem Outcome.
 - **Abnahme:** FE-04 und P8 teilen denselben Settlement-/Safety-Source-of-Truth; nicht `pnl_complete=false` als Abschluss verkaufen. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤DESIGN_GATE P8¤. ¤realized_pnl=None¤ hält Safety korrekt fail-closed; aktuell kein freigegebener LIVE-Pfad. Nicht als jetzige Kapitalfreigabe oder LIVE-Fehlbuchung behaupten.
 
 ### C4 — P8-Landing-Reconcile benutzt confirmed statt finalized
 - [ ] **CRITICAL vor werttragender Reconciliation · CODE_CONFIRMED · G-E/G-F · P8/FE-04 · Cross-Ref C3.**
@@ -354,6 +378,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Risiko korrekt eingeordnet:** **Heute** führt C3 bei `realized_pnl=None` trotzdem zu HALT und hält Kapital zurück. **Sobald C3 geschlossen wird**, könnte der jetzige confirmed-Landing-Pfad vor finalisiertem Chainbeleg Holdings lösen oder Outcome/PnL buchen. FE-04 hat bereits den strengeren `finalized_transaction`-Einstieg; keine Abschwächung dieses Vertrags.
 - **Fixvertrag:** Kritische Finance-Settlement-Funktion verwendet ausschließlich finalisierte Receipt-/Meta-/Signature-/Token-/Rent-Nachweise mit Slot-/Fork-/Source-Konsistenz; `confirmed` darf als **vorläufige Telemetrie** ohne `capital_released`/PnL verwendet werden. Finalization-Reorg/Gap/Proof-unavailable ⇒ UNKNOWN/HALT. Keine bloße Ersetzung einer einzigen Konstante, wenn Status und Metadaten unterschiedliche Commitments/Slots besitzen.
 - **Tests:** confirmed→missing/reorg, confirmed-success→finalized-failure, finalized mit vollständigen Gebühren/Deltas, Status finalized aber Meta absent, Fork-Drift, Replay. **Abnahme:** kein Finance-Release/Outcome vor finalized-gebundenem vollständigen Settlement. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤DESIGN_GATE P8¤. ¤confirmed¤ ist im alten Pending-Reconcile vorhanden; solange C3 Unknown liefert, kommt es zu **keiner** Kapitalfreigabe. Fatal würde die Kombination erst bei P8-PnL-Implementierung ohne Finality-Gate.
 
 ### C5 — finanzielle Reconciliation konkurriert im Winner-Workload-Budget
 - [ ] **MEDIUM vor P8-LIVE · CODE_CONFIRMED · G-E/G-F · P8/Provider.**
@@ -430,6 +455,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Verbindlicher Fix:** **Keine Fundingklasse aus dem Phasenplan streichen.** Zunächst volle semantische Gleichheit von TX-Bytes, LookupTables, Token-/ATA-/Inventar-Provenienz, Kosten, Plan-Identity und Safety-Holds nachweisen. Falls byte- und entscheidungsgleich: technische Build-/Sign-/Fee-Evidence pro deterministischem Message-/Fee-Cache-Key nur einmal erzeugen und an beide Attributions-/Fundingkandidaten anbinden. Falls Kapitalherkunft, Exit-/Inventorystrategie oder spätere Kosten abweichen, nicht blind deduplizieren. Kein Cross-Slot-/Cross-Blockhash-Reuse, kein Quote-Zero-Default.
 - **Tests RED→GREEN:** identische NoSwap/Preheld-Pläne → ein Build/Feecall, **beide** Fundinglabels/Reports bleiben vorhanden; abweichende Plan-/Fee-/Blockhash-/LUT-Inputs → getrennte Arbeit; Mock-RPC-Callcounter 5-rps-Policy unverändert; economics/safety parity und Funding-Class-Schema. 
 - **Abnahme:** doppeltes Remote-I/O nachweisbar reduziert, vollständige Entscheidungs- und Finanzattribution unverändert. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤CODE_CONFIRMED unter Branchbedingungen¤. NoSwap/Preheld bauen identische Instruction-Klassen und beide Fee-RPC-Aufrufe erfolgen im Shadow nur, **wenn** beide Kandidaten bis zum ¤path==Rpc, tip==0, no-prereq¤-Fee-Branch gelangen. Nicht jede Opportunity erzeugt garantiert zwei Fee-Calls.
 
 ### D3 — Sweep-Fan-out ist accountseitig unbounded und blockiert Owner-Ingress
 - [ ] **HIGH / LIVELESSNESS + CAPTURE INTEGRITY · CODE_CONFIRMED · G-A/G-C/G-D · R127/S1-LT/P6-MT; STRESSTEST VOR 4H.**
@@ -438,6 +464,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Verbindlicher Fix:** Vor der 4h-Bereitschaft synthetischer deterministischer Lasttest für größte erwartete Dirty-Bank-/Account-Menge (auch 1 Worker). Bei unzulässiger Owner-Stall/Overflow: stabile **gebundene** Account-Work-Queue mit fairen Chunks und wiederholter Ingress-Drain-Opportunity, Snapshot-/Root-/input_revision-/event_slot-Provenienz pro Work-Item, Dedup/Force-Rearm/faire Retryordnung. Keiner der sechs Instruktionsmarker und keiner der Debtor-/Census-Fälle darf still verloren gehen. No O(n²)-Kopie, kein unbounded Aufstauen oder willkürliches Dropping. Optional gesonderter CPU-Worker nur mit eindeutiger Ownership/Backpressure; keine parallelen mutable State-Zugriffe.
 - **Tests RED→GREEN:** 1/2/N Rayon-Worker, eine Bank mit 100/10.000/100.000 abhängigen Accounts, Dirty-Event mitten im Lauf, Root-/Oracle-Revision während Chunkgrenze, Shutdown, starvation/oldest-first, voller Queue-/RAM-Budget, Counterparität (unique/forwarded/healthy/liquidatable/pending/census), max Owner-blocking p95/p99 und kein unregistrierter Ingress-Overflow.
 - **Abnahme:** realistische Fan-outs unter begrenzter Owner-Blockdauer und ohne Vollständigkeitsverlust; erst echte Kalibrierung misst freie Kapazität. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤SOURCE_CONFIRMED, IMPACT_UNMEASURED¤. Unbounded Account-Fanout/Owner-Hold ist Fakt, Queue-Overflow und verletzte 4h-SLO sind noch Hypothesen. Synthetischen Stress **vor** 4h ausführen; Chunking bei tatsächlich über Budget liegendem Owner-Stall.
 
 ### D4 — `on_logs` ruft `flush` pro TX auf und kann Kompatibilitätssink früh versiegeln
 - [ ] **MEDIUM / CAPTURE-FAILURE · CODE_CONFIRMED · G-A/G-C · JFI/PERSIST.**
@@ -446,6 +473,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Verbindlicher Fix:** Unqualifizierten per-TX-`flush`-Aufruf und Kommentar aus `on_logs` entfernen; Writer-Lane darf weiter gemäß `WriterConfig` flush/sync machen; `JsonlSink` nur explizit an der Verifier-Batch-Grenze abschließen. Bei notwendigem Durability-Checkpoint separate native API statt `finish`-Semantik missbrauchen.
 - **Tests:** zwei/drei Logs-TX nacheinander mit `JsonlSink` → alle Rows vor explizitem Batch-Finish; `JournalSink` Batch-/Sync-Policy bleibt unverändert; Strict-Exporter paritätisch, kein JSON-Writer im produktiven Capture.
 - **Abnahme:** keine vorzeitige Versiegelung/Verlustfolge durch reguläre TX-Verarbeitung. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤LATENT_ONLY after strict-driver inspection¤. ¤strict_driver.rs¤ nutzt ¤market_verification::run¤ → ¤JournalSink¤, genau wie produktiver ¤capture.rs¤. ¤JsonlSink¤ ist in den gelesenen Pfaden nur als Kompatibilitäts-/Testtyp sichtbar. Die Fehlkombination ist möglich, aber **kein** nachgewiesener 4h-Capture-Fehler. Gate von pauschal „vor 4h“ auf defensive API-Härtung nach produktiver D1-Gatekorrektur herabstufen.
 
 ### D5 — unerreichbar angenommener Receivership-Decoderzweig kann Capture panicken
 - [ ] **MEDIUM / PANIC HARDENING · CODE_CONFIRMED, TRIGGER_NOT_PROVEN · G-A/G-C · C0-E1.**
@@ -454,6 +482,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Verbindlicher Fix:** Kein `unreachable!/panic!/unwrap` auf untrusted Decodevarianten. Explizit fehlerhaftes/inkonsistentes Decoderresultat zählen und als `UNKNOWN/INCOMPLETE` qualifizieren, keine Liquidation unterschlagen und keine falsche Duplikatzählung. Keine stille `continue`-Lösung, die den Pfad als vollständige Evidence erscheinen lässt.
 - **Tests:** direkt injizierter zusätzlicher Receivership-Event, gültige Classic/Deleverage/Bankruptcy, Doppeldekodierung, Truncation, fuzz-/property-Test aller Varianten; kein Panic, keine falsch vollständige Coverage.
 - **Abnahme:** Decoderfehler fail-closed in Evidence und Report, Capture bleibt kontrolliert. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤CURRENTLY UNREACHABLE / DEFENSIVE_ONLY¤. ¤market/decoding.rs¤ führt Receiver-Payloads separat in ¤events¤. ¤market_truth.rs::provisional_event¤ akzeptiert nur ¤CLASSIC_EVENT¤, ¤DELEVERAGE_EVENT¤, ¤BANKRUPTCY_EVENT¤; daraus kann ¤additional_events¤ aktuell kein Receivership enthalten. Existierendes ¤unreachable!¤ für künftige Decoderänderungen ersetzen/auf Enum-Typvertrag testen, aber keinen gegenwärtigen Crash behaupten.
 
 ### D6 — MarketStats pro Ingress-Event zweimal geklont und emittiert
 - [ ] **LOW / PERFORMANCE · CODE_CONFIRMED · G-C/G-D · MT0/Market-Observer.**
@@ -520,7 +549,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** angeforderte Poolgröße wirksam und messbar, keine unqualifizierte zusätzliche Parallelität. **Commit/Evidence:** —.
 
 **Keine zusätzlichen D-Tickets für als sauber berichtete Grundlagen:** Pin-/Seed-/Discriminator-/Loader-v3-Funktionen in `protocol.rs`, allgemeine Funding-Klassenlogik außer D2 sowie Capture-Window-/Cutoff-/Drain-Grundlogik. Das schließt B2/D11-Decoderprovenienz, D1-Manifest-Wahrheit oder C1/C7-Ingressabschluss **nicht**.
-
+- **Triage 18.10.2026:** ¤WITHDRAWN / NO_BUG_EVIDENCE_IN_CURRENT_STARTUP¤. Fable zieht die Hypothese zurück: die operationalen Env-Werte werden in ¤startup::run¤ vor ¤run_shadow¤ angewendet. Kein belegter früher Rayon-Pool-Init. **Keine** globale/zweite Poolumstellung ohne Gegenbeispiel. Falls echte Workerzahl relevant: nur Mess-/Prooftest; kein Codefix als Pflicht.
 
 ## 9. E — fünfter Reviewdurchgang: Decoder, tatsächliche TX-Gates, BOOT und Projektionen
 
@@ -589,6 +618,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Soll-Fix:** Mit realer synthetischer Signal-/EINTR-Injektion Writer-/WSS-/Lock-/Reader-/Shutdownreaktion beweisen und dokumentieren; nur bei nachgewiesenem Fehler targeted EINTR-Retry oder angepassten Handlerflags, mit bounded Shutdown.
 - **Tests:** SIGTERM während blocked read/write, WSS recv und Journal-Seal; Prozess exit/INCOMPLETE/Durability, keinerlei Endlosblockade.
 - **Abnahme:** Signalstrategie nachgewiesen sicher; sofern kein Fehler, E8 als `NO_BUG_WITH_EVIDENCE` dokumentieren, nicht still zur Implementierungsaufgabe aufblasen. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤WITHDRAWN_AS_BUG¤. Abwesenheit von ¤SA_RESTART¤ ist kein Defektnachweis; mögliche EINTR-Weiterleitung kann beabsichtigtes Stop-Verhalten sein. Keine Signalhandleränderung ohne dedizierten Fehlerfall und Shutdown-Parität.
 
 ### E9 — Projection-Cache hat keine vollständige Bank-/Oracle-/Revision-Provenienz
 - [ ] **HIGH / STALE-EVALUATION RISK · CODE_CONFIRMED, KONKRETER FEHLENTSCHEID NICHT REPRODUZIERT · G-A/G-E · P3/P6/FE-01.**
@@ -597,6 +627,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Soll-Fix:** Projektionsresultat typisiert an **alle** für Health/Sizing/Refresh erforderlichen Bank-/Oracle-/Integration-Key-Revisionen, Root/ContextSlot, ProgramData-Pin und Chain-Clock binden; Reuse ausschließlich, wenn abhängige Revisions-IDs und Sourceidentität passen oder in einen konsistenten State-Snapshot re-projiziert wurde. Änderungsereignisse während laufender Remote-Projektion invalidieren den Cache, verwerfen veraltete Workerresultate und planen bounded neue Arbeit. Kein neuer Hotpath-RPC oder stilles Akzeptieren von gemischten Slot-Ständen.
 - **Tests:** Candidate unverändert bei geänderter Bank/Oracle/Reserve/Root, Projection-Worker-Eingang gegen späteres Resultat, StaleOutOfOrder mit gleicher candidate_slot, Canary-PnL-/Health-Abweichung, Snapshot-/reorg-/ProgramUpgrade, idempotentes bounded Requeue. Beobachtetes `evaluation_slot` entspricht qualifizierter Gesamtevaluation.
 - **Abnahme:** kein veraltetes Remote-Overlay mit neuen Dependency-/Oracle-Daten als eine konsistente Projektion bewertet; identische Parität bei stabilen Eingängen. **Commit/Evidence:** —.
+- **Triage 18.10.2026:** ¤LATENT/RECORD-PROVENANCE, DESIGN_GATE¤. Basisaccount-Hash+Slot validieren Dependency-/Oracle-Revisionen nicht. Eine spätere Simulation kann Stale/Drift erkennen, ist aber **kein** Beweis für ein korrektes ¤evaluation_slot¤ oder Ranking. Vor FE-Integrationsfreigabe Snapshotprovenienz testen; keine Aussage über erlittene Fehltrades.
 
 ### E10 — ReverseIndex lässt leere bank_to_accounts-Einträge zurück
 - [ ] **LOW / MEMORY-HYGIENE · CODE_CONFIRMED · P2/S1-LT.**
@@ -654,16 +685,16 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 
 ## 11. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
 
-**Tranche A — laufende Härtung, ausschließlich Offline-Code und Tests:**
-1. **C1/C7 + D1 + E4/E5/E6** (Recovery/Fatal, Market-Manifest, BOOT-Writer/Doctor/Run-Volume vor 4h), N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar. **D4/D5/D8/D9** als gezielte Capture-Härtung integrieren.
-2. **D3-Stresstest vor 4h-Readiness**; bei unzulässiger Owner-Stall/Ingress-Overflow accountseitig gebundenes Chunking implementieren. M1/M2 plus N4/N5/N6 zur Stabilität von Admission, Durability und Diagnose; keine neue Source-of-Truth.
+**AUFTRAG 1 – verbindliche Codehärtung und Evidence-Wahrheit vor 4h (Offline-Code, keine Mainnet-Läufe):**
+1. **C1/C7 + D1 + E4/E5/E6** (Recovery/Fatal, Market-Manifest, BOOT-Writer/Doctor/Run-Volume vor 4h), N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar. **D8/D9** als gezielte Capture-Härtung integrieren. **D4/D5 nur defensiv/nicht blockierend** nach den neuen Decoder-/Strict-Pfad-Erkenntnissen.
+2. **D3-Stresstest vor 4h-Readiness**; bei **gemessener** unzulässiger Owner-Stall/Ingress-Overflow accountseitig gebundenes Chunking implementieren. Kein unbewiesener Architekturumbau. M1/M2 plus N4/N5/N6 zur Stabilität von Admission, Durability und Diagnose; keine neue Source-of-Truth.
 3. N7/N8 nach Mess-/Sicherheitsvertrag, L4 und kleine isolierte L1/L2; **B2/E1/D11** mit einheitlichem striktem Bank-Decoder für BOOT-/P1A-/P1B-Scopes; **E3** bytegenaue gepinnte Fremdinstruktionsdiscriminatoren.
 4. Gesamte relevante Offline-Regression, Release-/Formatter-/Clippy-Nachweis, Redaction-Probes, Ledger-/STATUS-/4h-Readiness-Synchronisierung.
 5. **Erst dann** getrennt autorisierter G-B-Audit; bei PASS gesondert G-C-Kalibrierung; G-D-vier-Stundenprüfung.
 
-**Tranche B — profitkritische Fertigstellung vor einer eventuell autorisierten FE-06:**
+**AUFTRAG 2 – Design-/Finanz-Gates vor Pilot, vor FE-06 und vor P8-LIVE:**
 1. **B2/E1/D11, E2, E9**, B4, B9 und ggf. L4 für die ausgewählte Fundingklasse; echte Candidate-/Source-/Oracle-/Rent-/Exit-/Plan-Instruktions-Parität (FE-01/02/04).
-2. B6/B7/C2/C8/C9/D2/D6/D7/D12/D13/E10/E11/E12 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
+2. B6/B7/C2/C8/C9/D2/D6/D7/D12/E10/E11/E12 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
 3. **B1 + B3 + B15 + C3 + C4 + C5 + C11 + L1 + L2 verpflichtend** für finanzielle Single-Flight-/Wallet-/Limit-/Journal-/UNKNOWN-Gates (FE-04/P8). B10/B11/B12/B17 fachlich vor passendem Pilot prüfen; Ticket-Status bleibt sonst OPEN. C10/C12 werden im jeweiligen P8-/Error-Vertrag geschlossen.
 4. FE-05 ausschließlich read-only und nur autorisiert; FE-06 gesonderter individueller Geldbeschluss, ein Versuch dann HALT; FE-07 nur mit finalisiertem tatsächlich realisiertem Nettoledger.
 
@@ -688,10 +719,10 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 
 ## 13. Aktuelle Abnahmeentscheidung
 
-- **G-A:** **OPEN**. C1/C7, D1/D4/D5/D8/D9, **E1/E2/E3/E4/E5/E6/E9** sind zusätzlich als Recovery-/Capture-/Decoder-/Plan-/BOOT-Evidence-Gates erfasst; D3-Lastqualifikation fehlt. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
+- **G-A:** **OPEN**. C1/C7, D1/D8/D9, **E1/E2/E3/E4/E5/E6/E9** sind zusätzlich als Recovery-/Capture-/Decoder-/Plan-/BOOT-Evidence-Gates erfasst; D3-Lastqualifikation fehlt. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
 - **G-B (Netzwerk-Audit):** **NOT_RUN / NICHT FREIGEGEBEN**. Das vorhandene BOOT-03–08-Modul ist Code, kein Network-READY; **E4/E5/E6 (lokaler Writer/Doctor/Disk-Scope)** und BOOT-12/JFI offen.
 - **G-C (600s-Kalibrierung):** **NOT_RUN / NICHT FREIGEGEBEN**.
-- **G-D (4h):** **NOT_QUALIFIED / NICHT FREIGEGEBEN**. D1-Manifest-Fix und D3-Owner-Fanout-Stresstest fehlen. Historische 4h-/5h-Versuche bleiben INCOMPLETE.
+- **G-D (4h):** **NOT_QUALIFIED / NICHT FREIGEGEBEN**. C1-Recovery-/D1-Manifest-Fix und D3-Owner-Fanout-Stresstest fehlen. D4/D5/D13/E8 sind **keine** ohne neuen Beweis geltenden 4h-Blocker. Historische 4h-/5h-Versuche bleiben INCOMPLETE.
 - **G-E (FE-01–05):** **PARTIAL/OPEN**, bisheriger FE-00-Befund `NO_ECONOMIC_GO`.
 - **G-F (FE-06/07):** **NOT_AUTHORIZED / NOT_RUN**, kein erster realisierter Gewinn belegt.
 
