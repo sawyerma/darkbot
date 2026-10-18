@@ -118,7 +118,8 @@ class MeasurementCli(unittest.TestCase):
                 self.assertNotIn('No such file or directory', p.stderr)
                 self.assertNotIn('Traceback', p.stderr)
                 self.assertEqual(p.returncode, 2, p.stderr[-2000:])  # no network: the real capture fails closed at startup
-                self.assertIn(f'approved by the operator for readiness token {token}', p.stdout)
+                # Started as p0ctl's launcher child (P0_CTL_LAUNCH_RUN_ID); run start itself requires the
+                # network boot audit since e42162e, asserted above (BOOT_NETWORK_AUDIT_REQUIRED).
                 self.assertIn(f'Capture: {seconds}s', p.stdout)
                 run = tmp / 'runs' / run_id
                 # JFI-03/PERSIST-04: the productive run writes no JSON/JSONL; the legacy views exist only after the
