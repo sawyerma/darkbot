@@ -921,6 +921,7 @@ mod regression {
     use crate::analytics::record::MarketPlanIdentity;
     use crate::market_observer::truth::LiquidationType;
     include!("econ_a2_tests.rs");
+    include!("econ_a3_tests.rs");
     /// JFI-FIX-05: a typed `ECON_CANONICAL` frame round-trips losslessly and renders the
     /// identical historical JSONL row; an identity status outside the closed set is refused.
     #[test]
@@ -1019,6 +1020,7 @@ mod regression {
             &plan,
             100_000_000_000,
             30,
+            None,
         )
         .unwrap();
         let got: Value = serde_json::from_str(
@@ -1052,7 +1054,8 @@ mod regression {
             &out,
             &plan,
             100_000_000_000,
-            30
+            30,
+            None
         )
         .is_err());
         // Runs before PERSIST-01 keep their JSONL stream: same replay, byte-identical renders.
@@ -1061,7 +1064,16 @@ mod regression {
         let legacy = legacy_dir.join("shadow_evaluations.jsonl");
         fs::write(&legacy, format!("{}\n", serde_json::to_string(&r).unwrap())).unwrap();
         let from_legacy = w.h.cfg.run_dir.join("offline_replay_legacy");
-        replay(&input, &legacy, &from_legacy, &plan, 100_000_000_000, 30).unwrap();
+        replay(
+            &input,
+            &legacy,
+            &from_legacy,
+            &plan,
+            100_000_000_000,
+            30,
+            None,
+        )
+        .unwrap();
         for name in ["canonical_market_shadow.jsonl", "economics_final.json"] {
             assert_eq!(
                 fs::read(out.join(name)).unwrap(),
@@ -1082,7 +1094,8 @@ mod regression {
                 &w.h.cfg.run_dir.join("ambiguous"),
                 &plan,
                 100_000_000_000,
-                30
+                30,
+                None
             )
             .err()
             .as_deref(),
@@ -1492,11 +1505,30 @@ pub struct JoinOutcome {
 /// PERSIST-01, their JSONL file. One bounded streaming pass; no RPC repricing/re-simulation and
 /// no synthetic evaluation when the original capture lost data. Used by the offline replay and
 /// the native report (B7).
-/// A2: run context of the offline join: the market commitment (capture start record) and the
-/// first in-window receipt per slot (`SlotBoundary` rows of the market journal), if read.
+/// A3: the capture window an evaluation must lie in to join, the rule of the live chain
+/// (`Worker::hour`): monotone `capture_start_ns`/`capture_cutoff_ns` and the plan.
+#[derive(Clone, Copy)]
+pub struct CaptureFilter<'a> {
+    pub plan: &'a MeasurementPlan,
+    pub start_ns: u64,
+    pub cutoff_ns: u64,
+}
+impl CaptureFilter<'_> {
+    fn admits(&self, rec: &OpportunityRecord) -> bool {
+        rec.timing
+            .t_rx_ns
+            .and_then(|t| live_hour(self.plan, self.start_ns, self.cutoff_ns, t))
+            .is_some()
+    }
+}
+
+/// Run context of the offline join. A2: the market commitment (capture start record) and the
+/// first in-window receipt per slot (`SlotBoundary` rows of the market journal), if read. A3:
+/// the capture window of the evaluations (`None`: every evaluation frame joins).
 pub struct JoinContext<'a> {
     pub market_commitment: &'a str,
     pub slot_first_seen: Option<&'a BTreeMap<u64, u64>>,
+    pub capture: Option<CaptureFilter<'a>>,
 }
 
 pub fn join(
@@ -1580,6 +1612,9 @@ pub fn join(
                             .map_err(|_| "SHADOW_DECODE")?
                             .record
                     };
+                    if ctx.capture.is_some_and(|c| !c.admits(&rec)) {
+                        continue;
+                    }
                     if let Some(rows) = grouped.get_mut(&rec.account) {
                         assign_record(rows, &rec);
                     }
@@ -1607,6 +1642,9 @@ pub fn join(
             }
             let rec: OpportunityRecord =
                 serde_json::from_slice(&line).map_err(|_| "SHADOW_DECODE")?;
+            if ctx.capture.is_some_and(|c| !c.admits(&rec)) {
+                continue;
+            }
             if let Some(rows) = grouped.get_mut(&rec.account) {
                 assign_record(rows, &rec);
             }
@@ -1635,9 +1673,19 @@ pub(super) fn replay(
     plan: &MeasurementPlan,
     start_ns: u64,
     max_seconds: u64,
+    capture_start_ns: Option<u64>,
 ) -> Result<(), String> {
     use std::io::BufRead;
     plan.validate()?;
+    let capture = capture_start_ns
+        .map(|start| {
+            plan.cutoff(start).map(|cutoff_ns| CaptureFilter {
+                plan,
+                start_ns: start,
+                cutoff_ns,
+            })
+        })
+        .transpose()?;
     if max_seconds == 0 || max_seconds > 7200 {
         return Err("REPLAY_TIME_BUDGET".into());
     }
@@ -1678,6 +1726,7 @@ pub(super) fn replay(
         &JoinContext {
             market_commitment: "UNKNOWN",
             slot_first_seen: None,
+            capture,
         },
     )?;
     fs::create_dir_all(out).map_err(|_| "REPLAY_OUTPUT")?;
@@ -1709,6 +1758,7 @@ pub(super) fn replay(
             "cumulative":summarize(&cumulative,plan.span_seconds(0,i),unassigned,true),
             "window_delta":summarize(&delta,plan.span_seconds(i-1,i),unassigned,true),
             "race_margins":race_margins(&cumulative,"UNKNOWN",false),
+            "evaluation_window":if capture.is_some() {"CAPTURE_WINDOW_MONOTONIC: only evaluations the live chain admits"} else {"NOT_APPLIED: no monotone capture start given; every evaluation frame joins"},
             "raw_shadow_available":available,"live_enabled":false,"master_pass":false});
         atomic_json(&out.join(format!("hour_{i:02}.json")), &value)?;
         if i == SNAPSHOT_COUNT {

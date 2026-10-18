@@ -19,8 +19,8 @@
 //! * Output is text: table or CSV with identical cells. JSON output is refused (JFI-01/03 take
 //!   precedence over the older `--format json` example of L.5).
 use super::econ::{
-    canonical_join, joined_facts, record_digest, CanonicalJoin, JoinContext, JoinedFacts,
-    OpportunityRow, REPORT_JOURNAL as ECON_REPORT_JOURNAL,
+    canonical_join, joined_facts, record_digest, CanonicalJoin, CaptureFilter, JoinContext,
+    JoinedFacts, OpportunityRow, REPORT_JOURNAL as ECON_REPORT_JOURNAL,
 };
 use super::journal::{self, kind};
 use super::measurement::utc_ns;
@@ -1485,6 +1485,12 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
                 &JoinContext {
                     market_commitment: &commitment,
                     slot_first_seen: Some(&slots),
+                    // A3: only evaluations the live chain admits (`Worker::hour`).
+                    capture: Some(CaptureFilter {
+                        plan: &capture.manifest.plan,
+                        start_ns: capture.monotonic_window.0,
+                        cutoff_ns: capture.monotonic_window.1,
+                    }),
                 },
             );
             match joined {

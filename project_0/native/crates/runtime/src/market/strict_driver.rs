@@ -174,7 +174,11 @@ fn capture_files(run: &Path) -> Result<BTreeMap<String, (u64, [u8; 32])>, String
 }
 
 /// The run's single CAPTURE window from its typed phase journal (unix ns, half-open).
-fn capture_window(run: &Path, manifest: &RunManifest) -> Result<(u64, u64), String> {
+/// A window as `(start, end)` nanoseconds.
+type Span = (u64, u64);
+
+/// The unique CAPTURE window: unix ns (half-open) and the monotone process-clock start/cutoff.
+fn capture_window(run: &Path, manifest: &RunManifest) -> Result<(Span, Span), String> {
     let path = run.join("capture/measurement_phases.p0j");
     let mut r = crate::storage::segments::ChainReader::open(&path)
         .map_err(|e| format!("PHASE_JOURNAL: {e}"))?;
@@ -196,7 +200,7 @@ fn capture_window(run: &Path, manifest: &RunManifest) -> Result<(u64, u64), Stri
     if end.checked_sub(start) != Some(manifest.plan.duration_seconds * NS) {
         return Err("PLAN_WINDOW_MISMATCH".into());
     }
-    Ok((start, end))
+    Ok(((start, end), (w.capture_start_ns, w.capture_cutoff_ns)))
 }
 
 /// Exclusive, non-blocking writer lock of one spec directory (held while the guard lives).
@@ -222,6 +226,8 @@ pub struct CaptureBinding {
     pub manifest_path: PathBuf,
     /// Unix ns, half-open.
     pub window: (u64, u64),
+    /// A3: monotone process-clock `[capture_start_ns, capture_cutoff_ns]` (evaluation window).
+    pub monotonic_window: (u64, u64),
     pub evidence: CaptureEvidence,
     pub evidence_digest: String,
 }
@@ -236,7 +242,7 @@ pub fn bind_capture(run: &Path) -> Result<CaptureBinding, String> {
     if manifest.layout.as_deref() != Some(crate::run_layout::RunLayout::V2.tag()) {
         return Err("NATIVE_DRIVER_REQUIRES_LAYOUT_V2".into());
     }
-    let window = capture_window(&run, &manifest)?;
+    let (window, monotonic_window) = capture_window(&run, &manifest)?;
     let native = run.join("verification/native");
     std::fs::create_dir_all(&native).map_err(|e| e.to_string())?;
     let evidence = CaptureEvidence {
@@ -260,6 +266,7 @@ pub fn bind_capture(run: &Path) -> Result<CaptureBinding, String> {
         manifest,
         manifest_path,
         window,
+        monotonic_window,
         evidence,
         evidence_digest,
     })
@@ -284,6 +291,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         window: (start, end),
         evidence,
         evidence_digest,
+        ..
     } = bind_capture(&req.run)?;
     let binary = std::env::current_exe().map_err(|e| e.to_string())?;
     let provider = if req.offline {

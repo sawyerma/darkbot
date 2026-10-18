@@ -3,9 +3,9 @@ use std::path::Path;
 fn main() {
     let result = (|| -> Result<(), String> {
         let args: Vec<_> = std::env::args().collect();
-        if args.len() != 7 {
+        if !matches!(args.len(), 7 | 8) {
             return Err(
-                "usage: p0-econ-replay MARKET SHADOW OUT PLAN START_UNIX_NS MAX_SECONDS".into(),
+                "usage: p0-econ-replay MARKET SHADOW OUT PLAN START_UNIX_NS MAX_SECONDS [CAPTURE_START_NS]".into(),
             );
         }
         let plan: MeasurementPlan =
@@ -18,6 +18,10 @@ fn main() {
             &plan,
             args[5].parse().map_err(|_| "START_INVALID")?,
             args[6].parse().map_err(|_| "BUDGET_INVALID")?,
+            // A3: the monotone capture start applies the live evaluation window.
+            args.get(7)
+                .map(|v| v.parse().map_err(|_| "CAPTURE_START_INVALID"))
+                .transpose()?,
         )
     })();
     if let Err(error) = result {

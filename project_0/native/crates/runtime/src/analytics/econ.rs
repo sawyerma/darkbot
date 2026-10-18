@@ -23,7 +23,8 @@ mod canonical;
 mod docs;
 pub use canonical::{
     canonical_legacy_view, join as canonical_join, joined_facts, race_margins, record_digest,
-    CanonicalSummary, JoinContext, JoinOutcome, Joined as CanonicalJoin, JoinedFacts, RaceMargins,
+    CanonicalSummary, CaptureFilter, JoinContext, JoinOutcome, Joined as CanonicalJoin,
+    JoinedFacts, RaceMargins,
 };
 pub use docs::*;
 
@@ -418,6 +419,15 @@ pub struct Race {
     pub required_speedup_to_winner_rx_ms: Option<f64>,
     pub required_speedup_to_winner_slot_seen_ms: Option<f64>,
 }
+/// The live snapshot bucket of a monotone receipt time; `None` outside `[start, cutoff]` or the
+/// plan. A3: the one window rule of the live evaluation chain and of the offline join.
+pub fn live_hour(plan: &MeasurementPlan, start: u64, cutoff: u64, ns: u64) -> Option<usize> {
+    if ns < start || ns > cutoff {
+        return None;
+    }
+    plan.live_bucket(ns - start)
+}
+
 /// A2: the winner's live receipt is a race observation only under `confirmed`. Under
 /// `finalized` (and an unknown commitment) it is the finalized notification, roughly a
 /// finalization later than the winner slot, so every margin against it would be too optimistic.
@@ -823,11 +833,7 @@ impl Worker {
     }
     fn hour(&self, ns: u64) -> Option<usize> {
         let start = self.h.shared.start_ns.load(Ordering::Acquire);
-        let cutoff = self.h.cutoff()?;
-        if ns < start || ns > cutoff {
-            return None;
-        }
-        self.h.cfg.plan.live_bucket(ns - start)
+        live_hour(&self.h.cfg.plan, start, self.h.cutoff()?, ns)
     }
     fn over_limit(&self) {
         self.h
@@ -2216,6 +2222,15 @@ pub fn replay_canonical(
     plan: &MeasurementPlan,
     start_ns: u64,
     max_seconds: u64,
+    capture_start_ns: Option<u64>,
 ) -> Result<(), String> {
-    canonical::replay(market, shadow, out, plan, start_ns, max_seconds)
+    canonical::replay(
+        market,
+        shadow,
+        out,
+        plan,
+        start_ns,
+        max_seconds,
+        capture_start_ns,
+    )
 }

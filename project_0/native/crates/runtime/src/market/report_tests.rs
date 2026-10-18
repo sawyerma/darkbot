@@ -186,7 +186,13 @@ mod report_e2e {
             journal::source::ECON,
             &[crate::analytics::econ::ShadowEvaluation {
                 previous: None,
-                record: record(&target, 29),
+                // Inside the capture window [1000 s, 1060 s] of the monotone clock (A3: the join
+                // admits exactly the evaluations the live chain admits).
+                record: {
+                    let mut r = record(&target, 29);
+                    r.timing.t_rx_ns = Some(1_010 * NS);
+                    r
+                },
             }],
         );
         write_frames(

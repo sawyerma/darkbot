@@ -84,6 +84,7 @@ fn a2_slot_margin_is_identical_live_and_offline_and_rx_only_when_confirmed() {
             &JoinContext {
                 market_commitment: commitment,
                 slot_first_seen: Some(&inputs.slot_first_seen),
+                capture: None,
             },
         )
         .unwrap();
