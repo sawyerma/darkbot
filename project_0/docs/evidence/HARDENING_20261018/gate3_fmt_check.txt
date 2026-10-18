@@ -1,0 +1,280 @@
+command: cargo fmt --check  [trailing whitespace of the verbatim rustfmt diff stripped for git diff --check]
+environment: CARGO_BUILD_JOBS=2 (machine load limit); cwd project_0/native (virtual workspace: common, solana, liquidation, runtime, reporter)
+tested_head: 0de1b9b41cdf5b2495cf9d9d97a0a40353fc86e3
+worktree: dirty_entries_under_native=0
+toolchain: rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew); cargo 1.93.1 (Homebrew)
+started_utc: 2026-10-18T14:42:00Z
+----- output -----
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter/src/bin/p0_market_capture_reported.rs:4:
+ use darkbot_runner::status_tap::StatusTap;
+ use std::{process::ExitCode, sync::atomic::Ordering};
+ fn main() -> ExitCode {
+-    if let Some(spec) = std::env::var("P0_ENV_FILE").ok().filter(|v|!v.trim().is_empty()) {
++    if let Some(spec) = std::env::var("P0_ENV_FILE")
++        .ok()
++        .filter(|v| !v.trim().is_empty())
++    {
+         match darkbot_p0_reporter::env_file::load_list(&spec) {
+-            Ok(files) => for f in files {
+-                eprintln!("[P0/ENV] {} set={} kept_existing={}",
+-                    f.file.display(), f.set.join(","), f.kept_existing.join(","));
+-            },
+-            Err(e) => { eprintln!("[P0/ENV] {e}"); return ExitCode::FAILURE; }
++            Ok(files) => {
++                for f in files {
++                    eprintln!(
++                        "[P0/ENV] {} set={} kept_existing={}",
++                        f.file.display(),
++                        f.set.join(","),
++                        f.kept_existing.join(",")
++                    );
++                }
++            }
++            Err(e) => {
++                eprintln!("[P0/ENV] {e}");
++                return ExitCode::FAILURE;
++            }
+         }
+     }
+     let env = |k: &str| std::env::var(k).ok();
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs:1:
+ //! TEST_ONLY reporter fixture. No network or wallet.
+-use darkbot_p0_reporter::{start,ReporterConfig};
+-use darkbot_runner::status_tap::{MarketSnapshot,StatusTap,StorageSnapshot,TransportSnapshot};
+-use std::{io::Read,sync::{Arc,atomic::{AtomicBool,Ordering}},time::Duration};
+-fn main(){
+- let socket=std::env::var("P0_FIXTURE_SOCKET").expect("fixture socket");
+- let gen=std::env::var("P0_FIXTURE_GENERATION_FILE").expect("fixture generation");
+- let tap=StatusTap::new();
+- let mut cfg=ReporterConfig::new(socket.into(),gen.into(),"run-TEST_ONLY".into());
+- cfg.heartbeat=Duration::from_millis(150);
+- let handle=start(cfg,tap.clone()).expect("fixture reporter start");
+- let stop=Arc::new(AtomicBool::new(false));let done=stop.clone();
+- std::thread::spawn(move||{let mut buf=Vec::new();let _=std::io::stdin().read_to_end(&mut buf);done.store(true,Ordering::Relaxed);});
+- let mut i=0u64;
+- while !stop.load(Ordering::Relaxed){
+-  i+=1;
+-  tap.publish_transport(TransportSnapshot{connected:true,last_frame_age_ns:Some(1000000*i),last_slot:Some(300000000+i)});
+-  tap.publish_market(MarketSnapshot{observing:true,stream_ready:true,gap_count:i/50,reconnect_count:0,liquidation_events:i/10,last_observed_slot:Some(300000000+i),live_verdict:"MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED"});
+-  tap.publish_storage(StorageSnapshot{queue_bytes:4096*(i%7),lag_frames:i%3});
+-  std::thread::sleep(Duration::from_millis(50));
+- }
+- handle.stop();
++use darkbot_p0_reporter::{start, ReporterConfig};
++use darkbot_runner::status_tap::{MarketSnapshot, StatusTap, StorageSnapshot, TransportSnapshot};
++use std::{
++    io::Read,
++    sync::{
++        atomic::{AtomicBool, Ordering},
++        Arc,
++    },
++    time::Duration,
++};
++fn main() {
++    let socket = std::env::var("P0_FIXTURE_SOCKET").expect("fixture socket");
++    let gen = std::env::var("P0_FIXTURE_GENERATION_FILE").expect("fixture generation");
++    let tap = StatusTap::new();
++    let mut cfg = ReporterConfig::new(socket.into(), gen.into(), "run-TEST_ONLY".into());
++    cfg.heartbeat = Duration::from_millis(150);
++    let handle = start(cfg, tap.clone()).expect("fixture reporter start");
++    let stop = Arc::new(AtomicBool::new(false));
++    let done = stop.clone();
++    std::thread::spawn(move || {
++        let mut buf = Vec::new();
++        let _ = std::io::stdin().read_to_end(&mut buf);
++        done.store(true, Ordering::Relaxed);
++    });
++    let mut i = 0u64;
++    while !stop.load(Ordering::Relaxed) {
++        i += 1;
++        tap.publish_transport(TransportSnapshot {
++            connected: true,
++            last_frame_age_ns: Some(1000000 * i),
++            last_slot: Some(300000000 + i),
++        });
++        tap.publish_market(MarketSnapshot {
++            observing: true,
++            stream_ready: true,
++            gap_count: i / 50,
++            reconnect_count: 0,
++            liquidation_events: i / 10,
++            last_observed_slot: Some(300000000 + i),
++            live_verdict: "MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED",
++        });
++        tap.publish_storage(StorageSnapshot {
++            queue_bytes: 4096 * (i % 7),
++            lag_frames: i % 3,
++        });
++        std::thread::sleep(Duration::from_millis(50));
++    }
++    handle.stop();
+ }
+
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter/src/env_file.rs:1:
+-use std::path::{Path,PathBuf};
+-#[derive(Debug,Default)]
+-pub struct Loaded { pub file: PathBuf, pub set: Vec<String>, pub kept_existing: Vec<String> }
+-pub fn parse(input:&str)->Result<Vec<(String,String)>,String>{
+- let mut out=Vec::new();
+- for (i,line) in input.lines().enumerate(){
+-  let line=line.trim();
+-  if line.is_empty()||line.starts_with('#'){continue}
+-  let line=line.strip_prefix("export ").unwrap_or(line).trim_start();
+-  let (key,value)=line.split_once('=').ok_or_else(||format!("line {}: expected KEY=VALUE",i+1))?;
+-  let key=key.trim();
+-  let mut chars=key.chars();
+-  if !matches!(chars.next(),Some(c) if c.is_ascii_uppercase()||c=='_')||!chars.all(|c|c.is_ascii_uppercase()||c.is_ascii_digit()||c=='_'){
+-   return Err(format!("line {}: invalid key",i+1));
+-  }
+-  let value=value.trim();
+-  let value=if value.len()>=2 && ((value.starts_with('"')&&value.ends_with('"'))||(value.starts_with("'")&&value.ends_with("'"))){&value[1..value.len()-1]}else{value};
+-  out.push((key.to_owned(),value.to_owned()));
+- }
+- Ok(out)
++use std::path::{Path, PathBuf};
++#[derive(Debug, Default)]
++pub struct Loaded {
++    pub file: PathBuf,
++    pub set: Vec<String>,
++    pub kept_existing: Vec<String>,
+ }
+-pub fn load(path:&Path)->Result<Loaded,String>{
+- let text=std::fs::read_to_string(path).map_err(|e|format!("env file read {}: {e}",path.display()))?;
+- let entries=parse(&text).map_err(|e|format!("{}: {e}",path.display()))?;
+- let mut loaded=Loaded{file:path.to_path_buf(),..Default::default()};
+- for (key,value) in entries{
+-  if std::env::var_os(&key).is_some(){loaded.kept_existing.push(key);}
+-  else{std::env::set_var(&key,value);loaded.set.push(key);}
+- }
+- Ok(loaded)
++pub fn parse(input: &str) -> Result<Vec<(String, String)>, String> {
++    let mut out = Vec::new();
++    for (i, line) in input.lines().enumerate() {
++        let line = line.trim();
++        if line.is_empty() || line.starts_with('#') {
++            continue;
++        }
++        let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
++        let (key, value) = line
++            .split_once('=')
++            .ok_or_else(|| format!("line {}: expected KEY=VALUE", i + 1))?;
++        let key = key.trim();
++        let mut chars = key.chars();
++        if !matches!(chars.next(),Some(c) if c.is_ascii_uppercase()||c=='_')
++            || !chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
++        {
++            return Err(format!("line {}: invalid key", i + 1));
++        }
++        let value = value.trim();
++        let value = if value.len() >= 2
++            && ((value.starts_with('"') && value.ends_with('"'))
++                || (value.starts_with("'") && value.ends_with("'")))
++        {
++            &value[1..value.len() - 1]
++        } else {
++            value
++        };
++        out.push((key.to_owned(), value.to_owned()));
++    }
++    Ok(out)
+ }
+-pub fn load_list(spec:&str)->Result<Vec<Loaded>,String>{
+- spec.split(':').map(str::trim).filter(|v|!v.is_empty()).map(|p|load(Path::new(p))).collect()
++pub fn load(path: &Path) -> Result<Loaded, String> {
++    let text = std::fs::read_to_string(path)
++        .map_err(|e| format!("env file read {}: {e}", path.display()))?;
++    let entries = parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
++    let mut loaded = Loaded {
++        file: path.to_path_buf(),
++        ..Default::default()
++    };
++    for (key, value) in entries {
++        if std::env::var_os(&key).is_some() {
++            loaded.kept_existing.push(key);
++        } else {
++            std::env::set_var(&key, value);
++            loaded.set.push(key);
++        }
++    }
++    Ok(loaded)
+ }
++pub fn load_list(spec: &str) -> Result<Vec<Loaded>, String> {
++    spec.split(':')
++        .map(str::trim)
++        .filter(|v| !v.is_empty())
++        .map(|p| load(Path::new(p)))
++        .collect()
++}
+ #[cfg(test)]
+-mod tests{
+- use super::*;
+- #[test]fn parse_basic(){assert_eq!(parse("export A=1\nB=\"two words\"\n").unwrap(),vec![("A".into(),"1".into()),("B".into(),"two words".into())]);}
+- #[test]fn no_secret_in_errors(){let e=parse("SENSITIVE_VALUE").unwrap_err();assert!(!e.contains("SENSITIVE_VALUE"));assert!(parse("bad-key=123").is_err());}
++mod tests {
++    use super::*;
++    #[test]
++    fn parse_basic() {
++        assert_eq!(
++            parse("export A=1\nB=\"two words\"\n").unwrap(),
++            vec![("A".into(), "1".into()), ("B".into(), "two words".into())]
++        );
++    }
++    #[test]
++    fn no_secret_in_errors() {
++        let e = parse("SENSITIVE_VALUE").unwrap_err();
++        assert!(!e.contains("SENSITIVE_VALUE"));
++        assert!(parse("bad-key=123").is_err());
++    }
+ }
+
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter/tests/config.rs:1:
+-use darkbot_runner::market::observer::{MarketConfig,MarketSource};
+-fn get<'a>(items:&'a [(&'a str,&'a str)])->impl Fn(&str)->Option<String>+'a{move |key|items.iter().find(|(k,_)|*k==key).map(|(_,v)|v.to_string())}
+-const ID:&str="MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA";
+-#[test]fn missing_program(){assert_eq!(MarketConfig::from_lookup(&get(&[("HELIUS_API_KEY","TEST")]),1700000000).unwrap_err(),"missing required env: P0_PROGRAM_ID");}
+-#[test]fn missing_source(){assert_eq!(MarketConfig::from_lookup(&get(&[("P0_PROGRAM_ID",ID)]),1700000000).unwrap_err(),"missing required env: P0_WS_URL (or HELIUS_API_KEY)");}
+-#[test]fn logs_helius(){let c=MarketConfig::from_lookup(&get(&[("P0_PROGRAM_ID",ID),("HELIUS_API_KEY","TEST"),("P0_MARKET_SOURCE","logs")]),1700000000).unwrap();assert_eq!(c.source,MarketSource::Logs);assert!(c.ws_url.starts_with("wss://mainnet.helius-rpc.com/?api-key="));}
++use darkbot_runner::market::observer::{MarketConfig, MarketSource};
++fn get<'a>(items: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
++    move |key| {
++        items
++            .iter()
++            .find(|(k, _)| *k == key)
++            .map(|(_, v)| v.to_string())
++    }
++}
++const ID: &str = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA";
++#[test]
++fn missing_program() {
++    assert_eq!(
++        MarketConfig::from_lookup(&get(&[("HELIUS_API_KEY", "TEST")]), 1700000000).unwrap_err(),
++        "missing required env: P0_PROGRAM_ID"
++    );
++}
++#[test]
++fn missing_source() {
++    assert_eq!(
++        MarketConfig::from_lookup(&get(&[("P0_PROGRAM_ID", ID)]), 1700000000).unwrap_err(),
++        "missing required env: P0_WS_URL (or HELIUS_API_KEY)"
++    );
++}
++#[test]
++fn logs_helius() {
++    let c = MarketConfig::from_lookup(
++        &get(&[
++            ("P0_PROGRAM_ID", ID),
++            ("HELIUS_API_KEY", "TEST"),
++            ("P0_MARKET_SOURCE", "logs"),
++        ]),
++        1700000000,
++    )
++    .unwrap();
++    assert_eq!(c.source, MarketSource::Logs);
++    assert!(c
++        .ws_url
++        .starts_with("wss://mainnet.helius-rpc.com/?api-key="));
++}
+
+----- end -----
+finished_utc: 2026-10-18T14:42:01Z
+exit_code: 1
