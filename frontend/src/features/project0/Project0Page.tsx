@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Project0Tab } from "./model/contracts";
 import { UNCONNECTED_MONITOR } from "./model/contracts";
 import { useFleetDrafts } from "./hooks/useFleetDrafts";
-import { TabStrip, DetailRow, Notice } from "./components/PanelPrimitives";
+import { TabStrip } from "./components/PanelPrimitives";
+import { HealthSection } from "./components/HealthSection";
+import { ensureProject0Adapter } from "./api/project0Adapter";
 import { OverviewPanel } from "./pages/OverviewPanel";
 import { LiquidatorPanel } from "./pages/LiquidatorPanel";
 import { CapturePanel } from "./pages/CapturePanel";
@@ -29,6 +31,7 @@ export default function Project0Page() {
   const [tab, setTab] = useState<Project0Tab>("overview");
   const [healthOpen, setHealthOpen] = useState(false);
   const fleet = useFleetDrafts();
+  useEffect(() => { ensureProject0Adapter(); }, []);
 
   return <div className="p0-graphite"><div className="p0-panel">
     <div className="p0-heading">
@@ -37,16 +40,7 @@ export default function Project0Page() {
         onClick={() => setHealthOpen(v => !v)}>● &nbsp; Health · Unknown &nbsp;›</button>
     </div>
     <TabStrip label="Project 0 areas" options={TABS} value={tab} onChange={setTab}/>
-    {healthOpen ? <section className="p0-health" aria-label="System Health">
-      <h2>System Health <span className="p0-quiet">· Backend not connected</span></h2>
-      <DetailRow title="Software & program identity" value="Not checked"/>
-      <DetailRow title="RPC / WebSocket / slot progression" value="Not checked"/>
-      <DetailRow title="Wallet / provider / capacity" value="Not checked"/>
-      <DetailRow title="RPC latency · p50 / p95 / p99" value="— / — / — ms"/>
-      <DetailRow title="Ingress → decision · p50 / p95 / p99" value="— / — / — ms"/>
-      <DetailRow title="Stream age / writer queue" value="— / —"/>
-      <Notice>No live Boot Audit API is connected. Checks cannot be marked PASS.</Notice>
-    </section> : null}
+    {healthOpen ? <HealthSection/> : null}
     {tab === "overview" ? <OverviewPanel monitor={UNCONNECTED_MONITOR} goto={setTab}/> : null}
     {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} goto={setTab}/> : null}
     {tab === "capture" ? <CapturePanel/> : null}
