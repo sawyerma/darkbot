@@ -53,8 +53,9 @@
 | `B` finanzielle Pipeline-/State-Prüfung | — | B1–B9, mit **B8 als umstrittener Fixvorschlag**; zusätzliche konkrete kleine Befunde B10–B18 |
 | `C` Recovery/Owner/Settlement Review 3 | — | C1–C12 offen, C13 weiterer Reviewumfang; C1/C7 vor 4h, C3/C4/C5 vor P8. |
 | `D` Market-Evidence/Funding/Sweep Review 4 | — | D1–D13 offen; D1 vor 4h, D3 vor 4h-Stresstest, D4/D5/D8/D9 Capture-Härtung; D2 Effizienz, D10=C6, D11=B11. |
+| `E` Decoder/Planner/BOOT/Projection Review 5 | — | E1–E12 offen; E13 weitere Reviewabdeckung. E1+B2/D11 vor P1B/FE-01; E2 vor FE-04/06; E4/E5/E6 vor BOOT-/4h-Readiness; E9 vor Integrationsevaluation. |
 | `X` verbindliche Quervertragslücken | — | X1 BOOT-12, X2 JFI-BOOT, X3 BOOT-01/02; verwandt mit N1–N8, keine doppelte Implementierung |
-| Weitere Reviewmodule | — | `winner_tracker.rs`, `chain.rs`, `econ*.rs`, `measurement.rs`, `report.rs`, `index.rs`, `integration.rs`, `projection.rs`, `census.rs`, `planner.rs` und Python-Skripte noch nicht vollständig begutachtet; `sweep.rs`, `state_owner/ingress.rs`, `funding.rs`, `protocol.rs`, `market/{capture,sink,core}.rs` im vierten Durchgang gelesen (C-/D-Tickets bleiben offen) |
+| Weitere Reviewmodule | — | `market/winner.rs`, `chain.rs`, `econ*.rs`, `measurement.rs`, `report.rs`, `census.rs`, `lookup_tables.rs`, `market_*`-Verifier, `strict_driver.rs`, `markers.rs`, `related.rs`, `rows.rs`, Tools/Bins und Python-Skripte noch nicht vollständig begutachtet; fünf Durchgänge zu Owner/Storage/Market/Protocol/Planner/Projection/Index/Integration/Winner-Tracker protokolliert |
 
 Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review der eingecheckten Fixes und zielgerichteten Testangaben; **eine neue vollständige Workspace-Ausführung durch den Register-Autor wurde nicht vorgenommen**.
 
@@ -521,7 +522,114 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 **Keine zusätzlichen D-Tickets für als sauber berichtete Grundlagen:** Pin-/Seed-/Discriminator-/Loader-v3-Funktionen in `protocol.rs`, allgemeine Funding-Klassenlogik außer D2 sowie Capture-Window-/Cutoff-/Drain-Grundlogik. Das schließt B2/D11-Decoderprovenienz, D1-Manifest-Wahrheit oder C1/C7-Ingressabschluss **nicht**.
 
 
-## 9. X — explizite Phasenplan-Vertragslücken; mit N-Tickets koordinieren
+## 9. E — fünfter Reviewdurchgang: Decoder, tatsächliche TX-Gates, BOOT und Projektionen
+
+**Review-Stand:** 2026-10-18 · GitHub-`main` `81b667a14d68d0418e03e846c79ae8c698b31c37`. Fables Befunde zu `liquidation/{planner,projection,index,integration}.rs` und `orchestration/{control,winner_tracker,boot_audit}.rs` wurden mit GitHub-Quellcode, `runtime/execution/{builder,pipeline}.rs` und `state_owner/detect.rs` abgeglichen. **Keine neuen Regressionstests ausgeführt.** Hier dokumentierte `REVIEW_REQUIRED`-Fälle sind Prüfpflichten, kein behaupteter reproduzierter Laufzeitfehler. E1/E2 sind belegte Source-Invarianten, nicht bloß Performanceideen. Keine Änderung an LIVE-, Provider-, FE- oder Quota-Freigaben.
+
+### E1 — Integration umgeht den strikten 0.1.12-Bank-Layout-Decoder
+- [ ] **HIGH / PROTOCOL-SAFETY · CODE_CONFIRMED · G-A/G-E · P1A/P1B/FE-01; Cross-Ref B2/B11/D11.**
+- **Pfade:** `liquidation/src/integration.rs::{pod_after_disc,kinds_for_account,pricing_kinds_for_account,refresh_plan_for_account}`; `liquidation/src/protocol.rs::decode_bank`.
+- **Ist:** `pod_after_disc<T>` verlangt nur `data.len() >= 8+size_of::<T>()` und decodiert den **Prefix** `data[8..need]`. `kinds_for_account`, `pricing_kinds_for_account` und `refresh_plan_for_account` prüfen den Bank-Owner und Discriminator, benutzen aber danach dennoch `pod_after_disc::<Bank>` statt `protocol::decode_bank`. Daher kann eine verlängerte/auf 0.1.12 resized Bank **entgegen P1B-02** akzeptiert und als gültige Integration/Refresh-Quelle ausgewertet werden. Weitere MarginfiAccount-Eingänge derselben Funktionen verwenden ebenfalls `len < need` statt exakter Länge; derselbe Verstoß gegenüber B2. **Das ist source-belegt; ob ein bestimmter Mainnet-Bankdatensatz betroffen ist, bedarf qualifizierter Chain-Evidence.**
+- **Soll-Fix:** **Einen einzigen strikten, versionsgepinnten Bank-Decoder** aus `protocol.rs` an sämtlichen Marginfi-Bank-Callsites verwenden; Owner, 8-Byte-Discriminator und die **exakte** für den aktiv gepinnten Crate zugelassene Länge sichern. `pod_after_disc<T>` nur für speziell geprüfte **externe** Integrationstypen mit je eigenem Layoutvertrag benutzen, nie für `Bank`/`MarginfiAccount`/`MarginfiGroup`/`FeeState`. Betroffene MarginfiAccount-Decoder im selben B2-Fix umstellen. Unaligned Buffer korrekt unterscheiden (D11); nicht durch Löschen des Strict-Checks „reparieren“. Unknown version/layout ⇒ explizit `UNKNOWN_LAYOUT`/no-plan/Stop, niemals stilles Prefix oder scheinbar valider Preis.
+- **Tests RED→GREEN:** 0.1.11-Bank-Fixture + 0.1.12-resized Bank-Prefix + falscher Owner/Discriminator + zwei Byte weniger/eins mehr + unaligned Slice; durch **alle drei** Integration-API-Pfade (Kinds, Pricing, Refresh) sowie Health/Sizer/Builder/Index; unbekannte Version überall gleicher fail-closed Verdict, identische Source-/Pin-Provenienz. Kein RPC und keine LIVE-Aktion.
+- **Abnahme:** `grep`-/Callsite-Inventur enthält keinen Bank-Prefix-Decoder mehr; B2/P1B-Rundung/Health-/Oracle-/Refresh-Parität nachgewiesen. **Commit/Evidence:** —.
+
+### E2 — Planner validiert handgeschriebene Steps, nicht die reale Receivership-TX
+- [ ] **HIGH / TX-ADMISSION · CODE_CONFIRMED · G-A/G-E/G-F · P5/FE-04/FE-06; kein LIVE vor Schluss.**
+- **Pfade:** `liquidation/src/planner.rs::validate_receivership/validate_bundle`, `runtime/src/execution/builder.rs::receivership`, `liquidation/src/receivership.rs::build_receivership`, `runtime/src/execution/pipeline.rs::evaluate`.
+- **Ist:** Builder erzeugt echte `Vec<Instruction>` über `build_receivership(ReceivershipParams { init_record, pre_refreshes, withdraws, swaps, repays, ... })`, erstellt aber **danach unabhängig** `steps=[StartLiquidation, Withdraw, route_steps…, Repay, EndLiquidation]`. Pre-Start-Refreshes und Initialisierung des LiquidationRecords fehlen darin; die `Step`-Regeln für erlaubte Prefixe, End als letzte Instruktion und Instruktionssequenz werden so **nicht über den tatsächlichen Input** geprüft. `Pipeline` ruft `validate_receivership(plan.steps, ...)` vor dem TX-Build auf. Die zusätzliche tatsächliche Program-ID-Allowlist hilft, prüft aber nicht die **zeitliche Reihenfolge, Instruktionsdiscriminator und Start/End-Anzahl**. Dass der derzeitige `build_receivership`-Output tatsächlich regelwidrig ist, ist **nicht belegt**; die unabhängige Gate-Kette ist nicht wirksam.
+- **Soll-Fix:** Sequenz/Discriminator/Programm aus den **realen und vollständig gebauten** `Instruction`-Daten der Receivership-TX sowie aller Prerequisite-TXs/Bundleelemente ableiten und eine **einzige** Gateprüfung unmittelbar vor der signierten Payload durchführen; Program+Instruction-Daten **gemeinsam** klassifizieren, sonst fail-closed. Erkennt genau eine Start-/End-Kombination in genau einer TX, End als tatsächlich letzte erlaubte Instruktion (nur explizit gepinnte Ausnahmen, falls On-Chain nachgewiesen), richtige Prefix-Refresh-/Oracle-/InitRecord-Positionen, gültige Swap-/Withdraw-/Repay-Reihenfolge, Top-Level-/Prerequisite-Allowlist, LUT-program resolution und geplanten SubmissionPath. Für unbekannte Diskriminatoren/Programme kein generischer „Other allowed“ als Umgehung der Struktur. `Step` bleibt höchstens abgeleitete Diagnose, **nicht** unabhängige Eingangsquelle. FE-04 SignedPayload-/Approval-Bindung (B1) darf dieses Gate nicht umgehen.
+- **Tests RED→GREEN:** tatsächlich gebaute Instruktionsliste mit `End` nicht zuletzt; Doppel-Start, fehlendes End, unzulässige PreStart-/AfterEnd-Instruktion, fremder ProgramID mit vermeintlich korrektem Discriminator, unbekannter Discriminator auf erlaubter ProgramID, verbotener Swap, falsches Bundle-Splitting, LUT-Auflösung, legitime gepinnte Kamino/Drift/JupLend-Refreshes, init_record yes/no, Token-2022 und repay_all, Prerequisite separat. Mock-Signer/Submitter beweist **0 Sendeaufrufe** bei Verstoß. Shadow-/Fixture-Parität.
+- **Abnahme:** das Gate entscheidet ausschließlich auf tatsächlichem Build-/Sign-/Submit-Payload; keine zweite manuell zusammengesetzte „immer gültige“ Schrittfolge. **Commit/Evidence:** —.
+
+### E3 — Drift-/JupLend-Refresh-Discriminatoren nicht bytegenau getestet
+- [ ] **MEDIUM / PROTOCOL-PARITY · CODE_CONFIRMED · G-A/G-E · P1A/P1B/FE-01.**
+- **Pfad:** `liquidation/src/integration.rs::{drift_refresh,juplend_refresh,tests::pinned_refresh_discriminators_match_expected}`.
+- **Ist:** Die fest kodierten Drift- und JupLend-Discriminatoren werden im Test **nur auf Länge acht** geprüft. Kamino wird per `global:refresh_reserve/refresh_obligation`-Hash gegen feste Bytes getestet. Drift-/JupLend-Fehlbytes könnten daher den Test bestehen und erst als fehlgeschlagene Simulation/IntegrationRefresh auffallen. Die jeweiligen Fremdprotokolle müssen **nicht** denselben Hash-Präfixalgorithmus wie Anchor-Kamino verwenden.
+- **Soll-Fix:** Fest kodierte Discriminatoren gegen **gepinnten echten Instruction-Source/IDL/Mock-Crate** byteweise testen; nur bei belegtem Hash-Algorithmus berechnen, sonst geprüfte Konstanten exakt vergleichen und Source-Commit referenzieren. Live-Refresh-Build und Builder-/Instruction-Provenienz in denselben Test einbeziehen; bei P1B-Upgrade Fingerprint/Pin prüfen.
+- **Tests:** exakte erwartete acht Bytes pro Protokoll und Instruktionsart, mutiertes Byte muss FAIL erzeugen, inkompatible Deployment-/IDL-Version ⇒ fail-closed, kein bloßer `len()==8`-Test.
+- **Abnahme:** signierbarer Refresh ist durch Source/Fixture begründet, nicht durch eine 8-Byte-Länge. **Commit/Evidence:** —.
+
+### E4 — BOOT-02 hat keinen aktiven Journal-Writer-Probe
+- [ ] **HIGH / LOCAL ADMISSION · CODE_CONFIRMED · G-A/G-B · BOOT-02/PERSIST/SK; Cross-Ref X3/M2.**
+- **Pfad:** `runtime/src/orchestration/boot_audit.rs::offline`.
+- **Ist:** BOOT-02 kontrolliert Runtime-Owner, unsealed Vorjournale, RAM und freie Diskkapazität, führt aber **keinen** isolierten Create→Frame-Write→Sync→Readback→Seal→Verify-Test des *tatsächlichen Run-Dateisystems* aus. Eine freie Diskzahl beweist weder aktuelle Schreibbarkeit noch Flush-/Sync-/Journal-Parität.
+- **Soll-Fix:** Nur nach sauberer BOOT-Owner-/Pfadprüfung in einer **einmaligen eindeutigen Probe-Datei** auf dem tatsächlich konfigurierten Ziel-Volume eine native `.p0j`-Framekette erstellen, fsync/sync_data plus Verzeichnismetadaten und CRC/Hash/Längen-/Manifest-Readback/Seal entsprechend bestehendem Journalvertrag überprüfen; Probe-Datei nach Erfolg geordnet entfernen, bei Fehler Ursache und Artefakt für Diagnose sicher behandeln, niemals fremde/historische Journale verändern. Kosten/Sync-Semantik explizit messen und eine lokal belastbare Schreibfähigkeit statt globaler Garantie behaupten. Keine Mainnet-Reads, keine Keys.
+- **Tests:** temp-volume writable/read-only/full/quota/permission, injected fsync/short-write/readback/manifest-failure, concurrent Owner und stale probe; BOOT bleibt `BLOCKED/UNKNOWN` bei unsicherem I/O.
+- **Abnahme:** aktive Writer-Probe auf **richtigem Zielpfad** PASS; sonst BOOT-02 nicht PASS. **Commit/Evidence:** —.
+
+### E5 — BOOT-Doctor scannt große alte p0j-Journale vollständig
+- [ ] **MEDIUM / OPERABILITY · CODE_CONFIRMED · G-A/G-B · BOOT-02.**
+- **Pfad:** `runtime/src/orchestration/boot_audit.rs::unsealed_journals`.
+- **Ist:** Für jedes `.p0j` der drei neuesten Runs pro Root wird `Reader::open` ausgeführt und in `while let Ok(Some(_)) = r.next_frame() {}` **bis zum Ende** gelesen. Ein langes Marktjournal kann Doctor/Admission deutlich verzögern; konkrete Minutenangabe ist erst mit realen Bytes nachzuweisen. Zudem klassifiziert die Schleife Lesefehler nicht getrennt, sondern beendet den Scan.
+- **Soll-Fix:** Bounded *strukturelles* Seal-/Tail-/Manifest-Screening mit expliziter Max-Arbeits-/Zeitgrenze und Erkennung von beschädigtem/undecodierbarem Tail; **nicht** einen unverifizierten Header/Footer als vollständige Chain-Verifikation verkaufen. Volle CRC/Hash-/Frame-Parität gehört weiterhin zum separaten strikten Verifier oder zu gefordertem tieferen BOOT-Gate. Bei unklarem Ergebnis `UNKNOWN/WARN/BLOCKED`, keine unbesehene Annahme `SEALED`. Kein Löschen älterer Runs.
+- **Tests:** 0-Byte/TornTail/corrupt sealed/unsealed, zig große Segmente, max drei Runroots, Budgetablauf und falscher Footer, vollständiger Checker findet absichtlich manipuliertes Middle-Frame. p50/p99-Doctor-Dauer und read bytes.
+- **Abnahme:** begrenzte Doctor-Laufzeit **ohne** Falsch-PASS der Journal-Integrität. **Commit/Evidence:** —.
+
+### E6 — BOOT-Diskreserve misst Projekt-data statt tatsächlichen Run-Pfad
+- [ ] **MEDIUM / CAPACITY-CORRECTNESS · CODE_CONFIRMED · G-A/G-B/G-C · BOOT-02/SK.**
+- **Pfad:** `runtime/src/orchestration/boot_audit.rs::offline` (`let data=project.join("data")` und `free_disk_bytes(data|project)`); `OfflineInputs::for_project`.
+- **Ist:** Speicherprüfung bezieht sich auf `project/data` (oder Projektwurzel), ohne jeden konfigurierten Output-Runroot auf getrennte Mounts/Symlinks/Volumes aufzulösen. Bei abweichendem `P0_DATA_DIR`/Runpfad können Reserve und späterer Capture-Writer ein anderes Dateisystem nutzen.
+- **Soll-Fix:** Zielverzeichnis des tatsächlich gewählten Capture-/Journal-/Market-Output-Runroots gegen Config/CanonicalPath/Persist-Owner auflösen; Volume-ID und freie Bytes + Reserve/Quota am korrekten Ziel; optional alle getrennten Write-Volumes prüfen. Noch nicht vorhandenen Run-Unterordner über nächste existierende Elternstruktur desselben Volumes behandeln, keine symlink-/path-TOCTOU-Umgehung. Zusammen mit E4 Writer-Probe und Storage-/Capacity-Preflight.
+- **Tests:** Projekt und Run auf verschiedenen Mounts/Mock-filesystem IDs, Symlink/RelativePath, fehlendes Verzeichnis, FreeSpace knapp, Writer-Fehler trotz viel freien Bytes; P0_FREE_ONLY unverändert.
+- **Abnahme:** BOOT-Prüfung qualifiziert das Volume, auf das tatsächlich geschrieben wird. **Commit/Evidence:** —.
+
+### E7 — owner_state nimmt beim reinen Statuslesen kurz den exklusiven Runtime-Lock
+- [ ] **LOW / REVIEW_REQUIRED: RACE-BEHAVIOR · G-A/G-B · BOOT-02/Control.**
+- **Pfad:** `runtime/src/orchestration/control.rs::owner_state/acquire_owner`.
+- **Ist:** `owner_state` öffnet das Lockfile und testet Owner-Anwesenheit durch kurzzeitiges `flock(LOCK_EX|LOCK_NB)`; ein parallel gestarteter `acquire_owner` kann genau währenddessen `RUNTIME_OWNER_LOCKED` melden, obwohl nur der Doctor kurz prüft. Das ist eine **kleine echte Konkurrenzmöglichkeit**, keine belegte Datenbeschädigung und darf nicht durch Entfernen des exklusiven Runtime-Locks „repariert“ werden.
+- **Soll-Fix:** konkurrierende offline Doctor/Run-Starts gezielt reproduzieren; falls relevant, Statusprobes so kapseln/ordnen, dass weder falsche Live-Owner-Angaben noch unberechtigter Run-Fehlschlag auftreten. Strikte einzelne aktive Runtime beibehalten; ein retry/zweiter read-only Statuscheck darf keinesfalls zwei Owner zulassen.
+- **Tests:** 1.000 deterministische Lock-Handovers, Parallel-Doctor und Start, zwei Runner dürfen nie gleichzeitig Lock besitzen, Drop/Crash-Freigabe.
+- **Abnahme:** keine falsche Owner-Freigabe, Race-Befund gemessen/behoben oder belegbar unter kontrollierter Benutzerausgabe tolerierbar; kein Haken ohne Reproduktion/Evidence. **Commit/Evidence:** —.
+
+### E8 — SIGINT/SIGTERM-Handler ohne SA_RESTART: tatsächliche I/O-Auswirkung prüfen
+- [ ] **LOW / REVIEW_REQUIRED, NICHT automatisch Bug · G-A · S0/SK.**
+- **Pfad:** `runtime/src/orchestration/control.rs::install_stop_handler`.
+- **Ist:** `libc::sigaction` wird mit Standard-Flags Null installiert, `SA_RESTART` fehlt. Auf Unix kann dies blockierende Syscalls mit `EINTR` beenden. Ob das **hier** schlecht ist, hängt von gewünschten Shutdown-Interrupts und der konkreten I/O-Retry-Logik ab; blindes Setzen von `SA_RESTART` könnte einen Shutdown sogar verlängern.
+- **Soll-Fix:** Mit realer synthetischer Signal-/EINTR-Injektion Writer-/WSS-/Lock-/Reader-/Shutdownreaktion beweisen und dokumentieren; nur bei nachgewiesenem Fehler targeted EINTR-Retry oder angepassten Handlerflags, mit bounded Shutdown.
+- **Tests:** SIGTERM während blocked read/write, WSS recv und Journal-Seal; Prozess exit/INCOMPLETE/Durability, keinerlei Endlosblockade.
+- **Abnahme:** Signalstrategie nachgewiesen sicher; sofern kein Fehler, E8 als `NO_BUG_WITH_EVIDENCE` dokumentieren, nicht still zur Implementierungsaufgabe aufblasen. **Commit/Evidence:** —.
+
+### E9 — Projection-Cache hat keine vollständige Bank-/Oracle-/Revision-Provenienz
+- [ ] **HIGH / STALE-EVALUATION RISK · CODE_CONFIRMED, KONKRETER FEHLENTSCHEID NICHT REPRODUZIERT · G-A/G-E · P3/P6/FE-01.**
+- **Pfade:** `runtime/src/orchestration/state_owner/detect.rs`: `projection_cache.remove(&acct).filter(|c| c.base_account_hash == base_account_hash && base_record.slot == slot)`; `liquidation/src/projection.rs::ProjectedState::account`; Integration-/Oracle-/Bank-Reverse-Index.
+- **Ist:** Der Cache-Reuse validiert nur Hash und Trigger-Slot des **Kandidatenaccounts**. Andere Banken/Oracles und Integrations-/Reserve-Accounts können zwischen Projection-Worker-Snapshot und späterem Consume aktualisiert worden sein, ohne `base_account_hash` oder `base_record.slot` zu ändern. Das `ProjectedState`-Overlay fällt für nicht überschriebenen State auf den **heutigen** Base-State zurück, kann also Werte verschiedener Quellversionen zu einem gemeinsamen `projection_slot` kombinieren. Eine spätere Simulation ist keine verlässliche Korrektur für falsche Profit-/Ranking-/Telemetry-Entscheidungen.
+- **Soll-Fix:** Projektionsresultat typisiert an **alle** für Health/Sizing/Refresh erforderlichen Bank-/Oracle-/Integration-Key-Revisionen, Root/ContextSlot, ProgramData-Pin und Chain-Clock binden; Reuse ausschließlich, wenn abhängige Revisions-IDs und Sourceidentität passen oder in einen konsistenten State-Snapshot re-projiziert wurde. Änderungsereignisse während laufender Remote-Projektion invalidieren den Cache, verwerfen veraltete Workerresultate und planen bounded neue Arbeit. Kein neuer Hotpath-RPC oder stilles Akzeptieren von gemischten Slot-Ständen.
+- **Tests:** Candidate unverändert bei geänderter Bank/Oracle/Reserve/Root, Projection-Worker-Eingang gegen späteres Resultat, StaleOutOfOrder mit gleicher candidate_slot, Canary-PnL-/Health-Abweichung, Snapshot-/reorg-/ProgramUpgrade, idempotentes bounded Requeue. Beobachtetes `evaluation_slot` entspricht qualifizierter Gesamtevaluation.
+- **Abnahme:** kein veraltetes Remote-Overlay mit neuen Dependency-/Oracle-Daten als eine konsistente Projektion bewertet; identische Parität bei stabilen Eingängen. **Commit/Evidence:** —.
+
+### E10 — ReverseIndex lässt leere bank_to_accounts-Einträge zurück
+- [ ] **LOW / MEMORY-HYGIENE · CODE_CONFIRMED · P2/S1-LT.**
+- **Pfad:** `liquidation/src/index.rs::ReverseIndex::set_account_banks/remove_account`.
+- **Ist:** Wenn ein Account aus einer Bank-Set-Zuordnung entfernt wird, wird das `HashSet` leer, aber der HashMap-Key der Bank nicht gelöscht. Viele ehemalige Banks können Speicher-/Indexgröße aufblasen; funktionale Fehlweiterleitung ist **nicht** belegt.
+- **Soll-Fix:** Nach Entfernen nur vollständig leere Reverse-Sets löschen; dabei Borrowing/Iterator-Lifetimes korrekt halten, keine aktive Referenz verlieren.
+- **Tests:** add→move→remove, dieselbe Bank unter mehreren Accounts, leere Sets verschwinden, Lookup-/Iteration-Parität, langes Alternieren ohne wachsende leere Keys.
+- **Abnahme:** bounded Index-Speicher ohne Routing-/Fanout-Verhaltensänderung. **Commit/Evidence:** —.
+
+### E11 — Kamino-Discriminator wird pro Refresh-Aufruf neu gehasht
+- [ ] **LOW / HOTPATH-ALLOCATION · CODE_CONFIRMED · P6-MT.**
+- **Pfad:** `liquidation/src/integration.rs::{ix_discriminator,kamino_refreshes}`.
+- **Ist:** `ix_discriminator("refresh_reserve"/"refresh_obligation")` erzeugt zur Laufzeit Hash + `Vec<u8>` bei jedem Plan. Ob dies gegenüber Reserve-Decode/RPC relevant ist, ist zu profilieren.
+- **Soll-Fix:** bereits byteweise getestete, gepinnte 8-Byte-Konstanten anstelle wiederholtem dynamischem Hash, sofern Quell-/IDL-Parität sichergestellt ist; keine ungetesteten Fremdprotokolldiscriminatoren aus Kamino-Hash ableiten.
+- **Tests:** exakte Bytes, Source-Pin/Upgrade, Build-Instruction/Accounts bitidentisch, Allocation-Timing.
+- **Abnahme:** weniger dynamische Arbeit, identische signierbare Instruktionen. **Commit/Evidence:** —.
+
+### E12 — Kamino-Reserve wird pro Kandidat vollständig Borsh-deserialisiert
+- [ ] **LOW / PERFORMANCE + PROVENANCE · CODE_CONFIRMED · P6-MT · Cross-Ref B7/C2.**
+- **Pfad:** `liquidation/src/integration.rs::kamino_reserve/refresh_plan_for_bank/dependency_keys_for_bank`.
+- **Ist:** Vollständige `Kamino Reserve::try_deserialize` für Oracle/Refresh-Planung plus weitere `MinimalReserve`-POD-Zugriffe auf dieselben Accountbytes. Kann bei vielen Kandidaten wiederholt erfolgen. Der Aufwand ist ohne Bench nicht quantifiziert.
+- **Soll-Fix:** konservativer, versionierter Cache/Parser pro **identischem Reserve-Snapshot und Slot-/Write-Revision**, falls messbar sinnvoll; nur korrekt geprüfte Felder extrahieren, keine veralteten Oracle-/Farm-Keys. Ein universeller `Pod<Reserve>`-Cast ohne Version-/Owner-/Disc-Check ist ausgeschlossen.
+- **Tests:** duplicate candidate batches, Oracle-/Reserve-Revision, verschiedene Kamino-Mocksource-Versionen, vollständige Dependency- und Byteparität, p50/p95 Allokationsprofil.
+- **Abnahme:** identische Freshness-/Oracle-Provenienz und besseres gemessenes Profil. **Commit/Evidence:** —.
+
+### E13 — fünfter Review ist kein vollständiger Verifier-/Finance-/Tooling-Audit
+- [ ] **REVIEW_REQUIRED / COVERAGE-GATE · bleibt offen bis restliche Dateien geprüft.**
+- **Gemäß fünftem Durchgang inhaltlich ohne neuen gesonderten Befund:** `winner_tracker.rs` Kapazität/TTL/revisionierte Watch-Verarbeitung; `projection.rs` Overlay-Mutation; `index.rs` Threshold-Bereiche; `control.rs` eigentliche `flock`-Owner-Mutual-Exclusion; `boot_audit.rs` existierende Token-Bindung/Offline-TOCTOU-Rechecks. Keine dieser Aussagen qualifiziert das ganze System.
+- **Weiterhin ungelesen oder nur partiell:** `market/winner.rs`, `winner_tracker.rs` außerhalb der gelesenen Pfade, `chain.rs`, `econ*.rs`, `measurement.rs`, `report.rs`, `census.rs`, `lookup_tables.rs`, `market_*`-Verifier, `strict_driver.rs`, `markers.rs`, `related.rs`, `rows.rs`, `summary.rs`, `common/{mt0,histogram,timing,error,config}.rs`, `bin/{p0ctl,p0-journal,p0-strict-verify}` und Python-Verifier. Phase-/Risk-basierte künftige Prüfung; neue bestätigte Befunde als F-Serie, nicht hier unterstellen.
+- **Abnahme:** vollständiger Scope-/Code-SHA-/Test-/Evidence-Bericht; relevante ökonomische Winner-/Census-/Verifier-Outputs gegen echte kanonische Chain-Truth-Fakten qualifizieren. **Commit/Evidence:** —.
+
+
+## 10. X — explizite Phasenplan-Vertragslücken; mit N-Tickets koordinieren
 
 ### X1 — BOOT-12 muss aktuelle Identitäten vor Runtime-Admission erneut prüfen
 - [ ] **CRITICAL · G-B.**
@@ -544,24 +652,24 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Tests:** korrupte Journalversion/Writer-Probe, Doppel-Owner, fehlende Binärdatei, Disk-/RAM-Untergrenze, Config-Drift; keine echte Netzwerkaktivität.
 - **Dedupe:** M1–M3/N1–N3/PERSIST/SK. **Commit/Evidence:** —.
 
-## 10. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
+## 11. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
 
 **Tranche A — laufende Härtung, ausschließlich Offline-Code und Tests:**
-1. **C1/C7 + D1** (Recovery/Fatal, Manifest-Wahrheit vor 4h), N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar. **D4/D5/D8/D9** als gezielte Capture-Härtung integrieren.
+1. **C1/C7 + D1 + E4/E5/E6** (Recovery/Fatal, Market-Manifest, BOOT-Writer/Doctor/Run-Volume vor 4h), N1, N2, N3, M3, B5, B13 sowie X1/X2/X3 soweit ohne Mainnet umsetzbar. **D4/D5/D8/D9** als gezielte Capture-Härtung integrieren.
 2. **D3-Stresstest vor 4h-Readiness**; bei unzulässiger Owner-Stall/Ingress-Overflow accountseitig gebundenes Chunking implementieren. M1/M2 plus N4/N5/N6 zur Stabilität von Admission, Durability und Diagnose; keine neue Source-of-Truth.
-3. N7/N8 nach Mess-/Sicherheitsvertrag, L4 und kleine isolierte L1/L2; B2 soweit für richtige BOOT-/P1A-Scope-/Layoutprüfung erforderlich.
+3. N7/N8 nach Mess-/Sicherheitsvertrag, L4 und kleine isolierte L1/L2; **B2/E1/D11** mit einheitlichem striktem Bank-Decoder für BOOT-/P1A-/P1B-Scopes; **E3** bytegenaue gepinnte Fremdinstruktionsdiscriminatoren.
 4. Gesamte relevante Offline-Regression, Release-/Formatter-/Clippy-Nachweis, Redaction-Probes, Ledger-/STATUS-/4h-Readiness-Synchronisierung.
 5. **Erst dann** getrennt autorisierter G-B-Audit; bei PASS gesondert G-C-Kalibrierung; G-D-vier-Stundenprüfung.
 
 **Tranche B — profitkritische Fertigstellung vor einer eventuell autorisierten FE-06:**
-1. B2, B4, B9 und ggf. L4 für die ausgewählte Fundingklasse; echte Candidate-/Source-/Oracle-/Rent-/Exit-Parität (FE-01/02).
-2. B6/B7/C2/C8/C9/D2/D6/D7/D12/D13 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
+1. **B2/E1/D11, E2, E9**, B4, B9 und ggf. L4 für die ausgewählte Fundingklasse; echte Candidate-/Source-/Oracle-/Rent-/Exit-/Plan-Instruktions-Parität (FE-01/02/04).
+2. B6/B7/C2/C8/C9/D2/D6/D7/D12/D13/E10/E11/E12 anhand belastbarer Timingdaten und Kandidaten-Shadow, nicht aufgrund einer geschätzten 4h-Profitrate (FE-03/P6).
 3. **B1 + B3 + B15 + C3 + C4 + C5 + C11 + L1 + L2 verpflichtend** für finanzielle Single-Flight-/Wallet-/Limit-/Journal-/UNKNOWN-Gates (FE-04/P8). B10/B11/B12/B17 fachlich vor passendem Pilot prüfen; Ticket-Status bleibt sonst OPEN. C10/C12 werden im jeweiligen P8-/Error-Vertrag geschlossen.
 4. FE-05 ausschließlich read-only und nur autorisiert; FE-06 gesonderter individueller Geldbeschluss, ein Versuch dann HALT; FE-07 nur mit finalisiertem tatsächlich realisiertem Nettoledger.
 
 **Tranche C — separat beobachtete, nicht gestrichene Produktpflichten:** vollständiger C0-E1-Index/Crosscheck/Strict-Master, H0, Race/Binary-Geyser/Jito-Single/Bundle/gRPC, JIT-ExactIn, P6-MT/M4, P8-RES/Inventory/Rebalancing, K-Untersuchungen, P9 und Frontend bleiben gemäß §0.6/Phasenplan verbindlich. `NO_ECONOMIC_GO` stoppt nur nicht qualifiziertes LIVE, **nicht** die restliche Roadmap; kein Master-PASS oder erster Profit wird erfunden.
 
-## 11. Vorlage für jeden zukünftigen Befund und die Erledigung
+## 12. Vorlage für jeden zukünftigen Befund und die Erledigung
 
 ```text
 ### ID — kurzer reproduzierbarer Befund
@@ -578,10 +686,10 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 
 Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchstreichen, **Fix und Evidence behalten**. Keine Zusammenlegung unabhängiger Bugs ohne belegte gemeinsame Ursache; bei Doppelbelegen auf eine einzige Implementierung/Regression referenzieren.
 
-## 12. Aktuelle Abnahmeentscheidung
+## 13. Aktuelle Abnahmeentscheidung
 
-- **G-A:** **OPEN**. C1/C7 sowie D1/D4/D5/D8/D9 sind als Recovery-/Capture-/Evidence-Gates erfasst; D3-Lastqualifikation fehlt. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
-- **G-B (Netzwerk-Audit):** **NOT_RUN / NICHT FREIGEGEBEN**. Das vorhandene BOOT-03–08-Modul ist Code, kein Network-READY; BOOT-12 und JFI offen.
+- **G-A:** **OPEN**. C1/C7, D1/D4/D5/D8/D9, **E1/E2/E3/E4/E5/E6/E9** sind zusätzlich als Recovery-/Capture-/Decoder-/Plan-/BOOT-Evidence-Gates erfasst; D3-Lastqualifikation fehlt. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
+- **G-B (Netzwerk-Audit):** **NOT_RUN / NICHT FREIGEGEBEN**. Das vorhandene BOOT-03–08-Modul ist Code, kein Network-READY; **E4/E5/E6 (lokaler Writer/Doctor/Disk-Scope)** und BOOT-12/JFI offen.
 - **G-C (600s-Kalibrierung):** **NOT_RUN / NICHT FREIGEGEBEN**.
 - **G-D (4h):** **NOT_QUALIFIED / NICHT FREIGEGEBEN**. D1-Manifest-Fix und D3-Owner-Fanout-Stresstest fehlen. Historische 4h-/5h-Versuche bleiben INCOMPLETE.
 - **G-E (FE-01–05):** **PARTIAL/OPEN**, bisheriger FE-00-Befund `NO_ECONOMIC_GO`.
