@@ -4,6 +4,15 @@ use darkbot_runner::market::observer::{run_from_env, run_from_env_with};
 use darkbot_runner::status_tap::StatusTap;
 use std::{process::ExitCode, sync::atomic::Ordering};
 fn main() -> ExitCode {
+    if let Some(spec) = std::env::var("P0_ENV_FILE").ok().filter(|v|!v.trim().is_empty()) {
+        match darkbot_p0_reporter::env_file::load_list(&spec) {
+            Ok(files) => for f in files {
+                eprintln!("[P0/ENV] {} set={} kept_existing={}",
+                    f.file.display(), f.set.join(","), f.kept_existing.join(","));
+            },
+            Err(e) => { eprintln!("[P0/ENV] {e}"); return ExitCode::FAILURE; }
+        }
+    }
     let env = |k: &str| std::env::var(k).ok();
     let reporting = env("P0_REPORT_SOCKET").is_some_and(|s| !s.trim().is_empty());
     let result = if !reporting {

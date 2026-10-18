@@ -1,4 +1,5 @@
 //! Project_0 read-only status publisher. Engine owns the socket; gateway reads it.
+pub mod env_file;
 pub mod generation;
 pub mod proto;
 use darkbot_runner::status_tap::{StatusSnapshot, StatusTap};
